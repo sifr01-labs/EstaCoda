@@ -6,6 +6,7 @@ export type NativeIntent =
   | "voice-transcription"
   | "speech-generation"
   | "attachment-analysis"
+  | "browser-control"
   | "general";
 
 export type IntentRouteEvidence = {
@@ -35,10 +36,14 @@ export type SkillInvocation = {
 };
 
 export type IntentTaskClass =
+  | "conversation"
+  | "repo-inspection"
   | "code-review"
   | "repo-change"
   | "docs-writing"
   | "release-validation"
+  | "provider-diagnostics"
+  | "browser-operation"
   | "architecture-advice"
   | "research"
   | "media-generation"

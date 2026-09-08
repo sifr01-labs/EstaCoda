@@ -81,6 +81,7 @@ Not every file or directory exists before the related capability runs.
 |---|---|
 | `~/.estacoda/active-profile.json` | Currently selected profile |
 | `~/.estacoda/sessions.sqlite` | Session database, with rows scoped by `profile_id` |
+| `~/.estacoda/cli-sessions.json` | Version 2 explicit-continuation pointers keyed by profile and workspace; never an authorization boundary |
 | `~/.estacoda/memory/shared/` | Shared memory across profiles |
 | `~/.estacoda/trust.json` | Workspace trust grants keyed by directory |
 | `~/.estacoda/workspace-approvals.json` | Persistent workspace approval grants keyed by directory and action |
@@ -140,6 +141,8 @@ The provider layer has three parts: model catalog, provider registry, and execut
 EstaCoda routes provider calls through configured provider adapters, including OpenAI-compatible chat completions and OpenAI Responses where configured. Provider selection depends on configured provider IDs, route preferences, model capability, and credential readiness.
 
 Auxiliary routes resolve through the same infrastructure as primary model routes. Supported route names include `vision`, `compression`, `assessor`, `profile_context`, `web_extract`, `session_search`, `skills_library`, `mcp`, `memory_flush`, and `delegation`. These are preference routes, not separate runtimes.
+
+Vision dispatch is a single governed boundary. A vision-capable main route receives initial attachments natively; a text-only main route selects a runnable vision-capable auxiliary candidate. Images discovered after the first prompt are delivered ephemerally to a continuation. Source containment, normalization limits, hosted-egress policy, budget reservation/settlement, and capability checks run before provider dispatch. Raw image/base64 content is excluded from durable session, trajectory, log, and export surfaces.
 
 See [Provider Reference](../reference/provider-reference.md) for provider maturity labels.
 

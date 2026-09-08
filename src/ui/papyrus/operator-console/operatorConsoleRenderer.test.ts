@@ -1,7 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { resolveTokens } from "../../../theme/token-resolver.js";
+import { RLI } from "../../bidi.js";
 import { stringWidth } from "../screen/stringWidth.js";
 import {
+  createPastedTextAttachment,
   createOperatorConsoleStyle,
   createInitialOperatorConsoleState,
   createOperatorConsoleLayout,
@@ -201,6 +203,26 @@ describe("Papyrus operator console renderer", () => {
     expect(output.every((line) => stringWidth(line) <= 120)).toBe(true);
   });
 
+  it("forwards the terminal software bidi mode to attachment previews", () => {
+    const text = "هلا ممكن تستخدم ٣ subagents وتبحث عن RSI";
+    const state = createState({
+      terminal: { width: 100, height: 20, isTty: true, bidiMode: "software" },
+      attachments: [createPastedTextAttachment({
+        id: "paste-mixed-software",
+        content: text,
+      })],
+    });
+    const layout = createOperatorConsoleLayout(state, { width: 100, height: 20, isTty: true });
+    const attachmentOutput = renderOperatorConsoleLines(state, layout)
+      .filter((line) => line.region === "attachments")
+      .map((line) => line.text)
+      .join("\n");
+
+    expect(attachmentOutput).toContain("RSI نع ثحبتو subagents ٣ مدختست نكمم اله");
+    expect(attachmentOutput).not.toContain(RLI);
+    expect(state.attachments[0]?.content).toBe(text);
+  });
+
   it("renders streaming segments and live tail between transcript and turn activity", () => {
     const state = createState({
       transcript: [{ id: "t1", role: "assistant", text: "Ready." }],
@@ -261,10 +283,10 @@ describe("Papyrus operator console renderer", () => {
     expect(tailIndex).toBeGreaterThan(streamingIndex);
     expect(turnActivityIndex).toBeGreaterThan(streamingIndex);
     expect(output).toContainEqual(expect.stringContaining("I am reading the operator console path."));
-    expect(output).toContainEqual(expect.stringContaining("◷ read_file"));
+    expect(output).toContainEqual(expect.stringContaining("◷ Files"));
     expect(output).toContainEqual(expect.stringContaining("Now checking the layout"));
     expect(output).toContainEqual(expect.stringContaining("Now checking the layout▍"));
-    expect(output).toContainEqual(expect.stringContaining("working · 1 active · 1 done · 00:33"));
+    expect(output).toContainEqual(expect.stringContaining("working · activity: 1 active · 1 done · 00:33"));
     expect(output.join("\n")).not.toContain("Running tools");
     expect(output.join("\n")).not.toContain("Assistant stream");
     expect(output.join("\n")).not.toContain("assistant:");
@@ -373,7 +395,7 @@ describe("Papyrus operator console renderer", () => {
     expect(approvalIndex).toBeLessThan(attachmentsIndex);
     expect(approvalIndex).toBeLessThan(promptIndex);
     expect(approvalIndex).toBeLessThan(statusIndex);
-    expect(output).toContainEqual(expect.stringContaining("[Approve once]"));
+    expect(output).toContainEqual(expect.stringContaining("Approve once  Permit only this action"));
     expect(output.every((line) => stringWidth(line) <= 120)).toBe(true);
   });
 
@@ -395,7 +417,10 @@ describe("Papyrus operator console renderer", () => {
 
     expect(first).toEqual(second);
     expect(first).toContainEqual(expect.stringContaining("Approval required"));
-    expect(first).toContainEqual(expect.stringContaining("Approve once        ❯ Reject        Inspect"));
+    expect(first).toContainEqual(expect.stringContaining("❯ Reject"));
+    expect(first.findIndex((line) => line.includes("Inspect"))).toBeLessThan(
+      first.findIndex((line) => line.includes("Approve once"))
+    );
     expect(first.every((line) => stringWidth(line) <= 72)).toBe(true);
     expect(JSON.stringify(state)).toBe(before);
   });

@@ -30,7 +30,8 @@ export class ToolCallPlanner {
       };
     }
 
-    if (this.#registry.get(tool) === undefined) {
+    const definition = this.#registry.get(tool);
+    if (definition === undefined) {
       return {
         id,
         tool,
@@ -56,12 +57,26 @@ export class ToolCallPlanner {
       };
     }
 
+    const canonicalized = canonicalizeNestedToolNames(tool, parsed.input, this.#aliases);
+    if (!canonicalized.ok) {
+      return {
+        id,
+        tool,
+        input: {},
+        source: "provider-tool-call",
+        status: "invalid",
+        raw: delta.raw,
+        error: canonicalized.error
+      };
+    }
+
     return {
       id,
       tool,
-      input: canonicalizeNestedToolNames(tool, parsed.input, this.#aliases),
+      input: canonicalized.input,
       source: "provider-tool-call",
       status: "planned",
+      riskClass: definition.riskClass,
       raw: delta.raw
     };
   }
@@ -79,18 +94,79 @@ function canonicalizeNestedToolNames(
   tool: string,
   input: Record<string, unknown>,
   aliases: ReadonlyMap<string, string>
-): Record<string, unknown> {
-  if (tool !== "delegate_task" || aliases.size === 0) return input;
+): { ok: true; input: Record<string, unknown> } | { ok: false; error: string } {
+  if (aliases.size === 0) return { ok: true, input };
+
+  if (tool === "plan") {
+    return canonicalizePlanRequirements(input, aliases);
+  }
+
+  if (tool !== "delegate_task") return { ok: true, input };
 
   return {
-    ...input,
-    ...(input.allowedTools === undefined
-      ? {}
-      : { allowedTools: canonicalizeAllowedTools(input.allowedTools, aliases) }),
-    ...(input.tasks === undefined
-      ? {}
-      : { tasks: canonicalizeDelegatedTasks(input.tasks, aliases) })
+    ok: true,
+    input: {
+      ...input,
+      ...(input.allowedTools === undefined
+        ? {}
+        : { allowedTools: canonicalizeAllowedTools(input.allowedTools, aliases) }),
+      ...(input.tasks === undefined
+        ? {}
+        : { tasks: canonicalizeDelegatedTasks(input.tasks, aliases) })
+    }
   };
+}
+
+function canonicalizePlanRequirements(
+  input: Record<string, unknown>,
+  aliases: ReadonlyMap<string, string>
+): { ok: true; input: Record<string, unknown> } | { ok: false; error: string } {
+  if (!Array.isArray(input.requirements)) return { ok: true, input };
+
+  const visibleCanonicalNames = new Set(aliases.values());
+  const requirements: unknown[] = [];
+  for (const [index, item] of input.requirements.entries()) {
+    if (item === null || typeof item !== "object" || Array.isArray(item)) {
+      requirements.push(item);
+      continue;
+    }
+    const requirement = item as Record<string, unknown>;
+    if (typeof requirement.tool !== "string") {
+      requirements.push(item);
+      continue;
+    }
+    const requested = requirement.tool.trim();
+    const aliasTarget = aliases.get(requested);
+    if (aliasTarget !== undefined && visibleCanonicalNames.has(requested) && aliasTarget !== requested) {
+      return {
+        ok: false,
+        error: `Mission requirement ${requirementLabel(requirement, index)} uses ambiguous tool name ${JSON.stringify(requested)}. Use an unambiguous tool name exposed in this turn.`
+      };
+    }
+    const canonical = aliasTarget ?? requested;
+    if (!visibleCanonicalNames.has(canonical) && !isExplicitCanonicalToolName(requested)) {
+      return {
+        ok: false,
+        error: `Mission requirement ${requirementLabel(requirement, index)} references unavailable tool ${JSON.stringify(requested)}. Use an exact tool name exposed in this turn.`
+      };
+    }
+    requirements.push({ ...requirement, tool: canonical });
+  }
+
+  return {
+    ok: true,
+    input: { ...input, requirements }
+  };
+}
+
+function isExplicitCanonicalToolName(name: string): boolean {
+  return name.includes(".");
+}
+
+function requirementLabel(requirement: Record<string, unknown>, index: number): string {
+  return typeof requirement.id === "string" && requirement.id.trim().length > 0
+    ? JSON.stringify(requirement.id.trim())
+    : `at index ${index}`;
 }
 
 function canonicalizeDelegatedTasks(value: unknown, aliases: ReadonlyMap<string, string>): unknown {

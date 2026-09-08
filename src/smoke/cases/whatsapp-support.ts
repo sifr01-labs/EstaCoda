@@ -185,11 +185,13 @@ async function assertFakeBridgeRapidTextsDebounce(homeDir: string): Promise<void
     }) as unknown as Runtime,
     sessionStore: new InMemoryChannelSessionStore(),
     authPolicy: { whatsapp: { dmPolicy: "open" } },
-    whatsappTextDebounce: {
-      textDebounceMs: 10,
-      textDebounceMaxMessages: 10,
-      textDebounceMaxChars: 8_000
-    }
+    textDebounceResolver: (channelKind) => channelKind === "whatsapp"
+      ? {
+          textDebounceMs: 10,
+          textDebounceMaxMessages: 10,
+          textDebounceMaxChars: 8_000
+        }
+      : undefined
   });
   await gateway.start();
   await adapter.pollOnce();

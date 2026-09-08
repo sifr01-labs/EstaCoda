@@ -5,9 +5,14 @@ import { createWebTools, type FetchLike } from "./web-tools.js";
 function normalizeSnapshot(result: unknown): unknown {
   return JSON.parse(JSON.stringify(result, (key, value) => {
     if ((key === "sessionId" || key === "id") && typeof value === "string") return "<session-id>";
-    if ((key === "createdAt" || key === "timestamp") && typeof value === "string") return "<timestamp>";
+    if ((key === "createdAt" || key === "timestamp" || key === "observedAt") && typeof value === "string") {
+      return "<timestamp>";
+    }
     if ((key === "path" || key === "screenshotPath") && typeof value === "string") {
       return value.replace(/\/(?:private\/)?tmp\/[^/]+/u, "<tmp-dir>");
+    }
+    if (typeof value === "string") {
+      return value.replace(/\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z\b/gu, "<timestamp>");
     }
     return value;
   }));

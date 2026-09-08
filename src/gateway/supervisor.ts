@@ -8,7 +8,7 @@ import type { ProfileStatePaths } from "../config/profile-home.js";
 import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
 import { WorkspaceApprovalController } from "../security/workspace-approval-controller.js";
 import type { SecurityAssessorRuntimeConfig } from "../security/security-policy-factory.js";
-import type { LoadedRuntimeConfig, ChannelBusyPolicy } from "../config/runtime-config.js";
+import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
 import type { ChannelAdapter, ChannelAuthPolicies, ChannelKind, ChannelMessage } from "../contracts/channel.js";
 import type { ResolvedModelRoute } from "../contracts/provider.js";
 import type { SecurityPolicy } from "../contracts/security.js";
@@ -19,6 +19,9 @@ import { createFileCronJobLock } from "../cron/cron-lock.js";
 import { ProviderExecutor } from "../providers/provider-executor.js";
 import { createProviderUsageRecorder } from "../providers/provider-usage-ledger.js";
 import { SQLiteProviderSpendController } from "../tasks/sqlite-provider-spend.js";
+import { TaskOperatorService } from "../tasks/task-operator-service.js";
+import { createUsageInspector } from "../session/usage-inspector.js";
+import { SQLiteChannelMessageTurnStore } from "../channels/channel-message-turn-store.js";
 import type { MemoryCurationCheckpointResult } from "../memory/memory-curation-service.js";
 import { curateSessionFinalizationJob } from "../memory/session-finalization-curator.js";
 import {
@@ -84,6 +87,7 @@ import {
 } from "./runtime-cache-state.js";
 import { ActiveTurnRegistry } from "./active-turn-registry.js";
 import { GatewayApprovalQueue } from "./approval-queue.js";
+import { SQLitePendingTurnStore } from "./pending-turn-store.js";
 import { VoiceStateManager } from "./voice-state.js";
 import {
   HookRegistry,
@@ -329,6 +333,7 @@ export type SupervisorInternalState = {
   exit: (code: number) => void;
   activeTurnRegistry?: ActiveTurnRegistry;
   gatewayApprovalQueue?: GatewayApprovalQueue;
+  pendingTurnStore?: SQLitePendingTurnStore;
   runtimeCache?: RuntimeCache;
   runtimeFingerprint?: RuntimeFingerprint;
   pruneTimer?: ReturnType<typeof setInterval>;
@@ -487,6 +492,7 @@ function createInitialState(
     exit: exitFn,
     activeTurnRegistry: undefined,
     gatewayApprovalQueue: undefined,
+    pendingTurnStore: undefined,
     runtimeCache: undefined,
     runtimeFingerprint: undefined,
     pruneTimer: undefined,
@@ -594,6 +600,7 @@ async function cleanupSupervisorStartupResources(state: SupervisorInternalState)
 
   // 5. Close session DB if opened
   if (state.sessionDb !== undefined) {
+    state.pendingTurnStore = undefined;
     const sessionDb = state.sessionDb;
     state.sessionDb = undefined;
     if ((activeFinalization !== undefined && !finalizationSettled) || !taskHostSettled) {
@@ -973,6 +980,26 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
       controller: new WorkspaceApprovalController()
     });
     state.gatewayApprovalQueue = gatewayApprovalQueue;
+    const durableMediaRoots = [
+      profilePaths.channelMediaPath,
+      profilePaths.audioCachePath,
+      join(profilePaths.tempPath, "audio")
+    ];
+    let pendingTurnStore: SQLitePendingTurnStore | undefined;
+    if (config.gateway.messageQueue.persistence === "sqlite") {
+      await Promise.all(durableMediaRoots.map((root) => mkdir(root, { recursive: true })));
+      pendingTurnStore = new SQLitePendingTurnStore({
+        db: sessionDb.db,
+        profileId,
+        approvedMediaRoots: durableMediaRoots,
+        maxPendingPerProfile: config.gateway.messageQueue.maxPendingPerProfile,
+        uncertainRetentionDays: config.gateway.messageQueue.uncertainRetentionDays,
+        onDiagnostic: (diagnostic) => {
+          logWarning(`Pending-turn store ${diagnostic.operation} failed (${diagnostic.code}).`);
+        }
+      });
+      state.pendingTurnStore = pendingTurnStore;
+    }
 
     const sessionFinalizationQueue = new SessionFinalizationQueue({ db: sessionDb.db });
     state.sessionFinalizationWorker = new SessionFinalizationWorker({
@@ -1315,6 +1342,19 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
     const trustStore = new WorkspaceTrustStore({ path: trustStorePath });
     const workspaceTrusted = await trustStore.isTrusted(options.workspaceRoot);
     const taskStore = new SQLiteTaskStore({ db: sessionDb.db, profileId });
+    const usageSpendController = new SQLiteProviderSpendController({ db: sessionDb.db, profileId });
+    const gatewayUsageInspector = createUsageInspector({
+      sessionDb,
+      taskStore,
+      profileId,
+      taskOperatorService: new TaskOperatorService({
+        store: taskStore,
+        defaultTaskSpendingLimit: config.budgets.task,
+        spendingScope: (kind, ownerId) => usageSpendController.getScope(kind, ownerId)
+      }),
+      spendingScope: (ownerId) => usageSpendController.getScope("session", ownerId)
+    });
+    const channelMessageTurnStore = new SQLiteChannelMessageTurnStore({ db: sessionDb.db, profileId });
     const taskResultService = new TaskResultService({
       store: taskStore,
       profileId,
@@ -1469,6 +1509,40 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
     > = ({ sessionId, reason }) => {
       sessionFinalizationQueue.enqueue({ profileId, sessionId, reason });
     };
+    const textDebounceResolver: NonNullable<
+      ConstructorParameters<typeof ChannelGateway>[0]["textDebounceResolver"]
+    > = (channelKind) => {
+      if (channelKind === "telegram") {
+        return {
+          textDebounceMs: telegram.textDebounceMs ?? 1_500,
+          textDebounceMaxMessages: telegram.textDebounceMaxMessages ?? 10,
+          textDebounceMaxChars: telegram.textDebounceMaxChars ?? 8_000
+        };
+      }
+      if (channelKind === "whatsapp") {
+        return {
+          textDebounceMs: whatsapp.textDebounceMs ?? 5_000,
+          textDebounceMaxMessages: whatsapp.textDebounceMaxMessages ?? 10,
+          textDebounceMaxChars: whatsapp.textDebounceMaxChars ?? 8_000
+        };
+      }
+      return undefined;
+    };
+    const busyPolicyResolver: NonNullable<
+      ConstructorParameters<typeof ChannelGateway>[0]["busyPolicyResolver"]
+    > = (channelKind) => {
+      const channelConfig = config.channels[channelKind as keyof typeof config.channels];
+      return {
+        busyPolicy: channelConfig?.busyPolicy ?? "reject",
+        queueDepth: channelConfig?.queueDepth ?? 3,
+        busyTextCoalescing: {
+          enabled: channelConfig?.busyTextCoalescing?.enabled === true,
+          windowMs: channelConfig?.busyTextCoalescing?.windowMs ?? 1_500,
+          maxMessages: channelConfig?.busyTextCoalescing?.maxMessages ?? 5,
+          maxChars: channelConfig?.busyTextCoalescing?.maxChars ?? 8_000,
+        },
+      };
+    };
     const gateway = options.factories?.createChannelGateway
       ? options.factories.createChannelGateway({
           adapters: wrappers,
@@ -1477,7 +1551,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           sessionStore: new PersistentChannelSessionStore({ path: sessionContextPath, policy: sessionPolicy, surfacePointerStore }),
           approvalStore,
           authPolicy: authPolicies,
-          trustedWorkspace: workspaceTrusted,
+          trustedWorkspace: () => trustStore.isTrusted(options.workspaceRoot),
           sessionPolicy,
           handoffStore,
           surfacePointerStore,
@@ -1499,21 +1573,10 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           runtimeCache,
           runtimeFingerprint,
           isDraining: () => state.draining,
-          busyPolicyResolver: (channelKind) => {
-            const channelConfig = config.channels[channelKind as keyof typeof config.channels] as
-              | { busyPolicy?: ChannelBusyPolicy; queueDepth?: number }
-              | undefined;
-            return {
-              busyPolicy: channelConfig?.busyPolicy ?? "reject",
-              queueDepth: channelConfig?.queueDepth ?? 3,
-            };
-          },
-          whatsappTextDebounce: {
-            textDebounceMs: whatsapp.textDebounceMs ?? 5_000,
-            textDebounceMaxMessages: whatsapp.textDebounceMaxMessages ?? 10,
-            textDebounceMaxChars: whatsapp.textDebounceMaxChars ?? 8_000
-          },
+          busyPolicyResolver,
+          textDebounceResolver,
           telegramStreaming: config.channels.telegram.streaming,
+          telegramSecureInputMode: config.channels.telegram.secureInputMode,
           runtimeForSession: async ({ sessionId, securityPolicy, metadata }) => {
             const latestConfig = await loadConfig();
             return createGatewayRuntime(latestConfig, sessionDb, homeDir, trustStorePath, {
@@ -1536,6 +1599,9 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           enqueueSessionFinalization,
           profileId,
           approvalQueue: gatewayApprovalQueue,
+          pendingTurnStore,
+          usageInspector: gatewayUsageInspector,
+          channelMessageTurnStore,
           voiceStateManager,
           voiceAutoTtsDefault: config.voice.autoTts,
           autoTtsConfig: async () => {
@@ -1553,7 +1619,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           sessionStore: new PersistentChannelSessionStore({ path: sessionContextPath, policy: sessionPolicy, surfacePointerStore }),
           approvalStore,
           authPolicy: authPolicies,
-          trustedWorkspace: workspaceTrusted,
+          trustedWorkspace: () => trustStore.isTrusted(options.workspaceRoot),
           sessionPolicy,
           handoffStore,
           surfacePointerStore,
@@ -1575,21 +1641,10 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           runtimeCache,
           runtimeFingerprint,
           isDraining: () => state.draining,
-          busyPolicyResolver: (channelKind) => {
-            const channelConfig = config.channels[channelKind as keyof typeof config.channels] as
-              | { busyPolicy?: ChannelBusyPolicy; queueDepth?: number }
-              | undefined;
-            return {
-              busyPolicy: channelConfig?.busyPolicy ?? "reject",
-              queueDepth: channelConfig?.queueDepth ?? 3,
-            };
-          },
-          whatsappTextDebounce: {
-            textDebounceMs: whatsapp.textDebounceMs ?? 5_000,
-            textDebounceMaxMessages: whatsapp.textDebounceMaxMessages ?? 10,
-            textDebounceMaxChars: whatsapp.textDebounceMaxChars ?? 8_000
-          },
+          busyPolicyResolver,
+          textDebounceResolver,
           telegramStreaming: config.channels.telegram.streaming,
+          telegramSecureInputMode: config.channels.telegram.secureInputMode,
           runtimeForSession: async ({ sessionId, securityPolicy, metadata }) => {
             const latestConfig = await loadConfig();
             return createGatewayRuntime(latestConfig, sessionDb, homeDir, trustStorePath, {
@@ -1612,6 +1667,9 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           enqueueSessionFinalization,
           profileId,
           approvalQueue: gatewayApprovalQueue,
+          pendingTurnStore,
+          usageInspector: gatewayUsageInspector,
+          channelMessageTurnStore,
           voiceStateManager,
           voiceAutoTtsDefault: config.voice.autoTts,
           autoTtsConfig: async () => {
@@ -1864,6 +1922,7 @@ export async function runPrune(state: SupervisorInternalState, guard: { running:
   guard.running = true;
   try {
     await state.runtimeCache!.prune();
+    state.pendingTurnStore?.pruneRetention();
   } catch (err) {
     logWarning(`Runtime cache prune error: ${err instanceof Error ? err.message : String(err)}`);
   } finally {

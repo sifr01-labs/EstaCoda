@@ -17,9 +17,13 @@ export type ModelProfile = {
   id: string;
   provider: ProviderId;
   contextWindowTokens: number;
+  /** Registry-advertised maximum generated tokens. Omitted when unavailable or invalid. */
+  maxOutputTokens?: number;
   status?: "stable" | "alpha" | "beta" | "deprecated" | "unknown";
   supportsTools: boolean;
   supportsVision: boolean;
+  /** Defaults to supported for vision routes; set false for known single-image routes. */
+  supportsMultipleImages?: boolean;
   supportsStructuredOutput: boolean;
   supportsReasoning?: boolean;
   supportsStreaming?: boolean;
@@ -82,6 +86,7 @@ export type ProviderMessageContentPart =
       type: "image_url";
       image_url: {
         url: string;
+        detail?: "low" | "auto" | "high";
       };
     };
 
@@ -201,6 +206,10 @@ export type ProviderLoopRuntimeMetadata = {
     reason: "provider_length";
     attempts: number;
     exhausted: boolean;
+    exhaustionCause?: Extract<
+      import("./execution-plan.js").ExecutionTerminationCause,
+      "provider_failed" | "budget_exhausted" | "deadline_reached"
+    >;
     initialFinishReason: ProviderFinishReason;
     finalFinishReason?: ProviderFinishReason;
   };
@@ -229,6 +238,7 @@ export type ResolvedModelRoute = {
 };
 
 export type AuxiliaryModelProvider = ProviderId | "auto" | "main";
+export type VisionHostedProcessingPreference = "allow-with-approval" | "local-only";
 
 export type AuxiliaryModelSlotConfig = {
   provider?: AuxiliaryModelProvider;
@@ -238,8 +248,8 @@ export type AuxiliaryModelSlotConfig = {
   contextWindowTokens?: number;
   timeoutMs?: number;
   maxConcurrency?: number;
-  extraBody?: Record<string, unknown>;
   fallbackToMain?: boolean;
+  hostedProcessing?: VisionHostedProcessingPreference;
   enabled?: boolean;
 };
 
@@ -356,6 +366,7 @@ export type ProviderErrorClass =
 export type ProviderRoutePreferences = {
   requireTools?: boolean;
   requireVision?: boolean;
+  requireMultipleImages?: boolean;
   requireStructuredOutput?: boolean;
   requireReasoning?: boolean;
   preferFreeOrOpenWeights?: boolean;

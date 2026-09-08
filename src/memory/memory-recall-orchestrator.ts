@@ -11,6 +11,7 @@ import { collectExternalMemoryRecall } from "./external-memory-provider.js";
 import {
   detectSessionRecallIntent,
   sessionRecallResultToPromptBlocks,
+  type SessionRecallResult,
   type SessionRecallService
 } from "../session/session-recall-service.js";
 import type { MemoryPromptContextBuilder } from "./memory-prompt-context-builder.js";
@@ -21,6 +22,13 @@ type MemoryPromptContextBuilderLike = Pick<MemoryPromptContextBuilder, "build">;
 type SessionRecallServiceLike = Pick<SessionRecallService, "recall">;
 
 type SessionRecallDecisionRecorder = {
+  recordSessionRecallStage?(input: {
+    stage: "started" | "completed" | "failed";
+    focus: "general" | "visited-sites";
+    sourceSessionIds: string[];
+    resultCount: number;
+    onEvent?: RuntimeEventSink;
+  }): Promise<string[]>;
   recordSessionRecallDecision(input: {
     triggered: boolean;
     reason: string;
@@ -92,10 +100,16 @@ export class MemoryRecallOrchestrator {
 
   async prepareForTurn(input: {
     text: string;
+    currentSessionId?: string;
+    currentMessageId?: string;
     onEvent?: RuntimeEventSink;
   }): Promise<MemoryRecallOrchestratorResult> {
     const intent = detectSessionRecallIntent(input.text);
-    const session = await this.#sessionRecall(intent, input.onEvent);
+    const session = await this.#sessionRecall(intent, {
+      currentSessionId: input.currentSessionId,
+      currentMessageId: input.currentMessageId,
+      onEvent: input.onEvent
+    });
     const external = await this.#externalRecall({
       query: intent.query,
       triggered: intent.triggered
@@ -123,7 +137,11 @@ export class MemoryRecallOrchestrator {
 
   async #sessionRecall(
     intent: ReturnType<typeof detectSessionRecallIntent>,
-    onEvent?: RuntimeEventSink
+    runtime: {
+      currentSessionId?: string;
+      currentMessageId?: string;
+      onEvent?: RuntimeEventSink;
+    }
   ): Promise<{
     triggered: boolean;
     blocks: PromptMemoryBlock[];
@@ -138,7 +156,7 @@ export class MemoryRecallOrchestrator {
         query: intent.query,
         sourceSessionIds: [],
         warningCount: 0,
-        onEvent
+        onEvent: runtime.onEvent
       });
       const decision: MemoryRecallDecision = {
         included: false,
@@ -156,19 +174,60 @@ export class MemoryRecallOrchestrator {
       };
     }
 
-    const recall = await this.#sessionRecallService.recall(intent.query);
+    const currentSession = intent.includeCurrentSession && runtime.currentSessionId !== undefined
+      ? {
+          sessionId: runtime.currentSessionId,
+          ...(runtime.currentMessageId === undefined ? {} : { excludeMessageIds: [runtime.currentMessageId] })
+        }
+      : undefined;
+    const recallOptions = intent.focus === "general" && currentSession === undefined
+      ? undefined
+      : {
+          focus: intent.focus,
+          ...(currentSession === undefined ? {} : { currentSession })
+        };
+    const stageWarnings = await this.#recordSessionRecallStage({
+      stage: "started",
+      focus: intent.focus,
+      sourceSessionIds: [],
+      resultCount: 0,
+      onEvent: runtime.onEvent
+    });
+    let recall: SessionRecallResult;
+    try {
+      recall = recallOptions === undefined
+        ? await this.#sessionRecallService.recall(intent.query)
+        : await this.#sessionRecallService.recall(intent.query, recallOptions);
+    } catch (error) {
+      await this.#recordSessionRecallStage({
+        stage: "failed",
+        focus: intent.focus,
+        sourceSessionIds: [],
+        resultCount: 0,
+        onEvent: runtime.onEvent
+      });
+      throw error;
+    }
     const blocks = sessionRecallResultToPromptBlocks(recall);
     const sourceSessionIds = uniqueSourceSessionIds(blocks);
+    stageWarnings.push(...await this.#recordSessionRecallStage({
+      stage: "completed",
+      focus: intent.focus,
+      sourceSessionIds,
+      resultCount: blocks.length,
+      onEvent: runtime.onEvent
+    }));
     const eventWarnings = await this.#recordSessionRecallDecision({
       triggered: true,
       reason: intent.reason,
       query: intent.query,
       sourceSessionIds,
       warningCount: recall.diagnostics.warnings.length,
-      onEvent
+      onEvent: runtime.onEvent
     });
     const warnings = [
       ...recall.diagnostics.warnings,
+      ...stageWarnings,
       ...eventWarnings
     ];
     const decision: MemoryRecallDecision = {
@@ -282,6 +341,19 @@ export class MemoryRecallOrchestrator {
       return [];
     }
     return await this.#recorder.recordSessionRecallDecision(input);
+  }
+
+  async #recordSessionRecallStage(input: {
+    stage: "started" | "completed" | "failed";
+    focus: "general" | "visited-sites";
+    sourceSessionIds: string[];
+    resultCount: number;
+    onEvent?: RuntimeEventSink;
+  }): Promise<string[]> {
+    if (this.#recorder?.recordSessionRecallStage === undefined) {
+      return [];
+    }
+    return await this.#recorder.recordSessionRecallStage(input);
   }
 
   async #recordExternalMemoryRecall(input: {

@@ -687,7 +687,7 @@ describe("runConfigEditor", () => {
       "Configure voice",
       "Voice",
       "Voice",
-      "Vision and Image Generation",
+      "Image Generation and Editing",
       "Image model",
       "Browser",
       "Voice",
@@ -965,13 +965,14 @@ describe("runConfigEditor", () => {
     await promptBrowserCapability(prompt, {
       backend: "local-cdp",
       autoLaunch: true,
+      headless: true,
       supervised: true,
       engine: "cdp",
     });
 
     const searchInput = selectInputs.find((input) => input.title === "Search provider");
     const voiceInputs = selectInputs.filter((input) => input.title === "Voice");
-    const visionInput = selectInputs.find((input) => input.title === "Vision and Image Generation");
+    const visionInput = selectInputs.find((input) => input.title === "Image Generation and Editing");
     const browserInput = selectInputs.find((input) => input.title === "Browser");
     const allStatusText = selectInputs.flatMap((input) => input.statusLines ?? []).map((line) => line.text).join("\n");
 
@@ -1779,7 +1780,7 @@ describe("runConfigEditor", () => {
     await trustWorkspace(tempDir, workspaceRoot);
     const before = await readFile(profileConfigPath(tempDir), "utf8");
     const selectInputs: SelectPromptInput<unknown>[] = [];
-    const prompt = fakePrompt({ values: ["Back", "exit"] });
+    const prompt = fakePrompt({ values: ["image-generation", "Back", "exit"] });
     const baseSelect = prompt.select!;
     prompt.select = async (input) => {
       selectInputs.push(input as SelectPromptInput<unknown>);
@@ -1795,7 +1796,7 @@ describe("runConfigEditor", () => {
       applyExecutor: { apply },
     });
 
-    const imageProviderInput = selectInputs.find((input) => input.title === "Vision and Image Generation");
+    const imageProviderInput = selectInputs.find((input) => input.title === "Image Generation and Editing");
     expect(result.completed).toBe(true);
     expect(result.selectedActionId).toBe("exit");
     expect(result.reviewManifest).toBeUndefined();
@@ -1804,7 +1805,8 @@ describe("runConfigEditor", () => {
     await expect(readFile(profileConfigPath(tempDir), "utf8")).resolves.toBe(before);
     expect(imageProviderInput?.options.find((option) => option.label === "Back")?.group).toBe("navigation");
     expect(selectInputs.map((input) => input.title)).toEqual([
-      "Vision and Image Generation",
+      "Vision & Images",
+      "Image Generation and Editing",
       "Setup editor",
     ]);
   });
@@ -1814,7 +1816,7 @@ describe("runConfigEditor", () => {
     await trustWorkspace(tempDir, workspaceRoot);
     const before = await readFile(profileConfigPath(tempDir), "utf8");
     const selectInputs: SelectPromptInput<unknown>[] = [];
-    const prompt = fakePrompt({ values: ["fal", "Back", "Back", "exit"] });
+    const prompt = fakePrompt({ values: ["image-generation", "fal", "Back", "Back", "exit"] });
     const baseSelect = prompt.select!;
     prompt.select = async (input) => {
       selectInputs.push(input as SelectPromptInput<unknown>);
@@ -1836,9 +1838,10 @@ describe("runConfigEditor", () => {
     expect(apply).not.toHaveBeenCalled();
     await expect(readFile(profileConfigPath(tempDir), "utf8")).resolves.toBe(before);
     expect(selectInputs.map((input) => input.title)).toEqual([
-      "Vision and Image Generation",
+      "Vision & Images",
+      "Image Generation and Editing",
       "Image model",
-      "Vision and Image Generation",
+      "Image Generation and Editing",
       "Setup editor",
     ]);
   });
@@ -3481,6 +3484,312 @@ describe("runConfigEditor", () => {
     }));
   });
 
+  it("reviews and applies automatic Vision Analysis settings without changing image generation", async () => {
+    await writeUserConfig(tempDir, {
+      ...localReadyConfig(),
+      imageGen: {
+        provider: "fal",
+        model: "fal-ai/flux-2/klein/9b",
+        apiKeyEnv: "FAL_KEY",
+      },
+      auxiliaryModels: {
+        vision: { provider: "openai", id: "old-vision", enabled: true },
+      },
+    });
+    await trustWorkspace(tempDir, workspaceRoot);
+    const prompt = fakePrompt({ values: ["vision-analysis", "automatic", true] });
+    const selectInputs = captureSelectInputs(prompt);
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      defaultActionId: "configure-image-generation",
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+      }),
+    });
+    const rawConfig = await readFile(profileConfigPath(tempDir), "utf8");
+    const config = JSON.parse(rawConfig) as {
+      imageGen?: { provider?: string; model?: string; apiKeyEnv?: string };
+      auxiliaryModels?: { vision?: Record<string, unknown> };
+    };
+
+    expect(result.completed).toBe(true);
+    expect(result.reviewManifest?.sections["provider-model-network"][0]?.review).toEqual(expect.objectContaining({
+      summaryKey: "setupDrafts.visionAnalysisRoute.basic.summary",
+      values: expect.objectContaining({
+        auxiliaryTask: "vision",
+        routeMode: "automatic",
+        hostedProcessing: "allow-with-approval",
+        timeoutMs: 60_000,
+        maxConcurrency: 1,
+      }),
+    }));
+    expect(config.auxiliaryModels?.vision).toEqual({
+      provider: "auto",
+      timeoutMs: 60_000,
+      maxConcurrency: 1,
+      fallbackToMain: false,
+      hostedProcessing: "allow-with-approval",
+      enabled: true,
+    });
+    expect(config.imageGen).toEqual({
+      provider: "fal",
+      model: "fal-ai/flux-2/klein/9b",
+      apiKeyEnv: "FAL_KEY",
+    });
+    expect(selectInputs.find((input) => input.title === "Vision & Images")?.options.map((option) => option.label)).toEqual([
+      "Vision Analysis",
+      "Image Generation & Editing",
+      "Back",
+    ]);
+    expect(selectInputs.find((input) => input.options.some((option) => option.id === "vision-route-automatic"))?.options.map((option) => option.label)).toEqual([
+      "Automatic (recommended)",
+      "Choose a vision model",
+      "Turn off Vision Analysis",
+      "Advanced settings",
+      "Back",
+    ]);
+    expect(selectInputs.some((input) => input.title === "Vision Processing Location")).toBe(false);
+    expect(rawConfig).not.toContain("old-vision");
+  });
+
+  it("unwinds Vision Analysis Back actions through each parent screen", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    const prompt = fakePrompt({
+      values: ["vision-analysis", "advanced", "settings", "Back", "Back", "Back", "Back", "exit"],
+    });
+    const selectInputs = captureSelectInputs(prompt);
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      defaultActionId: "configure-image-generation",
+    });
+
+    expect(result.completed).toBe(true);
+    expect(result.reviewManifest).toBeUndefined();
+    expect(selectInputs.map((input) => input.title).filter((title) => [
+      "Vision & Images",
+      "Vision Analysis route",
+      "Advanced Vision Analysis",
+      "Vision processing location",
+      "Setup editor",
+    ].includes(title))).toEqual([
+      "Vision & Images",
+      "Vision Analysis route",
+      "Advanced Vision Analysis",
+      "Vision processing location",
+      "Advanced Vision Analysis",
+      "Vision Analysis route",
+      "Vision & Images",
+      "Setup editor",
+    ]);
+  });
+
+  it("hides local-only processing when no local model or loopback endpoint is configured", async () => {
+    await writeUserConfig(tempDir, {
+      model: { provider: "openai", id: "gpt-5.5" },
+      providers: {
+        openai: {
+          kind: "openai-compatible",
+          baseUrl: "https://api.openai.com/v1",
+          authMethod: "none",
+          models: ["gpt-5.5"],
+          enableNetwork: true,
+        },
+      },
+      auxiliaryModels: { vision: { provider: "auto", enabled: true } },
+    });
+    await trustWorkspace(tempDir, workspaceRoot);
+    const prompt = fakePrompt({
+      values: ["vision-analysis", "advanced", "settings", "60000", "1", false],
+    });
+    const selectInputs = captureSelectInputs(prompt);
+
+    await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      defaultActionId: "configure-image-generation",
+    });
+
+    expect(selectInputs.some((input) => input.title === "Vision processing location")).toBe(false);
+  });
+
+  it("keeps privacy and performance controls behind Advanced settings", async () => {
+    await writeUserConfig(tempDir, {
+      ...localReadyConfig(),
+      auxiliaryModels: {
+        vision: { provider: "auto", enabled: true },
+      },
+    });
+    await trustWorkspace(tempDir, workspaceRoot);
+    const prompt = fakePrompt({
+      values: ["vision-analysis", "advanced", "settings", "local-only", "45000", "2", true],
+    });
+    const selectInputs = captureSelectInputs(prompt);
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      defaultActionId: "configure-image-generation",
+      applyExecutor: createReviewedSetupApplyExecutor({ homeDir: tempDir, workspaceRoot }),
+    });
+    const config = JSON.parse(await readFile(profileConfigPath(tempDir), "utf8")) as {
+      auxiliaryModels?: { vision?: Record<string, unknown> };
+    };
+
+    expect(result.completed).toBe(true);
+    expect(selectInputs.find((input) => input.options.some((option) => option.id === "vision-advanced-settings"))?.options.map((option) => option.label)).toEqual([
+      "Main model",
+      "Dedicated route with main fallback",
+      "Privacy and performance",
+      "Back",
+    ]);
+    expect(selectInputs.some((input) => input.options.some((option) => option.id === "vision-hosted-local-only"))).toBe(true);
+    expect(config.auxiliaryModels?.vision).toEqual({
+      provider: "auto",
+      timeoutMs: 45_000,
+      maxConcurrency: 2,
+      fallbackToMain: false,
+      hostedProcessing: "local-only",
+      enabled: true,
+    });
+  });
+
+  it("offers the bilingual route verifier after Vision Analysis apply without implicit hosted consent", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    const verify = vi.fn()
+      .mockResolvedValueOnce(visionVerificationReport("consent-required", "missing"))
+      .mockResolvedValueOnce(visionVerificationReport("passed", "granted"));
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({
+        values: [
+          "vision-analysis",
+          "automatic",
+          true,
+          "Verify now",
+          "Send fixture and verify",
+        ],
+      }),
+      defaultActionId: "configure-image-generation",
+      applyExecutor: createReviewedSetupApplyExecutor({ homeDir: tempDir, workspaceRoot }),
+      visionRouteVerification: verify,
+    });
+
+    expect(verify).toHaveBeenCalledTimes(2);
+    expect(verify.mock.calls[0]?.[0]).toMatchObject({ consentHosted: false });
+    expect(verify.mock.calls[1]?.[0]).toMatchObject({ consentHosted: true });
+    expect(result.visionRouteVerificationReport?.status).toBe("passed");
+    expect(result.output).toContain("Vision Analysis verification");
+  });
+
+  it("uses the benign bilingual image when verifying a local Vision Analysis route", async () => {
+    await writeUserConfig(tempDir, localReadyConfig());
+    await trustWorkspace(tempDir, workspaceRoot);
+    const completionBodies: unknown[] = [];
+    const prompt = fakePrompt({
+      values: [
+        "vision-analysis",
+        "dedicated",
+        "Local",
+        "",
+        "Check endpoint",
+        "vision-local",
+        "",
+        "No API key",
+        "Run test",
+        "Review changes",
+        true,
+      ],
+    });
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt,
+      defaultActionId: "configure-image-generation",
+      flowEngine: flowEngine({ credentialAction: "endpoint", envVarName: "OPENAI_COMPATIBLE_API_KEY", providers: ["local"] }),
+      providerFetch: async (url, init) => {
+        if (url.endsWith("/models")) {
+          return fetchResponse({ data: [{ id: "vision-local" }] });
+        }
+        completionBodies.push(JSON.parse(init.body ?? "{}"));
+        return fetchResponse({ choices: [{ message: { content: "VISION READY / الرؤية جاهزة" } }] });
+      },
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+      }),
+    });
+    const completionBody = completionBodies[0] as {
+      messages?: Array<{ content?: Array<{ type?: string; image_url?: { url?: string } }> }>;
+    };
+
+    expect(result.completed).toBe(true);
+    expect(completionBody.messages?.[0]?.content).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "text" }),
+      expect.objectContaining({
+        type: "image_url",
+        image_url: expect.objectContaining({ url: expect.stringMatching(/^data:image\/png;base64,/u) }),
+      }),
+    ]));
+    expect(result.reviewManifest?.sections["provider-model-network"][0]?.review.values).toEqual(expect.objectContaining({
+      auxiliaryTask: "vision",
+      routeMode: "dedicated",
+      hostedProcessing: "allow-with-approval",
+      chatCompletionStatus: "passed",
+    }));
+  });
+
+  it("keeps Vision Analysis config and secrets unchanged when dedicated-route review is cancelled", async () => {
+    await writeUserConfig(tempDir, {
+      ...localReadyConfig(),
+      auxiliaryModels: {
+        vision: { provider: "auto", enabled: true },
+      },
+    });
+    await trustWorkspace(tempDir, workspaceRoot);
+    const secret = "sk-vision-cancelled-secret";
+
+    const result = await runConfigEditor({
+      homeDir: tempDir,
+      workspaceRoot,
+      prompt: fakePrompt({
+        values: ["vision-analysis", "dedicated", "OpenAI", "gpt-5.5", false],
+        secret,
+      }),
+      defaultActionId: "configure-image-generation",
+      flowEngine: flowEngine({ credentialAction: "collect", envVarName: "VISION_CANCEL_KEY" }),
+      applyExecutor: createReviewedSetupApplyExecutor({
+        homeDir: tempDir,
+        workspaceRoot,
+      }),
+    });
+    const rawConfig = await readFile(profileConfigPath(tempDir), "utf8");
+    const config = JSON.parse(rawConfig) as {
+      auxiliaryModels?: { vision?: Record<string, unknown> };
+    };
+
+    expect(result.completed).toBe(false);
+    expect(result.applyPlanningResult?.kind).toBe("cancelled");
+    expect(config.auxiliaryModels?.vision).toEqual({ provider: "auto", enabled: true });
+    await expect(readFile(profileEnvPath(tempDir), "utf8")).rejects.toThrow();
+    expect(rawConfig).not.toContain(secret);
+    expect(JSON.stringify(result)).not.toContain(secret);
+    expect(JSON.stringify(result.reviewManifest)).not.toContain(secret);
+  });
+
   it("does not change assessor route when auxiliary review is cancelled", async () => {
     await writeUserConfig(tempDir, {
       ...localReadyConfig(),
@@ -3915,7 +4224,7 @@ describe("runConfigEditor", () => {
     }
 
     const imageOptionLabels: string[][] = [];
-    const imagePrompt = fakePrompt({ values: ["Back", "exit"] });
+    const imagePrompt = fakePrompt({ values: ["image-generation", "Back", "exit"] });
     const baseImageSelect = imagePrompt.select!;
     imagePrompt.select = async (input) => {
       imageOptionLabels.push(input.options.map((option) => option.label));
@@ -3930,7 +4239,8 @@ describe("runConfigEditor", () => {
     });
 
     expect(imageResult.completed).toBe(true);
-    expect(imageOptionLabels[0]).toEqual(["fal.ai", "BytePlus / ModelArk", "OpenAI", "Back"]);
+    expect(imageOptionLabels[0]).toEqual(["Vision Analysis", "Image Generation & Editing", "Back"]);
+    expect(imageOptionLabels[1]).toEqual(["fal.ai", "BytePlus / ModelArk", "OpenAI", "Back"]);
     expect(imageOptionLabels.some((labels) => labels.includes("Configure"))).toBe(false);
     expect(imageResult.reviewManifest).toBeUndefined();
   });
@@ -5118,6 +5428,7 @@ describe("runConfigEditor", () => {
       workspaceRoot,
       prompt: fakePrompt({
         values: [
+          "image-generation",
           "fal",
           "fal-ai/flux-2/klein/9b",
         ],
@@ -5198,6 +5509,7 @@ describe("runConfigEditor", () => {
     expect(values).toEqual({
       backend: "local-cdp",
       autoLaunch: true,
+      headless: true,
       supervised: true,
       engine: "cdp",
       launchArgs: [],
@@ -5214,6 +5526,7 @@ describe("runConfigEditor", () => {
       values: [
         "local-supervised",
         true,
+        false,
         "",
         "/usr/bin/chromium",
         "--headless=new",
@@ -5229,8 +5542,47 @@ describe("runConfigEditor", () => {
       chromeFlags: ["--no-first-run", "--disable-gpu"],
       launchCommand: undefined,
       autoLaunch: true,
+      headless: false,
       supervised: true,
     });
+  });
+
+  it("returns from browser window Back to the auto-launch choice", async () => {
+    const selectedTitles: string[] = [];
+    const basePrompt = fakePrompt({
+      values: [
+        "local-supervised",
+        true,
+        "Back",
+        true,
+        false,
+        "",
+        "/usr/bin/chromium",
+        "",
+        "",
+      ],
+    });
+    const prompt = basePrompt as Prompt;
+    const baseSelect = prompt.select!;
+    prompt.select = async (input) => {
+      selectedTitles.push(input.title);
+      return baseSelect(input);
+    };
+
+    const values = await promptBrowserCapability(prompt, {}, "en", { allowBack: true });
+
+    expect(values).toMatchObject({
+      backend: "local-cdp",
+      autoLaunch: true,
+      headless: false,
+    });
+    expect(selectedTitles).toEqual([
+      "Browser",
+      "Local supervised browser",
+      "Browser window",
+      "Local supervised browser",
+      "Browser window",
+    ]);
   });
 
   it("maps existing CDP browser mode to flat browser config fields", async () => {
@@ -5245,6 +5597,7 @@ describe("runConfigEditor", () => {
       chromeFlags: [],
       launchCommand: undefined,
       autoLaunch: false,
+      headless: true,
       supervised: true,
     });
   });
@@ -5260,6 +5613,7 @@ describe("runConfigEditor", () => {
       launchArgs: [],
       chromeFlags: [],
       autoLaunch: false,
+      headless: true,
       supervised: false,
       hybridRouting: true,
       cloudFallback: true,
@@ -5277,6 +5631,7 @@ describe("runConfigEditor", () => {
       launchArgs: [],
       chromeFlags: [],
       autoLaunch: false,
+      headless: true,
       supervised: false,
     });
   });
@@ -5315,6 +5670,7 @@ describe("runConfigEditor", () => {
         chromeFlags?: string[];
         launchCommand?: string;
         autoLaunch?: boolean;
+        headless?: boolean;
         supervised?: boolean;
       };
     };
@@ -5332,6 +5688,7 @@ describe("runConfigEditor", () => {
       backend: "local-cdp",
       cdpUrl: "http://127.0.0.1:1",
       autoLaunch: false,
+      headless: true,
       supervised: true,
     });
     expect(config.channels).toBeUndefined();
@@ -5820,6 +6177,35 @@ function minimalManifest(sourceBundleIds: readonly string[] = []): SetupReviewMa
       readOnlyCount: 0,
     },
   };
+}
+
+function visionVerificationReport(
+  status: "consent-required" | "passed",
+  hostedConsent: "missing" | "granted"
+) {
+  return {
+    status,
+    provider: "openai",
+    model: "gpt-5.5",
+    routeSource: "main" as const,
+    dispatch: "native" as const,
+    inference: "hosted" as const,
+    hostedDestinations: ["openai@https://api.openai.com/v1"],
+    hostedConsent,
+    credentialReady: true,
+    visionCapable: true,
+    configurationFingerprint: "fingerprint",
+    diagnostics: [],
+    fixtureSha256: "a".repeat(64),
+    expectedEnglishDetected: status === "passed",
+    expectedArabicDetected: status === "passed",
+    latencyMs: status === "passed" ? 25 : 0,
+    pricingComplete: status === "passed",
+    normalizedImage: { width: 320, height: 160, bytes: 1024 },
+    fallbackUsed: false,
+    attempts: status === "passed" ? ["openai/gpt-5.5:ok"] : [],
+    ...(status === "passed" ? {} : { error: "Hosted verification requires consent." }),
+  } as const;
 }
 
 function fakePrompt(options: { readonly values?: readonly unknown[]; readonly secret?: string | readonly string[] } = {}): Prompt {

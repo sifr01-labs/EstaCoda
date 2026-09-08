@@ -1,6 +1,6 @@
 import { padVisibleEnd, truncateVisible, wrapText } from "../../renderers/layout.js";
 import { formatUsageCost, formatUsageCostNotice } from "../../usage-cost-format.js";
-import { renderActivityTraceSurface } from "./activityTraceSurface.js";
+import { renderActivitySpanTraceSurface } from "./activityTraceSurface.js";
 import type { OperatorConsoleLocale } from "./activeWorkCopy.js";
 import type {
   TaskCardAttemptState,
@@ -26,6 +26,7 @@ type SubagentCopy = {
   readonly retainedTimeline: string;
   readonly noActivity: string;
   readonly resultSummary: string;
+  readonly noResultSummary: string;
   readonly filesAndArtifacts: string;
   readonly attempts: string;
   readonly current: string;
@@ -35,6 +36,9 @@ type SubagentCopy = {
   readonly diagnostic: string;
   readonly waitingForApproval: string;
   readonly waitingForInput: string;
+  readonly retryable: string;
+  readonly notRetryable: string;
+  readonly recoveredDiagnostic: string;
   readonly closeHint: string;
   readonly mouseActiveHint: string;
   readonly mouseToggleHint: string;
@@ -52,6 +56,7 @@ const COPY: Readonly<Record<OperatorConsoleLocale, SubagentCopy>> = {
     retainedTimeline: "Retained safe activity",
     noActivity: "No retained safe activity yet",
     resultSummary: "Result summary",
+    noResultSummary: "Open to inspect the full result",
     filesAndArtifacts: "Results and artifacts",
     attempts: "Attempts and retries",
     current: "current",
@@ -61,7 +66,10 @@ const COPY: Readonly<Record<OperatorConsoleLocale, SubagentCopy>> = {
     diagnostic: "diagnostic only",
     waitingForApproval: "waiting for approval",
     waitingForInput: "waiting for input",
-    closeHint: "Esc return to Task · ←/→ inspect events · Home oldest visible · End live · ↑/↓ scroll",
+    retryable: "retryable",
+    notRetryable: "not retryable",
+    recoveredDiagnostic: "Recovered output is available for inspection and was not accepted for synthesis.",
+    closeHint: "Esc return to Task · ←/→ inspect activities · Home oldest · End live · ↑/↓ scroll",
     mouseActiveHint: "[Mouse Mode] Click or wheel here · Esc release",
     mouseToggleHint: "Ctrl+G mouse",
   },
@@ -76,6 +84,7 @@ const COPY: Readonly<Record<OperatorConsoleLocale, SubagentCopy>> = {
     retainedTimeline: "النشاط الآمن المحفوظ",
     noActivity: "لا يوجد نشاط آمن محفوظ بعد",
     resultSummary: "ملخص النتيجة",
+    noResultSummary: "افتح النتيجة لفحصها كاملة",
     filesAndArtifacts: "النتائج والمخرجات",
     attempts: "المحاولات وإعادات المحاولة",
     current: "الحالية",
@@ -85,7 +94,10 @@ const COPY: Readonly<Record<OperatorConsoleLocale, SubagentCopy>> = {
     diagnostic: "للتشخيص فقط",
     waitingForApproval: "بانتظار الموافقة",
     waitingForInput: "بانتظار إدخال",
-    closeHint: "Esc للعودة إلى المهمة · ←/→ لفحص الأحداث · Home للأقدم · End للمباشر · ↑/↓ للتمرير",
+    retryable: "قابل لإعادة المحاولة",
+    notRetryable: "غير قابل لإعادة المحاولة",
+    recoveredDiagnostic: "تتوفر مخرجات مستردة للفحص ولم تُقبل للاستخدام في التجميع.",
+    closeHint: "Esc للعودة إلى المهمة · ←/→ لفحص الأنشطة · Home للأقدم · End للمباشر · ↑/↓ للتمرير",
     mouseActiveHint: "[وضع الماوس] انقر أو مرّر هنا · Esc للتحرير",
     mouseToggleHint: "Ctrl+G للماوس",
   },
@@ -172,6 +184,7 @@ export function subagentInspectionContentLines(
     subagents: [subagent],
     trace: {
       events: subagent.trace,
+      spans: card.trace.spans.filter((span) => span.scope.stepId === subagent.stepId),
       ...(subagent.traceSummary?.totalEvents === undefined
         ? {}
         : { totalEvents: subagent.traceSummary.totalEvents }),
@@ -181,7 +194,7 @@ export function subagentInspectionContentLines(
       hasEarlierEvents: subagent.traceSummary?.hasEarlierEvents ?? false,
     },
   };
-  lines.push("", ...renderActivityTraceSurface(traceCard, options.inspection?.subagentTrace, {
+  lines.push("", ...renderActivitySpanTraceSurface(traceCard, options.inspection?.subagentTrace, {
     width: contentWidth,
     locale,
     style,
@@ -193,7 +206,7 @@ export function subagentInspectionContentLines(
         `${formatTimestamp(event.timestamp)} · ${formatCategory(event.category, locale)} · ${event.label}`
       ), style);
 
-  const summaries = resultSummaryLines(subagent);
+  const summaries = resultSummaryLines(subagent, copy);
   addSection(lines, copy.resultSummary, summaries.length === 0 ? [copy.none] : summaries, style);
   addSection(lines, copy.filesAndArtifacts, subagent.results.length === 0
     ? [copy.none]
@@ -218,19 +231,28 @@ export function subagentInspectionContentLines(
   return lines;
 }
 
-function resultSummaryLines(subagent: TaskCardSubagentState): readonly string[] {
-  const values: string[] = [];
+function resultSummaryLines(
+  subagent: TaskCardSubagentState,
+  copy: SubagentCopy
+): readonly string[] {
+  const acceptedResults = subagent.results.filter((result) => result.disposition === "accepted");
+  if (acceptedResults.length > 0) {
+    const summaries = acceptedResults.flatMap((result) => {
+      const summary = deriveTaskResultSummary(result.displaySummary ?? result.summary, 480);
+      return summary === undefined ? [] : [summary];
+    });
+    const livePreview = subagent.status === "running"
+      ? normalizeText(
+          subagent.assistantPreview ?? subagent.activeAttempt?.assistantPreview ?? subagent.latestAttempt?.assistantPreview
+        )
+      : undefined;
+    const values = [...(livePreview === undefined ? [] : [livePreview]), ...summaries];
+    return values.length === 0 ? [copy.noResultSummary] : [...new Set(values)];
+  }
   const preview = normalizeText(
     subagent.assistantPreview ?? subagent.activeAttempt?.assistantPreview ?? subagent.latestAttempt?.assistantPreview
   );
-  if (preview !== undefined) values.push(preview);
-  for (const result of subagent.results) {
-    const summary = deriveTaskResultSummary(result.displaySummary ?? result.summary, 480);
-    if (result.disposition === "accepted" && summary !== undefined) {
-      values.push(summary);
-    }
-  }
-  return [...new Set(values)];
+  return preview === undefined ? [] : [preview];
 }
 
 function blockerLines(
@@ -243,7 +265,14 @@ function blockerLines(
   if (status === "waiting_for_approval") return [copy.waitingForApproval];
   if (status === "waiting_for_input") return [copy.waitingForInput];
   if (status === "failed" || status === "cancelled" || status === "interrupted" || status === "expired") {
-    return [formatStatus(status, locale)];
+    const failure = attempt?.failure ?? subagent.outcome.failure;
+    return [
+      failure === undefined
+        ? formatStatus(status, locale)
+        : `${isolate(failure.class)} · ${failure.retryable ? copy.retryable : copy.notRetryable}` +
+          ` · ${copy.attempt} ${attempt?.attemptNumber ?? subagent.outcome.attemptsUsed}/${attempt?.maxAttempts ?? subagent.outcome.maxAttempts}`,
+      ...(subagent.outcome.recovered ? [copy.recoveredDiagnostic] : []),
+    ];
   }
   return [copy.none];
 }
@@ -255,7 +284,10 @@ function formatAttempt(
   locale: OperatorConsoleLocale
 ): string {
   const current = attempt.attemptId === currentAttemptId ? ` · ${copy.current}` : "";
-  return `${copy.attempt} ${attempt.attemptNumber} · ${formatStatus(attempt.status, locale)}${current} · ${formatDuration(attempt.elapsedMs)} · ${formatCompactNumber(attempt.usage.totalTokens)} ${copy.tokens} · ${formatCost(attempt.usage, locale)}`;
+  const failure = attempt.failure === undefined
+    ? ""
+    : ` · ${isolate(attempt.failure.class)} · ${attempt.failure.retryable ? copy.retryable : copy.notRetryable}`;
+  return `${copy.attempt} ${attempt.attemptNumber}/${attempt.maxAttempts} · ${formatStatus(attempt.status, locale)}${current}${failure} · ${formatDuration(attempt.elapsedMs)} · ${formatCompactNumber(attempt.usage.totalTokens)} ${copy.tokens} · ${formatCost(attempt.usage, locale)}`;
 }
 
 function formatResult(result: TaskCardResultState, copy: SubagentCopy): string {

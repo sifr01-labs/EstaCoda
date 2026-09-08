@@ -8,6 +8,7 @@ import type {
   ChannelDelivery,
   ChannelKind,
   ChannelSessionKey,
+  ChannelTextDeliveryReceipt,
   ChannelTextOptions
 } from "../contracts/channel.js";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
@@ -153,14 +154,17 @@ export class DeliveryRouter {
     targets: DeliveryTarget[],
     text: string,
     options?: ChannelTextOptions
-  ): Promise<Map<string, { success: boolean; error?: string }>> {
-    const results = new Map<string, { success: boolean; error?: string }>();
+  ): Promise<Map<string, { success: boolean; error?: string; receipt?: ChannelTextDeliveryReceipt }>> {
+    const results = new Map<string, { success: boolean; error?: string; receipt?: ChannelTextDeliveryReceipt }>();
 
     for (const target of targets) {
       const targetKey = this.#targetToString(target);
       try {
         const meta = await this.#deliverSingleText(target, text, options);
-        results.set(targetKey, { success: true });
+        results.set(targetKey, {
+          success: true,
+          ...(meta.receipt === undefined ? {} : { receipt: meta.receipt })
+        });
         emitDeliveryHook(this.#hookRegistry, "delivery:success", {
           kind: "text",
           target: this.#sanitizeHookTarget(target),
@@ -201,7 +205,7 @@ export class DeliveryRouter {
     target: DeliveryTarget,
     text: string,
     options?: ChannelTextOptions
-  ): Promise<{ truncated?: boolean; overflowSaved?: boolean }> {
+  ): Promise<{ truncated?: boolean; overflowSaved?: boolean; receipt?: ChannelTextDeliveryReceipt }> {
     if (target.kind === "silent") {
       return {};
     }
@@ -235,11 +239,12 @@ export class DeliveryRouter {
     }
 
     const capped = await this.#applyLegacyOutputCap(text, sessionKey.platform);
-    await adapter.delivery.sendText(sessionKey, capped.text, options);
+    const receipt = await adapter.delivery.sendText(sessionKey, capped.text, options);
 
     return {
       truncated: capped.wasTruncated || undefined,
       overflowSaved: capped.overflowSaved || undefined,
+      ...(receipt === undefined ? {} : { receipt })
     };
   }
 

@@ -47,6 +47,22 @@ describe("buildProviderToolSchemaCatalog", () => {
     expect(catalog.tools).toHaveLength(100);
     for (const blockedTool of blockedTools) {
       expect(selectedToolNames).not.toContain(blockedTool.name);
+      expect(catalog.entries.map((entry) => entry.tool.name)).not.toContain(blockedTool.name);
     }
+  });
+
+  it("retains canonical metadata beside each provider-safe schema", () => {
+    const source = {
+      ...tool("mcp.postman.getCollection"),
+      toolsets: ["mcp", "research"]
+    };
+    const catalog = buildProviderToolSchemaCatalog({ tools: [source] });
+
+    expect(catalog.entries).toEqual([{
+      tool: source,
+      schema: catalog.tools[0]
+    }]);
+    expect(catalog.entries[0]?.schema.function.name).toBe("mcp_postman_getCollection");
+    expect(catalog.aliases.get("mcp_postman_getCollection")).toBe(source.name);
   });
 });

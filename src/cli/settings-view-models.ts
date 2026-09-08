@@ -164,6 +164,7 @@ export function buildBrowserSettingsViewModel(
     kv("Backend", browser.backend),
     kv("Supervised mode", browser.supervised ? "enabled" : "disabled"),
     kv("Auto-launch", browser.autoLaunch ? "enabled" : "disabled"),
+    ...(browser.autoLaunch ? [kv("Browser window", browser.headless ? "background" : "visible")] : []),
     ...(browser.cdpUrl !== undefined ? [kv("CDP URL", browser.cdpUrl)] : []),
     ...(browser.launchExecutable !== undefined ? [kv("Launch executable", browser.launchExecutable)] : []),
     ...(browser.launchArgs !== undefined ? [kv("Launch args", String(browser.launchArgs.length))] : []),
@@ -171,7 +172,7 @@ export function buildBrowserSettingsViewModel(
     ...(browser.launchCommand !== undefined ? [kv("Deprecated launch command", "configured")] : []),
     kv("Hybrid routing", browser.hybridRouting ? "enabled" : "disabled"),
     kv("Web extraction", web.enableNetwork ? "enabled" : "disabled"),
-    kv("Change with", "estacoda browser setup --backend local-cdp --cdp-url http://127.0.0.1:9222 --launch-executable /path/to/chrome --launch-arg --headless=new --chrome-flag --no-first-run"),
+    kv("Change with", "estacoda browser setup --backend local-cdp --auto-launch --headed --launch-executable /path/to/chrome --chrome-flag --no-first-run"),
     kv("Cloud routing", "estacoda browser setup --backend browserbase --cloud-provider browserbase --hybrid-routing"),
   ];
   return buildKeyValueBlockViewModel({

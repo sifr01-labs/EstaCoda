@@ -42,7 +42,8 @@ describe("Papyrus operator console transcript surface", () => {
 
     expect(rendered).toContain("EstaCoda");
     expect(rendered).toContain("I inspected the runtime path.");
-    expect(rendered).toContain("✓ read_file");
+    expect(rendered).toContain("✓ Files");
+    expect(rendered).toContain("Read");
     expect(rendered).toContain("src/cli/session-loop.ts");
     expect(rendered).toContain("1s");
     expect(rendered).not.toContain("Tool │");
@@ -98,6 +99,23 @@ describe("Papyrus operator console transcript surface", () => {
     expect(rows.join("\n")).toContain("line 12");
   });
 
+  it("renders a structured completion trace above the delivered answer", () => {
+    const transcript: TranscriptBlock[] = [{
+      id: "assistant-task-1",
+      role: "assistant",
+      text: "The final synthesized answer.",
+      taskTrace: deliveredTrace(),
+    }];
+
+    const rows = renderTranscriptSurface(transcript, { width: 52, height: 9 });
+    const rendered = rows.join("\n");
+
+    expect(rendered).toContain("Activity trace · 4 activities · 1:50");
+    expect(rendered).toContain("The final synthesized answer.");
+    expect(rendered.indexOf("Activity trace")).toBeLessThan(rendered.indexOf("EstaCoda"));
+    expect(rows.every((line) => stringWidth(line) <= 52)).toBe(true);
+  });
+
   it("returns no rows for empty transcript state", () => {
     expect(renderTranscriptSurface([], { width: 80 })).toEqual([]);
     expect(getTranscriptSurfaceDesiredHeight([], 80)).toBe(0);
@@ -106,4 +124,25 @@ describe("Papyrus operator console transcript surface", () => {
 
 function numberedLines(count: number): string {
   return Array.from({ length: count }, (_, index) => `line ${index + 1}`).join("\n");
+}
+
+function deliveredTrace() {
+  return {
+    version: 1 as const,
+    taskId: "task-1",
+    stage: "synthesis" as const,
+    outcome: "complete_with_warnings" as const,
+    answerAvailable: true,
+    activityCount: 4,
+    activityCountComplete: true,
+    totalDurationMs: 110_000,
+    hasEarlierActivities: false,
+    workerOutcomes: { usable: 1, failed: 2, cancelled: 0, total: 3 },
+    spans: [
+      { category: "plan" as const, scope: { kind: "task" as const, label: "Task" }, status: "completed" as const, durationMs: 10_000, label: "Planning" },
+      { category: "search" as const, scope: { kind: "subagent" as const, label: "Subagent 1" }, status: "completed" as const, durationMs: 20_000, label: "Searching" },
+      { category: "write" as const, scope: { kind: "synthesis" as const, label: "Synthesis" }, status: "completed" as const, durationMs: 70_000, label: "Writing response" },
+      { category: "deliver" as const, scope: { kind: "delivery" as const, label: "Delivery" }, status: "completed" as const, durationMs: 10_000, label: "Finalizing task delivery" },
+    ],
+  };
 }

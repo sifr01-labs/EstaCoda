@@ -14,9 +14,11 @@ import { memoryFileCompactionToolProvider } from "./memory-file-compaction-tools
 import { memoryRetrievalToolProvider } from "./memory-retrieval-tools.js";
 import { memoryToolProvider } from "./memory-tool.js";
 import { notebookToolProvider } from "./notebook-tools.js";
+import { planToolProvider } from "./plan-tools.js";
 import { processToolProvider } from "./process-tools.js";
 import { pythonToolProvider } from "./python-tools.js";
 import { sessionSearchToolProvider } from "./session-search-tool.js";
+import { sessionUsageToolProvider } from "./session-usage-tool.js";
 import { skillToolProvider } from "./skill-tools.js";
 import { taskResultToolProvider } from "./task-result-tools.js";
 import { taskToolProvider } from "./task-tools.js";
@@ -42,9 +44,11 @@ export {
   memoryRetrievalToolProvider,
   memoryToolProvider,
   notebookToolProvider,
+  planToolProvider,
   processToolProvider,
   pythonToolProvider,
   sessionSearchToolProvider,
+  sessionUsageToolProvider,
   skillToolProvider,
   taskResultToolProvider,
   taskToolProvider,
@@ -69,6 +73,7 @@ export type ToolRegistrationEntry = {
 
 export const toolRegistrationPlan: readonly ToolRegistrationEntry[] = [
   { provider: builtinToolProvider, phase: "pre-skill-visibility" },
+  { provider: planToolProvider, phase: "pre-skill-visibility" },
   { provider: pythonToolProvider, phase: "pre-skill-visibility" },
   { provider: webToolProvider, phase: "pre-skill-visibility" },
   { provider: workspaceToolProvider, phase: "pre-skill-visibility" },
@@ -87,6 +92,7 @@ export const toolRegistrationPlan: readonly ToolRegistrationEntry[] = [
   { provider: memoryRetrievalToolProvider, phase: "pre-skill-visibility" },
   { provider: memoryFileCompactionToolProvider, phase: "pre-skill-visibility" },
   { provider: sessionSearchToolProvider, phase: "pre-skill-visibility" },
+  { provider: sessionUsageToolProvider, phase: "pre-skill-visibility" },
   { provider: taskResultToolProvider, phase: "pre-skill-visibility" },
   { provider: taskToolProvider, phase: "pre-skill-visibility" },
   { provider: skillToolProvider, phase: "post-skill-visibility" },

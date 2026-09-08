@@ -65,6 +65,33 @@ function skillWithSteps(count: number): SkillDefinition {
 }
 
 describe("SkillPlaybookRunner execution cap", () => {
+  it("never selects the foreground plan tool for deterministic playbooks", async () => {
+    const executeFirstAvailable = vi.fn(async () => execution("file.read"));
+    const executeTool = vi.fn();
+    const executor = new SkillPlaybookRunner({
+      toolExecutor: { executeFirstAvailable, executeTool } as never,
+      runRecorder: runRecorder() as never,
+      sessionId: "s1"
+    });
+    const selectedSkill: SkillDefinition = {
+      ...skillWithSteps(1),
+      requiredToolsets: ["core"],
+      playbook: [{ id: "plan-step", description: "Plan the work", preferredTool: "plan" }]
+    };
+
+    await executor.runSkillPlaybook({
+      selectedSkill,
+      intent: intent(),
+      trustedWorkspace: true,
+      text: "run"
+    });
+
+    expect(executeTool).not.toHaveBeenCalled();
+    expect(executeFirstAvailable).toHaveBeenCalledWith(expect.objectContaining({
+      excludedTools: expect.arrayContaining(["plan"])
+    }));
+  });
+
   it("continues deterministic skill playbooks past four executable steps", async () => {
     const executeTool = vi.fn(async (request: { tool: string }) => execution(request.tool));
     const executor = new SkillPlaybookRunner({

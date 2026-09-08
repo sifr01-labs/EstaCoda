@@ -9,7 +9,15 @@ import {
   type CdpFetchLike
 } from "./browser-backend.js";
 import { registerBrowserProvider, resetBrowserProvidersForTest } from "./browser-registry.js";
-import type { BrowserActionInput, BrowserBackend, BrowserNavigateInput, BrowserNavigateResult, BrowserSnapshot } from "../contracts/browser.js";
+import type {
+  BrowserActionInput,
+  BrowserBackend,
+  BrowserNavigateInput,
+  BrowserNavigateResult,
+  BrowserSnapshot,
+  BrowserSwitchTabInput
+} from "../contracts/browser.js";
+import { browserCapabilities } from "./browser-capabilities.js";
 
 function createCdpFetch(input: {
   ok: boolean;
@@ -30,6 +38,8 @@ type FakeHybridBackend = BrowserBackend & {
   navigations: BrowserNavigateInput[];
   snapshots: BrowserActionInput[];
   clicks: BrowserActionInput[];
+  tabLists: BrowserActionInput[];
+  tabSwitches: BrowserSwitchTabInput[];
   closeSessionCalls: string[];
   closeCalls: number;
 };
@@ -38,6 +48,8 @@ function createHybridSnapshot(sessionId: string, url = "https://example.com"): B
   return {
     sessionId,
     url,
+    identity: { documentEpoch: 1, actionRevision: 1, observationId: 1 },
+    observedAt: "2026-08-13T00:00:00.000Z",
     title: "Hybrid test page",
     text: `Snapshot for ${url}.`,
     elements: [{ ref: "@e1", role: "button", name: "Hybrid Button" }]
@@ -53,9 +65,12 @@ function createFakeHybridBackend(input: {
 }): FakeHybridBackend {
   const backend: FakeHybridBackend = {
     kind: input.kind,
+    capabilities: browserCapabilities({ snapshots: true, tabs: true }),
     navigations: [],
     snapshots: [],
     clicks: [],
+    tabLists: [],
+    tabSwitches: [],
     closeSessionCalls: [],
     closeCalls: 0,
     isAvailable: () => input.available ?? true,
@@ -87,6 +102,26 @@ function createFakeHybridBackend(input: {
     click: async (request) => {
       backend.clicks.push(request);
       return createHybridSnapshot(request.sessionId ?? `${input.kind}-session`);
+    },
+    tabs: async (request = {}) => {
+      backend.tabLists.push(request);
+      const sessionId = request.sessionId ?? `${input.kind}-session`;
+      return {
+        sessionId,
+        tabs: [{ ref: "@t1", url: "https://example.com", title: "Hybrid test page", controlled: true }],
+        blockedCount: 0
+      };
+    },
+    switchTab: async (request) => {
+      backend.tabSwitches.push(request);
+      const tab = { ref: request.tabRef, url: "https://example.com/tab", title: "Hybrid tab", controlled: true };
+      return {
+        tab,
+        snapshot: {
+          ...createHybridSnapshot(request.sessionId ?? `${input.kind}-session`, tab.url),
+          tab
+        }
+      };
     },
     closeSession: async (sessionId) => {
       backend.closeSessionCalls.push(sessionId);
@@ -187,6 +222,7 @@ describe("browser backend baselines", () => {
     expect(await backend.status()).toEqual({
       backend: "unconfigured",
       available: false,
+      capabilities: backend.capabilities,
       reason: "No backend in this test."
     });
     await expect(backend.navigate({ url: "https://example.com" })).rejects.toThrow("No backend in this test.");
@@ -251,6 +287,7 @@ describe("browser backend baselines", () => {
     expect(missing.status()).toEqual({
       backend: "unconfigured",
       available: false,
+      capabilities: missing.capabilities,
       reason: "No browser backend is configured."
     });
     await expect(missing.navigate({ url: "https://example.com" })).rejects.toThrow("No browser backend is configured");
@@ -267,6 +304,7 @@ describe("browser backend baselines", () => {
     expect(configured.status()).toEqual({
       backend: "unconfigured",
       available: false,
+      capabilities: configured.capabilities,
       reason: "No browser backend is configured."
     });
   });
@@ -280,6 +318,7 @@ describe("browser backend baselines", () => {
     await expect(backend.status()).resolves.toEqual({
       backend: "firecrawl",
       available: false,
+      capabilities: backend.capabilities,
       reason: "Unknown browser provider: unknown-cloud."
     });
   });
@@ -331,6 +370,7 @@ describe("browser backend baselines", () => {
     await expect(backend.status()).resolves.toEqual({
       backend: "local-cdp",
       available: true,
+      capabilities: backend.capabilities,
       endpoint: "http://127.0.0.1:9222",
       browser: "Chrome/125.0.0.0",
       version: "1.3"
@@ -352,6 +392,7 @@ describe("browser backend baselines", () => {
     await expect(backend.status()).resolves.toEqual({
       backend: "local-cdp",
       available: false,
+      capabilities: backend.capabilities,
       endpoint: "http://127.0.0.1:9222",
       reason: "CDP endpoint returned 503 Service Unavailable"
     });
@@ -374,6 +415,7 @@ describe("browser backend baselines", () => {
     await expect(backend.status()).resolves.toEqual({
       backend: "local-cdp",
       available: false,
+      capabilities: backend.capabilities,
       reason: "CDP URL is not configured."
     });
     await expect(backend.navigate({ url: "https://example.com" })).rejects.toThrow("CDP URL is not configured.");
@@ -518,6 +560,33 @@ describe("browser backend baselines", () => {
 
     expect(cloud.snapshots).toEqual([{ sessionId: "browser-key" }]);
     expect(local.clicks).toEqual([{ sessionId: "browser-key::local", ref: "@e1" }]);
+  });
+
+  it("routes tab listing and switching through the owning hybrid sub-session", async () => {
+    const cloud = createFakeHybridBackend({ kind: "browserbase" });
+    const local = createFakeHybridBackend({ kind: "local-cdp" });
+    const backend = createHybridBrowserBackend({
+      cloudBackend: cloud,
+      localBackend: local,
+      allowPrivateUrls: true,
+      hybridRouting: true,
+      resolveHostname: hybridResolve
+    });
+    await backend.navigate({ url: "http://192.168.1.1", sessionId: "browser-key" });
+
+    await expect(backend.tabs?.({ sessionId: "browser-key" })).resolves.toMatchObject({
+      sessionId: "browser-key",
+      tabs: [{ ref: "@t1", controlled: true }]
+    });
+    await expect(backend.switchTab?.({ sessionId: "browser-key", tabRef: "@t1" })).resolves.toMatchObject({
+      tab: { ref: "@t1", controlled: true },
+      snapshot: { sessionId: "browser-key" }
+    });
+
+    expect(local.tabLists).toEqual([{ sessionId: "browser-key::local" }]);
+    expect(local.tabSwitches).toEqual([{ sessionId: "browser-key::local", tabRef: "@t1" }]);
+    expect(cloud.tabLists).toEqual([]);
+    expect(cloud.tabSwitches).toEqual([]);
   });
 
   it("keeps public and local sub-sessions for the same browser key able to coexist and cleans up both", async () => {

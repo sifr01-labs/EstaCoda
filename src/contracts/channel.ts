@@ -113,6 +113,8 @@ export type ChannelStreamingTextResult = {
   fallbackRequired: boolean;
   deliveredText?: string;
   fallbackText?: string;
+  /** Opaque platform message IDs that contain the final visible answer. */
+  messageIds?: string[];
 };
 
 export type ChannelStreamingTextHandle = {
@@ -159,8 +161,17 @@ export type ArtifactDeliveryOutcome =
       errorMessage?: string;
     };
 
+export type ChannelTextDeliveryReceipt = {
+  /** Opaque platform message IDs created or finalized by this delivery. */
+  messageIds: string[];
+};
+
 export type ChannelDelivery = {
-  sendText(sessionKey: ChannelSessionKey, text: string, options?: ChannelTextOptions): Promise<void>;
+  sendText(
+    sessionKey: ChannelSessionKey,
+    text: string,
+    options?: ChannelTextOptions
+  ): Promise<ChannelTextDeliveryReceipt | void>;
   sendProgress?(sessionKey: ChannelSessionKey, event: RuntimeEvent): Promise<void>;
   sendArtifact?(sessionKey: ChannelSessionKey, artifact: ArtifactRecord): Promise<ArtifactDeliveryOutcome>;
   startStreamingText?(sessionKey: ChannelSessionKey, options?: ChannelStreamingTextOptions): ChannelStreamingTextHandle;
@@ -228,6 +239,12 @@ export type ChannelAdapter = {
   leaveVoiceChannelForMessage?(message: ChannelMessage): Promise<ChannelVoiceCommandResult>;
   /** Poll for inbound messages. Present on polling adapters (Telegram, Email). */
   pollOnce?(): Promise<number>;
+  /** Best-effort deletion of one inbound platform message. Authorization stays in ChannelGateway. */
+  deleteInboundMessage?(message: ChannelMessage): Promise<boolean>;
+  /** Best-effort channel-native indicator for an admitted inbound turn. */
+  setInboundProcessingIndicator?(message: ChannelMessage, active: boolean): Promise<boolean>;
+  /** Temporarily let a polling adapter receive the next protected-input message while a turn is waiting. */
+  beginSecureInputIntake?(): () => void;
 };
 
 export type TelegramAuthPolicy = {

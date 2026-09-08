@@ -20,6 +20,7 @@ import { sanitizeHookError } from "../gateway/hook-registry.js";
 import { buildAdapterCapability } from "./adapter-capability.js";
 import { renderChannelProgressLabel, type ActivityLabelLocale } from "./activity-labels.js";
 import { formatTelegramReply } from "./telegram-format.js";
+import { telegramAttributionMessageIds } from "./telegram-message-attribution.js";
 import {
   createTelegramStreamTextSanitizer,
   escapeTelegramPartialHtml,
@@ -31,6 +32,7 @@ export type TelegramFetch = (url: string, init?: {
   method?: string;
   headers?: Record<string, string>;
   body?: string;
+  signal?: AbortSignal;
 }) => Promise<{
   ok: boolean;
   status: number;
@@ -155,6 +157,9 @@ type TelegramMessage = {
   video?: TelegramFile;
   audio?: TelegramFile;
   voice?: TelegramFile;
+  reply_to_message?: {
+    message_id: number;
+  };
 };
 
 type TelegramFile = {
@@ -173,6 +178,9 @@ type TelegramDeliveryAddress = {
   chatId: string;
   messageThreadId?: number;
 };
+
+const TELEGRAM_PROCESSING_REACTION = "👨‍💻";
+const TELEGRAM_PROCESSING_REACTION_TIMEOUT_MS = 1_500;
 
 type ProgressEntry = {
   text: string;
@@ -320,6 +328,8 @@ export class TelegramAdapter implements ChannelAdapter {
   #running = false;
   readonly #progressBySession = new Map<string, TelegramProgressState>();
   readonly #mediaGroupBuffers = new Map<string, TelegramMediaGroupBuffer>();
+  readonly #secureInputPollReleases = new Set<() => void>();
+  #secureInputIntakeCount = 0;
 
   readonly delivery = {
     sendText: async (sessionKey: ChannelSessionKey, text: string, options?: ChannelTextOptions) => {
@@ -335,19 +345,22 @@ export class TelegramAdapter implements ChannelAdapter {
             ...options,
             format: formatted.format
           });
-          return;
+          return { messageIds: [String(editMessageId)] };
         } catch {
           // Stale or deleted callback messages should not break delivery; send a fresh card instead.
         }
       }
 
+      const messageIds: string[] = [];
       for (const [index, chunk] of chunks.entries()) {
-        await this.#sendMessage(address, chunk, {
+        const sent = await this.#sendMessage(address, chunk, {
           ...options,
           actions: index === chunks.length - 1 ? options?.actions : undefined,
           format: formatted.format
         });
+        messageIds.push(String(sent.message_id));
       }
+      return { messageIds };
     },
     sendProgress: async (sessionKey: ChannelSessionKey, event: RuntimeEvent) => {
       const address = telegramDeliveryAddress(sessionKey);
@@ -461,6 +474,69 @@ export class TelegramAdapter implements ChannelAdapter {
     await this.#flushMediaGroupBuffers();
   }
 
+  beginSecureInputIntake(): () => void {
+    this.#secureInputIntakeCount += 1;
+    for (const release of [...this.#secureInputPollReleases]) release();
+    let closed = false;
+    return () => {
+      if (closed) return;
+      closed = true;
+      this.#secureInputIntakeCount = Math.max(0, this.#secureInputIntakeCount - 1);
+    };
+  }
+
+  async deleteInboundMessage(message: ChannelMessage): Promise<boolean> {
+    if (message.channel !== "telegram") return false;
+    const messageId = telegramMessageId(message);
+    if (
+      messageId === undefined ||
+      !Number.isSafeInteger(messageId) ||
+      messageId <= 0 ||
+      message.sessionKey.chatId.length === 0
+    ) return false;
+    await this.#deleteMessage(message.sessionKey.chatId, messageId);
+    return true;
+  }
+
+  async setInboundProcessingIndicator(message: ChannelMessage, active: boolean): Promise<boolean> {
+    if (
+      message.channel !== "telegram" ||
+      message.sessionKey.platform !== "telegram" ||
+      message.sessionKey.chatId.length === 0
+    ) return false;
+    const telegramMetadata = message.metadata?.telegram;
+    if (
+      telegramMetadata !== null &&
+      typeof telegramMetadata === "object" &&
+      !Array.isArray(telegramMetadata) &&
+      typeof (telegramMetadata as { callbackQueryId?: unknown }).callbackQueryId === "string"
+    ) return false;
+
+    const rawMessageId = telegramAttributionMessageIds(message).at(-1);
+    const messageId = rawMessageId === undefined ? undefined : Number(rawMessageId);
+    if (messageId === undefined || !Number.isSafeInteger(messageId) || messageId <= 0) {
+      return false;
+    }
+
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), TELEGRAM_PROCESSING_REACTION_TIMEOUT_MS);
+    try {
+      const updated = await this.#call<boolean>("setMessageReaction", {
+        chat_id: message.sessionKey.chatId,
+        message_id: messageId,
+        reaction: active
+          ? [{ type: "emoji", emoji: TELEGRAM_PROCESSING_REACTION }]
+          : [],
+        is_big: false
+      }, { signal: controller.signal });
+      return updated === true;
+    } catch {
+      return false;
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+
   async pollOnce(): Promise<number> {
     if (this.#handler === undefined) {
       throw new Error("TelegramAdapter must be started before polling");
@@ -488,7 +564,7 @@ export class TelegramAdapter implements ChannelAdapter {
       const buffered = this.#maybeBufferMediaGroup(message);
       if (!buffered) {
         try {
-          await this.#handler(message);
+          await this.#awaitHandlerOrSecureInputIntake(() => this.#handler!(message));
         } finally {
           if (update.callback_query?.id !== undefined) {
             await this.#answerCallbackQuery(update.callback_query.id);
@@ -499,6 +575,30 @@ export class TelegramAdapter implements ChannelAdapter {
     }
 
     return count;
+  }
+
+  async #awaitHandlerOrSecureInputIntake(handle: () => Promise<void>): Promise<void> {
+    if (this.#secureInputIntakeCount > 0) {
+      void handle().catch(() => undefined);
+      return;
+    }
+    let release = (): void => {};
+    const intakeStarted = new Promise<void>((resolve) => {
+      release = resolve;
+    });
+    this.#secureInputPollReleases.add(release);
+    try {
+      const handled = handle();
+      const outcome = await Promise.race([
+        handled.then(() => "handled" as const),
+        intakeStarted.then(() => "intake" as const)
+      ]);
+      if (outcome === "intake") {
+        void handled.catch(() => undefined);
+      }
+    } finally {
+      this.#secureInputPollReleases.delete(release);
+    }
   }
 
   #maybeBufferMediaGroup(message: ChannelMessage): boolean {
@@ -1267,13 +1367,18 @@ export class TelegramAdapter implements ChannelAdapter {
     }
   }
 
-  async #call<T>(method: string, body: Record<string, unknown>): Promise<T> {
+  async #call<T>(
+    method: string,
+    body: Record<string, unknown>,
+    options: { signal?: AbortSignal } = {}
+  ): Promise<T> {
     const response = await this.#fetch(`https://api.telegram.org/bot${this.#botToken}/${method}`, {
       method: "POST",
       headers: {
         "content-type": "application/json"
       },
-      body: JSON.stringify(body)
+      body: JSON.stringify(body),
+      signal: options.signal
     });
     const payload = await response.json() as TelegramApiResponse<T>;
 
@@ -1517,7 +1622,8 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
         await this.#input.editMessageText(segment.messageId, firstChunk, { format: formatted.format });
 
         for (const chunk of remainingChunks) {
-          await this.#input.sendMessage(chunk, { format: formatted.format });
+          const message = await this.#input.sendMessage(chunk, { format: formatted.format });
+          this.#recordPreviewMessage(message.message_id);
         }
 
         this.#clearTimers();
@@ -1525,7 +1631,8 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
         return {
           delivered: true,
           fallbackRequired: false,
-          deliveredText: finalText
+          deliveredText: finalText,
+          messageIds: [...this.#previewMessageIds].map(String)
         };
       } catch (error) {
         this.#captureError(error);
@@ -1831,15 +1938,17 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
   }
 
   async #finishWithFreshFinal(finalText: string): Promise<ChannelStreamingTextResult> {
+    const messageIds: string[] = [];
     try {
       const richMessage = await this.#input.trySendRich?.(finalText);
       if (richMessage !== undefined) {
-        await this.#deleteResponsePreviewMessages();
+        const retainedPreviewIds = await this.#deleteResponsePreviewMessages();
         this.#clearTimers();
         return {
           delivered: true,
           fallbackRequired: false,
-          deliveredText: finalText
+          deliveredText: finalText,
+          messageIds: [String(richMessage.message_id), ...retainedPreviewIds.map(String)]
         };
       }
 
@@ -1851,23 +1960,26 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
       }
 
       for (const chunk of chunks) {
-        await this.#input.sendMessage(chunk, { format: formatted.format });
+        const message = await this.#input.sendMessage(chunk, { format: formatted.format });
+        messageIds.push(String(message.message_id));
       }
 
-      await this.#deleteResponsePreviewMessages();
+      const retainedPreviewIds = await this.#deleteResponsePreviewMessages();
       this.#clearTimers();
       return {
         delivered: true,
         fallbackRequired: false,
-        deliveredText: finalText
+        deliveredText: finalText,
+        messageIds: [...messageIds, ...retainedPreviewIds.map(String)]
       };
     } catch (error) {
       this.#captureError(error);
-      return this.#fallbackResult(finalText);
+      return this.#fallbackResult(finalText, messageIds);
     }
   }
 
   async #finishDraft(finalText: string): Promise<ChannelStreamingTextResult> {
+    const messageIds: string[] = [];
     try {
       const formatted = this.#input.formatFinalText(finalText);
       const chunks = formatted.chunks.flatMap((chunk) => splitStreamingTelegramText(chunk, TELEGRAM_MAX_TEXT_UTF16));
@@ -1877,19 +1989,21 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
       }
 
       for (const chunk of chunks) {
-        await this.#input.sendMessage(chunk, { format: formatted.format });
+        const message = await this.#input.sendMessage(chunk, { format: formatted.format });
+        messageIds.push(String(message.message_id));
       }
 
-      await this.#deleteResponsePreviewMessages();
+      const retainedPreviewIds = await this.#deleteResponsePreviewMessages();
       this.#clearTimers();
       return {
         delivered: true,
         fallbackRequired: false,
-        deliveredText: finalText
+        deliveredText: finalText,
+        messageIds: [...messageIds, ...retainedPreviewIds.map(String)]
       };
     } catch (error) {
       this.#captureError(error);
-      return this.#fallbackResult(finalText);
+      return this.#fallbackResult(finalText, messageIds);
     }
   }
 
@@ -1969,18 +2083,21 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
     segment.deliveredVisibleText = "";
   }
 
-  async #deleteResponsePreviewMessages(): Promise<void> {
+  async #deleteResponsePreviewMessages(): Promise<number[]> {
     const messageIds = Array.from(this.#previewMessageIds);
+    const retainedMessageIds: number[] = [];
 
     for (const messageId of messageIds) {
       try {
         await this.#input.deleteMessage(messageId);
       } catch (error) {
         this.#captureError(error);
+        retainedMessageIds.push(messageId);
       } finally {
         this.#previewMessageIds.delete(messageId);
       }
     }
+    return retainedMessageIds;
   }
 
   #segmentPreviewMessageIds(segment: TelegramStreamingTextSegment): number[] {
@@ -2017,11 +2134,16 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
     return continuation.length === 0 ? {} : { fallbackText: continuation };
   }
 
-  #fallbackResult(finalText: string): ChannelStreamingTextResult {
+  #fallbackResult(finalText: string, additionalMessageIds: readonly string[] = []): ChannelStreamingTextResult {
+    const messageIds = [...new Set([
+      ...Array.from(this.#previewMessageIds, String),
+      ...additionalMessageIds
+    ])];
     return {
       delivered: false,
       fallbackRequired: true,
-      ...this.#fallbackTextPayload(finalText)
+      ...this.#fallbackTextPayload(finalText),
+      ...(messageIds.length === 0 ? {} : { messageIds })
     };
   }
 
@@ -2272,6 +2394,7 @@ export function updateToChannelMessage(update: TelegramUpdate, now: () => Date =
   const chatId = String(message.chat.id);
   const senderId = String(message.from?.id ?? message.chat.id);
   const displayName = [message.from?.first_name, message.from?.last_name].filter(Boolean).join(" ");
+  const replyToMessageId = validTelegramMessageId(message.reply_to_message?.message_id);
 
   return {
     id: `telegram-${update.update_id}-${message.message_id}`,
@@ -2297,10 +2420,16 @@ export function updateToChannelMessage(update: TelegramUpdate, now: () => Date =
         updateId: update.update_id,
         messageId: message.message_id,
         chatType: message.chat.type,
+        ...(replyToMessageId === undefined ? {} : { replyToMessageId }),
+        ...(update.edited_message === undefined ? {} : { edited: true }),
         ...(message.media_group_id === undefined ? {} : { mediaGroupId: message.media_group_id })
       }
     }
   };
+}
+
+function validTelegramMessageId(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0 ? value : undefined;
 }
 
 function callbackQueryToChannelMessage(update: TelegramUpdate, now: () => Date): ChannelMessage | undefined {
@@ -2774,6 +2903,7 @@ async function fetchJson(url: string, init?: {
   method?: string;
   headers?: Record<string, string>;
   body?: string;
+  signal?: AbortSignal;
 }) {
   return fetch(url, init as RequestInit);
 }

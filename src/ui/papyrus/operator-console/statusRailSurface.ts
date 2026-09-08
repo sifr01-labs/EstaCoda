@@ -145,8 +145,13 @@ export function resolveContextPercent(state: StatusRailState): number {
 
 export function formatSessionTimer(elapsedMs: number): string {
   const totalSeconds = Math.max(0, Math.floor(elapsedMs / 1000));
-  const minutes = Math.floor(totalSeconds / 60);
   const seconds = totalSeconds % 60;
+  if (totalSeconds >= 60 * 60) {
+    const hours = Math.floor(totalSeconds / (60 * 60));
+    const minutes = Math.floor((totalSeconds % (60 * 60)) / 60);
+    return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+  }
+  const minutes = Math.floor(totalSeconds / 60);
   return `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 }
 

@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { stringWidth } from "../screen/stringWidth.js";
+import { isolateTechnicalTokens, PDI, RLI } from "../../bidi.js";
 import {
   createSubmittedSteerTranscriptBlock,
   getQueuedSteerSurfaceDesiredHeight,
@@ -31,6 +32,26 @@ describe("Papyrus operator console steer surface", () => {
 
     expect(metrics.cursorRow).toBe(0);
     expect(metrics.cursorColumn).toBe(16);
+  });
+
+  it("uses the shared bidi layout for mixed Arabic steer drafts", () => {
+    const value = "هلا RSI";
+    const output = renderSteerInputSurface(steerDraft(value), { width: 24, height: 3 });
+    const metrics = getSteerInputSurfaceMetrics(steerDraft(value), { width: 24, height: 3 });
+
+    expect(output[1]).toContain(`› ${" ".repeat(11)}${RLI}${isolateTechnicalTokens(value)}${PDI}`);
+    expect(metrics.cursorRow).toBe(0);
+    expect(metrics.cursorColumn).toBe(18);
+  });
+
+  it("places the cursor on the next row at an RTL soft-wrap boundary", () => {
+    const metrics = getSteerInputSurfaceMetrics(steerDraft("مرحبا عالم", 6), {
+      width: 12,
+      height: 4,
+    });
+
+    expect(metrics.logicalRows).toBe(2);
+    expect(metrics.cursorRow).toBe(1);
   });
 
   it("renders queued steer text and safe-boundary cancellation copy", () => {
@@ -188,10 +209,10 @@ describe("Papyrus operator console steer surface", () => {
   });
 });
 
-function steerDraft(draft: string): SteerState {
+function steerDraft(draft: string, cursorOffset = draft.length): SteerState {
   return {
     draft,
-    cursorOffset: draft.length,
+    cursorOffset,
     mode: "drafting",
   };
 }

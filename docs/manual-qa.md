@@ -138,15 +138,15 @@ terminal lifecycle cleanup.
 | Delegated batch | `estacoda` then request a batch of at least three read-only subtasks | `delegate_task` returns one queued durable Task handle with three worker Steps and the default terminal synthesis Step without holding the turn open. Task/background status—not nested child rows in the creating turn—reports subsequent execution. |
 | Delegation settlement | Run a batch containing one fast Step and one Step configured to time out or fail | The creating turn remains settled after returning the Task handle. Task status and results show the precise completed, failed, waiting, cancelled, or timed-out Step outcomes and the derived Task terminal state. |
 | Delegation fallback | Run the same prompt through one-shot mode and a non-TTY/plain session | Output contains the bounded queued Task handle only. It contains no worker tool/provider lines, prompts, arguments, paths, provider/model identifiers, cancellation reasons, or worker session IDs. |
-| Subagent card counts | Run delegated batches containing 1, 3, 4, 6, and 7 worker Steps; resize between narrow, medium, and wide widths | Every full Subagent card remains exactly seven rows. One to three stack; four to six use two readable columns; seven uses a third column only when readable and otherwise shows `+N more Subagents`. Cards have grey tokenized fill, whitespace gutters, and no permanent perimeter border. |
-| Subagent card content | Observe one running Subagent and one completed Subagent whose Result contains both a deliberate `displaySummary` and malformed legacy `summary`; repeat with a legacy Result that has only `summary`, then open each in inspection | The running card shows semantic safe activity rather than `Worker finished`, Step-state, Attempt, usage, or result-recording audit events. The completed card and inspection prefer the bounded deliberate summary and never show malformed legacy metadata or a streaming tail. A legacy Result uses the safe first-paragraph extractor. The truthful footer and retained safe trace remain available. |
+| Subagent row counts | Run delegated batches containing 1, 3, 4, 6, and 7 worker Steps; resize between narrow, medium, and wide widths | The command center uses one readable worker column when narrow and at most two column-major columns when wide. Stage and ribbon truth remain visible when height is constrained; only complete rows render, followed by a factual `+N more Subagents` summary when needed. |
+| Subagent row content | Observe one running Subagent and one completed Subagent whose Result contains both a deliberate `displaySummary` and malformed legacy `summary`; repeat with a legacy Result that has only `summary`, then open each in inspection | The compact row shows semantic current activity and truthful outcome rather than audit bookkeeping. Inspection prefers the bounded deliberate summary and never labels a malformed streaming tail as the settled result. A legacy Result uses the safe first-paragraph extractor, and a Result without summary metadata provides an explicit full-result inspection prompt. |
 | Task display identity | Create a Task with a generated `task_<uuid>` ID, inspect the main header, then open the Task | The main header shows `task_` plus eight UUID characters. Inspection shows the complete durable ID. Keyboard and Mouse Mode still open the exact Task because display shortening never changes routing state. |
-| Parent synthesis stage | Run three delegated workers through settlement and allow their synthesis Step to become ready/running; then let synthesis settle | Full worker cards collapse only while synthesis is active. A distinct parent panel shows the factual Subagent-result count, current safe synthesis activity, synthesis-only semantic trace, elapsed/tokens/cost footer, and waiting state when applicable. Each compact Subagent row still opens its exact detail view, the parent panel opens whole-Task inspection, and full cards return after synthesis settles. |
+| Lifecycle command center | Run three delegated workers from initial dispatch through settlement, synthesis, and delivery | One command center remains stable throughout live delegation and synthesis. Its tracker advances from Subagents to Synthesis, degraded worker outcomes remain attached to the Subagents stage, and the ribbon changes scope without implying percentage progress. Each compact worker row opens its exact detail view and the Task header opens whole-Task inspection. On settlement the Task becomes a one-row receipt and the permanent completion ribbon appears above the delivered answer. |
 | Truthful Task phase | Observe a three-worker Task while workers run, after all workers complete, and while synthesis runs; repeat in plain/non-TTY mode | Papyrus changes the live phase from `delegating` to `synthesizing` and shows `3 of 3 delegated Steps completed` without changing the durable lifecycle or inventing a percentage. It does not leave a stale one-time `running` notice above the live card. Plain/non-TTY output prints the derived phase and worker settlement once as a bounded snapshot. |
 | Default batch synthesis | Ask the model to delegate three parallel research Steps without explicitly supplying a synthesis object; repeat with `synthesis: false` | The ordinary batch persists four Steps: three workers and one terminal synthesis Step. After workers complete, synthesis runs and its accepted Result is delivered once to the creator session. The explicit inspection-only batch persists only its three workers and creates no local final-answer delivery binding. |
 | Unified delegated answer delivery | Run one default single-Subagent Task and one synthesized multi-Subagent Task; repeat the single Task with `synthesis: false`, then settle a bound Task without an accepted answer | Each successful default Task appends exactly one ordinary assistant message to the authorized creator or verified compaction descendant, including after restart. The explicit inspection-only Task creates no local binding. The no-answer binding settles once as `terminal-answer-unavailable`, emits no diagnostic body, and does not churn the outbox. |
 | Partial batch synthesis | Run a batch where one worker publishes an accepted Result and another fails; repeat with every worker failing or producing diagnostic-only output | Synthesis waits until every worker settles, runs from accepted evidence in the mixed-success case, identifies incomplete coverage in its context/final answer, and leaves the Task lifecycle `partial`. Diagnostic output is never offered as evidence. With no accepted worker Result, synthesis is skipped and no unsupported primary Result is created. |
-| Synthesized session answer | Start a delegated Task with synthesis, type but do not submit a new prompt while synthesis settles, then restart through a transcript-preserving compaction lineage | The accepted synthesis Result appears as a normal assistant message, the draft remains exactly intact, and exactly one durable message becomes part of the active session transcript. Worker Results remain inspection-only. Recovery may re-display an answer whose prior terminal write was not acknowledged, but never appends a duplicate transcript message; an unrelated session cannot receive it. |
+| Synthesized session answer | Start a delegated Task with synthesis, type but do not submit a new prompt while synthesis settles, then restart through a transcript-preserving compaction lineage; repeat in plain mode at a narrow width | The accepted synthesis Result appears as a normal assistant message with its compact final trace ribbon directly above it, the draft remains exactly intact, and exactly one durable message becomes part of the active session transcript. The ribbon uses the real output width and retains degraded worker counts; worker Results remain inspection-only. Recovery may re-display an answer whose prior terminal write was not acknowledged, but never appends a duplicate transcript message; an unrelated session cannot receive it. |
 | Task inspection | Focus the Task header with `Tab`/arrows and `Enter`, then press `Ctrl+G` and repeat by clicking it | Both routes open the same whole-Task workspace. It shows factual state, aggregate tokens/cost, Subagents, Steps, dependencies, approvals, blockers, results, and an event trace. It never shows a completion percentage. |
 | Explicit Mouse Mode | Before pressing `Ctrl+G`, select/copy text and scroll terminal history. Then enable Mouse Mode, click a Task target, press `Escape`, enable it again, type/paste, and click outside the Task region | Native terminal mouse behavior works by default. The visible Mouse Mode hint appears only while capture is active. Task hit regions respond while active; `Escape`, typing/pasting, and an outside click release capture. The next `Escape` performs normal Task navigation. |
 | Trace history and live tail | In a running Task, select an earlier activity square with arrows and with Mouse Mode; allow new events to arrive; select `Return to live` | The selected event remains outlined by event ID and new activity does not move it. `Return to live` resumes following the newest event. Category counters remain all-time totals when the visible trace window overflows. Wheel input changes inspection only while Mouse Mode is active and the pointer is inside inspection. |
@@ -156,6 +156,24 @@ terminal lifecycle cleanup.
 | Paste | `estacoda` then paste single-line and multiline text | Small single-line paste remains inline. Multiline/large paste uses the existing compact paste reference behavior and submits the original pasted content. |
 | Resize | `estacoda` then resize narrower and wider while idle, during slash autocomplete, and during active-turn chrome | Prompt rows, slash menu rows, and Operator Console regions reflow without full-screen clear, scrollback clear, or overlapping text. Focused slash rows remain visible. |
 | Cancel/EOF | `estacoda`, then press `Ctrl-C`; relaunch and press `Ctrl-D` on an empty prompt | `Ctrl-C` cancels/cleans up the raw prompt. `Ctrl-D` exits cleanly from an empty prompt. Terminal raw mode is restored after each exit path. |
+
+### 2.1.1 Session Continuation Matrix
+
+Run these checks from two disposable workspaces and, where noted, two profiles. Do not inspect or edit real user session state during this QA.
+
+| Scenario | Command | Verify |
+|----------|---------|--------|
+| Fresh-by-default launch | Run `estacoda`, use `/doctor` to record the session ID, exit, then repeat | The two launches use different session IDs. The second launch does not silently restore the first transcript. |
+| Explicit last-session continuation | Start a session with user activity, record its ID, exit, then run both `estacoda --continue` and `estacoda -c` from the same profile and workspace | The prior session ID and transcript are restored. Normal setup and workspace-trust gates still run. |
+| Missing/stale pointer | In a disposable home with no pointer, run `estacoda --continue`; repeat after ending or removing the referenced session | Startup fails closed, suggests `estacoda sessions`, and does not create or guess a continuation. No raw pointer or foreign session metadata is printed. |
+| Top-level picker | Run `estacoda sessions` with at least three eligible sessions | Wide terminals show `#`, Session, Started, Last active, and Via columns. Narrow terminals keep `#` and Session on the main row and show the other fields beneath the focused row. Enter opens the focused session. Escape cancels without changing session state. |
+| Picker compatibility | Repeat the picker in wide, narrow, `NO_COLOR`, no-Unicode, and Arabic terminal configurations | Layout remains readable, token hierarchy degrades cleanly, technical values remain isolated in Arabic, and no ANSI leaks appear in plain/no-color output. |
+| Direct open | Run `estacoda sessions open <session-id>` for an eligible session | The requested session opens without showing the picker and still passes setup/trust/profile/workspace validation. |
+| In-session picker | Run `/sessions` inside an interactive CLI | The same picker appears without the current session. Enter switches runtime and Escape returns to the current session. |
+| Scope enforcement | Try `--continue`, `sessions open`, `/sessions`, and `/switch` with an empty session, another profile, another workspace, an ended session, a child session, and an internal Task session | Every route rejects the target with bounded generic copy and exposes no cross-scope metadata. |
+| Origin preservation | Create a session from Telegram, continue it in CLI, then reopen the picker | `Via Telegram` remains the origin after later CLI activity. Opening or switching does not rewrite the origin. |
+| Attachment preservation | Attach a Telegram chat to a session, open/switch to it from CLI, then inspect `sessions show` and gateway status | The attachment remains intact; CLI continuation does not attach, detach, or authorize a channel. |
+| Pointer file hygiene | Inspect the disposable `~/.estacoda/cli-sessions.json` after launch/switch | It is version 2, mode `0600`, and contains only the versioned entry index plus profile/workspace/session/timestamp fields, with one current entry per profile/workspace pair. |
 
 The renderer/input rollout flags are removed and should no longer activate
 legacy interactive modes:
@@ -177,7 +195,7 @@ ESTACODA_SKILL_SUGGESTIONS=1 estacoda
 
 No Slack suggestion provider is enabled by default.
 
-### 2.1.1 Terminal Recovery
+### 2.1.2 Terminal Recovery
 
 Use these recovery steps if a local terminal is left in an odd state after a
 crash, forced kill, or interrupted manual test:
@@ -339,7 +357,9 @@ Use a tool call that requires a second provider pass after tool execution.
 - Supported routes include selected assistant/tool history as structured native messages.
 - The final continuation instruction remains the last user message.
 - Tool results already selected as native `tool` messages do not appear again in the flat `Executed tool results` block.
-- Non-selected tool results still appear in flat continuation text.
+- Non-selected results from the newest batch appear in flat continuation text; older batches appear only as compact receipts.
+- A 1M-context model still receives at most the fixed approximately 12K-token native-history allowance.
+- Flat continuation feedback stays within approximately 12K characters, and only newest-batch images are resent.
 
 ### Compression Excluding Echo
 
@@ -479,6 +499,18 @@ const output = adapter.render(/* any ViewModel */);
 - `output` contains no ANSI escape codes.
 - `output` contains no emoji.
 - `output` contains no HTML tags.
+
+### 9.2 Telegram Processing Reaction
+
+Run the gateway with a real Telegram bot in a direct message, a group, and a forum topic.
+
+**Verify:**
+- An admitted normal request receives one temporary 👨‍💻 reaction on the latest originating user message.
+- No initial `Thinking` progress message is sent when the reaction succeeds.
+- The reaction is removed after a successful response, a runtime failure, `/stop`, and interrupt replacement.
+- Tool, fallback-model, warning, and approval progress remains visible after the initial reaction.
+- A chat that disallows 👨‍💻 falls back to the localized `Thinking` progress message without failing the turn.
+- Commands, callback queries, unauthorized messages, duplicates, and queued work that has not started do not receive the reaction.
 
 ---
 
@@ -699,12 +731,14 @@ mkdir -p /tmp/estacoda-browser-qa-home
 **Local supervised auto-launch:**
 
 ```bash
-HOME=/tmp/estacoda-browser-qa-home pnpm run dev -- browser setup --backend local-cdp --auto-launch --launch-executable /path/to/chrome --launch-arg --headless=new --chrome-flag --no-first-run
+HOME=/tmp/estacoda-browser-qa-home pnpm run dev -- browser setup --backend local-cdp --auto-launch --headed --launch-executable /path/to/chrome --chrome-flag --no-first-run
 HOME=/tmp/estacoda-browser-qa-home pnpm run dev -- browser status
 ```
 
 **Verify:**
-- Status shows `local-cdp`, supervised mode, auto-launch enabled, launch executable, launch args count, and Chrome flags count.
+- Status shows `local-cdp`, supervised mode, auto-launch enabled, browser window visible, launch executable, launch args count, and Chrome flags count.
+- `--headed` opens an isolated visible Chrome/Chromium window on the first browser action; `--headless` keeps background behavior.
+- Setup planning, status, and verification do not launch a browser in either display mode.
 - Runtime navigation can launch Chrome/Chromium only from the configured structured executable/argument fields.
 - `browser.launchCommand` is not split, guessed, or shell-parsed.
 - Cleanup kills only the Chrome process launched by EstaCoda and removes the temporary user data directory.
@@ -774,10 +808,24 @@ HOME=/tmp/estacoda-qa-ready pnpm run dev -- setup --interactive
 
 **Verify:**
 - `edit-auxiliary-model-route` is available from configured-ready state.
-- The task prompt shows the approved tasks: assessor, compression, session_search, memory_compaction, and profile_context.
+- The task prompt shows assessor, compression, session_search, memory_compaction, and profile_context; Vision Analysis is not listed here.
 - Assessor is explicitly described as approval-assessment in the prompt copy.
 - Review is explicit about which auxiliary task is being configured.
 - Applying sets the correct `auxiliaryModels.<task>` route.
+
+### 10.14.1 Vision Analysis Review And Reliability
+
+From a configured disposable setup, choose `Vision & Images` and then `Vision Analysis`.
+
+**Verify:**
+- The common screen shows Automatic, Choose a vision model, Turn off Vision Analysis, Advanced, and Back.
+- Main-only, dedicated-with-main-fallback, hosted-processing preference, timeout, and concurrency remain reviewable under Advanced; ordinary route changes do not prompt for them. The saved route uses `id`, never `model`.
+- Back unwinds one level at a time from Privacy and performance to Advanced, then to the route screen, then to Vision & Images. Vision processing location is omitted when no local model or loopback endpoint is configured.
+- Turning Vision Analysis off blocks analysis even when the main model supports images and does not change Image Generation & Editing.
+- A ten-image comparison uses one provider request. A twenty-image comparison uses two ordered batches (10 + 10), shows progress for each range, and performs one text-only cross-batch synthesis without resending images. A failed batch reports partial completion without silently skipping the rest; failed synthesis returns all completed batch findings.
+- `local-only` cannot dispatch an image to a hosted route. `allow-with-approval` still asks for unexpected agent-discovered workspace images, while an explicitly referenced current-turn image does not repeatedly prompt in adaptive mode.
+- Cancelling review leaves the existing route and secrets unchanged. After apply, `estacoda verify vision` uses the benign English/Arabic fixture and does not print raw image bytes or secrets. A hosted selected route or possible hosted fallback is not called without `--consent-hosted`; an expiring OAuth credential is not refreshed during this read-only check.
+- `pnpm run eval:vision:fixtures` creates the declared manifest and fixtures. Corrupt and inputs above the 32 MiB source ceiling fail before provider dispatch. `pnpm run eval:vision:live` produces JSON and Markdown release reports; any route chain with a possible hosted destination refuses to run without `--consent-hosted`, and only stored regression thresholds fail the command.
 
 ### 10.15 Review, Cancel, And Raw Secret Safety
 
@@ -844,6 +892,31 @@ fallback prompt selection. Use disposable homes and fake credentials only.
 | Secret no-echo check | Enter a fake API key/token in any setup credential prompt | Typed or pasted secret text does not echo, does not produce paste preview rows, and does not appear in review, logs, output, or final result text. |
 | Back/cancel behavior | Use `Back`, `Cancel`, `Esc`, or `Ctrl-C` in setup/editor prompts | `Back` returns to the previous meaningful structured step where supported. Cancel before apply leaves config, trust, and `.env` unchanged. Terminal state is restored. |
 | Non-TTY summary/plain output | Pipe setup/help output, for example `estacoda setup --help \| cat` or run a non-interactive setup path in CI | Output remains plain and deterministic, with no cursor controls, raw prompt behavior, or Papyrus select cursor movement. |
+
+### 10.18 Mixed-direction editable input matrix
+
+Run this matrix in a real interactive terminal after changing editable text
+layout, prompt/steer rendering, raw redraws, terminal capability resolution, or
+cursor navigation. Use the same Arabic/Latin input in each emulator:
+
+```text
+هلا ممكن تستخدم ٣ subagents وتبحث عن RSI
+```
+
+| Scenario | Verify |
+|----------|--------|
+| Native bidi terminal | Arabic shaping remains connected; `subagents` and `RSI` remain internally LTR; the row is RTL-aligned; neighboring prompt/status chrome does not move. |
+| Windows Terminal or VS Code integrated terminal | Papyrus selects software ordering; the visible cluster order matches native mode without double reversal. |
+| Submit with Enter | The submitted prompt rail preserves the same Arabic/Latin reading order, keeps its marker fixed at the left edge, and does not replace the logical runtime payload with visual-order text. |
+| Paste as an attachment | The attachment card preview preserves the Arabic/Latin reading order in native and software modes, stays inside its borders at narrow widths, and submission retains the original logical text. |
+| Soft wrap before an Arabic word | The caret at the first character after the wrap appears on the next row. Left/Right crosses the wrap once and never becomes stuck. |
+| Explicit newline between two Arabic lines | Left/Right follows logical continuity at the line boundary and never jumps from the start of the first line to the end of the second. |
+| Mixed-direction ghost completion | The completion is visible in both native and software modes, while accepting or submitting still uses only the logical editor buffer. |
+| Pasted leading RLM, ALM, or bidi override | Removed untrusted controls do not affect base direction, alignment, wrapping, or adjacent chrome. |
+
+Record the emulator name/version and whether Papyrus selected native or software
+mode. A new terminal family is not considered supported until its real visual
+output and cursor movement pass this matrix.
 
 The renderer/input rollout flags no longer activate alternate interactive modes:
 

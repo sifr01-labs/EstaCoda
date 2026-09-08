@@ -23,7 +23,7 @@ import {
 } from "./index.js";
 
 describe("durable Task surfaces", () => {
-  it("renders one Subagent as exactly seven borderless grey rows with semantic title and truthful footer", () => {
+  it("renders one Subagent as a compact command-center row with details retained in inspection", () => {
     const tokens = resolveTokens("standard", "dark", "kemetBlue");
     const style = createOperatorConsoleStyle({
       tokens,
@@ -53,23 +53,22 @@ describe("durable Task surfaces", () => {
     });
     const text = stripAnsi(lines.join("\n"));
 
-    expect(lines).toHaveLength(8);
-    expect(lines.slice(1)).toHaveLength(7);
-    expect(text).toContain("Task 1/1");
-    expect(text).toContain("Subagent 1 · Research how modern AI agents improve themselves auto…");
+    expect(lines).toHaveLength(11);
+    expect(text).toContain("Competitor comparison");
+    expect(text).toContain("Plan ✓ ─── Subagents • ─── Synthesis ○ ─── Deliver ○");
+    expect(text).toContain("Research how modern AI agents improve themselves…");
     expect(text).not.toContain("Full research objective retained for detailed inspection");
     expect(subagentInspectionContentLines(card, card.subagents[0]!, 72).join("\n"))
       .toContain("Full research objective retained for detailed inspection");
-    expect(text).toContain("+3 earlier activities");
-    expect(text).toContain("I found the relevant comparison data.");
-    expect(text).toContain("running · 03:18 · 100 tokens · $0.0060");
+    expect(text).toContain("Activity trace · 0 activities");
+    expect(text).not.toContain("Safe activity 5");
+    expect(text).not.toContain("I found the relevant comparison data.");
     expect(text).not.toMatch(/[╭╮╰╯│]/u);
-    expect(lines.slice(1).every((line) => line.includes("\x1b[48;2;37;37;37m"))).toBe(true);
+    expect(lines.some((line) => line.includes("\x1b[48;2;37;37;37m"))).toBe(true);
+    expect(text).toContain("D detach · P pause · C cancel");
     expect(lines[0]).toContain("\x1b[38;2;64;224;208m");
-    expect(lines[1]).toContain(ansiFg(tokens.contract.palette.accent));
-    expect(lines[1]).toContain(ansiFg(tokens.contract.text.secondary));
-    expect(lines.at(-1)).toContain(ansiFg(tokens.contract.palette.action));
-    expect(lines.at(-1)).toContain(ansiFg(tokens.contract.text.muted));
+    expect(lines.some((line) => line.includes(ansiFg(tokens.contract.palette.accent)))).toBe(true);
+    expect(lines.some((line) => line.includes(ansiFg(tokens.contract.palette.action)))).toBe(true);
     expect(lines.every((line) => visibleWidth(line) <= 72)).toBe(true);
   });
 
@@ -81,7 +80,7 @@ describe("durable Task surfaces", () => {
     const card = makeCard({ subagents: [subagent] });
     const text = renderTaskCardSurface({ cards: [card], scrollOffset: 0 }, { width: 72 }).join("\n");
 
-    expect(text).toContain("Subagent 1 · Research how modern AI agents improve themselves auto…");
+    expect(text).toContain("Research how modern AI agents improve themselves…");
     expect(text).not.toContain("Delegated work 1");
     expect(subagentInspectionContentLines(card, subagent, 72).join("\n"))
       .toContain("Research how modern AI agents improve themselves autonomously using measurable evaluation loops");
@@ -95,7 +94,7 @@ describe("durable Task surfaces", () => {
       { cards: [arabicCard], scrollOffset: 0 },
       { width: 72, locale: "ar" }
     ).join("\n");
-    expect(arabicText).toContain("Subagent 2 · مراجعة النتائج ومقارنة الأدلة وإعداد ملخص واضح");
+    expect(arabicText).toContain("مراجعة النتائج ومقارنة الأدلة وإعداد ملخص واضح");
     expect(arabicText).not.toContain("Delegated work 2");
   });
 
@@ -110,10 +109,9 @@ describe("durable Task surfaces", () => {
       scrollOffset: 0,
     }, { width: 100, height: 8 });
 
-    expect(main[0]).toContain("\u2068task_37c8496f\u2069");
-    expect(main[0]).not.toContain(taskId);
+    expect(main[1]).toContain("Task #task_37c8496f");
+    expect(main.join("\n")).not.toContain(taskId);
     expect(inspection[0]).toContain(`\u2068${taskId}\u2069`);
-    expect(main[0]).toContain("Ctrl+G");
     expect(main[0]).toContain("Competitor comparison");
     expect(main.every((line) => visibleWidth(line) <= 100)).toBe(true);
 
@@ -122,29 +120,28 @@ describe("durable Task surfaces", () => {
       { cards: [makeCard({ taskId: customTaskId })], scrollOffset: 0 },
       { width: 100 },
     );
-    expect(custom[0]).toContain(`\u2068${customTaskId}\u2069`);
+    expect(custom[1]).toContain(customTaskId);
   });
 
-  it("uses column-major 1-3 | 4-6 placement, equal widths, and +N more instead of squeezing", () => {
+  it("uses compact column-major worker rows without squeezing", () => {
     const four = makeCard({ subagents: Array.from({ length: 4 }, (_, index) => makeSubagent(index + 1)) });
     const wide = renderTaskCardSurface({ cards: [four], scrollOffset: 0 }, { width: 100, isTty: true });
 
-    expect(getTaskCardSurfaceDesiredHeight({ cards: [four], scrollOffset: 0 }, 100)).toBe(24);
-    expect(wide).toHaveLength(24);
-    expect(wide[1]).toContain("Subagent 1");
-    expect(wide[1]).toContain("Subagent 4");
-    expect(wide[9]).toContain("Subagent 2");
-    expect(wide[17]).toContain("Subagent 3");
+    expect(getTaskCardSurfaceDesiredHeight({ cards: [four], scrollOffset: 0 }, 100)).toBe(15);
+    expect(wide).toHaveLength(15);
+    expect(wide[11]).toContain("Research Company 1");
+    expect(wide[11]).toContain("Research Company 3");
+    expect(wide[13]).toContain("Research Company 2");
+    expect(wide[13]).toContain("Research Company 4");
     expect(wide.every((line) => visibleWidth(line) === 100)).toBe(true);
 
     const narrow = renderTaskCardSurface({ cards: [four], scrollOffset: 0 }, { width: 72, isTty: true });
     const narrowText = narrow.join("\n");
-    expect(getTaskCardSurfaceDesiredHeight({ cards: [four], scrollOffset: 0 }, 72)).toBe(25);
-    expect(narrowText).toContain("Subagent 1");
-    expect(narrowText).toContain("Subagent 2");
-    expect(narrowText).toContain("Subagent 3");
-    expect(narrowText).not.toContain("Subagent 4 ·");
-    expect(narrowText).toContain("+1 more Subagents");
+    expect(getTaskCardSurfaceDesiredHeight({ cards: [four], scrollOffset: 0 }, 72)).toBe(17);
+    expect(narrowText).toContain("Research Company 1");
+    expect(narrowText).toContain("Research Company 2");
+    expect(narrowText).toContain("Research Company 3");
+    expect(narrowText).toContain("Research Company 4");
   });
 
   it("focuses and opens main-session Subagents directly with the keyboard", () => {
@@ -167,8 +164,9 @@ describe("durable Task surfaces", () => {
       style,
       focusedSubagentStepId: "step-1",
     });
-    expect(stripAnsi(focused[1] ?? "")).toContain("▌");
-    expect(focused[1]).toContain("\x1b[38;2;64;224;208m");
+    const focusedWorker = focused.find((line) => stripAnsi(line).includes("Research Company 1"));
+    expect(stripAnsi(focusedWorker ?? "")).toContain("▌");
+    expect(focusedWorker).toContain("\x1b[38;2;64;224;208m");
 
     state = routeTaskSurfaceKey(state, { type: "key", key: "down" }, 24).state;
     expect(state.focus.target).toEqual({ kind: "taskSubagent", taskId: card.taskId, stepId: "step-2" });
@@ -198,30 +196,29 @@ describe("durable Task surfaces", () => {
       .toContain("Subagent 8");
   });
 
-  it("adds a third column only when seven Subagents remain readable", () => {
+  it("keeps at most two readable compact worker columns", () => {
     const card = makeCard({ subagents: Array.from({ length: 7 }, (_, index) => makeSubagent(index + 1)) });
     const threeColumns = renderTaskCardSurface({ cards: [card], scrollOffset: 0 }, { width: 140, isTty: true });
     const twoColumns = renderTaskCardSurface({ cards: [card], scrollOffset: 0 }, { width: 100, isTty: true });
 
-    expect(threeColumns[1]).toContain("Subagent 1");
-    expect(threeColumns[1]).toContain("Subagent 4");
-    expect(threeColumns[1]).toContain("Subagent 7");
+    expect(threeColumns.join("\n")).toContain("Research Company 1");
+    expect(threeColumns.join("\n")).toContain("Research Company 7");
     expect(threeColumns.join("\n")).not.toContain("more Subagents");
-    expect(twoColumns.join("\n")).toContain("+1 more Subagents");
+    expect(twoColumns.join("\n")).not.toContain("more Subagents");
   });
 
-  it("never clips a visible card below seven rows and uses a compact tiny-terminal fallback", () => {
+  it("prioritizes stage and ribbon truth in height-constrained and tiny terminals", () => {
     const card = makeCard({ subagents: Array.from({ length: 4 }, (_, index) => makeSubagent(index + 1)) });
     const constrained = renderTaskCardSurface({ cards: [card], scrollOffset: 0 }, { width: 100, height: 9 });
     const tiny = renderTaskCardSurface({ cards: [card], scrollOffset: 0 }, { width: 36, height: 5 });
 
     expect(constrained).toHaveLength(9);
-    expect(constrained.join("\n")).toContain("Subagent 1");
-    expect(constrained.join("\n")).toContain("Subagent 2");
-    expect(constrained.join("\n")).toContain("+2 more Subagents");
+    expect(constrained.join("\n")).toContain("Subagents");
+    expect(constrained.join("\n")).toContain("Activity trace");
+    expect(constrained.join("\n")).not.toContain("Research Company");
     expect(tiny).toHaveLength(5);
-    expect(tiny.join("\n")).toContain("Subagent 1 · running");
-    expect(tiny.join("\n")).toContain("Subagent 4 · running");
+    expect(tiny.join("\n")).toContain("Subagents");
+    expect(tiny.join("\n")).not.toContain("Research Company");
     expect(tiny.join("\n")).not.toMatch(/[╭╮╰╯│]/u);
   });
 
@@ -231,8 +228,8 @@ describe("durable Task surfaces", () => {
     const before = renderTaskCardSurface({ cards: [first], scrollOffset: 0 }, { width: 72 }).join("\n");
     const after = renderTaskCardSurface({ cards: [next], scrollOffset: 0 }, { width: 72 }).join("\n");
 
-    expect(before).toContain("Subagent 1");
-    expect(after).toContain("Subagent 1");
+    expect(before).toContain("Research Company 1");
+    expect(after).toContain("Research Company 1");
     expect(before).not.toContain("no earlier activity");
     expect(after).not.toContain("no earlier activity");
     expect(before).toContain("Reading package.json");
@@ -256,8 +253,8 @@ describe("durable Task surfaces", () => {
     const inspection = subagentInspectionContentLines(card, subagent, 72).join("\n");
 
     expect(text).toContain("Comparing trust-boundary mechanisms");
-    expect(text).toContain("Inspecting memory architecture");
-    expect(text).toContain("Writing recommendations");
+    expect(text).not.toContain("Inspecting memory architecture");
+    expect(text).not.toContain("Writing recommendations");
     expect(text).not.toContain("Worker finished");
     expect(text).not.toContain("Step status changed");
     expect(text).not.toContain("Usage recorded");
@@ -300,18 +297,10 @@ describe("durable Task surfaces", () => {
     });
     const styled = renderTaskCardSurface({ cards: [card], scrollOffset: 0 }, { width: 72, style });
 
-    expect(lines).toHaveLength(8);
-    expect(lines.slice(1)).toHaveLength(7);
-    expect(text).toContain("Summary");
-    expect(stripAnsi(lines[2]!)).toContain("> Summary");
-    expect(lines.slice(3, 7).every((line) => stripAnsi(line).trim().length > 0)).toBe(true);
-    expect(styled[2]).toContain("◆");
-    expect(styled[2]).toContain(ansiFg(tokens.contract.palette.action));
-    expect(compactText).toContain("Found that EstaCoda already has strong file and profile boundaries");
-    expect(compactText).toContain("memory writes need explicit provenance and review semantics");
-    expect(compactText).toContain("Produced 7 recommendations.");
-    expect(compactText).toContain("every durable memory write before broad rollout.");
-    expect(compactText).not.toContain("Summary: Found");
+    expect(lines).toHaveLength(11);
+    expect(text).toContain("Report ready");
+    expect(styled.some((line) => line.includes(ansiFg(tokens.contract.severity.ok)))).toBe(true);
+    expect(compactText).not.toContain("Found that EstaCoda already has strong file and profile boundaries");
     expect(text).not.toContain("A shorter provider preview.");
     expect(text).not.toContain("arbitrary legacy slice");
     expect(inspection).toContain("Found that EstaCoda already has strong file and profile boundaries");
@@ -320,7 +309,7 @@ describe("durable Task surfaces", () => {
     expect(overview).not.toContain("arbitrary legacy slice");
     expect(text).not.toContain("Worker finished");
     expect(text).not.toContain("Usage recorded");
-    expect(text).toContain("completed · 03:18");
+    expect(text).not.toContain("completed · 03:18");
   });
 
   it("retains a real history row and uses three summary rows when completed activity was truncated", () => {
@@ -350,10 +339,11 @@ describe("durable Task surfaces", () => {
       { width: 72 }
     );
 
-    expect(lines).toHaveLength(8);
-    expect(stripAnsi(lines[2]!)).toContain("+2 earlier activities");
-    expect(stripAnsi(lines[3]!)).toContain("> Summary");
-    expect(stripAnsi(lines[7]!)).toContain("completed");
+    expect(lines).toHaveLength(11);
+    expect(lines.join("\n")).toContain("Report ready");
+    expect(lines.join("\n")).not.toContain("Reviewed evidence source");
+    expect(subagentInspectionContentLines(makeCard({ subagents: [subagent] }), subagent, 72).join("\n"))
+      .toContain("Reviewed evidence source 5");
   });
 
   it("keeps the completed summary marker and compact spacing deterministic in plain narrow Arabic", () => {
@@ -382,10 +372,11 @@ describe("durable Task surfaces", () => {
     );
     const text = lines.join("\n");
 
-    expect(lines).toHaveLength(8);
-    expect(lines[2]).toContain("> الملخص");
-    expect(text.match(/الملخص/gu)).toHaveLength(1);
-    expect(text).toContain("قارنت الأدلة");
+    expect(lines).toHaveLength(5);
+    expect(text).toContain("الوكلاء الفرعيون");
+    expect(text).not.toContain("قارنت الأدلة");
+    expect(subagentInspectionContentLines(makeCard({ subagents: [subagent] }), subagent, 72, { locale: "ar" }).join("\n"))
+      .toContain("قارنت الأدلة");
     expect(text).not.toMatch(/\u001B\[/u);
     expect(lines.every((line) => visibleWidth(line) === 38)).toBe(true);
   });
@@ -405,10 +396,8 @@ describe("durable Task surfaces", () => {
         summary: "## Summary\n\n**Compared [leading agent harnesses](https://example.com) across extension systems, persistent memory, lifecycle hooks, and trust boundaries.**",
       }],
     });
-    const text = stripAnsi(renderTaskCardSurface(
-      { cards: [makeCard({ subagents: [subagent] })], scrollOffset: 0 },
-      { width: 72 }
-    ).join("\n"));
+    const card = makeCard({ subagents: [subagent] });
+    const text = stripAnsi(subagentInspectionContentLines(card, subagent, 72).join("\n"));
     const compactText = text.replace(/\s+/gu, " ");
 
     expect(compactText).toContain("Compared leading agent harnesses across extension systems");
@@ -433,10 +422,8 @@ describe("durable Task surfaces", () => {
         primary: true,
       }],
     });
-    const text = stripAnsi(renderTaskCardSurface(
-      { cards: [makeCard({ subagents: [subagent] })], scrollOffset: 0 },
-      { width: 72 }
-    ).join("\n"));
+    const card = makeCard({ subagents: [subagent] });
+    const text = stripAnsi(subagentInspectionContentLines(card, subagent, 72).join("\n"));
 
     expect(text).toContain("Open to inspect the full result");
     expect(text).not.toContain("…firmation gates");
@@ -454,17 +441,20 @@ describe("durable Task surfaces", () => {
     const text = lines.join("\n");
     const inspection = taskInspectionContentLines(card, 100).join("\n");
 
-    expect(getTaskCardSurfaceDesiredHeight(state, 100)).toBe(14);
-    expect(lines).toHaveLength(14);
-    expect(text).toContain("Delegated Task 1/1 · ⁨T-104⁩ · synthesizing");
-    expect(text).toContain("3 of 3 delegated Steps completed");
-    expect(text).toContain("Parent synthesis · Synthesize delegated results");
-    expect(text).toContain("Synthesizing 3 Subagent results");
-    expect(text).toContain("Comparing overlapping recommendations");
-    expect(text).toContain("Activity trace · 2 events");
-    expect(text).toContain("Preparing final response");
+    expect(getTaskCardSurfaceDesiredHeight(state, 100)).toBe(17);
+    expect(lines).toHaveLength(17);
+    expect(text).toContain("Competitor comparison");
+    expect(text).toContain("⁨Task #T-104⁩");
+    expect(text).toContain("3 usable reports");
+    expect(text).toContain("Plan ✓ ─── Subagents ✓ ─── Synthesis ● ─── Deliver ○");
+    expect(text).toContain("Synthesis");
+    expect(text).toContain("Activity trace · 3 activities");
+    expect(text).toContain("Write · Synthesis · 12s · Writing current response");
     expect(text).not.toContain("Usage recorded");
-    expect(text.match(/Subagent [123]/gu)).toHaveLength(3);
+    expect(text).not.toContain("Delegated Task");
+    expect(text).not.toContain("Parent synthesis");
+    expect(text).not.toContain("settled");
+    expect(text.match(/Research Company [123]/gu)).toHaveLength(3);
     expect(text).not.toContain("Summary");
     expect(text).not.toContain("Accepted worker summary");
     expect(inspection).toContain("synthesizing");
@@ -472,27 +462,213 @@ describe("durable Task surfaces", () => {
     expect(inspection).toContain("Accepted worker summary 1");
     expect(lines.every((line) => visibleWidth(line) === 100)).toBe(true);
 
-    const targets = getTaskCardHitTargets(state, 100, 14);
-    expect(targets[0]).toMatchObject({ kind: "taskHeader", y: 0, height: 8 });
+    const targets = getTaskCardHitTargets(state, 100, 16);
+    expect(targets[0]).toMatchObject({ kind: "taskHeader", y: 0, height: 10 });
     expect(targets.filter((target) => target.kind === "subagentCard")).toEqual([
-      expect.objectContaining({ stepId: "step-1", y: 9, height: 1 }),
-      expect.objectContaining({ stepId: "step-2", y: 11, height: 1 }),
-      expect.objectContaining({ stepId: "step-3", y: 13, height: 1 }),
+      expect.objectContaining({ stepId: "step-1", y: 11, height: 1 }),
+      expect.objectContaining({ stepId: "step-2", y: 13, height: 1 }),
+      expect.objectContaining({ stepId: "step-3", y: 15, height: 1 }),
     ]);
 
     const styled = renderTaskCardSurface(state, { width: 100, isTty: true, style, motionElapsedMs: 105 });
-    expect(styled[1]).toContain(ansiFg(tokens.contract.palette.brand));
+    expect(styled[0]).toContain(ansiFg(tokens.contract.palette.brand));
     expect(styled[2]).toContain(ansiFg(tokens.contract.palette.action));
-    expect(styled[4]).toContain(ansiFg(tokens.contract.trace.read));
-    expect(styled[4]).toContain(ansiFg(tokens.contract.trace.answer));
-    expect(styled[9]).toContain("\x1b[48;2;37;37;37m");
+    expect(styled[8]).toContain(ansiFg(tokens.contract.trace.read));
+    expect(styled[8]).toContain(ansiFg(tokens.contract.trace.answer));
+    expect(styled[11]).toContain("\x1b[48;2;37;37;37m");
 
     const six = makeSynthesisCard("running", 6);
     const sixLines = renderTaskCardSurface({ cards: [six], scrollOffset: 0 }, { width: 100 });
-    expect(getTaskCardSurfaceDesiredHeight({ cards: [six], scrollOffset: 0 }, 100)).toBe(14);
-    expect(sixLines[9]).toContain("Subagent 1");
-    expect(sixLines[9]).toContain("Subagent 4");
-    expect(sixLines.join("\n")).toContain("Synthesizing 6 Subagent results");
+    expect(getTaskCardSurfaceDesiredHeight({ cards: [six], scrollOffset: 0 }, 100)).toBe(17);
+    expect(sixLines[11]).toContain("Research Company 1");
+    expect(sixLines[11]).toContain("Research Company 4");
+    expect(sixLines.join("\n")).toContain("6 usable reports");
+
+    for (const width of [28, 52, 80, 100, 140]) {
+      const responsive = renderTaskCardSurface(state, { width });
+      expect(responsive).toHaveLength(getTaskCardSurfaceDesiredHeight(state, width));
+      expect(responsive.every((line) => visibleWidth(line) === width)).toBe(true);
+      expect(responsive.join("\n")).not.toContain("░");
+      if (width < 60) expect(responsive.join("\n")).not.toContain("Research Company");
+      if (width >= 60) expect(responsive.join("\n")).toContain("Research Company 1");
+    }
+
+    const lightStyle = createOperatorConsoleStyle({
+      tokens: resolveTokens("standard", "light", "kemetBlue"),
+      capabilities: { supportsColor: true, supportsTrueColor: true },
+    });
+    const noColorStyle = createOperatorConsoleStyle({
+      tokens: resolveTokens("standard", "dark", "kemetBlue"),
+      capabilities: { supportsColor: false, supportsTrueColor: false },
+    });
+    const light = renderTaskCardSurface(state, { width: 100, style: lightStyle });
+    const noColor = renderTaskCardSurface(state, { width: 100, style: noColorStyle }).join("\n");
+    expect(light[11]).toContain("\x1b[48;2;245;245;245m");
+    expect(noColor).not.toMatch(/\u001B\[/u);
+    expect(noColor).toContain("Write · Synthesis");
+  });
+
+  it("keeps degraded synthesis truthful about usable, failed, and recovered worker outcomes", () => {
+    const card = makeSynthesisCard("running");
+    const failed = {
+      ...card.subagents[0]!,
+      status: "failed" as const,
+      outcome: {
+        usable: false,
+        recovered: true,
+        attemptsUsed: 2,
+        maxAttempts: 2,
+        failure: {
+          class: "provider-timeout",
+          retryable: true,
+          uncertainSideEffects: false,
+        },
+      },
+      results: [{
+        id: "result-worker-1-diagnostic",
+        handle: "result://worker-1-diagnostic",
+        kind: "summary",
+        disposition: "diagnostic" as const,
+        status: "available",
+        byteLength: 180,
+        primary: false,
+        stepId: "step-1",
+        displaySummary: "Recovered partial technical review",
+      }],
+    };
+    const degraded: TaskCardState = {
+      ...card,
+      subagents: [failed, ...card.subagents.slice(1)],
+      phase: {
+        name: "synthesizing",
+        workerProgress: {
+          completed: 2,
+          failed: 1,
+          cancelled: 0,
+          settled: 3,
+          usable: 2,
+          recovered: 1,
+          total: 3,
+        },
+      },
+    };
+
+    const english = renderTaskCardSurface(
+      { cards: [degraded], selectedTaskId: degraded.taskId, scrollOffset: 0 },
+      { width: 100 }
+    ).join("\n");
+    const arabic = renderTaskCardSurface(
+      { cards: [degraded], selectedTaskId: degraded.taskId, scrollOffset: 0 },
+      { width: 100, locale: "ar" }
+    ).join("\n");
+    const englishInspection = subagentInspectionContentLines(degraded, failed, 100).join("\n");
+    const arabicInspection = subagentInspectionContentLines(degraded, failed, 100, { locale: "ar" }).join("\n");
+    const warnedReceipt: TaskCardState = {
+      ...degraded,
+      status: "partial",
+      presentation: "receipt",
+      phase: { ...degraded.phase, name: "partial" },
+    };
+    const englishReceipt = renderTaskCardSurface(
+      { cards: [warnedReceipt], selectedTaskId: warnedReceipt.taskId, scrollOffset: 0 },
+      { width: 100 }
+    ).join("\n");
+    const arabicReceipt = renderTaskCardSurface(
+      { cards: [warnedReceipt], selectedTaskId: warnedReceipt.taskId, scrollOffset: 0 },
+      { width: 100, locale: "ar" }
+    ).join("\n");
+
+    expect(english).toContain("2 usable reports · 1 failed");
+    expect(english).toContain("Subagents ⚠");
+    expect(english).toContain("Provider timeout · Partial saved");
+    expect(englishInspection).toContain("Recovered output is available for inspection and was not accepted for synthesis.");
+    expect(englishReceipt).toContain("completed with warnings");
+    expect(stripBidi(arabic)).toContain("نتائج صالحة: 2 · فشل: 1");
+    expect(arabic).toContain("التجميع");
+    expect(arabic).toContain("حُفظت نتيجة جزئية");
+    expect(arabicInspection).toContain("تتوفر مخرجات مستردة للفحص ولم تُقبل للاستخدام في التجميع.");
+    expect(arabicReceipt).toContain("اكتملت مع تحذيرات");
+  });
+
+  it("enters trace mode explicitly and keeps historical span selection stable across refresh", () => {
+    const card = makeSynthesisCard("running");
+    let state = createInitialOperatorConsoleState({
+      terminal: { width: 100, height: 30, isTty: true },
+      tasks: { cards: [card], selectedTaskId: card.taskId, scrollOffset: 0 },
+    });
+    state = routeTaskSurfaceKey(state, { type: "key", key: "tab" }).state;
+
+    const beforeTrace = routeTaskSurfaceKey(state, { type: "key", key: "left" });
+    expect(beforeTrace.handled).toBe(false);
+    expect(beforeTrace.state.tasks.traceMode).toBeUndefined();
+
+    state = routeTaskSurfaceKey(state, { type: "text", text: "t" }).state;
+    expect(state.tasks.traceMode).toEqual({ taskId: card.taskId, followLive: true });
+    state = routeTaskSurfaceKey(state, { type: "key", key: "left" }).state;
+    expect(state.tasks.traceMode).toEqual({
+      taskId: card.taskId,
+      followLive: false,
+      selectedSpanId: "span-synthesis-read",
+    });
+
+    const appended = {
+      ...card,
+      trace: {
+        ...card.trace,
+        spans: [...card.trace.spans, {
+          ...card.trace.spans.at(-1)!,
+          id: "span-synthesis-validate",
+          category: "validate" as const,
+          label: "Checking citations",
+        }],
+      },
+    };
+    state = { ...state, tasks: reconcileTaskSurfaceState(state.tasks, [appended]) };
+    expect(state.tasks.traceMode?.selectedSpanId).toBe("span-synthesis-read");
+    expect(renderTaskCardSurface(state.tasks, { width: 100 }).join("\n"))
+      .toContain("Read · Synthesis · 9s · Loading usable reports");
+
+    state = routeTaskSurfaceKey(state, { type: "key", key: "enter" }).state;
+    expect(state.tasks.inspection).toMatchObject({
+      followLive: false,
+      selectedTraceSpanId: "span-synthesis-read",
+    });
+    state = routeTaskSurfaceKey(state, { type: "key", key: "escape" }).state;
+    state = routeTaskSurfaceKey(state, { type: "key", key: "end" }).state;
+    expect(state.tasks.traceMode).toEqual({ taskId: card.taskId, followLive: true });
+    state = routeTaskSurfaceKey(state, { type: "key", key: "escape" }).state;
+    expect(state.tasks.traceMode).toBeUndefined();
+  });
+
+  it("emits only state-valid Task intents and confirms cancellation", () => {
+    const card = makeSynthesisCard("running");
+    let state = createInitialOperatorConsoleState({
+      terminal: { width: 100, height: 30, isTty: true },
+      tasks: { cards: [card], selectedTaskId: card.taskId, scrollOffset: 0 },
+    });
+    state = routeTaskSurfaceKey(state, { type: "key", key: "tab" }).state;
+
+    const pause = routeTaskSurfaceKey(state, { type: "text", text: "p" });
+    expect(pause.intent).toEqual({ type: "pauseTask", taskId: card.taskId });
+    const pending = routeTaskSurfaceKey(state, { type: "text", text: "c" });
+    expect(pending.intent).toBeUndefined();
+    expect(pending.state.tasks.pendingControl).toEqual({ kind: "cancel", taskId: card.taskId });
+    expect(renderTaskCardSurface(pending.state.tasks, { width: 100 }).join("\n"))
+      .toContain("Cancel Task? · Enter confirm · Esc keep running");
+    const cancelled = routeTaskSurfaceKey(pending.state, { type: "key", key: "enter" });
+    expect(cancelled.intent).toEqual({ type: "cancelTask", taskId: card.taskId });
+    expect(cancelled.state.tasks.pendingControl).toBeUndefined();
+
+    const detached = routeTaskSurfaceKey(state, { type: "text", text: "d" });
+    expect(detached.intent).toEqual({ type: "detachTask", taskId: card.taskId });
+    expect(detached.state.focus.target).toEqual({ kind: "prompt" });
+
+    const completed = { ...card, status: "completed" as const, phase: { ...card.phase, name: "completed" as const } };
+    const completedText = renderTaskCardSurface({ cards: [completed], scrollOffset: 0 }, { width: 100 }).join("\n");
+    expect(completedText).toContain("T trace");
+    expect(completedText).not.toContain("D detach");
+    expect(completedText).not.toContain("P pause");
+    expect(completedText).not.toContain("C cancel");
   });
 
   it("keeps semantic motion scoped to the visible running worker or synthesis card", () => {
@@ -511,22 +687,22 @@ describe("durable Task surfaces", () => {
     })).toBe(false);
   });
 
-  it("collapses workers only while synthesis is active and keeps constrained output truthful", () => {
+  it("keeps the compact command center across delegation and synthesis", () => {
     const pending = makeSynthesisCard("pending");
     const running = makeSynthesisCard("running");
     const completed = makeSynthesisCard("completed");
 
-    expect(getTaskCardSurfaceDesiredHeight({ cards: [pending], scrollOffset: 0 }, 100)).toBe(24);
-    expect(getTaskCardSurfaceDesiredHeight({ cards: [running], scrollOffset: 0 }, 100)).toBe(14);
-    expect(getTaskCardSurfaceDesiredHeight({ cards: [completed], scrollOffset: 0 }, 100)).toBe(24);
+    expect(getTaskCardSurfaceDesiredHeight({ cards: [pending], scrollOffset: 0 }, 100)).toBe(17);
+    expect(getTaskCardSurfaceDesiredHeight({ cards: [running], scrollOffset: 0 }, 100)).toBe(17);
+    expect(getTaskCardSurfaceDesiredHeight({ cards: [completed], scrollOffset: 0 }, 100)).toBe(17);
     expect(renderTaskCardSurface({ cards: [pending], scrollOffset: 0 }, { width: 100 }).join("\n"))
       .not.toContain("Parent synthesis");
     expect(renderTaskCardSurface({ cards: [completed], scrollOffset: 0 }, { width: 100 }).join("\n"))
       .not.toContain("Parent synthesis");
     expect(renderTaskCardSurface({ cards: [makeSynthesisCard("ready")], scrollOffset: 0 }, { width: 100 }).join("\n"))
-      .toContain("Preparing to synthesize 3 Subagent results");
+      .toContain("Synthesis ●");
     expect(renderTaskCardSurface({ cards: [makeSynthesisCard("waiting_for_approval")], scrollOffset: 0 }, { width: 100 }).join("\n"))
-      .toContain("Synthesis waiting for approval");
+      .toContain("WAITING");
 
     const constrained = renderTaskCardSurface(
       { cards: [running], scrollOffset: 0 },
@@ -534,8 +710,8 @@ describe("durable Task surfaces", () => {
     );
     const constrainedText = constrained.join("\n");
     expect(constrained).toHaveLength(10);
-    expect(constrainedText).toContain("تجميع الوكيل الرئيسي");
-    expect(constrainedText).toContain("يتم تجميع 3 من نتائج الوكلاء الفرعيين");
+    expect(constrainedText).toContain("التجميع");
+    expect(constrainedText).toContain("مسار النشاط · 3 أنشطة");
     expect(constrainedText).toContain("+3 وكلاء فرعيون إضافيون");
     expect(constrainedText).not.toMatch(/\u001B\[/u);
     expect(constrained.map(visibleWidth)).toEqual(Array.from({ length: 10 }, () => 72));
@@ -547,6 +723,7 @@ describe("durable Task surfaces", () => {
       taskId: "T-second",
       objective: "Second Task",
       trace: {
+        spans: [],
         events: [
           { eventId: "second-1", kind: "read", label: "Read first file", category: "read", timestamp: "2026-07-20T10:00:00.000Z" },
           { eventId: "second-2", kind: "answer", label: "Summarized file", category: "answer", timestamp: "2026-07-20T10:01:00.000Z" },
@@ -572,6 +749,7 @@ describe("durable Task surfaces", () => {
       status: "completed" as const,
       usage: cardUsage(0.42),
       trace: {
+        spans: [],
         events: [
           ...second.trace.events,
           { eventId: "second-3", kind: "finish" as const, label: "Finished Task", category: "finish" as const, timestamp: "2026-07-20T10:02:00.000Z" },
@@ -613,7 +791,18 @@ describe("durable Task surfaces", () => {
     const receipt = makeCard({
       presentation: "receipt",
       status: "completed",
-      phase: { name: "completed", workerProgress: { completed: 3, settled: 3, total: 3 } },
+      phase: {
+        name: "completed",
+        workerProgress: {
+          completed: 3,
+          failed: 0,
+          cancelled: 0,
+          settled: 3,
+          usable: 3,
+          recovered: 0,
+          total: 3
+        }
+      },
       progress: { completed: 3, skipped: 0, total: 3 },
     });
     const taskState = { cards: [receipt], selectedTaskId: receipt.taskId, scrollOffset: 0 };
@@ -705,10 +894,11 @@ describe("durable Task surfaces", () => {
     const light = renderTaskCardSurface({ cards: [card], scrollOffset: 0 }, { width: 72, style: lightStyle });
     const plain = renderTaskCardSurface({ cards: [card], scrollOffset: 0 }, { width: 72, style: plainStyle });
 
-    expect(light.slice(1).every((line) => line.includes("\x1b[48;2;245;245;245m"))).toBe(true);
+    const lightWorker = light.find((line) => stripAnsi(line).includes("Research Company 1"));
+    expect(lightWorker).toContain("\x1b[48;2;245;245;245m");
     expect(plain.join("\n")).not.toMatch(/\u001B\[/u);
-    expect(plain.join("\n")).toContain(". Subagent 1");
-    expect(plain.join("\n")).toContain("> Reading company 1");
+    expect(plain.join("\n")).toContain("Research Company 1");
+    expect(plain.join("\n")).toContain("Reading company 1");
     expect(plain.every((line) => visibleWidth(line) === 72)).toBe(true);
   });
 
@@ -756,6 +946,7 @@ describe("durable Task surfaces", () => {
       completedAt: "2026-07-20T09:59:00.000Z",
       elapsedMs: 60_000,
       assistantPreview: "Recovered a partial comparison.",
+      maxAttempts: 3,
       usage: cardUsage(0.004),
     };
     const secondAttempt = {
@@ -828,8 +1019,8 @@ describe("durable Task surfaces", () => {
     expect(text).not.toContain("Other Subagent activity");
     expect(text).toContain("The retry has validated both sources.");
     expect(text).toContain("result://comparison-b");
-    expect(text).toContain("Attempt 1 · failed");
-    expect(text).toContain("Attempt 2 · running · current");
+    expect(text).toContain("Attempt 1/3 · failed");
+    expect(text).toContain("Attempt 2/3 · running · current");
     expect(text).toContain("Research Company A");
     expect(text).not.toContain("worker-session-secret");
 
@@ -973,7 +1164,7 @@ describe("durable Task surfaces", () => {
     expect(createOperatorConsoleLayout(state).regions.map((region) => region.kind)).toEqual(["taskInspection"]);
 
     state = routeTaskSurfaceKey(state, { type: "key", key: "left" }).state;
-    expect(state.tasks.inspection).toMatchObject({ followLive: false, selectedTraceEventId: "event-attempt-started" });
+    expect(state.tasks.inspection).toMatchObject({ followLive: false, selectedTraceSpanId: "event-attempt-started" });
     state = routeTaskSurfaceKey(state, { type: "key", key: "end" }).state;
     expect(state.tasks.inspection).toMatchObject({ followLive: true });
     state = routeTaskSurfaceKey(state, { type: "key", key: "pagedown" }).state;
@@ -1016,7 +1207,7 @@ describe("durable Task surfaces", () => {
     expect(renderTaskInspectionSurface(state.tasks, { width: 80, height: 20 }).join("\n"))
       .toContain("Main session / Task ⁨T-104⁩ / Subagent 2");
     state = routeTaskSurfaceKey(state, { type: "key", key: "left" }).state;
-    expect(state.tasks.inspection?.subagentTrace).toEqual({ followLive: false, selectedTraceEventId: "second-1" });
+    expect(state.tasks.inspection?.subagentTrace).toEqual({ followLive: false, selectedTraceSpanId: "second-1" });
 
     const refreshedCard = { ...card, subagents: [second, first] };
     state = { ...state, tasks: { ...state.tasks, cards: [refreshedCard] } };
@@ -1086,8 +1277,8 @@ describe("durable Task surfaces", () => {
     const lines = renderOperatorConsoleTextLines(state, createOperatorConsoleLayout(state));
     const text = lines.join("\n");
 
-    expect(text).toContain("المهمة");
-    expect(text).toContain("\u2068T-104\u2069");
+    expect(text).toContain("مقارنة الشركات");
+    expect(text).toContain("الوكلاء الفرعيون");
     expect(text).not.toMatch(/\u001B\[/u);
     expect(lines.every((line) => visibleWidth(line) <= 28)).toBe(true);
   });
@@ -1278,7 +1469,7 @@ describe("durable Task surfaces", () => {
     }));
     const card = makeCard({
       subagents: [makeSubagent(1, { trace })],
-      trace: { events: trace, hasEarlierEvents: false },
+      trace: { events: trace, spans: [], hasEarlierEvents: false },
     });
     const initial = createInitialOperatorConsoleState({
       terminal: { width: 60, height: 10, isTty: true },
@@ -1293,7 +1484,7 @@ describe("durable Task surfaces", () => {
     });
     const layout = createOperatorConsoleLayout(initial);
     const eventHit = createOperatorConsoleHitRegions(initial, layout)
-      .find((region) => region.id === `task:${card.taskId}:task:event:trace-1`)!;
+      .find((region) => region.id === `task:${card.taskId}:task:activity:trace-1`)!;
     expect(eventHit).toBeDefined();
     const selected = routeOperatorConsoleInput({
       state: initial,
@@ -1306,7 +1497,7 @@ describe("durable Task surfaces", () => {
     });
     expect(selected.state.tasks.inspection).toMatchObject({
       followLive: false,
-      selectedTraceEventId: "trace-1",
+      selectedTraceSpanId: "trace-1",
     });
 
     const selectedState = {
@@ -1395,6 +1586,7 @@ function makeCard(overrides: Partial<TaskCardState> = {}): TaskCardState {
           elapsedMs: 198_000,
           currentActivity: "Browsing",
           currentToolCategory: "browser",
+          maxAttempts: 3,
           usage: cardUsage(0.006)
         }],
         activeAttempt: {
@@ -1410,6 +1602,7 @@ function makeCard(overrides: Partial<TaskCardState> = {}): TaskCardState {
           elapsedMs: 198_000,
           currentActivity: "Browsing",
           currentToolCategory: "browser",
+          maxAttempts: 3,
           usage: cardUsage(0.006)
         },
       },
@@ -1431,10 +1624,12 @@ function makeCard(overrides: Partial<TaskCardState> = {}): TaskCardState {
       currentToolCategory: "browser",
       usage: { total: cardUsage(0.006), currentAttempt: cardUsage(0.006) },
       attempts: [],
+      outcome: { usable: false, recovered: false, attemptsUsed: 0, maxAttempts: 3 },
       trace: [],
       results: []
     }],
     trace: {
+      spans: [],
       events: [{
         eventId: "event-attempt-started",
         kind: "attempt-started",
@@ -1483,7 +1678,15 @@ function makeCard(overrides: Partial<TaskCardState> = {}): TaskCardState {
     ...overrides,
     phase: overrides.phase ?? {
       name: "delegating",
-      workerProgress: { completed: 1, settled: 1, total: 2 },
+      workerProgress: {
+        completed: 1,
+        failed: 0,
+        cancelled: 0,
+        settled: 1,
+        usable: 1,
+        recovered: 0,
+        total: 2
+      },
     },
   };
 }
@@ -1534,6 +1737,7 @@ function makeSynthesisCard(
     currentActivity: "Comparing overlapping recommendations",
     currentToolCategory: "read",
     assistantPreview: "Preparing final response",
+    maxAttempts: 3,
     usage: cardUsage(0.03),
   };
   const synthesisStep: TaskCardState["steps"][number] = {
@@ -1563,7 +1767,11 @@ function makeSynthesisCard(
           : "running",
       workerProgress: {
         completed: subagentCount,
+        failed: 0,
+        cancelled: 0,
         settled: subagentCount,
+        usable: subagentCount,
+        recovered: 0,
         total: subagentCount,
       },
     },
@@ -1589,6 +1797,44 @@ function makeSynthesisCard(
     ],
     subagents,
     trace: {
+      spans: [
+        {
+          id: "span-synthesis-plan",
+          category: "plan",
+          scope: { kind: "synthesis", stepId: "step-synthesis", label: "Synthesis" },
+          status: "completed",
+          startedAt: "2026-07-20T10:03:18.000Z",
+          endedAt: "2026-07-20T10:03:20.000Z",
+          durationMs: 2_000,
+          eventCount: 1,
+          label: "Planning next action",
+          attemptId: "attempt-synthesis-1",
+        },
+        {
+          id: "span-synthesis-read",
+          category: "read",
+          scope: { kind: "synthesis", stepId: "step-synthesis", label: "Synthesis" },
+          status: "completed",
+          startedAt: "2026-07-20T10:03:20.000Z",
+          endedAt: "2026-07-20T10:03:29.000Z",
+          durationMs: 9_000,
+          eventCount: 1,
+          label: "Loading usable reports",
+          attemptId: "attempt-synthesis-1",
+        },
+        {
+          id: "span-synthesis-write",
+          category: "write",
+          scope: { kind: "synthesis", stepId: "step-synthesis", label: "Synthesis" },
+          status: synthesisStatus === "completed" ? "completed" : "running",
+          startedAt: "2026-07-20T10:03:29.000Z",
+          ...(synthesisStatus === "completed" ? { endedAt: "2026-07-20T10:03:30.000Z" } : {}),
+          durationMs: synthesisStatus === "completed" ? 1_000 : 12_000,
+          eventCount: 12,
+          label: "Writing current response",
+          attemptId: "attempt-synthesis-1",
+        },
+      ],
       events: [
         {
           eventId: "synthesis-reading",
@@ -1677,6 +1923,15 @@ function makeSubagent(
     trace: [],
     results: [],
     ...overrides,
+    outcome: overrides.outcome ?? {
+      usable: overrides.results?.some((result) => result.disposition === "accepted") ?? false,
+      recovered: overrides.results?.some((result) => result.disposition === "diagnostic") ?? false,
+      attemptsUsed: overrides.attempts?.length ?? 0,
+      maxAttempts: overrides.latestAttempt?.maxAttempts ?? 3,
+      ...(overrides.latestAttempt?.failure === undefined
+        ? {}
+        : { failure: overrides.latestAttempt.failure })
+    },
   };
 }
 
@@ -1686,6 +1941,10 @@ function visibleWidth(value: string): number {
 
 function stripAnsi(value: string): string {
   return value.replace(/\u001B\[[0-?]*[ -/]*[@-~]/gu, "");
+}
+
+function stripBidi(value: string): string {
+  return value.replace(/[\u2066-\u2069]/gu, "");
 }
 
 function ansiFg(hex: string): string {

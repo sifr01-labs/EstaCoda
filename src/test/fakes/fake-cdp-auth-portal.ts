@@ -1,0 +1,505 @@
+import { vi } from "vitest";
+import type {
+  CdpFetchLike,
+  CdpWebSocketEvent,
+  CdpWebSocketFactory,
+  CdpWebSocketLike,
+} from "../../browser/cdp-client.js";
+
+export type FakeCdpAuthElement = {
+  ref: string;
+  role: string;
+  name: string;
+  withinText?: string;
+  label?: string;
+  value?: string;
+};
+
+export type FakeCdpAuthSnapshot = {
+  url: string;
+  title: string;
+  text: string;
+  elements: FakeCdpAuthElement[];
+  regions?: Array<{
+    ref: string;
+    text: string;
+    actionRefs: string[];
+    links: Array<{ text: string; href: string }>;
+    hitTestable: boolean;
+    blockedBy?: string;
+  }>;
+};
+
+/**
+ * Test-only CDP peer with explicit hooks for protected delivery and submission.
+ * It is intentionally stateful so browser tests can model authentication page
+ * transitions without starting Chrome or handling real protected values.
+ */
+export class FakeCdpAuthPortalSocket implements CdpWebSocketLike {
+  readonly readyState = 1;
+  readonly sent: Array<{ id: number; method: string; params?: Record<string, unknown> }> = [];
+  readonly #listeners = new Map<string, Array<(event: CdpWebSocketEvent) => void>>();
+  readonly failMethods = new Map<string, string>();
+  readonly failNextMethods = new Map<string, { remaining: number; message: string }>();
+  readonly missingElementIndexes = new Set<number>();
+  readonly protectedSourceValues = new Map<number, string>();
+  #contextCounter = 0;
+  #targetCounter = 0;
+  closed = false;
+  snapshot: FakeCdpAuthSnapshot = {
+    url: "https://example.com/final",
+    title: "Supervised Page",
+    text: "Supervised text",
+    elements: [{ ref: "@e1", role: "button", name: "Open" }],
+  };
+  axTree: unknown;
+  protectedFieldInspection = {
+    connected: true,
+    current: true,
+    visible: true,
+    disabled: false,
+    editable: true,
+    semanticsMatch: true,
+    explicitEmail: false,
+    conflictCount: 1,
+  };
+  protectedSubmitInspection = {
+    connected: true,
+    current: true,
+    visible: true,
+    disabled: false,
+    clickable: true,
+    semanticsMatch: true,
+    conflictCount: 1,
+  };
+  protectedClearSucceeds = true;
+  protectedClearVerification = true;
+  currentChallengeClearSucceeds = true;
+  currentChallengeClearVerification = true;
+  documentCurrent = true;
+  frameId = "main-frame";
+  onProtectedDelivery?: () => void;
+  onProtectedSubmit?: () => void;
+  onRuntimeEvaluate?: (expression: string) => void;
+  onNativeClick?: () => void;
+  rejectBrowserActions = false;
+  failNextMouseRelease: string | undefined;
+  browserActionPreflight: Record<string, unknown> = {
+    kind: "button",
+    tag: "button",
+    role: "button",
+    label: "Submit",
+    formAssociated: true,
+    submit: true,
+  };
+  visualSurface = { cssWidth: 16, cssHeight: 16, scrollX: 0, scrollY: 0, mutationRevision: 0 };
+
+  send(data: string): void {
+    const message = JSON.parse(data) as {
+      id: number;
+      method: string;
+      params?: Record<string, unknown>;
+    };
+    this.sent.push(message);
+    if (message.method === "Runtime.evaluate" && typeof message.params?.expression === "string") {
+      this.onRuntimeEvaluate?.(message.params.expression);
+    }
+    if (message.method === "Input.dispatchMouseEvent" && message.params?.type === "mouseReleased") {
+      this.onNativeClick?.();
+      if (this.failNextMouseRelease !== undefined) {
+        const failure = this.failNextMouseRelease;
+        this.failNextMouseRelease = undefined;
+        this.#emit("message", {
+          data: JSON.stringify({ id: message.id, error: { message: failure } }),
+        });
+        return;
+      }
+    }
+    if (message.method === "Runtime.evaluate" && typeof message.params?.expression === "string") {
+      const index = /__estacodaElements\?\.\[(\d+)\]/u.exec(message.params.expression)?.[1];
+      if (index !== undefined && this.missingElementIndexes.has(Number(index))) {
+        this.#emit("message", {
+          data: JSON.stringify({
+            id: message.id,
+            error: { message: `Browser element ref not found at index ${index}` },
+          }),
+        });
+        return;
+      }
+    }
+    const transientFailure = this.failNextMethods.get(message.method);
+    if (transientFailure !== undefined && transientFailure.remaining > 0) {
+      transientFailure.remaining -= 1;
+      if (transientFailure.remaining === 0) this.failNextMethods.delete(message.method);
+      this.#emit("message", {
+        data: JSON.stringify({
+          id: message.id,
+          error: { message: transientFailure.message },
+        }),
+      });
+      return;
+    }
+    const failure = this.failMethods.get(message.method);
+    if (failure !== undefined) {
+      this.#emit("message", {
+        data: JSON.stringify({
+          id: message.id,
+          error: { message: failure },
+        }),
+      });
+      return;
+    }
+    const result = this.#resultFor(message);
+    this.#emit("message", {
+      data: JSON.stringify({
+        id: message.id,
+        result,
+      }),
+    });
+    if (
+      message.method === "Page.navigate" ||
+      (message.method === "Runtime.evaluate" &&
+        typeof message.params?.expression === "string" &&
+        message.params.expression.includes("history.back"))
+    ) {
+      setTimeout(
+        () =>
+          this.#emit("message", {
+            data: JSON.stringify({ method: "Page.loadEventFired", params: {} }),
+          }),
+        0,
+      );
+    }
+  }
+
+  close(): void {
+    this.closed = true;
+    this.#emit("close", {});
+  }
+
+  addEventListener(
+    type: "open" | "message" | "error" | "close",
+    listener: (event: CdpWebSocketEvent) => void,
+  ): void {
+    const listeners = this.#listeners.get(type) ?? [];
+    listeners.push(listener);
+    this.#listeners.set(type, listeners);
+  }
+
+  emitMessage(message: unknown): void {
+    this.#emit("message", { data: JSON.stringify(message) });
+  }
+
+  #resultFor(message: { method: string; params?: Record<string, unknown> }): unknown {
+    const method = message.method;
+    if (method === "Target.createBrowserContext") {
+      return { browserContextId: `context-${++this.#contextCounter}` };
+    }
+    if (method === "Target.createTarget") {
+      return { targetId: `target-${++this.#targetCounter}` };
+    }
+    if (method === "Target.getTargets") {
+      return {
+        targetInfos: Array.from({ length: 20 }, (_, index) => ({
+          targetId: `target-${index + 1}`,
+          type: "page",
+          title: `target-${index + 1}`,
+          url: index === 0 ? "https://example.com/final" : `https://example.com/target-${index + 1}`,
+          browserContextId: `context-${index + 1}`,
+        })),
+      };
+    }
+    if (method === "Runtime.evaluate") {
+      if (this.rejectBrowserActions && typeof message.params?.expression === "string" &&
+          (/\.(?:click|focus)\(\)/u.test(message.params.expression) ||
+            message.params.expression.includes("const rect = el.getBoundingClientRect()"))) {
+        return { exceptionDetails: { text: "Element became non-interactable" } };
+      }
+      if (message.params?.expression === "document") {
+        return { result: { objectId: "protected-document-object" } };
+      }
+      if (typeof message.params?.expression === "string" &&
+          message.params.expression.includes("const domRevision")) {
+        return { result: { value: JSON.stringify({
+          ...this.visualSurface,
+          ...(message.params.expression.includes("const secretHint") ? { rects: [] } : {})
+        }) } };
+      }
+      if (typeof message.params?.expression === "string" &&
+          message.params.expression.includes("document.elementFromPoint(x, y)") &&
+          message.params.expression.includes("window.__estacodaElements.indexOf(current)")) {
+        return { result: { value: { ref: "@e1" } } };
+      }
+      if (
+        typeof message.params?.expression === "string" &&
+        /^window\.__estacodaElements\?\.\[\d+\]$/u.test(message.params.expression)
+      ) {
+        const index = /\[(\d+)\]/u.exec(message.params.expression)?.[1] ?? "unknown";
+        return { result: { objectId: `protected-field-object-${index}` } };
+      }
+      if (typeof message.params?.expression === "string" && message.params.expression.includes("const inlineScripted")) {
+        return { result: { value: this.browserActionPreflight } };
+      }
+      if (typeof message.params?.expression === "string" && message.params.expression.includes("const rect = el.getBoundingClientRect()")) {
+        return { result: { value: { x: 48, y: 24 } } };
+      }
+      return { result: { value: JSON.stringify(this.snapshot) } };
+    }
+    if (method === "Accessibility.getFullAXTree") {
+      return this.axTree ?? { nodes: [] };
+    }
+    if (method === "DOM.resolveNode") {
+      return { object: { objectId: `object-${this.sent.at(-1)?.params?.backendNodeId ?? "unknown"}` } };
+    }
+    if (method === "Runtime.callFunctionOn") {
+      if (
+        typeof message.params?.functionDeclaration === "string" &&
+        message.params.functionDeclaration.includes("this === document")
+      ) {
+        return { result: { value: this.documentCurrent } };
+      }
+      if (
+        typeof message.params?.functionDeclaration === "string" &&
+        message.params.functionDeclaration.includes("const field = this") &&
+        message.params.functionDeclaration.includes("conflictCount")
+      ) {
+        const args = message.params.arguments as Array<{ value?: unknown }> | undefined;
+        return {
+          result: {
+            value: {
+              ...this.protectedFieldInspection,
+              explicitEmail: args?.[1]?.value === "account-identifier",
+            },
+          },
+        };
+      }
+      if (
+        typeof message.params?.functionDeclaration === "string" &&
+        message.params.functionDeclaration.includes("clickable:")
+      ) {
+        return { result: { value: this.protectedSubmitInspection } };
+      }
+      if (
+        typeof message.params?.functionDeclaration === "string" &&
+        message.params.functionDeclaration.includes("includeValue") &&
+        message.params.functionDeclaration.includes("fingerprint")
+      ) {
+        const args = message.params.arguments as Array<{ value?: unknown }> | undefined;
+        const elementIndex = args?.[0]?.value;
+        const includeValue = args?.[1]?.value === true;
+        const value = typeof elementIndex === "number" ? this.protectedSourceValues.get(elementIndex) : undefined;
+        return {
+          result: {
+            value: {
+              connected: value !== undefined,
+              current: value !== undefined,
+              visible: value !== undefined,
+              empty: value === undefined || value.length === 0,
+              fingerprint: value === undefined ? "missing" : `fingerprint:${value}`,
+              ...(includeValue && value !== undefined ? { value } : {}),
+            },
+          },
+        };
+      }
+      if (
+        typeof message.params?.functionDeclaration === "string" &&
+        message.params.functionDeclaration.includes("currentProtectedKinds")
+      ) {
+        const args = message.params.arguments as Array<{ value?: unknown }> | undefined;
+        const clearValues = args?.[1]?.value === true;
+        const succeeded = clearValues
+          ? this.currentChallengeClearSucceeds
+          : this.currentChallengeClearVerification;
+        if (clearValues && succeeded) {
+          this.snapshot.elements = this.snapshot.elements.map((element) => ({ ...element, value: "" }));
+        }
+        return { result: { value: succeeded } };
+      }
+      if (
+        typeof message.params?.functionDeclaration === "string" &&
+        message.params.functionDeclaration.includes("this.value === ''")
+      ) {
+        return { result: { value: this.protectedClearVerification } };
+      }
+      if (
+        typeof message.params?.functionDeclaration === "string" &&
+        message.params.functionDeclaration.includes("setter.call(this, '')")
+      ) {
+        return { result: { value: this.protectedClearSucceeds } };
+      }
+      if (
+        typeof message.params?.functionDeclaration === "string" &&
+        message.params.functionDeclaration.includes("protectedValue")
+      ) {
+        this.onProtectedDelivery?.();
+        return { result: { value: true } };
+      }
+      if (
+        typeof message.params?.functionDeclaration === "string" &&
+        message.params.functionDeclaration.includes("this.click();")
+      ) {
+        this.onProtectedSubmit?.();
+        return { result: { value: true } };
+      }
+      return { result: { value: true } };
+    }
+    if (method === "Page.getFrameTree") {
+      return { frameTree: { frame: { id: this.frameId, url: this.snapshot.url } } };
+    }
+    if (method === "Page.captureScreenshot") {
+      return { data: "iVBORw0KGgoAAAANSUhEUgAAABAAAAAQCAYAAAAf8/9hAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAAGklEQVQ4jWP4TyFgGDXg/2gY/B8Ng//DIgwAXXj8LuMlDaEAAAAASUVORK5CYII=" };
+    }
+    return { ok: true, method };
+  }
+
+  #emit(type: string, event: CdpWebSocketEvent): void {
+    for (const listener of this.#listeners.get(type) ?? []) {
+      listener(event);
+    }
+  }
+}
+
+export function showCredentialLoginPage(socket: FakeCdpAuthPortalSocket): void {
+  resetProtectedInspections(socket);
+  socket.snapshot = {
+    url: "https://accounts.example.com/login",
+    title: "Sign in",
+    text: "Sign in",
+    elements: [
+      { ref: "@e1", role: "textbox", name: "Email" },
+      { ref: "@e2", role: "textbox", name: "Password" },
+      { ref: "@e3", role: "button", name: "Log in" },
+    ],
+  };
+}
+
+export function showOtpChallengePage(socket: FakeCdpAuthPortalSocket): void {
+  resetProtectedInspections(socket);
+  socket.snapshot = {
+    url: "https://accounts.example.com/challenge",
+    title: "Verify account",
+    text: "Enter authenticator code",
+    elements: [
+      { ref: "@e1", role: "textbox", name: "One-time code" },
+      { ref: "@e2", role: "button", name: "Authenticate" },
+    ],
+  };
+}
+
+export function showAuthenticatedHome(
+  socket: FakeCdpAuthPortalSocket,
+  options: { documentChanged?: boolean } = {}
+): void {
+  socket.protectedFieldInspection.current = false;
+  socket.protectedFieldInspection.conflictCount = 0;
+  socket.protectedSubmitInspection.current = false;
+  if (options.documentChanged ?? true) socket.documentCurrent = false;
+  socket.snapshot = {
+    url: "https://accounts.example.com/home",
+    title: "Account home",
+    text: "Welcome",
+    elements: [{ ref: "@e1", role: "link", name: "My profile" }],
+  };
+}
+
+export function createFakeCdpAuthPortalSocketFactory(): {
+  webSocketFactory: CdpWebSocketFactory;
+  sockets: FakeCdpAuthPortalSocket[];
+  browserSocket: () => FakeCdpAuthPortalSocket | undefined;
+  pageSocket: (index?: number) => FakeCdpAuthPortalSocket | undefined;
+} {
+  const sockets: FakeCdpAuthPortalSocket[] = [];
+  const webSocketFactory: CdpWebSocketFactory = vi.fn(() => {
+    const socket = new FakeCdpAuthPortalSocket();
+    sockets.push(socket);
+    return socket;
+  });
+  return {
+    webSocketFactory,
+    sockets,
+    browserSocket: () => sockets[0],
+    pageSocket: (index = 0) => sockets[index + 1],
+  };
+}
+
+function resetProtectedInspections(socket: FakeCdpAuthPortalSocket): void {
+  socket.documentCurrent = true;
+  socket.frameId = "main-frame";
+  Object.assign(socket.protectedFieldInspection, {
+    connected: true,
+    current: true,
+    visible: true,
+    disabled: false,
+    editable: true,
+    semanticsMatch: true,
+    explicitEmail: false,
+    conflictCount: 1,
+  });
+  Object.assign(socket.protectedSubmitInspection, {
+    connected: true,
+    current: true,
+    visible: true,
+    disabled: false,
+    clickable: true,
+    semanticsMatch: true,
+    conflictCount: 1,
+  });
+  socket.protectedClearSucceeds = true;
+  socket.protectedClearVerification = true;
+  socket.currentChallengeClearSucceeds = true;
+  socket.currentChallengeClearVerification = true;
+}
+
+export function createFakeCdpFetch(overrides?: {
+  versionOk?: boolean;
+  targetOk?: boolean;
+}): CdpFetchLike {
+  return vi.fn(async (url: string) => {
+    if (url.endsWith("/json/version")) {
+      return response({
+        ok: overrides?.versionOk ?? true,
+        status: overrides?.versionOk === false ? 503 : 200,
+        statusText: overrides?.versionOk === false ? "Service Unavailable" : "OK",
+        payload: {
+          Browser: "Chrome/125.0.0.0",
+          "Protocol-Version": "1.3",
+          webSocketDebuggerUrl: "ws://cdp/browser",
+        },
+      });
+    }
+    if (url.endsWith("/json/list")) {
+      return response({
+        ok: overrides?.targetOk ?? true,
+        status: overrides?.targetOk === false ? 500 : 200,
+        statusText: overrides?.targetOk === false ? "No Target" : "OK",
+        payload: Array.from({ length: 20 }, (_, index) => {
+          const id = `target-${index + 1}`;
+          return {
+            id,
+            type: "page",
+            title: id,
+            url: index === 0 ? "https://example.com/final" : `https://example.com/${id}`,
+            browserContextId: `context-${index + 1}`,
+            webSocketDebuggerUrl: `ws://cdp/${id}`,
+          };
+        }),
+      });
+    }
+    throw new Error(`Unexpected fetch URL: ${url}`);
+  });
+}
+
+function response(input: {
+  ok: boolean;
+  status: number;
+  statusText: string;
+  payload: unknown;
+}): Awaited<ReturnType<CdpFetchLike>> {
+  return {
+    ok: input.ok,
+    status: input.status,
+    statusText: input.statusText,
+    json: async () => input.payload,
+    text: async () => JSON.stringify(input.payload),
+  };
+}

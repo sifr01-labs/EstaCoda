@@ -11,8 +11,23 @@ import type {
   ChannelSessionKey
 } from "../contracts/channel.js";
 import type { ChannelKind } from "../contracts/channel.js";
-import type { ChannelBusyPolicy, LoadedRuntimeConfig } from "../config/runtime-config.js";
-import { SessionMessageQueue } from "./session-message-queue.js";
+import type { ChannelTextDeliveryReceipt } from "../contracts/channel.js";
+import type { ChannelBusyPolicy, LoadedRuntimeConfig, TelegramSecureInputMode } from "../config/runtime-config.js";
+import type {
+  SecureInputCollectionResult,
+  SecureInputRequestSnapshot
+} from "../contracts/secure-input.js";
+import {
+  SessionMessageQueue,
+  type BeforeQueueMutation,
+  type BusyTextCoalescingPolicy,
+  type QueuedMessage
+} from "./session-message-queue.js";
+import {
+  PendingTurnStoreError,
+  type PendingTurnRecord,
+  type SQLitePendingTurnStore
+} from "../gateway/pending-turn-store.js";
 import { assessSecurityPolicy, type SecurityApprovalMode, type SecurityAssessment, type SecurityDecision, type SecurityPolicy, type SecurityRequest } from "../contracts/security.js";
 import { runCronCommand } from "../cron/cron-command.js";
 import { originFromSessionKey } from "../cron/cron-runner.js";
@@ -47,15 +62,18 @@ import {
   type PendingApprovalChannel
 } from "../gateway/approval-queue.js";
 import { HookRegistry, sanitizeHookError } from "../gateway/hook-registry.js";
-import { createHash } from "node:crypto";
+import { createHash, randomBytes } from "node:crypto";
 import { unlink } from "node:fs/promises";
+import { join } from "node:path";
 import type { HandoffStore } from "./handoff-store.js";
 import type { SurfacePointerStore } from "./surface-pointer-store.js";
 import type { SurfaceType } from "./surface-pointer.js";
 import type { DeliveryRouter } from "./delivery-router.js";
 import {
   parseApprovalAction,
+  parseSecureInputAction,
   renderApprovalActions,
+  renderSecureInputActions,
   renderSetupApprovalActions,
   type ApprovalActionScope
 } from "./approval-actions.js";
@@ -81,6 +99,14 @@ import {
 import { createProviderModelSelectionFlow } from "../providers/provider-model-selection-flow.js";
 import { resolveProfileStateHome } from "../config/profile-home.js";
 import { saveRuntimeConfig } from "../config/runtime-config.js";
+import { formatUsageInspection } from "../ui/usage-inspection-format.js";
+import type { TurnUsageInspection, UsageInspection, UsageInspector } from "../session/usage-inspector.js";
+import type { ChannelMessageTurnStore } from "./channel-message-turn-store.js";
+import {
+  mergedTelegramAttributionMetadata,
+  telegramAttributionMessageIds
+} from "./telegram-message-attribution.js";
+import { TelegramSecureInputReplayStore } from "./telegram-secure-input-replay-store.js";
 import type { VoiceStateManager, VoiceMode } from "../gateway/voice-state.js";
 import {
   checkTtsProviderStatus,
@@ -102,6 +128,14 @@ import {
 
 function sessionKeyHash(sessionId: string): string {
   return createHash("sha256").update(sessionId).digest("hex").slice(0, 16);
+}
+
+function boundedErrorClass(error: unknown): string {
+  const rawClass = error instanceof Error ? error.constructor.name : "UnknownError";
+  const token = rawClass
+    .replace(/[^A-Za-z0-9_.-]/gu, "")
+    .slice(0, 64);
+  return token.length > 0 ? token : "UnknownError";
 }
 
 const DEFAULT_GATEWAY_APPROVAL_TTL_MS = 5 * 60 * 1000;
@@ -158,13 +192,17 @@ function isVoiceDeliveryArtifact(artifact: ArtifactRecord): boolean {
 export type BusyPolicyConfig = {
   busyPolicy: ChannelBusyPolicy;
   queueDepth: number;
+  busyTextCoalescing?: BusyTextCoalescingPolicy;
 };
 
-export type WhatsAppTextDebounceConfig = {
+export type ChannelTextDebounceConfig = {
   textDebounceMs: number;
   textDebounceMaxMessages: number;
   textDebounceMaxChars: number;
 };
+
+/** @deprecated Use ChannelTextDebounceConfig with textDebounceResolver. */
+export type WhatsAppTextDebounceConfig = ChannelTextDebounceConfig;
 
 export type ChannelRuntimeFactory = (input: {
   sessionId: string;
@@ -200,6 +238,12 @@ export type ChannelGatewayOptions = {
   homeDir?: string;
   profileId?: string;
   approvalQueue?: GatewayApprovalQueue;
+  /** Profile-scoped durable queue. Its presence means persistence is required; failures never fall back to memory. */
+  pendingTurnStore?: SQLitePendingTurnStore;
+  /** Profile-scoped local accounting reader for model-free usage commands. */
+  usageInspector?: UsageInspector;
+  /** Profile-scoped outbound-message attribution used by reply-to usage inspection. */
+  channelMessageTurnStore?: ChannelMessageTurnStore;
 
   // Stage 5D additions (all optional)
   /** Active turn registry for busy protection and abort tracking. */
@@ -235,8 +279,14 @@ export type ChannelGatewayOptions = {
   autoTtsFetch?: VoiceFetchLike;
   autoTtsNow?: () => number;
   autoTtsId?: () => string;
+  /** Resolve rapid-text debounce settings for a channel. Undefined disables debounce. */
+  textDebounceResolver?: (channelKind: ChannelKind) => ChannelTextDebounceConfig | undefined;
+  /** @deprecated Use textDebounceResolver. Ignored when the resolver is provided. */
   whatsappTextDebounce?: WhatsAppTextDebounceConfig;
   telegramStreaming?: ChannelStreamingTextOptions & { enabled?: boolean };
+  /** Profile-level Telegram protected-input behavior. Defaults to protected handoff. */
+  telegramSecureInputMode?: TelegramSecureInputMode;
+  telegramSecureInputReplayStore?: Pick<TelegramSecureInputReplayStore, "has" | "record">;
 };
 
 type ApprovalScope = "once" | "session" | "always";
@@ -246,14 +296,37 @@ type AutoTtsUsageWindow = {
   chars: number;
 };
 
-type WhatsAppTextDebounceBuffer = {
+type ChannelTextDebounceBuffer = {
   adapter: ChannelAdapter;
+  config: ChannelTextDebounceConfig;
   firstMessage: ChannelMessage;
   latestReceivedAt: string;
   textChunks: string[];
   messageIds: string[];
+  telegramMessageIds: string[];
   totalChars: number;
   timer: ReturnType<typeof setTimeout> | undefined;
+};
+
+type PendingTelegramSecureInput = {
+  actionId: string;
+  captureKey: string;
+  mode: Exclude<TelegramSecureInputMode, "disabled">;
+  destinationLabel: string;
+  state: "prompted" | "armed";
+  settle(result: SecureInputCollectionResult): void;
+  closeIntake(): void;
+  timer: ReturnType<typeof setTimeout>;
+};
+
+type ArmedTelegramSecret = {
+  label: string;
+  timer: ReturnType<typeof setTimeout>;
+};
+
+type SuppliedTelegramSecret = {
+  value: Uint8Array;
+  timer: ReturnType<typeof setTimeout>;
 };
 
 type ProviderServingState =
@@ -395,6 +468,7 @@ export class ChannelGateway {
   readonly #homeDir: string | undefined;
   readonly #profileId: string;
   readonly #approvalQueue: GatewayApprovalQueue | undefined;
+  readonly #pendingTurnStore: SQLitePendingTurnStore | undefined;
   readonly #activeTurns = new Map<string, AbortController>();
   readonly #pendingApprovals = new Map<string, PendingApprovalContinuation>();
   readonly #approvalGrants = new Map<string, ApprovalGrant[]>();
@@ -408,6 +482,8 @@ export class ChannelGateway {
   readonly #activeRuntimeByTurnKey = new Map<string, Runtime>();
   readonly #logWarning?: (message: string) => void;
   readonly #enqueueSessionFinalization: ChannelGatewayOptions["enqueueSessionFinalization"];
+  readonly #usageInspector: UsageInspector | undefined;
+  readonly #channelMessageTurnStore: ChannelMessageTurnStore | undefined;
 
   // Stage 6
   readonly #isDraining: (() => boolean) | undefined;
@@ -436,9 +512,17 @@ export class ChannelGateway {
   readonly #autoTtsNow: () => number;
   readonly #autoTtsId: (() => string) | undefined;
   readonly #autoTtsUsageByChat = new Map<string, AutoTtsUsageWindow>();
-  readonly #whatsappTextDebounce: WhatsAppTextDebounceConfig | undefined;
-  readonly #whatsappTextDebounceBuffers = new Map<string, WhatsAppTextDebounceBuffer>();
+  readonly #textDebounceResolver: ChannelGatewayOptions["textDebounceResolver"];
+  readonly #textDebounceBuffers = new Map<string, ChannelTextDebounceBuffer>();
+  readonly #textDebounceFlushes = new Set<Promise<void>>();
   readonly #telegramStreaming: (ChannelStreamingTextOptions & { enabled?: boolean }) | undefined;
+  readonly #telegramSecureInputMode: TelegramSecureInputMode;
+  readonly #pendingTelegramSecureInputByAction = new Map<string, PendingTelegramSecureInput>();
+  readonly #pendingTelegramSecureInputByCapture = new Map<string, PendingTelegramSecureInput>();
+  readonly #armedTelegramSecrets = new Map<string, ArmedTelegramSecret>();
+  readonly #suppliedTelegramSecrets = new Map<string, SuppliedTelegramSecret>();
+  readonly #capturedTelegramSecretMessages = new Set<string>();
+  readonly #telegramSecureInputReplayStore: Pick<TelegramSecureInputReplayStore, "has" | "record"> | undefined;
   readonly #providerServingStateBySessionKey = new Map<string, ProviderServingState>();
 
   constructor(options: ChannelGatewayOptions) {
@@ -460,6 +544,7 @@ export class ChannelGateway {
     this.#homeDir = options.homeDir;
     this.#profileId = options.profileId ?? "default";
     this.#approvalQueue = options.approvalQueue;
+    this.#pendingTurnStore = options.pendingTurnStore;
 
     // Stage 5D
     this.#activeTurnRegistry = options.activeTurnRegistry;
@@ -467,6 +552,8 @@ export class ChannelGateway {
     this.#runtimeFingerprint = options.runtimeFingerprint;
     this.#logWarning = options.logWarning;
     this.#enqueueSessionFinalization = options.enqueueSessionFinalization;
+    this.#usageInspector = options.usageInspector;
+    this.#channelMessageTurnStore = options.channelMessageTurnStore;
 
     // Stage 6
     this.#isDraining = options.isDraining;
@@ -489,23 +576,40 @@ export class ChannelGateway {
     this.#autoTtsFetch = options.autoTtsFetch;
     this.#autoTtsNow = options.autoTtsNow ?? Date.now;
     this.#autoTtsId = options.autoTtsId;
-    this.#whatsappTextDebounce = options.whatsappTextDebounce;
+    const legacyWhatsAppTextDebounce = options.whatsappTextDebounce;
+    this.#textDebounceResolver = options.textDebounceResolver ?? (
+      legacyWhatsAppTextDebounce === undefined
+        ? undefined
+        : (channelKind) => channelKind === "whatsapp" ? legacyWhatsAppTextDebounce : undefined
+    );
     this.#telegramStreaming = options.telegramStreaming;
+    this.#telegramSecureInputMode = options.telegramSecureInputMode ?? "protected-handoff";
+    this.#telegramSecureInputReplayStore = options.telegramSecureInputReplayStore ?? (
+      options.homeDir === undefined
+        ? undefined
+        : new TelegramSecureInputReplayStore({
+            path: join(
+              resolveProfileStateHome({ homeDir: options.homeDir, profileId: this.#profileId }).gatewayStatePath,
+              "telegram-secure-input-replays.json"
+            )
+          })
+    );
 
     for (const adapter of options.adapters) {
       this.#adapters.set(adapter.id ?? adapter.kind, adapter);
     }
   }
 
-  /** Stage 7: check if there is any pending work (active turns, queued messages, draining). */
+  /** Stage 7: check if there is any pending work, including buffered or owned debounce flushes. */
   hasPendingWork(): boolean {
     const hasActiveTurns = this.#activeTurnRegistry !== undefined
       ? this.#activeTurnRegistry.stats().activeTurnCount > 0
       : this.#activeTurns.size > 0;
     const hasQueued = this.#sessionMessageQueue.totalSize() > 0;
     const hasDraining = this.#drainingQueue.size > 0;
-    const hasDebouncedText = this.#whatsappTextDebounceBuffers.size > 0;
-    return hasActiveTurns || hasQueued || hasDraining || hasDebouncedText;
+    const hasDebouncedText = this.#textDebounceBuffers.size > 0;
+    const hasDebounceFlushes = this.#textDebounceFlushes.size > 0;
+    return hasActiveTurns || hasQueued || hasDraining || hasDebouncedText || hasDebounceFlushes;
   }
 
   async #deliverText(
@@ -513,12 +617,18 @@ export class ChannelGateway {
     sessionKey: ChannelSessionKey,
     text: string,
     options?: import("../contracts/channel.js").ChannelTextOptions
-  ): Promise<void> {
+  ): Promise<ChannelTextDeliveryReceipt | undefined> {
     if (this.#deliveryRouter) {
-      await this.#deliveryRouter.deliverText([{ kind: "origin", originalSessionKey: sessionKey }], text, options);
-    } else {
-      await adapter.delivery?.sendText(sessionKey, text, options);
+      const results = await this.#deliveryRouter.deliverText(
+        [{ kind: "origin", originalSessionKey: sessionKey }],
+        text,
+        options
+      );
+      if (!(results instanceof Map)) return undefined;
+      const result = results.values().next().value;
+      return result?.success === true ? result.receipt : undefined;
     }
+    return await adapter.delivery?.sendText(sessionKey, text, options) ?? undefined;
   }
 
   async #deliverProgress(
@@ -530,6 +640,82 @@ export class ChannelGateway {
       await this.#deliveryRouter.deliverProgress({ kind: "origin", originalSessionKey: sessionKey }, event);
     } else {
       await adapter.delivery?.sendProgress?.(sessionKey, event);
+    }
+  }
+
+  async #setInboundProcessingIndicator(
+    adapter: ChannelAdapter,
+    message: ChannelMessage,
+    active: boolean
+  ): Promise<boolean> {
+    if (adapter.setInboundProcessingIndicator === undefined) {
+      return false;
+    }
+    try {
+      return await adapter.setInboundProcessingIndicator(message, active);
+    } catch (error) {
+      this.#logWarning?.(
+        `Channel processing indicator update failed (${boundedErrorClass(error)}).`
+      );
+      return false;
+    }
+  }
+
+  async #authorizedUsageReplyInspection(
+    message: ChannelMessage,
+    sessionId: string
+  ): Promise<TurnUsageInspection | undefined> {
+    const platformMessageId = telegramReplyToMessageId(message);
+    if (
+      platformMessageId === undefined ||
+      this.#channelMessageTurnStore === undefined ||
+      this.#usageInspector === undefined
+    ) {
+      return undefined;
+    }
+    try {
+      const binding = await this.#channelMessageTurnStore.resolve({
+        sessionKey: normalizeSessionKey(message.sessionKey, this.#sessionPolicy),
+        platformMessageId
+      });
+      if (binding === undefined) return undefined;
+      return await this.#usageInspector.inspectLinkedTurn(
+        sessionId,
+        binding.sessionId,
+        binding.turnId
+      );
+    } catch (error) {
+      this.#logWarning?.(`Channel reply attribution lookup failed (${boundedErrorClass(error)}).`);
+      return undefined;
+    }
+  }
+
+  async #recordChannelMessageTurnBindings(input: {
+    sessionKey: ChannelSessionKey;
+    platformMessageIds: readonly string[] | undefined;
+    direction: "inbound" | "outbound";
+    sessionId: string;
+    turnId: string | undefined;
+  }): Promise<void> {
+    if (
+      input.sessionKey.platform !== "telegram" ||
+      this.#channelMessageTurnStore === undefined ||
+      input.turnId === undefined ||
+      input.platformMessageIds === undefined ||
+      input.platformMessageIds.length === 0
+    ) {
+      return;
+    }
+    try {
+      await this.#channelMessageTurnStore.record({
+        sessionKey: input.sessionKey,
+        platformMessageIds: input.platformMessageIds,
+        direction: input.direction,
+        sessionId: input.sessionId,
+        turnId: input.turnId
+      });
+    } catch (error) {
+      this.#logWarning?.(`Channel reply attribution write failed (${boundedErrorClass(error)}).`);
     }
   }
 
@@ -907,24 +1093,165 @@ export class ChannelGateway {
   }
 
   async start(): Promise<void> {
+    const recoveredKeys = await this.#recoverDurableQueue();
     for (const adapter of this.#adapters.values()) {
       await adapter.start?.(async (message) => {
         await this.receive(message);
       });
     }
+    for (const key of recoveredKeys) {
+      void this.#drainQueuedTurns(key).catch((error) => {
+        this.#warnQueueFailure("recovery drain", error);
+      });
+    }
   }
 
   async stop(): Promise<void> {
+    this.#cancelAllTelegramSecureInput();
     await this.flushPendingDebounces();
     for (const adapter of this.#adapters.values()) {
       await adapter.stop?.();
     }
   }
 
+  #beforeQueueMutation(): BeforeQueueMutation | undefined {
+    const store = this.#pendingTurnStore;
+    if (store === undefined) return undefined;
+    return (mutation) => {
+      if (mutation.kind === "enqueue") {
+        const result = store.enqueue(mutation.queuedMessage.message);
+        return result.inserted
+          ? { durableTurnId: result.turn.id }
+          : { duplicate: true, durableTurnId: result.turn.id };
+      }
+      const turnId = mutation.previousQueuedMessage.durableTurnId;
+      if (turnId === undefined) {
+        throw new PendingTurnStoreError({ code: "state_conflict", operation: "coalesce" });
+      }
+      const result = store.coalescePending({
+        turnId,
+        previousMessage: mutation.previousQueuedMessage.message,
+        incomingMessage: mutation.incomingMessage,
+        combinedMessage: mutation.queuedMessage.message
+      });
+      return result.duplicate
+        ? { duplicate: true, durableTurnId: result.turn.id }
+        : { durableTurnId: result.turn.id };
+    };
+  }
+
+  async #recoverDurableQueue(): Promise<string[]> {
+    const store = this.#pendingTurnStore;
+    if (store === undefined) return [];
+
+    store.pruneRetention();
+    store.markClaimedAsUncertain();
+    const recoveredKeys = new Set<string>();
+    for (const turn of store.listPendingForRecovery()) {
+      if (!await this.#isRecoverableTurn(turn)) {
+        store.markPendingAsUncertain(turn.id);
+        continue;
+      }
+      const key = stableSessionKey(turn.message.sessionKey, this.#sessionPolicy);
+      this.#sessionMessageQueue.enqueueRecovered(key, this.#queuedMessageFromRecord(turn));
+      recoveredKeys.add(key);
+    }
+    return [...recoveredKeys];
+  }
+
+  async #isRecoverableTurn(turn: PendingTurnRecord): Promise<boolean> {
+    try {
+      const policies = turn.message.channel === "whatsapp"
+        ? {
+            ...this.#authPolicy,
+            whatsapp: this.#authPolicy.whatsapp === undefined
+              ? undefined
+              : { ...this.#authPolicy.whatsapp, requireMention: false }
+          }
+        : this.#authPolicy;
+      if (!authorizeChannelMessage(turn.message, policies).allowed) return false;
+      if (turn.message.sessionKey.platform !== turn.message.channel) return false;
+      normalizeSessionKey(turn.message.sessionKey, this.#sessionPolicy);
+      this.#adapterFor(turn.message.channel);
+      this.#pendingTurnStore?.validateForRecovery(turn.message);
+      const trusted = typeof this.#trustedWorkspace === "function"
+        ? await this.#trustedWorkspace(turn.message)
+        : this.#trustedWorkspace;
+      return trusted === true;
+    } catch {
+      return false;
+    }
+  }
+
+  #queuedMessageFromRecord(turn: PendingTurnRecord): QueuedMessage {
+    const policy = this.#busyPolicyResolver?.(turn.message.channel) ?? {
+      busyPolicy: "queue" as const,
+      queueDepth: 3
+    };
+    const ids = Array.isArray(turn.message.metadata?.busyTextCoalescedMessageIds)
+      ? turn.message.metadata.busyTextCoalescedMessageIds.filter((value): value is string => typeof value === "string")
+      : [];
+    const receivedAts = Array.isArray(turn.message.metadata?.busyTextCoalescedReceivedAts)
+      ? turn.message.metadata.busyTextCoalescedReceivedAts.filter((value): value is string => typeof value === "string")
+      : [];
+    const messages = ids.length === receivedAts.length
+      ? ids.map((id, index) => ({ id, receivedAt: receivedAts[index]! }))
+      : [];
+    const updatedAt = Date.parse(turn.updatedAt);
+    return {
+      message: turn.message,
+      channelKind: turn.message.channel,
+      enqueuedAt: Date.parse(turn.createdAt),
+      policyAtArrival: policy.busyPolicy,
+      queueDepthAtArrival: policy.queueDepth,
+      durableTurnId: turn.id,
+      ...(messages.length < 2 ? {} : {
+        textCoalescing: {
+          messages,
+          lastUpdatedAt: Number.isFinite(updatedAt) ? updatedAt : Date.now(),
+          totalChars: turn.message.text.length
+        }
+      })
+    };
+  }
+
+  #warnQueueFailure(action: string, error: unknown): void {
+    try {
+      this.#logWarning?.(`Durable channel queue ${action} failed (${boundedErrorClass(error)}).`);
+    } catch {
+      // Diagnostics must not affect queue state.
+    }
+  }
+
+  #quarantineClaim(turnId: string): void {
+    try {
+      this.#pendingTurnStore?.markClaimedAsUncertain(turnId);
+    } catch (error) {
+      this.#warnQueueFailure("quarantine", error);
+    }
+  }
+
+  #durableTurnIds(messages: QueuedMessage[]): string[] {
+    const ids = messages.map((message) => message.durableTurnId);
+    if (ids.some((id) => id === undefined)) {
+      throw new PendingTurnStoreError({ code: "state_conflict", operation: "replace" });
+    }
+    return ids as string[];
+  }
+
+  async #deliverQueuePersistenceFailure(
+    adapter: ChannelAdapter,
+    sessionKey: ChannelSessionKey
+  ): Promise<void> {
+    await this.#deliverText(adapter, sessionKey, "Unable to save this queued request safely. Please try again.");
+  }
+
   async flushPendingDebounces(): Promise<void> {
-    const keys = [...this.#whatsappTextDebounceBuffers.keys()];
-    for (const key of keys) {
-      await this.#flushWhatsAppTextDebounce(key);
+    while (this.#textDebounceBuffers.size > 0 || this.#textDebounceFlushes.size > 0) {
+      for (const key of [...this.#textDebounceBuffers.keys()]) {
+        this.#startTextDebounceFlush(key);
+      }
+      await Promise.all([...this.#textDebounceFlushes]);
     }
   }
 
@@ -1022,6 +1349,13 @@ export class ChannelGateway {
       ? message
       : { ...message, text: auth.authorizedText };
 
+    if (await this.#isCapturedTelegramSecretReplay(authorizedMessage)) {
+      return { sessionId: "", replyText: "", artifactCount: 0, progressCount: 0 };
+    }
+
+    const secureInputResult = await this.#interceptTelegramSecureInput(authorizedMessage, adapter);
+    if (secureInputResult !== undefined) return secureInputResult;
+
     const commandResult = await this.#handleCommand(authorizedMessage, adapter);
 
     if (commandResult !== undefined) {
@@ -1035,9 +1369,21 @@ export class ChannelGateway {
       return { sessionId: "", replyText: drainText, artifactCount: 0, progressCount: 0 };
     }
 
+    if (this.#pendingTurnStore !== undefined) {
+      try {
+        if (this.#pendingTurnStore.hasDeliveryIdentity(authorizedMessage.channel, authorizedMessage.id)) {
+          return { sessionId: "", replyText: "", artifactCount: 0, progressCount: 0 };
+        }
+      } catch (error) {
+        this.#warnQueueFailure("deduplication", error);
+        await this.#deliverQueuePersistenceFailure(adapter, authorizedMessage.sessionKey);
+        return { sessionId: "", replyText: "", artifactCount: 0, progressCount: 0 };
+      }
+    }
+
     const processedMessage = await this.#preprocessMessage?.(authorizedMessage) ?? authorizedMessage;
 
-    const debounced = await this.#maybeDebounceWhatsAppText(processedMessage, adapter);
+    const debounced = await this.#maybeDebounceText(processedMessage, adapter);
     if (debounced !== undefined) {
       return debounced;
     }
@@ -1045,64 +1391,460 @@ export class ChannelGateway {
     return this.#routeNormalTurn(processedMessage, adapter);
   }
 
-  async #maybeDebounceWhatsAppText(message: ChannelMessage, adapter: ChannelAdapter): Promise<ChannelGatewayResult | undefined> {
-    if (!this.#isEligibleForWhatsAppTextDebounce(message)) {
-      return undefined;
+  async #interceptTelegramSecureInput(
+    message: ChannelMessage,
+    adapter: ChannelAdapter
+  ): Promise<ChannelGatewayResult | undefined> {
+    if (message.channel !== "telegram") return undefined;
+
+    const action = parseSecureInputAction(message.text);
+    if (action !== undefined) {
+      return this.#handleTelegramSecureInputAction(message, adapter, action);
     }
-    const config = this.#whatsappTextDebounce;
-    if (config === undefined) {
+
+    const captureKey = this.#telegramSecureInputCaptureKey(message);
+    const pending = this.#pendingTelegramSecureInputByCapture.get(captureKey);
+    if (pending?.state === "armed") {
+      if (!this.#isAuthorizedTelegramDirectDm(message)) {
+        return this.#telegramSecureInputReply(
+          adapter,
+          message,
+          "Protected input is accepted only from the configured private Telegram user and chat."
+        );
+      }
+      if (!this.#isCapturableTelegramSecretMessage(message)) {
+        return this.#telegramSecureInputReply(
+          adapter,
+          message,
+          "Send the credential as one text-only message, or tap Cancel."
+        );
+      }
+
+      if (!await this.#recordTelegramSecretCapture(message)) {
+        pending.settle({ status: "cancelled" });
+        await this.#bestEffortDeleteTelegramSecret(adapter, message);
+        return this.#telegramSecureInputReply(
+          adapter,
+          message,
+          "Credential was not used because the local replay guard could not be recorded. Retry from a trusted device."
+        );
+      }
+      const value = new TextEncoder().encode(message.text);
+      await this.#bestEffortDeleteTelegramSecret(adapter, message);
+      pending.settle({ status: "provided", value });
+      return this.#telegramSecureInputReply(
+        adapter,
+        message,
+        "Credential received for one-time protected delivery. Telegram deletion was attempted but is not guaranteed."
+      );
+    }
+
+    const armed = this.#armedTelegramSecrets.get(captureKey);
+    if (armed !== undefined) {
+      if (!this.#isAuthorizedTelegramDirectDm(message)) {
+        return this.#telegramSecureInputReply(
+          adapter,
+          message,
+          "Protected input is accepted only from the configured private Telegram user and chat."
+        );
+      }
+      if (!this.#isCapturableTelegramSecretMessage(message)) {
+        return this.#telegramSecureInputReply(
+          adapter,
+          message,
+          "Send the credential as one text-only message, or use /secret again to replace this request."
+        );
+      }
+
+      if (!await this.#recordTelegramSecretCapture(message)) {
+        clearTimeout(armed.timer);
+        this.#armedTelegramSecrets.delete(captureKey);
+        await this.#bestEffortDeleteTelegramSecret(adapter, message);
+        return this.#telegramSecureInputReply(
+          adapter,
+          message,
+          "Credential was not used because the local replay guard could not be recorded. Retry from a trusted device."
+        );
+      }
+      clearTimeout(armed.timer);
+      this.#armedTelegramSecrets.delete(captureKey);
+      const existing = this.#suppliedTelegramSecrets.get(captureKey);
+      if (existing !== undefined) {
+        clearTimeout(existing.timer);
+        existing.value.fill(0);
+      }
+      const supplied: SuppliedTelegramSecret = {
+        value: new TextEncoder().encode(message.text),
+        timer: setTimeout(() => this.#expireSuppliedTelegramSecret(captureKey), 2 * 60 * 1000)
+      };
+      this.#suppliedTelegramSecrets.set(captureKey, supplied);
+      await this.#bestEffortDeleteTelegramSecret(adapter, message);
+
+      const syntheticMessage: ChannelMessage = {
+        ...message,
+        id: `${message.id}:protected-secret`,
+        text: `The user supplied a protected credential labeled ${JSON.stringify(armed.label)}. The protected value is available only through the secure-input runtime boundary.`,
+        attachments: [],
+        metadata: {
+          protectedCredential: { label: armed.label, source: "telegram-direct-dm" }
+        }
+      };
+      const result = await this.#routeNormalTurn(syntheticMessage, adapter);
+      await this.#deliverText(
+        adapter,
+        message.sessionKey,
+        "Credential received and offered to the runtime without adding its value to local history. Telegram deletion was attempted but is not guaranteed."
+      );
+      return result;
+    }
+
+    const secretLabel = parseTelegramSecretCommand(message.text);
+    if (secretLabel !== undefined) {
+      if (this.#isDraining?.()) {
+        return this.#telegramSecureInputReply(
+          adapter,
+          message,
+          "Gateway is restarting, please try again shortly."
+        );
+      }
+      if (this.#telegramSecureInputMode !== "direct-dm") {
+        return this.#telegramSecureInputReply(
+          adapter,
+          message,
+          this.#telegramSecureInputMode === "disabled"
+            ? "Telegram protected input is disabled for this profile."
+            : "Direct Telegram credential intake is not enabled. Continue on a trusted device instead."
+        );
+      }
+      if (!this.#isAuthorizedTelegramDirectDm(message)) {
+        return this.#telegramSecureInputReply(
+          adapter,
+          message,
+          "The /secret command requires a configured private chat with both this user ID and chat ID allowlisted."
+        );
+      }
+      if (secretLabel.length === 0) {
+        return this.#telegramSecureInputReply(adapter, message, "Usage: /secret <label>");
+      }
+
+      const existing = this.#armedTelegramSecrets.get(captureKey);
+      if (existing !== undefined) clearTimeout(existing.timer);
+      this.#armedTelegramSecrets.set(captureKey, {
+        label: secretLabel,
+        timer: setTimeout(() => this.#armedTelegramSecrets.delete(captureKey), 2 * 60 * 1000)
+      });
+      return this.#telegramSecureInputReply(
+        adapter,
+        message,
+        [
+          `Send the credential for ${JSON.stringify(secretLabel)} as your next text message.`,
+          "It will be held in memory for up to 2 minutes and used once.",
+          "Telegram and the bot transport will receive it; message deletion is best-effort."
+        ].join("\n")
+      );
+    }
+
+    return undefined;
+  }
+
+  async #collectTelegramSecureInput(input: {
+    request: SecureInputRequestSnapshot;
+    signal: AbortSignal;
+    destinationLabel: string;
+    message: ChannelMessage;
+    adapter: ChannelAdapter;
+  }): Promise<SecureInputCollectionResult> {
+    if (
+      input.signal.aborted ||
+      input.message.channel !== "telegram" ||
+      this.#telegramSecureInputMode === "disabled"
+    ) {
+      return { status: "cancelled" };
+    }
+
+    const captureKey = this.#telegramSecureInputCaptureKey(input.message);
+    const supplied = this.#suppliedTelegramSecrets.get(captureKey);
+    if (supplied !== undefined && this.#isAuthorizedTelegramDirectDm(input.message)) {
+      clearTimeout(supplied.timer);
+      this.#suppliedTelegramSecrets.delete(captureKey);
+      return { status: "provided", value: supplied.value };
+    }
+
+    const direct = this.#telegramSecureInputMode === "direct-dm" &&
+      this.#isAuthorizedTelegramDirectDm(input.message);
+    const mode: PendingTelegramSecureInput["mode"] = direct ? "direct-dm" : "protected-handoff";
+    const actionId = randomBytes(9).toString("base64url");
+    const expiresAtMs = new Date(input.request.expiresAt).getTime();
+    const ttlMs = Math.max(1, Math.min(5 * 60 * 1000, expiresAtMs - Date.now()));
+
+    return await new Promise<SecureInputCollectionResult>((resolve) => {
+      let settled = false;
+      const settle = (result: SecureInputCollectionResult) => {
+        if (settled) {
+          if (result.status === "provided") result.value.fill(0);
+          return;
+        }
+        settled = true;
+        input.signal.removeEventListener("abort", onAbort);
+        pending.closeIntake();
+        clearTimeout(pending.timer);
+        this.#pendingTelegramSecureInputByAction.delete(actionId);
+        if (this.#pendingTelegramSecureInputByCapture.get(captureKey) === pending) {
+          this.#pendingTelegramSecureInputByCapture.delete(captureKey);
+        }
+        resolve(result);
+      };
+      const onAbort = () => settle({ status: "cancelled" });
+      const closeIntake = input.adapter.beginSecureInputIntake?.() ?? (() => undefined);
+      const pending: PendingTelegramSecureInput = {
+        actionId,
+        captureKey,
+        mode,
+        destinationLabel: input.destinationLabel,
+        state: "prompted",
+        settle,
+        closeIntake,
+        timer: setTimeout(() => settle({ status: "cancelled" }), ttlMs)
+      };
+
+      const previous = this.#pendingTelegramSecureInputByCapture.get(captureKey);
+      previous?.settle({ status: "cancelled" });
+      this.#pendingTelegramSecureInputByAction.set(actionId, pending);
+      this.#pendingTelegramSecureInputByCapture.set(captureKey, pending);
+      input.signal.addEventListener("abort", onAbort, { once: true });
+
+      void this.#deliverText(
+          input.adapter,
+          input.message.sessionKey,
+          renderTelegramSecureInputPrompt(input.request, input.destinationLabel, mode),
+          { actions: renderSecureInputActions(actionId, mode) }
+        ).catch(() => settle({ status: "cancelled" }));
+    });
+  }
+
+  async #handleTelegramSecureInputAction(
+    message: ChannelMessage,
+    adapter: ChannelAdapter,
+    action: NonNullable<ReturnType<typeof parseSecureInputAction>>
+  ): Promise<ChannelGatewayResult> {
+    const pending = this.#pendingTelegramSecureInputByAction.get(action.actionId);
+    const options = telegramSecureInputFinalDeliveryOptions(message);
+    if (pending === undefined || pending.captureKey !== this.#telegramSecureInputCaptureKey(message)) {
+      return this.#telegramSecureInputReply(adapter, message, "This secure-input button is stale. Retry the original task.", options);
+    }
+
+    if (action.action === "arm") {
+      if (pending.mode !== "direct-dm" || !this.#isAuthorizedTelegramDirectDm(message)) {
+        return this.#telegramSecureInputReply(adapter, message, "Direct Telegram intake is not authorized for this chat.", options);
+      }
+      pending.state = "armed";
+      return this.#telegramSecureInputReply(
+        adapter,
+        message,
+        [
+          `Send the credential as your next text message for ${pending.destinationLabel}.`,
+          "Telegram and the bot transport will receive it; deletion is best-effort, not a security guarantee."
+        ].join("\n"),
+        options
+      );
+    }
+
+    pending.settle({ status: "cancelled" });
+    const text = action.action === "cancel"
+      ? "Protected input request canceled."
+      : action.action === "destination-entry"
+        ? "Enter the credential directly in the visible destination, then retry or continue the task."
+        : "Continue from a trusted local EstaCoda surface; this Telegram request has been closed.";
+    return this.#telegramSecureInputReply(adapter, message, text, options);
+  }
+
+  #isAuthorizedTelegramDirectDm(message: ChannelMessage): boolean {
+    if (message.channel !== "telegram" || message.sessionKey.chatType !== "dm" || message.sessionKey.threadId !== undefined) {
+      return false;
+    }
+    const policy = this.#authPolicy.telegram;
+    const userIds = new Set(policy?.allowedUserIds ?? []);
+    const chatIds = new Set(policy?.allowedChatIds ?? []);
+    return userIds.size > 0 && chatIds.size > 0 &&
+      userIds.has(message.sender.id) && chatIds.has(message.sessionKey.chatId);
+  }
+
+  #isCapturableTelegramSecretMessage(message: ChannelMessage): boolean {
+    return message.text.length > 0 &&
+      (message.attachments?.length ?? 0) === 0 &&
+      (message.metadata?.telegram as { edited?: unknown } | undefined)?.edited !== true &&
+      telegramCallbackQueryId(message) === undefined;
+  }
+
+  #telegramSecureInputCaptureKey(message: ChannelMessage): string {
+    return JSON.stringify([
+      this.#profileId,
+      message.sessionKey.accountId ?? "telegram",
+      message.sessionKey.chatId,
+      message.sender.id
+    ]);
+  }
+
+  async #bestEffortDeleteTelegramSecret(adapter: ChannelAdapter, message: ChannelMessage): Promise<void> {
+    try {
+      await adapter.deleteInboundMessage?.(message);
+    } catch (error) {
+      this.#logWarning?.(`Telegram protected-input deletion failed (${boundedErrorClass(error)}).`);
+    }
+  }
+
+  async #isCapturedTelegramSecretReplay(message: ChannelMessage): Promise<boolean> {
+    if (message.channel !== "telegram") return false;
+    const key = this.#telegramCapturedMessageKey(message);
+    if (this.#capturedTelegramSecretMessages.has(key)) return true;
+    try {
+      return await this.#telegramSecureInputReplayStore?.has(message) ?? false;
+    } catch (error) {
+      this.#logWarning?.(`Telegram protected-input replay check failed (${boundedErrorClass(error)}).`);
+      // Fail closed: a transport replay must never become an ordinary model-visible message.
+      return true;
+    }
+  }
+
+  async #recordTelegramSecretCapture(message: ChannelMessage): Promise<boolean> {
+    const key = this.#telegramCapturedMessageKey(message);
+    if (this.#telegramSecureInputReplayStore === undefined) {
+      this.#logWarning?.("Telegram protected-input replay recording is unavailable.");
+      return false;
+    }
+    try {
+      await this.#telegramSecureInputReplayStore.record(message);
+      this.#capturedTelegramSecretMessages.add(key);
+      while (this.#capturedTelegramSecretMessages.size > 256) {
+        const oldest = this.#capturedTelegramSecretMessages.values().next().value as string | undefined;
+        if (oldest === undefined) break;
+        this.#capturedTelegramSecretMessages.delete(oldest);
+      }
+      return true;
+    } catch (error) {
+      this.#logWarning?.(`Telegram protected-input replay recording failed (${boundedErrorClass(error)}).`);
+      return false;
+    }
+  }
+
+  #telegramCapturedMessageKey(message: ChannelMessage): string {
+    return JSON.stringify([
+      message.sessionKey.accountId ?? "telegram",
+      message.sessionKey.chatId,
+      message.sender.id,
+      message.id
+    ]);
+  }
+
+  async #telegramSecureInputReply(
+    adapter: ChannelAdapter,
+    message: ChannelMessage,
+    text: string,
+    options?: ChannelTextOptions
+  ): Promise<ChannelGatewayResult> {
+    await this.#deliverText(adapter, message.sessionKey, text, options);
+    return {
+      sessionId: this.#sessionIdByTurnKey.get(stableSessionKey(message.sessionKey, this.#sessionPolicy)) ?? "",
+      replyText: text,
+      artifactCount: 0,
+      progressCount: 0
+    };
+  }
+
+  #expireSuppliedTelegramSecret(captureKey: string): void {
+    const supplied = this.#suppliedTelegramSecrets.get(captureKey);
+    if (supplied === undefined) return;
+    supplied.value.fill(0);
+    this.#suppliedTelegramSecrets.delete(captureKey);
+  }
+
+  #cancelAllTelegramSecureInput(): void {
+    for (const pending of [...this.#pendingTelegramSecureInputByAction.values()]) {
+      pending.settle({ status: "cancelled" });
+    }
+    for (const armed of this.#armedTelegramSecrets.values()) clearTimeout(armed.timer);
+    this.#armedTelegramSecrets.clear();
+    for (const [key] of this.#suppliedTelegramSecrets) this.#expireSuppliedTelegramSecret(key);
+  }
+
+  async #maybeDebounceText(message: ChannelMessage, adapter: ChannelAdapter): Promise<ChannelGatewayResult | undefined> {
+    const config = this.#textDebounceResolver?.(message.channel);
+    if (config === undefined || !this.#isEligibleForTextDebounce(message, config)) {
       return undefined;
     }
 
-    const key = this.#whatsappTextDebounceKey(message);
+    const key = this.#textDebounceKey(message);
     const text = message.text.trim();
-    const existing = this.#whatsappTextDebounceBuffers.get(key);
+    const existing = this.#textDebounceBuffers.get(key);
     if (existing !== undefined) {
       existing.textChunks.push(text);
       existing.messageIds.push(message.id);
+      existing.telegramMessageIds = [...new Set([
+        ...existing.telegramMessageIds,
+        ...telegramAttributionMessageIds(message)
+      ])].slice(0, 256);
       existing.latestReceivedAt = message.receivedAt;
       existing.totalChars += text.length;
       existing.adapter = adapter;
-      this.#resetWhatsAppTextDebounceTimer(key, existing);
+      existing.config = config;
+      this.#resetTextDebounceTimer(key, existing);
       if (
         existing.textChunks.length >= config.textDebounceMaxMessages ||
         existing.totalChars >= config.textDebounceMaxChars
       ) {
-        return await this.#flushWhatsAppTextDebounce(key) ?? { sessionId: "", replyText: "", artifactCount: 0, progressCount: 0 };
+        this.#startTextDebounceFlush(key);
       }
       return { sessionId: "", replyText: "", artifactCount: 0, progressCount: 0 };
     }
 
-    const buffer: WhatsAppTextDebounceBuffer = {
+    const buffer: ChannelTextDebounceBuffer = {
       adapter,
+      config,
       firstMessage: message,
       latestReceivedAt: message.receivedAt,
       textChunks: [text],
       messageIds: [message.id],
+      telegramMessageIds: telegramAttributionMessageIds(message),
       totalChars: text.length,
       timer: undefined
     };
-    this.#whatsappTextDebounceBuffers.set(key, buffer);
-    this.#resetWhatsAppTextDebounceTimer(key, buffer);
+    this.#textDebounceBuffers.set(key, buffer);
+    this.#resetTextDebounceTimer(key, buffer);
 
     if (
       buffer.textChunks.length >= config.textDebounceMaxMessages ||
       buffer.totalChars >= config.textDebounceMaxChars
     ) {
-      return await this.#flushWhatsAppTextDebounce(key) ?? { sessionId: "", replyText: "", artifactCount: 0, progressCount: 0 };
+      this.#startTextDebounceFlush(key);
     }
 
     return { sessionId: "", replyText: "", artifactCount: 0, progressCount: 0 };
   }
 
-  #isEligibleForWhatsAppTextDebounce(message: ChannelMessage): boolean {
-    if (message.channel !== "whatsapp") {
+  #isEligibleForTextDebounce(message: ChannelMessage, config: ChannelTextDebounceConfig): boolean {
+    if (config.textDebounceMs <= 0) {
       return false;
     }
-    if (this.#whatsappTextDebounce === undefined || this.#whatsappTextDebounce.textDebounceMs <= 0) {
-      return false;
-    }
+    return this.#isEligibleForNormalTextAggregation(message);
+  }
+
+  #isEligibleForNormalTextAggregation(message: ChannelMessage): boolean {
     if (message.attachments !== undefined && message.attachments.length > 0) {
+      return false;
+    }
+    if (typeof message.metadata?.interactionId === "string") {
+      return false;
+    }
+    const telegramMetadata = message.metadata?.telegram;
+    if (
+      typeof telegramMetadata === "object" &&
+      telegramMetadata !== null &&
+      (
+        typeof (telegramMetadata as { callbackQueryId?: unknown }).callbackQueryId === "string" ||
+        typeof (telegramMetadata as { mediaGroupId?: unknown }).mediaGroupId === "string" ||
+        telegramReplyToMessageId(message) !== undefined
+      )
+    ) {
       return false;
     }
     const text = message.text.trim();
@@ -1112,31 +1854,45 @@ export class ChannelGateway {
     return true;
   }
 
-  #whatsappTextDebounceKey(message: ChannelMessage): string {
-    return [
-      message.channel,
-      message.sessionKey.chatId,
-      message.sessionKey.userId ?? message.sender.id
-    ].join(":");
+  #textDebounceKey(message: ChannelMessage): string {
+    return JSON.stringify([
+      stableSessionKey(message.sessionKey, this.#sessionPolicy),
+      message.sender.id
+    ]);
   }
 
-  #resetWhatsAppTextDebounceTimer(key: string, buffer: WhatsAppTextDebounceBuffer): void {
+  #resetTextDebounceTimer(key: string, buffer: ChannelTextDebounceBuffer): void {
     if (buffer.timer !== undefined) {
       clearTimeout(buffer.timer);
     }
     buffer.timer = setTimeout(() => {
-      void this.#flushWhatsAppTextDebounce(key).catch((error) => {
-        this.#logWarning?.(`WhatsApp text debounce flush failed for ${key}: ${error instanceof Error ? error.message : String(error)}`);
-      });
-    }, this.#whatsappTextDebounce?.textDebounceMs ?? 0);
+      this.#startTextDebounceFlush(key);
+    }, buffer.config.textDebounceMs);
   }
 
-  async #flushWhatsAppTextDebounce(key: string): Promise<ChannelGatewayResult | undefined> {
-    const buffer = this.#whatsappTextDebounceBuffers.get(key);
+  #startTextDebounceFlush(key: string): void {
+    let ownedFlush: Promise<void>;
+    ownedFlush = this.#flushTextDebounce(key).then(
+      () => undefined,
+      (error) => {
+        try {
+          this.#logWarning?.(`Channel text debounce flush failed (${boundedErrorClass(error)}).`);
+        } catch {
+          // Logging must not turn an observed background failure into an unhandled rejection.
+        }
+      }
+    ).finally(() => {
+      this.#textDebounceFlushes.delete(ownedFlush);
+    });
+    this.#textDebounceFlushes.add(ownedFlush);
+  }
+
+  async #flushTextDebounce(key: string): Promise<ChannelGatewayResult | undefined> {
+    const buffer = this.#textDebounceBuffers.get(key);
     if (buffer === undefined) {
       return undefined;
     }
-    this.#whatsappTextDebounceBuffers.delete(key);
+    this.#textDebounceBuffers.delete(key);
     if (buffer.timer !== undefined) {
       clearTimeout(buffer.timer);
     }
@@ -1148,9 +1904,10 @@ export class ChannelGateway {
       receivedAt: buffer.latestReceivedAt,
       metadata: {
         ...(buffer.firstMessage.metadata ?? {}),
+        ...mergedTelegramAttributionMetadata(buffer.firstMessage, buffer.telegramMessageIds),
         debouncedMessageIds: buffer.messageIds,
         debounceSize: buffer.textChunks.length,
-        debounceWindowMs: this.#whatsappTextDebounce?.textDebounceMs ?? 0
+        debounceWindowMs: buffer.config.textDebounceMs
       }
     };
 
@@ -1162,6 +1919,18 @@ export class ChannelGateway {
     const normalizedSessionKey = normalizeSessionKey(processedMessage.sessionKey, this.#sessionPolicy);
 
     const policy = this.#busyPolicyResolver?.(processedMessage.channel) ?? { busyPolicy: "reject" as const, queueDepth: 3 };
+    const reapedSettledTurn = this.#reapSettledOrphanTurn(activeTurnKey);
+    if (reapedSettledTurn && this.#sessionMessageQueue.size(activeTurnKey) > 0) {
+      void this.#drainQueuedTurns(activeTurnKey).catch((error) => {
+        try {
+          this.#logWarning?.(
+            `Settled-turn recovery drain failed for session=${sessionKeyHash(activeTurnKey)} (${boundedErrorClass(error)}).`
+          );
+        } catch {
+          // Diagnostics must not interfere with gateway admission.
+        }
+      });
+    }
     const isBusy = this.#activeTurnRegistry !== undefined
       ? this.#activeTurnRegistry.isBusy(activeTurnKey)
       : this.#activeTurns.has(activeTurnKey);
@@ -1180,17 +1949,42 @@ export class ChannelGateway {
           return { sessionId: "", replyText: "", artifactCount: 0, progressCount: 0 };
         }
         case "queue": {
-          const policy = this.#busyPolicyResolver?.(processedMessage.channel) ?? { busyPolicy: "reject" as const, queueDepth: 3 };
-          const enqueueResult = this.#sessionMessageQueue.enqueue(
-            activeTurnKey,
-            processedMessage,
-            policy.busyPolicy,
-            policy.queueDepth
-          );
+          let enqueueResult;
+          try {
+            const beforeCommit = this.#beforeQueueMutation();
+            enqueueResult = policy.busyTextCoalescing?.enabled === true
+              ? this.#sessionMessageQueue.enqueueOrCoalesceText(
+                  activeTurnKey,
+                  processedMessage,
+                  policy.busyPolicy,
+                  policy.queueDepth,
+                  policy.busyTextCoalescing,
+                  this.#isEligibleForNormalTextAggregation(processedMessage),
+                  Date.now(),
+                  beforeCommit
+                )
+              : this.#sessionMessageQueue.enqueue(
+                  activeTurnKey,
+                  processedMessage,
+                  policy.busyPolicy,
+                  policy.queueDepth,
+                  beforeCommit
+                );
+          } catch (error) {
+            this.#warnQueueFailure("enqueue", error);
+            await this.#deliverQueuePersistenceFailure(adapter, normalizedSessionKey);
+            return { sessionId: "", replyText: "", artifactCount: 0, progressCount: 0 };
+          }
+          if (enqueueResult.duplicate === true) {
+            return { sessionId: "", replyText: "", artifactCount: 0, progressCount: 0 };
+          }
           if (enqueueResult.accepted) {
             const position = enqueueResult.position;
             if (position !== undefined) {
-              await this.#deliverText(adapter, normalizedSessionKey, `Queued (position ${position})`);
+              const queueText = enqueueResult.coalesced === true
+                ? `Added to queued message (position ${position})`
+                : `Queued (position ${position})`;
+              await this.#deliverText(adapter, normalizedSessionKey, queueText);
             }
           } else {
             await this.#deliverText(adapter, normalizedSessionKey, "Queue is full. Please try again later.");
@@ -1199,12 +1993,23 @@ export class ChannelGateway {
         }
         case "interrupt": {
           if (this.#hasActiveSubagentsForTurn(activeTurnKey)) {
-            const enqueueResult = this.#sessionMessageQueue.enqueue(
-              activeTurnKey,
-              processedMessage,
-              policy.busyPolicy,
-              policy.queueDepth
-            );
+            let enqueueResult;
+            try {
+              enqueueResult = this.#sessionMessageQueue.enqueue(
+                activeTurnKey,
+                processedMessage,
+                policy.busyPolicy,
+                policy.queueDepth,
+                this.#beforeQueueMutation()
+              );
+            } catch (error) {
+              this.#warnQueueFailure("enqueue", error);
+              await this.#deliverQueuePersistenceFailure(adapter, normalizedSessionKey);
+              return { sessionId: "", replyText: "", artifactCount: 0, progressCount: 0 };
+            }
+            if (enqueueResult.duplicate === true) {
+              return { sessionId: "", replyText: "", artifactCount: 0, progressCount: 0 };
+            }
             if (enqueueResult.accepted) {
               const position = enqueueResult.position;
               if (position !== undefined) {
@@ -1215,12 +2020,28 @@ export class ChannelGateway {
             }
             return { sessionId: "", replyText: "", artifactCount: 0, progressCount: 0 };
           }
+          let durableTurnId: string | undefined;
+          if (this.#pendingTurnStore !== undefined) {
+            try {
+              const turnIds = this.#durableTurnIds(this.#sessionMessageQueue.list(activeTurnKey));
+              const result = this.#pendingTurnStore.replacePending(turnIds, processedMessage);
+              if (!result.inserted) {
+                return { sessionId: "", replyText: "", artifactCount: 0, progressCount: 0 };
+              }
+              durableTurnId = result.turn.id;
+            } catch (error) {
+              this.#warnQueueFailure("interrupt replacement", error);
+              await this.#deliverQueuePersistenceFailure(adapter, normalizedSessionKey);
+              return { sessionId: "", replyText: "", artifactCount: 0, progressCount: 0 };
+            }
+          }
           this.#sessionMessageQueue.clear(activeTurnKey);
           this.#sessionMessageQueue.unshift(
             activeTurnKey,
             processedMessage,
             policy.busyPolicy,
-            policy.queueDepth
+            policy.queueDepth,
+            durableTurnId
           );
           // Abort active turn if one exists
           if (this.#activeTurnRegistry !== undefined) {
@@ -1239,7 +2060,19 @@ export class ChannelGateway {
     return this.#processTurn(processedMessage, adapter);
   }
 
-  async #processTurn(message: ChannelMessage, adapter: ChannelAdapter): Promise<ChannelGatewayResult> {
+  #processTurn(message: ChannelMessage, adapter: ChannelAdapter): Promise<ChannelGatewayResult> {
+    let settleOwner = (): void => {};
+    const owner = new Promise<void>((resolve) => {
+      settleOwner = resolve;
+    });
+    return this.#processOwnedTurn(message, adapter, owner).finally(settleOwner);
+  }
+
+  async #processOwnedTurn(
+    message: ChannelMessage,
+    adapter: ChannelAdapter,
+    owner: PromiseLike<void>
+  ): Promise<ChannelGatewayResult> {
     const activeTurnKey = stableSessionKey(message.sessionKey, this.#sessionPolicy);
     const normalizedSessionKey = normalizeSessionKey(message.sessionKey, this.#sessionPolicy);
 
@@ -1249,7 +2082,7 @@ export class ChannelGateway {
     let turnStarted = false;
 
     if (this.#activeTurnRegistry !== undefined) {
-      const startResult = this.#activeTurnRegistry.startTurn(activeTurnKey, controller);
+      const startResult = this.#activeTurnRegistry.startTurn(activeTurnKey, controller, undefined, owner);
       if (!startResult.ok) {
         if (this.#activeTurnRegistry.consumeBusyAck(activeTurnKey)) {
           const busyText = "EstaCoda is busy with another request in this chat. Please wait.";
@@ -1281,8 +2114,11 @@ export class ChannelGateway {
     let progressCount = 0;
     let terminalEventEmitted = false;
     let streamHandle: ChannelStreamingTextHandle | undefined;
+    let processingIndicatorActive = false;
     const turnStartTime = Date.now();
     try {
+      processingIndicatorActive = await this.#setInboundProcessingIndicator(adapter, message, true);
+
       // Session resolution
       sessionId = await this.#sessionStore.getOrCreateSessionId(message.sessionKey, {
         receivedAt: message.receivedAt
@@ -1321,6 +2157,8 @@ export class ChannelGateway {
         }
       }
 
+      const usageReplyToTurnId = (await this.#authorizedUsageReplyInspection(message, sessionId))?.usage.turnId;
+
       const securityPolicy = this.#securityPolicyFor(
         normalizedSessionKey,
         sessionId,
@@ -1335,6 +2173,7 @@ export class ChannelGateway {
         ? await this.#trustedWorkspace(message)
         : this.#trustedWorkspace;
       const debounceMetadata = readDebounceMetadata(message.metadata);
+      const busyTextCoalescingMetadata = readBusyTextCoalescingMetadata(message.metadata);
       streamHandle = this.#startStreamingTextIfEligible(adapter, normalizedSessionKey, controller.signal);
       const streamCallbacksWired = streamHandle !== undefined;
 
@@ -1345,12 +2184,29 @@ export class ChannelGateway {
         channel: message.channel,
         trustedWorkspace,
         signal: controller.signal,
+        ...(message.channel === "telegram" && runtime!.createSecureInputRequestHandler !== undefined
+          ? {
+              onSecureInputRequest: runtime!.createSecureInputRequestHandler({
+                collect: (request, signal, context) => this.#collectTelegramSecureInput({
+                  request,
+                  signal,
+                  destinationLabel: context.verifiedDestinationLabel,
+                  message,
+                  adapter
+                }),
+                userId: message.sender.id,
+                signal: controller.signal
+              })
+            }
+          : {}),
         inputMetadata: {
           surfaceType: message.sessionKey.platform,
           chatId: message.sessionKey.chatId,
           userId: message.sender.id,
           origin: message.text.startsWith("/") ? "command" : "message",
-          ...(debounceMetadata === undefined ? {} : debounceMetadata)
+          ...(debounceMetadata === undefined ? {} : debounceMetadata),
+          ...(busyTextCoalescingMetadata === undefined ? {} : busyTextCoalescingMetadata),
+          ...(usageReplyToTurnId === undefined ? {} : { usageReplyToTurnId })
         },
         ...(streamCallbacksWired
           ? {
@@ -1359,6 +2215,16 @@ export class ChannelGateway {
             }
           : {}),
         onEvent: async (event) => {
+          if (
+            this.#activeTurnRegistry !== undefined &&
+            turnId !== undefined &&
+            isTurnProgressEvent(event)
+          ) {
+            this.#activeTurnRegistry.markProgress(activeTurnKey, turnId);
+          }
+          if (processingIndicatorActive && event.kind === "agent-start") {
+            return;
+          }
           if (await this.#handleStreamingEvent(streamHandle, event, {
             deltasViaCallbacks: streamCallbacksWired,
             segmentBreaksViaCallbacks: streamCallbacksWired
@@ -1412,14 +2278,34 @@ export class ChannelGateway {
         !approvalBoundary &&
         !artifactBoundary;
 
+      let finalMessageIds = streamingDeliveredFinalText ? streamResult?.messageIds : undefined;
       if (!streamingDeliveredFinalText) {
-        await this.#deliverText(
+        const receipt = await this.#deliverText(
           adapter,
           normalizedSessionKey,
           streamResult?.fallbackText ?? response.text,
           message.channel === "whatsapp" ? { replyTo: message.id } : undefined
         );
+        finalMessageIds = [...new Set([
+          ...(streamResult?.messageIds ?? []),
+          ...(receipt?.messageIds ?? [])
+        ])];
       }
+      const responseTurnId = response.turnUsage?.turnId;
+      await this.#recordChannelMessageTurnBindings({
+        sessionKey: normalizedSessionKey,
+        platformMessageIds: telegramAttributionMessageIds(message),
+        direction: "inbound",
+        sessionId,
+        turnId: responseTurnId
+      });
+      await this.#recordChannelMessageTurnBindings({
+        sessionKey: normalizedSessionKey,
+        platformMessageIds: finalMessageIds,
+        direction: "outbound",
+        sessionId,
+        turnId: responseTurnId
+      });
       await adapter.send?.({
         conversationId: message.sessionKey.chatId,
         sessionKey: normalizedSessionKey,
@@ -1443,7 +2329,7 @@ export class ChannelGateway {
 
       if (pendingApproval !== undefined) {
         const approvalPrompt = renderApprovalPrompt(pendingApproval, adapter.kind === "telegram" ? "html" : "plain");
-        await this.#deliverText(adapter,
+        const approvalReceipt = await this.#deliverText(adapter,
           normalizedSessionKey,
           approvalPrompt,
           pendingApproval.approvalId === undefined
@@ -1455,6 +2341,13 @@ export class ChannelGateway {
                 actions: renderPendingApprovalActions(pendingApproval)
               }
         );
+        await this.#recordChannelMessageTurnBindings({
+          sessionKey: normalizedSessionKey,
+          platformMessageIds: approvalReceipt?.messageIds,
+          direction: "outbound",
+          sessionId,
+          turnId: responseTurnId
+        });
         await adapter.send?.({
           conversationId: message.sessionKey.chatId,
           sessionKey: normalizedSessionKey,
@@ -1544,7 +2437,12 @@ export class ChannelGateway {
 
       return { sessionId, replyText: errorText, artifactCount: 0, progressCount: 0 };
     } finally {
-      // 1. End the active turn
+      // 1. Clear any channel-native processing indicator.
+      if (processingIndicatorActive) {
+        await this.#setInboundProcessingIndicator(adapter, message, false);
+      }
+
+      // 2. End the active turn
       if (this.#activeTurnRegistry !== undefined && turnId !== undefined) {
         this.#activeTurnRegistry.endTurn(activeTurnKey, turnId);
       } else {
@@ -1553,7 +2451,7 @@ export class ChannelGateway {
         }
       }
 
-      // 2. Release runtime only if it was successfully acquired
+      // 3. Release runtime only if it was successfully acquired
       if (runtime !== undefined) {
         this.#activeRuntimeByTurnKey.delete(activeTurnKey);
         try {
@@ -1565,7 +2463,7 @@ export class ChannelGateway {
         }
       }
 
-      // 3. Drain queued turns only if this turn actually started
+      // 4. Drain queued turns only if this turn actually started
       // Fire-and-owned: the completed turn must resolve its receive promise
       // independently of how long the queue takes to drain.
       if (turnStarted) {
@@ -1578,6 +2476,29 @@ export class ChannelGateway {
         });
       }
     }
+  }
+
+  #reapSettledOrphanTurn(activeTurnKey: string): boolean {
+    if (
+      this.#activeTurnRegistry === undefined ||
+      this.#activeRuntimeByTurnKey.has(activeTurnKey)
+    ) {
+      return false;
+    }
+
+    const turn = this.#activeTurnRegistry.getTurn(activeTurnKey);
+    if (turn === undefined || !this.#activeTurnRegistry.reapSettledTurn(activeTurnKey, turn.turnId)) {
+      return false;
+    }
+
+    try {
+      this.#logWarning?.(
+        `Reaped settled orphan turn ${turn.turnId} for session=${sessionKeyHash(activeTurnKey)}.`
+      );
+    } catch {
+      // Diagnostics must not interfere with gateway admission.
+    }
+    return true;
   }
 
   async #runSessionHygiene(sessionId: string, signal: AbortSignal): Promise<Awaited<ReturnType<SessionHygieneService["run"]>> | undefined> {
@@ -1727,11 +2648,37 @@ export class ChannelGateway {
 
       this.#drainingQueue.add(activeTurnKey);
 
+      let durableClaim: PendingTurnRecord | undefined;
+      if (this.#pendingTurnStore !== undefined) {
+        if (queued.durableTurnId === undefined) {
+          this.#warnQueueFailure(
+            "claim",
+            new PendingTurnStoreError({ code: "state_conflict", operation: "claim" })
+          );
+          this.#drainingQueue.delete(activeTurnKey);
+          continue;
+        }
+        try {
+          durableClaim = this.#pendingTurnStore.claim(queued.durableTurnId);
+        } catch (error) {
+          this.#warnQueueFailure("claim", error);
+          this.#drainingQueue.delete(activeTurnKey);
+          if (!(error instanceof PendingTurnStoreError) || error.code !== "state_conflict") {
+            this.#sessionMessageQueue.unshiftQueued(activeTurnKey, queued);
+            return;
+          }
+          continue;
+        }
+      }
+
       let adapter: ChannelAdapter;
       try {
         adapter = this.#adapterFor(queued.channelKind);
       } catch {
-        this.#logWarning?.(`No adapter found for channel kind ${queued.channelKind}; dropping queued message`);
+        if (durableClaim !== undefined) {
+          this.#quarantineClaim(durableClaim.id);
+        }
+        this.#logWarning?.(`No adapter found for queued channel kind; quarantining queued message`);
         this.#drainingQueue.delete(activeTurnKey);
         continue;
       }
@@ -1747,19 +2694,34 @@ export class ChannelGateway {
       try {
         result = await turnPromise;
       } catch (err) {
-        this.#logWarning?.(`Queued turn failed for ${activeTurnKey}: ${err instanceof Error ? err.message : String(err)}`);
+        if (durableClaim !== undefined) {
+          this.#quarantineClaim(durableClaim.id);
+        }
+        this.#warnQueueFailure("execution", err);
         continue;
       }
 
       // If the turn didn't actually start (busy race), re-enqueue and stop draining
       if (result.sessionId === "") {
-        this.#sessionMessageQueue.unshift(
-          activeTurnKey,
-          queued.message,
-          queued.policyAtArrival,
-          queued.queueDepthAtArrival
-        );
+        if (durableClaim !== undefined) {
+          try {
+            this.#pendingTurnStore?.releaseClaim(durableClaim.id, durableClaim.claimId!);
+          } catch (error) {
+            this.#warnQueueFailure("claim release", error);
+            return;
+          }
+        }
+        this.#sessionMessageQueue.unshiftQueued(activeTurnKey, queued);
         return;
+      }
+
+      if (durableClaim !== undefined) {
+        try {
+          this.#pendingTurnStore?.complete(durableClaim.id, durableClaim.claimId!);
+        } catch (error) {
+          // The turn may have executed. Leave a claimed row so restart recovery quarantines it.
+          this.#warnQueueFailure("completion", error);
+        }
       }
 
       // Turn completed successfully. Loop to drain the next queued message.
@@ -2376,6 +3338,7 @@ export class ChannelGateway {
         "EstaCoda channel commands",
         "/help - show this help",
         "/status - show the active channel session",
+        "/usage [last|task <task-id>] - show recorded tokens and estimated cost; reply with /usage for one answer",
         "/model - choose a session model",
         "/model <provider>/<model> - set the model for this session",
         "/model clear - clear this session model override",
@@ -2397,6 +3360,7 @@ export class ChannelGateway {
         "/resume - show the latest interrupted-turn resume note",
         "/approve [once|session|always] - approve the pending gated action",
         "/deny - deny the pending gated action",
+        "/secret <label> - protect the next authorized private Telegram message",
         "/approvals - inspect current approval state",
         "/revoke <approval-id> - revoke a persistent approval",
         "/attach <code> - attach this chat to a CLI session via handoff code",
@@ -2420,6 +3384,16 @@ export class ChannelGateway {
       const pointer = this.#surfacePointerStore !== undefined
         ? await this.#surfacePointerStore.getPointer(message.sessionKey.platform as SurfaceType, message.sessionKey.chatId)
         : undefined;
+      let durableQueueLine: string | undefined;
+      if (this.#pendingTurnStore !== undefined) {
+        try {
+          const counts = this.#pendingTurnStore.counts();
+          durableQueueLine = `Durable queue: ${counts.pending} pending, ${counts.claimed} claimed, ${counts.uncertain} uncertain`;
+        } catch (error) {
+          this.#warnQueueFailure("status", error);
+          durableQueueLine = "Durable queue: unavailable";
+        }
+      }
       const text = [
         "EstaCoda channel status",
         `Channel: ${message.channel}`,
@@ -2428,6 +3402,7 @@ export class ChannelGateway {
         pointer !== undefined ? `Attached to: ${pointer.sessionId} (since ${pointer.attachedAt})` : "Session: independent",
         pointer?.homeDelivery !== undefined ? `Home delivery: ${pointer.homeDelivery}` : undefined,
         `YOLO mode: ${this.#isYoloEnabled(message.sessionKey, sessionId) ? "on" : "off"}`,
+        durableQueueLine,
         ...this.#activeSubagentStatusLines(message, sessionId)
       ].filter((line) => line !== undefined).join("\n");
       await this.#deliverText(adapter, message.sessionKey, text);
@@ -2438,6 +3413,51 @@ export class ChannelGateway {
         artifactCount: 0,
         progressCount: 0
       };
+    }
+
+    if (command === "/usage") {
+      const sessionId = await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt });
+      const args = parseGatewayCommandArgs(message.text);
+      const replyRequested = args.length === 0 && telegramReplyToMessageId(message) !== undefined;
+      const valid = args.length === 0 ||
+        (args.length === 1 && args[0]?.toLowerCase() === "last") ||
+        (args.length === 2 && args[0]?.toLowerCase() === "task" && (args[1]?.length ?? 0) > 0);
+      if (!valid) {
+        const text = "Usage: /usage | /usage last | /usage task <task-id>";
+        await this.#deliverText(adapter, message.sessionKey, text);
+        return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
+      }
+
+      let inspection: UsageInspection | undefined;
+      try {
+        const repliedInspection = replyRequested
+          ? await this.#authorizedUsageReplyInspection(message, sessionId)
+          : undefined;
+        inspection = this.#usageInspector === undefined
+          ? undefined
+          : replyRequested
+            ? repliedInspection === undefined
+              ? undefined
+              : { ...repliedInspection, selection: "replied" }
+            : args.length === 0
+              ? await this.#usageInspector.inspectSession(sessionId)
+            : args[0]?.toLowerCase() === "last"
+              ? await this.#usageInspector.inspectLatestTurn(sessionId)
+              : await this.#usageInspector.inspectTask(sessionId, args[1]!);
+      } catch {
+        inspection = undefined;
+      }
+      const text = inspection === undefined
+        ? replyRequested
+          ? "No referenced turn is available in this session. Reply to an attributed Telegram message and send /usage again."
+          : args[0]?.toLowerCase() === "task"
+          ? "Task usage is unavailable for this session."
+          : args[0]?.toLowerCase() === "last"
+            ? "No completed turn usage is available in this session."
+            : "Session usage is unavailable."
+        : formatUsageInspection(inspection);
+      await this.#deliverText(adapter, message.sessionKey, text);
+      return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
     }
 
     if (command === "/yolo") {
@@ -3130,6 +4150,18 @@ export class ChannelGateway {
       const queueSize = this.#sessionMessageQueue.size(key);
       if (queueSize > 0) {
         // No active turn, but queued messages: clear them
+        if (this.#pendingTurnStore !== undefined) {
+          try {
+            this.#pendingTurnStore.clearPendingTurns(
+              this.#durableTurnIds(this.#sessionMessageQueue.list(key))
+            );
+          } catch (error) {
+            this.#warnQueueFailure("clear", error);
+            const text = "Unable to clear the durable queue safely. Please try again.";
+            await this.#deliverText(adapter, message.sessionKey, text);
+            return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
+          }
+        }
         this.#sessionMessageQueue.clear(key);
         const text = `Stopped. Cleared ${queueSize} queued message${queueSize === 1 ? "" : "s"}.`;
         await this.#deliverText(adapter, message.sessionKey, text);
@@ -3829,6 +4861,19 @@ export class ChannelGateway {
   }
 }
 
+function isTurnProgressEvent(event: RuntimeEvent): boolean {
+  return event.kind === "agent-start" ||
+    event.kind === "tool-start" ||
+    event.kind === "tool-result" ||
+    event.kind === "provider-attempt" ||
+    event.kind === "provider-token" ||
+    event.kind === "provider-tool-call" ||
+    event.kind === "provider-result" ||
+    event.kind === "session-compacted" ||
+    event.kind === "memory-curation" ||
+    event.kind === "delegation-progress";
+}
+
 function yoloSessionKey(stableKey: string, sessionId: string): string {
   return `${stableKey}:${sessionId}`;
 }
@@ -3937,6 +4982,66 @@ function modelPickerTelegramCallbackMessageId(message: ChannelMessage): string |
     return messageId;
   }
   return undefined;
+}
+
+function telegramCallbackQueryId(message: ChannelMessage): string | undefined {
+  const telegram = message.metadata?.telegram;
+  if (typeof telegram !== "object" || telegram === null) return undefined;
+  const value = (telegram as { callbackQueryId?: unknown }).callbackQueryId;
+  return typeof value === "string" && value.length > 0 ? value : undefined;
+}
+
+function telegramSecureInputFinalDeliveryOptions(message: ChannelMessage): ChannelTextOptions {
+  const editMessageId = modelPickerTelegramCallbackMessageId(message);
+  return {
+    actions: [],
+    ...(editMessageId === undefined ? {} : { editMessageId })
+  };
+}
+
+function parseTelegramSecretCommand(text: string): string | undefined {
+  const match = text.match(/^\/secret(?:@\w+)?(?:\s+(.*))?$/u);
+  if (match === null) return undefined;
+  return (match[1] ?? "")
+    .replace(/[\u0000-\u001F\u007F]/gu, " ")
+    .replace(/\s+/gu, " ")
+    .trim()
+    .slice(0, 80);
+}
+
+function renderTelegramSecureInputPrompt(
+  snapshot: SecureInputRequestSnapshot,
+  destinationLabel: string,
+  mode: PendingTelegramSecureInput["mode"]
+): string {
+  const kind = snapshot.request.kind.replaceAll("-", " ");
+  const storage = snapshot.request.retention === "use-once"
+    ? "Not saved"
+    : snapshot.request.retention === "destination-managed"
+      ? "Managed by destination"
+      : "Profile secret store (explicit authorization required)";
+  if (mode === "direct-dm") {
+    return [
+      "🔐 Send credential here",
+      "",
+      `Your next message can be used once for: ${kind}`,
+      `Destination: ${destinationLabel}`,
+      `Storage: ${storage}`,
+      "",
+      "Telegram and the bot transport will receive the value.",
+      "EstaCoda keeps it out of model context and local history. Deletion is best-effort."
+    ].join("\n");
+  }
+  return [
+    "🔐 Secure input required",
+    "",
+    `${snapshot.request.purpose}`,
+    `Credential: ${kind}`,
+    `Destination: ${destinationLabel}`,
+    `Storage: ${storage}`,
+    "",
+    "The credential will not be collected through Telegram in this mode."
+  ].join("\n");
 }
 
 function modelPickerModelNavigationRows(providerId: string, page: number, totalPages: number): ChannelTextAction[][] {
@@ -4232,12 +5337,46 @@ function readDebounceMetadata(metadata: Record<string, unknown> | undefined): {
   };
 }
 
-function parseGatewayCommand(text: string): "/help" | "/status" | "/memory" | "/sessions" | "/switch" | "/search" | "/compact" | "/new" | "/reset" | "/reload-mcp" | "/resume" | "/stop" | "/approve" | "/deny" | "/commands" | "/approvals" | "/revoke" | "/trust" | "/untrust" | "/workspace.trust.grant" | "/workspace.trust.revoke" | "/workspace.trust.status" | "/yolo" | "/cron" | "/attach" | "/detach" | "/sethome" | "/diagnostics" | undefined {
+function readBusyTextCoalescingMetadata(metadata: Record<string, unknown> | undefined): {
+  busyTextCoalescedMessageIds: string[];
+  busyTextCoalescedReceivedAts: string[];
+  busyTextCoalescingSize: number;
+  busyTextCoalescingWindowMs: number;
+} | undefined {
+  const ids = metadata?.busyTextCoalescedMessageIds;
+  const receivedAts = metadata?.busyTextCoalescedReceivedAts;
+  const size = metadata?.busyTextCoalescingSize;
+  const windowMs = metadata?.busyTextCoalescingWindowMs;
+  if (
+    !Array.isArray(ids) ||
+    ids.some((id) => typeof id !== "string") ||
+    !Array.isArray(receivedAts) ||
+    receivedAts.some((receivedAt) => typeof receivedAt !== "string") ||
+    ids.length !== receivedAts.length ||
+    ids.length !== size ||
+    ids.length < 2 ||
+    typeof size !== "number" ||
+    !Number.isFinite(size) ||
+    typeof windowMs !== "number" ||
+    !Number.isFinite(windowMs)
+  ) {
+    return undefined;
+  }
+  return {
+    busyTextCoalescedMessageIds: ids.slice(0, 100),
+    busyTextCoalescedReceivedAts: receivedAts.slice(0, 100),
+    busyTextCoalescingSize: Math.max(0, Math.trunc(size)),
+    busyTextCoalescingWindowMs: Math.max(0, Math.trunc(windowMs))
+  };
+}
+
+function parseGatewayCommand(text: string): "/help" | "/status" | "/usage" | "/memory" | "/sessions" | "/switch" | "/search" | "/compact" | "/new" | "/reset" | "/reload-mcp" | "/resume" | "/stop" | "/approve" | "/deny" | "/commands" | "/approvals" | "/revoke" | "/trust" | "/untrust" | "/workspace.trust.grant" | "/workspace.trust.revoke" | "/workspace.trust.status" | "/yolo" | "/cron" | "/attach" | "/detach" | "/sethome" | "/diagnostics" | undefined {
   const token = text.trim().split(/\s+/u)[0]?.toLowerCase();
 
   if (
     token === "/help" ||
     token === "/status" ||
+    token === "/usage" ||
     token === "/memory" ||
     token === "/sessions" ||
     token === "/switch" ||
@@ -4269,6 +5408,16 @@ function parseGatewayCommand(text: string): "/help" | "/status" | "/memory" | "/
   }
 
   return undefined;
+}
+
+function telegramReplyToMessageId(message: ChannelMessage): string | undefined {
+  if (message.channel !== "telegram") return undefined;
+  const telegram = message.metadata?.telegram;
+  if (telegram === null || typeof telegram !== "object" || Array.isArray(telegram)) return undefined;
+  const value = (telegram as { replyToMessageId?: unknown }).replyToMessageId;
+  return typeof value === "number" && Number.isSafeInteger(value) && value > 0
+    ? String(value)
+    : undefined;
 }
 
 function parseGatewayCommandArgs(text: string): string[] {
@@ -4514,6 +5663,7 @@ export function telegramGatewayCommands(): Array<{ command: string; description:
   return [
     { command: "/help", description: "Show Telegram help" },
     { command: "/status", description: "Show current session status" },
+    { command: "/usage", description: "Show tokens and estimated cost" },
     { command: "/model", description: "Choose a session model" },
     { command: "/memory", description: "Inspect and manage memory curation" },
     { command: "/sessions", description: "List recent chat sessions" },
@@ -4531,6 +5681,7 @@ export function telegramGatewayCommands(): Array<{ command: string; description:
     { command: "/resume", description: "Show the latest interrupted turn" },
     { command: "/approve", description: "Approve the pending gated action" },
     { command: "/deny", description: "Deny the pending gated action" },
+    { command: "/secret", description: "Protect the next private message" },
     { command: "/approvals", description: "Show approval state for this chat" },
     { command: "/revoke", description: "Revoke a persistent approval" },
     { command: "/commands", description: "Show available Telegram commands" },

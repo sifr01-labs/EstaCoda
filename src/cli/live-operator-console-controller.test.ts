@@ -1,9 +1,12 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
+import type { ExecutionPlan } from "../contracts/execution-plan.js";
+import type { SecureInputRequestSnapshot } from "../contracts/secure-input.js";
 import { resolveTokens } from "../theme/token-resolver.js";
 import {
   createDefaultStatusRailState,
   createOperatorConsoleRuntimeHost,
   createOperatorConsoleStyle,
+  OperatorConsoleSecureInputCollector,
   type TaskCardState,
 } from "../ui/papyrus/operator-console/index.js";
 import { LiveOperatorConsoleController } from "./live-operator-console-controller.js";
@@ -11,6 +14,37 @@ import { LiveOperatorConsoleController } from "./live-operator-console-controlle
 describe("LiveOperatorConsoleController", () => {
   afterEach(() => {
     vi.useRealTimers();
+  });
+
+  it("clears terminal Plans from the live region while unfinished Plans remain visible", () => {
+    const output = createOutput();
+    const { controller, runtimeHost } = createControllerFixture(output);
+    const active: ExecutionPlan = {
+      objective: "Authenticate the developer account",
+      originTurnId: "turn-1",
+      revision: 1,
+      status: "active",
+      items: [{ id: "verify", content: "Verify authentication", status: "in_progress" }],
+    };
+
+    controller.setExecutionPlan(active);
+    expect(runtimeHost.getState().executionPlan).toEqual(active);
+    expect(stripAnsi(output.text())).toContain("Plan · 0 / 1 · Authenticate the developer account");
+
+    output.clear();
+    controller.setExecutionPlan({
+      ...active,
+      revision: 2,
+      status: "completed",
+      items: [{ ...active.items[0]!, status: "completed" }],
+    });
+    expect(runtimeHost.getState().executionPlan).toBeUndefined();
+    expect(stripAnsi(output.text())).not.toContain("Plan · 0 / 1 · Authenticate the developer account");
+
+    controller.setExecutionPlan({ ...active, revision: 3, status: "abandoned" });
+    expect(runtimeHost.getState().executionPlan).toBeUndefined();
+    controller.setExecutionPlan({ ...active, revision: 4, status: "transferred" });
+    expect(runtimeHost.getState().executionPlan).toBeUndefined();
   });
 
   it("advances visible motion from elapsed time and the token cadence", () => {
@@ -108,6 +142,100 @@ describe("LiveOperatorConsoleController", () => {
     expect(output.text()).toBe("");
   });
 
+  it("redraws the secure-input lifecycle without exposing collected values", async () => {
+    const output = createOutput();
+    const { controller, runtimeHost } = createControllerFixture(output);
+    const collector = new OperatorConsoleSecureInputCollector(runtimeHost, {
+      onSurfaceChange: () => controller.refresh(),
+    });
+    const abort = new AbortController();
+    const context = {
+      verifiedDestinationLabel: "https://developers.mtn.com · Sign in",
+      group: { purpose: "Sign in to MTN", index: 1, total: 2 },
+    };
+
+    output.clear();
+    const emailResultPromise = collector.collect(
+      secureInputSnapshot("account-identifier", "email"),
+      abort.signal,
+      context
+    );
+    let rendered = stripAnsi(output.text());
+    expect(rendered).toContain("Secure input required");
+    expect(rendered).toContain("1 of 2");
+    expect(rendered).toContain("Flow · Sign in to MTN");
+    expect(rendered).toContain("✓ Verified destination");
+    expect(rendered).toContain("https://developers.mtn.com · Sign in");
+
+    collector.routeInput({ type: "key", key: "enter" });
+    output.clear();
+    collector.routeInput({ type: "key", key: "enter" });
+    expect(stripAnsi(output.text())).toContain("Enter a value or cancel this request.");
+
+    output.clear();
+    collector.routeInput({ type: "paste", text: "person@example.com" });
+    rendered = stripAnsi(output.text());
+    expect(rendered).toContain("Value · ••••••••••••••••••");
+    expect(rendered).toContain("Enter submit · Tab return · Esc cancel");
+    expect(rendered).toContain("Type in browser");
+    expect(rendered).not.toContain("person@example.com");
+    expect(JSON.stringify(runtimeHost.getState())).not.toContain("person@example.com");
+
+    output.clear();
+    collector.routeInput({ type: "key", key: "enter" });
+    const emailResult = await emailResultPromise;
+    expect(emailResult.status).toBe("provided");
+    if (emailResult.status === "provided") emailResult.value.fill(0);
+    expect(runtimeHost.getState().secureInput).toBeUndefined();
+    expect(stripAnsi(output.text())).not.toContain("Secure input required");
+
+    output.clear();
+    const passwordResultPromise = collector.collect(
+      secureInputSnapshot("password", "password"),
+      abort.signal,
+      { ...context, group: { ...context.group, index: 2 } }
+    );
+    rendered = stripAnsi(output.text());
+    expect(rendered).toContain("2 of 2");
+    expect(rendered).toContain("Password");
+
+    output.clear();
+    collector.routeInput({ type: "key", key: "escape" });
+    await expect(passwordResultPromise).resolves.toEqual({ status: "cancelled" });
+    expect(runtimeHost.getState().secureInput).toBeUndefined();
+    expect(stripAnsi(output.text())).not.toContain("Secure input required");
+    expect(runtimeHost.render().layout.regions.map((region) => region.kind)).toEqual(["prompt", "statusRail"]);
+    controller.clear();
+  });
+
+  it("pauses hidden live motion while secure input is awaiting the operator", async () => {
+    vi.useFakeTimers();
+    const output = createOutput();
+    const { controller, runtimeHost } = createControllerFixture(output);
+    const collector = new OperatorConsoleSecureInputCollector(runtimeHost, {
+      onSurfaceChange: () => controller.refresh(),
+    });
+    const abort = new AbortController();
+
+    controller.setTurnActivity({ phase: "thinking" });
+    const resultPromise = collector.collect(
+      secureInputSnapshot("password", "password"),
+      abort.signal,
+      { verifiedDestinationLabel: "https://developers.mtn.com · Sign in" }
+    );
+    output.clear();
+
+    vi.advanceTimersByTime(180);
+    expect(output.text()).toBe("");
+
+    abort.abort();
+    await expect(resultPromise).resolves.toEqual({ status: "cancelled" });
+    output.clear();
+    vi.advanceTimersByTime(180);
+    expect(output.text()).not.toBe("");
+    controller.clear();
+  });
+
   it("does not restart animation from stale turn activity after turn cleanup", () => {
     vi.useFakeTimers();
     const output = createOutput();
@@ -183,13 +311,13 @@ describe("LiveOperatorConsoleController", () => {
     });
 
     controller.refresh();
-    expect(stripAnsi(output.text())).toContain("• Subagent 1");
+    expect(stripAnsi(output.text())).toContain("• Research Company A");
     controller.resetActiveWork();
     output.clear();
     vi.advanceTimersByTime(105);
 
     expect(runtimeHost.getState().activeWork.items).toEqual([]);
-    expect(stripAnsi(output.text())).toContain("● Subagent 1");
+    expect(stripAnsi(output.text())).toContain("● Research Company A");
   });
 
   it("refreshes durable Task snapshots on their own timer", () => {
@@ -220,6 +348,7 @@ describe("LiveOperatorConsoleController", () => {
     const output = createOutput();
     let task = makeLiveTask({
       trace: {
+        spans: [],
         events: [
           { eventId: "event-1", kind: "read", label: "Read first file", category: "read", timestamp: "2026-07-20T10:00:00.000Z" },
           { eventId: "event-2", kind: "answer", label: "Summarized first file", category: "answer", timestamp: "2026-07-20T10:01:00.000Z" },
@@ -237,7 +366,7 @@ describe("LiveOperatorConsoleController", () => {
     controller.routeInput({ type: "key", key: "left" });
     expect(runtimeHost.getState().tasks.inspection).toMatchObject({
       followLive: false,
-      selectedTraceEventId: "event-1",
+      selectedTraceSpanId: "event-1",
     });
 
     output.resize(48, 16);
@@ -252,6 +381,7 @@ describe("LiveOperatorConsoleController", () => {
         pricingComplete: true,
       },
       trace: {
+        spans: [],
         events: [
           ...task.trace.events,
           { eventId: "event-3", kind: "finish", label: "Finished Task", category: "finish", timestamp: "2026-07-20T10:02:00.000Z" },
@@ -266,7 +396,7 @@ describe("LiveOperatorConsoleController", () => {
     expect(state.tasks.inspectedTaskId).toBe("T-live-1");
     expect(state.tasks.inspection).toMatchObject({
       followLive: false,
-      selectedTraceEventId: "event-1",
+      selectedTraceSpanId: "event-1",
     });
     expect(state.tasks.cards[0]).toMatchObject({
       status: "completed",
@@ -276,6 +406,40 @@ describe("LiveOperatorConsoleController", () => {
     expect(text).toContain("Read first file");
     expect(text).toContain("Return to live");
     expect(text).not.toContain("Finished Task");
+  });
+
+  it("dispatches confirmed Task controls through the authorized operator service", () => {
+    const output = createOutput();
+    let task = makeLiveTask();
+    const pause = vi.fn(() => {
+      task = { ...task, status: "paused", phase: { name: "paused" } };
+      return {} as never;
+    });
+    const cancel = vi.fn(() => {
+      task = { ...task, status: "cancelled", phase: { name: "cancelled" } };
+      return {} as never;
+    });
+    const retry = vi.fn();
+    const refreshTasks = vi.fn(() => true);
+    const { controller, runtimeHost } = createControllerFixture(output, {
+      getTasks: () => [task],
+      refreshTasks,
+      taskOperator: { pause, cancel, retry },
+      taskSessionId: "session-authorized",
+    });
+
+    controller.routeInput({ type: "key", key: "tab" });
+    expect(controller.routeInput({ type: "text", text: "p" })).toBe(true);
+    expect(pause).toHaveBeenCalledWith(task.taskId, "session-authorized");
+    expect(refreshTasks).toHaveBeenLastCalledWith(true);
+    expect(runtimeHost.getState().tasks.cards[0]?.status).toBe("paused");
+
+    expect(controller.routeInput({ type: "text", text: "c" })).toBe(true);
+    expect(cancel).not.toHaveBeenCalled();
+    expect(runtimeHost.getState().tasks.pendingControl).toEqual({ kind: "cancel", taskId: task.taskId });
+    expect(controller.routeInput({ type: "key", key: "enter" })).toBe(true);
+    expect(cancel).toHaveBeenCalledWith(task.taskId, "session-authorized");
+    expect(runtimeHost.getState().tasks.cards[0]?.status).toBe("cancelled");
   });
 
   it("returns prompt editing and hard interrupts after active Task inspection", () => {
@@ -444,7 +608,8 @@ describe("LiveOperatorConsoleController", () => {
     })]);
     const text = stripAnsi(output.text());
     expect(text).toContain("I will inspect the file first.");
-    expect(text).toContain("read_file");
+    expect(text).toContain("Files");
+    expect(text).toContain("Read");
     expect(text).toContain("src/app.ts");
     expect(text).not.toContain("Running tools");
 
@@ -698,7 +863,8 @@ describe("LiveOperatorConsoleController", () => {
     expect(runtimeHost.getState().terminal.height).toBe(24);
     expect(lines.length).toBeLessThanOrEqual(24);
     expect(text).not.toContain("Running tools");
-    expect(text).toContain("read_file");
+    expect(text).toContain("Files");
+    expect(text).toContain("Read");
     expect(text).toContain("src/file-19.ts");
     expect(runtimeHost.getState().streaming?.segments).toContainEqual(expect.objectContaining({
       text: "I will inspect the memory files.",
@@ -712,6 +878,7 @@ function createController(
     ConstructorParameters<typeof LiveOperatorConsoleController>[0],
     "animationIntervalMs" | "now" | "streamingRefreshIntervalMs" | "turnStartedAtMs"
       | "getTasks" | "refreshTasks" | "taskRefreshIntervalMs" | "onMouseModeChange"
+      | "taskOperator" | "taskSessionId" | "onTaskControlError"
   > = {}
 ): LiveOperatorConsoleController {
   return createControllerFixture(output, options).controller;
@@ -723,6 +890,7 @@ function createControllerFixture(
     ConstructorParameters<typeof LiveOperatorConsoleController>[0],
     "animationIntervalMs" | "now" | "streamingRefreshIntervalMs" | "turnStartedAtMs"
       | "getTasks" | "refreshTasks" | "taskRefreshIntervalMs" | "onMouseModeChange"
+      | "taskOperator" | "taskSessionId" | "onTaskControlError"
   > = {}
 ): {
   readonly controller: LiveOperatorConsoleController;
@@ -823,11 +991,12 @@ function makeLiveTask(overrides: Partial<TaskCardState> = {}): TaskCardState {
         updatedAt: "2026-07-20T10:00:03.000Z",
         startedAt: "2026-07-20T10:00:00.000Z",
         elapsedMs: 3_000,
+        maxAttempts: 3,
         usage,
       },
     }],
     subagents: [],
-    trace: { events: [], hasEarlierEvents: false },
+    trace: { events: [], spans: [], hasEarlierEvents: false },
     childTasks: [],
     recentActivity: [],
     currentToolCategory: "browser",
@@ -860,9 +1029,34 @@ function makeLiveTaskWithSubagent(): TaskCardState {
       currentToolCategory: "read",
       usage: { total: card.usage, currentAttempt: card.usage },
       attempts: [],
+      outcome: { usable: false, recovered: false, attemptsUsed: 0, maxAttempts: 3 },
       trace: [],
       results: [],
     }],
+  };
+}
+
+function secureInputSnapshot(
+  kind: SecureInputRequestSnapshot["request"]["kind"],
+  ref: string
+): SecureInputRequestSnapshot {
+  return {
+    id: `secure-${ref}`,
+    scope: { profileId: "default", sessionId: "session-1" },
+    request: {
+      kind,
+      purpose: "Sign in to MTN",
+      destination: {
+        type: "browser-field",
+        sessionId: "browser-1",
+        ref,
+        expectedOrigin: "https://developers.mtn.com",
+      },
+      retention: "use-once",
+    },
+    status: "awaiting_input",
+    requestedAt: "2026-08-13T10:00:00.000Z",
+    expiresAt: "2026-08-13T10:05:00.000Z",
   };
 }
 

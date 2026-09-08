@@ -152,6 +152,37 @@ describe("ProviderExecutor OAuth 401 refresh/retry", () => {
     expect(result.attempts[1].content).toBe("success-after-refresh");
   });
 
+  it("does not refresh, retry, or rewrite OAuth state in read-only credential mode", async () => {
+    await writeAuthJson(tmpDir, {
+      version: 1,
+      providers: {
+        "oauth-provider": {
+          authMethod: "oauth_device_pkce",
+          accessToken: "read-only-access",
+          refreshToken: "read-only-refresh",
+          expiresAt: new Date(Date.now() + 3600 * 1000).toISOString(),
+          source: "estacoda"
+        }
+      }
+    });
+    const before = await readFile(profileAuthPath(tmpDir), "utf8");
+    const adapter = createMockAdapter({
+      id: "oauth-provider",
+      responses: [
+        { ok: false, content: "Unauthorized", model: "test-model", provider: "oauth-provider", errorClass: "auth" },
+        { ok: true, content: "must-not-run", model: "test-model", provider: "oauth-provider" }
+      ]
+    });
+    registry.register(adapter);
+
+    const executor = new ProviderExecutor({ registry, homeDir: tmpDir, readOnlyCredentials: true });
+    const result = await executor.complete({ messages: [] }, {}, { primaryRoute: createOAuthRoute() });
+
+    expect(result.ok).toBe(false);
+    expect(adapter.calls).toHaveLength(1);
+    expect(await readFile(profileAuthPath(tmpDir), "utf8")).toBe(before);
+  });
+
   it("refreshes and writes OAuth token in the selected profile", async () => {
     writeActiveProfile("default", { homeDir: tmpDir });
     await writeAuthJson(tmpDir, {

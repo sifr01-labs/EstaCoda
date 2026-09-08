@@ -231,6 +231,50 @@ describe("IntentRouter governed route contract", () => {
   });
 
   it.each([
+    "Open the fictional developer portal we visited in previous sessions and log us in.",
+    "Spin up a browser and get us logged in to our dev account.",
+    "Navigate the browser to https://example.com/account.",
+    "Please log into my account on the website.",
+    "Use Chrome to click the Settings tab.",
+    "Open a visible browser and let me interact with it.",
+    "افتح بوابة المطورين وسجّل دخولنا.",
+    "افتح Chrome وانتقل إلى https://example.com."
+  ])("routes browser control request %s with high confidence", (prompt) => {
+    const route = routerWith().route(prompt);
+
+    expect(route.nativeIntent).toBe("browser-control");
+    expect(route.taskClass).toBe("browser-operation");
+    expect(route.confidence).toBeGreaterThanOrEqual(0.9);
+    expect(route.suggestedToolsets).toEqual(["browser"]);
+    expect(route.labels).toContain("browser-control");
+    expect(route.primarySkill).toBeUndefined();
+  });
+
+  it("labels browser authentication separately from ordinary navigation", () => {
+    const authentication = routerWith().route("Open the developer portal and sign us in.");
+    const arabicAuthentication = routerWith().route("افتح بوابة المطورين وسجّل دخولنا.");
+    const navigation = routerWith().route("Open https://example.com in the browser.");
+
+    expect(authentication.labels).toContain("authentication");
+    expect(arabicAuthentication.labels).toContain("authentication");
+    expect(navigation.labels).not.toContain("authentication");
+  });
+
+  it.each([
+    "Review the browser backend code.",
+    "How does the browser architecture work?",
+    "Investigate the CDP integration tests.",
+    "Refactor the Chromium session controller implementation.",
+    "اشرح لي معمارية browser backend."
+  ])("does not treat browser engineering request %s as browser control", (prompt) => {
+    const route = routerWith().route(prompt);
+
+    expect(route.nativeIntent).toBe("general");
+    expect(route.suggestedToolsets).not.toContain("browser");
+    expect(route.labels).not.toContain("browser-control");
+  });
+
+  it.each([
     ["please review this pull request", "code-review"],
     ["can you update the README docs for this command", "docs-writing"],
     ["validate this branch before merge", "release-validation"],
@@ -253,8 +297,30 @@ describe("IntentRouter governed route contract", () => {
     );
   });
 
-  it("leaves unrelated prompts as general without task-class evidence", () => {
-    const route = routerWith().route("hello there");
+  it.each([
+    ["Trace the intent router through this codebase.", "repo-inspection"],
+    ["افحص تنفيذ intent router في الكود.", "repo-inspection"],
+    ["Diagnose why the Kimi provider keeps failing.", "provider-diagnostics"],
+    ["حقق في سبب فشل مزوّد Kimi.", "provider-diagnostics"],
+    ["hello", "conversation"],
+    ["كيف حالك؟", "conversation"]
+  ] as const)("classifies bounded policy case %s as %s", (prompt, taskClass) => {
+    expect(routerWith().route(prompt).taskClass).toBe(taskClass);
+  });
+
+  it.each([
+    "Explain how Postman environments work.",
+    "Review this Postman request.",
+    "Tell me about provider design patterns.",
+    "Explain provider architecture patterns."
+  ])("does not false-positive provider or repository diagnostics for %s", (prompt) => {
+    const route = routerWith().route(prompt);
+    expect(route.taskClass).not.toBe("provider-diagnostics");
+    expect(route.taskClass).not.toBe("repo-inspection");
+  });
+
+  it("leaves unrelated non-conversational prompts as general without task-class evidence", () => {
+    const route = routerWith().route("please continue");
 
     expect(route.taskClass).toBe("general");
     expect(route.evidence.some((entry) => entry.kind === "task-class")).toBe(false);

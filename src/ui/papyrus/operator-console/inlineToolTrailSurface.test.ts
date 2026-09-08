@@ -16,7 +16,8 @@ describe("Papyrus operator console inline tool trail surface", () => {
       durationMs: 3_000,
     }, 72);
 
-    expect(row).toContain("◷ read_file");
+    expect(row).toContain("◷ Files");
+    expect(row).toContain("Read");
     expect(row).toContain("src/cli/session-loop.ts");
     expect(row).toContain("3s");
     expect(stringWidth(row)).toBeLessThanOrEqual(72);
@@ -40,9 +41,11 @@ describe("Papyrus operator console inline tool trail surface", () => {
       durationMs: 0,
     }, 56);
 
-    expect(succeeded).toContain("✓ read_file");
+    expect(succeeded).toContain("✓ Files");
+    expect(succeeded).toContain("Read");
     expect(succeeded).toContain("1s");
-    expect(failed).toContain("✗ terminal.run");
+    expect(failed).toContain("✗ Shell");
+    expect(failed).toContain("Run");
     expect(failed).toContain("denied");
     expect(failed).toContain("0ms");
   });
@@ -71,8 +74,14 @@ describe("Papyrus operator console inline tool trail surface", () => {
       durationMs: 0,
     }, 56, { style });
 
-    expect(succeeded).toContain(`${ansiFg(tokens.contract.severity.ok)}✓\x1b[0m read_file`);
-    expect(failed).toContain(`${ansiFg(tokens.contract.severity.error)}✗\x1b[0m terminal.run`);
+    expect(succeeded).toContain(`${ansiFg(tokens.contract.severity.ok)}✓\x1b[0m`);
+    expect(succeeded).toContain(`${ansiFg(tokens.contract.palette.accent)}Files`);
+    expect(succeeded).toContain(`${ansiFg(tokens.contract.text.secondary)}Read`);
+    expect(succeeded).toContain(`${ansiFg(tokens.contract.text.muted)}src/app.ts`);
+    expect(succeeded).toContain(`${ansiFg(tokens.contract.text.muted)}1s\x1b[0m`);
+    expect(failed).toContain(`${ansiFg(tokens.contract.severity.error)}✗\x1b[0m`);
+    expect(failed).toContain(`${ansiFg(tokens.contract.palette.accent)}Shell`);
+    expect(failed).toContain(`${ansiFg(tokens.contract.text.secondary)}Run`);
     expect(stringWidth(succeeded)).toBeLessThanOrEqual(56);
     expect(stringWidth(failed)).toBeLessThanOrEqual(56);
   });

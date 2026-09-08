@@ -8,6 +8,7 @@ export type ActiveWorkCopy = {
   readonly duration: string;
   readonly running: string;
   readonly completed: string;
+  readonly succeeded: string;
   readonly active: string;
   readonly done: string;
   readonly failed: string;
@@ -28,6 +29,7 @@ const ENGLISH_ACTIVE_WORK_COPY: ActiveWorkCopy = {
   duration: "duration",
   running: "running",
   completed: "completed",
+  succeeded: "succeeded",
   active: "active",
   done: "done",
   failed: "failed",
@@ -48,6 +50,7 @@ const ARABIC_ACTIVE_WORK_COPY: ActiveWorkCopy = {
   duration: "المدة",
   running: "قيد التشغيل",
   completed: "اكتملت",
+  succeeded: "نجحت",
   active: "نشطة",
   done: "مكتملة",
   failed: "فشلت",

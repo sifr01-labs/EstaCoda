@@ -4,7 +4,7 @@ import type { Readable } from "node:stream";
 import type { Runtime } from "../runtime/create-runtime.js";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
 import type { SessionEvent } from "../contracts/session.js";
-import type { ToolResult } from "../contracts/tool.js";
+import type { ToolApprovalHandler, ToolResult } from "../contracts/tool.js";
 import type { ProviderExecutionSummary, ProviderId } from "../contracts/provider.js";
 import type { ModelSwitchContext } from "../providers/model-switch-resolver.js";
 import { renderSessionRecallResult } from "../session/session-recall-service.js";
@@ -56,6 +56,8 @@ import {
   createSubmittedSteerTranscriptBlock,
   ActiveWorkRuntimeEventMapper,
   formatPlainDelegationProgressEvent,
+  executionPlanFromRuntimeEvent,
+  formatPlainExecutionPlan,
   createOperatorConsoleRuntimeHost,
   createOperatorConsoleStyle,
   mapStartupDashboardViewModelToOperatorConsoleState,
@@ -63,19 +65,23 @@ import {
   renderContextCompactionStatusSurface,
   renderCompletedActiveWorkSurface,
   renderOperatorConsoleLines,
+  renderTranscriptSurface,
   routeSteerKey,
   type ContextCompactionStatusSurfaceState,
   type ContextCompactionSurfaceState,
   type OperatorConsoleStyle,
   type OperatorConsoleRuntimeHost,
+  OperatorConsoleSecureInputCollector,
   type QueuedSteerState,
   type SteerState,
+  type TaskControlIntent,
   type TurnActivityState,
 } from "../ui/papyrus/operator-console/index.js";
 import type { ParsedKeypress } from "../ui/input/parseKeypress.js";
 import { applyKeypress, createLineEditorState } from "../ui/input/lineEditor.js";
 import { createKeypressStreamDispatcher } from "../ui/input/keyPressStreamDispatcher.js";
 import { createTerminalLifecycle, type TerminalLifecycle } from "../ui/input/terminalLifecycle.js";
+import { moveEditableCursorVisual } from "../ui/papyrus/input/editableTextLayout.js";
 import { centerVisibleBlock, measureVisibleWidth, truncateVisible } from "../ui/renderers/layout.js";
 import { chromeCopy } from "../ui/cli-ui-copy.js";
 import { resolveShellHistoryMode } from "./shell-history-mode.js";
@@ -133,8 +139,15 @@ import type {
 import type { SessionCostSummary, TurnUsageSummary, UsageCostSummary } from "../contracts/usage-cost.js";
 import { mergeUsageCostSummaries, unavailableUsageCostSummary } from "../providers/provider-usage-projection.js";
 import { formatTurnUsageFooter } from "../ui/usage-cost-format.js";
-import { isolateLtr, isolateRtl } from "../ui/bidi.js";
+import { isolateAuto, isolateLtr, isolateRtl } from "../ui/bidi.js";
 import { resolveWorkspaceStatus } from "./workspace-status.js";
+import { listResumableSessions, resolveSessionForResume } from "../session/session-resume.js";
+import {
+  buildSessionPickerPrompt,
+  noResumableSessionsMessage,
+  SESSION_PICKER_LIMIT,
+} from "./session-picker.js";
+import { InteractiveSelectCancelledError } from "./interactive-select.js";
 
 export type SessionLoopOptions = {
   runtime: Runtime;
@@ -336,7 +349,13 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
   });
   let activeTurn: AbortController | undefined;
   let clearActiveTurnChrome: () => void = () => undefined;
+  let cleanupActiveTurn: () => void = () => undefined;
   let activeTurnCancelMessage = "Cancelling current turn. Press Ctrl+C again or type /exit to leave.";
+  let forcedSessionExitRequested = false;
+  let resolveForcedSessionExit!: (reason: SessionFinalizationReason) => void;
+  const forcedSessionExit = new Promise<SessionFinalizationReason>((resolve) => {
+    resolveForcedSessionExit = resolve;
+  });
   const operatorConsoleEnabled = options.operatorConsole?.enabled === true
     && renderer.capabilities.isTTY
     && !renderer.capabilities.isCI
@@ -435,10 +454,10 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
   let cachedTaskCards: readonly TaskCardState[] = [];
   let cachedTaskCardsAtMs = Number.NEGATIVE_INFINITY;
   let taskTurnScope = await initialTaskTurnScope(runtime);
-  const refreshOperatorConsoleTasks = (): boolean => {
+  const refreshOperatorConsoleTasks = (force = false): boolean => {
     void refreshSessionCost();
     const timestamp = Date.now();
-    if (cachedTaskRuntime === runtime &&
+    if (!force && cachedTaskRuntime === runtime &&
         timestamp - cachedTaskCardsAtMs < OPERATOR_CONSOLE_TASK_REFRESH_INTERVAL_MS) {
       return false;
     }
@@ -458,6 +477,9 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
   };
   const onOperatorConsoleApprovalIntent = async (intent: ApprovalIntent): Promise<void> => {
     if (intent.type !== "approve" && intent.type !== "reject") return;
+    if (intent.type === "approve" && intent.scope !== "once") {
+      throw new Error("Interactive Task approvals support approve-once only.");
+    }
     const taskApprovals = options.taskApprovals;
     if (taskApprovals === undefined) throw new Error("Interactive Task approvals are unavailable.");
     await taskApprovals.resolve({
@@ -465,6 +487,15 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
       authorizedSessionId: runtime.sessionId,
       decision: intent.type === "approve" ? "approved" : "denied"
     });
+  };
+  const onOperatorConsoleTaskIntent = (intent: TaskControlIntent): void => {
+    if (intent.type === "detachTask") return;
+    const taskOperator = runtime.taskOperator;
+    if (taskOperator === undefined) throw new Error("Durable Task controls are unavailable.");
+    if (intent.type === "pauseTask") taskOperator.pause(intent.taskId, runtime.sessionId);
+    else if (intent.type === "cancelTask") taskOperator.cancel(intent.taskId, runtime.sessionId);
+    else taskOperator.retry(intent.taskId, intent.stepId, runtime.sessionId);
+    refreshOperatorConsoleTasks(true);
   };
   const prompt = options.prompt ?? createInteractivePrompt({
     input: cliInput,
@@ -493,6 +524,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           getTasks: getOperatorConsoleTasks,
           getApprovals: getOperatorConsoleApprovals,
           onApprovalIntent: onOperatorConsoleApprovalIntent,
+          onTaskIntent: onOperatorConsoleTaskIntent,
           style: operatorConsoleStyle,
         },
       }),
@@ -506,10 +538,22 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
       .then(async (messages) => {
         if (runtime !== targetRuntime) return;
         for (const message of messages) {
-          const rendered = renderer.render(buildAssistantResponseViewModel({
-            label: targetRuntime.getStartup().agentName,
-            text: message.text,
-          }));
+          const rendered = operatorConsoleEnabled && message.trace !== undefined
+            ? renderTranscriptSurface([{
+                id: message.messageId,
+                role: "assistant",
+                text: message.text,
+                taskTrace: message.trace,
+              }], {
+                width: (output as { readonly columns?: number }).columns ?? renderer.capabilities.terminalWidth,
+                locale: renderer.locale === "ar" ? "ar" : "en",
+                style: operatorConsoleStyle,
+              }).join("\n")
+            : renderer.render(buildAssistantResponseViewModel({
+                label: targetRuntime.getStartup().agentName,
+                text: message.text,
+                taskTrace: message.trace,
+              }));
           if (prompt.writeDurable?.(rendered) !== true) {
             output.write(rendered.endsWith("\n") ? rendered : `${rendered}\n`);
           }
@@ -527,8 +571,22 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
     return taskSessionCompletionRefresh;
   };
   const close = options.close ?? (() => prompt.close?.());
+  const forceSessionExit = (reason: Extract<SessionFinalizationReason, "cli-exit" | "sigint">) => {
+    if (forcedSessionExitRequested) return;
+    forcedSessionExitRequested = true;
+    clearActiveTurnChrome();
+    activeTurn?.abort(reason === "sigint" ? "SIGINT" : "CLI exit");
+    cleanupActiveTurn();
+    enqueueRuntimeFinalization(runtime, reason, output);
+    output.write("\nEnding EstaCoda session.\n");
+    resolveForcedSessionExit(reason);
+  };
   const onSigint = () => {
     if (activeTurn !== undefined) {
+      if (activeTurn.signal.aborted) {
+        forceSessionExit("sigint");
+        return;
+      }
       clearActiveTurnChrome();
       activeTurn.abort("SIGINT");
       output.write(`\n${activeTurnCancelMessage}\n`);
@@ -681,6 +739,8 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
             getStatus: getOperatorConsoleStatus,
             refreshTasks: refreshOperatorConsoleTasks,
             getTasks: getOperatorConsoleTasks,
+            taskOperator: runtime.taskOperator,
+            taskSessionId: runtime.sessionId,
             turnStartedAtMs: now(),
             promptPlaceholder: COMPACTION_PROMPT_PLACEHOLDER,
           });
@@ -696,7 +756,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           : prompt;
         let shouldExit: Awaited<ReturnType<typeof handleSlashCommand>>;
         try {
-          shouldExit = await handleSlashCommand({
+          const slashCommand = handleSlashCommand({
             text,
             runtime,
             output,
@@ -729,6 +789,12 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
             },
             onSessionCompacted: () => applyCompactionRailReset()
           });
+          shouldExit = slashAbortController === undefined
+            ? await slashCommand
+            : await Promise.race([
+              slashCommand,
+              forcedSessionExit.then(() => true as const),
+            ]);
         } catch (error) {
           slashLiveFrame?.clear();
           if (isSetupConsoleExit(error)) {
@@ -824,11 +890,18 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
             getStatus: getOperatorConsoleStatus,
             refreshTasks: refreshOperatorConsoleTasks,
             getTasks: getOperatorConsoleTasks,
+            taskOperator: runtime.taskOperator,
+            taskSessionId: runtime.sessionId,
             onMouseModeChange: (active) => {
               operatorConsoleInputLifecycle?.setMouseTracking(active);
             },
             turnStartedAtMs,
           });
+        const secureInputCollector = operatorConsoleRuntimeHost === undefined
+          ? undefined
+          : new OperatorConsoleSecureInputCollector(operatorConsoleRuntimeHost, {
+              onSurfaceChange: () => operatorConsoleLiveFrame?.refresh(),
+            });
         let turnWasCancelled = false;
 
         function clearOperatorConsoleLiveFrame(): void {
@@ -934,6 +1007,10 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
             if (current === undefined) return;
             const intent = routeSteerKey(current, event);
             if (intent.type !== "submit") return;
+            if (intent.text.trim() === "/exit") {
+              forceSessionExit("cli-exit");
+              return;
+            }
             if (queued !== undefined || steeringRetryUsed || pendingSteeringNote !== undefined) {
               setOperatorConsoleSteerState(currentQueuedSteerState(queued ?? createQueuedSteerState(pendingSteeringNote ?? intent.text)));
               return;
@@ -954,7 +1031,35 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
               current?.mode === "drafting" ? current.draft : "",
               current?.mode === "drafting" ? current.cursorOffset : 0
             ),
-            event
+            event,
+            {
+              navigation: {
+                moveLeft: (inputLine) => moveEditableCursorVisual(
+                  inputLine.text,
+                  inputLine.cursor,
+                  "left",
+                  {
+                    maxCells: Math.max(
+                      1,
+                      (operatorConsoleRuntimeHost?.getState().terminal.width ?? 80) - 6
+                    ),
+                    wrap: true,
+                  }
+                ),
+                moveRight: (inputLine) => moveEditableCursorVisual(
+                  inputLine.text,
+                  inputLine.cursor,
+                  "right",
+                  {
+                    maxCells: Math.max(
+                      1,
+                      (operatorConsoleRuntimeHost?.getState().terminal.width ?? 80) - 6
+                    ),
+                    wrap: true,
+                  }
+                ),
+              },
+            }
           ).state;
           const unchanged = current?.mode === "drafting"
             ? line.text === current.draft && line.cursor === current.cursorOffset
@@ -984,6 +1089,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           const keypressDispatcher = createKeypressStreamDispatcher({
             onEvents: (events: readonly ParsedKeypress[]) => {
               for (const event of events) {
+                if (secureInputCollector?.routeInput(event) === true) continue;
                 if (operatorConsoleLiveFrame?.routeInput(event) === true) continue;
                 handleOperatorConsoleSteerKey(event);
               }
@@ -1031,11 +1137,123 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
         };
         clearActiveTurnChrome = clearSpinner;
 
+        const turnController = activeTurn;
+        let activeTurnCleanedUp = false;
+        const cleanupCurrentActiveTurn = () => {
+          if (activeTurnCleanedUp) return;
+          activeTurnCleanedUp = true;
+          secureInputCollector?.dispose();
+          if (activeTurn === turnController) {
+            activeTurn = undefined;
+            activeTurnStartedAtMs = undefined;
+          }
+          disposeOperatorConsoleSteerInput?.();
+          disposeOperatorConsoleSteerInput = undefined;
+          operatorConsoleSteerState = undefined;
+          operatorConsoleLiveFrame?.setSteer(undefined);
+          clearSpinner();
+          if (cleanupActiveTurn === cleanupCurrentActiveTurn) {
+            cleanupActiveTurn = () => undefined;
+            clearActiveTurnChrome = () => undefined;
+          }
+        };
+        cleanupActiveTurn = cleanupCurrentActiveTurn;
+
         if (!wroteUserPromptRail) {
           output.write("\n");
           wroteUserPromptRail = true;
         }
         renderSpinner("thinking");
+
+        let approvalPromptQueue: Promise<void> = Promise.resolve();
+        const onApprovalRequest: ToolApprovalHandler = (request) => {
+          const pendingPrompt = approvalPromptQueue.then(async () => {
+            disposeOperatorConsoleSteerInput?.();
+            disposeOperatorConsoleSteerInput = undefined;
+            clearSpinner();
+            try {
+              const resolution = await maybeHandleApprovalGate({
+                runtime,
+                prompt,
+                input: cliInput,
+                output,
+                renderer,
+                approvalPromptAdapter,
+                locale: renderer.locale === "ar" ? "ar" : "en",
+                operatorConsoleHost: operatorConsoleRuntimeHost,
+                resumeExactTool: true,
+                execution: {
+                  tool: request.tool,
+                  input: request.input,
+                  decision: "ask",
+                  riskClass: request.riskClass,
+                  targetKey: request.targetKey,
+                  targetSummary: request.targetSummary,
+                  toolCallId: request.toolCallId,
+                  toolCallName: request.toolCallName
+                }
+              });
+              if (resolution.message !== undefined) {
+                output.write(`${resolution.message}\n\n`);
+              }
+              return resolution.retry ? "approved" as const : "denied" as const;
+            } finally {
+              if (activeTurn?.signal.aborted !== true) {
+                disposeOperatorConsoleSteerInput = startOperatorConsoleSteerInput();
+                renderSpinner("tool");
+              }
+            }
+          });
+          approvalPromptQueue = pendingPrompt.then(() => undefined, () => undefined);
+          return pendingPrompt;
+        };
+
+        const onSecureInputRequest = secureInputCollector === undefined || runtime.createSecureInputRequestHandler === undefined
+          ? undefined
+          : runtime.createSecureInputRequestHandler({
+              collect: secureInputCollector.collect,
+              signal: activeTurn.signal,
+              authorize: async ({ destinationLabel, assessment, transfer, transferGroup }) => {
+                disposeOperatorConsoleSteerInput?.();
+                disposeOperatorConsoleSteerInput = undefined;
+                clearSpinner();
+                try {
+                  const arabic = renderer.locale === "ar";
+                  const reason = transferGroup !== undefined
+                    ? (() => {
+                        const sources = [...new Set(transferGroup.items.map((item) => item.sourceLabel))].join(", ");
+                        const destinations = [...new Set(transferGroup.items.map((item) => item.destinationLabel))].join(", ");
+                        const handling = [...new Set(transferGroup.items.map((item) =>
+                          `${item.persistence} persistence / ${item.sharing} sharing`
+                        ))].join(", ");
+                        return arabic
+                          ? `نقل ${isolateAuto(String(transferGroup.items.length))} قيم محمية من ${isolateAuto(sources)} إلى ${isolateAuto(destinations)}. معالجة الوجهة: ${isolateAuto(handling)}. لا تحتفظ EstaCoda بذاكرة النقل.`
+                          : `Transfer ${transferGroup.items.length} protected values from ${sources} to ${destinations}. Destination handling: ${handling}. EstaCoda does not retain the transfer buffers.`;
+                      })()
+                    : transfer !== undefined
+                    ? arabic
+                      ? `نقل ${isolateAuto(transfer.credentialLabel)} من ${isolateAuto(transfer.sourceLabel)} إلى ${isolateAuto(destinationLabel)}. معالجة الوجهة: ${isolateAuto(`${transfer.persistence} / ${transfer.sharing}`)}. لا تحتفظ EstaCoda بذاكرة النقل.`
+                      : `Transfer ${transfer.credentialLabel} from ${transfer.sourceLabel} to ${destinationLabel}. Destination handling: ${transfer.persistence} persistence / ${transfer.sharing} sharing. EstaCoda does not retain the transfer buffer.`
+                    : assessment.reason === "persistent-secret-requires-approval"
+                    ? arabic
+                      ? "سيتم حفظ بيانات الاعتماد في مخزن الأسرار للملف الشخصي النشط."
+                      : "This will persist the credential in the active profile secret store."
+                    : arabic
+                      ? "يتطلب هذا التسليم المحمي تفويضاً صريحاً."
+                      : "This protected delivery requires explicit authorization.";
+                  const question = arabic
+                    ? `${isolateRtl(reason)}\n${isolateRtl(`هل تسمح بتسليم الإدخال المحمي إلى ${isolateAuto(destinationLabel)}؟`)} [y/N] `
+                    : `${reason}\nAuthorize protected ${transfer === undefined && transferGroup === undefined ? "input delivery" : "transfer"}? [y/N] `;
+                  const answer = await prompt(question);
+                  return /^(?:y|yes)$/iu.test(answer.trim()) ? "approved" : "denied";
+                } finally {
+                  if (activeTurn?.signal.aborted !== true) {
+                    disposeOperatorConsoleSteerInput = startOperatorConsoleSteerInput();
+                    renderSpinner("tool");
+                  }
+                }
+              }
+            });
 
         disposeOperatorConsoleSteerInput = startOperatorConsoleSteerInput();
         const responsePromise = runtime.handle({
@@ -1052,7 +1270,13 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
               : (reason) => {
                   operatorConsoleLiveFrame.flushStreamingSegment(reason);
                 },
+	            onApprovalRequest,
+	            onSecureInputRequest,
 	            onEvent: (event) => {
+	              const executionPlan = executionPlanFromRuntimeEvent(event);
+	              if (executionPlan !== undefined) {
+	                operatorConsoleLiveFrame?.setExecutionPlan(executionPlan ?? undefined);
+	              }
 	              if (event.kind === "context-window-usage") {
 	                latestContextUsage = { filled: event.usedTokens, total: event.totalTokens };
 	                refreshOperatorConsoleTransientSurface();
@@ -1072,7 +1296,9 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
 	                operatorConsoleLiveFrame.resetStreaming();
 	              }
               let newPhase: string | undefined;
-              if (operatorConsoleLiveFrame !== undefined && event.kind === "delegation-progress") {
+              if (executionPlan !== undefined) {
+                newPhase = undefined;
+              } else if (operatorConsoleLiveFrame !== undefined && event.kind === "delegation-progress") {
                 operatorConsoleLiveFrame.applyActiveWorkEvent(activeWorkEventMapper.buildDelegationProgress(event));
                 newPhase = "tool";
               } else if (operatorConsoleLiveFrame !== undefined && isToolActivityRuntimeEvent(event)) {
@@ -1096,16 +1322,14 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
             }
           })
 	          .finally(() => {
-	            activeTurn = undefined;
-	            activeTurnStartedAtMs = undefined;
-	            disposeOperatorConsoleSteerInput?.();
-	            disposeOperatorConsoleSteerInput = undefined;
-	            operatorConsoleSteerState = undefined;
-	            operatorConsoleLiveFrame?.setSteer(undefined);
-	            clearSpinner();
-	            clearActiveTurnChrome = () => undefined;
+	            cleanupCurrentActiveTurn();
 	          });
-        const response = await responsePromise;
+        const turnOutcome = await Promise.race([
+          responsePromise.then((response) => ({ kind: "response" as const, response })),
+          forcedSessionExit.then((reason) => ({ kind: "session-exit" as const, reason })),
+        ]);
+        if (turnOutcome.kind === "session-exit" || forcedSessionExitRequested) return;
+        const response = turnOutcome.response;
         if (response.turnUsage?.turnId !== undefined) {
           taskTurnScope.currentTurnIds.add(response.turnUsage.turnId);
         }
@@ -1136,6 +1360,10 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
           });
           writeTurnBoundaryRows(completedRows.length === 0 ? [] : completedRows);
           operatorConsoleLiveFrame?.resetActiveWork();
+        }
+        if (!operatorConsoleEnabled) {
+          const mission = formatPlainExecutionPlan(response.executionPlan, renderer.locale === "ar" ? "ar" : "en");
+          if (mission !== undefined) writeTurnBoundaryRows(mission.split("\n"));
         }
         lastProviderExecutionSummary = response.providerExecution === undefined
           ? undefined
@@ -1258,8 +1486,11 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
 	  } finally {
 	    process.removeListener("SIGINT", onSigint);
 	    stopIdleStatusTicker();
-	    await runtime.dispose();
-	    close();
+	    try {
+	      await runtime.dispose();
+	    } finally {
+	      close();
+	    }
 	  }
 }
 
@@ -1576,6 +1807,10 @@ export async function handleSlashCommand(input: {
       input.output.write(`${input.renderer.render(buildSkillsMenuViewModel(input.runtime, args.join(" ")))}\n\n`);
       return false;
     case "reload-mcp":
+      if (args[0] === "status") {
+        input.output.write(`${input.runtime.describe()}\n\n`);
+        return false;
+      }
       if (input.refreshRuntime === undefined) {
         input.output.write("This session cannot reload MCP configuration here.\n\n");
         return false;
@@ -1585,13 +1820,16 @@ export async function handleSlashCommand(input: {
         runtime: await input.refreshRuntime({ preserveSession: true }),
         notice: (runtime) => {
           const snapshots = runtime.inspectMcpServers();
-          const configured = snapshots.length;
+          const configured = snapshots.filter((snapshot) => snapshot.enabled).length;
           const ready = snapshots.filter((snapshot) => snapshot.available).length;
           return [
             "Reloaded MCP configuration for this session.",
             configured === 0
               ? "No MCP servers are configured."
               : `MCP servers ready: ${ready}/${configured}.`,
+            configured > ready
+              ? "Reconnection did not restore every connector. Review the errors below before retrying; your task remains saved."
+              : "Ask to continue your saved task when ready; reload does not replay actions.",
             "",
             runtime.describe()
           ].join("\n");
@@ -1699,6 +1937,14 @@ export async function handleSlashCommand(input: {
         input.output.write(`${await renderSessionRecall(input.runtime, args.slice(1).join(" "))}\n\n`);
         return false;
       }
+      if (
+        args.length === 0 &&
+        input.prompt?.select !== undefined &&
+        input.switchRuntime !== undefined &&
+        input.workspaceRoot !== undefined
+      ) {
+        return handleInteractiveSessionPicker(input);
+      }
       input.output.write(`${await renderSessionList(input.runtime)}\n\n`);
       return false;
     case "search":
@@ -1730,18 +1976,23 @@ export async function handleSlashCommand(input: {
         input.output.write("This session cannot switch sessions here.\n\n");
         return false;
       }
-      const targetSession = await input.runtime.sessionDb.getSession(target);
-      if (targetSession === undefined) {
-        input.output.write(`Session not found: ${target}\n\n`);
+      if (input.workspaceRoot === undefined) {
+        input.output.write("This session cannot verify the target workspace.\n\n");
         return false;
       }
       const activeProfileId = await runtimeProfileId(input.runtime);
-      if (targetSession.profileId !== activeProfileId) {
-        input.output.write(`Session not found in active profile: ${target}\n\n`);
+      const resolution = await resolveSessionForResume({
+        sessionDb: input.runtime.sessionDb,
+        profileId: activeProfileId,
+        workspaceRoot: input.workspaceRoot,
+        sessionId: target,
+      });
+      if (!resolution.ok) {
+        input.output.write("Session not available in the active profile and workspace.\n\n");
         return false;
       }
       return {
-        runtime: await input.switchRuntime(target),
+        runtime: await input.switchRuntime(resolution.sessionId),
         notice: (runtime) => [
           "Switched this session to an existing session.",
           `Session: ${runtime.sessionId}`,
@@ -2255,6 +2506,7 @@ async function maybeHandleApprovalGate(input: {
   approvalPromptAdapter: ApprovalPromptAdapter;
   locale?: import("../ui/tool-display.js").ToolDisplayLocale;
   operatorConsoleHost?: OperatorConsoleRuntimeHost;
+  resumeExactTool?: boolean;
   execution: ToolExecutionRecord | undefined;
 }): Promise<{
   retry: boolean;
@@ -2305,8 +2557,8 @@ async function maybeHandleApprovalGate(input: {
     return {
       retry: true,
       message: scope === "always"
-        ? "Approval granted (persistent for this workspace). Retrying now."
-        : `Approval granted (${scope}). Retrying now.`
+        ? `Approval granted (persistent for this workspace). ${input.resumeExactTool ? "Continuing now." : "Retrying now."}`
+        : `Approval granted (${scope}). ${input.resumeExactTool ? "Continuing now." : "Retrying now."}`
     };
   }
 }
@@ -2599,6 +2851,66 @@ async function handleBrowserCommand(input: {
   ].join("\n");
 }
 
+async function handleInteractiveSessionPicker(input: {
+  runtime: Runtime;
+  switchRuntime?: (sessionId: string) => Promise<Runtime>;
+  prompt?: Prompt;
+  output: NodeJS.WritableStream;
+  renderer: { locale?: "en" | "ar" };
+  workspaceRoot?: string;
+}): Promise<boolean | { runtime: Runtime; notice: (runtime: Runtime) => string }> {
+  const profileId = await runtimeProfileId(input.runtime);
+  const workspaceRoot = input.workspaceRoot!;
+  const sessions = await listResumableSessions({
+    sessionDb: input.runtime.sessionDb,
+    profileId,
+    workspaceRoot,
+    limit: SESSION_PICKER_LIMIT,
+    excludeSessionId: input.runtime.sessionId,
+  });
+  const locale = input.renderer.locale === "ar" ? "ar" : "en";
+  if (sessions.length === 0) {
+    input.output.write(`${noResumableSessionsMessage(locale)}\n\n`);
+    return false;
+  }
+
+  let selectedSessionId: string;
+  try {
+    selectedSessionId = await input.prompt!.select!(buildSessionPickerPrompt(sessions, locale));
+  } catch (error) {
+    if (error instanceof InteractiveSelectCancelledError) {
+      input.output.write(`${locale === "ar" ? "تم إلغاء اختيار الجلسة." : "Session selection cancelled."}\n\n`);
+      return false;
+    }
+    throw error;
+  }
+
+  const selected = sessions.find((session) => session.id === selectedSessionId);
+  if (selected === undefined) {
+    input.output.write(`${locale === "ar" ? "تعذر فتح الجلسة المحددة." : "The selected session could not be opened."}\n\n`);
+    return false;
+  }
+  const resolution = await resolveSessionForResume({
+    sessionDb: input.runtime.sessionDb,
+    profileId,
+    workspaceRoot,
+    sessionId: selected.id,
+  });
+  if (!resolution.ok) {
+    input.output.write(`${locale === "ar" ? "لم تعد الجلسة المحددة قابلة للاستئناف." : "The selected session is no longer resumable."}\n\n`);
+    return false;
+  }
+  return {
+    runtime: await input.switchRuntime!(resolution.sessionId),
+    notice: (runtime) => [
+      locale === "ar" ? "تم الانتقال إلى جلسة موجودة." : "Switched this session to an existing session.",
+      `Session: ${runtime.sessionId}`,
+      "",
+      runtime.describe(),
+    ].join("\n"),
+  };
+}
+
 async function renderLatestResume(runtime: Runtime): Promise<string> {
   const resumeNote = await runtime.latestResumeNote();
 
@@ -2875,6 +3187,13 @@ export function renderRuntimeEvent(
     case "context-estimate":
     case "context-window-usage":
       return undefined;
+    case "execution-plan-started":
+    case "execution-plan-updated":
+    case "execution-plan-completed":
+    case "execution-plan-blocked":
+    case "execution-plan-transferred":
+    case "execution-plan-abandoned":
+      return undefined;
     case "session-compacted":
       return undefined;
     case "delegation-progress": {
@@ -2910,6 +3229,13 @@ function operatorConsoleTransientPhaseForRuntimeEvent(event: RuntimeEvent): stri
       return event.ok || !event.willFallback ? "finalizing" : "provider";
     case "context-estimate":
     case "context-window-usage":
+      return undefined;
+    case "execution-plan-started":
+    case "execution-plan-updated":
+    case "execution-plan-completed":
+    case "execution-plan-blocked":
+    case "execution-plan-transferred":
+    case "execution-plan-abandoned":
       return undefined;
     case "session-compacted":
       return "background";
@@ -3030,7 +3356,20 @@ function delegatedTaskNotices(
       ? isolateRtl(`مهمة مفوضة ${isolateLtr(taskId)} · ${localizedTaskStatus(phase, "ar")}`)
       : `Delegated Task ${taskId} · ${localizedTaskStatus(phase, "en")}`);
     if (workerProgress !== undefined) {
-      const progress = workerProgress.completed === workerProgress.total
+      const progress = workerProgress.settled === workerProgress.total &&
+          (workerProgress.failed > 0 || workerProgress.cancelled > 0)
+        ? locale === "ar"
+          ? [
+              `نتائج صالحة: ${workerProgress.usable}`,
+              ...(workerProgress.failed === 0 ? [] : [`فشل: ${workerProgress.failed}`]),
+              ...(workerProgress.cancelled === 0 ? [] : [`أُلغي: ${workerProgress.cancelled}`]),
+            ].join(" · ")
+          : [
+              `${workerProgress.usable} usable ${workerProgress.usable === 1 ? "report" : "reports"}`,
+              ...(workerProgress.failed === 0 ? [] : [`${workerProgress.failed} failed`]),
+              ...(workerProgress.cancelled === 0 ? [] : [`${workerProgress.cancelled} cancelled`]),
+            ].join(" · ")
+        : workerProgress.completed === workerProgress.total
         ? locale === "ar"
           ? `اكتملت ${workerProgress.completed} من ${workerProgress.total} خطوات مفوضة`
           : `${workerProgress.completed} of ${workerProgress.total} delegated Steps completed`
@@ -3044,14 +3383,14 @@ function delegatedTaskNotices(
 }
 
 function localizedTaskStatus(status: string, locale: "en" | "ar"): string {
-  if (locale === "en") return status;
+  if (locale === "en") return status === "partial" ? "completed with warnings" : status;
   switch (status) {
     case "queued": return "قيد الانتظار";
     case "running": return "قيد التنفيذ";
     case "delegating": return "يتم تنفيذ العمل المفوض";
     case "synthesizing": return "يتم تجميع النتائج";
     case "completed": return "مكتملة";
-    case "partial": return "مكتملة جزئياً";
+    case "partial": return "اكتملت مع تحذيرات";
     case "failed": return "فشلت";
     case "cancelled": return "ملغاة";
     case "paused": return "متوقفة مؤقتاً";
@@ -3220,7 +3559,9 @@ function taskApprovalToCard(
     action: toolDisplayLabel(approval.toolName, locale),
     target: approval.targetPreview,
     risk: approval.riskClass,
-    summary
+    summary,
+    availableScopes: ["once"],
+    grantMatch: "target"
   };
 }
 
@@ -3286,6 +3627,10 @@ export function taskProjectionToCard(
       attempts: subagent.attempts.map(taskAttemptToCard),
       ...(subagent.latestAttempt === undefined ? {} : { latestAttempt: taskAttemptToCard(subagent.latestAttempt) }),
       ...(subagent.activeAttempt === undefined ? {} : { activeAttempt: taskAttemptToCard(subagent.activeAttempt) }),
+      outcome: {
+        ...subagent.outcome,
+        ...(subagent.outcome.failure === undefined ? {} : { failure: { ...subagent.outcome.failure } })
+      },
       trace: subagent.trace.map((event) => ({ ...event })),
       traceSummary: {
         totalEvents: subagent.traceSummary.totalEvents,
@@ -3296,6 +3641,10 @@ export function taskProjectionToCard(
     })),
     trace: {
       events: task.trace.events.map((event) => ({ ...event })),
+      spans: task.trace.spans.map((span) => ({
+        ...span,
+        scope: { ...span.scope },
+      })),
       totalEvents: task.trace.totalEvents,
       categoryCounts: { ...task.trace.categoryCounts },
       hasEarlierEvents: task.trace.hasEarlierEvents
@@ -3342,6 +3691,8 @@ function taskAttemptToCard(
     ...(attempt.currentActivity === undefined ? {} : { currentActivity: attempt.currentActivity }),
     ...(attempt.currentToolCategory === undefined ? {} : { currentToolCategory: attempt.currentToolCategory }),
     ...(attempt.assistantPreview === undefined ? {} : { assistantPreview: attempt.assistantPreview }),
+    maxAttempts: attempt.maxAttempts,
+    ...(attempt.failure === undefined ? {} : { failure: { ...attempt.failure } }),
     usage: taskUsageToCard(attempt.usage)
   };
 }

@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import type { ModelProfile, ProviderExecutionSummary } from "../contracts/provider.js";
@@ -80,6 +80,31 @@ type ProviderStatusMetadata = {
   sessionModelOverrideMessage?: string;
   providerExecution?: ProviderExecutionSummary;
 };
+
+describe("provider diagnostics tool policy metadata", () => {
+  it("marks provider, configuration, and diagnostic surfaces for bounded selection", () => {
+    const tools = createConfigTools({
+      workspaceRoot: process.cwd(),
+      homeDir: process.cwd(),
+      profileId: "default"
+    });
+    const providerNames = tools.filter((tool) => tool.toolsets.includes("provider")).map((tool) => tool.name);
+    const diagnosticNames = tools.filter((tool) => tool.toolsets.includes("diagnostics")).map((tool) => tool.name);
+
+    expect(providerNames).toEqual([
+      "config.provider.status",
+      "config.provider.execution_status",
+      "config.provider.setup"
+    ]);
+    expect(diagnosticNames).toEqual([
+      "config.provider.status",
+      "config.provider.execution_status",
+      "config.compression.status"
+    ]);
+    expect(tools.find((tool) => tool.name === "config.provider.setup")?.toolsets)
+      .toContain("configuration");
+  });
+});
 
 describe("config.provider.status", () => {
   it("reports profile config when no session override exists", async () => {
@@ -331,6 +356,41 @@ describe("config.web.setup", () => {
         apiKeyEnv: "sk-secret-value"
       }
     })).rejects.toThrow("Expected brave.apiKeyEnv to be a valid environment variable name");
+  });
+});
+
+describe("config.browser.setup", () => {
+  it("changes window visibility without removing existing browser settings", async () => {
+    const homeDir = await configHome({
+      model: { provider: "local", id: "qwen2.5:3b" },
+      browser: {
+        backend: "local-cdp",
+        cdpUrl: "http://127.0.0.1:9222",
+        launchExecutable: "/usr/bin/chromium",
+        launchArgs: ["--app=https://example.test"],
+        chromeFlags: ["--no-first-run"],
+        autoLaunch: true,
+        headless: true,
+        supervised: true
+      }
+    });
+    const tool = configTool("config.browser.setup", homeDir);
+
+    const result = await tool.run({ headless: false });
+
+    expect(result.content).toContain("Browser window: visible");
+    expect(result.metadata).toMatchObject({
+      browser: {
+        backend: "local-cdp",
+        cdpUrl: "http://127.0.0.1:9222",
+        launchExecutable: "/usr/bin/chromium",
+        launchArgs: ["--app=https://example.test"],
+        chromeFlags: ["--no-first-run"],
+        autoLaunch: true,
+        headless: false,
+        supervised: true
+      }
+    });
   });
 });
 
@@ -678,6 +738,134 @@ describe("config.compression.status", () => {
     const tools = createConfigTools({ workspaceRoot: "/tmp/workspace", homeDir: "/tmp/home" });
     expect(tools.map((tool) => tool.name)).toContain("config.compression.status");
     expect(tools.map((tool) => tool.name)).not.toContain("config.compression.setup");
+  });
+});
+
+describe("MCP capability configuration tools", () => {
+  it("reports connector lifecycle and current-turn exposure independently", async () => {
+    const homeDir = await configHome({
+      mcpServers: { postman: { transport: "http", url: "https://mcp.example.test" } }
+    });
+    const sessionDb = new InMemorySessionDB();
+    await sessionDb.createSession({ id: "session-1", profileId: "default" });
+    await sessionDb.appendEvent("session-1", {
+      kind: "provider-tool-inventory",
+      phase: "initial",
+      tools: ["config_mcp_status"],
+      addedTools: ["config_mcp_status"],
+      nativeSchemaTokens: 123,
+      connectors: [{
+        kind: "mcp",
+        id: "postman",
+        configured: true,
+        connected: false,
+        schemasRegistered: false,
+        available: false,
+        exposedThisTurn: false
+      }]
+    });
+    try {
+      const tools = createConfigTools({
+        workspaceRoot: homeDir,
+        homeDir,
+        profileId: "default",
+        sessionId: "session-1",
+        sessionDb,
+        mcpServerSnapshots: [{
+          name: "postman",
+          transport: "http",
+          configured: true,
+          enabled: true,
+          connected: false,
+          schemasRegistered: false,
+          toolCount: 0,
+          resourceCount: 0,
+          promptCount: 0,
+          tools: [],
+          capabilities: {
+            protectedDeliveryConfigured: false,
+            groupedDeliverySupported: false,
+            browserRelaySupported: false,
+            artifactRelayConfigured: false,
+            resultRedactionConfigured: false,
+            continuityConfigured: false,
+            verificationConfigured: false
+          },
+          available: false,
+          failureStage: "connection",
+          error: "connection failed"
+        }]
+      });
+      const status = await tools.find((tool) => tool.name === "config.mcp.status")?.run({});
+      expect(status?.content).toContain("configured: yes");
+      expect(status?.content).toContain("connected: no");
+      expect(status?.content).toContain("schemas registered: no");
+      expect(status?.content).toContain("available: no");
+      expect(status?.content).toContain("exposed this turn: no");
+      expect(status?.content).toContain("failure stage: connection");
+    } finally {
+      await rm(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it("exposes reviewed capability fields while keeping status metadata free of secrets and protected paths", async () => {
+    const secret = "mcp-config-secret-sentinel";
+    const homeDir = await configHome({
+      mcpServers: {
+        records: {
+          command: "records-mcp",
+          env: { API_TOKEN: secret },
+          headers: { Authorization: secret },
+          toolRiskClasses: {
+            updateRecords: "external-side-effect",
+            readRecords: "read-only-network"
+          },
+          protectedToolArguments: {
+            updateRecords: {
+              paths: ["/values/*/value"],
+              handling: { persistence: "destination-managed", sharing: "workspace" },
+              groupedDelivery: true,
+              browserRelay: true
+            }
+          },
+          artifactToolArguments: {
+            importSpec: {
+              paths: ["/files/*/content"],
+              allowedMimeTypes: ["application/json"],
+              maxBytes: 12 * 1024 * 1024
+            }
+          },
+          redactedToolResultPaths: { readRecords: ["/records/*/value"] },
+          continuityToolResultPaths: { readRecords: ["/records/*/id", "/records/*/name"] },
+          toolVerificationRelationships: { readRecords: ["updateRecords"] }
+        }
+      }
+    });
+    try {
+      const status = await configTool("config.mcp.status", homeDir).run({});
+      const serialized = JSON.stringify(status);
+      expect(status.content).toContain("protected delivery configured: yes");
+      expect(status.content).toContain("result redaction configured: yes");
+      expect(status.content).toContain("continuity configured: yes");
+      expect(status.content).toContain("artifact relay configured: yes");
+      expect(status.content).toContain("verification configured: yes");
+      expect(serialized).not.toContain(secret);
+      expect(serialized).not.toContain("/values/*/value");
+      expect(serialized).not.toContain("/records/*/value");
+      expect(serialized).not.toContain("/records/*/id");
+      expect(serialized).not.toContain("/files/*/content");
+
+      const setup = configTool("config.mcp.setup", homeDir);
+      const schema = JSON.stringify(setup.inputSchema);
+      expect(schema).toContain("protectedToolArguments");
+      expect(schema).toContain("artifactToolArguments");
+      expect(schema).toContain("redactedToolResultPaths");
+      expect(schema).toContain("continuityToolResultPaths");
+      expect(schema).toContain("toolVerificationRelationships");
+      expect(schema).toContain("toolRiskClasses");
+    } finally {
+      await rm(homeDir, { recursive: true, force: true });
+    }
   });
 });
 

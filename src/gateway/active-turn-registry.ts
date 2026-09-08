@@ -1,5 +1,5 @@
 export type ActiveTurnRegistryOptions = {
-  /** Stuck threshold in ms. Default 5 min (300_000). */
+  /** Inactivity threshold in ms. Default 5 min (300_000). */
   stuckThresholdMs?: number;
   /** Max stuck scans before a turn is flagged repeat-stuck. Default 3. */
   maxStuckChecks?: number;
@@ -15,6 +15,7 @@ export type ActiveTurn = {
   turnId: string;
   key: string;
   startedAt: number;
+  lastProgressAt: number;
   abortController?: AbortController;
   stuckCheckCount: number;
   busyAckSentAt?: number;
@@ -48,8 +49,15 @@ export type StuckTurnHistoryEntry = {
   wasAborted: boolean;
 };
 
+type ActiveTurnOwnership = {
+  turnId: string;
+  owner: PromiseLike<void>;
+  settled: boolean;
+};
+
 export class ActiveTurnRegistry {
   #activeTurns: Map<string, ActiveTurn>;
+  #turnOwnership: Map<string, ActiveTurnOwnership>;
   #history: StuckTurnHistoryEntry[];
   #abortedTurnIds: Set<string>;
 
@@ -66,6 +74,7 @@ export class ActiveTurnRegistry {
 
   constructor(options?: ActiveTurnRegistryOptions) {
     this.#activeTurns = new Map();
+    this.#turnOwnership = new Map();
     this.#history = [];
     this.#abortedTurnIds = new Set();
 
@@ -82,24 +91,61 @@ export class ActiveTurnRegistry {
 
   /** Attempt to start a turn for key.
    *  Returns busy if key already has an active turn. */
-  startTurn(key: string, abortController?: AbortController, metadata?: Record<string, unknown>): StartTurnResult {
+  startTurn(
+    key: string,
+    abortController?: AbortController,
+    metadata?: Record<string, unknown>,
+    owner?: PromiseLike<void>
+  ): StartTurnResult {
     const existing = this.#activeTurns.get(key);
     if (existing !== undefined) {
       return { ok: false, reason: "busy", currentTurnId: existing.turnId };
     }
 
     const turnId = this.#generateTurnId();
+    const startedAt = Date.now();
     const turn: ActiveTurn = {
       turnId,
       key,
-      startedAt: Date.now(),
+      startedAt,
+      lastProgressAt: startedAt,
       abortController,
       stuckCheckCount: 0,
       metadata,
     };
     this.#activeTurns.set(key, turn);
+    if (owner !== undefined) {
+      const ownership: ActiveTurnOwnership = {
+        turnId,
+        owner,
+        settled: false,
+      };
+      this.#turnOwnership.set(key, ownership);
+      void Promise.resolve(owner).then(
+        () => this.#recordOwnerSettlement(key, turnId, owner),
+        () => this.#recordOwnerSettlement(key, turnId, owner)
+      );
+    }
     this.#totalStarted++;
     return { ok: true, turnId };
+  }
+
+  /** Remove a retained registration only when its exact execution owner settled. */
+  reapSettledTurn(key: string, expectedTurnId: string): boolean {
+    const turn = this.#activeTurns.get(key);
+    const ownership = this.#turnOwnership.get(key);
+    if (
+      turn === undefined ||
+      turn.turnId !== expectedTurnId ||
+      ownership === undefined ||
+      ownership.turnId !== expectedTurnId ||
+      !ownership.settled
+    ) {
+      return false;
+    }
+
+    this.endTurn(key, expectedTurnId);
+    return true;
   }
 
   /** Update metadata for an active turn. No-op if turn not found or turnId mismatched. */
@@ -147,6 +193,7 @@ export class ActiveTurnRegistry {
     }
 
     this.#activeTurns.delete(key);
+    this.#turnOwnership.delete(key);
     this.#abortedTurnIds.delete(turn.turnId);
     this.#totalEnded++;
   }
@@ -159,6 +206,23 @@ export class ActiveTurnRegistry {
   /** Get the active turn for a key, or undefined. */
   getTurn(key: string): ActiveTurn | undefined {
     return this.#activeTurns.get(key);
+  }
+
+  /** Refresh the inactivity watchdog for the exact active turn.
+   *  Late progress from an older or already-aborted turn is ignored. */
+  markProgress(key: string, turnId: string): boolean {
+    const turn = this.#activeTurns.get(key);
+    if (
+      turn === undefined ||
+      turn.turnId !== turnId ||
+      this.#abortedTurnIds.has(turnId)
+    ) {
+      return false;
+    }
+
+    turn.lastProgressAt = Date.now();
+    turn.stuckCheckCount = 0;
+    return true;
   }
 
   /** Abort an active turn via its AbortController.
@@ -175,7 +239,7 @@ export class ActiveTurnRegistry {
     return { ok: true, turnId: turn.turnId };
   }
 
-  /** Scan active turns and return those exceeding stuckThresholdMs.
+  /** Scan active turns and return those inactive beyond stuckThresholdMs.
    *  Increments stuckCheckCount for each stuck turn found. */
   listStuckTurns(thresholdMs?: number): Array<ActiveTurn & { stuckForMs: number }> {
     const threshold = thresholdMs ?? this.#stuckThresholdMs;
@@ -183,7 +247,7 @@ export class ActiveTurnRegistry {
     const stuck: Array<ActiveTurn & { stuckForMs: number }> = [];
 
     for (const turn of this.#activeTurns.values()) {
-      const stuckForMs = now - turn.startedAt;
+      const stuckForMs = now - turn.lastProgressAt;
       if (stuckForMs > threshold) {
         turn.stuckCheckCount++;
         stuck.push({ ...turn, stuckForMs });
@@ -201,7 +265,7 @@ export class ActiveTurnRegistry {
 
     for (const turn of this.#activeTurns.values()) {
       if (turn.stuckCheckCount >= this.#maxStuckChecks) {
-        repeat.push({ ...turn, stuckForMs: now - turn.startedAt });
+        repeat.push({ ...turn, stuckForMs: now - turn.lastProgressAt });
       }
     }
 
@@ -248,7 +312,7 @@ export class ActiveTurnRegistry {
     const now = Date.now();
 
     for (const turn of this.#activeTurns.values()) {
-      if (now - turn.startedAt > this.#stuckThresholdMs) {
+      if (now - turn.lastProgressAt > this.#stuckThresholdMs) {
         stuckTurnCount++;
         if (turn.stuckCheckCount >= this.#maxStuckChecks) {
           repeatStuckCount++;
@@ -287,6 +351,7 @@ export class ActiveTurnRegistry {
   /** Remove all active turns and clear history. For testing / emergency reset. */
   clear(): void {
     this.#activeTurns.clear();
+    this.#turnOwnership.clear();
     this.#history.length = 0;
     this.#abortedTurnIds.clear();
     this.#totalStarted = 0;
@@ -297,5 +362,18 @@ export class ActiveTurnRegistry {
 
   #wasAborted(turnId: string): boolean {
     return this.#abortedTurnIds.has(turnId);
+  }
+
+  #recordOwnerSettlement(key: string, turnId: string, owner: PromiseLike<void>): void {
+    const turn = this.#activeTurns.get(key);
+    const ownership = this.#turnOwnership.get(key);
+    if (
+      turn?.turnId !== turnId ||
+      ownership?.turnId !== turnId ||
+      ownership.owner !== owner
+    ) {
+      return;
+    }
+    ownership.settled = true;
   }
 }

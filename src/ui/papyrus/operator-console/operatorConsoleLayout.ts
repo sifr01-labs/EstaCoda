@@ -12,6 +12,7 @@ import { getApprovalSurfaceDesiredHeight } from "./approvalSurface.js";
 import { getAttachmentSurfaceDesiredHeight } from "./attachmentSurface.js";
 import { getPromptSurfaceDesiredHeight } from "./promptSurface.js";
 import { getSetupPanelSurfaceDesiredHeight } from "./setupPanelSurface.js";
+import { getSecureInputSurfaceDesiredHeight } from "./secureInputSurface.js";
 import { getSlashSurfaceDesiredHeight } from "./slashSurface.js";
 import { getStartupDashboardSurfaceDesiredHeight } from "./startupDashboardSurface.js";
 import {
@@ -20,6 +21,7 @@ import {
   hasStreamingSurface,
 } from "./streamingSurface.js";
 import { getTurnActivitySurfaceDesiredHeight } from "./turnActivitySurface.js";
+import { getMissionSurfaceDesiredHeight } from "./missionSurface.js";
 import {
   getQueuedSteerSurfaceDesiredHeight,
   getSteerInputSurfaceDesiredHeight,
@@ -62,6 +64,7 @@ const STATUS_PRIORITY = 2;
 const INTERACTIVE_OPTIONAL_PRIORITY = 3;
 const APPROVAL_PRIORITY = 3;
 const TURN_ACTIVITY_PRIORITY = 3;
+const MISSION_PRIORITY = 3;
 const ACTIVE_WORK_PRIORITY = 4;
 const STREAMING_PRIORITY = 5;
 const ATTACHMENTS_PRIORITY = 5;
@@ -106,6 +109,19 @@ function createRegionDescriptors(
   state: OperatorConsoleState,
   terminal: TerminalMetrics
 ): readonly RegionDescriptor[] {
+  if (state.secureInput !== undefined) {
+    return [{
+      kind: "secureInput",
+      priority: PROMPT_PRIORITY,
+      minHeight: 1,
+      desiredHeight: getSecureInputSurfaceDesiredHeight(
+        state.secureInput,
+        terminal.width,
+        state.locale
+      ),
+    }];
+  }
+
   if (state.mode === "setup") {
     return createSetupRegionDescriptors(state, terminal);
   }
@@ -145,7 +161,7 @@ function createRegionDescriptors(
       kind: "transcript",
       priority: TRANSCRIPT_PRIORITY,
       minHeight: 1,
-      desiredHeight: getTranscriptSurfaceDesiredHeight(state.transcript, terminal.width),
+      desiredHeight: getTranscriptSurfaceDesiredHeight(state.transcript, terminal.width, state.locale),
     });
   }
 
@@ -165,7 +181,7 @@ function createRegionDescriptors(
       kind: "approvals",
       priority: APPROVAL_PRIORITY,
       minHeight: 1,
-      desiredHeight: getApprovalSurfaceDesiredHeight(state.approvals),
+      desiredHeight: getApprovalSurfaceDesiredHeight(state.approvals, terminal.width, state.locale),
     });
   }
 
@@ -175,6 +191,15 @@ function createRegionDescriptors(
       priority: TURN_ACTIVITY_PRIORITY,
       minHeight: 1,
       desiredHeight: getTurnActivitySurfaceDesiredHeight(state.turnActivity),
+    });
+  }
+
+  if (state.executionPlan !== undefined) {
+    descriptors.push({
+      kind: "mission",
+      priority: MISSION_PRIORITY,
+      minHeight: 1,
+      desiredHeight: getMissionSurfaceDesiredHeight(state.executionPlan),
     });
   }
 
@@ -334,32 +359,36 @@ function surfaceOrderIndex(kind: OperatorConsoleRegionKind): number {
       return 0;
     case "setupPanel":
       return 1;
-    case "transcript":
+    case "secureInput":
       return 2;
-    case "streaming":
+    case "transcript":
       return 3;
-    case "approvals":
+    case "streaming":
       return 4;
-    case "turnActivity":
+    case "approvals":
       return 5;
-    case "activeWork":
+    case "turnActivity":
       return 6;
-    case "queuedSteer":
+    case "mission":
       return 7;
-    case "taskCards":
+    case "activeWork":
       return 8;
-    case "taskInspection":
+    case "queuedSteer":
       return 9;
-    case "attachments":
+    case "taskCards":
       return 10;
-    case "promptGap":
+    case "taskInspection":
       return 11;
-    case "prompt":
+    case "attachments":
       return 12;
-    case "slashMenu":
+    case "promptGap":
       return 13;
-    case "statusRail":
+    case "prompt":
       return 14;
+    case "slashMenu":
+      return 15;
+    case "statusRail":
+      return 16;
   }
 }
 

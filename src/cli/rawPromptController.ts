@@ -24,13 +24,15 @@ import { RawPromptOverlayHost, RawPromptRenderLoop, type RawPromptOperatorConsol
 import { buildRawPromptSlashAutocompleteRows } from "./rawPromptSlashAutocomplete.js";
 import type { Prompt, PromptOptions } from "./prompt-contract.js";
 import { type GhostTextState, isGhostTextVisible } from "../ui/papyrus/input/ghostTextController.js";
+import { moveEditableCursorVisual } from "../ui/papyrus/input/editableTextLayout.js";
+import { stringWidth } from "../ui/papyrus/screen/stringWidth.js";
 import {
   applyPapyrusVimKeymap,
   createPapyrusVimKeymapState,
   type PapyrusVimKeymapState,
 } from "../ui/papyrus/input/vim/vimKeymap.js";
 import {
-  createApprovalFocusTarget,
+  createDefaultApprovalFocusTarget,
   createInitialFocusState,
   createInitialOperatorConsoleState,
   createPastedTextAttachment,
@@ -533,7 +535,7 @@ export class RawPromptController {
         const approval = approvals.find((candidate) => candidate.status === "pending");
         if (approval === undefined) return false;
         approvalErrors.delete(approval.id);
-        attachmentFocus = createInitialFocusState(createApprovalFocusTarget(approval.id, "approve"));
+        attachmentFocus = createInitialFocusState(createDefaultApprovalFocusTarget(approval.id));
         render();
         return true;
       };
@@ -603,6 +605,24 @@ export class RawPromptController {
         ).tasks;
         attachmentFocus = routed.state.focus;
         if (!routed.handled) return routed;
+        if (routed.taskIntent !== undefined) {
+          const handleTaskIntent = this.#operatorConsole.onTaskIntent;
+          if (handleTaskIntent !== undefined) {
+            try {
+              void Promise.resolve(handleTaskIntent(routed.taskIntent)).then(
+                () => {
+                  this.#operatorConsole?.refreshTasks?.(true);
+                  if (!settled) render();
+                },
+                () => {
+                  if (!settled) render();
+                }
+              );
+            } catch {
+              if (!settled) render();
+            }
+          }
+        }
         // A handled navigation event is also an explicit projection refresh: Task
         // data can change independently while the idle prompt is waiting.
         render();
@@ -663,7 +683,27 @@ export class RawPromptController {
             finish({ type: "cancel" });
             return;
           }
-          const result = applyKeypress(state, event);
+          const terminalWidth = currentTerminal().width;
+          const wrapEditableText = this.#operatorConsole?.enabled === true;
+          const maxCells = wrapEditableText
+            ? Math.max(1, terminalWidth - 2)
+            : Math.max(1, terminalWidth - stringWidth(question));
+          const result = applyKeypress(state, event, {
+            navigation: {
+              moveLeft: (line) => moveEditableCursorVisual(
+                line.text,
+                line.cursor,
+                "left",
+                { maxCells, wrap: wrapEditableText }
+              ),
+              moveRight: (line) => moveEditableCursorVisual(
+                line.text,
+                line.cursor,
+                "right",
+                { maxCells, wrap: wrapEditableText }
+              ),
+            },
+          });
           if (result.intent?.type === "submit") {
             finish(formatSubmittedText(result.intent.text));
             return;

@@ -505,7 +505,7 @@ function responsesMessageContent(message: ProviderRequest["messages"][number]): 
     const record = part as {
       type?: unknown;
       text?: unknown;
-      image_url?: { url?: unknown };
+      image_url?: { url?: unknown; detail?: unknown };
     };
 
     if (record.type === "text" && typeof record.text === "string") {
@@ -518,7 +518,10 @@ function responsesMessageContent(message: ProviderRequest["messages"][number]): 
     if (record.type === "image_url" && typeof record.image_url?.url === "string") {
       return {
         type: "input_image",
-        image_url: record.image_url.url
+        image_url: record.image_url.url,
+        ...(record.image_url.detail === "low" || record.image_url.detail === "high" || record.image_url.detail === "auto"
+          ? { detail: record.image_url.detail }
+          : {})
       };
     }
 

@@ -78,11 +78,12 @@ describe("Papyrus operator console streaming surface", () => {
     const rendered = renderStreamingSurface(state, { width: 84 }).join("\n");
 
     expect(rendered).toContain("I'll inspect the runtime path first.");
-    expect(rendered).toContain("◷ read_file");
+    expect(rendered).toContain("◷ Files");
+    expect(rendered).toContain("Read");
     expect(rendered).toContain("src/cli/session-loop.ts");
     expect(rendered).toContain("The session loop wires deltas through the console.▍");
-    expect(rendered.indexOf("I'll inspect the runtime path first.")).toBeLessThan(rendered.indexOf("◷ read_file"));
-    expect(rendered.indexOf("◷ read_file")).toBeLessThan(rendered.indexOf("The session loop wires"));
+    expect(rendered.indexOf("I'll inspect the runtime path first.")).toBeLessThan(rendered.indexOf("◷ Files"));
+    expect(rendered.indexOf("◷ Files")).toBeLessThan(rendered.indexOf("The session loop wires"));
   });
 
   it("settles into the same assistant frame without the live cursor", () => {

@@ -20,6 +20,8 @@ type PackageJson = {
   bin?: Record<string, string>;
   engines?: Record<string, string>;
   files?: string[];
+  dependencies?: Record<string, string>;
+  scripts?: Record<string, string>;
 };
 
 describe("package installability metadata", () => {
@@ -60,5 +62,18 @@ describe("package installability metadata", () => {
       "NOTICE",
       "package.json"
     ]));
+  });
+
+  it("ships the native vision image processor as a runtime dependency", async () => {
+    const raw = await readFile(resolve(process.cwd(), "package.json"), "utf8");
+    const pkg = JSON.parse(raw) as PackageJson;
+
+    expect(pkg.dependencies?.sharp).toMatch(/^\^\d+\.\d+\.\d+$/u);
+    const sharp = await import("sharp");
+    expect(sharp.default.versions.sharp).toMatch(/^\d+\.\d+\.\d+$/u);
+    expect(sharp.default.versions.vips).toBeDefined();
+    expect(pkg.scripts?.preinstall).toBeUndefined();
+    expect(pkg.scripts?.install).toBeUndefined();
+    expect(pkg.scripts?.postinstall).toBeUndefined();
   });
 });

@@ -10,9 +10,13 @@ import type {
   SessionRecord
 } from "../contracts/session.js";
 import type { ProviderExecutor } from "../providers/provider-executor.js";
+import type { ArtifactStore } from "../artifacts/artifact-store.js";
 import { stripInlineReasoning } from "../providers/provider-reasoning.js";
 import { SessionCompressionLock } from "../session/session-compression-lock.js";
 import { reconstructSessionCompressionState } from "../session/session-compression-state.js";
+import { executionPlanCarryForwardEvent } from "../session/execution-plan-state.js";
+import { executionCheckpointCarryForwardEvent } from "../session/execution-checkpoint-state.js";
+import { executionEvidenceCarryForwardEvents } from "../session/execution-evidence-state.js";
 import { redactSensitiveText } from "../utils/redaction.js";
 import {
   SemanticCompressor,
@@ -34,6 +38,7 @@ export type SessionCompressionServiceOptions = {
   lock?: SessionCompressionLock;
   now?: () => Date;
   id?: () => string;
+  artifactStore?: ArtifactStore;
 };
 
 export type SessionCompressionRequest = {
@@ -65,11 +70,13 @@ export class SessionCompressionService {
   readonly #compressor: SemanticCompressor;
   readonly #lock: SessionCompressionLock;
   readonly #now: () => Date;
+  readonly #artifactStore: ArtifactStore | undefined;
 
   constructor(options: SessionCompressionServiceOptions) {
     this.#sessionDb = options.sessionDb;
     this.#lock = options.lock ?? new SessionCompressionLock();
     this.#now = options.now ?? (() => new Date());
+    this.#artifactStore = options.artifactStore;
     this.#compressor = new SemanticCompressor({
       config: options.config,
       route: options.route,
@@ -95,7 +102,8 @@ export class SessionCompressionService {
         ? await this.#requireSession(input.sessionId)
         : undefined;
       const messages = await this.#sessionDb.listMessages(input.sessionId);
-      const previousState = reconstructSessionCompressionState(await this.#sessionDb.listEvents(input.sessionId));
+      const sessionEvents = await this.#sessionDb.listEvents(input.sessionId);
+      const previousState = reconstructSessionCompressionState(sessionEvents);
       const compressed = await this.#compressor.compress({
         messages,
         profileId: input.profileId,
@@ -138,14 +146,17 @@ export class SessionCompressionService {
             compactionTrigger: trigger
           })
         });
+        const carriedEvents = childCompactionEvents(sessionEvents, parentSession.id, childSession.id, parentSession.profileId);
         const written = await this.#sessionDb.rewriteTranscript({
           sessionId: childSession.id,
           messages: compressed.messages.map(toChildTranscriptMessage),
-          events: [{
-            kind: "context-window-usage-invalidated",
-            reason: "compaction"
-          }]
+          events: carriedEvents
         });
+        await this.#artifactStore?.hydrateSessionArtifacts({
+          events: carriedEvents,
+          sessionId: childSession.id,
+          profileId: parentSession.profileId
+        }).catch(() => undefined);
         await this.#sessionDb.endSession(parentSession.id, "compression");
         const eventWarnings = [
           ...(await this.#recordEventsBestEffort({
@@ -367,6 +378,45 @@ export class SessionCompressionService {
       return [`session compaction fork event write failed: ${errorMessage(error)}`];
     }
   }
+}
+
+function childCompactionEvents(
+  events: readonly SessionEvent[],
+  sourceSessionId: string,
+  childSessionId: string,
+  profileId: string
+): SessionEvent[] {
+  const carriedPlan = executionPlanCarryForwardEvent(events);
+  const carriedEvidence = executionEvidenceCarryForwardEvents(events);
+  const carriedCheckpoint = executionCheckpointCarryForwardEvent({
+    events,
+    sourceSessionId,
+    sessionId: childSessionId,
+    profileId
+  });
+  const retainedArtifactIds = new Set(carriedCheckpoint?.checkpoint.artifactReferences.map((reference) => reference.id) ?? []);
+  const carriedArtifacts = events.flatMap((event) => {
+    if (
+      event.kind !== "session-artifact-registered" ||
+      event.artifact.sessionId !== sourceSessionId ||
+      event.artifact.profileId !== profileId ||
+      !retainedArtifactIds.has(event.artifact.id)
+    ) return [];
+    return [{
+      kind: "session-artifact-registered" as const,
+      artifact: { ...event.artifact, sessionId: childSessionId }
+    }];
+  });
+  return [
+    {
+      kind: "context-window-usage-invalidated",
+      reason: "compaction"
+    },
+    ...carriedArtifacts,
+    ...(carriedCheckpoint === undefined ? [] : [carriedCheckpoint]),
+    ...carriedEvidence,
+    ...(carriedPlan === undefined ? [] : [carriedPlan])
+  ];
 }
 
 export function renderSessionCompactionResult(

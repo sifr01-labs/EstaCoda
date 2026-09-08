@@ -1,5 +1,5 @@
 import { describe, expect, it, beforeEach, afterEach } from "vitest";
-import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
+import { mkdtemp, readFile, rm, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { resolveRuntimeCredential } from "./runtime-credential-resolver.js";
@@ -350,6 +350,38 @@ describe("resolveRuntimeCredential OAuth", () => {
     // Refresh fails because there's no mock server, but we verify the behavior
     expect(result.diagnostic.ok).toBe(false);
     expect(result.diagnostic.message).toBeDefined();
+  });
+
+  it("does not refresh or rewrite expiring OAuth state in read-only mode", async () => {
+    await writeAuthJson(tmpDir, {
+      version: 1,
+      providers: {
+        codex: {
+          authMethod: "oauth_device_pkce",
+          accessToken: "read-only-old-access",
+          refreshToken: "read-only-refresh",
+          expiresAt: new Date(Date.now() + 30 * 1000).toISOString(),
+          source: "estacoda"
+        }
+      }
+    });
+    const authPath = resolveProfileStateHome({ homeDir: tmpDir, profileId: "default" }).authJsonPath;
+    const before = await readFile(authPath, "utf8");
+
+    const result = await resolveRuntimeCredential({
+      providerId: "codex",
+      route: { authMethod: "oauth_device_pkce" },
+      metadata: codexMetadata(),
+      homeDir: tmpDir,
+      readOnly: true
+    });
+
+    expect(result.diagnostic).toEqual({
+      ok: false,
+      message: "OAuth token for codex requires refresh; read-only verification will not modify auth state."
+    });
+    expect(result.credential).toBeUndefined();
+    expect(await readFile(authPath, "utf8")).toBe(before);
   });
 
   it("does not leak token values in diagnostics", async () => {

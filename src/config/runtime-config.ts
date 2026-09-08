@@ -13,6 +13,7 @@ import type {
   AuxiliaryModelSlotConfig,
   AuxiliaryModelSlotInput,
   AuxiliaryModelTask,
+  AuxiliaryModelProvider,
   ModelProfile,
   ProviderEndpoint,
   ProviderApiMode,
@@ -63,8 +64,43 @@ import {
   normalizeWhatsAppGroupAllowlist,
   normalizeWhatsAppUserId,
 } from "../channels/whatsapp-identity.js";
+import { isProtectedArgumentPattern, parseProtectedArgumentPattern } from "../security/protected-argument-path.js";
 
 export type MCPServerTrust = "conservative" | "read-only-network" | "read-only-local";
+export type MCPProtectedToolArgumentsConfig = {
+  paths: string[];
+  handling: {
+    persistence: "none" | "destination-managed" | "unknown";
+    sharing: "private" | "workspace" | "account" | "external" | "unknown";
+  };
+  /** Whether this registered integration permits atomic multi-value delivery. */
+  groupedDelivery?: boolean;
+  /** Whether protected values may be relayed from a verified browser field. */
+  browserRelay?: boolean;
+};
+export type MCPArtifactTypeMapping = { argument: string; values: Record<string, string> };
+
+export function isMcpArtifactTypeMapping(value: unknown): value is MCPArtifactTypeMapping {
+  if (value === null || typeof value !== "object" || Array.isArray(value)) return false;
+  const mapping = value as MCPArtifactTypeMapping;
+  return typeof mapping.argument === "string" && /^[A-Za-z][A-Za-z0-9_]{0,63}$/u.test(mapping.argument) &&
+    mapping.values !== null && typeof mapping.values === "object" && !Array.isArray(mapping.values) &&
+    Object.keys(mapping.values).length > 0 && Object.keys(mapping.values).length <= 16 &&
+    Object.entries(mapping.values).every(([key, entry]) =>
+      /^(?:Swagger|OpenAPI|AsyncAPI|RAML|GraphQL|Smithy)(?::\d{1,3}(?:\.\d{1,3}){0,2})?$/u.test(key) &&
+      typeof entry === "string" && /^[A-Za-z0-9][A-Za-z0-9:._-]{0,63}$/u.test(entry));
+}
+
+export type MCPArtifactToolArgumentsConfig = {
+  /** Reviewed mapping from detected format:version to a destination string argument. */
+  typeMapping?: MCPArtifactTypeMapping;
+  /** Reviewed JSON Pointer patterns whose string value may come from a session artifact. */
+  paths: string[];
+  /** Exact textual MIME types accepted by the connector destination. */
+  allowedMimeTypes: string[];
+  /** Connector-specific upper bound, never greater than the browser download ceiling. */
+  maxBytes: number;
+};
 export type UiLanguage = "en" | "ar";
 export type UiFlavor = "standard" | "arabic-light" | "kemet-full";
 export type ActivityLabelsLocale = "en" | "ar";
@@ -309,8 +345,17 @@ export type GatewayLifecycleNotificationsConfig = {
   enabled?: boolean;
 };
 
+export type GatewayMessageQueuePersistence = "memory" | "sqlite";
+
+export type GatewayMessageQueueConfig = {
+  persistence?: GatewayMessageQueuePersistence;
+  maxPendingPerProfile?: number;
+  uncertainRetentionDays?: number;
+};
+
 export type GatewayConfig = {
   lifecycleNotifications?: GatewayLifecycleNotificationsConfig;
+  messageQueue?: GatewayMessageQueueConfig;
 };
 
 export type MCPServerToolsConfig = {
@@ -328,6 +373,7 @@ export type MCPServerConfig = {
   args?: string[];
   cwd?: string;
   env?: Record<string, string>;
+  envRefs?: Record<string, string>;
   url?: string;
   headers?: Record<string, string>;
   tools?: MCPServerToolsConfig;
@@ -340,6 +386,15 @@ export type MCPServerConfig = {
   connectTimeoutMs?: number;
   trust?: MCPServerTrust;
   toolRiskClass?: ToolRiskClass;
+  toolRiskClasses?: Record<string, ToolRiskClass>;
+  protectedToolArguments?: Record<string, MCPProtectedToolArgumentsConfig>;
+  artifactToolArguments?: Record<string, MCPArtifactToolArgumentsConfig>;
+  /** Tool name -> reviewed JSON Pointer patterns removed from returned JSON. */
+  redactedToolResultPaths?: Record<string, string[]>;
+  /** Tool name -> reviewed non-secret scalar result paths retained for turn continuity. */
+  continuityToolResultPaths?: Record<string, string[]>;
+  /** Verification tool name -> mutation tool names, all unprefixed MCP names. */
+  toolVerificationRelationships?: Record<string, string[]>;
   resourceReadRiskClass?: ToolRiskClass;
   promptGetRiskClass?: ToolRiskClass;
 };
@@ -418,6 +473,7 @@ export type EstaCodaConfig = {
     launchExecutable?: string;
     launchArgs?: string[];
     autoLaunch?: boolean;
+    headless?: boolean;
     supervised?: boolean;
     chromeFlags?: string[];
     engine?: BrowserEngineKind;
@@ -471,6 +527,8 @@ export type EstaCodaConfig = {
   };
 };
 
+export type TelegramSecureInputMode = "protected-handoff" | "direct-dm" | "disabled";
+
 export type TelegramChannelConfig = {
   enabled?: boolean;
   botTokenEnv?: string;
@@ -485,6 +543,11 @@ export type TelegramChannelConfig = {
   maxAttachmentBytes?: number;
   busyPolicy?: ChannelBusyPolicy;
   queueDepth?: number;
+  busyTextCoalescing?: ChannelBusyTextCoalescingConfig;
+  textDebounceMs?: number;
+  textDebounceMaxMessages?: number;
+  textDebounceMaxChars?: number;
+  secureInputMode?: TelegramSecureInputMode;
   streaming?: TelegramStreamingConfig;
   pairing?: {
     code?: string;
@@ -517,6 +580,7 @@ export type DiscordChannelConfig = {
   };
   busyPolicy?: ChannelBusyPolicy;
   queueDepth?: number;
+  busyTextCoalescing?: ChannelBusyTextCoalescingConfig;
 };
 
 export type EmailChannelConfig = {
@@ -535,6 +599,7 @@ export type EmailChannelConfig = {
   maxAttachmentBytes?: number;
   busyPolicy?: ChannelBusyPolicy;
   queueDepth?: number;
+  busyTextCoalescing?: ChannelBusyTextCoalescingConfig;
 };
 
 export type WhatsAppChannelConfig = {
@@ -553,9 +618,17 @@ export type WhatsAppChannelConfig = {
   pairingMode?: "qr";
   busyPolicy?: ChannelBusyPolicy;
   queueDepth?: number;
+  busyTextCoalescing?: ChannelBusyTextCoalescingConfig;
   textDebounceMs?: number;
   textDebounceMaxMessages?: number;
   textDebounceMaxChars?: number;
+};
+
+export type ChannelBusyTextCoalescingConfig = {
+  enabled?: boolean;
+  windowMs?: number;
+  maxMessages?: number;
+  maxChars?: number;
 };
 
 export type LoadedRuntimeConfig = {
@@ -593,6 +666,7 @@ export type LoadedRuntimeConfig = {
     launchExecutable?: string;
     launchArgs?: string[];
     autoLaunch: boolean;
+    headless: boolean;
     supervised: boolean;
     chromeFlags?: string[];
     engine?: BrowserEngineKind;
@@ -610,6 +684,7 @@ export type LoadedRuntimeConfig = {
     lifecycleNotifications: {
       enabled: boolean;
     };
+    messageQueue: Required<GatewayMessageQueueConfig>;
   };
   tts: Required<Pick<TtsConfig, "provider" | "speed">> & TtsConfig;
   stt: Required<Pick<SttConfig, "provider">> & SttConfig;
@@ -699,6 +774,7 @@ export type BrowserSetupInput = {
   launchExecutable?: string;
   launchArgs?: string[];
   autoLaunch?: boolean;
+  headless?: boolean;
   supervised?: boolean;
   chromeFlags?: string[];
   engine?: BrowserEngineKind;
@@ -711,6 +787,11 @@ export type BrowserSetupInput = {
   summarizeSnapshots?: BrowserSnapshotSummarizeMode;
   snapshotSummarizeThreshold?: number;
 };
+
+export function isBrowserDisplayUpdate(input: BrowserSetupInput): boolean {
+  const keys = Object.keys(input);
+  return keys.length > 0 && keys.every((key) => key === "autoLaunch" || key === "headless");
+}
 
 export type VoiceSetupInput = {
   ttsProvider?: TtsProvider;
@@ -745,6 +826,7 @@ export type MCPSetupInput = {
   args?: string[];
   cwd?: string;
   env?: Record<string, string>;
+  envRefs?: Record<string, string>;
   url?: string;
   headers?: Record<string, string>;
   tools?: MCPServerToolsConfig;
@@ -757,6 +839,12 @@ export type MCPSetupInput = {
   connectTimeoutMs?: number;
   trust?: MCPServerTrust;
   toolRiskClass?: ToolRiskClass;
+  toolRiskClasses?: Record<string, ToolRiskClass>;
+  protectedToolArguments?: Record<string, MCPProtectedToolArgumentsConfig>;
+  artifactToolArguments?: Record<string, MCPArtifactToolArgumentsConfig>;
+  redactedToolResultPaths?: Record<string, string[]>;
+  continuityToolResultPaths?: Record<string, string[]>;
+  toolVerificationRelationships?: Record<string, string[]>;
   resourceReadRiskClass?: ToolRiskClass;
   promptGetRiskClass?: ToolRiskClass;
 };
@@ -768,6 +856,7 @@ export type TelegramSetupInput = {
   allowedUserIds?: string[];
   allowedChatIds?: string[];
   pollTimeoutSeconds?: number;
+  secureInputMode?: TelegramSecureInputMode;
   enabled?: boolean;
 };
 
@@ -815,11 +904,16 @@ export type ModelFallbackSetupInput = {
 
 export type AuxiliaryModelRouteSetupInput = {
   task: AuxiliaryModelTask;
-  provider: ProviderId;
-  id: string;
+  provider: AuxiliaryModelProvider;
+  id?: string;
   baseUrl?: string;
   apiKeyEnv?: string;
   contextWindowTokens?: number;
+  timeoutMs?: number;
+  maxConcurrency?: number;
+  fallbackToMain?: boolean;
+  hostedProcessing?: "allow-with-approval" | "local-only";
+  enabled?: boolean;
 };
 
 export type SkillSetupInput = {
@@ -1037,6 +1131,11 @@ export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Prom
         missing: telegramMissing.length === 0 ? undefined : telegramMissing,
         busyPolicy: normalizeChannelBusyPolicy(telegram.busyPolicy, "telegram", warnedInvalidBusyPolicies),
         queueDepth: normalizeQueueDepth(telegram.queueDepth),
+        busyTextCoalescing: normalizeBusyTextCoalescing(telegram.busyTextCoalescing),
+        textDebounceMs: normalizeTextDebounceMs(telegram.textDebounceMs, 1_500),
+        textDebounceMaxMessages: normalizeTextDebounceMaxMessages(telegram.textDebounceMaxMessages),
+        textDebounceMaxChars: normalizeTextDebounceMaxChars(telegram.textDebounceMaxChars),
+        secureInputMode: normalizeTelegramSecureInputMode(telegram.secureInputMode),
         streaming: normalizeTelegramStreamingConfig(telegram.streaming)
       },
       discord: {
@@ -1048,14 +1147,16 @@ export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Prom
         ready: discord.enabled === true && discordMissing.length === 0,
         missing: discordMissing.length === 0 ? undefined : discordMissing,
         busyPolicy: normalizeChannelBusyPolicy(discord.busyPolicy, "discord", warnedInvalidBusyPolicies),
-        queueDepth: normalizeQueueDepth(discord.queueDepth)
+        queueDepth: normalizeQueueDepth(discord.queueDepth),
+        busyTextCoalescing: normalizeBusyTextCoalescing(discord.busyTextCoalescing)
       },
       email: {
         ...email,
         ready: email.enabled === true && emailMissing.length === 0,
         missing: emailMissing.length === 0 ? undefined : emailMissing,
         busyPolicy: normalizeChannelBusyPolicy(email.busyPolicy, "email", warnedInvalidBusyPolicies),
-        queueDepth: normalizeQueueDepth(email.queueDepth)
+        queueDepth: normalizeQueueDepth(email.queueDepth),
+        busyTextCoalescing: normalizeBusyTextCoalescing(email.busyTextCoalescing)
       },
       whatsapp: {
         ...whatsapp,
@@ -1070,9 +1171,10 @@ export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Prom
         missing: whatsappMissing.length === 0 ? undefined : whatsappMissing,
         busyPolicy: normalizeChannelBusyPolicy(whatsapp.busyPolicy, "whatsapp", warnedInvalidBusyPolicies),
         queueDepth: normalizeQueueDepth(whatsapp.queueDepth),
-        textDebounceMs: normalizeWhatsAppTextDebounceMs(whatsapp.textDebounceMs),
-        textDebounceMaxMessages: normalizeWhatsAppTextDebounceMaxMessages(whatsapp.textDebounceMaxMessages),
-        textDebounceMaxChars: normalizeWhatsAppTextDebounceMaxChars(whatsapp.textDebounceMaxChars)
+        busyTextCoalescing: normalizeBusyTextCoalescing(whatsapp.busyTextCoalescing),
+        textDebounceMs: normalizeTextDebounceMs(whatsapp.textDebounceMs, 5_000),
+        textDebounceMaxMessages: normalizeTextDebounceMaxMessages(whatsapp.textDebounceMaxMessages),
+        textDebounceMaxChars: normalizeTextDebounceMaxChars(whatsapp.textDebounceMaxChars)
       }
     }
   };
@@ -1125,6 +1227,10 @@ function patchConfig(...configs: EstaCodaConfig[]): EstaCodaConfig {
       lifecycleNotifications: {
         ...(merged.gateway?.lifecycleNotifications ?? {}),
         ...(config.gateway?.lifecycleNotifications ?? {})
+      },
+      messageQueue: {
+        ...(merged.gateway?.messageQueue ?? {}),
+        ...(config.gateway?.messageQueue ?? {})
       }
     },
     tts: mergeTtsConfig(merged.tts, config.tts),
@@ -1177,6 +1283,14 @@ function patchConfig(...configs: EstaCodaConfig[]): EstaCodaConfig {
       telegram: {
         ...(merged.channels?.telegram ?? {}),
         ...(config.channels?.telegram ?? {}),
+        ...(merged.channels?.telegram?.busyTextCoalescing === undefined && config.channels?.telegram?.busyTextCoalescing === undefined
+          ? {}
+          : {
+              busyTextCoalescing: {
+                ...(merged.channels?.telegram?.busyTextCoalescing ?? {}),
+                ...(config.channels?.telegram?.busyTextCoalescing ?? {})
+              }
+            }),
         ...(merged.channels?.telegram?.streaming === undefined && config.channels?.telegram?.streaming === undefined
           ? {}
           : {
@@ -1188,15 +1302,39 @@ function patchConfig(...configs: EstaCodaConfig[]): EstaCodaConfig {
       },
       discord: {
         ...(merged.channels?.discord ?? {}),
-        ...(config.channels?.discord ?? {})
+        ...(config.channels?.discord ?? {}),
+        ...(merged.channels?.discord?.busyTextCoalescing === undefined && config.channels?.discord?.busyTextCoalescing === undefined
+          ? {}
+          : {
+              busyTextCoalescing: {
+                ...(merged.channels?.discord?.busyTextCoalescing ?? {}),
+                ...(config.channels?.discord?.busyTextCoalescing ?? {})
+              }
+            })
       },
       email: {
         ...(merged.channels?.email ?? {}),
-        ...(config.channels?.email ?? {})
+        ...(config.channels?.email ?? {}),
+        ...(merged.channels?.email?.busyTextCoalescing === undefined && config.channels?.email?.busyTextCoalescing === undefined
+          ? {}
+          : {
+              busyTextCoalescing: {
+                ...(merged.channels?.email?.busyTextCoalescing ?? {}),
+                ...(config.channels?.email?.busyTextCoalescing ?? {})
+              }
+            })
       },
       whatsapp: {
         ...(merged.channels?.whatsapp ?? {}),
-        ...(config.channels?.whatsapp ?? {})
+        ...(config.channels?.whatsapp ?? {}),
+        ...(merged.channels?.whatsapp?.busyTextCoalescing === undefined && config.channels?.whatsapp?.busyTextCoalescing === undefined
+          ? {}
+          : {
+              busyTextCoalescing: {
+                ...(merged.channels?.whatsapp?.busyTextCoalescing ?? {}),
+                ...(config.channels?.whatsapp?.busyTextCoalescing ?? {})
+              }
+            })
       }
     }
   }), {}));
@@ -1279,8 +1417,8 @@ function stripDefaultAuxiliarySlots(
       slot.contextWindowTokens === undefined &&
       slot.timeoutMs === undefined &&
       slot.maxConcurrency === undefined &&
-      slot.extraBody === undefined &&
-      slot.fallbackToMain === undefined;
+      slot.fallbackToMain === undefined &&
+      slot.hostedProcessing === undefined;
     if (!isDefault) {
       stripped[task as AuxiliaryModelTask | "default"] = slot;
     }
@@ -1352,8 +1490,8 @@ export function normalizeAuxiliaryModels(
       ...(slot?.contextWindowTokens !== undefined ? { contextWindowTokens: slot.contextWindowTokens } : {}),
       ...(slot?.timeoutMs !== undefined ? { timeoutMs: slot.timeoutMs } : {}),
       ...(slot?.maxConcurrency !== undefined ? { maxConcurrency: slot.maxConcurrency } : {}),
-      ...(slot?.extraBody !== undefined ? { extraBody: slot.extraBody } : {}),
-      ...(slot?.fallbackToMain !== undefined ? { fallbackToMain: slot.fallbackToMain } : {})
+      ...(slot?.fallbackToMain !== undefined ? { fallbackToMain: slot.fallbackToMain } : {}),
+      ...(slot?.hostedProcessing !== undefined ? { hostedProcessing: slot.hostedProcessing } : {})
     };
   }
   return normalized;
@@ -1367,7 +1505,23 @@ function normalizeAuxiliarySlotInput(
   if (typeof slot === "string") {
     return parseAuxiliaryModelShorthand(slot, path);
   }
+  if (
+    slot.hostedProcessing !== undefined &&
+    slot.hostedProcessing !== "allow-with-approval" &&
+    slot.hostedProcessing !== "local-only"
+  ) {
+    throw new Error(`${path}.hostedProcessing must be allow-with-approval or local-only`);
+  }
+  validateAuxiliaryPositiveInteger(slot.contextWindowTokens, `${path}.contextWindowTokens`);
+  validateAuxiliaryPositiveInteger(slot.timeoutMs, `${path}.timeoutMs`);
+  validateAuxiliaryPositiveInteger(slot.maxConcurrency, `${path}.maxConcurrency`);
   return slot;
+}
+
+function validateAuxiliaryPositiveInteger(value: number | undefined, path: string): void {
+  if (value !== undefined && (!Number.isInteger(value) || value <= 0)) {
+    throw new Error(`${path} must be a positive integer when set`);
+  }
 }
 
 function parseAuxiliaryModelShorthand(value: string, path: string): AuxiliaryModelSlotConfig {
@@ -1446,6 +1600,12 @@ function normalizeProfileConfig(value: EstaCodaConfig["profile"]): LoadedRuntime
   };
 }
 
+function normalizeTelegramSecureInputMode(value: unknown): TelegramSecureInputMode {
+  return value === "direct-dm" || value === "disabled" || value === "protected-handoff"
+    ? value
+    : "protected-handoff";
+}
+
 function normalizeTelegramStreamingConfig(value: TelegramStreamingConfig | undefined): Required<TelegramStreamingConfig> {
   return {
     enabled: value?.enabled ?? true,
@@ -1488,6 +1648,7 @@ function normalizeBrowserConfig(value: EstaCodaConfig["browser"]): LoadedRuntime
     launchExecutable,
     launchArgs,
     autoLaunch: normalizeOptionalBoolean(value?.autoLaunch, "browser.autoLaunch") ?? false,
+    headless: normalizeOptionalBoolean(value?.headless, "browser.headless") ?? true,
     supervised: normalizeOptionalBoolean(value?.supervised, "browser.supervised") ?? backend === "local-cdp",
     chromeFlags,
     engine,
@@ -2043,6 +2204,17 @@ function normalizeGatewayConfig(value: EstaCodaConfig["gateway"]): LoadedRuntime
   return {
     lifecycleNotifications: {
       enabled: value?.lifecycleNotifications?.enabled === true
+    },
+    messageQueue: {
+      persistence: value?.messageQueue?.persistence === "sqlite" ? "sqlite" : "memory",
+      maxPendingPerProfile: coercePositiveInteger(value?.messageQueue?.maxPendingPerProfile, {
+        default: 1_000,
+        max: 10_000
+      }),
+      uncertainRetentionDays: coerceNonNegativeInteger(value?.messageQueue?.uncertainRetentionDays, {
+        default: 7,
+        max: 365
+      })
     }
   };
 }
@@ -2193,6 +2365,9 @@ function normalizeMcpServers(
       env: typeof record.env === "object" && record.env !== null && !Array.isArray(record.env)
         ? Object.fromEntries(Object.entries(record.env).filter(([, envValue]) => typeof envValue === "string") as Array<[string, string]>)
         : undefined,
+      envRefs: typeof record.envRefs === "object" && record.envRefs !== null && !Array.isArray(record.envRefs)
+        ? Object.fromEntries(Object.entries(record.envRefs).filter(([, envName]) => typeof envName === "string") as Array<[string, string]>)
+        : undefined,
       url: typeof record.url === "string" ? record.url : undefined,
       headers: typeof record.headers === "object" && record.headers !== null && !Array.isArray(record.headers)
         ? Object.fromEntries(Object.entries(record.headers).filter(([, headerValue]) => typeof headerValue === "string") as Array<[string, string]>)
@@ -2229,11 +2404,125 @@ function normalizeMcpServers(
         ? record.trust
         : undefined,
       toolRiskClass: isToolRiskClass(record.toolRiskClass) ? record.toolRiskClass : undefined,
+      toolRiskClasses: normalizeToolRiskClasses(record.toolRiskClasses),
+      protectedToolArguments: normalizeProtectedToolArguments(record.protectedToolArguments),
+      artifactToolArguments: normalizeArtifactToolArguments(record.artifactToolArguments),
+      redactedToolResultPaths: normalizeToolResultRedactionPaths(record.redactedToolResultPaths),
+      continuityToolResultPaths: normalizeToolResultContinuityPaths(record.continuityToolResultPaths),
+      toolVerificationRelationships: normalizeToolVerificationRelationships(record.toolVerificationRelationships),
       resourceReadRiskClass: isToolRiskClass(record.resourceReadRiskClass) ? record.resourceReadRiskClass : undefined,
       promptGetRiskClass: isToolRiskClass(record.promptGetRiskClass) ? record.promptGetRiskClass : undefined
     };
   }
   return normalized;
+}
+
+function normalizeToolRiskClasses(value: unknown): Record<string, ToolRiskClass> | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) {
+    return undefined;
+  }
+  const entries = Object.entries(value)
+    .filter((entry): entry is [string, ToolRiskClass] => entry[0].trim().length > 0 && isToolRiskClass(entry[1]));
+  return entries.length === 0 ? undefined : Object.fromEntries(entries);
+}
+
+function normalizeProtectedToolArguments(value: unknown): Record<string, MCPProtectedToolArgumentsConfig> | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+  const entries = Object.entries(value).flatMap(([toolName, declaration]) => {
+    if (toolName.trim().length === 0) {
+      throw new Error("Invalid MCP protected argument configuration for unnamed tool");
+    }
+    const legacyPaths = Array.isArray(declaration)
+      ? declaration.filter((path): path is string => typeof path === "string" && isLegacyProtectedArgumentPath(path))
+        .map((path) => `/${path.split(".").join("/")}`)
+      : undefined;
+    const record = typeof declaration === "object" && declaration !== null && !Array.isArray(declaration)
+      ? declaration as Record<string, unknown>
+      : undefined;
+    if (record !== undefined && (!Array.isArray(record.paths) ||
+      record.paths.some((path) => typeof path !== "string") ||
+      (record.groupedDelivery !== undefined && typeof record.groupedDelivery !== "boolean") ||
+      (record.browserRelay !== undefined && typeof record.browserRelay !== "boolean"))) {
+      throw new Error(`Invalid MCP protected argument configuration for tool ${toolName.slice(0, 160)}`);
+    }
+    const paths = legacyPaths ?? (record?.paths as string[] | undefined) ?? [];
+    if (record !== undefined && paths.length === 0) {
+      throw new Error(`Invalid MCP protected argument configuration for tool ${toolName.slice(0, 160)}`);
+    }
+    if (paths.length === 0) return [];
+    const handling = typeof record?.handling === "object" && record.handling !== null && !Array.isArray(record.handling)
+      ? record.handling as Record<string, unknown>
+      : {};
+    const persistence = isProtectedArgumentPersistence(handling.persistence) ? handling.persistence : "unknown";
+    const sharing = isProtectedArgumentSharing(handling.sharing) ? handling.sharing : "unknown";
+    return [[toolName, {
+      paths: legacyPaths === undefined ? paths : [...new Set(paths)],
+      handling: { persistence, sharing },
+      ...(typeof record?.groupedDelivery === "boolean" ? { groupedDelivery: record.groupedDelivery } : {}),
+      ...(typeof record?.browserRelay === "boolean" ? { browserRelay: record.browserRelay } : {})
+    }] as [string, MCPProtectedToolArgumentsConfig]];
+  });
+  return entries.length === 0 ? undefined : Object.fromEntries(entries);
+}
+
+function normalizeArtifactToolArguments(value: unknown): Record<string, MCPArtifactToolArgumentsConfig> | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+  const entries = Object.entries(value).map(([toolName, declaration]) => {
+    if (toolName.trim().length === 0 || typeof declaration !== "object" || declaration === null || Array.isArray(declaration)) {
+      throw new Error(`Invalid MCP artifact argument configuration for tool ${toolName.slice(0, 160)}`);
+    }
+    const record = declaration as Record<string, unknown>;
+    if (!Array.isArray(record.paths) || record.paths.length === 0 || record.paths.some((path) => typeof path !== "string") ||
+        !Array.isArray(record.allowedMimeTypes) || record.allowedMimeTypes.length === 0 ||
+        record.allowedMimeTypes.some((mimeType) => typeof mimeType !== "string") ||
+        typeof record.maxBytes !== "number" ||
+        (record.typeMapping !== undefined && !isMcpArtifactTypeMapping(record.typeMapping))) {
+      throw new Error(`Invalid MCP artifact argument configuration for tool ${toolName.slice(0, 160)}`);
+    }
+    return [toolName, {
+      paths: record.paths as string[],
+      allowedMimeTypes: record.allowedMimeTypes as string[],
+      maxBytes: record.maxBytes,
+      ...(record.typeMapping === undefined ? {} : { typeMapping: record.typeMapping as MCPArtifactTypeMapping })
+    }] as [string, MCPArtifactToolArgumentsConfig];
+  });
+  return entries.length === 0 ? undefined : Object.fromEntries(entries);
+}
+
+function normalizeToolVerificationRelationships(value: unknown): Record<string, string[]> | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+  const entries = Object.entries(value).flatMap(([toolName, targets]) => {
+    if (toolName.trim().length === 0 || !Array.isArray(targets) || targets.length === 0 ||
+      targets.some((target) => typeof target !== "string")) {
+      throw new Error(`Invalid MCP verification configuration for tool ${toolName.slice(0, 160)}`);
+    }
+    return [[toolName, targets as string[]] as [string, string[]]];
+  });
+  return entries.length === 0 ? undefined : Object.fromEntries(entries);
+}
+
+function normalizeToolResultRedactionPaths(value: unknown): Record<string, string[]> | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+  const entries = Object.entries(value).flatMap(([toolName, paths]) => {
+    if (toolName.trim().length === 0 || !Array.isArray(paths) || paths.length === 0 ||
+      paths.some((path) => typeof path !== "string")) {
+      throw new Error(`Invalid MCP result redaction configuration for tool ${toolName.slice(0, 160)}`);
+    }
+    return [[toolName, paths as string[]] as [string, string[]]];
+  });
+  return entries.length === 0 ? undefined : Object.fromEntries(entries);
+}
+
+function normalizeToolResultContinuityPaths(value: unknown): Record<string, string[]> | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+  const entries = Object.entries(value).flatMap(([toolName, paths]) => {
+    if (toolName.trim().length === 0 || !Array.isArray(paths) || paths.length === 0 ||
+      paths.some((path) => typeof path !== "string")) {
+      throw new Error(`Invalid MCP continuity configuration for tool ${toolName.slice(0, 160)}`);
+    }
+    return [[toolName, paths as string[]] as [string, string[]]];
+  });
+  return entries.length === 0 ? undefined : Object.fromEntries(entries);
 }
 
 export function buildProviderRegistry(config: EstaCodaConfig, options: {
@@ -2508,20 +2797,32 @@ export async function setupAuxiliaryModelConfig(options: {
     ...(existing.config.auxiliaryModels ?? {}),
     [options.input.task]: {
       provider: options.input.provider,
-      id: options.input.id,
+      ...(options.input.id !== undefined ? { id: options.input.id } : {}),
       ...(options.input.baseUrl !== undefined ? { baseUrl: options.input.baseUrl } : {}),
       ...(options.input.apiKeyEnv !== undefined ? { apiKeyEnv: options.input.apiKeyEnv } : {}),
       ...(options.input.contextWindowTokens !== undefined ? { contextWindowTokens: options.input.contextWindowTokens } : {}),
-      enabled: true
+      ...(options.input.timeoutMs !== undefined ? { timeoutMs: options.input.timeoutMs } : {}),
+      ...(options.input.maxConcurrency !== undefined ? { maxConcurrency: options.input.maxConcurrency } : {}),
+      ...(options.input.fallbackToMain !== undefined ? { fallbackToMain: options.input.fallbackToMain } : {}),
+      ...(options.input.hostedProcessing !== undefined ? { hostedProcessing: options.input.hostedProcessing } : {}),
+      enabled: options.input.enabled ?? true
     }
   };
   const normalized = normalizeAuxiliaryModels(mergedAuxiliaryModels);
-  const config = patchConfig(existing.config, {
+  const normalizedTaskSlot = normalized[options.input.task] as AuxiliaryModelSlotConfig;
+  const patched = patchConfig(existing.config, {
     auxiliaryModels: {
       ...(existing.config.auxiliaryModels ?? {}),
-      [options.input.task]: normalized[options.input.task]
+      [options.input.task]: normalizedTaskSlot
     }
   });
+  const config: EstaCodaConfig = {
+    ...patched,
+    auxiliaryModels: {
+      ...(patched.auxiliaryModels ?? {}),
+      [options.input.task]: normalizedTaskSlot
+    }
+  };
 
   await saveRuntimeConfig(targetPath, config);
 
@@ -2658,6 +2959,7 @@ export async function setupBrowserConfig(options: {
   workspaceRoot: string;
   homeDir?: string;
   input: BrowserSetupInput;
+  preserveExisting?: boolean;
 }): Promise<{
   path: string;
   config: EstaCodaConfig;
@@ -2665,26 +2967,28 @@ export async function setupBrowserConfig(options: {
   validateBrowserSetupInput(options.input);
   const targetPath = resolveConfigMutationPath(options);
   const existing = await readConfig(targetPath);
+  const current = options.preserveExisting === true ? existing.config.browser : undefined;
   const config = patchConfig(existing.config, {
     browser: {
-      backend: options.input.backend ?? "local-cdp",
-      cloudProvider: options.input.cloudProvider,
-      cdpUrl: options.input.cdpUrl,
-      launchCommand: options.input.launchCommand,
-      launchExecutable: options.input.launchExecutable,
-      launchArgs: options.input.launchArgs,
-      autoLaunch: options.input.autoLaunch ?? false,
-      supervised: options.input.supervised,
-      chromeFlags: options.input.chromeFlags,
-      engine: options.input.engine,
-      commandTimeout: options.input.commandTimeout,
-      inactivityTimeout: options.input.inactivityTimeout,
-      recordSessions: options.input.recordSessions,
-      hybridRouting: options.input.hybridRouting,
-      cloudFallback: options.input.cloudFallback,
-      cloudSpendApproved: options.input.cloudSpendApproved,
-      summarizeSnapshots: options.input.summarizeSnapshots,
-      snapshotSummarizeThreshold: options.input.snapshotSummarizeThreshold
+      backend: options.input.backend ?? current?.backend ?? "local-cdp",
+      cloudProvider: options.input.cloudProvider ?? current?.cloudProvider,
+      cdpUrl: options.input.cdpUrl ?? current?.cdpUrl,
+      launchCommand: options.input.launchCommand ?? current?.launchCommand,
+      launchExecutable: options.input.launchExecutable ?? current?.launchExecutable,
+      launchArgs: options.input.launchArgs ?? current?.launchArgs,
+      autoLaunch: options.input.autoLaunch ?? current?.autoLaunch ?? false,
+      headless: options.input.headless ?? current?.headless ?? true,
+      supervised: options.input.supervised ?? current?.supervised,
+      chromeFlags: options.input.chromeFlags ?? current?.chromeFlags,
+      engine: options.input.engine ?? current?.engine,
+      commandTimeout: options.input.commandTimeout ?? current?.commandTimeout,
+      inactivityTimeout: options.input.inactivityTimeout ?? current?.inactivityTimeout,
+      recordSessions: options.input.recordSessions ?? current?.recordSessions,
+      hybridRouting: options.input.hybridRouting ?? current?.hybridRouting,
+      cloudFallback: options.input.cloudFallback ?? current?.cloudFallback,
+      cloudSpendApproved: options.input.cloudSpendApproved ?? current?.cloudSpendApproved,
+      summarizeSnapshots: options.input.summarizeSnapshots ?? current?.summarizeSnapshots,
+      snapshotSummarizeThreshold: options.input.snapshotSummarizeThreshold ?? current?.snapshotSummarizeThreshold
     }
   });
 
@@ -2905,39 +3209,48 @@ export async function setupMcpConfig(options: {
   path: string;
   config: EstaCodaConfig;
 }> {
-  validateMcpSetupInput(options.input);
   const targetPath = resolveConfigMutationPath(options);
   const existing = await readConfig(targetPath);
   const serverName = options.input.name.trim();
   const servers = normalizeMcpServers(existing.config.mcpServers ?? existing.config.mcp_servers, options.homeDir);
-  servers[serverName] = {
-    enabled: options.input.enabled ?? true,
-    transport: options.input.transport ?? "stdio",
-    command: options.input.command,
-    args: options.input.args,
-    cwd: options.input.cwd === undefined ? undefined : expandConfiguredPath(options.input.cwd, options.homeDir),
-    env: options.input.env,
-    url: options.input.url,
-    headers: options.input.headers,
+  const previous = servers[serverName] ?? {};
+  const nextServer: MCPServerConfig = {
+    enabled: options.input.enabled ?? previous.enabled ?? true,
+    transport: options.input.transport ?? previous.transport ?? "stdio",
+    command: options.input.command ?? previous.command,
+    args: options.input.args ?? previous.args,
+    cwd: options.input.cwd === undefined ? previous.cwd : expandConfiguredPath(options.input.cwd, options.homeDir),
+    env: options.input.env ?? previous.env,
+    envRefs: options.input.envRefs ?? previous.envRefs,
+    url: options.input.url ?? previous.url,
+    headers: options.input.headers ?? previous.headers,
     tools: {
-      include: options.input.includeTools ?? options.input.tools?.include,
-      exclude: options.input.excludeTools ?? options.input.tools?.exclude,
-      resources: options.input.exposeResources ?? options.input.tools?.resources,
-      prompts: options.input.exposePrompts ?? options.input.tools?.prompts,
-      prefix: options.input.toolPrefix ?? options.input.tools?.prefix
+      include: options.input.includeTools ?? options.input.tools?.include ?? previous.tools?.include,
+      exclude: options.input.excludeTools ?? options.input.tools?.exclude ?? previous.tools?.exclude,
+      resources: options.input.exposeResources ?? options.input.tools?.resources ?? previous.tools?.resources,
+      prompts: options.input.exposePrompts ?? options.input.tools?.prompts ?? previous.tools?.prompts,
+      prefix: options.input.toolPrefix ?? options.input.tools?.prefix ?? previous.tools?.prefix
     },
-    includeTools: options.input.includeTools,
-    excludeTools: options.input.excludeTools,
-    exposeResources: options.input.exposeResources,
-    exposePrompts: options.input.exposePrompts,
-    toolPrefix: options.input.toolPrefix,
-    timeoutMs: options.input.timeoutMs,
-    connectTimeoutMs: options.input.connectTimeoutMs,
-    trust: options.input.trust,
-    toolRiskClass: options.input.toolRiskClass,
-    resourceReadRiskClass: options.input.resourceReadRiskClass,
-    promptGetRiskClass: options.input.promptGetRiskClass
+    includeTools: options.input.includeTools ?? previous.includeTools,
+    excludeTools: options.input.excludeTools ?? previous.excludeTools,
+    exposeResources: options.input.exposeResources ?? previous.exposeResources,
+    exposePrompts: options.input.exposePrompts ?? previous.exposePrompts,
+    toolPrefix: options.input.toolPrefix ?? previous.toolPrefix,
+    timeoutMs: options.input.timeoutMs ?? previous.timeoutMs,
+    connectTimeoutMs: options.input.connectTimeoutMs ?? previous.connectTimeoutMs,
+    trust: options.input.trust ?? previous.trust,
+    toolRiskClass: options.input.toolRiskClass ?? previous.toolRiskClass,
+    toolRiskClasses: options.input.toolRiskClasses ?? previous.toolRiskClasses,
+    protectedToolArguments: options.input.protectedToolArguments ?? previous.protectedToolArguments,
+    artifactToolArguments: options.input.artifactToolArguments ?? previous.artifactToolArguments,
+    redactedToolResultPaths: options.input.redactedToolResultPaths ?? previous.redactedToolResultPaths,
+    continuityToolResultPaths: options.input.continuityToolResultPaths ?? previous.continuityToolResultPaths,
+    toolVerificationRelationships: options.input.toolVerificationRelationships ?? previous.toolVerificationRelationships,
+    resourceReadRiskClass: options.input.resourceReadRiskClass ?? previous.resourceReadRiskClass,
+    promptGetRiskClass: options.input.promptGetRiskClass ?? previous.promptGetRiskClass
   };
+  validateMcpSetupInput({ name: serverName, ...nextServer });
+  servers[serverName] = nextServer;
   const config = patchConfig(existing.config, {
     mcpServers: servers
   });
@@ -3146,7 +3459,9 @@ export async function setupTelegramConfig(options: {
   validateTelegramSetupInput(options.input);
   const targetPath = resolveConfigMutationPath(options);
   const existing = await readConfig(targetPath);
-  const envName = options.input.botTokenEnv ?? "ESTACODA_TELEGRAM_BOT_TOKEN";
+  const envName = options.input.botTokenEnv ??
+    existing.config.channels?.telegram?.botTokenEnv ??
+    "ESTACODA_TELEGRAM_BOT_TOKEN";
   let secretPath: string | undefined;
   if (options.input.botToken !== undefined && options.input.botToken.trim().length > 0) {
     const secret = await writeEnvSecret({
@@ -3175,6 +3490,9 @@ export async function setupTelegramConfig(options: {
   }
   if (options.input.pollTimeoutSeconds !== undefined) {
     telegramPatch.pollTimeoutSeconds = options.input.pollTimeoutSeconds;
+  }
+  if (options.input.secureInputMode !== undefined) {
+    telegramPatch.secureInputMode = options.input.secureInputMode;
   }
 
   const config = patchConfig(existing.config, {
@@ -3291,6 +3609,9 @@ export async function setupWhatsAppConfig(options: {
     replyPrefix: options.input.replyPrefix ?? existing.config.channels?.whatsapp?.replyPrefix ?? WHATSAPP_DEFAULT_REPLY_PREFIX,
     pairingMode: options.input.pairingMode ?? "qr"
   };
+  if (existing.config.channels?.whatsapp?.busyTextCoalescing !== undefined) {
+    whatsappPatch.busyTextCoalescing = existing.config.channels.whatsapp.busyTextCoalescing;
+  }
   const config: EstaCodaConfig = {
     ...existing.config,
     channels: {
@@ -3338,6 +3659,7 @@ export async function addWhatsAppAllowedUser(options: {
   if (whatsapp.pairingMode === "qr") whatsappPatch.pairingMode = "qr";
   if (whatsapp.busyPolicy !== undefined) whatsappPatch.busyPolicy = whatsapp.busyPolicy;
   if (whatsapp.queueDepth !== undefined) whatsappPatch.queueDepth = whatsapp.queueDepth;
+  if (whatsapp.busyTextCoalescing !== undefined) whatsappPatch.busyTextCoalescing = whatsapp.busyTextCoalescing;
   if (whatsapp.textDebounceMs !== undefined) whatsappPatch.textDebounceMs = whatsapp.textDebounceMs;
   if (whatsapp.textDebounceMaxMessages !== undefined) whatsappPatch.textDebounceMaxMessages = whatsapp.textDebounceMaxMessages;
   if (whatsapp.textDebounceMaxChars !== undefined) whatsappPatch.textDebounceMaxChars = whatsapp.textDebounceMaxChars;
@@ -3511,11 +3833,27 @@ function validateModelFallbackSetupInput(input: ModelFallbackSetupInput): void {
 function validateAuxiliaryModelRouteSetupInput(input: AuxiliaryModelRouteSetupInput): void {
   requireNonEmpty(input.task, "auxiliary task");
   requireNonEmpty(input.provider, "auxiliary provider");
-  requireNonEmpty(input.id, "auxiliary model id");
+  if (input.provider !== "auto" && input.provider !== "main") {
+    requireNonEmpty(input.id, "auxiliary model id");
+  } else if (input.id !== undefined) {
+    throw new Error("Automatic and main auxiliary routes cannot set a model id");
+  }
   validateOptionalUrl(input.baseUrl, "auxiliary baseUrl");
   validateOptionalEnvName(input.apiKeyEnv, "auxiliary apiKeyEnv");
   if (input.contextWindowTokens !== undefined && (!Number.isInteger(input.contextWindowTokens) || input.contextWindowTokens <= 0)) {
     throw new Error("Expected auxiliary contextWindowTokens to be a positive integer");
+  }
+  if (input.timeoutMs !== undefined && (!Number.isInteger(input.timeoutMs) || input.timeoutMs <= 0)) {
+    throw new Error("Expected auxiliary timeoutMs to be a positive integer");
+  }
+  if (input.maxConcurrency !== undefined && (!Number.isInteger(input.maxConcurrency) || input.maxConcurrency <= 0)) {
+    throw new Error("Expected auxiliary maxConcurrency to be a positive integer");
+  }
+  if (input.hostedProcessing !== undefined && input.task !== "vision") {
+    throw new Error("hostedProcessing is supported only for the vision auxiliary route");
+  }
+  if (input.hostedProcessing !== undefined && input.hostedProcessing !== "allow-with-approval" && input.hostedProcessing !== "local-only") {
+    throw new Error("Expected hostedProcessing to be allow-with-approval or local-only");
   }
 }
 
@@ -3542,6 +3880,7 @@ function validateBrowserSetupInput(input: BrowserSetupInput): void {
     launchExecutable: input.launchExecutable,
     launchArgs: input.launchArgs,
     autoLaunch: input.autoLaunch,
+    headless: input.headless,
     supervised: input.supervised,
     chromeFlags: input.chromeFlags,
     engine: input.engine,
@@ -3594,14 +3933,153 @@ function validateMcpSetupInput(input: MCPSetupInput): void {
   }
   validateOptionalUrl(input.url, "url");
   validateRiskClass(input.toolRiskClass, "toolRiskClass");
+  for (const [toolName, riskClass] of Object.entries(input.toolRiskClasses ?? {})) {
+    requireNonEmpty(toolName, "MCP tool risk override name");
+    validateRiskClass(riskClass, `toolRiskClasses.${toolName}`);
+  }
+  for (const [toolName, declaration] of Object.entries(input.protectedToolArguments ?? {})) {
+    requireNonEmpty(toolName, "MCP protected argument tool name");
+    if (!Array.isArray(declaration.paths) || declaration.paths.length === 0 || declaration.paths.length > 8 ||
+        declaration.paths.some((path) => !isProtectedArgumentPattern(path)) ||
+        new Set(declaration.paths).size !== declaration.paths.length ||
+        hasOverlappingProtectedArgumentPatterns(declaration.paths) ||
+        !isProtectedArgumentPersistence(declaration.handling?.persistence) ||
+        !isProtectedArgumentSharing(declaration.handling?.sharing) ||
+        (declaration.groupedDelivery !== undefined && typeof declaration.groupedDelivery !== "boolean") ||
+        (declaration.browserRelay !== undefined && typeof declaration.browserRelay !== "boolean") ||
+        !isMutationRiskClass(resolveMcpSetupToolRisk(input, toolName))) {
+      throw new Error(`Invalid protected argument declaration for MCP tool ${toolName}`);
+    }
+  }
+  for (const [toolName, declaration] of Object.entries(input.artifactToolArguments ?? {})) {
+    requireNonEmpty(toolName, "MCP artifact argument tool name");
+    if (declaration.typeMapping !== undefined && !isMcpArtifactTypeMapping(declaration.typeMapping)) {
+      throw new Error(`Invalid artifact type mapping for MCP tool ${toolName}`);
+    }
+    if (!Array.isArray(declaration.paths) || declaration.paths.length === 0 || declaration.paths.length > 8 ||
+        declaration.paths.some((path) => !isProtectedArgumentPattern(path)) ||
+        new Set(declaration.paths).size !== declaration.paths.length ||
+        hasOverlappingProtectedArgumentPatterns(declaration.paths) ||
+        !Array.isArray(declaration.allowedMimeTypes) || declaration.allowedMimeTypes.length === 0 ||
+        declaration.allowedMimeTypes.length > 8 ||
+        declaration.allowedMimeTypes.some((mimeType) => !isRelayedArtifactMimeType(mimeType)) ||
+        new Set(declaration.allowedMimeTypes).size !== declaration.allowedMimeTypes.length ||
+        !Number.isSafeInteger(declaration.maxBytes) || declaration.maxBytes <= 0 ||
+        declaration.maxBytes > 25 * 1024 * 1024 ||
+        !isMutationRiskClass(resolveMcpSetupToolRisk(input, toolName))) {
+      throw new Error(`Invalid artifact argument declaration for MCP tool ${toolName}`);
+    }
+    const protectedPaths = input.protectedToolArguments?.[toolName]?.paths ?? [];
+    const combinedPaths = [...protectedPaths, ...declaration.paths];
+    if (new Set(combinedPaths).size !== combinedPaths.length || hasOverlappingProtectedArgumentPatterns(combinedPaths)) {
+      throw new Error(`Invalid artifact argument declaration for MCP tool ${toolName}`);
+    }
+  }
+  for (const [toolName, paths] of Object.entries(input.redactedToolResultPaths ?? {})) {
+    requireNonEmpty(toolName, "MCP result redaction tool name");
+    if (!Array.isArray(paths) || paths.length === 0 || paths.length > 8 ||
+        paths.some((path) => !isProtectedArgumentPattern(path)) ||
+        new Set(paths).size !== paths.length || hasOverlappingProtectedArgumentPatterns(paths)) {
+      throw new Error(`Invalid result redaction declaration for MCP tool ${toolName}`);
+    }
+  }
+  for (const [toolName, paths] of Object.entries(input.continuityToolResultPaths ?? {})) {
+    requireNonEmpty(toolName, "MCP continuity tool name");
+    if (!Array.isArray(paths) || paths.length === 0 || paths.length > 8 ||
+        paths.some((path) => !isContinuityResultPattern(path)) ||
+        new Set(paths).size !== paths.length || hasOverlappingProtectedArgumentPatterns(paths)) {
+      throw new Error(`Invalid continuity declaration for MCP tool ${toolName}`);
+    }
+  }
+  for (const [verificationTool, mutationTools] of Object.entries(input.toolVerificationRelationships ?? {})) {
+    requireNonEmpty(verificationTool, "MCP verification tool name");
+    if (!Array.isArray(mutationTools) || mutationTools.length === 0 || mutationTools.length > 16 ||
+        mutationTools.some((toolName) => typeof toolName !== "string" || toolName.trim().length === 0) ||
+        new Set(mutationTools).size !== mutationTools.length || mutationTools.includes(verificationTool) ||
+        !isReadRiskClass(resolveMcpSetupToolRisk(input, verificationTool)) ||
+        mutationTools.some((toolName) => !isMutationRiskClass(resolveMcpSetupToolRisk(input, toolName)))) {
+      throw new Error(`Invalid verification relationship for MCP tool ${verificationTool}`);
+    }
+  }
   validateRiskClass(input.resourceReadRiskClass, "resourceReadRiskClass");
   validateRiskClass(input.promptGetRiskClass, "promptGetRiskClass");
+  for (const [targetName, sourceName] of Object.entries(input.envRefs ?? {})) {
+    validateOptionalEnvName(targetName, "MCP environment target");
+    validateOptionalEnvName(sourceName, `MCP environment reference for ${targetName}`);
+    if (input.env?.[targetName] !== undefined) {
+      throw new Error(`MCP environment target ${targetName} cannot use both env and envRefs`);
+    }
+  }
   if (input.timeoutMs !== undefined && (!Number.isInteger(input.timeoutMs) || input.timeoutMs <= 0)) {
     throw new Error("Expected timeoutMs to be a positive integer");
   }
   if (input.connectTimeoutMs !== undefined && (!Number.isInteger(input.connectTimeoutMs) || input.connectTimeoutMs <= 0)) {
     throw new Error("Expected connectTimeoutMs to be a positive integer");
   }
+}
+
+function resolveMcpSetupToolRisk(input: MCPSetupInput, toolName: string): ToolRiskClass {
+  const defaultRisk = input.trust === "read-only-local"
+    ? "read-only-local"
+    : input.trust === "read-only-network" ? "read-only-network" : "external-side-effect";
+  if (input.toolRiskClasses !== undefined) {
+    return input.toolRiskClasses[toolName] ?? defaultRisk;
+  }
+  return input.toolRiskClass ?? defaultRisk;
+}
+
+function isReadRiskClass(value: ToolRiskClass): boolean {
+  return value === "read-only-local" || value === "read-only-network";
+}
+
+function isMutationRiskClass(value: ToolRiskClass): boolean {
+  return value === "workspace-write" || value === "external-side-effect" || value === "destructive-local" ||
+    value === "shared-state-mutation" || value === "spend-money";
+}
+
+function isContinuityResultPattern(path: string): boolean {
+  if (path === "/url") return true; // Result normalization admits only bounded, relative task coordinates.
+  const segments = parseProtectedArgumentPattern(path);
+  if (segments === undefined) return false;
+  const namedSegments = segments.filter((segment) => segment !== "*");
+  if (namedSegments.some((segment) => /(?:api.?key|auth|cookie|credential|otp|pass(?:word|code)?|secret|token)/iu.test(segment))) {
+    return false;
+  }
+  const leaf = namedSegments.at(-1)?.replace(/[_-]+/gu, "").toLocaleLowerCase();
+  return leaf !== undefined && (
+    /(?:^id$|id$|identifier$|uid$|uuid$|hash$|sha256$|ref$|reference$)/u.test(leaf) ||
+    /(?:^name$|name$|label$|title$)/u.test(leaf)
+  );
+}
+
+function hasOverlappingProtectedArgumentPatterns(paths: readonly string[]): boolean {
+  const parsed = paths.map((path) => parseProtectedArgumentPattern(path)!);
+  return parsed.some((candidate, index) => parsed.some((other, otherIndex) =>
+    index !== otherIndex && candidate.length < other.length &&
+    candidate.every((segment, segmentIndex) => segment === other[segmentIndex])
+  ));
+}
+
+function isLegacyProtectedArgumentPath(value: string): boolean {
+  const segments = value.split(".");
+  return segments.length > 0 && segments.every((segment) =>
+    /^[A-Za-z_][A-Za-z0-9_]*$/u.test(segment) &&
+    segment !== "__proto__" && segment !== "prototype" && segment !== "constructor"
+  );
+}
+
+function isProtectedArgumentPersistence(value: unknown): value is MCPProtectedToolArgumentsConfig["handling"]["persistence"] {
+  return value === "none" || value === "destination-managed" || value === "unknown";
+}
+
+function isProtectedArgumentSharing(value: unknown): value is MCPProtectedToolArgumentsConfig["handling"]["sharing"] {
+  return value === "private" || value === "workspace" || value === "account" || value === "external" || value === "unknown";
+}
+
+function isRelayedArtifactMimeType(value: unknown): value is string {
+  return value === "application/json" || value === "application/yaml" || value === "application/raml+yaml" ||
+    value === "application/graphql" || value === "text/plain" || value === "text/markdown" ||
+    value === "text/x-protobuf" || value === "text/x-smithy";
 }
 
 function validateSecuritySetupInput(input: SecuritySetupInput): void {
@@ -3646,6 +4124,14 @@ function validateTelegramSetupInput(input: TelegramSetupInput): void {
   validateOptionalEnvName(input.botTokenEnv, "botTokenEnv");
   if (input.pollTimeoutSeconds !== undefined && (!Number.isInteger(input.pollTimeoutSeconds) || input.pollTimeoutSeconds <= 0)) {
     throw new Error("Expected pollTimeoutSeconds to be a positive integer");
+  }
+  if (
+    input.secureInputMode !== undefined &&
+    input.secureInputMode !== "protected-handoff" &&
+    input.secureInputMode !== "direct-dm" &&
+    input.secureInputMode !== "disabled"
+  ) {
+    throw new Error("Expected secureInputMode protected-handoff, direct-dm, or disabled");
   }
 }
 
@@ -3989,14 +4475,23 @@ function normalizeQueueDepth(value: unknown): number {
   return coercePositiveInteger(value, { default: 3, max: 10 });
 }
 
-function normalizeWhatsAppTextDebounceMs(value: unknown): number {
-  return coerceNonNegativeInteger(value, { default: 5_000, max: 60_000 });
+function normalizeBusyTextCoalescing(value: ChannelBusyTextCoalescingConfig | undefined): Required<ChannelBusyTextCoalescingConfig> {
+  return {
+    enabled: value?.enabled === true,
+    windowMs: coerceNonNegativeInteger(value?.windowMs, { default: 1_500, max: 60_000 }),
+    maxMessages: coercePositiveInteger(value?.maxMessages, { default: 5, max: 100 }),
+    maxChars: coercePositiveInteger(value?.maxChars, { default: 8_000, max: 100_000 }),
+  };
 }
 
-function normalizeWhatsAppTextDebounceMaxMessages(value: unknown): number {
+function normalizeTextDebounceMs(value: unknown, defaultMs: number): number {
+  return coerceNonNegativeInteger(value, { default: defaultMs, max: 60_000 });
+}
+
+function normalizeTextDebounceMaxMessages(value: unknown): number {
   return coercePositiveInteger(value, { default: 10, max: 100 });
 }
 
-function normalizeWhatsAppTextDebounceMaxChars(value: unknown): number {
+function normalizeTextDebounceMaxChars(value: unknown): number {
   return coercePositiveInteger(value, { default: 8_000, max: 100_000 });
 }

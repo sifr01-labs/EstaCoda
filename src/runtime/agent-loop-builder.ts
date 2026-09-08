@@ -1,6 +1,7 @@
 import type { ProjectContextSnapshot } from "../contracts/context.js";
 import type { AgentEvolutionPolicy } from "../contracts/agent-evolution.js";
 import type { BrowserBackend } from "../contracts/browser.js";
+import type { BrowserSessionLease } from "../browser/session-lifecycle.js";
 import type { ExternalMemoryProvider, MemoryProvider, MemoryPromptContext } from "../contracts/memory.js";
 import type { ModelProfile, ProviderRoutePreferences, ResolvedAuxiliaryRoute, ResolvedModelRoute } from "../contracts/provider.js";
 import type { SecurityPolicy } from "../contracts/security.js";
@@ -12,6 +13,7 @@ import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
 import type { ArtifactStore } from "../artifacts/artifact-store.js";
 import type { TaskResultService } from "../tasks/task-result-service.js";
 import type { TaskOperatorService } from "../tasks/task-operator-service.js";
+import type { UsageInspector } from "../session/usage-inspector.js";
 import type { ContextReferenceExpander } from "../context/context-reference-expander.js";
 import type { CronStore } from "../cron/cron-store.js";
 import { availableToolsetsFromTools } from "../cron/cron-runtime-validation.js";
@@ -35,6 +37,8 @@ import type { SessionCompressionConfig } from "../config/runtime-config.js";
 import type { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
 import type { ProviderUsageTaskAttribution } from "../providers/provider-usage-ledger.js";
 import { loadSessionContextWindowUsage } from "../session/session-context-window-usage.js";
+import { hydratableExecutionPlanSnapshot } from "../session/execution-plan-state.js";
+import { hydratableExecutionCheckpoint } from "../session/execution-checkpoint-state.js";
 import type { SkillEvolutionStore } from "../skills/skill-evolution.js";
 import type { ChangeManifestStore } from "../skills/change-manifest-store.js";
 import type { SkillLearningManager } from "../skills/skill-learning.js";
@@ -43,6 +47,7 @@ import { SkillRegistry } from "../skills/skill-registry.js";
 import { ToolExecutor } from "../tools/tool-executor.js";
 import { ToolRegistry } from "../tools/tool-registry.js";
 import { ToolCallPlanner } from "../tools/tool-call-planner.js";
+import { resolveRegisteredToolCapability } from "../tools/tool-capability.js";
 import { buildProviderToolSchemaCatalog, type OpenAICompatibleToolSchema } from "../tools/tool-schema.js";
 import { toolRegistrationPlan, type ToolRegistrationPhase } from "../tools/index.js";
 import type { WorkspaceFsAdapter } from "../tools/workspace-tools.js";
@@ -50,6 +55,7 @@ import type { FetchLike as WebFetchLike } from "../tools/web-tools.js";
 import type { ImageGenerationFetchLike } from "../tools/image-generation-tools.js";
 import type { VoiceFetchLike } from "../tools/voice-tools.js";
 import type { FasterWhisperWorker } from "../tools/stt-local-whisper.js";
+import type { MCPServerSnapshot } from "../mcp/mcp-tools.js";
 import type { ProcessManager } from "../process/process-manager.js";
 import type { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import { AgentLoop, type AgentLoopOptions } from "./agent-loop.js";
@@ -59,6 +65,12 @@ import { ProviderTurnLoop, type ProviderTurnLoopBudgets, type ProviderTurnLoopOp
 import { RunRecorder } from "./run-recorder.js";
 import { RuntimeRouter } from "./runtime-router.js";
 import { SkillPlaybookRunner } from "./skill-playbook-runner.js";
+import { ExecutionPlanController } from "./execution-plan-controller.js";
+import { ExecutionPlanStore } from "./execution-plan-store.js";
+import { ExecutionEvidenceIndex } from "./execution-evidence-index.js";
+import { ExecutionCapabilityPreflight } from "./execution-capability-preflight.js";
+import { ExecutionWorkingSetController } from "./execution-working-set.js";
+import { ExecutionCheckpointController } from "./execution-checkpoint-controller.js";
 import { LlmSkillRouteShadowReranker } from "./skill-route-reranker.js";
 import { createSessionRuntimeContext, type SessionRuntimeContext } from "./session-runtime-context.js";
 import { ToolPlanRunner } from "./tool-plan-runner.js";
@@ -81,7 +93,11 @@ export const DEFAULT_PROVIDER_TURN_BUDGETS: ProviderTurnLoopBudgets = {
   maxProviderIterations: 45,
   maxProviderToolCalls: 100,
   maxRepeatedToolFailures: 5,
-  maxProviderWallClockMs: 300_000
+  maxRepeatedBrowserObservations: 3,
+  noProgressNudgeIteration: 3,
+  maxNoProgressIterations: 6,
+  maxProviderWallClockMs: 30 * 60_000,
+  finalizationReserveMs: 15_000
 };
 
 export type AgentLoopExecutionControls = {
@@ -137,6 +153,7 @@ export type AgentLoopRuntimeSubstrate = {
   providerExecutor: ProviderExecutor;
   routes: AgentLoopRouteInput;
   mcpTools: readonly RegisteredTool[];
+  mcpServerSnapshots?: readonly MCPServerSnapshot[];
   skillRegistry: SkillRegistry;
   localSkillsRoot: string;
   bundledSkillsRoot: string;
@@ -162,10 +179,12 @@ export type AgentLoopRuntimeSubstrate = {
   externalMemoryProviders: ExternalMemoryProvider[];
   processManager: ProcessManager;
   browserBackend: BrowserBackend;
+  browserSessionLease?: BrowserSessionLease;
   browserConfig: SessionToolContext["browserConfig"];
   artifactStore: ArtifactStore;
   taskResultService?: TaskResultService;
   taskOperatorService?: TaskOperatorService;
+  usageInspector?: UsageInspector;
   trustStore: WorkspaceTrustStore;
   cronStore: CronStore;
   disableCronTools?: boolean;
@@ -234,6 +253,9 @@ export type AgentLoopSessionInput = {
 
 export type BuiltAgentLoopSession = {
   sessionRuntimeContext: SessionRuntimeContext;
+  executionPlanController?: ExecutionPlanController;
+  executionCheckpointController?: ExecutionCheckpointController;
+  executionWorkingSet?: ExecutionWorkingSetController;
   toolRegistry: ToolRegistry;
   toolExecutor: ToolExecutor;
   toolCallPlanner: ToolCallPlanner;
@@ -283,12 +305,94 @@ export class AgentLoopBuilder {
     const substrate = this.#substrate;
     const routes = input.providerRoutes ?? substrate.routes;
     const sessionRuntimeContext = input.sessionRuntimeContext ?? createSessionRuntimeContext(input.sessionId);
+    const runRecorder = (this.#factories.runRecorder ?? ((options) => new RunRecorder(options)))({
+      sessionDb: input.sessionDb,
+      sessionId: input.sessionId,
+      sessionRuntimeContext,
+      trajectoryRecorder: input.trajectoryRecorder,
+      trajectoryStore: hasTrajectoryStore(input.sessionDb) ? input.sessionDb : undefined,
+      profileId: substrate.profileId,
+      skillEvolutionStore: substrate.skillEvolutionStore
+    });
+    // This same registry is subsequently filtered in-place for the session.
+    // Capability preflight therefore cannot observe a broader/global inventory.
+    const toolRegistry = new ToolRegistry();
+    const ownsForegroundSupervision = input.parentSessionId === undefined && input.taskExecution === undefined;
+    const ownsExecutionPlan = ownsForegroundSupervision;
+    // Every runtime records authoritative execution receipts. Only root
+    // foreground sessions additionally expose the optional Plan controller.
+    const executionEvidenceIndex = new ExecutionEvidenceIndex();
+    const persistedSessionEvents = ownsExecutionPlan
+      ? await input.sessionDb.listEvents(input.sessionId)
+      : [];
+    if (ownsForegroundSupervision) {
+      await substrate.artifactStore.hydrateSessionArtifacts({
+        events: persistedSessionEvents,
+        sessionId: input.sessionId,
+        profileId: substrate.profileId
+      });
+    }
+    executionEvidenceIndex.hydrate(persistedSessionEvents);
+    const executionCapabilityPreflight = new ExecutionCapabilityPreflight({
+      registry: toolRegistry,
+      browserSourceAvailable: () => substrate.browserBackend.isAvailable(),
+      configuredConnectors: substrate.mcpServerSnapshots
+    });
+    const executionPlanController = ownsExecutionPlan
+      ? new ExecutionPlanController(
+          new ExecutionPlanStore(),
+          (event, sink) => runRecorder.recordExecutionPlanTransition(
+            event,
+            sink === undefined ? undefined : (runtimeEvent) => sink(runtimeEvent as typeof event)
+          ),
+          executionEvidenceIndex,
+          executionCapabilityPreflight,
+          (record) => runRecorder.recordExecutionEvidence(record)
+        )
+      : undefined;
+    const executionCheckpointController = ownsForegroundSupervision
+      ? new ExecutionCheckpointController({
+          sessionId: () => sessionRuntimeContext.currentSessionId(),
+          profileId: substrate.profileId,
+          record: (event) => runRecorder.recordExecutionCheckpointTransition(event)
+        })
+      : undefined;
+    const executionWorkingSet = ownsForegroundSupervision
+      ? new ExecutionWorkingSetController({
+          profileId: substrate.profileId,
+          sessionId: input.sessionId,
+          checkpointReader: executionCheckpointController
+        })
+      : undefined;
+    if (executionPlanController !== undefined) {
+      const persistedPlan = hydratableExecutionPlanSnapshot(persistedSessionEvents);
+      if (persistedPlan !== undefined) {
+        try {
+          executionPlanController.hydrate(persistedPlan);
+        } catch {
+          // Malformed persisted working state is ignored rather than entering the provider prompt.
+        }
+      }
+    }
+    if (executionCheckpointController !== undefined) {
+      const persistedCheckpoint = hydratableExecutionCheckpoint({
+        events: persistedSessionEvents,
+        sessionId: input.sessionId,
+        profileId: substrate.profileId
+      });
+      if (persistedCheckpoint !== undefined) {
+        try {
+          executionCheckpointController.hydrate(persistedCheckpoint);
+        } catch {
+          // Invalid persisted checkpoint state never enters the foreground runtime.
+        }
+      }
+    }
     const initialContextWindowUsage = await loadSessionContextWindowUsage({
       sessionDb: input.sessionDb,
       sessionId: input.sessionId,
       profileId: substrate.profileId
     });
-    const toolRegistry = new ToolRegistry();
     const runtimeToolContext = buildRuntimeToolContext({
       workspaceRoot: substrate.workspaceRoot,
       homeDir: substrate.homeDir,
@@ -325,6 +429,8 @@ export class AgentLoopBuilder {
         parentSessionId: input.parentSessionId,
         childSessionId: input.parentSessionId === undefined ? undefined : input.sessionId,
         currentSessionId: () => sessionRuntimeContext.currentSessionId(),
+        executionPlanController,
+        executionCheckpointController,
         homeDir: substrate.homeDir,
         childProcessEnv: substrate.executionControls?.childProcessEnv,
         pythonStateRoot: substrate.pythonStateRoot,
@@ -334,7 +440,9 @@ export class AgentLoopBuilder {
         imageCacheRoot: substrate.imageCacheRoot,
         browserBackend: substrate.browserBackend,
         browserConfig: substrate.browserConfig,
+        mcpServerSnapshots: substrate.mcpServerSnapshots,
         mainRoute: routes.mainRoute,
+        mainFallbackRoutes: routes.modelFallbackRoutes,
         visionRoute: routes.visionRoute,
         compressionRoute: routes.compressionRoute,
         providerRegistry: substrate.providerRegistry,
@@ -343,6 +451,7 @@ export class AgentLoopBuilder {
         artifactStore: substrate.artifactStore,
         taskResultService: substrate.taskResultService,
         taskOperatorService: substrate.taskOperatorService,
+        usageInspector: substrate.usageInspector,
         sessionDb: input.sessionDb,
         trajectoryRecorder: input.trajectoryRecorder,
         memoryStore: substrate.memoryStore,
@@ -426,7 +535,9 @@ export class AgentLoopBuilder {
       securityPolicy: input.securityPolicy,
       sessionDb: input.sessionDb,
       trajectoryRecorder: input.trajectoryRecorder,
-      workspaceRoot: substrate.workspaceRoot
+      workspaceRoot: substrate.workspaceRoot,
+      profileId: substrate.profileId,
+      executionCheckpointController
     });
     let delegationVisibleTools: readonly ToolDefinition[] = [];
     const delegationService = input.delegationServiceFactory?.({
@@ -472,18 +583,24 @@ export class AgentLoopBuilder {
     const providerToolSchemaCatalog = buildProviderToolSchemaCatalog({
       tools: providerToolAvailability.available
     });
+    const executionCompletionCapabilities = providerToolAvailability.available.flatMap((definition) => {
+      const registered = toolRegistry.get(definition.name);
+      if (registered === undefined) return [];
+      const resolution = resolveRegisteredToolCapability(registered);
+      if (resolution.ok === false || resolution.capability.classification === "unsupported") return [];
+      const capability = resolution.capability;
+      return [{
+        tool: capability.canonicalTool,
+        kind: capability.verification === undefined
+          ? capability.classification === "mutate" ? "mutation" as const : "read" as const
+          : "verification" as const,
+        ...(capability.verification === undefined ? {} : { verifies: capability.verification.verifies }),
+        ...(capability.connector === undefined ? {} : { connector: capability.connector })
+      }];
+    });
     const toolCallPlanner = new ToolCallPlanner({
       registry: toolRegistry,
       aliases: providerToolSchemaCatalog.aliases
-    });
-    const runRecorder = (this.#factories.runRecorder ?? ((options) => new RunRecorder(options)))({
-      sessionDb: input.sessionDb,
-      sessionId: input.sessionId,
-      sessionRuntimeContext,
-      trajectoryRecorder: input.trajectoryRecorder,
-      trajectoryStore: hasTrajectoryStore(input.sessionDb) ? input.sessionDb : undefined,
-      profileId: substrate.profileId,
-      skillEvolutionStore: substrate.skillEvolutionStore
     });
     const memoryRecallOrchestrator = input.memoryRecall === "disabled"
       ? undefined
@@ -504,7 +621,8 @@ export class AgentLoopBuilder {
       sessionId: input.sessionId,
       sessionRuntimeContext,
       maxConcurrentSafeTools: 4,
-      delegateTaskCallLimit: (substrate.delegationConfig ?? DEFAULT_DELEGATION_CONFIG).maxDelegateCallsPerTurn
+      delegateTaskCallLimit: (substrate.delegationConfig ?? DEFAULT_DELEGATION_CONFIG).maxDelegateCallsPerTurn,
+      executionEvidenceIndex
     });
     const providerTurnLoop = (this.#factories.providerTurnLoop ?? ((options) => new ProviderTurnLoop(options)))({
       providerExecutor: substrate.providerExecutor,
@@ -530,7 +648,12 @@ export class AgentLoopBuilder {
       },
       providerRequestDefaults: substrate.executionControls?.providerRequestDefaults,
       initialContextWindowUsage,
-      taskExecution: input.taskExecution
+      taskExecution: input.taskExecution,
+      executionPlanReader: executionPlanController,
+      executionWorkingSet,
+      executionCheckpointController,
+      browserSessionLease: ownsForegroundSupervision ? substrate.browserSessionLease : undefined,
+      browserBackend: substrate.browserBackend
     });
     const skillPlaybookRunner = (this.#factories.skillPlaybookRunner ?? ((options) => new SkillPlaybookRunner(options)))({
       toolExecutor,
@@ -580,6 +703,9 @@ export class AgentLoopBuilder {
       contextReferenceExpander: substrate.contextReferenceExpander,
       projectContext: input.projectContext ?? substrate.projectContext,
       providerTools: providerToolSchemaCatalog.tools,
+      providerToolSchemaCatalog: ownsExecutionPlan ? providerToolSchemaCatalog : undefined,
+      mcpServerSnapshots: substrate.mcpServerSnapshots,
+      executionCompletionCapabilities,
       soul: undefined,
       skillsIndex: sessionSkillCatalog,
       skillConfig: input.skillConfig,
@@ -593,12 +719,21 @@ export class AgentLoopBuilder {
           }),
       skillEvolutionStore: substrate.skillEvolutionStore,
       agentEvolutionPolicy: input.agentEvolutionPolicy,
+      taskExecution: input.taskExecution,
+      executionPlanReader: executionPlanController,
+      executionPlanController,
+      executionCheckpointController,
+      executionCapabilityPreflight,
+      executionEvidenceIndex,
       ui: input.ui,
       agentProfile: input.agentProfile
     });
 
     return {
       sessionRuntimeContext,
+      executionPlanController,
+      executionCheckpointController,
+      executionWorkingSet,
       toolRegistry,
       toolExecutor,
       toolCallPlanner,
@@ -719,6 +854,8 @@ function buildPreSkillVisibilityToolContext(input: SessionToolContext): SessionT
     parentSessionId: input.parentSessionId,
     childSessionId: input.childSessionId,
     currentSessionId: input.currentSessionId,
+    executionPlanController: input.executionPlanController,
+    executionCheckpointController: input.executionCheckpointController,
     homeDir: input.homeDir,
     childProcessEnv: input.childProcessEnv,
     pythonStateRoot: input.pythonStateRoot,
@@ -728,7 +865,9 @@ function buildPreSkillVisibilityToolContext(input: SessionToolContext): SessionT
     imageCacheRoot: input.imageCacheRoot,
     browserBackend: input.browserBackend,
     browserConfig: input.browserConfig,
+    mcpServerSnapshots: input.mcpServerSnapshots,
     mainRoute: input.mainRoute,
+    mainFallbackRoutes: input.mainFallbackRoutes,
     visionRoute: input.visionRoute,
     compressionRoute: input.compressionRoute,
     providerRegistry: input.providerRegistry,
@@ -737,6 +876,7 @@ function buildPreSkillVisibilityToolContext(input: SessionToolContext): SessionT
     artifactStore: input.artifactStore,
     taskResultService: input.taskResultService,
     taskOperatorService: input.taskOperatorService,
+    usageInspector: input.usageInspector,
     sessionDb: input.sessionDb,
     trajectoryRecorder: input.trajectoryRecorder,
     memoryStore: input.memoryStore,

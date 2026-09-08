@@ -151,7 +151,12 @@ Focus rules locked for v1:
 
 These renders are visual targets, not exact string snapshots. Papyrus owns
 measurement, wrapping, truncation, focus, resize behavior, and Arabic/bidi
-safety.
+safety. Editable prompt and steer text share a UAX #9-backed layout primitive
+that preserves the logical input buffer while producing visual rows, terminal
+cell cursor coordinates, and visual arrow navigation. RTL row alignment and
+directional isolation are render concerns and never mutate submitted text. The
+raw terminal host resolves Papyrus's native/software bidi policy and passes the
+resolved value into the otherwise deterministic prompt and steer surfaces.
 
 ### Phase A: Surface State
 
@@ -363,21 +368,16 @@ foreground/background/waiting ownership, show the immutable preference and
 background-continuation readiness, and include only a bounded safe wait reason.
 Expired leases and Task status alone are never presented as active ownership.
 Cards remain available after completion, failure, partial settlement, or
-cancellation; they are not transient worker rows. The main-session Task region
-shows stable `Subagent N` identities beneath the live assistant stream. Each
-full Subagent card occupies exactly seven rows, including its title and truthful
-status/elapsed/tokens/cost footer. The interior continually refreshes with the
-latest retained safe activity. Cards use the elevated grey surface token,
-whitespace gutters instead of permanent perimeter borders, and the existing
-worker motion token while running. Focus adds the action-color leading rail and
-title treatment. The main card is a presentation projection: lifecycle and
-accounting events such as `Worker finished`, Step-state changes, Attempt
-bookkeeping, and usage recording remain available in inspection but do not
-consume its activity rows. Running cards show semantic safe work such as
-searching, reading, writing, or preparing an answer. Completed cards replace
-those transient rows with `Result ready` and up to three wrapped lines from the
-accepted result summary, falling back to the retained assistant preview only
-when no result summary exists.
+cancellation; they are not transient worker rows. Every live delegated Task
+uses one compact command center beneath the live assistant stream: Task header,
+stage tracker, current-stage summary, logical activity ribbon, current activity,
+compact worker rows, and state-valid controls. Worker rows keep stable
+`Subagent N` identities and use the elevated surface token; focus adds the
+action-color treatment. Selecting a row opens its detailed activity, result,
+Attempt, dependency, and accounting inspection. Lifecycle and accounting events
+such as `Worker finished`, Step-state changes, Attempt bookkeeping, and usage
+recording remain available in inspection but do not consume the main ribbon or
+current-activity line.
 
 The main-session Task header uses a compact display identity: generated
 `task_<uuid>` values render as `task_` plus the first eight UUID characters,
@@ -386,30 +386,28 @@ namespace. The exact durable Task ID remains visible in inspection and remains
 the only value used for focus, hit regions, routing, commands, and persistence.
 
 When every delegated Subagent is settled and the durable synthesis Step is
-`ready`, `running`, `waiting_for_input`, or `waiting_for_approval`, the
-main-session Task region gives the parent stage visual priority. It shows a
-distinct `Parent synthesis` panel sourced from that Step's persisted status,
-current Attempt, safe activity, usage, and semantic trace. The panel reports
-the factual number of Subagent results being synthesized and the worker-only
-settlement fact, such as `3 of 3 delegated Steps completed`. The live Task
-header and whole-Task view derive a read-only user phase from the persisted
-graph, so a durable lifecycle of `running` is presented as `delegating` or
-`synthesizing` when the Step state proves it. This projection does not mutate
-the Task, scheduler, or API lifecycle. It never invents intermediate prose or
-a completion percentage. Audit-only lifecycle events do not become its
-selected activity callout.
+`ready`, `running`, `waiting_for_input`, or `waiting_for_approval`, the same
+command center advances its active stage to synthesis. The stage summary is
+sourced from the synthesis Step's persisted status, current Attempt, safe
+activity, and usage; worker outcomes remain a separate completed or warning
+stage. The live Task header and whole-Task view derive this read-only user phase
+from the persisted graph, so a durable lifecycle of `running` is presented as
+`delegating` or `synthesizing` when the Step state proves it. This projection
+does not mutate the Task, scheduler, or API lifecycle. It never invents
+intermediate prose or a completion percentage. Audit-only lifecycle events do
+not become its selected activity callout.
 
 The rich Papyrus session does not retain a one-time `running` transcript notice
 above a live Task card because that snapshot would become stale. The live card
 is authoritative. Plain and non-TTY sessions instead print the current derived
 phase and worker settlement as a bounded snapshot because no live card exists.
 
-While that parent stage is active, settled seven-row Subagent cards collapse to
-individually focusable one-row summaries beneath it. Their exact Step IDs and
-mouse/keyboard routes do not change, and their complete safe activity and
-accepted result summaries remain available in inspection. The parent panel
-opens whole-Task inspection. Before synthesis becomes active, and after it
-settles, the ordinary seven-row Subagent presentation remains in effect.
+The compact worker rows remain individually focusable throughout delegation and
+synthesis. Their exact Step IDs and mouse/keyboard routes do not change, and
+their complete safe activity and accepted result summaries remain available in
+inspection. The Task header opens whole-Task inspection. When the Task settles,
+the retained Task rolls into its existing one-row receipt while the permanent
+completion ribbon moves above the delivered answer.
 
 An interactive CLI delegation with one worker receives a durable local
 completion binding, as does a batch with its default synthesis Step. Once the
@@ -428,7 +426,7 @@ recovery may safely show the same durable answer again after the claim becomes
 stale. A settled Result is displayed normally; the CLI does not replay
 completed text as fake token streaming.
 
-Completed Subagent cards prefer the Result's dedicated `displaySummary` over
+Completed Subagent inspection prefers the Result's dedicated `displaySummary` over
 generic Result metadata or streaming previews. The field is immutable,
 single-line plain text bounded to 480 Unicode characters; Agent Steps populate
 it from the deliberately requested opening summary paragraph. Results created
@@ -436,24 +434,23 @@ before this contract remain compatible: Papyrus safely extracts the first
 complete usable paragraph from their generic `summary` metadata. It never uses
 an arbitrary assistant-stream tail as the settled summary.
 
-One to three Subagents stack vertically. Four to six use two equal-width,
-column-major columns when both remain readable. A third column is added only at
-a readable width; otherwise the surface keeps complete seven-row cards and
-shows `+N more Subagents`. Narrow and height-constrained terminals use the
-single-column or compact deterministic fallback instead of clipping a card.
-The Task header opens the whole-Task view; a Subagent card opens that Subagent.
+Compact Subagent rows stack vertically at narrow widths and use at most two
+equal-width, column-major columns when both remain readable. Height-constrained
+terminals preserve stage and ribbon truth first, then show as many complete
+worker rows as fit with a factual `+N more Subagents` summary. The Task header
+opens the whole-Task view; a Subagent row opens that Subagent.
 
 The whole-Task inspection workspace shows the objective, lifecycle, elapsed
 time, aggregate usage/cost, factual Step state, Subagent summaries, approvals,
 blockers, dependencies, results, child Tasks, and safe artifacts. Its activity
-trace is an event sequence, not a completion meter: one semantic-color square
-per retained `Terminal`, `Search`, `Plan`, `Read`, `Edit`, `Answer`, `Wait`,
-`Finish`, or `Failed` event, plus all-time category counters. The outlined
-square is the inspected event; the separate live-tail marker is the newest
-event. Selecting history disables follow-live and exposes `Return to live`.
-Overflow uses a bounded readable window with an earlier-event count. The view
-may state `N of M Steps settled`, but never derives or renders a Task completion
-percentage. All-time counters come from profile-scoped aggregate metadata; the
+trace is an execution history, not a completion meter. Adjacent retained events
+of the same logical activity become duration-weighted `Plan`, `Search`, `Read`,
+`Write`, `Execute`, `Wait`, `Retry`, `Deliver`, or `Failed` spans. The outlined
+span is the inspected activity; the separate live-tail marker is the newest
+activity. Selecting history disables follow-live and exposes `Return to live`.
+Overflow uses a bounded readable window with an earlier-activity count. The
+view may state `N of M Steps settled`, but never derives or renders a Task
+completion percentage. Aggregate metadata remains profile scoped; the
 projection does not load or expose omitted Event payloads.
 
 Subagent inspection reuses the workspace filtered by stable Step ID. It shows
@@ -468,10 +465,17 @@ handles and summaries; it does not claim a separate file-access history.
 `Ctrl+T` focuses the Task header. `Up`/`Down` change Tasks, `Right` enters the
 visible Subagent grid, and the arrow keys then move among complete visible
 Subagent cards. `Enter` opens the focused Task header or opens a focused
-Subagent directly. Native terminal selection, copy/paste, and scroll behavior
+Subagent directly. On a focused Task, `T` enters compact trace mode;
+`Left`/`Right` select logical activities, `Home` selects the oldest activity,
+`End` returns to live, `Enter` inspects the selection, and `Escape` collapses
+trace mode. Available Task controls are rendered from current state: `R` retries
+the single eligible failed Step, `D` detaches the foreground session without
+mutating the Task, `P` pauses at a safe boundary, and `C` opens an explicit
+cancel confirmation. Invalid actions are omitted, and settled Tasks retain only
+trace inspection. Native terminal selection, copy/paste, and scroll behavior
 remains available by default. `Ctrl+G` explicitly enables temporary Mouse Mode
 for the Task region; while active, Task/Subagent cards, breadcrumbs, trace
-events, and `Return to live` use the same actions as their keyboard routes.
+activities, and `Return to live` use the same actions as their keyboard routes.
 `Up`/`Down`, `Page Up`/`Page Down`,
 `Home`, and `End` navigate or scroll according to the active inspection target;
 `Escape` first releases an active Mouse Mode, then unwinds Subagent to Task to
@@ -484,7 +488,7 @@ while Mouse Mode is active. Terminal startup defensively resets stale tracking,
 and cleanup disables it on normal exit, failure, and suspend.
 
 The existing Task refresh updates projections and newly settled provider usage
-in place. Established cards retain their order, selected Task/Subagent/event
+in place. Established cards retain their order, selected Task/Subagent/activity
 IDs remain selected while present, history remains frozen when follow-live is
 off, and terminal resize recomputes the layout without closing inspection.
 
@@ -515,6 +519,19 @@ is not repeated in the main transcript or completed-work surface. Multiple
 runtime turns caused by one CLI steering submission are summed before the final
 visible response is delivered.
 
+When a durable Task answer is delivered into its originating CLI transcript,
+the session message also persists a versioned, bounded snapshot of the final
+logical activity spans. Both the structured Operator Console transcript and the
+plain renderer keep that compact ribbon immediately above the answer after
+settlement, using the actual terminal width and showing terminal outcome, total
+duration, and degraded worker truth. New snapshots retain the factual total
+worker count; older version-1 snapshots without it remain readable. The answer
+body remains unchanged, and malformed snapshot metadata is ignored rather than
+blocking delivery. At most 96 safe logical spans are stored; an earlier marker
+and lower-bound activity count preserve truth when history was already bounded.
+Raw Task Events, provider text, tool input/output, paths, and result bodies are
+never copied into the snapshot.
+
 Interactive input precedence is centralized as: modal Task inspection,
 approval prompt, autocomplete/typeahead, attachment selection, then ordinary
 prompt or steering input. Plain, CI, dumb-terminal, and non-TTY Task inspection
@@ -534,7 +551,7 @@ explain the setup editor flow
 ╭──────────────────────────── EstaCoda ────────────────────────────╮
 │ The setup editor is split into detection, review, apply, and      │
 │                                                                   │
-│   ◷ read_file   src/cli/setup-editor.ts                    00:04 │
+│   ◷ Files      Read        src/cli/setup-editor.ts            4s │
 │                                                                   │
 │ verification.▍                                                    │
 ╰───────────────────────────────────────────────────────────────────╯
@@ -559,9 +576,10 @@ Streaming contract:
   `Assistant stream` or `assistant:` must not appear in normal rendering. The
   live-only marker is the trailing cursor on incomplete text.
 - Inline tool trails render inside that shared assistant-message frame using
-  the Papyrus active-work visual grammar for status symbols. They are part of
-  the assistant answer surface, not a detached dashboard or separate transcript
-  role.
+  the canonical `status | family | action | object | telemetry` grammar. They
+  are part of the assistant answer surface, not a detached dashboard or
+  separate transcript role. Narration remains primary; execution rows are
+  indented and visually subordinate.
 - Local interactive Operator Console turns receive visible text through
   `runtime.handle({ onDelta })`. Plain CLI turns keep the append-only stdout
   `provider-token` path and must not be converted to managed-frame rendering.
@@ -574,6 +592,13 @@ Streaming contract:
   between the segment it follows and later assistant text when possible.
 - Inline trail rendering is passive: it formats the current trail metadata and
   does not add optional progress plumbing or independent live duration ticks.
+- Live trails and the completed-tools panel share the same row formatter. The
+  completed panel uses a quieter historical tone and carries its compact
+  success/failure/elapsed summary in the header; it has no duplicate footer.
+- Status color is semantic: running uses the activity accent, success uses the
+  success token, approval/waiting uses caution, and failure/cancellation uses
+  error. Tool families use one muted accent while objects and durations recede;
+  elapsed time alone never changes a row to caution.
 - If a provider attempt reports `provider-result.willFallback`, the Operator
   Console resets live streaming for that attempt before fallback output starts.
   Failed-attempt text must not survive into the visible fallback stream.
@@ -604,13 +629,20 @@ Approval required:
 ```text
 Assistant:
 I need approval before modifying the database.
-┌─ Approval required ───────────────────┐
-│ Action: run migration                  │
-│ Target: production database            │
-│ Risk: schema change                    │
-│                                        │
-│ [Approve once]   [Reject]   [Inspect]  │
-└────────────────────────────────────────┘
+  ╭─ Approval required ────────────── schema change ─╮
+  │ run migration                                    │
+  │ Target · production database                     │
+  │                                                  │
+  │ ❯ Inspect       Review details before deciding   │
+  │   Approve once  Permit only this action          │
+  │   Approve for session                            │
+  │                 Permit matches this session      │
+  │   Always approve in workspace                    │
+  │                 Permit matches here until revoked │
+  │   Reject        Deny this action                 │
+  │                                                  │
+  │ ↑↓ move · Enter select · Esc reject              │
+  ╰──────────────────────────────────────────────────╯
 Assistant:
 Waiting for approval.
 ```
@@ -618,26 +650,61 @@ Waiting for approval.
 Focused approval control:
 
 ```text
-┌─ Approval required ─────────────────────────────────────┐
-│ Action: write file                                      │
-│ Target: src/runtime/provider-turn-loop.ts               │
-│ Risk: runtime behavior change                           │
-│                                                         │
-│ +42 lines  -17 lines                                    │
-│                                                         │
-│ ❯ Approve once        Reject        Inspect             │
-└─────────────────────────────────────────────────────────┘
+  ╭─ Approval required ───────── runtime behavior change ─╮
+  │ write file                                             │
+  │ Target · src/runtime/provider-turn-loop.ts             │
+  │                                                        │
+  │ +42 lines  -17 lines                                   │
+  │                                                        │
+  │ ❯ Inspect       Review details before deciding         │
+  │   Approve once  Permit only this action                │
+  │   Approve for session  Permit matches this session     │
+  │   Always approve in workspace                          │
+  │                 Permit matches here until revoked      │
+  │   Reject        Deny this action                       │
+  │                                                        │
+  │ ↑↓ move · Enter select · Esc reject                    │
+  ╰────────────────────────────────────────────────────────╯
 ```
 
-Approval v1 controls:
+Runtime approval controls:
 
-- Approve once
-- Reject
 - Inspect
+- Approve once
+- Approve for session
+- Always approve in workspace, when persistent revocation is available
+- Reject
 
-Feedback, amend, session approval, and persistent approval controls are out of
-scope for approval v1 unless the implementation adds a separately reviewed
-runtime path.
+The card is bounded and inset on wide terminals, but falls back to the available
+width on narrow terminals. Up and down move through the vertical choices; Tab,
+Shift+Tab, left, and right remain supported for compatibility. Fixed copy is
+localized, while action, target, risk, and summary values are rendered with
+mixed-direction isolation. New approval prompts initially focus **Inspect**, so
+pressing Enter before navigating inspects the request and never approves it.
+Session and workspace scopes use the existing runtime grant path. When an
+approval has a stable target key, broader choices say that matching actions are
+permitted. When no stable target key exists, they explicitly say that the whole
+tool is permitted. Persistent approval remains workspace-scoped and revocable;
+the hardline floor remains non-overridable. Durable Task approval cards remain
+approve-once only and cannot create session or persistent grants. Feedback and
+amend controls remain out of scope.
+
+Protected input is also a modal attention card. It presents the request kind as
+the primary heading, verified destination separately from retention and compact
+absolute expiry metadata, and keeps the three existing actions visible while a
+value is being entered. **Enter securely** remains selected during entry, masked
+bullets use the active Papyrus action color, and the footer changes to
+`Enter submit · Tab return · Esc cancel`. `Tab` returns to the action menu
+without clearing the protected value. At narrow widths the actions stack; at
+normal widths they remain horizontal.
+
+No raw value enters Operator Console state. Beyond the request metadata, the
+surface exposes only `maskedCharacterCount` and the metadata-only `entryActive`
+flag. The raw value remains exclusively inside
+`SecretPromptController`, is cleared on submission, cancellation, abort, and
+collector cleanup, and must never enter rendered output, logs, snapshots, error
+messages, or model context. The user-facing **Type in browser** action preserves
+the existing `enter-directly` intent and cancellation semantics.
 
 ### Phase G: Setup And Secret Panels
 
@@ -705,8 +772,8 @@ Active turn with steer draft:
 ```text
 Assistant is working…
 ╭─ Active work ─────────────────────────────────────────────────────────╮
-│ ◷ reading setup editor files                                   00:08  │
-│ ◷ searching approval tests                                      00:04  │
+│ ◷ Files       Read        src/cli/setup-editor.ts                8s  │
+│ ◷ Files       Search      approval tests                         4s  │
 ╰───────────────────────────────────────────────────────────────────────╯
 ╭─ Steer current turn ──────────────────────────────────────────────────╮
 │ › focus only on approval cards and pasted attachments                  │
@@ -719,8 +786,8 @@ Queued steer:
 ```text
 Assistant is working…
 ╭─ Active work ─────────────────────────────────────────────────────────╮
-│ ◷ terminal.exec     pnpm test                                  00:31  │
-│ ◷ read_file         src/cli/session-loop.ts                    00:08  │
+│ ◷ Shell       Run         pnpm test                               31s  │
+│ ◷ Files       Read        src/cli/session-loop.ts                  8s  │
 ╰───────────────────────────────────────────────────────────────────────╯
 ╭─ Queued steer ────────────────────────────────────────────────────────╮
 │ focus only on approval cards and pasted attachments                    │
@@ -752,8 +819,8 @@ Assistant:
 The structure is sound. The critical change is that Papyrus owns the interactive
 frame while runtime and setup code send semantic state into the Operator Console.
 ╭─ Active work ─────────────────────────────────────────────────────────╮
-│ ✓ searched operator console files                              00:01  │
-│ ◷ reading setup editor tests                                   00:04  │
+│ ✓ Files       Search      operator console files                  1s  │
+│ ◷ Files       Read        setup editor tests                      4s  │
 ╰───────────────────────────────────────────────────────────────────────╯
 Attachments
 ╭─ pasted text ─────────────╮ ╭─ file excerpt ────────────╮

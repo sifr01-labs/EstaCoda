@@ -14,6 +14,20 @@ description: "Browser backend, CDP integration, and structured browser tools."
 | `src/browser/cdp-supervisor.ts` | CDP page supervisor, AX snapshots, dialogs, console history, screenshots |
 | `src/tools/web-tools.ts` | Browser tool schemas, session-key derivation, snapshot rendering, and summarization |
 
+## Grounded resource continuity and recovery
+
+For a qualifying foreground checkpoint, successful `browser.extract` results retain a bounded set of exact source links and labels. The API integration playbook requests extraction of the source-list region before leaving it, followed by inspection of existing destination resources and a per-item create/update/verify/skip decision. This is guidance, not a new execution gate: incomplete discovery does not prevent safe progress on other items.
+
+Region-capable click and extraction accept an unambiguous `ref: "@r19"` as an alias for `regionRef: "@r19"`. Normalization happens before click security preflight and dispatch; it does not choose another target or refresh stale references. Session, tab, document/action identity, hit-testing, protected-field and URL checks remain unchanged. Conflicting selectors are not normalized. Element-only operations still require an element, with an actionable region-versus-element error for a known region reference.
+
+The checkpoint relates a resource's source URL to completed download receipts and reviewed connector identifiers. The supervised browser supplies the page owning the download control separately from its download URL; only a bounded, non-secret page locator is retained. Signed download URLs and transient element references are not persisted in this ledger. Connector associations require a matching artifact ID plus hash, or an unambiguous already-retained destination identifier from the same connector. Names, shared workspace IDs, raw result text and model-authored arguments cannot establish a relationship. Bulk results without unambiguous per-resource identity remain unassociated. Configured continuity fields `resourceId`, `specificationId`/`specId`, and `collectionId` support destination identity; `resourceId` is the generic connector-independent option.
+
+Resource rows survive restart and checkpoint carry-forward after context compression and are projected into the protected execution working-state layer. Rows contain independent receipts, not a linear workflow stage or completion claim. The existing operation journal remains the authority for operation verification. Old version-1 checkpoints without rows still load. Limits are 16 resources, 4 artifacts, 8 destination facts and 8 operation references per row, plus an 8 KiB resource allowance separate from the original 16 KiB checkpoint-state allowance. Oversized or unsafe observations are not admitted; absence from this bounded ledger is not proof that a resource does not exist.
+
+Successful reloads no longer automatically reset no-progress tracking when the same tab has equivalent semantic page evidence. Document/action revisions, observation IDs and renumbered element/region references are excluded from that comparison. Changed page content, controls, authentication state or destinations can still count as progress. Previously terminal destination failures remain remembered. Browser lookup also returns an advisory `role-mismatch` alternative when one current actionable element exactly matches the requested label at another role; the mismatched locator is not authorized automatically, and the supervised backend does not immediately suggest vision for that case.
+
+Security note: this adds no tool, permission, native-dialog access, provider-specific branch or connector-specific execution authority. URLs are still checked against current navigation policy before use. Source labels remain untrusted data. Artifact ownership, protected transfer, approvals, profile isolation and read-back verification remain enforced by their existing paths. Backend support for source-page download provenance is currently implemented on the supervised CDP path; other backends without that evidence do not invent the association.
+
 ## Backends
 
 | Backend | Status | Evidence |
@@ -33,7 +47,7 @@ The setup editor writes the existing flat `browser` config shape. It does not mi
 
 The browser setup flow supports four modes:
 
-- Local supervised browser: writes `backend: "local-cdp"`, `supervised: true`, reviewed `autoLaunch`, optional `cdpUrl`, and reviewed launch settings.
+- Local supervised browser: writes `backend: "local-cdp"`, `supervised: true`, reviewed `autoLaunch`, reviewed `headless`, optional `cdpUrl`, and reviewed launch settings.
 - Existing CDP browser: writes `backend: "local-cdp"`, `supervised: true`, `autoLaunch: false`, and the reviewed `cdpUrl`.
 - Browserbase cloud browser: writes `backend: "browserbase"`, `cloudProvider: "browserbase"`, `hybridRouting: true`, `cloudFallback: true`, and `cloudSpendApproved: false`.
 - Disabled / unconfigured browser tools: writes `backend: "unconfigured"`.
@@ -58,7 +72,7 @@ Disabled browser tools are an intentional onboarding outcome. Selecting disabled
 Local CDP has two paths:
 
 - Unsupervised local CDP keeps the compatibility behavior: users provide `browser.cdpUrl`, and EstaCoda connects to an already-running browser.
-- Supervised local CDP can auto-launch Chrome/Chromium when `browser.autoLaunch === true`. Discovery checks `browser.launchExecutable`, deprecated `browser.launchCommand` raw data, `CHROME_PATH`, `CHROMIUM_PATH`, local binaries, platform defaults, Homebrew paths, and conservative bundled/Docker paths. The launcher uses structured arguments, never shell-parses `launchCommand`, never calls `exec`, creates an isolated `--user-data-dir`, reads `DevToolsActivePort`, health-checks `/json/version`, and kills only the Chrome process EstaCoda launched during backend cleanup.
+- Supervised local CDP can auto-launch Chrome/Chromium when `browser.autoLaunch === true`. `browser.headless` defaults to `true`; setting it to `false` or using CLI `--headed` opens a visible managed browser window. Discovery checks `browser.launchExecutable`, deprecated `browser.launchCommand` raw data, `CHROME_PATH`, `CHROMIUM_PATH`, local binaries, platform defaults, Homebrew paths, and conservative bundled/Docker paths. The launcher uses structured arguments, never shell-parses `launchCommand`, never calls `exec`, creates an isolated `--user-data-dir`, reads `DevToolsActivePort`, health-checks `/json/version`, and kills only the Chrome process EstaCoda launched during backend cleanup.
 
 ## CDP Capabilities
 
@@ -80,6 +94,8 @@ Local CDP has two paths:
 
 The supervised local CDP backend tracks pending dialogs, recent console history, frame navigation data, and isolated browser sessions. It also enables supervised request interception for subresource requests and aborts metadata, private/internal, website-policy-blocked, and secret-bearing URLs before response bodies are read. This is not complete browser automation parity and does not provide socket-level DNS rebinding or TOCTOU protection.
 
+CDP commands are bounded by a 15-second default deadline and accept cancellation from the owning tool call. Browser-state projection for provider prompts uses one 5-second refresh deadline across availability, tab, and snapshot reads; on cancellation or timeout it preserves a stale prior projection when one exists instead of blocking the turn lifecycle.
+
 ## Session Ownership
 
 Browser tools derive browser session keys from the runtime session context. A normal tool call without an explicit `sessionId` uses:
@@ -88,17 +104,45 @@ Browser tools derive browser session keys from the runtime session context. A no
 <runtime-session-id>:main
 ```
 
-Delegated or child runtime sessions therefore get isolated browser state by default. Passing an explicit `sessionId` remains supported and intentionally shares the named browser session across parent/child contexts. Direct backend calls that omit session IDs are compatibility paths, not the intended browser tool path.
+Delegated or child runtime sessions therefore get isolated browser state by default. Passing an explicit `sessionId` remains supported and intentionally shares the named browser session across parent/child contexts. An explicit ID equal to the current runtime session ID is canonicalized to that runtime's `:main` browser session so later implicit calls cannot silently fork the browser. Direct backend calls that omit session IDs are compatibility paths, not the intended browser tool path.
 
 Supervised local CDP owns one session manager per endpoint stack. Configured CDP and auto-launched fallback stacks can coexist, and each browser session key is mapped to the stack that created it. Closing a session closes the owning stack session only; configured/manual CDP sessions do not keep an EstaCoda-launched Chrome process alive.
 
 Each supervised session is created in its own CDP Browser Context through `Target.createBrowserContext`, then a page target is created with that `browserContextId`. Cleanup closes the target and disposes the Browser Context, so cookies and other browser-context state are isolated per browser session key.
 
+Tab discovery is also scoped to that Browser Context. `browser.tabs` returns stable opaque refs such as `@t1`, and `browser.switch_tab` changes the page EstaCoda controls without exposing raw CDP target IDs. Discovery joins `Target.getTargets` context metadata with the page connection data from `/json/list`; tabs from other contexts and tabs rejected by URL, website, metadata, or secret policy are not exposed. After `browser.click`, EstaCoda automatically follows the new tab only when exactly one new safe page tab appeared. When zero or multiple safe tabs appear, it keeps the current tab controlled and reports the new refs for an explicit switch.
+
+Browser-related provider turns receive a bounded, redacted projection of the live session: session status, the controlled tab, up to eight safe tabs, canonical snapshot identity/readiness, and the last browser action. This protected mutable state supersedes historical browser observations, so the model does not need to poll `browser.tabs` or reconstruct the current tab from old tool results. The runtime refreshes an existing projection at the next relevant turn boundary, detects manual URL, document/action identity, tab-list, or controlled-tab changes, and marks state stale if a safe refresh cannot complete. Tab-changing action deltas retain and report both the source and destination tabs.
+
+The provider turn loop guards demonstrated browser loops without treating every unchanged page as intellectual failure. Trusted results are fingerprinted in memory: a different find result, candidate set, region, tab inventory, or structural snapshot is new evidence even when the URL and document do not change. Repeating a whole-state observation produces one local corrective instruction and temporarily removes only that exhausted schema from the next request. A failed target means no action was dispatched and permits one different retarget; a dispatched action that returns `no-change`, timeout, or unverified settlement is tracked separately. Repeated equivalent evidence, repeated targets, or multiple ineffective dispatched actions stop before the broad provider budgets. State-changing actions reset the guard. Page content, inputs, tab data, and fingerprints are not added to budget events or traces.
+
 ## Snapshots
 
-Snapshots prefer `Accessibility.getFullAXTree`. AX nodes are converted into compact `BrowserSnapshot.elements` with deterministic refs such as `@e1`, preserving useful `role`, `name`, `value`, `disabled`, and `checked` fields. Unhelpful and ignored AX nodes are skipped. If the AX command fails, returns an empty/malformed tree, or refs cannot be bound to DOM nodes, EstaCoda falls back to the DOM-query snapshot path.
+Snapshots prefer `Accessibility.getFullAXTree`. AX nodes are converted into compact `BrowserSnapshot.elements` with refs such as `@e1`, preserving useful `role`, `name`, `label`, surrounding text, compact semantic region text, `value`, `disabled`, and `checked` fields. The region is the smallest bounded visible ancestor that adds meaningful context and contains a manageable set of actionable descendants. This lets a card such as `TikTok Connect` expose its related `Callback URL`, `Edit`, and `Delete` controls without conflating notification text elsewhere on the page. Unhelpful and ignored AX nodes are skipped. If the AX command fails, returns an empty/malformed tree, or refs cannot be bound to DOM nodes, EstaCoda falls back to the DOM-query snapshot path.
 
-The default snapshot is a bounded actionable AX subset. It is not true viewport-visible filtering yet. `browser.snapshot` with `full: true` requests a larger full-page snapshot. Snapshot rendering marks compact and full snapshots with headers, truncates oversized text, and can summarize large snapshots when configured.
+One shared page-side interactability evaluator controls which elements receive actionable refs, appear in semantic find/extract results, pass structural preflight, and may be activated. It rejects detached, hidden, inert, disabled, zero-geometry, and modal-blocked controls, including states inherited from ancestors and disabled fieldsets. Controls inside the active modal remain usable, as do valid offscreen controls. Page text and diagnostics remain visible even when a control is excluded. EstaCoda repeats this check immediately before dispatch so a DOM change between observation and action fails safely without weakening canonical identity or target-binding checks.
+
+Element refs are intentionally scoped by session, tab, `documentEpoch`, and `actionRevision`. A ref action must include the source snapshot's canonical `identity` and `tabRef`; stale, cross-document, or cross-tab refs fail with structured current-state metadata before an action is dispatched. `observationId` identifies a capture but does not invalidate refs by itself. `browser.find`, `browser.click`, `browser.type`, `browser.select`, and `browser.extract` also accept semantic locators using `role`, `name`, `text`, `label`, `withinText`, and optional exact matching. Semantic resolution uses a fresh policy-checked snapshot, ignores hidden and disabled matches, and returns bounded candidates instead of guessing when a locator is ambiguous.
+
+Consequential browser controls use a read-only structural preflight before security policy is assessed. The supervised backend resolves the current target without activating it and reports bounded tag/role, link or control kind, form/submit association, canonical identity, and a redacted label. Only an ordinary HTTP(S) anchor with structural link evidence remains `read-only-network`; buttons, submit/form controls, scripted or unknown elements, Enter and other ambiguous keys, and dialog acceptance become `external-side-effect`. Escape and navigation-only keys remain read-only, as does dialog dismissal. Page labels improve the approval description but cannot lower risk. Missing, stale, ambiguous, or uninspectable targets fail closed.
+
+After approval, EstaCoda repeats the preflight and compares the exact session, tab, document/action identity, ref, structural kind, and action. A changed control is not activated, so a one-time approval for one button cannot authorize another. Protected sign-in and MFA submission keep using the separate field-bound protected-delivery path described below.
+
+Protected sign-in fields use a separate field-bound path. `browser.fill_protected_form` accepts one current canonical identity and a bounded set of related refs (for example, account identifier and password), verifies every destination before collection, collects the values through one operator flow, re-verifies the complete form, and delivers without exposing values to the model or tool result. With `submitRef`, it also invokes the prebound authentication control inside the same local transaction. A later protected `browser.type` call can use the same identity-bound submission path.
+
+Authentication then follows an explicit runtime lifecycle: credentials requested/submitted, challenge required/submitted, verification pending, authenticated, or blocked. A visible challenge always outranks authenticated-looking controls from the same page, so credentials may be complete while the overall sign-in remains pending. Challenges are detected generically and may include a one-time code, passkey, security key, biometric step, CAPTCHA, push approval, device confirmation, or another verification method. Resend and retry actions keep the existing challenge item pending rather than creating duplicate Mission work. Challenge departure plus a causal document/action transition and authenticated-only destination evidence can verify success; submission alone cannot. A document or URL change is not departure proof by itself: the post-submit page is re-inspected because a rejected login may reload the same form. When the challenge remains, current protected fields are cleared and verified before redaction is lifted, and the turn stops for corrected user input instead of collecting the same credentials again automatically. Six-digit challenge-shaped values are rejected before delivery to an explicitly email-shaped destination. Failed and no-change browser actions preserve pending evidence, while an unrelated consequential state change invalidates its causal chain. Completed authentication remains complete unless a later trusted snapshot explicitly shows an authentication error or signed-out page. Screenshots, vision, extraction, and descriptive snapshots remain suppressed while protected input is active; only verified challenge departure or verified value clearing releases that protection. Human input time inside this flow is excluded from the autonomous provider wall-clock budget.
+
+When a trusted current snapshot contains exactly one one-time-code field and one verification control, the compacted snapshot directs the provider to call `browser.type` immediately with protected input and the bound `submitRef`. If the provider instead stops or asks for the code in ordinary chat, the runtime permits one bounded corrective continuation in the same user turn. A protected-input timeout aborts the collector and waits briefly for trusted cleanup; when cleanup settles, later work may safely reuse the browser session, while genuinely unsettled browser work remains locked.
+
+Governed downloads click the grounded page control through CDP and capture the result into runtime-managed storage. A successful receipt carries a nested prompt-safe artifact record, so its `artifact://` reference remains available after the raw download result is compacted; the local backing path is never exposed to the provider. For isolated supervised sessions, download behavior is applied to the owning browser context, and an auto-launched temporary Chrome profile disables native Save prompts. EstaCoda does not automate operating-system Save dialogs. If Chrome still opens one and no managed download begins, `browser.download` reports `native-save-dialog-suspected` and tells the provider not to repeat the page click.
+
+A stale download reference still fails before dispatch. For the same session and controlled tab, the tool attempts one read-only snapshot and returns compact current refs and identity as recovery evidence; it never replays the click or selects a replacement target. Cancellation, unavailable snapshots, and changed session/tab scope return explicit snapshot instructions instead. Repeated `stale-browser-ref` results with `actionDispatched: false` do not immediately terminate the foreground turn: independent connector work and fresh browser inspection remain available. These failed calls do not count as progress; the existing whole-task no-progress, iteration, and deadline budgets remain enforced. Dispatched/uncertain failures, authentication requirements, URL policy, and approval boundaries are unchanged.
+
+The optional Plan may represent multiple independent steps as `in_progress`. It remains a bounded checklist, not permission or proof of completion. API-integration guidance calls for reading plausible existing destination resources before deciding reuse/update/create, retaining per-product decisions and identifiers, and handling credential setup independently of an unavailable product. These are workflow recommendations, not new runtime admission gates.
+
+The default snapshot is a bounded actionable AX subset. It is not true viewport-visible filtering yet. Before returning it to the provider, EstaCoda deterministically compacts the structured snapshot into a stable character budget. Identity, URL/title, active dialogs and alerts, actionable refs, protected-input guidance, authentication context, headings, frames, and browser errors take priority; repeated navigation, duplicate labels, and inert boilerplate are deduplicated. The complete structured snapshot remains available in internal tool metadata. A `... [deterministically compacted]` suffix makes omitted output visible. `browser.snapshot` with `full: true` retains the larger diagnostic path.
+
+Every snapshot carries canonical `identity`, `observedAt`, and document `readiness`. `documentEpoch` advances for document or controlled-tab replacement, `actionRevision` advances when refs can change, and `observationId` advances on every capture. After navigation and ordinary browser actions, the supervised backend waits for an explicit `waitFor` condition or bounded DOM stability. The result contains the action delta, resulting identity, a bounded safe current-state summary, and current actionable refs when observation is safe. Supported conditions are URL text, page text, an element role/name, a dialog, and DOM stability. `waitTimeoutMs` is capped at 10 seconds; a timeout returns the latest safe state with an explicit timeout outcome and does not claim that the requested condition succeeded. Delta labels, titles, URLs, and ref summaries are bounded and redacted.
 
 Snapshot summarization settings:
 
@@ -111,7 +155,7 @@ Snapshot summarization settings:
 }
 ```
 
-`browser.summarizeSnapshots` accepts `true`, `false`, or `"auto"`. In `"auto"` mode, summarization uses an auxiliary model route only when one is available. Summarization runs only after the rendered snapshot exceeds `browser.snapshotSummarizeThreshold`. Secret-bearing URLs and sensitive values are redacted before any provider call.
+`browser.summarizeSnapshots` accepts `true`, `false`, or `"auto"`. Deterministic compaction runs first for normal snapshots. In `"auto"` mode, an auxiliary model is a final fallback only when the compacted result still exceeds `browser.snapshotSummarizeThreshold` and an auxiliary route is available. `true` explicitly permits provider summarization when the original rendered snapshot exceeds the threshold. `false` never invokes a summarization provider. Secret-bearing URLs and sensitive values are redacted before any provider call.
 
 ## Web Research Tools
 
@@ -128,17 +172,31 @@ Browser tools exposed to the agent:
 | `browser.status` | Show browser state |
 | `browser.navigate` | Navigate to URL |
 | `browser.snapshot` | Get accessible page snapshot |
-| `browser.click` | Click element by ref |
-| `browser.type` | Type text into element |
+| `browser.find` | Find visible, enabled elements by semantic locator |
+| `browser.click` | Click by semantic locator, identity-scoped ref/region, or one-use governed visual target |
+| `browser.type` | Type by semantic locator or identity-scoped ref; optionally bind and immediately submit a one-time-code challenge |
+| `browser.fill_protected_form` | Fill related protected fields in one verified operator flow, optionally with a prebound submit control |
+| `browser.select` | Select an option by semantic locator or identity-scoped ref |
+| `browser.extract` | Extract one semantically resolved element |
 | `browser.scroll` | Scroll page |
 | `browser.press` | Press keyboard key |
 | `browser.back` | Navigate back |
 | `browser.get_images` | List page images |
 | `browser.console` | Get console output |
+| `browser.tabs` | List safe tabs in the current isolated browser session |
+| `browser.switch_tab` | Focus and control a safe tab by opaque ref |
 | `browser.cdp` | Raw CDP command |
-| `browser.screenshot` | Capture screenshot |
-| `browser.vision` | Analyze screenshot with vision |
+| `browser.screenshot` | Capture a sanitized current-viewport screenshot |
+| `browser.vision` | Analyze a sanitized current-viewport screenshot through the governed vision route |
 | `browser.dialog` | Respond to JS dialog |
+
+## Governed Visual Escalation
+
+Semantic snapshots remain the default browser observation. Ambiguous matching, visible text without a grounded action, target-resolution failure, native action without change, or an explicit agent request can recommend one `browser.vision` fallback. Repeated visual observations are fingerprinted and bounded by the same browser supervision path; vision does not disable loop detection or restore plan-driven continuation.
+
+The screenshot boundary captures only the current controlled tab and viewport. Before bytes leave the browser backend, the runtime locates password, token, key, secret, one-time-code, and credential value regions and composites opaque masks into the image. A capture is discarded when DOM mutation, scroll, or viewport signals change between inspection and capture. Protected-input transactions continue to block visual observation completely.
+
+When vision reports a pixel candidate, `browser.click.visualTarget` accepts the screenshot ID and viewport-image coordinate only once. The runtime verifies the same session, tab, document generation, action revision, viewport, scroll offset, and DOM mutation revision; hit-tests the point; and accepts it only if it resolves to a current runtime-grounded element or visible region. Normal action preflight, approval classification, native pointer hit-testing, URL policy, and settlement still run. Navigation, scrolling, resizing, DOM change, another screenshot, or the first resolution attempt expires the visual target. Raw coordinate dispatch, page JavaScript clicking, and reconstruction of masked values are not available through this path.
 
 ## URL Safety And Website Policy
 
@@ -162,7 +220,7 @@ Current coverage:
 ## Configuration
 
 ```bash
-pnpm run dev -- browser setup --backend local-cdp --cdp-url http://127.0.0.1:9222 --launch-executable /path/to/chrome --launch-arg --headless=new --chrome-flag --no-first-run
+pnpm run dev -- browser setup --backend local-cdp --auto-launch --headed --launch-executable /path/to/chrome --chrome-flag --no-first-run
 pnpm run dev -- browser test
 ```
 
@@ -174,14 +232,17 @@ Structured launch fields are the supported configuration surface:
     "backend": "local-cdp",
     "supervised": true,
     "autoLaunch": true,
+    "headless": false,
     "launchExecutable": "/path/to/chrome",
-    "launchArgs": ["--headless=new"],
+    "launchArgs": [],
     "chromeFlags": ["--no-first-run"]
   }
 }
 ```
 
-`browser.launchExecutable` is the preferred executable path. `browser.launchArgs` and `browser.chromeFlags` are structured string arrays. `browser.launchCommand` remains accepted as deprecated compatibility data only. It is never split, guessed, or shell-parsed and should not be used as the normal setup path.
+`browser.launchExecutable` is the preferred executable path. `browser.headless` owns browser-window visibility and defaults to `true`; in visible mode, legacy `--headless` values in structured arguments are ignored. `browser.launchArgs` and `browser.chromeFlags` are structured string arrays. `browser.launchCommand` remains accepted as deprecated compatibility data only. It is never split, guessed, or shell-parsed and should not be used as the normal setup path.
+
+CLI and model-tool updates that specify only browser window behavior preserve the other reviewed browser settings. The Setup Editor continues to apply its complete reviewed browser selection, including intentional field removal when switching modes.
 
 Browserbase configuration:
 

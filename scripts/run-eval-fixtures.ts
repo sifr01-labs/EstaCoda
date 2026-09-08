@@ -4,7 +4,7 @@ import { installIsolatedStateHome } from "../src/test/state-home.js";
 
 installIsolatedStateHome("estacoda-eval-home-");
 
-const fixtureId = process.argv[2];
+const fixtureId = process.argv.slice(2).find((argument) => argument !== "--");
 const cases = fixtureId === undefined
   ? defaultEvalFixtures
   : defaultEvalFixtures.filter((c) => c.id === fixtureId);

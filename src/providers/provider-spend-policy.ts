@@ -10,6 +10,8 @@ import type {
   ProviderSpendRequest
 } from "../contracts/provider-spend.js";
 import { estimateMessagesTokensRough, estimateTextTokensRough } from "../prompt/token-estimator.js";
+import { estimateProviderImageInputTokens } from "./provider-image-token-estimator.js";
+import { resolveProviderOutputTokenBound } from "./provider-output-limit.js";
 import { providerPricingSnapshot, providerUsageRequestKey } from "./provider-usage-ledger.js";
 
 export type ProviderSpendPreparation = {
@@ -29,8 +31,9 @@ export function prepareProviderSpend(input: {
   usage: ProviderUsageContext;
 }): ProviderSpendPreparation {
   const pricing = providerPricingSnapshot(input.route.provider, input.route.id, input.route);
-  const estimatedInputTokens = estimateProviderRequestInputTokens(input.request);
-  const outputBound = providerOutputBound(input.request, input.route);
+  const inputEstimate = estimateProviderRequestInputTokens(input.request, input.route, input.usage);
+  const estimatedInputTokens = inputEstimate?.tokens;
+  const outputBound = resolveProviderOutputTokenBound(input.request, input.route);
   const inputRate = pricing.inputPerMillionTokens;
   const outputRate = pricing.outputPerMillionTokens;
   const reasoningRate = pricing.reasoningPerMillionTokens ?? outputRate;
@@ -38,12 +41,18 @@ export function prepareProviderSpend(input: {
     pricing.reasoningPerMillionTokens !== undefined;
   const pricingAvailable = validRate(inputRate) && validRate(outputRate) &&
     (!reasoningPossible || validRate(reasoningRate));
-  const safelyBounded = estimatedInputTokens !== undefined && outputBound !== undefined;
+  const inputExposureBounded = estimatedInputTokens !== undefined || (
+    pricingAvailable && maximumInputRate(pricing) === 0
+  );
+  const outputExposureBounded = outputBound !== undefined || (
+    pricingAvailable && outputRate === 0 && (!reasoningPossible || reasoningRate === 0)
+  );
+  const safelyBounded = inputExposureBounded && outputExposureBounded;
   const maximumEstimatedCostUsd = pricingAvailable && safelyBounded
     ? maximumEstimatedProviderCost({
-        estimatedInputTokens,
-        maximumOutputTokens: outputBound,
-        maximumReasoningTokens: reasoningPossible ? outputBound : 0,
+        estimatedInputTokens: estimatedInputTokens ?? 0,
+        maximumOutputTokens: outputBound ?? 0,
+        maximumReasoningTokens: reasoningPossible ? outputBound ?? 0 : 0,
         inputRate,
         outputRate,
         reasoningRate: reasoningPossible ? reasoningRate : undefined,
@@ -81,6 +90,10 @@ export function prepareProviderSpend(input: {
       providerAttemptIndex: input.providerAttemptIndex,
       pricing,
       estimatedInputTokens: estimatedInputTokens ?? 0,
+      ...(inputEstimate?.imageTokens === undefined ? {} : {
+        estimatedImageInputTokens: inputEstimate.imageTokens,
+        imageTokenEstimator: inputEstimate.imageTokenEstimator
+      }),
       boundedMaximumOutputTokens: outputBound ?? 0,
       ...(reasoningPossible && outputBound !== undefined
         ? { boundedMaximumReasoningTokens: outputBound }
@@ -109,9 +122,31 @@ export function providerSpendDenialMessage(reason: ProviderSpendDenialReason): s
   }
 }
 
-function estimateProviderRequestInputTokens(request: ProviderRequest): number | undefined {
+type ProviderInputTokenEstimate = {
+  tokens: number;
+  imageTokens?: number;
+  imageTokenEstimator?: string;
+};
+
+function estimateProviderRequestInputTokens(
+  request: ProviderRequest,
+  route: ResolvedModelRoute,
+  usage: ProviderUsageContext
+): ProviderInputTokenEstimate | undefined {
   try {
-    const messages = request.messages.map(tokenEstimateMessage);
+    const imageCount = countProviderImageParts(request.messages);
+    const imageInputs = usage.imageInputs ?? [];
+    if (imageCount !== imageInputs.length) return undefined;
+    const imageEstimate = imageCount === 0
+      ? undefined
+      : estimateProviderImageInputTokens({
+          provider: route.provider,
+          model: route.id,
+          images: imageInputs
+        });
+    if (imageCount > 0 && imageEstimate === undefined) return undefined;
+
+    const messages = request.messages.map((message) => tokenEstimateMessage(message, imageCount === 0));
     const roughTokens = estimateMessagesTokensRough(messages);
     const structured = JSON.stringify({
       tools: request.tools ?? [],
@@ -119,38 +154,44 @@ function estimateProviderRequestInputTokens(request: ProviderRequest): number | 
     });
     const structuredTokens = estimateTextTokensRough(structured);
     const conservativeBytes = request.messages.reduce((total, message) => {
-      if (Array.isArray(message.content) && message.content.some((part) =>
-        typeof part !== "object" || part === null || !("type" in part) ||
-        (part as { type?: unknown }).type !== "text"
-      )) {
-        throw new Error("Provider media input has no deterministic token bound.");
-      }
       return total + Buffer.byteLength(JSON.stringify({
         role: message.role,
-        content: message.content,
+        content: boundedProviderContent(message.content),
         toolCalls: message.toolCalls,
         toolCallId: message.toolCallId,
         providerReplayEcho: message.providerReplayEcho
       }), "utf8") + 32;
     }, Buffer.byteLength(structured, "utf8") + 64);
-    const total = Math.max(roughTokens + structuredTokens, conservativeBytes);
-    return Number.isSafeInteger(total) && total >= 0 ? total : undefined;
+    const textTokens = Math.max(roughTokens + structuredTokens, conservativeBytes);
+    const total = textTokens + (imageEstimate?.tokens ?? 0);
+    return Number.isSafeInteger(total) && total >= 0
+      ? {
+          tokens: total,
+          ...(imageEstimate === undefined ? {} : {
+            imageTokens: imageEstimate.tokens,
+            imageTokenEstimator: imageEstimate.estimator
+          })
+        }
+      : undefined;
   } catch {
     return undefined;
   }
 }
 
-function tokenEstimateMessage(message: ProviderMessage) {
+function tokenEstimateMessage(message: ProviderMessage, includeImagePlaceholders: boolean) {
   const content = typeof message.content === "string" ? message.content : "";
-  const parts = Array.isArray(message.content)
-    ? message.content.map((part: unknown) => {
+  const parts: Array<{ type: "text"; text: string } | { type: "image_url" }> | undefined =
+    Array.isArray(message.content)
+    ? message.content.reduce<Array<{ type: "text"; text: string } | { type: "image_url" }>>((result, part: unknown) => {
         if (typeof part === "object" && part !== null && "type" in part &&
             (part as { type?: unknown }).type === "text" && "text" in part &&
             typeof (part as { text?: unknown }).text === "string") {
-          return { type: "text" as const, text: (part as { text: string }).text };
+          result.push({ type: "text", text: (part as { text: string }).text });
+        } else if (includeImagePlaceholders) {
+          result.push({ type: "image_url" });
         }
-        return { type: "image_url" as const };
-      })
+        return result;
+      }, [])
     : undefined;
   return {
     role: message.role,
@@ -162,11 +203,40 @@ function tokenEstimateMessage(message: ProviderMessage) {
   };
 }
 
-function providerOutputBound(request: ProviderRequest, route: ResolvedModelRoute): number | undefined {
-  for (const candidate of [request.maxTokens, route.maxTokens, route.contextWindowTokens, route.profile.contextWindowTokens]) {
-    if (typeof candidate === "number" && Number.isSafeInteger(candidate) && candidate > 0) return candidate;
+function countProviderImageParts(messages: readonly ProviderMessage[]): number {
+  let count = 0;
+  for (const message of messages) {
+    if (!Array.isArray(message.content)) continue;
+    for (const part of message.content) {
+      if (!isProviderContentPart(part)) throw new Error("Provider content part is invalid.");
+      if (part.type === "image_url") count += 1;
+    }
   }
-  return undefined;
+  return count;
+}
+
+function boundedProviderContent(content: unknown): unknown {
+  if (!Array.isArray(content)) return content;
+  return content.map((part) => {
+    if (!isProviderContentPart(part)) throw new Error("Provider content part is invalid.");
+    return part.type === "text"
+      ? { type: "text", text: part.text }
+      : { type: "image_url" };
+  });
+}
+
+function isProviderContentPart(part: unknown): part is
+  | { type: "text"; text: string }
+  | { type: "image_url"; image_url: { url: string } } {
+  if (typeof part !== "object" || part === null || !("type" in part)) return false;
+  const candidate = part as {
+    type?: unknown;
+    text?: unknown;
+    image_url?: { url?: unknown };
+  };
+  return candidate.type === "text"
+    ? typeof candidate.text === "string"
+    : candidate.type === "image_url" && typeof candidate.image_url?.url === "string";
 }
 
 function maximumEstimatedProviderCost(input: {
@@ -187,6 +257,20 @@ function maximumEstimatedProviderCost(input: {
   return input.estimatedInputTokens / 1_000_000 * maximumInputRate +
     input.maximumOutputTokens / 1_000_000 * input.outputRate +
     input.maximumReasoningTokens / 1_000_000 * (input.reasoningRate ?? input.outputRate);
+}
+
+function maximumInputRate(pricing: {
+  inputPerMillionTokens?: number;
+  cacheReadPerMillionTokens?: number;
+  cacheWritePerMillionTokens?: number;
+}): number | undefined {
+  const input = pricing.inputPerMillionTokens;
+  if (!validRate(input)) return undefined;
+  return Math.max(
+    input,
+    pricing.cacheReadPerMillionTokens ?? input,
+    pricing.cacheWritePerMillionTokens ?? input
+  );
 }
 
 function validRate(value: number | undefined): value is number {

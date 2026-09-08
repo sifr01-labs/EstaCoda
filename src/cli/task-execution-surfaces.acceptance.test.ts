@@ -152,7 +152,18 @@ describe("Task execution ownership surface acceptance", () => {
     expect(taskProjectionToCard({
       ...delegatedProjection,
       status: "completed",
-      phase: { name: "completed", workerProgress: { completed: 1, settled: 1, total: 1 } },
+      phase: {
+        name: "completed",
+        workerProgress: {
+          completed: 1,
+          failed: 0,
+          cancelled: 0,
+          settled: 1,
+          usable: 0,
+          recovered: 0,
+          total: 1
+        }
+      },
     }).presentation).toBe("receipt");
 
     const projection = operator.status(automatic.taskId, "interactive");
@@ -161,6 +172,8 @@ describe("Task execution ownership surface acceptance", () => {
       expect.objectContaining({ displayLabel: "Subagent 1", position: 0, role: "worker" })
     ]);
     expect(card.trace.events.length).toBeGreaterThan(0);
+    expect(card.trace.spans.length).toBeGreaterThan(0);
+    expect(card.trace.spans[0]?.scope).not.toBe(projection.trace.spans[0]?.scope);
     const state = createInitialOperatorConsoleState({
       locale: "ar",
       terminal: { width: 30, height: 12, isTty: false },
@@ -169,9 +182,9 @@ describe("Task execution ownership surface acceptance", () => {
     const lines = renderOperatorConsoleTextLines(state, createOperatorConsoleLayout(state));
     const plain = lines.join("\n");
     expect(plain).toContain("المهمة");
-    expect(plain).toContain(`\u2068${automatic.taskId.slice(0, 12)}`);
-    expect(plain).toContain("Subagent 1");
-    expect(plain).toContain("pending");
+    expect(plain).toContain("الوكلاء الفرعيون");
+    expect(plain).toContain("تخطيط");
+    expect(plain).not.toContain(`\u2068${automatic.taskId.slice(0, 12)}`);
     expect(plain).not.toMatch(/\u001B\[/u);
     expect(lines.every((line) => visibleWidth(line) <= 30)).toBe(true);
   });

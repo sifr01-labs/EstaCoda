@@ -10,8 +10,10 @@ import type {
   ResolvedModelRoute
 } from "../contracts/provider.js";
 import { ProviderRegistry } from "./provider-registry.js";
-import { routeProvider } from "./provider-router.js";
+import { matchesPreferences, routeProvider } from "./provider-router.js";
 import { inferModelProfile, resolveModelProfileFromCatalog } from "./model-catalog.js";
+import { getProviderMetadata } from "./provider-metadata.js";
+import { isLocalProviderRoute } from "./provider-route-location.js";
 
 const taskCapabilityRequirements: Record<AuxiliaryModelTask, ProviderRoutePreferences> = {
   vision: { requireVision: true },
@@ -58,6 +60,23 @@ export function resolveAuxiliaryModelRoute(
     };
   }
 
+  const fallbackFailure = visionFallbackConfigurationFailure(
+    task,
+    slot,
+    context.mainRoute,
+    context.providerRegistry
+  );
+  if (fallbackFailure !== undefined) {
+    return {
+      task,
+      route: undefined,
+      source: configuredRouteSource(slot),
+      fallbackToMain: false,
+      ...executionFields,
+      diagnostics: [fallbackFailure]
+    };
+  }
+
   // 2. Custom baseUrl
   if (slot.baseUrl !== undefined) {
     if (slot.id === undefined || slot.id.length === 0) {
@@ -83,11 +102,29 @@ export function resolveAuxiliaryModelRoute(
       contextWindowTokens: slot.contextWindowTokens
     };
 
+    const routeFailure = visionRouteFailure(task, slot, route, context.providerRegistry);
+    if (routeFailure !== undefined) {
+      return {
+        task,
+        route: undefined,
+        source: "custom",
+        fallbackToMain: false,
+        ...executionFields,
+        diagnostics: [customRouteDiagnostic(effectiveProvider, slot.baseUrl), routeFailure]
+      };
+    }
+
     return {
       task,
       route,
       source: "custom",
-      fallbackToMain: slot.fallbackToMain ?? false,
+      fallbackToMain: computeFallbackToMain({
+        task,
+        slot,
+        mainRoute: context.mainRoute,
+        providerRegistry: context.providerRegistry,
+        source: "custom"
+      }),
       ...executionFields,
       diagnostics: [customRouteDiagnostic(effectiveProvider, slot.baseUrl)]
     };
@@ -95,6 +132,18 @@ export function resolveAuxiliaryModelRoute(
 
   // 3. Main provider
   if (slot.provider === "main") {
+    const routeFailure = visionRouteFailure(task, slot, context.mainRoute, context.providerRegistry);
+    if (routeFailure !== undefined) {
+      return {
+        task,
+        route: undefined,
+        source: "main",
+        fallbackToMain: false,
+        ...executionFields,
+        diagnostics: [routeFailure]
+      };
+    }
+
     return {
       task,
       route: context.mainRoute,
@@ -123,18 +172,39 @@ export function resolveAuxiliaryModelRoute(
         contextWindowTokens: slot.contextWindowTokens
       };
 
+      const routeFailure = visionRouteFailure(task, slot, route, context.providerRegistry);
+      if (routeFailure !== undefined) {
+        return {
+          task,
+          route: undefined,
+          source: "explicit",
+          fallbackToMain: false,
+          ...executionFields,
+          diagnostics: [routeFailure]
+        };
+      }
+
       return {
         task,
         route,
         source: "explicit",
-        fallbackToMain: slot.fallbackToMain ?? false,
+        fallbackToMain: computeFallbackToMain({
+          task,
+          slot,
+          mainRoute: context.mainRoute,
+          providerRegistry: context.providerRegistry,
+          source: "explicit"
+        }),
         ...executionFields,
         diagnostics: [`Explicit route ${explicitProvider}/${slot.id}`]
       };
     }
 
     // Best model on explicit provider
-    const providerModels = models.filter((m) => m.provider === explicitProvider);
+    const providerModels = models.filter((m) =>
+      m.provider === explicitProvider &&
+      !(task === "vision" && slot.hostedProcessing === "local-only" && m.provider !== "local")
+    );
     const chosen = routeProvider(providerModels, requirements);
 
     if (chosen === undefined) {
@@ -143,7 +213,13 @@ export function resolveAuxiliaryModelRoute(
         task,
         route: undefined,
         source: "explicit",
-        fallbackToMain: computeFallbackToMain({ task, slot, mainRoute: context.mainRoute, source: "explicit" }),
+        fallbackToMain: computeFallbackToMain({
+          task,
+          slot,
+          mainRoute: context.mainRoute,
+          providerRegistry: context.providerRegistry,
+          source: "explicit"
+        }),
         ...executionFields,
         diagnostics
       };
@@ -157,30 +233,57 @@ export function resolveAuxiliaryModelRoute(
       contextWindowTokens: slot.contextWindowTokens
     };
 
+    const routeFailure = visionRouteFailure(task, slot, route, context.providerRegistry);
+    if (routeFailure !== undefined) {
+      return {
+        task,
+        route: undefined,
+        source: "explicit",
+        fallbackToMain: false,
+        ...executionFields,
+        diagnostics: [routeFailure]
+      };
+    }
+
     return {
       task,
       route,
       source: "explicit",
-      fallbackToMain: slot.fallbackToMain ?? false,
+      fallbackToMain: computeFallbackToMain({
+        task,
+        slot,
+        mainRoute: context.mainRoute,
+        providerRegistry: context.providerRegistry,
+        source: "explicit"
+      }),
       ...executionFields,
       diagnostics: [`Best model on ${explicitProvider}: ${chosen.primary.id}`]
     };
   }
 
   // 6. Auto (slot.provider is "auto" or undefined)
-  const mainSatisfies = matchesPreferences(context.mainRoute.profile, requirements);
+  const mainSatisfies = matchesPreferences(context.mainRoute.profile, requirements) &&
+    visionRouteFailure(task, slot, context.mainRoute, context.providerRegistry) === undefined;
   if (mainSatisfies) {
     return {
       task,
       route: context.mainRoute,
       source: "auto-main",
-      fallbackToMain: computeFallbackToMain({ task, slot, mainRoute: context.mainRoute, source: "auto-main" }),
+      fallbackToMain: computeFallbackToMain({
+        task,
+        slot,
+        mainRoute: context.mainRoute,
+        providerRegistry: context.providerRegistry,
+        source: "auto-main"
+      }),
       ...executionFields,
       diagnostics: ["Main model satisfies task requirements"]
     };
   }
 
-  const models = context.providerModels ?? [];
+  const models = (context.providerModels ?? []).filter((model) =>
+    !(task === "vision" && slot.hostedProcessing === "local-only" && model.provider !== "local")
+  );
   const chosen = routeProvider(models, requirements);
 
   if (chosen === undefined) {
@@ -189,7 +292,13 @@ export function resolveAuxiliaryModelRoute(
       task,
       route: undefined,
       source: "auto-configured",
-      fallbackToMain: computeFallbackToMain({ task, slot, mainRoute: context.mainRoute, source: "auto-configured" }),
+      fallbackToMain: computeFallbackToMain({
+        task,
+        slot,
+        mainRoute: context.mainRoute,
+        providerRegistry: context.providerRegistry,
+        source: "auto-configured"
+      }),
       ...executionFields,
       diagnostics
     };
@@ -203,11 +312,29 @@ export function resolveAuxiliaryModelRoute(
     contextWindowTokens: slot.contextWindowTokens
   };
 
+  const routeFailure = visionRouteFailure(task, slot, route, context.providerRegistry);
+  if (routeFailure !== undefined) {
+    return {
+      task,
+      route: undefined,
+      source: "auto-configured",
+      fallbackToMain: false,
+      ...executionFields,
+      diagnostics: [routeFailure]
+    };
+  }
+
   return {
     task,
     route,
     source: "auto-configured",
-    fallbackToMain: computeFallbackToMain({ task, slot, mainRoute: context.mainRoute, source: "auto-configured" }),
+    fallbackToMain: computeFallbackToMain({
+      task,
+      slot,
+      mainRoute: context.mainRoute,
+      providerRegistry: context.providerRegistry,
+      source: "auto-configured"
+    }),
     ...executionFields,
     diagnostics: [`Auto-selected ${chosen.primary.provider}/${chosen.primary.id}`]
   };
@@ -234,33 +361,108 @@ function resolvedExecutionFields(slot: AuxiliaryModelSlotConfig): Pick<ResolvedA
   };
 }
 
-function matchesPreferences(model: ModelProfile, preferences: ProviderRoutePreferences): boolean {
-  if (preferences.requireTools === true && !model.supportsTools) return false;
-  if (preferences.requireVision === true && !model.supportsVision) return false;
-  if (preferences.requireStructuredOutput === true && !model.supportsStructuredOutput) return false;
-  if (preferences.requireReasoning === true && model.supportsReasoning !== true) return false;
-  return true;
+function visionRequirementFailure(
+  task: AuxiliaryModelTask,
+  route: ResolvedModelRoute
+): string | undefined {
+  if (task !== "vision" || route.profile.supportsVision) {
+    return undefined;
+  }
+
+  return `Route ${route.provider}/${route.id} does not satisfy vision task requirements: vision`;
+}
+
+function visionRouteFailure(
+  task: AuxiliaryModelTask,
+  slot: AuxiliaryModelSlotConfig,
+  route: ResolvedModelRoute,
+  providerRegistry: ProviderRegistry
+): string | undefined {
+  return localOnlyVisionFailure(task, slot, route) ??
+    visionRequirementFailure(task, route) ??
+    visionExecutabilityFailure(task, route, providerRegistry);
+}
+
+function visionExecutabilityFailure(
+  task: AuxiliaryModelTask,
+  route: ResolvedModelRoute,
+  providerRegistry: ProviderRegistry
+): string | undefined {
+  if (task !== "vision") return undefined;
+  const adapter = providerRegistry.get(route.provider);
+  if (adapter === undefined) {
+    return `Route ${route.provider}/${route.id} has no registered provider adapter`;
+  }
+  if (adapter.executable === false) {
+    return `Route ${route.provider}/${route.id} uses a discovery-only provider adapter`;
+  }
+  if (!getProviderMetadata(route.provider).runnable) {
+    return `Route ${route.provider}/${route.id} uses provider metadata that is not runnable`;
+  }
+  return undefined;
+}
+
+function localOnlyVisionFailure(
+  task: AuxiliaryModelTask,
+  slot: AuxiliaryModelSlotConfig,
+  route: ResolvedModelRoute
+): string | undefined {
+  if (task !== "vision" || slot.hostedProcessing !== "local-only" || isLocalProviderRoute(route)) {
+    return undefined;
+  }
+  return `Route ${route.provider}/${route.id} is hosted, but vision hosted processing is local-only`;
 }
 
 function computeFallbackToMain(options: {
   task: AuxiliaryModelTask;
   slot: AuxiliaryModelSlotConfig;
   mainRoute: ResolvedModelRoute;
+  providerRegistry: ProviderRegistry;
   source: ResolvedAuxiliaryRoute["source"];
 }): boolean {
   if (options.slot.fallbackToMain !== undefined) {
     return options.slot.fallbackToMain;
   }
 
+  if (
+    options.task === "vision" &&
+    visionRouteFailure(options.task, options.slot, options.mainRoute, options.providerRegistry) !== undefined
+  ) {
+    return false;
+  }
+
   if (options.source === "explicit" || options.source === "custom") {
     return false;
   }
 
-  if (options.task === "vision") {
-    return options.mainRoute.profile.supportsVision;
-  }
+  return options.task === "vision";
+}
 
-  return false;
+function visionFallbackConfigurationFailure(
+  task: AuxiliaryModelTask,
+  slot: AuxiliaryModelSlotConfig,
+  mainRoute: ResolvedModelRoute,
+  providerRegistry: ProviderRegistry
+): string | undefined {
+  if (task !== "vision" || slot.fallbackToMain !== true) return undefined;
+  if (!mainRoute.profile.supportsVision) {
+    return "Vision fallbackToMain requires a vision-capable main model route";
+  }
+  if (slot.hostedProcessing === "local-only" && !isLocalProviderRoute(mainRoute)) {
+    return "Vision fallbackToMain is incompatible with local-only processing when the main route is hosted";
+  }
+  const executabilityFailure = visionExecutabilityFailure(task, mainRoute, providerRegistry);
+  if (executabilityFailure !== undefined) {
+    return `Vision fallbackToMain requires an executable main model route: ${executabilityFailure}`;
+  }
+  return undefined;
+}
+
+function configuredRouteSource(slot: AuxiliaryModelSlotConfig): ResolvedAuxiliaryRoute["source"] {
+  if (slot.baseUrl !== undefined) return "custom";
+  if (slot.provider === "main") return "main";
+  if (slot.provider !== undefined && slot.provider !== "auto") return "explicit";
+  return "auto-configured";
 }
 
 export async function resolveAllAuxiliaryRoutes(

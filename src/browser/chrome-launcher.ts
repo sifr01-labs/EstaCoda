@@ -1,6 +1,12 @@
 import { spawn as nodeSpawn } from "node:child_process";
 import type { ChildProcess } from "node:child_process";
-import { mkdir as nodeMkdir, mkdtemp as nodeMkdtemp, readFile as nodeReadFile, rm as nodeRm } from "node:fs/promises";
+import {
+  mkdir as nodeMkdir,
+  mkdtemp as nodeMkdtemp,
+  readFile as nodeReadFile,
+  rm as nodeRm,
+  writeFile as nodeWriteFile
+} from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir as nodeTmpdir } from "node:os";
 
@@ -8,12 +14,14 @@ export interface ChromeLauncherOptions {
   launchExecutable: string;
   launchArgs?: string[];
   chromeFlags?: string[];
+  headless?: boolean;
   userDataDir?: string;
   env?: NodeJS.ProcessEnv;
   cwd?: string;
   platform?: NodeJS.Platform;
   getuid?: () => number;
   readFile?: typeof nodeReadFile;
+  writeFile?: typeof nodeWriteFile;
   rm?: typeof nodeRm;
   mkdir?: typeof nodeMkdir;
   mkdtemp?: typeof nodeMkdtemp;
@@ -38,7 +46,6 @@ const POLL_INTERVAL_MS = 25;
 const APPARMOR_RESTRICT_USERNS_PATH = "/proc/sys/kernel/apparmor_restrict_unprivileged_userns";
 const DEFAULT_CHROME_FLAGS = [
   "--remote-debugging-port=0",
-  "--headless=new",
   "--no-first-run",
   "--no-default-browser-check",
   "--disable-background-timer-throttling",
@@ -59,13 +66,14 @@ export async function launchChrome(options: ChromeLauncherOptions): Promise<Laun
     throw new Error(`Chrome executable was not found: ${launchExecutable}`);
   }
 
-  const launchArgs = normalizeUserArgs(options.launchArgs, "launchArgs");
-  const chromeFlags = normalizeUserArgs(options.chromeFlags, "chromeFlags");
+  const launchArgs = browserDisplayArgs(normalizeUserArgs(options.launchArgs, "launchArgs"), options.headless);
+  const chromeFlags = browserDisplayArgs(normalizeUserArgs(options.chromeFlags, "chromeFlags"), options.headless);
   const mkdir = options.mkdir ?? nodeMkdir;
   const mkdtemp = options.mkdtemp ?? nodeMkdtemp;
   const rm = options.rm ?? nodeRm;
   const tmpdir = options.tmpdir ?? nodeTmpdir;
   const readFile = options.readFile ?? nodeReadFile;
+  const writeFile = options.writeFile ?? nodeWriteFile;
   const spawn = options.spawn ?? nodeSpawn;
   const fetch = options.fetch ?? globalThis.fetch;
   const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
@@ -76,11 +84,14 @@ export async function launchChrome(options: ChromeLauncherOptions): Promise<Laun
   try {
     if (!createdUserDataDir) {
       await mkdir(userDataDir, { recursive: true });
+    } else {
+      await writeManagedDownloadPreferences({ userDataDir, mkdir, writeFile });
     }
 
     const args = [
       ...launchArgs,
       ...chromeFlags,
+      ...(options.headless === false ? [] : ["--headless=new"]),
       ...DEFAULT_CHROME_FLAGS,
       `--user-data-dir=${userDataDir}`
     ];
@@ -131,6 +142,30 @@ export async function launchChrome(options: ChromeLauncherOptions): Promise<Laun
     });
     throw error;
   }
+}
+
+async function writeManagedDownloadPreferences(input: {
+  userDataDir: string;
+  mkdir: typeof nodeMkdir;
+  writeFile: typeof nodeWriteFile;
+}): Promise<void> {
+  const profileDirectory = join(input.userDataDir, "Default");
+  const defaultDownloadDirectory = join(input.userDataDir, "Downloads");
+  await input.mkdir(profileDirectory, { recursive: true, mode: 0o700 });
+  await input.mkdir(defaultDownloadDirectory, { recursive: true, mode: 0o700 });
+  await input.writeFile(join(profileDirectory, "Preferences"), JSON.stringify({
+    download: {
+      default_directory: defaultDownloadDirectory,
+      directory_upgrade: true,
+      prompt_for_download: false
+    }
+  }), { encoding: "utf8", mode: 0o600 });
+}
+
+function browserDisplayArgs(args: string[], headless: boolean | undefined): string[] {
+  return headless === false
+    ? args.filter((arg) => arg !== "--headless" && !arg.startsWith("--headless="))
+    : args;
 }
 
 function normalizeExecutable(value: string): string {

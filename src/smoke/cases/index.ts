@@ -10,6 +10,7 @@ import { gateway_stop_case } from "./gateway-stop.js";
 import { whatsapp_support_case } from "./whatsapp-support.js";
 import { delegation_mvp_case } from "./delegation-mvp.js";
 import { provider_setup_endpoint_first_case } from "./provider-setup-endpoint-first.js";
+import { session_continuation_case } from "./session-continuation.js";
 
 export const allSmokeCases = [
   corrupt_skill_usage_case,
@@ -23,5 +24,6 @@ export const allSmokeCases = [
   gateway_stop_case,
   whatsapp_support_case,
   delegation_mvp_case,
-  provider_setup_endpoint_first_case
+  provider_setup_endpoint_first_case,
+  session_continuation_case
 ];

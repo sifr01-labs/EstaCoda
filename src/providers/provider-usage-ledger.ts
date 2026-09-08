@@ -210,6 +210,18 @@ function assertProviderUsageContext(context: ProviderUsageContext): void {
   if (context.routeIndex !== undefined && (!Number.isSafeInteger(context.routeIndex) || context.routeIndex < 0)) {
     throw new Error("Provider usage route index is invalid.");
   }
+  if (context.imageInputs !== undefined) {
+    if (context.imageInputs.length === 0 || context.imageInputs.length > 64) {
+      throw new Error("Provider usage image input attribution is invalid.");
+    }
+    for (const image of context.imageInputs) {
+      if (!Number.isSafeInteger(image.width) || image.width <= 0 ||
+          !Number.isSafeInteger(image.height) || image.height <= 0 ||
+          (image.detail !== undefined && !["low", "high", "original", "auto"].includes(image.detail))) {
+        throw new Error("Provider usage image input attribution is invalid.");
+      }
+    }
+  }
 }
 
 function sum(

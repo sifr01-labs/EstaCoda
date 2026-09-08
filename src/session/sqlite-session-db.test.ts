@@ -44,6 +44,132 @@ describe("SQLiteSessionDB", () => {
     }
   });
 
+  it("returns bounded profile-safe session summaries and persists first-user presentation metadata", async () => {
+    const db = new SQLiteSessionDB({ path: dbPath });
+    try {
+      await db.createSession({
+        id: "eligible",
+        profileId: "alpha",
+        title: "EstaCoda session",
+        metadata: { workspaceRoot: "/workspace", surfaceType: "telegram" }
+      });
+      await db.appendMessage({
+        id: "eligible-user",
+        sessionId: "eligible",
+        role: "user",
+        content: "Repair TOKEN=abcdefghijklmnopqrstuvwxyz123456",
+        channel: "telegram"
+      });
+      await db.appendMessage({
+        id: "eligible-agent",
+        sessionId: "eligible",
+        role: "agent",
+        content: "Working"
+      });
+
+      await db.createSession({ id: "empty", profileId: "alpha", metadata: { workspaceRoot: "/workspace" } });
+      await db.createSession({ id: "foreign-workspace", profileId: "alpha", metadata: { workspaceRoot: "/other" } });
+      await db.appendMessage({ sessionId: "foreign-workspace", role: "user", content: "Other workspace" });
+      await db.createSession({ id: "other-profile", profileId: "beta", metadata: { workspaceRoot: "/workspace" } });
+      await db.appendMessage({ sessionId: "other-profile", role: "user", content: "Other profile" });
+      await db.createSession({
+        id: "child",
+        profileId: "alpha",
+        parentSessionId: "eligible",
+        metadata: { workspaceRoot: "/workspace" }
+      });
+      await db.appendMessage({ sessionId: "child", role: "user", content: "Child work" });
+      await db.createSession({
+        id: "internal-root",
+        profileId: "alpha",
+        metadata: { workspaceRoot: "/workspace", kind: "task-step-worker" }
+      });
+      await db.appendMessage({ sessionId: "internal-root", role: "user", content: "Worker work" });
+      await db.createSession({ id: "ended", profileId: "alpha", metadata: { workspaceRoot: "/workspace" } });
+      await db.appendMessage({ sessionId: "ended", role: "user", content: "Ended work" });
+      await db.endSession("ended", "compression");
+
+      const summaries = await db.listSessionSummaries("alpha", {
+        workspaceRoot: "/workspace",
+        rootSessionsOnly: true,
+        activeSessionsOnly: true,
+        userActivityOnly: true,
+        userFacingOnly: true,
+        limit: 1
+      });
+
+      expect(summaries).toHaveLength(1);
+      expect(summaries[0]).toMatchObject({
+        session: {
+          id: "eligible",
+          title: "Repair TOKEN=[REDACTED]",
+          metadata: {
+            workspaceRoot: "/workspace",
+            surfaceType: "telegram",
+            originSurface: "telegram"
+          }
+        },
+        messageCount: 2,
+        userMessageCount: 1,
+        firstUserMessage: {
+          id: "eligible-user",
+          channel: "telegram",
+          content: "Repair TOKEN=abcdefghijklmnopqrstuvwxyz123456"
+        }
+      });
+      await expect(db.listSessionSummaries("beta", { workspaceRoot: "/workspace" }))
+        .resolves.toEqual([expect.objectContaining({ session: expect.objectContaining({ id: "other-profile" }) })]);
+    } finally {
+      db.close();
+    }
+  });
+
+  it("keeps explicit titles and originating surfaces immutable across later messages", async () => {
+    const db = new SQLiteSessionDB({ path: dbPath });
+    try {
+      await db.createSession({
+        id: "named",
+        profileId: "alpha",
+        title: "Explicit title",
+        metadata: { originSurface: "cli", surfaceType: "telegram" }
+      });
+      await db.appendMessage({
+        sessionId: "named",
+        role: "user",
+        content: "Telegram follow-up",
+        channel: "telegram"
+      });
+
+      await expect(db.getSessionForProfile("named", "alpha")).resolves.toMatchObject({
+        title: "Explicit title",
+        metadata: { originSurface: "cli", surfaceType: "telegram" }
+      });
+    } finally {
+      db.close();
+    }
+  });
+
+  it("atomically assigns only the first meaningful session title", async () => {
+    const first = new SQLiteSessionDB({ path: dbPath });
+    const second = new SQLiteSessionDB({ path: dbPath });
+    try {
+      await first.createSession({ id: "atomic-title", profileId: "alpha", title: "EstaCoda session" });
+      await Promise.all([
+        first.appendMessage({ sessionId: "atomic-title", role: "user", content: "First candidate" }),
+        second.appendMessage({ sessionId: "atomic-title", role: "user", content: "Second candidate" }),
+      ]);
+
+      const session = await first.getSessionForProfile("atomic-title", "alpha");
+      expect(["First candidate", "Second candidate"]).toContain(session?.title);
+      await expect(first.setSessionTitleIfPlaceholder("atomic-title", "Late candidate")).resolves.toBe(false);
+      await expect(first.getSessionForProfile("atomic-title", "alpha"))
+        .resolves.toMatchObject({ title: session?.title });
+    } finally {
+      first.close();
+      second.close();
+    }
+  });
+
   it("persists immutable logical-session spending scopes", async () => {
     const db = new SQLiteSessionDB({ path: dbPath });
     try {

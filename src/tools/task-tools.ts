@@ -13,7 +13,7 @@ export function createTaskTools(options: {
   return [{
     name: "task.status",
     description:
-      "Inspect bounded lifecycle status, execution ownership/readiness, Step progress, usage completeness, and result handles for a durable Task linked to this session. Does not expose workspace paths, host identities, prompts, tool inputs, credentials, or full result bodies.",
+      "Inspect bounded lifecycle status, execution ownership/readiness, Step progress, token usage, estimated provider cost, and result handles for a particular durable Task linked to this session. Use this when the user asks what a specific Task cost. Does not expose workspace paths, host identities, prompts, tool inputs, credentials, or full result bodies.",
     inputSchema: {
       type: "object",
       additionalProperties: false,

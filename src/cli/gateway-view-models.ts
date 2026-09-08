@@ -302,7 +302,9 @@ function lockStateLabel(lock: IdentityLockStatus | undefined): string {
 function channelKv(name: string, channel: LoadedRuntimeConfig["channels"]["telegram"]): KeyValueEntry {
   const status = channel.ready ? "ready" : channel.enabled ? "configured, missing credentials" : "disabled";
   const missing = channel.missing !== undefined && channel.missing.length > 0 ? ` (missing: ${channel.missing.join(", ")})` : "";
-  const busySuffix = channel.enabled ? ` (${channel.busyPolicy ?? "reject"}, depth ${channel.queueDepth ?? 3})` : "";
+  const busySuffix = channel.enabled
+    ? ` (${channel.busyPolicy ?? "reject"}, depth ${channel.queueDepth ?? 3}, queued-text coalescing ${channel.busyTextCoalescing?.enabled === true ? "on" : "off"})`
+    : "";
   return kv(name, `${status}${missing}${busySuffix}`);
 }
 
@@ -748,6 +750,7 @@ export type ChannelsStatusData = {
     readonly identityLock?: IdentityLockStatus;
     readonly busyPolicy: string;
     readonly queueDepth: number;
+    readonly busyTextCoalescingEnabled?: boolean;
   };
   readonly discord?: {
     readonly config: LoadedRuntimeConfig["channels"]["discord"];
@@ -758,6 +761,7 @@ export type ChannelsStatusData = {
     readonly identityLock?: IdentityLockStatus;
     readonly busyPolicy: string;
     readonly queueDepth: number;
+    readonly busyTextCoalescingEnabled?: boolean;
   };
   readonly email?: {
     readonly config: LoadedRuntimeConfig["channels"]["email"];
@@ -768,6 +772,7 @@ export type ChannelsStatusData = {
     readonly identityLock?: IdentityLockStatus;
     readonly busyPolicy: string;
     readonly queueDepth: number;
+    readonly busyTextCoalescingEnabled?: boolean;
   };
   readonly whatsapp?: {
     readonly diag: WhatsAppGatewayDiagnostics;
@@ -779,6 +784,7 @@ export type ChannelsStatusData = {
     readonly identityLock?: IdentityLockStatus;
     readonly busyPolicy: string;
     readonly queueDepth: number;
+    readonly busyTextCoalescingEnabled?: boolean;
   };
 };
 
@@ -821,7 +827,7 @@ function buildChannelRuntimeEntries(
 
 export function buildChannelsStatusViewModel(data: ChannelsStatusData): CommandResultViewModel | PlainFallbackViewModel {
   if (data.channel === "telegram" && data.telegram !== undefined) {
-    const { diag, pointers, capability, runtimeStateNote, adapterRuntime, identityLock, busyPolicy, queueDepth } = data.telegram;
+    const { diag, pointers, capability, runtimeStateNote, adapterRuntime, identityLock, busyPolicy, queueDepth, busyTextCoalescingEnabled } = data.telegram;
     const entries: KeyValueEntry[] = [
       kv("Enabled", diag.enabled ? "yes" : "no"),
       kv("Ready", diag.ready ? "yes" : "no"),
@@ -837,6 +843,7 @@ export function buildChannelsStatusViewModel(data: ChannelsStatusData): CommandR
       kv("Session reset policy", diag.sessionResetPolicy),
       kv("Busy policy", busyPolicy),
       kv("Queue depth", String(queueDepth)),
+      kv("Queued-text coalescing", busyTextCoalescingEnabled ? "enabled" : "disabled"),
       kv("Identity lock", channelLockLabel(identityLock)),
       ...buildChannelRuntimeEntries(runtimeStateNote, adapterRuntime),
     ];
@@ -855,7 +862,7 @@ export function buildChannelsStatusViewModel(data: ChannelsStatusData): CommandR
   }
 
   if (data.channel === "discord" && data.discord !== undefined) {
-    const { config, pointers, capability, runtimeStateNote, adapterRuntime, identityLock, busyPolicy, queueDepth } = data.discord;
+    const { config, pointers, capability, runtimeStateNote, adapterRuntime, identityLock, busyPolicy, queueDepth, busyTextCoalescingEnabled } = data.discord;
     const tokenPresent = config.botTokenEnv !== undefined && process.env[config.botTokenEnv] !== undefined;
     return buildCommandResultViewModel({
       ok: true,
@@ -872,6 +879,7 @@ export function buildChannelsStatusViewModel(data: ChannelsStatusData): CommandR
             kv("Allowed channels", (config.allowedChannels ?? []).join(", ") || "none"),
             kv("Busy policy", busyPolicy),
             kv("Queue depth", String(queueDepth)),
+            kv("Queued-text coalescing", busyTextCoalescingEnabled ? "enabled" : "disabled"),
             kv("Identity lock", channelLockLabel(identityLock)),
             ...buildChannelRuntimeEntries(runtimeStateNote, adapterRuntime),
           ],
@@ -883,7 +891,7 @@ export function buildChannelsStatusViewModel(data: ChannelsStatusData): CommandR
   }
 
   if (data.channel === "email" && data.email !== undefined) {
-    const { config, pointers, capability, runtimeStateNote, adapterRuntime, identityLock, busyPolicy, queueDepth } = data.email;
+    const { config, pointers, capability, runtimeStateNote, adapterRuntime, identityLock, busyPolicy, queueDepth, busyTextCoalescingEnabled } = data.email;
     const passwordPresent = config.passwordEnv !== undefined && process.env[config.passwordEnv] !== undefined;
     return buildCommandResultViewModel({
       ok: true,
@@ -903,6 +911,7 @@ export function buildChannelsStatusViewModel(data: ChannelsStatusData): CommandR
             kv("Allow all users", config.allowAllUsers ? "yes" : "no"),
             kv("Busy policy", busyPolicy),
             kv("Queue depth", String(queueDepth)),
+            kv("Queued-text coalescing", busyTextCoalescingEnabled ? "enabled" : "disabled"),
             kv("Identity lock", channelLockLabel(identityLock)),
             ...buildChannelRuntimeEntries(runtimeStateNote, adapterRuntime),
           ],
@@ -914,7 +923,7 @@ export function buildChannelsStatusViewModel(data: ChannelsStatusData): CommandR
   }
 
   if (data.channel === "whatsapp" && data.whatsapp !== undefined) {
-    const { diag, config, pointers, capability, runtimeStateNote, adapterRuntime, identityLock, busyPolicy, queueDepth } = data.whatsapp;
+    const { diag, config, pointers, capability, runtimeStateNote, adapterRuntime, identityLock, busyPolicy, queueDepth, busyTextCoalescingEnabled } = data.whatsapp;
     return buildCommandResultViewModel({
       ok: true,
       title: "WhatsApp channel status",
@@ -939,6 +948,7 @@ export function buildChannelsStatusViewModel(data: ChannelsStatusData): CommandR
             kv("Pairing mode", config.pairingMode ?? "qr"),
             kv("Busy policy", busyPolicy),
             kv("Queue depth", String(queueDepth)),
+            kv("Queued-text coalescing", busyTextCoalescingEnabled ? "enabled" : "disabled"),
             kv("Identity lock", channelLockLabel(identityLock)),
             ...buildChannelRuntimeEntries(runtimeStateNote, adapterRuntime),
           ],

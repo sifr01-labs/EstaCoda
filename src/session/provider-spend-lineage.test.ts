@@ -31,6 +31,22 @@ describe("provider spend contracts", () => {
     }))).toThrow(/pricing snapshot input rate/i);
   });
 
+  it("requires bounded image estimates to carry auditable estimator lineage", () => {
+    expect(() => assertProviderSpendRequest(request({
+      estimatedImageInputTokens: 50
+    }))).toThrow(/image token estimator/i);
+    expect(() => assertProviderSpendRequest(request({
+      estimatedInputTokens: 100,
+      estimatedImageInputTokens: 101,
+      imageTokenEstimator: "test-estimator"
+    }))).toThrow(/cannot exceed the total input estimate/i);
+    expect(() => assertProviderSpendRequest(request({
+      estimatedInputTokens: 100,
+      estimatedImageInputTokens: 50,
+      imageTokenEstimator: "test-estimator"
+    }))).not.toThrow();
+  });
+
   it("rejects an unrelated same-profile visible turn", async () => {
     const db = new InMemorySessionDB();
     await db.createSession({ id: "execution", profileId: "alpha" });
@@ -70,6 +86,33 @@ describe("provider spend contracts", () => {
 
     await expect(assertProviderSpendLineage(db, request({
       sourceKind: "task",
+      executionSessionId: "worker",
+      sessionBudgetScopeId: "origin",
+      visibleTurnId: "origin-turn",
+      taskId: "task-child",
+      rootTaskId: "task-root",
+      planRevisionId: "revision-child",
+      stepId: "step-child",
+      attemptId: "attempt-child"
+    }))).resolves.toBeUndefined();
+  });
+
+  it("accepts Task-attributed auxiliary work from the originating visible turn", async () => {
+    const db = new InMemorySessionDB();
+    const limit = { maxEstimatedCostUsd: 5, warningThresholdPercent: 80 };
+    await db.createSession({ id: "origin", profileId: "alpha", spendingLimit: limit });
+    await db.appendMessage({ id: "origin-turn", sessionId: "origin", role: "user", content: "Delegated work" });
+    await db.createSession({
+      id: "worker",
+      profileId: "alpha",
+      parentSessionId: "origin",
+      spendingScopeSessionId: "origin",
+      spendingLimit: limit
+    });
+
+    await expect(assertProviderSpendLineage(db, request({
+      sourceKind: "auxiliary",
+      auxiliaryKind: "vision",
       executionSessionId: "worker",
       sessionBudgetScopeId: "origin",
       visibleTurnId: "origin-turn",

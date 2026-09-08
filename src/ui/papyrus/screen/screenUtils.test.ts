@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { clearLineWidthCache, lineWidth, lineWidthCacheSize } from "./lineWidthCache.js";
-import { reorderBidi, type ClusteredChar } from "./bidi.js";
+import { reorderBidi, resolveBidiMode, type ClusteredChar } from "./bidi.js";
 import { stringWidth } from "./stringWidth.js";
 import { widestLine } from "./widestLine.js";
 
@@ -99,5 +99,11 @@ describe("Papyrus screen-local bidi", () => {
   it("can be explicitly disabled independent of terminal environment", () => {
     const input = clusters("abc مرحبا");
     expect(reorderBidi(input, { mode: "native" })).toBe(input);
+  });
+
+  it("resolves explicit terminal bidi modes without consulting the environment", () => {
+    expect(resolveBidiMode("software")).toBe("software");
+    expect(resolveBidiMode("native")).toBe("native");
+    expect(resolveBidiMode("off")).toBe("native");
   });
 });

@@ -240,6 +240,26 @@ To attach a Telegram chat to this session, send the following in Telegram:
 This code is single-use and expires in 10 minutes."
 `;
 
+exports[`Session surfaces — Arabic picker > renders mixed Arabic and technical text in plain mode > sessions-picker-arabic-plain 1`] = `
+"⁧اختر جلسة⁩
+   ⁦#⁩  ⁧الجلسة⁩
+   -  -------------------
+>  ⁦1⁩  ⁧مراجعة نشر Telegram⁩
+      ⁧بدأت 2026-08-04 08:15 UTC  |  آخر نشاط 2026-08-04 09:45 UTC  |  عبر Telegram⁩
+
+⁧Up/Down للتنقل  |  ENTER للفتح  |  CTRL+C للخروج⁩"
+`;
+
+exports[`Session surfaces — Arabic picker > renders mixed Arabic and technical text with theme tokens > sessions-picker-arabic-standard 1`] = `
+"[38;2;67;137;215m[1m⁧اختر جلسة⁩[0m[0m
+   [38;2;176;176;176m⁦#⁩[0m  [38;2;176;176;176m⁧الجلسة⁩             [0m
+   [38;2;237;237;237m─  ───────────────────[0m
+[38;2;64;224;208m❯[0m  [38;2;64;224;208m⁦1⁩[0m  [38;2;64;224;208m⁧مراجعة نشر Telegram⁩[0m
+      [38;2;112;112;112m⁧بدأت 2026-08-04 08:15 UTC · آخر نشاط 2026-08-04 09:45 UTC · عبر Telegram⁩[0m
+
+[38;2;112;112;112m⁧↑↓ للتنقل · ENTER للفتح · CTRL+C للخروج⁩[0m"
+`;
+
 exports[`Session surfaces — attach > renders in narrow width > session-attach-narrow width 1`] = `
 "[38;2;76;175;80m[OK][0m [1mSurface attached[0m
 
@@ -423,10 +443,13 @@ Detached telegram:chat-1."
 exports[`Session surfaces — help > renders in narrow width > sessions-help-narrow width 1`] = `
 "[38;2;76;175;80m[OK][0m [1mEstaCoda sessions[0m
 
+• estacoda sessions                           Choose and resume a recent session
+• estacoda sessions open <session-id>         Resume a session by id
 • estacoda sessions list                      List recent sessions
 • estacoda sessions recall <query>            Summarize historical session matches
 • estacoda sessions compact <session-id> [--topic <topic>]  Compact a session manually
 • estacoda sessions show <session-id>         Show session details
+• estacoda sessions diagnose <session-id>     Diagnose session execution
 • estacoda sessions current                   Show current session
 • estacoda sessions attach <surface> <id> <session-id>  Attach surface to session
 • estacoda sessions detach <surface> <id>     Detach surface from session"
@@ -435,10 +458,13 @@ exports[`Session surfaces — help > renders in narrow width > sessions-help-nar
 exports[`Session surfaces — help > renders in no Unicode > sessions-help-no Unicode 1`] = `
 "[38;2;76;175;80m[OK][0m [1mEstaCoda sessions[0m
 
+- estacoda sessions                           Choose and resume a recent session
+- estacoda sessions open <session-id>         Resume a session by id
 - estacoda sessions list                      List recent sessions
 - estacoda sessions recall <query>            Summarize historical session matches
 - estacoda sessions compact <session-id> [--topic <topic>]  Compact a session manually
 - estacoda sessions show <session-id>         Show session details
+- estacoda sessions diagnose <session-id>     Diagnose session execution
 - estacoda sessions current                   Show current session
 - estacoda sessions attach <surface> <id> <session-id>  Attach surface to session
 - estacoda sessions detach <surface> <id>     Detach surface from session"
@@ -447,10 +473,13 @@ exports[`Session surfaces — help > renders in no Unicode > sessions-help-no Un
 exports[`Session surfaces — help > renders in no color > sessions-help-no color 1`] = `
 "[OK] EstaCoda sessions
 
+• estacoda sessions                           Choose and resume a recent session
+• estacoda sessions open <session-id>         Resume a session by id
 • estacoda sessions list                      List recent sessions
 • estacoda sessions recall <query>            Summarize historical session matches
 • estacoda sessions compact <session-id> [--topic <topic>]  Compact a session manually
 • estacoda sessions show <session-id>         Show session details
+• estacoda sessions diagnose <session-id>     Diagnose session execution
 • estacoda sessions current                   Show current session
 • estacoda sessions attach <surface> <id> <session-id>  Attach surface to session
 • estacoda sessions detach <surface> <id>     Detach surface from session"
@@ -459,10 +488,13 @@ exports[`Session surfaces — help > renders in no color > sessions-help-no colo
 exports[`Session surfaces — help > renders in plain > sessions-help-plain 1`] = `
 "[OK] EstaCoda sessions
 
+- estacoda sessions                           Choose and resume a recent session
+- estacoda sessions open <session-id>         Resume a session by id
 - estacoda sessions list                      List recent sessions
 - estacoda sessions recall <query>            Summarize historical session matches
 - estacoda sessions compact <session-id> [--topic <topic>]  Compact a session manually
 - estacoda sessions show <session-id>         Show session details
+- estacoda sessions diagnose <session-id>     Diagnose session execution
 - estacoda sessions current                   Show current session
 - estacoda sessions attach <surface> <id> <session-id>  Attach surface to session
 - estacoda sessions detach <surface> <id>     Detach surface from session"
@@ -471,10 +503,13 @@ exports[`Session surfaces — help > renders in plain > sessions-help-plain 1`] 
 exports[`Session surfaces — help > renders in standard dark > sessions-help-standard dark 1`] = `
 "[38;2;76;175;80m[OK][0m [1mEstaCoda sessions[0m
 
+• estacoda sessions                           Choose and resume a recent session
+• estacoda sessions open <session-id>         Resume a session by id
 • estacoda sessions list                      List recent sessions
 • estacoda sessions recall <query>            Summarize historical session matches
 • estacoda sessions compact <session-id> [--topic <topic>]  Compact a session manually
 • estacoda sessions show <session-id>         Show session details
+• estacoda sessions diagnose <session-id>     Diagnose session execution
 • estacoda sessions current                   Show current session
 • estacoda sessions attach <surface> <id> <session-id>  Attach surface to session
 • estacoda sessions detach <surface> <id>     Detach surface from session"
@@ -483,10 +518,13 @@ exports[`Session surfaces — help > renders in standard dark > sessions-help-st
 exports[`Session surfaces — help > renders in standard light > sessions-help-standard light 1`] = `
 "[38;2;46;125;50m[OK][0m [1mEstaCoda sessions[0m
 
+• estacoda sessions                           Choose and resume a recent session
+• estacoda sessions open <session-id>         Resume a session by id
 • estacoda sessions list                      List recent sessions
 • estacoda sessions recall <query>            Summarize historical session matches
 • estacoda sessions compact <session-id> [--topic <topic>]  Compact a session manually
 • estacoda sessions show <session-id>         Show session details
+• estacoda sessions diagnose <session-id>     Diagnose session execution
 • estacoda sessions current                   Show current session
 • estacoda sessions attach <surface> <id> <session-id>  Attach surface to session
 • estacoda sessions detach <surface> <id>     Detach surface from session"
@@ -642,12 +680,82 @@ exports[`Session surfaces — not found > renders in standard light > session-no
 [38;2;198;40;40m[ERROR][0m [1mNot found[0m: Session not found: missing"
 `;
 
+exports[`Session surfaces — picker > renders in narrow width > sessions-picker-narrow width 1`] = `
+"[38;2;67;137;215m[1mChoose a session[0m[0m
+   [38;2;176;176;176m#[0m  [38;2;176;176;176mSession                   [0m
+   [38;2;237;237;237m─  ──────────────────────────[0m
+[38;2;64;224;208m❯[0m  [38;2;64;224;208m1[0m  [38;2;64;224;208mImplement session picker  [0m
+      [38;2;112;112;112mStarted 2026-08-04 08:15 UTC ·[0m
+      [38;2;112;112;112mLast active 2026-08-04 09:45 UTC ·[0m
+      [38;2;112;112;112mVia CLI[0m
+   [38;2;112;112;112m2[0m  [38;2;232;232;232mTelegram deployment review[0m
+
+[38;2;112;112;112m↑↓ navigate · ENTER open · CTRL+C exit[0m"
+`;
+
+exports[`Session surfaces — picker > renders in no Unicode > sessions-picker-no Unicode 1`] = `
+"[38;2;67;137;215m[1mChoose a session[0m[0m
+   [38;2;176;176;176m#[0m  [38;2;176;176;176mSession                   [0m
+   [38;2;237;237;237m-  --------------------------[0m
+[38;2;64;224;208m>[0m  [38;2;64;224;208m1[0m  [38;2;64;224;208mImplement session picker  [0m
+      [38;2;112;112;112mStarted 2026-08-04 08:15 UTC | Last active 2026-08-04 09:45 UTC | Via CLI[0m
+   [38;2;112;112;112m2[0m  [38;2;232;232;232mTelegram deployment review[0m
+
+[38;2;112;112;112mUp/Down navigate | ENTER open | CTRL+C exit[0m"
+`;
+
+exports[`Session surfaces — picker > renders in no color > sessions-picker-no color 1`] = `
+"Choose a session
+   #  Session
+   ─  ──────────────────────────
+❯  1  Implement session picker
+      Started 2026-08-04 08:15 UTC · Last active 2026-08-04 09:45 UTC · Via CLI
+   2  Telegram deployment review
+
+↑↓ navigate · ENTER open · CTRL+C exit"
+`;
+
+exports[`Session surfaces — picker > renders in plain > sessions-picker-plain 1`] = `
+"Choose a session
+   #  Session
+   -  --------------------------
+>  1  Implement session picker
+      Started 2026-08-04 08:15 UTC  |  Last active 2026-08-04 09:45 UTC  |  Via CLI
+   2  Telegram deployment review
+
+Up/Down navigate  |  ENTER open  |  CTRL+C exit"
+`;
+
+exports[`Session surfaces — picker > renders in standard dark > sessions-picker-standard dark 1`] = `
+"[38;2;67;137;215m[1mChoose a session[0m[0m
+   [38;2;176;176;176m#[0m  [38;2;176;176;176mSession                   [0m
+   [38;2;237;237;237m─  ──────────────────────────[0m
+[38;2;64;224;208m❯[0m  [38;2;64;224;208m1[0m  [38;2;64;224;208mImplement session picker  [0m
+      [38;2;112;112;112mStarted 2026-08-04 08:15 UTC · Last active 2026-08-04 09:45 UTC · Via CLI[0m
+   [38;2;112;112;112m2[0m  [38;2;232;232;232mTelegram deployment review[0m
+
+[38;2;112;112;112m↑↓ navigate · ENTER open · CTRL+C exit[0m"
+`;
+
+exports[`Session surfaces — picker > renders in standard light > sessions-picker-standard light 1`] = `
+"[38;2;67;137;215m[1mChoose a session[0m[0m
+   [38;2;74;74;74m#[0m  [38;2;74;74;74mSession                   [0m
+   [38;2;224;224;224m─  ──────────────────────────[0m
+[38;2;0;140;149m❯[0m  [38;2;0;140;149m1[0m  [38;2;0;140;149mImplement session picker  [0m
+      [38;2;138;138;138mStarted 2026-08-04 08:15 UTC · Last active 2026-08-04 09:45 UTC · Via CLI[0m
+   [38;2;138;138;138m2[0m  [38;2;26;26;26mTelegram deployment review[0m
+
+[38;2;138;138;138m↑↓ navigate · ENTER open · CTRL+C exit[0m"
+`;
+
 exports[`Session surfaces — show > renders in narrow width > session-show-narrow width 1`] = `
 "[38;2;76;175;80m[OK][0m [1mSession detail[0m
 
 Session: sess-1
 Title: Test Session
 Profile: default
+Workspace: /workspace
+Origin: telegram
 Created: 2024-01-01T00:00:00Z
 Updated: 2024-01-02T00:00:00Z
 Messages: 5
@@ -662,6 +770,8 @@ exports[`Session surfaces — show > renders in no Unicode > session-show-no Uni
 Session: sess-1
 Title: Test Session
 Profile: default
+Workspace: /workspace
+Origin: telegram
 Created: 2024-01-01T00:00:00Z
 Updated: 2024-01-02T00:00:00Z
 Messages: 5
@@ -676,6 +786,8 @@ exports[`Session surfaces — show > renders in no color > session-show-no color
 Session: sess-1
 Title: Test Session
 Profile: default
+Workspace: /workspace
+Origin: telegram
 Created: 2024-01-01T00:00:00Z
 Updated: 2024-01-02T00:00:00Z
 Messages: 5
@@ -690,6 +802,8 @@ exports[`Session surfaces — show > renders in plain > session-show-plain 1`] =
 Session: sess-1
 Title: Test Session
 Profile: default
+Workspace: /workspace
+Origin: telegram
 Created: 2024-01-01T00:00:00Z
 Updated: 2024-01-02T00:00:00Z
 Messages: 5
@@ -704,6 +818,8 @@ exports[`Session surfaces — show > renders in standard dark > session-show-sta
 Session: sess-1
 Title: Test Session
 Profile: default
+Workspace: /workspace
+Origin: telegram
 Created: 2024-01-01T00:00:00Z
 Updated: 2024-01-02T00:00:00Z
 Messages: 5
@@ -718,6 +834,8 @@ exports[`Session surfaces — show > renders in standard light > session-show-st
 Session: sess-1
 Title: Test Session
 Profile: default
+Workspace: /workspace
+Origin: telegram
 Created: 2024-01-01T00:00:00Z
 Updated: 2024-01-02T00:00:00Z
 Messages: 5
@@ -732,6 +850,8 @@ exports[`Session surfaces — show no pointers > renders in narrow width > sessi
 Session: sess-1
 Title: Test Session
 Profile: default
+Workspace: /workspace
+Origin: cli
 Created: 2024-01-01T00:00:00Z
 Updated: 2024-01-02T00:00:00Z
 Messages: 0
@@ -746,6 +866,8 @@ exports[`Session surfaces — show no pointers > renders in no Unicode > session
 Session: sess-1
 Title: Test Session
 Profile: default
+Workspace: /workspace
+Origin: cli
 Created: 2024-01-01T00:00:00Z
 Updated: 2024-01-02T00:00:00Z
 Messages: 0
@@ -760,6 +882,8 @@ exports[`Session surfaces — show no pointers > renders in no color > session-s
 Session: sess-1
 Title: Test Session
 Profile: default
+Workspace: /workspace
+Origin: cli
 Created: 2024-01-01T00:00:00Z
 Updated: 2024-01-02T00:00:00Z
 Messages: 0
@@ -774,6 +898,8 @@ exports[`Session surfaces — show no pointers > renders in plain > session-show
 Session: sess-1
 Title: Test Session
 Profile: default
+Workspace: /workspace
+Origin: cli
 Created: 2024-01-01T00:00:00Z
 Updated: 2024-01-02T00:00:00Z
 Messages: 0
@@ -788,6 +914,8 @@ exports[`Session surfaces — show no pointers > renders in standard dark > sess
 Session: sess-1
 Title: Test Session
 Profile: default
+Workspace: /workspace
+Origin: cli
 Created: 2024-01-01T00:00:00Z
 Updated: 2024-01-02T00:00:00Z
 Messages: 0
@@ -802,6 +930,8 @@ exports[`Session surfaces — show no pointers > renders in standard light > ses
 Session: sess-1
 Title: Test Session
 Profile: default
+Workspace: /workspace
+Origin: cli
 Created: 2024-01-01T00:00:00Z
 Updated: 2024-01-02T00:00:00Z
 Messages: 0

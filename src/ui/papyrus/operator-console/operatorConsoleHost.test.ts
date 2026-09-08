@@ -82,6 +82,33 @@ describe("Papyrus operator console raw prompt host", () => {
     });
   });
 
+  it("preserves secure input as a modal when a shared runtime host is rebuilt", () => {
+    const host = createOperatorConsoleRuntimeHost();
+    const secureInput = {
+      kind: "api-key" as const,
+      purpose: "Authenticate the request",
+      destinationLabel: "Verified process environment",
+      retention: "use-once" as const,
+      expiresAt: "2026-08-13T10:05:00.000Z",
+      maskedCharacterCount: 8,
+      entryActive: false,
+      focusedAction: "enter-securely" as const,
+    };
+
+    host.setSecureInput(secureInput);
+    const frame = buildOperatorConsoleRawPromptFrameWithRuntimeHost(host, {
+      prompt: "> ",
+      state: createLineEditorState("prompt content must be hidden"),
+      terminal: { width: 80, height: 20, isTty: true },
+      secureInput: host.getState().secureInput,
+    });
+
+    expect(frame.layout.regions.map((region) => region.kind)).toEqual(["secureInput"]);
+    expect(frame.state.secureInput).toEqual(secureInput);
+    expect(frame.rows.join("\n")).toContain("Value · ••••••••");
+    expect(frame.rows.join("\n")).not.toContain("prompt content must be hidden");
+  });
+
   it("renders prompt box with status rail below", () => {
     const frame = buildOperatorConsoleRawPromptFrame({
       prompt: "> ",
@@ -206,8 +233,8 @@ describe("Papyrus operator console raw prompt host", () => {
 
     expect(frame.state.approvals).toEqual([approval]);
     expect(text).toContain("Approval required");
-    expect(text).toContain("Action: Write file");
-    expect(text).toContain("Target: write the reviewed artifact");
+    expect(text).toContain("Write file");
+    expect(text).toContain("Target · write the reviewed artifact");
     expect(text).toContain("❯ Approve once");
   });
 

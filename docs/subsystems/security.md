@@ -7,6 +7,8 @@ description: "Security model: policy, approvals, trust, channel allowlists, hand
 
 EstaCoda uses a capability-first security model where tool risk classes, approval modes, workspace trust, and channel allowlists work together to bound agent behavior across all surfaces.
 
+Explicit credential paste recognition normalizes LF, CRLF, and CR-only terminal input. An introductory submission cue followed by opaque value lines (optionally behind a pasted-text marker) routes the turn to protected recollection before agent-loop persistence and model dispatch; ordinary discussion and unrelated identifiers are not intercepted. At declared protected tool destinations, a nonempty literal identified by a secret field label or a variable's `type: "secret"` is replaced with a protected-input request before executor persistence and dispatch. Empty strings, placeholders, ordinary variables, and template references remain supported. The dispatcher still requires the existing approvals and secure-input capability; this correction adds no automatic authority and never guesses credential splits or reuses the discarded literal. Recognition remains bounded, and historical plaintext is not retroactively cleaned.
+
 ## Files
 
 | File | Role |
@@ -19,6 +21,7 @@ EstaCoda uses a capability-first security model where tool risk classes, approva
 | `src/contracts/security.ts` | Security types and defaults |
 | `src/channels/channel-approval-store.ts` | Approval persistence per channel |
 | `src/gateway/approval-queue.ts` | Durable gateway pending approval queue |
+| `src/gateway/pending-turn-store.ts` | Profile-scoped durable busy-message recovery store |
 | `src/channels/handoff-store.ts` | Short-lived handoff codes |
 
 ## Approval Modes
@@ -138,6 +141,7 @@ Current protection coverage:
 
 - `web.extract` guards the initial URL and every manual redirect before reading the response body.
 - `browser.navigate` guards the initial URL and checks the final post-navigation URL, with best-effort cleanup to `about:blank` when a redirect lands on a blocked target.
+- `browser.click`, consequential keyboard actions, and dialog acceptance run a read-only structural preflight. Ordinary HTTP(S) anchors remain read-only; buttons, form submissions, scripted/unknown controls, Enter or ambiguous keys, and dialog acceptance require `external-side-effect` approval. The target is revalidated after approval and exact target keys prevent one control's approval from authorizing another. Stale or unavailable structural evidence fails closed, and untrusted page labels can never reduce risk.
 - `browser.cdp` is an `external-side-effect` tool. URL-capable CDP methods including `Page.navigate`, `Target.createTarget`, `Runtime.evaluate`, and `Runtime.callFunctionOn` apply URL-safety, secret scanning, and website-policy checks to explicit URLs and obvious network/navigation literal URL expressions.
 - Supervised local CDP request interception aborts metadata, private/internal, website-policy-blocked, and secret-bearing browser subresource requests. It does not proxy content and does not read response bodies.
 
@@ -155,6 +159,8 @@ Hybrid routing uses the same URL classifier as browser and web tools:
 
 Known limits: there is no socket-level DNS rebinding or TOCTOU protection, runtime-expression guarding is not full JavaScript static analysis, and debug telemetry is not persistent session recording, video capture, or a dashboard.
 
+Security risk note: browser controls can mutate remote accounts even when the tool name is generic. Dynamic classification therefore raises uncertain controls instead of inferring safety from words such as “view” or “continue.” Approval metadata contains only a bounded redacted label and hostname, while approval scope binds to runtime-observed structural identity rather than page text. Existing workspace trust, URL policy, hardline command checks, protected-authentication authorization, cloud-spend approval, and raw CDP gating remain independent floors.
+
 ## Channel Security Model
 
 ### Global Policy
@@ -164,6 +170,8 @@ All channels share the **same runtime security policy**. There is no channel-spe
 Gateway approvals use a durable `pending_approvals` table in the session database. Rows are profile-scoped by `profile_id`; list and resolve operations are also scoped by profile and may be scoped by session. Pending approvals are ask-only: deterministic `deny` results and hardline results never become approvable queue rows. Command payloads are transient and are redacted after approval, denial, or expiry; list and history surfaces use command preview/hash rather than raw payload.
 
 Managed Python capability setup approvals use the same durable queue but a distinct `managed_python_capability_install` kind. They carry only a registered capability ID, selected groups, registered package summary, and bounded replay context. On approval, `ChannelGateway` calls the managed Python capability installer directly, invalidates the cached runtime for that session, and replays the original channel message. On denial or expiry, no installation happens.
+
+Gateway busy-message durability is a separate opt-in queue under `gateway.messageQueue.persistence: "sqlite"`. It stores validated but otherwise unredacted ordinary remote user text and routing/attachment metadata, so it expands the local data-retention and replay surface even though credentials and attachment bytes are excluded. Recovery revalidates channel authorization, workspace trust, session scope, adapter availability, and attachment roots. A crash-left claim becomes uncertain and is not replayed: authorization checks cannot prove whether an already-started external side effect occurred. Operators must treat `sessions.sqlite` and backups as sensitive and must not bypass uncertainty by editing the database.
 
 ### Channel Allowlists
 

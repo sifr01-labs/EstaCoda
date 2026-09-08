@@ -3,6 +3,7 @@
 // No ANSI, formatting, terminal-width, or rendering logic.
 
 import type { SessionCostSummary } from "./usage-cost.js";
+import type { TaskCompletionTraceSnapshot } from "./task-completion-trace.js";
 
 export type ViewModelSeverity = "ok" | "warn" | "error" | "info";
 
@@ -166,13 +167,25 @@ export interface PickerOption {
   readonly id: string;
   readonly label: string;
   readonly description?: string;
+  readonly cells?: Readonly<Record<string, string>>;
   readonly selected?: boolean;
+}
+
+export interface PickerColumn {
+  readonly key: string;
+  readonly header: string;
+  readonly alignment?: "left" | "right";
 }
 
 export interface PickerViewModel {
   readonly kind: "picker";
+  readonly surface?: "sessionPicker";
   readonly title: string;
   readonly options: readonly PickerOption[];
+  readonly columns?: readonly PickerColumn[];
+  readonly descriptionVisibility?: "always" | "selected";
+  readonly instruction?: string;
+  readonly direction?: "ltr" | "rtl";
 }
 
 // ─────────────────────────────────────────────────────────────
@@ -275,6 +288,7 @@ export interface AssistantResponseViewModel {
   readonly kind: "assistantResponse";
   readonly label: string;
   readonly text: string;
+  readonly taskTrace?: TaskCompletionTraceSnapshot;
   readonly usageFooter?: string;
   readonly matchedSkills?: readonly string[];
   readonly progress?: readonly string[];

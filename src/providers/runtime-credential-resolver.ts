@@ -21,6 +21,8 @@ export type RuntimeCredentialResolverOptions = {
   metadata?: ProviderMetadata;
   homeDir?: string;
   profileId?: string;
+  /** Verification and evaluation callers may inspect credentials without refreshing or writing auth state. */
+  readOnly?: boolean;
 };
 
 export type RuntimeCredentialDiagnostic = {
@@ -39,7 +41,13 @@ export async function resolveRuntimeCredential(
   // 0. OAuth credential resolution
   const oauthAuthMethod = options.route?.authMethod ?? options.providerConfig?.authMethod ?? options.metadata?.defaultAuthMethod;
   if (oauthAuthMethod !== undefined && isOAuthAuthMethod(oauthAuthMethod)) {
-    return await resolveOAuthCredential(options.providerId, oauthAuthMethod, options.homeDir, options.profileId);
+    return await resolveOAuthCredential(
+      options.providerId,
+      oauthAuthMethod,
+      options.homeDir,
+      options.profileId,
+      options.readOnly === true
+    );
   }
 
   // 1. route explicit credential reference
@@ -106,7 +114,8 @@ async function resolveOAuthCredential(
   providerId: string,
   authMethod: ProviderAuthMethod,
   homeDir?: string,
-  profileId?: string
+  profileId?: string,
+  readOnly = false
 ): Promise<RuntimeCredentialResolution> {
   const oauthResult = await loadOAuthStore({ homeDir, profileId });
   const record = oauthResult.store.providers[providerId];
@@ -122,6 +131,14 @@ async function resolveOAuthCredential(
 
   // Refresh if expired or expiring soon
   if (shouldRefreshToken(record)) {
+    if (readOnly) {
+      return {
+        diagnostic: {
+          ok: false,
+          message: `OAuth token for ${providerId} requires refresh; read-only verification will not modify auth state.`
+        }
+      };
+    }
     const refreshResult = await refreshOAuthToken({
       providerId,
       record,

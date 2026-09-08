@@ -310,6 +310,31 @@ Auxiliary routes are preference/routing constructs, not separate runtimes:
 
 Security smart approval uses `auxiliaryModels.assessor`. The route key is exactly `assessor`; there is no `auxiliaryModels.approval` route. The assessor route is resolved with `resolveAuxiliaryModelRoute("assessor", ...)` and consumed through `executeAuxiliaryTask(...)`. The assessor route is configurable through the Setup Editor (`edit-auxiliary-model-route`) in addition to direct config edits.
 
+### Vision routing and governance
+
+The main route receives initial images natively when it is runnable and advertises vision. A text-only main route uses `auxiliaryModels.vision`; post-tool images use the same dispatch policy and are delivered only as ephemeral continuation content. `vision.analyze`, initial attachments, `browser.vision`, and generated-image artifact analysis share this dispatch path, including normalization, spending lineage, cancellation, concurrency, and fallback metadata. Ordinary `describe` work stays native on a vision-capable main route, while an explicitly configured dedicated route handles specialized `ocr`, `document`, `chart`, `screenshot`, and multi-image `compare` modes. Comparison accepts two to twenty images. Sets above four are validated once and dispatched sequentially in batches of at most four; unknown custom adapters receive one image per batch unless they advertise `supportsMultipleImages`. Automatic routes do not force an extra auxiliary call. An explicitly disabled vision slot blocks all analysis, including analysis by a vision-capable main model. Auto, explicit, custom, main, and fallback candidates must all have registered executable adapters, runnable provider metadata, and vision capability. The tool fails with a structured unavailable error when no candidate qualifies.
+
+Auxiliary config uses `id`, not `model`:
+
+```json
+{
+  "auxiliaryModels": {
+    "vision": {
+      "provider": "openai",
+      "id": "gpt-4o",
+      "apiKeyEnv": "OPENAI_API_KEY",
+      "hostedProcessing": "allow-with-approval",
+      "timeoutMs": 120000,
+      "maxConcurrency": 2
+    }
+  }
+}
+```
+
+Hosted dispatch is data egress. Current-turn attachments, explicit references, browser screenshots, and generated artifacts avoid approval fatigue in adaptive mode, while agent-discovered workspace files ask before unexpected hosted egress; strict mode still asks and `local-only` rejects hosted routes. Provenance is runtime-derived and cannot be supplied in tool input. The selected profile image cache is an explicit vision root, and generated artifact references resolve only to image files canonically contained by that cache; traversal and symlink escapes remain blocked. Grants bind to every possible provider destination and the workspace. Cost is reserved before primary and fallback dispatch using normalized dimensions, then settled against actual usage with session and Task lineage. Unknown pricing fails closed when an active budget cannot safely price the call.
+
+`contextWindowTokens`, `timeoutMs`, and `maxConcurrency` must be positive integers when set. `fallbackToMain: true` is valid for vision only when the main route supports vision and satisfies the selected hosted-processing policy; incompatible fallback configuration resolves unavailable with a diagnostic instead of being silently disabled. The retired `extraBody` auxiliary field is ignored and removed during normalization.
+
 Config should not use legacy auxiliary names such as `models.auxiliary`, `auxiliary.default`, or `auxiliary.contextualize`. Profile-context CLI/documentation should use `--profile-context`, not `--contextualize`.
 
 Config Part 2 consumes the Providers Pass D auxiliary route contract. It does not add a second auxiliary resolver architecture.

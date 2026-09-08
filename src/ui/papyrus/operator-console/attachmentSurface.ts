@@ -1,5 +1,7 @@
 import type { ParsedKeypress } from "../../input/parseKeypress.js";
 import { redactSensitiveText } from "../../../utils/redaction.js";
+import { renderReadOnlyTextRows } from "../input/editableTextLayout.js";
+import type { BidiMode } from "../screen/bidi.js";
 import { stringWidth } from "../screen/stringWidth.js";
 import { setFocus } from "./focusModel.js";
 import type {
@@ -12,6 +14,7 @@ export type AttachmentSurfaceRenderOptions = {
   readonly height?: number;
   readonly maxCardRows?: number;
   readonly focusedAttachmentId?: string;
+  readonly bidi?: BidiMode;
 };
 
 export type AttachmentIntent =
@@ -101,7 +104,8 @@ export function renderAttachmentSurface(
       attachment,
       cardWidth,
       columns === 1,
-      attachment.id === options.focusedAttachmentId
+      attachment.id === options.focusedAttachmentId,
+      options.bidi ?? "native"
     ));
     for (let lineIndex = 0; lineIndex < CARD_HEIGHT; lineIndex += 1) {
       rows.push(truncateVisibleCells(renderedCards.map((card) => card[lineIndex] ?? "").join(" ".repeat(CARD_GAP)), width));
@@ -284,16 +288,23 @@ function renderAttachmentCard(
   attachment: AttachmentCardState,
   width: number,
   includeControls: boolean,
-  focused: boolean
+  focused: boolean,
+  bidiMode: BidiMode
 ): readonly string[] {
   const contentWidth = Math.max(0, width - 4);
   const metadata = includeControls
     ? `${formatAttachmentMetadata(attachment)} · Enter open · Esc remove`
     : formatAttachmentMetadata(attachment);
   const title = focused ? `› ${attachment.title}` : attachment.title;
+  const preview = renderReadOnlyTextRows(attachment.preview, {
+    maxCells: Math.max(1, contentWidth),
+    wrap: true,
+    alignRtl: false,
+    bidi: bidiMode,
+  })[0] ?? "";
   return [
     renderTopBorder(title, width),
-    renderContentRow(attachment.preview, contentWidth, width),
+    renderContentRow(preview, contentWidth, width),
     renderContentRow(metadata, contentWidth, width),
     renderBottomBorder(width),
   ];

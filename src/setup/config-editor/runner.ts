@@ -1,8 +1,8 @@
 import { resolveStateHome } from "../../config/state-home.js";
 import { hasSavedEnvSecret } from "../../config/env-secret-store.js";
 import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "../../config/profile-home.js";
-import { loadRuntimeConfig } from "../../config/runtime-config.js";
-import type { AuxiliaryModelSlotInput, ProviderId } from "../../contracts/provider.js";
+import { loadRuntimeConfig, type EstaCodaConfig } from "../../config/runtime-config.js";
+import type { AuxiliaryModelSlotConfig, AuxiliaryModelSlotInput, ProviderId } from "../../contracts/provider.js";
 import type { SecurityApprovalMode } from "../../contracts/security.js";
 import type { PromptCardStatusLine } from "../../contracts/view-model.js";
 import type { Prompt } from "../../cli/prompt-contract.js";
@@ -22,6 +22,7 @@ import {
   type ProviderModelRoutePromptMode,
 } from "../provider-model-route-prompt.js";
 import { getProviderMetadata } from "../../providers/provider-metadata.js";
+import { isLocalProviderEndpoint } from "../../providers/provider-route-location.js";
 import type { SkillAutonomy } from "../../skills/skill-learning.js";
 import type {
   SetupApplyEndState,
@@ -55,6 +56,12 @@ import {
   collectOpenAICompatibleEndpointFlow,
   type OpenAICompatibleEndpointFlowResult,
 } from "../openai-compatible-endpoint-flow.js";
+import { loadVisionAnalysisVerificationImageDataUrl } from "../vision-analysis-verification.js";
+import {
+  renderVisionRouteVerification,
+  runVisionRouteVerification,
+  type VisionRouteVerificationReport,
+} from "../vision-route-verification.js";
 import {
   formatSetupCopy,
   promptSetupChoice,
@@ -79,10 +86,18 @@ import {
   promptOptionalCapabilityAction,
   promptSecurityMode,
   promptSpendingLimit,
+  promptVisionAndImagesCapability,
+  promptVisionAnalysisAdvancedChoice,
+  promptVisionAnalysisRouteMode,
+  promptVisionAnalysisRouteSettings,
+  promptVisionVerificationAfterApply,
+  promptHostedVisionVerificationConsent,
   promptVoiceCapability,
   promptWorkflowLearning,
   promptWorkspaceTrustConfirmation,
+  visionAnalysisRouteMode,
   type ConfigEditorPostApplyActionId,
+  type SetupEditorAuxiliaryTask,
 } from "./prompts.js";
 import {
   preserveSetupConsoleOnPromptClose,
@@ -141,6 +156,7 @@ export type ConfigEditorRunnerOptions = CollectSetupRouteOptions & {
     readonly serviceActions?: GatewayServiceActivationOptions["serviceActions"];
   };
   readonly whatsappSetupDependencies?: WhatsAppSetupDependencies;
+  readonly visionRouteVerification?: typeof runVisionRouteVerification;
 };
 
 export type ConfigEditorRunnerResult = {
@@ -158,6 +174,7 @@ export type ConfigEditorRunnerResult = {
   readonly applyEndState?: SetupApplyEndState;
   readonly gatewayServiceActivationResult?: GatewayServiceActivationResult;
   readonly setupConsoleRenderedOutput?: boolean;
+  readonly visionRouteVerificationReport?: VisionRouteVerificationReport;
 };
 
 type LocalizedConfigEditorRunnerOptions = ConfigEditorRunnerOptions & {
@@ -170,6 +187,7 @@ type PendingOAuthWrite = SetupDeferredOAuthWrite;
 type RunOnceResult = ConfigEditorRunnerResult & {
   readonly repairAgainDecision?: SetupRouteDecision;
   readonly menuBackRequested?: boolean;
+  readonly visionParentBackRequested?: boolean;
 };
 
 type ConfigEditorLoopState = {
@@ -576,10 +594,11 @@ async function handleAction(
       return handleCredentialAction(options, initialDecision, session, action);
     case "configure-channels":
     case "configure-voice":
-    case "configure-image-generation":
     case "configure-web-search":
     case "configure-browser":
       return handleOptionalCapabilityAction(options, initialDecision, session, action);
+    case "configure-image-generation":
+      return handleVisionAndImagesAction(options, initialDecision, session, action);
     default: {
       const output = formatSetupCopy(options.locale, "setupEditor.result.unimplementedAction", {
         actionId: action.id,
@@ -898,6 +917,51 @@ async function handleLanguageAction(
       activityLabels: preferences.activityLabels,
     },
   });
+}
+
+async function handleVisionAndImagesAction(
+  options: LocalizedConfigEditorRunnerOptions,
+  initialDecision: SetupRouteDecision,
+  session: NonNullable<SetupRouteDecision["setupEditorPlanSession"]>,
+  action: ConfigEditorRenderedAction
+): Promise<ConfigEditorRunnerResult> {
+  while (true) {
+    const selection = await promptVisionAndImagesCapability(options.prompt, options.locale);
+    if (selection.kind === "back") return menuBackResult(initialDecision, action.id);
+    if (selection.value === "image-generation") {
+      return handleOptionalCapabilityAction(options, initialDecision, session, action);
+    }
+
+    const source = requireEditorAction(action);
+    const visionAction: ConfigEditorRenderedAction = {
+      id: "edit-auxiliary-model-route",
+      label: setupCopyText(options.locale, "setupEditor.prompt.visionAndImages.analysis"),
+      description: setupCopyText(options.locale, "setupEditor.prompt.visionAndImages.analysis.description"),
+      readOnly: false,
+      source: "synthetic",
+      editorAction: {
+        ...source,
+        id: "edit-auxiliary-model-route",
+        copyKey: "setupEditor.actions.editAuxiliaryModelRoute",
+        sectionId: "model-route",
+        patch: {
+          kind: "scoped-config-patch-intent",
+          fields: ["auxiliaryModels.*"],
+          preserveUnrelatedConfig: true,
+        },
+      },
+    };
+    const result = await handleSelectedAuxiliaryRouteAction(
+      options,
+      initialDecision,
+      session,
+      visionAction,
+      "vision",
+      true
+    );
+    if (result.visionParentBackRequested === true) continue;
+    return result;
+  }
 }
 
 async function handleOptionalCapabilityAction(
@@ -1401,6 +1465,9 @@ async function collectAndApplyOpenAICompatibleEndpointFlow(
     };
   }
 ): Promise<RunOnceResult> {
+  const visionVerificationImageDataUrl = editorAction.reviewValues?.auxiliaryTask === "vision"
+    ? await loadVisionAnalysisVerificationImageDataUrl()
+    : undefined;
   const flowResult = await collectOpenAICompatibleEndpointFlow({
     providerId: input.providerId,
     defaultBaseUrl: input.defaultBaseUrl,
@@ -1410,6 +1477,7 @@ async function collectAndApplyOpenAICompatibleEndpointFlow(
     ui: createOpenAICompatibleEndpointFlowUi(options.prompt, options.locale),
     fetch: openAICompatibleSetupFetch(options),
     initialEnv: process.env,
+    ...(visionVerificationImageDataUrl === undefined ? {} : { visionVerificationImageDataUrl }),
   });
 
   if (flowResult.kind !== "ready") {
@@ -1469,6 +1537,7 @@ async function reviewAndApplyOpenAICompatibleEndpointResult(
     deferredSecretWrites: flowResult.pendingCredentialWrite === undefined
       ? undefined
       : [flowResult.pendingCredentialWrite],
+    offerVisionVerification: shouldOfferVisionVerification(routeAction),
   });
 }
 
@@ -1551,45 +1620,172 @@ async function handleAuxiliaryRouteAction(
   session: NonNullable<SetupRouteDecision["setupEditorPlanSession"]>,
   action: ConfigEditorRenderedAction
 ): Promise<RunOnceResult> {
-  const editorAction = requireEditorAction(action);
+  requireEditorAction(action);
   const auxiliaryTaskResult = await promptAuxiliaryModelTask(options.prompt, options.locale, { allowBack: true });
   if (auxiliaryTaskResult.kind === "back") {
     return menuBackResult(initialDecision, action.id);
   }
-  const auxiliaryTask = auxiliaryTaskResult.value;
+  return handleSelectedAuxiliaryRouteAction(
+    options,
+    initialDecision,
+    session,
+    action,
+    auxiliaryTaskResult.value
+  );
+}
+
+async function handleSelectedAuxiliaryRouteAction(
+  options: LocalizedConfigEditorRunnerOptions,
+  initialDecision: SetupRouteDecision,
+  session: NonNullable<SetupRouteDecision["setupEditorPlanSession"]>,
+  action: ConfigEditorRenderedAction,
+  auxiliaryTask: SetupEditorAuxiliaryTask | "vision",
+  returnToVisionParent = false
+): Promise<RunOnceResult> {
+  const editorAction = requireEditorAction(action);
   const loaded = await loadRuntimeConfig(options);
-  const currentAuxiliaryRoute = auxiliaryRouteFromSlot(loaded.config.auxiliaryModels?.[auxiliaryTask]);
-  const resolved = await selectResolvedProviderRoute(options, "auxiliary", {
-    currentProviderId: currentAuxiliaryRoute?.provider,
-    currentModelId: currentAuxiliaryRoute?.id,
-  });
-  if (resolved.kind !== "selected") {
-    return handleProviderRoutePromptExit(options, initialDecision, action.id, resolved);
-  }
-
-  const selectedAction: SetupEditorActionDraft = {
-    ...editorAction,
-    reviewValues: {
-      ...editorAction.reviewValues,
-      auxiliaryTask,
-    },
-  };
-  if (resolved.selection.credentialAction.kind === "endpoint") {
-    return collectAndApplyOpenAICompatibleEndpointFlow(options, initialDecision, session, selectedAction, {
-      providerId: resolved.selection.provider,
-      defaultBaseUrl: resolved.selection.credentialAction.baseUrl ?? resolved.selection.baseUrl ?? "http://localhost:11434/v1",
-      defaultApiKeyEnv: resolved.selection.credentialAction.apiKeyEnv,
-      currentRoute: currentAuxiliaryRoute === undefined
-        ? undefined
-        : {
-            providerId: currentAuxiliaryRoute.provider,
-            modelId: currentAuxiliaryRoute.id,
-            baseUrl: currentAuxiliaryRoute.baseUrl,
+  const currentSlot = auxiliarySlotConfig(loaded.config.auxiliaryModels?.[auxiliaryTask]);
+  const currentAuxiliaryRoute = auxiliaryRouteFromSlot(currentSlot);
+  while (true) {
+    let visionReviewValues: Readonly<Record<string, unknown>> = {};
+    if (auxiliaryTask === "vision") {
+      const routeChoice = await promptVisionAnalysisRouteMode(options.prompt, currentSlot, options.locale);
+      if (routeChoice.kind === "back") {
+        return returnToVisionParent
+          ? visionParentBackResult(initialDecision, action.id)
+          : menuBackResult(initialDecision, action.id);
+      }
+      let routeMode = routeChoice.value === "advanced" ? visionAnalysisRouteMode(currentSlot) : routeChoice.value;
+      let settings = {
+        hostedProcessing: currentSlot?.hostedProcessing ?? "allow-with-approval" as const,
+        timeoutMs: currentSlot?.timeoutMs ?? 60_000,
+        maxConcurrency: currentSlot?.maxConcurrency ?? 1,
+      };
+      let advancedSettingsOnly = false;
+      if (routeChoice.value === "advanced") {
+        let returnToRoute = false;
+        while (true) {
+          const advanced = await promptVisionAnalysisAdvancedChoice(options.prompt, currentSlot, options.locale);
+          if (advanced.kind === "back") {
+            returnToRoute = true;
+            break;
+          }
+          if (advanced.value === "settings") {
+            const advancedSettings = await promptVisionAnalysisRouteSettings(
+              options.prompt,
+              currentSlot,
+              options.locale,
+              { localProcessingAvailable: hasConfiguredLocalModel(loaded.config) }
+            );
+            if (advancedSettings.kind === "back") continue;
+            advancedSettingsOnly = true;
+            settings = advancedSettings.value;
+          } else {
+            routeMode = advanced.value;
+          }
+          break;
+        }
+        if (returnToRoute) continue;
+      }
+      visionReviewValues = {
+        routeMode,
+        advancedSettings: routeChoice.value === "advanced",
+        hostedProcessing: settings.hostedProcessing,
+        timeoutMs: settings.timeoutMs,
+        maxConcurrency: settings.maxConcurrency,
+      };
+      const routeNeedsProvider = routeMode === "dedicated" || routeMode === "fallback";
+      const canReuseCurrentProvider = currentAuxiliaryRoute !== undefined &&
+        (advancedSettingsOnly || routeMode === "fallback");
+      if (routeChoice.value === "advanced" && (!routeNeedsProvider || canReuseCurrentProvider)) {
+        const currentRouteValues = (routeMode === "dedicated" || routeMode === "fallback") && currentAuxiliaryRoute !== undefined
+          ? {
+              provider: currentAuxiliaryRoute.provider,
+              model: currentAuxiliaryRoute.id,
+              ...(currentAuxiliaryRoute.baseUrl === undefined ? {} : { baseUrl: currentAuxiliaryRoute.baseUrl }),
+              ...(currentSlot?.apiKeyEnv === undefined ? {} : { apiKeyEnv: currentSlot.apiKeyEnv }),
+              ...(currentSlot?.contextWindowTokens === undefined ? {} : { contextWindowTokens: currentSlot.contextWindowTokens }),
+            }
+          : {};
+        return reviewAndApplyAction(options, initialDecision, session, {
+          ...editorAction,
+          reviewValues: {
+            ...editorAction.reviewValues,
+            auxiliaryTask,
+            ...visionReviewValues,
+            ...currentRouteValues,
           },
+        });
+      }
+      if (routeMode === "automatic" || routeMode === "main" || routeMode === "disabled") {
+        return reviewAndApplyAction(options, initialDecision, session, {
+          ...editorAction,
+          reviewValues: {
+            ...editorAction.reviewValues,
+            auxiliaryTask,
+            ...visionReviewValues,
+          },
+        });
+      }
+    }
+    const resolved = await selectResolvedProviderRoute(options, "auxiliary", {
+      currentProviderId: currentAuxiliaryRoute?.provider,
+      currentModelId: currentAuxiliaryRoute?.id,
     });
-  }
+    if (resolved.kind === "back" && auxiliaryTask === "vision") continue;
+    if (resolved.kind !== "selected") {
+      return handleProviderRoutePromptExit(options, initialDecision, action.id, resolved);
+    }
 
-  return reviewAndApplyResolvedRoute(options, initialDecision, session, selectedAction, resolved.selection);
+    const selectedAction: SetupEditorActionDraft = {
+      ...editorAction,
+      reviewValues: {
+        ...editorAction.reviewValues,
+        auxiliaryTask,
+        ...visionReviewValues,
+      },
+    };
+    if (resolved.selection.credentialAction.kind === "endpoint") {
+      const result = await collectAndApplyOpenAICompatibleEndpointFlow(options, initialDecision, session, selectedAction, {
+        providerId: resolved.selection.provider,
+        defaultBaseUrl: resolved.selection.credentialAction.baseUrl ?? resolved.selection.baseUrl ?? "http://localhost:11434/v1",
+        defaultApiKeyEnv: resolved.selection.credentialAction.apiKeyEnv,
+        currentRoute: currentAuxiliaryRoute === undefined
+          ? undefined
+          : {
+              providerId: currentAuxiliaryRoute.provider,
+              modelId: currentAuxiliaryRoute.id,
+              baseUrl: currentAuxiliaryRoute.baseUrl,
+            },
+      });
+      if (result.menuBackRequested === true && auxiliaryTask === "vision") continue;
+      return result;
+    }
+
+    return reviewAndApplyResolvedRoute(options, initialDecision, session, selectedAction, resolved.selection);
+  }
+}
+
+function hasConfiguredLocalModel(config: EstaCodaConfig): boolean {
+  const providerBaseUrl = (provider: ProviderId | undefined): string | undefined =>
+    provider === undefined ? undefined : config.providers?.[provider]?.baseUrl;
+  const routes: Array<{ readonly provider: ProviderId; readonly baseUrl?: string }> = [];
+  if (config.model?.provider !== undefined) {
+    routes.push({ provider: config.model.provider, baseUrl: providerBaseUrl(config.model.provider) });
+  }
+  for (const fallback of config.model?.fallbacks ?? []) {
+    routes.push({ provider: fallback.provider, baseUrl: fallback.baseUrl ?? providerBaseUrl(fallback.provider) });
+  }
+  const visionRoute = auxiliaryRouteFromSlot(config.auxiliaryModels?.vision);
+  if (visionRoute !== undefined) {
+    routes.push({ provider: visionRoute.provider, baseUrl: visionRoute.baseUrl ?? providerBaseUrl(visionRoute.provider) });
+  }
+  for (const [provider, providerConfig] of Object.entries(config.providers ?? {})) {
+    if ((providerConfig.models?.length ?? 0) > 0) {
+      routes.push({ provider, baseUrl: providerConfig.baseUrl });
+    }
+  }
+  return routes.some(isLocalProviderEndpoint);
 }
 
 function auxiliaryRouteFromSlot(
@@ -1615,6 +1811,17 @@ function auxiliaryRouteFromSlot(
     provider: slot.provider,
     id: slot.id,
     baseUrl: slot.baseUrl,
+  };
+}
+
+function auxiliarySlotConfig(slot: AuxiliaryModelSlotInput | undefined): AuxiliaryModelSlotConfig | undefined {
+  if (slot === undefined) return undefined;
+  if (typeof slot !== "string") return slot;
+  const separator = slot.indexOf("/");
+  if (separator <= 0 || separator === slot.length - 1) return undefined;
+  return {
+    provider: slot.slice(0, separator),
+    id: slot.slice(separator + 1),
   };
 }
 
@@ -1656,7 +1863,14 @@ async function reviewAndApplyAction(
     trustStorePath: overrides.trustStorePath ?? options.trustStorePath ?? stateHome.trustJsonPath,
   });
   const reviewManifest = buildSetupReviewManifest([draftBundle]);
-  return reviewAndApplyManifest(options, initialDecision, editorAction.id, reviewManifest);
+  return reviewAndApplyManifest(
+    options,
+    initialDecision,
+    editorAction.id,
+    reviewManifest,
+    {},
+    shouldOfferVisionVerification(editorAction)
+  );
 }
 
 function verificationDraftBundle(
@@ -1697,7 +1911,8 @@ async function reviewAndApplyManifest(
   sideEffects: {
     readonly pendingCredentialWrites?: readonly PendingCredentialWrite[];
     readonly pendingOAuthWrites?: readonly PendingOAuthWrite[];
-  } = {}
+  } = {},
+  offerVisionVerification = false
 ): Promise<ConfigEditorRunnerResult> {
   const reviewAccepted = await promptConfigEditorReviewApproval(options.prompt, {
     selectedActionId,
@@ -1714,6 +1929,7 @@ async function reviewAndApplyManifest(
     applyPlanningResult,
     deferredSecretWrites: sideEffects.pendingCredentialWrites,
     deferredOAuthWrites: sideEffects.pendingOAuthWrites,
+    offerVisionVerification,
   });
 }
 
@@ -1725,6 +1941,7 @@ async function finalizeReviewedApply(input: {
   readonly applyPlanningResult: SetupApplyPlanningResult;
   readonly deferredSecretWrites?: readonly SetupDeferredSecretWrite[];
   readonly deferredOAuthWrites?: readonly SetupDeferredOAuthWrite[];
+  readonly offerVisionVerification?: boolean;
 }): Promise<RunOnceResult> {
   const { options, initialDecision, selectedActionId, reviewManifest, applyPlanningResult } = input;
   const previouslyReadyGatewayChannelIds = applyPlanningResult.kind === "apply-plan-ready" && options.applyExecutor !== undefined
@@ -1766,6 +1983,15 @@ async function finalizeReviewedApply(input: {
     };
   }
 
+  const visionRouteVerificationReport = input.offerVisionVerification === true &&
+    applyEndState.kind !== "cancelled" && applyEndState.kind !== "blocked"
+    ? await maybeRunVisionVerificationAfterApply(options)
+    : undefined;
+  const visionVerificationOutput = visionRouteVerificationReport === undefined
+    ? undefined
+    : renderVisionRouteVerification(visionRouteVerificationReport);
+  if (visionVerificationOutput !== undefined) write(options, `${visionVerificationOutput}\n`);
+
   const postApply = await handlePostApplyHandoff({
     options,
     initialDecision,
@@ -1773,7 +1999,10 @@ async function finalizeReviewedApply(input: {
     reviewManifest,
     applyPlanningResult,
     applyEndState,
-    renderedApplyOutput: output,
+    renderedApplyOutput: [output, visionVerificationOutput]
+      .filter((line): line is string => line !== undefined)
+      .join("\n"),
+    visionRouteVerificationReport,
     previouslyReadyGatewayChannelIds,
   });
   return postApply;
@@ -1787,6 +2016,7 @@ async function handlePostApplyHandoff(input: {
   readonly applyPlanningResult: SetupApplyPlanningResult;
   readonly applyEndState: SetupApplyEndState;
   readonly renderedApplyOutput: string;
+  readonly visionRouteVerificationReport?: VisionRouteVerificationReport;
   readonly previouslyReadyGatewayChannelIds?: readonly GatewayActivationChannelId[];
 }): Promise<RunOnceResult> {
   const {
@@ -1798,6 +2028,7 @@ async function handlePostApplyHandoff(input: {
     applyEndState,
     renderedApplyOutput,
     previouslyReadyGatewayChannelIds,
+    visionRouteVerificationReport,
   } = input;
   const completedWithoutPrompt = applyEndState.kind === "cancelled";
   if (completedWithoutPrompt) {
@@ -1856,7 +2087,26 @@ async function handlePostApplyHandoff(input: {
     applyPlanningResult,
     applyEndState,
     gatewayServiceActivationResult,
+    visionRouteVerificationReport,
   };
+}
+
+async function maybeRunVisionVerificationAfterApply(
+  options: LocalizedConfigEditorRunnerOptions
+): Promise<VisionRouteVerificationReport | undefined> {
+  if (!await promptVisionVerificationAfterApply(options.prompt, options.locale)) return undefined;
+  const config = await loadRuntimeConfig(options);
+  const runVerification = options.visionRouteVerification ?? runVisionRouteVerification;
+  let report = await runVerification({ config, consentHosted: false });
+  if (report.status !== "consent-required") return report;
+  const consentHosted = await promptHostedVisionVerificationConsent(options.prompt, options.locale);
+  if (!consentHosted) return report;
+  report = await runVerification({ config, consentHosted: true });
+  return report;
+}
+
+function shouldOfferVisionVerification(action: SetupEditorActionDraft): boolean {
+  return action.reviewValues?.auxiliaryTask === "vision" && action.reviewValues?.routeMode !== "disabled";
 }
 
 function renderConcreteVerificationWarnings(
@@ -2036,6 +2286,7 @@ async function reviewAndApplyResolvedRoute(
     deferredOAuthWrites: credentialResult.pendingOAuthWrite === undefined
       ? undefined
       : [credentialResult.pendingOAuthWrite],
+    offerVisionVerification: shouldOfferVisionVerification(selectedAction),
   });
 }
 
@@ -2541,6 +2792,20 @@ function menuBackResult(
     initialDecision,
     selectedActionId,
     menuBackRequested: true,
+  };
+}
+
+function visionParentBackResult(
+  initialDecision: SetupRouteDecision,
+  selectedActionId: string
+): RunOnceResult {
+  return {
+    completed: false,
+    exitCode: 0,
+    output: "",
+    initialDecision,
+    selectedActionId,
+    visionParentBackRequested: true,
   };
 }
 

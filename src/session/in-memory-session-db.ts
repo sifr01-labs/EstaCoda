@@ -8,7 +8,9 @@ import type {
   SessionModelOverride,
   SessionRecord,
   SessionSearchOptions,
-  SessionSearchResult
+  SessionSearchResult,
+  SessionSummaryOptions,
+  SessionSummaryRecord
 } from "../contracts/session.js";
 import type { FailureRecord } from "../contracts/failure.js";
 import type { ProviderUsageEntry, ProviderUsageQuery } from "../contracts/provider-usage.js";
@@ -16,6 +18,13 @@ import { cloneSpendingLimit } from "../contracts/budget.js";
 import { verifiedCompressionLineage } from "./session-lineage.js";
 import { tokenizeSearchTerms } from "../search/fts-query.js";
 import { providerUsageMatches } from "../providers/provider-usage-ledger.js";
+import {
+  deriveSessionDescription,
+  isPlaceholderSessionTitle,
+  isUserFacingRootSession,
+  resolveSessionWorkspaceRoot,
+  withImmutableSessionOrigin,
+} from "./session-presentation.js";
 
 const SESSION_MODEL_OVERRIDE_METADATA_KEY = "sessionModelOverride";
 
@@ -67,7 +76,7 @@ export class InMemorySessionDB implements SessionDB {
       ...(spendingLimit === undefined ? {} : { spendingLimit }),
       endedAt: input.endedAt,
       endReason: input.endReason,
-      metadata: input.metadata
+      metadata: cloneMetadata(withImmutableSessionOrigin(input.metadata, undefined))
     };
 
     this.#sessions.set(id, session);
@@ -82,11 +91,64 @@ export class InMemorySessionDB implements SessionDB {
     return session === undefined ? undefined : cloneSession(session);
   }
 
+  async getSessionForProfile(id: string, profileId: string): Promise<SessionRecord | undefined> {
+    const session = this.#sessions.get(id);
+    return session === undefined || session.profileId !== profileId ? undefined : cloneSession(session);
+  }
+
+  async hasUserMessageForProfile(sessionId: string, profileId: string): Promise<boolean> {
+    if ((await this.getSessionForProfile(sessionId, profileId)) === undefined) {
+      return false;
+    }
+    return (this.#messages.get(sessionId) ?? []).some((message) => message.role === "user");
+  }
+
+  async setSessionTitleIfPlaceholder(sessionId: string, title: string): Promise<boolean> {
+    const session = this.#sessions.get(sessionId);
+    if (session === undefined) {
+      throw new Error(`Session not found: ${sessionId}`);
+    }
+    if (!isPlaceholderSessionTitle(session.title)) {
+      return false;
+    }
+    session.title = title;
+    return true;
+  }
+
   async listSessions(profileId?: string): Promise<SessionRecord[]> {
     return [...this.#sessions.values()]
       .filter((session) => profileId === undefined || session.profileId === profileId)
       .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
       .map(cloneSession);
+  }
+
+  async listSessionSummaries(
+    profileId: string,
+    options: SessionSummaryOptions = {}
+  ): Promise<SessionSummaryRecord[]> {
+    const limit = normalizeSummaryLimit(options.limit);
+    const summaries = [...this.#sessions.values()]
+      .filter((session) => session.profileId === profileId)
+      .filter((session) => options.workspaceRoot === undefined || resolveSessionWorkspaceRoot(session) === options.workspaceRoot)
+      .filter((session) => options.rootSessionsOnly !== true || session.parentSessionId === undefined)
+      .filter((session) => options.activeSessionsOnly !== true || session.endedAt === undefined)
+      .filter((session) => options.userFacingOnly !== true || isUserFacingRootSession(session))
+      .map((session): SessionSummaryRecord => {
+        const messages = this.#messages.get(session.id) ?? [];
+        const userMessages = messages.filter((message) => message.role === "user");
+        return {
+          session: cloneSession(session),
+          messageCount: messages.length,
+          userMessageCount: userMessages.length,
+          firstUserMessage: userMessages[0] === undefined ? undefined : cloneMessage(userMessages[0]),
+        };
+      })
+      .filter((summary) => options.userActivityOnly !== true || summary.userMessageCount > 0)
+      .sort((left, right) =>
+        right.session.updatedAt.localeCompare(left.session.updatedAt) ||
+        left.session.id.localeCompare(right.session.id)
+      );
+    return summaries.slice(0, limit);
   }
 
   async appendMessage(input: AppendMessageInput): Promise<SessionMessage> {
@@ -107,6 +169,13 @@ export class InMemorySessionDB implements SessionDB {
     };
 
     this.#messages.get(input.sessionId)?.push(message);
+    if (message.role === "user") {
+      await this.setSessionTitleIfPlaceholder(
+        input.sessionId,
+        deriveSessionDescription(session.title, message.content)
+      );
+      session.metadata = cloneMetadata(withImmutableSessionOrigin(session.metadata, message.channel));
+    }
     this.#touch(input.sessionId);
 
     return cloneMessage(message);
@@ -313,8 +382,19 @@ function cloneSession(session: SessionRecord): SessionRecord {
   return {
     ...session,
     ...(session.spendingLimit === undefined ? {} : { spendingLimit: cloneSpendingLimit(session.spendingLimit) }),
-    metadata: session.metadata === undefined ? undefined : structuredClone(session.metadata)
+    metadata: cloneMetadata(session.metadata)
   };
+}
+
+function cloneMetadata(metadata: Record<string, unknown> | undefined): Record<string, unknown> | undefined {
+  return metadata === undefined ? undefined : structuredClone(metadata);
+}
+
+function normalizeSummaryLimit(value: number | undefined): number {
+  if (value === undefined || !Number.isFinite(value)) {
+    return 20;
+  }
+  return Math.min(100, Math.max(1, Math.floor(value)));
 }
 
 function cloneMessage(message: SessionMessage): SessionMessage {

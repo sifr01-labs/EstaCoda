@@ -1,3 +1,5 @@
+import type { BrowserActionPreflight, BrowserActionPreflightKind } from "../contracts/browser.js";
+
 const MAX_SECURITY_SUMMARY_CHARS = 120;
 const MAX_DISPLAY_PREVIEW_CHARS = 96;
 const REDACTED_DISPLAY_VALUE = "[redacted]";
@@ -80,6 +82,45 @@ export function redactToolDisplayPreview(value: unknown): string | undefined {
     return undefined;
   }
   return truncateDisplayPreview(redactSecretsInString(summary));
+}
+
+export function buildBrowserActionSecuritySummary(input: {
+  action: BrowserActionPreflightKind;
+  key?: string;
+  preflight?: BrowserActionPreflight;
+}): string {
+  const host = browserActionHost(input.preflight?.url);
+  const target = input.preflight?.target;
+  const label = target?.label === undefined
+    ? undefined
+    : truncateDisplayPreview(redactSecretsInString(target.label));
+
+  if (input.action === "press") {
+    return truncateSecuritySummary(`Press ${redactSecretsInString(input.key ?? "key")}${label === undefined ? "" : ` on “${label}”`} on ${host}`);
+  }
+  if (input.action === "dialog") {
+    const actionLabel = input.key === "dismiss" ? "Dismiss" : "Accept";
+    return truncateSecuritySummary(`${actionLabel} browser dialog${label === undefined ? "" : ` “${label}”`} on ${host}`);
+  }
+
+  const kind = target?.kind === "button" ? "button"
+    : target?.kind === "link" ? "link"
+      : target?.kind === "form-control" ? "form control"
+        : target?.kind === "scripted-control" ? "scripted control"
+          : "element";
+  return truncateSecuritySummary(`Click ${kind}${label === undefined ? "" : ` “${label}”`} on ${host}`);
+}
+
+function browserActionHost(value: string | undefined): string {
+  if (value === undefined) return "current page";
+  try {
+    const parsed = new URL(value);
+    return parsed.protocol === "http:" || parsed.protocol === "https:"
+      ? parsed.hostname
+      : "current page";
+  } catch {
+    return "current page";
+  }
 }
 
 function displayPreviewWithLineRange(path: unknown, lineStart: unknown, lineEnd: unknown): string | undefined {

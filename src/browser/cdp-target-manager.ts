@@ -27,6 +27,20 @@ export interface ManagedCdpTarget {
   close: () => Promise<void>;
 }
 
+export interface CdpPageTarget {
+  browserContextId: string;
+  targetId: string;
+  pageWebSocketDebuggerUrl: string;
+  url: string;
+  title?: string;
+  openerId?: string;
+}
+
+export interface AttachedCdpTarget extends CdpPageTarget {
+  supervisor: CdpTargetSupervisor;
+  close: () => Promise<void>;
+}
+
 type VersionPayload = {
   webSocketDebuggerUrl?: unknown;
 };
@@ -34,6 +48,15 @@ type VersionPayload = {
 type ListEntry = {
   id?: unknown;
   webSocketDebuggerUrl?: unknown;
+};
+
+type TargetInfo = {
+  targetId?: unknown;
+  type?: unknown;
+  title?: unknown;
+  url?: unknown;
+  browserContextId?: unknown;
+  openerId?: unknown;
 };
 
 export class CdpTargetManager {
@@ -86,7 +109,7 @@ export class CdpTargetManager {
       );
 
       const pageWebSocketDebuggerUrl = await this.#findPageWebSocketDebuggerUrl(targetId);
-      supervisor = await this.#createPageSupervisor(pageWebSocketDebuggerUrl);
+      supervisor = await this.#createPageSupervisor(pageWebSocketDebuggerUrl, browserContextId);
       const handle = new ManagedTargetHandle({
         browserContextId,
         targetId,
@@ -114,6 +137,146 @@ export class CdpTargetManager {
       }).catch(() => undefined);
       throw error;
     }
+  }
+
+  async createPageTarget(browserContextId: string, url: string): Promise<CdpPageTarget> {
+    if (this.#closed) throw new Error("CDP target manager is closed.");
+    const contextId = requireNonEmptyString(browserContextId, "browserContextId");
+    const destination = requireNonEmptyString(url, "url");
+    const client = await this.#getBrowserClient();
+    const targetId = await sendRequiredStringResult(
+      client,
+      "Target.createTarget",
+      { url: destination, browserContextId: contextId },
+      "targetId",
+      "Target.createTarget"
+    );
+    try {
+      const pageWebSocketDebuggerUrl = await this.#findPageWebSocketDebuggerUrl(targetId);
+      const info = (await this.#fetchTargetInfos()).find((candidate) => candidate.targetId === targetId);
+      if (info?.browserContextId !== contextId || info.type !== "page") {
+        throw new Error(`Created CDP target ${targetId} was not a page in browser context ${contextId}.`);
+      }
+      return {
+        browserContextId: contextId,
+        targetId,
+        pageWebSocketDebuggerUrl,
+        url: typeof info.url === "string" ? info.url : destination,
+        ...(typeof info.title === "string" && info.title.trim() !== "" ? { title: info.title } : {}),
+        ...(typeof info.openerId === "string" && info.openerId.trim() !== "" ? { openerId: info.openerId } : {})
+      };
+    } catch (error) {
+      await client.send("Target.closeTarget", { targetId }).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  async closePageTarget(browserContextId: string, targetId: string): Promise<void> {
+    const contextId = requireNonEmptyString(browserContextId, "browserContextId");
+    const requestedTargetId = requireNonEmptyString(targetId, "targetId");
+    const target = (await this.listPageTargets(contextId)).find((entry) => entry.targetId === requestedTargetId);
+    if (target === undefined) {
+      throw new Error(`CDP page target ${requestedTargetId} is not available in browser context ${contextId}.`);
+    }
+    await (await this.#getBrowserClient()).send("Target.closeTarget", { targetId: requestedTargetId });
+  }
+
+  async listPageTargets(browserContextId: string): Promise<CdpPageTarget[]> {
+    if (this.#closed) {
+      throw new Error("CDP target manager is closed.");
+    }
+    const contextId = requireNonEmptyString(browserContextId, "browserContextId");
+    const [targetInfos, entries] = await Promise.all([
+      this.#fetchTargetInfos(),
+      this.#fetchTargetList()
+    ]);
+    const webSocketUrls = new Map(entries.flatMap((entry) => (
+      typeof entry.id === "string" &&
+      typeof entry.webSocketDebuggerUrl === "string" &&
+      entry.webSocketDebuggerUrl.trim() !== ""
+        ? [[entry.id, entry.webSocketDebuggerUrl] as const]
+        : []
+    )));
+    return targetInfos.flatMap((targetInfo) => {
+      const pageWebSocketDebuggerUrl = typeof targetInfo.targetId === "string"
+        ? webSocketUrls.get(targetInfo.targetId)
+        : undefined;
+      if (
+        targetInfo.type !== "page" ||
+        targetInfo.browserContextId !== contextId ||
+        typeof targetInfo.targetId !== "string" ||
+        targetInfo.targetId.trim() === "" ||
+        typeof targetInfo.url !== "string" ||
+        pageWebSocketDebuggerUrl === undefined
+      ) {
+        return [];
+      }
+      return [{
+        browserContextId: contextId,
+        targetId: targetInfo.targetId,
+        pageWebSocketDebuggerUrl,
+        url: targetInfo.url,
+        ...(typeof targetInfo.title === "string" && targetInfo.title.trim() !== "" ? { title: targetInfo.title } : {}),
+        ...(typeof targetInfo.openerId === "string" && targetInfo.openerId.trim() !== "" ? { openerId: targetInfo.openerId } : {})
+      }];
+    });
+  }
+
+  async findVisiblePageTargetId(browserContextId: string, preferredTargetId?: string): Promise<string | undefined> {
+    const targets = await this.listPageTargets(browserContextId);
+    const ordered = preferredTargetId === undefined
+      ? targets
+      : [
+          ...targets.filter((target) => target.targetId === preferredTargetId),
+          ...targets.filter((target) => target.targetId !== preferredTargetId)
+        ];
+    for (const target of ordered.slice(0, 16)) {
+      let client: CdpClientLike | undefined;
+      try {
+        client = await this.#createClient(target.pageWebSocketDebuggerUrl);
+        const result = await client.send("Runtime.evaluate", {
+          expression: "document.visibilityState",
+          returnByValue: true
+        });
+        if (runtimeEvaluationValue(result) === "visible") return target.targetId;
+      } catch {
+        // A closing or transient target is ignored; no page content is read.
+      } finally {
+        client?.close();
+      }
+    }
+    return undefined;
+  }
+
+  async attachTarget(browserContextId: string, targetId: string): Promise<AttachedCdpTarget> {
+    const contextId = requireNonEmptyString(browserContextId, "browserContextId");
+    const requestedTargetId = requireNonEmptyString(targetId, "targetId");
+    const target = (await this.listPageTargets(contextId)).find((entry) => entry.targetId === requestedTargetId);
+    if (target === undefined) {
+      throw new Error(`CDP page target ${requestedTargetId} is not available in browser context ${contextId}.`);
+    }
+    const supervisor = await this.#createPageSupervisor(target.pageWebSocketDebuggerUrl, contextId);
+    let closed = false;
+    return {
+      ...target,
+      supervisor,
+      close: async () => {
+        if (closed) return;
+        closed = true;
+        await supervisor.close();
+      }
+    };
+  }
+
+  async activateTarget(browserContextId: string, targetId: string): Promise<void> {
+    const contextId = requireNonEmptyString(browserContextId, "browserContextId");
+    const requestedTargetId = requireNonEmptyString(targetId, "targetId");
+    const target = (await this.listPageTargets(contextId)).find((entry) => entry.targetId === requestedTargetId);
+    if (target === undefined) {
+      throw new Error(`CDP page target ${requestedTargetId} is not available in browser context ${contextId}.`);
+    }
+    const client = await this.#getBrowserClient();
+    await client.send("Target.activateTarget", { targetId: requestedTargetId });
   }
 
   async close(): Promise<void> {
@@ -178,16 +341,7 @@ export class CdpTargetManager {
 
   async #findPageWebSocketDebuggerUrl(targetId: string): Promise<string> {
     const listUrl = `${this.#endpoint}/json/list`;
-    const response = await this.#fetch(listUrl);
-    if (!response.ok) {
-      throw new Error(`Failed to fetch CDP target list from ${listUrl}: HTTP ${response.status} ${response.statusText}`);
-    }
-    const payload = await response.json();
-    if (!Array.isArray(payload)) {
-      throw new Error(`CDP target list from ${listUrl} was not an array.`);
-    }
-
-    const entry = (payload as ListEntry[]).find((candidate) => candidate.id === targetId);
+    const entry = (await this.#fetchTargetList()).find((candidate) => candidate.id === targetId);
     if (entry === undefined) {
       throw new Error(`CDP target list from ${listUrl} did not include created target ${targetId}.`);
     }
@@ -197,10 +351,36 @@ export class CdpTargetManager {
     return entry.webSocketDebuggerUrl;
   }
 
-  async #createPageSupervisor(pageWebSocketDebuggerUrl: string): Promise<CdpTargetSupervisor> {
+  async #fetchTargetList(): Promise<ListEntry[]> {
+    const listUrl = `${this.#endpoint}/json/list`;
+    const response = await this.#fetch(listUrl);
+    if (!response.ok) {
+      throw new Error(`Failed to fetch CDP target list from ${listUrl}: HTTP ${response.status} ${response.statusText}`);
+    }
+    const payload = await response.json();
+    if (!Array.isArray(payload)) {
+      throw new Error(`CDP target list from ${listUrl} was not an array.`);
+    }
+    return payload as ListEntry[];
+  }
+
+  async #fetchTargetInfos(): Promise<TargetInfo[]> {
+    const client = await this.#getBrowserClient();
+    const payload = await client.send("Target.getTargets");
+    if (!isRecord(payload) || !Array.isArray(payload.targetInfos)) {
+      throw new Error("Target.getTargets did not return a targetInfos array.");
+    }
+    return payload.targetInfos as TargetInfo[];
+  }
+
+  async #createPageSupervisor(
+    pageWebSocketDebuggerUrl: string,
+    browserContextId: string
+  ): Promise<CdpTargetSupervisor> {
     try {
       return await this.#supervisorFactory({
-        webSocketUrl: pageWebSocketDebuggerUrl
+        webSocketUrl: pageWebSocketDebuggerUrl,
+        browserContextId
       });
     } catch (error) {
       throw new Error(`Failed to create CDP page supervisor for target websocket ${pageWebSocketDebuggerUrl}: ${errorMessage(error)}`, {
@@ -208,6 +388,18 @@ export class CdpTargetManager {
       });
     }
   }
+}
+
+function runtimeEvaluationValue(value: unknown): unknown {
+  if (!isRecord(value) || !isRecord(value.result)) return undefined;
+  return value.result.value;
+}
+
+function requireNonEmptyString(value: string, name: string): string {
+  if (typeof value !== "string" || value.trim() === "") {
+    throw new Error(`${name} must be a non-empty string.`);
+  }
+  return value.trim();
 }
 
 class ManagedTargetHandle implements ManagedCdpTarget {

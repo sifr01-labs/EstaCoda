@@ -477,7 +477,7 @@ Treat the group as corrupted native history. Let flat fallback carry the context
 
 **Inspect:**
 
-Check whether the duplicate result belongs to a selected native group or to an older unselected group. Non-selected tool results may still appear in flat continuation text.
+Check whether the duplicate result belongs to a selected native group in the active continuation. The newest batch may appear in flat continuation text when it was not selected for native replay; older batches should appear only as compact receipts.
 
 **Repair:**
 

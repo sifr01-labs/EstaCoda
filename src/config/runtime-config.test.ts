@@ -18,7 +18,9 @@ import {
   setupImageGenerationConfig,
   setupWebConfig,
   setupVoiceConfig,
-  setupBudgetConfig
+  setupBudgetConfig,
+  setupTelegramConfig,
+  setupMcpConfig
 } from "./runtime-config.js";
 import { DEFAULT_DELEGATION_CONFIG } from "./delegation-defaults.js";
 import { DEFAULT_MEMORY_CONFIG } from "./memory-config.js";
@@ -162,6 +164,148 @@ async function withHomeEnv<T>(
   }
 }
 
+describe("setupMcpConfig capability validation", () => {
+  it("rejects duplicate or overlapping protected paths and conflicting verification risks before writing", async () => {
+    const homeDir = await mkdtemp(join(tmpdir(), "estacoda-mcp-config-"));
+    const base = {
+      workspaceRoot: homeDir,
+      homeDir
+    };
+    try {
+      await expect(setupMcpConfig({
+        ...base,
+        input: {
+          name: "records",
+          command: "records-mcp",
+          protectedToolArguments: {
+            update: {
+              paths: ["/auth", "/auth/token"],
+              handling: { persistence: "none", sharing: "private" }
+            }
+          }
+        }
+      })).rejects.toThrow(/Invalid protected argument declaration/u);
+      await expect(setupMcpConfig({
+        ...base,
+        input: {
+          name: "records",
+          command: "records-mcp",
+          redactedToolResultPaths: {
+            read: ["/records", "/records/*/value"]
+          }
+        }
+      })).rejects.toThrow(/Invalid result redaction declaration/u);
+      await expect(setupMcpConfig({
+        ...base,
+        input: {
+          name: "records",
+          command: "records-mcp",
+          continuityToolResultPaths: {
+            read: ["/records/*/credential"]
+          }
+        }
+      })).rejects.toThrow(/Invalid continuity declaration/u);
+      await expect(setupMcpConfig({
+        ...base,
+        input: {
+          name: "records",
+          command: "records-mcp",
+          artifactToolArguments: {
+            importSpec: {
+              paths: ["/files/*/content"],
+              allowedMimeTypes: ["application/octet-stream"],
+              maxBytes: 30 * 1024 * 1024
+            }
+          }
+        }
+      })).rejects.toThrow(/Invalid artifact argument declaration/u);
+      await expect(setupMcpConfig({
+        ...base,
+        input: {
+          name: "records",
+          command: "records-mcp",
+          toolRiskClasses: { verify: "external-side-effect", update: "external-side-effect" },
+          toolVerificationRelationships: { verify: ["update"] }
+        }
+      })).rejects.toThrow(/Invalid verification relationship/u);
+      await expect(setupMcpConfig({
+        ...base,
+        input: {
+          name: "records", command: "records-mcp",
+          artifactToolArguments: { importSpec: {
+            paths: ["/files/*/content"], allowedMimeTypes: ["application/yaml"], maxBytes: 1024,
+            typeMapping: { argument: "../type", values: { "Swagger:2.0": "OPENAPI:2.0" } }
+          } }
+        }
+      })).rejects.toThrow(/Invalid artifact type mapping/u);
+      await expect(readFile(profileConfigPath(homeDir), "utf8")).rejects.toThrow();
+    } finally {
+      await rm(homeDir, { recursive: true, force: true });
+    }
+  });
+
+  it("fails closed on explicitly empty structured capability mappings", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-mcp-config-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    try {
+      await writeFile(profileConfigPath(workspace), JSON.stringify({
+        model: { provider: "openai", id: "gpt-4o" },
+        mcpServers: {
+          records: {
+            command: "records-mcp",
+            protectedToolArguments: {
+              update: {
+                paths: [],
+                handling: { persistence: "none", sharing: "private" }
+              }
+            }
+          }
+        }
+      }));
+      await expect(loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace }))
+        .rejects.toThrow(/Invalid MCP protected argument configuration/u);
+
+      await writeFile(profileConfigPath(workspace), JSON.stringify({
+        model: { provider: "openai", id: "gpt-4o" },
+        mcpServers: {
+          records: {
+            command: "records-mcp",
+            toolVerificationRelationships: { verify: [] }
+          }
+        }
+      }));
+      await expect(loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace }))
+        .rejects.toThrow(/Invalid MCP verification configuration/u);
+
+      await writeFile(profileConfigPath(workspace), JSON.stringify({
+        model: { provider: "openai", id: "gpt-4o" },
+        mcpServers: {
+          records: {
+            command: "records-mcp",
+            redactedToolResultPaths: { read: [] }
+          }
+        }
+      }));
+      await expect(loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace }))
+        .rejects.toThrow(/Invalid MCP result redaction configuration/u);
+
+      await writeFile(profileConfigPath(workspace), JSON.stringify({
+        model: { provider: "openai", id: "gpt-4o" },
+        mcpServers: {
+          records: {
+            command: "records-mcp",
+            continuityToolResultPaths: { read: [] }
+          }
+        }
+      }));
+      await expect(loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace }))
+        .rejects.toThrow(/Invalid MCP continuity configuration/u);
+    } finally {
+      await rm(workspace, { recursive: true, force: true });
+    }
+  });
+});
+
 describe("normalizeAuxiliaryModels", () => {
   it("fills missing tasks with auto/enabled defaults", () => {
     const result = normalizeAuxiliaryModels({});
@@ -216,6 +360,35 @@ describe("normalizeAuxiliaryModels", () => {
     expect(() => normalizeAuxiliaryModels({ vision: "openai" })).toThrow("auxiliaryModels.vision shorthand must be provider/model");
     expect(() => normalizeAuxiliaryModels({ vision: "/gpt-4.1-mini" })).toThrow("auxiliaryModels.vision shorthand is missing provider before /");
     expect(() => normalizeAuxiliaryModels({ vision: "openai/" })).toThrow("auxiliaryModels.vision shorthand is missing model id after /");
+  });
+
+  it.each([
+    ["contextWindowTokens", 0],
+    ["contextWindowTokens", -1],
+    ["contextWindowTokens", 1.5],
+    ["timeoutMs", 0],
+    ["timeoutMs", -1],
+    ["timeoutMs", Number.POSITIVE_INFINITY],
+    ["maxConcurrency", 0],
+    ["maxConcurrency", -1],
+    ["maxConcurrency", 1.5]
+  ] as const)("rejects invalid auxiliary %s values", (field, value) => {
+    expect(() => normalizeAuxiliaryModels({
+      vision: { provider: "openai", id: "gpt-4o", [field]: value }
+    })).toThrow(`auxiliaryModels.vision.${field} must be a positive integer when set`);
+  });
+
+  it("strips the retired extraBody field from legacy auxiliary config", () => {
+    const result = normalizeAuxiliaryModels({
+      vision: {
+        provider: "openai",
+        id: "gpt-4o",
+        extraBody: { unsafeLegacyOption: true }
+      }
+    } as any);
+
+    expect(result.vision).toEqual({ provider: "openai", enabled: true, id: "gpt-4o" });
+    expect(result.vision).not.toHaveProperty("extraBody");
   });
 
   it("rejects approval as an auxiliary route", () => {
@@ -538,6 +711,47 @@ describe("loadRuntimeConfig gateway lifecycle notifications", () => {
     expect(loaded.channels.telegram.streaming).toMatchObject({
       enabled: false,
       transport: "auto"
+    });
+    await rm(workspace, { recursive: true, force: true });
+  });
+});
+
+describe("loadRuntimeConfig gateway message queue", () => {
+  it("keeps in-memory persistence as the bounded default", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    await writeFile(profileConfigPath(workspace), JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" }
+    }));
+
+    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
+    expect(loaded.gateway.messageQueue).toEqual({
+      persistence: "memory",
+      maxPendingPerProfile: 1_000,
+      uncertainRetentionDays: 7
+    });
+    await rm(workspace, { recursive: true, force: true });
+  });
+
+  it("normalizes opt-in SQLite persistence and clamps queue bounds", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    await writeFile(profileConfigPath(workspace), JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      gateway: {
+        messageQueue: {
+          persistence: "sqlite",
+          maxPendingPerProfile: 100_001,
+          uncertainRetentionDays: 1_000
+        }
+      }
+    }));
+
+    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
+    expect(loaded.gateway.messageQueue).toEqual({
+      persistence: "sqlite",
+      maxPendingPerProfile: 10_000,
+      uncertainRetentionDays: 365
     });
     await rm(workspace, { recursive: true, force: true });
   });
@@ -1188,6 +1402,7 @@ describe("loadRuntimeConfig browser provider compatibility", () => {
         launchExecutable: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
         launchArgs: ["--headless=new", "--profile-directory=Default"],
         autoLaunch: true,
+        headless: false,
         supervised: false,
         chromeFlags: ["--disable-gpu", "--no-first-run"],
         engine: "auto",
@@ -1210,6 +1425,7 @@ describe("loadRuntimeConfig browser provider compatibility", () => {
       launchExecutable: "/Applications/Google Chrome.app/Contents/MacOS/Google Chrome",
       launchArgs: ["--headless=new", "--profile-directory=Default"],
       autoLaunch: true,
+      headless: false,
       supervised: false,
       chromeFlags: ["--disable-gpu", "--no-first-run"],
       engine: "auto",
@@ -1234,6 +1450,7 @@ describe("loadRuntimeConfig browser provider compatibility", () => {
     expect(loaded.browser).toMatchObject({
       backend: "local-cdp",
       autoLaunch: false,
+      headless: true,
       supervised: true,
       engine: "cdp",
       hybridRouting: false,
@@ -1549,7 +1766,209 @@ describe("setupWebConfig", () => {
   });
 });
 
+describe("setupTelegramConfig", () => {
+  it("enables direct DM intake without replacing an existing bot token reference", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-telegram-config-"));
+    const configPath = profileConfigPath(workspace);
+    await mkdir(dirname(configPath), { recursive: true });
+    await writeFile(configPath, JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      channels: {
+        telegram: {
+          enabled: true,
+          botTokenEnv: "CUSTOM_TELEGRAM_TOKEN",
+          allowedUserIds: ["42"],
+          allowedChatIds: ["99"]
+        }
+      }
+    }));
+
+    const result = await setupTelegramConfig({
+      workspaceRoot: workspace,
+      homeDir: workspace,
+      input: { secureInputMode: "direct-dm" }
+    });
+
+    expect(result.config.channels?.telegram).toMatchObject({
+      botTokenEnv: "CUSTOM_TELEGRAM_TOKEN",
+      secureInputMode: "direct-dm",
+      allowedUserIds: ["42"],
+      allowedChatIds: ["99"]
+    });
+    await rm(workspace, { recursive: true, force: true });
+  });
+
+  it("preserves rapid text debounce settings during guided setup mutations", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-telegram-config-"));
+    const configPath = profileConfigPath(workspace);
+    await mkdir(dirname(configPath), { recursive: true });
+    await writeFile(configPath, JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      gateway: {
+        messageQueue: {
+          persistence: "sqlite",
+          maxPendingPerProfile: 250,
+          uncertainRetentionDays: 14
+        }
+      },
+      channels: {
+        telegram: {
+          enabled: false,
+          busyTextCoalescing: {
+            enabled: true,
+            windowMs: 2_000,
+            maxMessages: 4,
+            maxChars: 6_000
+          },
+          textDebounceMs: 2_250,
+          textDebounceMaxMessages: 7,
+          textDebounceMaxChars: 4_096
+        }
+      }
+    }));
+
+    const result = await setupTelegramConfig({
+      workspaceRoot: workspace,
+      homeDir: workspace,
+      input: {
+        enabled: true,
+        botTokenEnv: "ESTACODA_TELEGRAM_BOT_TOKEN",
+        allowedUserIds: ["42"]
+      }
+    });
+
+    expect(result.config.channels?.telegram).toMatchObject({
+      enabled: true,
+      allowedUserIds: ["42"],
+      busyTextCoalescing: {
+        enabled: true,
+        windowMs: 2_000,
+        maxMessages: 4,
+        maxChars: 6_000
+      },
+      textDebounceMs: 2_250,
+      textDebounceMaxMessages: 7,
+      textDebounceMaxChars: 4_096
+    });
+    expect(result.config.gateway?.messageQueue).toEqual({
+      persistence: "sqlite",
+      maxPendingPerProfile: 250,
+      uncertainRetentionDays: 14
+    });
+    await rm(workspace, { recursive: true, force: true });
+  });
+});
+
 describe("loadRuntimeConfig channel readiness", () => {
+  it("normalizes queued-text coalescing as disabled for every channel by default", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    await writeFile(profileConfigPath(workspace), JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      channels: {}
+    }));
+
+    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
+    for (const channel of Object.values(loaded.channels)) {
+      expect(channel.busyTextCoalescing).toEqual({
+        enabled: false,
+        windowMs: 1_500,
+        maxMessages: 5,
+        maxChars: 8_000
+      });
+    }
+    await rm(workspace, { recursive: true, force: true });
+  });
+
+  it("normalizes and caps explicit queued-text coalescing config", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    await writeFile(profileConfigPath(workspace), JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      channels: {
+        telegram: {
+          busyTextCoalescing: {
+            enabled: true,
+            windowMs: 999_999,
+            maxMessages: 999,
+            maxChars: 999_999
+          }
+        }
+      }
+    }));
+
+    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
+    expect(loaded.channels.telegram.busyTextCoalescing).toEqual({
+      enabled: true,
+      windowMs: 60_000,
+      maxMessages: 100,
+      maxChars: 100_000
+    });
+    await rm(workspace, { recursive: true, force: true });
+  });
+
+  it("normalizes Telegram rapid text debounce defaults", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    await writeFile(profileConfigPath(workspace), JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      channels: { telegram: { enabled: false } }
+    }));
+
+    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
+    expect(loaded.channels.telegram.textDebounceMs).toBe(1_500);
+    expect(loaded.channels.telegram.textDebounceMaxMessages).toBe(10);
+    expect(loaded.channels.telegram.textDebounceMaxChars).toBe(8_000);
+    expect(loaded.channels.telegram.secureInputMode).toBe("protected-handoff");
+    await rm(workspace, { recursive: true, force: true });
+  });
+
+  it("normalizes explicit Telegram rapid text debounce config", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    await writeFile(profileConfigPath(workspace), JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      channels: {
+        telegram: {
+          enabled: false,
+          textDebounceMs: 0,
+          textDebounceMaxMessages: 4,
+          textDebounceMaxChars: 1_200,
+          secureInputMode: "direct-dm"
+        }
+      }
+    }));
+
+    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
+    expect(loaded.channels.telegram.textDebounceMs).toBe(0);
+    expect(loaded.channels.telegram.textDebounceMaxMessages).toBe(4);
+    expect(loaded.channels.telegram.textDebounceMaxChars).toBe(1_200);
+    expect(loaded.channels.telegram.secureInputMode).toBe("direct-dm");
+    await rm(workspace, { recursive: true, force: true });
+  });
+
+  it("caps Telegram rapid text debounce limits", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    await writeFile(profileConfigPath(workspace), JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      channels: {
+        telegram: {
+          enabled: false,
+          textDebounceMs: 999_999,
+          textDebounceMaxMessages: 999,
+          textDebounceMaxChars: 999_999
+        }
+      }
+    }));
+
+    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
+    expect(loaded.channels.telegram.textDebounceMs).toBe(60_000);
+    expect(loaded.channels.telegram.textDebounceMaxMessages).toBe(100);
+    expect(loaded.channels.telegram.textDebounceMaxChars).toBe(100_000);
+    await rm(workspace, { recursive: true, force: true });
+  });
+
   it("normalizes Telegram streaming config as enabled with auto transport by default", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
     await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
@@ -1967,6 +2386,7 @@ describe("loadRuntimeConfig channel readiness", () => {
           mode: "bot",
           dmPolicy: "pairing",
           pairingMode: "qr",
+          busyTextCoalescing: { enabled: true, windowMs: 2_000, maxMessages: 4, maxChars: 6_000 },
           pairingCodePhoneNumber: "+971501234567",
           stalePairingCode: "123456",
           unknownWhatsAppKey: true
@@ -1989,7 +2409,8 @@ describe("loadRuntimeConfig channel readiness", () => {
       allowedGroups: [],
       mode: "bot",
       dmPolicy: "allowlist",
-      pairingMode: "qr"
+      pairingMode: "qr",
+      busyTextCoalescing: { enabled: true, windowMs: 2_000, maxMessages: 4, maxChars: 6_000 }
     });
     const persisted = JSON.parse(await readFile(configPath, "utf8"));
     expect(persisted.channels.whatsapp.pairingCodePhoneNumber).toBeUndefined();
@@ -2995,6 +3416,99 @@ describe("loadRuntimeConfig profile loading", () => {
     expect(loaded.model.provider).toBe("openai");
     expect(loaded.model.id).toBe("gpt-4o");
     expect(loaded.mcp.servers).toHaveProperty("test");
+    await rm(workspace, { recursive: true, force: true });
+  });
+
+  it("normalizes MCP environment references without resolving their values into config", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    await writeFile(profileConfigPath(workspace), JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      mcpServers: {
+        postman: {
+          command: "npx",
+          args: ["@postman/postman-mcp-server"],
+          envRefs: { POSTMAN_API_KEY: "POSTMAN_API_KEY" }
+        }
+      }
+    }));
+
+    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
+
+    expect(loaded.mcp.servers.postman?.envRefs).toEqual({ POSTMAN_API_KEY: "POSTMAN_API_KEY" });
+    expect(loaded.mcp.servers.postman?.env).toBeUndefined();
+    await rm(workspace, { recursive: true, force: true });
+  });
+
+  it("normalizes legacy MCP protected arguments while preserving structured declarations for discovery validation", async () => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+    await writeFile(profileConfigPath(workspace), JSON.stringify({
+      model: { provider: "openai", id: "gpt-4o" },
+      mcpServers: {
+        trusted: {
+          command: "trusted-mcp",
+          protectedToolArguments: {
+            authenticate: ["credential", "nested.token", "credential"],
+            updateRecords: {
+              paths: ["/values/*/value", "/values/*/value", "/__proto__/value", "/values/0/value"],
+              handling: { persistence: "destination-managed", sharing: "workspace" },
+              groupedDelivery: false,
+              browserRelay: true
+            },
+            invalid: ["__proto__.token", "token[0]"]
+          },
+          toolVerificationRelationships: {
+            verifyRecords: ["updateRecords"]
+          },
+          redactedToolResultPaths: {
+            verifyRecords: ["/values/*/value"]
+          },
+          continuityToolResultPaths: {
+            verifyRecords: ["/records/*/id", "/records/*/name"]
+          },
+          artifactToolArguments: {
+            importSpec: {
+              paths: ["/files/*/content"],
+              allowedMimeTypes: ["application/json", "application/yaml"],
+              maxBytes: 12 * 1024 * 1024,
+              typeMapping: { argument: "type", values: { "Swagger:2.0": "OPENAPI:2.0" } }
+            }
+          }
+        }
+      }
+    }));
+
+    const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
+    expect(loaded.mcp.servers.trusted?.protectedToolArguments).toEqual({
+      authenticate: {
+        paths: ["/credential", "/nested/token"],
+        handling: { persistence: "unknown", sharing: "unknown" }
+      },
+      updateRecords: {
+        paths: ["/values/*/value", "/values/*/value", "/__proto__/value", "/values/0/value"],
+        handling: { persistence: "destination-managed", sharing: "workspace" },
+        groupedDelivery: false,
+        browserRelay: true
+      }
+    });
+    expect(loaded.mcp.servers.trusted?.toolVerificationRelationships).toEqual({
+      verifyRecords: ["updateRecords"]
+    });
+    expect(loaded.mcp.servers.trusted?.redactedToolResultPaths).toEqual({
+      verifyRecords: ["/values/*/value"]
+    });
+    expect(loaded.mcp.servers.trusted?.continuityToolResultPaths).toEqual({
+      verifyRecords: ["/records/*/id", "/records/*/name"]
+    });
+    expect(loaded.mcp.servers.trusted?.artifactToolArguments).toEqual({
+      importSpec: {
+        paths: ["/files/*/content"],
+        allowedMimeTypes: ["application/json", "application/yaml"],
+        maxBytes: 12 * 1024 * 1024,
+        typeMapping: { argument: "type", values: { "Swagger:2.0": "OPENAPI:2.0" } }
+      }
+    });
     await rm(workspace, { recursive: true, force: true });
   });
 

@@ -33,6 +33,9 @@ import {
 } from "../ui/papyrus/operator-console/index.js";
 import { RawPromptRenderLoop } from "./rawPromptRenderLoop.js";
 import { semanticMotionForPhase, semanticMotionFrameIndex } from "../ui/semantic-motion.js";
+import type { TaskOperatorService } from "../tasks/task-operator-service.js";
+import type { TaskControlIntent } from "../ui/papyrus/operator-console/taskSurface.js";
+import type { ExecutionPlan } from "../contracts/execution-plan.js";
 
 export type LiveOperatorConsoleControllerOptions = {
   readonly output: Pick<Writable, "write"> & {
@@ -46,8 +49,11 @@ export type LiveOperatorConsoleControllerOptions = {
   readonly animationIntervalMs?: number;
   readonly streamingRefreshIntervalMs?: number;
   readonly getStatus: () => StatusRailState;
-  readonly refreshTasks?: () => boolean;
+  readonly refreshTasks?: (force?: boolean) => boolean;
   readonly getTasks?: () => readonly TaskCardState[];
+  readonly taskOperator?: Pick<TaskOperatorService, "pause" | "cancel" | "retry">;
+  readonly taskSessionId?: string;
+  readonly onTaskControlError?: (error: Error, intent: TaskControlIntent) => void;
   readonly taskRefreshIntervalMs?: number;
   readonly turnStartedAtMs?: number;
   readonly promptPlaceholder?: string;
@@ -74,8 +80,11 @@ export class LiveOperatorConsoleController {
   readonly #animationIntervalMs: number;
   readonly #streamingRefreshIntervalMs: number;
   readonly #getStatus: () => StatusRailState;
-  readonly #refreshTasks: (() => boolean) | undefined;
+  readonly #refreshTasks: ((force?: boolean) => boolean) | undefined;
   readonly #getTasks: (() => readonly TaskCardState[]) | undefined;
+  readonly #taskOperator: LiveOperatorConsoleControllerOptions["taskOperator"];
+  readonly #taskSessionId: string | undefined;
+  readonly #onTaskControlError: LiveOperatorConsoleControllerOptions["onTaskControlError"];
   readonly #taskRefreshIntervalMs: number;
   readonly #turnStartedAtMs: number | undefined;
   readonly #promptPlaceholder: string | undefined;
@@ -85,6 +94,7 @@ export class LiveOperatorConsoleController {
   #activeWork: ToolActivityState = createActiveWorkRuntimeState();
   #steer: SteerState | undefined;
   #turnActivity: TurnActivityState | undefined;
+  #executionPlan: ExecutionPlan | undefined;
   #transcript: readonly TranscriptBlock[];
   #streamingSegments: readonly StreamingSegment[] = [];
   #streamingCurrentSegmentText = "";
@@ -115,6 +125,9 @@ export class LiveOperatorConsoleController {
     this.#getStatus = options.getStatus;
     this.#refreshTasks = options.refreshTasks;
     this.#getTasks = options.getTasks;
+    this.#taskOperator = options.taskOperator;
+    this.#taskSessionId = options.taskSessionId;
+    this.#onTaskControlError = options.onTaskControlError;
     this.#taskRefreshIntervalMs = normalizePositiveInteger(
       options.taskRefreshIntervalMs ?? DEFAULT_TASK_REFRESH_INTERVAL_MS,
       DEFAULT_TASK_REFRESH_INTERVAL_MS
@@ -182,6 +195,7 @@ export class LiveOperatorConsoleController {
       this.#runtimeHost.setFocus(routed.state.focus);
       this.refresh();
     }
+    if (routed.taskIntent !== undefined) this.#handleTaskIntent(routed.taskIntent);
     if (!routed.handled) return false;
     return true;
   }
@@ -327,6 +341,12 @@ export class LiveOperatorConsoleController {
     this.#syncAnimationTimer();
   }
 
+  setExecutionPlan(plan: ExecutionPlan | undefined): void {
+    this.#executionPlan = plan === undefined || isTerminalExecutionPlan(plan) ? undefined : plan;
+    this.#runtimeHost.setExecutionPlan(this.#executionPlan);
+    this.refresh({ dirtyRegions: ["mission"] });
+  }
+
   clear(): void {
     this.#stopAnimationTimer();
     this.#stopStreamingRefreshTimer();
@@ -343,6 +363,7 @@ export class LiveOperatorConsoleController {
     if (wasMouseModeActive && this.#tasks.mouseModeActive !== true) this.#onMouseModeChange?.(false);
     this.#runtimeHost.setTasks(this.#tasks);
     const focus = this.#runtimeHost.getState().focus;
+    const secureInput = this.#runtimeHost.getState().secureInput;
     this.#renderLoop.render({
       prompt: "",
       state: createLineEditorState(this.#steer?.mode === "drafting" ? this.#steer.draft : ""),
@@ -353,8 +374,10 @@ export class LiveOperatorConsoleController {
         motionElapsedMs,
         tasks: this.#tasks,
         focus,
+        secureInput,
         transcript: this.#transcript,
         turnActivity: this.#turnActivity,
+        executionPlan: this.#executionPlan,
         activeWork,
         streaming: this.#streamingSnapshotForRender(),
         steer: this.#steer,
@@ -467,6 +490,27 @@ export class LiveOperatorConsoleController {
     timer.unref?.();
   }
 
+  #handleTaskIntent(intent: TaskControlIntent): void {
+    if (intent.type === "detachTask") return;
+    if (this.#taskOperator === undefined) return;
+    try {
+      if (intent.type === "pauseTask") {
+        this.#taskOperator.pause(intent.taskId, this.#taskSessionId);
+      } else if (intent.type === "cancelTask") {
+        this.#taskOperator.cancel(intent.taskId, this.#taskSessionId);
+      } else {
+        this.#taskOperator.retry(intent.taskId, intent.stepId, this.#taskSessionId);
+      }
+    } catch (error) {
+      this.#onTaskControlError?.(error instanceof Error ? error : new Error(String(error)), intent);
+      return;
+    }
+    this.#refreshTasks?.(true);
+    this.#tasks = reconcileTaskSurfaceState(this.#tasks, this.#getTasks?.() ?? []);
+    this.#runtimeHost.setTasks(this.#tasks);
+    this.refresh({ dirtyRegions: ["taskCards", "taskInspection", "statusRail"] });
+  }
+
   #stopTaskRefreshTimer(): void {
     if (this.#taskRefreshTimer === undefined) return;
     clearInterval(this.#taskRefreshTimer);
@@ -492,6 +536,10 @@ export class LiveOperatorConsoleController {
   }
 
   #visibleMotionSignature(elapsedMs: number): string {
+    // Secure input is a modal surface. Work happening underneath it is not visible
+    // and must not keep presenting the console as actively working while the
+    // runtime is waiting for the operator.
+    if (this.#runtimeHost.getState().secureInput !== undefined) return "";
     const motion = this.#runtimeHost.getState().style?.tokens.contract.motion;
     const hasLiveTail = this.#streamingTail.trim().length > 0;
     const hasVisibleStreamingText = hasLiveTail || this.#streamingSegments.some((segment) => segment.text.trim().length > 0);
@@ -660,6 +708,10 @@ function withoutSubagentItems(state: ToolActivityState): ToolActivityState {
 
 function isTerminalActiveWorkStatus(status: ActiveWorkItem["status"]): boolean {
   return status === "succeeded" || status === "failed" || status === "cancelled";
+}
+
+function isTerminalExecutionPlan(plan: ExecutionPlan): boolean {
+  return plan.status === "completed" || plan.status === "abandoned" || plan.status === "transferred";
 }
 
 function resolveToolTrailDurationMs(

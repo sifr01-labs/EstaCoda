@@ -71,13 +71,16 @@ Adapters only render or normalize channel-specific transport events. They must n
 
 **UX choices:**
 
-- One evolving progress message per active turn
+- An admitted user turn gets a temporary 👨‍💻 reaction on its originating message instead of an initial `Thinking` progress message
+- If Telegram rejects the reaction, the existing localized `Thinking` progress message is used automatically
+- Later tool, model-fallback, warning, and approval progress remains visible in one evolving progress message
 - Inline approval buttons map to `/approve` and `/deny`
 - Final replies formatted in Telegram-safe HTML
 - Long final replies are chunked after Telegram formatting, using Telegram's 4096 UTF-16 code-unit text payload limit
 - Chunk suffixes such as `(1/3)` count inside Telegram's payload limit
 - Inline actions are attached only to the final text chunk
 - Experimental response streaming defaults on for configured Telegram channels and edits Telegram messages during a turn; final `response.text` remains authoritative
+- Bounded rapid-text batching defaults to `1500ms`, `10` messages, and `8000` characters per canonical session and sender
 - Activity labels localized (`en`, `ar`)
 - Group sessions per-user by default
 - Thread sessions shared by default
@@ -102,6 +105,36 @@ Operator-facing setup steps:
 3. For group chats, add the EstaCoda bot plus `@getidsbot` or `@chatIDrobot` to the group. The ID bot replies with the group chat ID.
 4. Group chat IDs are usually long negative numbers.
 
+**Rapid-text ingress batching:**
+
+`ChannelGateway` batches ordinary Telegram text that arrives within `channels.telegram.textDebounceMs` and joins fragments with blank lines. The canonical key includes account, chat/topic session identity, and sender. Threshold and timer flushes are gateway-owned and ingress-nonblocking; graceful drain waits for them. Commands, callbacks, pairing/auth flows, attachments, and media groups bypass this path. Set `textDebounceMs: 0` to disable it. The adapter's `getUpdates` cadence and album batching are unchanged.
+
+Telegram secure input is profile-configured with `channels.telegram.secureInputMode`. The default `protected-handoff` mode sends destination and retention metadata plus trusted-device, direct-destination, and cancel actions without accepting the credential in Telegram. `disabled` cancels runtime collection. The explicit `direct-dm` convenience mode accepts only a private, non-topic message when both the exact sender ID and chat ID are configured in their respective allowlists. A runtime request requires the user to arm next-message capture; `/secret <label>` provides the proactive equivalent.
+
+`ChannelGateway` owns authorization, pending request resolution, expiry, and one-use binding. The Telegram adapter owns only transport polling, callback delivery, and best-effort message deletion. A captured value is intercepted before debounce, durable channel turns, session history, provider dispatch, memory, streaming, or progress. Deletion is never presented as guaranteed because Telegram and the bot transport already received the value. Only a bounded, short-lived hash of the captured update identity is stored under the selected profile gateway state so a replay after restart is dropped; request buttons become stale after restart and secret values are never restored.
+
+**Optional busy-queue tail coalescing:**
+
+Each channel may opt into `busyTextCoalescing` only alongside `busyPolicy: "queue"`. This is a bounded tail operation on `SessionMessageQueue`, not a replacement for FIFO: eligible ordinary text from the same canonical session and sender updates the final queued entry in place. The queue position stays stable, and bounded runtime metadata carries every component message ID and receive timestamp. Commands, callbacks, approvals, attachments, media, and all interrupt paths bypass coalescing. Reaching a window, message, or character limit creates a new FIFO entry and retains normal queue-depth enforcement.
+
+The canonical queue remains `SessionMessageQueue`. When `gateway.messageQueue.persistence` is `sqlite`, `SQLitePendingTurnStore` is a fail-closed write-ahead recovery layer for that FIFO. Admission persists before acknowledgement; coalescing, interrupt replacement, and `/stop` clearing commit in SQLite before the corresponding memory mutation. Dequeue claims the exact durable turn before runtime execution. A handled terminal result completes the row and preserves its platform-message identity for bounded deduplication.
+
+Durable state is profile-scoped inside the global session database:
+
+```text
+pending -> claimed -> completed
+             |
+             +-> uncertain
+```
+
+Startup converts every crash-left `claimed` row for the selected profile to `uncertain`, then considers only `pending` rows for recovery. Before rebuilding the in-memory FIFO it rechecks current channel authorization, workspace trust, canonical session scope, adapter availability, and attachment roots/existence. Any pending row that no longer passes those checks becomes uncertain. Uncertain rows are never model-visible and never replay automatically.
+
+This boundary is intentionally conservative. A process can crash after a provider or tool side effect but before durable completion, so the store cannot prove exactly-once execution. Replaying a claimed row would risk duplicating messages, writes, purchases, or commands; quarantining it can instead leave work unfinished. Operators see profile-wide pending/claimed/uncertain counts through channel `/status`. `/stop` clears the current chat's queued rows only when no turn is active; with an active turn it aborts that turn and leaves queued rows intact. There is no supported command to force-replay uncertain rows.
+
+SQLite rows include validated channel message JSON with ordinary user text retained, plus routing/sender identifiers, bounded metadata, and canonical local attachment paths. They exclude channel credentials, secret-shaped payloads, remote attachment URLs, and file bytes. Treat `sessions.sqlite` and its backups as sensitive. Switching to `memory` stops new durable writes and recovery but does not delete existing rows; drain or clear pending chat queues first, because re-enabling SQLite later will reconsider surviving pending rows.
+
+Each durable turn also owns bounded delivery-identity rows. The primary platform message ID and every original ID retained by rapid-text batching share the turn's profile/channel scope and retention lifecycle. Authorized normal ingress checks this index before debounce or immediate execution, while pending-turn deletion and terminal-row pruning remove the aliases by cascade. Recovery decodes pending rows individually: malformed message JSON or an attachment path that now escapes an approved root quarantines only that row as uncertain and does not block valid FIFO recovery.
+
 **Experimental streaming path:**
 
 Telegram streaming is a delivery-UX path, not runtime state. It defaults to enabled for configured Telegram channels and can be disabled per profile with `channels.telegram.streaming.enabled: false`. Provider-token events are consumed by the gateway and appended to a per-turn stream handle. Non-token runtime events continue through normal progress delivery.
@@ -114,7 +147,7 @@ streamed text -> tool progress -> streamed continuation -> final edit
 
 On a provider tool boundary, the gateway signals a segment break before delivering tool progress. The adapter seals the current streamed message, clears the progress message slot for that supplied session/topic identity, and later provider tokens create a new streamed message below tool progress. Sealed streamed messages are not edited into the final answer. The final edit applies only to the current live streamed segment.
 
-Telegram outbound delivery preserves a validated numeric `message_thread_id` across text, typing indicators, streamed previews, progress, and artifacts. Progress labels use redacted display previews, isolate in-memory state by the supplied account/chat/topic/user identity, send the first visible update immediately, and coalesce later edits. The adapter honors Telegram `retry_after` responses, rolls over to a fresh progress message after non-retryable edit failures, and retains a bounded recent window of at most 12 entries within Telegram's text limit. This state is delivery UX only and is not an execution audit log.
+Telegram outbound delivery preserves a validated numeric `message_thread_id` across text, typing indicators, streamed previews, progress, and artifacts. After authorization, deduplication, batching, and active-turn admission, Telegram adds a temporary 👨‍💻 reaction to the latest originating user message; Telegram itself redirects album reactions to the first non-deleted album item. EstaCoda attempts to remove the reaction on every terminal path. A failed reaction falls back to the localized `Thinking` progress label; there is no user configuration or model-visible reaction tool. Later progress labels use redacted display previews, isolate in-memory state by the supplied account/chat/topic/user identity, send the first visible update immediately, and coalesce later edits. The adapter honors Telegram `retry_after` responses, rolls over to a fresh progress message after non-retryable edit failures, and retains a bounded recent window of at most 12 entries within Telegram's text limit. This state is delivery UX only and is not an execution audit log.
 
 The stream worker uses partial-only sanitization and lightweight HTML escaping. It does not run final Telegram formatting on partial edits. Final delivery still uses `formatTelegramReply()` and adapter-owned chunking. Flood-control retry exhaustion, oversized escaped partial payloads, provider fallback/failure cleanup, missing live final segments, approval boundaries, artifact boundaries, and final edit failures all require normal final text fallback. Active-handle degradation does not disable streaming globally for future turns.
 
@@ -453,6 +486,7 @@ estacoda channels status telegram
 Channel-specific commands available in gateway:
 
 - `/status` — show current session and channel status
+- `/usage`, `/usage last`, `/usage task <task-id>` — inspect recorded session, latest-turn, or authorized Task usage without a model call
 - `/sessions` — list recent sessions
 - `/switch <session-id>` — switch to a different session
 - `/attach <code>` — attach to a CLI session via handoff code
@@ -470,6 +504,10 @@ Channel-specific commands available in gateway:
 - `/model set <provider>/<model>` — compatibility syntax for the same conversation-scoped override
 - `/model clear` — clear the conversation-scoped model override
 - `/model --global <provider>/<model>` — persist the selected route as the profile primary model only when channel authorization, workspace/profile trust, and profile config path proof are available
+
+Telegram records successful inbound user messages, every delivered final-answer chunk, and delivered approval prompts against the originating visible turn. Replying to any of those messages with `/usage` inspects that turn directly; a normal-language reply can use the model-visible `session.usage` `replied_turn` scope. Resolution is constrained to the same Telegram account/chat type/chat/topic/user surface and then re-authorized against the current Session's verified compression lineage. Switching, detaching, creating, or resetting into an unrelated Session makes an older mapping unusable. Failed deliveries, progress, command output, and artifact messages are not attributed.
+
+Attribution state is profile-scoped and intentionally contains no message text or raw account, chat, topic, or user identifiers. The normalized surface is stored as a SHA-256 digest, rows expire after 90 days, and each profile retains at most 10,000 rows. Recording prunes expired rows and deterministically evicts the oldest excess rows. Expired, malformed, unmapped, cross-profile, cross-user, and unrelated-lineage lookups fail closed. The v32 migration discards v31 mappings because the earlier schema lacked the chat-type and user dimensions required to reconstruct this stronger boundary safely.
 
 Gateway `/model` also supports plain-text fallback commands for channels without native actions: `model-select <provider>/<model>` and `model-clear`. Telegram and Discord render model picker actions where their adapters support actions; those callback payloads contain short opaque picker action tokens, not route/model identifiers or raw credentials. Model control commands, including picker callbacks, bypass busy-session queues so the operator can change or clear model state while a conversation is active. Normal user turns still follow the configured busy-session policy.
 

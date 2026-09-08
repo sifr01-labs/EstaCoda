@@ -10,6 +10,7 @@ export type RuntimeFingerprint = {
   modelProvider: string;
   modelId: string;
   modelContextWindowTokens: number;
+  modelMaxOutputTokens?: number;
   primaryModelRouteHash?: string;
   modelFallbackRoutesHash?: string;
   profileId: string;
@@ -91,6 +92,7 @@ export function computeRuntimeFingerprint(
     modelProvider: config.model.provider,
     modelId: config.model.id,
     modelContextWindowTokens: config.model.contextWindowTokens,
+    modelMaxOutputTokens: config.model.maxOutputTokens,
     primaryModelRouteHash: config.primaryModelRoute
       ? stableJsonHash(fingerprintRoute(config.primaryModelRoute))
       : undefined,
@@ -170,6 +172,7 @@ function fingerprintRoute(route: ResolvedModelRoute): Record<string, unknown> {
     apiMode: route.apiMode,
     contextWindowTokens: route.contextWindowTokens,
     maxTokens: route.maxTokens,
+    modelMaxOutputTokens: route.profile.maxOutputTokens,
     timeoutMs: route.timeoutMs,
     staleTimeoutMs: route.staleTimeoutMs,
   };

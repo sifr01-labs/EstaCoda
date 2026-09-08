@@ -7,6 +7,12 @@ description: "Tool system: registry, schemas, execution, and builtin tools."
 
 Tools are functions that extend the agent's capabilities. They are organized into a registry with risk-based gating.
 
+## Provider-visible inventory
+
+Registration, visibility, and execution authority are separate states. The runtime registers the tools that are available to the selected profile and session, then builds a bounded inventory for each foreground turn. Ordinary conversation receives zero tools. Actionable work receives task-policy tools, selected-skill toolsets, explicitly named connector tools, the active browser, attachment-required reads, and a compact status/recovery set. Unrelated MCP connectors and the full catalog are never added as a low-confidence fallback. `plan` is reserved for work that is genuinely multi-step.
+
+One evidence-owned expansion is permitted between normal provider iterations. Today the runtime may add the already-registered `browser.vision` schema after trusted browser results show that semantic/native targeting did not work. Model prose and Plan text cannot widen the inventory. Telemetry stores the initial or expanded tool names, bounded reason, connector exposure flags, and estimated native-schema tokens. It does not store schema bodies, arguments, results, or secrets. Every exposed tool still passes the same execution-time security, approval, trust, and hard-block checks.
+
 ## Files
 
 | File | Role |
@@ -53,6 +59,7 @@ The runtime assembles tools from provider modules at startup. Treat this table a
 | `image.generate` | `external-side-effect` | `live-proven` |
 | `voice.speak` | `external-side-effect` | `smoke-tested` |
 | `voice.transcribe` | `safe` | `smoke-tested` |
+| `vision.analyze` | `read-only-local` or contextual hosted egress | `eval-tested` |
 | `execute_code` | `caution` | `smoke-tested` |
 | `memory.curate` | `workspace-write` | `smoke-tested` |
 | `memory.read` | `read-only-local` | `smoke-tested` |
@@ -64,6 +71,16 @@ The runtime assembles tools from provider modules at startup. Treat this table a
 | `task.status` | `read-only-local` | `smoke-tested` |
 | `workspace.trust.*` | `read-only-local` / `shared-state-mutation` | `smoke-tested` |
 | `cronjob` | `caution` | `smoke-tested` |
+
+## Vision Analysis
+
+`vision.analyze` keeps the compatible single-image `path` input and accepts `paths` with two to twenty images for comparison. `paths` selects `compare` mode when `mode` is omitted; supplying both `path` and `paths`, more than twenty paths, or a non-compare multi-image mode fails before file reads. Sets above ten images are validated and processed sequentially in provider batches of at most ten. Activity identifies the current image range, and a final text-only pass synthesizes successful batches without resending images. The combined result explicitly reports complete or partial processing and falls back to the full batch findings if synthesis is unavailable. Other controls are optional `prompt`, `mode` (`describe`, `ocr`, `document`, `chart`, `screenshot`, `compare`), `detail` (`low`, `standard`, `high`), and `output` (`concise`, `standard`, `detailed`). Text inside an image is untrusted content: prompts explicitly require transcription or reporting where relevant, never obedience to image-borne commands or policy claims.
+
+Ready image attachments on the initial turn are submitted as one governed image set. Sets above ten are internally divided into bounded provider batches, so aggregate normalized-byte, animation-pixel, cancellation, and spending limits apply before dispatch without dropping attachments. Generated and browser images receive automatic artifact provenance only when their runtime artifact record belongs to the current visible turn; an older or unregistered cache file is treated as agent-discovered and follows the stricter egress decision.
+
+Source resolution accepts regular files only, canonicalizes workspace and channel-media containment, detects MIME from magic bytes, and returns relative display paths. Normalization corrects orientation, strips metadata, bounds source reads, dimensions, pixels, decoded memory, frames, aggregate animation pixels, per-image and aggregate normalized bytes, and concurrency, and emits only JPEG/PNG/WebP payloads for hosted routes. Defaults include a firm 32 MiB source-read ceiling, 20,000-pixel input dimension, 50 megapixels, 256 MiB decoded memory, 100 frames, 100 million animation pixels per image, 7,680-pixel output dimension, 4 MiB normalized output per image, 80 MiB aggregate normalized output, 500 million aggregate animation pixels, and normalization concurrency of two. Compatible sources above the old 8 MiB boundary can therefore be decoded and resized without widening per-image hosted payload limits.
+
+Results expose structured error codes plus dispatch route, latency, normalized dimensions, per-image usage, aggregate resource totals, and fallback metadata. Every comparison source receives provenance and sensitive-path checks, every normalized image is included in spend estimation, and incompatible single-image fallbacks are excluded. Image bytes, normalized intermediates, and data URLs are runtime-only and must not enter sessions, trajectories, logs, or exports. Native initial attachments avoid a redundant tool suggestion; text-only main routes and post-tool discoveries use the governed auxiliary dispatch path.
 
 ## Workspace File Tools
 

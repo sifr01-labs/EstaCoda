@@ -4,7 +4,7 @@ import type { ContextReference } from "./context.js";
 import type { IntentRoute } from "./intent.js";
 import type { ProviderErrorClass } from "./provider.js";
 import type { PromptBudgetReport } from "./prompt.js";
-import type { ArtifactRecord } from "./artifact.js";
+import type { ArtifactRecord, SessionArtifactRegistration } from "./artifact.js";
 import type { MemoryConclusion, SkillOutcome } from "./memory.js";
 import type { SecurityAssessment, SecurityDecision } from "./security.js";
 import type { ToolResult, ToolRiskClass } from "./tool.js";
@@ -19,6 +19,9 @@ import type {
 import type { FailureRecord } from "./failure.js";
 import type { ProviderUsageEntry, ProviderUsageQuery } from "./provider-usage.js";
 import type { DelegateRole } from "./delegation.js";
+import type { ExecutionEvidenceRecord, ExecutionPlanLifecycleEvent } from "./execution-plan.js";
+import type { ExecutionCheckpointLifecycleEvent } from "./execution-checkpoint.js";
+import type { ProviderToolInventoryEvent } from "./runtime-event.js";
 import type {
   ModelProfile,
   ProviderApiMode,
@@ -34,6 +37,13 @@ import type {
 } from "./provider.js";
 
 export type SessionRole = "user" | "agent" | "system" | "tool";
+
+export type AgentCancellationSource =
+  | "interrupt"
+  | "stop"
+  | "drain-timeout"
+  | "stuck-loop"
+  | "unknown";
 
 export type SessionRecord = {
   id: string;
@@ -230,7 +240,47 @@ export type StructuredToolHistoryDiagnosticEvent = {
   reason?: StructuredToolHistoryDiagnosticReason;
 };
 
+export type AuthenticationEvidenceAssessmentEvent = {
+  kind: "authentication-evidence-assessed";
+  stage: "credentials" | "challenge" | "verification";
+  outcome: "candidate" | "verified" | "blocked" | "invalidated" | "inconclusive";
+  reason:
+    | "authenticated-evidence-observed"
+    | "authentication-error"
+    | "causal-chain-interrupted"
+    | "challenge-required"
+    | "challenge-departed-without-authenticated-evidence"
+    | "challenge-still-present"
+    | "preexisting-authenticated-evidence"
+    | "protected-settlement-inconclusive"
+    | "protected-submission-failed"
+    | "signed-out";
+  submissionToolCallId: string;
+  evidenceToolCallId?: string;
+  challengeDeparted: boolean;
+  stateTransitionObserved: boolean;
+  postSubmitEvidence: boolean;
+  preexistingEvidence: boolean;
+  navigationInterrupted: boolean;
+  sensitiveInputActive: boolean;
+};
+
 export type SessionEvent =
+  | { kind: "mcp-connection-status"; connectors: Array<{
+      name: string; connected: boolean; available: boolean; schemasRegistered: boolean;
+      failureStage?: "configuration" | "connection" | "schema-registration" | "availability";
+      error?: string;
+    }> }
+  | {
+      kind: "plaintext-credential-intercepted";
+      credentialKinds: Array<"api-key" | "client-secret" | "access-token" | "password" | "private-key" | "generic-secret">;
+      disposition: "withheld-before-persistence";
+    }
+  | ExecutionPlanLifecycleEvent
+  | ExecutionCheckpointLifecycleEvent
+  | ProviderToolInventoryEvent
+  | ExecutionEvidenceRecord
+  | AuthenticationEvidenceAssessmentEvent
   | {
       kind: "intent-routed";
       route: IntentRoute;
@@ -322,6 +372,10 @@ export type SessionEvent =
       artifact: ArtifactRecord;
       tool?: string;
     }
+  | {
+      kind: "session-artifact-registered";
+      artifact: SessionArtifactRegistration;
+    }
   | SessionContextWindowUsageEvent
   | SessionContextWindowUsageInvalidatedEvent
   | {
@@ -384,6 +438,13 @@ export type SessionEvent =
   | {
       kind: "prompt-assembled";
       budget: PromptBudgetReport;
+    }
+  | {
+      kind: "session-recall-stage";
+      stage: "started" | "completed" | "failed";
+      focus: "general" | "visited-sites";
+      sourceSessionIds: string[];
+      resultCount: number;
     }
   | {
       kind: "session-recall-decision";
@@ -451,6 +512,12 @@ export type SessionEvent =
       reason: string;
     }
   | {
+      kind: "execution-final-outcome-recorded";
+      status: import("./execution-plan.js").ExecutionFinalOutcomeStatus;
+      terminationCause: import("./execution-plan.js").ExecutionTerminationCause;
+      completionFloor: import("./execution-plan.js").ExecutionCompletionFloor;
+    }
+  | {
       kind: "provider-spending-warning";
       warningId: string;
       scopeKind: "session" | "root_task";
@@ -513,6 +580,7 @@ export type SessionEvent =
   | {
       kind: "agent-cancelled";
       reason: string;
+      abortSource?: AgentCancellationSource;
       resumeNote?: string;
       activeSkill?: string;
       activeToolPlans?: Array<{
@@ -621,6 +689,22 @@ export type SessionSearchOptions = {
   rootSessionsOnly?: boolean;
 };
 
+export type SessionSummaryOptions = {
+  workspaceRoot?: string;
+  limit?: number;
+  rootSessionsOnly?: boolean;
+  activeSessionsOnly?: boolean;
+  userActivityOnly?: boolean;
+  userFacingOnly?: boolean;
+};
+
+export type SessionSummaryRecord = {
+  session: SessionRecord;
+  messageCount: number;
+  userMessageCount: number;
+  firstUserMessage?: SessionMessage;
+};
+
 export type CreateSessionInput = {
   id?: string;
   profileId: string;
@@ -661,7 +745,11 @@ export type RewriteSessionTranscriptInput = {
 export type SessionDB = {
   createSession(input: CreateSessionInput): Promise<SessionRecord>;
   getSession(id: string): Promise<SessionRecord | undefined>;
+  getSessionForProfile(id: string, profileId: string): Promise<SessionRecord | undefined>;
   listSessions(profileId?: string): Promise<SessionRecord[]>;
+  listSessionSummaries(profileId: string, options?: SessionSummaryOptions): Promise<SessionSummaryRecord[]>;
+  hasUserMessageForProfile(sessionId: string, profileId: string): Promise<boolean>;
+  setSessionTitleIfPlaceholder(sessionId: string, title: string): Promise<boolean>;
   endSession(sessionId: string, reason: string): Promise<void>;
   setSessionModelOverride(sessionId: string, override: SessionModelOverride): Promise<void>;
   clearSessionModelOverride(sessionId: string): Promise<void>;

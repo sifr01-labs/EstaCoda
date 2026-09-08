@@ -1,6 +1,7 @@
 import type { ChannelAttachment } from "../contracts/channel.js";
 import type { ContextExpansionResult, ProjectContextSnapshot } from "../contracts/context.js";
 import type { IntentRoute } from "../contracts/intent.js";
+import type { ExecutionPlanReader, ExecutionTerminationCause } from "../contracts/execution-plan.js";
 import type { MemoryPromptContext } from "../contracts/memory.js";
 import type {
   ModelProfile,
@@ -14,9 +15,9 @@ import type {
   ProviderUsage,
   ResolvedModelRoute
 } from "../contracts/provider.js";
-import type { RuntimeEvent, RuntimeEventSink } from "../contracts/runtime-event.js";
+import type { ProviderToolInventoryEvent, RuntimeEvent, RuntimeEventSink } from "../contracts/runtime-event.js";
 import type { SecurityDecision } from "../contracts/security.js";
-import type { ProviderUsageContext } from "../contracts/provider-usage.js";
+import type { ProviderImageInput, ProviderUsageContext, ProviderUsageLineage } from "../contracts/provider-usage.js";
 import type {
   ReplacementSessionMessage,
   SessionContextWindowUsage,
@@ -27,19 +28,23 @@ import type {
 import type { LoadedSkill, SelectedSkillPromptContent, SkillDefinition, SkillCatalogEntry } from "../contracts/skill.js";
 import type { ToolCallPlan } from "../contracts/tool-plan.js";
 import type { ToolRiskClass } from "../contracts/tool.js";
+import type { ExecutionCheckpointSupervisionController } from "../contracts/execution-checkpoint.js";
+import type { GroupedSecureInputRequestHandler, SecureInputRequestHandler, SecureInputTransferRequestHandler } from "../contracts/secure-input.js";
 import type { AgentProfileMode, AgentResponseLanguage, UiFlavor, UiLanguage } from "../config/runtime-config.js";
 import { PromptCache } from "../prompt/prompt-cache.js";
+import { estimateProviderRequestAccounting } from "../prompt/provider-request-accounting.js";
 import { estimateTextTokensRough } from "../prompt/token-estimator.js";
 import {
   assembleProviderContinuationPrompt,
   assembleProviderPrompt,
   type ProviderPromptAssembly
 } from "../prompt/prompt-assembly.js";
-import { deriveSessionHistoryBudget, packSessionHistory } from "../prompt/history-packer.js";
+import { deriveSessionHistoryBudget, packSessionHistory, sanitizeSessionHistoryCredentials } from "../prompt/history-packer.js";
 import type { CompactResult } from "../prompt/session-compression-service.js";
 import { SUMMARY_FORMAT_VERSION } from "../prompt/semantic-compressor.js";
 import type { ConversationContinuationState } from "./conversation-continuation-state.js";
 import { normalizeProviderMessagesStrict } from "../providers/provider-message-normalizer.js";
+import { resolveProviderOutputTokenBound } from "../providers/provider-output-limit.js";
 import type { PromptBudgetReport, PromptSemanticCompressionReport } from "../contracts/prompt.js";
 import {
   assertProviderAttemptState,
@@ -51,32 +56,77 @@ import {
 import type { ProviderUsageTaskAttribution } from "../providers/provider-usage-ledger.js";
 import type { OpenAICompatibleToolSchema } from "../tools/tool-schema.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
-import { stableToolCallId } from "../tools/tool-call-planner.js";
 import type { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import type { RunRecorder } from "./run-recorder.js";
 import type { ToolPlanRunner } from "./tool-plan-runner.js";
 import type { SkillSetupContext } from "./agent-loop.js";
+import type { ProviderToolExpansionCandidate } from "./provider-tool-narrowing.js";
 import type { SessionRuntimeContext } from "./session-runtime-context.js";
 import { emit, isAborted } from "../utils/runtime-helpers.js";
+import { visionInputProvenanceForTurn } from "../vision/vision-egress-policy.js";
 import { emitContextEstimate, emitContextWindowUsage } from "./context-usage-events.js";
 import { normalizeSessionContextWindowUsage } from "../session/session-context-window-usage.js";
 import {
   pendingDelegatedAnswerOwnership,
   type PendingDelegatedAnswerOwnership
 } from "./delegated-answer-ownership.js";
+import {
+  createTurnToolFeedbackLedger,
+  recordTurnToolFeedbackBatch,
+  TurnMcpReadLedger,
+  type TurnToolFeedbackLedger
+} from "./turn-tool-feedback-ledger.js";
+import { ExecutionWorkingSetController } from "./execution-working-set.js";
+import type { BrowserSessionLease } from "../browser/session-lifecycle.js";
+import { deriveBrowserSessionKey } from "../browser/session-key.js";
+import type { BrowserBackend, BrowserSnapshot, BrowserStateProjection } from "../contracts/browser.js";
+import {
+  projectBrowserStateFromExecutions,
+  refreshBrowserStateProjection
+} from "../browser/browser-state-projection.js";
+import {
+  ExecutionSupervisionController,
+  EXECUTION_SUPERVISION_PROMPTS
+} from "./execution-supervision-controller.js";
+import {
+  createProviderToolCallNamespace,
+  namespaceProviderToolCalls,
+  runtimeProviderToolCallId
+} from "./provider-tool-call-identity.js";
 
 const MAX_PROVIDER_REPLAY_ECHO_CHARS = 32_000;
+const PROVIDER_TOKEN_EFFICIENCY_WARNING_THRESHOLD = 500_000;
+const PROTECTED_OTP_CONTINUATION_PROMPT = [
+  "A trusted current browser snapshot shows one one-time-code field and one submit control.",
+  "Do not ask the user to send the code in ordinary chat.",
+  "Call browser.type now with the exact ref, identity, tabRef, protectedInput.kind=one-time-code, and submitRef from the newest browser snapshot so the protected prompt opens and submits locally in this same turn."
+].join(" ");
 
 export type ProviderTurnLoopBudgets = {
   maxProviderIterations: number;
   maxProviderToolCalls: number;
   maxRepeatedToolFailures: number;
+  maxRepeatedBrowserObservations: number;
+  noProgressNudgeIteration: number;
+  maxNoProgressIterations: number;
   maxProviderWallClockMs: number;
+  finalizationReserveMs: number;
 };
+
+type NormalizedProviderTurnLoopBudgets = Required<ProviderTurnLoopBudgets>;
 
 export type ProviderTurnLoopRequestDefaults = {
   temperature?: number;
   maxTokens?: number;
+};
+
+export type ProviderTurnLoopResult = {
+  providerExecution: ProviderExecutionResult | undefined;
+  toolExecutions: ToolExecutionRecord[];
+  iterations: number;
+  terminationCause: ExecutionTerminationCause;
+  delegatedAnswerOwnership?: PendingDelegatedAnswerOwnership;
+  emergencyDeadlineReached?: boolean;
 };
 
 export type ProviderTurnLoopOptions = {
@@ -108,6 +158,11 @@ export type ProviderTurnLoopOptions = {
   providerRequestDefaults?: ProviderTurnLoopRequestDefaults;
   initialContextWindowUsage?: SessionContextWindowUsage;
   taskExecution?: ProviderUsageTaskAttribution;
+  executionPlanReader?: ExecutionPlanReader;
+  executionWorkingSet?: ExecutionWorkingSetController;
+  executionCheckpointController?: ExecutionCheckpointSupervisionController;
+  browserSessionLease?: BrowserSessionLease;
+  browserBackend?: BrowserBackend;
 };
 
 export class ProviderTurnLoop {
@@ -127,10 +182,17 @@ export class ProviderTurnLoop {
   readonly #skillsIndex: SkillCatalogEntry[];
   readonly #ui: ProviderTurnLoopOptions["ui"];
   readonly #agentProfile: ProviderTurnLoopOptions["agentProfile"];
-  readonly #budgets: ProviderTurnLoopBudgets;
+  readonly #budgets: NormalizedProviderTurnLoopBudgets;
   readonly #providerRequestDefaults: ProviderTurnLoopRequestDefaults;
   readonly #profileId: string;
   readonly #taskExecution: ProviderUsageTaskAttribution | undefined;
+  readonly #executionPlanReader: ExecutionPlanReader | undefined;
+  readonly #executionWorkingSet: ExecutionWorkingSetController | undefined;
+  readonly #executionCheckpointController: ExecutionCheckpointSupervisionController | undefined;
+  readonly #browserSessionLease: BrowserSessionLease | undefined;
+  readonly #browserBackend: BrowserBackend | undefined;
+  #activeBrowserLease: { sessionId: string; owner: string } | undefined;
+  #foregroundTurnSequence = 0;
   #providerRequestSequence = 0;
   #lastPromptTokens = 0;
   #lastActualPromptTokens: number | undefined;
@@ -152,10 +214,29 @@ export class ProviderTurnLoop {
     this.#skillsIndex = options.skillsIndex;
     this.#ui = options.ui;
     this.#agentProfile = options.agentProfile;
-    this.#budgets = options.budgets;
+    this.#budgets = {
+      ...options.budgets,
+      maxRepeatedBrowserObservations: normalizeBrowserObservationLimit(
+        options.budgets.maxRepeatedBrowserObservations
+      ),
+      maxNoProgressIterations: normalizeNoProgressStopIteration(options.budgets.maxNoProgressIterations),
+      noProgressNudgeIteration: normalizeNoProgressNudgeIteration(
+        options.budgets.noProgressNudgeIteration,
+        options.budgets.maxNoProgressIterations
+      ),
+      finalizationReserveMs: normalizeFinalizationReserve(
+        options.budgets.finalizationReserveMs,
+        options.budgets.maxProviderWallClockMs
+      )
+    };
     this.#providerRequestDefaults = options.providerRequestDefaults ?? {};
     this.#profileId = options.profileId;
     this.#taskExecution = options.taskExecution;
+    this.#executionPlanReader = options.executionPlanReader;
+    this.#executionWorkingSet = options.executionWorkingSet;
+    this.#executionCheckpointController = options.executionCheckpointController;
+    this.#browserSessionLease = options.browserSessionLease;
+    this.#browserBackend = options.browserBackend;
     this.#lastActualPromptTokens = options.initialContextWindowUsage?.usedTokens;
   }
 
@@ -166,6 +247,8 @@ export class ProviderTurnLoop {
   }
 
   async run(input: {
+    /** Explain a blocked task without executing tools or supervising its checkpoint. */
+    diagnosticOnly?: boolean;
     visibleTurnId?: string;
     userText: string;
     routedText: string;
@@ -182,29 +265,56 @@ export class ProviderTurnLoop {
     attachments: ChannelAttachment[] | undefined;
     memoryPromptContext: MemoryPromptContext | undefined;
     providerTools: OpenAICompatibleToolSchema[];
+    toolExpansionCandidates?: readonly ProviderToolExpansionCandidate[];
+    connectorInventory?: ProviderToolInventoryEvent["connectors"];
     preflightCompression?: PromptSemanticCompressionReport;
     conversationContinuationState?: ConversationContinuationState;
     fallbackText: string;
     onEvent?: RuntimeEventSink;
     onDelta?: (text: string) => void;
     onSegmentBreak?: (reason?: string) => void | Promise<void>;
+    onApprovalRequest?: import("../contracts/tool.js").ToolApprovalHandler;
+    onSecureInputRequest?: SecureInputRequestHandler;
     toolPlans: ToolCallPlan[];
     trustedWorkspace: boolean;
     initialRiskClass: ToolRiskClass;
     signal?: AbortSignal;
-  }): Promise<{
-    providerExecution: ProviderExecutionResult | undefined;
-    toolExecutions: ToolExecutionRecord[];
-    iterations: number;
-    delegatedAnswerOwnership?: PendingDelegatedAnswerOwnership;
-  }> {
+  }): Promise<ProviderTurnLoopResult> {
+    const releaseBrowserLeaseOnAbort = (): void => this.#releaseBrowserSessionLease();
+    input.signal?.addEventListener("abort", releaseBrowserLeaseOnAbort, { once: true });
+    try {
     this.#providerRequestSequence = 0;
     this.#toolPlanRunner.resetPerTurnBudgets?.();
+    if (input.diagnosticOnly === true) {
+      const execution = await this.#completeWithProvider({
+        ...input,
+        diagnosticOnly: true,
+        foregroundTurnId: runtimeForegroundTurnId(input.visibleTurnId, this.#sessionId, ++this.#foregroundTurnSequence),
+        providerToolCallNamespace: createProviderToolCallNamespace(),
+        providerTools: [],
+        toolExecutions: [],
+        toolPlans: [],
+        iteration: 0,
+        loopStartedAt: Date.now()
+      });
+      // Even a hallucinated tool call cannot reach the runner in diagnostic mode.
+      return {
+        providerExecution: execution,
+        toolExecutions: [],
+        iterations: execution === undefined ? 0 : providerIterationCost(execution),
+        terminationCause: input.signal?.aborted ? "cancelled" : execution?.ok ? "normal" : "provider_failed"
+      };
+    }
     const providerToolExecutions: ToolExecutionRecord[] = [];
     let effectiveProviderExecution: ProviderExecutionResult | undefined;
     let previousProviderExecution: ProviderExecutionResult | undefined;
     let iterations = 0;
-    const loopStartedAt = Date.now();
+    let loopStartedAt = Date.now();
+    const onSecureInputRequest = timeSecureInputHandler(input.onSecureInputRequest, (elapsedMs) => {
+      // Operator think/typing time is not autonomous provider work and must not
+      // consume the emergency wall-clock budget.
+      loopStartedAt += elapsedMs;
+    });
     const repeatedFailures = new Map<string, number>();
     let maxObservedRisk = input.initialRiskClass;
     let pendingEmptyResponseNudge = false;
@@ -214,11 +324,50 @@ export class ProviderTurnLoop {
     let retryEmptyInitialResponse = false;
     let reasoningOnlyPrefillRetries = 0;
     let pendingReasoningOnlyPrefill = false;
+    let pendingProtectedOtpNudge = false;
+    let protectedOtpCorrectionUsed = false;
     let retryReasoningOnlyInitialResponse = false;
     let delegatedAnswerOwnership: PendingDelegatedAnswerOwnership | undefined;
+    let emergencyDeadlineReached = false;
+    let terminationCause: ExecutionTerminationCause = "normal";
+    let toolFeedbackLedger = createTurnToolFeedbackLedger();
+    let providerCallsThisTurn = 0;
+    let providerTokensThisTurn = 0;
+    let activeProviderTools = [...input.providerTools];
+    let toolExpansionUsed = false;
+    const workingSessionId = this.#sessionRuntimeContext?.currentSessionId() ?? this.#sessionId;
+    const foregroundTurnId = runtimeForegroundTurnId(
+      input.visibleTurnId,
+      workingSessionId,
+      ++this.#foregroundTurnSequence
+    );
+    const providerToolCallNamespace = createProviderToolCallNamespace();
+    const mcpReadLedger = new TurnMcpReadLedger({
+      profileId: this.#profileId,
+      sessionId: workingSessionId
+    });
+    this.#acquireOrRenewBrowserSessionLease(foregroundTurnId);
+    const executionSupervision = new ExecutionSupervisionController({
+      foregroundTurnId,
+      existingExecutions: input.toolExecutions,
+      currentSessionId: () => this.#sessionRuntimeContext?.currentSessionId() ?? this.#sessionId,
+      locale: this.#ui?.language ?? "en",
+      maxRepeatedBrowserObservations: this.#budgets.maxRepeatedBrowserObservations,
+      noProgressNudgeIteration: this.#budgets.noProgressNudgeIteration,
+      maxNoProgressIterations: this.#budgets.maxNoProgressIterations,
+      executionWorkingSet: this.#executionWorkingSet,
+      executionCheckpointController: this.#executionCheckpointController,
+      runRecorder: this.#runRecorder,
+      onEvent: input.onEvent
+    });
+    if (this.canRunProvider()) {
+      await executionSupervision.initialize();
+    }
 
     for (let iteration = 0; iteration < this.#budgets.maxProviderIterations; iteration += 1) {
+      this.#acquireOrRenewBrowserSessionLease(foregroundTurnId);
       if (isAborted(input.signal)) {
+        terminationCause = "cancelled";
         await this.#runRecorder.recordProviderBudgetExhausted({
           budget: "abort-signal",
           limit: 1,
@@ -232,20 +381,27 @@ export class ProviderTurnLoop {
         break;
       }
       const elapsedMs = Date.now() - loopStartedAt;
-      if (elapsedMs > this.#budgets.maxProviderWallClockMs) {
+      const remainingMs = this.#budgets.maxProviderWallClockMs - elapsedMs;
+      if (remainingMs <= this.#budgets.finalizationReserveMs) {
+        emergencyDeadlineReached = true;
+        terminationCause = "deadline_reached";
         await this.#runRecorder.recordProviderBudgetExhausted({
           budget: "provider-wall-clock-ms",
           limit: this.#budgets.maxProviderWallClockMs,
           observed: elapsedMs,
-          reason: "Provider loop exceeded its wall-clock budget."
+          reason: "Provider loop reached its emergency finalization reserve."
         }, input.onEvent);
         await this.#runRecorder.recordClassifiedFailure(
-          { kind: "budget", budget: "provider-wall-clock-ms", limit: this.#budgets.maxProviderWallClockMs, observed: elapsedMs, reason: "Provider loop exceeded its wall-clock budget." },
+          { kind: "budget", budget: "provider-wall-clock-ms", limit: this.#budgets.maxProviderWallClockMs, observed: elapsedMs, reason: "Provider loop reached its emergency finalization reserve." },
           "provider-budget-exhausted"
+        );
+        effectiveProviderExecution = executionSupervision.emergencyDeadlineReceipt(
+          effectiveProviderExecution ?? localReceiptExecution(this.#model)
         );
         break;
       }
       if (providerToolExecutions.length >= this.#budgets.maxProviderToolCalls) {
+        terminationCause = "budget_exhausted";
         await this.#runRecorder.recordProviderBudgetExhausted({
           budget: "provider-tool-calls",
           limit: this.#budgets.maxProviderToolCalls,
@@ -258,42 +414,81 @@ export class ProviderTurnLoop {
         );
         break;
       }
+      const supervisionPrompt = executionSupervision.consumePromptState();
       const phase: "initial" | "continuation" = iteration === 0 || retryEmptyInitialResponse || retryReasoningOnlyInitialResponse
         ? "initial"
         : "continuation";
       retryEmptyInitialResponse = false;
       retryReasoningOnlyInitialResponse = false;
+      const providerToolsForIteration = filterSuppressedBrowserProviderTools(
+        activeProviderTools,
+        supervisionPrompt.suppressedBrowserTools
+      );
 
       let execution = phase === "initial"
         ? await this.#completeWithProvider({
             ...input,
+            foregroundTurnId,
+            providerToolCallNamespace,
+            providerTools: providerToolsForIteration,
             iteration,
             loopStartedAt,
-            reasoningOnlyPrefill: pendingReasoningOnlyPrefill
+            reasoningOnlyPrefill: pendingReasoningOnlyPrefill,
+            toolLoopProgressNudge: supervisionPrompt.toolLoopProgressNudge
           })
         : await this.#continueProviderAfterTools({
           ...input,
+          foregroundTurnId,
+          providerToolCallNamespace,
+          providerTools: providerToolsForIteration,
           toolExecutions: [
             ...input.toolExecutions,
             ...providerToolExecutions
           ],
+          toolFeedbackLedger,
           providerExecution: previousProviderExecution,
           iteration,
           loopStartedAt,
           emptyResponseNudge: pendingEmptyResponseNudge,
-          reasoningOnlyPrefill: pendingReasoningOnlyPrefill
+          protectedOtpNudge: pendingProtectedOtpNudge,
+          browserEvidenceNudge: supervisionPrompt.browserEvidenceNudge,
+          browserRetargetNudge: supervisionPrompt.browserRetargetNudge,
+          browserVisualEscalationReason: supervisionPrompt.browserVisualEscalationReason,
+          toolLoopProgressNudge: supervisionPrompt.toolLoopProgressNudge,
+          reasoningOnlyPrefill: pendingReasoningOnlyPrefill,
+          efficiencySignals: providerEfficiencySignals({
+            providerCalls: providerCallsThisTurn,
+            providerCallBudget: this.#budgets.maxProviderIterations,
+            providerTokens: providerTokensThisTurn,
+            repeatedMcpReads: toolFeedbackLedger.repeatedMcpReadCount ?? 0,
+            machineReadableApiDescriptionAvailable: providerToolExecutions.some((record) =>
+              record.result?.ok === true && (
+                record.result.content.includes("Machine-readable API description available:") ||
+                record.result.metadata?.apiDescription !== undefined
+              )
+            )
+          })
         });
       pendingEmptyResponseNudge = false;
+      pendingProtectedOtpNudge = false;
       pendingReasoningOnlyPrefill = false;
 
       if (execution === undefined) {
+        terminationCause = "provider_failed";
         break;
       }
 
+      providerCallsThisTurn += execution.attempts.length;
+      providerTokensThisTurn += providerExecutionTokenUse(execution);
+
       const consumedProviderIterations = providerIterationCost(execution);
       iterations += consumedProviderIterations;
+      if (execution.runtimeMetadata?.continuation?.exhausted === true) {
+        terminationCause = execution.runtimeMetadata.continuation.exhaustionCause ?? "budget_exhausted";
+      }
 
       if (isTruncatedToolCallRefusalExecution(execution)) {
+        terminationCause = "provider_failed";
         await this.#runRecorder.recordProviderIteration({
           iteration,
           phase,
@@ -312,6 +507,7 @@ export class ProviderTurnLoop {
 
       if (isReasoningOnlyExecution(execution)) {
         if (isReasoningOnlyLengthExhaustion(execution)) {
+          terminationCause = "provider_failed";
           execution = reasoningOnlySafeGuidanceExecution(execution, REASONING_ONLY_LENGTH_EXHAUSTION_MESSAGE);
           await this.#runRecorder.recordProviderIteration({
             iteration,
@@ -327,6 +523,47 @@ export class ProviderTurnLoop {
             iteration += consumedProviderIterations - 1;
           }
           break;
+        }
+
+        const toolLoopProgress = executionSupervision.observeReasoningOnly();
+        if (toolLoopProgress.active) {
+          await this.#runRecorder.recordProviderIteration({
+            iteration,
+            phase,
+            ok: execution.ok,
+            toolCalls: 0,
+            executedTools: 0,
+            exhausted: toolLoopProgress.shouldStop
+          });
+          effectiveProviderExecution = mergeProviderExecutions(effectiveProviderExecution, execution);
+          previousProviderExecution = execution;
+          if (toolLoopProgress.shouldStop) {
+            terminationCause = "tool_loop_no_progress";
+            const reason = "The foreground tool loop reached its no-progress iteration limit.";
+            await this.#runRecorder.recordProviderBudgetExhausted({
+              budget: "tool-loop-no-progress-iterations",
+              limit: this.#budgets.maxNoProgressIterations,
+              observed: toolLoopProgress.noProgressIterations,
+              reason
+            }, input.onEvent);
+            await this.#runRecorder.recordClassifiedFailure(
+              {
+                kind: "budget",
+                budget: "tool-loop-no-progress-iterations",
+                limit: this.#budgets.maxNoProgressIterations,
+                observed: toolLoopProgress.noProgressIterations,
+                reason
+              },
+              "provider-budget-exhausted"
+            );
+            effectiveProviderExecution = executionSupervision.toolLoopNoProgressStopReceipt(execution);
+            break;
+          }
+          pendingReasoningOnlyPrefill = reasoningOnlyPrefillRetries < 2;
+          if (pendingReasoningOnlyPrefill) reasoningOnlyPrefillRetries += 1;
+          retryReasoningOnlyInitialResponse = phase === "initial";
+          if (consumedProviderIterations > 1) iteration += consumedProviderIterations - 1;
+          continue;
         }
 
         if (
@@ -353,6 +590,7 @@ export class ProviderTurnLoop {
         }
 
         execution = reasoningOnlySafeGuidanceExecution(execution, REASONING_ONLY_EMPTY_RESPONSE_MESSAGE);
+        terminationCause = "provider_failed";
         await this.#runRecorder.recordProviderIteration({
           iteration,
           phase,
@@ -369,6 +607,36 @@ export class ProviderTurnLoop {
         break;
       }
 
+      const remainingAfterProviderMs = this.#budgets.maxProviderWallClockMs - (Date.now() - loopStartedAt);
+      if (
+        remainingAfterProviderMs <= this.#budgets.finalizationReserveMs &&
+        (execution.ok !== true || execution.toolCalls.length > 0)
+      ) {
+        emergencyDeadlineReached = true;
+        terminationCause = "deadline_reached";
+        const elapsedAfterProviderMs = Date.now() - loopStartedAt;
+        await this.#runRecorder.recordProviderBudgetExhausted({
+          budget: "provider-wall-clock-ms",
+          limit: this.#budgets.maxProviderWallClockMs,
+          observed: elapsedAfterProviderMs,
+          reason: "Provider loop reached its emergency finalization reserve before starting new tool work."
+        }, input.onEvent);
+        await this.#runRecorder.recordClassifiedFailure(
+          {
+            kind: "budget",
+            budget: "provider-wall-clock-ms",
+            limit: this.#budgets.maxProviderWallClockMs,
+            observed: elapsedAfterProviderMs,
+            reason: "Provider loop reached its emergency finalization reserve before starting new tool work."
+          },
+          "provider-budget-exhausted"
+        );
+        execution = executionSupervision.emergencyDeadlineReceipt(execution);
+        effectiveProviderExecution = mergeProviderExecutions(effectiveProviderExecution, execution);
+        previousProviderExecution = execution;
+        break;
+      }
+
       if (execution.ok === true && execution.toolCalls.length > 0) {
         execution = await this.#persistProviderToolCallTurn(execution);
       }
@@ -380,13 +648,71 @@ export class ProviderTurnLoop {
         toolPlans: input.toolPlans,
         trustedWorkspace: input.trustedWorkspace,
         visibleTurnId: input.visibleTurnId,
+        providerUsageLineage: await this.#providerUsageLineage(input.visibleTurnId),
+        visionInputProvenance: visionInputProvenanceForTurn({
+          attachments: input.attachments,
+          references: input.context?.references
+        }),
         remainingToolCalls: Math.max(0, this.#budgets.maxProviderToolCalls - providerToolExecutions.length),
         riskBaseline: maxObservedRisk,
         signal: input.signal,
-        onEvent: input.onEvent
+        onEvent: input.onEvent,
+        onApprovalRequest: input.onApprovalRequest,
+        onSecureInputRequest,
+        readLedger: mcpReadLedger,
+        readLedgerScope: {
+          profileId: this.#profileId,
+          sessionId: this.#sessionRuntimeContext?.currentSessionId() ?? this.#sessionId
+        },
+        runtimeAdmissionGuard: executionSupervision.runtimeAdmissionGuard(),
+        onExecution: async (toolExecution) => {
+          await executionSupervision.applyRuntimeEffects({ executions: [toolExecution] });
+        }
       });
-      const loopToolExecutions = loopToolExecutionResult.executions;
+      const loopToolExecutions = [...loopToolExecutionResult.executions];
       maxObservedRisk = loopToolExecutionResult.maxObservedRisk;
+      const protectedChallenge = executionSupervision.takeProtectedAuthenticationChallenge();
+      if (protectedChallenge !== undefined) {
+        if (onSecureInputRequest === undefined) {
+          executionSupervision.requireProtectedChallengeInput();
+        } else if (providerToolExecutions.length + loopToolExecutions.length < this.#budgets.maxProviderToolCalls) {
+          const recovery = await this.#toolPlanRunner.executeInternalTool({
+            id: runtimeProviderToolCallId({
+              namespace: providerToolCallNamespace,
+              providerIteration: iteration,
+              callOrdinal: execution.toolCalls.length
+            }),
+            tool: "browser.type",
+            value: {
+              ref: protectedChallenge.fieldRef,
+              sessionId: protectedChallenge.sessionId,
+              identity: protectedChallenge.identity,
+              tabRef: protectedChallenge.tabRef,
+              protectedInput: {
+                kind: "one-time-code",
+                purpose: "Complete the current authentication challenge",
+                retention: "use-once"
+              },
+              submitRef: protectedChallenge.submitRef
+            },
+            toolPlans: input.toolPlans,
+            trustedWorkspace: input.trustedWorkspace,
+            riskBaseline: maxObservedRisk,
+            visibleTurnId: input.visibleTurnId,
+            providerUsageLineage: await this.#providerUsageLineage(input.visibleTurnId),
+            signal: input.signal,
+            onEvent: input.onEvent,
+            onApprovalRequest: input.onApprovalRequest,
+            onSecureInputRequest,
+            runtimeAdmissionGuard: executionSupervision.runtimeAdmissionGuard(),
+            onExecution: async (toolExecution) => {
+              await executionSupervision.applyRuntimeEffects({ executions: [toolExecution] });
+            }
+          });
+          if (recovery.execution !== undefined) loopToolExecutions.push(recovery.execution);
+          maxObservedRisk = recovery.maxObservedRisk;
+        }
+      }
       providerToolExecutions.push(...loopToolExecutions);
       delegatedAnswerOwnership = pendingDelegatedAnswerOwnership(loopToolExecutions) ?? delegatedAnswerOwnership;
       if (loopToolExecutions.some((execution) => !isHousekeepingToolName(execution.tool.name))) {
@@ -407,8 +733,63 @@ export class ProviderTurnLoop {
         });
       }
       const currentPlans = input.toolPlans.slice(beforePlans);
+      toolFeedbackLedger = recordTurnToolFeedbackBatch(
+        toolFeedbackLedger,
+        currentPlans,
+        loopToolExecutions
+      );
       const hasRecoverableToolFeedback = currentPlans.some((plan) => isRecoverableToolPlanStatus(plan.status));
       const repeatedFailureBudgetExceeded = this.#recordRepeatedToolFailures(loopToolExecutions, repeatedFailures);
+      const supervisionAssessment = executionSupervision.assessProgress(loopToolExecutions);
+      const { browserObservation, toolLoopProgress, runtimeUserInputBlocker } = supervisionAssessment;
+      const canContinueWithExpandedInventory =
+        runtimeUserInputBlocker === undefined &&
+        supervisionAssessment.terminationCause === undefined &&
+        repeatedFailureBudgetExceeded === undefined &&
+        browserObservation?.shouldStop !== true &&
+        !toolLoopProgress.shouldStop &&
+        iteration + consumedProviderIterations < this.#budgets.maxProviderIterations &&
+        providerToolExecutions.length < this.#budgets.maxProviderToolCalls;
+      if (
+        !toolExpansionUsed &&
+        canContinueWithExpandedInventory &&
+        browserObservation?.visualEscalationReason !== undefined
+      ) {
+        const additions = (input.toolExpansionCandidates ?? [])
+          .filter((candidate) => candidate.source === "active-browser")
+          .filter((candidate) => !activeProviderTools.some((tool) => tool.function.name === candidate.schema.function.name));
+        if (additions.length > 0) {
+          activeProviderTools = [...activeProviderTools, ...additions.map((candidate) => candidate.schema)];
+          toolExpansionUsed = true;
+          await this.#runRecorder.recordProviderToolInventory({
+            kind: "provider-tool-inventory",
+            phase: "expanded",
+            tools: activeProviderTools.map((tool) => tool.function.name),
+            addedTools: additions.map((candidate) => candidate.schema.function.name),
+            expansionReason: `browser:${browserObservation.visualEscalationReason}`,
+            nativeSchemaTokens: estimateTextTokensRough(JSON.stringify(activeProviderTools)),
+            connectors: input.connectorInventory ?? []
+          }, input.onEvent);
+        }
+      }
+      if (supervisionAssessment.terminationCause !== undefined) {
+        terminationCause = supervisionAssessment.terminationCause;
+      }
+      this.#acquireOrRenewBrowserSessionLease(foregroundTurnId);
+      if (runtimeUserInputBlocker !== undefined) {
+        execution = executionSupervision.runtimeUserInputRequiredReceipt(execution, runtimeUserInputBlocker.summary);
+        await this.#runRecorder.recordProviderIteration({
+          iteration,
+          phase,
+          ok: execution.ok,
+          toolCalls: execution.toolCalls.length,
+          executedTools: providerToolExecutions.length - beforeExecutions,
+          exhausted: false
+        });
+        effectiveProviderExecution = mergeProviderExecutions(effectiveProviderExecution, execution);
+        previousProviderExecution = execution;
+        break;
+      }
       if (repeatedFailureBudgetExceeded !== undefined) {
         await this.#runRecorder.recordProviderBudgetExhausted({
           budget: "repeated-tool-failures",
@@ -421,10 +802,50 @@ export class ProviderTurnLoop {
           "provider-budget-exhausted"
         );
       }
+      if (browserObservation?.shouldStop === true) {
+        const reason = `Browser work (${browserObservation.tool}) repeated evidence or ineffective targets without a new grounded strategy.`;
+        await this.#runRecorder.recordProviderBudgetExhausted({
+          budget: "repeated-browser-observations",
+          limit: this.#budgets.maxRepeatedBrowserObservations,
+          observed: browserObservation.count,
+          reason
+        }, input.onEvent);
+        await this.#runRecorder.recordClassifiedFailure(
+          {
+            kind: "budget",
+            budget: "repeated-browser-observations",
+            limit: this.#budgets.maxRepeatedBrowserObservations,
+            observed: browserObservation.count,
+            reason
+          },
+          "provider-budget-exhausted"
+        );
+      }
+      if (toolLoopProgress.shouldStop) {
+        const reason = "The foreground tool loop reached its no-progress iteration limit.";
+        await this.#runRecorder.recordProviderBudgetExhausted({
+          budget: "tool-loop-no-progress-iterations",
+          limit: this.#budgets.maxNoProgressIterations,
+          observed: toolLoopProgress.noProgressIterations,
+          reason
+        }, input.onEvent);
+        await this.#runRecorder.recordClassifiedFailure(
+          {
+            kind: "budget",
+            budget: "tool-loop-no-progress-iterations",
+            limit: this.#budgets.maxNoProgressIterations,
+            observed: toolLoopProgress.noProgressIterations,
+            reason
+          },
+          "provider-budget-exhausted"
+        );
+      }
       const exhausted = (
         iteration + consumedProviderIterations >= this.#budgets.maxProviderIterations ||
         providerToolExecutions.length >= this.#budgets.maxProviderToolCalls ||
-        repeatedFailureBudgetExceeded !== undefined
+        repeatedFailureBudgetExceeded !== undefined ||
+        browserObservation?.shouldStop === true ||
+        toolLoopProgress.shouldStop
       ) && execution.toolCalls.length > 0 && loopToolExecutions.length > 0;
 
       let terminalPostToolEmpty =
@@ -457,6 +878,10 @@ export class ProviderTurnLoop {
         exhausted
       });
 
+      if (browserObservation?.shouldStop === true) {
+        execution = executionSupervision.browserNoProgressStopReceipt(execution);
+      }
+
       if (delegatedAnswerOwnership !== undefined) {
         effectiveProviderExecution = mergeProviderExecutions(effectiveProviderExecution, execution);
         previousProviderExecution = execution;
@@ -464,6 +889,10 @@ export class ProviderTurnLoop {
           iteration += consumedProviderIterations - 1;
         }
         break;
+      }
+
+      if (toolLoopProgress.shouldStop) {
+        execution = executionSupervision.toolLoopNoProgressStopReceipt(execution);
       }
 
       if (
@@ -503,6 +932,25 @@ export class ProviderTurnLoop {
         }
       }
 
+      const shouldCorrectProtectedOtpStop =
+        !protectedOtpCorrectionUsed &&
+        phase === "continuation" &&
+        execution.ok === true &&
+        execution.toolCalls.length === 0 &&
+        execution.response?.content.trim().length !== 0 &&
+        activeProviderTools.some((tool) => tool.function.name === "browser.type") &&
+        hasVisibleOneTimeCodeChallenge(providerToolExecutions) &&
+        iteration + consumedProviderIterations < this.#budgets.maxProviderIterations;
+      if (shouldCorrectProtectedOtpStop) {
+        protectedOtpCorrectionUsed = true;
+        pendingProtectedOtpNudge = true;
+        previousProviderExecution = execution;
+        if (consumedProviderIterations > 1) {
+          iteration += consumedProviderIterations - 1;
+        }
+        continue;
+      }
+
       effectiveProviderExecution = mergeProviderExecutions(effectiveProviderExecution, execution);
       previousProviderExecution = execution;
 
@@ -512,9 +960,19 @@ export class ProviderTurnLoop {
         (loopToolExecutions.length === 0 && !hasRecoverableToolFeedback) ||
         exhausted
       ) {
-        if (exhausted && execution.ok === true) {
+        if (terminationCause === "normal") {
+          terminationCause = execution.ok !== true
+            ? "provider_failed"
+            : exhausted
+              ? "budget_exhausted"
+              : "normal";
+        }
+        if (exhausted && execution.ok === true && !toolLoopProgress.shouldStop) {
+          const exhaustionReason = browserObservation?.shouldStop === true
+            ? "browser evidence or ineffective targets repeated without a new grounded strategy"
+            : "max iterations, tool calls, or repeated tool failures reached with pending work";
           await this.#runRecorder.recordClassifiedFailure(
-            { kind: "loop-exhausted", reason: "max iterations or tool calls reached with pending work", iterations: iteration + 1 },
+            { kind: "loop-exhausted", reason: exhaustionReason, iterations: iteration + 1 },
             "provider-iteration"
           );
         }
@@ -526,12 +984,93 @@ export class ProviderTurnLoop {
       }
     }
 
+    await this.#runRecorder.markPlannedToolPlansCancelled(
+      input.toolPlans,
+      "Provider turn ended before the planned tool call produced a result."
+    );
+
     return {
       providerExecution: effectiveProviderExecution,
       toolExecutions: providerToolExecutions,
       iterations,
-      ...(delegatedAnswerOwnership === undefined ? {} : { delegatedAnswerOwnership })
+      terminationCause,
+      ...(delegatedAnswerOwnership === undefined ? {} : { delegatedAnswerOwnership }),
+      ...(emergencyDeadlineReached ? { emergencyDeadlineReached: true } : {})
     };
+    } finally {
+      input.signal?.removeEventListener("abort", releaseBrowserLeaseOnAbort);
+      this.#releaseBrowserSessionLease();
+    }
+  }
+
+  async #browserStateForPrompt(input: {
+    intent: IntentRoute;
+    executions: readonly ToolExecutionRecord[];
+    signal?: AbortSignal;
+  }): Promise<BrowserStateProjection | undefined> {
+    const context = this.#sessionRuntimeContext;
+    const previous = context?.browserState();
+    const runtimeSessionId = context?.currentSessionId() ?? this.#sessionId;
+    const sessionId = deriveBrowserSessionKey({ currentSessionId: () => runtimeSessionId });
+    const projected = projectBrowserStateFromExecutions({
+      executions: input.executions,
+      sessionId,
+      previous
+    });
+    if (projected !== undefined) {
+      context?.setBrowserState(projected);
+      return projected;
+    }
+    if (
+      this.#browserBackend === undefined ||
+      (previous === undefined && !input.intent.suggestedToolsets.includes("browser"))
+    ) {
+      return previous;
+    }
+    const refreshed = await refreshBrowserStateProjection({
+      backend: this.#browserBackend,
+      sessionId,
+      previous,
+      signal: input.signal
+    });
+    context?.setBrowserState(refreshed);
+    return refreshed;
+  }
+
+  #acquireOrRenewBrowserSessionLease(foregroundTurnId: string): void {
+    if (this.#browserSessionLease === undefined) return;
+    const owner = `provider-turn:${this.#profileId}:${foregroundTurnId}`;
+
+    const runtimeSessionId = this.#sessionRuntimeContext?.currentSessionId() ?? this.#sessionId;
+    const sessionId = deriveBrowserSessionKey({ currentSessionId: () => runtimeSessionId });
+
+    if (
+      this.#activeBrowserLease !== undefined &&
+      (this.#activeBrowserLease.sessionId !== sessionId ||
+        this.#activeBrowserLease.owner !== owner)
+    ) {
+      this.#browserSessionLease.release(
+        this.#activeBrowserLease.sessionId,
+        this.#activeBrowserLease.owner
+      );
+      this.#activeBrowserLease = undefined;
+    }
+
+    if (this.#activeBrowserLease === undefined) {
+      this.#browserSessionLease.acquire(sessionId, owner);
+      this.#activeBrowserLease = { sessionId, owner };
+      return;
+    }
+    this.#browserSessionLease.renew(sessionId, owner);
+  }
+
+  #releaseBrowserSessionLease(): void {
+    if (this.#activeBrowserLease === undefined) return;
+    this.#browserSessionLease?.release(
+      this.#activeBrowserLease.sessionId,
+      this.#activeBrowserLease.owner
+    );
+    this.#activeBrowserLease = undefined;
   }
 
   #recordRepeatedToolFailures(
@@ -559,6 +1098,9 @@ export class ProviderTurnLoop {
   }
 
   async #completeWithProvider(input: {
+    diagnosticOnly?: boolean;
+    foregroundTurnId: string;
+    providerToolCallNamespace: string;
     visibleTurnId?: string;
     userText: string;
     routedText: string;
@@ -586,12 +1128,18 @@ export class ProviderTurnLoop {
     loopStartedAt: number;
     signal?: AbortSignal;
     reasoningOnlyPrefill?: boolean;
+    toolLoopProgressNudge?: boolean;
   }): Promise<ProviderExecutionResult | undefined> {
     if (this.#providerExecutor === undefined || this.#model === undefined || this.#model.provider === "unconfigured") {
       return undefined;
     }
 
     const sessionHistory = await this.#providerSessionHistory();
+    const browserState = input.diagnosticOnly ? undefined : await this.#browserStateForPrompt({
+      intent: input.intent,
+      executions: input.toolExecutions,
+      signal: input.signal
+    });
     const prompt = assembleProviderPrompt({
       ...input,
       model: this.#model,
@@ -610,16 +1158,20 @@ export class ProviderTurnLoop {
       selectedSkillSetup: input.selectedSkillSetup,
       attachments: input.attachments,
       ui: this.#ui,
-      agentProfile: this.#agentProfile
+      agentProfile: this.#agentProfile,
+      executionPlan: input.diagnosticOnly ? undefined : this.#executionPlanReader?.current(),
+      executionWorkingSet: input.diagnosticOnly ? undefined : this.#executionWorkingSet?.snapshot(
+        input.foregroundTurnId,
+        this.#sessionRuntimeContext?.currentSessionId() ?? this.#sessionId
+      ),
+      browserState
     });
     if (input.reasoningOnlyPrefill === true) {
       prompt.messages.push(reasoningOnlyPrefillMessage());
     }
-    this.#lastPromptTokens = prompt.budget.estimatedTokens;
-    await this.#runRecorder.recordPromptAssembly(prompt.budget);
-    await this.#recordNativeHistoryDiagnostics(prompt, "primary");
-    await emitAssembledPromptEstimate(input.onEvent, prompt.budget);
-
+    if (input.toolLoopProgressNudge === true) {
+      prompt.messages.push({ role: "user", content: EXECUTION_SUPERVISION_PROMPTS.toolLoopProgress });
+    }
     const providerRequest = normalizeProviderRequest({
       provider: this.#model.provider,
       model: this.#model.id,
@@ -629,9 +1181,15 @@ export class ProviderTurnLoop {
         ? input.providerTools
         : undefined
     });
+    const promptBudget = this.#accountProviderRequest(prompt.budget, providerRequest);
+    this.#lastPromptTokens = promptBudget.requestAccounting?.estimatedInputTokens ?? promptBudget.estimatedTokens;
+    await this.#runRecorder.recordPromptAssembly(promptBudget);
+    await this.#recordNativeHistoryDiagnostics(prompt, "primary");
+    await emitAssembledPromptEstimate(input.onEvent, promptBudget);
     const providerPreferences = {
       requireTools: input.providerTools.length > 0,
       requireVision: providerRequestContainsImageParts(providerRequest),
+      requireMultipleImages: providerRequestImagePartCount(providerRequest) > 1,
       requireStructuredOutput: false,
       providerOrder: [this.#model.provider],
       ...this.#providerPreferences
@@ -639,6 +1197,7 @@ export class ProviderTurnLoop {
     const execution = await this.#completeProviderRequestWithFinalizationRetries({
       request: providerRequest,
       preferences: providerPreferences,
+      imageInputs: prompt.imageInputs,
       sessionId: this.#currentSessionId(),
       iteration: input.iteration,
       loopStartedAt: input.loopStartedAt,
@@ -646,10 +1205,11 @@ export class ProviderTurnLoop {
       onEvent: input.onEvent,
       onDelta: input.onDelta,
       onSegmentBreak: input.onSegmentBreak,
-      visibleTurnId: input.visibleTurnId
+      visibleTurnId: input.visibleTurnId,
+      providerToolCallNamespace: input.providerToolCallNamespace
     });
     if (execution.response?.usage?.inputTokens !== undefined) {
-      await this.#recordContextWindowUsage(execution, prompt.budget, input.onEvent);
+      await this.#recordContextWindowUsage(execution, promptBudget, input.onEvent);
     }
 
     await this.#sessionDb.appendEvent(this.#currentSessionId(), {
@@ -679,6 +1239,8 @@ export class ProviderTurnLoop {
   }
 
   async #continueProviderAfterTools(input: {
+    foregroundTurnId: string;
+    providerToolCallNamespace: string;
     visibleTurnId?: string;
     userText: string;
     routedText: string;
@@ -697,6 +1259,7 @@ export class ProviderTurnLoop {
     providerTools: OpenAICompatibleToolSchema[];
     providerExecution: ProviderExecutionResult | undefined;
     toolPlans: ToolCallPlan[];
+    toolFeedbackLedger: TurnToolFeedbackLedger;
     conversationContinuationState?: ConversationContinuationState;
     fallbackText: string;
     onEvent?: RuntimeEventSink;
@@ -705,7 +1268,13 @@ export class ProviderTurnLoop {
     iteration: number;
     loopStartedAt: number;
     emptyResponseNudge?: boolean;
+    protectedOtpNudge?: boolean;
+    browserEvidenceNudge?: boolean;
+    browserRetargetNudge?: boolean;
+    browserVisualEscalationReason?: string;
+    toolLoopProgressNudge?: boolean;
     reasoningOnlyPrefill?: boolean;
+    efficiencySignals?: string[];
     signal?: AbortSignal;
   }): Promise<ProviderExecutionResult | undefined> {
     if (
@@ -713,13 +1282,28 @@ export class ProviderTurnLoop {
       this.#model === undefined ||
       this.#model.provider === "unconfigured" ||
       input.providerExecution?.ok !== true ||
-      (input.providerExecution.toolCalls.length === 0 && input.emptyResponseNudge !== true) ||
-      !input.toolPlans.some((plan) => plan.status === "executed" || isRecoverableToolPlanStatus(plan.status))
+      (
+        input.providerExecution.toolCalls.length === 0 &&
+        input.emptyResponseNudge !== true &&
+        input.protectedOtpNudge !== true &&
+        input.toolLoopProgressNudge !== true
+      ) ||
+      (
+        input.toolLoopProgressNudge !== true &&
+        !input.toolPlans.some((plan) => plan.status === "executed" || isRecoverableToolPlanStatus(plan.status))
+      )
     ) {
       return undefined;
     }
 
     const sessionHistory = await this.#providerSessionHistory();
+    const browserState = await this.#browserStateForPrompt({
+      intent: input.intent,
+      executions: input.toolFeedbackLedger.latest.flatMap((entry) =>
+        entry.execution === undefined ? [] : [entry.execution]
+      ),
+      signal: input.signal
+    });
     const prompt = assembleProviderContinuationPrompt({
       ...input,
       model: this.#model,
@@ -738,7 +1322,13 @@ export class ProviderTurnLoop {
       selectedSkillSetup: input.selectedSkillSetup,
       attachments: input.attachments,
       ui: this.#ui,
-      agentProfile: this.#agentProfile
+      agentProfile: this.#agentProfile,
+      executionPlan: this.#executionPlanReader?.current(),
+      executionWorkingSet: this.#executionWorkingSet?.snapshot(
+        input.foregroundTurnId,
+        this.#sessionRuntimeContext?.currentSessionId() ?? this.#sessionId
+      ),
+      browserState
     });
     if (input.emptyResponseNudge === true) {
       prompt.messages.push({
@@ -746,14 +1336,38 @@ export class ProviderTurnLoop {
         content: "You just executed tool calls but returned an empty response. Please process the tool results above and continue with the task."
       });
     }
+    if (input.protectedOtpNudge === true) {
+      prompt.messages.push({
+        role: "user",
+        content: PROTECTED_OTP_CONTINUATION_PROMPT
+      });
+    }
+    if (input.browserEvidenceNudge === true) {
+      prompt.messages.push({
+        role: "user",
+        content: EXECUTION_SUPERVISION_PROMPTS.browserEvidence
+      });
+    }
+    if (input.browserRetargetNudge === true) {
+      prompt.messages.push({
+        role: "user",
+        content: EXECUTION_SUPERVISION_PROMPTS.browserRetarget
+      });
+    }
+    if (input.browserVisualEscalationReason !== undefined) {
+      prompt.messages.push({
+        role: "user",
+        content: input.browserVisualEscalationReason === "repeated-incidental-match"
+          ? EXECUTION_SUPERVISION_PROMPTS.browserVisualRepeatedMatch
+          : EXECUTION_SUPERVISION_PROMPTS.browserVisual
+      });
+    }
+    if (input.toolLoopProgressNudge === true) {
+      prompt.messages.push({ role: "user", content: EXECUTION_SUPERVISION_PROMPTS.toolLoopProgress });
+    }
     if (input.reasoningOnlyPrefill === true) {
       prompt.messages.push(reasoningOnlyPrefillMessage());
     }
-    this.#lastPromptTokens = prompt.budget.estimatedTokens;
-    await this.#runRecorder.recordPromptAssembly(prompt.budget);
-    await this.#recordNativeHistoryDiagnostics(prompt, "primary");
-    await emitAssembledPromptEstimate(input.onEvent, prompt.budget);
-
     const providerRequest = normalizeProviderRequest({
       provider: this.#model.provider,
       model: this.#model.id,
@@ -763,9 +1377,15 @@ export class ProviderTurnLoop {
         ? input.providerTools
         : undefined
     });
+    const promptBudget = this.#accountProviderRequest(prompt.budget, providerRequest);
+    this.#lastPromptTokens = promptBudget.requestAccounting?.estimatedInputTokens ?? promptBudget.estimatedTokens;
+    await this.#runRecorder.recordPromptAssembly(promptBudget);
+    await this.#recordNativeHistoryDiagnostics(prompt, "primary");
+    await emitAssembledPromptEstimate(input.onEvent, promptBudget);
     const providerPreferences = {
       requireTools: input.providerTools.length > 0,
       requireVision: providerRequestContainsImageParts(providerRequest),
+      requireMultipleImages: providerRequestImagePartCount(providerRequest) > 1,
       requireStructuredOutput: false,
       providerOrder: [this.#model.provider],
       ...this.#providerPreferences
@@ -773,6 +1393,7 @@ export class ProviderTurnLoop {
     const execution = await this.#completeProviderRequestWithFinalizationRetries({
       request: providerRequest,
       preferences: providerPreferences,
+      imageInputs: prompt.imageInputs,
       sessionId: this.#currentSessionId(),
       iteration: input.iteration,
       loopStartedAt: input.loopStartedAt,
@@ -780,10 +1401,11 @@ export class ProviderTurnLoop {
       onEvent: input.onEvent,
       onDelta: input.onDelta,
       onSegmentBreak: input.onSegmentBreak,
-      visibleTurnId: input.visibleTurnId
+      visibleTurnId: input.visibleTurnId,
+      providerToolCallNamespace: input.providerToolCallNamespace
     });
     if (execution.response?.usage?.inputTokens !== undefined) {
-      await this.#recordContextWindowUsage(execution, prompt.budget, input.onEvent);
+      await this.#recordContextWindowUsage(execution, promptBudget, input.onEvent);
     }
 
     const continuationEvent = {
@@ -797,7 +1419,9 @@ export class ProviderTurnLoop {
         status: plan.status
       })),
       ...providerExecutionEventMetadata(execution),
-      nudge: input.emptyResponseNudge === true
+      nudge: input.emptyResponseNudge === true ||
+        input.protectedOtpNudge === true ||
+        input.toolLoopProgressNudge === true
     };
     await this.#sessionDb.appendEvent(this.#currentSessionId(), continuationEvent);
     this.#trajectoryRecorder.record("provider-continuation", {
@@ -810,7 +1434,9 @@ export class ProviderTurnLoop {
         status: plan.status
       })),
       ...providerExecutionEventMetadata(execution),
-      nudge: input.emptyResponseNudge === true
+      nudge: input.emptyResponseNudge === true ||
+        input.protectedOtpNudge === true ||
+        input.toolLoopProgressNudge === true
     });
 
     if (!execution.ok) {
@@ -832,9 +1458,26 @@ export class ProviderTurnLoop {
     };
   }
 
+  #accountProviderRequest(
+    budget: PromptBudgetReport,
+    request: Pick<ProviderRequest, "messages" | "tools" | "maxTokens">
+  ): PromptBudgetReport {
+    const outputReservationTokens = resolveProviderOutputTokenBound(
+      request,
+      this.#primaryModelRoute,
+      this.#model
+    ) ?? 0;
+
+    return {
+      ...budget,
+      requestAccounting: estimateProviderRequestAccounting(request, outputReservationTokens)
+    };
+  }
+
   async #completeProviderRequestWithFinalizationRetries(input: {
     request: Omit<ProviderRequest, "model"> & { model?: string };
     preferences: ProviderRoutePreferences;
+    imageInputs: readonly ProviderImageInput[];
     sessionId: string;
     iteration: number;
     loopStartedAt: number;
@@ -843,6 +1486,7 @@ export class ProviderTurnLoop {
     onDelta?: (text: string) => void;
     onSegmentBreak?: (reason?: string) => void | Promise<void>;
     visibleTurnId?: string;
+    providerToolCallNamespace: string;
   }): Promise<ProviderExecutionResult> {
     const initial = await this.#completeProviderRequestWithTruncatedToolRetry(input);
     return await this.#continueLengthTruncatedTextResponse({
@@ -854,6 +1498,7 @@ export class ProviderTurnLoop {
   async #completeProviderRequestWithTruncatedToolRetry(input: {
     request: Omit<ProviderRequest, "model"> & { model?: string };
     preferences: ProviderRoutePreferences;
+    imageInputs: readonly ProviderImageInput[];
     sessionId: string;
     iteration: number;
     loopStartedAt: number;
@@ -864,6 +1509,7 @@ export class ProviderTurnLoop {
     onDelta?: (text: string) => void;
     onSegmentBreak?: (reason?: string) => void | Promise<void>;
     visibleTurnId?: string;
+    providerToolCallNamespace: string;
   }): Promise<ProviderExecutionResult> {
     const primaryRoute = input.primaryRoute ?? this.#primaryModelRoute;
     const fallbackChain = input.fallbackChain ?? this.#modelFallbackRoutes;
@@ -878,13 +1524,20 @@ export class ProviderTurnLoop {
       signal: input.signal,
       primaryRoute,
       fallbackChain,
-      usage: await this.#nextProviderUsageContext(input.visibleTurnId),
+      retryRateLimits: true,
+      deadlineAtMs: providerWorkDeadlineAt(input.loopStartedAt, this.#budgets),
+      usage: await this.#nextProviderUsageContext(input.visibleTurnId, input.imageInputs),
       onEvent: initialEvents.onEvent
     });
 
     if (!isLengthTruncatedToolCallExecution(execution)) {
-      await initialEvents.flushToolCalls();
-      return execution;
+      const normalizedExecution = namespaceProviderToolCalls({
+        execution,
+        namespace: input.providerToolCallNamespace,
+        providerIteration: input.iteration
+      });
+      await initialEvents.flushToolCalls(normalizedExecution.toolCalls);
+      return normalizedExecution;
     }
     initialEvents.discardToolCalls();
 
@@ -940,7 +1593,9 @@ export class ProviderTurnLoop {
       signal: input.signal,
       primaryRoute: retryPrimaryRoute,
       fallbackChain: retryChain.slice(1),
-      usage: await this.#nextProviderUsageContext(input.visibleTurnId),
+      retryRateLimits: true,
+      deadlineAtMs: providerWorkDeadlineAt(input.loopStartedAt, this.#budgets),
+      usage: await this.#nextProviderUsageContext(input.visibleTurnId, input.imageInputs),
       onEvent: retryEvents.onEvent
     });
     const retryExecution = rebaseRetryRouteIdentity(retryExecutionRaw, retryChain, originalRouteChain);
@@ -956,14 +1611,20 @@ export class ProviderTurnLoop {
       });
     }
 
-    await retryEvents.flushToolCalls();
-    return mergeTruncatedToolRetryExecutions(execution, retryExecution);
+    const normalizedRetryExecution = namespaceProviderToolCalls({
+      execution: retryExecution,
+      namespace: input.providerToolCallNamespace,
+      providerIteration: input.iteration
+    });
+    await retryEvents.flushToolCalls(normalizedRetryExecution.toolCalls);
+    return mergeTruncatedToolRetryExecutions(execution, normalizedRetryExecution);
   }
 
   async #continueLengthTruncatedTextResponse(input: {
     initial: ProviderExecutionResult;
     request: Omit<ProviderRequest, "model"> & { model?: string };
     preferences: ProviderRoutePreferences;
+    imageInputs: readonly ProviderImageInput[];
     sessionId: string;
     iteration: number;
     loopStartedAt: number;
@@ -972,6 +1633,7 @@ export class ProviderTurnLoop {
     onDelta?: (text: string) => void;
     onSegmentBreak?: (reason?: string) => void | Promise<void>;
     visibleTurnId?: string;
+    providerToolCallNamespace: string;
   }): Promise<ProviderExecutionResult> {
     if (!isLengthTruncatedTextExecution(input.initial)) {
       return input.initial;
@@ -984,6 +1646,7 @@ export class ProviderTurnLoop {
     let continuationAttempts = 0;
     let consumedProviderIterations = providerIterationCost(input.initial);
     let exhausted = false;
+    let exhaustionCause: NonNullable<ProviderLoopRuntimeMetadata["continuation"]>["exhaustionCause"];
     let finalFinishReason: ProviderFinishReason | undefined = input.initial.response?.finishReason;
 
     while (continuationAttempts < MAX_TEXT_CONTINUATION_ATTEMPTS && isLengthTruncatedTextExecution(current)) {
@@ -991,11 +1654,13 @@ export class ProviderTurnLoop {
       const retryPrimaryRoute = retryChain[0];
       if (retryPrimaryRoute === undefined) {
         exhausted = true;
+        exhaustionCause = "provider_failed";
         break;
       }
 
       if (input.iteration + consumedProviderIterations >= this.#budgets.maxProviderIterations) {
         exhausted = true;
+        exhaustionCause = "budget_exhausted";
         break;
       }
 
@@ -1012,6 +1677,7 @@ export class ProviderTurnLoop {
           "provider-budget-exhausted"
         );
         exhausted = true;
+        exhaustionCause = "deadline_reached";
         break;
       }
 
@@ -1063,12 +1729,14 @@ export class ProviderTurnLoop {
 
     if (isLengthTruncatedTextExecution(current)) {
       exhausted = true;
+      exhaustionCause ??= "budget_exhausted";
     }
 
     return mergeTextContinuationExecutions(executions, accumulatedVisibleText, {
       reason: "provider_length",
       attempts: continuationAttempts,
       exhausted,
+      ...(exhaustionCause === undefined ? {} : { exhaustionCause }),
       initialFinishReason: "length",
       ...(finalFinishReason === undefined ? {} : { finalFinishReason })
     });
@@ -1081,7 +1749,7 @@ export class ProviderTurnLoop {
     compression?: PromptSemanticCompressionReport;
   }> {
     const sourceMessages = await this.#sessionDb.listMessages(this.#currentSessionId());
-    const messages = sourceMessages;
+    const messages = sanitizeSessionHistoryCredentials(sourceMessages);
     const packed = packSessionHistory(messages, {
       maxEstimatedTokens: deriveSessionHistoryBudget(this.#model?.contextWindowTokens)
     });
@@ -1155,14 +1823,29 @@ export class ProviderTurnLoop {
     return this.#sessionRuntimeContext?.currentSessionId() ?? this.#sessionId;
   }
 
-  async #nextProviderUsageContext(visibleTurnId: string | undefined): Promise<ProviderUsageContext> {
+  async #nextProviderUsageContext(
+    visibleTurnId: string | undefined,
+    imageInputs: readonly ProviderImageInput[]
+  ): Promise<ProviderUsageContext> {
+    const lineage = await this.#providerUsageLineage(visibleTurnId);
+    return {
+      requestKey: [
+        lineage.executionSessionId ?? this.#currentSessionId(),
+        lineage.visibleTurnId ?? "session",
+        String(this.#providerRequestSequence++)
+      ].join("\0"),
+      sourceKind: this.#taskExecution === undefined ? "main" : "task",
+      ...(imageInputs.length === 0 ? {} : { imageInputs }),
+      ...lineage
+    };
+  }
+
+  async #providerUsageLineage(visibleTurnId: string | undefined): Promise<ProviderUsageLineage> {
     const sessionId = this.#currentSessionId();
     const session = await this.#sessionDb.getSession(sessionId);
     const task = this.#taskExecution;
     const effectiveVisibleTurnId = task === undefined ? visibleTurnId : task.originTurnId;
     return {
-      requestKey: [sessionId, effectiveVisibleTurnId ?? "session", String(this.#providerRequestSequence++)].join("\0"),
-      sourceKind: task === undefined ? "main" : "task",
       executionSessionId: sessionId,
       ...(session?.spendingScopeSessionId === undefined
         ? {}
@@ -1197,10 +1880,10 @@ export class ProviderTurnLoop {
       return execution;
     }
 
-    const normalizedToolCalls = execution.toolCalls.map((toolCall) => ({
-      ...toolCall,
-      id: toolCall.id ?? stableToolCallId(toolCall)
-    }));
+    if (execution.toolCalls.some((toolCall) => toolCall.id === undefined)) {
+      throw new Error("Provider tool calls must have runtime-owned identities before persistence.");
+    }
+    const normalizedToolCalls = execution.toolCalls.map((toolCall) => ({ ...toolCall, id: toolCall.id! }));
     const containsDelegationRequest = normalizedToolCalls.some((toolCall) => toolCall.name === "delegate_task");
     const secretIndexes = new Set<number>();
     normalizedToolCalls.forEach((toolCall, index) => {
@@ -1502,16 +2185,23 @@ export function compressionReportFromResult(result: CompactResult): PromptSemant
 }
 
 function providerRequestContainsImageParts(request: Pick<ProviderRequest, "messages">): boolean {
-  return request.messages.some((message) => providerContentContainsImagePart(message.content));
+  return providerRequestImagePartCount(request) > 0;
 }
 
-function providerContentContainsImagePart(content: ProviderMessage["content"]): boolean {
-  return Array.isArray(content) && content.some((part) =>
+function providerRequestImagePartCount(request: Pick<ProviderRequest, "messages">): number {
+  return request.messages.reduce(
+    (count, message) => count + providerContentImagePartCount(message.content),
+    0
+  );
+}
+
+function providerContentImagePartCount(content: ProviderMessage["content"]): number {
+  return Array.isArray(content) ? content.filter((part) =>
     part !== null &&
     typeof part === "object" &&
     !Array.isArray(part) &&
     (part as { type?: unknown }).type === "image_url"
-  );
+  ).length : 0;
 }
 
 function isDeterministicCompressionFallback(reason: string | undefined): boolean {
@@ -1523,7 +2213,9 @@ async function emitAssembledPromptEstimate(
   budget: PromptBudgetReport
 ): Promise<void> {
   await emitContextEstimate(sink, {
-    filled: normalizeTokenCount(budget.estimatedTokens),
+    filled: normalizeTokenCount(
+      budget.requestAccounting?.estimatedInputTokens ?? budget.estimatedTokens
+    ),
     total: normalizeTokenCount(budget.contextWindowTokens),
     source: "assembled-prompt",
     stage: "assembled-prompt"
@@ -1682,6 +2374,129 @@ function reasoningOnlySafeGuidanceExecution(
   };
 }
 
+function timeSecureInputHandler(
+  handler: SecureInputRequestHandler | undefined,
+  onElapsed: (elapsedMs: number) => void
+): SecureInputRequestHandler | undefined {
+  if (handler === undefined) return undefined;
+  let activeRequests = 0;
+  let pausedAt = 0;
+  const timedCall = async <T>(call: () => Promise<T>): Promise<T> => {
+    if (activeRequests === 0) pausedAt = Date.now();
+    activeRequests += 1;
+    try {
+      return await call();
+    } finally {
+      activeRequests -= 1;
+      if (activeRequests === 0) onElapsed(Math.max(0, Date.now() - pausedAt));
+    }
+  };
+  const timed: SecureInputRequestHandler = async (request, consume) => {
+    return await timedCall(async () => await handler(request, consume));
+  };
+  const requestGroup = (handler as Partial<GroupedSecureInputRequestHandler>).requestGroup;
+  if (requestGroup !== undefined) {
+    const grouped = timed as GroupedSecureInputRequestHandler;
+    grouped.requestGroup = async (request) => {
+      return await timedCall(async () => await requestGroup(request));
+    };
+  }
+  const transferHandler = handler as Partial<SecureInputTransferRequestHandler>;
+  const transfer = transferHandler.transfer;
+  if (transfer !== undefined) {
+    (timed as SecureInputTransferRequestHandler).transfer = async (request, consume) => {
+      return await timedCall(async () => await transfer(request, consume));
+    };
+  }
+  const collectGroup = transferHandler.collectGroup;
+  if (collectGroup !== undefined) {
+    (timed as SecureInputTransferRequestHandler).collectGroup = async (request, consume) =>
+      await timedCall(async () => await collectGroup(request, consume));
+  }
+  const transferGroup = transferHandler.transferGroup;
+  if (transferGroup !== undefined) {
+    (timed as SecureInputTransferRequestHandler).transferGroup = async (request, consume) => {
+      return await timedCall(async () => await transferGroup(request, consume));
+    };
+  }
+  return timed;
+}
+
+function localReceiptExecution(model: ModelProfile | undefined): ProviderExecutionResult {
+  return {
+    ok: true,
+    fallbackUsed: false,
+    attempts: [],
+    toolCalls: [],
+    response: {
+      ok: true,
+      content: "",
+      model: model?.id ?? "unknown",
+      provider: (model?.provider ?? "unknown") as ProviderResponse["provider"],
+      finishReason: "stop"
+    }
+  };
+}
+
+function runtimeForegroundTurnId(
+  visibleTurnId: string | undefined,
+  sessionId: string,
+  sequence: number
+): string {
+  const normalized = visibleTurnId?.trim();
+  if (normalized !== undefined && normalized.length > 0) {
+    return [...normalized].slice(0, 160).join("");
+  }
+  return `runtime-${sessionId}-${sequence}`;
+}
+
+function normalizeBrowserObservationLimit(limit: number): number {
+  return Number.isFinite(limit)
+    ? Math.max(2, Math.floor(limit))
+    : 3;
+}
+
+function filterSuppressedBrowserProviderTools(
+  tools: readonly OpenAICompatibleToolSchema[],
+  suppressedTools: readonly string[]
+): OpenAICompatibleToolSchema[] {
+  if (suppressedTools.length === 0) return [...tools];
+  const suppressed = new Set(suppressedTools);
+  return tools.filter((tool) => {
+    const canonicalName = canonicalBrowserProviderToolName(tool.function.name);
+    return canonicalName === undefined || !suppressed.has(canonicalName);
+  });
+}
+
+function canonicalBrowserProviderToolName(name: string): string | undefined {
+  if (name.startsWith("browser.")) return name;
+  if (name.startsWith("browser_")) return `browser.${name.slice("browser_".length)}`;
+  return undefined;
+}
+
+function normalizeNoProgressStopIteration(limit: number): number {
+  return Number.isFinite(limit) ? Math.max(2, Math.floor(limit)) : 6;
+}
+
+function normalizeNoProgressNudgeIteration(nudge: number, stop: number): number {
+  const normalizedStop = normalizeNoProgressStopIteration(stop);
+  if (!Number.isFinite(nudge)) return Math.min(3, normalizedStop - 1);
+  return Math.min(Math.max(1, Math.floor(nudge)), normalizedStop - 1);
+}
+
+function normalizeFinalizationReserve(reserveMs: number, wallClockMs: number): number {
+  if (!Number.isFinite(reserveMs) || reserveMs < 0) return 0;
+  const safeWallClockMs = Number.isFinite(wallClockMs) ? Math.max(1, Math.floor(wallClockMs)) : 30 * 60_000;
+  return Math.min(Math.floor(reserveMs), Math.max(0, safeWallClockMs - 1));
+}
+
+function providerWorkDeadlineAt(
+  loopStartedAt: number,
+  budgets: Pick<NormalizedProviderTurnLoopBudgets, "maxProviderWallClockMs" | "finalizationReserveMs">
+): number {
+  return loopStartedAt + budgets.maxProviderWallClockMs - budgets.finalizationReserveMs;
+}
+
 function isTruncatedToolCallRefusalExecution(execution: ProviderExecutionResult): boolean {
   return execution.ok === true &&
     execution.toolCalls.length === 0 &&
@@ -1702,13 +2517,91 @@ function providerIterationCost(execution: ProviderExecutionResult): number {
   return cost;
 }
 
+function providerExecutionTokenUse(execution: ProviderExecutionResult): number {
+  const attemptTokens = execution.attempts
+    .map((attempt) => attempt.usage)
+    .filter((usage): usage is ProviderUsage => usage !== undefined)
+    .reduce((sum, usage) => sum + providerUsageTokenTotal(usage), 0);
+  return attemptTokens > 0
+    ? attemptTokens
+    : providerUsageTokenTotal(execution.response?.usage);
+}
+
+function hasVisibleOneTimeCodeChallenge(executions: readonly ToolExecutionRecord[]): boolean {
+  for (let index = executions.length - 1; index >= 0; index -= 1) {
+    const execution = executions[index]!;
+    if (!execution.tool.toolsets.includes("browser")) continue;
+    const snapshot = browserSnapshotMetadata(execution.result?.metadata?.snapshot);
+    // Only the latest browser execution may authorize this correction. A later
+    // browser result without a snapshot can represent cancellation, failure, or
+    // a state transition that makes an older challenge unsafe to retry.
+    if (snapshot === undefined) return false;
+    if (snapshot.sensitiveInputActive === true) return false;
+    const elements = snapshot.elements ?? [];
+    const codeFields = elements.filter((element) =>
+      (element.role === "textbox" || element.role === "searchbox" || element.role === "combobox") &&
+      /one[-\s]?time|otp|mfa|verification\s+code|security\s+code|authenticat(?:ion|or)\s+code|رمز التحقق|رمز الأمان/iu
+        .test([element.name, element.label, element.withinText].filter(Boolean).join(" "))
+    );
+    const submitControls = elements.filter((element) =>
+      element.role === "button" &&
+      /verify|authenticate|submit|continue|confirm|next|sign\s*in|log\s*in|تحقق|تأكيد|متابعة|دخول/iu
+        .test([element.name, element.label, element.withinText].filter(Boolean).join(" "))
+    );
+    return codeFields.length === 1 && submitControls.length === 1;
+  }
+  return false;
+}
+
+function browserSnapshotMetadata(value: unknown): BrowserSnapshot | undefined {
+  if (typeof value !== "object" || value === null || Array.isArray(value)) return undefined;
+  const candidate = value as Partial<BrowserSnapshot>;
+  if (
+    typeof candidate.sessionId !== "string" ||
+    typeof candidate.url !== "string" ||
+    typeof candidate.observedAt !== "string" ||
+    typeof candidate.identity !== "object" ||
+    candidate.identity === null
+  ) return undefined;
+  return candidate as BrowserSnapshot;
+}
+
+function providerUsageTokenTotal(usage: ProviderUsage | undefined): number {
+  if (usage === undefined) return 0;
+  return usage.totalTokens ?? (usage.inputTokens ?? 0) + (usage.outputTokens ?? 0);
+}
+
+export function providerEfficiencySignals(input: {
+  providerCalls: number;
+  providerCallBudget: number;
+  providerTokens: number;
+  repeatedMcpReads: number;
+  machineReadableApiDescriptionAvailable: boolean;
+}): string[] {
+  const providerCallThreshold = Math.max(1, Math.ceil(input.providerCallBudget * 0.5));
+  return [
+    input.repeatedMcpReads > 0
+      ? `${input.repeatedMcpReads} identical MCP read${input.repeatedMcpReads === 1 ? " was" : "s were"} already reused. Do not request those facts again unless a mutation or input change makes them stale.`
+      : undefined,
+    input.machineReadableApiDescriptionAvailable
+      ? "A grounded machine-readable API description is available. Prefer its governed download and a reviewed artifact import over manually scraping endpoint pages when comprehensive API structure is needed."
+      : undefined,
+    input.providerCalls >= providerCallThreshold
+      ? `${input.providerCalls} provider calls have been used this turn. Prefer the shortest remaining path to mutation, verification, completion, or a concrete blocker.`
+      : undefined,
+    input.providerTokens >= PROVIDER_TOKEN_EFFICIENCY_WARNING_THRESHOLD
+      ? `Provider usage has exceeded ${PROVIDER_TOKEN_EFFICIENCY_WARNING_THRESHOLD.toLocaleString("en-US")} tokens this turn. Reuse confirmed facts and avoid broad repeated reads.`
+      : undefined
+  ].filter((signal): signal is string => signal !== undefined);
+}
+
 function createProviderToolCallEventBuffer(input: {
   sink: RuntimeEventSink | undefined;
   onDelta?: (text: string) => void;
   onSegmentBreak?: (reason?: string) => void | Promise<void>;
 }): {
   onEvent: (event: ProviderRuntimeEvent) => Promise<void>;
-  flushToolCalls: () => Promise<void>;
+  flushToolCalls: (toolCalls: ProviderExecutionResult["toolCalls"]) => Promise<void>;
   discardToolCalls: () => void;
 } {
   const toolCallEvents: Extract<ProviderRuntimeEvent, { kind: "provider-tool-call" }>[] = [];
@@ -1724,12 +2617,15 @@ function createProviderToolCallEventBuffer(input: {
         safeProviderDelta(input.onDelta, event.text);
       }
     },
-    async flushToolCalls() {
+    async flushToolCalls(toolCalls) {
       if (toolCallEvents.length > 0) {
         await safeProviderSegmentBreak(input.onSegmentBreak, "provider-tool-call");
       }
-      for (const event of toolCallEvents) {
-        await emit(input.sink, mapProviderRuntimeEvent(event));
+      for (const [index, event] of toolCallEvents.entries()) {
+        await emit(input.sink, mapProviderRuntimeEvent({
+          ...event,
+          id: toolCalls[index]?.id
+        }));
       }
       toolCallEvents.length = 0;
     },

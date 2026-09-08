@@ -95,6 +95,8 @@ export function createImageGenerationTools(options: ImageGenerationToolOptions):
       const artifact = await storeImageArtifact(options, result, {
         summary: truncateSummary(`Image generated from prompt: ${prompt}`),
         metadata: {
+          visionProvenance: "generated-artifact",
+          ...(context?.visibleTurnId === undefined ? {} : { visionTurnId: context.visibleTurnId }),
           provider: imageGen.provider,
           model: result.model,
           aspectRatio: result.aspectRatio,
@@ -178,6 +180,8 @@ export function createImageGenerationTools(options: ImageGenerationToolOptions):
       const artifact = await storeImageArtifact(options, result, {
         summary: truncateSummary(`Image edited from ${sourceImages.sources.length} source image(s): ${prompt}`),
         metadata: {
+          visionProvenance: "generated-artifact",
+          ...(context?.visibleTurnId === undefined ? {} : { visionTurnId: context.visibleTurnId }),
           provider: imageGen.provider,
           model: result.model,
           aspectRatio: result.aspectRatio,

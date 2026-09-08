@@ -21,6 +21,13 @@ class FakeCdpClient implements CdpClientLike {
   targetId = "target-1";
   failContext = false;
   failTarget = false;
+  targetInfos: unknown[] = [{
+    targetId: "target-1",
+    type: "page",
+    title: "Main",
+    url: "about:blank",
+    browserContextId: "context-1"
+  }];
 
   async send(method: string, params?: Record<string, unknown>): Promise<unknown> {
     this.calls.push({ method, params });
@@ -41,6 +48,12 @@ class FakeCdpClient implements CdpClientLike {
     }
     if (method === "Target.disposeBrowserContext") {
       return {};
+    }
+    if (method === "Target.activateTarget") {
+      return {};
+    }
+    if (method === "Target.getTargets") {
+      return { targetInfos: this.targetInfos };
     }
     throw new Error(`Unexpected CDP method: ${method}`);
   }
@@ -100,6 +113,7 @@ function createHarness(input: {
   fetch?: CdpFetchLike;
   client?: FakeCdpClient;
   supervisorFactory?: (options: CdpTargetSupervisorOptions) => Promise<CdpTargetSupervisor>;
+  pageVisibility?: Record<string, "visible" | "hidden">;
 } = {}) {
   const client = input.client ?? new FakeCdpClient();
   const createdClients: string[] = [];
@@ -114,6 +128,15 @@ function createHarness(input: {
     fetch: input.fetch ?? createFetch(createDefaultRoutes()),
     createClient: vi.fn(async (webSocketUrl: string) => {
       createdClients.push(webSocketUrl);
+      if (webSocketUrl !== "ws://browser" && input.pageVisibility !== undefined) {
+        return {
+          send: vi.fn(async (method: string) => {
+            if (method !== "Runtime.evaluate") throw new Error(`Unexpected CDP method: ${method}`);
+            return { result: { value: input.pageVisibility?.[webSocketUrl] ?? "hidden" } };
+          }),
+          close: vi.fn()
+        };
+      }
       return client;
     }),
     supervisorFactory
@@ -148,9 +171,41 @@ describe("CdpTargetManager", () => {
       pageWebSocketDebuggerUrl: "ws://page/target-1"
     });
     expect(harness.supervisorFactory).toHaveBeenCalledWith({
-      webSocketUrl: "ws://page/target-1"
+      webSocketUrl: "ws://page/target-1",
+      browserContextId: "context-1"
     });
     expect(target.supervisor).toBe(harness.supervisors[0]);
+  });
+
+  it("creates a page target in an existing browser context without creating or disposing context state", async () => {
+    const client = new FakeCdpClient();
+    client.targetId = "target-2";
+    client.targetInfos = [{
+      targetId: "target-2",
+      type: "page",
+      title: "Controlled tab",
+      url: "about:blank",
+      browserContextId: "context-1"
+    }];
+    const fetch = createFetch(createDefaultRoutes({
+      list: { payload: [{ id: "target-2", webSocketDebuggerUrl: "ws://page/target-2" }] }
+    }));
+    const harness = createHarness({ client, fetch });
+
+    const target = await harness.manager.createPageTarget("context-1", "about:blank");
+
+    expect(target).toEqual({
+      browserContextId: "context-1",
+      targetId: "target-2",
+      pageWebSocketDebuggerUrl: "ws://page/target-2",
+      url: "about:blank",
+      title: "Controlled tab"
+    });
+    expect(client.calls).toEqual([
+      { method: "Target.createTarget", params: { url: "about:blank", browserContextId: "context-1" } },
+      { method: "Target.getTargets", params: undefined }
+    ]);
+    expect(harness.supervisorFactory).not.toHaveBeenCalled();
   });
 
   it("closes supervisor before Target.closeTarget and disposes the browser context last", async () => {
@@ -191,6 +246,133 @@ describe("CdpTargetManager", () => {
 
     expect(harness.client.calls.filter((call) => call.method === "Target.closeTarget")).toHaveLength(1);
     expect(harness.client.calls.filter((call) => call.method === "Target.disposeBrowserContext")).toHaveLength(1);
+  });
+
+  it("lists only page targets from the requested browser context", async () => {
+    const client = new FakeCdpClient();
+    client.targetInfos = [
+      { targetId: "target-1", type: "page", title: "Main", url: "https://example.com", browserContextId: "context-1" },
+      { targetId: "target-2", type: "page", title: "Details", url: "https://example.com/details", browserContextId: "context-1", openerId: "target-1" },
+      { targetId: "target-other", type: "page", title: "Other", url: "https://other.example", browserContextId: "context-2" },
+      { targetId: "browser-ui", type: "browser_ui", title: "Omnibox", url: "chrome://omnibox", browserContextId: "context-1" },
+      { targetId: "missing-websocket", type: "page", title: "Broken", url: "https://broken.example", browserContextId: "context-1" }
+    ];
+    const harness = createHarness({
+      client,
+      fetch: createFetch(createDefaultRoutes({
+        list: {
+          payload: [
+            { id: "target-1", webSocketDebuggerUrl: "ws://page/target-1" },
+            { id: "target-2", webSocketDebuggerUrl: "ws://page/target-2" },
+            { id: "target-other", webSocketDebuggerUrl: "ws://page/other" },
+            { id: "browser-ui", webSocketDebuggerUrl: "ws://browser-ui" }
+          ]
+        }
+      }))
+    });
+
+    await expect(harness.manager.listPageTargets("context-1")).resolves.toEqual([
+      {
+        browserContextId: "context-1",
+        targetId: "target-1",
+        pageWebSocketDebuggerUrl: "ws://page/target-1",
+        url: "https://example.com",
+        title: "Main"
+      },
+      {
+        browserContextId: "context-1",
+        targetId: "target-2",
+        pageWebSocketDebuggerUrl: "ws://page/target-2",
+        url: "https://example.com/details",
+        title: "Details",
+        openerId: "target-1"
+      }
+    ]);
+  });
+
+  it("detects the visible page target without reading page content", async () => {
+    const client = new FakeCdpClient();
+    client.targetInfos = [
+      { targetId: "target-1", type: "page", url: "https://example.com/one", browserContextId: "context-1" },
+      { targetId: "target-2", type: "page", url: "https://example.com/two", browserContextId: "context-1" }
+    ];
+    const harness = createHarness({
+      client,
+      fetch: createFetch(createDefaultRoutes({
+        list: {
+          payload: [
+            { id: "target-1", webSocketDebuggerUrl: "ws://page/target-1" },
+            { id: "target-2", webSocketDebuggerUrl: "ws://page/target-2" }
+          ]
+        }
+      })),
+      pageVisibility: {
+        "ws://page/target-1": "hidden",
+        "ws://page/target-2": "visible"
+      }
+    });
+
+    await expect(harness.manager.findVisiblePageTargetId("context-1", "target-1")).resolves.toBe("target-2");
+    expect(harness.createdClients).toEqual([
+      "ws://browser",
+      "ws://page/target-1",
+      "ws://page/target-2"
+    ]);
+  });
+
+  it("attaches and activates only same-context page targets without owning their lifecycle", async () => {
+    const client = new FakeCdpClient();
+    client.targetInfos = [
+      { targetId: "target-2", type: "page", title: "Details", url: "https://example.com/details", browserContextId: "context-1" },
+      { targetId: "target-other", type: "page", title: "Other", url: "https://other.example", browserContextId: "context-2" }
+    ];
+    const harness = createHarness({
+      client,
+      fetch: createFetch(createDefaultRoutes({
+        list: {
+          payload: [
+            { id: "target-2", webSocketDebuggerUrl: "ws://page/target-2" },
+            { id: "target-other", webSocketDebuggerUrl: "ws://page/other" }
+          ]
+        }
+      }))
+    });
+
+    const attached = await harness.manager.attachTarget("context-1", "target-2");
+    await harness.manager.activateTarget("context-1", "target-2");
+    await attached.close();
+    await attached.close();
+
+    expect(attached).toMatchObject({
+      browserContextId: "context-1",
+      targetId: "target-2",
+      pageWebSocketDebuggerUrl: "ws://page/target-2"
+    });
+    expect(harness.supervisors).toHaveLength(1);
+    expect(harness.supervisorFactory).toHaveBeenCalledWith({
+      webSocketUrl: "ws://page/target-2",
+      browserContextId: "context-1"
+    });
+    expect(harness.supervisors[0]?.closed).toBe(true);
+    expect(harness.client.calls).toContainEqual({ method: "Target.activateTarget", params: { targetId: "target-2" } });
+    expect(harness.client.calls.some((call) => call.method === "Target.closeTarget")).toBe(false);
+    expect(harness.client.calls.some((call) => call.method === "Target.disposeBrowserContext")).toBe(false);
+    await expect(harness.manager.attachTarget("context-1", "target-other")).rejects.toThrow(
+      "CDP page target target-other is not available in browser context context-1."
+    );
+  });
+
+  it("fails closed when Target.getTargets does not return target metadata", async () => {
+    const client = new FakeCdpClient();
+    client.send = vi.fn(async (method: string) => {
+      if (method === "Target.getTargets") return {};
+      throw new Error(`Unexpected CDP method: ${method}`);
+    });
+    const harness = createHarness({ client });
+
+    await expect(harness.manager.listPageTargets("context-1")).rejects.toThrow(
+      "Target.getTargets did not return a targetInfos array."
+    );
   });
 
   it("fails closed when /json/version has no browser websocket URL", async () => {

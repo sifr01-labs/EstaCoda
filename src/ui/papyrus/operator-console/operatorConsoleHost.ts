@@ -8,6 +8,7 @@ import {
   type OperatorConsoleState,
   type PromptSurfaceState,
   type SetupSurfaceState,
+  type SecureInputSurfaceState,
   type SlashMenuState,
   type StatusRailState,
   type SteerState,
@@ -27,6 +28,7 @@ import {
   type OperatorConsoleRuntimeHost,
 } from "./operatorConsoleRuntimeHost.js";
 import type { OperatorConsoleStyle } from "./operatorConsoleStyle.js";
+import type { ExecutionPlan } from "../../../contracts/execution-plan.js";
 
 export type OperatorConsoleRawPromptSnapshot = {
   readonly mode?: OperatorConsoleMode;
@@ -36,12 +38,14 @@ export type OperatorConsoleRawPromptSnapshot = {
   readonly status?: StatusRailState;
   readonly motionElapsedMs?: number;
   readonly setupPanel?: SetupSurfaceState;
+  readonly secureInput?: SecureInputSurfaceState;
   readonly terminal?: Partial<TerminalMetrics>;
   readonly transcript?: readonly TranscriptBlock[];
   readonly attachments?: readonly AttachmentCardState[];
   readonly approvals?: readonly ApprovalCardState[];
   readonly tasks?: TaskSurfaceState;
   readonly turnActivity?: TurnActivityState;
+  readonly executionPlan?: ExecutionPlan;
   readonly slash?: SlashMenuState;
   readonly activeWork?: ToolActivityState;
   readonly streaming?: StreamingState;
@@ -75,6 +79,7 @@ export function buildOperatorConsoleStateFromRawPrompt(
     locale: snapshot.locale,
     terminal,
     setupPanel: snapshot.setupPanel,
+    secureInput: snapshot.secureInput,
     prompt: {
       value: snapshot.state.text,
       cursorOffset: snapshot.state.cursor,
@@ -87,6 +92,7 @@ export function buildOperatorConsoleStateFromRawPrompt(
     motionElapsedMs: snapshot.motionElapsedMs,
     transcript: snapshot.transcript ?? [],
     turnActivity: snapshot.turnActivity,
+    executionPlan: snapshot.executionPlan,
     attachments: snapshot.attachments ?? [],
     approvals: snapshot.approvals ?? [],
     tasks: snapshot.tasks,
@@ -131,8 +137,10 @@ export function buildOperatorConsoleRawPromptFrameWithRuntimeHost(
   host.setStatus(snapshot.status ?? createDefaultOperatorConsoleRawPromptStatus());
   host.setMotionElapsedMs(snapshot.motionElapsedMs ?? 0);
   host.setSetupPanel(snapshot.setupPanel);
+  host.setSecureInput(snapshot.secureInput);
   host.setTranscript(snapshot.transcript ?? []);
   host.setTurnActivity(snapshot.turnActivity);
+  host.setExecutionPlan(snapshot.executionPlan);
   host.setAttachments(snapshot.attachments ?? []);
   host.setApprovals(snapshot.approvals ?? []);
   host.setTasks(snapshot.tasks ?? createInitialOperatorConsoleState().tasks);
@@ -217,6 +225,7 @@ function normalizeTerminal(input: Partial<TerminalMetrics> | undefined): Termina
     width: normalizeDimension(input?.width, DEFAULT_TERMINAL.width),
     height: normalizeDimension(input?.height, DEFAULT_TERMINAL.height),
     isTty: input?.isTty ?? DEFAULT_TERMINAL.isTty,
+    ...(input?.bidiMode === undefined ? {} : { bidiMode: input.bidiMode }),
   };
 }
 

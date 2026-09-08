@@ -6,6 +6,7 @@ export type ClusteredChar = {
 };
 
 export type BidiMode = "auto" | "software" | "native" | "off";
+export type ResolvedBidiMode = "software" | "native";
 
 type BidiOptions = {
   mode?: BidiMode;
@@ -45,9 +46,15 @@ export function hasRTLCharacters(text: string): boolean {
 }
 
 export function shouldUseSoftwareBidi(mode: BidiMode = "auto"): boolean {
-  if (mode === "software") return true;
-  if (mode === "native" || mode === "off") return false;
-  return process.platform === "win32" || process.env.WT_SESSION !== undefined || process.env.TERM_PROGRAM === "vscode";
+  return resolveBidiMode(mode) === "software";
+}
+
+export function resolveBidiMode(mode: BidiMode = "auto"): ResolvedBidiMode {
+  if (mode === "software") return "software";
+  if (mode === "native" || mode === "off") return "native";
+  return process.platform === "win32" || process.env.WT_SESSION !== undefined || process.env.TERM_PROGRAM === "vscode"
+    ? "software"
+    : "native";
 }
 
 function directionOf(value: string): Direction {

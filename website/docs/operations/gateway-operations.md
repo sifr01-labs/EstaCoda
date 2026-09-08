@@ -235,6 +235,94 @@ Telegram uses bot-token-based pairing. The bot token must be present in the prof
 estacoda channels status telegram
 ```
 
+## Telegram rapid-text batching
+
+The gateway batches ordinary Telegram text from the same canonical account/chat/topic session and sender for `1500ms` by default. It joins fragments with blank lines and preserves their original message IDs in bounded runtime metadata. Limits default to `10` messages and `8000` characters; either threshold triggers an ingress-nonblocking flush.
+
+Commands, callbacks, pairing/auth messages, attachments, and media groups bypass batching. Set `channels.telegram.textDebounceMs` to `0` to roll back to immediate dispatch. The setting does not change `getUpdates` polling cadence, media-group handling, or FIFO busy-queue ordering.
+
+## Optional FIFO tail coalescing
+
+Set `channels.<channel>.busyTextCoalescing.enabled` to `true` only with `busyPolicy: "queue"` to append eligible ordinary text to the final queued entry. Coalescing requires the same canonical session and sender and is bounded by `windowMs`, `maxMessages`, and `maxChars`. It preserves the entry's FIFO position plus component message IDs and receive timestamps. Commands, callbacks, approvals, attachments, media, and interrupt replacement bypass it. When a bound is reached, normal FIFO enqueue and queue-full behavior apply. Use `estacoda gateway status` or `estacoda channels status <channel>` to verify the enabled state.
+
+## Durable busy queue
+
+The canonical busy queue is FIFO in both modes. The default `memory` mode keeps queued turns only in the gateway process. Opt-in `sqlite` mode adds profile-scoped recovery:
+
+```json
+{
+  "gateway": {
+    "messageQueue": {
+      "persistence": "sqlite",
+      "maxPendingPerProfile": 1000,
+      "uncertainRetentionDays": 7
+    }
+  }
+}
+```
+
+SQLite mode has no silent memory fallback. An accepted busy message is persisted before the gateway sends `Queued (position N)`. The gateway claims the exact row before execution and completes it after a terminal result is handled. Queue clearing, interrupt replacement, and enabled FIFO-tail coalescing update SQLite before changing the in-memory FIFO.
+
+The store also keeps a bounded, profile-scoped delivery-identity index for each durable turn. Rapid-text batches register every original platform message ID, not only the composite turn ID. Before an authorized normal message enters batching or immediate execution, the gateway checks this index and silently ignores a previously recorded delivery. Clearing a pending turn or pruning its completed retention row removes its delivery identities with it.
+
+### Recovery and delivery guarantees
+
+On startup, the selected profile follows this recovery sequence:
+
+1. Existing `claimed` rows become `uncertain`.
+2. Only `pending` rows are considered for replay, in FIFO order.
+3. Current channel authorization, workspace trust, account/chat/topic session scope, adapter availability, and attachment paths are checked again.
+4. A pending row that fails any check becomes uncertain instead of executing.
+
+This is not exactly-once execution. A crash before claim leaves a pending turn that can run after restart. A crash after claim may have happened before, during, or after external side effects, so automatic replay could duplicate a sent message, file change, command, or purchase. EstaCoda quarantines that row as uncertain. This also means durable mode does not guarantee at-least-once execution for uncertain work. There is no supported command to force-replay uncertain rows.
+
+Graceful shutdown remains the primary path: it stops new ingress and waits for active and queued turns. If drain times out or the process crashes, an unfinished claimed turn is conservatively uncertain on the next durable startup. Pending turns that never began remain recoverable.
+
+### Stored data and bounds
+
+Durable rows are stored in the global `sessions.sqlite` database with a profile ID. A gateway loads only the selected profile; profiles do not share pending work. Each row includes:
+
+- channel and platform message identifiers, including bounded aliases for rapid-text batch members;
+- canonical account/chat/topic session routing and sender identity;
+- user message text and receive time;
+- bounded metadata and attachment descriptors;
+- queue status plus claim/completion/uncertainty timestamps.
+
+The store does not add channel credentials, authorization headers, token-derived identifiers, remote attachment URLs, or attachment file bytes to a pending turn. Secret-shaped payloads are rejected, but ordinary user text and platform routing identifiers can still be sensitive. Attachment descriptors use canonical local paths beneath approved profile media/cache roots. The file must still exist inside an approved root during recovery; a missing, replaced, or escaping path makes the row uncertain.
+
+The normalized limits are:
+
+| Limit | Default | Hard bound |
+|---|---:|---:|
+| Non-completed rows per profile | `1000` | `1..10000` |
+| Uncertain/completed retention | `7` days | `0..365` days |
+| Persisted message JSON | — | `262144` bytes |
+| Message text | — | `100000` characters |
+| Attachments | — | `16` descriptors / `65536` JSON bytes |
+| Message metadata | — | `32768` JSON bytes |
+
+Pending, claimed, and uncertain rows count toward the profile capacity. Completed identities are kept only within the bounded deduplication/retention policy. Retention pruning runs at durable startup and periodically while the gateway runs.
+
+### Inspect, clear, and roll back
+
+From an authorized channel chat, `/status` includes profile-wide durable `pending`, `claimed`, and `uncertain` counts without displaying message content. `/stop` behaves by chat:
+
+- if a turn is active, it cancels that turn and leaves queued rows intact;
+- if no turn is active but that chat has queued rows, it clears the matching memory and SQLite rows transactionally;
+- it does not clear another profile, chat, account, or topic, and it does not replay or clear uncertain rows.
+
+To return to memory-only mode safely:
+
+1. Prefer a graceful drain; inspect `/status` and clear unwanted per-chat queued work while SQLite mode is still active.
+2. Set `gateway.messageQueue.persistence` to `"memory"` in the selected profile and restart the gateway.
+3. Remember that switching modes does not delete existing SQLite rows. Memory mode ignores them. If SQLite is enabled again later, surviving pending rows are reconsidered under the normal recovery checks.
+
+Do not edit `sessions.sqlite` directly while the gateway is running.
+
+:::warning Security risk
+SQLite mode intentionally persists remote user content and routing metadata beyond the gateway process lifetime. Protect the EstaCoda state directory and its backups as sensitive data, restrict local access, and enable durability only when recovery value outweighs the added retention and replay surface. Authorization and workspace trust are revalidated during recovery, but they do not protect a copied or locally exposed database.
+:::
+
 ## Telegram streaming
 
 Telegram streaming is an experimental delivery option under `channels.telegram.streaming.enabled`. It defaults to enabled for configured Telegram channels. Set `channels.telegram.streaming.enabled` to `false` to opt out. When enabled, provider tokens edit Telegram messages during a turn, tool boundaries seal the current streamed message, tool progress appears below that sealed message, and later provider tokens start a new streamed message below the progress entry.

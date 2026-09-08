@@ -28,6 +28,97 @@ function makeTempDir(): string {
 }
 
 describe("RunRecorder", () => {
+  it("records execution-plan lifecycle state without raw tool results", async () => {
+    const db = new SQLiteSessionDB({ path: join(makeTempDir(), "sessions.sqlite") });
+    try {
+      const session = await db.createSession({ id: "session-plan", profileId: "default" });
+      const trajectoryRecorder = new TrajectoryRecorder({
+        profileId: "default",
+        sessionId: session.id,
+        modelId: "test-model",
+        id: () => "trajectory-plan"
+      });
+      const recorder = new RunRecorder({
+        sessionDb: db,
+        sessionId: session.id,
+        trajectoryRecorder,
+        profileId: "default"
+      });
+      const event = {
+        kind: "execution-plan-started" as const,
+        plan: {
+          objective: "Test APIs",
+          originTurnId: "turn-1",
+          revision: 1,
+          status: "active" as const,
+          items: [{ id: "test", content: "Test APIs", status: "in_progress" as const }]
+        }
+      };
+      const emitted: RuntimeEvent[] = [];
+
+      await recorder.recordExecutionPlanTransition(event, (runtimeEvent) => { emitted.push(runtimeEvent); });
+
+      expect(await db.listEvents(session.id)).toContainEqual(event);
+      expect(trajectoryRecorder.snapshot().events).toContainEqual(expect.objectContaining({
+        kind: "execution-plan-started",
+        data: { plan: event.plan }
+      }));
+      expect(emitted).toEqual([event]);
+      expect(JSON.stringify(event)).not.toContain("toolResult");
+    } finally {
+      db.close();
+    }
+  });
+
+  it("normalizes execution effect receipts at the persistence boundary", async () => {
+    const db = new SQLiteSessionDB({ path: join(makeTempDir(), "sessions.sqlite") });
+    try {
+      const session = await db.createSession({ id: "session-effects", profileId: "default" });
+      const trajectoryRecorder = new TrajectoryRecorder({
+        profileId: "default",
+        sessionId: session.id,
+        modelId: "test-model",
+        id: () => "trajectory-effects"
+      });
+      const recorder = new RunRecorder({
+        sessionDb: db,
+        sessionId: session.id,
+        trajectoryRecorder,
+        profileId: "default"
+      });
+
+      await recorder.recordExecutionEvidence({
+        kind: "execution-evidence-recorded",
+        toolCallId: "call-verify",
+        tool: "mcp.postman.verify",
+        status: "success",
+        riskClass: "read-only-network",
+        targetSummary: "token=secret-receipt-value",
+        executionEffect: {
+          kind: "verification",
+          verifies: ["mcp.postman.update", "token=secret-receipt-value"],
+          connector: { kind: "mcp", id: "token=secret-receipt-value" }
+        },
+        verifiedMutation: { toolCallId: "call-forged", tool: "mcp.other.update" }
+      });
+
+      const events = await db.listEvents(session.id);
+      expect(events).toContainEqual(expect.objectContaining({
+        kind: "execution-evidence-recorded",
+        toolCallId: "call-verify",
+        executionEffect: {
+          kind: "verification",
+          verifies: ["mcp.postman.update"]
+        }
+      }));
+      expect(events[0]).not.toHaveProperty("verifiedMutation");
+      expect(JSON.stringify(events)).not.toContain("secret-receipt-value");
+      expect(JSON.stringify(trajectoryRecorder.snapshot())).not.toContain("secret-receipt-value");
+    } finally {
+      db.close();
+    }
+  });
+
   it("records artifacts nested in safe tool metadata envelopes", async () => {
     const db = new SQLiteSessionDB({ path: join(makeTempDir(), "sessions.sqlite") });
     try {

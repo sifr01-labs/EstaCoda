@@ -5,7 +5,12 @@ import type { IntentRoute, SkillRouteCandidate } from "../contracts/intent.js";
 import type { SkillOutcome } from "../contracts/memory.js";
 import type { PromptBudgetReport } from "../contracts/prompt.js";
 import type { SecurityDecision } from "../contracts/security.js";
-import type { SessionDB, StructuredToolHistoryDiagnosticEvent } from "../contracts/session.js";
+import type {
+  AgentCancellationSource,
+  AuthenticationEvidenceAssessmentEvent,
+  SessionDB,
+  StructuredToolHistoryDiagnosticEvent
+} from "../contracts/session.js";
 import type {
   LoadedSkill,
   SkillDefinition,
@@ -16,7 +21,9 @@ import type {
 } from "../contracts/skill.js";
 import type { ToolCallPlan } from "../contracts/tool-plan.js";
 import type { ToolsetName, ToolRiskClass } from "../contracts/tool.js";
-import type { RuntimeEvent, RuntimeEventSink } from "../contracts/runtime-event.js";
+import type { ProviderToolInventoryEvent, RuntimeEvent, RuntimeEventSink } from "../contracts/runtime-event.js";
+import type { ExecutionEvidenceRecord, ExecutionFinalOutcome, ExecutionPlanLifecycleEvent } from "../contracts/execution-plan.js";
+import type { ExecutionCheckpointLifecycleEvent } from "../contracts/execution-checkpoint.js";
 import type { Trajectory } from "../contracts/trajectory.js";
 import type { TrajectoryStore } from "../contracts/trajectory-store.js";
 import type { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
@@ -28,7 +35,9 @@ import { emit } from "../utils/runtime-helpers.js";
 import { truncate } from "../utils/formatting.js";
 import { buildFailureRecord, type FailureContext } from "../trajectory/failure-classifier.js";
 import { redactSensitiveText } from "../utils/redaction.js";
+import { normalizeExecutionEvidenceRecord } from "../session/execution-evidence-state.js";
 import type { SessionRuntimeContext } from "./session-runtime-context.js";
+import { cloneExecutionPlan } from "./execution-plan-store.js";
 
 export type RunRecorderOptions = {
   sessionDb: SessionDB;
@@ -57,6 +66,80 @@ export class RunRecorder {
     this.#trajectoryStore = options.trajectoryStore;
     this.#profileId = options.profileId;
     this.#skillEvolutionStore = options.skillEvolutionStore;
+  }
+
+  async recordExecutionPlanTransition(
+    event: ExecutionPlanLifecycleEvent,
+    sink?: RuntimeEventSink
+  ): Promise<void> {
+    const persistedEvent: ExecutionPlanLifecycleEvent = {
+      ...event,
+      plan: cloneExecutionPlan(event.plan),
+      ...(event.taskIds === undefined ? {} : { taskIds: [...event.taskIds] })
+    };
+    await this.#sessionDb.appendEvent(this.#currentSessionId(), persistedEvent);
+    this.#trajectoryRecorder.record(persistedEvent.kind, {
+      plan: cloneExecutionPlan(persistedEvent.plan),
+      ...(persistedEvent.taskIds === undefined ? {} : { taskIds: [...persistedEvent.taskIds] })
+    });
+    try {
+      await emit(sink, {
+        ...persistedEvent,
+        plan: cloneExecutionPlan(persistedEvent.plan),
+        ...(persistedEvent.taskIds === undefined ? {} : { taskIds: [...persistedEvent.taskIds] })
+      });
+    } catch {
+      // UI/event consumers are observational; persistence remains authoritative.
+    }
+  }
+
+  async recordExecutionCheckpointTransition(
+    event: ExecutionCheckpointLifecycleEvent
+  ): Promise<void> {
+    const persistedEvent: ExecutionCheckpointLifecycleEvent = {
+      ...event,
+      checkpoint: {
+        ...event.checkpoint,
+        qualificationReasons: [...event.checkpoint.qualificationReasons],
+        intentLabels: [...event.checkpoint.intentLabels],
+        requiredOperations: [...event.checkpoint.requiredOperations],
+        connectorIds: [...event.checkpoint.connectorIds],
+        artifactReferences: event.checkpoint.artifactReferences.map((reference) => ({ ...reference })),
+        safeFacts: event.checkpoint.safeFacts.map((fact) => ({ ...fact })),
+        ...(event.checkpoint.resources === undefined ? {} : { resources: structuredClone(event.checkpoint.resources) }),
+        operations: event.checkpoint.operations.map((operation) => ({ ...operation })),
+        ...(event.checkpoint.blocker === undefined ? {} : { blocker: { ...event.checkpoint.blocker } })
+      }
+    };
+    await this.#sessionDb.appendEvent(this.#currentSessionId(), persistedEvent);
+    this.#trajectoryRecorder.record(persistedEvent.kind, {
+      transition: persistedEvent.transition,
+      checkpoint: persistedEvent.checkpoint
+    });
+  }
+
+  async recordExecutionEvidence(record: ExecutionEvidenceRecord): Promise<void> {
+    const persisted = normalizeExecutionEvidenceRecord(record);
+    if (persisted === undefined) return;
+    await this.#sessionDb.appendEvent(this.#currentSessionId(), persisted);
+    this.#trajectoryRecorder.record(persisted.kind, persisted);
+  }
+
+  async recordExecutionFinalOutcome(outcome: ExecutionFinalOutcome): Promise<void> {
+    const event = {
+      kind: "execution-final-outcome-recorded" as const,
+      status: outcome.status,
+      terminationCause: outcome.terminationCause,
+      completionFloor: outcome.completionFloor
+    };
+    await this.#sessionDb.appendEvent(this.#currentSessionId(), event);
+    this.#trajectoryRecorder.record(event.kind, event);
+  }
+
+  async recordAuthenticationEvidenceAssessment(
+    event: AuthenticationEvidenceAssessmentEvent
+  ): Promise<void> {
+    await this.#sessionDb.appendEvent(this.#currentSessionId(), { ...event });
   }
 
   async recordSkillPlaybookStep(input: {
@@ -159,6 +242,7 @@ export class RunRecorder {
 
   async recordCancellation(input: {
     reason: string;
+    abortSource?: AgentCancellationSource;
     resumeNote?: string;
     activeSkill?: string;
     activeToolPlans?: ToolCallPlan[];
@@ -166,6 +250,7 @@ export class RunRecorder {
     await this.#sessionDb.appendEvent(this.#currentSessionId(), {
       kind: "agent-cancelled",
       reason: input.reason,
+      ...(input.abortSource === undefined ? {} : { abortSource: input.abortSource }),
       resumeNote: input.resumeNote,
       activeSkill: input.activeSkill,
       activeToolPlans: input.activeToolPlans?.map((plan) => ({
@@ -176,6 +261,7 @@ export class RunRecorder {
     });
     this.#trajectoryRecorder.record("agent-cancelled", {
       reason: input.reason,
+      ...(input.abortSource === undefined ? {} : { abortSource: input.abortSource }),
       resumeNote: input.resumeNote,
       activeSkill: input.activeSkill,
       activeToolPlans: input.activeToolPlans?.map((plan) => ({
@@ -187,6 +273,7 @@ export class RunRecorder {
     await emit(sink, {
       kind: "agent-cancelled",
       reason: input.reason,
+      ...(input.abortSource === undefined ? {} : { abortSource: input.abortSource }),
       resumeNote: input.resumeNote
     });
   }
@@ -204,6 +291,15 @@ export class RunRecorder {
       ...input
     });
     this.#trajectoryRecorder.record("provider-iteration", input);
+  }
+
+  async recordProviderToolInventory(
+    event: ProviderToolInventoryEvent,
+    sink?: RuntimeEventSink
+  ): Promise<void> {
+    await this.#sessionDb.appendEvent(this.#currentSessionId(), event);
+    this.#trajectoryRecorder.record(event.kind, event);
+    await emit(sink, event);
   }
 
   async recordStructuredToolHistoryDiagnostic(input: StructuredToolHistoryDiagnosticEvent): Promise<void> {
@@ -416,6 +512,47 @@ export class RunRecorder {
     return warnings;
   }
 
+  async recordSessionRecallStage(input: {
+    stage: "started" | "completed" | "failed";
+    focus: "general" | "visited-sites";
+    sourceSessionIds: string[];
+    resultCount: number;
+    onEvent?: RuntimeEventSink;
+  }): Promise<string[]> {
+    const event = {
+      kind: "session-recall-stage" as const,
+      stage: input.stage,
+      focus: input.focus,
+      sourceSessionIds: [...input.sourceSessionIds],
+      resultCount: input.resultCount
+    };
+    const warnings: string[] = [];
+    try {
+      await this.#sessionDb.appendEvent(this.#currentSessionId(), event);
+    } catch (error) {
+      warnings.push(`session recall stage session event failed: ${errorMessage(error)}`);
+    }
+
+    try {
+      this.#trajectoryRecorder.record("session-recall-stage", {
+        stage: event.stage,
+        focus: event.focus,
+        sourceSessionIds: event.sourceSessionIds,
+        resultCount: event.resultCount
+      });
+    } catch (error) {
+      warnings.push(`session recall stage trajectory event failed: ${errorMessage(error)}`);
+    }
+
+    try {
+      await emit(input.onEvent, event);
+    } catch (error) {
+      warnings.push(`session recall stage runtime event failed: ${errorMessage(error)}`);
+    }
+
+    return warnings;
+  }
+
   async recordExternalMemoryRecall(input: {
     providerIds: string[];
     enabled: boolean;
@@ -507,6 +644,7 @@ export class RunRecorder {
     userText: string;
     toolExecutions: ToolExecutionRecord[];
     toolPlans: ToolCallPlan[];
+    finalOutcomeStatus?: import("../contracts/skill.js").SkillRouteFinalOutcomeStatus;
   }): Promise<SkillOutcome[]> {
     if (
       input.selectedSkill === undefined ||
@@ -521,8 +659,15 @@ export class RunRecorder {
     const executedPlans = input.toolPlans.filter((plan) => plan.status === "executed");
     const blockedPlans = input.toolPlans.filter((plan) => plan.status === "blocked");
     const failedPlans = input.toolPlans.filter((plan) => plan.status === "invalid" || plan.status === "unavailable");
-    const status: SkillOutcome["status"] =
-      blocked.length > 0 || blockedPlans.length > 0
+    const status: SkillOutcome["status"] = input.finalOutcomeStatus === "succeeded"
+      ? "succeeded"
+      : input.finalOutcomeStatus === "partial"
+        ? "partial"
+        : input.finalOutcomeStatus === "blocked"
+          ? "blocked"
+          : input.finalOutcomeStatus === "failed" || input.finalOutcomeStatus === "cancelled"
+            ? "failed"
+            : blocked.length > 0 || blockedPlans.length > 0
         ? "blocked"
         : (failed.length > 0 || failedPlans.length > 0) && (succeeded.length > 0 || executedPlans.length > 0)
           ? "partial"
@@ -570,8 +715,14 @@ export class RunRecorder {
   }
 
   async appendCancelledAssistantMessage(input: {
-    response: { text: string; progress: string[]; toolPlans: ToolCallPlan[] };
+    response: {
+      text: string;
+      progress: string[];
+      toolPlans: ToolCallPlan[];
+      finalOutcome?: import("../contracts/execution-plan.js").ExecutionFinalOutcome;
+    };
     channel: ChannelKind;
+    respondingToTurnId?: string;
   }): Promise<void> {
     await this.#sessionDb.appendMessage({
       sessionId: this.#currentSessionId(),
@@ -579,7 +730,9 @@ export class RunRecorder {
       content: input.response.text,
       channel: input.channel,
       metadata: {
+        ...(input.respondingToTurnId === undefined ? {} : { respondingToTurnId: input.respondingToTurnId }),
         cancelled: true,
+        ...(input.response.finalOutcome === undefined ? {} : { finalOutcome: input.response.finalOutcome }),
         resumeNote: input.response.progress.find((entry) => entry.startsWith("resume:"))?.replace(/^resume:\s*/u, ""),
         toolPlans: input.response.toolPlans.map((plan) => ({
           id: plan.id,
@@ -616,6 +769,15 @@ export class RunRecorder {
 
   async persistTrajectory(): Promise<void> {
     await this.#trajectoryStore?.saveTrajectory(this.#trajectoryRecorder.snapshot());
+  }
+
+  async beginTurn(): Promise<void> {
+    if (!this.#trajectoryRecorder.beginTurn()) return;
+    try {
+      await this.persistTrajectory();
+    } catch {
+      // A stale completed outcome must be cleared in memory even if trace persistence is unavailable.
+    }
   }
 
   async completeTrajectory(

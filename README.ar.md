@@ -95,13 +95,16 @@ estacoda         # يبدأ الإعداد الأول، ثم يشغّل جلسة
 ## أوامر شائعة
 
 ```bash
-estacoda                       # start a terminal session
-estacoda setup                 # review, edit, or repair setup
-estacoda update                # update using the current install method
-estacoda update --check        # check for updates without modifying files
-estacoda uninstall             # remove install code and wrappers; keep user data
-estacoda uninstall --purge     # remove install code and user data
-estacoda whatsapp              # start the WhatsApp setup wizard
+estacoda                       # بدء جلسة طرفية جديدة
+estacoda --continue            # استئناف آخر جلسة لهذا الملف الشخصي ومساحة العمل
+estacoda sessions              # اختيار جلسة قابلة للاستئناف تفاعليًا
+estacoda sessions open <id>    # استئناف جلسة معروفة عبر المعرّف
+estacoda setup                 # مراجعة الإعداد أو تعديله أو إصلاحه
+estacoda update                # التحديث وفق طريقة التثبيت الحالية
+estacoda update --check        # فحص التحديثات دون تعديل الملفات
+estacoda uninstall             # إزالة كود التثبيت مع إبقاء بيانات المستخدم
+estacoda uninstall --purge     # إزالة كود التثبيت وبيانات المستخدم
+estacoda whatsapp              # بدء معالج إعداد WhatsApp
 ```
 
 لواجهة الأوامر الكاملة، راجع [CLI Commands](https://www.estacoda.com/docs/reference/cli-commands).

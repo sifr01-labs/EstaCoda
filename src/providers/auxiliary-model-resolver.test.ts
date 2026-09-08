@@ -37,9 +37,17 @@ function fakeModelProfile(overrides?: Partial<ModelProfile>): ModelProfile {
   };
 }
 
-function fakeRegistry(models: ModelProfile[] = []) {
+function fakeRegistry(models: ModelProfile[] = [], options: {
+  missingProviders?: string[];
+  discoveryOnlyProviders?: string[];
+} = {}) {
+  const providers = new Set(["openai", "openai-compatible", "local", ...models.map((model) => model.provider)]);
   return {
     listModels: async () => models,
+    get: (provider: string) => {
+      if (options.missingProviders?.includes(provider) || !providers.has(provider)) return undefined;
+      return { executable: options.discoveryOnlyProviders?.includes(provider) ? false : undefined };
+    }
   } as unknown as import("./provider-registry.js").ProviderRegistry;
 }
 
@@ -106,6 +114,70 @@ describe("resolveAuxiliaryModelRoute", () => {
     expect(result.diagnostics.some((d) => d.includes("slot.id is missing"))).toBe(true);
   });
 
+  it("rejects a custom vision route whose model is not vision-capable", () => {
+    const result = resolveAuxiliaryModelRoute("vision", {
+      baseUrl: "http://localhost:11434/v1",
+      id: "qwen2.5:3b",
+    }, {
+      mainRoute: fakeMainRoute(),
+      providerRegistry: fakeRegistry(),
+    });
+
+    expect(result.route).toBeUndefined();
+    expect(result.source).toBe("custom");
+    expect(result.fallbackToMain).toBe(false);
+    expect(result.diagnostics).toContain(
+      "Route openai-compatible/qwen2.5:3b does not satisfy vision task requirements: vision"
+    );
+  });
+
+  it("keeps a vision-capable custom route available", () => {
+    const result = resolveAuxiliaryModelRoute("vision", {
+      baseUrl: "http://localhost:11434/v1",
+      id: "qwen2.5-vl",
+    }, {
+      mainRoute: fakeMainRoute(),
+      providerRegistry: fakeRegistry(),
+    });
+
+    expect(result.route?.id).toBe("qwen2.5-vl");
+    expect(result.route?.profile.supportsVision).toBe(true);
+    expect(result.source).toBe("custom");
+  });
+
+  it("keeps local Vision Analysis routes usable in local-only mode", () => {
+    const result = resolveAuxiliaryModelRoute("vision", {
+      provider: "local",
+      baseUrl: "http://127.0.0.1:11434/v1",
+      id: "qwen2.5-vl",
+      hostedProcessing: "local-only",
+    }, {
+      mainRoute: fakeMainRoute(),
+      providerRegistry: fakeRegistry(),
+    });
+
+    expect(result.route?.id).toBe("qwen2.5-vl");
+    expect(result.source).toBe("custom");
+    expect(result.fallbackToMain).toBe(false);
+  });
+
+  it("rejects hosted Vision Analysis routes in local-only mode", () => {
+    const result = resolveAuxiliaryModelRoute("vision", {
+      provider: "openai",
+      id: "gpt-4o",
+      hostedProcessing: "local-only",
+    }, {
+      mainRoute: fakeMainRoute(),
+      providerRegistry: fakeRegistry([fakeModelProfile({ id: "gpt-4o", supportsVision: true })]),
+    });
+
+    expect(result.route).toBeUndefined();
+    expect(result.fallbackToMain).toBe(false);
+    expect(result.diagnostics).toContain(
+      "Route openai/gpt-4o is hosted, but vision hosted processing is local-only"
+    );
+  });
+
   it("uses main route when provider is main", () => {
     const mainRoute = fakeMainRoute();
     const result = resolveAuxiliaryModelRoute("assessor", { provider: "main" }, {
@@ -115,6 +187,23 @@ describe("resolveAuxiliaryModelRoute", () => {
     expect(result.source).toBe("main");
     expect(result.route).toBe(mainRoute);
     expect(result.fallbackToMain).toBe(false);
+  });
+
+  it("rejects provider main for vision when the main model lacks vision", () => {
+    const mainRoute = fakeMainRoute({
+      profile: { ...fakeMainRoute().profile, supportsVision: false },
+    });
+    const result = resolveAuxiliaryModelRoute("vision", { provider: "main" }, {
+      mainRoute,
+      providerRegistry: fakeRegistry(),
+    });
+
+    expect(result.route).toBeUndefined();
+    expect(result.source).toBe("main");
+    expect(result.fallbackToMain).toBe(false);
+    expect(result.diagnostics).toContain(
+      "Route openai/gpt-4o does not satisfy vision task requirements: vision"
+    );
   });
 
   it("resolves explicit provider+id to exact route", () => {
@@ -129,6 +218,72 @@ describe("resolveAuxiliaryModelRoute", () => {
     expect(result.route?.provider).toBe("openai");
     expect(result.route?.id).toBe("gpt-4o-mini");
     expect(result.fallbackToMain).toBe(false);
+  });
+
+  it("rejects an exact explicit vision route without vision capability", () => {
+    const models = [
+      fakeModelProfile({ provider: "openai", id: "text-only", supportsVision: false }),
+    ];
+    const result = resolveAuxiliaryModelRoute("vision", {
+      provider: "openai",
+      id: "text-only",
+    }, {
+      mainRoute: fakeMainRoute(),
+      providerRegistry: fakeRegistry(models),
+      providerModels: models,
+    });
+
+    expect(result.route).toBeUndefined();
+    expect(result.source).toBe("explicit");
+    expect(result.fallbackToMain).toBe(false);
+    expect(result.diagnostics).toContain(
+      "Route openai/text-only does not satisfy vision task requirements: vision"
+    );
+  });
+
+  it("rejects an explicit vision route without a registered adapter", () => {
+    const models = [fakeModelProfile({ id: "gpt-4o", supportsVision: true })];
+    const result = resolveAuxiliaryModelRoute("vision", {
+      provider: "openai",
+      id: "gpt-4o"
+    }, {
+      mainRoute: fakeMainRoute(),
+      providerRegistry: fakeRegistry(models, { missingProviders: ["openai"] }),
+      providerModels: models
+    });
+
+    expect(result.route).toBeUndefined();
+    expect(result.diagnostics).toContain("Route openai/gpt-4o has no registered provider adapter");
+  });
+
+  it("rejects a vision route exposed only by a discovery adapter", () => {
+    const models = [fakeModelProfile({ id: "gpt-4o", supportsVision: true })];
+    const result = resolveAuxiliaryModelRoute("vision", {
+      provider: "openai",
+      id: "gpt-4o"
+    }, {
+      mainRoute: fakeMainRoute(),
+      providerRegistry: fakeRegistry(models, { discoveryOnlyProviders: ["openai"] }),
+      providerModels: models
+    });
+
+    expect(result.route).toBeUndefined();
+    expect(result.diagnostics).toContain("Route openai/gpt-4o uses a discovery-only provider adapter");
+  });
+
+  it("rejects a vision route whose provider metadata is not runnable", () => {
+    const models = [fakeModelProfile({ provider: "nous", id: "vision-model", supportsVision: true })];
+    const result = resolveAuxiliaryModelRoute("vision", {
+      provider: "nous",
+      id: "vision-model"
+    }, {
+      mainRoute: fakeMainRoute(),
+      providerRegistry: fakeRegistry(models),
+      providerModels: models
+    });
+
+    expect(result.route).toBeUndefined();
+    expect(result.diagnostics).toContain("Route nous/vision-model uses provider metadata that is not runnable");
   });
 
   it("propagates slot timeoutMs and maxConcurrency", () => {
@@ -374,6 +529,97 @@ describe("resolveAuxiliaryModelRoute", () => {
       providerRegistry: fakeRegistry(),
     });
     expect(result.fallbackToMain).toBe(true);
+  });
+
+  it("rejects fallbackToMain when the main route is text-only", () => {
+    const mainRoute = fakeMainRoute({
+      profile: { ...fakeMainRoute().profile, supportsVision: false },
+    });
+    const models = [
+      fakeModelProfile({ provider: "openai", id: "gpt-4o-mini", supportsVision: true }),
+    ];
+    const result = resolveAuxiliaryModelRoute("vision", {
+      provider: "openai",
+      id: "gpt-4o-mini",
+      fallbackToMain: true,
+    }, {
+      mainRoute,
+      providerRegistry: fakeRegistry(models),
+      providerModels: models,
+    });
+
+    expect(result.route).toBeUndefined();
+    expect(result.fallbackToMain).toBe(false);
+    expect(result.diagnostics).toContain(
+      "Vision fallbackToMain requires a vision-capable main model route"
+    );
+  });
+
+  it("rejects hosted fallbackToMain when vision processing is local-only", () => {
+    const mainRoute = fakeMainRoute({
+      profile: { ...fakeMainRoute().profile, supportsVision: true },
+    });
+    const models = [
+      fakeModelProfile({ provider: "local", id: "local-vision", supportsVision: true }),
+    ];
+    const result = resolveAuxiliaryModelRoute("vision", {
+      provider: "local",
+      id: "local-vision",
+      hostedProcessing: "local-only",
+      fallbackToMain: true,
+    }, {
+      mainRoute,
+      providerRegistry: fakeRegistry(models),
+      providerModels: models,
+    });
+
+    expect(result.route).toBeUndefined();
+    expect(result.fallbackToMain).toBe(false);
+    expect(result.diagnostics).toContain(
+      "Vision fallbackToMain is incompatible with local-only processing when the main route is hosted"
+    );
+  });
+
+  it("rejects fallbackToMain when the main route has no executable adapter", () => {
+    const mainRoute = fakeMainRoute({
+      profile: { ...fakeMainRoute().profile, supportsVision: true },
+    });
+    const models = [
+      fakeModelProfile({ provider: "local", id: "local-vision", supportsVision: true }),
+    ];
+    const result = resolveAuxiliaryModelRoute("vision", {
+      provider: "local",
+      id: "local-vision",
+      fallbackToMain: true,
+    }, {
+      mainRoute,
+      providerRegistry: fakeRegistry(models, { missingProviders: ["openai"] }),
+      providerModels: models,
+    });
+
+    expect(result.route).toBeUndefined();
+    expect(result.fallbackToMain).toBe(false);
+    expect(result.diagnostics).toContain(
+      "Vision fallbackToMain requires an executable main model route: Route openai/gpt-4o has no registered provider adapter"
+    );
+  });
+
+  it("does not automatically enable an unusable main-route fallback", () => {
+    const mainRoute = fakeMainRoute({
+      profile: { ...fakeMainRoute().profile, supportsVision: true },
+    });
+    const models = [
+      fakeModelProfile({ provider: "local", id: "local-vision", supportsVision: true }),
+    ];
+    const result = resolveAuxiliaryModelRoute("vision", { provider: "auto" }, {
+      mainRoute,
+      providerRegistry: fakeRegistry(models, { discoveryOnlyProviders: ["openai"] }),
+      providerModels: models,
+    });
+
+    expect(result.route?.provider).toBe("local");
+    expect(result.route?.id).toBe("local-vision");
+    expect(result.fallbackToMain).toBe(false);
   });
 
   it("defaults fallbackToMain for vision to true when main supports vision", () => {

@@ -34,10 +34,18 @@ describe("toolRegistrationPlan", () => {
     expect(configEntry?.phase).toBe("pre-skill-visibility");
   });
 
+  it("registers foreground planning as session-bound and pre-skill", () => {
+    const entry = toolRegistrationPlan.find((candidate) => candidate.provider.name === "plan");
+
+    expect(entry?.provider.kind).toBe("session");
+    expect(entry?.phase).toBe("pre-skill-visibility");
+  });
+
   it("registers local memory read/search tools without changing session_search schema", () => {
     const memoryEntry = toolRegistrationPlan.find((entry) => entry.provider.name === "memory");
     const memoryRetrievalEntry = toolRegistrationPlan.find((entry) => entry.provider.name === "memoryRetrieval");
     const sessionSearchEntry = toolRegistrationPlan.find((entry) => entry.provider.name === "sessionSearch");
+    const sessionUsageEntry = toolRegistrationPlan.find((entry) => entry.provider.name === "sessionUsage");
     const taskResultEntry = toolRegistrationPlan.find((entry) => entry.provider.name === "taskResult");
     const taskEntry = toolRegistrationPlan.find((entry) => entry.provider.name === "task");
 
@@ -46,6 +54,8 @@ describe("toolRegistrationPlan", () => {
     expect(memoryRetrievalEntry?.phase).toBe("pre-skill-visibility");
     expect(sessionSearchEntry?.provider.kind).toBe("session");
     expect(sessionSearchEntry?.phase).toBe("pre-skill-visibility");
+    expect(sessionUsageEntry?.provider.kind).toBe("session");
+    expect(sessionUsageEntry?.phase).toBe("pre-skill-visibility");
     expect(taskResultEntry?.provider.kind).toBe("session");
     expect(taskResultEntry?.phase).toBe("pre-skill-visibility");
     expect(taskEntry?.provider.kind).toBe("session");

@@ -8,6 +8,7 @@ import { buildCompressionStatusReport, renderCompressionStatusReport } from "../
 import { resolveEffectiveSessionModelOverride } from "../providers/model-switch-resolver.js";
 import {
   loadRuntimeConfig,
+  isBrowserDisplayUpdate,
   setupMcpConfig,
   setupBrowserConfig,
   setupImageGenerationConfig,
@@ -24,6 +25,8 @@ import {
   type WebSetupInput
 } from "../config/runtime-config.js";
 import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "../config/profile-home.js";
+import { summarizeMcpCapabilityConfig } from "../mcp/mcp-tools.js";
+import type { MCPServerSnapshot } from "../mcp/mcp-tools.js";
 import {
   diagnoseProviderConfig,
   formatProviderTruthStatus,
@@ -36,6 +39,7 @@ export type ConfigToolsOptions = {
   profileId?: string;
   sessionId?: string | (() => string);
   sessionDb?: Pick<SessionDB, "listEvents"> & Partial<Pick<SessionDB, "getSessionModelOverride" | "listMessages">>;
+  mcpServerSnapshots?: readonly MCPServerSnapshot[];
 };
 
 export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[] {
@@ -48,7 +52,7 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
         properties: {}
       },
       riskClass: "read-only-local",
-      toolsets: ["core"],
+      toolsets: ["core", "provider", "diagnostics"],
       progressLabel: "checking provider config",
       maxResultSizeChars: 4000,
       isAvailable: () => true,
@@ -151,7 +155,7 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
         properties: {}
       },
       riskClass: "read-only-local",
-      toolsets: ["core"],
+      toolsets: ["core", "provider", "diagnostics"],
       progressLabel: "checking provider execution status",
       maxResultSizeChars: 4000,
       isAvailable: () => true,
@@ -238,7 +242,7 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
         properties: {}
       },
       riskClass: "read-only-local",
-      toolsets: ["core"],
+      toolsets: ["core", "diagnostics"],
       progressLabel: "checking compression config",
       maxResultSizeChars: 5000,
       isAvailable: () => true,
@@ -364,6 +368,7 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
           cdpUrl: { type: "string" },
           launchCommand: { type: "string" },
           autoLaunch: { type: "boolean" },
+          headless: { type: "boolean" },
         }
       },
       riskClass: "shared-state-mutation",
@@ -374,7 +379,8 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
       run: async (input: BrowserSetupInput) => {
         const result = await setupBrowserConfig({
           ...options,
-          input
+          input,
+          preserveExisting: isBrowserDisplayUpdate(input)
         });
 
         return {
@@ -385,6 +391,7 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
             result.config.browser?.cdpUrl === undefined ? undefined : `CDP URL: ${result.config.browser.cdpUrl}`,
             result.config.browser?.launchCommand === undefined ? undefined : `Launch command: ${result.config.browser.launchCommand}`,
             `Auto-launch: ${result.config.browser?.autoLaunch === true ? "enabled" : "disabled"}`,
+            result.config.browser?.autoLaunch === true ? `Browser window: ${result.config.browser.headless === false ? "visible" : "background"}` : undefined,
             `Wrote ${result.path}.`
           ].filter((line) => line !== undefined).join("\n"),
           metadata: {
@@ -396,7 +403,7 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
     },
     {
       name: "config.mcp.status",
-      description: "Show configured MCP servers and config sources.",
+      description: "Show configured MCP connector lifecycle, current-turn exposure, capabilities, and config sources.",
       inputSchema: {
         type: "object",
         properties: {}
@@ -409,6 +416,12 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
       run: async () => {
         const loaded = await loadRuntimeConfig(options);
         const servers = Object.entries(loaded.mcp.servers);
+        const snapshots = options.mcpServerSnapshots ?? [];
+        const sessionId = typeof options.sessionId === "function" ? options.sessionId() : options.sessionId;
+        const events = sessionId === undefined || options.sessionDb === undefined
+          ? []
+          : await options.sessionDb.listEvents(sessionId).catch(() => []);
+        const latestInventory = [...events].reverse().find((event) => event.kind === "provider-tool-inventory");
         return {
           ok: true,
           content: servers.length === 0
@@ -420,21 +433,49 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
             : [
                 "MCP servers",
                 ...servers.map(([name, server]) =>
-                  [
+                  (() => {
+                    const snapshot = snapshots.find((candidate) => candidate.name === name);
+                    const exposure = latestInventory?.connectors.find((candidate) => candidate.id === name);
+                    const capabilities = summarizeMcpCapabilityConfig(server);
+                    return [
                     `${name}`,
+                    `  configured: yes`,
                     `  enabled: ${server.enabled === false ? "no" : "yes"}`,
+                    `  connected: ${snapshot === undefined ? "unknown" : snapshot.connected ? "yes" : "no"}`,
+                    `  schemas registered: ${snapshot === undefined ? "unknown" : snapshot.schemasRegistered ? "yes" : "no"}`,
+                    `  available: ${snapshot === undefined ? "unknown" : snapshot.available ? "yes" : "no"}`,
+                    `  exposed this turn: ${exposure === undefined ? "unknown" : exposure.exposedThisTurn ? "yes" : "no"}`,
+                    snapshot?.failureStage === undefined ? undefined : `  failure stage: ${snapshot.failureStage}`,
+                    snapshot?.error === undefined ? undefined : `  error: ${snapshot.error}`,
                     `  transport: ${server.transport ?? "stdio"}`,
                     `  trust: ${server.trust ?? "conservative"}`,
                     server.command === undefined ? undefined : `  command: ${server.command}`,
                     server.url === undefined ? undefined : `  url: ${server.url}`,
                     server.args === undefined ? undefined : `  args: ${server.args.join(" ") || "(none)"}`,
-                    server.cwd === undefined ? undefined : `  cwd: ${server.cwd}`
-                  ].filter((line) => line !== undefined).join("\n")
+                    server.cwd === undefined ? undefined : `  cwd: ${server.cwd}`,
+                    `  protected delivery configured: ${capabilities.protectedDeliveryConfigured ? "yes" : "no"}`,
+                    `  grouped delivery supported: ${capabilities.groupedDeliverySupported ? "yes" : "no"}`,
+                    `  browser relay supported: ${capabilities.browserRelaySupported ? "yes" : "no"}`,
+                    `  artifact relay configured: ${capabilities.artifactRelayConfigured ? "yes" : "no"}`,
+                    `  result redaction configured: ${capabilities.resultRedactionConfigured ? "yes" : "no"}`,
+                    `  continuity configured: ${capabilities.continuityConfigured ? "yes" : "no"}`,
+                    `  verification configured: ${capabilities.verificationConfigured ? "yes" : "no"}`
+                    ].filter((line) => line !== undefined).join("\n");
+                  })()
                 ),
                 `Config sources: ${loaded.sources.join(", ") || "none"}`
               ].join("\n"),
           metadata: {
-            servers: loaded.mcp.servers,
+            servers: servers.map(([name, server]) => ({
+              ...(snapshots.find((candidate) => candidate.name === name) ?? {}),
+              exposedThisTurn: latestInventory?.connectors.find((candidate) => candidate.id === name)?.exposedThisTurn,
+              name,
+              configured: true,
+              enabled: server.enabled !== false,
+              transport: server.transport ?? "stdio",
+              trust: server.trust ?? "conservative",
+              capabilities: summarizeMcpCapabilityConfig(server)
+            })),
             sources: loaded.sources
           }
         };
@@ -465,6 +506,80 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
           toolRiskClass: {
             type: "string",
             enum: ["read-only-local", "read-only-network", "workspace-write", "external-side-effect", "credential-access", "destructive-local", "shared-state-mutation", "spend-money", "sandbox-escape"]
+          },
+          toolRiskClasses: {
+            type: "object",
+            additionalProperties: {
+              type: "string",
+              enum: ["read-only-local", "read-only-network", "workspace-write", "external-side-effect", "credential-access", "destructive-local", "shared-state-mutation", "spend-money", "sandbox-escape"]
+            }
+          },
+          protectedToolArguments: {
+            type: "object",
+            additionalProperties: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                paths: { type: "array", minItems: 1, maxItems: 8, items: { type: "string" } },
+                handling: {
+                  type: "object",
+                  additionalProperties: false,
+                  properties: {
+                    persistence: { type: "string", enum: ["none", "destination-managed", "unknown"] },
+                    sharing: { type: "string", enum: ["private", "workspace", "account", "external", "unknown"] }
+                  },
+                  required: ["persistence", "sharing"]
+                },
+                groupedDelivery: { type: "boolean" },
+                browserRelay: { type: "boolean" }
+              },
+              required: ["paths", "handling"]
+            }
+          },
+          artifactToolArguments: {
+            type: "object",
+            additionalProperties: {
+              type: "object",
+              additionalProperties: false,
+              properties: {
+                paths: { type: "array", minItems: 1, maxItems: 8, items: { type: "string" } },
+                allowedMimeTypes: { type: "array", minItems: 1, maxItems: 8, items: { type: "string" } },
+                maxBytes: { type: "integer", minimum: 1, maximum: 25 * 1024 * 1024 },
+                typeMapping: {
+                  type: "object", additionalProperties: false,
+                  properties: { argument: { type: "string" }, values: { type: "object", additionalProperties: { type: "string" } } },
+                  required: ["argument", "values"]
+                }
+              },
+              required: ["paths", "allowedMimeTypes", "maxBytes"]
+            }
+          },
+          redactedToolResultPaths: {
+            type: "object",
+            additionalProperties: {
+              type: "array",
+              minItems: 1,
+              maxItems: 8,
+              items: { type: "string" }
+            }
+          },
+          continuityToolResultPaths: {
+            type: "object",
+            additionalProperties: {
+              type: "array",
+              minItems: 1,
+              maxItems: 8,
+              items: { type: "string" }
+            }
+          },
+          toolVerificationRelationships: {
+            type: "object",
+            additionalProperties: {
+              type: "array",
+              minItems: 1,
+              maxItems: 16,
+              items: { type: "string" }
+            }
           },
           resourceReadRiskClass: {
             type: "string",
@@ -501,7 +616,13 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
           ].filter((line) => line !== undefined).join("\n"),
           metadata: {
             path: result.path,
-            servers: result.config.mcpServers
+            servers: Object.entries(result.config.mcpServers ?? {}).map(([name, server]) => ({
+              name,
+              enabled: server.enabled !== false,
+              transport: server.transport ?? "stdio",
+              trust: server.trust ?? "conservative",
+              capabilities: summarizeMcpCapabilityConfig(server)
+            }))
           }
         };
       }
@@ -518,6 +639,10 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
           allowedUserIds: { type: "array", items: { type: "string" } },
           allowedChatIds: { type: "array", items: { type: "string" } },
           pollTimeoutSeconds: { type: "number" },
+          secureInputMode: {
+            type: "string",
+            enum: ["protected-handoff", "direct-dm", "disabled"]
+          },
           enabled: { type: "boolean" },
         }
       },
@@ -642,7 +767,7 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
         required: ["provider", "model"]
       },
       riskClass: "shared-state-mutation",
-      toolsets: ["core"],
+      toolsets: ["core", "provider", "configuration"],
       progressLabel: "configuring provider",
       maxResultSizeChars: 6000,
       isAvailable: () => true,
@@ -735,7 +860,8 @@ export const configToolProvider: SessionToolProvider = {
       homeDir: ctx.homeDir,
       profileId: ctx.profileId,
       sessionId: ctx.currentSessionId,
-      sessionDb: requireProviderDependency("config", "sessionDb", ctx.sessionDb)
+      sessionDb: requireProviderDependency("config", "sessionDb", ctx.sessionDb),
+      mcpServerSnapshots: ctx.mcpServerSnapshots
     });
   }
 };

@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { resolveTokens } from "../../../theme/token-resolver.js";
 import { createOperatorConsoleStyle } from "./operatorConsoleStyle.js";
+import type { ToolActivityState } from "./operatorConsoleState.js";
 import { renderTurnActivitySurface } from "./turnActivitySurface.js";
 
 describe("turn activity semantic motion", () => {
@@ -56,6 +57,36 @@ describe("turn activity semantic motion", () => {
     expect(text).toContain("o");
     expect(text).not.toContain("\x1b");
     for (const character of text) expect(character.charCodeAt(0)).toBeLessThan(128);
+  });
+
+  it("labels live work counters as activity so they are distinct from Mission progress", () => {
+    const activeWork: ToolActivityState = {
+      items: [{
+        id: "browser-1",
+        toolName: "browser.navigate",
+        status: "succeeded",
+        summary: "Open developers.mtn.com",
+      }],
+      startedAtMs: 0,
+      updatedAtMs: 20_000,
+      scrollOffset: 0,
+      expanded: false,
+    };
+
+    expect(stripAnsi(renderTurnActivitySurface({ phase: "provider" }, {
+      width: 80,
+      activeWork,
+      style,
+      motionElapsedMs: 0,
+    }).join("\n"))).toContain("working · activity: 0 active · 1 done · 00:20");
+
+    expect(stripAnsi(renderTurnActivitySurface({ phase: "provider" }, {
+      width: 100,
+      locale: "ar",
+      activeWork,
+      style,
+      motionElapsedMs: 0,
+    }).join("\n"))).toContain("نشاط:");
   });
 });
 

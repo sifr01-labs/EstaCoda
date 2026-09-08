@@ -5,6 +5,7 @@ import {
   approvalCardStateFromToolExecution,
   createApprovalFocusTarget,
   createInitialOperatorConsoleState,
+  DEFAULT_APPROVAL_FOCUS_CONTROL,
   routeApprovalKey,
   type ApprovalCardState,
   type ApprovalIntent,
@@ -59,6 +60,9 @@ async function operatorConsoleApprovalPromptAdapter(input: ApprovalPromptAdapter
   const approval = approvalCardStateFromToolExecution(input.execution, {
     focused: true,
     locale: input.locale,
+    availableScopes: input.allowPersistentApproval
+      ? ["once", "session", "always"]
+      : ["once", "session"],
   });
   if (input.input?.isTTY === true) {
     return await readInlineOperatorConsoleApproval({
@@ -92,7 +96,10 @@ async function readInlineOperatorConsoleApproval(input: {
     status: input.host.getState().status,
     approvals: [input.approval],
     focus: {
-      target: createApprovalFocusTarget(input.approval.id, input.approval.focusedControl ?? "approve"),
+      target: createApprovalFocusTarget(
+        input.approval.id,
+        input.approval.focusedControl ?? DEFAULT_APPROVAL_FOCUS_CONTROL
+      ),
     },
   });
   let renderedRows = 0;
@@ -210,7 +217,7 @@ function approvalIntentFromAnswer(answer: string, approvalId: string): ApprovalI
 function mapOperatorConsoleApprovalIntent(intent: ApprovalIntent): string {
   switch (intent.type) {
     case "approve":
-      return "once";
+      return intent.scope;
     case "reject":
       return "deny";
     case "inspect":

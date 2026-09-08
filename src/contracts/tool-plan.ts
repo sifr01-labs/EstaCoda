@@ -1,4 +1,5 @@
 import type { ToolResult } from "./tool.js";
+import type { ToolRiskClass } from "./tool.js";
 
 export type ToolCallPlanStatus =
   | "planned"
@@ -14,6 +15,8 @@ export type ToolCallPlan = {
   input: Record<string, unknown>;
   source: "provider-tool-call" | "internal";
   status: ToolCallPlanStatus;
+  /** Static registry risk used when execution never produces an authoritative record. */
+  riskClass?: ToolRiskClass;
   raw?: unknown;
   error?: string;
   result?: ToolResult;

@@ -1,5 +1,9 @@
 import type { FileChangePreviewViewModel } from "./view-model.js";
-import type { SessionCompressionTrigger, SessionContextWindowUsage } from "./session.js";
+import type {
+  AgentCancellationSource,
+  SessionCompressionTrigger,
+  SessionContextWindowUsage
+} from "./session.js";
 import type {
   ProviderFinishReason,
   ProviderReasoningMetadata,
@@ -9,6 +13,7 @@ import type {
   SkillRouteTelemetryDetails,
   SkillRouteFinalOutcomeStatus
 } from "./skill.js";
+import type { ExecutionPlanLifecycleEvent } from "./execution-plan.js";
 
 export type ContextEstimateStage =
   | "input"
@@ -19,7 +24,40 @@ export type ContextEstimateStage =
   | "provider-tool-feedback"
   | "assembled-prompt";
 
+export type ProviderToolInventoryEvent = {
+  kind: "provider-tool-inventory";
+  phase: "initial" | "expanded";
+  tools: string[];
+  addedTools: string[];
+  expansionReason?: string;
+  nativeSchemaTokens: number;
+  connectors: Array<{
+    kind: "mcp";
+    id: string;
+    configured: boolean;
+    connected: boolean;
+    schemasRegistered: boolean;
+    available: boolean;
+    exposedThisTurn: boolean;
+  }>;
+};
+
 export type RuntimeEvent =
+  | ExecutionPlanLifecycleEvent
+  | ProviderToolInventoryEvent
+  | {
+      kind: "authentication-lifecycle";
+      stage:
+        | "credentials-requested"
+        | "credentials-submitted"
+        | "challenge-required"
+        | "challenge-submitted"
+        | "verification-pending"
+        | "authenticated"
+        | "blocked";
+      toolCallId: string;
+      blockerKind?: "user_input_required" | "approval_required" | "missing_capability" | "external_state" | "budget";
+    }
   | {
       kind: "agent-start";
       sessionId: string;
@@ -191,6 +229,13 @@ export type RuntimeEvent =
       reason?: string;
     }
   | {
+      kind: "session-recall-stage";
+      stage: "started" | "completed" | "failed";
+      focus: "general" | "visited-sites";
+      sourceSessionIds: string[];
+      resultCount: number;
+    }
+  | {
       kind: "session-recall-decision";
       triggered: boolean;
       reason: string;
@@ -199,6 +244,7 @@ export type RuntimeEvent =
   | {
       kind: "agent-cancelled";
       reason: string;
+      abortSource?: AgentCancellationSource;
       resumeNote?: string;
     }
   | {

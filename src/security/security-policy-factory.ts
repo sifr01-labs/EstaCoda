@@ -12,6 +12,7 @@ import {
 import type { ResolvedAuxiliaryRoute, ResolvedModelRoute } from "../contracts/provider.js";
 import { ProviderExecutor } from "../providers/provider-executor.js";
 import { assessCommandSafety, assessHardlineFloor, normalizeCommandForSafety } from "./command-safety.js";
+import { assessDataEgress, dataEgressHardBlock } from "./data-egress-policy.js";
 import { assessCommandRiskDetailed, type SmartApprovalAssessment } from "./smart-approval-assessor.js";
 
 export function normalizeSecurityApprovalMode(mode: string | undefined): SecurityApprovalMode {
@@ -88,6 +89,9 @@ function assessStrict(request: SecurityRequest): SecurityAssessment {
     };
   }
 
+  const dataEgress = assessDataEgress(request, "strict");
+  if (dataEgress !== undefined) return dataEgress;
+
   const nonHostBypass = nonHostCommandBypassFor(request, "strict");
   if (nonHostBypass !== undefined) {
     return nonHostBypass;
@@ -146,6 +150,9 @@ function assessOpen(request: SecurityRequest): SecurityAssessment {
     };
   }
 
+  const dataEgress = assessDataEgress(request, "open");
+  if (dataEgress !== undefined) return dataEgress;
+
   const nonHostBypass = nonHostCommandBypassFor(request, "open");
   if (nonHostBypass !== undefined) {
     return nonHostBypass;
@@ -171,6 +178,9 @@ function assessAdaptiveDeterministic(request: SecurityRequest): SecurityAssessme
       deterministicRule: hardBlock.code
     };
   }
+
+  const dataEgress = assessDataEgress(request, "adaptive");
+  if (dataEgress !== undefined) return dataEgress;
 
   if (
     request.riskClass === "credential-access" ||
@@ -231,6 +241,8 @@ function hardBlockFor(request: SecurityRequest): {
   code: string;
   reason: string;
 } | undefined {
+  const dataEgressBlock = dataEgressHardBlock(request);
+  if (dataEgressBlock !== undefined) return dataEgressBlock;
   const command = request.command ?? request.targetSummary ?? "";
   return assessHardlineFloor(command, { environmentType: environmentTypeFor(request) });
 }

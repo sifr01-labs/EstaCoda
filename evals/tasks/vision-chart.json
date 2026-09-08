@@ -1,0 +1,37 @@
+{
+  "id": "vision-chart",
+  "title": "Vision chart extraction reliability",
+  "channel": "provider",
+  "evidence": "implemented but not live-proven",
+  "optIn": true,
+  "metrics": [
+    "accuracy_percent",
+    "hallucination_count",
+    "latency_ms",
+    "cost_usd",
+    "fallback_count",
+    "approval_frequency_percent"
+  ],
+  "goal": "Measure chart value extraction and trend reasoning without invented datapoints.",
+  "prompt": "Use vision.analyze with mode chart, detail high, and output detailed. Return each quarter and value, then state the supported trend.",
+  "prerequisites": [
+    "Run pnpm run eval:vision:fixtures.",
+    "Configure and explicitly enable a vision-capable live route."
+  ],
+  "fixtures": [
+    ".estacoda/eval-fixtures/vision/chart.png"
+  ],
+  "steps": [
+    "Run the chart prompt against the deterministic fixture.",
+    "Score values and conclusions against manifest.json.",
+    "Record any unsupported claim as one hallucination."
+  ],
+  "assertions": [
+    "Q1 through Q4 values are exact.",
+    "Q4 is identified as the maximum.",
+    "The response identifies a monotonic increase and invents no additional series."
+  ],
+  "notes": [
+    "Accuracy percent uses the six expected manifest items."
+  ]
+}

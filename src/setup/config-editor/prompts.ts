@@ -2,7 +2,11 @@ import type { Prompt } from "../../cli/prompt-contract.js";
 import { promptForApiKeyInput } from "../../cli/secret-prompt.js";
 import type { BrowserBackendKind, BrowserCloudProviderKind } from "../../contracts/browser.js";
 import { defaultImageApiKeyEnv, defaultImageBaseUrl, defaultImageModel, IMAGE_MODEL_OPTIONS, resolveImageModel } from "../../contracts/image-generation.js";
-import type { AuxiliaryModelTask } from "../../contracts/provider.js";
+import type {
+  AuxiliaryModelSlotConfig,
+  AuxiliaryModelTask,
+  VisionHostedProcessingPreference,
+} from "../../contracts/provider.js";
 import type { SecurityApprovalMode } from "../../contracts/security.js";
 import type { PromptCardStatusLine } from "../../contracts/view-model.js";
 import type { BrowserEngineKind, ImageGenerationProvider, SttProvider, TtsProvider } from "../../config/runtime-config.js";
@@ -123,6 +127,7 @@ export type BrowserCapabilityResult = {
   readonly chromeFlags: string[];
   readonly launchCommand?: string;
   readonly autoLaunch: boolean;
+  readonly headless: boolean;
   readonly supervised?: boolean;
   readonly engine?: BrowserEngineKind;
   readonly hybridRouting?: boolean;
@@ -154,11 +159,77 @@ export const SETUP_EDITOR_AUXILIARY_TASKS = [
 
 export type SetupEditorAuxiliaryTask = typeof SETUP_EDITOR_AUXILIARY_TASKS[number];
 
+export type VisionAndImagesCapability = "vision-analysis" | "image-generation";
+
+export type VisionAnalysisRouteMode = "automatic" | "main" | "dedicated" | "disabled" | "fallback";
+export type VisionAnalysisRouteChoice = "automatic" | "dedicated" | "disabled" | "advanced";
+export type VisionAnalysisAdvancedChoice = "main" | "fallback" | "settings";
+
+export type VisionAnalysisRouteSettings = {
+  readonly hostedProcessing: VisionHostedProcessingPreference;
+  readonly timeoutMs: number;
+  readonly maxConcurrency: number;
+};
+
+export type VisionAnalysisRouteSettingsResult =
+  | { readonly kind: "back" }
+  | { readonly kind: "selected"; readonly value: VisionAnalysisRouteSettings };
+
 export type ConfigEditorPostApplyActionId =
   | "launch"
   | "accept-limited-mode"
   | "repair-again"
   | "exit";
+
+export async function promptVisionVerificationAfterApply(
+  prompt: Prompt,
+  locale: SetupCopyLocale = "en"
+): Promise<boolean> {
+  return promptSetupChoice(prompt, {
+    title: setupCopyText(locale, "setupEditor.prompt.visionVerification.title"),
+    message: `${setupCopyText(locale, "setupEditor.prompt.visionVerification.body")}\n`,
+    choices: [
+      setupNavigationChoice({
+        id: "skip-vision-verification",
+        label: setupCopyText(locale, "setupEditor.prompt.visionVerification.skip"),
+        description: setupCopyText(locale, "setupEditor.prompt.visionVerification.skip.description"),
+        value: false,
+      }),
+      setupNavigationChoice({
+        id: "run-vision-verification",
+        label: setupCopyText(locale, "setupEditor.prompt.visionVerification.run"),
+        description: setupCopyText(locale, "setupEditor.prompt.visionVerification.run.description"),
+        value: true,
+      }),
+    ],
+    defaultValue: false,
+  });
+}
+
+export async function promptHostedVisionVerificationConsent(
+  prompt: Prompt,
+  locale: SetupCopyLocale = "en"
+): Promise<boolean> {
+  return promptSetupChoice(prompt, {
+    title: setupCopyText(locale, "setupEditor.prompt.visionVerification.hosted.title"),
+    message: `${setupCopyText(locale, "setupEditor.prompt.visionVerification.hosted.body")}\n`,
+    choices: [
+      setupNavigationChoice({
+        id: "deny-hosted-vision-verification",
+        label: setupCopyText(locale, "setupEditor.prompt.visionVerification.hosted.deny"),
+        description: setupCopyText(locale, "setupEditor.prompt.visionVerification.hosted.deny.description"),
+        value: false,
+      }),
+      setupNavigationChoice({
+        id: "consent-hosted-vision-verification",
+        label: setupCopyText(locale, "setupEditor.prompt.visionVerification.hosted.consent"),
+        description: setupCopyText(locale, "setupEditor.prompt.visionVerification.hosted.consent.description"),
+        value: true,
+      }),
+    ],
+    defaultValue: false,
+  });
+}
 
 export type SpendingLimitPromptResult =
   | { readonly kind: "back" }
@@ -302,6 +373,7 @@ async function promptBoundedNumber(
     readonly defaultValue: number;
     readonly minimum: number;
     readonly maximum?: number;
+    readonly integer?: boolean;
   },
   locale: SetupCopyLocale
 ): Promise<BoundedNumberPromptResult> {
@@ -318,6 +390,7 @@ async function promptBoundedNumber(
     const value = Number(raw);
     if (
       Number.isFinite(value) &&
+      (input.integer !== true || Number.isInteger(value)) &&
       value >= input.minimum &&
       (input.maximum === undefined || value <= input.maximum)
     ) {
@@ -913,7 +986,7 @@ export function setupEditorReviewSelectedAreaLabel(
     case "configure-voice":
       return locale === "ar" ? "الصوت" : "Voice";
     case "configure-image-generation":
-      return locale === "ar" ? "توليد الصور" : "Image Generation";
+      return locale === "ar" ? "توليد الصور وتعديلها" : "Image Generation and Editing";
     case "configure-browser":
       return locale === "ar" ? "المتصفح" : "Browser";
     case "edit-language":
@@ -1276,6 +1349,187 @@ export async function promptAuxiliaryModelTask(
     ],
     defaultValue: "assessor" as const,
   }, options);
+}
+
+export async function promptVisionAndImagesCapability(
+  prompt: Prompt,
+  locale: SetupCopyLocale = "en"
+): Promise<SetupChoiceResult<VisionAndImagesCapability>> {
+  return promptSetupChoiceResult(prompt, {
+    title: setupCopyText(locale, "setupEditor.prompt.visionAndImages.title"),
+    message: `${setupCopyText(locale, "setupEditor.prompt.visionAndImages.body")}\n`,
+    allowBack: true,
+    choices: [
+      {
+        id: "vision-and-images-analysis",
+        label: setupCopyText(locale, "setupEditor.prompt.visionAndImages.analysis"),
+        description: setupCopyText(locale, "setupEditor.prompt.visionAndImages.analysis.description"),
+        value: "vision-analysis",
+      },
+      {
+        id: "vision-and-images-generation",
+        label: setupCopyText(locale, "setupEditor.prompt.visionAndImages.generation"),
+        description: setupCopyText(locale, "setupEditor.prompt.visionAndImages.generation.description"),
+        value: "image-generation",
+      },
+    ],
+    defaultValue: "vision-analysis",
+  });
+}
+
+export async function promptVisionAnalysisRouteMode(
+  prompt: Prompt,
+  current: AuxiliaryModelSlotConfig | undefined,
+  locale: SetupCopyLocale = "en"
+): Promise<SetupChoiceResult<VisionAnalysisRouteChoice>> {
+  const currentMode = visionAnalysisRouteMode(current);
+  const choices: SetupChoice<VisionAnalysisRouteChoice>[] = [
+    {
+      id: "vision-route-automatic",
+      label: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.mode.automatic"),
+      description: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.mode.automatic.description"),
+      value: "automatic",
+      current: currentMode === "automatic",
+    },
+    {
+      id: "vision-route-dedicated",
+      label: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.mode.dedicated"),
+      description: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.mode.dedicated.description"),
+      value: "dedicated",
+      current: currentMode === "dedicated",
+    },
+    {
+      id: "vision-route-disabled",
+      label: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.mode.disabled"),
+      description: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.mode.disabled.description"),
+      value: "disabled",
+      current: currentMode === "disabled",
+    },
+    {
+      id: "vision-route-advanced",
+      label: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.mode.advanced"),
+      description: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.mode.advanced.description"),
+      value: "advanced",
+      current: currentMode === "main" || currentMode === "fallback",
+    }
+  ];
+  return promptSetupChoiceResult(prompt, {
+    title: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.mode.title"),
+    message: `${setupCopyText(locale, "setupEditor.prompt.visionAnalysis.mode.body")}\n`,
+    allowBack: true,
+    choices,
+    defaultValue: currentMode === "main" || currentMode === "fallback" ? "advanced" : currentMode,
+  });
+}
+
+export async function promptVisionAnalysisAdvancedChoice(
+  prompt: Prompt,
+  current: AuxiliaryModelSlotConfig | undefined,
+  locale: SetupCopyLocale = "en"
+): Promise<SetupChoiceResult<VisionAnalysisAdvancedChoice>> {
+  const currentMode = visionAnalysisRouteMode(current);
+  return promptSetupChoiceResult(prompt, {
+    title: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.advanced.title"),
+    message: `${setupCopyText(locale, "setupEditor.prompt.visionAnalysis.advanced.body")}\n`,
+    allowBack: true,
+    choices: [
+      {
+        id: "vision-advanced-main",
+        label: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.mode.main"),
+        description: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.mode.main.description"),
+        value: "main",
+        current: currentMode === "main",
+      },
+      {
+        id: "vision-advanced-fallback",
+        label: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.mode.fallback"),
+        description: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.mode.fallback.description"),
+        value: "fallback",
+        current: currentMode === "fallback",
+      },
+      {
+        id: "vision-advanced-settings",
+        label: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.advanced.settings"),
+        description: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.advanced.settings.description"),
+        value: "settings",
+      },
+    ],
+    defaultValue: currentMode === "fallback" ? "fallback" : currentMode === "main" ? "main" : "settings",
+  });
+}
+
+export async function promptVisionAnalysisRouteSettings(
+  prompt: Prompt,
+  current: AuxiliaryModelSlotConfig | undefined,
+  locale: SetupCopyLocale = "en",
+  options: { readonly localProcessingAvailable?: boolean } = {}
+): Promise<VisionAnalysisRouteSettingsResult> {
+  const showLocalOnly = options.localProcessingAvailable === true || current?.hostedProcessing === "local-only";
+  let hostedProcessing: "allow-with-approval" | "local-only" = "allow-with-approval";
+  if (showLocalOnly) {
+    const result = await promptSetupChoiceResult(prompt, {
+      title: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.hosted.title"),
+      message: `${setupCopyText(locale, "setupEditor.prompt.visionAnalysis.hosted.body")}\n`,
+      allowBack: true,
+      choices: [
+        {
+          id: "vision-hosted-approval",
+          label: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.hosted.allow"),
+          description: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.hosted.allow.description"),
+          value: "allow-with-approval" as const,
+        },
+        {
+          id: "vision-hosted-local-only",
+          label: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.hosted.localOnly"),
+          description: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.hosted.localOnly.description"),
+          value: "local-only" as const,
+        },
+      ],
+      defaultValue: current?.hostedProcessing ?? "allow-with-approval",
+    });
+    if (result.kind === "back") return result;
+    hostedProcessing = result.value;
+  }
+
+  const timeoutMs = await promptBoundedNumber(prompt, {
+    title: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.limits.title"),
+    question: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.timeout.question"),
+    description: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.timeout.description"),
+    invalid: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.timeout.invalid"),
+    defaultValue: current?.timeoutMs ?? 60_000,
+    minimum: 1,
+    integer: true,
+  }, locale);
+  if (timeoutMs.kind === "back") return timeoutMs;
+
+  const maxConcurrency = await promptBoundedNumber(prompt, {
+    title: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.limits.title"),
+    question: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.concurrency.question"),
+    description: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.concurrency.description"),
+    invalid: setupCopyText(locale, "setupEditor.prompt.visionAnalysis.concurrency.invalid"),
+    defaultValue: current?.maxConcurrency ?? 1,
+    minimum: 1,
+    integer: true,
+  }, locale);
+  if (maxConcurrency.kind === "back") return maxConcurrency;
+
+  return {
+    kind: "selected",
+    value: {
+      hostedProcessing,
+      timeoutMs: timeoutMs.value,
+      maxConcurrency: maxConcurrency.value,
+    },
+  };
+}
+
+export function visionAnalysisRouteMode(slot: AuxiliaryModelSlotConfig | undefined): VisionAnalysisRouteMode {
+  if (slot?.enabled === false) return "disabled";
+  if (slot?.provider === "main") return "main";
+  if (slot?.provider !== undefined && slot.provider !== "auto") {
+    return slot.fallbackToMain === true ? "fallback" : "dedicated";
+  }
+  return "automatic";
 }
 
 export async function promptConfigEditorPostApplyAction(
@@ -2025,6 +2279,7 @@ export function promptBrowserCapability(
     readonly chromeFlags?: readonly string[];
     readonly launchCommand?: string;
     readonly autoLaunch?: boolean;
+    readonly headless?: boolean;
     readonly supervised?: boolean;
     readonly engine?: BrowserEngineKind;
     readonly hybridRouting?: boolean;
@@ -2045,6 +2300,7 @@ export function promptBrowserCapability(
     readonly chromeFlags?: readonly string[];
     readonly launchCommand?: string;
     readonly autoLaunch?: boolean;
+    readonly headless?: boolean;
     readonly supervised?: boolean;
     readonly engine?: BrowserEngineKind;
     readonly hybridRouting?: boolean;
@@ -2065,6 +2321,7 @@ export async function promptBrowserCapability(
     readonly chromeFlags?: readonly string[];
     readonly launchCommand?: string;
     readonly autoLaunch?: boolean;
+    readonly headless?: boolean;
     readonly supervised?: boolean;
     readonly engine?: BrowserEngineKind;
     readonly hybridRouting?: boolean;
@@ -2114,7 +2371,7 @@ export async function promptBrowserCapability(
     },
   ] as const;
   const currentModeLabel = modeChoices.find((choice) => choice.value === defaultMode)?.label ?? defaultMode;
-  while (true) {
+  browserModeLoop: while (true) {
     const modeResult = await promptSetupChoiceMaybeBack<BrowserModeChoice>(prompt, {
       title: setupCopyText(locale, "setupEditor.prompt.browser.mode.title"),
       message: `${setupCopyText(locale, "setupEditor.prompt.browser.mode.body")}\n`,
@@ -2138,6 +2395,7 @@ export async function promptBrowserCapability(
       return browserCapabilityWithMode({
         backend: "local-cdp",
         autoLaunch: true,
+        headless: true,
         supervised: true,
         engine: "cdp",
         launchArgs: [],
@@ -2152,6 +2410,7 @@ export async function promptBrowserCapability(
         launchArgs: [],
         chromeFlags: [],
         autoLaunch: false,
+        headless: true,
         supervised: false,
       }, mode);
     }
@@ -2173,6 +2432,7 @@ export async function promptBrowserCapability(
         launchArgs: [],
         chromeFlags: [],
         autoLaunch: false,
+        headless: true,
         supervised: false,
         hybridRouting: true,
         cloudFallback: true,
@@ -2193,68 +2453,98 @@ export async function promptBrowserCapability(
         chromeFlags: [],
         launchCommand: current.launchCommand,
         autoLaunch: false,
+        headless: true,
         supervised: true,
       }, mode);
     }
 
-    const autoLaunchResult = await promptSetupChoiceMaybeBack(prompt, {
-      title: setupCopyText(locale, "setupEditor.prompt.browser.local.title"),
-      message: [
-        setupCopyText(locale, "setupEditor.prompt.browser.local.body"),
-        setupCopyText(locale, "setupEditor.prompt.browser.autoLaunch"),
-        "",
-      ].join("\n"),
-      choices: [
-        {
-          id: "browser-auto-launch-yes",
-          label: setupCopyText(locale, "setupEditor.prompt.browser.autoLaunch.yes"),
-          description: setupCopyText(locale, "setupEditor.prompt.browser.autoLaunch.description"),
-          value: true,
-        },
-        {
-          id: "browser-auto-launch-no",
-          label: setupCopyText(locale, "setupEditor.prompt.browser.autoLaunch.no"),
-          description: setupCopyText(locale, "setupEditor.prompt.browser.autoLaunch.no.description"),
-          value: false,
-        },
-      ],
-      defaultValue: current.autoLaunch ?? false,
-    }, options);
-    if (isSetupChoiceBackResult(autoLaunchResult)) {
-      continue;
-    }
-    const autoLaunch = setupChoiceSelectedValue(autoLaunchResult);
-    const cdpUrl = await promptSetupStringWithDefault(
-      prompt,
-      setupPromptLabel(locale, setupCopyText(locale, "setupEditor.prompt.browser.cdpUrl.optional")),
-      current.cdpUrl ?? ""
-    );
-    const launchExecutable = await promptSetupStringWithDefault(
-      prompt,
-      setupPromptLabel(locale, setupCopyText(locale, "setupEditor.prompt.browser.launchExecutable")),
-      current.launchExecutable ?? ""
-    );
-    const launchArgsInput = await promptSetupStringWithDefault(
-      prompt,
-      setupPromptLabel(locale, setupCopyText(locale, "setupEditor.prompt.browser.launchArgs")),
-      current.launchArgs?.join(", ") ?? ""
-    );
-    const chromeFlagsInput = await promptSetupStringWithDefault(
-      prompt,
-      setupPromptLabel(locale, setupCopyText(locale, "setupEditor.prompt.browser.chromeFlags")),
-      current.chromeFlags?.join(", ") ?? ""
-    );
+    while (true) {
+      const autoLaunchResult = await promptSetupChoiceMaybeBack(prompt, {
+        title: setupCopyText(locale, "setupEditor.prompt.browser.local.title"),
+        message: [
+          setupCopyText(locale, "setupEditor.prompt.browser.local.body"),
+          setupCopyText(locale, "setupEditor.prompt.browser.autoLaunch"),
+          "",
+        ].join("\n"),
+        choices: [
+          {
+            id: "browser-auto-launch-yes",
+            label: setupCopyText(locale, "setupEditor.prompt.browser.autoLaunch.yes"),
+            description: setupCopyText(locale, "setupEditor.prompt.browser.autoLaunch.description"),
+            value: true,
+          },
+          {
+            id: "browser-auto-launch-no",
+            label: setupCopyText(locale, "setupEditor.prompt.browser.autoLaunch.no"),
+            description: setupCopyText(locale, "setupEditor.prompt.browser.autoLaunch.no.description"),
+            value: false,
+          },
+        ],
+        defaultValue: current.autoLaunch ?? false,
+      }, options);
+      if (isSetupChoiceBackResult(autoLaunchResult)) {
+        continue browserModeLoop;
+      }
+      const autoLaunch = setupChoiceSelectedValue(autoLaunchResult);
+      let headless = current.headless ?? true;
+      if (autoLaunch) {
+        const headlessResult = await promptSetupChoiceMaybeBack(prompt, {
+          title: setupCopyText(locale, "setupEditor.prompt.browser.window.title"),
+          message: `${setupCopyText(locale, "setupEditor.prompt.browser.window.body")}\n`,
+          choices: [
+            {
+              id: "browser-window-background",
+              label: setupCopyText(locale, "setupEditor.prompt.browser.window.background"),
+              description: setupCopyText(locale, "setupEditor.prompt.browser.window.background.description"),
+              value: true,
+            },
+            {
+              id: "browser-window-visible",
+              label: setupCopyText(locale, "setupEditor.prompt.browser.window.visible"),
+              description: setupCopyText(locale, "setupEditor.prompt.browser.window.visible.description"),
+              value: false,
+            },
+          ],
+          defaultValue: headless,
+        }, options);
+        if (isSetupChoiceBackResult(headlessResult)) {
+          continue;
+        }
+        headless = setupChoiceSelectedValue(headlessResult);
+      }
+      const cdpUrl = await promptSetupStringWithDefault(
+        prompt,
+        setupPromptLabel(locale, setupCopyText(locale, "setupEditor.prompt.browser.cdpUrl.optional")),
+        current.cdpUrl ?? ""
+      );
+      const launchExecutable = await promptSetupStringWithDefault(
+        prompt,
+        setupPromptLabel(locale, setupCopyText(locale, "setupEditor.prompt.browser.launchExecutable")),
+        current.launchExecutable ?? ""
+      );
+      const launchArgsInput = await promptSetupStringWithDefault(
+        prompt,
+        setupPromptLabel(locale, setupCopyText(locale, "setupEditor.prompt.browser.launchArgs")),
+        current.launchArgs?.join(", ") ?? ""
+      );
+      const chromeFlagsInput = await promptSetupStringWithDefault(
+        prompt,
+        setupPromptLabel(locale, setupCopyText(locale, "setupEditor.prompt.browser.chromeFlags")),
+        current.chromeFlags?.join(", ") ?? ""
+      );
 
-    return browserCapabilityWithMode({
-      backend: "local-cdp",
-      cdpUrl: optionalTrimmedString(cdpUrl),
-      launchExecutable: optionalTrimmedString(launchExecutable),
-      launchArgs: splitCsv(launchArgsInput),
-      chromeFlags: splitCsv(chromeFlagsInput),
-      launchCommand: current.launchCommand,
-      autoLaunch,
-      supervised: true,
-    }, "local-supervised");
+      return browserCapabilityWithMode({
+        backend: "local-cdp",
+        cdpUrl: optionalTrimmedString(cdpUrl),
+        launchExecutable: optionalTrimmedString(launchExecutable),
+        launchArgs: splitCsv(launchArgsInput),
+        chromeFlags: splitCsv(chromeFlagsInput),
+        launchCommand: current.launchCommand,
+        autoLaunch,
+        headless,
+        supervised: true,
+      }, "local-supervised");
+    }
   }
 }
 
@@ -2351,6 +2641,7 @@ function browserModeFromCurrent(current: {
 function isRecommendedBrowserConfig(current: {
   readonly backend?: BrowserBackendKind;
   readonly autoLaunch?: boolean;
+  readonly headless?: boolean;
   readonly supervised?: boolean;
   readonly cdpUrl?: string;
   readonly launchExecutable?: string;
@@ -2360,6 +2651,7 @@ function isRecommendedBrowserConfig(current: {
 }): boolean {
   return current.backend === "local-cdp" &&
     current.autoLaunch === true &&
+    current.headless !== false &&
     current.supervised === true &&
     current.cdpUrl === undefined &&
     current.launchExecutable === undefined &&
@@ -2372,6 +2664,7 @@ function browserCurrentStateIsKnown(current: {
   readonly backend?: BrowserBackendKind;
   readonly cloudProvider?: BrowserCloudProviderKind;
   readonly autoLaunch?: boolean;
+  readonly headless?: boolean;
   readonly cdpUrl?: string;
   readonly launchExecutable?: string;
   readonly launchArgs?: readonly string[];
@@ -2381,6 +2674,7 @@ function browserCurrentStateIsKnown(current: {
   return current.backend !== undefined ||
     current.cloudProvider !== undefined ||
     current.autoLaunch !== undefined ||
+    current.headless !== undefined ||
     current.cdpUrl !== undefined ||
     current.launchExecutable !== undefined ||
     current.launchArgs !== undefined ||

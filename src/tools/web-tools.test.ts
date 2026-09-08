@@ -4,12 +4,19 @@ import { tmpdir } from "node:os";
 import { join, relative } from "node:path";
 import { PassThrough } from "node:stream";
 import { afterEach, describe, expect, it, vi } from "vitest";
-import type { BrowserActionInput, BrowserBackend, BrowserNavigateInput } from "../contracts/browser.js";
+import type { BrowserActionInput, BrowserActionPreflight, BrowserBackend, BrowserNavigateInput } from "../contracts/browser.js";
+import type { GroupedSecureInputRequestHandler } from "../contracts/secure-input.js";
 import type { ResolvedAuxiliaryRoute, ResolvedModelRoute } from "../contracts/provider.js";
 import type { ManagedPythonCapabilityInstallStatus } from "../python-env/capability-manager.js";
 import { DDGS_CAPABILITY_ID } from "../python-env/capability-registry.js";
 import type { ProviderExecutor, ProviderExecutionResult } from "../providers/provider-executor.js";
+import { ArtifactStore } from "../artifacts/artifact-store.js";
 import { createMockBrowserBackend, createUnconfiguredBrowserBackend } from "../browser/browser-backend.js";
+import { browserCapabilities } from "../browser/browser-capabilities.js";
+import { BrowserTargetError } from "../browser/browser-locator.js";
+import { BrowserSessionStateError } from "../browser/session-state.js";
+import { ephemeralVisionImages } from "../vision/ephemeral-vision-content.js";
+import { createGovernedVisionArtifactDispatcher, createVisionTools } from "./vision-tools.js";
 import { createWebTools, webToolProvider, type FetchLike, type WebToolOptions } from "./web-tools.js";
 import { registerWebResearchProvider, resetWebResearchProvidersForTest } from "./web-research-registry.js";
 import type { WebResearchProvider, WebResearchSubprocess, WebResearchSubprocessSpawn } from "./web-research-provider.js";
@@ -20,15 +27,22 @@ const expectedToolNames = [
   "web.crawl",
   "browser.status",
   "browser.snapshot",
+  "browser.find",
   "browser.click",
   "browser.type",
+  "browser.fill_protected_form",
+  "browser.select",
+  "browser.extract",
   "browser.scroll",
   "browser.press",
   "browser.back",
   "browser.get_images",
   "browser.console",
+  "browser.tabs",
+  "browser.switch_tab",
   "browser.cdp",
   "browser.screenshot",
+  "browser.download",
   "browser.vision",
   "browser.dialog",
   "browser.navigate"
@@ -61,6 +75,29 @@ function createTestWebTools(options: WebToolOptions = {}) {
     ...options
   });
 }
+
+describe("browser tool execution resources", () => {
+  it("declares exclusive runtime-only scheduling per derived browser session", () => {
+    const tools = createTestWebTools();
+    const download = tool("browser.download", tools);
+    const switchTab = tool("browser.switch_tab", tools);
+    const webExtract = tool("web.extract", tools);
+
+    expect(download.executionConcurrency?.resourceKey({}, { sessionId: "runtime-session" })).toBe(
+      "browser:runtime-session:main"
+    );
+    expect(switchTab.executionConcurrency?.resourceKey({ sessionId: "shared-session" }, { sessionId: "runtime-session" })).toBe(
+      "browser:shared-session"
+    );
+    expect(download.executionTimeoutMs).toBe(60_000);
+    expect(switchTab.executionTimeoutMs).toBe(60_000);
+    expect(tool("browser.type", tools).executionAbortSettlementGraceMs).toBe(2_000);
+    expect(tool("browser.fill_protected_form", tools).executionAbortSettlementGraceMs).toBe(2_000);
+    expect(download.executionAbortSettlementGraceMs).toBeUndefined();
+    expect(webExtract.executionConcurrency).toBeUndefined();
+    expect(webExtract.executionTimeoutMs).toBeUndefined();
+  });
+});
 
 function createFetchResponse(input: {
   ok?: boolean;
@@ -131,6 +168,11 @@ const publicResolver = async (hostname: string) => hostname === "localhost"
   ? ["127.0.0.1"]
   : ["93.184.216.34"];
 
+const VALID_PNG = Buffer.from(
+  "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAACXBIWXMAAAPoAAAD6AG1e1JrAAAADUlEQVQImWP4z8DwHwAFAAH/q842iQAAAABJRU5ErkJggg==",
+  "base64"
+);
+
 const summaryModelProfile = {
   id: "summary-model",
   provider: "openai" as const,
@@ -154,6 +196,36 @@ const snapshotAuxiliaryRoute: ResolvedAuxiliaryRoute = {
   diagnostics: []
 };
 
+const visionRoute: ResolvedModelRoute = {
+  provider: "openai",
+  id: "vision-model",
+  baseUrl: "https://api.openai.com/v1",
+  profile: {
+    ...summaryModelProfile,
+    id: "vision-model",
+    supportsVision: true
+  }
+};
+
+function visionAuxiliaryRoute(
+  source: ResolvedAuxiliaryRoute["source"] = "explicit"
+): ResolvedAuxiliaryRoute {
+  return {
+    task: "vision",
+    route: visionRoute,
+    source,
+    fallbackToMain: false,
+    diagnostics: []
+  };
+}
+
+function createVisionScreenshotBackend(screenshot = vi.fn(async () => ({
+  mimeType: "image/png" as const,
+  base64: VALID_PNG.toString("base64")
+}))): BrowserBackend {
+  return { ...createMockBrowserBackend(), screenshot };
+}
+
 function okProviderResult(content: string): ProviderExecutionResult {
   return {
     ok: true,
@@ -175,12 +247,18 @@ function createSummaryExecutor(content: string): Pick<ProviderExecutor, "complet
   };
 }
 
+function browserIdentity(actionRevision: number, documentEpoch = 1, observationId = actionRevision) {
+  return { documentEpoch, actionRevision, observationId };
+}
+
 function createLargeSnapshotBackend(text = "Snapshot text. ".repeat(800)): BrowserBackend {
   return {
     ...createMockBrowserBackend(),
     snapshot: async () => ({
       sessionId: "session-1",
       url: "https://example.com/",
+      identity: browserIdentity(1),
+      observedAt: "2026-08-13T00:00:00.000Z",
       title: "Large Snapshot",
       text,
       elements: [
@@ -218,13 +296,17 @@ function createSessionRecordingBrowserBackend(calls: Array<{ method: string; inp
   const snapshotFor = (input: BrowserActionInput | BrowserNavigateInput = {}): ReturnType<NonNullable<BrowserBackend["snapshot"]>> extends Promise<infer T> ? T : never => ({
     sessionId: input.sessionId ?? "missing-session",
     url: "https://example.com/",
+    identity: browserIdentity(1),
+    observedAt: "2026-08-13T00:00:00.000Z",
     title: "Recorded Browser Page",
     text: `Recorded browser snapshot for ${input.sessionId ?? "missing-session"}.`,
+    tab: { ref: "@t1", url: "https://example.com/", title: "Recorded Browser Page", controlled: true },
     elements: [{ ref: "@e1", role: "button", name: "Recorded Button" }]
   });
 
   return {
     kind: "mock",
+    capabilities: browserCapabilities({ snapshots: true, semanticActions: true, controlledNewTabs: true }),
     isAvailable: () => true,
     status: () => ({ backend: "mock", available: true }),
     navigate: async (input) => {
@@ -246,6 +328,16 @@ function createSessionRecordingBrowserBackend(calls: Array<{ method: string; inp
       calls.push({ method: "snapshot", input });
       return snapshotFor(input);
     },
+    find: async (input) => {
+      calls.push({ method: "find", input });
+      return {
+        sessionId: input.sessionId ?? "missing-session",
+        identity: browserIdentity(1),
+        tabRef: "@t1",
+        status: "found",
+        candidates: [{ ref: "@e1", identity: browserIdentity(1), tabRef: "@t1", role: "button", name: "Recorded Button" }]
+      };
+    },
     click: async (input) => {
       calls.push({ method: "click", input });
       return snapshotFor(input);
@@ -253,6 +345,20 @@ function createSessionRecordingBrowserBackend(calls: Array<{ method: string; inp
     type: async (input) => {
       calls.push({ method: "type", input });
       return snapshotFor(input);
+    },
+    select: async (input) => {
+      calls.push({ method: "select", input });
+      return snapshotFor(input);
+    },
+    extract: async (input) => {
+      calls.push({ method: "extract", input });
+      return {
+        sessionId: input.sessionId ?? "missing-session",
+        identity: browserIdentity(1),
+        tabRef: "@t1",
+        target: { ref: "@e1", identity: browserIdentity(1), tabRef: "@t1", role: "button", name: "Recorded Button" },
+        text: "Recorded Button"
+      };
     },
     scroll: async (input) => {
       calls.push({ method: "scroll", input });
@@ -273,6 +379,30 @@ function createSessionRecordingBrowserBackend(calls: Array<{ method: string; inp
     console: async (input = {}) => {
       calls.push({ method: "console", input });
       return [{ level: "log", text: `Recorded console for ${input.sessionId ?? "missing-session"}` }];
+    },
+    tabs: async (input = {}) => {
+      calls.push({ method: "tabs", input });
+      return {
+        sessionId: input.sessionId ?? "missing-session",
+        tabs: [
+          { ref: "@t1", url: "https://example.com/", title: "Main", controlled: true },
+          { ref: "@t2", url: "https://example.com/details", title: "Details", controlled: false }
+        ],
+        blockedCount: 1
+      };
+    },
+    switchTab: async (input) => {
+      calls.push({ method: "switchTab", input });
+      const tab = { ref: input.tabRef, url: "https://example.com/details", title: "Details", controlled: true };
+      return {
+        tab,
+        snapshot: {
+          ...snapshotFor(input),
+          url: tab.url,
+          title: tab.title,
+          tab
+        }
+      };
     },
     cdp: async (input) => {
       calls.push({ method: "cdp", input });
@@ -1048,7 +1178,7 @@ describe("web and browser tools baselines", () => {
     expect(result.content).toContain("Browser: mock");
     expect(result.content).toContain("Session: test-runtime-session:main");
     expect(result.content).toContain("URL: https://example.com/app");
-    expect(result.content).toContain("[Compact viewport snapshot]");
+    expect(result.content).toContain("Identity: documentEpoch=1 actionRevision=1 observationId=1");
     expect(result.metadata).toMatchObject({
       url: "https://example.com/app",
       backend: "mock",
@@ -1075,6 +1205,8 @@ describe("web and browser tools baselines", () => {
           snapshot: {
             sessionId: input.sessionId ?? "nav-session",
             url: input.url,
+            identity: browserIdentity(1),
+            observedAt: "2026-08-13T00:00:00.000Z",
             text: "Fallback snapshot."
           },
           metadata: {
@@ -1248,6 +1380,8 @@ describe("web and browser tools baselines", () => {
           snapshot: {
             sessionId: input.sessionId ?? "redirect-session",
             url: input.url === "about:blank" ? "about:blank" : "http://169.254.169.254/latest",
+            identity: browserIdentity(1),
+            observedAt: "2026-08-13T00:00:00.000Z",
             text: "redirected"
           }
         };
@@ -1286,6 +1420,8 @@ describe("web and browser tools baselines", () => {
           snapshot: {
             sessionId: input.sessionId ?? "private-redirect-session",
             url: input.url === "about:blank" ? "about:blank" : "http://192.168.1.1/admin",
+            identity: browserIdentity(1),
+            observedAt: "2026-08-13T00:00:00.000Z",
             text: "redirected"
           }
         };
@@ -1324,6 +1460,8 @@ describe("web and browser tools baselines", () => {
           snapshot: {
             sessionId: input.sessionId ?? "policy-redirect-session",
             url: input.url === "about:blank" ? "about:blank" : "https://blocked.test/final",
+            identity: browserIdentity(1),
+            observedAt: "2026-08-13T00:00:00.000Z",
             text: "redirected"
           }
         };
@@ -1357,6 +1495,358 @@ describe("web and browser tools baselines", () => {
 
     expect(cdp.riskClass).toBe("external-side-effect");
     expect(cdp.toolsets).toEqual(["dangerous"]);
+  });
+
+  it("raises consequential click targets while preserving structurally safe links", async () => {
+    const current = browserIdentity(4);
+    const labels = new Map([
+      ["@e2", "DELETE password=hunter2"],
+      ["@e3", "Renew credential"],
+      ["@e4", "Submit"],
+      ["@e5", "Confirm"],
+      ["@e6", "Purchase"],
+      ["@e7", "Continue"],
+      ["@e8", "Unknown scripted control"]
+    ]);
+    const preflightAction = vi.fn(async (_action: "click" | "press" | "dialog", input: BrowserActionInput): Promise<BrowserActionPreflight> => ({
+      action: "click",
+      sessionId: input.sessionId!,
+      identity: current,
+      tabRef: "@t1",
+      url: "https://developers.mtn.com/apps?token=must-redact",
+      target: {
+        ref: input.ref,
+        kind: input.ref === "@e1" ? "link" : input.ref === "@e8" ? "scripted-control" : "button",
+        tag: input.ref === "@e1" ? "a" : input.ref === "@e8" ? "div" : "button",
+        role: input.ref === "@e1" ? "link" : "button",
+        label: input.ref === "@e1" ? "API docs" : labels.get(input.ref!)!,
+        ...(input.ref === "@e1" ? { href: "https://developers.mtn.com/docs" } : {}),
+        formAssociated: input.ref !== "@e1",
+        submit: input.ref !== "@e1"
+      }
+    }));
+    const browserBackend = { ...createSessionRecordingBrowserBackend(), preflightAction };
+    const click = tool("browser.click", createTestWebTools({ browserBackend }));
+    const base = { sessionId: "runtime:main", identity: current, tabRef: "@t1" };
+
+    const link = await click.resolveSecurity?.({ ...base, ref: "@e1" }, { trustedWorkspace: true, sessionId: "runtime" });
+    expect(link).toMatchObject({ riskClass: "read-only-network", targetSummary: "Click link “API docs” on developers.mtn.com" });
+
+    for (const [ref, label] of labels) {
+      const resolution = await click.resolveSecurity?.({ ...base, ref }, { trustedWorkspace: true, sessionId: "runtime" });
+      expect(resolution).toMatchObject({
+        riskClass: "external-side-effect",
+        targetKey: expect.stringMatching(/^browser-action:[a-f0-9]{64}$/u),
+        targetSummary: expect.stringContaining(label.startsWith("DELETE") ? "DELETE password=[redacted]" : label)
+      });
+      expect(JSON.stringify(resolution)).not.toContain("hunter2");
+      expect(JSON.stringify(resolution)).not.toContain("must-redact");
+    }
+  });
+
+  it.each(["ref", "regionRef"] as const)("security-binds a grounded %s region without converting it to an element or raw coordinates", async (field) => {
+    const current = browserIdentity(5);
+    const clickMethod = vi.fn(async (input: BrowserActionInput) => {
+      expect(input).toMatchObject({
+        sessionId: "runtime:main",
+        regionRef: "@r2",
+        identity: current,
+        tabRef: "@t1"
+      });
+      expect(input.ref).toBeUndefined();
+      expect(input.locator).toBeUndefined();
+      return createSessionRecordingBrowserBackend().snapshot!({ sessionId: "runtime:main" });
+    });
+    const preflightAction = vi.fn(async (_action: "click" | "press" | "dialog", input: BrowserActionInput): Promise<BrowserActionPreflight> => ({
+      action: "click",
+      sessionId: input.sessionId!,
+      identity: current,
+      tabRef: "@t1",
+      url: "https://developers.mtn.com/apps",
+      target: {
+        ref: "@r2",
+        kind: "scripted-control",
+        tag: "div",
+        label: "TikTok Connect",
+        formAssociated: false,
+        submit: false
+      }
+    }));
+    const click = tool("browser.click", createTestWebTools({
+      browserBackend: { ...createSessionRecordingBrowserBackend(),
+        capabilities: browserCapabilities({ snapshots: true, semanticActions: true, visibleRegionActions: true }),
+        click: clickMethod, preflightAction }
+    }));
+    const input = {
+      sessionId: "runtime:main",
+      [field]: "@r2",
+      identity: current,
+      tabRef: "@t1"
+    };
+    const approved = await click.resolveSecurity?.(input, { trustedWorkspace: true, sessionId: "runtime" });
+
+    expect(approved).toMatchObject({
+      riskClass: "external-side-effect",
+      targetKey: expect.stringMatching(/^browser-action:[a-f0-9]{64}$/u),
+      targetSummary: "Click scripted control “TikTok Connect” on developers.mtn.com"
+    });
+    await expect(click.run(input, { securityResolution: approved })).resolves.toMatchObject({ ok: true });
+    expect(preflightAction).toHaveBeenCalledOnce();
+    expect(preflightAction).toHaveBeenCalledWith("click", expect.objectContaining({ regionRef: "@r2" }));
+    expect(preflightAction.mock.calls[0]![1].ref).toBeUndefined();
+    expect(clickMethod).toHaveBeenCalledOnce();
+  });
+
+  it("fails closed when a reviewed bound target becomes stale before dispatch", async () => {
+    const reviewedIdentity = browserIdentity(9);
+    const currentIdentity = browserIdentity(10);
+    const clickMethod = vi.fn(async (input: BrowserActionInput) => {
+      expect(input).toMatchObject({
+        sessionId: "runtime:main",
+        ref: "@e2",
+        identity: reviewedIdentity,
+        tabRef: "@t1"
+      });
+      expect(input.locator).toBeUndefined();
+      throw new BrowserTargetError({
+        reason: "stale-browser-ref",
+        message: "The reviewed browser document changed before dispatch.",
+        currentSessionId: "runtime:main",
+        currentIdentity,
+        currentTabRef: "@t1"
+      });
+    });
+    const preflightAction = vi.fn(async (_action: "click" | "press" | "dialog", input: BrowserActionInput): Promise<BrowserActionPreflight> => ({
+      action: "click",
+      sessionId: input.sessionId!,
+      identity: reviewedIdentity,
+      tabRef: "@t1",
+      url: "https://developers.mtn.com/apps",
+      target: { ref: "@e2", kind: "button", tag: "button", role: "button", label: "DELETE", formAssociated: true, submit: true }
+    }));
+    const browserBackend = { ...createSessionRecordingBrowserBackend(), click: clickMethod, preflightAction };
+    const click = tool("browser.click", createTestWebTools({ browserBackend }));
+    const context = { trustedWorkspace: true, sessionId: "runtime" };
+    const input = {
+      sessionId: "runtime:main",
+      locator: { role: "button", name: "DELETE" },
+      waitFor: { kind: "dom-stable" as const }
+    };
+    const approved = await click.resolveSecurity?.(input, context);
+
+    await expect(click.run(input, { securityResolution: approved })).resolves.toMatchObject({
+      ok: false,
+      content: expect.stringContaining("No action was dispatched."),
+      metadata: {
+        reason: "stale-browser-ref",
+        actionDispatched: false,
+        currentIdentity
+      }
+    });
+    expect(preflightAction).toHaveBeenCalledOnce();
+    expect(clickMethod).toHaveBeenCalledOnce();
+  });
+
+  it("resolves a semantic locator once and dispatches the exact reviewed target", async () => {
+    const clickMethod = vi.fn(async (input: BrowserActionInput) => {
+      expect(input).toMatchObject({
+        sessionId: "runtime:main",
+        ref: "@e5",
+        identity: browserIdentity(9),
+        tabRef: "@t1"
+      });
+      expect(input.locator).toBeUndefined();
+      return createSessionRecordingBrowserBackend().snapshot!({ sessionId: "runtime:main" });
+    });
+    const current = browserIdentity(9);
+    const preflightAction = vi.fn(async (_action: "click" | "press" | "dialog", input: BrowserActionInput): Promise<BrowserActionPreflight> => {
+      return {
+        action: "click",
+        sessionId: input.sessionId!,
+        identity: current,
+        tabRef: "@t1",
+        url: "https://developers.mtn.com/login",
+        target: { ref: "@e5", kind: "link", tag: "a", role: "link", label: "Login", href: "https://developers.mtn.com/login", formAssociated: false, submit: false }
+      };
+    });
+    const click = tool("browser.click", createTestWebTools({
+      browserBackend: { ...createSessionRecordingBrowserBackend(), click: clickMethod, preflightAction }
+    }));
+    const input = { sessionId: "runtime:main", locator: { role: "link", name: "Login" } };
+    const approved = await click.resolveSecurity?.(input, { trustedWorkspace: true, sessionId: "runtime" });
+
+    expect(approved).toMatchObject({
+      riskClass: "read-only-network",
+      targetSummary: "Click link “Login” on developers.mtn.com"
+    });
+    await expect(click.run(input, { securityResolution: approved })).resolves.toMatchObject({ ok: true });
+    expect(preflightAction).toHaveBeenCalledOnce();
+    expect(clickMethod).toHaveBeenCalledOnce();
+  });
+
+  it("returns current candidates when a reviewed semantic locator is ambiguous", async () => {
+    const current = browserIdentity(9);
+    const candidates = ["@e2", "@e3"].map((ref) => ({
+      ref,
+      identity: current,
+      tabRef: "@t1",
+      role: "button",
+      name: "Open"
+    }));
+    const preflightAction = vi.fn(async () => {
+      throw new BrowserTargetError({
+        reason: "browser-target-ambiguous",
+        message: "Browser locator matched 2 current elements; refine the locator instead of guessing.",
+        candidates,
+        currentSessionId: "runtime:main",
+        currentIdentity: current,
+        currentTabRef: "@t1"
+      });
+    });
+    const clickMethod = vi.fn();
+    const click = tool("browser.click", createTestWebTools({
+      browserBackend: { ...createSessionRecordingBrowserBackend(), click: clickMethod, preflightAction }
+    }));
+    const input = { sessionId: "runtime:main", locator: { role: "button", name: "Open" } };
+    const reviewed = await click.resolveSecurity?.(input, { trustedWorkspace: true, sessionId: "runtime" });
+    expect(reviewed).toMatchObject({ riskClass: "read-only-network" });
+
+    await expect(click.run(input, { securityResolution: reviewed })).resolves.toMatchObject({
+      ok: false,
+      content: expect.stringContaining("matched 2 current elements"),
+      metadata: {
+        reason: "browser-target-ambiguous",
+        candidates
+      }
+    });
+    expect(preflightAction).toHaveBeenCalledOnce();
+    expect(clickMethod).not.toHaveBeenCalled();
+  });
+
+  it("keeps navigation keys read-only and raises Enter on a focused form control", async () => {
+    const pressMethod = vi.fn(async () => createSessionRecordingBrowserBackend().snapshot!({ sessionId: "runtime:main" }));
+    const preflightAction = vi.fn(async (_action: "click" | "press" | "dialog", input: BrowserActionInput): Promise<BrowserActionPreflight> => ({
+      action: "press",
+      sessionId: input.sessionId!,
+      identity: browserIdentity(5),
+      tabRef: "@t1",
+      url: "https://developers.mtn.com/login",
+      target: { ref: "@e4", kind: "form-control", tag: "input", role: "textbox", label: "Email", formAssociated: true, submit: false }
+    }));
+    const press = tool("browser.press", createTestWebTools({
+      browserBackend: { ...createSessionRecordingBrowserBackend(), press: pressMethod, preflightAction }
+    }));
+    const context = { trustedWorkspace: true, sessionId: "runtime" };
+
+    await expect(press.resolveSecurity?.({ key: "Escape" }, context)).resolves.toMatchObject({ riskClass: "read-only-network" });
+    expect(preflightAction).not.toHaveBeenCalled();
+    const reviewed = await press.resolveSecurity?.({ key: "Enter" }, context);
+    expect(reviewed).toMatchObject({
+      riskClass: "external-side-effect",
+      targetSummary: "Press enter on “Email” on developers.mtn.com"
+    });
+    await expect(press.run({ key: "Enter" }, { securityResolution: reviewed })).resolves.toMatchObject({ ok: true });
+    expect(pressMethod).toHaveBeenCalledWith(expect.objectContaining({
+      ref: "@e4",
+      identity: browserIdentity(5),
+      tabRef: "@t1",
+      key: "Enter"
+    }));
+  });
+
+  it("raises dialog acceptance while leaving dismissal read-only", async () => {
+    const dialogMethod = vi.fn(async () => createSessionRecordingBrowserBackend().snapshot!({ sessionId: "runtime:main" }));
+    const preflightAction = vi.fn(async (_action: "click" | "press" | "dialog", input: BrowserActionInput): Promise<BrowserActionPreflight> => ({
+      action: "dialog",
+      sessionId: input.sessionId!,
+      identity: browserIdentity(6),
+      tabRef: "@t1",
+      url: "https://developers.mtn.com/apps",
+      target: { ref: "dialog-7", kind: "dialog", role: "confirm", label: "Delete this app?", formAssociated: false, submit: false }
+    }));
+    const dialog = tool("browser.dialog", createTestWebTools({
+      browserBackend: { ...createSessionRecordingBrowserBackend(), dialog: dialogMethod, preflightAction }
+    }));
+    const context = { trustedWorkspace: true, sessionId: "runtime" };
+
+    const reviewed = await dialog.resolveSecurity?.({ action: "accept" }, context);
+    expect(reviewed).toMatchObject({
+      riskClass: "external-side-effect",
+      targetSummary: "Accept browser dialog “Delete this app?” on developers.mtn.com"
+    });
+    await expect(dialog.run({ action: "accept" }, { securityResolution: reviewed })).resolves.toMatchObject({ ok: true });
+    expect(dialogMethod).toHaveBeenCalledWith(expect.objectContaining({
+      ref: "dialog-7",
+      identity: browserIdentity(6),
+      tabRef: "@t1",
+      action: "accept"
+    }));
+    await expect(dialog.resolveSecurity?.({ action: "dismiss" }, context)).resolves.toMatchObject({
+      riskClass: "read-only-network"
+    });
+  });
+
+  it("exposes safe tab discovery and explicit switching as concise browser tools", async () => {
+    const calls: Array<{ method: string; input: BrowserActionInput | BrowserNavigateInput }> = [];
+    const tools = createTestWebTools({
+      browserBackend: createSessionRecordingBrowserBackend(calls),
+      currentSessionId: () => "runtime-session"
+    });
+    const tabs = tool("browser.tabs", tools);
+    const switchTab = tool("browser.switch_tab", tools);
+
+    expect(tabs.riskClass).toBe("read-only-network");
+    expect(switchTab.riskClass).toBe("read-only-network");
+    await expect(tabs.run({})).resolves.toMatchObject({
+      ok: true,
+      content: expect.stringContaining("@t1 [controlled] Main — https://example.com/")
+    });
+    const switched = await switchTab.run({ tabRef: "@t2" });
+
+    expect(switched.ok).toBe(true);
+    expect(switched.content).toContain("Controlled tab: @t2 [controlled] Details — https://example.com/details");
+    expect(switched.content).toContain("Recorded browser snapshot for runtime-session:main.");
+    expect(calls).toEqual([
+      { method: "tabs", input: { sessionId: "runtime-session:main" } },
+      { method: "switchTab", input: { sessionId: "runtime-session:main", tabRef: "@t2", signal: undefined } }
+    ]);
+  });
+
+  it("guides target discovery away from local browser profiles", () => {
+    const navigate = tool("browser.navigate");
+
+    expect(navigate.description).toContain("a URL supplied by the user");
+    expect(navigate.description).toContain("existing controlled tabs");
+    expect(navigate.description).toContain("normal permitted web lookup");
+    expect(navigate.description).toContain("one focused clarification");
+    expect(navigate.description).toContain("local browser profile data requires explicit authorization");
+  });
+
+  it("offers controlled current-tab or new-tab navigation and forwards the disposition", async () => {
+    const calls: Array<{ method: string; input: BrowserActionInput | BrowserNavigateInput }> = [];
+    const navigate = tool("browser.navigate", createTestWebTools({
+      browserBackend: createSessionRecordingBrowserBackend(calls),
+      currentSessionId: () => "runtime-session",
+      resolveHostname: publicResolver
+    }));
+
+    expect(navigate.inputSchema).toMatchObject({
+      properties: {
+        disposition: { type: "string", enum: ["current-tab", "new-tab"] }
+      }
+    });
+    await expect(navigate.run({
+      url: "https://example.com/connect",
+      disposition: "new-tab"
+    })).resolves.toMatchObject({ ok: true });
+    expect(calls).toContainEqual({
+      method: "navigate",
+      input: expect.objectContaining({
+        url: "https://example.com/connect",
+        sessionId: "runtime-session:main",
+        disposition: "new-tab"
+      })
+    });
   });
 
   it("blocks browser.cdp Page.navigate to metadata and private URLs before the backend call", async () => {
@@ -1756,12 +2246,17 @@ describe("web and browser tools baselines", () => {
     }> = [
       { toolName: "browser.navigate", backendMethod: "navigate", input: { url: "https://example.com" } },
       { toolName: "browser.snapshot", backendMethod: "snapshot", input: {} },
+      { toolName: "browser.find", backendMethod: "find", input: { locator: { role: "button", name: "Recorded Button" } } },
       { toolName: "browser.click", backendMethod: "click", input: { ref: "@e1" } },
       { toolName: "browser.type", backendMethod: "type", input: { ref: "@e1", text: "hello" } },
+      { toolName: "browser.select", backendMethod: "select", input: { locator: { label: "Environment" }, value: "Sandbox" } },
+      { toolName: "browser.extract", backendMethod: "extract", input: { locator: { role: "button", name: "Recorded Button" } } },
       { toolName: "browser.scroll", backendMethod: "scroll", input: { direction: "down", amount: 300 } },
       { toolName: "browser.back", backendMethod: "back", input: {} },
       { toolName: "browser.press", backendMethod: "press", input: { key: "Enter" } },
       { toolName: "browser.console", backendMethod: "console", input: {} },
+      { toolName: "browser.tabs", backendMethod: "tabs", input: {} },
+      { toolName: "browser.switch_tab", backendMethod: "switchTab", input: { tabRef: "@t2" } },
       { toolName: "browser.get_images", backendMethod: "getImages", input: {} },
       { toolName: "browser.screenshot", backendMethod: "screenshot", input: {}, options: { workspaceRoot } },
       {
@@ -1770,7 +2265,11 @@ describe("web and browser tools baselines", () => {
         input: { prompt: "describe" },
         options: {
           workspaceRoot,
-          visionAnalyzer: async () => ({ ok: true, content: "vision ok" })
+          visionDispatcher: {
+            isAvailable: () => true,
+            resolveSecurity: async () => undefined,
+            dispatch: async () => ({ ok: true, content: "vision ok" })
+          }
         }
       },
       { toolName: "browser.dialog", backendMethod: "dialog", input: { action: "accept" } },
@@ -1799,6 +2298,438 @@ describe("web and browser tools baselines", () => {
     }
   });
 
+  it("keeps explicit runtime and implicit browser calls on the same main session", async () => {
+    const calls: Array<{ method: string; input: BrowserActionInput | BrowserNavigateInput }> = [];
+    const tools = createTestWebTools({
+      browserBackend: createSessionRecordingBrowserBackend(calls),
+      currentSessionId: () => "runtime-session",
+      resolveHostname: publicResolver
+    });
+
+    await tool("browser.navigate", tools).run({
+      sessionId: "runtime-session",
+      url: "https://example.com"
+    });
+    await tool("browser.snapshot", tools).run({});
+
+    expect(calls.slice(-2)).toEqual([
+      expect.objectContaining({ method: "navigate", input: expect.objectContaining({ sessionId: "runtime-session:main" }) }),
+      expect.objectContaining({ method: "snapshot", input: expect.objectContaining({ sessionId: "runtime-session:main" }) })
+    ]);
+  });
+
+  it("requests protected browser input for a runtime-derived verified field without calling plaintext type", async () => {
+    const type = vi.fn();
+    const prepareProtectedField = vi.fn(async () => ({
+      type: "browser-field" as const,
+      sessionId: "test-runtime-session:main",
+      ref: "@e1",
+      expectedOrigin: "https://example.com",
+      tabRef: "@t1",
+      frameId: "main-frame",
+    }));
+    const onSecureInputRequest = vi.fn(async () => ({
+      status: "delivered" as const,
+      destinationLabel: "Browser field at https://example.com",
+      persisted: false,
+    }));
+    const browserType = tool("browser.type", createTestWebTools({
+      browserBackend: {
+        ...createSessionRecordingBrowserBackend(),
+        kind: "local-cdp",
+        type,
+        prepareProtectedField,
+      },
+    }));
+
+    const result = await browserType.run({
+      ref: "@e1",
+      protectedInput: {
+        kind: "password",
+        purpose: "Sign in",
+        retention: "use-once",
+      },
+    }, { onSecureInputRequest });
+
+    expect(result).toMatchObject({
+      ok: true,
+      metadata: {
+        backend: "local-cdp",
+        secureInputReceipt: { status: "delivered", persisted: false },
+      },
+    });
+    expect(result.content).not.toContain("password");
+    expect(type).not.toHaveBeenCalled();
+    expect(prepareProtectedField).toHaveBeenCalledWith(expect.objectContaining({
+      sessionId: "test-runtime-session:main",
+      ref: "@e1",
+    }));
+    expect(onSecureInputRequest).toHaveBeenCalledWith(expect.objectContaining({
+      kind: "password",
+      purpose: "Sign in",
+      destination: expect.objectContaining({ ref: "@e1", expectedOrigin: "https://example.com" }),
+    }), expect.any(Function));
+  });
+
+  it("does not expose secure-input handler failures through browser.type", async () => {
+    const browserType = tool("browser.type", createTestWebTools({
+      browserBackend: {
+        ...createSessionRecordingBrowserBackend(),
+        kind: "local-cdp",
+        prepareProtectedField: async () => ({
+          type: "browser-field",
+          sessionId: "test-runtime-session:main",
+          ref: "@e1",
+          expectedOrigin: "https://example.com",
+        }),
+      },
+    }));
+
+    const result = await browserType.run({
+      ref: "@e1",
+      protectedInput: { kind: "api-key", purpose: "Authenticate" },
+    }, {
+      onSecureInputRequest: async () => {
+        throw new Error("handler-sentinel-secret");
+      },
+    });
+
+    expect(result).toMatchObject({ ok: false });
+    expect(JSON.stringify(result)).not.toContain("handler-sentinel-secret");
+  });
+
+  it("requests atomic local submission for a one-time-code and returns only settled metadata", async () => {
+    const prepareProtectedField = vi.fn(async (input: BrowserActionInput) => ({
+      type: "browser-field" as const,
+      sessionId: input.sessionId!,
+      ref: input.ref!,
+      expectedOrigin: "https://portal.example.com",
+      tabRef: input.tabRef,
+      frameId: "main-frame",
+      label: "Browser field and submit control at https://portal.example.com",
+      submit: { ref: input.submitRef! },
+    }));
+    const takeProtectedFieldDeliveryResult = vi.fn(() => ({
+      delivery: "delivered" as const,
+      submission: "clicked" as const,
+      documentChanged: true,
+      challengeState: "departed" as const,
+      conditionMet: true,
+      beforeIdentity: browserIdentity(8),
+      afterIdentity: browserIdentity(10),
+      sensitiveInputActive: false,
+      snapshot: {
+        sessionId: "test-runtime-session:main",
+        url: "https://portal.example.com/home",
+        identity: browserIdentity(10),
+        observedAt: "2026-08-13T00:00:00.000Z",
+        title: "Portal home",
+      },
+    }));
+    const browserType = tool("browser.type", createTestWebTools({
+      browserBackend: {
+        ...createSessionRecordingBrowserBackend(),
+        kind: "local-cdp",
+        prepareProtectedField,
+        takeProtectedFieldDeliveryResult,
+      },
+    }));
+    const onSecureInputRequest = vi.fn(async () => ({
+      status: "delivered" as const,
+      destinationLabel: "Browser field and submit control at https://portal.example.com",
+      persisted: false,
+    }));
+
+    const result = await browserType.run({
+      ref: "@e19",
+      submitRef: "@e20",
+      identity: browserIdentity(8),
+      tabRef: "@t1",
+      protectedInput: {
+        kind: "one-time-code",
+        purpose: "Enter and submit the portal authentication code",
+      },
+    }, { onSecureInputRequest });
+
+    expect(result).toMatchObject({
+      ok: true,
+      metadata: {
+        protectedDelivery: {
+          submission: "clicked",
+          challengeState: "departed",
+          sensitiveInputActive: false,
+        },
+        snapshot: { identity: browserIdentity(10), title: "Portal home" },
+      },
+    });
+    expect(result.content).toContain("authentication itself still requires post-submit verification");
+    expect(prepareProtectedField).toHaveBeenCalledWith(expect.objectContaining({ submitRef: "@e20" }));
+    expect(onSecureInputRequest).toHaveBeenCalledTimes(1);
+    expect(takeProtectedFieldDeliveryResult).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(result)).not.toContain("123456");
+  });
+
+  it("renders only the explicit protected-transaction notice for an unsettled delivery", async () => {
+    const takeProtectedFieldDeliveryResult = vi.fn(() => ({
+      delivery: "delivered" as const,
+      submission: "clicked" as const,
+      documentChanged: false,
+      challengeState: "unknown" as const,
+      conditionMet: false,
+      beforeIdentity: browserIdentity(8),
+      afterIdentity: browserIdentity(9),
+      sensitiveInputActive: true,
+      snapshot: {
+        sessionId: "test-runtime-session:main",
+        url: "https://portal.example.com/challenge",
+        identity: browserIdentity(9),
+        observedAt: "2026-08-14T00:00:00.000Z",
+        sensitiveInputActive: true as const,
+      },
+    }));
+    const browserType = tool("browser.type", createTestWebTools({
+      browserBackend: {
+        ...createSessionRecordingBrowserBackend(),
+        kind: "local-cdp",
+        prepareProtectedField: async (input) => ({
+          type: "browser-field",
+          sessionId: input.sessionId!,
+          ref: input.ref!,
+          expectedOrigin: "https://portal.example.com",
+          submit: { ref: input.submitRef! },
+        }),
+        takeProtectedFieldDeliveryResult,
+      },
+    }));
+
+    const result = await browserType.run({
+      ref: "@e1",
+      submitRef: "@e2",
+      protectedInput: { kind: "one-time-code", purpose: "Authenticate" },
+    }, {
+      onSecureInputRequest: async () => ({
+        status: "delivered",
+        destinationLabel: "Protected browser field",
+        persisted: false,
+      }),
+    });
+
+    expect(result.content).toBe([
+      "Protected authentication transaction active.",
+      "Page content is intentionally suppressed.",
+      "State: settling.",
+    ].join("\n"));
+    expect(result.content).not.toContain("authenticated");
+  });
+
+  it("rejects atomic protected submission for non-OTP secrets", async () => {
+    const prepareProtectedField = vi.fn();
+    const browserType = tool("browser.type", createTestWebTools({
+      browserBackend: {
+        ...createSessionRecordingBrowserBackend(),
+        kind: "local-cdp",
+        prepareProtectedField,
+      },
+    }));
+
+    const result = await browserType.run({
+      ref: "@e1",
+      submitRef: "@e2",
+      protectedInput: { kind: "password", purpose: "Sign in" },
+    }, { onSecureInputRequest: vi.fn() });
+
+    expect(result.ok).toBe(false);
+    expect(result.content).toContain("limited to one-time-code");
+    expect(prepareProtectedField).not.toHaveBeenCalled();
+  });
+
+  it("requests every related browser credential in one grouped protected form flow", async () => {
+    const prepareProtectedField = vi.fn(async (input: BrowserActionInput) => ({
+      type: "browser-field" as const,
+      sessionId: input.sessionId!,
+      ref: input.ref!,
+      expectedOrigin: "https://portal.example.com",
+      tabRef: input.tabRef,
+      frameId: "main-frame",
+    }));
+    const onSecureInputRequest = vi.fn(async () => ({
+      status: "failed" as const,
+      destinationLabel: "unused",
+      persisted: false,
+    })) as unknown as GroupedSecureInputRequestHandler;
+    onSecureInputRequest.requestGroup = vi.fn(async () => ({
+      status: "delivered" as const,
+      items: [
+        { id: "email", receipt: { status: "delivered" as const, destinationLabel: "Email", persisted: false } },
+        { id: "password", receipt: { status: "delivered" as const, destinationLabel: "Password", persisted: false } },
+      ],
+    }));
+    const protectedForm = tool("browser.fill_protected_form", createTestWebTools({
+      browserBackend: {
+        ...createSessionRecordingBrowserBackend(),
+        kind: "local-cdp",
+        prepareProtectedField,
+      },
+    }));
+
+    const result = await protectedForm.run({
+      purpose: "Sign in to the portal",
+      identity: browserIdentity(7),
+      tabRef: "@t1",
+      fields: [
+        { id: "email", ref: "@e3", kind: "account-identifier" },
+        { id: "password", ref: "@e4", kind: "password" },
+      ],
+    }, { onSecureInputRequest });
+
+    expect(result).toMatchObject({
+      ok: true,
+      metadata: {
+        backend: "local-cdp",
+        secureInputGroupReceipt: { status: "delivered" },
+      },
+    });
+    expect(result.content).toContain("form was not submitted");
+    expect(prepareProtectedField).toHaveBeenCalledTimes(2);
+    expect(onSecureInputRequest).not.toHaveBeenCalled();
+    expect(onSecureInputRequest.requestGroup).toHaveBeenCalledWith(expect.objectContaining({
+      purpose: "Sign in to the portal",
+      items: [
+        expect.objectContaining({ id: "email", request: expect.objectContaining({ kind: "account-identifier", retention: "use-once" }) }),
+        expect.objectContaining({ id: "password", request: expect.objectContaining({ kind: "password", retention: "use-once" }) }),
+      ],
+    }));
+    const serializedCall = JSON.stringify(vi.mocked(onSecureInputRequest.requestGroup).mock.calls);
+    expect(serializedCall).not.toContain("text");
+    expect(serializedCall).not.toContain("value");
+
+    const rejectedPlaintext = await protectedForm.run({
+      purpose: "Sign in to the portal",
+      identity: browserIdentity(7),
+      tabRef: "@t1",
+      fields: [
+        { id: "email", ref: "@e3", kind: "account-identifier", value: "must-not-enter-tool-input" },
+        { id: "password", ref: "@e4", kind: "password" },
+      ],
+    }, { onSecureInputRequest });
+    expect(rejectedPlaintext.ok).toBe(false);
+    expect(onSecureInputRequest.requestGroup).toHaveBeenCalledTimes(1);
+    expect(JSON.stringify(rejectedPlaintext)).not.toContain("must-not-enter-tool-input");
+  });
+
+  it("binds grouped protected fields to one local authentication submission", async () => {
+    const prepareProtectedField = vi.fn(async (input: BrowserActionInput) => ({
+      type: "browser-field" as const,
+      sessionId: input.sessionId!,
+      ref: input.ref!,
+      expectedOrigin: "https://portal.example.com",
+      tabRef: input.tabRef,
+      frameId: "main-frame",
+      label: "Browser field with verified submit control at https://portal.example.com",
+      submit: { ref: input.submitRef! },
+    }));
+    const onSecureInputRequest = vi.fn() as unknown as GroupedSecureInputRequestHandler;
+    onSecureInputRequest.requestGroup = vi.fn(async () => ({
+      status: "delivered" as const,
+      items: [
+        { id: "email", receipt: { status: "delivered" as const, destinationLabel: "Email", persisted: false } },
+        { id: "password", receipt: { status: "delivered" as const, destinationLabel: "Password", persisted: false } },
+      ],
+    }));
+    const takeProtectedFieldDeliveryResult = vi.fn(() => ({
+      delivery: "delivered" as const,
+      submission: "clicked" as const,
+      documentChanged: false,
+      challengeState: "departed" as const,
+      conditionMet: true,
+      beforeIdentity: browserIdentity(7),
+      afterIdentity: browserIdentity(9),
+      sensitiveInputActive: false,
+      snapshot: {
+        sessionId: "test-runtime-session:main",
+        url: "https://portal.example.com/challenge",
+        identity: browserIdentity(9),
+        observedAt: "2026-08-14T00:00:00.000Z",
+        title: "Verify account",
+      },
+    }));
+    const protectedForm = tool("browser.fill_protected_form", createTestWebTools({
+      browserBackend: {
+        ...createSessionRecordingBrowserBackend(),
+        kind: "local-cdp",
+        prepareProtectedField,
+        takeProtectedFieldDeliveryResult,
+      },
+    }));
+
+    const result = await protectedForm.run({
+      purpose: "model-authored-purpose-must-not-be-approval-metadata",
+      identity: browserIdentity(7),
+      tabRef: "@t1",
+      submitRef: "@e5",
+      fields: [
+        { id: "email", ref: "@e3", kind: "account-identifier" },
+        { id: "password", ref: "@e4", kind: "password" },
+      ],
+    }, { onSecureInputRequest });
+
+    expect(result).toMatchObject({
+      ok: true,
+      metadata: {
+        protectedDelivery: { submission: "clicked", challengeState: "departed" },
+        snapshot: { identity: browserIdentity(9), title: "Verify account" },
+      },
+    });
+    expect(prepareProtectedField).toHaveBeenCalledTimes(2);
+    expect(prepareProtectedField).toHaveBeenNthCalledWith(1, expect.objectContaining({ ref: "@e3", submitRef: "@e5" }));
+    expect(prepareProtectedField).toHaveBeenNthCalledWith(2, expect.objectContaining({ ref: "@e4", submitRef: "@e5" }));
+    expect(takeProtectedFieldDeliveryResult).toHaveBeenCalledWith(expect.objectContaining({ ref: "@e4" }));
+  });
+
+  it("raises only bound protected submissions to external side effect with safe stable metadata", async () => {
+    const tools = createTestWebTools({ currentSessionId: () => "runtime-security-session" });
+    const browserType = tool("browser.type", tools);
+    const protectedForm = tool("browser.fill_protected_form", tools);
+    const context = { trustedWorkspace: true, sessionId: "runtime-security-session" };
+
+    expect(await browserType.resolveSecurity?.({ ref: "@e1", protectedInput: { kind: "one-time-code", purpose: "secret purpose" } }, context))
+      .toBeUndefined();
+    expect(await protectedForm.resolveSecurity?.({ identity: browserIdentity(1), tabRef: "@t1", fields: [], purpose: "secret purpose" }, context))
+      .toBeUndefined();
+    const typeResolution = await browserType.resolveSecurity?.({
+      ref: "@e1",
+      tabRef: "@t1",
+      submitRef: "@e2",
+      protectedInput: { kind: "one-time-code", purpose: "account@example.com" },
+    }, context);
+    const formResolution = await protectedForm.resolveSecurity?.({
+      identity: browserIdentity(1),
+      tabRef: "@t1",
+      submitRef: "@e2",
+      fields: [{ id: "password", ref: "@e1", kind: "password" }],
+      purpose: "account@example.com",
+    }, context);
+
+    expect(typeResolution).toEqual(formResolution);
+    expect(typeResolution).toMatchObject({
+      riskClass: "external-side-effect",
+      targetKey: expect.stringMatching(/^browser-protected-submit:[a-f0-9]{64}$/u),
+      targetSummary: "Submit a verified protected browser authentication control",
+    });
+    expect(JSON.stringify(typeResolution)).not.toContain("account@example.com");
+  });
+
+  it("publishes exact protected-input enums instead of inviting invented kinds", () => {
+    const tools = createTestWebTools();
+    const browserType = tool("browser.type", tools);
+    const protectedForm = tool("browser.fill_protected_form", tools);
+    const schemas = JSON.stringify([browserType.inputSchema, protectedForm.inputSchema]);
+
+    expect(schemas).toContain("account-identifier");
+    expect(schemas).toContain("one-time-code");
+    expect(schemas).not.toContain("account-email");
+  });
+
   it("does not require a browser session key for browser.status", async () => {
     const status = tool("browser.status", createWebTools({
       browserBackend: createSessionRecordingBrowserBackend()
@@ -1808,6 +2739,80 @@ describe("web and browser tools baselines", () => {
 
     expect(result.ok).toBe(true);
     expect(result.content).toContain("Browser backend: mock");
+    expect(result.content).toContain("Capabilities: snapshots, semanticActions, controlledNewTabs");
+    expect(result.content).not.toContain("downloads");
+  });
+
+  it("announces governed download support from the backend capability declaration", async () => {
+    const base = createSessionRecordingBrowserBackend();
+    const browserBackend: BrowserBackend = {
+      ...base,
+      capabilities: { ...base.capabilities, downloads: true },
+      download: async () => ({ outcome: "download-failed", reason: "not-used" })
+    };
+    const status = tool("browser.status", createWebTools({ browserBackend }));
+
+    const result = await status.run({});
+
+    expect(result.ok).toBe(true);
+    expect(result.content).toContain("Capabilities: snapshots, semanticActions, controlledNewTabs, downloads");
+    expect(result.metadata).toMatchObject({ capabilities: { downloads: true } });
+  });
+
+  it("surfaces structured browser session-loss reasons to the model", async () => {
+    const browserBackend = {
+      ...createSessionRecordingBrowserBackend(),
+      snapshot: async () => {
+        throw new BrowserSessionStateError("session_missing", "Browser session not found: runtime-session:main");
+      }
+    };
+    const snapshot = tool("browser.snapshot", createTestWebTools({
+      browserBackend,
+      currentSessionId: () => "runtime-session"
+    }));
+
+    const result = await snapshot.run({});
+
+    expect(result).toMatchObject({
+      ok: false,
+      metadata: { backend: "mock", reason: "session_missing" }
+    });
+  });
+
+  it("warns that authentication was not preserved when navigation replaces a lost session", async () => {
+    const browserBackend = {
+      ...createSessionRecordingBrowserBackend(),
+      navigate: async (input: BrowserNavigateInput) => ({
+        session: {
+          id: input.sessionId ?? "missing",
+          backend: "mock" as const,
+          currentUrl: input.url,
+          createdAt: "2026-08-13T00:00:00.000Z"
+        },
+        snapshot: {
+          sessionId: input.sessionId ?? "missing",
+          url: input.url,
+          identity: browserIdentity(1),
+          observedAt: "2026-08-13T00:00:00.000Z"
+        },
+        metadata: {
+          sessionRecovery: {
+            reason: "session_missing",
+            authenticationPreserved: false
+          }
+        }
+      })
+    };
+    const navigate = tool("browser.navigate", createTestWebTools({
+      browserBackend,
+      currentSessionId: () => "runtime-session",
+      resolveHostname: publicResolver
+    }));
+
+    const result = await navigate.run({ url: "https://example.com/recovered" });
+
+    expect(result.ok).toBe(true);
+    expect(result.content).toContain("Authentication was not preserved");
   });
 
   it("preserves explicit browser session IDs and treats blank explicit IDs as absent", async () => {
@@ -1893,7 +2898,7 @@ describe("web and browser tools baselines", () => {
     const result = await snapshot.run({});
 
     expect(result.ok).toBe(true);
-    expect(result.content).toContain("[Compact viewport snapshot]");
+    expect(result.content).toContain("Identity: documentEpoch=1 actionRevision=1 observationId=1");
     expect(result.content).toContain("Snapshot text.");
     expect(result.content).toContain("Interactive elements:");
     expect(result.content).toContain("@e1 button Mock Button");
@@ -1907,6 +2912,81 @@ describe("web and browser tools baselines", () => {
     });
   });
 
+  it("keeps page text while omitting non-interactable controls from model-visible snapshots", async () => {
+    const snapshot = tool("browser.snapshot", createTestWebTools({
+      browserBackend: {
+        ...createMockBrowserBackend(),
+        snapshot: async () => ({
+          sessionId: "session-modal",
+          url: "https://example.com",
+          identity: browserIdentity(1),
+          observedAt: "2026-08-18T00:00:00.000Z",
+          text: "Background diagnostics remain visible.",
+          elements: [
+            { ref: "@e1", role: "button", name: "Background action", interactable: false, interactabilityReason: "modal-blocked" },
+            { ref: "@e2", role: "button", name: "Confirm" }
+          ]
+        })
+      }
+    }));
+
+    const result = await snapshot.run({});
+
+    expect(result.content).toContain("Background diagnostics remain visible.");
+    expect(result.content).toContain("@e2 button Confirm");
+    expect(result.content).not.toContain("Background action");
+  });
+
+  it("renders only the explicit protected-transaction notice while page observation is suppressed", async () => {
+    const snapshot = tool("browser.snapshot", createTestWebTools({
+      browserBackend: {
+        ...createMockBrowserBackend(),
+        snapshot: async () => ({
+          sessionId: "session-protected",
+          url: "https://portal.example.com",
+          identity: browserIdentity(4),
+          observedAt: "2026-08-14T00:00:00.000Z",
+          sensitiveInputActive: true,
+          tab: { ref: "@t1", url: "https://portal.example.com", controlled: true },
+          elements: [{ ref: "@e1", role: "textbox" }],
+        }),
+      },
+    }));
+
+    const result = await snapshot.run({});
+
+    expect(result.content).toBe([
+      "Protected authentication transaction active.",
+      "Page content is intentionally suppressed.",
+      "State: settling.",
+    ].join("\n"));
+  });
+
+  it("turns an unambiguous email and password snapshot into one grouped-flow instruction", async () => {
+    const snapshot = tool("browser.snapshot", createTestWebTools({
+      browserBackend: {
+        ...createMockBrowserBackend(),
+        snapshot: async () => ({
+          sessionId: "session-1",
+          url: "https://portal.example.com/login",
+          identity: browserIdentity(9),
+          observedAt: "2026-08-13T00:00:00.000Z",
+          tab: { ref: "@t1", url: "https://portal.example.com/login", controlled: true },
+          elements: [
+            { ref: "@e3", role: "textbox", name: "Email" },
+            { ref: "@e4", role: "textbox", name: "Password" },
+            { ref: "@e5", role: "button", name: "Sign in" },
+          ]
+        })
+      }
+    }));
+
+    const result = await snapshot.run({});
+
+    expect(result.content).toContain("request all related values in one browser.fill_protected_form call");
+    expect(result.content).toContain(`identity=${JSON.stringify(browserIdentity(9))}, tabRef=@t1, fields=[@e3:account-identifier, @e4:password]`);
+  });
+
   it("renders full browser snapshot headers and concise element state", async () => {
     const snapshot = tool("browser.snapshot", createTestWebTools({
       browserBackend: {
@@ -1914,6 +2994,8 @@ describe("web and browser tools baselines", () => {
         snapshot: async () => ({
           sessionId: "session-1",
           url: "https://example.com",
+          identity: browserIdentity(1),
+          observedAt: "2026-08-13T00:00:00.000Z",
           title: "Snapshot Title",
           text: "Snapshot text.",
           elements: [
@@ -1930,6 +3012,32 @@ describe("web and browser tools baselines", () => {
     expect(result.content).toContain("[Full page snapshot]");
     expect(result.content).toContain("@e1 textbox Email value=\"ada@example.com\" disabled=false");
     expect(result.content).toContain("@e2 checkbox Subscribe checked=mixed");
+    expect(result.metadata).toMatchObject({
+      compaction: { mode: "full", compacted: false, truncated: false }
+    });
+  });
+
+  it("keeps explicit full diagnostic snapshots on the existing un-compacted path", async () => {
+    const executor = createSummaryExecutor("provider summary should not be used");
+    const snapshot = tool("browser.snapshot", createTestWebTools({
+      browserBackend: createLargeSnapshotBackend("Diagnostic line. ".repeat(800)),
+      browserConfig: {
+        summarizeSnapshots: false,
+        snapshotSummarizeThreshold: 20
+      },
+      snapshotAuxiliaryRoute,
+      mainRoute: summaryRoute,
+      providerExecutor: executor
+    }));
+
+    const result = await snapshot.run({ full: true });
+
+    expect(executor.complete).not.toHaveBeenCalled();
+    expect(result.content).toContain("[Full page snapshot]");
+    expect(result.content).toMatch(/\n\.\.\. \[truncated\]$/u);
+    expect(result.metadata).toMatchObject({
+      compaction: { mode: "full", compacted: false, truncated: true }
+    });
   });
 
   it("browser.snapshot defaults to compact rendering when full is omitted or false", async () => {
@@ -1945,13 +3053,15 @@ describe("web and browser tools baselines", () => {
     expect(omitted.content).not.toContain("[Full page snapshot]");
   });
 
-  it("truncates rendered browser snapshots with a clear suffix", async () => {
+  it("deterministically compacts oversized browser snapshots with a clear suffix", async () => {
     const snapshot = tool("browser.snapshot", createTestWebTools({
       browserBackend: {
         ...createMockBrowserBackend(),
         snapshot: async () => ({
           sessionId: "session-1",
           url: "https://example.com",
+          identity: browserIdentity(1),
+          observedAt: "2026-08-13T00:00:00.000Z",
           text: "x".repeat(9_000),
           elements: []
         })
@@ -1962,10 +3072,13 @@ describe("web and browser tools baselines", () => {
 
     expect(result.ok).toBe(true);
     expect(result.content.length).toBeLessThanOrEqual(8_000);
-    expect(result.content).toMatch(/\n\.\.\. \[truncated\]$/u);
+    expect(result.content).toMatch(/\n\.\.\. \[deterministically compacted\]$/u);
+    expect(result.metadata).toMatchObject({
+      compaction: { mode: "deterministic", compacted: true, truncated: true }
+    });
   });
 
-  it("browser.snapshot summarizeSnapshots=false skips LLM summarization and truncates", async () => {
+  it("browser.snapshot summarizeSnapshots=false skips LLM summarization after deterministic compaction", async () => {
     const executor = createSummaryExecutor("summary");
     const snapshot = tool("browser.snapshot", createTestWebTools({
       browserBackend: createLargeSnapshotBackend("x".repeat(9_000)),
@@ -1983,7 +3096,32 @@ describe("web and browser tools baselines", () => {
     expect(result.ok).toBe(true);
     expect(executor.complete).not.toHaveBeenCalled();
     expect(result.content.length).toBeLessThanOrEqual(8_000);
-    expect(result.content).toMatch(/\n\.\.\. \[truncated\]$/u);
+    expect(result.content).toMatch(/\n\.\.\. \[deterministically compacted\]$/u);
+    expect(result.metadata?.summarized).toBeUndefined();
+  });
+
+  it("browser.snapshot auto mode avoids a provider call when deterministic compaction fits", async () => {
+    const executor = createSummaryExecutor("provider summary should not be used");
+    const snapshot = tool("browser.snapshot", createTestWebTools({
+      browserBackend: createLargeSnapshotBackend(),
+      browserConfig: {
+        summarizeSnapshots: "auto",
+        snapshotSummarizeThreshold: 8_000
+      },
+      snapshotAuxiliaryRoute,
+      mainRoute: summaryRoute,
+      providerExecutor: executor
+    }));
+
+    const result = await snapshot.run({});
+
+    expect(result.ok).toBe(true);
+    expect(executor.complete).not.toHaveBeenCalled();
+    expect(result.content).toContain("@e1 button Save");
+    expect(result.content).toContain("@e2 textbox Email");
+    expect(result.metadata).toMatchObject({
+      compaction: { mode: "deterministic", compacted: true }
+    });
     expect(result.metadata?.summarized).toBeUndefined();
   });
 
@@ -2055,7 +3193,7 @@ describe("web and browser tools baselines", () => {
     const summarized = await withRoute.run({});
 
     expect(skipped.ok).toBe(true);
-    expect(skipped.content).toMatch(/\n\.\.\. \[truncated\]$/u);
+    expect(skipped.content).toMatch(/\n\.\.\. \[deterministically compacted\]$/u);
     expect(summarized.ok).toBe(true);
     expect(summarized.metadata).toMatchObject({ summarized: true });
     expect(executor.complete).toHaveBeenCalledTimes(1);
@@ -2091,6 +3229,7 @@ describe("web and browser tools baselines", () => {
   it("renders browser snapshot observability sections when present", async () => {
     const browserBackend: BrowserBackend = {
       kind: "mock",
+      capabilities: browserCapabilities({ snapshots: true }),
       isAvailable: () => true,
       status: () => ({ backend: "mock", available: true }),
       navigate: async () => {
@@ -2099,6 +3238,8 @@ describe("web and browser tools baselines", () => {
       snapshot: async () => ({
         sessionId: "session-1",
         url: "https://example.com",
+        identity: browserIdentity(1),
+        observedAt: "2026-08-13T00:00:00.000Z",
         text: "Page text.",
         pendingDialogs: [{ id: "dialog-1", type: "alert", message: "Careful" }],
         frameTree: [{ frameId: "frame-1", url: "https://frame.test/app", origin: "https://frame.test", isOopif: false }],
@@ -2115,7 +3256,7 @@ describe("web and browser tools baselines", () => {
     expect(result.content).toContain("dialog-1 alert: Careful");
     expect(result.content).toContain("Frames:");
     expect(result.content).toContain("frame-1 https://frame.test/app origin=https://frame.test");
-    expect(result.content).toContain("Console:");
+    expect(result.content).toContain("Console errors:");
     expect(result.content).toContain("[warn] 1970-01-01T00:00:00.000Z Heads up");
     expect(result.content).toContain("Interactive elements:");
   });
@@ -2130,6 +3271,405 @@ describe("web and browser tools baselines", () => {
     expect(result.ok).toBe(false);
     expect(result.content).toBe("Invalid browser element ref: invalid-ref");
     expect(result.metadata).toEqual({ backend: "mock" });
+  });
+
+  it("renders semantic candidates and forwards locators to browser actions", async () => {
+    const calls: Array<{ method: string; input: BrowserActionInput | BrowserNavigateInput }> = [];
+    const browserBackend = createSessionRecordingBrowserBackend(calls);
+    const tools = createTestWebTools({ browserBackend, currentSessionId: () => "runtime-session" });
+
+    const found = await tool("browser.find", tools).run({
+      locator: { role: "button", name: "Recorded Button", withinText: "OAuth V1" }
+    });
+    const selected = await tool("browser.select", tools).run({
+      locator: { label: "Environment" },
+      value: "Sandbox"
+    });
+    const extracted = await tool("browser.extract", tools).run({
+      locator: { role: "button", name: "Recorded Button" }
+    });
+
+    expect(found.content).toContain(`@e1 identity=${JSON.stringify(browserIdentity(1))} tab=@t1 button \"Recorded Button\"`);
+    expect(selected.ok).toBe(true);
+    expect(extracted.content).toContain("Text: Recorded Button");
+    expect(calls).toEqual(expect.arrayContaining([
+      expect.objectContaining({ method: "find", input: expect.objectContaining({ sessionId: "runtime-session:main" }) }),
+      expect.objectContaining({ method: "select", input: expect.objectContaining({ locator: { label: "Environment" }, value: "Sandbox" }) }),
+      expect.objectContaining({ method: "extract", input: expect.objectContaining({ locator: { role: "button", name: "Recorded Button" } }) })
+    ]));
+  });
+
+  it("canonicalizes region aliases at the extraction tool boundary", async () => {
+    const calls: Array<{ method: string; input: BrowserActionInput | BrowserNavigateInput }> = [];
+    const tools = createTestWebTools({ browserBackend: createSessionRecordingBrowserBackend(calls), currentSessionId: () => "runtime-session" });
+    const input = { ref: "@r19", identity: browserIdentity(8), tabRef: "@t1" };
+    await tool("browser.extract", tools).run(input);
+    expect(calls).toContainEqual({ method: "extract", input: {
+      sessionId: "runtime-session:main", regionRef: "@r19", identity: input.identity, tabRef: input.tabRef
+    } });
+    expect(input.ref).toBe("@r19");
+  });
+
+  it("renders matching page regions with their grounded actions before incidental text", async () => {
+    const regionText = "TikTok Connect Callback URL Edit Delete";
+    const backend: BrowserBackend = {
+      ...createMockBrowserBackend(),
+      find: async () => ({
+        sessionId: "runtime-session:main",
+        identity: browserIdentity(4),
+        tabRef: "@t2",
+        status: "not-found",
+        candidates: [],
+        nearbyCandidates: [
+          {
+            ref: "@e7",
+            identity: browserIdentity(4),
+            tabRef: "@t2",
+            role: "link",
+            name: "Callback URL",
+            regionText
+          },
+          {
+            ref: "@e8",
+            identity: browserIdentity(4),
+            tabRef: "@t2",
+            role: "button",
+            name: "Edit",
+            regionText
+          },
+          {
+            ref: "@e9",
+            identity: browserIdentity(4),
+            tabRef: "@t2",
+            role: "button",
+            name: "Delete",
+            regionText
+          },
+          {
+            ref: "@e10",
+            identity: browserIdentity(4),
+            tabRef: "@t2",
+            role: "link",
+            name: "TikTok Connect notification"
+          }
+        ]
+      })
+    };
+
+    const result = await tool("browser.find", createTestWebTools({
+      browserBackend: backend,
+      currentSessionId: () => "runtime-session"
+    })).run({ locator: { role: "button", name: "TikTok Connect", exact: true } });
+
+    expect(result.ok).toBe(true);
+    expect(result.content).toContain("No visible, enabled browser element matched exactly");
+    expect(result.content).toContain("Nearby current-document candidates (not exact matches");
+    expect(result.content).toContain(`Region: ${JSON.stringify(regionText)}`);
+    expect(result.content).toContain("Actions:");
+    expect(result.content).toContain(`@e7 identity=${JSON.stringify(browserIdentity(4))} tab=@t2`);
+    expect(result.content.indexOf("Callback URL")).toBeLessThan(result.content.indexOf("TikTok Connect notification"));
+    expect(result.metadata).toMatchObject({
+      nearbyCandidates: [
+        { ref: "@e7", identity: browserIdentity(4), tabRef: "@t2" },
+        { ref: "@e8", identity: browserIdentity(4), tabRef: "@t2" },
+        { ref: "@e9", identity: browserIdentity(4), tabRef: "@t2" },
+        { ref: "@e10", identity: browserIdentity(4), tabRef: "@t2" }
+      ]
+    });
+  });
+
+  it("renders an exact role alternative without telling the model to escalate to vision", async () => {
+    const backend: BrowserBackend = { ...createMockBrowserBackend(), find: async () => ({
+      sessionId: "runtime-session:main", identity: browserIdentity(4), tabRef: "@t2", status: "not-found", candidates: [],
+      alternative: { reason: "role-mismatch", requestedRole: "link", candidate: {
+        ref: "@e28", identity: browserIdentity(4), tabRef: "@t2", role: "button", name: "Example app"
+      } }
+    }) };
+    const result = await tool("browser.find", createTestWebTools({ browserBackend: backend })).run({ locator: { role: "link", text: "Example app" } });
+    expect(result.content).toContain("Exact text matched one current button");
+    expect(result.content).toContain("Use this alternative only if it is the intended control");
+    expect(result.content).toContain("@e28");
+    expect(result.content).not.toContain("browser.vision");
+    expect(result.metadata).toHaveProperty("alternative.reason", "role-mismatch");
+  });
+
+  it("surfaces stale and ambiguous browser targets as structured failures", async () => {
+    const backend: BrowserBackend = {
+      ...createMockBrowserBackend(),
+      click: async () => {
+        throw new BrowserTargetError({
+          reason: "browser-target-ambiguous",
+          message: "Browser locator matched 2 current elements; refine the locator instead of guessing.",
+          currentIdentity: browserIdentity(9),
+          currentTabRef: "@t2",
+          candidates: [
+            { ref: "@e1", identity: browserIdentity(9), tabRef: "@t2", role: "button", name: "Open" },
+            { ref: "@e2", identity: browserIdentity(9), tabRef: "@t2", role: "button", name: "Open" }
+          ]
+        });
+      }
+    };
+
+    const result = await tool("browser.click", createTestWebTools({ browserBackend: backend })).run({
+      locator: { role: "button", name: "Open" }
+    });
+
+    expect(result).toMatchObject({
+      ok: false,
+      metadata: {
+        backend: "mock",
+        reason: "browser-target-ambiguous",
+        currentIdentity: browserIdentity(9),
+        currentTabRef: "@t2",
+        candidates: [{ ref: "@e1" }, { ref: "@e2" }]
+      }
+    });
+  });
+
+  it("marks target-resolution failures as undispatched and returns grounded nearby actions", async () => {
+    const regionText = "TikTok Connect Callback URL Edit Delete";
+    const nearbyCandidates = [
+      { ref: "@e7", identity: browserIdentity(9), tabRef: "@t2", role: "link", name: "Callback URL", regionText },
+      { ref: "@e8", identity: browserIdentity(9), tabRef: "@t2", role: "button", name: "Edit", regionText },
+      { ref: "@e9", identity: browserIdentity(9), tabRef: "@t2", role: "button", name: "Delete", regionText }
+    ];
+    const backend: BrowserBackend = {
+      ...createMockBrowserBackend(),
+      click: async () => {
+        throw new BrowserTargetError({
+          reason: "browser-target-not-found",
+          message: "Browser locator did not match a current element.",
+          currentIdentity: browserIdentity(9),
+          currentTabRef: "@t2",
+          nearbyCandidates
+        });
+      }
+    };
+
+    const result = await tool("browser.click", createTestWebTools({ browserBackend: backend })).run({
+      locator: { name: "TikTok Connect", exact: true }
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.content).toContain("No action was dispatched");
+    expect(result.content).toContain(`Region: ${JSON.stringify(regionText)}`);
+    expect(result.content).toContain("Actions:");
+    expect(result.content).toContain("Callback URL");
+    expect(result.content).toContain("Edit");
+    expect(result.content).toContain("Delete");
+    expect(result.metadata).toMatchObject({
+      reason: "browser-target-not-found",
+      actionDispatched: false,
+      nearbyCandidates: [{ ref: "@e7" }, { ref: "@e8" }, { ref: "@e9" }]
+    });
+  });
+
+  it("forwards browser wait conditions and prioritizes compact action deltas", async () => {
+    const calls: BrowserActionInput[] = [];
+    const browserBackend: BrowserBackend = {
+      ...createMockBrowserBackend(),
+      click: async (input) => {
+        calls.push(input);
+        return {
+          sessionId: input.sessionId ?? "session-1",
+          url: "https://example.com/products/loans",
+          identity: browserIdentity(7),
+          observedAt: "2026-08-13T00:00:00.000Z",
+          readiness: "complete",
+          text: "This full snapshot text should not be repeated after an action.",
+          elements: [{ ref: "@e2", role: "button", name: "View product" }],
+          actionDelta: {
+            outcome: "changed",
+            beforeIdentity: browserIdentity(6),
+            afterIdentity: browserIdentity(7),
+            waitCondition: "text",
+            conditionMet: true,
+            url: {
+              changed: true,
+              before: "https://example.com/products",
+              after: "https://example.com/products/loans"
+            },
+            addedElements: [{ role: "button", name: "View product" }]
+          }
+        };
+      }
+    };
+    const click = tool("browser.click", createTestWebTools({
+      browserBackend,
+      currentSessionId: () => "runtime-session"
+    }));
+
+    const result = await click.run({
+      ref: "@e1",
+      waitFor: { kind: "text", value: "Loan API" },
+      waitTimeoutMs: 3_000
+    });
+
+    expect(calls[0]).toMatchObject({
+      sessionId: "runtime-session:main",
+      waitFor: { kind: "text", value: "Loan API" },
+      waitTimeoutMs: 3_000
+    });
+    expect(result.content).toContain("Action completed with an observable page change.");
+    expect(result.content).toContain("Identity: documentEpoch=1 actionRevision=6 observationId=6 → documentEpoch=1 actionRevision=7 observationId=7");
+    expect(result.content).toContain("Added: button \"View product\"");
+    expect(result.content).not.toContain("full snapshot text");
+  });
+
+  it("renders action wait timeouts without claiming completion", async () => {
+    const browserBackend: BrowserBackend = {
+      ...createMockBrowserBackend(),
+      press: async (input) => ({
+        sessionId: input.sessionId ?? "session-1",
+        url: "https://example.com",
+        identity: browserIdentity(2),
+        observedAt: "2026-08-13T00:00:00.000Z",
+        actionDelta: {
+          outcome: "timeout",
+          beforeIdentity: browserIdentity(2),
+          afterIdentity: browserIdentity(2),
+          waitCondition: "dialog",
+          conditionMet: false,
+          url: { changed: false, after: "https://example.com" }
+        }
+      })
+    };
+    const press = tool("browser.press", createTestWebTools({ browserBackend }));
+
+    const result = await press.run({ key: "Enter" });
+
+    expect(result.content).toContain("Action wait timed out");
+    expect(result.content).not.toContain("Action completed");
+    expect(result.content).toContain("Current state:");
+    expect(result.content).toContain("Identity: documentEpoch=1 actionRevision=2 observationId=2");
+    expect(result.content).toContain("Actionable refs: none");
+  });
+
+  it("returns actions from the attempted target region first after a no-change action", async () => {
+    const regionText = "TikTok Connect Callback URL Edit Delete";
+    const unrelated = Array.from({ length: 22 }, (_, index) => ({
+      ref: `@e${index + 1}`,
+      role: "button",
+      name: `Unrelated action ${index + 1}`
+    }));
+    const browserBackend: BrowserBackend = {
+      ...createMockBrowserBackend(),
+      click: async (input) => ({
+        sessionId: input.sessionId ?? "session-1",
+        url: "https://example.com/apps",
+        identity: browserIdentity(5),
+        observedAt: "2026-08-13T00:00:00.000Z",
+        readiness: "complete",
+        tab: { ref: "@t1", url: "https://example.com/apps", controlled: true },
+        elements: [
+          ...unrelated,
+          { ref: "@e23", role: "link", name: "Callback URL", regionText },
+          { ref: "@e24", role: "button", name: "Edit", regionText },
+          { ref: "@e25", role: "button", name: "Delete", regionText }
+        ],
+        actionDelta: {
+          outcome: "no-change",
+          beforeIdentity: browserIdentity(5),
+          afterIdentity: browserIdentity(5),
+          waitCondition: "dom-stable",
+          conditionMet: true,
+          url: { changed: false, after: "https://example.com/apps" },
+          target: {
+            ref: "@e23",
+            role: "link",
+            name: "Callback URL",
+            regionText
+          }
+        }
+      })
+    };
+
+    const result = await tool("browser.click", createTestWebTools({ browserBackend })).run({
+      locator: { name: "Callback URL", withinText: "TikTok Connect" }
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.content).toContain("Action dispatched; no observable page change was detected.");
+    expect(result.content).toContain(`Current actionable refs (related region first: ${JSON.stringify(regionText)}):`);
+    expect(result.content.indexOf("@e23")).toBeLessThan(result.content.indexOf("@e1 "));
+    expect(result.content).toContain("@e24");
+    expect(result.content).toContain("@e25");
+  });
+
+  it("renders blocked-popup recovery as bounded controlled navigation", async () => {
+    const browserBackend: BrowserBackend = {
+      ...createMockBrowserBackend(),
+      click: async (input) => ({
+        sessionId: input.sessionId ?? "session-1",
+        url: "https://example.com/apps",
+        identity: browserIdentity(5),
+        observedAt: "2026-08-13T00:00:00.000Z",
+        tab: { ref: "@t1", url: "https://example.com/apps", controlled: true },
+        actionDelta: {
+          outcome: "popup-blocked",
+          beforeIdentity: browserIdentity(5),
+          afterIdentity: browserIdentity(5),
+          waitCondition: "dom-stable",
+          conditionMet: true,
+          url: { changed: false, after: "https://example.com/apps" },
+          popup: {
+            destination: "https://example.com/connect",
+            userGesture: true
+          }
+        }
+      })
+    };
+
+    const result = await tool("browser.click", createTestWebTools({ browserBackend })).run({ ref: "@e1" });
+
+    expect(result.content).toContain("Chrome blocked a popup");
+    expect(result.content).toContain("browser.navigate with disposition=new-tab");
+    expect(result.content).toContain("Safe popup destination: https://example.com/connect");
+    expect(result.content).toContain("without changing Chrome permissions");
+  });
+
+  it("renders dispatched settlement failures as non-retryable action outcomes", async () => {
+    const browserBackend: BrowserBackend = {
+      ...createMockBrowserBackend(),
+      click: async (input) => ({
+        sessionId: input.sessionId ?? "session-1",
+        url: "https://example.com/apps/example/edit",
+        identity: { documentEpoch: 2, actionRevision: 3, observationId: 4 },
+        observedAt: "2026-08-13T00:00:00.000Z",
+        actionDelta: {
+          outcome: "dispatched-unverified",
+          beforeIdentity: browserIdentity(2),
+          afterIdentity: { documentEpoch: 2, actionRevision: 3, observationId: 4 },
+          waitCondition: "url",
+          conditionMet: false,
+          actionDispatched: true,
+          settlementFailed: true,
+          documentChangeObserved: true,
+          stateObservation: "post-dispatch",
+          url: {
+            changed: true,
+            before: "https://example.com/apps",
+            after: "https://example.com/apps/example/edit"
+          }
+        }
+      })
+    };
+    const click = tool("browser.click", createTestWebTools({ browserBackend }));
+
+    const result = await click.run({ ref: "@e1" });
+
+    expect(result.ok).toBe(true);
+    expect(result.content).toContain("Action was dispatched, but settlement verification failed.");
+    expect(result.content).toContain("Do not retry automatically");
+    expect(result.content).toContain("Document change observed: yes");
+    expect(result.metadata).toMatchObject({
+      snapshot: {
+        actionDelta: {
+          actionDispatched: true,
+          settlementFailed: true
+        }
+      }
+    });
   });
 
   it("writes browser.screenshot under a temp workspace root", async () => {
@@ -2153,6 +3693,202 @@ describe("web and browser tools baselines", () => {
     expect((path as string).startsWith(join(workspaceRoot, ".estacoda", "browser", "screenshots"))).toBe(true);
     expect(relative(process.cwd(), path as string).startsWith("..")).toBe(true);
     await expect(readFile(path as string)).resolves.toEqual(Buffer.from("iVBORw0KGgo=", "base64"));
+  });
+
+  it("preserves browser provenance when browser.screenshot is followed by vision.analyze", async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "estacoda-browser-artifact-vision-"));
+    tempRoots.push(workspaceRoot);
+    const artifactStore = new ArtifactStore({ id: () => "browser-screenshot" });
+    const screenshot = tool("browser.screenshot", createTestWebTools({
+      browserBackend: createVisionScreenshotBackend(),
+      workspaceRoot,
+      artifactStore
+    }));
+    const screenshotResult = await screenshot.run({}, { visibleTurnId: "turn-browser-artifact" });
+    const screenshotPath = screenshotResult.metadata?.path;
+    expect(typeof screenshotPath).toBe("string");
+
+    const [vision] = createVisionTools({
+      workspaceRoot,
+      artifactStore,
+      mainRoute: visionRoute,
+      visionAuxiliaryRoute: visionAuxiliaryRoute("auto-main")
+    });
+    const resolution = await vision.resolveSecurity?.({ path: screenshotPath as string }, {
+      trustedWorkspace: true,
+      sessionId: "session-browser-artifact",
+      visibleTurnId: "turn-browser-artifact"
+    });
+    const analysis = await vision.run({ path: screenshotPath as string });
+
+    expect(artifactStore.list()).toContainEqual(expect.objectContaining({
+      id: "browser-screenshot",
+      metadata: { visionProvenance: "browser-artifact", visionTurnId: "turn-browser-artifact" }
+    }));
+    expect(resolution).toMatchObject({
+      dataEgress: { sourceProvenance: "browser-artifact" }
+    });
+    expect(analysis).toMatchObject({ ok: true, metadata: { dispatch: "native" } });
+    expect(ephemeralVisionImages(analysis)).toHaveLength(1);
+  });
+
+  it("dispatches a browser screenshot natively without an auxiliary provider call", async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "estacoda-browser-native-vision-"));
+    tempRoots.push(workspaceRoot);
+    const screenshot = vi.fn(async () => ({
+      mimeType: "image/png" as const,
+      base64: VALID_PNG.toString("base64")
+    }));
+    const executor = createSummaryExecutor("unexpected auxiliary call");
+    const dispatcher = createGovernedVisionArtifactDispatcher({
+      workspaceRoot,
+      mainRoute: visionRoute,
+      visionAuxiliaryRoute: visionAuxiliaryRoute("auto-main"),
+      providerExecutor: executor as ProviderExecutor,
+      currentSessionId: () => "session-native"
+    });
+    const browserVision = tool("browser.vision", createTestWebTools({
+      browserBackend: createVisionScreenshotBackend(screenshot),
+      workspaceRoot,
+      visionDispatcher: dispatcher
+    }));
+
+    const result = await browserVision.run({ prompt: "Inspect the page" }, {
+      visibleTurnId: "turn-native",
+      providerUsageLineage: { executionSessionId: "session-native", visibleTurnId: "turn-native" }
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.metadata).toEqual(expect.objectContaining({ dispatch: "native", backend: "mock" }));
+    expect(ephemeralVisionImages(result)).toHaveLength(1);
+    expect(screenshot).toHaveBeenCalledTimes(1);
+    expect(executor.complete).not.toHaveBeenCalled();
+  });
+
+  it("blocks browser.vision only while protected screenshot observation remains active", async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "estacoda-browser-protected-vision-"));
+    tempRoots.push(workspaceRoot);
+    let sensitiveInputActive = true;
+    const screenshot = vi.fn(async () => {
+      if (sensitiveInputActive) {
+        throw Object.assign(
+          new Error("Browser screenshot is blocked while protected input is active."),
+          { code: "sensitive-input-active" },
+        );
+      }
+      return {
+        mimeType: "image/png" as const,
+        base64: VALID_PNG.toString("base64"),
+      };
+    });
+    const dispatcher = createGovernedVisionArtifactDispatcher({
+      workspaceRoot,
+      mainRoute: visionRoute,
+      visionAuxiliaryRoute: visionAuxiliaryRoute("auto-main"),
+      currentSessionId: () => "session-protected-vision",
+    });
+    const dispatch = vi.spyOn(dispatcher, "dispatch");
+    const browserVision = tool("browser.vision", createTestWebTools({
+      browserBackend: createVisionScreenshotBackend(screenshot),
+      workspaceRoot,
+      visionDispatcher: dispatcher,
+    }));
+
+    const blocked = await browserVision.run({ prompt: "Inspect the page" });
+    expect(blocked).toMatchObject({
+      ok: false,
+      metadata: { backend: "mock" },
+    });
+    expect(blocked.content).toBe("Browser screenshot is blocked while protected input is active.");
+    expect(dispatch).not.toHaveBeenCalled();
+
+    sensitiveInputActive = false;
+    const resumed = await browserVision.run({ prompt: "Inspect the page" });
+    expect(resumed.ok).toBe(true);
+    expect(dispatch).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses exactly one auxiliary analysis call for a browser screenshot with a text-only main route", async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "estacoda-browser-aux-vision-"));
+    tempRoots.push(workspaceRoot);
+    const screenshot = vi.fn(async () => ({
+      mimeType: "image/png" as const,
+      base64: VALID_PNG.toString("base64")
+    }));
+    const executor = createSummaryExecutor("browser vision result");
+    const dispatcher = createGovernedVisionArtifactDispatcher({
+      workspaceRoot,
+      mainRoute: summaryRoute,
+      visionAuxiliaryRoute: visionAuxiliaryRoute(),
+      providerExecutor: executor as ProviderExecutor,
+      currentSessionId: () => "session-aux"
+    });
+    const browserVision = tool("browser.vision", createTestWebTools({
+      browserBackend: createVisionScreenshotBackend(screenshot),
+      workspaceRoot,
+      visionDispatcher: dispatcher
+    }));
+
+    const result = await browserVision.run({ prompt: "Inspect the page" }, {
+      visibleTurnId: "turn-aux",
+      providerUsageLineage: { executionSessionId: "session-aux", visibleTurnId: "turn-aux" }
+    });
+
+    expect(result.ok).toBe(true);
+    expect(result.metadata).toEqual(expect.objectContaining({ dispatch: "auxiliary", backend: "mock" }));
+    expect(ephemeralVisionImages(result)).toHaveLength(0);
+    expect(screenshot).toHaveBeenCalledTimes(1);
+    expect(executor.complete).toHaveBeenCalledTimes(1);
+    expect(executor.complete).toHaveBeenCalledWith(
+      expect.any(Object),
+      expect.objectContaining({ requireVision: true }),
+      expect.objectContaining({
+        usage: expect.objectContaining({
+          executionSessionId: "session-aux",
+          visibleTurnId: "turn-aux"
+        })
+      })
+    );
+  });
+
+  it("binds browser artifact egress to every hosted native destination", async () => {
+    const workspaceRoot = await mkdtemp(join(tmpdir(), "estacoda-browser-vision-security-"));
+    tempRoots.push(workspaceRoot);
+    const anthropicRoute: ResolvedModelRoute = {
+      ...visionRoute,
+      provider: "anthropic",
+      id: "claude-vision",
+      baseUrl: "https://api.anthropic.com/v1",
+      profile: { ...visionRoute.profile, provider: "anthropic", id: "claude-vision" }
+    };
+    const dispatcher = createGovernedVisionArtifactDispatcher({
+      workspaceRoot,
+      mainRoute: visionRoute,
+      mainFallbackRoutes: [anthropicRoute],
+      visionAuxiliaryRoute: visionAuxiliaryRoute("auto-main")
+    });
+    const browserVision = tool("browser.vision", createTestWebTools({
+      browserBackend: createVisionScreenshotBackend(),
+      workspaceRoot,
+      visionDispatcher: dispatcher
+    }));
+
+    const resolution = await browserVision.resolveSecurity?.({}, {
+      trustedWorkspace: true,
+      sessionId: "session-security"
+    });
+
+    expect(resolution).toMatchObject({
+      riskClass: "external-side-effect",
+      dataEgress: {
+        sourceProvenance: "browser-artifact",
+        sensitivePath: false,
+        destinations: [
+          "anthropic@https://api.anthropic.com/v1",
+          "openai@https://api.openai.com/v1"
+        ]
+      }
+    });
   });
 
   it("returns unavailable for browser.vision without an analyzer", async () => {

@@ -13,7 +13,9 @@ import { CLIPBOARD_MODE_ENV_VAR } from "./clipboard-mode.js";
 import { MCP_SUGGESTIONS_MODE_ENV_VAR } from "./mcp-suggestions-mode.js";
 import { SKILL_SUGGESTIONS_MODE_ENV_VAR } from "./skill-suggestions-mode.js";
 import { INPUT_KEYMAP_MODE_ENV_VAR } from "./input-keymap-mode.js";
-import type { PromptOptions } from "./prompt-contract.js";
+import type { Prompt, PromptOptions } from "./prompt-contract.js";
+import type { SelectPromptInput } from "./interactive-select.js";
+import { InteractiveSelectCancelledError } from "./interactive-select.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import { loadSessionContextWindowUsage } from "../session/session-context-window-usage.js";
 import type { Runtime } from "../runtime/create-runtime.js";
@@ -22,7 +24,7 @@ import type { AgentLoopResponse } from "../runtime/agent-loop.js";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
 import type { TerminalCapabilities, UiLocale } from "../contracts/ui.js";
 import type { CompactResult } from "../prompt/session-compression-service.js";
-import { isolateLtr } from "../ui/bidi.js";
+import { isolateLtr, PDI, RLI } from "../ui/bidi.js";
 import { renderPlain } from "../ui/renderers/plain-renderer.js";
 import { measureVisibleWidth, stripAnsi } from "../ui/renderers/layout.js";
 import { StandardRenderer } from "../ui/renderers/standard-renderer.js";
@@ -438,13 +440,48 @@ async function waitForNoTtyDataListener(input: NodeJS.ReadStream): Promise<void>
 
 function approvalAnswerKeypresses(answer: string): readonly string[] {
   const normalized = answer.trim().toLowerCase().replace(/\s+/gu, " ");
-  if (normalized === "inspect") return ["\x1b[C", "\x1b[C", "\r"];
-  if (normalized === "reject" || normalized === "deny" || normalized === "no") return ["\t", "\r"];
+  if (normalized === "inspect") return ["\r"];
+  if (normalized === "reject" || normalized === "deny" || normalized === "no") return ["\x1b[A", "\r"];
   if (normalized === "escape" || normalized === "esc" || normalized === "cancel") return ["\x1b"];
-  return ["\r"];
+  if (normalized === "session") return ["\x1b[B", "\x1b[B", "\r"];
+  if (normalized === "always") return ["\x1b[B", "\x1b[B", "\x1b[B", "\r"];
+  return ["\x1b[B", "\r"];
 }
 
 describe("runSessionLoop — user prompt rail behavior", () => {
+  it("shows MCP failure diagnostics without reconnecting when status is requested", async () => {
+    const chunks: string[] = [];
+    const refreshRuntime = vi.fn();
+    const runtime = createMockRuntime({ describe: () => "status: degraded\nexample: connection: initialize timed out" });
+    const result = await handleSlashCommand({
+      text: "/reload-mcp status", runtime, refreshRuntime,
+      output: { write: (chunk: string) => { chunks.push(chunk); return true; } } as NodeJS.WritableStream,
+      renderer: { render: renderPlain, capabilities: interactiveCaps() }
+    });
+    expect(result).toBe(false);
+    expect(refreshRuntime).not.toHaveBeenCalled();
+    expect(chunks.join("")).toContain("initialize timed out");
+  });
+
+  it.each([false, true])("makes one session-preserving MCP refresh and reports readiness: %s", async (available) => {
+    const refreshed = createMockRuntime({
+      describe: () => available ? "status: ready" : "status: degraded\nexample: connection: initialize timed out",
+      inspectMcpServers: () => [{ enabled: true, available }] as ReturnType<Runtime["inspectMcpServers"]>
+    });
+    const refreshRuntime = vi.fn(async () => refreshed);
+    const result = await handleSlashCommand({
+      text: "/reload-mcp", runtime: createMockRuntime(), refreshRuntime,
+      output: { write: () => true } as unknown as NodeJS.WritableStream,
+      renderer: { render: renderPlain, capabilities: interactiveCaps() }
+    });
+    expect(refreshRuntime).toHaveBeenCalledExactlyOnceWith({ preserveSession: true });
+    expect(typeof result).toBe("object");
+    if (typeof result === "object") {
+      const notice = result.notice(refreshed);
+      expect(notice).toContain(`MCP servers ready: ${available ? 1 : 0}/1`);
+      expect(notice).toContain(available ? "reload does not replay actions" : "initialize timed out");
+    }
+  });
   it("queues idle SIGINT as a session boundary", async () => {
     const enqueueSessionFinalization = vi.fn();
     let rejectPrompt: ((error: Error) => void) | undefined;
@@ -598,7 +635,7 @@ describe("runSessionLoop — user prompt rail behavior", () => {
       activeAttempts: 1,
       steps: [],
       subagents: [],
-      trace: { events: [], totalEvents: 0, categoryCounts: {}, hasEarlierEvents: false },
+      trace: { events: [], spans: [], totalEvents: 0, categoryCounts: {}, hasEarlierEvents: false },
       recentActivity: [],
       elapsedMs: 1_000,
       usage: usageSummary(0.01),
@@ -796,7 +833,15 @@ describe("runSessionLoop — user prompt rail behavior", () => {
           status: "running",
           phase: {
             name: "synthesizing",
-            workerProgress: { completed: 3, settled: 3, total: 3 },
+            workerProgress: {
+              completed: 3,
+              failed: 0,
+              cancelled: 0,
+              settled: 3,
+              usable: 3,
+              recovered: 0,
+              total: 3
+            },
           },
         }),
       } as unknown as NonNullable<Runtime["taskOperator"]>,
@@ -1654,6 +1699,44 @@ describe("runSessionLoop — user prompt rail behavior", () => {
     expect(rendered).not.toContain("+----------------------------------------------------------+");
   });
 
+  it("keeps the submitted payload logical while rendering a bidi-safe Arabic prompt rail", async () => {
+    const text = "هلا ممكن تستخدم ٣ subagents وتبحث عن RSI";
+    const outputChunks: string[] = [];
+    const handle = vi.fn(async (_input: Parameters<Runtime["handle"]>[0]) => mockResponse());
+    const runtime = createMockRuntime({ handle });
+    let promptIndex = 0;
+
+    await runSessionLoop({
+      runtime,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 120,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 120, supportsAnimation: false }),
+      locale: "ar",
+      prompt: Object.assign(
+        async () => {
+          const values = [text, "/exit"];
+          return values[promptIndex++] ?? "/exit";
+        },
+        { close: () => {} }
+      ),
+      close: () => {},
+    });
+
+    expect(handle).toHaveBeenCalledTimes(1);
+    expect(handle.mock.calls[0]?.[0]).toMatchObject({ text });
+    const rendered = stripAnsi(outputChunks.join(""));
+    expect(rendered).toContain(`↳ ${RLI}`);
+    expect(rendered).toContain(isolateLtr("subagents"));
+    expect(rendered).toContain(isolateLtr("RSI"));
+    expect(rendered).toContain(PDI);
+  });
+
   it("renders a delivered Task synthesis as a normal assistant message before the next prompt", async () => {
     const outputChunks: string[] = [];
     const drainTaskSessionCompletions = vi.fn()
@@ -1663,6 +1746,22 @@ describe("runSessionLoop — user prompt rail behavior", () => {
         taskId: "task-1",
         resultId: "result-synthesis",
         text: "The three reports agree on explicit provenance and review gates.",
+        trace: {
+          version: 1,
+          taskId: "task-1",
+          stage: "synthesis",
+          outcome: "complete",
+          answerAvailable: true,
+          activityCount: 3,
+          activityCountComplete: true,
+          totalDurationMs: 90_000,
+          hasEarlierActivities: false,
+          spans: [
+            { category: "plan", scope: { kind: "task", label: "Task" }, status: "completed", durationMs: 10_000, label: "Planning" },
+            { category: "write", scope: { kind: "synthesis", label: "Synthesis" }, status: "completed", durationMs: 70_000, label: "Writing response" },
+            { category: "deliver", scope: { kind: "delivery", label: "Delivery" }, status: "completed", durationMs: 10_000, label: "Finalizing task delivery" },
+          ],
+        },
       }])
       .mockResolvedValue([]);
     const acknowledgeTaskSessionCompletion = vi.fn(async () => undefined);
@@ -1679,15 +1778,24 @@ describe("runSessionLoop — user prompt rail behavior", () => {
           outputChunks.push(String(chunk));
           return true;
         },
-      } as NodeJS.WritableStream,
+        isTTY: true,
+        columns: 52,
+        rows: 24,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 52, supportsAnimation: false }),
+      operatorConsole: { enabled: true },
       prompt,
       close: () => {},
     });
 
     const rendered = outputChunks.join("");
+    const readable = stripAnsi(rendered);
+    const compact = readable.replace(/\s+/gu, " ");
     expect(rendered).toContain("EstaCoda");
-    expect(rendered).toContain("The three reports agree on explicit provenance and review gates.");
-    expect(rendered).toContain("Ending EstaCoda session.");
+    expect(readable).toContain("Activity trace · 3 activities · 1:30");
+    expect(compact).toContain("The three reports agree on explicit provenance and review gates.");
+    expect(readable.indexOf("Activity trace")).toBeLessThan(readable.indexOf("The three reports agree"));
+    expect(readable).toContain("Ending EstaCoda session.");
     expect(drainTaskSessionCompletions).toHaveBeenCalled();
     expect(acknowledgeTaskSessionCompletion).toHaveBeenCalledWith({
       bindingId: "delivery-1",
@@ -2826,9 +2934,9 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(durableOutput).toContain("src/completed-7.ts");
     expect(durableOutput).toContain("approval required");
     expect(durableOutput).toContain("failed");
-    expect(durableOutput).toContain("Worked for");
+    expect(durableOutput).not.toContain("Worked for");
     expect(durableOutput).toContain(
-      "9 completed · 3 active · 1 failed · Worked for 00:00"
+      "9 succeeded · 3 active · 1 failed · 0s"
     );
   });
 
@@ -2933,7 +3041,8 @@ describe("runSessionLoop — active turn spinner", () => {
     const rendered = stripAnsi(outputChunks.join(""));
     expect(rendered).toContain("Delegated work");
     const completedOutput = rendered.slice(rendered.lastIndexOf("Tools completed"));
-    expect(completedOutput).toContain("Delegate Task");
+    expect(completedOutput).toContain("Agents");
+    expect(completedOutput).toContain("Delegate");
     expect(completedOutput).toContain("1 completed");
     expect(completedOutput).not.toContain("Subagent 1");
     expect(completedOutput).not.toContain("Read File");
@@ -3722,6 +3831,118 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(stripAnsi(outputChunks.join(""))).toContain("Cancelling current turn");
     expect(stripAnsi(outputChunks.join(""))).not.toContain("Queued steer");
     expect(stripAnsi(outputChunks.join(""))).not.toContain("User steer:");
+  });
+
+  it("force-exits after a second active-turn Ctrl+C when runtime cancellation does not settle", async () => {
+    const input = makeTtyInput();
+    const outputChunks: string[] = [];
+    const enqueueSessionFinalization = vi.fn();
+    const dispose = vi.fn(async () => undefined);
+    let handleStarted: (() => void) | undefined;
+    const handleStartedPromise = new Promise<void>((resolve) => {
+      handleStarted = resolve;
+    });
+    const runtime = createMockRuntime({
+      enqueueSessionFinalization,
+      dispose,
+      handle: async ({ signal }: Parameters<Runtime["handle"]>[0]) => {
+        handleStarted?.();
+        signal?.addEventListener("abort", () => undefined, { once: true });
+        return await new Promise<AgentLoopResponse>(() => undefined);
+      },
+    });
+    const loop = runSessionLoop({
+      runtime,
+      input,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 96,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 96, supportsAnimation: false }),
+      operatorConsole: {
+        enabled: true,
+        runtimeHost: createOperatorConsoleRuntimeHost({
+          terminal: { width: 96, height: 16, isTty: true },
+        }),
+      },
+      prompt: Object.assign(async () => "build feature", { close: () => {} }),
+      close: () => {},
+    });
+
+    await handleStartedPromise;
+    input.press("\u0003", { name: "c", ctrl: true });
+    input.press("\u0003", { name: "c", ctrl: true });
+    await loop;
+
+    const rendered = stripAnsi(outputChunks.join(""));
+    expect(rendered.match(/Cancelling current turn\./gu)).toHaveLength(1);
+    expect(rendered).toContain("Ending EstaCoda session.");
+    expect(enqueueSessionFinalization).toHaveBeenCalledTimes(1);
+    expect(enqueueSessionFinalization).toHaveBeenCalledWith("sigint");
+    expect(dispose).toHaveBeenCalledTimes(1);
+    expect(input.listenerCount("data")).toBe(0);
+    expect(input.isRaw).toBe(false);
+  });
+
+  it("handles active-turn /exit before steering and finalizes immediately", async () => {
+    const input = makeTtyInput();
+    const outputChunks: string[] = [];
+    const enqueueSessionFinalization = vi.fn();
+    let abortReason: unknown;
+    let handleStarted: (() => void) | undefined;
+    const handleStartedPromise = new Promise<void>((resolve) => {
+      handleStarted = resolve;
+    });
+    const runtime = createMockRuntime({
+      enqueueSessionFinalization,
+      handle: async ({ signal }: Parameters<Runtime["handle"]>[0]) => {
+        handleStarted?.();
+        signal?.addEventListener("abort", () => {
+          abortReason = signal.reason;
+        }, { once: true });
+        return await new Promise<AgentLoopResponse>(() => undefined);
+      },
+    });
+    const loop = runSessionLoop({
+      runtime,
+      input,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: true,
+        columns: 96,
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ terminalWidth: 96, supportsAnimation: false }),
+      operatorConsole: {
+        enabled: true,
+        runtimeHost: createOperatorConsoleRuntimeHost({
+          terminal: { width: 96, height: 16, isTty: true },
+        }),
+      },
+      prompt: Object.assign(async () => "build feature", { close: () => {} }),
+      close: () => {},
+    });
+
+    await handleStartedPromise;
+    for (const char of "/exit") input.press(char, { name: char, sequence: char });
+    input.press("\r", { name: "return" });
+    await loop;
+
+    const rendered = stripAnsi(outputChunks.join(""));
+    expect(abortReason).toBe("CLI exit");
+    expect(rendered).toContain("Ending EstaCoda session.");
+    expect(rendered).not.toContain("User steer:");
+    expect(rendered).not.toContain("Queued steer");
+    expect(enqueueSessionFinalization).toHaveBeenCalledTimes(1);
+    expect(enqueueSessionFinalization).toHaveBeenCalledWith("cli-exit");
+    expect(input.listenerCount("data")).toBe(0);
+    expect(input.isRaw).toBe(false);
   });
 
   it("renders provider progress between runtime events without the retired controller", async () => {
@@ -4867,6 +5088,134 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(outputChunks.join("")).not.toContain("private transcript text");
   });
 
+  it("uses the shared workspace-scoped picker for /sessions and preserves the origin surface", async () => {
+    const workspaceRoot = "/workspace";
+    const sessionDb = new InMemorySessionDB();
+    await sessionDb.createSession({
+      id: "current-session",
+      profileId: "default",
+      metadata: { workspaceRoot },
+    });
+    await sessionDb.createSession({
+      id: "telegram-session",
+      profileId: "default",
+      title: "Review gateway deployment",
+      metadata: { workspaceRoot },
+    });
+    await sessionDb.appendMessage({
+      id: "telegram-first-message",
+      sessionId: "telegram-session",
+      role: "user",
+      content: "Review the gateway deployment",
+      channel: "telegram",
+    });
+    await sessionDb.appendMessage({
+      id: "cli-follow-up-message",
+      sessionId: "telegram-session",
+      role: "user",
+      content: "Continue from the CLI",
+      channel: "cli",
+    });
+    await sessionDb.createSession({
+      id: "other-workspace-session",
+      profileId: "default",
+      metadata: { workspaceRoot: "/other-workspace" },
+    });
+    await sessionDb.appendMessage({
+      id: "other-workspace-message",
+      sessionId: "other-workspace-session",
+      role: "user",
+      content: "Private work from another workspace",
+      channel: "cli",
+    });
+
+    let selection: SelectPromptInput<string> | undefined;
+    const prompt = Object.assign(async () => "", {
+      select: async (input: SelectPromptInput<string>) => {
+        selection = input;
+        return "telegram-session";
+      },
+    }) as unknown as Prompt;
+    const switchedRuntime = createMockRuntime({
+      sessionDb,
+      sessionId: "telegram-session",
+    });
+    const switchRuntime = vi.fn(async () => switchedRuntime);
+    const outputChunks: string[] = [];
+
+    const result = await handleSlashCommand({
+      text: "/sessions",
+      runtime: createMockRuntime({ sessionDb, sessionId: "current-session" }),
+      switchRuntime,
+      prompt,
+      workspaceRoot,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+      } as unknown as NodeJS.WritableStream,
+      renderer: { render: renderPlain, locale: "en" },
+    });
+
+    expect(selection?.options.map((option) => option.value)).toEqual(["telegram-session"]);
+    expect(selection?.options[0]?.description).toContain("Via Telegram");
+    expect(selection?.options[0]?.description).not.toContain("Private work from another workspace");
+    expect(switchRuntime).toHaveBeenCalledWith("telegram-session");
+    expect(typeof result).toBe("object");
+    if (typeof result === "object") {
+      expect(result.runtime).toBe(switchedRuntime);
+      expect(result.notice(switchedRuntime)).toContain("Switched this session to an existing session.");
+    }
+    expect(outputChunks).toEqual([]);
+  });
+
+  it("treats Escape from the in-session /sessions picker as a no-op", async () => {
+    const workspaceRoot = "/workspace";
+    const sessionDb = new InMemorySessionDB();
+    await sessionDb.createSession({
+      id: "current-session",
+      profileId: "default",
+      metadata: { workspaceRoot },
+    });
+    await sessionDb.createSession({
+      id: "resumable-session",
+      profileId: "default",
+      metadata: { workspaceRoot },
+    });
+    await sessionDb.appendMessage({
+      id: "resumable-message",
+      sessionId: "resumable-session",
+      role: "user",
+      content: "Resume this work",
+      channel: "cli",
+    });
+    const prompt = Object.assign(async () => "", {
+      select: async () => { throw new InteractiveSelectCancelledError(); },
+    }) as unknown as Prompt;
+    const outputChunks: string[] = [];
+    const switchRuntime = vi.fn();
+
+    const result = await handleSlashCommand({
+      text: "/sessions",
+      runtime: createMockRuntime({ sessionDb, sessionId: "current-session" }),
+      switchRuntime,
+      prompt,
+      workspaceRoot,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+      } as unknown as NodeJS.WritableStream,
+      renderer: { render: renderPlain, locale: "en" },
+    });
+
+    expect(result).toBe(false);
+    expect(switchRuntime).not.toHaveBeenCalled();
+    expect(outputChunks.join("")).toContain("Session selection cancelled.");
+  });
+
   it("clears the completed turn timer after /switch swaps to another session", async () => {
     const outputChunks: string[] = [];
     const output = {
@@ -4886,7 +5235,18 @@ describe("runSessionLoop — active turn spinner", () => {
         return mockResponse();
       },
     });
-    await runtime.sessionDb.createSession({ id: "target-session", profileId: "default" });
+    const workspaceRoot = "/workspace";
+    await runtime.sessionDb.createSession({
+      id: "target-session",
+      profileId: "default",
+      metadata: { workspaceRoot },
+    });
+    await runtime.sessionDb.appendMessage({
+      sessionId: "target-session",
+      role: "user",
+      content: "Earlier user activity",
+      channel: "cli",
+    });
     const switchedRuntime = withModelInfo({
       ...createMockRuntime(),
       sessionDb: runtime.sessionDb,
@@ -4905,6 +5265,7 @@ describe("runSessionLoop — active turn spinner", () => {
       runtime,
       output,
       switchRuntime: async () => switchedRuntime,
+      workspaceRoot,
       now: () => nowMs,
       capabilities: interactiveCaps({ supportsAnimation: false }),
       prompt: Object.assign(
@@ -5688,6 +6049,73 @@ describe("runSessionLoop — active turn spinner", () => {
     expect(result.rendered).toContain("Approval granted (once). Retrying now.");
   });
 
+  it("surfaces approval during the active turn and resumes without replaying the user input", async () => {
+    const outputChunks: string[] = [];
+    const grants: ApprovalGrantInput[] = [];
+    const decisions: string[] = [];
+    const handle = vi.fn(async (input: Parameters<Runtime["handle"]>[0]): Promise<AgentLoopResponse> => {
+      const decision = await input.onApprovalRequest?.({
+        tool: {
+          name: "browser.cdp",
+          description: "Raw browser protocol call",
+          inputSchema: {},
+          riskClass: "external-side-effect",
+          toolsets: ["dangerous"],
+          progressLabel: "running cdp",
+          maxResultSizeChars: 1000
+        },
+        input: { method: "Runtime.evaluate" },
+        riskClass: "external-side-effect",
+        targetKey: "browser.cdp:Runtime.evaluate",
+        targetSummary: "Runtime.evaluate"
+      });
+      decisions.push(decision ?? "missing");
+      return { ...approvalAllowResponse(), text: "Exact CDP call completed." };
+    });
+    const runtime = {
+      ...createMockRuntime(),
+      revokeApproval: async () => true,
+      grantApproval: async (grant) => {
+        grants.push(grant);
+      },
+      handle
+    } as Runtime;
+    let promptIndex = 0;
+
+    await runSessionLoop({
+      runtime,
+      output: {
+        write(chunk: string | Uint8Array): boolean {
+          outputChunks.push(String(chunk));
+          return true;
+        },
+        isTTY: false,
+        columns: 100
+      } as unknown as NodeJS.WritableStream,
+      capabilities: interactiveCaps({ isTTY: false, supportsAnimation: false }),
+      prompt: Object.assign(async () => {
+        const answers = ["use raw cdp", "once", "/exit"];
+        return answers[promptIndex++] ?? "/exit";
+      }, { close: () => {} }),
+      close: () => {}
+    });
+
+    const rendered = stripAnsi(outputChunks.join(""));
+    expect(handle).toHaveBeenCalledOnce();
+    expect(decisions).toEqual(["approved"]);
+    expect(grants).toHaveLength(1);
+    expect(grants[0]).toMatchObject({
+      toolName: "browser.cdp",
+      riskClass: "external-side-effect",
+      targetKey: "browser.cdp:Runtime.evaluate",
+      scope: "once"
+    });
+    expect(rendered).toContain("Approval granted (once). Continuing now.");
+    expect(rendered.indexOf("Approval granted (once). Continuing now.")).toBeLessThan(
+      rendered.indexOf("Exact CDP call completed.")
+    );
+  });
+
   it("/approve session grants session approval and retries", async () => {
     const result = await runApprovalPromptScenario(["/approve session"]);
 
@@ -5829,7 +6257,7 @@ describe("runSessionLoop — active turn spinner", () => {
         action: "Run Command",
         target: "npm install left-pad",
         risk: "destructive-local",
-        focusedControl: "approve",
+        focusedControl: "inspect",
       }),
     ]);
     expect(result.grants).toEqual([
@@ -5842,14 +6270,14 @@ describe("runSessionLoop — active turn spinner", () => {
       },
     ]);
     expect(result.rendered).toContain("Approval required");
-    expect(result.rendered).toContain("Action: Run Command");
-    expect(result.rendered).toContain("Target: npm install left-pad");
-    expect(result.rendered).toContain("Risk: destructive-local");
+    expect(result.rendered).toContain("Run Command");
+    expect(result.rendered).toContain("Target · npm install left-pad");
+    expect(result.rendered).toContain("destructive-local");
     expect(result.rendered).toContain("❯ Approve once");
+    expect(result.rendered).toContain("Approve for session");
+    expect(result.rendered).toContain("Always approve in workspace");
     expect(result.rendered).toContain("Reject");
     expect(result.rendered).toContain("Inspect");
-    expect(result.rendered).not.toContain("Allow for this session");
-    expect(result.rendered).not.toContain("Always allow");
     expect(result.rendered).not.toContain("Feedback");
     expect(result.rendered).not.toContain("Amend");
     expect(result.rendered).toContain("Approval granted (once). Retrying now.");
@@ -5857,6 +6285,26 @@ describe("runSessionLoop — active turn spinner", () => {
     const statusRailLine = result.rendered.split("\n").find((line) => line.includes("mock-model"));
     expect(statusRailLine).toBeDefined();
     expect(statusRailLine).not.toMatch(/\b(approval|tool|workspace|trust|setup|steer|channel)\b/iu);
+  });
+
+  it("grants session and workspace scopes selected from inline Operator Console cards", async () => {
+    for (const scope of ["session", "always"] as const) {
+      const result = await runApprovalPromptScenario([scope], {
+        response: commandApprovalAskResponse(),
+        operatorConsoleHost: createOperatorConsoleRuntimeHost({
+          terminal: { width: 96, height: 16, isTty: true },
+        }),
+        ttyCoreSession: true,
+      });
+
+      expect(result.grants).toEqual([
+        expect.objectContaining({
+          toolName: "terminal.run",
+          scope,
+        }),
+      ]);
+      expect(result.handleInputs).toEqual(["write file", "write file"]);
+    }
   });
 
   it("keeps the Operator Console prompt and status rail visible during plain provider turns", async () => {

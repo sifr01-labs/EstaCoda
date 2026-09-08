@@ -307,7 +307,7 @@ describe("raw prompt controller", () => {
     read.input.send("\u0007");
     await Promise.resolve();
     expect(read.output.writes.join("")).toContain("Mouse Mode");
-    read.input.send("\x1b[<0;2;2M\x1b[<0;2;2m");
+    read.input.send("\x1b[<0;2;10M\x1b[<0;2;10m");
     await Promise.resolve();
     expect(read.output.writes.join("")).toContain("Retained safe activity");
 
@@ -525,7 +525,7 @@ describe("raw prompt controller", () => {
       });
 
       expect(refreshTasks).toHaveBeenCalledTimes(1);
-      expect(stripAnsi(output.writes.join(""))).toContain("• Subagent 1");
+      expect(stripAnsi(output.writes.join(""))).toContain("• Finish work");
       input.send("ab");
       input.send("\u007f");
       expect(refreshTasks).toHaveBeenCalledTimes(1);
@@ -533,7 +533,7 @@ describe("raw prompt controller", () => {
       output.writes.length = 0;
       vi.advanceTimersByTime(tokens.contract.motion.worker.cadenceMs);
       expect(refreshTasks).toHaveBeenCalledTimes(2);
-      expect(stripAnsi(output.writes.join(""))).toContain("● Subagent 1");
+      expect(stripAnsi(output.writes.join(""))).toContain("● Finish work");
 
       input.send("\r");
       await expect(pending).resolves.toEqual({ type: "submit", text: "a" });
@@ -554,10 +554,42 @@ describe("raw prompt controller", () => {
     });
 
     expect(read.output.writes.join("")).toContain("Approval required");
+    expect(read.output.writes.join("")).toContain("Approve once");
+    expect(read.output.writes.join("")).not.toContain("Approve for session");
+    expect(read.output.writes.join("")).not.toContain("Always approve in workspace");
     read.input.send("\r");
 
     await expect(read.pending).resolves.toEqual({ type: "submit", text: "" });
     expect(onApprovalIntent).not.toHaveBeenCalled();
+  });
+
+  it("defaults Task approval focus to Inspect so immediate Enter cannot approve", async () => {
+    let approvals: readonly ApprovalCardState[] = [promptApprovalCard()];
+    const onApprovalIntent = vi.fn(async (intent: { readonly type: string }) => {
+      if (intent.type === "reject") approvals = [];
+    });
+    const read = startPendingOperatorConsoleRead({
+      operatorConsole: {
+        enabled: true,
+        terminal: { width: 72, height: 16, isTty: true },
+        getApprovals: () => approvals,
+        onApprovalIntent
+      }
+    });
+
+    read.input.send("\t");
+    expect(read.output.writes.join("")).toContain("❯ Inspect");
+    read.input.send("\r");
+    await flushPromises();
+
+    expect(read.isResolved()).toBe(false);
+    expect(onApprovalIntent).not.toHaveBeenCalled();
+
+    read.input.send("\x1b");
+    await flushKeypressTimers();
+    expect(onApprovalIntent).toHaveBeenCalledWith({ type: "reject", approvalId: "approval-raw-1" });
+    read.input.send("done\r");
+    await expect(read.pending).resolves.toEqual({ type: "submit", text: "done" });
   });
 
   it("routes explicit approve-once and rejection controls without submitting the prompt", async () => {
@@ -575,10 +607,15 @@ describe("raw prompt controller", () => {
     });
 
     approved.input.send("\t");
+    approved.input.send("\x1b[B");
     approved.input.send("\r");
     await flushPromises();
     expect(approved.isResolved()).toBe(false);
-    expect(onApprovalIntent).toHaveBeenCalledWith({ type: "approve", approvalId: "approval-raw-1" });
+    expect(onApprovalIntent).toHaveBeenCalledWith({
+      type: "approve",
+      approvalId: "approval-raw-1",
+      scope: "once",
+    });
     approved.input.send("continue\r");
     await expect(approved.pending).resolves.toEqual({ type: "submit", text: "continue" });
 
@@ -593,7 +630,7 @@ describe("raw prompt controller", () => {
       }
     });
     rejected.input.send("\t");
-    rejected.input.send("\x1b[C");
+    rejected.input.send("\x1b[A");
     rejected.input.send("\r");
     await flushPromises();
     expect(rejected.isResolved()).toBe(false);
@@ -1140,6 +1177,12 @@ describe("raw prompt controller", () => {
 
     expect(result).toEqual({ type: "submit", text: "abXc" });
     expect(lifecycle.calls).toEqual(["start", "stop"]);
+  });
+
+  it("maps arrow-key movement through the visual order for Arabic input", async () => {
+    const { result } = await readWithFakeInput("سلام\x1b[CX\r");
+
+    expect(result).toEqual({ type: "submit", text: "سلاXم" });
   });
 
   it("routes Vim insert and normal mode transitions behind the raw keymap option", async () => {
@@ -2260,7 +2303,7 @@ function promptTaskCard(): TaskCardState {
       attempts: []
     }],
     subagents: [],
-    trace: { events: [], hasEarlierEvents: false },
+    trace: { events: [], spans: [], hasEarlierEvents: false },
     childTasks: [],
     phase: { name: "completed" },
     recentActivity: [{ eventId: "event-completed", kind: "attempt-completed", label: "Attempt completed", category: "finish", timestamp: "2026-07-20T10:00:00.000Z" }],
@@ -2285,6 +2328,7 @@ function promptTaskCardWithTrace(labels: readonly string[]): TaskCardState {
     status: "running",
     phase: { name: "running" },
     trace: {
+      spans: [],
       events: labels.map((label, index) => ({
         eventId: `event-${index}`,
         kind: "attempt-progressed",
@@ -2329,6 +2373,7 @@ function promptTaskCardWithSubagentTrace(
       currentToolCategory: "read",
       usage: { total: card.usage, currentAttempt: card.usage },
       attempts: [],
+      outcome: { usable: false, recovered: false, attemptsUsed: 0, maxAttempts: 3 },
       trace,
       results: [],
     }],

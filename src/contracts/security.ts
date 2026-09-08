@@ -32,6 +32,23 @@ export type SecurityContext = {
   activeChannel?: ChannelKind;
   targetChannel?: ChannelKind;
   targetConversationIsActive?: boolean;
+  dataEgress?: SecurityDataEgressContext;
+};
+
+export type SecurityDataEgressContext = {
+  kind: "vision-image";
+  inference: "hosted";
+  sourceProvenance:
+    | "current-turn-attachment"
+    | "explicit-reference"
+    | "browser-artifact"
+    | "generated-artifact"
+    | "agent-discovered";
+  /** Full source set for multi-image egress; the singular field is the most restrictive value. */
+  sourceProvenances?: readonly SecurityDataEgressContext["sourceProvenance"][];
+  sourceCount?: number;
+  sensitivePath: boolean;
+  destinations: readonly string[];
 };
 
 export type SecurityApprovalMode = "strict" | "adaptive" | "open";
@@ -110,6 +127,10 @@ export async function assessSecurityPolicy(
 
 export const capabilityFirstDefaults: SecurityPolicy = {
   decide(request) {
+    if (request.context.dataEgress?.inference === "hosted") {
+      return request.context.dataEgress.sensitivePath ? "deny" : "ask";
+    }
+
     if (request.toolName === "browser.cdp") {
       return "ask";
     }

@@ -2,8 +2,11 @@ import type { ParsedKeypress } from "../../input/parseKeypress.js";
 import { padVisibleEnd, truncateVisible, wrapText } from "../../renderers/layout.js";
 import { semanticMotionFrame } from "../../semantic-motion.js";
 import {
-  navigateActivityTrace,
-  renderActivityTraceSurface,
+  activityRibbonHeight,
+  getActivityRibbonSpans,
+  getInspectionActivitySpans,
+  navigateActivitySpans,
+  renderActivityRibbonSurface,
   type TraceNavigationAction,
 } from "./activityTraceSurface.js";
 import { setFocus } from "./focusModel.js";
@@ -12,9 +15,9 @@ import type {
 } from "./activeWorkCopy.js";
 import type {
   OperatorConsoleState,
+  TaskCardActivitySpanState,
   TaskCardActivityState,
   TaskCardState,
-  TaskCardStepState,
   TaskCardSubagentState,
   TaskSurfaceState,
 } from "./operatorConsoleState.js";
@@ -31,6 +34,8 @@ import {
   subagentInspectionContentLines,
 } from "./subagentInspectionSurface.js";
 import { deriveTaskResultSummary } from "../../../utils/task-result-summary.js";
+import { renderTaskStageSurface, taskStageHeaderHeight } from "./taskStageSurface.js";
+import { renderTaskWorkerRows, resolveTaskWorkerRowsLayout } from "./taskWorkerRows.js";
 
 const SUBAGENT_CARD_HEIGHT = 7;
 const SUBAGENT_ACTIVITY_ROWS = 3;
@@ -39,8 +44,8 @@ const SUBAGENT_COLUMN_GAP = 2;
 const SUBAGENT_ROW_GAP = 1;
 const COLLAPSED_SUBAGENT_CARD_HEIGHT = 1;
 const COLLAPSED_SUBAGENT_ROW_GAP = 1;
-const PARENT_SYNTHESIS_STAGE_HEIGHT = 7;
-const PARENT_SYNTHESIS_STAGE_GAP = 1;
+const TASK_COMMAND_CENTER_STAGE_GAP = 1;
+const TASK_CONTROL_HEIGHT = 1;
 const MIN_SUBAGENT_CARD_WIDTH = 44;
 const MAX_SUBAGENT_TITLE_WORDS = 8;
 const MAX_SUBAGENT_TITLE_WIDTH = 64;
@@ -74,19 +79,24 @@ type TaskCopy = {
   delegatedStepsCompleted: (completed: number, total: number) => string;
   delegatedStepsSettled: (settled: number, total: number) => string;
   delegatedProgressCompact: (completed: number, settled: number, total: number) => string;
+  workerOutcomes: (usable: number, failed: number, cancelled: number) => string;
   phaseLabel: (phase: TaskCardState["phase"]["name"]) => string;
   earlierActivities: string;
   waitingForActivity: string;
   resultReady: string;
+  recoveredOutput: string;
   resultUnavailable: string;
   noResultSummary: string;
-  parentSynthesis: string;
-  preparingSynthesis: (count: number) => string;
-  synthesizingResults: (count: number) => string;
-  synthesisWaitingForInput: string;
-  synthesisWaitingForApproval: string;
   tokens: string;
   moreSubagents: string;
+  trace: string;
+  retryFailed: string;
+  detach: string;
+  pause: string;
+  cancel: string;
+  cancelConfirm: string;
+  confirm: string;
+  keepRunning: string;
 };
 
 const COPY: Readonly<Record<OperatorConsoleLocale, TaskCopy>> = {
@@ -103,19 +113,28 @@ const COPY: Readonly<Record<OperatorConsoleLocale, TaskCopy>> = {
     delegatedProgressCompact: (completed, settled, total) => completed === total
       ? `${completed}/${total} completed`
       : `${settled}/${total} settled`,
-    phaseLabel: (phase) => phase.replaceAll("_", " "),
+    workerOutcomes: (usable, failed, cancelled) => [
+      `${usable} usable ${usable === 1 ? "report" : "reports"}`,
+      ...(failed === 0 ? [] : [`${failed} failed`]),
+      ...(cancelled === 0 ? [] : [`${cancelled} cancelled`]),
+    ].join(" · "),
+    phaseLabel: (phase) => phase === "partial" ? "completed with warnings" : phase.replaceAll("_", " "),
     earlierActivities: "earlier activities",
     waitingForActivity: "Waiting for safe activity",
     resultReady: "Summary",
+    recoveredOutput: "Recovered output · diagnostic only",
     resultUnavailable: "Result unavailable",
     noResultSummary: "Open to inspect the full result",
-    parentSynthesis: "Parent synthesis",
-    preparingSynthesis: (count) => `Preparing to synthesize ${count} Subagent ${count === 1 ? "result" : "results"}`,
-    synthesizingResults: (count) => `Synthesizing ${count} Subagent ${count === 1 ? "result" : "results"}`,
-    synthesisWaitingForInput: "Synthesis waiting for input",
-    synthesisWaitingForApproval: "Synthesis waiting for approval",
     tokens: "tokens",
     moreSubagents: "more Subagents",
+    trace: "trace",
+    retryFailed: "retry failed",
+    detach: "detach",
+    pause: "pause",
+    cancel: "cancel",
+    cancelConfirm: "Cancel Task?",
+    confirm: "confirm",
+    keepRunning: "keep running",
   },
   ar: {
     tasks: "المهام",
@@ -130,25 +149,41 @@ const COPY: Readonly<Record<OperatorConsoleLocale, TaskCopy>> = {
     delegatedProgressCompact: (completed, settled, total) => completed === total
       ? `${completed}/${total} مكتملة`
       : `${settled}/${total} مستقرة`,
+    workerOutcomes: (usable, failed, cancelled) => [
+      `نتائج صالحة: ${usable}`,
+      ...(failed === 0 ? [] : [`فشل: ${failed}`]),
+      ...(cancelled === 0 ? [] : [`أُلغي: ${cancelled}`]),
+    ].join(" · "),
     phaseLabel: localizedArabicTaskPhase,
     earlierActivities: "أنشطة سابقة",
     waitingForActivity: "بانتظار نشاط آمن",
     resultReady: "الملخص",
+    recoveredOutput: "مخرجات مستردة · للتشخيص فقط",
     resultUnavailable: "النتيجة غير متاحة",
     noResultSummary: "افتح لفحص النتيجة الكاملة",
-    parentSynthesis: "تجميع الوكيل الرئيسي",
-    preparingSynthesis: (count) => `يتم التحضير لتجميع ${count} من نتائج الوكلاء الفرعيين`,
-    synthesizingResults: (count) => `يتم تجميع ${count} من نتائج الوكلاء الفرعيين`,
-    synthesisWaitingForInput: "التجميع بانتظار إدخال",
-    synthesisWaitingForApproval: "التجميع بانتظار الموافقة",
     tokens: "رمز",
     moreSubagents: "وكلاء فرعيون إضافيون",
+    trace: "المسار",
+    retryFailed: "إعادة محاولة الفاشل",
+    detach: "فصل",
+    pause: "إيقاف مؤقت",
+    cancel: "إلغاء",
+    cancelConfirm: "إلغاء المهمة؟",
+    confirm: "للتأكيد",
+    keepRunning: "للمتابعة",
   },
 };
+
+export type TaskControlIntent =
+  | { readonly type: "retryTask"; readonly taskId: string; readonly stepId?: string }
+  | { readonly type: "detachTask"; readonly taskId: string }
+  | { readonly type: "pauseTask"; readonly taskId: string }
+  | { readonly type: "cancelTask"; readonly taskId: string };
 
 export type TaskSurfaceKeyResult = {
   readonly state: OperatorConsoleState;
   readonly handled: boolean;
+  readonly intent?: TaskControlIntent;
 };
 
 export type TaskCardHitTarget = {
@@ -164,7 +199,7 @@ export type TaskCardHitTarget = {
 export type TaskSurfacePointerAction =
   | { readonly type: "openTask"; readonly taskId: string }
   | { readonly type: "openSubagent"; readonly taskId: string; readonly stepId: string }
-  | { readonly type: "selectTraceEvent"; readonly scope: "task" | "subagent"; readonly eventId: string }
+  | { readonly type: "selectTraceSpan"; readonly scope: "task" | "subagent"; readonly spanId: string }
   | { readonly type: "returnToLive"; readonly scope: "task" | "subagent" }
   | { readonly type: "back" }
   | { readonly type: "scroll"; readonly delta: number };
@@ -229,11 +264,26 @@ export function reconcileTaskSurfaceState(
               subagentTrace: retainedInspection.subagentTrace ?? { followLive: true },
             }),
       };
+  const traceCard = cards.find((card) => card.taskId === current.traceMode?.taskId);
+  const traceMode = traceCard === undefined
+    ? undefined
+    : current.traceMode?.followLive === false &&
+        getActivityRibbonSpans(traceCard).some((span) => span.id === current.traceMode?.selectedSpanId)
+      ? current.traceMode
+      : current.traceMode === undefined
+        ? undefined
+        : { taskId: traceCard.taskId, followLive: true as const };
+  const pendingCard = cards.find((card) => card.taskId === current.pendingControl?.taskId);
+  const pendingControl = pendingCard !== undefined && !isSettledTaskStatus(pendingCard.status)
+    ? current.pendingControl
+    : undefined;
   return {
     cards,
     ...(selectedTaskId === undefined ? {} : { selectedTaskId }),
     ...(inspectedTaskId === undefined ? {} : { inspectedTaskId }),
     inspection,
+    ...(traceMode === undefined ? {} : { traceMode }),
+    ...(pendingControl === undefined ? {} : { pendingControl }),
     ...(cards.length > 0 && current.mouseModeActive === true ? { mouseModeActive: true } : {}),
     scrollOffset: inspectedTaskId === undefined ? 0 : current.scrollOffset,
   };
@@ -243,20 +293,24 @@ export function getTaskCardSurfaceDesiredHeight(state: TaskSurfaceState, width =
   const card = selectedTask(state);
   if (card === undefined) return 0;
   if (card.presentation === "receipt") return 1;
-  const synthesis = activeParentSynthesisStep(card);
-  if (synthesis !== undefined) {
-    const grid = resolveSubagentGrid(card.subagents.length, dimension(width));
-    return 1 +
-      PARENT_SYNTHESIS_STAGE_HEIGHT +
-      PARENT_SYNTHESIS_STAGE_GAP +
-      collapsedSubagentGridHeight(grid);
+  if (usesTaskCommandCenter(card)) {
+    const normalizedWidth = dimension(width);
+    if (normalizedWidth < 60) {
+      return taskStageHeaderHeight(normalizedWidth) + activityRibbonHeight(normalizedWidth) + TASK_CONTROL_HEIGHT;
+    }
+    return taskStageHeaderHeight(normalizedWidth) +
+      activityRibbonHeight(normalizedWidth) +
+      TASK_COMMAND_CENTER_STAGE_GAP * 2 +
+      resolveTaskWorkerRowsLayout(card.subagents.length, normalizedWidth).height +
+      TASK_CONTROL_HEIGHT;
   }
-  if (card.subagents.length === 0) return 2;
+  if (card.subagents.length === 0) return 2 + TASK_CONTROL_HEIGHT;
   const grid = resolveSubagentGrid(card.subagents.length, dimension(width));
   return 1 +
     grid.rows * SUBAGENT_CARD_HEIGHT +
     Math.max(0, grid.rows - 1) * SUBAGENT_ROW_GAP +
-    (grid.hiddenCount > 0 ? 1 : 0);
+    (grid.hiddenCount > 0 ? 1 : 0) +
+    TASK_CONTROL_HEIGHT;
 }
 
 export function renderTaskCardSurface(
@@ -282,17 +336,24 @@ export function renderTaskCardSurface(
   if (card.presentation === "receipt") {
     return [renderTaskReceipt(card, state, copy, options, width, isFocused)];
   }
-  const synthesis = activeParentSynthesisStep(card);
-  if (synthesis !== undefined) {
-    return renderParentSynthesisTaskSurface(card, synthesis, header, copy, options, width, height);
+  if (usesTaskCommandCenter(card)) {
+    return renderTaskCommandCenterSurface(card, state, copy, options, width, height, isFocused);
   }
   if (card.subagents.length === 0) {
     const summary = `${formatStatus(card.status)} · ${isolateIfArabic(formatExecution(card), options.locale)} · ${formatDuration(card.elapsedMs)} · ${formatCardUsage(card.usage, options.locale ?? "en")} · ${copy.inspectHint}`;
-    return padSurfaceRows([header, summary], height, width);
+    return padSurfaceRows([
+      header,
+      summary,
+      ...(height >= 3 ? [renderTaskControls(card, state, copy, options.style, width, options.locale)] : []),
+    ], height, width);
   }
 
   const grid = resolveSubagentGrid(card.subagents.length, width);
-  const fitted = fitSubagentGridToHeight(grid, card.subagents.length, height);
+  const withoutControls = fitSubagentGridToHeight(grid, card.subagents.length, height);
+  const withControls = fitSubagentGridToHeight(grid, card.subagents.length, Math.max(0, height - TASK_CONTROL_HEIGHT));
+  const showControls = withControls.rows > 0 && withControls.rows === withoutControls.rows;
+  const contentHeight = Math.max(0, height - (showControls ? TASK_CONTROL_HEIGHT : 0));
+  const fitted = fitSubagentGridToHeight(grid, card.subagents.length, contentHeight);
   if (fitted.rows === 0) {
     return renderCompactSubagentFallback(card, header, copy, options, width, height);
   }
@@ -323,6 +384,7 @@ export function renderTaskCardSurface(
     }
   }
   if (hiddenCount > 0) rows.push(`+${hiddenCount} ${copy.moreSubagents}`);
+  if (showControls) rows.push(renderTaskControls(card, state, copy, options.style, width, options.locale));
   return padSurfaceRows(rows, height, width);
 }
 
@@ -345,10 +407,15 @@ export function getTaskCardHitTargets(
       height: 1,
     }];
   }
-  const synthesis = activeParentSynthesisStep(card);
-  const taskTargetHeight = synthesis === undefined
+  const commandCenter = usesTaskCommandCenter(card);
+  const taskTargetHeight = !commandCenter
     ? 1
-    : Math.min(normalizedHeight, 1 + PARENT_SYNTHESIS_STAGE_HEIGHT);
+    : Math.min(
+        normalizedHeight,
+        taskStageHeaderHeight(normalizedWidth) +
+          TASK_COMMAND_CENTER_STAGE_GAP +
+          activityRibbonHeight(normalizedWidth)
+      );
   const targets: TaskCardHitTarget[] = [{
     kind: "taskHeader",
     taskId: card.taskId,
@@ -358,8 +425,8 @@ export function getTaskCardHitTargets(
     height: taskTargetHeight,
   }];
   if (card.subagents.length === 0) return targets;
-  if (synthesis !== undefined) {
-    const layout = resolveCollapsedSynthesisLayout(card, normalizedWidth, normalizedHeight);
+  if (commandCenter) {
+    const layout = resolveCommandCenterLayout(card, normalizedWidth, normalizedHeight);
     const columnWidth = resolveEqualColumnWidth(normalizedWidth, layout.grid.columns);
     for (let columnIndex = 0; columnIndex < layout.grid.columns; columnIndex += 1) {
       for (let rowIndex = 0; rowIndex < layout.grid.rows; rowIndex += 1) {
@@ -453,8 +520,9 @@ export function routeTaskSurfaceKey(
   keypress: ParsedKeypress,
   viewportHeight: number = state.terminal.height
 ): TaskSurfaceKeyResult {
-  if (keypress.type !== "key" || state.tasks.cards.length === 0) return { state, handled: false };
+  if (state.tasks.cards.length === 0) return { state, handled: false };
   if (state.tasks.inspectedTaskId !== undefined) {
+    if (keypress.type !== "key") return { state, handled: true };
     const card = inspectedTask(state.tasks);
     if (card === undefined) return { state: closeInspection(state), handled: true };
     const inspectedSubagent = card.subagents.find((candidate) =>
@@ -506,6 +574,11 @@ export function routeTaskSurfaceKey(
 
   const mainSubagentFocus = state.focus.target.kind === "taskSubagent";
   const taskFocus = state.focus.target.kind === "taskCard";
+  if (taskFocus || mainSubagentFocus) {
+    const controlled = routeFocusedTaskControl(state, keypress);
+    if (controlled !== undefined) return controlled;
+  }
+  if (keypress.type !== "key") return { state, handled: false };
   if (!taskFocus && !mainSubagentFocus) {
     const shortcut = keypress.ctrl === true && keypress.key === "t";
     if (!shortcut && keypress.key !== "tab") return { state, handled: false };
@@ -519,6 +592,22 @@ export function routeTaskSurfaceKey(
       },
       handled: true,
     };
+  }
+
+  const traceCard = selectedTask(state.tasks);
+  if (traceCard !== undefined && state.tasks.traceMode?.taskId === traceCard.taskId) {
+    switch (keypress.key) {
+      case "left": return { state: setMainTraceSelection(state, traceCard, "left"), handled: true };
+      case "right": return { state: setMainTraceSelection(state, traceCard, "right"), handled: true };
+      case "home": return { state: setMainTraceSelection(state, traceCard, "home"), handled: true };
+      case "end": return { state: setMainTraceSelection(state, traceCard, "end"), handled: true };
+      case "enter": return { state: inspectMainTraceSelection(state, traceCard), handled: true };
+      case "escape": return {
+        state: { ...state, tasks: { ...state.tasks, traceMode: undefined } },
+        handled: true,
+      };
+      default: break;
+    }
   }
 
   if (mainSubagentFocus) {
@@ -714,27 +803,29 @@ export function routeTaskSurfacePointer(
     return subagent === undefined ? state : setSubagentTraceSelection(state, subagent, "end");
   }
   if (action.scope === "task") {
-    if (!card.trace.events.some((event) => event.eventId === action.eventId)) return state;
-    const { selectedTraceEventId: _selectedTraceEventId, ...inspection } = state.tasks.inspection ?? { followLive: true };
+    if (!getInspectionActivitySpans(card).some((span) => span.id === action.spanId)) return state;
+    const { selectedTraceSpanId: _selectedTraceSpanId, ...inspection } = state.tasks.inspection ?? { followLive: true };
     return {
       ...state,
       tasks: {
         ...state.tasks,
-        inspection: { ...inspection, followLive: false, selectedTraceEventId: action.eventId },
+        inspection: { ...inspection, followLive: false, selectedTraceSpanId: action.spanId },
       },
     };
   }
   const subagent = card.subagents.find((candidate) =>
     candidate.stepId === state.tasks.inspection?.inspectedSubagentStepId
   );
-  if (subagent === undefined || !subagent.trace.some((event) => event.eventId === action.eventId)) return state;
+  if (subagent === undefined || !subagentActivitySpans(card, subagent).some((span) =>
+    span.id === action.spanId
+  )) return state;
   return {
     ...state,
     tasks: {
       ...state.tasks,
       inspection: {
         ...(state.tasks.inspection ?? { followLive: true }),
-        subagentTrace: { followLive: false, selectedTraceEventId: action.eventId },
+        subagentTrace: { followLive: false, selectedTraceSpanId: action.spanId },
       },
     },
   };
@@ -764,6 +855,109 @@ function closeInspection(state: OperatorConsoleState, focusPrompt = false): Oper
   };
 }
 
+function routeFocusedTaskControl(
+  state: OperatorConsoleState,
+  keypress: ParsedKeypress
+): TaskSurfaceKeyResult | undefined {
+  const card = selectedTask(state.tasks);
+  if (card === undefined) return undefined;
+  if (state.tasks.pendingControl?.taskId === card.taskId) {
+    if (keypress.type === "key" && keypress.key === "enter") {
+      return {
+        state: { ...state, tasks: { ...state.tasks, pendingControl: undefined } },
+        handled: true,
+        intent: { type: "cancelTask", taskId: card.taskId },
+      };
+    }
+    if (keypress.type === "key" && keypress.key === "escape") {
+      return {
+        state: { ...state, tasks: { ...state.tasks, pendingControl: undefined } },
+        handled: true,
+      };
+    }
+    return { state, handled: true };
+  }
+  if (keypress.type !== "text" || keypress.text.length !== 1) return undefined;
+  switch (keypress.text.toLocaleLowerCase()) {
+    case "t": {
+      const spans = getActivityRibbonSpans(card);
+      if (spans.length === 0) return undefined;
+      const traceMode = state.tasks.traceMode?.taskId === card.taskId
+        ? undefined
+        : { taskId: card.taskId, followLive: true as const };
+      return {
+        state: {
+          ...state,
+          tasks: { ...state.tasks, ...(traceMode === undefined ? { traceMode: undefined } : { traceMode }) },
+          focus: setFocus(state.focus, { kind: "taskCard", taskId: card.taskId }),
+        },
+        handled: true,
+      };
+    }
+    case "r": {
+      const stepId = retryableStepId(card);
+      return stepId === undefined
+        ? undefined
+        : { state, handled: true, intent: { type: "retryTask", taskId: card.taskId, stepId } };
+    }
+    case "d":
+      if (isSettledTaskStatus(card.status)) return undefined;
+      return {
+        state: {
+          ...state,
+          tasks: { ...state.tasks, traceMode: undefined },
+          focus: setFocus(state.focus, { kind: "prompt" }),
+        },
+        handled: true,
+        intent: { type: "detachTask", taskId: card.taskId },
+      };
+    case "p":
+      return isSettledTaskStatus(card.status) || card.status === "paused"
+        ? undefined
+        : { state, handled: true, intent: { type: "pauseTask", taskId: card.taskId } };
+    case "c":
+      return isSettledTaskStatus(card.status)
+        ? undefined
+        : {
+            state: {
+              ...state,
+              tasks: { ...state.tasks, pendingControl: { kind: "cancel", taskId: card.taskId } },
+            },
+            handled: true,
+          };
+    default: return undefined;
+  }
+}
+
+function setMainTraceSelection(
+  state: OperatorConsoleState,
+  card: TaskCardState,
+  action: TraceNavigationAction
+): OperatorConsoleState {
+  const selection = navigateActivitySpans(getActivityRibbonSpans(card), state.tasks.traceMode, action);
+  return {
+    ...state,
+    tasks: { ...state.tasks, traceMode: { taskId: card.taskId, ...selection } },
+  };
+}
+
+function inspectMainTraceSelection(state: OperatorConsoleState, card: TaskCardState): OperatorConsoleState {
+  const selection = state.tasks.traceMode;
+  return {
+    ...state,
+    tasks: {
+      ...state.tasks,
+      inspectedTaskId: card.taskId,
+      inspection: {
+        followLive: selection?.followLive ?? true,
+        ...(selection?.selectedSpanId === undefined ? {} : { selectedTraceSpanId: selection.selectedSpanId }),
+        ...(card.subagents[0] === undefined ? {} : { selectedSubagentStepId: card.subagents[0].stepId }),
+      },
+      scrollOffset: 0,
+    },
+  };
+}
+
 function setTaskScroll(state: OperatorConsoleState, offset: number, maxOffset: number): OperatorConsoleState {
   const scrollOffset = Math.max(0, Math.min(maxOffset, offset));
   if (scrollOffset === state.tasks.scrollOffset) return state;
@@ -775,14 +969,23 @@ function setTaskTraceSelection(
   card: TaskCardState,
   action: TraceNavigationAction
 ): OperatorConsoleState {
-  const { selectedTraceEventId: _selectedTraceEventId, ...inspection } = state.tasks.inspection ?? { followLive: true };
+  const { selectedTraceSpanId: _selectedTraceSpanId, ...inspection } = state.tasks.inspection ?? { followLive: true };
+  const selection = navigateActivitySpans(
+    getInspectionActivitySpans(card),
+    {
+      followLive: state.tasks.inspection?.followLive ?? true,
+      selectedSpanId: state.tasks.inspection?.selectedTraceSpanId,
+    },
+    action
+  );
   return {
     ...state,
     tasks: {
       ...state.tasks,
       inspection: {
         ...inspection,
-        ...navigateActivityTrace(card.trace.events, state.tasks.inspection, action, state.terminal.width),
+        followLive: selection.followLive,
+        ...(selection.selectedSpanId === undefined ? {} : { selectedTraceSpanId: selection.selectedSpanId }),
       },
       scrollOffset: 0,
     }
@@ -794,11 +997,13 @@ function setSubagentTraceSelection(
   subagent: TaskCardSubagentState,
   action: TraceNavigationAction
 ): OperatorConsoleState {
-  const trace = navigateActivityTrace(
-    subagent.trace,
-    state.tasks.inspection?.subagentTrace,
-    action,
-    state.terminal.width
+  const spanTrace = navigateActivitySpans(
+    subagentActivitySpans(inspectedTask(state.tasks), subagent),
+    {
+      followLive: state.tasks.inspection?.subagentTrace?.followLive ?? true,
+      selectedSpanId: state.tasks.inspection?.subagentTrace?.selectedTraceSpanId,
+    },
+    action
   );
   return {
     ...state,
@@ -806,11 +1011,28 @@ function setSubagentTraceSelection(
       ...state.tasks,
       inspection: {
         ...(state.tasks.inspection ?? { followLive: true }),
-        subagentTrace: trace,
+        subagentTrace: {
+          followLive: spanTrace.followLive,
+          ...(spanTrace.selectedSpanId === undefined ? {} : { selectedTraceSpanId: spanTrace.selectedSpanId }),
+        },
       },
       scrollOffset: 0,
     },
   };
+}
+
+function subagentActivitySpans(
+  card: TaskCardState | undefined,
+  subagent: TaskCardSubagentState
+): readonly TaskCardActivitySpanState[] {
+  if (card === undefined) return [];
+  const projected = card.trace.spans.filter((span) => span.scope.stepId === subagent.stepId);
+  if (projected.length > 0) return projected;
+  return getInspectionActivitySpans({
+    ...card,
+    subagents: [subagent],
+    trace: { events: subagent.trace, spans: [], hasEarlierEvents: false },
+  });
 }
 
 function selectRelativeSubagent(
@@ -898,8 +1120,8 @@ function visibleSubagentGrid(card: TaskCardState, width: number, height: number)
   if (card.presentation === "receipt") {
     return { columns: 1, rows: 0, hiddenCount: card.subagents.length };
   }
-  if (activeParentSynthesisStep(card) !== undefined) {
-    return resolveCollapsedSynthesisLayout(card, dimension(width), dimension(height)).grid;
+  if (usesTaskCommandCenter(card)) {
+    return resolveCommandCenterLayout(card, dimension(width), dimension(height)).grid;
   }
   const grid = resolveSubagentGrid(card.subagents.length, dimension(width));
   const fitted = fitSubagentGridToHeight(grid, card.subagents.length, dimension(height));
@@ -911,8 +1133,8 @@ function visibleSubagentGrid(card: TaskCardState, width: number, height: number)
 function visibleSubagents(card: TaskCardState, width: number, height: number): readonly TaskCardSubagentState[] {
   if (card.presentation === "receipt") return [];
   const normalizedHeight = dimension(height);
-  if (activeParentSynthesisStep(card) !== undefined) {
-    const layout = resolveCollapsedSynthesisLayout(card, dimension(width), normalizedHeight);
+  if (usesTaskCommandCenter(card)) {
+    const layout = resolveCommandCenterLayout(card, dimension(width), normalizedHeight);
     return card.subagents.slice(0, layout.visibleCount);
   }
   const grid = resolveSubagentGrid(card.subagents.length, dimension(width));
@@ -1020,174 +1242,166 @@ type TaskCardRenderOptions = {
   readonly motionElapsedMs?: number;
 };
 
-type CollapsedSynthesisLayout = {
+type TaskCommandCenterLayout = {
   readonly grid: SubagentGrid;
   readonly workerTop: number;
   readonly visibleCount: number;
 };
 
-function activeParentSynthesisStep(card: TaskCardState): TaskCardStepState | undefined {
-  if (card.subagents.length === 0 || !card.subagents.every((subagent) => isSettledSubagent(subagent.status))) {
-    return undefined;
-  }
-  return card.steps.find((step) =>
-    step.executorRole === "synthesis" &&
-    (step.status === "ready" ||
-      step.status === "running" ||
-      step.status === "waiting_for_input" ||
-      step.status === "waiting_for_approval")
-  );
+function usesTaskCommandCenter(card: TaskCardState): boolean {
+  return card.phase?.workerProgress !== undefined || card.subagents.length > 0;
 }
 
-function collapsedSubagentGridHeight(grid: SubagentGrid): number {
-  if (grid.rows === 0) return grid.hiddenCount > 0 ? 1 : 0;
-  return grid.rows * COLLAPSED_SUBAGENT_CARD_HEIGHT +
-    Math.max(0, grid.rows - 1) * COLLAPSED_SUBAGENT_ROW_GAP +
-    (grid.hiddenCount > 0 ? 1 : 0);
-}
-
-function fitCollapsedSubagentGridToHeight(
-  grid: SubagentGrid,
-  count: number,
-  height: number
-): SubagentGrid {
-  for (let rows = grid.rows; rows > 0; rows -= 1) {
-    const hiddenCount = Math.max(0, count - rows * grid.columns);
-    const candidate = { columns: grid.columns, rows, hiddenCount };
-    if (collapsedSubagentGridHeight(candidate) <= height) return candidate;
-  }
-  return { columns: grid.columns, rows: 0, hiddenCount: count };
-}
-
-function resolveCollapsedSynthesisLayout(
+function resolveCommandCenterLayout(
   card: TaskCardState,
   width: number,
   height: number
-): CollapsedSynthesisLayout {
-  const stageHeight = Math.min(PARENT_SYNTHESIS_STAGE_HEIGHT, Math.max(0, height - 1));
-  const remaining = Math.max(0, height - 1 - stageHeight);
-  const hasStageGap = remaining > PARENT_SYNTHESIS_STAGE_GAP;
-  const workerTop = 1 + stageHeight + (hasStageGap ? PARENT_SYNTHESIS_STAGE_GAP : 0);
-  const workerHeight = hasStageGap ? remaining - PARENT_SYNTHESIS_STAGE_GAP : 0;
-  const grid = fitCollapsedSubagentGridToHeight(
-    resolveSubagentGrid(card.subagents.length, width),
-    card.subagents.length,
-    workerHeight
-  );
+): TaskCommandCenterLayout {
+  const commandHeight = taskStageHeaderHeight(width) +
+    (width >= 60 ? TASK_COMMAND_CENTER_STAGE_GAP : 0) +
+    activityRibbonHeight(width);
+  const showControls = showTaskCommandCenterControls(card, width, height);
+  const hasStageGap = width >= 60 && height > commandHeight;
+  const workerTop = commandHeight + (hasStageGap ? TASK_COMMAND_CENTER_STAGE_GAP : 0);
+  const workerHeight = hasStageGap
+    ? Math.max(0, height - workerTop - (showControls ? TASK_CONTROL_HEIGHT : 0))
+    : 0;
+  const workerLayout = resolveTaskWorkerRowsLayout(card.subagents.length, width);
+  let visibleRows = Math.min(workerLayout.rows, Math.max(0, Math.ceil(workerHeight / 2)));
+  while (visibleRows > 0) {
+    const candidateCount = Math.min(card.subagents.length, visibleRows * workerLayout.columns);
+    const candidateHeight = visibleRows * 2 - 1;
+    const needsOverflowRow = candidateCount < card.subagents.length;
+    if (candidateHeight + (needsOverflowRow ? 1 : 0) <= workerHeight) break;
+    visibleRows -= 1;
+  }
+  const visibleCount = Math.min(card.subagents.length, visibleRows * workerLayout.columns);
+  const grid = {
+    columns: workerLayout.columns,
+    rows: visibleRows,
+    hiddenCount: Math.max(0, card.subagents.length - visibleCount),
+  };
   return {
     grid,
     workerTop,
-    visibleCount: Math.min(card.subagents.length, grid.rows * grid.columns),
+    visibleCount,
   };
 }
 
-function renderParentSynthesisTaskSurface(
+function renderTaskCommandCenterSurface(
   card: TaskCardState,
-  synthesis: TaskCardStepState,
-  header: string,
+  state: TaskSurfaceState,
   copy: TaskCopy,
   options: TaskCardRenderOptions,
   width: number,
-  height: number
+  height: number,
+  focused: boolean
 ): readonly string[] {
-  const stageHeight = Math.min(PARENT_SYNTHESIS_STAGE_HEIGHT, Math.max(0, height - 1));
-  const rows: string[] = [padVisibleEnd(truncateVisible(header, width, "…"), width)];
-  rows.push(...renderParentSynthesisStage(card, synthesis, copy, options, width, stageHeight));
-  const layout = resolveCollapsedSynthesisLayout(card, width, height);
+  const showControls = showTaskCommandCenterControls(card, width, height);
+  const rows: string[] = [...renderTaskStageSurface(card, {
+    width,
+    locale: options.locale,
+    style: options.style,
+    focused,
+  })];
+  if (width >= 60) rows.push("".padEnd(width));
+  rows.push(...renderActivityRibbonSurface(card, {
+    width,
+    locale: options.locale,
+    style: options.style,
+    scope: "auto",
+    ...(state.traceMode?.taskId === card.taskId ? { selection: state.traceMode } : {}),
+  }));
+  if (rows.length >= height || width < 60) {
+    return padSurfaceRows([
+      ...rows.slice(0, Math.max(0, height - (showControls ? TASK_CONTROL_HEIGHT : 0))),
+      ...(showControls ? [renderTaskControls(card, state, copy, options.style, width, options.locale)] : []),
+    ], height, width);
+  }
+  const layout = resolveCommandCenterLayout(card, width, height);
   if (layout.workerTop > rows.length) rows.push("".padEnd(width));
   const visibleSubagents = card.subagents.slice(0, layout.visibleCount);
-  const columnWidth = resolveEqualColumnWidth(width, layout.grid.columns);
-  for (let rowIndex = 0; rowIndex < layout.grid.rows; rowIndex += 1) {
-    if (rowIndex > 0) rows.push("".padEnd(width));
-    const summaries = Array.from({ length: layout.grid.columns }, (_, columnIndex) => {
-      const subagent = visibleSubagents[columnIndex * layout.grid.rows + rowIndex];
-      if (subagent === undefined) return "".padEnd(columnWidth);
-      const summary = `${formatSubagentTitle(
-        subagent,
-        options,
-        options.focusedSubagentStepId === subagent.stepId
-      )} · ${formatSubagentFooter(subagent, copy, options)}`;
-      const background = options.style?.tokens.contract.surface.bgElevated ?? "";
-      return styleBackgroundRow(options.style, ` ${summary}`, columnWidth, background);
-    });
-    rows.push(padVisibleEnd(truncateVisible(
-      summaries.join(" ".repeat(SUBAGENT_COLUMN_GAP)),
-      width,
-      "…"
-    ), width));
-  }
+  rows.push(...renderTaskWorkerRows(visibleSubagents, {
+    width,
+    locale: options.locale,
+    style: options.style,
+    focusedStepId: options.focusedSubagentStepId,
+    columns: layout.grid.columns,
+    motionElapsedMs: options.motionElapsedMs,
+  }));
   const hiddenCount = card.subagents.length - visibleSubagents.length;
-  if (hiddenCount > 0 && rows.length < height) rows.push(`+${hiddenCount} ${copy.moreSubagents}`);
+  if (hiddenCount > 0 && rows.length < height - (showControls ? TASK_CONTROL_HEIGHT : 0)) {
+    rows.push(`+${hiddenCount} ${copy.moreSubagents}`);
+  }
+  if (showControls) rows.push(renderTaskControls(card, state, copy, options.style, width, options.locale));
   return padSurfaceRows(rows, height, width);
 }
 
-function renderParentSynthesisStage(
+function showTaskCommandCenterControls(card: TaskCardState, width: number, height: number): boolean {
+  const commandHeight = taskStageHeaderHeight(width) + activityRibbonHeight(width);
+  if (width < 60) return height >= commandHeight + TASK_CONTROL_HEIGHT;
+  const fullHeight = commandHeight +
+    TASK_COMMAND_CENTER_STAGE_GAP * 2 +
+    resolveTaskWorkerRowsLayout(card.subagents.length, width).height +
+    TASK_CONTROL_HEIGHT;
+  return height >= fullHeight;
+}
+
+function renderTaskControls(
   card: TaskCardState,
-  synthesis: TaskCardStepState,
+  state: TaskSurfaceState,
   copy: TaskCopy,
-  options: TaskCardRenderOptions,
+  style: OperatorConsoleStyle | undefined,
   width: number,
-  height: number
-): readonly string[] {
-  if (height === 0) return [];
-  const style = options.style;
-  const tokens = style?.tokens.contract;
-  const attempt = synthesis.activeAttempt ?? synthesis.latestAttempt;
-  const symbol = parentSynthesisStatusSymbol(synthesis, style, options.motionElapsedMs);
-  const title = tokens === undefined
-    ? copy.parentSynthesis
-    : styleColor(style, styleBold(style, copy.parentSynthesis), tokens.palette.brand);
-  const description = styleSecondary(style, conciseSubagentTitle(synthesis.title));
-  const workerProgress = card.phase.workerProgress;
-  const progressText = workerProgress === undefined
-    ? undefined
-    : workerProgress.completed === workerProgress.total
-      ? copy.delegatedStepsCompleted(workerProgress.completed, workerProgress.total)
-      : copy.delegatedStepsSettled(workerProgress.settled, workerProgress.total);
-  const titleRow = [`${symbol} ${title}`, description, progressText]
-    .filter((value): value is string => value !== undefined)
-    .join(` ${styleMuted(style, "·")} `);
-  const resultCount = card.subagents.filter((subagent) => subagent.status === "completed").length;
-  const headlineText = parentSynthesisHeadline(synthesis, resultCount, copy);
-  const currentActivity = semanticParentSynthesisActivityLabel(
-    attempt?.currentActivity,
-    traceCategoryForTool(attempt?.currentToolCategory),
-    synthesis
-  );
-  const headline = [headlineText, currentActivity]
-    .filter((value): value is string => value !== undefined)
-    .join(` ${styleMuted(style, "·")} `);
-  const headlineColor = synthesis.status === "waiting_for_input" || synthesis.status === "waiting_for_approval"
-    ? tokens?.palette.caution
-    : tokens?.palette.action;
-  const styledHeadline = headlineColor === undefined ? headline : styleColor(style, headline, headlineColor);
-  const traceEvents = card.trace.events.flatMap((event) => {
-    if (event.stepId !== synthesis.stepId || !isMainCardActivityEvent(event)) return [];
-    const label = semanticParentSynthesisActivityLabel(event.label, event.category, synthesis);
-    return label === undefined ? [] : [{ ...event, label }];
-  });
-  const traceCard: TaskCardState = {
-    ...card,
-    subagents: [],
-    trace: { events: traceEvents, hasEarlierEvents: false },
-    recentActivity: traceEvents.slice(-12).reverse(),
+  locale: OperatorConsoleLocale = "en"
+): string {
+  if (state.mouseModeActive === true) {
+    return fitControlRow(styleMuted(style, copy.mouseActiveHint), width);
+  }
+  if (state.pendingControl?.taskId === card.taskId) {
+    const enter = isolateIfArabic("Enter", locale);
+    const escape = isolateIfArabic("Esc", locale);
+    const warning = width < 60
+      ? `${copy.cancelConfirm} · ${enter} / ${escape}`
+      : `${copy.cancelConfirm} · ${enter} ${copy.confirm} · ${escape} ${copy.keepRunning}`;
+    const color = style?.tokens.contract.severity.warn;
+    return fitControlRow(color === undefined ? warning : styleColor(style, styleBold(style, warning), color), width);
+  }
+  const controls: string[] = [];
+  const compact = width < 60;
+  const shortcut = (key: string, label?: string) => {
+    const isolatedKey = isolateIfArabic(key, locale);
+    return label === undefined ? isolatedKey : `${isolatedKey} ${label}`;
   };
-  const traceRows = renderActivityTraceSurface(traceCard, { followLive: true }, {
-    width,
-    locale: options.locale,
-    style,
+  const traceControl = card.trace.spans.length > 0 ? shortcut("T", copy.trace) : undefined;
+  if (compact && traceControl !== undefined) controls.push(traceControl);
+  if (retryableStepId(card) !== undefined) controls.push(shortcut("R", compact ? undefined : copy.retryFailed));
+  if (!isSettledTaskStatus(card.status)) {
+    controls.push(shortcut("D", compact ? undefined : copy.detach));
+    if (card.status !== "paused") controls.push(shortcut("P", compact ? undefined : copy.pause));
+    controls.push(shortcut("C", compact ? undefined : copy.cancel));
+  }
+  if (!compact && traceControl !== undefined) controls.push(traceControl);
+  const prefix = state.traceMode?.taskId === card.taskId ? "◆ " : "";
+  return fitControlRow(styleMuted(style, `${prefix}${controls.join(" · ")}`), width);
+}
+
+function fitControlRow(value: string, width: number): string {
+  return padVisibleEnd(truncateVisible(value, width, "…"), width);
+}
+
+function retryableStepId(card: TaskCardState): string | undefined {
+  if (card.status !== "waiting_for_input" && card.status !== "paused") return undefined;
+  const candidates = card.steps.filter((step) => {
+    if (step.status !== "waiting_for_input") return false;
+    const attempt = step.latestAttempt;
+    return attempt?.failure?.retryable === true && step.attempts.length < attempt.maxAttempts;
   });
-  const paddedTraceRows = Array.from({ length: 4 }, (_, index) => traceRows[index] ?? "");
-  const usage = attempt?.usage ?? synthesis.usage;
-  const elapsedMs = attempt?.elapsedMs ?? 0;
-  const status = styleParentSynthesisStatus(formatSubagentStatus(synthesis.status), synthesis.status, style);
-  const footer = `${status} ${styleMuted(style, `· ${formatDuration(elapsedMs)} · ${formatCompactTokenCount(usage.totalTokens)} ${copy.tokens} · ${formatCardUsage(usage, options.locale ?? "en")}`)}`;
-  const fullRows = [titleRow, styledHeadline, ...paddedTraceRows, footer];
-  if (height === 1) return [padVisibleEnd(truncateVisible(titleRow, width, "…"), width)];
-  const fittedRows = height >= fullRows.length
-    ? fullRows
-    : [titleRow, ...fullRows.slice(1, Math.max(1, height - 1)), footer];
-  return padSurfaceRows(fittedRows.slice(0, height), height, width);
+  return candidates.length === 1 ? candidates[0]?.stepId : undefined;
+}
+
+function isSettledTaskStatus(status: TaskCardState["status"]): boolean {
+  return status === "completed" || status === "partial" || status === "failed" || status === "cancelled";
 }
 
 function formatTaskHeader(
@@ -1222,12 +1436,28 @@ function formatTaskHeader(
   const phase = styleMuted(style, copy.phaseLabel(card.phase.name));
   const progressText = workerProgress === undefined
     ? `${card.progress.completed + card.progress.skipped} of ${card.progress.total} ${copy.stepsSettled}`
-    : copy.delegatedProgressCompact(workerProgress.completed, workerProgress.settled, workerProgress.total);
+    : formatWorkerProgress(workerProgress, copy, true);
   const progress = styleMuted(style, progressText);
   if (workerProgress === undefined) {
     return `${styledRail} ${styledTitle} ${separator} ${taskId} ${separator} ${styledMouseHint} ${separator} ${card.objective} ${separator} ${progress}`;
   }
   return `${styledRail} ${styledTitle} ${separator} ${taskId} ${separator} ${phase} ${separator} ${progress} ${separator} ${styledMouseHint} ${separator} ${card.objective}`;
+}
+
+function formatWorkerProgress(
+  progress: NonNullable<TaskCardState["phase"]["workerProgress"]>,
+  copy: TaskCopy,
+  compact: boolean
+): string {
+  if (progress.settled === progress.total && (progress.failed > 0 || progress.cancelled > 0)) {
+    return copy.workerOutcomes(progress.usable, progress.failed, progress.cancelled);
+  }
+  if (compact) {
+    return copy.delegatedProgressCompact(progress.completed, progress.settled, progress.total);
+  }
+  return progress.completed === progress.total
+    ? copy.delegatedStepsCompleted(progress.completed, progress.total)
+    : copy.delegatedStepsSettled(progress.settled, progress.total);
 }
 
 function renderTaskReceipt(
@@ -1257,7 +1487,7 @@ function renderTaskReceipt(
   const phase = styleTaskReceiptStatus(copy.phaseLabel(card.phase.name), card.status, style);
   const progress = workerProgress === undefined
     ? `${card.progress.completed + card.progress.skipped}/${card.progress.total} ${copy.stepsSettled}`
-    : copy.delegatedProgressCompact(workerProgress.completed, workerProgress.settled, workerProgress.total);
+    : formatWorkerProgress(workerProgress, copy, true);
   const metrics = styleMuted(
     style,
     `${formatDuration(card.elapsedMs)} · ${formatCompactTokenCount(card.usage.totalTokens)} ${copy.tokens} · ${formatCardUsage(card.usage, options.locale ?? "en")}`
@@ -1308,7 +1538,7 @@ function localizedArabicTaskPhase(phase: TaskCardState["phase"]["name"]): string
     case "waiting_for_approval": return "بانتظار الموافقة";
     case "paused": return "متوقفة مؤقتاً";
     case "completed": return "مكتملة";
-    case "partial": return "مكتملة جزئياً";
+    case "partial": return "اكتملت مع تحذيرات";
     case "failed": return "فشلت";
     case "cancelled": return "ملغاة";
   }
@@ -1491,56 +1721,6 @@ function subagentStatusSymbol(
   return tokens === undefined ? "." : styleColor(style, tokens.glyph.bullet, tokens.text.muted);
 }
 
-function parentSynthesisStatusSymbol(
-  synthesis: TaskCardStepState,
-  style: OperatorConsoleStyle | undefined,
-  motionElapsedMs: number | undefined
-): string {
-  const tokens = style?.tokens.contract;
-  if (synthesis.status === "ready" || synthesis.status === "running") {
-    if (tokens === undefined) return ">";
-    const motion = tokens.motion.worker;
-    const elapsed = tokens.behavior.allowAnimation ? motionElapsedMs : 0;
-    return styleColor(style, semanticMotionFrame(motion, elapsed, synthesis.position * 2), motion.color);
-  }
-  if (synthesis.status === "waiting_for_input" || synthesis.status === "waiting_for_approval") {
-    return tokens === undefined ? "!" : styleColor(style, "!", tokens.palette.caution);
-  }
-  return tokens === undefined ? "." : styleColor(style, tokens.glyph.bullet, tokens.text.muted);
-}
-
-function parentSynthesisHeadline(
-  synthesis: TaskCardStepState,
-  subagentCount: number,
-  copy: TaskCopy
-): string {
-  if (synthesis.status === "waiting_for_input") return copy.synthesisWaitingForInput;
-  if (synthesis.status === "waiting_for_approval") return copy.synthesisWaitingForApproval;
-  return synthesis.status === "ready"
-    ? copy.preparingSynthesis(subagentCount)
-    : copy.synthesizingResults(subagentCount);
-}
-
-function semanticParentSynthesisActivityLabel(
-  value: string | undefined,
-  category: TaskCardActivityState["category"],
-  synthesis: TaskCardStepState
-): string | undefined {
-  let label = normalizeCardText(value);
-  if (label === undefined) return undefined;
-  for (const suffix of [` · ${synthesis.title}`, ` · ${synthesis.objective}`]) {
-    if (label.endsWith(suffix)) label = label.slice(0, -suffix.length).trimEnd();
-  }
-  if (/^Attempt waiting$/iu.test(label)) return "Waiting for input";
-  if (/^(?:Worker (?:started|finished)|Starting delegated work|Result ready|Step status changed|Usage recorded|Attempt (?:queued|started|completed|checkpointed|failed|cancelled|interrupted|lease expired)|Worker assigned|Result recorded)$/iu.test(label)) {
-    return undefined;
-  }
-  if (/^(?:Tool activity|Read|Search|Edit|Terminal command) (?:started|finished)$/iu.test(label)) {
-    return semanticGenericActivity(category, /finished$/iu.test(label));
-  }
-  return label;
-}
-
 function subagentActivityRows(subagent: TaskCardSubagentState): {
   readonly rows: readonly SubagentActivityRow[];
   readonly hiddenCount: number;
@@ -1681,7 +1861,11 @@ function formatSettledSubagentState(
   const successful = subagent.status === "completed";
   const label = successful
     ? copy.resultReady
-    : subagent.status === "skipped" ? formatSubagentStatus(subagent.status) : copy.resultUnavailable;
+    : subagent.status === "skipped"
+      ? formatSubagentStatus(subagent.status)
+      : subagent.outcome.recovered
+        ? copy.recoveredOutput
+        : copy.resultUnavailable;
   const tokens = style?.tokens.contract;
   const glyph = successful
     ? tokens?.glyph.trace.live ?? ">"
@@ -1739,20 +1923,6 @@ function styleSubagentStatus(
   if (status === "failed" || status === "cancelled") return styleColor(style, value, tokens.severity.error);
   if (status === "waiting_for_input" || status === "waiting_for_approval") return styleColor(style, value, tokens.palette.caution);
   if (status === "running") return styleColor(style, value, tokens.palette.action);
-  return styleColor(style, value, tokens.text.secondary);
-}
-
-function styleParentSynthesisStatus(
-  value: string,
-  status: TaskCardStepState["status"],
-  style: OperatorConsoleStyle | undefined
-): string {
-  const tokens = style?.tokens.contract;
-  if (tokens === undefined) return value;
-  if (status === "waiting_for_input" || status === "waiting_for_approval") {
-    return styleColor(style, value, tokens.palette.caution);
-  }
-  if (status === "ready" || status === "running") return styleColor(style, value, tokens.palette.action);
   return styleColor(style, value, tokens.text.secondary);
 }
 

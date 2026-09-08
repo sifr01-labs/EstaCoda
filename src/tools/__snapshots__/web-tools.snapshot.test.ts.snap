@@ -8,6 +8,10 @@ URL: https://example.com/
 Title: Test Page
 
 [Compact viewport snapshot]
+Identity: documentEpoch=1 actionRevision=1 observationId=1
+Observed: <timestamp>
+Readiness: complete
+Controlled tab: @t1 [controlled] Test Page — https://example.com/
 
 Hello world.
 
@@ -29,7 +33,20 @@ Interactive elements:
           "role": "button",
         },
       ],
+      "identity": {
+        "actionRevision": 1,
+        "documentEpoch": 1,
+        "observationId": 1,
+      },
+      "observedAt": "<timestamp>",
+      "readiness": "complete",
       "sessionId": "<session-id>",
+      "tab": {
+        "controlled": true,
+        "ref": "@t1",
+        "title": "Test Page",
+        "url": "https://example.com/",
+      },
       "text": "Hello world.",
       "title": "Test Page",
       "url": "https://example.com/",
@@ -43,13 +60,28 @@ Interactive elements:
 exports[`web and browser golden snapshots > browser.snapshot output matches golden > browser-snapshot-mock 1`] = `
 {
   "content": "[Compact viewport snapshot]
-
-Hello world.
+Identity: documentEpoch=1 actionRevision=1 observationId=1
+Observed: <timestamp>
+URL: mock://browser
+Title: Test Page
+Readiness: complete
+Controlled tab: @t1 [controlled] Test Page — mock://browser
 
 Interactive elements:
-@e1 button Mock Button",
+@e1 button Mock Button
+
+Page context:
+Hello world.",
   "metadata": {
     "backend": "mock",
+    "compaction": {
+      "compacted": false,
+      "inputChars": 312,
+      "mode": "deterministic",
+      "omittedItems": 0,
+      "outputChars": 312,
+      "truncated": false,
+    },
     "snapshot": {
       "elements": [
         {
@@ -58,7 +90,20 @@ Interactive elements:
           "role": "button",
         },
       ],
+      "identity": {
+        "actionRevision": 1,
+        "documentEpoch": 1,
+        "observationId": 1,
+      },
+      "observedAt": "<timestamp>",
+      "readiness": "complete",
       "sessionId": "<session-id>",
+      "tab": {
+        "controlled": true,
+        "ref": "@t1",
+        "title": "Test Page",
+        "url": "mock://browser",
+      },
       "text": "Hello world.",
       "title": "Test Page",
       "url": "mock://browser",

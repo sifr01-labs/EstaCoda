@@ -25,6 +25,9 @@ import {
 
 const HIDE_CURSOR = "\x1b[?25l";
 const SHOW_CURSOR = "\x1b[?25h";
+const SESSION_PICKER_WIDE_CHROME_ROWS = 7;
+const SESSION_PICKER_NARROW_CHROME_ROWS = 10;
+const SESSION_PICKER_VIEWPORT_GUTTER_ROWS = 1;
 
 export type SelectPromptInput<T> = {
   title: string;
@@ -51,18 +54,28 @@ export type SelectPromptInput<T> = {
   }>;
   defaultIndex?: number;
   fallbackPrompt: string;
-  surface?: "promptCard";
+  surface?: "promptCard" | "sessionPicker";
   locale?: Locale;
   direction?: TextDirection;
   technicalLines?: readonly string[];
   statusLines?: readonly PromptCardStatusLine[];
   showCurrentBadge?: boolean;
   showColumnHeaders?: boolean;
+  descriptionVisibility?: "always" | "selected";
+  visibleRows?: number;
+  escapeCancels?: boolean;
   tableDirection?: "ltr" | "rtl";
   tableWidth?: "full" | "content";
   tableMaxWidth?: number;
   tableAlign?: "left" | "center" | "right";
 };
+
+export class InteractiveSelectCancelledError extends Error {
+  constructor() {
+    super("Interactive selection cancelled.");
+    this.name = "InteractiveSelectCancelledError";
+  }
+}
 
 export async function selectOption<T>(input: Readable, output: Writable, selection: SelectPromptInput<T>): Promise<T> {
   const isTty = Boolean((input as NodeJS.ReadStream).isTTY && (output as NodeJS.WriteStream).isTTY);
@@ -88,9 +101,9 @@ async function plainFallback<T>(input: Readable, output: Writable, selection: Se
 }
 
 async function ttySelect<T>(input: Readable, output: Writable, selection: SelectPromptInput<T>): Promise<T> {
-  return await new Promise<T>((resolve) => {
+  return await new Promise<T>((resolve, reject) => {
     const ttyInput = input as NodeJS.ReadStream;
-    let selectState = createPapyrusSelectState(selection);
+    let selectState = createPapyrusSelectState(fitSelectionToTerminalHeight(selection, output));
     let settled = false;
     let restored = false;
     let cursorHidden = false;
@@ -101,7 +114,11 @@ async function ttySelect<T>(input: Readable, output: Writable, selection: Select
 
     const render = () => {
       const selectedIndex = focusedSelectionIndex(selectState);
-      const text = renderTtySelection(selection, selectedIndex, renderer);
+      const text = renderTtySelection(
+        fitSelectionToTerminalHeight(selection, output),
+        selectedIndex,
+        renderer
+      );
       renderLoop.render(text);
     };
 
@@ -140,6 +157,16 @@ async function ttySelect<T>(input: Readable, output: Writable, selection: Select
       resolve(value);
     };
 
+    const cancel = () => {
+      if (settled) {
+        return;
+      }
+      settled = true;
+      restoreTerminal();
+      output.write("\n");
+      reject(new InteractiveSelectCancelledError());
+    };
+
     const keypressDispatcher = createKeypressStreamDispatcher({
       onEvents: (events) => {
         for (const keypress of events) {
@@ -147,6 +174,10 @@ async function ttySelect<T>(input: Readable, output: Writable, selection: Select
             restoreTerminal();
             output.write("\n");
             process.emit("SIGINT");
+            return;
+          }
+          if (selection.escapeCancels === true && keypress.type === "key" && keypress.key === "escape") {
+            cancel();
             return;
           }
           const event = selectKeyEventFromParsedKeypress(keypress);
@@ -179,6 +210,31 @@ async function ttySelect<T>(input: Readable, output: Writable, selection: Select
 
     renderSafely();
   });
+}
+
+function fitSelectionToTerminalHeight<T>(
+  selection: SelectPromptInput<T>,
+  output: Writable
+): SelectPromptInput<T> {
+  if (selection.surface !== "sessionPicker") return selection;
+  const terminalRows = (output as NodeJS.WriteStream).rows;
+  if (typeof terminalRows !== "number" || !Number.isFinite(terminalRows) || terminalRows <= 0) {
+    return selection;
+  }
+  const configuredRows = Math.max(
+    1,
+    Math.min(selection.options.length, selection.visibleRows ?? selection.options.length)
+  );
+  const terminalColumns = (output as NodeJS.WriteStream).columns ?? 80;
+  const chromeRows = terminalColumns < 100
+    ? SESSION_PICKER_NARROW_CHROME_ROWS
+    : SESSION_PICKER_WIDE_CHROME_ROWS;
+  const availableRows = Math.max(
+    1,
+    Math.floor(terminalRows) - chromeRows - SESSION_PICKER_VIEWPORT_GUTTER_ROWS
+  );
+  const visibleRows = Math.min(configuredRows, availableRows);
+  return visibleRows === selection.visibleRows ? selection : { ...selection, visibleRows };
 }
 
 class TtySelectRenderLoop {
@@ -223,7 +279,7 @@ function renderTtySelection<T>(
       }),
     }).join("\n");
   }
-  const vm = buildSelectionViewModel(selection, selectedIndex);
+  const vm = buildSelectionViewModel(selection, selectedIndex, true);
   return renderer.render(vm);
 }
 
@@ -273,7 +329,7 @@ function createPapyrusSelectState<T>(
     })),
     {
       focusedValue: optionValueForIndex(clampIndex(selection.defaultIndex ?? 0, selection.options.length)),
-      viewportSize: Math.max(1, selection.options.length),
+      viewportSize: Math.max(1, Math.min(selection.options.length, selection.visibleRows ?? selection.options.length)),
       wrap: true,
     }
   );
@@ -313,7 +369,11 @@ function digitFromKeypress(value: string): number | undefined {
   return Number.parseInt(value, 10);
 }
 
-function buildSelectionViewModel<T>(selection: SelectPromptInput<T>, selectedIndex: number): ViewModel {
+function buildSelectionViewModel<T>(
+  selection: SelectPromptInput<T>,
+  selectedIndex: number,
+  visibleOnly = false
+): ViewModel {
   if (selection.surface === "promptCard") {
     const options: OnboardingPromptOption[] = selection.options.map((opt, i) => ({
       id: String(i),
@@ -346,13 +406,39 @@ function buildSelectionViewModel<T>(selection: SelectPromptInput<T>, selectedInd
     });
   }
 
-  const options: PickerOption[] = selection.options.map((opt, i) => ({
-    id: String(i),
-    label: opt.label,
-    description: opt.description,
-    selected: i === selectedIndex,
-  }));
-  return buildPickerViewModel({ title: selection.title, options });
+  const visibleRows = visibleOnly
+    ? Math.max(1, Math.min(selection.options.length, selection.visibleRows ?? selection.options.length))
+    : selection.options.length;
+  const startIndex = visibleOnly
+    ? Math.min(
+        Math.max(0, selectedIndex - visibleRows + 1),
+        Math.max(0, selection.options.length - visibleRows)
+      )
+    : 0;
+  const visibleOptions = selection.options.slice(startIndex, startIndex + visibleRows);
+  const options: PickerOption[] = visibleOptions.map((opt, visibleIndex) => {
+    const absoluteIndex = startIndex + visibleIndex;
+    return {
+      id: String(absoluteIndex),
+      label: opt.label,
+      description: opt.description,
+      cells: opt.cells,
+      selected: absoluteIndex === selectedIndex,
+    };
+  });
+  return buildPickerViewModel({
+    title: selection.title,
+    surface: selection.surface === "sessionPicker" ? "sessionPicker" : undefined,
+    options,
+    columns: selection.columns?.map((column) => ({
+      key: column.key,
+      header: column.header,
+      alignment: column.align,
+    })),
+    descriptionVisibility: selection.descriptionVisibility,
+    instruction: selection.hint ?? selection.instruction,
+    direction: selection.direction ?? (selection.locale === "ar" ? "rtl" : "ltr"),
+  });
 }
 
 function selectedOutputLine<T>(

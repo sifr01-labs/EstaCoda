@@ -5,6 +5,7 @@ import type { ViewModel } from "../contracts/view-model.js";
 import type { SessionRecord } from "../contracts/session.js";
 import { StandardRenderer } from "../ui/renderers/standard-renderer.js";
 import { renderPlain } from "../ui/renderers/plain-renderer.js";
+import { buildPickerViewModel } from "../ui/view-models/builders.js";
 import {
   buildSessionsHelpViewModel,
   buildSessionsListViewModel,
@@ -142,10 +143,78 @@ describe("Session surfaces — list", () => {
   }
 });
 
+describe("Session surfaces — picker", () => {
+  const vm = buildPickerViewModel({
+    title: "Choose a session",
+    columns: [
+      { key: "number", header: "#", alignment: "right" },
+      { key: "session", header: "Session" },
+    ],
+    options: [
+      {
+        id: "session-1",
+        label: "Implement session picker",
+        cells: { number: "1", session: "Implement session picker" },
+        description: "Started 2026-08-04 08:15 UTC  ·  Last active 2026-08-04 09:45 UTC  ·  Via CLI",
+        selected: true,
+      },
+      {
+        id: "session-2",
+        label: "Telegram deployment review",
+        cells: { number: "2", session: "Telegram deployment review" },
+        description: "Started 2026-08-03 12:00 UTC  ·  Last active 2026-08-03 13:30 UTC  ·  Via Telegram",
+      },
+    ],
+    descriptionVisibility: "selected",
+    instruction: "↑↓ navigate  ·  ENTER open  ·  CTRL+C exit",
+  });
+  for (const ctx of snapshotContexts()) {
+    it(`renders in ${ctx.name}`, () => {
+      const output = ctx.renderer.render(vm);
+      expect(snapshotOutput(output)).toMatchSnapshot(`sessions-picker-${ctx.name}`);
+    });
+  }
+});
+
+describe("Session surfaces — Arabic picker", () => {
+  const vm = buildPickerViewModel({
+    title: "اختر جلسة",
+    columns: [
+      { key: "number", header: "#", alignment: "right" },
+      { key: "session", header: "الجلسة" },
+    ],
+    options: [{
+      id: "session-ar",
+      label: "مراجعة نشر Telegram",
+      cells: { number: "1", session: "مراجعة نشر Telegram" },
+      description: "بدأت 2026-08-04 08:15 UTC  ·  آخر نشاط 2026-08-04 09:45 UTC  ·  عبر Telegram",
+      selected: true,
+    }],
+    descriptionVisibility: "selected",
+    instruction: "↑↓ للتنقل  ·  ENTER للفتح  ·  CTRL+C للخروج",
+    direction: "rtl",
+  });
+
+  it("renders mixed Arabic and technical text in plain mode", () => {
+    expect(snapshotOutput(renderPlain(vm))).toMatchSnapshot("sessions-picker-arabic-plain");
+  });
+
+  it("renders mixed Arabic and technical text with theme tokens", () => {
+    const renderer = new StandardRenderer({
+      tokens: resolveTokens("standard", "dark", "kemetBlue"),
+      capabilities: fullCaps(),
+      locale: "ar",
+    });
+    expect(snapshotOutput(renderer.render(vm))).toMatchSnapshot("sessions-picker-arabic-standard");
+  });
+});
+
 describe("Session surfaces — show", () => {
   const vm = buildSessionShowViewModel({
     session: fakeSessionRecord(),
     messageCount: 5,
+    originSurface: "telegram",
+    workspaceRoot: "/workspace",
     pointers: [
       { surfaceType: "telegram", surfaceId: "chat-1", attachedAt: "2024-01-01T00:00:00Z" },
     ],
@@ -162,6 +231,8 @@ describe("Session surfaces — show no pointers", () => {
   const vm = buildSessionShowViewModel({
     session: fakeSessionRecord(),
     messageCount: 0,
+    originSurface: "cli",
+    workspaceRoot: "/workspace",
     pointers: [],
   });
   for (const ctx of snapshotContexts()) {

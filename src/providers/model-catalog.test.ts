@@ -100,6 +100,7 @@ describe("resolveModelProfile", () => {
       const result = resolveModelProfile("kimi", "kimi-k3", buildProfileResolutionContext(snapshot));
 
       expect(result.source).toBe("models-dev");
+      expect(result.profile.maxOutputTokens).toBe(131_072);
       expect(result.profile.cost).toMatchObject({
         inputPerMillionTokens: 3,
         outputPerMillionTokens: 15,

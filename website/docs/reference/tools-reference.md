@@ -37,8 +37,15 @@ Static tools that are always registered if their provider is loaded.
 
 | Tool | Risk | State touched |
 |------|------|---------------|
-| `playbook.plan` | `read-only-local` | None |
 | `trajectory.record` | `read-only-local` | SQLite (trajectory events) |
+
+### Foreground planning tool
+
+`plan` is a session-aware `read-only-local` core tool for the current foreground Mission. It supports `read`, `write`, and `merge`, and stores one bounded execution plan per root interactive session. The latest unresolved snapshot is persisted through session events, survives semantic compaction, and can be hydrated when the session continues. The CLI presents this as one live `Mission` panel (`خطة التنفيذ` in Arabic), while ACP maps the same real checklist to its plan update protocol. It is intentionally absent from delegated-child and durable Task-worker inventories. The plan grants no authority: every action still uses its own tool and existing security policy.
+
+The model-visible Plan remains deliberately small: each step contains only an ID, description, and coordination status. Governed cross-system transfer preflight is a separate runtime check over the routed request and the selected profile's reviewed connector metadata; Plan text cannot declare protected paths, verification relationships, or capability readiness.
+
+EstaCoda may attach bounded runtime-owned evidence to a matching active step. A unique specification or collection mutation completes its step only after a successful independently configured verifier links back to that mutation. A successful browser navigation records observed progress but does not complete “open app” unless a future reviewed contract can prove the expected destination; clicks and other low-level gestures never complete the surrounding business step. Failed, blocked, unavailable, timed-out, and uncertain calls cannot complete steps. Aggregate or ambiguous work stays active and receives one compact reconciliation notice in the next normal provider turn—there is no extra Plan-maintenance call. Verified completed steps cannot be reactivated by a later model-authored merge. These annotations improve coordination only; final execution outcomes remain authoritative.
 
 ### Workspace tools
 
@@ -226,11 +233,19 @@ Local browser automation via CDP or remote browser backend.
 |------|------|---------------|
 | `browser.*` | `external-side-effect` | Browser session state |
 
-Implemented browser tools include `browser.status`, `browser.navigate`, `browser.snapshot`, `browser.click`, `browser.type`, `browser.scroll`, `browser.press`, `browser.back`, `browser.get_images`, `browser.console`, `browser.cdp`, `browser.screenshot`, `browser.vision`, and `browser.dialog`.
+Implemented browser tools include `browser.status`, `browser.navigate`, `browser.snapshot`, `browser.find`, `browser.click`, `browser.type`, `browser.fill_protected_form`, `browser.select`, `browser.extract`, `browser.scroll`, `browser.press`, `browser.back`, `browser.get_images`, `browser.console`, `browser.tabs`, `browser.switch_tab`, `browser.cdp`, `browser.screenshot`, `browser.vision`, and `browser.dialog`.
 
 **Availability:** Requires a configured browser backend. `local-cdp` supports manual CDP and supervised auto-launch. Browserbase is implemented through the browser backend and remains blocked until `browser.cloudSpendApproved === true`. browser-use, Firecrawl browser, and Camofox are registered deferred providers.
 
-**Snapshots:** `browser.snapshot` returns compact output by default. Compact output is a bounded actionable AX subset with refs such as `@e1`; it is not true viewport-visible filtering yet. Passing `full: true` requests the larger full snapshot path. Rendered output labels compact vs full snapshots, truncates oversized text, and may summarize large results when `browser.summarizeSnapshots` and `browser.snapshotSummarizeThreshold` allow it.
+**Snapshots:** `browser.snapshot` returns compact output by default. Compact output is a bounded actionable AX subset with refs such as `@e1`; it is not true viewport-visible filtering yet. Normal snapshots are deterministically compacted into a stable budget before any optional provider summarization, preserving identity, actionable controls, dialogs, authentication context, frames, and errors while deduplicating boilerplate. A visible suffix marks omitted output. Passing `full: true` retains the larger diagnostic path. In `"auto"` mode, provider summarization is only a fallback when deterministic output still exceeds `browser.snapshotSummarizeThreshold`; `true` explicitly permits it based on the original rendered size.
+
+**Semantic targets:** `browser.find`, `browser.click`, `browser.type`, `browser.select`, and `browser.extract` accept locators containing `role`, `name`, `text`, `label`, `withinText`, `exact`, and optional canonical `identity`. Hidden and disabled elements are excluded. Ambiguous locators return candidates. Ref-based actions require the source snapshot `identity` and `tabRef`; validity is scoped by session, tab, `documentEpoch`, and `actionRevision`, while `observationId` does not invalidate a ref by itself.
+
+**Protected forms:** `browser.fill_protected_form` groups one to eight current refs from the same canonical identity, tab, frame, and origin. EstaCoda verifies all fields before collection and again before delivery, shows one continuous operator input flow, and never returns protected values to the model. With `submitRef`, the local runtime submits the prebound authentication control in the same transaction. A protected challenge `browser.type` request can use the same identity-bound submission path. Authentication remains pending through any active code, passkey, approval, biometric, CAPTCHA, device, or other verification challenge. Challenge departure, a causal state transition, and authenticated-only evidence—not submission alone—establish success.
+
+**Action settling:** Snapshots expose canonical identity, observation time, and readiness. Navigation and browser actions accept an optional `waitFor` condition and `waitTimeoutMs` capped at 10 seconds. Without an explicit condition, the supervised backend waits for bounded DOM stability. Normal action results contain the compact redacted delta, resulting identity, bounded safe current-state summary, and current actionable refs when safe; an unmet condition is reported as a timeout with the latest state, not as confirmed success.
+
+**Tabs:** `browser.tabs` returns safe same-session page tabs using opaque refs such as `@t1`. `browser.switch_tab` focuses and controls one of those refs. A click automatically follows exactly one newly opened safe tab; ambiguous multi-tab results require an explicit switch. Tab-changing action results identify both the source and destination. Browser-related provider turns receive a bounded, redacted current-state projection, so `browser.tabs` should not be polled while that projection is current. Other browser contexts and policy-blocked tabs are not exposed.
 
 **Browserbase navigation:** Public HTTP(S) navigation may create a Browserbase session only when Browserbase is configured, `BROWSERBASE_API_KEY` and `BROWSERBASE_PROJECT_ID` are available, and cloud spend is approved. Credentials and config alone do not create sessions. Missing approval returns a spend-gate error and does not fall back to local. Eligible Browserbase failures may fall back to local only when `browser.cloudFallback === true`.
 
@@ -254,6 +269,12 @@ Image generation and vision analysis.
 | `vision.analyze` | `safe` | None |
 
 **Availability:** `image.generate` requires a configured image generation provider and API key. `image.edit` requires a configured image provider, an edit-capable selected model, and safe HTTPS source images or artifacts with provider source URLs. `vision.analyze` requires a vision-capable model route.
+
+**Vision behavior:** `vision.analyze` accepts the compatible single-image `path`, or `paths` with two to twenty images for `compare` mode, plus optional `prompt`, detail `low` / `standard` / `high`, and output depth `concise` / `standard` / `detailed`. Multi-image input selects `compare` when mode is omitted. Sets above ten images are validated first and processed sequentially in provider batches of at most ten. Activity identifies the current image range, and one text-only pass synthesizes successful batches without resending images; failed synthesis returns every batch finding. Completion and any partial image-batch failure are reported explicitly, so images are never silently skipped. It accepts only canonical contained regular files, detects MIME by magic bytes, corrects orientation, strips metadata, and separately bounds source reads, dimensions, pixels, decoded memory, animation frames and pixels, per-image output, aggregate output, and concurrency. Text visible inside images is untrusted content and is never followed as instruction.
+
+Initial attachments use the main model natively when it supports vision; otherwise the auxiliary vision route is used. Multiple initial images are one governed image set subject to the same aggregate resource ceilings and automatic bounded batching as explicit comparison. Comparison uses repeated image input only on a capable selected route; unknown custom routes are safely processed one image at a time unless they advertise multi-image support explicitly. Post-tool images are ephemeral continuation content. Raw image bytes, normalized intermediates, and data URLs are not written to sessions, trajectories, logs, or exports. Generated or browser artifacts receive automatic provenance only from a current-turn runtime artifact record; older or unregistered cache files are treated as agent-discovered. Every source is subject to contextual egress policy and every image is included in spending estimates. Structured failures distinguish unavailable routes, unsafe/corrupt/oversized images, normalization limits, budget denial, timeout, cancellation, and provider failure.
+
+**Verification:** `estacoda verify vision` checks the selected profile's effective route with a benign bilingual fixture. It reports configuration and fixture fingerprints, readiness, dispatch, normalized payload, latency, text detection, fallback, and cost availability. A hosted selected route or possible hosted fallback requires the separate `--consent-hosted` flag, and credential inspection does not refresh OAuth state.
 
 ### Voice tools
 
@@ -328,7 +349,7 @@ Output is redacted, source-labeled, marked as local memory context, and treated 
 | Tool | Risk | State touched |
 |------|------|---------------|
 | `delegate_task` | `shared-state-mutation` | Profile-owned Task graph, creator/parent links, Task journal |
-| `task.status` | `read-only-local` | Bounded status for a Task linked to the active session |
+| `task.status` | `read-only-local` | Bounded status, token usage, and estimated cost for a Task linked to the active session |
 | `terminal.inspect` | `read-only-local` | Bounded command output only |
 
 **Behavior:** Atomically creates a fixed durable Task graph and returns its handle immediately. One task becomes one Step; a batch becomes independent worker Steps plus one terminal synthesis Step whose revision-1 dependencies are every worker. A synthesis object customizes the final-answer objective/model; `synthesis: false` explicitly requests an inspection-only batch. Provider tool-call identity prevents duplicate creation. No synchronous child execution or in-memory persistence fallback remains.
@@ -352,6 +373,14 @@ The immediate successful operator row says **task created** because `delegate_ta
 | `config.compression.status` | `safe` | None |
 
 **Behavior:** Shows normalized compression config, auxiliary route status, and latest session compression state. Does not mutate config or expose credentials.
+
+### Session usage tool
+
+| Tool | Risk | State touched |
+|------|------|---------------|
+| `session.usage` | `read-only-local` | None |
+
+**Behavior:** Reads canonical provider-usage records for `scope: "session"`, `scope: "latest_turn"`, or `scope: "replied_turn"`. It does not invoke another model. Latest-turn inspection excludes the current tool-calling turn. On Telegram, replied-turn inspection uses a runtime-owned mapping for successful inbound prompts, final-answer chunks, and approval prompts rather than a model-supplied turn ID, then re-authorizes the target against the current Session's verified compression lineage. Turn output partitions Main agent, Auxiliary models, and Delegated work, states that values are as of the latest settled provider call, reports active and settled originating Task counts, and remains provisional while linked Task work is active. Use `task.status` when the user names a particular Task; Task inspection includes configured budget status. Task usage may already be included in its originating turn and session totals.
 
 ### Session search tool
 

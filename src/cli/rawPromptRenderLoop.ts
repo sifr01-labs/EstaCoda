@@ -1,5 +1,10 @@
 import { stringWidth } from "../ui/papyrus/screen/stringWidth.js";
+import { resolveBidiMode, type ResolvedBidiMode } from "../ui/papyrus/screen/bidi.js";
 import type { LineEditorState } from "../ui/input/lineEditor.js";
+import {
+  layoutEditableText,
+  renderEditableTextRow,
+} from "../ui/papyrus/input/editableTextLayout.js";
 import {
   buildOperatorConsoleRawPromptFrameWithRuntimeHost,
   type OperatorConsoleRawPromptFrame,
@@ -48,6 +53,7 @@ export type RawPromptGhostText = {
 export type RawPromptRenderSnapshot = {
   readonly prompt: string;
   readonly state: LineEditorState;
+  readonly bidiMode?: ResolvedBidiMode;
   readonly ghostText?: RawPromptGhostText;
   readonly fallbackRows?: readonly RawPromptOverlayRow[];
   readonly operatorConsole?: RawPromptOperatorConsoleOptions;
@@ -64,8 +70,10 @@ export type RawPromptOperatorConsoleOptions = Omit<OperatorConsoleRawPromptSnaps
   readonly getStatus?: () => OperatorConsoleRawPromptSnapshot["status"];
   readonly getTerminal?: () => Partial<TerminalMetrics>;
   /** Refreshes the prepared Task snapshot outside prompt-edit render calls. */
-  readonly refreshTasks?: () => boolean;
+  readonly refreshTasks?: (force?: boolean) => boolean;
   readonly getTasks?: () => readonly TaskCardState[];
+  readonly onTaskIntent?: (intent: import("../ui/papyrus/operator-console/taskSurface.js").TaskControlIntent) =>
+    void | Promise<void>;
   readonly getApprovals?: () => readonly ApprovalCardState[];
   readonly onApprovalIntent?: (intent: import("../ui/papyrus/operator-console/approvalSurface.js").ApprovalIntent) =>
     void | Promise<void>;
@@ -76,6 +84,7 @@ export type RawPromptOperatorConsoleOptions = Omit<OperatorConsoleRawPromptSnaps
   readonly streaming?: StreamingState;
   readonly transcript?: readonly TranscriptBlock[];
   readonly turnActivity?: TurnActivityState;
+  readonly executionPlan?: OperatorConsoleRawPromptSnapshot["executionPlan"];
   readonly steer?: SteerState;
   readonly promptMode?: PromptSurfaceState["mode"];
 };
@@ -133,6 +142,7 @@ export class RawPromptRenderLoop {
   }
 
   #renderVisibleFrame(snapshot: RawPromptRenderSnapshot, options: RawPromptRenderOptions): number {
+    const liveTerminal = snapshot.operatorConsole?.getTerminal?.();
     const frame = snapshot.operatorConsole?.enabled === true
       ? buildOperatorConsoleRawPromptFrameWithRuntimeHost(this.#getOperatorConsoleHost(), {
         mode: snapshot.operatorConsole.mode,
@@ -142,11 +152,16 @@ export class RawPromptRenderLoop {
         status: snapshot.operatorConsole.getStatus?.() ?? snapshot.operatorConsole.status,
         motionElapsedMs: snapshot.operatorConsole.motionElapsedMs,
         setupPanel: snapshot.operatorConsole.setupPanel,
+        secureInput: snapshot.operatorConsole.secureInput,
         transcript: snapshot.operatorConsole.transcript,
         turnActivity: snapshot.operatorConsole.turnActivity,
+        executionPlan: snapshot.operatorConsole.executionPlan,
         terminal: {
           ...snapshot.operatorConsole.terminal,
-          ...snapshot.operatorConsole.getTerminal?.(),
+          ...liveTerminal,
+          bidiMode: liveTerminal?.bidiMode ??
+            snapshot.operatorConsole.terminal?.bidiMode ??
+            resolveBidiMode(),
         },
         attachments: snapshot.operatorConsole.attachments,
         approvals: snapshot.operatorConsole.approvals,
@@ -160,7 +175,11 @@ export class RawPromptRenderLoop {
         style: snapshot.operatorConsole.style,
         focus: snapshot.operatorConsole.focus,
       })
-      : buildFallbackRawPromptFrame(snapshot);
+      : buildFallbackRawPromptFrame(
+        snapshot,
+        this.#output.columns ?? 80,
+        snapshot.bidiMode ?? resolveBidiMode()
+      );
 
     if (this.#canRedrawDirtyOperatorConsoleRegions(frame, options.dirtyRegions)) {
       this.#redrawDirtyOperatorConsoleRegions(frame, options.dirtyRegions!);
@@ -292,23 +311,29 @@ type RawPromptFrame = OperatorConsoleRawPromptFrame | {
   readonly cursorColumn: number;
 };
 
-function buildFallbackRawPromptFrame(snapshot: RawPromptRenderSnapshot): RawPromptFrame {
-  const textBeforeCursor = snapshot.state.text.slice(0, snapshot.state.cursor);
-  const beforeCursorLines = textBeforeCursor.split("\n");
-  const textLines = snapshot.state.text.split("\n");
-  const cursorLineIndex = beforeCursorLines.length - 1;
-  const cursorOffsetInLine = beforeCursorLines[beforeCursorLines.length - 1]?.length ?? 0;
-  const promptRows = textLines.map((line, index) => {
-    const renderedLine = index === cursorLineIndex && snapshot.ghostText?.text
-      ? `${line.slice(0, cursorOffsetInLine)}${snapshot.ghostText.text}${line.slice(cursorOffsetInLine)}`
-      : line;
+function buildFallbackRawPromptFrame(
+  snapshot: RawPromptRenderSnapshot,
+  terminalWidth: number,
+  bidiMode: ReturnType<typeof resolveBidiMode>
+): RawPromptFrame {
+  const promptWidth = stringWidth(snapshot.prompt);
+  const ghostText = snapshot.ghostText?.text ?? "";
+  const displayText = ghostText.length === 0
+    ? snapshot.state.text
+    : `${snapshot.state.text.slice(0, snapshot.state.cursor)}${ghostText}${snapshot.state.text.slice(snapshot.state.cursor)}`;
+  const layout = layoutEditableText(displayText, {
+    maxCells: Math.max(1, terminalWidth - promptWidth),
+    cursorOffset: snapshot.state.cursor,
+    wrap: false,
+  });
+  const promptRows = layout.rows.map((row, index) => {
+    const renderedLine = renderEditableTextRow(row, { bidi: bidiMode });
     return index === 0 ? `${snapshot.prompt}${renderedLine}` : renderedLine;
   });
   const fallbackRows = (snapshot.fallbackRows ?? []).map((row) => row.text);
   const rows = [...promptRows, ...fallbackRows];
-  const cursorRow = cursorLineIndex;
-  const cursorLinePrefix = beforeCursorLines[beforeCursorLines.length - 1] ?? "";
-  const cursorColumn = (cursorRow === 0 ? stringWidth(snapshot.prompt) : 0) + stringWidth(cursorLinePrefix);
+  const cursorRow = layout.cursorRow;
+  const cursorColumn = (cursorRow === 0 ? promptWidth : 0) + layout.cursorColumn;
 
   return {
     rows: rows.length === 0 ? [""] : rows,

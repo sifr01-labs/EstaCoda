@@ -1,4 +1,5 @@
 import type { ModelProfile, ProviderId, ProviderRoutePreferences } from "../contracts/provider.js";
+import { supportsMultipleImageInputs } from "./model-image-capabilities.js";
 
 export function routeProvider(models: ModelProfile[], preferences: ProviderRoutePreferences = {}): { primary: ModelProfile; fallbacks: ModelProfile[] } | undefined {
   const candidates = models
@@ -27,6 +28,7 @@ export function matchesPreferences(model: ModelProfile, preferences: ProviderRou
 
   if (preferences.requireTools === true && !model.supportsTools) return false;
   if (preferences.requireVision === true && !model.supportsVision) return false;
+  if (preferences.requireMultipleImages === true && !supportsMultipleImageInputs(model)) return false;
   if (preferences.requireStructuredOutput === true && !model.supportsStructuredOutput) return false;
   if (preferences.requireReasoning === true && model.supportsReasoning !== true) return false;
 

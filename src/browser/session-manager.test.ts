@@ -1,7 +1,14 @@
 import { describe, expect, it, vi, afterEach } from "vitest";
 import { BrowserSessionManager } from "./session-manager.js";
 import { BrowserSessionLifecycle } from "./session-lifecycle.js";
-import type { CdpTargetSupervisor, ManagedCdpTarget } from "./cdp-target-manager.js";
+import type {
+  AttachedCdpTarget,
+  CdpPageTarget,
+  CdpTargetSupervisor,
+  ManagedCdpTarget
+} from "./cdp-target-manager.js";
+import type { BrowserSnapshotInput } from "./snapshot-state.js";
+import { resolveBrowserTarget } from "./browser-locator.js";
 
 class FakeSupervisor implements CdpTargetSupervisor {
   close = vi.fn();
@@ -33,18 +40,81 @@ class FakeManagedTarget implements ManagedCdpTarget {
 
 class FakeTargetManager {
   readonly targets: FakeManagedTarget[] = [];
+  readonly pageTargets: CdpPageTarget[] = [];
+  readonly attachments: AttachedCdpTarget[] = [];
+  readonly activated: string[] = [];
   readonly createTarget = vi.fn(async (): Promise<ManagedCdpTarget> => {
     if (this.createError !== undefined) {
       throw this.createError;
     }
     const target = new FakeManagedTarget(this.targets.length + 1, this.events);
     this.targets.push(target);
+    this.pageTargets.push({
+      browserContextId: target.browserContextId,
+      targetId: target.targetId,
+      pageWebSocketDebuggerUrl: target.pageWebSocketDebuggerUrl,
+      url: "about:blank",
+      title: `Page ${this.targets.length}`
+    });
     return target;
+  });
+  readonly listPageTargets = vi.fn(async (browserContextId: string) =>
+    this.pageTargets.filter((target) => target.browserContextId === browserContextId));
+  readonly attachTarget = vi.fn(async (browserContextId: string, targetId: string): Promise<AttachedCdpTarget> => {
+    const target = this.pageTargets.find((candidate) =>
+      candidate.browserContextId === browserContextId && candidate.targetId === targetId);
+    if (target === undefined) throw new Error("target unavailable");
+    const supervisor = new FakeSupervisor();
+    const attached: AttachedCdpTarget = {
+      ...target,
+      supervisor,
+      close: vi.fn(async () => supervisor.close())
+    };
+    this.attachments.push(attached);
+    return attached;
+  });
+  readonly activateTarget = vi.fn(async (browserContextId: string, targetId: string) => {
+    const target = this.pageTargets.find((candidate) =>
+      candidate.browserContextId === browserContextId && candidate.targetId === targetId);
+    if (target === undefined) throw new Error("target unavailable");
+    this.activated.push(targetId);
+  });
+  readonly findVisiblePageTargetId = vi.fn(async (browserContextId: string) =>
+    this.pageTargets.find((target) =>
+      target.browserContextId === browserContextId && target.targetId === this.visibleTargetId)?.targetId);
+  readonly createPageTarget = vi.fn(async (browserContextId: string, url: string): Promise<CdpPageTarget> => {
+    const targetId = `target-${this.pageTargets.length + 1}`;
+    const target = {
+      browserContextId,
+      targetId,
+      pageWebSocketDebuggerUrl: `ws://${targetId}`,
+      url,
+      title: targetId
+    };
+    this.pageTargets.push(target);
+    return target;
+  });
+  readonly closePageTarget = vi.fn(async (browserContextId: string, targetId: string) => {
+    const index = this.pageTargets.findIndex((target) =>
+      target.browserContextId === browserContextId && target.targetId === targetId);
+    if (index < 0) throw new Error("target unavailable");
+    this.pageTargets.splice(index, 1);
   });
 
   createError: Error | undefined;
+  visibleTargetId: string | undefined;
 
   constructor(private readonly events: string[] = []) {}
+
+  addTab(browserContextId: string, targetId: string, url: string): void {
+    this.pageTargets.push({
+      browserContextId,
+      targetId,
+      pageWebSocketDebuggerUrl: `ws://${targetId}`,
+      url,
+      title: targetId
+    });
+  }
 }
 
 class FakeLifecycle {
@@ -82,6 +152,77 @@ describe("BrowserSessionManager", () => {
     expect(session.pageWebSocketDebuggerUrl).toBe("ws://page-1");
     expect(session.supervisor).toBe(targetManager.targets[0]?.supervisor);
     expect(manager.has("session-1")).toBe(true);
+  });
+
+  it("owns canonical snapshot identity independently per browser session", async () => {
+    const manager = new BrowserSessionManager({ targetManager: new FakeTargetManager() });
+    await manager.acquire("session-a");
+    await manager.acquire("session-b");
+    const base = (sessionId: string, text: string): BrowserSnapshotInput => ({
+      sessionId,
+      url: "https://example.com",
+      text,
+      elements: []
+    });
+
+    const first = manager.observeSnapshot("session-a", base("session-a", "first"), {
+      frameId: "main-a",
+      loaderId: "loader-1"
+    });
+    const repeated = manager.observeSnapshot("session-a", base("session-a", "changed"), {
+      frameId: "main-a",
+      loaderId: "loader-1"
+    });
+    const secondSession = manager.observeSnapshot("session-b", base("session-b", "first"), {
+      frameId: "main-b",
+      loaderId: "loader-1"
+    });
+
+    expect(first.identity).toEqual({ documentEpoch: 1, actionRevision: 1, observationId: 1 });
+    expect(repeated.identity).toEqual({ documentEpoch: 1, actionRevision: 1, observationId: 2 });
+    expect(secondSession.identity).toEqual({ documentEpoch: 1, actionRevision: 1, observationId: 1 });
+  });
+
+  it("keeps refs from other tabs and replaced documents invalid", async () => {
+    const targetManager = new FakeTargetManager();
+    const manager = new BrowserSessionManager({ targetManager });
+    const session = await manager.acquire("session-1");
+    targetManager.addTab(session.browserContextId, "target-2", "https://example.com");
+    const base = (tabRef: string): BrowserSnapshotInput => ({
+      sessionId: "session-1",
+      url: "https://example.com",
+      tab: { ref: tabRef, url: "https://example.com", controlled: true },
+      elements: [{ ref: "@e1", role: "button", name: "Continue" }]
+    });
+
+    const first = manager.observeSnapshot("session-1", base("@t1"), {
+      frameId: "main",
+      loaderId: "loader-1"
+    });
+    await manager.switchTab("session-1", "@t2");
+    const switched = manager.observeSnapshot("session-1", base("@t2"), {
+      frameId: "main",
+      loaderId: "loader-1"
+    });
+
+    expect(switched.identity.documentEpoch).toBe(first.identity.documentEpoch + 1);
+    expect(() => resolveBrowserTarget(switched.snapshot, {
+      sessionId: "session-1",
+      ref: "@e1",
+      identity: first.snapshot.identity,
+      tabRef: "@t1"
+    })).toThrow("belongs to tab @t1");
+
+    const replaced = manager.observeSnapshot("session-1", base("@t2"), {
+      frameId: "main",
+      loaderId: "loader-2"
+    });
+    expect(() => resolveBrowserTarget(replaced.snapshot, {
+      sessionId: "session-1",
+      ref: "@e1",
+      identity: switched.snapshot.identity,
+      tabRef: "@t2"
+    })).toThrow("came from documentEpoch");
   });
 
   it("acquire() reuses an existing session for the same key", async () => {
@@ -143,6 +284,131 @@ describe("BrowserSessionManager", () => {
     expect(first.targetId).toBe("target-1");
     expect(second.targetId).toBe("target-2");
     expect(targetManager.createTarget).toHaveBeenCalledTimes(2);
+  });
+
+  it("lists same-context page tabs with stable opaque refs", async () => {
+    const targetManager = new FakeTargetManager();
+    const manager = new BrowserSessionManager({ targetManager });
+    await manager.acquire("session-1");
+    targetManager.addTab("context-1", "target-2", "https://example.com/details");
+    targetManager.addTab("context-other", "target-other", "https://other.example");
+
+    const first = await manager.listTabs("session-1");
+    const second = await manager.listTabs("session-1");
+
+    expect(first.map((tab) => ({ ref: tab.ref, targetId: tab.targetId, controlled: tab.controlled }))).toEqual([
+      { ref: "@t1", targetId: "target-1", controlled: true },
+      { ref: "@t2", targetId: "target-2", controlled: false }
+    ]);
+    expect(second.map((tab) => tab.ref)).toEqual(["@t1", "@t2"]);
+  });
+
+  it("reports a manually focused same-context tab without changing control", async () => {
+    const targetManager = new FakeTargetManager();
+    const manager = new BrowserSessionManager({ targetManager });
+    await manager.acquire("session-1");
+    targetManager.addTab("context-1", "target-2", "https://example.com/details");
+    targetManager.visibleTargetId = "target-2";
+
+    await expect(manager.visibleTab("session-1")).resolves.toMatchObject({
+      ref: "@t2",
+      targetId: "target-2",
+      controlled: false
+    });
+    expect(targetManager.activated).toEqual([]);
+  });
+
+  it("switches the controlled target and returns to the owner without disposing the context", async () => {
+    const targetManager = new FakeTargetManager();
+    const lifecycle = new FakeLifecycle();
+    const manager = new BrowserSessionManager({ targetManager, lifecycle });
+    const session = await manager.acquire("session-1");
+    targetManager.addTab("context-1", "target-2", "https://example.com/details");
+    await manager.listTabs("session-1");
+
+    const switched = await manager.switchTab("session-1", "@t2");
+
+    expect(switched).toBe(session);
+    expect(switched).toMatchObject({ targetId: "target-2", tabRef: "@t2" });
+    expect(switched.supervisor).toBe(targetManager.attachments[0]?.supervisor);
+    expect(targetManager.activated).toEqual(["target-2"]);
+    expect(targetManager.targets[0]?.close).not.toHaveBeenCalled();
+    expect(lifecycle.register).toHaveBeenCalledTimes(1);
+    expect(lifecycle.touch).toHaveBeenCalledWith("session-1");
+
+    const returned = await manager.switchTab("session-1", "@t1");
+
+    expect(returned).toMatchObject({ targetId: "target-1", tabRef: "@t1" });
+    expect(returned.supervisor).toBe(targetManager.targets[0]?.supervisor);
+    expect(targetManager.attachments[0]?.close).toHaveBeenCalledTimes(1);
+    expect(targetManager.targets[0]?.close).not.toHaveBeenCalled();
+  });
+
+  it("opens, attaches, and controls a new tab inside the existing browser context", async () => {
+    const targetManager = new FakeTargetManager();
+    const manager = new BrowserSessionManager({ targetManager });
+    const owner = await manager.acquire("session-1");
+
+    const opened = await manager.openTab("session-1", "about:blank");
+
+    expect(targetManager.createPageTarget).toHaveBeenCalledWith(owner.browserContextId, "about:blank");
+    expect(opened.browserContextId).toBe(owner.browserContextId);
+    expect(opened.targetId).toBe("target-2");
+    expect(opened.tabRef).toBe("@t2");
+    expect(targetManager.attachTarget).toHaveBeenCalledWith(owner.browserContextId, "target-2");
+    expect(targetManager.activated).toContain("target-2");
+  });
+
+  it("closes the active attachment before closing the context-owning target", async () => {
+    const events: string[] = [];
+    const targetManager = new FakeTargetManager(events);
+    const manager = new BrowserSessionManager({ targetManager });
+    await manager.acquire("session-1");
+    targetManager.addTab("context-1", "target-2", "https://example.com/details");
+    await manager.listTabs("session-1");
+    await manager.switchTab("session-1", "@t2");
+    const attachment = targetManager.attachments[0]!;
+    vi.mocked(attachment.close).mockImplementation(async () => {
+      events.push("attachment:target-2:close");
+    });
+
+    await manager.close("session-1");
+
+    expect(events).toEqual([
+      "attachment:target-2:close",
+      "target:target-1:close"
+    ]);
+    expect(attachment.close).toHaveBeenCalledTimes(1);
+    expect(targetManager.targets[0]?.close).toHaveBeenCalledTimes(1);
+  });
+
+  it("retains failed tab detachments and retries them during session cleanup", async () => {
+    const targetManager = new FakeTargetManager();
+    const manager = new BrowserSessionManager({ targetManager });
+    await manager.acquire("session-1");
+    targetManager.addTab("context-1", "target-2", "https://example.com/details");
+    await manager.listTabs("session-1");
+    await manager.switchTab("session-1", "@t2");
+    const attachment = targetManager.attachments[0]!;
+    vi.mocked(attachment.close)
+      .mockRejectedValueOnce(new Error("detach failed"))
+      .mockResolvedValueOnce(undefined);
+
+    await manager.switchTab("session-1", "@t1");
+    await manager.close("session-1");
+
+    expect(attachment.close).toHaveBeenCalledTimes(2);
+    expect(targetManager.targets[0]?.close).toHaveBeenCalledTimes(1);
+  });
+
+  it("rejects malformed and unavailable tab refs without changing the controlled target", async () => {
+    const targetManager = new FakeTargetManager();
+    const manager = new BrowserSessionManager({ targetManager });
+    const session = await manager.acquire("session-1");
+
+    await expect(manager.switchTab("session-1", "target-2")).rejects.toThrow("Browser tab ref must look like @t1.");
+    await expect(manager.switchTab("session-1", "@t2")).rejects.toThrow("Browser tab not found: @t2");
+    expect(session).toMatchObject({ targetId: "target-1", tabRef: "@t1" });
   });
 
   it("invalid or empty keys throw deterministic errors", async () => {

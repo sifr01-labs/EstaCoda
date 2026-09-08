@@ -11,10 +11,10 @@ EstaCoda is a TypeScript-first agent runtime built for Node.js >= 22.18.0, pnpm/
 
 | File | Role | Evidence |
 |------|------|----------|
-| `src/index.ts` | Boot flow. Dispatches CLI commands, uses setup-route launch gating for incomplete setup, then starts interactive session or one-shot prompt. Also restores the active CLI workspace session from persisted store before interactive launch. | `smoke-tested` |
+| `src/index.ts` | Boot flow. Dispatches CLI commands, uses setup-route launch gating for incomplete setup, then starts a fresh interactive/one-shot session or an explicitly requested continuation. | `smoke-tested` |
 | `src/cli/cli.ts` | CLI command surface. Parses arguments and dispatches to subcommands. | `smoke-tested` |
 | `src/cli/session-loop.ts` | Interactive terminal loop. Handles in-session admin commands: `/sessions`, `/search`, `/switch`, `/new` (`/reset` alias). | `smoke-tested` |
-| `src/cli/cli-session-store.ts` | Persisted active CLI session pointer keyed by workspace root. | `smoke-tested` |
+| `src/cli/cli-session-store.ts` | Version 2 last-CLI-session pointer store keyed by profile and normalized workspace root. | `smoke-tested` |
 | `src/channels/gateway-runner.ts` | Gateway diagnostics helpers for Telegram plus WhatsApp diagnostics export. Gateway orchestration lives in `ChannelGateway` and CLI gateway commands. | `smoke-tested` |
 | `src/channels/discord-adapter.ts` | Discord adapter. Receives messages, sends replies, handles attachments, and supports text delivery paths. | `implemented; operator validation required` |
 | `src/channels/email-adapter.ts` | Email adapter. IMAP receive, SMTP send, reply-in-thread, attachment ingestion, and sender filtering via Python worker. | `implemented; operator validation required` |
@@ -38,7 +38,7 @@ Key composition rules:
 
 - Official skills load first. Profile-installed and configured external skills load next.
 - Visible skill catalog is filtered per session using runtime conditions.
-- `vision.analyze` is registered as a real tool and uses auxiliary `vision` provider route preferences.
+- Vision dispatch is one policy boundary. Initial attachments stay native when the main route supports vision; text-only main routes use a runnable vision-capable auxiliary route. Images discovered after the initial prompt are attached ephemerally to a continuation and raw/base64 image content is excluded from session, trajectory, log, and export persistence.
 - Channel media directory is treated as an additional allowed root for relevant tools.
 - Configured MCP servers are loaded during runtime creation and stopped during runtime disposal.
 
@@ -363,8 +363,11 @@ Capability-first security boundary.
 
 ### Sessions
 
+- `estacoda -c` / `estacoda --continue` — explicitly resume the last CLI session pointer for the selected profile and current workspace.
+- `estacoda sessions` — interactively choose and resume a recent user-facing session in the current profile and workspace.
+- `estacoda sessions open <session-id>` — resume a known active user-facing root session after profile/workspace validation.
 - `estacoda sessions list` — recent sessions with attached surfaces.
-- `estacoda sessions show <session-id>` — session detail with surface pointers.
+- `estacoda sessions show <session-id>` — session detail with origin, workspace, and surface pointers.
 - `estacoda sessions current` — current runtime session (when present).
 - `estacoda sessions attach <surface> <surface-id> <session-id>` — explicit attach.
 - `estacoda sessions detach <surface> <surface-id>` — explicit detach.
@@ -375,7 +378,8 @@ Capability-first security boundary.
 
 - Interactive/session state written to session DB
 - Global SQLite session DB at `~/.estacoda/sessions.sqlite`, with rows scoped by `profile_id`
-- CLI session context persisted in `.estacoda/cli-sessions.json`
+- CLI launches create fresh session context unless `--continue`, the picker, or `sessions open` explicitly selects an existing session
+- Global `~/.estacoda/cli-sessions.json` version 2 stores only last-session pointers keyed by profile/workspace; it is revalidated against SQLite and is not an authorization boundary
 - Channel session context persisted under the bound profile gateway state via `ChannelSessionStore`
 - Cross-surface pointers under the bound profile gateway state
 - Channel session identity includes explicit chat/thread policy

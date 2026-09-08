@@ -9,8 +9,8 @@ export function formatSessionDisplayId(sessionId: string): string {
 }
 
 export function resolveStartupSessionId(
-  restoredSessionId: string | undefined,
+  requestedSessionId: string | undefined,
   createId: () => string = createSessionId
 ): string {
-  return restoredSessionId ?? createId();
+  return requestedSessionId ?? createId();
 }

@@ -62,12 +62,16 @@ Telegram is the live-proven first-party remote channel for v0.1.0.
 | Pairing codes | `implemented` |
 | Handoff codes | `implemented` |
 | Progress compaction | `implemented` |
+| Temporary processing reaction | `default-on` |
+| Rapid inbound text batching | `default-on, bounded` |
 | Experimental text streaming | `default-on when Telegram is configured` |
 | Spoken replies with `/voice` | `implemented when TTS is configured` |
 
 **Behavior:**
 
-- One evolving progress message per active turn
+- An admitted request receives a temporary 👨‍💻 reaction on the latest originating user message instead of an initial `Thinking` message
+- EstaCoda removes the reaction best-effort when the turn finishes, fails, or is interrupted; if Telegram rejects the initial reaction, EstaCoda automatically falls back to `Thinking`
+- Later tool, model-fallback, warning, and approval progress continues in one evolving progress message
 - Inline approval buttons map to `/approve` and `/deny`
 - Final replies formatted in Telegram-safe HTML
 - Streaming defaults on for configured Telegram channels and progressively edits Telegram messages during a turn; final `response.text` remains authoritative
@@ -80,6 +84,7 @@ Telegram is the live-proven first-party remote channel for v0.1.0.
 - Group sessions are per-user by default
 - Thread sessions are shared by default
 - Active chat → session mapping persists across gateway restarts
+- Rapid ordinary text from the same account, chat/topic, and sender is joined with blank lines before one turn
 
 **Setup:**
 
@@ -105,6 +110,46 @@ Use `@BotFather` and `/newbot` to create a bot and copy the API token. Use `@use
 - `enabled: true`
 - `botTokenEnv` set
 - Referenced environment variable present
+
+### Telegram Rapid-Text Batching
+
+Telegram batches ordinary text fragments for `1500ms` by default, with limits of `10` messages and `8000` characters. Threshold flushes return control to polling before the runtime turn finishes, while graceful gateway shutdown waits for owned flush work.
+
+Commands, callback queries, pairing/auth flows, attachments, and albums bypass batching. Albums stay one multi-image attachment turn, the album caption remains its prompt, and following text is not merged into the album. Set `channels.telegram.textDebounceMs` to `0` for immediate dispatch. This feature does not change Telegram polling cadence or the FIFO busy queue.
+
+### Optional queued-text coalescing
+
+Every gateway channel can opt into bounded FIFO-tail coalescing with `busyTextCoalescing`, but it runs only with `busyPolicy: "queue"`. It combines adjacent ordinary text only when the canonical session and sender match, keeps the queued entry at its existing position, and preserves component message IDs and receive timestamps. Commands, callbacks, approvals, attachments, voice messages, media, and interrupt replacement stay separate.
+
+```json
+{
+  "channels": {
+    "telegram": {
+      "busyPolicy": "queue",
+      "busyTextCoalescing": {
+        "enabled": true,
+        "windowMs": 1500,
+        "maxMessages": 5,
+        "maxChars": 8000
+      }
+    }
+  }
+}
+```
+
+When a bound is reached, the new message takes the next FIFO position. Normal queue-full behavior is unchanged. Channel and gateway status commands show whether this option is enabled.
+
+```json
+{
+  "channels": {
+    "telegram": {
+      "textDebounceMs": 1500,
+      "textDebounceMaxMessages": 10,
+      "textDebounceMaxChars": 8000
+    }
+  }
+}
+```
 
 ### Telegram Streaming (Experimental)
 
@@ -329,6 +374,16 @@ Queue depth is clamped to `[1, 10]`, default `3`. Configure independently per ch
 
 ---
 
+## Durable Busy Queue
+
+Busy queues are process-local by default. To recover accepted queued messages after restart, set `gateway.messageQueue.persistence` to `"sqlite"` for the selected profile. The gateway persists before acknowledging, then claims before execution. Pending work can recover in FIFO order; work left claimed by a crash becomes uncertain and is not replayed automatically.
+
+Durable rows include user text, channel/session/sender routing, receive time, bounded metadata, and local attachment descriptors. They do not include channel credentials or attachment bytes. Current authorization, workspace trust, session scope, and attachment files are checked again before recovery.
+
+Use `/status` in an authorized channel to inspect profile-wide pending/claimed/uncertain counts. `/stop` clears that chat's queued rows only when no turn is active; an active `/stop` cancels the turn and preserves its queue. SQLite mode is security-sensitive and does not promise exactly-once or unconditional at-least-once execution. Read [Gateway Operations](../operations/gateway-operations.md#durable-busy-queue) before enabling it.
+
+---
+
 ## Cross-Surface Sessions
 
 Sessions are separate by default. A CLI session and a Telegram session for the same user do not share context automatically.
@@ -359,6 +414,9 @@ All gateway channels support a common set of control commands:
 |---|---|
 | `/help` | Show available commands |
 | `/status` | Show current session and channel status |
+| `/usage` | Show recorded usage and estimated cost for the current session |
+| `/usage last` | Show recorded usage for the latest completed visible turn |
+| `/usage task <task-id>` | Show recorded usage for a Task authorized by the current session |
 | `/sessions` | List recent sessions |
 | `/switch <session-id>` | Switch to a different session |
 | `/attach <code>` | Attach to a CLI session via handoff code |
@@ -377,6 +435,8 @@ All gateway channels support a common set of control commands:
 | `/memory ...` | Inspect and manage memory curation with CLI-equivalent behavior |
 | `/cron` | List cron jobs |
 | `/diagnostics` | Run gateway diagnostics |
+
+On Telegram, reply with `/usage` to your original prompt, any chunk of EstaCoda's final answer, or an approval prompt to inspect the originating turn without a model call. You can also reply in normal language—for example, “How much did this cost?”—and the agent can use the read-only replied-turn usage scope. A stored reply identifier is only a routing hint: the mapping is re-authorized against the same profile, Telegram account, chat type, chat, topic, user, and verified Session lineage. It expires after 90 days; failed deliveries and unrelated, expired, or unmapped messages fail closed. No automatic cost footer is added.
 
 Model control commands bypass busy-session queues so the operator can change model state while a conversation is active.
 

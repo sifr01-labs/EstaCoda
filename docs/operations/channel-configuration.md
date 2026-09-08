@@ -16,6 +16,59 @@ Every channel object supports:
 | `enabled` | `boolean` | `false` | Whether the adapter is loaded by `estacoda gateway run` or by an installed service started with `estacoda gateway start`. |
 | `busyPolicy` | `"reject" \| "queue" \| "interrupt"` | `"reject"` | Behavior when a new message arrives during an active turn. |
 | `queueDepth` | `number` | `3` | Maximum buffered messages when `busyPolicy` is `"queue"`. Clamped to `[1, 10]`. |
+| `busyTextCoalescing` | `object` | disabled | Optional bounded coalescing of adjacent ordinary text at the FIFO queue tail. |
+
+### Optional FIFO Tail Coalescing
+
+Queued-text coalescing is disabled by default and applies only when the same channel also has `busyPolicy: "queue"`. When enabled, a new ordinary text message may be appended to the final queued entry only when the canonical session and sender match and the configured time, message-count, and character limits all permit it. The entry keeps its original FIFO position, and runtime metadata retains the component message IDs and receive timestamps.
+
+Commands, callbacks, approvals, attachments, voice messages, and other media never coalesce. Interrupt replacement never uses this path. When a limit is reached, the message becomes a new FIFO entry; if the queue is already full, the existing queue-full behavior applies.
+
+```json
+{
+  "channels": {
+    "telegram": {
+      "busyPolicy": "queue",
+      "busyTextCoalescing": {
+        "enabled": true,
+        "windowMs": 1500,
+        "maxMessages": 5,
+        "maxChars": 8000
+      }
+    }
+  }
+}
+```
+
+`windowMs` is capped at `60000`, `maxMessages` at `100`, and `maxChars` at `100000`. `estacoda gateway status` and `estacoda channels status <channel>` report whether queued-text coalescing is enabled.
+
+## Gateway Queue Persistence
+
+The busy-message FIFO is in memory by default. Queue persistence is a profile-scoped gateway option, not a per-channel setting:
+
+```json
+{
+  "gateway": {
+    "messageQueue": {
+      "persistence": "sqlite",
+      "maxPendingPerProfile": 1000,
+      "uncertainRetentionDays": 7
+    }
+  }
+}
+```
+
+| Field | Type | Default | Bounds | Description |
+|---|---|---:|---:|---|
+| `gateway.messageQueue.persistence` | `"memory" \| "sqlite"` | `"memory"` | — | Selects process-local FIFO state or durable queued-turn recovery. |
+| `gateway.messageQueue.maxPendingPerProfile` | positive integer | `1000` | `1..10000` | Caps non-completed durable rows for the selected profile. Pending, claimed, and uncertain rows consume capacity. |
+| `gateway.messageQueue.uncertainRetentionDays` | non-negative integer | `7` | `0..365` | Retains completed and uncertain rows for deduplication and quarantine before periodic pruning. |
+
+SQLite mode writes an accepted busy message before sending its `Queued` acknowledgement, claims it before execution, and marks a terminally handled claim completed. Pending rows recover in FIFO order after restart. A claim left by a crash becomes `uncertain` and is never replayed automatically because the gateway cannot prove whether its external effects occurred.
+
+Rows live in the global `sessions.sqlite` database but carry the selected profile ID; recovery reads only that profile. The durable message contains user text and routing identity, sender data, receive time, bounded metadata, and attachment descriptors. It does not store channel credentials, authorization headers, or attachment file bytes. Attachment paths must remain canonical files beneath approved profile media/cache roots at recovery time.
+
+This mode does not provide exactly-once execution. It also deliberately gives up automatic at-least-once replay once execution is uncertain. Protect and back up the state directory as sensitive user data. See the public [gateway operations guide](../../website/docs/operations/gateway-operations.md#durable-busy-queue) for inspection, clearing, shutdown, and rollback behavior.
 
 ## Telegram
 
@@ -33,6 +86,9 @@ Every channel object supports:
       "sessionIdleResetMinutes": 30,
       "pollTimeoutSeconds": 30,
       "maxAttachmentBytes": 10485760,
+      "textDebounceMs": 1500,
+      "textDebounceMaxMessages": 10,
+      "textDebounceMaxChars": 8000,
       "streaming": {
         "enabled": false,
         "editIntervalMs": 750,
@@ -44,7 +100,13 @@ Every channel object supports:
         "freshFinalAfterSeconds": 0
       },
       "busyPolicy": "queue",
-      "queueDepth": 5
+      "queueDepth": 5,
+      "busyTextCoalescing": {
+        "enabled": false,
+        "windowMs": 1500,
+        "maxMessages": 5,
+        "maxChars": 8000
+      }
     }
   }
 }
@@ -59,6 +121,12 @@ Guided setup asks for:
 Guided setup does not ask for the bot-token env-var name. The token is written to the selected profile `.env` as `ESTACODA_TELEGRAM_BOT_TOKEN`, and the profile config uses `botTokenEnv: "ESTACODA_TELEGRAM_BOT_TOKEN"`. Config review and setup output must redact the raw token.
 
 Use `@BotFather` and `/newbot` to get the bot API token. Use `@userinfobot` and `/start` to get Telegram user IDs. For group chats, add the EstaCoda bot and either `@getidsbot` or `@chatIDrobot` to the group; the ID bot replies with the group chat ID, usually a long negative number.
+
+### Telegram Rapid-Text Batching
+
+Telegram batches ordinary text fragments from the same account, chat or topic, and sender when they arrive within `textDebounceMs`. Fragments are joined with a blank line and retain their original message IDs in bounded runtime metadata. The defaults are `1500ms`, `10` messages, and `8000` characters. Set `textDebounceMs` to `0` to preserve immediate one-message-per-turn dispatch.
+
+Commands, callback queries, pairing/auth messages, attachments, and media groups bypass batching. Telegram albums remain one attachment turn, their caption remains the vision prompt, and following text starts a separate text batch. These settings affect ingress only; they do not change polling cadence or the FIFO busy queue.
 
 ### Telegram Streaming
 
@@ -238,8 +306,9 @@ For WhatsApp voice bubbles, install `ffmpeg` in the operator environment. Voice-
 
 ## Defaults
 
-If `busyPolicy` or `queueDepth` is omitted for a channel, the runtime uses:
+If `busyPolicy`, `queueDepth`, or `busyTextCoalescing` is omitted for a channel, the runtime uses:
 - `busyPolicy`: `"reject"`
 - `queueDepth`: `3`
+- `busyTextCoalescing.enabled`: `false`
 
-There is no top-level `channels.busyPolicy` or `channels.queueDepth`. Each channel configures its own policy independently.
+There is no top-level `channels.busyPolicy`, `channels.queueDepth`, or `channels.busyTextCoalescing`. Each channel configures its own policy independently.

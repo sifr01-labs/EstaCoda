@@ -10,6 +10,7 @@ import type { SecurityPolicy } from "../contracts/security.js";
 import type { LoadedSkill, SkillDefinition } from "../contracts/skill.js";
 import type { RegisteredTool, ToolDefinition } from "../contracts/tool.js";
 import { ArtifactStore } from "../artifacts/artifact-store.js";
+import { NO_BROWSER_CAPABILITIES } from "../browser/browser-capabilities.js";
 import { normalizeMemoryConfig } from "../config/memory-config.js";
 import { normalizeExternalMemoryConfig, normalizeSessionCompressionConfig } from "../config/runtime-config.js";
 import { ContextReferenceExpander } from "../context/context-reference-expander.js";
@@ -43,6 +44,7 @@ import { writeManagedPythonCapabilityManifest } from "../python-env/manifest.js"
 import { fingerprintManagedPythonCapabilitySpec } from "../python-env/spec-hash.js";
 import * as capabilityManager from "../python-env/capability-manager.js";
 import { createSessionRuntimeContext } from "./session-runtime-context.js";
+import { ExecutionEvidenceIndex } from "./execution-evidence-index.js";
 import { AgentLoopBuilder, defaultSkillVisibilityStrategy, type AgentLoopRuntimeSubstrate } from "./agent-loop-builder.js";
 
 const model: ModelProfile = {
@@ -84,6 +86,254 @@ describe("AgentLoopBuilder", () => {
     expect(first.runRecorder).not.toBe(second.runRecorder);
     expect(first.providerTurnLoop).not.toBe(second.providerTurnLoop);
     expect(first.agentLoop).not.toBe(second.agentLoop);
+    expect(first.executionPlanController).toBeDefined();
+    expect(second.executionPlanController).toBeDefined();
+    expect(first.executionPlanController).not.toBe(second.executionPlanController);
+    expect(first.executionCheckpointController).toBeDefined();
+    expect(second.executionCheckpointController).toBeDefined();
+    expect(first.executionCheckpointController).not.toBe(second.executionCheckpointController);
+    expect(first.executionWorkingSet).toBeDefined();
+    expect(second.executionWorkingSet).toBeDefined();
+    expect(first.executionWorkingSet).not.toBe(second.executionWorkingSet);
+    expect(first.toolRegistry.get("plan")).toBeDefined();
+  });
+
+  it("does not register foreground execution planning in child or Task worker runtimes", async () => {
+    const evidenceIndexes: unknown[] = [];
+    const harness = await createBuilderHarness({
+      factories: {
+        agentLoop(options) {
+          evidenceIndexes.push(options.executionEvidenceIndex);
+          return { handle: vi.fn() } as never;
+        }
+      }
+    });
+    const delegatedChild = await harness.build("child-session", { parentSessionId: "parent-session" });
+    const taskWorker = await harness.build("task-worker", {
+      parentSessionId: "parent-session",
+      taskExecution: {
+        taskId: "task-1",
+        rootTaskId: "task-1",
+        planRevisionId: "revision-1",
+        stepId: "step-1",
+        attemptId: "attempt-1"
+      }
+    });
+
+    expect(delegatedChild.executionPlanController).toBeUndefined();
+    expect(taskWorker.executionPlanController).toBeUndefined();
+    expect(delegatedChild.executionCheckpointController).toBeUndefined();
+    expect(taskWorker.executionCheckpointController).toBeUndefined();
+    expect(delegatedChild.executionWorkingSet).toBeUndefined();
+    expect(taskWorker.executionWorkingSet).toBeUndefined();
+    expect(delegatedChild.toolRegistry.get("plan")).toBeUndefined();
+    expect(taskWorker.toolRegistry.get("plan")).toBeUndefined();
+    expect(delegatedChild.providerTools.map((tool) => tool.function.name)).not.toContain("plan");
+    expect(taskWorker.providerTools.map((tool) => tool.function.name)).not.toContain("plan");
+    expect(evidenceIndexes).toEqual([expect.any(ExecutionEvidenceIndex), expect.any(ExecutionEvidenceIndex)]);
+  });
+
+  it("enables routed provider narrowing only for the root foreground loop", async () => {
+    const catalogs: unknown[] = [];
+    const harness = await createBuilderHarness({
+      factories: {
+        agentLoop(options) {
+          catalogs.push(options.providerToolSchemaCatalog);
+          return { handle: vi.fn() } as never;
+        }
+      }
+    });
+
+    await harness.build("root-session");
+    await harness.build("child-session", { parentSessionId: "root-session" });
+    await harness.build("task-worker", {
+      parentSessionId: "root-session",
+      taskExecution: {
+        taskId: "task-1",
+        rootTaskId: "task-1",
+        planRevisionId: "revision-1",
+        stepId: "step-1",
+        attemptId: "attempt-1"
+      }
+    });
+
+    expect(catalogs[0]).toEqual(expect.objectContaining({
+      tools: expect.any(Array),
+      entries: expect.any(Array),
+      aliases: expect.any(Map)
+    }));
+    expect(catalogs.slice(1)).toEqual([undefined, undefined]);
+  });
+
+  it("passes only trusted available execution capability facts into completion classification", async () => {
+    const captured: unknown[] = [];
+    const mutation: RegisteredTool = {
+      ...registeredTool("mcp.postman.updateCollection", ["mcp"]),
+      riskClass: "external-side-effect",
+      connector: { kind: "mcp", id: "postman" }
+    };
+    const verifier: RegisteredTool = {
+      ...registeredTool("mcp.postman.getCollection", ["mcp"]),
+      connector: { kind: "mcp", id: "postman" },
+      capabilityMetadata: {
+        verification: { verifies: ["mcp.postman.updateCollection"] }
+      }
+    };
+    const harness = await createBuilderHarness({
+      mcpTools: [mutation, verifier],
+      factories: {
+        agentLoop(options) {
+          captured.push(options.executionCompletionCapabilities);
+          return { handle: vi.fn() } as never;
+        }
+      }
+    });
+
+    await harness.build("completion-capabilities");
+
+    expect(captured[0]).toEqual(expect.arrayContaining([{
+      tool: "mcp.postman.updateCollection",
+      kind: "mutation",
+      connector: { kind: "mcp", id: "postman" }
+    }, {
+      tool: "mcp.postman.getCollection",
+      kind: "verification",
+      verifies: ["mcp.postman.updateCollection"],
+      connector: { kind: "mcp", id: "postman" }
+    }]));
+  });
+
+  it("shares one read-only execution-plan projection with the root provider and agent loops", async () => {
+    const providerReaders: unknown[] = [];
+    const providerWorkingSets: unknown[] = [];
+    const providerBrowserLeases: unknown[] = [];
+    const agentReaders: unknown[] = [];
+    const harness = await createBuilderHarness({
+      factories: {
+        providerTurnLoop(options) {
+          providerReaders.push(options.executionPlanReader);
+          providerWorkingSets.push(options.executionWorkingSet);
+          providerBrowserLeases.push(options.browserSessionLease);
+          return { run: vi.fn() } as never;
+        },
+        agentLoop(options) {
+          agentReaders.push(options.executionPlanReader);
+          return { handle: vi.fn() } as never;
+        }
+      }
+    });
+
+    const root = await harness.build("root-session");
+    await harness.build("child-session", { parentSessionId: "root-session" });
+
+    expect(providerReaders).toEqual([root.executionPlanController, undefined]);
+    expect(providerWorkingSets).toEqual([root.executionWorkingSet, undefined]);
+    expect(providerBrowserLeases).toEqual([harness.browserSessionLease, undefined]);
+    expect(agentReaders).toEqual([root.executionPlanController, undefined]);
+  });
+
+  it("hydrates the latest unresolved execution plan only for the root session", async () => {
+    const harness = await createBuilderHarness();
+    await harness.sessionDb.createSession({ id: "resume-session", profileId: "default" });
+    await harness.sessionDb.appendEvent("resume-session", {
+      kind: "execution-plan-updated",
+      plan: {
+        objective: "Resume API testing",
+        originTurnId: "turn-origin",
+        revision: 4,
+        status: "active",
+        items: [{ id: "verify", content: "Verify responses", status: "in_progress" }]
+      }
+    });
+
+    const built = await harness.build("resume-session");
+
+    expect(built.executionPlanController?.current()).toMatchObject({
+      objective: "Resume API testing",
+      originTurnId: "turn-origin",
+      revision: 4
+    });
+  });
+
+  it("hydrates a profile-owned foreground execution checkpoint", async () => {
+    const harness = await createBuilderHarness();
+    await harness.sessionDb.createSession({ id: "checkpoint-session", profileId: "default" });
+    await harness.sessionDb.appendEvent("checkpoint-session", {
+      kind: "execution-checkpoint-updated",
+      transition: "carried_forward",
+      checkpoint: {
+        version: 1,
+        id: "checkpoint:resume",
+        sessionId: "checkpoint-session",
+        profileId: "default",
+        originTurnId: "turn-origin",
+        revision: 4,
+        progressRevision: 1,
+        originalObjective: "Import and verify APIs in Postman",
+        status: "retryable",
+        qualificationReasons: ["cross_system"],
+        selectedSkillName: "api-integration",
+        taskClass: "general",
+        intentLabels: ["api.integration"],
+        requiredOperations: ["read", "mutation", "verification"],
+        connectorIds: ["postman"],
+        artifactReferences: [],
+        safeFacts: [],
+        operations: [],
+        completionFloor: "mutation_with_verification",
+        lastTerminationCause: "provider_failed",
+        lastProviderFailureClass: "rate-limit",
+        createdAt: "2030-01-01T00:00:00.000Z",
+        updatedAt: "2030-01-01T00:05:00.000Z"
+      }
+    });
+
+    const built = await harness.build("checkpoint-session");
+
+    expect(built.executionCheckpointController?.current()).toMatchObject({
+      id: "checkpoint:resume",
+      revision: 4,
+      status: "retryable",
+      lastProviderFailureClass: "rate-limit"
+    });
+  });
+
+  it("keeps hydrated execution evidence independent from resumed Plan progress", async () => {
+    const harness = await createBuilderHarness();
+    await harness.sessionDb.createSession({ id: "evidence-resume", profileId: "default" });
+    await harness.sessionDb.appendEvent("evidence-resume", {
+      kind: "execution-evidence-recorded",
+      toolCallId: "call-verified",
+      tool: "browser.snapshot",
+      status: "success",
+      riskClass: "read-only-network",
+      targetSummary: "Postman collection"
+    });
+    await harness.sessionDb.appendEvent("evidence-resume", {
+      kind: "execution-plan-updated",
+      plan: {
+        objective: "Resume API testing",
+        originTurnId: "turn-origin",
+        revision: 4,
+        status: "active",
+        items: [{ id: "verify", content: "Verify responses", status: "in_progress" }]
+      }
+    });
+
+    const built = await harness.build("evidence-resume");
+    const completed = await built.executionPlanController?.merge({
+      items: [{ id: "verify", status: "completed", evidenceCallIds: ["call-verified"] }]
+    });
+
+    expect(completed).toMatchObject({
+      status: "completed",
+      items: [{
+        id: "verify",
+        status: "completed"
+      }]
+    });
+    expect(completed?.items[0]).not.toHaveProperty("evidence");
+    expect(completed?.items[0]).not.toHaveProperty("evidenceCallIds");
   });
 
   it("seeds each provider loop from its own persisted session usage", async () => {
@@ -463,7 +713,11 @@ describe("AgentLoopBuilder", () => {
           maxProviderIterations: 7,
           maxProviderToolCalls: 100,
           maxRepeatedToolFailures: 5,
-          maxProviderWallClockMs: 42_000
+          maxRepeatedBrowserObservations: 3,
+          noProgressNudgeIteration: 3,
+          maxNoProgressIterations: 6,
+          maxProviderWallClockMs: 42_000,
+          finalizationReserveMs: 15_000
         },
         providerRequestDefaults: {
           temperature: 0,
@@ -647,6 +901,54 @@ describe("AgentLoopBuilder", () => {
     expect(delegationVisibleTools?.().map((tool) => tool.name)).toContain("mcp.read");
   });
 
+  it("does not turn Plan requirements into capability authority", async () => {
+    const parentOnly = registeredTool("mcp.parent-only.read", ["research"]);
+    const parentMutation = {
+      ...registeredTool("mcp.parent-only.update", ["research"]),
+      riskClass: "external-side-effect" as const
+    };
+    const parentVerify = registeredTool("mcp.parent-only.verify", ["research"]);
+    const harness = await createBuilderHarness({ mcpTools: [parentOnly, parentMutation, parentVerify] });
+    await harness.sessionDb.createSession({ id: "parent-session", profileId: "default" });
+    await harness.sessionDb.createSession({ id: "narrowed-session", profileId: "default" });
+    const parent = await harness.build("parent-session");
+    const narrowed = await harness.build("narrowed-session", {
+      disabledToolsets: ["research"]
+    });
+
+    const parentPlan = await parent.executionPlanController!.write({
+      objective: "Inspect the target",
+      items: [
+        { id: "inspect", content: "Inspect target", status: "in_progress" },
+        { id: "update", content: "Update target", status: "pending" },
+        { id: "verify", content: "Verify target", status: "pending" }
+      ],
+      requirements: [
+        { id: "target-read", itemId: "inspect", tool: "mcp.parent-only.read", capability: "read" },
+        { id: "target-update", itemId: "update", tool: "mcp.parent-only.update", capability: "mutate" },
+        { id: "target-verify", itemId: "verify", tool: "mcp.parent-only.verify", capability: "verify" }
+      ]
+    }, "turn-parent");
+    const narrowedPlan = await narrowed.executionPlanController!.write({
+      objective: "Inspect the target",
+      items: [
+        { id: "inspect", content: "Inspect target", status: "in_progress" },
+        { id: "update", content: "Update target", status: "pending" },
+        { id: "verify", content: "Verify target", status: "pending" }
+      ],
+      requirements: [
+        { id: "target-read", itemId: "inspect", tool: "mcp.parent-only.read", capability: "read" },
+        { id: "target-update", itemId: "update", tool: "mcp.parent-only.update", capability: "mutate" },
+        { id: "target-verify", itemId: "verify", tool: "mcp.parent-only.verify", capability: "verify" }
+      ]
+    }, "turn-narrowed");
+
+    expect(parentPlan).not.toHaveProperty("requirements");
+    expect(parentPlan).not.toHaveProperty("capabilityPreflight");
+    expect(narrowedPlan).not.toHaveProperty("requirements");
+    expect(narrowedPlan).not.toHaveProperty("capabilityPreflight");
+  });
+
   it("exposes cron runtime toolsets after disabled toolsets are removed", async () => {
     const observedToolsets: string[][] = [];
     const writeTool = registeredTool("mcp.write", ["shell-write"]);
@@ -668,6 +970,7 @@ async function createBuilderHarness(input: {
   skillRegistry?: SkillRegistry;
   routes?: AgentLoopRuntimeSubstrate["routes"];
   executionControls?: AgentLoopRuntimeSubstrate["executionControls"];
+  browserSessionLease?: AgentLoopRuntimeSubstrate["browserSessionLease"];
   factories?: ConstructorParameters<typeof AgentLoopBuilder>[0]["factories"];
   sessionRecallServiceFactory?: AgentLoopRuntimeSubstrate["sessionRecallServiceFactory"];
   memoryFileCompactionServiceFactory?: AgentLoopRuntimeSubstrate["memoryFileCompactionServiceFactory"];
@@ -709,6 +1012,11 @@ async function createBuilderHarness(input: {
   });
   const skillRegistry = input.skillRegistry ?? new SkillRegistry();
   const fileStateTracker = new FileStateTracker();
+  const browserSessionLease = input.browserSessionLease ?? {
+    acquire: vi.fn(),
+    renew: vi.fn(),
+    release: vi.fn()
+  };
   const skillEvolutionStore = new SkillEvolutionStore({
     usagePath: join(workspaceRoot, "usage.json"),
     evolutionRoot: join(workspaceRoot, "evolution")
@@ -778,8 +1086,10 @@ async function createBuilderHarness(input: {
     externalMemoryProviders: [],
     processManager: new ProcessManager({ workspaceRoot }),
     browserBackend: {
+      capabilities: NO_BROWSER_CAPABILITIES,
       isAvailable: async () => false
     } as BrowserBackend,
+    browserSessionLease,
     browserConfig: undefined,
     artifactStore: new ArtifactStore(),
     trustStore: new WorkspaceTrustStore({ path: join(workspaceRoot, "trust.json") }),
@@ -806,6 +1116,7 @@ async function createBuilderHarness(input: {
   return {
     builder,
     fileStateTracker,
+    browserSessionLease,
     sessionDb,
     workspaceRoot,
     stateRoot: join(homeDir, ".estacoda"),
@@ -813,7 +1124,7 @@ async function createBuilderHarness(input: {
       return await builder.buildSession({
         sessionId,
         sessionDb,
-        trajectoryRecorder: {} as never,
+        trajectoryRecorder: { record: vi.fn() } as never,
         skillLearningManager: {} as never,
         agentEvolutionPolicy: deriveAgentEvolutionPolicy("none"),
         responseLabel: "EstaCoda",

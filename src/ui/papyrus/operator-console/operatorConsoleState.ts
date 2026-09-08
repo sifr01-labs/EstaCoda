@@ -1,11 +1,16 @@
 import {
   createInitialFocusState,
+  type ApprovalFocusScope,
   type ApprovalFocusControl,
   type FocusState,
 } from "./focusModel.js";
 import type { OperatorConsoleLocale } from "./activeWorkCopy.js";
 import type { OperatorConsoleStyle } from "./operatorConsoleStyle.js";
 import type { SessionCostSummary, SpendingBudgetSummary } from "../../../contracts/usage-cost.js";
+import type { TaskCompletionTraceSnapshot } from "../../../contracts/task-completion-trace.js";
+import type { ResolvedBidiMode } from "../screen/bidi.js";
+import type { ExecutionPlan } from "../../../contracts/execution-plan.js";
+import type { SecureInputKind, SecureInputRetention } from "../../../contracts/secure-input.js";
 
 export type OperatorConsoleMode = "session" | "setup";
 
@@ -16,6 +21,7 @@ export type TranscriptBlock = {
   readonly createdAtMs?: number;
   readonly attachmentIds?: readonly string[];
   readonly toolTrail?: readonly InlineToolTrailEntry[];
+  readonly taskTrace?: TaskCompletionTraceSnapshot;
 };
 
 export type PromptSurfaceState = {
@@ -155,6 +161,12 @@ export type TaskCardAttemptState = {
   readonly currentActivity?: string;
   readonly currentToolCategory?: string;
   readonly assistantPreview?: string;
+  readonly maxAttempts: number;
+  readonly failure?: {
+    readonly class: string;
+    readonly retryable: boolean;
+    readonly uncertainSideEffects: boolean;
+  };
   readonly usage: TaskCardUsageState;
 };
 
@@ -169,8 +181,26 @@ export type TaskCardActivityState = {
   readonly subagentIndex?: number;
 };
 
+export type TaskCardActivitySpanState = {
+  readonly id: string;
+  readonly category: "plan" | "search" | "read" | "execute" | "write" | "validate" | "wait" | "retry" | "failure" | "deliver";
+  readonly scope: {
+    readonly kind: "task" | "subagent" | "synthesis" | "delivery";
+    readonly stepId?: string;
+    readonly label: string;
+  };
+  readonly status: "completed" | "running" | "failed";
+  readonly startedAt: string;
+  readonly endedAt?: string;
+  readonly durationMs: number;
+  readonly eventCount: number;
+  readonly label: string;
+  readonly attemptId?: string;
+};
+
 export type TaskCardTraceState = {
   readonly events: readonly TaskCardActivityState[];
+  readonly spans: readonly TaskCardActivitySpanState[];
   readonly totalEvents?: number;
   readonly categoryCounts?: Readonly<Record<TaskCardActivityState["category"], number>>;
   readonly hasEarlierEvents: boolean;
@@ -212,8 +242,19 @@ export type TaskCardSubagentState = {
   readonly attempts: readonly TaskCardAttemptState[];
   readonly latestAttempt?: TaskCardAttemptState;
   readonly activeAttempt?: TaskCardAttemptState;
+  readonly outcome: {
+    readonly usable: boolean;
+    readonly recovered: boolean;
+    readonly attemptsUsed: number;
+    readonly maxAttempts: number;
+    readonly failure?: {
+      readonly class: string;
+      readonly retryable: boolean;
+      readonly uncertainSideEffects: boolean;
+    };
+  };
   readonly trace: readonly TaskCardActivityState[];
-  readonly traceSummary?: Omit<TaskCardTraceState, "events">;
+  readonly traceSummary?: Omit<TaskCardTraceState, "events" | "spans">;
   readonly results: readonly TaskCardResultState[];
 };
 
@@ -248,7 +289,11 @@ export type TaskCardState = {
     readonly name: "planning" | "queued" | "running" | "waiting_for_host" | "waiting_for_input" | "waiting_for_approval" | "paused" | "completed" | "partial" | "failed" | "cancelled" | "delegating" | "synthesizing";
     readonly workerProgress?: {
       readonly completed: number;
+      readonly failed: number;
+      readonly cancelled: number;
       readonly settled: number;
+      readonly usable: number;
+      readonly recovered: number;
       readonly total: number;
     };
   };
@@ -269,9 +314,22 @@ export type TaskCardState = {
 };
 
 export type ActivityTraceInspectionState = {
-  /** Stable event identity selected for inspection. Omitted while following the live tail. */
+  /** Stable raw-event identity retained for the diagnostic event debugger. */
   readonly selectedTraceEventId?: string;
+  /** Stable logical activity identity selected in the human-facing trace. */
+  readonly selectedTraceSpanId?: string;
   readonly followLive: boolean;
+};
+
+export type TaskTraceModeState = {
+  readonly taskId: string;
+  readonly followLive: boolean;
+  readonly selectedSpanId?: string;
+};
+
+export type PendingTaskControlState = {
+  readonly taskId: string;
+  readonly kind: "cancel";
 };
 
 export type TaskInspectionState = ActivityTraceInspectionState & {
@@ -288,6 +346,9 @@ export type TaskSurfaceState = {
   readonly selectedTaskId?: string;
   readonly inspectedTaskId?: string;
   readonly inspection?: TaskInspectionState;
+  /** Compact ribbon navigation is opt-in so normal card arrows keep navigating Tasks and workers. */
+  readonly traceMode?: TaskTraceModeState;
+  readonly pendingControl?: PendingTaskControlState;
   /** Explicit temporary terminal mouse capture. Native terminal mouse behavior is the default. */
   readonly mouseModeActive?: boolean;
   readonly scrollOffset: number;
@@ -385,6 +446,10 @@ export type StreamingState = {
 
 export type ApprovalControl = ApprovalFocusControl;
 
+export type ApprovalCardScope = ApprovalFocusScope;
+
+export type ApprovalGrantMatch = "target" | "tool";
+
 export type ApprovalCardState = {
   readonly id: string;
   readonly status: "pending" | "approved" | "rejected" | "expired" | "superseded";
@@ -392,11 +457,16 @@ export type ApprovalCardState = {
   readonly target: string;
   readonly risk?: string;
   readonly summary?: string;
+  /** Defaults to approve-once only when omitted. */
+  readonly availableScopes?: readonly ApprovalCardScope[];
+  /** Describes whether a broader grant matches this target or the whole tool. */
+  readonly grantMatch?: ApprovalGrantMatch;
   readonly diffStats?: {
     readonly added?: number;
     readonly removed?: number;
   };
   readonly focusedControl?: ApprovalControl;
+  readonly focusedScope?: ApprovalCardScope;
 };
 
 export type SlashMenuItemState = {
@@ -481,6 +551,29 @@ export type TerminalMetrics = {
   readonly width: number;
   readonly height: number;
   readonly isTty: boolean;
+  readonly bidiMode?: ResolvedBidiMode;
+};
+
+export const SECURE_INPUT_ACTIONS = ["enter-securely", "enter-directly", "cancel"] as const;
+
+export type SecureInputAction = (typeof SECURE_INPUT_ACTIONS)[number];
+
+/** Metadata-only state. The protected value must remain in the input controller. */
+export type SecureInputSurfaceState = {
+  readonly kind: SecureInputKind;
+  readonly purpose: string;
+  readonly destinationLabel: string;
+  readonly retention: SecureInputRetention;
+  readonly expiresAt: string;
+  readonly maskedCharacterCount: number;
+  readonly entryActive: boolean;
+  readonly validationError?: string;
+  readonly focusedAction: SecureInputAction;
+  readonly group?: {
+    readonly purpose: string;
+    readonly index: number;
+    readonly total: number;
+  };
 };
 
 export type OperatorConsoleState = {
@@ -488,12 +581,14 @@ export type OperatorConsoleState = {
   readonly locale: OperatorConsoleLocale;
   readonly startup?: StartupDashboardState;
   readonly setupPanel?: SetupSurfaceState;
+  readonly secureInput?: SecureInputSurfaceState;
   readonly transcript: readonly TranscriptBlock[];
   readonly prompt: PromptSurfaceState;
   readonly status: StatusRailState;
   /** One elapsed-time clock shared by every animated surface. */
   readonly motionElapsedMs: number;
   readonly turnActivity?: TurnActivityState;
+  readonly executionPlan?: ExecutionPlan;
   readonly attachments: readonly AttachmentCardState[];
   readonly tasks: TaskSurfaceState;
   readonly activeWork: ToolActivityState;
@@ -509,10 +604,12 @@ export type OperatorConsoleState = {
 export type OperatorConsoleSurface =
   | "startupDashboard"
   | "setupPanel"
+  | "secureInput"
   | "transcript"
   | "streaming"
   | "approvals"
   | "turnActivity"
+  | "mission"
   | "activeWork"
   | "queuedSteer"
   | "taskCards"
@@ -526,10 +623,12 @@ export type OperatorConsoleSurface =
 export const OPERATOR_CONSOLE_SURFACE_ORDER: readonly OperatorConsoleSurface[] = [
   "startupDashboard",
   "setupPanel",
+  "secureInput",
   "transcript",
   "streaming",
   "approvals",
   "turnActivity",
+  "mission",
   "activeWork",
   "queuedSteer",
   "taskCards",
@@ -546,11 +645,13 @@ export type CreateInitialOperatorConsoleStateInput = {
   readonly locale?: OperatorConsoleLocale;
   readonly startup?: StartupDashboardState;
   readonly setupPanel?: SetupSurfaceState;
+  readonly secureInput?: SecureInputSurfaceState;
   readonly transcript?: readonly TranscriptBlock[];
   readonly prompt?: PromptSurfaceState;
   readonly status?: StatusRailState;
   readonly motionElapsedMs?: number;
   readonly turnActivity?: TurnActivityState;
+  readonly executionPlan?: ExecutionPlan;
   readonly attachments?: readonly AttachmentCardState[];
   readonly tasks?: TaskSurfaceState;
   readonly activeWork?: ToolActivityState;
@@ -575,11 +676,13 @@ export function createInitialOperatorConsoleState(
     locale: input.locale ?? "en",
     ...(input.startup === undefined ? {} : { startup: input.startup }),
     ...(input.setupPanel === undefined ? {} : { setupPanel: input.setupPanel }),
+    ...(input.secureInput === undefined ? {} : { secureInput: input.secureInput }),
     transcript: input.transcript ?? [],
     prompt: input.prompt ?? createDefaultPromptSurfaceState(),
     status: input.status ?? createDefaultStatusRailState(),
     motionElapsedMs: normalizeMotionElapsedMs(input.motionElapsedMs),
     ...(input.turnActivity === undefined ? {} : { turnActivity: input.turnActivity }),
+    ...(input.executionPlan === undefined ? {} : { executionPlan: input.executionPlan }),
     attachments: input.attachments ?? [],
     tasks: input.tasks ?? createDefaultTaskSurfaceState(),
     activeWork: input.activeWork ?? createDefaultToolActivityState(),

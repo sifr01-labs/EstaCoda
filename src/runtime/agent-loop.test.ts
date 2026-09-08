@@ -3,7 +3,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ArtifactRecord } from "../contracts/artifact.js";
+import type { ChannelAttachment } from "../contracts/channel.js";
 import type { IntentRoute } from "../contracts/intent.js";
+import type { ExecutionPlan, ExecutionPlanReader, ExecutionTerminationCause } from "../contracts/execution-plan.js";
 import type { MemoryProvider } from "../contracts/memory.js";
 import type { ModelProfile, ProviderStreamDiagnostics } from "../contracts/provider.js";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
@@ -14,8 +16,10 @@ import type { TrajectoryStore } from "../contracts/trajectory-store.js";
 import type { ProviderExecutionResult } from "../providers/provider-executor.js";
 import { providerSpendDenialMessage } from "../providers/provider-spend-policy.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
+import { buildProviderToolSchemaCatalog } from "../tools/tool-schema.js";
 import { deriveAgentEvolutionPolicy } from "../contracts/agent-evolution.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
+import { diagnoseSessionExecution } from "../session/session-execution-diagnostics.js";
 import { SESSION_RECALL_UNTRUSTED_NOTICE, type SessionRecallService } from "../session/session-recall-service.js";
 import { MemoryPromptContextBuilder } from "../memory/memory-prompt-context-builder.js";
 import { MemoryRecallOrchestrator } from "../memory/memory-recall-orchestrator.js";
@@ -26,6 +30,12 @@ import { MemoryBudgetOverflowError, MemoryStore } from "../memory/memory-store.j
 import { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import { RunRecorder } from "./run-recorder.js";
 import { AgentLoop } from "./agent-loop.js";
+import { ExecutionPlanController } from "./execution-plan-controller.js";
+import { ExecutionPlanStore } from "./execution-plan-store.js";
+import { ExecutionCheckpointController } from "./execution-checkpoint-controller.js";
+import { hydratableExecutionCheckpoint } from "../session/execution-checkpoint-state.js";
+import { ExecutionEvidenceIndex } from "./execution-evidence-index.js";
+import type { ExecutionCompletionCapability } from "./execution-outcome.js";
 import type { SkillLearningManager } from "../skills/skill-learning.js";
 import type { CompactResult, SessionCompressionService } from "../prompt/session-compression-service.js";
 import type { NativeToolExecutor } from "./native-tool-executor.js";
@@ -39,6 +49,8 @@ import { createSessionRuntimeContext } from "./session-runtime-context.js";
 import { normalizeSessionCompressionConfig, type SessionCompressionConfig } from "../config/runtime-config.js";
 import type { MemoryCurationService } from "../memory/memory-curation-service.js";
 import { MemoryCurationBusyError } from "../memory/memory-curation-coordinator.js";
+import type { ExecutionCapabilityPreflight } from "./execution-capability-preflight.js";
+import type { ConversationContinuationState } from "./conversation-continuation-state.js";
 
 const memoryPromotionMocks = vi.hoisted(() => ({
   resolveUserPreferencePromotion: vi.fn(),
@@ -220,6 +232,63 @@ function failedProviderExecution(): ProviderExecutionResult {
   };
 }
 
+function postmanMutation(overrides: Partial<ToolExecutionRecord> = {}): ToolExecutionRecord {
+  return {
+    tool: {
+      name: "mcp.postman.updateCollection",
+      description: "Update Postman",
+      inputSchema: {},
+      riskClass: "external-side-effect",
+      toolsets: ["mcp"],
+      progressLabel: "updating Postman",
+      maxResultSizeChars: 1_000
+    },
+    input: { apiKey: "raw-postman-secret", collection: "private collection contents" },
+    decision: "allow",
+    riskClass: "external-side-effect",
+    executionEffect: { kind: "mutation", connector: { kind: "mcp", id: "postman" } },
+    targetSummary: "collection token=raw-postman-secret",
+    toolCallId: "call-postman-update",
+    result: { ok: true, content: "private Postman collection response" },
+    ...overrides
+  };
+}
+
+function postmanVerification(overrides: Partial<ToolExecutionRecord> = {}): ToolExecutionRecord {
+  return {
+    tool: {
+      name: "mcp.postman.getCollection",
+      description: "Read Postman",
+      inputSchema: {},
+      riskClass: "read-only-network",
+      toolsets: ["mcp"],
+      progressLabel: "reading Postman",
+      maxResultSizeChars: 1_000
+    },
+    input: {},
+    decision: "allow",
+    riskClass: "read-only-network",
+    executionEffect: {
+      kind: "verification",
+      verifies: ["mcp.postman.updateCollection"],
+      connector: { kind: "mcp", id: "postman" }
+    },
+    toolCallId: "call-postman-verify",
+    result: { ok: true, content: "verified" },
+    ...overrides
+  };
+}
+
+function postmanRead(overrides: Partial<ToolExecutionRecord> = {}): ToolExecutionRecord {
+  return {
+    ...postmanVerification(),
+    executionEffect: { kind: "read", connector: { kind: "mcp", id: "postman" } },
+    toolCallId: "call-postman-read",
+    result: { ok: true, content: "read collection" },
+    ...overrides
+  };
+}
+
 function fallbackProviderExecution(content: string): ProviderExecutionResult {
   return {
     ok: true,
@@ -294,12 +363,24 @@ async function createAgentLoop(input: {
   memoryProvider?: MemoryProvider;
   trajectoryStore?: Pick<TrajectoryStore, "saveTrajectory">;
   providerExecution?: ProviderExecutionResult;
+  providerTerminationCause?: ExecutionTerminationCause;
   providerLoopToolExecutions?: ToolExecutionRecord[];
   delegatedAnswerOwnership?: PendingDelegatedAnswerOwnership;
   providerUsageCostUsd?: number;
   skillLearningManager?: SkillLearningManager;
   skillRouteShadowReranker?: SkillRouteShadowReranker;
   agentEvolutionPolicy?: ReturnType<typeof deriveAgentEvolutionPolicy>;
+  onProviderTurnRun?: () => void;
+  routeIntent?: IntentRoute;
+  selectedSkill?: SkillDefinition | null;
+  routeAttachments?: ChannelAttachment[];
+  providerToolDefinitions?: ToolDefinition[];
+  executionCompletionCapabilities?: readonly ExecutionCompletionCapability[];
+  nativeToolExecutions?: ToolExecutionRecord[];
+  executionPlanReader?: ExecutionPlanReader;
+  executionPlanController?: ExecutionPlanController;
+  executionCapabilityPreflight?: ExecutionCapabilityPreflight;
+  enableExecutionCheckpoint?: boolean;
 }) {
   const sessionDb = new InMemorySessionDB();
   const sessionId = `agent-loop-test-${Date.now()}-${Math.random()}`;
@@ -341,6 +422,14 @@ async function createAgentLoop(input: {
     trajectoryStore: input.trajectoryStore,
     profileId: "default"
   });
+  const executionCheckpointController = input.enableExecutionCheckpoint === true
+    ? new ExecutionCheckpointController({
+        sessionId: () => sessionRuntimeContext.currentSessionId(),
+        profileId: "default",
+        createId: () => "checkpoint:test",
+        record: (event) => runRecorder.recordExecutionCheckpointTransition(event)
+      })
+    : undefined;
   const memoryRecallOrchestrator = new MemoryRecallOrchestrator({
     builder: new MemoryPromptContextBuilder({ store: new MemoryStore() }),
     sessionRecallService: input.sessionRecallService,
@@ -349,20 +438,37 @@ async function createAgentLoop(input: {
 
   const runtimeRouter = {
     route: vi.fn(() => ({
-      intent,
-      selectedSkill,
+      intent: input.routeIntent ?? intent,
+      selectedSkill: input.selectedSkill === null ? undefined : input.selectedSkill ?? selectedSkill,
       selectedSkillInstructions: undefined,
       selectedSkillResources: undefined,
       selectedSkillSetup: undefined,
-      attachments: undefined
+      attachments: input.routeAttachments
     }))
   } as unknown as RuntimeRouter;
+
+  const providerToolSchemaCatalog = buildProviderToolSchemaCatalog({
+    tools: input.providerToolDefinitions ?? []
+  });
+  const executionEvidenceIndex = new ExecutionEvidenceIndex();
 
   const providerTurnLoop = {
     canRunProvider: vi.fn(() => input.canRunProvider),
     lastPromptTokens: vi.fn(() => 77),
     lastActualPromptTokens: vi.fn(() => 88),
     run: vi.fn(async () => {
+      input.onProviderTurnRun?.();
+      const providerLoopExecutions = input.providerLoopToolExecutions ?? [];
+      if (providerLoopExecutions.length > 0) {
+        const currentSessionId = sessionRuntimeContext.currentSessionId();
+        const visibleTurn = [...await sessionDb.listMessages(currentSessionId)].reverse()
+          .find((message) => message.role === "user");
+        if (visibleTurn === undefined) throw new Error("Expected a visible user turn before provider execution.");
+        for (const execution of providerLoopExecutions) {
+          const receipt = executionEvidenceIndex.record(execution, visibleTurn.id);
+          if (receipt !== undefined) await runRecorder.recordExecutionEvidence(receipt);
+        }
+      }
       if (input.providerUsageCostUsd !== undefined) {
         const currentSessionId = sessionRuntimeContext.currentSessionId();
         const visibleTurn = [...await sessionDb.listMessages(currentSessionId)].reverse()
@@ -397,8 +503,11 @@ async function createAgentLoop(input: {
       }
       return {
         providerExecution: input.providerExecution,
-        toolExecutions: input.providerLoopToolExecutions ?? [],
+        toolExecutions: providerLoopExecutions,
         iterations: input.providerExecution === undefined ? 0 : 1,
+        terminationCause: input.providerTerminationCause ?? (
+          input.providerExecution?.ok === false ? "provider_failed" : "normal"
+        ),
         ...(input.delegatedAnswerOwnership === undefined ? {} : {
           delegatedAnswerOwnership: input.delegatedAnswerOwnership
         })
@@ -412,7 +521,7 @@ async function createAgentLoop(input: {
 
   const nativeToolExecutor = {
     executeDeterministicNativeTools: vi.fn(async () => ({
-      executions: [],
+      executions: input.nativeToolExecutions ?? [],
       plans: []
     }))
   } as unknown as NativeToolExecutor;
@@ -434,7 +543,9 @@ async function createAgentLoop(input: {
     profileId: "default",
     toolExecutor: {} as any,
     model,
-    providerTools: [],
+    providerTools: providerToolSchemaCatalog.tools,
+    providerToolSchemaCatalog,
+    executionCompletionCapabilities: input.executionCompletionCapabilities,
     memoryProvider: input.memoryProvider,
     memoryRecallOrchestrator,
     sessionCompressionService: input.sessionCompressionService,
@@ -442,21 +553,864 @@ async function createAgentLoop(input: {
     compressionConfig: input.compressionConfig,
     skillLearningManager: input.skillLearningManager,
     skillRouteShadowReranker: input.skillRouteShadowReranker,
-    agentEvolutionPolicy: input.agentEvolutionPolicy ?? deriveAgentEvolutionPolicy("suggest")
+    agentEvolutionPolicy: input.agentEvolutionPolicy ?? deriveAgentEvolutionPolicy("suggest"),
+    executionPlanReader: input.executionPlanController ?? input.executionPlanReader,
+    executionPlanController: input.executionPlanController,
+    executionCheckpointController,
+    executionCapabilityPreflight: input.executionCapabilityPreflight,
+    executionEvidenceIndex
   });
 
   return {
     loop,
+    runtimeRouter,
     providerTurnLoop,
     runSkillPlaybook: input.runSkillPlaybook,
     sessionDb,
     sessionId,
     sessionRuntimeContext,
-    trajectoryRecorder
+    trajectoryRecorder,
+    nativeToolExecutor,
+    executionCheckpointController
   };
 }
 
+describe("AgentLoop execution checkpoints", () => {
+  it("does not create a checkpoint for ordinary conversation", async () => {
+    const conversationalIntent: IntentRoute = {
+      ...intent,
+      taskClass: "conversation",
+      labels: ["conversation"],
+      suggestedToolsets: [],
+      suggestedSkills: []
+    };
+    const { loop, executionCheckpointController, sessionDb, sessionId } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook: vi.fn(async () => []),
+      providerExecution: successfulProviderExecution("It is a lightweight rain jacket."),
+      routeIntent: conversationalIntent,
+      selectedSkill: null,
+      enableExecutionCheckpoint: true
+    });
+
+    await loop.handle({
+      text: "What is a rain jacket and when should I wear one?",
+      channel: "cli",
+      trustedWorkspace: true
+    });
+
+    expect(executionCheckpointController?.current()).toBeUndefined();
+    expect((await sessionDb.listEvents(sessionId)).some((event) =>
+      event.kind === "execution-checkpoint-updated"
+    )).toBe(false);
+  });
+
+  it("persists a retryable checkpoint when a qualifying provider attempt fails", async () => {
+    const apiSkill: SkillDefinition = {
+      ...selectedSkill,
+      name: "api-integration",
+      requiredToolsets: ["browser", "mcp"]
+    };
+    const apiIntent: IntentRoute = {
+      ...intent,
+      labels: ["api.integration"],
+      suggestedToolsets: ["browser", "mcp"],
+      suggestedSkills: [apiSkill],
+      primarySkill: apiSkill
+    };
+    const { loop, executionCheckpointController, sessionDb, sessionId } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook: vi.fn(async () => []),
+      providerExecution: failedProviderExecution(),
+      routeIntent: apiIntent,
+      selectedSkill: apiSkill,
+      executionCompletionCapabilities: [{
+        tool: "mcp.postman.updateCollection",
+        kind: "mutation",
+        connector: { kind: "mcp", id: "postman" }
+      }, {
+        tool: "mcp.postman.getCollection",
+        kind: "verification",
+        verifies: ["mcp.postman.updateCollection"],
+        connector: { kind: "mcp", id: "postman" }
+      }],
+      enableExecutionCheckpoint: true
+    });
+
+    await loop.handle({
+      text: "Import all six Swagger APIs into Postman and verify the update.",
+      channel: "cli",
+      trustedWorkspace: true
+    });
+
+    expect(executionCheckpointController?.current()).toMatchObject({
+      status: "retryable",
+      completionFloor: "mutation_with_verification",
+      lastTerminationCause: "provider_failed",
+      lastProviderFailureClass: "network"
+    });
+    expect((await sessionDb.listEvents(sessionId)).filter((event) =>
+      event.kind === "execution-checkpoint-updated"
+    )).toHaveLength(2);
+  });
+
+  it("resumes a failed API integration with its bounded toolbox and original completion floor", async () => {
+    const apiSkill: SkillDefinition = {
+      ...selectedSkill,
+      name: "api-integration",
+      requiredToolsets: ["browser", "mcp"],
+      optionalToolsets: ["files", "web"],
+      playbook: [
+        { id: "inspect", description: "Inspect the products." },
+        { id: "download", description: "Download the specifications." },
+        { id: "import", description: "Import and verify the specifications." }
+      ]
+    };
+    const apiIntent: IntentRoute = {
+      ...intent,
+      taskClass: "browser-operation",
+      labels: ["api.integration"],
+      suggestedToolsets: ["browser", "mcp"],
+      suggestedSkills: [apiSkill],
+      primarySkill: apiSkill
+    };
+    const providerToolDefinitions: ToolDefinition[] = [
+      { ...tool, name: "browser.snapshot", toolsets: ["browser"], riskClass: "read-only-network" },
+      { ...tool, name: "browser.click", toolsets: ["browser"], riskClass: "read-only-network" },
+      { ...tool, name: "browser.download", toolsets: ["browser"], riskClass: "read-only-network" },
+      {
+        ...tool,
+        name: "mcp.postman.getCollection",
+        toolsets: ["mcp"],
+        connector: { kind: "mcp", id: "postman" },
+        riskClass: "read-only-network"
+      },
+      {
+        ...tool,
+        name: "mcp.postman.updateCollection",
+        toolsets: ["mcp"],
+        connector: { kind: "mcp", id: "postman" },
+        riskClass: "external-side-effect"
+      },
+      {
+        ...tool,
+        name: "mcp.linear.getIssues",
+        toolsets: ["mcp"],
+        connector: { kind: "mcp", id: "linear" },
+        riskClass: "read-only-network"
+      },
+      { ...tool, name: "file.write", toolsets: ["files"], riskClass: "workspace-write" }
+    ];
+    const { loop, runtimeRouter, providerTurnLoop, executionCheckpointController, sessionDb, sessionId } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook: vi.fn(async () => []),
+      providerExecution: failedProviderExecution(),
+      routeIntent: apiIntent,
+      selectedSkill: apiSkill,
+      providerToolDefinitions,
+      executionCompletionCapabilities: [{
+        tool: "mcp.postman.updateCollection",
+        kind: "mutation",
+        connector: { kind: "mcp", id: "postman" }
+      }, {
+        tool: "mcp.postman.getCollection",
+        kind: "verification",
+        verifies: ["mcp.postman.updateCollection"],
+        connector: { kind: "mcp", id: "postman" }
+      }],
+      enableExecutionCheckpoint: true
+    });
+
+    const objective = "Import all six Swagger APIs into Postman and verify the update.";
+    await loop.handle({ text: objective, channel: "cli", trustedWorkspace: true });
+    const retryText = "Okay can you pick u where we lefto ff/";
+    const retry = await loop.handle({ text: retryText, channel: "cli", trustedWorkspace: true });
+
+    expect(vi.mocked(runtimeRouter.route).mock.calls[1]?.[0]).toMatchObject({
+      text: `${objective}\nFollow-up: ${retryText}`,
+      checkpointSkillName: "api-integration"
+    });
+    const resumedProviderInput = vi.mocked(providerTurnLoop.run).mock.calls[1]?.[0];
+    expect(resumedProviderInput.routedText).toBe(`${objective}\nFollow-up: ${retryText}`);
+    expect(resumedProviderInput.providerTools.map((entry) => entry.function.name)).toEqual([
+      "browser_snapshot",
+      "browser_click",
+      "browser_download",
+      "mcp_postman_getCollection",
+      "mcp_postman_updateCollection"
+    ]);
+    expect(resumedProviderInput.providerTools.map((entry) => entry.function.name)).not.toContain("mcp_linear_getIssues");
+    expect(resumedProviderInput.providerTools.map((entry) => entry.function.name)).not.toContain("file_write");
+    expect(retry.finalOutcome?.completionFloor).toBe("mutation_with_verification");
+    expect(executionCheckpointController?.current()).toMatchObject({
+      status: "retryable",
+      completionFloor: "mutation_with_verification"
+    });
+
+    const apiKey = "fake-consumer-key-123456789";
+    const clientSecret = "fake-consumer-secret-987654321";
+    await loop.handle({
+      text: `okay here are the key and secret - you can also retry any blocker\n[Pasted text 1]\n${apiKey}\r${clientSecret}`,
+      channel: "cli",
+      trustedWorkspace: true
+    });
+    const protectedProviderInput = vi.mocked(providerTurnLoop.run).mock.calls[2]?.[0];
+    expect(protectedProviderInput.routedText).toContain(objective);
+    expect(protectedProviderInput.routedText).toContain("withheld the values");
+    expect(protectedProviderInput.providerTools.map((entry) => entry.function.name)).toContain("mcp_postman_updateCollection");
+    expect(JSON.stringify(protectedProviderInput)).not.toContain(apiKey);
+    expect(JSON.stringify(protectedProviderInput)).not.toContain(clientSecret);
+    expect(JSON.stringify(await sessionDb.listMessages(sessionId))).not.toContain(apiKey);
+    expect(JSON.stringify(await sessionDb.listMessages(sessionId))).not.toContain(clientSecret);
+    expect(await sessionDb.listEvents(sessionId)).toContainEqual({
+      kind: "plaintext-credential-intercepted",
+      credentialKinds: ["generic-secret"],
+      disposition: "withheld-before-persistence"
+    });
+
+    await loop.handle({
+      text: "Use the other Postman workspace instead.",
+      channel: "cli",
+      trustedWorkspace: true
+    });
+    expect(vi.mocked(runtimeRouter.route).mock.calls[3]?.[0]).toMatchObject({
+      text: `${objective}\nFollow-up: Use the other Postman workspace instead.`,
+      checkpointSkillName: "api-integration"
+    });
+    expect(executionCheckpointController?.current()).toMatchObject({
+      status: "retryable",
+      latestUserCorrection: "Use the other Postman workspace instead.",
+      completionFloor: "mutation_with_verification"
+    });
+  });
+
+  it("does not inherit a checkpoint toolbox after explicit replacement work", async () => {
+    const apiSkill: SkillDefinition = {
+      ...selectedSkill,
+      name: "api-integration",
+      requiredToolsets: ["browser", "mcp"],
+      playbook: [
+        { id: "inspect", description: "Inspect." },
+        { id: "import", description: "Import." },
+        { id: "verify", description: "Verify." }
+      ]
+    };
+    const apiIntent: IntentRoute = {
+      ...intent,
+      taskClass: "browser-operation",
+      suggestedToolsets: ["browser", "mcp"],
+      suggestedSkills: [apiSkill],
+      primarySkill: apiSkill
+    };
+    const postmanTool: ToolDefinition = {
+      ...tool,
+      name: "mcp.postman.getCollection",
+      toolsets: ["mcp"],
+      connector: { kind: "mcp", id: "postman" },
+      riskClass: "read-only-network"
+    };
+    const { loop, runtimeRouter, providerTurnLoop, executionCheckpointController } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook: vi.fn(async () => []),
+      providerExecution: failedProviderExecution(),
+      routeIntent: apiIntent,
+      selectedSkill: apiSkill,
+      providerToolDefinitions: [postmanTool],
+      executionCompletionCapabilities: [{
+        tool: "mcp.postman.updateCollection",
+        kind: "mutation",
+        connector: { kind: "mcp", id: "postman" }
+      }, {
+        tool: "mcp.postman.getCollection",
+        kind: "verification",
+        verifies: ["mcp.postman.updateCollection"],
+        connector: { kind: "mcp", id: "postman" }
+      }],
+      enableExecutionCheckpoint: true
+    });
+    await loop.handle({
+      text: "Import all six APIs into Postman and verify the update.",
+      channel: "cli",
+      trustedWorkspace: true
+    });
+    const conversationIntent: IntentRoute = {
+      ...intent,
+      taskClass: "conversation",
+      labels: ["conversation"],
+      suggestedToolsets: [],
+      suggestedSkills: [],
+      primarySkill: undefined
+    };
+    vi.mocked(runtimeRouter.route).mockReturnValue({
+      intent: conversationIntent,
+      selectedSkill: undefined,
+      selectedSkillPromptContent: undefined,
+      selectedSkillInstructions: undefined,
+      selectedSkillResources: undefined,
+      selectedSkillSetup: undefined,
+      attachments: undefined
+    });
+
+    await loop.handle({ text: "Explain what a rain jacket is?", channel: "cli", trustedWorkspace: true });
+
+    expect(vi.mocked(runtimeRouter.route).mock.calls[1]?.[0]).not.toHaveProperty("checkpointSkillName");
+    expect(vi.mocked(runtimeRouter.route).mock.calls[1]?.[0].text).toBe("Explain what a rain jacket is?");
+    expect(vi.mocked(providerTurnLoop.run).mock.calls[1]?.[0].providerTools).toEqual([]);
+    expect(executionCheckpointController?.current()).toMatchObject({ status: "superseded" });
+  });
+
+  it("returns one aggregated blocker when current checkpoint requirements are unavailable", async () => {
+    const apiSkill: SkillDefinition = {
+      ...selectedSkill,
+      name: "api-integration",
+      requiredToolsets: ["browser", "mcp"],
+      playbook: [
+        { id: "inspect", description: "Inspect." },
+        { id: "import", description: "Import." },
+        { id: "verify", description: "Verify." }
+      ]
+    };
+    const apiIntent: IntentRoute = {
+      ...intent,
+      taskClass: "browser-operation",
+      suggestedToolsets: ["browser", "mcp"],
+      suggestedSkills: [apiSkill],
+      primarySkill: apiSkill
+    };
+    const assessCheckpointResume = vi.fn<ExecutionCapabilityPreflight["assessCheckpointResume"]>(async () => ({
+      status: "blocked" as const,
+      issues: [
+        { kind: "toolset_unavailable" as const, subject: "browser" },
+        { kind: "connector_unavailable" as const, subject: "postman" }
+      ]
+    }));
+    const { loop, providerTurnLoop, nativeToolExecutor, executionCheckpointController } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook: vi.fn(async () => []),
+      providerExecution: failedProviderExecution(),
+      routeIntent: apiIntent,
+      selectedSkill: apiSkill,
+      providerToolDefinitions: [{
+        ...tool,
+        name: "mcp.postman.getCollection",
+        toolsets: ["mcp"],
+        connector: { kind: "mcp", id: "postman" },
+        riskClass: "read-only-network"
+      }],
+      executionCompletionCapabilities: [{
+        tool: "mcp.postman.updateCollection",
+        kind: "mutation",
+        connector: { kind: "mcp", id: "postman" }
+      }, {
+        tool: "mcp.postman.getCollection",
+        kind: "verification",
+        verifies: ["mcp.postman.updateCollection"],
+        connector: { kind: "mcp", id: "postman" }
+      }],
+      enableExecutionCheckpoint: true,
+      executionCapabilityPreflight: {
+        assessCheckpointResume,
+        assessRoutedGovernedTransfer: vi.fn(async () => undefined)
+      } as unknown as ExecutionCapabilityPreflight
+    });
+    await loop.handle({
+      text: "Import all six APIs into Postman and verify the update.",
+      channel: "cli",
+      trustedWorkspace: true
+    });
+
+    const response = await loop.handle({ text: "try again", channel: "cli", trustedWorkspace: true });
+
+    expect(response.text).toContain('required toolset "browser" is unavailable');
+    expect(response.text).toContain('connector "postman" is disconnected or unavailable');
+    expect(response.finalOutcome?.completionFloor).toBe("mutation_with_verification");
+    expect(providerTurnLoop.run).toHaveBeenCalledTimes(2);
+    expect(vi.mocked(providerTurnLoop.run).mock.calls[1]?.[0]).toMatchObject({ diagnosticOnly: true, providerTools: [], toolExpansionCandidates: [] });
+    expect(nativeToolExecutor.executeDeterministicNativeTools).toHaveBeenCalledOnce();
+    expect(assessCheckpointResume).toHaveBeenCalledOnce();
+    const saved = executionCheckpointController?.current();
+    for (const text of ["ok", "why?", "Explain why the connector is unavailable"]) {
+      await loop.handle({ text, channel: "cli", trustedWorkspace: true });
+      expect(executionCheckpointController?.current()).toMatchObject({
+        id: saved!.id, status: "blocked", originalObjective: saved!.originalObjective,
+        operations: saved!.operations, artifactReferences: saved!.artifactReferences
+      });
+    }
+    expect(nativeToolExecutor.executeDeterministicNativeTools).toHaveBeenCalledOnce();
+    // A fresh registry becoming ready must not turn a diagnostic question into execution.
+    assessCheckpointResume.mockResolvedValue({ status: "ready" });
+    const beforeQuestion = executionCheckpointController?.current();
+    await loop.handle({ text: "Explain why the connection failed", channel: "cli", trustedWorkspace: true });
+    expect(executionCheckpointController?.current()).toEqual(beforeQuestion);
+    expect(vi.mocked(providerTurnLoop.run).mock.lastCall?.[0]).toMatchObject({ diagnosticOnly: true });
+    expect(nativeToolExecutor.executeDeterministicNativeTools).toHaveBeenCalledOnce();
+    await loop.handle({ text: "continue", channel: "cli", trustedWorkspace: true });
+    expect(vi.mocked(providerTurnLoop.run).mock.lastCall?.[0]).not.toHaveProperty("diagnosticOnly");
+    expect(executionCheckpointController?.current()?.id).toBe(saved!.id);
+  });
+
+  it("closes a checkpoint only from a receipt-derived completed outcome", async () => {
+    const apiSkill: SkillDefinition = {
+      ...selectedSkill,
+      name: "api-integration",
+      requiredToolsets: ["browser", "mcp"]
+    };
+    const apiIntent: IntentRoute = {
+      ...intent,
+      labels: ["api.integration"],
+      suggestedToolsets: ["browser", "mcp"],
+      suggestedSkills: [apiSkill],
+      primarySkill: apiSkill
+    };
+    const { loop, executionCheckpointController, sessionDb, sessionId } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook: vi.fn(async () => []),
+      providerExecution: successfulProviderExecution("Imported and verified."),
+      providerLoopToolExecutions: [postmanMutation(), postmanVerification()],
+      routeIntent: apiIntent,
+      selectedSkill: apiSkill,
+      executionCompletionCapabilities: [{
+        tool: "mcp.postman.updateCollection",
+        kind: "mutation",
+        connector: { kind: "mcp", id: "postman" }
+      }, {
+        tool: "mcp.postman.getCollection",
+        kind: "verification",
+        verifies: ["mcp.postman.updateCollection"],
+        connector: { kind: "mcp", id: "postman" }
+      }],
+      enableExecutionCheckpoint: true
+    });
+
+    const response = await loop.handle({
+      text: "Update the Postman collection and verify the update.",
+      channel: "cli",
+      trustedWorkspace: true
+    });
+
+    expect(response.finalOutcome?.status).toBe("completed");
+    expect(executionCheckpointController?.current()).toMatchObject({
+      status: "completed",
+      progressRevision: 1
+    });
+    expect(hydratableExecutionCheckpoint({
+      events: await sessionDb.listEvents(sessionId),
+      sessionId,
+      profileId: "default"
+    })).toMatchObject({ status: "completed", progressRevision: 1 });
+  });
+});
+
 describe("AgentLoop provider availability gating", () => {
+  it("returns a routed governed-transfer blocker before browser, playbook, or provider work", async () => {
+    const apiSkill: SkillDefinition = {
+      ...selectedSkill,
+      name: "api-integration",
+      requiredToolsets: ["browser", "mcp"]
+    };
+    const apiIntent: IntentRoute = {
+      ...intent,
+      labels: ["api.integration"],
+      suggestedToolsets: ["browser", "mcp"],
+      suggestedSkills: [apiSkill],
+      primarySkill: apiSkill
+    };
+    const assessRoutedGovernedTransfer = vi.fn(async () => ({
+      status: "blocked" as const,
+      connectorId: "postman",
+      reasonCode: "artifact_import_missing" as const,
+      reasonCodes: ["artifact_import_missing"] as const
+    }));
+    const runSkillPlaybook = vi.fn(async () => []);
+    const { loop, providerTurnLoop, nativeToolExecutor, sessionDb, sessionId } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook,
+      providerExecution: successfulProviderExecution("should not run"),
+      routeIntent: apiIntent,
+      selectedSkill: apiSkill,
+      executionCapabilityPreflight: {
+        assessRoutedGovernedTransfer
+      } as unknown as ExecutionCapabilityPreflight
+    });
+
+    const response = await loop.handle({
+      text: "Import this Swagger specification into Postman.",
+      channel: "cli",
+      trustedWorkspace: true
+    });
+
+    expect(response.finalOutcome?.status).toBe("blocked");
+    expect(response.text).toContain("artifactToolArguments");
+    expect(response.text).toContain("No browser or destination action was performed.");
+    expect(assessRoutedGovernedTransfer).toHaveBeenCalledOnce();
+    expect(nativeToolExecutor.executeDeterministicNativeTools).not.toHaveBeenCalled();
+    expect(runSkillPlaybook).not.toHaveBeenCalled();
+    expect(providerTurnLoop.run).not.toHaveBeenCalled();
+    const blockerMessage = [...await sessionDb.listMessages(sessionId)].reverse()
+      .find((message) => message.role === "agent");
+    expect(blockerMessage?.metadata?.conversationContinuationState).toEqual(expect.objectContaining({
+      status: "open",
+      source: "explicit",
+      capabilityContext: {
+        toolsets: ["browser"],
+        connectors: [{ kind: "mcp", id: "postman" }]
+      }
+    }));
+  });
+
+  it("routes an explicit retry with the blocked request and preserves connector recovery tools", async () => {
+    const apiSkill: SkillDefinition = {
+      ...selectedSkill,
+      name: "api-integration",
+      requiredToolsets: ["browser", "mcp"]
+    };
+    const apiIntent: IntentRoute = {
+      ...intent,
+      labels: ["api.integration"],
+      suggestedToolsets: ["browser", "mcp"],
+      suggestedSkills: [apiSkill],
+      primarySkill: apiSkill
+    };
+    const assessRoutedGovernedTransfer = vi.fn()
+      .mockResolvedValueOnce({
+        status: "blocked" as const,
+        connectorId: "postman",
+        reasonCode: "connector_unavailable" as const,
+        reasonCodes: ["connector_unavailable"] as const
+      })
+      .mockResolvedValueOnce(undefined);
+    const providerToolDefinitions: ToolDefinition[] = [
+      { ...tool, name: "browser.snapshot", toolsets: ["browser"] },
+      { ...tool, name: "config.mcp.status", toolsets: ["configuration"] },
+      {
+        ...tool,
+        name: "mcp.postman.getCollection",
+        toolsets: ["mcp"],
+        connector: { kind: "mcp", id: "postman" }
+      },
+      {
+        ...tool,
+        name: "mcp.linear.getIssues",
+        toolsets: ["mcp"],
+        connector: { kind: "mcp", id: "linear" }
+      }
+    ];
+    const { loop, runtimeRouter, providerTurnLoop } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook: vi.fn(async () => []),
+      providerExecution: successfulProviderExecution("done"),
+      routeIntent: apiIntent,
+      selectedSkill: apiSkill,
+      providerToolDefinitions,
+      executionCapabilityPreflight: {
+        assessRoutedGovernedTransfer
+      } as unknown as ExecutionCapabilityPreflight
+    });
+
+    await loop.handle({
+      text: "Set up these API products in Postman.",
+      channel: "cli",
+      trustedWorkspace: true
+    });
+    await loop.handle({
+      text: "why not try again",
+      channel: "cli",
+      trustedWorkspace: true
+    });
+
+    expect(vi.mocked(runtimeRouter.route).mock.calls[1]?.[0].text).toContain(
+      "Set up these API products in Postman.\nFollow-up: why not try again"
+    );
+    const retryInput = vi.mocked(providerTurnLoop.run).mock.calls[0]?.[0] as {
+      providerTools: Array<{ function: { name: string } }>;
+      conversationContinuationState?: ConversationContinuationState;
+    };
+    expect(retryInput.providerTools.map((entry) => entry.function.name)).toEqual([
+      "browser_snapshot",
+      "config_mcp_status",
+      "mcp_postman_getCollection"
+    ]);
+    expect(retryInput.conversationContinuationState?.capabilityContext).toEqual({
+      toolsets: ["browser"],
+      connectors: [{ kind: "mcp", id: "postman" }]
+    });
+  });
+
+  it("propagates approval and secure-input handlers into the provider tool loop independently", async () => {
+    const { loop, providerTurnLoop } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook: vi.fn(async () => []),
+      providerExecution: successfulProviderExecution("done")
+    });
+    const onApprovalRequest = vi.fn(async () => "approved" as const);
+    const onSecureInputRequest = vi.fn(async () => ({
+      status: "cancelled" as const,
+      destinationLabel: "Protected destination",
+      persisted: false
+    }));
+
+    await loop.handle({
+      text: "use the test skill",
+      channel: "cli",
+      trustedWorkspace: true,
+      onApprovalRequest,
+      onSecureInputRequest
+    });
+
+    expect(providerTurnLoop.run).toHaveBeenCalledWith(expect.objectContaining({
+      onApprovalRequest,
+      onSecureInputRequest
+    }));
+  });
+
+  it("uses the selected skill's bounded provider inventory", async () => {
+    const providerToolDefinitions: ToolDefinition[] = [
+      { ...tool, name: "plan", toolsets: ["core"] },
+      tool,
+      { ...tool, name: "browser.snapshot", toolsets: ["browser"] },
+      { ...tool, name: "mcp.postman.getCollection", toolsets: ["mcp"] }
+    ];
+    const { loop, providerTurnLoop } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook: vi.fn(async () => []),
+      providerExecution: successfulProviderExecution("done"),
+      providerToolDefinitions
+    });
+
+    await loop.handle({ text: "use the test skill", channel: "cli", trustedWorkspace: true });
+
+    const runInput = vi.mocked(providerTurnLoop.run).mock.calls[0]?.[0] as {
+      providerTools: Array<{ function: { name: string } }>;
+    };
+    expect(runInput.providerTools.map((entry) => entry.function.name)).toEqual([
+      "files_read"
+    ]);
+  });
+
+  it("exposes zero provider tools for low-confidence conversation", async () => {
+    const providerToolDefinitions: ToolDefinition[] = [
+      { ...tool, name: "plan", toolsets: ["core"] },
+      tool,
+      { ...tool, name: "browser.snapshot", toolsets: ["browser"] }
+    ];
+    const { loop, providerTurnLoop } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook: vi.fn(async () => []),
+      providerExecution: successfulProviderExecution("done"),
+      providerToolDefinitions,
+      routeIntent: { ...intent, taskClass: "conversation", confidence: 0.35, suggestedToolsets: [] },
+      selectedSkill: null
+    });
+
+    await loop.handle({ text: "hello", channel: "cli", trustedWorkspace: true });
+
+    const runInput = vi.mocked(providerTurnLoop.run).mock.calls[0]?.[0] as {
+      providerTools: Array<{ function: { name: string } }>;
+    };
+    expect(runInput.providerTools).toEqual([]);
+  });
+
+  it("narrows a low-confidence turn when the user explicitly names a configured connector", async () => {
+    const providerToolDefinitions: ToolDefinition[] = [
+      { ...tool, name: "plan", toolsets: ["core"] },
+      tool,
+      { ...tool, name: "browser.snapshot", toolsets: ["browser"] },
+      {
+        ...tool,
+        name: "collections.get",
+        toolsets: ["mcp"],
+        connector: { kind: "mcp", id: "postman" }
+      },
+      {
+        ...tool,
+        name: "issues.get",
+        toolsets: ["mcp"],
+        connector: { kind: "mcp", id: "linear" }
+      }
+    ];
+    const { loop, providerTurnLoop, sessionDb, sessionId } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook: vi.fn(async () => []),
+      providerExecution: successfulProviderExecution("done"),
+      providerToolDefinitions,
+      routeIntent: { ...intent, confidence: 0.35, suggestedToolsets: [] },
+      selectedSkill: null
+    });
+
+    await loop.handle({
+      text: "Add the requests to Postman.",
+      channel: "cli",
+      trustedWorkspace: true
+    });
+
+    const runInput = vi.mocked(providerTurnLoop.run).mock.calls[0]?.[0] as {
+      providerTools: Array<{ function: { name: string } }>;
+    };
+    expect(runInput.providerTools.map((entry) => entry.function.name)).toEqual(["collections_get"]);
+    expect(await sessionDb.listEvents(sessionId)).toContainEqual(expect.objectContaining({
+      kind: "provider-tool-inventory",
+      phase: "initial",
+      tools: ["collections_get"],
+      addedTools: ["collections_get"],
+      nativeSchemaTokens: expect.any(Number)
+    }));
+  });
+
+  it("keeps browser actions beside Postman for the active-session wording from the MTN journey", async () => {
+    const providerToolDefinitions: ToolDefinition[] = [
+      { ...tool, name: "plan", toolsets: ["core"] },
+      { ...tool, name: "browser.status", toolsets: ["browser", "core"] },
+      { ...tool, name: "browser.snapshot", toolsets: ["browser"] },
+      { ...tool, name: "browser.click", toolsets: ["browser"] },
+      { ...tool, name: "browser.tabs", toolsets: ["browser"] },
+      { ...tool, name: "browser.switch_tab", toolsets: ["browser"] },
+      {
+        ...tool,
+        name: "mcp.postman.getCollection",
+        toolsets: ["mcp"],
+        connector: { kind: "mcp", id: "postman" }
+      },
+      {
+        ...tool,
+        name: "mcp.postman.updateCollection",
+        toolsets: ["mcp"],
+        connector: { kind: "mcp", id: "postman" }
+      },
+      {
+        ...tool,
+        name: "mcp.linear.getIssues",
+        toolsets: ["mcp"],
+        connector: { kind: "mcp", id: "linear" }
+      }
+    ];
+    const { loop, providerTurnLoop, sessionRuntimeContext } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook: vi.fn(async () => []),
+      providerExecution: successfulProviderExecution("done"),
+      providerToolDefinitions,
+      routeIntent: { ...intent, confidence: 0.35, suggestedToolsets: [] },
+      selectedSkill: null
+    });
+    sessionRuntimeContext.setBrowserState({
+      sessionStatus: "active",
+      sessionId: "active-browser:main",
+      freshness: "current"
+    });
+
+    await loop.handle({
+      text: "okay great - now i want you to click on the tiktok connect app shown there. you'll see 6 products listed under them. i want you to get all 6 products set up in our postman collection.",
+      channel: "cli",
+      trustedWorkspace: true
+    });
+
+    const runInput = vi.mocked(providerTurnLoop.run).mock.calls[0]?.[0] as {
+      providerTools: Array<{ function: { name: string } }>;
+    };
+    const names = runInput.providerTools.map((entry) => entry.function.name);
+    expect(names).toEqual(expect.arrayContaining([
+      "browser_snapshot",
+      "browser_click",
+      "browser_tabs",
+      "browser_switch_tab",
+      "mcp_postman_getCollection",
+      "mcp_postman_updateCollection"
+    ]));
+    expect(names).not.toContain("mcp_linear_getIssues");
+  });
+
+  it("keeps a deterministically executed image tool out of the provider inventory", async () => {
+    const providerToolDefinitions: ToolDefinition[] = [
+      { ...tool, name: "plan", toolsets: ["core"] },
+      { ...tool, name: "image.generate", toolsets: ["media"] },
+      { ...tool, name: "browser.snapshot", toolsets: ["browser"] }
+    ];
+    const executionPlanReader: ExecutionPlanReader = {
+      current: () => ({
+        objective: "Generate and inspect an image",
+        originTurnId: "turn-1",
+        revision: 1,
+        status: "active",
+        items: [{ id: "generate", content: "Generate the image", status: "in_progress" }],
+        requirements: [{ id: "image", itemId: "generate", tool: "image.generate", capability: "read" }],
+        capabilityPreflight: {
+          status: "ready",
+          assessments: [{
+            requirementId: "image",
+            itemId: "generate",
+            tool: "image.generate",
+            capability: "read",
+            status: "ready",
+            resolution: {
+              canonicalTool: "image.generate",
+              riskClass: "read-only-local",
+              classification: "read"
+            }
+          }]
+        }
+      })
+    };
+    const { loop, providerTurnLoop } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook: vi.fn(async () => []),
+      providerExecution: successfulProviderExecution("done"),
+      providerToolDefinitions,
+      executionPlanReader,
+      routeIntent: { ...intent, nativeIntent: "image-generation", suggestedToolsets: ["media"] },
+      nativeToolExecutions: [{
+        tool: { ...tool, name: "image.generate", toolsets: ["media"] },
+        decision: "allow",
+        riskClass: "read-only-local",
+        result: { ok: true, content: "generated image" }
+      }]
+    });
+
+    await loop.handle({ text: "Generate an image.", channel: "cli", trustedWorkspace: true });
+
+    const runInput = vi.mocked(providerTurnLoop.run).mock.calls[0]?.[0] as {
+      providerTools: Array<{ function: { name: string } }>;
+    };
+    expect(runInput.providerTools.map((entry) => entry.function.name)).not.toContain("image_generate");
+  });
+
+  it("persists the bounded parent abort source for provider-loop cancellation", async () => {
+    const controller = new AbortController();
+    const liveEvents: RuntimeEvent[] = [];
+    const { loop, sessionDb, sessionId, trajectoryRecorder } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook: vi.fn(async () => []),
+      providerExecution: successfulProviderExecution("late response"),
+      onProviderTurnRun: () => controller.abort("stuck-loop")
+    });
+
+    await loop.handle({
+      text: "long-running request",
+      channel: "cli",
+      trustedWorkspace: true,
+      signal: controller.signal,
+      onEvent: (event) => {
+        liveEvents.push(event);
+      }
+    });
+
+    expect(await sessionDb.listEvents(sessionId)).toContainEqual(expect.objectContaining({
+      kind: "agent-cancelled",
+      reason: "cancelled during provider/tool loop",
+      abortSource: "stuck-loop"
+    }));
+    expect(liveEvents).toContainEqual(expect.objectContaining({
+      kind: "agent-cancelled",
+      reason: "cancelled during provider/tool loop",
+      abortSource: "stuck-loop"
+    }));
+    expect(trajectoryRecorder.snapshot().events).toContainEqual(expect.objectContaining({
+      kind: "agent-cancelled",
+      data: expect.objectContaining({
+        reason: "cancelled during provider/tool loop",
+        abortSource: "stuck-loop"
+      })
+    }));
+  });
+
   it("persists and returns only the deterministic acknowledgement for delegated answer ownership", async () => {
     const delegatedExecution: ToolExecutionRecord = {
       ...execution,
@@ -703,13 +1657,13 @@ describe("AgentLoop provider availability gating", () => {
   });
 
   it("persists conversation continuation when the assistant promises follow-up work", async () => {
-    const { loop, sessionDb, sessionId } = await createAgentLoop({
+    const { loop, sessionDb, sessionId, trajectoryRecorder } = await createAgentLoop({
       canRunProvider: true,
       runSkillPlaybook: vi.fn(async () => []),
       providerExecution: successfulProviderExecution("Let me inspect provider routing.")
     });
 
-    await loop.handle({
+    const response = await loop.handle({
       text: "why did the model switch?",
       channel: "cli",
       trustedWorkspace: true
@@ -722,6 +1676,13 @@ describe("AgentLoop provider availability gating", () => {
       promisedAction: "inspect provider routing",
       source: "heuristic"
     });
+    expect(response.finalOutcome).toMatchObject({
+      status: "blocked",
+      terminationCause: "normal",
+      completionFloor: "none"
+    });
+    expect(agent?.metadata?.finalOutcome).toMatchObject({ status: "blocked" });
+    expect(trajectoryRecorder.snapshot().outcome).toMatchObject({ success: false, status: "blocked" });
   });
 
   it("passes open conversation continuation state into an acknowledgement turn", async () => {
@@ -737,7 +1698,8 @@ describe("AgentLoop provider availability gating", () => {
         "I inspected the provider routing path and found the model switch comes from fallback selection after the primary route fails, with metadata persisted on the assistant message."
       ),
       toolExecutions: [],
-      iterations: 1
+      iterations: 1,
+      terminationCause: "normal"
     });
     await loop.handle({ text: "okay", channel: "cli", trustedWorkspace: true });
 
@@ -750,6 +1712,88 @@ describe("AgentLoop provider availability gating", () => {
     });
     const latestAgent = [...await sessionDb.listMessages(sessionId)].reverse().find((message) => message.role === "agent");
     expect(latestAgent?.metadata?.conversationContinuationState).toMatchObject({ status: "satisfied" });
+  });
+
+  it("reuses only observed browser and connector surfaces on a continued turn", async () => {
+    const browserExecution: ToolExecutionRecord = {
+      tool: { ...tool, name: "browser.snapshot", toolsets: ["browser"] },
+      decision: "allow",
+      riskClass: "read-only-network",
+      result: { ok: true, content: "bounded browser state" }
+    };
+    const postmanExecution: ToolExecutionRecord = {
+      tool: {
+        ...tool,
+        name: "mcp.postman.getCollection",
+        toolsets: ["mcp"],
+        connector: { kind: "mcp", id: "postman" }
+      },
+      decision: "allow",
+      riskClass: "read-only-network",
+      result: { ok: true, content: "bounded collection state" }
+    };
+    const providerToolDefinitions: ToolDefinition[] = [
+      { ...tool, name: "plan", toolsets: ["core"] },
+      { ...tool, name: "browser.click", toolsets: ["browser"] },
+      { ...tool, name: "browser.switch_tab", toolsets: ["browser"] },
+      postmanExecution.tool,
+      {
+        ...tool,
+        name: "mcp.postman.updateCollection",
+        toolsets: ["mcp"],
+        connector: { kind: "mcp", id: "postman" }
+      },
+      {
+        ...tool,
+        name: "mcp.linear.getIssues",
+        toolsets: ["mcp"],
+        connector: { kind: "mcp", id: "linear" }
+      }
+    ];
+    const { loop, providerTurnLoop, sessionRuntimeContext } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook: vi.fn(async () => []),
+      providerExecution: successfulProviderExecution("I'll finish the protected Postman update next."),
+      providerLoopToolExecutions: [browserExecution, postmanExecution],
+      providerToolDefinitions,
+      routeIntent: { ...intent, confidence: 0.35, suggestedToolsets: [] },
+      selectedSkill: null
+    });
+    sessionRuntimeContext.setBrowserState({
+      sessionStatus: "active",
+      sessionId: "active-browser:main",
+      freshness: "current"
+    });
+
+    await loop.handle({
+      text: "Set up the app key and secret in Postman.",
+      channel: "cli",
+      trustedWorkspace: true
+    });
+    vi.mocked(providerTurnLoop.run).mockResolvedValueOnce({
+      providerExecution: successfulProviderExecution("I continued the existing browser and Postman work."),
+      toolExecutions: [],
+      iterations: 1,
+      terminationCause: "normal"
+    });
+    await loop.handle({ text: "let's do this [pasted text]", channel: "cli", trustedWorkspace: true });
+
+    const continuedInput = vi.mocked(providerTurnLoop.run).mock.calls[1]?.[0] as {
+      providerTools: Array<{ function: { name: string } }>;
+      conversationContinuationState?: { capabilityContext?: unknown };
+    };
+    const names = continuedInput.providerTools.map((entry) => entry.function.name);
+    expect(names).toEqual(expect.arrayContaining([
+      "browser_click",
+      "browser_switch_tab",
+      "mcp_postman_getCollection",
+      "mcp_postman_updateCollection"
+    ]));
+    expect(names).not.toContain("mcp_linear_getIssues");
+    expect(continuedInput.conversationContinuationState?.capabilityContext).toEqual({
+      toolsets: ["browser"],
+      connectors: [{ kind: "mcp", id: "postman" }]
+    });
   });
 
   it("ignores retired activeTaskState metadata", async () => {
@@ -790,7 +1834,8 @@ describe("AgentLoop provider availability gating", () => {
     vi.mocked(providerTurnLoop.run).mockResolvedValueOnce({
       providerExecution: successfulProviderExecution("The README is already concise and does not need a rewrite for this request."),
       toolExecutions: [],
-      iterations: 1
+      iterations: 1,
+      terminationCause: "normal"
     });
     await loop.handle({ text: "Can you review the README?", channel: "cli", trustedWorkspace: true });
 
@@ -812,13 +1857,15 @@ describe("AgentLoop provider availability gating", () => {
     vi.mocked(providerTurnLoop.run).mockResolvedValueOnce({
       providerExecution: successfulProviderExecution("The README is already concise and does not need a rewrite for this request."),
       toolExecutions: [],
-      iterations: 1
+      iterations: 1,
+      terminationCause: "normal"
     });
     await loop.handle({ text: "Can you review the README?", channel: "cli", trustedWorkspace: true });
     vi.mocked(providerTurnLoop.run).mockResolvedValueOnce({
       providerExecution: successfulProviderExecution("Okay."),
       toolExecutions: [],
-      iterations: 1
+      iterations: 1,
+      terminationCause: "normal"
     });
     await loop.handle({ text: "okay", channel: "cli", trustedWorkspace: true });
 
@@ -841,7 +1888,8 @@ describe("AgentLoop provider availability gating", () => {
     vi.mocked(providerTurnLoop.run).mockResolvedValueOnce({
       providerExecution: successfulProviderExecution("Okay, stopping."),
       toolExecutions: [],
-      iterations: 1
+      iterations: 1,
+      terminationCause: "normal"
     });
     await loop.handle({ text: "stop", channel: "cli", trustedWorkspace: true });
 
@@ -916,7 +1964,12 @@ describe("AgentLoop provider availability gating", () => {
     expect(response.text).toBe("I completed the requested actions but did not produce any visible output.");
     expect(trajectoryRecorder.snapshot().outcome).toEqual({
       success: false,
-      summary: "Provider turn succeeded but returned empty visible content."
+      status: "failed",
+      terminationCause: "normal",
+      completionFloor: "none",
+      confirmedActions: [],
+      uncertainActions: [],
+      summary: "Turn failed."
     });
   });
 
@@ -963,7 +2016,8 @@ describe("AgentLoop provider availability gating", () => {
     vi.mocked(providerTurnLoop.run).mockResolvedValueOnce({
       providerExecution: successfulProviderToolCallExecution(""),
       toolExecutions: [artifactExecution],
-      iterations: 1
+      iterations: 1,
+      terminationCause: "normal"
     });
     await sessionDb.appendMessage({
       sessionId,
@@ -1064,8 +2118,10 @@ describe("AgentLoop provider availability gating", () => {
       trustedWorkspace: true
     });
 
-    const agentMessages = (await sessionDb.listMessages(sessionId)).filter((message) => message.role === "agent");
+    const messages = await sessionDb.listMessages(sessionId);
+    const agentMessages = messages.filter((message) => message.role === "agent");
     const metadata = agentMessages[0]?.metadata;
+    expect(metadata?.respondingToTurnId).toBe(messages.find((message) => message.role === "user")?.id);
     expect(metadata?.provider).toBe("test-provider/test-model");
     expect(metadata?.providerFallbackUsed).toBe(false);
     expect(metadata?.providerPrimaryFailureClass).toBeUndefined();
@@ -1265,6 +2321,207 @@ describe("AgentLoop provider availability gating", () => {
     });
   });
 
+  it("preserves a successful Postman mutation when the provider later fails", async () => {
+    const learning = { observeTurn: vi.fn(async () => undefined) } as unknown as SkillLearningManager;
+    const { loop, sessionDb, sessionId, trajectoryRecorder } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook: vi.fn(async () => []),
+      providerExecution: failedProviderExecution(),
+      providerLoopToolExecutions: [postmanMutation()],
+      skillLearningManager: learning
+    });
+
+    const response = await loop.handle({
+      text: "Update the Postman collection and verify it.",
+      channel: "cli",
+      trustedWorkspace: true
+    });
+
+    expect(response.finalOutcome).toEqual({
+      status: "partially_completed",
+      terminationCause: "provider_failed",
+      completionFloor: "mutation_with_verification",
+      confirmedActions: [expect.objectContaining({
+        toolCallId: "call-postman-update",
+        tool: "mcp.postman.updateCollection",
+        status: "confirmed",
+        verification: "not_verified"
+      })],
+      uncertainActions: []
+    });
+    expect(response.skillOutcomes).toEqual([expect.objectContaining({ status: "partial" })]);
+    expect(response.text).toContain("Confirmed actions:");
+    expect(response.text).toContain("The confirmed actions remain confirmed");
+    expect(response.text).not.toContain("raw-postman-secret");
+    expect(response.text).not.toContain("private collection contents");
+    expect(response.text).not.toContain("private Postman collection response");
+    expect(trajectoryRecorder.snapshot().outcome).toMatchObject({
+      success: false,
+      status: "partially_completed",
+      confirmedActions: [expect.objectContaining({ toolCallId: "call-postman-update" })]
+    });
+    const finalMessage = (await sessionDb.listMessages(sessionId)).filter((message) => message.role === "agent").at(-1);
+    expect(finalMessage?.metadata?.finalOutcome).toEqual(response.finalOutcome);
+    expect(vi.mocked(learning.observeTurn)).toHaveBeenCalledWith(expect.objectContaining({
+      outcomeStatus: "partial"
+    }));
+  });
+
+  it("records one truthful incomplete outcome when requested Postman mutation produced only reads", async () => {
+    const learning = { observeTurn: vi.fn(async () => undefined) } as unknown as SkillLearningManager;
+    const { loop, sessionDb, sessionId, trajectoryRecorder } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook: vi.fn(async () => []),
+      providerExecution: successfulProviderExecution("I inspected the collection."),
+      providerLoopToolExecutions: [postmanRead()],
+      skillLearningManager: learning
+    });
+
+    const response = await loop.handle({
+      text: "Update the Postman collection.",
+      channel: "cli",
+      trustedWorkspace: true
+    });
+    const messages = await sessionDb.listMessages(sessionId);
+    const agent = [...messages].reverse().find((message) => message.role === "agent");
+    const events = await sessionDb.listEvents(sessionId);
+    const diagnosis = diagnoseSessionExecution({ sessionId, events, providerUsage: [] });
+
+    expect(response.finalOutcome).toMatchObject({
+      status: "partially_completed",
+      terminationCause: "normal",
+      completionFloor: "mutation",
+      confirmedActions: []
+    });
+    expect(agent?.metadata?.finalOutcome).toEqual(response.finalOutcome);
+    expect(events).toContainEqual(expect.objectContaining({
+      kind: "execution-final-outcome-recorded",
+      status: "partially_completed",
+      terminationCause: "normal",
+      completionFloor: "mutation"
+    }));
+    expect(diagnosis.finalOutcome).toEqual({
+      status: "partially_completed",
+      terminationCause: "normal",
+      completionFloor: "mutation"
+    });
+    expect(learning.observeTurn).toHaveBeenCalledWith(expect.objectContaining({ outcomeStatus: "partial" }));
+    expect(trajectoryRecorder.snapshot().outcome).toMatchObject({
+      success: false,
+      status: "partially_completed",
+      terminationCause: "normal",
+      completionFloor: "mutation"
+    });
+  });
+
+  it("records browser no-progress as incomplete even when its stop receipt is provider-successful", async () => {
+    const { loop, sessionDb, sessionId } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook: vi.fn(async () => []),
+      providerExecution: successfulProviderExecution(
+        "I stopped because repeated browser observations showed no state change."
+      ),
+      providerTerminationCause: "browser_no_progress",
+      providerLoopToolExecutions: [postmanRead()]
+    });
+
+    const response = await loop.handle({
+      text: "Update the Postman collection from the browser page.",
+      channel: "cli",
+      trustedWorkspace: true
+    });
+    const events = await sessionDb.listEvents(sessionId);
+
+    expect(response.finalOutcome).toMatchObject({
+      status: "partially_completed",
+      terminationCause: "browser_no_progress",
+      completionFloor: "mutation"
+    });
+    expect(events).toContainEqual(expect.objectContaining({
+      kind: "execution-final-outcome-recorded",
+      status: "partially_completed",
+      terminationCause: "browser_no_progress"
+    }));
+  });
+
+  it("does not render Mission-incomplete copy after authoritative mutation verification", async () => {
+    const stalePlan: ExecutionPlan = {
+      objective: "Update and verify Postman",
+      originTurnId: "stale-turn",
+      revision: 1,
+      status: "active",
+      items: [
+        { id: "update", content: "Update Postman", status: "in_progress" },
+        { id: "verify", content: "Verify Postman", status: "pending" }
+      ]
+    };
+    const { loop } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook: vi.fn(async () => []),
+      providerExecution: successfulProviderExecution("The Mission is incomplete."),
+      providerLoopToolExecutions: [postmanMutation(), postmanVerification()],
+      executionPlanReader: { current: () => stalePlan }
+    });
+
+    const response = await loop.handle({
+      text: "Update the Postman collection and verify it.",
+      channel: "cli",
+      trustedWorkspace: true
+    });
+
+    expect(response.finalOutcome).toMatchObject({
+      status: "completed",
+      confirmedActions: [{
+        toolCallId: "call-postman-update",
+        verification: "verified"
+      }]
+    });
+    expect(response.text).toContain("authoritative execution receipts");
+    expect(response.text).not.toContain("Mission is incomplete");
+  });
+
+  it("records an uncertain receipt when cancellation interrupts a consequential execution", async () => {
+    const controller = new AbortController();
+    const learning = { observeTurn: vi.fn(async () => undefined) } as unknown as SkillLearningManager;
+    const { loop, sessionDb, sessionId, trajectoryRecorder } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook: vi.fn(async () => []),
+      providerExecution: successfulProviderExecution("late response"),
+      providerLoopToolExecutions: [postmanMutation({ result: undefined })],
+      skillLearningManager: learning,
+      onProviderTurnRun: () => controller.abort("stop")
+    });
+
+    const response = await loop.handle({
+      text: "Update Postman.",
+      channel: "cli",
+      trustedWorkspace: true,
+      signal: controller.signal
+    });
+
+    expect(response.finalOutcome).toEqual({
+      status: "cancelled",
+      terminationCause: "cancelled",
+      completionFloor: "mutation",
+      confirmedActions: [],
+      uncertainActions: [expect.objectContaining({
+        toolCallId: "call-postman-update",
+        status: "uncertain"
+      })]
+    });
+    expect(response.text).toContain("Uncertain actions:");
+    expect(trajectoryRecorder.snapshot().outcome).toMatchObject({
+      success: false,
+      status: "cancelled",
+      uncertainActions: [expect.objectContaining({ toolCallId: "call-postman-update" })]
+    });
+    const finalMessage = (await sessionDb.listMessages(sessionId)).filter((message) => message.role === "agent").at(-1);
+    expect(finalMessage?.metadata?.finalOutcome).toEqual(response.finalOutcome);
+    expect(vi.mocked(learning.observeTurn)).toHaveBeenCalledWith(expect.objectContaining({
+      outcomeStatus: "cancelled"
+    }));
+  });
+
   it("returns a deterministic local spending denial without a provider-authored explanation", async () => {
     const denialReason = "SESSION_LIMIT_EXHAUSTED" as const;
     const providerExecution: ProviderExecutionResult = {
@@ -1319,15 +2576,110 @@ describe("AgentLoop provider availability gating", () => {
     expect(saveTrajectory).toHaveBeenCalledTimes(1);
     expect(saveTrajectory).toHaveBeenCalledWith(expect.objectContaining({
       id: trajectoryRecorder.trajectoryId,
-      outcome: {
+      outcome: expect.objectContaining({
         success: true,
+        status: "completed",
+        terminationCause: "normal",
+        completionFloor: "none",
+        confirmedActions: [],
+        uncertainActions: [],
         summary: "Turn completed."
-      },
+      }),
       events: expect.arrayContaining([
         expect.objectContaining({ kind: "assistant-output" }),
         expect.objectContaining({ kind: "session-end" })
       ])
     }));
+  });
+
+  it("clears a prior trajectory outcome without letting a stale Mission downgrade the next turn", async () => {
+    const savedTrajectories: Array<ReturnType<TrajectoryRecorder["snapshot"]>> = [];
+    const saveTrajectory = vi.fn(async (trajectory: ReturnType<TrajectoryRecorder["snapshot"]>) => {
+      savedTrajectories.push(structuredClone(trajectory));
+    });
+    let currentPlan: ExecutionPlan | undefined;
+    let providerRuns = 0;
+    let outcomeObservedDuringSecondTurn: unknown = "not-observed";
+    const { loop } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook: vi.fn(async () => []),
+      providerExecution: successfulProviderExecution("done"),
+      trajectoryStore: { saveTrajectory },
+      executionPlanReader: { current: () => currentPlan },
+      onProviderTurnRun: () => {
+        providerRuns += 1;
+        if (providerRuns === 2) {
+          outcomeObservedDuringSecondTurn = savedTrajectories.at(-1)?.outcome;
+        }
+      }
+    });
+
+    const first = await loop.handle({
+      text: "summarize the current state",
+      channel: "cli",
+      trustedWorkspace: true
+    });
+    expect(first.finalOutcome?.status).toBe("completed");
+
+    currentPlan = {
+      objective: "Update and verify Postman",
+      originTurnId: "turn-2",
+      revision: 1,
+      status: "active",
+      items: [
+        { id: "inspect", content: "Inspect Postman", status: "in_progress" },
+        { id: "update", content: "Update Postman", status: "pending" },
+        { id: "verify", content: "Verify Postman", status: "pending" }
+      ]
+    };
+    const second = await loop.handle({
+      text: "summarize the Postman and MTN work",
+      channel: "cli",
+      trustedWorkspace: true
+    });
+
+    expect(outcomeObservedDuringSecondTurn).toBeUndefined();
+    expect(second.finalOutcome?.status).toBe("completed");
+    expect(savedTrajectories.at(-1)?.outcome).toMatchObject({
+      success: true,
+      status: "completed"
+    });
+  });
+
+  it("does not carry a model-authored blocker into the provider loop", async () => {
+    const executionPlanController = new ExecutionPlanController(new ExecutionPlanStore());
+    await executionPlanController.write({
+      objective: "Authenticate the account",
+      items: [{
+        id: "credentials",
+        content: "Collect corrected credentials",
+        status: "blocked",
+        blocker: { kind: "user_input_required", summary: "Provide corrected credentials." }
+      }]
+    }, "turn-auth");
+    let planAtProviderStart: ExecutionPlan | undefined;
+    const { loop, providerTurnLoop } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook: vi.fn(async () => []),
+      providerExecution: successfulProviderExecution("Requesting protected credentials again."),
+      executionPlanController,
+      onProviderTurnRun: () => {
+        planAtProviderStart = executionPlanController.current();
+      }
+    });
+
+    await loop.handle({
+      text: "yeah lets retry",
+      channel: "cli",
+      trustedWorkspace: true
+    });
+
+    expect(providerTurnLoop.run).toHaveBeenCalledOnce();
+    expect(planAtProviderStart).toMatchObject({
+      status: "active",
+      items: [{ id: "credentials", status: "pending" }]
+    });
+    expect(planAtProviderStart?.items[0]).not.toHaveProperty("blocker");
   });
 
   it("does not fail a completed turn when final trajectory persistence fails", async () => {
@@ -1654,6 +3006,41 @@ describe("AgentLoop provider availability gating", () => {
     }));
   });
 
+  it("injects visited-site recall for an explicit last-session request", async () => {
+    const recall = vi.fn(async () => ({
+      query: "Pull up the developer website we visited in the last session.",
+      blocks: [],
+      diagnostics: {
+        rawHitCount: 0,
+        groupedSessionCount: 0,
+        returnedSessionCount: 0,
+        fallbackCount: 0,
+        warnings: []
+      }
+    }));
+    const { loop, providerTurnLoop } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook: vi.fn(async () => []),
+      sessionRecallService: { recall }
+    });
+
+    await loop.handle({
+      text: "Pull up the developer website we visited in the last session.",
+      channel: "cli",
+      trustedWorkspace: true
+    });
+
+    expect(recall).toHaveBeenCalledWith(
+      "Pull up the developer website we visited in the last session.",
+      { focus: "visited-sites" }
+    );
+    expect(providerTurnLoop.run).toHaveBeenCalledTimes(1);
+    const runInput = vi.mocked(providerTurnLoop.run).mock.calls[0]?.[0] as {
+      memoryPromptContext?: { diagnostics?: { recallTriggered: boolean } };
+    };
+    expect(runInput.memoryPromptContext?.diagnostics?.recallTriggered).toBe(true);
+  });
+
   it("continues ordinary turns when omitted recall decision event recording fails", async () => {
     const recall = vi.fn();
     const { loop, providerTurnLoop, sessionDb, sessionId } = await createAgentLoop({
@@ -1709,11 +3096,13 @@ describe("AgentLoop provider availability gating", () => {
       runSkillPlaybook: vi.fn(async () => []),
       sessionRecallService: { recall }
     });
+    const liveEvents: RuntimeEvent[] = [];
 
     await loop.handle({
       text: "What did we decide last time?",
       channel: "cli",
-      trustedWorkspace: true
+      trustedWorkspace: true,
+      onEvent: (event) => { liveEvents.push(event); }
     });
 
     expect(recall).toHaveBeenCalledWith("What did we decide last time?");
@@ -1730,11 +3119,70 @@ describe("AgentLoop provider availability gating", () => {
       entryIds: ["source-session"]
     }));
     const events = await sessionDb.listEvents(sessionId);
+    expect(events.filter((event) => event.kind === "session-recall-stage")).toEqual([
+      expect.objectContaining({
+        kind: "session-recall-stage",
+        stage: "started",
+        focus: "general",
+        sourceSessionIds: [],
+        resultCount: 0
+      }),
+      expect.objectContaining({
+        kind: "session-recall-stage",
+        stage: "completed",
+        focus: "general",
+        sourceSessionIds: ["source-session"],
+        resultCount: 1
+      })
+    ]);
+    expect(liveEvents.filter((event) => event.kind === "session-recall-stage")).toEqual(
+      events.filter((event) => event.kind === "session-recall-stage")
+    );
     expect(events).toContainEqual(expect.objectContaining({
       kind: "session-recall-decision",
       triggered: true,
       sourceSessionIds: ["source-session"]
     }));
+  });
+
+  it("passes the visible history query as an excluded current-session message", async () => {
+    const recall = vi.fn(async () => ({
+      query: "look at our session history and find what websites we visited",
+      blocks: [],
+      diagnostics: {
+        rawHitCount: 0,
+        groupedSessionCount: 0,
+        returnedSessionCount: 0,
+        fallbackCount: 0,
+        warnings: []
+      }
+    }));
+    const { loop, sessionDb, sessionId } = await createAgentLoop({
+      canRunProvider: true,
+      runSkillPlaybook: vi.fn(async () => []),
+      sessionRecallService: { recall }
+    });
+
+    await loop.handle({
+      text: "look at our session history and find what websites we visited",
+      channel: "cli",
+      trustedWorkspace: true
+    });
+    const current = (await sessionDb.listMessages(sessionId)).find((message) =>
+      message.role === "user" && message.content.includes("session history")
+    );
+    expect(current).toBeDefined();
+
+    expect(recall).toHaveBeenCalledWith(
+      "look at our session history and find what websites we visited",
+      {
+        focus: "visited-sites",
+        currentSession: {
+          sessionId,
+          excludeMessageIds: [current!.id]
+        }
+      }
+    );
   });
 
   it("continues explicit recall turns when triggered recall decision event recording fails", async () => {

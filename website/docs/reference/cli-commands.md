@@ -8,14 +8,18 @@ sidebar_position: 1
 
 EstaCoda is a command-line agent system. Every surface that mutates state, inspects configuration, or changes runtime behavior is reachable from the terminal. This page documents the implemented command families. It does not document planned or pending behavior.
 
-## Global option
+## Global options
 
 ```bash
 estacoda --profile <id> <command>
 estacoda -p <id> <command>
+estacoda --continue [prompt-or-slash-command]
+estacoda -c [prompt-or-slash-command]
 ```
 
 The `--profile` / `-p` flag selects a profile for the current command only. It does not change `active-profile.json`. Only `estacoda profile use <name>` changes the active profile. The flag is valid before any command.
+
+`--continue` / `-c` explicitly resumes the last CLI session for the selected profile and current workspace. Bare `estacoda` starts fresh. The continuation flag is valid for an interactive launch, one-shot prompt, or slash command, but not for standalone operator commands that dispatch before a conversational runtime.
 
 ---
 
@@ -65,6 +69,8 @@ Checks:
 - Pack registry validity
 
 **Exit code:** 0 if ready, 1 if warnings exist.
+
+Use `estacoda verify vision` for the selected profile's bilingual vision route proof. Fully local route chains run directly; a hosted selected route or possible hosted fallback requires `--consent-hosted`. The command is read-only and exits 0 only when the configured route returns a successful result.
 
 ---
 
@@ -280,9 +286,15 @@ See [Scheduled Jobs](../user-guide/cron.md) for the full cron behavior model.
 
 ## Sessions
 
+Bare `estacoda` starts a fresh CLI session on every launch. Resume is always explicit.
+
 ```bash
+estacoda --continue                      # continue the last session for this profile/workspace
+estacoda sessions                       # interactively choose and resume a recent session
+estacoda sessions open <session-id>     # resume a known session by id
 estacoda sessions list                  # recent sessions with attached surfaces
 estacoda sessions show <session-id>     # session detail + surface pointers
+estacoda sessions diagnose <session-id> # bounded, redacted execution diagnostics
 estacoda sessions current               # current runtime session
 estacoda sessions attach <surface> <id> <session-id>
 estacoda sessions detach <surface> <id>
@@ -293,11 +305,18 @@ estacoda sessions compact <session-id> [--topic <topic>]
 
 Valid surfaces: `cli`, `telegram`, `discord`, `whatsapp`, `email`.
 
-**State touched:** SQLite session DB (`~/.estacoda/sessions.sqlite`).
+**State touched:** SQLite session DB (`~/.estacoda/sessions.sqlite`) and the version 2 CLI continuation index (`~/.estacoda/cli-sessions.json`) when a conversational runtime launches or switches.
 
-**Profile boundary:** Sessions are profile-scoped. `sessions recall` is bounded to the active profile and workspace when metadata is available.
+**Profile boundary:** Resume targets and continuation pointers are keyed and revalidated by selected profile and current workspace. Ended, internal, child, cross-profile, and cross-workspace sessions are rejected. `sessions recall` is bounded to the active profile and workspace when metadata is available.
+
+**Execution diagnosis:** `sessions diagnose` is read-only and profile-authorized. It summarizes provider usage, tool activity, Mission progress, execution evidence, and protected-authentication transition receipts without printing prompts, messages, tool payloads, protected labels, browser content, URLs, private paths, secrets, or token-derived identifiers. A protected delivery-to-submit provider seam is reported as `no` only when an atomic receipt proves it; otherwise it is `unknown`.
+
+**Picker behavior:** In a TTY, bare `estacoda sessions` shows up to 20 resumable user-facing root sessions with user activity from the selected profile and current workspace. It displays session number and a sanitized description, with start time, last activity, and immutable origin on the focused row. Enter resumes the selection through normal setup and workspace-trust checks; Escape cancels. `sessions list` remains the non-interactive operator listing.
+
+**`--continue` behavior:** The flag may be combined with an interactive launch, one-shot prompt, or slash command. It is rejected with standalone CLI operator commands that dispatch before a conversational runtime. Missing, malformed, or stale scoped pointers fail closed and direct the user to `estacoda sessions`.
 
 **Failure modes:**
+- `sessions open <session-id>` uses a generic unavailable error for missing or out-of-scope targets so it does not disclose other profiles or workspaces.
 - `sessions compact` is non-rotating in this implementation; it does not adopt a compacted child session.
 - Attach/detach requires the session to exist in the active profile.
 
@@ -420,11 +439,14 @@ estacoda browser disable
 estacoda tools                          # list available tools grouped by toolset
 estacoda mcp status                     # configured MCP servers and readiness
 estacoda mcp reload                     # reload MCP config
+estacoda mcp setup --name postman --command npx --args @postman/postman-mcp-server --env-ref POSTMAN_API_KEY=POSTMAN_API_KEY
 ```
 
-**State touched:** None for `tools`. `mcp reload` refreshes the runtime tool registry from current config.
+`--env-ref CHILD_KEY=PROFILE_ENV_KEY` forwards only the named secret from the selected profile `.env` when the MCP server starts. It stores the variable names in config, never the secret value.
 
-**Failure modes:** MCP servers missing from config are not errors; they simply do not appear.
+**State touched:** None for `tools`. `mcp setup` updates the selected profile config. `mcp reload` refreshes the runtime tool registry from current config.
+
+**Failure modes:** MCP servers missing from config are not errors; they simply do not appear. A missing or invalid `--env-ref` leaves that server unavailable and does not start its process.
 
 ---
 

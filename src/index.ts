@@ -3,8 +3,8 @@ import { resolveHomeDir } from "./config/home-dir.js";
 import { loadRuntimeConfig, type LoadedRuntimeConfig } from "./config/runtime-config.js";
 import { resolveStateHome } from "./config/state-home.js";
 import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "./config/profile-home.js";
-import { PersistentCliSessionStore } from "./cli/cli-session-store.js";
 import { parseGlobalCliOptions, runCliCommand } from "./cli/cli.js";
+import { PersistentCliSessionStore } from "./cli/cli-session-store.js";
 import type { SessionDB } from "./contracts/session.js";
 import { canRunInteractive } from "./ui/terminal-capabilities.js";
 import { createRuntime } from "./runtime/create-runtime.js";
@@ -22,7 +22,9 @@ import { renderPlain } from "./ui/renderers/plain-renderer.js";
 import type { UiLocale } from "./contracts/ui.js";
 import { createSQLiteSessionDB } from "./session/session-setup.js";
 import { scheduleStartupUpdatePrefetch, shouldScheduleStartupUpdatePrefetch } from "./lifecycle/startup-update.js";
-import { createSessionId, resolveStartupSessionId } from "./session/session-id.js";
+import { createSessionId } from "./session/session-id.js";
+import { resolveSessionForResume } from "./session/session-resume.js";
+import { resolveSessionLaunchIntent } from "./session/session-launch-intent.js";
 import { GatewayApprovalQueue } from "./gateway/approval-queue.js";
 import { ForegroundTaskHost } from "./tasks/foreground-task-host.js";
 import { SQLiteTaskStore } from "./tasks/sqlite-task-store.js";
@@ -39,6 +41,7 @@ async function main(): Promise<void> {
     process.exit(1);
   }
   let argv = parsedGlobalOptions.argv;
+  const continueLastSession = parsedGlobalOptions.continueSession === true;
   const homeDir = resolveHomeDir();
 
   // Handle --version / -v immediately, before any async init
@@ -46,6 +49,11 @@ async function main(): Promise<void> {
     const version = await getPackageVersion();
     console.log(`estacoda ${version}`);
     process.exit(0);
+  }
+
+  if (continueLastSession && canDispatchBeforeRuntime(argv)) {
+    console.error("--continue cannot be combined with a standalone CLI command. Use it with an interactive launch, one-shot prompt, or slash command.");
+    process.exit(1);
   }
 
   let workspaceRoot = process.cwd();
@@ -74,6 +82,7 @@ async function main(): Promise<void> {
   const profileId = parsedGlobalOptions.profileId ?? readActiveProfile({ homeDir })?.profileId ?? defaultProfileId();
   const trustStore = new WorkspaceTrustStore({ path: stateHome.trustJsonPath });
   let setupLaunchHandoffCompleted = false;
+  let sessionHandoff: { readonly sessionId: string; readonly workspaceRoot: string } | undefined;
 
   if (argv[0] === "setup") {
     const setupResult = await runSetupStartup({
@@ -123,7 +132,13 @@ async function main(): Promise<void> {
       }
     });
 
-    if (command.handled) {
+    if (command.sessionHandoff !== undefined) {
+      sessionHandoff = command.sessionHandoff;
+      if (command.output.length > 0) {
+        console.log(command.output);
+      }
+      argv = [];
+    } else if (command.handled) {
       if (command.output.length > 0) {
         console.log(command.output);
       }
@@ -144,6 +159,11 @@ async function main(): Promise<void> {
 
     workspaceRoot = launchResult.workspaceRoot;
     launchLocale = launchResult.locale;
+  }
+
+  if (sessionHandoff !== undefined && sessionHandoff.workspaceRoot !== workspaceRoot) {
+    console.error("The selected session belongs to a different workspace. Run `estacoda sessions` again from this workspace.");
+    process.exit(1);
   }
 
   let config: LoadedRuntimeConfig;
@@ -278,14 +298,50 @@ async function main(): Promise<void> {
   }
 
   const sessionDb = await openLocalSessionDb();
-  const restoredSessionId = await cliSessionStore.getSessionId(workspaceRoot);
-  const startupSessionId = resolveStartupSessionId(restoredSessionId);
+  const launchIntent = resolveSessionLaunchIntent({
+    argv,
+    continueSession: continueLastSession,
+    selectedSessionId: sessionHandoff?.sessionId,
+  });
+  let startupSessionId: string;
+  if (launchIntent.kind === "continue") {
+    const continuedSessionId = await cliSessionStore.getSessionId({ profileId, workspaceRoot });
+    if (continuedSessionId === undefined) {
+      await sessionDb.close();
+      console.error("No previous session is available for this profile and workspace. Run `estacoda sessions` to choose one.");
+      process.exit(1);
+    }
+    const resolution = await resolveSessionForResume({
+      sessionDb,
+      profileId,
+      workspaceRoot,
+      sessionId: continuedSessionId,
+    });
+    if (!resolution.ok) {
+      await sessionDb.close();
+      console.error("The previous session is no longer resumable in this profile and workspace. Run `estacoda sessions` to choose another.");
+      process.exit(1);
+    }
+    startupSessionId = resolution.sessionId;
+  } else if (launchIntent.kind === "open") {
+    startupSessionId = launchIntent.sessionId;
+  } else {
+    startupSessionId = createSessionId();
+  }
 
   const runtime = await buildRuntime({
     sessionId: startupSessionId,
-    sessionDb
+    sessionDb,
+    ...(launchIntent.kind === "new"
+      ? { sessionMetadata: { kind: "interactive-root", originSurface: "cli" } }
+      : {}),
   });
-  await cliSessionStore.setSessionId(workspaceRoot, runtime.sessionId);
+  const rememberCliSession = async (sessionId: string): Promise<void> => {
+    await cliSessionStore.setSessionId({ profileId, workspaceRoot, sessionId }).catch(() => {
+      console.warn("Warning: EstaCoda could not remember this session for `--continue`.");
+    });
+  };
+  await rememberCliSession(runtime.sessionId);
   if (shouldScheduleStartupUpdatePrefetch(argv, canRunInteractive())) {
     scheduleStartupUpdatePrefetch({
       homeDir: stateHome.homeDir,
@@ -363,11 +419,13 @@ async function main(): Promise<void> {
           }
         },
         refreshRuntime: async (options) => {
+          const preserveSession = options?.preserveSession === true;
           const nextRuntime = await buildRuntime({
-            sessionId: options?.preserveSession === true ? runtime.sessionId : createSessionId(),
-            sessionDb: await openLocalSessionDb()
+            sessionId: preserveSession ? runtime.sessionId : createSessionId(),
+            sessionDb: await openLocalSessionDb(),
+            ...(preserveSession ? {} : { sessionMetadata: { kind: "interactive-root", originSurface: "cli" } }),
           });
-          await cliSessionStore.setSessionId(workspaceRoot, nextRuntime.sessionId);
+          await rememberCliSession(nextRuntime.sessionId);
           return nextRuntime;
         },
         switchRuntime: async (sessionId) => {
@@ -375,7 +433,7 @@ async function main(): Promise<void> {
             sessionId,
             sessionDb: await openLocalSessionDb()
           });
-          await cliSessionStore.setSessionId(workspaceRoot, nextRuntime.sessionId);
+          await rememberCliSession(nextRuntime.sessionId);
           return nextRuntime;
         },
         modelSwitchContext
@@ -401,7 +459,10 @@ async function main(): Promise<void> {
       runtime,
       refreshRuntime: async (options) => buildRuntime({
         sessionId: options?.preserveSession === true ? runtime.sessionId : createSessionId(),
-        sessionDb: await openLocalSessionDb()
+        sessionDb: await openLocalSessionDb(),
+        ...(options?.preserveSession === true
+          ? {}
+          : { sessionMetadata: { kind: "interactive-root", originSurface: "cli" } }),
       }),
       modelSwitchContext,
       output,
@@ -427,7 +488,8 @@ async function main(): Promise<void> {
   const oneShot = await Promise.race([
     runOneShotPrompt({
       runtime,
-      argv
+      argv,
+      locale: config.ui.language === "ar" ? "ar" : "en"
     }),
     new Promise<never>((_, reject) => {
       setTimeout(() => {

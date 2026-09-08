@@ -1285,6 +1285,67 @@ describe("reviewed setup apply executor", () => {
     ]);
   });
 
+  it("applies every reviewed Vision Analysis route mode and clears stale dedicated fields", async () => {
+    const cases: Array<{
+      routeMode: "automatic" | "main" | "dedicated" | "disabled" | "fallback";
+      provider: string;
+      enabled: boolean;
+      fallbackToMain: boolean;
+      model?: string;
+    }> = [
+      { routeMode: "automatic", provider: "auto", enabled: true, fallbackToMain: false },
+      { routeMode: "main", provider: "main", enabled: true, fallbackToMain: false },
+      { routeMode: "disabled", provider: "auto", enabled: false, fallbackToMain: false },
+      { routeMode: "dedicated", provider: "local", enabled: true, fallbackToMain: false, model: "vision-local" },
+      { routeMode: "fallback", provider: "local", enabled: true, fallbackToMain: true, model: "vision-local" },
+    ];
+
+    for (const testCase of cases) {
+      await mkdir(dirname(profileConfigPath(tempDir)), { recursive: true });
+      await writeFile(profileConfigPath(tempDir), JSON.stringify({
+        model: { provider: "local", id: "local-test-model" },
+        auxiliaryModels: {
+          vision: {
+            provider: "openai",
+            id: "stale-vision-model",
+            baseUrl: "https://stale.example/v1",
+            apiKeyEnv: "STALE_KEY",
+            enabled: true,
+          },
+        },
+      }, null, 2), "utf8");
+      const plan = auxiliaryPlan({
+        auxiliaryTask: "vision",
+        routeMode: testCase.routeMode,
+        ...(testCase.model === undefined ? {} : { provider: testCase.provider, model: testCase.model }),
+        hostedProcessing: "local-only",
+        timeoutMs: 45_000,
+        maxConcurrency: 2,
+      });
+
+      const result = await applyReviewedSetupPlanOperations(plan, {
+        homeDir: tempDir,
+        workspaceRoot,
+      });
+      const config = JSON.parse(await readFile(profileConfigPath(tempDir), "utf8")) as {
+        model?: { provider?: string; id?: string };
+        auxiliaryModels?: Record<string, Record<string, unknown>>;
+      };
+
+      expect(result.ok, testCase.routeMode).toBe(true);
+      expect(config.model).toEqual({ provider: "local", id: "local-test-model" });
+      expect(config.auxiliaryModels?.vision).toEqual({
+        provider: testCase.provider,
+        ...(testCase.model === undefined ? {} : { id: testCase.model }),
+        timeoutMs: 45_000,
+        maxConcurrency: 2,
+        fallbackToMain: testCase.fallbackToMain,
+        hostedProcessing: "local-only",
+        enabled: testCase.enabled,
+      });
+    }
+  });
+
   it("rejects unsupported auxiliary task review values safely", async () => {
     await mkdir(dirname(profileConfigPath(tempDir)), { recursive: true });
     await writeFile(profileConfigPath(tempDir), JSON.stringify({
@@ -1308,7 +1369,7 @@ describe("reviewed setup apply executor", () => {
     };
 
     expect(result.ok).toBe(false);
-    expect(result.error).toContain("Auxiliary route apply requires");
+    expect(result.error).toContain("Vision Analysis route apply requires");
     expect(config.auxiliaryModels?.assessor).toEqual({ provider: "local", id: "assessor-local", enabled: true });
     expect(config.auxiliaryModels?.vision).toBeUndefined();
   });
@@ -1356,6 +1417,7 @@ describe("reviewed setup apply executor", () => {
         launchArgs?: string[];
         chromeFlags?: string[];
         autoLaunch?: boolean;
+        headless?: boolean;
         supervised?: boolean;
         engine?: string;
         hybridRouting?: boolean;
@@ -1374,6 +1436,7 @@ describe("reviewed setup apply executor", () => {
       launchArgs: ["--headless=new"],
       chromeFlags: ["--no-first-run", "--disable-gpu"],
       autoLaunch: true,
+      headless: true,
       supervised: true,
       engine: "cdp",
       hybridRouting: true,

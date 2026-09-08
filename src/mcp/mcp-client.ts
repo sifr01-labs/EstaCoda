@@ -3,6 +3,7 @@ import { basename, join } from "node:path";
 import { spawn, type ChildProcessWithoutNullStreams } from "node:child_process";
 import { resolveOsHomeDir } from "../config/home-dir.js";
 import { buildSafeChildEnv } from "../security/process-env.js";
+import { sanitizeMcpDiagnostic } from "./mcp-diagnostics.js";
 
 export type MCPServerTransport = "stdio" | "http";
 
@@ -87,6 +88,7 @@ export class MCPClient {
   #nextId = 1;
   #started = false;
   #stderr = "";
+  #stderrTruncated = false;
   #stdioClosedError: Error | undefined;
   readonly #pending = new Map<number, {
     resolve: (value: unknown) => void;
@@ -117,7 +119,12 @@ export class MCPClient {
     this.#url = options.url;
     this.#headers = options.headers ?? {};
     this.#timeoutMs = options.timeoutMs ?? 10_000;
-    this.#connectTimeoutMs = options.connectTimeoutMs ?? this.#timeoutMs;
+    this.#connectTimeoutMs = options.connectTimeoutMs ?? defaultMcpConnectTimeoutMs(
+      this.#transport,
+      this.#timeoutMs,
+      this.#command,
+      this.#args
+    );
     this.#fetch = options.fetch ?? defaultFetch;
   }
 
@@ -207,6 +214,8 @@ export class MCPClient {
   async #startStdio(): Promise<void> {
     const resolved = await resolveStdioCommand(this.#command!, this.#args);
     this.#stdioClosedError = undefined;
+    this.#stderr = "";
+    this.#stderrTruncated = false;
     this.#child = spawn(resolved.command, resolved.args, {
       cwd: this.#cwd,
       env: buildStdioEnv(this.#env),
@@ -219,20 +228,35 @@ export class MCPClient {
       this.#pump();
     });
     this.#child.stderr.on("data", (chunk: string) => {
-      this.#stderr += chunk;
+      if (this.#stderrTruncated) return;
+      const combined = this.#stderr + chunk;
+      if (combined.length > 16_384) {
+        // Drop the cut line so truncation cannot expose part of a credential.
+        const boundary = combined.lastIndexOf("\n", 16_384);
+        this.#stderr = boundary < 0 ? "" : combined.slice(0, boundary);
+        this.#stderrTruncated = true;
+      } else {
+        this.#stderr = combined;
+      }
     });
     this.#child.on("error", (error) => {
       this.#markStdioClosed(new Error(`MCP server ${this.#name} process error: ${error.message}`));
     });
     this.#child.on("exit", (code, signal) => {
-      this.#markStdioClosed(new Error(`MCP server ${this.#name} exited (${code ?? "null"}${signal === null ? "" : `, ${signal}`})`));
+      this.#markStdioClosed(new Error(`MCP server ${this.#name} exited (${code ?? "null"}${signal === null ? "" : `, ${signal}`})${this.#stderrDiagnostic()}`));
     });
     this.#child.on("close", (code, signal) => {
-      this.#markStdioClosed(new Error(`MCP server ${this.#name} closed (${code ?? "null"}${signal === null ? "" : `, ${signal}`})`));
+      this.#markStdioClosed(new Error(`MCP server ${this.#name} closed (${code ?? "null"}${signal === null ? "" : `, ${signal}`})${this.#stderrDiagnostic()}`));
     });
     this.#child.stdin.on("error", (error) => {
       this.#markStdioClosed(this.#stdioWriteError(error));
     });
+  }
+
+  #stderrDiagnostic(): string {
+    const diagnostic = sanitizeMcpDiagnostic(this.#stderr, Object.values(this.#env ?? {}));
+    if (diagnostic.length === 0 && this.#stderrTruncated) return "; stderr exceeded diagnostic limit";
+    return diagnostic.length === 0 ? "" : `; stderr: ${diagnostic}`;
   }
 
   async #notify(method: string, params?: unknown): Promise<void> {
@@ -270,7 +294,7 @@ export class MCPClient {
     const response = await new Promise<unknown>((resolve, reject) => {
       const timeout = setTimeout(() => {
         this.#pending.delete(id);
-        reject(new Error(`MCP request timed out: ${this.#name} ${method}`));
+        reject(new Error(`MCP request timed out: ${this.#name} ${method}${this.#stderrDiagnostic()}`));
       }, timeoutMs);
       this.#pending.set(id, {
         resolve: (value) => {
@@ -479,6 +503,26 @@ export class MCPClient {
   }
 }
 
+function defaultMcpConnectTimeoutMs(
+  transport: "stdio" | "http",
+  requestTimeoutMs: number,
+  command?: string,
+  args: readonly string[] = []
+): number {
+  // Package-runner-backed stdio connectors commonly need more than one normal
+  // request window for cold process startup and module loading. Operators can
+  // still override this explicitly per connector.
+  const executable = command?.split(/[\\/]/u).at(-1)?.toLocaleLowerCase("en-US");
+  const packageRunner = executable === "npx" || executable === "npx.cmd" ||
+    executable === "pnpx" || executable === "bunx" || executable === "uvx" ||
+    (executable === "pnpm" && args[0] === "dlx");
+  return transport === "stdio" && packageRunner
+    ? Math.max(requestTimeoutMs, 30_000)
+    : requestTimeoutMs;
+}
+
+export const __defaultMcpConnectTimeoutMsForTest = defaultMcpConnectTimeoutMs;
+
 function buildStdioEnv(customEnv: Record<string, string> | undefined): Record<string, string> {
   return buildSafeChildEnv({
     extra: customEnv
@@ -548,7 +592,13 @@ function parseNpxPackageSpec(args: string[]): {
   return undefined;
 }
 
-async function resolveNpxCachedBinary(packageName: string): Promise<string | undefined> {
+async function resolveNpxCachedBinary(packageSpec: string): Promise<string | undefined> {
+  // Exact pins are package metadata, not part of the node_modules directory.
+  // Never substitute an arbitrary cached version for a pin, range, tag or URL.
+  const parsed = /^(@[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._-]*|[a-z0-9][a-z0-9._-]*)(?:@(\d+\.\d+\.\d+(?:-[a-zA-Z0-9.-]+)?(?:\+[a-zA-Z0-9.-]+)?))?$/u.exec(packageSpec);
+  if (parsed === null) return undefined;
+  const packageName = parsed[1]!;
+  const version = parsed[2];
   const npmCacheRoot = join(resolveUserHome(), ".npm", "_npx");
   let cacheDirs: string[];
   try {
@@ -564,7 +614,9 @@ async function resolveNpxCachedBinary(packageName: string): Promise<string | und
       const packageJson = JSON.parse(await readFile(packageJsonPath, "utf8")) as {
         bin?: string | Record<string, string>;
         name?: string;
+        version?: string;
       };
+      if (packageJson.name !== packageName || (version !== undefined && packageJson.version !== version)) continue;
       const binaryName = pickPackageBinaryName(packageJson, packageName);
       if (binaryName === undefined) {
         continue;

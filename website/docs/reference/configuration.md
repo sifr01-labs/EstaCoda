@@ -180,6 +180,26 @@ Specialized routes for non-primary tasks. Unsupported auxiliary names throw duri
 | `memory_compaction` | Memory file compaction |
 | `profile_context` | Profile context generation |
 
+Vision example (auxiliary route model names use `id`, not `model`):
+
+```json
+{
+  "auxiliaryModels": {
+    "vision": {
+      "provider": "openai",
+      "id": "gpt-4o",
+      "apiKeyEnv": "OPENAI_API_KEY",
+      "hostedProcessing": "allow-with-approval",
+      "timeoutMs": 120000,
+      "maxConcurrency": 2,
+      "fallbackToMain": true
+    }
+  }
+}
+```
+
+`hostedProcessing: "local-only"` prevents hosted image egress. `allow-with-approval` delegates the decision to strict/adaptive/open runtime policy; it is not blanket consent. Vision candidates must have a registered executable adapter, runnable provider metadata, and vision capability. `contextWindowTokens`, `timeoutMs`, and `maxConcurrency` must be positive integers when set. `fallbackToMain: true` requires a vision-capable main route that also satisfies `hostedProcessing`; incompatible fallback configuration is reported instead of silently disabled. The retired `extraBody` field is ignored and stripped during normalization. Budgeted hosted calls fail closed when their provider/image cost cannot be priced safely.
+
 ### budgets
 
 Optional monetary limits on estimated model-provider spending. Budgets are disabled by default. You can configure them interactively with:
@@ -414,8 +434,8 @@ Browser backend selection.
 | `browser.hybridRouting` | boolean | Routes public HTTP(S) URLs to cloud and allowed private/internal URLs to local when configured. Does not bypass URL safety. |
 | `browser.cloudFallback` | boolean | Allows eligible Browserbase failures to fall back to local. Spend approval failures do not fall back. |
 | `browser.cloudSpendApproved` | boolean or `"pending"` | Explicit approval for billable cloud browser session creation. Credentials alone do not approve spend. |
-| `browser.summarizeSnapshots` | boolean or `"auto"` | Controls whether oversized rendered snapshots may be summarized. |
-| `browser.snapshotSummarizeThreshold` | number | Rendered snapshot character threshold before summarization is considered. |
+| `browser.summarizeSnapshots` | boolean or `"auto"` | Controls optional provider summarization after deterministic snapshot compaction. `true` explicitly uses the original rendered size; `"auto"` uses the compacted size; `false` never calls a summarizer. |
+| `browser.snapshotSummarizeThreshold` | number | Character threshold used by the selected snapshot summarization mode. |
 
 Browserbase is implemented through the browser backend and requires `BROWSERBASE_API_KEY`, `BROWSERBASE_PROJECT_ID`, and explicit `browser.cloudSpendApproved: true` before billable sessions can be created. `estacoda browser approve-cloud` sets approval, and `estacoda browser revoke-cloud` disables it. Config alone does not create Browserbase sessions. browser-use, Firecrawl browser, and Camofox remain deferred providers.
 
@@ -551,6 +571,7 @@ MCP server definitions.
       "args": ["/path/to/server.js"],
       "cwd": "/optional/cwd",
       "env": { "KEY": "value" },
+      "envRefs": { "API_TOKEN": "PROFILE_API_TOKEN" },
       "includeTools": ["tool1"],
       "excludeTools": ["tool2"],
       "trust": "conservative",
@@ -561,6 +582,140 @@ MCP server definitions.
 ```
 
 Trust levels: `conservative`, `read-only-network`, `read-only-local`.
+
+Use `env` only for non-secret literal values. `envRefs` maps a child-process variable name to a variable loaded from the selected profile `.env`; only the names are persisted in `config.json`. Missing or invalid references leave that MCP server unavailable.
+
+Reviewed MCP tools may accept protected browser values without exposing those values to the model. Declare the eligible argument locations with JSON Pointer patterns. `*` matches one array item; it does not match arbitrary object keys.
+
+```json
+{
+  "mcpServers": {
+    "records": {
+      "command": "records-mcp",
+      "protectedToolArguments": {
+        "updateRecords": {
+          "paths": ["/values/*/value"],
+          "handling": {
+            "persistence": "destination-managed",
+            "sharing": "workspace"
+          },
+          "groupedDelivery": true,
+          "browserRelay": true
+        }
+      },
+      "toolRiskClasses": {
+        "updateRecords": "external-side-effect",
+        "readRecords": "read-only-network"
+      },
+      "toolVerificationRelationships": {
+        "readRecords": ["updateRecords"]
+      }
+    }
+  }
+}
+```
+
+When one tool call contains two to eight protected browser sources, EstaCoda binds and verifies every source and destination, presents one grouped protected-transfer approval, and invokes the MCP tool once only after every value is ready. Any failure before invocation prevents the remote mutation. This is dispatch atomicity; the remote service remains responsible for its own transaction and rollback behavior.
+
+Source validation is complete and bounded rather than one-at-a-time: EstaCoda checks every source before authorization and checks every source again before reading any value. A failed group reports all affected argument IDs with safe reason codes such as `source-empty`, `source-replaced`, or `tab-mismatch`. It never includes browser text, protected values, element refs, URLs, or raw exception text. Initial validation failure performs no authorization, source read, or connector dispatch, and all acquired bindings and temporary bytes are cleaned before the result is returned.
+
+`persistence` is `none`, `destination-managed`, or `unknown`. `sharing` is `private`, `workspace`, `account`, `external`, or `unknown`. These declarations describe destination behavior for approval copy; they do not grant additional access.
+
+`groupedDelivery` and `browserRelay` default to `true` for an existing protected declaration and are enforced by the secure dispatcher. Set either to `false` when the integration does not support that capability. `toolVerificationRelationships` maps a read-only verification tool to one or more mutation tools using their unprefixed MCP names.
+
+On MCP discovery or reload, EstaCoda validates configured tool names and JSON Pointer patterns against the discovered tools and actual MCP input schemas. Unknown tools, missing or incompatible paths, duplicates, overlapping paths, and risk conflicts leave that server unavailable. Diagnostics report only whether protected delivery, grouped delivery, browser relay, result redaction, continuity, and verification are configured; they do not print protected paths or values.
+
+`redactedToolResultPaths` declares structured JSON result fields that must be replaced before an MCP result reaches the model or persistence. If the reviewed structure is absent or the response is not structured JSON, EstaCoda withholds the complete result. The reviewed `config.mcp.setup` tool accepts these structured fields. The CLI accepts the equivalent JSON objects through `--protected-tool-arguments-json`, `--redacted-tool-result-paths-json`, and `--tool-verification-relationships-json`.
+
+`continuityToolResultPaths` declares reviewed non-secret scalar identifiers and names that may be retained in the runtime-owned working set after result redaction. Successful MCP calls may also retain non-secret identifier-shaped target arguments, including schema-valid targets such as `workspace`, `collection`, and `environment`, so an accepted locator survives later prompt packing; mutation targets refresh only after success. Failed calls, undeclared MCP result fields, connector-supplied continuity metadata, free-form result text, credential-like fields or values, and session/profile/turn/tool-call identifiers are excluded. Retained facts are bounded and scoped to the current profile, session, and visible turn. Use `--continuity-tool-result-paths-json` for the CLI equivalent.
+
+`artifactToolArguments` declares exact string destinations that may receive a current-session governed browser download. The model supplies an artifact reference and receipt hash, while the runtime validates ownership, browser-download provenance, MIME type, size, origin, file state, and SHA-256 before injecting UTF-8 content immediately before the approved MCP call. Use `--artifact-tool-arguments-json` for the CLI equivalent. After raw download feedback is compacted, the provider retains only the prompt-safe reference, sanitized filename, hash, validated origin, MIME type, and size needed to reuse the receipt. Artifact contents, local paths, and arbitrary artifact metadata never become model-authored or persisted tool arguments.
+
+#### Postman protected-transfer recipe
+
+This is a reviewed configuration recipe over generic MCP behavior, not a Postman-specific Setup Editor feature. It is pinned to the inspected `@postman/postman-mcp-server` `2.11.2` minimal schemas:
+
+```json
+{
+  "mcpServers": {
+    "postman": {
+      "command": "npx",
+      "args": ["--yes", "@postman/postman-mcp-server@2.11.2"],
+      "envRefs": { "POSTMAN_API_KEY": "POSTMAN_API_KEY" },
+      "trust": "conservative",
+      "includeTools": [
+        "getAuthenticatedUser", "getWorkspaces",
+        "getCollections", "getCollection",
+        "getEnvironments", "getEnvironment",
+        "createCollection", "putCollection",
+        "createEnvironment", "putEnvironment",
+        "createSpec", "getSpec",
+        "generateCollection", "getSpecCollections"
+      ],
+      "toolRiskClasses": {
+        "getAuthenticatedUser": "read-only-network",
+        "getWorkspaces": "read-only-network",
+        "getCollections": "read-only-network",
+        "getCollection": "read-only-network",
+        "getEnvironments": "read-only-network",
+        "getEnvironment": "read-only-network",
+        "createCollection": "external-side-effect",
+        "putCollection": "external-side-effect",
+        "createEnvironment": "external-side-effect",
+        "putEnvironment": "external-side-effect",
+        "createSpec": "external-side-effect",
+        "getSpec": "read-only-network",
+        "generateCollection": "external-side-effect",
+        "getSpecCollections": "read-only-network"
+      },
+      "artifactToolArguments": {
+        "createSpec": {
+          "paths": ["/files/*/content"],
+          "allowedMimeTypes": ["application/json", "application/yaml"],
+          "maxBytes": 12582912
+        }
+      },
+      "protectedToolArguments": {
+        "createEnvironment": {
+          "paths": ["/environment/values/*/value"],
+          "handling": {
+            "persistence": "destination-managed",
+            "sharing": "workspace"
+          },
+          "groupedDelivery": true,
+          "browserRelay": true
+        },
+        "putEnvironment": {
+          "paths": ["/environment/values/*/value"],
+          "handling": {
+            "persistence": "destination-managed",
+            "sharing": "workspace"
+          },
+          "groupedDelivery": true,
+          "browserRelay": true
+        }
+      },
+      "redactedToolResultPaths": {
+        "getEnvironment": ["/environment/values/*/value"]
+      },
+      "continuityToolResultPaths": {
+        "getWorkspaces": ["/workspaces/*/id", "/workspaces/*/name"],
+        "getCollection": ["/collection/id", "/collection/name"],
+        "getEnvironment": ["/environment/id", "/environment/name"],
+        "getSpec": ["/spec/id"]
+      },
+      "toolVerificationRelationships": {
+        "getEnvironment": ["createEnvironment", "putEnvironment"],
+        "getCollection": ["createCollection", "putCollection"],
+        "getSpec": ["createSpec"],
+        "getSpecCollections": ["generateCollection"]
+      }
+    }
+  }
+}
+```
+
+Keep the Postman API key in the selected profile's `.env`. Create a dedicated environment and send its two to eight `type: "secret"` variables in one protected call, which produces one grouped approval and one remote invocation. Collections should use variable references such as `{{service_client_id}}`; never place copied credential values in collection content. When OpenAPI or Swagger is available, capture it with `browser.download`, relay its receipt to `createSpec.files[*].content`, generate the collection with `generateCollection`, and verify with the spec and collection read tools. The runtime injects the validated artifact text; do not paste it into model-authored arguments. Because `putEnvironment` replaces state, read and preserve all intended fields before using it. Review the schemas and update the pin deliberately when upgrading the MCP package.
 
 ### skills
 
@@ -623,6 +778,30 @@ Security mode and policy overrides.
 
 Modes: `strict`, `adaptive`, `open`. Default is `adaptive`.
 
+### gateway
+
+Gateway-wide behavior, including opt-in busy-queue persistence.
+
+```json
+{
+  "gateway": {
+    "messageQueue": {
+      "persistence": "memory",
+      "maxPendingPerProfile": 1000,
+      "uncertainRetentionDays": 7
+    }
+  }
+}
+```
+
+| Setting | Type / allowed values | Default | Notes |
+|---|---|---:|---|
+| `gateway.messageQueue.persistence` | `"memory"` or `"sqlite"` | `"memory"` | `memory` loses queued busy messages when the process exits. `sqlite` enables profile-scoped recovery. |
+| `gateway.messageQueue.maxPendingPerProfile` | positive integer | `1000` | Caps pending, claimed, and uncertain rows per profile; clamped to `1..10000`. |
+| `gateway.messageQueue.uncertainRetentionDays` | non-negative integer | `7` | Retains completed and uncertain rows before pruning; clamped to `0..365`. |
+
+SQLite mode persists user message content and routing/attachment descriptors in `sessions.sqlite`; it does not persist channel credentials or attachment bytes. Pending rows can recover after restart, while crash-left claimed rows become uncertain and are not replayed automatically. See [Gateway Operations](../operations/gateway-operations.md#durable-busy-queue) before enabling this security-sensitive option.
+
 ### channels
 
 Channel adapter configuration. See [Channel Configuration](../user-guide/channels.md) for full schema.
@@ -633,6 +812,10 @@ Channel adapter configuration. See [Channel Configuration](../user-guide/channel
     "telegram": {
       "enabled": true,
       "botTokenEnv": "ESTACODA_TELEGRAM_BOT_TOKEN",
+      "textDebounceMs": 1500,
+      "secureInputMode": "protected-handoff",
+      "textDebounceMaxMessages": 10,
+      "textDebounceMaxChars": 8000,
       "streaming": {
         "enabled": true,
         "editIntervalMs": 750,
@@ -644,13 +827,41 @@ Channel adapter configuration. See [Channel Configuration](../user-guide/channel
         "freshFinalAfterSeconds": 0
       },
       "busyPolicy": "reject",
-      "queueDepth": 3
+      "queueDepth": 3,
+      "busyTextCoalescing": {
+        "enabled": false,
+        "windowMs": 1500,
+        "maxMessages": 5,
+        "maxChars": 8000
+      }
     }
   }
 }
 ```
 
 Guided Telegram setup stores the bot token in the selected profile `.env` under `ESTACODA_TELEGRAM_BOT_TOKEN` and writes `botTokenEnv: "ESTACODA_TELEGRAM_BOT_TOKEN"` to config. The raw Telegram bot token must not appear in config review or setup output.
+
+Ordinary Telegram text is batched by canonical account/chat/topic session and sender. Fragments are joined with blank lines. Commands, callbacks, pairing/auth flows, attachments, and albums bypass batching. `textDebounceMs: 0` disables it, and batching does not change Telegram polling cadence or the FIFO busy queue.
+
+| Setting | Type | Default | Notes |
+|---|---|---:|---|
+| `channels.telegram.textDebounceMs` | non-negative integer | `1500` | Quiet window in milliseconds. `0` dispatches text immediately. |
+| `channels.telegram.textDebounceMaxMessages` | positive integer | `10` | Flush threshold, capped at `100`. |
+| `channels.telegram.textDebounceMaxChars` | positive integer | `8000` | Flush threshold, capped at `100000`. |
+| `channels.telegram.secureInputMode` | `"protected-handoff"`, `"direct-dm"`, or `"disabled"` | `"protected-handoff"` | Controls Telegram credential intake. `direct-dm` is an explicit convenience mode and requires both the sender user ID and private chat ID to be allowlisted. |
+
+Telegram protected input defaults to `protected-handoff`, so credential values do not enter Telegram. In explicitly configured `direct-dm` mode, an authorized private chat can arm the next message from a runtime prompt or with `/secret <label>`. Groups, channels, and topics are rejected. The captured update is intercepted before batching, durable turn storage, session history, model dispatch, memory, streaming, and progress; its value remains memory-only and one-use. Telegram and the bot transport still receive the value, and deletion is best-effort rather than a security guarantee. EstaCoda persists only a short-lived hash of the captured Telegram delivery identity to prevent a post-restart update replay from reaching the model.
+
+Enable convenience mode explicitly with `estacoda telegram configure --secure-input-mode direct-dm`. Keep `protected-handoff` when Telegram transport exposure is not acceptable.
+
+All four channel objects support optional bounded FIFO-tail text coalescing. It is disabled by default and takes effect only with `busyPolicy: "queue"`. Eligible ordinary text combines only with the final queued entry from the same canonical session and sender, without changing its FIFO position. Commands, callbacks, approvals, attachments, and media never combine, and interrupt behavior is unchanged. Reaching a limit creates a new queue entry, subject to the normal queue-depth limit.
+
+| Setting | Type | Default | Notes |
+|---|---|---:|---|
+| `channels.<channel>.busyTextCoalescing.enabled` | `boolean` | `false` | Enables queue-tail coalescing for explicit queue policy. |
+| `channels.<channel>.busyTextCoalescing.windowMs` | non-negative integer | `1500` | Maximum gap between combined queued messages, capped at `60000`. |
+| `channels.<channel>.busyTextCoalescing.maxMessages` | positive integer | `5` | Maximum component messages, capped at `100`. |
+| `channels.<channel>.busyTextCoalescing.maxChars` | positive integer | `8000` | Maximum combined text length, capped at `100000`. |
 
 Telegram streaming is configured under `channels.telegram.streaming`. It defaults to enabled for configured Telegram channels and affects Telegram delivery only. Set `channels.telegram.streaming.enabled` to `false` to opt out. It does not change session state, memory, approvals, tool execution, artifacts, or final `response.text`.
 

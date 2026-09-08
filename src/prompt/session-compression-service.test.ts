@@ -297,6 +297,263 @@ describe("SessionCompressionService", () => {
     }));
   });
 
+  it("carries only the latest unresolved execution-plan snapshot into a compacted child", async () => {
+    const { db, sessionId } = await sessionDbWithMessages(8);
+    await db.appendEvent(sessionId, {
+      kind: "execution-plan-started",
+      plan: {
+        objective: "Test APIs",
+        originTurnId: "turn-plan",
+        revision: 1,
+        status: "active",
+        items: [{ id: "test", content: "Test APIs", status: "in_progress" }]
+      }
+    });
+    await db.appendEvent(sessionId, {
+      kind: "execution-plan-updated",
+      plan: {
+        objective: "Test APIs",
+        originTurnId: "turn-plan",
+        revision: 2,
+        status: "active",
+        items: [{ id: "test", content: "Test APIs", status: "pending" }]
+      }
+    });
+    const service = new SessionCompressionService({
+      sessionDb: db,
+      config: normalizeSessionCompressionConfig({ enabled: false, protectFirstN: 1, protectLastN: 2 }),
+      ...auxiliaryHarness("plan-aware summary")
+    });
+
+    const result = await service.compactNow({
+      profileId: "profile",
+      sessionId,
+      preserveTranscript: true
+    });
+    const childEvents = await db.listEvents(result.activeSessionId);
+    const carried = childEvents.filter((event) => event.kind.startsWith("execution-plan-"));
+
+    expect(carried).toHaveLength(1);
+    expect(carried[0]).toMatchObject({
+      kind: "execution-plan-updated",
+      plan: { revision: 2, originTurnId: "turn-plan" }
+    });
+    expect(JSON.stringify(carried)).not.toContain("tool-result");
+  });
+
+  it("carries a bounded active checkpoint into the compacted child session", async () => {
+    const { db, sessionId } = await sessionDbWithMessages(8);
+    await db.appendEvent(sessionId, {
+      kind: "execution-checkpoint-updated",
+      transition: "created",
+      checkpoint: {
+        version: 1,
+        id: "checkpoint:compact",
+        sessionId,
+        profileId: "profile",
+        originTurnId: "turn-origin",
+        revision: 1,
+        progressRevision: 0,
+        originalObjective: "Import and verify APIs in Postman",
+        status: "active",
+        qualificationReasons: ["cross_system"],
+        selectedSkillName: "api-integration",
+        taskClass: "general",
+        intentLabels: ["api.integration"],
+        requiredOperations: ["read", "mutation", "verification"],
+        connectorIds: ["postman"],
+        artifactReferences: [],
+        safeFacts: [],
+        operations: [],
+        completionFloor: "mutation_with_verification",
+        createdAt: "2030-01-01T00:00:00.000Z",
+        updatedAt: "2030-01-01T00:00:00.000Z"
+      }
+    });
+    const artifactReference = { id: "artifact-compact", sha256: "a".repeat(64) };
+    await db.appendEvent(sessionId, {
+      kind: "session-artifact-registered",
+      artifact: {
+        version: 1,
+        id: artifactReference.id,
+        sessionId,
+        profileId: "profile",
+        storageKey: "objects/opaque-object",
+        kind: "data",
+        bytes: 30,
+        mimeType: "application/json",
+        sha256: artifactReference.sha256,
+        createdAt: "2030-01-01T00:01:00.000Z",
+        source: {
+          kind: "browser.download",
+          description: "Governed browser download.",
+          filename: "openapi.json",
+          origin: "https://developer.example.test"
+        }
+      }
+    });
+    await db.appendEvent(sessionId, {
+      kind: "execution-checkpoint-updated",
+      transition: "artifact_attached",
+      checkpoint: {
+        version: 1,
+        id: "checkpoint:compact",
+        sessionId,
+        profileId: "profile",
+        originTurnId: "turn-origin",
+        revision: 2,
+        progressRevision: 1,
+        originalObjective: "Import and verify APIs in Postman",
+        status: "active",
+        qualificationReasons: ["cross_system"],
+        selectedSkillName: "api-integration",
+        taskClass: "general",
+        intentLabels: ["api.integration"],
+        requiredOperations: ["read", "mutation", "verification"],
+        connectorIds: ["postman"],
+        artifactReferences: [artifactReference],
+        safeFacts: [],
+        operations: [],
+        completionFloor: "mutation_with_verification",
+        createdAt: "2030-01-01T00:00:00.000Z",
+        updatedAt: "2030-01-01T00:01:00.000Z"
+      }
+    });
+    await db.appendEvent(sessionId, {
+      kind: "execution-checkpoint-updated",
+      transition: "attempt_settled",
+      checkpoint: {
+        version: 1,
+        id: "checkpoint:compact",
+        sessionId,
+        profileId: "profile",
+        originTurnId: "turn-origin",
+        revision: 3,
+        progressRevision: 1,
+        originalObjective: "Import and verify APIs in Postman",
+        status: "retryable",
+        qualificationReasons: ["cross_system"],
+        selectedSkillName: "api-integration",
+        taskClass: "general",
+        intentLabels: ["api.integration"],
+        requiredOperations: ["read", "mutation", "verification"],
+        connectorIds: ["postman"],
+        artifactReferences: [artifactReference],
+        safeFacts: [],
+        operations: [],
+        completionFloor: "mutation_with_verification",
+        lastTerminationCause: "provider_failed",
+        createdAt: "2030-01-01T00:00:00.000Z",
+        updatedAt: "2030-01-01T00:05:00.000Z"
+      }
+    });
+    const service = new SessionCompressionService({
+      sessionDb: db,
+      config: normalizeSessionCompressionConfig({ enabled: false, protectFirstN: 1, protectLastN: 2 }),
+      ...auxiliaryHarness("checkpoint-aware summary")
+    });
+
+    const result = await service.compactNow({
+      profileId: "profile",
+      sessionId,
+      preserveTranscript: true
+    });
+    const carried = (await db.listEvents(result.activeSessionId)).filter((event) =>
+      event.kind === "execution-checkpoint-updated"
+    );
+
+    expect(carried).toHaveLength(1);
+    expect(carried[0]).toMatchObject({
+      transition: "carried_forward",
+      checkpoint: {
+        id: "checkpoint:compact",
+        sessionId: result.activeSessionId,
+        revision: 3,
+        status: "retryable"
+      }
+    });
+    const carriedArtifact = (await db.listEvents(result.activeSessionId)).find((event) =>
+      event.kind === "session-artifact-registered"
+    );
+    expect(carriedArtifact).toMatchObject({
+      artifact: {
+        id: "artifact-compact",
+        sessionId: result.activeSessionId,
+        profileId: "profile",
+        storageKey: "objects/opaque-object"
+      }
+    });
+  });
+
+  it("carries bounded evidence receipts without copying raw tool results", async () => {
+    const { db, sessionId } = await sessionDbWithMessages(8);
+    await db.appendEvent(sessionId, {
+      kind: "tool-result",
+      tool: "postman.update",
+      toolCallId: "call-1",
+      result: { ok: true, content: "secret raw collection body" }
+    });
+    await db.appendEvent(sessionId, {
+      kind: "execution-evidence-recorded",
+      toolCallId: "call-1",
+      tool: "postman.update",
+      status: "success",
+      riskClass: "external-side-effect",
+      targetSummary: "Collection A",
+      visibleTurnId: "turn-current",
+      executionEffect: {
+        kind: "mutation",
+        connector: { kind: "mcp", id: "postman" }
+      }
+    });
+    await db.appendEvent(sessionId, {
+      kind: "execution-evidence-recorded",
+      toolCallId: "call-2",
+      tool: "postman.verify",
+      status: "success",
+      riskClass: "read-only-network",
+      targetSummary: "token=secret-compaction-value",
+      visibleTurnId: "turn-current",
+      executionEffect: {
+        kind: "verification",
+        verifies: ["postman.update"],
+        connector: { kind: "mcp", id: "postman" }
+      },
+      verifiedMutation: { toolCallId: "call-1", tool: "postman.update" }
+    });
+    const service = new SessionCompressionService({
+      sessionDb: db,
+      config: normalizeSessionCompressionConfig({ enabled: false, protectFirstN: 1, protectLastN: 2 }),
+      ...auxiliaryHarness("evidence-aware summary")
+    });
+
+    const result = await service.compactNow({
+      profileId: "profile",
+      sessionId,
+      preserveTranscript: true
+    });
+    const childEvents = await db.listEvents(result.activeSessionId);
+
+    expect(childEvents).toContainEqual(expect.objectContaining({
+      kind: "execution-evidence-recorded",
+      toolCallId: "call-1",
+      targetSummary: "Collection A",
+      executionEffect: { kind: "mutation", connector: { kind: "mcp", id: "postman" } }
+    }));
+    expect(childEvents).toContainEqual(expect.objectContaining({
+      kind: "execution-evidence-recorded",
+      toolCallId: "call-2",
+      executionEffect: {
+        kind: "verification",
+        verifies: ["postman.update"],
+        connector: { kind: "mcp", id: "postman" }
+      },
+      verifiedMutation: { toolCallId: "call-1", tool: "postman.update" }
+    }));
+    expect(JSON.stringify(childEvents)).not.toContain("secret raw collection body");
+    expect(JSON.stringify(childEvents)).not.toContain("secret-compaction-value");
+  });
+
   it("compactIfNeeded can rotate hygiene compaction to a compacted child session", async () => {
     const { db, sessionId } = await sessionDbWithMessages(8);
     const service = new SessionCompressionService({
@@ -1029,7 +1286,11 @@ function forwardingSessionDb(db: InMemorySessionDB, overrides: Partial<SessionDB
   return {
     createSession: overrides.createSession ?? db.createSession.bind(db),
     getSession: overrides.getSession ?? db.getSession.bind(db),
+    getSessionForProfile: overrides.getSessionForProfile ?? db.getSessionForProfile.bind(db),
     listSessions: overrides.listSessions ?? db.listSessions.bind(db),
+    listSessionSummaries: overrides.listSessionSummaries ?? db.listSessionSummaries.bind(db),
+    hasUserMessageForProfile: overrides.hasUserMessageForProfile ?? db.hasUserMessageForProfile.bind(db),
+    setSessionTitleIfPlaceholder: overrides.setSessionTitleIfPlaceholder ?? db.setSessionTitleIfPlaceholder.bind(db),
     endSession: overrides.endSession ?? db.endSession.bind(db),
     appendMessage: overrides.appendMessage ?? db.appendMessage.bind(db),
     replaceMessages: overrides.replaceMessages ?? db.replaceMessages.bind(db),

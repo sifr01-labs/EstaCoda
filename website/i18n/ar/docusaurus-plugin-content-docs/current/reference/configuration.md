@@ -180,6 +180,26 @@ model.staleTimeoutMs / model.fallbacks[].staleTimeoutMs
 | `memory_compaction` | ضغط ملف الذاكرة |
 | `profile_context` | توليد سياق الملف الشخصي |
 
+مثال للرؤية (تستخدم أسماء نماذج المسارات المساعدة `id`، وليس `model`):
+
+```json
+{
+  "auxiliaryModels": {
+    "vision": {
+      "provider": "openai",
+      "id": "gpt-4o",
+      "apiKeyEnv": "OPENAI_API_KEY",
+      "hostedProcessing": "allow-with-approval",
+      "timeoutMs": 120000,
+      "maxConcurrency": 2,
+      "fallbackToMain": true
+    }
+  }
+}
+```
+
+يمنع `hostedProcessing: "local-only"` خروج الصورة إلى مزوّد مستضاف. أما `allow-with-approval` فيفوّض القرار إلى سياسة وقت التشغيل الصارمة/التكيفية/المفتوحة، ولا يمثل موافقة شاملة. يجب أن يملك مسار الرؤية محوّل مزوّد مسجلًا وقابلًا للتنفيذ، وبيانات مزوّد قابلة للتشغيل، ودعمًا للرؤية. يجب أن تكون `contextWindowTokens` و`timeoutMs` و`maxConcurrency` أعدادًا صحيحة موجبة عند ضبطها. يتطلب `fallbackToMain: true` مسارًا رئيسيًا داعمًا للرؤية ومتوافقًا أيضًا مع `hostedProcessing`؛ ويُبلّغ عن إعداد الرجوع غير المتوافق بدل تعطيله بصمت. يُتجاهل الحقل المتقاعد `extraBody` ويُحذف أثناء التطبيع. وتفشل الاستدعاءات المستضافة الخاضعة لميزانية بصورة مغلقة إذا تعذر تسعير تكلفة المزوّد/الصورة بأمان.
+
 ### budgets
 
 حدود مالية اختيارية للإنفاق التقديري على مزوّدي النماذج. تكون الميزانيات متوقفة افتراضيًا. يمكن ضبطها تفاعليًا عبر:
@@ -414,8 +434,8 @@ Brave Search مزود خارجي ببيانات اعتماد ويستخدم نم
 | `browser.hybridRouting` | boolean | يوجّه عناوين HTTP(S) العامة إلى السحابة والعناوين الخاصة/الداخلية المسموحة إلى المحلي عند الإعداد. لا يتجاوز أمان URL. |
 | `browser.cloudFallback` | boolean | يسمح لإخفاقات Browserbase المؤهلة بالرجوع إلى المحلي. إخفاقات موافقة الإنفاق لا ترجع. |
 | `browser.cloudSpendApproved` | boolean أو `"pending"` | موافقة صريحة لإنشاء جلسات متصفح سحابية قابلة للفوترة. بيانات الاعتماد وحدها لا توافق على الإنفاق. |
-| `browser.summarizeSnapshots` | boolean أو `"auto"` | يتحكم في إمكانية تلخيص اللقطات المعروضة الضخمة. |
-| `browser.snapshotSummarizeThreshold` | number | عتبة أحرف عرض اللقطة قبل التفكير في التلخيص. |
+| `browser.summarizeSnapshots` | boolean أو `"auto"` | يتحكم في تلخيص المزود الاختياري بعد ضغط اللقطة حتميًا. تستخدم القيمة `true` الحجم الأصلي المعروض صراحةً، ويستخدم `"auto"` الحجم المضغوط، ولا تستدعي القيمة `false` مزود التلخيص. |
+| `browser.snapshotSummarizeThreshold` | number | عتبة الأحرف التي يستخدمها وضع تلخيص اللقطة المحدد. |
 
 Browserbase مُنفّذ عبر خلفية المتصفح، ويتطلب `BROWSERBASE_API_KEY` و`BROWSERBASE_PROJECT_ID` و`browser.cloudSpendApproved: true` صريحة قبل إنشاء جلسات قابلة للفوترة. يضبط `estacoda browser approve-cloud` الموافقة، ويعطلها `estacoda browser revoke-cloud`. الإعداد وحده لا ينشئ جلسات Browserbase. تبقى browser-use وFirecrawl browser وCamofox مزودات مؤجلة.
 
@@ -551,6 +571,7 @@ STT المستضاف المستقر: OpenAI، Groq، xAI. STT المحلي يد�
       "args": ["/path/to/server.js"],
       "cwd": "/optional/cwd",
       "env": { "KEY": "value" },
+      "envRefs": { "API_TOKEN": "PROFILE_API_TOKEN" },
       "includeTools": ["tool1"],
       "excludeTools": ["tool2"],
       "trust": "conservative",
@@ -561,6 +582,131 @@ STT المستضاف المستقر: OpenAI، Groq، xAI. STT المحلي يد�
 ```
 
 مستويات الثقة: `conservative`، `read-only-network`، `read-only-local`.
+
+استخدم `env` فقط للقيم الحرفية غير السرية. يربط `envRefs` اسم متغير العملية الفرعية بمتغير محمّل من ملف `.env` للملف الشخصي المختار؛ لا يُحفظ في `config.json` سوى الأسماء. إذا كان المرجع مفقودًا أو غير صالح، يبقى خادم MCP غير متاح.
+
+يمكن للأدوات التي تمت مراجعتها استقبال قيم محمية من المتصفح من دون كشفها للنموذج. تُحفظ في الإعدادات مسارات JSON Pointer والقدرات فقط، ولا تُحفظ قيم بيانات الاعتماد:
+
+```json
+{
+  "mcpServers": {
+    "records": {
+      "toolRiskClasses": {
+        "updateRecords": "external-side-effect",
+        "readRecords": "read-only-network"
+      },
+      "protectedToolArguments": {
+        "updateRecords": {
+          "paths": ["/values/*/value"],
+          "handling": {
+            "persistence": "destination-managed",
+            "sharing": "workspace"
+          },
+          "groupedDelivery": true,
+          "browserRelay": true
+        }
+      },
+      "toolVerificationRelationships": {
+        "readRecords": ["updateRecords"]
+      }
+    }
+  }
+}
+```
+
+يتحقق EstaCoda عند اكتشاف خادم MCP أو إعادة تحميله من أسماء الأدوات والمسارات بمقارنتها مع مخططات الإدخال الفعلية. تؤدي الأداة غير المعروفة، أو المسارات المفقودة أو المتعارضة، أو تعارض تصنيف المخاطر إلى إبقاء الخادم غير متاح. تعرض التشخيصات حالة النقل المحمي، والتنقيح، والاستمرارية، والتحقق بصيغة نعم/لا فقط، ولا تعرض المسارات المحمية أو القيم السرية.
+
+يحدد `redactedToolResultPaths` حقول نتائج JSON المنظمة التي يجب استبدالها قبل وصول نتيجة MCP إلى النموذج أو التخزين. إذا غابت البنية التي تمت مراجعتها أو لم تكن الاستجابة JSON منظمة، يحجب EstaCoda النتيجة كاملة. يقبل مسار `config.mcp.setup` القابل للمراجعة هذه الحقول، وتقبل CLI الخيارات `--protected-tool-arguments-json` و`--redacted-tool-result-paths-json` و`--tool-verification-relationships-json`.
+
+يحدد `continuityToolResultPaths` معرّفات وأسماء قياسية غير سرية تمت مراجعتها ويمكن الاحتفاظ بها في مجموعة عمل يملكها وقت التشغيل بعد تنقيح النتيجة. تُستبعد حقول MCP غير المعلنة، وبيانات الاستمرارية التي يرسلها الموصل، والنص الحر للنتيجة، والمسارات أو القيم التي تبدو كبيانات اعتماد. تبقى الحقائق محدودة ومقيدة بالملف الشخصي والجلسة ورسالة المستخدم الحالية. يقبل CLI الإعداد المكافئ عبر `--continuity-tool-result-paths-json`.
+
+يحدد `artifactToolArguments` وجهات نصية دقيقة يمكنها استقبال تنزيل متصفح خاضع للحوكمة من الجلسة الحالية. يرسل النموذج مرجع `artifact://` وبصمة SHA-256 فقط، بينما يتحقق وقت التشغيل من ملكية الجلسة ومصدر `browser.download` ونوع MIME والحجم والأصل وحالة الملف والبصمة قبل حقن محتوى UTF-8 مباشرة قبل استدعاء MCP المعتمد. يقبل CLI الإعداد المكافئ عبر `--artifact-tool-arguments-json`، ولا يدخل محتوى الأثر في وسيطات كتبها النموذج أو في وسيطات الأدوات المخزنة.
+
+#### وصفة النقل المحمي إلى Postman
+
+هذه وصفة إعداد تمت مراجعتها وتستخدم سلوك MCP العام، وليست ميزة خاصة بـ Postman داخل Setup Editor. وهي مثبتة على مخططات الحد الأدنى التي تمت مراجعتها من `@postman/postman-mcp-server` بالإصدار `2.11.2`:
+
+```json
+{
+  "mcpServers": {
+    "postman": {
+      "command": "npx",
+      "args": ["--yes", "@postman/postman-mcp-server@2.11.2"],
+      "envRefs": { "POSTMAN_API_KEY": "POSTMAN_API_KEY" },
+      "trust": "conservative",
+      "includeTools": [
+        "getAuthenticatedUser", "getWorkspaces",
+        "getCollections", "getCollection",
+        "getEnvironments", "getEnvironment",
+        "createCollection", "putCollection",
+        "createEnvironment", "putEnvironment",
+        "createSpec", "getSpec",
+        "generateCollection", "getSpecCollections"
+      ],
+      "toolRiskClasses": {
+        "getAuthenticatedUser": "read-only-network",
+        "getWorkspaces": "read-only-network",
+        "getCollections": "read-only-network",
+        "getCollection": "read-only-network",
+        "getEnvironments": "read-only-network",
+        "getEnvironment": "read-only-network",
+        "createCollection": "external-side-effect",
+        "putCollection": "external-side-effect",
+        "createEnvironment": "external-side-effect",
+        "putEnvironment": "external-side-effect",
+        "createSpec": "external-side-effect",
+        "getSpec": "read-only-network",
+        "generateCollection": "external-side-effect",
+        "getSpecCollections": "read-only-network"
+      },
+      "artifactToolArguments": {
+        "createSpec": {
+          "paths": ["/files/*/content"],
+          "allowedMimeTypes": ["application/json", "application/yaml"],
+          "maxBytes": 12582912
+        }
+      },
+      "protectedToolArguments": {
+        "createEnvironment": {
+          "paths": ["/environment/values/*/value"],
+          "handling": {
+            "persistence": "destination-managed",
+            "sharing": "workspace"
+          },
+          "groupedDelivery": true,
+          "browserRelay": true
+        },
+        "putEnvironment": {
+          "paths": ["/environment/values/*/value"],
+          "handling": {
+            "persistence": "destination-managed",
+            "sharing": "workspace"
+          },
+          "groupedDelivery": true,
+          "browserRelay": true
+        }
+      },
+      "redactedToolResultPaths": {
+        "getEnvironment": ["/environment/values/*/value"]
+      },
+      "continuityToolResultPaths": {
+        "getWorkspaces": ["/workspaces/*/id", "/workspaces/*/name"],
+        "getCollection": ["/collection/id", "/collection/name"],
+        "getEnvironment": ["/environment/id", "/environment/name"],
+        "getSpec": ["/spec/id"]
+      },
+      "toolVerificationRelationships": {
+        "getEnvironment": ["createEnvironment", "putEnvironment"],
+        "getCollection": ["createCollection", "putCollection"],
+        "getSpec": ["createSpec"],
+        "getSpecCollections": ["generateCollection"]
+      }
+    }
+  }
+}
+```
+
+احتفظ بمفتاح Postman API في ملف `.env` للملف الشخصي المختار. أنشئ بيئة مخصصة وأرسل من متغيرين إلى ثمانية متغيرات من النوع `type: "secret"` في استدعاء محمي واحد؛ ينتج عن ذلك اعتماد مجمع واحد واستدعاء بعيد واحد. يجب أن تستخدم المجموعات مراجع مثل `{{service_client_id}}`، وألا تحتوي على قيم بيانات اعتماد منسوخة. عند توفر OpenAPI أو Swagger، التقطه عبر `browser.download`، ومرر إيصال الأثر إلى `createSpec.files[*].content`، ثم أنشئ المجموعة عبر `generateCollection` وتحقق منها بأدوات قراءة المواصفة والمجموعة. يحقن وقت التشغيل نص الأثر المتحقق منه؛ لا تلصقه في وسيطات يكتبها النموذج. ولأن `putEnvironment` يستبدل الحالة، اقرأ جميع الحقول المقصودة وحافظ عليها قبل استخدامه. راجع المخططات وحدّث الإصدار المثبت بصورة مقصودة عند ترقية حزمة MCP.
 
 ### skills
 
@@ -623,6 +769,30 @@ STT المستضاف المستقر: OpenAI، Groq، xAI. STT المحلي يد�
 
 الأوضاع: `strict`، `adaptive`، `open`. الافتراضي هو `adaptive`.
 
+### gateway
+
+سلوك البوابة العام، بما فيه حفظ طابور الانشغال اختياريًا.
+
+```json
+{
+  "gateway": {
+    "messageQueue": {
+      "persistence": "memory",
+      "maxPendingPerProfile": 1000,
+      "uncertainRetentionDays": 7
+    }
+  }
+}
+```
+
+| الإعداد | النوع / القيم المسموحة | الافتراضي | ملاحظات |
+|---|---|---:|---|
+| `gateway.messageQueue.persistence` | `"memory"` أو `"sqlite"` | `"memory"` | يفقد `memory` رسائل الانشغال المنتظرة عند خروج العملية. يفعّل `sqlite` استردادًا محدودًا بالملف الشخصي. |
+| `gateway.messageQueue.maxPendingPerProfile` | عدد صحيح موجب | `1000` | يحد صفوف `pending` و`claimed` و`uncertain` لكل ملف شخصي؛ ويُقيّد إلى `1..10000`. |
+| `gateway.messageQueue.uncertainRetentionDays` | عدد صحيح غير سالب | `7` | يحتفظ بصفوف `completed` و`uncertain` قبل التنظيف؛ ويُقيّد إلى `0..365`. |
+
+يحفظ وضع SQLite محتوى رسالة المستخدم وبيانات التوجيه ووصف المرفقات في `sessions.sqlite`، لكنه لا يحفظ بيانات اعتماد القنوات أو بايتات ملفات المرفقات. يمكن استرداد صفوف `pending` بعد إعادة التشغيل، بينما تتحول صفوف `claimed` التي تركها الانهيار إلى `uncertain` ولا تُعاد تلقائيًا. راجع [عمليات البوابة](../operations/gateway-operations.md#طابور-الانشغال-الدائم) قبل تفعيل هذا الخيار الحساس أمنيًا.
+
 ### channels
 
 إعدادات محول القنوات. راجع [إعدادات القنوات](../user-guide/channels.md) للمخطط الكامل.
@@ -633,6 +803,9 @@ STT المستضاف المستقر: OpenAI، Groq، xAI. STT المحلي يد�
     "telegram": {
       "enabled": true,
       "botTokenEnv": "ESTACODA_TELEGRAM_BOT_TOKEN",
+      "textDebounceMs": 1500,
+      "textDebounceMaxMessages": 10,
+      "textDebounceMaxChars": 8000,
       "streaming": {
         "enabled": true,
         "editIntervalMs": 750,
@@ -644,13 +817,36 @@ STT المستضاف المستقر: OpenAI، Groq، xAI. STT المحلي يد�
         "freshFinalAfterSeconds": 0
       },
       "busyPolicy": "reject",
-      "queueDepth": 3
+      "queueDepth": 3,
+      "busyTextCoalescing": {
+        "enabled": false,
+        "windowMs": 1500,
+        "maxMessages": 5,
+        "maxChars": 8000
+      }
     }
   }
 }
 ```
 
 الإعداد الموجّه لـ Telegram يخزن رمز البوت في `.env` الخاص بالملف الشخصي المحدد تحت `ESTACODA_TELEGRAM_BOT_TOKEN`، ويكتب `botTokenEnv: "ESTACODA_TELEGRAM_BOT_TOKEN"` في الإعدادات. يجب ألا يظهر رمز بوت Telegram الخام في مراجعة الإعدادات أو مخرجات الإعداد.
+
+تُجمع رسائل Telegram النصية العادية حسب هوية الحساب/المحادثة/الموضوع والمرسل. تُفصل الأجزاء بسطر فارغ. تتجاوز الأوامر وcallback queries ومسارات الربط/التفويض والمرفقات والألبومات هذا التجميع. تضبط القيمة `textDebounceMs: 0` الإرسال الفوري، ولا يغير التجميع إيقاع polling أو طابور FIFO عند الانشغال.
+
+| الإعداد | النوع | الافتراضي | ملاحظات |
+|---|---|---:|---|
+| `channels.telegram.textDebounceMs` | عدد صحيح غير سالب | `1500` | نافذة الهدوء بالمللي ثانية. القيمة `0` ترسل النص فورًا. |
+| `channels.telegram.textDebounceMaxMessages` | عدد صحيح موجب | `10` | حد التفريغ، وبحد أقصى `100`. |
+| `channels.telegram.textDebounceMaxChars` | عدد صحيح موجب | `8000` | حد التفريغ، وبحد أقصى `100000`. |
+
+تدعم كائنات القنوات الأربع دمجًا اختياريًا ومحدودًا لنهاية طابور FIFO. تكون الميزة معطلة افتراضيًا، ولا تعمل إلا مع `busyPolicy: "queue"`. يُدمج النص العادي المؤهل فقط مع آخر عنصر في الطابور عندما تتطابق الجلسة الأساسية والمرسل، من دون تغيير موضعه في FIFO. لا تُدمج الأوامر أو callbacks أو الموافقات أو المرفقات أو الوسائط، ولا يتغير سلوك `interrupt`. عند بلوغ أحد الحدود تُضاف الرسالة كعنصر FIFO جديد مع تطبيق حد عمق الطابور المعتاد.
+
+| الإعداد | النوع | الافتراضي | ملاحظات |
+|---|---|---:|---|
+| `channels.<channel>.busyTextCoalescing.enabled` | `boolean` | `false` | يفعّل دمج نهاية الطابور عند استخدام سياسة `queue` صراحةً. |
+| `channels.<channel>.busyTextCoalescing.windowMs` | عدد صحيح غير سالب | `1500` | أقصى فاصل بين الرسائل المدمجة، وبحد أقصى `60000`. |
+| `channels.<channel>.busyTextCoalescing.maxMessages` | عدد صحيح موجب | `5` | أقصى عدد من الرسائل المكوّنة، وبحد أقصى `100`. |
+| `channels.<channel>.busyTextCoalescing.maxChars` | عدد صحيح موجب | `8000` | أقصى طول للنص المدمج، وبحد أقصى `100000`. |
 
 يُضبط بث Telegram تحت `channels.telegram.streaming`. يكون مفعلاً افتراضيًا لقنوات Telegram المُعدّة، ويؤثر في توصيل Telegram فقط. لتعطيله، اضبط `channels.telegram.streaming.enabled` على `false`. لا يغير حالة الجلسة، أو الذاكرة، أو الموافقات، أو تنفيذ الأدوات، أو المنتجات، أو `response.text` النهائي.
 

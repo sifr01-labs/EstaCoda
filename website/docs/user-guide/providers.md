@@ -272,8 +272,8 @@ Config example:
 ```json
 {
   "auxiliaryModels": {
-    "assessor": { "provider": "openai", "model": "gpt-4o-mini", "apiKeyEnv": "OPENAI_API_KEY" },
-    "vision": { "provider": "openai", "model": "gpt-4o", "apiKeyEnv": "OPENAI_API_KEY" }
+    "assessor": { "provider": "openai", "id": "gpt-4o-mini", "apiKeyEnv": "OPENAI_API_KEY" },
+    "vision": { "provider": "openai", "id": "gpt-4o", "apiKeyEnv": "OPENAI_API_KEY", "hostedProcessing": "allow-with-approval" }
   }
 }
 ```
@@ -281,6 +281,14 @@ Config example:
 The `assessor` route drives smart approval classification. It requires a working provider executor and a runnable model. If the assessor route is missing, malformed, or fails, the system falls back to manual approval. There is no `auxiliaryModels.approval` route. The assessor route is configurable through the Setup Editor (`edit-auxiliary-model-route`) in addition to direct config edits.
 
 Missing auxiliary routes fail closed or fall back as documented by the calling subsystem. They do not crash the session.
+
+For images, a vision-capable main route handles initial attachments natively. A text-only main route uses the configured `vision` auxiliary route, and images discovered later are delivered ephemerally through the same policy. `vision.analyze`, initial attachments, `browser.vision`, and generated image artifacts share the governed dispatch path. Generated `artifact://...` references resolve inside the selected profile image cache without exposing a hidden local path. Ordinary descriptions remain native on a multimodal main route; an explicitly configured dedicated route handles specialized OCR, document, chart, screenshot, and comparison analysis. Comparison accepts two to twenty images; sets above four are validated and processed sequentially in bounded batches, while unknown custom adapters receive one image at a time unless they explicitly advertise repeated-image support. Automatic routing does not add an unnecessary auxiliary call, and explicitly turning Vision Analysis off also blocks a vision-capable main model. Every primary or fallback candidate must have a registered executable adapter, runnable provider metadata, and vision capability. Hosted image processing is contextual data egress: current attachments, explicit references, browser screenshots, and generated artifacts avoid repeated prompts in adaptive mode; agent-discovered files ask, strict mode asks, and `hostedProcessing: "local-only"` blocks hosted dispatch. Provenance is derived for every comparison source, and cache traversal or symlink escape is rejected.
+
+Vision calls normalize and bound image resources before dispatch, including per-image and aggregate bytes and animation pixels, reserve configured session/Task budget across every image for primary and fallback attempts, and return route, latency, usage, normalization, aggregate resources, and fallback metadata. Normalized intermediates remain memory-only. A missing route, unsafe source, resource-limit failure, unpriceable budgeted route, timeout, cancellation, or exhausted provider chain returns a structured failure instead of silently degrading to metadata-only analysis.
+
+Verify the effective automatic, main, dedicated hosted, dedicated local, or custom OpenAI-compatible route with `estacoda verify vision`. A fully local route chain runs the bundled bilingual fixture directly. A hosted selected route or possible hosted fallback requires `--consent-hosted` because it may send that fixture and incur cost. The check is read-only and reports capability, credentials, dispatch, latency, normalized payload, text detection, fallback, cost availability, configuration fingerprint, and fixture hash without exposing image bytes or secret values.
+
+Maintainers can run the opt-in scored release lane from a source checkout with `pnpm run eval:vision:live`; any route chain with a possible hosted destination requires `--consent-hosted` and has a `$1.00` maximum estimated exposure by default. Use `--max-cost-usd <amount>` to set another explicit run cap. Schema-v2 JSON and Markdown reports cover OCR error rates, grounded facts, hallucinations, latency, cost, payload size, actual hosted dispatches, deterministic configured-fallback execution, and approval frequency. Aggregate tolerances and stored mandatory per-case thresholds prevent prompt-injection, fallback, multi-image, or resource-boundary failures from being averaged into a pass.
 
 Auxiliary route management is available through the Setup Editor (`edit-auxiliary-model-route`).
 

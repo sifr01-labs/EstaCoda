@@ -2,6 +2,97 @@ import { describe, expect, it } from "vitest";
 import { InMemorySessionDB } from "./in-memory-session-db.js";
 
 describe("InMemorySessionDB", () => {
+  it("summarizes only eligible profile and workspace sessions with safe presentation metadata", async () => {
+    const db = new InMemorySessionDB();
+    await db.createSession({
+      id: "eligible",
+      profileId: "profile",
+      title: "EstaCoda session",
+      metadata: { workspaceRoot: "/workspace" }
+    });
+    await db.appendMessage({
+      id: "eligible-user",
+      sessionId: "eligible",
+      role: "user",
+      content: "Investigate OPENAI_API_KEY=super-secret-value",
+      channel: "cli"
+    });
+    await db.appendMessage({
+      id: "eligible-agent",
+      sessionId: "eligible",
+      role: "agent",
+      content: "Working"
+    });
+
+    await db.createSession({ id: "empty", profileId: "profile", metadata: { workspaceRoot: "/workspace" } });
+    await db.createSession({ id: "foreign-workspace", profileId: "profile", metadata: { workspaceRoot: "/other" } });
+    await db.appendMessage({ sessionId: "foreign-workspace", role: "user", content: "Other workspace" });
+    await db.createSession({ id: "other-profile", profileId: "other", metadata: { workspaceRoot: "/workspace" } });
+    await db.appendMessage({ sessionId: "other-profile", role: "user", content: "Other profile" });
+    await db.createSession({
+      id: "child",
+      profileId: "profile",
+      parentSessionId: "eligible",
+      metadata: { workspaceRoot: "/workspace" }
+    });
+    await db.appendMessage({ sessionId: "child", role: "user", content: "Child work" });
+    await db.createSession({
+      id: "internal-root",
+      profileId: "profile",
+      metadata: { workspaceRoot: "/workspace", kind: "task-operator-origin" }
+    });
+    await db.appendMessage({ sessionId: "internal-root", role: "user", content: "Task operator work" });
+    await db.createSession({ id: "ended", profileId: "profile", metadata: { workspaceRoot: "/workspace" } });
+    await db.appendMessage({ sessionId: "ended", role: "user", content: "Ended work" });
+    await db.endSession("ended", "compression");
+
+    const summaries = await db.listSessionSummaries("profile", {
+      workspaceRoot: "/workspace",
+      rootSessionsOnly: true,
+      activeSessionsOnly: true,
+      userActivityOnly: true,
+      userFacingOnly: true,
+      limit: 20
+    });
+
+    expect(summaries).toHaveLength(1);
+    expect(summaries[0]).toMatchObject({
+      session: {
+        id: "eligible",
+        title: "Investigate OPENAI_API_KEY=[REDACTED]",
+        metadata: { workspaceRoot: "/workspace", originSurface: "cli" }
+      },
+      messageCount: 2,
+      userMessageCount: 1,
+      firstUserMessage: {
+        id: "eligible-user",
+        channel: "cli"
+      }
+    });
+  });
+
+  it("does not replace an explicit title or immutable originating surface", async () => {
+    const db = new InMemorySessionDB();
+    await db.createSession({
+      id: "named",
+      profileId: "profile",
+      title: "Explicit title",
+      metadata: { originSurface: "cli", surfaceType: "telegram" }
+    });
+
+    await db.appendMessage({
+      sessionId: "named",
+      role: "user",
+      content: "First Telegram message",
+      channel: "telegram"
+    });
+
+    await expect(db.getSession("named")).resolves.toMatchObject({
+      title: "Explicit title",
+      metadata: { originSurface: "cli", surfaceType: "telegram" }
+    });
+  });
+
   it("snapshots optional logical-session spending scopes and validates inheritance", async () => {
     const db = new InMemorySessionDB();
     const configured = { maxEstimatedCostUsd: 20, warningThresholdPercent: 80 };

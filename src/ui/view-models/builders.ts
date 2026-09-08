@@ -234,14 +234,24 @@ export function buildProgressContextRailViewModel(
 
 export interface BuildPickerInput {
   readonly title: string;
+  readonly surface?: PickerViewModel["surface"];
   readonly options: readonly PickerOption[];
+  readonly columns?: PickerViewModel["columns"];
+  readonly descriptionVisibility?: PickerViewModel["descriptionVisibility"];
+  readonly instruction?: string;
+  readonly direction?: PickerViewModel["direction"];
 }
 
 export function buildPickerViewModel(input: BuildPickerInput): PickerViewModel {
   return {
     kind: "picker",
+    surface: input.surface,
     title: input.title,
     options: input.options,
+    columns: input.columns,
+    descriptionVisibility: input.descriptionVisibility,
+    instruction: input.instruction,
+    direction: input.direction,
   };
 }
 
@@ -362,6 +372,7 @@ export function buildPlainFallbackViewModel(
 export interface BuildAssistantResponseInput {
   readonly label: string;
   readonly text: string;
+  readonly taskTrace?: AssistantResponseViewModel["taskTrace"];
   readonly usageFooter?: string;
   readonly matchedSkills?: readonly string[];
   readonly progress?: readonly string[];
@@ -374,6 +385,7 @@ export function buildAssistantResponseViewModel(
     kind: "assistantResponse",
     label: input.label,
     text: input.text,
+    taskTrace: input.taskTrace,
     usageFooter: input.usageFooter,
     matchedSkills: input.matchedSkills,
     progress: input.progress,

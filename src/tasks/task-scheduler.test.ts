@@ -1764,6 +1764,7 @@ function makeGraph(
     creatorSessionId: "creator-alpha",
     rootTaskId: "task-alpha",
     originSessionId: "creator-alpha",
+    originTurnId: "visible-turn-alpha",
     source: "cli",
     executionPreference: "auto",
     creationKey: "create-alpha",

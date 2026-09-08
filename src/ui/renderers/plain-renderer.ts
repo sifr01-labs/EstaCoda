@@ -7,6 +7,9 @@ import type { UiLocale } from "../../ui/cli-ui-copy.js";
 import { chromeCopy } from "../../ui/cli-ui-copy.js";
 import { closeOpenBidiIsolates, isolateLtr, isolateRtl } from "../../ui/bidi.js";
 import { formatUsageCost } from "../usage-cost-format.js";
+import { renderTaskCompletionTrace } from "../task-completion-trace.js";
+import { renderReadOnlyTextRows } from "../papyrus/input/editableTextLayout.js";
+import type { ResolvedBidiMode } from "../papyrus/screen/bidi.js";
 import type {
   ActiveTurnSpinnerViewModel,
   ActivityTimelineViewModel,
@@ -43,7 +46,7 @@ import type {
 // Generic dispatcher
 // ─────────────────────────────────────────────────────────────
 
-export function renderPlain(viewModel: ViewModel, locale?: UiLocale): string {
+export function renderPlain(viewModel: ViewModel, locale?: UiLocale, width = 80): string {
   switch (viewModel.kind) {
     case "status":
       return renderStatus(viewModel);
@@ -74,7 +77,7 @@ export function renderPlain(viewModel: ViewModel, locale?: UiLocale): string {
     case "plainFallback":
       return renderPlainFallback(viewModel);
     case "assistantResponse":
-      return renderAssistantResponse(viewModel);
+      return renderAssistantResponse(viewModel, locale, width);
     case "conversationMessage":
       return renderConversationMessage(viewModel, locale);
     case "sessionStatusRail":
@@ -82,7 +85,7 @@ export function renderPlain(viewModel: ViewModel, locale?: UiLocale): string {
     case "shortcutHintRail":
       return renderShortcutHintRail(viewModel, locale);
     case "userPromptRail":
-      return renderUserPromptRail(viewModel);
+      return renderUserPromptRail(viewModel, width);
     case "activeTurnSpinner":
       return renderActiveTurnSpinner(viewModel, locale);
     case "toolActivityRail":
@@ -507,6 +510,10 @@ function toolActivityStatusMarker(status: ToolActivityRailEvent["status"]): stri
 // ──────────────────────────────────────
 
 export function renderPicker(vm: PickerViewModel): string {
+  if (vm.columns !== undefined && vm.columns.length > 0) {
+    return renderColumnPicker(vm);
+  }
+
   const lines: string[] = [vm.title];
 
   for (let i = 0; i < vm.options.length; i++) {
@@ -519,7 +526,62 @@ export function renderPicker(vm: PickerViewModel): string {
     }
   }
 
+  if (vm.instruction !== undefined) {
+    lines.push("", asciiPickerText(vm.instruction));
+  }
+
   return lines.join("\n");
+}
+
+function renderColumnPicker(vm: PickerViewModel): string {
+  const columns = vm.columns ?? [];
+  const rows = vm.options.map((option) => columns.map((column) =>
+    option.cells?.[column.key] ?? (column === columns[columns.length - 1] ? option.label : "")
+  ));
+  const widths = columns.map((column, columnIndex) => Math.max(
+    measureTextWidth(column.header),
+    ...rows.map((row) => measureTextWidth(row[columnIndex] ?? ""))
+  ));
+  const renderCells = (values: readonly string[]) => columns.map((column, columnIndex) => {
+    const value = pickerCellText(values[columnIndex] ?? "", vm.direction, columnIndex === 0);
+    return padVisibleAlign(value, widths[columnIndex] ?? 0, column.alignment ?? "left");
+  }).join("  ");
+  const lines = [
+    vm.direction === "rtl" ? isolateRtl(vm.title) : vm.title,
+    `   ${renderCells(columns.map((column) => column.header))}`,
+    `   ${columns.map((_column, index) => "-".repeat(widths[index] ?? 0)).join("  ")}`,
+  ];
+
+  for (let index = 0; index < vm.options.length; index += 1) {
+    const option = vm.options[index]!;
+    lines.push(`${option.selected ? ">" : " "}  ${renderCells(rows[index] ?? [])}`);
+    if (
+      option.description !== undefined &&
+      (vm.descriptionVisibility !== "selected" || option.selected === true)
+    ) {
+      const description = asciiPickerText(option.description);
+      lines.push(`   ${" ".repeat((widths[0] ?? 0) + 2)}${vm.direction === "rtl" ? isolateRtl(description) : description}`);
+    }
+  }
+
+  if (vm.instruction !== undefined) {
+    const instruction = asciiPickerText(vm.instruction);
+    lines.push("", vm.direction === "rtl" ? isolateRtl(instruction) : instruction);
+  }
+  return lines.join("\n");
+}
+
+function asciiPickerText(value: string): string {
+  return value.replaceAll("↑↓", "Up/Down").replaceAll("·", "|");
+}
+
+function pickerCellText(
+  value: string,
+  direction: PickerViewModel["direction"],
+  technical: boolean
+): string {
+  if (direction !== "rtl" || value.length === 0) return value;
+  return technical || !/\p{Script=Arabic}/u.test(value) ? isolateLtr(value) : isolateRtl(value);
 }
 
 // ──────────────────────────────────────
@@ -1151,9 +1213,23 @@ export function renderStartupDashboard(vm: StartupDashboardViewModel, locale: Ui
 // Command Result
 // ──────────────────────────────────────
 
-export function renderAssistantResponse(vm: AssistantResponseViewModel): string {
+export function renderAssistantResponse(
+  vm: AssistantResponseViewModel,
+  locale: UiLocale = "en",
+  width = 80
+): string {
   const plainLabel = /^[\x00-\x7F]+$/.test(vm.label) ? vm.label : "EstaCoda";
   const lines: string[] = [
+    ...(vm.taskTrace === undefined
+      ? []
+      : [
+          ...renderTaskCompletionTrace(vm.taskTrace, {
+            width: Math.max(1, Math.floor(width)),
+            locale: locale === "ar" ? "ar" : "en",
+            useUnicode: false,
+          }),
+          "",
+        ]),
     `${plainLabel}:`,
     ...vm.text.split("\n"),
   ];
@@ -1285,9 +1361,18 @@ export function renderShortcutHintRail(vm: ShortcutHintRailViewModel, locale?: U
   return `> ${locale === "ar" ? isolateRtl(text) : text}`;
 }
 
-export function renderUserPromptRail(vm: UserPromptRailViewModel): string {
-  return vm.text
-    .split(/\r\n|\r|\n/u)
+export function renderUserPromptRail(
+  vm: UserPromptRailViewModel,
+  width = 80,
+  bidiMode: ResolvedBidiMode = "native"
+): string {
+  const textWidth = Math.max(1, width - 2);
+  return renderReadOnlyTextRows(vm.text, {
+    maxCells: textWidth,
+    wrap: true,
+    alignRtl: false,
+    bidi: bidiMode,
+  })
     .map((line, index) => `${index === 0 ? ">" : " "} ${line}`)
     .join("\n");
 }

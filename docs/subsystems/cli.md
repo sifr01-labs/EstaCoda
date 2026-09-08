@@ -104,6 +104,14 @@ estacoda trace failures <trajectory-id>
 
 ## Memory And Session Recall Commands
 
+Interactive session selection:
+
+```bash
+estacoda sessions
+```
+
+In a TTY, this opens a two-column picker for the 20 most recently active resumable root sessions in the selected profile and current workspace. The focused row shows when the session started, its last activity time, and whether it originated in CLI, Telegram, or another channel. Pressing Enter resumes that session through the normal setup, trust, and runtime launch path. `estacoda sessions list` remains the non-interactive operator listing.
+
 Top-level session recall commands:
 
 ```bash
@@ -120,6 +128,14 @@ estacoda sessions compact <session-id> [--topic <topic>]
 ```
 
 This calls the active runtime's session compaction service. It is semantic session compression for a session transcript; it does not rewrite durable Task state or run Memory File Compaction. This top-level CLI command is non-rotating in the current implementation; it does not create/adopt a compacted child session.
+
+Read-only execution diagnostics:
+
+```bash
+estacoda sessions diagnose <session-id>
+```
+
+The command authorizes the target against the selected profile, then projects bounded provider usage, tool activity, Mission transitions, execution evidence, and protected-authentication receipts. It never reconstructs or prints prompts, messages, tool inputs or results, protected labels, browser page content, URLs, private paths, secrets, or token-derived identifiers. Protected authentication is limited to transition verdicts; delivery-to-submit is reported as having no provider seam only when an atomic protected-delivery receipt proves it, and otherwise remains unknown.
 
 Memory-file compaction is exposed as runtime tools, not as a top-level CLI command in this implementation:
 
@@ -159,7 +175,7 @@ In-session commands:
 
 | Command | Purpose |
 |---------|---------|
-| `/sessions` | List active sessions |
+| `/sessions` | Open the workspace-scoped picker in an interactive CLI; list sessions where picker adoption is unavailable |
 | `/search <query>` | Search session history |
 | `/session recall <query>` | Summarize historical session matches |
 | `/sessions recall <query>` | Alias for session recall where supported |
@@ -239,7 +255,9 @@ Onboarding provider credential prompts and Telegram token prompts share the setu
 
 After a normal message is submitted, the idle prompt is gone. The active turn shows durable transcript output plus Operator Console active-work, approval, and steer surfaces; it does not show a fake read-only prompt box containing the submitted user text. The submitted prompt remains visible in the transcript rail/history.
 
-While `runtime.handle()` is active in a local interactive CLI session, visible typing routes through the Operator Console `Steer current turn` surface. Non-empty steer text is submitted as active-turn guidance, rendered as a `User steer:` transcript block, and applied by aborting the current turn with `CLI steer` before queueing one retry using the original submitted text plus an explicit steering note block. `Ctrl+C` remains the hard interrupt path and aborts the current turn with `SIGINT`; it is not modeled as steer submission or cancellation.
+The live Mission surface displays only active or blocked foreground work. Completed, abandoned, and transferred Missions clear from the live region; plain and one-shot output may still render one durable terminal checklist summary.
+
+While `runtime.handle()` is active in a local interactive CLI session, visible typing routes through the Operator Console `Steer current turn` surface. Non-empty steer text is submitted as active-turn guidance, rendered as a `User steer:` transcript block, and applied by aborting the current turn with `CLI steer` before queueing one retry using the original submitted text plus an explicit steering note block. An exact `/exit` entered in this surface bypasses steering and exits the session. `Ctrl+C` remains the hard interrupt path: the first press aborts the current turn with `SIGINT`, and a second press force-exits if the turn has not settled. Neither action is modeled as steer submission or cancellation.
 
 Steering V1 is abort-and-retry steering. It is not true in-flight provider steering, and it does not add a runtime/provider steering primitive. The retried text is inspectable:
 
@@ -300,7 +318,11 @@ Approval inspection commands are normal interactive slash commands:
 
 ## Session Resume
 
-CLI startup restores the active workspace session from `cli-session-store.ts`. Fresh launches are no longer forced back to the default `scaffold` session.
+Every CLI invocation that reaches the runtime starts a fresh session unless the user explicitly resumes one. Startup has three explicit continuation paths: `estacoda --continue` (or `estacoda -c`) reads the version 2 profile/workspace pointer, `estacoda sessions` returns a picker handoff, and `estacoda sessions open <session-id>` returns a direct handoff. A pure `SessionLaunchIntent` resolver keeps those launch choices separate from runtime construction. Normal setup, profile, workspace, and trust checks still run before the selected session starts.
+
+`PersistentCliSessionStore` writes `~/.estacoda/cli-sessions.json` atomically with `0600` permissions. Entries are keyed by normalized profile and workspace and contain no transcript data. Version 1 or malformed files fail closed. `resolveSessionForResume` then uses profile-scoped database reads before every continuation or switch: the target must match the selected profile and current workspace, contain user activity, and be an active, user-facing root session. `/sessions` excludes the active session and revalidates after selection; `/switch` applies the same boundary. Gateway `/sessions` retains its non-picker surface semantics, and CLI continuation never rewrites gateway origin or attachment state.
+
+Fresh CLI sessions persist `originSurface: "cli"` when the row is created. The first meaningful user title is assigned with a conditional database update so concurrent first messages cannot replace one another. Operators can inspect the immutable origin and normalized workspace with `estacoda sessions show <session-id>`. Deleting `cli-sessions.json` clears only continuation convenience pointers; it does not remove SQLite sessions.
 
 ## Setup And Onboarding
 
@@ -385,17 +407,19 @@ The interactive model picker can configure Codex where the nested OpenAI choice 
 
 `estacoda model setup codex` remains the direct CLI setup path. It authenticates through OAuth device code, stores tokens in the selected profile's `auth.json`, and configures the `codex/gpt-5.5` route. Raw OAuth tokens are not printed. Route config remains separate from token storage.
 
-The Setup Editor can configure Codex for primary and fallback model routes through reviewed apply. OAuth tokens from the Setup Editor are written only after review approval; cancelling review after OAuth does not persist tokens. Auxiliary model routes remain unchanged in this pass and do not introduce Codex OAuth setup.
+The Setup Editor can configure Codex for primary and fallback model routes through reviewed apply. OAuth tokens from the Setup Editor are written only after review approval; cancelling review after OAuth does not persist tokens. Auxiliary model routes do not introduce Codex OAuth setup.
 
-Optional capabilities stay separate from the primary LLM route. In the Onboarding Wizard, the menu is limited to Channels, Voice STT/TTS, Browser, and Skip. Vision/image generation is intentionally absent from that menu.
+Optional capabilities stay separate from the primary LLM route. In the Onboarding Wizard, the menu is limited to Channels, Voice STT/TTS, Browser, and Skip. Vision & Images is intentionally absent from that menu.
 
-The Setup Editor is the broader operator surface. It keeps technical review/manifest behavior and exposes capabilities that the Onboarding Wizard does not show, including Vision/image generation. Each Setup Editor capability creates its own single-module draft bundle through an independent action:
+The Setup Editor is the broader operator surface. It keeps technical review/manifest behavior and exposes **Vision & Images**, which opens a choice between **Vision Analysis** and the existing **Image Generation & Editing** flow. Vision Analysis no longer appears in the Auxiliary models task selector. Its common route screen contains **Automatic**, **Choose a vision model**, and **Turn off Vision Analysis**; main-only routing, dedicated-with-main-fallback, hosted-processing policy, timeout, and concurrency are under **Advanced settings**. Each Setup Editor capability creates its own single-module draft bundle through an independent action:
+
+Vision Analysis review states whether image bytes may leave the machine, which route receives them, and any advanced timeout/concurrency bounds. `local-only` prevents hosted image dispatch; `allow-with-approval` still uses the runtime's contextual egress decision. Timeout and concurrency control provider requests, not the total number of submitted images: sets of up to twenty images are processed automatically in bounded batches. Review cancellation writes neither route changes nor collected credentials. After apply, the Setup Editor offers the bundled benign English/Arabic verification and defaults to skipping it. Choosing verification for a hosted route or possible hosted fallback opens a second explicit image-egress/cost consent prompt; declining sends nothing and preserves the saved route. The equivalent operator command is `estacoda verify vision`, with `--consent-hosted` required for a hosted destination. Credential inspection is read-only and will not refresh OAuth state.
 
 | Action | Setup behavior |
 |--------|----------------|
 | `configure-channels` | Remote-control surface. Setup requires token env var reference plus allowed user or chat identities before enable can apply. Creates a single-module draft bundle. |
 | `configure-voice` | Optional/native voice configuration. Does not change the primary provider/model route. Creates a single-module draft bundle. |
-| `configure-image-generation` | Optional/native image capability configuration. Does not change the primary provider/model route. Creates a single-module draft bundle. |
+| `configure-image-generation` | Opens Vision & Images. Vision Analysis applies a scoped auxiliary-route draft; Image Generation & Editing retains its existing single-module capability flow. Neither changes the primary provider/model route. |
 | `configure-browser` | Records backend, URL, or command references. Setup planning does not auto-launch a browser or open a CDP connection. Creates a single-module draft bundle. |
 
 Skipping optional capabilities keeps core setup valid.

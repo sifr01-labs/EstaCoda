@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { FSI, isolateTechnicalTokens, LRI, PDI, RLI } from "../../bidi.js";
 import { stringWidth } from "../screen/stringWidth.js";
 import {
   createFileExcerptAttachment,
@@ -44,6 +45,50 @@ describe("Papyrus operator console attachment surface", () => {
 
     expect(output.join("\n")).toContain("MVP known issue");
     expect(output.join("\n")).toContain("2,481 chars");
+  });
+
+  it("isolates mixed Arabic attachment previews for native terminal bidi", () => {
+    const text = "هلا ممكن تستخدم ٣ subagents وتبحث عن RSI";
+    const attachment = createPastedTextAttachment({
+      id: "paste-mixed-native",
+      content: text,
+    });
+    const before = JSON.stringify(attachment);
+    const output = renderAttachmentSurface([attachment], { width: 100, bidi: "native" });
+    const previewRow = output[2] ?? "";
+
+    expect(previewRow).toContain(`${RLI}${isolateTechnicalTokens(text)}${PDI}`);
+    expectBalancedBidiIsolates(previewRow);
+    expect(JSON.stringify(attachment)).toBe(before);
+  });
+
+  it("visually reorders mixed Arabic attachment previews in software bidi mode", () => {
+    const text = "هلا ممكن تستخدم ٣ subagents وتبحث عن RSI";
+    const attachment = createPastedTextAttachment({
+      id: "paste-mixed-software",
+      content: text,
+    });
+    const output = renderAttachmentSurface([attachment], { width: 100, bidi: "software" });
+    const previewRow = output[2] ?? "";
+
+    expect(previewRow).toContain("RSI نع ثحبتو subagents ٣ مدختست نكمم اله");
+    expect(previewRow).not.toContain(RLI);
+    expect(previewRow).not.toContain(PDI);
+    expect(attachment.content).toBe(text);
+  });
+
+  it("keeps narrow mixed-direction attachment cards cell-safe and isolate-balanced", () => {
+    const text = "مرحبا RSI ثم subagents";
+    const attachment = createPastedTextAttachment({
+      id: "paste-mixed-narrow",
+      content: text,
+    });
+    const output = renderAttachmentSurface([attachment], { width: 36, bidi: "native" });
+    const previewRow = output[2] ?? "";
+
+    expect(output.every((line) => stringWidth(line) <= 36)).toBe(true);
+    expect(previewRow).toContain(`${RLI}${isolateTechnicalTokens(text)}${PDI}`);
+    expectBalancedBidiIsolates(previewRow);
   });
 
   it("renders file excerpt path and line count", () => {
@@ -459,4 +504,17 @@ function fileAttachment(id: string, path: string, lineCount: number): Attachment
     path,
     content: Array.from({ length: lineCount }, (_, index) => `line ${index + 1}`).join("\n"),
   });
+}
+
+function expectBalancedBidiIsolates(text: string): void {
+  let depth = 0;
+  for (const char of text) {
+    if (char === LRI || char === RLI || char === FSI) {
+      depth += 1;
+    } else if (char === PDI) {
+      depth -= 1;
+      expect(depth).toBeGreaterThanOrEqual(0);
+    }
+  }
+  expect(depth).toBe(0);
 }

@@ -21,6 +21,7 @@ import type { WorkspaceFsAdapter } from "../tools/workspace-tools.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { createSecurityPolicyForMode } from "../security/security-policy-factory.js";
 import { acpRuntimeToolEventTitle, acpToolExecutionTitle } from "./tool-display.js";
+import type { ExecutionPlan } from "../contracts/execution-plan.js";
 
 type JsonRpcId = string | number | null;
 
@@ -88,6 +89,24 @@ type AcpSession = {
 type RequestPermissionOutcome =
   | { outcome: "selected"; optionId: string; source?: "client" | "default-deny" }
   | { outcome: "cancelled" };
+
+export function executionPlanAcpUpdate(plan: ExecutionPlan): {
+  sessionUpdate: "plan";
+  entries: Array<{ label: string; status: "pending" | "in_progress" | "completed"; priority: "medium" }>;
+} {
+  return {
+    sessionUpdate: "plan",
+    entries: plan.items.map((item) => ({
+      label: item.content,
+      status: item.status === "in_progress"
+        ? "in_progress"
+        : item.status === "completed" || item.status === "cancelled"
+          ? "completed"
+          : "pending",
+      priority: "medium"
+    }))
+  };
+}
 
 type PromptStopReason = "end_turn" | "cancelled" | "error";
 
@@ -455,12 +474,24 @@ export class AcpServer {
                     params: {
                       sessionId: acpSessionId,
                       update: {
-                        sessionUpdate: "plan_update",
-                        entries: event.labels.map((label) => ({
-                          label,
-                          state: "selected"
-                        }))
+                        sessionUpdate: "thought_message_chunk",
+                        content: { type: "text", text: `intent: ${event.labels.join(", ")}` }
                       }
+                    }
+                  });
+                  break;
+                case "execution-plan-started":
+                case "execution-plan-updated":
+                case "execution-plan-completed":
+                case "execution-plan-blocked":
+                case "execution-plan-transferred":
+                case "execution-plan-abandoned":
+                  this.#notify({
+                    jsonrpc: "2.0",
+                    method: "session/update",
+                    params: {
+                      sessionId: acpSessionId,
+                      update: executionPlanAcpUpdate(event.plan)
                     }
                   });
                   break;
@@ -1068,11 +1099,24 @@ export class AcpServer {
           params: {
             sessionId: acpSessionId,
             update: {
-              sessionUpdate: "plan",
-              entries: Array.isArray(event.labels)
-                ? event.labels.map((label) => ({ label, status: "in_progress", priority: "medium" }))
-                : []
+              sessionUpdate: "thought_message_chunk",
+              content: { type: "text", text: `intent: ${Array.isArray(event.labels) ? event.labels.join(", ") : ""}` }
             }
+          }
+        });
+        return;
+      case "execution-plan-started":
+      case "execution-plan-updated":
+      case "execution-plan-completed":
+      case "execution-plan-blocked":
+      case "execution-plan-transferred":
+      case "execution-plan-abandoned":
+        this.#notify({
+          jsonrpc: "2.0",
+          method: "session/update",
+          params: {
+            sessionId: acpSessionId,
+            update: executionPlanAcpUpdate(event.plan as ExecutionPlan)
           }
         });
         return;

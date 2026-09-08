@@ -10,6 +10,7 @@ import { renderApprovalSurface } from "./approvalSurface.js";
 import { renderAttachmentSurface } from "./attachmentSurface.js";
 import { renderPromptSurface } from "./promptSurface.js";
 import { renderSetupPanelSurface } from "./setupPanelSurface.js";
+import { renderSecureInputSurface } from "./secureInputSurface.js";
 import {
   isSteerInputActive,
   renderQueuedSteerSurface,
@@ -21,6 +22,7 @@ import { renderStatusRailSurface } from "./statusRailSurface.js";
 import { renderStreamingSurface } from "./streamingSurface.js";
 import { renderTranscriptSurface } from "./transcriptSurface.js";
 import { renderTurnActivitySurface } from "./turnActivitySurface.js";
+import { renderMissionSurface } from "./missionSurface.js";
 import { renderTaskCardSurface, renderTaskInspectionSurface } from "./taskSurface.js";
 
 export type OperatorConsoleRenderedLine = {
@@ -65,11 +67,20 @@ function renderRegionLines(
       style: state.style,
     }).map((text) => ({ region: region.kind, text }));
   }
+  if (region.kind === "secureInput" && state.secureInput !== undefined) {
+    return renderSecureInputSurface(state.secureInput, {
+      width: region.width,
+      height: region.height,
+      locale: state.locale,
+      style: state.style,
+    }).map((text) => ({ region: region.kind, text }));
+  }
   if (region.kind === "prompt") {
     if (isSteerInputActive(state.steer) && state.steer !== undefined) {
       return renderSteerInputSurface(state.steer, {
         width: region.width,
         height: region.height,
+        bidi: state.terminal.bidiMode,
       }).map((text) => ({ region: region.kind, text }));
     }
     return renderPromptSurface(state.prompt, {
@@ -77,6 +88,7 @@ function renderRegionLines(
       height: region.height,
       terminalHeight: layoutHeightForRegion(region),
       style: state.style,
+      bidi: state.terminal.bidiMode,
     }).map((text) => ({ region: region.kind, text }));
   }
   if (region.kind === "attachments") {
@@ -84,6 +96,7 @@ function renderRegionLines(
       width: region.width,
       height: region.height,
       focusedAttachmentId: state.focus.target.kind === "attachment" ? state.focus.target.attachmentId : undefined,
+      bidi: state.terminal.bidiMode,
     }).map((text) => ({ region: region.kind, text }));
   }
   if (region.kind === "taskCards") {
@@ -128,6 +141,7 @@ function renderRegionLines(
     return renderStreamingSurface(state.streaming, {
       width: region.width,
       height: region.height,
+      locale: state.locale,
       style: state.style,
       motionElapsedMs: state.motionElapsedMs,
     }).map((text) => ({ region: region.kind, text }));
@@ -136,6 +150,7 @@ function renderRegionLines(
     return renderTranscriptSurface(state.transcript, {
       width: region.width,
       height: region.height,
+      locale: state.locale,
       style: state.style,
     }).map((text) => ({ region: region.kind, text }));
   }
@@ -148,10 +163,20 @@ function renderRegionLines(
       motionElapsedMs: state.motionElapsedMs,
     }).map((text) => ({ region: region.kind, text }));
   }
+  if (region.kind === "mission") {
+    return renderMissionSurface(state.executionPlan, {
+      width: region.width,
+      height: region.height,
+      locale: state.locale,
+      style: state.style,
+    }).map((text) => ({ region: region.kind, text }));
+  }
   if (region.kind === "approvals") {
     return renderApprovalSurface(state.approvals, {
       width: region.width,
       height: region.height,
+      locale: state.locale,
+      style: state.style,
     }).map((text) => ({ region: region.kind, text }));
   }
   if (region.kind === "queuedSteer" && state.steer?.queued !== undefined) {
@@ -191,6 +216,8 @@ function regionLabel(
       return `Startup: ${state.startup?.productName ?? "EstaCoda"}`;
     case "setupPanel":
       return `Setup: ${state.setupPanel?.title ?? ""}`;
+    case "secureInput":
+      return "Secure input required";
     case "transcript":
       return "";
     case "streaming":
@@ -199,6 +226,8 @@ function regionLabel(
       return `Approvals: ${state.approvals.length}`;
     case "turnActivity":
       return `Turn activity: ${state.turnActivity?.phase ?? ""}`;
+    case "mission":
+      return "";
     case "queuedSteer":
       return `Queued steer: ${state.steer?.queued?.text ?? ""}`;
     case "taskCards":

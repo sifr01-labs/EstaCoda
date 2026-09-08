@@ -9,6 +9,7 @@ import type {
   ToolActivityState,
 } from "./operatorConsoleState.js";
 import { createDefaultToolActivityState } from "./operatorConsoleState.js";
+import type { ExecutionPlan } from "../../../contracts/execution-plan.js";
 
 const MAX_REMEMBERED_DELEGATION_SETTLEMENTS = 512;
 export const MAX_DELEGATION_WORKER_ACTIVITY_ROWS = 6;
@@ -53,6 +54,21 @@ export type ActiveWorkRuntimeEventMapperOptions = {
   readonly now?: () => number;
 };
 
+export function executionPlanFromRuntimeEvent(event: RuntimeEvent): ExecutionPlan | null | undefined {
+  switch (event.kind) {
+    case "execution-plan-started":
+    case "execution-plan-updated":
+    case "execution-plan-blocked":
+      return event.plan;
+    case "execution-plan-completed":
+    case "execution-plan-transferred":
+    case "execution-plan-abandoned":
+      return null;
+    default:
+      return undefined;
+  }
+}
+
 export class ActiveWorkRuntimeEventMapper {
   readonly #starts = new Map<string, number[]>();
   readonly #delegationStarts = new Map<string, number>();
@@ -83,7 +99,7 @@ export class ActiveWorkRuntimeEventMapper {
         summary: "preparing",
         target: event.tool === "delegate_task"
           ? delegationStartingLabel(this.#locale)
-          : event.displayPreview ?? event.targetSummary ?? toolDisplayLabel(event.tool),
+          : activityTarget(event),
         detailsRef: event.activityId,
       };
     }
@@ -106,7 +122,7 @@ export class ActiveWorkRuntimeEventMapper {
       displayLabel: toolDisplayLabel(event.tool, this.#locale),
       status,
       summary: gated ? "gated" : failed ? "failed" : activeWorkSummaryKeyForTool(event.tool),
-      target: delegationTarget ?? event.displayPreview ?? event.targetSummary ?? toolDisplayLabel(event.tool),
+      target: delegationTarget ?? activityTarget(event),
       ...(elapsedMs === undefined ? {} : { durationMs: elapsedMs }),
       detailsRef: event.activityId,
       ...(gated ? { riskClass: event.riskClass } : {}),
@@ -188,6 +204,15 @@ export class ActiveWorkRuntimeEventMapper {
   #eventKey(event: Extract<RuntimeEvent, { kind: "tool-start" | "tool-result" }>): string {
     return event.activityId ?? `${event.tool}\0${event.targetSummary ?? ""}`;
   }
+}
+
+function activityTarget(
+  event: Extract<RuntimeEvent, { kind: "tool-start" | "tool-result" }>
+): string | undefined {
+  if (event.kind === "tool-result" && event.tool === "browser.click" && event.targetSummary !== undefined) {
+    return event.targetSummary;
+  }
+  return event.displayPreview ?? event.targetSummary;
 }
 
 function delegationStartingLabel(locale: ToolDisplayLocale): string {

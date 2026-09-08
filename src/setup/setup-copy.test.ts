@@ -503,6 +503,12 @@ const SETUP_EDITOR_KEYS = [
   "setupEditor.prompt.browser.autoLaunch.no",
   "setupEditor.prompt.browser.autoLaunch.description",
   "setupEditor.prompt.browser.autoLaunch.no.description",
+  "setupEditor.prompt.browser.window.title",
+  "setupEditor.prompt.browser.window.body",
+  "setupEditor.prompt.browser.window.background",
+  "setupEditor.prompt.browser.window.background.description",
+  "setupEditor.prompt.browser.window.visible",
+  "setupEditor.prompt.browser.window.visible.description",
   "setupEditor.prompt.browser.cdpUrl",
   "setupEditor.prompt.browser.cdpUrl.optional",
   "setupEditor.prompt.browser.cdpUrl.required",
@@ -557,6 +563,10 @@ const SETUP_MODULE_KEYS = [
   "setupModules.browser.title",
   "setupModules.browser.review",
   "setupModules.browser.draft",
+  "setupModules.browser.summary.visible",
+  "setupModules.browser.summary.background",
+  "setupModules.browser.summary.externallyManaged",
+  "setupModules.browser.summary.disabled",
   "setupModules.{moduleId}.blocked",
 ] as const;
 
@@ -799,6 +809,10 @@ describe("setup copy", () => {
     expect(resolveSetupCopy("ar", "setupModules.browser.draft")).toContain("محرك المتصفح");
     expect(resolveSetupCopy("ar", "setupModules.browser.draft")).not.toContain("واجهة المتصفح");
     expect(resolveSetupCopy("ar", "setupModules.browser.draft")).not.toContain("واجهة متصفح");
+    expect(resolveSetupCopy("ar", "setupModules.browser.summary.visible")).toContain("ستظهر نافذة المتصفح");
+    expect(resolveSetupCopy("ar", "setupModules.browser.summary.background")).toContain("في الخلفية");
+    expect(resolveSetupCopy("ar", "setupModules.browser.summary.externallyManaged")).toContain("خارجيًا");
+    expect(resolveSetupCopy("ar", "setupModules.browser.summary.disabled")).toContain("تعطيل أدوات المتصفح");
     expect(resolveSetupCopy("ar", "setupEditor.prompt.browser.mode.disable.description")).toContain("محرك المتصفح");
     expect(resolveSetupCopy("ar", "setupEditor.prompt.browser.mode.disable.description")).not.toContain("نظام المتصفح");
     expect(resolveSetupCopy("ar", "setupEditor.actions.verifyBrowser.description")).toContain("محرك المتصفح");
@@ -811,6 +825,7 @@ describe("setup copy", () => {
     expect(resolveSetupCopy("ar", "setupEditor.prompt.browser.local.body")).toContain(isolateLtr("Chrome"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.browser.autoLaunch")).toContain(isolateLtr("Chrome"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.browser.autoLaunch.description")).toContain(isolateLtr("Chrome/Chromium"));
+    expect(resolveSetupCopy("ar", "setupEditor.prompt.browser.window.visible.description")).toContain(isolateLtr("Chrome"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.browser.mode.existingCdp")).toContain(isolateLtr("CDP"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.browser.hybridRouting.description")).toContain(isolateLtr("Browserbase"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.browser.hybridRouting.description")).toContain(isolateLtr("security.allowPrivateUrls"));
@@ -1019,7 +1034,7 @@ describe("setup copy", () => {
     expect(rawSetupCopy("ar", "setupEditor.prompt.browser.mode.body")).toBe("اختر كيف تشغّل EstaCoda أدوات المتصفح.");
     expect(rawSetupCopy("ar", "setupEditor.prompt.browser.mode.recommended")).toBe("إعداد المتصفح الموصى به");
     expect(rawSetupCopy("ar", "setupEditor.prompt.browser.mode.recommended.description")).toBe(
-      "يشغّل Chrome محلياً وتلقائياً تحت إشراف EstaCoda، مع إعدادات آمنة مناسبة لمعظم المستخدمين."
+      "يشغّل Chrome محلياً وتلقائياً في الخلفية تحت إشراف EstaCoda، مع إعدادات آمنة. اختر «متصفح محلي مُشرف عليه» لإظهار نافذته."
     );
     expect(resolveSetupCopy("ar", "setupEditor.prompt.browser.mode.recommended.description")).toContain(isolateLtr("Chrome"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.browser.mode.recommended.description")).toContain(isolateLtr("EstaCoda"));
@@ -1141,8 +1156,11 @@ describe("setup copy", () => {
     expect(rawSetupCopy("en", "setupEditor.actions.configureChannels.description")).toBe("Remote-control channels such as Telegram and WhatsApp.");
     expect(rawSetupCopy("en", "setupEditor.actions.configureVoice")).toBe("Voice");
     expect(rawSetupCopy("en", "setupEditor.actions.configureVoice.description")).toBe("Speech-to-text and text-to-speech providers.");
-    expect(rawSetupCopy("en", "setupEditor.actions.configureImageGeneration")).toBe("Image generation");
-    expect(rawSetupCopy("en", "setupEditor.actions.configureImageGeneration.description")).toBe("Image generation provider and model.");
+    expect(rawSetupCopy("en", "setupEditor.actions.configureImageGeneration")).toBe("Vision & Images");
+    expect(rawSetupCopy("en", "setupEditor.actions.configureImageGeneration.description")).toBe("Understand, generate, and edit images.");
+    expect(rawSetupCopy("en", "setupEditor.prompt.auxiliaryRoute.vision")).toBe("Vision Analysis");
+    expect(rawSetupCopy("en", "setupEditor.prompt.visionAnalysis.mode.automatic")).toBe("Automatic (recommended)");
+    expect(rawSetupCopy("en", "setupEditor.prompt.visionAnalysis.hosted.allow")).toBe("Allow hosted processing with normal approvals");
     expect(rawSetupCopy("en", "setupEditor.actions.configureWebSearch")).toBe("Search");
     expect(rawSetupCopy("en", "setupEditor.actions.configureWebSearch.description")).toBe("Configure how EstaCoda finds and retrieves web results.");
     expect(rawSetupCopy("en", "setupEditor.actions.configureBrowser")).toBe("Browser");
@@ -1227,8 +1245,11 @@ describe("setup copy", () => {
     expect(rawSetupCopy("ar", "setupEditor.actions.configureChannels.description")).toBe("قنوات تحكم عن بُعد مثل Telegram وWhatsApp.");
     expect(rawSetupCopy("ar", "setupEditor.actions.configureVoice")).toBe("الصوت");
     expect(rawSetupCopy("ar", "setupEditor.actions.configureVoice.description")).toBe("مزودو تحويل الكلام إلى نص وتحويل النص إلى كلام.");
-    expect(rawSetupCopy("ar", "setupEditor.actions.configureImageGeneration")).toBe("توليد الصور");
-    expect(rawSetupCopy("ar", "setupEditor.actions.configureImageGeneration.description")).toBe("مزود ونموذج توليد الصور.");
+    expect(rawSetupCopy("ar", "setupEditor.actions.configureImageGeneration")).toBe("الصور والرؤية");
+    expect(rawSetupCopy("ar", "setupEditor.actions.configureImageGeneration.description")).toBe("افهم الصور وأنشئها وعدّلها.");
+    expect(rawSetupCopy("ar", "setupEditor.prompt.auxiliaryRoute.vision")).toBe("تحليل الصور");
+    expect(rawSetupCopy("ar", "setupEditor.prompt.visionAnalysis.mode.automatic")).toBe("تلقائي (موصى به)");
+    expect(rawSetupCopy("ar", "setupEditor.prompt.visionAnalysis.hosted.allow")).toBe("السماح بالمعالجة المستضافة مع الموافقات المعتادة");
     expect(rawSetupCopy("ar", "setupEditor.actions.configureWebSearch.description")).toBe("اضبط كيف تعثر EstaCoda على نتائج الويب وتسترجعها.");
     expect(rawSetupCopy("ar", "setupEditor.actions.configureBrowser")).toBe("المتصفح");
     expect(rawSetupCopy("ar", "setupEditor.actions.configureBrowser.description")).toBe("اضبط كيف تفتح EstaCoda المتصفحات وتتحكم بها.");

@@ -2,6 +2,7 @@ import { createOperatorConsoleLayout, type OperatorConsoleLayout } from "./opera
 import { renderOperatorConsoleTextLines } from "./operatorConsoleRenderer.js";
 import type { FocusState, FocusTarget } from "./focusModel.js";
 import type { OperatorConsoleStyle } from "./operatorConsoleStyle.js";
+import type { ExecutionPlan } from "../../../contracts/execution-plan.js";
 import {
   createDefaultPromptSurfaceState,
   createDefaultStatusRailState,
@@ -17,6 +18,7 @@ import {
   type OperatorConsoleState,
   type PromptSurfaceState,
   type SetupSurfaceState,
+  type SecureInputSurfaceState,
   type SlashMenuState,
   type StartupDashboardState,
   type StatusRailState,
@@ -110,6 +112,16 @@ export class OperatorConsoleRuntimeHost {
     this.#state = {
       ...this.#state,
       ...(turnActivity === undefined ? { turnActivity: undefined } : { turnActivity: cloneTurnActivityState(turnActivity) }),
+    };
+  }
+
+  setExecutionPlan(executionPlan: ExecutionPlan | undefined): void {
+    if (this.#disposed) return;
+    this.#state = {
+      ...this.#state,
+      ...(executionPlan === undefined
+        ? { executionPlan: undefined }
+        : { executionPlan: cloneExecutionPlanState(executionPlan) }),
     };
   }
 
@@ -218,6 +230,14 @@ export class OperatorConsoleRuntimeHost {
     };
   }
 
+  setSecureInput(secureInput: SecureInputSurfaceState | undefined): void {
+    if (this.#disposed) return;
+    this.#state = {
+      ...this.#state,
+      ...(secureInput === undefined ? { secureInput: undefined } : { secureInput: { ...secureInput } }),
+    };
+  }
+
   render(): OperatorConsoleRuntimeFrame {
     const layout = createOperatorConsoleLayout(this.#state, this.#state.terminal);
     return {
@@ -255,11 +275,13 @@ function cloneOperatorConsoleState(state: OperatorConsoleState): OperatorConsole
     locale: state.locale,
     startup: state.startup === undefined ? undefined : cloneStartupDashboardState(state.startup),
     setupPanel: state.setupPanel === undefined ? undefined : cloneSetupSurfaceState(state.setupPanel),
+    secureInput: state.secureInput === undefined ? undefined : { ...state.secureInput },
     transcript: state.transcript.map(cloneTranscriptBlock),
     prompt: clonePromptSurfaceState(state.prompt),
     status: cloneStatusRailState(state.status),
     motionElapsedMs: state.motionElapsedMs,
     turnActivity: state.turnActivity === undefined ? undefined : cloneTurnActivityState(state.turnActivity),
+    executionPlan: state.executionPlan === undefined ? undefined : cloneExecutionPlanState(state.executionPlan),
     attachments: state.attachments.map(cloneAttachmentCardState),
     tasks: cloneTaskSurfaceState(state.tasks),
     activeWork: cloneToolActivityState(state.activeWork),
@@ -275,6 +297,33 @@ function cloneOperatorConsoleState(state: OperatorConsoleState): OperatorConsole
 
 function cloneTurnActivityState(turnActivity: TurnActivityState): TurnActivityState {
   return { ...turnActivity };
+}
+
+function cloneExecutionPlanState(plan: ExecutionPlan): ExecutionPlan {
+  return {
+    ...plan,
+    ...(plan.runtimeSynchronization === undefined ? {} : {
+      runtimeSynchronization: {
+        ...plan.runtimeSynchronization,
+        ...(plan.runtimeSynchronization.evidenceCallIds === undefined ? {} : {
+          evidenceCallIds: [...plan.runtimeSynchronization.evidenceCallIds]
+        })
+      }
+    }),
+    items: plan.items.map((item) => ({
+      ...item,
+      ...(item.evidenceCallIds === undefined ? {} : { evidenceCallIds: [...item.evidenceCallIds] }),
+      ...(item.evidence === undefined ? {} : { evidence: item.evidence.map((entry) => ({ ...entry })) }),
+      ...(item.completionKind === undefined ? {} : { completionKind: item.completionKind }),
+      ...(item.blocker === undefined ? {} : { blocker: { ...item.blocker } }),
+      ...(item.runtimeProgress === undefined ? {} : {
+        runtimeProgress: {
+          status: item.runtimeProgress.status,
+          evidence: item.runtimeProgress.evidence.map((entry) => ({ ...entry }))
+        }
+      })
+    }))
+  };
 }
 
 function cloneFocusState(focus: FocusState): FocusState {
@@ -354,10 +403,12 @@ function cloneTerminalMetrics(terminal: TerminalMetrics): TerminalMetrics {
 
 function normalizeTerminalMetrics(terminal: Partial<TerminalMetrics>): TerminalMetrics {
   const fallback = createDefaultTerminalMetrics();
+  const bidiMode = terminal.bidiMode ?? fallback.bidiMode;
   return {
     width: normalizeNonNegativeInteger(terminal.width ?? fallback.width),
     height: normalizeNonNegativeInteger(terminal.height ?? fallback.height),
     isTty: terminal.isTty ?? fallback.isTty,
+    ...(bidiMode === undefined ? {} : { bidiMode }),
   };
 }
 
@@ -366,6 +417,15 @@ function cloneTranscriptBlock(block: TranscriptBlock): TranscriptBlock {
     ...block,
     ...(block.attachmentIds === undefined ? {} : { attachmentIds: [...block.attachmentIds] }),
     ...(block.toolTrail === undefined ? {} : { toolTrail: block.toolTrail.map(cloneInlineToolTrailEntry) }),
+    ...(block.taskTrace === undefined ? {} : {
+      taskTrace: {
+        ...block.taskTrace,
+        spans: block.taskTrace.spans.map((span) => ({ ...span, scope: { ...span.scope } })),
+        ...(block.taskTrace.workerOutcomes === undefined
+          ? {}
+          : { workerOutcomes: { ...block.taskTrace.workerOutcomes } }),
+      },
+    }),
   };
 }
 
@@ -419,6 +479,7 @@ function cloneTaskSurfaceState(tasks: TaskSurfaceState): TaskSurfaceState {
       })),
       trace: {
         events: card.trace.events.map((event) => ({ ...event })),
+        spans: card.trace.spans.map((span) => ({ ...span, scope: { ...span.scope } })),
         ...(card.trace.totalEvents === undefined ? {} : { totalEvents: card.trace.totalEvents }),
         ...(card.trace.categoryCounts === undefined ? {} : { categoryCounts: { ...card.trace.categoryCounts } }),
         hasEarlierEvents: card.trace.hasEarlierEvents
@@ -440,6 +501,9 @@ function cloneTaskSurfaceState(tasks: TaskSurfaceState): TaskSurfaceState {
             ...(tasks.inspection.selectedTraceEventId === undefined
               ? {}
               : { selectedTraceEventId: tasks.inspection.selectedTraceEventId }),
+            ...(tasks.inspection.selectedTraceSpanId === undefined
+              ? {}
+              : { selectedTraceSpanId: tasks.inspection.selectedTraceSpanId }),
             ...(tasks.inspection.selectedSubagentStepId === undefined
               ? {}
               : { selectedSubagentStepId: tasks.inspection.selectedSubagentStepId }),
@@ -451,6 +515,8 @@ function cloneTaskSurfaceState(tasks: TaskSurfaceState): TaskSurfaceState {
               : { subagentTrace: { ...tasks.inspection.subagentTrace } })
           }
         }),
+    ...(tasks.traceMode === undefined ? {} : { traceMode: { ...tasks.traceMode } }),
+    ...(tasks.pendingControl === undefined ? {} : { pendingControl: { ...tasks.pendingControl } }),
     scrollOffset: normalizeNonNegativeInteger(tasks.scrollOffset),
   };
 }

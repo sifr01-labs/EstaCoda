@@ -190,6 +190,74 @@ describe("ProviderExecutor route-based execution", () => {
     expect(adapter.calls[0].options?.staleTimeoutMs).toBe(567);
   });
 
+  it("caps the provider transport timeout at the remaining absolute deadline", async () => {
+    const adapter = createMockAdapter({ id: "test-provider" });
+    registry.register(adapter);
+
+    const route = createDefaultRoute({ provider: "test-provider", timeoutMs: 10_000 });
+    const result = await executor.complete({ messages: [] }, {}, {
+      primaryRoute: route,
+      deadlineAtMs: 5_000,
+      now: () => 3_750
+    });
+
+    expect(result.ok).toBe(true);
+    expect(adapter.calls[0].options?.timeoutMs).toBe(1_250);
+    expect(route.timeoutMs).toBe(10_000);
+  });
+
+  it("does not dispatch after the absolute deadline has elapsed", async () => {
+    const adapter = createMockAdapter({ id: "test-provider" });
+    registry.register(adapter);
+
+    const result = await executor.complete({ messages: [] }, {}, {
+      primaryRoute: createDefaultRoute({ provider: "test-provider" }),
+      deadlineAtMs: 5_000,
+      now: () => 5_000
+    });
+
+    expect(result.ok).toBe(false);
+    expect(result.attempts).toEqual([expect.objectContaining({
+      state: "preflight",
+      errorClass: "timeout"
+    })]);
+    expect(adapter.calls).toHaveLength(0);
+  });
+
+  it("recomputes remaining absolute time before fallback dispatch", async () => {
+    const primary = createMockAdapter({
+      id: "test-provider",
+      completeResponse: {
+        ok: false,
+        content: "primary unavailable",
+        errorClass: "server",
+        model: "primary-model",
+        provider: "test-provider"
+      }
+    });
+    const fallback = createMockAdapter({ id: "fallback-provider" });
+    registry.register(primary);
+    registry.register(fallback);
+    const clock = [0, 400];
+
+    const result = await executor.complete({ messages: [] }, {}, {
+      primaryRoute: createDefaultRoute({ provider: "test-provider", id: "primary-model", apiMode: "custom_openai_compatible" }),
+      fallbackChain: [createDefaultRoute({
+        provider: "fallback-provider",
+        id: "fallback-model",
+        apiMode: "custom_openai_compatible",
+        authMethod: "none",
+        baseUrl: "http://localhost:9999/v1"
+      })],
+      deadlineAtMs: 1_000,
+      now: () => clock.shift() ?? 400
+    });
+
+    expect(result.ok).toBe(true);
+    expect(primary.calls[0].options?.timeoutMs).toBe(1_000);
+    expect(fallback.calls[0].options?.timeoutMs).toBe(600);
+  });
+
   it("passes route maxTokens when request maxTokens is unset", async () => {
     const adapter = createMockAdapter({ id: "test-provider" });
     registry.register(adapter);
@@ -705,8 +773,54 @@ describe("ProviderExecutor route-based execution", () => {
     expect(result.response?.provider).toBe("vision");
   });
 
+  it("skips known single-image fallbacks for multi-image requests", async () => {
+    const primaryAdapter = createMockAdapter({
+      id: "primary",
+      completeResponse: {
+        ok: false,
+        content: "Rate limited",
+        model: "primary-model",
+        provider: "primary",
+        errorClass: "rate-limit"
+      }
+    });
+    const singleAdapter = createMockAdapter({ id: "single" });
+    const multiAdapter = createMockAdapter({ id: "multi" });
+    registry.register(primaryAdapter);
+    registry.register(singleAdapter);
+    registry.register(multiAdapter);
+
+    const singleRoute = createDefaultRoute({ provider: "single", id: "single-model" });
+    singleRoute.profile = {
+      ...singleRoute.profile,
+      supportsVision: true,
+      supportsMultipleImages: false
+    };
+    const multiRoute = createDefaultRoute({ provider: "multi", id: "multi-model" });
+    multiRoute.profile = { ...multiRoute.profile, supportsVision: true };
+
+    const result = await executor.complete(
+      { messages: [] },
+      { requireVision: true, requireMultipleImages: true },
+      {
+        primaryRoute: createDefaultRoute({ provider: "primary", id: "primary-model" }),
+        fallbackChain: [singleRoute, multiRoute]
+      }
+    );
+
+    expect(result.ok).toBe(true);
+    expect(singleAdapter.calls).toHaveLength(0);
+    expect(multiAdapter.calls).toHaveLength(1);
+    expect(result.attempts[1]).toEqual(expect.objectContaining({
+      provider: "single",
+      errorClass: "unsupported",
+      content: expect.stringContaining("does not support multiple image inputs")
+    }));
+  });
+
   it("captures cancelled streaming diagnostics without counting the aborted token as visible", async () => {
     const controller = new AbortController();
+    const events: ProviderRuntimeEvent[] = [];
     const calls: MockCall[] = [];
     const adapter: ProviderAdapter & { calls: MockCall[] } = {
       id: "test-provider",
@@ -731,16 +845,93 @@ describe("ProviderExecutor route-based execution", () => {
     const result = await executor.complete({ messages: [] }, {}, {
       primaryRoute: createDefaultRoute({ provider: "test-provider" }),
       stream: true,
-      signal: controller.signal
+      signal: controller.signal,
+      onEvent: (event) => {
+        events.push(event);
+      }
     });
 
     expect(result.ok).toBe(false);
     expect(result.attempts[0]?.streamDiagnostics).toEqual(expect.objectContaining({
       finish: "cancelled",
-      errorClass: "timeout",
       tokenChunks: 0,
       visibleChars: 0
     }));
+    expect(result.attempts[0]?.errorClass).toBeUndefined();
+    expect(result.attempts[0]?.streamDiagnostics).not.toHaveProperty("errorClass");
+    expect(events).toContainEqual(expect.objectContaining({
+      kind: "provider-attempt-end",
+      ok: false,
+      willFallback: false
+    }));
+  });
+
+  it("classifies a provider timeout independently from parent cancellation", async () => {
+    const adapter = createMockAdapter({
+      id: "test-provider",
+      streamEvents: [{
+        kind: "error",
+        provider: "test-provider",
+        model: "gpt-4o",
+        response: {
+          ok: false,
+          content: "Timed out after 1000ms",
+          model: "gpt-4o",
+          provider: "test-provider",
+          errorClass: "timeout"
+        }
+      }]
+    });
+    registry.register(adapter);
+
+    const result = await executor.complete({ messages: [] }, {}, {
+      primaryRoute: createDefaultRoute({ provider: "test-provider" }),
+      stream: true
+    });
+
+    expect(result.attempts[0]).toEqual(expect.objectContaining({
+      errorClass: "timeout",
+      streamDiagnostics: expect.objectContaining({
+        finish: "error",
+        errorClass: "timeout"
+      })
+    }));
+  });
+
+  it("records cancellation when an aborted stream returns without another event", async () => {
+    const controller = new AbortController();
+    const adapter: ProviderAdapter = {
+      id: "test-provider",
+      name: "test-provider mock",
+      executable: true,
+      health: () => ({ available: true }),
+      listModels: () => [],
+      complete: async (request) => ({
+        ok: true,
+        content: "unused",
+        model: request.model,
+        provider: "test-provider"
+      }),
+      stream: async function* (request) {
+        yield { kind: "start", provider: "test-provider", model: request.model };
+        controller.abort("interrupt");
+      }
+    };
+    registry.register(adapter);
+
+    const result = await executor.complete({ messages: [] }, {}, {
+      primaryRoute: createDefaultRoute({ provider: "test-provider" }),
+      stream: true,
+      signal: controller.signal
+    });
+
+    expect(result.attempts[0]).toEqual(expect.objectContaining({
+      errorClass: undefined,
+      streamDiagnostics: expect.objectContaining({
+        finish: "cancelled"
+      })
+    }));
+    expect(result.attempts[0]?.streamDiagnostics).not.toHaveProperty("errorClass");
   });
 
   it("openai_responses route executes without runnable=false rejection after metadata flip", async () => {

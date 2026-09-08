@@ -4,6 +4,7 @@ import { resolveTokens } from "../../../theme/token-resolver.js";
 import {
   createOperatorConsoleStyle,
   createDefaultStatusRailState,
+  formatSessionTimer,
   renderContextBar,
   renderStatusRailSurface,
   type StatusRailState,
@@ -214,6 +215,12 @@ describe("Papyrus operator console status rail surface", () => {
     expect(renderStatusRailSurface(status({
       sessionTimer: { elapsedMs: 125_900 },
     }), { width: 80 })).toContain("◷ 02:05");
+  });
+
+  it("switches the session timer to hours at one hour", () => {
+    expect(formatSessionTimer(3_599_999)).toBe("59:59");
+    expect(formatSessionTimer(3_600_000)).toBe("01:00:00");
+    expect(formatSessionTimer(3_725_900)).toBe("01:02:05");
   });
 
   it("emits no ANSI or cursor-control sequences", () => {

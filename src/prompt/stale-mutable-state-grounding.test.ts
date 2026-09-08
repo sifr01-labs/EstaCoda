@@ -268,7 +268,8 @@ describe("stale mutable-state grounding regressions", () => {
     const rendered = renderMessages(prompt.messages);
 
     expect(rendered).toContain("current-verification-result.txt is present now");
-    expect(rendered).toContain("EstaCoda executed the requested tools. Use these results to produce the final answer now.");
+    expect(rendered).toContain("EstaCoda executed the requested tools. Use the results below to continue the work.");
+    expect(rendered).toContain("Continue executing the user's original request.");
     expect(rendered).not.toContain("Historical tool result");
     expect(JSON.stringify(prompt.messages)).not.toContain("STALE_MUTABLE_ECHO");
   });

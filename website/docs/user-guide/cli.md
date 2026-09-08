@@ -23,8 +23,19 @@ The CLI is not a chat wrapper. It is a stateful agent command surface with expli
 ## Starting and Resuming
 
 ```bash
-# Start interactive session
+# Start a fresh interactive session
 estacoda
+
+# Continue the last CLI session for this profile and workspace
+estacoda --continue
+# Short form
+estacoda -c
+
+# Choose a different resumable session
+estacoda sessions
+
+# Resume a known session by id
+estacoda sessions open <session-id>
 
 # Run a one-shot command
 estacoda --profile work "explain this file"
@@ -36,7 +47,9 @@ estacoda -p work doctor
 
 `--profile` / `-p` selects a profile for the current command only. It does not change the active profile on disk. Only `estacoda profile use <name>` updates `~/.estacoda/active-profile.json`.
 
-CLI startup restores the active workspace session from the session store. Fresh launches are no longer forced back to a default scaffold session.
+Every CLI invocation that reaches the runtime starts a fresh session by default. Continuation is explicit: `--continue` / `-c` uses the last CLI session pointer for the selected profile and current workspace, while `estacoda sessions` opens the session picker and `estacoda sessions open <session-id>` resumes a known session directly. All three paths still run normal setup and workspace-trust checks.
+
+The `--continue` / `-c` flag also works with a one-shot prompt or slash command. It is rejected with standalone operator commands that dispatch before a conversational runtime. If the scoped pointer is missing, malformed, empty, ended, internal, or belongs to another profile or workspace, startup fails closed and suggests `estacoda sessions`.
 
 ---
 
@@ -45,6 +58,7 @@ CLI startup restores the active workspace session from the session store. Fresh 
 ```bash
 estacoda setup              # Canonical setup entrypoint
 estacoda verify             # Verify configuration
+estacoda verify vision      # Prove the configured local vision route
 estacoda settings           # Show current settings
 estacoda doctor             # Health report and required fixes
 estacoda doctor --live      # Live provider check
@@ -56,7 +70,9 @@ New users enter the Onboarding Wizard. The visible flow is setup detection, prof
 
 Setup is reviewed, not autonomous. No wizard step writes or serializes raw secrets; cancellation and blocked apply paths write nothing. Credentials are displayed only as `Not set`, `Existing credential detected`, or `New credential pending`. Reviewed apply execution is the only boundary that persists secrets to the selected profile `.env` with `0600` permissions. Raw secrets are not displayed in review output.
 
-The Onboarding Wizard optional capability menu covers Channels, Voice STT/TTS, Browser, and Skip. Vision/image generation is configured from the Setup Editor, not from the Onboarding Wizard.
+The Onboarding Wizard optional capability menu covers Channels, Voice STT/TTS, Browser, and Skip. Vision & Images is configured from the Setup Editor, not from the Onboarding Wizard. Open **Vision & Images** and choose **Vision Analysis** or **Image Generation & Editing**. The image-generation flow is unchanged. Vision Analysis is no longer listed under Auxiliary models; its common screen offers Automatic, Choose a vision model, and Turn off, with main-only routing and dedicated-with-main-fallback under Advanced settings.
+
+Advanced Vision Analysis settings contain hosted-processing preference, request timeout, and concurrency. They control routing/privacy and simultaneous provider work, not how many submitted images are analyzed; image sets up to twenty are handled automatically in bounded batches. `local-only` blocks hosted image processing; `allow-with-approval` keeps contextual runtime approval in force. Cancelling review writes no route or credential changes. After apply, the Setup Editor offers a bundled benign English/Arabic verification and defaults to skipping it. Hosted verification requires a second explicit image-egress and possible-cost consent; declining sends nothing. The equivalent commands are `estacoda verify vision` for an all-local route and `estacoda verify vision --consent-hosted` when the selected route or a possible fallback is hosted. Verification reports route, dispatch, credential and vision readiness, text detection, normalized size, latency, approximate cost, fallback, and non-secret fingerprints without rewriting config, secrets, or expiring OAuth state.
 
 Workspace trust is required before EstaCoda can run in a workspace. If trust is deferred, setup may be saved, but launch is blocked with `Setup saved. Workspace trust is still required before EstaCoda can run here.`
 
@@ -95,13 +111,17 @@ Runs deterministic eval fixtures and returns pass/fail per assertion with timing
 
 ---
 
-## Session Recall and Compaction
+## Session Navigation, Recall, and Compaction
 
 ```bash
+estacoda sessions
+estacoda sessions open <session-id>
 estacoda session recall <query>
 estacoda sessions recall <query>
 estacoda sessions compact <session-id> [--topic <topic>]
 ```
+
+In a TTY, `estacoda sessions` displays up to 20 active user-facing root sessions with user activity from the selected profile and current workspace. The rows show a safe description; the focused row adds start time, last activity, and immutable origin surface. Enter resumes the selected session and Escape cancels without changing the active session.
 
 Recall commands summarize historical session matches. They use the selected profile, apply workspace scoping when a workspace root is available, and fall back to deterministic snippets if auxiliary summarization fails.
 
@@ -115,7 +135,7 @@ Inside an active session, slash commands provide operational controls. This is a
 
 | Command | Purpose |
 |---------|---------|
-| `/sessions` | List active sessions |
+| `/sessions` | Choose another resumable session in an interactive CLI; list sessions on non-picker surfaces |
 | `/search <query>` | Search session history |
 | `/session recall <query>` | Summarize historical session matches |
 | `/compact [topic]` | Compact in-session context |
@@ -200,6 +220,12 @@ security policy remain authoritative.
 Durable Tasks linked to the active session remain visible as cards after their
 creating turn and after terminal settlement. Use `Ctrl+T` or an available `Tab`
 transition to focus them, arrow keys to select a Task, and `Enter` to inspect.
+On a focused Task, press `T` to enter its logical activity trace; use
+`Left`/`Right` or `Home`/`End` to inspect history or return live, `Enter` to open
+the selected activity, and `Escape` to collapse the trace. The control row shows
+only actions valid for the current state: `R` retry, `D` detach, `P` pause, and
+`C` cancel with confirmation. Settled Tasks retain trace inspection without
+showing mutation controls.
 The inspection page supports arrow scrolling, `Page Up`/`Page Down`,
 `Home`/`End`, and `Escape` to return. It shows bounded plan, Step, Attempt,
 elapsed-time, safe-activity, tool-category, usage/cost, result-handle, and
@@ -207,6 +233,11 @@ wait/failure metadata. It does not show raw worker text, provider streams, raw
 event payloads, tool arguments/results, credentials, private paths, or result
 bodies. Plain, CI, dumb-terminal, and non-TTY sessions use the deterministic
 `task` and `/task` command output instead.
+
+When the Task delivers its answer, the final compact activity ribbon remains
+visible immediately above that answer. It records execution history and terminal
+outcome, not completion percentage; degraded runs retain their warning and
+worker-outcome summary.
 
 Input ownership is deterministic: modal Task inspection, then approval prompts,
 then autocomplete/typeahead, then attachment selection, then ordinary prompt or
@@ -216,6 +247,12 @@ Bracketed paste is enabled only for supported TTY prompts. Small single-line
 pastes remain inline. Multiline and large pastes become attachment cards. Secret
 prompts bypass paste preview/storage and do not emit shortcut hints or live
 slash hints.
+
+Runtime protected-input cards keep **Enter securely**, **Type in browser**, and
+**Cancel** visible while you type. Entered characters are shown only as masked
+bullets. Press `Tab` to return to the action menu without clearing the protected
+value, `Enter` to submit while secure entry is active, or `Esc` to cancel. The
+raw value does not enter model context or Operator Console state.
 
 Arabic setup chrome is direction-aware for localized setup selectors, rails, onboarding summaries, prompt cards, raw setup prompts, verification reports, and the startup dashboard. Arabic picker rows are RTL/right-aligned, selected output uses `تم تحديد`, and technical selected values are LTR-isolated. The Arabic startup dashboard uses two RTL-aware columns at normal widths and a bounded stacked layout at narrow widths. This is not full runtime Arabic localization.
 
@@ -231,7 +268,10 @@ text writes a transcript-visible `User steer:` block, aborts the current CLI tur
 with `CLI steer`, and queues one retry with the original submitted text plus an
 explicit steering note. Empty or whitespace-only steer input does nothing.
 `Esc` cancels a steer draft or queued steer. `Ctrl+C` remains the hard interrupt
-path and is not modeled as steer submit/cancel.
+path: the first press cancels the active turn, and a second press exits the
+session if the turn has not settled. Entering an exact `/exit` in the active
+steer surface also exits immediately instead of queueing a steer. These exit
+paths are not modeled as steer submit/cancel.
 
 ---
 
@@ -301,7 +341,7 @@ Standard mode uses Unicode box-drawing and a small semantic motion language: Bra
 
 **Provider not configured:** The runtime reports a broken route. Run `estacoda model setup` or `estacoda doctor --live` to diagnose.
 
-**Approval required:** Respond to the prompt with `once`, `session`, `always`, or `deny`. Check `/approvals` for current grants. Use `/revoke <id>` to remove persistent grants.
+**Approval required:** The Papyrus card initially selects **Inspect**; move explicitly to **Approve once** or **Reject** when ready. Explicit `/approve once|session|always` and `/deny` commands remain available for queued approvals. Check `/approvals` for current grants, and use `/revoke <id>` to remove a persistent grant.
 
 **Unsafe command denied:** The command matched a hardline block. Change the command; the hardline floor cannot be overridden.
 
@@ -323,6 +363,8 @@ estacoda model status
 # Session state
 /sessions
 /switch <session-id>
+estacoda --continue
+estacoda sessions open <session-id>
 
 # Approval state
 /approvals

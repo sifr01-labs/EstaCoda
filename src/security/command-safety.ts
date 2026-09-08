@@ -482,8 +482,65 @@ function looksDestructive(command: string): boolean {
 }
 
 function looksCredentialSeeking(command: string): boolean {
-  return /\b(printenv|env|security\s+find|op\s+read|gh\s+auth\s+token|pass\s+show)\b/iu.test(command) ||
+  return looksBrowserProfileDatabaseRead(command) ||
+    /\b(printenv|env|security\s+find|op\s+read|gh\s+auth\s+token|pass\s+show)\b/iu.test(command) ||
     /(\.env|\.ssh|\.aws|\.gnupg|id_rsa|id_ed25519|\.npmrc|token|secret|api[_-]?key|credentials)/iu.test(command);
+}
+
+const BROWSER_PROFILE_DATABASE_PATHS = [
+  /(?:~|\$HOME|\$\{HOME\}|\/Users\/[^/\s"'`;|&]+|\/var\/root)\/Library\/Application Support\/(?:Google\/Chrome|Chromium|Microsoft Edge|BraveSoftware\/Brave-Browser)\/[^;&|\r\n]{1,240}?\/(?:History|Cookies|Login Data)(?:-journal)?(?=$|[\s"'`;|&)])/iu,
+  /(?:~|\$HOME|\$\{HOME\}|\/Users\/[^/\s"'`;|&]+|\/var\/root)\/Library\/Safari\/(?:History\.db|Cookies\/Cookies\.binarycookies)(?=$|[\s"'`;|&)])/iu,
+  /(?:~|\$HOME|\$\{HOME\}|\/home\/[^/\s"'`;|&]+|\/root)\/(?:\.config\/(?:google-chrome(?:-[a-z]+)?|chromium|microsoft-edge(?:-[a-z]+)?|BraveSoftware\/Brave-Browser)|snap\/chromium\/common\/chromium)\/[^;&|\r\n]{1,240}?\/(?:History|Cookies|Login Data)(?:-journal)?(?=$|[\s"'`;|&)])/iu,
+  /(?:\$XDG_CONFIG_HOME|\$\{XDG_CONFIG_HOME\})\/(?:google-chrome(?:-[a-z]+)?|chromium|microsoft-edge(?:-[a-z]+)?|BraveSoftware\/Brave-Browser)\/[^;&|\r\n]{1,240}?\/(?:History|Cookies|Login Data)(?:-journal)?(?=$|[\s"'`;|&)])/iu,
+  /(?:(?:[A-Z]:\/Users\/[^/;"'|&\r\n]+|%USERPROFILE%|\$env:USERPROFILE|\$\{env:USERPROFILE\})\/AppData\/Local|%LOCALAPPDATA%|\$env:LOCALAPPDATA|\$\{env:LOCALAPPDATA\})\/(?:Google\/Chrome|Chromium|Microsoft\/Edge|BraveSoftware\/Brave-Browser)\/(?:User Data\/)?[^;&|\r\n]{1,240}?\/(?:History|Cookies|Login Data)(?:-journal)?(?=$|[\s"'`;|&)])/iu
+] as const;
+
+const BROWSER_PROFILE_READ_COMMANDS = new Set([
+  "cat", "less", "more", "head", "tail", "grep", "rg", "sed", "awk", "strings",
+  "sqlite3", "duckdb", "cp", "rsync", "dd", "tar", "zip", "7z", "find", "fd", "locate",
+  "get-content", "copy-item", "select-string", "type"
+]);
+
+const BROWSER_PROFILE_READ_INTERPRETERS = new Set([
+  "python", "python3", "node", "bun", "deno", "ruby", "perl", "php", "powershell", "pwsh"
+]);
+
+const SHELL_INTERPRETERS = new Set(["sh", "bash", "zsh", "fish"]);
+
+const INLINE_BROWSER_PROFILE_READ_OPERATION =
+  /\b(?:cat|less|more|head|tail|grep|rg|sed|awk|strings|sqlite3|duckdb|cp|rsync|dd|tar|zip|7z|find|fd|locate|Get-Content|Copy-Item|Select-String|type)\b/iu;
+
+function looksBrowserProfileDatabaseRead(command: string): boolean {
+  const pathCandidates = [
+    command.replace(/\\ /gu, " "),
+    command.replace(/\\/gu, "/")
+  ];
+  if (!pathCandidates.some((candidate) =>
+    BROWSER_PROFILE_DATABASE_PATHS.some((pattern) => pattern.test(candidate))
+  )) {
+    return false;
+  }
+
+  return splitShellSegments(command).some((segment) => {
+    let tokens = unwrappedCommandTokens(tokenizeCommand(segment));
+    while (tokens[0] !== undefined && /^[A-Za-z_][A-Za-z0-9_]*=/u.test(tokens[0])) {
+      tokens = tokens.slice(1);
+    }
+    const commandName = browserReadCommandName(tokens[0]);
+    if (commandName === undefined) return false;
+    if (BROWSER_PROFILE_READ_COMMANDS.has(commandName) || BROWSER_PROFILE_READ_INTERPRETERS.has(commandName)) {
+      return true;
+    }
+    if (SHELL_INTERPRETERS.has(commandName)) {
+      return INLINE_BROWSER_PROFILE_READ_OPERATION.test(segment);
+    }
+    return commandName === "cmd" && /(?:^|\s)\/(?:c|k)\s+(?:type|copy|findstr|more)\b/iu.test(segment);
+  });
+}
+
+function browserReadCommandName(token: string | undefined): string | undefined {
+  if (token === undefined) return undefined;
+  return getBasename(token.replace(/^["']+|["']+$/gu, "")).toLowerCase();
 }
 
 function matchesRootDelete(command: string): boolean {

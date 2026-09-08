@@ -25,7 +25,7 @@ export async function assertProviderSpendLineage(
     }
   }
   if (request.visibleTurnId === undefined) return;
-  const visibleLineageRoot = request.sourceKind === "task" && executionSession.parentSessionId !== undefined
+  const visibleLineageRoot = request.taskId !== undefined && executionSession.parentSessionId !== undefined
     ? executionSession.parentSessionId
     : executionSession.id;
   const visibleLineage = await verifiedCompressionLineage(sessionDb, visibleLineageRoot, request.profileId);

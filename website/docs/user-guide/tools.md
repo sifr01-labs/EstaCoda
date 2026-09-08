@@ -54,7 +54,9 @@ Provider-backed tools are not standalone. They are requests the provider makes t
 
 ### MCP Tools
 
-MCP (Model Context Protocol) tools are loaded from configured MCP servers. They are registered at runtime startup and refreshed with `/reload-mcp`. If an MCP server is missing or misconfigured, its tools are unavailable.
+MCP (Model Context Protocol) tools are loaded from configured MCP servers and refreshed with `/reload-mcp`. Status distinguishes whether a server is configured, connected, registered callable schemas, is available, and was exposed in the current turn. A configured server that fails startup or registers no tools remains visible in diagnostics instead of appearing unconfigured.
+
+EstaCoda exposes all registered tools from a connector when you explicitly name that connector in an actionable request, but it does not add unrelated MCP servers. An active browser and compact recovery/status tools remain available for actionable work, while ordinary conversation gets no tools. In a browser turn, EstaCoda may add the visual fallback once after browser results prove ordinary targeting failed. Tool visibility is not permission to execute: approvals, workspace trust, protected-input handling, and hard blocks still apply normally.
 
 ### Skill-Selected Tool Use
 

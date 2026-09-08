@@ -1,7 +1,9 @@
 import { join } from "node:path";
 import { stdin, stdout } from "node:process";
+import { summarizeMcpCapabilityConfig } from "../mcp/mcp-tools.js";
 import {
   createTelegramPairingCode,
+  isBrowserDisplayUpdate,
   loadRuntimeConfig,
   setupMcpConfig,
   setupBrowserConfig,
@@ -53,6 +55,10 @@ import { createReviewedSetupApplyExecutor } from "../setup/review/apply-executor
 import { collectSetupRoute } from "../setup/setup-router.js";
 import { renderSetupRouteSummary } from "../setup/setup-state-renderer.js";
 import { runSetupVerification } from "../setup/verification.js";
+import {
+  renderVisionRouteVerification,
+  runVisionRouteVerification,
+} from "../setup/vision-route-verification.js";
 import { checkSttProviderStatus, checkTtsProviderStatusWithCapabilities, type VoiceProviderStatus } from "../tools/voice-tools.js";
 import type { ToolDefinition } from "../contracts/tool.js";
 import type { FetchLike as ProviderFetchLike } from "../providers/openai-compatible-provider.js";
@@ -201,6 +207,10 @@ export type CliCommandResult = {
   handled: boolean;
   exitCode: number;
   output: string;
+  sessionHandoff?: {
+    readonly sessionId: string;
+    readonly workspaceRoot: string;
+  };
   launchHandoff?: {
     readonly workspaceRoot: string;
     readonly locale: UiLocale;
@@ -229,15 +239,20 @@ export type CliOptions = {
 };
 
 export type ParsedGlobalCliOptions =
-  | { ok: true; argv: string[]; profileId?: string }
+  | { ok: true; argv: string[]; profileId?: string; continueSession?: true }
   | { ok: false; error: string };
 
 export function parseGlobalCliOptions(argv: readonly string[]): ParsedGlobalCliOptions {
   const nextArgv: string[] = [];
   let profileId: string | undefined;
+  let continueSession = false;
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
+    if (arg === "--continue" || arg === "-c") {
+      continueSession = true;
+      continue;
+    }
     if (arg === "--profile" || arg === "-p") {
       const value = argv[i + 1];
       if (value === undefined || value.startsWith("-")) {
@@ -263,9 +278,12 @@ export function parseGlobalCliOptions(argv: readonly string[]): ParsedGlobalCliO
     nextArgv.push(arg);
   }
 
-  return profileId === undefined
-    ? { ok: true, argv: nextArgv }
-    : { ok: true, argv: nextArgv, profileId };
+  return {
+    ok: true,
+    argv: nextArgv,
+    ...(profileId === undefined ? {} : { profileId }),
+    ...(continueSession ? { continueSession: true as const } : {}),
+  };
 }
 
 export async function runCliCommand(options: CliOptions): Promise<CliCommandResult> {
@@ -320,7 +338,7 @@ export async function runCliCommand(options: CliOptions): Promise<CliCommandResu
     case "doctor":
       return runDoctor(options, args);
     case "verify":
-      return verify(options);
+      return verify(options, args);
     case "settings":
       return settings(options, args);
     case "profile":
@@ -548,7 +566,26 @@ function interactiveSetupConsole(options: CliOptions): SetupConsolePromptAdapter
       };
 }
 
-async function verify(options: CliOptions): Promise<CliCommandResult> {
+async function verify(options: CliOptions, args: string[]): Promise<CliCommandResult> {
+  if (args[0] === "vision") {
+    const config = await loadRuntimeConfig(options);
+    const report = await runVisionRouteVerification({
+      config,
+      consentHosted: hasFlag(args, "--consent-hosted"),
+    });
+    return {
+      handled: true,
+      exitCode: report.status === "passed" ? 0 : 1,
+      output: renderVisionRouteVerification(report),
+    };
+  }
+  if (args.length > 0) {
+    return {
+      handled: true,
+      exitCode: 1,
+      output: `Unknown verification target: ${args[0]}. Available: vision`,
+    };
+  }
   const result = await runSetupVerification({
     ...options,
     runtime: options.runtime
@@ -1232,7 +1269,8 @@ async function persistModelSelection(
     baseUrl: resolution.baseUrl,
     apiKeyEnv: envVarName,
     apiMode: resolution.apiMode,
-    authMethod: resolution.authMethod === "api_key" ? undefined : resolution.authMethod
+    authMethod: resolution.authMethod === "api_key" ? undefined : resolution.authMethod,
+    enableNetwork: true
   });
 
   mutated = applyRegisterProviderModel(mutated, {
@@ -1828,7 +1866,7 @@ async function browser(options: CliOptions, args: string[]): Promise<CliCommandR
       output: [
         "EstaCoda browser backend",
         "  estacoda browser status",
-        "  estacoda browser setup --backend local-cdp --cdp-url http://127.0.0.1:9222 --launch-executable /path/to/chrome --launch-arg --headless=new --chrome-flag --no-first-run",
+        "  estacoda browser setup --backend local-cdp --auto-launch [--headless | --headed] --launch-executable /path/to/chrome --chrome-flag --no-first-run",
         "  estacoda browser setup --backend browserbase --cloud-provider browserbase --hybrid-routing",
         "  estacoda browser approve-cloud",
         "  estacoda browser revoke-cloud",
@@ -1874,6 +1912,7 @@ async function browser(options: CliOptions, args: string[]): Promise<CliCommandR
         config.browser.launchCommand === undefined ? undefined : `Deprecated launch command: ${config.browser.launchCommand}`,
         ...deprecatedLaunchCommandWarnings(config.browser.launchCommand),
         `Auto-launch: ${config.browser.autoLaunch ? "enabled" : "disabled"}`,
+        config.browser.autoLaunch ? `Browser window: ${config.browser.headless ? "background" : "visible"}` : undefined,
         `Hybrid routing: ${config.browser.hybridRouting ? "enabled" : "disabled"}`,
         `Config sources: ${config.sources.join(", ") || "none"}`,
         subcommand === "test"
@@ -1890,7 +1929,8 @@ async function browser(options: CliOptions, args: string[]): Promise<CliCommandR
     : parseBrowserArgs(args.slice(1));
   const result = await setupBrowserConfig({
     ...options,
-    input: parsed
+    input: parsed,
+    preserveExisting: subcommand !== "disable" && isBrowserDisplayUpdate(parsed)
   });
 
   return {
@@ -1906,6 +1946,7 @@ async function browser(options: CliOptions, args: string[]): Promise<CliCommandR
       result.config.browser?.launchCommand === undefined ? undefined : `Deprecated launch command: ${result.config.browser.launchCommand}`,
       ...deprecatedLaunchCommandWarnings(result.config.browser?.launchCommand),
       `Auto-launch: ${result.config.browser?.autoLaunch === true ? "enabled" : "disabled"}`,
+      result.config.browser?.autoLaunch === true ? `Browser window: ${result.config.browser.headless === false ? "visible" : "background"}` : undefined,
       `Hybrid routing: ${result.config.browser?.hybridRouting === true ? "enabled" : "disabled"}`,
       `Config: ${result.path}`
     ].filter((line) => line !== undefined).join("\n")
@@ -2769,6 +2810,7 @@ async function telegram(options: CliOptions, args: string[]): Promise<CliCommand
         "EstaCoda Telegram channel",
         "  estacoda telegram status",
         "  estacoda telegram setup",
+        "  estacoda telegram configure --secure-input-mode protected-handoff|direct-dm|disabled",
         "  estacoda telegram allow-user <id>",
         "  estacoda telegram allow-chat <id>",
         "  estacoda telegram set-default-chat <id>",
@@ -2795,6 +2837,7 @@ async function telegram(options: CliOptions, args: string[]): Promise<CliCommand
         telegram.defaultChatId === undefined ? undefined : `Default chat: ${telegram.defaultChatId}`,
         `Allowed users: ${(telegram.allowedUserIds ?? []).join(", ") || "none"}`,
         `Allowed chats: ${(telegram.allowedChatIds ?? []).join(", ") || "none"}`,
+        `Secure input: ${telegram.secureInputMode ?? "protected-handoff"}`,
         telegram.missing === undefined ? undefined : `Missing: ${telegram.missing.join(", ")}`,
         `Config sources: ${config.sources.join(", ") || "none"}`
       ].filter((line) => line !== undefined).join("\n")
@@ -2853,6 +2896,7 @@ async function telegram(options: CliOptions, args: string[]): Promise<CliCommand
       result.config.channels?.telegram?.botTokenEnv === undefined ? undefined : `Bot token env: ${result.config.channels.telegram.botTokenEnv}`,
       result.secretPath === undefined ? undefined : `Secret store: ${result.secretPath}`,
       result.config.channels?.telegram?.defaultChatId === undefined ? undefined : `Default chat: ${result.config.channels.telegram.defaultChatId}`,
+      `Secure input: ${result.config.channels?.telegram?.secureInputMode ?? "protected-handoff"}`,
       parsed.enabled === false ? undefined : "Next: run estacoda telegram status, then start the gateway when channel runtime is enabled."
     ].filter((line) => line !== undefined).join("\n")
   };
@@ -3051,7 +3095,14 @@ async function mcp(options: CliOptions, args: string[]): Promise<CliCommandResul
         "  estacoda mcp reload",
         "  estacoda mcp setup --name docs --command npx --args @modelcontextprotocol/server-filesystem,/path",
         "  estacoda mcp setup --name docs --command uvx --args mcp-server-fetch",
-        "  estacoda mcp setup --name remote --transport http --url http://127.0.0.1:3000/mcp --server-trust read-only-network"
+        "  estacoda mcp setup --name remote --transport http --url http://127.0.0.1:3000/mcp --server-trust read-only-network",
+        "  --env-ref CHILD_KEY=PROFILE_ENV_KEY forwards an explicitly named profile secret without storing its value in config",
+        "  --tool-risk-classes TOOL=RISK,... classifies individual discovered operations; unknown tools stay conservative",
+        "  --protected-tool-arguments-json JSON configures reviewed JSON Pointer mappings without credential values",
+        "  --artifact-tool-arguments-json JSON configures reviewed session-artifact content mappings",
+        "  --redacted-tool-result-paths-json JSON removes reviewed fields from structured MCP results",
+        "  --continuity-tool-result-paths-json JSON retains reviewed non-secret scalar result fields for the current turn",
+        "  --tool-verification-relationships-json JSON maps read-only verification tools to mutation tools"
       ].join("\n")
     };
   }
@@ -3073,14 +3124,24 @@ async function mcp(options: CliOptions, args: string[]): Promise<CliCommandResul
             "EstaCoda MCP",
             ...lines.map(([name, server]) => {
               const snapshot = snapshots.find((entry) => entry.name === name);
-              const status = snapshot === undefined
-                ? (server.enabled === false ? "disabled" : "configured")
+              const capabilities = snapshot?.capabilities ?? summarizeMcpCapabilityConfig(server);
+              const status = server.enabled === false
+                ? "disabled"
+                : snapshot === undefined
+                  ? "configured"
                 : snapshot.available
                   ? "ready"
-                  : `unavailable (${snapshot.error})`;
+                  : "unavailable";
               return [
                 `${name}`,
                 `  status: ${status}`,
+                `  configured: yes`,
+                `  enabled: ${server.enabled === false ? "no" : "yes"}`,
+                `  connected: ${snapshot === undefined ? "unknown" : snapshot.connected ? "yes" : "no"}`,
+                `  schemas registered: ${snapshot === undefined ? "unknown" : snapshot.schemasRegistered ? "yes" : "no"}`,
+                `  available: ${snapshot === undefined ? "unknown" : snapshot.available ? "yes" : "no"}`,
+                snapshot?.failureStage === undefined ? undefined : `  failure stage: ${snapshot.failureStage}`,
+                snapshot?.error === undefined ? undefined : `  error: ${snapshot.error}`,
                 `  transport: ${server.transport ?? "stdio"}`,
                 `  trust: ${server.trust ?? "conservative"}`,
                 server.command === undefined ? undefined : `  command: ${server.command}`,
@@ -3088,7 +3149,14 @@ async function mcp(options: CliOptions, args: string[]): Promise<CliCommandResul
                 server.args === undefined ? undefined : `  args: ${server.args.join(" ") || "(none)"}`,
                 server.cwd === undefined ? undefined : `  cwd: ${server.cwd}`,
                 snapshot === undefined ? undefined : `  discovered tools: ${snapshot.toolCount}, resources: ${snapshot.resourceCount}, prompts: ${snapshot.promptCount}`,
-                snapshot === undefined || snapshot.tools.length === 0 ? undefined : `  registered: ${snapshot.tools.join(", ")}`
+                snapshot === undefined || snapshot.tools.length === 0 ? undefined : `  registered: ${snapshot.tools.join(", ")}`,
+                `  protected delivery configured: ${capabilities.protectedDeliveryConfigured ? "yes" : "no"}`,
+                `  grouped delivery supported: ${capabilities.groupedDeliverySupported ? "yes" : "no"}`,
+                `  browser relay supported: ${capabilities.browserRelaySupported ? "yes" : "no"}`,
+                `  artifact relay configured: ${capabilities.artifactRelayConfigured ? "yes" : "no"}`,
+                `  result redaction configured: ${capabilities.resultRedactionConfigured ? "yes" : "no"}`,
+                `  continuity configured: ${capabilities.continuityConfigured ? "yes" : "no"}`,
+                `  verification configured: ${capabilities.verificationConfigured ? "yes" : "no"}`
               ].filter((line) => line !== undefined).join("\n");
             }),
             `Config sources: ${config.sources.join(", ") || "none"}`
@@ -3123,7 +3191,7 @@ async function mcp(options: CliOptions, args: string[]): Promise<CliCommandResul
     return {
       handled: true,
       exitCode: 1,
-      output: "Usage: estacoda mcp setup --name <server> --command <cmd> [--args a,b,c]"
+      output: "Usage: estacoda mcp setup --name <server> --command <cmd> [--args a,b,c] [--env-ref CHILD_KEY=PROFILE_ENV_KEY] [--protected-tool-arguments-json JSON] [--artifact-tool-arguments-json JSON] [--redacted-tool-result-paths-json JSON] [--continuity-tool-result-paths-json JSON]"
     };
   }
   const result = await setupMcpConfig({
@@ -3675,9 +3743,7 @@ function parseWebArgs(args: string[]): Partial<WebSetupInput> {
 }
 
 function parseBrowserArgs(args: string[]): Partial<BrowserSetupInput> {
-  const parsed: Partial<BrowserSetupInput> = {
-    backend: "local-cdp"
-  };
+  const parsed: Partial<BrowserSetupInput> = {};
 
   for (let index = 0; index < args.length; index++) {
     const arg = args[index];
@@ -3706,6 +3772,16 @@ function parseBrowserArgs(args: string[]): Partial<BrowserSetupInput> {
       index += 1;
     } else if (arg === "--auto-launch") {
       parsed.autoLaunch = true;
+    } else if (arg === "--headless") {
+      if (parsed.headless === false) {
+        throw new Error("Use only one of --headless or --headed.");
+      }
+      parsed.headless = true;
+    } else if (arg === "--headed") {
+      if (parsed.headless === true) {
+        throw new Error("Use only one of --headless or --headed.");
+      }
+      parsed.headless = false;
     } else if (arg === "--hybrid-routing") {
       parsed.hybridRouting = true;
     }
@@ -3754,6 +3830,13 @@ function parseTelegramArgs(args: string[]): TelegramSetupInput {
     } else if (arg === "--poll-timeout-seconds") {
       parsed.pollTimeoutSeconds = Number.parseInt(next ?? "", 10);
       index += 1;
+    } else if (arg === "--secure-input-mode") {
+      if (next === "protected-handoff" || next === "direct-dm" || next === "disabled") {
+        parsed.secureInputMode = next;
+      } else {
+        throw new Error("Expected --secure-input-mode protected-handoff, direct-dm, or disabled");
+      }
+      index += 1;
     }
   }
 
@@ -3794,10 +3877,7 @@ function parseTelegramPairArgs(args: string[]): {
 }
 
 function parseMcpArgs(args: string[]): Partial<MCPSetupInput> {
-  const parsed: Partial<MCPSetupInput> = {
-    enabled: true,
-    transport: "stdio"
-  };
+  const parsed: Partial<MCPSetupInput> = {};
 
   for (let index = 0; index < args.length; index++) {
     const arg = args[index];
@@ -3827,11 +3907,32 @@ function parseMcpArgs(args: string[]): Partial<MCPSetupInput> {
     } else if (arg === "--env") {
       parsed.env = parseKeyValueList(next ?? "");
       index += 1;
+    } else if (arg === "--env-ref") {
+      parsed.envRefs = parseKeyValueList(next ?? "");
+      index += 1;
     } else if (arg === "--header" || arg === "--headers") {
       parsed.headers = parseKeyValueList(next ?? "");
       index += 1;
     } else if (arg === "--tool-risk-class") {
       parsed.toolRiskClass = next as MCPSetupInput["toolRiskClass"];
+      index += 1;
+    } else if (arg === "--tool-risk-classes") {
+      parsed.toolRiskClasses = parseKeyValueList(next ?? "") as Record<string, import("../contracts/tool.js").ToolRiskClass>;
+      index += 1;
+    } else if (arg === "--protected-tool-arguments-json") {
+      parsed.protectedToolArguments = parseJsonRecord(next ?? "", "protected tool arguments") as MCPSetupInput["protectedToolArguments"];
+      index += 1;
+    } else if (arg === "--artifact-tool-arguments-json") {
+      parsed.artifactToolArguments = parseJsonRecord(next ?? "", "artifact tool arguments") as MCPSetupInput["artifactToolArguments"];
+      index += 1;
+    } else if (arg === "--redacted-tool-result-paths-json") {
+      parsed.redactedToolResultPaths = parseJsonRecord(next ?? "", "redacted tool result paths") as MCPSetupInput["redactedToolResultPaths"];
+      index += 1;
+    } else if (arg === "--continuity-tool-result-paths-json") {
+      parsed.continuityToolResultPaths = parseJsonRecord(next ?? "", "continuity tool result paths") as MCPSetupInput["continuityToolResultPaths"];
+      index += 1;
+    } else if (arg === "--tool-verification-relationships-json") {
+      parsed.toolVerificationRelationships = parseJsonRecord(next ?? "", "tool verification relationships") as MCPSetupInput["toolVerificationRelationships"];
       index += 1;
     } else if (arg === "--resource-read-risk-class") {
       parsed.resourceReadRiskClass = next as MCPSetupInput["resourceReadRiskClass"];
@@ -3915,6 +4016,19 @@ function parseKeyValueList(value: string): Record<string, string> {
     parsed[key] = entryValue;
   }
   return parsed;
+}
+
+function parseJsonRecord(value: string, label: string): Record<string, unknown> {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(value);
+  } catch {
+    throw new Error(`Expected ${label} to be a JSON object`);
+  }
+  if (typeof parsed !== "object" || parsed === null || Array.isArray(parsed)) {
+    throw new Error(`Expected ${label} to be a JSON object`);
+  }
+  return parsed as Record<string, unknown>;
 }
 
 function localeForConfig(config: { ui: { language: string } }): Locale {
@@ -4054,15 +4168,48 @@ async function handoff(options: CliOptions, args: string[]): Promise<CliCommandR
 }
 
 async function sessions(options: CliOptions, args: string[]): Promise<CliCommandResult> {
-  const result = await runSessionsCommand({
-    args,
-    homeDir: resolveHomeDir(options.homeDir),
-    workspaceRoot: options.workspaceRoot,
-    providerFetch: options.providerFetch,
-    modelsDevOptions: options.modelsDevOptions,
-    runtime: options.runtime,
-  });
-  return { handled: true, exitCode: result.ok ? 0 : 1, output: result.output };
+  const homeDir = resolveHomeDir(options.homeDir);
+  const profileId = options.profileId ?? readActiveProfile({ homeDir }).profileId ?? defaultProfileId();
+  const interactive = options.interactive ?? canRunInteractive();
+  const locale = options.prompt?.uiContext?.locale ?? await readSessionCommandLocale(homeDir, profileId);
+  const ownsPrompt = args.length === 0 && interactive && options.prompt === undefined;
+  const prompt = ownsPrompt
+    ? createInteractivePrompt({ uiContext: promptUiContextForLocale(locale) })
+    : options.prompt;
+  try {
+    const result = await runSessionsCommand({
+      args,
+      homeDir,
+      profileId,
+      workspaceRoot: options.workspaceRoot,
+      interactive,
+      locale,
+      prompt,
+      providerFetch: options.providerFetch,
+      modelsDevOptions: options.modelsDevOptions,
+      runtime: options.runtime,
+    });
+    return {
+      handled: true,
+      exitCode: result.ok ? 0 : 1,
+      output: result.output,
+      ...(result.selectedSession === undefined ? {} : { sessionHandoff: result.selectedSession }),
+    };
+  } finally {
+    if (ownsPrompt) {
+      prompt?.close?.();
+    }
+  }
+}
+
+async function readSessionCommandLocale(homeDir: string, profileId: string): Promise<UiLocale> {
+  try {
+    const profilePaths = resolveProfileStateHome({ homeDir, profileId });
+    const loaded = await readConfig(profilePaths.configPath);
+    return loaded.config.ui?.language === "ar" ? "ar" : "en";
+  } catch {
+    return "en";
+  }
 }
 
 async function channels(options: CliOptions, args: string[]): Promise<CliCommandResult> {
@@ -4123,6 +4270,11 @@ function help(): string {
     ...commands.map(
       (cmd) => `  estacoda ${cmd.name.padEnd(maxWidth)}  ${cmd.description}`
     ),
+    "",
+    "Launch options",
+    "  estacoda                         Start a fresh interactive session",
+    "  estacoda -c, --continue          Continue the last session for this profile and workspace",
+    "  estacoda --profile <id> [...]    Select a profile for this command only",
   ].join("\n");
 }
 

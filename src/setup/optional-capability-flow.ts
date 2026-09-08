@@ -182,6 +182,7 @@ export function setupModuleContextFromConfig(
           launchArgs: stringArrayValue(browser.launchArgs),
           chromeFlags: stringArrayValue(browser.chromeFlags),
           autoLaunch: booleanValue(browser.autoLaunch),
+          headless: booleanValue(browser.headless),
           supervised: booleanValue(browser.supervised),
           engine: browserEngineValue(browser.engine),
           hybridRouting: booleanValue(browser.hybridRouting),
@@ -1066,7 +1067,7 @@ export function optionalCapabilityTitle(moduleId: string, locale: SetupCopyLocal
       case "voice":
         return "Voice";
       case "vision":
-        return "Vision and image generation";
+        return "Image Generation and Editing";
       case "web-search":
         return "Search";
       case "browser":

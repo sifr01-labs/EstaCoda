@@ -772,7 +772,7 @@ describe("computeRuntimeFingerprint", () => {
     const fp1 = computeRuntimeFingerprint(base, opts);
     const fp2 = computeRuntimeFingerprint(
       fakeLoadedRuntimeConfig({
-        browser: { backend: "local-cdp", autoLaunch: true, cdpUrl: "ws://localhost:9222", supervised: true },
+        browser: { backend: "local-cdp", autoLaunch: true, headless: true, cdpUrl: "ws://localhost:9222", supervised: true },
       }),
       opts
     );
@@ -1187,6 +1187,26 @@ describe("computeRuntimeFingerprint", () => {
       opts
     );
     expect(fp2.modelContextWindowTokens).toBe(256_000);
+    expect(fp1).not.toEqual(fp2);
+  });
+
+  it("model max output metadata changes the runtime fingerprint", () => {
+    const base = fakeLoadedRuntimeConfig();
+    const opts = fakeOptions();
+    const fp1 = computeRuntimeFingerprint(base, opts);
+    const fp2 = computeRuntimeFingerprint(
+      fakeLoadedRuntimeConfig({
+        model: { ...base.model, maxOutputTokens: 16_384 },
+        primaryModelRoute: {
+          provider: base.model.provider,
+          id: base.model.id,
+          profile: { ...base.model, maxOutputTokens: 16_384 }
+        }
+      }),
+      opts
+    );
+
+    expect(fp2.modelMaxOutputTokens).toBe(16_384);
     expect(fp1).not.toEqual(fp2);
   });
 

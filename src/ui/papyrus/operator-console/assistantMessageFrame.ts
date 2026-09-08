@@ -11,6 +11,7 @@ import {
 } from "../../bidi.js";
 import { stringWidth } from "../screen/stringWidth.js";
 import { formatInlineToolTrailRow } from "./inlineToolTrailSurface.js";
+import type { OperatorConsoleLocale } from "./activeWorkCopy.js";
 import type { InlineToolTrailEntry } from "./operatorConsoleState.js";
 import {
   type OperatorConsoleStyle,
@@ -45,6 +46,7 @@ export type AssistantMessageFrameRenderOptions = {
   readonly height?: number;
   readonly style?: OperatorConsoleStyle;
   readonly motionElapsedMs?: number;
+  readonly locale?: OperatorConsoleLocale;
 };
 
 const DEFAULT_ASSISTANT_NAME = "EstaCoda";
@@ -73,7 +75,7 @@ export function renderAssistantMessageFrame(
   if (height <= 0) return [];
 
   const title = normalizeTitle(input.title, options.style);
-  const contentRows = renderWrappedContentRows(input, contentWidthFor(width), options.style, options.motionElapsedMs);
+  const contentRows = renderWrappedContentRows(input, contentWidthFor(width), options.style, options.motionElapsedMs, options.locale);
   if (height < 3) return [truncateAssistantText(`${title}: ${summarizeContentRows(contentRows)}`, width)];
 
   const visibleContentRows = Math.max(1, height - 2);
@@ -91,10 +93,11 @@ function renderWrappedContentRows(
   input: AssistantMessageFrameInput,
   width: number,
   style?: OperatorConsoleStyle,
-  motionElapsedMs?: number
+  motionElapsedMs?: number,
+  locale?: OperatorConsoleLocale
 ): readonly string[] {
   const rows = contentBlocksForInput(input).flatMap((block, index, blocks) =>
-    renderContentBlockRows(block, index, blocks, width, style, motionElapsedMs)
+    renderContentBlockRows(block, index, blocks, width, style, motionElapsedMs, locale)
   );
   return rows.length === 0 ? [""] : rows;
 }
@@ -118,7 +121,8 @@ function renderContentBlockRows(
   blocks: readonly AssistantMessageFrameBlock[],
   width: number,
   style: OperatorConsoleStyle | undefined,
-  motionElapsedMs: number | undefined
+  motionElapsedMs: number | undefined,
+  locale: OperatorConsoleLocale | undefined
 ): readonly string[] {
   if (block.kind === "text") {
     const lines = withOptionalCursor(normalizeFrameLines(block.lines), block.cursor);
@@ -127,7 +131,7 @@ function renderContentBlockRows(
 
   const entries = [...block.entries].sort((left, right) => left.sequence - right.sequence);
   if (entries.length === 0) return [];
-  const rows = entries.map((entry) => formatInlineToolTrailRow(entry, width, { style, motionElapsedMs }));
+  const rows = entries.map((entry) => formatInlineToolTrailRow(entry, width, { style, motionElapsedMs, locale }));
   return [
     ...(shouldSeparateFromPreviousBlock(index, blocks) ? [""] : []),
     ...rows,

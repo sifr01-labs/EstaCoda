@@ -1,5 +1,6 @@
+import { Script } from "node:vm";
 import { describe, expect, it } from "vitest";
-import { CDPSupervisor } from "./cdp-supervisor.js";
+import { CDPSupervisor, parseCdpSnapshot, snapshotExpression } from "./cdp-supervisor.js";
 import type { CdpWebSocketEvent, CdpWebSocketLike } from "./cdp-client.js";
 
 class FakeCdpSocket implements CdpWebSocketLike {
@@ -16,10 +17,14 @@ class FakeCdpSocket implements CdpWebSocketLike {
         title: string;
         text: string;
         elements: Array<{ ref: string; role?: string; name?: string }>;
+        scriptedElements?: Array<Record<string, unknown>>;
+        regions?: Array<Record<string, unknown>>;
       };
       axTree?: unknown;
       failAxTree?: boolean;
       failElementClear?: boolean;
+      callFunctionValue?: unknown;
+      silentMethods?: ReadonlySet<string>;
     } = {}
   ) {}
 
@@ -30,6 +35,7 @@ class FakeCdpSocket implements CdpWebSocketLike {
       params?: Record<string, unknown>;
     };
     this.sent.push(message);
+    if (this.options.silentMethods?.has(message.method) === true) return;
     if (message.method === "Accessibility.getFullAXTree" && this.options.failAxTree === true) {
       this.#emit("message", {
         data: JSON.stringify({
@@ -60,7 +66,7 @@ class FakeCdpSocket implements CdpWebSocketLike {
         : message.method === "DOM.resolveNode"
           ? { object: { objectId: `object-${message.params?.backendNodeId ?? "unknown"}` } }
           : message.method === "Runtime.callFunctionOn"
-            ? { result: { value: true } }
+            ? { result: { value: this.options.callFunctionValue ?? true } }
         : { ok: true, method: message.method };
     this.#emit("message", {
       data: JSON.stringify({
@@ -111,6 +117,84 @@ async function flushAsyncEvents(): Promise<void> {
 }
 
 describe("CDPSupervisor", () => {
+  it("keeps the browser-side structured snapshot expression syntactically valid", () => {
+    const expression = snapshotExpression();
+
+    // Compile the generated expression for syntax validation without executing it.
+    expect(() => new Script(`(${expression});`)).not.toThrow();
+    expect(expression).toContain("collectScriptedControls");
+    expect(expression).toContain("style.cursor !== 'pointer'");
+    expect(expression).toContain("estacodaVisibleText");
+    expect(expression).toContain("estacodaAssessRendering");
+  });
+
+  it("preserves page text while removing non-interactable DOM controls", () => {
+    expect(parseCdpSnapshot(JSON.stringify({
+      url: "https://example.com",
+      title: "Modal",
+      text: "Background diagnostics remain readable",
+      elements: [
+        { ref: "@e1", role: "button", name: "Background", interactable: false, interactabilityReason: "modal-blocked" },
+        {
+          ref: "@e2",
+          role: "button",
+          name: "Confirm",
+          withinText: "Account Settings Confirm Cancel",
+          regionText: "Account Settings Confirm Cancel",
+          interactable: true
+        }
+      ]
+    }), "session-1")).toMatchObject({
+      text: "Background diagnostics remain readable",
+      elements: [{
+        ref: "@e2",
+        role: "button",
+        name: "Confirm",
+        withinText: "Account Settings Confirm Cancel",
+        regionText: "Account Settings Confirm Cancel"
+      }]
+    });
+  });
+
+  it("parses bounded visible regions while omitting secret-bearing or unsafe links", () => {
+    const parsed = parseCdpSnapshot(JSON.stringify({
+      url: "https://example.com/apps",
+      title: "Apps",
+      text: "TikTok Connect",
+      elements: [
+        { ref: "@e1", role: "link", name: "Callback URL" },
+        { ref: "@e2", role: "button", name: "Edit" },
+        { ref: "@e3", role: "button", name: "Delete" }
+      ],
+      regions: [{
+        ref: "@r1",
+        text: "TikTok Connect Callback URL Edit Delete",
+        actionRefs: ["@e1", "@e2", "@e3", "@e99", "not-a-ref"],
+        links: [
+          { text: "Callback URL", href: "https://example.com/callback" },
+          { text: "Private callback", href: "https://example.com/callback?token=do-not-render" },
+          { text: "CSRF callback", href: "https://example.com/callback?csrf=also-do-not-render" },
+          { text: "Credential URL", href: "https://user:password@example.com/callback" },
+          { text: "Unsafe", href: "javascript:alert(1)" }
+        ],
+        hitTestable: true,
+        viewport: "partially-visible"
+      }]
+    }), "session-1");
+
+    expect(parsed.regions).toEqual([{
+      ref: "@r1",
+      text: "TikTok Connect Callback URL Edit Delete",
+      actionRefs: ["@e1", "@e2", "@e3"],
+      links: [{ text: "Callback URL", href: "https://example.com/callback" }],
+      hitTestable: true,
+      viewport: "partially-visible"
+    }]);
+    expect(JSON.stringify(parsed)).not.toContain("do-not-render");
+    expect(JSON.stringify(parsed)).not.toContain("also-do-not-render");
+    expect(JSON.stringify(parsed)).not.toContain("javascript:");
+  });
+
   it("start() connects once and enables Page and Runtime", async () => {
     const sockets: FakeCdpSocket[] = [];
     const supervisor = new CDPSupervisor({
@@ -156,6 +240,47 @@ describe("CDPSupervisor", () => {
     });
   });
 
+  it("times out a CDP command when the connected browser never replies", async () => {
+    const socket = new FakeCdpSocket("ws://cdp/page-1", {
+      silentMethods: new Set(["Runtime.evaluate"])
+    });
+    const supervisor = new CDPSupervisor({
+      webSocketUrl: "ws://cdp/page-1",
+      webSocketFactory: () => socket,
+      requestTimeoutMs: 5
+    });
+
+    await supervisor.start();
+    await expect(supervisor.send("Runtime.evaluate", { expression: "1" }))
+      .rejects.toThrow("Timed out waiting for CDP command Runtime.evaluate.");
+
+    const timedOutRequest = socket.sent.at(-1)!;
+    socket.emitMessage({ id: timedOutRequest.id, result: { result: { value: 1 } } });
+    await expect(supervisor.send("Page.navigate", { url: "https://example.com/next" }))
+      .resolves.toMatchObject({ method: "Page.navigate" });
+  });
+
+  it("cancels a pending CDP command through its AbortSignal", async () => {
+    const socket = new FakeCdpSocket("ws://cdp/page-1", {
+      silentMethods: new Set(["Runtime.evaluate"])
+    });
+    const supervisor = new CDPSupervisor({
+      webSocketUrl: "ws://cdp/page-1",
+      webSocketFactory: () => socket,
+      requestTimeoutMs: 1_000
+    });
+    const controller = new AbortController();
+
+    await supervisor.start();
+    const pending = supervisor.send("Runtime.evaluate", { expression: "1" }, { signal: controller.signal });
+    controller.abort("test cancellation");
+
+    await expect(pending).rejects.toMatchObject({
+      name: "AbortError",
+      message: "CDP command Runtime.evaluate was cancelled."
+    });
+  });
+
   it("getSnapshot() returns page content plus scaffold-only empty event arrays", async () => {
     const supervisor = new CDPSupervisor({
       webSocketUrl: "ws://cdp/page-1",
@@ -166,12 +291,14 @@ describe("CDPSupervisor", () => {
     await expect(supervisor.getSnapshot("session-1")).resolves.toEqual({
       sessionId: "session-1",
       url: "https://example.com/page",
+      readiness: "unknown",
       title: "Example",
       text: "Readable text",
       elements: [{ ref: "@e1", role: "button", name: "Continue" }],
       pendingDialogs: [],
       frameTree: [],
-      consoleHistory: []
+      consoleHistory: [],
+      documentSignal: {}
     });
   });
 
@@ -218,9 +345,8 @@ describe("CDPSupervisor", () => {
       title: "Example",
       text: "Readable text",
       elements: [
-        { ref: "@e1", role: "button", name: "Continue", disabled: true },
-        { ref: "@e2", role: "textbox", name: "Email", value: "ada@example.com" },
-        { ref: "@e3", role: "checkbox", name: "Subscribe", checked: "mixed" }
+        { ref: "@e1", role: "textbox", name: "Email", value: "ada@example.com" },
+        { ref: "@e2", role: "checkbox", name: "Subscribe", checked: "mixed" }
       ],
       pendingDialogs: [],
       frameTree: [],
@@ -233,6 +359,137 @@ describe("CDPSupervisor", () => {
       { backendNodeId: 103 }
     ]);
     expect(socket.sent.filter((message) => message.method === "Runtime.callFunctionOn")).toHaveLength(3);
+  });
+
+  it("excludes AX controls rejected by the shared interactability evaluator", async () => {
+    const socket = new FakeCdpSocket("ws://cdp/page-1", {
+      snapshot: { url: "https://example.com", title: "Example", text: "Background text remains", elements: [] },
+      axTree: {
+        nodes: [{
+          nodeId: "covered-button",
+          backendDOMNodeId: 101,
+          role: { value: "button" },
+          name: { value: "Covered action" }
+        }]
+      },
+      callFunctionValue: {
+        text: "Covered action",
+        interactable: false,
+        interactabilityReason: "modal-blocked",
+        hidden: false,
+        disabled: false
+      }
+    });
+    const supervisor = new CDPSupervisor({
+      webSocketUrl: "ws://cdp/page-1",
+      webSocketFactory: () => socket
+    });
+
+    await supervisor.start();
+    await expect(supervisor.getSnapshot("session-1")).resolves.toMatchObject({
+      text: "Background text remains",
+      elements: []
+    });
+  });
+
+  it("binds actionable AX controls to their compact visible page region", async () => {
+    const socket = new FakeCdpSocket("ws://cdp/page-1", {
+      axTree: {
+        nodes: [{
+          nodeId: "edit-button",
+          backendDOMNodeId: 101,
+          role: { value: "button" },
+          name: { value: "Edit" }
+        }]
+      },
+      callFunctionValue: {
+        text: "Edit",
+        withinText: "TikTok Connect Callback URL Edit Delete",
+        regionText: "TikTok Connect Callback URL Edit Delete",
+        interactable: true,
+        hidden: false,
+        disabled: false
+      }
+    });
+    const supervisor = new CDPSupervisor({
+      webSocketUrl: "ws://cdp/page-1",
+      webSocketFactory: () => socket
+    });
+
+    await supervisor.start();
+
+    await expect(supervisor.getSnapshot("session-1")).resolves.toMatchObject({
+      elements: [{
+        ref: "@e1",
+        role: "button",
+        name: "Edit",
+        withinText: "TikTok Connect Callback URL Edit Delete",
+        regionText: "TikTok Connect Callback URL Edit Delete"
+      }]
+    });
+  });
+
+  it("supplements AX controls with a grounded scripted control from page metadata", async () => {
+    const socket = new FakeCdpSocket("ws://cdp/page-1", {
+      snapshot: {
+        url: "https://example.com/apps",
+        title: "My apps",
+        text: "TikTok Connect Callback URL",
+        elements: [],
+        scriptedElements: [{
+          ref: "@e2",
+          role: "button",
+          name: "TikTok Connect",
+          text: "TikTok Connect",
+          withinText: "TikTok Connect Callback URL",
+          regionText: "TikTok Connect Callback URL",
+          viewport: "visible",
+          interactable: true,
+          hidden: false,
+          disabled: false
+        }],
+        regions: [{
+          ref: "@r1",
+          text: "TikTok Connect Callback URL",
+          actionRefs: ["@e2"],
+          links: [],
+          hitTestable: true,
+          viewport: "partially-visible"
+        }]
+      },
+      axTree: {
+        nodes: [{
+          nodeId: "callback-link",
+          backendDOMNodeId: 101,
+          role: { value: "link" },
+          name: { value: "Callback URL" }
+        }]
+      },
+      callFunctionValue: {
+        text: "Callback URL",
+        withinText: "TikTok Connect Callback URL",
+        regionText: "TikTok Connect Callback URL",
+        interactable: true,
+        hidden: false,
+        disabled: false,
+        viewport: "offscreen"
+      }
+    });
+    const supervisor = new CDPSupervisor({
+      webSocketUrl: "ws://cdp/page-1",
+      webSocketFactory: () => socket
+    });
+
+    await supervisor.start();
+    const observed = await supervisor.getSnapshot("session-1");
+
+    expect(observed.elements).toEqual([
+      expect.objectContaining({ ref: "@e1", role: "link", name: "Callback URL", viewport: "offscreen" }),
+      expect.objectContaining({ ref: "@e2", role: "button", name: "TikTok Connect", viewport: "visible" })
+    ]);
+    expect(observed.regions).toEqual([
+      expect.objectContaining({ ref: "@r1", actionRefs: ["@e2"], viewport: "partially-visible" })
+    ]);
   });
 
   it("getSnapshot() falls back when compact AX refs cannot be bound to DOM nodes", async () => {
@@ -253,6 +510,37 @@ describe("CDPSupervisor", () => {
       sessionId: "session-1",
       elements: [{ ref: "@e1", role: "button", name: "Continue" }]
     });
+  });
+
+  it("does not expose password values from AX snapshots", async () => {
+    const socket = new FakeCdpSocket("ws://cdp/page-1", {
+      axTree: {
+        nodes: [{
+          nodeId: "password-1",
+          backendDOMNodeId: 201,
+          role: { value: "textbox" },
+          name: { value: "Password" },
+          value: { value: "plain-user-password" }
+        }]
+      },
+      callFunctionValue: { label: "Password", sensitive: true, hidden: false }
+    });
+    const supervisor = new CDPSupervisor({
+      webSocketUrl: "ws://cdp/page-1",
+      webSocketFactory: () => socket
+    });
+
+    await supervisor.start();
+    const snapshot = await supervisor.getSnapshot("session-1");
+
+    expect(snapshot.elements).toEqual([{
+      ref: "@e1",
+      role: "textbox",
+      name: "Password",
+      label: "Password",
+      hidden: false
+    }]);
+    expect(JSON.stringify(snapshot)).not.toContain("plain-user-password");
   });
 
   it("getSnapshot() falls back when AX element bindings cannot be cleared", async () => {
@@ -363,8 +651,8 @@ describe("CDPSupervisor", () => {
 
     expect(compact.elements).toEqual([{ ref: "@e1", role: "button", name: "Save" }]);
     expect(full.elements).toEqual([
-      { ref: "@e1", role: "heading", name: "Account Settings" },
-      { ref: "@e2", role: "button", name: "Save" },
+      { ref: "@e1", role: "button", name: "Save" },
+      { ref: "@e2", role: "heading", name: "Account Settings" },
       { ref: "@e3", role: "paragraph", name: "Profile details" }
     ]);
     expect((compact.elements ?? []).length).toBeLessThan((full.elements ?? []).length);
@@ -447,6 +735,31 @@ describe("CDPSupervisor", () => {
     });
   });
 
+  it("captures browser-owned popup attempts in a bounded, clearable queue", async () => {
+    const socket = new FakeCdpSocket("ws://127.0.0.1:9222/devtools/page/popup-attempts");
+    const supervisor = new CDPSupervisor({
+      webSocketUrl: "ws://127.0.0.1:9222/devtools/page/popup-attempts",
+      webSocketFactory: () => socket
+    });
+    await supervisor.start();
+
+    socket.emitMessage({ method: "Page.windowOpen", params: { url: "", userGesture: true } });
+    socket.emitMessage({ method: "Page.windowOpen", params: { url: 42, userGesture: true } });
+    for (let index = 0; index < 10; index += 1) {
+      socket.emitMessage({
+        method: "Page.windowOpen",
+        params: { url: `https://example.com/popup-${index}`, userGesture: index % 2 === 0 }
+      });
+    }
+
+    expect(supervisor.popupAttempts()).toEqual(Array.from({ length: 8 }, (_, offset) => ({
+      url: `https://example.com/popup-${offset + 2}`,
+      userGesture: (offset + 2) % 2 === 0
+    })));
+    expect(supervisor.popupAttempts({ clear: true })).toHaveLength(8);
+    expect(supervisor.popupAttempts()).toEqual([]);
+  });
+
   it("captures console events and caps history at 50 entries", async () => {
     const socket = new FakeCdpSocket("ws://cdp/page-1");
     const supervisor = new CDPSupervisor({
@@ -474,6 +787,30 @@ describe("CDPSupervisor", () => {
       text: "message-54",
       timestamp: "1970-01-01T00:00:00.000Z"
     });
+  });
+
+  it("clears and suppresses console history while protected input is active", async () => {
+    const socket = new FakeCdpSocket("ws://cdp/page-1");
+    const supervisor = new CDPSupervisor({
+      webSocketUrl: "ws://cdp/page-1",
+      webSocketFactory: () => socket
+    });
+
+    await supervisor.start();
+    socket.emitMessage({
+      method: "Runtime.consoleAPICalled",
+      params: { type: "log", args: [{ value: "before-protected-entry" }] }
+    });
+    supervisor.setSensitiveInputActive(true);
+    socket.emitMessage({
+      method: "Runtime.consoleAPICalled",
+      params: { type: "log", args: [{ value: "protected-sentinel-secret" }] }
+    });
+
+    expect(supervisor.consoleHistory()).toEqual([]);
+    expect(JSON.stringify(await supervisor.getSnapshot("session-1"))).not.toContain("protected-sentinel-secret");
+    supervisor.setSensitiveInputActive(false);
+    expect(supervisor.consoleHistory()).toEqual([]);
   });
 
   it("captures frame navigation data in a bounded frame list", async () => {
@@ -504,6 +841,57 @@ describe("CDPSupervisor", () => {
         isOopif: false
       }]
     });
+  });
+
+  it("reports manual same-URL document replacement through main-frame loader signals", async () => {
+    const socket = new FakeCdpSocket("ws://cdp/page-1");
+    const supervisor = new CDPSupervisor({
+      webSocketUrl: "ws://cdp/page-1",
+      webSocketFactory: () => socket
+    });
+
+    await supervisor.start();
+    socket.emitMessage({
+      method: "Page.frameNavigated",
+      params: { frame: { id: "main", loaderId: "loader-1", url: "https://example.com/page" } }
+    });
+    const before = await supervisor.getSnapshot("session-1");
+    socket.emitMessage({
+      method: "Page.frameNavigated",
+      params: { frame: { id: "main", loaderId: "loader-2", url: "https://example.com/page" } }
+    });
+    const after = await supervisor.getSnapshot("session-1");
+
+    expect(before.url).toBe(after.url);
+    expect(before.documentSignal).toEqual({ frameId: "main", loaderId: "loader-1" });
+    expect(after.documentSignal).toEqual({ frameId: "main", loaderId: "loader-2" });
+  });
+
+  it("uses the default main-frame execution context when a loader id is unavailable", async () => {
+    const socket = new FakeCdpSocket("ws://cdp/page-1");
+    const supervisor = new CDPSupervisor({
+      webSocketUrl: "ws://cdp/page-1",
+      webSocketFactory: () => socket
+    });
+
+    await supervisor.start();
+    socket.emitMessage({
+      method: "Page.frameNavigated",
+      params: { frame: { id: "main", url: "https://example.com/page" } }
+    });
+    socket.emitMessage({
+      method: "Runtime.executionContextCreated",
+      params: { context: { id: 41, auxData: { frameId: "main", isDefault: true } } }
+    });
+    const before = await supervisor.getSnapshot("session-1");
+    socket.emitMessage({
+      method: "Runtime.executionContextCreated",
+      params: { context: { id: 42, auxData: { frameId: "main", isDefault: true } } }
+    });
+    const after = await supervisor.getSnapshot("session-1");
+
+    expect(before.documentSignal).toEqual({ frameId: "main", executionContextId: 41 });
+    expect(after.documentSignal).toEqual({ frameId: "main", executionContextId: 42 });
   });
 
   it("request interception aborts metadata, private, policy, and secret URLs", async () => {
@@ -626,6 +1014,138 @@ describe("CDPSupervisor", () => {
     });
     expect(socket.sent).toEqual(expect.arrayContaining([
       expect.objectContaining({ method: "Fetch.continueRequest", params: { requestId: "missing-url" } })
+    ]));
+  });
+
+  it("captures trusted browser download lifecycle events", async () => {
+    const socket = new FakeCdpSocket("ws://cdp/page-1");
+    const supervisor = new CDPSupervisor({
+      webSocketUrl: "ws://cdp/page-1",
+      webSocketFactory: () => socket
+    });
+    await supervisor.start();
+    await supervisor.prepareDownload("/tmp/estacoda-download-test", 1_024);
+    const waiting = supervisor.waitForDownload(1_000);
+
+    socket.emitMessage({
+      method: "Browser.downloadWillBegin",
+      params: { guid: "guid-1", url: "https://example.com/openapi.json", suggestedFilename: "openapi.json" }
+    });
+    socket.emitMessage({
+      method: "Browser.downloadProgress",
+      params: { guid: "guid-1", state: "completed", receivedBytes: 128 }
+    });
+
+    await expect(waiting).resolves.toEqual({
+      outcome: "download-completed",
+      guid: "guid-1",
+      url: "https://example.com/openapi.json",
+      suggestedFilename: "openapi.json",
+      receivedBytes: 128
+    });
+    expect(socket.sent).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        method: "Browser.setDownloadBehavior",
+        params: { behavior: "allowAndName", downloadPath: "/tmp/estacoda-download-test", eventsEnabled: true }
+      })
+    ]));
+  });
+
+  it("applies download behavior and cancellation to the owning isolated browser context", async () => {
+    const socket = new FakeCdpSocket("ws://cdp/page-1");
+    const supervisor = new CDPSupervisor({
+      webSocketUrl: "ws://cdp/page-1",
+      browserContextId: "context-1",
+      webSocketFactory: () => socket
+    });
+    const controller = new AbortController();
+    await supervisor.start();
+    await supervisor.prepareDownload("/tmp/estacoda-download-test", 1_024, controller.signal);
+    const waiting = supervisor.waitForDownload(1_000, controller.signal);
+    socket.emitMessage({
+      method: "Browser.downloadWillBegin",
+      params: { guid: "guid-context", url: "https://example.com/openapi.json", suggestedFilename: "openapi.json" }
+    });
+
+    controller.abort();
+
+    await expect(waiting).rejects.toMatchObject({ name: "AbortError" });
+    expect(socket.sent).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        method: "Browser.setDownloadBehavior",
+        params: {
+          behavior: "allowAndName",
+          downloadPath: "/tmp/estacoda-download-test",
+          eventsEnabled: true,
+          browserContextId: "context-1"
+        }
+      }),
+      expect.objectContaining({
+        method: "Browser.cancelDownload",
+        params: { guid: "guid-context", browserContextId: "context-1" }
+      })
+    ]));
+  });
+
+  it("diagnoses a download that never starts as a suspected native save dialog", async () => {
+    const socket = new FakeCdpSocket("ws://cdp/page-1");
+    const supervisor = new CDPSupervisor({
+      webSocketUrl: "ws://cdp/page-1",
+      webSocketFactory: () => socket
+    });
+    await supervisor.start();
+    await supervisor.prepareDownload("/tmp/estacoda-download-test", 1_024);
+
+    await expect(supervisor.waitForDownload(5)).resolves.toEqual({
+      outcome: "download-failed",
+      reason: "native-save-dialog-suspected"
+    });
+  });
+
+  it("cancels a download as soon as trusted progress exceeds the size limit", async () => {
+    const socket = new FakeCdpSocket("ws://cdp/page-1");
+    const supervisor = new CDPSupervisor({
+      webSocketUrl: "ws://cdp/page-1",
+      webSocketFactory: () => socket
+    });
+    await supervisor.start();
+    await supervisor.prepareDownload("/tmp/estacoda-download-test", 64);
+    socket.emitMessage({
+      method: "Browser.downloadWillBegin",
+      params: { guid: "guid-large", url: "https://example.com/large.zip", suggestedFilename: "large.zip" }
+    });
+    socket.emitMessage({
+      method: "Browser.downloadProgress",
+      params: { guid: "guid-large", state: "inProgress", receivedBytes: 65 }
+    });
+    const waiting = supervisor.waitForDownload(1_000);
+
+    await expect(waiting).resolves.toMatchObject({ outcome: "download-failed", reason: "download-too-large" });
+    expect(socket.sent).toEqual(expect.arrayContaining([
+      expect.objectContaining({ method: "Browser.cancelDownload", params: { guid: "guid-large" } })
+    ]));
+  });
+
+  it("cancels an active partial download when the runtime request is aborted", async () => {
+    const socket = new FakeCdpSocket("ws://cdp/page-1");
+    const supervisor = new CDPSupervisor({
+      webSocketUrl: "ws://cdp/page-1",
+      webSocketFactory: () => socket
+    });
+    const controller = new AbortController();
+    await supervisor.start();
+    await supervisor.prepareDownload("/tmp/estacoda-download-test", 1_024, controller.signal);
+    const waiting = supervisor.waitForDownload(1_000, controller.signal);
+    socket.emitMessage({
+      method: "Browser.downloadWillBegin",
+      params: { guid: "guid-partial", url: "https://example.com/openapi.json", suggestedFilename: "openapi.json" }
+    });
+
+    controller.abort();
+
+    await expect(waiting).rejects.toMatchObject({ name: "AbortError" });
+    expect(socket.sent).toEqual(expect.arrayContaining([
+      expect.objectContaining({ method: "Browser.cancelDownload", params: { guid: "guid-partial" } })
     ]));
   });
 });

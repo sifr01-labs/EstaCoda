@@ -49,26 +49,42 @@ When local CDP is configured and connected, the following operations are support
 - `screenshot` — capture page screenshot
 - `dialog handling` — accept/dismiss dialogs
 
-All operations except `status` require a browser session. Browser tools derive browser session keys from the current runtime session, so parent and delegated runtime sessions get isolated browser state by default. Passing an explicit `sessionId` intentionally shares that named browser session.
+All operations except `status` require a browser session. Browser tools derive browser session keys from the current runtime session, so parent and delegated runtime sessions get isolated browser state by default. Passing an explicit `sessionId` intentionally shares that named browser session. An explicit ID equal to the current runtime session ID resolves to the same default `:main` browser session used by later implicit calls.
 
 Supervised sessions use isolated CDP Browser Contexts. EstaCoda creates a Browser Context for each browser session key, opens the page target inside that context, and disposes the context during cleanup so cookies and browser-context state do not leak across parent/delegated sessions.
 
 Supervised local CDP can auto-launch Chrome/Chromium when `browser.autoLaunch === true`. Discovery checks structured config, environment variables, local binaries, and platform defaults. Launch uses structured argument arrays, does not shell-parse `browser.launchCommand`, never calls `exec`, creates an isolated user data directory, and kills only Chrome processes launched by EstaCoda during cleanup.
 
+Local CDP commands use a 15-second default deadline, so a silent browser connection cannot indefinitely block an active turn. Raw CDP passthrough also inherits cancellation from its owning tool call.
+
 ## Snapshots
 
-Browser snapshots prefer the accessibility tree from `Accessibility.getFullAXTree`. Snapshot elements expose deterministic refs such as `@e1` and may include `role`, `name`, `value`, `disabled`, and `checked`. Ignored and unhelpful AX nodes are skipped.
+Browser snapshots prefer the accessibility tree from `Accessibility.getFullAXTree`. Snapshot elements expose refs such as `@e1` and may include `role`, `name`, `label`, surrounding text, `value`, `disabled`, and `checked`. Ignored and unhelpful AX nodes are skipped.
+
+EstaCoda uses the same interactability check for snapshot refs, semantic find/extract, action preflight, and the final moment before an action. Detached, hidden, inert, disabled, zero-size, and modal-blocked controls are excluded; controls inside the active modal and valid controls outside the current viewport remain usable. Excluding a control does not remove ordinary page text or diagnostics from the snapshot.
 
 The DOM snapshot path remains as fallback when AX is unavailable, empty, malformed, or cannot bind actionable refs. Refs are actionable where exposed.
 
-`browser.snapshot` defaults to a compact snapshot. Compact snapshots are a bounded actionable AX subset, not true viewport-visible filtering yet. Passing `full: true` requests the full snapshot path. Rendered tool output labels compact vs full snapshots, truncates large results, and may summarize oversized snapshots when configured.
+`browser.snapshot` defaults to a compact snapshot. Compact snapshots are a bounded actionable AX subset, not true viewport-visible filtering yet. EstaCoda deterministically compacts normal snapshots before returning them to the model, prioritizing identity, dialogs and alerts, actionable refs, forms and validation errors, authentication context, frames, and browser errors while deduplicating repeated navigation and boilerplate. A visible suffix marks omitted output. Passing `full: true` retains the larger diagnostic path.
+
+Snapshots include a canonical identity, observation time, and page readiness. The identity separates document replacement (`documentEpoch`), actionable-ref changes (`actionRevision`), and individual captures (`observationId`). Actions such as `browser.navigate`, `browser.click`, `browser.type`, `browser.press`, and `browser.back` wait briefly for DOM stability by default and return a concise delta plus the resulting identity, a safe current-state summary, and current actionable refs when safe. You can pass `waitFor` to wait for a URL fragment, page text, an element role/name, a dialog, or DOM stability, plus `waitTimeoutMs` up to 10 seconds. If the condition is not met, EstaCoda returns the latest state and labels the result as timed out rather than claiming success. Use `browser.snapshot` when you explicitly need a detailed current page snapshot.
+
+Prefer semantic locators for interaction. `browser.find`, `browser.click`, `browser.type`, `browser.select`, and `browser.extract` can target elements by `role`, `name`, `text`, `label`, or surrounding `withinText`; for example, a “View product” button inside the “Security MTN OAuth V1” card. Non-interactable matches are skipped, and ambiguous matches return candidates rather than being selected automatically. If you use an `@eN` ref, also pass the snapshot's canonical `identity` and controlled `tabRef`. EstaCoda rejects refs from a stale document/action state or another tab before dispatching the action.
+
+When one page requests several related protected values, such as an email and password, EstaCoda uses one secure form flow. It shows each verified destination in sequence, keeps every value outside model context, re-verifies the complete form, fills the fields, and can submit a prebound sign-in control as part of the same protected transaction.
+
+EstaCoda keeps the overall sign-in pending whenever the resulting page still asks for a challenge—even if that page also contains account-looking controls. Challenges are generic: they may be a 2FA code, passkey, security key, biometric step, CAPTCHA, push approval, device confirmation, or another verification method. Retry and resend actions continue the same Mission step. EstaCoda reports success only after the challenge departs through a causal browser transition and the destination provides authenticated-only evidence; submitting credentials or a challenge is not success by itself. Waiting for you to enter protected values does not consume the autonomous provider wall-clock budget.
+
+When a page shows one one-time-code field and one verification button, EstaCoda prompts for and submits the code through protected input in the same user turn. The code stays out of model context and ordinary chat. If collection times out, the runtime cancels the prompt, allows a short cleanup window, and keeps the browser session usable once that cleanup finishes.
+
+Governed page downloads are captured into runtime-managed storage. A successful download keeps a prompt-safe relay receipt available to the agent after older raw tool results are compacted. The receipt contains the governed reference, sanitized filename, SHA-256, validated source origin, MIME type, and size, but not the local backing path, arbitrary metadata, or downloaded content. This lets a valid artifact be reused by a reviewed connector without downloading it again. Supervised isolated sessions apply download behavior to the correct browser context, and auto-launched temporary Chrome profiles disable native Save prompts. EstaCoda cannot click an operating-system Save dialog. If one still appears, the download fails with a specific diagnostic instead of repeatedly clicking the page control.
 
 Snapshot summarization is controlled by:
 
 - `browser.summarizeSnapshots`: `false`, `true`, or `"auto"`
 - `browser.snapshotSummarizeThreshold`: character threshold before summarization is considered
 
-In `"auto"` mode, summarization runs only when an auxiliary model route is available and the rendered snapshot exceeds the threshold. Secret-bearing URLs and sensitive values are redacted before provider calls.
+In `"auto"` mode, deterministic compaction runs first and an auxiliary model is used only when the compacted result still exceeds the threshold. `true` explicitly permits summarization based on the original rendered size, while `false` never invokes a summarization provider. Secret-bearing URLs and sensitive values are redacted before provider calls.
 
 ---
 
@@ -110,6 +126,20 @@ URLs containing secret-like markers (API keys, tokens, passwords) are redacted o
 Blocklists support exact domains, wildcard domains, and shared files. The blocklist is checked before navigation.
 
 Hybrid routing uses the same classifier. Public HTTP(S) URLs route to Browserbase/cloud when Browserbase is configured and cloud spend is approved. Private/internal URLs route to local only when `security.allowPrivateUrls === true`. Metadata endpoints remain blocked. Cloud spend approval failure does not fall back to local. Browserbase failures may fall back to local when `browser.cloudFallback === true`. Unsafe redirects are blanked to `about:blank` when possible; otherwise the unsafe session is closed.
+
+### Working with tabs
+
+In a supervised local browser, EstaCoda can work across tabs without asking the model to interpret raw CDP target data:
+
+- `browser.tabs` lists the safe page tabs in the current isolated browser session and marks the tab EstaCoda currently controls.
+- `browser.switch_tab` focuses a tab by its opaque ref, such as `@t2`, and makes it the target of later snapshots and actions.
+- After a click, EstaCoda automatically follows a newly opened tab only when exactly one new safe tab appeared. If several tabs open, it stays on the current tab and reports their refs so the agent can choose explicitly.
+
+During browser work, EstaCoda also supplies the model with a small current-state summary containing the live session status, controlled tab, safe tabs, canonical page identity/readiness, and last browser action. This summary overrides older browser details in the conversation and reduces repeated tab or snapshot checks. If you navigate or change the controlled browser manually, EstaCoda refreshes the summary at the next browser-related turn boundary. A tab change reports both the source and destination.
+
+If the agent repeats the same successful snapshot or tab listing without taking an action, EstaCoda gives it one recovery instruction and then stops after the third unchanged observation. This prevents an observation-only loop from consuming the much larger turn limits. A changed page, changed tab list, or action that changes browser state resets the guard; an action that explicitly reports no change or a timeout does not count as progress.
+
+Tabs from other EstaCoda browser sessions are excluded. Tabs blocked by URL safety, website policy, cloud metadata protection, or secret detection are hidden and cannot be selected through `browser.switch_tab`.
 
 ---
 

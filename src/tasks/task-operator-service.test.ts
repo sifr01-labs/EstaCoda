@@ -235,6 +235,24 @@ describe("TaskOperatorService", () => {
           }
         }
       });
+      tx.appendEvent({
+        id: "event-retry-preview-continued",
+        profileId: "alpha",
+        taskId: graph.task.id,
+        planRevisionId: graph.revision.id,
+        stepId: researchStep!.id,
+        attemptId: retryAttempt.id,
+        kind: "attempt-progressed",
+        timestamp: "2026-01-01T00:00:04.002Z",
+        data: {
+          activity: {
+            kind: "assistant",
+            label: "Assistant answer",
+            traceCategory: "answer",
+            assistantPreview: "The bounded answer continues."
+          }
+        }
+      });
       tx.recordResult({
         id: "result-research",
         profileId: "alpha",
@@ -268,7 +286,15 @@ describe("TaskOperatorService", () => {
     ]);
     expect(projection.phase).toEqual({
       name: "delegating",
-      workerProgress: { completed: 0, settled: 0, total: 2 },
+      workerProgress: {
+        completed: 0,
+        failed: 0,
+        cancelled: 0,
+        settled: 0,
+        usable: 1,
+        recovered: 0,
+        total: 2
+      },
     });
     expect(projection.subagents.map((subagent) => subagent.displayLabel)).toEqual(["Subagent 1", "Subagent 2"]);
     expect(projection.subagents).toHaveLength(2);
@@ -280,7 +306,7 @@ describe("TaskOperatorService", () => {
       objective: "Research authentication",
       currentActivity: "Assistant answer",
       currentToolCategory: "files",
-      assistantPreview: "The session guards are mapped safely.",
+      assistantPreview: "The bounded answer continues.",
       latestAttempt: {
         attemptId: retryAttempt.id,
         attemptNumber: 2,
@@ -310,8 +336,24 @@ describe("TaskOperatorService", () => {
         subagentIndex: 1,
         category: "answer",
         label: "The session guards are mapped safely. · Research authentication"
+      }),
+      expect.objectContaining({
+        eventId: "event-retry-preview-continued",
+        attemptId: retryAttempt.id,
+        subagentIndex: 1,
+        category: "answer",
+        label: "The bounded answer continues. · Research authentication"
       })
     ]);
+    expect(projection.trace.spans.find((span) => span.id === "event-retry-preview")).toMatchObject({
+      category: "write",
+      scope: { kind: "subagent", stepId: researchStep!.id, label: "Subagent 1" },
+      status: "running",
+      eventCount: 2,
+      label: "Writing response",
+      attemptId: retryAttempt.id
+    });
+    expect(JSON.stringify(projection.trace.spans)).not.toContain("The bounded answer continues.");
     expect(projection.subagents[0]?.results).toEqual([
       expect.objectContaining({
         id: "result-research",
@@ -324,6 +366,19 @@ describe("TaskOperatorService", () => {
     ]);
     expect(JSON.stringify(projection)).not.toContain("must-not-project");
 
+    const failedReviewAttempt = projectionAttempt({
+      id: "attempt-review-1",
+      taskId: graph.task.id,
+      stepId: graph.steps[1]!.id,
+      planRevisionId: graph.revision.id,
+      attemptNumber: 1,
+      status: "failed",
+      workerSessionId: "worker-two",
+      createdAt: "2026-01-01T00:00:04.500Z",
+      updatedAt: "2026-01-01T00:00:05.000Z",
+      startedAt: "2026-01-01T00:00:04.500Z",
+      completedAt: "2026-01-01T00:00:05.000Z"
+    });
     store.atomicWrite((tx) => {
       const currentResearch = tx.getStep(graph.steps[0]!.id)!;
       tx.updateStep({ ...currentResearch, status: "completed", updatedAt: "2026-01-01T00:00:05.000Z" });
@@ -332,7 +387,23 @@ describe("TaskOperatorService", () => {
       tx.updateStep(readyReview);
       const runningReview = { ...readyReview, status: "running" as const };
       tx.updateStep(runningReview);
-      tx.updateStep({ ...runningReview, status: "completed", updatedAt: "2026-01-01T00:00:05.000Z" });
+      tx.createAttempt(failedReviewAttempt);
+      tx.updateStep({ ...runningReview, status: "failed", updatedAt: "2026-01-01T00:00:05.000Z" });
+      tx.recordResult({
+        id: "result-review-diagnostic",
+        profileId: "alpha",
+        taskId: graph.task.id,
+        stepId: graph.steps[1]!.id,
+        attemptId: failedReviewAttempt.id,
+        kind: "summary",
+        disposition: "diagnostic",
+        status: "available",
+        handle: "task-result://review-diagnostic",
+        byteLength: 18,
+        contentHash: "c".repeat(64),
+        displaySummary: "Recovered partial review",
+        createdAt: "2026-01-01T00:00:05.000Z"
+      });
       tx.updateStep({
         ...graph.steps[2]!,
         status: "ready",
@@ -340,9 +411,38 @@ describe("TaskOperatorService", () => {
       });
     });
 
-    expect(service.status(graph.task.id, "owner").phase).toEqual({
+    const degradedSynthesis = service.status(graph.task.id, "owner");
+    expect(degradedSynthesis.phase).toEqual({
       name: "synthesizing",
-      workerProgress: { completed: 2, settled: 2, total: 2 },
+      workerProgress: {
+        completed: 1,
+        failed: 1,
+        cancelled: 0,
+        settled: 2,
+        usable: 1,
+        recovered: 1,
+        total: 2
+      },
+    });
+    expect(degradedSynthesis.subagents[1]?.outcome).toEqual({
+      usable: false,
+      recovered: true,
+      attemptsUsed: 1,
+      maxAttempts: graph.steps[1]!.retryPolicy.maxAttempts,
+      failure: {
+        class: "provider",
+        retryable: true,
+        uncertainSideEffects: false
+      }
+    });
+    expect(degradedSynthesis.subagents[1]?.latestAttempt).toMatchObject({
+      attemptNumber: 1,
+      maxAttempts: graph.steps[1]!.retryPolicy.maxAttempts,
+      failure: {
+        class: "provider",
+        retryable: true,
+        uncertainSideEffects: false
+      }
     });
   });
 

@@ -1504,6 +1504,74 @@ describe("runGatewaySupervisor", () => {
     const policy = capturedOpts.busyPolicyResolver("telegram");
     expect(policy.busyPolicy).toBe("reject");
     expect(policy.queueDepth).toBe(3);
+    expect(policy.busyTextCoalescing).toEqual({
+      enabled: false,
+      windowMs: 1_500,
+      maxMessages: 5,
+      maxChars: 8_000
+    });
+  });
+
+  it("passes a profile-scoped local usage inspector to ChannelGateway", async () => {
+    let capturedOpts: any;
+
+    await runGatewaySupervisor({
+      workspaceRoot: tmpDir,
+      homeDir: tmpDir,
+      once: true,
+      factories: {
+        createChannelGateway: (opts: any) => {
+          capturedOpts = opts;
+          return fakeChannelGateway() as any;
+        },
+        createDeliveryRouter: () => fakeDeliveryRouter() as any,
+      },
+    });
+
+    expect(capturedOpts.usageInspector).toMatchObject({
+      inspectSession: expect.any(Function),
+      inspectLatestTurn: expect.any(Function),
+      inspectRepliedTurn: expect.any(Function),
+      inspectTurn: expect.any(Function),
+      inspectLinkedTurn: expect.any(Function),
+      inspectTask: expect.any(Function)
+    });
+    expect(capturedOpts.channelMessageTurnStore).toMatchObject({
+      record: expect.any(Function),
+      resolve: expect.any(Function),
+      prune: expect.any(Function)
+    });
+  });
+
+  it("injects a profile-scoped durable turn store only when SQLite queue persistence is configured", async () => {
+    let capturedOpts: any;
+    const configPath = profileConfigPath(tmpDir);
+    await mkdir(dirname(configPath), { recursive: true });
+    await writeFile(configPath, JSON.stringify({
+      gateway: {
+        messageQueue: {
+          persistence: "sqlite",
+          maxPendingPerProfile: 12,
+          uncertainRetentionDays: 3
+        }
+      }
+    }));
+
+    await runGatewaySupervisor({
+      workspaceRoot: tmpDir,
+      homeDir: tmpDir,
+      once: true,
+      factories: {
+        createChannelGateway: (opts: any) => {
+          capturedOpts = opts;
+          return fakeChannelGateway() as any;
+        },
+        createDeliveryRouter: () => fakeDeliveryRouter() as any,
+      },
+    });
+
+    expect(capturedOpts.pendingTurnStore?.constructor.name).toBe("SQLitePendingTurnStore");
+    expect(typeof capturedOpts.trustedWorkspace).toBe("function");
   });
 
   it("busyPolicyResolver reads per-channel config from loaded config", async () => {
@@ -1518,6 +1586,7 @@ describe("runGatewaySupervisor", () => {
           enabled: false,
           busyPolicy: "queue",
           queueDepth: 5,
+          busyTextCoalescing: { enabled: true, windowMs: 2_000, maxMessages: 4, maxChars: 6_000 },
         },
         discord: {
           enabled: false,
@@ -1543,10 +1612,66 @@ describe("runGatewaySupervisor", () => {
     const telegramPolicy = capturedOpts.busyPolicyResolver("telegram");
     expect(telegramPolicy.busyPolicy).toBe("queue");
     expect(telegramPolicy.queueDepth).toBe(5);
+    expect(telegramPolicy.busyTextCoalescing).toEqual({
+      enabled: true,
+      windowMs: 2_000,
+      maxMessages: 4,
+      maxChars: 6_000
+    });
 
     const discordPolicy = capturedOpts.busyPolicyResolver("discord");
     expect(discordPolicy.busyPolicy).toBe("interrupt");
     expect(discordPolicy.queueDepth).toBe(2);
+  });
+
+  it("textDebounceResolver preserves normalized Telegram and WhatsApp config", async () => {
+    let capturedOpts: any;
+    const gateway = { start: async () => {}, stop: async () => {}, hasPendingWork: () => false };
+
+    const configPath = profileConfigPath(tmpDir);
+    await mkdir(dirname(configPath), { recursive: true });
+    await writeFile(configPath, JSON.stringify({
+      channels: {
+        telegram: {
+          enabled: false,
+          textDebounceMs: 1_750,
+          textDebounceMaxMessages: 6,
+          textDebounceMaxChars: 2_400
+        },
+        whatsapp: {
+          enabled: false,
+          textDebounceMs: 2750,
+          textDebounceMaxMessages: 4,
+          textDebounceMaxChars: 1200
+        }
+      }
+    }));
+
+    await runGatewaySupervisor({
+      workspaceRoot: tmpDir,
+      homeDir: tmpDir,
+      once: true,
+      factories: {
+        createChannelGateway: (opts: any) => {
+          capturedOpts = opts;
+          return gateway as any;
+        },
+        createDeliveryRouter: () => fakeDeliveryRouter() as any,
+      },
+    });
+
+    expect(typeof capturedOpts.textDebounceResolver).toBe("function");
+    expect(capturedOpts.textDebounceResolver("telegram")).toEqual({
+      textDebounceMs: 1_750,
+      textDebounceMaxMessages: 6,
+      textDebounceMaxChars: 2_400
+    });
+    expect(capturedOpts.textDebounceResolver("whatsapp")).toEqual({
+      textDebounceMs: 2750,
+      textDebounceMaxMessages: 4,
+      textDebounceMaxChars: 1200
+    });
+    expect(capturedOpts.textDebounceResolver("discord")).toBeUndefined();
   });
 
   it("passes normalized Discord voice-channel options and temp root to the adapter", async () => {
@@ -2958,6 +3083,48 @@ describe("supervisor lifecycle hooks", () => {
     } finally {
       HookRegistry.prototype.emit = originalEmit;
     }
+  });
+
+  it("awaits gateway debounce flush work before completing graceful drain", async () => {
+    const exited = fakeExit();
+    let releaseFlush: (() => void) | undefined;
+    const flushGate = new Promise<void>((resolve) => { releaseFlush = resolve; });
+    let flushStarted = false;
+    let stopped = false;
+    const gateway = {
+      start: async () => {},
+      flushPendingDebounces: async () => {
+        flushStarted = true;
+        await flushGate;
+      },
+      hasPendingWork: () => false,
+      stop: async () => { stopped = true; }
+    };
+    const beforeSigterm = process.listenerCount("SIGTERM");
+
+    const promise = runGatewaySupervisor({
+      workspaceRoot: tmpDir,
+      homeDir: tmpDir,
+      once: false,
+      factories: {
+        createChannelGateway: () => gateway as any,
+        createDeliveryRouter: () => fakeDeliveryRouter() as any,
+        exit: exited.exit,
+      },
+    });
+
+    await waitForCondition(() => process.listenerCount("SIGTERM") > beforeSigterm);
+    process.emit("SIGTERM");
+    await waitForCondition(() => flushStarted);
+
+    expect(exited.codes()).toEqual([]);
+    expect(stopped).toBe(false);
+
+    releaseFlush?.();
+    await promise;
+
+    expect(exited.codes()).toEqual([0]);
+    expect(stopped).toBe(true);
   });
 
   it("supervisor:drain:complete with timedOut=true on drain timeout", async () => {

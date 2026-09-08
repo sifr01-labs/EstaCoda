@@ -3,9 +3,11 @@ import { mkdtempSync, writeFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  modelInfoToProfile,
   normalizeProviderIdForEstaCoda,
   resolveModelsDevSnapshot,
-  resetModelsDevRegistryForTest
+  resetModelsDevRegistryForTest,
+  type ModelInfo
 } from "./models-dev-registry.js";
 
 function withFixture(
@@ -109,3 +111,63 @@ describe("models-dev provider canonicalization", () => {
     ]);
   }));
 });
+
+describe("modelInfoToProfile output limits", () => {
+  it("preserves a valid registry max output without changing other provider metadata", () => {
+    const model = modelInfoFixture({
+      providerId: "openai",
+      maxOutput: 16_384,
+      costInput: 2.5,
+      costOutput: 10
+    });
+    const original = structuredClone(model);
+
+    const profile = modelInfoToProfile(model);
+
+    expect(profile).toMatchObject({
+      id: "fixture-model",
+      provider: "openai",
+      contextWindowTokens: 128_000,
+      maxOutputTokens: 16_384,
+      supportsTools: true,
+      supportsVision: false,
+      supportsStructuredOutput: true,
+      cost: {
+        inputPerMillionTokens: 2.5,
+        outputPerMillionTokens: 10
+      }
+    });
+    expect(model).toEqual(original);
+  });
+
+  it.each([0, -1, 1.5, Number.NaN, Number.POSITIVE_INFINITY])(
+    "omits invalid registry max output %s",
+    (maxOutput) => {
+      const profile = modelInfoToProfile(modelInfoFixture({ maxOutput }));
+
+      expect(profile).not.toHaveProperty("maxOutputTokens");
+    }
+  );
+});
+
+function modelInfoFixture(overrides: Partial<ModelInfo> = {}): ModelInfo {
+  return {
+    id: "fixture-model",
+    name: "Fixture Model",
+    family: "fixture",
+    providerId: "fixture-provider",
+    reasoning: false,
+    toolCall: true,
+    attachment: false,
+    temperature: true,
+    structuredOutput: true,
+    openWeights: false,
+    inputModalities: ["text"],
+    outputModalities: ["text"],
+    contextWindow: 128_000,
+    maxOutput: 4_096,
+    status: "",
+    interleaved: false,
+    ...overrides
+  };
+}

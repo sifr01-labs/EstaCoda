@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 import {
+  blockedConnectorContinuationState,
+  continuesConversationCommitment,
   detectPromisedAction,
   isAcknowledgementContinuation,
   renderConversationContinuationPrompt,
+  sanitizeConversationContinuationState,
   updateConversationContinuationState,
   type ConversationContinuationState
 } from "./conversation-continuation-state.js";
@@ -28,7 +31,37 @@ describe("conversation continuation state", () => {
     expect(isAcknowledgementContinuation("okay")).toBe(true);
     expect(isAcknowledgementContinuation("continue")).toBe(true);
     expect(isAcknowledgementContinuation("go on")).toBe(true);
+    expect(isAcknowledgementContinuation("let's do this [pasted text]")).toBe(true);
+    expect(isAcknowledgementContinuation("why not try again")).toBe(true);
+    expect(isAcknowledgementContinuation("Okay can you pick u where we lefto ff/")).toBe(true);
+    expect(isAcknowledgementContinuation("Please resume where you left off.")).toBe(true);
     expect(isAcknowledgementContinuation("okay thanks")).toBe(false);
+    expect(isAcknowledgementContinuation("Can you review the README?")).toBe(false);
+  });
+
+  it("creates bounded continuation for a governed connector blocker", () => {
+    expect(blockedConnectorContinuationState({
+      userText: "Set up these API products in Postman.",
+      connectorId: "postman",
+      reasonCodes: ["connector_unavailable", "verification_missing"],
+      updatedAt: "2026-08-25T00:00:00.000Z"
+    })).toEqual(expect.objectContaining({
+      status: "open",
+      source: "explicit",
+      userRequest: "Set up these API products in Postman.",
+      lastProgress: "Blocked by: connector_unavailable, verification_missing.",
+      capabilityContext: {
+        toolsets: ["browser"],
+        connectors: [{ kind: "mcp", id: "postman" }]
+      }
+    }));
+  });
+
+  it("continues open work through acknowledgement and deictic action language", () => {
+    expect(continuesConversationCommitment("let's do this", openCommitment)).toBe(true);
+    expect(continuesConversationCommitment("Please click that app shown there.", openCommitment)).toBe(true);
+    expect(continuesConversationCommitment("Can you review the README?", openCommitment)).toBe(false);
+    expect(continuesConversationCommitment("stop", openCommitment)).toBe(false);
   });
 
   it("does not treat a new explicit request as continuation", () => {
@@ -74,6 +107,61 @@ describe("conversation continuation state", () => {
 
     expect(state).toMatchObject({ status: "open" });
     expect(state?.lastProgress).toContain("file.search");
+  });
+
+  it("persists only bounded browser and registered connector provenance", () => {
+    const state = updateConversationContinuationState({
+      userText: "Set up the app key in Postman.",
+      agentText: "I'll finish the protected Postman update next.",
+      toolExecutions: [
+        {
+          tool: {
+            name: "browser.snapshot",
+            toolsets: ["browser", "research"],
+          },
+          result: { ok: true }
+        },
+        {
+          tool: {
+            name: "mcp.postman.getCollection",
+            toolsets: ["mcp"],
+            connector: { kind: "mcp", id: "postman" }
+          },
+          result: { ok: true }
+        },
+        {
+          tool: {
+            name: "shell.run",
+            toolsets: ["shell-write", "dangerous"]
+          },
+          result: { ok: true }
+        }
+      ]
+    });
+
+    expect(state?.capabilityContext).toEqual({
+      toolsets: ["browser"],
+      connectors: [{ kind: "mcp", id: "postman" }]
+    });
+  });
+
+  it("drops untrusted persisted capability names during hydration", () => {
+    const hydrated = sanitizeConversationContinuationState({
+      ...openCommitment,
+      capabilityContext: {
+        toolsets: ["browser", "dangerous"],
+        connectors: [
+          { kind: "mcp", id: "postman" },
+          { kind: "mcp", id: "invalid\nconnector" },
+          { kind: "other", id: "untrusted" }
+        ]
+      }
+    });
+
+    expect(hydrated?.capabilityContext).toEqual({
+      toolsets: ["browser"],
+      connectors: [{ kind: "mcp", id: "postman" }]
+    });
   });
 
   it("does not reopen an old commitment for casual thanks without open state", () => {

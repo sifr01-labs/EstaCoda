@@ -7,6 +7,11 @@ import { FileSurfacePointerStore } from "../channels/surface-pointer-store.js";
 import { openDefaultSQLiteDatabase } from "../storage/factory.js";
 import { resolveProfileStateHome } from "../config/profile-home.js";
 import { SESSION_RECALL_UNTRUSTED_NOTICE } from "../session/session-recall-service.js";
+import type { Prompt } from "./prompt-contract.js";
+import type { SelectPromptInput } from "./interactive-select.js";
+import { InteractiveSelectCancelledError } from "./interactive-select.js";
+import { createSQLiteSessionDB } from "../session/session-setup.js";
+import type { ProviderUsageEntry } from "../contracts/provider-usage.js";
 
 async function makeTempDir(): Promise<string> {
   return mkdtemp(join(tmpdir(), "estacoda-cli-sess-test-"));
@@ -33,6 +38,8 @@ describe("CLI session commands", () => {
         created_at text not null,
         updated_at text,
         parent_session_id text,
+        ended_at text,
+        end_reason text,
         metadata_json text
       )
     `);
@@ -67,6 +74,294 @@ describe("CLI session commands", () => {
 
   afterEach(async () => {
     await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  describe("sessions picker", () => {
+    it("returns a workspace-scoped resume handoff for the selected session", async () => {
+      const db = openDefaultSQLiteDatabase({ path: dbPath });
+      seedPickerSession(db, {
+        id: "sess-selected",
+        profileId: "default",
+        title: "Review Telegram deployment",
+        workspaceRoot: tmpDir,
+        originSurface: "telegram",
+        updatedAt: "2026-08-04T10:00:00.000Z",
+      });
+      seedPickerSession(db, {
+        id: "sess-other-workspace",
+        profileId: "default",
+        title: "Other workspace",
+        workspaceRoot: "/other/workspace",
+        updatedAt: "2026-08-04T11:00:00.000Z",
+      });
+      seedPickerSession(db, {
+        id: "sess-internal",
+        profileId: "default",
+        title: "Internal task worker",
+        workspaceRoot: tmpDir,
+        kind: "task-step-worker",
+        updatedAt: "2026-08-04T12:00:00.000Z",
+      });
+      db.close();
+
+      let selection: SelectPromptInput<string> | undefined;
+      const prompt = pickerPrompt(async (input) => {
+        selection = input;
+        return input.options[0]!.value;
+      });
+      const result = await runCliCommand({
+        argv: ["sessions"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        interactive: true,
+        prompt,
+      });
+
+      expect(result).toEqual(expect.objectContaining({
+        handled: true,
+        exitCode: 0,
+        output: "",
+        sessionHandoff: { sessionId: "sess-selected", workspaceRoot: tmpDir },
+      }));
+      expect(selection?.columns).toEqual([
+        { key: "number", header: "#", align: "right" },
+        { key: "session", header: "Session" },
+        { key: "started", header: "Started" },
+        { key: "active", header: "Last active" },
+        { key: "origin", header: "Via" },
+      ]);
+      expect(selection?.options.map((option) => option.value)).toEqual(["sess-selected"]);
+      expect(selection?.options[0]?.description).toContain("Via Telegram");
+    });
+
+    it("honors a command-local profile override", async () => {
+      const db = openDefaultSQLiteDatabase({ path: dbPath });
+      seedPickerSession(db, {
+        id: "default-session",
+        profileId: "default",
+        title: "Default profile",
+        workspaceRoot: tmpDir,
+      });
+      seedPickerSession(db, {
+        id: "work-session",
+        profileId: "work",
+        title: "Work profile",
+        workspaceRoot: tmpDir,
+      });
+      db.close();
+
+      let optionValues: string[] = [];
+      const result = await runCliCommand({
+        argv: ["sessions"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        profileId: "work",
+        interactive: true,
+        prompt: pickerPrompt(async (input) => {
+          optionValues = input.options.map((option) => option.value);
+          return input.options[0]!.value;
+        }),
+      });
+
+      expect(optionValues).toEqual(["work-session"]);
+      expect(result.sessionHandoff?.sessionId).toBe("work-session");
+    });
+
+    it("returns a non-error empty state without prompting", async () => {
+      let prompted = false;
+      const result = await runCliCommand({
+        argv: ["sessions"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        interactive: true,
+        prompt: pickerPrompt(async () => {
+          prompted = true;
+          return "unexpected";
+        }),
+      });
+
+      expect(result.exitCode).toBe(0);
+      expect(result.output).toContain("No resumable sessions");
+      expect(result.sessionHandoff).toBeUndefined();
+      expect(prompted).toBe(false);
+    });
+
+    it("keeps explicit sessions list non-interactive", async () => {
+      const db = openDefaultSQLiteDatabase({ path: dbPath });
+      seedPickerSession(db, {
+        id: "sess-list",
+        profileId: "default",
+        title: "List only",
+        workspaceRoot: tmpDir,
+      });
+      db.close();
+      let prompted = false;
+
+      const result = await runCliCommand({
+        argv: ["sessions", "list"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        interactive: true,
+        prompt: pickerPrompt(async () => {
+          prompted = true;
+          return "unexpected";
+        }),
+      });
+
+      expect(result.output).toContain("sess-list");
+      expect(result.sessionHandoff).toBeUndefined();
+      expect(prompted).toBe(false);
+    });
+
+    it("treats Escape cancellation as a successful no-op", async () => {
+      const db = openDefaultSQLiteDatabase({ path: dbPath });
+      seedPickerSession(db, {
+        id: "sess-cancel",
+        profileId: "default",
+        title: "Leave this session untouched",
+        workspaceRoot: tmpDir,
+      });
+      db.close();
+
+      const result = await runCliCommand({
+        argv: ["sessions"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        interactive: true,
+        prompt: pickerPrompt(async () => { throw new InteractiveSelectCancelledError(); }),
+      });
+
+      expect(result.exitCode).toBe(0);
+      expect(result.output).toContain("Session selection cancelled");
+      expect(result.sessionHandoff).toBeUndefined();
+    });
+
+    it("revalidates the selected session before returning a handoff", async () => {
+      const db = openDefaultSQLiteDatabase({ path: dbPath });
+      seedPickerSession(db, {
+        id: "sess-stale",
+        profileId: "default",
+        title: "Session ending while the picker is open",
+        workspaceRoot: tmpDir,
+      });
+      db.close();
+
+      const result = await runCliCommand({
+        argv: ["sessions"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+        interactive: true,
+        prompt: pickerPrompt(async () => {
+          const updateDb = openDefaultSQLiteDatabase({ path: dbPath });
+          updateDb.query("update sessions set ended_at = ?, end_reason = ? where id = ?")
+            .run("2026-08-04T12:00:00.000Z", "done", "sess-stale");
+          updateDb.close();
+          return "sess-stale";
+        }),
+      });
+
+      expect(result.exitCode).toBe(1);
+      expect(result.output).toContain("no longer resumable");
+      expect(result.sessionHandoff).toBeUndefined();
+    });
+  });
+
+  describe("sessions open", () => {
+    it("returns a handoff for an active session in the selected profile and workspace", async () => {
+      const db = openDefaultSQLiteDatabase({ path: dbPath });
+      seedPickerSession(db, {
+        id: "sess-open",
+        profileId: "default",
+        title: "Continue deployment review",
+        workspaceRoot: tmpDir,
+        originSurface: "telegram",
+      });
+      db.close();
+      const pointers = new FileSurfacePointerStore({ path: surfacePointerPath });
+      await pointers.setPointer("telegram", "chat-1", {
+        sessionId: "sess-open",
+        attachedAt: "2026-08-01T08:00:00.000Z",
+      });
+
+      const result = await runCliCommand({
+        argv: ["sessions", "open", "sess-open"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+      });
+
+      expect(result).toEqual(expect.objectContaining({
+        exitCode: 0,
+        sessionHandoff: { sessionId: "sess-open", workspaceRoot: tmpDir },
+      }));
+      const verifyDb = openDefaultSQLiteDatabase({ path: dbPath });
+      const row = verifyDb.query<{ metadata_json: string }>("select metadata_json from sessions where id = ?").get("sess-open");
+      verifyDb.close();
+      expect(JSON.parse(row!.metadata_json).originSurface).toBe("telegram");
+      await expect(pointers.getPointer("telegram", "chat-1")).resolves.toMatchObject({ sessionId: "sess-open" });
+    });
+
+    it("rejects empty sessions", async () => {
+      const db = openDefaultSQLiteDatabase({ path: dbPath });
+      db.query("insert into sessions (id, profile_id, title, created_at, updated_at, metadata_json) values (?, ?, ?, ?, ?, ?)")
+        .run("sess-empty", "default", "EstaCoda session", "2026-08-01T08:00:00.000Z", "2026-08-01T08:00:00.000Z", JSON.stringify({ workspaceRoot: tmpDir, originSurface: "cli" }));
+      db.close();
+
+      const result = await runCliCommand({
+        argv: ["sessions", "open", "sess-empty"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+      });
+
+      expect(result.exitCode).toBe(1);
+      expect(result.sessionHandoff).toBeUndefined();
+    });
+
+    it.each([
+      { name: "another profile", profileId: "work", workspaceRoot: undefined, kind: undefined },
+      { name: "another workspace", profileId: "default", workspaceRoot: "/other", kind: undefined },
+      { name: "an internal session", profileId: "default", workspaceRoot: undefined, kind: "task-step-worker" },
+    ])("rejects $name without exposing a handoff", async ({ profileId, workspaceRoot, kind }) => {
+      const db = openDefaultSQLiteDatabase({ path: dbPath });
+      seedPickerSession(db, {
+        id: `blocked-${profileId}-${kind ?? "session"}`,
+        profileId,
+        title: "Blocked",
+        workspaceRoot: workspaceRoot ?? tmpDir,
+        kind,
+      });
+      db.close();
+
+      const result = await runCliCommand({
+        argv: ["sessions", "open", `blocked-${profileId}-${kind ?? "session"}`],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+      });
+
+      expect(result.exitCode).toBe(1);
+      expect(result.output).toContain("not available in the selected profile and current workspace");
+      expect(result.sessionHandoff).toBeUndefined();
+    });
+
+    it("rejects ended sessions", async () => {
+      const db = openDefaultSQLiteDatabase({ path: dbPath });
+      seedPickerSession(db, {
+        id: "sess-ended",
+        profileId: "default",
+        title: "Ended",
+        workspaceRoot: tmpDir,
+      });
+      db.query("update sessions set ended_at = ?, end_reason = ? where id = ?")
+        .run("2026-08-04T12:00:00.000Z", "done", "sess-ended");
+      db.close();
+
+      const result = await runCliCommand({
+        argv: ["sessions", "open", "sess-ended"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+      });
+      expect(result.exitCode).toBe(1);
+      expect(result.sessionHandoff).toBeUndefined();
+    });
   });
 
   describe("sessions list", () => {
@@ -124,8 +419,8 @@ describe("CLI session commands", () => {
   describe("sessions show", () => {
     it("shows session details", async () => {
       const db = openDefaultSQLiteDatabase({ path: dbPath });
-      db.query("insert into sessions (id, profile_id, title, created_at, updated_at) values (?, ?, ?, ?, ?)")
-        .run("sess-1", "default", "Test Session", "2024-01-01T00:00:00Z", "2024-01-02T00:00:00Z");
+      db.query("insert into sessions (id, profile_id, title, created_at, updated_at, metadata_json) values (?, ?, ?, ?, ?, ?)")
+        .run("sess-1", "default", "Test Session", "2024-01-01T00:00:00Z", "2024-01-02T00:00:00Z", JSON.stringify({ workspaceRoot: tmpDir, originSurface: "cli" }));
       db.query("insert into messages (id, session_id, role, content, created_at) values (?, ?, ?, ?, ?)")
         .run("msg-1", "sess-1", "user", "hello", "2024-01-01T00:00:00Z");
       db.close();
@@ -139,6 +434,8 @@ describe("CLI session commands", () => {
       expect(result.output).toContain("sess-1");
       expect(result.output).toContain("Test Session");
       expect(result.output).toContain("Messages: 1");
+      expect(result.output).toContain(`Workspace: ${tmpDir}`);
+      expect(result.output).toContain("Origin: cli");
     });
 
     it("returns error for missing session", async () => {
@@ -169,6 +466,154 @@ describe("CLI session commands", () => {
       expect(result.handled).toBe(true);
       expect(result.output).toContain("Surface pointers");
       expect(result.output).toContain("telegram:chat-1");
+    });
+  });
+
+  describe("sessions diagnose", () => {
+    it("renders profile-authorized, bounded execution diagnostics without raw event payloads", async () => {
+      const rawDb = openDefaultSQLiteDatabase({ path: dbPath });
+      rawDb.query("insert into sessions (id, profile_id, title, created_at, updated_at) values (?, ?, ?, ?, ?)")
+        .run("sess-diagnose", "default", "Diagnostic Session", "2026-08-16T08:00:00Z", "2026-08-16T08:10:00Z");
+      rawDb.query("insert into messages (id, session_id, role, content, created_at) values (?, ?, ?, ?, ?)")
+        .run("turn-diagnose", "sess-diagnose", "user", "diagnose this session", "2026-08-16T08:00:00Z");
+      rawDb.close();
+
+      const db = await createSQLiteSessionDB({ path: dbPath });
+      await db.appendEvent("sess-diagnose", {
+        kind: "tool-called",
+        tool: "browser.snapshot",
+        input: { page: "RAW-PAGE-SENTINEL", url: "https://private.example/account" },
+        toolCallId: "TOKEN-DERIVED-CALL-ID",
+      });
+      await db.appendEvent("sess-diagnose", {
+        kind: "tool-result",
+        tool: "browser.snapshot",
+        result: { ok: true, content: "RAW-RESULT-SENTINEL" },
+      });
+      for (const callId of ["observation-1", "observation-2"]) {
+        await db.appendEvent("sess-diagnose", {
+          kind: "execution-evidence-recorded",
+          toolCallId: callId,
+          tool: "browser.snapshot",
+          status: "success",
+          riskClass: "read-only-network",
+          targetSummary: "PROTECTED-LABEL-SENTINEL",
+        });
+      }
+      await db.appendEvent("sess-diagnose", {
+        kind: "execution-plan-started",
+        plan: {
+          objective: "MISSION-OBJECTIVE-SENTINEL",
+          originTurnId: "TOKEN-DERIVED-TURN-ID",
+          revision: 1,
+          status: "active",
+          items: [{ id: "private-item", content: "MISSION-ITEM-SENTINEL", status: "in_progress" }],
+        },
+      });
+      await db.appendEvent("sess-diagnose", {
+        kind: "execution-plan-completed",
+        plan: {
+          objective: "MISSION-OBJECTIVE-SENTINEL",
+          originTurnId: "TOKEN-DERIVED-TURN-ID",
+          revision: 2,
+          status: "completed",
+          items: [{ id: "private-item", content: "MISSION-ITEM-SENTINEL", status: "completed" }],
+        },
+      });
+      await db.appendEvent("sess-diagnose", {
+        kind: "authentication-evidence-assessed",
+        stage: "credentials",
+        outcome: "verified",
+        reason: "authenticated-evidence-observed",
+        submissionToolCallId: "TOKEN-DERIVED-CALL-ID",
+        evidenceToolCallId: "TOKEN-DERIVED-EVIDENCE-ID",
+        challengeDeparted: true,
+        stateTransitionObserved: true,
+        postSubmitEvidence: true,
+        preexistingEvidence: false,
+        navigationInterrupted: false,
+        sensitiveInputActive: false,
+      });
+      await db.appendEvent("sess-diagnose", diagnosticProviderCompletion(11_500));
+      await db.recordProviderUsageEntries([diagnosticProviderUsage("sess-diagnose")]);
+      const eventsBefore = (await db.listEvents("sess-diagnose")).length;
+      const usageBefore = (await db.listProviderUsageEntries("default", { sessionId: "sess-diagnose" })).length;
+      await db.close();
+
+      const result = await runCliCommand({
+        argv: ["sessions", "diagnose", "sess-diagnose"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+      });
+
+      expect(result.handled).toBe(true);
+      expect(result.exitCode).toBe(0);
+      expect(result.output).toContain("Session execution diagnosis");
+      expect(result.output).toContain("Provider calls: 1");
+      expect(result.output).toContain("Tokens: 30");
+      expect(result.output).toContain("Estimated cost: $0.0020");
+      expect(result.output).toContain("Slow provider calls: 1 of 1 timed; slowest 11.5s");
+      expect(result.output).toContain("Repeated observation calls: 1");
+      expect(result.output).toContain("Status: completed");
+      expect(result.output).toContain("Final cause: Plan completed");
+      expect(result.output).toContain("Submission observed: yes");
+      expect(result.output).toContain("Causal evidence: verified");
+      expect(result.output).toContain("Provider seam: no");
+      for (const sentinel of [
+        "RAW-PAGE-SENTINEL",
+        "RAW-RESULT-SENTINEL",
+        "PROTECTED-LABEL-SENTINEL",
+        "MISSION-OBJECTIVE-SENTINEL",
+        "MISSION-ITEM-SENTINEL",
+        "TOKEN-DERIVED",
+        "https://private.example/account",
+      ]) {
+        expect(result.output).not.toContain(sentinel);
+      }
+
+      const reopened = await createSQLiteSessionDB({ path: dbPath });
+      expect(await reopened.listEvents("sess-diagnose")).toHaveLength(eventsBefore);
+      expect(await reopened.listProviderUsageEntries("default", { sessionId: "sess-diagnose" }))
+        .toHaveLength(usageBefore);
+      await reopened.close();
+    });
+
+    it("does not disclose sessions from another profile", async () => {
+      const db = openDefaultSQLiteDatabase({ path: dbPath });
+      db.query("insert into sessions (id, profile_id, title, created_at, updated_at) values (?, ?, ?, ?, ?)")
+        .run("work-secret-session", "work", "PRIVATE-TITLE-SENTINEL", "2026-08-16T08:00:00Z", "2026-08-16T08:10:00Z");
+      db.query("insert into session_events (id, session_id, created_at, event_json) values (?, ?, ?, ?)")
+        .run("private-event", "work-secret-session", "2026-08-16T08:05:00Z", JSON.stringify({
+          kind: "provider-budget-exhausted",
+          budget: "PRIVATE-BUDGET-SENTINEL",
+          limit: 1,
+          observed: 2,
+          reason: "PRIVATE-REASON-SENTINEL",
+        }));
+      db.close();
+
+      const result = await runCliCommand({
+        argv: ["sessions", "diagnose", "work-secret-session"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+      });
+
+      expect(result.exitCode).toBe(1);
+      expect(result.output).toContain("Session not found");
+      expect(result.output).not.toContain("PRIVATE-TITLE-SENTINEL");
+      expect(result.output).not.toContain("PRIVATE-BUDGET-SENTINEL");
+      expect(result.output).not.toContain("PRIVATE-REASON-SENTINEL");
+    });
+
+    it("requires exactly one session id", async () => {
+      for (const argv of [
+        ["sessions", "diagnose"],
+        ["sessions", "diagnose", "one", "two"],
+      ]) {
+        const result = await runCliCommand({ argv, workspaceRoot: tmpDir, homeDir: tmpDir });
+        expect(result.exitCode).toBe(1);
+        expect(result.output).toContain("Usage: estacoda sessions diagnose <session-id>");
+      }
     });
   });
 
@@ -464,6 +909,34 @@ describe("CLI session commands", () => {
   });
 });
 
+function pickerPrompt(select: (input: SelectPromptInput<string>) => Promise<string>): Prompt {
+  return Object.assign(async () => "", { select }) as Prompt;
+}
+
+function seedPickerSession(
+  db: ReturnType<typeof openDefaultSQLiteDatabase>,
+  input: {
+    id: string;
+    profileId: string;
+    title: string;
+    workspaceRoot: string;
+    originSurface?: string;
+    kind?: string;
+    updatedAt?: string;
+  }
+): void {
+  const createdAt = "2026-08-01T08:00:00.000Z";
+  const updatedAt = input.updatedAt ?? "2026-08-02T09:00:00.000Z";
+  db.query("insert into sessions (id, profile_id, title, created_at, updated_at, metadata_json) values (?, ?, ?, ?, ?, ?)")
+    .run(input.id, input.profileId, input.title, createdAt, updatedAt, JSON.stringify({
+      workspaceRoot: input.workspaceRoot,
+      ...(input.originSurface === undefined ? {} : { originSurface: input.originSurface }),
+      ...(input.kind === undefined ? {} : { kind: input.kind }),
+    }));
+  db.query("insert into messages (id, session_id, role, content, created_at, channel) values (?, ?, ?, ?, ?, ?)")
+    .run(`message-${input.id}`, input.id, "user", input.title, updatedAt, input.originSurface ?? "cli");
+}
+
 function compactResult(overrides: {
   fallbackUsed?: boolean;
   fallbackReason?: string;
@@ -502,5 +975,61 @@ function compactResult(overrides: {
       ineffectiveCompressionCount: 0
     },
     userFacingMessage: "Session history compacted"
+  };
+}
+
+function diagnosticProviderCompletion(durationMs: number) {
+  return {
+    kind: "provider-completion" as const,
+    ok: true,
+    fallbackUsed: false,
+    attempts: [{
+      state: "dispatched" as const,
+      dispatchedAt: "2026-08-16T08:00:00.000Z",
+      provider: "test",
+      model: "test-model",
+      ok: true,
+      streamDiagnostics: {
+        stream: true as const,
+        startedAtMs: 0,
+        endedAtMs: durationMs,
+        durationMs,
+        eventCount: 1,
+        tokenChunks: 1,
+        visibleChars: 1,
+        toolCallChunks: 0,
+        transportDone: true,
+        finish: "done" as const,
+      },
+    }],
+  };
+}
+
+function diagnosticProviderUsage(sessionId: string): ProviderUsageEntry {
+  return {
+    id: "usage-diagnose",
+    profileId: "default",
+    sessionId,
+    visibleTurnId: "turn-diagnose",
+    requestKey: "sha256:diagnose",
+    provider: "test",
+    model: "test-model",
+    routeRole: "primary",
+    routeIndex: 0,
+    providerAttemptIndex: 0,
+    sourceKind: "main",
+    pricing: { currency: "USD", fingerprint: "sha256:pricing" },
+    pricingFingerprint: "sha256:pricing",
+    inputTokens: 20,
+    outputTokens: 10,
+    reasoningTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    totalTokens: 30,
+    estimatedCostUsd: 0.002,
+    usageComplete: true,
+    pricingComplete: true,
+    incompleteReasons: [],
+    dispatchedAt: "2026-08-16T08:00:00.000Z",
   };
 }

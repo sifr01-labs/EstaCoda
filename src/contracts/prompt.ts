@@ -6,7 +6,11 @@ export type PromptLayerName =
   | "skills-index"
   | "project-context"
   | "session-history"
+  | "native-history"
   | "conversation-continuation"
+  | "execution-plan"
+  | "execution-working-set"
+  | "browser-state"
   | "compaction-notice"
   | "user-message"
   | "channel-attachments"
@@ -18,6 +22,7 @@ export type PromptLayerName =
   | "memory"
   | "session-recall"
   | "external-recall"
+  | "authentication-state"
   | "native-tools"
   | "tool-results"
   | "artifacts"
@@ -55,6 +60,16 @@ export type PromptLayerReport = {
   cacheStatus?: "hit" | "miss" | "uncacheable";
 };
 
+export type ProviderRequestAccounting = {
+  selectedToolCount: number;
+  serializedSchemaBytes: number;
+  estimatedSchemaTokens: number;
+  estimatedMessageTokens: number;
+  estimatedInputTokens: number;
+  outputReservationTokens: number;
+  totalEstimatedRequestTokens: number;
+};
+
 export type PromptBudgetReport = {
   model: string;
   contextWindowTokens: number;
@@ -70,4 +85,5 @@ export type PromptBudgetReport = {
   };
   warnings: string[];
   compression?: PromptSemanticCompressionReport;
+  requestAccounting?: ProviderRequestAccounting;
 };

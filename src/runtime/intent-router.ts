@@ -51,6 +51,7 @@ const NATIVE_INTENT_TOOLSETS: Record<NativeIntent, ToolsetName[]> = {
   "voice-transcription": ["media", "files"],
   "speech-generation": ["media", "files"],
   "attachment-analysis": ["media", "files"],
+  "browser-control": ["browser"],
   "general": []
 };
 
@@ -87,6 +88,11 @@ export class IntentRouter {
   constructor(options: IntentRouterOptions) {
     this.#skillRegistry = options.skillRegistry;
     this.#model = options.model;
+  }
+
+  /** Resolves only from the current session-filtered skill registry. */
+  resolveSkill(name: string): LoadedSkill | SkillDefinition | undefined {
+    return this.#skillRegistry.resolve(name);
   }
 
   route(prompt: string, options: IntentRouteOptions = {}): IntentRoute {
@@ -316,6 +322,11 @@ function detectNativeIntent(normalized: string, attachments: ChannelAttachment[]
     };
   }
 
+  const browserControl = detectBrowserControl(normalized);
+  if (browserControl !== undefined) {
+    return browserControl;
+  }
+
   if (readyAttachments.length > 0) {
     return {
       nativeIntent: "attachment-analysis",
@@ -369,6 +380,9 @@ function detectTaskClass(normalized: string, nativeIntent: NativeIntent): {
 }
 
 function taskClassFromPrompt(normalized: string): IntentTaskClass {
+  if (matchesProviderDiagnostics(normalized)) {
+    return "provider-diagnostics";
+  }
   if (matchesReleaseValidation(normalized)) {
     return "release-validation";
   }
@@ -384,8 +398,14 @@ function taskClassFromPrompt(normalized: string): IntentTaskClass {
   if (matchesResearch(normalized)) {
     return "research";
   }
+  if (matchesRepoInspection(normalized)) {
+    return "repo-inspection";
+  }
   if (matchesRepoChange(normalized)) {
     return "repo-change";
+  }
+  if (matchesConversation(normalized)) {
+    return "conversation";
   }
 
   return "general";
@@ -567,6 +587,80 @@ function matchesSpeechGeneration(normalized: string): boolean {
   return /\b(text to speech|tts|read aloud|speak this|say this|spoken reply|generate speech)\b/iu.test(normalized);
 }
 
+function detectBrowserControl(normalized: string): {
+  nativeIntent: "browser-control";
+  labels: IntentLabel[];
+  evidence: IntentRouteEvidence[];
+} | undefined {
+  if (matchesBrowserEngineeringQuestion(normalized)) {
+    return undefined;
+  }
+
+  const authentication = matchesBrowserAuthentication(normalized);
+  const supervised = matchesSupervisedBrowserRequest(normalized);
+  const directControl = matchesDirectBrowserControl(normalized);
+  if (!authentication && !supervised && !directControl) {
+    return undefined;
+  }
+
+  const detail = authentication
+    ? "Prompt explicitly asks to authenticate through a website or browser."
+    : supervised
+      ? "Prompt explicitly asks for a visible or supervised browser session."
+      : "Prompt explicitly asks to navigate or interact with a browser.";
+
+  return {
+    nativeIntent: "browser-control",
+    labels: [
+      "browser-control",
+      ...(authentication ? ["authentication"] : []),
+      ...(supervised ? ["supervised-browser"] : [])
+    ],
+    evidence: [{
+      kind: "native-intent",
+      detail,
+      weight: 0.95
+    }]
+  };
+}
+
+function matchesBrowserEngineeringQuestion(normalized: string): boolean {
+  const browserSubject = /\b(browser|chrome|chromium|cdp|playwright|puppeteer)\b|متصفح|كروم/iu;
+  const engineeringSubject = /\b(code|codebase|architecture|implementation|backend|controller|class|interface|module|tests?|integration)\b|كود|شفرة|معمارية|هندسة|تنفيذ|خلفية|متحكم|واجهة|وحدة|اختبار|تكامل/iu;
+  const engineeringIntent = /\b(explain|review|audit|analy[sz]e|design|implement|fix|change|update|modify|refactor|test|debug|investigate|how|why|what)\b|اشرح|راجع|دقق|حلل|صمم|نفذ|أصلح|غير|حدّث|عدل|اختبر|صحح|حقق|كيف|لماذا|ما /iu;
+
+  return browserSubject.test(normalized) &&
+    engineeringSubject.test(normalized) &&
+    engineeringIntent.test(normalized);
+}
+
+function matchesBrowserAuthentication(normalized: string): boolean {
+  const authenticationAction = /\b(?:log|sign)\s+(?:me\s+|us\s+)?in(?:to)?\b|\blogin\s+to\b|\bget\s+(?:me|us)\s+(?:logged|signed)\s+in\b|\bauthenticate\b|سج[ّ]?ل(?:ني|نا)?\s+(?:ال)?دخول(?:ي|نا)?|تسجيل\s+(?:ال)?دخول|ادخل(?:ني|نا)?\s+(?:إلى|الى)/iu;
+  const webTarget = /\b(browser|chrome|chromium|website|site|portal|web\s?page|account|dashboard)\b|https?:\/\/|متصفح|كروم|موقع|بوابة|صفحة|حساب|لوحة\s+التحكم/iu;
+  return authenticationAction.test(normalized) && webTarget.test(normalized);
+}
+
+function matchesSupervisedBrowserRequest(normalized: string): boolean {
+  return /\b(?:open|launch|start|spin\s+up|show|use)\b.{0,80}\b(?:visible|headed|supervised)\b.{0,30}\b(?:browser|chrome|chromium)\b/iu.test(normalized) ||
+    /\b(?:visible|headed|supervised)\b.{0,30}\b(?:browser|chrome|chromium)\b/iu.test(normalized) ||
+    /\b(?:show|let)\b.{0,80}\b(?:watch|see|interact)\b.{0,80}\b(?:browser|chrome|chromium)\b/iu.test(normalized) ||
+    /(?:افتح|شغ[ّ]?ل|ابدأ|أظهر|استخدم).{0,80}(?:مرئي|ظاهر|تحت\s+الإشراف).{0,30}(?:متصفح|كروم)/iu.test(normalized) ||
+    /(?:دعني|خليني).{0,80}(?:أشاهد|أرى|أتفاعل).{0,80}(?:متصفح|كروم)/iu.test(normalized);
+}
+
+function matchesDirectBrowserControl(normalized: string): boolean {
+  const browser = "(?:browser|chrome|chromium)";
+  const action = "(?:open|launch|start|spin\\s+up|navigate|go\\s+to|visit|browse|control|interact|click|press|type|enter|fill|select|scroll|switch|inspect|screenshot|capture)";
+  const explicitBrowserControl = new RegExp(
+    `(?:\\b${action}\\b.{0,100}\\b${browser}\\b|\\b${browser}\\b.{0,100}\\b${action}\\b)`,
+    "iu"
+  );
+  const directWebNavigation = /\b(?:open|navigate|go\s+to|visit|browse)\b.{0,100}(?:https?:\/\/|\b(?:website|web\s?page|site|portal|login\s+page)\b|\b[a-z0-9-]+\.(?:com|org|net|io|ai|dev|app|co)\b)/iu;
+  const arabicBrowserControl = /(?:افتح|شغ[ّ]?ل|ابدأ|انتقل|اذهب|تصفح|تحكم|تفاعل|انقر|اضغط|اكتب|أدخل|املأ|اختر|مرر|بد[ّ]?ل|افحص|التقط).{0,100}(?:متصفح|كروم|موقع|بوابة|صفحة|https?:\/\/)/iu;
+
+  return explicitBrowserControl.test(normalized) || directWebNavigation.test(normalized) || arabicBrowserControl.test(normalized);
+}
+
 function matchesCodeReview(normalized: string): boolean {
   return /\b(review|audit|inspect)\b.{0,80}\b(pr|pull request|merge request|diff|patch|implementation|code)\b/iu.test(normalized) ||
     /\b(pr|pull request|merge request|diff|patch|implementation|code)\b.{0,80}\b(review|audit|inspect)\b/iu.test(normalized);
@@ -574,7 +668,35 @@ function matchesCodeReview(normalized: string): boolean {
 
 function matchesRepoChange(normalized: string): boolean {
   return /\b(implement|fix|change|update|modify|refactor|add|remove)\b.{0,80}\b(code|repo|repository|file|files|test|tests|feature|bug|command|cli)\b/iu.test(normalized) ||
-    /\b(can you|please|let'?s)\b.{0,40}\b(implement|fix|change|update|modify|refactor|add|remove)\b/iu.test(normalized);
+    /(?:نف[ّ]?ذ|أصلح|اصلح|غي[ّ]?ر|حد[ّ]?ث|عد[ّ]?ل|أضف|اضف|احذف|أعد\s+هيكلة).{0,80}(?:الكود|الشفرة|المستودع|ملف|ملفات|اختبار|اختبارات|ميزة|خلل|أمر)/iu.test(normalized);
+}
+
+function matchesRepoInspection(normalized: string): boolean {
+  const action = /\b(review|audit|inspect|examine|read|search|find|trace|understand|explain|investigate|debug|diagnose)\b/iu;
+  const subject = /\b(codebase|code|repo|repository|source|implementation|file|files|tests?|function|class|module|package)\b/iu;
+  const arabicAction = /(?:راجع|دق[ّ]?ق|افحص|اقرأ|ابحث|تتب[ّ]?ع|افهم|اشرح|حل[ّ]?ل|حق[ّ]?ق|صح[ّ]?ح)/u;
+  const arabicSubject = /(?:الكود|الشفرة|المستودع|المصدر|التنفيذ|ملف|ملفات|اختبار|اختبارات|دالة|صنف|وحدة|حزمة)/u;
+  return (action.test(normalized) && subject.test(normalized)) ||
+    (arabicAction.test(normalized) && arabicSubject.test(normalized));
+}
+
+function matchesProviderDiagnostics(normalized: string): boolean {
+  const action = /\b(diagnose|debug|investigate|inspect|check)\b/iu;
+  const problem = /\b(why|failure|failing|failed|error|mismatch|wrong|broken|status)\b/iu;
+  const subject = /\b(provider|model route|model routing|kimi|openai|anthropic|rate limit|429|token accounting|context window|max output|provider config(?:uration)?)\b/iu;
+  const arabicAction = /(?:شخ[ّ]?ص|صح[ّ]?ح|حق[ّ]?ق|افحص|تحق[ّ]?ق)/u;
+  const arabicProblem = /(?:لماذا|فشل|يفشل|خطأ|مشكلة|عدم\s+تطابق|حالة)/u;
+  const arabicSubject = /(?:مزو[ّ]?د|مسار\s+النموذج|توجيه\s+النموذج|كيمي|Kimi|حد\s+المعدل|محاسبة\s+الرموز|نافذة\s+السياق|حد\s+الإخراج|إعدادات\s+المزو[ّ]?د)/iu;
+  return ((action.test(normalized) || problem.test(normalized)) && subject.test(normalized)) ||
+    ((arabicAction.test(normalized) || arabicProblem.test(normalized)) && arabicSubject.test(normalized));
+}
+
+function matchesConversation(normalized: string): boolean {
+  if (/^(?:(?:hi|hello|hey)(?:\s+there)?|thanks(?:\s+(?:a lot|so much|for your help))?|thank you(?:\s+(?:very much|for your help))?|good (?:morning|afternoon|evening)|bye|goodbye|مرحبا|مرحباً|أهلا|اهلا|شكرا|شكراً|مع السلامة)[\s!?.،؟]*$/iu.test(normalized)) {
+    return true;
+  }
+  return /^(?:how are you|what(?:'s| is) your name|who are you|tell me a joke|let'?s chat)[\s!?.]*$/iu.test(normalized) ||
+    /^(?:كيف حالك|ما اسمك|من أنت|من انت|قل لي نكتة|دعنا نتحدث)[\s!?.،؟]*$/u.test(normalized);
 }
 
 function matchesDocsWriting(normalized: string): boolean {
@@ -826,6 +948,8 @@ function taskClassFromNativeIntent(nativeIntent: NativeIntent): IntentTaskClass 
     case "attachment-analysis":
     case "voice-transcription":
       return "attachment-analysis";
+    case "browser-control":
+      return "browser-operation";
     case "general":
       return "general";
   }

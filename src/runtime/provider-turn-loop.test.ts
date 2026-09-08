@@ -1,14 +1,19 @@
 import { describe, expect, it, vi } from "vitest";
+import { Buffer } from "node:buffer";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { normalizeSessionCompressionConfig } from "../config/runtime-config.js";
 import type { ChannelAttachment } from "../contracts/channel.js";
+import type { BrowserBackend } from "../contracts/browser.js";
+import { browserCapabilities } from "../browser/browser-capabilities.js";
+import type { ContextExpansionResult } from "../contracts/context.js";
 import type { ModelProfile, ResolvedModelRoute, ProviderRequest, ProviderResponse, ProviderStreamDiagnostics } from "../contracts/provider.js";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
 import type { ReplacementSessionMessage, SessionDB, SessionEvent } from "../contracts/session.js";
 import type { ToolCallPlan } from "../contracts/tool-plan.js";
-import type { ToolDefinition } from "../contracts/tool.js";
+import type { RegisteredTool, ToolDefinition } from "../contracts/tool.js";
+import type { SecureInputRequestHandler } from "../contracts/secure-input.js";
 import type { ProviderExecutionResult } from "../providers/provider-executor.js";
 import { ProviderExecutor } from "../providers/provider-executor.js";
 import { createOpenAICompatibleProvider } from "../providers/openai-compatible-provider.js";
@@ -17,12 +22,27 @@ import { SessionCompressionService, type CompactResult } from "../prompt/session
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import { SESSION_RECALL_UNTRUSTED_NOTICE } from "../session/session-recall-service.js";
 import { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
-import { stableToolCallId, ToolCallPlanner } from "../tools/tool-call-planner.js";
+import { ToolCallPlanner } from "../tools/tool-call-planner.js";
+import {
+  buildProviderToolSchemaCatalog,
+  type OpenAICompatibleToolSchema,
+  type ProviderToolSchemaCatalog
+} from "../tools/tool-schema.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { ToolRegistry } from "../tools/tool-registry.js";
+import { createPlanTools } from "../tools/plan-tools.js";
 import { RunRecorder } from "./run-recorder.js";
 import { ToolPlanRunner } from "./tool-plan-runner.js";
-import { ProviderTurnLoop, type ProviderTurnLoopOptions } from "./provider-turn-loop.js";
+import { ProviderTurnLoop, providerEfficiencySignals, type ProviderTurnLoopOptions } from "./provider-turn-loop.js";
+import { ExecutionPlanStore } from "./execution-plan-store.js";
+import { ExecutionPlanController } from "./execution-plan-controller.js";
+import { ExecutionCapabilityPreflight } from "./execution-capability-preflight.js";
+import { ExecutionEvidenceIndex } from "./execution-evidence-index.js";
+import { ExecutionWorkingSetController } from "./execution-working-set.js";
+import { ExecutionCheckpointController } from "./execution-checkpoint-controller.js";
+import { EXECUTION_SUPERVISION_PROMPTS } from "./execution-supervision-controller.js";
+import { attachEphemeralVisionImages } from "../vision/ephemeral-vision-content.js";
+import { createSessionRuntimeContext } from "./session-runtime-context.js";
 
 function createMockAdapter() {
   return {
@@ -187,7 +207,11 @@ async function createProviderTurnLoopForTest(
       maxProviderIterations: 2,
       maxProviderToolCalls: 4,
       maxRepeatedToolFailures: 2,
-      maxProviderWallClockMs: 10_000
+      maxRepeatedBrowserObservations: 3,
+      noProgressNudgeIteration: 3,
+      maxNoProgressIterations: 6,
+      maxProviderWallClockMs: 10_000,
+      finalizationReserveMs: 0
     },
     ...overrides
   });
@@ -267,7 +291,11 @@ async function createCompressionHarness() {
       maxProviderIterations: 2,
       maxProviderToolCalls: 4,
       maxRepeatedToolFailures: 2,
-      maxProviderWallClockMs: 10_000
+      maxRepeatedBrowserObservations: 3,
+      noProgressNudgeIteration: 3,
+      maxNoProgressIterations: 6,
+      maxProviderWallClockMs: 10_000,
+      finalizationReserveMs: 0
     },
     ...overrides
   });
@@ -331,36 +359,52 @@ async function appendProviderToolHistory(db: InMemorySessionDB, sessionId: strin
 async function runBasicProviderTurn(
   loop: ProviderTurnLoop,
   callbacks: {
+    diagnosticOnly?: boolean;
     onEvent?: (event: RuntimeEvent) => void;
     onDelta?: (text: string) => void;
     onSegmentBreak?: (reason?: string) => void | Promise<void>;
     attachments?: ChannelAttachment[];
+    toolExecutions?: ToolExecutionRecord[];
+    toolPlans?: ToolCallPlan[];
+    context?: ContextExpansionResult;
     visibleTurnId?: string;
+    userText?: string;
+    providerTools?: OpenAICompatibleToolSchema[];
+    toolExpansionCandidates?: Parameters<ProviderTurnLoop["run"]>[0]["toolExpansionCandidates"];
+    providerToolSchemaCatalog?: ProviderToolSchemaCatalog;
+    signal?: AbortSignal;
+    onSecureInputRequest?: SecureInputRequestHandler;
+    onApprovalRequest?: Parameters<ProviderTurnLoop["run"]>[0]["onApprovalRequest"];
   } = {}
 ): Promise<Awaited<ReturnType<ProviderTurnLoop["run"]>>> {
   return await loop.run({
+    diagnosticOnly: callbacks.diagnosticOnly,
     visibleTurnId: callbacks.visibleTurnId,
-    userText: "current user request",
-    routedText: "current user request",
+    userText: callbacks.userText ?? "current user request",
+    routedText: callbacks.userText ?? "current user request",
     selectedSkill: undefined,
     selectedSkillInstructions: undefined,
     selectedSkillResources: undefined,
     selectedSkillSetup: undefined,
     intent: { labels: ["general"], confidence: 1, nativeIntent: "general", evidence: [], suggestedToolsets: [], suggestedSkills: [], confirmationRequired: false, rationale: "" },
     securityDecision: "allow",
-    toolExecutions: [],
-    context: undefined,
+    toolExecutions: callbacks.toolExecutions ?? [],
+    context: callbacks.context,
     projectContext: undefined,
     attachments: callbacks.attachments,
     memoryPromptContext: undefined,
-    providerTools: [],
+    providerTools: callbacks.providerTools ?? [],
+    toolExpansionCandidates: callbacks.toolExpansionCandidates,
     fallbackText: "",
-    toolPlans: [],
+    toolPlans: callbacks.toolPlans ?? [],
     trustedWorkspace: false,
     initialRiskClass: "read-only-local",
     onEvent: callbacks.onEvent,
     onDelta: callbacks.onDelta,
-    onSegmentBreak: callbacks.onSegmentBreak
+    onSegmentBreak: callbacks.onSegmentBreak,
+    onSecureInputRequest: callbacks.onSecureInputRequest,
+    onApprovalRequest: callbacks.onApprovalRequest,
+    signal: callbacks.signal
   });
 }
 
@@ -425,12 +469,31 @@ function incompleteStreamExecution(partialContent: string | undefined): Provider
   };
 }
 
-function providerToolCall(id: string, argumentsText = "{}"): ProviderExecutionResult["toolCalls"][number] {
+function providerToolCall(
+  id: string,
+  argumentsText = "{}",
+  name = testTool.name
+): ProviderExecutionResult["toolCalls"][number] {
   return {
     id,
-    name: testTool.name,
+    name,
     argumentsText
   };
+}
+
+function toolProviderSchema(name: string): OpenAICompatibleToolSchema {
+  return {
+    type: "function",
+    function: {
+      name,
+      description: `${name} test schema`,
+      parameters: { type: "object", properties: {} }
+    }
+  };
+}
+
+function planProviderSchema(): OpenAICompatibleToolSchema {
+  return toolProviderSchema("plan");
 }
 
 function truncatedToolCallExecution(input: {
@@ -606,6 +669,18 @@ async function createPostToolNudgeHarness(input: {
   modelFallbackRoutes?: ResolvedModelRoute[];
   maxProviderIterations?: number;
   maxProviderWallClockMs?: number;
+  noProgressNudgeIteration?: number;
+  maxNoProgressIterations?: number;
+  finalizationReserveMs?: number;
+  taskExecution?: ProviderTurnLoopOptions["taskExecution"];
+  executionPlanReader?: ProviderTurnLoopOptions["executionPlanReader"];
+  executionPlanController?: ExecutionPlanController;
+  executionWorkingSet?: ProviderTurnLoopOptions["executionWorkingSet"];
+  executionCheckpointController?: ProviderTurnLoopOptions["executionCheckpointController"];
+  browserSessionLease?: ProviderTurnLoopOptions["browserSessionLease"];
+  browserBackend?: BrowserBackend;
+  sessionRuntimeContext?: ProviderTurnLoopOptions["sessionRuntimeContext"];
+  sessionId?: string;
   onExecutePlans?: (input: {
     sessionDb: InMemorySessionDB;
     sessionId: string;
@@ -634,7 +709,7 @@ async function createPostToolNudgeHarness(input: {
     complete: completeSpy
   } as unknown as ProviderExecutor;
   const sessionDb = new InMemorySessionDB();
-  const sessionId = `nudge-session-${Date.now()}-${Math.random()}`;
+  const sessionId = input.sessionId ?? `nudge-session-${Date.now()}-${Math.random()}`;
   await sessionDb.createSession({ id: sessionId, profileId: "default", title: "nudge" });
   const trajectoryRecorder = new TrajectoryRecorder({
     profileId: "default",
@@ -652,19 +727,48 @@ async function createPostToolNudgeHarness(input: {
     await input.onExecutePlans?.({ sessionDb, sessionId, stepInput });
     const step = input.toolSteps[toolStepIndex] ?? {};
     toolStepIndex += 1;
-    for (const plan of step.plans ?? []) {
+    const runtimeCalls = stepInput.providerExecution?.toolCalls ?? [];
+    for (const [index, plan] of (step.plans ?? []).entries()) {
+      if (runtimeCalls[index]?.id !== undefined) plan.id = runtimeCalls[index].id;
       stepInput.toolPlans.push(plan);
     }
-    for (const execution of step.executions ?? []) {
-      stepInput.toolPlans.push(toolPlan(execution.toolCallId ?? execution.tool.name));
+    for (const [index, execution] of (step.executions ?? []).entries()) {
+      if (runtimeCalls[index]?.id !== undefined) execution.toolCallId = runtimeCalls[index].id;
+      const plan = toolPlan(execution.toolCallId ?? execution.tool.name);
+      plan.tool = execution.tool.name;
+      plan.result = execution.result;
+      stepInput.toolPlans.push(plan);
+      await stepInput.onExecution?.(execution);
     }
     return {
       executions: step.executions ?? [],
       maxObservedRisk: stepInput.riskBaseline
     };
   });
+  const executeInternalTool = vi.fn(async (stepInput: Parameters<ToolPlanRunner["executeInternalTool"]>[0]) => {
+    const step = input.toolSteps[toolStepIndex] ?? {};
+    toolStepIndex += 1;
+    const plan: ToolCallPlan = {
+      id: stepInput.id,
+      tool: stepInput.tool,
+      input: stepInput.value,
+      source: "internal",
+      status: "executed"
+    };
+    stepInput.toolPlans.push(plan);
+    const execution = step.executions?.[0];
+    if (execution !== undefined) {
+      execution.toolCallId = stepInput.id;
+      await stepInput.onExecution?.(execution);
+    }
+    return {
+      ...(execution === undefined ? {} : { execution }),
+      maxObservedRisk: stepInput.riskBaseline
+    };
+  });
   const toolPlanRunner = {
-    executePlans
+    executePlans,
+    executeInternalTool
   } as unknown as ToolPlanRunner;
   const loop = new ProviderTurnLoop({
     providerExecutor,
@@ -689,14 +793,26 @@ async function createPostToolNudgeHarness(input: {
       maxProviderIterations: input.maxProviderIterations ?? 3,
       maxProviderToolCalls: 8,
       maxRepeatedToolFailures: 3,
-      maxProviderWallClockMs: input.maxProviderWallClockMs ?? 10_000
-    }
+      maxRepeatedBrowserObservations: 3,
+      noProgressNudgeIteration: input.noProgressNudgeIteration ?? 3,
+      maxNoProgressIterations: input.maxNoProgressIterations ?? 6,
+      maxProviderWallClockMs: input.maxProviderWallClockMs ?? 10_000,
+      finalizationReserveMs: input.finalizationReserveMs ?? 0
+    },
+    taskExecution: input.taskExecution,
+    executionPlanReader: input.executionPlanController ?? input.executionPlanReader,
+    executionWorkingSet: input.executionWorkingSet,
+    executionCheckpointController: input.executionCheckpointController,
+    browserSessionLease: input.browserSessionLease,
+    browserBackend: input.browserBackend,
+    sessionRuntimeContext: input.sessionRuntimeContext
   });
 
   return {
     loop,
     completeSpy,
     executePlans,
+    executeInternalTool,
     sessionDb,
     sessionId
   };
@@ -704,6 +820,7 @@ async function createPostToolNudgeHarness(input: {
 
 async function createRealToolPlanningHarness(input: {
   response: ProviderExecutionResult;
+  taskExecution?: ProviderTurnLoopOptions["taskExecution"];
 }) {
   const completeSpy = vi.fn<ProviderExecutor["complete"]>(async (_request, _preferences, options) => {
     for (const toolCall of input.response.toolCalls) {
@@ -777,14 +894,20 @@ async function createRealToolPlanningHarness(input: {
       maxProviderIterations: 1,
       maxProviderToolCalls: 8,
       maxRepeatedToolFailures: 3,
-      maxProviderWallClockMs: 10_000
-    }
+      maxRepeatedBrowserObservations: 3,
+      noProgressNudgeIteration: 3,
+      maxNoProgressIterations: 6,
+      maxProviderWallClockMs: 10_000,
+      finalizationReserveMs: 0
+    },
+    taskExecution: input.taskExecution
   });
 
   return {
     loop,
     completeSpy,
-    executeTool
+    executeTool,
+    sessionId
   };
 }
 
@@ -823,7 +946,11 @@ function forwardingSessionDb(db: InMemorySessionDB, overrides: Partial<SessionDB
   return {
     createSession: overrides.createSession ?? db.createSession.bind(db),
     getSession: overrides.getSession ?? db.getSession.bind(db),
+    getSessionForProfile: overrides.getSessionForProfile ?? db.getSessionForProfile.bind(db),
     listSessions: overrides.listSessions ?? db.listSessions.bind(db),
+    listSessionSummaries: overrides.listSessionSummaries ?? db.listSessionSummaries.bind(db),
+    hasUserMessageForProfile: overrides.hasUserMessageForProfile ?? db.hasUserMessageForProfile.bind(db),
+    setSessionTitleIfPlaceholder: overrides.setSessionTitleIfPlaceholder ?? db.setSessionTitleIfPlaceholder.bind(db),
     endSession: overrides.endSession ?? db.endSession.bind(db),
     appendMessage: overrides.appendMessage ?? db.appendMessage.bind(db),
     replaceMessages: overrides.replaceMessages ?? db.replaceMessages.bind(db),
@@ -840,6 +967,30 @@ function forwardingSessionDb(db: InMemorySessionDB, overrides: Partial<SessionDB
     saveFailure: overrides.saveFailure ?? db.saveFailure.bind(db)
   };
 }
+
+describe("providerEfficiencySignals", () => {
+  it("nudges at half the configured provider-call budget and prefers a grounded API artifact", () => {
+    expect(providerEfficiencySignals({
+      providerCalls: 9,
+      providerCallBudget: 20,
+      providerTokens: 0,
+      repeatedMcpReads: 0,
+      machineReadableApiDescriptionAvailable: false
+    })).not.toEqual(expect.arrayContaining([expect.stringContaining("provider calls have been used")]));
+
+    const signals = providerEfficiencySignals({
+      providerCalls: 10,
+      providerCallBudget: 20,
+      providerTokens: 0,
+      repeatedMcpReads: 0,
+      machineReadableApiDescriptionAvailable: true
+    });
+    expect(signals).toEqual(expect.arrayContaining([
+      expect.stringContaining("10 provider calls have been used"),
+      expect.stringContaining("grounded machine-readable API description")
+    ]));
+  });
+});
 
 describe("ProviderTurnLoop streaming callbacks", () => {
   it("continues emitting provider-token events when callbacks are omitted", async () => {
@@ -981,6 +1132,42 @@ describe("ProviderTurnLoop streaming callbacks", () => {
     expect(order.filter((entry) => entry === "segment:provider-tool-call")).toHaveLength(1);
   });
 
+  it("continues to a truthful final response after a tool timeout", async () => {
+    const timedOut = toolExecution("call-timeout");
+    timedOut.settlement = {
+      terminalStatus: "timed_out",
+      dispatchState: "started",
+      sideEffectState: "none",
+      timeoutMs: 10
+    };
+    timedOut.result = {
+      ok: false,
+      content: "Tool execution timed out without a side effect. The call may be retried if it is still needed.",
+      metadata: {
+        reason: "timeout",
+        terminalStatus: "timed_out",
+        dispatchState: "started",
+        sideEffectState: "none",
+        timeoutMs: 10
+      }
+    };
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("", [providerToolCall("call-timeout")]),
+        providerExecution("The read timed out, so I could not confirm the requested state.")
+      ],
+      toolSteps: [{ executions: [timedOut] }]
+    });
+
+    const result = await runBasicProviderTurn(harness.loop);
+
+    expect(harness.completeSpy).toHaveBeenCalledTimes(2);
+    expect(result.providerExecution?.response?.content).toBe(
+      "The read timed out, so I could not confirm the requested state."
+    );
+    expect(JSON.stringify(harness.completeSpy.mock.calls[1]?.[0])).toContain("timed out without a side effect");
+  });
+
   it("does not fail the provider turn when onSegmentBreak throws", async () => {
     const harness = await createPostToolNudgeHarness({
       responses: [
@@ -999,6 +1186,98 @@ describe("ProviderTurnLoop streaming callbacks", () => {
     });
 
     expect(result.providerExecution?.response?.content).toContain("done");
+  });
+
+  it("propagates complete Task lineage into provider-planned tool execution", async () => {
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("", [providerToolCall("call-task-tool")]),
+        providerExecution("done")
+      ],
+      toolSteps: [{ executions: [toolExecution("call-task-tool")] }],
+      taskExecution: {
+        taskId: "task-leaf",
+        rootTaskId: "task-root",
+        planRevisionId: "revision-1",
+        stepId: "step-1",
+        attemptId: "attempt-1",
+        originSessionId: "origin-session",
+        originTurnId: "origin-turn"
+      }
+    });
+
+    await runBasicProviderTurn(harness.loop, { visibleTurnId: "worker-visible-turn" });
+
+    expect(harness.executePlans.mock.calls[0]?.[0].providerUsageLineage).toEqual({
+      executionSessionId: harness.sessionId,
+      visibleTurnId: "origin-turn",
+      taskId: "task-leaf",
+      rootTaskId: "task-root",
+      planRevisionId: "revision-1",
+      stepId: "step-1",
+      attemptId: "attempt-1"
+    });
+  });
+
+  it("forwards Task lineage through ToolPlanRunner to ToolExecutor", async () => {
+    const harness = await createRealToolPlanningHarness({
+      response: providerExecution("", [providerToolCall("call-task-tool")]),
+      taskExecution: {
+        taskId: "task-leaf",
+        rootTaskId: "task-root",
+        planRevisionId: "revision-1",
+        stepId: "step-1",
+        attemptId: "attempt-1",
+        originTurnId: "origin-turn"
+      }
+    });
+
+    await runBasicProviderTurn(harness.loop, { visibleTurnId: "worker-visible-turn" });
+
+    expect(harness.executeTool).toHaveBeenCalledWith(expect.objectContaining({
+      providerUsageLineage: {
+        executionSessionId: harness.sessionId,
+        visibleTurnId: "origin-turn",
+        taskId: "task-leaf",
+        rootTaskId: "task-root",
+        planRevisionId: "revision-1",
+        stepId: "step-1",
+        attemptId: "attempt-1"
+      }
+    }));
+  });
+
+  it("forwards current-turn image attachment provenance through ToolPlanRunner", async () => {
+    const harness = await createRealToolPlanningHarness({
+      response: providerExecution("", [providerToolCall("call-vision-tool")])
+    });
+
+    await runBasicProviderTurn(harness.loop, {
+      attachments: [{
+        id: "image-current-turn",
+        kind: "image",
+        status: "ready",
+        localPath: "/profile/channel-media/inbound/image.png"
+      }],
+      context: {
+        originalText: "inspect @file:workspace-reference.png",
+        expandedText: "inspect @file:workspace-reference.png",
+        references: [{
+          raw: "@file:workspace-reference.png",
+          kind: "file",
+          target: "workspace-reference.png"
+        }],
+        blocks: [],
+        warnings: []
+      }
+    });
+
+    expect(harness.executeTool).toHaveBeenCalledWith(expect.objectContaining({
+      visionInputProvenance: {
+        attachmentPaths: ["/profile/channel-media/inbound/image.png"],
+        explicitReferencePaths: ["workspace-reference.png"]
+      }
+    }));
   });
 });
 
@@ -1088,6 +1367,63 @@ describe("ProviderTurnLoop provider availability", () => {
 });
 
 describe("ProviderTurnLoop request defaults", () => {
+  it("uses registry max output metadata for request accounting", async () => {
+    const harness = await createCompressionHarness();
+    const modelWithOutputLimit: ModelProfile = {
+      ...mockModel,
+      maxOutputTokens: 16_384
+    };
+
+    await runBasicProviderTurn(harness.loop({
+      model: modelWithOutputLimit,
+      primaryModelRoute: {
+        ...primaryRoute,
+        profile: modelWithOutputLimit
+      }
+    }));
+
+    const promptEvent = (await harness.sessionDb.listEvents(harness.sessionId)).find(
+      (event): event is Extract<SessionEvent, { kind: "prompt-assembled" }> => event.kind === "prompt-assembled"
+    );
+    expect(promptEvent?.budget.requestAccounting?.outputReservationTokens).toBe(16_384);
+  });
+
+  it("accounts for the exact native schemas sent in the provider request", async () => {
+    const harness = await createCompressionHarness();
+    const providerTools = [
+      toolProviderSchema("fixture.first"),
+      toolProviderSchema("fixture.second")
+    ];
+    const loop = harness.loop();
+
+    await runBasicProviderTurn(loop, { providerTools });
+
+    const request = harness.completeSpy.mock.calls[0]?.[0] as ProviderRequest;
+    const promptEvent = (await harness.sessionDb.listEvents(harness.sessionId)).find(
+      (event): event is Extract<SessionEvent, { kind: "prompt-assembled" }> => event.kind === "prompt-assembled"
+    );
+    const accounting = promptEvent?.budget.requestAccounting;
+    const serializedSchemas = JSON.stringify(request.tools);
+
+    expect(request.tools).toEqual(providerTools);
+    expect(JSON.stringify(request.messages)).not.toContain("fixture.first test schema");
+    expect(JSON.stringify(request.messages)).not.toContain("fixture.second test schema");
+    expect(accounting).toMatchObject({
+      selectedToolCount: request.tools?.length,
+      serializedSchemaBytes: Buffer.byteLength(serializedSchemas, "utf8"),
+      outputReservationTokens: mockModel.contextWindowTokens
+    });
+    expect(accounting?.estimatedSchemaTokens).toBeGreaterThan(0);
+    expect(accounting?.estimatedMessageTokens).toBeGreaterThan(0);
+    expect(accounting?.estimatedInputTokens).toBe(
+      (accounting?.estimatedMessageTokens ?? 0) + (accounting?.estimatedSchemaTokens ?? 0)
+    );
+    expect(accounting?.totalEstimatedRequestTokens).toBe(
+      (accounting?.estimatedInputTokens ?? 0) + mockModel.contextWindowTokens
+    );
+    expect(loop.lastPromptTokens()).toBe(accounting?.estimatedInputTokens);
+  });
+
   it("uses the normal default provider temperature", async () => {
     const harness = await createCompressionHarness();
 
@@ -1485,7 +1821,11 @@ describe("ProviderTurnLoop OpenAI-compatible stream recovery", () => {
           maxProviderIterations: 3,
           maxProviderToolCalls: 4,
           maxRepeatedToolFailures: 2,
-          maxProviderWallClockMs: 10_000
+          maxRepeatedBrowserObservations: 3,
+          noProgressNudgeIteration: 3,
+          maxNoProgressIterations: 6,
+          maxProviderWallClockMs: 10_000,
+          finalizationReserveMs: 0
         }
       });
 
@@ -1513,7 +1853,2147 @@ describe("ProviderTurnLoop OpenAI-compatible stream recovery", () => {
 });
 
 describe("ProviderTurnLoop post-tool empty response recovery", () => {
+  it("replays only the newest raw tool batch in flat continuation feedback", async () => {
+    const firstRawResult = "FIRST_RAW_TOOL_RESULT";
+    const secondRawResult = "SECOND_RAW_TOOL_RESULT";
+    const firstExecution = toolExecution("call-first", firstRawResult);
+    const secondExecution = toolExecution("call-second", secondRawResult);
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("", [providerToolCall("call-first")]),
+        providerExecution("", [providerToolCall("call-second")]),
+        providerExecution("Completed after both tool batches.")
+      ],
+      toolSteps: [
+        { executions: [firstExecution] },
+        { executions: [secondExecution] },
+        {}
+      ],
+      maxProviderIterations: 3
+    });
+
+    await runBasicProviderTurn(harness.loop);
+
+    const thirdRequest = harness.completeSpy.mock.calls[2]?.[0] as ProviderRequest;
+    const continuation = JSON.stringify(thirdRequest.messages.at(-1)?.content);
+    expect(continuation).toContain(secondRawResult);
+    expect(firstExecution.toolCallId).toMatch(/^tool-call-[a-f0-9]{24}$/u);
+    expect(continuation).toContain(firstExecution.toolCallId!);
+    expect(continuation).not.toContain(firstRawResult);
+  });
+
+  it("does not continue provider narration merely because a Mission remains unfinished", async () => {
+    const planStore = new ExecutionPlanStore();
+    planStore.replace({
+      objective: "Build the collection",
+      originTurnId: "turn-plan",
+      revision: 1,
+      status: "active",
+      items: [
+        { id: "build", content: "Build collection", status: "in_progress" },
+        { id: "verify", content: "Verify collection", status: "pending" }
+      ]
+    });
+    const harness = await createPostToolNudgeHarness({
+      responses: Array.from({ length: 7 }, (_, index) => providerExecution(`Narration ${index + 1}`)),
+      toolSteps: [],
+      executionPlanReader: planStore,
+      maxProviderIterations: 8
+    });
+
+    const result = await runBasicProviderTurn(harness.loop);
+    const recoveryText = "The foreground tool loop has repeated the same calls or results without material progress.";
+    const requests = harness.completeSpy.mock.calls.map((call) => call[0] as ProviderRequest);
+
+    expect(harness.completeSpy).toHaveBeenCalledTimes(1);
+    expect(requests.filter((request) => JSON.stringify(request.messages).includes(recoveryText))).toHaveLength(0);
+    expect(result.providerExecution?.response?.content).toBe("Narration 1");
+  });
+
+  it("stops a repeated tool loop despite changing provider result representations", async () => {
+    const toolNames = Array.from({ length: 7 }, () => "mcp.postman.getCollection");
+    const harness = await createPostToolNudgeHarness({
+      responses: toolNames.map((toolName, index) => providerExecution("", [
+        providerToolCall(`call-loop-${index + 1}`, "{}", toolName)
+      ])),
+      toolSteps: toolNames.map((toolName, index) => ({
+        executions: [toolExecutionForTool(
+          `call-loop-${index + 1}`,
+          toolName,
+          `Changing representation ${index + 1}`
+        )]
+      })),
+      maxProviderIterations: 12
+    });
+    const events: RuntimeEvent[] = [];
+
+    const result = await runBasicProviderTurn(harness.loop, {
+      onEvent: (event) => events.push(event)
+    });
+    const requests = harness.completeSpy.mock.calls.map(([request]) => request as ProviderRequest);
+    const nudgeText = "The foreground tool loop has repeated the same calls or results without material progress.";
+
+    expect(harness.completeSpy).toHaveBeenCalledTimes(7);
+    expect(harness.executePlans).toHaveBeenCalledTimes(7);
+    expect(requests.filter((request) => JSON.stringify(request.messages).includes(nudgeText))).toHaveLength(1);
+    expect(result.providerExecution?.response?.content).toContain("foreground tool loop stopped");
+    expect(result.providerExecution?.response?.content).toContain("independent of any plan");
+    expect(events).toEqual(expect.arrayContaining([
+      expect.objectContaining({
+        kind: "provider-budget-exhausted",
+        budget: "tool-loop-no-progress-iterations",
+        limit: 6,
+        observed: 6
+      })
+    ]));
+  });
+
+  it("truthfully stops checkpointed work when only non-semantic reads repeat", async () => {
+    const checkpoint = new ExecutionCheckpointController({
+      sessionId: "checkpoint-no-progress-session",
+      profileId: "default",
+      now: () => "2030-01-01T00:00:00.000Z",
+      createId: () => "checkpoint:no-progress"
+    });
+    await checkpoint.ensure({
+      originTurnId: "turn-no-progress",
+      originalObjective: "Import and verify the Postman collection",
+      qualificationReasons: ["external_multi_step"],
+      intentLabels: ["api.integration"],
+      requiredOperations: ["read", "mutation", "verification"],
+      connectorIds: ["postman"],
+      completionFloor: "mutation_with_verification"
+    });
+    const toolNames = Array.from({ length: 5 }, () => "mcp.postman.getCollection");
+    const harness = await createPostToolNudgeHarness({
+      sessionId: "checkpoint-no-progress-session",
+      responses: toolNames.map((toolName, index) => providerExecution("", [
+        providerToolCall(`call-checkpoint-loop-${index + 1}`, "{}", toolName)
+      ])),
+      toolSteps: toolNames.map((toolName, index) => ({
+        executions: [toolExecutionForTool(
+          `call-checkpoint-loop-${index + 1}`,
+          toolName,
+          `Changing representation ${index + 1}`
+        )]
+      })),
+      executionCheckpointController: checkpoint,
+      noProgressNudgeIteration: 2,
+      maxNoProgressIterations: 3,
+      maxProviderIterations: 8
+    });
+
+    const result = await runBasicProviderTurn(harness.loop);
+
+    expect(harness.completeSpy).toHaveBeenCalledTimes(3);
+    expect(checkpoint.current()?.progressRevision).toBe(0);
+    expect(result.terminationCause).toBe("tool_loop_no_progress");
+    expect(result.providerExecution?.response?.content).toContain("foreground tool loop stopped");
+  });
+
+  it("does not stop checkpointed work while new connector mutations and declared verification advance it", async () => {
+    const checkpoint = new ExecutionCheckpointController({
+      sessionId: "checkpoint-connector-progress-session",
+      profileId: "default",
+      now: () => "2030-01-01T00:00:00.000Z",
+      createId: () => "checkpoint:connector-progress"
+    });
+    await checkpoint.ensure({
+      originTurnId: "turn-connector-progress",
+      originalObjective: "Import and verify the Postman collection",
+      qualificationReasons: ["external_multi_step"],
+      intentLabels: ["api.integration"],
+      requiredOperations: ["read", "mutation", "verification"],
+      connectorIds: ["postman"],
+      completionFloor: "mutation_with_verification"
+    });
+    const postmanExecution = (input: {
+      id: string;
+      tool: string;
+      effect: NonNullable<ToolExecutionRecord["executionEffect"]>;
+      riskClass?: ToolExecutionRecord["riskClass"];
+    }): ToolExecutionRecord => {
+      const record = toolExecutionForTool(input.id, input.tool, `${input.tool} completed`);
+      record.tool.toolsets = ["mcp"];
+      record.tool.riskClass = input.riskClass ?? "read-only-network";
+      record.riskClass = record.tool.riskClass;
+      record.executionEffect = input.effect;
+      return record;
+    };
+    const steps = [
+      postmanExecution({
+        id: "call-create-spec",
+        tool: "mcp.postman.createSpec",
+        riskClass: "external-side-effect",
+        effect: { kind: "mutation", connector: { kind: "mcp", id: "postman" } }
+      }),
+      postmanExecution({
+        id: "call-get-spec",
+        tool: "mcp.postman.getSpec",
+        effect: {
+          kind: "verification",
+          verifies: ["mcp.postman.createSpec"],
+          connector: { kind: "mcp", id: "postman" }
+        }
+      }),
+      postmanExecution({
+        id: "call-generate-collection",
+        tool: "mcp.postman.generateCollection",
+        riskClass: "external-side-effect",
+        effect: { kind: "mutation", connector: { kind: "mcp", id: "postman" } }
+      }),
+      postmanExecution({
+        id: "call-get-spec-collections",
+        tool: "mcp.postman.getSpecCollections",
+        effect: {
+          kind: "verification",
+          verifies: ["mcp.postman.generateCollection"],
+          connector: { kind: "mcp", id: "postman" }
+        }
+      }),
+      toolExecutionForTool("call-browser-navigate", "browser.navigate", "product page opened"),
+      toolExecutionForTool("call-browser-snapshot", "browser.snapshot", "product page inspected")
+    ];
+    const harness = await createPostToolNudgeHarness({
+      sessionId: "checkpoint-connector-progress-session",
+      responses: [
+        ...steps.map((execution) => providerExecution("", [providerToolCall(
+          execution.toolCallId!,
+          "{}",
+          execution.tool.name
+        )])),
+        providerExecution("Imported and verified the collection, then continued to the next product.")
+      ],
+      toolSteps: steps.map((execution) => ({ executions: [execution] })),
+      executionCheckpointController: checkpoint,
+      noProgressNudgeIteration: 2,
+      maxNoProgressIterations: 4,
+      maxProviderIterations: 8
+    });
+
+    const result = await runBasicProviderTurn(harness.loop);
+
+    expect(harness.completeSpy).toHaveBeenCalledTimes(7);
+    expect(result.terminationCause).toBe("normal");
+    expect(result.providerExecution?.response?.content).toContain("Imported and verified");
+  });
+
+  it("reuses a successful Postman workspace argument without parsing connector prose", async () => {
+    const planStore = new ExecutionPlanStore();
+    planStore.replace({
+      objective: "Configure MTN products in Postman",
+      originTurnId: "turn-working-set",
+      revision: 1,
+      status: "active",
+      items: [{ id: "inspect", content: "Inspect Postman", status: "in_progress" }]
+    });
+    const workingSet = new ExecutionWorkingSetController({
+      profileId: "default",
+      sessionId: "placeholder"
+    });
+    const workspaceRead = toolExecutionForTool(
+      "call-workspaces-working-set",
+      "mcp.postman.getCollections",
+      "| Collection | ID |\n| MTN Products | collection-123 |"
+    );
+    workspaceRead.input = { workspace: "workspace-456" };
+    workspaceRead.riskClass = "read-only-network";
+    workspaceRead.tool.riskClass = "read-only-network";
+    workspaceRead.tool.toolsets = ["mcp"];
+    workspaceRead.result = {
+      ok: true,
+      content: "| Collection | ID |\n| MTN Products | collection-123 |"
+    };
+    const collectionCreate = toolExecutionForTool(
+      "call-create-collection",
+      "mcp.postman.createCollection",
+      "collection created"
+    );
+    collectionCreate.input = { workspace: "workspace-456", collection: { name: "MTN Products" } };
+    collectionCreate.riskClass = "external-side-effect";
+    collectionCreate.tool.riskClass = "external-side-effect";
+    collectionCreate.tool.toolsets = ["mcp"];
+    collectionCreate.executionEffect = { kind: "mutation", connector: { kind: "mcp", id: "postman" } };
+    const dispatchedTools: string[] = [];
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("", [providerToolCall(
+          "call-workspaces-working-set",
+          JSON.stringify({ workspace: "workspace-456" }),
+          "mcp.postman.getCollections"
+        )]),
+        providerExecution("", [providerToolCall(
+          "call-create-collection",
+          JSON.stringify({ workspace: "workspace-456", collection: { name: "MTN Products" } }),
+          "mcp.postman.createCollection"
+        )]),
+        providerExecution("Created the collection in the known workspace.")
+      ],
+      toolSteps: [{ executions: [workspaceRead] }, { executions: [collectionCreate] }],
+      executionPlanReader: planStore,
+      executionWorkingSet: workingSet,
+      onExecutePlans: ({ stepInput }) => {
+        const current = stepInput.toolPlans.at(-1)?.tool;
+        if (current !== undefined) dispatchedTools.push(current);
+      },
+      maxProviderIterations: 3
+    });
+
+    await runBasicProviderTurn(harness.loop);
+
+    const continuation = JSON.stringify((harness.completeSpy.mock.calls[1]?.[0] as ProviderRequest).messages);
+    expect(continuation).toContain("Authoritative execution working state");
+    expect(continuation).toContain("Workspace: workspace-456");
+    expect(continuation.match(/MTN Products/gu)).toHaveLength(1);
+    expect(dispatchedTools).toEqual([
+      "mcp.postman.getCollections",
+      "mcp.postman.createCollection"
+    ]);
+  });
+
+  it("grounds provider continuations in the current controlled browser tab", async () => {
+    const browserExecution = toolExecutionForTool(
+      "call-browser-state",
+      "browser.snapshot",
+      "Historical-looking snapshot excerpt"
+    );
+    browserExecution.riskClass = "read-only-network";
+    browserExecution.tool.riskClass = "read-only-network";
+    browserExecution.result = {
+      ok: true,
+      content: "Current browser snapshot",
+      metadata: {
+        snapshot: {
+          sessionId: "browser-session",
+          url: "https://example.com/oauth",
+          title: "OAuth V1",
+          identity: { documentEpoch: 4, actionRevision: 12, observationId: 15 },
+          observedAt: "2026-08-13T00:00:00.000Z",
+          readiness: "complete",
+          tab: {
+            ref: "@t3",
+            url: "https://example.com/oauth",
+            title: "OAuth V1",
+            controlled: true
+          }
+        }
+      }
+    };
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("", [providerToolCall("call-browser-state", "{}", "browser.snapshot")]),
+        providerExecution("Continue on OAuth V1.")
+      ],
+      toolSteps: [{ executions: [browserExecution] }],
+      maxProviderIterations: 2
+    });
+
+    await runBasicProviderTurn(harness.loop);
+
+    const continuation = JSON.stringify((harness.completeSpy.mock.calls[1]?.[0] as ProviderRequest).messages);
+    expect(continuation).toContain("Authoritative current browser state");
+    expect(continuation).toContain("Controlled tab: @t3 (controlled)");
+    expect(continuation).toContain("supersedes browser state found in conversation history");
+  });
+
+  it("corrects a provider stop on a visible OTP challenge before it reaches ordinary chat", async () => {
+    const challengeSnapshot = toolExecutionForTool(
+      "call-otp-snapshot",
+      "browser.snapshot",
+      "Current browser snapshot"
+    );
+    challengeSnapshot.tool.toolsets = ["browser"];
+    challengeSnapshot.result = {
+      ok: true,
+      content: "Current browser snapshot",
+      metadata: {
+        snapshot: {
+          sessionId: "browser-session",
+          url: "https://portal.example.com/challenge",
+          title: "Verify account",
+          identity: { documentEpoch: 4, actionRevision: 12, observationId: 15 },
+          observedAt: "2026-08-13T00:00:00.000Z",
+          readiness: "complete",
+          tab: {
+            ref: "@t3",
+            url: "https://portal.example.com/challenge",
+            title: "Verify account",
+            controlled: true
+          },
+          elements: [
+            { ref: "@e19", role: "textbox", name: "Enter authenticator code", withinText: "Authenticate" },
+            { ref: "@e20", role: "button", name: "Authenticate", withinText: "Authenticate" }
+          ]
+        }
+      }
+    };
+    const protectedInput = toolExecutionForTool(
+      "call-otp-input",
+      "browser.type",
+      "Protected input delivered and submitted."
+    );
+    protectedInput.tool.toolsets = ["browser"];
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("", [providerToolCall("call-otp-snapshot", "{}", "browser.snapshot")]),
+        providerExecution("Please paste the verification code here."),
+        providerExecution("", [providerToolCall(
+          "call-otp-input",
+          JSON.stringify({
+            ref: "@e19",
+            identity: { documentEpoch: 4, actionRevision: 12, observationId: 15 },
+            tabRef: "@t3",
+            protectedInput: { kind: "one-time-code", purpose: "Verify account" },
+            submitRef: "@e20"
+          }),
+          "browser.type"
+        )]),
+        providerExecution("Authentication continued securely.")
+      ],
+      toolSteps: [
+        { executions: [challengeSnapshot] },
+        {},
+        { executions: [protectedInput] },
+        {}
+      ],
+      maxProviderIterations: 4
+    });
+
+    const result = await runBasicProviderTurn(harness.loop, {
+      providerTools: [toolProviderSchema("browser.snapshot"), toolProviderSchema("browser.type")]
+    });
+
+    expect(harness.completeSpy).toHaveBeenCalledTimes(4);
+    const correctionRequest = harness.completeSpy.mock.calls[2]?.[0] as ProviderRequest;
+    expect(JSON.stringify(correctionRequest.messages)).toContain(
+      "Do not ask the user to send the code in ordinary chat."
+    );
+    expect(harness.executePlans.mock.calls[2]?.[0].providerExecution?.toolCalls).toEqual([
+      expect.objectContaining({ id: expect.stringMatching(/^tool-call-[a-f0-9]{24}$/u), name: "browser.type" })
+    ]);
+    expect(result.providerExecution?.response?.content).toBe("Authentication continued securely.");
+    expect(result.providerExecution?.response?.content).not.toContain("paste the verification code");
+  });
+
+  it("submits a newly detected OTP challenge locally before the next provider continuation", async () => {
+    const challengeIdentity = { documentEpoch: 4, actionRevision: 12, observationId: 15 };
+    const authenticatedIdentity = { documentEpoch: 5, actionRevision: 13, observationId: 16 };
+    const challengeSnapshot = {
+      sessionId: "browser-session",
+      url: "https://portal.example.com/challenge",
+      title: "Two-factor authentication",
+      identity: challengeIdentity,
+      observedAt: "2026-08-13T00:00:00.000Z",
+      readiness: "complete" as const,
+      tab: {
+        ref: "@t3",
+        url: "https://portal.example.com/challenge",
+        title: "Two-factor authentication",
+        controlled: true
+      },
+      elements: [
+        { ref: "@e19", role: "textbox", name: "Enter authenticator code" },
+        { ref: "@e20", role: "button", name: "Authenticate", withinText: "Two-factor authentication" }
+      ]
+    };
+    const credentials = toolExecutionForTool("call-credentials", "browser.fill_protected_form", "challenge shown");
+    credentials.tool.toolsets = ["browser"];
+    credentials.result = {
+      ok: true,
+      content: "Credentials submitted; challenge required.",
+      metadata: {
+        secureInputGroupReceipt: { status: "delivered" },
+        protectedDelivery: {
+          delivery: "delivered",
+          submission: "clicked",
+          documentChanged: true,
+          challengeState: "departed",
+          conditionMet: true,
+          beforeIdentity: { documentEpoch: 3, actionRevision: 11, observationId: 14 },
+          afterIdentity: challengeIdentity,
+          sensitiveInputActive: false
+        },
+        snapshot: challengeSnapshot
+      }
+    };
+    const challengeSubmission = toolExecutionForTool("runtime-otp", "browser.type", "challenge submitted");
+    challengeSubmission.tool.toolsets = ["browser"];
+    challengeSubmission.result = {
+      ok: true,
+      content: "Protected input delivered and submitted.",
+      metadata: {
+        secureInputReceipt: { status: "delivered" },
+        protectedDelivery: {
+          delivery: "delivered",
+          submission: "clicked",
+          documentChanged: true,
+          challengeState: "departed",
+          conditionMet: true,
+          beforeIdentity: challengeIdentity,
+          afterIdentity: authenticatedIdentity,
+          sensitiveInputActive: false
+        },
+        snapshot: {
+          ...challengeSnapshot,
+          url: "https://portal.example.com/account",
+          title: "Account home",
+          identity: authenticatedIdentity,
+          tab: {
+            ...challengeSnapshot.tab,
+            url: "https://portal.example.com/account",
+            title: "Account home"
+          },
+          elements: [
+            { ref: "@account", role: "link", name: "My profile" },
+            { ref: "@logout", role: "button", name: "Sign out" }
+          ]
+        }
+      }
+    };
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("", [providerToolCall("call-credentials", "{}", "browser.fill_protected_form")]),
+        providerExecution("Authentication verified; continuing the original task.")
+      ],
+      toolSteps: [
+        { executions: [credentials] },
+        { executions: [challengeSubmission] }
+      ],
+      maxProviderIterations: 3
+    });
+    const secureInput = vi.fn<SecureInputRequestHandler>(async () => ({
+      status: "delivered",
+      destinationLabel: "Verification code",
+      persisted: false
+    }));
+
+    const result = await runBasicProviderTurn(harness.loop, {
+      providerTools: [toolProviderSchema("browser.fill_protected_form"), toolProviderSchema("browser.type")],
+      onSecureInputRequest: secureInput
+    });
+
+    expect(harness.completeSpy).toHaveBeenCalledTimes(2);
+    expect(harness.executeInternalTool).toHaveBeenCalledOnce();
+    expect(harness.executeInternalTool.mock.calls[0]?.[0]).toMatchObject({
+      tool: "browser.type",
+      value: {
+        ref: "@e19",
+        identity: challengeIdentity,
+        tabRef: "@t3",
+        protectedInput: { kind: "one-time-code", retention: "use-once" },
+        submitRef: "@e20"
+      }
+    });
+    expect(result.toolExecutions.map((execution) => execution.tool.name)).toEqual([
+      "browser.fill_protected_form",
+      "browser.type"
+    ]);
+    expect(result.providerExecution?.response?.content).toContain("Authentication verified");
+  });
+
+  it("stops with user input required when a live OTP challenge has no protected input handler", async () => {
+    const challengeIdentity = { documentEpoch: 4, actionRevision: 12, observationId: 15 };
+    const credentials = toolExecutionForTool("call-credentials", "browser.fill_protected_form", "challenge shown");
+    credentials.tool.toolsets = ["browser"];
+    credentials.result = {
+      ok: true,
+      content: "Credentials submitted; challenge required.",
+      metadata: {
+        secureInputGroupReceipt: { status: "delivered" },
+        protectedDelivery: {
+          delivery: "delivered",
+          submission: "clicked",
+          documentChanged: true,
+          challengeState: "departed",
+          conditionMet: true,
+          beforeIdentity: { documentEpoch: 3, actionRevision: 11, observationId: 14 },
+          afterIdentity: challengeIdentity,
+          sensitiveInputActive: false
+        },
+        snapshot: {
+          sessionId: "browser-session",
+          url: "https://portal.example.com/challenge",
+          title: "Two-factor authentication",
+          identity: challengeIdentity,
+          observedAt: "2026-08-13T00:00:00.000Z",
+          readiness: "complete",
+          tab: {
+            ref: "@t3",
+            url: "https://portal.example.com/challenge",
+            title: "Two-factor authentication",
+            controlled: true
+          },
+          elements: [
+            { ref: "@e19", role: "textbox", name: "Verification code" },
+            { ref: "@e20", role: "button", name: "Verify" }
+          ]
+        }
+      }
+    };
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("", [providerToolCall("call-credentials", "{}", "browser.fill_protected_form")])
+      ],
+      toolSteps: [{ executions: [credentials] }],
+      maxProviderIterations: 2
+    });
+
+    const result = await runBasicProviderTurn(harness.loop, {
+      providerTools: [toolProviderSchema("browser.fill_protected_form"), toolProviderSchema("browser.type")]
+    });
+
+    expect(harness.completeSpy).toHaveBeenCalledOnce();
+    expect(harness.executeInternalTool).not.toHaveBeenCalled();
+    expect(result.terminationCause).toBe("user_input_required");
+    expect(result.providerExecution?.response?.content).toContain("protected one-time-code input is unavailable");
+  });
+
+  it("does not retry an older OTP challenge after protected input was cancelled", async () => {
+    const challengeSnapshot = toolExecutionForTool(
+      "call-cancelled-otp-snapshot",
+      "browser.snapshot",
+      "Current browser snapshot"
+    );
+    challengeSnapshot.tool.toolsets = ["browser"];
+    challengeSnapshot.result = {
+      ok: true,
+      content: "Current browser snapshot",
+      metadata: {
+        snapshot: {
+          sessionId: "browser-session",
+          url: "https://portal.example.com/challenge",
+          title: "Verify account",
+          identity: { documentEpoch: 4, actionRevision: 12, observationId: 15 },
+          observedAt: "2026-08-13T00:00:00.000Z",
+          readiness: "complete",
+          tab: {
+            ref: "@t3",
+            url: "https://portal.example.com/challenge",
+            title: "Verify account",
+            controlled: true
+          },
+          elements: [
+            { ref: "@e19", role: "textbox", name: "Verification code", label: "One-time code" },
+            { ref: "@e20", role: "button", name: "Verify", withinText: "Two-factor authentication" }
+          ]
+        }
+      }
+    };
+    const cancelledInput = toolExecutionForTool(
+      "call-cancelled-otp-input",
+      "browser.type",
+      "Protected input collection was cancelled."
+    );
+    cancelledInput.tool.toolsets = ["browser"];
+    cancelledInput.result = {
+      ok: false,
+      content: "Protected input collection was cancelled.",
+      metadata: { reason: "cancelled" }
+    };
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("", [providerToolCall("call-cancelled-otp-snapshot", "{}", "browser.snapshot")]),
+        providerExecution("", [providerToolCall(
+          "call-cancelled-otp-input",
+          JSON.stringify({
+            ref: "@e19",
+            identity: { documentEpoch: 4, actionRevision: 12, observationId: 15 },
+            tabRef: "@t3",
+            protectedInput: { kind: "one-time-code", purpose: "Verify account" },
+            submitRef: "@e20"
+          }),
+          "browser.type"
+        )]),
+        providerExecution("The protected verification prompt was cancelled.")
+      ],
+      toolSteps: [
+        { executions: [challengeSnapshot] },
+        { executions: [cancelledInput] },
+        {}
+      ],
+      maxProviderIterations: 4
+    });
+
+    const result = await runBasicProviderTurn(harness.loop, {
+      providerTools: [toolProviderSchema("browser.snapshot"), toolProviderSchema("browser.type")]
+    });
+
+    expect(harness.completeSpy).toHaveBeenCalledTimes(3);
+    expect(result.providerExecution?.response?.content).toBe("The protected verification prompt was cancelled.");
+  });
+
+  it("refreshes persisted browser state when manual browser changes occur between turns", async () => {
+    const sessionRuntimeContext = createSessionRuntimeContext("runtime-session");
+    sessionRuntimeContext.setBrowserState({
+      sessionStatus: "active",
+      sessionId: "runtime-session:main",
+      controlledTab: { ref: "@t1", url: "https://example.com/old", controlled: true },
+      tabs: [{ ref: "@t1", url: "https://example.com/old", controlled: true }],
+      identity: { documentEpoch: 2, actionRevision: 4, observationId: 6 },
+      readiness: "complete",
+      freshness: "current"
+    });
+    const currentSnapshot = {
+      sessionId: "runtime-session:main",
+      url: "https://example.com/manual",
+      title: "Manually selected",
+      identity: { documentEpoch: 3, actionRevision: 5, observationId: 7 },
+      observedAt: "2026-08-13T00:01:00.000Z",
+      readiness: "complete" as const,
+      tab: {
+        ref: "@t2",
+        url: "https://example.com/manual",
+        title: "Manually selected",
+        controlled: true
+      }
+    };
+    const browserBackend: BrowserBackend = {
+      kind: "mock",
+      capabilities: browserCapabilities({ snapshots: true, tabs: true }),
+      isAvailable: () => true,
+      status: () => ({ backend: "mock", available: true }),
+      navigate: async () => ({
+        session: { id: "runtime-session:main", backend: "mock", createdAt: currentSnapshot.observedAt },
+        snapshot: currentSnapshot
+      }),
+      snapshot: async () => currentSnapshot,
+      tabs: async () => ({
+        sessionId: "runtime-session:main",
+        tabs: [
+          { ref: "@t1", url: "https://example.com/old", controlled: false },
+          currentSnapshot.tab
+        ],
+        blockedCount: 0
+      })
+    };
+    const harness = await createPostToolNudgeHarness({
+      responses: [providerExecution("Done.")],
+      toolSteps: [],
+      maxProviderIterations: 1,
+      browserBackend,
+      sessionRuntimeContext,
+      sessionId: "runtime-session"
+    });
+
+    await runBasicProviderTurn(harness.loop);
+
+    const initial = JSON.stringify((harness.completeSpy.mock.calls[0]?.[0] as ProviderRequest).messages);
+    expect(initial).toContain("Controlled tab: @t2 (controlled)");
+    expect(initial).toContain("External/manual browser changes were detected");
+    expect(sessionRuntimeContext.browserState()).toMatchObject({
+      controlledTab: { ref: "@t2" },
+      externalChangeDetected: true,
+      freshness: "current"
+    });
+  });
+
+  it("holds and renews the browser session lease for the foreground provider turn without a Mission", async () => {
+    const browserSessionLease = {
+      acquire: vi.fn(),
+      renew: vi.fn(),
+      release: vi.fn()
+    };
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("", [providerToolCall("call-browser", "{}", "browser.snapshot")]),
+        providerExecution("Complete.")
+      ],
+      toolSteps: [{ executions: [toolExecutionForTool("call-browser", "browser.snapshot", "state")] }],
+      browserSessionLease,
+      maxProviderIterations: 2
+    });
+
+    await runBasicProviderTurn(harness.loop, { visibleTurnId: "turn-browser-lease" });
+
+    expect(browserSessionLease.acquire).toHaveBeenCalledWith(
+      `${harness.sessionId}:main`,
+      "provider-turn:default:turn-browser-lease"
+    );
+    expect(browserSessionLease.renew).toHaveBeenCalled();
+    expect(browserSessionLease.release).toHaveBeenCalledWith(
+      `${harness.sessionId}:main`,
+      "provider-turn:default:turn-browser-lease"
+    );
+  });
+
+  it("releases the browser session lease when the foreground provider turn completes or is cancelled", async () => {
+    const completedPlanStore = new ExecutionPlanStore();
+    completedPlanStore.replace({
+      objective: "Configure MTN products in Postman",
+      originTurnId: "turn-browser-complete",
+      revision: 1,
+      status: "active",
+      items: [{ id: "update", content: "Update Postman", status: "in_progress" }]
+    });
+    const completedLease = { acquire: vi.fn(), renew: vi.fn(), release: vi.fn() };
+    const completedHarness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("", [providerToolCall("call-update", "{}", "mcp.postman.updateCollection")]),
+        providerExecution("Complete.")
+      ],
+      toolSteps: [{ executions: [toolExecutionForTool("call-update", "mcp.postman.updateCollection", "updated")] }],
+      executionPlanReader: completedPlanStore,
+      browserSessionLease: completedLease,
+      maxProviderIterations: 2,
+      onExecutePlans: () => {
+        completedPlanStore.replace({
+          objective: "Configure MTN products in Postman",
+          originTurnId: "turn-browser-complete",
+          revision: 2,
+          status: "completed",
+          items: [{
+            id: "update",
+            content: "Update Postman",
+            status: "completed",
+            completionKind: "reasoning"
+          }]
+        });
+      }
+    });
+
+    await runBasicProviderTurn(completedHarness.loop, { visibleTurnId: "turn-browser-complete" });
+    expect(completedLease.release).toHaveBeenCalledWith(
+      `${completedHarness.sessionId}:main`,
+      "provider-turn:default:turn-browser-complete"
+    );
+
+    const cancelledPlanStore = new ExecutionPlanStore();
+    cancelledPlanStore.replace({
+      objective: "Inspect MTN",
+      originTurnId: "turn-browser-cancelled",
+      revision: 1,
+      status: "active",
+      items: [{ id: "inspect", content: "Inspect MTN", status: "in_progress" }]
+    });
+    const cancelledLease = { acquire: vi.fn(), renew: vi.fn(), release: vi.fn() };
+    const cancelledHarness = await createPostToolNudgeHarness({
+      responses: [providerExecution("unused")],
+      toolSteps: [],
+      executionPlanReader: cancelledPlanStore,
+      browserSessionLease: cancelledLease
+    });
+    const controller = new AbortController();
+    controller.abort();
+
+    await runBasicProviderTurn(cancelledHarness.loop, {
+      visibleTurnId: "turn-browser-cancelled",
+      signal: controller.signal
+    });
+    expect(cancelledLease.release).toHaveBeenCalledWith(
+      `${cancelledHarness.sessionId}:main`,
+      "provider-turn:default:turn-browser-cancelled"
+    );
+  });
+
+  it.each(["blocked", "abandoned"] as const)(
+    "keeps browser lease ownership independent when a Mission becomes %s",
+    async (terminalStatus) => {
+      const planStore = new ExecutionPlanStore();
+      const originTurnId = `turn-browser-${terminalStatus}`;
+      planStore.replace({
+        objective: "Configure MTN products in Postman",
+        originTurnId,
+        revision: 1,
+        status: "active",
+        items: [{ id: "update", content: "Update Postman", status: "in_progress" }]
+      });
+      const browserSessionLease = { acquire: vi.fn(), renew: vi.fn(), release: vi.fn() };
+      const harness = await createPostToolNudgeHarness({
+        responses: [
+          providerExecution("", [providerToolCall("call-terminal", "{}", "mcp.postman.updateCollection")]),
+          providerExecution("Stopped.")
+        ],
+        toolSteps: [{ executions: [toolExecutionForTool(
+          "call-terminal",
+          "mcp.postman.updateCollection",
+          terminalStatus === "blocked" ? "authentication expired" : "cancelled"
+        )] }],
+        executionPlanReader: planStore,
+        browserSessionLease,
+        maxProviderIterations: 2,
+        onExecutePlans: () => {
+          planStore.replace({
+            objective: "Configure MTN products in Postman",
+            originTurnId,
+            revision: 2,
+            status: terminalStatus,
+            items: [{
+              id: "update",
+              content: "Update Postman",
+              status: terminalStatus === "blocked" ? "blocked" : "cancelled",
+              blocker: {
+                kind: "external_state",
+                summary: terminalStatus === "blocked" ? "Authentication expired" : "User cancelled"
+              }
+            }]
+          });
+        }
+      });
+
+      await runBasicProviderTurn(harness.loop, { visibleTurnId: originTurnId });
+
+      expect(browserSessionLease.release).toHaveBeenCalledWith(
+        `${harness.sessionId}:main`,
+        `provider-turn:default:${originTurnId}`
+      );
+    }
+  );
+
+  it("executes a provider-authored plan with the first substantive tool batch", async () => {
+    const planStore = new ExecutionPlanStore();
+    const controller = new ExecutionPlanController(planStore);
+    const firstCalls = [
+      providerToolCall("call-plan", JSON.stringify({
+        operation: "write",
+        objective: "Inspect MTN products and update Postman",
+        items: [
+          { id: "execute", content: "Inspect MTN product details", status: "in_progress" },
+          { id: "update", content: "Update Postman", status: "pending" },
+          { id: "verify", content: "Verify the collection", status: "pending" }
+        ]
+      }), "plan"),
+      providerToolCall("call-browser", "{}", "browser.snapshot"),
+      providerToolCall("call-postman", "{}", "mcp.postman.getCollection")
+    ];
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("", firstCalls),
+        providerExecution("Mission complete.")
+      ],
+      toolSteps: [
+        {
+          executions: [
+            {
+              ...toolExecutionForTool("call-plan", "plan", "plan refined"),
+              riskClass: "read-only-local",
+              tool: { ...testTool, name: "plan", riskClass: "read-only-local", toolsets: ["core"] }
+            },
+            toolExecutionForTool("call-browser", "browser.snapshot", "six products"),
+            toolExecutionForTool("call-postman", "mcp.postman.getCollection", "collection")
+          ]
+        },
+        {}
+      ],
+      executionPlanController: controller,
+      maxProviderIterations: 3,
+      onExecutePlans: ({ stepInput }) => {
+        if (stepInput.providerExecution?.toolCalls.some((call) => call.name === "plan")) {
+          return controller.write({
+            objective: "Inspect MTN products and update Postman",
+            items: [
+              { id: "execute", content: "Inspect MTN product details", status: "in_progress" },
+              { id: "update", content: "Update Postman", status: "pending" },
+              { id: "verify", content: "Verify the collection", status: "pending" }
+            ]
+          }, "visible-turn").then(() => undefined);
+        }
+      }
+    });
+
+    await runBasicProviderTurn(harness.loop, {
+      visibleTurnId: "visible-turn",
+      userText: "Look at the approved app and set up all 6 products in our Postman collection, then verify the result.",
+      providerTools: [planProviderSchema(), toolProviderSchema("browser.snapshot"), toolProviderSchema("mcp.postman.getCollection")]
+    });
+
+    const executedBatches = harness.executePlans.mock.calls
+      .map(([call]) => call.providerExecution?.toolCalls.map((toolCall) => toolCall.name) ?? [])
+      .filter((names) => names.length > 0);
+    expect(executedBatches).toEqual([
+      ["plan", "browser.snapshot", "mcp.postman.getCollection"]
+    ]);
+    const firstRequest = harness.completeSpy.mock.calls[0]?.[0] as ProviderRequest;
+    expect((firstRequest.tools as OpenAICompatibleToolSchema[] | undefined)?.map((tool) => tool.function.name)).toEqual([
+      "plan",
+      "browser.snapshot",
+      "mcp.postman.getCollection"
+    ]);
+    expect(JSON.stringify(firstRequest.messages)).not.toContain("Active execution plan");
+    expect(JSON.stringify(firstRequest.messages)).not.toContain("Before doing anything else");
+  });
+
+  it("does not widen the next provider inventory from Plan text", async () => {
+    const registry = new ToolRegistry();
+    const requirementTools: RegisteredTool[] = [
+      {
+        ...testTool,
+        name: "browser.snapshot",
+        riskClass: "read-only-network",
+        toolsets: ["browser"],
+        isAvailable: () => true,
+        run: async () => ({ ok: true, content: "source records" })
+      },
+      {
+        ...testTool,
+        name: "mcp.target.read",
+        riskClass: "read-only-network",
+        toolsets: ["mcp"],
+        connector: { kind: "mcp", id: "target" },
+        isAvailable: () => true,
+        run: async () => ({ ok: true, content: "target state" })
+      },
+      {
+        ...testTool,
+        name: "mcp.target.update",
+        riskClass: "external-side-effect",
+        toolsets: ["mcp"],
+        connector: { kind: "mcp", id: "target" },
+        isAvailable: () => true,
+        run: async () => ({ ok: true, content: "updated" })
+      },
+      {
+        ...testTool,
+        name: "mcp.target.verify",
+        riskClass: "read-only-network",
+        toolsets: ["mcp"],
+        connector: { kind: "mcp", id: "target" },
+        capabilityMetadata: { verification: { verifies: ["mcp.target.update"] } },
+        isAvailable: () => true,
+        run: async () => ({ ok: true, content: "verified" })
+      }
+    ];
+    for (const tool of requirementTools) registry.register(tool);
+    const planTool = {
+      ...testTool,
+      name: "plan",
+      riskClass: "read-only-local" as const,
+      toolsets: ["core" as const]
+    };
+    const catalog = buildProviderToolSchemaCatalog({ tools: [planTool, ...requirementTools] });
+    const controller = new ExecutionPlanController(
+      new ExecutionPlanStore(),
+      undefined,
+      undefined,
+      new ExecutionCapabilityPreflight({ registry })
+    );
+    const proposal = {
+      objective: "Move source records into the destination and verify the result",
+      items: [
+        { id: "inspect", content: "Inspect source records", status: "in_progress" as const },
+        { id: "read", content: "Read destination state", status: "pending" as const },
+        { id: "update", content: "Update destination state", status: "pending" as const },
+        { id: "verify", content: "Verify destination state", status: "pending" as const }
+      ],
+      requirements: [
+        { id: "source", itemId: "inspect", tool: "browser.snapshot", capability: "read" as const },
+        { id: "target-read", itemId: "read", tool: "mcp.target.read", capability: "read" as const },
+        { id: "target-update", itemId: "update", tool: "mcp.target.update", capability: "mutate" as const },
+        { id: "target-verify", itemId: "verify", tool: "mcp.target.verify", capability: "verify" as const }
+      ]
+    };
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("", [providerToolCall("call-plan", JSON.stringify({ operation: "write", ...proposal }), "plan")]),
+        providerExecution("", [providerToolCall("call-browser", "{}", "browser.snapshot")]),
+        providerExecution("Continuing with the source records.")
+      ],
+      toolSteps: [
+        {
+          executions: [{
+            ...toolExecutionForTool("call-plan", "plan", "plan accepted"),
+            tool: planTool
+          }]
+        },
+        { executions: [toolExecutionForTool("call-browser", "browser.snapshot", "source records")] },
+        {}
+      ],
+      executionPlanController: controller,
+      maxProviderIterations: 3,
+      onExecutePlans: async ({ sessionId, stepInput }) => {
+        if (stepInput.providerExecution?.toolCalls.some((call) => call.name === "plan")) {
+          await controller.write(proposal, "visible-turn", undefined, {
+            source: "provider",
+            sessionId
+          });
+        }
+      }
+    });
+    const initialTools = catalog.entries
+      .filter((entry) => entry.tool.name !== "browser.snapshot")
+      .map((entry) => entry.schema);
+
+    await runBasicProviderTurn(harness.loop, {
+      visibleTurnId: "visible-turn",
+      userText: "Move the approved records into Target and verify the result.",
+      providerTools: initialTools,
+      providerToolSchemaCatalog: catalog
+    });
+
+    const firstRequest = harness.completeSpy.mock.calls[0]?.[0] as ProviderRequest;
+    const secondRequest = harness.completeSpy.mock.calls[1]?.[0] as ProviderRequest;
+    expect((firstRequest.tools as OpenAICompatibleToolSchema[]).map((tool) => tool.function.name)).not.toContain("browser_snapshot");
+    expect((secondRequest.tools as OpenAICompatibleToolSchema[]).map((tool) => tool.function.name)).toEqual([
+      "plan",
+      "mcp_target_read",
+      "mcp_target_update",
+      "mcp_target_verify"
+    ]);
+    expect(controller.current()).not.toHaveProperty("requirements");
+    expect(controller.current()).not.toHaveProperty("capabilityPreflight");
+  });
+
+  it("keeps execution evidence out of Plan progress during standard continuation", async () => {
+    const evidence = new ExecutionEvidenceIndex();
+    const controller = new ExecutionPlanController(new ExecutionPlanStore(), undefined, evidence);
+    await controller.write({
+      objective: "Locate and verify the destination collection",
+      items: [{ id: "locate-collection", content: "Locate the destination collection", status: "in_progress" }]
+    }, "visible-turn");
+    const planTool = createPlanTools({ controller })[0]!;
+    const readExecution = toolExecutionForTool("call-read", "mcp.target.read", "raw destination payload");
+    readExecution.riskClass = "read-only-network";
+    readExecution.tool.riskClass = "read-only-network";
+    readExecution.targetSummary = "destination collection";
+    const rejectedPlanExecution = {
+      ...toolExecutionForTool("call-plan-missing", "plan", "pending"),
+      tool: { ...testTool, name: "plan", riskClass: "read-only-local" as const, toolsets: ["core" as const] }
+    };
+    const acceptedPlanExecution = {
+      ...toolExecutionForTool("call-plan-retry", "plan", "pending"),
+      tool: { ...testTool, name: "plan", riskClass: "read-only-local" as const, toolsets: ["core" as const] }
+    };
+    const missingEvidenceMerge = {
+      operation: "merge" as const,
+      items: [{ id: "locate-collection", content: "Locate the destination collection", status: "completed" as const }]
+    };
+    const repairedMerge = {
+      operation: "merge" as const,
+      items: [{
+        id: "locate-collection",
+        content: "Locate the destination collection",
+        status: "completed" as const,
+        evidenceCallIds: [] as string[]
+      }]
+    };
+    const repairedPlanCall = providerToolCall("call-plan-retry", JSON.stringify(repairedMerge), "plan");
+    let stateAfterLightweightUpdate: string | undefined;
+    let runtimeReadId: string | undefined;
+    let executionBatch = 0;
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("", [providerToolCall("call-read", "{}", "mcp.target.read")]),
+        providerExecution("", [providerToolCall("call-plan-missing", JSON.stringify(missingEvidenceMerge), "plan")]),
+        providerExecution("", [repairedPlanCall]),
+        providerExecution("Mission complete.")
+      ],
+      toolSteps: [
+        { executions: [readExecution] },
+        { executions: [rejectedPlanExecution] },
+        { executions: [acceptedPlanExecution] }
+      ],
+      executionPlanReader: controller,
+      executionPlanController: controller,
+      maxProviderIterations: 4,
+      onExecutePlans: async ({ stepInput }) => {
+        executionBatch += 1;
+        const call = stepInput.providerExecution?.toolCalls[0];
+        if (executionBatch === 1 && call?.id !== undefined) {
+          runtimeReadId = call.id;
+          readExecution.toolCallId = call.id;
+          repairedMerge.items[0]!.evidenceCallIds = [call.id];
+          repairedPlanCall.argumentsText = JSON.stringify(repairedMerge);
+          evidence.record(readExecution, "visible-turn");
+        } else if (executionBatch === 2) {
+          rejectedPlanExecution.result = await planTool.run(missingEvidenceMerge, { visibleTurnId: "visible-turn" });
+          stateAfterLightweightUpdate = controller.current()?.items[0]?.status;
+        } else if (executionBatch === 3) {
+          acceptedPlanExecution.result = await planTool.run(repairedMerge, { visibleTurnId: "visible-turn" });
+        }
+      }
+    });
+
+    await runBasicProviderTurn(harness.loop, {
+      visibleTurnId: "visible-turn",
+      userText: "Locate the destination collection and verify it.",
+      providerTools: [planProviderSchema(), toolProviderSchema("mcp.target.read")]
+    });
+
+    const continuationRequest = harness.completeSpy.mock.calls[2]?.[0] as ProviderRequest;
+    const continuationContext = JSON.stringify(continuationRequest.messages);
+    expect(continuationContext).not.toContain("completion-evidence-required");
+    expect(runtimeReadId).toMatch(/^tool-call-[a-f0-9]{24}$/u);
+    expect(continuationContext).toContain(runtimeReadId!);
+    expect(stateAfterLightweightUpdate).toBe("completed");
+    expect(controller.current()).toMatchObject({
+      status: "completed",
+      items: [{
+        id: "locate-collection",
+        status: "completed"
+      }]
+    });
+    expect(controller.current()?.items[0]).not.toHaveProperty("evidenceCallIds");
+    expect(controller.current()?.items[0]).not.toHaveProperty("evidence");
+  });
+
+  it("does not let Plan text govern runtime continuation", async () => {
+    const registry = new ToolRegistry();
+    for (const name of ["mcp.target.read", "mcp.target.verify"]) {
+      registry.register({
+        ...testTool,
+        name,
+        riskClass: "read-only-network",
+        isAvailable: () => true,
+        run: async () => ({ ok: true, content: "unused" })
+      });
+    }
+    const controller = new ExecutionPlanController(
+      new ExecutionPlanStore(),
+      undefined,
+      undefined,
+      new ExecutionCapabilityPreflight({ registry })
+    );
+    const proposal = {
+      objective: "Provision a destination from a browser source",
+      items: [
+        { id: "inspect-source", content: "Inspect source", status: "in_progress" as const },
+        { id: "update-target", content: "Update destination", status: "pending" as const },
+        { id: "verify-target", content: "Verify destination", status: "pending" as const }
+      ],
+      requirements: [
+        { id: "destination-read", itemId: "inspect-source", tool: "mcp.target.read", capability: "read" as const },
+        { id: "destination-write", itemId: "update-target", tool: "mcp.target.update", capability: "mutate" as const },
+        { id: "destination-verify", itemId: "verify-target", tool: "mcp.target.verify", capability: "verify" as const }
+      ]
+    };
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("", [providerToolCall("call-plan", JSON.stringify({ operation: "write", ...proposal }), "plan")]),
+        providerExecution("", [providerToolCall("call-browser", "{}", "browser.navigate")])
+      ],
+      toolSteps: [{
+        executions: [{
+          ...toolExecutionForTool("call-plan", "plan", "plan blocked"),
+          riskClass: "read-only-local",
+          tool: { ...testTool, name: "plan", riskClass: "read-only-local", toolsets: ["core"] }
+        }]
+      }],
+      executionPlanController: controller,
+      maxProviderIterations: 3,
+      onExecutePlans: async ({ sessionId, stepInput }) => {
+        if (stepInput.providerExecution?.toolCalls.some((call) => call.name === "plan")) {
+          await controller.write(proposal, "visible-turn", undefined, {
+            source: "provider",
+            sessionId
+          });
+        }
+      }
+    });
+
+    const result = await runBasicProviderTurn(harness.loop, {
+      visibleTurnId: "visible-turn",
+      userText: "Inspect the source, provision the destination, and verify it.",
+      providerTools: [planProviderSchema(), toolProviderSchema("browser.navigate")]
+    });
+
+    expect(harness.completeSpy).toHaveBeenCalledTimes(2);
+    expect(harness.executePlans).toHaveBeenCalledTimes(2);
+    expect(result.providerExecution?.response?.content).not.toContain("stopped before substantive work");
+    expect(controller.current()?.status).toBe("active");
+    expect(controller.current()).not.toHaveProperty("requirements");
+    expect(controller.current()).not.toHaveProperty("capabilityPreflight");
+  });
+
+  it("does not create a provisional Mission before the model's first action", async () => {
+    const controller = new ExecutionPlanController(new ExecutionPlanStore());
+    const mutationCall = providerToolCall("call-update", "{}", "mcp.postman.updateCollection");
+    const harness = await createPostToolNudgeHarness({
+      responses: [providerExecution("", [mutationCall])],
+      toolSteps: [{ executions: [toolExecutionForTool("call-update", "mcp.postman.updateCollection", "updated")] }],
+      executionPlanController: controller,
+      maxProviderIterations: 1
+    });
+
+    await runBasicProviderTurn(harness.loop, {
+      visibleTurnId: "visible-turn",
+      userText: "Update the collection and then verify the resulting state.",
+      providerTools: [planProviderSchema(), toolProviderSchema("mcp.postman.updateCollection")]
+    });
+
+    const executedBatches = harness.executePlans.mock.calls
+      .map(([call]) => call.providerExecution?.toolCalls.map((toolCall) => toolCall.name) ?? [])
+      .filter((names) => names.length > 0);
+    expect(executedBatches).toEqual([["mcp.postman.updateCollection"]]);
+    expect(harness.completeSpy).toHaveBeenCalledOnce();
+    const firstRequest = harness.completeSpy.mock.calls[0]?.[0] as ProviderRequest;
+    expect((firstRequest.tools as OpenAICompatibleToolSchema[] | undefined)?.map((tool) => tool.function.name)).toEqual([
+      "plan",
+      "mcp.postman.updateCollection"
+    ]);
+    expect(JSON.stringify(firstRequest.messages)).not.toContain("Active execution plan");
+    expect(controller.current()).toBeUndefined();
+  });
+
+  it("surfaces a trusted authentication blocker without creating a Mission", async () => {
+    const controller = new ExecutionPlanController(new ExecutionPlanStore());
+    const protectedFormExecution: ToolExecutionRecord = {
+      ...toolExecutionForTool("call-auth", "browser.fill_protected_form", "credentials not provided"),
+      result: {
+        ok: false,
+        content: "Protected form input cancelled.",
+        metadata: {
+          secureInputGroupReceipt: { status: "cancelled" }
+        }
+      }
+    };
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("", [providerToolCall("call-auth", "{}", "browser.fill_protected_form")])
+      ],
+      toolSteps: [{ executions: [protectedFormExecution] }],
+      executionPlanController: controller,
+      maxProviderIterations: 2
+    });
+
+    const result = await runBasicProviderTurn(harness.loop, {
+      visibleTurnId: "visible-auth-turn",
+      userText: "Access the developer workspace and update its Postman collection.",
+      providerTools: [planProviderSchema(), toolProviderSchema("browser.fill_protected_form")]
+    });
+
+    expect(harness.executePlans).toHaveBeenCalledTimes(1);
+    expect(result.providerExecution?.response?.content).toContain("Authentication needs your input");
+    expect(result.terminationCause).toBe("user_input_required");
+    expect(controller.current()).toBeUndefined();
+  });
+
+  it("keeps a repaired five-step MTN Mission instead of substituting the provisional fallback", async () => {
+    const controller = new ExecutionPlanController(new ExecutionPlanStore());
+    let activeSessionId: string | undefined;
+    const planTool = createPlanTools({
+      controller,
+      currentSessionId: () => {
+        if (activeSessionId === undefined) throw new Error("test session is not active");
+        return activeSessionId;
+      }
+    })[0]!;
+    const proposal = {
+      operation: "write" as const,
+      objective: "Configure approved MTN products in Postman and verify the result",
+      items: [
+        { id: "inspect", content: "Inspect the approved MTN app", status: "in_progress" as const, completionKind: "reasoning" as const },
+        { id: "products", content: "Identify MTN products", status: "pending" as const, completionKind: "reasoning" as const },
+        { id: "postman", content: "Inspect Postman", status: "pending" as const, completionKind: "reasoning" as const },
+        { id: "update", content: "Update Postman collection", status: "pending" as const, completionKind: "reasoning" as const },
+        { id: "verify", content: "Verify Postman collection", status: "pending" as const, completionKind: "reasoning" as const }
+      ]
+    };
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("", [providerToolCall("call-plan", JSON.stringify(proposal), "plan")]),
+        providerExecution("Mission is active.")
+      ],
+      toolSteps: [{
+        executions: [{
+          ...toolExecutionForTool("call-plan", "plan", "plan repaired"),
+          riskClass: "read-only-local",
+          tool: { ...testTool, name: "plan", riskClass: "read-only-local", toolsets: ["core"] }
+        }]
+      }],
+      executionPlanController: controller,
+      maxProviderIterations: 2,
+      onExecutePlans: async ({ sessionId, stepInput }) => {
+        if (!stepInput.providerExecution?.toolCalls.some((call) => call.name === "plan")) return;
+        activeSessionId = sessionId;
+        const result = await planTool.run(proposal, { visibleTurnId: "visible-turn" });
+        expect(result.ok).toBe(true);
+      }
+    });
+
+    await runBasicProviderTurn(harness.loop, {
+      visibleTurnId: "visible-turn",
+      userText: "Inspect the approved MTN app, configure all products in Postman, and verify every change.",
+      providerTools: [planProviderSchema(), toolProviderSchema("mcp.postman.updateCollection")]
+    });
+
+    expect(controller.current()).toMatchObject({
+      objective: proposal.objective,
+      originTurnId: "visible-turn",
+      items: proposal.items.map((item) => ({ id: item.id, content: item.content, status: item.status }))
+    });
+    expect(controller.current()?.items).toHaveLength(5);
+    expect(controller.current()?.items.map((item) => item.id)).not.toEqual(["execute", "verify"]);
+  });
+
+  it("does not activate a Mission for simple or read-only multi-part work", async () => {
+    const controller = new ExecutionPlanController(new ExecutionPlanStore());
+    const harness = await createPostToolNudgeHarness({
+      responses: [providerExecution("", [providerToolCall("call-nav", "{}", "browser.navigate")])],
+      toolSteps: [{ executions: [toolExecutionForTool("call-nav", "browser.navigate", "opened")] }],
+      executionPlanController: controller,
+      maxProviderIterations: 1
+    });
+
+    await runBasicProviderTurn(harness.loop, {
+      visibleTurnId: "visible-turn",
+      userText: "Open developers.mtn.com.",
+      providerTools: [planProviderSchema(), toolProviderSchema("browser.navigate")]
+    });
+
+    expect(harness.executePlans).toHaveBeenCalledTimes(1);
+    expect(controller.current()).toBeUndefined();
+  });
+
+  it("does not mutate an existing Mission while executing substantive tools", async () => {
+    const controller = new ExecutionPlanController(new ExecutionPlanStore());
+    await controller.write({
+      objective: "Existing Mission",
+      items: [{ id: "existing", content: "Keep working", status: "in_progress" }]
+    }, "older-turn");
+    const harness = await createPostToolNudgeHarness({
+      responses: [providerExecution("", [providerToolCall("call-update", "{}", "mcp.postman.updateCollection")])],
+      toolSteps: [{ executions: [toolExecutionForTool("call-update", "mcp.postman.updateCollection", "updated")] }],
+      executionPlanController: controller,
+      maxProviderIterations: 1
+    });
+
+    await runBasicProviderTurn(harness.loop, {
+      visibleTurnId: "newer-turn",
+      userText: "Update the collection and then verify the resulting state.",
+      providerTools: [planProviderSchema(), toolProviderSchema("mcp.postman.updateCollection")]
+    });
+
+    expect(controller.current()).toMatchObject({
+      objective: "Existing Mission",
+      originTurnId: "older-turn",
+      revision: 1
+    });
+  });
+
+  it("does not auto-activate when the foreground plan tool is unavailable", async () => {
+    const controller = new ExecutionPlanController(new ExecutionPlanStore());
+    const harness = await createPostToolNudgeHarness({
+      responses: [providerExecution("", [providerToolCall("call-update", "{}", "mcp.postman.updateCollection")])],
+      toolSteps: [{ executions: [toolExecutionForTool("call-update", "mcp.postman.updateCollection", "updated")] }],
+      executionPlanController: controller,
+      maxProviderIterations: 1
+    });
+
+    await runBasicProviderTurn(harness.loop, {
+      visibleTurnId: "visible-turn",
+      userText: "Update the collection and then verify the resulting state.",
+      providerTools: [toolProviderSchema("mcp.postman.updateCollection")]
+    });
+
+    expect(controller.current()).toBeUndefined();
+    expect(harness.executePlans).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not let a plan transition reset runtime tool-loop progress", async () => {
+    const planStore = new ExecutionPlanStore();
+    planStore.replace({
+      objective: "Build and verify",
+      originTurnId: "turn-progress-reset",
+      revision: 1,
+      status: "active",
+      items: [
+        { id: "build", content: "Build", status: "in_progress" },
+        { id: "verify", content: "Verify", status: "pending" }
+      ]
+    });
+    let executionCount = 0;
+    const harness = await createPostToolNudgeHarness({
+      responses: Array.from({ length: 8 }, (_, index) => providerExecution("", [
+        providerToolCall(`call-progress-${index + 1}`)
+      ])),
+      toolSteps: Array.from({ length: 8 }, (_, index) => ({
+        executions: [toolExecutionForTool(`call-progress-${index + 1}`, "web.extract", "same evidence")]
+      })),
+      executionPlanReader: planStore,
+      maxProviderIterations: 8,
+      onExecutePlans: () => {
+        executionCount += 1;
+        if (executionCount === 3) {
+          planStore.replace({
+            objective: "Build and verify",
+            originTurnId: "turn-progress-reset",
+            revision: 2,
+            status: "active",
+            items: [
+              { id: "build", content: "Build", status: "completed", evidenceCallIds: ["call-progress-3"], evidence: [{
+                toolCallId: "call-progress-3",
+                tool: "web.extract",
+                outcome: "success",
+                riskClass: "read-only-network"
+              }] },
+              { id: "verify", content: "Verify", status: "in_progress" }
+            ]
+          });
+        }
+      }
+    });
+
+    const result = await runBasicProviderTurn(harness.loop);
+
+    expect(harness.completeSpy).toHaveBeenCalledTimes(7);
+    expect(result.providerExecution?.response?.content).toContain("foreground tool loop stopped");
+    const nudgeText = "The foreground tool loop has repeated the same calls or results without material progress.";
+    const requests = harness.completeSpy.mock.calls.map(([request]) => request as ProviderRequest);
+    expect(requests.filter((request) => JSON.stringify(request.messages).includes(nudgeText))).toHaveLength(1);
+  });
+
+  it("stops before new tool work when the emergency finalization reserve is reached", async () => {
+    const planStore = new ExecutionPlanStore();
+    planStore.replace({
+      objective: "Update external state",
+      originTurnId: "turn-deadline",
+      revision: 1,
+      status: "active",
+      items: [{ id: "update", content: "Update", status: "in_progress" }]
+    });
+    const harness = await createPostToolNudgeHarness({
+      responses: [providerExecution("", [providerToolCall("call-deadline")])],
+      toolSteps: [{ executions: [toolExecutionForTool("call-deadline", "mcp.postman.updateCollection")] }],
+      executionPlanReader: planStore,
+      maxProviderWallClockMs: 100,
+      finalizationReserveMs: 20
+    });
+    let dateCalls = 0;
+    const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => {
+      dateCalls += 1;
+      return dateCalls <= 2 ? 0 : 85;
+    });
+
+    try {
+      const result = await runBasicProviderTurn(harness.loop);
+
+      expect(harness.executePlans).not.toHaveBeenCalled();
+      expect(result.providerExecution?.response?.content).toContain("emergency deadline reserve");
+      expect(result.terminationCause).toBe("deadline_reached");
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it("does not interrupt a consequential mutation merely to preserve finalization time", async () => {
+    const planStore = new ExecutionPlanStore();
+    planStore.replace({
+      objective: "Update external state",
+      originTurnId: "turn-running-mutation",
+      revision: 1,
+      status: "active",
+      items: [{ id: "update", content: "Update", status: "in_progress" }]
+    });
+    let now = 0;
+    const mutation = toolExecutionForTool(
+      "call-running-mutation",
+      "mcp.postman.updateCollection",
+      "updated"
+    );
+    mutation.riskClass = "external-side-effect";
+    mutation.tool.riskClass = "external-side-effect";
+    const harness = await createPostToolNudgeHarness({
+      responses: [providerExecution("", [providerToolCall("call-running-mutation")])],
+      toolSteps: [{ executions: [mutation] }],
+      executionPlanReader: planStore,
+      maxProviderIterations: 3,
+      maxProviderWallClockMs: 100,
+      finalizationReserveMs: 20,
+      onExecutePlans: () => {
+        now = 90;
+      }
+    });
+    const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => now);
+
+    try {
+      const result = await runBasicProviderTurn(harness.loop);
+
+      expect(harness.executePlans).toHaveBeenCalledTimes(1);
+      expect(harness.completeSpy).toHaveBeenCalledTimes(1);
+      expect(result.toolExecutions).toEqual([expect.objectContaining({
+        toolCallId: expect.stringMatching(/^tool-call-[a-f0-9]{24}$/u),
+        result: expect.objectContaining({ ok: true })
+      })]);
+      expect(result.providerExecution?.response?.content).toContain("emergency deadline reserve");
+      expect(result.terminationCause).toBe("deadline_reached");
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+
+  it("does not suspend runtime execution for a Mission-authored blocker", async () => {
+    const planStore = new ExecutionPlanStore();
+    planStore.replace({
+      objective: "Sign in and finish setup",
+      originTurnId: "turn-user-input",
+      revision: 1,
+      status: "active",
+      items: [
+        { id: "credentials", content: "Enter credentials", status: "in_progress" },
+        { id: "finish", content: "Finish setup", status: "pending" },
+      ]
+    });
+    const harness = await createPostToolNudgeHarness({
+      responses: [providerExecution("", [providerToolCall("call-inspect", "{}", "browser.snapshot")])],
+      toolSteps: [{ executions: [toolExecutionForTool("call-inspect", "browser.snapshot", "login form")] }],
+      executionPlanReader: planStore,
+      maxProviderIterations: 5,
+      onExecutePlans: () => {
+        planStore.replace({
+          objective: "Sign in and finish setup",
+          originTurnId: "turn-user-input",
+          revision: 2,
+          status: "active",
+          items: [
+            {
+              id: "credentials",
+              content: "Enter credentials",
+              status: "blocked",
+              blocker: { kind: "user_input_required", summary: "Enter the email and password in the secure prompt." }
+            },
+            { id: "finish", content: "Finish setup", status: "pending" },
+          ]
+        });
+      }
+    });
+
+    const result = await runBasicProviderTurn(harness.loop);
+
+    expect(harness.completeSpy).toHaveBeenCalledTimes(2);
+    expect(harness.executePlans).toHaveBeenCalledTimes(2);
+    expect(result.providerExecution?.response?.content).not.toContain("Mission needs your input");
+  });
+
+  it("continues normally after a failed plan update even when the optional plan is blocked", async () => {
+    const planStore = new ExecutionPlanStore();
+    planStore.replace({
+      objective: "Sign in to the correct fictional portal",
+      originTurnId: "turn-plan-repair",
+      revision: 1,
+      status: "active",
+      items: [
+        {
+          id: "credentials",
+          content: "Submit credentials",
+          status: "blocked",
+          blocker: { kind: "user_input_required", summary: "Provide the credentials." }
+        },
+        { id: "verify", content: "Verify authentication", status: "pending" }
+      ]
+    });
+    const failedPlanUpdate = toolExecutionForTool("call-plan-repair", "plan", "invalid Mission update");
+    failedPlanUpdate.result = {
+      ok: false,
+      content: "Only blocked or cancelled items may include a blocker."
+    };
+    let executionBatch = 0;
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("", [providerToolCall("call-plan-repair", "{}", "plan")]),
+        providerExecution("", [providerToolCall("call-correct-navigation", "{}", "browser.navigate")]),
+        providerExecution("Recovered on the correct fictional portal.")
+      ],
+      toolSteps: [
+        { executions: [failedPlanUpdate] },
+        { executions: [toolExecutionForTool("call-correct-navigation", "browser.navigate", "correct portal opened")] }
+      ],
+      executionPlanReader: planStore,
+      maxProviderIterations: 3,
+      onExecutePlans: () => {
+        executionBatch += 1;
+        if (executionBatch !== 2) return;
+        planStore.replace({
+          objective: "Sign in to the correct fictional portal",
+          originTurnId: "turn-plan-repair",
+          revision: 2,
+          status: "completed",
+          items: [
+            { id: "credentials", content: "Submit credentials", status: "completed" },
+            { id: "verify", content: "Verify authentication", status: "completed" }
+          ]
+        });
+      }
+    });
+
+    const result = await runBasicProviderTurn(harness.loop);
+
+    expect(harness.completeSpy).toHaveBeenCalledTimes(3);
+    expect(harness.executePlans).toHaveBeenCalledTimes(3);
+    expect(result.toolExecutions.map((execution) => execution.toolCallId)).toHaveLength(2);
+    expect(result.toolExecutions.every((execution) =>
+      /^tool-call-[a-f0-9]{24}$/u.test(execution.toolCallId ?? "")
+    )).toBe(true);
+    expect(result.providerExecution?.response?.content).toContain("Recovered on the correct fictional portal.");
+    expect(result.providerExecution?.response?.content).not.toContain("Mission needs your input");
+  });
+
+  it("uses standard tool-result continuation for repeated failed plan updates", async () => {
+    const planStore = new ExecutionPlanStore();
+    planStore.replace({
+      objective: "Recover a fictional sign-in",
+      originTurnId: "turn-bounded-plan-repair",
+      revision: 1,
+      status: "active",
+      items: [
+        {
+          id: "credentials",
+          content: "Submit credentials",
+          status: "blocked",
+          blocker: { kind: "user_input_required", summary: "Provide the credentials." }
+        },
+        { id: "verify", content: "Verify authentication", status: "pending" }
+      ]
+    });
+    const failed = (id: string) => {
+      const execution = toolExecutionForTool(id, "plan", "invalid Mission update");
+      execution.result = { ok: false, content: "Invalid Mission update." };
+      return execution;
+    };
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("", [providerToolCall("call-plan-first", "{}", "plan")]),
+        providerExecution("", [providerToolCall("call-plan-second", "{}", "plan")]),
+        providerExecution("must not run")
+      ],
+      toolSteps: [
+        { executions: [failed("call-plan-first")] },
+        { executions: [failed("call-plan-second")] }
+      ],
+      executionPlanReader: planStore,
+      maxProviderIterations: 4
+    });
+
+    const result = await runBasicProviderTurn(harness.loop);
+
+    expect(harness.completeSpy).toHaveBeenCalledTimes(3);
+    expect(result.providerExecution?.response?.content).toBe("must not run");
+  });
+
+  it("does not charge protected operator input time to the provider wall-clock budget", async () => {
+    let now = 0;
+    const handler: SecureInputRequestHandler = async () => {
+      now = 90;
+      return { status: "delivered", destinationLabel: "Verified field", persisted: false };
+    };
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("", [providerToolCall("call-protected", "{}", "browser.type")]),
+        providerExecution("Sign-in fields are ready.")
+      ],
+      toolSteps: [{ executions: [toolExecutionForTool("call-protected", "browser.type", "delivered")] }],
+      maxProviderIterations: 2,
+      maxProviderWallClockMs: 100,
+      finalizationReserveMs: 20,
+      onExecutePlans: async ({ stepInput }) => {
+        await stepInput.onSecureInputRequest?.({
+          kind: "password",
+          purpose: "Sign in",
+          destination: {
+            type: "browser-field",
+            sessionId: "browser-session",
+            ref: "@e1",
+            expectedOrigin: "https://example.com"
+          },
+          retention: "use-once"
+        }, async () => undefined);
+      }
+    });
+    const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => now);
+
+    try {
+      const result = await runBasicProviderTurn(harness.loop, { onSecureInputRequest: handler });
+
+      expect(harness.completeSpy).toHaveBeenCalledTimes(2);
+      expect(result.providerExecution?.response?.content).toContain("Sign-in fields are ready.");
+      expect(result.providerExecution?.response?.content).not.toContain("emergency deadline");
+    } finally {
+      nowSpy.mockRestore();
+    }
+  });
+  it("suppresses only a repeated whole-state observation while preserving grounded exploration", async () => {
+    const sensitivePageText = "private account marker";
+    const snapshotExecution = (id: string): ToolExecutionRecord => ({
+      ...toolExecutionForTool(id, "browser.snapshot", "Rendered browser snapshot."),
+      result: {
+        ok: true,
+        content: "Rendered browser snapshot.",
+        metadata: {
+          snapshot: {
+            sessionId: "browser-session",
+            url: "https://example.com/account",
+            title: "Account",
+            text: sensitivePageText
+          }
+        }
+      }
+    });
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("", [providerToolCall("call-snapshot-1", "{}", "browser.snapshot")]),
+        providerExecution("", [providerToolCall("call-snapshot-2", "{}", "browser.snapshot")]),
+        providerExecution("I will use a different grounded inspection before acting.")
+      ],
+      toolSteps: [
+        { executions: [snapshotExecution("call-snapshot-1")] },
+        { executions: [snapshotExecution("call-snapshot-2")] }
+      ],
+      maxProviderIterations: 4
+    });
+    const events: RuntimeEvent[] = [];
+
+    const providerTools = [
+      "browser_snapshot",
+      "browser_find",
+      "browser_extract",
+      "browser_screenshot",
+      "browser_console",
+      "browser_cdp",
+      "browser_click",
+      "browser_scroll",
+      "browser_tabs",
+      "browser_switch_tab",
+      "browser_dialog",
+      "browser_back",
+      "browser_navigate",
+      "browser_press",
+      "browser_type",
+      "browser_fill_protected_form",
+      "browser_select",
+      "mcp_postman_updateCollection"
+    ].map(toolProviderSchema);
+    const result = await runBasicProviderTurn(harness.loop, {
+      onEvent: (event) => events.push(event),
+      providerTools
+    });
+
+    expect(harness.completeSpy).toHaveBeenCalledTimes(3);
+    expect(result.iterations).toBe(3);
+    expect(result.providerExecution?.response?.content).toBe(
+      "I will use a different grounded inspection before acting."
+    );
+    expect(result.terminationCause).toBe("normal");
+
+    const requests = harness.completeSpy.mock.calls.map(([request]) => request as ProviderRequest);
+    const nudge = EXECUTION_SUPERVISION_PROMPTS.browserEvidence;
+    expect(requests.filter((request) => JSON.stringify(request.messages).includes(nudge))).toHaveLength(1);
+    const recoveryRequest = requests[2]!;
+    const recoveryTools = (recoveryRequest.tools as OpenAICompatibleToolSchema[])
+      .map((tool) => tool.function.name);
+    expect(recoveryTools).not.toContain("browser_snapshot");
+    expect(recoveryTools).toContain("browser_find");
+    expect(recoveryTools).toContain("browser_extract");
+    expect(recoveryTools).toContain("browser_click");
+    expect(recoveryTools).toContain("browser_tabs");
+    expect(recoveryTools).toContain("mcp_postman_updateCollection");
+    expect(events).not.toContainEqual(expect.objectContaining({
+      kind: "provider-budget-exhausted",
+      budget: "repeated-browser-observations"
+    }));
+    expect(JSON.stringify(requests)).not.toContain(sensitivePageText);
+  });
+
+  it("allows find, structural snapshot, no-change repair, bounded retarget, and a different grounded action", async () => {
+    const onApprovalRequest = vi.fn(async () => "approved" as const);
+    const findResult: ToolExecutionRecord = {
+      ...toolExecutionForTool("call-find", "browser.find", "No exact clickable match."),
+      result: {
+        ok: true,
+        content: "No exact clickable match.",
+        metadata: {
+          status: "not-found",
+          tabRef: "@t1",
+          identity: { documentEpoch: 1, actionRevision: 1, observationId: 1 },
+          candidates: [],
+          nearbyCandidates: [{
+            ref: "@e7",
+            role: "button",
+            name: "Edit",
+            regionText: "TikTok Connect Callback URL Edit Delete"
+          }]
+        }
+      }
+    };
+    const structuralSnapshot: ToolExecutionRecord = {
+      ...toolExecutionForTool("call-snapshot", "browser.snapshot", "Rendered app controls."),
+      result: {
+        ok: true,
+        content: "Rendered app controls.",
+        metadata: {
+          snapshot: {
+            sessionId: "browser-session",
+            url: "https://example.com/apps",
+            title: "Apps",
+            text: "TikTok Connect",
+            identity: { documentEpoch: 1, actionRevision: 2, observationId: 2 },
+            elements: [
+              { ref: "@e6", role: "link", name: "Callback URL", regionText: "TikTok Connect Callback URL Edit Delete" },
+              { ref: "@e7", role: "button", name: "Edit", regionText: "TikTok Connect Callback URL Edit Delete" },
+              { ref: "@e8", role: "button", name: "Delete", regionText: "TikTok Connect Callback URL Edit Delete" }
+            ]
+          }
+        }
+      }
+    };
+    const noChangeClick: ToolExecutionRecord = {
+      ...toolExecutionForTool("call-callback", "browser.click", "The action was dispatched but the page did not change."),
+      input: { ref: "@e6", tabRef: "@t1" },
+      targetKey: "browser:browser-session:@t1:@e6",
+      result: {
+        ok: true,
+        content: "The action was dispatched but the page did not change.",
+        metadata: {
+          snapshot: {
+            sessionId: "browser-session",
+            url: "https://example.com/apps",
+            actionDelta: { outcome: "no-change", actionDispatched: true }
+          }
+        }
+      }
+    };
+    const failedRetarget: ToolExecutionRecord = {
+      ...toolExecutionForTool("call-missing", "browser.click", "Browser target was not found."),
+      input: { locator: { text: "TikTok Connect" }, tabRef: "@t1" },
+      targetKey: "browser:browser-session:@t1:text:TikTok Connect",
+      result: {
+        ok: false,
+        content: "Browser target was not found. No action was dispatched.",
+        metadata: { reason: "browser-target-not-found", actionDispatched: false }
+      }
+    };
+    const changedClick: ToolExecutionRecord = {
+      ...toolExecutionForTool("call-edit", "browser.click", "App editor opened."),
+      input: { ref: "@e7", tabRef: "@t1" },
+      targetKey: "browser:browser-session:@t1:@e7",
+      result: {
+        ok: true,
+        content: "App editor opened.",
+        metadata: {
+          snapshot: {
+            sessionId: "browser-session",
+            url: "https://example.com/apps/tiktok",
+            actionDelta: { outcome: "changed", actionDispatched: true }
+          }
+        }
+      }
+    };
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("", [providerToolCall("call-find", JSON.stringify({ text: "TikTok Connect" }), "browser.find")]),
+        providerExecution("", [providerToolCall("call-snapshot", "{}", "browser.snapshot")]),
+        providerExecution("", [providerToolCall("call-callback", JSON.stringify({ ref: "@e6", tabRef: "@t1" }), "browser.click")]),
+        providerExecution("", [providerToolCall("call-missing", JSON.stringify({ locator: { text: "TikTok Connect" }, tabRef: "@t1" }), "browser.click")]),
+        providerExecution("", [providerToolCall("call-edit", JSON.stringify({ ref: "@e7", tabRef: "@t1" }), "browser.click")]),
+        providerExecution("Recovered after opening the grounded app editor.")
+      ],
+      toolSteps: [
+        { executions: [findResult] },
+        { executions: [structuralSnapshot] },
+        { executions: [noChangeClick] },
+        { executions: [failedRetarget] },
+        { executions: [changedClick] }
+      ],
+      maxProviderIterations: 7
+    });
+    const providerTools = [
+      "browser.snapshot",
+      "browser.find",
+      "browser.extract",
+      "browser.click",
+      "browser.scroll",
+      "browser.tabs",
+      "browser.switch_tab",
+      "mcp.postman.updateCollection"
+    ].map(toolProviderSchema);
+
+    const result = await runBasicProviderTurn(harness.loop, { providerTools, onApprovalRequest });
+    const requests = harness.completeSpy.mock.calls.map(([request]) => request as ProviderRequest);
+    const afterNoChangeTools = (requests[3]!.tools as OpenAICompatibleToolSchema[]).map((tool) => tool.function.name);
+    const afterTargetFailureTools = (requests[4]!.tools as OpenAICompatibleToolSchema[]).map((tool) => tool.function.name);
+
+    expect(result.terminationCause).toBe("normal");
+    expect(result.providerExecution?.response?.content).toBe("Recovered after opening the grounded app editor.");
+    expect(afterNoChangeTools).toEqual(providerTools.map((tool) => tool.function.name));
+    expect(afterTargetFailureTools).toEqual(providerTools.map((tool) => tool.function.name));
+    expect(JSON.stringify(requests[3]!.messages)).toContain("same strategy and semantic outcome");
+    expect(JSON.stringify(requests[4]!.messages)).toContain("call browser.snapshot for fresh refs");
+    expect(harness.executePlans.mock.calls[4]?.[0].onApprovalRequest).toBe(onApprovalRequest);
+    expect(harness.executePlans.mock.calls[4]?.[0].providerExecution?.toolCalls[0]?.argumentsText).toBe(
+      JSON.stringify({ ref: "@e7", tabRef: "@t1" })
+    );
+  });
+
+  it("expands the active browser toolbox once after authoritative visual-escalation evidence", async () => {
+    const noChangeClick: ToolExecutionRecord = {
+      ...toolExecutionForTool("call-click", "browser.click", "The action was dispatched but the page did not change."),
+      input: { ref: "@e6", tabRef: "@t1" },
+      targetKey: "browser:browser-session:@t1:@e6",
+      result: {
+        ok: true,
+        content: "The action was dispatched but the page did not change.",
+        metadata: {
+          snapshot: {
+            sessionId: "browser-session",
+            url: "https://example.com/apps",
+            actionDelta: { outcome: "no-change", actionDispatched: true }
+          }
+        }
+      }
+    };
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("", [providerToolCall("call-click", JSON.stringify({ ref: "@e6", tabRef: "@t1" }), "browser.click")]),
+        providerExecution("Recovered with visual inspection.")
+      ],
+      toolSteps: [{ executions: [noChangeClick] }],
+      maxProviderIterations: 3
+    });
+    const events: RuntimeEvent[] = [];
+    await runBasicProviderTurn(harness.loop, {
+      providerTools: [toolProviderSchema("browser_click")],
+      toolExpansionCandidates: [{
+        toolName: "browser.vision",
+        source: "active-browser",
+        schema: toolProviderSchema("browser_vision")
+      }],
+      onEvent: (event) => events.push(event)
+    });
+
+    const requests = harness.completeSpy.mock.calls.map(([request]) => request as ProviderRequest);
+    expect((requests[0]?.tools as OpenAICompatibleToolSchema[]).map((tool) => tool.function.name))
+      .toEqual(["browser_click"]);
+    expect((requests[1]?.tools as OpenAICompatibleToolSchema[]).map((tool) => tool.function.name))
+      .toEqual(["browser_click", "browser_vision"]);
+    expect(events).toContainEqual(expect.objectContaining({
+      kind: "provider-tool-inventory",
+      phase: "expanded",
+      addedTools: ["browser_vision"],
+      expansionReason: "browser:native-action-no-change"
+    }));
+    const persisted = await harness.sessionDb.listEvents(harness.sessionId);
+    expect(persisted.filter((event) => event.kind === "provider-tool-inventory")).toHaveLength(1);
+  });
+
+  it("does not record an expansion when no provider iteration remains to receive it", async () => {
+    const noChangeClick: ToolExecutionRecord = {
+      ...toolExecutionForTool("call-click", "browser.click", "The action was dispatched but the page did not change."),
+      input: { ref: "@e6", tabRef: "@t1" },
+      targetKey: "browser:browser-session:@t1:@e6",
+      result: {
+        ok: true,
+        content: "The action was dispatched but the page did not change.",
+        metadata: {
+          snapshot: {
+            sessionId: "browser-session",
+            url: "https://example.com/apps",
+            actionDelta: { outcome: "no-change", actionDispatched: true }
+          }
+        }
+      }
+    };
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("", [providerToolCall("call-click", JSON.stringify({ ref: "@e6", tabRef: "@t1" }), "browser.click")])
+      ],
+      toolSteps: [{ executions: [noChangeClick] }],
+      maxProviderIterations: 1
+    });
+    const events: RuntimeEvent[] = [];
+
+    await runBasicProviderTurn(harness.loop, {
+      providerTools: [toolProviderSchema("browser_click")],
+      toolExpansionCandidates: [{
+        toolName: "browser.vision",
+        source: "active-browser",
+        schema: toolProviderSchema("browser_vision")
+      }],
+      onEvent: (event) => events.push(event)
+    });
+
+    expect(harness.completeSpy).toHaveBeenCalledTimes(1);
+    expect(events).not.toContainEqual(expect.objectContaining({
+      kind: "provider-tool-inventory",
+      phase: "expanded"
+    }));
+    const persisted = await harness.sessionDb.listEvents(harness.sessionId);
+    expect(persisted.filter((event) => event.kind === "provider-tool-inventory")).toHaveLength(0);
+  });
+
+  it("stops a repeated unresolved target after one bounded retargeting opportunity", async () => {
+    const missingTarget = (id: string): ToolExecutionRecord => ({
+      ...toolExecutionForTool(id, "browser.click", "Browser target was not found."),
+      input: { locator: { text: "Missing control" }, tabRef: "@t1" },
+      targetKey: "browser:browser-session:@t1:text:Missing control",
+      result: {
+        ok: false,
+        content: "Browser target was not found. No action was dispatched.",
+        metadata: { reason: "browser-target-not-found", actionDispatched: false }
+      }
+    });
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("", [providerToolCall("call-missing-1", JSON.stringify({ locator: { text: "Missing control" }, tabRef: "@t1" }), "browser.click")]),
+        providerExecution("", [providerToolCall("call-missing-2", JSON.stringify({ locator: { text: "Missing control" }, tabRef: "@t1" }), "browser.click")]),
+        providerExecution("This response must not be reached.")
+      ],
+      toolSteps: [
+        { executions: [missingTarget("call-missing-1")] },
+        { executions: [missingTarget("call-missing-2")] }
+      ],
+      maxProviderIterations: 4
+    });
+    const providerTools = [
+      "browser.snapshot",
+      "browser.find",
+      "browser.click",
+      "browser.tabs",
+      "browser.switch_tab"
+    ].map(toolProviderSchema);
+
+    const result = await runBasicProviderTurn(harness.loop, { providerTools });
+    const requests = harness.completeSpy.mock.calls.map(([request]) => request as ProviderRequest);
+
+    expect(harness.completeSpy).toHaveBeenCalledTimes(2);
+    expect(JSON.stringify(requests[1]!.messages)).toContain("call browser.snapshot for fresh refs");
+    expect((requests[1]!.tools as OpenAICompatibleToolSchema[]).map((tool) => tool.function.name))
+      .toEqual(providerTools.map((tool) => tool.function.name));
+    expect(result.terminationCause).toBe("browser_no_progress");
+    expect(result.providerExecution?.response?.content).toContain("ineffective target was repeated");
+  });
+
+  it("continues independent connector work after two stale undispatched downloads", async () => {
+    const input = { ref: "@e17", tabRef: "@t7", identity: { documentEpoch: 21, actionRevision: 60, observationId: 138 } };
+    const stale = (id: string): ToolExecutionRecord => ({
+      ...toolExecutionForTool(id, "browser.download", "Stale download reference."), input,
+      result: { ok: false, content: "No download dispatched. Refresh refs before retrying.", metadata: {
+        reason: "stale-browser-ref", actionDispatched: false,
+        currentIdentity: { documentEpoch: 21, actionRevision: 61, observationId: 139 }
+      } }
+    });
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("", [providerToolCall("stale-1", JSON.stringify(input), "browser.download")]),
+        providerExecution("", [providerToolCall("stale-2", JSON.stringify(input), "browser.download")]),
+        providerExecution("I will finish independent readback.", [providerToolCall("read-independent", "{}", "mcp.destination.getEnvironment")]),
+        providerExecution("Destination readback completed. One product download remains unfinished.")
+      ],
+      toolSteps: [
+        { executions: [stale("stale-1")] },
+        { executions: [stale("stale-2")] },
+        { executions: [toolExecutionForTool("read-independent", "mcp.destination.getEnvironment", "Environment metadata verified.")] }
+      ],
+      maxProviderIterations: 5
+    });
+    const result = await runBasicProviderTurn(harness.loop, { providerTools: [
+      toolProviderSchema("browser_download"), toolProviderSchema("browser_snapshot"),
+      toolProviderSchema("mcp_destination_getEnvironment")
+    ] });
+    expect(harness.completeSpy).toHaveBeenCalledTimes(4);
+    expect(result.terminationCause).toBe("normal");
+    expect(result.providerExecution?.response?.content).toContain("remains unfinished");
+    const request = harness.completeSpy.mock.calls[2]![0] as ProviderRequest;
+    expect(JSON.stringify(request.messages)).toContain("continue independent work");
+    expect((request.tools as OpenAICompatibleToolSchema[]).map((tool) => tool.function.name))
+      .toContain("mcp_destination_getEnvironment");
+  });
+
   it("stops before a substitute continuation when a delegated Task owns the answer", async () => {
+    const activePlan = new ExecutionPlanStore();
+    activePlan.replace({
+      objective: "Delegate the work",
+      originTurnId: "turn-delegate",
+      revision: 1,
+      status: "active",
+      items: [{ id: "delegate", content: "Delegate the work", status: "in_progress" }]
+    });
     const delegation = {
       ...toolExecutionForTool("call-delegate", "delegate_task", "Created durable Task task-owned."),
       riskClass: "shared-state-mutation" as const,
@@ -1538,7 +4018,8 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
         }]),
         providerExecution("The workers have not returned, but here is my direct synthesis.")
       ],
-      toolSteps: [{ executions: [delegation] }]
+      toolSteps: [{ executions: [delegation] }],
+      executionPlanReader: activePlan
     });
 
     const result = await runBasicProviderTurn(harness.loop);
@@ -1624,7 +4105,8 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
         {}
       ],
       maxProviderIterations: 1,
-      onExecutePlans: async ({ sessionDb, sessionId }) => {
+      onExecutePlans: async ({ sessionDb, sessionId, stepInput }) => {
+        const runtimeId = stepInput.providerExecution?.toolCalls[0]?.id;
         const messages = await sessionDb.listMessages(sessionId);
         expect(messages).toContainEqual(expect.objectContaining({
           role: "agent",
@@ -1633,7 +4115,7 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
             nativeReplaySafe: true,
             providerToolCalls: [
               {
-                id: "call-before-exec",
+                id: runtimeId,
                 name: testTool.name,
                 argumentsText: "{}"
               }
@@ -1662,6 +4144,7 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     await runBasicProviderTurn(harness.loop);
 
     const messages = await harness.sessionDb.listMessages(harness.sessionId);
+    const runtimeId = harness.executePlans.mock.calls[0]?.[0].providerExecution?.toolCalls[0]?.id;
     expect(messages).toContainEqual(expect.objectContaining({
       role: "agent",
       content: "I'll look that up.",
@@ -1669,7 +4152,7 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
         kind: "provider-tool-call-turn",
         providerToolCalls: [
           {
-            id: "call-content",
+            id: runtimeId,
             name: testTool.name,
             argumentsText: "{\"query\":\"docs\"}"
           }
@@ -1678,11 +4161,7 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     }));
   });
 
-  it("requires vision for image-bearing continuation requests", async () => {
-    const dir = mkdtempSync(join(tmpdir(), "estacoda-provider-turn-vision-"));
-    const imagePath = join(dir, "image.png");
-    writeFileSync(imagePath, Buffer.from("fake-png"));
-
+  it("uses initial ephemeral images once and post-tool images on continuation", async () => {
     const visionModel: ModelProfile = {
       ...mockModel,
       supportsVision: true
@@ -1691,43 +4170,50 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
       ...primaryRoute,
       profile: visionModel
     };
-    const attachment: ChannelAttachment = {
-      id: "image-1",
-      kind: "image",
-      status: "ready",
-      localPath: imagePath,
-      bytes: 8
-    };
+    const initialExecution = toolExecutionForTool("initial-image", "vision.analyze");
+    initialExecution.result = attachEphemeralVisionImages(initialExecution.result!, [{
+      content: { type: "image_url", image_url: { url: "data:image/png;base64,aW5pdGlhbA==" } },
+      usage: { width: 10, height: 20, detail: "auto" },
+      delivery: "initial"
+    }]);
+    const continuationExecution = toolExecutionForTool("call-image", "vision.analyze");
+    continuationExecution.result = attachEphemeralVisionImages(continuationExecution.result!, [{
+      content: { type: "image_url", image_url: { url: "data:image/png;base64,Y29udGludWF0aW9u" } },
+      usage: { width: 30, height: 40, detail: "auto" },
+      delivery: "continuation"
+    }]);
+    const harness = await createPostToolNudgeHarness({
+      model: visionModel,
+      primaryModelRoute: visionPrimaryRoute,
+      responses: [
+        providerExecution("", [providerToolCall("call-image")]),
+        providerExecution("final answer")
+      ],
+      toolSteps: [{ executions: [continuationExecution] }],
+      maxProviderIterations: 2
+    });
 
-    try {
-      const harness = await createPostToolNudgeHarness({
-        model: visionModel,
-        primaryModelRoute: visionPrimaryRoute,
-        responses: [
-          providerExecution("", [providerToolCall("call-image")]),
-          providerExecution("final answer")
-        ],
-        toolSteps: [
-          {
-            executions: [toolExecution("call-image")]
-          }
-        ],
-        maxProviderIterations: 2
-      });
+    await runBasicProviderTurn(harness.loop, { toolExecutions: [initialExecution] });
 
-      await runBasicProviderTurn(harness.loop, { attachments: [attachment] });
-
-      expect(harness.completeSpy).toHaveBeenCalledTimes(2);
-      const initialPreferences = harness.completeSpy.mock.calls[0]![1] as { requireVision?: boolean };
-      const continuationPreferences = harness.completeSpy.mock.calls[1]![1] as { requireVision?: boolean };
-      expect(initialPreferences.requireVision).toBe(true);
-      expect(continuationPreferences.requireVision).toBe(true);
-    } finally {
-      rmSync(dir, { recursive: true, force: true });
-    }
+    expect(harness.completeSpy).toHaveBeenCalledTimes(2);
+    const initialRequest = harness.completeSpy.mock.calls[0]![0] as ProviderRequest;
+    const continuationRequest = harness.completeSpy.mock.calls[1]![0] as ProviderRequest;
+    expect(JSON.stringify(initialRequest.messages)).toContain("aW5pdGlhbA==");
+    expect(JSON.stringify(initialRequest.messages)).not.toContain("Y29udGludWF0aW9u");
+    expect(JSON.stringify(continuationRequest.messages)).toContain("Y29udGludWF0aW9u");
+    expect(JSON.stringify(continuationRequest.messages)).not.toContain("aW5pdGlhbA==");
+    expect((harness.completeSpy.mock.calls[0]![1] as { requireVision?: boolean }).requireVision).toBe(true);
+    expect((harness.completeSpy.mock.calls[1]![1] as { requireVision?: boolean }).requireVision).toBe(true);
+    expect(harness.completeSpy.mock.calls[0]![2]?.usage?.imageInputs).toEqual([
+      { width: 10, height: 20, detail: "auto" }
+    ]);
+    expect(harness.completeSpy.mock.calls[1]![2]?.usage?.imageInputs).toEqual([
+      { width: 30, height: 40, detail: "auto" }
+    ]);
   });
 
   it("uses structured native history for supported post-tool continuation", async () => {
+    let liveRuntimeId: string | undefined;
     const harness = await createPostToolNudgeHarness({
       primaryModelRoute: nativeHistoryRoute,
       responses: [
@@ -1739,13 +4225,15 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
           executions: [toolExecution("call-live", "live tool result")]
         }
       ],
-      onExecutePlans: async ({ sessionDb, sessionId }) => {
+      onExecutePlans: async ({ sessionDb, sessionId, stepInput }) => {
+        const runtimeId = stepInput.providerExecution?.toolCalls[0]?.id;
+        if (runtimeId !== undefined) liveRuntimeId = runtimeId;
         await sessionDb.appendMessage({
           sessionId,
           role: "tool",
           content: "live tool result",
           metadata: {
-            tool_call_id: "call-live",
+            tool_call_id: liveRuntimeId,
             tool_call_name: testTool.name
           }
         });
@@ -1754,6 +4242,7 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
 
     await runBasicProviderTurn(harness.loop);
 
+    expect(liveRuntimeId).toMatch(/^tool-call-[a-f0-9]{24}$/u);
     const continuationRequest = harness.completeSpy.mock.calls[1]?.[0] as ProviderRequest;
     expect(continuationRequest.messages.at(-1)?.role).toBe("user");
     expect(JSON.stringify(continuationRequest.messages.at(-1)?.content)).toContain("EstaCoda executed the requested tools.");
@@ -1762,7 +4251,7 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
         role: "assistant",
         toolCalls: [
           {
-            id: "call-live",
+            id: liveRuntimeId,
             name: testTool.name,
             argumentsText: "{}"
           }
@@ -1770,12 +4259,12 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
       }),
       expect.objectContaining({
         role: "tool",
-        toolCallId: "call-live",
+        toolCallId: liveRuntimeId,
         content: expect.stringContaining("live tool result")
       })
     ]));
     const liveReplayToolMessage = continuationRequest.messages.find((message) =>
-      message.role === "tool" && message.toolCallId === "call-live"
+      message.role === "tool" && message.toolCallId === liveRuntimeId
     );
     expect(String(liveReplayToolMessage?.content)).toContain("[Historical tool result from ");
     expect(String(liveReplayToolMessage?.content)).toContain("via test.tool; reference only.");
@@ -1810,13 +4299,13 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
           executions: [toolExecution("call-flat", "flat tool result")]
         }
       ],
-      onExecutePlans: async ({ sessionDb, sessionId }) => {
+      onExecutePlans: async ({ sessionDb, sessionId, stepInput }) => {
         await sessionDb.appendMessage({
           sessionId,
           role: "tool",
           content: "flat tool result",
           metadata: {
-            tool_call_id: "call-flat",
+            tool_call_id: stepInput.providerExecution?.toolCalls[0]?.id,
             tool_call_name: testTool.name
           }
         });
@@ -1838,13 +4327,12 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     ]));
   });
 
-  it("normalizes missing stable tool-call IDs before persistence and planning", async () => {
+  it("assigns a runtime-owned tool-call ID before persistence and planning", async () => {
     const toolCall = {
       index: 0,
       name: testTool.name,
       argumentsText: "{\"path\":\"src/index.ts\"}"
     };
-    const expectedId = stableToolCallId(toolCall);
     const harness = await createPostToolNudgeHarness({
       responses: [
         providerExecution("", [toolCall])
@@ -1859,16 +4347,79 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
 
     const messages = await harness.sessionDb.listMessages(harness.sessionId);
     const persistedTurn = messages.find((message) => message.metadata?.kind === "provider-tool-call-turn");
+    const persistedId = (persistedTurn?.metadata?.providerToolCalls as Array<{ id?: string }> | undefined)?.[0]?.id;
+    expect(persistedId).toMatch(/^tool-call-[a-f0-9]{24}$/u);
     expect(persistedTurn?.metadata?.providerToolCalls).toEqual([
-      {
-        id: expectedId,
+      expect.objectContaining({
+        id: persistedId,
         name: testTool.name,
         argumentsText: "{\"path\":\"src/index.ts\"}"
-      }
+      })
     ]);
     expect(harness.executePlans.mock.calls[0]?.[0].providerExecution?.toolCalls).toEqual([
-      expect.objectContaining({ id: expectedId })
+      expect.objectContaining({ id: persistedId })
     ]);
+  });
+
+  it("namespaces repeated provider IDs across iterations and preserves both calls", async () => {
+    const firstExecution = toolExecution("browser_download_1", "first download");
+    const secondExecution = toolExecution("browser_download_1", "second download");
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("", [providerToolCall("browser_download_1")]),
+        providerExecution("", [providerToolCall("browser_download_1")]),
+        providerExecution("done")
+      ],
+      toolSteps: [
+        { executions: [firstExecution] },
+        { executions: [secondExecution] }
+      ],
+      maxProviderIterations: 3
+    });
+
+    const result = await runBasicProviderTurn(harness.loop);
+    const runtimeIds = harness.executePlans.mock.calls
+      .slice(0, 2)
+      .map(([stepInput]) => stepInput.providerExecution?.toolCalls[0]?.id);
+    const persistedTurns = (await harness.sessionDb.listMessages(harness.sessionId))
+      .filter((message) => message.metadata?.kind === "provider-tool-call-turn");
+
+    expect(runtimeIds).toHaveLength(2);
+    expect(runtimeIds.every((id) => /^tool-call-[a-f0-9]{24}$/u.test(id ?? ""))).toBe(true);
+    expect(new Set(runtimeIds).size).toBe(2);
+    expect(JSON.stringify(runtimeIds)).not.toContain("browser_download_1");
+    expect(result.toolExecutions.map((execution) => execution.toolCallId)).toEqual(runtimeIds);
+    expect(persistedTurns.map((message) =>
+      (message.metadata?.providerToolCalls as Array<{ id: string }>)[0]?.id
+    )).toEqual(runtimeIds);
+  });
+
+  it("namespaces identical calls without provider IDs across iterations", async () => {
+    const anonymousCall = {
+      index: 0,
+      name: testTool.name,
+      argumentsText: "{}"
+    };
+    const harness = await createPostToolNudgeHarness({
+      responses: [
+        providerExecution("", [{ ...anonymousCall }]),
+        providerExecution("", [{ ...anonymousCall }]),
+        providerExecution("done")
+      ],
+      toolSteps: [
+        { executions: [toolExecution("anonymous-one")] },
+        { executions: [toolExecution("anonymous-two")] }
+      ],
+      maxProviderIterations: 3
+    });
+
+    await runBasicProviderTurn(harness.loop);
+    const runtimeIds = harness.executePlans.mock.calls
+      .slice(0, 2)
+      .map(([stepInput]) => stepInput.providerExecution?.toolCalls[0]?.id);
+
+    expect(runtimeIds.every((id) => /^tool-call-[a-f0-9]{24}$/u.test(id ?? ""))).toBe(true);
+    expect(new Set(runtimeIds).size).toBe(2);
   });
 
   it("marks secret-bearing arguments unsafe and omits faithful arguments", async () => {
@@ -1886,11 +4437,13 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
 
     const messages = await harness.sessionDb.listMessages(harness.sessionId);
     const persisted = messages.find((message) => message.metadata?.kind === "provider-tool-call-turn");
+    const persistedId = (persisted?.metadata?.providerToolCalls as Array<{ id?: string }> | undefined)?.[0]?.id;
+    expect(persistedId).toMatch(/^tool-call-[a-f0-9]{24}$/u);
     expect(persisted?.metadata).toEqual(expect.objectContaining({
       nativeReplaySafe: false,
       providerToolCalls: [
         {
-          id: "call-secret",
+          id: persistedId,
           name: testTool.name,
           argumentsRedacted: true
         }
@@ -1940,6 +4493,8 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
 
     const messages = await harness.sessionDb.listMessages(harness.sessionId);
     const persisted = messages.find((message) => message.metadata?.kind === "provider-tool-call-turn");
+    const runtimeId = (persisted?.metadata?.providerToolCalls as Array<{ id?: string }> | undefined)?.[0]?.id;
+    expect(runtimeId).toMatch(/^tool-call-[a-f0-9]{24}$/u);
     expect(persisted?.metadata).toEqual(expect.objectContaining({
       nativeReplaySafe: true,
       providerReplayEcho: {
@@ -1985,6 +4540,8 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
 
     const messages = await harness.sessionDb.listMessages(harness.sessionId);
     const persisted = messages.find((message) => message.metadata?.kind === "provider-tool-call-turn");
+    const runtimeId = (persisted?.metadata?.providerToolCalls as Array<{ id?: string }> | undefined)?.[0]?.id;
+    expect(runtimeId).toMatch(/^tool-call-[a-f0-9]{24}$/u);
     expect(persisted?.metadata).toEqual(expect.objectContaining({
       nativeReplaySafe: true,
       provider: "deepseek",
@@ -1993,7 +4550,7 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
       attemptedRouteIndex: 0,
       providerToolCalls: [
         {
-          id: "call-protocol-echo",
+          id: runtimeId,
           name: testTool.name,
           argumentsText: "{}"
         }
@@ -2516,7 +5073,7 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     const nudgeToolRunInput = harness.executePlans.mock.calls[2]?.[0];
     expect(nudgeToolRunInput).toBeDefined();
     expect(nudgeToolRunInput?.providerExecution?.toolCalls).toEqual([
-      expect.objectContaining({ id: "call-nudge" })
+      expect.objectContaining({ id: expect.stringMatching(/^tool-call-[a-f0-9]{24}$/u) })
     ]);
     expect(result.toolExecutions).toContain(nudgeToolExecution);
   });
@@ -2843,7 +5400,7 @@ describe("ProviderTurnLoop reasoning-only response recovery", () => {
 
       expect(result.iterations).toBe(1);
       expect(harness.completeSpy).toHaveBeenCalledTimes(1);
-      expect(result.providerExecution?.response?.content).toBe("");
+      expect(result.providerExecution?.response?.content).toContain("emergency deadline reserve");
       expect(harness.executePlans).not.toHaveBeenCalled();
     } finally {
       nowSpy.mockRestore();
@@ -3125,6 +5682,7 @@ describe("ProviderTurnLoop length-truncated text continuation", () => {
       reason: "provider_length",
       attempts: 3,
       exhausted: true,
+      exhaustionCause: "budget_exhausted",
       initialFinishReason: "length",
       finalFinishReason: "length"
     });
@@ -3299,10 +5857,12 @@ describe("ProviderTurnLoop length-truncated text continuation", () => {
     expect(result.iterations).toBe(1);
     expect(harness.completeSpy).toHaveBeenCalledTimes(1);
     expect(result.providerExecution?.response?.content).toBe("Partial answer");
+    expect(result.terminationCause).toBe("budget_exhausted");
     expect(result.providerExecution?.runtimeMetadata?.continuation).toEqual({
       reason: "provider_length",
       attempts: 0,
       exhausted: true,
+      exhaustionCause: "budget_exhausted",
       initialFinishReason: "length",
       finalFinishReason: "length"
     });
@@ -3471,11 +6031,13 @@ describe("ProviderTurnLoop truncated tool-call safety", () => {
     } });
 
     expect(result.iterations).toBe(2);
-    expect(result.toolExecutions.map((execution) => execution.toolCallId)).toEqual(["retry-call"]);
+    expect(result.toolExecutions.map((execution) => execution.toolCallId)).toEqual([
+      expect.stringMatching(/^tool-call-[a-f0-9]{24}$/u)
+    ]);
     expect(harness.completeSpy).toHaveBeenCalledTimes(2);
     expect(harness.executePlans).toHaveBeenCalledTimes(1);
     expect(harness.executePlans.mock.calls[0]![0].providerExecution!.toolCalls).toEqual([
-      expect.objectContaining({ id: "retry-call" })
+      expect.objectContaining({ id: expect.stringMatching(/^tool-call-[a-f0-9]{24}$/u) })
     ]);
     expect(harness.completeSpy.mock.calls[1]![0].maxTokens).toBe(8192);
     expect(harness.completeSpy.mock.calls[1]![0].messages).toEqual(harness.completeSpy.mock.calls[0]![0].messages);
@@ -3483,7 +6045,7 @@ describe("ProviderTurnLoop truncated tool-call safety", () => {
     expect(retryOptions.primaryRoute).toEqual(primaryRoute);
     expect(retryOptions.fallbackChain).toEqual([fallbackRoute]);
     expect(result.providerExecution?.toolCalls).toEqual([
-      expect.objectContaining({ id: "retry-call" })
+      expect.objectContaining({ id: expect.stringMatching(/^tool-call-[a-f0-9]{24}$/u) })
     ]);
     expect(result.providerExecution?.attempts).toHaveLength(2);
     expect(result.providerExecution?.runtimeMetadata?.truncation).toEqual({
@@ -3494,7 +6056,7 @@ describe("ProviderTurnLoop truncated tool-call safety", () => {
     const toolCallEvents = events.filter((event) => event.kind === "provider-tool-call");
     expect(toolCallEvents).toEqual([
       expect.objectContaining({
-        id: "retry-call",
+        id: expect.stringMatching(/^tool-call-[a-f0-9]{24}$/u),
         argumentsText: "{\"safe\":\"retry\"}"
       })
     ]);
@@ -3547,7 +6109,9 @@ describe("ProviderTurnLoop truncated tool-call safety", () => {
     const result = await runBasicProviderTurn(harness.loop);
 
     expect(result.iterations).toBe(2);
-    expect(result.toolExecutions.map((execution) => execution.toolCallId)).toEqual(["fallback-retry-call"]);
+    expect(result.toolExecutions.map((execution) => execution.toolCallId)).toEqual([
+      expect.stringMatching(/^tool-call-[a-f0-9]{24}$/u)
+    ]);
     expect(harness.completeSpy).toHaveBeenCalledTimes(2);
     const retryOptions = harness.completeSpy.mock.calls[1]?.[2] as { primaryRoute?: ResolvedModelRoute; fallbackChain?: ResolvedModelRoute[] };
     expect(retryOptions.primaryRoute).toEqual(fallbackRoute);
@@ -3735,14 +6299,14 @@ describe("ProviderTurnLoop truncated tool-call safety", () => {
     expect(result.providerExecution?.response?.finishReason).toBe("tool_calls");
     expect(result.providerExecution?.toolCalls).toEqual([
       expect.objectContaining({
-        id: "bad-json",
+        id: expect.stringMatching(/^tool-call-[a-f0-9]{24}$/u),
         argumentsText: "{\"path\""
       })
     ]);
     expect(result.toolExecutions).toEqual([]);
     expect(toolPlans).toEqual([
       expect.objectContaining({
-        id: "bad-json",
+        id: expect.stringMatching(/^tool-call-[a-f0-9]{24}$/u),
         status: "invalid",
         source: "provider-tool-call"
       })
@@ -3751,6 +6315,19 @@ describe("ProviderTurnLoop truncated tool-call safety", () => {
 });
 
 describe("ProviderTurnLoop explicit route propagation", () => {
+  it("answers connector diagnostics once without executing even unsolicited tool calls", async () => {
+    const registry = new ProviderRegistry();
+    registry.register(createMockAdapter());
+    const executor = new ProviderExecutor({ registry, allowUnenforcedAttributedSpend: true });
+    const complete = vi.spyOn(executor, "complete").mockResolvedValue(providerExecution("I will reconnect", [{
+      id: "unexpected", name: "terminal.run", argumentsText: '{"command":"echo forbidden"}'
+    }]));
+    const loop = await createProviderTurnLoopForTest({ providerExecutor: executor });
+    const result = await runBasicProviderTurn(loop, { diagnosticOnly: true, userText: "Why is the connector unavailable?" });
+    expect(complete).toHaveBeenCalledOnce();
+    expect(result.toolExecutions).toEqual([]);
+    expect(complete.mock.calls[0]?.[0].tools ?? []).toEqual([]);
+  });
   it("uses the per-turn memory prompt context when assembling provider prompts", async () => {
     const registry = new ProviderRegistry();
     registry.register(createMockAdapter());
@@ -3903,7 +6480,11 @@ describe("ProviderTurnLoop explicit route propagation", () => {
         maxProviderIterations: 2,
         maxProviderToolCalls: 4,
         maxRepeatedToolFailures: 2,
-        maxProviderWallClockMs: 10_000
+        maxRepeatedBrowserObservations: 3,
+        noProgressNudgeIteration: 3,
+        maxNoProgressIterations: 6,
+        maxProviderWallClockMs: 10_000,
+        finalizationReserveMs: 0
       }
     });
 
@@ -4030,7 +6611,11 @@ describe("ProviderTurnLoop explicit route propagation", () => {
         maxProviderIterations: 2,
         maxProviderToolCalls: 4,
         maxRepeatedToolFailures: 2,
-        maxProviderWallClockMs: 10_000
+        maxRepeatedBrowserObservations: 3,
+        noProgressNudgeIteration: 3,
+        maxNoProgressIterations: 6,
+        maxProviderWallClockMs: 10_000,
+        finalizationReserveMs: 0
       }
     });
 
@@ -4064,7 +6649,7 @@ describe("ProviderTurnLoop explicit route propagation", () => {
     completeSpy.mockRestore();
   });
 
-  it("returns undefined providerExecution when providerExecutor is undefined", async () => {
+  it("returns undefined providerExecution and cancels unresolved plans when providerExecutor is undefined", async () => {
     const sessionDb = new InMemorySessionDB();
     const sessionId = "test-session-789";
     await sessionDb.createSession({ id: sessionId, profileId: "default", title: "test" });
@@ -4113,10 +6698,15 @@ describe("ProviderTurnLoop explicit route propagation", () => {
         maxProviderIterations: 2,
         maxProviderToolCalls: 4,
         maxRepeatedToolFailures: 2,
-        maxProviderWallClockMs: 10_000
+        maxRepeatedBrowserObservations: 3,
+        noProgressNudgeIteration: 3,
+        maxNoProgressIterations: 6,
+        maxProviderWallClockMs: 10_000,
+        finalizationReserveMs: 0
       }
     });
 
+    const toolPlans = [toolPlan("call-pending", "planned")];
     const result = await loop.run({
       userText: "hello",
       routedText: "hello",
@@ -4133,12 +6723,20 @@ describe("ProviderTurnLoop explicit route propagation", () => {
       memoryPromptContext: undefined,
       providerTools: [],
       fallbackText: "",
-      toolPlans: [],
+      toolPlans,
       trustedWorkspace: false,
       initialRiskClass: "read-only-local"
     });
 
     expect(result.providerExecution).toBeUndefined();
     expect(result.iterations).toBe(0);
+    expect(result.terminationCause).toBe("provider_failed");
+    expect(toolPlans).toEqual([
+      expect.objectContaining({
+        id: "call-pending",
+        status: "cancelled",
+        error: "Provider turn ended before the planned tool call produced a result."
+      })
+    ]);
   });
 });

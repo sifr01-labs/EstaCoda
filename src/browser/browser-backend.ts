@@ -1,13 +1,34 @@
-import type { BrowserActionInput, BrowserBackend, BrowserBackendStatus, BrowserConsoleEntry, BrowserNavigateInput, BrowserNavigateResult, BrowserScreenshotResult, BrowserSnapshot } from "../contracts/browser.js";
+import type {
+  BrowserActionInput,
+  BrowserBackend,
+  BrowserBackendStatus,
+  BrowserConsoleEntry,
+  BrowserNavigateInput,
+  BrowserNavigateResult,
+  BrowserSnapshot,
+  BrowserSwitchTabInput
+} from "../contracts/browser.js";
 import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
 import { connectCdp, type CdpClient, type CdpFetchLike, type CdpWebSocketFactory } from "./cdp-client.js";
 import { evaluateCdpSnapshot } from "./cdp-supervisor.js";
+import { createBrowserSnapshotIdentityState, observeBrowserSnapshot, type BrowserSnapshotIdentityState } from "./snapshot-state.js";
+import { findBrowserLocator, resolveBrowserTarget } from "./browser-locator.js";
 import { registerDefaultBrowserProviders, selectBrowserProvider } from "./browser-registry.js";
 import { createSupervisedLocalCdpBrowserBackend } from "./supervised-local-cdp-backend.js";
 import { createBrowserbaseBrowserBackend, type BrowserbaseBrowserBackendOptions } from "./browser-providers/browserbase-provider.js";
 import { classifyBrowserUrl, type HybridClassificationResult } from "./hybrid-classifier.js";
 import { decideBrowserRoute, type BrowserRouteDecision } from "./hybrid-router.js";
 import type { ResolveHostnameFn } from "./url-safety.js";
+import {
+  assertBrowserRuntimeEvaluationSucceeded,
+  browserInteractabilityGuardSource
+} from "./browser-interactability.js";
+import { dispatchNativeBrowserClick } from "./native-input.js";
+import {
+  browserCapabilities,
+  validateBrowserBackendCapabilities
+} from "./browser-capabilities.js";
+import { captureGovernedBrowserScreenshot } from "./browser-visual-observation.js";
 
 export type { CdpFetchLike, CdpWebSocketEvent, CdpWebSocketFactory, CdpWebSocketLike } from "./cdp-client.js";
 
@@ -16,18 +37,21 @@ export type UnconfiguredBrowserBackendOptions = {
 };
 
 export function createUnconfiguredBrowserBackend(options: UnconfiguredBrowserBackendOptions = {}): BrowserBackend {
-  return {
+  const capabilities = browserCapabilities();
+  return validateBrowserBackendCapabilities({
     kind: "unconfigured",
+    capabilities,
     isAvailable: () => false,
     status: () => ({
       backend: "unconfigured",
       available: false,
+      capabilities,
       reason: options.reason ?? "No browser backend is configured."
     }),
     async navigate(input: BrowserNavigateInput): Promise<BrowserNavigateResult> {
       throw new Error(options.reason ?? `No browser backend is configured for ${input.url}.`);
     }
-  };
+  });
 }
 
 export function createMockBrowserBackend(input: {
@@ -36,20 +60,31 @@ export function createMockBrowserBackend(input: {
   text?: string;
 } = {}): BrowserBackend {
   const sessionId = input.sessionId ?? "mock-browser-session";
-  const snapshot = (url = "mock://browser"): BrowserSnapshot => ({
+  const identityState = createBrowserSnapshotIdentityState();
+  const snapshot = (url = "mock://browser"): BrowserSnapshot => observeBrowserSnapshot({
     sessionId,
     url,
+    readiness: "complete",
     title: input.title ?? "Mock Browser Page",
     text: input.text ?? `Mock browser snapshot for ${url}.`,
+    tab: { ref: "@t1", url, title: input.title ?? "Mock Browser Page", controlled: true },
     elements: [{ ref: "@e1", role: "button", name: "Mock Button" }]
-  });
+  }, identityState);
 
-  return {
+  const capabilities = browserCapabilities({
+    snapshots: true,
+    semanticActions: true,
+    screenshots: true,
+    rawCdp: true
+  });
+  return validateBrowserBackendCapabilities({
     kind: "mock",
+    capabilities,
     isAvailable: () => true,
     status: () => ({
       backend: "mock",
       available: true,
+      capabilities,
       browser: input.title ?? "Mock Browser"
     }),
     async navigate(request) {
@@ -64,8 +99,26 @@ export function createMockBrowserBackend(input: {
       };
     },
     snapshot: async () => snapshot(),
+    find: async (request) => {
+      if (request.locator === undefined) throw new Error("browser.find requires a semantic locator.");
+      return findBrowserLocator(snapshot(), request.locator);
+    },
     click: async () => snapshot(),
     type: async () => snapshot(),
+    select: async () => snapshot(),
+    extract: async (request) => {
+      const current = snapshot();
+      const target = resolveBrowserTarget(current, request);
+      const element = current.elements?.find((candidate) => candidate.ref === target.ref);
+      return {
+        sessionId: current.sessionId,
+        identity: { ...current.identity },
+        tabRef: target.tabRef,
+        target,
+        ...(element?.text === undefined && element?.name === undefined ? {} : { text: element.text ?? element.name }),
+        ...(element?.value === undefined ? {} : { value: element.value })
+      };
+    },
     scroll: async () => snapshot(),
     press: async () => snapshot(),
     back: async () => snapshot(),
@@ -77,7 +130,7 @@ export function createMockBrowserBackend(input: {
       base64: "iVBORw0KGgo="
     }),
     dialog: async () => snapshot()
-  };
+  });
 }
 
 export type LocalCdpBrowserBackendOptions = {
@@ -87,6 +140,7 @@ export type LocalCdpBrowserBackendOptions = {
   launchArgs?: string[];
   chromeFlags?: string[];
   autoLaunch?: boolean;
+  headless?: boolean;
   fetch?: CdpFetchLike;
   webSocketFactory?: CdpWebSocketFactory;
 };
@@ -97,13 +151,27 @@ export function createLocalCdpBrowserBackend(options: LocalCdpBrowserBackendOpti
     id: string;
     webSocketDebuggerUrl: string;
   }>();
+  const snapshotIdentityStates = new Map<string, BrowserSnapshotIdentityState>();
   let latestSessionId: string | undefined;
 
-  return {
+  const capabilities = browserCapabilities({
+    snapshots: true,
+    nativePointer: true,
+    screenshots: true,
+    rawCdp: true
+  });
+  return validateBrowserBackendCapabilities({
     kind: "local-cdp",
+    capabilities,
     isAvailable: async () => (await checkLocalCdpStatus(endpoint, options.fetch)).available,
-    status: () => checkLocalCdpStatus(endpoint, options.fetch),
+    status: async () => ({
+      ...await checkLocalCdpStatus(endpoint, options.fetch),
+      capabilities
+    }),
     async navigate(input) {
+      if (input.disposition === "new-tab") {
+        throw new Error("Controlled new-tab navigation requires the supervised local CDP backend.");
+      }
       return navigateWithLocalCdp({
         endpoint,
         input,
@@ -112,7 +180,8 @@ export function createLocalCdpBrowserBackend(options: LocalCdpBrowserBackendOpti
         sessions,
         setLatestSessionId: (sessionId) => {
           latestSessionId = sessionId;
-        }
+        },
+        snapshotIdentityStates
       });
     },
     snapshot: (input) => runCdpSessionAction({
@@ -120,7 +189,7 @@ export function createLocalCdpBrowserBackend(options: LocalCdpBrowserBackendOpti
       latestSessionId,
       input,
       webSocketFactory: options.webSocketFactory,
-      action: async (client, sessionId) => evaluateCdpSnapshot(client, sessionId)
+      action: async (client, sessionId) => observeLocalCdpSnapshot(client, sessionId, snapshotIdentityStates)
     }),
     click: (input) => runCdpSessionAction({
       sessions,
@@ -128,11 +197,10 @@ export function createLocalCdpBrowserBackend(options: LocalCdpBrowserBackendOpti
       input,
       webSocketFactory: options.webSocketFactory,
       action: async (client, sessionId) => {
-        await client.send("Runtime.evaluate", {
-          expression: refActionExpression(input.ref, "click"),
-          awaitPromise: true
-        });
-        return evaluateCdpSnapshot(client, sessionId);
+        const current = await observeLocalCdpSnapshot(client, sessionId, snapshotIdentityStates);
+        const target = resolveBrowserTarget(current, input);
+        await dispatchNativeBrowserClick(client, target.ref);
+        return observeLocalCdpSnapshot(client, sessionId, snapshotIdentityStates);
       }
     }),
     type: (input) => runCdpSessionAction({
@@ -141,11 +209,14 @@ export function createLocalCdpBrowserBackend(options: LocalCdpBrowserBackendOpti
       input,
       webSocketFactory: options.webSocketFactory,
       action: async (client, sessionId) => {
-        await client.send("Runtime.evaluate", {
-          expression: refActionExpression(input.ref, "type", input.text ?? ""),
+        const current = await observeLocalCdpSnapshot(client, sessionId, snapshotIdentityStates);
+        const target = resolveBrowserTarget(current, input);
+        const actionEvaluation = await client.send("Runtime.evaluate", {
+          expression: refTypeActionExpression(target.ref, input.text ?? ""),
           awaitPromise: true
         });
-        return evaluateCdpSnapshot(client, sessionId);
+        assertBrowserRuntimeEvaluationSucceeded(actionEvaluation);
+        return observeLocalCdpSnapshot(client, sessionId, snapshotIdentityStates);
       }
     }),
     scroll: (input) => runCdpSessionAction({
@@ -160,7 +231,7 @@ export function createLocalCdpBrowserBackend(options: LocalCdpBrowserBackendOpti
           expression: `window.scrollBy(0, ${JSON.stringify(delta)}); "ok";`,
           returnByValue: true
         });
-        return evaluateCdpSnapshot(client, sessionId);
+        return observeLocalCdpSnapshot(client, sessionId, snapshotIdentityStates);
       }
     }),
     press: (input) => runCdpSessionAction({
@@ -172,7 +243,7 @@ export function createLocalCdpBrowserBackend(options: LocalCdpBrowserBackendOpti
         const key = input.key ?? "Enter";
         await client.send("Input.dispatchKeyEvent", { type: "keyDown", key });
         await client.send("Input.dispatchKeyEvent", { type: "keyUp", key });
-        return evaluateCdpSnapshot(client, sessionId);
+        return observeLocalCdpSnapshot(client, sessionId, snapshotIdentityStates);
       }
     }),
     back: (input = {}) => runCdpSessionAction({
@@ -186,7 +257,7 @@ export function createLocalCdpBrowserBackend(options: LocalCdpBrowserBackendOpti
           returnByValue: true
         });
         await client.waitFor("Page.loadEventFired", 2_000).catch(() => undefined);
-        return evaluateCdpSnapshot(client, sessionId);
+        return observeLocalCdpSnapshot(client, sessionId, snapshotIdentityStates);
       }
     }),
     getImages: (input = {}) => runCdpSessionAction({
@@ -237,18 +308,15 @@ export function createLocalCdpBrowserBackend(options: LocalCdpBrowserBackendOpti
       latestSessionId,
       input,
       webSocketFactory: options.webSocketFactory,
-      action: async (client) => {
-        const result = await client.send("Page.captureScreenshot", {
-          format: "png",
-          captureBeyondViewport: true
-        }) as { data?: unknown };
-        if (typeof result.data !== "string") {
-          throw new Error("CDP screenshot did not return image data.");
-        }
-        return {
-          mimeType: "image/png",
-          base64: result.data
-        } satisfies BrowserScreenshotResult;
+      action: async (client, sessionId) => {
+        const snapshot = await observeLocalCdpSnapshot(client, sessionId, snapshotIdentityStates);
+        const captured = await captureGovernedBrowserScreenshot({
+          client,
+          sessionId,
+          tabRef: snapshot.tab?.ref,
+          identity: snapshot.identity
+        });
+        return captured.screenshot;
       }
     }),
     dialog: (input = {}) => runCdpSessionAction({
@@ -261,10 +329,10 @@ export function createLocalCdpBrowserBackend(options: LocalCdpBrowserBackendOpti
           accept: input.action !== "dismiss",
           promptText: input.promptText ?? ""
         });
-        return evaluateCdpSnapshot(client, sessionId);
+        return observeLocalCdpSnapshot(client, sessionId, snapshotIdentityStates);
       }
     })
-  };
+  });
 }
 
 async function runCdpSessionAction<T>(input: {
@@ -325,12 +393,10 @@ async function ensureConsoleCapture(client: CdpClient): Promise<void> {
   });
 }
 
-function refActionExpression(ref: string | undefined, action: "click" | "type", text = ""): string {
+function refTypeActionExpression(ref: string | undefined, text = ""): string {
   const index = refToIndex(ref);
-  if (action === "click") {
-    return `(() => { const el = window.__estacodaElements?.[${index}]; if (!el) throw new Error('Browser element ref not found: ${ref ?? ""}'); el.click(); return 'clicked'; })()`;
-  }
-  return `(() => { const el = window.__estacodaElements?.[${index}]; if (!el) throw new Error('Browser element ref not found: ${ref ?? ""}'); el.focus(); el.value = ${JSON.stringify(text)}; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); return 'typed'; })()`;
+  const guard = browserInteractabilityGuardSource(`window.__estacodaElements?.[${index}]`, ref ?? "");
+  return `(() => { ${guard} el.focus(); el.value = ${JSON.stringify(text)}; el.dispatchEvent(new Event('input', { bubbles: true })); el.dispatchEvent(new Event('change', { bubbles: true })); return 'typed'; })()`;
 }
 
 function refToIndex(ref: string | undefined): number {
@@ -372,6 +438,7 @@ async function navigateWithLocalCdp(input: {
   webSocketFactory: CdpWebSocketFactory | undefined;
   sessions: Map<string, { id: string; webSocketDebuggerUrl: string }>;
   setLatestSessionId(sessionId: string): void;
+  snapshotIdentityStates: Map<string, BrowserSnapshotIdentityState>;
 }): Promise<BrowserNavigateResult> {
   if (input.endpoint === undefined) {
     throw new Error("CDP URL is not configured.");
@@ -397,7 +464,7 @@ async function navigateWithLocalCdp(input: {
     await client.waitFor("Page.loadEventFired", 5_000).catch(() => undefined);
 
     const sessionId = input.input.sessionId ?? target.id ?? `cdp-${Date.now()}`;
-    const snapshot = await evaluateCdpSnapshot(client, sessionId);
+    const snapshot = await observeLocalCdpSnapshot(client, sessionId, input.snapshotIdentityStates);
     input.sessions.set(sessionId, {
       id: sessionId,
       webSocketDebuggerUrl: target.webSocketDebuggerUrl
@@ -416,6 +483,26 @@ async function navigateWithLocalCdp(input: {
   } finally {
     client.close();
   }
+}
+
+async function observeLocalCdpSnapshot(
+  client: CdpClient,
+  sessionId: string,
+  states: Map<string, BrowserSnapshotIdentityState>
+): Promise<BrowserSnapshot> {
+  let state = states.get(sessionId);
+  if (state === undefined) {
+    state = createBrowserSnapshotIdentityState();
+    states.set(sessionId, state);
+  }
+  const frameTree = await client.send("Page.getFrameTree").catch(() => undefined) as {
+    frameTree?: { frame?: { id?: unknown; loaderId?: unknown } };
+  } | undefined;
+  const frame = frameTree?.frameTree?.frame;
+  return observeBrowserSnapshot(await evaluateCdpSnapshot(client, sessionId), state, Date.now, {
+    ...(typeof frame?.id === "string" ? { frameId: frame.id } : {}),
+    ...(typeof frame?.loaderId === "string" ? { loaderId: frame.loaderId } : {}),
+  });
 }
 
 async function createCdpTarget(input: {
@@ -477,7 +564,10 @@ async function createCdpTarget(input: {
   };
 }
 
-async function checkLocalCdpStatus(endpoint: string | undefined, fetchLike: CdpFetchLike | undefined): Promise<BrowserBackendStatus> {
+async function checkLocalCdpStatus(
+  endpoint: string | undefined,
+  fetchLike: CdpFetchLike | undefined
+): Promise<Omit<BrowserBackendStatus, "capabilities">> {
   if (endpoint === undefined) {
     return {
       backend: "local-cdp",
@@ -730,8 +820,23 @@ export function createHybridBrowserBackend(options: HybridBrowserBackendOptions)
     throw new Error(`Browser redirect safety violation: ${decision.reason}`);
   };
 
+  const capabilities = browserCapabilities({
+    snapshots: options.cloudBackend.capabilities.snapshots && options.localBackend.capabilities.snapshots,
+    semanticActions: options.cloudBackend.capabilities.semanticActions && options.localBackend.capabilities.semanticActions,
+    visibleRegionActions: options.cloudBackend.capabilities.visibleRegionActions && options.localBackend.capabilities.visibleRegionActions,
+    nativePointer: options.cloudBackend.capabilities.nativePointer && options.localBackend.capabilities.nativePointer,
+    tabs: options.cloudBackend.capabilities.tabs && options.localBackend.capabilities.tabs,
+    controlledNewTabs: options.cloudBackend.capabilities.controlledNewTabs && options.localBackend.capabilities.controlledNewTabs,
+    popupObservation: options.cloudBackend.capabilities.popupObservation && options.localBackend.capabilities.popupObservation,
+    downloads: false,
+    protectedInput: false,
+    protectedSourceRelay: false,
+    screenshots: options.cloudBackend.capabilities.screenshots && options.localBackend.capabilities.screenshots,
+    rawCdp: options.cloudBackend.capabilities.rawCdp && options.localBackend.capabilities.rawCdp
+  });
   const backend: BrowserBackend = {
     kind: "browserbase",
+    capabilities,
     isAvailable: async () => (await options.cloudBackend.isAvailable()) || (await options.localBackend.isAvailable()),
     status: async () => {
       const cloudStatus = await options.cloudBackend.status();
@@ -740,6 +845,7 @@ export function createHybridBrowserBackend(options: HybridBrowserBackendOptions)
         ...cloudStatus,
         backend: "browserbase",
         available: cloudStatus.available || localStatus.available,
+        capabilities,
         reason: cloudStatus.available || localStatus.available ? cloudStatus.reason : cloudStatus.reason ?? localStatus.reason,
         hybridRouting: options.hybridRouting,
         lastNavigationBackend,
@@ -782,8 +888,30 @@ export function createHybridBrowserBackend(options: HybridBrowserBackendOptions)
       };
     },
     snapshot: (input) => runSnapshotAction(input, "snapshot", "snapshot"),
+    find: async (input) => {
+      const route = resolveActionRoute(input);
+      const method = backendForRoute(route.route).find;
+      if (method === undefined) throw new Error(`Hybrid browser ${route.route} backend does not support find.`);
+      const result = await method(actionInputForRoute(input, route));
+      return { ...result, sessionId: browserKeyForInput(input.sessionId) };
+    },
+    preflightAction: async (action, input) => {
+      const route = resolveActionRoute(input);
+      const method = backendForRoute(route.route).preflightAction;
+      if (method === undefined) throw new Error(`Hybrid browser ${route.route} backend does not support action preflight.`);
+      const result = await method(action, actionInputForRoute(input, route));
+      return { ...result, sessionId: browserKeyForInput(input.sessionId) };
+    },
     click: (input) => runSnapshotAction(input, "click", "click"),
     type: (input) => runSnapshotAction(input, "type", "type"),
+    select: (input) => runSnapshotAction(input, "select", "select"),
+    extract: async (input) => {
+      const route = resolveActionRoute(input);
+      const method = backendForRoute(route.route).extract;
+      if (method === undefined) throw new Error(`Hybrid browser ${route.route} backend does not support extract.`);
+      const result = await method(actionInputForRoute(input, route));
+      return { ...result, sessionId: browserKeyForInput(input.sessionId) };
+    },
     scroll: (input) => runSnapshotAction(input, "scroll", "scroll"),
     press: (input) => runSnapshotAction(input, "press", "press"),
     back: (input = {}) => runSnapshotAction(input, "back", "back"),
@@ -802,6 +930,32 @@ export function createHybridBrowserBackend(options: HybridBrowserBackendOptions)
         throw new Error(`Hybrid browser ${route.route} backend does not support console.`);
       }
       return method(actionInputForRoute(input, route));
+    },
+    tabs: async (input = {}) => {
+      const route = resolveActionRoute(input);
+      const method = backendForRoute(route.route).tabs;
+      if (method === undefined) {
+        throw new Error(`Hybrid browser ${route.route} backend does not support tabs.`);
+      }
+      const browserKey = browserKeyForInput(input.sessionId);
+      const result = await method(actionInputForRoute(input, route));
+      return {
+        ...result,
+        sessionId: browserKey
+      };
+    },
+    switchTab: async (input: BrowserSwitchTabInput) => {
+      const route = resolveActionRoute(input);
+      const method = backendForRoute(route.route).switchTab;
+      if (method === undefined) {
+        throw new Error(`Hybrid browser ${route.route} backend does not support switchTab.`);
+      }
+      const browserKey = browserKeyForInput(input.sessionId);
+      const result = await method(actionInputForRoute(input, route));
+      return {
+        ...result,
+        snapshot: rewriteSnapshotSession(result.snapshot, browserKey)
+      };
     },
     cdp: async (input) => {
       const route = resolveActionRoute(input);
@@ -845,7 +999,7 @@ export function createHybridBrowserBackend(options: HybridBrowserBackendOptions)
     }
   };
 
-  return backend;
+  return validateBrowserBackendCapabilities(backend);
 }
 
 export function createBrowserBackendFromConfig(config: {
@@ -857,6 +1011,7 @@ export function createBrowserBackendFromConfig(config: {
   launchArgs?: string[];
   chromeFlags?: string[];
   autoLaunch?: boolean;
+  headless?: boolean;
   hybridRouting?: boolean;
   cloudFallback?: boolean;
   cloudSpendApproved?: "pending" | boolean;
@@ -879,6 +1034,7 @@ export function createBrowserBackendFromConfig(config: {
       launchArgs: config.launchArgs,
       chromeFlags: config.chromeFlags,
       autoLaunch: config.autoLaunch,
+      headless: config.headless,
       fetch: config.fetch,
       webSocketFactory: config.webSocketFactory,
       securityConfig: config.securityConfig,
@@ -907,6 +1063,7 @@ export function createBrowserBackendFromConfig(config: {
         launchArgs: config.launchArgs,
         chromeFlags: config.chromeFlags,
         autoLaunch: config.autoLaunch,
+        headless: config.headless,
         fetch: config.fetch,
         webSocketFactory: config.webSocketFactory,
         securityConfig: cloudSecurityConfig,
@@ -930,6 +1087,7 @@ export function createBrowserBackendFromConfig(config: {
           launchArgs: config.launchArgs,
           chromeFlags: config.chromeFlags,
           autoLaunch: config.autoLaunch,
+          headless: config.headless,
           fetch: config.fetch,
           webSocketFactory: config.webSocketFactory,
           securityConfig: config.securityConfig,
@@ -943,6 +1101,7 @@ export function createBrowserBackendFromConfig(config: {
         launchArgs: config.launchArgs,
         chromeFlags: config.chromeFlags,
         autoLaunch: config.autoLaunch,
+        headless: config.headless,
         fetch: config.fetch,
         webSocketFactory: config.webSocketFactory
       });
@@ -963,6 +1122,7 @@ export function createBrowserBackendFromConfig(config: {
         launchArgs: config.launchArgs,
         chromeFlags: config.chromeFlags,
         autoLaunch: config.autoLaunch,
+        headless: config.headless,
         fetch: config.fetch,
         webSocketFactory: config.webSocketFactory,
         securityConfig: config.securityConfig,
@@ -986,6 +1146,7 @@ function createCloudProviderStatusBackend(config: {
   cloudProvider: string;
 }): BrowserBackend {
   registerDefaultBrowserProviders();
+  const capabilities = browserCapabilities();
 
   const status = async (): Promise<BrowserBackendStatus> => {
     const selection = await selectBrowserProvider({
@@ -1000,17 +1161,19 @@ function createCloudProviderStatusBackend(config: {
     return {
       backend: config.backend,
       available: false,
+      capabilities,
       reason
     };
   };
 
-  return {
+  return validateBrowserBackendCapabilities({
     kind: config.backend,
+    capabilities,
     isAvailable: async () => false,
     status,
     async navigate(input) {
       const current = await status();
       throw new Error(current.reason ?? `No cloud browser backend is configured for ${input.url}.`);
     }
-  };
+  });
 }

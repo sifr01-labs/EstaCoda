@@ -114,6 +114,27 @@ describe("maybeSummarizeSnapshot", () => {
     expect(result.content).toBe("short @e1 snapshot");
   });
 
+  it("can use pre-compaction size to honor explicit provider summarization", async () => {
+    const executor = createExecutor("Explicit summary with @e1 preserved.");
+    const result = await maybeSummarizeSnapshot({
+      renderedSnapshot: "compact @e1 snapshot",
+      thresholdChars: 1_000
+    }, {
+      providerExecutor: executor,
+      auxiliaryRoute,
+      mainRoute: route,
+      maxResultSizeChars: 8_000,
+      threshold: 100,
+      mode: true
+    });
+
+    expect(executor.complete).toHaveBeenCalledTimes(1);
+    expect(result).toEqual({
+      content: "Explicit summary with @e1 preserved.",
+      summarized: true
+    });
+  });
+
   it("auto mode calls the provider only when an auxiliary route and executor are available", async () => {
     const executor = createExecutor("auto summary");
     const available = await maybeSummarizeSnapshot({
@@ -202,7 +223,7 @@ describe("maybeSummarizeSnapshot", () => {
   it("prompts the provider to preserve interactive refs", async () => {
     const executor = createExecutor("summary");
     await maybeSummarizeSnapshot({
-      renderedSnapshot: "[Compact viewport snapshot]\n\nInteractive elements:\n@e1 button Save",
+      renderedSnapshot: "[Compact viewport snapshot]\nRevision: 4\nControlled tab: @t2\n\nInteractive elements:\n@e1 button Save",
       userTask: "Click save"
     }, {
       providerExecutor: executor,
@@ -216,6 +237,9 @@ describe("maybeSummarizeSnapshot", () => {
     const request = vi.mocked(executor.complete).mock.calls[0]?.[0];
     const prompt = JSON.stringify(request?.messages);
     expect(prompt).toContain("Preserve all useful interactive elements and their exact @eN refs");
+    expect(prompt).toContain("Preserve the snapshot identity and controlled tab ref");
+    expect(prompt).toContain("Revision: 4");
+    expect(prompt).toContain("Controlled tab: @t2");
     expect(prompt).toContain("@e1 button Save");
     expect(prompt).toContain("Click save");
   });

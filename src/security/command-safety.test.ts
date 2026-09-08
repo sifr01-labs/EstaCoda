@@ -348,6 +348,54 @@ describe("command-safety", () => {
     });
   });
 
+  describe("browser profile database access", () => {
+    const protectedReads = [
+      'sqlite3 "$HOME/Library/Application Support/Google/Chrome/Default/History" "select url from urls"',
+      "command sqlite3 ~/Library/Application\\ Support/Google/Chrome/Profile\\ 2/Login\\ Data '.tables'",
+      "cp '~/Library/Application Support/Chromium/Profile 1/Network/Cookies' /tmp/cookies-copy",
+      "strings '/Users/ada/Library/Application Support/Microsoft Edge/Default/Login Data'",
+      "sh -c \"sqlite3 '/Users/ada/Library/Application Support/BraveSoftware/Brave-Browser/Default/History' '.tables'\"",
+      "sqlite3 ~/Library/Safari/History.db 'select url from history_items'",
+      "cat /home/ada/.config/google-chrome/Default/History",
+      "bash -lc \"sqlite3 '/home/ada/.config/chromium/Profile 2/Login Data' '.schema'\"",
+      "command cp /home/ada/.config/microsoft-edge/Default/Network/Cookies /tmp/edge-cookies",
+      "python3 -c \"import sqlite3; sqlite3.connect('/home/ada/.config/BraveSoftware/Brave-Browser/Default/History')\"",
+      "sqlite3 $XDG_CONFIG_HOME/google-chrome/Default/History '.tables'",
+      "sqlite3 ~/snap/chromium/common/chromium/Default/History '.tables'",
+      String.raw`type "C:\Users\Ada\AppData\Local\Google\Chrome\User Data\Default\History"`,
+      String.raw`powershell -Command "Get-Content '$env:LOCALAPPDATA\Microsoft\Edge\User Data\Default\Network\Cookies'"`,
+      "pwsh -Command \"Copy-Item '${env:LOCALAPPDATA}\\BraveSoftware\\Brave-Browser\\User Data\\Profile 3\\Login Data' C:\\Temp\\login-data\"",
+      String.raw`cmd /c type "%LOCALAPPDATA%\Chromium\User Data\Default\History"`
+    ];
+
+    it.each(protectedReads)("classifies a browser profile read as credential access: %s", (command) => {
+      const assessment = assessCommandSafety(command);
+
+      expect(assessment.riskClass).toBe("credential-access");
+      expect(assessment.severity).toBe("medium");
+      expect(assessment.hardBlock).toBeUndefined();
+    });
+
+    const falsePositives = [
+      "sqlite3 ./History 'select * from project_events'",
+      "cat ./fixtures/History",
+      "cp ./Cookies /tmp/project-cookies",
+      "rg 'Login Data' docs/architecture.md",
+      "git log -- History",
+      "sqlite3 './fixtures/Library/Application Support/Google/Chrome/Default/History' '.tables'",
+      "cat ./sandbox/.config/google-chrome/Default/History",
+      'echo "$HOME/Library/Application Support/Google/Chrome/Default/History"',
+      'printf "cat %s\\n" "$HOME/Library/Application Support/Google/Chrome/Default/History"'
+    ];
+
+    it.each(falsePositives)("does not classify an ordinary workspace/history reference: %s", (command) => {
+      const assessment = assessCommandSafety(command);
+
+      expect(assessment.riskClass).toBeUndefined();
+      expect(assessment.hardBlock).toBeUndefined();
+    });
+  });
+
   describe("container bypass", () => {
     const coreOnlyCommands = [
       "sudo apt update",

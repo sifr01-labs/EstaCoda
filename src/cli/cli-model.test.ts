@@ -189,6 +189,8 @@ describe("cli model", () => {
       expect(result.output).toContain("Model switched: gpt-4o");
       expect(result.output).toContain("Provider: openai");
       expect(result.output).toContain("Saved as preferred model.");
+      const savedConfig = await readUserConfig(tmpDir) as any;
+      expect(savedConfig.providers?.openai?.enableNetwork).toBe(true);
       expect(selectInputs).toMatchObject([
         {
           surface: "promptCard",
@@ -531,6 +533,7 @@ describe("cli model", () => {
 
       const config = await readUserConfig(tmpDir) as any;
       expect(config.providers?.openai?.apiKeyEnv).toBe("OPENAI_API_KEY");
+      expect(config.providers?.openai?.enableNetwork).toBe(true);
 
       // Verify secret was written to .env
       const envPath = profileEnvPath(tmpDir);

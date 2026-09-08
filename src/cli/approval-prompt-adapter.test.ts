@@ -129,7 +129,7 @@ describe("approval prompt adapter routing", () => {
     expect(outputChunks.join("")).not.toContain("Always allow");
   });
 
-  it("renders inline Operator Console approval cards and accepts focused approve without typed prompt", async () => {
+  it("defaults inline Operator Console approvals to inspection so immediate Enter cannot approve", async () => {
     const { input, outputChunks } = adapterInput("approve once");
     const ttyInput = makeTtyInput();
     const host = createOperatorConsoleRuntimeHost({
@@ -142,18 +142,19 @@ describe("approval prompt adapter routing", () => {
       operatorConsoleHost: host,
     });
     ttyInput.press("\r");
-    await expect(result).resolves.toBe("once");
+    await expect(result).resolves.toBe("inspect");
 
     const rendered = outputChunks.join("");
     expect(rendered).toContain("Approval required");
-    expect(rendered).toContain("Action: Run Command");
-    expect(rendered).toContain("Target: npm install left-pad");
-    expect(rendered).toContain("Risk: destructive-local");
-    expect(rendered).toContain("❯ Approve once");
+    expect(rendered).toContain("Run Command");
+    expect(rendered).toContain("Target · npm install left-pad");
+    expect(rendered).toContain("destructive-local");
+    expect(rendered).toContain("❯ Inspect");
+    expect(rendered).not.toContain("❯ Approve once");
     expect(rendered).toContain("Reject");
     expect(rendered).toContain("Inspect");
-    expect(rendered).not.toContain("Allow for this session");
-    expect(rendered).not.toContain("Always allow");
+    expect(rendered).toContain("Approve for session");
+    expect(rendered).toContain("Always approve in workspace");
     expect(rendered).not.toContain("Feedback");
     expect(rendered).not.toContain("Amend");
     expect(rendered).not.toContain("Ask user");
@@ -162,6 +163,64 @@ describe("approval prompt adapter routing", () => {
     expect(host.getState().approvals).toHaveLength(0);
     expect(host.getState().status).not.toHaveProperty("approvals");
     expect(ttyInput.rawModes).toEqual([true, false]);
+  });
+
+  it("approves once only after explicitly moving from Inspect to Approve once", async () => {
+    const { input, outputChunks } = adapterInput("approve once");
+    const ttyInput = makeTtyInput();
+    const result = papyrusApprovalPromptAdapter({
+      ...input,
+      input: ttyInput,
+      operatorConsoleHost: createOperatorConsoleRuntimeHost(),
+    });
+
+    ttyInput.press("\x1b[B");
+    ttyInput.press("\r");
+
+    await expect(result).resolves.toBe("once");
+    expect(outputChunks.join("")).toContain("❯ Approve once");
+  });
+
+  it("selects session and workspace scopes from inline Operator Console approvals", async () => {
+    const sessionInput = makeTtyInput();
+    const session = papyrusApprovalPromptAdapter({
+      ...adapterInput("").input,
+      input: sessionInput,
+      operatorConsoleHost: createOperatorConsoleRuntimeHost(),
+    });
+    sessionInput.press("\x1b[B");
+    sessionInput.press("\x1b[B");
+    sessionInput.press("\r");
+    await expect(session).resolves.toBe("session");
+
+    const alwaysInput = makeTtyInput();
+    const always = papyrusApprovalPromptAdapter({
+      ...adapterInput("").input,
+      input: alwaysInput,
+      operatorConsoleHost: createOperatorConsoleRuntimeHost(),
+    });
+    alwaysInput.press("\x1b[B");
+    alwaysInput.press("\x1b[B");
+    alwaysInput.press("\x1b[B");
+    alwaysInput.press("\r");
+    await expect(always).resolves.toBe("always");
+  });
+
+  it("omits workspace-persistent scope from inline approvals when revocation is unavailable", async () => {
+    const { input, outputChunks } = adapterInput("", { allowPersistentApproval: false });
+    const ttyInput = makeTtyInput();
+    const result = papyrusApprovalPromptAdapter({
+      ...input,
+      input: ttyInput,
+      operatorConsoleHost: createOperatorConsoleRuntimeHost(),
+    });
+    ttyInput.press("\x1b[B");
+    ttyInput.press("\x1b[B");
+    ttyInput.press("\r");
+
+    await expect(result).resolves.toBe("session");
+    expect(outputChunks.join("")).toContain("Approve for session");
+    expect(outputChunks.join("")).not.toContain("Always approve in workspace");
   });
 
   it("renders inline Operator Console file diff stats without prompt-region suspension", async () => {
@@ -204,13 +263,14 @@ describe("approval prompt adapter routing", () => {
       input: ttyInput,
       operatorConsoleHost: host,
     });
+    ttyInput.press("\x1b[B");
     ttyInput.press("\r");
     await expect(result).resolves.toBe("once");
 
     const rendered = outputChunks.join("");
-    expect(rendered).toContain("Action: Workspace Write");
-    expect(rendered).toContain("Target: src/runtime/provider-turn-loop.ts");
-    expect(rendered).toContain("Risk: workspace-write");
+    expect(rendered).toContain("Workspace Write");
+    expect(rendered).toContain("Target · src/runtime/provider-turn-loop.ts");
+    expect(rendered).toContain("workspace-write");
     expect(rendered).toContain("+2 lines  -1 lines");
     expect(input.chrome?.clearInlineSpinner).not.toHaveBeenCalled();
     expect(input.prompt).not.toHaveBeenCalled();
@@ -223,7 +283,7 @@ describe("approval prompt adapter routing", () => {
       input: rejectInput,
       operatorConsoleHost: createOperatorConsoleRuntimeHost(),
     });
-    rejectInput.press("\t");
+    rejectInput.press("\x1b[A");
     rejectInput.press("\r");
     await expect(reject).resolves.toBe("deny");
 
@@ -242,8 +302,6 @@ describe("approval prompt adapter routing", () => {
       input: inspectInput,
       operatorConsoleHost: createOperatorConsoleRuntimeHost(),
     });
-    inspectInput.press("\x1b[C");
-    inspectInput.press("\x1b[C");
     inspectInput.press("\r");
     await expect(inspect).resolves.toBe("inspect");
   });
@@ -259,14 +317,20 @@ describe("approval prompt adapter routing", () => {
       }),
     });
 
-    ttyInput.press("\t");
-    ttyInput.press("\x1b[C");
-    ttyInput.press("\x1b[D");
+    ttyInput.press("\x1b[B");
+    ttyInput.press("\x1b[B");
+    ttyInput.press("\x1b[B");
+    ttyInput.press("\x1b[B");
+    ttyInput.press("\x1b[A");
+    ttyInput.press("\x1b[A");
+    ttyInput.press("\x1b[A");
     ttyInput.press("\r");
-    await expect(result).resolves.toBe("deny");
+    await expect(result).resolves.toBe("once");
 
     const rendered = outputChunks.join("");
     expect(rendered).toContain("❯ Approve once");
+    expect(rendered).toContain("❯ Approve for session");
+    expect(rendered).toContain("❯ Always approve in workspace");
     expect(rendered).toContain("❯ Reject");
     expect(rendered).toContain("❯ Inspect");
     expect(input.prompt).not.toHaveBeenCalled();

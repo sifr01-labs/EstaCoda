@@ -1,0 +1,41 @@
+{
+  "id": "vision-provider-fallback",
+  "title": "Vision provider fallback reliability",
+  "channel": "provider",
+  "evidence": "implemented but not live-proven",
+  "optIn": true,
+  "metrics": [
+    "accuracy_percent",
+    "hallucination_count",
+    "latency_ms",
+    "cost_usd",
+    "fallback_count",
+    "approval_frequency_percent"
+  ],
+  "goal": "Verify a failed primary vision route falls back only to a runnable vision-capable route with complete metadata and spending settlement.",
+  "prompt": "Use vision.analyze with mode ocr and transcribe the English OCR fixture exactly.",
+  "prerequisites": [
+    "Run pnpm run eval:vision:fixtures.",
+    "Configure a disposable primary vision route that deterministically fails and a working vision-capable fallback.",
+    "Set a small explicit session or Task budget that safely covers both reservations."
+  ],
+  "fixtures": [
+    ".estacoda/eval-fixtures/vision/english-ocr.png"
+  ],
+  "steps": [
+    "Explicitly enable this live task and approve any hosted egress once required.",
+    "Run the prompt and confirm the configured primary fails.",
+    "Verify the fallback produces expected OCR and inspect attempts, fallback, usage, cost, and lineage metadata.",
+    "Confirm unused reservation is released and actual dispatched usage is settled."
+  ],
+  "assertions": [
+    "Only vision-capable runnable routes are attempted.",
+    "Fallback metadata identifies the route and fallback_count is one.",
+    "OCR remains accurate after fallback.",
+    "Budget and usage records include both dispatched attempts without double settlement."
+  ],
+  "notes": [
+    "Do not simulate primary failure by removing all credentials if that makes the route fail before the intended dispatch path.",
+    "Approval frequency is approvals divided by hosted image dispatches in this run."
+  ]
+}

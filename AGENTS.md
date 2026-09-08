@@ -31,6 +31,7 @@ EstaCoda is agent infrastructure. A small bug can become remote code execution, 
 8. Preserve Arabic and bidirectional text handling when touching localized UX.
 9. Do not silently change public behavior without docs and tests.
 10. Leave the repo cleaner than you found it.
+11. Optimize first for task completion, reliability, and provider efficiency while preserving governance as a mandatory safety boundary. Capability registration and visibility do not grant execution authority, and governance must not make configured task-relevant capabilities undiscoverable.
 
 ## Contribution rubric — what we want / what we do not want
 

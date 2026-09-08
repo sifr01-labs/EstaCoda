@@ -1,8 +1,8 @@
-import { describe, it, expect, beforeAll, afterAll } from "vitest";
+import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { createExecuteCodeTool } from "./execute-code-tool.js";
 import { resolveTestPythonBinary } from "../test/test-python.js";
 import type { SessionDB } from "../contracts/session.js";
-import type { ToolExecutor } from "./tool-executor.js";
+import type { NamedToolExecutionRequest, ToolExecutor } from "./tool-executor.js";
 import type { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 
 describe("execute_code environment isolation", () => {
@@ -167,5 +167,64 @@ print("LANG=" + ("yes" if any(k in os.environ for k in ["LANG", "LC_ALL"]) else 
     expect(result.content).toContain("PATH=yes");
     expect(result.content).toContain("TMP=yes");
     expect(result.content).toContain(hasLang ? "LANG=yes" : "LANG=no");
+  });
+});
+
+describe("execute_code nested approvals", () => {
+  it("propagates the active approval handler to a nested tool call", async () => {
+    const onApprovalRequest = vi.fn(async () => "approved" as const);
+    const executeTool = vi.fn(async (request: NamedToolExecutionRequest) => {
+      const decision = await request.onApprovalRequest?.({
+        tool: {
+          name: request.tool,
+          description: "nested write",
+          inputSchema: {},
+          riskClass: "workspace-write",
+          toolsets: ["files"],
+          progressLabel: "writing",
+          maxResultSizeChars: 1000
+        },
+        input: request.input,
+        riskClass: "workspace-write",
+        targetSummary: "nested.txt"
+      });
+      expect(decision).toBe("approved");
+      return {
+        tool: {
+          name: request.tool,
+          description: "nested write",
+          inputSchema: {},
+          riskClass: "workspace-write" as const,
+          toolsets: ["files"],
+          progressLabel: "writing",
+          maxResultSizeChars: 1000
+        },
+        input: request.input,
+        decision: "allow" as const,
+        riskClass: "workspace-write" as const,
+        result: { ok: true, content: "nested write completed" }
+      };
+    });
+    const tool = createExecuteCodeTool({
+      workspaceRoot: "/tmp",
+      toolExecutor: { executeTool } as unknown as ToolExecutor,
+      sessionDb: {} as SessionDB,
+      trajectoryRecorder: {} as TrajectoryRecorder,
+      sessionId: "test-session",
+      trustedWorkspace: async () => true,
+      allowedTools: ["file.write"],
+      pythonBinary: await resolveTestPythonBinary()
+    });
+
+    const result = await tool.run({
+      code: 'result = tool("file.write", {"path": "nested.txt", "content": "ok"})\nprint(result["content"])',
+      timeoutMs: 3_000
+    }, { onApprovalRequest });
+
+    expect(result.ok).toBe(true);
+    expect(result.content).toContain("nested write completed");
+    expect(executeTool).toHaveBeenCalledOnce();
+    expect(executeTool.mock.calls[0]?.[0].onApprovalRequest).toBe(onApprovalRequest);
+    expect(onApprovalRequest).toHaveBeenCalledOnce();
   });
 });

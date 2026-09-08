@@ -24,9 +24,17 @@ export type CdpWebSocketLike = {
 
 export type CdpWebSocketFactory = (url: string) => CdpWebSocketLike;
 
+export const CDP_REQUEST_TIMEOUT_MS = 15_000;
+
+export type CdpSendOptions = {
+  signal?: AbortSignal;
+  timeoutMs?: number;
+};
+
 export async function connectCdp(input: {
   webSocketUrl: string;
   webSocketFactory: CdpWebSocketFactory | undefined;
+  requestTimeoutMs?: number;
 }): Promise<CdpClient> {
   const factory = input.webSocketFactory ?? ((url) => {
     if (typeof WebSocket === "undefined") {
@@ -58,7 +66,7 @@ export async function connectCdp(input: {
     });
   });
 
-  return new CdpClient(socket);
+  return new CdpClient(socket, { requestTimeoutMs: input.requestTimeoutMs });
 }
 
 export class CdpClient {
@@ -68,8 +76,13 @@ export class CdpClient {
     reject(error: Error): void;
   }>();
   #eventWaiters = new Map<string, Array<() => void>>();
+  readonly #requestTimeoutMs: number;
 
-  constructor(private readonly socket: CdpWebSocketLike) {
+  constructor(
+    private readonly socket: CdpWebSocketLike,
+    options: { requestTimeoutMs?: number } = {}
+  ) {
+    this.#requestTimeoutMs = normalizeTimeoutMs(options.requestTimeoutMs, CDP_REQUEST_TIMEOUT_MS);
     this.socket.addEventListener("message", (event) => {
       this.#handleMessage(event.data);
     });
@@ -81,19 +94,54 @@ export class CdpClient {
     });
   }
 
-  send(method: string, params?: Record<string, unknown>): Promise<unknown> {
+  send(method: string, params?: Record<string, unknown>, options: CdpSendOptions = {}): Promise<unknown> {
     const id = this.#nextId++;
+    const timeoutMs = normalizeTimeoutMs(options.timeoutMs, this.#requestTimeoutMs);
+
+    if (options.signal?.aborted === true) {
+      return Promise.reject(cdpAbortError(method));
+    }
 
     return new Promise((resolve, reject) => {
-      this.#pending.set(id, {
-        resolve,
-        reject
-      });
-      this.socket.send(JSON.stringify({
-        id,
-        method,
-        params
-      }));
+      let timeout: ReturnType<typeof setTimeout> | undefined;
+      const onAbort = () => {
+        this.#pending.delete(id);
+        pending.reject(cdpAbortError(method));
+      };
+      const cleanup = () => {
+        if (timeout !== undefined) clearTimeout(timeout);
+        options.signal?.removeEventListener("abort", onAbort);
+      };
+      const pending = {
+        resolve: (value: unknown) => {
+          cleanup();
+          resolve(value);
+        },
+        reject: (error: Error) => {
+          cleanup();
+          reject(error);
+        }
+      };
+      this.#pending.set(id, pending);
+      timeout = setTimeout(() => {
+        this.#pending.delete(id);
+        pending.reject(new Error(`Timed out waiting for CDP command ${method}.`));
+      }, timeoutMs);
+      options.signal?.addEventListener("abort", onAbort, { once: true });
+      if (options.signal?.aborted === true) {
+        onAbort();
+        return;
+      }
+      try {
+        this.socket.send(JSON.stringify({
+          id,
+          method,
+          params
+        }));
+      } catch (error) {
+        this.#pending.delete(id);
+        pending.reject(error instanceof Error ? error : new Error("CDP WebSocket send failed."));
+      }
     });
   }
 
@@ -169,4 +217,16 @@ export class CdpClient {
 
     this.#pending.clear();
   }
+}
+
+function normalizeTimeoutMs(value: number | undefined, fallback: number): number {
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? Math.floor(value)
+    : fallback;
+}
+
+function cdpAbortError(method: string): Error {
+  const error = new Error(`CDP command ${method} was cancelled.`);
+  error.name = "AbortError";
+  return error;
 }

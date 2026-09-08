@@ -18,6 +18,8 @@ export type SessionToolContext = {
   parentSessionId?: string;
   childSessionId?: string;
   currentSessionId: () => string;
+  executionPlanController?: import("./execution-plan.js").ExecutionPlanControllerApi;
+  executionCheckpointController?: import("./execution-checkpoint.js").ExecutionCheckpointJournalController;
   sessionRuntimeContext?: {
     currentSessionId(): string;
     rotateSession(sessionId: string): void;
@@ -34,7 +36,9 @@ export type SessionToolContext = {
   imageCacheRoot?: string;
   browserBackend?: import("./browser.js").BrowserBackend;
   browserConfig?: Pick<import("../config/runtime-config.js").LoadedRuntimeConfig["browser"], "summarizeSnapshots" | "snapshotSummarizeThreshold">;
+  mcpServerSnapshots?: readonly import("../mcp/mcp-tools.js").MCPServerSnapshot[];
   mainRoute?: import("./provider.js").ResolvedModelRoute;
+  mainFallbackRoutes?: import("./provider.js").ResolvedModelRoute[];
   visionRoute?: import("./provider.js").ResolvedAuxiliaryRoute;
   compressionRoute?: import("./provider.js").ResolvedAuxiliaryRoute;
   providerRegistry?: import("../providers/provider-registry.js").ProviderRegistry;
@@ -59,6 +63,7 @@ export type SessionToolContext = {
   artifactStore?: import("../artifacts/artifact-store.js").ArtifactStore;
   taskResultService?: import("../tasks/task-result-service.js").TaskResultService;
   taskOperatorService?: import("../tasks/task-operator-service.js").TaskOperatorService;
+  usageInspector?: import("../session/usage-inspector.js").UsageInspector;
   memoryFileCompactionService?: import("../memory/memory-file-compaction-service.js").MemoryFileCompactionService;
   fileStateTracker?: import("../delegation/file-state-tracker.js").FileStateTracker;
   sessionCompressionService?: import("../prompt/session-compression-service.js").SessionCompressionService;

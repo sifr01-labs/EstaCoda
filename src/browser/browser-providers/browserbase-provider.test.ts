@@ -7,6 +7,7 @@ import type {
 } from "../../contracts/browser.js";
 import { createBrowserBackendFromConfig } from "../browser-backend.js";
 import { browserbaseProvider, createBrowserbaseBrowserBackend, getBrowserbaseAvailability, type BrowserbaseClientLike } from "./browserbase-provider.js";
+import { browserCapabilities } from "../browser-capabilities.js";
 
 type FakeBackend = BrowserBackend & {
   close: ReturnType<typeof vi.fn<() => Promise<void>>>;
@@ -17,6 +18,8 @@ function createSnapshot(input: { sessionId: string; url?: string; backend?: "loc
   return {
     sessionId: input.sessionId,
     url: input.url ?? "https://example.com",
+    identity: { documentEpoch: 1, actionRevision: 1, observationId: 1 },
+    observedAt: "2026-08-13T00:00:00.000Z",
     title: "Fake page",
     text: "Fake snapshot.",
     elements: [{ ref: "@e1", role: "button", name: "Fake Button" }]
@@ -31,6 +34,7 @@ function createFakeBackend(input: {
   const navigations = input.navigations ?? [];
   const backend: FakeBackend = {
     kind: input.kind ?? "local-cdp",
+    capabilities: browserCapabilities(),
     isAvailable: () => true,
     status: () => ({ backend: input.kind ?? "local-cdp", available: true }),
     async navigate(request): Promise<BrowserNavigateResult> {

@@ -107,16 +107,21 @@ function createTelegramStreamingHarness(options: {
       };
     }
 
+    let result: unknown = { message_id: Number(body.message_id ?? nextMessageId - 1) };
+    if (method === "setMessageReaction") {
+      result = true;
+    } else if (method === "sendMessageDraft" || method === "sendRichMessageDraft") {
+      result = { ok: true };
+    } else if (method === "sendMessage" || method === "sendRichMessage") {
+      result = { message_id: nextMessageId++ };
+    }
+
     return {
       ok: true,
       status: 200,
       json: async () => ({
         ok: true,
-        result: method === "sendMessageDraft" || method === "sendRichMessageDraft"
-          ? { ok: true }
-          : method === "sendMessage" || method === "sendRichMessage"
-            ? { message_id: nextMessageId++ }
-            : { message_id: Number(body.message_id ?? nextMessageId - 1) }
+        result
       })
     };
   });
@@ -314,6 +319,117 @@ describe("TelegramAdapter", () => {
     expect(adapter.getCapabilities!()).toEqual(registry.get("telegram"));
   });
 
+  it("sets and clears the default inbound processing reaction", async () => {
+    const { adapter, calls } = createTelegramStreamingHarness();
+    const message = updateToChannelMessage({
+      update_id: 10,
+      message: {
+        message_id: 42,
+        chat: { id: "123", type: "private" },
+        from: { id: "user-1" },
+        text: "hello"
+      }
+    });
+    expect(message).toBeDefined();
+
+    await expect(adapter.setInboundProcessingIndicator(message!, true)).resolves.toBe(true);
+    await expect(adapter.setInboundProcessingIndicator(message!, false)).resolves.toBe(true);
+
+    expect(callsFor(calls, "setMessageReaction").map((call) => call.body)).toEqual([
+      {
+        chat_id: "123",
+        message_id: 42,
+        reaction: [{ type: "emoji", emoji: "👨‍💻" }],
+        is_big: false
+      },
+      {
+        chat_id: "123",
+        message_id: 42,
+        reaction: [],
+        is_big: false
+      }
+    ]);
+  });
+
+  it("uses the latest original Telegram message for aggregated inbound text", async () => {
+    const { adapter, calls } = createTelegramStreamingHarness();
+    const message = updateToChannelMessage({
+      update_id: 10,
+      message: {
+        message_id: 40,
+        chat: { id: "123", type: "private" },
+        from: { id: "user-1" },
+        text: "hello"
+      }
+    });
+    expect(message).toBeDefined();
+    message!.metadata = {
+      telegram: {
+        messageId: 40,
+        attributionMessageIds: [40, 41, 42]
+      }
+    };
+
+    await adapter.setInboundProcessingIndicator(message!, true);
+
+    expect(callsFor(calls, "setMessageReaction")[0]?.body.message_id).toBe(42);
+  });
+
+  it("treats Telegram processing reaction failures as best-effort", async () => {
+    const { adapter, calls } = createTelegramStreamingHarness({
+      failMethods: { setMessageReaction: [1] }
+    });
+    const message = updateToChannelMessage({
+      update_id: 10,
+      message: {
+        message_id: 42,
+        chat: { id: "123", type: "private" },
+        from: { id: "user-1" },
+        text: "hello"
+      }
+    });
+    expect(message).toBeDefined();
+
+    await expect(adapter.setInboundProcessingIndicator(message!, true)).resolves.toBe(false);
+    expect(callsFor(calls, "setMessageReaction")).toHaveLength(1);
+  });
+
+  it("skips the processing reaction when no valid Telegram message id is available", async () => {
+    const { adapter, calls } = createTelegramStreamingHarness();
+    const message: ChannelMessage = {
+      id: "message-without-platform-id",
+      channel: "telegram",
+      sessionKey: { platform: "telegram", chatId: "123", userId: "user-1" },
+      sender: { id: "user-1" },
+      text: "hello",
+      receivedAt: new Date().toISOString()
+    };
+
+    await expect(adapter.setInboundProcessingIndicator(message, true)).resolves.toBe(false);
+    expect(callsFor(calls, "setMessageReaction")).toHaveLength(0);
+  });
+
+  it("does not react to callback-query messages", async () => {
+    const { adapter, calls } = createTelegramStreamingHarness();
+    const message: ChannelMessage = {
+      id: "telegram-callback-1",
+      channel: "telegram",
+      sessionKey: { platform: "telegram", chatId: "123", userId: "user-1" },
+      sender: { id: "user-1" },
+      text: "callback-action",
+      receivedAt: new Date().toISOString(),
+      metadata: {
+        telegram: {
+          messageId: 42,
+          callbackQueryId: "callback-1"
+        }
+      }
+    };
+
+    await expect(adapter.setInboundProcessingIndicator(message, true)).resolves.toBe(false);
+    expect(callsFor(calls, "setMessageReaction")).toHaveLength(0);
+  });
+
   it("renders generic actions as Telegram inline keyboard buttons", async () => {
     const bodies: Array<Record<string, unknown>> = [];
     const fetch = vi.fn(async (_url: string, init?: { body?: string }) => {
@@ -407,8 +523,9 @@ describe("TelegramAdapter", () => {
   it("delivery.sendText sends short messages once", async () => {
     const { adapter, bodies } = createTelegramTextHarness();
 
-    await adapter.delivery.sendText({ platform: "telegram", chatId: "123" }, "short reply");
+    const receipt = await adapter.delivery.sendText({ platform: "telegram", chatId: "123" }, "short reply");
 
+    expect(receipt).toEqual({ messageIds: ["1"] });
     expect(bodies).toHaveLength(1);
     expect(sentText(bodies[0])).toBe("short reply");
     expect(bodies[0]?.parse_mode).toBe("HTML");
@@ -948,7 +1065,8 @@ describe("TelegramAdapter", () => {
     expect(result).toEqual({
       delivered: true,
       fallbackRequired: false,
-      deliveredText: "<>&".repeat(1_500)
+      deliveredText: "<>&".repeat(1_500),
+      messageIds: ["1", "2", "3", "4", "5"]
     });
     expect(callsFor(calls, "sendRichMessageDraft")).toHaveLength(1);
     expect(callsFor(calls, "sendMessageDraft")).toHaveLength(0);
@@ -976,7 +1094,8 @@ describe("TelegramAdapter", () => {
     expect(result).toEqual({
       delivered: true,
       fallbackRequired: false,
-      deliveredText: "final"
+      deliveredText: "final",
+      messageIds: ["2"]
     });
     expect(callsFor(calls, "sendMessage").map((call) => call.body.text)).toEqual(["first", "final"]);
     expect(callsFor(calls, "deleteMessage").map((call) => call.body.message_id)).toEqual([1]);
@@ -1009,7 +1128,8 @@ describe("TelegramAdapter", () => {
     expect(result).toEqual({
       delivered: true,
       fallbackRequired: false,
-      deliveredText: "fallback"
+      deliveredText: "fallback",
+      messageIds: ["1"]
     });
   });
 
@@ -1036,6 +1156,28 @@ describe("TelegramAdapter", () => {
     expect(callsFor(calls, "sendMessage")).toHaveLength(1);
     expect(callsFor(calls, "editMessageText")).toHaveLength(0);
     expect(callsFor(calls, "deleteMessage")).toHaveLength(0);
+  });
+
+  it("delivery.startStreamingText draft fallback reports final chunks sent before a later chunk fails", async () => {
+    vi.useFakeTimers();
+    const { adapter, calls } = createTelegramStreamingHarness({
+      failMethods: { sendMessage: [2] }
+    });
+    const handle = adapter.delivery.startStreamingText!({ platform: "telegram", chatId: "123", chatType: "dm" }, {
+      minInitialChars: 1,
+      transport: "draft"
+    });
+
+    handle.append("draft");
+    await flushTelegramStreamingTimers();
+    const result = await handle.finish("<>&".repeat(1_500));
+
+    expect(result).toEqual({
+      delivered: false,
+      fallbackRequired: true,
+      messageIds: ["1"]
+    });
+    expect(callsFor(calls, "sendMessage")).toHaveLength(2);
   });
 
   it("delivery.startStreamingText segmentBreak with drafts materializes the segment and rotates draft IDs", async () => {
@@ -1098,7 +1240,8 @@ describe("TelegramAdapter", () => {
     expect(result).toEqual({
       delivered: true,
       fallbackRequired: false,
-      deliveredText: "**final** <raw>"
+      deliveredText: "**final** <raw>",
+      messageIds: ["2"]
     });
     expect(callsFor(calls, "sendRichMessage")[0]?.body).toMatchObject({
       chat_id: "123",
@@ -1206,7 +1349,8 @@ describe("TelegramAdapter", () => {
 
     expect(result).toEqual({
       delivered: false,
-      fallbackRequired: true
+      fallbackRequired: true,
+      messageIds: ["1"]
     });
     expect(callsFor(calls, "sendRichMessage")).toHaveLength(1);
     expect(callsFor(calls, "sendMessage").map((call) => call.body.text)).toEqual(["preview▌"]);
@@ -1677,7 +1821,8 @@ describe("TelegramAdapter", () => {
     expect(result).toEqual({
       delivered: true,
       fallbackRequired: false,
-      deliveredText: "final <answer>"
+      deliveredText: "final <answer>",
+      messageIds: ["2"]
     });
     expect(callsFor(calls, "sendRichMessage").at(-1)?.body).toMatchObject({
       rich_message: {
@@ -1728,7 +1873,8 @@ describe("TelegramAdapter", () => {
     expect(result).toEqual({
       delivered: true,
       fallbackRequired: false,
-      deliveredText: "final <answer>"
+      deliveredText: "final <answer>",
+      messageIds: ["2"]
     });
     expect(callsFor(calls, "sendMessage").map((call) => call.body.text)).toEqual(["draft▌"]);
     expect(callsFor(calls, "sendRichMessage").at(-1)?.body).toMatchObject({
@@ -1759,7 +1905,8 @@ describe("TelegramAdapter", () => {
     expect(result).toEqual({
       delivered: true,
       fallbackRequired: false,
-      deliveredText: "final"
+      deliveredText: "final",
+      messageIds: ["3"]
     });
     expect(callsFor(calls, "sendMessage").map((call) => call.body.text)).toEqual(["first|", "second|"]);
     expect(callsFor(calls, "sendRichMessage").at(-1)?.body).toMatchObject({
@@ -1790,7 +1937,8 @@ describe("TelegramAdapter", () => {
     expect(result).toEqual({
       delivered: true,
       fallbackRequired: false,
-      deliveredText: "final"
+      deliveredText: "final",
+      messageIds: ["2", "1"]
     });
     expect(callsFor(calls, "sendMessage").map((call) => call.body.text)).toEqual(["draft▌"]);
     expect(callsFor(calls, "sendRichMessage").at(-1)?.body).toMatchObject({
@@ -1930,7 +2078,8 @@ describe("TelegramAdapter", () => {
     expect(result).toEqual({
       delivered: false,
       fallbackRequired: true,
-      fallbackText: " pending final"
+      fallbackText: " pending final",
+      messageIds: ["1"]
     });
     expect(callsFor(calls, "sendMessage").map((call) => call.body.text)).toEqual(["draft|"]);
   });
@@ -1958,7 +2107,8 @@ describe("TelegramAdapter", () => {
 
     expect(result).toEqual({
       delivered: false,
-      fallbackRequired: true
+      fallbackRequired: true,
+      messageIds: ["1"]
     });
   });
 
@@ -1987,7 +2137,8 @@ describe("TelegramAdapter", () => {
     expect(result).toEqual({
       delivered: true,
       fallbackRequired: false,
-      deliveredText: "fallback"
+      deliveredText: "fallback",
+      messageIds: ["3"]
     });
   });
 
@@ -2327,7 +2478,8 @@ describe("TelegramAdapter", () => {
     expect(result).toEqual({
       delivered: true,
       fallbackRequired: false,
-      deliveredText: "final"
+      deliveredText: "final",
+      messageIds: ["4"]
     });
     expect(callsFor(calls, "sendRichMessage").at(-1)?.body).toMatchObject({
       rich_message: {
@@ -2619,6 +2771,26 @@ describe("TelegramAdapter", () => {
     });
   });
 
+  it("deletes an inbound message only from its Telegram transport metadata", async () => {
+    const { adapter, calls } = createTelegramStreamingHarness();
+    const message = updateToChannelMessage({
+      update_id: 43,
+      message: {
+        message_id: 17,
+        text: "sensitive value",
+        chat: { id: "chat-1", type: "private" },
+        from: { id: "user-1" }
+      }
+    });
+
+    expect(message).toBeDefined();
+    await expect(adapter.deleteInboundMessage(message!)).resolves.toBe(true);
+    expect(callsFor(calls, "deleteMessage")[0]?.body).toEqual({
+      chat_id: "chat-1",
+      message_id: 17
+    });
+  });
+
   it("acknowledges callback queries after polling", async () => {
     const calls: TelegramHarnessCall[] = [];
     const fetch = vi.fn(async (url: string, init?: { body?: string }) => {
@@ -2674,6 +2846,41 @@ describe("TelegramAdapter", () => {
     });
   });
 
+  it("releases polling only while a secure-input handler is waiting", async () => {
+    const polls = [
+      [{ update_id: 50, message: { message_id: 20, text: "start", chat: { id: "chat-1", type: "private" }, from: { id: "user-1" } } }],
+      [{ update_id: 51, message: { message_id: 21, text: "credential", chat: { id: "chat-1", type: "private" }, from: { id: "user-1" } } }]
+    ];
+    let pollIndex = 0;
+    const fetch = vi.fn(async (url: string) => ({
+      ok: true,
+      status: 200,
+      json: async () => ({
+        ok: true,
+        result: url.endsWith("/getUpdates") ? polls[pollIndex++] ?? [] : true
+      })
+    }));
+    const adapter = new TelegramAdapter({ botToken: "test-token", fetch });
+    let resolveWaiting: (() => void) | undefined;
+    const waiting = new Promise<void>((resolve) => { resolveWaiting = resolve; });
+    let firstFinished = false;
+    await adapter.start(async (message) => {
+      if (message.text === "start") {
+        const close = adapter.beginSecureInputIntake();
+        await waiting;
+        close();
+        firstFinished = true;
+      } else {
+        resolveWaiting?.();
+      }
+    });
+
+    await expect(adapter.pollOnce()).resolves.toBe(1);
+    expect(firstFinished).toBe(false);
+    await expect(adapter.pollOnce()).resolves.toBe(1);
+    await vi.waitFor(() => expect(firstFinished).toBe(true));
+  });
+
   it("preserves Telegram media group ids on parsed messages", () => {
     const message = updateToChannelMessage({
       update_id: 45,
@@ -2700,6 +2907,67 @@ describe("TelegramAdapter", () => {
       mediaGroupId: "album-1",
       messageId: 10,
       updateId: 45
+    }));
+  });
+
+  it("preserves the replied Telegram message id as bounded adapter metadata", () => {
+    const message = updateToChannelMessage({
+      update_id: 46,
+      message: {
+        message_id: 11,
+        date: 1700000000,
+        text: "what did this cost?",
+        chat: { id: "chat-1", type: "private" },
+        reply_to_message: { message_id: 7 }
+      }
+    });
+
+    expect(message?.metadata?.telegram).toEqual(expect.objectContaining({
+      messageId: 11,
+      replyToMessageId: 7
+    }));
+  });
+
+  it("omits missing or malformed replied Telegram message ids from adapter metadata", () => {
+    const missing = updateToChannelMessage({
+      update_id: 47,
+      message: {
+        message_id: 12,
+        text: "standalone",
+        chat: { id: "chat-1", type: "private" }
+      }
+    });
+    const malformed = updateToChannelMessage({
+      update_id: 48,
+      message: {
+        message_id: 13,
+        text: "bad reply",
+        chat: { id: "chat-1", type: "private" },
+        reply_to_message: { message_id: "7" as never }
+      }
+    });
+
+    expect(missing?.metadata?.telegram).not.toHaveProperty("replyToMessageId");
+    expect(malformed?.metadata?.telegram).not.toHaveProperty("replyToMessageId");
+  });
+
+  it("preserves a bounded reply id for edited messages in Telegram topics", () => {
+    const message = updateToChannelMessage({
+      update_id: 49,
+      edited_message: {
+        message_id: 14,
+        message_thread_id: 99,
+        text: "edited reply",
+        chat: { id: "group-1", type: "supergroup" },
+        from: { id: "user-1" },
+        reply_to_message: { message_id: 8 }
+      }
+    });
+
+    expect(message?.sessionKey).toMatchObject({ chatType: "thread", threadId: "99" });
+    expect(message?.metadata?.telegram).toEqual(expect.objectContaining({
+      messageId: 14,
+      replyToMessageId: 8
     }));
   });
 

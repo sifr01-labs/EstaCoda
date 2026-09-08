@@ -446,6 +446,7 @@ function isNativeIntent(value: string): value is NativeIntent {
     value === "voice-transcription" ||
     value === "speech-generation" ||
     value === "attachment-analysis" ||
+    value === "browser-control" ||
     value === "general";
 }
 

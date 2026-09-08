@@ -31,20 +31,21 @@ Bare `/` opens the slash menu.
 
 ### `/sessions` or `/session`
 
-List recent sessions for the active profile.
+In an interactive CLI, open the shared session picker for the selected profile and current workspace. The current session is excluded. Enter switches to the focused session; Escape cancels without changing runtimes.
 
-**State touched:** None (read-only).
+**State touched:** Listing and cancellation are read-only. A successful switch updates the profile/workspace entry in `~/.estacoda/cli-sessions.json`.
 
-**Gateway difference:** Gateway `/sessions` lists recent sessions for the channel user.
+**Fallback and gateway difference:** Contexts without the interactive picker continue to list recent sessions. Gateway `/sessions` keeps its channel-specific list behavior and does not adopt the CLI picker.
 
 ### `/switch <session-id>`
 
 Switch the current runtime to an existing session.
 
-**State touched:** SQLite session DB (active session pointer).
+**State touched:** The session DB is read for validation. A successful CLI switch updates the scoped continuation pointer in `~/.estacoda/cli-sessions.json`; it does not rewrite the transcript, origin surface, or channel attachments.
 
 **Failure modes:**
-- Rejects if the session does not exist in the active profile.
+- Rejects if the session is missing, ended, internal, a child session, outside the active profile, or outside the current workspace.
+- Uses a generic unavailable message rather than disclosing another profile or workspace.
 - Rejects if `switchRuntime` is not available in the current context.
 
 ### `/reset` or `/new`

@@ -1,0 +1,37 @@
+{
+  "id": "vision-rotation",
+  "title": "Vision rotation reliability",
+  "channel": "provider",
+  "evidence": "implemented but not live-proven",
+  "optIn": true,
+  "metrics": [
+    "accuracy_percent",
+    "hallucination_count",
+    "latency_ms",
+    "cost_usd",
+    "fallback_count",
+    "approval_frequency_percent"
+  ],
+  "goal": "Verify normalization and OCR remain correct for a rotated receipt.",
+  "prompt": "Use vision.analyze with mode ocr, detail high, and output detailed. Transcribe the rotated receipt exactly.",
+  "prerequisites": [
+    "Run pnpm run eval:vision:fixtures.",
+    "Configure and explicitly enable a vision-capable live route."
+  ],
+  "fixtures": [
+    ".estacoda/eval-fixtures/vision/rotation.png"
+  ],
+  "steps": [
+    "Run the OCR prompt against the rotated fixture.",
+    "Compare identifier, amount, and approval value with manifest.json.",
+    "Record normalization metadata, including dimensions and orientation handling."
+  ],
+  "assertions": [
+    "All three expected strings are recovered.",
+    "The amount and receipt identifier are exact.",
+    "Rotation does not cause invented or reversed text."
+  ],
+  "notes": [
+    "Accuracy percent uses the three expected manifest items."
+  ]
+}

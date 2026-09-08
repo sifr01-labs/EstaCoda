@@ -40,7 +40,9 @@ import { createExternalMemoryProvidersFromConfig } from "../memory/external-memo
 import { MemoryPromotionStore } from "../memory/memory-promotion-store.js";
 import { normalizeExternalMemoryConfig, normalizeSessionCompressionConfig, type AgentProfileMode, type AgentResponseLanguage, type EstaCodaConfig, type LoadedRuntimeConfig, type MCPServerConfig, type UiFlavor, type UiLanguage } from "../config/runtime-config.js";
 import { loadMcpServers, type MCPServerSnapshot } from "../mcp/mcp-tools.js";
+import { mcpFailureDiagnostics, sanitizeMcpDiagnostic } from "../mcp/mcp-diagnostics.js";
 import { ProcessManager } from "../process/process-manager.js";
+import { createProtectedProcessEnvironmentTransport, createProtectedProcessStdinTransport } from "../process/protected-process-transports.js";
 import { resolveAuxiliaryModelRoute } from "../providers/auxiliary-model-resolver.js";
 import { createCatalogProvider } from "../providers/catalog-provider.js";
 import { fallbackKnownModelProfiles, inferModelProfile } from "../providers/model-catalog.js";
@@ -52,8 +54,7 @@ import type { SecurityApprovalMode, SecurityPolicy, SecurityRequest } from "../c
 import type { SessionContextWindowUsage, SessionDB } from "../contracts/session.js";
 import type { SessionCostSummary } from "../contracts/usage-cost.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
-import { loadSessionContextWindowUsage } from "../session/session-context-window-usage.js";
-import { loadSessionCostUsage } from "../session/session-cost-usage.js";
+import { createUsageInspector, type UsageInspector } from "../session/usage-inspector.js";
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
 import {
   SessionFinalizationQueue,
@@ -66,6 +67,13 @@ import { createProviderUsageRecorder } from "../providers/provider-usage-ledger.
 import { SQLiteProviderSpendController } from "../tasks/sqlite-provider-spend.js";
 import { SessionCompressionService, type CompactResult } from "../prompt/session-compression-service.js";
 import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
+import { EphemeralSecretBroker } from "../security/ephemeral-secret-broker.js";
+import { SecureInputTransportRegistry } from "../security/secure-input-transport-registry.js";
+import { matchesProtectedArgumentPointer } from "../security/protected-argument-path.js";
+import { createProtectedToolArgumentTransport } from "../security/protected-tool-argument-transport.js";
+import { createProtectedBrowserValueSource } from "../security/protected-browser-value-source.js";
+import { createProfileEnvSecretStore, createRegisteredSecretStoreTransport, RegisteredSecretStoreRegistry } from "../security/registered-secret-store.js";
+import { createProtectedBrowserFieldTransport } from "../browser/protected-browser-field-transport.js";
 import { createSecurityPolicyForMode } from "../security/security-policy-factory.js";
 import { type ApprovalScope, type PersistedWorkspaceApprovalGrant, type SmartApprovalAssessorRuntimeConfig, type WorkspaceApprovalController } from "../security/workspace-approval-controller.js";
 import { loadSkillsFromDirectory } from "../skills/skill-loader.js";
@@ -98,6 +106,7 @@ import type { WorkspaceFsAdapter } from "../tools/workspace-tools.js";
 import { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import type { AgentLoopInput, AgentLoopResponse } from "./agent-loop.js";
 import { AgentLoopBuilder, type AgentLoopExecutionControls } from "./agent-loop-builder.js";
+import { SecureInputCoordinator, type SecureInputAuthorizationHandler, type SecureInputWaitHandler } from "./secure-input-coordinator.js";
 import { DefaultChildAgentLoopFactory } from "./agent-loop-factory.js";
 import { createSessionRuntimeContext } from "./session-runtime-context.js";
 import { buildStatusViewModel, buildKeyValueBlockViewModel, kv, buildWarningErrorViewModel, buildStartupViewModel, buildTableViewModel } from "../ui/view-models/builders.js";
@@ -173,12 +182,14 @@ export type RuntimeOptions = {
     launchArgs?: string[];
     chromeFlags?: string[];
     autoLaunch: boolean;
+    headless?: boolean;
     supervised?: boolean;
     hybridRouting?: boolean;
     cloudFallback?: boolean;
     cloudSpendApproved?: "pending" | boolean;
     summarizeSnapshots?: LoadedRuntimeConfig["browser"]["summarizeSnapshots"];
     snapshotSummarizeThreshold?: LoadedRuntimeConfig["browser"]["snapshotSummarizeThreshold"];
+    inactivityTimeout?: number;
   };
   tts?: LoadedRuntimeConfig["tts"];
   stt?: LoadedRuntimeConfig["stt"];
@@ -260,6 +271,7 @@ export type Runtime = {
   latestResumeNote(): Promise<string | undefined>;
   currentContextWindowUsage?(): Promise<SessionContextWindowUsage | undefined>;
   currentSessionCost?(): Promise<SessionCostSummary | undefined>;
+  usageInspector?: UsageInspector;
   inspectMemoryPromotions(): Promise<MemoryPromotionRecord[]>;
   recallSession?(query: string): Promise<SessionRecallResult>;
   compactSession?(input?: {
@@ -283,7 +295,15 @@ export type Runtime = {
     toolInput: Record<string, unknown>;
     toolCallId?: string;
     signal?: AbortSignal;
+    onSecureInputRequest?: import("../contracts/secure-input.js").SecureInputRequestHandler;
   }): Promise<import("../tools/tool-executor.js").ToolExecutionRecord | undefined>;
+  createSecureInputRequestHandler?(input: {
+    collect: import("../contracts/secure-input.js").SecureInputCollector;
+    authorize?: SecureInputAuthorizationHandler;
+    onWaitStateChange?: SecureInputWaitHandler;
+    userId?: string;
+    signal?: AbortSignal;
+  }): import("../contracts/secure-input.js").SecureInputRequestHandler;
   transcribeAudio?(input: {
     path: string;
     language?: string;
@@ -339,10 +359,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   const runtimeUiIdentity = resolveRuntimeUiIdentity(options);
   const skillRegistry = new SkillRegistry();
   const memoryStore = new MemoryStore();
-  const artifactStore = new ArtifactStore();
   const profileId = options.profileId ?? "default";
   const globalPaths = resolveGlobalStateHome({ homeDir: options.homeDir });
   const profilePaths = resolveProfileStateHome({ homeDir: options.homeDir, profileId });
+  const artifactStore = new ArtifactStore({ storageRoot: join(profilePaths.profileRoot, "artifacts") });
   const sessionId = options.sessionId ?? createSessionId();
   const sessionRuntimeContext = createSessionRuntimeContext(sessionId);
   const defaultTaskCreationOrigin = normalizeTaskCreationOrigin(options.taskCreationOrigin);
@@ -388,6 +408,15 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       spendingScope: (kind, ownerId) => providerSpendController.getScope(kind, ownerId)
     }),
     backgroundContinuation: () => options.taskBackgroundContinuation ?? "unknown"
+  });
+  const usageInspector = createUsageInspector({
+    sessionDb,
+    taskStore,
+    taskOperatorService,
+    profileId,
+    ...(providerSpendController === undefined ? {} : {
+      spendingScope: (ownerId) => providerSpendController.getScope("session", ownerId)
+    })
   });
   const closeSessionDbOnDispose = options.closeSessionDbOnDispose ?? true;
   const workspaceRoot = options.workspaceRoot ?? process.cwd();
@@ -540,7 +569,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   const skillLoadWarnings: string[] = [];
   const effectiveMcpServers = options.workspaceTrusted === true ? (options.mcpServers ?? {}) : {};
   const loadedMcpServers = await loadMcpServers({
-    servers: effectiveMcpServers
+    servers: effectiveMcpServers,
+    artifactStore
   });
   const mcpTools = loadedMcpServers.flatMap((server) => server.tools);
   // Load skills from explicit profile-local and package sources:
@@ -601,6 +631,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   }) | undefined;
   const browserSessionLifecycle = supervisedLocalCdp
     ? new BrowserSessionLifecycle({
+      inactivityTimeoutMs: options.browser?.inactivityTimeout,
       onCleanup: async (sessionId) => {
         await browserLifecycleBackend?.closeSession?.(sessionId);
       }
@@ -618,6 +649,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         launchArgs: options.browser?.launchArgs,
         chromeFlags: options.browser?.chromeFlags,
         autoLaunch: options.browser?.autoLaunch,
+        headless: options.browser?.headless,
         fetch: options.cdpFetch,
         webSocketFactory: options.cdpWebSocketFactory,
         securityConfig: options.securityConfig,
@@ -632,6 +664,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         launchArgs: options.browser?.launchArgs,
         chromeFlags: options.browser?.chromeFlags,
         autoLaunch: options.browser?.autoLaunch,
+        headless: options.browser?.headless,
         hybridRouting: options.browser?.hybridRouting,
         cloudFallback: options.browser?.cloudFallback,
         cloudSpendApproved: options.browser?.cloudSpendApproved,
@@ -735,7 +768,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     config: compressionConfig,
     route: compressionRoute,
     mainRoute,
-    providerExecutor
+    providerExecutor,
+    artifactStore
   });
   const contextReferenceExpander = new ContextReferenceExpander({ workspaceRoot });
   const projectContext = await new ProjectContextLoader({ workspaceRoot }).load();
@@ -751,6 +785,17 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   await sessionDb.appendEvent(sessionId, {
     kind: "trajectory-linked",
     trajectoryId: trajectoryRecorder.snapshot().id
+  });
+  await sessionDb.appendEvent(sessionId, {
+    kind: "mcp-connection-status",
+    connectors: loadedMcpServers.map(({ snapshot }) => ({
+      name: sanitizeMcpDiagnostic(snapshot.name),
+      connected: snapshot.connected,
+      available: snapshot.available,
+      schemasRegistered: snapshot.schemasRegistered,
+      ...(snapshot.failureStage === undefined ? {} : { failureStage: snapshot.failureStage }),
+      ...(snapshot.error === undefined ? {} : { error: sanitizeMcpDiagnostic(snapshot.error) })
+    }))
   });
 
   const configuredSecurityMode = options.securityMode ?? "adaptive";
@@ -861,6 +906,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       providerExecutor,
       routes: agentLoopRoutes,
       mcpTools,
+      mcpServerSnapshots: loadedMcpServers.map((server) => server.snapshot),
       skillRegistry,
       localSkillsRoot,
       bundledSkillsRoot: bundledSkillsDir,
@@ -938,10 +984,12 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       externalMemoryProviders,
       processManager,
       browserBackend,
+      browserSessionLease: browserSessionLifecycle,
       browserConfig: options.browser,
       artifactStore,
       taskResultService,
       taskOperatorService,
+      usageInspector,
       trustStore,
       cronStore,
       disableCronTools: options.disableCronTools,
@@ -1059,6 +1107,31 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     sessionRecallService,
     memoryCurationService
   } = builtSession;
+  const secretBroker = new EphemeralSecretBroker();
+  const secureInputTransports = new SecureInputTransportRegistry();
+  secureInputTransports.register(createProtectedToolArgumentTransport((request) => {
+    const destination = request.destination;
+    if (destination.type === "tool-argument") {
+      return toolRegistry.get(destination.toolName)?.protectedArguments?.some((entry) =>
+        matchesProtectedArgumentPointer(entry.path, destination.argumentPath) && entry.destination === undefined
+      ) === true;
+    }
+    if (destination.type !== "mcp-argument") return false;
+    return toolRegistry.getRegisteredByToolset("mcp").some((tool) =>
+      tool.protectedArguments?.some((entry) =>
+        matchesProtectedArgumentPointer(entry.path, destination.argumentPath) &&
+        entry.destination?.type === "mcp-argument" &&
+        entry.destination.serverId === destination.serverId &&
+        entry.destination.toolName === destination.toolName
+      ) === true
+    );
+  }));
+  secureInputTransports.register(createProtectedBrowserFieldTransport(browserBackend));
+  secureInputTransports.register(createProtectedProcessStdinTransport(processManager));
+  secureInputTransports.register(createProtectedProcessEnvironmentTransport(processManager));
+  const secretStores = new RegisteredSecretStoreRegistry();
+  secretStores.register(createProfileEnvSecretStore({ profileId, homeDir: options.homeDir }));
+  secureInputTransports.register(createRegisteredSecretStoreTransport(secretStores));
   const taskAgentExecutor = taskStore === undefined
     ? undefined
     : new AgentStepExecutor({
@@ -1086,6 +1159,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     sessionDb,
     taskAgentExecutor,
     taskOperator: taskOperatorService,
+    usageInspector,
     drainTaskSessionCompletions: taskSessionCompletionService === undefined
       ? undefined
       : () => taskSessionCompletionService.deliverPending(sessionRuntimeContext.currentSessionId()),
@@ -1165,22 +1239,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       return cancelled?.kind === "agent-cancelled" ? cancelled.resumeNote : undefined;
     },
     async currentContextWindowUsage() {
-      return await loadSessionContextWindowUsage({
-        sessionDb,
-        sessionId: sessionRuntimeContext.currentSessionId(),
-        profileId
-      });
+      return (await usageInspector.inspectSession(sessionRuntimeContext.currentSessionId()))?.contextWindow;
     },
     async currentSessionCost() {
-      return await loadSessionCostUsage({
-        sessionDb,
-        taskStore,
-        sessionId: sessionRuntimeContext.currentSessionId(),
-        profileId,
-        ...(providerSpendController === undefined ? {} : {
-          spendingScope: (ownerId) => providerSpendController.getScope("session", ownerId)
-        })
-      });
+      return (await usageInspector.inspectSession(sessionRuntimeContext.currentSessionId()))?.usage;
     },
     async inspectMemoryPromotions() {
       return await memoryProvider.inspectPromotions?.() ?? [];
@@ -1240,8 +1302,24 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         trustedWorkspace,
         sessionId: sessionRuntimeContext.currentSessionId(),
         toolCallId: input.toolCallId,
-        signal: input.signal
+        signal: input.signal,
+        onSecureInputRequest: input.onSecureInputRequest
       });
+    },
+    createSecureInputRequestHandler(input) {
+      const coordinator = new SecureInputCoordinator({
+        broker: secretBroker,
+        transports: secureInputTransports,
+        collect: input.collect,
+        browserSource: createProtectedBrowserValueSource(browserBackend),
+        authorize: input.authorize,
+        onWaitStateChange: input.onWaitStateChange
+      });
+      return coordinator.createRequestHandler({
+        profileId,
+        sessionId: sessionRuntimeContext.currentSessionId(),
+        ...(input.userId === undefined ? {} : { userId: input.userId })
+      }, input.signal);
     },
     async transcribeAudio(input) {
       return await transcribeAudioFile({
@@ -1337,6 +1415,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         return;
       }
       disposed = true;
+      secretBroker.dispose();
       unregisterBrowserEmergencyCleanup?.();
       browserSessionLifecycle?.stop();
       await browserSessionLifecycle?.cleanupAll();
@@ -1353,16 +1432,18 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       }
     },
     describe() {
+      const failures = mcpFailureDiagnostics(loadedMcpServers.map((server) => server.snapshot));
       return [
-        `${runtimeBranding.responseLabel} is ready`,
+        `${runtimeBranding.responseLabel} is ready${failures.length === 0 ? "" : " with unavailable connectors"}`,
         `model: ${options.model.provider}/${options.model.id}`,
         `profile: ${options.profileId}`,
         `security: ${activeSecurityMode}${activeSecurityMode === "open" ? " (YOLO)" : ""}`,
         `skills: ${sessionSkillCatalog.length} (${options.skillAutonomy ?? "suggest"})`,
         `tools: ${toolRegistry.list().length}`,
-        `mcp: ${loadedMcpServers.filter((server) => server.snapshot.available).length}/${loadedMcpServers.length}`,
+        `mcp: ${loadedMcpServers.filter((server) => server.snapshot.available).length}/${loadedMcpServers.filter((server) => server.snapshot.enabled).length}`,
         skillLoadWarnings.length === 0 ? undefined : `skill load warnings: ${skillLoadWarnings.length}`,
-        "status: ready"
+        ...failures,
+        failures.length === 0 ? "status: ready" : "status: degraded (connector recovery required)"
       ].filter((line) => line !== undefined).join("\n");
     },
     getStatus() {
@@ -1419,7 +1500,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         skillAutonomy: options.skillAutonomy ?? "suggest",
         toolCount: toolRegistry.list().length,
         mcpActive: loadedMcpServers.filter((server) => server.snapshot.available).length,
-        mcpTotal: loadedMcpServers.length,
+        mcpTotal: loadedMcpServers.filter((server) => server.snapshot.enabled).length,
         warnings: skillLoadWarnings.map((message) =>
           buildWarningErrorViewModel({ severity: "warn", title: "Skill load", message })
         ),
@@ -1447,7 +1528,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
           runtimeBranding.taglineSecondary,
         ].filter((t) => t.length > 0),
         model: { provider: options.model.provider, id: options.model.id },
-        readiness: skillLoadWarnings.length > 0 || loadedMcpServers.some((s) => !s.snapshot.available)
+        readiness: skillLoadWarnings.length > 0 || loadedMcpServers.some((s) => s.snapshot.enabled && !s.snapshot.available)
           ? "degraded"
           : "ready",
         warnings: skillLoadWarnings.map((message) =>

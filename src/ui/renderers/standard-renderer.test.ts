@@ -37,7 +37,7 @@ import {
   slashMenuOption,
 } from "../view-models/builders.js";
 import { StandardRenderer } from "./standard-renderer.js";
-import { closeOpenBidiIsolates, isolateLtr, isolateRtl, LRI, PDI, RLI } from "../bidi.js";
+import { closeOpenBidiIsolates, isolateLtr, isolateRtl, isolateTechnicalTokens, LRI, PDI, RLI } from "../bidi.js";
 import { measureVisibleWidth, stripAnsi } from "./layout.js";
 
 function fullCaps(): TerminalCapabilities {
@@ -2282,6 +2282,86 @@ describe("StandardRenderer — empty and edge states", () => {
     expect(out).toContain("A");
     expect(out).toContain("B");
   });
+
+  it("renders the session picker as a tokenized wide table", () => {
+    const caps = { ...fullCaps(), terminalWidth: 150 };
+    const r = renderer("dark", caps);
+    const longDescription = "Review deployment evidence and investigate every remaining production issue before release ".repeat(2);
+    const vm = buildPickerViewModel({
+      title: "Choose a session",
+      surface: "sessionPicker",
+      columns: [
+        { key: "number", header: "#", alignment: "right" },
+        { key: "session", header: "Session" },
+        { key: "started", header: "Started" },
+        { key: "active", header: "Last active" },
+        { key: "origin", header: "Via" },
+      ],
+      options: [
+        {
+          id: "one",
+          label: longDescription,
+          selected: true,
+          cells: {
+            number: "1",
+            session: longDescription,
+            started: "04 Aug 2026, 10:00",
+            active: "04 Aug 2026, 11:00",
+            origin: "CLI",
+          },
+        },
+        {
+          id: "two",
+          label: "Review Telegram deployment",
+          cells: {
+            number: "2",
+            session: "Review Telegram deployment",
+            started: "03 Aug 2026, 09:00",
+            active: "05 Aug 2026, 12:30",
+            origin: "Telegram",
+          },
+        },
+      ],
+    });
+    const out = r.renderPicker(vm);
+    const plain = stripAnsi(out);
+    expect(plain).toContain("Last active");
+    expect(plain).toContain("03 Aug 2026, 09:00");
+    expect(plain).toContain("05 Aug 2026, 12:30");
+    expect(plain).toContain("Telegram");
+    expect(plain).not.toContain(longDescription);
+    expect(Math.max(...plain.split("\n").map(measureVisibleWidth))).toBeLessThanOrEqual(130);
+    expect(out).toContain("38;2;176;176;176m03 Aug 2026, 09:00");
+    expect(out).toContain("38;2;78;161;255mTelegram");
+    expect(out).toContain("48;2;26;58;92m");
+  });
+
+  it("collapses session activity under the selected row in narrow and ASCII terminals", () => {
+    const r = renderer("dark", { ...noUnicodeCaps(), supportsColor: false, terminalWidth: 64 });
+    const vm = buildPickerViewModel({
+      title: "Choose a session",
+      surface: "sessionPicker",
+      columns: [
+        { key: "number", header: "#", alignment: "right" },
+        { key: "session", header: "Session" },
+        { key: "started", header: "Started" },
+        { key: "active", header: "Last active" },
+        { key: "origin", header: "Via" },
+      ],
+      options: [{
+        id: "one",
+        label: "Review deployment",
+        selected: true,
+        cells: { number: "1", session: "Review deployment", started: "04 Aug, 10:00", active: "04 Aug, 11:00", origin: "CLI" },
+      }],
+      instruction: "Up/Down navigate | ESC cancel",
+    });
+    const out = r.renderPicker(vm);
+    expect(out.split("\n").some((line) => line.startsWith("+") && measureVisibleWidth(line) === 62)).toBe(true);
+    expect(out).toContain("Started: 04 Aug, 10:00");
+    expect(out).toContain("Last active: 04 Aug, 11:00");
+    expect(out).toContain("Via: CLI");
+  });
 });
 
 describe("StandardRenderer — deterministic output", () => {
@@ -2344,6 +2424,50 @@ describe("StandardRenderer — assistant response", () => {
     expect(stripAnsi(out)).not.toContain("Turn total:");
   });
 
+  it("renders a multicolour persisted Task ribbon above the delivered answer", () => {
+    const tokens = resolveTokens("standard", "dark", "kemetBlue");
+    const r = new StandardRenderer({ tokens, capabilities: fullCaps() });
+    const out = r.renderAssistantResponse(buildAssistantResponseViewModel({
+      label: "EstaCoda",
+      text: "The final synthesized answer.",
+      taskTrace: completionTrace(),
+    }));
+    const plain = stripAnsi(out);
+
+    expect(plain).toContain("Synthesis");
+    expect(plain).toContain("Activity trace · 4 activities · 1:50");
+    expect(plain).toContain("✓ complete");
+    expect(plain.indexOf("Activity trace")).toBeLessThan(plain.indexOf("The final synthesized answer."));
+    expect(out).toContain(ansiFgForHex(tokens.contract.trace.plan));
+    expect(out).toContain(ansiFgForHex(tokens.contract.trace.search));
+    expect(out).toContain(ansiFgForHex(tokens.contract.trace.answer));
+    expect(out).toContain(ansiFgForHex(tokens.contract.trace.finish));
+  });
+
+  it("localizes and bounds a degraded Arabic Task ribbon", () => {
+    const caps = { ...fullCaps(), terminalWidth: 48 };
+    const r = new StandardRenderer({
+      tokens: resolveTokens("standard", "dark", "kemetBlue"),
+      capabilities: caps,
+      locale: "ar",
+    });
+    const out = stripAnsi(r.renderAssistantResponse(buildAssistantResponseViewModel({
+      label: "إستاكودا",
+      text: "الإجابة النهائية.",
+      taskTrace: {
+        ...completionTrace(),
+        outcome: "complete_with_warnings",
+        workerOutcomes: { usable: 1, failed: 2, cancelled: 0 },
+      },
+    })));
+
+    expect(out).toContain("مكتمل مع تحذيرات");
+    expect(out).toContain("مسار النشاط");
+    expect(out).toContain("نتائج صالحة: 1");
+    expect(out.split("\n").every((line) => measureVisibleWidth(line) <= 48)).toBe(true);
+    expectBalancedBidiIsolates(out);
+  });
+
   it("wraps the usage footer without losing values on narrow terminals", () => {
     const caps = { ...fullCaps(), terminalWidth: 24 };
     const r = new StandardRenderer({
@@ -2374,6 +2498,26 @@ describe("StandardRenderer — assistant response", () => {
     expectBalancedBidiIsolates(out);
   });
 });
+
+function completionTrace() {
+  return {
+    version: 1 as const,
+    taskId: "task-1",
+    stage: "synthesis" as const,
+    outcome: "complete" as const,
+    answerAvailable: true,
+    activityCount: 4,
+    activityCountComplete: true,
+    totalDurationMs: 110_000,
+    hasEarlierActivities: false,
+    spans: [
+      { category: "plan" as const, scope: { kind: "task" as const, label: "Task" }, status: "completed" as const, durationMs: 10_000, label: "Planning" },
+      { category: "search" as const, scope: { kind: "subagent" as const, label: "Subagent 1" }, status: "completed" as const, durationMs: 20_000, label: "Searching" },
+      { category: "write" as const, scope: { kind: "synthesis" as const, label: "Synthesis" }, status: "completed" as const, durationMs: 70_000, label: "Writing response" },
+      { category: "deliver" as const, scope: { kind: "delivery" as const, label: "Delivery" }, status: "completed" as const, durationMs: 10_000, label: "Finalizing task delivery" },
+    ],
+  };
+}
 
 describe("StandardRenderer — conversation message", () => {
   it("renders assistant message with open horizontal frame and brand title", () => {
@@ -2809,6 +2953,59 @@ describe("StandardRenderer — prompt chrome rails", () => {
     const vm = buildUserPromptRailViewModel({ text: "line one\nline two" });
     const out = r.render(vm);
     expect(stripAnsi(out)).toBe("↳ line one\n  line two");
+  });
+
+  it("renders mixed Arabic user prompt rails with native bidi isolation", () => {
+    const text = "هلا ممكن تستخدم ٣ subagents وتبحث عن RSI";
+    const r = new StandardRenderer({
+      tokens: resolveTokens("standard", "dark", "kemetBlue"),
+      capabilities: fullCaps(),
+      locale: "ar",
+      bidiMode: "native",
+    });
+    const out = stripAnsi(r.render(buildUserPromptRailViewModel({ text })));
+
+    expect(out).toBe(`↳ ${RLI}${isolateTechnicalTokens(text)}${PDI}`);
+    expect(out).toContain(isolateLtr("subagents"));
+    expect(out).toContain(isolateLtr("RSI"));
+    expectBalancedBidiIsolates(out);
+  });
+
+  it("renders mixed Arabic user prompt rails in deterministic software bidi mode", () => {
+    const r = new StandardRenderer({
+      tokens: resolveTokens("standard", "dark", "kemetBlue"),
+      capabilities: fullCaps(),
+      locale: "ar",
+      bidiMode: "software",
+    });
+    const out = stripAnsi(r.render(buildUserPromptRailViewModel({
+      text: "هلا ممكن تستخدم ٣ subagents وتبحث عن RSI",
+    })));
+
+    expect(out).toBe("↳ RSI نع ثحبتو subagents ٣ مدختست نكمم اله");
+    expect(out).not.toContain(RLI);
+    expect(out).not.toContain(PDI);
+  });
+
+  it("wraps mixed Arabic user prompt rails without moving the rail marker or overflowing", () => {
+    const capabilities = { ...fullCaps(), terminalWidth: 24 };
+    const r = new StandardRenderer({
+      tokens: resolveTokens("standard", "dark", "kemetBlue"),
+      capabilities,
+      locale: "ar",
+      bidiMode: "native",
+    });
+    const rows = stripAnsi(r.render(buildUserPromptRailViewModel({
+      text: "هلا ممكن تستخدم ٣ subagents وتبحث عن RSI",
+    }))).split("\n");
+
+    expect(rows.length).toBeGreaterThan(1);
+    expect(rows[0]).toMatch(/^↳ /u);
+    expect(rows.slice(1).every((row) => row.startsWith("  "))).toBe(true);
+    expect(rows.every((row) => measureVisibleWidth(row) <= capabilities.terminalWidth)).toBe(true);
+    expect(rows.join("\n")).toContain(isolateLtr("subagents"));
+    expect(rows.join("\n")).toContain(isolateLtr("RSI"));
+    for (const row of rows) expectBalancedBidiIsolates(row);
   });
 
   it("renders active turn thinking motion with its localized label", () => {

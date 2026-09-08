@@ -1,6 +1,6 @@
 import { padVisibleEnd, truncateVisible, wrapText } from "../../renderers/layout.js";
 import { formatUsageCost, formatUsageCostNotice, formatUsdAmount } from "../../usage-cost-format.js";
-import { renderActivityTraceSurface } from "./activityTraceSurface.js";
+import { renderActivitySpanTraceSurface } from "./activityTraceSurface.js";
 import type { OperatorConsoleLocale } from "./activeWorkCopy.js";
 import type {
   TaskCardResultState,
@@ -26,6 +26,7 @@ type OverviewCopy = {
   readonly stepsSettled: string;
   readonly delegatedStepsCompleted: (completed: number, total: number) => string;
   readonly delegatedStepsSettled: (settled: number, total: number) => string;
+  readonly workerOutcomes: (usable: number, failed: number, cancelled: number) => string;
   readonly tokens: string;
   readonly subagents: string;
   readonly plan: string;
@@ -60,6 +61,11 @@ const COPY: Readonly<Record<OperatorConsoleLocale, OverviewCopy>> = {
     stepsSettled: "Steps settled",
     delegatedStepsCompleted: (completed, total) => `${completed} of ${total} delegated Steps completed`,
     delegatedStepsSettled: (settled, total) => `${settled} of ${total} delegated Steps settled`,
+    workerOutcomes: (usable, failed, cancelled) => [
+      `${usable} usable ${usable === 1 ? "report" : "reports"}`,
+      ...(failed === 0 ? [] : [`${failed} failed`]),
+      ...(cancelled === 0 ? [] : [`${cancelled} cancelled`]),
+    ].join(" · "),
     tokens: "tokens",
     subagents: "Subagents",
     plan: "Plan Steps",
@@ -82,7 +88,7 @@ const COPY: Readonly<Record<OperatorConsoleLocale, OverviewCopy>> = {
     limit: "Limit",
     none: "none",
     noSubagents: "No delegated Subagents",
-    closeHint: "Esc return · ↑/↓ select Subagent · Enter inspect · ←/→ events · PgUp/PgDn scroll",
+    closeHint: "Esc return · ↑/↓ select Subagent · Enter inspect · ←/→ activities · PgUp/PgDn scroll",
     mouseActiveHint: "[Mouse Mode] Click or wheel here · Esc release",
     mouseToggleHint: "Ctrl+G mouse",
   },
@@ -92,6 +98,11 @@ const COPY: Readonly<Record<OperatorConsoleLocale, OverviewCopy>> = {
     stepsSettled: "خطوات مستقرة",
     delegatedStepsCompleted: (completed, total) => `اكتملت ${completed} من ${total} خطوات مفوضة`,
     delegatedStepsSettled: (settled, total) => `استقرت ${settled} من ${total} خطوات مفوضة`,
+    workerOutcomes: (usable, failed, cancelled) => [
+      `نتائج صالحة: ${usable}`,
+      ...(failed === 0 ? [] : [`فشل: ${failed}`]),
+      ...(cancelled === 0 ? [] : [`أُلغي: ${cancelled}`]),
+    ].join(" · "),
     tokens: "رمز",
     subagents: "الوكلاء الفرعيون",
     plan: "خطوات الخطة",
@@ -114,7 +125,7 @@ const COPY: Readonly<Record<OperatorConsoleLocale, OverviewCopy>> = {
     limit: "الحد",
     none: "لا يوجد",
     noSubagents: "لا يوجد وكلاء فرعيون مفوضون",
-    closeHint: "Esc للعودة · ↑/↓ لاختيار وكيل فرعي · Enter للفحص · ←/→ للأحداث · PgUp/PgDn للتمرير",
+    closeHint: "Esc للعودة · ↑/↓ لاختيار وكيل فرعي · Enter للفحص · ←/→ للأنشطة · PgUp/PgDn للتمرير",
     mouseActiveHint: "[وضع الماوس] انقر أو مرّر هنا · Esc للتحرير",
     mouseToggleHint: "Ctrl+G للماوس",
   },
@@ -185,7 +196,7 @@ export function taskOverviewContentLines(
     ...objectiveLines,
     lifecycleColor === undefined ? lifecycle : styleColor(style, lifecycle, lifecycleColor),
     "",
-    ...renderActivityTraceSurface(card, options.inspection, { width: contentWidth, locale, style }),
+    ...renderActivitySpanTraceSurface(card, options.inspection, { width: contentWidth, locale, style }),
     "",
   ];
 
@@ -391,6 +402,9 @@ function formatLifecycleProgress(card: TaskCardState, copy: OverviewCopy): strin
   if (workers === undefined) {
     return `${card.progress.completed + card.progress.skipped} of ${card.progress.total} ${copy.stepsSettled}`;
   }
+  if (workers.settled === workers.total && (workers.failed > 0 || workers.cancelled > 0)) {
+    return copy.workerOutcomes(workers.usable, workers.failed, workers.cancelled);
+  }
   return workers.completed === workers.total
     ? copy.delegatedStepsCompleted(workers.completed, workers.total)
     : copy.delegatedStepsSettled(workers.settled, workers.total);
@@ -400,7 +414,7 @@ function formatTaskPhase(
   phase: TaskCardState["phase"]["name"],
   locale: OperatorConsoleLocale
 ): string {
-  if (locale === "en") return formatStatus(phase);
+  if (locale === "en") return phase === "partial" ? "completed with warnings" : formatStatus(phase);
   switch (phase) {
     case "planning": return "قيد التخطيط";
     case "queued": return "في قائمة الانتظار";
@@ -412,7 +426,7 @@ function formatTaskPhase(
     case "waiting_for_approval": return "بانتظار الموافقة";
     case "paused": return "متوقفة مؤقتاً";
     case "completed": return "مكتملة";
-    case "partial": return "مكتملة جزئياً";
+    case "partial": return "اكتملت مع تحذيرات";
     case "failed": return "فشلت";
     case "cancelled": return "ملغاة";
   }

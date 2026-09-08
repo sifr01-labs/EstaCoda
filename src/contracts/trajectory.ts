@@ -1,3 +1,11 @@
+import type {
+  ExecutionCompletionFloor,
+  ConfirmedActionReceipt,
+  ExecutionFinalOutcomeStatus,
+  ExecutionTerminationCause,
+  UncertainActionReceipt
+} from "./execution-plan.js";
+
 export type TrajectoryEventKind =
   | "session-start"
   | "user-input"
@@ -18,13 +26,24 @@ export type TrajectoryEventKind =
   | "provider-completion"
   | "provider-continuation"
   | "provider-iteration"
+  | "provider-tool-inventory"
   | "provider-budget-exhausted"
+  | "execution-plan-started"
+  | "execution-plan-updated"
+  | "execution-plan-completed"
+  | "execution-plan-blocked"
+  | "execution-plan-transferred"
+  | "execution-plan-abandoned"
+  | "execution-checkpoint-updated"
+  | "execution-evidence-recorded"
+  | "execution-final-outcome-recorded"
   | "skill-route-usage"
   | "skill-route-telemetry"
   | "skill-lifecycle-changed"
   | "security-risk-escalated"
   | "agent-cancelled"
   | "prompt-assembled"
+  | "session-recall-stage"
   | "session-recall-decision"
   | "external-memory-recall"
   | "external-memory-mirror-write"
@@ -52,8 +71,13 @@ export type Trajectory = {
   events: TrajectoryEvent[];
   outcome?: {
     success: boolean;
+    status?: ExecutionFinalOutcomeStatus;
+    terminationCause?: ExecutionTerminationCause;
+    completionFloor?: ExecutionCompletionFloor;
     summary: string;
     userAccepted?: boolean;
+    confirmedActions?: ConfirmedActionReceipt[];
+    uncertainActions?: UncertainActionReceipt[];
   };
 };
 

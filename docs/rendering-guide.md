@@ -350,6 +350,8 @@ buildApprovalSecurityViewModel({
 | Writing terminal output into the live prompt region | Route through the Papyrus raw prompt, surface controller, or Operator Console host. |
 | Mirroring secret prompt input into preview/status chrome | Keep secret prompt content inside the prompt answer path only. |
 | Rendering tool activity with fixed live slots or timers | Route tool-start/tool-result rows through the Operator Console active-work surface, with durable/plain fallbacks outside TTY console rendering. |
+| Rendering raw tool or MCP identifiers as the primary label | Resolve the shared `status | family | action | object | telemetry` presentation and retain the raw identity only in runtime state and diagnostics. |
+| Using caution color for elapsed time | Reserve caution for waiting, approval, and attention states; durations remain muted telemetry regardless of length. |
 | Putting a prompt marker inside placeholder copy | Let the prompt row own `>`/`›`; placeholder copy starts with the hint text. |
 
 ---
@@ -394,8 +396,30 @@ truncation or padding.
 Live and settled assistant text share one render-time bidi preparation path.
 It contains untrusted directional controls to each logical line, isolates mixed
 LTR runs before wrapping, and gives each wrapped Arabic row its own directional
-isolate. Stored transcript and streaming state remain in logical order. Editable
-prompt rows continue to use terminal-native bidi and are not software-reordered.
+isolate. Stored transcript and streaming state remain in logical order.
+
+Editable Papyrus text uses the shared `editableTextLayout` primitive. The
+backing prompt or steer draft remains in logical order, while the layout resolves
+UAX #9 embedding levels, wraps on grapheme boundaries, retains logical-to-visual
+cluster mappings, right-aligns RTL rows, and derives the terminal cursor column
+and visual left/right navigation from the same result. Rendered rows are placed
+inside a paragraph-direction isolate so terminal shaping cannot reorder adjacent
+console chrome. Pure LTR input retains the existing fast path without isolates.
+Submitted user prompt rails reuse the same layout in read-only mode without RTL
+alignment. The rail marker remains outside the directional paragraph, technical
+tokens stay isolated, and the runtime payload remains the original logical text.
+Pasted-text attachment cards use that read-only layout for their bounded preview
+row as well. Preview redaction still happens before layout, and neither native nor
+software rendering changes the stored attachment content that is submitted.
+
+The live terminal boundary resolves Papyrus's existing bidi policy once per
+frame. Native mode emits isolated logical-order text so the terminal retains
+Arabic shaping ownership. Software mode emits the layout's UAX #9 visual
+clusters for terminal families that Papyrus identifies as needing software
+ordering, including Windows Terminal and VS Code's integrated terminal. Pure
+surface tests must pass a resolved `native` or `software` mode explicitly rather
+than reading process environment during rendering. When adding terminal support,
+verify the real emulator using the mixed-input matrix in `docs/manual-qa.md`.
 
 Inside the Papyrus screen buffer, zero-width direction controls are packed into
 an adjacent visible cell's string when that content exists. They never receive

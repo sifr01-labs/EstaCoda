@@ -1,5 +1,5 @@
 import { afterEach, describe, it, expect, vi } from "vitest";
-import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import {
@@ -11,6 +11,7 @@ import {
 } from "./channel-gateway.js";
 import { ChannelApprovalStore } from "./channel-approval-store.js";
 import { createFakeTelegramAdapter } from "../test/fakes/fake-telegram-adapter.js";
+import { TelegramAdapter } from "./telegram-adapter.js";
 import { InMemorySurfacePointerStore } from "./surface-pointer-store.js";
 import type {
   ChannelAdapter,
@@ -33,8 +34,14 @@ import type { FakeDeliveryRecord } from "../test/fakes/fake-channel-adapter.js";
 import { HookRegistry } from "../gateway/hook-registry.js";
 import { createSQLiteSessionDB } from "../session/session-setup.js";
 import { GatewayApprovalQueue } from "../gateway/approval-queue.js";
+import { SQLitePendingTurnStore } from "../gateway/pending-turn-store.js";
 import { WorkspaceApprovalController, WorkspaceApprovalStore } from "../security/workspace-approval-controller.js";
-import { renderApprovalActions, renderSetupApprovalActions } from "./approval-actions.js";
+import {
+  parseSecureInputAction,
+  renderApprovalActions,
+  renderSecureInputActions,
+  renderSetupApprovalActions
+} from "./approval-actions.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import { loadRuntimeConfig } from "../config/runtime-config.js";
 import { resolveProfileStateHome } from "../config/profile-home.js";
@@ -136,6 +143,7 @@ function runtimeResponse(input: {
   toolExecutions?: Awaited<ReturnType<Runtime["handle"]>>["toolExecutions"];
   artifacts?: Awaited<ReturnType<Runtime["handle"]>>["artifacts"];
   setupApprovals?: Awaited<ReturnType<Runtime["handle"]>>["setupApprovals"];
+  turnUsage?: Awaited<ReturnType<Runtime["handle"]>>["turnUsage"];
 }): Awaited<ReturnType<Runtime["handle"]>> {
   return {
     label: "test",
@@ -150,6 +158,7 @@ function runtimeResponse(input: {
     context: undefined,
     projectContext: undefined,
     setupApprovals: input.setupApprovals,
+    ...(input.turnUsage === undefined ? {} : { turnUsage: input.turnUsage }),
     progress: []
   };
 }
@@ -254,6 +263,7 @@ function createStreamingGatewayHarness(input: {
     | { kind: "segmentBreak"; reason?: string }
   >;
   deliveryRouter?: ChannelGatewayOptions["deliveryRouter"];
+  channelMessageTurnStore?: ChannelGatewayOptions["channelMessageTurnStore"];
   telegramStreaming?: ChannelGatewayOptions["telegramStreaming"];
 } = {}): StreamingGatewayHarness {
   const handle = input.handle ?? createStreamingHandleSpy();
@@ -292,7 +302,8 @@ function createStreamingGatewayHarness(input: {
       maxFloodStrikes: 3,
       cleanupFailedAttempts: false
     },
-    deliveryRouter: input.deliveryRouter
+    deliveryRouter: input.deliveryRouter,
+    channelMessageTurnStore: input.channelMessageTurnStore
   });
 
   return { adapter: adapter as StreamingGatewayHarness["adapter"], handle, gateway, runtime };
@@ -351,6 +362,290 @@ function createRecordingDeliveryRouter() {
   } as unknown as ChannelGatewayOptions["deliveryRouter"];
   return { deliveryRouter, routedTexts, routedArtifacts, routedProgress };
 }
+
+describe("ChannelGateway Telegram secure input", () => {
+  function createSecureInputGateway(mode: "protected-handoff" | "direct-dm" | "disabled" = "direct-dm") {
+    const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+    const deleted: ChannelMessage[] = [];
+    adapter.deleteInboundMessage = async (message) => {
+      deleted.push(message);
+      return true;
+    };
+    const runtime = createMinimalRuntime();
+    const runtimeTexts: string[] = [];
+    const consumed: string[] = [];
+    runtime.createSecureInputRequestHandler = (input) => async (request, consume) => {
+      const snapshot = {
+        id: "request-1",
+        scope: { profileId: "default", sessionId: "session-1", userId: "user-1" },
+        request,
+        status: "awaiting_input" as const,
+        requestedAt: new Date().toISOString(),
+        expiresAt: new Date(Date.now() + 60_000).toISOString()
+      };
+      const collected = await input.collect(snapshot, input.signal ?? new AbortController().signal, {
+        verifiedDestinationLabel: "Verified password field"
+      });
+      if (collected.status === "provided") {
+        await consume(collected.value, {
+          requestId: snapshot.id,
+          scope: snapshot.scope,
+          request,
+          signal: input.signal ?? new AbortController().signal
+        });
+        collected.value.fill(0);
+        return { status: "delivered", destinationLabel: "Verified password field", persisted: false };
+      }
+      return { status: "cancelled", destinationLabel: "Verified password field", persisted: false };
+    };
+    runtime.handle = async (input) => {
+      runtimeTexts.push(input.text);
+      const receipt = await input.onSecureInputRequest?.({
+        kind: "password",
+        purpose: "Sign in",
+        destination: {
+          type: "browser-field",
+          sessionId: "browser-1",
+          ref: "password",
+          expectedOrigin: "https://example.test"
+        },
+        retention: "use-once",
+        expiresInMs: 60_000
+      }, async (value) => {
+        consumed.push(new TextDecoder().decode(value));
+      });
+      return runtimeResponse({
+        text: receipt?.status === "delivered" ? "Protected credential delivered." : "Protected input canceled.",
+        securityDecision: "allow"
+      });
+    };
+    const gateway = new ChannelGateway({
+      adapters: [adapter],
+      runtimeForSession: async () => runtime,
+      sessionStore: new InMemoryChannelSessionStore(),
+      authPolicy: {
+        telegram: { allowedUserIds: ["user-1"], allowedChatIds: ["123456"] }
+      },
+      telegramSecureInputMode: mode,
+      telegramSecureInputReplayStore: {
+        has: async () => false,
+        record: async () => undefined
+      },
+      profileId: "default"
+    });
+    return { adapter, consumed, deleted, gateway, runtimeTexts };
+  }
+
+  it("uses compact callback actions without exposing request metadata", () => {
+    const actions = renderSecureInputActions("opaque-action", "direct-dm");
+    const values = actions.flat().map((action) => action.value);
+    expect(values.every((value) => value.length <= 64)).toBe(true);
+    expect(values.map(parseSecureInputAction)).toEqual([
+      { actionId: "opaque-action", action: "arm" },
+      { actionId: "opaque-action", action: "trusted-device" },
+      { actionId: "opaque-action", action: "cancel" }
+    ]);
+    expect(parseSecureInputAction("ecsi1:a:not%ZZvalid")).toBeUndefined();
+  });
+
+  it("intercepts an armed direct-DM credential before runtime dispatch and attempts deletion", async () => {
+    const harness = createSecureInputGateway();
+    const sentinel = "SENTINEL-telegram-password-9281";
+    const turn = harness.gateway.receive(makeTelegramDmMessage("sign me in"));
+    await waitFor(() => harness.adapter.records.some((record) => record.text?.includes("Send credential here")));
+
+    const prompt = harness.adapter.records.find((record) => record.text?.includes("Send credential here"));
+    const arm = prompt?.options?.actions?.flat().find((action) => action.label === "Use next message");
+    expect(arm).toBeDefined();
+    await harness.gateway.receive(makeTelegramDmMessage(arm!.value, {
+      id: "callback-arm",
+      metadata: { telegram: { messageId: 88, callbackQueryId: "cb-1", chatType: "private" } }
+    }));
+    await harness.gateway.receive(makeTelegramDmMessage(sentinel, { id: "secret-message" }));
+    await turn;
+
+    expect(harness.consumed).toEqual([sentinel]);
+    expect(harness.deleted.map((message) => message.id)).toEqual(["secret-message"]);
+    expect(harness.runtimeTexts).toEqual(["sign me in"]);
+    expect(JSON.stringify(harness.adapter.records)).not.toContain(sentinel);
+
+    const replay = await harness.gateway.receive(makeTelegramDmMessage(sentinel, { id: "secret-message" }));
+    expect(replay.replyText).toBe("");
+    expect(harness.runtimeTexts).toEqual(["sign me in"]);
+  });
+
+  it("requires both direct-DM allowlists and rejects group capture", async () => {
+    const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+    const gateway = new ChannelGateway({
+      adapters: [adapter],
+      runtimeForSession: async () => createMinimalRuntime(),
+      authPolicy: { telegram: { allowedUserIds: ["user-1"], allowedChatIds: [] } },
+      telegramSecureInputMode: "direct-dm"
+    });
+    const missingChatAllowlist = await gateway.receive(makeTelegramDmMessage("/secret production token"));
+    expect(missingChatAllowlist.replyText).toContain("both this user ID and chat ID allowlisted");
+
+    const group = await gateway.receive(makeTelegramDmMessage("/secret production token", {
+      sessionKey: {
+        platform: "telegram",
+        accountId: "telegram",
+        chatId: "123456",
+        chatType: "group",
+        userId: "user-1"
+      }
+    }));
+    expect(group.replyText).toContain("both this user ID and chat ID allowlisted");
+  });
+
+  it("binds a proactive /secret value to the next runtime request without model exposure", async () => {
+    const harness = createSecureInputGateway();
+    const sentinel = "SENTINEL-proactive-secret-4412";
+    await harness.gateway.receive(makeTelegramDmMessage("/secret MTN consumer secret"));
+    await harness.gateway.receive(makeTelegramDmMessage(sentinel, { id: "proactive-secret" }));
+
+    expect(harness.consumed).toEqual([sentinel]);
+    expect(harness.deleted.map((message) => message.id)).toEqual(["proactive-secret"]);
+    expect(harness.runtimeTexts).toEqual([
+      'The user supplied a protected credential labeled "MTN consumer secret". The protected value is available only through the secure-input runtime boundary.'
+    ]);
+    expect(JSON.stringify(harness.runtimeTexts)).not.toContain(sentinel);
+    expect(JSON.stringify(harness.adapter.records)).not.toContain(sentinel);
+  });
+
+  it("fails closed on stale buttons and tolerates Telegram deletion failure", async () => {
+    const harness = createSecureInputGateway();
+    harness.adapter.deleteInboundMessage = async () => {
+      throw new Error("Telegram delete failed");
+    };
+    const stale = await harness.gateway.receive(makeTelegramDmMessage("ecsi1:a:old-process", {
+      metadata: { telegram: { messageId: 91, callbackQueryId: "cb-stale", chatType: "private" } }
+    }));
+    expect(stale.replyText).toContain("stale");
+
+    const sentinel = "SENTINEL-delete-failure-77";
+    await harness.gateway.receive(makeTelegramDmMessage("/secret temporary"));
+    await harness.gateway.receive(makeTelegramDmMessage(sentinel, { id: "delete-failure-secret" }));
+    expect(harness.consumed).toEqual([sentinel]);
+    expect(JSON.stringify(harness.adapter.records)).not.toContain(sentinel);
+  });
+});
+
+describe("ChannelGateway Telegram processing indicator", () => {
+  it("replaces only the initial Thinking progress with a successful processing indicator", async () => {
+    const { adapter, gateway } = createStreamingGatewayHarness({
+      actions: [
+        { kind: "event", event: { kind: "agent-start", sessionId: "session-1", input: "hello" } },
+        { kind: "event", event: { kind: "tool-start", tool: "file.read" } }
+      ]
+    });
+    const indicatorStates: boolean[] = [];
+    adapter.setInboundProcessingIndicator = async (_message, active) => {
+      indicatorStates.push(active);
+      return true;
+    };
+
+    const result = await gateway.receive(makeMessage("hello"));
+
+    expect(indicatorStates).toEqual([true, false]);
+    expect(adapter.records.filter((record) => record.kind === "progress").map((record) => record.event?.kind)).toEqual([
+      "tool-start"
+    ]);
+    expect(result.progressCount).toBe(1);
+  });
+
+  it("falls back to existing Thinking progress when the processing indicator is unavailable", async () => {
+    const { adapter, gateway } = createStreamingGatewayHarness({
+      actions: [
+        { kind: "event", event: { kind: "agent-start", sessionId: "session-1", input: "hello" } }
+      ]
+    });
+    const indicatorStates: boolean[] = [];
+    adapter.setInboundProcessingIndicator = async (_message, active) => {
+      indicatorStates.push(active);
+      return false;
+    };
+
+    const result = await gateway.receive(makeMessage("hello"));
+
+    expect(indicatorStates).toEqual([true]);
+    expect(adapter.records.filter((record) => record.kind === "progress").map((record) => record.event?.kind)).toEqual([
+      "agent-start"
+    ]);
+    expect(result.progressCount).toBe(1);
+  });
+
+  it("clears the processing indicator after a runtime failure", async () => {
+    const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+    const indicatorStates: boolean[] = [];
+    adapter.setInboundProcessingIndicator = async (_message, active) => {
+      indicatorStates.push(active);
+      return true;
+    };
+    const gateway = new ChannelGateway({
+      adapters: [adapter],
+      runtimeForSession: async () => ({
+        ...createMinimalRuntime(),
+        handle: async ({ onEvent }) => {
+          await onEvent?.({ kind: "agent-start", sessionId: "session-1", input: "hello" });
+          throw new Error("runtime boom");
+        }
+      }),
+      sessionStore: new InMemoryChannelSessionStore(),
+      authPolicy: { telegram: { allowedUserIds: ["user-1"] } }
+    });
+
+    const result = await gateway.receive(makeMessage("hello"));
+
+    expect(result.replyText).toContain("runtime boom");
+    expect(indicatorStates).toEqual([true, false]);
+    expect(adapter.records.filter((record) => record.kind === "progress")).toHaveLength(0);
+  });
+
+  it("clears the processing indicator after /stop without reacting to the command", async () => {
+    const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+    const indicatorStates: boolean[] = [];
+    adapter.setInboundProcessingIndicator = async (_message, active) => {
+      indicatorStates.push(active);
+      return true;
+    };
+    const gateway = new ChannelGateway({
+      adapters: [adapter],
+      runtimeForSession: async () => ({
+        ...createMinimalRuntime(),
+        handle: async ({ onEvent, signal }) => {
+          await onEvent?.({ kind: "agent-start", sessionId: "session-1", input: "hello" });
+          await new Promise<void>((resolve) => signal?.addEventListener("abort", () => resolve(), { once: true }));
+          return runtimeResponse({ text: "stopped", securityDecision: "allow" });
+        }
+      }),
+      sessionStore: new InMemoryChannelSessionStore(),
+      authPolicy: { telegram: { allowedUserIds: ["user-1"] } }
+    });
+
+    const turn = gateway.receive(makeMessage("hello"));
+    await waitFor(() => indicatorStates.length === 1);
+    await gateway.receive(makeMessage("/stop", { id: "stop-message" }));
+    await turn;
+
+    expect(indicatorStates).toEqual([true, false]);
+  });
+
+  it("does not start a processing indicator for an unauthorized message", async () => {
+    const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+    const indicator = vi.fn(async () => true);
+    adapter.setInboundProcessingIndicator = indicator;
+    const gateway = new ChannelGateway({
+      adapters: [adapter],
+      runtimeForSession: async () => createMinimalRuntime(),
+      sessionStore: new InMemoryChannelSessionStore(),
+      authPolicy: { telegram: { allowedUserIds: ["another-user"] } }
+    });
+
+    await gateway.receive(makeMessage("hello"));
+
+    expect(indicator).not.toHaveBeenCalled();
+  });
+});
 
 describe("ChannelGateway Telegram streaming", () => {
   it("starts streaming only for Telegram when config is enabled and passes config options", async () => {
@@ -699,6 +994,34 @@ describe("ChannelGateway Telegram streaming", () => {
     await gateway.receive(makeMessage("hello"));
 
     expect(adapter.records.filter((record) => record.kind === "text").map((record) => record.text)).toEqual([" answer"]);
+  });
+
+  it("attributes visible streaming previews and fallback delivery to the same turn", async () => {
+    const record = vi.fn();
+    const { adapter, gateway } = createStreamingGatewayHarness({
+      handle: createStreamingHandleSpy({
+        finishResult: {
+          delivered: false,
+          fallbackRequired: true,
+          fallbackText: " continuation",
+          messageIds: ["preview-1"]
+        }
+      }),
+      runtimeResponse: runtimeResponse({
+        text: "complete answer",
+        securityDecision: "allow",
+        turnUsage: turnUsage("turn-1", 120, 0.25)
+      }),
+      channelMessageTurnStore: { record, resolve: vi.fn(), prune: vi.fn() }
+    });
+    adapter.delivery!.sendText = vi.fn(async () => ({ messageIds: ["fallback-2"] }));
+
+    await gateway.receive(makeMessage("hello"));
+
+    expect(record).toHaveBeenCalledWith(expect.objectContaining({
+      platformMessageIds: ["preview-1", "fallback-2"],
+      turnId: "turn-1"
+    }));
   });
 
   it("stream finish failure falls back through DeliveryRouter", async () => {
@@ -1060,6 +1383,20 @@ function makeTelegramCallbackMessage(text: string, messageId = "77", callbackQue
   });
 }
 
+function makeTelegramDmMessage(text: string, overrides?: Partial<ChannelMessage>): ChannelMessage {
+  return makeMessage(text, {
+    sessionKey: {
+      platform: "telegram",
+      accountId: "telegram",
+      chatId: "123456",
+      chatType: "dm",
+      userId: "user-1"
+    },
+    metadata: { telegram: { messageId: 42, chatType: "private" } },
+    ...overrides
+  });
+}
+
 async function waitFor(predicate: () => boolean, timeoutMs = 500): Promise<void> {
   const startedAt = Date.now();
   while (Date.now() - startedAt < timeoutMs) {
@@ -1172,6 +1509,33 @@ function voiceToolExecution(): Awaited<ReturnType<Runtime["handle"]>>["toolExecu
   };
 }
 
+function completeUsage(totalTokens: number, estimatedCostUsd: number) {
+  return {
+    providerCalls: totalTokens === 0 ? 0 : 1,
+    inputTokens: totalTokens,
+    outputTokens: 0,
+    reasoningTokens: 0,
+    cacheReadTokens: 0,
+    cacheWriteTokens: 0,
+    totalTokens,
+    estimatedCostUsd,
+    usageComplete: true,
+    costComplete: true,
+    incompleteReasons: []
+  };
+}
+
+function turnUsage(turnId: string, totalTokens: number, estimatedCostUsd: number) {
+  return {
+    turnId,
+    mainAgent: completeUsage(totalTokens, estimatedCostUsd),
+    auxiliaryModels: completeUsage(0, 0),
+    delegatedWork: completeUsage(0, 0),
+    total: completeUsage(totalTokens, estimatedCostUsd),
+    provisional: false
+  };
+}
+
 async function writeGatewayModelConfig(homeDir: string, config: unknown): Promise<void> {
   const configPath = resolveProfileStateHome({ homeDir, profileId: "default" }).configPath;
   await mkdir(dirname(configPath), { recursive: true });
@@ -1271,7 +1635,11 @@ function createMinimalRuntime(): Runtime {
         metadata: input.metadata
       }),
       getSession: async () => undefined,
+      getSessionForProfile: async () => undefined,
       listSessions: async () => [],
+      listSessionSummaries: async () => [],
+      hasUserMessageForProfile: async () => false,
+      setSessionTitleIfPlaceholder: async () => false,
       endSession: async () => {},
       setSessionModelOverride: async () => {},
       clearSessionModelOverride: async () => {},
@@ -3420,6 +3788,315 @@ describe("ChannelGateway commands", () => {
     });
   });
 
+  describe("/usage", () => {
+    it("reports session, latest-turn, and authorized Task accounting without handling a model turn", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const inspectSession = vi.fn(async (sessionId: string) => ({
+        scope: "session" as const,
+        sessionId,
+        usage: completeUsage(120, 0.25),
+        asOf: "latest-settled-provider-call" as const
+      }));
+      const inspectLatestTurn = vi.fn(async (sessionId: string) => ({
+        scope: "turn" as const,
+        selection: "latest" as const,
+        sessionId,
+        usage: {
+          turnId: "turn-1",
+          mainAgent: completeUsage(120, 0.25),
+          auxiliaryModels: completeUsage(0, 0),
+          delegatedWork: completeUsage(0, 0),
+          total: completeUsage(120, 0.25),
+          provisional: false
+        },
+        originatingTasks: { active: 0, settled: 0, scanTruncated: false },
+        asOf: "latest-settled-provider-call" as const
+      }));
+      const inspectTask = vi.fn(async (sessionId: string, taskId: string) => ({
+        scope: "task" as const,
+        sessionId,
+        taskId,
+        status: "completed" as const,
+        usage: completeUsage(240, 0.5),
+        provisional: false,
+        asOf: "latest-settled-provider-call" as const
+      }));
+      const handle = vi.fn();
+      const runtimeForSession = vi.fn(async () => ({ ...createMinimalRuntime(), handle }));
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession,
+        sessionStore: { getOrCreateSessionId: async () => "attached-session" },
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+        usageInspector: {
+          inspectSession,
+          inspectLatestTurn,
+          inspectRepliedTurn: vi.fn(),
+          inspectLinkedTurn: vi.fn(),
+          inspectTurn: vi.fn(),
+          inspectTask
+        }
+      });
+
+      expect((await gateway.receive(makeMessage("/usage"))).replyText).toContain("Usage — current session");
+      expect((await gateway.receive(makeMessage("/usage last"))).replyText).toContain("Usage — latest completed turn");
+      expect((await gateway.receive(makeMessage("/usage task task-1"))).replyText).toContain("Usage — Task");
+      expect(inspectSession).toHaveBeenCalledWith("attached-session");
+      expect(inspectLatestTurn).toHaveBeenCalledWith("attached-session");
+      expect(inspectTask).toHaveBeenCalledWith("attached-session", "task-1");
+      expect(handle).not.toHaveBeenCalled();
+      expect(runtimeForSession).not.toHaveBeenCalled();
+    });
+
+    it("rejects invalid syntax before constructing a runtime", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const runtimeForSession = vi.fn(async () => createMinimalRuntime());
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession,
+        sessionStore: new InMemoryChannelSessionStore(),
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } }
+      });
+
+      const result = await gateway.receive(makeMessage("/usage something"));
+      expect(result.replyText).toBe("Usage: /usage | /usage last | /usage task <task-id>");
+      expect(runtimeForSession).not.toHaveBeenCalled();
+    });
+
+    it("uses a replied Telegram answer as the turn scope without invoking a model", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const inspectLinkedTurn = vi.fn(async (sessionId: string, _linkedSessionId: string, turnId: string) => ({
+        scope: "turn" as const,
+        selection: "specific" as const,
+        sessionId,
+        usage: turnUsage(turnId, 120, 0.25),
+        originatingTasks: { active: 0, settled: 0, scanTruncated: false },
+        asOf: "latest-settled-provider-call" as const
+      }));
+      const runtimeForSession = vi.fn(async () => createMinimalRuntime());
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession,
+        sessionStore: { getOrCreateSessionId: async () => "attached-session" },
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+        channelMessageTurnStore: {
+          record: vi.fn(),
+          resolve: vi.fn(async () => ({
+            sessionId: "attached-session",
+            turnId: "turn-1",
+            direction: "outbound" as const,
+            createdAt: "2030-01-01T00:00:00.000Z",
+            expiresAt: "2030-04-01T00:00:00.000Z"
+          })),
+          prune: vi.fn()
+        },
+        usageInspector: {
+          inspectSession: vi.fn(),
+          inspectLatestTurn: vi.fn(),
+          inspectRepliedTurn: vi.fn(),
+          inspectLinkedTurn,
+          inspectTurn: vi.fn(),
+          inspectTask: vi.fn()
+        }
+      });
+
+      const result = await gateway.receive(makeMessage("/usage", {
+        metadata: { telegram: { messageId: 600, replyToMessageId: 501 } }
+      }));
+
+      expect(result.replyText).toContain("Usage — replied message");
+      expect(inspectLinkedTurn).toHaveBeenCalledWith("attached-session", "attached-session", "turn-1");
+      expect(runtimeForSession).not.toHaveBeenCalled();
+    });
+
+    it("fails closed when a replied Telegram message is not attributed to the current session", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const runtimeForSession = vi.fn(async () => createMinimalRuntime());
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession,
+        sessionStore: { getOrCreateSessionId: async () => "attached-session" },
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+        channelMessageTurnStore: { record: vi.fn(), resolve: vi.fn(async () => undefined), prune: vi.fn() },
+        usageInspector: {
+          inspectSession: vi.fn(),
+          inspectLatestTurn: vi.fn(),
+          inspectRepliedTurn: vi.fn(),
+          inspectLinkedTurn: vi.fn(),
+          inspectTurn: vi.fn(),
+          inspectTask: vi.fn()
+        }
+      });
+
+      const result = await gateway.receive(makeMessage("/usage", {
+        metadata: { telegram: { messageId: 600, replyToMessageId: 999 } }
+      }));
+
+      expect(result.replyText).toBe(
+        "No referenced turn is available in this session. Reply to an attributed Telegram message and send /usage again."
+      );
+      expect(runtimeForSession).not.toHaveBeenCalled();
+    });
+  });
+
+  describe("Telegram reply usage attribution", () => {
+    it("records every final-answer message id and passes an authorized reply target into the next turn", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      let nextMessageId = 500;
+      adapter.delivery!.sendText = vi.fn(async () => ({ messageIds: [String(++nextMessageId)] }));
+      const bindings = new Map<string, {
+        sessionId: string;
+        turnId: string;
+        direction: "inbound" | "outbound";
+        createdAt: string;
+        expiresAt: string;
+      }>();
+      const record = vi.fn((input: {
+        platformMessageIds: readonly string[];
+        direction: "inbound" | "outbound";
+        sessionId: string;
+        turnId: string;
+      }) => {
+        for (const messageId of input.platformMessageIds) {
+          bindings.set(messageId, {
+            sessionId: input.sessionId,
+            turnId: input.turnId,
+            direction: input.direction,
+            createdAt: "2030-01-01T00:00:00.000Z",
+            expiresAt: "2030-04-01T00:00:00.000Z"
+          });
+        }
+      });
+      const resolve = vi.fn((input: { platformMessageId: string }) => bindings.get(input.platformMessageId));
+      const inspectLinkedTurn = vi.fn(async (sessionId: string, _linkedSessionId: string, turnId: string) => ({
+        scope: "turn" as const,
+        selection: "specific" as const,
+        sessionId,
+        usage: turnUsage(turnId, 120, 0.25),
+        originatingTasks: { active: 0, settled: 0, scanTruncated: false },
+        asOf: "latest-settled-provider-call" as const
+      }));
+      const handled: Array<{ inputMetadata?: Record<string, unknown> }> = [];
+      let handledTurns = 0;
+      const handle = vi.fn(async (input: { inputMetadata?: Record<string, unknown> }) => {
+        handled.push(input);
+        handledTurns += 1;
+        const id = `turn-${handledTurns}`;
+        return runtimeResponse({
+          text: `answer ${handledTurns}`,
+          securityDecision: "allow",
+          turnUsage: turnUsage(id, 120, 0.25)
+        });
+      });
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession: async () => ({ ...createMinimalRuntime(), handle }),
+        sessionStore: { getOrCreateSessionId: async () => "attached-session" },
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+        channelMessageTurnStore: { record, resolve, prune: vi.fn() },
+        usageInspector: {
+          inspectSession: vi.fn(),
+          inspectLatestTurn: vi.fn(),
+          inspectRepliedTurn: vi.fn(),
+          inspectLinkedTurn,
+          inspectTurn: vi.fn(),
+          inspectTask: vi.fn()
+        }
+      });
+
+      const firstResult = await gateway.receive(makeMessage("do work", {
+        id: "incoming-1",
+        metadata: { telegram: { messageId: 400 } }
+      }));
+      const inboundUsage = await gateway.receive(makeMessage("/usage", {
+        id: "incoming-usage",
+        metadata: { telegram: { messageId: 401, replyToMessageId: 400 } }
+      }));
+      await gateway.receive(makeMessage("how much did this cost?", {
+        id: "incoming-2",
+        metadata: { telegram: { messageId: 700, replyToMessageId: 501 } }
+      }));
+
+      expect(record).toHaveBeenNthCalledWith(1, expect.objectContaining({
+        platformMessageIds: ["400"],
+        direction: "inbound",
+        sessionId: "attached-session",
+        turnId: "turn-1"
+      }));
+      expect(record).toHaveBeenNthCalledWith(2, expect.objectContaining({
+        platformMessageIds: ["501"],
+        direction: "outbound",
+        sessionId: "attached-session",
+        turnId: "turn-1"
+      }));
+      expect(firstResult.replyText).toBe("answer 1");
+      expect(firstResult.replyText).not.toMatch(/usage|cost|token/iu);
+      expect(inboundUsage.replyText).toContain("Usage — replied message");
+      expect(resolve).toHaveBeenCalledWith(expect.objectContaining({ platformMessageId: "501" }));
+      expect(handled[1]?.inputMetadata).toEqual(expect.objectContaining({ usageReplyToTurnId: "turn-1" }));
+    });
+
+    it("attributes a delivered approval prompt to the originating turn", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      let nextMessageId = 500;
+      adapter.delivery!.sendText = vi.fn(async () => ({ messageIds: [String(++nextMessageId)] }));
+      const record = vi.fn();
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession: async () => ({
+          ...createMinimalRuntime(),
+          handle: async () => runtimeResponse({
+            text: "Approval required.",
+            securityDecision: "ask",
+            toolExecutions: [commandExecution("ask", "npm install example")],
+            turnUsage: turnUsage("turn-approval", 120, 0.25)
+          })
+        }),
+        sessionStore: { getOrCreateSessionId: async () => "attached-session" },
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+        channelMessageTurnStore: { record, resolve: vi.fn(), prune: vi.fn() }
+      });
+
+      await gateway.receive(makeMessage("install it", {
+        metadata: { telegram: { messageId: 400 } }
+      }));
+
+      expect(record).toHaveBeenCalledWith(expect.objectContaining({
+        platformMessageIds: ["502"],
+        direction: "outbound",
+        turnId: "turn-approval"
+      }));
+    });
+
+    it("does not create attribution when final delivery fails", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      adapter.delivery!.sendText = vi.fn(async () => {
+        throw new Error("delivery failed");
+      });
+      const record = vi.fn();
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession: async () => ({
+          ...createMinimalRuntime(),
+          handle: async () => runtimeResponse({
+            text: "answer",
+            securityDecision: "allow",
+            turnUsage: turnUsage("turn-failed", 120, 0.25)
+          })
+        }),
+        sessionStore: { getOrCreateSessionId: async () => "attached-session" },
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+        channelMessageTurnStore: { record, resolve: vi.fn(), prune: vi.fn() }
+      });
+
+      const result = await gateway.receive(makeMessage("work", {
+        metadata: { telegram: { messageId: 400 } }
+      }));
+      expect(result.replyText).toContain("delivery failed");
+      expect(record).not.toHaveBeenCalled();
+    });
+  });
+
   describe("channel-triggered run metadata", () => {
     it("passes source metadata to runtime factory", async () => {
       const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
@@ -3481,11 +4158,13 @@ describe("ChannelGateway commands", () => {
   });
 
   describe("telegramGatewayCommands", () => {
-    it("includes /compact, /sethome, and /diagnostics", () => {
+    it("includes /usage, /compact, /sethome, and /diagnostics", () => {
       const commands = telegramGatewayCommands();
+      const usage = commands.find((c) => c.command === "/usage");
       const compact = commands.find((c) => c.command === "/compact");
       const sethome = commands.find((c) => c.command === "/sethome");
       const diagnostics = commands.find((c) => c.command === "/diagnostics");
+      expect(usage).toBeDefined();
       expect(compact).toBeDefined();
       expect(sethome).toBeDefined();
       expect(diagnostics).toBeDefined();
@@ -3657,6 +4336,60 @@ describe("ChannelGateway commands", () => {
       expect(r2.replyText).toBe("");
       expect(r2.artifactCount).toBe(0);
       expect(registry.stats().totalStarted).toBe(1);
+    });
+
+    it("refreshes the active-turn heartbeat for meaningful runtime progress", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const registry = new ActiveTurnRegistry();
+      const markProgress = vi.spyOn(registry, "markProgress");
+      const progressEvents: RuntimeEvent[] = [
+        { kind: "agent-start", sessionId: "session-1", input: "hello" },
+        { kind: "provider-attempt", provider: "kimi", model: "kimi-k3", fallback: false },
+        { kind: "provider-token", provider: "kimi", model: "kimi-k3", text: "working" },
+        { kind: "provider-tool-call", provider: "kimi", model: "kimi-k3", id: "call-1", name: "file.read" },
+        { kind: "tool-start", tool: "file.read", activityId: "call-1" },
+        { kind: "tool-result", tool: "file.read", activityId: "call-1", ok: true },
+        { kind: "provider-result", provider: "kimi", model: "kimi-k3", ok: true, fallback: false, willFallback: false },
+        {
+          kind: "delegation-progress",
+          subagentId: "child-1",
+          childSessionId: "child-session",
+          parentSessionId: "session-1",
+          role: "leaf",
+          depth: 1,
+          childEvent: { kind: "agent-start", sessionId: "child-session" }
+        }
+      ];
+
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession: async () => ({
+          ...createMinimalRuntime(),
+          handle: async ({ onEvent }) => {
+            for (const event of progressEvents) {
+              await onEvent?.(event);
+            }
+            await onEvent?.({
+              kind: "context-estimate",
+              filled: 100,
+              total: 1_000,
+              source: "live-estimate",
+              stage: "preflight"
+            });
+            return runtimeResponse({ text: "done", securityDecision: "allow" });
+          }
+        }),
+        sessionStore: new InMemoryChannelSessionStore(),
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+        activeTurnRegistry: registry
+      });
+
+      await gateway.receive(makeMessage("hello"));
+
+      expect(markProgress).toHaveBeenCalledTimes(progressEvents.length);
+      expect(markProgress.mock.calls.every(([key, turnId]) =>
+        typeof key === "string" && turnId === "turn-1"
+      )).toBe(true);
     });
 
     it("receive() rejects new turns while draining with no side effects", async () => {
@@ -3940,25 +4673,36 @@ describe("ChannelGateway commands", () => {
         sessionStore: new InMemoryChannelSessionStore(),
         authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
         activeTurnRegistry: registry,
-        busyPolicyResolver: () => ({ busyPolicy: "interrupt", queueDepth: 3 })
+        busyPolicyResolver: () => ({
+          busyPolicy: "interrupt",
+          queueDepth: 3,
+          busyTextCoalescing: { enabled: true, windowMs: 1_500, maxMessages: 5, maxChars: 8_000 }
+        })
       });
 
       const first = gateway.receive(makeMessage("first"));
       await firstStartedPromise;
       const second = await gateway.receive(makeMessage("second"));
+      const third = await gateway.receive(makeMessage("third"));
 
       expect(second.replyText).toBe("");
+      expect(third.replyText).toBe("");
       expect(registry.stats().totalAborted).toBe(0);
       expect(adapter.records).toContainEqual(expect.objectContaining({
         kind: "text",
         text: "Queued (position 1)"
       }));
+      expect(adapter.records).toContainEqual(expect.objectContaining({
+        kind: "text",
+        text: "Queued (position 2)"
+      }));
+      expect(adapter.records.some((record) => record.text?.startsWith("Added to queued message"))).toBe(false);
 
       resolveFirst?.();
       const firstResult = await first;
       expect(firstResult.replyText).toBe("first done");
-      await waitFor(() => handledTexts.includes("second"));
-      expect(handledTexts).toEqual(["first", "second"]);
+      await waitFor(() => handledTexts.includes("third"));
+      expect(handledTexts).toEqual(["first", "second", "third"]);
     });
 
     it("keeps ordinary interrupt behavior when the active turn has no subagents", async () => {
@@ -4269,6 +5013,181 @@ describe("ChannelGateway commands", () => {
       expect(result.replyText).toContain("factory fail");
       expect(registry.isBusy("telegram:123456:user-1")).toBe(false);
       expect(disposed).toBe(false);
+    });
+
+    it("reaps a settled turn claim retained by a synchronous lifecycle observer fault", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const registry = new ActiveTurnRegistry();
+      const hookRegistry = new HookRegistry();
+      const originalEmit = hookRegistry.emit.bind(hookRegistry);
+      const handle = vi.fn(async () => runtimeResponse({ text: "recovered", securityDecision: "allow" }));
+      const warnings: string[] = [];
+      let injectStartFault = true;
+      const activeTurnKey = stableSessionKey(makeMessage("first").sessionKey, {});
+
+      vi.spyOn(hookRegistry, "emit").mockImplementation(((name, payload) => {
+        if (name === "session:turn:start" && injectStartFault) {
+          injectStartFault = false;
+          throw new Error("injected lifecycle observer fault");
+        }
+        return originalEmit(name, payload);
+      }) as typeof hookRegistry.emit);
+
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession: async () => ({ ...createMinimalRuntime(), handle }),
+        sessionStore: new InMemoryChannelSessionStore(),
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+        activeTurnRegistry: registry,
+        hookRegistry,
+        logWarning: (message) => warnings.push(message)
+      });
+
+      await expect(gateway.receive(makeMessage("first"))).rejects.toThrow("injected lifecycle observer fault");
+      expect(registry.isBusy(activeTurnKey)).toBe(true);
+
+      const recovered = await gateway.receive(makeMessage("second"));
+
+      expect(recovered.replyText).toBe("recovered");
+      expect(handle).toHaveBeenCalledOnce();
+      expect(registry.isBusy(activeTurnKey)).toBe(false);
+      expect(warnings).toEqual([
+        expect.stringMatching(/^Reaped settled orphan turn turn-\d+ for session=[a-f0-9]{16}\.$/u)
+      ]);
+      expect(warnings.join("\n")).not.toContain(activeTurnKey);
+    });
+
+    it("admits only one replacement when concurrent messages encounter a settled orphan", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const registry = new ActiveTurnRegistry();
+      const activeTurnKey = stableSessionKey(makeMessage("stale").sessionKey, {});
+      let settleStaleOwner: (() => void) | undefined;
+      const staleOwner = new Promise<void>((resolve) => { settleStaleOwner = resolve; });
+      const staleTurn = registry.startTurn(activeTurnKey, new AbortController(), undefined, staleOwner);
+      expect(staleTurn.ok).toBe(true);
+      settleStaleOwner?.();
+      await staleOwner;
+      await Promise.resolve();
+
+      let releaseReplacement: (() => void) | undefined;
+      const replacementGate = new Promise<void>((resolve) => { releaseReplacement = resolve; });
+      const handle = vi.fn(async () => {
+        await replacementGate;
+        return runtimeResponse({ text: "replacement", securityDecision: "allow" });
+      });
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession: async () => ({ ...createMinimalRuntime(), handle }),
+        sessionStore: new InMemoryChannelSessionStore(),
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+        activeTurnRegistry: registry
+      });
+
+      const second = gateway.receive(makeMessage("second", { id: "second" }));
+      const third = gateway.receive(makeMessage("third", { id: "third" }));
+      await waitFor(() => handle.mock.calls.length === 1);
+      releaseReplacement?.();
+      const results = await Promise.all([second, third]);
+
+      expect(handle).toHaveBeenCalledOnce();
+      expect(results.filter((result) => result.replyText === "replacement")).toHaveLength(1);
+      expect(results.filter((result) => result.replyText === "")).toHaveLength(1);
+      expect(registry.isBusy(activeTurnKey)).toBe(false);
+    });
+
+    it("drains existing FIFO work before newly arriving work after reaping an orphan", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const registry = new ActiveTurnRegistry();
+      const activeTurnKey = stableSessionKey(makeMessage("stale").sessionKey, {});
+      let settleStaleOwner: (() => void) | undefined;
+      const staleOwner = new Promise<void>((resolve) => { settleStaleOwner = resolve; });
+      registry.startTurn(activeTurnKey, new AbortController(), undefined, staleOwner);
+      const handled: string[] = [];
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession: async () => ({
+          ...createMinimalRuntime(),
+          handle: async ({ text }: { text: string }) => {
+            handled.push(text);
+            return runtimeResponse({ text: "ok", securityDecision: "allow" });
+          }
+        }),
+        sessionStore: new InMemoryChannelSessionStore(),
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+        activeTurnRegistry: registry,
+        busyPolicyResolver: () => ({ busyPolicy: "queue", queueDepth: 3 })
+      });
+
+      await gateway.receive(makeMessage("already queued", { id: "queued" }));
+      settleStaleOwner?.();
+      await staleOwner;
+      await Promise.resolve();
+
+      await gateway.receive(makeMessage("new arrival", { id: "new" }));
+      await waitFor(() => !gateway.hasPendingWork(), 2_000);
+
+      expect(handled).toEqual(["already queued", "new arrival"]);
+      expect(registry.isBusy(activeTurnKey)).toBe(false);
+    });
+
+    it("does not let an older owner settling after disposal failure reap a newer turn", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const registry = new ActiveTurnRegistry();
+      let releaseFirstDispose: (() => void) | undefined;
+      let markFirstDisposeStarted: (() => void) | undefined;
+      const firstDisposeGate = new Promise<void>((resolve) => { releaseFirstDispose = resolve; });
+      const firstDisposeStarted = new Promise<void>((resolve) => { markFirstDisposeStarted = resolve; });
+      let releaseSecondHandle: (() => void) | undefined;
+      let markSecondHandleStarted: (() => void) | undefined;
+      const secondHandleGate = new Promise<void>((resolve) => { releaseSecondHandle = resolve; });
+      const secondHandleStarted = new Promise<void>((resolve) => { markSecondHandleStarted = resolve; });
+      let runtimeCount = 0;
+
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession: async () => {
+          runtimeCount += 1;
+          if (runtimeCount === 1) {
+            return {
+              ...createMinimalRuntime(),
+              handle: async () => runtimeResponse({ text: "first", securityDecision: "allow" }),
+              dispose: async () => {
+                markFirstDisposeStarted?.();
+                await firstDisposeGate;
+                throw new Error("injected disposal failure");
+              }
+            };
+          }
+          return {
+            ...createMinimalRuntime(),
+            handle: async () => {
+              markSecondHandleStarted?.();
+              await secondHandleGate;
+              return runtimeResponse({ text: "second", securityDecision: "allow" });
+            }
+          };
+        },
+        sessionStore: new InMemoryChannelSessionStore(),
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+        activeTurnRegistry: registry
+      });
+
+      const first = gateway.receive(makeMessage("first", { id: "first" }));
+      await firstDisposeStarted;
+      const second = gateway.receive(makeMessage("second", { id: "second" }));
+      await secondHandleStarted;
+
+      releaseFirstDispose?.();
+      await first;
+      const third = await gateway.receive(makeMessage("third", { id: "third" }));
+
+      expect(third.replyText).toBe("");
+      expect(runtimeCount).toBe(2);
+      expect(registry.isBusy(stableSessionKey(makeMessage("second").sessionKey, {}))).toBe(true);
+
+      releaseSecondHandle?.();
+      await second;
+      expect(registry.stats().activeTurnCount).toBe(0);
     });
 
     it("runtime acquisition failure cleans fallback active turn", async () => {
@@ -5446,6 +6365,513 @@ describe("ChannelGateway commands", () => {
       }
     }
 
+    it("recovers pending FIFO turns on restart and completes each durable claim once", async () => {
+      const directory = await mkdtemp(join(tmpdir(), "estacoda-durable-gateway-"));
+      const sessionDb = await createSQLiteSessionDB({ path: join(directory, "sessions.sqlite") });
+      try {
+        let turnId = 0;
+        let claimId = 0;
+        const store = new SQLitePendingTurnStore({
+          db: sessionDb.db,
+          profileId: "default",
+          idFactory: () => `turn-${++turnId}`,
+          claimIdFactory: () => `claim-${++claimId}`
+        });
+        store.enqueue(makeMessage("first", { id: "queued-1" }));
+        store.enqueue(makeMessage("second", { id: "queued-2" }));
+        const handled: string[] = [];
+        const gateway = new ChannelGateway({
+          adapters: [createFakeTelegramAdapter()],
+          runtimeForSession: async () => ({
+            ...createMinimalRuntime(),
+            handle: async ({ text }: { text: string }) => {
+              handled.push(text);
+              return runtimeResponse({ text: "ok", securityDecision: "allow" });
+            }
+          }),
+          authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+          trustedWorkspace: true,
+          pendingTurnStore: store,
+          busyPolicyResolver: () => ({ busyPolicy: "queue", queueDepth: 3 })
+        });
+
+        await gateway.start();
+        await waitForPendingWork(gateway);
+
+        expect(handled).toEqual(["first", "second"]);
+        expect(store.counts()).toMatchObject({ pending: 0, claimed: 0, completed: 2, uncertain: 0 });
+      } finally {
+        sessionDb.close();
+        await rm(directory, { recursive: true, force: true });
+      }
+    });
+
+    it("quarantines crash-left claims and pending turns whose authorization was removed", async () => {
+      const directory = await mkdtemp(join(tmpdir(), "estacoda-durable-quarantine-"));
+      const sessionDb = await createSQLiteSessionDB({ path: join(directory, "sessions.sqlite") });
+      try {
+        let turnId = 0;
+        const store = new SQLitePendingTurnStore({
+          db: sessionDb.db,
+          profileId: "default",
+          idFactory: () => `turn-${++turnId}`
+        });
+        store.enqueue(makeMessage("claimed", { id: "claimed-message" }));
+        store.claimNext();
+        store.enqueue(makeMessage("revoked", { id: "revoked-message" }));
+        const handled: string[] = [];
+        const gateway = new ChannelGateway({
+          adapters: [createFakeTelegramAdapter()],
+          runtimeForSession: async () => ({
+            ...createMinimalRuntime(),
+            handle: async ({ text }: { text: string }) => {
+              handled.push(text);
+              return runtimeResponse({ text: "ok", securityDecision: "allow" });
+            }
+          }),
+          authPolicy: { telegram: { allowedUserIds: [] } },
+          trustedWorkspace: true,
+          pendingTurnStore: store,
+          busyPolicyResolver: () => ({ busyPolicy: "queue", queueDepth: 3 })
+        });
+
+        await gateway.start();
+        await waitForPendingWork(gateway);
+
+        expect(handled).toEqual([]);
+        expect(store.counts()).toMatchObject({ pending: 0, claimed: 0, uncertain: 2 });
+      } finally {
+        sessionDb.close();
+        await rm(directory, { recursive: true, force: true });
+      }
+    });
+
+    it("does not acknowledge or retain an in-memory turn when durable admission fails", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const registry = new ActiveTurnRegistry();
+      let releaseFirst: (() => void) | undefined;
+      let markFirstStarted: (() => void) | undefined;
+      const firstStarted = new Promise<void>((resolve) => { markFirstStarted = resolve; });
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession: async () => ({
+          ...createMinimalRuntime(),
+          handle: async () => {
+            markFirstStarted?.();
+            await new Promise<void>((resolve) => { releaseFirst = resolve; });
+            return runtimeResponse({ text: "ok", securityDecision: "allow" });
+          }
+        }),
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+        activeTurnRegistry: registry,
+        pendingTurnStore: {
+          hasDeliveryIdentity: () => false,
+          enqueue: () => { throw new Error("database unavailable"); }
+        } as unknown as SQLitePendingTurnStore,
+        busyPolicyResolver: () => ({ busyPolicy: "queue", queueDepth: 3 })
+      });
+      const first = gateway.receive(makeMessage("active"));
+      await firstStarted;
+      await gateway.receive(makeMessage("queued", { id: "queued" }));
+
+      expect(adapter.records.some((record) => record.text?.startsWith("Queued (position"))).toBe(false);
+      expect(adapter.records).toContainEqual(expect.objectContaining({
+        text: "Unable to save this queued request safely. Please try again."
+      }));
+      releaseFirst?.();
+      await first;
+      expect(gateway.hasPendingWork()).toBe(false);
+    });
+
+    it("deduplicates completed immediate redelivery for every original rapid-text message id", async () => {
+      const directory = await mkdtemp(join(tmpdir(), "estacoda-durable-dedupe-"));
+      const sessionDb = await createSQLiteSessionDB({ path: join(directory, "sessions.sqlite") });
+      try {
+        const store = new SQLitePendingTurnStore({ db: sessionDb.db, profileId: "default" });
+        const batched = makeMessage("first\n\nsecond", {
+          id: "telegram-1",
+          metadata: {
+            debouncedMessageIds: ["telegram-1", "telegram-2"],
+            debounceSize: 2,
+            debounceWindowMs: 1_500
+          }
+        });
+        store.enqueue(batched);
+        const claimed = store.claimNext()!;
+        store.complete(claimed.id, claimed.claimId!);
+        const handled: string[] = [];
+        const gateway = new ChannelGateway({
+          adapters: [createFakeTelegramAdapter()],
+          runtimeForSession: async () => ({
+            ...createMinimalRuntime(),
+            handle: async ({ text }: { text: string }) => {
+              handled.push(text);
+              return runtimeResponse({ text: "ok", securityDecision: "allow" });
+            }
+          }),
+          authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+          pendingTurnStore: store,
+          busyPolicyResolver: () => ({ busyPolicy: "queue", queueDepth: 3 })
+        });
+
+        await gateway.receive(makeMessage("first", { id: "telegram-1" }));
+        await gateway.receive(makeMessage("second", { id: "telegram-2" }));
+        await gateway.receive(makeMessage("new", { id: "telegram-3" }));
+
+        expect(handled).toEqual(["new"]);
+      } finally {
+        sessionDb.close();
+        await rm(directory, { recursive: true, force: true });
+      }
+    });
+
+    it("quarantines untrusted and escaping-attachment recovery rows while continuing valid work", async () => {
+      const directory = await mkdtemp(join(tmpdir(), "estacoda-durable-revalidation-"));
+      const mediaRoot = join(directory, "media");
+      const outsideRoot = join(directory, "outside");
+      await mkdir(mediaRoot);
+      await mkdir(outsideRoot);
+      const replacedFile = join(mediaRoot, "replaced.txt");
+      const outsideFile = join(outsideRoot, "private.txt");
+      await writeFile(replacedFile, "safe");
+      await writeFile(outsideFile, "private");
+      const sessionDb = await createSQLiteSessionDB({ path: join(directory, "sessions.sqlite") });
+      try {
+        let turn = 0;
+        const store = new SQLitePendingTurnStore({
+          db: sessionDb.db,
+          profileId: "default",
+          approvedMediaRoots: [mediaRoot],
+          idFactory: () => `turn-${++turn}`
+        });
+        store.enqueue(makeMessage("untrusted", { id: "untrusted" }));
+        store.enqueue(makeMessage("invalid attachment", {
+          id: "invalid-attachment",
+          attachments: [{
+            id: "attachment-1",
+            kind: "document",
+            status: "ready",
+            localPath: replacedFile
+          }]
+        }));
+        store.enqueue(makeMessage("valid", {
+          id: "valid",
+          sessionKey: { platform: "telegram", chatId: "trusted-chat", userId: "user-1" }
+        }));
+        await rm(replacedFile);
+        await symlink(outsideFile, replacedFile);
+        const handled: string[] = [];
+        const gateway = new ChannelGateway({
+          adapters: [createFakeTelegramAdapter()],
+          runtimeForSession: async () => ({
+            ...createMinimalRuntime(),
+            handle: async ({ text }: { text: string }) => {
+              handled.push(text);
+              return runtimeResponse({ text: "ok", securityDecision: "allow" });
+            }
+          }),
+          authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+          trustedWorkspace: (message) => message.sessionKey.chatId === "trusted-chat",
+          pendingTurnStore: store,
+          busyPolicyResolver: () => ({ busyPolicy: "queue", queueDepth: 3 })
+        });
+
+        await gateway.start();
+        await waitForPendingWork(gateway);
+
+        expect(handled).toEqual(["valid"]);
+        expect(store.counts()).toMatchObject({ pending: 0, claimed: 0, completed: 1, uncertain: 2 });
+      } finally {
+        sessionDb.close();
+        await rm(directory, { recursive: true, force: true });
+      }
+    });
+
+    it("keeps durable FIFO capacity and transactional tail coalescing aligned with memory", async () => {
+      const directory = await mkdtemp(join(tmpdir(), "estacoda-durable-coalescing-"));
+      const sessionDb = await createSQLiteSessionDB({ path: join(directory, "sessions.sqlite") });
+      try {
+        let turn = 0;
+        const store = new SQLitePendingTurnStore({
+          db: sessionDb.db,
+          profileId: "default",
+          idFactory: () => `turn-${++turn}`
+        });
+        const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+        const registry = new ActiveTurnRegistry();
+        let releaseActive: (() => void) | undefined;
+        let markActiveStarted: (() => void) | undefined;
+        const activeStarted = new Promise<void>((resolve) => { markActiveStarted = resolve; });
+        const handled: string[] = [];
+        const gateway = new ChannelGateway({
+          adapters: [adapter],
+          runtimeForSession: async () => ({
+            ...createMinimalRuntime(),
+            handle: async ({ text }: { text: string }) => {
+              handled.push(text);
+              if (text === "active") {
+                markActiveStarted?.();
+                await new Promise<void>((resolve) => { releaseActive = resolve; });
+              }
+              return runtimeResponse({ text: "ok", securityDecision: "allow" });
+            }
+          }),
+          authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+          activeTurnRegistry: registry,
+          pendingTurnStore: store,
+          busyPolicyResolver: () => ({
+            busyPolicy: "queue",
+            queueDepth: 1,
+            busyTextCoalescing: { enabled: true, windowMs: 1_500, maxMessages: 2, maxChars: 8_000 }
+          })
+        });
+
+        const active = gateway.receive(makeMessage("active", { id: "active" }));
+        await activeStarted;
+        await gateway.receive(makeMessage("queued one", { id: "queued-1" }));
+        await gateway.receive(makeMessage("queued two", { id: "queued-2" }));
+        await gateway.receive(makeMessage("queue full", { id: "queued-3" }));
+
+        expect(store.counts()).toMatchObject({ pending: 1, completed: 1 });
+        expect(store.hasDeliveryIdentity("telegram", "queued-1")).toBe(true);
+        expect(store.hasDeliveryIdentity("telegram", "queued-2")).toBe(true);
+        expect(store.hasDeliveryIdentity("telegram", "queued-3")).toBe(false);
+        expect(adapter.records.filter((record) => record.text?.includes("Queue is full"))).toHaveLength(1);
+
+        releaseActive?.();
+        await active;
+        await waitForPendingWork(gateway);
+        expect(handled).toEqual(["active", "queued one\n\nqueued two"]);
+        expect(store.counts()).toMatchObject({ pending: 0, claimed: 0, completed: 2 });
+      } finally {
+        sessionDb.close();
+        await rm(directory, { recursive: true, force: true });
+      }
+    });
+
+    it("clears the exact durable chat queue before mutating memory on /stop", async () => {
+      const directory = await mkdtemp(join(tmpdir(), "estacoda-durable-stop-"));
+      const sessionDb = await createSQLiteSessionDB({ path: join(directory, "sessions.sqlite") });
+      try {
+        const store = new SQLitePendingTurnStore({ db: sessionDb.db, profileId: "default" });
+        const registry = new ActiveTurnRegistry();
+        let handleResolved = false;
+        let releaseDispose: (() => void) | undefined;
+        const gateway = new ChannelGateway({
+          adapters: [createFakeTelegramAdapter()],
+          runtimeForSession: async () => ({
+            ...createMinimalRuntime(),
+            handle: async () => {
+              await new Promise((resolve) => setTimeout(resolve, 20));
+              handleResolved = true;
+              return runtimeResponse({ text: "ok", securityDecision: "allow" });
+            },
+            dispose: async () => new Promise<void>((resolve) => { releaseDispose = resolve; })
+          }),
+          authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+          activeTurnRegistry: registry,
+          pendingTurnStore: store,
+          busyPolicyResolver: () => ({ busyPolicy: "queue", queueDepth: 3 })
+        });
+
+        const active = gateway.receive(makeMessage("active", { id: "active" }));
+        await new Promise((resolve) => setTimeout(resolve, 5));
+        await gateway.receive(makeMessage("queued", { id: "queued" }));
+        await waitFor(() => handleResolved && registry.stats().activeTurnCount === 0);
+
+        const stopped = await gateway.receive(makeMessage("/stop", { id: "stop" }));
+        expect(stopped.replyText).toContain("Cleared 1 queued message");
+        expect(store.counts()).toMatchObject({ pending: 0, claimed: 0 });
+        expect(store.hasDeliveryIdentity("telegram", "queued")).toBe(false);
+
+        releaseDispose?.();
+        await active;
+        expect(gateway.hasPendingWork()).toBe(false);
+      } finally {
+        sessionDb.close();
+        await rm(directory, { recursive: true, force: true });
+      }
+    });
+
+    it("transactionally replaces durable FIFO work when queue policy changes to interrupt", async () => {
+      const directory = await mkdtemp(join(tmpdir(), "estacoda-durable-interrupt-"));
+      const sessionDb = await createSQLiteSessionDB({ path: join(directory, "sessions.sqlite") });
+      try {
+        let turn = 0;
+        const store = new SQLitePendingTurnStore({
+          db: sessionDb.db,
+          profileId: "default",
+          idFactory: () => `turn-${++turn}`
+        });
+        const registry = new ActiveTurnRegistry();
+        let policy: "queue" | "interrupt" = "queue";
+        let markActiveStarted: (() => void) | undefined;
+        const activeStarted = new Promise<void>((resolve) => { markActiveStarted = resolve; });
+        const handled: string[] = [];
+        const gateway = new ChannelGateway({
+          adapters: [createFakeTelegramAdapter()],
+          runtimeForSession: async () => ({
+            ...createMinimalRuntime(),
+            handle: async ({ text, signal }: { text: string; signal?: AbortSignal }) => {
+              handled.push(text);
+              if (text === "active") {
+                markActiveStarted?.();
+                await new Promise<void>((_resolve, reject) => {
+                  signal?.addEventListener("abort", () => reject(new Error("interrupted")));
+                });
+              }
+              return runtimeResponse({ text: "ok", securityDecision: "allow" });
+            }
+          }),
+          authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+          activeTurnRegistry: registry,
+          pendingTurnStore: store,
+          busyPolicyResolver: () => ({ busyPolicy: policy, queueDepth: 3 })
+        });
+
+        const active = gateway.receive(makeMessage("active", { id: "active" }));
+        await activeStarted;
+        await gateway.receive(makeMessage("old one", { id: "old-1" }));
+        await gateway.receive(makeMessage("old two", { id: "old-2" }));
+        policy = "interrupt";
+        await gateway.receive(makeMessage("replacement", { id: "replacement" }));
+        await active;
+        await waitForPendingWork(gateway);
+
+        expect(handled).toEqual(["active", "replacement"]);
+        expect(store.hasDeliveryIdentity("telegram", "old-1")).toBe(false);
+        expect(store.hasDeliveryIdentity("telegram", "old-2")).toBe(false);
+        expect(store.hasDeliveryIdentity("telegram", "replacement")).toBe(true);
+        expect(store.counts()).toMatchObject({ pending: 0, claimed: 0, completed: 1 });
+      } finally {
+        sessionDb.close();
+        await rm(directory, { recursive: true, force: true });
+      }
+    });
+
+    it("recovers only the selected profile while isolating chats and topics", async () => {
+      const directory = await mkdtemp(join(tmpdir(), "estacoda-durable-scope-"));
+      const sessionDb = await createSQLiteSessionDB({ path: join(directory, "sessions.sqlite") });
+      try {
+        let alphaTurn = 0;
+        const alpha = new SQLitePendingTurnStore({
+          db: sessionDb.db,
+          profileId: "alpha",
+          idFactory: () => `alpha-${++alphaTurn}`
+        });
+        const beta = new SQLitePendingTurnStore({ db: sessionDb.db, profileId: "beta" });
+        alpha.enqueue(makeMessage("chat one", {
+          id: "shared-id",
+          sessionKey: { platform: "telegram", chatId: "chat-1", userId: "user-1" }
+        }));
+        alpha.enqueue(makeMessage("topic one", {
+          id: "topic-1",
+          sessionKey: {
+            platform: "telegram",
+            chatId: "group-1",
+            threadId: "topic-1",
+            chatType: "thread",
+            userId: "user-1"
+          }
+        }));
+        alpha.enqueue(makeMessage("topic two", {
+          id: "topic-2",
+          sessionKey: {
+            platform: "telegram",
+            chatId: "group-1",
+            threadId: "topic-2",
+            chatType: "thread",
+            userId: "user-1"
+          }
+        }));
+        beta.enqueue(makeMessage("beta", { id: "shared-id" }));
+        const handled: string[] = [];
+        const gateway = new ChannelGateway({
+          adapters: [createFakeTelegramAdapter()],
+          runtimeForSession: async () => ({
+            ...createMinimalRuntime(),
+            handle: async ({ text }: { text: string }) => {
+              handled.push(text);
+              return runtimeResponse({ text: "ok", securityDecision: "allow" });
+            }
+          }),
+          authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+          trustedWorkspace: true,
+          pendingTurnStore: alpha,
+          busyPolicyResolver: () => ({ busyPolicy: "queue", queueDepth: 3 })
+        });
+
+        await gateway.start();
+        await waitForPendingWork(gateway);
+
+        expect(handled.sort()).toEqual(["chat one", "topic one", "topic two"]);
+        expect(alpha.counts()).toMatchObject({ pending: 0, completed: 3 });
+        expect(beta.counts()).toMatchObject({ pending: 1, completed: 0 });
+      } finally {
+        sessionDb.close();
+        await rm(directory, { recursive: true, force: true });
+      }
+    });
+
+    it("quarantines an in-flight claim after a simulated drain-timeout restart and replays only pending work", async () => {
+      const directory = await mkdtemp(join(tmpdir(), "estacoda-durable-timeout-"));
+      const sessionDb = await createSQLiteSessionDB({ path: join(directory, "sessions.sqlite") });
+      try {
+        let turn = 0;
+        const store = new SQLitePendingTurnStore({
+          db: sessionDb.db,
+          profileId: "default",
+          idFactory: () => `turn-${++turn}`
+        });
+        store.enqueue(makeMessage("in flight", { id: "in-flight" }));
+        let releaseInFlight: (() => void) | undefined;
+        const firstGateway = new ChannelGateway({
+          adapters: [createFakeTelegramAdapter()],
+          runtimeForSession: async () => ({
+            ...createMinimalRuntime(),
+            handle: async () => new Promise<Awaited<ReturnType<Runtime["handle"]>>>((resolve) => {
+              releaseInFlight = () => resolve(runtimeResponse({ text: "late", securityDecision: "allow" }));
+            })
+          }),
+          authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+          trustedWorkspace: true,
+          pendingTurnStore: store,
+          busyPolicyResolver: () => ({ busyPolicy: "queue", queueDepth: 3 })
+        });
+        await firstGateway.start();
+        await waitFor(() => store.counts().claimed === 1);
+        store.enqueue(makeMessage("still pending", { id: "still-pending" }));
+
+        const recovered: string[] = [];
+        const restartedGateway = new ChannelGateway({
+          adapters: [createFakeTelegramAdapter()],
+          runtimeForSession: async () => ({
+            ...createMinimalRuntime(),
+            handle: async ({ text }: { text: string }) => {
+              recovered.push(text);
+              return runtimeResponse({ text: "ok", securityDecision: "allow" });
+            }
+          }),
+          authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+          trustedWorkspace: true,
+          pendingTurnStore: store,
+          busyPolicyResolver: () => ({ busyPolicy: "queue", queueDepth: 3 })
+        });
+        await restartedGateway.start();
+        await waitForPendingWork(restartedGateway);
+
+        expect(recovered).toEqual(["still pending"]);
+        expect(store.counts()).toMatchObject({ pending: 0, claimed: 0, completed: 1, uncertain: 1 });
+
+        releaseInFlight?.();
+        await waitFor(() => !firstGateway.hasPendingWork());
+        expect(store.counts()).toMatchObject({ completed: 1, uncertain: 1 });
+      } finally {
+        sessionDb.close();
+        await rm(directory, { recursive: true, force: true });
+      }
+    });
+
     it("queue mode enqueues message and delivers position", async () => {
       const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
       const registry = new ActiveTurnRegistry();
@@ -5491,6 +6917,120 @@ describe("ChannelGateway commands", () => {
       const queuedRecords = adapter.records.filter((r) => r.kind === "text" && r.text?.includes("Queued"));
       expect(queuedRecords.length).toBe(1);
       expect(handleCount).toBe(2); // first + drained queued
+    });
+
+    it("coalesces eligible queued text at the existing position and preserves provenance", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const registry = new ActiveTurnRegistry();
+      const handled: Array<{ text: string; inputMetadata?: Record<string, unknown> }> = [];
+      let releaseFirst: (() => void) | undefined;
+      let markFirstStarted: (() => void) | undefined;
+      const firstStarted = new Promise<void>((resolve) => { markFirstStarted = resolve; });
+      const firstBlocked = new Promise<void>((resolve) => { releaseFirst = resolve; });
+
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession: async () => ({
+          ...createMinimalRuntime(),
+          handle: async (input: Parameters<Runtime["handle"]>[0]) => {
+            handled.push({ text: input.text, inputMetadata: input.inputMetadata });
+            if (input.text === "active") {
+              markFirstStarted?.();
+              await firstBlocked;
+            }
+            return runtimeResponse({ text: "ok", securityDecision: "allow" });
+          }
+        }),
+        sessionStore: new InMemoryChannelSessionStore(),
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+        activeTurnRegistry: registry,
+        busyPolicyResolver: () => ({
+          busyPolicy: "queue",
+          queueDepth: 3,
+          busyTextCoalescing: { enabled: true, windowMs: 1_500, maxMessages: 5, maxChars: 8_000 }
+        })
+      });
+
+      const first = gateway.receive(makeMessage("active", { id: "active", receivedAt: "2026-08-06T12:00:00.000Z" }));
+      await firstStarted;
+      await gateway.receive(makeMessage("queued one", { id: "queued-1", receivedAt: "2026-08-06T12:00:01.000Z" }));
+      await gateway.receive(makeMessage("queued two", { id: "queued-2", receivedAt: "2026-08-06T12:00:02.000Z" }));
+
+      expect(adapter.records.filter((record) => record.text === "Queued (position 1)")).toHaveLength(1);
+      expect(adapter.records.filter((record) => record.text === "Added to queued message (position 1)")).toHaveLength(1);
+
+      releaseFirst?.();
+      await first;
+      await waitForPendingWork(gateway);
+
+      expect(handled.map((item) => item.text)).toEqual(["active", "queued one\n\nqueued two"]);
+      expect(handled[1]?.inputMetadata).toEqual(expect.objectContaining({
+        busyTextCoalescedMessageIds: ["queued-1", "queued-2"],
+        busyTextCoalescedReceivedAts: [
+          "2026-08-06T12:00:01.000Z",
+          "2026-08-06T12:00:02.000Z"
+        ],
+        busyTextCoalescingSize: 2,
+        busyTextCoalescingWindowMs: 1_500
+      }));
+    });
+
+    it("keeps different senders, commands, and attachments as separate queued entries", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const registry = new ActiveTurnRegistry();
+      const handled: string[] = [];
+      let releaseFirst: (() => void) | undefined;
+      let markFirstStarted: (() => void) | undefined;
+      const firstStarted = new Promise<void>((resolve) => { markFirstStarted = resolve; });
+      const firstBlocked = new Promise<void>((resolve) => { releaseFirst = resolve; });
+
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession: async () => ({
+          ...createMinimalRuntime(),
+          handle: async (input: Parameters<Runtime["handle"]>[0]) => {
+            handled.push(input.text);
+            if (input.text === "active") {
+              markFirstStarted?.();
+              await firstBlocked;
+            }
+            return runtimeResponse({ text: "ok", securityDecision: "allow" });
+          }
+        }),
+        sessionStore: new InMemoryChannelSessionStore(),
+        authPolicy: { telegram: { allowedUserIds: ["user-1", "user-2"] } },
+        activeTurnRegistry: registry,
+        busyPolicyResolver: () => ({
+          busyPolicy: "queue",
+          queueDepth: 5,
+          busyTextCoalescing: { enabled: true, windowMs: 1_500, maxMessages: 5, maxChars: 8_000 }
+        })
+      });
+
+      const first = gateway.receive(makeMessage("active"));
+      await firstStarted;
+      await gateway.receive(makeMessage("normal"));
+      await gateway.receive(makeMessage("other sender", { sender: { id: "user-2" } }));
+      await gateway.receive(makeMessage("/not-a-command"));
+      await gateway.receive(makeTelegramCallbackMessage("unknown-callback"));
+      await gateway.receive(makeMessage("with attachment", {
+        attachments: [{ id: "attachment-1", kind: "file", name: "note.txt" }]
+      }));
+
+      expect(adapter.records.filter((record) => record.text?.startsWith("Added to queued message"))).toHaveLength(0);
+      expect(adapter.records.filter((record) => record.text?.startsWith("Queued (position"))).toHaveLength(5);
+
+      releaseFirst?.();
+      await first;
+      await waitForPendingWork(gateway);
+      expect(handled).toEqual([
+        "active",
+        "normal",
+        "other sender",
+        "/not-a-command",
+        "unknown-callback",
+        "with attachment"
+      ]);
     });
 
     it("queue mode rejects when queue is full", async () => {
@@ -6966,7 +8506,7 @@ describe("ChannelGateway commands", () => {
       expect(handle).toHaveBeenCalledWith(expect.objectContaining({ text: "@EstaCoda summarize this" }));
     });
 
-    describe("WhatsApp rapid text debounce", () => {
+    describe("rapid text debounce", () => {
       const debounceConfig = {
         textDebounceMs: 100,
         textDebounceMaxMessages: 10,
@@ -6988,13 +8528,92 @@ describe("ChannelGateway commands", () => {
         });
       }
 
+      function makeTelegramMessage(text: string, overrides: Partial<ChannelMessage> = {}): ChannelMessage {
+        return makeMessage(text, {
+          id: `telegram-${text}`,
+          channel: "telegram",
+          sessionKey: {
+            platform: "telegram",
+            accountId: "telegram",
+            chatId: "telegram-chat",
+            userId: "telegram-user",
+            chatType: "dm"
+          },
+          sender: { id: "telegram-user", displayName: "Telegram user" },
+          metadata: { telegram: { updateId: 1, messageId: 1, chatType: "private" } },
+          ...overrides
+        });
+      }
+
+      function telegramTextUpdate(updateId: number, messageId: number, text: string) {
+        return {
+          update_id: updateId,
+          message: {
+            message_id: messageId,
+            date: 1_700_000_000 + messageId,
+            text,
+            chat: { id: "telegram-chat", type: "private" },
+            from: { id: "telegram-user", first_name: "Ada" }
+          }
+        };
+      }
+
+      function createTelegramPollingGateway(polls: unknown[][]) {
+        let pollIndex = 0;
+        const apiMethods: string[] = [];
+        const fetch = vi.fn(async (url: string) => {
+          const method = url.split("/").at(-1) ?? "";
+          apiMethods.push(method);
+          return {
+            ok: true,
+            status: 200,
+            json: async () => ({
+              ok: true,
+              result: method === "getUpdates"
+                ? polls[pollIndex++] ?? []
+                : method === "sendMessage"
+                  ? { message_id: 1 }
+                  : true
+            })
+          };
+        });
+        const adapter = new TelegramAdapter({ botToken: "test-token", fetch });
+        const handled: Array<Parameters<Runtime["handle"]>[0]> = [];
+        const record = vi.fn();
+        let turnNumber = 0;
+        const handle = vi.fn(async (input: Parameters<Runtime["handle"]>[0]) => {
+          handled.push(input);
+          turnNumber += 1;
+          return runtimeResponse({
+            text: "ok",
+            securityDecision: "allow",
+            turnUsage: turnUsage(`telegram-turn-${turnNumber}`, 10, 0.01)
+          });
+        });
+        const gateway = new ChannelGateway({
+          adapters: [adapter],
+          runtimeForSession: async ({ sessionId }) => ({ ...createMinimalRuntime(), sessionId, handle }),
+          sessionStore: new InMemoryChannelSessionStore(),
+          authPolicy: { telegram: { allowedUserIds: ["telegram-user"] } },
+          channelMessageTurnStore: { record, resolve: vi.fn(), prune: vi.fn() },
+          textDebounceResolver: (channelKind) => channelKind === "telegram"
+            ? { textDebounceMs: 1_500, textDebounceMaxMessages: 10, textDebounceMaxChars: 8_000 }
+            : undefined
+        });
+        return { adapter, apiMethods, gateway, handle, handled, record };
+      }
+
       function createDebounceGateway(input: {
         handle?: Runtime["handle"];
         authPolicy?: ConstructorParameters<typeof ChannelGateway>[0]["authPolicy"];
         busyPolicyResolver?: ConstructorParameters<typeof ChannelGateway>[0]["busyPolicyResolver"];
         activeTurnRegistry?: ActiveTurnRegistry;
         config?: typeof debounceConfig;
+        logWarning?: (message: string) => void;
+        channel?: "telegram" | "whatsapp";
+        pair?: ConstructorParameters<typeof ChannelGateway>[0]["pair"];
       } = {}) {
+        const channel = input.channel ?? "whatsapp";
         const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
         const handle = input.handle ?? vi.fn(async () => runtimeResponse({ text: "ok", securityDecision: "allow" }));
         const runtimeForSession = vi.fn(async ({ sessionId }) => ({ ...createMinimalRuntime(), sessionId, handle }));
@@ -7002,10 +8621,16 @@ describe("ChannelGateway commands", () => {
           adapters: [adapter],
           runtimeForSession,
           sessionStore: new InMemoryChannelSessionStore(),
-          authPolicy: input.authPolicy ?? { whatsapp: { dmPolicy: "open" } },
-          whatsappTextDebounce: input.config ?? debounceConfig,
+          authPolicy: input.authPolicy ?? (channel === "telegram"
+            ? { telegram: { allowedUserIds: ["telegram-user"] } }
+            : { whatsapp: { dmPolicy: "open" } }),
+          textDebounceResolver: (channelKind) => channelKind === channel
+            ? input.config ?? debounceConfig
+            : undefined,
           busyPolicyResolver: input.busyPolicyResolver,
-          activeTurnRegistry: input.activeTurnRegistry
+          activeTurnRegistry: input.activeTurnRegistry,
+          logWarning: input.logWarning,
+          pair: input.pair
         });
         return { adapter, gateway, handle, runtimeForSession };
       }
@@ -7043,6 +8668,93 @@ describe("ChannelGateway commands", () => {
             debounceWindowMs: 10
           })
         }));
+      });
+
+      it("combines Telegram fragments from one getUpdates response", async () => {
+        const { adapter, gateway, handled, record } = createTelegramPollingGateway([[
+          telegramTextUpdate(1, 11, "first"),
+          telegramTextUpdate(2, 12, "second")
+        ]]);
+
+        await gateway.start();
+        expect(await adapter.pollOnce()).toBe(2);
+        expect(handled).toEqual([]);
+
+        await gateway.flushPendingDebounces();
+
+        expect(handled).toHaveLength(1);
+        expect(handled[0]).toMatchObject({
+          text: "first\n\nsecond",
+          inputMetadata: {
+            debouncedMessageIds: ["telegram-1-11", "telegram-2-12"],
+            debounceSize: 2,
+            debounceWindowMs: 1_500
+          }
+        });
+        expect(record).toHaveBeenCalledWith(expect.objectContaining({
+          platformMessageIds: ["11", "12"],
+          direction: "inbound"
+        }));
+        await gateway.stop();
+      });
+
+      it("combines Telegram fragments across consecutive polling passes", async () => {
+        const { adapter, gateway, handled } = createTelegramPollingGateway([
+          [telegramTextUpdate(3, 13, "first poll")],
+          [telegramTextUpdate(4, 14, "second poll")]
+        ]);
+
+        await gateway.start();
+        expect(await adapter.pollOnce()).toBe(1);
+        expect(await adapter.pollOnce()).toBe(1);
+        expect(handled).toEqual([]);
+
+        await gateway.flushPendingDebounces();
+
+        expect(handled.map((input) => input.text)).toEqual(["first poll\n\nsecond poll"]);
+        await gateway.stop();
+      });
+
+      it("keeps Telegram callbacks out of batching and acknowledges them", async () => {
+        const callbackUpdate = {
+          update_id: 5,
+          callback_query: {
+            id: "callback-5",
+            data: "unrecognized-callback",
+            from: { id: "telegram-user", first_name: "Ada" },
+            message: {
+              message_id: 15,
+              date: 1_700_000_015,
+              chat: { id: "telegram-chat", type: "private" }
+            }
+          }
+        };
+        const { adapter, apiMethods, gateway, handled } = createTelegramPollingGateway([[callbackUpdate]]);
+
+        await gateway.start();
+        expect(await adapter.pollOnce()).toBe(1);
+
+        expect(handled.map((input) => input.text)).toEqual(["unrecognized-callback"]);
+        expect(apiMethods).toContain("answerCallbackQuery");
+        await gateway.stop();
+      });
+
+      it("preserves the deprecated WhatsApp-specific debounce option", async () => {
+        const handle = vi.fn(async () => runtimeResponse({ text: "ok", securityDecision: "allow" }));
+        const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+        const gateway = new ChannelGateway({
+          adapters: [adapter],
+          runtimeForSession: async ({ sessionId }) => ({ ...createMinimalRuntime(), sessionId, handle }),
+          sessionStore: new InMemoryChannelSessionStore(),
+          authPolicy: { whatsapp: { dmPolicy: "open" } },
+          whatsappTextDebounce: debounceConfig
+        });
+
+        await gateway.receive(makeWhatsAppMessage("legacy option"));
+        await gateway.flushPendingDebounces();
+
+        expect(handle).toHaveBeenCalledOnce();
+        expect(handle).toHaveBeenCalledWith(expect.objectContaining({ text: "legacy option" }));
       });
 
       it("resets the quiet timer when another WhatsApp text arrives", async () => {
@@ -7094,6 +8806,256 @@ describe("ChannelGateway commands", () => {
         expect(texts.sort()).toEqual(["chat one", "chat two"]);
       });
 
+      it("isolates WhatsApp debounce buffers by account, thread, and sender", async () => {
+        const texts: string[] = [];
+        const handle = vi.fn(async (input) => {
+          texts.push(input.text);
+          return runtimeResponse({ text: "ok", securityDecision: "allow" });
+        });
+        const { gateway } = createDebounceGateway({
+          handle,
+          authPolicy: {
+            whatsapp: {
+              dmPolicy: "open",
+              groupPolicy: "open"
+            }
+          }
+        });
+
+        await gateway.receive(makeWhatsAppMessage("account one", {
+          id: "account-one",
+          sessionKey: {
+            platform: "whatsapp",
+            accountId: "account-one",
+            chatId: "shared-chat",
+            userId: "shared-sender",
+            chatType: "dm"
+          },
+          sender: { id: "shared-sender", displayName: "Shared sender" }
+        }));
+        await gateway.receive(makeWhatsAppMessage("account two", {
+          id: "account-two",
+          sessionKey: {
+            platform: "whatsapp",
+            accountId: "account-two",
+            chatId: "shared-chat",
+            userId: "shared-sender",
+            chatType: "dm"
+          },
+          sender: { id: "shared-sender", displayName: "Shared sender" }
+        }));
+        await gateway.receive(makeWhatsAppMessage("thread one", {
+          id: "thread-one",
+          sessionKey: {
+            platform: "whatsapp",
+            accountId: "account-one",
+            chatId: "group-chat",
+            threadId: "thread-one",
+            userId: "shared-sender",
+            chatType: "thread"
+          },
+          sender: { id: "shared-sender", displayName: "Shared sender" }
+        }));
+        await gateway.receive(makeWhatsAppMessage("thread two", {
+          id: "thread-two",
+          sessionKey: {
+            platform: "whatsapp",
+            accountId: "account-one",
+            chatId: "group-chat",
+            threadId: "thread-two",
+            userId: "shared-sender",
+            chatType: "thread"
+          },
+          sender: { id: "shared-sender", displayName: "Shared sender" }
+        }));
+        await gateway.receive(makeWhatsAppMessage("sender one", {
+          id: "sender-one",
+          sessionKey: {
+            platform: "whatsapp",
+            accountId: "account-one",
+            chatId: "shared-group",
+            userId: "sender-one",
+            chatType: "group"
+          },
+          sender: { id: "sender-one", displayName: "Sender one" }
+        }));
+        await gateway.receive(makeWhatsAppMessage("sender two", {
+          id: "sender-two",
+          sessionKey: {
+            platform: "whatsapp",
+            accountId: "account-one",
+            chatId: "shared-group",
+            userId: "sender-two",
+            chatType: "group"
+          },
+          sender: { id: "sender-two", displayName: "Sender two" }
+        }));
+        await gateway.flushPendingDebounces();
+
+        expect(texts.sort()).toEqual([
+          "account one",
+          "account two",
+          "sender one",
+          "sender two",
+          "thread one",
+          "thread two"
+        ]);
+      });
+
+      it("isolates Telegram buffers by account, chat, topic, and sender", async () => {
+        const texts: string[] = [];
+        const handle = vi.fn(async (input: Parameters<Runtime["handle"]>[0]) => {
+          texts.push(input.text);
+          return runtimeResponse({ text: "ok", securityDecision: "allow" });
+        });
+        const { gateway } = createDebounceGateway({
+          channel: "telegram",
+          handle,
+          authPolicy: {
+            telegram: {
+              allowedUserIds: ["shared-sender", "sender-one", "sender-two"]
+            }
+          }
+        });
+        const variants: Array<[string, Partial<ChannelMessage>]> = [
+          ["account one", {
+            sessionKey: { platform: "telegram", accountId: "account-one", chatId: "shared-chat", userId: "shared-sender", chatType: "dm" },
+            sender: { id: "shared-sender", displayName: "Shared sender" }
+          }],
+          ["account two", {
+            sessionKey: { platform: "telegram", accountId: "account-two", chatId: "shared-chat", userId: "shared-sender", chatType: "dm" },
+            sender: { id: "shared-sender", displayName: "Shared sender" }
+          }],
+          ["chat one", {
+            sessionKey: { platform: "telegram", accountId: "account-one", chatId: "chat-one", userId: "shared-sender", chatType: "dm" },
+            sender: { id: "shared-sender", displayName: "Shared sender" }
+          }],
+          ["chat two", {
+            sessionKey: { platform: "telegram", accountId: "account-one", chatId: "chat-two", userId: "shared-sender", chatType: "dm" },
+            sender: { id: "shared-sender", displayName: "Shared sender" }
+          }],
+          ["topic one", {
+            sessionKey: { platform: "telegram", accountId: "account-one", chatId: "group-chat", threadId: "topic-one", userId: "shared-sender", chatType: "thread" },
+            sender: { id: "shared-sender", displayName: "Shared sender" }
+          }],
+          ["topic two", {
+            sessionKey: { platform: "telegram", accountId: "account-one", chatId: "group-chat", threadId: "topic-two", userId: "shared-sender", chatType: "thread" },
+            sender: { id: "shared-sender", displayName: "Shared sender" }
+          }],
+          ["sender one", {
+            sessionKey: { platform: "telegram", accountId: "account-one", chatId: "shared-group", userId: "sender-one", chatType: "group" },
+            sender: { id: "sender-one", displayName: "Sender one" }
+          }],
+          ["sender two", {
+            sessionKey: { platform: "telegram", accountId: "account-one", chatId: "shared-group", userId: "sender-two", chatType: "group" },
+            sender: { id: "sender-two", displayName: "Sender two" }
+          }]
+        ];
+
+        for (const [text, overrides] of variants) {
+          await gateway.receive(makeTelegramMessage(text, { id: `isolation-${text}`, ...overrides }));
+        }
+        await gateway.flushPendingDebounces();
+
+        expect(texts.sort()).toEqual(variants.map(([text]) => text).sort());
+      });
+
+      it("keeps Telegram control commands outside rapid-text batching", async () => {
+        const handle = vi.fn(async () => runtimeResponse({ text: "ok", securityDecision: "allow" }));
+        const { gateway } = createDebounceGateway({ channel: "telegram", handle });
+
+        const status = await gateway.receive(makeTelegramMessage("/status"));
+        const stop = await gateway.receive(makeTelegramMessage("/stop"));
+        const approve = await gateway.receive(makeTelegramMessage("/approve"));
+        const deny = await gateway.receive(makeTelegramMessage("/deny"));
+
+        expect(status.replyText).toContain("EstaCoda channel status");
+        expect(stop.replyText).toContain("Stopping the EstaCoda gateway");
+        expect(approve.replyText).toContain("no pending approval");
+        expect(deny.replyText).toContain("no pending approval");
+        expect(handle).not.toHaveBeenCalled();
+        expect(gateway.hasPendingWork()).toBe(false);
+      });
+
+      it("keeps Telegram pairing flows outside rapid-text batching", async () => {
+        const pair = vi.fn(async (message: ChannelMessage) => message.text === "PAIR42" ? "paired" : undefined);
+        const handle = vi.fn(async () => runtimeResponse({ text: "ok", securityDecision: "allow" }));
+        const { gateway } = createDebounceGateway({
+          channel: "telegram",
+          handle,
+          authPolicy: { telegram: { allowedUserIds: [] } },
+          pair
+        });
+
+        const result = await gateway.receive(makeTelegramMessage("PAIR42"));
+
+        expect(result.replyText).toBe("paired");
+        expect(pair).toHaveBeenCalledOnce();
+        expect(handle).not.toHaveBeenCalled();
+        expect(gateway.hasPendingWork()).toBe(false);
+      });
+
+      it("keeps Telegram albums and following text in separate turns", async () => {
+        const handled: Array<Parameters<Runtime["handle"]>[0]> = [];
+        const handle = vi.fn(async (input: Parameters<Runtime["handle"]>[0]) => {
+          handled.push(input);
+          return runtimeResponse({ text: "ok", securityDecision: "allow" });
+        });
+        const { gateway } = createDebounceGateway({ channel: "telegram", handle });
+
+        await gateway.receive(makeTelegramMessage("album caption", {
+          id: "telegram-album",
+          attachments: [
+            { id: "photo-one", kind: "image", status: "ready", localPath: "/profile/channel-media/telegram/one.jpg", bytes: 100 },
+            { id: "photo-two", kind: "image", status: "ready", localPath: "/profile/channel-media/telegram/two.jpg", bytes: 100 }
+          ],
+          metadata: {
+            telegram: {
+              updateId: 10,
+              messageId: 20,
+              mediaGroupId: "album-one",
+              mediaGroupMessageIds: [20, 21],
+              mediaGroupSize: 2
+            }
+          }
+        }));
+        await gateway.receive(makeTelegramMessage("following text", { id: "telegram-following" }));
+        await gateway.flushPendingDebounces();
+
+        expect(handled).toHaveLength(2);
+        expect(handled[0]).toMatchObject({
+          text: "album caption",
+          attachments: [
+            expect.objectContaining({ id: "photo-one" }),
+            expect.objectContaining({ id: "photo-two" })
+          ]
+        });
+        expect(handled[1]).toMatchObject({ text: "following text", attachments: undefined });
+      });
+
+      it("dispatches a standalone Telegram attachment without waiting for the text window", async () => {
+        const handle = vi.fn(async () => runtimeResponse({ text: "ok", securityDecision: "allow" }));
+        const { gateway } = createDebounceGateway({ channel: "telegram", handle });
+
+        await gateway.receive(makeTelegramMessage("document caption", {
+          id: "telegram-document",
+          attachments: [{
+            id: "document-one",
+            kind: "document",
+            status: "ready",
+            localPath: "/profile/channel-media/telegram/document.pdf",
+            bytes: 200
+          }]
+        }));
+
+        expect(handle).toHaveBeenCalledOnce();
+        expect(handle).toHaveBeenCalledWith(expect.objectContaining({
+          text: "document caption",
+          attachments: [expect.objectContaining({ id: "document-one" })]
+        }));
+        expect(gateway.hasPendingWork()).toBe(false);
+      });
+
       it("bypasses debounce for slash and control commands", async () => {
         vi.useFakeTimers();
         const handle = vi.fn(async () => runtimeResponse({ text: "ok", securityDecision: "allow" }));
@@ -7123,7 +9085,7 @@ describe("ChannelGateway commands", () => {
           sessionStore: new InMemoryChannelSessionStore(),
           authPolicy: { whatsapp: { dmPolicy: "pairing" } },
           pair,
-          whatsappTextDebounce: debounceConfig
+          textDebounceResolver: (channelKind) => channelKind === "whatsapp" ? debounceConfig : undefined
         });
 
         const result = await gateway.receive(makeWhatsAppMessage("12345678"));
@@ -7217,7 +9179,7 @@ describe("ChannelGateway commands", () => {
         expect(handle).toHaveBeenCalledWith(expect.objectContaining({ text: "summarize @notbot" }));
       });
 
-      it("flushes immediately at max message count and max chars", async () => {
+      it("flushes at max message count and max chars", async () => {
         vi.useFakeTimers();
         const texts: string[] = [];
         const handle = vi.fn(async (input) => {
@@ -7231,6 +9193,7 @@ describe("ChannelGateway commands", () => {
         });
         await byCount.gateway.receive(makeWhatsAppMessage("one"));
         await byCount.gateway.receive(makeWhatsAppMessage("two"));
+        await byCount.gateway.flushPendingDebounces();
         expect(texts).toContain("one\n\ntwo");
 
         const byChars = createDebounceGateway({
@@ -7239,7 +9202,135 @@ describe("ChannelGateway commands", () => {
         });
         await byChars.gateway.receive(makeWhatsAppMessage("abc"));
         await byChars.gateway.receive(makeWhatsAppMessage("def"));
+        await byChars.gateway.flushPendingDebounces();
         expect(texts).toContain("abc\n\ndef");
+      });
+
+      it("starts a maximum-message flush without awaiting the runtime turn", async () => {
+        let releaseTurn: (() => void) | undefined;
+        const turnGate = new Promise<void>((resolve) => { releaseTurn = resolve; });
+        const registry = new ActiveTurnRegistry();
+        const handle = vi.fn(async () => {
+          await turnGate;
+          return runtimeResponse({ text: "ok", securityDecision: "allow" });
+        });
+        const { gateway } = createDebounceGateway({
+          handle,
+          activeTurnRegistry: registry,
+          config: { textDebounceMs: 60_000, textDebounceMaxMessages: 2, textDebounceMaxChars: 8_000 }
+        });
+        const first = makeWhatsAppMessage("one", { id: "count-one" });
+        const second = makeWhatsAppMessage("two", { id: "count-two" });
+        let ingressReturned = false;
+
+        await gateway.receive(first);
+        const ingress = gateway.receive(second).then((result) => {
+          ingressReturned = true;
+          return result;
+        });
+
+        try {
+          await waitFor(() => handle.mock.calls.length === 1);
+          await waitFor(() => ingressReturned);
+          expect(registry.isBusy(stableSessionKey(first.sessionKey, {}))).toBe(true);
+          expect(gateway.hasPendingWork()).toBe(true);
+        } finally {
+          releaseTurn?.();
+        }
+
+        expect(await ingress).toMatchObject({ sessionId: "", replyText: "" });
+        await gateway.flushPendingDebounces();
+        expect(gateway.hasPendingWork()).toBe(false);
+      });
+
+      it("starts a maximum-character flush without blocking ingress polling", async () => {
+        let releaseTurn: (() => void) | undefined;
+        const turnGate = new Promise<void>((resolve) => { releaseTurn = resolve; });
+        const handle = vi.fn(async () => {
+          await turnGate;
+          return runtimeResponse({ text: "ok", securityDecision: "allow" });
+        });
+        const { gateway } = createDebounceGateway({
+          handle,
+          config: { textDebounceMs: 60_000, textDebounceMaxMessages: 10, textDebounceMaxChars: 5 }
+        });
+        let ingressReturned = false;
+
+        await gateway.receive(makeWhatsAppMessage("abc", { id: "chars-one" }));
+        const ingress = gateway.receive(makeWhatsAppMessage("def", { id: "chars-two" })).then((result) => {
+          ingressReturned = true;
+          return result;
+        });
+
+        try {
+          await waitFor(() => handle.mock.calls.length === 1);
+          await waitFor(() => ingressReturned);
+          expect(gateway.hasPendingWork()).toBe(true);
+        } finally {
+          releaseTurn?.();
+        }
+
+        await ingress;
+        await gateway.flushPendingDebounces();
+        expect(handle).toHaveBeenCalledWith(expect.objectContaining({ text: "abc\n\ndef" }));
+      });
+
+      it("dispatches once when a stale timer races a threshold flush", async () => {
+        const callbacks: Array<() => void> = [];
+        const timeoutSpy = vi.spyOn(globalThis, "setTimeout").mockImplementation(((callback: TimerHandler) => {
+          callbacks.push(callback as () => void);
+          return callbacks.length as unknown as ReturnType<typeof setTimeout>;
+        }) as unknown as typeof setTimeout);
+        const clearTimeoutSpy = vi.spyOn(globalThis, "clearTimeout").mockImplementation(() => undefined);
+        const handle = vi.fn(async () => runtimeResponse({ text: "ok", securityDecision: "allow" }));
+        const { gateway } = createDebounceGateway({
+          handle,
+          config: { textDebounceMs: 1000, textDebounceMaxMessages: 2, textDebounceMaxChars: 8_000 }
+        });
+
+        try {
+          await gateway.receive(makeWhatsAppMessage("one", { id: "race-one" }));
+          const staleTimer = callbacks[0];
+          await gateway.receive(makeWhatsAppMessage("two", { id: "race-two" }));
+          staleTimer?.();
+          await gateway.flushPendingDebounces();
+
+          expect(handle).toHaveBeenCalledOnce();
+          expect(handle).toHaveBeenCalledWith(expect.objectContaining({ text: "one\n\ntwo" }));
+        } finally {
+          timeoutSpy.mockRestore();
+          clearTimeoutSpy.mockRestore();
+        }
+      });
+
+      it("observes flush rejection without logging buffered message content", async () => {
+        const warnings: string[] = [];
+        const registry = new ActiveTurnRegistry();
+        const { adapter, gateway } = createDebounceGateway({
+          activeTurnRegistry: registry,
+          logWarning: (message) => warnings.push(message),
+          config: { textDebounceMs: 60_000, textDebounceMaxMessages: 1, textDebounceMaxChars: 8_000 }
+        });
+        const message = makeWhatsAppMessage("private buffered request", { id: "flush-rejection" });
+        const activeKey = stableSessionKey(message.sessionKey, {});
+        const active = registry.startTurn(activeKey, new AbortController());
+        adapter.delivery!.sendText = async () => {
+          throw new Error(`delivery failed for ${message.text}`);
+        };
+
+        try {
+          await gateway.receive(message);
+          await gateway.flushPendingDebounces();
+
+          expect(warnings).toEqual(["Channel text debounce flush failed (Error)."]);
+          expect(warnings.join("\n")).not.toContain(message.text);
+          expect(gateway.hasPendingWork()).toBe(true);
+        } finally {
+          if (active.ok) {
+            registry.endTurn(activeKey, active.turnId);
+          }
+        }
+        expect(gateway.hasPendingWork()).toBe(false);
       });
 
       it("flushes pending WhatsApp text buffers on graceful gateway shutdown", async () => {
@@ -7253,6 +9344,55 @@ describe("ChannelGateway commands", () => {
         await gateway.flushPendingDebounces();
 
         expect(handle).toHaveBeenCalledWith(expect.objectContaining({ text: "before shutdown" }));
+      });
+
+      it("waits for buffered and already scheduled flush work before stopping adapters", async () => {
+        let releaseTurns: (() => void) | undefined;
+        const turnGate = new Promise<void>((resolve) => { releaseTurns = resolve; });
+        const seenTexts: string[] = [];
+        const handle = vi.fn(async (input: Parameters<Runtime["handle"]>[0]) => {
+          seenTexts.push(input.text);
+          await turnGate;
+          return runtimeResponse({ text: "ok", securityDecision: "allow" });
+        });
+        const { adapter, gateway } = createDebounceGateway({
+          handle,
+          config: { textDebounceMs: 60_000, textDebounceMaxMessages: 2, textDebounceMaxChars: 8_000 }
+        });
+        const stopAdapter = vi.fn(async () => undefined);
+        adapter.stop = stopAdapter;
+        const otherChat = {
+          sessionKey: {
+            platform: "whatsapp" as const,
+            chatId: "971509999999",
+            userId: "971509999999",
+            chatType: "dm" as const
+          },
+          sender: { id: "971509999999", displayName: "Other chat" }
+        };
+
+        await gateway.receive(makeWhatsAppMessage("scheduled one", { id: "scheduled-one" }));
+        await gateway.receive(makeWhatsAppMessage("scheduled two", { id: "scheduled-two" }));
+        await gateway.receive(makeWhatsAppMessage("buffered", { id: "buffered", ...otherChat }));
+        let stopSettled = false;
+        const stopping = gateway.stop().then(() => { stopSettled = true; });
+
+        try {
+          await waitFor(() => handle.mock.calls.length === 2);
+          expect(stopSettled).toBe(false);
+          expect(stopAdapter).not.toHaveBeenCalled();
+          expect(gateway.hasPendingWork()).toBe(true);
+        } finally {
+          releaseTurns?.();
+        }
+
+        await stopping;
+        expect(stopAdapter).toHaveBeenCalledOnce();
+        expect(gateway.hasPendingWork()).toBe(false);
+        expect(seenTexts.sort()).toEqual([
+          "buffered",
+          "scheduled one\n\nscheduled two"
+        ]);
       });
 
       it("queues one combined busy-session turn for rapid WhatsApp texts", async () => {
@@ -7288,6 +9428,52 @@ describe("ChannelGateway commands", () => {
         await waitFor(() => seenTexts.includes("one\n\ntwo"));
 
         expect(seenTexts).toEqual(["active", "one\n\ntwo"]);
+      });
+
+      it("flushes Telegram limits without awaiting the runtime turn", async () => {
+        let releaseTurn: (() => void) | undefined;
+        const turnGate = new Promise<void>((resolve) => { releaseTurn = resolve; });
+        const handle = vi.fn(async () => {
+          await turnGate;
+          return runtimeResponse({ text: "ok", securityDecision: "allow" });
+        });
+        const { gateway } = createDebounceGateway({
+          channel: "telegram",
+          handle,
+          config: { textDebounceMs: 60_000, textDebounceMaxMessages: 2, textDebounceMaxChars: 8_000 }
+        });
+        let ingressReturned = false;
+
+        await gateway.receive(makeTelegramMessage("one", { id: "telegram-limit-one" }));
+        const ingress = gateway.receive(makeTelegramMessage("two", { id: "telegram-limit-two" })).then(() => {
+          ingressReturned = true;
+        });
+
+        try {
+          await waitFor(() => handle.mock.calls.length === 1);
+          await waitFor(() => ingressReturned);
+          expect(gateway.hasPendingWork()).toBe(true);
+        } finally {
+          releaseTurn?.();
+        }
+
+        await ingress;
+        await gateway.flushPendingDebounces();
+        expect(handle).toHaveBeenCalledWith(expect.objectContaining({ text: "one\n\ntwo" }));
+      });
+
+      it("dispatches Telegram text immediately when textDebounceMs is zero", async () => {
+        const handle = vi.fn(async () => runtimeResponse({ text: "ok", securityDecision: "allow" }));
+        const { gateway } = createDebounceGateway({
+          channel: "telegram",
+          handle,
+          config: { textDebounceMs: 0, textDebounceMaxMessages: 10, textDebounceMaxChars: 8_000 }
+        });
+
+        await gateway.receive(makeTelegramMessage("immediate"));
+
+        expect(handle).toHaveBeenCalledWith(expect.objectContaining({ text: "immediate" }));
+        expect(gateway.hasPendingWork()).toBe(false);
       });
 
       it("disables debounce when textDebounceMs is zero", async () => {

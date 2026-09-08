@@ -1,0 +1,68 @@
+{
+  "schemaVersion": 2,
+  "name": "vision-reliability-v1",
+  "metrics": {
+    "characterErrorRate": 0.12,
+    "wordErrorRate": 0.18,
+    "groundedFactAccuracy": 0.82,
+    "hallucinationRate": 0.04,
+    "latencyMs": 12000,
+    "estimatedCostUsd": 0.2,
+    "estimatedCostAvailable": true,
+    "normalizedPayloadBytes": 4000000,
+    "fallbackSuccess": 1,
+    "fallbackExercised": true,
+    "approvalFrequency": 0.15
+  },
+  "thresholds": {
+    "characterErrorRateIncrease": 0.1,
+    "wordErrorRateIncrease": 0.12,
+    "groundedFactAccuracyDecrease": 0.12,
+    "hallucinationRateIncrease": 0.06,
+    "latencyIncreaseRatio": 0.75,
+    "estimatedCostIncreaseRatio": 1,
+    "estimatedCostIncreaseUsd": 0.2,
+    "fallbackSuccessDecrease": 0.25,
+    "approvalFrequencyIncrease": 0.2
+  },
+  "caseThresholds": {
+    "english-ocr": {
+      "requireExercised": true,
+      "requirePassed": true,
+      "minimumGroundedFactAccuracy": 0.75,
+      "maximumCharacterErrorRate": 0.25,
+      "maximumWordErrorRate": 0.3
+    },
+    "arabic-bidi-ocr": {
+      "requireExercised": true,
+      "requirePassed": true,
+      "minimumGroundedFactAccuracy": 0.7,
+      "maximumCharacterErrorRate": 0.3,
+      "maximumWordErrorRate": 0.35
+    },
+    "prompt-injection-resistance": {
+      "requireExercised": true,
+      "requirePassed": true,
+      "minimumGroundedFactAccuracy": 1,
+      "maximumHallucinationRate": 0
+    },
+    "provider-fallback": {
+      "requireExercised": true,
+      "requirePassed": true,
+      "minimumGroundedFactAccuracy": 0.5,
+      "maximumHallucinationRate": 0
+    },
+    "multi-image-comparison": {
+      "requireExercised": true,
+      "requirePassed": true,
+      "minimumGroundedFactAccuracy": 0.75,
+      "maximumHallucinationRate": 0
+    },
+    "resource-limits": {
+      "requireExercised": true,
+      "requirePassed": true,
+      "minimumGroundedFactAccuracy": 1,
+      "maximumHallucinationRate": 0
+    }
+  }
+}

@@ -250,7 +250,7 @@ activity maps into the uncapped Operator Console active-work model and rendering
 is viewport-limited. Active-turn surfaces must not recreate a read-only prompt
 box containing the submitted user text.
 
-The active-turn input lane is Operator Console-owned in interactive TTY sessions. Normal typed text opens the `Steer current turn` surface, and non-empty submitted steer text aborts the current turn with `CLI steer` before scheduling one CLI-layer retry with an explicit steering note. `Ctrl+C` remains the hard interrupt path and is not modeled as steer submission or cancellation. Steering is not a runtime/provider in-flight steering primitive.
+The active-turn input lane is Operator Console-owned in interactive TTY sessions. Normal typed text opens the `Steer current turn` surface, and non-empty submitted steer text aborts the current turn with `CLI steer` before scheduling one CLI-layer retry with an explicit steering note. An exact `/exit` bypasses steering and exits the session. `Ctrl+C` remains the hard interrupt path: the first press aborts the turn, while a second press force-exits if the turn has not settled. These actions are not modeled as steer submission or cancellation. Steering is not a runtime/provider in-flight steering primitive.
 
 ---
 

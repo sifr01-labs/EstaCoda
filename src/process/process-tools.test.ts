@@ -14,7 +14,25 @@ function createFakeProcessManager(): ProcessManager {
     })),
     list: vi.fn(() => []),
     logs: vi.fn(() => []),
-    stop: vi.fn()
+    stop: vi.fn(),
+    prepareProtectedEnvironment: vi.fn(async (command: string, variableName: string) => ({
+      id: "proc-protected",
+      command,
+      cwd: "/tmp/workspace",
+      status: "prepared" as const,
+      startedAt: "2026-05-18T10:00:00.000Z",
+      updatedAt: "2026-05-18T10:00:00.000Z",
+      variableName
+    })),
+    releasePrepared: vi.fn(),
+    get: vi.fn((id: string) => ({
+      id,
+      command: "service start",
+      cwd: "/tmp/workspace",
+      status: "running" as const,
+      startedAt: "2026-05-18T10:00:00.000Z",
+      updatedAt: "2026-05-18T10:00:00.000Z"
+    }))
   } as unknown as ProcessManager;
 }
 
@@ -49,5 +67,51 @@ describe("process.start hardline floor", () => {
     expect(result?.ok).toBe(false);
     expect(result?.content).toContain("privilege escalation");
     expect(processManager.start).not.toHaveBeenCalled();
+  });
+});
+
+describe("protected process tool requests", () => {
+  it("reserves a process and requests one-process environment delivery without putting the value in the command", async () => {
+    const processManager = createFakeProcessManager();
+    const start = createProcessTools({ processManager }).find((tool) => tool.name === "process.start");
+    const onSecureInputRequest = vi.fn(async (request) => {
+      expect(request.destination).toEqual({
+        type: "process-environment",
+        processId: "proc-protected",
+        variableName: "SERVICE_TOKEN"
+      });
+      return { status: "delivered" as const, destinationLabel: "Process environment SERVICE_TOKEN", persisted: false };
+    });
+
+    const result = await start?.run({
+      command: "service start",
+      protectedEnvironment: {
+        ref: "SERVICE_TOKEN",
+        protectedInput: { kind: "access-token", purpose: "Authenticate service" }
+      }
+    }, { onSecureInputRequest });
+
+    expect(result?.ok).toBe(true);
+    expect(processManager.prepareProtectedEnvironment).toHaveBeenCalledWith("service start", "SERVICE_TOKEN");
+    expect(processManager.start).not.toHaveBeenCalled();
+  });
+
+  it("requests stdin delivery only for an explicit prompt label", async () => {
+    const processManager = createFakeProcessManager();
+    const inputTool = createProcessTools({ processManager }).find((tool) => tool.name === "process.input");
+    const onSecureInputRequest = vi.fn(async (request) => ({
+      status: "delivered" as const,
+      destinationLabel: request.destination.type,
+      persisted: false
+    }));
+    const result = await inputTool?.run({
+      id: "proc-1",
+      promptLabel: "Password:",
+      protectedInput: { kind: "password", purpose: "Sign in" }
+    }, { onSecureInputRequest });
+    expect(result?.ok).toBe(true);
+    expect(onSecureInputRequest).toHaveBeenCalledWith(expect.objectContaining({
+      destination: { type: "process-stdin", processId: "proc-1", promptLabel: "Password:" }
+    }), expect.any(Function));
   });
 });

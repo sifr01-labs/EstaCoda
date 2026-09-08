@@ -97,6 +97,18 @@ export class AdapterResilienceSupervisor {
     return this.rawAdapter.leaveVoiceChannelForMessage?.bind(this.rawAdapter);
   }
 
+  get deleteInboundMessage(): ChannelAdapter["deleteInboundMessage"] {
+    return this.rawAdapter.deleteInboundMessage?.bind(this.rawAdapter);
+  }
+
+  get setInboundProcessingIndicator(): ChannelAdapter["setInboundProcessingIndicator"] {
+    return this.rawAdapter.setInboundProcessingIndicator?.bind(this.rawAdapter);
+  }
+
+  get beginSecureInputIntake(): ChannelAdapter["beginSecureInputIntake"] {
+    return this.rawAdapter.beginSecureInputIntake?.bind(this.rawAdapter);
+  }
+
   get pollOnce(): ChannelAdapter["pollOnce"] {
     return this.rawAdapter.pollOnce === undefined
       ? undefined

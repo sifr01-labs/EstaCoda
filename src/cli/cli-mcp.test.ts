@@ -54,4 +54,152 @@ describe("cli mcp setup", () => {
       await rm(tmpDir, { recursive: true, force: true });
     }
   });
+
+  it("stores MCP environment references without storing secret values", async () => {
+    const tmpDir = await makeTempDir();
+    try {
+      const result = await runCliCommand({
+        argv: [
+          "mcp",
+          "setup",
+          "--name",
+          "postman",
+          "--command",
+          "npx",
+          "--args",
+          "@postman/postman-mcp-server",
+          "--env-ref",
+          "POSTMAN_API_KEY=POSTMAN_API_KEY",
+        ],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir,
+      });
+
+      expect(result.exitCode).toBe(0);
+      const rawConfig = await readFile(profileConfigPath(tmpDir), "utf8");
+      const config = JSON.parse(rawConfig) as {
+        mcpServers?: Record<string, { env?: Record<string, string>; envRefs?: Record<string, string> }>;
+      };
+      expect(config.mcpServers?.postman?.envRefs).toEqual({ POSTMAN_API_KEY: "POSTMAN_API_KEY" });
+      expect(config.mcpServers?.postman?.env).toBeUndefined();
+      expect(rawConfig).not.toContain("postman-secret-value");
+    } finally {
+      await rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("stores per-tool MCP risk overrides", async () => {
+    const tmpDir = await makeTempDir();
+    try {
+      const result = await runCliCommand({
+        argv: [
+          "mcp", "setup", "--name", "postman", "--command", "npx",
+          "--tool-risk-classes",
+          "getCollection=read-only-network,updateCollection=external-side-effect"
+        ],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir
+      });
+      expect(result.exitCode).toBe(0);
+      const config = JSON.parse(await readFile(profileConfigPath(tmpDir), "utf8")) as {
+        mcpServers?: Record<string, { toolRiskClasses?: Record<string, string> }>;
+      };
+      expect(config.mcpServers?.postman?.toolRiskClasses).toEqual({
+        getCollection: "read-only-network",
+        updateCollection: "external-side-effect"
+      });
+    } finally {
+      await rm(tmpDir, { recursive: true, force: true });
+    }
+  });
+
+  it("stores generic protected delivery and verification metadata without credential values", async () => {
+    const tmpDir = await makeTempDir();
+    try {
+      const protectedConfig = {
+        updateRecords: {
+          paths: ["/values/*/value"],
+          handling: { persistence: "destination-managed", sharing: "workspace" },
+          groupedDelivery: true,
+          browserRelay: true
+        }
+      };
+      const resultRedactions = {
+        readRecords: ["/records/*/value"]
+      };
+      const continuityPaths = {
+        readRecords: ["/records/*/id", "/records/*/name"]
+      };
+      const artifactConfig = {
+        importSpec: {
+          paths: ["/files/*/content"],
+          allowedMimeTypes: ["application/json", "application/yaml"],
+          maxBytes: 12 * 1024 * 1024
+        }
+      };
+      const initial = await runCliCommand({
+        argv: [
+          "mcp", "setup", "--name", "records", "--command", "records-mcp",
+          "--env-ref", "API_TOKEN=RECORDS_API_TOKEN"
+        ],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir
+      });
+      expect(initial.exitCode).toBe(0);
+      const result = await runCliCommand({
+        argv: [
+          "mcp", "setup", "--name", "records",
+          "--tool-risk-classes", "updateRecords=external-side-effect,readRecords=read-only-network",
+          "--protected-tool-arguments-json", JSON.stringify(protectedConfig),
+          "--artifact-tool-arguments-json", JSON.stringify(artifactConfig),
+          "--redacted-tool-result-paths-json", JSON.stringify(resultRedactions),
+          "--continuity-tool-result-paths-json", JSON.stringify(continuityPaths),
+          "--tool-verification-relationships-json", JSON.stringify({ readRecords: ["updateRecords"] })
+        ],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir
+      });
+
+      expect(result.exitCode).toBe(0);
+      const rawConfig = await readFile(profileConfigPath(tmpDir), "utf8");
+      const config = JSON.parse(rawConfig) as {
+        mcpServers?: Record<string, {
+          command?: string;
+          envRefs?: Record<string, string>;
+          protectedToolArguments?: unknown;
+          artifactToolArguments?: unknown;
+          redactedToolResultPaths?: unknown;
+          continuityToolResultPaths?: unknown;
+          toolVerificationRelationships?: unknown;
+        }>;
+      };
+      expect(config.mcpServers?.records?.command).toBe("records-mcp");
+      expect(config.mcpServers?.records?.envRefs).toEqual({ API_TOKEN: "RECORDS_API_TOKEN" });
+      expect(config.mcpServers?.records?.protectedToolArguments).toEqual(protectedConfig);
+      expect(config.mcpServers?.records?.artifactToolArguments).toEqual(artifactConfig);
+      expect(config.mcpServers?.records?.redactedToolResultPaths).toEqual(resultRedactions);
+      expect(config.mcpServers?.records?.continuityToolResultPaths).toEqual(continuityPaths);
+      expect(config.mcpServers?.records?.toolVerificationRelationships).toEqual({
+        readRecords: ["updateRecords"]
+      });
+      expect(rawConfig).not.toContain("credential-value");
+
+      const status = await runCliCommand({
+        argv: ["mcp", "status"],
+        workspaceRoot: tmpDir,
+        homeDir: tmpDir
+      });
+      expect(status.output).toContain("protected delivery configured: yes");
+      expect(status.output).toContain("grouped delivery supported: yes");
+      expect(status.output).toContain("browser relay supported: yes");
+      expect(status.output).toContain("artifact relay configured: yes");
+      expect(status.output).toContain("result redaction configured: yes");
+      expect(status.output).toContain("continuity configured: yes");
+      expect(status.output).toContain("verification configured: yes");
+      expect(status.output).not.toContain("/values/*/value");
+      expect(status.output).not.toContain("/records/*/value");
+    } finally {
+      await rm(tmpDir, { recursive: true, force: true });
+    }
+  });
 });

@@ -1422,7 +1422,7 @@ describe("runFirstRunSetup", () => {
       "FAL",
       "BytePlus",
       "Voice",
-      "Vision and Image Generation",
+      "Vision & Images",
     ]));
     expect(seenOptions["Configure optional capability"]).toEqual([
       "Channels",

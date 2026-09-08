@@ -3,7 +3,11 @@ import { createOperatorConsoleHitRegions, findOperatorConsoleHitRegion } from ".
 import { createOperatorConsoleLayout, type OperatorConsoleLayout } from "./operatorConsoleLayout.js";
 import type { OperatorConsoleState } from "./operatorConsoleState.js";
 import { setFocus } from "./focusModel.js";
-import { routeTaskSurfaceKey, routeTaskSurfacePointer } from "./taskSurface.js";
+import {
+  routeTaskSurfaceKey,
+  routeTaskSurfacePointer,
+  type TaskControlIntent,
+} from "./taskSurface.js";
 
 export type OperatorConsoleInputSurface =
   | "taskInspection"
@@ -38,6 +42,7 @@ export type OperatorConsoleInputRouteResult = {
   readonly handled: boolean;
   /** The pointer event ended the explicit capture mode and the terminal must be released. */
   readonly releaseMouseMode?: boolean;
+  readonly taskIntent?: TaskControlIntent;
 };
 
 export function isMouseModeToggle(event: ParsedKeypress): boolean {
@@ -141,7 +146,28 @@ export function routeOperatorConsoleInput(input: {
     const layout = input.layout ?? createOperatorConsoleLayout(input.state);
     const viewportHeight = layout.regions.find((region) => region.kind === "taskInspection")?.height;
     const routed = routeTaskSurfaceKey(input.state, input.event, viewportHeight ?? input.state.terminal.height);
-    return { state: routed.state, surface: "taskInspection", handled: routed.handled };
+    return {
+      state: routed.state,
+      surface: "taskInspection",
+      handled: routed.handled,
+      ...(routed.intent === undefined ? {} : { taskIntent: routed.intent }),
+    };
+  }
+  const taskShortcut = input.event.type === "text" && input.event.text.length === 1 &&
+    ["t", "r", "d", "p", "c"].includes(input.event.text.toLocaleLowerCase());
+  if (liveFocus && input.state.tasks.cards.length > 0 &&
+      (!isPromptEditingInput(input.event) || taskShortcut)) {
+    const layout = input.layout ?? createOperatorConsoleLayout(input.state);
+    const viewportHeight = layout.regions.find((region) => region.kind === "taskCards")?.height;
+    const routed = routeTaskSurfaceKey(input.state, input.event, viewportHeight ?? input.state.terminal.height);
+    if (routed.handled) {
+      return {
+        state: routed.state,
+        surface: "liveFocus",
+        handled: true,
+        ...(routed.intent === undefined ? {} : { taskIntent: routed.intent }),
+      };
+    }
   }
   if (
     isPromptEditingInput(input.event) &&
@@ -163,7 +189,14 @@ export function routeOperatorConsoleInput(input: {
     const layout = input.layout ?? createOperatorConsoleLayout(input.state);
     const viewportHeight = layout.regions.find((region) => region.kind === "taskCards")?.height;
     const routed = routeTaskSurfaceKey(input.state, input.event, viewportHeight ?? input.state.terminal.height);
-    if (routed.handled) return { state: routed.state, surface: "liveFocus", handled: true };
+    if (routed.handled) {
+      return {
+        state: routed.state,
+        surface: "liveFocus",
+        handled: true,
+        ...(routed.intent === undefined ? {} : { taskIntent: routed.intent }),
+      };
+    }
   }
   return { state: input.state, surface, handled: false };
 }

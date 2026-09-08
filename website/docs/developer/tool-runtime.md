@@ -60,6 +60,10 @@ Tool providers are registered in named phases:
 
 MCP tools are registered before the planned tool-registration phases. After registration, the runtime snapshots available tools and builds the provider tool schemas that can be exposed to the model.
 
+Configured MCP descriptors are retained even when startup or schema registration fails. Connector status distinguishes configuration, connection, schema registration, callable availability, and current-turn exposure. The per-turn provider inventory is then selected from the final available catalog: conversation gets zero tools; actionable work gets its bounded task policy, selected skill toolsets, explicitly named connectors, active browser, attachment reads, and compact recovery tools. The bundled API-integration skill uses a reviewed complete browser interaction profile plus every tool from explicitly named connectors; it excludes broad file, web, setup-mutation, unrelated-connector, and diagnostic-browser surfaces unless an independent attachment rule requires a safe reader. Generic MCP routing and low confidence never mean “all connectors” or “all tools.”
+
+The runtime may expand once during a foreground provider loop, but only from precomputed eligible candidates and authoritative tool-result evidence. The current expansion adds `browser.vision` after browser supervision proves native/semantic targeting failed. Provider prose and Plan text cannot widen the inventory. `provider-tool-inventory` telemetry records names, reason, connector exposure, and estimated native-schema tokens without recording schema bodies, arguments, results, or secrets. Visibility does not bypass execution-time approvals, trust, secret handling, or hard blocks.
+
 ---
 
 ## Execution flow
@@ -124,7 +128,7 @@ It is responsible for:
 - tracking observed risk
 - returning tool results and failure state to the provider turn loop
 
-Repeated tool-failure budgets are enforced by `ProviderTurnLoop`, using the outcomes returned from tool execution. The runner reports what happened; the provider loop decides whether repeated failures have exceeded the turn budget.
+Repeated tool-failure and unchanged browser-observation budgets are enforced by `ProviderTurnLoop`, using the outcomes returned from tool execution. The runner reports what happened; the provider loop decides whether repeated failures or successful observation-only stalls have exceeded the turn budget.
 
 ---
 
@@ -214,11 +218,11 @@ See [Provider runtime](./provider-runtime.md) for provider echo, serializer rule
 
 After tools run, provider continuation sends tool results back to the model.
 
-For unsupported routes, continuation uses the existing flat `Executed tool results` text path. For supported native routes, selected tool groups are inserted as structured assistant/tool history. The final continuation instruction remains the last user message.
+For unsupported routes, continuation uses the flat `Executed tool results` text path. For supported native routes, selected tool groups are inserted as structured assistant/tool history. Native history has a fixed allowance of approximately 12K tokens independent of model context size, and assistant/tool groups remain atomic. Older unselected native units are repacked into bounded summaries. The final continuation instruction remains the last user message.
 
-If a selected native `tool` message already carries a tool result, that same result is not repeated in the flat continuation block. Non-selected tool results remain in flat text so the model still receives them.
+The newest tool batch remains available at the existing per-tool result limits. Older batches become compact redacted receipts, and the entire flat feedback block is capped at approximately 12K characters. Only newest-batch images are sent again; artifact references remain available separately. Successful browser downloads carry a nested prompt-safe artifact record so that reference survives result compaction without exposing its local backing path. If a selected native `tool` message already carries a newest-batch result, that same result is not repeated in the flat continuation block.
 
-Continuation is still bounded by provider-turn budgets. Repeated tool failures, too many tool calls, too many provider iterations, or wall-clock exhaustion can stop the loop before another provider attempt is made.
+Continuation is still bounded by provider-turn budgets. Repeated tool failures, a third unchanged browser observation after one recovery nudge, too many tool calls, too many provider iterations, or wall-clock exhaustion can stop the loop before another provider attempt is made.
 
 ---
 

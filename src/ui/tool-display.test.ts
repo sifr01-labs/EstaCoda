@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import {
   formatToolDisplayCall,
+  resolveToolActivityPresentation,
   TOOL_DISPLAY_LABELS,
   toolDisplayIcon,
   toolDisplayLabel,
@@ -8,7 +9,7 @@ import {
 } from "./tool-display.js";
 
 const expectedLabels: Record<string, ToolDisplayLabelSet> = {
-  "playbook.plan": { en: "Plan", ar: "تخطيط" },
+  plan: { en: "Update Plan", ar: "تحديث الخطة" },
   "trajectory.record": { en: "Record Trajectory", ar: "تسجيل المسار" },
   "file.read": { en: "Read File", ar: "قراءة ملف" },
   "file.write": { en: "Write File", ar: "كتابة ملف" },
@@ -30,6 +31,7 @@ const expectedLabels: Record<string, ToolDisplayLabelSet> = {
   "browser.navigate": { en: "Browser Navigate", ar: "فتح صفحة" },
   "browser.click": { en: "Browser Click", ar: "نقر" },
   "browser.type": { en: "Browser Type", ar: "كتابة" },
+  "browser.fill_protected_form": { en: "Protected Form", ar: "نموذج محمي" },
   "browser.scroll": { en: "Browser Scroll", ar: "تمرير" },
   "browser.press": { en: "Browser Press", ar: "ضغط مفتاح" },
   "browser.back": { en: "Browser Back", ar: "رجوع" },
@@ -139,6 +141,60 @@ describe("tool display labels", () => {
     expect(toolDisplayLabel("web_search", "en")).toBe("Web Search");
     expect(toolDisplayLabel("custom.api_fetch", "en")).toBe("Custom API Fetch");
     expect(toolDisplayLabel("custom.api_fetch", "ar")).toBe("أداة Custom API Fetch");
+  });
+
+  it("decomposes native and MCP tool names into stable activity presentation", () => {
+    expect(resolveToolActivityPresentation({ tool: "browser.snapshot" })).toEqual({
+      family: "Browser",
+      action: "Snapshot",
+    });
+    expect(resolveToolActivityPresentation({ tool: "mcp.postman.getAuthenticatedUser" })).toEqual({
+      family: "Postman",
+      action: "Get Authenticated User",
+    });
+    expect(resolveToolActivityPresentation({ tool: "read_file", target: "src/app.ts" })).toEqual({
+      family: "Files",
+      action: "Read",
+      object: "src/app.ts",
+    });
+    expect(resolveToolActivityPresentation({ tool: "terminal.exec", target: "pnpm test" })).toEqual({
+      family: "Shell",
+      action: "Run",
+      object: "pnpm test",
+    });
+  });
+
+  it("removes redundant objects and extracts governed browser click targets", () => {
+    expect(resolveToolActivityPresentation({
+      tool: "browser.snapshot",
+      displayLabel: "Browser Snapshot",
+      target: "Browser Snapshot",
+    })).toEqual({ family: "Browser", action: "Snapshot" });
+    expect(resolveToolActivityPresentation({
+      tool: "browser.click",
+      target: "Click scripted control “TikTok Connect” on developers.mtn.com",
+    })).toEqual({
+      family: "Browser",
+      action: "Click",
+      object: "“TikTok Connect”",
+      context: "developers.mtn.com",
+    });
+  });
+
+  it("sanitizes untrusted activity labels and localizes reviewed Arabic identities", () => {
+    expect(resolveToolActivityPresentation({
+      tool: "mcp.postman.getWorkspaces\u001b[31m",
+      target: "workspace\u0007 alpha",
+    })).toEqual({
+      family: "Postman",
+      action: "Get Workspaces",
+      object: "workspace alpha",
+    });
+    expect(resolveToolActivityPresentation({ tool: "file.read", locale: "ar", target: "src/app.ts" })).toEqual({
+      family: "الملفات",
+      action: "قراءة",
+      object: "src/app.ts",
+    });
   });
 
   it("suppresses icons on plain and ACP surfaces", () => {

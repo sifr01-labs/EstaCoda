@@ -33,6 +33,7 @@ import { loadOAuthStore } from "./oauth/oauth-store.js";
 import { refreshOAuthToken } from "./oauth/oauth-refresh.js";
 import { providerUsageEntryFromAttempt } from "./provider-usage-ledger.js";
 import { prepareProviderSpend, providerSpendDenialMessage } from "./provider-spend-policy.js";
+import { supportsMultipleImageInputs } from "./model-image-capabilities.js";
 
 export type ProviderAttempt = ProviderAttemptState & {
   provider: string;
@@ -141,6 +142,10 @@ export type ProviderExecutionOptions = {
   onEvent?: (event: ProviderRuntimeEvent) => void | Promise<void>;
   now?: () => number;
   usage?: ProviderUsageContext;
+  /** Absolute emergency ceiling for the complete route chain, including fallbacks and retries. */
+  deadlineAtMs?: number;
+  /** Foreground-only opt-in for one same-route retry before normal fallback. */
+  retryRateLimits?: boolean;
 };
 
 export type ProviderExecutorOptions = {
@@ -155,6 +160,10 @@ export type ProviderExecutorOptions = {
   spendController?: ProviderSpendController;
   /** Test-only compatibility for non-durable in-memory runtimes. Never enable for production SQLite execution. */
   allowUnenforcedAttributedSpend?: boolean;
+  /** Prevent credential refresh writes during diagnostic or evaluation execution. */
+  readOnlyCredentials?: boolean;
+  /** Test seam for the bounded rate-limit backoff. */
+  retrySleep?: (milliseconds: number, signal?: AbortSignal) => Promise<boolean>;
 };
 
 export type ProviderSpendController = {
@@ -190,6 +199,8 @@ export class ProviderExecutor {
   readonly #usageRecorder: ProviderExecutorOptions["usageRecorder"];
   readonly #spendController: ProviderSpendController | undefined;
   readonly #allowUnenforcedAttributedSpend: boolean;
+  readonly #readOnlyCredentials: boolean;
+  readonly #retrySleep: NonNullable<ProviderExecutorOptions["retrySleep"]>;
 
   constructor(options: ProviderExecutorOptions) {
     this.#registry = options.registry;
@@ -198,6 +209,8 @@ export class ProviderExecutor {
     this.#usageRecorder = options.usageRecorder;
     this.#spendController = options.spendController;
     this.#allowUnenforcedAttributedSpend = options.allowUnenforcedAttributedSpend === true;
+    this.#readOnlyCredentials = options.readOnlyCredentials === true;
+    this.#retrySleep = options.retrySleep ?? waitForProviderRetry;
   }
 
   async dispose(): Promise<void> {
@@ -260,7 +273,7 @@ export class ProviderExecutor {
         const partialContent = lastPartialContent(attempts);
         return {
           ok: false,
-          fallbackUsed: attempts.length > 1,
+          fallbackUsed: attempts.some((attempt) => attempt.routeRole === "fallback"),
           attempts,
           ...(partialContent === undefined ? {} : { partialContent }),
           toolCalls
@@ -376,7 +389,8 @@ export class ProviderExecutor {
         route: { apiKeyEnv: route.apiKeyEnv, authMethod: route.authMethod },
         metadata: getProviderMetadata(route.provider),
         homeDir: this.#homeDir,
-        profileId: this.#profileId
+        profileId: this.#profileId,
+        readOnly: this.#readOnlyCredentials
       });
 
       if (!resolution.diagnostic.ok) {
@@ -416,6 +430,25 @@ export class ProviderExecutor {
 
       while (routeAttemptCount < maxRouteAttempts) {
         routeAttemptCount++;
+        const deadlineTimeoutMs = remainingDeadlineMs(options.deadlineAtMs, options.now);
+        if (deadlineTimeoutMs !== undefined && deadlineTimeoutMs <= 0) {
+          attempts.push({
+            provider: route.provider,
+            model: route.id,
+            routeIndex: index,
+            routeRole: routeRoleForIndex(index),
+            state: "preflight",
+            ok: false,
+            errorClass: "timeout",
+            content: "Provider turn emergency deadline elapsed before dispatch."
+          });
+          return {
+            ok: false,
+            fallbackUsed: index > 0,
+            attempts,
+            toolCalls
+          };
+        }
         const dispatchedAt = new Date().toISOString();
         const routeRequest = buildRouteProviderRequest(request, route, { stream: options.stream === true });
         const providerAttemptIndex = attempts.length;
@@ -468,7 +501,7 @@ export class ProviderExecutor {
         const completionOptions: ProviderCompletionOptions = {
           credential,
           signal: options.signal,
-          timeoutMs: route.timeoutMs,
+          timeoutMs: boundedProviderTimeout(route.timeoutMs, deadlineTimeoutMs),
           staleTimeoutMs: route.staleTimeoutMs
         };
 
@@ -509,7 +542,23 @@ export class ProviderExecutor {
         const callResponse = callResult.response;
 
         const nextRoute = chain[index + 1];
-        const callWillFallback = !callResponse.ok && shouldFallback(callResponse, route, nextRoute);
+        const retryBackoffMs = 1_000;
+        const remainingRetryWindowMs = remainingDeadlineMs(options.deadlineAtMs, options.now);
+        const canRetryRateLimit =
+          options.retryRateLimits === true &&
+          !isSignalAborted(options.signal) &&
+          callResponse.ok === false &&
+          callResponse.errorClass === "rate-limit" &&
+          routeAttemptCount < maxRouteAttempts &&
+          (remainingRetryWindowMs === undefined || remainingRetryWindowMs > retryBackoffMs);
+        // Live consumers use this legacy flag to decide whether provider work is still
+        // continuing. A bounded same-route retry must therefore keep the turn open too.
+        const callWillFallback =
+          canRetryRateLimit || (
+            !isSignalAborted(options.signal) &&
+            !callResponse.ok &&
+            shouldFallback(callResponse, route, nextRoute)
+          );
 
         const dispatchedAttempt: ProviderAttempt & { state: "dispatched"; dispatchedAt: string } = {
           provider: route.provider,
@@ -578,7 +627,15 @@ export class ProviderExecutor {
           break;
         }
 
+        if (canRetryRateLimit) {
+          const retryReady = await this.#retrySleep(retryBackoffMs, options.signal);
+          if (retryReady) continue;
+          response = callResponse;
+          break;
+        }
+
         const canRetry =
+          !this.#readOnlyCredentials &&
           callResponse.errorClass === "auth" &&
           routeAttemptCount < maxRouteAttempts &&
           effectiveAuthMethod !== undefined &&
@@ -629,7 +686,10 @@ export class ProviderExecutor {
       }
 
       const nextRoute = chain[index + 1];
-      const willFallback = !response.ok && shouldFallback(response, route, nextRoute);
+      const willFallback =
+        !isSignalAborted(options.signal) &&
+        !response.ok &&
+        shouldFallback(response, route, nextRoute);
 
       if (response.ok) {
         const extractedToolCalls = extractToolCallsFromProviderResponse(response.raw);
@@ -728,7 +788,7 @@ export class ProviderExecutor {
     const partialContent = lastPartialContent(attempts);
     return {
       ok: false,
-      fallbackUsed: attempts.length > 1,
+      fallbackUsed: attempts.some((attempt) => attempt.routeRole === "fallback"),
       attempts,
       ...(partialContent === undefined ? {} : { partialContent }),
       toolCalls
@@ -879,6 +939,23 @@ export class ProviderExecutor {
   }
 }
 
+async function waitForProviderRetry(milliseconds: number, signal?: AbortSignal): Promise<boolean> {
+  if (signal?.aborted === true) return false;
+  return await new Promise<boolean>((resolve) => {
+    let settled = false;
+    const finish = (ready: boolean) => {
+      if (settled) return;
+      settled = true;
+      clearTimeout(timer);
+      signal?.removeEventListener("abort", onAbort);
+      resolve(ready);
+    };
+    const onAbort = () => finish(false);
+    const timer = setTimeout(() => finish(true), milliseconds);
+    signal?.addEventListener("abort", onAbort, { once: true });
+  });
+}
+
 function attemptMetadataFromResponse(response: ProviderResponse): Pick<
   ProviderAttempt,
   "finishReason" | "incompleteReason" | "usage" | "reasoningMetadata"
@@ -920,6 +997,10 @@ function safeReasoningMetadataFromResponse(response: ProviderResponse): Provider
 
 function routeRoleForIndex(index: number): ProviderRouteRole {
   return index === 0 ? "primary" : "fallback";
+}
+
+function isSignalAborted(signal: AbortSignal | undefined): boolean {
+  return signal?.aborted === true;
 }
 
 function buildRouteProviderRequest(
@@ -1012,8 +1093,7 @@ async function collectProviderStream(input: {
         ok: false,
         content: "Provider stream cancelled.",
         model: input.model,
-        provider: input.provider,
-        errorClass: "timeout"
+        provider: input.provider
       };
       return {
         response,
@@ -1058,6 +1138,20 @@ async function collectProviderStream(input: {
         sawTransportDone = true;
         break;
     }
+  }
+
+  if (input.signal?.aborted === true) {
+    const response: ProviderResponse = {
+      ok: false,
+      content: "Provider stream cancelled.",
+      model: input.model,
+      provider: input.provider
+    };
+    return {
+      response,
+      toolCalls: [],
+      streamDiagnostics: finishDiagnostics("cancelled", response)
+    };
   }
 
   if (errorResponse !== undefined) {
@@ -1183,6 +1277,7 @@ function shouldFallback(
   currentRoute: ResolvedModelRoute,
   nextRoute: ResolvedModelRoute | undefined
 ): boolean {
+  if (nextRoute === undefined) return false;
   if (response.errorClass === undefined ||
       response.errorClass === "unknown" ||
       response.errorClass === "rate-limit" ||
@@ -1196,9 +1291,6 @@ function shouldFallback(
   }
 
   if (response.errorClass === "auth") {
-    if (nextRoute === undefined) {
-      return false;
-    }
     return isCredentialIndependent(currentRoute, nextRoute);
   }
 
@@ -1225,6 +1317,10 @@ function routePreferenceFailure(
     return `Provider route ${route.provider}/${route.id} does not support vision required for this request.`;
   }
 
+  if (preferences.requireMultipleImages === true && !supportsMultipleImageInputs(route.profile)) {
+    return `Provider route ${route.provider}/${route.id} does not support multiple image inputs required for this request.`;
+  }
+
   if (preferences.requireStructuredOutput === true && !route.profile.supportsStructuredOutput) {
     return `Provider route ${route.provider}/${route.id} does not support structured output required for this request.`;
   }
@@ -1247,6 +1343,23 @@ function isCredentialIndependent(a: ResolvedModelRoute, b: ResolvedModelRoute): 
     return false;
   }
   return true;
+}
+
+function remainingDeadlineMs(
+  deadlineAtMs: number | undefined,
+  now: (() => number) | undefined
+): number | undefined {
+  if (deadlineAtMs === undefined) return undefined;
+  return Math.max(0, Math.floor(deadlineAtMs - (now?.() ?? Date.now())));
+}
+
+function boundedProviderTimeout(
+  routeTimeoutMs: number | undefined,
+  deadlineTimeoutMs: number | undefined
+): number | undefined {
+  if (deadlineTimeoutMs === undefined) return routeTimeoutMs;
+  if (routeTimeoutMs === undefined) return deadlineTimeoutMs;
+  return Math.min(routeTimeoutMs, deadlineTimeoutMs);
 }
 
 function lastPartialContent(attempts: readonly ProviderAttempt[]): string | undefined {
