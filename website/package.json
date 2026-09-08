@@ -42,6 +42,11 @@
       "last 5 safari version"
     ]
   },
+  "pnpm": {
+    "overrides": {
+      "express@4.22.2>qs": "6.16.0"
+    }
+  },
   "engines": {
     "node": ">=22.18.0"
   }

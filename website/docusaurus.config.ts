@@ -61,7 +61,8 @@ const config: Config = {
     [
       '@easyops-cn/docusaurus-search-local',
       {
-        hashed: true,
+        // Filename hashing avoids local serve redirects on asset query strings.
+        hashed: 'filename',
         language: ['en', 'ar'],
         indexBlog: false,
         docsRouteBasePath: '/',
