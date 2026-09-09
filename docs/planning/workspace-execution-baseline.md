@@ -89,8 +89,8 @@ These are baseline observations or review findings, not desired behavior. Charac
 | B03 | At PR 0, resume checked workspace but common runtime construction lacked the equivalent working-root check | Fixed in PR 1: common immutable target/workspace validation; regression assertion replaces gap assertion |
 | B04 | Process-local active-turn registries do not coordinate independent processes | PR 4: persisted session owner/fence; retain existing Task leases |
 | B05 | Cached gateway factory/fingerprint can retain startup config; MCP exposure uses construction-time trust | PR 4: current acquisition context and appropriate rebuilds; live message trust checks already exist |
-| B06 | Background process manager inherits parent env, signals the immediate child on stop, and lacks runtime-wide owned-process disposal | PR 3: explicit environment adapters, scope cleanup and descendant cancellation |
-| B07 | Python harness final truncation does not bound accumulated stdout/stderr/tool-call promises; parent cancellation is not wired into harness lifetime | PR 3: bounded lease-backed harness lifecycle |
+| B06 | At PR 0, background processes inherited parent env, stopped only the immediate child, and lacked runtime-owned disposal | Addressed in PR 3: explicit environment adapters, independent scopes, process-group cancellation and cleanup; see [host limits](../operations/host-execution.md) |
+| B07 | At PR 0, harness final truncation did not bound buffered output/tool calls, and parent cancellation was not wired into its lifetime | Addressed in PR 3: bounded incremental protocol, input/output/call limits and lease/caller cancellation |
 | B08 | Non-host environment labels influence destructive-local approval without verified backend controls | PR 2: verified authority, not label-derived containment |
 | B09 | Existing reusable grant structures do not yet carry the proposed full profile/surface/authority-generation binding | PR 2/5: scoped extension and explicit migration; do not invent legacy authority |
 

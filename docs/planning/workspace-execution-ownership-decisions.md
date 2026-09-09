@@ -1,6 +1,6 @@
 # Shared workspace, target, and execution ownership decisions
 
-Status: shared implementation decisions. PR 1 implements local workspace/target records and profile/workspace Session validation; see [implemented behavior and limits](../operations/workspaces.md). Later environment, execution-owner, control transport and handoff decisions remain planning contracts, not shipped APIs or a claim that cross-process execution is already safe. They govern the overlapping scope of the [workspace implementation plan](workspace-execution-implementation-plan.md) and [Desktop implementation plan](desktop-implementation-plan.md). Change this document and both affected plans together when revising a decision.
+Status: shared implementation decisions. PR 1 implements local workspace/target records and profile/workspace Session validation; see [implemented behavior and limits](../operations/workspaces.md). PR 3 implements local host environment/resource scopes and editor materialization checks; see [host execution behavior](../operations/host-execution.md). Exclusive cross-process execution ownership, control transport, Docker and handoff decisions remain planning contracts, not shipped APIs or a claim that cross-process execution is already safe. They govern the overlapping scope of the [workspace implementation plan](workspace-execution-implementation-plan.md) and [Desktop implementation plan](desktop-implementation-plan.md). Change this document and both affected plans together when revising a decision.
 
 ## 1. Decisions and boundaries
 

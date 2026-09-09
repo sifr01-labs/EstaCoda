@@ -1,8 +1,8 @@
 # Workspace and execution implementation plan
 
-Status: PR 0, PR 1 and PR 2 are implemented on `ame/execution-baseline`; later slices remain proposed. See the [PR 1 implementation and validation record](workspace-execution-pr1.md), [PR 2 implementation and validation record](workspace-execution-pr2.md), and [implemented workspace behavior](../operations/workspaces.md). This plan replaces the earlier workspace/Docker roadmap for this workstream.
+Status: PR 0, PR 1, PR 2 and PR 3 are implemented on `ame/execution-baseline`; later slices remain proposed. See the [PR 1 implementation and validation record](workspace-execution-pr1.md), [PR 2 implementation and validation record](workspace-execution-pr2.md), [PR 3 implementation and validation record](workspace-execution-pr3.md), and [implemented workspace behavior](../operations/workspaces.md). This plan replaces the earlier workspace/Docker roadmap for this workstream.
 
-Shared contract and ownership decisions are defined in [Shared workspace, target, and execution ownership decisions](workspace-execution-ownership-decisions.md). That document is authoritative for overlap with the Desktop plan: core target bindings, supervisor ownership, private control transport, handoff, and recovery. Its later ownership/environment contracts remain proposed work, not shipped guarantees.
+Shared contract and ownership decisions are defined in [Shared workspace, target, and execution ownership decisions](workspace-execution-ownership-decisions.md). That document is authoritative for overlap with the Desktop plan: core target bindings, supervisor ownership, private control transport, handoff, and recovery. Its cross-process ownership, control transport and Docker contracts remain proposed work, not shipped guarantees.
 
 ## 1. Product objective
 
@@ -250,7 +250,7 @@ Acceptance: covered work proceeds without repeated approval; expansion is gated;
 
 ### PR 3 — Complete host execution lease
 
-Branch: `ame/host-environment-lease`
+Implemented on `ame/execution-baseline` in the nine commits below, following the operator’s same-branch instruction. See the [implementation record](workspace-execution-pr3.md) and [host behavior and limits](../operations/host-execution.md).
 
 Commits:
 
