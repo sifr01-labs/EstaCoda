@@ -209,3 +209,52 @@ function cyrb53(str: string): string {
   h2 = Math.imul(h2 ^ (h2 >>> 16), 2246822507) ^ Math.imul(h1 ^ (h1 >>> 13), 3266489909);
   return (4294967296 * (2097151 & h2) + (h1 >>> 0)).toString(16).padStart(16, "0");
 }
+
+export type RuntimeRevisions = Readonly<{
+  build: string;
+  definition: string;
+  authority: string;
+  metadata: string;
+}>;
+
+/** These digests classify construction inputs; none is an authorization grant.
+ * Keep credential values out of persisted revision records. */
+export function runtimeRevisions(fingerprint: RuntimeFingerprint): RuntimeRevisions {
+  const { uiFlavor, activityLabels, runtimeUiIdentity, ...behavior } = fingerprint;
+  const authority = {
+    profileId: fingerprint.profileId,
+    workspaceRoot: fingerprint.workspaceRoot,
+    trustStorePath: fingerprint.trustStorePath,
+    securityMode: fingerprint.securityMode,
+    securityUrlPolicyHash: fingerprint.securityUrlPolicyHash,
+    disabledToolsets: fingerprint.disabledToolsets,
+    enableWebNetwork: fingerprint.enableWebNetwork,
+    approvalControllerPresent: fingerprint.approvalControllerPresent,
+    explicitSecurityPolicyPresent: fingerprint.explicitSecurityPolicyPresent,
+  };
+  const definition = {
+    skillConfigHash: fingerprint.skillConfigHash,
+    skillAutonomy: fingerprint.skillAutonomy,
+    externalSkillRoots: fingerprint.externalSkillRoots,
+    mcpServersHash: fingerprint.mcpServersHash,
+    disabledToolsets: fingerprint.disabledToolsets,
+    agentProfileMode: fingerprint.agentProfileMode,
+    agentResponseLanguage: fingerprint.agentResponseLanguage,
+    uiLanguage: fingerprint.uiLanguage,
+  };
+  return Object.freeze({
+    build: stableJsonHash(behavior),
+    definition: stableJsonHash(definition),
+    authority: stableJsonHash(authority),
+    metadata: stableJsonHash({ uiFlavor, activityLabels, runtimeUiIdentity }),
+  });
+}
+
+export function classifyRuntimeChange(previous: RuntimeFingerprint, current: RuntimeFingerprint):
+  "none" | "metadata" | "construction" | "definition" | "authority" {
+  const a = runtimeRevisions(previous), b = runtimeRevisions(current);
+  if (a.authority !== b.authority) return "authority";
+  if (a.definition !== b.definition) return "definition";
+  if (a.build !== b.build) return "construction";
+  return a.metadata === b.metadata ? "none" : "metadata";
+}

@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { computeRuntimeFingerprint, stableJsonHash, type RuntimeFingerprint } from "./runtime-fingerprint.js";
+import { computeRuntimeFingerprint, stableJsonHash, classifyRuntimeChange, runtimeRevisions, type RuntimeFingerprint } from "./runtime-fingerprint.js";
 import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
 import type { ToolsetName } from "../contracts/tool.js";
 import type { ResolvedTokens } from "../contracts/ui-tokens.js";
@@ -1257,3 +1257,13 @@ describe("computeRuntimeFingerprint", () => {
     expect(fp.trustStorePath).toBe("/home/test/.estacoda/trust.json");
   });
 });
+
+ it("classifies cosmetic, provider, instruction and authority changes independently", () => {
+   const original = computeRuntimeFingerprint(fakeLoadedRuntimeConfig(), fakeOptions());
+   expect(classifyRuntimeChange(original, { ...original })).toBe("none");
+   expect(classifyRuntimeChange(original, { ...original, runtimeUiIdentity: "new-theme" })).toBe("metadata");
+   expect(classifyRuntimeChange(original, { ...original, modelId: "new-model" })).toBe("construction");
+   expect(classifyRuntimeChange(original, { ...original, mcpServersHash: "changed" })).toBe("definition");
+   expect(classifyRuntimeChange(original, { ...original, securityMode: "strict" })).toBe("authority");
+   expect(runtimeRevisions({ ...original, modelId: "new-model" }).authority).toBe(runtimeRevisions(original).authority);
+ });

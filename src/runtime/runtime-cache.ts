@@ -1,5 +1,5 @@
 import type { Runtime } from "./create-runtime.js";
-import type { RuntimeFingerprint } from "./runtime-fingerprint.js";
+import { classifyRuntimeChange, type RuntimeFingerprint } from "./runtime-fingerprint.js";
 import type { SecurityPolicy } from "../contracts/security.js";
 import { HookRegistry } from "../gateway/hook-registry.js";
 import { createHash } from "node:crypto";
@@ -503,7 +503,8 @@ export class RuntimeCache {
   }
 
   #fingerprintsEqual(a: RuntimeFingerprint, b: RuntimeFingerprint): boolean {
-    return JSON.stringify(a) === JSON.stringify(b);
+    const change = classifyRuntimeChange(a, b);
+    return change === "none" || change === "metadata";
   }
 
   #cloneFingerprint(fingerprint: RuntimeFingerprint): RuntimeFingerprint {
