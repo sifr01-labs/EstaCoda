@@ -1,5 +1,7 @@
-import { spawn } from "node:child_process";
-import { mkdir, mkdtemp, unlink, writeFile } from "node:fs/promises";
+import type { ChildProcess } from "node:child_process";
+import type { HostExecutionLease } from "../execution/host-environment.js";
+import { HostProcessScope, type HostProcesses } from "../execution/host-processes.js";
+import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { SessionDB } from "../contracts/session.js";
@@ -10,6 +12,7 @@ import type { ToolExecutor } from "./tool-executor.js";
 
 export type ExecuteCodeToolOptions = {
   workspaceRoot: string;
+  executionLease?: HostExecutionLease;
   toolExecutor: ToolExecutor;
   sessionDb: SessionDB;
   trajectoryRecorder: TrajectoryRecorder;
@@ -65,7 +68,8 @@ export function createExecuteCodeTool(options: ExecuteCodeToolOptions): Register
         timeoutMs: boundedNumber(input.timeoutMs, 5_000, 1, 30_000),
         maxOutputChars: boundedNumber(input.maxOutputChars, 12_000, 1_000, 48_000),
         pythonBinary: options.pythonBinary ?? "python3",
-        workspaceRoot: options.workspaceRoot,
+        workspaceRoot: options.executionLease?.workspaceRoot ?? options.workspaceRoot,
+        executionLease: options.executionLease,
         allowedTools,
         executeTool: async (tool, toolInput) => {
           if (!allowedTools.has(tool)) {
@@ -126,6 +130,7 @@ export const executeCodeToolProvider: SessionToolProvider = {
     return [
       createExecuteCodeTool({
         workspaceRoot: ctx.workspaceRoot,
+        executionLease: ctx.executionLease,
         toolExecutor: requireProviderDependency("executeCode", "toolExecutor", ctx.toolExecutor),
         sessionDb: requireProviderDependency("executeCode", "sessionDb", ctx.sessionDb),
         trajectoryRecorder: requireProviderDependency("executeCode", "trajectoryRecorder", ctx.trajectoryRecorder),
@@ -150,12 +155,26 @@ type RunCodeOptions = {
   maxOutputChars: number;
   pythonBinary: string;
   workspaceRoot: string;
+  executionLease?: HostExecutionLease;
   allowedTools: Set<string>;
   executeTool(tool: string, input: Record<string, unknown>): Promise<ToolResult>;
 };
 
 async function runCode(options: RunCodeOptions): Promise<ToolResult> {
+  options.executionLease?.assertActive();
+  await options.executionLease?.files.realpath(options.workspaceRoot);
+  const ownedProcesses = options.executionLease ? undefined : new HostProcessScope(options.workspaceRoot);
+  const processes = options.executionLease?.processes ?? ownedProcesses!;
   const tempDir = await mkdtemp(join(tmpdir(), "estacoda-execute-code-"));
+  try {
+    return await runHarness(options, processes, tempDir);
+  } finally {
+    await ownedProcesses?.release();
+    await rm(tempDir, { recursive: true, force: true });
+  }
+}
+
+async function runHarness(options: RunCodeOptions, processes: HostProcesses, tempDir: string): Promise<ToolResult> {
   const scriptPath = join(tempDir, "script.py");
   const script = renderPythonHarness(options.code);
   const sandboxHome = join(tempDir, "sandbox-home");
@@ -168,25 +187,25 @@ async function runCode(options: RunCodeOptions): Promise<ToolResult> {
     childEnv["ESTACODA_INPUT_JSON"] = JSON.stringify(options.input);
     childEnv["ESTACODA_ALLOWED_TOOLS_JSON"] = JSON.stringify([...options.allowedTools].sort());
 
-    const child = spawn(options.pythonBinary, ["-u", scriptPath], {
-      cwd: options.workspaceRoot,
+    const child = processes.spawn(options.pythonBinary, ["-u", scriptPath], {
+      input: true,
       env: childEnv,
-      stdio: ["pipe", "pipe", "pipe"]
     });
     let stdout = "";
     let stderr = "";
     let settled = false;
+    let timedOut = false;
     const toolCallQueue: Promise<void>[] = [];
     const timeout = setTimeout(() => {
-      finish({
+      timedOut = true;
+      void processes.terminate(child, "SIGKILL").then(() => finish({
         ok: false,
         content: `execute_code timed out after ${options.timeoutMs}ms`,
         metadata: {
           timedOut: true,
           timeoutMs: options.timeoutMs
         }
-      });
-      child.kill("SIGKILL");
+      })).catch(() => finish(errorResult("execute_code termination could not be confirmed.")));
     }, options.timeoutMs);
 
     child.stdout.setEncoding("utf8");
@@ -213,6 +232,7 @@ async function runCode(options: RunCodeOptions): Promise<ToolResult> {
       });
     });
     child.on("close", async (code, signal) => {
+      if (timedOut) return;
       await Promise.allSettled(toolCallQueue);
       finish({
         ok: code === 0,
@@ -236,7 +256,6 @@ async function runCode(options: RunCodeOptions): Promise<ToolResult> {
 
       settled = true;
       clearTimeout(timeout);
-      void unlink(scriptPath).catch(() => undefined);
       resolve(result);
     }
   });
@@ -277,7 +296,7 @@ function extractToolCalls(stdout: string): { plainStdout: string; calls: ToolCal
 }
 
 async function handleToolCall(
-  child: ReturnType<typeof spawn>,
+  child: ChildProcess,
   call: ToolCall,
   executeTool: RunCodeOptions["executeTool"]
 ): Promise<void> {

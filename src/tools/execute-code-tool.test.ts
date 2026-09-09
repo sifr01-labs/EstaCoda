@@ -1,3 +1,7 @@
+import { mkdtemp, realpath, rm, stat } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { HostEnvironment } from "../execution/host-environment.js";
 import { describe, it, expect, beforeAll, afterAll, vi } from "vitest";
 import { createExecuteCodeTool } from "./execute-code-tool.js";
 import { resolveTestPythonBinary } from "../test/test-python.js";
@@ -227,4 +231,22 @@ describe("execute_code nested approvals", () => {
     expect(executeTool.mock.calls[0]?.[0].onApprovalRequest).toBe(onApprovalRequest);
     expect(onApprovalRequest).toHaveBeenCalledOnce();
   });
+});
+
+it("uses the selected lease view and removes harness artifacts after exit", async () => {
+  const root = await mkdtemp(join(tmpdir(), "harness-view-"));
+  const environment = await HostEnvironment.create({ profileId: "test", workspaceRoot: root });
+  const lease = environment.acquire({ profileId: "test", sessionId: "test", surface: "test" });
+  try {
+    const tool = createExecuteCodeTool({ workspaceRoot: "/unselected-view", executionLease: lease,
+      toolExecutor: {} as ToolExecutor, sessionDb: {} as SessionDB, trajectoryRecorder: {} as TrajectoryRecorder,
+      sessionId: "test", trustedWorkspace: async () => true, pythonBinary: await resolveTestPythonBinary() });
+    const result = await tool.run({ code: 'import os, json\nprint(json.dumps([os.getcwd(), os.environ["HOME"]]))' });
+    expect(result.ok).toBe(true);
+    const [cwd, home] = JSON.parse(result.content) as string[];
+    expect(cwd).toBe(await realpath(root));
+    await expect(stat(home!)).rejects.toThrow();
+    await lease.release();
+    await expect(tool.run({ code: 'print("should not run")' })).rejects.toThrow(/released/);
+  } finally { await lease.release(); environment.destroy(); await rm(root, { recursive: true, force: true }); }
 });
