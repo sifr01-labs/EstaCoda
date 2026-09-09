@@ -105,7 +105,7 @@ Use existing scenario/metrics/trajectory components where they represent the mea
 The standard validation commands are those in `AGENTS.md`. Record actual outcomes after execution. A full pass on this machine does not prove Docker containment, live provider completion, channel-account delivery, shared-process ownership, or future Desktop lifecycle behavior.
 
 1. Documentation commit: plans and ownership decisions preserved; inventory mapped to current source. Review checks: local Markdown links, whitespace, and no runtime/source mutation.
-2. Characterization commit: pending.
+2. Characterization commit: `src/runtime/workspace-execution-baseline.test.ts` adds 11 passing tests for canonical identity/trust separation, persisted resume isolation, once/session/persistent approval reuse and expansion, hardline precedence, and observed gaps B01–B04/B08. B04 uses independent registry instances; it does not claim to implement or validate a cross-process lease. Focused tests and typecheck passed in the isolated checkout. Review: all real state is temporary, cache runtimes are inert fakes, policy probes never execute their command strings, and no production source changes are included. Gap assertions intentionally describe the old behavior and must be replaced when the corresponding fix ships.
 3. Measurement commit and final validation: pending.
 
 Security note: this PR documents sensitive boundaries and adds isolated local test/measurement consumers. It grants no new execution authority, changes no persisted production schema, installs no capability/service, and makes no production credential request. Runtime fixes and migration/downgrade decisions remain in subsequent PRs.
