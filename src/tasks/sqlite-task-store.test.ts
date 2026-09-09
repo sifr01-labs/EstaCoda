@@ -15,7 +15,8 @@ import type {
 import { TASK_TOOL_RISK_CLASSES } from "../contracts/task.js";
 import type { ToolRiskClass } from "../contracts/tool.js";
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
-import { CHANNEL_MESSAGE_TURN_SCHEMA_VERSION } from "../session/channel-message-turn-schema.js";
+import { ExecutionTargetStore, targetBinding } from "../workspaces/execution-target.js";
+import { EXECUTION_TARGET_SCHEMA_VERSION } from "../workspaces/execution-target-schema.js";
 import { openDefaultSQLiteDatabase } from "../storage/factory.js";
 import { SQLiteTaskStore, TaskStoreIntegrityError, TaskStoreProfileError } from "./sqlite-task-store.js";
 import { taskListCursor } from "./task-store.js";
@@ -56,6 +57,24 @@ describe("SQLiteTaskStore", () => {
     rmSync(tempDir, { recursive: true, force: true });
   });
 
+  it("inherits the creator target atomically and refuses Task rebinding", async () => {
+    const targets = new ExecutionTargetStore({ homeDir: tempDir, profileId: "alpha" });
+    try {
+      const binding = targetBinding(await targets.acquireLocal(tempDir));
+      await sessionDb.createSession({ id: "bound", profileId: "alpha", executionTarget: binding });
+      const graph = makeGraph("alpha");
+      graph.task.creatorSessionId = "bound";
+      graph.task.originSessionId = "bound";
+      graph.task.createdBy = { kind: "user", sessionId: "bound" };
+      graph.task.workspace = binding.workspace;
+      store.atomicWrite((tx) => tx.createTaskGraph(graph));
+      const stored = store.getTask(graph.task.id)!;
+      expect(stored.executionTarget).toEqual(binding);
+      expect(() => store.atomicWrite((tx) => tx.updateTask({ ...stored, executionTarget: undefined }))).toThrow("immutable");
+      expect(() => sessionDb.db.query("update tasks set execution_target_json = null").run()).toThrow("immutable");
+    } finally { targets.close(); }
+  });
+
   it("installs the Task persistence schema and enables foreign keys", () => {
     const tables = new Set(sessionDb.db.query<{ name: string }>(
       "select name from sqlite_master where type = 'table'"
@@ -75,7 +94,7 @@ describe("SQLiteTaskStore", () => {
       "select name from sqlite_master where type = 'index'"
     ).all().map((row) => row.name));
 
-    expect(version).toBe(CHANNEL_MESSAGE_TURN_SCHEMA_VERSION);
+    expect(version).toBe(EXECUTION_TARGET_SCHEMA_VERSION);
     expect(foreignKeys).toBe(1);
     expect([...TASK_TABLES].every((table) => tables.has(table))).toBe(true);
     expect([...OBSOLETE_EXECUTION_TABLES].every((table) => !tables.has(table))).toBe(true);
@@ -786,7 +805,7 @@ describe("Task schema migrations", () => {
       ).get()).toEqual({ name: "tasks" });
       expect(migrated.db.query<{ version: number }>(
         "select max(version) as version from schema_version"
-      ).get()?.version).toBe(CHANNEL_MESSAGE_TURN_SCHEMA_VERSION);
+      ).get()?.version).toBe(EXECUTION_TARGET_SCHEMA_VERSION);
     } finally {
       migrated.close();
       rmSync(tempDir, { recursive: true, force: true });

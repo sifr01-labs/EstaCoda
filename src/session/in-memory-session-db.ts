@@ -1,3 +1,4 @@
+import { parseExecutionTargetBinding, targetSessionMetadata } from "../workspaces/execution-target.js";
 import type {
   AppendMessageInput,
   CreateSessionInput,
@@ -49,6 +50,12 @@ export class InMemorySessionDB implements SessionDB {
       throw new Error(`Session already exists: ${id}`);
     }
 
+    const parent = input.parentSessionId === undefined ? undefined : await this.getSessionForProfile(input.parentSessionId, input.profileId);
+    const executionTarget = input.executionTarget ?? parent?.executionTarget;
+    if (parent?.executionTarget !== undefined && JSON.stringify(executionTarget) !== JSON.stringify(parent.executionTarget)) {
+      throw new Error("Child Session must retain its parent execution target.");
+    }
+    const metadata = targetSessionMetadata(input.metadata, executionTarget);
     const spendingLimit = cloneSpendingLimit(input.spendingLimit);
     const spendingScopeSessionId = spendingLimit === undefined
       ? undefined
@@ -76,7 +83,8 @@ export class InMemorySessionDB implements SessionDB {
       ...(spendingLimit === undefined ? {} : { spendingLimit }),
       endedAt: input.endedAt,
       endReason: input.endReason,
-      metadata: cloneMetadata(withImmutableSessionOrigin(input.metadata, undefined))
+      ...(executionTarget === undefined ? {} : { executionTarget: parseExecutionTargetBinding(executionTarget) }),
+      metadata: cloneMetadata(withImmutableSessionOrigin(metadata, undefined))
     };
 
     this.#sessions.set(id, session);
@@ -382,6 +390,7 @@ function cloneSession(session: SessionRecord): SessionRecord {
   return {
     ...session,
     ...(session.spendingLimit === undefined ? {} : { spendingLimit: cloneSpendingLimit(session.spendingLimit) }),
+    ...(session.executionTarget === undefined ? {} : { executionTarget: parseExecutionTargetBinding(session.executionTarget) }),
     metadata: cloneMetadata(session.metadata)
   };
 }

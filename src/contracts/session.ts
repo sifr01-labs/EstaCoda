@@ -46,6 +46,7 @@ export type AgentCancellationSource =
   | "unknown";
 
 export type SessionRecord = {
+  executionTarget?: import("./workspace.js").ExecutionTargetBinding;
   id: string;
   profileId: string;
   title?: string;
@@ -706,6 +707,7 @@ export type SessionSummaryRecord = {
 };
 
 export type CreateSessionInput = {
+  executionTarget?: import("./workspace.js").ExecutionTargetBinding;
   id?: string;
   profileId: string;
   title?: string;

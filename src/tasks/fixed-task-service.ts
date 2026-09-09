@@ -231,7 +231,7 @@ export class FixedTaskService {
         }
         if (completionDelivery !== undefined) store.createDeliveryBinding(completionDelivery);
       });
-      return graph;
+      return { ...graph, task: this.#store.getTask(task.id)! };
     } catch (error) {
       if (normalized.creationKey === undefined) throw error;
       const raced = this.#store.getTaskByCreationKey(normalized.creationKey);

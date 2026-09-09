@@ -12,3 +12,27 @@ export type RegisteredWorkspace = {
   identity: WorkspaceIdentity;
   locationRevision: number;
 };
+
+export type SourceWorkspaceBinding = {
+  identity: WorkspaceIdentity;
+  registeredWorkspaceId?: string;
+  registeredWorkspaceRevision?: number;
+};
+
+export type ExecutionTargetBinding = {
+  schemaVersion: 1;
+  targetId: string;
+  targetGeneration: number;
+  workspace: WorkspaceIdentity;
+};
+
+export type LocalExecutionTarget = {
+  schemaVersion: 1;
+  profileId: string;
+  id: string;
+  kind: "local";
+  generation: number;
+  source: SourceWorkspaceBinding;
+  workspace: WorkspaceIdentity;
+  status: "available" | "archived";
+};

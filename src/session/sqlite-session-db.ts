@@ -1,3 +1,5 @@
+import { parseExecutionTargetBinding, targetSessionMetadata } from "../workspaces/execution-target.js";
+import { EXECUTION_TARGET_SCHEMA_VERSION, migrateExecutionTargetSchemaV33 } from "../workspaces/execution-target-schema.js";
 import type {
   AppendMessageInput,
   CreateSessionInput,
@@ -65,6 +67,7 @@ import {
 } from "./session-presentation.js";
 
 type SessionRow = {
+  execution_target_json: string | null;
   id: string;
   profile_id: string;
   title: string | null;
@@ -185,6 +188,12 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
     const now = this.#now().toISOString();
     const id = input.id ?? this.#id();
     const profileId = input.profileId ?? "default";
+    const parent = input.parentSessionId === undefined ? undefined : await this.getSessionForProfile(input.parentSessionId, profileId);
+    const executionTarget = input.executionTarget ?? parent?.executionTarget;
+    if (parent?.executionTarget !== undefined && JSON.stringify(executionTarget) !== JSON.stringify(parent.executionTarget)) {
+      throw new Error("Child Session must retain its parent execution target.");
+    }
+    const metadata = targetSessionMetadata(input.metadata, executionTarget);
     const spendingLimit = cloneSpendingLimit(input.spendingLimit);
     const spendingScopeSessionId = spendingLimit === undefined
       ? undefined
@@ -213,8 +222,8 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
           spending_limit_json,
           ended_at,
           end_reason,
-          metadata_json
-        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+          metadata_json, execution_target_json
+        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         id,
@@ -227,7 +236,8 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
         spendingLimit === undefined ? null : JSON.stringify(spendingLimit),
         input.endedAt ?? null,
         input.endReason ?? null,
-        stringifyJson(withImmutableSessionOrigin(input.metadata, undefined))
+        stringifyJson(withImmutableSessionOrigin(metadata, undefined)),
+        executionTarget === undefined ? null : JSON.stringify(parseExecutionTargetBinding(executionTarget))
       );
 
     const session = await this.getSessionForProfile(id, profileId);
@@ -941,6 +951,7 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
       `);
     });
 
+    if (this.#readSchemaVersion() > EXECUTION_TARGET_SCHEMA_VERSION) throw new Error("Session database was created by a newer EstaCoda version.");
     this.#runMigrationStep(4, "v0.9-schema-v4-cron-executions", () => this.#migrateV4());
     this.#runMigrationStep(5, "v0.9-schema-v5-pending-approvals", () => this.#migrateV5());
     this.#runMigrationStep(6, "v0.9-schema-v6-session-lineage", () => this.#migrateV6());
@@ -981,6 +992,7 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
       migrateChannelMessageTurnSchemaV31(this.#db));
     this.#runMigrationStep(CHANNEL_MESSAGE_TURN_SCHEMA_VERSION, "v0.10-schema-v32-bounded-channel-message-turn-bindings", () =>
       migrateChannelMessageTurnSchemaV32(this.#db));
+    this.#runMigrationStep(EXECUTION_TARGET_SCHEMA_VERSION, "workspace-target-bindings-v33", () => migrateExecutionTargetSchemaV33(this.#db));
   }
 
   #withMigrationLock(migrate: () => void): void {
@@ -1221,6 +1233,7 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
 
 function rowToSession(row: SessionRow): SessionRecord {
   return {
+    ...(row.execution_target_json == null ? {} : { executionTarget: parseExecutionTargetBinding(JSON.parse(row.execution_target_json)) }),
     id: row.id,
     profileId: row.profile_id,
     title: row.title ?? undefined,

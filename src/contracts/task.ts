@@ -227,6 +227,7 @@ export type Task = {
   objective: string;
   status: TaskStatus;
   workspace: TaskWorkspaceBinding;
+  executionTarget?: import("./workspace.js").ExecutionTargetBinding;
   authorityPolicy: TaskAuthorityPolicy;
   /** Optional immutable monetary policy. Present only on a root Task. */
   spendingLimit?: SpendingLimit;

@@ -1,3 +1,4 @@
+import { parseExecutionTargetBinding } from "../workspaces/execution-target.js";
 import type {
   Task,
   TaskApprovalLink,
@@ -244,6 +245,21 @@ export class SQLiteTaskStore implements TaskStore {
       this.#assertAttemptOwned(task.parentAttemptId, task.parentTaskId);
     }
 
+    const creator = task.creatorSessionId === undefined ? null : this.#db.query<{ execution_target_json: string | null }>(
+      "select execution_target_json from sessions where id = ? and profile_id = ?"
+    ).get(task.creatorSessionId, this.#profileId);
+    const creatorTarget = creator?.execution_target_json == null ? undefined : parseExecutionTargetBinding(JSON.parse(creator.execution_target_json));
+    const parentTarget = task.parentTaskId === undefined ? undefined : this.getTask(task.parentTaskId)?.executionTarget;
+    const inherited = parentTarget ?? creatorTarget;
+    const executionTarget = task.executionTarget ?? inherited;
+    if (executionTarget !== undefined) {
+      const binding = parseExecutionTargetBinding(executionTarget);
+      if (binding.workspace.identityHash !== task.workspace.identityHash || binding.workspace.canonicalPath !== task.workspace.canonicalPath ||
+        (inherited !== undefined && JSON.stringify(binding) !== JSON.stringify(inherited))) {
+        throw new TaskStoreIntegrityError("Task must retain its creator/parent execution target and workspace.");
+      }
+    }
+
     this.#db.query(
       `insert into tasks (
         id, profile_id, creator_session_id, root_task_id, origin_session_id, origin_turn_id,
@@ -251,9 +267,9 @@ export class SQLiteTaskStore implements TaskStore {
         source, execution_preference, creation_key, objective, status, workspace_path, workspace_identity_hash,
         authority_policy_json, spending_limit_json, execution_limits_json, active_plan_revision_id,
         wait_reason_json, failure_json, created_by_json,
-        created_at, updated_at, started_at, completed_at, cancelled_at
-      ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
-    ).run(...taskValues(task));
+        created_at, updated_at, started_at, completed_at, cancelled_at, execution_target_json
+      ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+    ).run(...taskValues({ ...task, executionTarget }));
   }
 
   updateTask(task: Task): void {
@@ -275,6 +291,7 @@ export class SQLiteTaskStore implements TaskStore {
       creationKey: existing.creationKey,
       objective: existing.objective,
       workspace: existing.workspace,
+      executionTarget: existing.executionTarget,
       authorityPolicy: existing.authorityPolicy,
       spendingLimit: existing.spendingLimit,
       executionLimits: existing.executionLimits,
@@ -292,6 +309,7 @@ export class SQLiteTaskStore implements TaskStore {
       creationKey: task.creationKey,
       objective: task.objective,
       workspace: task.workspace,
+      executionTarget: task.executionTarget,
       authorityPolicy: task.authorityPolicy,
       spendingLimit: task.spendingLimit,
       executionLimits: task.executionLimits,
@@ -308,7 +326,7 @@ export class SQLiteTaskStore implements TaskStore {
         creation_key = ?, objective = ?, status = ?, workspace_path = ?, workspace_identity_hash = ?,
         authority_policy_json = ?, spending_limit_json = ?, execution_limits_json = ?, active_plan_revision_id = ?,
         wait_reason_json = ?, failure_json = ?, created_by_json = ?, created_at = ?,
-        updated_at = ?, started_at = ?, completed_at = ?, cancelled_at = ?
+        updated_at = ?, started_at = ?, completed_at = ?, cancelled_at = ?, execution_target_json = ?
        where id = ? and profile_id = ?`
     ).run(...taskValues(task).slice(2), task.id, this.#profileId);
     this.#assertChanged(result.changes, "Task", task.id);
@@ -1834,7 +1852,8 @@ function taskValues(task: Task): SQLiteValue[] {
     task.updatedAt,
     task.startedAt ?? null,
     task.completedAt ?? null,
-    task.cancelledAt ?? null
+    task.cancelledAt ?? null,
+    task.executionTarget === undefined ? null : JSON.stringify(parseExecutionTargetBinding(task.executionTarget))
   ];
 }
 
@@ -1919,6 +1938,7 @@ function deliveryBindingValues(binding: TaskDeliveryBinding): SQLiteValue[] {
 
 function rowToTask(row: TaskRow): Task {
   return {
+    ...(row.execution_target_json == null ? {} : { executionTarget: parseExecutionTargetBinding(JSON.parse(row.execution_target_json)) }),
     id: row.id,
     profileId: row.profile_id,
     ...(row.creator_session_id === null ? {} : { creatorSessionId: row.creator_session_id }),
@@ -2369,6 +2389,7 @@ function isPromiseLike(value: unknown): value is PromiseLike<unknown> {
 }
 
 type TaskRow = {
+  execution_target_json: string | null;
   id: string;
   profile_id: string;
   creator_session_id: string | null;
