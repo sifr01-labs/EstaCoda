@@ -1,3 +1,4 @@
+import { validateCurrentExecutionAuthority } from "../runtime/live-execution-authority.js";
 import { assertCurrentExecutionFence } from "../session/execution-fence-context.js";
 import { validateDispatchAuthorization } from "../security/dispatch-authorization.js";
 import { executionActionIdentity } from "../security/execution-action-identity.js";
@@ -598,6 +599,7 @@ export class ToolExecutor {
           const currentHardline = assessHardlineFloor(typeof request.input.command === "string" ? request.input.command : "");
           if (currentHardline !== undefined) throw new Error(currentHardline.reason);
           await validateDispatchAuthorization(assessment);
+          await validateCurrentExecutionAuthority();
           assertCurrentExecutionFence();
           dispatchState = "started";
         },
@@ -611,6 +613,7 @@ export class ToolExecutor {
           running,
           timeout.signal
         );
+        await validateCurrentExecutionAuthority();
         settlement = {
           terminalStatus: result.ok ? "completed" : "failed",
           dispatchState,

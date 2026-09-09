@@ -2,9 +2,9 @@ import { AsyncLocalStorage } from "node:async_hooks";
 import type { SQLiteDatabase, SQLiteStatement, SQLiteValue } from "../storage/sqlite.js";
 import type { ExecutionClaim } from "./execution-ownership.js";
 
-const context = new AsyncLocalStorage<{ db: SQLiteDatabase; claim: ExecutionClaim }>();
-export function withExecutionFence<T>(db: SQLiteDatabase, claim: ExecutionClaim, work: () => T): T {
-  return context.run({ db, claim }, work);
+const context = new AsyncLocalStorage<{ db: SQLiteDatabase; claim: ExecutionClaim; assertLive?: () => void }>();
+export function withExecutionFence<T>(db: SQLiteDatabase, claim: ExecutionClaim, work: () => T, assertLive?: () => void): T {
+  return context.run({ db, claim, assertLive }, work);
 }
 export function rotateExecutionFence(db: SQLiteDatabase, claim: ExecutionClaim): void {
   const current = context.getStore();
@@ -28,6 +28,7 @@ export function executionFencedDatabase(raw: SQLiteDatabase): SQLiteDatabase {
   const guarded = <T>(work: () => T): T => {
     const current = context.getStore();
     if (!current || current.db !== wrapper) return work();
+    current.assertLive?.();
     const claim = current.claim;
     raw.exec("savepoint execution_fence");
     try {

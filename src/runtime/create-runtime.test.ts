@@ -3602,12 +3602,14 @@ describe("createRuntime MCP trust gating", () => {
     expect(servers).toEqual([]);
   });
 
-  it("attempts to start/register MCP when workspaceTrusted is true", async () => {
+  it("starts MCP only with current persisted trust", async () => {
     const options = await minimalRuntimeOptions({
       mcpServers: { echo: { command: "echo", args: ["hello"] } },
       workspaceTrusted: true
     });
-    const runtime = await createRuntime(options);
+    const trustStore = new WorkspaceTrustStore({ homeDir: options.workspaceRoot });
+    await trustStore.grant(options.workspaceRoot);
+    const runtime = await createRuntime({ ...options, trustStore });
     const servers = runtime.inspectMcpServers();
     expect(servers.length).toBe(1);
     expect(servers[0].name).toBe("echo");

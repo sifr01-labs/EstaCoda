@@ -1,3 +1,4 @@
+import { createLiveAuthority } from "./live-execution-authority.js";
 import { ResourceCleanup } from "../execution/resource-cleanup.js";
 import { acquireRuntimeContext } from "./runtime-acquisition.js";
 import { withDispatchAuthorization, validateDispatchAuthorization } from "../security/dispatch-authorization.js";
@@ -493,6 +494,8 @@ async function buildRuntime(options: RuntimeOptions, rollback: ResourceCleanup):
     homeDir: options.homeDir
   });
   const trustStore = options.trustStore ?? new WorkspaceTrustStore({ path: options.trustStorePath, homeDir: options.homeDir });
+  const validateLiveAuthority = await createLiveAuthority({ profileRoot: profilePaths.profileRoot, workspaceRoot, trustStore });
+  executionOwner.setValidator(validateLiveAuthority, () => executionLease.release());
   const cronStore = options.cronStore ?? new CronStore({
     path: join(profilePaths.cronPath, "jobs.json"),
     outputRoot: join(profilePaths.cronPath, "output"),
@@ -583,7 +586,7 @@ async function buildRuntime(options: RuntimeOptions, rollback: ResourceCleanup):
 
   const bundledSkillsDir = new URL("../../skills/official", import.meta.url).pathname;
   const skillLoadWarnings: string[] = [];
-  const effectiveMcpServers = options.workspaceTrusted === true ? (options.mcpServers ?? {}) : {};
+  const effectiveMcpServers = await trustStore.isTrusted(workspaceRoot) ? (options.mcpServers ?? {}) : {};
   const loadedMcpServers = await loadMcpServers({
     servers: effectiveMcpServers,
     artifactStore
@@ -854,10 +857,14 @@ async function buildRuntime(options: RuntimeOptions, rollback: ResourceCleanup):
       const basePolicy = baseSecurityPolicyForActiveMode();
       const assessedSessionId = sessionRuntimeContext.currentSessionId();
       const persistedTrust = await trustStore.isTrusted(workspaceRoot);
+      const authorityRevision = options.approvalController?.authorizationRevision(request);
       const fence = (assessment: SecurityAssessment): SecurityAssessment => assessment.decision !== "allow" ? assessment : withDispatchAuthorization(assessment, async () => {
           await validateApprovalOwner(assessedSessionId);
           if ((persistedTrust && !await trustStore.isTrusted(workspaceRoot)) || !request.context.trustedWorkspace || baseSecurityPolicyForActiveMode().decide(request) === "deny") throw new Error("Execution authority changed before dispatch.");
           await validateDispatchAuthorization(assessment);
+        }, async () => {
+          await validateLiveAuthority();
+          if (authorityRevision !== options.approvalController?.authorizationRevision(request)) throw new Error("Execution approval was revoked.");
         });
 
       if (options.approvalController === undefined) {
@@ -1065,6 +1072,7 @@ async function buildRuntime(options: RuntimeOptions, rollback: ResourceCleanup):
   });
   const subagentRegistry = new SubagentRegistry();
   const childFactory = new DefaultChildAgentLoopFactory({
+    validateExecutionAuthority: validateLiveAuthority,
     builder,
     parentRoutes: agentLoopRoutes,
     providerRegistry,
@@ -1200,7 +1208,7 @@ async function buildRuntime(options: RuntimeOptions, rollback: ResourceCleanup):
 
   return {
     async validateExecutionHealth() {
-      executionOwner.assert(); executionLease.assertActive();
+      await executionOwner.validate(); executionLease.assertActive();
       const session = await sessionDb.getSessionForProfile(sessionRuntimeContext.currentSessionId(), profileId);
       if (!session) throw new Error("Session is unavailable.");
       await validateSessionWorkspaceOwnership({ session, profileId, workspaceRoot, homeDir: options.homeDir });

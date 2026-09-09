@@ -115,6 +115,7 @@ export class ChildModelOverrideError extends Error {
 }
 
 export type DefaultChildAgentLoopFactoryOptions = {
+  validateExecutionAuthority?: () => Promise<void>;
   builder: AgentLoopBuilder;
   parentRoutes: AgentLoopRouteInput;
   providerRegistry?: ProviderRegistry;
@@ -148,6 +149,7 @@ export type ChildProviderRouteConfig = {
 };
 
 export class DefaultChildAgentLoopFactory implements ChildAgentLoopFactory {
+  readonly #validateExecutionAuthority?: () => Promise<void>;
   readonly #builder: AgentLoopBuilder;
   readonly #parentRoutes: AgentLoopRouteInput;
   readonly #providerRegistry: ProviderRegistry | undefined;
@@ -170,6 +172,7 @@ export class DefaultChildAgentLoopFactory implements ChildAgentLoopFactory {
   readonly #id: () => string;
 
   constructor(options: DefaultChildAgentLoopFactoryOptions) {
+    this.#validateExecutionAuthority = options.validateExecutionAuthority;
     this.#builder = options.builder;
     this.#parentRoutes = options.parentRoutes;
     this.#providerRegistry = options.providerRegistry;
@@ -342,6 +345,7 @@ export class DefaultChildAgentLoopFactory implements ChildAgentLoopFactory {
     });
 
     executionOwner = await RuntimeSessionOwner.acquire(this.#sessionDb, childSession.id, input.profileId);
+    executionOwner.setValidator(this.#validateExecutionAuthority ?? (async () => undefined), async () => { await builtSession.executionLease?.release(); });
 
     return {
       childSession,

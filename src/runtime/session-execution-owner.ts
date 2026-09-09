@@ -1,3 +1,4 @@
+import { withExecutionAuthority } from "./live-execution-authority.js";
 import type { SessionDB } from "../contracts/session.js";
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
 import { SessionExecutionOwnership, type ExecutionClaim } from "../session/execution-ownership.js";
@@ -14,6 +15,25 @@ export class RuntimeSessionOwner {
   readonly #controller = new AbortController();
   #closed = false;
   #active?: Promise<unknown>;
+  #validator: () => Promise<void> = async () => undefined;
+  #stop?: () => Promise<void>;
+  #watchdog?: ReturnType<typeof setInterval>;
+  readonly #authorityChecks = new Set<() => void | Promise<void>>();
+  setValidator(check: () => Promise<void>, stop?: () => Promise<void>): void {
+    this.#validator = check; this.#stop = stop;
+    let checking = false;
+    this.#watchdog = setInterval(() => {
+      if (checking || this.#closed || this.signal.aborted) return;
+      checking = true;
+      void this.validate().catch(() => this.cancel()).finally(() => { checking = false; });
+    }, 1000);
+    this.#watchdog.unref?.();
+  }
+  async validate(): Promise<void> {
+    this.assert(); await this.#validator();
+    for (const check of this.#authorityChecks) await check();
+    this.assert();
+  }
   private constructor(readonly db: SessionDB) {
     if (db instanceof SQLiteSessionDB) this.#store = new SessionExecutionOwnership(db.db);
   }
@@ -33,17 +53,17 @@ export class RuntimeSessionOwner {
   }
   run<T>(work: () => Promise<T>): Promise<T> {
     return this.#serial.runExclusive("turn", async () => {
-      this.assert();
+      await this.validate();
       if (this.#claim) this.#store!.advance(this.#claim, "turn");
       const timer = setInterval(() => {
         try { if (this.#claim) this.#store!.renew(this.#claim); }
         catch (error) { this.#controller.abort(error); }
       }, 10_000);
       timer.unref?.();
-      const running = Promise.resolve().then(() => this.#claim
-        ? withExecutionFence(this.#store!.db, this.#claim, work) : work());
+      const running = Promise.resolve().then(() => withExecutionAuthority(() => this.validate(), this.#authorityChecks, () => this.#claim
+        ? withExecutionFence(this.#store!.db, this.#claim, work, () => this.assert()) : work()));
       this.#active = running;
-      try { const result = await running; this.assert(); return result; }
+      try { const result = await running; await this.validate(); return result; }
       finally { clearInterval(timer); this.#active = undefined; }
     });
   }
@@ -55,12 +75,18 @@ export class RuntimeSessionOwner {
     this.#claim = next;
     rotateExecutionFence(this.#store!.db, next);
   }
-  cancel(): void { this.#controller.abort(new Error("Session execution cancelled.")); }
+  cancel(): void {
+    this.#controller.abort(new Error("Session execution cancelled or authority revoked."));
+    if (this.#watchdog) clearInterval(this.#watchdog);
+    void this.#stop?.().catch(() => undefined);
+  }
   async settle(): Promise<void> {
     this.#closed = true; this.cancel();
     await this.#active?.catch(() => undefined);
+    await this.#stop?.();
   }
   release(): void {
+    if (this.#watchdog) clearInterval(this.#watchdog);
     for (const claim of this.#retiredClaims) this.#store!.release(claim);
     this.#retiredClaims.length = 0;
     if (this.#claim) { this.#store!.release(this.#claim); this.#claim = undefined; }

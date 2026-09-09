@@ -4909,6 +4909,8 @@ export class ChannelGateway {
             actionKey !== securityActionKey(request) || !request.context.trustedWorkspace || hardlineAssessmentForRequest(request, securityMode) !== undefined ||
             createSecurityPolicyForMode(securityMode).decide(request) === "deny") throw new Error("Channel approval authority changed before dispatch. Review the current action.");
           dispatched = true;
+        }, async () => {
+          if (revision !== this.#approvalStore.revision(request)) throw new Error("Channel execution approval was revoked.");
         });
       },
       decide(request: SecurityRequest): SecurityDecision {
