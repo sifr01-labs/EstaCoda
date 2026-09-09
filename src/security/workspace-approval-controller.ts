@@ -1,6 +1,6 @@
 import { withDispatchAuthorization, validateDispatchAuthorization } from "./dispatch-authorization.js";
 import { createPendingAction, securityActionKey } from "./pending-action-approval.js";
-import { readApprovalFile, updateApprovalFile } from "./approval-file.js";
+import { hasApprovalGrant, approvalAuthorityRevision, recordApprovalRevocation, readApprovalFile, updateApprovalFile, type ApprovalAuthority } from "./approval-file.js";
 import { sameReusableAuthority, samePendingAuthority, validApprovalScope, type ApprovalExecutionScope } from "./approval-scope.js";
 import { join, resolve } from "node:path";
 import { resolveHomeDir } from "../config/home-dir.js";
@@ -76,7 +76,8 @@ export class WorkspaceApprovalStore {
     return readApprovalFile(this.#path, isPersistedGrant).grants.filter((grant) => grant.workspaceRoot === resolve(workspaceRoot));
   }
 
-  revision(): number { return readApprovalFile(this.#path, isPersistedGrant).revision; }
+  revision(authority?: ApprovalAuthority): number { return approvalAuthorityRevision(readApprovalFile(this.#path, isPersistedGrant), authority); }
+  hasGrant(grant: PersistedWorkspaceApprovalGrant): boolean { return hasApprovalGrant(readApprovalFile(this.#path, isPersistedGrant), grant); }
 
   async grant(input: {
     workspaceRoot: string; toolName: string; riskClass: ToolRiskClass;
@@ -84,7 +85,7 @@ export class WorkspaceApprovalStore {
   }): Promise<PersistedWorkspaceApprovalGrant> {
     if (input.executionScope !== undefined && !validApprovalScope(input.executionScope)) throw new Error("Invalid approval execution scope.");
     return updateApprovalFile(this.#path, isPersistedGrant, (file) => {
-      if (input.expectedRevision !== undefined && input.expectedRevision !== file.revision) throw new Error("Approval authority changed. Review the current action to renew approval.");
+      if (input.expectedRevision !== undefined && input.expectedRevision !== approvalAuthorityRevision(file, input)) throw new Error("Approval authority changed. Review the current action to renew approval.");
       const workspaceRoot = resolve(input.workspaceRoot);
       const existing = file.grants.find((grant) => grant.workspaceRoot === workspaceRoot && grant.toolName === input.toolName &&
         grant.riskClass === input.riskClass && grant.targetKey === input.targetKey && sameReusableAuthority(grant.executionScope, input.executionScope));
@@ -99,10 +100,13 @@ export class WorkspaceApprovalStore {
 
   async revoke(id: string, workspaceRoot: string): Promise<boolean> {
     return updateApprovalFile(this.#path, isPersistedGrant, (file) => {
-      const before = file.grants.length;
+      const previous = file.grants;
+      const before = previous.length;
       file.grants = file.grants.filter((grant) => !(grant.id === id && grant.workspaceRoot === resolve(workspaceRoot)));
       if (before === file.grants.length) return false;
       file.revision++;
+      const retained = new Set(file.grants);
+      for (const grant of previous) if (!retained.has(grant)) recordApprovalRevocation(file, grant);
       return true;
     });
   }
@@ -119,7 +123,7 @@ export class WorkspaceApprovalController {
     this.#store = options.store ?? new WorkspaceApprovalStore();
   }
 
-  authorizationRevision(): number { return this.#store.revision(); }
+  authorizationRevision(authority?: ApprovalAuthority): number { return this.#store.revision(authority); }
 
   get storePath(): string {
     return this.#store.path;
@@ -135,13 +139,14 @@ export class WorkspaceApprovalController {
       smartApproval?: SmartApprovalAssessorRuntimeConfig;
     }
   ): Promise<SecurityAssessment> {
-    const authorizationRevision = this.#store.revision();
+    const authorizationRevision = this.#store.revision(request);
     const actionKey = securityActionKey(request);
     const scope = structuredClone(request.executionScope);
     let dispatched = false;
+    let requiredGrant: PersistedWorkspaceApprovalGrant | undefined;
     const fence = (assessment: SecurityAssessment): SecurityAssessment => assessment.decision !== "allow" ? assessment : withDispatchAuthorization(assessment, async () => {
         await validateDispatchAuthorization(assessment);
-        if (dispatched || this.#store.revision() !== authorizationRevision || securityActionKey(request) !== actionKey ||
+        if (dispatched || (requiredGrant !== undefined && !this.#store.hasGrant(requiredGrant)) || this.#store.revision(request) !== authorizationRevision || securityActionKey(request) !== actionKey ||
           (scope !== undefined && !samePendingAuthority(scope, request.executionScope)) || !request.context.trustedWorkspace ||
           hardlineBlockFor(request) !== undefined || basePolicy.decide(request) === "deny") throw new Error("Approval authority changed before dispatch. Review the current action to renew approval.");
         dispatched = true;
@@ -167,6 +172,7 @@ export class WorkspaceApprovalController {
 
     const matched = await this.#findMatchingGrant(request, options);
     if (matched !== undefined) {
+      if (matched.scope === "always") requiredGrant = matched.grant as PersistedWorkspaceApprovalGrant;
       if (matched.scope === "once") {
         const sessionGrants = this.#sessionGrants.get(options.sessionId) ?? [];
         if (matched.index !== undefined) {
@@ -202,12 +208,12 @@ export class WorkspaceApprovalController {
 
     const smartAssessment = await smartAssessmentFor(request, options.mode, options.smartApproval);
     if (smartAssessment !== undefined) {
-      return smartAssessment.decision === "ask" ? { ...smartAssessment, pendingApproval: createPendingAction(request, this.#store.revision()) } : fence(smartAssessment);
+      return smartAssessment.decision === "ask" ? { ...smartAssessment, pendingApproval: createPendingAction(request, this.#store.revision(request)) } : fence(smartAssessment);
     }
 
     const assessment = await assessSecurityPolicy(basePolicy, request, options.mode);
     if (assessment.decision !== "ask") return fence(assessment);
-    return { ...assessment, pendingApproval: createPendingAction(request, this.#store.revision()) };
+    return { ...assessment, pendingApproval: createPendingAction(request, this.#store.revision(request)) };
   }
 
   async grant(input: {
@@ -235,7 +241,7 @@ export class WorkspaceApprovalController {
       return;
     }
 
-    if (input.expectedRevision !== undefined && input.expectedRevision !== this.#store.revision()) throw new Error("Approval authority changed. Review the current action to renew approval.");
+    if (input.expectedRevision !== undefined && input.expectedRevision !== this.#store.revision(input)) throw new Error("Approval authority changed. Review the current action to renew approval.");
     const scopedGrant: EphemeralApprovalGrant = {
       actionKey: input.scope === "once" ? input.actionKey : undefined,
       executionScope: input.executionScope === undefined ? undefined : structuredClone(input.executionScope),

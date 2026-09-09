@@ -165,3 +165,31 @@ it("consumes a Task approval at dispatch and fences a second in-flight receipt",
   await expect(validateDispatchAuthorization(second)).rejects.toThrow(/authority changed/);
   expect((await policy.assess!({ ...request, actionKey: "b".repeat(64) })).decision).toBe("ask");
 });
+
+it("retains exact action identity for a durable Task approval's full lifetime", async () => {
+  const { executionActionIdentity } = await import("../security/execution-action-identity.js");
+  const initial = Date.now();
+  const clock = vi.spyOn(Date, "now").mockReturnValue(initial);
+  try {
+    const { task, step, attempt } = context("require_approval");
+    task.status = "running"; task.activePlanRevisionId = step.planRevisionId;
+    const request = (content = "reviewed") => ({ toolName: "file.write", riskClass: "workspace-write" as const, targetKey: "a.txt",
+      actionKey: executionActionIdentity("alpha", "task-retention-worker", "file.write", "workspace-write", { path: "a.txt", content }),
+      description: "write", context: { trustedWorkspace: true } });
+    let link: TaskApprovalLink | undefined;
+    const store = { profileId: "alpha", getTask: () => task, getStep: () => step, getAttempt: () => attempt,
+      listApprovalLinks: () => link?.status === "approved" ? [link] : [],
+      updateApprovalLink: (updated: TaskApprovalLink) => { link = updated; },
+      atomicWrite: (callback: (store: TaskStore) => unknown) => callback(store as unknown as TaskStore) } as unknown as TaskStore;
+    const service = new TaskApprovalService({ store, now: () => new Date(Date.now()) });
+    const policy = service.securityPolicyFor(task, step, attempt, { decide: () => "ask" });
+    expect((await policy.assess!(request())).decision).toBe("ask");
+    link = { ...service.createLink({ task, step, attempt, request: service.takeRequest(attempt.id)! }), status: "approved" };
+    clock.mockReturnValue(initial + 23 * 60 * 60_000);
+    expect(policy.decide(request())).toBe("allow");
+    expect(policy.decide(request("changed"))).toBe("ask");
+    await validateDispatchAuthorization(await policy.assess!(request()));
+    expect(link.status).toBe("consumed");
+    expect(policy.decide(request())).toBe("ask");
+  } finally { clock.mockRestore(); }
+});

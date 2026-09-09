@@ -6270,6 +6270,51 @@ describe("ChannelGateway commands", () => {
       }
     });
 
+    it.each(["revocation", "expiry", "scope-unavailable"])("renews a stale CLI-approved action once and continues other chats after %s", async (reason) => {
+      const { queue, directory, cleanup } = await setupGatewayApprovalQueue();
+      const clock = vi.spyOn(Date, "now");
+      try {
+        const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+        const store = new ChannelApprovalStore({ path: join(directory, "channel-approvals.json") });
+        const facts = await verifyHostExecution(directory);
+        const runtimes = new Map<string, ReturnType<typeof createApprovalRuntime>>();
+        let unavailable: string | undefined;
+        const gateway = new ChannelGateway({
+          adapters: [adapter], profileId: "profile-a", approvalQueue: queue, approvalStore: store,
+          authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+          approvalScopeForSession: async (sessionId) => {
+            if (sessionId === unavailable) throw new Error("Workspace trust was revoked");
+            return localApprovalScope("profile-a", sessionId, facts);
+          },
+          runtimeForSession: async ({ sessionId }) => {
+            if (!runtimes.has(sessionId)) runtimes.set(sessionId, createApprovalRuntime());
+            return runtimes.get(sessionId)!.runtime;
+          }
+        });
+        const first = makeMessage("first risky action");
+        const second = makeMessage("second risky action", { id: "msg-2", sessionKey: { ...first.sessionKey, chatId: "other-chat" } });
+        await gateway.receive(first);
+        const [stale] = await queue.listPending({ profileId: "profile-a" });
+        if (reason === "expiry") clock.mockReturnValue(Date.now() + 60_000);
+        await gateway.receive(second);
+        for (const pending of await queue.listPending({ profileId: "profile-a" })) {
+          await queue.resolveApproval(pending.id, "approved", "cli", { profileId: "profile-a", sessionId: pending.sessionId });
+        }
+        if (reason === "revocation") {
+          const sessionKey = normalizeSessionKey(first.sessionKey, {});
+          const grant = await store.grant({ sessionKey, toolName: "terminal.run", riskClass: "destructive-local", targetKey: "terminal.run:rm-build",
+            executionScope: channelApprovalScope(localApprovalScope("profile-a", stale.sessionId, facts), sessionKey) });
+          await store.revoke(grant.id, sessionKey);
+        } else if (reason === "expiry") clock.mockReturnValue(stale.executionApproval!.expiresAt + 1);
+        else unavailable = stale.sessionId;
+        await expect(gateway.tickApprovalResolutions()).resolves.toBeUndefined();
+        await expect(gateway.tickApprovalResolutions()).resolves.toBeUndefined();
+        expect(runtimes.get(stale.sessionId)!.calls()).toBe(1);
+        expect([...runtimes.values()].map((runtime) => runtime.calls()).sort()).toEqual([1, 2]);
+        expect(adapter.records.filter((record) => record.kind === "text" && record.text?.includes("Approval needs renewal"))).toHaveLength(1);
+      } finally { clock.mockRestore(); await cleanup(); }
+    });
+
     it("CLI denial of the durable row is observed by the live gateway without resuming", async () => {
       const { queue, cleanup } = await setupGatewayApprovalQueue();
       try {

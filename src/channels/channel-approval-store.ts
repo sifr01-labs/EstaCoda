@@ -1,4 +1,4 @@
-import { readApprovalFile, updateApprovalFile } from "../security/approval-file.js";
+import { hasApprovalGrant, approvalAuthorityRevision, recordApprovalRevocation, readApprovalFile, updateApprovalFile, type ApprovalAuthority } from "../security/approval-file.js";
 import { sameReusableAuthority, validApprovalScope, type ApprovalExecutionScope } from "../security/approval-scope.js";
 import { join } from "node:path";
 import { resolveHomeDir } from "../config/home-dir.js";
@@ -42,7 +42,8 @@ export class ChannelApprovalStore {
     return readApprovalFile(this.#path, isGrant).grants.filter((grant) => matchesSessionScope(grant, sessionKey));
   }
   async listAll(): Promise<PersistedApprovalGrant[]> { return readApprovalFile(this.#path, isGrant).grants; }
-  revision(): number { return readApprovalFile(this.#path, isGrant).revision; }
+  revision(authority?: ApprovalAuthority): number { return approvalAuthorityRevision(readApprovalFile(this.#path, isGrant), authority); }
+  hasGrant(grant: PersistedApprovalGrant): boolean { return hasApprovalGrant(readApprovalFile(this.#path, isGrant), grant); }
 
   async grant(input: {
     sessionKey: ChannelSessionKey; toolName: string; riskClass: string;
@@ -50,7 +51,7 @@ export class ChannelApprovalStore {
   }): Promise<PersistedApprovalGrant> {
     if (input.executionScope !== undefined && !validApprovalScope(input.executionScope)) throw new Error("Invalid approval execution scope.");
     return updateApprovalFile(this.#path, isGrant, (file) => {
-      if (input.expectedRevision !== undefined && input.expectedRevision !== file.revision) throw new Error("Approval authority changed. Review the current action to renew approval.");
+      if (input.expectedRevision !== undefined && input.expectedRevision !== approvalAuthorityRevision(file, input)) throw new Error("Approval authority changed. Review the current action to renew approval.");
       const existing = file.grants.find((grant) => matchesSessionScope(grant, input.sessionKey) && grant.toolName === input.toolName &&
         grant.riskClass === input.riskClass && grant.targetKey === input.targetKey && sameReusableAuthority(grant.executionScope, input.executionScope));
       if (existing) return existing;
@@ -64,10 +65,13 @@ export class ChannelApprovalStore {
   }
   async revoke(id: string, sessionKey?: ChannelSessionKey): Promise<boolean> {
     return updateApprovalFile(this.#path, isGrant, (file) => {
-      const before = file.grants.length;
+      const previous = file.grants;
+      const before = previous.length;
       file.grants = file.grants.filter((grant) => grant.id !== id || (sessionKey !== undefined && !matchesSessionScope(grant, sessionKey)));
       if (before === file.grants.length) return false;
       file.revision++;
+      const retained = new Set(file.grants);
+      for (const grant of previous) if (!retained.has(grant)) recordApprovalRevocation(file, grant);
       return true;
     });
   }

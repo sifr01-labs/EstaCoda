@@ -31,7 +31,7 @@ Reusable grants currently require equal verified host authority. EstaCoda does n
 
 Action tokens are opaque. Argument fingerprints used to assign those tokens remain in process memory, rather than entering durable approval receipts. Pending local/channel actions expire after ten minutes and cannot be transferred to another process. Restarted work may need a fresh exact-action review. Persistent grants remain reusable when their authority still matches.
 
-Task approvals use their existing durable ownership records, not local/channel persistent grants. The queue checks the linked Task hierarchy and current authority before resolution. Task dispatch rechecks the Attempt fence and approval, and consumes the approval before executing. A changed action or lost process-local action identity requires a new review; a durable queue decision alone does not authorize execution.
+Task approvals use their existing durable ownership records, not local/channel persistent grants. The queue checks the linked Task hierarchy and current authority before resolution. Task dispatch rechecks the Attempt fence and approval, and consumes the approval before executing. Exact-action tokens are retained through pending approval expiry, including the configured Task approval lifetime (24 hours by default). Cache pressure cannot evict retained tokens: the bounded 1,000-entry cache rejects new identities when every slot is retained, and capacity becomes available as retention expires or a Task approval is consumed or denied. Approval consumption still prevents replay; retaining an identity does not authorize another execution. A changed action or lost process-local action identity requires a new review; a durable queue decision alone does not authorize execution.
 
 ## Renewal and revocation
 
@@ -39,13 +39,13 @@ Use `/approvals` in an interactive CLI or channel Session to inspect grants. Leg
 
 An old command queue entry without a valid execution binding cannot be approved. Repeat the request in its owning Session. Legacy Task queue entries are different: they can use an existing, validated Task approval link with its exact creator/Task/Attempt ownership. Missing or malformed ownership is never treated as permission.
 
-Grant writes and revocations advance the existing store's authorization revision. Equivalent grant requests reuse the existing generation; changing a label does not rewrite authority. Immediately before dispatch, a previously allowed action must pass its current ownership and authorization checks. Revoking and recreating an identical grant cannot revive the old dispatch authorization. A concurrent authorization change can require one fresh review.
+Grant writes and revocations advance the storage revision. Revocation also advances a separate revision for the affected profile, surface, workspace, authority, tool, risk and target. Unrelated grants and revocations do not invalidate pending or assessed actions. Equivalent grant requests reuse the existing generation; changing a label does not rewrite authority. Immediately before dispatch, a previously allowed action must pass its current ownership and authorization checks. Revoking and recreating an identical grant cannot revive the old dispatch authorization. A relevant concurrent revocation can require one fresh review. A stale CLI-approved channel action is removed from the live pending continuations with one renewal message, allowing other chats to continue.
 
 ACP's editor permission response authorizes only the offered one-time action. Changed arguments, expired context, another Session, and an unoffered permission option cannot reuse that response.
 
 ## Persistence and upgrade
 
-Workspace grants remain in the existing global `workspace-approvals.json`. The supervised gateway keeps its existing profile-local `gateway/channel-approvals.json`; explicitly configured store paths are preserved. The JSON format is version 2 with a monotonic revision. Version 1 grants remain inspectable but do not gain an execution scope during migration.
+Workspace grants remain in the existing global `workspace-approvals.json`. The supervised gateway keeps its existing profile-local `gateway/channel-approvals.json`; explicitly configured store paths are preserved. The JSON format is version 3 with a monotonic storage revision and scoped revocation records that survive grant removal. Version 2 scoped grants retain their authority; version 1 grants remain inspectable but do not gain an execution scope during migration. Old pending receipts may require renewal after upgrade. Unknown formats and malformed revocation records fail closed.
 
 A sibling `.lock.sqlite` file serializes JSON mutations across processes. JSON remains the grant source of truth. SQLite transactions release on owner death; there is no age-based lock stealing. Writes use an atomic rename and private file permissions. Unknown formats fail closed. Mutations reject store and lock symlinks.
 

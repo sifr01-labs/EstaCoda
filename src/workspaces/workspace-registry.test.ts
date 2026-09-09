@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile, rename, symlink } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile, rename, symlink, lstat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it } from "vitest";
@@ -60,4 +60,13 @@ it("does not transfer trust on move or follow a retargeted canonical directory",
   await symlink(firstPath, nextPath);
   await expect(store.resolve("project")).rejects.toThrow("location changed");
   expect(store.get("project")?.locationRevision).toBe(2);
+});
+
+it("rejects dangling registry symlinks without creating their destination", async () => {
+  const profile = join(homeDir, ".estacoda", "profiles", "linked");
+  const destination = join(homeDir, "outside.sqlite");
+  await mkdir(profile, { recursive: true });
+  await symlink(destination, join(profile, "workspaces.sqlite"));
+  expect(() => new WorkspaceRegistry({ homeDir, profileId: "linked" })).toThrow(/symbolic link/);
+  await expect(lstat(destination)).rejects.toHaveProperty("code", "ENOENT");
 });

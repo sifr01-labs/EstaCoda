@@ -1,3 +1,4 @@
+import { releaseExecutionActionRetention, retainExecutionActionIdentity } from "../security/execution-action-identity.js";
 import { withDispatchAuthorization, validateDispatchAuthorization } from "../security/dispatch-authorization.js";
 import { assessHardlineFloor } from "../security/command-safety.js";
 import { createHash, randomUUID } from "node:crypto";
@@ -23,6 +24,7 @@ type ApprovalQueue = {
 };
 
 export type TaskApprovalRequest = {
+  actionKey?: string;
   toolName: string;
   riskClass: TaskApprovalLink["riskClass"];
   targetFingerprint: string;
@@ -201,8 +203,10 @@ export class TaskApprovalService {
     const sessionId = input.task.creatorSessionId;
     if (sessionId === undefined) throw new Error("A durable approval requires the Task creator session.");
     const now = this.#now();
+    const id = this.#id();
+    retainExecutionActionIdentity(input.request.actionKey, now.getTime() + this.#ttlMs, `task:${input.task.profileId}:${id}`);
     return {
-      id: this.#id(),
+      id,
       profileId: input.task.profileId,
       taskId: input.task.id,
       planRevisionId: input.step.planRevisionId,
@@ -252,6 +256,7 @@ export class TaskApprovalService {
       updatedAt: now,
       consumedAt: now
     }));
+    releaseExecutionActionRetention(`task:${link.profileId}:${link.id}`);
   }
 
   #narrowDecision(
@@ -302,6 +307,7 @@ export class TaskApprovalService {
       updatedAt: now,
       ...(status === "pending" ? {} : { resolvedAt: pending.resolvedAt?.toISOString() ?? now })
     }));
+    if (status === "denied" || status === "expired") releaseExecutionActionRetention(`task:${link.profileId}:${link.id}`);
   }
 
   async #refresh(link: TaskApprovalLink): Promise<void> {
@@ -318,9 +324,11 @@ export class TaskApprovalService {
       updatedAt: now,
       resolvedAt: pending.resolvedAt?.toISOString() ?? now
     }));
+    if (pending.status === "denied" || pending.status === "expired") releaseExecutionActionRetention(`task:${link.profileId}:${link.id}`);
   }
 
   async #closeForTerminalTask(link: TaskApprovalLink): Promise<void> {
+    releaseExecutionActionRetention(`task:${link.profileId}:${link.id}`);
     const queue = this.#queue;
     if (link.status === "pending" && link.pendingApprovalId !== undefined && queue !== undefined) {
       try {
@@ -384,6 +392,7 @@ function listApprovalLinksForTasks(
 
 function approvalRequest(request: SecurityRequest): TaskApprovalRequest {
   return {
+    actionKey: request.actionKey,
     toolName: bounded(request.toolName ?? "unknown-tool", 120),
     riskClass: request.riskClass,
     targetFingerprint: taskApprovalFingerprint(request),

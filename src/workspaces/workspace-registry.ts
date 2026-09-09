@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { chmodSync, existsSync, lstatSync, mkdirSync } from "node:fs";
+import { chmodSync, lstatSync, mkdirSync } from "node:fs";
 import { stat } from "node:fs/promises";
 import { join } from "node:path";
 import { resolveProfileStateHome } from "../config/profile-home.js";
@@ -33,7 +33,8 @@ export class WorkspaceRegistry {
     this.profileId = paths.profileId;
     mkdirSync(paths.profileRoot, { recursive: true, mode: 0o700 });
     const path = join(paths.profileRoot, "workspaces.sqlite");
-    if (existsSync(path) && lstatSync(path).isSymbolicLink()) throw new Error("Workspace registry must not be a symbolic link.");
+    try { if (lstatSync(path).isSymbolicLink()) throw new Error("Workspace registry must not be a symbolic link."); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
     this.db = openDefaultSQLiteDatabase({ path });
     try {
       chmodSync(path, 0o600);

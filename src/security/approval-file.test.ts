@@ -41,7 +41,7 @@ it("serializes competing process writers without losing grants or reusing genera
     expect(grants).toHaveLength(48);
     expect(store.revision()).toBe(48);
     expect(new Set(grants.map((grant) => grant.authorizationGeneration)).size).toBe(48);
-    expect(JSON.parse(await readFile(path, "utf8")).version).toBe(2);
+    expect(JSON.parse(await readFile(path, "utf8")).version).toBe(3);
   } finally {
     for (const process of processes) if (process.exitCode === null) process.kill("SIGKILL");
     await rm(root, { recursive: true, force: true });
@@ -74,10 +74,37 @@ it("fails closed on unknown versions and dangling lock symlinks; version-one fie
     await writeFile(path, JSON.stringify({ version: 99, grants: [] }));
     expect(() => readApprovalFile(path, (_): _ is unknown => true)).toThrow(/Unsupported/);
     await writeFile(path, JSON.stringify({ version: 1, grants: [{ id: "legacy", executionScope: {}, authorizationGeneration: 50 }] }));
-    expect(readApprovalFile(path, (_): _ is unknown => true)).toEqual({ version: 2, revision: 0, grants: [{ id: "legacy" }] });
+    expect(readApprovalFile(path, (_): _ is unknown => true)).toEqual({ version: 3, revision: 0, revocations: {}, grants: [{ id: "legacy" }] });
     await symlink(join(root, "missing-target"), path + ".lock.sqlite");
     const store = new WorkspaceApprovalStore({ path });
     await expect(store.grant({ workspaceRoot: root, toolName: "file.write", riskClass: "workspace-write" })).rejects.toThrow(/symbolic link/);
     await expect(readFile(join(root, "missing-target"))).rejects.toHaveProperty("code", "ENOENT");
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+it("preserves version-two grants and scoped revocation tombstones across reopening", async () => {
+  const root = await mkdtemp(join(tmpdir(), "approval-upgrade-"));
+  try {
+    const { localApprovalScope } = await import("./approval-scope.js");
+    const { verifyHostExecution } = await import("../execution/host-authority.js");
+    const path = join(root, "approvals.json");
+    const executionScope = localApprovalScope("work", "session", await verifyHostExecution(root));
+    const input = { workspaceRoot: root, toolName: "file.write", riskClass: "workspace-write" as const, targetKey: "a", executionScope };
+    const legacy = { ...input, id: "old", grantedAt: new Date().toISOString(), authorizationGeneration: 7 };
+    await writeFile(path, JSON.stringify({ version: 2, revision: 7, grants: [legacy] }));
+    const store = new WorkspaceApprovalStore({ path });
+    expect(await store.listForWorkspace(root)).toEqual([legacy]);
+    expect(store.hasGrant(legacy)).toBe(true);
+    const before = store.revision(input);
+    await store.revoke("old", root);
+    const reopened = new WorkspaceApprovalStore({ path });
+    expect(reopened.revision(input)).toBeGreaterThan(before);
+    await expect(reopened.grant({ ...input, expectedRevision: before })).rejects.toThrow(/renew/);
+    await reopened.grant(input);
+    expect(reopened.revision(input)).toBe(store.revision(input));
+    const corrupt = JSON.parse(await readFile(path, "utf8"));
+    corrupt.revocations = { invalid: 1 };
+    await writeFile(path, JSON.stringify(corrupt));
+    expect(() => reopened.revision(input)).toThrow(/corrupt/);
   } finally { await rm(root, { recursive: true, force: true }); }
 });

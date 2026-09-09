@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { expect, it } from "vitest";
@@ -31,5 +31,30 @@ it("fences an assessed grant across revoke and identical regrant, while fresh wo
     const fresh = await controller.assess(createSecurityPolicyForMode("adaptive"), request, options);
     await expect(validateDispatchAuthorization(fresh)).resolves.toBeUndefined();
     await expect(validateDispatchAuthorization(fresh)).rejects.toThrow(/authority changed/);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+it("preserves covered dispatch and pending grants across unrelated changes, but fences relevant revocation", async () => {
+  const root = await mkdtemp(join(tmpdir(), "approval-isolation-"));
+  try {
+    const store = new WorkspaceApprovalStore({ path: join(root, "approvals.json") });
+    const controller = new WorkspaceApprovalController({ store });
+    const executionScope = localApprovalScope("work", "session", await verifyHostExecution(root));
+    const input = { workspaceRoot: root, toolName: "terminal.run", riskClass: "destructive-local" as const, targetKey: "build", executionScope };
+    const request = { ...input, command: "rm -rf ./build", description: "fixture", context: { trustedWorkspace: true } };
+    const options = { workspaceRoot: root, sessionId: "session", mode: "adaptive" as const };
+    const revision = store.revision(input);
+    await store.grant(input);
+    const covered = await controller.assess(createSecurityPolicyForMode("adaptive"), request, options);
+    for (const unrelated of [{ ...input, executionScope: { ...executionScope, profileId: "other" } }, { ...input, targetKey: "another-target" }]) {
+      const grant = await store.grant(unrelated);
+      await store.revoke(grant.id, root);
+    }
+    expect(store.revision(input)).toBe(revision);
+    await expect(validateDispatchAuthorization(covered)).resolves.toBeUndefined();
+    await expect(store.grant({ ...input, expectedRevision: revision })).resolves.toBeDefined();
+    const assessed = await controller.assess(createSecurityPolicyForMode("adaptive"), request, options);
+    await writeFile(store.path, JSON.stringify({ version: 3, revision: store.revision(), revocations: {}, grants: [] }));
+    await expect(validateDispatchAuthorization(assessed)).rejects.toThrow(/authority changed/);
   } finally { await rm(root, { recursive: true, force: true }); }
 });

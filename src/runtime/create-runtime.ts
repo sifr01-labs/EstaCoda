@@ -1379,7 +1379,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       await validateApprovalOwner(currentScope.sessionId);
       if (!await trustStore.isTrusted(workspaceRoot) || baseSecurityPolicyForActiveMode().decide(issued.request) === "deny") throw new Error("Approval is no longer permitted in the current workspace.");
       if (pendingActions.get(pending!.id) !== issued) throw new Error("Approval was already consumed. Review the current action.");
-      assertPendingAction(pending, currentScope, options.approvalController.authorizationRevision());
+      assertPendingAction(pending, currentScope, options.approvalController.authorizationRevision(issued.request));
       pendingActions.delete(pending.id);
       await options.approvalController.grant({
         expectedRevision: pending.authorizationRevision,

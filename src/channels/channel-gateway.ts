@@ -1046,8 +1046,8 @@ export class ChannelGateway {
       const executionApproval = pending.executionApproval ?? createPendingAction({
         toolName: pending.toolName, riskClass: pending.riskClass as SecurityRequest["riskClass"], targetKey: pending.targetKey,
         command: pending.targetSummary, executionScope, description: "gateway command approval", context: { trustedWorkspace }
-      }, this.#approvalStore.revision());
-      assertPendingAction(executionApproval, executionScope, this.#approvalStore.revision());
+      }, this.#approvalStore.revision({ ...pending, executionScope }));
+      assertPendingAction(executionApproval, executionScope, this.#approvalStore.revision({ ...pending, executionScope }));
       pending = { ...pending, executionApproval };
     }
     if (this.#approvalQueue === undefined) return pending;
@@ -4319,7 +4319,8 @@ export class ChannelGateway {
     }
 
     try {
-      assertPendingAction(pending.executionApproval, await this.#resolveApprovalScope(pending.sessionId, pending.originalMessage.sessionKey), this.#approvalStore.revision());
+      const executionScope = await this.#resolveApprovalScope(pending.sessionId, pending.originalMessage.sessionKey);
+      assertPendingAction(pending.executionApproval, executionScope, this.#approvalStore.revision({ ...pending, executionScope }));
     } catch {
       return await this.#terminatePendingApproval(key, pending, adapter, "Approval needs renewal", "The action expired or its execution authority changed. Repeat the request to review the current action.");
     }
@@ -4628,7 +4629,12 @@ export class ChannelGateway {
   ): Promise<ChannelGatewayResult> {
     const normalizedSessionKey = normalizeSessionKey(pending.originalMessage.sessionKey, this.#sessionPolicy);
     if (pending.kind !== "command") throw new Error("Managed installation must use its capability-specific approval path.");
-    assertPendingAction(pending.executionApproval, await this.#resolveApprovalScope(pending.sessionId, normalizedSessionKey), this.#approvalStore.revision());
+    try {
+      const executionScope = await this.#resolveApprovalScope(pending.sessionId, normalizedSessionKey);
+      assertPendingAction(pending.executionApproval, executionScope, this.#approvalStore.revision({ ...pending, executionScope }));
+    } catch {
+      return await this.#terminatePendingApproval(key, pending, adapter, "Approval needs renewal", "The action expired or its execution authority changed. Repeat the request to review the current action.");
+    }
     if (this.#pendingApprovals.get(key) !== pending) throw new Error("Approval was already consumed. Review the current action.");
     this.#pendingApprovals.delete(key);
     if (scope !== "always") {
@@ -4788,9 +4794,6 @@ export class ChannelGateway {
     const approvalGrants = this.#approvalGrants;
 
     const assess = async (request: SecurityRequest) => {
-      if (this.#approvalScopeForSession !== undefined) request.executionScope = await this.#resolveApprovalScope(sessionId, sessionKey);
-      else if (validApprovalScope(request.executionScope) && request.executionScope.profileId === this.#profileId) request.executionScope = channelApprovalScope(request.executionScope, sessionKey);
-      else request.executionScope = undefined;
       const basePolicy = createSecurityPolicyForMode(securityMode, {
         assessor: securityAssessor === undefined
           ? undefined
@@ -4840,8 +4843,9 @@ export class ChannelGateway {
               : "medium"
           } as const;
         }
-        if ((await this.#approvalStore.listForSession(sessionKey)).some((grant) => Number.isSafeInteger(grant.authorizationGeneration) && grant.authorizationGeneration! > 0 && sameReusableAuthority(grant.executionScope, request.executionScope) && matchesPersistentApproval(grant, request))) {
-          return {
+        const persistentGrant = (await this.#approvalStore.listForSession(sessionKey)).find((grant) => Number.isSafeInteger(grant.authorizationGeneration) && grant.authorizationGeneration! > 0 && sameReusableAuthority(grant.executionScope, request.executionScope) && matchesPersistentApproval(grant, request));
+        if (persistentGrant !== undefined) {
+          return withDispatchAuthorization({
             decision: "allow" as const,
             mode: securityMode,
           reason: "Allowed by a persisted approval grant.",
@@ -4851,16 +4855,21 @@ export class ChannelGateway {
               request.riskClass === "spend-money"
               ? "high"
               : "medium"
-          } as const;
+          } as const, () => {
+            if (!this.#approvalStore.hasGrant(persistentGrant)) throw new Error("Channel approval authority changed before dispatch. Review the current action.");
+          });
         }
 
       const assessment = await assessSecurityPolicy(basePolicy, request, securityMode);
-      return assessment.decision === "ask" ? { ...assessment, pendingApproval: createPendingAction(request, this.#approvalStore.revision()) } : assessment;
+      return assessment.decision === "ask" ? { ...assessment, pendingApproval: createPendingAction(request, this.#approvalStore.revision(request)) } : assessment;
     };
 
     return {
       assess: async (request: SecurityRequest) => {
-        const revision = this.#approvalStore.revision();
+        if (this.#approvalScopeForSession !== undefined) request.executionScope = await this.#resolveApprovalScope(sessionId, sessionKey);
+        else if (validApprovalScope(request.executionScope) && request.executionScope.profileId === this.#profileId) request.executionScope = channelApprovalScope(request.executionScope, sessionKey);
+        else request.executionScope = undefined;
+        const revision = this.#approvalStore.revision(request);
         const assessment = await assess(request);
         if (assessment.decision !== "allow") return assessment;
         const executionScope = structuredClone(request.executionScope);
@@ -4869,7 +4878,7 @@ export class ChannelGateway {
         return withDispatchAuthorization(assessment, async () => {
           const currentScope = await this.#resolveApprovalScope(sessionId, sessionKey);
           await validateDispatchAuthorization(assessment);
-          if (dispatched || revision !== this.#approvalStore.revision() || !samePendingAuthority(executionScope, currentScope) ||
+          if (dispatched || revision !== this.#approvalStore.revision(request) || !samePendingAuthority(executionScope, currentScope) ||
             actionKey !== securityActionKey(request) || !request.context.trustedWorkspace || hardlineAssessmentForRequest(request, securityMode) !== undefined ||
             createSecurityPolicyForMode(securityMode).decide(request) === "deny") throw new Error("Channel approval authority changed before dispatch. Review the current action.");
           dispatched = true;
