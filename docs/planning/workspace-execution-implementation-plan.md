@@ -188,6 +188,8 @@ PRs are independently usable. Tests and documentation accompany the behavior the
 
 ### PR 0 — Baseline and implementation boundaries
 
+Status: locally complete. See the [baseline inventory, measurements and validation record](workspace-execution-baseline.md). This records current behavior; subsequent PRs implement the planned contracts.
+
 Branch: `ame/execution-baseline`
 
 Commits:

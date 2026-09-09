@@ -1,6 +1,6 @@
 # Workspace execution PR 0 baseline
 
-Status: baseline work in progress. No execution authority or runtime behavior changes in PR 0. The [implementation plan](workspace-execution-implementation-plan.md) and [shared ownership decisions](workspace-execution-ownership-decisions.md) describe future behavior, not guarantees of this revision.
+Status: PR 0 complete and locally validated. No execution authority or runtime behavior changes in PR 0. The [implementation plan](workspace-execution-implementation-plan.md) and [shared ownership decisions](workspace-execution-ownership-decisions.md) describe future behavior, not guarantees of this revision.
 
 ## Scope and reproducibility
 
@@ -94,11 +94,39 @@ These are baseline observations or review findings, not desired behavior. Charac
 
 ## Measurement protocol
 
-Commit 3 will record a reproducible local baseline for ordinary file-edit completion, authorized channel execution, scheduled work, and interrupted/recovered work. Measure elapsed time with a monotonic clock, including setup separately from execution where available. Record individual samples and observed success; do not assert tight wall-clock thresholds in unit tests.
+The committed [measurement report](../../evals/baselines/workspace-host.json) records ordinary file-edit completion, authorized channel execution, scheduled work, and interrupted/recovered work. The generator uses `performance.now()` for elapsed times, records setup separately, and preserves every individual sample. Tests assert completed effects and accounting, with no tight wall-clock thresholds.
 
 Provider calls/tokens and approvals must come from observed fixture/runtime accounting, not inferred from elapsed time. Fixed fake-provider token values are accounting fixtures only. No result from the existing scenario harness's injected timestamps may be presented as measured latency. Zero live requests/cost does not imply zero production cost.
 
 Use existing scenario/metrics/trajectory components where they represent the measured boundary. A fake runtime that directly writes the answer is not sufficient evidence of real agent-loop completion. Keep deterministic structural tests separate from timing samples and distinguish simulated recovery from actual host crash recovery.
+
+## Measured host workflows
+
+Run from a clean checkout with the frozen lockfile installed:
+
+```bash
+pnpm exec vitest run src/runtime/workspace-execution-baseline.test.ts src/runtime/host-execution-baseline.test.ts
+node --import tsx scripts/measure-host-execution-baseline.ts --samples 5 --out evals/baselines/workspace-host.json
+```
+
+The [harness](../../src/test/host-execution-baseline.ts) creates fresh temporary workspace/profile/trust/SQLite state for each sample. A scripted provider asks the real agent loop to read and patch `counter.cjs`, then run `node verify.cjs`. The command asserts the edited function's behavior. The provider requires successful tool receipts before continuing; the harness verifies final bytes, one successful patch, one successful command, final response/delivery, no tool failures, and matching provider event/invocation counts. Every runtime and temporary directory is disposed after the sample. No production runtime is replaced with a fake.
+
+The channel case uses real `ChannelGateway` allowlist authorization and adaptive policy with a fake Telegram delivery adapter. The scheduled case uses `createRuntimeCronRunner`, including trusted workdir resolution and delivery, without a daemon, scheduler tick, or scheduling wait. The recovery case cooperatively aborts after the successful patch, disposes the runtime, reopens SQLite, validates session/profile/workspace compatibility, reads the existing edit and verifies it. The original user message survives reopening; six messages are present before resume in every recorded sample. This does **not** measure a killed process, cancellation of an in-flight subprocess, cross-process fencing, uncertain mutation reconciliation, or crash recovery of durable Tasks.
+
+Results from five samples per scenario on Darwin/arm64, Node 24.14.1, pnpm 10.33.0, Vitest 4.1.6:
+
+| Workflow | Completed | Median execution ms | Median runtime acquisition ms | Median command ms | Provider calls/sample | Synthetic total tokens/sample | Approval prompts/sample |
+|---|---:|---:|---:|---:|---:|---:|---:|
+| Code edit | 5/5 | 342.5 | 12.4 | 320.2 | 4 | 440 | 0 |
+| Authorized channel | 5/5 | 341.2 | 12.0 | 320.3 | 4 | 440 | 0 |
+| Scheduled runtime | 5/5 | 337.7 | 11.9 | 315.3 | 4 | 440 | 0 |
+| Interrupted/resumed session | 5/5 | 362.2 | 12.4 | 319.1 | 5 | 550 | 0 |
+
+Recovery median is 341.2 ms, including disposal, SQLite reopening, new runtime acquisition, reread and verification. The recovery acquisition column aggregates both acquisitions per sample. Command timings span runtime tool-start/tool-result events, including policy/executor and subprocess overhead. Execution includes runtime acquisition, tools, and delivery; fixture setup and final cleanup are excluded. Imports/JIT and OS caches warm across the run; these are not fresh-process CLI startup measurements. Do not add the overlapping timing columns.
+
+The provider returns exactly 100 input / 10 output tokens per successful call to exercise existing usage accounting. Calls are observed and tokens are synthetic; live-provider requests are zero and estimated production cost is unavailable. Zero approval prompts characterizes these narrow trusted adaptive-mode fixtures only; it says nothing about strict mode or destructive/remote actions. Small local samples provide a comparison point for future host changes, not a percentile SLA or a model-quality/completion-rate estimate. No regression budget is set yet.
+
+The report records the production base revision plus SHA-256 digests of the harness, generator and frozen lockfile, and machine/runtime metadata without user paths, environment values or transcript contents. It was generated from the isolated base checkout with the reviewed new fixture files copied in. A failing fixture exits nonzero before replacing an existing report. Run focused tests for diagnostic detail; never publish a previous report as the result of a failed new run.
 
 ## Validation and commit review ledger
 
@@ -106,6 +134,21 @@ The standard validation commands are those in `AGENTS.md`. Record actual outcome
 
 1. Documentation commit: plans and ownership decisions preserved; inventory mapped to current source. Review checks: local Markdown links, whitespace, and no runtime/source mutation.
 2. Characterization commit: `src/runtime/workspace-execution-baseline.test.ts` adds 11 passing tests for canonical identity/trust separation, persisted resume isolation, once/session/persistent approval reuse and expansion, hardline precedence, and observed gaps B01–B04/B08. B04 uses independent registry instances; it does not claim to implement or validate a cross-process lease. Focused tests and typecheck passed in the isolated checkout. Review: all real state is temporary, cache runtimes are inert fakes, policy probes never execute their command strings, and no production source changes are included. Gap assertions intentionally describe the old behavior and must be replaced when the corresponding fix ships.
-3. Measurement commit and final validation: pending.
+3. Measurement commit: four real-runtime workflow tests pass, and the generator completed 20/20 measured samples. Review checked schema-correct tool calls, real verification effects, final delivery, temporary-state cleanup, cancellation ordering, persisted session reuse, usage accounting, monotonic timing, and report/source digests. No runtime policy, dependency, lockfile or production source changes. Full local validation passed as recorded below.
+
+| Check | Clean base | Base plus PR 0 fixtures |
+|---|---|---|
+| Node / pnpm versions | 24.14.1 / 10.33.0 | Same |
+| `pnpm install --frozen-lockfile` | Passed with network access | Same unchanged installed lockfile; no reinstall needed |
+| `pnpm run typecheck` | Passed | Passed |
+| `pnpm run test` | 10,384 tests / 579 files passed | 10,399 tests / 581 files passed |
+| `pnpm run smoke` | Passed | Passed |
+| `pnpm run build` | Passed | Passed |
+| `pnpm run audit:runtime-imports` | Passed | Passed |
+| `pnpm run audit:esm` | Passed | Passed |
+| `pnpm run smoke:dist` | Passed | Passed |
+| `git diff --check` | Passed | Passed; new files also checked before commit |
+
+Focused validation: 15/15 tests across both new test files. The full suite used a clean detached checkout with only the reviewed fixture files added; unrelated operator files were excluded. Local test and measurement runners removed secret-named environment variables and used `CI=true`. CI's Node 22.18.0 lane and other operating systems were not run locally. Known gaps B01–B09 remain follow-up work, not failures of these documented baseline acceptance criteria.
 
 Security note: this PR documents sensitive boundaries and adds isolated local test/measurement consumers. It grants no new execution authority, changes no persisted production schema, installs no capability/service, and makes no production credential request. Runtime fixes and migration/downgrade decisions remain in subsequent PRs.
