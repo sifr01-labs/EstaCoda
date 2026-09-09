@@ -1114,7 +1114,7 @@ async function buildRuntime(options: RuntimeOptions, rollback: ResourceCleanup):
           taskHostAdmission: options.taskHostAdmission,
           onTaskCreated: options.onTaskCreated
         }),
-    trustedWorkspace: async () => activeTrustedWorkspace || await trustStore.isTrusted(workspaceRoot),
+    trustedWorkspace: async () => await trustStore.isTrusted(workspaceRoot),
     disabledToolsets: options.disabledToolsets,
     toolRegistryFilter: options.enabledToolsets === undefined
       ? undefined
@@ -1215,7 +1215,7 @@ async function buildRuntime(options: RuntimeOptions, rollback: ResourceCleanup):
     beginTask: taskOperatorService === undefined || taskWorkspace === undefined
       ? undefined
       : async (objective, beginOptions = {}) => {
-          if (!activeTrustedWorkspace && !(await trustStore.isTrusted(workspaceRoot))) {
+          if (!(await trustStore.isTrusted(workspaceRoot))) {
             throw new Error("Task creation requires a trusted workspace.");
           }
           const origin = currentTaskCreationOrigin();
@@ -1332,7 +1332,7 @@ async function buildRuntime(options: RuntimeOptions, rollback: ResourceCleanup):
       const current = await sessionDb.getSession(sessionRuntimeContext.currentSessionId());
       if (current === undefined) throw new Error("Session is no longer available.");
       await validateSessionWorkspaceOwnership({ session: current, profileId, workspaceRoot, homeDir: options.homeDir });
-      const trustedWorkspace = input.trustedWorkspace ?? await trustStore.isTrusted(workspaceRoot);
+      const trustedWorkspace = await trustStore.isTrusted(workspaceRoot);
       activeTrustedWorkspace = trustedWorkspace;
 
       executionLease.assertActive();

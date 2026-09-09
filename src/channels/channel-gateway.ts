@@ -235,6 +235,7 @@ export type ChannelGatewayOptions = {
   approvalStore?: ChannelApprovalStore;
   sessionPolicy?: ChannelSessionPolicy;
   securityMode?: SecurityApprovalMode;
+  currentSecurityMode?: () => Promise<SecurityApprovalMode>;
   securityAssessor?: SecurityAssessorRuntimeConfig;
   preprocessMessage?: (message: ChannelMessage) => Promise<ChannelMessage>;
   handoffStore?: HandoffStore;
@@ -467,6 +468,7 @@ export class ChannelGateway {
   readonly #pair: ChannelGatewayOptions["pair"];
   readonly #approvalStore: ChannelApprovalStore;
   readonly #sessionPolicy: ChannelSessionPolicy;
+  readonly #currentSecurityMode?: () => Promise<SecurityApprovalMode>;
   readonly #securityMode: SecurityApprovalMode;
   readonly #securityAssessor: SecurityAssessorRuntimeConfig | undefined;
   readonly #preprocessMessage: ChannelGatewayOptions["preprocessMessage"];
@@ -545,6 +547,7 @@ export class ChannelGateway {
     this.#pair = options.pair;
     this.#approvalStore = options.approvalStore ?? new ChannelApprovalStore();
     this.#sessionPolicy = options.sessionPolicy ?? {};
+    this.#currentSecurityMode = options.currentSecurityMode;
     this.#securityMode = options.securityMode ?? "adaptive";
     this.#securityAssessor = options.securityAssessor;
     this.#preprocessMessage = options.preprocessMessage;
@@ -4817,6 +4820,7 @@ export class ChannelGateway {
     const approvalGrants = this.#approvalGrants;
 
     const assess = async (request: SecurityRequest) => {
+      const securityMode = this.#yoloSessions.get(yoloSessionKey(key, sessionId)) === true ? "open" : await this.#currentSecurityMode?.() ?? this.#securityMode;
       const basePolicy = createSecurityPolicyForMode(securityMode, {
         assessor: securityAssessor === undefined
           ? undefined

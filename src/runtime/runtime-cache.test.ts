@@ -853,3 +853,18 @@ describe("RuntimeCache", () => {
     });
   });
 });
+
+it("prepares current configuration on every acquisition and constructs from the same snapshot", async () => {
+  let generation = 1;
+  const snapshots: unknown[] = [];
+  const factory = vi.fn(async (input) => { snapshots.push(input.configuration); return createMockRuntime(); });
+  const cache = new RuntimeCache({ createRuntime: factory,
+    prepare: async () => ({ fingerprint: fakeFingerprint({ mcpServersHash: String(generation) }),
+      configuration: { generation } as unknown as import("../config/runtime-config.js").LoadedRuntimeConfig }) });
+  const first = await cache.get("session", fakeFingerprint(), fakeSecurityPolicy);
+  await first.dispose();
+  generation = 2;
+  const second = await cache.get("session", fakeFingerprint(), fakeSecurityPolicy);
+  expect(snapshots).toEqual([{ generation: 1 }, { generation: 2 }]);
+  await second.dispose(); await cache.disposeAll();
+});

@@ -886,6 +886,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
       primaryModelRoute: effectivePrimaryRoute,
       modelFallbackRoutes: latestConfig.modelFallbackRoutes,
       workspaceRoot: selectedRoot,
+      workspaceTrusted: await new WorkspaceTrustStore({ path: tsp }).isTrusted(selectedRoot),
       homeDir: hd,
       sessionId: input.sessionId,
       profileId,
@@ -1048,8 +1049,21 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
     state.hookRegistry = hookRegistry;
 
     const runtimeCache = new RuntimeCache({
+      prepare: async (sessionId, metadata) => {
+        const configuration = await loadConfig();
+        const session = await sessionDb.getSessionForProfile(sessionId, profileId);
+        const workspaceRoot = session?.executionTarget?.workspace.canonicalPath ?? options.workspaceRoot;
+        if (!await trustStore.isTrusted(workspaceRoot)) throw new Error("Workspace trust was revoked before runtime acquisition.");
+        const fingerprint = computeRuntimeFingerprint(configuration, {
+          profileId, workspaceRoot, homeDir, localSkillsRoot: profilePaths.skillsPath, trustStorePath,
+          disabledToolsets: [], disableCronTools: false, approvalControllerPresent: metadata?.originSurface === "shared",
+          explicitSecurityPolicyPresent: true, currentPlatform: process.platform, tokens: runtimeTokens
+        });
+        state.runtimeFingerprint = fingerprint;
+        return { configuration, fingerprint };
+      },
       createRuntime: (input) =>
-        createGatewayRuntime(config, sessionDb, homeDir, trustStorePath, input),
+        createGatewayRuntime(input.configuration!, sessionDb, homeDir, trustStorePath, input),
       maxEntries: 50,
       idleTtlMs: 1_800_000,
       logWarning,
@@ -1595,6 +1609,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
             });
           },
           pair: pairChannelMessage,
+          currentSecurityMode: async () => (await loadConfig()).security.approvalMode,
           securityMode: config.security.approvalMode,
           securityAssessor: gatewaySecurityAssessor,
           activeTurnRegistry,
@@ -1675,6 +1690,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
             });
           },
           pair: pairChannelMessage,
+          currentSecurityMode: async () => (await loadConfig()).security.approvalMode,
           securityMode: config.security.approvalMode,
           securityAssessor: gatewaySecurityAssessor,
           activeTurnRegistry,

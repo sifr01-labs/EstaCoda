@@ -1,3 +1,4 @@
+import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
 import type { Runtime } from "./create-runtime.js";
 import { classifyRuntimeChange, type RuntimeFingerprint } from "./runtime-fingerprint.js";
 import type { SecurityPolicy } from "../contracts/security.js";
@@ -14,7 +15,9 @@ export type RuntimeCacheOptions = {
     sessionId: string;
     securityPolicy: SecurityPolicy;
     metadata?: Record<string, unknown>;
+    configuration?: LoadedRuntimeConfig;
   }) => Promise<Runtime>;
+  prepare?: (sessionId: string, metadata?: Record<string, unknown>) => Promise<{ fingerprint: RuntimeFingerprint; configuration: LoadedRuntimeConfig }>;
   /** Optional logger. */
   logWarning?: (message: string) => void;
   /** Optional hook registry for lifecycle events. */
@@ -107,6 +110,7 @@ export function createCachedRuntimeProxy(
 }
 
 export class RuntimeCache {
+  #prepare?: RuntimeCacheOptions["prepare"];
   #maxEntries: number;
   #idleTtlMs: number;
   #createRuntime: RuntimeCacheOptions["createRuntime"];
@@ -125,6 +129,7 @@ export class RuntimeCache {
   #totalInvalidated = 0;
 
   constructor(options: RuntimeCacheOptions) {
+    this.#prepare = options.prepare;
     this.#maxEntries = options.maxEntries ?? 50;
     this.#idleTtlMs = options.idleTtlMs ?? 1_800_000;
     this.#createRuntime = options.createRuntime;
@@ -138,12 +143,14 @@ export class RuntimeCache {
     securityPolicy: SecurityPolicy,
     metadata?: Record<string, unknown>
   ): Promise<Runtime> {
+    const prepared = await this.#prepare?.(sessionId, metadata);
+    if (prepared) fingerprint = prepared.fingerprint;
     const existing = this.#activeEntries.get(sessionId);
     const entryId = `${sessionId}#${++this.#nextEntryId}`;
 
     // Case 1: No entry -> create
     if (existing === undefined) {
-      const runtime = await this.#createRuntime({ sessionId, securityPolicy, metadata });
+      const runtime = await this.#createRuntime({ sessionId, securityPolicy, metadata, configuration: prepared?.configuration });
       const entry: CachedRuntimeEntry = {
         entryId,
         sessionId,
@@ -167,7 +174,7 @@ export class RuntimeCache {
 
     // Case 2: Entry exists but suspended or disposePending -> create new
     if (existing.suspended || existing.disposePending) {
-      const runtime = await this.#createRuntime({ sessionId, securityPolicy, metadata });
+      const runtime = await this.#createRuntime({ sessionId, securityPolicy, metadata, configuration: prepared?.configuration });
       const entry: CachedRuntimeEntry = {
         entryId,
         sessionId,
@@ -206,7 +213,7 @@ export class RuntimeCache {
 
     // Case 3: Fingerprint mismatch -> create new, retire old
     if (!this.#fingerprintsEqual(existing.fingerprint, fingerprint)) {
-      const runtime = await this.#createRuntime({ sessionId, securityPolicy, metadata });
+      const runtime = await this.#createRuntime({ sessionId, securityPolicy, metadata, configuration: prepared?.configuration });
       const entry: CachedRuntimeEntry = {
         entryId,
         sessionId,
