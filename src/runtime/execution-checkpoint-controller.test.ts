@@ -399,3 +399,32 @@ function deferred<T>() {
   const promise = new Promise<T>((resolver) => { resolve = resolver; });
   return { promise, resolve };
 }
+
+it("revalidates current definition while preserving original provenance and rejects target changes", async () => {
+  const events: ExecutionCheckpointLifecycleEvent[] = [];
+  let definition = "definition-one";
+  const binding = () => ({ targetId: "target", targetGeneration: 1, workspaceIdentityHash: "workspace",
+    definitionRevision: definition, authorityRevision: "authority", originalDefinitionRevision: definition, originalAuthorityRevision: "authority" });
+  const options = { sessionId: "session-1", profileId: "profile-1", now: () => now,
+    executionBinding: binding, record: async (event: ExecutionCheckpointLifecycleEvent) => { events.push(event); } };
+  const original = new ExecutionCheckpointController(options);
+  const saved = await original.ensure(creation());
+  definition = "definition-two";
+  const resumed = new ExecutionCheckpointController(options); resumed.hydrate(saved);
+  await resumed.prepareForTurn("continue");
+  expect(resumed.current()?.executionBinding).toMatchObject({ definitionRevision: "definition-two", originalDefinitionRevision: "definition-one" });
+  expect(hydratableExecutionCheckpoint({ events, sessionId: "session-1", profileId: "profile-1" })?.executionBinding?.definitionRevision).toBe("definition-two");
+  const wrong = new ExecutionCheckpointController({ ...options, executionBinding: () => ({ ...binding(), targetId: "other" }) });
+  expect(() => wrong.hydrate(saved)).toThrow("different execution target");
+});
+it("migrates readable version-1 checkpoints only against an established current binding", async () => {
+  const events: ExecutionCheckpointLifecycleEvent[] = [];
+  const legacy = new ExecutionCheckpointController({ sessionId: "session-1", profileId: "profile-1", now: () => now, record: async (event) => { events.push(event); } });
+  const saved = await legacy.ensure(creation());
+  const resumed = new ExecutionCheckpointController({ sessionId: "session-1", profileId: "profile-1", now: () => now,
+    record: async (event) => { events.push(event); }, executionBinding: () => ({ targetId: "target", targetGeneration: 1, workspaceIdentityHash: "workspace",
+      definitionRevision: "current", authorityRevision: "current", originalDefinitionRevision: "current", originalAuthorityRevision: "current" }) });
+  resumed.hydrate(saved); await resumed.prepareForTurn("continue");
+  const hydrated = hydratableExecutionCheckpoint({ events, sessionId: "session-1", profileId: "profile-1" });
+  expect(hydrated?.executionBinding).toMatchObject({ legacyMigrated: true, originalDefinitionRevision: "legacy-unknown", definitionRevision: "current" });
+});

@@ -1,3 +1,6 @@
+import { hostAuthorityFingerprint } from "../execution/host-authority.js";
+import { stableJsonHash } from "./runtime-fingerprint.js";
+import { redactSensitiveText } from "../utils/redaction.js";
 import type { ProjectContextSnapshot } from "../contracts/context.js";
 import type { AgentEvolutionPolicy } from "../contracts/agent-evolution.js";
 import type { BrowserBackend } from "../contracts/browser.js";
@@ -70,7 +73,7 @@ import { ExecutionPlanStore } from "./execution-plan-store.js";
 import { ExecutionEvidenceIndex } from "./execution-evidence-index.js";
 import { ExecutionCapabilityPreflight } from "./execution-capability-preflight.js";
 import { ExecutionWorkingSetController } from "./execution-working-set.js";
-import { ExecutionCheckpointController } from "./execution-checkpoint-controller.js";
+import { ExecutionCheckpointController, ExecutionCheckpointBindingError } from "./execution-checkpoint-controller.js";
 import { LlmSkillRouteShadowReranker } from "./skill-route-reranker.js";
 import { createSessionRuntimeContext, type SessionRuntimeContext } from "./session-runtime-context.js";
 import { ToolPlanRunner } from "./tool-plan-runner.js";
@@ -372,8 +375,21 @@ export class AgentLoopBuilder {
           (record) => runRecorder.recordExecutionEvidence(record)
         )
       : undefined;
+    const boundTarget = (await input.sessionDb.getSession(input.sessionId))?.executionTarget;
     const executionCheckpointController = ownsForegroundSupervision
       ? new ExecutionCheckpointController({
+          executionBinding: () => {
+            if (!boundTarget || !executionLease) return undefined;
+            const definitionRevision = stableJsonHash(redactSensitiveText(JSON.stringify({
+              tools: toolRegistry.list().map((tool) => ({ name: tool.name, description: tool.description, inputSchema: tool.inputSchema, toolsets: tool.toolsets })),
+              skills: substrate.skillRegistry.list().map((skill) => ({ name: skill.name, version: skill.version, routing: skill.routing, playbook: skill.playbook, instructions: "instructions" in skill ? skill.instructions : undefined })),
+              agentProfile: input.agentProfile
+            })));
+            const authorityRevision = hostAuthorityFingerprint(executionLease.facts);
+            return { targetId: boundTarget.targetId, targetGeneration: boundTarget.targetGeneration,
+              workspaceIdentityHash: boundTarget.workspace.identityHash, definitionRevision, authorityRevision,
+              originalDefinitionRevision: definitionRevision, originalAuthorityRevision: authorityRevision };
+          },
           sessionId: () => sessionRuntimeContext.currentSessionId(),
           profileId: substrate.profileId,
           record: (event) => runRecorder.recordExecutionCheckpointTransition(event)
@@ -405,7 +421,8 @@ export class AgentLoopBuilder {
       if (persistedCheckpoint !== undefined) {
         try {
           executionCheckpointController.hydrate(persistedCheckpoint);
-        } catch {
+        } catch (error) {
+          if (error instanceof ExecutionCheckpointBindingError) throw error;
           // Invalid persisted checkpoint state never enters the foreground runtime.
         }
       }

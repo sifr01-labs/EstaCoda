@@ -119,7 +119,15 @@ export type ExecutionCheckpointAuthenticationStage =
  * Runtime-owned foreground continuity. It is not model-writable and grants no
  * tool, connector, authentication, approval, or completion authority.
  */
+export type CheckpointExecutionBinding = {
+  targetId: string; targetGeneration: number; workspaceIdentityHash: string;
+  definitionRevision: string; authorityRevision: string;
+  originalDefinitionRevision: string; originalAuthorityRevision: string;
+  legacyMigrated?: boolean;
+};
+
 export type ForegroundExecutionCheckpoint = {
+  executionBinding?: CheckpointExecutionBinding;
   version: typeof EXECUTION_CHECKPOINT_VERSION;
   id: string;
   sessionId: string;
@@ -157,6 +165,7 @@ export type ForegroundExecutionCheckpoint = {
 };
 
 export type ExecutionCheckpointTransition =
+  | "binding_revalidated"
   | "created"
   | "carried_forward"
   | "corrected"

@@ -57,14 +57,14 @@ const TASK_CLASSES = new Set<IntentTaskClass>([
   "research", "media-generation", "attachment-analysis", "general"
 ]);
 const CHECKPOINT_KEYS = new Set([
-  "version", "id", "sessionId", "profileId", "originTurnId", "revision", "progressRevision",
+  "executionBinding", "version", "id", "sessionId", "profileId", "originTurnId", "revision", "progressRevision",
   "originalObjective", "latestUserCorrection", "status", "qualificationReasons", "selectedSkillName", "taskClass",
   "intentLabels", "requiredOperations", "connectorIds", "completionFloor", "blocker",
   "artifactReferences", "safeFacts", "resources", "operations", "authenticationRecoveryStage",
   "lastTerminationCause", "lastProviderFailureClass", "createdAt", "updatedAt"
 ]);
 const TRANSITIONS = new Set<ExecutionCheckpointLifecycleEvent["transition"]>([
-  "created", "carried_forward", "corrected", "artifact_attached", "facts_retained", "resources_retained", "operation_planned",
+  "binding_revalidated", "created", "carried_forward", "corrected", "artifact_attached", "facts_retained", "resources_retained", "operation_planned",
   "operation_dispatched", "operation_settled", "operation_verified", "authentication_stage_updated",
   "attempt_settled", "blocked", "cancelled", "superseded"
 ]);
@@ -236,6 +236,13 @@ function isCoherentTransition(
   candidate: ForegroundExecutionCheckpoint
 ): boolean {
   if (Date.parse(candidate.updatedAt) < Date.parse(current.updatedAt)) return false;
+  if (transition === "binding_revalidated") {
+    const previous = current.executionBinding, next = candidate.executionBinding;
+    if (!next || (previous && (previous.targetId !== next.targetId || previous.targetGeneration !== next.targetGeneration || previous.workspaceIdentityHash !== next.workspaceIdentityHash || previous.originalDefinitionRevision !== next.originalDefinitionRevision || previous.originalAuthorityRevision !== next.originalAuthorityRevision))) return false;
+    if (!previous && next.legacyMigrated !== true) return false;
+    return JSON.stringify({ ...current, executionBinding: undefined, revision: candidate.revision, updatedAt: candidate.updatedAt }) === JSON.stringify({ ...candidate, executionBinding: undefined });
+  }
+  if (JSON.stringify(current.executionBinding) !== JSON.stringify(candidate.executionBinding)) return false;
   const correctionUnchanged = candidate.latestUserCorrection === current.latestUserCorrection;
   const progressDelta = candidate.progressRevision - current.progressRevision;
   if (transition === "resources_retained") {
@@ -370,6 +377,16 @@ export function executionCheckpointCarryForwardEvent(input: {
   }));
 }
 
+export function validateCheckpointExecutionBinding(value: unknown): NonNullable<ForegroundExecutionCheckpoint["executionBinding"]> {
+  if (!isRecord(value) || Object.keys(value).some((key) => !["targetId", "targetGeneration", "workspaceIdentityHash", "definitionRevision", "authorityRevision", "originalDefinitionRevision", "originalAuthorityRevision", "legacyMigrated"].includes(key))) throw new ExecutionCheckpointValidationError("Invalid checkpoint execution binding.");
+  if (value.legacyMigrated !== undefined && value.legacyMigrated !== true) throw new ExecutionCheckpointValidationError("Invalid legacy binding marker.");
+  return { targetId: token(value.targetId, "targetId", 160), targetGeneration: positiveInteger(value.targetGeneration, "targetGeneration"),
+    workspaceIdentityHash: token(value.workspaceIdentityHash, "workspaceIdentityHash", 128),
+    definitionRevision: token(value.definitionRevision, "definitionRevision", 128), authorityRevision: token(value.authorityRevision, "authorityRevision", 128),
+    originalDefinitionRevision: token(value.originalDefinitionRevision, "originalDefinitionRevision", 128), originalAuthorityRevision: token(value.originalAuthorityRevision, "originalAuthorityRevision", 128),
+    ...(value.legacyMigrated === true ? { legacyMigrated: true } : {}) };
+}
+
 export function validateExecutionCheckpoint(input: unknown): ForegroundExecutionCheckpoint {
   if (!isRecord(input)) throw new ExecutionCheckpointValidationError("Checkpoint must be an object.");
   const unknownKeys = Object.keys(input).filter((key) => !CHECKPOINT_KEYS.has(key));
@@ -382,6 +399,7 @@ export function validateExecutionCheckpoint(input: unknown): ForegroundExecution
   const status = enumValue(input.status, STATUSES, "status");
   const checkpoint: ForegroundExecutionCheckpoint = {
     version: EXECUTION_CHECKPOINT_VERSION,
+    ...(input.executionBinding === undefined ? {} : { executionBinding: validateCheckpointExecutionBinding(input.executionBinding) }),
     id: token(input.id, "id", 128),
     sessionId: token(input.sessionId, "sessionId", 256),
     profileId: token(input.profileId, "profileId", 128),

@@ -1,5 +1,6 @@
 import { createHash, randomUUID } from "node:crypto";
 import type {
+  CheckpointExecutionBinding,
   ExecutionCheckpointAttemptSettlement,
   ExecutionCheckpointBlocker,
   ExecutionCheckpointArtifactReference,
@@ -38,7 +39,10 @@ export class ExecutionCheckpointConflictError extends Error {
   }
 }
 
+export class ExecutionCheckpointBindingError extends Error {}
+
 export type ExecutionCheckpointControllerOptions = {
+  executionBinding?: () => CheckpointExecutionBinding | undefined;
   sessionId: string | (() => string);
   profileId: string;
   record?: (event: ExecutionCheckpointLifecycleEvent) => Promise<void>;
@@ -57,10 +61,12 @@ export class ExecutionCheckpointController implements ExecutionCheckpointReader 
   readonly #record: ((event: ExecutionCheckpointLifecycleEvent) => Promise<void>) | undefined;
   readonly #now: () => string;
   readonly #createId: () => string;
+  readonly #executionBinding?: () => CheckpointExecutionBinding | undefined;
   #checkpoint: ForegroundExecutionCheckpoint | undefined;
   #writeQueue: Promise<void> = Promise.resolve();
 
   constructor(options: ExecutionCheckpointControllerOptions) {
+    this.#executionBinding = options.executionBinding;
     if (typeof options.sessionId === "string") {
       const sessionId = options.sessionId;
       this.#sessionId = () => sessionId;
@@ -82,6 +88,8 @@ export class ExecutionCheckpointController implements ExecutionCheckpointReader 
     if (validated.sessionId !== this.#sessionId() || validated.profileId !== this.#profileId) {
       throw new ExecutionCheckpointConflictError("Checkpoint does not belong to this runtime.");
     }
+    const binding = this.#executionBinding?.();
+    if (validated.executionBinding && binding && (validated.executionBinding.targetId !== binding.targetId || validated.executionBinding.targetGeneration !== binding.targetGeneration || validated.executionBinding.workspaceIdentityHash !== binding.workspaceIdentityHash)) throw new ExecutionCheckpointBindingError("Checkpoint belongs to a different execution target. Start new work or reconcile the original target.");
     this.#checkpoint = validated;
     return cloneExecutionCheckpoint(validated);
   }
@@ -95,6 +103,7 @@ export class ExecutionCheckpointController implements ExecutionCheckpointReader 
       const now = this.#now();
       const checkpoint = validateExecutionCheckpoint({
         version: EXECUTION_CHECKPOINT_VERSION,
+        ...(this.#executionBinding?.() === undefined ? {} : { executionBinding: this.#executionBinding!() }),
         id: this.#createId(),
         sessionId: this.#sessionId(),
         profileId: this.#profileId,
@@ -303,7 +312,19 @@ export class ExecutionCheckpointController implements ExecutionCheckpointReader 
   }
 
   async prepareForTurn(userText: string): Promise<ExecutionCheckpointTurnPreparation> {
-    const current = this.current();
+    let current = this.current();
+    const binding = this.#executionBinding?.();
+    if (current && !isTerminalCheckpointStatus(current.status) && binding) {
+      const previous = current.executionBinding;
+      const next = { ...binding, originalDefinitionRevision: previous?.originalDefinitionRevision ?? "legacy-unknown",
+        originalAuthorityRevision: previous?.originalAuthorityRevision ?? "legacy-unknown",
+        ...(!previous || previous.legacyMigrated ? { legacyMigrated: true as const } : {}) };
+      if (JSON.stringify(previous) !== JSON.stringify(next)) {
+        await this.#transition(current.revision, "binding_revalidated", (checkpoint) => ({ ...checkpoint,
+          executionBinding: next, revision: checkpoint.revision + 1, updatedAt: this.#now() }));
+        current = this.current();
+      }
+    }
     if (current === undefined || isTerminalCheckpointStatus(current.status)) {
       return { disposition: "none" };
     }
