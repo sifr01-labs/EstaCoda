@@ -1,6 +1,6 @@
 # Shared workspace, target, and execution ownership decisions
 
-Status: proposed implementation decisions reconciled with the current code. These are planning contracts, not shipped APIs or a claim that cross-process execution is already safe. They govern the overlapping scope of the [workspace implementation plan](workspace-execution-implementation-plan.md) and [Desktop implementation plan](desktop-implementation-plan.md). Change this document and both affected plans together when revising a decision.
+Status: shared implementation decisions. PR 1 implements local workspace/target records and profile/workspace Session validation; see [implemented behavior and limits](../operations/workspaces.md). Later environment, execution-owner, control transport and handoff decisions remain planning contracts, not shipped APIs or a claim that cross-process execution is already safe. They govern the overlapping scope of the [workspace implementation plan](workspace-execution-implementation-plan.md) and [Desktop implementation plan](desktop-implementation-plan.md). Change this document and both affected plans together when revising a decision.
 
 ## 1. Decisions and boundaries
 
@@ -40,7 +40,7 @@ type ExecutionTargetBinding = {
 };
 ```
 
-These shapes describe the shared semantics; final serialized schemas require explicit versions and validation in their implementation PR. The current path hash identifies a canonical path, not repository contents, an OS directory object, or a security sandbox.
+These shapes describe shared semantics. PR 1 serialized workspace records, targets and target bindings use `schemaVersion: 1`; Session/Task persistence adds bindings in Session schema 33. Later shapes still require explicit versions and validation in their implementation PR. The current path hash identifies a canonical path, not repository contents, an OS directory object, or a security sandbox.
 
 | Concept | Meaning and owner | Lifetime/change rule |
 |---|---|---|

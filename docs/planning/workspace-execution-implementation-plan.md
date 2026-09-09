@@ -1,8 +1,8 @@
 # Workspace and execution implementation plan
 
-Status: proposed implementation plan. This document describes future work, not shipped behavior. It replaces the earlier workspace/Docker roadmap for this workstream.
+Status: PR 0 and PR 1 are implemented on `ame/execution-baseline`; later slices remain proposed. See the [PR 1 implementation and validation record](workspace-execution-pr1.md) and [implemented workspace behavior](../operations/workspaces.md). This plan replaces the earlier workspace/Docker roadmap for this workstream.
 
-Shared contract and ownership decisions are defined in [Shared workspace, target, and execution ownership decisions](workspace-execution-ownership-decisions.md). That document is authoritative for overlap with the Desktop plan: core target bindings, supervisor ownership, private control transport, handoff, and recovery. It is also proposed work, not a shipped guarantee.
+Shared contract and ownership decisions are defined in [Shared workspace, target, and execution ownership decisions](workspace-execution-ownership-decisions.md). That document is authoritative for overlap with the Desktop plan: core target bindings, supervisor ownership, private control transport, handoff, and recovery. Its later ownership/environment contracts remain proposed work, not shipped guarantees.
 
 ## 1. Product objective
 
@@ -208,7 +208,7 @@ Acceptance: current behavior and scope are documented; known failures are distin
 
 ### PR 1 — Stable workspaces and session ownership
 
-Branch: `ame/stable-named-workspaces`
+Implementation: complete in seven commits on `ame/execution-baseline`, continuing the PR 0 branch at the operator’s request. Originally planned branch: `ame/stable-named-workspaces`. See the [review and validation record](workspace-execution-pr1.md).
 
 Commits:
 

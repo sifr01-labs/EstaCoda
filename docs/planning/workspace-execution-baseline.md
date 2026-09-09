@@ -2,6 +2,8 @@
 
 Status: PR 0 complete and locally validated. No execution authority or runtime behavior changes in PR 0. The [implementation plan](workspace-execution-implementation-plan.md) and [shared ownership decisions](workspace-execution-ownership-decisions.md) describe future behavior, not guarantees of this revision.
 
+Subsequent PR 1 update: B03 is fixed by common runtime profile/workspace/target validation, and its characterization is now a regression assertion. The PR 0 measurement report remains a historical artifact; the recovery harness now supplies its explicit state home to the validator. Its current digest therefore differs from the recorded PR 0 digest. See the [PR 1 record](workspace-execution-pr1.md).
+
 ## Scope and reproducibility
 
 - Base revision: `10d5dbb9c95fcb717ccd84bb927b3c4d045967f5` (updated `main`).
@@ -84,7 +86,7 @@ These are baseline observations or review findings, not desired behavior. Charac
 |---|---|---|
 | B01 | Concurrent uncached `RuntimeCache.get` calls can build two runtimes and lose one cache-owned cleanup reference | PR 4: serialize acquisition and fence construction/revocation races |
 | B02 | Gateway lock acquisition permits age-based reclamation even when the recorded PID is live | PR 4: instance-aware singleton acquisition; expiry alone cannot establish death |
-| B03 | Resume helper checks workspace, but common runtime construction checks existing profile without an equivalent working-root check | PR 1: common immutable target/workspace validation |
+| B03 | At PR 0, resume checked workspace but common runtime construction lacked the equivalent working-root check | Fixed in PR 1: common immutable target/workspace validation; regression assertion replaces gap assertion |
 | B04 | Process-local active-turn registries do not coordinate independent processes | PR 4: persisted session owner/fence; retain existing Task leases |
 | B05 | Cached gateway factory/fingerprint can retain startup config; MCP exposure uses construction-time trust | PR 4: current acquisition context and appropriate rebuilds; live message trust checks already exist |
 | B06 | Background process manager inherits parent env, signals the immediate child on stop, and lacks runtime-wide owned-process disposal | PR 3: explicit environment adapters, scope cleanup and descendant cancellation |

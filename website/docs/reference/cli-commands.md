@@ -13,6 +13,7 @@ EstaCoda is a command-line agent system. Every surface that mutates state, inspe
 ```bash
 estacoda --profile <id> <command>
 estacoda -p <id> <command>
+estacoda --workspace <alias> [command-or-prompt]
 estacoda --continue [prompt-or-slash-command]
 estacoda -c [prompt-or-slash-command]
 ```
@@ -20,6 +21,27 @@ estacoda -c [prompt-or-slash-command]
 The `--profile` / `-p` flag selects a profile for the current command only. It does not change `active-profile.json`. Only `estacoda profile use <name>` changes the active profile. The flag is valid before any command.
 
 `--continue` / `-c` explicitly resumes the last CLI session for the selected profile and current workspace. Bare `estacoda` starts fresh. The continuation flag is valid for an interactive launch, one-shot prompt, or slash command, but not for standalone operator commands that dispatch before a conversational runtime.
+
+---
+
+## Workspaces
+
+```bash
+estacoda workspace add <alias> [existing-path]
+estacoda workspace list
+estacoda workspace show <alias-or-id>
+estacoda workspace rename <alias-or-id> <new-alias>
+estacoda workspace move <alias-or-id> <existing-path>
+estacoda workspace remove <alias-or-id>
+estacoda workspace open <alias-or-id>
+estacoda --profile work --workspace app "Review the current changes"
+```
+
+Names are optional and profile-local. `add` defaults to the current directory. Aliases are case-insensitive ASCII letters, digits and hyphens, beginning with a letter, up to 64 characters. `open` enters the normal launcher with setup and trust checks. `cd project && estacoda` remains supported.
+
+Put `--workspace` before the command or prompt. Command-specific options are preserved: `estacoda bench run --workspace /benchmark/path` still takes a benchmark path.
+
+Rename preserves the stable workspace ID. Move updates the registration to an existing directory and increments its location revision; it does not move files or transfer trust. Remove deletes only the registration. Existing Sessions and Tasks retain their original execution target. Workspace state is stored in `~/.estacoda/profiles/<id>/workspaces.sqlite`; it does not alter the selected profile's configuration or grant approval.
 
 ---
 
@@ -39,7 +61,7 @@ estacoda setup --provider <p> --model <m> --api-key-env <env>
 **State touched:**
 - `~/.estacoda/profiles/<id>/config.json`
 - `~/.estacoda/profiles/<id>/.env` (credential references, not raw values)
-- `~/.estacoda/profiles/<id>/trust.json`
+- `~/.estacoda/trust.json`
 
 **Profile boundary:** Uses the active profile, or the profile selected via `--profile`.
 

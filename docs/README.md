@@ -20,6 +20,7 @@ Historical ADRs were removed after they drifted; current subsystem documentation
 | [Architecture](./architecture/) | System structure, runtime composition, data flow, evolution, and risk register. |
 | [Subsystems](./subsystems/) | Per-subsystem deep dives: skills, memory, security, providers, channels, voice, tools, CLI, traces, evals, cron, browser, MCP, ACP. |
 | [Operations](./operations/) | How to set up, test, run smoke, operate voice, hand off agent work, manage state, and validate release artifacts. |
+| [Named workspaces](./operations/workspaces.md) | Local selection, trust separation, Session/Task ownership and migration. |
 | [Memory Operator Readiness](./operations/memory-operator-readiness.md) | Operational guide for Memory Hardening phases 0-10. |
 | [Planning](./planning/) | Governance note: planning docs are private workspace artifacts. |
 | **UI / CLI** | |

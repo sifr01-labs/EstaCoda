@@ -48,6 +48,12 @@ estacoda -p work doctor
 
 `--profile` / `-p` selects a profile for the current command only. It does not change `active-profile.json`; only `estacoda profile use <name>` changes the active profile.
 
+## Named workspaces
+
+Use `estacoda workspace add <alias> [path]`, `list`, `show`, `rename`, `move`, `remove`, or `open`. Prefix-only `estacoda --workspace <alias> [prompt]` selects a registered directory in the selected profile. Ordinary current-directory launch remains available without registration.
+
+Registration and moves do not grant trust or move files. Existing Sessions and Tasks retain their working target. See [Named workspaces and session ownership](../operations/workspaces.md) for commands, persistence, legacy binding and downgrade limits.
+
 ## Python Environment Commands
 
 `estacoda python-env` manages runtime-owned Python capability environments.

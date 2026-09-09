@@ -17,12 +17,13 @@ This page explains what a session owns, how to move between sessions, and what g
 | State | Owner | Notes |
 |---|---|---|
 | Conversation history | Session | Stored in the session DB under the active profile |
-| Selected profile | Session | The profile active when the session was created |
+| Selected profile | Session | The profile selected when the session was created |
+| Execution target | Session | Immutable profile-owned local working directory binding for durable runtime Sessions |
 | Model route override | Session | Set via `/model <provider>/<model>` |
 | Session-scoped approvals | Session | Granted with `session` scope expire when the session ends |
 | Surface pointers | Session | Links from channels (Telegram, Discord, etc.) to this session |
 
-Sessions do not own persistent memory files. `USER.md`, `MEMORY.md`, and `SOUL.md` belong to the profile. Sessions do not own workspace trust or cron state. Those are also profile-scoped.
+Sessions do not own persistent memory files. `USER.md`, `MEMORY.md`, and `SOUL.md` belong to the profile. Sessions do not own workspace trust or cron state. Directory trust is global; cron state belongs to the profile.
 
 ---
 
@@ -31,6 +32,16 @@ Sessions do not own persistent memory files. `USER.md`, `MEMORY.md`, and `SOUL.m
 Sessions are separate by default. A CLI session and a Telegram session for the same user do not share context automatically. If you want a Telegram chat to continue a CLI session, you must attach it explicitly.
 
 Profile isolation is strict. A session created under profile `work` cannot see sessions created under profile `personal`, even if both are on the same machine. Sessions share the global `sessions.sqlite` file, but every access is scoped by `profile_id`.
+
+## Workspace ownership
+
+Sessions resume and attach only within their owning profile and working directory. A bound Session also needs its original available target with a matching generation. CLI attachment, channel attach/switch and ACP load enforce the same ownership check. Failed attachment leaves the existing surface pointer in place; ACP validates before replaying messages.
+
+Optional workspace aliases select directories for new work. Use `estacoda workspace add app /path/to/app`, then `estacoda --workspace app`, or `estacoda workspace open app`. Rename preserves identity. Move updates the registration only; it does not move files, transfer trust or retarget old Sessions and Tasks. Continue old work in its original directory or start new work at the new location.
+
+Legacy Sessions with consistent existing workspace metadata can be bound on runtime construction. Rootless Sessions require an established CLI origin and explicit local selection; ambiguous remote records are rejected. Do not edit stored target IDs to bypass a mismatch. Profile directory renaming does not migrate historical ownership.
+
+Back up the global Session database and profile workspace database together before upgrading. Downgrades require a compatible pre-upgrade snapshot; older binaries do not reliably reject the new ownership fields. Workspace validation does not yet provide exclusive execution ownership across processes or move a live CLI session into the gateway host.
 
 ## Usage and Spending
 
