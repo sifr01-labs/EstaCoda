@@ -249,6 +249,25 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
     return session;
   }
 
+  async bindSessionExecutionTarget(input: Parameters<NonNullable<SessionDB["bindSessionExecutionTarget"]>>[0]): Promise<void> {
+    const binding = parseExecutionTargetBinding(input.binding);
+    this.#withWriteTransaction(() => {
+      const row = this.#db.query<SessionRow>("select * from sessions where id = ? and profile_id = ?").get(input.sessionId, input.profileId);
+      if (row === null) throw new Error("Session not found in the selected profile.");
+      if (row.execution_target_json !== null) {
+        if (JSON.stringify(parseExecutionTargetBinding(JSON.parse(row.execution_target_json))) !== JSON.stringify(binding)) throw new Error("Session execution target is immutable.");
+        return;
+      }
+      if (row.ended_at !== null || JSON.stringify(parseJson(row.metadata_json)) !== JSON.stringify(input.expectedMetadata)) throw new Error("Session changed during legacy binding. Retry selection.");
+      const metadata: Record<string, unknown> = { ...input.expectedMetadata, workspaceRoot: binding.workspace.canonicalPath };
+      // The common validator resolved legacy aliases before this compare-and-set.
+      delete metadata.workspaceDirectory;
+      delete metadata.projectRoot;
+      this.#db.query("update sessions set execution_target_json = ?, metadata_json = ? where id = ? and profile_id = ?")
+        .run(JSON.stringify(binding), JSON.stringify(metadata), input.sessionId, input.profileId);
+    });
+  }
+
   async getSession(id: string): Promise<SessionRecord | undefined> {
     const row = this.#db.query<SessionRow>("select * from sessions where id = ?").get(id);
     return row === null ? undefined : rowToSession(row);

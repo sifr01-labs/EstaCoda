@@ -179,7 +179,7 @@ export async function runHostBaselineSample(scenario: HostBaselineScenario) {
         runtimes.delete(runtime);
         db.close();
         db = new SQLiteSessionDB({ path: dbPath });
-        assert.deepEqual(await resolveSessionForResume({ sessionDb: db, sessionId: "fixture-session", profileId: "default", workspaceRoot }),
+        assert.deepEqual(await resolveSessionForResume({ homeDir, sessionDb: db, sessionId: "fixture-session", profileId: "default", workspaceRoot }),
           { ok: true, sessionId: "fixture-session" });
         const persistedMessages = await db.listMessages("fixture-session");
         persistedMessagesBeforeResume = persistedMessages.length;

@@ -1,3 +1,5 @@
+import { ensureRuntimeSession, validateSessionWorkspaceOwnership } from "../session/session-workspace-ownership.js";
+import { resolveWorkspaceDirectory } from "../workspaces/workspace-registry.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -139,6 +141,7 @@ function normalizeTaskCreationOrigin(origin: TaskCreationOrigin | undefined): Ta
 }
 
 export type RuntimeOptions = {
+  allowLegacyLocalBinding?: boolean;
   sourceWorkspace?: import("../contracts/workspace.js").SourceWorkspaceBinding;
   tokens: ResolvedTokens;
   model: ModelProfile;
@@ -420,7 +423,10 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     })
   });
   const closeSessionDbOnDispose = options.closeSessionDbOnDispose ?? true;
-  const workspaceRoot = options.workspaceRoot ?? process.cwd();
+  const workspaceRoot = (await resolveWorkspaceDirectory(options.workspaceRoot ?? process.cwd())).canonicalPath;
+  await ensureRuntimeSession({ sessionDb, sessionId, profileId, workspaceRoot, homeDir: options.homeDir,
+    durable: sessionDb instanceof SQLiteSessionDB, sourceWorkspace: options.sourceWorkspace,
+    allowLegacyLocalBinding: options.allowLegacyLocalBinding, metadata: options.sessionMetadata, spendingLimit: options.budgets?.session });
   const taskWorkspace = taskStore === undefined ? undefined : await resolveTaskWorkspaceBinding(workspaceRoot);
   const localSkillsRoot = options.localSkillsRoot ?? profilePaths.skillsPath;
   const profileMemoryRoot = profilePaths.profileRoot;
@@ -541,25 +547,6 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     : undefined);
   let activeTrustedWorkspace = false;
   let disposed = false;
-  const existingSession = await sessionDb.getSession(sessionId);
-
-  if (existingSession !== undefined && existingSession.profileId !== profileId) {
-    throw new Error(`Session ${sessionId} belongs to profile ${existingSession.profileId}, not ${profileId}.`);
-  }
-
-  if (existingSession === undefined) {
-    await sessionDb.createSession({
-      id: sessionId,
-      profileId,
-      title: "EstaCoda session",
-      ...(options.budgets?.session === undefined ? {} : { spendingLimit: options.budgets.session }),
-      metadata: {
-        workspaceRoot,
-        ...(options.sessionMetadata ?? {})
-      }
-    });
-  }
-
   const trajectoryRecorder = new TrajectoryRecorder({
     profileId,
     sessionId,
@@ -1286,6 +1273,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       return subagentRegistry.operatorStatus({ parentSessionId });
     },
     async handle(input) {
+      const current = await sessionDb.getSession(sessionRuntimeContext.currentSessionId());
+      if (current === undefined) throw new Error("Session is no longer available.");
+      await validateSessionWorkspaceOwnership({ session: current, profileId, workspaceRoot, homeDir: options.homeDir });
       const trustedWorkspace = input.trustedWorkspace ?? await trustStore.isTrusted(workspaceRoot);
       activeTrustedWorkspace = trustedWorkspace;
 
@@ -1295,6 +1285,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       });
     },
     async executeTool(input) {
+      const current = await sessionDb.getSession(sessionRuntimeContext.currentSessionId());
+      if (current === undefined) throw new Error("Session is no longer available.");
+      await validateSessionWorkspaceOwnership({ session: current, profileId, workspaceRoot, homeDir: options.homeDir });
       const trustedWorkspace = await trustStore.isTrusted(workspaceRoot);
       activeTrustedWorkspace = trustedWorkspace;
       return await toolExecutor.executeTool({

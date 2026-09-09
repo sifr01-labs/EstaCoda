@@ -1,8 +1,8 @@
+import { validateSessionWorkspaceOwnership } from "./session-workspace-ownership.js";
 import type { SessionDB } from "../contracts/session.js";
 import {
   buildSessionPresentation,
   isUserFacingRootSession,
-  resolveSessionWorkspaceRoot,
   type SessionPresentation,
 } from "./session-presentation.js";
 
@@ -33,6 +33,7 @@ export async function resolveSessionForResume(input: {
   profileId: string;
   workspaceRoot: string;
   sessionId: string;
+  homeDir?: string;
 }): Promise<{ ok: true; sessionId: string } | { ok: false; reason: SessionResumeFailure }> {
   const session = await input.sessionDb.getSessionForProfile(input.sessionId, input.profileId);
   if (session === undefined) {
@@ -41,10 +42,11 @@ export async function resolveSessionForResume(input: {
   if (
     session.endedAt !== undefined ||
     !isUserFacingRootSession(session) ||
-    resolveSessionWorkspaceRoot(session) !== input.workspaceRoot ||
     !(await input.sessionDb.hasUserMessageForProfile(session.id, input.profileId))
   ) {
     return { ok: false, reason: "not-resumable" };
   }
+  try { await validateSessionWorkspaceOwnership({ ...input, session, allowLegacyLocalBinding: true }); }
+  catch { return { ok: false, reason: "not-resumable" }; }
   return { ok: true, sessionId: session.id };
 }

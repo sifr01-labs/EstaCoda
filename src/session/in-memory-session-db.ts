@@ -94,6 +94,21 @@ export class InMemorySessionDB implements SessionDB {
     return cloneSession(session);
   }
 
+  async bindSessionExecutionTarget(input: Parameters<NonNullable<SessionDB["bindSessionExecutionTarget"]>>[0]): Promise<void> {
+    const session = this.#sessions.get(input.sessionId);
+    if (session === undefined || session.profileId !== input.profileId) throw new Error("Session not found in the selected profile.");
+    const binding = parseExecutionTargetBinding(input.binding);
+    if (session.executionTarget !== undefined) {
+      if (JSON.stringify(session.executionTarget) !== JSON.stringify(binding)) throw new Error("Session execution target is immutable.");
+      return;
+    }
+    if (session.endedAt !== undefined || JSON.stringify(session.metadata) !== JSON.stringify(input.expectedMetadata)) throw new Error("Session changed during legacy binding.");
+    session.executionTarget = binding;
+    session.metadata = { ...session.metadata, workspaceRoot: binding.workspace.canonicalPath };
+    delete session.metadata.workspaceDirectory;
+    delete session.metadata.projectRoot;
+  }
+
   async getSession(id: string): Promise<SessionRecord | undefined> {
     const session = this.#sessions.get(id);
     return session === undefined ? undefined : cloneSession(session);

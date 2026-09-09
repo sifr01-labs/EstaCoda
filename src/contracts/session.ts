@@ -745,6 +745,10 @@ export type RewriteSessionTranscriptInput = {
 };
 
 export type SessionDB = {
+  bindSessionExecutionTarget?(input: {
+    sessionId: string; profileId: string; binding: import("./workspace.js").ExecutionTargetBinding;
+    expectedMetadata: Record<string, unknown> | undefined;
+  }): Promise<void>;
   createSession(input: CreateSessionInput): Promise<SessionRecord>;
   getSession(id: string): Promise<SessionRecord | undefined>;
   getSessionForProfile(id: string, profileId: string): Promise<SessionRecord | undefined>;

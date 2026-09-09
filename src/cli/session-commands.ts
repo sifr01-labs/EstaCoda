@@ -113,6 +113,7 @@ export async function runSessionsCommand(
         };
       }
       const resolution = await resolveSessionForResume({
+        homeDir: input.homeDir,
         sessionDb: db,
         profileId,
         workspaceRoot: input.workspaceRoot,
@@ -150,6 +151,7 @@ export async function runSessionsCommand(
     const db = await createSQLiteSessionDB({ path: globalPaths.sessionsSqlitePath });
     try {
       const resolution = await resolveSessionForResume({
+        homeDir: input.homeDir,
         sessionDb: db,
         profileId,
         workspaceRoot: input.workspaceRoot,

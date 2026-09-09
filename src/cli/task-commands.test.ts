@@ -139,7 +139,7 @@ describe("Task commands", () => {
     await new WorkspaceTrustStore({ homeDir: root }).grant(root);
     const paths = resolveGlobalStateHome({ homeDir: root });
     const setupDb = await createSQLiteSessionDB({ path: paths.sessionsSqlitePath });
-    await setupDb.createSession({ id: "selected-owner", profileId: "default", title: "Existing owner" });
+    await setupDb.createSession({ id: "selected-owner", profileId: "default", metadata: { workspaceRoot: root }, title: "Existing owner" });
     setupDb.close();
 
     const result = await taskCommand({ argv: [], workspaceRoot: root, homeDir: root }, [

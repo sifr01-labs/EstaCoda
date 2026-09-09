@@ -1,3 +1,4 @@
+import { validateSessionWorkspaceOwnership } from "../session/session-workspace-ownership.js";
 import type { ChannelKind } from "../contracts/channel.js";
 import type {
   DelegateModelOverride,
@@ -191,6 +192,10 @@ export class DefaultChildAgentLoopFactory implements ChildAgentLoopFactory {
   }
 
   async createChild(input: CreateChildAgentLoopInput): Promise<ChildAgentLoopRuntime> {
+    if (input.profileId !== (this.#profileId ?? "default")) throw new Error("Child runtime belongs to a different profile.");
+    const parent = await this.#sessionDb.getSessionForProfile(input.parentSessionId, input.profileId);
+    if (parent === undefined) throw new Error("Child runtime requires an existing parent Session in its profile.");
+    await validateSessionWorkspaceOwnership({ session: parent, profileId: input.profileId, workspaceRoot: this.#workspaceRoot, homeDir: this.#homeDir });
     const childSessionId = input.resumeSessionId ?? this.#id();
     const resumedSession = input.resumeSessionId === undefined
       ? undefined
@@ -205,6 +210,7 @@ export class DefaultChildAgentLoopFactory implements ChildAgentLoopFactory {
     )) {
       throw new Error("Durable Task worker session cannot be resumed outside its original Attempt.");
     }
+    if (resumedSession !== undefined) await validateSessionWorkspaceOwnership({ session: resumedSession, profileId: input.profileId, workspaceRoot: this.#workspaceRoot, homeDir: this.#homeDir });
     const depth = input.depth ?? 1;
     const role = input.role ?? "leaf";
     const allowedToolsets = input.allowedToolsets ?? [];
@@ -343,7 +349,12 @@ export class DefaultChildAgentLoopFactory implements ChildAgentLoopFactory {
       approvalMode,
       toolAccess: effectiveToolAccess,
       modelOverride: modelOverride.metadata,
-      handle: async (handleInput) => await builtSession.agentLoop.handle(handleInput),
+      handle: async (handleInput) => {
+        const current = await this.#sessionDb.getSessionForProfile(childSession.id, input.profileId);
+        if (current === undefined) throw new Error("Child Session is unavailable.");
+        await validateSessionWorkspaceOwnership({ session: current, profileId: input.profileId, workspaceRoot: this.#workspaceRoot, homeDir: this.#homeDir });
+        return await builtSession.agentLoop.handle(handleInput);
+      },
       cleanup: async () => {
         await this.#builder.cleanupSession(builtSession);
       }

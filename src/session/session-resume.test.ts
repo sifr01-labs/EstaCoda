@@ -5,18 +5,18 @@ import { listResumableSessions, resolveSessionForResume } from "./session-resume
 describe("session resume boundary", () => {
   it("lists only active user-facing sessions in the selected profile and workspace", async () => {
     const db = new InMemorySessionDB();
-    await seed(db, "eligible", { profileId: "default", workspaceRoot: "/workspace" });
-    await seed(db, "other-profile", { profileId: "work", workspaceRoot: "/workspace" });
+    await seed(db, "eligible", { profileId: "default", workspaceRoot: process.cwd() });
+    await seed(db, "other-profile", { profileId: "work", workspaceRoot: process.cwd() });
     await seed(db, "other-workspace", { profileId: "default", workspaceRoot: "/other" });
-    await seed(db, "internal", { profileId: "default", workspaceRoot: "/workspace", kind: "task-step-worker" });
-    await seed(db, "child", { profileId: "default", workspaceRoot: "/workspace", parentSessionId: "eligible" });
-    await seed(db, "ended", { profileId: "default", workspaceRoot: "/workspace" });
+    await seed(db, "internal", { profileId: "default", workspaceRoot: process.cwd(), kind: "task-step-worker" });
+    await seed(db, "child", { profileId: "default", workspaceRoot: process.cwd(), parentSessionId: "eligible" });
+    await seed(db, "ended", { profileId: "default", workspaceRoot: process.cwd() });
     await db.endSession("ended", "done");
 
     const sessions = await listResumableSessions({
       sessionDb: db,
       profileId: "default",
-      workspaceRoot: "/workspace",
+      workspaceRoot: process.cwd(),
       limit: 20,
     });
     expect(sessions.map((session) => session.id)).toEqual(["eligible"]);
@@ -24,33 +24,33 @@ describe("session resume boundary", () => {
 
   it("rejects cross-profile, cross-workspace, ended, child, and internal direct resumes", async () => {
     const db = new InMemorySessionDB();
-    await seed(db, "eligible", { profileId: "default", workspaceRoot: "/workspace" });
-    await seed(db, "other-profile", { profileId: "work", workspaceRoot: "/workspace" });
+    await seed(db, "eligible", { profileId: "default", workspaceRoot: process.cwd() });
+    await seed(db, "other-profile", { profileId: "work", workspaceRoot: process.cwd() });
     await seed(db, "other-workspace", { profileId: "default", workspaceRoot: "/other" });
-    await seed(db, "internal", { profileId: "default", workspaceRoot: "/workspace", kind: "task-step-worker" });
-    await seed(db, "child", { profileId: "default", workspaceRoot: "/workspace", parentSessionId: "eligible" });
-    await seed(db, "ended", { profileId: "default", workspaceRoot: "/workspace" });
+    await seed(db, "internal", { profileId: "default", workspaceRoot: process.cwd(), kind: "task-step-worker" });
+    await seed(db, "child", { profileId: "default", workspaceRoot: process.cwd(), parentSessionId: "eligible" });
+    await seed(db, "ended", { profileId: "default", workspaceRoot: process.cwd() });
     await db.endSession("ended", "done");
 
     await expect(resolveSessionForResume({
-      sessionDb: db, profileId: "default", workspaceRoot: "/workspace", sessionId: "eligible",
+      sessionDb: db, profileId: "default", workspaceRoot: process.cwd(), sessionId: "eligible",
     })).resolves.toEqual({ ok: true, sessionId: "eligible" });
     for (const sessionId of ["other-profile", "other-workspace", "internal", "child", "ended", "missing"]) {
       await expect(resolveSessionForResume({
-        sessionDb: db, profileId: "default", workspaceRoot: "/workspace", sessionId,
+        sessionDb: db, profileId: "default", workspaceRoot: process.cwd(), sessionId,
       })).resolves.toMatchObject({ ok: false });
     }
   });
 
   it("rejects an explicitly continued empty session and keeps it out of the picker", async () => {
     const db = new InMemorySessionDB();
-    await db.createSession({ id: "empty", profileId: "default", metadata: { workspaceRoot: "/workspace" } });
+    await db.createSession({ id: "empty", profileId: "default", metadata: { workspaceRoot: process.cwd() } });
 
     await expect(resolveSessionForResume({
-      sessionDb: db, profileId: "default", workspaceRoot: "/workspace", sessionId: "empty",
+      sessionDb: db, profileId: "default", workspaceRoot: process.cwd(), sessionId: "empty",
     })).resolves.toEqual({ ok: false, reason: "not-resumable" });
     await expect(listResumableSessions({
-      sessionDb: db, profileId: "default", workspaceRoot: "/workspace", limit: 20,
+      sessionDb: db, profileId: "default", workspaceRoot: process.cwd(), limit: 20,
     })).resolves.toEqual([]);
   });
 });

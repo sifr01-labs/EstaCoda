@@ -12,6 +12,7 @@ import {
 export type HandoffRenderer = (viewModel: ViewModel) => string;
 
 export type HandoffCommandInput = {
+  profileId?: string;
   args: string[];
   homeDir: string;
   runtime?: {
@@ -25,7 +26,7 @@ export async function runHandoffCommand(
   renderer: HandoffRenderer = renderPlain
 ): Promise<{ ok: boolean; output: string }> {
   const [subcommand, ...rest] = input.args;
-  const profileId = readActiveProfile({ homeDir: input.homeDir }).profileId ?? defaultProfileId();
+  const profileId = input.profileId ?? readActiveProfile({ homeDir: input.homeDir }).profileId ?? defaultProfileId();
   const handoffPath = join(resolveProfileStateHome({ homeDir: input.homeDir, profileId }).gatewayStatePath, "handoff-codes.json");
 
   if (subcommand === "telegram") {

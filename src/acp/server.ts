@@ -1,3 +1,4 @@
+import { validateSessionWorkspaceOwnership } from "../session/session-workspace-ownership.js";
 import { randomUUID } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
 import { mkdir } from "node:fs/promises";
@@ -55,6 +56,7 @@ type JsonRpcNotification = {
 };
 
 type AcpServerOptions = {
+  profileId?: string;
   workspaceRoot: string;
   homeDir?: string;
   input?: NodeJS.ReadableStream;
@@ -141,7 +143,7 @@ export class AcpServer {
   constructor(options: AcpServerOptions) {
     this.#workspaceRoot = options.workspaceRoot;
     this.#homeDir = resolveHomeDir(options.homeDir);
-    this.#profileId = readActiveProfile({ homeDir: this.#homeDir })?.profileId ?? defaultProfileId();
+    this.#profileId = options.profileId ?? readActiveProfile({ homeDir: this.#homeDir })?.profileId ?? defaultProfileId();
     this.#input = options.input ?? process.stdin;
     this.#output = options.output ?? process.stdout;
     this.#runtimeFactory = options.runtimeFactory;
@@ -375,19 +377,22 @@ export class AcpServer {
     const requested = expectString(parsed.sessionId, "sessionId");
     const existing = this.#sessions.get(requested);
     if (existing !== undefined) {
+      const current = await this.#sessionDb.getSessionForProfile(existing.estacodaSessionId, this.#profileId);
+      if (current === undefined) throw new Error("ACP Session is unavailable in this profile.");
+      const requestedRoot = typeof parsed.cwd === "string" && parsed.cwd.length > 0 ? resolve(parsed.cwd) : existing.workspaceRoot;
+      await validateSessionWorkspaceOwnership({ session: current, profileId: this.#profileId, workspaceRoot: requestedRoot, homeDir: this.#homeDir });
       await this.#replayMessages(existing);
       this.#emitSessionInfo(existing);
       return { sessionId: existing.acpSessionId };
     }
 
-    const record = await this.#sessionDb.getSession(requested);
+    const record = await this.#sessionDb.getSessionForProfile(requested, this.#profileId);
     if (record === undefined) {
       throw new Error(`Unknown session: ${requested}`);
     }
 
-    const workspaceRoot = typeof record.metadata?.workspaceRoot === "string"
-      ? record.metadata.workspaceRoot
-      : this.#workspaceRoot;
+    const workspaceRoot = typeof parsed.cwd === "string" && parsed.cwd.length > 0 ? resolve(parsed.cwd) : this.#workspaceRoot;
+    await validateSessionWorkspaceOwnership({ session: record, profileId: this.#profileId, workspaceRoot, homeDir: this.#homeDir });
     const grants = createSessionGrants();
     const runtime = await this.#buildRuntime({
       acpSessionId: requested,
@@ -413,7 +418,7 @@ export class AcpServer {
   async #listSessions(): Promise<{
     sessions: Array<{ sessionId: string; title?: string; updatedAt: string }>;
   }> {
-    const sessions = await this.#sessionDb.listSessions();
+    const sessions = await this.#sessionDb.listSessions(this.#profileId);
     return {
       sessions: sessions.map((session) => ({
         sessionId: session.id,

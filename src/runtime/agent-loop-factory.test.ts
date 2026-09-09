@@ -25,10 +25,11 @@ import {
 
 describe("DefaultChildAgentLoopFactory", () => {
   it("creates a child session with delegated metadata and suppressed runtime features", async () => {
-    const db = new InMemorySessionDB();
+    const db = await parentSessionDb();
     await db.createSession({
-      id: "parent-1",
+      id: "spending-parent",
       profileId: "default",
+      metadata: { workspaceRoot: process.cwd() },
       spendingLimit: { maxEstimatedCostUsd: 20, warningThresholdPercent: 80 }
     });
     const built = fakeBuiltSession();
@@ -39,12 +40,12 @@ describe("DefaultChildAgentLoopFactory", () => {
       sessionDb: db,
       trajectoryRecorderFactory: ({ profileId, sessionId }) => new TrajectoryRecorder({ profileId, sessionId, modelId: "model" }),
       responseLabel: "EstaCoda",
-      workspaceRoot: "/workspace",
+      workspaceRoot: process.cwd(),
       id: () => "child-1"
     });
 
     const child = await factory.createChild({
-      parentSessionId: "parent-1",
+      parentSessionId: "spending-parent",
       profileId: "default",
       task: "Inspect the thing",
       context: "Extra context",
@@ -58,12 +59,12 @@ describe("DefaultChildAgentLoopFactory", () => {
     expect(child.childSessionId).toBe("child-1");
     expect(session).toMatchObject({
       id: "child-1",
-      parentSessionId: "parent-1",
-      spendingScopeSessionId: "parent-1",
+      parentSessionId: "spending-parent",
+      spendingScopeSessionId: "spending-parent",
       spendingLimit: { maxEstimatedCostUsd: 20, warningThresholdPercent: 80 },
       metadata: {
         kind: "delegated-child",
-        parentSessionId: "parent-1",
+        parentSessionId: "spending-parent",
         role: "leaf",
         depth: 1,
         allowedToolsets: ["research"],
@@ -74,7 +75,7 @@ describe("DefaultChildAgentLoopFactory", () => {
         ]),
         delegationConfigVersion: CHILD_DELEGATION_CONFIG_VERSION,
         approvalMode: CHILD_APPROVAL_MODE,
-        workspaceRoot: "/workspace"
+        workspaceRoot: process.cwd()
       }
     } satisfies Partial<SessionRecord>);
     expect(session?.metadata?.suppressedRuntimeFeatures).toEqual(expect.arrayContaining([
@@ -87,14 +88,14 @@ describe("DefaultChildAgentLoopFactory", () => {
   });
 
   it("records durable Task ownership in Task Step worker sessions", async () => {
-    const db = new InMemorySessionDB();
+    const db = await parentSessionDb();
     const factory = new DefaultChildAgentLoopFactory({
       builder: fakeBuilder(fakeBuiltSession()) as never,
       parentRoutes: parentRoutes(),
       sessionDb: db,
       trajectoryRecorderFactory: ({ profileId, sessionId }) => new TrajectoryRecorder({ profileId, sessionId, modelId: "model" }),
       responseLabel: "EstaCoda",
-      workspaceRoot: "/workspace",
+      workspaceRoot: process.cwd(),
       id: () => "task-child-1"
     });
 
@@ -129,14 +130,14 @@ describe("DefaultChildAgentLoopFactory", () => {
   });
 
   it("reopens only the original open worker session for the same durable Attempt", async () => {
-    const db = new InMemorySessionDB();
+    const db = await parentSessionDb();
     const factory = new DefaultChildAgentLoopFactory({
       builder: fakeBuilder(fakeBuiltSession()) as never,
       parentRoutes: parentRoutes(),
       sessionDb: db,
       trajectoryRecorderFactory: ({ profileId, sessionId }) => new TrajectoryRecorder({ profileId, sessionId, modelId: "model" }),
       responseLabel: "EstaCoda",
-      workspaceRoot: "/workspace",
+      workspaceRoot: process.cwd(),
       id: () => "task-child-resume"
     });
     const taskExecution = {
@@ -167,7 +168,7 @@ describe("DefaultChildAgentLoopFactory", () => {
     });
 
     expect(resumed.childSessionId).toBe(first.childSessionId);
-    await expect(db.listSessions("default")).resolves.toHaveLength(1);
+    expect((await db.listSessions("default")).filter((session) => session.parentSessionId === "parent-1")).toHaveLength(1);
     await expect(factory.createChild({
       parentSessionId: "parent-1",
       profileId: "default",
@@ -180,7 +181,7 @@ describe("DefaultChildAgentLoopFactory", () => {
   });
 
   it("builds a runnable child loop without parent recall, compression, learning, or full project context", async () => {
-    const db = new InMemorySessionDB();
+    const db = await parentSessionDb();
     const built = fakeBuiltSession();
     const builder = fakeBuilder(built);
     const factory = new DefaultChildAgentLoopFactory({
@@ -189,7 +190,7 @@ describe("DefaultChildAgentLoopFactory", () => {
       sessionDb: db,
       trajectoryRecorderFactory: ({ profileId, sessionId }) => new TrajectoryRecorder({ profileId, sessionId, modelId: "model" }),
       responseLabel: "EstaCoda",
-      workspaceRoot: "/workspace",
+      workspaceRoot: process.cwd(),
       id: () => "child-1"
     });
 
@@ -214,11 +215,11 @@ describe("DefaultChildAgentLoopFactory", () => {
     expect(buildInput?.sessionCompression).toBe("disabled");
     expect(buildInput?.skillLearningManager).toBeUndefined();
     expect(buildInput?.agentEvolutionPolicy).toBeUndefined();
-    expect(buildInput?.projectContext).toEqual({ workspaceRoot: "/workspace", files: [], warnings: [] });
+    expect(buildInput?.projectContext).toEqual({ workspaceRoot: process.cwd(), files: [], warnings: [] });
   });
 
   it("strips delegate_task from leaf child registries", async () => {
-    const db = new InMemorySessionDB();
+    const db = await parentSessionDb();
     const built = fakeBuiltSession();
     const tools = parentToolsWithDelegate();
     const builder = fakeBuilder(built, tools);
@@ -228,7 +229,7 @@ describe("DefaultChildAgentLoopFactory", () => {
       sessionDb: db,
       trajectoryRecorderFactory: ({ profileId, sessionId }) => new TrajectoryRecorder({ profileId, sessionId, modelId: "model" }),
       responseLabel: "EstaCoda",
-      workspaceRoot: "/workspace",
+      workspaceRoot: process.cwd(),
       delegationConfig: { ...DEFAULT_DELEGATION_CONFIG, maxSpawnDepth: 3 },
       id: () => "child-1"
     });
@@ -250,7 +251,7 @@ describe("DefaultChildAgentLoopFactory", () => {
   });
 
   it("keeps delegate_task for orchestrators below max spawn depth", async () => {
-    const db = new InMemorySessionDB();
+    const db = await parentSessionDb();
     const built = fakeBuiltSession();
     const tools = parentToolsWithDelegate();
     const builder = fakeBuilder(built, tools);
@@ -260,7 +261,7 @@ describe("DefaultChildAgentLoopFactory", () => {
       sessionDb: db,
       trajectoryRecorderFactory: ({ profileId, sessionId }) => new TrajectoryRecorder({ profileId, sessionId, modelId: "model" }),
       responseLabel: "EstaCoda",
-      workspaceRoot: "/workspace",
+      workspaceRoot: process.cwd(),
       delegationConfig: { ...DEFAULT_DELEGATION_CONFIG, maxSpawnDepth: 3 },
       id: () => "child-1"
     });
@@ -280,7 +281,7 @@ describe("DefaultChildAgentLoopFactory", () => {
   });
 
   it("applies same-provider child model overrides and disables child fallbacks", async () => {
-    const db = new InMemorySessionDB();
+    const db = await parentSessionDb();
     const built = fakeBuiltSession();
     const builder = fakeBuilder(built);
     const factory = new DefaultChildAgentLoopFactory({
@@ -289,7 +290,7 @@ describe("DefaultChildAgentLoopFactory", () => {
       sessionDb: db,
       trajectoryRecorderFactory: ({ profileId, sessionId }) => new TrajectoryRecorder({ profileId, sessionId, modelId: "model" }),
       responseLabel: "EstaCoda",
-      workspaceRoot: "/workspace",
+      workspaceRoot: process.cwd(),
       id: () => "child-override"
     });
 
@@ -328,7 +329,7 @@ describe("DefaultChildAgentLoopFactory", () => {
   });
 
   it("uses exact valid-length model override ids when constructing child routes", async () => {
-    const db = new InMemorySessionDB();
+    const db = await parentSessionDb();
     const built = fakeBuiltSession();
     const builder = fakeBuilder(built);
     const factory = new DefaultChildAgentLoopFactory({
@@ -337,7 +338,7 @@ describe("DefaultChildAgentLoopFactory", () => {
       sessionDb: db,
       trajectoryRecorderFactory: ({ profileId, sessionId }) => new TrajectoryRecorder({ profileId, sessionId, modelId: "model" }),
       responseLabel: "EstaCoda",
-      workspaceRoot: "/workspace",
+      workspaceRoot: process.cwd(),
       id: () => "child-valid-long-model"
     });
     const modelId = `model-${"x".repeat(MAX_DELEGATE_MODEL_OVERRIDE_ID_LENGTH - "model-".length)}`;
@@ -365,7 +366,7 @@ describe("DefaultChildAgentLoopFactory", () => {
   });
 
   it("rejects overlong model override ids without building a child session", async () => {
-    const db = new InMemorySessionDB();
+    const db = await parentSessionDb();
     const built = fakeBuiltSession();
     const builder = fakeBuilder(built);
     const factory = new DefaultChildAgentLoopFactory({
@@ -374,7 +375,7 @@ describe("DefaultChildAgentLoopFactory", () => {
       sessionDb: db,
       trajectoryRecorderFactory: ({ profileId, sessionId }) => new TrajectoryRecorder({ profileId, sessionId, modelId: "model" }),
       responseLabel: "EstaCoda",
-      workspaceRoot: "/workspace",
+      workspaceRoot: process.cwd(),
       id: () => "child-overlong-model"
     });
     const overlongModelId = `model-${"x".repeat(MAX_DELEGATE_MODEL_OVERRIDE_ID_LENGTH + 1)}`;
@@ -407,7 +408,7 @@ describe("DefaultChildAgentLoopFactory", () => {
   });
 
   it("applies reviewed cross-provider child model overrides with target provider route data", async () => {
-    const db = new InMemorySessionDB();
+    const db = await parentSessionDb();
     const built = fakeBuiltSession();
     const builder = fakeBuilder(built);
     const registry = new ProviderRegistry();
@@ -438,7 +439,7 @@ describe("DefaultChildAgentLoopFactory", () => {
       sessionDb: db,
       trajectoryRecorderFactory: ({ profileId, sessionId }) => new TrajectoryRecorder({ profileId, sessionId, modelId: "model" }),
       responseLabel: "EstaCoda",
-      workspaceRoot: "/workspace",
+      workspaceRoot: process.cwd(),
       id: () => "child-cross-provider"
     });
     const previous = process.env.DEEPSEEK_API_KEY;
@@ -496,7 +497,7 @@ describe("DefaultChildAgentLoopFactory", () => {
   });
 
   it("rejects unknown cross-provider overrides before building a child session", async () => {
-    const db = new InMemorySessionDB();
+    const db = await parentSessionDb();
     const built = fakeBuiltSession();
     const builder = fakeBuilder(built);
     const factory = new DefaultChildAgentLoopFactory({
@@ -506,7 +507,7 @@ describe("DefaultChildAgentLoopFactory", () => {
       sessionDb: db,
       trajectoryRecorderFactory: ({ profileId, sessionId }) => new TrajectoryRecorder({ profileId, sessionId, modelId: "model" }),
       responseLabel: "EstaCoda",
-      workspaceRoot: "/workspace",
+      workspaceRoot: process.cwd(),
       id: () => "child-cross-provider"
     });
 
@@ -531,7 +532,7 @@ describe("DefaultChildAgentLoopFactory", () => {
   });
 
   it("rejects unknown cross-provider models before building a child session", async () => {
-    const db = new InMemorySessionDB();
+    const db = await parentSessionDb();
     const built = fakeBuiltSession();
     const builder = fakeBuilder(built);
     const registry = new ProviderRegistry();
@@ -560,7 +561,7 @@ describe("DefaultChildAgentLoopFactory", () => {
       sessionDb: db,
       trajectoryRecorderFactory: ({ profileId, sessionId }) => new TrajectoryRecorder({ profileId, sessionId, modelId: "model" }),
       responseLabel: "EstaCoda",
-      workspaceRoot: "/workspace",
+      workspaceRoot: process.cwd(),
       id: () => "child-unknown-model"
     });
 
@@ -585,7 +586,7 @@ describe("DefaultChildAgentLoopFactory", () => {
   });
 
   it("rejects cross-provider model overrides with missing credentials before building a child session", async () => {
-    const db = new InMemorySessionDB();
+    const db = await parentSessionDb();
     const built = fakeBuiltSession();
     const builder = fakeBuilder(built);
     const registry = new ProviderRegistry();
@@ -614,7 +615,7 @@ describe("DefaultChildAgentLoopFactory", () => {
       sessionDb: db,
       trajectoryRecorderFactory: ({ profileId, sessionId }) => new TrajectoryRecorder({ profileId, sessionId, modelId: "model" }),
       responseLabel: "EstaCoda",
-      workspaceRoot: "/workspace",
+      workspaceRoot: process.cwd(),
       id: () => "child-missing-provider-key"
     });
     delete process.env.DEEPSEEK_MISSING_API_KEY;
@@ -657,7 +658,7 @@ describe("DefaultChildAgentLoopFactory", () => {
         }
       }, null, 2) + "\n", "utf8");
 
-      const db = new InMemorySessionDB();
+      const db = await parentSessionDb("research");
       const built = fakeBuiltSession();
       const builder = fakeBuilder(built);
       const registry = new ProviderRegistry();
@@ -689,7 +690,7 @@ describe("DefaultChildAgentLoopFactory", () => {
         sessionDb: db,
         trajectoryRecorderFactory: ({ profileId, sessionId }) => new TrajectoryRecorder({ profileId, sessionId, modelId: "model" }),
         responseLabel: "EstaCoda",
-        workspaceRoot: "/workspace",
+        workspaceRoot: process.cwd(),
         id: () => "child-codex-profile"
       });
 
@@ -716,7 +717,7 @@ describe("DefaultChildAgentLoopFactory", () => {
   });
 
   it("allows cross-provider authMethod none without requiring credentials", async () => {
-    const db = new InMemorySessionDB();
+    const db = await parentSessionDb();
     const built = fakeBuiltSession();
     const builder = fakeBuilder(built);
     const registry = new ProviderRegistry();
@@ -746,7 +747,7 @@ describe("DefaultChildAgentLoopFactory", () => {
       sessionDb: db,
       trajectoryRecorderFactory: ({ profileId, sessionId }) => new TrajectoryRecorder({ profileId, sessionId, modelId: "model" }),
       responseLabel: "EstaCoda",
-      workspaceRoot: "/workspace",
+      workspaceRoot: process.cwd(),
       id: () => "child-no-auth-provider"
     });
 
@@ -783,7 +784,7 @@ describe("DefaultChildAgentLoopFactory", () => {
   });
 
   it("rejects cross-provider overrides when target provider network execution is disabled", async () => {
-    const db = new InMemorySessionDB();
+    const db = await parentSessionDb();
     const built = fakeBuiltSession();
     const builder = fakeBuilder(built);
     const registry = new ProviderRegistry();
@@ -812,7 +813,7 @@ describe("DefaultChildAgentLoopFactory", () => {
       sessionDb: db,
       trajectoryRecorderFactory: ({ profileId, sessionId }) => new TrajectoryRecorder({ profileId, sessionId, modelId: "model" }),
       responseLabel: "EstaCoda",
-      workspaceRoot: "/workspace",
+      workspaceRoot: process.cwd(),
       id: () => "child-network-disabled"
     });
     const previous = process.env.DEEPSEEK_API_KEY;
@@ -847,7 +848,7 @@ describe("DefaultChildAgentLoopFactory", () => {
   });
 
   it("rejects overlong provider override ids without exposing the full value", async () => {
-    const db = new InMemorySessionDB();
+    const db = await parentSessionDb();
     const built = fakeBuiltSession();
     const builder = fakeBuilder(built);
     const factory = new DefaultChildAgentLoopFactory({
@@ -856,7 +857,7 @@ describe("DefaultChildAgentLoopFactory", () => {
       sessionDb: db,
       trajectoryRecorderFactory: ({ profileId, sessionId }) => new TrajectoryRecorder({ profileId, sessionId, modelId: "model" }),
       responseLabel: "EstaCoda",
-      workspaceRoot: "/workspace",
+      workspaceRoot: process.cwd(),
       id: () => "child-overlong-provider"
     });
     const overlongProvider = `provider-${"x".repeat(MAX_DELEGATE_PROVIDER_OVERRIDE_ID_LENGTH + 1)}`;
@@ -1044,4 +1045,10 @@ function tool(name: string, riskClass: ToolRiskClass, toolsets: ToolsetName[]) {
     progressLabel: name,
     maxResultSizeChars: 1000
   };
+}
+
+async function parentSessionDb(profileId = "default"): Promise<InMemorySessionDB> {
+  const db = new InMemorySessionDB();
+  await db.createSession({ id: "parent-1", profileId, metadata: { workspaceRoot: process.cwd() } });
+  return db;
 }

@@ -1,3 +1,4 @@
+import { validateSessionWorkspaceOwnership } from "../session/session-workspace-ownership.js";
 import { appendFile, mkdir, unlink } from "node:fs/promises";
 import { createHash } from "node:crypto";
 import { dirname, join } from "node:path";
@@ -1555,6 +1556,11 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           sessionPolicy,
           handoffStore,
           surfacePointerStore,
+          validateSessionAttachment: async (sessionId) => {
+            const session = await sessionDb.getSessionForProfile(sessionId, profileId);
+            if (session === undefined) throw new Error("Session not found in the gateway profile.");
+            await validateSessionWorkspaceOwnership({ session, profileId, workspaceRoot: options.workspaceRoot, homeDir });
+          },
           preprocessMessage: async (message) => {
             const latestConfig = await loadConfig();
             return injectVoiceTranscripts(message, {
@@ -1623,6 +1629,11 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           sessionPolicy,
           handoffStore,
           surfacePointerStore,
+          validateSessionAttachment: async (sessionId) => {
+            const session = await sessionDb.getSessionForProfile(sessionId, profileId);
+            if (session === undefined) throw new Error("Session not found in the gateway profile.");
+            await validateSessionWorkspaceOwnership({ session, profileId, workspaceRoot: options.workspaceRoot, homeDir });
+          },
           preprocessMessage: async (message) => {
             const latestConfig = await loadConfig();
             return injectVoiceTranscripts(message, {

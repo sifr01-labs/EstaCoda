@@ -1,3 +1,4 @@
+import { realpathSync } from "node:fs";
 import type {
   ProviderRequest,
   ResolvedAuxiliaryRoute,
@@ -818,8 +819,11 @@ function sessionMatchesWorkspace(session: SessionRecord, workspaceRoot: string |
   if (workspaceRoot === undefined) {
     return true;
   }
-  const value = workspaceFromMetadata(session.metadata);
-  return value === workspaceRoot;
+  const value = session.executionTarget?.workspace.canonicalPath ?? workspaceFromMetadata(session.metadata);
+  if (value === workspaceRoot) return true;
+  if (value === undefined) return false;
+  try { return realpathSync(value) === realpathSync(workspaceRoot); }
+  catch { return false; }
 }
 
 function isDelegatedChildSession(session: SessionRecord): boolean {

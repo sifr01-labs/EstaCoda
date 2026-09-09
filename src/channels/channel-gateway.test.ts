@@ -5401,12 +5401,13 @@ describe("ChannelGateway commands", () => {
       const sessionStore = new InMemoryChannelSessionStore();
 
       const gateway = new ChannelGateway({
+        validateSessionAttachment: async (id) => { expect(id).toBe("target-sess"); },
         adapters: [adapter],
         runtimeForSession: async ({ sessionId }) => ({
           ...createMinimalRuntime(),
           sessionDb: {
             ...createMinimalRuntime().sessionDb,
-            getSession: async (id: string) => id === "target-sess" ? { id: "target-sess", profileId: "default", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), metadata: {} } : undefined
+            getSessionForProfile: async (id: string) => id === "target-sess" ? { id: "target-sess", profileId: "default", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), metadata: {} } : undefined
           } as unknown as Runtime["sessionDb"]
         }),
         sessionStore,
@@ -5481,12 +5482,13 @@ describe("ChannelGateway commands", () => {
       const sessionStore = new InMemoryChannelSessionStore();
 
       const gateway = new ChannelGateway({
+        validateSessionAttachment: async (id) => { expect(id).toBe("target-sess"); },
         adapters: [adapter],
         runtimeForSession: async ({ sessionId }) => ({
           ...createMinimalRuntime(),
           sessionDb: {
             ...createMinimalRuntime().sessionDb,
-            getSession: async (id: string) => id === "target-sess" ? { id: "target-sess", profileId: "default", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), metadata: {} } : undefined
+            getSessionForProfile: async (id: string) => id === "target-sess" ? { id: "target-sess", profileId: "default", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), metadata: {} } : undefined
           } as unknown as Runtime["sessionDb"]
         }),
         sessionStore,
@@ -6306,6 +6308,7 @@ describe("ChannelGateway commands", () => {
         runtimeForSession: async () => createMinimalRuntime(),
         sessionStore: new InMemoryChannelSessionStore(),
         authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+        validateSessionAttachment: async (sessionId) => { expect(sessionId).toBe("cli-sess"); },
         handoffStore: handoffStore as unknown as import("./handoff-store.js").HandoffStore,
         surfacePointerStore: pointerStore
       });

@@ -3452,6 +3452,7 @@ async function acp(options: CliOptions, args: string[]): Promise<CliCommandResul
 
   if (subcommand === undefined || subcommand === "serve") {
     await runAcpServer({
+      profileId: options.profileId,
       workspaceRoot: options.workspaceRoot,
       homeDir: options.homeDir
     });
@@ -4184,6 +4185,7 @@ function parseSecuritySetupArgs(args: string[]): SecuritySetupInput {
 
 async function handoff(options: CliOptions, args: string[]): Promise<CliCommandResult> {
   const result = await runHandoffCommand({
+    profileId: options.profileId,
     args,
     homeDir: resolveHomeDir(options.homeDir),
     runtime: options.runtime,

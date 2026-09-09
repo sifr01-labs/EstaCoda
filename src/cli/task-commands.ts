@@ -1,3 +1,5 @@
+import { ensureRuntimeSession } from "../session/session-workspace-ownership.js";
+import { createSessionId } from "../session/session-id.js";
 import { defaultProfileId, readActiveProfile, resolveGlobalStateHome, resolveProfileStateHome } from "../config/profile-home.js";
 import { resolveHomeDir } from "../config/home-dir.js";
 import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
@@ -74,12 +76,12 @@ export async function taskCommand(options: CliOptions, args: string[]): Promise<
         if (creatorSessionId !== undefined && existingSession === undefined) {
           throw new Error(`Session ${creatorSessionId} was not found in this profile.`);
         }
-        const creatorSession = existingSession ?? await db!.createSession({
-          profileId,
-          title: taskCreatorSessionTitle(normalizedObjective),
-          ...(budgets.session === undefined ? {} : { spendingLimit: budgets.session }),
-          metadata: { kind: "task-operator-origin", source: "cli" }
-        });
+        const originId = existingSession?.id ?? createSessionId();
+        await ensureRuntimeSession({ sessionDb: db!, sessionId: originId, profileId, workspaceRoot: options.workspaceRoot,
+          homeDir, durable: true, allowLegacyLocalBinding: true, spendingLimit: budgets.session,
+          metadata: { kind: "task-operator-origin", source: "cli", originSurface: "cli" } });
+        const creatorSession = (await db!.getSessionForProfile(originId, profileId))!;
+        if (existingSession === undefined) await db!.setSessionTitleIfPlaceholder(originId, taskCreatorSessionTitle(normalizedObjective));
         try {
           return {
             task: service.begin({

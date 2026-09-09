@@ -129,7 +129,7 @@ describe("workspace execution baseline", () => {
     expect(await acquireGatewayLock(state)).toEqual({ acquired: false, stale: false });
   });
 
-  it("B03 observed gap: runtime construction admits a working-root mismatch rejected by resume", async () => {
+  it("B03 fixed: runtime construction rejects the same working-root mismatch as resume", async () => {
     const original = join(root, "original");
     const other = join(root, "other");
     await mkdir(original);
@@ -141,15 +141,14 @@ describe("workspace execution baseline", () => {
       await db.appendMessage({ sessionId: "existing", role: "user", channel: "cli", content: "Fixture request." });
       expect(await resolveSessionForResume({ sessionDb: db, sessionId: "existing", profileId: "default", workspaceRoot: other }))
         .toMatchObject({ ok: false });
-      runtime = await createRuntime({
+      await expect(createRuntime({
         tokens: resolveTokens("standard", "dark", "kemetBlue"),
         model: { provider: "unconfigured", id: "baseline", contextWindowTokens: 8192,
           supportsTools: false, supportsVision: false, supportsStructuredOutput: false },
         providerRegistry: new ProviderRegistry(),
         homeDir: join(root, "home"), workspaceRoot: other, localSkillsRoot: join(root, "skills"),
         profileId: "default", sessionId: "existing", sessionDb: db, closeSessionDbOnDispose: false
-      });
-      expect(runtime.sessionId).toBe("existing");
+      })).rejects.toThrow("different workspace");
       expect((await db.getSession("existing"))?.metadata?.workspaceRoot).toBe(original);
     } finally {
       await runtime?.dispose();

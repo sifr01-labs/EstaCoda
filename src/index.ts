@@ -242,6 +242,7 @@ async function main(): Promise<void> {
       workspaceRoot,
       sourceWorkspace: sourceWorkspace?.identity.canonicalPath === workspaceRoot ? sourceWorkspace : undefined,
       sessionId: input.sessionId,
+      allowLegacyLocalBinding: true,
       sessionDb,
       closeSessionDbOnDispose: input.closeSessionDbOnDispose,
       sessionMetadata: input.sessionMetadata,
@@ -330,6 +331,7 @@ async function main(): Promise<void> {
       process.exit(1);
     }
     const resolution = await resolveSessionForResume({
+      homeDir,
       sessionDb,
       profileId,
       workspaceRoot,

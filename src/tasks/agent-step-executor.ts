@@ -138,6 +138,10 @@ export class AgentStepExecutor implements TaskStepExecutor {
       return failed("parent-session-unavailable", false);
     }
 
+    if (input.task.executionTarget !== undefined && JSON.stringify(input.task.executionTarget) !== JSON.stringify(parentSession.executionTarget)) {
+      return failed("execution-target-mismatch", false);
+    }
+
     let delegationDepth: number;
     try {
       delegationDepth = taskDelegationDepth(this.#taskStore, input.task, input.step);

@@ -572,7 +572,7 @@ describe("createRuntime token branding", () => {
   it("applies session spending defaults prospectively without rewriting resumed sessions", async () => {
     const options = await minimalRuntimeOptions();
     const sessionDb = new InMemorySessionDB();
-    await sessionDb.createSession({ id: "existing-unbounded", profileId: "default" });
+    await sessionDb.createSession({ id: "existing-unbounded", profileId: "default", metadata: { workspaceRoot: options.workspaceRoot } });
     const resumed = await createRuntime({
       ...options,
       sessionId: "existing-unbounded",
@@ -616,7 +616,7 @@ describe("createRuntime token branding", () => {
   it("exposes restored provider actual context usage for the active session", async () => {
     const options = await minimalRuntimeOptions();
     const sessionDb = new InMemorySessionDB();
-    await sessionDb.createSession({ id: "resumed-context-session", profileId: "default" });
+    await sessionDb.createSession({ id: "resumed-context-session", profileId: "default", metadata: { workspaceRoot: options.workspaceRoot } });
     await sessionDb.appendEvent("resumed-context-session", {
       kind: "context-window-usage",
       usedTokens: 7_500,
@@ -3157,7 +3157,7 @@ describe("createRuntime MCP trust gating", () => {
   it("creates and idempotently replays a durable delegation Task without launching a worker", async () => {
     const options = await minimalRuntimeOptions();
     const sessionDb = await createSQLiteSessionDB({ path: join(options.workspaceRoot, "sessions.sqlite") });
-    await sessionDb.createSession({ id: options.sessionId, profileId: "default" });
+    await sessionDb.createSession({ id: options.sessionId, profileId: "default", metadata: { workspaceRoot: options.workspaceRoot } });
     const provider = vi.fn(async () => ({
       ok: true as const,
       provider: "unconfigured" as const,
@@ -3244,7 +3244,7 @@ describe("createRuntime MCP trust gating", () => {
   it("binds single and synthesized batch answers to the CLI outbox and honors the inspection-only opt-out", async () => {
     const options = await minimalRuntimeOptions();
     const sessionDb = await createSQLiteSessionDB({ path: join(options.workspaceRoot, "cli-completion-sessions.sqlite") });
-    await sessionDb.createSession({ id: options.sessionId, profileId: "default" });
+    await sessionDb.createSession({ id: options.sessionId, profileId: "default", metadata: { workspaceRoot: options.workspaceRoot } });
     const runtime = await createRuntime({
       ...options,
       sessionDb,
@@ -3359,7 +3359,7 @@ describe("createRuntime MCP trust gating", () => {
   it("activates operator-created Tasks through the process hook", async () => {
     const options = await minimalRuntimeOptions();
     const sessionDb = await createSQLiteSessionDB({ path: join(options.workspaceRoot, "operator-task-sessions.sqlite") });
-    await sessionDb.createSession({ id: options.sessionId, profileId: "default" });
+    await sessionDb.createSession({ id: options.sessionId, profileId: "default", metadata: { workspaceRoot: options.workspaceRoot } });
     const onTaskCreated = vi.fn(async () => undefined);
     const taskWorkspace = await resolveTaskWorkspaceBinding(options.workspaceRoot);
     const taskHostAdmission = vi.fn(() => ({
@@ -3392,7 +3392,7 @@ describe("createRuntime MCP trust gating", () => {
   it("returns an operator Task handle when post-commit foreground activation fails", async () => {
     const options = await minimalRuntimeOptions();
     const sessionDb = await createSQLiteSessionDB({ path: join(options.workspaceRoot, "operator-task-activation-failure.sqlite") });
-    await sessionDb.createSession({ id: options.sessionId, profileId: "default" });
+    await sessionDb.createSession({ id: options.sessionId, profileId: "default", metadata: { workspaceRoot: options.workspaceRoot } });
     const onTaskCreated = vi.fn(async () => {
       throw new Error("sensitive foreground activation detail");
     });
@@ -3417,7 +3417,7 @@ describe("createRuntime MCP trust gating", () => {
   it("sends explicitly background operator Tasks directly to the gateway path", async () => {
     const options = await minimalRuntimeOptions();
     const sessionDb = await createSQLiteSessionDB({ path: join(options.workspaceRoot, "background-operator-task-sessions.sqlite") });
-    await sessionDb.createSession({ id: options.sessionId, profileId: "default" });
+    await sessionDb.createSession({ id: options.sessionId, profileId: "default", metadata: { workspaceRoot: options.workspaceRoot } });
     const onTaskCreated = vi.fn(async () => undefined);
     const runtime = await createRuntime({
       ...options,
@@ -3541,7 +3541,7 @@ describe("createRuntime MCP trust gating", () => {
   it("reflects durable delegation limits in the registered tool schema", async () => {
     const options = await minimalRuntimeOptions();
     const sessionDb = await createSQLiteSessionDB({ path: join(options.workspaceRoot, "sessions.sqlite") });
-    await sessionDb.createSession({ id: options.sessionId, profileId: "default" });
+    await sessionDb.createSession({ id: options.sessionId, profileId: "default", metadata: { workspaceRoot: options.workspaceRoot } });
     const runtime = await createRuntime({
       ...options,
       sessionDb,

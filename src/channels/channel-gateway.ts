@@ -219,6 +219,8 @@ export type ChannelSessionStore = {
 };
 
 export type ChannelGatewayOptions = {
+  /** Core ownership validation before attaching an existing Session. Absent fails closed. */
+  validateSessionAttachment?: (sessionId: string) => Promise<void>;
   adapters: ChannelAdapter[];
   runtimeForSession: ChannelRuntimeFactory;
   sessionStore?: ChannelSessionStore;
@@ -461,6 +463,7 @@ export class ChannelGateway {
   readonly #securityMode: SecurityApprovalMode;
   readonly #securityAssessor: SecurityAssessorRuntimeConfig | undefined;
   readonly #preprocessMessage: ChannelGatewayOptions["preprocessMessage"];
+  readonly #validateSessionAttachment: ChannelGatewayOptions["validateSessionAttachment"];
   readonly #handoffStore: HandoffStore | undefined;
   readonly #surfacePointerStore: SurfacePointerStore | undefined;
   readonly #diagnostics: (() => Promise<string>) | undefined;
@@ -538,6 +541,7 @@ export class ChannelGateway {
     this.#securityAssessor = options.securityAssessor;
     this.#preprocessMessage = options.preprocessMessage;
     this.#handoffStore = options.handoffStore;
+    this.#validateSessionAttachment = options.validateSessionAttachment;
     this.#surfacePointerStore = options.surfacePointerStore;
     this.#diagnostics = options.diagnostics;
     this.#deliveryRouter = options.deliveryRouter;
@@ -3517,6 +3521,15 @@ export class ChannelGateway {
         };
       }
 
+      try {
+        if (this.#validateSessionAttachment === undefined) throw new Error("Session ownership validation is unavailable.");
+        await this.#validateSessionAttachment(result.handoff.sessionId);
+      } catch {
+        const text = "Attach failed: session profile/workspace ownership could not be verified.";
+        await this.#deliverText(adapter, message.sessionKey, text);
+        return { sessionId: await this.#sessionStore.getOrCreateSessionId(message.sessionKey), replyText: text, artifactCount: 0, progressCount: 0 };
+      }
+
       await this.#surfacePointerStore.setPointer(
         message.sessionKey.platform as SurfaceType,
         message.sessionKey.chatId,
@@ -3795,7 +3808,7 @@ export class ChannelGateway {
       });
       try {
         const prefix = buildBaseSessionId(message.sessionKey, this.#sessionPolicy);
-        const sessions = (await runtime.sessionDb.listSessions("default"))
+        const sessions = (await runtime.sessionDb.listSessions(this.#profileId))
           .filter((session) => session.id === sessionId || session.id.startsWith(prefix))
           .slice(0, 10);
         const text = sessions.length === 0
@@ -3961,7 +3974,7 @@ export class ChannelGateway {
         )
       });
       try {
-        const targetSession = await runtime.sessionDb.getSession(targetSessionId);
+        const targetSession = await runtime.sessionDb.getSessionForProfile(targetSessionId, this.#profileId);
         if (targetSession === undefined) {
           const text = `Session not found: ${targetSessionId}`;
           await this.#deliverText(adapter, message.sessionKey, text);
@@ -3973,6 +3986,8 @@ export class ChannelGateway {
           };
         }
 
+        if (this.#validateSessionAttachment === undefined) throw new Error("Session ownership validation is unavailable.");
+        await this.#validateSessionAttachment(targetSessionId);
         await this.#sessionStore.setSessionId?.(message.sessionKey, targetSessionId, { receivedAt: message.receivedAt });
         const key = stableSessionKey(message.sessionKey, this.#sessionPolicy);
         const previousSessionId = this.#sessionIdByTurnKey.get(key);
