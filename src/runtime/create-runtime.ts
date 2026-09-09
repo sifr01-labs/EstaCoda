@@ -476,7 +476,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     config: memoryConfig,
     homeDir: options.homeDir
   });
-  const trustStore = options.trustStore ?? new WorkspaceTrustStore({ path: options.trustStorePath });
+  const trustStore = options.trustStore ?? new WorkspaceTrustStore({ path: options.trustStorePath, homeDir: options.homeDir });
   const cronStore = options.cronStore ?? new CronStore({
     path: join(profilePaths.cronPath, "jobs.json"),
     outputRoot: join(profilePaths.cronPath, "output"),

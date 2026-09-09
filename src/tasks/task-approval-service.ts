@@ -1,3 +1,5 @@
+import { withDispatchAuthorization, validateDispatchAuthorization } from "../security/dispatch-authorization.js";
+import { assessHardlineFloor } from "../security/command-safety.js";
 import { createHash, randomUUID } from "node:crypto";
 import type { SecurityAssessment, SecurityPolicy, SecurityRequest } from "../contracts/security.js";
 import { assessSecurityPolicy } from "../contracts/security.js";
@@ -100,8 +102,24 @@ export class TaskApprovalService {
           approved.push(approvalRequest(request));
           this.#approvedRequests.set(attempt.id, approved);
         }
-        if (decision === base.decision) return base;
-        return taskAssessment(base, decision);
+        const assessment = decision === base.decision ? base : taskAssessment(base, decision);
+        if (decision !== "allow") return assessment;
+        const approvedLink = this.#matchingApproved(attempt.id, taskApprovalFingerprint(request));
+        return withDispatchAuthorization(assessment, async () => {
+          await validateDispatchAuthorization(base);
+          const currentTask = this.#store.getTask(task.id);
+          const currentStep = this.#store.getStep(step.id);
+          const currentAttempt = this.#store.getAttempt(attempt.id);
+          if (currentTask === null || currentStep === null || currentAttempt === null ||
+            isTerminalTaskStatus(currentTask.status) || currentTask.activePlanRevisionId !== step.planRevisionId ||
+            currentAttempt.lease?.fencingToken !== attempt.lease?.fencingToken ||
+            (approvedLink !== undefined && this.#matchingApproved(attempt.id, taskApprovalFingerprint(request))?.id !== approvedLink.id) ||
+            assessHardlineFloor(request.command ?? "") !== undefined ||
+            this.#narrowDecision(currentTask, currentStep, currentAttempt, request, basePolicy.decide(request)) !== "allow") {
+            throw new Error("Task approval authority changed before dispatch.");
+          }
+          if (approvedLink !== undefined) this.consumeApproved(attempt.id, approvalRequest(request));
+        });
       }
     };
   }
@@ -267,7 +285,8 @@ export class TaskApprovalService {
         commandPreview: link.targetPreview,
         commandHash: link.targetFingerprint,
         toolName: link.toolName,
-        approvalKind: "command",
+        approvalKind: "task",
+        taskApprovalLinkId: link.id,
         requestedAt: new Date(link.requestedAt),
         expiresAt: new Date(link.expiresAt),
         channel: "cli"
@@ -334,6 +353,7 @@ export function taskApprovalFingerprint(request: SecurityRequest): string {
     ? ""
     : createHash("sha256").update(request.command).digest("hex");
   const digest = createHash("sha256").update(JSON.stringify([
+    request.actionKey ?? "",
     request.toolName ?? "",
     request.riskClass,
     request.targetKey ?? "",

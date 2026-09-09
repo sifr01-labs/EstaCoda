@@ -344,6 +344,7 @@ describe("createRuntime provider turn budgets", () => {
 describe("createRuntime protected-input composition", () => {
   it("delivers an authorized value through the registered active-profile store without entering tool input", async () => {
     const options = await minimalRuntimeOptions();
+    await new WorkspaceTrustStore({ homeDir: options.workspaceRoot }).grant(options.workspaceRoot);
     const runtime = await createRuntime({
       ...options,
       homeDir: options.workspaceRoot,
@@ -3626,6 +3627,7 @@ describe("createRuntime external memory providers", () => {
     const options = await minimalRuntimeOptions({
       workspaceTrusted: true
     });
+    await new WorkspaceTrustStore({ homeDir }).grant(options.workspaceRoot);
     const runtime = await createRuntime({
       ...options,
       homeDir,
@@ -3680,8 +3682,10 @@ describe("createRuntime browser backend wiring", () => {
     const nowSpy = vi.spyOn(Date, "now").mockImplementation(() => now);
     const options = await minimalRuntimeOptions();
     const socket = new FakeRuntimeCdpSocket();
+    await new WorkspaceTrustStore({ homeDir: options.workspaceRoot }).grant(options.workspaceRoot);
     const runtime = await createRuntime({
       ...options,
+      homeDir: options.workspaceRoot,
       cdpFetch: createRuntimeCdpFetch(),
       cdpWebSocketFactory: () => socket,
       browser: {
@@ -3720,8 +3724,10 @@ describe("createRuntime browser backend wiring", () => {
   it("uses supervised local CDP by default from ordinary runtime config", async () => {
     const options = await minimalRuntimeOptions();
     const socket = new FakeRuntimeCdpSocket();
+    await new WorkspaceTrustStore({ homeDir: options.workspaceRoot }).grant(options.workspaceRoot);
     const runtime = await createRuntime({
       ...options,
+      homeDir: options.workspaceRoot,
       cdpFetch: createRuntimeCdpFetch(),
       cdpWebSocketFactory: () => socket,
       browser: {
@@ -3755,8 +3761,10 @@ describe("createRuntime browser backend wiring", () => {
     globalThis.fetch = createRuntimeBrowserbaseFetch({ calls: browserbaseCalls });
     vi.stubEnv("BROWSERBASE_API_KEY", "bb_runtime_key");
     vi.stubEnv("BROWSERBASE_PROJECT_ID", "project_runtime");
+    await new WorkspaceTrustStore({ homeDir: options.workspaceRoot }).grant(options.workspaceRoot);
     const runtime = await createRuntime({
       ...options,
+      homeDir: options.workspaceRoot,
       cdpFetch: createRuntimeCdpFetch(),
       cdpWebSocketFactory: () => new FakeRuntimeCdpSocket(),
       browser: {
@@ -3834,8 +3842,10 @@ describe("createRuntime browser backend wiring", () => {
     globalThis.fetch = createRuntimeBrowserbaseFetch({ calls: browserbaseCalls, closeStatus: 400 });
     vi.stubEnv("BROWSERBASE_API_KEY", "bb_runtime_key");
     vi.stubEnv("BROWSERBASE_PROJECT_ID", "project_runtime");
+    await new WorkspaceTrustStore({ homeDir: options.workspaceRoot }).grant(options.workspaceRoot);
     const runtime = await createRuntime({
       ...options,
+      homeDir: options.workspaceRoot,
       cdpFetch: createRuntimeCdpFetch(),
       cdpWebSocketFactory: () => new FakeRuntimeCdpSocket(),
       browser: {
@@ -3868,8 +3878,10 @@ describe("createRuntime browser backend wiring", () => {
 
   it("preserves injected browserBackend behavior", async () => {
     const options = await minimalRuntimeOptions();
+    await new WorkspaceTrustStore({ homeDir: options.workspaceRoot }).grant(options.workspaceRoot);
     const runtime = await createRuntime({
       ...options,
+      homeDir: options.workspaceRoot,
       browserBackend: {
         kind: "mock",
         capabilities: browserCapabilities(),

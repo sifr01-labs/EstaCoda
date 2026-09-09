@@ -581,7 +581,7 @@ describe("gateway commands", () => {
       }
     });
 
-    it("resolves pending approvals by id for the selected profile", async () => {
+    it("requires renewal of legacy unbound command approvals", async () => {
       const globalPaths = resolveGlobalStateHome({ homeDir: tmpDir });
       const sessionDb = await createSQLiteSessionDB({ path: globalPaths.sessionsSqlitePath });
       try {
@@ -609,9 +609,9 @@ describe("gateway commands", () => {
           "select status, command_payload from pending_approvals where id = ?"
         ).get("approval-a");
 
-        expect(result.ok).toBe(true);
-        expect(result.output).toContain("approved");
-        expect(row).toMatchObject({ status: "approved", command_payload: null });
+        expect(result.ok).toBe(false);
+        expect(result.output).toContain("renewal");
+        expect(row).toMatchObject({ status: "pending", command_payload: "sudo apt update" });
       } finally {
         sessionDb.close();
       }

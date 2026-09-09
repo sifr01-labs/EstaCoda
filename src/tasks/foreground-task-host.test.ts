@@ -504,8 +504,8 @@ describe("ForegroundTaskHost", () => {
     const executor = new FakeTaskStepExecutor(() => ({
       outcome: "waiting_for_approval",
       approval: {
-        toolName: "terminal.exec",
-        riskClass: "destructive-local",
+        toolName: "file.write",
+        riskClass: "workspace-write",
         targetFingerprint: `sha256:${"c".repeat(64)}`,
         targetPreview: "run the reviewed command"
       }
@@ -652,11 +652,11 @@ function step(taskId: string, key: string, position: number, overrides: Partial<
 function authorityPolicy(): TaskAuthorityPolicy {
   return {
     allowedToolsets: ["core"],
-    allowedTools: ["task.result.read"],
+    allowedTools: ["task.result.read", "file.write"],
     blockedTools: [],
     riskClassPolicy: Object.fromEntries(TASK_TOOL_RISK_CLASSES.map((riskClass) => [
       riskClass,
-      riskClass === "read-only-local" ? "runtime_policy" : "forbid"
+      riskClass === "read-only-local" ? "runtime_policy" : riskClass === "workspace-write" ? "require_approval" : "forbid"
     ])) as TaskAuthorityPolicy["riskClassPolicy"],
     mayCreateChildTasks: false,
     maxChildDepth: 0

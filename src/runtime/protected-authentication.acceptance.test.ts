@@ -1,3 +1,4 @@
+import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -639,6 +640,7 @@ async function createAcceptanceHarness(scenario: AcceptanceScenario) {
   };
   providerRegistry.register(provider);
 
+  await new WorkspaceTrustStore({ homeDir: workspaceRoot }).grant(workspaceRoot);
   const runtime = await createRuntime({
     tokens: resolveTokens("standard", "dark", "kemetBlue"),
     model,

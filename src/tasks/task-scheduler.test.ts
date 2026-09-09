@@ -1473,6 +1473,7 @@ describe("TaskScheduler", () => {
     await scheduler.runOnce();
     const link = store.listApprovalLinks({ taskId: "task-alpha" })[0]!;
     expect(link).toMatchObject({ status: "pending", authorizedSessionId: "creator-alpha" });
+    sessionDb.db.exec("update pending_approvals set approval_kind = 'command', request_payload = null where approval_kind = 'task'");
     await queue.resolveApproval(link.pendingApprovalId!, "approved", "operator", {
       profileId: "alpha",
       sessionId: "creator-alpha"
@@ -1519,7 +1520,7 @@ describe("TaskScheduler", () => {
         ? {
             outcome: "waiting_for_approval",
             approval: {
-              toolName: `file.write.${step.key}`,
+              toolName: "file.write",
               riskClass: "workspace-write",
               targetFingerprint: `sha256:${(step.position === 0 ? "a" : "b").repeat(64)}`,
               targetPreview: `write ${step.key}`
@@ -1589,7 +1590,7 @@ describe("TaskScheduler", () => {
     const executor = new FakeTaskStepExecutor(({ step }) => ({
       outcome: "waiting_for_approval",
       approval: {
-        toolName: `file.write.${step.key}`,
+        toolName: "file.write",
         riskClass: "workspace-write",
         targetFingerprint: `sha256:${(step.position === 0 ? "c" : "d").repeat(64)}`,
         targetPreview: `write ${step.key}`
@@ -1906,9 +1907,9 @@ function makeRunningAttempt(step: TaskStep, id: string, expiresAt: string): Task
 function authorityPolicy(): TaskAuthorityPolicy {
   return {
     allowedToolsets: ["core"],
-    allowedTools: ["task.result.read"],
+    allowedTools: ["task.result.read", "file.write"],
     blockedTools: [],
-    riskClassPolicy: riskPolicy({ "read-only-local": "runtime_policy" }),
+    riskClassPolicy: riskPolicy({ "read-only-local": "runtime_policy", "workspace-write": "require_approval" }),
     mayCreateChildTasks: false,
     maxChildDepth: 0
   };

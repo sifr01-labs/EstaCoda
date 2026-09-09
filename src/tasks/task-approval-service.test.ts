@@ -1,3 +1,5 @@
+import { validateDispatchAuthorization } from "../security/dispatch-authorization.js";
+import { taskApprovalFingerprint } from "./task-approval-service.js";
 import { describe, expect, it, vi } from "vitest";
 import type { SecurityPolicy } from "../contracts/security.js";
 import type { Task, TaskApprovalLink, TaskAttempt, TaskStep } from "../contracts/task.js";
@@ -139,3 +141,27 @@ function context(disposition: "runtime_policy" | "require_approval"): {
   } as unknown as TaskAttempt;
   return { task, step, attempt };
 }
+
+it("consumes a Task approval at dispatch and fences a second in-flight receipt", async () => {
+  const { task, step, attempt } = context("require_approval");
+  task.status = "running"; task.activePlanRevisionId = step.planRevisionId;
+  const request = { toolName: "file.write", riskClass: "workspace-write" as const, targetKey: "a.txt",
+    actionKey: "a".repeat(64), description: "write", context: { trustedWorkspace: true } };
+  let link = { id: "approved-link", attemptId: attempt.id, status: "approved", targetFingerprint: taskApprovalFingerprint(request),
+    expiresAt: "2099-01-01T00:00:00.000Z" } as TaskApprovalLink;
+  const store = {
+    profileId: "alpha", getTask: () => task, getStep: () => step, getAttempt: () => attempt,
+    listApprovalLinks: () => link.status === "approved" ? [link] : [],
+    updateApprovalLink: (updated: TaskApprovalLink) => { link = updated; },
+    atomicWrite: (callback: (store: TaskStore) => unknown) => callback(store as unknown as TaskStore)
+  } as unknown as TaskStore;
+  const service = new TaskApprovalService({ store });
+  const policy = service.securityPolicyFor(task, step, attempt, { decide: () => "ask" });
+  const first = await policy.assess!(request);
+  const second = await policy.assess!(request);
+  expect(first.decision).toBe("allow");
+  await validateDispatchAuthorization(first);
+  expect(link.status).toBe("consumed");
+  await expect(validateDispatchAuthorization(second)).rejects.toThrow(/authority changed/);
+  expect((await policy.assess!({ ...request, actionKey: "b".repeat(64) })).decision).toBe("ask");
+});

@@ -1,3 +1,5 @@
+import { verifyHostExecution } from "../execution/host-authority.js";
+import { localApprovalScope } from "../security/approval-scope.js";
 import assert from "node:assert/strict";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -145,6 +147,7 @@ export async function runHostBaselineSample(scenario: HostBaselineScenario) {
         sessionStore: new InMemoryChannelSessionStore(),
         authPolicy: { telegram: { allowedUserIds: ["fixture-user"] } },
         trustedWorkspace: () => trustStore.isTrusted(workspaceRoot),
+        approvalScopeForSession: async (sessionId) => localApprovalScope("default", sessionId, await verifyHostExecution(workspaceRoot)),
         runtimeForSession: ({ sessionId, securityPolicy }) => makeRuntime(sessionId, securityPolicy),
       });
       await gateway.receive({ id: "fixture-message", channel: "telegram",

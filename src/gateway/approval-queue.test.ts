@@ -497,3 +497,15 @@ describe("GatewayApprovalQueue", () => {
     }
   });
 });
+
+it("does not accept unbound legacy commands, forged Task kinds, or unknown approval kinds", async () => {
+  const { sessionDb, queue } = await setup();
+  try {
+    const legacy = await queue.createPendingApproval(approval({ executionApproval: undefined, commandPayload: "rm -rf ./build" }));
+    await expect(queue.resolveApproval(legacy.id, "approved", "operator", { profileId: "profile-a" })).rejects.toThrow(/renewal/);
+    expect((await queue.getApproval(legacy.id, { profileId: "profile-a" }))?.status).toBe("pending");
+    await expect(queue.createPendingApproval(approval({ approvalKind: "task", taskApprovalLinkId: "not-a-task-link", executionApproval: undefined }))).rejects.toThrow(/Task approval/);
+    await expect(queue.createPendingApproval(approval({ approvalKind: "future-kind" as "command" }))).rejects.toThrow(/Unknown/);
+    await queue.resolveApproval(legacy.id, "denied", "operator", { profileId: "profile-a" });
+  } finally { sessionDb.close(); }
+});
