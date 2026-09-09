@@ -1,7 +1,5 @@
 import {
-  DEFAULT_ENVIRONMENT_TYPE,
   capabilityFirstDefaults,
-  type EnvironmentType,
   type SecurityAssessment,
   type SecurityApprovalMode,
   type SecurityAssessorConfig,
@@ -92,11 +90,6 @@ function assessStrict(request: SecurityRequest): SecurityAssessment {
   const dataEgress = assessDataEgress(request, "strict");
   if (dataEgress !== undefined) return dataEgress;
 
-  const nonHostBypass = nonHostCommandBypassFor(request, "strict");
-  if (nonHostBypass !== undefined) {
-    return nonHostBypass;
-  }
-
   const decision = capabilityFirstDefaults.decide(request);
   return {
     decision,
@@ -153,11 +146,6 @@ function assessOpen(request: SecurityRequest): SecurityAssessment {
   const dataEgress = assessDataEgress(request, "open");
   if (dataEgress !== undefined) return dataEgress;
 
-  const nonHostBypass = nonHostCommandBypassFor(request, "open");
-  if (nonHostBypass !== undefined) {
-    return nonHostBypass;
-  }
-
   return {
     decision: "allow",
     mode: "open",
@@ -194,11 +182,6 @@ function assessAdaptiveDeterministic(request: SecurityRequest): SecurityAssessme
       risk: "high",
       deterministicRule: "hard-risk-class"
     };
-  }
-
-  const nonHostBypass = nonHostCommandBypassFor(request, "adaptive");
-  if (nonHostBypass !== undefined) {
-    return nonHostBypass;
   }
 
   if (request.riskClass !== "destructive-local") {
@@ -244,43 +227,7 @@ function hardBlockFor(request: SecurityRequest): {
   const dataEgressBlock = dataEgressHardBlock(request);
   if (dataEgressBlock !== undefined) return dataEgressBlock;
   const command = request.command ?? request.targetSummary ?? "";
-  return assessHardlineFloor(command, { environmentType: environmentTypeFor(request) });
-}
-
-function nonHostCommandBypassFor(
-  request: SecurityRequest,
-  mode: SecurityApprovalMode
-): SecurityAssessment | undefined {
-  const environmentType = environmentTypeFor(request);
-  if (environmentType === "host" || request.command === undefined) {
-    return undefined;
-  }
-
-  if (request.riskClass !== "destructive-local") {
-    return undefined;
-  }
-
-  const isolatedAssessment = assessCommandSafety(request.command, { environmentType });
-  if (isolatedAssessment.hardBlock !== undefined || isolatedAssessment.riskClass !== undefined) {
-    return undefined;
-  }
-
-  const hostAssessment = assessCommandSafety(request.command, { environmentType: "host" });
-  if (hostAssessment.riskClass !== "destructive-local") {
-    return undefined;
-  }
-
-  return {
-    decision: "allow",
-    mode,
-    reason: `Allowed because ${environmentType} isolates this non-hardline destructive command from the host.`,
-    risk: "medium",
-    deterministicRule: "non-host-command-bypass"
-  };
-}
-
-function environmentTypeFor(request: SecurityRequest): EnvironmentType {
-  return request.environmentType ?? DEFAULT_ENVIRONMENT_TYPE;
+  return assessHardlineFloor(command);
 }
 
 async function assessWithAuxiliaryProvider(

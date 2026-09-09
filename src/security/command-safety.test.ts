@@ -396,7 +396,7 @@ describe("command-safety", () => {
     });
   });
 
-  describe("container bypass", () => {
+  describe("environment labels do not bypass command policy", () => {
     const coreOnlyCommands = [
       "sudo apt update",
       "git reset --hard HEAD~1",
@@ -408,8 +408,8 @@ describe("command-safety", () => {
     ];
 
     for (const command of coreOnlyCommands) {
-      it(`bypasses core-only detection in docker for ${command}`, () => {
-        expect(assessCommandSafety(command, { environmentType: "docker" }).hardBlock).toBeUndefined();
+      it(`retains command policy in docker for ${command}`, () => {
+        expect(assessCommandSafety(command, { environmentType: "docker" })).toEqual(assessCommandSafety(command));
       });
     }
 

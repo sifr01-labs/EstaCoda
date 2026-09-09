@@ -164,11 +164,11 @@ describe("workspace execution baseline", () => {
     expect(second.startTurn("same").ok).toBe(true);
   });
 
-  it("B08 observed gap: a Docker label changes destructive-local triage without a backend", async () => {
+  it("B08 fixed: a Docker label cannot change destructive-local triage without a backend", async () => {
     const policy = createSecurityPolicyForMode("adaptive");
     const request = commandRequest("rm -rf ./build");
     expect(await policy.decide({ ...request, environmentType: "host" })).toBe("ask");
-    expect(await policy.decide({ ...request, environmentType: "docker" })).toBe("allow");
+    expect(await policy.decide({ ...request, environmentType: "docker" })).toBe("ask");
     expect(await policy.decide({ ...commandRequest("rm -rf /"), environmentType: "docker" })).toBe("deny");
   });
 });

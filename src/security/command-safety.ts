@@ -47,24 +47,21 @@ type Detection = {
 
 export function assessCommandSafety(
   command: string,
-  options: { environmentType?: EnvironmentType } = {}
+  _options: { environmentType?: EnvironmentType } = {}
 ): CommandSafetyAssessment {
   const normalized = normalizeCommandForSafety(command);
-  const environmentType = options.environmentType ?? "host";
   const hardline = detectHardlineBlock(normalized);
 
   if (hardline !== undefined) {
     return toAssessment(normalized, hardline);
   }
 
-  if (environmentType === "host") {
-    const hostBlock = detectHostOnlyBlock(normalized);
-    if (hostBlock !== undefined) {
-      return toAssessment(normalized, hostBlock);
-    }
-  }
+  // EnvironmentType is compatibility metadata. Until a backend verifies actual
+  // containment, every label retains the same command floor and risk triage.
+  const policyBlock = detectPolicyBlock(normalized);
+  if (policyBlock !== undefined) return toAssessment(normalized, policyBlock);
 
-  const riskClass = inferRiskClass(normalized, environmentType);
+  const riskClass = inferRiskClass(normalized);
   return {
     normalized,
     riskClass,
@@ -86,7 +83,7 @@ export function assessHardlineFloor(
 function toAssessment(normalized: string, detection: Detection): CommandSafetyAssessment {
   return {
     normalized,
-    riskClass: detection.riskClass ?? inferRiskClass(normalized, "host"),
+    riskClass: detection.riskClass ?? inferRiskClass(normalized),
     severity: detection.severity,
     hardBlock: {
       code: detection.code,
@@ -104,12 +101,12 @@ function stripAnsi(value: string): string {
   );
 }
 
-function inferRiskClass(command: string, environmentType: EnvironmentType): ToolRiskClass | undefined {
+function inferRiskClass(command: string): ToolRiskClass | undefined {
   if (looksCredentialSeeking(command)) {
     return "credential-access";
   }
 
-  if (environmentType === "host" && looksDestructive(command)) {
+  if (looksDestructive(command)) {
     return "destructive-local";
   }
 
@@ -174,7 +171,7 @@ function detectHardlineBlock(command: string): Detection | undefined {
   return undefined;
 }
 
-function detectHostOnlyBlock(command: string): Detection | undefined {
+function detectPolicyBlock(command: string): Detection | undefined {
   if (matchesBroadDelete(command)) {
     return {
       code: "destructive-delete-root-or-broad-path",

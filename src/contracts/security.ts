@@ -4,6 +4,7 @@ import type { ToolRiskClass } from "./tool.js";
 
 export type SecurityDecision = "allow" | "ask" | "deny";
 export type SecurityRiskLevel = "low" | "medium" | "high";
+/** Compatibility metadata only; these names never establish containment or authority. */
 export type EnvironmentType =
   | "host"
   | "docker"

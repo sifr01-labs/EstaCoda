@@ -209,7 +209,7 @@ describe("WorkspaceApprovalController smart approvals", () => {
     expect(smart.assessCommandRisk).not.toHaveBeenCalled();
   });
 
-  it("does not call smart approval for open-mode non-host bypass", async () => {
+  it("does not call smart approval in open mode even with an environment label", async () => {
     const approvals = await controller();
     const smart = smartApproval("DENY");
 
@@ -224,7 +224,7 @@ describe("WorkspaceApprovalController smart approvals", () => {
     });
 
     expect(result.decision).toBe("allow");
-    expect(result.deterministicRule).toBe("non-host-command-bypass");
+    expect(result.deterministicRule).toBe("open-default-allow");
     expect(smart.assessCommandRisk).not.toHaveBeenCalled();
   });
 

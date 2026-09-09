@@ -102,7 +102,7 @@ describe("security policy factory", () => {
       expect(result.deterministicRule).toBe("git-destructive");
     });
 
-    it("bypasses non-hardline destructive command handling in docker", async () => {
+    it("does not let a docker label bypass command handling", async () => {
       const policy = createSecurityPolicyForMode("adaptive");
       const result = await policy.assess!({
         ...baseRequest,
@@ -110,8 +110,8 @@ describe("security policy factory", () => {
         environmentType: "docker"
       });
 
-      expect(result.decision).toBe("allow");
-      expect(result.deterministicRule).toBe("non-host-command-bypass");
+      expect(result.decision).toBe("deny");
+      expect(result.deterministicRule).toBe("privilege-escalation");
     });
 
     it.each([
@@ -123,7 +123,7 @@ describe("security policy factory", () => {
       const result = await policy.assess!({
         ...baseRequest,
         riskClass,
-        command: "sudo apt update",
+        command: "echo fixture",
         environmentType: "docker"
       });
 

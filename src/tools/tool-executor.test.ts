@@ -2453,7 +2453,7 @@ describe("ToolExecutor tool-call metadata persistence", () => {
 });
 
 describe("ToolExecutor command environment", () => {
-  it("passes explicit backend environmentType into command safety and tool context", async () => {
+  it("keeps environmentType as tool context metadata without reducing command risk", async () => {
     let observedRequest: SecurityRequest | undefined;
     const policy: SecurityPolicy = {
       decide() {
@@ -2483,7 +2483,7 @@ describe("ToolExecutor command environment", () => {
     });
 
     expect(record?.decision).toBe("allow");
-    expect(record?.riskClass).toBe("workspace-write");
+    expect(record?.riskClass).toBe("destructive-local");
     expect(record?.result?.content).toBe("environment=docker");
     expect(observedRequest?.environmentType).toBe("docker");
   });
