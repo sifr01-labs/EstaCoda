@@ -310,7 +310,7 @@ export class AgentLoopBuilder {
     const executionLease = isChild ? substrate.executionLease?.child({ profileId: substrate.profileId,
       sessionId: input.sessionId, surface: input.taskExecution === undefined ? "delegation" : "task",
       taskId: input.taskExecution?.taskId, attemptId: input.taskExecution?.attemptId }) : substrate.executionLease;
-    const processManager = isChild ? new ProcessManager({ workspaceRoot: substrate.workspaceRoot, executionLease }) : substrate.processManager;
+    const processManager = isChild ? new ProcessManager({ workspaceRoot: substrate.workspaceRoot, executionLease, childProcessEnv: substrate.executionControls?.childProcessEnv }) : substrate.processManager;
     try {
       return await this.#buildSession(input, executionLease, processManager);
     } catch (error) {

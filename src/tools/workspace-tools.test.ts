@@ -1082,7 +1082,7 @@ describe("terminal.run hardline floor", () => {
 });
 
 describe("terminal.run child process environment", () => {
-  it("inherits the parent process environment by default", async () => {
+  it("omits parent secrets by default", async () => {
     const root = await makeTempDir();
     const previous = process.env.ESTACODA_BENCHMARK_TEST_SECRET;
     process.env.ESTACODA_BENCHMARK_TEST_SECRET = "visible-parent-env";
@@ -1095,7 +1095,7 @@ describe("terminal.run child process environment", () => {
       });
 
       expect(result?.ok).toBe(true);
-      expect(result?.content).toBe("visible-parent-env");
+      expect(result?.content).toBe("missing");
     } finally {
       if (previous === undefined) {
         delete process.env.ESTACODA_BENCHMARK_TEST_SECRET;

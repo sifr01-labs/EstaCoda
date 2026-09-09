@@ -1,7 +1,12 @@
+import { mkdtempSync } from "node:fs";
+import { rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { buildSafeChildEnv, type SafeChildEnvOptions } from "../security/process-env.js";
 import { spawn, type ChildProcess, type ChildProcessWithoutNullStreams } from "node:child_process";
 
 export type HostSpawnOptions = { env?: NodeJS.ProcessEnv; input?: boolean };
-export type HostProcesses = Pick<HostProcessScope, "spawn" | "terminate">;
+export type HostProcesses = Pick<HostProcessScope, "spawn" | "terminate" | "environment">;
 type OwnedChild = { child: ChildProcess; closed: Promise<void>; settled: boolean; stopping?: Promise<void> };
 
 /** One resource owner, even when several owners share a workspace/environment.
@@ -10,11 +15,18 @@ export class HostProcessScope {
   readonly #root: string;
   readonly #children = new Map<ChildProcess, OwnedChild>();
   #released = false;
+  #home: string | undefined;
+
+  environment(options: SafeChildEnvOptions = {}): Record<string, string> {
+    if (this.#released) throw new Error("Process scope has been released.");
+    if (options.homeDir === undefined) this.#home ??= mkdtempSync(join(tmpdir(), "estacoda-process-home-"));
+    return buildSafeChildEnv({ ...options, homeDir: options.homeDir ?? this.#home });
+  }
   constructor(workspaceRoot: string) { this.#root = workspaceRoot; }
 
   spawn(command: string, args: readonly string[], options: HostSpawnOptions = {}): ChildProcessWithoutNullStreams {
     if (this.#released) throw new Error("Process scope has been released.");
-    const child = spawn(command, [...args], { cwd: this.#root, env: options.env ?? process.env,
+    const child = spawn(command, [...args], { cwd: this.#root, env: options.env ?? this.environment(),
       detached: process.platform !== "win32", stdio: ["pipe", "pipe", "pipe"] });
     let settle!: () => void;
     const record: OwnedChild = { child, settled: false, closed: new Promise<void>((resolve) => { settle = resolve; }) };
@@ -55,6 +67,7 @@ export class HostProcessScope {
     const results = await Promise.allSettled([...this.#children.keys()].map((child) => this.terminate(child)));
     const errors = results.filter((result): result is PromiseRejectedResult => result.status === "rejected");
     if (errors.length) throw new AggregateError(errors.map((result) => result.reason), "Owned processes did not settle.");
+    if (this.#home) await rm(this.#home, { recursive: true, force: true });
   }
 }
 

@@ -11,7 +11,6 @@ import type { FileChangePreviewViewModel } from "../contracts/view-model.js";
 import type { FileStateOperationKind, FileStateTracker } from "../delegation/file-state-tracker.js";
 import { isLikelyBinary, isTextyPath } from "../context/context-security.js";
 import { assessHardlineFloor } from "../security/command-safety.js";
-import { buildSafeChildEnv } from "../security/process-env.js";
 import { createTerminalInspectTool } from "./terminal-inspect-tool.js";
 import { errorResult } from "./workspace-paths.js";
 
@@ -1684,7 +1683,7 @@ async function runCommand(
   return new Promise((resolveResult) => {
     const shell = resolveShell();
     const child = processes.spawn(shell.command, [...shell.args, command], {
-      env: buildTerminalRunEnv(root, childProcessEnv)
+      env: processes.environment({ homeDir: childProcessEnv?.homeDir, extra: { ...childProcessEnv?.extra, PWD: root } })
     });
     const chunks: Buffer[] = [];
     const errorChunks: Buffer[] = [];
@@ -1727,23 +1726,6 @@ async function runCommand(
       });
     });
   });
-}
-
-function buildTerminalRunEnv(
-  root: string,
-  childProcessEnv: WorkspaceToolOptions["childProcessEnv"]
-): NodeJS.ProcessEnv {
-  if (childProcessEnv?.mode === "isolated") {
-    return buildSafeChildEnv({
-      homeDir: childProcessEnv.homeDir,
-      extra: { PWD: root }
-    });
-  }
-
-  return {
-    ...process.env,
-    PWD: root
-  };
 }
 
 function terminalContextSummary(input: {

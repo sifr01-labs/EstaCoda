@@ -27,7 +27,10 @@ export type SessionToolContext = {
   };
   homeDir?: string;
   childProcessEnv?: {
+    /** Legacy inherit is treated as isolated; broad inheritance is no longer supported. */
     mode: "inherit" | "isolated";
+    /** Trusted runtime adapter values, never model-supplied tool input. */
+    extra?: Record<string, string>;
     homeDir?: string;
   };
   pythonStateRoot?: string;

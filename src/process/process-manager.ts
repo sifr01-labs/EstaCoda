@@ -35,6 +35,7 @@ type InternalManagedProcess = ManagedProcessRecord & {
 export type ProcessManagerOptions = {
   executionLease?: HostExecutionLease;
   workspaceRoot: string;
+  childProcessEnv?: import("../contracts/tool-context.js").SessionToolContext["childProcessEnv"];
   maxLogChars?: number;
   now?: () => Date;
   id?: () => string;
@@ -44,6 +45,7 @@ const DEFAULT_MAX_LOG_CHARS = 96_000;
 
 export class ProcessManager {
   readonly #workspaceRoot: string;
+  readonly #childProcessEnv: ProcessManagerOptions["childProcessEnv"];
   readonly #processScope: HostProcesses;
   readonly #lease?: HostExecutionLease;
   readonly #ownedScope?: HostProcessScope;
@@ -54,6 +56,7 @@ export class ProcessManager {
 
   constructor(options: ProcessManagerOptions) {
     this.#lease = options.executionLease;
+    this.#childProcessEnv = options.childProcessEnv;
     this.#workspaceRoot = options.executionLease?.workspaceRoot ?? resolve(options.workspaceRoot);
     this.#ownedScope = options.executionLease === undefined ? new HostProcessScope(this.#workspaceRoot) : undefined;
     this.#processScope = options.executionLease?.processes ?? this.#ownedScope!;
@@ -145,7 +148,7 @@ export class ProcessManager {
       const shell = resolveShell();
       const child = this.#processScope.spawn(shell.command, [...shell.args, record.command], {
         env: {
-          ...process.env,
+          ...this.#processScope.environment({ homeDir: this.#childProcessEnv?.homeDir, extra: this.#childProcessEnv?.extra }),
           PWD: record.cwd,
           ...protectedEnvironment
         },

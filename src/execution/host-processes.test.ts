@@ -1,4 +1,4 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { once } from "node:events";
@@ -54,4 +54,29 @@ it.skipIf(process.platform === "win32")("terminates an owned process group inclu
     await lease.release();
     expect(() => process.kill(descendant, 0)).toThrow();
   } finally { await lease.release(); env.destroy(); await rm(root, { recursive: true, force: true }); }
+});
+
+it("isolates default environments and preserves only explicit adapter values", async () => {
+  const root = await mkdtemp(join(tmpdir(), "process-env-"));
+  const environment = await HostEnvironment.create({ profileId: "test", workspaceRoot: root });
+  const lease = environment.acquire({ profileId: "test", sessionId: "test", surface: "test" });
+  const previous = process.env.ESTACODA_PROCESS_TEST_TOKEN;
+  process.env.ESTACODA_PROCESS_TEST_TOKEN = "parent-only";
+  try {
+    const env = lease.processes.environment({ extra: { CAPABILITY_ENDPOINT: "configured", HOME: "/ignored" } });
+    expect(env.ESTACODA_PROCESS_TEST_TOKEN).toBeUndefined();
+    expect(env.CAPABILITY_ENDPOINT).toBe("configured");
+    expect(env.HOME).not.toBe("/ignored");
+    const child = lease.processes.spawn(process.execPath, ["-e", "process.stdout.write(JSON.stringify(process.env))"], { env });
+    let output = ""; child.stdout.on("data", (chunk) => { output += String(chunk); });
+    await once(child, "close");
+    expect(JSON.parse(output).CAPABILITY_ENDPOINT).toBe("configured");
+    expect(JSON.parse(output).ESTACODA_PROCESS_TEST_TOKEN).toBeUndefined();
+    await lease.release();
+    await expect(stat(env.HOME!)).rejects.toThrow();
+  } finally {
+    if (previous === undefined) delete process.env.ESTACODA_PROCESS_TEST_TOKEN;
+    else process.env.ESTACODA_PROCESS_TEST_TOKEN = previous;
+    await lease.release(); environment.destroy(); await rm(root, { recursive: true, force: true });
+  }
 });

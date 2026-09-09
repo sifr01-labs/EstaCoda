@@ -7,12 +7,12 @@ import { join } from "node:path";
 import type { SessionDB } from "../contracts/session.js";
 import type { RegisteredTool, SessionToolProvider, ToolResult } from "../contracts/tool.js";
 import type { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
-import { buildSafeChildEnv } from "../security/process-env.js";
 import type { ToolExecutor } from "./tool-executor.js";
 
 export type ExecuteCodeToolOptions = {
   workspaceRoot: string;
   executionLease?: HostExecutionLease;
+  childProcessEnv?: import("../contracts/tool-context.js").SessionToolContext["childProcessEnv"];
   toolExecutor: ToolExecutor;
   sessionDb: SessionDB;
   trajectoryRecorder: TrajectoryRecorder;
@@ -70,6 +70,7 @@ export function createExecuteCodeTool(options: ExecuteCodeToolOptions): Register
         pythonBinary: options.pythonBinary ?? "python3",
         workspaceRoot: options.executionLease?.workspaceRoot ?? options.workspaceRoot,
         executionLease: options.executionLease,
+        childProcessEnv: options.childProcessEnv,
         allowedTools,
         executeTool: async (tool, toolInput) => {
           if (!allowedTools.has(tool)) {
@@ -131,6 +132,7 @@ export const executeCodeToolProvider: SessionToolProvider = {
       createExecuteCodeTool({
         workspaceRoot: ctx.workspaceRoot,
         executionLease: ctx.executionLease,
+        childProcessEnv: ctx.childProcessEnv,
         toolExecutor: requireProviderDependency("executeCode", "toolExecutor", ctx.toolExecutor),
         sessionDb: requireProviderDependency("executeCode", "sessionDb", ctx.sessionDb),
         trajectoryRecorder: requireProviderDependency("executeCode", "trajectoryRecorder", ctx.trajectoryRecorder),
@@ -156,6 +158,7 @@ type RunCodeOptions = {
   pythonBinary: string;
   workspaceRoot: string;
   executionLease?: HostExecutionLease;
+  childProcessEnv?: import("../contracts/tool-context.js").SessionToolContext["childProcessEnv"];
   allowedTools: Set<string>;
   executeTool(tool: string, input: Record<string, unknown>): Promise<ToolResult>;
 };
@@ -183,7 +186,7 @@ async function runHarness(options: RunCodeOptions, processes: HostProcesses, tem
   await writeFile(scriptPath, script, "utf8");
 
   return new Promise<ToolResult>((resolve) => {
-    const childEnv = buildSafeChildEnv({ homeDir: sandboxHome });
+    const childEnv = processes.environment({ homeDir: sandboxHome, extra: options.childProcessEnv?.extra });
     childEnv["ESTACODA_INPUT_JSON"] = JSON.stringify(options.input);
     childEnv["ESTACODA_ALLOWED_TOOLS_JSON"] = JSON.stringify([...options.allowedTools].sort());
 

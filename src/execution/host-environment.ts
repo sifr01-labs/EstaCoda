@@ -62,6 +62,7 @@ export class HostEnvironment {
     };
     return {
       processes: {
+        environment: (options) => { assertActive(); return scope.processes.environment(options); },
         spawn: (command, args, options) => { assertActive(); return scope.processes.spawn(command, args, options); },
         terminate: (child, signal) => { assertActive(); return scope.processes.terminate(child, signal); }
       },
