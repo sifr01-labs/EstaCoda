@@ -3864,13 +3864,13 @@ describe("createRuntime browser backend wiring", () => {
 
       expect(result?.result?.ok).toBe(true);
       await expect(runtime.dispose()).rejects.toThrow("Browserbase POST /v1/sessions/bb-runtime-session failed with HTTP 400.");
-      await expect(runtime.dispose()).resolves.toBeUndefined();
+      await expect(runtime.dispose()).rejects.toThrow("HTTP 400");
       expect(browserbaseCalls.map((call) => `${call.method} ${new URL(call.url).pathname}`)).toEqual([
         "POST /v1/sessions",
         "POST /v1/sessions/bb-runtime-session"
       ]);
     } finally {
-      await runtime.dispose();
+      await runtime.dispose().catch(() => undefined);
       globalThis.fetch = originalFetch;
       vi.unstubAllEnvs();
     }

@@ -157,6 +157,8 @@ describe("RuntimeCache", () => {
     const proxy1 = await cache.get("s1", fp, fakeSecurityPolicy);
     await cache.suspend("s1", "test-suspend");
 
+    await expect(cache.get("s1", fp, fakeSecurityPolicy)).rejects.toThrow("busy");
+    await proxy1.dispose();
     const proxy2 = await cache.get("s1", fp, fakeSecurityPolicy);
     const stats = cache.stats();
     expect(stats.totalCreated).toBe(2);
@@ -381,14 +383,14 @@ describe("RuntimeCache", () => {
     await proxy.dispose();
   });
 
-  it("double releaseLease logs warning and is harmless", async () => {
+  it("double proxy disposal is idempotent and harmless", async () => {
     const warnings: string[] = [];
     const cache = createCache({ logWarning: (msg) => warnings.push(msg) });
     const fp = fakeFingerprint();
     const proxy = await cache.get("s1", fp, fakeSecurityPolicy);
     await proxy.dispose();
     await proxy.dispose();
-    expect(warnings.some((w) => w.includes("double-release"))).toBe(true);
+    expect(warnings).toEqual([]);
     const stats = cache.stats();
     expect(stats.totalDisposed).toBe(0);
   });
@@ -428,6 +430,8 @@ describe("RuntimeCache", () => {
     const fp1 = fakeFingerprint();
     const proxy1 = await cache.get("s1", fp1, fakeSecurityPolicy);
     const fp2 = fakeFingerprint({ modelId: "gpt-5" });
+    await expect(cache.get("s1", fp2, fakeSecurityPolicy)).rejects.toThrow("busy");
+    await proxy1.dispose();
     const proxy2 = await cache.get("s1", fp2, fakeSecurityPolicy);
     await proxy1.dispose();
     await proxy2.dispose();
@@ -441,6 +445,8 @@ describe("RuntimeCache", () => {
     const fp1 = fakeFingerprint();
     const proxy1 = await cache.get("s1", fp1, fakeSecurityPolicy);
     const fp2 = fakeFingerprint({ modelId: "gpt-5" });
+    await expect(cache.get("s1", fp2, fakeSecurityPolicy)).rejects.toThrow("busy");
+    await proxy1.dispose();
     const proxy2 = await cache.get("s1", fp2, fakeSecurityPolicy);
     // Dispose old proxy - should dispose old entry, not new
     await proxy1.dispose();
@@ -460,6 +466,8 @@ describe("RuntimeCache", () => {
     const fp = fakeFingerprint();
     const proxy1 = await cache.get("s1", fp, fakeSecurityPolicy);
     await cache.suspend("s1", "crash");
+    await expect(cache.get("s1", fp, fakeSecurityPolicy)).rejects.toThrow("busy");
+    await proxy1.dispose();
     const proxy2 = await cache.get("s1", fp, fakeSecurityPolicy);
     const stats = cache.stats();
     expect(stats.totalCreated).toBe(2);
@@ -476,6 +484,8 @@ describe("RuntimeCache", () => {
     const fp = fakeFingerprint();
     const proxy1 = await cache.get("s1", fp, fakeSecurityPolicy);
     await cache.invalidate("s1");
+    await expect(cache.get("s1", fp, fakeSecurityPolicy)).rejects.toThrow("busy");
+    await proxy1.dispose();
     const proxy2 = await cache.get("s1", fp, fakeSecurityPolicy);
     const stats = cache.stats();
     expect(stats.totalCreated).toBe(2);
@@ -493,6 +503,7 @@ describe("RuntimeCache", () => {
     const fp1 = fakeFingerprint();
     const proxy1 = await cache.get("s1", fp1, fakeSecurityPolicy);
     const fp2 = fakeFingerprint({ modelId: "gpt-5" });
+    await proxy1.dispose();
     await cache.get("s1", fp2, fakeSecurityPolicy);
     // proxy1 has old entryId; disposing it should not affect new entry
     await proxy1.dispose();
@@ -625,6 +636,8 @@ describe("RuntimeCache", () => {
     const proxy1 = await cache.get("s1", fp, fakeSecurityPolicy);
     await cache.suspend("s1", "crash");
     // s1 is now suspended and disposePending but still borrowed
+    await expect(cache.get("s1", fp, fakeSecurityPolicy)).rejects.toThrow("busy");
+    await proxy1.dispose();
     const proxy2 = await cache.get("s1", fp, fakeSecurityPolicy);
     const stats = cache.stats();
     expect(stats.totalCreated).toBe(2);
@@ -642,7 +655,8 @@ describe("RuntimeCache", () => {
     const fp = fakeFingerprint();
     const proxy1 = await cache.get("s1", fp, fakeSecurityPolicy);
     const fp2 = fakeFingerprint({ modelId: "gpt-5" });
-    const proxy2 = await cache.get("s1", fp2, fakeSecurityPolicy);
+    await cache.suspend("s1", "changed");
+    const proxy2 = await cache.get("s3", fp2, fakeSecurityPolicy);
     // proxy1 belongs to session s1. Try releasing with wrong session s2.
     // We need the old entryId to call releaseLease directly.
     // The proxy1.dispose() would call releaseLease("s1", oldEntryId).
@@ -663,7 +677,8 @@ describe("RuntimeCache", () => {
     const fp = fakeFingerprint();
     const proxy1 = await cache.get("s1", fp, fakeSecurityPolicy);
     const fp2 = fakeFingerprint({ modelId: "gpt-5" });
-    const proxy2 = await cache.get("s1", fp2, fakeSecurityPolicy);
+    await cache.suspend("s1", "changed");
+    const proxy2 = await cache.get("s3", fp2, fakeSecurityPolicy);
     // At this point:
     // - old entry for s1 is in pending (borrowCount 1, from proxy1)
     // - new entry for s1 is in active (borrowCount 1, from proxy2)
@@ -677,7 +692,7 @@ describe("RuntimeCache", () => {
     expect(finalStats.totalDisposed).toBe(1);
   });
 
-  it("get() preserves old entry when createRuntime throws on fingerprint mismatch", async () => {
+  it("get() safely reconstructs after a replacement factory failure", async () => {
     let callCount = 0;
     const cache = createCache({
       createRuntime: async () => {
@@ -695,12 +710,12 @@ describe("RuntimeCache", () => {
     const fp2 = fakeFingerprint({ modelId: "gpt-5" });
     await expect(cache.get("s1", fp2, fakeSecurityPolicy)).rejects.toThrow("factory failure");
 
-    // Old entry should still be active and reusable
+    // The old owner settled before replacement; failure requires fresh acquisition.
     const proxy1b = await cache.get("s1", fp1, fakeSecurityPolicy);
     const stats = cache.stats();
-    expect(stats.totalCreated).toBe(1);
-    expect(stats.totalReused).toBe(1);
-    expect(stats.totalDisposed).toBe(0);
+    expect(stats.totalCreated).toBe(2);
+    expect(stats.totalReused).toBe(0);
+    expect(stats.totalDisposed).toBe(1);
     await proxy1b.dispose();
   });
 
@@ -867,4 +882,39 @@ it("prepares current configuration on every acquisition and constructs from the 
   const second = await cache.get("session", fakeFingerprint(), fakeSecurityPolicy);
   expect(snapshots).toEqual([{ generation: 1 }, { generation: 2 }]);
   await second.dispose(); await cache.disposeAll();
+});
+
+it("serializes concurrent misses and releases each borrower exactly once", async () => {
+  const runtime = createMockRuntime();
+  const factory = vi.fn(async () => { await Promise.resolve(); return runtime; });
+  const cache = new RuntimeCache({ createRuntime: factory });
+  const leases = await Promise.all(Array.from({ length: 8 }, () => cache.get("s", fakeFingerprint(), fakeSecurityPolicy)));
+  expect(factory).toHaveBeenCalledOnce();
+  await leases[0].dispose(); await leases[0].dispose();
+  expect(cache.stats().activeBorrows).toBe(7);
+  expect(() => leases[0].tools()).toThrow("released");
+  await Promise.all(leases.slice(1).map((lease) => lease.dispose()));
+  await cache.disposeAll(); expect(runtime.disposeCalls).toBe(1);
+});
+it("does not publish a runtime invalidated during construction", async () => {
+  let finish!: (runtime: Runtime) => void, started!: () => void;
+  const ready = new Promise<void>((resolve) => { started = resolve; });
+  const cache = new RuntimeCache({ createRuntime: () => { started(); return new Promise((resolve) => { finish = resolve; }); } });
+  const acquiring = cache.get("s", fakeFingerprint(), fakeSecurityPolicy);
+  await ready; await cache.invalidate("s");
+  const runtime = createMockRuntime(); finish(runtime);
+  await expect(acquiring).rejects.toThrow("invalidated");
+  expect(runtime.disposeCalls).toBe(1); expect(cache.stats().totalEntries).toBe(0);
+  await cache.disposeAll();
+});
+it("validates health before reuse and retains uncertain cleanup", async () => {
+  let healthy = true;
+  const runtime = createMockRuntime({ validateExecutionHealth: async () => { if (!healthy) throw new Error("root replaced"); },
+    dispose: async () => { throw new Error("unsettled process"); } });
+  const factory = vi.fn(async () => runtime);
+  const cache = new RuntimeCache({ createRuntime: factory });
+  const lease = await cache.get("s", fakeFingerprint(), fakeSecurityPolicy); await lease.dispose();
+  healthy = false;
+  await expect(cache.get("s", fakeFingerprint(), fakeSecurityPolicy)).rejects.toThrow("uncertain");
+  expect(factory).toHaveBeenCalledOnce(); expect(cache.stats().totalEntries).toBe(1);
 });

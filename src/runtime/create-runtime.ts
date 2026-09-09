@@ -267,6 +267,7 @@ function resolveRuntimeUiIdentity(options: RuntimeOptions): string {
 }
 
 export type Runtime = {
+  validateExecutionHealth?(): Promise<void>;
   readEditorFile?(path: string): Promise<string>;
   executionFacts?(): Readonly<HostExecutionFacts>;
   agentEvolutionPolicy(): AgentEvolutionPolicy;
@@ -573,6 +574,7 @@ async function buildRuntime(options: RuntimeOptions, rollback: ResourceCleanup):
   resources.defer(async () => { await localWhisper?.dispose?.(); });
   let activeTrustedWorkspace = false;
   let disposed = false;
+  let disposal: Promise<void> | undefined;
   const trajectoryRecorder = new TrajectoryRecorder({
     profileId,
     sessionId,
@@ -1197,6 +1199,13 @@ async function buildRuntime(options: RuntimeOptions, rollback: ResourceCleanup):
       });
 
   return {
+    async validateExecutionHealth() {
+      executionOwner.assert(); executionLease.assertActive();
+      const session = await sessionDb.getSessionForProfile(sessionRuntimeContext.currentSessionId(), profileId);
+      if (!session) throw new Error("Session is unavailable.");
+      await validateSessionWorkspaceOwnership({ session, profileId, workspaceRoot, homeDir: options.homeDir });
+      await executionLease.files.realpath(workspaceRoot);
+    },
     executionFacts: () => executionFacts,
     readEditorFile: options.workspaceFsAdapter === undefined ? undefined : (path) => executionLease.content.read(path, () => options.workspaceFsAdapter!.readTextFile({ path })),
     sessionDb,
@@ -1476,14 +1485,13 @@ async function buildRuntime(options: RuntimeOptions, rollback: ResourceCleanup):
       });
     },
     async dispose() {
-      if (disposed) {
-        return;
-      }
-      disposed = true;
-      await executionOwner.settle();
-      await executionLease.release();
-      executionOwner.release();
-      await hostEnvironment.retire(() => resources.release());
+      return disposal ??= (async () => {
+        disposed = true;
+        await executionOwner.settle();
+        await executionLease.release();
+        executionOwner.release();
+        await hostEnvironment.retire(() => resources.release());
+      })();
     },
     describe() {
       const failures = mcpFailureDiagnostics(loadedMcpServers.map((server) => server.snapshot));

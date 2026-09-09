@@ -1,3 +1,4 @@
+import { SessionCompressionLock } from "../session/session-compression-lock.js";
 import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
 import type { Runtime } from "./create-runtime.js";
 import { classifyRuntimeChange, type RuntimeFingerprint } from "./runtime-fingerprint.js";
@@ -65,7 +66,7 @@ function sessionKeyHash(sessionId: string): string {
 export async function safeDispose(
   runtime: Runtime,
   logWarning?: (msg: string) => void
-): Promise<void> {
+): Promise<boolean> {
   let timer: ReturnType<typeof setTimeout> | undefined;
   try {
     await Promise.race([
@@ -77,14 +78,12 @@ export async function safeDispose(
         );
       }),
     ]);
+    return true;
   } catch (err) {
     logWarning?.(
       `Runtime dispose failed or timed out: ${err instanceof Error ? err.message : String(err)}`
     );
-    // NOTE: The timeout does NOT cancel the underlying runtime.dispose() promise.
-    // The runtime may continue disposing in the background. This is acceptable
-    // for Stage 5B because the entry is already removed from the cache and
-    // the runtime will be garbage-collected once its background dispose finishes.
+    return false;
   } finally {
     if (timer !== undefined) {
       clearTimeout(timer);
@@ -97,19 +96,31 @@ export function createCachedRuntimeProxy(
   cache: RuntimeCache,
   lease: LeaseRef
 ): Runtime {
+  let released = false;
   return new Proxy(runtime, {
     get(target, prop, receiver) {
       if (prop === "dispose") {
         return async () => {
+          if (released) return;
+          released = true;
           await cache.releaseLease(lease.sessionId, lease.entryId);
         };
       }
-      return Reflect.get(target, prop, receiver);
+      const value = Reflect.get(target, prop, receiver);
+      if (typeof value !== "function") return value;
+      return (...args: unknown[]) => {
+        if (released) throw new Error("Cached runtime lease has been released.");
+        return value.apply(target, args);
+      };
     },
   }) as Runtime;
 }
 
 export class RuntimeCache {
+  readonly #acquisition = new SessionCompressionLock();
+  readonly #epochs = new Map<string, number>();
+  readonly #acquiring = new Set<Promise<Runtime>>();
+  #closed = false;
   #prepare?: RuntimeCacheOptions["prepare"];
   #maxEntries: number;
   #idleTtlMs: number;
@@ -143,120 +154,52 @@ export class RuntimeCache {
     securityPolicy: SecurityPolicy,
     metadata?: Record<string, unknown>
   ): Promise<Runtime> {
-    const prepared = await this.#prepare?.(sessionId, metadata);
-    if (prepared) fingerprint = prepared.fingerprint;
-    const existing = this.#activeEntries.get(sessionId);
-    const entryId = `${sessionId}#${++this.#nextEntryId}`;
-
-    // Case 1: No entry -> create
-    if (existing === undefined) {
-      const runtime = await this.#createRuntime({ sessionId, securityPolicy, metadata, configuration: prepared?.configuration });
-      const entry: CachedRuntimeEntry = {
-        entryId,
-        sessionId,
-        fingerprint: this.#cloneFingerprint(fingerprint),
-        runtime,
-        createdAt: Date.now(),
-        lastUsedAt: Date.now(),
-        borrowCount: 1,
-        suspended: false,
-        disposePending: false,
+    const operation = this.#acquisition.runExclusive(sessionId, async () => {
+      if (this.#closed) throw new Error("Runtime cache is closed.");
+      const epoch = this.#epochs.get(sessionId) ?? 0;
+      const prepared = await this.#prepare?.(sessionId, metadata);
+      if (prepared) fingerprint = prepared.fingerprint;
+      const ensureCurrent = () => {
+        if (this.#closed || epoch !== (this.#epochs.get(sessionId) ?? 0)) throw new Error("Runtime acquisition was invalidated.");
       };
-      this.#activeEntries.set(sessionId, entry);
-      this.#totalCreated++;
-      void this.#hookRegistry?.emit("session:cache:miss", {
-        sessionId,
-        entryId,
-        reason: "first-create",
-      });
-      return createCachedRuntimeProxy(runtime, this, { sessionId, entryId });
-    }
-
-    // Case 2: Entry exists but suspended or disposePending -> create new
-    if (existing.suspended || existing.disposePending) {
-      const runtime = await this.#createRuntime({ sessionId, securityPolicy, metadata, configuration: prepared?.configuration });
-      const entry: CachedRuntimeEntry = {
-        entryId,
-        sessionId,
-        fingerprint: this.#cloneFingerprint(fingerprint),
-        runtime,
-        createdAt: Date.now(),
-        lastUsedAt: Date.now(),
-        borrowCount: 1,
-        suspended: false,
-        disposePending: false,
-      };
-      if (!existing.disposePending) {
-        existing.disposePending = true;
-        this.#activeEntries.delete(sessionId);
-        this.#pendingEntries.set(existing.entryId, existing);
-        this.#pendingEvictReason.set(existing.entryId, "suspend");
-        if (existing.borrowCount === 0) {
-          await safeDispose(existing.runtime, this.#logWarning);
-          this.#totalDisposed++;
-          this.#emitEvict(existing);
-          this.#pendingEntries.delete(existing.entryId);
+      ensureCurrent();
+      // Retired runtimes may still own execution. Never construct a competing one.
+      if ([...this.#pendingEntries.values()].some((entry) => entry.sessionId === sessionId)) {
+        throw new Error("Session runtime is busy settling its previous owner.");
+      }
+      const existing = this.#activeEntries.get(sessionId);
+      let reason: "first-create" | "fingerprint-mismatch" | "suspended" = "first-create";
+      if (existing) {
+        let healthy = true;
+        try { await existing.runtime.validateExecutionHealth?.(); } catch { healthy = false; }
+        ensureCurrent();
+        if (healthy && !existing.suspended && !existing.disposePending && this.#fingerprintsEqual(existing.fingerprint, fingerprint)) {
+          existing.lastUsedAt = Date.now(); existing.borrowCount++;
+          this.#activeEntries.delete(sessionId); this.#activeEntries.set(sessionId, existing);
+          this.#totalReused++;
+          void this.#hookRegistry?.emit("session:cache:hit", { sessionId, entryId: existing.entryId, borrowCount: existing.borrowCount });
+          return createCachedRuntimeProxy(existing.runtime, this, { sessionId, entryId: existing.entryId });
         }
-      } else {
-        this.#activeEntries.delete(sessionId);
-        // Already in #pendingEntries from prior suspend
+        if (existing.borrowCount > 0) throw new Error("Session runtime is busy; apply changed configuration at a settled boundary.");
+        reason = healthy ? "fingerprint-mismatch" : "suspended";
+        // A failed/uncertain dispose retains this entry and the persisted claim.
+        if (!await safeDispose(existing.runtime, this.#logWarning)) throw new Error("Previous runtime cleanup is uncertain.");
+        ensureCurrent();
+        this.#pendingEvictReason.set(existing.entryId, "fingerprint-mismatch");
+        this.#activeEntries.delete(sessionId); this.#totalDisposed++; this.#emitEvict(existing);
       }
-      this.#activeEntries.set(sessionId, entry);
-      this.#totalCreated++;
-      void this.#hookRegistry?.emit("session:cache:miss", {
-        sessionId,
-        entryId,
-        reason: "suspended",
-      });
-      return createCachedRuntimeProxy(runtime, this, { sessionId, entryId });
-    }
-
-    // Case 3: Fingerprint mismatch -> create new, retire old
-    if (!this.#fingerprintsEqual(existing.fingerprint, fingerprint)) {
       const runtime = await this.#createRuntime({ sessionId, securityPolicy, metadata, configuration: prepared?.configuration });
-      const entry: CachedRuntimeEntry = {
-        entryId,
-        sessionId,
-        fingerprint: this.#cloneFingerprint(fingerprint),
-        runtime,
-        createdAt: Date.now(),
-        lastUsedAt: Date.now(),
-        borrowCount: 1,
-        suspended: false,
-        disposePending: false,
-      };
-      existing.disposePending = true;
-      this.#activeEntries.delete(sessionId);
-      this.#pendingEntries.set(existing.entryId, existing);
-      this.#pendingEvictReason.set(existing.entryId, "fingerprint-mismatch");
-      if (existing.borrowCount === 0) {
-        await safeDispose(existing.runtime, this.#logWarning);
-        this.#totalDisposed++;
-        this.#emitEvict(existing);
-        this.#pendingEntries.delete(existing.entryId);
-      }
-      this.#activeEntries.set(sessionId, entry);
-      this.#totalCreated++;
-      void this.#hookRegistry?.emit("session:cache:miss", {
-        sessionId,
-        entryId,
-        reason: "fingerprint-mismatch",
-      });
+      try { ensureCurrent(); await runtime.validateExecutionHealth?.(); ensureCurrent(); }
+      catch (error) { await runtime.dispose(); throw error; }
+      const entryId = `${sessionId}#${++this.#nextEntryId}`;
+      const entry: CachedRuntimeEntry = { entryId, sessionId, fingerprint: this.#cloneFingerprint(fingerprint), runtime,
+        createdAt: Date.now(), lastUsedAt: Date.now(), borrowCount: 1, suspended: false, disposePending: false };
+      this.#activeEntries.set(sessionId, entry); this.#totalCreated++;
+      void this.#hookRegistry?.emit("session:cache:miss", { sessionId, entryId, reason });
       return createCachedRuntimeProxy(runtime, this, { sessionId, entryId });
-    }
-
-    // Case 4: Cache hit -> reuse
-    this.#activeEntries.delete(sessionId);
-    existing.lastUsedAt = Date.now();
-    existing.borrowCount++;
-    this.#activeEntries.set(sessionId, existing);
-    this.#totalReused++;
-    void this.#hookRegistry?.emit("session:cache:hit", {
-      sessionId,
-      entryId: existing.entryId,
-      borrowCount: existing.borrowCount,
     });
-    return createCachedRuntimeProxy(existing.runtime, this, { sessionId, entryId: existing.entryId });
+    this.#acquiring.add(operation);
+    try { return await operation; } finally { this.#acquiring.delete(operation); }
   }
 
   async releaseLease(sessionId: string, entryId: string): Promise<void> {
@@ -271,7 +214,7 @@ export class RuntimeCache {
       }
       active.borrowCount--;
       if (active.disposePending && active.borrowCount === 0) {
-        await safeDispose(active.runtime, this.#logWarning);
+        if (!await safeDispose(active.runtime, this.#logWarning)) return;
         this.#totalDisposed++;
         this.#emitEvict(active);
         this.#activeEntries.delete(sessionId);
@@ -296,7 +239,7 @@ export class RuntimeCache {
       }
       pending.borrowCount--;
       if (pending.disposePending && pending.borrowCount === 0) {
-        await safeDispose(pending.runtime, this.#logWarning);
+        if (!await safeDispose(pending.runtime, this.#logWarning)) return;
         this.#totalDisposed++;
         this.#emitEvict(pending);
         this.#pendingEntries.delete(entryId);
@@ -311,6 +254,7 @@ export class RuntimeCache {
   }
 
   async suspend(sessionId: string, reason: string): Promise<void> {
+    this.#epochs.set(sessionId, (this.#epochs.get(sessionId) ?? 0) + 1);
     const entry = this.#activeEntries.get(sessionId);
     if (entry === undefined) return;
 
@@ -328,7 +272,7 @@ export class RuntimeCache {
     }
 
     if (entry.borrowCount === 0) {
-      await safeDispose(entry.runtime, this.#logWarning);
+      if (!await safeDispose(entry.runtime, this.#logWarning)) return;
       this.#totalDisposed++;
       this.#emitEvict(entry);
       this.#pendingEntries.delete(entry.entryId);
@@ -355,7 +299,7 @@ export class RuntimeCache {
         this.#activeEntries.delete(key);
         this.#pendingEntries.set(entry.entryId, entry);
         this.#pendingEvictReason.set(entry.entryId, "ttl");
-        await safeDispose(entry.runtime, this.#logWarning);
+        if (!await safeDispose(entry.runtime, this.#logWarning)) return;
         this.#totalDisposed++;
         this.#emitEvict(entry);
         this.#pendingEntries.delete(entry.entryId);
@@ -378,7 +322,7 @@ export class RuntimeCache {
         this.#activeEntries.delete(key);
         this.#pendingEntries.set(entry.entryId, entry);
         this.#pendingEvictReason.set(entry.entryId, "lru");
-        await safeDispose(entry.runtime, this.#logWarning);
+        if (!await safeDispose(entry.runtime, this.#logWarning)) return;
         this.#totalDisposed++;
         this.#emitEvict(entry);
         this.#pendingEntries.delete(entry.entryId);
@@ -394,6 +338,8 @@ export class RuntimeCache {
   }
 
   async disposeAll(): Promise<void> {
+    this.#closed = true;
+    await Promise.allSettled([...this.#acquiring]);
     const promises: Promise<void>[] = [];
     const pendingToDispose: CachedRuntimeEntry[] = [];
 
@@ -413,7 +359,8 @@ export class RuntimeCache {
       if (entry.borrowCount === 0) {
         promises.push(
           safeDispose(entry.runtime, this.#logWarning)
-            .then(() => {
+            .then((disposed) => {
+              if (!disposed) return;
               this.#totalDisposed++;
               this.#emitEvict(entry);
               this.#pendingEntries.delete(entry.entryId);
@@ -432,7 +379,8 @@ export class RuntimeCache {
       }
       promises.push(
         safeDispose(entry.runtime, this.#logWarning)
-          .then(() => {
+          .then((disposed) => {
+            if (!disposed) return;
             this.#totalDisposed++;
             this.#emitEvict(entry);
             this.#pendingEntries.delete(entry.entryId);
