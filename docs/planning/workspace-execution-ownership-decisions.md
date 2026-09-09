@@ -199,3 +199,9 @@ A small Desktop proof may use an existing configured profile and local target af
 12. Packaged Desktop quit/relaunch, compatible CLI attachment, explicit supervisor restart, and incompatible binary/schema detection preserve the documented lifetime and ownership rules.
 
 Run focused integration tests for these cases as their behavior ships, followed by each plan's release validation. The current planning change requires link/contract consistency and whitespace checks only; it does not implement or validate these future guarantees.
+
+## PR 4 implementation boundary
+
+Core Session claims/fences, singleton acquisition, Unix private control, durable operation receipts, current runtime authority and compatible checkpoint recovery are implemented. See the [implementation record](workspace-execution-pr4.md) and [runtime operations](../operations/runtime-ownership.md). Cancellation acknowledgement is explicitly not termination confirmation. Foreground transfer currently means settled disposal followed by explicit acquisition, never live resource migration. Direct skill-file edits load on reconstruction. On-demand startup uses the existing supervisor/service ownership; it does not add idle shutdown or automatic service installation.
+
+The conformance list above spans this core slice and later consumers. Signed Desktop lifecycle, multi-window/channel attachment and profile switching need the Desktop/PR 5 integration proof; Windows needs protected named pipes. Those cases are not claimed as locally validated by the core tests. No Electron scheduler or duplicate execution database was introduced.

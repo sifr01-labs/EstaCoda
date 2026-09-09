@@ -1,6 +1,6 @@
 # Workspace and execution implementation plan
 
-Status: PR 0, PR 1, PR 2 and PR 3 are implemented on `ame/execution-baseline`; later slices remain proposed. See the [PR 1 implementation and validation record](workspace-execution-pr1.md), [PR 2 implementation and validation record](workspace-execution-pr2.md), [PR 3 implementation and validation record](workspace-execution-pr3.md), and [implemented workspace behavior](../operations/workspaces.md). This plan replaces the earlier workspace/Docker roadmap for this workstream.
+Status: PR 0, PR 1, PR 2, PR 3 and PR 4 are implemented on `ame/execution-baseline`; later slices remain proposed. See the [PR 1 implementation and validation record](workspace-execution-pr1.md), [PR 2 implementation and validation record](workspace-execution-pr2.md), [PR 3 implementation and validation record](workspace-execution-pr3.md), [PR 4 implementation and validation record](workspace-execution-pr4.md), and [implemented workspace behavior](../operations/workspaces.md). This plan replaces the earlier workspace/Docker roadmap for this workstream.
 
 Shared contract and ownership decisions are defined in [Shared workspace, target, and execution ownership decisions](workspace-execution-ownership-decisions.md). That document is authoritative for overlap with the Desktop plan: core target bindings, supervisor ownership, private control transport, handoff, and recovery. Its cross-process ownership, control transport and Docker contracts remain proposed work, not shipped guarantees.
 
@@ -271,6 +271,8 @@ Handle spawn errors, aborts, timeout escalation, output floods, and descendants.
 Acceptance: files, shell, background processes, and Python harness share the selected execution view; no silent host escape path remains to be inherited by Docker; routine host workflows remain usable.
 
 ### PR 4 — Runtime coordinator, live trust, and compatible recovery
+
+Status: implemented in thirteen commits on the existing `ame/execution-baseline` branch, as requested. See [acquisition, control and recovery limits](../operations/runtime-ownership.md) and the [validation record](workspace-execution-pr4.md). The branch below remains the original proposed slice name.
 
 Branch: `ame/runtime-coordinator`
 

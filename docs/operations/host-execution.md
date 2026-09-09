@@ -1,6 +1,6 @@
 # Host execution and lifecycle
 
-PR 3 supplies the host execution lease used by the core runtime. It runs on the operator's machine and does not provide filesystem, network, or operating-system containment. Workspace trust, command approvals and the hardline floor still apply. Docker and exclusive cross-process Session ownership are later slices.
+PR 3 supplies the host execution lease used by the core runtime. It runs on the operator's machine and does not provide filesystem, network, or operating-system containment. Workspace trust, command approvals and the hardline floor still apply. PR 4 adds [exclusive cross-process Session ownership and shared control](runtime-ownership.md). Docker remains a later slice.
 
 ## Ownership and execution view
 

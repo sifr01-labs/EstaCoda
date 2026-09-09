@@ -159,3 +159,7 @@ Security note: this PR documents sensitive boundaries and adds isolated local te
 ## PR 2 follow-up
 
 PR 2 is implemented on the same branch; see its [review and validation record](workspace-execution-pr2.md). B08 is closed: environment labels no longer reduce destructive-local classification. B09's local/channel grant scope and revision gap is closed; extending reusable workflow authorization to cron, recurring Tasks and delegation remains PR 5 work. B01, B02 and B04 still require the PR 4 execution coordinator. The historical PR 0 measurements and findings above remain unchanged; no latency or production-cost improvement is inferred from the new tests.
+
+## PR 4 follow-up
+
+PR 4 closes B01 (serialized cache construction/cleanup), B02 (atomic singleton acquisition; no live-owner TTL takeover), B04 (persisted Session claims and fences) and B05 (current gateway configuration/trust with appropriate runtime replacement). B01/B02 characterizations now assert the fixed behavior; B04 retains the distinction between local registries and authority and gains an independent-process exclusion/recovery test. See the [PR 4 review record](workspace-execution-pr4.md) and [operational limits](../operations/runtime-ownership.md). Historical PR 0 measurements and the earlier status paragraphs above remain historical; no new latency, cost or model-quality benchmark is inferred.
