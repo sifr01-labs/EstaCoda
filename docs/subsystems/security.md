@@ -108,7 +108,7 @@ Core dangerous host patterns include:
 - `git push --force`, `git push -f`, and `git reset --hard`
 - Docker prune, Kubernetes delete, and Terraform destroy commands
 
-Hardline patterns are never bypassed by environment type. Non-host/container execution may bypass only non-hardline `destructive-local` command-safety detections.
+Environment type is compatibility metadata only. Every label receives the same command-safety classification; none bypasses destructive-local detections or the hardline floor. Core runtime host facts explicitly report the absence of containment. Unsupported mandatory execution controls block construction.
 
 ## Approval Scopes
 
@@ -118,9 +118,9 @@ Hardline patterns are never bypassed by environment type. Non-host/container exe
 | `session` | Until session ends |
 | `always` | Persisted until revoked |
 
-Persistent approvals match on normalized `targetKey` values, including operation type and normalized targets.
+Persistent approvals match the tool, risk and normalized `targetKey` under the same profile, surface, canonical workspace and verified host authority. Session grants also require the same Session/process. One-time grants additionally bind the exact action. Unknown legacy scopes remain inactive; repeat the intended action at the normal approval boundary to renew a Session or persistent grant.
 
-Persistent approvals do not override hardline command blocks. The hardline check is evaluated before grants are considered.
+Persistent approvals do not override hardline command blocks, deterministic denials or workspace trust. Authorization is rechecked before dispatch, and revoke/regrant cannot revive an already assessed action. Existing JSON stores coordinate revisioned writes across processes. See [Execution authority and approval reuse](../operations/execution-approvals.md) for renewal, Task/ACP behavior, storage and the remaining ownership limits.
 
 ## Workspace Trust
 

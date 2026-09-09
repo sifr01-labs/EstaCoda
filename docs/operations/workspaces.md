@@ -63,8 +63,12 @@ Back up runtime state before upgrading, with all EstaCoda processes stopped. Pre
 
 Profile IDs remain ownership boundaries. Renaming a profile directory does not migrate historical Session/Task ownership or embedded workspace/target profile IDs. Keep the owning profile ID when continuing existing work; cross-profile migration is outside this slice.
 
+## Execution approvals
+
+Workspace selection also supplies core-verified host facts for approval scope. Alias changes preserve equivalent authority; changing the actual workspace does not carry a grant with it. See [Execution authority and approval reuse](execution-approvals.md) for exact-action approval, persistent reuse, legacy renewal and revocation. Host facts do not claim containment.
+
 ## Limits and verification
 
-This slice validates profile/workspace ownership and coordinates persistent registry writes. It does not implement cross-process exclusive execution, shared supervisor control IPC, live trust revocation, managed worktrees, Docker, or containment. Two clients passing the same workspace check do not thereby acquire a single execution owner. Those guarantees require the later ownership and environment work.
+The implemented workspace and authority slices validate profile/workspace ownership, recheck Session/target ownership before dispatch, and coordinate persistent registry/approval writes. They do not implement cross-process exclusive execution, shared supervisor control IPC, continuous revocation/termination of already dispatched work, managed worktrees, Docker, or containment. Two clients passing the same workspace check do not thereby acquire a single execution owner. Those guarantees require the later ownership and environment work.
 
 Coverage includes independent-process alias/move/target/Session races, legacy database reopening, canonical path aliases, trust separation, immutable Session/Task bindings, CLI and channel pointer preservation, and ACP rejection before transcript replay. The session-continuation smoke case uses real temporary directories and SQLite targets. These are local deterministic tests, not live-provider, Desktop or multi-tenant isolation evidence.

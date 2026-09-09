@@ -154,3 +154,8 @@ The standard validation commands are those in `AGENTS.md`. Record actual outcome
 Focused validation: 15/15 tests across both new test files. The full suite used a clean detached checkout with only the reviewed fixture files added; unrelated operator files were excluded. Local test and measurement runners removed secret-named environment variables and used `CI=true`. CI's Node 22.18.0 lane and other operating systems were not run locally. Known gaps B01–B09 remain follow-up work, not failures of these documented baseline acceptance criteria.
 
 Security note: this PR documents sensitive boundaries and adds isolated local test/measurement consumers. It grants no new execution authority, changes no persisted production schema, installs no capability/service, and makes no production credential request. Runtime fixes and migration/downgrade decisions remain in subsequent PRs.
+
+
+## PR 2 follow-up
+
+PR 2 is implemented on the same branch; see its [review and validation record](workspace-execution-pr2.md). B08 is closed: environment labels no longer reduce destructive-local classification. B09's local/channel grant scope and revision gap is closed; extending reusable workflow authorization to cron, recurring Tasks and delegation remains PR 5 work. B01, B02 and B04 still require the PR 4 execution coordinator. The historical PR 0 measurements and findings above remain unchanged; no latency or production-cost improvement is inferred from the new tests.

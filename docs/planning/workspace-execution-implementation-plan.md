@@ -1,6 +1,6 @@
 # Workspace and execution implementation plan
 
-Status: PR 0 and PR 1 are implemented on `ame/execution-baseline`; later slices remain proposed. See the [PR 1 implementation and validation record](workspace-execution-pr1.md) and [implemented workspace behavior](../operations/workspaces.md). This plan replaces the earlier workspace/Docker roadmap for this workstream.
+Status: PR 0, PR 1 and PR 2 are implemented on `ame/execution-baseline`; later slices remain proposed. See the [PR 1 implementation and validation record](workspace-execution-pr1.md), [PR 2 implementation and validation record](workspace-execution-pr2.md), and [implemented workspace behavior](../operations/workspaces.md). This plan replaces the earlier workspace/Docker roadmap for this workstream.
 
 Shared contract and ownership decisions are defined in [Shared workspace, target, and execution ownership decisions](workspace-execution-ownership-decisions.md). That document is authoritative for overlap with the Desktop plan: core target bindings, supervisor ownership, private control transport, handoff, and recovery. Its later ownership/environment contracts remain proposed work, not shipped guarantees.
 
@@ -230,7 +230,7 @@ Acceptance: normal launch behavior is unchanged; aliases work; renames preserve 
 
 ### PR 2 — Verified authority and reusable approvals
 
-Branch: `ame/scoped-execution-authority`
+Implemented on `ame/execution-baseline`, continuing PR 1 at the operator's request. The original proposed branch was `ame/scoped-execution-authority`. See the [implementation record](workspace-execution-pr2.md).
 
 Commits:
 
