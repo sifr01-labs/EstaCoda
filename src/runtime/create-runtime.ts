@@ -1,7 +1,7 @@
+import { HostEnvironment } from "../execution/host-environment.js";
 import { withDispatchAuthorization, validateDispatchAuthorization } from "../security/dispatch-authorization.js";
 import { assertPendingAction, type PendingActionApproval } from "../security/pending-action-approval.js";
 import { localApprovalScope } from "../security/approval-scope.js";
-import { verifyHostExecution } from "../execution/host-authority.js";
 import type { HostExecutionFacts, RequestedExecutionPolicy } from "../contracts/execution-authority.js";
 import { ensureRuntimeSession, validateSessionWorkspaceOwnership } from "../session/session-workspace-ownership.js";
 import { resolveWorkspaceDirectory } from "../workspaces/workspace-registry.js";
@@ -432,10 +432,12 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   });
   const closeSessionDbOnDispose = options.closeSessionDbOnDispose ?? true;
   const workspaceRoot = (await resolveWorkspaceDirectory(options.workspaceRoot ?? process.cwd())).canonicalPath;
-  const executionFacts = await verifyHostExecution(workspaceRoot, options.requestedExecutionPolicy);
+  const hostEnvironment = await HostEnvironment.create({ profileId, workspaceRoot, policy: options.requestedExecutionPolicy });
+  const executionFacts = hostEnvironment.facts;
   await ensureRuntimeSession({ sessionDb, sessionId, profileId, workspaceRoot, homeDir: options.homeDir,
     durable: sessionDb instanceof SQLiteSessionDB, sourceWorkspace: options.sourceWorkspace,
     allowLegacyLocalBinding: options.allowLegacyLocalBinding, metadata: options.sessionMetadata, spendingLimit: options.budgets?.session });
+  const executionLease = hostEnvironment.acquire({ profileId, sessionId, surface: String(options.sessionMetadata?.originSurface ?? "local") });
   const taskWorkspace = taskStore === undefined ? undefined : await resolveTaskWorkspaceBinding(workspaceRoot);
   const localSkillsRoot = options.localSkillsRoot ?? profilePaths.skillsPath;
   const profileMemoryRoot = profilePaths.profileRoot;
@@ -1022,6 +1024,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       audioCacheRoot,
       audioTempRoot,
       imageCacheRoot,
+      executionLease,
       workspaceFsAdapter: options.workspaceFsAdapter,
       webFetch: options.webFetch,
       enableWebNetwork: options.enableWebNetwork,
@@ -1452,6 +1455,8 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         return;
       }
       disposed = true;
+      await executionLease.release();
+      hostEnvironment.destroy();
       secretBroker.dispose();
       unregisterBrowserEmergencyCleanup?.();
       browserSessionLifecycle?.stop();

@@ -143,6 +143,7 @@ export type AgentLoopToolRegistryFilter = (
 ) => AgentLoopToolRegistryFilterResult;
 
 export type AgentLoopRuntimeSubstrate = {
+  executionLease?: SessionToolContext["executionLease"];
   workspaceRoot: string;
   homeDir: string | undefined;
   stateRoot: string;

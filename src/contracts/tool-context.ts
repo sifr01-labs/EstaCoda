@@ -12,6 +12,7 @@ export type RuntimeToolContext = {
 };
 
 export type SessionToolContext = {
+  executionLease?: import("../execution/host-environment.js").HostExecutionLease;
   workspaceRoot: string;
   profileId: string;
   sessionId: string;
