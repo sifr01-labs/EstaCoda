@@ -1,10 +1,14 @@
-import { chmod, mkdir, open, readFile, rm, stat } from "node:fs/promises";
+import { readFile } from "node:fs/promises";
+import { chmodSync, lstatSync, mkdirSync, readFileSync, writeFileSync, unlinkSync } from "node:fs";
+import { randomUUID } from "node:crypto";
+import { openDefaultSQLiteDatabase } from "../storage/factory.js";
+import { processDefinitelyAbsent } from "../session/execution-ownership.js";
 import { join } from "node:path";
-import { isPidAlive } from "./pid-file.js";
 
 export type GatewayLockResult = {
   acquired: boolean;
   stale?: boolean;
+  instanceId?: string;
 };
 
 export type GatewayLockInspection =
@@ -19,6 +23,7 @@ const DEFAULT_STALE_TIMEOUT_MS = 30_000; // 30 seconds
 type LockFileContent = {
   pid: number;
   startedAt: string;
+  instanceId?: string;
 };
 
 type GatewayStateHome = string | { gatewayStatePath: string };
@@ -39,7 +44,7 @@ async function readLock(stateHome: GatewayStateHome): Promise<{ content: LockFil
     if (typeof parsed.pid === "number" && typeof parsed.startedAt === "string") {
       const lockedAt = Date.parse(parsed.startedAt);
       if (!Number.isNaN(lockedAt)) {
-        return { content: { pid: parsed.pid, startedAt: parsed.startedAt }, lockedAt: new Date(lockedAt) };
+        return { content: { pid: parsed.pid, startedAt: parsed.startedAt, instanceId: parsed.instanceId }, lockedAt: new Date(lockedAt) };
       }
     }
     return undefined;
@@ -48,57 +53,50 @@ async function readLock(stateHome: GatewayStateHome): Promise<{ content: LockFil
   }
 }
 
+const ownedInstances = new Map<string, string>();
+function openOwnership(stateHome: GatewayStateHome) {
+  const directory = gatewayDir(stateHome);
+  mkdirSync(directory, { recursive: true, mode: 0o700 });
+  if (lstatSync(directory).isSymbolicLink()) throw new Error("Gateway state must not be a symbolic link.");
+  chmodSync(directory, 0o700);
+  const path = join(directory, "singleton.sqlite");
+  for (const candidate of [path, `${path}-wal`, `${path}-shm`, lockPath(stateHome)]) {
+    try { if (lstatSync(candidate).isSymbolicLink()) throw new Error("Gateway ownership files must not be symbolic links."); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+  }
+  const db = openDefaultSQLiteDatabase({ path });
+  chmodSync(path, 0o600);
+  db.exec("create table if not exists singleton (id integer primary key check(id=1), instance_id text not null, pid integer not null)");
+  return db;
+}
+
 export async function acquireGatewayLock(
   stateHome: GatewayStateHome,
-  staleTimeoutMs: number = DEFAULT_STALE_TIMEOUT_MS
+  _staleTimeoutMs: number = DEFAULT_STALE_TIMEOUT_MS
 ): Promise<GatewayLockResult> {
-  const path = lockPath(stateHome);
-  await mkdir(gatewayDir(stateHome), { recursive: true });
-
+  const db = openOwnership(stateHome);
+  db.exec("begin immediate");
   try {
-    // Try to create the lock file exclusively (atomic)
-    const handle = await open(path, "wx", 0o600);
-    const content: LockFileContent = { pid: process.pid, startedAt: new Date().toISOString() };
-    await handle.writeFile(JSON.stringify(content), "utf8");
-    await handle.close();
-    await chmod(path, 0o600);
-    return { acquired: true, stale: false };
-  } catch (error) {
-    const code = error instanceof Error && "code" in error ? String((error as { code?: unknown }).code) : "";
-    if (code !== "EEXIST") {
-      throw error;
+    const row = db.query<{ instance_id: string; pid: number }>("select * from singleton where id=1").get();
+    if (row && !processDefinitelyAbsent(row.pid)) { db.exec("commit"); return { acquired: false, stale: false }; }
+    let legacy: LockFileContent | undefined;
+    try {
+      legacy = JSON.parse(readFileSync(lockPath(stateHome), "utf8"));
+      if (!legacy || !processDefinitelyAbsent(legacy.pid)) { db.exec("commit"); return { acquired: false, stale: false }; }
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code !== "ENOENT") { db.exec("commit"); return { acquired: false, stale: false }; }
     }
-
-    // Lock exists - check if stale
-    const lock = await readLock(stateHome);
-    if (lock === undefined) {
-      // Corrupt lock file - treat as stale and reclaim
-      await rm(path, { force: true });
-      const handle = await open(path, "wx", 0o600);
-      const content: LockFileContent = { pid: process.pid, startedAt: new Date().toISOString() };
-      await handle.writeFile(JSON.stringify(content), "utf8");
-      await handle.close();
-      await chmod(path, 0o600);
-      return { acquired: true, stale: true };
-    }
-
-    const elapsed = Date.now() - lock.lockedAt.getTime();
-    const pidDead = !isPidAlive(lock.content.pid);
-
-    if (elapsed > staleTimeoutMs || pidDead) {
-      // Stale lock - reclaim
-      await rm(path, { force: true });
-      const handle = await open(path, "wx", 0o600);
-      const content: LockFileContent = { pid: process.pid, startedAt: new Date().toISOString() };
-      await handle.writeFile(JSON.stringify(content), "utf8");
-      await handle.close();
-      await chmod(path, 0o600);
-      return { acquired: true, stale: true };
-    }
-
-    // Lock is still fresh
-    return { acquired: false, stale: false };
-  }
+    const instanceId = randomUUID();
+    db.query("insert or replace into singleton values (1, ?, ?)").run(instanceId, process.pid);
+    // Short local discovery publication is serialized with claim/cleanup. No
+    // provider, process launch or asynchronous work runs inside this transaction.
+    writeFileSync(lockPath(stateHome), JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString(), instanceId }), { mode: 0o600 });
+    chmodSync(lockPath(stateHome), 0o600);
+    db.exec("commit");
+    ownedInstances.set(lockPath(stateHome), instanceId);
+    return { acquired: true, stale: Boolean(row || legacy), instanceId };
+  } catch (error) { db.exec("rollback"); throw error; }
+  finally { db.close(); }
 }
 
 export async function readGatewayLockContent(stateHome: GatewayStateHome): Promise<LockFileContent | undefined> {
@@ -139,33 +137,35 @@ export async function inspectGatewayLockState(
     return { state: "malformed", error: "invalid startedAt" };
   }
 
-  const elapsed = Date.now() - lockedAt;
-  if (elapsed > staleTimeoutMs) {
-    return { state: "stale", pid: content.pid, startedAt: content.startedAt, reason: "expired" };
-  }
-
-  if (!isPidAlive(content.pid)) {
+  if (processDefinitelyAbsent(content.pid)) {
     return { state: "stale", pid: content.pid, startedAt: content.startedAt, reason: "pid-dead" };
   }
 
   return { state: "active", pid: content.pid, startedAt: content.startedAt };
 }
 
-export async function releaseGatewayLock(stateHome: GatewayStateHome): Promise<void> {
-  await rm(lockPath(stateHome), { force: true });
+export async function releaseGatewayLock(stateHome: GatewayStateHome, instanceId = ownedInstances.get(lockPath(stateHome))): Promise<void> {
+  const db = openOwnership(stateHome);
+  db.exec("begin immediate");
+  try {
+    const row = db.query<{ instance_id: string; pid: number }>("select instance_id, pid from singleton where id=1").get();
+    let discovery: LockFileContent | undefined;
+    try { discovery = JSON.parse(readFileSync(lockPath(stateHome), "utf8")); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+    const owned = instanceId !== undefined && row?.instance_id === instanceId;
+    const dead = instanceId === undefined && (!row || processDefinitelyAbsent(row.pid)) &&
+      discovery !== undefined && processDefinitelyAbsent(discovery.pid);
+    if (owned || dead) {
+      if (discovery && (dead || discovery.instanceId === instanceId)) unlinkSync(lockPath(stateHome));
+      db.query("delete from singleton where id=1 and instance_id=?").run(row?.instance_id ?? "");
+      if (ownedInstances.get(lockPath(stateHome)) === instanceId) ownedInstances.delete(lockPath(stateHome));
+    }
+    db.exec("commit");
+  } catch (error) { db.exec("rollback"); throw error; }
+  finally { db.close(); }
 }
 
-export async function isStaleLock(stateHome: GatewayStateHome, staleTimeoutMs: number = DEFAULT_STALE_TIMEOUT_MS): Promise<boolean> {
-  try {
-    await stat(lockPath(stateHome));
-  } catch {
-    return false;
-  }
-
+export async function isStaleLock(stateHome: GatewayStateHome, _staleTimeoutMs: number = DEFAULT_STALE_TIMEOUT_MS): Promise<boolean> {
   const lock = await readLock(stateHome);
-  if (lock === undefined) return true; // corrupt = stale
-
-  const elapsed = Date.now() - lock.lockedAt.getTime();
-  const pidDead = !isPidAlive(lock.content.pid);
-  return elapsed > staleTimeoutMs || pidDead;
+  return lock !== undefined && processDefinitelyAbsent(lock.content.pid);
 }

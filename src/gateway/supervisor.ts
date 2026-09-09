@@ -324,6 +324,7 @@ export type SupervisorInternalState = {
   homeDir: string;
   stateHome: ProfileStatePaths;
   gatewayLockAcquired: boolean;
+  gatewayInstanceId?: string;
   acquiredIdentityLocks: AcquiredIdentityLock[];
   channelGateway: ChannelGateway | undefined;
   sessionDb: SQLiteSessionDB | undefined;
@@ -646,7 +647,7 @@ async function cleanupSupervisorStartupResources(state: SupervisorInternalState)
 
   // 8. Release gateway lock ONLY if we acquired it
   if (state.gatewayLockAcquired) {
-    try { await releaseGatewayLock(state.stateHome); } catch { /* ignore */ }
+    try { await releaseGatewayLock(state.stateHome, state.gatewayInstanceId); } catch { /* ignore */ }
   }
 
   // 9. Remove signal handlers so they do not accumulate across tests or invocations
@@ -728,6 +729,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
     };
   }
   state.gatewayLockAcquired = true;
+  state.gatewayInstanceId = lockResult.instanceId;
 
   // 3. PID / state write
   await writeGatewayPid(profilePaths, { pid: process.pid, startedAt, version, profileId });

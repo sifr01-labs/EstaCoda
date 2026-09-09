@@ -200,6 +200,25 @@ describe("gateway state primitives", () => {
       expect(result.acquired).toBe(false);
     });
 
+    it("does not steal an expired live owner or remove a successor with an old instance", async () => {
+      const first = await acquireGatewayLock(tmpDir);
+      expect((await acquireGatewayLock(tmpDir, -1)).acquired).toBe(false);
+      expect(await isStaleLock(tmpDir, -1)).toBe(false);
+      await releaseGatewayLock(tmpDir, first.instanceId);
+      const second = await acquireGatewayLock(tmpDir);
+      await releaseGatewayLock(tmpDir, first.instanceId);
+      expect((await acquireGatewayLock(tmpDir)).acquired).toBe(false);
+      await releaseGatewayLock(tmpDir, second.instanceId);
+    });
+
+    it("keeps malformed ownership evidence busy", async () => {
+      const dir = join(tmpDir, ".estacoda", "gateway");
+      await mkdir(dir, { recursive: true });
+      await writeFile(join(dir, "gateway.lock"), "incomplete");
+      expect((await acquireGatewayLock(tmpDir)).acquired).toBe(false);
+      expect(await isStaleLock(tmpDir)).toBe(false);
+    });
+
     it("release allows re-acquire", async () => {
       await acquireGatewayLock(tmpDir);
       await releaseGatewayLock(tmpDir);
