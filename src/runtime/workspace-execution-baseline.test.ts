@@ -20,8 +20,8 @@ import { createRuntime, type Runtime } from "./create-runtime.js";
 import { RuntimeCache } from "./runtime-cache.js";
 import type { RuntimeFingerprint } from "./runtime-fingerprint.js";
 
-// PR 0 records current behavior. B01–B04/B08 are known gaps, NOT desired
-// contracts: replace their observed-gap assertions in the corresponding fix PR.
+// PR 0 baseline assertions become regression contracts as their fixes land.
+// Persisted cross-process exclusion is covered in execution-ownership.test.ts.
 // See docs/planning/workspace-execution-baseline.md. No real command is approved
 // or executed by the policy-only cases below.
 describe("workspace execution baseline", () => {
@@ -98,7 +98,7 @@ describe("workspace execution baseline", () => {
     expect(result.deterministicRule).toBe("destructive-delete-root-or-broad-path");
   });
 
-  it("B01 observed gap: concurrent cold cache acquisitions lose one cleanup reference", async () => {
+  it("B01 fixed: concurrent cold acquisitions share one runtime and cleanup", async () => {
     const created: Array<{ disposeCount: number }> = [];
     let release!: () => void;
     const barrier = new Promise<void>((resolve) => { release = resolve; });
@@ -116,18 +116,18 @@ describe("workspace execution baseline", () => {
     const borrowers = await Promise.all(pending);
     for (const borrower of borrowers) await borrower.dispose();
     await cache.disposeAll();
-    expect(created).toHaveLength(2);
-    expect(created.map((state) => state.disposeCount).sort()).toEqual([0, 1]);
+    expect(created).toHaveLength(1);
+    expect(created.map((state) => state.disposeCount).sort()).toEqual([1]);
     expect(cache.stats().totalEntries).toBe(0);
   });
 
-  it("B02 observed gap: a sufficiently old lock can be reclaimed while its PID is live", async () => {
+  it("B02 fixed: age never permits reclaiming a live owner", async () => {
     const state = { gatewayStatePath: join(root, "gateway") };
     await mkdir(state.gatewayStatePath);
     await writeFile(join(state.gatewayStatePath, "gateway.lock"), JSON.stringify({
       pid: process.pid, startedAt: new Date(Date.now() - 60_000).toISOString()
     }));
-    expect(await acquireGatewayLock(state)).toEqual({ acquired: true, stale: true });
+    expect(await acquireGatewayLock(state)).toEqual({ acquired: false, stale: false });
     // Fresh live locks are respected; this separates the age branch from all locks.
     expect(await acquireGatewayLock(state)).toEqual({ acquired: false, stale: false });
   });
@@ -159,7 +159,7 @@ describe("workspace execution baseline", () => {
     }
   });
 
-  it("B04 observed gap: independent active-turn registries do not share session exclusion", () => {
+  it("B04: active-turn registries are local bookkeeping, not cross-process authority", () => {
     const first = new ActiveTurnRegistry();
     const second = new ActiveTurnRegistry();
     expect(first.startTurn("same").ok).toBe(true);

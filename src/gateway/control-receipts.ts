@@ -1,3 +1,4 @@
+import { processDefinitelyAbsent } from "../session/execution-ownership.js";
 import { randomUUID } from "node:crypto";
 import type { SQLiteDatabase } from "../storage/sqlite.js";
 import { validatePrivateControlRequest, type PrivateControlRequest } from "./private-control.js";
@@ -68,6 +69,13 @@ export class ControlReceipts {
       if (count >= 10_000) throw new Error("Control receipt retention capacity reached.");
       const session = this.db.query<{ target: string; profile_id: string; ended_at: string | null }>("select profile_id, ended_at, json_extract(execution_target_json, '$.targetId') as target from sessions where id=?").get(request.sessionId);
       if (!session || session.profile_id !== this.profileId || session.target !== request.targetId || session.ended_at) throw new Error("Control Session binding changed.");
+      const owner = this.db.query<{ owner_id: string | null; owner_pid: number | null }>(
+        "select owner_id, owner_pid from session_execution_owners where session_id=?"
+      ).get(request.sessionId);
+      if (owner?.owner_id && owner.owner_pid !== process.pid && !processDefinitelyAbsent(owner.owner_pid ?? 0)) throw new Error("Session is owned by another process; wait for a settled handoff.");
+      if (request.method !== "send") this.db.query(`update session_execution_owners set control_revision=control_revision+1
+        where session_id=? and profile_id=? and target_id=? and owner_pid=? and owner_id is not null`)
+        .run(request.sessionId, this.profileId, request.targetId, process.pid);
       const eventId = randomUUID(), now = Date.now();
       this.db.query("insert into session_events values (?, ?, ?, ?)").run(eventId, request.sessionId, new Date(now).toISOString(), JSON.stringify({ type: "private-control-input", payload: binding }));
       this.db.query("insert into session_control_receipts values (?, ?, ?, ?, ?, ?, ?, ?, 'accepted', ?, null)")

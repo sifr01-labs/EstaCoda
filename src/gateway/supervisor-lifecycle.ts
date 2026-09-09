@@ -2,18 +2,16 @@ import { chmod, rm, readFile, writeFile, mkdir } from "node:fs/promises";
 import { join } from "node:path";
 import {
   readGatewayPid,
-  removeGatewayPid,
   isPidAlive,
   type GatewayPidContent,
 } from "./pid-file.js";
 import {
   readGatewayState,
-  removeGatewayState,
   cleanupStaleGatewayState,
 } from "./supervisor-state.js";
 import {
+  cleanupDeadGatewayMetadata,
   isStaleLock,
-  releaseGatewayLock,
   readGatewayLockContent,
 } from "./gateway-lock.js";
 
@@ -136,20 +134,6 @@ async function waitForPidExit(
   return !isPidAlive(pid);
 }
 
-async function removeLockIfSafe(stateHome: GatewayStateHome, stoppedPid: number): Promise<void> {
-  const lockContent = await readGatewayLockContent(stateHome);
-  if (lockContent === undefined) {
-    // Corrupt or missing lock — safe to remove via releaseGatewayLock (rm -f)
-    await releaseGatewayLock(stateHome);
-    return;
-  }
-  const stale = await isStaleLock(stateHome);
-  if (stale || lockContent.pid === stoppedPid) {
-    await releaseGatewayLock(stateHome);
-  }
-  // Otherwise: healthy lock owned by a different PID — do NOT remove.
-}
-
 async function cleanupNoPidFile(stateHome: GatewayStateHome): Promise<StopResult> {
   const lockContent = await readGatewayLockContent(stateHome);
   const stale = await isStaleLock(stateHome);
@@ -159,40 +143,18 @@ async function cleanupNoPidFile(stateHome: GatewayStateHome): Promise<StopResult
     return { ok: true, action: "was_not_running", liveLock: true };
   }
 
-  // No lock or stale/corrupt lock — safe to clean up stray state.
-  await removeGatewayState(stateHome);
-  if (stale) {
-    await releaseGatewayLock(stateHome);
-  }
-  return { ok: true, action: "was_not_running" };
-}
-
-async function cleanupInvalidPidFile(stateHome: GatewayStateHome): Promise<StopResult> {
-  const lockContent = await readGatewayLockContent(stateHome);
-  const stale = await isStaleLock(stateHome);
-
-  // Always remove the corrupt PID file.
-  await removeGatewayPid(stateHome);
-
-  if (lockContent !== undefined && !stale) {
-    // Live lock held by another process — preserve state and lock.
-    return { ok: true, action: "was_not_running", liveLock: true };
-  }
-
-  // No lock or stale/corrupt lock — safe to clean up state.
-  await removeGatewayState(stateHome);
-  if (stale) {
-    await releaseGatewayLock(stateHome);
-  }
+  // Cleanup rechecks ownership atomically; ambiguous metadata is preserved.
+  await cleanupDeadGatewayMetadata(stateHome);
   return { ok: true, action: "was_not_running" };
 }
 
 export async function signalGateway(
   stateHome: GatewayStateHome,
-  signal: NodeJS.Signals | number
+  signal: NodeJS.Signals | number,
+  expected?: GatewayPidContent
 ): Promise<SignalResult> {
   const pidContent = await readGatewayPid(stateHome);
-  if (pidContent === undefined || !isPidAlive(pidContent.pid)) {
+  if (pidContent === undefined || (expected && (expected.pid !== pidContent.pid || expected.startedAt !== pidContent.startedAt)) || !isPidAlive(pidContent.pid)) {
     return { ok: false, reason: "not_running" };
   }
 
@@ -239,7 +201,7 @@ export async function stopGateway(
   }
 
   // Case 3: Alive process — attempt graceful stop.
-  const sigResult = await signalGateway(stateHome, "SIGTERM");
+  const sigResult = await signalGateway(stateHome, "SIGTERM", pidContent);
   if (!sigResult.ok) {
     if (sigResult.reason === "permission_denied") {
       return {
@@ -249,18 +211,14 @@ export async function stopGateway(
       };
     }
     // not_running — process died between read and signal
-    await removeGatewayPid(stateHome);
-    await removeGatewayState(stateHome);
-    await removeLockIfSafe(stateHome, pidContent.pid);
+    await cleanupDeadGatewayMetadata(stateHome, pidContent.pid);
     return { ok: true, action: "was_not_running", pid: pidContent.pid };
   }
 
   const exited = await waitForPidExit(pidContent.pid, gracefulTimeoutMs);
 
   if (exited) {
-    await removeGatewayPid(stateHome);
-    await removeGatewayState(stateHome);
-    await removeLockIfSafe(stateHome, pidContent.pid);
+    await cleanupDeadGatewayMetadata(stateHome, pidContent.pid);
     return { ok: true, action: "stopped", pid: pidContent.pid };
   }
 
@@ -274,7 +232,7 @@ export async function stopGateway(
   }
 
   // Force: send SIGKILL.
-  const killResult = await signalGateway(stateHome, "SIGKILL");
+  const killResult = await signalGateway(stateHome, "SIGKILL", pidContent);
   if (!killResult.ok) {
     if (killResult.reason === "permission_denied") {
       return {
@@ -284,18 +242,14 @@ export async function stopGateway(
       };
     }
     // not_running — process died between graceful check and SIGKILL
-    await removeGatewayPid(stateHome);
-    await removeGatewayState(stateHome);
-    await removeLockIfSafe(stateHome, pidContent.pid);
+    await cleanupDeadGatewayMetadata(stateHome, pidContent.pid);
     return { ok: true, action: "stopped", pid: pidContent.pid, forced: true };
   }
 
   const killed = await waitForPidExit(pidContent.pid, killTimeoutMs);
 
   if (killed) {
-    await removeGatewayPid(stateHome);
-    await removeGatewayState(stateHome);
-    await removeLockIfSafe(stateHome, pidContent.pid);
+    await cleanupDeadGatewayMetadata(stateHome, pidContent.pid);
     return { ok: true, action: "stopped", pid: pidContent.pid, forced: true };
   }
 

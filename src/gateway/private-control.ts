@@ -1,3 +1,4 @@
+import { resolveProfileStateHome } from "../config/profile-home.js";
 import { createServer, createConnection, type Socket } from "node:net";
 import { randomBytes, timingSafeEqual } from "node:crypto";
 import { chmod, lstat, readFile, writeFile, unlink } from "node:fs/promises";
@@ -13,7 +14,7 @@ type Discovery = { protocol: 1; version: string; instanceId: string; profileId: 
 async function assertPrivate(path: string, directory = false): Promise<void> {
   const info = await lstat(path);
   if (info.isSymbolicLink() || (directory ? !info.isDirectory() : !info.isFile()) ||
-    (info.mode & 0o077) !== 0 || (process.getuid && info.uid !== process.getuid())) {
+    (!directory && info.size > MAX_BYTES) || (info.mode & 0o077) !== 0 || (process.getuid && info.uid !== process.getuid())) {
     throw new Error("Private control state has unsafe ownership or permissions.");
   }
 }
@@ -89,8 +90,27 @@ export async function startPrivateControl(input: {
   } };
 }
 
-export async function callPrivateControl(input: { directory: string; profileId: string; version: string; request: PrivateControlRequest }): Promise<unknown> {
+export async function callPrivateControl(input: { directory: string; profileId: string; version: string; request: PrivateControlRequest; startIfNeeded?: { homeDir: string } }): Promise<unknown> {
   validatePrivateControlRequest(input.request);
+  if (input.startIfNeeded) {
+    if (resolveProfileStateHome({ homeDir: input.startIfNeeded.homeDir, profileId: input.profileId }).gatewayStatePath !== input.directory) throw new Error("Control directory is outside the selected profile.");
+    const { startSharedHostOnDemand } = await import("./shared-host-startup.js");
+    const { readGatewayLockContent } = await import("./gateway-lock.js");
+    await startSharedHostOnDemand({ homeDir: input.startIfNeeded.homeDir, profileId: input.profileId, sessionId: input.request.sessionId, targetId: input.request.targetId });
+    const deadline = Date.now() + 10_000;
+    let ready = false;
+    while (Date.now() < deadline) {
+      try {
+        const path = join(input.directory, "control.json");
+        await assertPrivate(path);
+        const discovery = JSON.parse(await readFile(path, "utf8")) as Discovery;
+        if (discovery.instanceId === (await readGatewayLockContent({ gatewayStatePath: input.directory }))?.instanceId) { ready = true; break; }
+      } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+      await new Promise((resolve) => setTimeout(resolve, 100));
+    }
+    if (!ready) throw new Error("Shared supervisor is unavailable or incompatible. Inspect its existing service; do not start a duplicate host.");
+  }
+
   await assertPrivate(input.directory, true);
   const path = join(input.directory, "control.json");
   await assertPrivate(path);
@@ -103,9 +123,10 @@ export async function callPrivateControl(input: { directory: string; profileId: 
     socket.on("connect", () => socket.write(JSON.stringify({ ...discovery, request: input.request }) + "\n"));
     socket.setTimeout(10_000, () => socket.destroy(new Error("Control response unavailable. Query the same operation ID before retrying.")));
     socket.on("error", reject);
+    socket.on("close", () => { if (!socket.readableEnded) reject(new Error("Control response lost; inspect the same operation ID.")); });
     socket.on("data", (chunk: Buffer) => {
+      if (buffer.length + chunk.length > MAX_BYTES) { socket.destroy(new Error("Control response exceeds limit.")); return; }
       buffer = Buffer.concat([buffer, chunk]);
-      if (buffer.length > MAX_BYTES) socket.destroy(new Error("Control response exceeds limit."));
     });
     socket.on("end", () => {
       try { const response = JSON.parse(buffer.toString("utf8")); if (!response.ok) throw new Error(response.error); resolve(response.result); }

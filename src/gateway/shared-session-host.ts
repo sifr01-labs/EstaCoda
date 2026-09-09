@@ -18,6 +18,7 @@ export class SharedSessionHost {
   constructor(readonly options: {
     profileId: string; sessionDb: SessionDB; receipts?: ControlReceipts;
     acquire(sessionId: string): Promise<Runtime>;
+    channelCancel?(sessionId: string): boolean;
     channelApproval(request: PrivateControlRequest): Promise<unknown>;
   }) {}
   async validate(request: PrivateControlRequest, allowEnded = false): Promise<void> {
@@ -54,7 +55,9 @@ export class SharedSessionHost {
     if (request.method === "cancel") {
       this.#cancelGeneration.set(request.sessionId, generation + 1);
       active?.controller.abort(); active?.pending?.resolve("denied");
-      return { cancellationRequested: Boolean(active), terminationConfirmed: !active };
+      const channelCancelled = this.options.channelCancel?.(request.sessionId) ?? false;
+      // Absence from this map cannot prove a foreign owner or OS process settled.
+      return { cancellationRequested: Boolean(active) || channelCancelled, terminationConfirmed: false };
     }
     if (request.method === "approval") {
       if (active && active.pending && active.pending.id === request.approvalId) {

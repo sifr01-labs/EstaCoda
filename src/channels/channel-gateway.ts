@@ -236,6 +236,7 @@ export type ChannelGatewayOptions = {
   sessionPolicy?: ChannelSessionPolicy;
   securityMode?: SecurityApprovalMode;
   currentSecurityMode?: () => Promise<SecurityApprovalMode>;
+  currentSecurityAssessor?: () => Promise<SecurityAssessorRuntimeConfig>;
   securityAssessor?: SecurityAssessorRuntimeConfig;
   preprocessMessage?: (message: ChannelMessage) => Promise<ChannelMessage>;
   handoffStore?: HandoffStore;
@@ -469,6 +470,7 @@ export class ChannelGateway {
   readonly #approvalStore: ChannelApprovalStore;
   readonly #sessionPolicy: ChannelSessionPolicy;
   readonly #currentSecurityMode?: () => Promise<SecurityApprovalMode>;
+  readonly #currentSecurityAssessor?: () => Promise<SecurityAssessorRuntimeConfig>;
   readonly #securityMode: SecurityApprovalMode;
   readonly #securityAssessor: SecurityAssessorRuntimeConfig | undefined;
   readonly #preprocessMessage: ChannelGatewayOptions["preprocessMessage"];
@@ -548,6 +550,7 @@ export class ChannelGateway {
     this.#approvalStore = options.approvalStore ?? new ChannelApprovalStore();
     this.#sessionPolicy = options.sessionPolicy ?? {};
     this.#currentSecurityMode = options.currentSecurityMode;
+    this.#currentSecurityAssessor = options.currentSecurityAssessor;
     this.#securityMode = options.securityMode ?? "adaptive";
     this.#securityAssessor = options.securityAssessor;
     this.#preprocessMessage = options.preprocessMessage;
@@ -1283,6 +1286,21 @@ export class ChannelGateway {
       }
       await Promise.all([...this.#textDebounceFlushes]);
     }
+  }
+
+  /** The authenticated local endpoint delegates cancellation to this owner. */
+  cancelOperatorSession(sessionId: string): boolean {
+    let requested = false;
+    for (const [key, id] of this.#sessionIdByTurnKey) {
+      if (id !== sessionId) continue;
+      if (this.#activeTurnRegistry?.isBusy(key) || this.#activeTurns.has(key)) {
+        this.#abortReasonByKey.set(key, "channel-stop");
+        if (this.#activeTurnRegistry) this.#activeTurnRegistry.abortTurn(key, "channel-stop");
+        else this.#activeTurns.get(key)?.abort("channel-stop");
+        requested = true;
+      }
+    }
+    return requested;
   }
 
   /** Authenticated local operator entry point. The gateway retains queue,
@@ -4816,11 +4834,11 @@ export class ChannelGateway {
   ): SecurityPolicy {
     const key = stableSessionKey(sessionKey, this.#sessionPolicy);
     const securityMode = this.#yoloSessions.get(yoloSessionKey(key, sessionId)) === true ? "open" : this.#securityMode;
-    const securityAssessor = this.#securityAssessor;
     const approvalGrants = this.#approvalGrants;
 
     const assess = async (request: SecurityRequest) => {
       const securityMode = this.#yoloSessions.get(yoloSessionKey(key, sessionId)) === true ? "open" : await this.#currentSecurityMode?.() ?? this.#securityMode;
+      const securityAssessor = await this.#currentSecurityAssessor?.() ?? this.#securityAssessor;
       const basePolicy = createSecurityPolicyForMode(securityMode, {
         assessor: securityAssessor === undefined
           ? undefined

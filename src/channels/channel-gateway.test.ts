@@ -4645,6 +4645,60 @@ describe("ChannelGateway commands", () => {
       expect(registry.stats().totalAborted).toBe(1);
     });
 
+    it("local operator cancellation reaches only its active channel Session", async () => {
+      const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
+      const registry = new ActiveTurnRegistry();
+      let aborted = false;
+      let handleStartedResolve: (() => void) | undefined;
+      const handleStarted = new Promise<void>((resolve) => { handleStartedResolve = resolve; });
+
+      const gatewaySessionStore = new InMemoryChannelSessionStore();
+      const gateway = new ChannelGateway({
+        adapters: [adapter],
+        runtimeForSession: async () => ({
+          ...createMinimalRuntime(),
+          handle: async ({ signal }: { signal?: AbortSignal }) => {
+            handleStartedResolve?.();
+            return new Promise((resolve, reject) => {
+              signal?.addEventListener("abort", () => {
+                aborted = true;
+                reject(new Error("aborted"));
+              });
+              setTimeout(() => {
+                resolve({
+                  label: "ok",
+                  text: "ok",
+                  matchedSkills: [],
+                  intent: { labels: ["general"], confidence: 1, nativeIntent: "general", suggestedToolsets: [], suggestedSkills: [], confirmationRequired: false, evidence: [], rationale: "" },
+                  securityDecision: "allow",
+                  toolExecutions: [],
+                  toolPlans: [],
+                  skillOutcomes: [],
+                  artifacts: [],
+                  context: undefined,
+                  projectContext: undefined,
+                  progress: []
+                } as Awaited<ReturnType<Runtime["handle"]>>);
+              }, 200);
+            });
+          }
+        }),
+        sessionStore: gatewaySessionStore,
+        authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+        activeTurnRegistry: registry
+      });
+
+      const turn = gateway.receive(makeMessage("hello"));
+      await handleStarted;
+      expect(gateway.cancelOperatorSession("unrelated")).toBe(false);
+      const sessionId = await gatewaySessionStore.getOrCreateSessionId(makeMessage("hello").sessionKey);
+      expect(gateway.cancelOperatorSession(sessionId)).toBe(true);
+      const turnResult = await turn;
+
+      expect(aborted).toBe(true);
+      expect(registry.stats().totalAborted).toBe(1);
+    });
+
     it("queues ordinary interrupt-policy messages while the active turn has subagents", async () => {
       const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
       const registry = new ActiveTurnRegistry();
@@ -9684,3 +9738,19 @@ class ChannelGateway extends ProductionChannelGateway {
       localApprovalScope(options.profileId ?? "default", sessionId, await verifyHostExecution(process.cwd())), ...options });
   }
 }
+
+it("refreshes gateway assessor configuration at the policy boundary", async () => {
+  const currentSecurityAssessor = vi.fn(async () => ({ enabled: false }));
+  const gateway = new ChannelGateway({
+    adapters: [createFakeTelegramAdapter()],
+    sessionStore: new InMemoryChannelSessionStore(),
+    authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+    securityMode: "open", currentSecurityAssessor,
+    runtimeForSession: async ({ securityPolicy }) => createCachedPolicyProbeRuntime(securityPolicy)
+  });
+  await gateway.receive(makeMessage("first"));
+  const first = currentSecurityAssessor.mock.calls.length;
+  expect(first).toBeGreaterThan(0);
+  await gateway.receive(makeMessage("second", { id: "msg-2" }));
+  expect(currentSecurityAssessor.mock.calls.length).toBeGreaterThan(first);
+});

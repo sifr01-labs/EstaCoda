@@ -25,3 +25,15 @@ it("rejects target mismatch before runtime construction or channel approval", as
   await expect(host.handle({ method: "send", sessionId: "s", targetId: "t", operationId: "o", text: "work" })).rejects.toThrow("target");
   expect(acquire).not.toHaveBeenCalled(); expect(channelApproval).not.toHaveBeenCalled();
 });
+
+it("routes priority channel cancellation and never invents termination confirmation", async () => {
+  const channelCancel = vi.fn((id: string) => id === "session");
+  const host = new SharedSessionHost({ profileId: "default", channelCancel, acquire: vi.fn(), channelApproval: vi.fn(),
+    sessionDb: { getSessionForProfile: async () => ({ executionTarget: { targetId: "target" } }) } as unknown as SessionDB });
+  await expect(host.handle({ method: "cancel", sessionId: "session", targetId: "target", operationId: "op" }))
+    .resolves.toEqual({ cancellationRequested: true, terminationConfirmed: false });
+  await expect(host.handle({ method: "cancel", sessionId: "foreign", targetId: "target", operationId: "op2" }))
+    .resolves.toEqual({ cancellationRequested: false, terminationConfirmed: false });
+  expect(channelCancel).toHaveBeenCalledWith("session");
+  await host.close();
+});

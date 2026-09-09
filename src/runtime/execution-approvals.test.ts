@@ -41,6 +41,7 @@ it("requires a runtime-issued exact action, consumes it once, and renews reusabl
     expect((await execute("covered again"))?.result?.ok).toBe(true);
     expect((await runtime.inspectApprovals!())!.persistent).toHaveLength(1);
     await trust.revoke(root);
-    expect((await execute("untrusted"))?.decision).not.toBe("allow");
+    await expect(execute("untrusted")).rejects.toThrow("revoked");
+    expect(await readFile(join(root, "reviewed.txt"), "utf8")).toBe("covered again");
   } finally { await runtime.dispose(); await rm(root, { recursive: true, force: true }); }
 });

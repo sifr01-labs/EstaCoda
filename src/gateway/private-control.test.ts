@@ -27,3 +27,20 @@ it("rejects unknown methods, oversized input and malformed bindings", () => {
     expect(() => validatePrivateControlRequest({ ...request, ...changed })).toThrow("Invalid");
   }
 });
+
+it.skipIf(process.platform === "win32")("rejects a wrong instance secret before dispatch", async () => {
+  const { createConnection } = await import("node:net");
+  const { readFile } = await import("node:fs/promises");
+  const directory = await mkdtemp(join(tmpdir(), "ipc-auth-")); await chmod(directory, 0o700);
+  const handle = vi.fn(async () => ({}));
+  const server = await startPrivateControl({ directory, instanceId: "instance", profileId: "default", version: "test", handle });
+  try {
+    const discovery = JSON.parse(await readFile(join(directory, "control.json"), "utf8"));
+    const response = await new Promise<string>((resolve, reject) => {
+      const socket = createConnection(discovery.socket); let text = "";
+      socket.on("error", reject); socket.on("data", (chunk) => { text += chunk.toString(); }); socket.on("end", () => resolve(text));
+      socket.on("connect", () => socket.write(JSON.stringify({ ...discovery, token: "0".repeat(64), request: { method: "cancel", sessionId: "s", targetId: "t", operationId: "op" } }) + "\n"));
+    });
+    expect(JSON.parse(response).ok).toBe(false); expect(handle).not.toHaveBeenCalled();
+  } finally { await server.close(); await rm(directory, { recursive: true, force: true }); }
+});

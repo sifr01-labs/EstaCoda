@@ -169,3 +169,30 @@ export async function isStaleLock(stateHome: GatewayStateHome, _staleTimeoutMs: 
   const lock = await readLock(stateHome);
   return lock !== undefined && processDefinitelyAbsent(lock.content.pid);
 }
+
+/** Serialize stale metadata cleanup with singleton acquisition. A stale PID
+ * snapshot must never authorize unlinking a newly published owner's files. */
+export async function cleanupDeadGatewayMetadata(stateHome: GatewayStateHome, expectedPid?: number): Promise<boolean> {
+  const db = openOwnership(stateHome);
+  db.exec("begin immediate");
+  try {
+    const row = db.query<{ instance_id: string; pid: number }>("select * from singleton where id=1").get();
+    if (row && (!processDefinitelyAbsent(row.pid) || (expectedPid !== undefined && row.pid !== expectedPid))) { db.exec("commit"); return false; }
+    const removable: string[] = [];
+    for (const name of ["gateway.lock", "gateway.pid", "gateway-state.json"]) {
+      const path = join(gatewayDir(stateHome), name);
+      try {
+        if (lstatSync(path).isSymbolicLink()) { db.exec("commit"); return false; }
+        const content = JSON.parse(readFileSync(path, "utf8"));
+        if (!processDefinitelyAbsent(content.pid) || (expectedPid !== undefined && content.pid !== expectedPid)) { db.exec("commit"); return false; }
+        removable.push(path);
+      } catch (error) {
+        if ((error as NodeJS.ErrnoException).code !== "ENOENT") { db.exec("commit"); return false; }
+      }
+    }
+    for (const path of removable) unlinkSync(path);
+    if (row) db.query("delete from singleton where id=1 and instance_id=?").run(row.instance_id);
+    db.exec("commit"); return removable.length > 0;
+  } catch (error) { db.exec("rollback"); throw error; }
+  finally { db.close(); }
+}

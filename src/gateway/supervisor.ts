@@ -1610,6 +1610,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           },
           pair: pairChannelMessage,
           currentSecurityMode: async () => (await loadConfig()).security.approvalMode,
+          currentSecurityAssessor: async () => buildGatewaySecurityAssessorConfig(await loadConfig(), sessionDb),
           securityMode: config.security.approvalMode,
           securityAssessor: gatewaySecurityAssessor,
           activeTurnRegistry,
@@ -1691,6 +1692,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           },
           pair: pairChannelMessage,
           currentSecurityMode: async () => (await loadConfig()).security.approvalMode,
+          currentSecurityAssessor: async () => buildGatewaySecurityAssessorConfig(await loadConfig(), sessionDb),
           securityMode: config.security.approvalMode,
           securityAssessor: gatewaySecurityAssessor,
           activeTurnRegistry,
@@ -1786,6 +1788,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           });
           return runtimeCache.get(sessionId, fingerprint, createSecurityPolicyForMode(current.security.approvalMode), { originSurface: "shared" });
         },
+        channelCancel: (sessionId) => gateway instanceof ChannelGateway && gateway.cancelOperatorSession(sessionId),
         channelApproval: async (request) => {
           if (!(gateway instanceof ChannelGateway)) throw new Error("Gateway operator controls unavailable.");
           return gateway.resolveOperatorApproval({ sessionId: request.sessionId, approvalId: request.approvalId!, decision: request.decision! });

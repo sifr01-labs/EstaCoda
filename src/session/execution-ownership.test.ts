@@ -59,3 +59,32 @@ it("fences authoritative writes after an await without holding a transaction acr
   await expect(staleWrite).rejects.toThrow("fence");
   expect(await db.listMessages(input.sessionId)).toHaveLength(0);
 });
+
+it("excludes an independent process and permits recovery only after its confirmed exit", async () => {
+  const { fork } = await import("node:child_process");
+  const { writeFile } = await import("node:fs/promises");
+  const { pathToFileURL } = await import("node:url");
+  const { resolve } = await import("node:path");
+  const script = join(root, "owner.mjs");
+  await writeFile(script, `
+    import { SQLiteSessionDB } from ${JSON.stringify(pathToFileURL(resolve("src/session/sqlite-session-db.ts")).href)};
+    import { SessionExecutionOwnership } from ${JSON.stringify(pathToFileURL(resolve("src/session/execution-ownership.ts")).href)};
+    const db = new SQLiteSessionDB({ path: process.argv[2] });
+    const owner = new SessionExecutionOwnership(db.db);
+    process.on('message', (input) => { const claim = owner.claim(input); process.send({ fence: claim.fence }); });
+  `);
+  const child = fork(script, [join(root, "sessions.sqlite")], { execArgv: ["--import", "tsx"], stdio: ["ignore", "ignore", "pipe", "ipc"] });
+  const exited = new Promise<void>((resolve) => child.once("exit", () => resolve()));
+  try {
+    const claimed = new Promise<{ fence: number }>((resolve, reject) => { child.once("message", (value) => resolve(value as { fence: number })); child.once("error", reject); });
+    child.send(input);
+    const first = await claimed;
+    const contender = new SessionExecutionOwnership(db.db);
+    db.db.exec("update session_execution_owners set expires_at = 0");
+    expect(() => contender.claim(input)).toThrow("busy");
+    child.kill("SIGKILL"); await exited;
+    const recovered = contender.claim(input);
+    expect(recovered.fence).toBe(first.fence + 1);
+    contender.release(recovered);
+  } finally { child.kill("SIGKILL"); await exited; }
+}, 10_000);

@@ -349,7 +349,7 @@ describe("gateway state primitives", () => {
       expect(result.cleaned).toBe(false);
     });
 
-    it("removes stale PID and state but preserves a live lock", async () => {
+    it("preserves metadata while a live successor owns startup, then cleans after release", async () => {
       await writeGatewayPid(tmpDir, { pid: 99999, startedAt: new Date().toISOString(), version: "0.0.1" });
       await writeGatewayState(tmpDir, { lifecycle: "running", startedAt: new Date().toISOString(), pid: 99999, version: "0.0.1" });
 
@@ -358,9 +358,9 @@ describe("gateway state primitives", () => {
       expect(lockResult.acquired).toBe(true);
 
       const result = await cleanupStaleGatewayState(tmpDir);
-      expect(result.cleaned).toBe(true);
-      expect(await readGatewayPid(tmpDir)).toBeUndefined();
-      expect(await readGatewayState(tmpDir)).toBeUndefined();
+      expect(result.cleaned).toBe(false);
+      expect(await readGatewayPid(tmpDir)).toBeDefined();
+      expect(await readGatewayState(tmpDir)).toBeDefined();
 
       // The live lock must still be held
       const reacquire = await acquireGatewayLock(tmpDir);
@@ -368,6 +368,8 @@ describe("gateway state primitives", () => {
 
       // Clean up
       await releaseGatewayLock(tmpDir);
+      expect((await cleanupStaleGatewayState(tmpDir)).cleaned).toBe(true);
+      expect(await readGatewayPid(tmpDir)).toBeUndefined();
     });
   });
 });

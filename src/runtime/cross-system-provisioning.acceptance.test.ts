@@ -1,3 +1,4 @@
+import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
 import { inspect } from "node:util";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -473,7 +474,10 @@ async function createJourneyHarness(scenario: JourneyScenario) {
     resolveHostname: () => ["93.184.216.34"],
     settling: { pollIntervalMs: 5, stableWindowMs: 10, minimumObservationMs: 10 },
   });
+  const trustStore = new WorkspaceTrustStore({ homeDir: workspaceRoot });
+  await trustStore.grant(workspaceRoot);
   const runtime = await createRuntime({
+    trustStore,
     tokens: resolveTokens("standard", "dark", "kemetBlue"),
     model,
     primaryModelRoute: route,

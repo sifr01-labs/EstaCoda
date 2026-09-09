@@ -1,7 +1,6 @@
 import { chmod, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { readGatewayPid, removeGatewayPid, isStalePid } from "./pid-file.js";
-import { releaseGatewayLock, isStaleLock } from "./gateway-lock.js";
+import { cleanupDeadGatewayMetadata } from "./gateway-lock.js";
 
 export type SupervisorState = {
   lifecycle: "stopped" | "starting" | "running" | "draining" | "crashed";
@@ -71,22 +70,6 @@ export async function removeGatewayState(stateHome: GatewayStateHome): Promise<v
 }
 
 export async function cleanupStaleGatewayState(stateHome: GatewayStateHome): Promise<{ cleaned: boolean; reason?: string }> {
-  const stalePid = await isStalePid(stateHome);
-  const staleLock = await isStaleLock(stateHome);
-
-  if (!stalePid && !staleLock) {
-    return { cleaned: false };
-  }
-
-  const reasons: string[] = [];
-  if (stalePid) reasons.push("stale PID");
-  if (staleLock) reasons.push("stale lock");
-
-  await removeGatewayPid(stateHome);
-  await removeGatewayState(stateHome);
-  if (staleLock) {
-    await releaseGatewayLock(stateHome);
-  }
-
-  return { cleaned: true, reason: reasons.join(", ") };
+  const cleaned = await cleanupDeadGatewayMetadata(stateHome);
+  return cleaned ? { cleaned: true, reason: "stale PID or lock" } : { cleaned: false };
 }
