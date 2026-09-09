@@ -1,11 +1,10 @@
 import { ResourceCleanup } from "../execution/resource-cleanup.js";
-import { HostEnvironment } from "../execution/host-environment.js";
+import { acquireRuntimeContext } from "./runtime-acquisition.js";
 import { withDispatchAuthorization, validateDispatchAuthorization } from "../security/dispatch-authorization.js";
 import { assertPendingAction, type PendingActionApproval } from "../security/pending-action-approval.js";
 import { localApprovalScope } from "../security/approval-scope.js";
 import type { HostExecutionFacts, RequestedExecutionPolicy } from "../contracts/execution-authority.js";
-import { ensureRuntimeSession, validateSessionWorkspaceOwnership } from "../session/session-workspace-ownership.js";
-import { resolveWorkspaceDirectory } from "../workspaces/workspace-registry.js";
+import { validateSessionWorkspaceOwnership } from "../session/session-workspace-ownership.js";
 import { AsyncLocalStorage } from "node:async_hooks";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
@@ -448,15 +447,9 @@ async function buildRuntime(options: RuntimeOptions, rollback: ResourceCleanup):
   if (closeSessionDbOnDispose) resources.defer(async () => {
     await (sessionDb as { close?: () => void | Promise<void> }).close?.();
   });
-  const workspaceRoot = (await resolveWorkspaceDirectory(options.workspaceRoot ?? process.cwd())).canonicalPath;
-  const hostEnvironment = await HostEnvironment.create({ profileId, workspaceRoot, policy: options.requestedExecutionPolicy });
-  rollback.defer(() => hostEnvironment.destroy());
-  const executionFacts = hostEnvironment.facts;
-  await ensureRuntimeSession({ sessionDb, sessionId, profileId, workspaceRoot, homeDir: options.homeDir,
-    durable: sessionDb instanceof SQLiteSessionDB, sourceWorkspace: options.sourceWorkspace,
-    allowLegacyLocalBinding: options.allowLegacyLocalBinding, metadata: options.sessionMetadata, spendingLimit: options.budgets?.session });
-  const executionLease = hostEnvironment.acquire({ profileId, sessionId, surface: String(options.sessionMetadata?.originSurface ?? "local") });
-  rollback.defer(() => executionLease.release());
+  const { workspaceRoot, hostEnvironment, executionLease, executionFacts } = await acquireRuntimeContext({
+    options, sessionDb, sessionId, rollback
+  });
   const taskWorkspace = taskStore === undefined ? undefined : await resolveTaskWorkspaceBinding(workspaceRoot);
   const localSkillsRoot = options.localSkillsRoot ?? profilePaths.skillsPath;
   const profileMemoryRoot = profilePaths.profileRoot;
