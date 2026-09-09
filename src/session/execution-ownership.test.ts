@@ -42,3 +42,20 @@ it("keeps unknown or reused live PID evidence busy across reopen", () => {
   db.db.exec("update session_execution_owners set owner_pid = 0, expires_at = 0");
   expect(() => new SessionExecutionOwnership(other.db).claim(input)).toThrow("busy");
 });
+
+it("fences authoritative writes after an await without holding a transaction across I/O", async () => {
+  const { withExecutionFence } = await import("./execution-fence-context.js");
+  const owner = new SessionExecutionOwnership(db.db);
+  const claim = owner.claim(input);
+  let resume!: () => void;
+  const barrier = new Promise<void>((resolve) => { resume = resolve; });
+  const staleWrite = withExecutionFence(db.db, claim, async () => {
+    await barrier;
+    await db.appendMessage({ sessionId: input.sessionId, role: "agent", content: "stale result" });
+  });
+  owner.release(claim);
+  new SessionExecutionOwnership(other.db).claim(input);
+  resume();
+  await expect(staleWrite).rejects.toThrow("fence");
+  expect(await db.listMessages(input.sessionId)).toHaveLength(0);
+});

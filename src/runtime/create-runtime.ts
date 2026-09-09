@@ -389,7 +389,7 @@ async function buildRuntime(options: RuntimeOptions, rollback: ResourceCleanup):
   const profilePaths = resolveProfileStateHome({ homeDir: options.homeDir, profileId });
   const artifactStore = new ArtifactStore({ storageRoot: join(profilePaths.profileRoot, "artifacts") });
   const sessionId = options.sessionId ?? createSessionId();
-  const sessionRuntimeContext = createSessionRuntimeContext(sessionId);
+  const sessionRuntimeContext = createSessionRuntimeContext(sessionId, (next) => executionOwner.rotate(next));
   const defaultTaskCreationOrigin = normalizeTaskCreationOrigin(options.taskCreationOrigin);
   const taskCreationOriginContext = new AsyncLocalStorage<TaskCreationOrigin>();
   const currentTaskCreationOrigin = () => taskCreationOriginContext.getStore() ?? defaultTaskCreationOrigin;
@@ -447,7 +447,7 @@ async function buildRuntime(options: RuntimeOptions, rollback: ResourceCleanup):
   if (closeSessionDbOnDispose) resources.defer(async () => {
     await (sessionDb as { close?: () => void | Promise<void> }).close?.();
   });
-  const { workspaceRoot, hostEnvironment, executionLease, executionFacts } = await acquireRuntimeContext({
+  const { executionOwner, workspaceRoot, hostEnvironment, executionLease, executionFacts } = await acquireRuntimeContext({
     options, sessionDb, sessionId, rollback
   });
   const taskWorkspace = taskStore === undefined ? undefined : await resolveTaskWorkspaceBinding(workspaceRoot);
@@ -1336,11 +1336,11 @@ async function buildRuntime(options: RuntimeOptions, rollback: ResourceCleanup):
       activeTrustedWorkspace = trustedWorkspace;
 
       executionLease.assertActive();
-      return agentLoop.handle({
+      return executionOwner.run(() => agentLoop.handle({
         ...input,
-        signal: AbortSignal.any([executionLease.signal, ...(input.signal ? [input.signal] : [])]),
+        signal: AbortSignal.any([executionOwner.signal, executionLease.signal, ...(input.signal ? [input.signal] : [])]),
         trustedWorkspace
-      });
+      }));
     },
     async executeTool(input) {
       executionLease.assertActive();
@@ -1349,15 +1349,15 @@ async function buildRuntime(options: RuntimeOptions, rollback: ResourceCleanup):
       await validateSessionWorkspaceOwnership({ session: current, profileId, workspaceRoot, homeDir: options.homeDir });
       const trustedWorkspace = await trustStore.isTrusted(workspaceRoot);
       activeTrustedWorkspace = trustedWorkspace;
-      return await toolExecutor.executeTool({
+      return await executionOwner.run(() => toolExecutor.executeTool({
         tool: input.tool,
         input: input.toolInput,
         trustedWorkspace,
         sessionId: sessionRuntimeContext.currentSessionId(),
         toolCallId: input.toolCallId,
-        signal: AbortSignal.any([executionLease.signal, ...(input.signal ? [input.signal] : [])]),
+        signal: AbortSignal.any([executionOwner.signal, executionLease.signal, ...(input.signal ? [input.signal] : [])]),
         onSecureInputRequest: input.onSecureInputRequest
-      });
+      }));
     },
     createSecureInputRequestHandler(input) {
       const coordinator = new SecureInputCoordinator({
@@ -1480,7 +1480,9 @@ async function buildRuntime(options: RuntimeOptions, rollback: ResourceCleanup):
         return;
       }
       disposed = true;
+      await executionOwner.settle();
       await executionLease.release();
+      executionOwner.release();
       await hostEnvironment.retire(() => resources.release());
     },
     describe() {

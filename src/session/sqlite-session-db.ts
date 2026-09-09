@@ -1,3 +1,4 @@
+import { executionFencedDatabase } from "./execution-fence-context.js";
 import { EXECUTION_OWNERSHIP_SCHEMA_VERSION, migrateExecutionOwnershipV34 } from "./execution-ownership.js";
 import { parseExecutionTargetBinding, targetSessionMetadata } from "../workspaces/execution-target.js";
 import { EXECUTION_TARGET_SCHEMA_VERSION, migrateExecutionTargetSchemaV33 } from "../workspaces/execution-target-schema.js";
@@ -171,7 +172,7 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
 
   constructor(options: { path: string; db?: SQLiteDatabase; now?: () => Date; id?: () => string }) {
     this.#path = options.path;
-    this.#db = options.db ?? openDefaultSQLiteDatabase({ path: options.path });
+    this.#db = executionFencedDatabase(options.db ?? openDefaultSQLiteDatabase({ path: options.path }));
     this.#now = options.now ?? (() => new Date());
     this.#id = options.id ?? (() => crypto.randomUUID());
     this.#migrate();

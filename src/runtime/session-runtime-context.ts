@@ -7,7 +7,7 @@ export type SessionRuntimeContext = {
   setBrowserState(state: BrowserStateProjection | undefined): void;
 };
 
-export function createSessionRuntimeContext(initialSessionId: string): SessionRuntimeContext {
+export function createSessionRuntimeContext(initialSessionId: string, onRotate?: (sessionId: string) => void): SessionRuntimeContext {
   let activeSessionId = initialSessionId;
   const browserStates = new Map<string, BrowserStateProjection>();
 
@@ -16,6 +16,7 @@ export function createSessionRuntimeContext(initialSessionId: string): SessionRu
       return activeSessionId;
     },
     rotateSession(sessionId: string) {
+      onRotate?.(sessionId);
       activeSessionId = sessionId;
     },
     browserState() {

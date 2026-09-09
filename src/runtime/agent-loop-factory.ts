@@ -1,3 +1,4 @@
+import { RuntimeSessionOwner } from "./session-execution-owner.js";
 import { validateSessionWorkspaceOwnership } from "../session/session-workspace-ownership.js";
 import type { ChannelKind } from "../contracts/channel.js";
 import type {
@@ -235,7 +236,8 @@ export class DefaultChildAgentLoopFactory implements ChildAgentLoopFactory {
       profileId: input.profileId,
       sessionId: childSessionId
     });
-    const sessionRuntimeContext = createSessionRuntimeContext(childSessionId);
+    let executionOwner: RuntimeSessionOwner | undefined;
+    const sessionRuntimeContext = createSessionRuntimeContext(childSessionId, (next) => executionOwner?.rotate(next));
     let toolAccess: ChildToolAccessResult | undefined;
     let builtSession: BuiltAgentLoopSession | undefined;
     builtSession = await this.#builder.buildSession({
@@ -339,6 +341,8 @@ export class DefaultChildAgentLoopFactory implements ChildAgentLoopFactory {
       }
     });
 
+    executionOwner = await RuntimeSessionOwner.acquire(this.#sessionDb, childSession.id, input.profileId);
+
     return {
       childSession,
       childSessionId: childSession.id,
@@ -356,14 +360,16 @@ export class DefaultChildAgentLoopFactory implements ChildAgentLoopFactory {
         if (current === undefined) throw new Error("Child Session is unavailable.");
         await validateSessionWorkspaceOwnership({ session: current, profileId: input.profileId, workspaceRoot: this.#workspaceRoot, homeDir: this.#homeDir });
         builtSession.executionLease?.assertActive();
-        return await builtSession.agentLoop.handle({ ...handleInput, signal: AbortSignal.any([...[handleInput.signal, builtSession.executionLease?.signal].filter((value): value is AbortSignal => value !== undefined)]) });
+        return await executionOwner!.run(() => builtSession.agentLoop.handle({ ...handleInput, signal: AbortSignal.any([...[executionOwner!.signal, handleInput.signal, builtSession.executionLease?.signal].filter((value): value is AbortSignal => value !== undefined)]) }));
       },
       cleanup: async () => {
+        await executionOwner!.settle();
         await this.#builder.cleanupSession(builtSession);
+        executionOwner!.release();
       }
     };
     } catch (error) {
-      try { await this.#builder.cleanupSession(builtSession); }
+      try { await executionOwner?.settle(); await this.#builder.cleanupSession(builtSession); executionOwner?.release(); }
       catch (cleanupError) { throw new AggregateError([error, cleanupError], "Child acquisition and cleanup failed."); }
       throw error;
     }

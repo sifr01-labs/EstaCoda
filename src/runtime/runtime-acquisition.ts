@@ -1,3 +1,4 @@
+import { RuntimeSessionOwner } from "./session-execution-owner.js";
 import { HostEnvironment } from "../execution/host-environment.js";
 import { ensureRuntimeSession } from "../session/session-workspace-ownership.js";
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
@@ -22,10 +23,12 @@ export async function acquireRuntimeContext(input: {
     durable: sessionDb instanceof SQLiteSessionDB, sourceWorkspace: options.sourceWorkspace,
     allowLegacyLocalBinding: options.allowLegacyLocalBinding, metadata: options.sessionMetadata,
     spendingLimit: options.budgets?.session });
+  const executionOwner = await RuntimeSessionOwner.acquire(sessionDb, sessionId, profileId);
+  rollback.defer(() => executionOwner.release());
   const hostEnvironment = await HostEnvironment.create({ profileId, workspaceRoot, policy: options.requestedExecutionPolicy });
   rollback.defer(() => hostEnvironment.destroy());
   const executionLease = hostEnvironment.acquire({ profileId, sessionId,
     surface: String(options.sessionMetadata?.originSurface ?? "local") });
   rollback.defer(() => executionLease.release());
-  return { profileId, workspaceRoot, hostEnvironment, executionLease, executionFacts: hostEnvironment.facts };
+  return { executionOwner, profileId, workspaceRoot, hostEnvironment, executionLease, executionFacts: hostEnvironment.facts };
 }

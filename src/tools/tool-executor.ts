@@ -1,3 +1,4 @@
+import { assertCurrentExecutionFence } from "../session/execution-fence-context.js";
 import { validateDispatchAuthorization } from "../security/dispatch-authorization.js";
 import { executionActionIdentity } from "../security/execution-action-identity.js";
 import { type PendingActionApproval } from "../security/pending-action-approval.js";
@@ -597,9 +598,11 @@ export class ToolExecutor {
           const currentHardline = assessHardlineFloor(typeof request.input.command === "string" ? request.input.command : "");
           if (currentHardline !== undefined) throw new Error(currentHardline.reason);
           await validateDispatchAuthorization(assessment);
+          assertCurrentExecutionFence();
           dispatchState = "started";
         },
         afterDispatch: () => {
+          assertCurrentExecutionFence();
           dispatchState = "finished";
         }
       });
