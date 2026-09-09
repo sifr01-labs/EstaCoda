@@ -1282,6 +1282,29 @@ export class ChannelGateway {
     }
   }
 
+  /** Authenticated local operator entry point. The gateway retains queue,
+   * grant, continuation and delivery ownership; no forged channel message. */
+  async resolveOperatorApproval(input: { sessionId: string; approvalId: string; decision: "approved" | "denied" }): Promise<{ resolved: boolean }> {
+    const entry = [...this.#pendingApprovals].find(([, pending]) => pending.sessionId === input.sessionId && pending.approvalId === input.approvalId);
+    if (!entry || !this.#approvalQueue) throw new Error("Approval is not pending in this gateway Session.");
+    const [key, pending] = entry;
+    if (pending.kind === "managed-python-capability-install") throw new Error("Use the channel setup approval for managed dependency installation.");
+    if (input.decision === "approved") {
+      const scope = await this.#resolveApprovalScope(pending.sessionId, pending.originalMessage.sessionKey);
+      assertPendingAction(pending.executionApproval, scope, this.#approvalStore.revision({ ...pending, executionScope: scope }));
+    }
+    await this.#approvalQueue.resolveApproval(input.approvalId, input.decision, "local-operator", {
+      profileId: this.#profileId, sessionId: input.sessionId
+    });
+    const adapter = this.#adapterFor(pending.originalMessage.channel);
+    if (input.decision === "approved") {
+      await this.#resumePendingApproval(key, pending, adapter, "once", "Approved by local operator.");
+    } else {
+      await this.#terminatePendingApproval(key, pending, adapter, "Approval denied", "The local operator denied the pending action.");
+    }
+    return { resolved: true };
+  }
+
   async tickApprovalResolutions(): Promise<void> {
     if (this.#approvalQueue === undefined || this.#pendingApprovals.size === 0) {
       return;

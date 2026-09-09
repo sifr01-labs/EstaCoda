@@ -1,3 +1,6 @@
+import { startPrivateControl } from "./private-control.js";
+import { SharedSessionHost } from "./shared-session-host.js";
+import { createSecurityPolicyForMode } from "../security/security-policy-factory.js";
 import { verifyHostExecution } from "../execution/host-authority.js";
 import { localApprovalScope } from "../security/approval-scope.js";
 import { validateSessionWorkspaceOwnership } from "../session/session-workspace-ownership.js";
@@ -325,6 +328,8 @@ export type SupervisorInternalState = {
   stateHome: ProfileStatePaths;
   gatewayLockAcquired: boolean;
   gatewayInstanceId?: string;
+  privateControl?: { close(): Promise<void> };
+  sharedSessionHost?: SharedSessionHost;
   acquiredIdentityLocks: AcquiredIdentityLock[];
   channelGateway: ChannelGateway | undefined;
   sessionDb: SQLiteSessionDB | undefined;
@@ -584,6 +589,8 @@ async function cleanupSupervisorStartupResources(state: SupervisorInternalState)
   }
 
   // 4. Dispose cached runtimes
+  await state.privateControl?.close();
+  await state.sharedSessionHost?.close();
   if (state.runtimeCache !== undefined) {
     try { await state.runtimeCache.disposeAll(); } catch { /* ignore */ }
     state.runtimeCache = undefined;
@@ -791,7 +798,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
 
       while (Date.now() < deadline) {
         const hasPending = (state.channelGateway?.hasPendingWork() ?? false) ||
-          (state.taskBackgroundHost?.hasPendingWork() ?? false);
+          (state.taskBackgroundHost?.hasPendingWork() ?? false) || (state.sharedSessionHost?.hasPendingWork() ?? false);
         if (!hasPending) {
           drained = true;
           break;
@@ -854,6 +861,8 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
       metadata?: Record<string, unknown>;
     }
   ): Promise<Runtime> => {
+    const boundSession = await db.getSessionForProfile(input.sessionId, profileId);
+    const selectedRoot = boundSession?.executionTarget?.workspace.canonicalPath ?? options.workspaceRoot;
     let effectiveModel = latestConfig.model;
     let effectivePrimaryRoute = latestConfig.primaryModelRoute;
 
@@ -875,7 +884,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
       model: effectiveModel,
       primaryModelRoute: effectivePrimaryRoute,
       modelFallbackRoutes: latestConfig.modelFallbackRoutes,
-      workspaceRoot: options.workspaceRoot,
+      workspaceRoot: selectedRoot,
       homeDir: hd,
       sessionId: input.sessionId,
       profileId,
@@ -895,6 +904,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
       externalMemory: latestConfig.externalMemory,
       mcpServers: latestConfig.mcp.servers,
       securityPolicy: input.securityPolicy,
+      approvalController: input.metadata?.originSurface === "shared" ? new WorkspaceApprovalController() : undefined,
       browser: latestConfig.browser,
       imageGen: latestConfig.imageGen,
       tts: latestConfig.tts,
@@ -1741,6 +1751,33 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
       adapterKinds: configured.map((c) => c.kind),
       mode: configured.length === 0 ? "background" : "adapters+background",
     });
+
+    if (process.platform !== "win32" && Buffer.byteLength(join(profilePaths.gatewayStatePath, "c-12345678.sock")) <= 100) {
+      const sharedHost = new SharedSessionHost({
+        profileId, sessionDb,
+        acquire: async (sessionId) => {
+          const current = await loadConfig();
+          const session = await sessionDb.getSessionForProfile(sessionId, profileId);
+          const workspaceRoot = session?.executionTarget?.workspace.canonicalPath;
+          if (!workspaceRoot || !await trustStore.isTrusted(workspaceRoot)) throw new Error("Shared workspace is not trusted.");
+          const fingerprint = computeRuntimeFingerprint(current, {
+            profileId, workspaceRoot, homeDir, localSkillsRoot: profilePaths.skillsPath, trustStorePath,
+            disabledToolsets: [], disableCronTools: false, approvalControllerPresent: true,
+            explicitSecurityPolicyPresent: true, currentPlatform: process.platform, tokens: runtimeTokens
+          });
+          return runtimeCache.get(sessionId, fingerprint, createSecurityPolicyForMode(current.security.approvalMode), { originSurface: "shared" });
+        },
+        channelApproval: async (request) => {
+          if (!(gateway instanceof ChannelGateway)) throw new Error("Gateway operator controls unavailable.");
+          return gateway.resolveOperatorApproval({ sessionId: request.sessionId, approvalId: request.approvalId!, decision: request.decision! });
+        }
+      });
+      state.sharedSessionHost = sharedHost;
+      state.privateControl = await startPrivateControl({ directory: profilePaths.gatewayStatePath,
+        instanceId: state.gatewayInstanceId!, profileId, version, handle: (request) => sharedHost.handle(request) });
+     } else {
+      logWarning("Shared control unavailable: use a shorter profile home on Unix; Windows requires protected named-pipe support. Foreground and background services remain available.");
+    }
 
     // 12a. Start background timers
     const PRUNE_INTERVAL_MS = 60_000;
