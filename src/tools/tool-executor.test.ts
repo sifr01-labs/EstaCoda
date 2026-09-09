@@ -1,3 +1,5 @@
+import { verifyHostExecution } from "../execution/host-authority.js";
+import { localApprovalScope } from "../security/approval-scope.js";
 import { describe, expect, it, vi } from "vitest";
 import { createHash } from "node:crypto";
 import { mkdtemp, rm } from "node:fs/promises";
@@ -2528,9 +2530,10 @@ describe("ToolExecutor command environment", () => {
       const controller = new WorkspaceApprovalController({
         store: new WorkspaceApprovalStore({ path: join(directory, "approvals.json") })
       });
+      const executionScope = localApprovalScope("default", "test-session", await verifyHostExecution(process.cwd()));
       const policy: SecurityPolicy = {
         decide: (request) => capabilityFirstDefaults.decide(request),
-        assess: async (request) => await controller.assess(capabilityFirstDefaults, request, {
+        assess: async (request) => await controller.assess(capabilityFirstDefaults, { ...request, executionScope }, {
           workspaceRoot: process.cwd(),
           sessionId: "test-session",
           mode: "strict"
@@ -2560,6 +2563,7 @@ describe("ToolExecutor command environment", () => {
             riskClass: request.riskClass,
             targetKey: request.targetKey,
             targetSummary: request.targetSummary,
+            executionScope, actionKey: request.pendingApproval?.actionKey,
             scope: "once"
           });
           return "approved";
@@ -2677,9 +2681,10 @@ describe("ToolExecutor browser CDP gating", () => {
         store: new WorkspaceApprovalStore({ path: join(directory, "approvals.json") })
       });
       const basePolicy: SecurityPolicy = { decide: () => "ask" };
+      const executionScope = localApprovalScope("default", "test-session", await verifyHostExecution(process.cwd()));
       const policy: SecurityPolicy = {
         decide: (request) => basePolicy.decide(request),
-        assess: async (request) => await controller.assess(basePolicy, request, {
+        assess: async (request) => await controller.assess(basePolicy, { ...request, executionScope }, {
           workspaceRoot: process.cwd(),
           sessionId: "test-session",
           mode: "adaptive"
@@ -2707,6 +2712,7 @@ describe("ToolExecutor browser CDP gating", () => {
             riskClass: request.riskClass,
             targetKey: request.targetKey,
             targetSummary: request.targetSummary,
+            executionScope, actionKey: request.pendingApproval?.actionKey,
             scope: "once"
           });
           return "approved";

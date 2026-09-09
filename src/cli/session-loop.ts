@@ -1189,6 +1189,7 @@ export async function runSessionLoop(options: SessionLoopOptions): Promise<void>
                   riskClass: request.riskClass,
                   targetKey: request.targetKey,
                   targetSummary: request.targetSummary,
+                  ...(request.pendingApproval === undefined ? {} : { pendingApproval: request.pendingApproval }),
                   toolCallId: request.toolCallId,
                   toolCallName: request.toolCallName
                 }
@@ -2548,6 +2549,7 @@ async function maybeHandleApprovalGate(input: {
 
     const scope = answer.scope;
     await input.runtime.grantApproval({
+      ...(execution.pendingApproval === undefined ? {} : { pendingApproval: execution.pendingApproval }),
       toolName: execution.tool.name,
       riskClass: execution.riskClass,
       targetKey: execution.targetKey,

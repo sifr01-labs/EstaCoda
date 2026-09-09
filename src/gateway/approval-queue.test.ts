@@ -1,3 +1,4 @@
+import { exactActionKey } from "../security/pending-action-approval.js";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -31,6 +32,10 @@ function approval(overrides: Partial<Omit<PendingApproval, "id" | "status">> = {
     commandPreview: createCommandPreview(command),
     commandHash: createCommandHash(command),
     commandPayload: command,
+    executionApproval: { schemaVersion: 1, id: "fixture-pending-action", actionKey: exactActionKey(command),
+      authorizationRevision: 0, expiresAt: new Date("2099-05-18T10:05:00Z").getTime(),
+      executionScope: { schemaVersion: 1, profileId: overrides.profileId ?? "profile-a", sessionId: overrides.sessionId ?? "session-a",
+        workspaceIdentityHash: "a".repeat(64), authorityFingerprint: "b".repeat(64), environmentInstanceId: "host-fixture", surfaceKey: "channel:" + "c".repeat(64) } },
     toolName: "terminal.run",
     requestedAt: new Date("2026-05-18T10:00:00.000Z"),
     expiresAt: new Date("2099-05-18T10:05:00.000Z"),
@@ -64,8 +69,9 @@ function insertPending(
       resolved_at,
       resolved_by,
       channel,
-      chat_id
-    ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', null, null, ?, ?)`
+      chat_id,
+      request_payload
+    ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, 'pending', null, null, ?, ?, ?)`
   ).run(
     row.id,
     row.sessionId ?? "session-a",
@@ -77,7 +83,8 @@ function insertPending(
     (row.requestedAt ?? new Date("2026-05-18T10:00:00.000Z")).toISOString(),
     (row.expiresAt ?? new Date("2099-05-18T10:05:00.000Z")).toISOString(),
     row.channel ?? "telegram",
-    row.chatId ?? "chat-a"
+    row.chatId ?? "chat-a",
+    JSON.stringify({ executionApproval: row.executionApproval ?? approval({ profileId: row.profileId, sessionId: row.sessionId }).executionApproval })
   );
 }
 

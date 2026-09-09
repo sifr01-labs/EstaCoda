@@ -1,3 +1,4 @@
+import { createPendingAction, securityActionKey } from "./pending-action-approval.js";
 import { readApprovalFile, updateApprovalFile } from "./approval-file.js";
 import { sameReusableAuthority, samePendingAuthority, validApprovalScope, type ApprovalExecutionScope } from "./approval-scope.js";
 import { join, resolve } from "node:path";
@@ -13,6 +14,7 @@ import { dataEgressHardBlock } from "./data-egress-policy.js";
 export type ApprovalScope = "once" | "session" | "always";
 
 export type EphemeralApprovalGrant = {
+  actionKey?: string;
   executionScope?: ApprovalExecutionScope;
   toolName: string;
   riskClass: ToolRiskClass;
@@ -114,6 +116,8 @@ export class WorkspaceApprovalController {
     this.#store = options.store ?? new WorkspaceApprovalStore();
   }
 
+  authorizationRevision(): number { return this.#store.revision(); }
+
   get storePath(): string {
     return this.#store.path;
   }
@@ -184,10 +188,12 @@ export class WorkspaceApprovalController {
 
     const smartAssessment = await smartAssessmentFor(request, options.mode, options.smartApproval);
     if (smartAssessment !== undefined) {
-      return smartAssessment;
+      return smartAssessment.decision === "ask" ? { ...smartAssessment, pendingApproval: createPendingAction(request, this.#store.revision()) } : smartAssessment;
     }
 
-    return await assessSecurityPolicy(basePolicy, request, options.mode);
+    const assessment = await assessSecurityPolicy(basePolicy, request, options.mode);
+    if (assessment.decision !== "ask") return assessment;
+    return { ...assessment, pendingApproval: createPendingAction(request, this.#store.revision()) };
   }
 
   async grant(input: {
@@ -199,6 +205,7 @@ export class WorkspaceApprovalController {
     targetSummary?: string;
     scope: ApprovalScope;
     executionScope?: ApprovalExecutionScope;
+    actionKey?: string;
   }): Promise<void> {
     if (input.scope === "always") {
       await this.#store.grant({
@@ -213,6 +220,7 @@ export class WorkspaceApprovalController {
     }
 
     const scopedGrant: EphemeralApprovalGrant = {
+      actionKey: input.scope === "once" ? input.actionKey : undefined,
       executionScope: input.executionScope === undefined ? undefined : structuredClone(input.executionScope),
       toolName: input.toolName,
       riskClass: input.riskClass,
@@ -292,7 +300,7 @@ export class WorkspaceApprovalController {
     }
   ): Promise<MatchingGrant | undefined> {
     const sessionGrants = this.#sessionGrants.get(options.sessionId) ?? [];
-    const sessionIndex = sessionGrants.findIndex((grant) => matchesRequest(grant, request) && samePendingAuthority(grant.executionScope, request.executionScope));
+    const sessionIndex = sessionGrants.findIndex((grant) => matchesRequest(grant, request) && samePendingAuthority(grant.executionScope, request.executionScope) && (grant.scope !== "once" || grant.actionKey === securityActionKey(request)));
     if (sessionIndex >= 0) {
       const grant = sessionGrants[sessionIndex];
       if (grant !== undefined) {
@@ -433,13 +441,13 @@ function matchesRequest(
 }
 
 function sameGrant(
-  left: Pick<EphemeralApprovalGrant, "toolName" | "riskClass" | "targetKey" | "scope" | "executionScope">,
-  right: Pick<EphemeralApprovalGrant, "toolName" | "riskClass" | "targetKey" | "scope" | "executionScope">
+  left: Pick<EphemeralApprovalGrant, "toolName" | "riskClass" | "targetKey" | "scope" | "executionScope" | "actionKey">,
+  right: Pick<EphemeralApprovalGrant, "toolName" | "riskClass" | "targetKey" | "scope" | "executionScope" | "actionKey">
 ): boolean {
   return samePendingAuthority(left.executionScope, right.executionScope) && left.toolName === right.toolName &&
     left.riskClass === right.riskClass &&
     left.targetKey === right.targetKey &&
-    left.scope === right.scope;
+    left.scope === right.scope && left.actionKey === right.actionKey;
 }
 
 function inferRiskLevel(riskClass: ToolRiskClass): "low" | "medium" | "high" {

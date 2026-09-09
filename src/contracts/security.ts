@@ -62,6 +62,7 @@ export type SecurityAssessorConfig = {
 };
 
 export type SecurityRequest = {
+  actionKey?: string;
   executionScope?: import("../security/approval-scope.js").ApprovalExecutionScope;
   riskClass: ToolRiskClass;
   description: string;
@@ -74,6 +75,7 @@ export type SecurityRequest = {
 };
 
 export type SecurityAssessment = {
+  pendingApproval?: import("../security/pending-action-approval.js").PendingActionApproval;
   decision: SecurityDecision;
   mode: SecurityApprovalMode;
   reason: string;

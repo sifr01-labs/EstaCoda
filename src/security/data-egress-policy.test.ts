@@ -1,3 +1,6 @@
+import { mkdir } from "node:fs/promises";
+import { verifyHostExecution } from "../execution/host-authority.js";
+import { localApprovalScope } from "./approval-scope.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -105,6 +108,8 @@ describe("hosted vision data egress policy", () => {
     });
     const base = createSecurityPolicyForMode("adaptive");
     const discovered = request("agent-discovered");
+    await mkdir(workspaceA);
+    discovered.executionScope = localApprovalScope("default", "session-a", await verifyHostExecution(workspaceA));
 
     await expect(approvals.assess(base, discovered, {
       workspaceRoot: workspaceA,
@@ -118,6 +123,7 @@ describe("hosted vision data egress policy", () => {
       riskClass: "external-side-effect",
       targetKey: discovered.targetKey,
       targetSummary: discovered.targetSummary,
+      executionScope: discovered.executionScope,
       scope: "always"
     });
 

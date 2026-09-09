@@ -98,6 +98,7 @@ export type ToolExecutionContext = {
 };
 
 export type ToolApprovalRequest = {
+  pendingApproval?: import("../security/pending-action-approval.js").PendingActionApproval;
   tool: ToolDefinition;
   input: Record<string, unknown>;
   riskClass: ToolRiskClass;

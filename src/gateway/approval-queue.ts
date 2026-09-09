@@ -1,3 +1,4 @@
+import { validPendingAction, type PendingActionApproval } from "../security/pending-action-approval.js";
 import { createHash, randomUUID } from "node:crypto";
 import type { SQLiteDatabase } from "../storage/sqlite.js";
 import type { WorkspaceApprovalController } from "../security/workspace-approval-controller.js";
@@ -34,6 +35,7 @@ export type ManagedPythonCapabilityApprovalMessagePayload = {
 };
 
 export type PendingApproval = {
+  executionApproval?: PendingActionApproval;
   id: string;
   sessionId: string;
   profileId: string;
@@ -134,6 +136,8 @@ export class GatewayApprovalQueue {
     const profileId = requireScopeValue(approval.profileId, "profileId");
     const sessionId = requireScopeValue(approval.sessionId, "sessionId");
     const approvalKind = approval.approvalKind ?? "command";
+    if (approval.executionApproval !== undefined && (!validPendingAction(approval.executionApproval) ||
+      approval.executionApproval.executionScope.profileId !== profileId || approval.executionApproval.executionScope.sessionId !== sessionId)) throw new Error("Invalid pending action ownership.");
     const id = options.idempotencyKey === undefined
       ? this.#idFactory()
       : idempotentApprovalId(profileId, sessionId, options.idempotencyKey);
@@ -213,7 +217,7 @@ export class GatewayApprovalQueue {
         approval.commandPayload ?? null,
         approval.toolName,
         approvalKind,
-        approval.requestPayload === undefined ? null : JSON.stringify(approval.requestPayload),
+        approvalKind === "command" ? (approval.executionApproval === undefined ? null : JSON.stringify({ executionApproval: approval.executionApproval })) : (approval.requestPayload === undefined ? null : JSON.stringify(approval.requestPayload)),
         approval.requestedAt.toISOString(),
         approval.expiresAt.toISOString(),
         approval.channel,
@@ -288,6 +292,15 @@ export class GatewayApprovalQueue {
   ): Promise<void> {
     const profileId = requireScopeValue(scope.profileId, "profileId");
     const now = this.#now().toISOString();
+    if (decision === "approved") {
+      const current = this.#getScopedRow(id, { profileId, sessionId: scope.sessionId });
+      if (current !== null && current.status === "pending" && current.expires_at > now && current.approval_kind === "command") {
+        const binding = commandApprovalBinding(current);
+        if (!validPendingAction(binding) || binding.expiresAt <= this.#now().getTime()) throw new Error("Legacy or expired command approval requires renewal in the owning session.");
+        if (binding.executionScope.profileId !== profileId || binding.executionScope.sessionId !== current.session_id ||
+          assessHardlineFloor(current.command_payload ?? current.command_preview) !== undefined) throw new Error("Command approval is no longer permitted.");
+      }
+    }
     const result = scope.sessionId === undefined
       ? this.#db
           .query(
@@ -438,6 +451,7 @@ function assertApprovalReplayMatches(
     row.requested_at !== approval.requestedAt.toISOString() ||
     row.expires_at !== approval.expiresAt.toISOString() ||
     row.channel !== approval.channel ||
+    (approvalKind === "command" && row.status === "pending" && JSON.stringify(commandApprovalBinding(row)) !== JSON.stringify(approval.executionApproval)) ||
     row.chat_id !== (approval.chatId ?? null)
   ) {
     throw new Error("Gateway approval idempotency key was reused for a different request.");
@@ -469,7 +483,8 @@ function rowToPendingApproval(
     commandPayload: options.includePayload ? row.command_payload ?? undefined : undefined,
     toolName: row.tool_name,
     approvalKind: row.approval_kind ?? "command",
-    requestPayload: options.includeRequestPayload === true && row.request_payload !== null
+    executionApproval: row.approval_kind === "command" ? commandApprovalBinding(row) : undefined,
+    requestPayload: row.approval_kind !== "command" && options.includeRequestPayload === true && row.request_payload !== null
       ? parseManagedPythonCapabilityApprovalPayload(row.request_payload)
       : undefined,
     requestedAt: new Date(row.requested_at),
@@ -595,4 +610,12 @@ function rowResolveError(row: PendingApprovalRow): Error {
   }
 
   return new Error("Pending approval has expired.");
+}
+
+function commandApprovalBinding(row: PendingApprovalRow): PendingActionApproval | undefined {
+  if (row.approval_kind !== "command" || row.request_payload === null) return undefined;
+  try {
+    const value = JSON.parse(row.request_payload).executionApproval;
+    return validPendingAction(value) ? value : undefined;
+  } catch { return undefined; }
 }

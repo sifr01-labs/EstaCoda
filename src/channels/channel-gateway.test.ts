@@ -1,10 +1,12 @@
+import { verifyHostExecution } from "../execution/host-authority.js";
+import { channelApprovalScope, localApprovalScope } from "../security/approval-scope.js";
 import { validateSessionWorkspaceOwnership } from "../session/session-workspace-ownership.js";
 import { afterEach, describe, it, expect, vi } from "vitest";
 import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join } from "node:path";
 import {
-  ChannelGateway,
+  ChannelGateway as ProductionChannelGateway,
   InMemoryChannelSessionStore,
   telegramGatewayCommands,
   authorizeChannelMessage,
@@ -47,7 +49,7 @@ import { InMemorySessionDB } from "../session/in-memory-session-db.js";
 import { loadRuntimeConfig } from "../config/runtime-config.js";
 import { resolveProfileStateHome } from "../config/profile-home.js";
 import { resolveEffectiveSessionModelOverride } from "../providers/model-switch-resolver.js";
-import { PersistentChannelSessionStore, stableSessionKey } from "./channel-session-store.js";
+import { PersistentChannelSessionStore, normalizeSessionKey, stableSessionKey } from "./channel-session-store.js";
 import {
   compactModelPickerLabel,
   modelPickerCancelActionValue,
@@ -5815,6 +5817,7 @@ describe("ChannelGateway commands", () => {
         const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
         const approvalStore = new ChannelApprovalStore({ path: join(directory, "channel-approvals.json") });
         await approvalStore.grant({
+          executionScope: channelApprovalScope(localApprovalScope("profile-a", "fixture-session", await verifyHostExecution(process.cwd())), normalizeSessionKey(makeMessage("fixture").sessionKey)),
           sessionKey: { platform: "telegram", chatId: "123456", chatType: "dm" },
           toolName: "terminal.run",
           riskClass: "destructive-local",
@@ -5928,6 +5931,7 @@ describe("ChannelGateway commands", () => {
           idFactory: () => "persisted-approval-1"
         });
         await approvalStore.grant({
+          executionScope: channelApprovalScope(localApprovalScope("profile-a", "fixture-session", await verifyHostExecution(process.cwd())), normalizeSessionKey(makeMessage("fixture").sessionKey)),
           sessionKey: { platform: "telegram", chatId: "123456", chatType: "dm" },
           toolName: "terminal.run",
           riskClass: "destructive-local",
@@ -9627,3 +9631,11 @@ describe("ChannelGateway commands", () => {
     });
   });
 });
+
+// Fake runtimes use the same core-issued scope contract as the supervisor.
+class ChannelGateway extends ProductionChannelGateway {
+  constructor(options: ChannelGatewayOptions) {
+    super({ trustedWorkspace: true, approvalScopeForSession: async (sessionId) =>
+      localApprovalScope(options.profileId ?? "default", sessionId, await verifyHostExecution(process.cwd())), ...options });
+  }
+}

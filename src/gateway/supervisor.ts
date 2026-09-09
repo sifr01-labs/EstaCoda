@@ -1,3 +1,5 @@
+import { verifyHostExecution } from "../execution/host-authority.js";
+import { localApprovalScope } from "../security/approval-scope.js";
 import { validateSessionWorkspaceOwnership } from "../session/session-workspace-ownership.js";
 import { appendFile, mkdir, unlink } from "node:fs/promises";
 import { createHash } from "node:crypto";
@@ -1556,6 +1558,13 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           sessionPolicy,
           handoffStore,
           surfacePointerStore,
+          approvalScopeForSession: async (sessionId) => {
+            if (!await trustStore.isTrusted(options.workspaceRoot)) throw new Error("Workspace trust was revoked.");
+            const session = await sessionDb.getSessionForProfile(sessionId, profileId);
+            if (session === undefined) throw new Error("Session not found in gateway profile.");
+            await validateSessionWorkspaceOwnership({ session, profileId, workspaceRoot: options.workspaceRoot, homeDir });
+            return localApprovalScope(profileId, sessionId, await verifyHostExecution(options.workspaceRoot));
+          },
           validateSessionAttachment: async (sessionId) => {
             const session = await sessionDb.getSessionForProfile(sessionId, profileId);
             if (session === undefined) throw new Error("Session not found in the gateway profile.");
@@ -1629,6 +1638,13 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           sessionPolicy,
           handoffStore,
           surfacePointerStore,
+          approvalScopeForSession: async (sessionId) => {
+            if (!await trustStore.isTrusted(options.workspaceRoot)) throw new Error("Workspace trust was revoked.");
+            const session = await sessionDb.getSessionForProfile(sessionId, profileId);
+            if (session === undefined) throw new Error("Session not found in gateway profile.");
+            await validateSessionWorkspaceOwnership({ session, profileId, workspaceRoot: options.workspaceRoot, homeDir });
+            return localApprovalScope(profileId, sessionId, await verifyHostExecution(options.workspaceRoot));
+          },
           validateSessionAttachment: async (sessionId) => {
             const session = await sessionDb.getSessionForProfile(sessionId, profileId);
             if (session === undefined) throw new Error("Session not found in the gateway profile.");

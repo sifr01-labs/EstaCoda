@@ -1,3 +1,4 @@
+import { assertPendingAction, type PendingActionApproval } from "../security/pending-action-approval.js";
 import { localApprovalScope } from "../security/approval-scope.js";
 import { verifyHostExecution } from "../execution/host-authority.js";
 import type { HostExecutionFacts, RequestedExecutionPolicy } from "../contracts/execution-authority.js";
@@ -324,6 +325,7 @@ export type Runtime = {
     checkProvider?: boolean;
   }): Promise<ImageGenerationVerification>;
   grantApproval?(input: {
+    pendingApproval?: PendingActionApproval;
     toolName: string;
     riskClass: import("../contracts/tool.js").ToolRiskClass;
     targetKey?: string;
@@ -812,6 +814,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         sessionId: sessionRuntimeContext.currentSessionId()
       }
   });
+  const pendingActions = new Map<string, { pending: PendingActionApproval; toolName?: string; riskClass: string; targetKey?: string }>();
   const securityPolicy: SecurityPolicy = {
     decide(request: SecurityRequest) {
       return baseSecurityPolicyForActiveMode().decide(request);
@@ -840,12 +843,18 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         } satisfies SmartApprovalAssessorRuntimeConfig
         : undefined;
 
-      return await options.approvalController.assess(basePolicy, request, {
+      const assessment = await options.approvalController.assess(basePolicy, request, {
           workspaceRoot,
           sessionId: sessionRuntimeContext.currentSessionId(),
           mode: activeSecurityMode,
           smartApproval
         });
+      if (assessment.pendingApproval !== undefined) {
+        for (const [id, pending] of pendingActions) if (pending.pending.expiresAt <= Date.now()) pendingActions.delete(id);
+        if (pendingActions.size >= 100) pendingActions.delete(pendingActions.keys().next().value!);
+        pendingActions.set(assessment.pendingApproval.id, { pending: structuredClone(assessment.pendingApproval), toolName: request.toolName, riskClass: request.riskClass, targetKey: request.targetKey });
+      }
+      return assessment;
     }
   };
   const taskBaseSecurityPolicy: SecurityPolicy = {
@@ -1349,7 +1358,13 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       });
     },
     async grantApproval(input) {
-      await options.approvalController?.grant({
+      const pending = input.pendingApproval;
+      const issued = pending === undefined ? undefined : pendingActions.get(pending.id);
+      const currentScope = localApprovalScope(profileId, sessionRuntimeContext.currentSessionId(), executionFacts);
+      if (issued === undefined || JSON.stringify(issued.pending) !== JSON.stringify(pending) || issued.toolName !== input.toolName || issued.riskClass !== input.riskClass || issued.targetKey !== input.targetKey || options.approvalController === undefined) throw new Error("Approval context is missing. Review the current action to renew approval.");
+      assertPendingAction(pending, currentScope, options.approvalController.authorizationRevision());
+      await options.approvalController.grant({
+        actionKey: pending.actionKey,
         executionScope: localApprovalScope(profileId, sessionRuntimeContext.currentSessionId(), executionFacts),
         workspaceRoot,
         sessionId: sessionRuntimeContext.currentSessionId(),
@@ -1359,6 +1374,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         targetSummary: input.targetSummary,
         scope: input.scope
       });
+      pendingActions.delete(pending.id);
     },
     async inspectApprovals() {
       return await options.approvalController?.inspect({

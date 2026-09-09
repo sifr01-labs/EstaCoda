@@ -1,3 +1,4 @@
+import { securityActionKey } from "../security/pending-action-approval.js";
 import { localApprovalScope } from "../security/approval-scope.js";
 import { verifyHostExecution } from "../execution/host-authority.js";
 import { mkdir, mkdtemp, rename, rm, symlink, writeFile } from "node:fs/promises";
@@ -74,7 +75,7 @@ describe("workspace execution baseline", () => {
     const policy = createSecurityPolicyForMode("adaptive");
     expect((await controller.assess(policy, request, options)).decision).toBe("ask");
     await controller.grant({ ...options, toolName: "terminal.run", riskClass: request.riskClass,
-      targetKey: request.targetKey, targetSummary: request.targetSummary, executionScope: request.executionScope, scope });
+      targetKey: request.targetKey, targetSummary: request.targetSummary, executionScope: request.executionScope, actionKey: securityActionKey(request), scope });
     expect((await controller.assess(policy, request, options)).decision).toBe("allow");
     expect((await controller.assess(policy, request, options)).decision).toBe(scope === "once" ? "ask" : "allow");
     expect((await controller.assess(policy, commandRequest("rm -rf ./other"), options)).decision).toBe("ask");

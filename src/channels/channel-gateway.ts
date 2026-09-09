@@ -1,3 +1,5 @@
+import { assertPendingAction, createPendingAction, securityActionKey, type PendingActionApproval } from "../security/pending-action-approval.js";
+import { channelApprovalScope, samePendingAuthority, sameReusableAuthority, validApprovalScope, type ApprovalExecutionScope } from "../security/approval-scope.js";
 import type {
   ChannelAdapter,
   ChannelAuthPolicies,
@@ -219,6 +221,7 @@ export type ChannelSessionStore = {
 };
 
 export type ChannelGatewayOptions = {
+  approvalScopeForSession?: (sessionId: string) => Promise<ApprovalExecutionScope>;
   /** Core ownership validation before attaching an existing Session. Absent fails closed. */
   validateSessionAttachment?: (sessionId: string) => Promise<void>;
   adapters: ChannelAdapter[];
@@ -344,6 +347,7 @@ type ProviderServingState =
     };
 
 type CommandPendingApprovalContinuation = {
+  executionApproval?: PendingActionApproval;
   kind: "command";
   approvalId?: string;
   toolName: string;
@@ -371,6 +375,8 @@ type PendingApprovalContinuation =
   | PythonCapabilityPendingApprovalContinuation;
 
 type ApprovalGrant = {
+  executionScope?: ApprovalExecutionScope;
+  actionKey?: string;
   toolName: string;
   riskClass: string;
   targetKey?: string;
@@ -463,6 +469,7 @@ export class ChannelGateway {
   readonly #securityMode: SecurityApprovalMode;
   readonly #securityAssessor: SecurityAssessorRuntimeConfig | undefined;
   readonly #preprocessMessage: ChannelGatewayOptions["preprocessMessage"];
+  readonly #approvalScopeForSession: ChannelGatewayOptions["approvalScopeForSession"];
   readonly #validateSessionAttachment: ChannelGatewayOptions["validateSessionAttachment"];
   readonly #handoffStore: HandoffStore | undefined;
   readonly #surfacePointerStore: SurfacePointerStore | undefined;
@@ -542,6 +549,7 @@ export class ChannelGateway {
     this.#preprocessMessage = options.preprocessMessage;
     this.#handoffStore = options.handoffStore;
     this.#validateSessionAttachment = options.validateSessionAttachment;
+    this.#approvalScopeForSession = options.approvalScopeForSession;
     this.#surfacePointerStore = options.surfacePointerStore;
     this.#diagnostics = options.diagnostics;
     this.#deliveryRouter = options.deliveryRouter;
@@ -1026,9 +1034,22 @@ export class ChannelGateway {
     pending: PendingApprovalContinuation | undefined,
     adapter: ChannelAdapter
   ): Promise<PendingApprovalContinuation | undefined> {
-    if (pending === undefined || this.#approvalQueue === undefined) {
-      return pending;
+    if (pending === undefined) return undefined;
+    if (pending.kind === "command") {
+      let executionScope: ApprovalExecutionScope;
+      try { executionScope = await this.#resolveApprovalScope(pending.sessionId, pending.originalMessage.sessionKey); }
+      catch { throw new Error("Approval ownership could not be verified. Start new work in the configured workspace."); }
+      const trustedWorkspace = typeof this.#trustedWorkspace === "function"
+        ? await this.#trustedWorkspace(pending.originalMessage) : this.#trustedWorkspace === true;
+      if (!trustedWorkspace) throw new Error("Workspace trust is required to request command approval.");
+      const executionApproval = pending.executionApproval ?? createPendingAction({
+        toolName: pending.toolName, riskClass: pending.riskClass as SecurityRequest["riskClass"], targetKey: pending.targetKey,
+        command: pending.targetSummary, executionScope, description: "gateway command approval", context: { trustedWorkspace }
+      }, this.#approvalStore.revision());
+      assertPendingAction(executionApproval, executionScope, this.#approvalStore.revision());
+      pending = { ...pending, executionApproval };
     }
+    if (this.#approvalQueue === undefined) return pending;
 
     const payload = pending.kind === "managed-python-capability-install"
       ? managedPythonCapabilityApprovalPreview(pending.capability)
@@ -1039,6 +1060,7 @@ export class ChannelGateway {
       profileId: this.#profileId,
       commandPreview: createCommandPreview(payload),
       commandHash: createCommandHash(payload),
+      executionApproval: pending.kind === "command" ? pending.executionApproval : undefined,
       commandPayload: pending.kind === "command" ? payload : undefined,
       toolName: pending.toolName,
       approvalKind: pending.kind === "managed-python-capability-install"
@@ -4295,6 +4317,11 @@ export class ChannelGateway {
       return await this.#approvePythonCapabilitySetup(key, pending, adapter, message);
     }
 
+    try {
+      assertPendingAction(pending.executionApproval, await this.#resolveApprovalScope(pending.sessionId, pending.originalMessage.sessionKey), this.#approvalStore.revision());
+    } catch {
+      return await this.#terminatePendingApproval(key, pending, adapter, "Approval needs renewal", "The action expired or its execution authority changed. Repeat the request to review the current action.");
+    }
     if (pending.approvalId !== undefined && this.#approvalQueue !== undefined) {
       try {
         await this.#approvalQueue.resolveApproval(
@@ -4585,6 +4612,12 @@ export class ChannelGateway {
     };
   }
 
+  async #resolveApprovalScope(sessionId: string, sessionKey: ChannelSessionKey): Promise<ApprovalExecutionScope> {
+    const scope = await this.#approvalScopeForSession?.(sessionId);
+    if (!validApprovalScope(scope) || scope.profileId !== this.#profileId || scope.sessionId !== sessionId) throw new Error("Session approval scope is unavailable.");
+    return channelApprovalScope(scope, normalizeSessionKey(sessionKey, this.#sessionPolicy));
+  }
+
   async #resumePendingApproval(
     key: string,
     pending: PendingApprovalContinuation,
@@ -4593,19 +4626,24 @@ export class ChannelGateway {
     approvalText: string
   ): Promise<ChannelGatewayResult> {
     const normalizedSessionKey = normalizeSessionKey(pending.originalMessage.sessionKey, this.#sessionPolicy);
+    if (pending.kind !== "command") throw new Error("Managed installation must use its capability-specific approval path.");
+    assertPendingAction(pending.executionApproval, await this.#resolveApprovalScope(pending.sessionId, normalizedSessionKey), this.#approvalStore.revision());
     if (scope !== "always") {
       const grants = this.#approvalGrants.get(key) ?? [];
       grants.push({
+        executionScope: pending.executionApproval.executionScope,
+        actionKey: scope === "once" ? pending.executionApproval.actionKey : undefined,
         toolName: pending.toolName,
         riskClass: pending.riskClass,
         targetKey: pending.targetKey,
         targetSummary: pending.targetSummary,
         scope,
-        sessionId: scope === "session" ? pending.sessionId : undefined
+        sessionId: pending.sessionId
       });
       this.#approvalGrants.set(key, grants);
     } else {
       await this.#approvalStore.grant({
+        executionScope: pending.executionApproval.executionScope,
         sessionKey: normalizedSessionKey,
         toolName: pending.toolName,
         riskClass: pending.riskClass,
@@ -4744,6 +4782,9 @@ export class ChannelGateway {
     const approvalGrants = this.#approvalGrants;
 
     const assess = async (request: SecurityRequest) => {
+      if (this.#approvalScopeForSession !== undefined) request.executionScope = await this.#resolveApprovalScope(sessionId, sessionKey);
+      else if (validApprovalScope(request.executionScope) && request.executionScope.profileId === this.#profileId) request.executionScope = channelApprovalScope(request.executionScope, sessionKey);
+      else request.executionScope = undefined;
       const basePolicy = createSecurityPolicyForMode(securityMode, {
         assessor: securityAssessor === undefined
           ? undefined
@@ -4757,8 +4798,11 @@ export class ChannelGateway {
         return hardline;
       }
 
+      if (!request.context.trustedWorkspace || basePolicy.decide(request) === "deny") return await assessSecurityPolicy(basePolicy, request, securityMode);
       const grants = approvalGrants.get(key) ?? [];
       const grantIndex = grants.findIndex((grant) =>
+        samePendingAuthority(grant.executionScope, request.executionScope) &&
+        (grant.scope !== "once" || grant.actionKey === securityActionKey(request)) &&
         grant.toolName === request.toolName &&
         grant.riskClass === request.riskClass &&
         grant.targetKey === request.targetKey &&
@@ -4790,7 +4834,7 @@ export class ChannelGateway {
               : "medium"
           } as const;
         }
-        if (persistentApprovals.some((grant) => matchesPersistentApproval(grant, request))) {
+        if ((await this.#approvalStore.listForSession(sessionKey)).some((grant) => Number.isSafeInteger(grant.authorizationGeneration) && grant.authorizationGeneration! > 0 && sameReusableAuthority(grant.executionScope, request.executionScope) && matchesPersistentApproval(grant, request))) {
           return {
             decision: "allow" as const,
             mode: securityMode,
@@ -4804,7 +4848,8 @@ export class ChannelGateway {
           } as const;
         }
 
-      return await assessSecurityPolicy(basePolicy, request, securityMode);
+      const assessment = await assessSecurityPolicy(basePolicy, request, securityMode);
+      return assessment.decision === "ask" ? { ...assessment, pendingApproval: createPendingAction(request, this.#approvalStore.revision()) } : assessment;
     };
 
     return {
@@ -4818,16 +4863,6 @@ export class ChannelGateway {
           return hardline.decision;
         }
 
-        const grants = approvalGrants.get(key) ?? [];
-        const grantIndex = grants.findIndex((grant) =>
-          grant.toolName === request.toolName &&
-          grant.riskClass === request.riskClass &&
-          grant.targetKey === request.targetKey &&
-          (grant.scope !== "session" || grant.sessionId === sessionId)
-        );
-        if (grantIndex >= 0 || persistentApprovals.some((grant) => matchesPersistentApproval(grant, request))) {
-          return "allow";
-        }
         return basePolicy.decide(request);
       }
     };
@@ -5459,6 +5494,7 @@ function firstPendingApproval(
 
   return {
     kind: "command",
+    executionApproval: blocked.pendingApproval,
     toolName: blocked.tool.name,
     riskClass: blocked.riskClass,
     targetKey: blocked.targetKey,

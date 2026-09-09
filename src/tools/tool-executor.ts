@@ -1,3 +1,4 @@
+import { exactActionKey, type PendingActionApproval } from "../security/pending-action-approval.js";
 import { realpath } from "node:fs/promises";
 import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
 import {
@@ -5,7 +6,8 @@ import {
   assessSecurityPolicy,
   type EnvironmentType,
   type SecurityDecision,
-  type SecurityPolicy
+  type SecurityPolicy,
+  type SecurityRequest
 } from "../contracts/security.js";
 import type { SessionDB } from "../contracts/session.js";
 import type { ExecutionCheckpointJournalController } from "../contracts/execution-checkpoint.js";
@@ -122,6 +124,7 @@ export type ToolReadLedger = {
 };
 
 export type ToolExecutionRecord = {
+  pendingApproval?: PendingActionApproval;
   /** Executor-owned link to a successful equivalent call; never tool-result metadata. */
   completedReplayOf?: string;
   tool: ToolDefinition;
@@ -374,7 +377,8 @@ export class ToolExecutor {
     }
     const persistedTargetKey = redactPersistedString(targetKey);
     const persistedTargetSummary = redactPersistedString(targetSummary);
-    const securityRequest = {
+    const securityRequest: SecurityRequest = {
+      actionKey: exactActionKey([tool.name, riskClass, request.input]),
       riskClass,
       toolName: tool.name,
       targetKey: persistedTargetKey,
@@ -398,6 +402,7 @@ export class ToolExecutor {
       try {
         operatorDecision = await request.onApprovalRequest({
           tool: toDefinition(tool),
+          ...(assessment.pendingApproval === undefined ? {} : { pendingApproval: assessment.pendingApproval }),
           input: structuredClone(request.input),
           riskClass,
           targetKey: persistedTargetKey,
@@ -446,6 +451,7 @@ export class ToolExecutor {
       });
 
       return {
+        ...(assessment.pendingApproval === undefined ? {} : { pendingApproval: assessment.pendingApproval }),
         tool: toDefinition(tool),
         ...(executionEffect === undefined ? {} : { executionEffect }),
         settlement: notStartedSettlement("failed"),
