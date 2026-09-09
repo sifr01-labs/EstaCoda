@@ -62,6 +62,7 @@ export type SecurityAssessorConfig = {
 };
 
 export type SecurityRequest = {
+  executionScope?: import("../security/approval-scope.js").ApprovalExecutionScope;
   riskClass: ToolRiskClass;
   description: string;
   toolName?: string;

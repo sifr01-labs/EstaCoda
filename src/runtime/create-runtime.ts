@@ -1,3 +1,4 @@
+import { localApprovalScope } from "../security/approval-scope.js";
 import { verifyHostExecution } from "../execution/host-authority.js";
 import type { HostExecutionFacts, RequestedExecutionPolicy } from "../contracts/execution-authority.js";
 import { ensureRuntimeSession, validateSessionWorkspaceOwnership } from "../session/session-workspace-ownership.js";
@@ -816,6 +817,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       return baseSecurityPolicyForActiveMode().decide(request);
     },
     async assess(request: SecurityRequest) {
+      request.executionScope = localApprovalScope(profileId, sessionRuntimeContext.currentSessionId(), executionFacts);
       const basePolicy = baseSecurityPolicyForActiveMode();
 
       if (options.approvalController === undefined) {
@@ -1348,6 +1350,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     },
     async grantApproval(input) {
       await options.approvalController?.grant({
+        executionScope: localApprovalScope(profileId, sessionRuntimeContext.currentSessionId(), executionFacts),
         workspaceRoot,
         sessionId: sessionRuntimeContext.currentSessionId(),
         toolName: input.toolName,

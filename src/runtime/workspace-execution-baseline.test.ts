@@ -1,3 +1,5 @@
+import { localApprovalScope } from "../security/approval-scope.js";
+import { verifyHostExecution } from "../execution/host-authority.js";
 import { mkdir, mkdtemp, rename, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -67,12 +69,12 @@ describe("workspace execution baseline", () => {
     const path = join(root, "approvals.json");
     const makeController = () => new WorkspaceApprovalController({ store: new WorkspaceApprovalStore({ path }) });
     const controller = makeController();
-    const request = commandRequest("rm -rf ./build");
+    const request = { ...commandRequest("rm -rf ./build"), executionScope: localApprovalScope("default", "scope", await verifyHostExecution(root)) };
     const options = { workspaceRoot: root, sessionId: "scope", mode: "adaptive" as const };
     const policy = createSecurityPolicyForMode("adaptive");
     expect((await controller.assess(policy, request, options)).decision).toBe("ask");
     await controller.grant({ ...options, toolName: "terminal.run", riskClass: request.riskClass,
-      targetKey: request.targetKey, targetSummary: request.targetSummary, scope });
+      targetKey: request.targetKey, targetSummary: request.targetSummary, executionScope: request.executionScope, scope });
     expect((await controller.assess(policy, request, options)).decision).toBe("allow");
     expect((await controller.assess(policy, request, options)).decision).toBe(scope === "once" ? "ask" : "allow");
     expect((await controller.assess(policy, commandRequest("rm -rf ./other"), options)).decision).toBe("ask");

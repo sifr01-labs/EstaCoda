@@ -1,9 +1,12 @@
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { readApprovalFile, updateApprovalFile } from "../security/approval-file.js";
+import { sameReusableAuthority, validApprovalScope, type ApprovalExecutionScope } from "../security/approval-scope.js";
+import { join } from "node:path";
 import { resolveHomeDir } from "../config/home-dir.js";
 import type { ChannelSessionKey } from "../contracts/channel.js";
 
 export type PersistedApprovalGrant = {
+  executionScope?: ApprovalExecutionScope;
+  authorizationGeneration?: number;
   id: string;
   platform: string;
   userId?: string;
@@ -13,11 +16,6 @@ export type PersistedApprovalGrant = {
   targetKey?: string;
   targetSummary?: string;
   grantedAt: string;
-};
-
-type ApprovalFile = {
-  version: 1;
-  grants: PersistedApprovalGrant[];
 };
 
 export class ChannelApprovalStore {
@@ -41,94 +39,38 @@ export class ChannelApprovalStore {
   }
 
   async listForSession(sessionKey: ChannelSessionKey): Promise<PersistedApprovalGrant[]> {
-    const file = await this.#read();
-    return file.grants.filter((grant) => matchesSessionScope(grant, sessionKey));
+    return readApprovalFile(this.#path, isGrant).grants.filter((grant) => matchesSessionScope(grant, sessionKey));
   }
-
-  async listAll(): Promise<PersistedApprovalGrant[]> {
-    const file = await this.#read();
-    return file.grants;
-  }
+  async listAll(): Promise<PersistedApprovalGrant[]> { return readApprovalFile(this.#path, isGrant).grants; }
+  revision(): number { return readApprovalFile(this.#path, isGrant).revision; }
 
   async grant(input: {
-    sessionKey: ChannelSessionKey;
-    toolName: string;
-    riskClass: string;
-    targetKey?: string;
-    targetSummary?: string;
+    sessionKey: ChannelSessionKey; toolName: string; riskClass: string;
+    targetKey?: string; targetSummary?: string; executionScope?: ApprovalExecutionScope;
   }): Promise<PersistedApprovalGrant> {
-    const file = await this.#read();
-    const existing = file.grants.find((grant) =>
-      grant.platform === input.sessionKey.platform &&
-      grant.userId === input.sessionKey.userId &&
-      grant.chatId === input.sessionKey.chatId &&
-      grant.toolName === input.toolName &&
-      grant.riskClass === input.riskClass &&
-      grant.targetKey === input.targetKey &&
-      grant.targetSummary === input.targetSummary
-    );
-
-    if (existing !== undefined) {
-      return existing;
-    }
-
-    const grant: PersistedApprovalGrant = {
-      id: this.#idFactory(),
-      platform: input.sessionKey.platform,
-      userId: input.sessionKey.userId,
-      chatId: input.sessionKey.chatId,
-      toolName: input.toolName,
-      riskClass: input.riskClass,
-      targetKey: input.targetKey,
-      targetSummary: input.targetSummary,
-      grantedAt: this.#now().toISOString()
-    };
-
-    file.grants.push(grant);
-    file.grants.sort((left, right) => left.grantedAt.localeCompare(right.grantedAt) || left.id.localeCompare(right.id));
-    await this.#write(file);
-
-    return grant;
-  }
-
-  async revoke(id: string, sessionKey?: ChannelSessionKey): Promise<boolean> {
-    const file = await this.#read();
-    const before = file.grants.length;
-    file.grants = file.grants.filter((grant) => {
-      if (grant.id !== id) {
-        return true;
-      }
-
-      return sessionKey !== undefined && !matchesSessionScope(grant, sessionKey);
+    if (input.executionScope !== undefined && !validApprovalScope(input.executionScope)) throw new Error("Invalid approval execution scope.");
+    return updateApprovalFile(this.#path, isGrant, (file) => {
+      const existing = file.grants.find((grant) => matchesSessionScope(grant, input.sessionKey) && grant.toolName === input.toolName &&
+        grant.riskClass === input.riskClass && grant.targetKey === input.targetKey && sameReusableAuthority(grant.executionScope, input.executionScope));
+      if (existing) return existing;
+      const grant: PersistedApprovalGrant = { id: this.#idFactory(), platform: input.sessionKey.platform,
+        userId: input.sessionKey.userId, chatId: input.sessionKey.chatId, toolName: input.toolName, riskClass: input.riskClass,
+        targetKey: input.targetKey, targetSummary: input.targetSummary, executionScope: input.executionScope,
+        authorizationGeneration: ++file.revision, grantedAt: this.#now().toISOString() };
+      file.grants.push(grant);
+      return grant;
     });
-
-    if (file.grants.length === before) {
-      return false;
-    }
-
-    await this.#write(file);
-    return true;
+  }
+  async revoke(id: string, sessionKey?: ChannelSessionKey): Promise<boolean> {
+    return updateApprovalFile(this.#path, isGrant, (file) => {
+      const before = file.grants.length;
+      file.grants = file.grants.filter((grant) => grant.id !== id || (sessionKey !== undefined && !matchesSessionScope(grant, sessionKey)));
+      if (before === file.grants.length) return false;
+      file.revision++;
+      return true;
+    });
   }
 
-  async #read(): Promise<ApprovalFile> {
-    try {
-      const parsed = JSON.parse(await readFile(this.#path, "utf8")) as Partial<ApprovalFile>;
-      return {
-        version: 1,
-        grants: Array.isArray(parsed.grants) ? parsed.grants.filter(isGrant) : []
-      };
-    } catch {
-      return {
-        version: 1,
-        grants: []
-      };
-    }
-  }
-
-  async #write(file: ApprovalFile): Promise<void> {
-    await mkdir(dirname(this.#path), { recursive: true });
-    await writeFile(this.#path, `${JSON.stringify(file, null, 2)}\n`, "utf8");
-  }
 }
 
 function matchesSessionScope(grant: PersistedApprovalGrant, sessionKey: ChannelSessionKey): boolean {
