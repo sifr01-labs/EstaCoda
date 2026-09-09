@@ -92,3 +92,9 @@ export function hasPromptInjectionRisk(content: string): boolean {
     /reveal (the )?(system|developer) prompt/i.test(content) ||
     /exfiltrat(e|ion)|steal (secrets|tokens|keys)/i.test(content);
 }
+
+/** Exclusions for subprocess search must follow the same sensitive-path policy. */
+export function workspaceSearchExclusionGlobs(): string[] {
+  return [...SENSITIVE_SEGMENTS].flatMap((segment) => [segment, `**/${segment}`, `${segment}/**`, `**/${segment}/**`])
+    .concat([...SENSITIVE_EXTENSIONS].map((extension) => `*${extension}`));
+}

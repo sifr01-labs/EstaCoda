@@ -1,16 +1,18 @@
-import { realpath } from "node:fs/promises";
+import type { HostExecutionLease } from "../execution/host-environment.js";
+import { HostWorkspaceFiles } from "../execution/host-workspace-files.js";
 import { resolve } from "node:path";
-import { explainPathBlock } from "../context/context-security.js";
 import type { RegisteredTool, SessionToolProvider, ToolResult } from "../contracts/tool.js";
 import { runPythonWorker } from "../workers/python-worker.js";
 
 export type PythonToolOptions = {
+  executionLease?: HostExecutionLease;
   workspaceRoot?: string;
   allowedRoots?: string[];
 };
 
 export function createPythonTools(options: PythonToolOptions = {}): readonly RegisteredTool[] {
-  const allowedRoots = dedupeRoots([options.workspaceRoot, ...(options.allowedRoots ?? [])]);
+  const root = options.executionLease?.workspaceRoot ?? options.workspaceRoot;
+  const allowedRoots = dedupeRoots([root, ...(options.allowedRoots ?? [])]);
 
   return [
   {
@@ -27,12 +29,14 @@ export function createPythonTools(options: PythonToolOptions = {}): readonly Reg
     progressLabel: "probing python worker",
     maxResultSizeChars: 2000,
     isAvailable: () => true,
-    run: async (input: Record<string, unknown>) =>
+    run: async (input: Record<string, unknown>, context) =>
       runPythonWorker({
         tool: "python.probe",
         input
       }, {
-        cwd: options.workspaceRoot
+        cwd: root,
+        executionLease: options.executionLease,
+        signal: context?.signal
       })
   },
   {
@@ -51,8 +55,8 @@ export function createPythonTools(options: PythonToolOptions = {}): readonly Reg
     progressLabel: "probing document",
     maxResultSizeChars: 4000,
     isAvailable: () => true,
-    run: async (input: Record<string, unknown>) => {
-      const resolvedPath = await resolveAllowedDocumentPath(allowedRoots, input.path);
+    run: async (input: Record<string, unknown>, context) => {
+      const resolvedPath = await resolveAllowedDocumentPath(allowedRoots, input.path, options.executionLease);
       if (!resolvedPath.ok) {
         return resolvedPath;
       }
@@ -61,10 +65,14 @@ export function createPythonTools(options: PythonToolOptions = {}): readonly Reg
         tool: "document.probe",
         input: {
           ...input,
-          path: resolvedPath.path
+          path: resolvedPath.path,
+          maxPreviewChars: typeof input.maxPreviewChars === "number" && Number.isFinite(input.maxPreviewChars)
+            ? Math.max(0, Math.min(2000, Math.floor(input.maxPreviewChars))) : 500
         }
       }, {
-        cwd: options.workspaceRoot
+        cwd: root,
+        executionLease: options.executionLease,
+        signal: context?.signal
       });
     }
   }
@@ -79,6 +87,7 @@ export const pythonToolProvider: SessionToolProvider = {
   createTools(ctx) {
     return createPythonTools({
       workspaceRoot: ctx.workspaceRoot,
+      executionLease: ctx.executionLease,
       allowedRoots: [requireProviderDependency("python", "channelMediaRoot", ctx.channelMediaRoot)]
     });
   }
@@ -101,7 +110,8 @@ function dedupeRoots(roots: Array<string | undefined>): string[] {
 
 async function resolveAllowedDocumentPath(
   roots: string[],
-  pathValue: unknown
+  pathValue: unknown,
+  lease?: HostExecutionLease
 ): Promise<ToolResult & { path?: string }> {
   if (typeof pathValue !== "string" || pathValue.length === 0) {
     return {
@@ -121,32 +131,14 @@ async function resolveAllowedDocumentPath(
 
   for (const root of roots) {
     const candidate = resolve(root, pathValue);
-    let canonicalRoot = root;
-    let canonicalTarget = candidate;
-
+    // Additional roots are explicit profile capability inputs (channel media),
+    // never a fallback to the caller's workspace when a lease is selected.
+    const files = root === lease?.workspaceRoot ? lease.files : new HostWorkspaceFiles(root);
     try {
-      canonicalRoot = await realpath(root);
-    } catch {
-      canonicalRoot = root;
-    }
-
-    try {
-      canonicalTarget = await realpath(candidate);
-    } catch (error) {
-      lastError = error instanceof Error ? error.message : "path does not exist";
-      continue;
-    }
-
-    const blockedReason = explainPathBlock(canonicalRoot, canonicalTarget);
-    if (blockedReason === undefined) {
-      return {
-        ok: true,
-        content: "",
-        path: canonicalTarget
-      };
-    }
-
-    lastError = blockedReason;
+      const resolved = await files.resolvePath(candidate);
+      if (resolved.ok) return { ok: true, content: "", path: resolved.path };
+      lastError = resolved.content;
+    } catch { lastError = "Document root is unavailable."; }
   }
 
   return {

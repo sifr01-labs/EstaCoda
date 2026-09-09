@@ -1,8 +1,10 @@
-import { spawn } from "node:child_process";
-import { readdir, realpath, stat } from "node:fs/promises";
+import { explainPathBlock, workspaceSearchExclusionGlobs } from "../context/context-security.js";
+import { HostProcessScope, type HostProcesses } from "../execution/host-processes.js";
+import type { HostExecutionLease } from "../execution/host-environment.js";
+import { HostWorkspaceFiles, type WorkspaceFiles } from "../execution/host-workspace-files.js";
 import { basename, isAbsolute, join, relative, resolve, sep } from "node:path";
 import type { RegisteredTool, SessionToolProvider, ToolResult } from "../contracts/tool.js";
-import { errorResult, resolveWorkspacePath } from "./workspace-paths.js";
+import { errorResult } from "./workspace-paths.js";
 
 export type FileGlobInput = {
   pattern?: string;
@@ -14,6 +16,7 @@ export type FileGlobInput = {
 };
 
 export type GlobToolOptions = {
+  executionLease?: HostExecutionLease;
   workspaceRoot: string;
   rgCommand?: string;
   rgArgsPrefix?: readonly string[];
@@ -43,7 +46,8 @@ type GlobInputValidation =
   };
 
 export function createGlobTools(options: GlobToolOptions): readonly RegisteredTool[] {
-  const root = resolve(options.workspaceRoot);
+  const root = options.executionLease?.workspaceRoot ?? resolve(options.workspaceRoot);
+  const files = options.executionLease?.files ?? new HostWorkspaceFiles(root);
   const rgCommand = options.rgCommand ?? "rg";
   const rgArgsPrefix = options.rgArgsPrefix ?? [];
 
@@ -68,33 +72,39 @@ export function createGlobTools(options: GlobToolOptions): readonly RegisteredTo
       progressLabel: "finding files",
       maxResultSizeChars: 20_000,
       isAvailable: () => true,
-      run: async (input: FileGlobInput) => {
+      run: async (input: FileGlobInput, context) => {
+        const signal = AbortSignal.any([...[context?.signal, options.executionLease?.signal].filter((value): value is AbortSignal => value !== undefined)]);
+        if (signal.aborted) return errorResult("Glob cancelled before dispatch.");
         const validation = validateInput(input);
         if (!validation.ok) {
           return validation;
         }
 
-        const canonicalRoot = await realpath(root);
-        const start = await resolveWorkspacePath(canonicalRoot, input.path ?? ".", { allowDirectory: true });
+        try { await options.executionLease?.content.assertMaterialized(); } catch (error) { return errorResult(error instanceof Error ? error.message : "Editor content is not materialized."); }
+        const canonicalRoot = await files.realpath(root);
+        const start = await files.resolvePath(input.path ?? ".", { allowDirectory: true });
         if (!start.ok) {
           return start;
         }
 
-        const startStat = await stat(start.path);
+        const startStat = await files.stat(start.path);
         if (!startStat.isDirectory()) {
           return errorResult("path must point to a directory");
         }
 
         const startedAt = Date.now();
         const scopedPath = toWorkspaceRelative(canonicalRoot, start.path) || ".";
+        const owned = options.executionLease ? undefined : new HostProcessScope(root);
         const rgResult = await runRipgrepFiles({
+          processes: options.executionLease?.processes ?? owned!,
+          signal,
           root: canonicalRoot,
           rgCommand,
           rgArgsPrefix,
           pattern: validation.pattern,
           scopedPath,
           includeHidden: validation.includeHidden
-        });
+        }).finally(() => owned?.release());
         const backend = rgResult.kind === "ok" ? "rg" : "node";
         if (rgResult.kind === "error") {
           return errorResult(rgResult.content, rgResult.metadata);
@@ -103,6 +113,7 @@ export function createGlobTools(options: GlobToolOptions): readonly RegisteredTo
         const rawMatches = rgResult.kind === "ok"
           ? rgResult.paths
           : await findFilesWithNode({
+            files, signal,
             root: canonicalRoot,
             startPath: start.path,
             pattern: validation.pattern,
@@ -113,7 +124,7 @@ export function createGlobTools(options: GlobToolOptions): readonly RegisteredTo
           .filter((path): path is string => path !== undefined)
           .filter((path) => isAllowedWorkspaceFile(path, validation.includeHidden)));
         const sorted = validation.sort === "modified"
-          ? await sortByModifiedTime(canonicalRoot, filtered)
+          ? await sortByModifiedTime(files, canonicalRoot, filtered)
           : filtered.sort((left, right) => left.localeCompare(right));
         const total = sorted.length;
         const paged = sorted.slice(validation.offset, validation.offset + validation.limit);
@@ -143,6 +154,7 @@ export const globToolProvider: SessionToolProvider = {
   kind: "session",
   createTools(ctx) {
     return createGlobTools({
+      executionLease: ctx.executionLease,
       workspaceRoot: ctx.workspaceRoot
     });
   }
@@ -195,6 +207,8 @@ function parseInteger(value: number | undefined, fallback: number): number | und
 }
 
 function runRipgrepFiles(input: {
+  processes: HostProcesses;
+  signal?: AbortSignal;
   root: string;
   rgCommand: string;
   rgArgsPrefix: readonly string[];
@@ -216,17 +230,21 @@ function runRipgrepFiles(input: {
       ...(input.includeHidden ? ["--hidden"] : []),
       input.scopedPath
     ];
-    const child = spawn(input.rgCommand, args, {
-      cwd: input.root,
-      stdio: ["ignore", "pipe", "pipe"]
-    });
-    const stdoutChunks: Buffer[] = [];
-    const stderrChunks: Buffer[] = [];
+    if (input.signal?.aborted) { resolveResult({ kind: "error", content: "Glob cancelled before dispatch." }); return; }
+    const child = input.processes.spawn(input.rgCommand, args);
+    let stopped = false;
+    const cancel = () => { stopped = true; void input.processes.terminate(child).catch(() => resolveResult({ kind: "error", content: "Glob termination could not be confirmed." })); };
+    const timer = setTimeout(cancel, 30_000);
+    input.signal?.addEventListener("abort", cancel, { once: true });
+    const cleanup = () => { clearTimeout(timer); input.signal?.removeEventListener("abort", cancel); };
+    let stdout = "", stderr = "";
     let spawnFailed = false;
 
-    child.stdout.on("data", (chunk: Buffer) => stdoutChunks.push(chunk));
-    child.stderr.on("data", (chunk: Buffer) => stderrChunks.push(chunk));
+    child.stdout.setEncoding("utf8"); child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => { if (stdout.length + chunk.length > 2 * 1024 * 1024) cancel(); else stdout += chunk; });
+    child.stderr.on("data", (chunk: string) => { stderr = (stderr + chunk).slice(0, 4000); });
     child.on("error", (error: NodeJS.ErrnoException) => {
+      cleanup();
       spawnFailed = true;
       if (error.code === "ENOENT") {
         resolveResult({ kind: "missing" });
@@ -238,11 +256,12 @@ function runRipgrepFiles(input: {
       });
     });
     child.on("close", (code, signal) => {
+      cleanup();
+      if (stopped) { resolveResult({ kind: "error", content: "Glob cancelled or exceeded its time/output limit. Narrow the path." }); return; }
       if (spawnFailed) {
         return;
       }
-      const stdout = Buffer.concat(stdoutChunks).toString("utf8");
-      const stderr = Buffer.concat(stderrChunks).toString("utf8");
+
       if (code === 1 && signal === null && stdout.length === 0) {
         resolveResult({
           kind: "ok",
@@ -258,16 +277,15 @@ function runRipgrepFiles(input: {
         });
         return;
       }
-      resolveResult({
-        kind: "ok",
-        paths: stdout.split(/\r?\n/u).filter((line) => line.length > 0)
-      });
+      const paths = stdout.split(/\r?\n/u).filter((line) => line.length > 0);
+      if (paths.length > 20_000) { resolveResult({ kind: "error", content: "Glob file limit reached. Narrow the path." }); return; }
+      resolveResult({ kind: "ok", paths });
     });
   });
 }
 
 function exclusionArgs(): string[] {
-  const args: string[] = [];
+  const args: string[] = workspaceSearchExclusionGlobs().flatMap((pattern) => ["-g", `!${pattern}`]);
   for (const pattern of SENSITIVE_GLOBS) {
     args.push("-g", `!${pattern}`, "-g", `!**/${pattern}`);
   }
@@ -278,6 +296,8 @@ function exclusionArgs(): string[] {
 }
 
 async function findFilesWithNode(input: {
+  files: WorkspaceFiles;
+  signal?: AbortSignal;
   root: string;
   startPath: string;
   pattern: string;
@@ -286,6 +306,7 @@ async function findFilesWithNode(input: {
   const matcher = createGlobMatcher(input.pattern);
   const results: string[] = [];
   await walkDirectory(input.root, input.startPath, {
+    files: input.files, signal: input.signal, visited: { count: 0 },
     includeHidden: input.includeHidden,
     matcher,
     results
@@ -298,11 +319,16 @@ async function walkDirectory(
   path: string,
   options: {
     includeHidden: boolean;
+    files: WorkspaceFiles; signal?: AbortSignal; visited: { count: number };
     matcher: (workspaceRelativePath: string) => boolean;
     results: string[];
   }
 ): Promise<void> {
-  const entries = await readdir(path, { withFileTypes: true });
+  options.signal?.throwIfAborted();
+  if (++options.visited.count > 20_000 || options.results.length > 20_000) throw new Error("Glob traversal limit reached. Narrow the path.");
+  const resolved = await options.files.resolvePath(path, { allowDirectory: true });
+  if (!resolved.ok) return;
+  const entries = await options.files.readdir(resolved.path, { withFileTypes: true });
   for (const entry of entries) {
     const absolutePath = join(path, entry.name);
     const workspaceRelativePath = toWorkspaceRelative(root, absolutePath);
@@ -402,6 +428,7 @@ function normalizeSlashes(path: string): string {
 }
 
 function isAllowedWorkspaceFile(workspaceRelativePath: string, includeHidden: boolean): boolean {
+  if (explainPathBlock(process.cwd(), resolve(process.cwd(), workspaceRelativePath))) return false;
   const segments = normalizeSlashes(workspaceRelativePath).split("/");
   if (segments.some((segment) => EXCLUDED_DIRS.has(segment))) {
     return false;
@@ -420,10 +447,10 @@ function uniqueSorted(paths: string[]): string[] {
   return [...new Set(paths)].sort((left, right) => left.localeCompare(right));
 }
 
-async function sortByModifiedTime(root: string, paths: string[]): Promise<string[]> {
+async function sortByModifiedTime(files: WorkspaceFiles, root: string, paths: string[]): Promise<string[]> {
   const entries = await Promise.all(paths.map(async (path) => ({
     path,
-    mtimeMs: (await stat(join(root, path)).catch(() => undefined))?.mtimeMs ?? 0
+    mtimeMs: (await files.stat(join(root, path)).catch(() => undefined))?.mtimeMs ?? 0
   })));
   return entries
     .sort((left, right) => {

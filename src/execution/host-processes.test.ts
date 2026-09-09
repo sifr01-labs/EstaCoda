@@ -2,7 +2,8 @@ import { mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { once } from "node:events";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
+import { HostProcessScope } from "./host-processes.js";
 import { HostEnvironment } from "./host-environment.js";
 import { ProcessManager } from "../process/process-manager.js";
 
@@ -78,5 +79,31 @@ it("isolates default environments and preserves only explicit adapter values", a
     if (previous === undefined) delete process.env.ESTACODA_PROCESS_TEST_TOKEN;
     else process.env.ESTACODA_PROCESS_TEST_TOKEN = previous;
     await lease.release(); environment.destroy(); await rm(root, { recursive: true, force: true });
+  }
+});
+
+it.skipIf(process.platform === "win32").each([true, false])("requires OS proof of group absence after a signal/exit race (absent=%s)", async (absent) => {
+  const scope = new HostProcessScope(process.cwd());
+  const child = scope.spawn(process.execPath, ["-e", "process.stdout.write('ready'); setInterval(()=>{},1000)"], { env: {} });
+  await once(child.stdout, "data");
+  const kill = process.kill.bind(process);
+  const spy = vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
+    if (pid !== -child.pid!) return kill(pid, signal);
+    if (signal === 0) {
+      if (!absent) return true;
+      return kill(pid, signal);
+    }
+    throw Object.assign(new Error("signal denied"), { code: "EPERM" });
+  });
+  try {
+    const termination = scope.terminate(child, "SIGKILL");
+    child.kill("SIGKILL"); // The leader exits independently of the failed group signal.
+    if (absent) await expect(termination).resolves.toBeUndefined();
+    else await expect(termination).rejects.toThrow(/could not be confirmed/);
+  } finally {
+    spy.mockRestore();
+    child.kill("SIGKILL");
+    if (absent) await scope.release();
+    else await expect(scope.release()).rejects.toThrow(/did not settle/);
   }
 });

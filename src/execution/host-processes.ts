@@ -39,7 +39,7 @@ export class HostProcessScope {
     });
     child.once("close", () => {
       record.settled = true;
-      if (!record.cleanupError) this.#children.delete(child);
+      if (!record.cleanupError && !record.stopping) this.#children.delete(child);
       settle();
     });
     child.stdin.on("error", () => { /* A terminated child may close stdin during an authorized write. */ });
@@ -51,18 +51,26 @@ export class HostProcessScope {
     const record = this.#children.get(child);
     if (record === undefined) return; // A foreign handle grants no process control.
     record.stopping ??= (async () => {
-      if (process.platform === "win32" && child.pid !== undefined) {
-        await terminateWindowsTree(child.pid);
-      } else {
-        signalGroup(child, signal);
-        if (signal !== "SIGKILL") {
-          await Promise.race([record.closed, delay(1_000)]);
-          if (!record.settled) signalGroup(child, "SIGKILL");
+      let signalError: unknown;
+      try {
+        if (process.platform === "win32" && child.pid !== undefined) {
+          await terminateWindowsTree(child.pid);
+        } else {
+          signalGroup(child, signal);
+          if (signal !== "SIGKILL") {
+            await Promise.race([record.closed, delay(1_000)]);
+            if (!record.settled) signalGroup(child, "SIGKILL");
+          }
         }
-      }
+      } catch (error) { signalError = error; }
       await Promise.race([record.closed, delay(2_000)]);
-      if (record.cleanupError) throw new Error("Owned descendant cleanup could not be confirmed.");
       if (!record.settled) throw new Error("Owned process termination could not be confirmed.");
+      // A signal can race an exiting leader. A failed signal is only settled
+      // when the OS confirms the entire group no longer exists; never ignore EPERM.
+      if ((signalError || record.cleanupError) && !processGroupAbsent(child)) {
+        throw new Error("Owned process tree termination could not be confirmed.");
+      }
+      this.#children.delete(child);
     })();
     await record.stopping;
   }
@@ -81,6 +89,13 @@ function signalGroup(child: ChildProcess, signal: NodeJS.Signals): void {
   try { process.kill(-child.pid, signal); }
   catch (error) { if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error; }
 }
+function processGroupAbsent(child: ChildProcess): boolean {
+  if (child.pid === undefined) return true;
+  if (process.platform === "win32") return false;
+  try { process.kill(-child.pid, 0); return false; }
+  catch (error) { return (error as NodeJS.ErrnoException).code === "ESRCH"; }
+}
+
 function delay(ms: number): Promise<void> { return new Promise((resolve) => { const timer = setTimeout(resolve, ms); timer.unref(); }); }
 function terminateWindowsTree(pid: number): Promise<void> {
   return new Promise((resolve, reject) => {

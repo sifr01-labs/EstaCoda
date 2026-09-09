@@ -14,7 +14,7 @@ import type { ArtifactStore } from "../artifacts/artifact-store.js";
 import type { TaskResultService } from "../tasks/task-result-service.js";
 import type { TaskOperatorService } from "../tasks/task-operator-service.js";
 import type { UsageInspector } from "../session/usage-inspector.js";
-import type { ContextReferenceExpander } from "../context/context-reference-expander.js";
+import { ContextReferenceExpander } from "../context/context-reference-expander.js";
 import type { CronStore } from "../cron/cron-store.js";
 import { availableToolsetsFromTools } from "../cron/cron-runtime-validation.js";
 import type { DelegationConfig } from "../contracts/delegation.js";
@@ -723,7 +723,9 @@ export class AgentLoopBuilder {
       compressionConfig: input.sessionCompression === "disabled" ? undefined : substrate.compressionConfig,
       model: routes.model,
       providerPreferences: routes.providerPreferences,
-      contextReferenceExpander: substrate.contextReferenceExpander,
+      contextReferenceExpander: executionLease !== substrate.executionLease
+        ? new ContextReferenceExpander({ workspaceRoot: substrate.workspaceRoot, files: executionLease?.files })
+        : substrate.contextReferenceExpander,
       projectContext: input.projectContext ?? substrate.projectContext,
       providerTools: providerToolSchemaCatalog.tools,
       providerToolSchemaCatalog: ownsExecutionPlan ? providerToolSchemaCatalog : undefined,

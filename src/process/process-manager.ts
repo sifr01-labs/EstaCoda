@@ -131,6 +131,7 @@ export class ProcessManager {
     protectedEnvironmentVariable?: string
   ): Promise<InternalManagedProcess> {
     if (this.#disposed) throw new Error("Process manager has been disposed.");
+    await this.#lease?.content.assertMaterialized();
     const cwd = this.#lease === undefined ? await realpath(this.#workspaceRoot) : await this.#lease.files.realpath(this.#workspaceRoot);
     if (this.#disposed) throw new Error("Process manager has been disposed.");
     if (this.#processes.size >= 128) {

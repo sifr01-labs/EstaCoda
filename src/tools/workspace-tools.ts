@@ -1,3 +1,4 @@
+import { EditorContentView } from "../execution/editor-content-view.js";
 import { HostProcessScope, type HostProcesses } from "../execution/host-processes.js";
 import { HostWorkspaceFiles, type WorkspaceFiles, type WorkspacePathOptions } from "../execution/host-workspace-files.js";
 import type { HostExecutionLease } from "../execution/host-environment.js";
@@ -29,6 +30,10 @@ export type WorkspaceToolOptions = {
 };
 
 export type WorkspaceFsAdapter = {
+  /** Explicit ACP compatibility: approved writes target disk after editor parity checks. */
+  writeMode?: "materialized";
+  /** Internal prepared transaction view; checks editor parity once before apply/rollback. */
+  prepareMaterializedTransaction?: () => Promise<WorkspaceFsAdapter>;
   readTextFile(input: { path: string; lineStart?: number; lineEnd?: number }): Promise<string>;
   writeTextFile?(input: { path: string; content: string }): Promise<void>;
   deleteTextFile?(input: { path: string }): Promise<void>;
@@ -145,7 +150,35 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
   const maxReadBytes = options.maxReadBytes ?? DEFAULT_MAX_READ_BYTES;
   const maxSearchResults = options.maxSearchResults ?? DEFAULT_MAX_SEARCH_RESULTS;
   const commandTimeoutMs = options.commandTimeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS;
-  const fsAdapter = options.fsAdapter;
+  const contentView = options.executionLease?.content ?? new EditorContentView(files, root);
+  const originalAdapter = options.fsAdapter;
+  const fsAdapter: WorkspaceFsAdapter | undefined = originalAdapter === undefined ? undefined : {
+    ...originalAdapter,
+    prepareMaterializedTransaction: originalAdapter.writeMode !== "materialized" ? undefined : async () => {
+      await contentView.assertMaterialized();
+      return {
+        readTextFile: ({ path }) => files.readFile(path, "utf8"),
+        writeTextFile: async ({ path, content }) => {
+          const blocked = await ensureSafeParentDirectories(path, await realpath(root));
+          if (blocked) throw new Error(blocked.content);
+          await writeTextFileAtomically(path, content);
+        },
+        deleteTextFile: ({ path }) => files.rm(path)
+      };
+    },
+    readTextFile: ({ path }) => contentView.read(path, () => originalAdapter.readTextFile({ path })),
+    writeTextFile: originalAdapter.writeTextFile?.bind(originalAdapter) ?? (async ({ path, content }) => {
+      if (originalAdapter.writeMode !== "materialized") throw new Error("The editor does not support writes. Save the file or use a workspace with write support.");
+      await contentView.assertMaterialized();
+      const blocked = await ensureSafeParentDirectories(path, await realpath(root));
+      if (blocked) throw new Error(blocked.content);
+      await writeTextFileAtomically(path, content);
+    }),
+    deleteTextFile: originalAdapter.deleteTextFile?.bind(originalAdapter) ?? (originalAdapter.writeMode === "materialized" ? async ({ path }) => {
+      await contentView.assertMaterialized();
+      await files.rm(path);
+    } : undefined)
+  };
   const patchFailureTracker = createPatchFailureTracker();
 
   return [
@@ -193,6 +226,9 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
           });
         }
 
+        const materialized = fsAdapter === undefined || await contentView.isMaterialized(path.path);
+        result.metadata = { ...result.metadata, contentSource: fsAdapter === undefined ? "materialized" : "editor", materialized };
+        if (!materialized) result.content += "\n[Editor content differs from disk. Save or reload it before command execution.]";
         recordFileStateOperation(options, {
           operation: "read",
           sourceTool: "file.read",
@@ -538,6 +574,7 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
             return errorResult(`invalid regex: ${error instanceof Error ? error.message : "failed to compile query"}`);
           }
         }
+        try { await contentView.assertMaterialized(); } catch (error) { return errorResult(error instanceof Error ? error.message : "Editor content is not materialized."); }
         const results: string[] = [];
 
         await searchDirectory(canonicalRoot, start.path, {
@@ -564,6 +601,7 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
     createTerminalInspectTool({
       workspaceRoot: root,
       signal: options.executionLease?.signal,
+      assertMaterialized: () => contentView.assertMaterialized(),
       files,
       processes,
       timeoutMs: Math.min(commandTimeoutMs, 10_000)
@@ -594,6 +632,7 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
           return errorResult(blockedReason);
         }
 
+        try { await contentView.assertMaterialized(); } catch (error) { return errorResult(error instanceof Error ? error.message : "Editor content is not materialized."); }
         const ownedProcesses = options.executionLease ? undefined : new HostProcessScope(root);
         try { return await runCommand(
           await realpath(root),
@@ -1907,6 +1946,10 @@ function createWorkspaceIO(files: WorkspaceFiles) {
     files: PreparedWorkspacePatchFile[],
     fsAdapter: WorkspaceFsAdapter | undefined
   ): Promise<ToolResult | undefined> {
+    if (fsAdapter?.prepareMaterializedTransaction) {
+      try { fsAdapter = await fsAdapter.prepareMaterializedTransaction(); }
+      catch (error) { return errorResult(error instanceof Error ? error.message : "Editor content is not materialized."); }
+    }
     const rollbackStack: PatchRollbackStep[] = [];
     const appliedPaths: string[] = [];
 
@@ -2457,8 +2500,9 @@ function createWorkspaceIO(files: WorkspaceFiles) {
     if (fsAdapter !== undefined) {
       try {
         return await fsAdapter.readTextFile({ path });
-      } catch {
-        return undefined;
+      } catch (error) {
+        if (isNodeError(error) && error.code === "ENOENT") return undefined;
+        throw error;
       }
     }
 

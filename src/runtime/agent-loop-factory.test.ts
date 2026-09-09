@@ -87,6 +87,18 @@ describe("DefaultChildAgentLoopFactory", () => {
     ]));
   });
 
+  it("releases a built child scope if persisting its Session fails", async () => {
+    const db = await parentSessionDb();
+    const builder = fakeBuilder(fakeBuiltSession());
+    const factory = new DefaultChildAgentLoopFactory({ builder: builder as never, parentRoutes: parentRoutes(), sessionDb: db,
+      trajectoryRecorderFactory: ({ profileId, sessionId }) => new TrajectoryRecorder({ profileId, sessionId, modelId: "model" }),
+      responseLabel: "EstaCoda", workspaceRoot: process.cwd(), id: () => "failed-child" });
+    vi.spyOn(db, "createSession").mockRejectedValue(new Error("Session persistence failed"));
+    await expect(factory.createChild({ parentSessionId: "parent-1", profileId: "default", task: "inspect",
+      trustedWorkspace: true, parentVisibleTools: readOnlyParentTools() })).rejects.toThrow("Session persistence failed");
+    expect(builder.cleanupSession).toHaveBeenCalledOnce();
+  });
+
   it("records durable Task ownership in Task Step worker sessions", async () => {
     const db = await parentSessionDb();
     const factory = new DefaultChildAgentLoopFactory({

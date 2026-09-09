@@ -1,10 +1,11 @@
-import { mkdtemp, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
-import { tmpdir } from "node:os";
+import { randomUUID } from "node:crypto";
+import type { HostExecutionLease } from "../execution/host-environment.js";
+import { HostWorkspaceFiles, type WorkspaceFiles } from "../execution/host-workspace-files.js";
 import { basename, dirname, extname, join, relative, resolve } from "node:path";
 import type { RegisteredTool, SessionToolProvider, ToolResult } from "../contracts/tool.js";
 import type { FileChangePreviewViewModel } from "../contracts/view-model.js";
 import type { FileStateOperationKind, FileStateTracker } from "../delegation/file-state-tracker.js";
-import { errorResult, resolveWorkspacePath } from "./workspace-paths.js";
+import { errorResult } from "./workspace-paths.js";
 
 export type NotebookEditInput = {
   notebook_path?: string;
@@ -34,6 +35,7 @@ export type NotebookContent = {
 };
 
 export type NotebookToolOptions = {
+  executionLease?: HostExecutionLease;
   workspaceRoot: string;
   fileStateTracker?: FileStateTracker;
   sessionId?: string | (() => string);
@@ -50,7 +52,8 @@ const MAX_RESULT_CHARS = 4_000;
 const PREVIEW_LINES = 8;
 
 export function createNotebookTools(options: NotebookToolOptions): readonly RegisteredTool[] {
-  const root = resolve(options.workspaceRoot);
+  const root = options.executionLease?.workspaceRoot ?? resolve(options.workspaceRoot);
+  const files = options.executionLease?.files ?? new HostWorkspaceFiles(root);
 
   return [
     {
@@ -80,8 +83,9 @@ export function createNotebookTools(options: NotebookToolOptions): readonly Regi
           return inputValidation;
         }
 
-        const canonicalRoot = await realpath(root);
-        const resolved = await resolveWorkspacePath(canonicalRoot, input.notebook_path);
+        try { await options.executionLease?.content.assertMaterialized(); } catch (error) { return errorResult(error instanceof Error ? error.message : "Editor content is not materialized."); }
+        const canonicalRoot = await files.realpath(root);
+        const resolved = await files.resolvePath(input.notebook_path, { forbidSymlinks: true });
         if (!resolved.ok) {
           return resolved;
         }
@@ -90,7 +94,7 @@ export function createNotebookTools(options: NotebookToolOptions): readonly Regi
           return errorResult("notebook_path must point to a .ipynb file");
         }
 
-        const beforeStat = await stat(resolved.path);
+        const beforeStat = await files.stat(resolved.path);
         if (input.expected_mtime_ms !== undefined && beforeStat.mtimeMs !== input.expected_mtime_ms) {
           return errorResult("notebook has changed since expected_mtime_ms", {
             path: relative(canonicalRoot, resolved.path),
@@ -99,7 +103,7 @@ export function createNotebookTools(options: NotebookToolOptions): readonly Regi
           });
         }
 
-        const raw = await readFile(resolved.path, "utf8");
+        const raw = await files.readFile(resolved.path, "utf8");
         const parsed = parseNotebook(raw);
         if (!parsed.ok) {
           return parsed;
@@ -118,8 +122,8 @@ export function createNotebookTools(options: NotebookToolOptions): readonly Regi
         }
 
         const nextContent = `${JSON.stringify(notebook, null, 2)}\n`;
-        await writeNotebookAtomically(resolved.path, nextContent);
-        const afterStat = await stat(resolved.path);
+        await writeNotebookAtomically(files, resolved.path, nextContent);
+        const afterStat = await files.stat(resolved.path);
         const relativePath = relative(canonicalRoot, resolved.path);
 
         const result: ToolResult = {
@@ -165,6 +169,7 @@ export const notebookToolProvider: SessionToolProvider = {
   kind: "session",
   createTools(ctx) {
     return createNotebookTools({
+      executionLease: ctx.executionLease,
       workspaceRoot: ctx.workspaceRoot,
       fileStateTracker: ctx.fileStateTracker,
       sessionId: ctx.currentSessionId,
@@ -368,15 +373,12 @@ function sourceToNotebookField(source: string): string | string[] {
   return parts.map((part, index) => index === parts.length - 1 ? part : `${part}\n`);
 }
 
-async function writeNotebookAtomically(path: string, content: string): Promise<void> {
-  const tempDir = await mkdtemp(join(dirname(path), `.${basename(path)}.`));
-  const tempPath = join(tempDir, basename(path));
+async function writeNotebookAtomically(files: WorkspaceFiles, path: string, content: string): Promise<void> {
+  const tempPath = join(dirname(path), `.${basename(path)}.${randomUUID()}.tmp`);
   try {
-    await writeFile(tempPath, content, "utf8");
-    await rename(tempPath, path);
-  } finally {
-    await rm(tempDir, { recursive: true, force: true });
-  }
+    await files.writeFile(tempPath, content, { encoding: "utf8", flag: "wx" });
+    await files.rename(tempPath, path);
+  } finally { await files.rm(tempPath, { force: true }); }
 }
 
 function renderNotebookEditResult(input: {

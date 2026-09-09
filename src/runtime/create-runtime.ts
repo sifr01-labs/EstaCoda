@@ -268,6 +268,7 @@ function resolveRuntimeUiIdentity(options: RuntimeOptions): string {
 }
 
 export type Runtime = {
+  readEditorFile?(path: string): Promise<string>;
   executionFacts?(): Readonly<HostExecutionFacts>;
   agentEvolutionPolicy(): AgentEvolutionPolicy;
   describe(): string;
@@ -795,8 +796,8 @@ async function buildRuntime(options: RuntimeOptions, rollback: ResourceCleanup):
     providerExecutor,
     artifactStore
   });
-  const contextReferenceExpander = new ContextReferenceExpander({ workspaceRoot });
-  const projectContext = await new ProjectContextLoader({ workspaceRoot }).load();
+  const contextReferenceExpander = new ContextReferenceExpander({ workspaceRoot, files: executionLease.files });
+  const projectContext = await new ProjectContextLoader({ workspaceRoot, files: executionLease.files }).load();
   const renderedProjectContext = renderProjectContext(projectContext);
 
   trajectoryRecorder.record("session-start", {
@@ -1204,6 +1205,7 @@ async function buildRuntime(options: RuntimeOptions, rollback: ResourceCleanup):
 
   return {
     executionFacts: () => executionFacts,
+    readEditorFile: options.workspaceFsAdapter === undefined ? undefined : (path) => executionLease.content.read(path, () => options.workspaceFsAdapter!.readTextFile({ path })),
     sessionDb,
     taskAgentExecutor,
     taskOperator: taskOperatorService,
@@ -1333,18 +1335,22 @@ async function buildRuntime(options: RuntimeOptions, rollback: ResourceCleanup):
       return subagentRegistry.operatorStatus({ parentSessionId });
     },
     async handle(input) {
+      executionLease.assertActive();
       const current = await sessionDb.getSession(sessionRuntimeContext.currentSessionId());
       if (current === undefined) throw new Error("Session is no longer available.");
       await validateSessionWorkspaceOwnership({ session: current, profileId, workspaceRoot, homeDir: options.homeDir });
       const trustedWorkspace = input.trustedWorkspace ?? await trustStore.isTrusted(workspaceRoot);
       activeTrustedWorkspace = trustedWorkspace;
 
+      executionLease.assertActive();
       return agentLoop.handle({
         ...input,
+        signal: AbortSignal.any([executionLease.signal, ...(input.signal ? [input.signal] : [])]),
         trustedWorkspace
       });
     },
     async executeTool(input) {
+      executionLease.assertActive();
       const current = await sessionDb.getSession(sessionRuntimeContext.currentSessionId());
       if (current === undefined) throw new Error("Session is no longer available.");
       await validateSessionWorkspaceOwnership({ session: current, profileId, workspaceRoot, homeDir: options.homeDir });
@@ -1356,7 +1362,7 @@ async function buildRuntime(options: RuntimeOptions, rollback: ResourceCleanup):
         trustedWorkspace,
         sessionId: sessionRuntimeContext.currentSessionId(),
         toolCallId: input.toolCallId,
-        signal: input.signal,
+        signal: AbortSignal.any([executionLease.signal, ...(input.signal ? [input.signal] : [])]),
         onSecureInputRequest: input.onSecureInputRequest
       });
     },

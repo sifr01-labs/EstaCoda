@@ -247,6 +247,6 @@ it("uses the selected lease view and removes harness artifacts after exit", asyn
     expect(cwd).toBe(await realpath(root));
     await expect(stat(home!)).rejects.toThrow();
     await lease.release();
-    await expect(tool.run({ code: 'print("should not run")' })).rejects.toThrow(/released/);
+    expect((await tool.run({ code: 'print("should not run")' })).content).toContain("released");
   } finally { await lease.release(); environment.destroy(); await rm(root, { recursive: true, force: true }); }
 });

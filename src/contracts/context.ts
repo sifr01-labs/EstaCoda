@@ -29,6 +29,7 @@ export type ContextExpansionResult = {
 };
 
 export type ContextReferenceExpanderOptions = {
+  files?: import("../execution/host-workspace-files.js").WorkspaceFiles;
   workspaceRoot: string;
   maxFileBytes?: number;
   maxFolderEntries?: number;
@@ -43,6 +44,7 @@ export type ProjectContextFile = {
 };
 
 export type ProjectContextLoadOptions = {
+  files?: import("../execution/host-workspace-files.js").WorkspaceFiles;
   workspaceRoot: string;
   maxFileBytes?: number;
   maxTotalBytes?: number;

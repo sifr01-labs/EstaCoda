@@ -60,7 +60,14 @@ export class HostWorkspaceFiles implements WorkspaceFiles {
     return fs.lstat(path);
   }
   async readdir(path: string, _options: { withFileTypes: true }): Promise<Dirent[]> {
-    return fs.readdir(await this.#checked(path, { allowDirectory: true }), { withFileTypes: true });
+    const directory = await fs.opendir(await this.#checked(path, { allowDirectory: true }));
+    const entries: Dirent[] = [];
+    for await (const entry of directory) {
+      this.#assertActive();
+      if (entries.length >= 20_000) throw new Error("Directory enumeration limit reached. Narrow the path.");
+      entries.push(entry);
+    }
+    return entries;
   }
   async readFile(path: string): Promise<Buffer>;
   async readFile(path: string, encoding: "utf8"): Promise<string>;

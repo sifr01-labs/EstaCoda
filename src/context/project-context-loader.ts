@@ -1,4 +1,4 @@
-import { readdir, readFile, realpath, stat } from "node:fs/promises";
+import { HostWorkspaceFiles, type WorkspaceFiles } from "../execution/host-workspace-files.js";
 import { join, relative, resolve } from "node:path";
 import type {
   ContextBlock,
@@ -25,17 +25,19 @@ const PROJECT_CONTEXT_CANDIDATES: ProjectContextFile[] = [
 
 export class ProjectContextLoader {
   readonly #workspaceRoot: string;
+  readonly #files: WorkspaceFiles;
   readonly #maxFileBytes: number;
   readonly #maxTotalBytes: number;
 
   constructor(options: ProjectContextLoadOptions) {
     this.#workspaceRoot = resolve(options.workspaceRoot);
+    this.#files = options.files ?? new HostWorkspaceFiles(this.#workspaceRoot);
     this.#maxFileBytes = options.maxFileBytes ?? DEFAULT_MAX_FILE_BYTES;
     this.#maxTotalBytes = options.maxTotalBytes ?? DEFAULT_MAX_TOTAL_BYTES;
   }
 
   async load(): Promise<ProjectContextSnapshot> {
-    const root = await realpath(this.#workspaceRoot);
+    const root = await this.#files.realpath(this.#workspaceRoot);
     const files = await this.#discover(root);
     const blocks: ContextBlock[] = [];
     const warnings: string[] = [];
@@ -70,7 +72,7 @@ export class ProjectContextLoader {
       const path = join(root, candidate.path);
 
       try {
-        const candidateStat = await stat(path);
+        const candidateStat = await this.#files.stat(path);
         if (candidateStat.isFile()) {
           discovered.push(candidate);
         }
@@ -82,7 +84,7 @@ export class ProjectContextLoader {
     const cursorRulesDir = join(root, ".cursor", "rules");
 
     try {
-      const entries = await readdir(cursorRulesDir, { withFileTypes: true });
+      const entries = await this.#files.readdir(cursorRulesDir, { withFileTypes: true });
       for (const entry of entries) {
         if (entry.isFile() && entry.name.endsWith(".mdc")) {
           discovered.push({
@@ -105,7 +107,7 @@ export class ProjectContextLoader {
     file: ProjectContextFile,
     remainingBytes: number
   ): Promise<ContextBlock> {
-    const fullPath = await realpath(join(root, file.path));
+    const fullPath = await this.#files.realpath(join(root, file.path));
     const blockedReason = explainPathBlock(root, fullPath);
 
     if (blockedReason !== undefined) {
@@ -120,7 +122,7 @@ export class ProjectContextLoader {
       };
     }
 
-    const bytes = await readFile(fullPath);
+    const bytes = await this.#files.readFile(fullPath);
 
     if (isLikelyBinary(bytes)) {
       return {

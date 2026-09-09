@@ -64,6 +64,8 @@ export function createExecuteCodeTool(options: ExecuteCodeToolOptions): Register
       if (Buffer.byteLength(input.code) > 256 * 1024 || Buffer.byteLength(JSON.stringify(asRecord(input.input))) > MAX_FRAME_BYTES) {
         return errorResult("execute_code code or input exceeds its limit.");
       }
+      try { await options.executionLease?.content.assertMaterialized(); }
+      catch (error) { return errorResult(error instanceof Error ? error.message : "Editor content is not materialized."); }
       return runCode({
         signal: context?.signal,
         code: input.code,

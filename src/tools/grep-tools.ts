@@ -1,8 +1,10 @@
-import { spawn } from "node:child_process";
-import { realpath, stat } from "node:fs/promises";
+import { explainPathBlock, workspaceSearchExclusionGlobs } from "../context/context-security.js";
+import { HostProcessScope, type HostProcesses } from "../execution/host-processes.js";
+import type { HostExecutionLease } from "../execution/host-environment.js";
+import { HostWorkspaceFiles } from "../execution/host-workspace-files.js";
 import { isAbsolute, relative, resolve, sep } from "node:path";
 import type { RegisteredTool, SessionToolProvider, ToolExecutionContext, ToolResult } from "../contracts/tool.js";
-import { errorResult, resolveWorkspacePath } from "./workspace-paths.js";
+import { errorResult } from "./workspace-paths.js";
 
 export type FileGrepInput = {
   pattern?: string;
@@ -25,6 +27,7 @@ export type FileGrepInput = {
 };
 
 export type GrepToolOptions = {
+  executionLease?: HostExecutionLease;
   workspaceRoot: string;
   rgCommand?: string;
   rgArgsPrefix?: readonly string[];
@@ -98,7 +101,8 @@ type GrepMetadata = {
 };
 
 export function createGrepTools(options: GrepToolOptions): readonly RegisteredTool[] {
-  const root = resolve(options.workspaceRoot);
+  const root = options.executionLease?.workspaceRoot ?? resolve(options.workspaceRoot);
+  const files = options.executionLease?.files ?? new HostWorkspaceFiles(root);
   const rgCommand = options.rgCommand ?? "rg";
   const rgArgsPrefix = options.rgArgsPrefix ?? [];
   const commandTimeoutMs = options.commandTimeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS;
@@ -141,19 +145,22 @@ export function createGrepTools(options: GrepToolOptions): readonly RegisteredTo
           return validation;
         }
 
-        const canonicalRoot = await realpath(root);
-        const start = await resolveWorkspacePath(canonicalRoot, input.path ?? ".", { allowDirectory: true });
+        try { await options.executionLease?.content.assertMaterialized(); } catch (error) { return errorResult(error instanceof Error ? error.message : "Editor content is not materialized."); }
+        const canonicalRoot = await files.realpath(root);
+        const start = await files.resolvePath(input.path ?? ".", { allowDirectory: true });
         if (!start.ok) {
           return start;
         }
 
-        const startStat = await stat(start.path);
+        const startStat = await files.stat(start.path);
         if (!startStat.isFile() && !startStat.isDirectory()) {
           return errorResult("path must point to a file or directory");
         }
 
         const scopedPath = toWorkspaceRelative(canonicalRoot, start.path) || ".";
-        return runRipgrep({
+        const owned = options.executionLease ? undefined : new HostProcessScope(root);
+        try { return await runRipgrep({
+          processes: options.executionLease?.processes ?? owned!,
           root: canonicalRoot,
           rgCommand,
           rgArgsPrefix,
@@ -161,8 +168,8 @@ export function createGrepTools(options: GrepToolOptions): readonly RegisteredTo
           validation,
           scopedPath,
           timeoutMs: commandTimeoutMs,
-          signal: context?.signal
-        });
+          signal: AbortSignal.any([...[context?.signal, options.executionLease?.signal].filter((value): value is AbortSignal => value !== undefined)])
+        }); } finally { await owned?.release(); }
       }
     }
   ];
@@ -173,6 +180,7 @@ export const grepToolProvider: SessionToolProvider = {
   kind: "session",
   createTools(ctx) {
     return createGrepTools({
+      executionLease: ctx.executionLease,
       workspaceRoot: ctx.workspaceRoot
     });
   }
@@ -252,6 +260,7 @@ function clampInteger(value: number, min: number, max: number): number {
 }
 
 function runRipgrep(input: {
+  processes: HostProcesses;
   root: string;
   rgCommand: string;
   rgArgsPrefix: readonly string[];
@@ -265,7 +274,7 @@ function runRipgrep(input: {
     const startedAt = Date.now();
     const args = buildRipgrepArgs(input);
     const rows: string[] = [];
-    const stderrChunks: Buffer[] = [];
+    let stderr = "";
     let pending = "";
     let seenRows = 0;
     let returned = 0;
@@ -280,10 +289,8 @@ function runRipgrep(input: {
     let killTimer: ReturnType<typeof setTimeout> | undefined;
     const targetRows = input.validation.offset + input.validation.limit;
 
-    const child = spawn(input.rgCommand, args, {
-      cwd: input.root,
-      stdio: ["ignore", "pipe", "pipe"]
-    });
+    if (input.signal?.aborted) { resolveResult(errorResult("Search cancelled before dispatch.")); return; }
+    const child = input.processes.spawn(input.rgCommand, args);
 
     const finish = (result: ToolResult) => {
       if (settled) {
@@ -303,12 +310,7 @@ function runRipgrep(input: {
         return;
       }
       truncatedReason = reason;
-      child.kill("SIGTERM");
-      killTimer = setTimeout(() => {
-        if (!closed) {
-          child.kill("SIGKILL");
-        }
-      }, 1_000);
+      void input.processes.terminate(child).catch(() => finish(errorResult("Search process termination could not be confirmed.")));
     };
 
     const timeout = setTimeout(() => {
@@ -333,6 +335,7 @@ function runRipgrep(input: {
         return;
       }
       pending += chunk.toString("utf8");
+      if (pending.length > 2 * 1024 * 1024) { terminate("result_size"); return; }
       const lines = pending.split(/\r?\n/u);
       pending = lines.pop() ?? "";
       for (const line of lines) {
@@ -342,7 +345,8 @@ function runRipgrep(input: {
         }
       }
     });
-    child.stderr.on("data", (chunk: Buffer) => stderrChunks.push(chunk));
+    child.stderr.setEncoding("utf8");
+    child.stderr.on("data", (chunk: string) => { stderr = (stderr + chunk).slice(0, 4000); });
     child.on("error", (error: NodeJS.ErrnoException) => {
       spawnFailed = true;
       if (error.code === "ENOENT") {
@@ -401,7 +405,7 @@ function runRipgrep(input: {
       }
 
       if (code !== 0 && code !== 1) {
-        const stderr = Buffer.concat(stderrChunks).toString("utf8").trim();
+        stderr = stderr.trim();
         finish(errorResult(stderr.length === 0 ? `rg failed with ${signal ?? `exit code ${code}`}` : stderr, {
           code,
           signal
@@ -525,7 +529,7 @@ function isOutputStopReason(reason: TruncationReason | undefined): reason is Out
 }
 
 function exclusionArgs(): string[] {
-  const args: string[] = [];
+  const args: string[] = workspaceSearchExclusionGlobs().flatMap((pattern) => ["-g", `!${pattern}`]);
   for (const pattern of SENSITIVE_GLOBS) {
     args.push("--glob", `!${pattern}`, "--glob", `!**/${pattern}`);
   }
@@ -591,6 +595,7 @@ function extractPathFromOutputLine(line: string, outputMode: GrepOutputMode): st
 }
 
 function isAllowedWorkspacePath(path: string): boolean {
+  if (explainPathBlock(process.cwd(), resolve(process.cwd(), path))) return false;
   const normalized = normalizeSlashes(path);
   if (normalized.length === 0 || normalized.startsWith("..") || isAbsolute(normalized)) {
     return false;

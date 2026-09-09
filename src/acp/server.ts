@@ -887,7 +887,7 @@ export class AcpServer {
 
   async #buildRuntimeText(session: AcpSession, userText: string): Promise<string> {
     const editorFileContext = this.#clientFsReadText
-      ? await this.#loadEditorFileContext(session.acpSessionId, session.workspaceRoot, userText)
+      ? await this.#loadEditorFileContext(session, userText)
       : [];
 
     return buildAcpRuntimePrompt({
@@ -1020,22 +1020,19 @@ export class AcpServer {
   }
 
   async #loadEditorFileContext(
-    acpSessionId: string,
-    workspaceRoot: string,
+    session: AcpSession,
     userText: string
   ): Promise<Array<{
     path: string;
     content: string;
   }>> {
-    const references = extractWorkspaceFileReferences(userText, workspaceRoot);
+    const references = extractWorkspaceFileReferences(userText, session.workspaceRoot);
     const contexts: Array<{ path: string; content: string }> = [];
 
     for (const reference of references) {
       try {
-        const content = await this.#readEditorTextFile({
-          sessionId: acpSessionId,
-          path: reference.absolutePath
-        });
+        if (!session.runtime.readEditorFile) continue;
+        const content = await session.runtime.readEditorFile(reference.absolutePath);
         contexts.push({
           path: reference.relativePath,
           content: content.length > 12_000 ? `${content.slice(0, 12_000)}\n...[truncated]` : content
@@ -1679,7 +1676,8 @@ function createAcpWorkspaceFsAdapter(input: {
   readTextFile: WorkspaceFsAdapter["readTextFile"];
 }): WorkspaceFsAdapter {
   return {
-    readTextFile: input.readTextFile
+    readTextFile: input.readTextFile,
+    writeMode: "materialized"
   };
 }
 

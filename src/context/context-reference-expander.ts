@@ -1,4 +1,4 @@
-import { readdir, readFile, realpath, stat } from "node:fs/promises";
+import { HostWorkspaceFiles, type WorkspaceFiles } from "../execution/host-workspace-files.js";
 import { basename, join, relative, resolve } from "node:path";
 import type {
   ContextBlock,
@@ -20,19 +20,21 @@ const REFERENCE_PATTERN = /@(file|folder):([^\s]+)/g;
 
 export class ContextReferenceExpander {
   readonly #workspaceRoot: string;
+  readonly #files: WorkspaceFiles;
   readonly #maxFileBytes: number;
   readonly #maxFolderEntries: number;
   readonly #maxTotalBytes: number;
 
   constructor(options: ContextReferenceExpanderOptions) {
     this.#workspaceRoot = resolve(options.workspaceRoot);
+    this.#files = options.files ?? new HostWorkspaceFiles(this.#workspaceRoot);
     this.#maxFileBytes = options.maxFileBytes ?? DEFAULT_MAX_FILE_BYTES;
     this.#maxFolderEntries = options.maxFolderEntries ?? DEFAULT_MAX_FOLDER_ENTRIES;
     this.#maxTotalBytes = options.maxTotalBytes ?? DEFAULT_MAX_TOTAL_BYTES;
   }
 
   async expand(text: string): Promise<ContextExpansionResult> {
-    const root = await realpath(this.#workspaceRoot);
+    const root = await this.#files.realpath(this.#workspaceRoot);
     const references = parseReferences(text);
     const blocks: ContextBlock[] = [];
     const warnings: string[] = [];
@@ -71,14 +73,16 @@ export class ContextReferenceExpander {
     const targetPath = resolve(root, reference.target);
 
     try {
-      const canonicalTarget = await realpath(targetPath);
+      const resolved = await this.#files.resolvePath(targetPath, { allowDirectory: true });
+      if (!resolved.ok) return blockedBlock(reference, resolved.content);
+      const canonicalTarget = resolved.path;
       const blockedReason = explainPathBlock(root, canonicalTarget);
 
       if (blockedReason !== undefined) {
         return blockedBlock(reference, blockedReason);
       }
 
-      const targetStat = await stat(canonicalTarget);
+      const targetStat = await this.#files.stat(canonicalTarget);
 
       if (reference.kind === "file") {
         if (!targetStat.isFile()) {
@@ -116,7 +120,7 @@ export class ContextReferenceExpander {
       return blockedBlock(reference, "file type is not included as text context");
     }
 
-    const fileBytes = await readFile(path);
+    const fileBytes = await this.#files.readFile(path);
 
     if (isLikelyBinary(fileBytes)) {
       return blockedBlock(reference, "file appears to be binary");
@@ -153,7 +157,7 @@ export class ContextReferenceExpander {
     reference: ContextReference,
     remainingBytes: number
   ): Promise<ContextBlock> {
-    const entries = await readdir(path, { withFileTypes: true });
+    const entries = await this.#files.readdir(path, { withFileTypes: true });
     const sortedEntries = entries
       .filter((entry) => !entry.name.startsWith(".git") && entry.name !== "node_modules")
       .sort((left, right) => left.name.localeCompare(right.name));

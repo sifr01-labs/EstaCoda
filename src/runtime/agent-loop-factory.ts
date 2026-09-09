@@ -294,6 +294,7 @@ export class DefaultChildAgentLoopFactory implements ChildAgentLoopFactory {
         return result;
       }
     });
+    try {
     const effectiveToolAccess = toolAccess ?? {
       effectiveAllowedTools: builtSession.toolRegistry.list().map((tool) => tool.name),
       effectiveAllowedToolsets: [],
@@ -350,15 +351,22 @@ export class DefaultChildAgentLoopFactory implements ChildAgentLoopFactory {
       toolAccess: effectiveToolAccess,
       modelOverride: modelOverride.metadata,
       handle: async (handleInput) => {
+        builtSession.executionLease?.assertActive();
         const current = await this.#sessionDb.getSessionForProfile(childSession.id, input.profileId);
         if (current === undefined) throw new Error("Child Session is unavailable.");
         await validateSessionWorkspaceOwnership({ session: current, profileId: input.profileId, workspaceRoot: this.#workspaceRoot, homeDir: this.#homeDir });
-        return await builtSession.agentLoop.handle(handleInput);
+        builtSession.executionLease?.assertActive();
+        return await builtSession.agentLoop.handle({ ...handleInput, signal: AbortSignal.any([...[handleInput.signal, builtSession.executionLease?.signal].filter((value): value is AbortSignal => value !== undefined)]) });
       },
       cleanup: async () => {
         await this.#builder.cleanupSession(builtSession);
       }
     };
+    } catch (error) {
+      try { await this.#builder.cleanupSession(builtSession); }
+      catch (cleanupError) { throw new AggregateError([error, cleanupError], "Child acquisition and cleanup failed."); }
+      throw error;
+    }
   }
 
   async #taskSpendingOrigin(taskId: string): Promise<SessionRecord | undefined> {

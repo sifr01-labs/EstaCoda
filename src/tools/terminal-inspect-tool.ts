@@ -9,6 +9,7 @@ import { errorResult } from "./workspace-paths.js";
 
 export type TerminalInspectToolOptions = {
   signal?: AbortSignal;
+  assertMaterialized?: () => Promise<void>;
   files?: WorkspaceFiles;
   processes?: HostProcesses;
   workspaceRoot: string;
@@ -94,6 +95,7 @@ export function createTerminalInspectTool(options: TerminalInspectToolOptions): 
     run: async (input, context) => {
       const signal = AbortSignal.any([...[context?.signal, options.signal].filter((value): value is AbortSignal => value !== undefined)]);
       if (signal.aborted) return errorResult("Inspection cancelled before dispatch.");
+      try { await options.assertMaterialized?.(); } catch (error) { return errorResult(error instanceof Error ? error.message : "Editor content is not materialized."); }
       const canonicalRoot = await files.realpath(options.workspaceRoot);
       const validation = await validateArgv(canonicalRoot, input.argv);
       if (!validation.ok) {

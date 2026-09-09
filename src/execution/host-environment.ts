@@ -1,3 +1,4 @@
+import { EditorContentView, type ExecutionContentView } from "./editor-content-view.js";
 import { HostProcessScope, type HostProcesses } from "./host-processes.js";
 import { HostWorkspaceFiles, type WorkspaceFiles } from "./host-workspace-files.js";
 import { randomUUID } from "node:crypto";
@@ -29,6 +30,7 @@ type Scope = {
 export class HostEnvironment {
   readonly facts: Readonly<HostExecutionFacts>;
   readonly profileId: string;
+  readonly #content: EditorContentView;
   readonly #scopes = new Set<Scope>();
   #destroyed = false;
   #retireCleanup?: () => Promise<void>;
@@ -50,6 +52,9 @@ export class HostEnvironment {
   private constructor(profileId: string, facts: Readonly<HostExecutionFacts>) {
     this.profileId = profileId;
     this.facts = facts;
+    this.#content = new EditorContentView(new HostWorkspaceFiles(facts.workspace.canonicalPath, () => {
+      if (this.#destroyed) throw new Error("Execution environment has been destroyed.");
+    }), facts.workspace.canonicalPath);
   }
 
   static async create(input: { profileId: string; workspaceRoot: string; policy?: RequestedExecutionPolicy }): Promise<HostEnvironment> {
@@ -76,6 +81,11 @@ export class HostEnvironment {
       if (released || scope.controller.signal.aborted || this.#destroyed) throw new Error("Execution lease has been released.");
     };
     return {
+      content: {
+        read: (path, reader) => { assertActive(); return this.#content.read(path, reader); },
+        isMaterialized: (path) => { assertActive(); return this.#content.isMaterialized(path); },
+        assertMaterialized: () => { assertActive(); return this.#content.assertMaterialized(); }
+      },
       processes: {
         environment: (options) => { assertActive(); return scope.processes.environment(options); },
         spawn: (command, args, options) => { assertActive(); return scope.processes.spawn(command, args, options); },
@@ -116,6 +126,7 @@ export class HostEnvironment {
 }
 
 export type HostExecutionLease = {
+  readonly content: ExecutionContentView;
   readonly processes: HostProcesses;
   readonly files: WorkspaceFiles;
   readonly scopeId: string;
