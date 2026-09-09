@@ -106,6 +106,8 @@ export const commandRegistry = createCommandRegistry();
 
 // Register all known commands. Called once at module load.
 function registerAll(): void {
+  commandRegistry.register({ name: "workspace", aliases: [], category: "Setup",
+    description: "Manage profile-local workspace names and launch selection", visibility: "public", scope: "cli" });
   // ── Slash commands ──
   commandRegistry.register({
     name: "help",

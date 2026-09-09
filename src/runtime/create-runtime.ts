@@ -139,6 +139,7 @@ function normalizeTaskCreationOrigin(origin: TaskCreationOrigin | undefined): Ta
 }
 
 export type RuntimeOptions = {
+  sourceWorkspace?: import("../contracts/workspace.js").SourceWorkspaceBinding;
   tokens: ResolvedTokens;
   model: ModelProfile;
   primaryModelRoute?: ResolvedModelRoute;

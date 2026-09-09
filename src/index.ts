@@ -1,4 +1,6 @@
 #!/usr/bin/env node
+import { WorkspaceRegistry } from "./workspaces/workspace-registry.js";
+import type { SourceWorkspaceBinding } from "./contracts/workspace.js";
 import { resolveHomeDir } from "./config/home-dir.js";
 import { loadRuntimeConfig, type LoadedRuntimeConfig } from "./config/runtime-config.js";
 import { resolveStateHome } from "./config/state-home.js";
@@ -57,6 +59,7 @@ async function main(): Promise<void> {
   }
 
   let workspaceRoot = process.cwd();
+  let sourceWorkspace: SourceWorkspaceBinding | undefined;
 
   if (isSideEffectFreeHelp(argv)) {
     const helpCommand = await runCliCommand({
@@ -81,6 +84,15 @@ async function main(): Promise<void> {
 
   const profileId = parsedGlobalOptions.profileId ?? readActiveProfile({ homeDir })?.profileId ?? defaultProfileId();
   const trustStore = new WorkspaceTrustStore({ path: stateHome.trustJsonPath });
+  if (parsedGlobalOptions.workspaceAlias !== undefined) {
+    const registry = new WorkspaceRegistry({ homeDir, profileId });
+    try {
+      const selected = await registry.resolve(parsedGlobalOptions.workspaceAlias);
+      workspaceRoot = selected.identity.canonicalPath;
+      sourceWorkspace = { identity: selected.identity, registeredWorkspaceId: selected.id, registeredWorkspaceRevision: selected.locationRevision };
+    } finally { registry.close(); }
+  }
+
   let setupLaunchHandoffCompleted = false;
   let sessionHandoff: { readonly sessionId: string; readonly workspaceRoot: string } | undefined;
 
@@ -132,7 +144,12 @@ async function main(): Promise<void> {
       }
     });
 
-    if (command.sessionHandoff !== undefined) {
+    if (command.workspaceHandoff !== undefined) {
+      const selected = command.workspaceHandoff;
+      workspaceRoot = selected.identity.canonicalPath;
+      sourceWorkspace = { identity: selected.identity, registeredWorkspaceId: selected.id, registeredWorkspaceRevision: selected.locationRevision };
+      argv = [];
+    } else if (command.sessionHandoff !== undefined) {
       sessionHandoff = command.sessionHandoff;
       if (command.output.length > 0) {
         console.log(command.output);
@@ -223,6 +240,7 @@ async function main(): Promise<void> {
       homeDir,
       profileId,
       workspaceRoot,
+      sourceWorkspace: sourceWorkspace?.identity.canonicalPath === workspaceRoot ? sourceWorkspace : undefined,
       sessionId: input.sessionId,
       sessionDb,
       closeSessionDbOnDispose: input.closeSessionDbOnDispose,
@@ -543,6 +561,7 @@ function canDispatchBeforeRuntime(argv: readonly string[]): boolean {
     "model",
     "packs",
     "profile",
+    "workspace",
     "proposal",
     "security",
     "sessions",

@@ -1,3 +1,5 @@
+import { workspaceCommand } from "./workspace-commands.js";
+import { WorkspaceRegistry, normalizeWorkspaceAlias } from "../workspaces/workspace-registry.js";
 import { join } from "node:path";
 import { stdin, stdout } from "node:process";
 import { summarizeMcpCapabilityConfig } from "../mcp/mcp-tools.js";
@@ -204,6 +206,7 @@ import { runWhatsAppWizard, type WhatsAppWizardDependencies } from "./whatsapp-w
 import { runDoctor } from "../doctor/index.js";
 
 export type CliCommandResult = {
+  workspaceHandoff?: import("../contracts/workspace.js").RegisteredWorkspace;
   handled: boolean;
   exitCode: number;
   output: string;
@@ -239,16 +242,26 @@ export type CliOptions = {
 };
 
 export type ParsedGlobalCliOptions =
-  | { ok: true; argv: string[]; profileId?: string; continueSession?: true }
+  | { ok: true; argv: string[]; profileId?: string; workspaceAlias?: string; continueSession?: true }
   | { ok: false; error: string };
 
 export function parseGlobalCliOptions(argv: readonly string[]): ParsedGlobalCliOptions {
   const nextArgv: string[] = [];
   let profileId: string | undefined;
   let continueSession = false;
+  let workspaceAlias: string | undefined;
+  let prefix = true;
 
   for (let i = 0; i < argv.length; i++) {
     const arg = argv[i];
+    if (prefix && (arg === "--workspace" || arg.startsWith("--workspace="))) {
+      if (workspaceAlias !== undefined) return { ok: false, error: "--workspace may be supplied only once." };
+      const value = arg === "--workspace" ? argv[++i] : arg.slice("--workspace=".length);
+      try { workspaceAlias = normalizeWorkspaceAlias(value ?? ""); }
+      catch { return { ok: false, error: "--workspace requires a valid workspace alias." }; }
+      continue;
+    }
+
     if (arg === "--continue" || arg === "-c") {
       continueSession = true;
       continue;
@@ -275,6 +288,7 @@ export function parseGlobalCliOptions(argv: readonly string[]): ParsedGlobalCliO
       }
       continue;
     }
+    prefix = false;
     nextArgv.push(arg);
   }
 
@@ -282,6 +296,7 @@ export function parseGlobalCliOptions(argv: readonly string[]): ParsedGlobalCliO
     ok: true,
     argv: nextArgv,
     ...(profileId === undefined ? {} : { profileId }),
+    ...(workspaceAlias === undefined ? {} : { workspaceAlias }),
     ...(continueSession ? { continueSession: true as const } : {}),
   };
 }
@@ -301,6 +316,13 @@ export async function runCliCommand(options: CliOptions): Promise<CliCommandResu
     profileId: parsedGlobalOptions.profileId ?? options.profileId
   };
   const [command, ...args] = options.argv;
+  if (parsedGlobalOptions.workspaceAlias !== undefined && !["help", "--help", "-h"].includes(command) && !args.includes("--help") && !args.includes("-h")) {
+    const registry = new WorkspaceRegistry({ homeDir: options.homeDir, profileId: options.profileId ?? readActiveProfile({ homeDir: options.homeDir }).profileId });
+    try { options = { ...options, workspaceRoot: (await registry.resolve(parsedGlobalOptions.workspaceAlias)).identity.canonicalPath }; }
+    catch (error) { return { handled: true, exitCode: 1, output: error instanceof Error ? error.message : String(error) }; }
+    finally { registry.close(); }
+  }
+
 
   switch (command) {
     case "setup":
@@ -343,6 +365,8 @@ export async function runCliCommand(options: CliOptions): Promise<CliCommandResu
       return settings(options, args);
     case "profile":
       return profileCommand(options, args);
+    case "workspace":
+      return workspaceCommand(options, args);
     case "python-env":
       return runPythonEnvCommand(options, args);
     case "trace":
@@ -4275,6 +4299,7 @@ function help(): string {
     "  estacoda                         Start a fresh interactive session",
     "  estacoda -c, --continue          Continue the last session for this profile and workspace",
     "  estacoda --profile <id> [...]    Select a profile for this command only",
+    "  estacoda --workspace <alias> [...] Select a named workspace (prefix only)",
   ].join("\n");
 }
 
