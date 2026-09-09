@@ -5089,7 +5089,7 @@ describe("runSessionLoop — active turn spinner", () => {
   });
 
   it("uses the shared workspace-scoped picker for /sessions and preserves the origin surface", async () => {
-    const workspaceRoot = "/workspace";
+    const workspaceRoot = process.cwd();
     const sessionDb = new InMemorySessionDB();
     await sessionDb.createSession({
       id: "current-session",
@@ -5235,7 +5235,7 @@ describe("runSessionLoop — active turn spinner", () => {
         return mockResponse();
       },
     });
-    const workspaceRoot = "/workspace";
+    const workspaceRoot = process.cwd();
     await runtime.sessionDb.createSession({
       id: "target-session",
       profileId: "default",

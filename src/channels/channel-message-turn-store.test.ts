@@ -1,3 +1,4 @@
+import { EXECUTION_TARGET_SCHEMA_VERSION } from "../workspaces/execution-target-schema.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -167,7 +168,7 @@ describe("SQLiteChannelMessageTurnStore", () => {
     const fixture = await createFixture();
     expect(fixture.db.db.query<{ version: number }>(
       "select max(version) as version from schema_version"
-    ).get()).toEqual({ version: CHANNEL_MESSAGE_TURN_SCHEMA_VERSION });
+    ).get()).toEqual({ version: EXECUTION_TARGET_SCHEMA_VERSION });
     expect(fixture.db.db.query<{ name: string }>(`
       select name from sqlite_master where type = 'index' and name = 'idx_channel_message_turn_bindings_retention'
     `).get()).toEqual({ name: "idx_channel_message_turn_bindings_retention" });
@@ -175,7 +176,15 @@ describe("SQLiteChannelMessageTurnStore", () => {
 
   it("invalidates v31 links that cannot be migrated into the stronger surface scope", async () => {
     const fixture = await createFixture();
-    fixture.db.db.exec("drop table channel_message_turn_bindings");
+    fixture.db.db.exec(`
+      drop trigger immutable_session_target;
+      drop trigger immutable_task_target;
+      drop trigger bound_session_workspace;
+      alter table sessions drop column execution_target_json;
+      alter table tasks drop column execution_target_json;
+      delete from schema_version where version = 33;
+      drop table channel_message_turn_bindings;
+    `);
     migrateChannelMessageTurnSchemaV31(fixture.db.db);
     fixture.db.db.query(`
       insert into channel_message_turn_bindings (

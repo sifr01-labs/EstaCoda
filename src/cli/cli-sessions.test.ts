@@ -816,8 +816,8 @@ describe("CLI session commands", () => {
   describe("sessions attach", () => {
     it("attaches surface to session", async () => {
       const db = openDefaultSQLiteDatabase({ path: dbPath });
-      db.query("insert into sessions (id, profile_id, title, created_at, updated_at) values (?, ?, ?, ?, ?)")
-        .run("sess-1", "default", "Test Session", "2024-01-01T00:00:00Z", "2024-01-02T00:00:00Z");
+      db.query("insert into sessions (id, profile_id, title, created_at, updated_at, metadata_json) values (?, ?, ?, ?, ?, ?)")
+        .run("sess-1", "default", "Test Session", "2024-01-01T00:00:00Z", "2024-01-02T00:00:00Z", JSON.stringify({ workspaceRoot: tmpDir }));
       db.close();
 
       const result = await runCliCommand({
@@ -831,6 +831,20 @@ describe("CLI session commands", () => {
       const pointerStore = new FileSurfacePointerStore({ path: surfacePointerPath });
       const pointer = await pointerStore.getPointer("telegram", "chat-1");
       expect(pointer?.sessionId).toBe("sess-1");
+    });
+
+    it.each(["profile", "workspace", "ambiguous"])("rejects %s ownership without replacing the existing surface pointer", async (kind) => {
+      const other = join(tmpDir, "other"); await mkdir(other);
+      const db = await createSQLiteSessionDB({ path: dbPath });
+      try {
+        await db.createSession({ id: "target", profileId: kind === "profile" ? "other" : "default",
+          metadata: kind === "ambiguous" ? { originSurface: "telegram" } : { workspaceRoot: kind === "workspace" ? other : tmpDir } });
+      } finally { db.close(); }
+      const pointers = new FileSurfacePointerStore({ path: surfacePointerPath });
+      await pointers.setPointer("telegram", "chat-1", { sessionId: "original", attachedAt: "2024-01-01T00:00:00Z" });
+      const result = await runCliCommand({ argv: ["sessions", "attach", "telegram", "chat-1", "target"], workspaceRoot: tmpDir, homeDir: tmpDir });
+      expect(result.exitCode).toBe(1);
+      expect((await new FileSurfacePointerStore({ path: surfacePointerPath }).getPointer("telegram", "chat-1"))?.sessionId).toBe("original");
     });
 
     it("returns error for invalid surface", async () => {

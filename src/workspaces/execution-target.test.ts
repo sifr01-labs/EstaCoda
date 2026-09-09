@@ -46,3 +46,11 @@ it("persists immutable session bindings, inherits them to children and rejects w
   const other = new ExecutionTargetStore({ homeDir, profileId: "other" });
   try { await expect(other.validate(binding, homeDir)).rejects.toThrow("another profile"); } finally { other.close(); }
 });
+it("rejects unknown persisted versions without changing stored ownership", async () => {
+  const binding = targetBinding(await targets.acquireLocal(homeDir));
+  await sessions.createSession({ id: "future", profileId: "default", executionTarget: binding });
+  // Simulate a newer writer; unknown database versions cannot be opened by this binary.
+  sessions.db.query("insert into schema_version (version) values (?)").run(99);
+  expect(() => new SQLiteSessionDB({ path: join(homeDir, "sessions.sqlite") })).toThrow(/newer|unsupported|Unsupported/);
+  expect((await sessions.getSession("future"))?.executionTarget).toEqual(binding);
+});

@@ -1982,6 +1982,7 @@ export async function handleSlashCommand(input: {
       }
       const activeProfileId = await runtimeProfileId(input.runtime);
       const resolution = await resolveSessionForResume({
+        homeDir: input.homeDir,
         sessionDb: input.runtime.sessionDb,
         profileId: activeProfileId,
         workspaceRoot: input.workspaceRoot,
@@ -2858,6 +2859,7 @@ async function handleInteractiveSessionPicker(input: {
   output: NodeJS.WritableStream;
   renderer: { locale?: "en" | "ar" };
   workspaceRoot?: string;
+  homeDir?: string;
 }): Promise<boolean | { runtime: Runtime; notice: (runtime: Runtime) => string }> {
   const profileId = await runtimeProfileId(input.runtime);
   const workspaceRoot = input.workspaceRoot!;
@@ -2891,6 +2893,7 @@ async function handleInteractiveSessionPicker(input: {
     return false;
   }
   const resolution = await resolveSessionForResume({
+    homeDir: input.homeDir,
     sessionDb: input.runtime.sessionDb,
     profileId,
     workspaceRoot,

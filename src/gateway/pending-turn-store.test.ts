@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { ChannelMessage } from "../contracts/channel.js";
 import type { SQLiteDatabase } from "../storage/sqlite.js";
 import { createSQLiteSessionDB } from "../session/session-setup.js";
-import { CHANNEL_MESSAGE_TURN_SCHEMA_VERSION } from "../session/channel-message-turn-schema.js";
+import { EXECUTION_TARGET_SCHEMA_VERSION } from "../workspaces/execution-target-schema.js";
 import {
   PendingTurnStoreError,
   SQLitePendingTurnStore,
@@ -24,6 +24,12 @@ describe("pending turn schema", () => {
     const dbPath = join(root, "sessions.sqlite");
     const initial = await createSQLiteSessionDB({ path: dbPath });
     initial.db.exec(`
+      drop trigger immutable_session_target;
+      drop trigger immutable_task_target;
+      drop trigger bound_session_workspace;
+      alter table sessions drop column execution_target_json;
+      alter table tasks drop column execution_target_json;
+      delete from schema_version where version = 33;
       drop table channel_message_turn_bindings;
       drop table pending_channel_turn_delivery_ids;
       drop table pending_channel_turns;
@@ -34,7 +40,7 @@ describe("pending turn schema", () => {
     const migrated = await createSQLiteSessionDB({ path: dbPath });
     try {
       expect(migrated.db.query<{ version: number }>("select max(version) as version from schema_version").get())
-        .toEqual({ version: CHANNEL_MESSAGE_TURN_SCHEMA_VERSION });
+        .toEqual({ version: EXECUTION_TARGET_SCHEMA_VERSION });
       expect(migrated.db.query<{ name: string }>(`
         select name from sqlite_master where type = 'table' and name = 'pending_channel_turns'
       `).get()).toEqual({ name: "pending_channel_turns" });
@@ -66,6 +72,12 @@ describe("pending turn schema", () => {
         }
       });
     initial.db.exec(`
+      drop trigger immutable_session_target;
+      drop trigger immutable_task_target;
+      drop trigger bound_session_workspace;
+      alter table sessions drop column execution_target_json;
+      alter table tasks drop column execution_target_json;
+      delete from schema_version where version = 33;
       drop table channel_message_turn_bindings;
       drop table pending_channel_turn_delivery_ids;
       delete from schema_version where version in (30, 31, 32);

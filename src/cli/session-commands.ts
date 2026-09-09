@@ -1,3 +1,4 @@
+import { validateSessionWorkspaceOwnership } from "../session/session-workspace-ownership.js";
 import { join } from "node:path";
 import { renderPlain } from "../ui/renderers/plain-renderer.js";
 import type { ViewModel } from "../contracts/view-model.js";
@@ -397,6 +398,11 @@ export async function runSessionsCommand(
       if (session === undefined) {
         const viewModel = buildSessionNotFoundViewModel({ sessionId });
         return { ok: false, output: renderer(viewModel) };
+      }
+      try {
+        await validateSessionWorkspaceOwnership({ session, profileId, workspaceRoot: input.workspaceRoot, homeDir });
+      } catch {
+        return { ok: false, output: renderer(buildSessionUsageErrorViewModel({ message: "Session profile/workspace ownership could not be verified. Open an established session in its workspace or start new work." })) };
       }
     } finally {
       await db.close();

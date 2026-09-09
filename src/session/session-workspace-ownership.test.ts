@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it } from "vitest";
@@ -57,4 +57,21 @@ it("does not rebind competing creations or accept stale migration snapshots", as
   const session = (await db.getSession("session"))!;
   await db.createSession({ id: "legacy", profileId: "default", metadata: { workspaceRoot: join(root, "one") } });
   await expect(db.bindSessionExecutionTarget({ sessionId: "legacy", profileId: "default", binding: session.executionTarget!, expectedMetadata: {} })).rejects.toThrow("changed");
+});
+
+it("persists legacy canonical aliases across reopen and refuses conflicting metadata", async () => {
+  const alias = join(root, "alias");
+  await symlink(join(root, "one"), alias);
+  await db.createSession({ id: "session", profileId: "default", metadata: { workspaceDirectory: alias, projectRoot: join(root, "one"), custom: "retained" } });
+  await ensureRuntimeSession(input());
+  const original = await db.getSession("session");
+  db.close(); db = new SQLiteSessionDB({ path: join(root, "sessions.sqlite") });
+  await ensureRuntimeSession({ ...input(), workspaceRoot: alias });
+  expect(await db.getSession("session")).toEqual(original);
+  expect(original?.metadata).toEqual({ workspaceRoot: original?.executionTarget?.workspace.canonicalPath, custom: "retained" });
+  for (const metadata of [{ workspaceRoot: join(root, "one"), projectRoot: join(root, "two") }, { workspaceRoot: 4, originSurface: "cli" }]) {
+    const session = await db.createSession({ profileId: "default", metadata });
+    await expect(ensureRuntimeSession({ ...input(), sessionId: session.id, allowLegacyLocalBinding: true })).rejects.toThrow("different workspace");
+    expect((await db.getSession(session.id))?.executionTarget).toBeUndefined();
+  }
 });

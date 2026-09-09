@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile, rename, symlink } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, beforeEach, expect, it } from "vitest";
@@ -43,4 +43,21 @@ it("coordinates separate connections without lost unrelated updates", async () =
     const results = await Promise.allSettled([store.add("same", homeDir), second.add("same", homeDir)]);
     expect(results.filter((result) => result.status === "fulfilled")).toHaveLength(1);
   } finally { second.close(); }
+});
+
+it("does not transfer trust on move or follow a retargeted canonical directory", async () => {
+  const firstPath = join(homeDir, "original");
+  const nextPath = join(homeDir, "next");
+  await mkdir(firstPath); await mkdir(nextPath);
+  const trust = new WorkspaceTrustStore({ homeDir });
+  await trust.grant(firstPath);
+  const grants = await trust.list();
+  const first = await store.add("project", firstPath);
+  await store.move(first.id, nextPath, 1);
+  expect(await trust.isTrusted(nextPath)).toBe(false);
+  expect(await trust.list()).toEqual(grants);
+  await rename(nextPath, join(homeDir, "moved-away"));
+  await symlink(firstPath, nextPath);
+  await expect(store.resolve("project")).rejects.toThrow("location changed");
+  expect(store.get("project")?.locationRevision).toBe(2);
 });

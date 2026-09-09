@@ -3986,8 +3986,14 @@ export class ChannelGateway {
           };
         }
 
-        if (this.#validateSessionAttachment === undefined) throw new Error("Session ownership validation is unavailable.");
-        await this.#validateSessionAttachment(targetSessionId);
+        try {
+          if (this.#validateSessionAttachment === undefined) throw new Error("Session ownership validation is unavailable.");
+          await this.#validateSessionAttachment(targetSessionId);
+        } catch {
+          const text = "Switch failed: session profile/workspace ownership could not be verified.";
+          await this.#deliverText(adapter, message.sessionKey, text);
+          return { sessionId: currentSessionId, replyText: text, artifactCount: 0, progressCount: 0 };
+        }
         await this.#sessionStore.setSessionId?.(message.sessionKey, targetSessionId, { receivedAt: message.receivedAt });
         const key = stableSessionKey(message.sessionKey, this.#sessionPolicy);
         const previousSessionId = this.#sessionIdByTurnKey.get(key);

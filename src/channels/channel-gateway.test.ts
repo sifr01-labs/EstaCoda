@@ -1,3 +1,4 @@
+import { validateSessionWorkspaceOwnership } from "../session/session-workspace-ownership.js";
 import { afterEach, describe, it, expect, vi } from "vitest";
 import { mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -6293,6 +6294,35 @@ describe("ChannelGateway commands", () => {
       } finally {
         await cleanup();
       }
+    });
+
+    it.each(["profile", "workspace", "ambiguous", "missing-validator"])("rejects %s ownership on attach and switch without moving pointers", async (kind) => {
+      const directory = await mkdtemp(join(tmpdir(), "gateway-attachment-"));
+      const other = join(directory, "other"); await mkdir(other);
+      try {
+        const db = new InMemorySessionDB();
+        await db.createSession({ id: "target", profileId: kind === "profile" ? "other" : "default",
+          metadata: kind === "ambiguous" ? { originSurface: "telegram" } : { workspaceRoot: kind === "workspace" ? other : directory } });
+        const pointers = new InMemorySurfacePointerStore();
+        const sessionStore = new InMemoryChannelSessionStore();
+        const key = makeMessage("").sessionKey;
+        await sessionStore.setSessionId(key, "original");
+        const gateway = new ChannelGateway({
+          adapters: [createFakeTelegramAdapter()], sessionStore, surfacePointerStore: pointers,
+          authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+          runtimeForSession: async () => ({ ...createMinimalRuntime(), sessionDb: db }),
+          handoffStore: { redeem: async () => ({ ok: true, handoff: { sessionId: "target", createdAt: new Date().toISOString() } }) } as unknown as import("./handoff-store.js").HandoffStore,
+          validateSessionAttachment: kind === "missing-validator" ? undefined : async (sessionId) => {
+            const session = (await db.getSession(sessionId))!;
+            await validateSessionWorkspaceOwnership({ session, profileId: "default", workspaceRoot: directory, homeDir: directory });
+          }
+        });
+        expect((await gateway.receive(makeMessage("/attach code"))).replyText).toContain("Attach failed");
+        expect(await pointers.listPointers()).toEqual([]);
+        expect(await sessionStore.getOrCreateSessionId(key)).toBe("original");
+        expect((await gateway.receive(makeMessage("/switch target"))).replyText).not.toContain("Switched");
+        expect(await sessionStore.getOrCreateSessionId(key)).toBe("original");
+      } finally { await rm(directory, { recursive: true, force: true }); }
     });
 
     it("handoff /attach and /detach still work", async () => {

@@ -1,9 +1,11 @@
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdir, mkdtemp, realpath, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { SmokeCase } from "../smoke-case.js";
 import { PersistentCliSessionStore } from "../../cli/cli-session-store.js";
-import { InMemorySessionDB } from "../../session/in-memory-session-db.js";
+import { SQLiteSessionDB } from "../../session/sqlite-session-db.js";
+import { ensureRuntimeSession } from "../../session/session-workspace-ownership.js";
+import { ExecutionTargetStore } from "../../workspaces/execution-target.js";
 import { listResumableSessions, resolveSessionForResume } from "../../session/session-resume.js";
 
 export const session_continuation_case: SmokeCase = {
@@ -11,12 +13,15 @@ export const session_continuation_case: SmokeCase = {
   name: "Session continuation stays profile- and workspace-scoped",
   tags: ["sessions", "cli", "security"],
   run: async () => {
-    const tempHome = await mkdtemp(join(tmpdir(), "estacoda-smoke-session-continuation-"));
+    const tempHome = await realpath(await mkdtemp(join(tmpdir(), "estacoda-smoke-session-continuation-")));
     const workspaceRoot = join(tempHome, "workspace");
     const otherWorkspaceRoot = join(tempHome, "other-workspace");
 
+    const sessionDb = new SQLiteSessionDB({ path: join(tempHome, "sessions.sqlite") });
+    const registry = new ExecutionTargetStore({ homeDir: tempHome, profileId: "default" });
     try {
-      const sessionDb = new InMemorySessionDB();
+      await mkdir(workspaceRoot);
+      await mkdir(otherWorkspaceRoot);
       await sessionDb.createSession({
         id: "telegram-session",
         profileId: "default",
@@ -38,6 +43,15 @@ export const session_continuation_case: SmokeCase = {
         channel: "cli",
       });
 
+      const named = await registry.add("project", workspaceRoot);
+      await ensureRuntimeSession({ sessionDb, homeDir: tempHome, sessionId: "telegram-session", profileId: "default", workspaceRoot, durable: true,
+        sourceWorkspace: { identity: named.identity, registeredWorkspaceId: named.id, registeredWorkspaceRevision: named.locationRevision } });
+      registry.rename("project", "renamed");
+      const bound = (await sessionDb.getSession("telegram-session"))?.executionTarget;
+      if (bound === undefined || registry.getTarget(bound.targetId)?.source.registeredWorkspaceId !== named.id) {
+        throw new Error("Named workspace provenance must survive rename.");
+      }
+
       const sessions = await listResumableSessions({
         sessionDb,
         profileId: "default",
@@ -52,6 +66,7 @@ export const session_continuation_case: SmokeCase = {
       }
 
       const sameWorkspace = await resolveSessionForResume({
+        homeDir: tempHome,
         sessionDb,
         profileId: "default",
         workspaceRoot,
@@ -61,6 +76,7 @@ export const session_continuation_case: SmokeCase = {
         throw new Error("Expected the session to be resumable in its owning scope.");
       }
       const otherWorkspace = await resolveSessionForResume({
+        homeDir: tempHome,
         sessionDb,
         profileId: "default",
         workspaceRoot: otherWorkspaceRoot,
@@ -87,6 +103,8 @@ export const session_continuation_case: SmokeCase = {
         throw new Error("A CLI continuation pointer must not cross workspace boundaries.");
       }
     } finally {
+      registry.close();
+      sessionDb.close();
       await rm(tempHome, { recursive: true, force: true });
     }
   },
