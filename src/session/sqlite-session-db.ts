@@ -1,3 +1,4 @@
+import { EXECUTION_OWNERSHIP_SCHEMA_VERSION, migrateExecutionOwnershipV34 } from "./execution-ownership.js";
 import { parseExecutionTargetBinding, targetSessionMetadata } from "../workspaces/execution-target.js";
 import { EXECUTION_TARGET_SCHEMA_VERSION, migrateExecutionTargetSchemaV33 } from "../workspaces/execution-target-schema.js";
 import type {
@@ -970,7 +971,7 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
       `);
     });
 
-    if (this.#readSchemaVersion() > EXECUTION_TARGET_SCHEMA_VERSION) throw new Error("Session database was created by a newer EstaCoda version.");
+    if (this.#readSchemaVersion() > EXECUTION_OWNERSHIP_SCHEMA_VERSION) throw new Error("Session database was created by a newer EstaCoda version.");
     this.#runMigrationStep(4, "v0.9-schema-v4-cron-executions", () => this.#migrateV4());
     this.#runMigrationStep(5, "v0.9-schema-v5-pending-approvals", () => this.#migrateV5());
     this.#runMigrationStep(6, "v0.9-schema-v6-session-lineage", () => this.#migrateV6());
@@ -1012,6 +1013,7 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
     this.#runMigrationStep(CHANNEL_MESSAGE_TURN_SCHEMA_VERSION, "v0.10-schema-v32-bounded-channel-message-turn-bindings", () =>
       migrateChannelMessageTurnSchemaV32(this.#db));
     this.#runMigrationStep(EXECUTION_TARGET_SCHEMA_VERSION, "workspace-target-bindings-v33", () => migrateExecutionTargetSchemaV33(this.#db));
+    this.#runMigrationStep(EXECUTION_OWNERSHIP_SCHEMA_VERSION, "session-execution-ownership-v34", () => migrateExecutionOwnershipV34(this.#db));
   }
 
   #withMigrationLock(migrate: () => void): void {
