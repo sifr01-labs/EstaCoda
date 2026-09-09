@@ -102,12 +102,7 @@ export type TaskActor = {
   attemptId?: TaskAttemptId;
 };
 
-export type TaskWorkspaceBinding = {
-  /** Canonical real path captured at creation. Trust is still rechecked before execution. */
-  canonicalPath: string;
-  /** Stable hash of the canonical path for comparison and display-safe diagnostics. */
-  identityHash: string;
-};
+export type TaskWorkspaceBinding = import("./workspace.js").WorkspaceIdentity;
 
 /**
  * Task authority can only narrow the runtime security policy. "runtime_policy" is not
