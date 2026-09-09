@@ -1,3 +1,4 @@
+import { ControlReceipts } from "./control-receipts.js";
 import { startPrivateControl } from "./private-control.js";
 import { SharedSessionHost } from "./shared-session-host.js";
 import { createSecurityPolicyForMode } from "../security/security-policy-factory.js";
@@ -1753,8 +1754,10 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
     });
 
     if (process.platform !== "win32" && Buffer.byteLength(join(profilePaths.gatewayStatePath, "c-12345678.sock")) <= 100) {
+      const receipts = new ControlReceipts(sessionDb.db, profileId, state.gatewayInstanceId!);
+      receipts.recover();
       const sharedHost = new SharedSessionHost({
-        profileId, sessionDb,
+        profileId, sessionDb, receipts,
         acquire: async (sessionId) => {
           const current = await loadConfig();
           const session = await sessionDb.getSessionForProfile(sessionId, profileId);
