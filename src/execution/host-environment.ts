@@ -31,6 +31,21 @@ export class HostEnvironment {
   readonly profileId: string;
   readonly #scopes = new Set<Scope>();
   #destroyed = false;
+  #retireCleanup?: () => Promise<void>;
+  #retiring?: Promise<void>;
+
+  /** The runtime owner detaches; independent scopes retain shared providers until idle. */
+  async retire(cleanup: () => Promise<void>): Promise<void> {
+    this.#retireCleanup ??= cleanup;
+    await this.#finishRetirement();
+  }
+
+  async #finishRetirement(): Promise<void> {
+    if (this.#scopes.size || !this.#retireCleanup) return;
+    this.#destroyed = true;
+    this.#retiring ??= Promise.resolve().then(this.#retireCleanup);
+    await this.#retiring;
+  }
 
   private constructor(profileId: string, facts: Readonly<HostExecutionFacts>) {
     this.profileId = profileId;
@@ -87,6 +102,7 @@ export class HostEnvironment {
           const errors = results.filter((result): result is PromiseRejectedResult => result.status === "rejected");
           if (errors.length) throw new AggregateError(errors.map((result) => result.reason), "Execution resource cleanup failed.");
           this.#scopes.delete(scope);
+          await this.#finishRetirement();
         })();
         await scope.closing;
       }

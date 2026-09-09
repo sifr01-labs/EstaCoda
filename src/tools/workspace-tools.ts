@@ -594,14 +594,15 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
           return errorResult(blockedReason);
         }
 
-        return runCommand(
+        const ownedProcesses = options.executionLease ? undefined : new HostProcessScope(root);
+        try { return await runCommand(
           await realpath(root),
           input.command,
           Math.max(1, Math.min(Number.isFinite(input.timeoutMs) ? input.timeoutMs! : commandTimeoutMs, commandTimeoutMs)),
           options.childProcessEnv,
-          processes,
+          options.executionLease?.processes ?? ownedProcesses!,
           AbortSignal.any([...[context?.signal, options.executionLease?.signal].filter((value): value is AbortSignal => value !== undefined)])
-        );
+        ); } finally { await ownedProcesses?.release(); }
       }
     }
   ];

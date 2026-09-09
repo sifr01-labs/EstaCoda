@@ -1,3 +1,4 @@
+import { ResourceCleanup } from "../execution/resource-cleanup.js";
 import { HostEnvironment } from "../execution/host-environment.js";
 import { withDispatchAuthorization, validateDispatchAuthorization } from "../security/dispatch-authorization.js";
 import { assertPendingAction, type PendingActionApproval } from "../security/pending-action-approval.js";
@@ -367,6 +368,18 @@ export type Runtime = {
 };
 
 export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
+  const rollback = new ResourceCleanup();
+  try { return await buildRuntime(options, rollback); }
+  catch (error) {
+    try { await rollback.release(); }
+    catch (cleanupError) { throw new AggregateError([error, cleanupError], "Runtime construction and cleanup failed."); }
+    throw error;
+  }
+}
+
+async function buildRuntime(options: RuntimeOptions, rollback: ResourceCleanup): Promise<Runtime> {
+  const resources = new ResourceCleanup();
+  rollback.defer(() => resources.release());
   const runtimeBranding = resolveRuntimeBranding(options);
   const runtimeUiIdentity = resolveRuntimeUiIdentity(options);
   const skillRegistry = new SkillRegistry();
@@ -431,13 +444,18 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     })
   });
   const closeSessionDbOnDispose = options.closeSessionDbOnDispose ?? true;
+  if (closeSessionDbOnDispose) resources.defer(async () => {
+    await (sessionDb as { close?: () => void | Promise<void> }).close?.();
+  });
   const workspaceRoot = (await resolveWorkspaceDirectory(options.workspaceRoot ?? process.cwd())).canonicalPath;
   const hostEnvironment = await HostEnvironment.create({ profileId, workspaceRoot, policy: options.requestedExecutionPolicy });
+  rollback.defer(() => hostEnvironment.destroy());
   const executionFacts = hostEnvironment.facts;
   await ensureRuntimeSession({ sessionDb, sessionId, profileId, workspaceRoot, homeDir: options.homeDir,
     durable: sessionDb instanceof SQLiteSessionDB, sourceWorkspace: options.sourceWorkspace,
     allowLegacyLocalBinding: options.allowLegacyLocalBinding, metadata: options.sessionMetadata, spendingLimit: options.budgets?.session });
   const executionLease = hostEnvironment.acquire({ profileId, sessionId, surface: String(options.sessionMetadata?.originSurface ?? "local") });
+  rollback.defer(() => executionLease.release());
   const taskWorkspace = taskStore === undefined ? undefined : await resolveTaskWorkspaceBinding(workspaceRoot);
   const localSkillsRoot = options.localSkillsRoot ?? profilePaths.skillsPath;
   const profileMemoryRoot = profilePaths.profileRoot;
@@ -473,6 +491,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         config: memoryConfig,
         indexFileMissingAtStartup: memoryIndexFileMissingAtStartup
       });
+  resources.defer(() => memoryIndexSync?.dispose());
   const memoryRetrievalService = new LocalMemoryRetrievalService({
     index: memoryIndex,
     config: memoryConfig,
@@ -542,6 +561,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       }
     })
   });
+  resources.defer(() => providerExecutor.dispose());
   const processManager = new ProcessManager({ workspaceRoot, executionLease, childProcessEnv: options.executionControls?.childProcessEnv });
   const pythonStateRoot = globalPaths.stateRoot;
   const channelMediaRoot = profilePaths.channelMediaPath;
@@ -556,6 +576,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         defaultHfHome: persistentHfHome
       })
     : undefined);
+  resources.defer(async () => { await localWhisper?.dispose?.(); });
   let activeTrustedWorkspace = false;
   let disposed = false;
   const trajectoryRecorder = new TrajectoryRecorder({
@@ -571,6 +592,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     servers: effectiveMcpServers,
     artifactStore
   });
+  for (const server of loadedMcpServers) resources.defer(() => server.stop());
   const mcpTools = loadedMcpServers.flatMap((server) => server.tools);
   // Load skills from explicit profile-local and package sources:
   // 1. packs/ under the selected profile (external, lowest priority)
@@ -639,6 +661,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   const unregisterBrowserEmergencyCleanup = browserSessionLifecycle === undefined
     ? undefined
     : registerEmergencyCleanup(browserSessionLifecycle);
+  resources.defer(() => unregisterBrowserEmergencyCleanup?.());
+  resources.defer(async () => { browserSessionLifecycle?.stop(); await browserSessionLifecycle?.cleanupAll(); });
+  resources.defer(async () => { await ownedBrowserBackend?.close?.(); });
   const browserBackend = options.browserBackend ?? (() => {
     const created = supervisedLocalCdp
       ? createSupervisedLocalCdpBrowserBackend({
@@ -1129,6 +1154,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     memoryCurationService
   } = builtSession;
   const secretBroker = new EphemeralSecretBroker();
+  resources.defer(() => secretBroker.dispose());
   const secureInputTransports = new SecureInputTransportRegistry();
   secureInputTransports.register(createProtectedToolArgumentTransport((request) => {
     const destination = request.destination;
@@ -1456,22 +1482,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       }
       disposed = true;
       await executionLease.release();
-      hostEnvironment.destroy();
-      secretBroker.dispose();
-      unregisterBrowserEmergencyCleanup?.();
-      browserSessionLifecycle?.stop();
-      await browserSessionLifecycle?.cleanupAll();
-      await ownedBrowserBackend?.close?.();
-      await localWhisper?.dispose?.();
-      await Promise.all(loadedMcpServers.map((server) => server.stop().catch(() => undefined)));
-      memoryIndexSync?.dispose();
-      await providerExecutor.dispose();
-      const closeSessionDb = closeSessionDbOnDispose
-        ? (sessionDb as { close?: () => void | Promise<void> }).close
-        : undefined;
-      if (closeSessionDbOnDispose && typeof closeSessionDb === "function") {
-        await closeSessionDb.call(sessionDb);
-      }
+      await hostEnvironment.retire(() => resources.release());
     },
     describe() {
       const failures = mcpFailureDiagnostics(loadedMcpServers.map((server) => server.snapshot));

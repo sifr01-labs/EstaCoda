@@ -315,8 +315,9 @@ export class AgentLoopBuilder {
       return await this.#buildSession(input, executionLease, processManager);
     } catch (error) {
       if (isChild) {
-        await processManager.dispose();
-        await executionLease?.release();
+        const cleanup = await Promise.allSettled([processManager.dispose(), executionLease?.release()]);
+        const failures = cleanup.filter((result): result is PromiseRejectedResult => result.status === "rejected");
+        if (failures.length) throw new AggregateError([error, ...failures.map((result) => result.reason)], "Session construction and cleanup failed.");
       }
       throw error;
     }
@@ -782,8 +783,12 @@ export class AgentLoopBuilder {
   }
 
   async cleanupSession(session: BuiltAgentLoopSession): Promise<void> {
-    if (session.processManager !== this.#substrate.processManager) await session.processManager?.dispose();
-    if (session.executionLease !== this.#substrate.executionLease) await session.executionLease?.release();
+    const cleanup = await Promise.allSettled([
+      session.processManager !== this.#substrate.processManager ? session.processManager?.dispose() : undefined,
+      session.executionLease !== this.#substrate.executionLease ? session.executionLease?.release() : undefined
+    ]);
+    const failures = cleanup.filter((result): result is PromiseRejectedResult => result.status === "rejected");
+    if (failures.length) throw new AggregateError(failures.map((result) => result.reason), "Session cleanup failed.");
     // Shared provider/MCP substrate remains owned by createRuntime().
   }
 }

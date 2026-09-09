@@ -38,3 +38,20 @@ it("waits for resource settlement and reports every cleanup failure", async () =
     expect(() => environment.destroy()).toThrow(/settling/);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
+
+it("defers shared substrate cleanup until independently owned scopes finish", async () => {
+  const root = await mkdtemp(join(tmpdir(), "host-retirement-"));
+  try {
+    const environment = await HostEnvironment.create({ profileId: "work", workspaceRoot: root });
+    const parent = environment.acquire({ profileId: "work", sessionId: "parent", surface: "cli" });
+    const child = parent.child({ profileId: "work", sessionId: "child", surface: "task" });
+    const cleanup = vi.fn(async () => {});
+    await parent.release(); await environment.retire(cleanup);
+    expect(cleanup).not.toHaveBeenCalled();
+    child.assertActive();
+    const grandchild = child.child({ profileId: "work", sessionId: "grandchild", surface: "delegation" });
+    await child.release(); expect(cleanup).not.toHaveBeenCalled();
+    await grandchild.release(); expect(cleanup).toHaveBeenCalledOnce();
+    expect(() => environment.acquire({ profileId: "work", sessionId: "new", surface: "cli" })).toThrow();
+  } finally { await rm(root, { recursive: true, force: true }); }
+});

@@ -55,9 +55,10 @@ export class HostProcessScope {
         await terminateWindowsTree(child.pid);
       } else {
         signalGroup(child, signal);
-        if (signal !== "SIGKILL") await Promise.race([record.closed, delay(1_000)]);
-        // Escalate the group, even if its leader has already exited.
-        if (!record.settled) signalGroup(child, "SIGKILL");
+        if (signal !== "SIGKILL") {
+          await Promise.race([record.closed, delay(1_000)]);
+          if (!record.settled) signalGroup(child, "SIGKILL");
+        }
       }
       await Promise.race([record.closed, delay(2_000)]);
       if (record.cleanupError) throw new Error("Owned descendant cleanup could not be confirmed.");

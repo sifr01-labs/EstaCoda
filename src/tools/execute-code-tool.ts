@@ -172,12 +172,21 @@ async function runCode(options: RunCodeOptions): Promise<ToolResult> {
   await options.executionLease?.files.realpath(options.workspaceRoot);
   const ownedProcesses = options.executionLease ? undefined : new HostProcessScope(options.workspaceRoot);
   const processes = options.executionLease?.processes ?? ownedProcesses!;
-  const tempDir = await mkdtemp(join(tmpdir(), "estacoda-execute-code-"));
+  let complete!: () => void;
+  const completed = new Promise<void>((resolve) => { complete = resolve; });
+  const detach = options.executionLease?.own({ release: () => completed });
+  let tempDir: string | undefined;
+  let cleanupUncertain = false;
   try {
-    return await runHarness(options, processes, tempDir);
+    tempDir = await mkdtemp(join(tmpdir(), "estacoda-execute-code-"));
+    const result = await runHarness(options, processes, tempDir);
+    cleanupUncertain = result.metadata?.cleanupUncertain === true;
+    return result;
   } finally {
-    await ownedProcesses?.release();
-    await rm(tempDir, { recursive: true, force: true });
+    try {
+      await ownedProcesses?.release();
+      if (tempDir && !cleanupUncertain) await rm(tempDir, { recursive: true, force: true });
+    } finally { detach?.(); complete(); }
   }
 }
 

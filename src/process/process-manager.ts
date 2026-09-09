@@ -53,6 +53,8 @@ export class ProcessManager {
   readonly #now: () => Date;
   readonly #id: () => string;
   readonly #processes = new Map<string, InternalManagedProcess>();
+  #disposed = false;
+  #closing?: Promise<void>;
 
   constructor(options: ProcessManagerOptions) {
     this.#lease = options.executionLease;
@@ -63,6 +65,7 @@ export class ProcessManager {
     this.#maxLogChars = Math.max(1, Math.min(options.maxLogChars ?? DEFAULT_MAX_LOG_CHARS, DEFAULT_MAX_LOG_CHARS));
     this.#now = options.now ?? (() => new Date());
     this.#id = options.id ?? randomId;
+    options.executionLease?.own({ release: () => this.dispose() });
   }
 
   async start(command: string, signal?: AbortSignal): Promise<ManagedProcessRecord> {
@@ -127,7 +130,9 @@ export class ProcessManager {
     status: "prepared" | "running",
     protectedEnvironmentVariable?: string
   ): Promise<InternalManagedProcess> {
+    if (this.#disposed) throw new Error("Process manager has been disposed.");
     const cwd = this.#lease === undefined ? await realpath(this.#workspaceRoot) : await this.#lease.files.realpath(this.#workspaceRoot);
+    if (this.#disposed) throw new Error("Process manager has been disposed.");
     if (this.#processes.size >= 128) {
       for (const [id, record] of this.#processes) {
         if (["exited", "stopped", "failed"].includes(record.status) && record.child?.exitCode !== null) this.#processes.delete(id);
@@ -253,10 +258,15 @@ export class ProcessManager {
     return toRecord(process);
   }
 
-  async dispose(): Promise<void> {
-    await Promise.all([...this.#processes.values()].map((record) => record.child === undefined ? undefined : this.#processScope.terminate(record.child)));
-    await this.#ownedScope?.release();
-    this.#processes.clear();
+  dispose(): Promise<void> {
+    this.#disposed = true;
+    return this.#closing ??= (async () => {
+      const results = await Promise.allSettled([...this.#processes.values()].map((record) => record.child === undefined ? undefined : this.#processScope.terminate(record.child)));
+      await this.#ownedScope?.release();
+      this.#processes.clear();
+      const failures = results.filter((result): result is PromiseRejectedResult => result.status === "rejected");
+      if (failures.length) throw new AggregateError(failures.map((result) => result.reason), "Managed processes did not settle.");
+    })();
   }
 
   #appendLog(process: InternalManagedProcess, stream: ManagedProcessLog["stream"], text: string): void {

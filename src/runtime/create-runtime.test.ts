@@ -4899,6 +4899,25 @@ describe("createRuntime SQLite session lifecycle", () => {
     sessionDb.close();
   });
 
+  it("closes owned session storage when runtime construction fails", async () => {
+    const options = await minimalRuntimeOptions();
+    const sessionDb = await createSQLiteSessionDB({ path: join(options.workspaceRoot, "construction.sqlite") });
+    const registry = new ProviderRegistry();
+    vi.spyOn(registry, "listModels").mockRejectedValue(new Error("construction probe"));
+    await expect(createRuntime({ ...options, sessionDb, providerRegistry: registry })).rejects.toThrow("construction probe");
+    await expect(sessionDb.listSessions()).rejects.toThrow(/closed|open/iu);
+  });
+
+  it("continues disposal after a worker cleanup failure", async () => {
+    const options = await minimalRuntimeOptions();
+    const sessionDb = await createSQLiteSessionDB({ path: join(options.workspaceRoot, "cleanup.sqlite") });
+    const runtime = await createRuntime({ ...options, sessionDb, localWhisper: {
+      dispose: async () => { throw new Error("worker cleanup probe"); }
+    } as any });
+    await expect(runtime.dispose()).rejects.toThrow("worker cleanup probe");
+    await expect(sessionDb.listSessions()).rejects.toThrow(/closed|open/iu);
+  });
+
   it("disposes runtime-owned faster-whisper resources", async () => {
     const options = await minimalRuntimeOptions();
     let disposed = false;
