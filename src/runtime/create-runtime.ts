@@ -1,3 +1,5 @@
+import { verifyHostExecution } from "../execution/host-authority.js";
+import type { HostExecutionFacts, RequestedExecutionPolicy } from "../contracts/execution-authority.js";
 import { ensureRuntimeSession, validateSessionWorkspaceOwnership } from "../session/session-workspace-ownership.js";
 import { resolveWorkspaceDirectory } from "../workspaces/workspace-registry.js";
 import { AsyncLocalStorage } from "node:async_hooks";
@@ -141,6 +143,7 @@ function normalizeTaskCreationOrigin(origin: TaskCreationOrigin | undefined): Ta
 }
 
 export type RuntimeOptions = {
+  requestedExecutionPolicy?: RequestedExecutionPolicy;
   allowLegacyLocalBinding?: boolean;
   sourceWorkspace?: import("../contracts/workspace.js").SourceWorkspaceBinding;
   tokens: ResolvedTokens;
@@ -261,6 +264,7 @@ function resolveRuntimeUiIdentity(options: RuntimeOptions): string {
 }
 
 export type Runtime = {
+  executionFacts?(): Readonly<HostExecutionFacts>;
   agentEvolutionPolicy(): AgentEvolutionPolicy;
   describe(): string;
   getStatus(): import("../contracts/view-model.js").StatusViewModel;
@@ -424,6 +428,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
   });
   const closeSessionDbOnDispose = options.closeSessionDbOnDispose ?? true;
   const workspaceRoot = (await resolveWorkspaceDirectory(options.workspaceRoot ?? process.cwd())).canonicalPath;
+  const executionFacts = await verifyHostExecution(workspaceRoot, options.requestedExecutionPolicy);
   await ensureRuntimeSession({ sessionDb, sessionId, profileId, workspaceRoot, homeDir: options.homeDir,
     durable: sessionDb instanceof SQLiteSessionDB, sourceWorkspace: options.sourceWorkspace,
     allowLegacyLocalBinding: options.allowLegacyLocalBinding, metadata: options.sessionMetadata, spendingLimit: options.budgets?.session });
@@ -1144,6 +1149,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       });
 
   return {
+    executionFacts: () => executionFacts,
     sessionDb,
     taskAgentExecutor,
     taskOperator: taskOperatorService,
