@@ -1,3 +1,4 @@
+import { withDispatchAuthorization, validateDispatchAuthorization } from "./dispatch-authorization.js";
 import { createPendingAction, securityActionKey } from "./pending-action-approval.js";
 import { readApprovalFile, updateApprovalFile } from "./approval-file.js";
 import { sameReusableAuthority, samePendingAuthority, validApprovalScope, type ApprovalExecutionScope } from "./approval-scope.js";
@@ -79,15 +80,17 @@ export class WorkspaceApprovalStore {
 
   async grant(input: {
     workspaceRoot: string; toolName: string; riskClass: ToolRiskClass;
-    targetKey?: string; targetSummary?: string; executionScope?: ApprovalExecutionScope;
+    targetKey?: string; targetSummary?: string; executionScope?: ApprovalExecutionScope; expectedRevision?: number;
   }): Promise<PersistedWorkspaceApprovalGrant> {
     if (input.executionScope !== undefined && !validApprovalScope(input.executionScope)) throw new Error("Invalid approval execution scope.");
     return updateApprovalFile(this.#path, isPersistedGrant, (file) => {
+      if (input.expectedRevision !== undefined && input.expectedRevision !== file.revision) throw new Error("Approval authority changed. Review the current action to renew approval.");
       const workspaceRoot = resolve(input.workspaceRoot);
       const existing = file.grants.find((grant) => grant.workspaceRoot === workspaceRoot && grant.toolName === input.toolName &&
         grant.riskClass === input.riskClass && grant.targetKey === input.targetKey && sameReusableAuthority(grant.executionScope, input.executionScope));
       if (existing) return existing;
-      const grant: PersistedWorkspaceApprovalGrant = { ...input, workspaceRoot, id: this.#idFactory(),
+      const { expectedRevision: _expectedRevision, ...grantInput } = input;
+      const grant: PersistedWorkspaceApprovalGrant = { ...grantInput, workspaceRoot, id: this.#idFactory(),
         authorizationGeneration: ++file.revision, grantedAt: this.#now().toISOString() };
       file.grants.push(grant);
       return grant;
@@ -132,6 +135,17 @@ export class WorkspaceApprovalController {
       smartApproval?: SmartApprovalAssessorRuntimeConfig;
     }
   ): Promise<SecurityAssessment> {
+    const authorizationRevision = this.#store.revision();
+    const actionKey = securityActionKey(request);
+    const scope = structuredClone(request.executionScope);
+    let dispatched = false;
+    const fence = (assessment: SecurityAssessment): SecurityAssessment => assessment.decision !== "allow" ? assessment : withDispatchAuthorization(assessment, async () => {
+        await validateDispatchAuthorization(assessment);
+        if (dispatched || this.#store.revision() !== authorizationRevision || securityActionKey(request) !== actionKey ||
+          (scope !== undefined && !samePendingAuthority(scope, request.executionScope)) || !request.context.trustedWorkspace ||
+          hardlineBlockFor(request) !== undefined || basePolicy.decide(request) === "deny") throw new Error("Approval authority changed before dispatch. Review the current action to renew approval.");
+        dispatched = true;
+      });
     const hardlineBlock = hardlineBlockFor(request);
     if (hardlineBlock !== undefined) {
       return {
@@ -165,7 +179,7 @@ export class WorkspaceApprovalController {
         }
       }
 
-      return {
+      return fence({
         decision: "allow",
         mode: options.mode,
         reason: matched.scope === "always"
@@ -183,16 +197,16 @@ export class WorkspaceApprovalController {
           used: false,
           status: "disabled"
         }
-      };
+      });
     }
 
     const smartAssessment = await smartAssessmentFor(request, options.mode, options.smartApproval);
     if (smartAssessment !== undefined) {
-      return smartAssessment.decision === "ask" ? { ...smartAssessment, pendingApproval: createPendingAction(request, this.#store.revision()) } : smartAssessment;
+      return smartAssessment.decision === "ask" ? { ...smartAssessment, pendingApproval: createPendingAction(request, this.#store.revision()) } : fence(smartAssessment);
     }
 
     const assessment = await assessSecurityPolicy(basePolicy, request, options.mode);
-    if (assessment.decision !== "ask") return assessment;
+    if (assessment.decision !== "ask") return fence(assessment);
     return { ...assessment, pendingApproval: createPendingAction(request, this.#store.revision()) };
   }
 
@@ -206,9 +220,11 @@ export class WorkspaceApprovalController {
     scope: ApprovalScope;
     executionScope?: ApprovalExecutionScope;
     actionKey?: string;
+    expectedRevision?: number;
   }): Promise<void> {
     if (input.scope === "always") {
       await this.#store.grant({
+        expectedRevision: input.expectedRevision,
         executionScope: input.executionScope,
         workspaceRoot: input.workspaceRoot,
         toolName: input.toolName,
@@ -219,6 +235,7 @@ export class WorkspaceApprovalController {
       return;
     }
 
+    if (input.expectedRevision !== undefined && input.expectedRevision !== this.#store.revision()) throw new Error("Approval authority changed. Review the current action to renew approval.");
     const scopedGrant: EphemeralApprovalGrant = {
       actionKey: input.scope === "once" ? input.actionKey : undefined,
       executionScope: input.executionScope === undefined ? undefined : structuredClone(input.executionScope),

@@ -1,3 +1,7 @@
+import { verifyHostExecution } from "../execution/host-authority.js";
+import { localApprovalScope, type ApprovalExecutionScope } from "../security/approval-scope.js";
+import { assertPendingAction, createPendingAction, exactActionKey, securityActionKey, type PendingActionApproval } from "../security/pending-action-approval.js";
+import { assessHardlineFloor } from "../security/command-safety.js";
 import { validateSessionWorkspaceOwnership } from "../session/session-workspace-ownership.js";
 import { randomUUID } from "node:crypto";
 import { chmodSync, existsSync, mkdirSync, writeFileSync } from "node:fs";
@@ -73,6 +77,7 @@ type AcpServerOptions = {
 };
 
 type SessionGrants = {
+  pending: Map<string, PendingActionApproval>;
   allowOnce: Set<string>;
   allowAlways: Set<string>;
   rejectAlways: Set<string>;
@@ -675,7 +680,15 @@ export class AcpServer {
           return { stopReason: "end_turn" };
         }
 
-        applyPermissionSelection(session, gated.targetKey, permissionOutcome.optionId);
+        if (permissionOutcome.optionId !== "allow-once") throw new Error("The editor selected an unoffered permission.");
+        const pending = gated.pendingApproval;
+        if (pending === undefined || JSON.stringify(session.grants.pending.get(pending.id)) !== JSON.stringify(pending)) throw new Error("Approval context is missing. Review the current action.");
+        const current = await this.#sessionDb.getSessionForProfile(session.estacodaSessionId, this.#profileId);
+        if (current === undefined || controller.signal.aborted) throw new Error("Approval session is no longer active.");
+        await validateSessionWorkspaceOwnership({ session: current, profileId: this.#profileId, workspaceRoot: session.workspaceRoot, homeDir: this.#homeDir });
+        assertPendingAction(pending, localApprovalScope(this.#profileId, session.estacodaSessionId, await verifyHostExecution(session.workspaceRoot)), 0);
+        session.grants.pending.delete(pending.id);
+        applyPermissionSelection(session, exactActionKey([pending.executionScope, pending.actionKey]), permissionOutcome.optionId);
         this.#notify({
           jsonrpc: "2.0",
           method: "session/update",
@@ -773,6 +786,7 @@ export class AcpServer {
     sessionId: string;
     grants: SessionGrants;
   }): Promise<Runtime> {
+    const executionScope = localApprovalScope(this.#profileId, options.sessionId, await verifyHostExecution(options.workspaceRoot));
     if (this.#runtimeFactory !== undefined) {
       return await this.#runtimeFactory({
         workspaceRoot: options.workspaceRoot,
@@ -780,6 +794,7 @@ export class AcpServer {
         homeDir: this.#homeDir,
         sessionDb: this.#sessionDb,
         securityPolicy: createAcpSecurityPolicy(options.grants, {
+          executionScope,
           allowEditorRead: this.#clientFsReadText
         })
       });
@@ -832,6 +847,7 @@ export class AcpServer {
         websiteBlocklist: config.security.websiteBlocklist
       },
       securityPolicy: createAcpSecurityPolicy(options.grants, {
+          executionScope,
         allowEditorRead: this.#clientFsReadText,
         mode: config.security.approvalMode,
         assessor: {
@@ -1535,6 +1551,7 @@ function classifyPermissionToolKind(toolName: string, riskClass: string): string
 
 function createSessionGrants(): SessionGrants {
   return {
+    pending: new Map(),
     allowOnce: new Set(),
     allowAlways: new Set(),
     rejectAlways: new Set()
@@ -1590,6 +1607,7 @@ function createAcpSecurityPolicy(
   grants: SessionGrants,
   options: {
     allowEditorRead: boolean;
+    executionScope: ApprovalExecutionScope;
     mode?: SecurityApprovalMode;
     assessor?: import("../security/security-policy-factory.js").SecurityAssessorRuntimeConfig;
   }
@@ -1598,7 +1616,9 @@ function createAcpSecurityPolicy(
     assessor: options.assessor
   });
   const assess = async (request: SecurityRequest) => {
-    const targetKey = request.targetKey;
+    request.executionScope = options.executionScope;
+    const targetKey = exactActionKey([options.executionScope, securityActionKey(request)]);
+    if (assessHardlineFloor(request.command ?? "") !== undefined || !request.context.trustedWorkspace || basePolicy.decide(request) === "deny") return await assessSecurityPolicy(basePolicy, request, options.mode ?? "adaptive");
     if (
       options.allowEditorRead === true &&
       request.toolName === "file.read" &&
@@ -1637,29 +1657,19 @@ function createAcpSecurityPolicy(
         };
       }
     }
-    return await assessSecurityPolicy(basePolicy, request, options.mode ?? "adaptive");
+    const assessment = await assessSecurityPolicy(basePolicy, request, options.mode ?? "adaptive");
+    if (assessment.decision !== "ask") return assessment;
+    const pendingApproval = createPendingAction(request, 0)!;
+    for (const [id, pending] of grants.pending) if (pending.expiresAt <= Date.now()) grants.pending.delete(id);
+    if (grants.pending.size >= 100) grants.pending.delete(grants.pending.keys().next().value!);
+    grants.pending.set(pendingApproval.id, structuredClone(pendingApproval));
+    return { ...assessment, pendingApproval };
   };
   return {
     assess(request: SecurityRequest) {
       return assess(request);
     },
     decide(request: SecurityRequest): SecurityDecision {
-      const targetKey = request.targetKey;
-      if (
-        options.allowEditorRead === true &&
-        request.toolName === "file.read" &&
-        request.riskClass === "read-only-local"
-      ) {
-        return "allow";
-      }
-      if (targetKey !== undefined) {
-        if (grants.rejectAlways.has(targetKey)) {
-          return "deny";
-        }
-        if (grants.allowAlways.has(targetKey) || grants.allowOnce.has(targetKey)) {
-          return "allow";
-        }
-      }
       return basePolicy.decide(request);
     }
   };

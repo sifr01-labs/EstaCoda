@@ -46,10 +46,11 @@ export class ChannelApprovalStore {
 
   async grant(input: {
     sessionKey: ChannelSessionKey; toolName: string; riskClass: string;
-    targetKey?: string; targetSummary?: string; executionScope?: ApprovalExecutionScope;
+    targetKey?: string; targetSummary?: string; executionScope?: ApprovalExecutionScope; expectedRevision?: number;
   }): Promise<PersistedApprovalGrant> {
     if (input.executionScope !== undefined && !validApprovalScope(input.executionScope)) throw new Error("Invalid approval execution scope.");
     return updateApprovalFile(this.#path, isGrant, (file) => {
+      if (input.expectedRevision !== undefined && input.expectedRevision !== file.revision) throw new Error("Approval authority changed. Review the current action to renew approval.");
       const existing = file.grants.find((grant) => matchesSessionScope(grant, input.sessionKey) && grant.toolName === input.toolName &&
         grant.riskClass === input.riskClass && grant.targetKey === input.targetKey && sameReusableAuthority(grant.executionScope, input.executionScope));
       if (existing) return existing;

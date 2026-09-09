@@ -2478,7 +2478,7 @@ describe("ToolExecutor command environment", () => {
 
     const record = await executor.executeTool({
       tool: "terminal.run",
-      input: { command: "sudo apt update" },
+      input: { command: "rm -rf ./build" },
       trustedWorkspace: true,
       sessionId: "test-session",
       environmentType: "docker"
@@ -2878,4 +2878,39 @@ describe("ToolExecutor dynamic data-egress security", () => {
     expect(record).toMatchObject({ decision: "deny", targetSummary: "dynamic tool security preflight failed" });
     expect(run).not.toHaveBeenCalled();
   });
+});
+
+
+it("does not dispatch after a matching grant is revoked and recreated during assessment logging", async () => {
+  const directory = await mkdtemp(join(tmpdir(), "executor-fence-"));
+  try {
+    const store = new WorkspaceApprovalStore({ path: join(directory, "approvals.json"), idFactory: () => "same-id" });
+    const controller = new WorkspaceApprovalController({ store });
+    const executionScope = localApprovalScope("test", "test-session", await verifyHostExecution(process.cwd()));
+    const policy: SecurityPolicy = {
+      decide: () => "ask",
+      assess: async (request) => {
+        request.executionScope = executionScope;
+        return controller.assess({ decide: () => "ask" }, request, { workspaceRoot: process.cwd(), sessionId: "test-session", mode: "strict" });
+      }
+    };
+    const run = vi.fn(async (): Promise<ToolResult> => ({ ok: true, content: "must not execute" }));
+    const { executor, sessionDb } = await setupExecutor({ policy, tools: [{ ...createTerminalEchoTool(), run }] });
+    const gated = await executor.executeTool({ tool: "terminal.run", input: { command: "rm -rf ./build" }, trustedWorkspace: true, sessionId: "test-session" });
+    const grantInput = { workspaceRoot: process.cwd(), executionScope, toolName: "terminal.run", riskClass: "destructive-local" as const, targetKey: gated!.targetKey };
+    await store.grant(grantInput);
+    const append = sessionDb.appendEvent.bind(sessionDb);
+    const spy = vi.spyOn(sessionDb, "appendEvent").mockImplementation(async (id, event) => {
+      await append(id, event);
+      if (event.kind === "security-assessed") {
+        await store.revoke("same-id", process.cwd());
+        await store.grant(grantInput);
+      }
+    });
+    const result = await executor.executeTool({ tool: "terminal.run", input: { command: "rm -rf ./build" }, trustedWorkspace: true, sessionId: "test-session" });
+    expect(run).not.toHaveBeenCalled();
+    expect(result?.settlement?.dispatchState).toBe("not_started");
+    expect(result?.result?.content).toContain("authority changed");
+    spy.mockRestore();
+  } finally { await rm(directory, { recursive: true, force: true }); }
 });

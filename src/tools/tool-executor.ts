@@ -1,4 +1,6 @@
-import { exactActionKey, type PendingActionApproval } from "../security/pending-action-approval.js";
+import { validateDispatchAuthorization } from "../security/dispatch-authorization.js";
+import { executionActionIdentity } from "../security/execution-action-identity.js";
+import { type PendingActionApproval } from "../security/pending-action-approval.js";
 import { realpath } from "node:fs/promises";
 import { basename, dirname, isAbsolute, relative, resolve } from "node:path";
 import {
@@ -23,7 +25,7 @@ import type {
   SecureInputRequestHandler,
   SecureInputTransferRequestHandler,
 } from "../contracts/secure-input.js";
-import { assessCommandSafety } from "../security/command-safety.js";
+import { assessHardlineFloor, assessCommandSafety } from "../security/command-safety.js";
 import { protectPlaintextToolArguments } from "../security/plaintext-credential-guard.js";
 import type { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import type { ToolRegistry } from "./tool-registry.js";
@@ -378,7 +380,7 @@ export class ToolExecutor {
     const persistedTargetKey = redactPersistedString(targetKey);
     const persistedTargetSummary = redactPersistedString(targetSummary);
     const securityRequest: SecurityRequest = {
-      actionKey: exactActionKey([tool.name, riskClass, request.input]),
+      actionKey: executionActionIdentity(this.#profileId, request.sessionId, tool.name, riskClass, request.input),
       riskClass,
       toolName: tool.name,
       targetKey: persistedTargetKey,
@@ -591,6 +593,10 @@ export class ToolExecutor {
               operation.id === durableOperationId && operation.status === "dispatched"
             )) throw new Error("Durable operation dispatch could not be journaled.");
           }
+          if (securityRequest.actionKey !== executionActionIdentity(this.#profileId, request.sessionId, tool.name, riskClass, request.input)) throw new Error("Tool arguments changed after authorization.");
+          const currentHardline = assessHardlineFloor(typeof request.input.command === "string" ? request.input.command : "");
+          if (currentHardline !== undefined) throw new Error(currentHardline.reason);
+          await validateDispatchAuthorization(assessment);
           dispatchState = "started";
         },
         afterDispatch: () => {

@@ -1,3 +1,4 @@
+import { withDispatchAuthorization, validateDispatchAuthorization } from "../security/dispatch-authorization.js";
 import { assertPendingAction, createPendingAction, securityActionKey, type PendingActionApproval } from "../security/pending-action-approval.js";
 import { channelApprovalScope, samePendingAuthority, sameReusableAuthority, validApprovalScope, type ApprovalExecutionScope } from "../security/approval-scope.js";
 import type {
@@ -4628,6 +4629,8 @@ export class ChannelGateway {
     const normalizedSessionKey = normalizeSessionKey(pending.originalMessage.sessionKey, this.#sessionPolicy);
     if (pending.kind !== "command") throw new Error("Managed installation must use its capability-specific approval path.");
     assertPendingAction(pending.executionApproval, await this.#resolveApprovalScope(pending.sessionId, normalizedSessionKey), this.#approvalStore.revision());
+    if (this.#pendingApprovals.get(key) !== pending) throw new Error("Approval was already consumed. Review the current action.");
+    this.#pendingApprovals.delete(key);
     if (scope !== "always") {
       const grants = this.#approvalGrants.get(key) ?? [];
       grants.push({
@@ -4643,6 +4646,7 @@ export class ChannelGateway {
       this.#approvalGrants.set(key, grants);
     } else {
       await this.#approvalStore.grant({
+        expectedRevision: pending.executionApproval.authorizationRevision,
         executionScope: pending.executionApproval.executionScope,
         sessionKey: normalizedSessionKey,
         toolName: pending.toolName,
@@ -4718,6 +4722,8 @@ export class ChannelGateway {
         ? ["none"]
         : persistent.map((grant, index) => `${index + 1}. [${grant.id}] ${formatPersistentApproval(grant)}`)),
       "",
+      ...(persistent.some((grant) => !validApprovalScope(grant.executionScope) || !grant.authorizationGeneration)
+        ? ["Legacy approvals are inactive. Repeat the intended action and use /approve session or /approve always to renew its scope."] : []),
       "Use /revoke <approval-id> to remove a persistent approval."
     ].join("\n");
     await this.#deliverText(adapter, message.sessionKey, text);
@@ -4853,8 +4859,21 @@ export class ChannelGateway {
     };
 
     return {
-      assess(request: SecurityRequest) {
-        return assess(request);
+      assess: async (request: SecurityRequest) => {
+        const revision = this.#approvalStore.revision();
+        const assessment = await assess(request);
+        if (assessment.decision !== "allow") return assessment;
+        const executionScope = structuredClone(request.executionScope);
+        const actionKey = securityActionKey(request);
+        let dispatched = false;
+        return withDispatchAuthorization(assessment, async () => {
+          const currentScope = await this.#resolveApprovalScope(sessionId, sessionKey);
+          await validateDispatchAuthorization(assessment);
+          if (dispatched || revision !== this.#approvalStore.revision() || !samePendingAuthority(executionScope, currentScope) ||
+            actionKey !== securityActionKey(request) || !request.context.trustedWorkspace || hardlineAssessmentForRequest(request, securityMode) !== undefined ||
+            createSecurityPolicyForMode(securityMode).decide(request) === "deny") throw new Error("Channel approval authority changed before dispatch. Review the current action.");
+          dispatched = true;
+        });
       },
       decide(request: SecurityRequest): SecurityDecision {
         const basePolicy = createSecurityPolicyForMode(securityMode);

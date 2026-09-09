@@ -1,5 +1,5 @@
 import { randomUUID } from "node:crypto";
-import { chmodSync, existsSync, lstatSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
+import { chmodSync, lstatSync, mkdirSync, readFileSync, renameSync, unlinkSync, writeFileSync } from "node:fs";
 import { dirname } from "node:path";
 import { openDefaultSQLiteDatabase } from "../storage/factory.js";
 
@@ -11,7 +11,12 @@ export function readApprovalFile<T>(path: string, valid: (value: unknown) => val
   const file = JSON.parse(raw);
   if (!file || ![1, 2].includes(file.version) || !Array.isArray(file.grants) ||
     (file.version === 2 && (!Number.isSafeInteger(file.revision) || file.revision < 0))) throw new Error("Unsupported or corrupt approval store. Restore a compatible backup.");
-  return { version: 2, revision: file.version === 1 ? 0 : file.revision, grants: file.grants.filter(valid) };
+  return { version: 2, revision: file.version === 1 ? 0 : file.revision, grants: file.grants.filter(valid).map((grant: T) => {
+    if (file.version !== 1) return grant;
+    const legacy = { ...grant } as T & { executionScope?: unknown; authorizationGeneration?: unknown };
+    delete legacy.executionScope; delete legacy.authorizationGeneration;
+    return legacy;
+  }) };
 }
 
 /** SQLite is only a cross-process write mutex; JSON remains the existing source
@@ -20,7 +25,10 @@ export function readApprovalFile<T>(path: string, valid: (value: unknown) => val
 export function updateApprovalFile<T, R>(path: string, valid: (value: unknown) => value is T, update: (file: ApprovalFile<T>) => R): R {
   mkdirSync(dirname(path), { recursive: true, mode: 0o700 });
   const lockPath = `${path}.lock.sqlite`;
-  for (const candidate of [path, lockPath]) if (existsSync(candidate) && lstatSync(candidate).isSymbolicLink()) throw new Error("Approval state must not be a symbolic link.");
+  for (const candidate of [path, lockPath]) {
+    try { if (lstatSync(candidate).isSymbolicLink()) throw new Error("Approval state must not be a symbolic link."); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
+  }
   const lock = openDefaultSQLiteDatabase({ path: lockPath });
   const temporary = `${path}.${randomUUID()}.tmp`;
   try {
@@ -29,6 +37,7 @@ export function updateApprovalFile<T, R>(path: string, valid: (value: unknown) =
     const file = readApprovalFile(path, valid);
     const previous = JSON.stringify(file);
     const result = update(file);
+    if (!Number.isSafeInteger(file.revision) || file.revision < 0) throw new Error("Approval revision exhausted. Restore a compatible backup.");
     if (JSON.stringify(file) !== previous) {
       writeFileSync(temporary, `${JSON.stringify(file, null, 2)}\n`, { mode: 0o600 });
       renameSync(temporary, path);

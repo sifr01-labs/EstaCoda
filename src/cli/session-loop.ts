@@ -1,3 +1,4 @@
+import { validApprovalScope } from "../security/approval-scope.js";
 import { stdin as defaultInput, stdout as defaultOutput } from "node:process";
 import { join } from "node:path";
 import type { Readable } from "node:stream";
@@ -2762,6 +2763,8 @@ async function renderApprovalStatus(runtime: Runtime): Promise<string> {
           `${index + 1}. [${grant.id}] tool=${grant.toolName} risk=${grant.riskClass}${grant.targetSummary === undefined ? "" : ` target=${grant.targetSummary}`}`
         )),
     "",
+    ...(approvals.persistent.some((grant) => !validApprovalScope(grant.executionScope) || !grant.authorizationGeneration)
+      ? ["Legacy approvals are inactive. Repeat the intended action and choose session or persistent approval once to renew its scope."] : []),
     "Use /revoke <approval-id> to remove a persistent approval."
   ].join("\n");
 }

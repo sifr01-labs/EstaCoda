@@ -1,3 +1,4 @@
+import { withDispatchAuthorization, validateDispatchAuthorization } from "../security/dispatch-authorization.js";
 import { assertPendingAction, type PendingActionApproval } from "../security/pending-action-approval.js";
 import { localApprovalScope } from "../security/approval-scope.js";
 import { verifyHostExecution } from "../execution/host-authority.js";
@@ -56,7 +57,7 @@ import { createOpenAICompatibleProvider } from "../providers/openai-compatible-p
 import { createOpenAIResponsesProvider } from "../providers/openai-responses-provider.js";
 import { ProviderRegistry } from "../providers/provider-registry.js";
 import { getDefaultApiKeyEnv, getProviderMetadata } from "../providers/provider-metadata.js";
-import type { SecurityApprovalMode, SecurityPolicy, SecurityRequest } from "../contracts/security.js";
+import type { SecurityApprovalMode, SecurityAssessment, SecurityPolicy, SecurityRequest } from "../contracts/security.js";
 import type { SessionContextWindowUsage, SessionDB } from "../contracts/session.js";
 import type { SessionCostSummary } from "../contracts/usage-cost.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
@@ -814,7 +815,13 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         sessionId: sessionRuntimeContext.currentSessionId()
       }
   });
-  const pendingActions = new Map<string, { pending: PendingActionApproval; toolName?: string; riskClass: string; targetKey?: string }>();
+  const pendingActions = new Map<string, { pending: PendingActionApproval; request: SecurityRequest; toolName?: string; riskClass: string; targetKey?: string }>();
+  const validateApprovalOwner = async (sessionId: string) => {
+    if (sessionId !== sessionRuntimeContext.currentSessionId()) throw new Error("Approval session changed. Review the current action.");
+    const current = await sessionDb.getSessionForProfile(sessionId, profileId);
+    if (current === undefined) throw new Error("Approval session is no longer available.");
+    await validateSessionWorkspaceOwnership({ session: current, profileId, workspaceRoot, homeDir: options.homeDir });
+  };
   const securityPolicy: SecurityPolicy = {
     decide(request: SecurityRequest) {
       return baseSecurityPolicyForActiveMode().decide(request);
@@ -822,14 +829,21 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
     async assess(request: SecurityRequest) {
       request.executionScope = localApprovalScope(profileId, sessionRuntimeContext.currentSessionId(), executionFacts);
       const basePolicy = baseSecurityPolicyForActiveMode();
+      const assessedSessionId = sessionRuntimeContext.currentSessionId();
+      const persistedTrust = await trustStore.isTrusted(workspaceRoot);
+      const fence = (assessment: SecurityAssessment): SecurityAssessment => assessment.decision !== "allow" ? assessment : withDispatchAuthorization(assessment, async () => {
+          await validateApprovalOwner(assessedSessionId);
+          if ((persistedTrust && !await trustStore.isTrusted(workspaceRoot)) || !request.context.trustedWorkspace || baseSecurityPolicyForActiveMode().decide(request) === "deny") throw new Error("Execution authority changed before dispatch.");
+          await validateDispatchAuthorization(assessment);
+        });
 
       if (options.approvalController === undefined) {
-        return await basePolicy.assess?.(request) ?? {
+        return fence(await basePolicy.assess?.(request) ?? {
           decision: basePolicy.decide(request),
           mode: activeSecurityMode,
           reason: "Decided by the active security policy.",
           risk: "medium"
-        };
+        });
       }
 
       const smartApproval = effectiveSecurityAssessor?.enabled === true
@@ -852,9 +866,9 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       if (assessment.pendingApproval !== undefined) {
         for (const [id, pending] of pendingActions) if (pending.pending.expiresAt <= Date.now()) pendingActions.delete(id);
         if (pendingActions.size >= 100) pendingActions.delete(pendingActions.keys().next().value!);
-        pendingActions.set(assessment.pendingApproval.id, { pending: structuredClone(assessment.pendingApproval), toolName: request.toolName, riskClass: request.riskClass, targetKey: request.targetKey });
+        pendingActions.set(assessment.pendingApproval.id, { pending: structuredClone(assessment.pendingApproval), request: structuredClone(request), toolName: request.toolName, riskClass: request.riskClass, targetKey: request.targetKey });
       }
-      return assessment;
+      return fence(assessment);
     }
   };
   const taskBaseSecurityPolicy: SecurityPolicy = {
@@ -1362,8 +1376,13 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       const issued = pending === undefined ? undefined : pendingActions.get(pending.id);
       const currentScope = localApprovalScope(profileId, sessionRuntimeContext.currentSessionId(), executionFacts);
       if (issued === undefined || JSON.stringify(issued.pending) !== JSON.stringify(pending) || issued.toolName !== input.toolName || issued.riskClass !== input.riskClass || issued.targetKey !== input.targetKey || options.approvalController === undefined) throw new Error("Approval context is missing. Review the current action to renew approval.");
+      await validateApprovalOwner(currentScope.sessionId);
+      if (!await trustStore.isTrusted(workspaceRoot) || baseSecurityPolicyForActiveMode().decide(issued.request) === "deny") throw new Error("Approval is no longer permitted in the current workspace.");
+      if (pendingActions.get(pending!.id) !== issued) throw new Error("Approval was already consumed. Review the current action.");
       assertPendingAction(pending, currentScope, options.approvalController.authorizationRevision());
+      pendingActions.delete(pending.id);
       await options.approvalController.grant({
+        expectedRevision: pending.authorizationRevision,
         actionKey: pending.actionKey,
         executionScope: localApprovalScope(profileId, sessionRuntimeContext.currentSessionId(), executionFacts),
         workspaceRoot,
@@ -1374,7 +1393,6 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
         targetSummary: input.targetSummary,
         scope: input.scope
       });
-      pendingActions.delete(pending.id);
     },
     async inspectApprovals() {
       return await options.approvalController?.inspect({
