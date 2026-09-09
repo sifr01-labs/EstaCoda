@@ -1,12 +1,13 @@
+import { HostWorkspaceFiles, type WorkspaceFiles, type WorkspacePathOptions } from "../execution/host-workspace-files.js";
 import { spawn, type ChildProcessByStdio } from "node:child_process";
-import { realpath, stat } from "node:fs/promises";
 import { isAbsolute, relative } from "node:path";
 import type { Readable } from "node:stream";
 import type { RegisteredTool, ToolResult } from "../contracts/tool.js";
 import { redactSensitiveText } from "../utils/redaction.js";
-import { errorResult, resolveWorkspacePath } from "./workspace-paths.js";
+import { errorResult } from "./workspace-paths.js";
 
 export type TerminalInspectToolOptions = {
+  files?: WorkspaceFiles;
   workspaceRoot: string;
   timeoutMs?: number;
   maxOutputChars?: number;
@@ -62,6 +63,8 @@ export function createTerminalInspectTool(options: TerminalInspectToolOptions): 
   const maxOutputChars = Math.max(1_000, Math.min(options.maxOutputChars ?? DEFAULT_MAX_OUTPUT_CHARS, DEFAULT_MAX_OUTPUT_CHARS));
   const maxOutputLines = Math.max(50, Math.min(options.maxOutputLines ?? DEFAULT_MAX_OUTPUT_LINES, DEFAULT_MAX_OUTPUT_LINES));
   const spawnProcess = options.spawnImpl ?? spawn;
+  const files = options.files ?? new HostWorkspaceFiles(options.workspaceRoot);
+  const { validateArgv } = createInspectionValidation(files);
 
   return {
     name: "terminal.inspect",
@@ -85,7 +88,7 @@ export function createTerminalInspectTool(options: TerminalInspectToolOptions): 
     maxResultSizeChars: maxOutputChars,
     isAvailable: () => true,
     run: async (input) => {
-      const canonicalRoot = await realpath(options.workspaceRoot);
+      const canonicalRoot = await files.realpath(options.workspaceRoot);
       const validation = await validateArgv(canonicalRoot, input.argv);
       if (!validation.ok) {
         return validation;
@@ -101,352 +104,6 @@ export function createTerminalInspectTool(options: TerminalInspectToolOptions): 
       });
     }
   };
-}
-
-async function validateArgv(root: string, rawArgv: unknown): Promise<(ToolResult & { ok: false }) | (ValidatedArgv & { ok: true })> {
-  if (!Array.isArray(rawArgv) || rawArgv.length === 0) {
-    return errorResult("argv must be a non-empty string array") as ToolResult & { ok: false };
-  }
-  if (rawArgv.length > MAX_ARGV_LENGTH) {
-    return errorResult(`argv must contain at most ${MAX_ARGV_LENGTH} entries`) as ToolResult & { ok: false };
-  }
-  if (!rawArgv.every((value): value is string => typeof value === "string")) {
-    return errorResult("argv entries must be strings") as ToolResult & { ok: false };
-  }
-
-  const argv = rawArgv.map((arg) => arg.trim());
-  const structuralError = validateStructuralArgv(argv);
-  if (structuralError !== undefined) {
-    return errorResult(structuralError) as ToolResult & { ok: false };
-  }
-
-  const command = argv[0];
-  if (!ALLOWED_COMMANDS.has(command)) {
-    return errorResult(`command is not allowed for terminal.inspect: ${command}`) as ToolResult & { ok: false };
-  }
-
-  const commandError = await validateCommandArgs(root, argv);
-  if (commandError !== undefined) {
-    return errorResult(commandError) as ToolResult & { ok: false };
-  }
-
-  return { ok: true, argv };
-}
-
-function validateStructuralArgv(argv: string[]): string | undefined {
-  for (const [index, arg] of argv.entries()) {
-    if (arg.length === 0) {
-      return "argv entries must be non-empty strings";
-    }
-    if (arg.length > MAX_ARG_CHARS) {
-      return `argv entry ${index} exceeds ${MAX_ARG_CHARS} characters`;
-    }
-    if (CONTROL_CHAR_PATTERN.test(arg)) {
-      return "argv entries must not contain control characters";
-    }
-    if (SHELL_SYNTAX_PATTERN.test(arg) || COMMAND_SUBSTITUTION_PATTERN.test(arg)) {
-      return "terminal.inspect does not allow shell syntax";
-    }
-    if (ENV_ASSIGNMENT_PATTERN.test(arg)) {
-      return "terminal.inspect does not allow environment assignments";
-    }
-  }
-
-  const command = argv[0];
-  if (command.includes("/") || command.includes("\\")) {
-    return "terminal.inspect does not allow executable paths";
-  }
-
-  return undefined;
-}
-
-async function validateCommandArgs(root: string, argv: string[]): Promise<string | undefined> {
-  const [command, ...args] = argv;
-  switch (command) {
-    case "pwd":
-      return args.length === 0 ? undefined : "pwd does not accept arguments";
-    case "ls":
-      return validateLsArgs(root, args);
-    case "cat":
-      return validateExistingPathCommand(root, "cat", args);
-    case "head":
-    case "tail":
-      return validateHeadTailArgs(root, command, args);
-    case "wc":
-      return validateWcArgs(root, args);
-    case "stat":
-    case "file":
-      return validateExistingPathCommand(root, command, args);
-    case "git":
-      return validateGitArgs(root, args);
-    default:
-      return `command is not allowed for terminal.inspect: ${command}`;
-  }
-}
-
-async function validateLsArgs(root: string, args: string[]): Promise<string | undefined> {
-  const pathArgs: string[] = [];
-  let optionsDone = false;
-  for (const arg of args) {
-    if (!optionsDone && arg === "--") {
-      optionsDone = true;
-      continue;
-    }
-    if (!optionsDone && arg.startsWith("-")) {
-      if (!["-1", "-a", "-l", "-la", "-al", "-lh", "-lah", "-alh", "--color=never"].includes(arg)) {
-        return `ls option is not allowed: ${arg}`;
-      }
-      continue;
-    }
-    pathArgs.push(arg);
-  }
-
-  return validatePathArgs(root, pathArgs.length === 0 ? ["."] : pathArgs, { command: "ls", allowMissing: false });
-}
-
-async function validateExistingPathCommand(root: string, command: string, args: string[]): Promise<string | undefined> {
-  if (args.length === 0) {
-    return `${command} requires at least one workspace path`;
-  }
-  if (args.some((arg) => arg.startsWith("-"))) {
-    return `${command} options are not allowed`;
-  }
-  return validatePathArgs(root, args, { command, allowMissing: false });
-}
-
-async function validateHeadTailArgs(root: string, command: "head" | "tail", args: string[]): Promise<string | undefined> {
-  const pathArgs: string[] = [];
-  for (let index = 0; index < args.length; index += 1) {
-    const arg = args[index]!;
-    if (arg === "-n") {
-      const count = args[++index];
-      if (!isPositiveIntegerText(count)) {
-        return `${command} -n requires a positive line count`;
-      }
-      continue;
-    }
-    if (/^-n\d+$/u.test(arg) || /^--lines=\d+$/u.test(arg)) {
-      continue;
-    }
-    if (arg.startsWith("-")) {
-      return `${command} option is not allowed: ${arg}`;
-    }
-    pathArgs.push(arg);
-  }
-  if (pathArgs.length === 0) {
-    return `${command} requires at least one workspace path`;
-  }
-  return validatePathArgs(root, pathArgs, { command, allowMissing: false });
-}
-
-async function validateWcArgs(root: string, args: string[]): Promise<string | undefined> {
-  const pathArgs: string[] = [];
-  for (const arg of args) {
-    if (arg.startsWith("-")) {
-      if (!/^-[lwcmb]+$/u.test(arg)) {
-        return `wc option is not allowed: ${arg}`;
-      }
-      continue;
-    }
-    pathArgs.push(arg);
-  }
-  if (pathArgs.length === 0) {
-    return "wc requires at least one workspace path";
-  }
-  return validatePathArgs(root, pathArgs, { command: "wc", allowMissing: false });
-}
-
-async function validateGitArgs(root: string, args: string[]): Promise<string | undefined> {
-  const [subcommand, ...subArgs] = args;
-  if (subcommand === undefined) {
-    return "git requires an allowed read-only subcommand";
-  }
-  if (subcommand.startsWith("-")) {
-    return "git global options are not allowed";
-  }
-
-  switch (subcommand) {
-    case "status":
-      return validateGitStatusArgs(root, subArgs);
-    case "diff":
-      return validateGitPathspecArgs(root, "git diff", subArgs, new Set([
-        "--stat",
-        "--name-only",
-        "--name-status",
-        "--cached",
-        "--staged",
-        "--color=never",
-        "--no-color"
-      ]));
-    case "log":
-      return validateGitLogArgs(root, subArgs);
-    case "branch":
-      return validateGitSimpleOptions("git branch", subArgs, new Set(["--show-current", "--list", "-a", "-r", "-v", "--color=never", "--no-color"]));
-    case "remote":
-      return subArgs.length === 0 || (subArgs.length === 1 && subArgs[0] === "-v")
-        ? undefined
-        : "git remote only allows no arguments or -v";
-    case "ls-files":
-      return validateGitPathspecArgs(root, "git ls-files", subArgs, new Set([
-        "--stage",
-        "--others",
-        "--cached",
-        "--deleted",
-        "--modified",
-        "--exclude-standard"
-      ]));
-    case "grep":
-      return validateGitGrepArgs(root, subArgs);
-    default:
-      return `git subcommand is not allowed: ${subcommand}`;
-  }
-}
-
-async function validateGitStatusArgs(root: string, args: string[]): Promise<string | undefined> {
-  return validateGitPathspecArgs(root, "git status", args, new Set([
-    "--short",
-    "--porcelain",
-    "--porcelain=v1",
-    "--branch",
-    "--untracked-files=all",
-    "--untracked-files=no",
-    "--ignored=no",
-    "--no-renames"
-  ]));
-}
-
-async function validateGitLogArgs(root: string, args: string[]): Promise<string | undefined> {
-  const pathArgs: string[] = [];
-  let afterDoubleDash = false;
-  for (let index = 0; index < args.length; index += 1) {
-    const arg = args[index]!;
-    if (arg === "--") {
-      afterDoubleDash = true;
-      continue;
-    }
-    if (afterDoubleDash) {
-      pathArgs.push(arg);
-      continue;
-    }
-    if (["--oneline", "--decorate", "--stat", "--name-only", "--color=never", "--no-color"].includes(arg)) {
-      continue;
-    }
-    if (/^--max-count=\d+$/u.test(arg) || /^-n\d+$/u.test(arg)) {
-      continue;
-    }
-    if (arg === "-n") {
-      const count = args[++index];
-      if (!isPositiveIntegerText(count)) {
-        return "git log -n requires a positive count";
-      }
-      continue;
-    }
-    return `git log argument is not allowed: ${arg}`;
-  }
-  return validatePathArgs(root, pathArgs, { command: "git log", allowMissing: true, rejectColon: true });
-}
-
-function validateGitSimpleOptions(command: string, args: string[], allowedOptions: ReadonlySet<string>): string | undefined {
-  for (const arg of args) {
-    if (!allowedOptions.has(arg)) {
-      return `${command} argument is not allowed: ${arg}`;
-    }
-  }
-  return undefined;
-}
-
-async function validateGitPathspecArgs(
-  root: string,
-  command: string,
-  args: string[],
-  allowedOptions: ReadonlySet<string>
-): Promise<string | undefined> {
-  const pathArgs: string[] = [];
-  let afterDoubleDash = false;
-  for (const arg of args) {
-    if (arg === "--") {
-      afterDoubleDash = true;
-      continue;
-    }
-    if (!afterDoubleDash && arg.startsWith("-")) {
-      if (!allowedOptions.has(arg)) {
-        return `${command} option is not allowed: ${arg}`;
-      }
-      continue;
-    }
-    if (!afterDoubleDash && !arg.startsWith("-")) {
-      return `${command} path arguments must follow --`;
-    }
-    pathArgs.push(arg);
-  }
-  return validatePathArgs(root, pathArgs, { command, allowMissing: true, rejectColon: true });
-}
-
-async function validateGitGrepArgs(root: string, args: string[]): Promise<string | undefined> {
-  const pathArgs: string[] = [];
-  let patternSeen = false;
-  let afterDoubleDash = false;
-  for (const arg of args) {
-    if (arg === "--") {
-      afterDoubleDash = true;
-      continue;
-    }
-    if (!patternSeen && !afterDoubleDash && ["-n", "-i", "-F", "--line-number", "--ignore-case", "--fixed-strings", "--color=never", "--no-color"].includes(arg)) {
-      continue;
-    }
-    if (!patternSeen) {
-      if (arg.startsWith("-") && !afterDoubleDash) {
-        return `git grep option is not allowed: ${arg}`;
-      }
-      patternSeen = true;
-      continue;
-    }
-    pathArgs.push(arg);
-  }
-  if (!patternSeen) {
-    return "git grep requires a pattern";
-  }
-  return validatePathArgs(root, pathArgs, { command: "git grep", allowMissing: true, rejectColon: true });
-}
-
-async function validatePathArgs(
-  root: string,
-  paths: string[],
-  options: { command: string; allowMissing: boolean; rejectColon?: boolean }
-): Promise<string | undefined> {
-  for (const path of paths) {
-    if (path.length === 0) {
-      return `${options.command} path arguments must be non-empty`;
-    }
-    if (path.startsWith("-")) {
-      return `${options.command} path arguments must not start with -`;
-    }
-    if (GLOB_PATTERN.test(path)) {
-      return `${options.command} path globs are not allowed`;
-    }
-    if (options.rejectColon === true && path.includes(":")) {
-      return `${options.command} revision or magic pathspec syntax is not allowed`;
-    }
-    const resolved = await resolveWorkspacePath(root, path, {
-      allowDirectory: true,
-      allowMissingLeaf: options.allowMissing
-    });
-    if (!resolved.ok) {
-      return resolved.content;
-    }
-    const resolvedRoot = await realpath(root).catch(() => root);
-    const rel = relative(resolvedRoot, resolved.path);
-    if (rel.startsWith("..") || isAbsolute(rel)) {
-      return "path is outside the trusted workspace";
-    }
-    if (!options.allowMissing) {
-      const stats = await stat(resolved.path).catch(() => undefined);
-      if (stats === undefined) {
-        return `${options.command} path does not exist: ${path}`;
-      }
-    }
-  }
-  return undefined;
 }
 
 function isPositiveIntegerText(value: string | undefined): boolean {
@@ -678,4 +335,356 @@ function terminalInspectContextSummary(input: {
 function lineCount(value: string): number {
   const trimmed = value.replace(/(?:\r\n|\r|\n)$/u, "");
   return trimmed.length === 0 ? 0 : trimmed.split(/\r\n|\r|\n/u).length;
+}
+
+function createInspectionValidation(files: WorkspaceFiles) {
+  const realpath = files.realpath.bind(files);
+  const stat = files.stat.bind(files);
+  const resolveWorkspacePath = (_root: string, path: string | undefined, options?: WorkspacePathOptions) => files.resolvePath(path, options);
+  async function validateArgv(root: string, rawArgv: unknown): Promise<(ToolResult & { ok: false }) | (ValidatedArgv & { ok: true })> {
+    if (!Array.isArray(rawArgv) || rawArgv.length === 0) {
+      return errorResult("argv must be a non-empty string array") as ToolResult & { ok: false };
+    }
+    if (rawArgv.length > MAX_ARGV_LENGTH) {
+      return errorResult(`argv must contain at most ${MAX_ARGV_LENGTH} entries`) as ToolResult & { ok: false };
+    }
+    if (!rawArgv.every((value): value is string => typeof value === "string")) {
+      return errorResult("argv entries must be strings") as ToolResult & { ok: false };
+    }
+
+    const argv = rawArgv.map((arg) => arg.trim());
+    const structuralError = validateStructuralArgv(argv);
+    if (structuralError !== undefined) {
+      return errorResult(structuralError) as ToolResult & { ok: false };
+    }
+
+    const command = argv[0];
+    if (!ALLOWED_COMMANDS.has(command)) {
+      return errorResult(`command is not allowed for terminal.inspect: ${command}`) as ToolResult & { ok: false };
+    }
+
+    const commandError = await validateCommandArgs(root, argv);
+    if (commandError !== undefined) {
+      return errorResult(commandError) as ToolResult & { ok: false };
+    }
+
+    return { ok: true, argv };
+  }
+
+  function validateStructuralArgv(argv: string[]): string | undefined {
+    for (const [index, arg] of argv.entries()) {
+      if (arg.length === 0) {
+        return "argv entries must be non-empty strings";
+      }
+      if (arg.length > MAX_ARG_CHARS) {
+        return `argv entry ${index} exceeds ${MAX_ARG_CHARS} characters`;
+      }
+      if (CONTROL_CHAR_PATTERN.test(arg)) {
+        return "argv entries must not contain control characters";
+      }
+      if (SHELL_SYNTAX_PATTERN.test(arg) || COMMAND_SUBSTITUTION_PATTERN.test(arg)) {
+        return "terminal.inspect does not allow shell syntax";
+      }
+      if (ENV_ASSIGNMENT_PATTERN.test(arg)) {
+        return "terminal.inspect does not allow environment assignments";
+      }
+    }
+
+    const command = argv[0];
+    if (command.includes("/") || command.includes("\\")) {
+      return "terminal.inspect does not allow executable paths";
+    }
+
+    return undefined;
+  }
+
+  async function validateCommandArgs(root: string, argv: string[]): Promise<string | undefined> {
+    const [command, ...args] = argv;
+    switch (command) {
+      case "pwd":
+        return args.length === 0 ? undefined : "pwd does not accept arguments";
+      case "ls":
+        return validateLsArgs(root, args);
+      case "cat":
+        return validateExistingPathCommand(root, "cat", args);
+      case "head":
+      case "tail":
+        return validateHeadTailArgs(root, command, args);
+      case "wc":
+        return validateWcArgs(root, args);
+      case "stat":
+      case "file":
+        return validateExistingPathCommand(root, command, args);
+      case "git":
+        return validateGitArgs(root, args);
+      default:
+        return `command is not allowed for terminal.inspect: ${command}`;
+    }
+  }
+
+  async function validateLsArgs(root: string, args: string[]): Promise<string | undefined> {
+    const pathArgs: string[] = [];
+    let optionsDone = false;
+    for (const arg of args) {
+      if (!optionsDone && arg === "--") {
+        optionsDone = true;
+        continue;
+      }
+      if (!optionsDone && arg.startsWith("-")) {
+        if (!["-1", "-a", "-l", "-la", "-al", "-lh", "-lah", "-alh", "--color=never"].includes(arg)) {
+          return `ls option is not allowed: ${arg}`;
+        }
+        continue;
+      }
+      pathArgs.push(arg);
+    }
+
+    return validatePathArgs(root, pathArgs.length === 0 ? ["."] : pathArgs, { command: "ls", allowMissing: false });
+  }
+
+  async function validateExistingPathCommand(root: string, command: string, args: string[]): Promise<string | undefined> {
+    if (args.length === 0) {
+      return `${command} requires at least one workspace path`;
+    }
+    if (args.some((arg) => arg.startsWith("-"))) {
+      return `${command} options are not allowed`;
+    }
+    return validatePathArgs(root, args, { command, allowMissing: false });
+  }
+
+  async function validateHeadTailArgs(root: string, command: "head" | "tail", args: string[]): Promise<string | undefined> {
+    const pathArgs: string[] = [];
+    for (let index = 0; index < args.length; index += 1) {
+      const arg = args[index]!;
+      if (arg === "-n") {
+        const count = args[++index];
+        if (!isPositiveIntegerText(count)) {
+          return `${command} -n requires a positive line count`;
+        }
+        continue;
+      }
+      if (/^-n\d+$/u.test(arg) || /^--lines=\d+$/u.test(arg)) {
+        continue;
+      }
+      if (arg.startsWith("-")) {
+        return `${command} option is not allowed: ${arg}`;
+      }
+      pathArgs.push(arg);
+    }
+    if (pathArgs.length === 0) {
+      return `${command} requires at least one workspace path`;
+    }
+    return validatePathArgs(root, pathArgs, { command, allowMissing: false });
+  }
+
+  async function validateWcArgs(root: string, args: string[]): Promise<string | undefined> {
+    const pathArgs: string[] = [];
+    for (const arg of args) {
+      if (arg.startsWith("-")) {
+        if (!/^-[lwcmb]+$/u.test(arg)) {
+          return `wc option is not allowed: ${arg}`;
+        }
+        continue;
+      }
+      pathArgs.push(arg);
+    }
+    if (pathArgs.length === 0) {
+      return "wc requires at least one workspace path";
+    }
+    return validatePathArgs(root, pathArgs, { command: "wc", allowMissing: false });
+  }
+
+  async function validateGitArgs(root: string, args: string[]): Promise<string | undefined> {
+    const [subcommand, ...subArgs] = args;
+    if (subcommand === undefined) {
+      return "git requires an allowed read-only subcommand";
+    }
+    if (subcommand.startsWith("-")) {
+      return "git global options are not allowed";
+    }
+
+    switch (subcommand) {
+      case "status":
+        return validateGitStatusArgs(root, subArgs);
+      case "diff":
+        return validateGitPathspecArgs(root, "git diff", subArgs, new Set([
+          "--stat",
+          "--name-only",
+          "--name-status",
+          "--cached",
+          "--staged",
+          "--color=never",
+          "--no-color"
+        ]));
+      case "log":
+        return validateGitLogArgs(root, subArgs);
+      case "branch":
+        return validateGitSimpleOptions("git branch", subArgs, new Set(["--show-current", "--list", "-a", "-r", "-v", "--color=never", "--no-color"]));
+      case "remote":
+        return subArgs.length === 0 || (subArgs.length === 1 && subArgs[0] === "-v")
+          ? undefined
+          : "git remote only allows no arguments or -v";
+      case "ls-files":
+        return validateGitPathspecArgs(root, "git ls-files", subArgs, new Set([
+          "--stage",
+          "--others",
+          "--cached",
+          "--deleted",
+          "--modified",
+          "--exclude-standard"
+        ]));
+      case "grep":
+        return validateGitGrepArgs(root, subArgs);
+      default:
+        return `git subcommand is not allowed: ${subcommand}`;
+    }
+  }
+
+  async function validateGitStatusArgs(root: string, args: string[]): Promise<string | undefined> {
+    return validateGitPathspecArgs(root, "git status", args, new Set([
+      "--short",
+      "--porcelain",
+      "--porcelain=v1",
+      "--branch",
+      "--untracked-files=all",
+      "--untracked-files=no",
+      "--ignored=no",
+      "--no-renames"
+    ]));
+  }
+
+  async function validateGitLogArgs(root: string, args: string[]): Promise<string | undefined> {
+    const pathArgs: string[] = [];
+    let afterDoubleDash = false;
+    for (let index = 0; index < args.length; index += 1) {
+      const arg = args[index]!;
+      if (arg === "--") {
+        afterDoubleDash = true;
+        continue;
+      }
+      if (afterDoubleDash) {
+        pathArgs.push(arg);
+        continue;
+      }
+      if (["--oneline", "--decorate", "--stat", "--name-only", "--color=never", "--no-color"].includes(arg)) {
+        continue;
+      }
+      if (/^--max-count=\d+$/u.test(arg) || /^-n\d+$/u.test(arg)) {
+        continue;
+      }
+      if (arg === "-n") {
+        const count = args[++index];
+        if (!isPositiveIntegerText(count)) {
+          return "git log -n requires a positive count";
+        }
+        continue;
+      }
+      return `git log argument is not allowed: ${arg}`;
+    }
+    return validatePathArgs(root, pathArgs, { command: "git log", allowMissing: true, rejectColon: true });
+  }
+
+  function validateGitSimpleOptions(command: string, args: string[], allowedOptions: ReadonlySet<string>): string | undefined {
+    for (const arg of args) {
+      if (!allowedOptions.has(arg)) {
+        return `${command} argument is not allowed: ${arg}`;
+      }
+    }
+    return undefined;
+  }
+
+  async function validateGitPathspecArgs(
+    root: string,
+    command: string,
+    args: string[],
+    allowedOptions: ReadonlySet<string>
+  ): Promise<string | undefined> {
+    const pathArgs: string[] = [];
+    let afterDoubleDash = false;
+    for (const arg of args) {
+      if (arg === "--") {
+        afterDoubleDash = true;
+        continue;
+      }
+      if (!afterDoubleDash && arg.startsWith("-")) {
+        if (!allowedOptions.has(arg)) {
+          return `${command} option is not allowed: ${arg}`;
+        }
+        continue;
+      }
+      if (!afterDoubleDash && !arg.startsWith("-")) {
+        return `${command} path arguments must follow --`;
+      }
+      pathArgs.push(arg);
+    }
+    return validatePathArgs(root, pathArgs, { command, allowMissing: true, rejectColon: true });
+  }
+
+  async function validateGitGrepArgs(root: string, args: string[]): Promise<string | undefined> {
+    const pathArgs: string[] = [];
+    let patternSeen = false;
+    let afterDoubleDash = false;
+    for (const arg of args) {
+      if (arg === "--") {
+        afterDoubleDash = true;
+        continue;
+      }
+      if (!patternSeen && !afterDoubleDash && ["-n", "-i", "-F", "--line-number", "--ignore-case", "--fixed-strings", "--color=never", "--no-color"].includes(arg)) {
+        continue;
+      }
+      if (!patternSeen) {
+        if (arg.startsWith("-") && !afterDoubleDash) {
+          return `git grep option is not allowed: ${arg}`;
+        }
+        patternSeen = true;
+        continue;
+      }
+      pathArgs.push(arg);
+    }
+    if (!patternSeen) {
+      return "git grep requires a pattern";
+    }
+    return validatePathArgs(root, pathArgs, { command: "git grep", allowMissing: true, rejectColon: true });
+  }
+
+  async function validatePathArgs(
+    root: string,
+    paths: string[],
+    options: { command: string; allowMissing: boolean; rejectColon?: boolean }
+  ): Promise<string | undefined> {
+    for (const path of paths) {
+      if (path.length === 0) {
+        return `${options.command} path arguments must be non-empty`;
+      }
+      if (path.startsWith("-")) {
+        return `${options.command} path arguments must not start with -`;
+      }
+      if (GLOB_PATTERN.test(path)) {
+        return `${options.command} path globs are not allowed`;
+      }
+      if (options.rejectColon === true && path.includes(":")) {
+        return `${options.command} revision or magic pathspec syntax is not allowed`;
+      }
+      const resolved = await resolveWorkspacePath(root, path, {
+        allowDirectory: true,
+        allowMissingLeaf: options.allowMissing
+      });
+      if (!resolved.ok) {
+        return resolved.content;
+      }
+      const resolvedRoot = await realpath(root).catch(() => root);
+      const rel = relative(resolvedRoot, resolved.path);
+      if (rel.startsWith("..") || isAbsolute(rel)) {
+        return "path is outside the trusted workspace";
+      }
+      if (!options.allowMissing) {
+        const stats = await stat(resolved.path).catch(() => undefined);
+        if (stats === undefined) {
+          return `${options.command} path does not exist: ${path}`;
+        }
+      }
+    }
+    return undefined;
+  }
+  return { validateArgv };
 }

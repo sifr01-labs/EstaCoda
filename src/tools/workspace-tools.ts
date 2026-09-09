@@ -1,6 +1,7 @@
+import { HostWorkspaceFiles, type WorkspaceFiles, type WorkspacePathOptions } from "../execution/host-workspace-files.js";
+import type { HostExecutionLease } from "../execution/host-environment.js";
 import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
-import { lstat, mkdir, readdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { platform } from "node:os";
 import type { EnvironmentType } from "../contracts/security.js";
@@ -12,9 +13,10 @@ import { isLikelyBinary, isTextyPath } from "../context/context-security.js";
 import { assessHardlineFloor } from "../security/command-safety.js";
 import { buildSafeChildEnv } from "../security/process-env.js";
 import { createTerminalInspectTool } from "./terminal-inspect-tool.js";
-import { errorResult, resolveWorkspacePath } from "./workspace-paths.js";
+import { errorResult } from "./workspace-paths.js";
 
 export type WorkspaceToolOptions = {
+  executionLease?: HostExecutionLease;
   workspaceRoot: string;
   maxReadBytes?: number;
   maxSearchResults?: number;
@@ -137,7 +139,9 @@ type PatchRollbackStep = {
 };
 
 export function createWorkspaceTools(options: WorkspaceToolOptions): readonly RegisteredTool[] {
-  const root = resolve(options.workspaceRoot);
+  const root = options.executionLease?.workspaceRoot ?? resolve(options.workspaceRoot);
+  const files = options.executionLease?.files ?? new HostWorkspaceFiles(root);
+  const { applyWorkspacePatchMode, applyPreparedWorkspacePatchFiles, writePreparedWorkspacePatchFile, deletePreparedWorkspacePatchFile, writeTextFileAtomically, applyWorkspacePatchOperationMode, prepareWorkspacePatchFiles, ensureSafeParentDirectories, readWorkspaceFile, searchDirectory, searchFile, readExistingWorkspaceText, realpath, readFile, writeFile, resolveWorkspacePath } = createWorkspaceIO(files);
   const maxReadBytes = options.maxReadBytes ?? DEFAULT_MAX_READ_BYTES;
   const maxSearchResults = options.maxSearchResults ?? DEFAULT_MAX_SEARCH_RESULTS;
   const commandTimeoutMs = options.commandTimeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS;
@@ -435,7 +439,7 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
         }
 
         const canonicalRoot = await realpath(root);
-        const path = await resolveWorkspacePath(canonicalRoot, input.path);
+        const path = await resolveWorkspacePath(canonicalRoot, input.path, { forbidSymlinks: true });
         if (!path.ok) {
           return path;
         }
@@ -559,6 +563,7 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
     },
     createTerminalInspectTool({
       workspaceRoot: root,
+      files,
       timeoutMs: Math.min(commandTimeoutMs, 10_000)
     }),
     {
@@ -604,6 +609,7 @@ export const workspaceToolProvider: SessionToolProvider = {
   createTools(ctx) {
     return createWorkspaceTools({
       workspaceRoot: ctx.workspaceRoot,
+      executionLease: ctx.executionLease,
       fsAdapter: ctx.workspaceFsAdapter,
       fileStateTracker: ctx.fileStateTracker,
       sessionId: ctx.currentSessionId,
@@ -708,96 +714,6 @@ function createPatchFailureTracker(): PatchFailureTracker {
   };
 }
 
-async function applyWorkspacePatchMode(input: {
-  root: string;
-  patch: string;
-  fsAdapter: WorkspaceFsAdapter | undefined;
-  recordOperation: (operation: {
-    operation: FileStateOperationKind;
-    sourceTool: string;
-    path: string;
-    bytes?: number;
-    changed?: boolean;
-    previewAvailable?: boolean;
-  }) => void;
-}): Promise<ToolResult> {
-  const parsed = parseWorkspacePatch(input.patch);
-  if (!("patch" in parsed)) {
-    return parsed;
-  }
-
-  const prepared = await prepareWorkspacePatchFiles(input.root, parsed.patch, input.fsAdapter);
-  if (!("files" in prepared)) {
-    return prepared;
-  }
-
-  if (input.fsAdapter === undefined) {
-    for (const file of prepared.files) {
-      if (file.operation === "delete") {
-        continue;
-      }
-      const ensureResult = await ensureSafeParentDirectories(file.absolutePath, input.root);
-      if (ensureResult !== undefined) {
-        return ensureResult;
-      }
-    }
-  }
-
-  const transactionSupport = validatePatchTransactionSupport(prepared.files, input.fsAdapter);
-  if (transactionSupport !== undefined) {
-    return transactionSupport;
-  }
-
-  const applied = await applyPreparedWorkspacePatchFiles(prepared.files, input.fsAdapter);
-  if (applied !== undefined) {
-    return applied;
-  }
-
-  const fileCount = prepared.files.length;
-  const hunkCount = prepared.files.reduce((total, file) => total + file.hunkCount, 0);
-  const oldBytes = prepared.files.reduce((total, file) => total + Buffer.byteLength(file.before), 0);
-  const newBytes = prepared.files.reduce((total, file) => total + Buffer.byteLength(file.after), 0);
-  const preview = buildPatchModeChangePreview({
-    files: prepared.files,
-    oldBytes,
-    newBytes
-  });
-  const result: ToolResult = {
-    ok: true,
-    content: `Applied patch to ${fileCount} file(s), ${hunkCount} hunk(s).`,
-    metadata: {
-      paths: prepared.files.map((file) => file.path),
-      fileCount,
-      hunkCount,
-      oldBytes,
-      newBytes,
-      operations: prepared.files.map((file) => file.operation),
-      matchDiagnostics: prepared.files.flatMap((file) => file.matchDiagnostics.map((diagnostic) => ({
-        path: file.path,
-        ...diagnostic
-      }))),
-      syntaxChecks: prepared.files
-        .filter((file) => file.operation !== "delete")
-        .map((file) => syntaxCheckMetadata(file.path, file.after))
-        .filter((check) => check.checked),
-      fileChangePreview: preview
-    }
-  };
-
-  for (const file of prepared.files) {
-    input.recordOperation({
-      operation: file.operation === "delete" ? "delete" : file.operation === "add" ? "write" : "replace",
-      sourceTool: "file.patch",
-      path: file.path,
-      bytes: Buffer.byteLength(file.after),
-      changed: file.before !== file.after,
-      previewAvailable: result.metadata?.fileChangePreview !== undefined
-    });
-  }
-
-  return result;
-}
-
 function validatePatchTransactionSupport(
   files: PreparedWorkspacePatchFile[],
   fsAdapter: WorkspaceFsAdapter | undefined
@@ -817,242 +733,8 @@ function validatePatchTransactionSupport(
   return undefined;
 }
 
-async function applyPreparedWorkspacePatchFiles(
-  files: PreparedWorkspacePatchFile[],
-  fsAdapter: WorkspaceFsAdapter | undefined
-): Promise<ToolResult | undefined> {
-  const rollbackStack: PatchRollbackStep[] = [];
-  const appliedPaths: string[] = [];
-
-  for (const file of files) {
-    try {
-      if (file.operation === "delete") {
-        await deletePreparedWorkspacePatchFile(file, fsAdapter);
-        rollbackStack.push({
-          path: file.path,
-          operation: "restore_deleted_file",
-          run: async () => writePreparedWorkspacePatchFile(file, file.before, fsAdapter)
-        });
-      } else {
-        await writePreparedWorkspacePatchFile(file, file.after, fsAdapter);
-        rollbackStack.push(file.operation === "add"
-          ? {
-              path: file.path,
-              operation: "delete_added_file",
-              run: async () => deletePreparedWorkspacePatchFile(file, fsAdapter)
-            }
-          : {
-              path: file.path,
-              operation: "restore_updated_file",
-              run: async () => writePreparedWorkspacePatchFile(file, file.before, fsAdapter)
-            });
-      }
-      appliedPaths.push(file.path);
-    } catch (error) {
-      const rollbackErrors: Array<{ path: string; operation: PatchRollbackStep["operation"]; error: string }> = [];
-      for (const step of [...rollbackStack].reverse()) {
-        try {
-          await step.run();
-        } catch (rollbackError) {
-          rollbackErrors.push({
-            path: step.path,
-            operation: step.operation,
-            error: formatPatchApplyError(rollbackError)
-          });
-        }
-      }
-
-      const rollbackOk = rollbackErrors.length === 0;
-      return errorResult(
-        [
-          `Patch apply failed while ${file.operation === "delete" ? "deleting" : "writing"} ${file.path}: ${formatPatchApplyError(error)}.`,
-          rollbackOk
-            ? "Rolled back previously applied changes."
-            : "Rollback failed for some previously applied changes; inspect the files before retrying."
-        ].join(" "),
-        {
-          path: file.path,
-          reason: "patch_apply_failed",
-          operation: file.operation,
-          appliedPaths,
-          rollback: {
-            attempted: rollbackStack.length,
-            ok: rollbackOk,
-            errors: rollbackErrors
-          }
-        }
-      );
-    }
-  }
-
-  return undefined;
-}
-
-async function writePreparedWorkspacePatchFile(
-  file: PreparedWorkspacePatchFile,
-  content: string,
-  fsAdapter: WorkspaceFsAdapter | undefined
-): Promise<void> {
-  if (fsAdapter?.writeTextFile !== undefined) {
-    await fsAdapter.writeTextFile({ path: file.absolutePath, content });
-    return;
-  }
-  await writeTextFileAtomically(file.absolutePath, content);
-}
-
-async function deletePreparedWorkspacePatchFile(
-  file: PreparedWorkspacePatchFile,
-  fsAdapter: WorkspaceFsAdapter | undefined
-): Promise<void> {
-  if (fsAdapter?.deleteTextFile !== undefined) {
-    await fsAdapter.deleteTextFile({ path: file.absolutePath });
-    return;
-  }
-  await rm(file.absolutePath);
-}
-
 function formatPatchApplyError(error: unknown): string {
   return error instanceof Error && error.message.length > 0 ? error.message : String(error);
-}
-
-async function writeTextFileAtomically(path: string, content: string): Promise<void> {
-  const tempPath = join(
-    dirname(path),
-    `.${basename(path)}.estacoda-patch-${process.pid}-${randomUUID()}.tmp`
-  );
-  try {
-    await writeFile(tempPath, content, { encoding: "utf8", flag: "wx" });
-    await rename(tempPath, path);
-  } catch (error) {
-    await rm(tempPath, { force: true }).catch(() => undefined);
-    throw error;
-  }
-}
-
-async function applyWorkspacePatchOperationMode(input: {
-  root: string;
-  path: string | undefined;
-  mode: "append" | "prepend" | "insert";
-  content: string;
-  anchor: string | undefined;
-  position: "before" | "after";
-  fsAdapter: WorkspaceFsAdapter | undefined;
-  recordOperation: (operation: {
-    operation: FileStateOperationKind;
-    sourceTool: string;
-    path: string;
-    bytes?: number;
-    changed?: boolean;
-    previewAvailable?: boolean;
-  }) => void;
-}): Promise<ToolResult> {
-  const resolved = await resolveWorkspacePath(input.root, input.path, { allowMissingLeaf: input.mode !== "insert", forbidSymlinks: true });
-  if (!resolved.ok) {
-    return resolved;
-  }
-
-  const relativePath = relative(input.root, resolved.path);
-  const before = await readExistingWorkspaceText(resolved.path, input.fsAdapter);
-  if (before === undefined && input.mode === "insert") {
-    return errorResult(`Cannot insert into missing file ${relativePath}.`, {
-      path: relativePath,
-      reason: "missing_file"
-    });
-  }
-
-  const existing = before ?? "";
-  let after: string;
-  let matchStrategy: PatchMatchStrategy | undefined;
-  let matchedSnippet: string | undefined;
-  let matchConfidenceValue: number | undefined;
-  if (input.mode === "append") {
-    after = `${existing}${input.content}`;
-  } else if (input.mode === "prepend") {
-    after = `${input.content}${existing}`;
-  } else {
-    const anchor = input.anchor ?? "";
-    const match = findPatchReplacementRanges(existing, anchor, {
-      path: relativePath,
-      replaceAll: false
-    });
-    if (!match.ok) {
-      return errorResult(match.content, {
-        ...(match.metadata ?? {}),
-        path: relativePath,
-        operation: "insert"
-      });
-    }
-    const range = match.ranges[0]!;
-    const replacement = input.position === "before"
-      ? `${input.content}${existing.slice(range.start, range.end)}`
-      : `${existing.slice(range.start, range.end)}${input.content}`;
-    after = applyPatchReplacementRanges(existing, [range], replacement);
-    matchStrategy = match.strategy;
-    matchedSnippet = buildMatchedSnippet(existing, range);
-    matchConfidenceValue = matchConfidence(match.strategy);
-  }
-
-  const syntax = validatePatchSyntax(relativePath, after);
-  if (syntax !== undefined) {
-    return syntax;
-  }
-
-  if (input.fsAdapter?.writeTextFile !== undefined) {
-    await input.fsAdapter.writeTextFile({
-      path: resolved.path,
-      content: after
-    });
-  } else {
-    const ensureResult = await ensureSafeParentDirectories(resolved.path, input.root);
-    if (ensureResult !== undefined) {
-      return ensureResult;
-    }
-    await writeFile(resolved.path, after, "utf8");
-  }
-
-  const oldBytes = Buffer.byteLength(existing);
-  const newBytes = Buffer.byteLength(after);
-  const preview = buildUnifiedFileChangePreview({
-    files: [{
-      operation: before === undefined ? "add" : "update",
-      path: relativePath,
-      absolutePath: resolved.path,
-      before: existing,
-      after,
-      hunkCount: 1,
-      matchDiagnostics: []
-    }],
-    oldBytes,
-    newBytes
-  });
-  const metadata: Record<string, unknown> = {
-    path: relativePath,
-    operation: input.mode,
-    oldBytes,
-    newBytes,
-    fileChangePreview: preview,
-    syntaxChecks: syntaxCheckMetadata(relativePath, after)
-  };
-  if (matchStrategy !== undefined) {
-    metadata.matchStrategy = matchStrategy;
-    metadata.matchConfidence = matchConfidenceValue;
-    metadata.matchedSnippet = matchedSnippet;
-  }
-
-  const result: ToolResult = {
-    ok: true,
-    content: `${patchOperationPastTense(input.mode)} ${relativePath}.`,
-    metadata
-  };
-  input.recordOperation({
-    operation: before === undefined ? "write" : "replace",
-    sourceTool: "file.patch",
-    path: relativePath,
-    bytes: newBytes,
-    changed: after !== existing,
-    previewAvailable: true
-  });
-  return result;
 }
 
 function patchOperationPastTense(mode: "append" | "prepend" | "insert"): string {
@@ -1211,123 +893,6 @@ function parsePatchContextHint(line: string): string | undefined {
   }
   const hint = match[1]?.trim() ?? "";
   return hint.length === 0 ? undefined : hint;
-}
-
-async function prepareWorkspacePatchFiles(
-  root: string,
-  patch: ParsedWorkspacePatch,
-  fsAdapter: WorkspaceFsAdapter | undefined
-): Promise<{ ok: true; files: PreparedWorkspacePatchFile[] } | ToolResult> {
-  const prepared: PreparedWorkspacePatchFile[] = [];
-
-  for (const file of patch.files) {
-    const resolved = await resolveWorkspacePath(root, file.path, {
-      allowMissingLeaf: file.operation === "add",
-      forbidSymlinks: file.operation === "add"
-    });
-    if (!resolved.ok) {
-      return resolved;
-    }
-
-    const relativePath = relative(root, resolved.path);
-    if (file.operation === "delete" && fsAdapter !== undefined && fsAdapter.deleteTextFile === undefined) {
-      return errorResult("workspace file adapter does not support delete operations", {
-        path: relativePath,
-        operation: "delete"
-      });
-    }
-    if (file.operation === "add") {
-      const existing = await readExistingWorkspaceText(resolved.path, fsAdapter);
-      if (existing !== undefined) {
-        return errorResult(`patch add file target already exists: ${relativePath}`, {
-          path: relativePath,
-          operation: "add"
-        });
-      }
-      const after = `${file.lines.join("\n")}\n`;
-      const syntax = validatePatchSyntax(relativePath, after);
-      if (syntax !== undefined) {
-        return syntax;
-      }
-      prepared.push({
-        operation: "add",
-        path: relativePath,
-        absolutePath: resolved.path,
-        before: "",
-        after,
-        hunkCount: 1,
-        matchDiagnostics: []
-      });
-      continue;
-    }
-
-    const before = fsAdapter !== undefined
-      ? await fsAdapter.readTextFile({ path: resolved.path })
-      : await readFile(resolved.path, "utf8");
-    if (file.operation === "delete") {
-      prepared.push({
-        operation: "delete",
-        path: relativePath,
-        absolutePath: resolved.path,
-        before,
-        after: "",
-        hunkCount: 1,
-        matchDiagnostics: []
-      });
-      continue;
-    }
-
-    let after = before;
-    const matchDiagnostics: PatchMatchDiagnostic[] = [];
-
-    for (const [index, hunk] of file.hunks.entries()) {
-      const materialized = materializePatchHunk(hunk);
-      if (!("oldString" in materialized)) {
-        return errorResult(`${relativePath} hunk ${index + 1}: ${materialized.content}`, {
-          path: relativePath,
-          hunkIndex: index + 1
-        });
-      }
-
-      const match = findPatchReplacementRanges(after, materialized.oldString, {
-        path: relativePath,
-        replaceAll: false,
-        contextHint: hunk.contextHint
-      });
-      if (!match.ok) {
-        return errorResult(`${relativePath} hunk ${index + 1}: ${match.content}`, {
-          ...(match.metadata ?? {}),
-          path: relativePath,
-          hunkIndex: index + 1
-        });
-      }
-
-      const range = match.ranges[0]!;
-      matchDiagnostics.push({
-        strategy: match.strategy,
-        confidence: matchConfidence(match.strategy),
-        matchedSnippet: buildMatchedSnippet(after, range)
-      });
-      after = applyPatchReplacementRanges(after, match.ranges, materialized.newString);
-    }
-
-    const syntax = validatePatchSyntax(relativePath, after);
-    if (syntax !== undefined) {
-      return syntax;
-    }
-
-    prepared.push({
-      operation: "update",
-      path: relativePath,
-      absolutePath: resolved.path,
-      before,
-      after,
-      hunkCount: file.hunks.length,
-      matchDiagnostics
-    });
-  }
-
-  return { ok: true, files: prepared };
 }
 
 function materializePatchHunk(
@@ -1886,119 +1451,6 @@ function firstAndLastNonBlankTrimmedLines(lines: string[]): { first: string; las
   };
 }
 
-async function ensureSafeParentDirectories(
-  targetPath: string,
-  workspaceRoot: string
-): Promise<ToolResult | undefined> {
-  const parent = dirname(targetPath);
-
-  // Walk up to find deepest existing directory and collect missing segments
-  const missingSegments: string[] = [];
-  let current = parent;
-
-  while (true) {
-    try {
-      const statResult = await lstat(current);
-      if (statResult.isSymbolicLink()) {
-        return errorResult("path contains a symlink in parent directories");
-      }
-      if (!statResult.isDirectory()) {
-        return errorResult("path parent contains a non-directory segment");
-      }
-      break;
-    } catch (error) {
-      if (!isNodeError(error) || error.code !== "ENOENT") {
-        return errorResult(error instanceof Error ? error.message : "failed to inspect path segment");
-      }
-      missingSegments.unshift(basename(current));
-      const next = dirname(current);
-      if (next === current) {
-        return errorResult("unable to resolve parent directory");
-      }
-      current = next;
-    }
-  }
-
-  // Verify deepest existing directory is inside workspace
-  let resolvedCurrent: string;
-  try {
-    resolvedCurrent = await realpath(current);
-  } catch {
-    return errorResult("unable to resolve parent directory");
-  }
-
-  const resolvedRoot = await realpath(workspaceRoot).catch(() => workspaceRoot);
-  const currentRel = relative(resolvedRoot, resolvedCurrent);
-  if (currentRel.startsWith("..") || isAbsolute(currentRel)) {
-    return errorResult("path is outside the trusted workspace");
-  }
-
-  // Create missing segments one by one
-  for (const segment of missingSegments) {
-    const nextPath = resolve(resolvedCurrent, segment);
-
-    // Check again in case a symlink was created concurrently
-    try {
-      const nextStat = await lstat(nextPath);
-      if (nextStat.isSymbolicLink()) {
-        return errorResult("path contains a symlink in parent directories");
-      }
-      if (!nextStat.isDirectory()) {
-        return errorResult("path parent contains a non-directory segment");
-      }
-      resolvedCurrent = await realpath(nextPath);
-    } catch (error) {
-      if (!isNodeError(error) || error.code !== "ENOENT") {
-        return errorResult(error instanceof Error ? error.message : "failed to inspect path segment");
-      }
-
-      await mkdir(nextPath);
-
-      // Verify containment after creation
-      const resolvedNext = await realpath(nextPath);
-      const nextRel = relative(resolvedRoot, resolvedNext);
-      if (nextRel.startsWith("..") || isAbsolute(nextRel)) {
-        return errorResult("path is outside the trusted workspace");
-      }
-      resolvedCurrent = resolvedNext;
-    }
-  }
-
-  // Final parent verification
-  const finalParent = await realpath(parent);
-  const finalRel = relative(resolvedRoot, finalParent);
-  if (finalRel.startsWith("..") || isAbsolute(finalRel)) {
-    return errorResult("path is outside the trusted workspace");
-  }
-
-  return undefined;
-}
-
-async function readWorkspaceFile(
-  root: string,
-  path: string,
-  options: { maxReadBytes: number; lineStart?: number; lineEnd?: number }
-): Promise<ToolResult> {
-  if (!isTextyPath(path)) {
-    return errorResult("file type is not included as text");
-  }
-
-  const bytes = await readFile(path);
-  if (isLikelyBinary(bytes)) {
-    return errorResult("file appears to be binary");
-  }
-
-  const truncated = bytes.length > options.maxReadBytes;
-  const content = bytes.subarray(0, options.maxReadBytes).toString("utf8");
-  const ranged = applyLineRange(content, options.lineStart, options.lineEnd);
-
-  return renderWorkspaceFile(root, path, ranged, {
-    maxReadBytes: options.maxReadBytes,
-    originalBytes: bytes.length,
-    alreadyRanged: true
-  });
-}
-
 function renderWorkspaceFile(
   root: string,
   path: string,
@@ -2030,109 +1482,6 @@ function renderWorkspaceFile(
       truncated
     }
   };
-}
-
-async function searchDirectory(
-  root: string,
-  path: string,
-  options: {
-    query: string;
-    matcher: RegExp | undefined;
-    results: string[];
-    maxSearchResults: number;
-    visitedDirectories: Set<string>;
-  }
-): Promise<void> {
-  if (options.results.length >= options.maxSearchResults) {
-    return;
-  }
-
-  const canonicalPath = await realpath(path).catch(() => path);
-  const targetStat = await stat(canonicalPath);
-  if (targetStat.isFile()) {
-    await searchFile(root, canonicalPath, options);
-    return;
-  }
-
-  if (!targetStat.isDirectory()) {
-    return;
-  }
-
-  if (options.visitedDirectories.has(canonicalPath)) {
-    return;
-  }
-  options.visitedDirectories.add(canonicalPath);
-
-  const entries = await readdir(canonicalPath, { withFileTypes: true });
-  for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
-    if (options.results.length >= options.maxSearchResults) {
-      return;
-    }
-
-    if (entry.isDirectory() && SKIP_DIRS.has(entry.name)) {
-      continue;
-    }
-
-    await searchDirectory(root, join(canonicalPath, entry.name), options);
-  }
-}
-
-async function searchFile(
-  root: string,
-  path: string,
-  options: {
-    query: string;
-    matcher: RegExp | undefined;
-    results: string[];
-    maxSearchResults: number;
-  }
-): Promise<void> {
-  if (!isTextyPath(path)) {
-    return;
-  }
-
-  const bytes = await readFile(path);
-  if (isLikelyBinary(bytes)) {
-    return;
-  }
-
-  const lines = bytes.toString("utf8").split("\n");
-
-  for (const [index, line] of lines.entries()) {
-    if (options.results.length >= options.maxSearchResults) {
-      return;
-    }
-
-    const matched = options.matcher === undefined
-      ? line.toLowerCase().includes(options.query.toLowerCase())
-      : options.matcher.test(line);
-
-    if (matched) {
-      options.results.push(`${relative(root, path)}:${index + 1}: ${line}`);
-    }
-  }
-}
-
-async function readExistingWorkspaceText(
-  path: string,
-  fsAdapter: WorkspaceFsAdapter | undefined
-): Promise<string | undefined> {
-  if (fsAdapter !== undefined) {
-    try {
-      return await fsAdapter.readTextFile({ path });
-    } catch {
-      return undefined;
-    }
-  }
-
-  try {
-    return await readFile(path, "utf8");
-  } catch (error) {
-    if (isNodeError(error) && error.code === "ENOENT") {
-      return undefined;
-    }
-    throw error;
-  }
 }
 
 function assessFileWriteShrink(existing: string | undefined, next: string): {
@@ -2467,4 +1816,676 @@ function applyLineRange(content: string, lineStart?: number, lineEnd?: number): 
 
 function explainCommandBlock(command: string, environmentType?: EnvironmentType): string | undefined {
   return assessHardlineFloor(command, { environmentType })?.reason;
+}
+
+function createWorkspaceIO(files: WorkspaceFiles) {
+  const realpath = files.realpath.bind(files);
+  const readFile = files.readFile.bind(files);
+  const writeFile = files.writeFile.bind(files);
+  const lstat = files.lstat.bind(files);
+  const stat = files.stat.bind(files);
+  const readdir = files.readdir.bind(files);
+  const mkdir = files.mkdir.bind(files);
+  const rm = files.rm.bind(files);
+  const rename = files.rename.bind(files);
+  const resolveWorkspacePath = (_root: string, path: string | undefined, options?: WorkspacePathOptions) => files.resolvePath(path, options);
+  async function applyWorkspacePatchMode(input: {
+    root: string;
+    patch: string;
+    fsAdapter: WorkspaceFsAdapter | undefined;
+    recordOperation: (operation: {
+      operation: FileStateOperationKind;
+      sourceTool: string;
+      path: string;
+      bytes?: number;
+      changed?: boolean;
+      previewAvailable?: boolean;
+    }) => void;
+  }): Promise<ToolResult> {
+    const parsed = parseWorkspacePatch(input.patch);
+    if (!("patch" in parsed)) {
+      return parsed;
+    }
+
+    const prepared = await prepareWorkspacePatchFiles(input.root, parsed.patch, input.fsAdapter);
+    if (!("files" in prepared)) {
+      return prepared;
+    }
+
+    if (input.fsAdapter === undefined) {
+      for (const file of prepared.files) {
+        if (file.operation === "delete") {
+          continue;
+        }
+        const ensureResult = await ensureSafeParentDirectories(file.absolutePath, input.root);
+        if (ensureResult !== undefined) {
+          return ensureResult;
+        }
+      }
+    }
+
+    const transactionSupport = validatePatchTransactionSupport(prepared.files, input.fsAdapter);
+    if (transactionSupport !== undefined) {
+      return transactionSupport;
+    }
+
+    const applied = await applyPreparedWorkspacePatchFiles(prepared.files, input.fsAdapter);
+    if (applied !== undefined) {
+      return applied;
+    }
+
+    const fileCount = prepared.files.length;
+    const hunkCount = prepared.files.reduce((total, file) => total + file.hunkCount, 0);
+    const oldBytes = prepared.files.reduce((total, file) => total + Buffer.byteLength(file.before), 0);
+    const newBytes = prepared.files.reduce((total, file) => total + Buffer.byteLength(file.after), 0);
+    const preview = buildPatchModeChangePreview({
+      files: prepared.files,
+      oldBytes,
+      newBytes
+    });
+    const result: ToolResult = {
+      ok: true,
+      content: `Applied patch to ${fileCount} file(s), ${hunkCount} hunk(s).`,
+      metadata: {
+        paths: prepared.files.map((file) => file.path),
+        fileCount,
+        hunkCount,
+        oldBytes,
+        newBytes,
+        operations: prepared.files.map((file) => file.operation),
+        matchDiagnostics: prepared.files.flatMap((file) => file.matchDiagnostics.map((diagnostic) => ({
+          path: file.path,
+          ...diagnostic
+        }))),
+        syntaxChecks: prepared.files
+          .filter((file) => file.operation !== "delete")
+          .map((file) => syntaxCheckMetadata(file.path, file.after))
+          .filter((check) => check.checked),
+        fileChangePreview: preview
+      }
+    };
+
+    for (const file of prepared.files) {
+      input.recordOperation({
+        operation: file.operation === "delete" ? "delete" : file.operation === "add" ? "write" : "replace",
+        sourceTool: "file.patch",
+        path: file.path,
+        bytes: Buffer.byteLength(file.after),
+        changed: file.before !== file.after,
+        previewAvailable: result.metadata?.fileChangePreview !== undefined
+      });
+    }
+
+    return result;
+  }
+
+  async function applyPreparedWorkspacePatchFiles(
+    files: PreparedWorkspacePatchFile[],
+    fsAdapter: WorkspaceFsAdapter | undefined
+  ): Promise<ToolResult | undefined> {
+    const rollbackStack: PatchRollbackStep[] = [];
+    const appliedPaths: string[] = [];
+
+    for (const file of files) {
+      try {
+        if (file.operation === "delete") {
+          await deletePreparedWorkspacePatchFile(file, fsAdapter);
+          rollbackStack.push({
+            path: file.path,
+            operation: "restore_deleted_file",
+            run: async () => writePreparedWorkspacePatchFile(file, file.before, fsAdapter)
+          });
+        } else {
+          await writePreparedWorkspacePatchFile(file, file.after, fsAdapter);
+          rollbackStack.push(file.operation === "add"
+            ? {
+                path: file.path,
+                operation: "delete_added_file",
+                run: async () => deletePreparedWorkspacePatchFile(file, fsAdapter)
+              }
+            : {
+                path: file.path,
+                operation: "restore_updated_file",
+                run: async () => writePreparedWorkspacePatchFile(file, file.before, fsAdapter)
+              });
+        }
+        appliedPaths.push(file.path);
+      } catch (error) {
+        const rollbackErrors: Array<{ path: string; operation: PatchRollbackStep["operation"]; error: string }> = [];
+        for (const step of [...rollbackStack].reverse()) {
+          try {
+            await step.run();
+          } catch (rollbackError) {
+            rollbackErrors.push({
+              path: step.path,
+              operation: step.operation,
+              error: formatPatchApplyError(rollbackError)
+            });
+          }
+        }
+
+        const rollbackOk = rollbackErrors.length === 0;
+        return errorResult(
+          [
+            `Patch apply failed while ${file.operation === "delete" ? "deleting" : "writing"} ${file.path}: ${formatPatchApplyError(error)}.`,
+            rollbackOk
+              ? "Rolled back previously applied changes."
+              : "Rollback failed for some previously applied changes; inspect the files before retrying."
+          ].join(" "),
+          {
+            path: file.path,
+            reason: "patch_apply_failed",
+            operation: file.operation,
+            appliedPaths,
+            rollback: {
+              attempted: rollbackStack.length,
+              ok: rollbackOk,
+              errors: rollbackErrors
+            }
+          }
+        );
+      }
+    }
+
+    return undefined;
+  }
+
+  async function writePreparedWorkspacePatchFile(
+    file: PreparedWorkspacePatchFile,
+    content: string,
+    fsAdapter: WorkspaceFsAdapter | undefined
+  ): Promise<void> {
+    if (fsAdapter?.writeTextFile !== undefined) {
+      await fsAdapter.writeTextFile({ path: file.absolutePath, content });
+      return;
+    }
+    await writeTextFileAtomically(file.absolutePath, content);
+  }
+
+  async function deletePreparedWorkspacePatchFile(
+    file: PreparedWorkspacePatchFile,
+    fsAdapter: WorkspaceFsAdapter | undefined
+  ): Promise<void> {
+    if (fsAdapter?.deleteTextFile !== undefined) {
+      await fsAdapter.deleteTextFile({ path: file.absolutePath });
+      return;
+    }
+    await rm(file.absolutePath);
+  }
+
+  async function writeTextFileAtomically(path: string, content: string): Promise<void> {
+    const tempPath = join(
+      dirname(path),
+      `.${basename(path)}.estacoda-patch-${process.pid}-${randomUUID()}.tmp`
+    );
+    try {
+      await writeFile(tempPath, content, { encoding: "utf8", flag: "wx" });
+      await rename(tempPath, path);
+    } catch (error) {
+      await rm(tempPath, { force: true }).catch(() => undefined);
+      throw error;
+    }
+  }
+
+  async function applyWorkspacePatchOperationMode(input: {
+    root: string;
+    path: string | undefined;
+    mode: "append" | "prepend" | "insert";
+    content: string;
+    anchor: string | undefined;
+    position: "before" | "after";
+    fsAdapter: WorkspaceFsAdapter | undefined;
+    recordOperation: (operation: {
+      operation: FileStateOperationKind;
+      sourceTool: string;
+      path: string;
+      bytes?: number;
+      changed?: boolean;
+      previewAvailable?: boolean;
+    }) => void;
+  }): Promise<ToolResult> {
+    const resolved = await resolveWorkspacePath(input.root, input.path, { allowMissingLeaf: input.mode !== "insert", forbidSymlinks: true });
+    if (!resolved.ok) {
+      return resolved;
+    }
+
+    const relativePath = relative(input.root, resolved.path);
+    const before = await readExistingWorkspaceText(resolved.path, input.fsAdapter);
+    if (before === undefined && input.mode === "insert") {
+      return errorResult(`Cannot insert into missing file ${relativePath}.`, {
+        path: relativePath,
+        reason: "missing_file"
+      });
+    }
+
+    const existing = before ?? "";
+    let after: string;
+    let matchStrategy: PatchMatchStrategy | undefined;
+    let matchedSnippet: string | undefined;
+    let matchConfidenceValue: number | undefined;
+    if (input.mode === "append") {
+      after = `${existing}${input.content}`;
+    } else if (input.mode === "prepend") {
+      after = `${input.content}${existing}`;
+    } else {
+      const anchor = input.anchor ?? "";
+      const match = findPatchReplacementRanges(existing, anchor, {
+        path: relativePath,
+        replaceAll: false
+      });
+      if (!match.ok) {
+        return errorResult(match.content, {
+          ...(match.metadata ?? {}),
+          path: relativePath,
+          operation: "insert"
+        });
+      }
+      const range = match.ranges[0]!;
+      const replacement = input.position === "before"
+        ? `${input.content}${existing.slice(range.start, range.end)}`
+        : `${existing.slice(range.start, range.end)}${input.content}`;
+      after = applyPatchReplacementRanges(existing, [range], replacement);
+      matchStrategy = match.strategy;
+      matchedSnippet = buildMatchedSnippet(existing, range);
+      matchConfidenceValue = matchConfidence(match.strategy);
+    }
+
+    const syntax = validatePatchSyntax(relativePath, after);
+    if (syntax !== undefined) {
+      return syntax;
+    }
+
+    if (input.fsAdapter?.writeTextFile !== undefined) {
+      await input.fsAdapter.writeTextFile({
+        path: resolved.path,
+        content: after
+      });
+    } else {
+      const ensureResult = await ensureSafeParentDirectories(resolved.path, input.root);
+      if (ensureResult !== undefined) {
+        return ensureResult;
+      }
+      await writeFile(resolved.path, after, "utf8");
+    }
+
+    const oldBytes = Buffer.byteLength(existing);
+    const newBytes = Buffer.byteLength(after);
+    const preview = buildUnifiedFileChangePreview({
+      files: [{
+        operation: before === undefined ? "add" : "update",
+        path: relativePath,
+        absolutePath: resolved.path,
+        before: existing,
+        after,
+        hunkCount: 1,
+        matchDiagnostics: []
+      }],
+      oldBytes,
+      newBytes
+    });
+    const metadata: Record<string, unknown> = {
+      path: relativePath,
+      operation: input.mode,
+      oldBytes,
+      newBytes,
+      fileChangePreview: preview,
+      syntaxChecks: syntaxCheckMetadata(relativePath, after)
+    };
+    if (matchStrategy !== undefined) {
+      metadata.matchStrategy = matchStrategy;
+      metadata.matchConfidence = matchConfidenceValue;
+      metadata.matchedSnippet = matchedSnippet;
+    }
+
+    const result: ToolResult = {
+      ok: true,
+      content: `${patchOperationPastTense(input.mode)} ${relativePath}.`,
+      metadata
+    };
+    input.recordOperation({
+      operation: before === undefined ? "write" : "replace",
+      sourceTool: "file.patch",
+      path: relativePath,
+      bytes: newBytes,
+      changed: after !== existing,
+      previewAvailable: true
+    });
+    return result;
+  }
+
+  async function prepareWorkspacePatchFiles(
+    root: string,
+    patch: ParsedWorkspacePatch,
+    fsAdapter: WorkspaceFsAdapter | undefined
+  ): Promise<{ ok: true; files: PreparedWorkspacePatchFile[] } | ToolResult> {
+    const prepared: PreparedWorkspacePatchFile[] = [];
+
+    for (const file of patch.files) {
+      const resolved = await resolveWorkspacePath(root, file.path, {
+        allowMissingLeaf: file.operation === "add",
+        forbidSymlinks: true
+      });
+      if (!resolved.ok) {
+        return resolved;
+      }
+
+      const relativePath = relative(root, resolved.path);
+      if (file.operation === "delete" && fsAdapter !== undefined && fsAdapter.deleteTextFile === undefined) {
+        return errorResult("workspace file adapter does not support delete operations", {
+          path: relativePath,
+          operation: "delete"
+        });
+      }
+      if (file.operation === "add") {
+        const existing = await readExistingWorkspaceText(resolved.path, fsAdapter);
+        if (existing !== undefined) {
+          return errorResult(`patch add file target already exists: ${relativePath}`, {
+            path: relativePath,
+            operation: "add"
+          });
+        }
+        const after = `${file.lines.join("\n")}\n`;
+        const syntax = validatePatchSyntax(relativePath, after);
+        if (syntax !== undefined) {
+          return syntax;
+        }
+        prepared.push({
+          operation: "add",
+          path: relativePath,
+          absolutePath: resolved.path,
+          before: "",
+          after,
+          hunkCount: 1,
+          matchDiagnostics: []
+        });
+        continue;
+      }
+
+      const before = fsAdapter !== undefined
+        ? await fsAdapter.readTextFile({ path: resolved.path })
+        : await readFile(resolved.path, "utf8");
+      if (file.operation === "delete") {
+        prepared.push({
+          operation: "delete",
+          path: relativePath,
+          absolutePath: resolved.path,
+          before,
+          after: "",
+          hunkCount: 1,
+          matchDiagnostics: []
+        });
+        continue;
+      }
+
+      let after = before;
+      const matchDiagnostics: PatchMatchDiagnostic[] = [];
+
+      for (const [index, hunk] of file.hunks.entries()) {
+        const materialized = materializePatchHunk(hunk);
+        if (!("oldString" in materialized)) {
+          return errorResult(`${relativePath} hunk ${index + 1}: ${materialized.content}`, {
+            path: relativePath,
+            hunkIndex: index + 1
+          });
+        }
+
+        const match = findPatchReplacementRanges(after, materialized.oldString, {
+          path: relativePath,
+          replaceAll: false,
+          contextHint: hunk.contextHint
+        });
+        if (!match.ok) {
+          return errorResult(`${relativePath} hunk ${index + 1}: ${match.content}`, {
+            ...(match.metadata ?? {}),
+            path: relativePath,
+            hunkIndex: index + 1
+          });
+        }
+
+        const range = match.ranges[0]!;
+        matchDiagnostics.push({
+          strategy: match.strategy,
+          confidence: matchConfidence(match.strategy),
+          matchedSnippet: buildMatchedSnippet(after, range)
+        });
+        after = applyPatchReplacementRanges(after, match.ranges, materialized.newString);
+      }
+
+      const syntax = validatePatchSyntax(relativePath, after);
+      if (syntax !== undefined) {
+        return syntax;
+      }
+
+      prepared.push({
+        operation: "update",
+        path: relativePath,
+        absolutePath: resolved.path,
+        before,
+        after,
+        hunkCount: file.hunks.length,
+        matchDiagnostics
+      });
+    }
+
+    return { ok: true, files: prepared };
+  }
+
+  async function ensureSafeParentDirectories(
+    targetPath: string,
+    workspaceRoot: string
+  ): Promise<ToolResult | undefined> {
+    const parent = dirname(targetPath);
+
+    // Walk up to find deepest existing directory and collect missing segments
+    const missingSegments: string[] = [];
+    let current = parent;
+
+    while (true) {
+      try {
+        const statResult = await lstat(current);
+        if (statResult.isSymbolicLink()) {
+          return errorResult("path contains a symlink in parent directories");
+        }
+        if (!statResult.isDirectory()) {
+          return errorResult("path parent contains a non-directory segment");
+        }
+        break;
+      } catch (error) {
+        if (!isNodeError(error) || error.code !== "ENOENT") {
+          return errorResult(error instanceof Error ? error.message : "failed to inspect path segment");
+        }
+        missingSegments.unshift(basename(current));
+        const next = dirname(current);
+        if (next === current) {
+          return errorResult("unable to resolve parent directory");
+        }
+        current = next;
+      }
+    }
+
+    // Verify deepest existing directory is inside workspace
+    let resolvedCurrent: string;
+    try {
+      resolvedCurrent = await realpath(current);
+    } catch {
+      return errorResult("unable to resolve parent directory");
+    }
+
+    const resolvedRoot = await realpath(workspaceRoot).catch(() => workspaceRoot);
+    const currentRel = relative(resolvedRoot, resolvedCurrent);
+    if (currentRel.startsWith("..") || isAbsolute(currentRel)) {
+      return errorResult("path is outside the trusted workspace");
+    }
+
+    // Create missing segments one by one
+    for (const segment of missingSegments) {
+      const nextPath = resolve(resolvedCurrent, segment);
+
+      // Check again in case a symlink was created concurrently
+      try {
+        const nextStat = await lstat(nextPath);
+        if (nextStat.isSymbolicLink()) {
+          return errorResult("path contains a symlink in parent directories");
+        }
+        if (!nextStat.isDirectory()) {
+          return errorResult("path parent contains a non-directory segment");
+        }
+        resolvedCurrent = await realpath(nextPath);
+      } catch (error) {
+        if (!isNodeError(error) || error.code !== "ENOENT") {
+          return errorResult(error instanceof Error ? error.message : "failed to inspect path segment");
+        }
+
+        await mkdir(nextPath);
+
+        // Verify containment after creation
+        const resolvedNext = await realpath(nextPath);
+        const nextRel = relative(resolvedRoot, resolvedNext);
+        if (nextRel.startsWith("..") || isAbsolute(nextRel)) {
+          return errorResult("path is outside the trusted workspace");
+        }
+        resolvedCurrent = resolvedNext;
+      }
+    }
+
+    // Final parent verification
+    const finalParent = await realpath(parent);
+    const finalRel = relative(resolvedRoot, finalParent);
+    if (finalRel.startsWith("..") || isAbsolute(finalRel)) {
+      return errorResult("path is outside the trusted workspace");
+    }
+
+    return undefined;
+  }
+
+  async function readWorkspaceFile(
+    root: string,
+    path: string,
+    options: { maxReadBytes: number; lineStart?: number; lineEnd?: number }
+  ): Promise<ToolResult> {
+    if (!isTextyPath(path)) {
+      return errorResult("file type is not included as text");
+    }
+
+    const bytes = await readFile(path);
+    if (isLikelyBinary(bytes)) {
+      return errorResult("file appears to be binary");
+    }
+
+    const truncated = bytes.length > options.maxReadBytes;
+    const content = bytes.subarray(0, options.maxReadBytes).toString("utf8");
+    const ranged = applyLineRange(content, options.lineStart, options.lineEnd);
+
+    return renderWorkspaceFile(root, path, ranged, {
+      maxReadBytes: options.maxReadBytes,
+      originalBytes: bytes.length,
+      alreadyRanged: true
+    });
+  }
+
+  async function searchDirectory(
+    root: string,
+    path: string,
+    options: {
+      query: string;
+      matcher: RegExp | undefined;
+      results: string[];
+      maxSearchResults: number;
+      visitedDirectories: Set<string>;
+    }
+  ): Promise<void> {
+    if (options.results.length >= options.maxSearchResults) {
+      return;
+    }
+
+    const resolved = await files.resolvePath(path, { allowDirectory: true });
+    if (!resolved.ok) return;
+    const canonicalPath = resolved.path;
+    const targetStat = await stat(canonicalPath);
+    if (targetStat.isFile()) {
+      await searchFile(root, canonicalPath, options);
+      return;
+    }
+
+    if (!targetStat.isDirectory()) {
+      return;
+    }
+
+    if (options.visitedDirectories.has(canonicalPath)) {
+      return;
+    }
+    options.visitedDirectories.add(canonicalPath);
+
+    const entries = await readdir(canonicalPath, { withFileTypes: true });
+    for (const entry of entries.sort((left, right) => left.name.localeCompare(right.name))) {
+      if (options.results.length >= options.maxSearchResults) {
+        return;
+      }
+
+      if (entry.isDirectory() && SKIP_DIRS.has(entry.name)) {
+        continue;
+      }
+
+      await searchDirectory(root, join(canonicalPath, entry.name), options);
+    }
+  }
+
+  async function searchFile(
+    root: string,
+    path: string,
+    options: {
+      query: string;
+      matcher: RegExp | undefined;
+      results: string[];
+      maxSearchResults: number;
+    }
+  ): Promise<void> {
+    if (!isTextyPath(path)) {
+      return;
+    }
+
+    const bytes = await readFile(path);
+    if (isLikelyBinary(bytes)) {
+      return;
+    }
+
+    const lines = bytes.toString("utf8").split("\n");
+
+    for (const [index, line] of lines.entries()) {
+      if (options.results.length >= options.maxSearchResults) {
+        return;
+      }
+
+      const matched = options.matcher === undefined
+        ? line.toLowerCase().includes(options.query.toLowerCase())
+        : options.matcher.test(line);
+
+      if (matched) {
+        options.results.push(`${relative(root, path)}:${index + 1}: ${line}`);
+      }
+    }
+  }
+
+  async function readExistingWorkspaceText(
+    path: string,
+    fsAdapter: WorkspaceFsAdapter | undefined
+  ): Promise<string | undefined> {
+    if (fsAdapter !== undefined) {
+      try {
+        return await fsAdapter.readTextFile({ path });
+      } catch {
+        return undefined;
+      }
+    }
+
+    try {
+      return await readFile(path, "utf8");
+    } catch (error) {
+      if (isNodeError(error) && error.code === "ENOENT") {
+        return undefined;
+      }
+      throw error;
+    }
+  }
+  return { applyWorkspacePatchMode, applyPreparedWorkspacePatchFiles, writePreparedWorkspacePatchFile, deletePreparedWorkspacePatchFile, writeTextFileAtomically, applyWorkspacePatchOperationMode, prepareWorkspacePatchFiles, ensureSafeParentDirectories, readWorkspaceFile, searchDirectory, searchFile, readExistingWorkspaceText, realpath, readFile, writeFile, resolveWorkspacePath };
 }

@@ -31,6 +31,13 @@ export async function resolveWorkspacePath(
     return pathError(blockedReason);
   }
 
+  if (options.forbidSymlinks === true) {
+    const issue = await checkParentSegmentsForSymlinks(root, path);
+    if (issue !== undefined) return pathError(issue);
+    const entry = await lstat(candidate).catch(() => undefined);
+    if (entry?.isSymbolicLink()) return pathError("path is a symlink");
+  }
+
   let canonical: string;
 
   try {

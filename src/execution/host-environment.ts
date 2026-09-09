@@ -1,3 +1,4 @@
+import { HostWorkspaceFiles, type WorkspaceFiles } from "./host-workspace-files.js";
 import { randomUUID } from "node:crypto";
 import type { HostExecutionFacts, RequestedExecutionPolicy } from "../contracts/execution-authority.js";
 import { verifyHostExecution } from "./host-authority.js";
@@ -57,6 +58,7 @@ export class HostEnvironment {
       if (released || scope.controller.signal.aborted || this.#destroyed) throw new Error("Execution lease has been released.");
     };
     return {
+      files: new HostWorkspaceFiles(this.facts.workspace.canonicalPath, assertActive),
       scopeId: scope.id, context: scope.context, facts: this.facts,
       workspaceRoot: this.facts.workspace.canonicalPath, signal: scope.controller.signal,
       assertActive,
@@ -90,6 +92,7 @@ export class HostEnvironment {
 }
 
 export type HostExecutionLease = {
+  readonly files: WorkspaceFiles;
   readonly scopeId: string;
   readonly context: ExecutionScopeContext;
   readonly facts: Readonly<HostExecutionFacts>;
