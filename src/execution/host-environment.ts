@@ -1,3 +1,4 @@
+import { HostProcessScope, type HostProcesses } from "./host-processes.js";
 import { HostWorkspaceFiles, type WorkspaceFiles } from "./host-workspace-files.js";
 import { randomUUID } from "node:crypto";
 import type { HostExecutionFacts, RequestedExecutionPolicy } from "../contracts/execution-authority.js";
@@ -18,6 +19,7 @@ type Scope = {
   context: ExecutionScopeContext;
   controller: AbortController;
   resources: Set<OwnedExecutionResource>;
+  processes: HostProcessScope;
   borrowers: number;
   closing?: Promise<void>;
 };
@@ -45,7 +47,8 @@ export class HostEnvironment {
       throw new Error("Execution scope is unavailable or belongs to another profile.");
     }
     const scope: Scope = { id: `scope_${randomUUID()}`, context: Object.freeze({ ...context }),
-      controller: new AbortController(), resources: new Set(), borrowers: 0 };
+      controller: new AbortController(), resources: new Set(), processes: new HostProcessScope(this.facts.workspace.canonicalPath), borrowers: 0 };
+    scope.resources.add(scope.processes);
     this.#scopes.add(scope);
     return this.#borrow(scope);
   }
@@ -58,6 +61,10 @@ export class HostEnvironment {
       if (released || scope.controller.signal.aborted || this.#destroyed) throw new Error("Execution lease has been released.");
     };
     return {
+      processes: {
+        spawn: (command, args, options) => { assertActive(); return scope.processes.spawn(command, args, options); },
+        terminate: (child, signal) => { assertActive(); return scope.processes.terminate(child, signal); }
+      },
       files: new HostWorkspaceFiles(this.facts.workspace.canonicalPath, assertActive),
       scopeId: scope.id, context: scope.context, facts: this.facts,
       workspaceRoot: this.facts.workspace.canonicalPath, signal: scope.controller.signal,
@@ -92,6 +99,7 @@ export class HostEnvironment {
 }
 
 export type HostExecutionLease = {
+  readonly processes: HostProcesses;
   readonly files: WorkspaceFiles;
   readonly scopeId: string;
   readonly context: ExecutionScopeContext;

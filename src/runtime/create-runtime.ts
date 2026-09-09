@@ -542,7 +542,7 @@ export async function createRuntime(options: RuntimeOptions): Promise<Runtime> {
       }
     })
   });
-  const processManager = new ProcessManager({ workspaceRoot });
+  const processManager = new ProcessManager({ workspaceRoot, executionLease });
   const pythonStateRoot = globalPaths.stateRoot;
   const channelMediaRoot = profilePaths.channelMediaPath;
   const audioCacheRoot = profilePaths.audioCachePath;

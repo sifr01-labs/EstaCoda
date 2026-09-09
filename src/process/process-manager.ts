@@ -1,4 +1,6 @@
-import { spawn, type ChildProcessByStdio } from "node:child_process";
+import { HostProcessScope, type HostProcesses } from "../execution/host-processes.js";
+import type { HostExecutionLease } from "../execution/host-environment.js";
+import { type ChildProcessByStdio } from "node:child_process";
 import { realpath } from "node:fs/promises";
 import type { Readable, Writable } from "node:stream";
 import { resolve } from "node:path";
@@ -31,6 +33,7 @@ type InternalManagedProcess = ManagedProcessRecord & {
 };
 
 export type ProcessManagerOptions = {
+  executionLease?: HostExecutionLease;
   workspaceRoot: string;
   maxLogChars?: number;
   now?: () => Date;
@@ -41,13 +44,19 @@ const DEFAULT_MAX_LOG_CHARS = 96_000;
 
 export class ProcessManager {
   readonly #workspaceRoot: string;
+  readonly #processScope: HostProcesses;
+  readonly #lease?: HostExecutionLease;
+  readonly #ownedScope?: HostProcessScope;
   readonly #maxLogChars: number;
   readonly #now: () => Date;
   readonly #id: () => string;
   readonly #processes = new Map<string, InternalManagedProcess>();
 
   constructor(options: ProcessManagerOptions) {
-    this.#workspaceRoot = resolve(options.workspaceRoot);
+    this.#lease = options.executionLease;
+    this.#workspaceRoot = options.executionLease?.workspaceRoot ?? resolve(options.workspaceRoot);
+    this.#ownedScope = options.executionLease === undefined ? new HostProcessScope(this.#workspaceRoot) : undefined;
+    this.#processScope = options.executionLease?.processes ?? this.#ownedScope!;
     this.#maxLogChars = options.maxLogChars ?? DEFAULT_MAX_LOG_CHARS;
     this.#now = options.now ?? (() => new Date());
     this.#id = options.id ?? randomId;
@@ -113,7 +122,7 @@ export class ProcessManager {
     status: "prepared" | "running",
     protectedEnvironmentVariable?: string
   ): Promise<InternalManagedProcess> {
-    const cwd = await realpath(this.#workspaceRoot);
+    const cwd = this.#lease === undefined ? await realpath(this.#workspaceRoot) : await this.#lease.files.realpath(this.#workspaceRoot);
     const id = this.#id();
     const startedAt = this.#now().toISOString();
     const record: InternalManagedProcess = {
@@ -134,14 +143,13 @@ export class ProcessManager {
   #spawn(record: InternalManagedProcess, protectedEnvironment?: Record<string, string>): void {
     try {
       const shell = resolveShell();
-      const child = spawn(shell.command, [...shell.args, record.command], {
-        cwd: record.cwd,
+      const child = this.#processScope.spawn(shell.command, [...shell.args, record.command], {
         env: {
           ...process.env,
           PWD: record.cwd,
           ...protectedEnvironment
         },
-        stdio: ["pipe", "pipe", "pipe"]
+        input: true
       });
       record.child = child;
       this.#appendLog(record, "system", `started pid ${child.pid ?? "unknown"}`);
@@ -228,9 +236,15 @@ export class ProcessManager {
     process.status = "stopped";
     process.updatedAt = this.#now().toISOString();
     this.#appendLog(process, "system", `stopping with ${signal}`);
-    process.child.kill(signal);
+    await this.#processScope.terminate(process.child, signal);
 
     return toRecord(process);
+  }
+
+  async dispose(): Promise<void> {
+    await Promise.all([...this.#processes.values()].map((record) => record.child === undefined ? undefined : this.#processScope.terminate(record.child)));
+    await this.#ownedScope?.release();
+    this.#processes.clear();
   }
 
   #appendLog(process: InternalManagedProcess, stream: ManagedProcessLog["stream"], text: string): void {

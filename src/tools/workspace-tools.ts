@@ -1,6 +1,6 @@
+import { HostProcessScope, type HostProcesses } from "../execution/host-processes.js";
 import { HostWorkspaceFiles, type WorkspaceFiles, type WorkspacePathOptions } from "../execution/host-workspace-files.js";
 import type { HostExecutionLease } from "../execution/host-environment.js";
-import { spawn } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { platform } from "node:os";
@@ -140,6 +140,7 @@ type PatchRollbackStep = {
 
 export function createWorkspaceTools(options: WorkspaceToolOptions): readonly RegisteredTool[] {
   const root = options.executionLease?.workspaceRoot ?? resolve(options.workspaceRoot);
+  const processes = options.executionLease?.processes ?? new HostProcessScope(root);
   const files = options.executionLease?.files ?? new HostWorkspaceFiles(root);
   const { applyWorkspacePatchMode, applyPreparedWorkspacePatchFiles, writePreparedWorkspacePatchFile, deletePreparedWorkspacePatchFile, writeTextFileAtomically, applyWorkspacePatchOperationMode, prepareWorkspacePatchFiles, ensureSafeParentDirectories, readWorkspaceFile, searchDirectory, searchFile, readExistingWorkspaceText, realpath, readFile, writeFile, resolveWorkspacePath } = createWorkspaceIO(files);
   const maxReadBytes = options.maxReadBytes ?? DEFAULT_MAX_READ_BYTES;
@@ -564,6 +565,7 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
     createTerminalInspectTool({
       workspaceRoot: root,
       files,
+      processes,
       timeoutMs: Math.min(commandTimeoutMs, 10_000)
     }),
     {
@@ -596,7 +598,8 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
           await realpath(root),
           input.command,
           Math.min(input.timeoutMs ?? commandTimeoutMs, commandTimeoutMs),
-          options.childProcessEnv
+          options.childProcessEnv,
+          processes
         );
       }
     }
@@ -1675,38 +1678,27 @@ async function runCommand(
   root: string,
   command: string,
   timeoutMs: number,
-  childProcessEnv: WorkspaceToolOptions["childProcessEnv"]
+  childProcessEnv: WorkspaceToolOptions["childProcessEnv"],
+  processes: HostProcesses
 ): Promise<ToolResult> {
   return new Promise((resolveResult) => {
     const shell = resolveShell();
-    const child = spawn(shell.command, [...shell.args, command], {
-      cwd: root,
-      env: buildTerminalRunEnv(root, childProcessEnv),
-      stdio: ["ignore", "pipe", "pipe"]
+    const child = processes.spawn(shell.command, [...shell.args, command], {
+      env: buildTerminalRunEnv(root, childProcessEnv)
     });
     const chunks: Buffer[] = [];
     const errorChunks: Buffer[] = [];
     let timedOut = false;
-    let closed = false;
-    let killTimer: ReturnType<typeof setTimeout> | undefined;
     const timeout = setTimeout(() => {
       timedOut = true;
-      child.kill("SIGTERM");
-      killTimer = setTimeout(() => {
-        if (!closed) {
-          child.kill("SIGKILL");
-        }
-      }, 1_000);
+      void processes.terminate(child).catch((error) => resolveResult(errorResult(String(error))));
     }, timeoutMs);
 
     child.stdout.on("data", (chunk: Buffer) => chunks.push(chunk));
     child.stderr.on("data", (chunk: Buffer) => errorChunks.push(chunk));
+    child.on("error", (error) => { clearTimeout(timeout); resolveResult(errorResult(`Failed to start command: ${error.message}`)); });
     child.on("close", (code, signal) => {
-      closed = true;
       clearTimeout(timeout);
-      if (killTimer !== undefined) {
-        clearTimeout(killTimer);
-      }
       const stdout = Buffer.concat(chunks).toString("utf8");
       const stderr = Buffer.concat(errorChunks).toString("utf8");
       const content = [

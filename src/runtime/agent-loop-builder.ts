@@ -56,7 +56,7 @@ import type { ImageGenerationFetchLike } from "../tools/image-generation-tools.j
 import type { VoiceFetchLike } from "../tools/voice-tools.js";
 import type { FasterWhisperWorker } from "../tools/stt-local-whisper.js";
 import type { MCPServerSnapshot } from "../mcp/mcp-tools.js";
-import type { ProcessManager } from "../process/process-manager.js";
+import { ProcessManager } from "../process/process-manager.js";
 import type { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import { AgentLoop, type AgentLoopOptions } from "./agent-loop.js";
 import { IntentRouter } from "./intent-router.js";
@@ -253,6 +253,8 @@ export type AgentLoopSessionInput = {
 };
 
 export type BuiltAgentLoopSession = {
+  executionLease?: SessionToolContext["executionLease"];
+  processManager?: ProcessManager;
   sessionRuntimeContext: SessionRuntimeContext;
   executionPlanController?: ExecutionPlanController;
   executionCheckpointController?: ExecutionCheckpointController;
@@ -303,6 +305,24 @@ export class AgentLoopBuilder {
   }
 
   async buildSession(input: AgentLoopSessionInput): Promise<BuiltAgentLoopSession> {
+    const substrate = this.#substrate;
+    const isChild = input.parentSessionId !== undefined || (substrate.executionLease !== undefined && input.sessionId !== substrate.executionLease.context.sessionId);
+    const executionLease = isChild ? substrate.executionLease?.child({ profileId: substrate.profileId,
+      sessionId: input.sessionId, surface: input.taskExecution === undefined ? "delegation" : "task",
+      taskId: input.taskExecution?.taskId, attemptId: input.taskExecution?.attemptId }) : substrate.executionLease;
+    const processManager = isChild ? new ProcessManager({ workspaceRoot: substrate.workspaceRoot, executionLease }) : substrate.processManager;
+    try {
+      return await this.#buildSession(input, executionLease, processManager);
+    } catch (error) {
+      if (isChild) {
+        await processManager.dispose();
+        await executionLease?.release();
+      }
+      throw error;
+    }
+  }
+
+  async #buildSession(input: AgentLoopSessionInput, executionLease: SessionToolContext["executionLease"], processManager: ProcessManager): Promise<BuiltAgentLoopSession> {
     const substrate = this.#substrate;
     const routes = input.providerRoutes ?? substrate.routes;
     const sessionRuntimeContext = input.sessionRuntimeContext ?? createSessionRuntimeContext(input.sessionId);
@@ -448,7 +468,7 @@ export class AgentLoopBuilder {
         compressionRoute: routes.compressionRoute,
         providerRegistry: substrate.providerRegistry,
         providerExecutor: substrate.providerExecutor,
-        processManager: substrate.processManager,
+        processManager,
         artifactStore: substrate.artifactStore,
         taskResultService: substrate.taskResultService,
         taskOperatorService: substrate.taskOperatorService,
@@ -463,7 +483,7 @@ export class AgentLoopBuilder {
         memoryRetrievalService: substrate.memoryRetrievalService,
         memoryFileCompactionService,
         fileStateTracker: substrate.fileStateTracker,
-        executionLease: substrate.executionLease,
+        executionLease,
         workspaceFsAdapter: substrate.workspaceFsAdapter,
         webFetch: substrate.webFetch,
         enableWebNetwork: substrate.enableWebNetwork,
@@ -732,6 +752,8 @@ export class AgentLoopBuilder {
     });
 
     return {
+      executionLease,
+      processManager,
       sessionRuntimeContext,
       executionPlanController,
       executionCheckpointController,
@@ -759,8 +781,10 @@ export class AgentLoopBuilder {
     };
   }
 
-  async cleanupSession(_session: BuiltAgentLoopSession): Promise<void> {
-    // Shared substrate lifecycles, including MCP servers, remain owned by createRuntime().
+  async cleanupSession(session: BuiltAgentLoopSession): Promise<void> {
+    if (session.processManager !== this.#substrate.processManager) await session.processManager?.dispose();
+    if (session.executionLease !== this.#substrate.executionLease) await session.executionLease?.release();
+    // Shared provider/MCP substrate remains owned by createRuntime().
   }
 }
 

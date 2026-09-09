@@ -1,0 +1,73 @@
+import { spawn, type ChildProcess, type ChildProcessWithoutNullStreams } from "node:child_process";
+
+export type HostSpawnOptions = { env?: NodeJS.ProcessEnv; input?: boolean };
+export type HostProcesses = Pick<HostProcessScope, "spawn" | "terminate">;
+type OwnedChild = { child: ChildProcess; closed: Promise<void>; settled: boolean; stopping?: Promise<void> };
+
+/** One resource owner, even when several owners share a workspace/environment.
+ * POSIX children receive a fresh process group; Windows uses taskkill /T. */
+export class HostProcessScope {
+  readonly #root: string;
+  readonly #children = new Map<ChildProcess, OwnedChild>();
+  #released = false;
+  constructor(workspaceRoot: string) { this.#root = workspaceRoot; }
+
+  spawn(command: string, args: readonly string[], options: HostSpawnOptions = {}): ChildProcessWithoutNullStreams {
+    if (this.#released) throw new Error("Process scope has been released.");
+    const child = spawn(command, [...args], { cwd: this.#root, env: options.env ?? process.env,
+      detached: process.platform !== "win32", stdio: ["pipe", "pipe", "pipe"] });
+    let settle!: () => void;
+    const record: OwnedChild = { child, settled: false, closed: new Promise<void>((resolve) => { settle = resolve; }) };
+    this.#children.set(child, record);
+    child.once("error", () => { /* The caller receives the error; close settles ownership. */ });
+    child.once("close", () => {
+      record.settled = true;
+      // A completed foreground leader must not leave an unowned descendant.
+      if (process.platform !== "win32") signalGroup(child, "SIGKILL");
+      this.#children.delete(child);
+      settle();
+    });
+    child.stdin.on("error", () => { /* A terminated child may close stdin during an authorized write. */ });
+    if (options.input !== true) child.stdin.end();
+    return child;
+  }
+
+  async terminate(child: ChildProcess, signal: NodeJS.Signals = "SIGTERM"): Promise<void> {
+    const record = this.#children.get(child);
+    if (record === undefined) return; // A foreign handle grants no process control.
+    record.stopping ??= (async () => {
+      if (process.platform === "win32" && child.pid !== undefined) {
+        await terminateWindowsTree(child.pid);
+      } else {
+        signalGroup(child, signal);
+        if (signal !== "SIGKILL") await Promise.race([record.closed, delay(1_000)]);
+        // Escalate the group, even if its leader has already exited.
+        if (!record.settled) signalGroup(child, "SIGKILL");
+      }
+      await Promise.race([record.closed, delay(2_000)]);
+      if (!record.settled) throw new Error("Owned process termination could not be confirmed.");
+    })();
+    await record.stopping;
+  }
+
+  async release(): Promise<void> {
+    this.#released = true;
+    const results = await Promise.allSettled([...this.#children.keys()].map((child) => this.terminate(child)));
+    const errors = results.filter((result): result is PromiseRejectedResult => result.status === "rejected");
+    if (errors.length) throw new AggregateError(errors.map((result) => result.reason), "Owned processes did not settle.");
+  }
+}
+
+function signalGroup(child: ChildProcess, signal: NodeJS.Signals): void {
+  if (child.pid === undefined) return;
+  try { process.kill(-child.pid, signal); }
+  catch (error) { if ((error as NodeJS.ErrnoException).code !== "ESRCH") throw error; }
+}
+function delay(ms: number): Promise<void> { return new Promise((resolve) => { const timer = setTimeout(resolve, ms); timer.unref(); }); }
+function terminateWindowsTree(pid: number): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const killer = spawn(`${process.env.SystemRoot ?? "C:\\Windows"}\\System32\\taskkill.exe`, ["/pid", String(pid), "/T", "/F"], { stdio: "ignore" });
+    killer.once("error", reject);
+    killer.once("close", (code) => code === 0 ? resolve() : reject(new Error("Owned Windows process tree could not be terminated.")));
+  });
+}

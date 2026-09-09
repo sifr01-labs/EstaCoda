@@ -1,5 +1,6 @@
+import { HostProcessScope, type HostProcesses } from "../execution/host-processes.js";
 import { HostWorkspaceFiles, type WorkspaceFiles, type WorkspacePathOptions } from "../execution/host-workspace-files.js";
-import { spawn, type ChildProcessByStdio } from "node:child_process";
+import { spawn, type ChildProcessWithoutNullStreams, type ChildProcessByStdio } from "node:child_process";
 import { isAbsolute, relative } from "node:path";
 import type { Readable } from "node:stream";
 import type { RegisteredTool, ToolResult } from "../contracts/tool.js";
@@ -8,6 +9,7 @@ import { errorResult } from "./workspace-paths.js";
 
 export type TerminalInspectToolOptions = {
   files?: WorkspaceFiles;
+  processes?: HostProcesses;
   workspaceRoot: string;
   timeoutMs?: number;
   maxOutputChars?: number;
@@ -62,7 +64,8 @@ export function createTerminalInspectTool(options: TerminalInspectToolOptions): 
   const timeoutMs = Math.max(1, Math.min(options.timeoutMs ?? DEFAULT_TIMEOUT_MS, DEFAULT_TIMEOUT_MS));
   const maxOutputChars = Math.max(1_000, Math.min(options.maxOutputChars ?? DEFAULT_MAX_OUTPUT_CHARS, DEFAULT_MAX_OUTPUT_CHARS));
   const maxOutputLines = Math.max(50, Math.min(options.maxOutputLines ?? DEFAULT_MAX_OUTPUT_LINES, DEFAULT_MAX_OUTPUT_LINES));
-  const spawnProcess = options.spawnImpl ?? spawn;
+  const spawnProcess = options.spawnImpl;
+  const processes = options.processes ?? new HostProcessScope(options.workspaceRoot);
   const files = options.files ?? new HostWorkspaceFiles(options.workspaceRoot);
   const { validateArgv } = createInspectionValidation(files);
 
@@ -100,7 +103,8 @@ export function createTerminalInspectTool(options: TerminalInspectToolOptions): 
         timeoutMs,
         maxOutputChars,
         maxOutputLines,
-        spawnProcess
+        spawnProcess,
+        processes
       });
     }
   };
@@ -116,15 +120,16 @@ function runInspectionCommand(input: {
   timeoutMs: number;
   maxOutputChars: number;
   maxOutputLines: number;
-  spawnProcess: typeof spawn;
+  spawnProcess?: typeof spawn;
+  processes: HostProcesses;
 }): Promise<ToolResult> {
   return new Promise((resolveResult) => {
     const startedAt = Date.now();
     const executableArgv = buildExecutableArgv(input.argv);
     const [command, ...args] = executableArgv;
-    let child: ChildProcessByStdio<null, Readable, Readable>;
+    let child: ChildProcessByStdio<null, Readable, Readable> | ChildProcessWithoutNullStreams;
     try {
-      child = input.spawnProcess(command!, args, {
+      child = input.spawnProcess === undefined ? input.processes.spawn(command!, args, { env: command === "git" ? safeGitEnv() : safeInspectEnv() }) : input.spawnProcess(command!, args, {
         cwd: input.root,
         env: command === "git" ? safeGitEnv() : safeInspectEnv(),
         shell: false,
@@ -142,6 +147,10 @@ function runInspectionCommand(input: {
     let killTimer: ReturnType<typeof setTimeout> | undefined;
     const timeout = setTimeout(() => {
       timedOut = true;
+      if (input.spawnProcess === undefined) {
+        void input.processes.terminate(child).catch((error) => resolveResult(errorResult(String(error))));
+        return;
+      }
       child.kill("SIGTERM");
       killTimer = setTimeout(() => {
         if (!closed) {
