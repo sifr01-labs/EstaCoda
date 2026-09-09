@@ -7,7 +7,7 @@ import { spawn, type ChildProcess, type ChildProcessWithoutNullStreams } from "n
 
 export type HostSpawnOptions = { env?: NodeJS.ProcessEnv; input?: boolean };
 export type HostProcesses = Pick<HostProcessScope, "spawn" | "terminate" | "environment">;
-type OwnedChild = { child: ChildProcess; closed: Promise<void>; settled: boolean; stopping?: Promise<void> };
+type OwnedChild = { child: ChildProcess; closed: Promise<void>; settled: boolean; cleanupError?: unknown; stopping?: Promise<void> };
 
 /** One resource owner, even when several owners share a workspace/environment.
  * POSIX children receive a fresh process group; Windows uses taskkill /T. */
@@ -32,11 +32,14 @@ export class HostProcessScope {
     const record: OwnedChild = { child, settled: false, closed: new Promise<void>((resolve) => { settle = resolve; }) };
     this.#children.set(child, record);
     child.once("error", () => { /* The caller receives the error; close settles ownership. */ });
+    child.once("exit", () => {
+      // Descendants may retain stdout and prevent close after their leader exits.
+      try { if (process.platform !== "win32") signalGroup(child, "SIGKILL"); }
+      catch (error) { record.cleanupError = error; }
+    });
     child.once("close", () => {
       record.settled = true;
-      // A completed foreground leader must not leave an unowned descendant.
-      if (process.platform !== "win32") signalGroup(child, "SIGKILL");
-      this.#children.delete(child);
+      if (!record.cleanupError) this.#children.delete(child);
       settle();
     });
     child.stdin.on("error", () => { /* A terminated child may close stdin during an authorized write. */ });
@@ -57,6 +60,7 @@ export class HostProcessScope {
         if (!record.settled) signalGroup(child, "SIGKILL");
       }
       await Promise.race([record.closed, delay(2_000)]);
+      if (record.cleanupError) throw new Error("Owned descendant cleanup could not be confirmed.");
       if (!record.settled) throw new Error("Owned process termination could not be confirmed.");
     })();
     await record.stopping;
@@ -80,7 +84,8 @@ function delay(ms: number): Promise<void> { return new Promise((resolve) => { co
 function terminateWindowsTree(pid: number): Promise<void> {
   return new Promise((resolve, reject) => {
     const killer = spawn(`${process.env.SystemRoot ?? "C:\\Windows"}\\System32\\taskkill.exe`, ["/pid", String(pid), "/T", "/F"], { stdio: "ignore" });
-    killer.once("error", reject);
-    killer.once("close", (code) => code === 0 ? resolve() : reject(new Error("Owned Windows process tree could not be terminated.")));
+    const timer = setTimeout(() => { killer.kill(); reject(new Error("Windows process cleanup timed out.")); }, 3_000);
+    killer.once("error", (error) => { clearTimeout(timer); reject(error); });
+    killer.once("close", (code) => { clearTimeout(timer); code === 0 ? resolve() : reject(new Error("Owned Windows process tree could not be terminated.")); });
   });
 }

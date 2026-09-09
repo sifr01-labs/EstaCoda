@@ -68,8 +68,22 @@ export class HostWorkspaceFiles implements WorkspaceFiles {
     const checked = await this.#checked(path);
     const info = await fs.stat(checked);
     if (!info.isFile()) throw new Error("Workspace reads require a regular file.");
-    const bytes = await fs.readFile(checked);
-    return encoding === undefined ? bytes : bytes.toString(encoding);
+    if (info.size > MAX_WORKSPACE_FILE_BYTES) throw new Error("Workspace file exceeds the 8 MiB read limit. Use bounded inspection.");
+    const handle = await fs.open(checked, "r");
+    try {
+      const buffer = Buffer.alloc(Math.min(info.size + 1, MAX_WORKSPACE_FILE_BYTES + 1));
+      let bytesRead = 0;
+      while (bytesRead < buffer.length) {
+        this.#assertActive();
+        const next = await handle.read(buffer, bytesRead, buffer.length - bytesRead, bytesRead);
+        if (!next.bytesRead) break;
+        bytesRead += next.bytesRead;
+      }
+      if (bytesRead > info.size || bytesRead > MAX_WORKSPACE_FILE_BYTES) throw new Error("Workspace file changed or exceeds the read limit. Retry a bounded read.");
+      this.#assertActive();
+      const bytes = buffer.subarray(0, bytesRead);
+      return encoding === undefined ? bytes : bytes.toString(encoding);
+    } finally { await handle.close(); }
   }
   async writeFile(path: string, content: string, options: "utf8" | { encoding: "utf8"; flag: string } = "utf8"): Promise<void> {
     await fs.writeFile(await this.#checked(path, { allowMissingLeaf: true, forbidSymlinks: true }), content, options);
@@ -84,3 +98,5 @@ export class HostWorkspaceFiles implements WorkspaceFiles {
     await fs.rename(source, target);
   }
 }
+
+const MAX_WORKSPACE_FILE_BYTES = 8 * 1024 * 1024;

@@ -8,6 +8,7 @@ import { redactSensitiveText } from "../utils/redaction.js";
 import { errorResult } from "./workspace-paths.js";
 
 export type TerminalInspectToolOptions = {
+  signal?: AbortSignal;
   files?: WorkspaceFiles;
   processes?: HostProcesses;
   workspaceRoot: string;
@@ -90,7 +91,9 @@ export function createTerminalInspectTool(options: TerminalInspectToolOptions): 
     progressLabel: "inspecting terminal",
     maxResultSizeChars: maxOutputChars,
     isAvailable: () => true,
-    run: async (input) => {
+    run: async (input, context) => {
+      const signal = AbortSignal.any([...[context?.signal, options.signal].filter((value): value is AbortSignal => value !== undefined)]);
+      if (signal.aborted) return errorResult("Inspection cancelled before dispatch.");
       const canonicalRoot = await files.realpath(options.workspaceRoot);
       const validation = await validateArgv(canonicalRoot, input.argv);
       if (!validation.ok) {
@@ -104,7 +107,8 @@ export function createTerminalInspectTool(options: TerminalInspectToolOptions): 
         maxOutputChars,
         maxOutputLines,
         spawnProcess,
-        processes
+        processes,
+        signal
       });
     }
   };
@@ -122,8 +126,10 @@ function runInspectionCommand(input: {
   maxOutputLines: number;
   spawnProcess?: typeof spawn;
   processes: HostProcesses;
+  signal?: AbortSignal;
 }): Promise<ToolResult> {
   return new Promise((resolveResult) => {
+    if (input.signal?.aborted) { resolveResult(errorResult("Inspection cancelled before dispatch.")); return; }
     const startedAt = Date.now();
     const executableArgv = buildExecutableArgv(input.argv);
     const [command, ...args] = executableArgv;
@@ -145,8 +151,7 @@ function runInspectionCommand(input: {
     let timedOut = false;
     let closed = false;
     let killTimer: ReturnType<typeof setTimeout> | undefined;
-    const timeout = setTimeout(() => {
-      timedOut = true;
+    const cancel = () => {
       if (input.spawnProcess === undefined) {
         void input.processes.terminate(child).catch((error) => resolveResult(errorResult(String(error))));
         return;
@@ -157,12 +162,16 @@ function runInspectionCommand(input: {
           child.kill("SIGKILL");
         }
       }, KILL_GRACE_MS);
-    }, input.timeoutMs);
+    };
+    const timeout = setTimeout(() => { timedOut = true; cancel(); }, input.timeoutMs);
+    input.signal?.addEventListener("abort", cancel, { once: true });
+    if (input.signal?.aborted) cancel();
 
     child.stdout.on("data", (chunk: Buffer) => stdout.append(chunk));
     child.stderr.on("data", (chunk: Buffer) => stderr.append(chunk));
     child.on("error", (error) => {
       closed = true;
+      input.signal?.removeEventListener("abort", cancel);
       clearTimeout(timeout);
       if (killTimer !== undefined) {
         clearTimeout(killTimer);
@@ -171,6 +180,7 @@ function runInspectionCommand(input: {
     });
     child.on("close", (code, signal) => {
       closed = true;
+      input.signal?.removeEventListener("abort", cancel);
       clearTimeout(timeout);
       if (killTimer !== undefined) {
         clearTimeout(killTimer);
@@ -182,7 +192,7 @@ function runInspectionCommand(input: {
       const commandLabel = redactSensitiveText(JSON.stringify(input.argv));
 
       resolveResult({
-        ok: code === 0 && signal === null,
+        ok: code === 0 && signal === null && !timedOut && !input.signal?.aborted,
         content,
         metadata: {
           argv: input.argv.map((arg) => redactSensitiveText(arg)),
@@ -190,6 +200,7 @@ function runInspectionCommand(input: {
           signal,
           timeoutMs: input.timeoutMs,
           timedOut,
+          cancelled: input.signal?.aborted ?? false,
           durationMs: Date.now() - startedAt,
           stdoutLines: stdoutResult.lines,
           stderrLines: stderrResult.lines,

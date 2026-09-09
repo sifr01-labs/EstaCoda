@@ -44,7 +44,7 @@ describe("process.start hardline floor", () => {
     const result = await start?.run({ command: "rm -rf ./build" });
 
     expect(result?.ok).toBe(true);
-    expect(processManager.start).toHaveBeenCalledWith("rm -rf ./build");
+    expect(processManager.start).toHaveBeenCalledWith("rm -rf ./build", undefined);
   });
 
   it("rejects hardBlock commands inside the process handler", async () => {

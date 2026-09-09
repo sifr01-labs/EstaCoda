@@ -1,4 +1,3 @@
-import type { ChildProcess } from "node:child_process";
 import type { HostExecutionLease } from "../execution/host-environment.js";
 import { HostProcessScope, type HostProcesses } from "../execution/host-processes.js";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -62,7 +61,11 @@ export function createExecuteCodeTool(options: ExecuteCodeToolOptions): Register
         return errorResult("execute_code requires non-empty Python code");
       }
 
+      if (Buffer.byteLength(input.code) > 256 * 1024 || Buffer.byteLength(JSON.stringify(asRecord(input.input))) > MAX_FRAME_BYTES) {
+        return errorResult("execute_code code or input exceeds its limit.");
+      }
       return runCode({
+        signal: context?.signal,
         code: input.code,
         input: asRecord(input.input),
         timeoutMs: boundedNumber(input.timeoutMs, 5_000, 1, 30_000),
@@ -72,7 +75,7 @@ export function createExecuteCodeTool(options: ExecuteCodeToolOptions): Register
         executionLease: options.executionLease,
         childProcessEnv: options.childProcessEnv,
         allowedTools,
-        executeTool: async (tool, toolInput) => {
+        executeTool: async (tool, toolInput, signal) => {
           if (!allowedTools.has(tool)) {
             return {
               ok: false,
@@ -92,7 +95,7 @@ export function createExecuteCodeTool(options: ExecuteCodeToolOptions): Register
             visibleTurnId: context?.visibleTurnId,
             providerUsageLineage: context?.providerUsageLineage,
             visionInputProvenance: context?.visionInputProvenance,
-            signal: context?.signal,
+            signal,
             onEvent: context?.onEvent,
             onApprovalRequest: context?.onApprovalRequest,
             onSecureInputRequest: context?.onSecureInputRequest
@@ -160,7 +163,8 @@ type RunCodeOptions = {
   executionLease?: HostExecutionLease;
   childProcessEnv?: import("../contracts/tool-context.js").SessionToolContext["childProcessEnv"];
   allowedTools: Set<string>;
-  executeTool(tool: string, input: Record<string, unknown>): Promise<ToolResult>;
+  signal?: AbortSignal;
+  executeTool(tool: string, input: Record<string, unknown>, signal: AbortSignal): Promise<ToolResult>;
 };
 
 async function runCode(options: RunCodeOptions): Promise<ToolResult> {
@@ -179,141 +183,102 @@ async function runCode(options: RunCodeOptions): Promise<ToolResult> {
 
 async function runHarness(options: RunCodeOptions, processes: HostProcesses, tempDir: string): Promise<ToolResult> {
   const scriptPath = join(tempDir, "script.py");
-  const script = renderPythonHarness(options.code);
   const sandboxHome = join(tempDir, "sandbox-home");
   await mkdir(sandboxHome, { recursive: true });
-
-  await writeFile(scriptPath, script, "utf8");
-
+  await writeFile(scriptPath, renderPythonHarness(options.code), "utf8");
+  const controller = new AbortController();
+  const signal = AbortSignal.any([controller.signal, ...[options.signal, options.executionLease?.signal].filter((value): value is AbortSignal => value !== undefined)]);
+  if (signal.aborted) return errorResult("execute_code cancelled before dispatch.");
+  const childEnv = processes.environment({ homeDir: sandboxHome, extra: options.childProcessEnv?.extra });
+  childEnv["ESTACODA_INPUT_JSON"] = JSON.stringify(options.input);
+  childEnv["ESTACODA_ALLOWED_TOOLS_JSON"] = JSON.stringify([...options.allowedTools].sort());
   return new Promise<ToolResult>((resolve) => {
-    const childEnv = processes.environment({ homeDir: sandboxHome, extra: options.childProcessEnv?.extra });
-    childEnv["ESTACODA_INPUT_JSON"] = JSON.stringify(options.input);
-    childEnv["ESTACODA_ALLOWED_TOOLS_JSON"] = JSON.stringify([...options.allowedTools].sort());
-
-    const child = processes.spawn(options.pythonBinary, ["-u", scriptPath], {
-      input: true,
-      env: childEnv,
-    });
-    let stdout = "";
-    let stderr = "";
-    let settled = false;
-    let timedOut = false;
-    const toolCallQueue: Promise<void>[] = [];
-    const timeout = setTimeout(() => {
-      timedOut = true;
-      void processes.terminate(child, "SIGKILL").then(() => finish({
-        ok: false,
-        content: `execute_code timed out after ${options.timeoutMs}ms`,
-        metadata: {
-          timedOut: true,
-          timeoutMs: options.timeoutMs
-        }
-      })).catch(() => finish(errorResult("execute_code termination could not be confirmed.")));
-    }, options.timeoutMs);
-
+    const child = processes.spawn(options.pythonBinary, ["-u", scriptPath], { input: true, env: childEnv });
+    let stdout = "", stderr = "", pendingLine = "";
+    let outputTruncated = false, settled = false, stopping = false;
+    let activeCall: Promise<void> | undefined;
+    const callIds = new Set<string>();
+    const timeout = setTimeout(() => { void stop(`execute_code timed out after ${options.timeoutMs}ms`, true); }, options.timeoutMs);
+    const onAbort = () => { void stop("execute_code cancelled."); };
+    signal.addEventListener("abort", onAbort, { once: true });
+    if (signal.aborted) onAbort();
     child.stdout.setEncoding("utf8");
     child.stderr.setEncoding("utf8");
-    child.stdout.on("data", (chunk) => {
-      stdout += chunk;
-      const { plainStdout, calls } = extractToolCalls(stdout);
-      stdout = plainStdout;
-
-      for (const call of calls) {
-        toolCallQueue.push(handleToolCall(child, call, options.executeTool));
+    child.stdout.on("data", (chunk: string) => {
+      if (stopping || settled) return;
+      pendingLine += chunk;
+      // A frame is bounded even when its terminating newline never arrives.
+      while (pendingLine.includes("\n")) {
+        const end = pendingLine.indexOf("\n");
+        const line = pendingLine.slice(0, end);
+        pendingLine = pendingLine.slice(end + 1);
+        if (line.startsWith(TOOL_CALL_PREFIX)) {
+          if (Buffer.byteLength(line) > MAX_FRAME_BYTES) { void stop("execute_code tool-call payload exceeds its limit."); return; }
+          try {
+            const call = JSON.parse(line.slice(TOOL_CALL_PREFIX.length)) as Partial<ToolCall>;
+            if (!call || typeof call.id !== "string" || !call.id.length || call.id.length > 128 || typeof call.tool !== "string" || call.tool.length > 128 ||
+                call.input === null || typeof call.input !== "object" || Array.isArray(call.input) || callIds.has(call.id)) throw new Error("invalid frame");
+            if (activeCall || callIds.size >= MAX_TOOL_CALLS) { void stop("execute_code tool-call count or concurrency limit exceeded."); return; }
+            callIds.add(call.id);
+            activeCall = (async () => {
+              if (signal.aborted) return;
+              const result = await options.executeTool(call.tool!, call.input!, signal);
+              if (signal.aborted || stopping || settled) return;
+              const response = JSON.stringify({ kind: "tool_result", id: call.id, result });
+              if (Buffer.byteLength(response) > MAX_FRAME_BYTES) { await stop("execute_code tool-result payload exceeds its limit."); return; }
+              child.stdin.write(`${response}\n`);
+            })().catch(() => stop("execute_code nested tool failed.")).finally(() => { activeCall = undefined; });
+          } catch { void stop("execute_code received an invalid tool-call frame."); return; }
+        } else appendStdout(`${line}\n`);
+      }
+      if (pendingLine.startsWith(TOOL_CALL_PREFIX) || TOOL_CALL_PREFIX.startsWith(pendingLine)) {
+        if (Buffer.byteLength(pendingLine) > MAX_FRAME_BYTES) void stop("execute_code tool-call payload exceeds its limit.");
+      } else if (pendingLine.length > options.maxOutputChars) {
+        appendStdout(pendingLine.slice(0, -options.maxOutputChars));
+        pendingLine = pendingLine.slice(-options.maxOutputChars);
       }
     });
-    child.stderr.on("data", (chunk) => {
-      stderr += chunk;
+    child.stderr.on("data", (chunk: string) => {
+      outputTruncated ||= stderr.length + chunk.length > options.maxOutputChars;
+      stderr = (stderr + chunk).slice(-options.maxOutputChars);
     });
-    child.on("error", (error) => {
-      finish({
-        ok: false,
-        content: `Failed to start execute_code: ${error.message}`,
-        metadata: {
-          errorType: error.name
-        }
-      });
+    child.once("error", () => { void stop("Failed to start execute_code."); });
+    child.once("close", async (code, exitSignal) => {
+      if (stopping) return;
+      await activeCall;
+      if (stopping || settled) return;
+      if (pendingLine.startsWith(TOOL_CALL_PREFIX)) { await stop("execute_code ended with an incomplete tool-call frame."); return; }
+      appendStdout(pendingLine);
+      finish({ ok: code === 0 && !signal.aborted, content: formatCodeOutput(stdout, stderr, options.maxOutputChars),
+        metadata: { exitCode: code, signal: exitSignal, timeoutMs: options.timeoutMs, maxOutputChars: options.maxOutputChars, toolCalls: callIds.size, outputTruncated } });
     });
-    child.on("close", async (code, signal) => {
-      if (timedOut) return;
-      await Promise.allSettled(toolCallQueue);
-      finish({
-        ok: code === 0,
-        content: formatCodeOutput(stdout, stderr, options.maxOutputChars),
-        metadata: {
-          exitCode: code,
-          signal,
-          timeoutMs: options.timeoutMs,
-          maxOutputChars: options.maxOutputChars,
-          toolCalls: toolCallQueue.length
-        }
-      });
-    });
-
     child.stdin.write(`${JSON.stringify({ kind: "ready" })}\n`);
-
+    function appendStdout(chunk: string): void {
+      outputTruncated ||= stdout.length + chunk.length > options.maxOutputChars;
+      stdout = (stdout + chunk).slice(-options.maxOutputChars);
+    }
+    async function stop(content: string, timedOut = false): Promise<void> {
+      if (stopping || settled) return;
+      stopping = true;
+      controller.abort();
+      try { await processes.terminate(child, "SIGKILL"); }
+      catch { finish({ ok: false, content: "execute_code termination could not be confirmed.", metadata: { cleanupUncertain: true } }); return; }
+      finish({ ok: false, content, metadata: { timedOut, cancelled: !timedOut && signal.aborted, toolCalls: callIds.size } });
+    }
     function finish(result: ToolResult): void {
-      if (settled) {
-        return;
-      }
-
+      if (settled) return;
       settled = true;
       clearTimeout(timeout);
+      signal.removeEventListener("abort", onAbort);
       resolve(result);
     }
   });
 }
 
-type ToolCall = {
-  id: string;
-  tool: string;
-  input: Record<string, unknown>;
-};
-
-function extractToolCalls(stdout: string): { plainStdout: string; calls: ToolCall[] } {
-  const calls: ToolCall[] = [];
-  const lines = stdout.split("\n");
-  const keptLines = [];
-
-  for (const line of lines) {
-    if (line.startsWith("__ESTACODA_TOOL_CALL__")) {
-      const raw = line.slice("__ESTACODA_TOOL_CALL__".length);
-      const parsed = JSON.parse(raw) as Partial<ToolCall>;
-
-      if (typeof parsed.id === "string" && typeof parsed.tool === "string") {
-        calls.push({
-          id: parsed.id,
-          tool: parsed.tool,
-          input: asRecord(parsed.input)
-        });
-      }
-    } else {
-      keptLines.push(line);
-    }
-  }
-
-  return {
-    plainStdout: keptLines.join("\n"),
-    calls
-  };
-}
-
-async function handleToolCall(
-  child: ChildProcess,
-  call: ToolCall,
-  executeTool: RunCodeOptions["executeTool"]
-): Promise<void> {
-  const result = await executeTool(call.tool, call.input);
-  if (child.stdin === null) {
-    return;
-  }
-
-  child.stdin.write(`${JSON.stringify({
-    kind: "tool_result",
-    id: call.id,
-    result
-  })}\n`);
-}
+const TOOL_CALL_PREFIX = "__ESTACODA_TOOL_CALL__";
+const MAX_FRAME_BYTES = 64 * 1024;
+const MAX_TOOL_CALLS = 64;
+type ToolCall = { id: string; tool: string; input: Record<string, unknown> };
 
 function renderPythonHarness(userCode: string): string {
   return `import json
@@ -355,7 +320,7 @@ function formatCodeOutput(stdout: string, stderr: string, maxOutputChars: number
 }
 
 function boundedNumber(value: unknown, fallback: number, min: number, max: number): number {
-  if (typeof value !== "number" || Number.isNaN(value)) {
+  if (typeof value !== "number" || !Number.isFinite(value)) {
     return fallback;
   }
 

@@ -563,6 +563,7 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
     },
     createTerminalInspectTool({
       workspaceRoot: root,
+      signal: options.executionLease?.signal,
       files,
       processes,
       timeoutMs: Math.min(commandTimeoutMs, 10_000)
@@ -596,9 +597,10 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
         return runCommand(
           await realpath(root),
           input.command,
-          Math.min(input.timeoutMs ?? commandTimeoutMs, commandTimeoutMs),
+          Math.max(1, Math.min(Number.isFinite(input.timeoutMs) ? input.timeoutMs! : commandTimeoutMs, commandTimeoutMs)),
           options.childProcessEnv,
-          processes
+          processes,
+          AbortSignal.any([...[context?.signal, options.executionLease?.signal].filter((value): value is AbortSignal => value !== undefined)])
         );
       }
     }
@@ -1678,28 +1680,33 @@ async function runCommand(
   command: string,
   timeoutMs: number,
   childProcessEnv: WorkspaceToolOptions["childProcessEnv"],
-  processes: HostProcesses
+  processes: HostProcesses,
+  abortSignal?: AbortSignal
 ): Promise<ToolResult> {
+  if (abortSignal?.aborted) return errorResult("Command cancelled before dispatch.");
   return new Promise((resolveResult) => {
     const shell = resolveShell();
     const child = processes.spawn(shell.command, [...shell.args, command], {
       env: processes.environment({ homeDir: childProcessEnv?.homeDir, extra: { ...childProcessEnv?.extra, PWD: root } })
     });
-    const chunks: Buffer[] = [];
-    const errorChunks: Buffer[] = [];
+    let stdout = "", stderr = "";
+    let outputTruncated = false;
+    const onAbort = () => { void processes.terminate(child).catch(() => resolveResult(errorResult("Command termination could not be confirmed."))); };
+    abortSignal?.addEventListener("abort", onAbort, { once: true });
+    if (abortSignal?.aborted) onAbort();
     let timedOut = false;
     const timeout = setTimeout(() => {
       timedOut = true;
       void processes.terminate(child).catch((error) => resolveResult(errorResult(String(error))));
     }, timeoutMs);
 
-    child.stdout.on("data", (chunk: Buffer) => chunks.push(chunk));
-    child.stderr.on("data", (chunk: Buffer) => errorChunks.push(chunk));
-    child.on("error", (error) => { clearTimeout(timeout); resolveResult(errorResult(`Failed to start command: ${error.message}`)); });
+    child.stdout.setEncoding("utf8"); child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => { outputTruncated ||= stdout.length + chunk.length > 16_000; stdout = (stdout + chunk).slice(0, 16_000); });
+    child.stderr.on("data", (chunk: string) => { outputTruncated ||= stderr.length + chunk.length > 16_000; stderr = (stderr + chunk).slice(0, 16_000); });
+    child.on("error", (error) => { abortSignal?.removeEventListener("abort", onAbort); clearTimeout(timeout); resolveResult(errorResult(`Failed to start command: ${error.message}`)); });
     child.on("close", (code, signal) => {
       clearTimeout(timeout);
-      const stdout = Buffer.concat(chunks).toString("utf8");
-      const stderr = Buffer.concat(errorChunks).toString("utf8");
+      abortSignal?.removeEventListener("abort", onAbort);
       const content = [
         stdout.trimEnd(),
         stderr.length === 0 ? undefined : `stderr:\n${stderr.trimEnd()}`
@@ -1708,7 +1715,7 @@ async function runCommand(
         .join("\n\n");
 
       resolveResult({
-        ok: code === 0 && signal === null,
+        ok: code === 0 && signal === null && !timedOut && !abortSignal?.aborted,
         content: content.length === 0 ? "(no output)" : content.slice(0, 16_000),
         metadata: {
           command,
@@ -1716,6 +1723,8 @@ async function runCommand(
           signal,
           timeoutMs,
           timedOut,
+          cancelled: abortSignal?.aborted ?? false,
+          outputTruncated,
           _estacoda_context_summary: terminalContextSummary({
             command,
             code,

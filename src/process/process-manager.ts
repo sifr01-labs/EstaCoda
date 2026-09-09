@@ -60,13 +60,15 @@ export class ProcessManager {
     this.#workspaceRoot = options.executionLease?.workspaceRoot ?? resolve(options.workspaceRoot);
     this.#ownedScope = options.executionLease === undefined ? new HostProcessScope(this.#workspaceRoot) : undefined;
     this.#processScope = options.executionLease?.processes ?? this.#ownedScope!;
-    this.#maxLogChars = options.maxLogChars ?? DEFAULT_MAX_LOG_CHARS;
+    this.#maxLogChars = Math.max(1, Math.min(options.maxLogChars ?? DEFAULT_MAX_LOG_CHARS, DEFAULT_MAX_LOG_CHARS));
     this.#now = options.now ?? (() => new Date());
     this.#id = options.id ?? randomId;
   }
 
-  async start(command: string): Promise<ManagedProcessRecord> {
+  async start(command: string, signal?: AbortSignal): Promise<ManagedProcessRecord> {
+    signal?.throwIfAborted();
     const record = await this.#createRecord(command, "running");
+    if (signal?.aborted) { this.#processes.delete(record.id); signal.throwIfAborted(); }
     this.#spawn(record);
     return toRecord(record);
   }
@@ -126,6 +128,12 @@ export class ProcessManager {
     protectedEnvironmentVariable?: string
   ): Promise<InternalManagedProcess> {
     const cwd = this.#lease === undefined ? await realpath(this.#workspaceRoot) : await this.#lease.files.realpath(this.#workspaceRoot);
+    if (this.#processes.size >= 128) {
+      for (const [id, record] of this.#processes) {
+        if (["exited", "stopped", "failed"].includes(record.status) && record.child?.exitCode !== null) this.#processes.delete(id);
+      }
+      if (this.#processes.size >= 128) throw new Error("Process scope record limit reached. Stop existing processes first.");
+    }
     const id = this.#id();
     const startedAt = this.#now().toISOString();
     const record: InternalManagedProcess = {
@@ -157,8 +165,9 @@ export class ProcessManager {
       record.child = child;
       this.#appendLog(record, "system", `started pid ${child.pid ?? "unknown"}`);
 
-      child.stdout.on("data", (chunk: Buffer) => this.#appendLog(record, "stdout", chunk.toString("utf8")));
-      child.stderr.on("data", (chunk: Buffer) => this.#appendLog(record, "stderr", chunk.toString("utf8")));
+      child.stdout.setEncoding("utf8"); child.stderr.setEncoding("utf8");
+      child.stdout.on("data", (chunk: string) => this.#appendLog(record, "stdout", chunk));
+      child.stderr.on("data", (chunk: string) => this.#appendLog(record, "stderr", chunk));
       child.on("error", (error) => {
         record.status = "failed";
         record.updatedAt = this.#now().toISOString();
@@ -252,14 +261,15 @@ export class ProcessManager {
 
   #appendLog(process: InternalManagedProcess, stream: ManagedProcessLog["stream"], text: string): void {
     if (process.sensitiveOutput === true) return;
+    if (!text.length) return;
     process.logs.push({
       stream,
-      text,
+      text: text.slice(-this.#maxLogChars),
       timestamp: this.#now().toISOString()
     });
 
     let totalChars = process.logs.reduce((total, log) => total + log.text.length, 0);
-    while (totalChars > this.#maxLogChars && process.logs.length > 1) {
+    while ((totalChars > this.#maxLogChars || process.logs.length > 1024) && process.logs.length > 1) {
       const removed = process.logs.shift();
       totalChars -= removed?.text.length ?? 0;
     }

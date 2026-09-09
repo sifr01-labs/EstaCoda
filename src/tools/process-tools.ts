@@ -38,6 +38,7 @@ export function createProcessTools(options: ProcessToolOptions): readonly Regist
       maxResultSizeChars: 3000,
       isAvailable: () => true,
       run: async (input: { command?: string; protectedEnvironment?: ProtectedInputEnvelope }, context) => {
+        if (context?.signal?.aborted) return errorResult("Process start cancelled before dispatch.");
         if (typeof input.command !== "string" || input.command.trim().length === 0) {
           return errorResult("command must be a non-empty string");
         }
@@ -81,7 +82,7 @@ export function createProcessTools(options: ProcessToolOptions): readonly Regist
           };
         }
 
-        const process = await options.processManager.start(input.command);
+        const process = await options.processManager.start(input.command, context?.signal);
 
         return {
           ok: process.status === "running",

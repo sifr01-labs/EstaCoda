@@ -64,7 +64,7 @@ export class HostEnvironment {
       processes: {
         environment: (options) => { assertActive(); return scope.processes.environment(options); },
         spawn: (command, args, options) => { assertActive(); return scope.processes.spawn(command, args, options); },
-        terminate: (child, signal) => { assertActive(); return scope.processes.terminate(child, signal); }
+        terminate: (child, signal) => scope.processes.terminate(child, signal)
       },
       files: new HostWorkspaceFiles(this.facts.workspace.canonicalPath, assertActive),
       scopeId: scope.id, context: scope.context, facts: this.facts,
