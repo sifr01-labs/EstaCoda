@@ -64,3 +64,20 @@ PR8 changes diagnostics and presentation, adds observational fields and required
 Same-user host processes, the local operator, kernel, runtime and approved Docker daemon/image remain trusted. This release does not provide hostile multi-tenant isolation, aggregate quotas, universal rollback or power-loss atomicity. Temporary-copy automatic application remains local foreground CLI only, and active child work defers it. Existing migration/downgrade constraints remain in force; additive trajectory fields require no database version change.
 
 CI's Node 22/Linux result and packaged Desktop lifecycle were not run locally. The conformance mapping identifies those delivery boundaries explicitly instead of claiming that core fixtures test an absent application. No remote backend, Desktop execution database, second scheduler, trace-to-eval automation or implicit Evolution promotion was introduced.
+
+## PR7/PR8 review follow-up
+
+A focused follow-up fixes the review findings without changing execution authority:
+
+- Used copies return attention instead of presenting an old applied receipt as success for new edits. Explicit artifact retries retain idempotency.
+- Local copy finishing runs before canonical completion is persisted, including final outcome, transcript, checkpoint settlement and trajectory. Returned and persisted partial outcomes agree.
+- Trajectory accounting includes provider continuations and records approval asks before the handler resolves them. The four-call coding fixture records four dispatches and 440 synthetic tokens.
+- The integration gate also exposed a definition-hash format mismatch that discarded real runtime references. SHA-256 references now cover the final filtered registry and survive SQLite persistence; checkpoint hydration uses the same final definition.
+- Docker doctor shares static control negotiation with acquisition, blocking impossible mandatory controls and explaining advisory defaults before execution.
+- Required source/compiled Docker gates now exercise configured production runtime acquisition through CLI, real gateway authorization and repeated scheduled jobs. They verify command containment, durable authority, metrics, missing-image failure and owned container/sidecar disposal.
+
+The historical PR8 measurement report above remains unchanged. Its benchmark event accounting already included all fixture provider calls; it is distinct from the corrected trajectory counters. Desktop, Windows transport, full Linux CI and hostile multi-tenant isolation remain separate boundaries.
+
+Follow-up validation: the complete required release wrapper passed on Node 24.14.1 / pnpm 10.33.0: frozen install, typecheck, 10,611 tests in 633 files, both 13-case smoke suites, build, import/ESM audits, all host budget samples, expanded source/compiled Docker workflows and package-image build/startup. The conformance manifest now includes 40 required files. Documentation links, patch hygiene and byte comparison with the isolated validation checkout passed; unrelated operator files were excluded from that checkout and preserved.
+
+Security review: finalization still requires the original local foreground scope, settled child/process work, current owner, trust, grants, source baseline and containment. Diagnostics and definition references confer no authority. No new dependencies, automatic image acquisition, remote application authority or recovery guarantees were introduced.

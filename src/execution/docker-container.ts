@@ -1,5 +1,5 @@
 import { DockerReceipts } from "./docker-receipts.js";
-import { DOCKER_DEFAULT_LIMITS, dockerLimits, verifyDockerCgroups, CGROUP_PROBE, type DockerLimits } from "./docker-limits.js";
+import { DOCKER_DEFAULT_LIMITS, dockerControls, verifyDockerCgroups, CGROUP_PROBE, type DockerLimits } from "./docker-limits.js";
 export { DOCKER_DEFAULT_LIMITS } from "./docker-limits.js";
 import { fileURLToPath } from "node:url";
 import { randomUUID, createHash } from "node:crypto";
@@ -60,7 +60,7 @@ export class DockerContainer {
     this.receipts = new DockerReceipts(input.profileId, input.homeDir);
     this.name = input.receipt?.name ?? `estacoda-exec-${randomUUID()}`; this.owner = input.receipt?.owner ?? randomUUID();
     if (!/^estacoda-exec-[a-f0-9-]{36}$/u.test(this.name) || !/^[a-f0-9-]{36}$/u.test(this.owner)) throw new Error("Invalid Docker ownership receipt.");
-    const negotiated = dockerLimits(input.policy); this.limits = negotiated.limits; this.degradations.push(...negotiated.degradations);
+    const negotiated = dockerControls(input.policy); this.limits = negotiated.limits; this.degradations.push(...negotiated.degradations);
     this.client = input.client; this.profileId = input.profileId; this.workspace = input.workspace; this.policy = input.policy;
   }
   get id(): string { if (!this.#id || this.#revoked) throw new Error("Docker lease is unavailable."); return this.#id; }
@@ -73,12 +73,6 @@ export class DockerContainer {
     const client = input.client ?? await DockerClient.connect();
     if (!input.receipt) await new DockerReceipts(input.profileId, input.homeDir).recover(client, workspace.identityHash);
     const container = new DockerContainer({ client, profileId: input.profileId, workspace, policy, receipt: input.receipt, homeDir: input.homeDir });
-    for (const key of ["lifetime", "credentialCapabilities"] as const) {
-      const control = policy[key];
-      if (!control || (key === "lifetime" && control.value === "session") || (key === "credentialCapabilities" && Array.isArray(control.value) && control.value.length === 0)) continue;
-      if (control.requirement === "mandatory") throw new Error(`Docker cannot yet verify requested ${key}.`);
-      container.degradations.push(`${key}: requested control unavailable; verified Docker defaults apply`);
-    }
     const image = JSON.parse(await client.run(["image", "inspect", policy.imageId!]))[0];
     if (image?.Id !== policy.imageId || image?.Config?.Labels?.[DOCKER_IMAGE_LABEL] !== "1" || Object.keys(image?.Config?.Volumes ?? {}).length) throw new Error("Docker image is not the approved execution image.");
     const previous = container.receipts.read(container.owner);

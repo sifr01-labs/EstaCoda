@@ -52,3 +52,19 @@ it("does not consume a copy on a no-change turn before later authorized work", a
     expect(await readFile(join(f.source, "hello.bin"), "utf8")).toBe("later work");
   } finally { store.close(); await f.cleanup(); }
 });
+it("never reports an old receipt as success for later copy edits", async () => {
+  const f = await copyFixture(), store = new ChangeApplicationStore(f);
+  try {
+    const target = await prepareTemporaryCopy({ ...f, source: "source", manifest: f.input });
+    await store.authorize(target.id, { version: 1, outcome: "apply", paths: [{ path: "hello.bin", operations: ["update"] }] });
+    await writeFile(join(f.destination, "hello.bin"), "first edit");
+    const first = await store.finish(target.id, "session");
+    expect(first.status).toBe("applied");
+    await writeFile(join(f.destination, "hello.bin"), "later edit");
+    const later = await store.finish(target.id, "session");
+    expect(later).toMatchObject({ status: "attention", code: "copy-consumed", paths: [], artifact: { id: first.artifact.id } });
+    expect(await readFile(join(f.source, "hello.bin"), "utf8")).toBe("first edit");
+    expect((await store.apply(first.artifact.id)).status).toBe("applied");
+    expect(await readFile(join(f.source, "hello.bin"), "utf8")).toBe("first edit");
+  } finally { store.close(); await f.cleanup(); }
+});

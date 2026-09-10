@@ -1,3 +1,4 @@
+import { validateDockerRuntimeWorkflows } from "./docker-runtime-workflows.js";
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -161,6 +162,7 @@ try {
     assert.equal(await readFile(join(root, "example.txt"), "utf8"), before);
     console.log("PASS: Docker temporary-copy target, preauthorized application and guarded rollback");
   } finally { changes.close(); }
+  await validateDockerRuntimeWorkflows({ runtimeRoot, workspaceRoot: root, homeDir: home, profileId, imageId: probe.imageId, client });
   await assert.rejects(prepared({ ...policy, imageId: `sha256:${"0".repeat(64)}` }));
   assert.equal((await readdir(join(home, ".estacoda", "profiles", profileId, "execution", "docker"))).filter((name) => name.endsWith(".json")).length, 0);
   console.log("PASS: both bind modes, limits, explicit direct network, missing image and settled ownership receipts");

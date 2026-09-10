@@ -10,7 +10,7 @@ import { type ChangeBundle, type WorkspaceChange } from "./change-artifact.js";
 import { checkStamp, checkedFile, hash, sameFile, snapshot, writeNew } from "./copy-files.js";
 import { targetBinding } from "./execution-target.js";
 
-export type ApplicationResult = { status: "applied" | "review" | "conflict" | "attention"; artifact: ArtifactRecord; paths: string[]; reason?: string };
+export type ApplicationResult = { status: "applied" | "review" | "conflict" | "attention"; artifact: ArtifactRecord; paths: string[]; reason?: string; code?: "copy-consumed" };
 
 /** Shared kernel mutex across profiles applying into the same destination. The
  * database stores no task state and never steals locks based on timestamps. */
@@ -94,7 +94,7 @@ export class ChangeApplicationStore extends ChangeAuthorizationStore {
     const prior = this.#journal(targetId);
     if (prior) {
       const { artifact } = await this.load(prior.artifactId);
-      return { status: prior.phase === "applied" ? "applied" : "attention", artifact, paths: [], reason: "This copy already has an application receipt. Inspect/recover it; use a fresh copy for further work." };
+      return { status: "attention", code: "copy-consumed", artifact, paths: [], reason: "This copy already has an application receipt. Inspect/recover it; use a fresh copy for further work." };
     }
     const artifact = await this.export(targetId, sessionId, persist);
     if (this.authorization(targetId)?.plan.outcome !== "apply") return { status: "review", artifact, paths: [] };

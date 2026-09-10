@@ -2652,7 +2652,7 @@ describe("ToolExecutor browser CDP gating", () => {
       isAvailable: () => true,
       run
     };
-    const { executor } = await setupExecutor({ policy, tools: [cdpTool] });
+    const { executor, trajectoryRecorder } = await setupExecutor({ policy, tools: [cdpTool] });
     const onApprovalRequest = vi.fn(async (request) => {
       expect(request.tool.name).toBe("browser.cdp");
       expect(request.input).toEqual({ method: "Runtime.evaluate" });
@@ -2672,6 +2672,7 @@ describe("ToolExecutor browser CDP gating", () => {
     expect(record?.decision).toBe("allow");
     expect(record?.result?.content).toBe("ran once");
     expect(run).toHaveBeenCalledOnce();
+    expect(trajectoryRecorder.snapshot().executionMetrics).toMatchObject({ approvalRequests: 1, deniedTools: 0 });
   });
 
   it("binds a one-time grant to the redacted security target and consumes it once", async () => {
@@ -2739,7 +2740,7 @@ describe("ToolExecutor browser CDP gating", () => {
       decide: () => "ask"
     };
     const tool = { ...createEchoTool("approval.test"), run };
-    const { executor } = await setupExecutor({ policy: askPolicy, tools: [tool] });
+    const { executor, trajectoryRecorder } = await setupExecutor({ policy: askPolicy, tools: [tool] });
 
     const record = await executor.executeTool({
       tool: "approval.test",
@@ -2752,12 +2753,13 @@ describe("ToolExecutor browser CDP gating", () => {
     expect(record?.decision).toBe("deny");
     expect(record?.result).toBeUndefined();
     expect(run).not.toHaveBeenCalled();
+    expect(trajectoryRecorder.snapshot().executionMetrics).toMatchObject({ approvalRequests: 1, deniedTools: 1 });
   });
 
   it("never invokes the approval handler for a policy denial", async () => {
     const run = vi.fn(async (): Promise<ToolResult> => ({ ok: true, content: "must not run" }));
     const onApprovalRequest = vi.fn(async () => "approved" as const);
-    const { executor } = await setupExecutor({
+    const { executor, trajectoryRecorder } = await setupExecutor({
       policy: createMockPolicy("deny"),
       tools: [{ ...createEchoTool("hardline.test"), run }]
     });
@@ -2772,6 +2774,7 @@ describe("ToolExecutor browser CDP gating", () => {
 
     expect(record?.decision).toBe("deny");
     expect(onApprovalRequest).not.toHaveBeenCalled();
+    expect(trajectoryRecorder.snapshot().executionMetrics).toMatchObject({ approvalRequests: 0, deniedTools: 1 });
     expect(run).not.toHaveBeenCalled();
   });
 });

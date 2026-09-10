@@ -12,7 +12,7 @@ it("retains bounded trajectory observations across database reopen without a sch
     const session = await db.createSession({ id: "session", profileId: "default", title: "Observations" });
     const recorder = new TrajectoryRecorder({ profileId: "default", sessionId: session.id, modelId: "test" });
     recorder.bindExecution({ definitionRevision: "a".repeat(64), authorityRevision: "b".repeat(64) });
-    recorder.record("tool-gated", { decision: "ask" });
+    recorder.record("tool-approval-requested", { tool: "test" });
     const trajectory = recorder.complete({ success: true, summary: "complete" });
     await db.saveTrajectory(trajectory); db.close(); db = new SQLiteSessionDB({ path });
     const loaded = (await db.loadTrajectory(trajectory.id))!;

@@ -348,7 +348,10 @@ export class AgentLoop {
     return this.#trajectoryRecorder.trajectoryId;
   }
 
-  async handle(input: AgentLoopInput): Promise<AgentLoopResponse> {
+  async handle(
+    input: AgentLoopInput,
+    finalizeExecution?: (outcome: ExecutionFinalOutcome, artifacts: ArtifactRecord[]) => Promise<string | undefined>
+  ): Promise<AgentLoopResponse> {
     await this.#runRecorder.beginTurn();
     const credentialInterception = interceptPlaintextCredentialInput(input.text);
     const turnText = credentialInterception?.projectedText ?? input.text;
@@ -1185,6 +1188,8 @@ export class AgentLoop {
       completionFloor,
       openContinuation: conversationContinuationState?.status === "open"
     });
+    // Finish owned workspace application before publishing canonical completion.
+    const finalizationNote = await finalizeExecution?.(finalOutcome, artifacts);
     await this.#runRecorder.recordExecutionFinalOutcome(finalOutcome);
     const skillOutcomes = await this.#runRecorder.recordSkillOutcomes({
       selectedSkill,
@@ -1308,6 +1313,7 @@ export class AgentLoop {
         this.#ui?.language === "ar" ? "ar" : "en"
       ), artifacts);
     }
+    if (finalizationNote) response.text += `\n\n${finalizationNote}`;
     await this.#skillLearningManager?.observeTurn({
       profileId: this.#profileId,
       sessionId: this.#currentSessionId(),

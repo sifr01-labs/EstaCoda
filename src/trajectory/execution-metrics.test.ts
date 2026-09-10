@@ -4,7 +4,7 @@ it("counts dispatched attempts once, preserves unknown usage and emits bounded c
   const r = new TrajectoryRecorder({ profileId: "p", sessionId: "s", modelId: "m" });
   r.bindExecution({ definitionRevision: "a".repeat(64), authorityRevision: "b".repeat(64) });
   r.record("provider-completion", { attempts: [{ state: "preflight" }, { state: "dispatched", usage: { totalTokens: 12 } }, { state: "dispatched" }], usage: { totalTokens: 12 }, private: "secret" });
-  r.record("tool-gated", { decision: "ask" }); r.record("tool-gated", { decision: "deny" });
+  r.record("tool-approval-requested", { tool: "test" }); r.record("tool-gated", { decision: "deny" });
   r.record("tool-result", { result: { ok: false, content: "secret" } });
   r.complete({ success: true, summary: "secret" });
   const s = r.snapshot();

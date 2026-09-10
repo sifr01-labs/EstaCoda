@@ -20,3 +20,15 @@ export function verifyDockerCgroups(values: Record<string, string>, limits: Dock
   if (Number(values["memory.max"]) !== limits.memoryBytes || values["memory.swap.max"] !== "0" || Number(values["pids.max"]) !== limits.pids ||
       !quota || !period || Math.abs(quota / period - limits.cpu) > 1e-9) throw new Error("Docker effective cgroup v2 limits were not enforced.");
 }
+
+/** Shared read-only negotiation for doctor and acquisition; no engine or grants. */
+export function dockerControls(policy: RequestedExecutionPolicy): { limits: DockerLimits; degradations: string[] } {
+  const negotiated = dockerLimits(policy);
+  for (const key of ["lifetime", "credentialCapabilities"] as const) {
+    const control = policy[key];
+    if (!control || (key === "lifetime" && control.value === "session") || (key === "credentialCapabilities" && Array.isArray(control.value) && control.value.length === 0)) continue;
+    if (control.requirement === "mandatory") throw new Error(`Docker cannot yet verify requested ${key}.`);
+    negotiated.degradations.push(`${key}: requested control unavailable; verified Docker defaults apply`);
+  }
+  return negotiated;
+}

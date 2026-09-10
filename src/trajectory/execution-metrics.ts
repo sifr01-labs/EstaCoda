@@ -10,7 +10,7 @@ export class ExecutionMetrics {
     deniedTools: 0, toolResults: 0, failedTools: 0, cancellations: 0, checkpointUpdates: 0, completedTurns: 0, failedTurns: 0 };
   observe(kind: TrajectoryEventKind, data: Record<string, unknown>): void {
     const add = (key: Exclude<keyof ExecutionMetricSnapshot, "version" | "elapsedMs">, value = 1) => { this.#values[key] = Math.min(LIMIT, this.#values[key] + number(value)); };
-    if (kind === "provider-completion") {
+    if (kind === "provider-completion" || kind === "provider-continuation") {
       add("providerCompletions");
       for (const raw of Array.isArray(data.attempts) ? data.attempts.slice(0, 256) : []) {
         const attempt = object(raw);
@@ -22,7 +22,7 @@ export class ExecutionMetrics {
         }
       }
     }
-    if (kind === "tool-gated" && data.decision === "ask") add("approvalRequests");
+    if (kind === "tool-approval-requested") add("approvalRequests");
     if (kind === "tool-gated" && data.decision === "deny") add("deniedTools");
     if (kind === "tool-result") { add("toolResults"); if (object(data.result).ok === false) add("failedTools"); }
     if (kind === "agent-cancelled") add("cancellations");

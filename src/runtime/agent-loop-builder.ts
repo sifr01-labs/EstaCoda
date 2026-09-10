@@ -1,6 +1,6 @@
 import { dockerToolAdmissionGuard } from "../execution/docker-tool-boundary.js";
 import { executionAuthorityFingerprint } from "../execution/execution-authority.js";
-import { stableJsonHash } from "./runtime-fingerprint.js";
+import { createHash } from "node:crypto";
 import { redactSensitiveText } from "../utils/redaction.js";
 import type { ProjectContextSnapshot } from "../contracts/context.js";
 import type { AgentEvolutionPolicy } from "../contracts/agent-evolution.js";
@@ -379,18 +379,16 @@ export class AgentLoopBuilder {
     const boundTarget = (await input.sessionDb.getSession(input.sessionId))?.executionTarget;
     const executionBinding = () => {
       if (!boundTarget || !executionLease) return undefined;
-      const definitionRevision = stableJsonHash(redactSensitiveText(JSON.stringify({
+      const definitionRevision = createHash("sha256").update(redactSensitiveText(JSON.stringify({
         tools: toolRegistry.list().map((tool) => ({ name: tool.name, description: tool.description, inputSchema: tool.inputSchema, toolsets: tool.toolsets })),
-        skills: substrate.skillRegistry.list().map((skill) => ({ name: skill.name, version: skill.version, routing: skill.routing, playbook: skill.playbook, instructions: "instructions" in skill ? skill.instructions : undefined })),
+        skills: sessionSkillRegistry.list().map((skill) => ({ name: skill.name, version: skill.version, routing: skill.routing, playbook: skill.playbook, instructions: "instructions" in skill ? skill.instructions : undefined })),
         agentProfile: input.agentProfile
-      })));
+      }))).digest("hex");
       const authorityRevision = executionAuthorityFingerprint(executionLease.facts);
       return { targetId: boundTarget.targetId, targetGeneration: boundTarget.targetGeneration,
         workspaceIdentityHash: boundTarget.workspace.identityHash, definitionRevision, authorityRevision,
         originalDefinitionRevision: definitionRevision, originalAuthorityRevision: authorityRevision };
     };
-    const references = executionBinding();
-    if (references) input.trajectoryRecorder.bindExecution(references);
     const executionCheckpointController = ownsForegroundSupervision
       ? new ExecutionCheckpointController({
           executionBinding,
@@ -413,21 +411,6 @@ export class AgentLoopBuilder {
           executionPlanController.hydrate(persistedPlan);
         } catch {
           // Malformed persisted working state is ignored rather than entering the provider prompt.
-        }
-      }
-    }
-    if (executionCheckpointController !== undefined) {
-      const persistedCheckpoint = hydratableExecutionCheckpoint({
-        events: persistedSessionEvents,
-        sessionId: input.sessionId,
-        profileId: substrate.profileId
-      });
-      if (persistedCheckpoint !== undefined) {
-        try {
-          executionCheckpointController.hydrate(persistedCheckpoint);
-        } catch (error) {
-          if (error instanceof ExecutionCheckpointBindingError) throw error;
-          // Invalid persisted checkpoint state never enters the foreground runtime.
         }
       }
     }
@@ -623,6 +606,24 @@ export class AgentLoopBuilder {
     if (input.disabledToolsets !== undefined && input.disabledToolsets.length > 0) {
       providerToolAvailability = await toolRegistry.snapshot();
       substrate.setAvailableToolsets?.(availableToolsetsFromTools(providerToolAvailability.available));
+    }
+    // Capture the final session registry, after registration and visibility filters.
+    const references = executionBinding();
+    if (references) input.trajectoryRecorder.bindExecution(references);
+    if (executionCheckpointController !== undefined) {
+      const persistedCheckpoint = hydratableExecutionCheckpoint({
+        events: persistedSessionEvents,
+        sessionId: input.sessionId,
+        profileId: substrate.profileId
+      });
+      if (persistedCheckpoint !== undefined) {
+        try {
+          executionCheckpointController.hydrate(persistedCheckpoint);
+        } catch (error) {
+          if (error instanceof ExecutionCheckpointBindingError) throw error;
+          // Invalid persisted checkpoint state never enters the foreground runtime.
+        }
+      }
     }
     delegationVisibleTools = providerToolAvailability.available;
     const providerToolSchemaCatalog = buildProviderToolSchemaCatalog({

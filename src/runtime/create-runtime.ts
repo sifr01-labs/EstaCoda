@@ -1360,28 +1360,29 @@ async function buildRuntime(options: RuntimeOptions, rollback: ResourceCleanup):
       activeTrustedWorkspace = trustedWorkspace;
 
       executionLease.assertActive();
-      return executionOwner.run(async () => {
-        const response = await agentLoop.handle({
-          ...input,
-          signal: AbortSignal.any([executionOwner.signal, executionLease.signal, ...(input.signal ? [input.signal] : [])]),
-          trustedWorkspace
-        });
+      return executionOwner.run(() => agentLoop.handle({
+        ...input,
+        signal: AbortSignal.any([executionOwner.signal, executionLease.signal, ...(input.signal ? [input.signal] : [])]),
+        trustedWorkspace
+      }, async (finalOutcome, artifacts) => {
         // Only the local foreground outcome consumes local task-start copy authority.
         // Child/remote work can export through the operator workflow after settlement.
         if (input.channel === "cli" && current.executionTarget && resolveSessionOriginSurface(current) === "cli" && !current.parentSessionId &&
-          response.finalOutcome?.terminationCause === "normal" &&
-          ["completed", "completed_with_recovered_errors"].includes(response.finalOutcome.status) &&
-          response.finalOutcome.uncertainActions.length === 0 && !input.signal?.aborted) {
-          const changes = new ChangeApplicationStore({ homeDir: options.homeDir, profileId });
+          finalOutcome.terminationCause === "normal" &&
+          ["completed", "completed_with_recovered_errors"].includes(finalOutcome.status) &&
+          finalOutcome.uncertainActions.length === 0 && !input.signal?.aborted) {
+          let changes: ChangeApplicationStore | undefined;
           try {
+            changes = new ChangeApplicationStore({ homeDir: options.homeDir, profileId });
             if (changes.getTarget(current.executionTarget.targetId)?.kind === "temporary-copy") {
               const unsettled = processManager.list().some((process) => ["prepared", "running"].includes(process.status)) ||
                 subagentRegistry.hasActiveSubagents(current.id) || !!taskStore?.listTasks({ workspaceIdentityHash: current.executionTarget.workspace.identityHash,
                   statuses: ["planning", "queued", "running", "waiting_for_host", "waiting_for_input", "waiting_for_approval", "paused"], limit: 1 }).length;
               if (unsettled) {
-                response.finalOutcome.status = "partially_completed";
-                response.text += "\n\nWorkspace changes await settlement of active processes or child work. Use workspace finish after they settle.";
-                return response;
+                finalOutcome.status = "partially_completed";
+                return options.ui?.language === "ar"
+                  ? "تنتظر تغييرات مجلد العمل انتهاء العمليات أو المهام الفرعية النشطة. استخدم ⁦workspace finish⁩ بعد انتهائها."
+                  : "Workspace changes await settlement of active processes or child work. Use workspace finish after they settle.";
               }
               await executionOwner.validate(); executionLease.assertActive();
               const completionSessionId = sessionRuntimeContext.currentSessionId();
@@ -1391,17 +1392,19 @@ async function buildRuntime(options: RuntimeOptions, rollback: ResourceCleanup):
                   await sessionDb.appendEvent(completionSessionId, event);
                   await artifactStore.hydrateSessionArtifacts({ events: [event], sessionId: completionSessionId, profileId });
                 });
-              response.artifacts.push(result.artifact);
-              if (["attention", "conflict"].includes(result.status)) response.finalOutcome.status = "partially_completed";
-              response.text += `\n\n${workspaceChangeSummary(result, options.ui?.language)}`;
+              artifacts.push(result.artifact);
+              if (["attention", "conflict"].includes(result.status)) finalOutcome.status = "partially_completed";
+              return workspaceChangeSummary(result, options.ui?.language);
             }
-          } catch (error) {
-            response.finalOutcome.status = "partially_completed";
-            response.text += `\n\nWorkspace changes need attention: ${error instanceof Error ? error.message : "export/application failed"}`;
-          } finally { changes.close(); }
+          } catch {
+            finalOutcome.status = "partially_completed";
+            return options.ui?.language === "ar"
+              ? "تحتاج تغييرات مجلد العمل إلى مراجعة. افحص التصدير والتطبيق والاسترداد محليًا قبل إعادة المحاولة."
+              : "Workspace changes need attention. Inspect export/application and recovery locally before retrying.";
+          } finally { changes?.close(); }
         }
-        return response;
-      });
+        return undefined;
+      }));
     },
     async executeTool(input) {
       executionLease.assertActive();

@@ -46,7 +46,7 @@ Core runtime acquisition recognizes the recorded copy root and binds the new Ses
 
 ## Apply or export
 
-For successful local foreground CLI work, the runtime exports a durable change artifact after the provider/tool loop settles. If task-start authorization covers every change and current trust/grants and baselines still match, it applies the changes without another approval prompt. Review-only work exports instead. Cancelled, failed or uncertain foreground work is not automatically applied. Active managed processes, subagents or nonterminal Tasks in the copy also defer automatic finishing. Conflicts or application errors are reported as partial completion with attention details.
+For successful local foreground CLI work, the runtime exports a durable change artifact after the provider/tool loop settles. If task-start authorization covers every change and current trust/grants and baselines still match, it applies the changes without another approval prompt. Review-only work exports instead. Cancelled, failed or uncertain foreground work is not automatically applied. Active managed processes, subagents or nonterminal Tasks in the copy also defer automatic finishing. Conflicts or application errors are reported as partial completion with attention details. Application finishing precedes the final outcome, transcript, checkpoint settlement and trajectory completion, so persisted completion agrees with the returned response.
 
 To make the copy review-only, omit `application` or use:
 
@@ -69,7 +69,7 @@ estacoda --profile work workspace recover <change-artifact-id>
 
 Automatic finishing is currently limited to successful local foreground CLI turns. New remote Sessions, remote input attached to CLI-originated Sessions, ACP and background/child work do not consume that local application authority automatically. After that work settles, a local operator can use the commands above. Runtime exports are registered in the Session's existing artifact events and artifact store; command-line-only exports use the copy ID as their operator capture scope.
 
-No-change exports do not consume the copy. A copy has one nonempty application receipt. Retrying that artifact cannot execute the mutations twice; further work needs a new copy/baseline. An `applied` receipt records a historical application, not continuing synchronization or a guarantee that the source still contains those bytes.
+No-change exports do not consume the copy. A copy has one nonempty application receipt. An explicit `apply` retry of that artifact cannot execute the mutations twice. A later `finish` or automatic finish returns attention and explains that no new changes were applied; further work needs a new copy/baseline. An `applied` receipt records a historical application, not continuing synchronization or a guarantee that the source still contains those bytes.
 
 ## Inputs, dependencies and bounds
 

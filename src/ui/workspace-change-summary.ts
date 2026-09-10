@@ -11,5 +11,8 @@ export function workspaceChangeSummary(result: ApplicationResult, locale: string
     attention: ar ? "يتطلب التطبيق تدخلاً. افحص الموافقات وسجل الاسترداد محلياً قبل إعادة المحاولة." : "Application needs attention. Inspect current approval scope and recovery state locally before retrying."
   };
   const id = /^artifact_[a-zA-Z0-9_-]+$|^[a-f0-9-]{36}$/u.test(result.artifact.id) ? result.artifact.id : undefined;
-  return `${messages[result.status]}${id ? `\n${ar ? "الأثر" : "Artifact"}: ${ar ? isolateLtr(id) : id}` : ""}`;
+  const message = result.code === "copy-consumed"
+    ? ar ? "لهذه النسخة سجل تطبيق سابق. لم تُطبّق تغييرات جديدة. راجع السجل وأنشئ نسخة جديدة لمتابعة العمل." : "This copy already has an application receipt. No new changes were applied. Inspect/recover the receipt and prepare a fresh copy for further work."
+    : messages[result.status];
+  return `${message}${id ? `\n${ar ? "الأثر" : "Artifact"}: ${ar ? isolateLtr(id) : id}` : ""}`;
 }

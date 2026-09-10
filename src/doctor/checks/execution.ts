@@ -1,3 +1,5 @@
+import { dockerControls } from "../../execution/docker-limits.js";
+import { isolateLtr } from "../../ui/bidi.js";
 import { selectedExecutionPolicy } from "../../execution/docker-policy.js";
 import { DockerClient } from "../../execution/docker-client.js";
 import { verifyHostExecution } from "../../execution/host-authority.js";
@@ -24,11 +26,18 @@ export async function diagnoseExecution(input: { homeDir?: string; profileId: st
         "Local host: filesystem and command network are not sandboxed. Trust and tool approvals still apply.",
         "المضيف المحلي: الملفات وشبكة الأوامر غير معزولة. تظل الثقة وموافقات الأدوات مطلوبة.");
     }
+    let degradations: string[];
+    try { degradations = dockerControls(policy).degradations; }
+    catch (error) {
+      const detail = error instanceof Error ? error.message : "Unsupported Docker requirements.";
+      return result("blocked", `${detail} Review Execution in Setup Editor before running work.`, `تعذر فرض قيود Docker المطلوبة: ${isolateLtr(detail)} راجع التنفيذ في محرر الإعداد قبل بدء العمل.`);
+    }
     const client = await connect();
     const info = JSON.parse(await client.run(["info", "--format", "{{json .}}"], 5000));
     const image = JSON.parse(await client.run(["image", "inspect", policy.imageId!], 5000))[0];
     if (info.OSType !== "linux" || String(info.CgroupVersion) !== "2" || !info.SecurityOptions?.some((v: string) => v.startsWith("name=seccomp")) ||
-      image?.Id !== policy.imageId || image.Config?.Labels?.["io.estacoda.execution.version"] !== "1") throw new Error("unavailable");
+      image?.Id !== policy.imageId || image.Config?.Labels?.["io.estacoda.execution.version"] !== "1" || Object.keys(image.Config?.Volumes ?? {}).length) throw new Error("unavailable");
+    if (degradations.length) return result("warning", "Docker cannot enforce requested advisory controls; defaults will apply. Review Execution in Setup Editor.", "لا يستطيع Docker فرض القيود الاستشارية المطلوبة؛ ستُستخدم الإعدادات الافتراضية. راجع التنفيذ في محرر الإعداد.");
     return result("info", "Docker engine and selected image are available. Container controls are verified on acquisition; no container was started. Tool approvals remain separate.",
       "محرك Docker والصورة المحددة متاحان. تُفحص قيود الحاوية عند بدء التنفيذ؛ لم تُشغّل حاوية. موافقات الأدوات مستقلة.");
   } catch {

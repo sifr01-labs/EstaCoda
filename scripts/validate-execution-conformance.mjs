@@ -24,6 +24,7 @@ const groups = {
     'src/execution/docker-container.test.ts', 'src/execution/docker-processes.test.ts',
     'src/execution/docker-tool-boundary.test.ts', 'src/execution/docker-receipts.test.ts',
     'src/runtime/live-execution-authority.test.ts', 'src/execution/release-stress.test.ts',
+    'src/runtime/runtime-acquisition.test.ts', 'src/tools/tool-executor.test.ts',
     'src/security/approval-scope.test.ts', 'src/security/workspace-approval-controller.test.ts'
   ],
   application: [

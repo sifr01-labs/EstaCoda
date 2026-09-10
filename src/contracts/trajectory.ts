@@ -16,6 +16,7 @@ export type TrajectoryEventKind =
   | "skill-playbook-step"
   | "tool-plan"
   | "tool-call"
+  | "tool-approval-requested"
   | "tool-gated"
   | "tool-result"
   | "artifact-created"

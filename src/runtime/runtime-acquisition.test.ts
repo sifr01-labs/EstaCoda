@@ -47,3 +47,32 @@ it.skipIf(process.platform === "win32")("cancels active commands and refuses set
     await expect(access(join(root, "finished.txt"))).rejects.toThrow();
   } finally { await runtime.dispose(); db.close(); await rm(root, { recursive: true, force: true }); }
 });
+it("persists definition references for the final tool registry and stable authority", async () => {
+  const root = await mkdtemp(join(tmpdir(), "runtime-references-"));
+  const db = new SQLiteSessionDB({ path: join(root, "sessions.sqlite") });
+  const trustStore = new WorkspaceTrustStore({ homeDir: root }); await trustStore.grant(root);
+  const model = { provider: "fixture", id: "fixture", contextWindowTokens: 8192, supportsTools: true, supportsVision: false, supportsStructuredOutput: false };
+  const registry = new ProviderRegistry();
+  registry.register({ id: model.provider, name: "Fixture", executable: true, health: () => ({ available: true }), listModels: () => [model],
+    complete: async () => ({ ok: true, provider: model.provider, model: model.id, content: "Hello.", finishReason: "stop" }) });
+  const references: Array<{ definitionRevision: string; authorityRevision: string }> = [];
+  try {
+    for (const disabledToolsets of [[], ["shell-write"], ["shell-write"]]) {
+      const sessionId = `reference-${references.length}`;
+      const runtime = await createRuntime({ tokens: resolveTokens("standard", "dark", "kemetBlue"), model, providerRegistry: registry,
+        primaryModelRoute: { provider: model.provider, id: model.id, profile: model, authMethod: "none" },
+        homeDir: root, workspaceRoot: root, localSkillsRoot: join(root, "skills"), profileId: "default", sessionId, sessionDb: db,
+        closeSessionDbOnDispose: false, securityMode: "open", trustStore, disabledToolsets });
+      try {
+        await runtime.handle({ channel: "cli", text: "Hello" });
+        const refs = (await db.listTrajectoriesForSession(sessionId))[0]!.executionReferences!;
+        expect(refs.definitionRevision).toMatch(/^[a-f0-9]{64}$/u);
+        expect(refs.authorityRevision).toMatch(/^[a-f0-9]{64}$/u);
+        references.push(refs);
+      } finally { await runtime.dispose(); }
+    }
+    expect(references[0]!.definitionRevision).not.toBe(references[1]!.definitionRevision);
+    expect(references[1]).toEqual(references[2]);
+    expect(references[0]!.authorityRevision).toBe(references[1]!.authorityRevision);
+  } finally { db.close(); await rm(root, { recursive: true, force: true }); }
+});

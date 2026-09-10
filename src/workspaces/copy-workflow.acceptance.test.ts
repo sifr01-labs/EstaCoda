@@ -25,8 +25,9 @@ it.each(["apply", "review", "conflict", "remote", "attached", "busy"])("real run
     const calls = [["file.read", { path: "counter.cjs" }], ["file.patch", { mode: "replace", path: "counter.cjs", old_string: "n + 1", new_string: "n + 2" }], ["terminal.run", { command: "node verify.cjs", timeoutMs: 5000 }]] as const;
     registry.register({ id: model.provider, name: "Copy fixture", executable: true, health: () => ({ available: true }), listModels: () => [model],
       complete: async (): Promise<ProviderResponse> => {
-        const call = calls[step++];
+        const call = step === 4 ? (step++, ["file.read", { path: "counter.cjs" }] as const) : calls[step++];
         return { ok: true, provider: model.provider, model: model.id, content: call ? "" : "Edit verified.", finishReason: call ? "tool_calls" : "stop",
+          usage: { inputTokens: 100, outputTokens: 10, totalTokens: 110 },
           ...(call ? { raw: { choices: [{ message: { tool_calls: [{ id: `call-${step}`, function: { name: call[0], arguments: JSON.stringify(call[1]) } }] } }] } } : {}) };
       } });
     runtime = await createRuntime({ tokens: resolveTokens("standard", "dark", "kemetBlue"), model, providerRegistry: registry,
@@ -46,7 +47,26 @@ it.each(["apply", "review", "conflict", "remote", "attached", "busy"])("real run
       expect(response.text).toContain(outcome === "conflict" ? "Source files conflict" : outcome === "apply" ? "Changes applied" : "Changes saved for review");
       expect((await db.listEvents("copy-session")).some((event) => event.kind === "session-artifact-registered")).toBe(true);
     }
+    const events = await db.listEvents("copy-session");
+    expect(events.filter((event) => event.kind === "execution-final-outcome-recorded").at(-1)).toMatchObject({ status: response.finalOutcome!.status });
+    const trajectory = (await db.listTrajectoriesForSession("copy-session"))[0]!;
+    expect(trajectory.outcome?.status).toBe(response.finalOutcome!.status);
+    expect(trajectory.executionReferences?.definitionRevision).toMatch(/^[a-f0-9]{64}$/u);
+    expect(trajectory.executionReferences?.authorityRevision).toMatch(/^[a-f0-9]{64}$/u);
+    expect(trajectory.executionMetrics).toMatchObject({ providerDispatches: 4, usageReports: 4, reportedTokens: 440 });
+    const message = (await db.listMessages("copy-session")).filter((entry) => entry.role === "agent").at(-1)!;
+    expect(message.content).toBe(response.text);
+    for (const artifact of response.artifacts) expect(JSON.stringify(message.metadata)).toContain(artifact.id);
     if (outcome === "busy") expect(response.text).toContain("await settlement");
     if (outcome === "conflict" || outcome === "busy") expect(response.finalOutcome?.status).toBe("partially_completed");
+    if (outcome === "apply") {
+      await writeFile(join(f.destination, "counter.cjs"), "later edit\n");
+      const later = await runtime.handle({ channel: "cli", text: "Read counter.cjs and summarize its contents." });
+      expect(later.finalOutcome?.status).toBe("partially_completed");
+      expect(later.text).toContain("No new changes were applied");
+      expect(await readFile(join(f.source, "counter.cjs"), "utf8")).toBe("module.exports = n => n + 2;\n");
+      expect((await db.listTrajectoriesForSession("copy-session"))[0]!.outcome?.status).toBe("partially_completed");
+      expect((await db.listMessages("copy-session")).filter((entry) => entry.role === "agent").at(-1)!.content).toBe(later.text);
+    }
   } finally { await runtime?.dispose(); db.close(); changes.close(); await f.cleanup(); }
 }, 30000);

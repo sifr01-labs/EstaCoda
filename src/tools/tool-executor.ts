@@ -404,6 +404,10 @@ export class ToolExecutor {
     let assessment = await assessSecurityPolicy(this.#securityPolicy, securityRequest);
     await this.#recordSecurityAssessment(request.sessionId, tool.name, riskClass, persistedTargetKey, persistedTargetSummary, assessment);
 
+    if (assessment.decision === "ask" && !isAbortSignalAborted(request.signal)) {
+      this.#trajectoryRecorder.record("tool-approval-requested", { tool: tool.name });
+    }
+
     if (assessment.decision === "ask" && request.onApprovalRequest !== undefined && !isAbortSignalAborted(request.signal)) {
       let operatorDecision: Awaited<ReturnType<ToolApprovalHandler>> = "denied";
       try {
