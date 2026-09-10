@@ -1,12 +1,13 @@
 import { expect, it } from "vitest";
-import { assertEnvelope, failureEnvelope, parseControlFrame, serializeControlFrame, utf8Bytes } from "./envelopes.js";
+import { assertEnvelope, failureEnvelope, parseControlFrame, serializeControlFrame, utf8Bytes, type RpcEnvelope } from "./envelopes.js";
 
 it("round trips framed requests, notifications, results and fixed safe errors", () => {
-  for (const value of [
+  const values: RpcEnvelope[] = [
     { jsonrpc: "2.0" as const, id: "r1", method: "control.initialize", params: {} },
     { jsonrpc: "2.0" as const, method: "control.event", params: { text: "مرحبا 🌊\nnext" } },
     { jsonrpc: "2.0" as const, id: "r1", result: null }, failureEnvelope(null, "-32700"),
-  ]) expect(parseControlFrame(serializeControlFrame(value))).toEqual(value);
+  ];
+  for (const value of values) expect(parseControlFrame(serializeControlFrame(value))).toEqual(value);
   expect(utf8Bytes("مرحبا 🌊")).toBe(Buffer.byteLength("مرحبا 🌊"));
 });
 it("rejects batches, ambiguous envelopes, unknown fields and unsafe error bodies", () => {
