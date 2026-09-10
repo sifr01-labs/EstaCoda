@@ -39,7 +39,10 @@ export function deriveExecutionCompletionFloor(input: {
   // Scope negation before punctuation/contractions are flattened: "and add"
   // inside "do not modify ... and add" is not a requested mutation.
   const text = normalizeExpectationText(input.userText);
-  const mutationText = normalizeExpectationText(affirmativeRequestSegments(input.userText.normalize("NFKC")).join(" "));
+  // Preserve comma boundaries only after negation and quoted examples are scoped.
+  // Flattening them loses the requested edit in "read the file, update it".
+  const mutationText = affirmativeRequestSegments(input.userText.normalize("NFKC").replace(/`[^`\n]*`/gu, " "))
+    .map((segment) => segment.split(",").map(normalizeExpectationText).join(", ")).join(" ");
   if (text.length === 0 || requestsInformationOnly(text)) return "none";
 
   const capabilities = input.capabilities ?? [];
@@ -50,7 +53,7 @@ export function deriveExecutionCompletionFloor(input: {
   const arabicMutationAction = /(?:حد[ّ]?ث|حدّث|أعد|اضبط|هيئ|أنشئ|أضف|غيّر|عدّل|اكتب|احفظ|ارفع|أرسل|احذف|أزل|ثبّت|اربط|املأ|أدخل|نفّذ|ابن|أكمل|أنه|طبّق|انشر)/u;
   const readLedRequest = /^(?:(?:can|could|would)\s+you\s+|please\s+)?(?:inspect|review|check|find|list|show|get|read|analy[sz]e|look\s+at|search|open)\b/iu.test(text) ||
     /^(?:من فضلك\s+)?(?:افحص|راجع|تحقق|ابحث|اعرض|اقرأ|حلل|انظر|افتح)/u.test(text);
-  const explicitMutationSequence = /\b(?:and|then)\s+(?:please\s+)?(?:update|set\s*up|configure|create|add|change|edit|modify|write|save|delete|remove|fix|complete|finish|apply|deploy|publish)\b/iu.test(mutationText) ||
+  const explicitMutationSequence = /(?:\b(?:and|then)\s+|,\s*)(?:please\s+)?(?:update|set\s*up|configure|create|add|change|edit|modify|write|save|delete|remove|fix|complete|finish|apply|deploy|publish)\b/iu.test(mutationText) ||
     /(?:ثم|و)\s*(?:حد[ّ]?ث|اضبط|هيئ|أنشئ|أضف|غيّر|عدّل|اكتب|احذف|أكمل|طبّق|انشر)/u.test(mutationText);
   const requestsMutation = (mutationAction.test(mutationText) || arabicMutationAction.test(mutationText)) &&
     (!readLedRequest || explicitMutationSequence) &&

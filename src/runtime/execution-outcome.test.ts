@@ -219,6 +219,27 @@ describe("execution outcome receipts", () => {
   });
 
   it.each([
+    "Read counter.cjs, update its exported number from 0 to 1 using file.patch, then run node test.cjs to test it.",
+    "Read the file, please modify its contents.",
+    "Read the file,update its contents.",
+    "Read the file， update its contents.",
+    "Read the file, update its contents. Do not add tests."
+  ])("requires mutation evidence for comma-separated actions: %s", (userText) => {
+    expect(deriveExecutionCompletionFloor({ userText })).toBe("mutation");
+  });
+
+  it.each([
+    "Read the file, do not modify it, add tests or update its contents.",
+    "Read the file, don't modify it, then update its contents.",
+    'Read the file containing "read the file, update its contents".',
+    "Read the file containing `read the file, update its contents`.",
+    "Read the file, the update notes, and the tests.",
+    "Read the file, then summarize the changes."
+  ])("keeps comma-separated constraints and quoted examples read-only: %s", (userText) => {
+    expect(deriveExecutionCompletionFloor({ userText })).toBe("read");
+  });
+
+  it.each([
     "Read the file. Do not modify the code and add tests.",
     "Read the file and don't change the code or add tests.",
     "Read the file; DON’T modify it and then add tests.",
@@ -243,6 +264,11 @@ describe("execution outcome receipts", () => {
   });
 
   it("preserves explicit and configured verification requirements on genuine edits", () => {
+    expect(deriveExecutionCompletionFloor({ userText: "Read the file, update it, then verify it." })).toBe("mutation_with_verification");
+    expect(deriveExecutionCompletionFloor({ userText: "Read Postman, update its collection.", capabilities: [
+      { tool: "mcp.postman.updateCollection", kind: "mutation", connector: { kind: "mcp", id: "postman" } },
+      { tool: "mcp.postman.getCollection", kind: "verification", verifies: ["mcp.postman.updateCollection"], connector: { kind: "mcp", id: "postman" } }
+    ] })).toBe("mutation_with_verification");
     expect(deriveExecutionCompletionFloor({ userText: "Read the file and update it, then verify it. Do not add tests." })).toBe("mutation_with_verification");
     expect(deriveExecutionCompletionFloor({ userText: "Update Postman without adding variables.", capabilities: [
       { tool: "mcp.postman.updateCollection", kind: "mutation", connector: { kind: "mcp", id: "postman" } },

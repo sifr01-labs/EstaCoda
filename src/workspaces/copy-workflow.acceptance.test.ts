@@ -79,6 +79,47 @@ it.each(["apply", "review", "conflict", "remote", "attached", "busy"])("real run
 }, 30000);
 
 it.each([
+  { progress: "none", status: "blocked", count: 0 },
+  { progress: "read", status: "partially_completed", count: 1 },
+  { progress: "edit-and-test", status: "completed", count: 3 }
+])("persists the actual progress of comma-separated edit requests: $progress", async ({ progress, status, count }) => {
+  const f = await copyFixture(), changes = new ChangeApplicationStore(f), db = new SQLiteSessionDB({ path: join(f.homeDir, "sessions.sqlite") });
+  let runtime: Awaited<ReturnType<typeof createRuntime>> | undefined;
+  try {
+    await writeFile(join(f.source, "counter.cjs"), "module.exports = 0;\n");
+    await writeFile(join(f.source, "test.cjs"), "require('node:assert/strict').equal(require('./counter.cjs'), 1);\n");
+    const model: ModelProfile = { provider: "copy-fixture", id: "comma-fixture", contextWindowTokens: 131072, supportsTools: true, supportsVision: false, supportsStructuredOutput: true };
+    const registry = new ProviderRegistry(); let step = 0;
+    const calls = [["file.read", { path: "counter.cjs" }],
+      ["file.patch", { mode: "replace", path: "counter.cjs", old_string: "module.exports = 0;", new_string: "module.exports = 1;" }],
+      ["terminal.run", { command: "node test.cjs", timeoutMs: 5000 }]] as const;
+    registry.register({ id: model.provider, name: "Comma fixture", executable: true, health: () => ({ available: true }), listModels: () => [model],
+      complete: async (request: ProviderRequest): Promise<ProviderResponse> => {
+        expect(step).toBeLessThanOrEqual(count);
+        for (const name of ["file_read", "file_patch", "terminal_run"]) {
+          expect(request.tools).toEqual(expect.arrayContaining([expect.objectContaining({ function: expect.objectContaining({ name }) })]));
+        }
+        const call = step < count ? calls[step] : undefined; step++;
+        // A provider's claim cannot stand in for the omitted mutation receipt.
+        return { ok: true, provider: model.provider, model: model.id, content: call ? "" : "The update passed node test.cjs.", finishReason: call ? "tool_calls" : "stop",
+          ...(call ? { raw: { choices: [{ message: { tool_calls: [{ id: `comma-${step}`, function: { name: call[0].replaceAll(".", "_"), arguments: JSON.stringify(call[1]) } }] } }] } } : {}) };
+      } });
+    runtime = await createRuntime({ tokens: resolveTokens("standard", "dark", "kemetBlue"), model, providerRegistry: registry,
+      primaryModelRoute: { provider: model.provider, id: model.id, profile: model, authMethod: "none" },
+      homeDir: f.homeDir, profileId: f.profileId, workspaceRoot: f.source, localSkillsRoot: join(f.homeDir, "skills"),
+      sessionId: "comma-session", sessionMetadata: { originSurface: "cli" }, sessionDb: db,
+      closeSessionDbOnDispose: false, securityMode: "open", workspaceTrusted: true, trustStore: changes.trust });
+    const response = await runtime.handle({ channel: "cli", text: "Read counter.cjs, update its exported number from 0 to 1 using file.patch, then run node test.cjs to test it." });
+    expect(response.finalOutcome).toMatchObject({ status, completionFloor: "mutation" });
+    expect(response.toolExecutions.map((entry) => [entry.tool.name, entry.result?.ok])).toEqual(calls.slice(0, count).map(([name]) => [name, true]));
+    expect(await readFile(join(f.source, "counter.cjs"), "utf8")).toBe(`module.exports = ${progress === "edit-and-test" ? 1 : 0};\n`);
+    expect((await db.listTrajectoriesForSession("comma-session"))[0]!.outcome).toMatchObject({ status, completionFloor: "mutation" });
+    expect((await db.listEvents("comma-session")).filter((event) => event.kind === "execution-final-outcome-recorded").at(-1)).toMatchObject({ status });
+    expect((await db.listMessages("comma-session")).filter((message) => message.role === "agent").at(-1)!.content).toBe(response.text);
+  } finally { await runtime?.dispose(); db.close(); changes.close(); await f.cleanup(); }
+}, 30000);
+
+it.each([
   { read: true, text: "Read counter.cjs and summarize its contents. Do not modify the code and add tests." },
   { read: false, text: "Read counter.cjs and summarize its contents. Do not modify the code and add tests." },
   { read: true, text: "Read counter.cjs and summarize its contents. Do not modify the code and add tests.", ending: "If you actually meant 'do add tests', just say the word and I'll add a test file (e.g., counter.test.cjs) without changing the module." },
