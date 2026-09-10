@@ -69,6 +69,8 @@ export type Trajectory = {
   sessionId: string;
   modelId: string;
   events: TrajectoryEvent[];
+  executionMetrics?: ExecutionMetricSnapshot;
+  executionReferences?: { definitionRevision: string; authorityRevision: string };
   outcome?: {
     success: boolean;
     status?: ExecutionFinalOutcomeStatus;
@@ -87,4 +89,11 @@ export type CompressedTrajectory = {
   summary: string;
   preservedEventIds: string[];
   evaluationSignals: Record<string, unknown>;
+};
+
+/** Bounded cumulative observations; missing usage is not zero-token inference. */
+export type ExecutionMetricSnapshot = {
+  version: 1; elapsedMs: number; providerCompletions: number; providerDispatches: number; reportedTokens: number; usageReports: number;
+  approvalRequests: number; deniedTools: number; toolResults: number; failedTools: number; cancellations: number;
+  checkpointUpdates: number; completedTurns: number; failedTurns: number;
 };

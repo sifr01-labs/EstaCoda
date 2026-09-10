@@ -1,3 +1,4 @@
+import { ExecutionMetrics } from "./execution-metrics.js";
 import type {
   CompressedTrajectory,
   Trajectory,
@@ -14,6 +15,7 @@ export type TrajectoryRecorderOptions = {
 };
 
 export class TrajectoryRecorder {
+  readonly #metrics = new ExecutionMetrics();
   readonly #trajectory: Trajectory;
   readonly #now: () => Date;
   readonly #id: () => string;
@@ -31,6 +33,7 @@ export class TrajectoryRecorder {
   }
 
   record(kind: TrajectoryEventKind, data: Record<string, unknown>): TrajectoryEvent {
+    this.#metrics.observe(kind, data);
     const event: TrajectoryEvent = {
       id: this.#id(),
       kind,
@@ -40,6 +43,11 @@ export class TrajectoryRecorder {
 
     this.#trajectory.events.push(event);
     return event;
+  }
+
+  bindExecution(references: { definitionRevision: string; authorityRevision: string }): void {
+    if (!/^[a-f0-9]{64}$/u.test(references.definitionRevision) || !/^[a-f0-9]{64}$/u.test(references.authorityRevision)) return;
+    this.#trajectory.executionReferences = { definitionRevision: references.definitionRevision, authorityRevision: references.authorityRevision };
   }
 
   complete(outcome: Trajectory["outcome"]): Trajectory {
@@ -57,6 +65,8 @@ export class TrajectoryRecorder {
   snapshot(): Trajectory {
     return {
       ...this.#trajectory,
+      executionMetrics: this.#metrics.snapshot(),
+      ...(this.#trajectory.executionReferences ? { executionReferences: { ...this.#trajectory.executionReferences } } : {}),
       events: this.#trajectory.events.map((event) => ({ ...event, data: { ...event.data } })),
       outcome:
         this.#trajectory.outcome === undefined ? undefined : { ...this.#trajectory.outcome }
@@ -79,6 +89,8 @@ export class TrajectoryRecorder {
       summary: summarize(trajectory),
       preservedEventIds,
       evaluationSignals: {
+        executionMetrics: trajectory.executionMetrics,
+        executionReferences: trajectory.executionReferences,
         eventCount: trajectory.events.length,
         success: trajectory.outcome?.success ?? null,
         finalOutcomeStatus: trajectory.outcome?.status ?? null,

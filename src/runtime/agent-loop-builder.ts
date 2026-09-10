@@ -377,20 +377,23 @@ export class AgentLoopBuilder {
         )
       : undefined;
     const boundTarget = (await input.sessionDb.getSession(input.sessionId))?.executionTarget;
+    const executionBinding = () => {
+      if (!boundTarget || !executionLease) return undefined;
+      const definitionRevision = stableJsonHash(redactSensitiveText(JSON.stringify({
+        tools: toolRegistry.list().map((tool) => ({ name: tool.name, description: tool.description, inputSchema: tool.inputSchema, toolsets: tool.toolsets })),
+        skills: substrate.skillRegistry.list().map((skill) => ({ name: skill.name, version: skill.version, routing: skill.routing, playbook: skill.playbook, instructions: "instructions" in skill ? skill.instructions : undefined })),
+        agentProfile: input.agentProfile
+      })));
+      const authorityRevision = executionAuthorityFingerprint(executionLease.facts);
+      return { targetId: boundTarget.targetId, targetGeneration: boundTarget.targetGeneration,
+        workspaceIdentityHash: boundTarget.workspace.identityHash, definitionRevision, authorityRevision,
+        originalDefinitionRevision: definitionRevision, originalAuthorityRevision: authorityRevision };
+    };
+    const references = executionBinding();
+    if (references) input.trajectoryRecorder.bindExecution(references);
     const executionCheckpointController = ownsForegroundSupervision
       ? new ExecutionCheckpointController({
-          executionBinding: () => {
-            if (!boundTarget || !executionLease) return undefined;
-            const definitionRevision = stableJsonHash(redactSensitiveText(JSON.stringify({
-              tools: toolRegistry.list().map((tool) => ({ name: tool.name, description: tool.description, inputSchema: tool.inputSchema, toolsets: tool.toolsets })),
-              skills: substrate.skillRegistry.list().map((skill) => ({ name: skill.name, version: skill.version, routing: skill.routing, playbook: skill.playbook, instructions: "instructions" in skill ? skill.instructions : undefined })),
-              agentProfile: input.agentProfile
-            })));
-            const authorityRevision = executionAuthorityFingerprint(executionLease.facts);
-            return { targetId: boundTarget.targetId, targetGeneration: boundTarget.targetGeneration,
-              workspaceIdentityHash: boundTarget.workspace.identityHash, definitionRevision, authorityRevision,
-              originalDefinitionRevision: definitionRevision, originalAuthorityRevision: authorityRevision };
-          },
+          executionBinding,
           sessionId: () => sessionRuntimeContext.currentSessionId(),
           profileId: substrate.profileId,
           record: (event) => runRecorder.recordExecutionCheckpointTransition(event)
