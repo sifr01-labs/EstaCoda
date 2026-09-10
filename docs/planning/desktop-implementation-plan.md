@@ -131,6 +131,8 @@ Desktop bootstrap/setup works without an execution host. Starting Work connects 
 
 ## 5. Proposed repository structure
 
+The tree below remains the delivery layout, not the current filesystem. Desktop PR 1 follows the [protocol packaging decision](../architecture/desktop/decisions.md): canonical pure host contracts live under `src/contracts/control-protocol.ts`, and the private workspace package re-exports them without moving the CLI build root. Existing targets live under `src/workspaces`; extend those owners rather than creating a second target store to match this illustrative tree.
+
 ```text
 estacoda/
 ├── apps/
@@ -313,6 +315,8 @@ Rules:
 ## 8. Control protocol
 
 ### 8.1 Initialization
+
+This is the planned Desktop transport. Current private host control uses an authenticated single-request v1 envelope, not JSON-RPC or capability negotiation; see the [compatibility decision](../architecture/desktop/decisions.md#adr-d-002--preserve-existing-host-wire-v1-add-desktop-transport-explicitly). PRs 2–3 must provide validated adapters and coordinate any missing host generation contracts before advertising dependent mutations. PR 1 preserves host wire behavior.
 
 The first request is `control.initialize`, carrying protocol version, client version, selected profile, and supported capabilities. A major mismatch fails initialization. Minor differences use capability negotiation.
 
@@ -1280,7 +1284,7 @@ Complete these slices before managed worktree lifecycle, PTY integration, broade
 
 ## 17. Implementation hygiene
 
-The repository currently contains unrelated uncommitted execution-plan/evidence work and untracked files. Before implementation, their owner should commit or otherwise isolate that work. Desktop commits must not absorb unrelated changes, duplicate-looking files, generated output, or blind snapshot churn.
+The operator checkout contains unrelated untracked duplicate-looking files. Desktop commits must stage explicit task-owned paths and leave unrelated content alone. When those files affect TypeScript discovery, validate a clean temporary copy of the tracked tree plus explicitly reviewed new files. Desktop commits must not absorb unrelated changes, generated output, or blind snapshot churn.
 
 Every security-sensitive PR includes:
 

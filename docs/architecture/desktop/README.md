@@ -55,6 +55,8 @@ The [threat model](threat-model.md) maps renderer, service, provider and channel
 
 The [credential transaction design](credential-transactions.md) defines candidate lifetime, isolated transport, reviewed apply, cancellation races and the existing multi-file atomicity gap.
 
+The [protocol/process/packaging decisions](decisions.md) distinguish existing host wire v1 from the planned Desktop JSON-RPC transport and preserve CLI packaging through a pure shared-source facade.
+
 PR 1 establishes decisions and the minimal package boundary; it cannot prove Electron sandboxing, staged credential isolation, two-window behavior, or packaged quit/relaunch. Those need actual process tests in PRs 2–5 and packaged release validation. The early bridge/supervisor lifecycle proof belongs to PRs 3–5; no shell or service is claimed here merely because Milestone 0 lists that proof as a prerequisite for later UI delivery.
 
 Risk: downstream code could confuse a client bridge or a display projection with an authority owner. Review subsequent implementations against this matrix and the shared conformance cases. PR 1 changes no storage schema, grants, profile configuration, services, or execution lifetime.
