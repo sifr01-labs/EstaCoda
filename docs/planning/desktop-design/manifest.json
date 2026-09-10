@@ -1,0 +1,34 @@
+{
+  "designVersion": 1,
+  "approvedOn": "2026-09-10",
+  "status": "Approved visual reference; production implementation pending",
+  "sourceName": "estacoda-branded-workspace",
+  "defaultState": {
+    "theme": "kemet",
+    "appearance": "system",
+    "density": "comfortable",
+    "sidebarWidthPx": 224,
+    "inspectorOpen": false,
+    "page": "work",
+    "work": "welcome"
+  },
+  "wordmarkProvenance": "PNG recovered without alteration from the approved fragment embedded SVG image; original screenshot path was temporary",
+  "files": {
+    "approved-prototype.html": {
+      "sha256": "75d515400bc5bd9f61429e89872faa039c49b530a94b5f80643f0d53e2be70f9",
+      "bytes": 154955
+    },
+    "preview.html": {
+      "sha256": "326d4a8e52e5f481e235674e896010c8510ac6b8310278d9a7e02d746b2b47cc",
+      "bytes": 212201
+    },
+    "assets/estacoda-icon.svg": {
+      "sha256": "b03f96ca781acdec00b4230efc8e7bab74d17d13be76d532b7543a9e59525c63",
+      "bytes": 1468
+    },
+    "assets/estacoda-wordmark-reference.png": {
+      "sha256": "776dae3658c888d3f83a7741b392684da6fe41a4ffd759b3ac1036d7df7adc0c",
+      "bytes": 35917
+    }
+  }
+}

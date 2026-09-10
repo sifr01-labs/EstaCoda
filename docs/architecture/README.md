@@ -21,3 +21,4 @@ All statements here are grounded in the current codebase. If a feature is not im
 | [Knowledge Map](./knowledge-map.md) | Runtime concept map with Mermaid visualization |
 | [Boundary Maps](./boundary-maps.md) | Cross-subsystem boundary analysis: memory, skills, provider loop, observability |
 | [Risk Register](./risk-register.md) | Architecture risks, severity, and mitigation |
+| [Desktop foundation](./desktop/README.md) | Planned desktop product, existing core ownership, and staged delivery boundaries |

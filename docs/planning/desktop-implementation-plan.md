@@ -1,6 +1,8 @@
 # EstaCoda Desktop implementation plan
 
-Status: consolidated implementation plan for review. This revision incorporates first-class Models/Providers and Connections/Telegram setup, operation, and diagnostics.
+Status: implementation plan with approved Desktop visual direction, version 1 · 10 September 2026. PR 5 now includes the complete approved interface and visual acceptance gate; production integrations remain sequenced below. Planned capabilities are not claims of shipped functionality.
+
+The [Desktop visual and interaction contract](desktop-visual-contract.md), [frozen branded prototype](desktop-design/README.md), and [acceptance matrix](desktop-design/acceptance-matrix.md) are required inputs to PR 5 and subsequent UI work. They supersede earlier visual concepts. PR numbers in this document refer to Desktop, not the workspace-execution series.
 
 Shared contract and ownership decisions are defined in [Shared workspace, target, and execution ownership decisions](workspace-execution-ownership-decisions.md). That document is authoritative for overlap with the workspace plan. The architecture below consumes its core target bindings and supervisor ownership; these are proposed capabilities, not shipped behavior.
 
@@ -57,34 +59,37 @@ The existing terminal UI is already named the Operator Console. Name the desktop
 
 ## 3. Product information architecture
 
-The permanent shell uses a navigation rail, a flexible primary surface, and a collapsible inspector.
+The permanent shell follows the approved neutral sidebar, flexible primary surface, collapsed-by-default inspector, and bottom runtime strip. Geometry, palette, assets, and interaction details are locked in the [visual contract](desktop-visual-contract.md).
 
 ```text
 ┌─────────────┬────────────────────────────────────┬────────────────┐
-│ Navigation  │ Primary surface                    │ Inspector      │
-│             │                                    │ collapsible    │
-│ Inbox       │ Work list or selected Work         │                │
-│ Work        │                                    │ Plan           │
-│ Models      │ Conversation, activity, output,    │ Activity       │
-│ Connections │ setup, or operational view         │ Files          │
-│ Scheduled   │                                    │ Diff           │
-│ Library     │                                    │ Terminal       │
-│ Settings    │                                    │ Evidence       │
-│             │                                    │ Details        │
-└─────────────┴────────────────────────────────────┴────────────────┘
+│ Brand / ⚙   │ Primary surface                    │ Inspector      │
+│ Search / +  │                                    │ collapsible    │
+│ Work        │ New chat or selected Work          │                │
+│ Inbox       │                                    │ Plan           │
+│ Library     │ Activity / Changes / Results       │ Execution      │
+│ Connections │                                    │ Usage          │
+│             │ Conversation or operational view   │                │
+│ Pinned Work │                                    │                │
+│ Workspaces  │ Composer: + / safety   model / send │                │
+├─────────────┴────────────────────────────────────┴────────────────┤
+│ Runtime connection / running / attention / background schedules   │
+└──────────────────────────────────────────────────────────────────┘
 ```
 
-Navigation entries appear only when functional. Models is available before Work because an unconfigured profile must be repairable. Connections appears when Telegram setup and status are implemented.
+PR 5's isolated fixture showcase implements all approved destinations. In the live application, navigation entries appear only when functional, and actions follow advertised capabilities. Models is reachable through Settings before new Work because an unconfigured profile must be repairable; it is not an additional primary navigation item. Connections becomes live when Telegram setup and status are implemented. Never populate live views with sample data to imitate the showcase.
 
 Primary experiences:
 
 - **Inbox**: approvals, input requests, failures, trust/setup blockers, Evolution reviews, and delivery issues.
 - **Work**: sessions, durable Tasks, runs, activity, controls, and outcomes.
-- **Models**: providers, credentials, primary route, fallbacks, specialist routes, and diagnostics.
+- **Models, within Settings**: providers, credentials, primary route, fallbacks, specialist routes, and diagnostics; the composer exposes per-Work model selection.
 - **Connections**: Telegram first; later Discord, Email, and explicitly experimental WhatsApp.
-- **Scheduled**: existing once, interval, and Cron jobs plus execution history.
-- **Library**: artifacts, evidence, skills, memory, and Evolution proposals.
-- **Settings**: profile, trust, security, browser, voice, optional capabilities, diagnostics, and lifecycle.
+- **Background work, from the status strip**: runtime state and existing once, interval, and Cron jobs plus execution history.
+- **Library**: Artifacts and Skills & tools first; evidence, memory, and Evolution use the same hierarchy as their capabilities arrive.
+- **Settings, from the sidebar top icon**: Appearance and Models, followed by governed profile, trust, security, browser, voice, optional capabilities, diagnostics, and lifecycle controls.
+
+Search and New chat sit below the sidebar identity. Pinned Work precedes workspace-grouped chats. The composer keeps attachments and safety on the left and model/send on the right. Neither pinning nor search changes canonical Work ownership.
 
 ## 4. Process architecture
 
@@ -558,13 +563,15 @@ For channel approvals, the bridge invokes the supervisor's `ChannelGateway` loca
 
 Exit when approval survives app restart and forged, duplicate, cross-session, and cross-profile resolutions fail closed.
 
-### Milestone 4 — Secure Electron shell
+### Milestone 4 — Secure Electron shell and approved interface
 
 Implement secure BrowserWindow policy, service supervision, reconnecting protocol client, semantic preload methods, profile bootstrap, recovery screens, layout, keyboard navigation, and bidi-safe rendering.
 
+Implement the complete [approved visual contract](desktop-visual-contract.md) as reusable React components: official branding, semantic themes, navigation/search/pinning, composer and Work states, Inbox, inspector, Models/Appearance, Library, Connections, and background-work views. Use deterministic fixtures through the same view-model boundary for integrations not yet delivered. Fixture mode is isolated from live services and excluded from release entry points. Appearance preferences can be live in this milestone; runtime-affecting configuration retains reviewed apply paths.
+
 Deny unexpected navigation, windows, and permissions. Enforce CSP. Do not embed remote content in privileged frames.
 
-Exit when renderer compromise does not provide Node/filesystem access and service death produces a recoverable state.
+Exit when renderer compromise does not provide Node/filesystem access, service death produces a recoverable state, and every required [visual/interaction acceptance case](desktop-design/acceptance-matrix.md) has review evidence. A secure but generic shell does not satisfy this milestone. Live features still follow the delivery mapping in the visual contract.
 
 ### Milestone 5 — Models and Providers
 
@@ -937,11 +944,17 @@ pnpm run desktop:package
 
 Do not claim a full validation pass unless every configured command was actually run.
 
+### Visual and interaction regression gate
+
+PR 5 adds deterministic captures and interaction checks from the [approved design acceptance matrix](desktop-design/acceptance-matrix.md) to `desktop:e2e`, with a documented focused visual invocation. Capture and manually review the frozen reference against the React implementation before accepting the first golden images. Compare identical viewports, fonts, appearances, device scales, and fixture states; test light/dark, theme changes, keyboard access, zoom, mixed-direction text, and recovery. Keep this gate in later UI PRs. Do not silently update baselines to accept visual drift. These commands and screenshot baselines are planned additions, not existing validation results.
+
 ## 13. Commit and PR structure
 
 Deliver milestone PRs rather than one long-lived implementation branch. Every commit must compile and pass relevant tests. Preserve security-boundary commits during review instead of squashing them into unrelated UI work.
 
 ### PR 1 — Architecture and workspace foundation
+
+Implementation baseline: [Desktop architecture foundation](../architecture/desktop/README.md). PR 1 records decisions and registers the minimal shared package; the executable bridge/supervisor and packaged lifecycle proof require PRs 3–5. No Electron or service implementation is implied by these documentation commits.
 
 - `docs(desktop): define product scope and canonical ownership`
 - `docs(desktop): add renderer service provider and channel threat model`
@@ -980,7 +993,9 @@ Deliver milestone PRs rather than one long-lived implementation branch. Every co
 - `test(control-service): cover work grouping and status mapping`
 - `test(approvals): reject forged and cross-session resolutions`
 
-### PR 5 — Secure Electron shell
+### PR 5 — Secure Electron shell and approved interface
+
+Required inputs: [visual contract](desktop-visual-contract.md), [frozen reference and assets](desktop-design/README.md), and [acceptance matrix](desktop-design/acceptance-matrix.md). Deliver the complete approved appearance and fixture journeys in this PR, with live bootstrap/inspection proof. The sequence expands from 9 to 15 focused commits to make the design work and verification explicit.
 
 - `chore(desktop): scaffold Electron Forge Vite and React`
 - `feat(desktop-main): enforce secure window policy`
@@ -988,13 +1003,21 @@ Deliver milestone PRs rather than one long-lived implementation branch. Every co
 - `feat(desktop-main): add reconnecting protocol client`
 - `feat(desktop-main): add isolated credential submission path`
 - `feat(desktop-preload): expose narrow semantic APIs`
-- `feat(desktop-ui): add adaptive navigation and inspector shell`
+- `feat(desktop-ui): add approved brand assets semantic tokens and primitives`
+- `feat(desktop-ui): add Kemet Graphite Sand and appearance preferences`
+- `feat(desktop-ui): add approved sidebar search pinned work and navigation`
+- `feat(desktop-ui): add approved composer work inbox and inspector views`
+- `feat(desktop-ui): add library connections and background fixture views`
+- `feat(desktop-ui): add models appearance and setup fixture journeys`
 - `feat(desktop-ui): add profile bootstrap and recovery states`
+- `test(desktop-ui): verify approved visuals interactions and accessibility`
 - `test(desktop): cover preload exposure window policy and credential isolation`
 
-Dependency and lockfile changes stay in the scaffold or feature commit that requires them.
+Dependency and lockfile changes stay in the scaffold or feature commit that requires them. Introduce the isolated fixture adapter alongside its first consumer; later features reuse these components. The visual-test commit includes reviewed reference/React comparisons, capture metadata, and documented deviations. The source prototype remains frozen. Missing production brand quality, unexplained visual drift, or fixture calls reaching live services blocks PR 5 completion.
 
 ### PR 6 — Models and Providers
+
+Connect the PR 5 Settings/Models and composer components to live route/setup services. Preserve their approved appearance and rerun the visual gate; do not create a second dashboard design.
 
 - `feat(control-service): expose provider metadata and model catalog`
 - `feat(control-service): project route health and credential presence`
@@ -1017,16 +1040,22 @@ Dependency and lockfile changes stay in the scaffold or feature commit that requ
 
 ### PR 7 — Core Work experience
 
+Connect the approved Work, Inbox, search, pin references, composer, and runtime-count views to canonical projections. Extend the narrow protocol/Main API for bounded search and validated attachments if not already supported; include profile/target fencing and payload limits. No filename-only mock may count as live attachment submission.
+
 - `feat(desktop-work): add work list and detail routing`
+- `feat(desktop-work): connect bounded search and profile-scoped pin references`
+- `feat(desktop-work): add validated target-scoped attachment submission`
 - `feat(desktop-work): stream assistant and tool activity`
 - `feat(desktop-work): render plans tasks and child agents`
 - `feat(desktop-work): add lifecycle guidance and model controls`
 - `feat(desktop-approvals): add approve-once and reject cards`
 - `feat(desktop-inbox): add needs-attention workflow`
-- `feat(desktop-usage): show canonical cost and context usage`
-- `test(desktop-work): cover live task approval override and restart journeys`
+- `feat(desktop-usage): show canonical cost context usage and runtime counts`
+- `test(desktop-work): cover live task attachment search approval override and restart journeys`
 
 ### PR 8 — Connections and Telegram
+
+Connect the PR 5 Connections components to real readiness, authorization, and gateway projections. The Email fixture is not alpha scope or proof of a supported connection. Retain the approved visual gate.
 
 - `feat(control-service): project channel readiness and gateway liveness`
 - `feat(control-service): expose reviewed Telegram setup drafts`
@@ -1075,6 +1104,7 @@ Dependency and lockfile changes stay in the scaffold or feature commit that requ
 - `feat(evidence): project verified execution evidence`
 - `feat(control-service): expose artifact and evidence methods`
 - `feat(desktop-evidence): add completion and evidence views`
+- `feat(desktop-library): connect artifact browse preview and source work links`
 - `test(artifacts): cover integrity retention and isolation`
 - `test(evidence): distinguish verified partial and unverified outcomes`
 - `docs(desktop): document artifact and evidence guarantees`
@@ -1097,6 +1127,8 @@ Dependency and lockfile changes stay in the scaffold or feature commit that requ
 
 ### PR 14 — Governed settings and Library
 
+Connect and extend the existing PR 5 Settings and Skills & tools components; retain the approved navigation and theme system. Governed runtime configuration stays separate from local appearance preferences.
+
 - `feat(control-service): expose reviewed configuration drafts`
 - `feat(desktop-settings): add summary confirm apply verify flow`
 - `feat(control-service): project skills memory and evolution state`
@@ -1105,6 +1137,8 @@ Dependency and lockfile changes stay in the scaffold or feature commit that requ
 - `test(desktop-settings): prevent cancellation and blocked-apply writes`
 
 ### PR 15 — Scheduling
+
+Connect the approved status-strip scheduling entry and background-work views to canonical Cron projections. Unknown/disconnected state must not display fixture counts or imply that a scheduled run is active.
 
 - `feat(control-service): expose schedule and execution projections`
 - `feat(desktop-scheduled): add schedule list and history`
@@ -1132,7 +1166,10 @@ After PR 5:
 - service connects and recovers
 - profile isolation is proven
 - existing Work is inspectable
-- credential staging is isolated but no provider UI is assumed complete
+- credential staging is isolated; provider visual journeys are complete with fixtures, while live provider setup remains PR 6
+- all approved interface states have reviewed visual and interaction evidence against the frozen reference
+- Kemet/Graphite/Sand and Light/Dark/System work without losing draft or attachment state
+- fixture mode is isolated from runtime operations and absent from release entry points
 
 ### Usable internal prototype
 
@@ -1171,7 +1208,7 @@ Remote environments, event subscriptions, organization controls, and general plu
 
 For two experienced engineers, one core/runtime and one Electron/frontend:
 
-These provisional estimates must be revisited after workspace PRs 0–4 and the packaged ownership proof. They do not include delivering those shared runtime prerequisites with the same engineers. The small proof below intentionally precedes the full Models/Connections alpha scope.
+These provisional estimates must be revisited after workspace PRs 0–4 and the packaged ownership proof. They also require re-estimation for the expanded PR 5 visual implementation and regression gate; the original totals below are historical planning ranges, not a renewed delivery commitment. They do not include delivering those shared runtime prerequisites with the same engineers. The small proof below intentionally precedes the full Models/Connections alpha scope.
 
 | Work | Estimate |
 |---|---:|
