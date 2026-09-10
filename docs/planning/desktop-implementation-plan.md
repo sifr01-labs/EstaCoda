@@ -281,6 +281,8 @@ Renderer persistence is limited to layout, panel sizes, collapsed sections, and 
 
 Models and channels both collect secrets, so they share one explicit transaction boundary.
 
+The [credential transaction decision](../architecture/desktop/credential-transactions.md) specifies transport, lifetime, cancellation and commit semantics. Existing setup writes are sequential, not proven crash-atomic across config and secret files; PR 6 must close that consistency/recovery gate and PR 8 must reuse it. The sequence below is a requirement, not a claim about current storage behavior.
+
 ```text
 collect in isolated UI
 → stage in DesktopControlService memory
@@ -302,7 +304,7 @@ Rules:
 4. The ordinary JSON-RPC channel receives candidate IDs, not credential values.
 5. Raw credential submission uses a separate, non-logged pipe owned by Electron Main and the service.
 6. The service response says only `candidate accepted`, `credential present`, or a bounded validation error.
-7. Cancel, timeout, profile switch, service shutdown, failed review, and blocked apply discard candidates and write nothing.
+7. Before the apply commit boundary, cancel, timeout, profile switch, service shutdown, failed review, and blocked apply discard candidates and write nothing. After commit begins, reconcile the outcome; do not claim nothing was saved. Post-apply verification is read-only and does not roll back a successful save silently.
 8. JavaScript cannot guarantee memory zeroization; the implementation must drop references promptly and make no stronger claim.
 9. OAuth runs entirely in the service. The renderer receives verification URL, user code, expiry, and safe status only.
 10. Successful OAuth tokens remain staged until the reviewed Apply step writes profile-local `auth.json`.
