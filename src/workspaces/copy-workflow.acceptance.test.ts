@@ -67,12 +67,53 @@ it.each(["apply", "review", "conflict", "remote", "attached", "busy"])("real run
     if (outcome === "conflict" || outcome === "busy") expect(response.finalOutcome?.status).toBe("partially_completed");
     if (outcome === "apply") {
       await writeFile(join(f.destination, "counter.cjs"), "later edit\n");
-      const later = await runtime.handle({ channel: "cli", text: "Read counter.cjs and summarize its contents." });
+      const later = await runtime.handle({ channel: "cli", text: "Read counter.cjs and summarize its contents. Do not modify the code and add tests." });
+      expect(later.finalOutcome?.completionFloor).toBe("read");
       expect(later.finalOutcome?.status).toBe("partially_completed");
       expect(later.text).toContain("No new changes were applied");
       expect(await readFile(join(f.source, "counter.cjs"), "utf8")).toBe("module.exports = n => n + 2;\n");
       expect((await db.listTrajectoriesForSession("copy-session"))[0]!.outcome?.status).toBe("partially_completed");
       expect((await db.listMessages("copy-session")).filter((entry) => entry.role === "agent").at(-1)!.content).toBe(later.text);
     }
+  } finally { await runtime?.dispose(); db.close(); changes.close(); await f.cleanup(); }
+}, 30000);
+
+it.each([
+  { read: true, text: "Read counter.cjs and summarize its contents. Do not modify the code and add tests." },
+  { read: false, text: "Read counter.cjs and summarize its contents. Do not modify the code and add tests." },
+  { read: true, text: "Read counter.cjs and summarize its contents. Do not modify the code and add tests.", ending: "If you actually meant 'do add tests', just say the word and I'll add a test file (e.g., counter.test.cjs) without changing the module." },
+  { read: true, text: "Read counter.cjs and summarize its contents. Do not modify the code and add tests.", ending: "I'll add a test file next.", open: true },
+  { read: true, text: "Read counter.cjs and summarize its contents. Do not modify the code and add tests.", ending: "I will not modify the code or add tests." },
+  { read: true, text: "اقرأ الملف counter.cjs. لا تعدّل الكود ثم أضف الاختبارات." }
+])("persists an evidence-based read outcome for negated edits: $read / $text", async ({ read, text, ending, open }) => {
+  const f = await copyFixture(), changes = new ChangeApplicationStore(f), db = new SQLiteSessionDB({ path: join(f.homeDir, "sessions.sqlite") });
+  let runtime: Awaited<ReturnType<typeof createRuntime>> | undefined;
+  try {
+    const content = "module.exports = n => n + 1;\n";
+    await writeFile(join(f.source, "counter.cjs"), content);
+    const model: ModelProfile = { provider: "copy-fixture", id: "read-fixture", contextWindowTokens: 131072, supportsTools: true, supportsVision: false, supportsStructuredOutput: true };
+    const registry = new ProviderRegistry(); let step = 0;
+    registry.register({ id: model.provider, name: "Read fixture", executable: true, health: () => ({ available: true }), listModels: () => [model],
+      complete: async (request: ProviderRequest): Promise<ProviderResponse> => {
+        const names = (request.tools ?? []).map((schema) => (schema as { function: { name: string } }).function.name);
+        expect(names).toContain("file_read");
+        expect(names).not.toContain("file_patch"); expect(names).not.toContain("terminal_run");
+        const call = read && step++ === 0;
+        return { ok: true, provider: model.provider, model: model.id, content: call ? "" : `The function increments its argument. ${ending ?? ""}`, finishReason: call ? "tool_calls" : "stop",
+          ...(call ? { raw: { choices: [{ message: { tool_calls: [{ id: "read-counter", function: { name: "file_read", arguments: JSON.stringify({ path: "counter.cjs" }) } }] } }] } } : {}) };
+      } });
+    runtime = await createRuntime({ tokens: resolveTokens("standard", "dark", "kemetBlue"), model, providerRegistry: registry,
+      primaryModelRoute: { provider: model.provider, id: model.id, profile: model, authMethod: "none" },
+      homeDir: f.homeDir, profileId: f.profileId, workspaceRoot: f.source, localSkillsRoot: join(f.homeDir, "skills"),
+      sessionId: "read-session", sessionMetadata: { originSurface: "cli" }, sessionDb: db,
+      closeSessionDbOnDispose: false, securityMode: "open", workspaceTrusted: true, trustStore: changes.trust });
+    const response = await runtime.handle({ channel: "cli", text });
+    const status = !read ? "blocked" : open ? "partially_completed" : "completed";
+    expect(response.finalOutcome).toMatchObject({ status, completionFloor: "read" });
+    expect(response.toolExecutions.filter((entry) => entry.result?.ok)).toHaveLength(read ? 1 : 0);
+    expect(await readFile(join(f.source, "counter.cjs"), "utf8")).toBe(content);
+    expect((await db.listTrajectoriesForSession("read-session"))[0]!.outcome).toMatchObject({ status, completionFloor: "read" });
+    expect((await db.listEvents("read-session")).filter((event) => event.kind === "execution-final-outcome-recorded").at(-1)).toMatchObject({ status });
+    expect((await db.listMessages("read-session")).filter((message) => message.role === "agent").at(-1)!.content).toBe(response.text);
   } finally { await runtime?.dispose(); db.close(); changes.close(); await f.cleanup(); }
 }, 30000);

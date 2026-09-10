@@ -12,6 +12,7 @@ import type { ModelProfile } from "../contracts/provider.js";
 import type { LoadedSkill, SkillDefinition, SkillDeferRule, SkillPattern } from "../contracts/skill.js";
 import type { ToolsetName } from "../contracts/tool.js";
 import type { SkillRegistry } from "../skills/skill-registry.js";
+import { affirmativeRequestSegments } from "./request-action-segments.js";
 
 export type IntentRouterOptions = {
   skillRegistry: SkillRegistry;
@@ -669,10 +670,8 @@ function matchesCodeReview(normalized: string): boolean {
 function matchesRepoChange(normalized: string): boolean {
   // A read/edit/test request must keep its editing tools visible. Do not let
   // quoted examples or a separate "do not modify" constraint supply that intent.
-  const clauses = normalized.replace(/"[^"\n]*"|“[^”\n]*”|(?<![\p{L}\p{N}])'[^'\n]*'(?![\p{L}\p{N}])/gu, " ")
-    .split(/[.!?;؛،\n]+(?=\s|$)|\bbut\b|ولكن/iu)
-    .flatMap((sentence) => sentence.split(/\b(?:do\s+not|don[’']t|never|without|avoid)\b|(?:^|\s)(?:لا|بدون|دون)(?:\s|$)/iu, 1)[0]!
-      .split(/\b(?:and|then)\b|ثم/iu));
+  const clauses = affirmativeRequestSegments(normalized)
+    .flatMap((sentence) => sentence.split(/\b(?:and|then)\b|ثم/iu));
   return clauses.some((clause) => {
     if (/\b(?:explain|describe|discuss|how\s+to|how\s+(?:do|does|would|can|should))\b|(?:اشرح|كيف)/iu.test(clause)) return false;
     return /\b(implement|fix|change|update|modify|refactor|add|remove)\b.{0,80}\b(code|repo|repository|file|files|test|tests|feature|bug|command|cli)\b/iu.test(clause) ||

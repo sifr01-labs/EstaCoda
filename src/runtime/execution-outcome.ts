@@ -13,6 +13,7 @@ import type { ToolCallPlan } from "../contracts/tool-plan.js";
 import type { ProviderExecutionResult } from "../providers/provider-executor.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { isolateLtr } from "../ui/bidi.js";
+import { affirmativeRequestSegments } from "./request-action-segments.js";
 
 const RECEIPT_RISK_CLASSES = new Set<ToolRiskClass>([
   "workspace-write",
@@ -35,7 +36,10 @@ export function deriveExecutionCompletionFloor(input: {
   userText: string;
   capabilities?: readonly ExecutionCompletionCapability[];
 }): ExecutionCompletionFloor {
+  // Scope negation before punctuation/contractions are flattened: "and add"
+  // inside "do not modify ... and add" is not a requested mutation.
   const text = normalizeExpectationText(input.userText);
+  const mutationText = normalizeExpectationText(affirmativeRequestSegments(input.userText.normalize("NFKC")).join(" "));
   if (text.length === 0 || requestsInformationOnly(text)) return "none";
 
   const capabilities = input.capabilities ?? [];
@@ -46,9 +50,9 @@ export function deriveExecutionCompletionFloor(input: {
   const arabicMutationAction = /(?:حد[ّ]?ث|حدّث|أعد|اضبط|هيئ|أنشئ|أضف|غيّر|عدّل|اكتب|احفظ|ارفع|أرسل|احذف|أزل|ثبّت|اربط|املأ|أدخل|نفّذ|ابن|أكمل|أنه|طبّق|انشر)/u;
   const readLedRequest = /^(?:(?:can|could|would)\s+you\s+|please\s+)?(?:inspect|review|check|find|list|show|get|read|analy[sz]e|look\s+at|search|open)\b/iu.test(text) ||
     /^(?:من فضلك\s+)?(?:افحص|راجع|تحقق|ابحث|اعرض|اقرأ|حلل|انظر|افتح)/u.test(text);
-  const explicitMutationSequence = /\b(?:and|then)\s+(?:please\s+)?(?:update|set\s*up|configure|create|add|change|edit|modify|write|save|delete|remove|fix|complete|finish|apply|deploy|publish)\b/iu.test(text) ||
-    /(?:ثم|و)\s*(?:حد[ّ]?ث|اضبط|هيئ|أنشئ|أضف|غيّر|عدّل|اكتب|احذف|أكمل|طبّق|انشر)/u.test(text);
-  const requestsMutation = (mutationAction.test(text) || arabicMutationAction.test(text)) &&
+  const explicitMutationSequence = /\b(?:and|then)\s+(?:please\s+)?(?:update|set\s*up|configure|create|add|change|edit|modify|write|save|delete|remove|fix|complete|finish|apply|deploy|publish)\b/iu.test(mutationText) ||
+    /(?:ثم|و)\s*(?:حد[ّ]?ث|اضبط|هيئ|أنشئ|أضف|غيّر|عدّل|اكتب|احذف|أكمل|طبّق|انشر)/u.test(mutationText);
+  const requestsMutation = (mutationAction.test(mutationText) || arabicMutationAction.test(mutationText)) &&
     (!readLedRequest || explicitMutationSequence) &&
     namesExecutionSurface;
   if (requestsMutation) {
@@ -464,7 +468,7 @@ function requestNamesExecutionSurface(
 }
 
 function normalizeExpectationText(value: string): string {
-  return value.normalize("NFKC").toLocaleLowerCase("en-US").replace(/[^\p{L}\p{N}]+/gu, " ").trim();
+  return value.normalize("NFKC").toLocaleLowerCase("en-US").replace(/[^\p{L}\p{M}\p{N}]+/gu, " ").trim();
 }
 
 function renderEnglishReceipt(outcome: ExecutionFinalOutcome): string[] {

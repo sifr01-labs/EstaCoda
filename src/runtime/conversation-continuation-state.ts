@@ -33,6 +33,8 @@ const MAX_CONTINUITY_CONNECTORS = 8;
 
 export function detectPromisedAction(agentText: string): string | undefined {
   const text = singleLine(agentText);
+  const sentences = text.split(/(?<=[.!?;])\s+|\s+but\s+/iu);
+  const userChoice = /\bif\s+you\s+(?:(?:actually|still|ever)\s+)?(?:want|wish|prefer|mean|meant|would\s+like)\b|\bif\s+you['’]d\s+like\b/iu;
   const patterns = [
     /\bLet me\s+([^.!?\n]{4,180})/iu,
     /\bI['’]?ll\s+([^.!?\n]{4,180})/iu,
@@ -43,10 +45,18 @@ export function detectPromisedAction(agentText: string): string | undefined {
   ];
 
   for (const pattern of patterns) {
-    const match = pattern.exec(text);
-    const action = sanitizeStateText(match?.[1]);
-    if (action !== undefined) {
-      return action;
+    for (const sentence of sentences) {
+      const match = pattern.exec(sentence);
+      if (match === null) continue;
+      // A user-choice offer is not work already promised for this turn. Keep
+      // other conditional commitments (including approval) open as before.
+      const prefix = sentence.slice(0, match.index);
+      if (userChoice.test(prefix) ||
+        (userChoice.test(match[1]!) && !patterns.some((candidate) => candidate.test(match[1]!))) ||
+        /\bsay\s+the\s+word\b/iu.test(prefix)) continue;
+      const action = sanitizeStateText(match[1]);
+      if (/^(?:not|never)\s+(?:modify|change|edit|update|add|write|create|delete|remove|run|execute|send|publish|deploy)\b/iu.test(action ?? "")) continue;
+      if (action !== undefined) return action;
     }
   }
 

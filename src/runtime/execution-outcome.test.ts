@@ -218,6 +218,40 @@ describe("execution outcome receipts", () => {
     expect(deriveExecutionCompletionFloor({ userText: "Create an email draft." })).toBe("none");
   });
 
+  it.each([
+    "Read the file. Do not modify the code and add tests.",
+    "Read the file and don't change the code or add tests.",
+    "Read the file; DON’T modify it and then add tests.",
+    'Read the file containing "do not modify the code and add tests".',
+    'Read the file containing "update the code and add tests".',
+    "Read the file without changing it and adding tests.",
+    "Inspect the Postman collection. Never update it and add variables.",
+    "اقرأ الملف. لا تعدّل الكود ثم أضف الاختبارات."
+  ])("requires only read evidence for negated edits: %s", (userText) => {
+    expect(deriveExecutionCompletionFloor({ userText })).toBe("read");
+  });
+
+  it.each([
+    "Read the file and update its contents. Do not add tests.",
+    "Do not modify tests. Update the file.",
+    "Do not modify tests, but update the file.",
+    "Update the file without adding tests.",
+    'Update the file with "do not modify code and add tests".',
+    "لا تعدّل الاختبارات. حدّث الملف."
+  ])("preserves genuinely requested mutations alongside constraints: %s", (userText) => {
+    expect(deriveExecutionCompletionFloor({ userText })).toBe("mutation");
+  });
+
+  it("preserves explicit and configured verification requirements on genuine edits", () => {
+    expect(deriveExecutionCompletionFloor({ userText: "Read the file and update it, then verify it. Do not add tests." })).toBe("mutation_with_verification");
+    expect(deriveExecutionCompletionFloor({ userText: "Update Postman without adding variables.", capabilities: [
+      { tool: "mcp.postman.updateCollection", kind: "mutation", connector: { kind: "mcp", id: "postman" } },
+      { tool: "mcp.postman.getCollection", kind: "verification", verifies: ["mcp.postman.updateCollection"], connector: { kind: "mcp", id: "postman" } }
+    ] })).toBe("mutation_with_verification");
+    expect(deriveExecutionCompletionFloor({ userText: 'Read the file and update it with "do not edit" then verify it.' })).toBe("mutation_with_verification");
+    expect(deriveExecutionCompletionFloor({ userText: "Do not modify files and add tests." })).toBe("none");
+  });
+
   it("does not complete requested mutation work from read receipts alone", () => {
     const read = successfulReceipt({
       toolCallId: "call-read",

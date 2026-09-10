@@ -39,6 +39,33 @@ describe("conversation continuation state", () => {
     expect(isAcknowledgementContinuation("Can you review the README?")).toBe(false);
   });
 
+  it.each([
+    "I read the file. If you want, I'll add tests.",
+    "I'll add tests if you'd like.",
+    "I'll add tests, if you'd like.",
+    "I will not modify the code or add tests.",
+    "I'll never change those files.",
+    "Say the word and I'll add a test file.",
+    "If you actually meant 'do add tests', just say the word and I'll add a test file (e.g., counter.test.cjs) without changing the module."
+  ])("does not invent open work from a user-choice offer: %s", (text) => {
+    expect(detectPromisedAction(text)).toBeUndefined();
+    expect(updateConversationContinuationState({ userText: "Read the file.", agentText: text })).toBeUndefined();
+  });
+
+  it.each([
+    "If the tests fail, I'll fix the code.",
+    "Once you approve, I'll deploy the change.",
+    "I will not stop until the tests pass.",
+    "I'll inspect the implementation now; if you want, I'll add tests.",
+    "I'll inspect the implementation now, and if you want I'll add tests.",
+    "If you want I'll add tests, but I'll inspect the implementation now.",
+    "If you want, I'll add tests. I'll inspect the implementation now.",
+    "I'll inspect the implementation now. If you want, I'll add tests."
+  ])("retains actual commitments alongside optional offers: %s", (text) => {
+    expect(detectPromisedAction(text)).toBeDefined();
+    expect(updateConversationContinuationState({ userText: "Review the implementation.", agentText: text })?.status).toBe("open");
+  });
+
   it("creates bounded continuation for a governed connector blocker", () => {
     expect(blockedConnectorContinuationState({
       userText: "Set up these API products in Postman.",
