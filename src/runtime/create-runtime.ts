@@ -1,3 +1,4 @@
+import { workspaceChangeSummary } from "../ui/workspace-change-summary.js";
 import { ChangeApplicationStore } from "../workspaces/change-application.js";
 import { resolveSessionOriginSurface } from "../session/session-presentation.js";
 import type { ExecutionFacts } from "../execution/execution-authority.js";
@@ -1392,7 +1393,7 @@ async function buildRuntime(options: RuntimeOptions, rollback: ResourceCleanup):
                 });
               response.artifacts.push(result.artifact);
               if (["attention", "conflict"].includes(result.status)) response.finalOutcome.status = "partially_completed";
-              response.text += `\n\nWorkspace changes: ${result.status}. ${result.reason ?? result.artifact.path}`;
+              response.text += `\n\n${workspaceChangeSummary(result, options.ui?.language)}`;
             }
           } catch (error) {
             response.finalOutcome.status = "partially_completed";

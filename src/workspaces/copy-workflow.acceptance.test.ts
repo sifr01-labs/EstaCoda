@@ -43,7 +43,7 @@ it.each(["apply", "review", "conflict", "remote", "attached", "busy"])("real run
     expect((await db.getSession("copy-session"))!.executionTarget!.targetId).toBe(target.id);
     expect(await readFile(join(f.source, "counter.cjs"), "utf8")).toBe(outcome === "apply" ? "module.exports = n => n + 2;\n" : outcome === "conflict" ? "user edits\n" : "module.exports = n => n + 1;\n");
     if (!["remote", "attached", "busy"].includes(outcome)) {
-      expect(response.text).toContain(`Workspace changes: ${outcome === "conflict" ? "conflict" : outcome === "apply" ? "applied" : "review"}`);
+      expect(response.text).toContain(outcome === "conflict" ? "Source files conflict" : outcome === "apply" ? "Changes applied" : "Changes saved for review");
       expect((await db.listEvents("copy-session")).some((event) => event.kind === "session-artifact-registered")).toBe(true);
     }
     if (outcome === "busy") expect(response.text).toContain("await settlement");
