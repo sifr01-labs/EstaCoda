@@ -1,3 +1,4 @@
+import { ChangeArtifactStore } from "../workspaces/change-artifact.js";
 import { prepareTemporaryCopy } from "../workspaces/temporary-copy.js";
 import { readFileSync, statSync } from "node:fs";
 import { readActiveProfile } from "../config/profile-home.js";
@@ -5,6 +6,7 @@ import { WorkspaceRegistry } from "../workspaces/workspace-registry.js";
 import type { CliCommandResult, CliOptions } from "./cli.js";
 
 const help = [
+  "estacoda workspace changes <copy-target-id>",
   "estacoda workspace copy <source-alias> <new-directory> <manifest.json>",
   "estacoda workspace add <alias> [path]",
   "estacoda workspace list",
@@ -20,6 +22,12 @@ const help = [
 export async function workspaceCommand(options: CliOptions, args: string[]): Promise<CliCommandResult> {
   const [command, selector, value] = args;
   if (!command || args.includes("--help") || args.includes("-h")) return { handled: true, exitCode: 0, output: help };
+  if (command === "changes" && args.length === 2) {
+    const store = new ChangeArtifactStore({ homeDir: options.homeDir, profileId: options.profileId ?? readActiveProfile({ homeDir: options.homeDir }).profileId });
+    try { return { handled: true, exitCode: 0, output: JSON.stringify(await store.export(selector!, selector!), null, 2) }; }
+    catch (error) { return { handled: true, exitCode: 1, output: error instanceof Error ? error.message : String(error) }; }
+    finally { store.close(); }
+  }
   if (command === "copy" && args.length === 4) {
     try {
       if (statSync(args[3]!).size > 1024 * 1024) throw new Error("Manifest is too large.");

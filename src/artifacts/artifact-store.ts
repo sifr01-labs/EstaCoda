@@ -244,7 +244,7 @@ function artifactFromRegistration(
       sourceOrigin: registration.source.origin,
       source: registration.source.kind,
       ...(registration.apiDescription === undefined ? {} : { apiDescription: registration.apiDescription }),
-      outcome: "download-completed"
+      outcome: registration.source.kind === "workspace.changes" ? "changes-exported" : "download-completed"
     }
   };
 }
@@ -288,13 +288,17 @@ function parseRegistration(value: unknown): SessionArtifactRegistration | undefi
 
 function validateSource(value: unknown): SessionArtifactSource {
   if (!isRecord(value) || Object.keys(value).some((key) => !["kind", "description", "filename", "origin"].includes(key)) ||
-    value.kind !== "browser.download" ||
+    !["browser.download", "workspace.changes"].includes(String(value.kind)) ||
     typeof value.description !== "string" || value.description.length === 0 || value.description.length > 320 ||
     redactSensitiveText(value.description) !== value.description ||
     typeof value.filename !== "string" || value.filename.length === 0 || value.filename.length > 160 ||
     /[\\/\u0000-\u001f\u007f]/u.test(value.filename) || redactSensitiveText(value.filename) !== value.filename ||
     typeof value.origin !== "string" || value.origin.length > 512) {
     throw new Error("Artifact source metadata is invalid.");
+  }
+  if (value.kind === "workspace.changes") {
+    if (!/^workspace:target_[a-f0-9-]{36}$/u.test(value.origin) || value.filename !== "workspace-changes.json") throw new Error("Invalid workspace artifact origin.");
+    return { kind: "workspace.changes", description: value.description, filename: value.filename, origin: value.origin };
   }
   const origin = new URL(value.origin);
   if ((origin.protocol !== "http:" && origin.protocol !== "https:") || origin.origin !== value.origin || origin.username || origin.password) {
