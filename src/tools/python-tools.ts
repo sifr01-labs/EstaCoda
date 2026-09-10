@@ -130,6 +130,7 @@ async function resolveAllowedDocumentPath(
   let lastError = "path is outside the trusted workspace";
 
   for (const root of roots) {
+    if (lease?.facts.backend === "docker" && root !== lease.workspaceRoot) continue;
     const candidate = resolve(root, pathValue);
     // Additional roots are explicit profile capability inputs (channel media),
     // never a fallback to the caller's workspace when a lease is selected.

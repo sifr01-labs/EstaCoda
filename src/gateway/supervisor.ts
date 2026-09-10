@@ -1,3 +1,4 @@
+import { selectedExecutionPolicy } from "../execution/docker-policy.js";
 import { recurringCronRuntimeOptions } from "../cron/cron-authority.js";
 import { withCronExecutionOrigin } from "../cron/cron-origin.js";
 import { runCronCommand } from "../cron/cron-command.js";
@@ -1630,6 +1631,9 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
             const session = await sessionDb.getSessionForProfile(sessionId, profileId);
             if (session === undefined) throw new Error("Session not found in gateway profile.");
             await validateSessionWorkspaceOwnership({ session, profileId, workspaceRoot, homeDir });
+            const facts = await runtimeCache.currentExecutionFacts(sessionId);
+            if (facts) return localApprovalScope(profileId, sessionId, facts);
+            if ((await selectedExecutionPolicy({ profileId, homeDir })).backend !== "host") throw new Error("Docker approval needs a current verified runtime. Start a new action to renew it.");
             return localApprovalScope(profileId, sessionId, await verifyHostExecution(workspaceRoot));
           },
           validateSessionAttachment: async (sessionId) => {
@@ -1722,6 +1726,9 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
             const session = await sessionDb.getSessionForProfile(sessionId, profileId);
             if (session === undefined) throw new Error("Session not found in gateway profile.");
             await validateSessionWorkspaceOwnership({ session, profileId, workspaceRoot, homeDir });
+            const facts = await runtimeCache.currentExecutionFacts(sessionId);
+            if (facts) return localApprovalScope(profileId, sessionId, facts);
+            if ((await selectedExecutionPolicy({ profileId, homeDir })).backend !== "host") throw new Error("Docker approval needs a current verified runtime. Start a new action to renew it.");
             return localApprovalScope(profileId, sessionId, await verifyHostExecution(workspaceRoot));
           },
           validateSessionAttachment: async (sessionId) => {

@@ -148,6 +148,7 @@ export type ToolExecutionRecord = {
 };
 
 export type ToolExecutorOptions = {
+  executionAdmissionGuard?: RuntimeToolAdmissionGuard;
   registry: ToolRegistry;
   securityPolicy: SecurityPolicy;
   sessionDb: SessionDB;
@@ -159,6 +160,7 @@ export type ToolExecutorOptions = {
 };
 
 export class ToolExecutor {
+  readonly #executionAdmissionGuard: RuntimeToolAdmissionGuard | undefined;
   readonly #registry: ToolRegistry;
   readonly #securityPolicy: SecurityPolicy;
   readonly #sessionDb: SessionDB;
@@ -171,6 +173,7 @@ export class ToolExecutor {
   readonly #operationLedger = new ExecutionOperationLedger();
 
   constructor(options: ToolExecutorOptions) {
+    this.#executionAdmissionGuard = options.executionAdmissionGuard;
     this.#registry = options.registry;
     this.#securityPolicy = options.securityPolicy;
     this.#sessionDb = options.sessionDb;
@@ -470,7 +473,10 @@ export class ToolExecutor {
       };
     }
 
-    const runtimeBlocker = request.runtimeAdmissionGuard?.({
+    const admissionInput = {
+      tool: toDefinition(tool), input: request.input, executionEffect
+    };
+    const runtimeBlocker = this.#executionAdmissionGuard?.(admissionInput) ?? request.runtimeAdmissionGuard?.({
       tool: toDefinition(tool),
       input: request.input,
       executionEffect

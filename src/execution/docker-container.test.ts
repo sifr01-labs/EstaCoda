@@ -4,9 +4,9 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { DOCKER_DEFAULT_LIMITS, DOCKER_OWNER_LABEL, assertSafeDockerWorkspace, verifyDockerInspection } from "./docker-container.js";
 const expected = { id: "a".repeat(64), owner: "owned", workspaceRoot: "/project", imageId: `sha256:${"b".repeat(64)}`, user: "1000:1000", writable: true, network: "none" };
-function inspected() { return { Id: expected.id, Image: expected.imageId, State: { Running: true }, Config: { User: expected.user, Labels: { [DOCKER_OWNER_LABEL]: expected.owner } },
+function inspected() { return { Id: expected.id, Image: expected.imageId, State: { Running: true }, Config: { WorkingDir: "/project", User: expected.user, Labels: { [DOCKER_OWNER_LABEL]: expected.owner } },
   HostConfig: { ReadonlyRootfs: true, Privileged: false, CapDrop: ["ALL"], SecurityOpt: ["no-new-privileges:true"], PidMode: "", IpcMode: "private", CgroupnsMode: "private", NetworkMode: "none",
-    Mounts: [{ BindOptions: { NonRecursive: true } }], Memory: DOCKER_DEFAULT_LIMITS.memoryBytes, MemorySwap: DOCKER_DEFAULT_LIMITS.memoryBytes, NanoCpus: 1e9, PidsLimit: 128 },
+    Tmpfs: { "/tmp": "rw,nosuid,nodev,size=67108864,mode=1777" }, ShmSize: 16777216, Mounts: [{ BindOptions: { NonRecursive: true } }], Memory: DOCKER_DEFAULT_LIMITS.memoryBytes, MemorySwap: DOCKER_DEFAULT_LIMITS.memoryBytes, NanoCpus: 1e9, PidsLimit: 128 },
   NetworkSettings: { Networks: { none: {} } }, Mounts: [{ Type: "bind", Source: "/project", Destination: "/project", RW: true, Propagation: "rprivate" }] }; }
 it("rejects effective privilege, namespace, networking, mount, image and ownership drift", () => {
   expect(() => verifyDockerInspection(inspected(), expected)).not.toThrow();

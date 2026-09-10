@@ -63,7 +63,7 @@ async function governance(profileRoot: string): Promise<string> {
     config = JSON.parse(await readFile(path, "utf8"));
   } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
 
-  return stableJsonHash({ security: config.security, tools: config.tools, mcp: config.mcp,
+  return stableJsonHash({ execution: config.execution, security: config.security, tools: config.tools, mcp: config.mcp,
     browser: config.browser, web: config.web });
 }
 export async function createLiveAuthority(input: { profileRoot: string; workspaceRoot: string; trustStore: WorkspaceTrustStore }): Promise<() => Promise<void>> {

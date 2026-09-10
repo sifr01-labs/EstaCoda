@@ -2,12 +2,12 @@ import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
 import { loadRuntimeConfig } from "../config/runtime-config.js";
 import { resolveProfileStateHome } from "../config/profile-home.js";
 import { join } from "node:path";
-import type { SecurityPolicy } from "../contracts/security.js";
+import type { SecurityRequest, SecurityPolicy } from "../contracts/security.js";
 import { assessSecurityPolicy } from "../contracts/security.js";
 import { createSecurityPolicyForMode } from "../security/security-policy-factory.js";
 import { assessHardlineFloor } from "../security/command-safety.js";
 import { ChannelApprovalStore } from "../channels/channel-approval-store.js";
-import { channelApprovalScope, localApprovalScope, samePendingAuthority } from "../security/approval-scope.js";
+import { channelApprovalScope, localApprovalScope, samePendingAuthority, validApprovalScope } from "../security/approval-scope.js";
 import { withDispatchAuthorization } from "../security/dispatch-authorization.js";
 import { securityActionKey } from "../security/pending-action-approval.js";
 import { verifyHostExecution } from "../execution/host-authority.js";
@@ -61,14 +61,22 @@ export async function recurringCronSecurityPolicy(job: CronJob, context: { profi
   if (!initialConfig || !job.executionOrigin) return undefined;
   const origin = parseCronExecutionOrigin(job.executionOrigin);
   const store = new ChannelApprovalStore({ path: join(resolveProfileStateHome(context).gatewayStatePath, "channel-approvals.json") });
-  const scope = async () => channelApprovalScope(localApprovalScope(context.profileId, context.sessionId,
-    await verifyHostExecution(origin.target.workspace.canonicalPath)), origin.sessionKey);
+  const scope = async (request: SecurityRequest) => {
+    if (validApprovalScope(request.executionScope)) {
+      if (request.executionScope.profileId !== context.profileId || request.executionScope.sessionId !== context.sessionId ||
+          request.executionScope.workspaceIdentityHash !== origin.target.workspace.identityHash) throw new Error("Recurring execution scope mismatch.");
+      return channelApprovalScope(request.executionScope, origin.sessionKey);
+    }
+    if (initialConfig.config.execution?.backend === "docker") throw new Error("Recurring Docker execution requires a verified runtime scope.");
+    return channelApprovalScope(localApprovalScope(context.profileId, context.sessionId,
+      await verifyHostExecution(origin.target.workspace.canonicalPath)), origin.sessionKey);
+  };
   return {
     decide: (request) => createSecurityPolicyForMode(initialConfig.security.approvalMode).decide(request),
     assess: async (request) => {
       const config = (await validateCronAuthority(job, context))!;
       const base = createSecurityPolicyForMode(config.security.approvalMode);
-      request.executionScope = await scope();
+      request.executionScope = await scope(request);
       const originalScope = structuredClone(request.executionScope);
       const action = securityActionKey(request), revision = store.revision(request);
       const assessment = await assessSecurityPolicy(base, request, config.security.approvalMode);
@@ -78,7 +86,7 @@ export async function recurringCronSecurityPolicy(job: CronJob, context: { profi
       if (result.decision !== "allow") return result;
       const validate = async () => {
         await validateCronAuthority(job, context);
-        if (revision !== store.revision(request) || (grant && !store.hasGrant(grant)) || !samePendingAuthority(originalScope, await scope()) ||
+        if (revision !== store.revision(request) || (grant && !store.hasGrant(grant)) || !samePendingAuthority(originalScope, await scope(request)) ||
           action !== securityActionKey(request) || !request.context.trustedWorkspace) throw new Error("Recurring execution approval was revoked.");
       };
       let dispatched = false;

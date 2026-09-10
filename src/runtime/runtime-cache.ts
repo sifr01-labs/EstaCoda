@@ -148,6 +148,13 @@ export class RuntimeCache {
     this.#hookRegistry = options.hookRegistry;
   }
 
+  async currentExecutionFacts(sessionId: string) {
+    const entry = this.#activeEntries.get(sessionId);
+    if (!entry || entry.suspended || entry.disposePending) return undefined;
+    await entry.runtime.validateExecutionHealth?.();
+    return entry.runtime.executionFacts?.();
+  }
+
   async get(
     sessionId: string,
     fingerprint: RuntimeFingerprint,

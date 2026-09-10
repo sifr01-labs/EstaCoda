@@ -1,3 +1,4 @@
+import { fileURLToPath } from "node:url";
 import { randomUUID, createHash } from "node:crypto";
 import { lstat, opendir, realpath } from "node:fs/promises";
 import { resolve, relative, isAbsolute } from "node:path";
@@ -118,7 +119,10 @@ export function verifyDockerInspection(record: any, expected: { id: string; owne
     !host?.ReadonlyRootfs || host.Privileged || (host.CapAdd ?? []).length || !(host.CapDrop ?? []).includes("ALL") ||
     !(host.SecurityOpt ?? []).some((s: string) => /^no-new-privileges(?::true)?$/u.test(s)) || (host.SecurityOpt ?? []).some((s: string) => /unconfined/u.test(s)) ||
     !["", "private"].includes(host.PidMode) || host.IpcMode !== "private" || host.CgroupnsMode !== "private" || host.UsernsMode === "host" ||
-    (host.Devices ?? []).length || (host.DeviceRequests ?? []).length || (host.VolumesFrom ?? []).length ||
+    (host.Devices ?? []).length || (host.DeviceRequests ?? []).length || (host.VolumesFrom ?? []).length || (host.Binds ?? []).length || (host.DeviceCgroupRules ?? []).length ||
+    host.PublishAllPorts || Object.keys(host.PortBindings ?? {}).length || host.UTSMode === "host" || host.CgroupParent ||
+    Object.keys(host.Tmpfs ?? {}).length !== 1 || host.Tmpfs["/tmp"] !== "rw,nosuid,nodev,size=67108864,mode=1777" || host.ShmSize !== 16777216 ||
+    config.WorkingDir !== expected.workspaceRoot ||
     host.NetworkMode !== expected.network || Object.keys(record.NetworkSettings?.Networks ?? {}).some((n) => n !== expected.network) ||
     !Array.isArray(mounts) || mounts.length !== 1 || mounts[0].Type !== "bind" || mounts[0].Source !== expected.workspaceRoot || mounts[0].Destination !== expected.workspaceRoot || mounts[0].RW !== expected.writable || mounts[0].Propagation !== "rprivate" ||
     host.Mounts?.length !== 1 || host.Mounts[0].BindOptions?.NonRecursive !== true ||
@@ -128,7 +132,7 @@ export function verifyDockerInspection(record: any, expected: { id: string; owne
 export async function assertSafeDockerWorkspace(root: string, homeDir?: string): Promise<void> {
   if (/[\r\n\0,]/u.test(root)) throw new Error("Docker bind paths cannot contain commas or control characters.");
   const state = resolveGlobalStateHome({ homeDir }).stateRoot;
-  const protectedRoots = [homedir(), state, ...[".ssh", ".docker", ".aws", ".gnupg", ".config"].map((name) => resolve(homedir(), name)), "/etc", "/proc", "/sys", "/dev", "/run", "/var/run", "/var/lib/docker", "/var/lib/containerd"];
+  const protectedRoots = [homedir(), state, ...[".ssh", ".docker", ".aws", ".gnupg", ".config"].map((name) => resolve(homedir(), name)), "/usr", "/bin", "/sbin", "/lib", "/lib64", "/opt", "/etc", "/proc", "/sys", "/dev", "/run", "/var/run", "/var/lib/docker", "/var/lib/containerd"];
   for (const candidate of protectedRoots) {
     const sensitive = await realpath(candidate).catch(() => resolve(candidate));
     const rel = relative(root, sensitive);
@@ -137,6 +141,12 @@ export async function assertSafeDockerWorkspace(root: string, homeDir?: string):
       const inverse = relative(resolve(sensitive), root);
       if (inverse === "" || (inverse !== ".." && !inverse.startsWith("../") && !isAbsolute(inverse))) throw new Error("Docker workspace is inside protected host state.");
     }
+  }
+  // The trusted controller and its imports must never be writable through the bind.
+  for (const codeRoot of [fileURLToPath(new URL("../", import.meta.url)), fileURLToPath(new URL("../../workers/", import.meta.url))]) {
+    const a = relative(root, codeRoot), b = relative(codeRoot, root);
+    const inside = (value: string) => value === "" || (value !== ".." && !value.startsWith("../") && !isAbsolute(value));
+    if (inside(a) || inside(b)) throw new Error("Docker workspace overlaps the trusted runtime installation.");
   }
   let count = 0;
   const scan = async (directory: string): Promise<void> => {

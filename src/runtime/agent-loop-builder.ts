@@ -1,3 +1,4 @@
+import { dockerToolAdmissionGuard } from "../execution/docker-tool-boundary.js";
 import { executionAuthorityFingerprint } from "../execution/execution-authority.js";
 import { stableJsonHash } from "./runtime-fingerprint.js";
 import { redactSensitiveText } from "../utils/redaction.js";
@@ -572,6 +573,7 @@ export class AgentLoopBuilder {
 
     const toolExecutor = (this.#factories.toolExecutor ?? ((options) => new ToolExecutor(options)))({
       registry: toolRegistry,
+      executionAdmissionGuard: executionLease?.facts.backend === "docker" ? dockerToolAdmissionGuard : undefined,
       securityPolicy: input.securityPolicy,
       sessionDb: input.sessionDb,
       trajectoryRecorder: input.trajectoryRecorder,

@@ -16,6 +16,7 @@ export type RuntimeFingerprint = {
   profileId: string;
 
   // ── Security (config-bound) ──
+  executionPolicyHash?: string;
   securityMode: SecurityApprovalMode;
   securityAssessorEnabled: boolean;
   securityAssessorProvider?: string;
@@ -100,6 +101,7 @@ export function computeRuntimeFingerprint(
       ? stableJsonHash(config.modelFallbackRoutes.map(fingerprintRoute))
       : undefined,
     profileId: options.profileId,
+    executionPolicyHash: stableJsonHash(config.config.execution ?? { backend: "host" }),
     securityMode: config.security.approvalMode,
     securityAssessorEnabled: config.security.assessor.enabled,
     securityAssessorProvider: config.security.assessor.provider,
@@ -225,6 +227,7 @@ export function runtimeRevisions(fingerprint: RuntimeFingerprint): RuntimeRevisi
     profileId: fingerprint.profileId,
     workspaceRoot: fingerprint.workspaceRoot,
     trustStorePath: fingerprint.trustStorePath,
+    executionPolicyHash: fingerprint.executionPolicyHash,
     securityMode: fingerprint.securityMode,
     securityUrlPolicyHash: fingerprint.securityUrlPolicyHash,
     disabledToolsets: fingerprint.disabledToolsets,
