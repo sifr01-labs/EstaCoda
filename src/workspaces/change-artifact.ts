@@ -32,7 +32,7 @@ export class ChangeArtifactStore extends ExecutionTargetStore {
       for (const entry of readdirSync(directory, { withFileTypes: true })) {
         if (++scanned > 2048) throw new Error("Change enumeration exceeded its bound.");
         const path = prefix + entry.name;
-        if (entry.name === "node_modules" || dependencies.has(path)) continue;
+        if (["node_modules", ".estacoda", ".git"].includes(entry.name) || dependencies.has(path)) continue;
         copyPath(path);
         if (entry.isDirectory()) scan(join(directory, entry.name), path + "/");
         else { paths.add(path); if (paths.size > COPY_LIMITS.files) throw new Error("Too many changed files."); }

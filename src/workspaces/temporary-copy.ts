@@ -1,3 +1,6 @@
+import { homedir } from "node:os";
+import { relative, isAbsolute, join } from "node:path";
+import { resolveGlobalStateHome } from "../config/profile-home.js";
 import { execFileSync } from "node:child_process";
 import { mkdirSync, rmdirSync, lstatSync, realpathSync } from "node:fs";
 import { dirname, resolve } from "node:path";
@@ -6,6 +9,16 @@ import { ExecutionTargetStore, targetBinding } from "./execution-target.js";
 import type { TemporaryCopyTarget } from "../contracts/workspace.js";
 import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
 import { COPY_LIMITS, checkStamp, copyPath, hash, snapshot, stamp, writeNew, separateRoots, type FileSnapshot, type DirectoryStamp } from "./copy-files.js";
+
+function safeCopyRoot(root: string, homeDir?: string): void {
+  const protectedRoots = [resolveGlobalStateHome({ homeDir }).stateRoot, "/usr", "/bin", "/sbin", "/lib", "/lib64", "/opt", "/etc", "/proc", "/sys", "/dev", "/run", "/var/run", "/var/lib/docker", ...[".ssh", ".aws", ".docker", ".gnupg", ".config"].map((name) => join(homedir(), name))];
+  if (root === "/" || root === homedir()) throw new Error("Copy roots cannot be host or home roots.");
+  for (const protectedRoot of protectedRoots) {
+    let canonical = protectedRoot; try { canonical = realpathSync(protectedRoot); } catch { /* Absent protected roots still reserve their path. */ }
+    const rel = relative(canonical, root);
+    if (rel === "" || rel !== ".." && !rel.startsWith("../") && !isAbsolute(rel)) throw new Error("Copy roots cannot use runtime or credential state.");
+  }
+}
 
 export type CopyInputManifest = { version: 1; files: Array<{ path: string; origin: "tracked" | "untracked" | "dependency" }> };
 export type SourceManifest = { version: 1; sourceStamp: DirectoryStamp; entries: Array<{ path: string; origin: "tracked" | "untracked" | "dependency"; baseline: FileSnapshot }> };
@@ -28,6 +41,7 @@ export async function prepareTemporaryCopy(options: { homeDir?: string; profileI
   try {
     const source = await store.resolve(options.source);
     if (!await new WorkspaceTrustStore(options).isTrusted(source.identity.canonicalPath)) throw new Error("Trust the source workspace through local setup first.");
+    safeCopyRoot(source.identity.canonicalPath, options.homeDir); safeCopyRoot(destination, options.homeDir);
     separateRoots(source.identity.canonicalPath, destination);
     try { lstatSync(destination); throw new Error("Copy destination must not exist."); } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
     const sourceStamp = stamp(source.identity.canonicalPath);

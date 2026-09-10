@@ -1367,7 +1367,7 @@ async function buildRuntime(options: RuntimeOptions, rollback: ResourceCleanup):
         });
         // Only the local foreground outcome consumes local task-start copy authority.
         // Child/remote work can export through the operator workflow after settlement.
-        if (current.executionTarget && resolveSessionOriginSurface(current) === "cli" && !current.parentSessionId &&
+        if (input.channel === "cli" && current.executionTarget && resolveSessionOriginSurface(current) === "cli" && !current.parentSessionId &&
           response.finalOutcome?.terminationCause === "normal" &&
           ["completed", "completed_with_recovered_errors"].includes(response.finalOutcome.status) &&
           response.finalOutcome.uncertainActions.length === 0 && !input.signal?.aborted) {
@@ -1376,11 +1376,17 @@ async function buildRuntime(options: RuntimeOptions, rollback: ResourceCleanup):
             if (changes.getTarget(current.executionTarget.targetId)?.kind === "temporary-copy") {
               await executionOwner.validate(); executionLease.assertActive();
               const result = await changes.finish(current.executionTarget.targetId, current.id,
-                (artifact) => sessionDb.appendEvent(current.id, { kind: "session-artifact-registered", artifact }));
+                async (artifact) => {
+                  const event = { kind: "session-artifact-registered" as const, artifact };
+                  await sessionDb.appendEvent(current.id, event);
+                  await artifactStore.hydrateSessionArtifacts({ events: [event], sessionId: current.id, profileId });
+                });
               response.artifacts.push(result.artifact);
+              if (["attention", "conflict"].includes(result.status)) response.finalOutcome.status = "partially_completed";
               response.text += `\n\nWorkspace changes: ${result.status}. ${result.reason ?? result.artifact.path}`;
             }
           } catch (error) {
+            response.finalOutcome.status = "partially_completed";
             response.text += `\n\nWorkspace changes need attention: ${error instanceof Error ? error.message : "export/application failed"}`;
           } finally { changes.close(); }
         }

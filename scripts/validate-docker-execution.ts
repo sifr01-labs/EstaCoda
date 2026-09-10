@@ -1,3 +1,5 @@
+import { prepareTemporaryCopy } from "../src/workspaces/temporary-copy.js";
+import { ChangeApplicationStore } from "../src/workspaces/change-application.js";
 import { HostWorkspaceFiles } from "../src/execution/host-workspace-files.js";
 import { ToolRegistry } from "../src/tools/tool-registry.js";
 import { ToolExecutor } from "../src/tools/tool-executor.js";
@@ -28,11 +30,12 @@ const probe = await probeDocker(client);
 assert(probe.available && probe.imageId, "Docker gate requires Linux/cgroup v2/seccomp and the explicitly prepared estacoda-execution:v1 image.");
 const parent = resolve(process.argv[2] ?? process.cwd());
 const root = await mkdtemp(join(parent, ".estacoda-docker-test-"));
+const copyRoot = `${root}-copy`;
 const home = await mkdtemp(join(tmpdir(), "estacoda-docker-gate-home-"));
 const profileId = "docker-gate";
 const policy: RequestedExecutionPolicy = { backend: "docker", imageId: probe.imageId };
-async function prepared(request: RequestedExecutionPolicy = policy) {
-  const container = await DockerContainer.prepare({ client, profileId, workspaceRoot: root, homeDir: home, policy: request });
+async function prepared(request: RequestedExecutionPolicy = policy, workspaceRoot = root) {
+  const container = await DockerContainer.prepare({ client, profileId, workspaceRoot, homeDir: home, policy: request });
   const environment = HostEnvironment.prepared(profileId, container.facts, {
     files: (active, processes) => new DockerWorkspaceFiles(container, active, processes, home),
     processes: () => new DockerProcessScope(container, home), dispose: () => container.release()
@@ -135,11 +138,26 @@ try {
   await retryable.close(); assert.equal(settlements, 2);
   const direct = await prepared({ ...policy, commandNetwork: { requirement: "mandatory", value: "unrestricted" } });
   try { assert.equal(direct.container.facts.networkContainment, false); assert.notEqual(executionAuthorityFingerprint(direct.container.facts), fingerprint); } finally { await direct.close(); }
+  const changes = new ChangeApplicationStore({ homeDir: home, profileId });
+  try {
+    await changes.add("gate-source", root); await changes.trust.grant(root);
+    const target = await prepareTemporaryCopy({ homeDir: home, profileId, source: "gate-source", destination: copyRoot, manifest: { version: 1, files: [{ path: "example.txt", origin: "untracked" }] } });
+    await changes.authorize(target.id, { version: 1, outcome: "apply", paths: [{ path: "example.txt", operations: ["update"] }] });
+    const before = await readFile(join(root, "example.txt"), "utf8"), copy = await prepared(policy, copyRoot);
+    try { await copy.lease.files.writeFile("example.txt", "authorized Docker copy مرحبا"); }
+    finally { await copy.close(); }
+    assert.equal(await readFile(join(root, "example.txt"), "utf8"), before);
+    const applied = await changes.finish(target.id, target.id); assert.equal(applied.status, "applied", applied.reason);
+    assert.equal(await readFile(join(root, "example.txt"), "utf8"), "authorized Docker copy مرحبا");
+    assert.equal((await changes.recover(applied.artifact.id)).status, "review");
+    assert.equal(await readFile(join(root, "example.txt"), "utf8"), before);
+    console.log("PASS: Docker temporary-copy target, preauthorized application and guarded rollback");
+  } finally { changes.close(); }
   await assert.rejects(prepared({ ...policy, imageId: `sha256:${"0".repeat(64)}` }));
   assert.equal((await readdir(join(home, ".estacoda", "profiles", profileId, "execution", "docker"))).filter((name) => name.endsWith(".json")).length, 0);
   console.log("PASS: both bind modes, limits, explicit direct network, missing image and settled ownership receipts");
 } finally {
   const remaining = await readdir(join(home, ".estacoda", "profiles", profileId, "execution", "docker")).catch((error) => { if (error.code === "ENOENT") return []; throw error; });
   if (remaining.some((name) => name.endsWith(".json"))) throw new Error("Docker gate cleanup is uncertain; temporary workspace and ownership receipts were preserved for inspection.");
-  await rm(root, { recursive: true, force: true }); await rm(home, { recursive: true, force: true });
+  await rm(copyRoot, { recursive: true, force: true }); await rm(root, { recursive: true, force: true }); await rm(home, { recursive: true, force: true });
 }

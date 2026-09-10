@@ -42,3 +42,22 @@ it("preserves later user edits during rollback and makes successful application 
     expect(await readFile(join(f.source, "hello.bin"), "utf8")).toBe("later user edit");
   } finally { store.close(); await f.cleanup(); }
 });
+
+it("serializes independent application processes against one copy receipt", async () => {
+  const f = await copyFixture(), store = new ChangeApplicationStore(f);
+  try {
+    const target = await prepareTemporaryCopy({ ...f, source: "source", manifest: f.input });
+    await store.authorize(target.id, { version: 1, outcome: "apply", paths: [{ path: "hello.bin", operations: ["update"] }] });
+    await writeFile(join(f.destination, "hello.bin"), "agent");
+    const artifacts = [await store.export(target.id, "s"), await store.export(target.id, "s")];
+    const results = await Promise.all(artifacts.map(async (artifact) => {
+      const script = `const {ChangeApplicationStore} = await import(${JSON.stringify(new URL("./change-application.ts", import.meta.url).href)});
+        const store = new ChangeApplicationStore(${JSON.stringify({ homeDir: f.homeDir, profileId: f.profileId })});
+        try { console.log(JSON.stringify(await store.apply(${JSON.stringify(artifact.id)}))); } finally { store.close(); }`;
+      const result = await promisify(execFile)(process.execPath, ["--import", import.meta.resolve("tsx"), "--input-type=module", "-e", script], { timeout: 15000 });
+      return JSON.parse(result.stdout).status;
+    }));
+    expect(results.sort()).toEqual(["applied", "attention"]);
+    expect(await readFile(join(f.source, "hello.bin"), "utf8")).toBe("agent");
+  } finally { store.close(); await f.cleanup(); }
+});
