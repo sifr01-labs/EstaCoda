@@ -5,6 +5,8 @@ import type { ChannelSessionKey } from "../contracts/channel.js";
 import type { ChannelSessionStore } from "./channel-gateway.js";
 import type { SurfacePointerStore } from "./surface-pointer-store.js";
 import type { SurfaceType } from "./surface-pointer.js";
+import { channelSurfaceId, type ChannelWorkspaceStore } from "./channel-workspace-store.js";
+import { resolveProfileStateHome } from "../config/profile-home.js";
 
 export type ChannelSessionPolicy = {
   groupSessionsPerUser?: boolean;
@@ -59,11 +61,15 @@ export class PersistentChannelSessionStore implements ChannelSessionStore {
   readonly #entries = new Map<string, ChannelSessionEntry>();
   readonly #policy: ChannelSessionPolicy;
   readonly #surfacePointerStore?: SurfacePointerStore;
+  readonly #workspaceStore?: ChannelWorkspaceStore;
+  readonly #profileId?: string;
   #sequence = 0;
   #loaded = false;
 
-  constructor(options: { path?: string; homeDir?: string; policy?: ChannelSessionPolicy; surfacePointerStore?: SurfacePointerStore } = {}) {
-    this.#path = options.path ?? join(resolveHomeDir(options.homeDir), ".estacoda", "channel-sessions.json");
+  constructor(options: { path?: string; homeDir?: string; profileId?: string; policy?: ChannelSessionPolicy; surfacePointerStore?: SurfacePointerStore; workspaceStore?: ChannelWorkspaceStore } = {}) {
+    this.#path = options.path ?? (options.profileId === undefined ? join(resolveHomeDir(options.homeDir), ".estacoda", "channel-sessions.json") : join(resolveProfileStateHome({ homeDir: options.homeDir, profileId: options.profileId }).gatewayStatePath, "channel-sessions.json"));
+    this.#workspaceStore = options.workspaceStore; this.#profileId = options.profileId;
+    if (options.workspaceStore && options.workspaceStore.profileId !== options.profileId) throw new Error("Channel workspace store belongs to another profile.");
     this.#policy = options.policy ?? {};
     this.#surfacePointerStore = options.surfacePointerStore;
   }
@@ -80,13 +86,15 @@ export class PersistentChannelSessionStore implements ChannelSessionStore {
     // session, that takes precedence over the channel-local session mapping.
     if (this.#surfacePointerStore !== undefined) {
       const surfaceType = sessionKey.platform as SurfaceType;
-      const surfaceId = sessionKey.chatId;
+      const surfaceId = this.#profileId === undefined ? sessionKey.chatId : channelSurfaceId(sessionKey, this.#policy);
       const pointer = await this.#surfacePointerStore.getPointer(surfaceType, surfaceId);
       if (pointer !== undefined) {
         return pointer.sessionId;
       }
     }
 
+    const selected = this.#workspaceStore?.current(sessionKey);
+    if (selected) { await this.#workspaceStore!.validateSelection(selected); return selected.sessionId; }
     const existing = this.#entries.get(key);
 
     if (existing !== undefined) {
@@ -114,6 +122,8 @@ export class PersistentChannelSessionStore implements ChannelSessionStore {
   }
 
   async resetSessionId(sessionKey: ChannelSessionKey, options?: { receivedAt?: string }): Promise<string> {
+    const selected = this.#workspaceStore?.resetSession(sessionKey);
+    if (selected) return selected;
     await this.#ensureLoaded();
     const key = stableSessionKey(sessionKey, this.#policy);
     const sessionId = this.#newSessionId(sessionKey);
@@ -126,6 +136,7 @@ export class PersistentChannelSessionStore implements ChannelSessionStore {
   }
 
   async setSessionId(sessionKey: ChannelSessionKey, sessionId: string, options?: { receivedAt?: string }): Promise<void> {
+    if (this.#workspaceStore?.resetSession(sessionKey, sessionId)) return;
     await this.#ensureLoaded();
     const key = stableSessionKey(sessionKey, this.#policy);
     const receivedAt = parseTimestamp(options?.receivedAt) ?? new Date();
