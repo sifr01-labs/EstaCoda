@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { resolveHomeDir } from "../config/home-dir.js";
@@ -82,7 +83,7 @@ export class PersistentChannelSessionStore implements ChannelSessionStore {
 
   async getOrCreateSessionId(sessionKey: ChannelSessionKey, options?: { receivedAt?: string }): Promise<string> {
     await this.#ensureLoaded();
-    const key = stableSessionKey(sessionKey, this.#policy);
+    const key = this.#profileId === undefined ? stableSessionKey(sessionKey, this.#policy) : channelSurfaceId(sessionKey, this.#policy);
 
     // Check surface pointer first. If a surface is explicitly attached to a
     // session, that takes precedence over the channel-local session mapping.
@@ -114,7 +115,7 @@ export class PersistentChannelSessionStore implements ChannelSessionStore {
       return existing.sessionId;
     }
 
-    const sessionId = buildBaseSessionId(sessionKey, this.#policy);
+    const sessionId = this.#profileId === undefined ? buildBaseSessionId(sessionKey, this.#policy) : randomUUID();
     this.#entries.set(
       key,
       createEntry(key, normalizeSessionKey(sessionKey, this.#policy), sessionId, parseTimestamp(options?.receivedAt) ?? new Date())
@@ -127,7 +128,7 @@ export class PersistentChannelSessionStore implements ChannelSessionStore {
     const selected = this.#workspaceStore?.resetSession(sessionKey);
     if (selected) return selected;
     await this.#ensureLoaded();
-    const key = stableSessionKey(sessionKey, this.#policy);
+    const key = this.#profileId === undefined ? stableSessionKey(sessionKey, this.#policy) : channelSurfaceId(sessionKey, this.#policy);
     const sessionId = this.#newSessionId(sessionKey);
     this.#entries.set(
       key,
@@ -140,7 +141,7 @@ export class PersistentChannelSessionStore implements ChannelSessionStore {
   async setSessionId(sessionKey: ChannelSessionKey, sessionId: string, options?: { receivedAt?: string }): Promise<void> {
     if (this.#workspaceStore?.resetSession(sessionKey, sessionId)) return;
     await this.#ensureLoaded();
-    const key = stableSessionKey(sessionKey, this.#policy);
+    const key = this.#profileId === undefined ? stableSessionKey(sessionKey, this.#policy) : channelSurfaceId(sessionKey, this.#policy);
     const receivedAt = parseTimestamp(options?.receivedAt) ?? new Date();
     this.#entries.set(
       key,
@@ -150,6 +151,7 @@ export class PersistentChannelSessionStore implements ChannelSessionStore {
   }
 
   #newSessionId(sessionKey: ChannelSessionKey): string {
+    if (this.#profileId !== undefined) return randomUUID();
     this.#sequence += 1;
     return `${buildBaseSessionId(sessionKey, this.#policy)}-${this.#sequence}`;
   }

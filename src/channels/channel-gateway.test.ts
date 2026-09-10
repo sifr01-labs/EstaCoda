@@ -5307,7 +5307,7 @@ describe("ChannelGateway commands", () => {
       expect(registry.isBusy("telegram:123456:user-1")).toBe(false);
     });
 
-    it("session reset /new invalidates old session in cache", async () => {
+    it("session reset /new leaves the previous shared execution owner cached", async () => {
       const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
       const cache = createFakeRuntimeCache();
       const fingerprint = createFakeFingerprint();
@@ -5328,8 +5328,7 @@ describe("ChannelGateway commands", () => {
       expect(cache.getCalls.length).toBe(1);
 
       await gateway.receive(makeMessage("/new"));
-      expect(cache.invalidateCalls.length).toBe(1);
-      expect(cache.invalidateCalls[0]).toBe(first.sessionId);
+      expect(cache.invalidateCalls).toHaveLength(0);
       expect(enqueueSessionFinalization).toHaveBeenCalledWith({
         sessionId: first.sessionId,
         reason: "channel-reset"
@@ -5451,7 +5450,7 @@ describe("ChannelGateway commands", () => {
       expect(result.replyText).not.toContain("YOLO mode");
     });
 
-    it("session reset /switch invalidates old session in cache", async () => {
+    it("session switch leaves the previous shared execution owner cached", async () => {
       const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
       const cache = createFakeRuntimeCache();
       const fingerprint = createFakeFingerprint();
@@ -5476,11 +5475,10 @@ describe("ChannelGateway commands", () => {
       const first = await gateway.receive(makeMessage("hello"));
       await sessionStore.setSessionId?.(makeMessage("").sessionKey, "target-sess");
       await gateway.receive(makeMessage("/switch target-sess"));
-      expect(cache.invalidateCalls.length).toBe(1);
-      expect(cache.invalidateCalls[0]).toBe(first.sessionId);
+      expect(cache.invalidateCalls).toHaveLength(0);
     });
 
-    it("auto-reset change invalidates cache", async () => {
+    it("auto-reset changes the view without retiring the previous owner", async () => {
       const adapter = createFakeTelegramAdapter() as FakeTelegramAdapter;
       const cache = createFakeRuntimeCache();
       const fingerprint = createFakeFingerprint();
@@ -5505,10 +5503,9 @@ describe("ChannelGateway commands", () => {
       await gateway.receive(makeMessage("hello"));
       expect(cache.invalidateCalls.length).toBe(0);
 
-      // Different sessionId triggers invalidate
+      // A different view pointer does not authorize owner retirement
       await gateway.receive(makeMessage("hello again"));
-      expect(cache.invalidateCalls.length).toBe(1);
-      expect(cache.invalidateCalls[0]).toBe("sess-1");
+      expect(cache.invalidateCalls).toHaveLength(0);
     });
 
     it("invalidate failure during /new does not break reset", async () => {
@@ -9799,4 +9796,22 @@ it("selects trusted aliases for future channel work without constructing a runti
     await gateway.receive(makeMessage("/workspace use project", { sender: { id: "intruder" }, sessionKey: { ...makeMessage("").sessionKey, userId: "intruder" } }));
     expect(workspaceStore.current(makeMessage("").sessionKey)?.sessionId).toBe(selected.sessionId);
   } finally { workspaceStore.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+
+it("keeps pointer mutations busy during input admission while stop remains reachable", async () => {
+  let enter!: () => void, finish!: () => void;
+  const entered = new Promise<void>((resolve) => { enter = resolve; });
+  const barrier = new Promise<void>((resolve) => { finish = resolve; });
+  const gateway = new ChannelGateway({ adapters: [createFakeTelegramAdapter()],
+    runtimeForSession: async () => createMinimalRuntime(),
+    authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+    preprocessMessage: async (message) => { enter(); await barrier; return message; } });
+  const running = gateway.receive(makeMessage("first work")); await entered;
+  try {
+    for (const command of ["/workspace use project", "/attach ABCDEF", "/switch other", "/detach", "/new"]) {
+      expect((await gateway.receive(makeMessage(command))).replyText).toContain("selection is busy");
+    }
+    expect((await gateway.receive(makeMessage("/stop"))).replyText).not.toContain("selection is busy");
+  } finally { finish(); await running; }
 });

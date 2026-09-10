@@ -1,3 +1,4 @@
+import { processDefinitelyAbsent } from "../session/execution-ownership.js";
 import { ChannelWorkspaceStore } from "../channels/channel-workspace-store.js";
 import { ensureRuntimeSession } from "../session/session-workspace-ownership.js";
 import { ControlReceipts } from "./control-receipts.js";
@@ -1618,7 +1619,13 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           validateSessionAttachment: async (sessionId) => {
             const session = await sessionDb.getSessionForProfile(sessionId, profileId);
             if (session === undefined) throw new Error("Session not found in the gateway profile.");
-            await validateSessionWorkspaceOwnership({ session, profileId, workspaceRoot: options.workspaceRoot, homeDir });
+            const workspaceRoot = session.executionTarget?.workspace.canonicalPath;
+            if (!workspaceRoot || !await trustStore.isTrusted(workspaceRoot)) throw new Error("Attachment needs a trusted, established target.");
+            await validateSessionWorkspaceOwnership({ session, profileId, workspaceRoot, homeDir });
+            const owner = sessionDb.db.query<{ owner_id: string | null; owner_pid: number | null }>("select owner_id, owner_pid from session_execution_owners where session_id=?").get(sessionId);
+            if (owner?.owner_id && owner.owner_pid !== process.pid && !processDefinitelyAbsent(owner.owner_pid ?? 0)) {
+              throw new Error("Foreground owner is busy. Settle CLI/ACP work and release its runtime before attaching.");
+            }
           },
           preprocessMessage: async (message) => {
             const latestConfig = await loadConfig();
@@ -1703,7 +1710,13 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           validateSessionAttachment: async (sessionId) => {
             const session = await sessionDb.getSessionForProfile(sessionId, profileId);
             if (session === undefined) throw new Error("Session not found in the gateway profile.");
-            await validateSessionWorkspaceOwnership({ session, profileId, workspaceRoot: options.workspaceRoot, homeDir });
+            const workspaceRoot = session.executionTarget?.workspace.canonicalPath;
+            if (!workspaceRoot || !await trustStore.isTrusted(workspaceRoot)) throw new Error("Attachment needs a trusted, established target.");
+            await validateSessionWorkspaceOwnership({ session, profileId, workspaceRoot, homeDir });
+            const owner = sessionDb.db.query<{ owner_id: string | null; owner_pid: number | null }>("select owner_id, owner_pid from session_execution_owners where session_id=?").get(sessionId);
+            if (owner?.owner_id && owner.owner_pid !== process.pid && !processDefinitelyAbsent(owner.owner_pid ?? 0)) {
+              throw new Error("Foreground owner is busy. Settle CLI/ACP work and release its runtime before attaching.");
+            }
           },
           preprocessMessage: async (message) => {
             const latestConfig = await loadConfig();

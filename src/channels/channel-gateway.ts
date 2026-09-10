@@ -469,6 +469,7 @@ export class ChannelGateway {
   readonly #workspaceStore?: ChannelWorkspaceStore;
   readonly #isWorkspaceTrusted?: (path: string) => Promise<boolean>;
   readonly #selectionLocks = new Set<string>();
+  readonly #admitting = new Map<string, number>();
   readonly #authPolicy: ChannelAuthPolicies;
   readonly #trustedWorkspace: ChannelGatewayOptions["trustedWorkspace"];
   readonly #onStopRequested: ChannelGatewayOptions["onStopRequested"];
@@ -1449,7 +1450,7 @@ export class ChannelGateway {
     if (secureInputResult !== undefined) return secureInputResult;
 
     const selectionKey = stableSessionKey(authorizedMessage.sessionKey, this.#sessionPolicy);
-    const selecting = /^\/workspace\s+use(?:\s|$)/u.test(authorizedMessage.text.trim());
+    const selecting = /^(?:\/workspace\s+use|\/(?:attach|detach|switch|new|reset))(?:\s|$)/u.test(authorizedMessage.text.trim());
     if ((selecting && this.#selectionBusy(selectionKey)) || this.#selectionLocks.has(selectionKey)) {
       // Control commands stay reachable while selection is awaiting I/O.
       if (!/^\/(?:stop|approve|deny)(?:\s|$)/u.test(authorizedMessage.text.trim())) {
@@ -1486,14 +1487,16 @@ export class ChannelGateway {
       }
     }
 
-    const processedMessage = await this.#preprocessMessage?.(authorizedMessage) ?? authorizedMessage;
-
-    const debounced = await this.#maybeDebounceText(processedMessage, adapter);
-    if (debounced !== undefined) {
-      return debounced;
+    this.#admitting.set(selectionKey, (this.#admitting.get(selectionKey) ?? 0) + 1);
+    try {
+      const processedMessage = await this.#preprocessMessage?.(authorizedMessage) ?? authorizedMessage;
+      const debounced = await this.#maybeDebounceText(processedMessage, adapter);
+      if (debounced !== undefined) return debounced;
+      return await this.#routeNormalTurn(processedMessage, adapter);
+    } finally {
+      const count = (this.#admitting.get(selectionKey) ?? 1) - 1;
+      if (count) this.#admitting.set(selectionKey, count); else this.#admitting.delete(selectionKey);
     }
-
-    return this.#routeNormalTurn(processedMessage, adapter);
   }
 
   async #interceptTelegramSecureInput(
@@ -2234,19 +2237,7 @@ export class ChannelGateway {
         this.#activeTurnRegistry.updateTurn(activeTurnKey, turnId, { sessionId });
       }
 
-      // Cache invalidation on session change
-      const previousSessionId = this.#sessionIdByTurnKey.get(activeTurnKey);
-      if (previousSessionId !== undefined && previousSessionId !== sessionId) {
-        if (this.#runtimeCache !== undefined) {
-          try {
-            await this.#runtimeCache.invalidate(previousSessionId);
-          } catch (invalidateErr) {
-            this.#logWarning?.(
-              `Session reset cache invalidate failed for ${previousSessionId}: ${invalidateErr instanceof Error ? invalidateErr.message : String(invalidateErr)}`
-            );
-          }
-        }
-      }
+      // Changing a view pointer does not retire the previous execution owner.
       this.#sessionIdByTurnKey.set(activeTurnKey, sessionId);
 
       const hygieneResult = await this.#runSessionHygiene(sessionId, controller.signal);
@@ -3348,7 +3339,7 @@ export class ChannelGateway {
   #surfaceId(key: ChannelSessionKey): string { return this.#workspaceStore ? channelSurfaceId(key, this.#sessionPolicy) : key.chatId; }
 
   #selectionBusy(key: string): boolean {
-    return this.#activeTurns.has(key) || this.#activeTurnRegistry?.isBusy(key) === true ||
+    return this.#admitting.has(key) || this.#activeTurns.has(key) || this.#activeTurnRegistry?.isBusy(key) === true ||
       this.#sessionMessageQueue.size(key) > 0 || this.#drainingQueue.has(key) || this.#pendingApprovals.has(key) ||
       [...this.#textDebounceBuffers.values()].some((b) => stableSessionKey(b.firstMessage.sessionKey, this.#sessionPolicy) === key);
   }
@@ -3718,14 +3709,7 @@ export class ChannelGateway {
       // After detach, get the new independent session id
       const newSessionId = await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt });
       const key = stableSessionKey(message.sessionKey, this.#sessionPolicy);
-      const previousSessionId = this.#sessionIdByTurnKey.get(key);
-      if (previousSessionId !== undefined && previousSessionId !== newSessionId) {
-        try {
-          await this.#runtimeCache?.invalidate(previousSessionId);
-        } catch (err) {
-          this.#logWarning?.(`Session detach cache invalidate failed: ${err instanceof Error ? err.message : String(err)}`);
-        }
-      }
+
       this.#sessionIdByTurnKey.set(key, newSessionId);
       const text = [
         "Detached this chat from the linked session.",
@@ -4016,13 +4000,7 @@ export class ChannelGateway {
       } catch {
         this.#logWarning?.("Session reset finalization enqueue failed");
       }
-      if (previousSessionId.length > 0) {
-        try {
-          await this.#runtimeCache?.invalidate(previousSessionId);
-        } catch (err) {
-          this.#logWarning?.(`Session reset cache invalidate failed: ${err instanceof Error ? err.message : String(err)}`);
-        }
-      }
+
       this.#sessionIdByTurnKey.delete(key);
       this.#pendingApprovals.delete(key);
       this.#approvalGrants.delete(key);
@@ -4132,16 +4110,12 @@ export class ChannelGateway {
           await this.#deliverText(adapter, message.sessionKey, text);
           return { sessionId: currentSessionId, replyText: text, artifactCount: 0, progressCount: 0 };
         }
-        await this.#sessionStore.setSessionId?.(message.sessionKey, targetSessionId, { receivedAt: message.receivedAt });
+        if (this.#workspaceStore && this.#surfacePointerStore) {
+          await this.#surfacePointerStore.setPointer(message.sessionKey.platform as SurfaceType, this.#surfaceId(message.sessionKey),
+            { sessionId: targetSessionId, attachedAt: new Date().toISOString() });
+        } else await this.#sessionStore.setSessionId?.(message.sessionKey, targetSessionId, { receivedAt: message.receivedAt });
         const key = stableSessionKey(message.sessionKey, this.#sessionPolicy);
-        const previousSessionId = this.#sessionIdByTurnKey.get(key);
-        if (previousSessionId !== undefined && previousSessionId !== targetSessionId) {
-          try {
-            await this.#runtimeCache?.invalidate(previousSessionId);
-          } catch (err) {
-            this.#logWarning?.(`Session switch cache invalidate failed: ${err instanceof Error ? err.message : String(err)}`);
-          }
-        }
+
         this.#sessionIdByTurnKey.set(key, targetSessionId);
         this.#pendingApprovals.delete(key);
         this.#approvalGrants.delete(key);
