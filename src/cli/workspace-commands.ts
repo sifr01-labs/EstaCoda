@@ -1,3 +1,4 @@
+import { ChangeApplicationStore } from "../workspaces/change-application.js";
 import { ChangeAuthorizationStore, parseApplicationPlan } from "../workspaces/change-authorization.js";
 import { ChangeArtifactStore } from "../workspaces/change-artifact.js";
 import { prepareTemporaryCopy } from "../workspaces/temporary-copy.js";
@@ -7,6 +8,8 @@ import { WorkspaceRegistry } from "../workspaces/workspace-registry.js";
 import type { CliCommandResult, CliOptions } from "./cli.js";
 
 const help = [
+  "estacoda workspace finish <copy-target-id>",
+  "estacoda workspace apply <change-artifact-id>",
   "estacoda workspace changes <copy-target-id>",
   "estacoda workspace copy <source-alias> <new-directory> <manifest.json>",
   "estacoda workspace add <alias> [path]",
@@ -23,6 +26,14 @@ const help = [
 export async function workspaceCommand(options: CliOptions, args: string[]): Promise<CliCommandResult> {
   const [command, selector, value] = args;
   if (!command || args.includes("--help") || args.includes("-h")) return { handled: true, exitCode: 0, output: help };
+  if (["finish", "apply"].includes(command) && args.length === 2) {
+    const store = new ChangeApplicationStore({ homeDir: options.homeDir, profileId: options.profileId ?? readActiveProfile({ homeDir: options.homeDir }).profileId });
+    try {
+      const result = command === "finish" ? await store.finish(selector!, selector!) : await store.apply(selector!);
+      return { handled: true, exitCode: ["attention", "conflict"].includes(result.status) ? 1 : 0, output: JSON.stringify(result, null, 2) };
+    } catch (error) { return { handled: true, exitCode: 1, output: error instanceof Error ? error.message : String(error) }; }
+    finally { store.close(); }
+  }
   if (command === "changes" && args.length === 2) {
     const store = new ChangeArtifactStore({ homeDir: options.homeDir, profileId: options.profileId ?? readActiveProfile({ homeDir: options.homeDir }).profileId });
     try { return { handled: true, exitCode: 0, output: JSON.stringify(await store.export(selector!, selector!), null, 2) }; }

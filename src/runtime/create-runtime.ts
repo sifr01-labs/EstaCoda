@@ -1,3 +1,5 @@
+import { ChangeApplicationStore } from "../workspaces/change-application.js";
+import { resolveSessionOriginSurface } from "../session/session-presentation.js";
 import type { ExecutionFacts } from "../execution/execution-authority.js";
 import { createLiveAuthority } from "./live-execution-authority.js";
 import { ResourceCleanup } from "../execution/resource-cleanup.js";
@@ -1357,11 +1359,33 @@ async function buildRuntime(options: RuntimeOptions, rollback: ResourceCleanup):
       activeTrustedWorkspace = trustedWorkspace;
 
       executionLease.assertActive();
-      return executionOwner.run(() => agentLoop.handle({
-        ...input,
-        signal: AbortSignal.any([executionOwner.signal, executionLease.signal, ...(input.signal ? [input.signal] : [])]),
-        trustedWorkspace
-      }));
+      return executionOwner.run(async () => {
+        const response = await agentLoop.handle({
+          ...input,
+          signal: AbortSignal.any([executionOwner.signal, executionLease.signal, ...(input.signal ? [input.signal] : [])]),
+          trustedWorkspace
+        });
+        // Only the local foreground outcome consumes local task-start copy authority.
+        // Child/remote work can export through the operator workflow after settlement.
+        if (current.executionTarget && resolveSessionOriginSurface(current) === "cli" && !current.parentSessionId &&
+          response.finalOutcome?.terminationCause === "normal" &&
+          ["completed", "completed_with_recovered_errors"].includes(response.finalOutcome.status) &&
+          response.finalOutcome.uncertainActions.length === 0 && !input.signal?.aborted) {
+          const changes = new ChangeApplicationStore({ homeDir: options.homeDir, profileId });
+          try {
+            if (changes.getTarget(current.executionTarget.targetId)?.kind === "temporary-copy") {
+              await executionOwner.validate(); executionLease.assertActive();
+              const result = await changes.finish(current.executionTarget.targetId, current.id,
+                (artifact) => sessionDb.appendEvent(current.id, { kind: "session-artifact-registered", artifact }));
+              response.artifacts.push(result.artifact);
+              response.text += `\n\nWorkspace changes: ${result.status}. ${result.reason ?? result.artifact.path}`;
+            }
+          } catch (error) {
+            response.text += `\n\nWorkspace changes need attention: ${error instanceof Error ? error.message : "export/application failed"}`;
+          } finally { changes.close(); }
+        }
+        return response;
+      });
     },
     async executeTool(input) {
       executionLease.assertActive();
