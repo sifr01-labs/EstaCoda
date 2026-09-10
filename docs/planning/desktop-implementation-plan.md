@@ -4,6 +4,8 @@ Status: implementation plan with approved Desktop visual direction, version 1 ·
 
 Desktop PR 1 is implemented as an architecture and shared-package foundation; see the [implementation record and validation](desktop-pr1.md). The Electron app, bridge, and visual implementation remain later PRs.
 
+Desktop PR 2 adds the pure control protocol and conformance suite; see its [implementation record](desktop-pr2.md) for exact coverage and validation. A declared method remains unavailable until its service handler and authority checks are implemented.
+
 The [Desktop visual and interaction contract](desktop-visual-contract.md), [frozen branded prototype](desktop-design/README.md), and [acceptance matrix](desktop-design/acceptance-matrix.md) are required inputs to PR 5 and subsequent UI work. They supersede earlier visual concepts. PR numbers in this document refer to Desktop, not the workspace-execution series.
 
 Shared contract and ownership decisions are defined in [Shared workspace, target, and execution ownership decisions](workspace-execution-ownership-decisions.md). That document is authoritative for overlap with the workspace plan. The architecture below consumes its core target bindings and supervisor ownership; these are proposed capabilities, not shipped behavior.
@@ -317,6 +319,8 @@ Rules:
 ## 8. Control protocol
 
 ### 8.1 Initialization
+
+Desktop PR 2 implements the initial [control protocol v1.0 contracts and validators](../architecture/desktop/control-protocol.md). The broad method/event catalogs below remain the delivery roadmap; only the reference's declared subset has executable schemas. Service handlers, byte decoding, durable dispatch and bounded replay storage remain PR 3 and later work.
 
 This is the planned Desktop transport. Current private host control uses an authenticated single-request v1 envelope, not JSON-RPC or capability negotiation; see the [compatibility decision](../architecture/desktop/decisions.md#adr-d-002--preserve-existing-host-wire-v1-add-desktop-transport-explicitly). PRs 2–3 must provide validated adapters and coordinate any missing host generation contracts before advertising dependent mutations. PR 1 preserves host wire behavior.
 

@@ -57,6 +57,8 @@ The [credential transaction design](credential-transactions.md) defines candidat
 
 The [protocol/process/packaging decisions](decisions.md) distinguish existing host wire v1 from the planned Desktop JSON-RPC transport and preserve CLI packaging through a pure shared-source facade.
 
+[Desktop control protocol v1.0](control-protocol.md) documents the PR 2 executable schemas, negotiation, bounds and reconnect requirements. A declared contract does not imply an implemented service handler.
+
 PR 1 establishes decisions and the minimal package boundary; it cannot prove Electron sandboxing, staged credential isolation, two-window behavior, or packaged quit/relaunch. Those need actual process tests in PRs 2–5 and packaged release validation. The early bridge/supervisor lifecycle proof belongs to PRs 3–5; no shell or service is claimed here merely because Milestone 0 lists that proof as a prerequisite for later UI delivery.
 
 Risk: downstream code could confuse a client bridge or a display projection with an authority owner. Review subsequent implementations against this matrix and the shared conformance cases. PR 1 changes no storage schema, grants, profile configuration, services, or execution lifetime.

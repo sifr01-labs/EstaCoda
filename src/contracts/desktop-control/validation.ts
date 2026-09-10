@@ -140,7 +140,9 @@ export function validateControlResponse<M extends keyof MethodContracts>(value: 
     }
     if (request.method === "control.subscribe" && result.state === "subscribed") {
       const cursor = (result as unknown as { cursor: MethodContracts["control.subscribe"]["params"]["after"] }).cursor;
-      if (cursor.instanceId !== context!.instanceId || cursor.streamId !== request.params.after.streamId || cursor.sequence !== request.params.after.sequence) throw new ControlProtocolError("-32007");
+      // The snapshot cursor covers the negotiated event set, not a filtered subsequence.
+      if (!context!.capabilities.events.every((event) => request.params.events.includes(event)) ||
+        cursor.instanceId !== context!.instanceId || cursor.streamId !== request.params.after.streamId || cursor.sequence !== request.params.after.sequence) throw new ControlProtocolError("-32007");
     }
     if ("operationId" in request.params) {
       const receipt = value.result as unknown as OperationReceipt;

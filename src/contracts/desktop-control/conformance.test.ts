@@ -32,7 +32,7 @@ const activities: ActivityProjection[] = [
 const cases = {
   "control.initialize": { params: initialize, result: initialized },
   "control.bootstrap": { params: {}, result: { profile: { id: "p", label: "Personal", configuration: "unconfigured" }, runtime: { state: "unavailable" }, capabilities: context.capabilities, cursor } },
-  "control.subscribe": { params: { after: cursor, events: ["work.changed"] }, result: { state: "subscribed", subscriptionId: "sub", cursor } },
+  "control.subscribe": { params: { after: cursor, events: [...CONTROL_EVENTS] }, result: { state: "subscribed", subscriptionId: "sub", cursor } },
   "control.unsubscribe": { params: { subscriptionId: "sub" }, result: { removed: true } },
   "control.cancelRequest": { params: { requestId: "old" }, result: { cancellationRequested: true } },
   "work.list": { params: { limit: 10 }, result: { items: [work], nextCursor: null } },
@@ -84,6 +84,9 @@ it("reconnects only across an explicit snapshot cursor and rejects stale notific
   expect(cursorDisposition(cursor, cursor)).toBe("duplicate");
   expect(cursorDisposition(cursor, { ...cursor, sequence: 12 })).toBe("snapshot_required");
   expect(() => validateControlRequest(request, { ...context, instanceId: "new" })).toThrow("snapshot");
+  const filtered = validateControlRequest({ ...request, params: { after: cursor, events: ["work.changed"] } }, context);
+  expect(() => validateControlResponse({ jsonrpc: "2.0", id: "r", result: cases["control.subscribe"].result }, filtered, context)).toThrow("snapshot");
+  expect(validateControlResponse({ jsonrpc: "2.0", id: "r", result: { state: "snapshot_required", reason: "stream_changed" } }, filtered, context)).toBeDefined();
 });
 it("does not convert cancellation acknowledgement or unknown receipts into success", () => {
   const request = validateControlRequest({ jsonrpc: "2.0", id: "r", method: "sessions.cancelTurn", params: binding }, context);
