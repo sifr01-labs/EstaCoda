@@ -1,3 +1,4 @@
+import { diagnoseExecution } from "./checks/execution.js";
 import { readFile, stat } from "node:fs/promises";
 import type { CliCommandResult, CliOptions } from "../cli/cli.js";
 import { loadRuntimeConfig, type LoadedRuntimeConfig } from "../config/runtime-config.js";
@@ -354,7 +355,9 @@ export async function runDoctor(options: CliOptions, args: string[] = []): Promi
   }
 
   const locale = config?.ui.language === "ar" ? "ar" : "en";
+  const executionDiagnostic = await diagnoseExecution({ ...effectiveOptions, profileId: selectedProfile, locale });
   const report = buildDoctorReport({
+    executionDiagnostic,
     locale,
     selectedProfile,
     workspaceRoot: options.workspaceRoot,
@@ -394,7 +397,7 @@ export async function runDoctor(options: CliOptions, args: string[] = []): Promi
 
   return {
     handled: true,
-    exitCode: warnings.length === 0 &&
+    exitCode: executionDiagnostic.severity !== "blocked" && executionDiagnostic.severity !== "warning" && warnings.length === 0 &&
       liveProviderDiagnostic?.status !== "blocked" &&
       liveToolDiagnostic?.status !== "blocked"
       ? 0
@@ -404,6 +407,7 @@ export async function runDoctor(options: CliOptions, args: string[] = []): Promi
 }
 
 type BuildDoctorReportInput = {
+  readonly executionDiagnostic: DoctorCheck;
   readonly locale: DoctorLocale;
   readonly selectedProfile: string;
   readonly workspaceRoot: string;
@@ -455,6 +459,7 @@ async function safeDoctorDiagnostic<T>(
 
 function buildDoctorReport(input: BuildDoctorReportInput): DoctorReport {
   const checks: DoctorCheck[] = [
+    input.executionDiagnostic,
     check("runtime", label(input.locale, "runtime"), "healthy"),
     check(
       "installation",
