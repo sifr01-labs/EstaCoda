@@ -41,6 +41,14 @@ importers:
         specifier: ^4.1.5
         version: 4.1.6(@types/node@25.7.0)(vite@8.0.16(@types/node@25.7.0)(esbuild@0.28.1)(tsx@4.21.0))
 
+  apps/desktop:
+    dependencies:
+      '@estacoda/control-protocol':
+        specifier: workspace:*
+        version: link:../../packages/control-protocol
+
+  packages/control-protocol: {}
+
 packages:
 
   '@discordjs/builders@1.14.1':

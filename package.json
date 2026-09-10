@@ -43,6 +43,7 @@
   "scripts": {
     "skills:catalog": "tsx scripts/build-skills-catalog.ts",
     "typecheck": "tsc --noEmit",
+    "desktop:foundation:check": "pnpm --filter @estacoda/control-protocol typecheck && pnpm --filter @estacoda/desktop typecheck && node scripts/check-desktop-protocol-boundary.mjs",
     "clean:dist": "node scripts/clean-dist.mjs",
     "build": "pnpm run clean:dist && tsc -p tsconfig.build.json",
     "verify:local-bin": "pnpm run build && head -n 1 dist/index.js && node dist/index.js --version && node dist/index.js --help",

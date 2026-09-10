@@ -1,3 +1,7 @@
+packages:
+  - apps/desktop
+  - packages/control-protocol
+
 overrides:
   esbuild: 0.28.1
   # Patch Vitest's vulnerable Vite 8.0.x resolutions without changing its major.

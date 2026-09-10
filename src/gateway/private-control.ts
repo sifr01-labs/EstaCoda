@@ -4,28 +4,14 @@ import { randomBytes, timingSafeEqual } from "node:crypto";
 import { chmod, lstat, readFile, writeFile, unlink } from "node:fs/promises";
 import { join, dirname } from "node:path";
 
-const MAX_BYTES = 131_072;
-export type PrivateControlRequest = {
-  method: "send" | "cancel" | "approval" | "inspect";
-  sessionId: string; targetId: string; operationId: string;
-  text?: string; approvalId?: string; decision?: "approved" | "denied";
-};
+import { PRIVATE_CONTROL_MAX_BYTES as MAX_BYTES, validatePrivateControlRequest, type PrivateControlRequest } from "../contracts/control-protocol.js";
+export { validatePrivateControlRequest, type PrivateControlRequest } from "../contracts/control-protocol.js";
 type Discovery = { protocol: 1; version: string; instanceId: string; profileId: string; socket: string; token: string };
 async function assertPrivate(path: string, directory = false): Promise<void> {
   const info = await lstat(path);
   if (info.isSymbolicLink() || (directory ? !info.isDirectory() : !info.isFile()) ||
     (!directory && info.size > MAX_BYTES) || (info.mode & 0o077) !== 0 || (process.getuid && info.uid !== process.getuid())) {
     throw new Error("Private control state has unsafe ownership or permissions.");
-  }
-}
-export function validatePrivateControlRequest(value: unknown): asserts value is PrivateControlRequest {
-  if (!value || typeof value !== "object") throw new Error("Invalid control request.");
-  const request = value as PrivateControlRequest;
-  if (!["send", "cancel", "approval", "inspect"].includes(request.method) ||
-    [request.sessionId, request.targetId, request.operationId].some((id) => typeof id !== "string" || !/^[A-Za-z0-9_.:-]{1,160}$/.test(id)) ||
-    (request.method === "send" && (typeof request.text !== "string" || request.text.length < 1 || request.text.length > 32_768)) ||
-    (request.method === "approval" && (typeof request.approvalId !== "string" || request.approvalId.length > 160 || !["approved", "denied"].includes(request.decision ?? "")))) {
-    throw new Error("Invalid control request.");
   }
 }
 

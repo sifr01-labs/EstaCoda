@@ -2,6 +2,8 @@
 
 Status: implementation plan with approved Desktop visual direction, version 1 · 10 September 2026. PR 5 now includes the complete approved interface and visual acceptance gate; production integrations remain sequenced below. Planned capabilities are not claims of shipped functionality.
 
+Desktop PR 1 is implemented as an architecture and shared-package foundation; see the [implementation record and validation](desktop-pr1.md). The Electron app, bridge, and visual implementation remain later PRs.
+
 The [Desktop visual and interaction contract](desktop-visual-contract.md), [frozen branded prototype](desktop-design/README.md), and [acceptance matrix](desktop-design/acceptance-matrix.md) are required inputs to PR 5 and subsequent UI work. They supersede earlier visual concepts. PR numbers in this document refer to Desktop, not the workspace-execution series.
 
 Shared contract and ownership decisions are defined in [Shared workspace, target, and execution ownership decisions](workspace-execution-ownership-decisions.md). That document is authoritative for overlap with the workspace plan. The architecture below consumes its core target bindings and supervisor ownership; these are proposed capabilities, not shipped behavior.
