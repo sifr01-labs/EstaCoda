@@ -180,7 +180,7 @@ async function runCode(options: RunCodeOptions): Promise<ToolResult> {
   let tempDir: string | undefined;
   let cleanupUncertain = false;
   try {
-    tempDir = await mkdtemp(join(tmpdir(), "estacoda-execute-code-"));
+    if (options.executionLease?.facts.backend !== "docker") tempDir = await mkdtemp(join(tmpdir(), "estacoda-execute-code-"));
     const result = await runHarness(options, processes, tempDir);
     cleanupUncertain = result.metadata?.cleanupUncertain === true;
     return result;
@@ -192,11 +192,10 @@ async function runCode(options: RunCodeOptions): Promise<ToolResult> {
   }
 }
 
-async function runHarness(options: RunCodeOptions, processes: HostProcesses, tempDir: string): Promise<ToolResult> {
-  const scriptPath = join(tempDir, "script.py");
-  const sandboxHome = join(tempDir, "sandbox-home");
-  await mkdir(sandboxHome, { recursive: true });
-  await writeFile(scriptPath, renderPythonHarness(options.code), "utf8");
+async function runHarness(options: RunCodeOptions, processes: HostProcesses, tempDir?: string): Promise<ToolResult> {
+  const scriptPath = tempDir ? join(tempDir, "script.py") : undefined;
+  const sandboxHome = tempDir ? join(tempDir, "sandbox-home") : "/tmp";
+  if (tempDir) { await mkdir(sandboxHome, { recursive: true }); await writeFile(scriptPath!, renderPythonHarness(options.code), "utf8"); }
   const controller = new AbortController();
   const signal = AbortSignal.any([controller.signal, ...[options.signal, options.executionLease?.signal].filter((value): value is AbortSignal => value !== undefined)]);
   if (signal.aborted) return errorResult("execute_code cancelled before dispatch.");
@@ -204,7 +203,7 @@ async function runHarness(options: RunCodeOptions, processes: HostProcesses, tem
   childEnv["ESTACODA_INPUT_JSON"] = JSON.stringify(options.input);
   childEnv["ESTACODA_ALLOWED_TOOLS_JSON"] = JSON.stringify([...options.allowedTools].sort());
   return new Promise<ToolResult>((resolve) => {
-    const child = processes.spawn(options.pythonBinary, ["-u", scriptPath], { input: true, env: childEnv });
+    const child = processes.spawn(tempDir ? options.pythonBinary : "python3", tempDir ? ["-u", scriptPath!] : ["-u", "-c", renderPythonHarness(options.code)], { input: true, env: childEnv });
     let stdout = "", stderr = "", pendingLine = "";
     let outputTruncated = false, settled = false, stopping = false;
     let activeCall: Promise<void> | undefined;

@@ -1,3 +1,4 @@
+import type { ExecutionFacts } from "../execution/execution-authority.js";
 import { createLiveAuthority } from "./live-execution-authority.js";
 import { ResourceCleanup } from "../execution/resource-cleanup.js";
 import { acquireRuntimeContext } from "./runtime-acquisition.js";
@@ -272,7 +273,7 @@ function resolveRuntimeUiIdentity(options: RuntimeOptions): string {
 export type Runtime = {
   validateExecutionHealth?(): Promise<void>;
   readEditorFile?(path: string): Promise<string>;
-  executionFacts?(): Readonly<HostExecutionFacts>;
+  executionFacts?(): Readonly<ExecutionFacts>;
   agentEvolutionPolicy(): AgentEvolutionPolicy;
   describe(): string;
   getStatus(): import("../contracts/view-model.js").StatusViewModel;

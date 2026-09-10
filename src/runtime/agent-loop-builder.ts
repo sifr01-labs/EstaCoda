@@ -1,4 +1,4 @@
-import { hostAuthorityFingerprint } from "../execution/host-authority.js";
+import { executionAuthorityFingerprint } from "../execution/execution-authority.js";
 import { stableJsonHash } from "./runtime-fingerprint.js";
 import { redactSensitiveText } from "../utils/redaction.js";
 import type { ProjectContextSnapshot } from "../contracts/context.js";
@@ -385,7 +385,7 @@ export class AgentLoopBuilder {
               skills: substrate.skillRegistry.list().map((skill) => ({ name: skill.name, version: skill.version, routing: skill.routing, playbook: skill.playbook, instructions: "instructions" in skill ? skill.instructions : undefined })),
               agentProfile: input.agentProfile
             })));
-            const authorityRevision = hostAuthorityFingerprint(executionLease.facts);
+            const authorityRevision = executionAuthorityFingerprint(executionLease.facts);
             return { targetId: boundTarget.targetId, targetGeneration: boundTarget.targetGeneration,
               workspaceIdentityHash: boundTarget.workspace.identityHash, definitionRevision, authorityRevision,
               originalDefinitionRevision: definitionRevision, originalAuthorityRevision: authorityRevision };

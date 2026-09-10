@@ -1,3 +1,4 @@
+import type { ExecutionFacts } from "./execution-authority.js";
 import { EditorContentView, type ExecutionContentView } from "./editor-content-view.js";
 import { HostProcessScope, type HostProcesses } from "./host-processes.js";
 import { HostWorkspaceFiles, type WorkspaceFiles } from "./host-workspace-files.js";
@@ -20,7 +21,7 @@ type Scope = {
   context: ExecutionScopeContext;
   controller: AbortController;
   resources: Set<OwnedExecutionResource>;
-  processes: HostProcessScope;
+  processes: HostProcesses & OwnedExecutionResource;
   borrowers: number;
   closing?: Promise<void>;
 };
@@ -28,9 +29,10 @@ type Scope = {
 /** A prepared host view can serve independent scopes. It is not an OS sandbox
  * or the persisted, exclusive Session execution owner introduced in PR 4. */
 export class HostEnvironment {
-  readonly facts: Readonly<HostExecutionFacts>;
+  readonly facts: Readonly<ExecutionFacts>;
   readonly profileId: string;
   readonly #content: EditorContentView;
+  readonly #driver?: { files(assertActive: () => void): WorkspaceFiles; processes(): HostProcesses & OwnedExecutionResource; dispose(): Promise<void> };
   readonly #scopes = new Set<Scope>();
   #retainers = 0;
   #destroyed = false;
@@ -46,16 +48,20 @@ export class HostEnvironment {
   async #finishRetirement(): Promise<void> {
     if (this.#scopes.size || this.#retainers || !this.#retireCleanup) return;
     this.#destroyed = true;
-    this.#retiring ??= Promise.resolve().then(this.#retireCleanup);
+    this.#retiring ??= Promise.resolve().then(() => this.#driver?.dispose()).then(this.#retireCleanup);
     await this.#retiring;
   }
 
-  private constructor(profileId: string, facts: Readonly<HostExecutionFacts>) {
+  private constructor(profileId: string, facts: Readonly<ExecutionFacts>, driver?: EnvironmentDriver) {
+    this.#driver = driver;
     this.profileId = profileId;
     this.facts = facts;
-    this.#content = new EditorContentView(new HostWorkspaceFiles(facts.workspace.canonicalPath, () => {
-      if (this.#destroyed) throw new Error("Execution environment has been destroyed.");
-    }), facts.workspace.canonicalPath);
+    const active = () => { if (this.#destroyed) throw new Error("Execution environment has been destroyed."); };
+    this.#content = new EditorContentView(driver ? driver.files(active) : new HostWorkspaceFiles(facts.workspace.canonicalPath, active), facts.workspace.canonicalPath);
+  }
+
+  static prepared(profileId: string, facts: Readonly<ExecutionFacts>, driver: EnvironmentDriver): HostEnvironment {
+    return new HostEnvironment(profileId, facts, driver);
   }
 
   static async create(input: { profileId: string; workspaceRoot: string; policy?: RequestedExecutionPolicy }): Promise<HostEnvironment> {
@@ -68,7 +74,7 @@ export class HostEnvironment {
       throw new Error("Execution scope is unavailable or belongs to another profile.");
     }
     const scope: Scope = { id: `scope_${randomUUID()}`, context: Object.freeze({ ...context }),
-      controller: new AbortController(), resources: new Set(), processes: new HostProcessScope(this.facts.workspace.canonicalPath), borrowers: 0 };
+      controller: new AbortController(), resources: new Set(), processes: this.#driver?.processes() ?? new HostProcessScope(this.facts.workspace.canonicalPath), borrowers: 0 };
     scope.resources.add(scope.processes);
     this.#scopes.add(scope);
     return this.#borrow(scope);
@@ -92,7 +98,7 @@ export class HostEnvironment {
         spawn: (command, args, options) => { assertActive(); return scope.processes.spawn(command, args, options); },
         terminate: (child, signal) => scope.processes.terminate(child, signal)
       },
-      files: new HostWorkspaceFiles(this.facts.workspace.canonicalPath, assertActive),
+      files: this.#driver?.files(assertActive) ?? new HostWorkspaceFiles(this.facts.workspace.canonicalPath, assertActive),
       scopeId: scope.id, context: scope.context, facts: this.facts,
       workspaceRoot: this.facts.workspace.canonicalPath, signal: scope.controller.signal,
       assertActive,
@@ -128,9 +134,10 @@ export class HostEnvironment {
     };
   }
 
-  destroy(): void {
+  destroy(): void | Promise<void> {
     if (this.#scopes.size || this.#retainers) throw new Error("Execution environment still has borrowed or settling scopes.");
     this.#destroyed = true;
+    return this.#driver?.dispose();
   }
 }
 
@@ -140,7 +147,7 @@ export type HostExecutionLease = {
   readonly files: WorkspaceFiles;
   readonly scopeId: string;
   readonly context: ExecutionScopeContext;
-  readonly facts: Readonly<HostExecutionFacts>;
+  readonly facts: Readonly<ExecutionFacts>;
   readonly workspaceRoot: string;
   readonly signal: AbortSignal;
   assertActive(): void;
@@ -151,3 +158,7 @@ export type HostExecutionLease = {
   own(resource: OwnedExecutionResource): () => void;
   release(): Promise<void>;
 };
+
+type EnvironmentDriver = { files(assertActive: () => void): WorkspaceFiles; processes(): HostProcesses & OwnedExecutionResource; dispose(): Promise<void> };
+/** Compatibility export: both host and Docker implement this owned lease contract. */
+export type ExecutionLease = HostExecutionLease;

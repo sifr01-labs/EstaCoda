@@ -1,3 +1,6 @@
+import { DockerContainer } from "../execution/docker-container.js";
+import { DockerWorkspaceFiles } from "../execution/docker-workspace-files.js";
+import { DockerProcessScope } from "../execution/docker-processes.js";
 import { selectedExecutionPolicy } from "../execution/docker-policy.js";
 import { RuntimeSessionOwner } from "./session-execution-owner.js";
 import { HostEnvironment } from "../execution/host-environment.js";
@@ -26,7 +29,12 @@ export async function acquireRuntimeContext(input: {
     spendingLimit: options.budgets?.session });
   const executionOwner = await RuntimeSessionOwner.acquire(sessionDb, sessionId, profileId, { workspaceRoot, homeDir: options.homeDir });
   rollback.afterRelease(() => executionOwner.release());
-  const hostEnvironment = await HostEnvironment.create({ profileId, workspaceRoot, policy: await selectedExecutionPolicy({ profileId, homeDir: options.homeDir }, options.requestedExecutionPolicy) });
+  const policy = await selectedExecutionPolicy({ profileId, homeDir: options.homeDir }, options.requestedExecutionPolicy);
+  const container = policy.backend === "docker" ? await DockerContainer.prepare({ profileId, workspaceRoot, homeDir: options.homeDir, policy }) : undefined;
+  if (container) rollback.defer(() => container.release());
+  const hostEnvironment = container ? HostEnvironment.prepared(profileId, container.facts, {
+    files: (active) => new DockerWorkspaceFiles(container, active), processes: () => new DockerProcessScope(container, options.homeDir), dispose: () => container.release()
+  }) : await HostEnvironment.create({ profileId, workspaceRoot, policy });
   rollback.defer(() => hostEnvironment.destroy());
   const executionLease = hostEnvironment.acquire({ profileId, sessionId,
     surface: String(options.sessionMetadata?.originSurface ?? "local") });

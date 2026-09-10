@@ -9,6 +9,7 @@ import type { WorkspaceIdentity } from "../contracts/workspace.js";
 import { resolveWorkspaceDirectory } from "../workspaces/workspace-registry.js";
 import { resolveGlobalStateHome } from "../config/profile-home.js";
 
+export type DockerReceipt = { name: string; owner: string; id?: string };
 export const DOCKER_OWNER_LABEL = "io.estacoda.execution.owner";
 export const DOCKER_DEFAULT_LIMITS = Object.freeze({ cpu: 1, memoryBytes: 512 * 1024 * 1024, pids: 128, outputBytes: 4 * 1024 * 1024, timeoutMs: 120_000 });
 export type DockerExecutionFacts = {
@@ -32,8 +33,8 @@ export function dockerAuthorityFingerprint(facts: Readonly<DockerExecutionFacts>
 /** One container, one unguessable creation receipt. Names and labels are checked
  * before resolving a full ID; foreign resources are never adopted or pruned. */
 export class DockerContainer {
-  readonly name = `estacoda-exec-${randomUUID()}`;
-  readonly owner = randomUUID();
+  readonly name: string;
+  readonly owner: string;
   readonly user = `${process.getuid?.() || 65532}:${process.getgid?.() || 65532}`;
   readonly client: DockerClient;
   readonly profileId: string;
@@ -43,18 +44,20 @@ export class DockerContainer {
   #id?: string;
   #released = false;
   #facts?: Readonly<DockerExecutionFacts>;
-  private constructor(input: { client: DockerClient; profileId: string; workspace: WorkspaceIdentity; policy: RequestedExecutionPolicy }) {
+  private constructor(input: { client: DockerClient; profileId: string; workspace: WorkspaceIdentity; policy: RequestedExecutionPolicy; receipt?: DockerReceipt }) {
+    this.name = input.receipt?.name ?? `estacoda-exec-${randomUUID()}`; this.owner = input.receipt?.owner ?? randomUUID();
+    if (!/^estacoda-exec-[a-f0-9-]{36}$/u.test(this.name) || !/^[a-f0-9-]{36}$/u.test(this.owner)) throw new Error("Invalid Docker ownership receipt.");
     this.client = input.client; this.profileId = input.profileId; this.workspace = input.workspace; this.policy = input.policy;
   }
   get id(): string { if (!this.#id || this.#released) throw new Error("Docker lease is unavailable."); return this.#id; }
   get facts(): Readonly<DockerExecutionFacts> { if (!this.#facts) throw new Error("Docker controls have not been verified."); return this.#facts; }
-  static async prepare(input: { profileId: string; workspaceRoot: string; homeDir?: string; policy: RequestedExecutionPolicy; client?: DockerClient }): Promise<DockerContainer> {
+  static async prepare(input: { profileId: string; workspaceRoot: string; homeDir?: string; policy: RequestedExecutionPolicy; client?: DockerClient; receipt?: DockerReceipt }): Promise<DockerContainer> {
     const policy = parseExecutionPolicy(input.policy);
     if (policy.backend !== "docker" || !input.profileId) throw new Error("Docker acquisition requires a selected profile and policy.");
     const workspace = await resolveWorkspaceDirectory(input.workspaceRoot);
     await assertSafeDockerWorkspace(workspace.canonicalPath, input.homeDir);
     const client = input.client ?? await DockerClient.connect();
-    const container = new DockerContainer({ client, profileId: input.profileId, workspace, policy });
+    const container = new DockerContainer({ client, profileId: input.profileId, workspace, policy, receipt: input.receipt });
     for (const key of ["lifetime", "credentialCapabilities", "limits"] as const) {
       const control = policy[key];
       if (!control || (key === "lifetime" && control.value === "session") || (key === "credentialCapabilities" && Array.isArray(control.value) && control.value.length === 0)) continue;
@@ -104,14 +107,7 @@ export class DockerContainer {
   }
   async release(): Promise<void> {
     if (this.#released) return;
-    const ids = (await this.client.run(["ps", "--all", "--quiet", "--no-trunc", "--filter", `name=^/${this.name}$`])).trim().split(/\s+/u).filter(Boolean);
-    if (!ids.length) { this.#released = true; return; }
-    if (ids.length !== 1 || (this.#id && ids[0] !== this.#id)) throw new Error("Docker cleanup ownership mismatch.");
-    const record = JSON.parse(await this.client.run(["inspect", ids[0]!]))[0];
-    if (record.Id !== ids[0] || record.Config?.Labels?.[DOCKER_OWNER_LABEL] !== this.owner) throw new Error("Docker cleanup ownership could not be verified.");
-    await this.client.run(["rm", "--force", ids[0]!]);
-    const remaining = (await this.client.run(["ps", "--all", "--quiet", "--no-trunc", "--filter", `id=${ids[0]}`])).trim();
-    if (remaining) throw new Error("Docker cleanup did not settle.");
+    await cleanupDockerReceipt(this.client, { name: this.name, owner: this.owner, id: this.#id });
     this.#released = true;
   }
 }
@@ -153,4 +149,16 @@ export async function assertSafeDockerWorkspace(root: string, homeDir?: string):
     }
   };
   await scan(root);
+}
+
+export async function cleanupDockerReceipt(client: DockerClient, receipt: DockerReceipt): Promise<void> {
+  if (!/^estacoda-exec-[a-f0-9-]{36}$/u.test(receipt.name) || !/^[a-f0-9-]{36}$/u.test(receipt.owner)) throw new Error("Invalid Docker cleanup receipt.");
+  const ids = (await client.run(["ps", "--all", "--quiet", "--no-trunc", "--filter", `name=^/${receipt.name}$`])).trim().split(/\s+/u).filter(Boolean);
+  if (!ids.length) return;
+  if (ids.length !== 1 || (receipt.id && ids[0] !== receipt.id)) throw new Error("Docker cleanup ownership mismatch.");
+  const record = JSON.parse(await client.run(["inspect", ids[0]!]))[0];
+  if (record.Id !== ids[0] || record.Config?.Labels?.[DOCKER_OWNER_LABEL] !== receipt.owner) throw new Error("Docker cleanup ownership could not be verified.");
+  try { await client.run(["rm", "--force", ids[0]!]); }
+  catch { /* A cooperating owner can finish the same cleanup; require confirmed absence below. */ }
+  if ((await client.run(["ps", "--all", "--quiet", "--no-trunc", "--filter", `id=${ids[0]}`])).trim()) throw new Error("Docker cleanup did not settle.");
 }

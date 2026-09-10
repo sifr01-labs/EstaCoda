@@ -30,7 +30,7 @@ export async function runPythonWorker(request: PythonWorkerRequest, options: Pyt
   if (Buffer.byteLength(serialized) > 64 * 1024) return { ok: false, content: "Python worker input exceeds its limit." };
   try {
     return await new Promise<ToolResult>((resolve) => {
-      const child = processes.spawn(options.pythonBinary ?? "python3", [options.runnerPath ?? defaultRunnerPath()], { input: true });
+      const child = processes.spawn(lease?.facts.backend === "docker" ? "python3" : options.pythonBinary ?? "python3", [lease?.facts.backend === "docker" ? "/opt/estacoda/python/runner.py" : options.runnerPath ?? defaultRunnerPath()], { input: true });
       let stdout = "", stderr = "", stopped = false;
       const timeoutMs = Math.max(1, Math.min(options.timeoutMs ?? 10_000, 30_000));
       const finish = (result: ToolResult) => { clearTimeout(timer); signal.removeEventListener("abort", cancel); resolve(result); };

@@ -1,7 +1,7 @@
 import { createHash } from "node:crypto";
 import type { ChannelSessionKey } from "../contracts/channel.js";
-import type { HostExecutionFacts } from "../contracts/execution-authority.js";
-import { hostAuthorityFingerprint } from "../execution/host-authority.js";
+import type { ExecutionFacts } from "../execution/execution-authority.js";
+import { executionAuthorityFingerprint } from "../execution/execution-authority.js";
 
 export type ApprovalExecutionScope = {
   schemaVersion: 1;
@@ -13,9 +13,9 @@ export type ApprovalExecutionScope = {
   surfaceKey: string;
 };
 
-export function localApprovalScope(profileId: string, sessionId: string, facts: Readonly<HostExecutionFacts>): ApprovalExecutionScope {
+export function localApprovalScope(profileId: string, sessionId: string, facts: Readonly<ExecutionFacts>): ApprovalExecutionScope {
   return { schemaVersion: 1, profileId, sessionId, workspaceIdentityHash: facts.workspace.identityHash,
-    authorityFingerprint: hostAuthorityFingerprint(facts), environmentInstanceId: facts.environmentInstanceId, surfaceKey: "local" };
+    authorityFingerprint: executionAuthorityFingerprint(facts), environmentInstanceId: facts.environmentInstanceId, surfaceKey: "local" };
 }
 export function channelApprovalScope(scope: ApprovalExecutionScope, key: ChannelSessionKey): ApprovalExecutionScope {
   return { ...scope, surfaceKey: `channel:${createHash("sha256").update(JSON.stringify([
