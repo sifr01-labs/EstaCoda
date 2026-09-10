@@ -32,6 +32,7 @@ export class HostEnvironment {
   readonly profileId: string;
   readonly #content: EditorContentView;
   readonly #scopes = new Set<Scope>();
+  #retainers = 0;
   #destroyed = false;
   #retireCleanup?: () => Promise<void>;
   #retiring?: Promise<void>;
@@ -43,7 +44,7 @@ export class HostEnvironment {
   }
 
   async #finishRetirement(): Promise<void> {
-    if (this.#scopes.size || !this.#retireCleanup) return;
+    if (this.#scopes.size || this.#retainers || !this.#retireCleanup) return;
     this.#destroyed = true;
     this.#retiring ??= Promise.resolve().then(this.#retireCleanup);
     await this.#retiring;
@@ -96,6 +97,14 @@ export class HostEnvironment {
       workspaceRoot: this.facts.workspace.canonicalPath, signal: scope.controller.signal,
       assertActive,
       borrow: () => { assertActive(); return this.#borrow(scope); },
+      retainEnvironment: () => {
+        assertActive(); this.#retainers++;
+        let released = false;
+        return async () => {
+          if (!released) { released = true; this.#retainers--; }
+          await this.#finishRetirement();
+        };
+      },
       child: (context) => { assertActive(); return this.acquire({ ...context, parentScopeId: scope.id }); },
       own: (resource) => {
         assertActive(); scope.resources.add(resource);
@@ -120,7 +129,7 @@ export class HostEnvironment {
   }
 
   destroy(): void {
-    if (this.#scopes.size) throw new Error("Execution environment still has borrowed or settling scopes.");
+    if (this.#scopes.size || this.#retainers) throw new Error("Execution environment still has borrowed or settling scopes.");
     this.#destroyed = true;
   }
 }
@@ -136,6 +145,8 @@ export type HostExecutionLease = {
   readonly signal: AbortSignal;
   assertActive(): void;
   borrow(): HostExecutionLease;
+  /** Keep shared state alive through owner settlement; grants no execution access. */
+  retainEnvironment(): () => Promise<void>;
   child(context: Omit<ExecutionScopeContext, "parentScopeId">): HostExecutionLease;
   own(resource: OwnedExecutionResource): () => void;
   release(): Promise<void>;

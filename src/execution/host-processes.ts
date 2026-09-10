@@ -1,3 +1,4 @@
+import { retainCurrentExecutionOperation } from "../runtime/live-execution-authority.js";
 import { mkdtempSync } from "node:fs";
 import { rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -7,7 +8,7 @@ import { spawn, type ChildProcess, type ChildProcessWithoutNullStreams } from "n
 
 export type HostSpawnOptions = { env?: NodeJS.ProcessEnv; input?: boolean };
 export type HostProcesses = Pick<HostProcessScope, "spawn" | "terminate" | "environment">;
-type OwnedChild = { child: ChildProcess; closed: Promise<void>; settled: boolean; cleanupError?: unknown; stopping?: Promise<void> };
+type OwnedChild = { child: ChildProcess; closed: Promise<void>; settled: boolean; cleanupError?: unknown; stopping?: Promise<void>; releaseAuthority(): void };
 
 /** One resource owner, even when several owners share a workspace/environment.
  * POSIX children receive a fresh process group; Windows uses taskkill /T. */
@@ -29,7 +30,7 @@ export class HostProcessScope {
     const child = spawn(command, [...args], { cwd: this.#root, env: options.env ?? this.environment(),
       detached: process.platform !== "win32", stdio: ["pipe", "pipe", "pipe"] });
     let settle!: () => void;
-    const record: OwnedChild = { child, settled: false, closed: new Promise<void>((resolve) => { settle = resolve; }) };
+    const record: OwnedChild = { child, releaseAuthority: retainCurrentExecutionOperation(), settled: false, closed: new Promise<void>((resolve) => { settle = resolve; }) };
     this.#children.set(child, record);
     child.once("error", () => { /* The caller receives the error; close settles ownership. */ });
     child.once("exit", () => {
@@ -39,7 +40,7 @@ export class HostProcessScope {
     });
     child.once("close", () => {
       record.settled = true;
-      if (!record.cleanupError && !record.stopping) this.#children.delete(child);
+      if (!record.cleanupError && !record.stopping) { this.#children.delete(child); record.releaseAuthority(); }
       settle();
     });
     child.stdin.on("error", () => { /* A terminated child may close stdin during an authorized write. */ });
@@ -71,6 +72,7 @@ export class HostProcessScope {
         throw new Error("Owned process tree termination could not be confirmed.");
       }
       this.#children.delete(child);
+      record.releaseAuthority();
     })();
     await record.stopping;
   }

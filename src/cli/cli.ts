@@ -2711,6 +2711,7 @@ async function cron(options: CliOptions, args: string[]): Promise<CliCommandResu
           const results = await tickCron({
             store,
             runner: createRuntimeCronRunner({
+              scriptExecution: { profileId, homeDir: options.homeDir, sessionDb: options.runtime?.sessionDb },
               store,
               runtimeFactory: async (job, context) => createIsolatedCronRuntime({
                 job,

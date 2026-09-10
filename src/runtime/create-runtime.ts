@@ -446,9 +446,10 @@ async function buildRuntime(options: RuntimeOptions, rollback: ResourceCleanup):
     })
   });
   const closeSessionDbOnDispose = options.closeSessionDbOnDispose ?? true;
-  if (closeSessionDbOnDispose) resources.defer(async () => {
-    await (sessionDb as { close?: () => void | Promise<void> }).close?.();
-  });
+  const closeSessionDb = async () => {
+    if (closeSessionDbOnDispose) await (sessionDb as { close?: () => void | Promise<void> }).close?.();
+  };
+  rollback.afterRelease(closeSessionDb);
   const { executionOwner, workspaceRoot, hostEnvironment, executionLease, executionFacts } = await acquireRuntimeContext({
     options, sessionDb, sessionId, rollback
   });
@@ -863,7 +864,6 @@ async function buildRuntime(options: RuntimeOptions, rollback: ResourceCleanup):
           if ((persistedTrust && !await trustStore.isTrusted(workspaceRoot)) || !request.context.trustedWorkspace || baseSecurityPolicyForActiveMode().decide(request) === "deny") throw new Error("Execution authority changed before dispatch.");
           await validateDispatchAuthorization(assessment);
         }, async () => {
-          await validateLiveAuthority();
           if (authorityRevision !== options.approvalController?.authorizationRevision(request)) throw new Error("Execution approval was revoked.");
         });
 
@@ -1497,8 +1497,11 @@ async function buildRuntime(options: RuntimeOptions, rollback: ResourceCleanup):
         disposed = true;
         await executionOwner.settle();
         await executionLease.release();
-        executionOwner.release();
-        await hostEnvironment.retire(() => resources.release());
+        await hostEnvironment.retire(async () => {
+          await resources.release();
+          executionOwner.release();
+          await closeSessionDb();
+        });
       })();
     },
     describe() {

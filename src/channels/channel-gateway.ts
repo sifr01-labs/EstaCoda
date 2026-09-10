@@ -1289,7 +1289,7 @@ export class ChannelGateway {
   }
 
   /** The authenticated local endpoint delegates cancellation to this owner. */
-  cancelOperatorSession(sessionId: string): boolean {
+  async cancelOperatorSession(sessionId: string): Promise<boolean> {
     let requested = false;
     for (const [key, id] of this.#sessionIdByTurnKey) {
       if (id !== sessionId) continue;
@@ -1299,6 +1299,19 @@ export class ChannelGateway {
         else this.#activeTurns.get(key)?.abort("channel-stop");
         requested = true;
       }
+    }
+    for (const [key, pending] of [...this.#pendingApprovals]) {
+      if (pending.sessionId !== sessionId) continue;
+      // Remove the continuation before awaiting durable resolution, so polling
+      // cannot resume a cancellation already accepted by this owner.
+      this.#pendingApprovals.delete(key);
+      try {
+        if (pending.approvalId && this.#approvalQueue) await this.#approvalQueue.resolveApproval(
+          pending.approvalId, "denied", "local-operator", { profileId: this.#profileId, sessionId });
+      } catch (error) { this.#pendingApprovals.set(key, pending); throw error; }
+      requested = true;
+      await this.#terminatePendingApproval(key, pending, this.#adapterFor(pending.originalMessage.channel),
+        "Cancelled", "The local operator cancelled this waiting action. Request it again to continue.");
     }
     return requested;
   }

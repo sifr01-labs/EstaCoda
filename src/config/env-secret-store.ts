@@ -151,3 +151,13 @@ function unquoteDotEnvValue(value: string): string {
   }
   return value;
 }
+
+/** Read-only availability projection; values never leave the parser. Last assignment wins. */
+export function presentEnvSecretNames(content: string): string[] {
+  const available = new Map<string, boolean>();
+  for (const line of content.split(/\r?\n/u)) {
+    const entry = parseDotEnvLine(line);
+    if (entry) available.set(entry.key, entry.value.trim().length > 0);
+  }
+  return [...available].filter(([, present]) => present).map(([key]) => key);
+}

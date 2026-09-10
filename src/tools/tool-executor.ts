@@ -1,4 +1,4 @@
-import { validateCurrentExecutionAuthority } from "../runtime/live-execution-authority.js";
+import { validateCurrentExecutionAuthority, withExecutionOperation } from "../runtime/live-execution-authority.js";
 import { assertCurrentExecutionFence } from "../session/execution-fence-context.js";
 import { validateDispatchAuthorization } from "../security/dispatch-authorization.js";
 import { executionActionIdentity } from "../security/execution-action-identity.js";
@@ -584,7 +584,7 @@ export class ToolExecutor {
         onApprovalRequest: tool.name === "execute_code" ? request.onApprovalRequest : undefined,
         onSecureInputRequest: request.onSecureInputRequest
       };
-      const running = runToolWithProtectedArguments(tool, request.input, executionContext, {
+      const running = withExecutionOperation(() => runToolWithProtectedArguments(tool, request.input, executionContext, {
         beforeDispatch: async () => {
           if (durableOperationId !== undefined) {
             const current = this.#activeCheckpoint();
@@ -607,7 +607,7 @@ export class ToolExecutor {
           assertCurrentExecutionFence();
           dispatchState = "finished";
         }
-      });
+      }));
       try {
         result = await awaitWithAbort(
           running,

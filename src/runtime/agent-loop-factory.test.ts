@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, realpath, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { DEFAULT_DELEGATION_CONFIG } from "../config/delegation-defaults.js";
@@ -13,6 +13,9 @@ import type { ToolDefinition, ToolRiskClass, ToolsetName } from "../contracts/to
 import { ProviderRegistry } from "../providers/provider-registry.js";
 import { resolveProfileStateHome, writeActiveProfile } from "../config/profile-home.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
+import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
+import { ensureRuntimeSession } from "../session/session-workspace-ownership.js";
+import { HostEnvironment } from "../execution/host-environment.js";
 import { ToolRegistry } from "../tools/tool-registry.js";
 import { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import type { BuiltAgentLoopSession } from "./agent-loop-builder.js";
@@ -24,6 +27,32 @@ import {
 } from "./agent-loop-factory.js";
 
 describe("DefaultChildAgentLoopFactory", () => {
+  it("releases the final child claim before retired shared resources close its database", async () => {
+    const root = await realpath(await mkdtemp(join(tmpdir(), "child-retirement-")));
+    const db = new SQLiteSessionDB({ path: join(root, "sessions.sqlite") });
+    try {
+      await ensureRuntimeSession({ sessionDb: db, sessionId: "parent", profileId: "default", workspaceRoot: root, homeDir: root, durable: true });
+      const environment = await HostEnvironment.create({ profileId: "default", workspaceRoot: root });
+      const parent = environment.acquire({ profileId: "default", sessionId: "parent", surface: "cli" });
+      const lease = parent.child({ profileId: "default", sessionId: "child", surface: "delegation" });
+      const builder = fakeBuilder({ ...fakeBuiltSession(), executionLease: lease });
+      builder.cleanupSession.mockImplementation(async () => { await lease.release(); return undefined; });
+      const factory = new DefaultChildAgentLoopFactory({ builder: builder as never, parentRoutes: parentRoutes(), sessionDb: db,
+        trajectoryRecorderFactory: ({ profileId, sessionId }) => new TrajectoryRecorder({ profileId, sessionId, modelId: "model" }),
+        responseLabel: "EstaCoda", workspaceRoot: root, homeDir: root, id: () => "child" });
+      const child = await factory.createChild({ parentSessionId: "parent", profileId: "default", task: "inspect",
+        trustedWorkspace: true, parentVisibleTools: readOnlyParentTools() });
+      const close = vi.fn(async () => {
+        expect(db.db.query<{ owner_id: string | null }>("select owner_id from session_execution_owners where session_id='child'").get()?.owner_id).toBeNull();
+        db.close();
+      });
+      await parent.release(); await environment.retire(close);
+      expect(close).not.toHaveBeenCalled();
+      await child.cleanup();
+      expect(close).toHaveBeenCalledOnce();
+    } finally { db.close(); await rm(root, { recursive: true, force: true }); }
+  });
+
   it("creates a child session with delegated metadata and suppressed runtime features", async () => {
     const db = await parentSessionDb();
     await db.createSession({

@@ -1840,6 +1840,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           jobLock: cronJobLock,
           hookRegistry,
           runner: createRuntimeCronRunner({
+              scriptExecution: { profileId, homeDir, sessionDb },
           deliver: async (job, content) => {
             const originKey = job.origin?.channel === "telegram" && job.origin.chatId !== undefined
               ? {

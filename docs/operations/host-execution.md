@@ -63,3 +63,9 @@ Cancellation cannot recall a request already sent to an external service. A nest
 Filesystem containment/symlink checks protect structured workspace operations under the local trusted-operator model. They do not provide an atomic defense against hostile concurrent filesystem replacement. Host shell commands remain governed host commands with OS-user permissions.
 
 PR 4 remains necessary for persisted exclusive Session ownership, fences, shared control transport, live authority revocation and runtime-cache acquisition races. Environment/scope IDs introduced here are not authorization tokens or substitutes for those controls.
+
+## Script-backed cron and cancellation settlement
+
+Script-backed cron runs, including `noAgent` runs, acquire an established Session target, persisted execution owner and host lease without constructing a provider runtime. The runner requires an explicit selected-profile `scriptExecution` context and current workspace trust. Script processes use the lease's isolated environment, bounded output and process-tree termination. Trusted scheduler adapters can supply intentional configuration through `scriptExecution.childProcessEnv.extra`; scripts no longer inherit the supervisor's full environment. The CLI and supervisor supply their selected profile/state context.
+
+A timed-out or cancelled Python harness retains its scope until accepted nested calls settle. The Session owner also tracks actual tool promises when the caller stops awaiting an aborted operation. A non-cooperative operation may therefore keep disposal and handoff pending; cancellation is not reported as proof of successful cleanup.

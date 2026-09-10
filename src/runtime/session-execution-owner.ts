@@ -1,3 +1,4 @@
+import { validateSessionWorkspaceOwnership } from "../session/session-workspace-ownership.js";
 import { withExecutionAuthority } from "./live-execution-authority.js";
 import type { SessionDB } from "../contracts/session.js";
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
@@ -15,6 +16,7 @@ export class RuntimeSessionOwner {
   readonly #controller = new AbortController();
   #closed = false;
   #active?: Promise<unknown>;
+  readonly #operations = new Set<Promise<unknown>>();
   #validator: () => Promise<void> = async () => undefined;
   #stop?: () => Promise<void>;
   #watchdog?: ReturnType<typeof setInterval>;
@@ -31,14 +33,19 @@ export class RuntimeSessionOwner {
   }
   async validate(): Promise<void> {
     this.assert(); await this.#validator();
+    if (this.#claim && this.targetContext) {
+      const session = await this.db.getSessionForProfile(this.#claim.sessionId, this.#claim.profileId);
+      if (!session) throw new Error("Session execution target is unavailable.");
+      await validateSessionWorkspaceOwnership({ session, profileId: this.#claim.profileId, ...this.targetContext });
+    }
     for (const check of this.#authorityChecks) await check();
     this.assert();
   }
-  private constructor(readonly db: SessionDB) {
+  private constructor(readonly db: SessionDB, readonly targetContext?: { workspaceRoot: string; homeDir?: string }) {
     if (db instanceof SQLiteSessionDB) this.#store = new SessionExecutionOwnership(db.db);
   }
-  static async acquire(db: SessionDB, sessionId: string, profileId: string): Promise<RuntimeSessionOwner> {
-    const owner = new RuntimeSessionOwner(db);
+  static async acquire(db: SessionDB, sessionId: string, profileId: string, targetContext?: { workspaceRoot: string; homeDir?: string }): Promise<RuntimeSessionOwner> {
+    const owner = new RuntimeSessionOwner(db, targetContext);
     if (owner.#store) {
       const session = await db.getSessionForProfile(sessionId, profileId);
       if (!session?.executionTarget) throw new Error("Execution requires an established Session target.");
@@ -57,11 +64,14 @@ export class RuntimeSessionOwner {
       if (this.#claim) this.#store!.advance(this.#claim, "turn");
       const timer = setInterval(() => {
         try { if (this.#claim) this.#store!.renew(this.#claim); }
-        catch (error) { this.#controller.abort(error); }
+        catch { this.cancel(); }
       }, 10_000);
       timer.unref?.();
       const running = Promise.resolve().then(() => withExecutionAuthority(() => this.validate(), this.#authorityChecks, () => this.#claim
-        ? withExecutionFence(this.#store!.db, this.#claim, work, () => this.assert()) : work()));
+        ? withExecutionFence(this.#store!.db, this.#claim, work, () => this.assert()) : work(), (operation) => {
+          this.#operations.add(operation);
+          void operation.finally(() => this.#operations.delete(operation)).catch(() => undefined);
+        }));
       this.#active = running;
       try { const result = await running; await this.validate(); return result; }
       finally { clearInterval(timer); this.#active = undefined; }
@@ -84,6 +94,7 @@ export class RuntimeSessionOwner {
     this.#closed = true; this.cancel();
     await this.#active?.catch(() => undefined);
     await this.#stop?.();
+    while (this.#operations.size) await Promise.allSettled([...this.#operations]);
   }
   release(): void {
     if (this.#watchdog) clearInterval(this.#watchdog);

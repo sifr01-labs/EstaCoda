@@ -4910,14 +4910,19 @@ describe("createRuntime SQLite session lifecycle", () => {
     await expect(sessionDb.listSessions()).rejects.toThrow(/closed|open/iu);
   });
 
-  it("continues disposal after a worker cleanup failure", async () => {
+  it("retains the Session claim and database after a worker cleanup failure", async () => {
     const options = await minimalRuntimeOptions();
     const sessionDb = await createSQLiteSessionDB({ path: join(options.workspaceRoot, "cleanup.sqlite") });
     const runtime = await createRuntime({ ...options, sessionDb, localWhisper: {
       dispose: async () => { throw new Error("worker cleanup probe"); }
     } as any });
-    await expect(runtime.dispose()).rejects.toThrow("worker cleanup probe");
-    await expect(sessionDb.listSessions()).rejects.toThrow(/closed|open/iu);
+    try {
+      await expect(runtime.dispose()).rejects.toThrow("worker cleanup probe");
+      const [session] = await sessionDb.listSessions();
+      const { RuntimeSessionOwner } = await import("./session-execution-owner.js");
+      await expect(RuntimeSessionOwner.acquire(sessionDb, session.id, session.profileId)).rejects.toThrow("busy");
+      await expect(runtime.dispose()).rejects.toThrow("worker cleanup probe");
+    } finally { sessionDb.close(); }
   });
 
   it("disposes runtime-owned faster-whisper resources", async () => {

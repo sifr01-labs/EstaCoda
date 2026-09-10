@@ -1,4 +1,11 @@
-import { spawn } from "node:child_process";
+import { acquireRuntimeContext } from "../runtime/runtime-acquisition.js";
+import { ResourceCleanup } from "../execution/resource-cleanup.js";
+import type { HostExecutionLease } from "../execution/host-environment.js";
+import type { SessionDB } from "../contracts/session.js";
+import { createSQLiteSessionDB } from "../session/session-setup.js";
+import { resolveProfileStateHome } from "../config/profile-home.js";
+import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
+import { createLiveAuthority } from "../runtime/live-execution-authority.js";
 import { randomUUID } from "node:crypto";
 import { mkdir, open, readFile, realpath, rm } from "node:fs/promises";
 import { dirname, extname, isAbsolute, join, relative, resolve } from "node:path";
@@ -231,7 +238,10 @@ export async function tickCron(input: TickCronInput): Promise<CronRunResult[]> {
   });
 }
 
+type CronScriptExecution = { profileId: string; homeDir?: string; sessionDb?: SessionDB; childProcessEnv?: { extra?: Record<string, string> } };
+
 export function createRuntimeCronRunner(input: {
+  scriptExecution?: CronScriptExecution;
   runtimeFactory: (job: CronJob, context: CronRunContext) => Promise<Runtime>;
   store?: CronStore;
   resolveSkills?: CronSkillResolver;
@@ -267,9 +277,16 @@ export function createRuntimeCronRunner(input: {
         });
       }
 
+      const runContext: CronRunContext = {
+        executionId,
+        sessionId: `cron-${job.id}-${randomUUID()}`,
+        scheduledAt: runInput?.scheduledAt,
+        workspaceRoot: workdir.workdir,
+        trustedWorkspace: workdir.trustedWorkspace
+      };
       const scriptResult = job.script === undefined
         ? undefined
-        : await runCronScript(job, workdir.workdir);
+        : await runCronScript(job, runContext, input.scriptExecution, input.isWorkspaceTrusted ?? (async () => false));
       const redactedScriptResult = scriptResult === undefined
         ? undefined
         : redactCronScriptResult(scriptResult);
@@ -309,13 +326,6 @@ export function createRuntimeCronRunner(input: {
         };
       }
 
-      const runContext: CronRunContext = {
-        executionId,
-        sessionId: `cron-${job.id}-${randomUUID()}`,
-        scheduledAt: runInput?.scheduledAt,
-        workspaceRoot: workdir.workdir,
-        trustedWorkspace: workdir.trustedWorkspace
-      };
       let runtime: Runtime | undefined;
       const skillResolver = input.resolveSkills ?? (job.skills.length === 0
         ? undefined
@@ -688,7 +698,10 @@ function defaultLockPath(store: CronStore): string {
   return join(dirname(store.path), ".tick.lock");
 }
 
-async function runCronScript(job: CronJob, workspaceRoot: string | undefined): Promise<CronScriptResult> {
+async function runCronScript(job: CronJob, context: CronRunContext, execution: CronScriptExecution | undefined,
+  isTrusted: (path: string) => Promise<boolean>): Promise<CronScriptResult> {
+  const workspaceRoot = context.workspaceRoot;
+  if (!execution) return failedScript("Script execution requires an explicit selected profile context.");
   if (workspaceRoot === undefined || workspaceRoot.trim().length === 0) {
     return failedScript("script-backed cron jobs require a workspace root");
   }
@@ -712,12 +725,31 @@ async function runCronScript(job: CronJob, workspaceRoot: string | undefined): P
       return failedScript("script extension is not supported; use .sh, .bash, .zsh, .py, .js, .mjs, or .ts");
     }
 
-    return await spawnCronScript({
-      command: invocation.command,
-      args: [...invocation.args, ...(job.scriptArgs ?? [])],
-      cwd: workspaceReal,
-      timeoutMs: boundedTimeout(job.scriptTimeoutMs)
-    });
+    const cleanup = new ResourceCleanup();
+    const db = execution.sessionDb ?? await createSQLiteSessionDB({ homeDir: execution.homeDir });
+    if (!execution.sessionDb) cleanup.afterRelease(async () => { await (db as { close?: () => void | Promise<void> }).close?.(); });
+    try {
+      const acquired = await acquireRuntimeContext({ options: {
+        workspaceRoot, homeDir: execution.homeDir, profileId: execution.profileId, sessionMetadata: { originSurface: "cron", cronJobId: job.id, cronExecutionId: context.executionId }
+      }, sessionDb: db, sessionId: context.sessionId, rollback: cleanup });
+      const live = await createLiveAuthority({
+        profileRoot: resolveProfileStateHome(execution).profileRoot, workspaceRoot,
+        trustStore: new WorkspaceTrustStore({ homeDir: execution.homeDir })
+      });
+      acquired.executionOwner.setValidator(async () => {
+        if (!await isTrusted(workspaceRoot)) throw new Error("Cron workspace trust was revoked.");
+        await live();
+      }, () => acquired.executionLease.release());
+      try {
+        return await acquired.executionOwner.run(async () => {
+          await acquired.executionLease.files.realpath(scriptReal);
+          return await spawnCronScript({ command: invocation.command,
+            args: [...invocation.args, ...(job.scriptArgs ?? [])], lease: acquired.executionLease,
+            childProcessEnv: execution.childProcessEnv, timeoutMs: boundedTimeout(job.scriptTimeoutMs) });
+        });
+      } finally { await acquired.executionOwner.settle(); }
+    } finally { await cleanup.release(); }
+
   } catch (error) {
     return failedScript(error instanceof Error ? error.message : String(error));
   }
@@ -734,63 +766,40 @@ function scriptInvocation(scriptPath: string): { command: string; args: string[]
 }
 
 function spawnCronScript(input: {
-  command: string;
-  args: string[];
-  cwd: string;
-  timeoutMs: number;
+  command: string; args: string[]; lease: HostExecutionLease;
+  childProcessEnv?: { extra?: Record<string, string> }; timeoutMs: number;
 }): Promise<CronScriptResult> {
-  return new Promise((resolveScript) => {
-    const child = spawn(input.command, input.args, {
-      cwd: input.cwd,
-      shell: false,
-      env: process.env
+  return new Promise((resolveScript, reject) => {
+    const child = input.lease.processes.spawn(input.command, input.args, {
+      env: input.lease.processes.environment(input.childProcessEnv)
     });
-    let stdout = "";
-    let stderr = "";
-    let timedOut = false;
-    const timer = setTimeout(() => {
-      timedOut = true;
-      child.kill("SIGTERM");
-    }, input.timeoutMs);
-
-    child.stdout.setEncoding("utf8");
-    child.stderr.setEncoding("utf8");
-    child.stdout.on("data", (chunk: string) => {
-      stdout = appendBounded(stdout, chunk);
-    });
-    child.stderr.on("data", (chunk: string) => {
-      stderr = appendBounded(stderr, chunk);
-    });
-    child.on("error", (error) => {
-      clearTimeout(timer);
-      resolveScript({
-        ok: false,
-        summary: error.message,
-        stdout,
-        stderr,
-        timedOut: false
-      });
-    });
-    child.on("close", (code) => {
-      clearTimeout(timer);
-      if (timedOut) {
-        resolveScript({
-          ok: false,
-          summary: `script timed out after ${input.timeoutMs}ms`,
-          stdout,
-          stderr,
-          timedOut: true
-        });
-        return;
+    let stdout = "", stderr = "", stopping = false, settled = false;
+    const finish = (result: CronScriptResult) => {
+      if (settled) return;
+      settled = true; clearTimeout(timer); input.lease.signal.removeEventListener("abort", onAbort); resolveScript(result);
+    };
+    const stop = async (timedOut: boolean) => {
+      if (stopping || settled) return;
+      stopping = true;
+      try {
+        await input.lease.processes.terminate(child);
+        finish({ ok: false, summary: timedOut ? `script timed out after ${input.timeoutMs}ms` : "script cancelled", stdout, stderr, timedOut });
+      } catch {
+        clearTimeout(timer); input.lease.signal.removeEventListener("abort", onAbort);
+        reject(new Error("Cron script termination could not be confirmed."));
       }
-      resolveScript({
-        ok: code === 0,
-        summary: code === 0 ? "script completed successfully" : `script exited with code ${code ?? "unknown"}`,
-        stdout,
-        stderr,
-        exitCode: code ?? undefined,
-        timedOut: false
-      });
+    };
+    const onAbort = () => { void stop(false); };
+    const timer = setTimeout(() => { void stop(true); }, input.timeoutMs);
+    input.lease.signal.addEventListener("abort", onAbort, { once: true });
+    if (input.lease.signal.aborted) onAbort();
+    child.stdout.setEncoding("utf8"); child.stderr.setEncoding("utf8");
+    child.stdout.on("data", (chunk: string) => { stdout = appendBounded(stdout, chunk); });
+    child.stderr.on("data", (chunk: string) => { stderr = appendBounded(stderr, chunk); });
+    child.once("error", () => { if (!stopping) finish(failedScript("Cron script failed to start.")); });
+    child.once("close", (code) => {
+      if (!stopping) finish({ ok: code === 0, summary: code === 0 ? "script completed successfully" : `script exited with code ${code ?? "unknown"}`,
+        stdout, stderr, exitCode: code ?? undefined, timedOut: false });
     });
   });
 }

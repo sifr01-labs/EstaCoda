@@ -299,7 +299,11 @@ export class DefaultChildAgentLoopFactory implements ChildAgentLoopFactory {
         return result;
       }
     });
+    let releaseEnvironment: (() => Promise<void>) | undefined;
     try {
+    // Cancelling the command scope must not close shared state before this
+    // Session's actual work settles and its persisted owner is released.
+    releaseEnvironment = builtSession.executionLease?.retainEnvironment();
     const effectiveToolAccess = toolAccess ?? {
       effectiveAllowedTools: builtSession.toolRegistry.list().map((tool) => tool.name),
       effectiveAllowedToolsets: [],
@@ -344,7 +348,7 @@ export class DefaultChildAgentLoopFactory implements ChildAgentLoopFactory {
       }
     });
 
-    executionOwner = await RuntimeSessionOwner.acquire(this.#sessionDb, childSession.id, input.profileId);
+    executionOwner = await RuntimeSessionOwner.acquire(this.#sessionDb, childSession.id, input.profileId, { workspaceRoot: this.#workspaceRoot, homeDir: this.#homeDir });
     executionOwner.setValidator(this.#validateExecutionAuthority ?? (async () => undefined), async () => { await builtSession.executionLease?.release(); });
 
     return {
@@ -370,10 +374,11 @@ export class DefaultChildAgentLoopFactory implements ChildAgentLoopFactory {
         await executionOwner!.settle();
         await this.#builder.cleanupSession(builtSession);
         executionOwner!.release();
+        await releaseEnvironment?.();
       }
     };
     } catch (error) {
-      try { await executionOwner?.settle(); await this.#builder.cleanupSession(builtSession); executionOwner?.release(); }
+      try { await executionOwner?.settle(); await this.#builder.cleanupSession(builtSession); executionOwner?.release(); await releaseEnvironment?.(); }
       catch (cleanupError) { throw new AggregateError([error, cleanupError], "Child acquisition and cleanup failed."); }
       throw error;
     }

@@ -11,3 +11,17 @@ it("unwinds in reverse construction order and attempts every action once after a
   await expect(cleanup.release()).rejects.toThrow("cleanup failure");
   expect(calls).toEqual([3, 2, 1]);
 });
+it("releases ownership only after successful resource cleanup", async () => {
+  const calls: string[] = [];
+  const failed = new ResourceCleanup();
+  failed.afterRelease(() => { calls.push("owner"); });
+  failed.defer(() => { throw new Error("unsettled"); });
+  await expect(failed.release()).rejects.toThrow("unsettled");
+  expect(calls).toEqual([]);
+  const settled = new ResourceCleanup();
+  settled.afterRelease(() => { calls.push("database"); });
+  settled.afterRelease(() => { calls.push("owner"); });
+  settled.defer(() => { calls.push("resource"); });
+  await settled.release();
+  expect(calls).toEqual(["resource", "owner", "database"]);
+});

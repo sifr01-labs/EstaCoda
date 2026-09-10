@@ -236,9 +236,9 @@ async function runHarness(options: RunCodeOptions, processes: HostProcesses, tem
               const result = await options.executeTool(call.tool!, call.input!, signal);
               if (signal.aborted || stopping || settled) return;
               const response = JSON.stringify({ kind: "tool_result", id: call.id, result });
-              if (Buffer.byteLength(response) > MAX_FRAME_BYTES) { await stop("execute_code tool-result payload exceeds its limit."); return; }
+              if (Buffer.byteLength(response) > MAX_FRAME_BYTES) { void stop("execute_code tool-result payload exceeds its limit."); return; }
               child.stdin.write(`${response}\n`);
-            })().catch(() => stop("execute_code nested tool failed.")).finally(() => { activeCall = undefined; });
+            })().catch(() => { void stop("execute_code nested tool failed."); }).finally(() => { activeCall = undefined; });
           } catch { void stop("execute_code received an invalid tool-call frame."); return; }
         } else appendStdout(`${line}\n`);
       }
@@ -273,7 +273,10 @@ async function runHarness(options: RunCodeOptions, processes: HostProcesses, tem
       stopping = true;
       controller.abort();
       try { await processes.terminate(child, "SIGKILL"); }
-      catch { finish({ ok: false, content: "execute_code termination could not be confirmed.", metadata: { cleanupUncertain: true } }); return; }
+      catch { await activeCall; finish({ ok: false, content: "execute_code termination could not be confirmed.", metadata: { cleanupUncertain: true } }); return; }
+      // Abort delivery is not nested execution settlement. Keep the harness resource
+      // registered until every accepted nested call has settled.
+      await activeCall;
       finish({ ok: false, content, metadata: { timedOut, cancelled: !timedOut && signal.aborted, toolCalls: callIds.size } });
     }
     function finish(result: ToolResult): void {

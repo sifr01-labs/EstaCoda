@@ -11,7 +11,7 @@ import type { ResourceCleanup } from "../execution/resource-cleanup.js";
  * never loads project config. Acquire identity before constructing tool resources;
  * rollback owns every acquired resource until the runtime is published. */
 export async function acquireRuntimeContext(input: {
-  options: RuntimeOptions;
+  options: Pick<RuntimeOptions, "profileId" | "workspaceRoot" | "homeDir" | "sourceWorkspace" | "allowLegacyLocalBinding" | "sessionMetadata" | "budgets" | "requestedExecutionPolicy">;
   sessionDb: SessionDB;
   sessionId: string;
   rollback: ResourceCleanup;
@@ -23,8 +23,8 @@ export async function acquireRuntimeContext(input: {
     durable: sessionDb instanceof SQLiteSessionDB, sourceWorkspace: options.sourceWorkspace,
     allowLegacyLocalBinding: options.allowLegacyLocalBinding, metadata: options.sessionMetadata,
     spendingLimit: options.budgets?.session });
-  const executionOwner = await RuntimeSessionOwner.acquire(sessionDb, sessionId, profileId);
-  rollback.defer(() => executionOwner.release());
+  const executionOwner = await RuntimeSessionOwner.acquire(sessionDb, sessionId, profileId, { workspaceRoot, homeDir: options.homeDir });
+  rollback.afterRelease(() => executionOwner.release());
   const hostEnvironment = await HostEnvironment.create({ profileId, workspaceRoot, policy: options.requestedExecutionPolicy });
   rollback.defer(() => hostEnvironment.destroy());
   const executionLease = hostEnvironment.acquire({ profileId, sessionId,

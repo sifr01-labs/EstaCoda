@@ -69,3 +69,22 @@ it("rejects oversized workspace reads before allocating their content", () => wi
   await writeFile(path, Buffer.alloc(9 * 1024 * 1024));
   await expect(lease.files.readFile(path)).rejects.toThrow(/limit/);
 }));
+it("retains the harness scope until a cancelled nested call actually settles", () => withLease(async (lease) => {
+  let start!: () => void, finish!: () => void;
+  const started = new Promise<void>((resolve) => { start = resolve; });
+  const pending = new Promise<void>((resolve) => { finish = resolve; });
+  const tool = await harness(lease, async () => { start(); await pending; return undefined; });
+  let returned = false, released = false;
+  const controller = new AbortController();
+  const running = tool.run({ code: 'tool("file.read", {})', timeoutMs: 3000 }, { signal: controller.signal } as any)
+    .then((result) => { returned = true; return result; });
+  try {
+    await started; controller.abort();
+    const releasing = lease.release().then(() => { released = true; });
+    await new Promise((resolve) => setTimeout(resolve, 50));
+    expect(returned).toBe(false); expect(released).toBe(false);
+    finish();
+    expect((await running).ok).toBe(false);
+    await releasing;
+  } finally { finish(); await running; }
+}));

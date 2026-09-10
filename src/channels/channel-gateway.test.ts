@@ -4690,9 +4690,9 @@ describe("ChannelGateway commands", () => {
 
       const turn = gateway.receive(makeMessage("hello"));
       await handleStarted;
-      expect(gateway.cancelOperatorSession("unrelated")).toBe(false);
+      expect(await gateway.cancelOperatorSession("unrelated")).toBe(false);
       const sessionId = await gatewaySessionStore.getOrCreateSessionId(makeMessage("hello").sessionKey);
-      expect(gateway.cancelOperatorSession(sessionId)).toBe(true);
+      expect(await gateway.cancelOperatorSession(sessionId)).toBe(true);
       const turnResult = await turn;
 
       expect(aborted).toBe(true);
@@ -9753,4 +9753,23 @@ it("refreshes gateway assessor configuration at the policy boundary", async () =
   expect(first).toBeGreaterThan(0);
   await gateway.receive(makeMessage("second", { id: "msg-2" }));
   expect(currentSecurityAssessor.mock.calls.length).toBeGreaterThan(first);
+});
+
+it("cancels a channel approval wait through its owner without allowing later resume", async () => {
+  const { queue, cleanup, directory } = await setupGatewayApprovalQueue();
+  const runtimeForSession = vi.fn(async ({ securityPolicy }: { securityPolicy: SecurityPolicy }) => createCachedPolicyProbeRuntime(securityPolicy));
+  try {
+    const gateway = new ChannelGateway({ adapters: [createFakeTelegramAdapter()], runtimeForSession,
+      sessionStore: new InMemoryChannelSessionStore(), authPolicy: { telegram: { allowedUserIds: ["user-1"] } },
+      profileId: "profile-a", approvalQueue: queue, approvalStore: new ChannelApprovalStore({ path: join(directory, "channel-approvals.json") }), securityMode: "strict" });
+    const first = await gateway.receive(makeMessage("run something risky"));
+    expect(first.replyText).toContain("decision=ask");
+    expect(await queue.listPending({ profileId: "profile-a" })).toHaveLength(1);
+    expect(await gateway.cancelOperatorSession("unrelated")).toBe(false);
+    expect(await gateway.cancelOperatorSession(first.sessionId)).toBe(true);
+    expect(await queue.listPending({ profileId: "profile-a" })).toHaveLength(0);
+    await gateway.receive(makeMessage("/approve"));
+    await gateway.tickApprovalResolutions();
+    expect(runtimeForSession).toHaveBeenCalledTimes(1);
+  } finally { await cleanup(); }
 });

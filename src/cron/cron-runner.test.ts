@@ -139,6 +139,8 @@ describe("createRuntimeCronRunner", () => {
     const runtime = fakeRuntime("Agent used script output.");
     const runtimeFactory = vi.fn(async () => runtime as never);
     const runner = createRuntimeCronRunner({
+      scriptExecution: { profileId: "default", homeDir: tmpDir },
+      isWorkspaceTrusted: async () => true,
       runtimeFactory,
       workspaceRoot: tmpDir,
       wrapResponse: false
@@ -163,6 +165,8 @@ describe("createRuntimeCronRunner", () => {
     const job = { ...fakeCronJob(), script: "secret.sh" };
     const runtime = fakeRuntime("Agent used redacted output.");
     const runner = createRuntimeCronRunner({
+      scriptExecution: { profileId: "default", homeDir: tmpDir },
+      isWorkspaceTrusted: async () => true,
       runtimeFactory: vi.fn(async () => runtime as never),
       workspaceRoot: tmpDir,
       wrapResponse: false
@@ -185,6 +189,8 @@ describe("createRuntimeCronRunner", () => {
     const job = { ...fakeCronJob(), script: "bidi.js" };
     const runtime = fakeRuntime("Agent used sanitized output.");
     const runner = createRuntimeCronRunner({
+      scriptExecution: { profileId: "default", homeDir: tmpDir },
+      isWorkspaceTrusted: async () => true,
       runtimeFactory: vi.fn(async () => runtime as never),
       workspaceRoot: tmpDir,
       wrapResponse: false
@@ -205,6 +211,8 @@ describe("createRuntimeCronRunner", () => {
     const job = { ...fakeCronJob(), script: "inject.sh" };
     const runtimeFactory = vi.fn(async () => fakeRuntime("unused") as never);
     const runner = createRuntimeCronRunner({
+      scriptExecution: { profileId: "default", homeDir: tmpDir },
+      isWorkspaceTrusted: async () => true,
       runtimeFactory,
       workspaceRoot: tmpDir,
       wrapResponse: false
@@ -223,6 +231,8 @@ describe("createRuntimeCronRunner", () => {
     const deliver = vi.fn(async () => ({ success: true, perTarget: new Map([["local", { success: true }]]) }));
     const runtimeFactory = vi.fn(async () => fakeRuntime("unused") as never);
     const runner = createRuntimeCronRunner({
+      scriptExecution: { profileId: "default", homeDir: tmpDir },
+      isWorkspaceTrusted: async () => true,
       runtimeFactory,
       deliver,
       workspaceRoot: tmpDir,
@@ -244,6 +254,8 @@ describe("createRuntimeCronRunner", () => {
     const runtimeFactory = vi.fn(async () => fakeRuntime("unused") as never);
     const deliver = vi.fn(async () => ({ success: true, perTarget: new Map([["local", { success: true }]]) }));
     const runner = createRuntimeCronRunner({
+      scriptExecution: { profileId: "default", homeDir: tmpDir },
+      isWorkspaceTrusted: async () => true,
       runtimeFactory,
       deliver,
       workspaceRoot: tmpDir,
@@ -271,6 +283,8 @@ describe("createRuntimeCronRunner", () => {
     const deliver = vi.fn();
     const runtimeFactory = vi.fn(async () => fakeRuntime("unused") as never);
     const runner = createRuntimeCronRunner({
+      scriptExecution: { profileId: "default", homeDir: tmpDir },
+      isWorkspaceTrusted: async () => true,
       runtimeFactory,
       deliver,
       workspaceRoot: tmpDir,
@@ -292,6 +306,8 @@ describe("createRuntimeCronRunner", () => {
     await writeFile(scriptPath, "printf 'status ok\\n{\"wakeAgent\":false}\\n'", "utf8");
     const deliver = vi.fn();
     const runner = createRuntimeCronRunner({
+      scriptExecution: { profileId: "default", homeDir: tmpDir },
+      isWorkspaceTrusted: async () => true,
       runtimeFactory: vi.fn(async () => fakeRuntime("unused") as never),
       deliver,
       workspaceRoot: tmpDir,
@@ -310,6 +326,8 @@ describe("createRuntimeCronRunner", () => {
     await writeFile(scriptPath, "printf 'PASSWORD=hunter2\\n'; exit 2\n", "utf8");
     const deliver = vi.fn(async () => ({ success: true, perTarget: new Map() }));
     const runner = createRuntimeCronRunner({
+      scriptExecution: { profileId: "default", homeDir: tmpDir },
+      isWorkspaceTrusted: async () => true,
       runtimeFactory: vi.fn(async () => fakeRuntime("unused") as never),
       deliver,
       workspaceRoot: tmpDir,
@@ -353,6 +371,7 @@ describe("createRuntimeCronRunner", () => {
     const runtime = fakeRuntime("Cron completed.");
     const runtimeFactory = vi.fn(async () => runtime as never);
     const runner = createRuntimeCronRunner({
+      scriptExecution: { profileId: "default", homeDir: tmpDir },
       runtimeFactory,
       workspaceRoot: tmpDir,
       allowedWorkdirRoots: [tmpDir],
@@ -379,11 +398,12 @@ describe("createRuntimeCronRunner", () => {
     const runtimeFactory = vi.fn(async () => fakeRuntime("unused") as never);
     const deliver = vi.fn(async () => ({ success: true, perTarget: new Map([["local", { success: true }]]) }));
     const runner = createRuntimeCronRunner({
+      scriptExecution: { profileId: "default", homeDir: tmpDir },
+      isWorkspaceTrusted: async () => true,
       runtimeFactory,
       deliver,
       workspaceRoot: tmpDir,
       allowedWorkdirRoots: [tmpDir],
-      isWorkspaceTrusted: async () => true,
       wrapResponse: false
     });
 
@@ -405,10 +425,11 @@ describe("createRuntimeCronRunner", () => {
     await writeFile(join(tmpDir, "escape.sh"), "printf 'escaped\\n'", "utf8");
     const runtimeFactory = vi.fn(async () => fakeRuntime("unused") as never);
     const runner = createRuntimeCronRunner({
+      scriptExecution: { profileId: "default", homeDir: tmpDir },
+      isWorkspaceTrusted: async () => true,
       runtimeFactory,
       workspaceRoot: tmpDir,
       allowedWorkdirRoots: [tmpDir],
-      isWorkspaceTrusted: async () => true,
       wrapResponse: false
     });
 
@@ -622,6 +643,8 @@ describe("tickCron with execution store and job lock", () => {
     await store.requestRun(job.id);
     const runtimeFactory = vi.fn(async () => fakeRuntime("unused") as never);
     const runner = createRuntimeCronRunner({
+      scriptExecution: { profileId: "default", homeDir: tmpDir },
+      isWorkspaceTrusted: async () => true,
       runtimeFactory,
       workspaceRoot: tmpDir,
       wrapResponse: false
@@ -1269,4 +1292,31 @@ describe("tickCron with execution store and job lock", () => {
       expect(events).toHaveLength(0);
     });
   });
+});
+
+it.skipIf(process.platform === "win32")("runs script-only jobs with isolated environment and kills TERM-resistant trees on timeout", async () => {
+  const root = mkdtempSync(join(tmpdir(), "cron-scope-regression-"));
+  vi.stubEnv("PR34_SYNTHETIC_SECRET", "synthetic-parent-only");
+  const runtimeFactory = vi.fn();
+  try {
+    await writeFile(join(root, "environment.sh"), 'printf "[ALERT] parent=%s explicit=%s\\n" "${PR34_SYNTHETIC_SECRET:-absent}" "$EXPLICIT_SETTING"\n');
+    const runner = createRuntimeCronRunner({ runtimeFactory, workspaceRoot: root, wrapResponse: false,
+      isWorkspaceTrusted: async () => true, scriptExecution: { profileId: "default", homeDir: root, childProcessEnv: { extra: { EXPLICIT_SETTING: "enabled" } } } });
+    const result = await runner.runJob({ ...fakeCronJob(), noAgent: true, script: "environment.sh" });
+    expect(result.ok).toBe(true); expect(result.output).toContain("parent=absent explicit=enabled");
+    await writeFile(join(root, "timeout.sh"), "trap '' TERM\nsleep 30 &\nwait\n");
+    const timed = await runner.runJob({ ...fakeCronJob(), noAgent: true, script: "timeout.sh", scriptTimeoutMs: 100 });
+    expect(timed.ok).toBe(false); expect(timed.output).toContain("timed out");
+    expect(runtimeFactory).not.toHaveBeenCalled();
+  } finally { vi.unstubAllEnvs(); rmSync(root, { recursive: true, force: true }); }
+}, 10000);
+it("refuses script execution without current workspace trust", async () => {
+  const root = mkdtempSync(join(tmpdir(), "cron-trust-regression-"));
+  try {
+    await writeFile(join(root, "script.sh"), "printf should-not-run");
+    const runner = createRuntimeCronRunner({ runtimeFactory: vi.fn(), workspaceRoot: root,
+      scriptExecution: { profileId: "default", homeDir: root }, isWorkspaceTrusted: async () => false });
+    const result = await runner.runJob({ ...fakeCronJob(), noAgent: true, script: "script.sh" });
+    expect(result.ok).toBe(false); expect(result.output).toContain("trust");
+  } finally { rmSync(root, { recursive: true, force: true }); }
 });
