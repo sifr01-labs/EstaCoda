@@ -291,7 +291,9 @@ function fakeExit() {
   };
 }
 
-async function waitForCondition(predicate: () => boolean, timeoutMs = 1_000): Promise<void> {
+// Startup includes real profile/SQLite I/O and can exceed one second while the
+// full suite is busy. Keep the readiness assertion bounded, below the test timeout.
+async function waitForCondition(predicate: () => boolean, timeoutMs = 3_000): Promise<void> {
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
     if (predicate()) return;

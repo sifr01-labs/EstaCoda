@@ -2,6 +2,8 @@ import { mkdtemp, rm, stat } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { once } from "node:events";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { expect, it, vi } from "vitest";
 import { HostProcessScope } from "./host-processes.js";
 import { HostEnvironment } from "./host-environment.js";
@@ -82,7 +84,7 @@ it("isolates default environments and preserves only explicit adapter values", a
   }
 });
 
-it.skipIf(process.platform === "win32").each([true, false])("requires OS proof of group absence after a signal/exit race (absent=%s)", async (absent) => {
+it.skipIf(process.platform === "win32").each(["absent", "present", "denied"])("requires OS proof of group absence after a signal/exit race (%s)", async (state) => {
   const scope = new HostProcessScope(process.cwd());
   const child = scope.spawn(process.execPath, ["-e", "process.stdout.write('ready'); setInterval(()=>{},1000)"], { env: {} });
   await once(child.stdout, "data");
@@ -90,7 +92,8 @@ it.skipIf(process.platform === "win32").each([true, false])("requires OS proof o
   const spy = vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
     if (pid !== -child.pid!) return kill(pid, signal);
     if (signal === 0) {
-      if (!absent) return true;
+      if (state === "present") return true;
+      if (state === "denied") throw Object.assign(new Error("probe denied"), { code: "EPERM" });
       return kill(pid, signal);
     }
     throw Object.assign(new Error("signal denied"), { code: "EPERM" });
@@ -98,12 +101,68 @@ it.skipIf(process.platform === "win32").each([true, false])("requires OS proof o
   try {
     const termination = scope.terminate(child, "SIGKILL");
     child.kill("SIGKILL"); // The leader exits independently of the failed group signal.
-    if (absent) await expect(termination).resolves.toBeUndefined();
-    else await expect(termination).rejects.toThrow(/could not be confirmed/);
+    if (state === "absent") await expect(termination).resolves.toBeUndefined();
+    else {
+      await expect(termination).rejects.toThrow(/could not be confirmed/);
+      const signals = spy.mock.calls.filter(([, signal]) => signal !== 0).length;
+      await expect(scope.release()).rejects.toThrow(/did not settle/);
+      expect(spy.mock.calls.filter(([, signal]) => signal !== 0)).toHaveLength(signals);
+    }
   } finally {
     spy.mockRestore();
     child.kill("SIGKILL");
-    if (absent) await scope.release();
-    else await expect(scope.release()).rejects.toThrow(/did not settle/);
+    await scope.release(); // A later retry may settle only after fresh OS proof.
   }
+});
+
+it.skipIf(process.platform === "win32")("waits for delayed group disappearance after close without ignoring a denied signal", async () => {
+  const scope = new HostProcessScope(process.cwd());
+  const child = scope.spawn(process.execPath, ["-e", "process.stdout.write('ready'); setInterval(()=>{},1000)"], { env: {} });
+  await once(child.stdout, "data");
+  const kill = process.kill.bind(process);
+  let probes = 0;
+  const spy = vi.spyOn(process, "kill").mockImplementation((pid, signal) => {
+    if (pid !== -child.pid!) return kill(pid, signal);
+    if (signal === 0) {
+      if (++probes < 4) return true;
+      return kill(pid, signal);
+    }
+    throw Object.assign(new Error("signal denied"), { code: "EPERM" });
+  });
+  try {
+    const termination = scope.terminate(child, "SIGKILL");
+    const concurrent = scope.terminate(child, "SIGKILL");
+    child.kill("SIGKILL");
+    await Promise.all([termination, concurrent]);
+    expect(probes).toBeGreaterThanOrEqual(4);
+  } finally {
+    spy.mockRestore(); child.kill("SIGKILL"); await scope.release();
+  }
+});
+
+it.skipIf(process.platform === "win32")("keeps a standalone Node process alive until the cleanup decision settles", async () => {
+  const moduleUrl = new URL("./host-processes.ts", import.meta.url).href;
+  const script = `
+    import { once } from 'node:events';
+    import { HostProcessScope } from ${JSON.stringify(moduleUrl)};
+    const scope = new HostProcessScope(process.cwd());
+    const child = scope.spawn(process.execPath, ['-e', "process.stdout.write('ready'); setInterval(()=>{},1000)"], { env: {} });
+    await once(child.stdout, 'data');
+    const kill = process.kill.bind(process);
+    let probes = 0;
+    process.kill = (pid, signal) => {
+      if (pid !== -child.pid) return kill(pid, signal);
+      if (signal === 0) { if (++probes < 4) return true; return kill(pid, signal); }
+      throw Object.assign(new Error('signal denied'), { code: 'EPERM' });
+    };
+    try {
+      const termination = scope.terminate(child, 'SIGKILL');
+      child.kill('SIGKILL');
+      await termination;
+      await scope.release();
+      process.stdout.write('settled');
+    } finally { process.kill = kill; child.kill('SIGKILL'); }
+  `;
+  const result = await promisify(execFile)(process.execPath, ["--import", "tsx", "--input-type=module", "-e", script], { timeout: 5_000 });
+  expect(result.stdout).toBe("settled");
 });

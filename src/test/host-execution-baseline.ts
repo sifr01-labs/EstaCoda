@@ -78,6 +78,7 @@ export async function runHostBaselineSample(scenario: HostBaselineScenario) {
           : [["file.read", { path: "counter.cjs" }], ["file.patch", { mode: "replace", path: "counter.cjs", old_string: "n + 1", new_string: "n + 2" }],
             ["terminal.run", { command: "node verify.cjs", timeoutMs: 5_000 }]] as const;
         const call = calls[step++];
+        if (call) assert(request.tools?.some((schema) => (schema as { function?: { name?: string } }).function?.name === call[0].replaceAll(".", "_")), `Fixture requested unavailable tool: ${call[0]}`);
         const response: ProviderResponse = {
           ok: true, content: call ? "" : "Fixture edit verified.", model: model.id, provider: model.provider,
           finishReason: call ? "tool_calls" : "stop",
@@ -87,7 +88,7 @@ export async function runHostBaselineSample(scenario: HostBaselineScenario) {
           expectedTool = call[0];
           const toolCallId = `${resume ? "resume" : "initial"}-${step}`;
           response.raw = { choices: [{ message: { tool_calls: [{ id: toolCallId,
-            function: { name: call[0], arguments: JSON.stringify(call[1]) } }] } }] };
+            function: { name: call[0].replaceAll(".", "_"), arguments: JSON.stringify(call[1]) } }] } }] };
         }
         return response;
       },

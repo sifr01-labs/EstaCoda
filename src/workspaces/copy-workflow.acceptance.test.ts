@@ -8,7 +8,7 @@ import { createRuntime } from "../runtime/create-runtime.js";
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
 import { ProviderRegistry } from "../providers/provider-registry.js";
 import { resolveTokens } from "../theme/token-resolver.js";
-import type { ModelProfile, ProviderResponse } from "../contracts/provider.js";
+import type { ModelProfile, ProviderRequest, ProviderResponse } from "../contracts/provider.js";
 
 it.each(["apply", "review", "conflict", "remote", "attached", "busy"])("real runtime copy workflow: %s", async (outcome) => {
   const f = await copyFixture(), changes = new ChangeApplicationStore(f), db = new SQLiteSessionDB({ path: join(f.homeDir, "sessions.sqlite") });
@@ -24,11 +24,17 @@ it.each(["apply", "review", "conflict", "remote", "attached", "busy"])("real run
     const registry = new ProviderRegistry(); let step = 0, approvalRequests = 0;
     const calls = [["file.read", { path: "counter.cjs" }], ["file.patch", { mode: "replace", path: "counter.cjs", old_string: "n + 1", new_string: "n + 2" }], ["terminal.run", { command: "node verify.cjs", timeoutMs: 5000 }]] as const;
     registry.register({ id: model.provider, name: "Copy fixture", executable: true, health: () => ({ available: true }), listModels: () => [model],
-      complete: async (): Promise<ProviderResponse> => {
+      complete: async (request: ProviderRequest): Promise<ProviderResponse> => {
         const call = step === 4 ? (step++, ["file.read", { path: "counter.cjs" }] as const) : calls[step++];
+        if (call) expect(request.tools).toEqual(expect.arrayContaining([expect.objectContaining({ function: expect.objectContaining({ name: call[0].replaceAll(".", "_") }) })]));
+        if (step === 5) {
+          for (const name of ["file_patch", "terminal_run"]) {
+            expect(request.tools).not.toEqual(expect.arrayContaining([expect.objectContaining({ function: expect.objectContaining({ name }) })]));
+          }
+        }
         return { ok: true, provider: model.provider, model: model.id, content: call ? "" : "Edit verified.", finishReason: call ? "tool_calls" : "stop",
           usage: { inputTokens: 100, outputTokens: 10, totalTokens: 110 },
-          ...(call ? { raw: { choices: [{ message: { tool_calls: [{ id: `call-${step}`, function: { name: call[0], arguments: JSON.stringify(call[1]) } }] } }] } } : {}) };
+          ...(call ? { raw: { choices: [{ message: { tool_calls: [{ id: `call-${step}`, function: { name: call[0].replaceAll(".", "_"), arguments: JSON.stringify(call[1]) } }] } }] } } : {}) };
       } });
     runtime = await createRuntime({ tokens: resolveTokens("standard", "dark", "kemetBlue"), model, providerRegistry: registry,
       primaryModelRoute: { provider: model.provider, id: model.id, profile: model, authMethod: "none" },
@@ -37,7 +43,7 @@ it.each(["apply", "review", "conflict", "remote", "attached", "busy"])("real run
       closeSessionDbOnDispose: false, securityMode: "open", workspaceTrusted: true, trustStore: changes.trust,
       executionControls: { providerBudgets: { maxProviderIterations: 8, maxProviderToolCalls: 6, maxProviderWallClockMs: 15000, finalizationReserveMs: 0 } } });
     if (outcome === "busy") expect((await runtime.executeTool!({ tool: "process.start", toolInput: { command: "sleep 30" } }))?.result?.ok).toBe(true);
-    const response = await runtime.handle({ channel: ["remote", "attached"].includes(outcome) ? "telegram" : "cli", text: "Read counter.cjs, fix its increment to add two instead of one using file.patch, then run node verify.cjs to test it.",
+    const response = await runtime.handle({ channel: ["remote", "attached"].includes(outcome) ? "telegram" : "cli", text: "Read counter.cjs with file.read. Change n + 1 to n + 2 using file.patch. Run exactly node verify.cjs using terminal.run. Do not modify verify.cjs or create other files. Report the test result.",
       onApprovalRequest: async () => { approvalRequests++; return "denied"; } });
     expect(response.toolExecutions.filter((tool) => tool.result?.ok)).toHaveLength(3);
     expect(approvalRequests).toBe(0);

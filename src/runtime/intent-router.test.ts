@@ -326,6 +326,37 @@ describe("IntentRouter governed route contract", () => {
     expect(route.evidence.some((entry) => entry.kind === "task-class")).toBe(false);
   });
 
+  it.each([
+    "Read counter.cjs with file.read. Change n + 1 to n + 2 using file.patch. Run exactly node test.cjs using terminal.run. Do not modify test.cjs or create other files. Report the test result.",
+    "Read the file and fix the bug, then run the tests.",
+    "Read the file. Do not modify tests. Update the code.",
+    "اقرأ ملف counter.cjs ثم عدّل الكود. لا تعدّل الاختبارات.",
+    "Just fix the code after reading it.",
+    "Read the file and fix the code without modifying tests.",
+    "Read counter.cjs and run node verify.cjs to verify the existing edit. Do not apply the patch again.",
+    "Read the code and run the tests.",
+    "اقرأ الملف ثم شغّل الاختبارات."
+  ])("preserves mutation intent in a read/edit/test request: %s", (prompt) => {
+    expect(routerWith().route(prompt).taskClass).toBe("repo-change");
+  });
+
+  it.each([
+    "Read the file. Do not modify the code or add tests.",
+    "Read the file but don't change the code.",
+    "Read the file. Do not modify the code and add tests.",
+    "Read the file without modifying code. Never add tests.",
+    'Read the file and explain the phrase "fix the bug".',
+    "Read the file and explain 'change the code'.",
+    "اقرأ ملف counter.cjs. لا تعدّل الكود.",
+    "Read the file. Do not run node test.cjs.",
+    "Read the file and explain how to change the code.",
+    "Read the file and describe how to run node test.cjs.",
+    "اشرح كيف أعدّل الكود في الملف.",
+    'Read the file and explain the command "run node test.cjs".'
+  ])("does not turn inspection constraints or quotations into mutation intent: %s", (prompt) => {
+    expect(routerWith().route(prompt).taskClass).toBe("repo-inspection");
+  });
+
   it("records local semantic shadow candidates without selecting a primary skill", () => {
     const releaseNotes = skill({
       name: "release-notes",

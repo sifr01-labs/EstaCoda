@@ -52,7 +52,7 @@ A command that previously relied on an incidental parent variable must use expli
 
 Complete harness protocol frames are parsed incrementally. Malformed, duplicate, concurrent or oversized requests stop execution. Nested calls still pass through the existing tool executor and approval path. Caller cancellation and scope release propagate to foreground execution. Long-running background processes remain owned by their scope until stopped or released.
 
-POSIX processes start in owned process groups. Stop sends `SIGTERM`, allows one second, then escalates to `SIGKILL`; immediate cancellation can request `SIGKILL` directly. Leader exit also triggers group cleanup so descendants cannot keep output pipes open indefinitely. Settlement waits are bounded. Windows uses bounded `taskkill /T /F` for explicit termination.
+POSIX processes start in owned process groups. Stop sends `SIGTERM`, allows one second, then escalates to `SIGKILL`; immediate cancellation can request `SIGKILL` directly. Leader exit also triggers group cleanup so descendants cannot keep output pipes open indefinitely. Settlement waits are bounded. After a failed POSIX group signal, cleanup polls for up to one second for OS proof that the group is absent. A live group or a denied probe retains ownership and reports failure. Later cleanup attempts can retry that proof; they do not signal a closed leader’s stale PID. Windows uses bounded `taskkill /T /F` for explicit termination.
 
 ## Limits and operational risk
 

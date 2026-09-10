@@ -54,7 +54,10 @@ export class HostProcessScope {
     record.stopping ??= (async () => {
       let signalError: unknown;
       try {
-        if (process.platform === "win32" && child.pid !== undefined) {
+        if (record.settled) {
+          // A retry after close must prove settlement, not signal a stale PID.
+          signalError = new Error("Process already closed; group settlement must be checked.");
+        } else if (process.platform === "win32" && child.pid !== undefined) {
           await terminateWindowsTree(child.pid);
         } else {
           signalGroup(child, signal);
@@ -68,13 +71,20 @@ export class HostProcessScope {
       if (!record.settled) throw new Error("Owned process termination could not be confirmed.");
       // A signal can race an exiting leader. A failed signal is only settled
       // when the OS confirms the entire group no longer exists; never ignore EPERM.
-      if ((signalError || record.cleanupError) && !processGroupAbsent(child)) {
+      if ((signalError || record.cleanupError) && !await waitForProcessGroupAbsence(child)) {
         throw new Error("Owned process tree termination could not be confirmed.");
       }
       this.#children.delete(child);
       record.releaseAuthority();
     })();
-    await record.stopping;
+    const stopping = record.stopping;
+    try { await stopping; }
+    catch (error) {
+      // Keep ownership on failure, but permit a later cleanup attempt to check
+      // fresh OS evidence. Concurrent callers still share the same attempt.
+      if (record.stopping === stopping) record.stopping = undefined;
+      throw error;
+    }
   }
 
   async release(): Promise<void> {
@@ -96,6 +106,19 @@ function processGroupAbsent(child: ChildProcess): boolean {
   if (process.platform === "win32") return false;
   try { process.kill(-child.pid, 0); return false; }
   catch (error) { return (error as NodeJS.ErrnoException).code === "ESRCH"; }
+}
+
+async function waitForProcessGroupAbsence(child: ChildProcess): Promise<boolean> {
+  if (child.pid === undefined) return true;
+  if (process.platform === "win32") return false;
+  const deadline = performance.now() + 1_000;
+  do {
+    if (processGroupAbsent(child)) return true;
+    // After close there may be no other handles. Keep the process alive until
+    // this bounded cleanup decision has actually settled.
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  } while (performance.now() < deadline);
+  return processGroupAbsent(child);
 }
 
 function delay(ms: number): Promise<void> { return new Promise((resolve) => { const timer = setTimeout(resolve, ms); timer.unref(); }); }

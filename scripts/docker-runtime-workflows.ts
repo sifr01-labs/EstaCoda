@@ -1,7 +1,7 @@
 import assert from "node:assert/strict";
 import { mkdir, readFile, readdir, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import type { ModelProfile, ProviderResponse } from "../src/contracts/provider.js";
+import type { ModelProfile, ProviderRequest, ProviderResponse } from "../src/contracts/provider.js";
 import type { Runtime } from "../src/runtime/create-runtime.js";
 import type { SecurityPolicy } from "../src/contracts/security.js";
 import type { DockerClient } from "../src/execution/docker-client.js";
@@ -40,15 +40,16 @@ export async function validateDockerRuntimeWorkflows(input: {
     let step = 0;
     const registry = new ProviderRegistry();
     registry.register({ id: model.provider, name: "Docker fixture", executable: true, health: () => ({ available: true }), listModels: () => [model],
-      complete: async (): Promise<ProviderResponse> => {
+      complete: async (request: ProviderRequest): Promise<ProviderResponse> => {
         invocations++;
         const calls = [["file.read", { path: "counter.cjs" }], ["file.patch", { mode: "replace", path: "counter.cjs", old_string: "n + 1", new_string: "n + 2" }],
           ["terminal.run", { command: "node test.cjs", timeoutMs: 10000 }]] as const;
         assert(step <= calls.length, "Unexpected provider continuation");
         const call = calls[step++];
+        if (call) assert(request.tools?.some((schema) => (schema as { function?: { name?: string } }).function?.name === call[0].replaceAll(".", "_")), `Fixture requested unavailable tool: ${call[0]}`);
         return { ok: true, provider: model.provider, model: model.id, content: call ? "" : "Docker fixture verified.",
           finishReason: call ? "tool_calls" : "stop", usage: { inputTokens: 100, outputTokens: 10, totalTokens: 110 },
-          ...(call ? { raw: { choices: [{ message: { tool_calls: [{ id: `call-${step}`, function: { name: call[0], arguments: JSON.stringify(call[1]) } }] } }] } } : {}) };
+          ...(call ? { raw: { choices: [{ message: { tool_calls: [{ id: `call-${step}`, function: { name: call[0].replaceAll(".", "_"), arguments: JSON.stringify(call[1]) } }] } }] } } : {}) };
       } });
     const runtime: Runtime = await createRuntime({ tokens: resolveTokens("standard", "dark", "kemetBlue"), model, providerRegistry: registry,
       primaryModelRoute: { provider: model.provider, id: model.id, profile: model, authMethod: "none" },

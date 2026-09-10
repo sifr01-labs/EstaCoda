@@ -398,11 +398,11 @@ function taskClassFromPrompt(normalized: string): IntentTaskClass {
   if (matchesResearch(normalized)) {
     return "research";
   }
-  if (matchesRepoInspection(normalized)) {
-    return "repo-inspection";
-  }
   if (matchesRepoChange(normalized)) {
     return "repo-change";
+  }
+  if (matchesRepoInspection(normalized)) {
+    return "repo-inspection";
   }
   if (matchesConversation(normalized)) {
     return "conversation";
@@ -667,8 +667,21 @@ function matchesCodeReview(normalized: string): boolean {
 }
 
 function matchesRepoChange(normalized: string): boolean {
-  return /\b(implement|fix|change|update|modify|refactor|add|remove)\b.{0,80}\b(code|repo|repository|file|files|test|tests|feature|bug|command|cli)\b/iu.test(normalized) ||
-    /(?:نف[ّ]?ذ|أصلح|اصلح|غي[ّ]?ر|حد[ّ]?ث|عد[ّ]?ل|أضف|اضف|احذف|أعد\s+هيكلة).{0,80}(?:الكود|الشفرة|المستودع|ملف|ملفات|اختبار|اختبارات|ميزة|خلل|أمر)/iu.test(normalized);
+  // A read/edit/test request must keep its editing tools visible. Do not let
+  // quoted examples or a separate "do not modify" constraint supply that intent.
+  const clauses = normalized.replace(/"[^"\n]*"|“[^”\n]*”|(?<![\p{L}\p{N}])'[^'\n]*'(?![\p{L}\p{N}])/gu, " ")
+    .split(/[.!?;؛،\n]+(?=\s|$)|\bbut\b|ولكن/iu)
+    .flatMap((sentence) => sentence.split(/\b(?:do\s+not|don[’']t|never|without|avoid)\b|(?:^|\s)(?:لا|بدون|دون)(?:\s|$)/iu, 1)[0]!
+      .split(/\b(?:and|then)\b|ثم/iu));
+  return clauses.some((clause) => {
+    if (/\b(?:explain|describe|discuss|how\s+to|how\s+(?:do|does|would|can|should))\b|(?:اشرح|كيف)/iu.test(clause)) return false;
+    return /\b(implement|fix|change|update|modify|refactor|add|remove)\b.{0,80}\b(code|repo|repository|file|files|test|tests|feature|bug|command|cli)\b/iu.test(clause) ||
+      /(?:نف[ّ]?ذ|أصلح|اصلح|غي[ّ]?ر|حد[ّ]?ث|عد[ّ]?ل|أضف|اضف|احذف|أعد\s+هيكلة).{0,80}(?:الكود|الشفرة|المستودع|ملف|ملفات|اختبار|اختبارات|ميزة|خلل|أمر)/iu.test(clause) ||
+      // Verification commands can write workspace state too; exposing the
+      // command tool does not approve its execution.
+      /\b(?:run|execute)\s+(?:(?:exactly|the)\s+)?(?:tests?\b|(?:node|pnpm|npm|npx|yarn|bun|python3?|pytest|vitest)\s+\S)/iu.test(clause) ||
+      /(?:شغ[ّ]?ل|نف[ّ]?ذ)\s+(?:الاختبارات|اختبارات|(?:node|pnpm|npm|pytest)\s+\S)/iu.test(clause);
+  });
 }
 
 function matchesRepoInspection(normalized: string): boolean {
