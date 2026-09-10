@@ -1,8 +1,8 @@
 # Workspace and execution implementation plan
 
-Status: PR 0, PR 1, PR 2, PR 3 and PR 4 are implemented on `ame/execution-baseline`; later slices remain proposed. See the [PR 1 implementation and validation record](workspace-execution-pr1.md), [PR 2 implementation and validation record](workspace-execution-pr2.md), [PR 3 implementation and validation record](workspace-execution-pr3.md), [PR 4 implementation and validation record](workspace-execution-pr4.md), and [implemented workspace behavior](../operations/workspaces.md). This plan replaces the earlier workspace/Docker roadmap for this workstream.
+Status: PR 0, PR 1, PR 2, PR 3, PR 4 and PR 5 are implemented on `ame/execution-baseline`; later slices remain proposed. See the [PR 1 implementation and validation record](workspace-execution-pr1.md), [PR 2 implementation and validation record](workspace-execution-pr2.md), [PR 3 implementation and validation record](workspace-execution-pr3.md), [PR 4 implementation and validation record](workspace-execution-pr4.md), [PR 5 implementation and validation record](workspace-execution-pr5.md), and [implemented workspace behavior](../operations/workspaces.md). This plan replaces the earlier workspace/Docker roadmap for this workstream.
 
-Shared contract and ownership decisions are defined in [Shared workspace, target, and execution ownership decisions](workspace-execution-ownership-decisions.md). That document is authoritative for overlap with the Desktop plan: core target bindings, supervisor ownership, private control transport, handoff, and recovery. Its cross-process ownership, control transport and Docker contracts remain proposed work, not shipped guarantees.
+Shared contract and ownership decisions are defined in [Shared workspace, target, and execution ownership decisions](workspace-execution-ownership-decisions.md). That document is authoritative for overlap with the Desktop plan: core target bindings, supervisor ownership, private control transport, handoff, and recovery. PR 4 implements core cross-process ownership and private Unix control; PR 5 adds channel selection and recurring authority. Packaged Desktop integration and Docker remain separate delivery gates.
 
 ## 1. Product objective
 
@@ -304,7 +304,9 @@ Acceptance: configuration and trust changes need no gateway restart; MCP exposur
 
 ### PR 5 — Channel workspace selection and recurring authority
 
-Branch: `ame/channel-workspace-selection`
+Implemented on `ame/execution-baseline`, continuing the existing branch as requested. See the [PR 5 record](workspace-execution-pr5.md) for validation and remaining product gates. The seven intended commit subjects below are retained.
+
+Originally proposed branch: `ame/channel-workspace-selection`
 
 Commits:
 

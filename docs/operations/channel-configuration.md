@@ -312,3 +312,13 @@ If `busyPolicy`, `queueDepth`, or `busyTextCoalescing` is omitted for a channel,
 - `busyTextCoalescing.enabled`: `false`
 
 There is no top-level `channels.busyPolicy`, `channels.queueDepth`, or `channels.busyTextCoalescing`. Each channel configures its own policy independently.
+
+## Workspace selection, setup and service installation
+
+New channels use the existing setup review/apply path for workspace trust, security mode, credentials and caller authorization. No separate channel setup wizard or implicit Docker installation is introduced. The available workspace execution mode is Local host; see [channel workspace selection](workspaces.md#select-a-channel-workspace).
+
+The supervisor stores future workspace/Session bindings in the owning profile's `workspaces.sqlite`. Channel Session mapping format 2 also records the profile and uses full normalized surface keys. Old underspecified mappings and attachments are not sufficient evidence to attach an account or thread: create a new checked handoff where needed. Existing explicitly configured host operation remains available.
+
+Service installation writes the canonical physical workspace directory into its existing systemd unit or launchd plist. Alias changes and later symlink changes do not rewrite the installed working directory. Moving that directory requires explicit service reinstallation. This pins a path, not directory contents or an inode. Installation does not grant workspace trust.
+
+Handoff and attached-view JSON stores read current disk state and serialize mutations through sibling SQLite locks with atomic JSON publication. A running supervisor can observe a code created by the CLI, and independent processes cannot redeem it twice. Default channel Session mappings have one supervisor writer and atomic publication. Unsupported/corrupt state blocks recovery; it is not replaced by an empty authorized state. Back up the global Session database, profile workspace database and profile gateway/cron state together with all processes stopped. Do not run an older writer against upgraded state.

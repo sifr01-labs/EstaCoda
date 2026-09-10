@@ -53,6 +53,12 @@ The existing Session database and queue payload hold pending bindings. No second
 
 ## Limits
 
-These checks do not grant exclusive Session execution across processes and cannot undo an operation already dispatched. Continuous owner coordination, cancellation of running work after revocation, complete host process lifetime management, credential filtering, managed worktrees and Docker containment remain later implementation steps. This release is not evidence of multi-tenant isolation.
+PR 3 and PR 4 add owned host resources, credential filtering, fenced Session execution and cancellation after live authority revocation; see [runtime ownership and its limits](runtime-ownership.md). These checks cannot undo an external operation already dispatched or provide OS containment. Managed worktrees and Docker remain later work. This release is not evidence of multi-tenant isolation.
 
 The tests use temporary local state, synthetic providers, separate Node processes and real SQLite/JSON persistence. They verify scope separation, one-time argument binding, reuse, legacy renewal, concurrent writes, owner death and revoke/regrant fencing. They do not establish production latency, live-provider cost or remote-environment isolation.
+
+## Recurring channel work
+
+A channel-origin cron runtime can reuse the originating surface's persistent grant across new execution Sessions when the workspace, host authority and reviewed action scope still match. Origin attribution comes from the authenticated gateway; tool arguments cannot supply it. Current channel authorization, workspace trust and target validity are rechecked before execution, during active authority validation and before delivery.
+
+The origin also restricts cron job management, upstream-output context and jobs created by a scheduled agent. Other surfaces cannot inspect or revoke a scoped grant merely by sharing a chat ID. Legacy jobs and unscoped grants are not automatically adopted. See [cron authority and migration](../subsystems/cron.md#channel-origin-recurring-authority).

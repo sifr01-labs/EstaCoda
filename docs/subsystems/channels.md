@@ -524,3 +524,9 @@ Gateway `--global` writes fail closed. If channel authorization, runtime workspa
 - Gateway status reports readiness, not background-process liveness.
 - Channel-specific safety rules are partial — general safety policy applies to all channels equally.
 - Inline approval actions are transport/UI sugar over `ChannelGateway`; adapters do not own approval authorization.
+
+## Workspace and recurring execution
+
+Authenticated channels support `/workspace`, `/workspace list`, and `/workspace use <alias>`. Selection is profile-local, uses the core workspace/target registry, and creates a fresh future Session without retargeting existing work. Active/queued work and pending approvals block pointer changes; stop/approve/deny remain reachable. See [workspace operations](../operations/workspaces.md#select-a-channel-workspace) and [setup/service migration](../operations/channel-configuration.md#workspace-selection-setup-and-service-installation).
+
+Channel-created cron jobs preserve the authenticated origin and selected target. Persistent approval reuse stays within that origin and current authority; old unscoped jobs do not gain grants. See [recurring authority](cron.md#channel-origin-recurring-authority).

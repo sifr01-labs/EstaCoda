@@ -69,6 +69,18 @@ Workspace selection also supplies core-verified host facts for approval scope. A
 
 ## Limits and verification
 
-The implemented workspace and authority slices validate profile/workspace ownership, recheck Session/target ownership before dispatch, and coordinate persistent registry/approval writes. They do not implement cross-process exclusive execution, shared supervisor control IPC, continuous revocation/termination of already dispatched work, managed worktrees, Docker, or containment. Two clients passing the same workspace check do not thereby acquire a single execution owner. Those guarantees require later ownership and Docker work.
+Core execution uses persisted Session ownership and fences, serialized runtime acquisition, private Unix supervisor control and active authority validation. See [runtime ownership and its limits](runtime-ownership.md). PR 5 adds scoped channel workspace selection and recurring authority. Packaged Desktop integration, managed worktrees, Windows shared control, Docker and containment remain separate delivery gates.
 
 Coverage includes independent-process alias/move/target/Session races, legacy database reopening, canonical path aliases, trust separation, immutable Session/Task bindings, CLI and channel pointer preservation, and ACP rejection before transcript replay. The session-continuation smoke case uses real temporary directories and SQLite targets. These are local deterministic tests, not live-provider, Desktop or multi-tenant isolation evidence.
+
+## Select a channel workspace
+
+Register an existing directory locally in the gateway's profile with `estacoda --profile work workspace add app /path/to/app`. Registration does not grant trust: use the existing local setup/apply flow to review workspace trust and the selected security mode. Keep channel credentials and allowlists in that profile.
+
+In an authenticated channel, use `/workspace` to inspect the future selection, `/workspace list` to list registered aliases, and `/workspace use app` to select one. Remote selection accepts aliases only. It creates a fresh Session pointer in the same profile-local workspace database and never edits an existing Session's target. Account, chat, thread and configured per-user boundaries determine the surface scope.
+
+Selection is blocked while work, preprocessing, queued input, debounce buffers or approvals are pending. Let them settle, use `/stop` for active work, or resolve the approval with `/approve` or `/deny`, then retry. These controls remain reachable during selection. Work already sent to external systems cannot be recalled by changing the selection.
+
+Alias renames preserve a selection. Moves and removals require explicit reselection; they do not redirect old Sessions or jobs. `/switch` and `/attach` select an established Session view after ownership checks. A live foreground CLI/ACP owner must settle and close before attachment can acquire it. `/detach` and `/new` leave an attached shared owner intact; `/new` starts fresh work at the channel's selected future target.
+
+The current execution choice is **Local host**. It uses existing trust and security controls, and is not OS containment. Docker is optional future work in PR 6; **Sandboxed** is not yet available through this channel flow. Existing host channels and scheduled jobs do not need Docker.

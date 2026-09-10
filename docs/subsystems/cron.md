@@ -283,3 +283,15 @@ estacoda cron remove <job-id>
 - There is no web dashboard for cron in this stack.
 - Per-job workdir does not grant arbitrary absolute-directory trust.
 - No-agent jobs do not create runtime sessions or trajectories.
+
+## Channel-origin recurring authority
+
+New jobs created through an authenticated channel's `/cron` command or `cronjob` tool record a versioned `executionOrigin`: selected profile, immutable target, normalized channel surface and authenticated principal. Their working directory is pinned to that target. They can deliver locally or to the recorded origin; an alternate recipient requires a separate local operator flow. Bound-origin delivery does not follow mutable legacy recipient fields.
+
+The runner validates the target, current workspace trust and current channel allowlist/open policy before execution and again at delivery. Runtime-backed work retains the origin during tool calls, child scheduling and upstream-output reads. Remote job management and upstream context cannot borrow jobs belonging to another surface/workspace. Active runtimes and scripts retain current-authority validation through their owned execution lifetime.
+
+A matching originating-channel persistent grant can authorize a recurring runtime tool action in a new Session. Scope includes profile, workspace, surface, current host authority, tool, risk and normalized target. Session-only or once-only approvals do not become recurring grants. Hardline blocks and deterministic denials remain non-overridable. Revocation invalidates pending dispatch; regranting does not revive an old approval. See [approval reuse](../operations/execution-approvals.md).
+
+Approve the intended action in its originating channel with `/approve always` when that persistent scope is appropriate. `/approvals` and `/revoke <id>` inspect and revoke it. A changed scope requires renewed review. If an unattended runtime needs an approval it does not already have, it cannot silently expand its authority. Scripts remain explicitly scheduled host commands under their existing checks and owned lease; they do not imply a general command allowlist or OS sandbox.
+
+Channel `/cron` uses the selected profile's cron store. Legacy/local jobs without `executionOrigin` retain their existing local behavior and receive no inferred channel grant. Remote commands do not automatically adopt old global jobs. Inspect and recreate them explicitly in the intended profile/channel if scoped recurring authority is wanted. Unknown origin formats and corrupt job stores fail closed; job mutations use serialized atomic JSON publication.

@@ -59,3 +59,9 @@ A dispatched or uncertain mutation requires verification/reconciliation, or oper
 ## Validation boundary
 
 Local tests cover independent-process claim exclusion and death recovery, stale-result fencing, cache contention, live revocation, singleton cleanup, authenticated IPC, durable retry receipts, priority controls and checkpoint migration. The [PR 4 record](../planning/workspace-execution-pr4.md) lists executed checks. Signed Desktop lifecycle, two-window/channel attachment, Windows IPC, Docker and production provider/account testing remain their respective delivery gates. See also [host execution limits](host-execution.md) and [workspace behavior](workspaces.md).
+
+## Channel views and recurring execution
+
+PR 5 routes workspace selection through the same profile-local target registry and Session preparation path. Selecting an alias changes future channel work only. Pointer mutations wait for existing input, queued work and approval handling to settle. Attachment validates current profile/target/trust and rejects another live foreground owner. Joining or leaving a view does not evict an established shared runtime or migrate its resources.
+
+Authenticated local operator decisions on channel approvals continue through `ChannelGateway`, including continuation and delivery. Persisted setup continuations require the complete original channel scope. Recurring jobs carry their origin through runtime construction, tool calls and child scheduling; current trust, target and channel authorization govern each run and delivery. See the [PR 5 record](../planning/workspace-execution-pr5.md). These core tests do not replace the packaged Desktop and live Telegram delivery proofs.

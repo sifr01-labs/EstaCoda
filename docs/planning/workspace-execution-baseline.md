@@ -163,3 +163,7 @@ PR 2 is implemented on the same branch; see its [review and validation record](w
 ## PR 4 follow-up
 
 PR 4 closes B01 (serialized cache construction/cleanup), B02 (atomic singleton acquisition; no live-owner TTL takeover), B04 (persisted Session claims and fences) and B05 (current gateway configuration/trust with appropriate runtime replacement). B01/B02 characterizations now assert the fixed behavior; B04 retains the distinction between local registries and authority and gains an independent-process exclusion/recovery test. See the [PR 4 review record](workspace-execution-pr4.md) and [operational limits](../operations/runtime-ownership.md). Historical PR 0 measurements and the earlier status paragraphs above remain historical; no new latency, cost or model-quality benchmark is inferred.
+
+## PR 5 follow-up
+
+PR 5 adds profile/surface workspace selection, checked shared-session attachment, current-authority continuation recovery and channel-origin recurring grants. Cron preserves that origin for scheduling, tools, context and delivery. Existing Task approvals retain their own canonical hierarchy/Attempt gates; this slice does not turn a channel grant into generic Task authority. See the [PR 5 implementation record](workspace-execution-pr5.md). Historical measurements above remain unchanged; these correctness tests do not establish a latency or provider-cost improvement.

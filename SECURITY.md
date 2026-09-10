@@ -163,6 +163,8 @@ Network-facing adapters must deny by default unless an allowlist, pairing policy
 
 Gateway approvals are durable in the `pending_approvals` table inside the session database and are scoped by profile plus session where applicable. Pending approvals are ask-only: deterministic denies and hardline results must not become approvable queue rows.
 
+Channel workspace aliases and surface pointers never grant execution authority. Recurring channel jobs pin the authenticated origin and target, recheck current channel authorization/trust, and reuse only matching persistent grants. Background job management and upstream context retain that origin. Unknown or corrupt binding formats block execution; legacy jobs do not gain inferred authority. Local host execution remains outside OS sandbox containment.
+
 WhatsApp is live-proven operationally, but it uses an isolated Baileys bridge under `scripts/whatsapp-bridge/`. Baileys is an unofficial WhatsApp API, so provider account enforcement, suspension, or upstream protocol changes are outside EstaCoda's control. Security issues in EstaCoda's bridge isolation, bearer-token handling, loopback binding, media path policy, authorization checks, alias handling, or profile-scoped state remain in scope.
 
 ### Install, Update, and Uninstall Boundaries
