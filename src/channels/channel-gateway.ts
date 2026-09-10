@@ -1,3 +1,4 @@
+import { channelSurfaceId, type ChannelWorkspaceStore } from "./channel-workspace-store.js";
 import { withDispatchAuthorization, validateDispatchAuthorization } from "../security/dispatch-authorization.js";
 import { assertPendingAction, createPendingAction, securityActionKey, type PendingActionApproval } from "../security/pending-action-approval.js";
 import { channelApprovalScope, samePendingAuthority, sameReusableAuthority, validApprovalScope, type ApprovalExecutionScope } from "../security/approval-scope.js";
@@ -222,6 +223,8 @@ export type ChannelSessionStore = {
 };
 
 export type ChannelGatewayOptions = {
+  workspaceStore?: ChannelWorkspaceStore;
+  isWorkspaceTrusted?: (path: string) => Promise<boolean>;
   approvalScopeForSession?: (sessionId: string) => Promise<ApprovalExecutionScope>;
   /** Core ownership validation before attaching an existing Session. Absent fails closed. */
   validateSessionAttachment?: (sessionId: string) => Promise<void>;
@@ -463,6 +466,9 @@ export class ChannelGateway {
   readonly #adapters = new Map<string, ChannelAdapter>();
   readonly #runtimeForSession: ChannelRuntimeFactory;
   readonly #sessionStore: ChannelSessionStore;
+  readonly #workspaceStore?: ChannelWorkspaceStore;
+  readonly #isWorkspaceTrusted?: (path: string) => Promise<boolean>;
+  readonly #selectionLocks = new Set<string>();
   readonly #authPolicy: ChannelAuthPolicies;
   readonly #trustedWorkspace: ChannelGatewayOptions["trustedWorkspace"];
   readonly #onStopRequested: ChannelGatewayOptions["onStopRequested"];
@@ -542,6 +548,8 @@ export class ChannelGateway {
 
   constructor(options: ChannelGatewayOptions) {
     this.#runtimeForSession = options.runtimeForSession;
+    this.#workspaceStore = options.workspaceStore;
+    this.#isWorkspaceTrusted = options.isWorkspaceTrusted;
     this.#sessionStore = options.sessionStore ?? new InMemoryChannelSessionStore();
     this.#authPolicy = options.authPolicy ?? {};
     this.#trustedWorkspace = options.trustedWorkspace;
@@ -1440,7 +1448,20 @@ export class ChannelGateway {
     const secureInputResult = await this.#interceptTelegramSecureInput(authorizedMessage, adapter);
     if (secureInputResult !== undefined) return secureInputResult;
 
-    const commandResult = await this.#handleCommand(authorizedMessage, adapter);
+    const selectionKey = stableSessionKey(authorizedMessage.sessionKey, this.#sessionPolicy);
+    const selecting = /^\/workspace\s+use(?:\s|$)/u.test(authorizedMessage.text.trim());
+    if ((selecting && this.#selectionBusy(selectionKey)) || this.#selectionLocks.has(selectionKey)) {
+      // Control commands stay reachable while selection is awaiting I/O.
+      if (!/^\/(?:stop|approve|deny)(?:\s|$)/u.test(authorizedMessage.text.trim())) {
+        const text = "Workspace selection is busy. Let current work and queued input settle, or use /stop; resolve pending approvals with /approve or /deny, then retry.";
+        await this.#deliverText(adapter, authorizedMessage.sessionKey, text);
+        return { sessionId: "", replyText: text, artifactCount: 0, progressCount: 0 };
+      }
+    }
+    let commandResult: ChannelGatewayResult | undefined;
+    if (selecting) this.#selectionLocks.add(selectionKey);
+    try { commandResult = await this.#handleCommand(authorizedMessage, adapter); }
+    finally { if (selecting) this.#selectionLocks.delete(selectionKey); }
 
     if (commandResult !== undefined) {
       return commandResult;
@@ -3324,6 +3345,14 @@ export class ChannelGateway {
     return false;
   }
 
+  #surfaceId(key: ChannelSessionKey): string { return this.#workspaceStore ? channelSurfaceId(key, this.#sessionPolicy) : key.chatId; }
+
+  #selectionBusy(key: string): boolean {
+    return this.#activeTurns.has(key) || this.#activeTurnRegistry?.isBusy(key) === true ||
+      this.#sessionMessageQueue.size(key) > 0 || this.#drainingQueue.has(key) || this.#pendingApprovals.has(key) ||
+      [...this.#textDebounceBuffers.values()].some((b) => stableSessionKey(b.firstMessage.sessionKey, this.#sessionPolicy) === key);
+  }
+
   async #handleCommand(message: ChannelMessage, adapter: ChannelAdapter): Promise<ChannelGatewayResult | undefined> {
     const approvalAction = parseApprovalAction(message.text);
     if (approvalAction !== undefined) {
@@ -3434,6 +3463,7 @@ export class ChannelGateway {
         "/new - start a fresh session",
         "/reset - alias for /new",
         "/reload-mcp - reload MCP config for future turns in this chat",
+        "/workspace [list|use <alias>] - select a registered workspace for new work",
         "/trust - trust this workspace for local read/write work",
         "/untrust - revoke workspace trust for this chat session",
         "/workspace.trust.status - show current workspace trust state",
@@ -3466,7 +3496,7 @@ export class ChannelGateway {
     if (command === "/status") {
       const sessionId = await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt });
       const pointer = this.#surfacePointerStore !== undefined
-        ? await this.#surfacePointerStore.getPointer(message.sessionKey.platform as SurfaceType, message.sessionKey.chatId)
+        ? await this.#surfacePointerStore.getPointer(message.sessionKey.platform as SurfaceType, this.#surfaceId(message.sessionKey))
         : undefined;
       let durableQueueLine: string | undefined;
       if (this.#pendingTurnStore !== undefined) {
@@ -3560,6 +3590,34 @@ export class ChannelGateway {
       };
     }
 
+    if (command === "/workspace") {
+      let text: string;
+      let sessionId = "";
+      try {
+        const store = this.#workspaceStore;
+        if (!store) throw new Error("Workspace selection is not configured on this gateway.");
+        const args = message.text.trim().split(/\s+/u).slice(1);
+        const current = store.current(message.sessionKey);
+        if (!args.length) {
+          const alias = current ? store.get(current.source.registeredWorkspaceId!)?.alias ?? "unavailable" : "configured default";
+          text = `Workspace: ${alias} (Local host). Use /workspace list or /workspace use <alias>.`;
+          sessionId = current?.sessionId ?? "";
+        } else if (args.length === 1 && args[0] === "list") {
+          text = ["Registered workspaces:", ...store.list().map((w) => w.alias)].join("\n");
+        } else if (args.length === 2 && args[0] === "use") {
+          const workspace = await store.resolve(args[1]!);
+          if (!await this.#isWorkspaceTrusted?.(workspace.identity.canonicalPath)) throw new Error("Trust this workspace through local setup before selecting it here.");
+          const selected = await store.select(message.sessionKey, args[1]!, current?.revision ?? 0);
+          await this.#surfacePointerStore?.removePointer(message.sessionKey.platform as SurfaceType, channelSurfaceId(message.sessionKey, this.#sessionPolicy));
+          sessionId = await this.#sessionStore.getOrCreateSessionId(message.sessionKey);
+          if (sessionId !== selected.sessionId) throw new Error("Workspace selection could not establish its Session. Retry selection.");
+          text = `Workspace selected: ${workspace.alias} (Local host). New work uses a fresh Session; existing work keeps its original target.`;
+        } else throw new Error("Usage: /workspace, /workspace list, or /workspace use <alias>. Paths are not accepted.");
+      } catch (error) { text = error instanceof Error ? error.message : "Workspace selection failed."; }
+      await this.#deliverText(adapter, message.sessionKey, text);
+      return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
+    }
+
     if (command === "/attach") {
       const code = message.text.trim().split(/\s+/u)[1];
       if (code === undefined || code.length === 0) {
@@ -3612,7 +3670,7 @@ export class ChannelGateway {
 
       await this.#surfacePointerStore.setPointer(
         message.sessionKey.platform as SurfaceType,
-        message.sessionKey.chatId,
+        this.#surfaceId(message.sessionKey),
         { sessionId: result.handoff.sessionId, attachedAt: new Date().toISOString() }
       );
 
@@ -3643,7 +3701,7 @@ export class ChannelGateway {
         };
       }
 
-      const pointer = await this.#surfacePointerStore.getPointer(message.sessionKey.platform as SurfaceType, message.sessionKey.chatId);
+      const pointer = await this.#surfacePointerStore.getPointer(message.sessionKey.platform as SurfaceType, this.#surfaceId(message.sessionKey));
       if (pointer === undefined) {
         const text = "This chat is not attached to any session.";
         await this.#deliverText(adapter, message.sessionKey, text);
@@ -3655,7 +3713,7 @@ export class ChannelGateway {
         };
       }
 
-      await this.#surfacePointerStore.removePointer(message.sessionKey.platform as SurfaceType, message.sessionKey.chatId);
+      await this.#surfacePointerStore.removePointer(message.sessionKey.platform as SurfaceType, this.#surfaceId(message.sessionKey));
 
       // After detach, get the new independent session id
       const newSessionId = await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt });
@@ -3699,19 +3757,19 @@ export class ChannelGateway {
       }
 
       const arg = message.text.trim().split(/\s+/u)[1];
-      const pointer = await this.#surfacePointerStore.getPointer(message.sessionKey.platform as SurfaceType, message.sessionKey.chatId);
+      const pointer = await this.#surfacePointerStore.getPointer(message.sessionKey.platform as SurfaceType, this.#surfaceId(message.sessionKey));
       const base = pointer ?? { sessionId, attachedAt: new Date().toISOString() };
 
       if (arg === "clear") {
         const { homeDelivery: _, ...rest } = base;
-        await this.#surfacePointerStore.setPointer(message.sessionKey.platform as SurfaceType, message.sessionKey.chatId, rest);
+        await this.#surfacePointerStore.setPointer(message.sessionKey.platform as SurfaceType, this.#surfaceId(message.sessionKey), rest);
         const text = "Cleared home delivery target for this chat.";
         await this.#deliverText(adapter, message.sessionKey, text);
         return { sessionId, replyText: text, artifactCount: 0, progressCount: 0 };
       }
 
       const homeDelivery = arg === "local" ? "local" : `${message.sessionKey.platform}:${message.sessionKey.chatId}`;
-      await this.#surfacePointerStore.setPointer(message.sessionKey.platform as SurfaceType, message.sessionKey.chatId, {
+      await this.#surfacePointerStore.setPointer(message.sessionKey.platform as SurfaceType, this.#surfaceId(message.sessionKey), {
         ...base,
         homeDelivery
       });
@@ -3968,7 +4026,7 @@ export class ChannelGateway {
       this.#sessionIdByTurnKey.delete(key);
       this.#pendingApprovals.delete(key);
       this.#approvalGrants.delete(key);
-      await this.#surfacePointerStore?.removePointer(message.sessionKey.platform as SurfaceType, message.sessionKey.chatId);
+      await this.#surfacePointerStore?.removePointer(message.sessionKey.platform as SurfaceType, this.#surfaceId(message.sessionKey));
       const sessionId = await this.#resetSession(message.sessionKey, message.receivedAt);
       const text = this.#renderFreshSessionNotice(sessionId);
       await this.#deliverText(adapter, message.sessionKey, text);
@@ -5514,7 +5572,7 @@ function readBusyTextCoalescingMetadata(metadata: Record<string, unknown> | unde
   };
 }
 
-function parseGatewayCommand(text: string): "/help" | "/status" | "/usage" | "/memory" | "/sessions" | "/switch" | "/search" | "/compact" | "/new" | "/reset" | "/reload-mcp" | "/resume" | "/stop" | "/approve" | "/deny" | "/commands" | "/approvals" | "/revoke" | "/trust" | "/untrust" | "/workspace.trust.grant" | "/workspace.trust.revoke" | "/workspace.trust.status" | "/yolo" | "/cron" | "/attach" | "/detach" | "/sethome" | "/diagnostics" | undefined {
+function parseGatewayCommand(text: string): "/help" | "/status" | "/usage" | "/memory" | "/sessions" | "/switch" | "/search" | "/compact" | "/new" | "/reset" | "/reload-mcp" | "/resume" | "/stop" | "/approve" | "/deny" | "/commands" | "/approvals" | "/revoke" | "/trust" | "/untrust" | "/workspace" | "/workspace.trust.grant" | "/workspace.trust.revoke" | "/workspace.trust.status" | "/yolo" | "/cron" | "/attach" | "/detach" | "/sethome" | "/diagnostics" | undefined {
   const token = text.trim().split(/\s+/u)[0]?.toLowerCase();
 
   if (
@@ -5531,6 +5589,7 @@ function parseGatewayCommand(text: string): "/help" | "/status" | "/usage" | "/m
     token === "/reload-mcp" ||
     token === "/trust" ||
     token === "/untrust" ||
+    token === "/workspace" ||
     token === "/workspace.trust.grant" ||
     token === "/workspace.trust.revoke" ||
     token === "/workspace.trust.status" ||
@@ -5817,6 +5876,7 @@ export function telegramGatewayCommands(): Array<{ command: string; description:
     { command: "/compact", description: "Compact this session context" },
     { command: "/new", description: "Start a fresh session" },
     { command: "/reset", description: "Alias for /new" },
+    { command: "/workspace", description: "Show, list or select a registered workspace" },
     { command: "/trust", description: "Trust this workspace" },
     { command: "/untrust", description: "Revoke workspace trust" },
     { command: "/workspace.trust.status", description: "Show workspace trust state" },

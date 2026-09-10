@@ -5,7 +5,7 @@ import type { ChannelSessionKey } from "../contracts/channel.js";
 import type { ChannelSessionStore } from "./channel-gateway.js";
 import type { SurfacePointerStore } from "./surface-pointer-store.js";
 import type { SurfaceType } from "./surface-pointer.js";
-import { channelSurfaceId, type ChannelWorkspaceStore } from "./channel-workspace-store.js";
+import { channelSurfaceId, type ChannelWorkspaceBinding, type ChannelWorkspaceStore } from "./channel-workspace-store.js";
 import { resolveProfileStateHome } from "../config/profile-home.js";
 
 export type ChannelSessionPolicy = {
@@ -63,12 +63,14 @@ export class PersistentChannelSessionStore implements ChannelSessionStore {
   readonly #surfacePointerStore?: SurfacePointerStore;
   readonly #workspaceStore?: ChannelWorkspaceStore;
   readonly #profileId?: string;
+  readonly #prepareWorkspaceSession?: (binding: ChannelWorkspaceBinding) => Promise<void>;
   #sequence = 0;
   #loaded = false;
 
-  constructor(options: { path?: string; homeDir?: string; profileId?: string; policy?: ChannelSessionPolicy; surfacePointerStore?: SurfacePointerStore; workspaceStore?: ChannelWorkspaceStore } = {}) {
+  constructor(options: { path?: string; homeDir?: string; profileId?: string; policy?: ChannelSessionPolicy; surfacePointerStore?: SurfacePointerStore; workspaceStore?: ChannelWorkspaceStore; prepareWorkspaceSession?: (binding: ChannelWorkspaceBinding) => Promise<void> } = {}) {
     this.#path = options.path ?? (options.profileId === undefined ? join(resolveHomeDir(options.homeDir), ".estacoda", "channel-sessions.json") : join(resolveProfileStateHome({ homeDir: options.homeDir, profileId: options.profileId }).gatewayStatePath, "channel-sessions.json"));
     this.#workspaceStore = options.workspaceStore; this.#profileId = options.profileId;
+    this.#prepareWorkspaceSession = options.prepareWorkspaceSession;
     if (options.workspaceStore && options.workspaceStore.profileId !== options.profileId) throw new Error("Channel workspace store belongs to another profile.");
     this.#policy = options.policy ?? {};
     this.#surfacePointerStore = options.surfacePointerStore;
@@ -94,7 +96,7 @@ export class PersistentChannelSessionStore implements ChannelSessionStore {
     }
 
     const selected = this.#workspaceStore?.current(sessionKey);
-    if (selected) { await this.#workspaceStore!.validateSelection(selected); return selected.sessionId; }
+    if (selected) { await this.#workspaceStore!.validateSelection(selected); await this.#prepareWorkspaceSession?.(selected); return selected.sessionId; }
     const existing = this.#entries.get(key);
 
     if (existing !== undefined) {

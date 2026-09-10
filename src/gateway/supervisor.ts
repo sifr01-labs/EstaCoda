@@ -1,3 +1,5 @@
+import { ChannelWorkspaceStore } from "../channels/channel-workspace-store.js";
+import { ensureRuntimeSession } from "../session/session-workspace-ownership.js";
 import { ControlReceipts } from "./control-receipts.js";
 import { startPrivateControl } from "./private-control.js";
 import { SharedSessionHost } from "./shared-session-host.js";
@@ -345,6 +347,7 @@ export type SupervisorInternalState = {
   gatewayApprovalQueue?: GatewayApprovalQueue;
   pendingTurnStore?: SQLitePendingTurnStore;
   runtimeCache?: RuntimeCache;
+  channelWorkspaceStore?: ChannelWorkspaceStore;
   runtimeFingerprint?: RuntimeFingerprint;
   pruneTimer?: ReturnType<typeof setInterval>;
   stuckScanTimer?: ReturnType<typeof setInterval>;
@@ -609,6 +612,9 @@ async function cleanupSupervisorStartupResources(state: SupervisorInternalState)
     state.gatewayLocalWhisper = undefined;
     state.gatewayLocalWhisperConfigKey = undefined;
   }
+
+  state.channelWorkspaceStore?.close();
+  state.channelWorkspaceStore = undefined;
 
   // 5. Close session DB if opened
   if (state.sessionDb !== undefined) {
@@ -1475,6 +1481,20 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
       idleResetMinutes: telegram.sessionIdleResetMinutes,
       timeZone: Intl.DateTimeFormat().resolvedOptions().timeZone,
     };
+    const channelWorkspaceStore = new ChannelWorkspaceStore({ homeDir, profileId, policy: sessionPolicy });
+    state.channelWorkspaceStore = channelWorkspaceStore;
+    const channelSessionStore = new PersistentChannelSessionStore({ path: sessionContextPath, homeDir, profileId,
+      policy: sessionPolicy, surfacePointerStore, workspaceStore: channelWorkspaceStore,
+      prepareWorkspaceSession: async (binding) => {
+        if (!await trustStore.isTrusted(binding.target.workspace.canonicalPath)) throw new Error("Selected workspace is not trusted.");
+        await ensureRuntimeSession({ sessionDb, sessionId: binding.sessionId, profileId, homeDir, durable: true,
+          workspaceRoot: binding.target.workspace.canonicalPath, sourceWorkspace: binding.source, metadata: { originSurface: "channel" } });
+      }
+    });
+    const channelWorkspaceRoot = async (sessionId: string) => {
+      const session = await sessionDb.getSessionForProfile(sessionId, profileId);
+      return session?.executionTarget?.workspace.canonicalPath ?? options.workspaceRoot;
+    };
     const gatewaySecurityAssessor = await buildGatewaySecurityAssessorConfig(config, sessionDb);
     if (gatewaySecurityAssessor.providerExecutor instanceof ProviderExecutor) {
       state.providerExecutors.add(gatewaySecurityAssessor.providerExecutor);
@@ -1578,19 +1598,22 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           adapters: wrappers,
           deliveryRouter: router,
           homeDir,
-          sessionStore: new PersistentChannelSessionStore({ path: sessionContextPath, policy: sessionPolicy, surfacePointerStore }),
+          sessionStore: channelSessionStore,
+          workspaceStore: channelWorkspaceStore,
+          isWorkspaceTrusted: (path) => trustStore.isTrusted(path),
           approvalStore,
           authPolicy: authPolicies,
-          trustedWorkspace: () => trustStore.isTrusted(options.workspaceRoot),
+          trustedWorkspace: async (message) => trustStore.isTrusted(await channelWorkspaceRoot(await channelSessionStore.getOrCreateSessionId(message.sessionKey))),
           sessionPolicy,
           handoffStore,
           surfacePointerStore,
           approvalScopeForSession: async (sessionId) => {
-            if (!await trustStore.isTrusted(options.workspaceRoot)) throw new Error("Workspace trust was revoked.");
+            const workspaceRoot = await channelWorkspaceRoot(sessionId);
+            if (!await trustStore.isTrusted(workspaceRoot)) throw new Error("Workspace trust was revoked.");
             const session = await sessionDb.getSessionForProfile(sessionId, profileId);
             if (session === undefined) throw new Error("Session not found in gateway profile.");
-            await validateSessionWorkspaceOwnership({ session, profileId, workspaceRoot: options.workspaceRoot, homeDir });
-            return localApprovalScope(profileId, sessionId, await verifyHostExecution(options.workspaceRoot));
+            await validateSessionWorkspaceOwnership({ session, profileId, workspaceRoot, homeDir });
+            return localApprovalScope(profileId, sessionId, await verifyHostExecution(workspaceRoot));
           },
           validateSessionAttachment: async (sessionId) => {
             const session = await sessionDb.getSessionForProfile(sessionId, profileId);
@@ -1660,19 +1683,22 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           adapters: wrappers,
           deliveryRouter: router,
           homeDir,
-          sessionStore: new PersistentChannelSessionStore({ path: sessionContextPath, policy: sessionPolicy, surfacePointerStore }),
+          sessionStore: channelSessionStore,
+          workspaceStore: channelWorkspaceStore,
+          isWorkspaceTrusted: (path) => trustStore.isTrusted(path),
           approvalStore,
           authPolicy: authPolicies,
-          trustedWorkspace: () => trustStore.isTrusted(options.workspaceRoot),
+          trustedWorkspace: async (message) => trustStore.isTrusted(await channelWorkspaceRoot(await channelSessionStore.getOrCreateSessionId(message.sessionKey))),
           sessionPolicy,
           handoffStore,
           surfacePointerStore,
           approvalScopeForSession: async (sessionId) => {
-            if (!await trustStore.isTrusted(options.workspaceRoot)) throw new Error("Workspace trust was revoked.");
+            const workspaceRoot = await channelWorkspaceRoot(sessionId);
+            if (!await trustStore.isTrusted(workspaceRoot)) throw new Error("Workspace trust was revoked.");
             const session = await sessionDb.getSessionForProfile(sessionId, profileId);
             if (session === undefined) throw new Error("Session not found in gateway profile.");
-            await validateSessionWorkspaceOwnership({ session, profileId, workspaceRoot: options.workspaceRoot, homeDir });
-            return localApprovalScope(profileId, sessionId, await verifyHostExecution(options.workspaceRoot));
+            await validateSessionWorkspaceOwnership({ session, profileId, workspaceRoot, homeDir });
+            return localApprovalScope(profileId, sessionId, await verifyHostExecution(workspaceRoot));
           },
           validateSessionAttachment: async (sessionId) => {
             const session = await sessionDb.getSessionForProfile(sessionId, profileId);

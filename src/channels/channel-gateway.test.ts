@@ -9773,3 +9773,30 @@ it("cancels a channel approval wait through its owner without allowing later res
     expect(runtimeForSession).toHaveBeenCalledTimes(1);
   } finally { await cleanup(); }
 });
+
+it("selects trusted aliases for future channel work without constructing a runtime", async () => {
+  const { ChannelWorkspaceStore } = await import("./channel-workspace-store.js");
+  const root = await mkdtemp(join(tmpdir(), "gateway-workspaces-"));
+  const workspaceStore = new ChannelWorkspaceStore({ homeDir: root, profileId: "default" });
+  const runtimeForSession = vi.fn(async () => createMinimalRuntime());
+  let trusted = false;
+  try {
+    await workspaceStore.add("project", root);
+    const sessionStore = new PersistentChannelSessionStore({ homeDir: root, profileId: "default", workspaceStore });
+    const gateway = new ProductionChannelGateway({ adapters: [createFakeTelegramAdapter()], runtimeForSession,
+      workspaceStore, sessionStore, isWorkspaceTrusted: async () => trusted,
+      authPolicy: { telegram: { allowedUserIds: ["user-1"] } } });
+    expect((await gateway.receive(makeMessage("/workspace list"))).replyText).toContain("project");
+    expect((await gateway.receive(makeMessage("/workspace use /tmp"))).replyText).toContain("aliases");
+    expect((await gateway.receive(makeMessage("/workspace use project"))).replyText).toContain("Trust this workspace");
+    expect(workspaceStore.current(makeMessage("").sessionKey)).toBeUndefined();
+    trusted = true;
+    const selected = await gateway.receive(makeMessage("/workspace use project"));
+    expect(selected.replyText).toContain("Workspace selected: project");
+    expect(await sessionStore.getOrCreateSessionId(makeMessage("").sessionKey)).toBe(selected.sessionId);
+    expect((await gateway.receive(makeMessage("/workspace"))).replyText).toContain("project (Local host)");
+    expect(runtimeForSession).not.toHaveBeenCalled();
+    await gateway.receive(makeMessage("/workspace use project", { sender: { id: "intruder" }, sessionKey: { ...makeMessage("").sessionKey, userId: "intruder" } }));
+    expect(workspaceStore.current(makeMessage("").sessionKey)?.sessionId).toBe(selected.sessionId);
+  } finally { workspaceStore.close(); await rm(root, { recursive: true, force: true }); }
+});
