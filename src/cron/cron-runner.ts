@@ -1,3 +1,4 @@
+import { withCronExecutionOrigin } from "./cron-origin.js";
 import { validateCronAuthority, recurringCronRuntimeOptions } from "./cron-authority.js";
 import { acquireRuntimeContext } from "../runtime/runtime-acquisition.js";
 import { ResourceCleanup } from "../execution/resource-cleanup.js";
@@ -262,6 +263,7 @@ export function createRuntimeCronRunner(input: {
           await validateCronAuthority(job, input.scriptExecution);
         } catch (error) { return blockedCronRunResult({ job, executionId, message: error instanceof Error ? error.message : "Recurring execution authority is unavailable." }); }
       }
+      return withCronExecutionOrigin(job.executionOrigin, async (): Promise<CronRunResult> => {
       const deliver = async (content: string) => {
         if (job.executionOrigin) {
           try { await validateCronAuthority(job, input.scriptExecution!); } catch { return false; }
@@ -438,6 +440,7 @@ export function createRuntimeCronRunner(input: {
           await activeRuntime.dispose();
         }
       }
+      });
     }
   };
 }

@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { readJsonState, updateJsonState } from "../storage/json-state.js";
+import { join } from "node:path";
 import { resolveHomeDir } from "../config/home-dir.js";
 import type { ChannelSessionKey } from "../contracts/channel.js";
 import type { ChannelSessionStore } from "./channel-gateway.js";
@@ -163,7 +163,7 @@ export class PersistentChannelSessionStore implements ChannelSessionStore {
     }
 
     try {
-      const parsed = JSON.parse(await readFile(this.#path, "utf8")) as Partial<ChannelSessionFile>;
+      const parsed = this.#readFile();
       if (![1, 2].includes(parsed.version!) || (parsed.version === 2 && parsed.profileId !== this.#profileId) || !Array.isArray(parsed.entries)) throw new Error("Unsupported channel session state or profile mismatch. Renew attachment explicitly.");
       const entries = parsed.entries;
 
@@ -192,6 +192,14 @@ export class PersistentChannelSessionStore implements ChannelSessionStore {
     this.#loaded = true;
   }
 
+  #readFile(): ChannelSessionFile {
+    return readJsonState(this.#path, () => ({ version: this.#profileId === undefined ? 1 : 2, profileId: this.#profileId, entries: [] }), (value) => {
+      const file = value as ChannelSessionFile;
+      if (!file || ![1, 2].includes(file.version) || (file.version === 2 && file.profileId !== this.#profileId) || !Array.isArray(file.entries)) throw new Error("Unsupported channel session state or profile mismatch. Renew attachment explicitly.");
+      return file;
+    });
+  }
+
   async #flush(): Promise<void> {
     const file: ChannelSessionFile = {
       version: this.#profileId === undefined ? 1 : 2,
@@ -199,8 +207,7 @@ export class PersistentChannelSessionStore implements ChannelSessionStore {
       entries: [...this.#entries.values()].sort((left, right) => left.key.localeCompare(right.key))
     };
 
-    await mkdir(dirname(this.#path), { recursive: true });
-    await writeFile(this.#path, `${JSON.stringify(file, null, 2)}\n`, "utf8");
+    updateJsonState(this.#path, () => this.#readFile(), (state) => { Object.assign(state, file); });
   }
 }
 

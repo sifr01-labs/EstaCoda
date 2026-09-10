@@ -100,7 +100,9 @@ describe("profile runtime state paths", () => {
         createChannelGateway(input) {
           gatewayOptions = input;
           return {
-            async start() {},
+            async start() {
+              await input.sessionStore!.getOrCreateSessionId({ platform: "telegram", chatId: "chat-1" }, { receivedAt: "2026-01-01T00:00:00.000Z" });
+            },
             async stop() {},
             hasPendingWork() {
               return false;
@@ -121,11 +123,8 @@ describe("profile runtime state paths", () => {
     expect(gatewayOptions?.profileId).toBe("beta");
     expect(gatewayOptions?.sessionStore).toBeDefined();
 
-    const sessionKey = { platform: "telegram" as const, chatId: "chat-1" };
-    await gatewayOptions!.sessionStore!.getOrCreateSessionId(sessionKey, { receivedAt: "2026-01-01T00:00:00.000Z" });
-
     const betaSessionPath = join(betaPaths.gatewayStatePath, "channel-sessions.json");
-    expect(await readFile(betaSessionPath, "utf8")).toContain("chat-1");
+    expect(JSON.parse(await readFile(betaSessionPath, "utf8"))).toMatchObject({ version: 2, profileId: "beta", entries: [{ key: expect.stringMatching(/^scope_/u), sessionId: expect.any(String) }] });
     await expectFileMissing(join(alphaPaths.gatewayStatePath, "channel-sessions.json"));
     await expectFileMissing(join(homeDir, ".estacoda", "channel-sessions.json"));
   });

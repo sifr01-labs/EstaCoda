@@ -9762,6 +9762,10 @@ it("cancels a channel approval wait through its owner without allowing later res
     const first = await gateway.receive(makeMessage("run something risky"));
     expect(first.replyText).toContain("decision=ask");
     expect(await queue.listPending({ profileId: "profile-a" })).toHaveLength(1);
+    for (const command of ["/workspace use project", "/switch other", "/new", "/detach"]) {
+      expect((await gateway.receive(makeMessage(command))).replyText).toContain("selection is busy");
+    }
+    expect(await queue.listPending({ profileId: "profile-a" })).toHaveLength(1);
     expect(await gateway.cancelOperatorSession("unrelated")).toBe(false);
     expect(await gateway.cancelOperatorSession(first.sessionId)).toBe(true);
     expect(await queue.listPending({ profileId: "profile-a" })).toHaveLength(0);
@@ -9814,4 +9818,27 @@ it("keeps pointer mutations busy during input admission while stop remains reach
     }
     expect((await gateway.receive(makeMessage("/stop"))).replyText).not.toContain("selection is busy");
   } finally { finish(); await running; }
+});
+
+it("blocks new input while a workspace change awaits trust validation", async () => {
+  const { ChannelWorkspaceStore } = await import("./channel-workspace-store.js");
+  const root = await mkdtemp(join(tmpdir(), "channel-selection-admission-"));
+  const workspaceStore = new ChannelWorkspaceStore({ homeDir: root, profileId: "default" });
+  let enter!: () => void, finish!: () => void;
+  const entered = new Promise<void>((resolve) => { enter = resolve; });
+  const barrier = new Promise<void>((resolve) => { finish = resolve; });
+  const runtimeForSession = vi.fn(async () => createMinimalRuntime());
+  try {
+    await workspaceStore.add("project", root);
+    const sessionStore = new PersistentChannelSessionStore({ homeDir: root, profileId: "default", workspaceStore });
+    const gateway = new ChannelGateway({ adapters: [createFakeTelegramAdapter()], runtimeForSession, workspaceStore, sessionStore,
+      isWorkspaceTrusted: async () => { enter(); await barrier; return true; }, authPolicy: { telegram: { allowedUserIds: ["user-1"] } } });
+    const selecting = gateway.receive(makeMessage("/workspace use project"));
+    await entered;
+    try {
+      expect((await gateway.receive(makeMessage("start work"))).replyText).toContain("selection is busy");
+      expect(runtimeForSession).not.toHaveBeenCalled();
+      expect((await gateway.receive(makeMessage("/deny"))).replyText).not.toContain("selection is busy");
+    } finally { finish(); await selecting; }
+  } finally { workspaceStore.close(); await rm(root, { recursive: true, force: true }); }
 });

@@ -1,3 +1,4 @@
+import { currentCronExecutionOrigin } from "./cron-origin.js";
 import { lstat, readdir, readFile } from "node:fs/promises";
 import { isAbsolute, join, relative, resolve } from "node:path";
 import type { CronStore } from "./cron-store.js";
@@ -19,6 +20,10 @@ export async function loadCronContextSources(input: {
   const sources: CronContextSource[] = [];
 
   for (const jobId of input.jobIds) {
+    if (currentCronExecutionOrigin() && !await input.store.get(jobId)) {
+      sources.push({ jobId, skippedReason: "job is outside the authorized origin" });
+      continue;
+    }
     const latest = await latestOutputPath(input.store, jobId);
     if ("skippedReason" in latest) {
       sources.push({ jobId, skippedReason: latest.skippedReason });

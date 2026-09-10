@@ -164,6 +164,7 @@ async function assertFakeBridgeRapidTextsDebounce(homeDir: string): Promise<void
   const gateway = new ChannelGateway({
     adapters: [adapter],
     runtimeForSession: async () => ({
+      sessionDb: { getSessionForProfile: async () => undefined },
       handle: async (input: Parameters<Runtime["handle"]>[0]) => {
         runtimeTexts.push(input.text);
         return {

@@ -1,3 +1,5 @@
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import { mkdtemp, readFile, writeFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -42,5 +44,39 @@ it("does not erase corrupt or unknown state and refuses cross-profile session po
     await expect(cron.list()).rejects.toThrow("Invalid recurring execution origin");
     await expect(cron.create({ prompt: "new", schedule: "every 1h" })).rejects.toThrow();
     expect(await readFile(jobs, "utf8")).toBe(raw);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+it("serializes handoff redemption and pointer writes across OS processes", async () => {
+  const root = await mkdtemp(join(tmpdir(), "channel-processes-"));
+  try {
+    const handoffs = new FileHandoffStore({ path: join(root, "handoffs.json") });
+    const code = await handoffs.create({ sessionId: "shared", surfaceType: "telegram", ttlMinutes: 5 });
+    const worker = join(root, "worker.mjs");
+    await writeFile(worker, `
+      import { FileHandoffStore } from ${JSON.stringify(new URL("./handoff-store.ts", import.meta.url).href)};
+      import { FileSurfacePointerStore } from ${JSON.stringify(new URL("./surface-pointer-store.ts", import.meta.url).href)};
+      const [root, code, id] = process.argv.slice(2);
+      const result = await new FileHandoffStore({ path: root + "/handoffs.json" }).redeem({ code, surfaceType: "telegram", surfaceId: id });
+      await new FileSurfacePointerStore({ path: root + "/pointers.json" }).setPointer("telegram", id, { sessionId: "shared", attachedAt: new Date().toISOString() });
+      process.stdout.write(JSON.stringify(result.ok));
+    `);
+    const results = await Promise.all(Array.from({ length: 4 }, (_, i) => promisify(execFile)(process.execPath,
+      ["--import", "tsx", worker, root, code.code, String(i)], { timeout: 15_000 })));
+    expect(results.filter((result) => result.stdout === "true")).toHaveLength(1);
+    expect(await new FileSurfacePointerStore({ path: join(root, "pointers.json") }).listPointers()).toHaveLength(4);
+    expect((await handoffs.get(code.code))?.redeemed).toBe(true);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+it("publishes complete default session mappings during concurrent channel admission", async () => {
+  const root = await mkdtemp(join(tmpdir(), "channel-session-publication-"));
+  try {
+    const store = new PersistentChannelSessionStore({ homeDir: root, profileId: "work" });
+    const keys = Array.from({ length: 20 }, (_, i) => ({ platform: "telegram", chatId: `chat-${i}` }));
+    const sessions = await Promise.all(keys.map((key) => store.getOrCreateSessionId(key)));
+    const reopened = new PersistentChannelSessionStore({ homeDir: root, profileId: "work" });
+    expect(await Promise.all(keys.map((key) => reopened.getOrCreateSessionId(key)))).toEqual(sessions);
+    expect(new Set(sessions).size).toBe(keys.length);
   } finally { await rm(root, { recursive: true, force: true }); }
 });

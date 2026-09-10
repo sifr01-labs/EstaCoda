@@ -3668,7 +3668,7 @@ export class ChannelGateway {
         if (this.#validateSessionAttachment === undefined) throw new Error("Session ownership validation is unavailable.");
         await this.#validateSessionAttachment(result.handoff.sessionId);
       } catch {
-        const text = "Attach failed: session profile/workspace ownership could not be verified.";
+        const text = "Attach failed: session profile/workspace ownership could not be verified. If it is open in a foreground CLI or editor, let work finish and close that session before creating a new handoff code.";
         await this.#deliverText(adapter, message.sessionKey, text);
         return { sessionId: await this.#sessionStore.getOrCreateSessionId(message.sessionKey), replyText: text, artifactCount: 0, progressCount: 0 };
       }
