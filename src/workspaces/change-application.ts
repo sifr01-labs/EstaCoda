@@ -126,6 +126,7 @@ export class ChangeApplicationStore extends ChangeAuthorizationStore {
         const root = target.source.identity.canonicalPath;
         const conflicts = bundle.changes.filter((change) => !sameFile(snapshot(root, change.path), change.before)).map((change) => change.path);
         if (conflicts.length) return { status: "conflict", artifact, paths: conflicts };
+        if (!bundle.changes.length) return { status: "review", artifact, paths: [], reason: "No changes to apply; this copy remains available for work." };
         const journal: ApplicationJournal = { version: 1, targetId: target.id, artifactId, phase: "applying", steps: bundle.changes.map((change) => ({ path: change.path, phase: "pending",
           temporary: posix.join(posix.dirname(change.path), `.estacoda-apply-${randomUUID()}.tmp`), rollbackTemporary: posix.join(posix.dirname(change.path), `.estacoda-apply-${randomUUID()}.tmp`) })) };
         this.#save(journal); // Durable intent precedes the first filesystem mutation.

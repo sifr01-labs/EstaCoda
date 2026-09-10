@@ -41,3 +41,14 @@ it("exports review-only requests and blocks changed destination containment or t
     expect((await store.finish(target.id, "s")).reason).toContain("trust");
   } finally { store.close(); await f.cleanup(); }
 });
+it("does not consume a copy on a no-change turn before later authorized work", async () => {
+  const f = await copyFixture(), store = new ChangeApplicationStore(f);
+  try {
+    const target = await prepareTemporaryCopy({ ...f, source: "source", manifest: f.input });
+    await store.authorize(target.id, { version: 1, outcome: "apply", paths: [{ path: "hello.bin", operations: ["update"] }] });
+    expect((await store.finish(target.id, "session")).status).toBe("review");
+    await writeFile(join(f.destination, "hello.bin"), "later work");
+    expect((await store.finish(target.id, "session")).status).toBe("applied");
+    expect(await readFile(join(f.source, "hello.bin"), "utf8")).toBe("later work");
+  } finally { store.close(); await f.cleanup(); }
+});

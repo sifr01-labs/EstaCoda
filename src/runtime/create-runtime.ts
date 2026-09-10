@@ -1374,12 +1374,21 @@ async function buildRuntime(options: RuntimeOptions, rollback: ResourceCleanup):
           const changes = new ChangeApplicationStore({ homeDir: options.homeDir, profileId });
           try {
             if (changes.getTarget(current.executionTarget.targetId)?.kind === "temporary-copy") {
+              const unsettled = processManager.list().some((process) => ["prepared", "running"].includes(process.status)) ||
+                subagentRegistry.hasActiveSubagents(current.id) || !!taskStore?.listTasks({ workspaceIdentityHash: current.executionTarget.workspace.identityHash,
+                  statuses: ["planning", "queued", "running", "waiting_for_host", "waiting_for_input", "waiting_for_approval", "paused"], limit: 1 }).length;
+              if (unsettled) {
+                response.finalOutcome.status = "partially_completed";
+                response.text += "\n\nWorkspace changes await settlement of active processes or child work. Use workspace finish after they settle.";
+                return response;
+              }
               await executionOwner.validate(); executionLease.assertActive();
-              const result = await changes.finish(current.executionTarget.targetId, current.id,
+              const completionSessionId = sessionRuntimeContext.currentSessionId();
+              const result = await changes.finish(current.executionTarget.targetId, completionSessionId,
                 async (artifact) => {
                   const event = { kind: "session-artifact-registered" as const, artifact };
-                  await sessionDb.appendEvent(current.id, event);
-                  await artifactStore.hydrateSessionArtifacts({ events: [event], sessionId: current.id, profileId });
+                  await sessionDb.appendEvent(completionSessionId, event);
+                  await artifactStore.hydrateSessionArtifacts({ events: [event], sessionId: completionSessionId, profileId });
                 });
               response.artifacts.push(result.artifact);
               if (["attention", "conflict"].includes(result.status)) response.finalOutcome.status = "partially_completed";

@@ -10,7 +10,7 @@ import { ProviderRegistry } from "../providers/provider-registry.js";
 import { resolveTokens } from "../theme/token-resolver.js";
 import type { ModelProfile, ProviderResponse } from "../contracts/provider.js";
 
-it.each(["apply", "review", "conflict", "remote", "attached"])("real runtime copy workflow: %s", async (outcome) => {
+it.each(["apply", "review", "conflict", "remote", "attached", "busy"])("real runtime copy workflow: %s", async (outcome) => {
   const f = await copyFixture(), changes = new ChangeApplicationStore(f), db = new SQLiteSessionDB({ path: join(f.homeDir, "sessions.sqlite") });
   let runtime: Awaited<ReturnType<typeof createRuntime>> | undefined;
   try {
@@ -35,16 +35,18 @@ it.each(["apply", "review", "conflict", "remote", "attached"])("real runtime cop
       sessionId: "copy-session", sessionMetadata: { originSurface: outcome === "remote" ? "telegram" : "cli" }, sessionDb: db,
       closeSessionDbOnDispose: false, securityMode: "open", workspaceTrusted: true, trustStore: changes.trust,
       executionControls: { providerBudgets: { maxProviderIterations: 8, maxProviderToolCalls: 6, maxProviderWallClockMs: 15000, finalizationReserveMs: 0 } } });
+    if (outcome === "busy") expect((await runtime.executeTool!({ tool: "process.start", toolInput: { command: "sleep 30" } }))?.result?.ok).toBe(true);
     const response = await runtime.handle({ channel: ["remote", "attached"].includes(outcome) ? "telegram" : "cli", text: "Read counter.cjs, fix its increment to add two instead of one using file.patch, then run node verify.cjs to test it.",
       onApprovalRequest: async () => { approvalRequests++; return "denied"; } });
     expect(response.toolExecutions.filter((tool) => tool.result?.ok)).toHaveLength(3);
     expect(approvalRequests).toBe(0);
     expect((await db.getSession("copy-session"))!.executionTarget!.targetId).toBe(target.id);
     expect(await readFile(join(f.source, "counter.cjs"), "utf8")).toBe(outcome === "apply" ? "module.exports = n => n + 2;\n" : outcome === "conflict" ? "user edits\n" : "module.exports = n => n + 1;\n");
-    if (!["remote", "attached"].includes(outcome)) {
+    if (!["remote", "attached", "busy"].includes(outcome)) {
       expect(response.text).toContain(`Workspace changes: ${outcome === "conflict" ? "conflict" : outcome === "apply" ? "applied" : "review"}`);
       expect((await db.listEvents("copy-session")).some((event) => event.kind === "session-artifact-registered")).toBe(true);
     }
-    if (outcome === "conflict") expect(response.finalOutcome?.status).toBe("partially_completed");
+    if (outcome === "busy") expect(response.text).toContain("await settlement");
+    if (outcome === "conflict" || outcome === "busy") expect(response.finalOutcome?.status).toBe("partially_completed");
   } finally { await runtime?.dispose(); db.close(); changes.close(); await f.cleanup(); }
 }, 30000);

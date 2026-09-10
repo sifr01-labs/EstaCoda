@@ -69,7 +69,7 @@ Workspace selection also supplies core-verified host facts for approval scope. A
 
 ## Limits and verification
 
-Core execution uses persisted Session ownership and fences, serialized runtime acquisition, private Unix supervisor control and active authority validation. See [runtime ownership and its limits](runtime-ownership.md). PR 5 adds scoped channel workspace selection and recurring authority. Packaged Desktop integration, managed worktrees, Windows shared control and the remaining release matrix remain separate delivery gates. PR 6 supplies [optional Docker containment](docker-execution.md).
+Core execution uses persisted Session ownership and fences, serialized runtime acquisition, private Unix supervisor control and active authority validation. See [runtime ownership and its limits](runtime-ownership.md). PR 5 adds scoped channel workspace selection and recurring authority. Packaged Desktop integration, managed worktrees, Windows shared control and the remaining release matrix remain separate delivery gates. PR 6 supplies [optional Docker containment](docker-execution.md). PR 7 adds [temporary-copy targets and authorized application](temporary-copies.md); the first copy advances the profile workspace database to version 2.
 
 Coverage includes independent-process alias/move/target/Session races, legacy database reopening, canonical path aliases, trust separation, immutable Session/Task bindings, CLI and channel pointer preservation, and ACP rejection before transcript replay. The session-continuation smoke case uses real temporary directories and SQLite targets. These are local deterministic tests, not live-provider, Desktop or multi-tenant isolation evidence.
 
