@@ -1,3 +1,5 @@
+import { DOCKER_DEFAULT_LIMITS, dockerLimits, verifyDockerCgroups, CGROUP_PROBE, type DockerLimits } from "./docker-limits.js";
+export { DOCKER_DEFAULT_LIMITS } from "./docker-limits.js";
 import { fileURLToPath } from "node:url";
 import { randomUUID, createHash } from "node:crypto";
 import { lstat, opendir, realpath } from "node:fs/promises";
@@ -12,13 +14,12 @@ import { resolveGlobalStateHome } from "../config/profile-home.js";
 
 export type DockerReceipt = { name: string; owner: string; id?: string };
 export const DOCKER_OWNER_LABEL = "io.estacoda.execution.owner";
-export const DOCKER_DEFAULT_LIMITS = Object.freeze({ cpu: 1, memoryBytes: 512 * 1024 * 1024, pids: 128, outputBytes: 4 * 1024 * 1024, timeoutMs: 120_000 });
 export type DockerExecutionFacts = {
   schemaVersion: 1; backend: "docker"; environmentInstanceId: string; workspace: WorkspaceIdentity;
   workspaceAccess: "read-only" | "read-write"; filesystemContainment: true;
   commandNetwork: "disabled" | "unrestricted"; networkContainment: boolean;
   credentialIsolation: "no-host-process-environment"; lifetime: "session";
-  limits: Readonly<typeof DOCKER_DEFAULT_LIMITS>; imageId: string; user: string;
+  limits: DockerLimits; imageId: string; user: string;
   policyRevision: "docker-v1"; verificationGeneration: 1; verifiedAt: string; advisoryDegradations: readonly string[];
 };
 const issued = new WeakSet<object>();
@@ -42,12 +43,14 @@ export class DockerContainer {
   readonly workspace: WorkspaceIdentity;
   readonly policy: RequestedExecutionPolicy;
   readonly degradations: string[] = [];
+  readonly limits: DockerLimits;
   #id?: string;
   #released = false;
   #facts?: Readonly<DockerExecutionFacts>;
   private constructor(input: { client: DockerClient; profileId: string; workspace: WorkspaceIdentity; policy: RequestedExecutionPolicy; receipt?: DockerReceipt }) {
     this.name = input.receipt?.name ?? `estacoda-exec-${randomUUID()}`; this.owner = input.receipt?.owner ?? randomUUID();
     if (!/^estacoda-exec-[a-f0-9-]{36}$/u.test(this.name) || !/^[a-f0-9-]{36}$/u.test(this.owner)) throw new Error("Invalid Docker ownership receipt.");
+    const negotiated = dockerLimits(input.policy); this.limits = negotiated.limits; this.degradations.push(...negotiated.degradations);
     this.client = input.client; this.profileId = input.profileId; this.workspace = input.workspace; this.policy = input.policy;
   }
   get id(): string { if (!this.#id || this.#released) throw new Error("Docker lease is unavailable."); return this.#id; }
@@ -59,7 +62,7 @@ export class DockerContainer {
     await assertSafeDockerWorkspace(workspace.canonicalPath, input.homeDir);
     const client = input.client ?? await DockerClient.connect();
     const container = new DockerContainer({ client, profileId: input.profileId, workspace, policy, receipt: input.receipt });
-    for (const key of ["lifetime", "credentialCapabilities", "limits"] as const) {
+    for (const key of ["lifetime", "credentialCapabilities"] as const) {
       const control = policy[key];
       if (!control || (key === "lifetime" && control.value === "session") || (key === "credentialCapabilities" && Array.isArray(control.value) && control.value.length === 0)) continue;
       if (control.requirement === "mandatory") throw new Error(`Docker cannot yet verify requested ${key}.`);
@@ -78,7 +81,7 @@ export class DockerContainer {
       const facts: Readonly<DockerExecutionFacts> = Object.freeze({ schemaVersion: 1, backend: "docker", environmentInstanceId: id,
         workspace: Object.freeze(workspace), workspaceAccess: policy.workspaceAccess?.value ?? "read-write", filesystemContainment: true,
         commandNetwork: policy.commandNetwork?.value ?? "disabled", networkContainment: policy.commandNetwork?.value !== "unrestricted",
-        credentialIsolation: "no-host-process-environment", lifetime: "session", limits: DOCKER_DEFAULT_LIMITS,
+        credentialIsolation: "no-host-process-environment", lifetime: "session", limits: container.limits,
         imageId: policy.imageId!, user: container.user, policyRevision: "docker-v1", verificationGeneration: 1,
         verifiedAt: new Date().toISOString(), advisoryDegradations: Object.freeze(container.degradations) });
       issued.add(facts); container.#facts = facts;
@@ -95,14 +98,15 @@ export class DockerContainer {
       "--user", this.user, "--workdir", root, "--read-only", "--cap-drop=ALL", "--security-opt=no-new-privileges:true",
       "--network", this.policy.commandNetwork?.value === "unrestricted" ? "bridge" : "none", "--ipc=private", "--cgroupns=private",
       "--mount", `type=bind,source=${root},target=${root},bind-recursive=disabled${this.policy.workspaceAccess?.value === "read-only" ? ",readonly" : ""}`,
-      "--tmpfs", "/tmp:rw,nosuid,nodev,size=67108864,mode=1777", "--shm-size=16777216", "--memory", String(DOCKER_DEFAULT_LIMITS.memoryBytes),
-      "--memory-swap", String(DOCKER_DEFAULT_LIMITS.memoryBytes), "--cpus", String(DOCKER_DEFAULT_LIMITS.cpu), "--pids-limit", String(DOCKER_DEFAULT_LIMITS.pids),
+      "--tmpfs", "/tmp:rw,nosuid,nodev,size=67108864,mode=1777", "--shm-size=16777216", "--memory", String(this.limits.memoryBytes),
+      "--memory-swap", String(this.limits.memoryBytes), "--cpus", String(this.limits.cpu), "--pids-limit", String(this.limits.pids),
       "--restart=no", "--env", "HOME=/tmp", this.policy.imageId!];
   }
   async verify(): Promise<void> {
     const record = JSON.parse(await this.client.run(["inspect", this.id]))[0];
     verifyDockerInspection(record, { id: this.id, owner: this.owner, workspaceRoot: this.workspace.canonicalPath, imageId: this.policy.imageId!, user: this.user,
-      writable: this.policy.workspaceAccess?.value !== "read-only", network: this.policy.commandNetwork?.value === "unrestricted" ? "bridge" : "none" });
+      limits: this.limits, writable: this.policy.workspaceAccess?.value !== "read-only", network: this.policy.commandNetwork?.value === "unrestricted" ? "bridge" : "none" });
+    verifyDockerCgroups(JSON.parse(await this.client.run(["exec", "--user", this.user, this.id, "python3", "-c", CGROUP_PROBE])), this.limits);
     const current = await resolveWorkspaceDirectory(this.workspace.canonicalPath);
     if (current.identityHash !== this.workspace.identityHash) throw new Error("Docker workspace identity changed.");
   }
@@ -113,7 +117,8 @@ export class DockerContainer {
   }
 }
 
-export function verifyDockerInspection(record: any, expected: { id: string; owner: string; workspaceRoot: string; imageId: string; user: string; writable: boolean; network: string }): void {
+export function verifyDockerInspection(record: any, expected: { id: string; owner: string; workspaceRoot: string; imageId: string; user: string; writable: boolean; network: string; limits?: DockerLimits }): void {
+  const limits = expected.limits ?? DOCKER_DEFAULT_LIMITS;
   const host = record?.HostConfig, config = record?.Config, mounts = record?.Mounts;
   if (record?.Id !== expected.id || !record.State?.Running || record.Image !== expected.imageId || config?.User !== expected.user || config.Labels?.[DOCKER_OWNER_LABEL] !== expected.owner ||
     !host?.ReadonlyRootfs || host.Privileged || (host.CapAdd ?? []).length || !(host.CapDrop ?? []).includes("ALL") ||
@@ -126,7 +131,7 @@ export function verifyDockerInspection(record: any, expected: { id: string; owne
     host.NetworkMode !== expected.network || Object.keys(record.NetworkSettings?.Networks ?? {}).some((n) => n !== expected.network) ||
     !Array.isArray(mounts) || mounts.length !== 1 || mounts[0].Type !== "bind" || mounts[0].Source !== expected.workspaceRoot || mounts[0].Destination !== expected.workspaceRoot || mounts[0].RW !== expected.writable || mounts[0].Propagation !== "rprivate" ||
     host.Mounts?.length !== 1 || host.Mounts[0].BindOptions?.NonRecursive !== true ||
-    host.Memory !== DOCKER_DEFAULT_LIMITS.memoryBytes || host.MemorySwap !== DOCKER_DEFAULT_LIMITS.memoryBytes || host.NanoCpus !== DOCKER_DEFAULT_LIMITS.cpu * 1e9 || host.PidsLimit !== DOCKER_DEFAULT_LIMITS.pids) throw new Error("Docker effective controls differ from approved policy.");
+    host.Memory !== limits.memoryBytes || host.MemorySwap !== limits.memoryBytes || host.NanoCpus !== Math.round(limits.cpu * 1e9) || host.PidsLimit !== limits.pids) throw new Error("Docker effective controls differ from approved policy.");
 }
 
 export async function assertSafeDockerWorkspace(root: string, homeDir?: string): Promise<void> {

@@ -38,14 +38,14 @@ export async function probeDocker(client?: DockerClient): Promise<{ available: b
   try {
     client ??= await DockerClient.connect();
     const server = JSON.parse(await client.run(["info", "--format", "{{json .}}"], 5_000));
-    if (server.OSType !== "linux" || !(server.SecurityOptions ?? []).some((s: string) => s.startsWith("name=seccomp"))) throw new Error("Docker requires Linux containers and an enabled seccomp profile.");
+    if (server.OSType !== "linux" || String(server.CgroupVersion) !== "2" || !(server.SecurityOptions ?? []).some((s: string) => s.startsWith("name=seccomp"))) throw new Error("Docker requires Linux containers, cgroup v2 and an enabled seccomp profile.");
     let imageId: string | undefined;
     try {
       const image = JSON.parse(await client.run(["image", "inspect", DOCKER_IMAGE_TAG]))[0];
       if (image.Config?.Labels?.[DOCKER_IMAGE_LABEL] === "1" && /^sha256:[a-f0-9]{64}$/u.test(image.Id)) imageId = image.Id;
     } catch { /* Image provisioning is a separate reviewed operation. */ }
     return { available: true, imageId };
-  } catch { return { available: false, blocker: "Local Docker with Linux containers and seccomp is unavailable. Start or repair Docker; Local host remains available." }; }
+  } catch { return { available: false, blocker: "Local Docker with Linux containers, cgroup v2 and seccomp is unavailable. Start or repair Docker; Local host remains available." }; }
 }
 /** Called only by an approved setup apply operation; never during execution acquisition. */
 export async function provisionDockerImage(): Promise<string> {
