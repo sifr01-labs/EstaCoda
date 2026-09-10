@@ -51,6 +51,8 @@ Keyboard access, visible focus, named icon actions, Escape/focus restoration, re
 
 ## Review and remaining gates
 
+The [threat model](threat-model.md) maps renderer, service, provider and channel attacks to required controls and their implementing PRs.
+
 PR 1 establishes decisions and the minimal package boundary; it cannot prove Electron sandboxing, staged credential isolation, two-window behavior, or packaged quit/relaunch. Those need actual process tests in PRs 2–5 and packaged release validation. The early bridge/supervisor lifecycle proof belongs to PRs 3–5; no shell or service is claimed here merely because Milestone 0 lists that proof as a prerequisite for later UI delivery.
 
 Risk: downstream code could confuse a client bridge or a display projection with an authority owner. Review subsequent implementations against this matrix and the shared conformance cases. PR 1 changes no storage schema, grants, profile configuration, services, or execution lifetime.
