@@ -1,3 +1,4 @@
+import { currentCronExecutionOrigin } from "../cron/cron-origin.js";
 import type { RegisteredTool, RuntimeToolProvider } from "../contracts/tool.js";
 import { CronStore } from "../cron/cron-store.js";
 import { renderPlain } from "../ui/renderers/plain-renderer.js";
@@ -133,7 +134,7 @@ export function createCronTools(options: {
           schedule: input.schedule,
           name: input.name,
           skills: normalizeSkills(input),
-          delivery: input.delivery ?? "local",
+          delivery: input.delivery ?? (currentCronExecutionOrigin() ? "origin" : "local"),
           repeat: input.repeat
         });
         return { ok: true, content: `Created cron job ${job.id}: ${job.name}\nNext run: ${job.nextRunAt ?? "none"}` };

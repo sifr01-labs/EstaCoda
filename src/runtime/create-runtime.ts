@@ -147,6 +147,8 @@ function normalizeTaskCreationOrigin(origin: TaskCreationOrigin | undefined): Ta
 }
 
 export type RuntimeOptions = {
+  /** Additional live origin authority supplied by a trusted execution surface. */
+  validateExecutionAuthority?: () => Promise<void>;
   requestedExecutionPolicy?: RequestedExecutionPolicy;
   allowLegacyLocalBinding?: boolean;
   sourceWorkspace?: import("../contracts/workspace.js").SourceWorkspaceBinding;
@@ -495,7 +497,8 @@ async function buildRuntime(options: RuntimeOptions, rollback: ResourceCleanup):
     homeDir: options.homeDir
   });
   const trustStore = options.trustStore ?? new WorkspaceTrustStore({ path: options.trustStorePath, homeDir: options.homeDir });
-  const validateLiveAuthority = await createLiveAuthority({ profileRoot: profilePaths.profileRoot, workspaceRoot, trustStore });
+  const validateProfileAuthority = await createLiveAuthority({ profileRoot: profilePaths.profileRoot, workspaceRoot, trustStore });
+  const validateLiveAuthority = async () => { await validateProfileAuthority(); await options.validateExecutionAuthority?.(); };
   executionOwner.setValidator(validateLiveAuthority, () => executionLease.release());
   const cronStore = options.cronStore ?? new CronStore({
     path: join(profilePaths.cronPath, "jobs.json"),

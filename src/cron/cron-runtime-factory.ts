@@ -1,3 +1,4 @@
+import { recurringCronRuntimeOptions } from "./cron-authority.js";
 import type { SessionDB } from "../contracts/session.js";
 import { loadRuntimeConfig } from "../config/runtime-config.js";
 import { createRuntime, type Runtime, type RuntimeOptions } from "../runtime/create-runtime.js";
@@ -27,6 +28,8 @@ export async function createIsolatedCronRuntime(input: {
   const primaryModelRoute = await resolveCronModelRoute({ job: input.job, latestConfig });
 
   return factory({
+    ...await recurringCronRuntimeOptions(input.job, { profileId: input.profileId, homeDir: input.homeDir, sessionId: input.context.sessionId }),
+    closeSessionDbOnDispose: input.sessionDb === undefined,
     tokens: resolveTokens("standard", "dark", "kemetBlue"),
     model: primaryModelRoute?.profile ?? latestConfig.model,
     primaryModelRoute,

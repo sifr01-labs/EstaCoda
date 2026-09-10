@@ -1,3 +1,4 @@
+import type { SecurityRequest } from "../contracts/security.js";
 import { hasApprovalGrant, approvalAuthorityRevision, recordApprovalRevocation, readApprovalFile, updateApprovalFile, type ApprovalAuthority } from "../security/approval-file.js";
 import { sameReusableAuthority, validApprovalScope, type ApprovalExecutionScope } from "../security/approval-scope.js";
 import { join } from "node:path";
@@ -40,6 +41,11 @@ export class ChannelApprovalStore {
 
   async listForSession(sessionKey: ChannelSessionKey): Promise<PersistedApprovalGrant[]> {
     return readApprovalFile(this.#path, isGrant).grants.filter((grant) => matchesSessionScope(grant, sessionKey));
+  }
+  async findReusableGrant(request: SecurityRequest): Promise<PersistedApprovalGrant | undefined> {
+    return (await this.listAll()).find((grant) => Number.isSafeInteger(grant.authorizationGeneration) && grant.authorizationGeneration! > 0 &&
+      sameReusableAuthority(grant.executionScope, request.executionScope) && grant.toolName === request.toolName &&
+      grant.riskClass === request.riskClass && grant.targetKey === request.targetKey);
   }
   async listAll(): Promise<PersistedApprovalGrant[]> { return readApprovalFile(this.#path, isGrant).grants; }
   revision(authority?: ApprovalAuthority): number { return approvalAuthorityRevision(readApprovalFile(this.#path, isGrant), authority); }

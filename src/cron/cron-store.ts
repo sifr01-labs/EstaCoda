@@ -1,3 +1,4 @@
+import { currentCronExecutionOrigin, parseCronExecutionOrigin, sameCronExecutionOrigin, type CronExecutionOrigin } from "./cron-origin.js";
 import { randomUUID } from "node:crypto";
 import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -9,6 +10,7 @@ export type CronDelivery = "local" | "origin" | string;
 export type CronScheduleKind = "once" | "interval" | "cron";
 
 export type CronJob = {
+  executionOrigin?: CronExecutionOrigin;
   id: string;
   name: string;
   prompt: string;
@@ -69,7 +71,8 @@ export class CronStore {
   }
 
   async list(): Promise<CronJob[]> {
-    return (await this.#load()).jobs;
+    const origin = currentCronExecutionOrigin();
+    return (await this.#load()).jobs.filter((job) => !origin || sameCronExecutionOrigin(origin, job.executionOrigin));
   }
 
   async get(id: string): Promise<CronJob | undefined> {
@@ -93,12 +96,19 @@ export class CronStore {
     repeat?: number;
     origin?: CronJob["origin"];
   }): Promise<CronJob> {
+    const executionOrigin = currentCronExecutionOrigin();
+    if (executionOrigin && input.delivery !== undefined && !["local", "origin"].includes(input.delivery)) throw new Error("Channel recurring work can deliver only locally or to its authorized origin. Configure other recipients through the local operator flow.");
+    if (executionOrigin && input.workdir !== undefined && input.workdir !== executionOrigin.target.workspace.canonicalPath) throw new Error("Recurring work must keep its authorized workspace.");
+    if (executionOrigin) input = { ...input, workdir: executionOrigin.target.workspace.canonicalPath,
+      origin: { channel: executionOrigin.sessionKey.platform, chatId: executionOrigin.sessionKey.chatId,
+        userId: executionOrigin.principalId, threadId: executionOrigin.sessionKey.threadId } };
     assertCronPromptSafe(input.prompt);
     validateCronJobShape(input);
     const now = this.#now().toISOString();
     const parsed = parseCronSchedule(input.schedule, this.#now());
     const job: CronJob = {
       id: `cron-${this.#id()}`,
+      ...(executionOrigin ? { executionOrigin } : {}),
       name: input.name ?? summarizePrompt(input.prompt),
       prompt: input.prompt,
       ...(input.noAgent === true ? { noAgent: true } : {}),
@@ -278,8 +288,9 @@ export class CronStore {
       return {
         jobs: Array.isArray(parsed.jobs) ? parsed.jobs.map(normalizeJob) : []
       };
-    } catch {
-      return { jobs: [] };
+    } catch (error) {
+      if ((error as NodeJS.ErrnoException).code === "ENOENT") return { jobs: [] };
+      throw error;
     }
   }
 
@@ -292,9 +303,18 @@ export class CronStore {
 
   async #mutate(fn: (jobs: CronJob[]) => CronJob[]): Promise<void> {
     const snapshot = await this.#load();
-    await this.#save({
-      jobs: fn(snapshot.jobs).map((job) => structuredClone(job))
-    });
+    const next = fn(snapshot.jobs).map((job) => structuredClone(job));
+    const origin = currentCronExecutionOrigin();
+    if (origin) {
+      for (const job of snapshot.jobs) {
+        if (!sameCronExecutionOrigin(origin, job.executionOrigin) && JSON.stringify(next.find((candidate) => candidate.id === job.id)) !== JSON.stringify(job)) throw new Error("Recurring job belongs to another authorized surface or workspace.");
+      }
+    }
+    for (const job of next) if (job.executionOrigin) {
+      if (job.workdir !== job.executionOrigin.target.workspace.canonicalPath) throw new Error("Recurring work cannot change its execution target. Create new work explicitly.");
+      if (!["local", "origin"].includes(job.delivery)) throw new Error("Recurring delivery exceeds its authorized origin.");
+    }
+    await this.#save({ jobs: next });
   }
 }
 
@@ -381,6 +401,7 @@ function cronFieldMatches(field: string, value: number, min: number, max: number
 }
 
 function normalizeJob(job: CronJob): CronJob {
+  if (job.executionOrigin !== undefined) parseCronExecutionOrigin(job.executionOrigin);
   const normalized = {
     ...job,
     scriptArgs: Array.isArray(job.scriptArgs) ? job.scriptArgs : undefined,

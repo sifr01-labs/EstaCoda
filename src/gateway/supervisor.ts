@@ -1,3 +1,6 @@
+import { recurringCronRuntimeOptions } from "../cron/cron-authority.js";
+import { withCronExecutionOrigin } from "../cron/cron-origin.js";
+import { runCronCommand } from "../cron/cron-command.js";
 import { processDefinitelyAbsent } from "../session/execution-ownership.js";
 import { ChannelWorkspaceStore } from "../channels/channel-workspace-store.js";
 import { ensureRuntimeSession } from "../session/session-workspace-ownership.js";
@@ -55,8 +58,8 @@ import {
 } from "../session/session-finalization-queue.js";
 import { resolveTokens } from "../theme/token-resolver.js";
 import { ChannelApprovalStore } from "../channels/channel-approval-store.js";
-import { ChannelGateway, telegramGatewayCommands } from "../channels/channel-gateway.js";
-import { PersistentChannelSessionStore } from "../channels/channel-session-store.js";
+import { type ChannelGatewayOptions, ChannelGateway, telegramGatewayCommands } from "../channels/channel-gateway.js";
+import { PersistentChannelSessionStore, normalizeSessionKey } from "../channels/channel-session-store.js";
 import { DeliveryRouter } from "../channels/delivery-router.js";
 import { sendGatewayLifecycleNotification } from "../channels/gateway-lifecycle-notifications.js";
 import { GATEWAY_HYGIENE_THRESHOLD, SessionHygieneService } from "../channels/session-hygiene-service.js";
@@ -1496,6 +1499,18 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
       const session = await sessionDb.getSessionForProfile(sessionId, profileId);
       return session?.executionTarget?.workspace.canonicalPath ?? options.workspaceRoot;
     };
+    const channelCronCommand: NonNullable<ChannelGatewayOptions["cronCommand"]> = async (args, message, sessionId) => {
+      const workspaceRoot = await channelWorkspaceRoot(sessionId);
+      if (!await trustStore.isTrusted(workspaceRoot)) return { ok: false, output: "Trust the selected workspace through setup before creating recurring work." };
+      await ensureRuntimeSession({ sessionDb, sessionId, profileId, homeDir, durable: true, workspaceRoot, metadata: { originSurface: "channel" } });
+      const session = (await sessionDb.getSessionForProfile(sessionId, profileId))!;
+      return withCronExecutionOrigin({ schemaVersion: 1, profileId, target: session.executionTarget!,
+        sessionKey: normalizeSessionKey(message.sessionKey, sessionPolicy), principalId: message.sender.id,
+        guildId: typeof message.metadata?.guildId === "string" ? message.metadata.guildId : undefined }, () => runCronCommand({
+          args, store: cronStore, defaultDelivery: "origin", workdirControls: { defaultWorkspaceRoot: workspaceRoot,
+            allowedRoots: [workspaceRoot], isWorkspaceTrusted: (path) => trustStore.isTrusted(path) }
+        }));
+    };
     const gatewaySecurityAssessor = await buildGatewaySecurityAssessorConfig(config, sessionDb);
     if (gatewaySecurityAssessor.providerExecutor instanceof ProviderExecutor) {
       state.providerExecutors.add(gatewaySecurityAssessor.providerExecutor);
@@ -1601,6 +1616,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           homeDir,
           sessionStore: channelSessionStore,
           workspaceStore: channelWorkspaceStore,
+          cronCommand: channelCronCommand,
           isWorkspaceTrusted: (path) => trustStore.isTrusted(path),
           approvalStore,
           authPolicy: authPolicies,
@@ -1692,6 +1708,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           homeDir,
           sessionStore: channelSessionStore,
           workspaceStore: channelWorkspaceStore,
+          cronCommand: channelCronCommand,
           isWorkspaceTrusted: (path) => trustStore.isTrusted(path),
           approvalStore,
           authPolicy: authPolicies,
@@ -1881,14 +1898,14 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           runner: createRuntimeCronRunner({
               scriptExecution: { profileId, homeDir, sessionDb },
           deliver: async (job, content) => {
-            const originKey = job.origin?.channel === "telegram" && job.origin.chatId !== undefined
+            const originKey = job.executionOrigin?.sessionKey ?? (job.origin?.channel === "telegram" && job.origin.chatId !== undefined
               ? {
                   platform: "telegram" as const,
                   chatId: job.origin.chatId,
                   userId: job.origin.userId,
                   threadId: job.origin.threadId,
                 }
-              : undefined;
+              : undefined);
             const fallbackSessionKey = originKey ?? {
               platform: "telegram" as const,
               chatId: job.origin?.chatId ?? "cron",
@@ -1908,7 +1925,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           store: cronStore,
           runtimeFactory: async (job, context) => {
             const latestConfig = await loadConfig();
-            return createRuntime(await buildGatewayCronRuntimeOptions({
+            return createRuntime({ ...await buildGatewayCronRuntimeOptions({
               latestConfig,
               job,
               workspaceRoot: context.workspaceRoot ?? options.workspaceRoot,
@@ -1917,7 +1934,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
               sessionDb,
               sessionId: context.sessionId,
               workspaceTrusted: context.trustedWorkspace
-            }));
+            }), closeSessionDbOnDispose: false, ...await recurringCronRuntimeOptions(job, { profileId, homeDir, sessionId: context.sessionId }) });
           },
         }),
       });

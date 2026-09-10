@@ -1,3 +1,4 @@
+import { validateCronAuthority, recurringCronRuntimeOptions } from "./cron-authority.js";
 import { acquireRuntimeContext } from "../runtime/runtime-acquisition.js";
 import { ResourceCleanup } from "../execution/resource-cleanup.js";
 import type { HostExecutionLease } from "../execution/host-environment.js";
@@ -255,6 +256,18 @@ export function createRuntimeCronRunner(input: {
   return {
     async runJob(job, runInput) {
       const executionId = runInput?.executionId;
+      if (job.executionOrigin !== undefined) {
+        try {
+          if (!input.scriptExecution) throw new Error("Recurring execution requires a selected profile context.");
+          await validateCronAuthority(job, input.scriptExecution);
+        } catch (error) { return blockedCronRunResult({ job, executionId, message: error instanceof Error ? error.message : "Recurring execution authority is unavailable." }); }
+      }
+      const deliver = async (content: string) => {
+        if (job.executionOrigin) {
+          try { await validateCronAuthority(job, input.scriptExecution!); } catch { return false; }
+        }
+        return input.deliver?.(job, content);
+      };
       const userPromptAssessment = assessCronUserPromptSafety(job.prompt);
       if (!userPromptAssessment.ok) {
         return blockedCronRunResult({
@@ -266,7 +279,7 @@ export function createRuntimeCronRunner(input: {
       const workdir = await resolveCronWorkdir({
         requestedWorkdir: job.workdir,
         defaultWorkspaceRoot: input.workspaceRoot ?? process.cwd(),
-        allowedRoots: input.allowedWorkdirRoots ?? (input.workspaceRoot === undefined ? [process.cwd()] : [input.workspaceRoot]),
+        allowedRoots: job.executionOrigin ? [job.executionOrigin.target.workspace.canonicalPath] : input.allowedWorkdirRoots ?? (input.workspaceRoot === undefined ? [process.cwd()] : [input.workspaceRoot]),
         isWorkspaceTrusted: input.isWorkspaceTrusted ?? (async () => false)
       });
       if (!workdir.ok) {
@@ -293,7 +306,7 @@ export function createRuntimeCronRunner(input: {
 
       if (job.noAgent === true) {
         const decision = renderNoAgentOutput(job, redactedScriptResult ?? failedScript("no-agent cron jobs require a script"), input.wrapResponse ?? true);
-        const rawDelivery = decision.deliveryContent === undefined ? undefined : await input.deliver?.(job, decision.deliveryContent);
+        const rawDelivery = decision.deliveryContent === undefined ? undefined : await deliver(decision.deliveryContent);
         const deliveryResult: CronDeliveryResult = typeof rawDelivery === "boolean"
           ? { success: rawDelivery, perTarget: new Map() }
           : (decision.deliveryContent === undefined ? { success: true, perTarget: new Map() } : (rawDelivery ?? { success: false, perTarget: new Map() }));
@@ -311,7 +324,7 @@ export function createRuntimeCronRunner(input: {
       if (redactedScriptResult !== undefined && !redactedScriptResult.ok) {
         const classified = classifyCronScriptFailure(redactedScriptResult.summary, redactedScriptResult.timedOut);
         const content = formatCronOutput(job, `Cron script failed: ${redactedScriptResult.summary}\n\n${renderScriptResult(redactedScriptResult)}`, input.wrapResponse ?? true);
-        const rawDelivery = await input.deliver?.(job, content);
+        const rawDelivery = await deliver(content);
         const deliveryResult: CronDeliveryResult = typeof rawDelivery === "boolean"
           ? { success: rawDelivery, perTarget: new Map() }
           : (rawDelivery ?? { success: false, perTarget: new Map() });
@@ -389,7 +402,7 @@ export function createRuntimeCronRunner(input: {
         }
         const content = formatCronOutput(job, response.text, input.wrapResponse ?? true);
         const silent = response.text.trimStart().startsWith("[SILENT]");
-        const rawDelivery = silent ? undefined : await input.deliver?.(job, content);
+        const rawDelivery = silent ? undefined : await deliver(content);
         const deliveryResult: CronDeliveryResult = typeof rawDelivery === "boolean"
           ? { success: rawDelivery, perTarget: new Map() }
           : (silent ? { success: true, perTarget: new Map<string, { success: boolean; error?: string }>() } : (rawDelivery ?? { success: false, perTarget: new Map() }));
@@ -406,7 +419,7 @@ export function createRuntimeCronRunner(input: {
         const message = error instanceof Error ? error.message : String(error);
         const failure = classifyCronFailure({ runtimeError: message });
         const content = formatCronOutput(job, `Cron job failed: ${message}`, input.wrapResponse ?? true);
-        const rawDelivery = await input.deliver?.(job, content);
+        const rawDelivery = await deliver(content);
         const deliveryResult: CronDeliveryResult = typeof rawDelivery === "boolean"
           ? { success: rawDelivery, perTarget: new Map() }
           : (rawDelivery ?? { success: false, perTarget: new Map() });
@@ -729,8 +742,9 @@ async function runCronScript(job: CronJob, context: CronRunContext, execution: C
     const db = execution.sessionDb ?? await createSQLiteSessionDB({ homeDir: execution.homeDir });
     if (!execution.sessionDb) cleanup.afterRelease(async () => { await (db as { close?: () => void | Promise<void> }).close?.(); });
     try {
+      const originOptions = await recurringCronRuntimeOptions(job, { ...execution, sessionId: context.sessionId });
       const acquired = await acquireRuntimeContext({ options: {
-        workspaceRoot, homeDir: execution.homeDir, profileId: execution.profileId, sessionMetadata: { originSurface: "cron", cronJobId: job.id, cronExecutionId: context.executionId }
+        ...originOptions, workspaceRoot, homeDir: execution.homeDir, profileId: execution.profileId, sessionMetadata: { originSurface: "cron", cronJobId: job.id, cronExecutionId: context.executionId }
       }, sessionDb: db, sessionId: context.sessionId, rollback: cleanup });
       const live = await createLiveAuthority({
         profileRoot: resolveProfileStateHome(execution).profileRoot, workspaceRoot,
@@ -739,6 +753,7 @@ async function runCronScript(job: CronJob, context: CronRunContext, execution: C
       acquired.executionOwner.setValidator(async () => {
         if (!await isTrusted(workspaceRoot)) throw new Error("Cron workspace trust was revoked.");
         await live();
+        await validateCronAuthority(job, execution);
       }, () => acquired.executionLease.release());
       try {
         return await acquired.executionOwner.run(async () => {

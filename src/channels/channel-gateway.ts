@@ -1,3 +1,4 @@
+import { withCronExecutionOrigin, type CronExecutionOrigin } from "../cron/cron-origin.js";
 import { channelSurfaceId, type ChannelWorkspaceStore } from "./channel-workspace-store.js";
 import { withDispatchAuthorization, validateDispatchAuthorization } from "../security/dispatch-authorization.js";
 import { assertPendingAction, createPendingAction, securityActionKey, type PendingActionApproval } from "../security/pending-action-approval.js";
@@ -224,6 +225,7 @@ export type ChannelSessionStore = {
 
 export type ChannelGatewayOptions = {
   workspaceStore?: ChannelWorkspaceStore;
+  cronCommand?: (args: string[], message: ChannelMessage, sessionId: string) => Promise<{ ok: boolean; output: string }>;
   isWorkspaceTrusted?: (path: string) => Promise<boolean>;
   approvalScopeForSession?: (sessionId: string) => Promise<ApprovalExecutionScope>;
   /** Core ownership validation before attaching an existing Session. Absent fails closed. */
@@ -467,6 +469,7 @@ export class ChannelGateway {
   readonly #runtimeForSession: ChannelRuntimeFactory;
   readonly #sessionStore: ChannelSessionStore;
   readonly #workspaceStore?: ChannelWorkspaceStore;
+  readonly #cronCommand: ChannelGatewayOptions["cronCommand"];
   readonly #isWorkspaceTrusted?: (path: string) => Promise<boolean>;
   readonly #selectionLocks = new Set<string>();
   readonly #admitting = new Map<string, number>();
@@ -550,6 +553,7 @@ export class ChannelGateway {
   constructor(options: ChannelGatewayOptions) {
     this.#runtimeForSession = options.runtimeForSession;
     this.#workspaceStore = options.workspaceStore;
+    this.#cronCommand = options.cronCommand;
     this.#isWorkspaceTrusted = options.isWorkspaceTrusted;
     this.#sessionStore = options.sessionStore ?? new InMemoryChannelSessionStore();
     this.#authPolicy = options.authPolicy ?? {};
@@ -2341,9 +2345,13 @@ export class ChannelGateway {
         }
       });
       const taskCreationOrigin = this.#taskCreationOrigin(normalizedSessionKey, message.sender.id);
-      const response = runtime.withTaskCreationOrigin === undefined
-        ? await handleTurn()
-        : await runtime.withTaskCreationOrigin(taskCreationOrigin, handleTurn);
+      const session = await runtime.sessionDb.getSessionForProfile(sessionId, this.#profileId);
+      const cronOrigin: CronExecutionOrigin | undefined = session?.executionTarget ? {
+        schemaVersion: 1, profileId: this.#profileId, target: session.executionTarget, sessionKey: normalizedSessionKey,
+        principalId: message.sender.id, guildId: typeof message.metadata?.guildId === "string" ? message.metadata.guildId : undefined
+      } : undefined;
+      const response = await withCronExecutionOrigin(cronOrigin, () => runtime!.withTaskCreationOrigin === undefined
+        ? handleTurn() : runtime!.withTaskCreationOrigin(taskCreationOrigin, handleTurn));
       sessionId = await this.#consumeRuntimeRotation({
         runtime,
         sessionKey: message.sessionKey,
@@ -3777,9 +3785,9 @@ export class ChannelGateway {
 
     if (command === "/cron") {
       const sessionId = await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt });
-      const result = await runCronCommand({
+      const result = this.#cronCommand ? await this.#cronCommand(tokenizeCommandArgs(message.text).slice(1), message, sessionId) : await runCronCommand({
         args: tokenizeCommandArgs(message.text).slice(1),
-        store: new CronStore(),
+        store: new CronStore({ path: join(resolveProfileStateHome({ homeDir: this.#homeDir, profileId: this.#profileId }).cronPath, "jobs.json") }),
         origin: originFromSessionKey(message.sessionKey, message.channel),
         defaultDelivery: "origin"
       });
@@ -4933,7 +4941,7 @@ export class ChannelGateway {
               : "medium"
           } as const;
         }
-        const persistentGrant = (await this.#approvalStore.listForSession(sessionKey)).find((grant) => Number.isSafeInteger(grant.authorizationGeneration) && grant.authorizationGeneration! > 0 && sameReusableAuthority(grant.executionScope, request.executionScope) && matchesPersistentApproval(grant, request));
+        const persistentGrant = await this.#approvalStore.findReusableGrant(request);
         if (persistentGrant !== undefined) {
           return withDispatchAuthorization({
             decision: "allow" as const,
