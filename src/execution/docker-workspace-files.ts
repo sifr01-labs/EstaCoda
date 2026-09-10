@@ -1,13 +1,12 @@
-import { DockerProcessScope } from "./docker-processes.js";
+import { DockerFileService } from "./docker-file-service.js";
 import type { HostProcesses } from "./host-processes.js";
-import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { Stats, Dirent } from "node:fs";
 import { explainPathBlock } from "../context/context-security.js";
 import type { WorkspaceFiles, WorkspacePathOptions } from "./host-workspace-files.js";
 import type { WorkspacePathResolution } from "../tools/workspace-paths.js";
 import { DockerContainer } from "./docker-container.js";
-let worker: Promise<string> | undefined;
+const services = new WeakMap<DockerContainer, DockerFileService>();
 
 export class DockerWorkspaceFiles implements WorkspaceFiles {
   constructor(readonly container: DockerContainer, readonly assertActive: () => void = () => {}, readonly processes?: HostProcesses, readonly homeDir?: string) {}
@@ -21,32 +20,22 @@ export class DockerWorkspaceFiles implements WorkspaceFiles {
     if (["write", "mkdir", "rm", "rename"].includes(op) && this.container.facts.workspaceAccess !== "read-write") throw new Error("Docker workspace is read-only.");
     const input = JSON.stringify({ root, op, path, ...extra });
     if (Buffer.byteLength(input)>12*1024*1024) throw new Error("Workspace request exceeds its limit.");
-    await this.container.verify();
-    const script = await (worker ??= readFile(new URL("../../workers/docker/files.py", import.meta.url), "utf8"));
     this.assertActive();
-    const owned = this.processes ? undefined : new DockerProcessScope(this.container, this.homeDir);
-    const processes = this.processes ?? owned!;
-    try { return await new Promise((accept, reject) => {
-      const child = processes.spawn("python3", ["-c", script], { input: true });
-      let output = "", size = 0, failed = false;
-      const fail = (error: Error) => { if (failed) return; failed = true; void processes.terminate(child).then(() => reject(error), (cleanup) => reject(new AggregateError([error, cleanup], "Docker workspace cleanup is uncertain."))); };
-      const timer = setTimeout(() => fail(new Error("Docker workspace operation timed out; outcome may be uncertain.")), 30_000);
-      child.stdout.on("data", (chunk: Buffer) => { size += chunk.length; if (size>12*1024*1024) fail(new Error("Docker workspace response exceeds its limit.")); else output += chunk.toString("utf8"); });
-      child.stderr.on("data", () => {});
-      child.stdin.on("error", () => {});
-      child.once("error", () => fail(new Error("Docker workspace transport failed.")));
-      child.once("close", (code) => {
-        clearTimeout(timer); if (failed) return;
-        try {
-          this.assertActive();
-          if (code !== 0) throw new Error("Docker workspace operation failed; host fallback is disabled.");
-          const response = JSON.parse(output);
-          if (!response.ok) throw Object.assign(new Error(String(response.error)), { code: response.code });
-          accept(response.value);
-        } catch (error) { reject(error); }
-      });
-      child.stdin.end(input);
-    }); } finally { await owned?.release(); }
+    let result: unknown;
+    if (this.processes) {
+      if (!this.processes.workspaceRequest) throw new Error("Docker file transport is unavailable; host fallback is disabled.");
+      result = await this.processes.workspaceRequest(input);
+    } else {
+      let service = services.get(this.container);
+      if (!service) {
+        await this.container.verify();
+        this.assertActive();
+        service = services.get(this.container);
+        if (!service) { service = new DockerFileService(this.container, this.homeDir); services.set(this.container, service); }
+      }
+      result = await service.request(input);
+    }
+    this.assertActive(); return result;
   }
   async resolvePath(path: string | undefined, options: WorkspacePathOptions = {}): Promise<WorkspacePathResolution> {
     try {

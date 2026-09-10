@@ -1,3 +1,4 @@
+import { DockerFileService } from "./docker-file-service.js";
 import { retainCurrentExecutionOperation } from "../runtime/live-execution-authority.js";
 import { randomUUID } from "node:crypto";
 import type { ChildProcess, ChildProcessWithoutNullStreams } from "node:child_process";
@@ -10,6 +11,11 @@ export class DockerProcessScope implements HostProcesses {
   readonly #local: HostProcessScope;
   readonly #children = new Map<ChildProcess, { receipt: DockerReceipt; releaseAuthority(): void; cleanup?: Promise<void> }>();
   #released = false;
+  #files?: DockerFileService;
+  workspaceRequest(input: string): Promise<unknown> {
+    if (this.#released) return Promise.reject(new Error("Docker process scope was released."));
+    return (this.#files ??= new DockerFileService(this.container, this.homeDir)).request(input);
+  }
   constructor(readonly container: DockerContainer, readonly homeDir?: string) { this.#local = new HostProcessScope(container.workspace.canonicalPath); }
   shell() { return { command: "/bin/bash", args: ["-c"] }; }
   environment(options: SafeChildEnvOptions = {}): Record<string, string> {
@@ -46,7 +52,7 @@ export class DockerProcessScope implements HostProcesses {
       await this.container.receipts.clean(this.container.client, record.receipt);
       this.#children.delete(child); record.releaseAuthority();
     })();
-    await record.cleanup;
+    try { await record.cleanup; } catch (error) { record.cleanup = undefined; throw error; }
   }
   async terminate(child: ChildProcess, signal: NodeJS.Signals = "SIGTERM"): Promise<void> {
     if (!this.#children.has(child)) return;
@@ -55,7 +61,7 @@ export class DockerProcessScope implements HostProcesses {
   }
   async release(): Promise<void> {
     this.#released = true;
-    const results = await Promise.allSettled([...this.#children.keys()].map((child) => this.terminate(child)));
+    const results = await Promise.allSettled([...this.#children.keys()].map((child) => this.terminate(child)).concat(this.#files ? [this.#files.release()] : []));
     const failures = results.filter((r): r is PromiseRejectedResult => r.status === "rejected");
     if (failures.length) throw new AggregateError(failures.map((r) => r.reason), "Owned Docker processes did not settle.");
     await this.#local.release();

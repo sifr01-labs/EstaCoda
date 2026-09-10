@@ -2,6 +2,8 @@
 
 Status: implemented on `ame/execution-baseline` in the nine prescribed commits. This slice adds optional local Docker execution while preserving daemon-independent Local host workflows. See [operator guidance and residual risks](../operations/docker-execution.md).
 
+Follow-up: the [PR 5 / PR 6 review fixes](workspace-execution-pr5-pr6-review-fixes.md) supersede the original cleanup, channel-reset/label, file-transport and CI limitations recorded below.
+
 ## Commit sequence
 
 1. `85e4a388` — selected-profile Docker policy, read-only capability probing and reviewed image preparation through Setup Editor.

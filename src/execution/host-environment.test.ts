@@ -55,3 +55,37 @@ it("defers shared substrate cleanup until independently owned scopes finish", as
     expect(() => environment.acquire({ profileId: "work", sessionId: "new", surface: "cli" })).toThrow();
   } finally { await rm(root, { recursive: true, force: true }); }
 });
+
+it("retries only failed resources while keeping a failed release revoked", async () => {
+  const root = await mkdtemp(join(tmpdir(), "host-retry-"));
+  try {
+    const environment = await HostEnvironment.create({ profileId: "work", workspaceRoot: root });
+    const lease = environment.acquire({ profileId: "work", sessionId: "s", surface: "cli" });
+    const success = vi.fn(), retry = vi.fn().mockRejectedValueOnce(new Error("uncertain")).mockResolvedValue(undefined);
+    lease.own({ release: success }); lease.own({ release: retry });
+    await expect(lease.release()).rejects.toThrow("cleanup failed");
+    expect(() => lease.assertActive()).toThrow("released");
+    expect(() => lease.borrow()).toThrow("released");
+    await lease.release(); await lease.release();
+    expect(success).toHaveBeenCalledOnce(); expect(retry).toHaveBeenCalledTimes(2);
+    environment.destroy();
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+it("retries retirement without replaying successful driver disposal", async () => {
+  const root = await mkdtemp(join(tmpdir(), "host-retirement-retry-"));
+  try {
+    const host = await HostEnvironment.create({ profileId: "work", workspaceRoot: root });
+    const { HostWorkspaceFiles } = await import("./host-workspace-files.js");
+    const { HostProcessScope } = await import("./host-processes.js");
+    const dispose = vi.fn().mockResolvedValue(undefined);
+    const environment = HostEnvironment.prepared("work", host.facts, {
+      files: (active) => new HostWorkspaceFiles(root, active), processes: () => new HostProcessScope(root), dispose
+    });
+    const cleanup = vi.fn().mockRejectedValueOnce(new Error("retry")).mockResolvedValue(undefined);
+    await expect(environment.retire(cleanup)).rejects.toThrow("retry");
+    await environment.retire(cleanup);
+    expect(dispose).toHaveBeenCalledOnce(); expect(cleanup).toHaveBeenCalledTimes(2);
+    host.destroy();
+  } finally { await rm(root, { recursive: true, force: true }); }
+});

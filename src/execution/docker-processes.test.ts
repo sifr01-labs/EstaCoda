@@ -12,3 +12,20 @@ it("does not inherit host credentials or accept arbitrary environment injection"
   await scope.release();
   expect(() => scope.spawn("echo", [])).toThrow("released");
 });
+
+it("retries uncertain receipt cleanup on release after a child has closed", async () => {
+  const { HostProcessScope } = await import("./host-processes.js");
+  const { EventEmitter } = await import("node:events");
+  const { PassThrough } = await import("node:stream");
+  const child = Object.assign(new EventEmitter(), { stdin: new PassThrough(), stdout: new PassThrough(), stderr: new PassThrough() });
+  const spawn = vi.spyOn(HostProcessScope.prototype, "spawn").mockReturnValue(child as never);
+  const clean = vi.fn().mockRejectedValueOnce(new Error("daemon unavailable")).mockResolvedValue(undefined);
+  const scope = new DockerProcessScope({ workspace: { canonicalPath: "/", identityHash: "test" }, client: { endpoint: "unix:///docker.sock" },
+    receipts: { write: vi.fn(), clean }, profileId: "test", policy: {} } as unknown as DockerContainer);
+  try {
+    scope.spawn("echo", []); child.emit("close", 0);
+    await vi.waitFor(() => expect(clean).toHaveBeenCalledOnce());
+    await scope.release(); await scope.release();
+    expect(clean).toHaveBeenCalledTimes(2);
+  } finally { spawn.mockRestore(); }
+});

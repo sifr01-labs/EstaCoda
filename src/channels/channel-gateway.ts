@@ -225,6 +225,7 @@ export type ChannelSessionStore = {
 
 export type ChannelGatewayOptions = {
   workspaceStore?: ChannelWorkspaceStore;
+  currentExecutionPolicy?: () => Promise<import("../contracts/execution-authority.js").RequestedExecutionPolicy>;
   cronCommand?: (args: string[], message: ChannelMessage, sessionId: string) => Promise<{ ok: boolean; output: string }>;
   isWorkspaceTrusted?: (path: string) => Promise<boolean>;
   approvalScopeForSession?: (sessionId: string) => Promise<ApprovalExecutionScope>;
@@ -469,6 +470,7 @@ export class ChannelGateway {
   readonly #runtimeForSession: ChannelRuntimeFactory;
   readonly #sessionStore: ChannelSessionStore;
   readonly #workspaceStore?: ChannelWorkspaceStore;
+  readonly #currentExecutionPolicy?: ChannelGatewayOptions["currentExecutionPolicy"];
   readonly #cronCommand: ChannelGatewayOptions["cronCommand"];
   readonly #isWorkspaceTrusted?: (path: string) => Promise<boolean>;
   readonly #selectionLocks = new Set<string>();
@@ -553,6 +555,7 @@ export class ChannelGateway {
   constructor(options: ChannelGatewayOptions) {
     this.#runtimeForSession = options.runtimeForSession;
     this.#workspaceStore = options.workspaceStore;
+    this.#currentExecutionPolicy = options.currentExecutionPolicy;
     this.#cronCommand = options.cronCommand;
     this.#isWorkspaceTrusted = options.isWorkspaceTrusted;
     this.#sessionStore = options.sessionStore ?? new InMemoryChannelSessionStore();
@@ -3600,12 +3603,15 @@ export class ChannelGateway {
       let sessionId = "";
       try {
         const store = this.#workspaceStore;
+        const policy = await this.#currentExecutionPolicy?.();
+        const backend = !policy ? "backend not configured" : policy.backend === "host" ? "configured: Local host" :
+          `configured: Docker · ${policy.workspaceAccess?.value ?? "read-write"} · network ${policy.commandNetwork?.value ?? "disabled"}`;
         if (!store) throw new Error("Workspace selection is not configured on this gateway.");
         const args = message.text.trim().split(/\s+/u).slice(1);
         const current = store.current(message.sessionKey);
         if (!args.length) {
           const alias = current ? store.get(current.source.registeredWorkspaceId!)?.alias ?? "unavailable" : "configured default";
-          text = `Workspace: ${alias} (Local host). Use /workspace list or /workspace use <alias>.`;
+          text = `Workspace: ${alias} (${backend}). Use /workspace list or /workspace use <alias>.`;
           sessionId = current?.sessionId ?? "";
         } else if (args.length === 1 && args[0] === "list") {
           text = ["Registered workspaces:", ...store.list().map((w) => w.alias)].join("\n");
@@ -3616,7 +3622,7 @@ export class ChannelGateway {
           await this.#surfacePointerStore?.removePointer(message.sessionKey.platform as SurfaceType, channelSurfaceId(message.sessionKey, this.#sessionPolicy));
           sessionId = await this.#sessionStore.getOrCreateSessionId(message.sessionKey);
           if (sessionId !== selected.sessionId) throw new Error("Workspace selection could not establish its Session. Retry selection.");
-          text = `Workspace selected: ${workspace.alias} (Local host). New work uses a fresh Session; existing work keeps its original target.`;
+          text = `Workspace selected: ${workspace.alias} (${backend}). New work uses a fresh Session; existing work keeps its original target.`;
         } else throw new Error("Usage: /workspace, /workspace list, or /workspace use <alias>. Paths are not accepted.");
       } catch (error) { text = error instanceof Error ? error.message : "Workspace selection failed."; }
       await this.#deliverText(adapter, message.sessionKey, text);

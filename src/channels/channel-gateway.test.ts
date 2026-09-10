@@ -9786,6 +9786,7 @@ it("selects trusted aliases for future channel work without constructing a runti
     const sessionStore = new PersistentChannelSessionStore({ homeDir: root, profileId: "default", workspaceStore });
     const gateway = new ProductionChannelGateway({ adapters: [createFakeTelegramAdapter()], runtimeForSession,
       workspaceStore, sessionStore, isWorkspaceTrusted: async () => trusted,
+      currentExecutionPolicy: async () => ({ backend: "docker", workspaceAccess: { value: "read-only", requirement: "mandatory" } }),
       authPolicy: { telegram: { allowedUserIds: ["user-1"] } } });
     expect((await gateway.receive(makeMessage("/workspace list"))).replyText).toContain("project");
     expect((await gateway.receive(makeMessage("/workspace use /tmp"))).replyText).toContain("aliases");
@@ -9793,9 +9794,10 @@ it("selects trusted aliases for future channel work without constructing a runti
     expect(workspaceStore.current(makeMessage("").sessionKey)).toBeUndefined();
     trusted = true;
     const selected = await gateway.receive(makeMessage("/workspace use project"));
+    expect(selected.replyText).toContain("configured: Docker · read-only · network disabled");
     expect(selected.replyText).toContain("Workspace selected: project");
     expect(await sessionStore.getOrCreateSessionId(makeMessage("").sessionKey)).toBe(selected.sessionId);
-    expect((await gateway.receive(makeMessage("/workspace"))).replyText).toContain("project (Local host)");
+    expect((await gateway.receive(makeMessage("/workspace"))).replyText).toContain("project (configured: Docker · read-only · network disabled)");
     expect(runtimeForSession).not.toHaveBeenCalled();
     await gateway.receive(makeMessage("/workspace use project", { sender: { id: "intruder" }, sessionKey: { ...makeMessage("").sessionKey, userId: "intruder" } }));
     expect(workspaceStore.current(makeMessage("").sessionKey)?.sessionId).toBe(selected.sessionId);

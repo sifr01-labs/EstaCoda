@@ -97,8 +97,8 @@ export class PersistentChannelSessionStore implements ChannelSessionStore {
       }
     }
 
-    const selected = this.#workspaceStore?.current(sessionKey);
-    if (selected) { await this.#workspaceStore!.validateSelection(selected); await this.#prepareWorkspaceSession?.(selected); return selected.sessionId; }
+    const selected = await this.#workspaceStore?.touchSession(sessionKey, parseTimestamp(options?.receivedAt) ?? new Date(), this.#policy);
+    if (selected) { await this.#prepareWorkspaceSession?.(selected); return selected.sessionId; }
     const existing = this.#entries.get(key);
 
     if (existing !== undefined) {
@@ -126,7 +126,7 @@ export class PersistentChannelSessionStore implements ChannelSessionStore {
   }
 
   async resetSessionId(sessionKey: ChannelSessionKey, options?: { receivedAt?: string }): Promise<string> {
-    const selected = this.#workspaceStore?.resetSession(sessionKey);
+    const selected = this.#workspaceStore?.resetSession(sessionKey, undefined, parseTimestamp(options?.receivedAt) ?? new Date());
     if (selected) return selected;
     await this.#ensureLoaded();
     const key = this.#profileId === undefined ? stableSessionKey(sessionKey, this.#policy) : channelSurfaceId(sessionKey, this.#policy);
@@ -140,7 +140,7 @@ export class PersistentChannelSessionStore implements ChannelSessionStore {
   }
 
   async setSessionId(sessionKey: ChannelSessionKey, sessionId: string, options?: { receivedAt?: string }): Promise<void> {
-    if (this.#workspaceStore?.resetSession(sessionKey, sessionId)) return;
+    if (this.#workspaceStore?.resetSession(sessionKey, sessionId, parseTimestamp(options?.receivedAt) ?? new Date())) return;
     await this.#ensureLoaded();
     const key = this.#profileId === undefined ? stableSessionKey(sessionKey, this.#policy) : channelSurfaceId(sessionKey, this.#policy);
     const receivedAt = parseTimestamp(options?.receivedAt) ?? new Date();

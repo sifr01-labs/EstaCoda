@@ -38,6 +38,7 @@ export class HostEnvironment {
   #destroyed = false;
   #retireCleanup?: () => Promise<void>;
   #retiring?: Promise<void>;
+  #driverDisposed = false;
 
   /** The runtime owner detaches; independent scopes retain shared providers until idle. */
   async retire(cleanup: () => Promise<void>): Promise<void> {
@@ -48,8 +49,11 @@ export class HostEnvironment {
   async #finishRetirement(): Promise<void> {
     if (this.#scopes.size || this.#retainers || !this.#retireCleanup) return;
     this.#destroyed = true;
-    this.#retiring ??= Promise.resolve().then(() => this.#driver?.dispose()).then(this.#retireCleanup);
-    await this.#retiring;
+    this.#retiring ??= (async () => {
+      if (!this.#driverDisposed) { await this.#driver?.dispose(); this.#driverDisposed = true; }
+      await this.#retireCleanup!();
+    })();
+    try { await this.#retiring; } catch (error) { this.#retiring = undefined; throw error; }
   }
 
   private constructor(profileId: string, facts: Readonly<ExecutionFacts>, driver?: EnvironmentDriver) {
@@ -118,19 +122,19 @@ export class HostEnvironment {
         return () => { scope.resources.delete(resource); };
       },
       release: async () => {
-        if (released) { await scope.closing; return; }
-        released = true;
-        if (--scope.borrowers > 0) return;
+        if (!released) { released = true; scope.borrowers--; }
+        if (scope.borrowers > 0) return;
         scope.controller.abort(new Error("Execution scope released."));
-        scope.closing = (async () => {
-          const results = await Promise.allSettled([...scope.resources].map((resource) => Promise.resolve().then(() => resource.release())));
-          scope.resources.clear();
+        scope.closing ??= (async () => {
+          const results = await Promise.allSettled([...scope.resources].map(async (resource) => {
+            await resource.release(); scope.resources.delete(resource);
+          }));
           const errors = results.filter((result): result is PromiseRejectedResult => result.status === "rejected");
           if (errors.length) throw new AggregateError(errors.map((result) => result.reason), "Execution resource cleanup failed.");
           this.#scopes.delete(scope);
           await this.#finishRetirement();
         })();
-        await scope.closing;
+        try { await scope.closing; } catch (error) { scope.closing = undefined; throw error; }
       }
     };
   }

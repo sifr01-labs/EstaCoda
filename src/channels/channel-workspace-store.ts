@@ -3,7 +3,7 @@ import type { ChannelSessionKey } from "../contracts/channel.js";
 import type { ExecutionTargetBinding, SourceWorkspaceBinding } from "../contracts/workspace.js";
 import { ExecutionTargetStore, parseExecutionTargetBinding, parseWorkspaceIdentity, targetBinding } from "../workspaces/execution-target.js";
 import { normalizeWorkspaceAlias } from "../workspaces/workspace-registry.js";
-import { normalizeSessionKey, type ChannelSessionPolicy } from "./channel-session-store.js";
+import { normalizeSessionKey, shouldAutoResetSession, type ChannelSessionPolicy } from "./channel-session-store.js";
 
 /** A routing handle for the complete normalized channel scope, never authority. */
 export function channelSurfaceId(key: ChannelSessionKey, policy: ChannelSessionPolicy = {}): string {
@@ -14,7 +14,7 @@ export function channelSurfaceId(key: ChannelSessionKey, policy: ChannelSessionP
 
 export type ChannelWorkspaceBinding = {
   schemaVersion: 1; profileId: string; surfaceId: string; revision: number;
-  source: SourceWorkspaceBinding; target: ExecutionTargetBinding; sessionId: string;
+  source: SourceWorkspaceBinding; target: ExecutionTargetBinding; sessionId: string; lastActivityAt?: string;
 };
 
 /** Extends the core profile-local workspace database. Selection and the fresh
@@ -33,6 +33,7 @@ export class ChannelWorkspaceStore extends ExecutionTargetStore {
     const binding = JSON.parse(row.record_json) as ChannelWorkspaceBinding;
     parseExecutionTargetBinding(binding.target); parseWorkspaceIdentity(binding.source?.identity);
     if (binding.schemaVersion !== 1 || binding.profileId !== this.profileId || binding.surfaceId !== surfaceId ||
+      (binding.lastActivityAt !== undefined && (typeof binding.lastActivityAt !== "string" || !Number.isFinite(Date.parse(binding.lastActivityAt)))) ||
       !Number.isSafeInteger(binding.revision) || binding.revision < 1 || !binding.sessionId ||
       !binding.source.registeredWorkspaceId || !Number.isSafeInteger(binding.source.registeredWorkspaceRevision) ||
       binding.source.identity.identityHash !== binding.target.workspace.identityHash) throw new Error("Invalid channel workspace binding. Select the workspace again.");
@@ -60,10 +61,29 @@ export class ChannelWorkspaceStore extends ExecutionTargetStore {
     }
     await this.validate(binding.target, binding.target.workspace.canonicalPath);
   }
-  resetSession(key: ChannelSessionKey, sessionId: string = randomUUID()): string | undefined {
+  /** Validation can yield; compare the selection again inside the write transaction.
+   * Activity and any future Session rotation are committed together across processes. */
+  async touchSession(key: ChannelSessionKey, receivedAt: Date, policy: ChannelSessionPolicy): Promise<ChannelWorkspaceBinding | undefined> {
+    for (let attempt = 0; attempt < 8; attempt++) {
+      const selected = this.current(key); if (!selected) return undefined;
+      await this.validateSelection(selected);
+      const result = this.transaction(() => {
+        const current = this.current(key);
+        if (!current || current.revision !== selected.revision) return undefined;
+        const time = new Date(Math.max(receivedAt.getTime(), Date.parse(current.lastActivityAt ?? "") || 0));
+        const reset = current.lastActivityAt !== undefined && shouldAutoResetSession(current.lastActivityAt, time, policy);
+        const next = { ...current, lastActivityAt: time.toISOString(),
+          ...(reset ? { revision: current.revision + 1, sessionId: randomUUID() } : {}) };
+        this.#write(next); return next;
+      });
+      if (result) return result;
+    }
+    throw new Error("Channel selection changed repeatedly. Retry the message.");
+  }
+  resetSession(key: ChannelSessionKey, sessionId: string = randomUUID(), receivedAt = new Date()): string | undefined {
     return this.transaction(() => {
       const current = this.current(key); if (!current) return undefined;
-      this.#write({ ...current, revision: current.revision + 1, sessionId }); return sessionId;
+      this.#write({ ...current, revision: current.revision + 1, sessionId, lastActivityAt: receivedAt.toISOString() }); return sessionId;
     });
   }
   #write(binding: ChannelWorkspaceBinding): void {

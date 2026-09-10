@@ -48,6 +48,13 @@ export class DockerContainer {
   readonly receipts: DockerReceipts;
   #id?: string;
   #released = false;
+  #revoked = false;
+  #closing?: Promise<void>;
+  readonly #resources = new Set<{ release(): Promise<void> }>();
+  own(resource: { release(): Promise<void> }): () => void {
+    if (this.#revoked) throw new Error("Docker lease is unavailable.");
+    this.#resources.add(resource); return () => { this.#resources.delete(resource); };
+  }
   #facts?: Readonly<DockerExecutionFacts>;
   private constructor(input: { client: DockerClient; profileId: string; workspace: WorkspaceIdentity; policy: RequestedExecutionPolicy; receipt?: DockerReceipt; homeDir?: string }) {
     this.receipts = new DockerReceipts(input.profileId, input.homeDir);
@@ -56,7 +63,7 @@ export class DockerContainer {
     const negotiated = dockerLimits(input.policy); this.limits = negotiated.limits; this.degradations.push(...negotiated.degradations);
     this.client = input.client; this.profileId = input.profileId; this.workspace = input.workspace; this.policy = input.policy;
   }
-  get id(): string { if (!this.#id || this.#released) throw new Error("Docker lease is unavailable."); return this.#id; }
+  get id(): string { if (!this.#id || this.#revoked) throw new Error("Docker lease is unavailable."); return this.#id; }
   get facts(): Readonly<DockerExecutionFacts> { if (!this.#facts) throw new Error("Docker controls have not been verified."); return this.#facts; }
   static async prepare(input: { profileId: string; workspaceRoot: string; homeDir?: string; policy: RequestedExecutionPolicy; client?: DockerClient; receipt?: DockerReceipt }): Promise<DockerContainer> {
     const policy = parseExecutionPolicy(input.policy);
@@ -123,8 +130,17 @@ export class DockerContainer {
   }
   async release(): Promise<void> {
     if (this.#released) return;
-    await this.receipts.clean(this.client, { name: this.name, owner: this.owner, id: this.#id }, this.receipts.read(this.owner)?.creatorPid !== process.pid);
-    this.#released = true;
+    this.#revoked = true;
+    this.#closing ??= (async () => {
+      const results = await Promise.allSettled([...this.#resources].map(async (resource) => {
+        await resource.release(); this.#resources.delete(resource);
+      }));
+      const failures = results.filter((result): result is PromiseRejectedResult => result.status === "rejected");
+      if (failures.length) throw new AggregateError(failures.map((r) => r.reason), "Docker file resources did not settle.");
+      await this.receipts.clean(this.client, { name: this.name, owner: this.owner, id: this.#id }, this.receipts.read(this.owner)?.creatorPid !== process.pid);
+      this.#released = true;
+    })();
+    try { await this.#closing; } catch (error) { this.#closing = undefined; throw error; }
   }
 }
 

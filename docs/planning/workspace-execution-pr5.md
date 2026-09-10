@@ -2,6 +2,8 @@
 
 Status: implemented and validated on `ame/execution-baseline` in the seven prescribed commits. This slice adds channel workspace selection and recurring authority through the existing core registry, supervisor, approval store and setup flow.
 
+Follow-up: the [PR 5 / PR 6 review fixes](workspace-execution-pr5-pr6-review-fixes.md) supersede the original cleanup, channel-reset/label, file-transport and CI limitations recorded below.
+
 ## Seven commits
 
 1. `86f648f6` — profile-local channel workspace/source/target bindings and atomic future Session selection in the existing workspace database.

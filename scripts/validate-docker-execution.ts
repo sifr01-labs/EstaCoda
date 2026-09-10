@@ -1,3 +1,4 @@
+import { HostWorkspaceFiles } from "../src/execution/host-workspace-files.js";
 import { ToolRegistry } from "../src/tools/tool-registry.js";
 import { ToolExecutor } from "../src/tools/tool-executor.js";
 import { InMemorySessionDB } from "../src/session/in-memory-session-db.js";
@@ -56,6 +57,20 @@ try {
     const lease = writable.lease, options = { workspaceRoot: "/unselected-view", executionLease: lease };
     const tools = createWorkspaceTools(options), tool = (name: string) => tools.find((entry) => entry.name === name)!;
     assert.equal((await tool("file.read").run({ path: "example.txt" })).ok, true);
+    const payload = Buffer.alloc(8 * 1024 * 1024, "x");
+    await writeFile(join(root, "large.bin"), payload);
+    assert.deepEqual(await lease.files.readFile("large.bin"), await new HostWorkspaceFiles(root).readFile("large.bin"));
+    await writeFile(join(root, "oversized.bin"), Buffer.alloc(payload.length + 1));
+    await assert.rejects(lease.files.readFile("oversized.bin"), /8 MiB/);
+    await lease.files.rm("oversized.bin");
+    let creations = 0;
+    const originalRun = client.run.bind(client);
+    client.run = async (args, timeout) => { if (args[0] === "create") creations++; return originalRun(args, timeout); };
+    const start = performance.now();
+    try { for (let i = 0; i < 3; i++) assert((await lease.files.readFile("example.txt", "utf8")).includes("مرحبا")); }
+    finally { client.run = originalRun; }
+    assert.equal(creations, 0, "Warm file reads must reuse their owned container");
+    console.log(`PASS: 8 MiB Host/Docker parity; three warm reads ${Math.round(performance.now() - start)}ms, zero new containers`);
     assert.equal((await lease.files.resolvePath("escape")).ok, false);
     assert.equal((await lease.files.resolvePath("../outside")).ok, false);
     await lease.files.writeFile("new.txt", "مرحبا"); assert.equal(await lease.files.readFile("new.txt", "utf8"), "مرحبا");
@@ -82,6 +97,11 @@ try {
     assert.equal(isolated.code, 0, isolated.stderr); assert(isolated.stdout.includes("contained"));
     console.log("PASS: file, shell, inspection, grep/glob, notebook, worker, code and network containment");
     const child = lease.child({ profileId, sessionId: "independent", surface: "task" });
+    assert((await child.files.readFile("example.txt", "utf8")).includes("مرحبا"));
+    const sibling = lease.child({ profileId, sessionId: "file-sibling", surface: "task" });
+    assert((await sibling.files.readFile("example.txt", "utf8")).includes("مرحبا"));
+    await sibling.release();
+    assert((await child.files.readFile("example.txt", "utf8")).includes("مرحبا"));
     const manager = new ProcessManager({ ...options });
     try {
       const record = await manager.start("printf managed; sleep 30");
@@ -89,6 +109,7 @@ try {
       assert(manager.logs(record.id)?.some((entry) => entry.text.includes("managed")));
       await manager.stop(record.id); await lease.release();
       assert.equal((await command(child, "sh", ["-c", "echo independent"])).code, 0);
+      assert((await child.files.readFile("example.txt", "utf8")).includes("مرحبا"));
     } finally { await manager.dispose(); await child.release(); }
     console.log("PASS: managed process cancellation and independent child scope");
   } finally { await writable.close(); }
@@ -101,9 +122,17 @@ try {
   } finally { await readonly.close(); }
   const limited = await prepared({ ...policy, limits: { requirement: "mandatory", value: { cpu: 0.5, pids: 32, outputBytes: 1024, timeoutMs: 500 } } });
   try {
+    assert.equal((await limited.lease.files.readFile("large.bin")).length, 8 * 1024 * 1024);
     assert.equal((await command(limited.lease, "python3", ["-c", "import time; time.sleep(60)"])).code, 124);
     const output = await command(limited.lease, "python3", ["-c", "print('x'*10000)"]); assert.equal(output.code, 124); assert(output.stdout.length <= 1024);
   } finally { await limited.close(); }
+  const retryable = await prepared();
+  let settlements = 0;
+  retryable.container.own({ release: async () => { if (++settlements === 1) throw new Error("transient cleanup failure"); } });
+  await assert.rejects(retryable.close(), /did not settle/);
+  assert.throws(() => retryable.container.id, /unavailable/);
+  assert.throws(() => retryable.container.own({ release: async () => {} }), /unavailable/);
+  await retryable.close(); assert.equal(settlements, 2);
   const direct = await prepared({ ...policy, commandNetwork: { requirement: "mandatory", value: "unrestricted" } });
   try { assert.equal(direct.container.facts.networkContainment, false); assert.notEqual(executionAuthorityFingerprint(direct.container.facts), fingerprint); } finally { await direct.close(); }
   await assert.rejects(prepared({ ...policy, imageId: `sha256:${"0".repeat(64)}` }));

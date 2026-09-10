@@ -78,3 +78,28 @@ jobs:
 
       - name: Smoke built dist
         run: pnpm run smoke:dist
+
+  execution-docker:
+    name: Docker execution parity
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    env:
+      CI: true
+      NODE_ENV: test
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: 22.18.0
+      - name: Enable Corepack
+        run: corepack enable
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+      - name: Prepare controlled execution image
+        run: docker build --pull --file workers/docker/Dockerfile --tag estacoda-execution:v1 workers
+      - name: Run mandatory Docker execution gate
+        run: pnpm run validate:execution-docker
+      - name: Validate existing package image
+        run: ESTACODA_REQUIRE_DOCKER=1 pnpm run validate:docker
