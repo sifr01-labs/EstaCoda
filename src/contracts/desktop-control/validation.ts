@@ -1,0 +1,174 @@
+import { CONTROL_LIMITS, ControlProtocolError, DESKTOP_PROTOCOL_VERSION, assertEnvelope, exactKeys, isControlId, isRecord, type RpcFailure } from "./envelopes.js";
+import { CONTROL_EVENTS, CONTROL_METHODS, assertInitializeParams, isControlCursor, isProtocolVersion, type Capabilities, type ControlEventType } from "./bootstrap.js";
+import { WORK_STATUSES } from "./projections.js";
+import type { ControlEvent, EventNotification, MethodContracts, MethodRequest, MethodSuccess, OperationReceipt } from "./methods.js";
+
+type Check = (value: unknown) => boolean;
+const text = (max: number, min = 0): Check => (v) => typeof v === "string" && v.length >= min && v.length <= max;
+const integer = (min = 0, max = Number.MAX_SAFE_INTEGER): Check => (v) => typeof v === "number" && Number.isSafeInteger(v) && v >= min && v <= max;
+const choice = (values: readonly string[]): Check => (v) => typeof v === "string" && values.includes(v);
+const boolean: Check = (v) => typeof v === "boolean";
+const nullable = (check: Check): Check => (v) => v === null || check(v);
+const array = (check: Check, max = 100, min = 0): Check => (v) => Array.isArray(v) && v.length >= min && v.length <= max && v.every(check);
+const unique = (check: Check, max = 64, min = 0): Check => (v) => array(check, max, min)(v) && new Set(v as unknown[]).size === (v as unknown[]).length;
+const shape = (required: Record<string, Check>, optional: Record<string, Check> = {}): Check => (v) =>
+  isRecord(v) && exactKeys(v, Object.keys(required), Object.keys(optional)) &&
+  Object.entries(required).every(([key, check]) => check(v[key])) &&
+  Object.entries(optional).every(([key, check]) => !Object.hasOwn(v, key) || check(v[key]));
+const id = isControlId;
+const cursorToken: Check = (v) => typeof v === "string" && /^[A-Za-z0-9_-]{1,512}$/.test(v);
+const capabilities = shape({ methods: unique(choice(CONTROL_METHODS)), events: unique(choice(CONTROL_EVENTS)) });
+const target = shape({ targetId: id, targetGeneration: integer(1) });
+const targetProjection = shape({ targetId: id, targetGeneration: integer(1), label: text(240, 1), isolation: choice(["host", "sandboxed", "unknown"]) });
+const work = shape({ id, canonicalId: id, profileId: id, kind: choice(["session", "task", "scheduled_execution", "evolution_review"]),
+  title: text(240, 1), status: choice(WORK_STATUSES), updatedAt: integer(), target: nullable(targetProjection) }, { reason: text(2_048) });
+const usage = shape({ reportedTokens: nullable(integer()), cost: nullable(shape({ amount: (v) => typeof v === "number" && Number.isFinite(v) && v >= 0,
+  currency: (v) => typeof v === "string" && /^[A-Z]{3}$/.test(v) })) });
+const evidence = shape({ state: choice(["verified", "unverified", "partial", "failed"]), summary: text(2_048), artifactIds: unique(id, 100) });
+const activityBase = { id, workId: id, profileId: id, sequence: integer(), timestamp: integer() };
+const activityVariants: Record<string, Check> = {
+  message: shape({ ...activityBase, kind: choice(["message"]), role: choice(["user", "assistant"]), text: text(16_384) }),
+  assistant_delta: shape({ ...activityBase, kind: choice(["assistant_delta"]), text: text(4_096, 1) }),
+  tool: shape({ ...activityBase, kind: choice(["tool"]), name: text(160, 1), state: choice(["running", "completed", "failed", "cancelled"]), summary: text(2_048) }),
+  plan: shape({ ...activityBase, kind: choice(["plan"]), steps: array(shape({ id, title: text(240, 1), status: choice(["pending", "running", "completed", "failed"]) }), 64) }),
+  result: shape({ ...activityBase, kind: choice(["result"]), status: choice(WORK_STATUSES), evidence, usage }),
+  status: shape({ ...activityBase, kind: choice(["status"]), status: choice(WORK_STATUSES) }, { reason: text(2_048) }),
+};
+const activity: Check = (v) => isRecord(v) && typeof v.kind === "string" && Object.hasOwn(activityVariants, v.kind) && activityVariants[v.kind]!(v);
+const approval = shape({ id, sessionId: id, target, actionSummary: text(2_048, 1), scope: choice(["once"]), decisions: unique(choice(["approved", "denied"]), 2, 1) });
+const inboxShape = shape({ id, profileId: id, workId: nullable(id), kind: choice(["approval", "input", "trust", "setup", "failure", "evolution", "delivery"]),
+  title: text(240, 1), summary: text(2_048), createdAt: integer(), approval: nullable(approval) });
+const inbox: Check = (v) => inboxShape(v) && isRecord(v) && (v.kind === "approval" ? v.approval !== null && v.workId !== null : v.approval === null);
+const modelShape = shape({ id: text(200, 1), providerId: id, label: text(240, 1), runnable: boolean,
+  credentialState: choice(["not_required", "missing", "present", "expired"]), role: nullable(choice(["primary", "fallback", "auxiliary", "session_override"])) });
+const model: Check = (v) => modelShape(v) && isRecord(v) && (!v.runnable || v.credentialState === "present" || v.credentialState === "not_required");
+const provider = shape({ id, label: text(240, 1), authMethods: unique(choice(["api_key", "oauth", "none"]), 3, 1), state: choice(["ready", "unconfigured", "repair_required", "unknown"]) });
+const connection = shape({ id, profileId: id, channel: choice(["telegram", "discord", "email", "whatsapp"]),
+  configurationState: choice(["configured", "unconfigured", "repair_required"]), runtimeState: choice(["running", "stopped", "disconnected", "unknown"]),
+  authorizationState: choice(["denied", "configured", "pairing_required", "unknown"]), summary: text(2_048) });
+const page = (check: Check): Check => shape({ items: array(check), nextCursor: nullable(cursorToken) });
+const pageParams = { limit: integer(1, 100) };
+const optionalPage = { cursor: cursorToken };
+const sessionParams = { operationId: id, sessionId: id, target };
+const mutationMethods = ["sessions.send", "sessions.cancelTurn", "approvals.resolve"] as const;
+const receiptShape = shape({ operationId: id, profileId: id, sessionId: id, target, method: choice(mutationMethods),
+  state: choice(["accepted", "dispatched", "completed", "uncertain", "unknown", "expired"]), cancellation: choice(["not_requested", "requested", "confirmed"]) });
+const receipt: Check = (v) => receiptShape(v) && isRecord(v) &&
+  (v.method === "sessions.cancelTurn" || v.cancellation === "not_requested") &&
+  (!["unknown", "expired"].includes(String(v.state)) || v.cancellation === "not_requested");
+const initializeResult = shape({ protocolVersion: isProtocolVersion, serviceVersion: (v) => typeof v === "string" && /^[A-Za-z0-9_.+-]{1,80}$/.test(v),
+  profileId: id, instanceId: id, capabilities,
+  limits: shape({ frameBytes: integer(1, CONTROL_LIMITS.frameBytes), subscriptions: integer(1, 32), replayEvents: integer(1, 256) }) });
+const bootstrap = shape({ profile: shape({ id, label: text(240, 1), configuration: choice(["unconfigured", "ready", "repair_required"]) }),
+  runtime: shape({ state: choice(["stopped", "starting", "ready", "disconnected", "incompatible", "unavailable"]) }), capabilities, cursor: isControlCursor });
+const subscribeResult: Check = (v) => shape({ state: choice(["subscribed"]), subscriptionId: id, cursor: isControlCursor })(v) ||
+  shape({ state: choice(["snapshot_required"]), reason: choice(["instance_changed", "stream_changed", "cursor_expired", "overflow"]) })(v);
+const initialize: Check = (v) => { try { assertInitializeParams(v); return true; } catch { return false; } };
+const contracts: { [M in keyof MethodContracts]: { params: Check; result: Check } } = {
+  "control.initialize": { params: initialize, result: initializeResult },
+  "control.bootstrap": { params: shape({}), result: bootstrap },
+  "control.subscribe": { params: shape({ after: isControlCursor, events: unique(choice(CONTROL_EVENTS), 64, 1) }), result: subscribeResult },
+  "control.unsubscribe": { params: shape({ subscriptionId: id }), result: shape({ removed: boolean }) },
+  "control.cancelRequest": { params: shape({ requestId: id }), result: shape({ cancellationRequested: boolean }) },
+  "work.list": { params: shape(pageParams, optionalPage), result: page(work) },
+  "work.get": { params: shape({ workId: id }), result: work },
+  "work.activity": { params: shape({ ...pageParams, workId: id }, optionalPage), result: page(activity) },
+  "inbox.list": { params: shape(pageParams, optionalPage), result: page(inbox) },
+  "models.list": { params: shape(pageParams, optionalPage), result: page(model) },
+  "providers.list": { params: shape(pageParams, optionalPage), result: page(provider) },
+  "connections.list": { params: shape(pageParams, optionalPage), result: page(connection) },
+  "connections.get": { params: shape({ connectionId: id }), result: connection },
+  "sessions.send": { params: shape({ ...sessionParams, text: text(32_768, 1) }), result: receipt },
+  "sessions.cancelTurn": { params: shape(sessionParams), result: receipt },
+  "approvals.resolve": { params: shape({ ...sessionParams, approvalId: id, decision: choice(["approved", "denied"]) }), result: receipt },
+  "operations.inspect": { params: shape({ ...sessionParams, method: choice(mutationMethods) }), result: receipt },
+};
+/** Established by the trusted connection, never populated from request authority fields. */
+export type ControlContext = { profileId: string; instanceId: string; capabilities: Capabilities };
+function contextValid(context: ControlContext): boolean { return id(context.profileId) && id(context.instanceId) && capabilities(context.capabilities); }
+function subset(actual: Capabilities, allowed: Capabilities): boolean {
+  return actual.methods.every((name) => allowed.methods.includes(name)) && actual.events.every((name) => allowed.events.includes(name));
+}
+export function validateControlRequest(value: unknown, context: ControlContext | null): MethodRequest {
+  assertEnvelope(value);
+  if (!("method" in value) || !("id" in value)) throw new ControlProtocolError("-32600");
+  if (!Object.hasOwn(contracts, value.method)) throw new ControlProtocolError("-32601");
+  const method = value.method as keyof MethodContracts;
+  if (!contracts[method].params(value.params)) throw new ControlProtocolError("-32602");
+  if (method === "control.initialize") {
+    if (context !== null) throw new ControlProtocolError("-32600");
+  } else {
+    if (!context) throw new ControlProtocolError("-32002");
+    if (!contextValid(context)) throw new ControlProtocolError("-32003");
+    if (!context.capabilities.methods.includes(method)) throw new ControlProtocolError("-32601");
+    if (method === "control.subscribe") {
+      const params = value.params as unknown as MethodContracts["control.subscribe"]["params"];
+      if (params.after.instanceId !== context.instanceId) throw new ControlProtocolError("-32007");
+      if (!params.events.every((event) => context.capabilities.events.includes(event))) throw new ControlProtocolError("-32601");
+    }
+    if (method === "control.cancelRequest" && value.params.requestId === value.id) throw new ControlProtocolError("-32602");
+  }
+  return value as MethodRequest;
+}
+function scoped(value: unknown, profileId: string): boolean {
+  return !isRecord(value) || (!Object.hasOwn(value, "profileId") || value.profileId === profileId);
+}
+/** Correlation requires the original request, not a method string guessed from the response. */
+export function validateControlResponse<M extends keyof MethodContracts>(value: unknown, request: MethodRequest<M>, context: ControlContext | null): MethodSuccess<M> | RpcFailure {
+  validateControlRequest(request, context);
+  assertEnvelope(value);
+  if (!("id" in value) || "method" in value || value.id !== request.id) throw new ControlProtocolError("-32600");
+  if ("error" in value) return value;
+  if (!contracts[request.method].result(value.result)) throw new ControlProtocolError("-32602");
+  if (request.method === "control.initialize") {
+    const result = value.result as unknown as MethodContracts["control.initialize"]["result"];
+    const params = request.params as MethodContracts["control.initialize"]["params"];
+    if (result.profileId !== params.profileId || result.protocolVersion.major !== DESKTOP_PROTOCOL_VERSION.major ||
+      result.protocolVersion.major !== params.protocolVersion.major || result.protocolVersion.minor > Math.min(params.protocolVersion.minor, DESKTOP_PROTOCOL_VERSION.minor) ||
+      !result.capabilities.methods.every((name) => params.capabilities.methods.includes(name)) ||
+      !result.capabilities.events.every((name) => params.capabilities.events.includes(name))) throw new ControlProtocolError("-32003");
+  } else {
+    const result = value.result as Record<string, unknown>;
+    if (!scoped(result, context!.profileId) || (Array.isArray(result.items) && !result.items.every((item) => scoped(item, context!.profileId)))) throw new ControlProtocolError("-32003");
+    if ("limit" in request.params && Array.isArray(result.items) && result.items.length > request.params.limit) throw new ControlProtocolError("-32009");
+    if (request.method === "work.get" && result.id !== request.params.workId) throw new ControlProtocolError("-32003");
+    if (request.method === "connections.get" && result.id !== request.params.connectionId) throw new ControlProtocolError("-32003");
+    if (request.method === "work.activity" && !(result.items as { workId: string }[]).every((item) => item.workId === request.params.workId)) throw new ControlProtocolError("-32003");
+    if (request.method === "control.bootstrap") {
+      const boot = value.result as unknown as MethodContracts["control.bootstrap"]["result"];
+      if (boot.profile.id !== context!.profileId || boot.cursor.instanceId !== context!.instanceId || !subset(boot.capabilities, context!.capabilities)) throw new ControlProtocolError("-32003");
+    }
+    if (request.method === "control.subscribe" && result.state === "subscribed") {
+      const cursor = (result as unknown as { cursor: MethodContracts["control.subscribe"]["params"]["after"] }).cursor;
+      if (cursor.instanceId !== context!.instanceId || cursor.streamId !== request.params.after.streamId || cursor.sequence !== request.params.after.sequence) throw new ControlProtocolError("-32007");
+    }
+    if ("operationId" in request.params) {
+      const receipt = value.result as unknown as OperationReceipt;
+      const method = request.method === "operations.inspect" ? request.params.method : request.method;
+      if (receipt.operationId !== request.params.operationId || receipt.sessionId !== request.params.sessionId || receipt.method !== method ||
+        receipt.target.targetId !== request.params.target.targetId || receipt.target.targetGeneration !== request.params.target.targetGeneration) throw new ControlProtocolError("-32003");
+    }
+  }
+  return value as unknown as MethodSuccess<M>;
+}
+const eventPayloads: { [E in ControlEvent["type"]]: Check } = {
+  "control.ready": shape({ state: choice(["ready"]) }), "work.changed": work, "activity.appended": activity,
+  "attention.changed": (v) => shape({ item: nullable(inbox), itemId: id })(v) && isRecord(v) && (v.item === null || (v.item as { id: string }).id === v.itemId),
+  "modelRoute.changed": model, "connection.changed": connection,
+  "service.warning": shape({ reason: choice(["resync_required", "runtime_unavailable", "configuration_changed"]) }),
+  "service.shutdown": shape({ reason: choice(["client_closed", "profile_changed", "service_restart"]) }),
+};
+export type SubscriptionContext = { subscriptionId: string; streamId: string; events: ControlEventType[] };
+export function validateEventNotification(value: unknown, context: ControlContext, subscription: SubscriptionContext): EventNotification {
+  assertEnvelope(value);
+  if (!contextValid(context)) throw new ControlProtocolError("-32003");
+  if (!("method" in value) || "id" in value || value.method !== "control.event") throw new ControlProtocolError("-32600");
+  const event = value.params;
+  if (!shape({ profileId: id, subscriptionId: id, cursor: isControlCursor, timestamp: integer(), type: choice(CONTROL_EVENTS), payload: () => true })(event) ||
+    !eventPayloads[event.type as ControlEvent["type"]](event.payload)) throw new ControlProtocolError("-32602");
+  const typed = event as unknown as ControlEvent;
+  if (typed.profileId !== context.profileId || typed.cursor.instanceId !== context.instanceId || typed.subscriptionId !== subscription.subscriptionId ||
+    typed.cursor.streamId !== subscription.streamId || !context.capabilities.events.includes(typed.type) || !subscription.events.includes(typed.type) ||
+    !scoped(typed.payload, context.profileId) || (typed.type === "attention.changed" && !scoped(typed.payload.item, context.profileId))) throw new ControlProtocolError("-32003");
+  return value as unknown as EventNotification;
+}

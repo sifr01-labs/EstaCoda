@@ -96,12 +96,34 @@ export function assertEnvelope(value: unknown): asserts value is RpcEnvelope {
 }
 /** Exactly one LF-terminated frame. Transport must also bound incomplete buffers. */
 export function parseControlFrame(frame: string): RpcEnvelope {
-  if (utf8Bytes(frame) > CONTROL_LIMITS.frameBytes) throw new ControlProtocolError("-32009");
+  if (frame.length > CONTROL_LIMITS.frameBytes || utf8Bytes(frame) > CONTROL_LIMITS.frameBytes) throw new ControlProtocolError("-32009");
   if (!frame.endsWith("\n") || frame.slice(0, -1).includes("\n") || frame.includes("\r")) throw new ControlProtocolError("-32600");
   let value: unknown;
-  try { value = JSON.parse(frame.slice(0, -1)); } catch { throw new ControlProtocolError("-32700"); }
+  try { rejectDuplicateKeys(frame); value = JSON.parse(frame.slice(0, -1)); }
+  catch (error) { if (error instanceof ControlProtocolError) throw error; throw new ControlProtocolError("-32700"); }
   assertEnvelope(value);
   return value;
+}
+/** JSON.parse discards duplicate keys. Detect ambiguity before that information is lost. */
+function rejectDuplicateKeys(source: string): void {
+  const stack: ({ keys: Set<string>; keyExpected: boolean } | null)[] = [];
+  for (let i = 0; i < source.length; i++) {
+    const char = source[i];
+    if (char === '"') {
+      const start = i++;
+      while (i < source.length && source[i] !== '"') { if (source[i] === "\\") i++; i++; }
+      const current = stack[stack.length - 1];
+      if (current?.keyExpected) {
+        const key: string = JSON.parse(source.slice(start, i + 1));
+        if (current.keys.has(key)) throw new ControlProtocolError("-32600");
+        current.keys.add(key); current.keyExpected = false;
+      }
+    } else if (char === "{" || char === "[") {
+      stack.push(char === "{" ? { keys: new Set(), keyExpected: true } : null);
+      if (stack.length > CONTROL_LIMITS.depth + 1) throw new ControlProtocolError("-32009");
+    } else if (char === "}" || char === "]") stack.pop();
+    else if (char === ",") { const current = stack[stack.length - 1]; if (current) current.keyExpected = true; }
+  }
 }
 export function serializeControlFrame(value: RpcEnvelope): string {
   assertEnvelope(value);

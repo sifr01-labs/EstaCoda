@@ -10,6 +10,7 @@ it("round trips framed requests, notifications, results and fixed safe errors", 
   expect(utf8Bytes("مرحبا 🌊")).toBe(Buffer.byteLength("مرحبا 🌊"));
 });
 it("rejects batches, ambiguous envelopes, unknown fields and unsafe error bodies", () => {
+  expect(() => parseControlFrame('{"jsonrpc":"2.0","id":"r","result":1,"result":2}\n')).toThrow();
   for (const value of [[], null, { jsonrpc: "1.0" },
     { jsonrpc: "2.0", id: 1, method: "work.get", params: {} },
     { jsonrpc: "2.0", id: "r", result: {}, error: {} },
