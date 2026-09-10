@@ -1,0 +1,980 @@
+{
+  "schemaVersion": 1,
+  "sourceRevision": "5d5b8a1e5bec736310790d493bfd1a79cda4062d",
+  "harnessSha256": "f405267d5d95e8d88515379777fee7ea37344a1218c30dbd6279005b74a51d7f",
+  "generatorSha256": "28d09d88edb5030c8e8ddb198d3eee7e74dabb264927fdf601f8449873497f8c",
+  "lockfileSha256": "1e88182ffe36009105bff36b22acd591a6993ab76b8e3fa2ee0024c58ac95ae2",
+  "environment": {
+    "node": "v24.14.1",
+    "pnpm": "10.33.0",
+    "platform": "darwin",
+    "arch": "arm64",
+    "osRelease": "25.5.0"
+  },
+  "methodology": {
+    "clock": "performance.now; milliseconds",
+    "state": "Fresh workspace, trust store, SQLite and profile per sample",
+    "timing": "Setup excludes imports; execution includes runtime acquisition, tools and delivery; cleanup excluded. Command start/result events include executor overhead.",
+    "inference": "Scripted provider; 100 input and 10 output tokens per response are synthetic accounting fixtures",
+    "channel": "Real gateway authorization with fake Telegram delivery; no external account",
+    "scheduledWork": "Real cron runtime runner; no daemon or wall-clock scheduling wait",
+    "recovery": "Cooperative abort after completed file.patch; dispose, reopen SQLite and resume same session. No process crash or uncertain-mutation replay claim.",
+    "liveProviderRequests": 0,
+    "productionCostEstimate": null,
+    "regressionBudgets": "Not set: small local fixture sample, not a production percentile estimate"
+  },
+  "summary": [
+    {
+      "scenario": "code-edit",
+      "successes": 5,
+      "samples": 5,
+      "executionMs": {
+        "min": 82.22233299999994,
+        "median": 83.28179200000022,
+        "max": 146.44158300000004
+      },
+      "runtimeStartupMs": {
+        "min": 21.91924999999992,
+        "median": 22.9170409999997,
+        "max": 44.11749999999995
+      },
+      "commandMs": {
+        "min": 30.043083000000024,
+        "median": 31.36695899999995,
+        "max": 35.073083
+      },
+      "providerCalls": {
+        "min": 4,
+        "median": 4,
+        "max": 4
+      },
+      "syntheticTotalTokens": {
+        "min": 440,
+        "median": 440,
+        "max": 440
+      },
+      "approvalRequests": {
+        "min": 0,
+        "median": 0,
+        "max": 0
+      }
+    },
+    {
+      "scenario": "authorized-channel",
+      "successes": 5,
+      "samples": 5,
+      "executionMs": {
+        "min": 78.17041700000027,
+        "median": 84.90766699999995,
+        "max": 99.98012500000004
+      },
+      "runtimeStartupMs": {
+        "min": 21.26983399999972,
+        "median": 22.443707999999788,
+        "max": 25.332667000000015
+      },
+      "commandMs": {
+        "min": 29.06287499999962,
+        "median": 30.675125000000207,
+        "max": 32.159082999999896
+      },
+      "providerCalls": {
+        "min": 4,
+        "median": 4,
+        "max": 4
+      },
+      "syntheticTotalTokens": {
+        "min": 440,
+        "median": 440,
+        "max": 440
+      },
+      "approvalRequests": {
+        "min": 0,
+        "median": 0,
+        "max": 0
+      }
+    },
+    {
+      "scenario": "scheduled-work",
+      "successes": 5,
+      "samples": 5,
+      "executionMs": {
+        "min": 98.48762500000021,
+        "median": 100.93258400000013,
+        "max": 107.41729200000009
+      },
+      "runtimeStartupMs": {
+        "min": 21.180457999999817,
+        "median": 22.509958000000097,
+        "max": 24.670666999999867
+      },
+      "commandMs": {
+        "min": 30.15949999999998,
+        "median": 30.619625000000042,
+        "max": 39.69291599999997
+      },
+      "providerCalls": {
+        "min": 4,
+        "median": 4,
+        "max": 4
+      },
+      "syntheticTotalTokens": {
+        "min": 440,
+        "median": 440,
+        "max": 440
+      },
+      "approvalRequests": {
+        "min": 0,
+        "median": 0,
+        "max": 0
+      }
+    },
+    {
+      "scenario": "interrupted-resume",
+      "successes": 5,
+      "samples": 5,
+      "executionMs": {
+        "min": 127.35004200000003,
+        "median": 135.28279199999997,
+        "max": 142.30583299999944
+      },
+      "runtimeStartupMs": {
+        "min": 20.10133399999995,
+        "median": 21.81268699999964,
+        "max": 27.844708000000082
+      },
+      "commandMs": {
+        "min": 30.003625000000056,
+        "median": 32.17258300000003,
+        "max": 44.62091700000019
+      },
+      "recoveryMs": {
+        "min": 79.78054199999997,
+        "median": 84.96274999999969,
+        "max": 96.31475000000046
+      },
+      "providerCalls": {
+        "min": 5,
+        "median": 5,
+        "max": 5
+      },
+      "syntheticTotalTokens": {
+        "min": 550,
+        "median": 550,
+        "max": 550
+      },
+      "approvalRequests": {
+        "min": 0,
+        "median": 0,
+        "max": 0
+      }
+    }
+  ],
+  "samples": [
+    {
+      "scenario": "code-edit",
+      "success": true,
+      "setupMs": 102.57241700000009,
+      "executionMs": 146.44158300000004,
+      "runtimeStartupMs": [
+        44.11749999999995
+      ],
+      "commandMs": [
+        35.073083
+      ],
+      "recoveryMs": null,
+      "providerInvocations": 4,
+      "approvalRequests": 0,
+      "deliveryCount": 0,
+      "persistedMessagesBeforeResume": 0,
+      "metrics": {
+        "providerCalls": 4,
+        "providerToolCalls": 3,
+        "toolCalls": 3,
+        "toolFailures": 0,
+        "providerIterations": 0,
+        "providerBudgetExhaustions": 0,
+        "promptAssemblies": 0,
+        "skillRouteEvents": 0,
+        "sessionRecallTriggered": false,
+        "sessionRecallCount": 1,
+        "sessionRecallWarningCount": 0,
+        "externalMemoryRecallCount": 0,
+        "memoryWrites": 0,
+        "memoryPromotions": 0,
+        "securityEscalations": 1,
+        "agentCancelled": false,
+        "contextUsageEvents": 15,
+        "inputTokens": 400,
+        "outputTokens": 40,
+        "totalTokens": 440,
+        "estimatedCostUsd": null
+      }
+    },
+    {
+      "scenario": "authorized-channel",
+      "success": true,
+      "setupMs": 87.79275000000007,
+      "executionMs": 99.98012500000004,
+      "runtimeStartupMs": [
+        25.332667000000015
+      ],
+      "commandMs": [
+        32.159082999999896
+      ],
+      "recoveryMs": null,
+      "providerInvocations": 4,
+      "approvalRequests": 0,
+      "deliveryCount": 1,
+      "persistedMessagesBeforeResume": 0,
+      "metrics": {
+        "providerCalls": 4,
+        "providerToolCalls": 3,
+        "toolCalls": 3,
+        "toolFailures": 0,
+        "providerIterations": 0,
+        "providerBudgetExhaustions": 0,
+        "promptAssemblies": 0,
+        "skillRouteEvents": 0,
+        "sessionRecallTriggered": false,
+        "sessionRecallCount": 1,
+        "sessionRecallWarningCount": 0,
+        "externalMemoryRecallCount": 0,
+        "memoryWrites": 0,
+        "memoryPromotions": 0,
+        "securityEscalations": 1,
+        "agentCancelled": false,
+        "contextUsageEvents": 15,
+        "inputTokens": 400,
+        "outputTokens": 40,
+        "totalTokens": 440,
+        "estimatedCostUsd": null
+      }
+    },
+    {
+      "scenario": "scheduled-work",
+      "success": true,
+      "setupMs": 89.83220799999992,
+      "executionMs": 107.09924999999998,
+      "runtimeStartupMs": [
+        24.670666999999867
+      ],
+      "commandMs": [
+        30.15949999999998
+      ],
+      "recoveryMs": null,
+      "providerInvocations": 4,
+      "approvalRequests": 0,
+      "deliveryCount": 1,
+      "persistedMessagesBeforeResume": 0,
+      "metrics": {
+        "providerCalls": 4,
+        "providerToolCalls": 3,
+        "toolCalls": 3,
+        "toolFailures": 0,
+        "providerIterations": 0,
+        "providerBudgetExhaustions": 0,
+        "promptAssemblies": 0,
+        "skillRouteEvents": 0,
+        "sessionRecallTriggered": false,
+        "sessionRecallCount": 1,
+        "sessionRecallWarningCount": 0,
+        "externalMemoryRecallCount": 0,
+        "memoryWrites": 0,
+        "memoryPromotions": 0,
+        "securityEscalations": 1,
+        "agentCancelled": false,
+        "contextUsageEvents": 15,
+        "inputTokens": 400,
+        "outputTokens": 40,
+        "totalTokens": 440,
+        "estimatedCostUsd": null
+      }
+    },
+    {
+      "scenario": "interrupted-resume",
+      "success": true,
+      "setupMs": 90.91883400000006,
+      "executionMs": 133.09220800000003,
+      "runtimeStartupMs": [
+        23.06058299999995,
+        21.034333999999944
+      ],
+      "commandMs": [
+        30.003625000000056
+      ],
+      "recoveryMs": 81.67037500000015,
+      "providerInvocations": 5,
+      "approvalRequests": 0,
+      "deliveryCount": 0,
+      "persistedMessagesBeforeResume": 6,
+      "metrics": {
+        "providerCalls": 5,
+        "providerToolCalls": 4,
+        "toolCalls": 4,
+        "toolFailures": 0,
+        "providerIterations": 0,
+        "providerBudgetExhaustions": 1,
+        "promptAssemblies": 0,
+        "skillRouteEvents": 0,
+        "sessionRecallTriggered": false,
+        "sessionRecallCount": 2,
+        "sessionRecallWarningCount": 0,
+        "externalMemoryRecallCount": 0,
+        "memoryWrites": 0,
+        "memoryPromotions": 0,
+        "securityEscalations": 2,
+        "agentCancelled": true,
+        "contextUsageEvents": 22,
+        "inputTokens": 500,
+        "outputTokens": 50,
+        "totalTokens": 550,
+        "estimatedCostUsd": null
+      }
+    },
+    {
+      "scenario": "code-edit",
+      "success": true,
+      "setupMs": 94.75954200000001,
+      "executionMs": 82.22233299999994,
+      "runtimeStartupMs": [
+        23.17387500000018
+      ],
+      "commandMs": [
+        30.043083000000024
+      ],
+      "recoveryMs": null,
+      "providerInvocations": 4,
+      "approvalRequests": 0,
+      "deliveryCount": 0,
+      "persistedMessagesBeforeResume": 0,
+      "metrics": {
+        "providerCalls": 4,
+        "providerToolCalls": 3,
+        "toolCalls": 3,
+        "toolFailures": 0,
+        "providerIterations": 0,
+        "providerBudgetExhaustions": 0,
+        "promptAssemblies": 0,
+        "skillRouteEvents": 0,
+        "sessionRecallTriggered": false,
+        "sessionRecallCount": 1,
+        "sessionRecallWarningCount": 0,
+        "externalMemoryRecallCount": 0,
+        "memoryWrites": 0,
+        "memoryPromotions": 0,
+        "securityEscalations": 1,
+        "agentCancelled": false,
+        "contextUsageEvents": 15,
+        "inputTokens": 400,
+        "outputTokens": 40,
+        "totalTokens": 440,
+        "estimatedCostUsd": null
+      }
+    },
+    {
+      "scenario": "authorized-channel",
+      "success": true,
+      "setupMs": 88.13833299999988,
+      "executionMs": 83.90087499999981,
+      "runtimeStartupMs": [
+        22.951416999999992
+      ],
+      "commandMs": [
+        29.965791999999965
+      ],
+      "recoveryMs": null,
+      "providerInvocations": 4,
+      "approvalRequests": 0,
+      "deliveryCount": 1,
+      "persistedMessagesBeforeResume": 0,
+      "metrics": {
+        "providerCalls": 4,
+        "providerToolCalls": 3,
+        "toolCalls": 3,
+        "toolFailures": 0,
+        "providerIterations": 0,
+        "providerBudgetExhaustions": 0,
+        "promptAssemblies": 0,
+        "skillRouteEvents": 0,
+        "sessionRecallTriggered": false,
+        "sessionRecallCount": 1,
+        "sessionRecallWarningCount": 0,
+        "externalMemoryRecallCount": 0,
+        "memoryWrites": 0,
+        "memoryPromotions": 0,
+        "securityEscalations": 1,
+        "agentCancelled": false,
+        "contextUsageEvents": 15,
+        "inputTokens": 400,
+        "outputTokens": 40,
+        "totalTokens": 440,
+        "estimatedCostUsd": null
+      }
+    },
+    {
+      "scenario": "scheduled-work",
+      "success": true,
+      "setupMs": 103.92129099999988,
+      "executionMs": 100.93258400000013,
+      "runtimeStartupMs": [
+        22.58416699999998
+      ],
+      "commandMs": [
+        30.619625000000042
+      ],
+      "recoveryMs": null,
+      "providerInvocations": 4,
+      "approvalRequests": 0,
+      "deliveryCount": 1,
+      "persistedMessagesBeforeResume": 0,
+      "metrics": {
+        "providerCalls": 4,
+        "providerToolCalls": 3,
+        "toolCalls": 3,
+        "toolFailures": 0,
+        "providerIterations": 0,
+        "providerBudgetExhaustions": 0,
+        "promptAssemblies": 0,
+        "skillRouteEvents": 0,
+        "sessionRecallTriggered": false,
+        "sessionRecallCount": 1,
+        "sessionRecallWarningCount": 0,
+        "externalMemoryRecallCount": 0,
+        "memoryWrites": 0,
+        "memoryPromotions": 0,
+        "securityEscalations": 1,
+        "agentCancelled": false,
+        "contextUsageEvents": 15,
+        "inputTokens": 400,
+        "outputTokens": 40,
+        "totalTokens": 440,
+        "estimatedCostUsd": null
+      }
+    },
+    {
+      "scenario": "interrupted-resume",
+      "success": true,
+      "setupMs": 95.71174999999994,
+      "executionMs": 135.28279199999997,
+      "runtimeStartupMs": [
+        25.422791000000416,
+        20.684541999999965
+      ],
+      "commandMs": [
+        32.099874999999884
+      ],
+      "recoveryMs": 84.96274999999969,
+      "providerInvocations": 5,
+      "approvalRequests": 0,
+      "deliveryCount": 0,
+      "persistedMessagesBeforeResume": 6,
+      "metrics": {
+        "providerCalls": 5,
+        "providerToolCalls": 4,
+        "toolCalls": 4,
+        "toolFailures": 0,
+        "providerIterations": 0,
+        "providerBudgetExhaustions": 1,
+        "promptAssemblies": 0,
+        "skillRouteEvents": 0,
+        "sessionRecallTriggered": false,
+        "sessionRecallCount": 2,
+        "sessionRecallWarningCount": 0,
+        "externalMemoryRecallCount": 0,
+        "memoryWrites": 0,
+        "memoryPromotions": 0,
+        "securityEscalations": 2,
+        "agentCancelled": true,
+        "contextUsageEvents": 22,
+        "inputTokens": 500,
+        "outputTokens": 50,
+        "totalTokens": 550,
+        "estimatedCostUsd": null
+      }
+    },
+    {
+      "scenario": "code-edit",
+      "success": true,
+      "setupMs": 89.70695800000021,
+      "executionMs": 83.9670000000001,
+      "runtimeStartupMs": [
+        21.91924999999992
+      ],
+      "commandMs": [
+        34.34916699999985
+      ],
+      "recoveryMs": null,
+      "providerInvocations": 4,
+      "approvalRequests": 0,
+      "deliveryCount": 0,
+      "persistedMessagesBeforeResume": 0,
+      "metrics": {
+        "providerCalls": 4,
+        "providerToolCalls": 3,
+        "toolCalls": 3,
+        "toolFailures": 0,
+        "providerIterations": 0,
+        "providerBudgetExhaustions": 0,
+        "promptAssemblies": 0,
+        "skillRouteEvents": 0,
+        "sessionRecallTriggered": false,
+        "sessionRecallCount": 1,
+        "sessionRecallWarningCount": 0,
+        "externalMemoryRecallCount": 0,
+        "memoryWrites": 0,
+        "memoryPromotions": 0,
+        "securityEscalations": 1,
+        "agentCancelled": false,
+        "contextUsageEvents": 15,
+        "inputTokens": 400,
+        "outputTokens": 40,
+        "totalTokens": 440,
+        "estimatedCostUsd": null
+      }
+    },
+    {
+      "scenario": "authorized-channel",
+      "success": true,
+      "setupMs": 89.15200000000004,
+      "executionMs": 84.90766699999995,
+      "runtimeStartupMs": [
+        22.292124999999942
+      ],
+      "commandMs": [
+        31.07641599999988
+      ],
+      "recoveryMs": null,
+      "providerInvocations": 4,
+      "approvalRequests": 0,
+      "deliveryCount": 1,
+      "persistedMessagesBeforeResume": 0,
+      "metrics": {
+        "providerCalls": 4,
+        "providerToolCalls": 3,
+        "toolCalls": 3,
+        "toolFailures": 0,
+        "providerIterations": 0,
+        "providerBudgetExhaustions": 0,
+        "promptAssemblies": 0,
+        "skillRouteEvents": 0,
+        "sessionRecallTriggered": false,
+        "sessionRecallCount": 1,
+        "sessionRecallWarningCount": 0,
+        "externalMemoryRecallCount": 0,
+        "memoryWrites": 0,
+        "memoryPromotions": 0,
+        "securityEscalations": 1,
+        "agentCancelled": false,
+        "contextUsageEvents": 15,
+        "inputTokens": 400,
+        "outputTokens": 40,
+        "totalTokens": 440,
+        "estimatedCostUsd": null
+      }
+    },
+    {
+      "scenario": "scheduled-work",
+      "success": true,
+      "setupMs": 89.01408300000003,
+      "executionMs": 100.75570799999969,
+      "runtimeStartupMs": [
+        21.180457999999817
+      ],
+      "commandMs": [
+        33.57791700000007
+      ],
+      "recoveryMs": null,
+      "providerInvocations": 4,
+      "approvalRequests": 0,
+      "deliveryCount": 1,
+      "persistedMessagesBeforeResume": 0,
+      "metrics": {
+        "providerCalls": 4,
+        "providerToolCalls": 3,
+        "toolCalls": 3,
+        "toolFailures": 0,
+        "providerIterations": 0,
+        "providerBudgetExhaustions": 0,
+        "promptAssemblies": 0,
+        "skillRouteEvents": 0,
+        "sessionRecallTriggered": false,
+        "sessionRecallCount": 1,
+        "sessionRecallWarningCount": 0,
+        "externalMemoryRecallCount": 0,
+        "memoryWrites": 0,
+        "memoryPromotions": 0,
+        "securityEscalations": 1,
+        "agentCancelled": false,
+        "contextUsageEvents": 15,
+        "inputTokens": 400,
+        "outputTokens": 40,
+        "totalTokens": 440,
+        "estimatedCostUsd": null
+      }
+    },
+    {
+      "scenario": "interrupted-resume",
+      "success": true,
+      "setupMs": 94.68904100000009,
+      "executionMs": 127.35004200000003,
+      "runtimeStartupMs": [
+        22.835125000000062,
+        20.10133399999995
+      ],
+      "commandMs": [
+        32.17258300000003
+      ],
+      "recoveryMs": 79.78054199999997,
+      "providerInvocations": 5,
+      "approvalRequests": 0,
+      "deliveryCount": 0,
+      "persistedMessagesBeforeResume": 6,
+      "metrics": {
+        "providerCalls": 5,
+        "providerToolCalls": 4,
+        "toolCalls": 4,
+        "toolFailures": 0,
+        "providerIterations": 0,
+        "providerBudgetExhaustions": 1,
+        "promptAssemblies": 0,
+        "skillRouteEvents": 0,
+        "sessionRecallTriggered": false,
+        "sessionRecallCount": 2,
+        "sessionRecallWarningCount": 0,
+        "externalMemoryRecallCount": 0,
+        "memoryWrites": 0,
+        "memoryPromotions": 0,
+        "securityEscalations": 2,
+        "agentCancelled": true,
+        "contextUsageEvents": 22,
+        "inputTokens": 500,
+        "outputTokens": 50,
+        "totalTokens": 550,
+        "estimatedCostUsd": null
+      }
+    },
+    {
+      "scenario": "code-edit",
+      "success": true,
+      "setupMs": 94.41075000000001,
+      "executionMs": 83.28179200000022,
+      "runtimeStartupMs": [
+        22.019459000000097
+      ],
+      "commandMs": [
+        31.36695899999995
+      ],
+      "recoveryMs": null,
+      "providerInvocations": 4,
+      "approvalRequests": 0,
+      "deliveryCount": 0,
+      "persistedMessagesBeforeResume": 0,
+      "metrics": {
+        "providerCalls": 4,
+        "providerToolCalls": 3,
+        "toolCalls": 3,
+        "toolFailures": 0,
+        "providerIterations": 0,
+        "providerBudgetExhaustions": 0,
+        "promptAssemblies": 0,
+        "skillRouteEvents": 0,
+        "sessionRecallTriggered": false,
+        "sessionRecallCount": 1,
+        "sessionRecallWarningCount": 0,
+        "externalMemoryRecallCount": 0,
+        "memoryWrites": 0,
+        "memoryPromotions": 0,
+        "securityEscalations": 1,
+        "agentCancelled": false,
+        "contextUsageEvents": 15,
+        "inputTokens": 400,
+        "outputTokens": 40,
+        "totalTokens": 440,
+        "estimatedCostUsd": null
+      }
+    },
+    {
+      "scenario": "authorized-channel",
+      "success": true,
+      "setupMs": 89.30304100000012,
+      "executionMs": 89.18233299999974,
+      "runtimeStartupMs": [
+        22.443707999999788
+      ],
+      "commandMs": [
+        30.675125000000207
+      ],
+      "recoveryMs": null,
+      "providerInvocations": 4,
+      "approvalRequests": 0,
+      "deliveryCount": 1,
+      "persistedMessagesBeforeResume": 0,
+      "metrics": {
+        "providerCalls": 4,
+        "providerToolCalls": 3,
+        "toolCalls": 3,
+        "toolFailures": 0,
+        "providerIterations": 0,
+        "providerBudgetExhaustions": 0,
+        "promptAssemblies": 0,
+        "skillRouteEvents": 0,
+        "sessionRecallTriggered": false,
+        "sessionRecallCount": 1,
+        "sessionRecallWarningCount": 0,
+        "externalMemoryRecallCount": 0,
+        "memoryWrites": 0,
+        "memoryPromotions": 0,
+        "securityEscalations": 1,
+        "agentCancelled": false,
+        "contextUsageEvents": 15,
+        "inputTokens": 400,
+        "outputTokens": 40,
+        "totalTokens": 440,
+        "estimatedCostUsd": null
+      }
+    },
+    {
+      "scenario": "scheduled-work",
+      "success": true,
+      "setupMs": 89.65562499999987,
+      "executionMs": 98.48762500000021,
+      "runtimeStartupMs": [
+        22.509958000000097
+      ],
+      "commandMs": [
+        30.306916999999885
+      ],
+      "recoveryMs": null,
+      "providerInvocations": 4,
+      "approvalRequests": 0,
+      "deliveryCount": 1,
+      "persistedMessagesBeforeResume": 0,
+      "metrics": {
+        "providerCalls": 4,
+        "providerToolCalls": 3,
+        "toolCalls": 3,
+        "toolFailures": 0,
+        "providerIterations": 0,
+        "providerBudgetExhaustions": 0,
+        "promptAssemblies": 0,
+        "skillRouteEvents": 0,
+        "sessionRecallTriggered": false,
+        "sessionRecallCount": 1,
+        "sessionRecallWarningCount": 0,
+        "externalMemoryRecallCount": 0,
+        "memoryWrites": 0,
+        "memoryPromotions": 0,
+        "securityEscalations": 1,
+        "agentCancelled": false,
+        "contextUsageEvents": 15,
+        "inputTokens": 400,
+        "outputTokens": 40,
+        "totalTokens": 440,
+        "estimatedCostUsd": null
+      }
+    },
+    {
+      "scenario": "interrupted-resume",
+      "success": true,
+      "setupMs": 96.00162499999988,
+      "executionMs": 139.18899999999985,
+      "runtimeStartupMs": [
+        20.852208999999675,
+        27.844708000000082
+      ],
+      "commandMs": [
+        33.24287499999991
+      ],
+      "recoveryMs": 92.94816700000001,
+      "providerInvocations": 5,
+      "approvalRequests": 0,
+      "deliveryCount": 0,
+      "persistedMessagesBeforeResume": 6,
+      "metrics": {
+        "providerCalls": 5,
+        "providerToolCalls": 4,
+        "toolCalls": 4,
+        "toolFailures": 0,
+        "providerIterations": 0,
+        "providerBudgetExhaustions": 1,
+        "promptAssemblies": 0,
+        "skillRouteEvents": 0,
+        "sessionRecallTriggered": false,
+        "sessionRecallCount": 2,
+        "sessionRecallWarningCount": 0,
+        "externalMemoryRecallCount": 0,
+        "memoryWrites": 0,
+        "memoryPromotions": 0,
+        "securityEscalations": 2,
+        "agentCancelled": true,
+        "contextUsageEvents": 22,
+        "inputTokens": 500,
+        "outputTokens": 50,
+        "totalTokens": 550,
+        "estimatedCostUsd": null
+      }
+    },
+    {
+      "scenario": "code-edit",
+      "success": true,
+      "setupMs": 90.47541699999965,
+      "executionMs": 82.63012500000013,
+      "runtimeStartupMs": [
+        22.9170409999997
+      ],
+      "commandMs": [
+        31.248041000000285
+      ],
+      "recoveryMs": null,
+      "providerInvocations": 4,
+      "approvalRequests": 0,
+      "deliveryCount": 0,
+      "persistedMessagesBeforeResume": 0,
+      "metrics": {
+        "providerCalls": 4,
+        "providerToolCalls": 3,
+        "toolCalls": 3,
+        "toolFailures": 0,
+        "providerIterations": 0,
+        "providerBudgetExhaustions": 0,
+        "promptAssemblies": 0,
+        "skillRouteEvents": 0,
+        "sessionRecallTriggered": false,
+        "sessionRecallCount": 1,
+        "sessionRecallWarningCount": 0,
+        "externalMemoryRecallCount": 0,
+        "memoryWrites": 0,
+        "memoryPromotions": 0,
+        "securityEscalations": 1,
+        "agentCancelled": false,
+        "contextUsageEvents": 15,
+        "inputTokens": 400,
+        "outputTokens": 40,
+        "totalTokens": 440,
+        "estimatedCostUsd": null
+      }
+    },
+    {
+      "scenario": "authorized-channel",
+      "success": true,
+      "setupMs": 90.89599999999973,
+      "executionMs": 78.17041700000027,
+      "runtimeStartupMs": [
+        21.26983399999972
+      ],
+      "commandMs": [
+        29.06287499999962
+      ],
+      "recoveryMs": null,
+      "providerInvocations": 4,
+      "approvalRequests": 0,
+      "deliveryCount": 1,
+      "persistedMessagesBeforeResume": 0,
+      "metrics": {
+        "providerCalls": 4,
+        "providerToolCalls": 3,
+        "toolCalls": 3,
+        "toolFailures": 0,
+        "providerIterations": 0,
+        "providerBudgetExhaustions": 0,
+        "promptAssemblies": 0,
+        "skillRouteEvents": 0,
+        "sessionRecallTriggered": false,
+        "sessionRecallCount": 1,
+        "sessionRecallWarningCount": 0,
+        "externalMemoryRecallCount": 0,
+        "memoryWrites": 0,
+        "memoryPromotions": 0,
+        "securityEscalations": 1,
+        "agentCancelled": false,
+        "contextUsageEvents": 15,
+        "inputTokens": 400,
+        "outputTokens": 40,
+        "totalTokens": 440,
+        "estimatedCostUsd": null
+      }
+    },
+    {
+      "scenario": "scheduled-work",
+      "success": true,
+      "setupMs": 84.34270800000013,
+      "executionMs": 107.41729200000009,
+      "runtimeStartupMs": [
+        21.747041999999965
+      ],
+      "commandMs": [
+        39.69291599999997
+      ],
+      "recoveryMs": null,
+      "providerInvocations": 4,
+      "approvalRequests": 0,
+      "deliveryCount": 1,
+      "persistedMessagesBeforeResume": 0,
+      "metrics": {
+        "providerCalls": 4,
+        "providerToolCalls": 3,
+        "toolCalls": 3,
+        "toolFailures": 0,
+        "providerIterations": 0,
+        "providerBudgetExhaustions": 0,
+        "promptAssemblies": 0,
+        "skillRouteEvents": 0,
+        "sessionRecallTriggered": false,
+        "sessionRecallCount": 1,
+        "sessionRecallWarningCount": 0,
+        "externalMemoryRecallCount": 0,
+        "memoryWrites": 0,
+        "memoryPromotions": 0,
+        "securityEscalations": 1,
+        "agentCancelled": false,
+        "contextUsageEvents": 15,
+        "inputTokens": 400,
+        "outputTokens": 40,
+        "totalTokens": 440,
+        "estimatedCostUsd": null
+      }
+    },
+    {
+      "scenario": "interrupted-resume",
+      "success": true,
+      "setupMs": 87.87958299999991,
+      "executionMs": 142.30583299999944,
+      "runtimeStartupMs": [
+        21.20591599999989,
+        22.419457999999395
+      ],
+      "commandMs": [
+        44.62091700000019
+      ],
+      "recoveryMs": 96.31475000000046,
+      "providerInvocations": 5,
+      "approvalRequests": 0,
+      "deliveryCount": 0,
+      "persistedMessagesBeforeResume": 6,
+      "metrics": {
+        "providerCalls": 5,
+        "providerToolCalls": 4,
+        "toolCalls": 4,
+        "toolFailures": 0,
+        "providerIterations": 0,
+        "providerBudgetExhaustions": 1,
+        "promptAssemblies": 0,
+        "skillRouteEvents": 0,
+        "sessionRecallTriggered": false,
+        "sessionRecallCount": 2,
+        "sessionRecallWarningCount": 0,
+        "externalMemoryRecallCount": 0,
+        "memoryWrites": 0,
+        "memoryPromotions": 0,
+        "securityEscalations": 2,
+        "agentCancelled": true,
+        "contextUsageEvents": 22,
+        "inputTokens": 500,
+        "outputTokens": 50,
+        "totalTokens": 550,
+        "estimatedCostUsd": null
+      }
+    }
+  ]
+}

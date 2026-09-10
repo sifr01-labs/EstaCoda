@@ -86,3 +86,5 @@ Alias renames preserve a selection. Moves and removals require explicit reselect
 The selected profile can use **Local host** or **Sandboxed (Docker)** through the existing Setup Editor review/apply flow. Local host is the default and provides no OS containment; existing host channels and scheduled jobs do not need Docker. Docker bind/network controls and limitations are documented in [Docker execution](docker-execution.md). Workspace switching does not change execution policy or widen a grant.
 
 Selected channel workspaces obey the configured idle/daily Session reset policy. Activity and future Session rotation are persisted atomically in the profile workspace store; resets preserve the selected source and execution target. Legacy selections establish activity on first use, and older message timestamps cannot move activity backward. Explicit surface attachments retain their existing precedence. `/workspace` reports the selected profile’s configured backend and Docker bind/network choices; this is not a claim that a live container has been verified.
+
+PR 8 consolidates [release diagnostics, validation and migration guidance](execution-release.md).

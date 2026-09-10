@@ -56,7 +56,7 @@ To make the copy review-only, omit `application` or use:
 
 The outcome/scope is fixed for that copy. Expanded authority requires a freshly prepared copy and reviewed application plan. Revoke an application grant through the existing workspace approval store/controller; exports cannot create or renew a grant. A revoked grant blocks application and automated rollback.
 
-These local operator commands also support explicit workflows:
+These local operator commands also support explicit workflows (add `--json` to finish/apply/recover for detailed local inspection):
 
 ```bash
 estacoda --profile work workspace changes <copy-target-id>
