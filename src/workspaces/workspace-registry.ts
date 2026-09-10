@@ -40,11 +40,11 @@ export class WorkspaceRegistry {
       chmodSync(path, 0o600);
       this.transaction(() => {
         const version = this.db.query<{ user_version: number }>("pragma user_version").get()!.user_version;
-        if (version !== 0 && version !== 1) throw new Error("Unsupported workspace registry version. Upgrade EstaCoda before opening it.");
+        if (version !== 0 && version !== 1 && version !== 2) throw new Error("Unsupported workspace registry version. Upgrade EstaCoda before opening it.");
         this.db.exec(`create table if not exists workspaces (
           id text primary key, profile_id text not null, alias text not null unique,
           path text not null, hash text not null, revision integer not null check(revision > 0)
-        ); pragma user_version = 1;`);
+        ); pragma user_version = ${Math.max(version, 1)};`);
       });
     } catch (error) { this.db.close(); throw error; }
   }

@@ -9,6 +9,7 @@ import type { CliCommandResult, CliOptions } from "./cli.js";
 
 const help = [
   "estacoda workspace finish <copy-target-id>",
+  "estacoda workspace recover <change-artifact-id>",
   "estacoda workspace apply <change-artifact-id>",
   "estacoda workspace changes <copy-target-id>",
   "estacoda workspace copy <source-alias> <new-directory> <manifest.json>",
@@ -26,10 +27,10 @@ const help = [
 export async function workspaceCommand(options: CliOptions, args: string[]): Promise<CliCommandResult> {
   const [command, selector, value] = args;
   if (!command || args.includes("--help") || args.includes("-h")) return { handled: true, exitCode: 0, output: help };
-  if (["finish", "apply"].includes(command) && args.length === 2) {
+  if (["finish", "apply", "recover"].includes(command) && args.length === 2) {
     const store = new ChangeApplicationStore({ homeDir: options.homeDir, profileId: options.profileId ?? readActiveProfile({ homeDir: options.homeDir }).profileId });
     try {
-      const result = command === "finish" ? await store.finish(selector!, selector!) : await store.apply(selector!);
+      const result = command === "finish" ? await store.finish(selector!, selector!) : command === "recover" ? await store.recover(selector!) : await store.apply(selector!);
       return { handled: true, exitCode: ["attention", "conflict"].includes(result.status) ? 1 : 0, output: JSON.stringify(result, null, 2) };
     } catch (error) { return { handled: true, exitCode: 1, output: error instanceof Error ? error.message : String(error) }; }
     finally { store.close(); }

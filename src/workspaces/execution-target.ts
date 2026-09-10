@@ -65,6 +65,7 @@ export class ExecutionTargetStore extends WorkspaceRegistry {
         source: input.source, workspace, status: "available", manifestHash: input.manifestHash, directoryStamp: input.directoryStamp };
       this.db.query("insert into execution_targets values (?, ?, ?)").run(target.id, `copy:${workspace.identityHash}`, JSON.stringify(target));
       this.db.query("insert into copy_manifests values (?, ?)").run(target.id, JSON.stringify(input.manifest));
+      this.db.exec("pragma user_version = 2"); // Older readers must not reinterpret a copy root as a local target.
       return target;
     });
   }

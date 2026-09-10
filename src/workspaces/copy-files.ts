@@ -22,26 +22,26 @@ export function checkStamp(root: string, expected: DirectoryStamp): void {
   const current = stamp(root);
   if (current.dev !== expected.dev || current.ino !== expected.ino) throw new Error("Workspace directory was replaced.");
 }
-export function checkedFile(root: string, path: string): string {
+export function checkedFile(root: string, path: string, allowLinked = false): string {
   copyPath(path); stamp(root);
   const parts = path.split("/"); let current = root;
   for (const [index, part] of parts.entries()) {
     current = join(current, part);
     try {
       const info = fs.lstatSync(current);
-      if (info.isSymbolicLink() || (index < parts.length - 1 ? !info.isDirectory() : !info.isFile()) || info.nlink > 1 && info.isFile()) throw new Error("Copy paths require directories and unlinked regular files; symlinks and special files are forbidden.");
+      if (info.isSymbolicLink() || (index < parts.length - 1 ? !info.isDirectory() : !info.isFile()) || (info.nlink > (allowLinked ? 2 : 1)) && info.isFile()) throw new Error("Copy paths require directories and unlinked regular files; symlinks and special files are forbidden.");
     } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
   }
   return current;
 }
-export function snapshot(root: string, path: string): FileSnapshot | null {
-  const file = checkedFile(root, path);
+export function snapshot(root: string, path: string, allowLinked = false): FileSnapshot | null {
+  const file = checkedFile(root, path, allowLinked);
   let fd: number;
   try { fd = fs.openSync(file, fs.constants.O_RDONLY | fs.constants.O_NOFOLLOW | fs.constants.O_NONBLOCK); }
   catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return null; throw error; }
   try {
     const before = fs.fstatSync(fd);
-    if (!before.isFile() || before.nlink !== 1 || before.size > COPY_LIMITS.fileBytes || before.mode & 0o7000) throw new Error("Copy file exceeds limits or has unsafe mode/type.");
+    if (!before.isFile() || before.nlink > (allowLinked ? 2 : 1) || before.size > COPY_LIMITS.fileBytes || before.mode & 0o7000) throw new Error("Copy file exceeds limits or has unsafe mode/type.");
     const bytes = Buffer.alloc(before.size + 1); let count = 0;
     while (count < bytes.length) { const n = fs.readSync(fd, bytes, count, bytes.length - count, count); if (!n) break; count += n; }
     const after = fs.fstatSync(fd);
