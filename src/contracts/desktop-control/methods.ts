@@ -1,0 +1,50 @@
+import type { BootstrapResult, Capabilities, ControlCursor, InitializeParams, InitializeResult } from "./bootstrap.js";
+import type { ActivityProjection, ConnectionProjection, InboxProjection, ModelProjection, Page, ProviderProjection, TargetReference, WorkProjection } from "./projections.js";
+
+export type PageParams = { limit: number; cursor?: string };
+export type SessionControl = { operationId: string; sessionId: string; target: TargetReference };
+/** These acknowledge acceptance/settlement only; none proves an external effect occurred exactly once. */
+export type OperationReceipt = {
+  operationId: string; profileId: string; sessionId: string; target: TargetReference;
+  method: "sessions.send" | "sessions.cancelTurn" | "approvals.resolve";
+  state: "accepted" | "dispatched" | "completed" | "uncertain" | "unknown" | "expired";
+  cancellation: "not_requested" | "requested" | "confirmed";
+};
+export type SubscribeParams = { after: ControlCursor; events: Capabilities["events"] };
+export type SubscribeResult =
+  | { state: "subscribed"; subscriptionId: string; cursor: ControlCursor }
+  | { state: "snapshot_required"; reason: "instance_changed" | "stream_changed" | "cursor_expired" | "overflow" };
+export type MethodContracts = {
+  "control.initialize": { params: InitializeParams; result: InitializeResult };
+  "control.bootstrap": { params: Record<string, never>; result: BootstrapResult };
+  "control.subscribe": { params: SubscribeParams; result: SubscribeResult };
+  "control.unsubscribe": { params: { subscriptionId: string }; result: { removed: boolean } };
+  "control.cancelRequest": { params: { requestId: string }; result: { cancellationRequested: boolean } };
+  "work.list": { params: PageParams; result: Page<WorkProjection> };
+  "work.get": { params: { workId: string }; result: WorkProjection };
+  "work.activity": { params: PageParams & { workId: string }; result: Page<ActivityProjection> };
+  "inbox.list": { params: PageParams; result: Page<InboxProjection> };
+  "models.list": { params: PageParams; result: Page<ModelProjection> };
+  "providers.list": { params: PageParams; result: Page<ProviderProjection> };
+  "connections.list": { params: PageParams; result: Page<ConnectionProjection> };
+  "connections.get": { params: { connectionId: string }; result: ConnectionProjection };
+  "sessions.send": { params: SessionControl & { text: string }; result: OperationReceipt };
+  "sessions.cancelTurn": { params: SessionControl; result: OperationReceipt };
+  "approvals.resolve": { params: SessionControl & { approvalId: string; decision: "approved" | "denied" }; result: OperationReceipt };
+  "operations.inspect": { params: SessionControl & { method: OperationReceipt["method"] }; result: OperationReceipt };
+};
+export type MethodRequest<M extends keyof MethodContracts = keyof MethodContracts> = M extends keyof MethodContracts
+  ? { jsonrpc: "2.0"; id: string; method: M; params: MethodContracts[M]["params"] } : never;
+export type MethodSuccess<M extends keyof MethodContracts> = { jsonrpc: "2.0"; id: string; result: MethodContracts[M]["result"] };
+type EventBase = { profileId: string; subscriptionId: string; cursor: ControlCursor; timestamp: number };
+export type ControlEvent = EventBase & (
+  | { type: "control.ready"; payload: { state: "ready" } }
+  | { type: "work.changed"; payload: WorkProjection }
+  | { type: "activity.appended"; payload: ActivityProjection }
+  | { type: "attention.changed"; payload: { item: InboxProjection | null; itemId: string } }
+  | { type: "modelRoute.changed"; payload: ModelProjection }
+  | { type: "connection.changed"; payload: ConnectionProjection }
+  | { type: "service.warning"; payload: { reason: "resync_required" | "runtime_unavailable" | "configuration_changed" } }
+  | { type: "service.shutdown"; payload: { reason: "client_closed" | "profile_changed" | "service_restart" } }
+);
+export type EventNotification = { jsonrpc: "2.0"; method: "control.event"; params: ControlEvent };
