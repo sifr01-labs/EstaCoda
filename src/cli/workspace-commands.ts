@@ -1,8 +1,11 @@
+import { prepareTemporaryCopy } from "../workspaces/temporary-copy.js";
+import { readFileSync, statSync } from "node:fs";
 import { readActiveProfile } from "../config/profile-home.js";
 import { WorkspaceRegistry } from "../workspaces/workspace-registry.js";
 import type { CliCommandResult, CliOptions } from "./cli.js";
 
 const help = [
+  "estacoda workspace copy <source-alias> <new-directory> <manifest.json>",
   "estacoda workspace add <alias> [path]",
   "estacoda workspace list",
   "estacoda workspace show <alias-or-id>",
@@ -17,6 +20,14 @@ const help = [
 export async function workspaceCommand(options: CliOptions, args: string[]): Promise<CliCommandResult> {
   const [command, selector, value] = args;
   if (!command || args.includes("--help") || args.includes("-h")) return { handled: true, exitCode: 0, output: help };
+  if (command === "copy" && args.length === 4) {
+    try {
+      if (statSync(args[3]!).size > 1024 * 1024) throw new Error("Manifest is too large.");
+      const target = await prepareTemporaryCopy({ homeDir: options.homeDir, profileId: options.profileId ?? readActiveProfile({ homeDir: options.homeDir }).profileId,
+        source: selector!, destination: value!, manifest: JSON.parse(readFileSync(args[3]!, "utf8")) });
+      return { handled: true, exitCode: 0, output: JSON.stringify(target, null, 2) };
+    } catch (error) { return { handled: true, exitCode: 1, output: error instanceof Error ? error.message : String(error) }; }
+  }
   const count = command === "list" ? [1] : command === "add" ? [2, 3] : ["rename", "move"].includes(command) ? [3] : [2];
   if (!["add", "list", "show", "rename", "move", "remove", "open"].includes(command) || !count.includes(args.length)) {
     return { handled: true, exitCode: 1, output: help };

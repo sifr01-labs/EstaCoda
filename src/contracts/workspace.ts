@@ -36,3 +36,10 @@ export type LocalExecutionTarget = {
   workspace: WorkspaceIdentity;
   status: "available" | "archived";
 };
+
+export type TemporaryCopyTarget = Omit<LocalExecutionTarget, "kind"> & {
+  kind: "temporary-copy";
+  manifestHash: string;
+  directoryStamp: { dev: number; ino: number };
+};
+export type ExecutionTarget = LocalExecutionTarget | TemporaryCopyTarget;

@@ -1,6 +1,8 @@
+import { checkStamp } from "./copy-files.js";
+import type { SourceManifest } from "./temporary-copy.js";
 import { createHash, randomUUID } from "node:crypto";
 import { isAbsolute } from "node:path";
-import type { ExecutionTargetBinding, LocalExecutionTarget, SourceWorkspaceBinding, WorkspaceIdentity } from "../contracts/workspace.js";
+import type { ExecutionTarget, TemporaryCopyTarget, ExecutionTargetBinding, LocalExecutionTarget, SourceWorkspaceBinding, WorkspaceIdentity } from "../contracts/workspace.js";
 import { WorkspaceRegistry, resolveWorkspaceDirectory } from "./workspace-registry.js";
 
 export function parseWorkspaceIdentity(value: unknown): WorkspaceIdentity {
@@ -17,7 +19,7 @@ export function parseExecutionTargetBinding(value: unknown): ExecutionTargetBind
   return { schemaVersion: 1, targetId: binding.targetId, targetGeneration: binding.targetGeneration, workspace: parseWorkspaceIdentity(binding.workspace) };
 }
 
-export function targetBinding(target: LocalExecutionTarget): ExecutionTargetBinding {
+export function targetBinding(target: ExecutionTarget): ExecutionTargetBinding {
   return { schemaVersion: 1, targetId: target.id, targetGeneration: target.generation, workspace: { ...target.workspace } };
 }
 
@@ -37,24 +39,46 @@ export class ExecutionTargetStore extends WorkspaceRegistry {
     super(options);
     try { this.db.exec(`create table if not exists execution_targets (
       id text primary key, selection_key text not null unique, record_json text not null
-    )`); } catch (error) { this.close(); throw error; }
+    ); create table if not exists copy_manifests (target_id text primary key, record_json text not null)`); } catch (error) { this.close(); throw error; }
   }
 
-  getTarget(id: string): LocalExecutionTarget | undefined {
+  getTarget(id: string): ExecutionTarget | undefined {
     const row = this.db.query<{ record_json: string }>("select record_json from execution_targets where id = ?").get(id);
     if (!row) return undefined;
-    const target = JSON.parse(row.record_json) as LocalExecutionTarget;
+    const target = JSON.parse(row.record_json) as ExecutionTarget;
     parseExecutionTargetBinding(targetBinding(target));
     parseWorkspaceIdentity(target.source?.identity);
-    if (target.schemaVersion !== 1 || target.id !== id || target.profileId !== this.profileId || target.kind !== "local" ||
-      !["available", "archived"].includes(target.status) || target.source.identity.identityHash !== target.workspace.identityHash) {
+    if (target.schemaVersion !== 1 || target.id !== id || target.profileId !== this.profileId || !["local", "temporary-copy"].includes(target.kind) ||
+      !["available", "archived"].includes(target.status) || (target.kind === "local" && target.source.identity.identityHash !== target.workspace.identityHash)) {
       throw new Error("Invalid execution target ownership record.");
     }
+    if (target.kind === "temporary-copy" && (!/^[a-f0-9]{64}$/u.test(target.manifestHash) || !Number.isSafeInteger(target.directoryStamp?.dev) || !Number.isSafeInteger(target.directoryStamp?.ino))) throw new Error("Invalid temporary copy provenance.");
     return target;
   }
 
-  async acquireLocal(path: string, source?: SourceWorkspaceBinding): Promise<LocalExecutionTarget> {
+  async registerCopy(input: { id: string; source: SourceWorkspaceBinding; workspaceRoot: string; manifest: SourceManifest; manifestHash: string; directoryStamp: { dev: number; ino: number } }): Promise<TemporaryCopyTarget> {
+    const workspace = await resolveWorkspaceDirectory(input.workspaceRoot);
+    return this.transaction(() => {
+      const source = this.require(input.source.registeredWorkspaceId!);
+      if (source.locationRevision !== input.source.registeredWorkspaceRevision || source.identity.identityHash !== input.source.identity.identityHash) throw new Error("Source moved during copy preparation.");
+      const target: TemporaryCopyTarget = { schemaVersion: 1, profileId: this.profileId, id: input.id, kind: "temporary-copy", generation: 1,
+        source: input.source, workspace, status: "available", manifestHash: input.manifestHash, directoryStamp: input.directoryStamp };
+      this.db.query("insert into execution_targets values (?, ?, ?)").run(target.id, `copy:${workspace.identityHash}`, JSON.stringify(target));
+      this.db.query("insert into copy_manifests values (?, ?)").run(target.id, JSON.stringify(input.manifest));
+      return target;
+    });
+  }
+  copyManifest(id: string): SourceManifest {
+    const row = this.db.query<{ record_json: string }>("select record_json from copy_manifests where target_id=?").get(id);
+    const target = this.getTarget(id);
+    if (!row || target?.kind !== "temporary-copy" || createHash("sha256").update(row.record_json).digest("hex") !== target.manifestHash) throw new Error("Copy baseline provenance is unavailable.");
+    return JSON.parse(row.record_json) as SourceManifest;
+  }
+
+  async acquireLocal(path: string, source?: SourceWorkspaceBinding): Promise<ExecutionTarget> {
     const workspace = await resolveWorkspaceDirectory(path);
+    const copy = this.db.query<{ id: string }>("select id from execution_targets where selection_key=?").get(`copy:${workspace.identityHash}`);
+    if (copy) { const target = this.getTarget(copy.id)!; return this.validate(targetBinding(target), path); }
     const snapshot: SourceWorkspaceBinding = source === undefined ? { identity: workspace } : structuredClone(source);
     parseWorkspaceIdentity(snapshot.identity);
     if (snapshot.identity.identityHash !== workspace.identityHash) throw new Error("Local target source must match its working directory.");
@@ -80,13 +104,14 @@ export class ExecutionTargetStore extends WorkspaceRegistry {
     });
   }
 
-  async validate(value: ExecutionTargetBinding, path: string): Promise<LocalExecutionTarget> {
+  async validate(value: ExecutionTargetBinding, path: string): Promise<ExecutionTarget> {
     const binding = parseExecutionTargetBinding(value);
     const target = this.getTarget(binding.targetId);
     if (!target || target.status !== "available" || target.generation !== binding.targetGeneration ||
       target.workspace.identityHash !== binding.workspace.identityHash) throw new Error("Execution target is missing, stale or belongs to another profile.");
     const actual = await resolveWorkspaceDirectory(path);
     if (actual.identityHash !== target.workspace.identityHash) throw new Error("Session execution target belongs to a different workspace.");
+    if (target.kind === "temporary-copy") { checkStamp(actual.canonicalPath, target.directoryStamp); this.copyManifest(target.id); }
     return target;
   }
 }
