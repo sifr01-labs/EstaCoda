@@ -1,3 +1,4 @@
+import { ChangeAuthorizationStore, parseApplicationPlan } from "../workspaces/change-authorization.js";
 import { ChangeArtifactStore } from "../workspaces/change-artifact.js";
 import { prepareTemporaryCopy } from "../workspaces/temporary-copy.js";
 import { readFileSync, statSync } from "node:fs";
@@ -31,8 +32,12 @@ export async function workspaceCommand(options: CliOptions, args: string[]): Pro
   if (command === "copy" && args.length === 4) {
     try {
       if (statSync(args[3]!).size > 1024 * 1024) throw new Error("Manifest is too large.");
+      const manifest = JSON.parse(readFileSync(args[3]!, "utf8"));
+      const application = parseApplicationPlan(manifest.application ?? { version: 1, outcome: "review", paths: [] });
       const target = await prepareTemporaryCopy({ homeDir: options.homeDir, profileId: options.profileId ?? readActiveProfile({ homeDir: options.homeDir }).profileId,
-        source: selector!, destination: value!, manifest: JSON.parse(readFileSync(args[3]!, "utf8")) });
+        source: selector!, destination: value!, manifest });
+      const authority = new ChangeAuthorizationStore({ homeDir: options.homeDir, profileId: target.profileId });
+      try { await authority.authorize(target.id, application); } finally { authority.close(); }
       return { handled: true, exitCode: 0, output: JSON.stringify(target, null, 2) };
     } catch (error) { return { handled: true, exitCode: 1, output: error instanceof Error ? error.message : String(error) }; }
   }
