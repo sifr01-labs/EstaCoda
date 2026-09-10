@@ -6,6 +6,7 @@ import ts from "typescript";
 const root = fileURLToPath(new URL("../", import.meta.url));
 const entry = resolve(root, "apps/desktop/src/control-protocol.ts");
 const core = resolve(root, "src/contracts/control-protocol.ts");
+const desktopCore = resolve(root, "src/contracts/desktop-control");
 const facade = resolve(root, "packages/control-protocol/src");
 const config = ts.readConfigFile(resolve(root, "apps/desktop/tsconfig.json"), ts.sys.readFile);
 if (config.error) throw new Error(ts.flattenDiagnosticMessageText(config.error.messageText, "\n"));
@@ -15,7 +16,7 @@ const visited = new Set();
 function visit(path) {
   const file = realpathSync(path);
   if (visited.has(file)) return;
-  if (file !== entry && file !== core && !file.startsWith(facade + sep)) {
+  if (file !== entry && file !== core && !file.startsWith(facade + sep) && !file.startsWith(desktopCore + sep)) {
     throw new Error(`Protocol imports non-contract source: ${relative(root, file)}`);
   }
   visited.add(file);
