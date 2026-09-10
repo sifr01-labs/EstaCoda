@@ -23,7 +23,8 @@ const groups = {
     'src/execution/host-processes.test.ts', 'src/execution/host-execution-bounds.test.ts',
     'src/execution/docker-container.test.ts', 'src/execution/docker-processes.test.ts',
     'src/execution/docker-tool-boundary.test.ts', 'src/execution/docker-receipts.test.ts',
-    'src/runtime/live-execution-authority.test.ts'
+    'src/runtime/live-execution-authority.test.ts', 'src/execution/release-stress.test.ts',
+    'src/security/approval-scope.test.ts', 'src/security/workspace-approval-controller.test.ts'
   ],
   application: [
     'src/workspaces/copy-workflow.acceptance.test.ts', 'src/workspaces/change-authorization.test.ts',
