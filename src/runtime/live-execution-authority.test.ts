@@ -98,3 +98,13 @@ it("keeps background-process approval checks live after the launching operation 
     expect(owner.signal.aborted).toBe(true);
   } finally { await owner.settle(); owner.release(); environment.destroy(); await rm(root, { recursive: true, force: true }); }
 }, 5000);
+it("invalidates live authority when the selected execution policy changes", async () => {
+  const root = await mkdtemp(join(tmpdir(), "docker-policy-revision-"));
+  const trustStore = new WorkspaceTrustStore({ homeDir: root });
+  try {
+    await writeFile(join(root, "config.json"), JSON.stringify({ execution: { backend: "host" } }));
+    const check = await createLiveAuthority({ profileRoot: root, workspaceRoot: root, trustStore });
+    await writeFile(join(root, "config.json"), JSON.stringify({ execution: { backend: "docker", imageId: `sha256:${"a".repeat(64)}` } }));
+    await expect(check()).rejects.toThrow("configuration changed");
+  } finally { await rm(root, { recursive: true, force: true }); }
+});

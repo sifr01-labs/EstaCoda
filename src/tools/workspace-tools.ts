@@ -1725,7 +1725,7 @@ async function runCommand(
 ): Promise<ToolResult> {
   if (abortSignal?.aborted) return errorResult("Command cancelled before dispatch.");
   return new Promise((resolveResult) => {
-    const shell = resolveShell();
+    const shell = processes.shell?.() ?? resolveShell();
     const child = processes.spawn(shell.command, [...shell.args, command], {
       env: processes.environment({ homeDir: childProcessEnv?.homeDir, extra: { ...childProcessEnv?.extra, PWD: root } })
     });

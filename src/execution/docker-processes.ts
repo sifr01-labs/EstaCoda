@@ -11,17 +11,18 @@ export class DockerProcessScope implements HostProcesses {
   readonly #children = new Map<ChildProcess, { receipt: DockerReceipt; releaseAuthority(): void; cleanup?: Promise<void> }>();
   #released = false;
   constructor(readonly container: DockerContainer, readonly homeDir?: string) { this.#local = new HostProcessScope(container.workspace.canonicalPath); }
+  shell() { return { command: "/bin/bash", args: ["-c"] }; }
   environment(options: SafeChildEnvOptions = {}): Record<string, string> {
     if (this.#released) throw new Error("Docker process scope was released.");
-    if (Object.keys(options.extra ?? {}).length) throw new Error("Docker credential/environment injection is not configured. Use an approved execution capability.");
-    return { HOME: "/tmp", TMPDIR: "/tmp", PATH: "/usr/local/bin:/usr/bin:/bin", LANG: "C.UTF-8", PYTHONDONTWRITEBYTECODE: "1" };
+    if (Object.entries(options.extra ?? {}).some(([key, value]) => key !== "PWD" || value !== this.container.workspace.canonicalPath)) throw new Error("Docker credential/environment injection is not configured. Use an approved execution capability.");
+    return { PWD: this.container.workspace.canonicalPath, HOME: "/tmp", TMPDIR: "/tmp", PATH: "/usr/local/bin:/usr/bin:/bin", LANG: "C.UTF-8", PYTHONDONTWRITEBYTECODE: "1" };
   }
   spawn(command: string, args: readonly string[], options: HostSpawnOptions = {}): ChildProcessWithoutNullStreams {
     if (this.#released) throw new Error("Docker process scope was released.");
     const receipt: DockerReceipt = { name: `estacoda-exec-${randomUUID()}`, owner: randomUUID() };
-    const env = options.env ?? this.environment();
-    const allowed = new Set([...Object.keys(this.environment()), "ESTACODA_INPUT_JSON", "ESTACODA_ALLOWED_TOOLS_JSON"]);
-    if (Object.keys(env).some((key) => !allowed.has(key))) throw new Error("Docker command requested an unapproved environment capability.");
+    const env = { ...this.environment(), ...options.env };
+    const fixed: Record<string, string> = { ...this.environment(), GIT_CONFIG_NOSYSTEM: "1", GIT_CONFIG_GLOBAL: "/dev/null", GIT_CONFIG_SYSTEM: "/dev/null", GIT_PAGER: "cat", GIT_TERMINAL_PROMPT: "0", GIT_EDITOR: "true", GIT_ASKPASS: "true", SSH_ASKPASS: "true", LC_ALL: "C" };
+    if (Object.entries(env).some(([key, value]) => typeof value !== "string" || !(fixed[key] === value || (key === "LANG" && value === "C") || ["ESTACODA_INPUT_JSON", "ESTACODA_ALLOWED_TOOLS_JSON"].includes(key)))) throw new Error("Docker command requested an unapproved environment capability.");
     const packet = JSON.stringify({ endpoint: this.container.client.endpoint, receipt, profileId: this.container.profileId,
       workspaceRoot: this.container.workspace.canonicalPath, homeDir: this.homeDir ?? this.container.receipts.homeDir, policy: this.container.policy, command, args, env });
     if (Buffer.byteLength(packet) > 1024 * 1024) throw new Error("Docker command input exceeds its limit.");

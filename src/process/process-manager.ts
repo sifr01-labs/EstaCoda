@@ -159,7 +159,7 @@ export class ProcessManager {
 
   #spawn(record: InternalManagedProcess, protectedEnvironment?: Record<string, string>): void {
     try {
-      const shell = resolveShell();
+      const shell = this.#processScope.shell?.() ?? resolveShell();
       const child = this.#processScope.spawn(shell.command, [...shell.args, record.command], {
         env: {
           ...this.#processScope.environment({ homeDir: this.#childProcessEnv?.homeDir, extra: this.#childProcessEnv?.extra }),

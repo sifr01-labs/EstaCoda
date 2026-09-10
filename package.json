@@ -51,6 +51,7 @@
     "validate:install": "scripts/validate-install-update.sh",
     "validate:source-install": "scripts/validate-source-install.sh",
     "validate:uninstall": "pnpm exec vitest run src/lifecycle/uninstall.test.ts src/cli/uninstall-command.test.ts",
+    "validate:execution-docker": "node --import tsx scripts/validate-docker-execution.ts",
     "validate:docker": "scripts/validate-docker-image.sh",
     "validate:homebrew": "scripts/validate-homebrew-handoff.sh",
     "start": "node dist/index.js",

@@ -761,7 +761,7 @@ async function runCronScript(job: CronJob, context: CronRunContext, execution: C
       try {
         return await acquired.executionOwner.run(async () => {
           await acquired.executionLease.files.realpath(scriptReal);
-          return await spawnCronScript({ command: invocation.command,
+          return await spawnCronScript({ command: acquired.executionFacts.backend === "docker" && extname(scriptReal).toLowerCase() === ".ts" ? "node" : invocation.command,
             args: [...invocation.args, ...(job.scriptArgs ?? [])], lease: acquired.executionLease,
             childProcessEnv: execution.childProcessEnv, timeoutMs: boundedTimeout(job.scriptTimeoutMs) });
         });

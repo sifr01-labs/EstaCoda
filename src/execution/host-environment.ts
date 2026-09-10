@@ -94,6 +94,7 @@ export class HostEnvironment {
         assertMaterialized: () => { assertActive(); return this.#content.assertMaterialized(); }
       },
       processes: {
+        ...(scope.processes.shell ? { shell: () => { assertActive(); return scope.processes.shell!(); } } : {}),
         environment: (options) => { assertActive(); return scope.processes.environment(options); },
         spawn: (command, args, options) => { assertActive(); return scope.processes.spawn(command, args, options); },
         terminate: (child, signal) => scope.processes.terminate(child, signal)

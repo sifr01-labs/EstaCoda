@@ -7,7 +7,7 @@ import { buildSafeChildEnv, type SafeChildEnvOptions } from "../security/process
 import { spawn, type ChildProcess, type ChildProcessWithoutNullStreams } from "node:child_process";
 
 export type HostSpawnOptions = { env?: NodeJS.ProcessEnv; input?: boolean };
-export type HostProcesses = Pick<HostProcessScope, "spawn" | "terminate" | "environment">;
+export type HostProcesses = Pick<HostProcessScope, "spawn" | "terminate" | "environment"> & { shell?(): { command: string; args: string[] } };
 type OwnedChild = { child: ChildProcess; closed: Promise<void>; settled: boolean; cleanupError?: unknown; stopping?: Promise<void>; releaseAuthority(): void };
 
 /** One resource owner, even when several owners share a workspace/environment.

@@ -1,3 +1,4 @@
+import { selectedExecutionPolicy } from "../execution/docker-policy.js";
 import { verifyHostExecution } from "../execution/host-authority.js";
 import { localApprovalScope, type ApprovalExecutionScope } from "../security/approval-scope.js";
 import { assertPendingAction, createPendingAction, exactActionKey, securityActionKey, type PendingActionApproval } from "../security/pending-action-approval.js";
@@ -686,7 +687,10 @@ export class AcpServer {
         const current = await this.#sessionDb.getSessionForProfile(session.estacodaSessionId, this.#profileId);
         if (current === undefined || controller.signal.aborted) throw new Error("Approval session is no longer active.");
         await validateSessionWorkspaceOwnership({ session: current, profileId: this.#profileId, workspaceRoot: session.workspaceRoot, homeDir: this.#homeDir });
-        assertPendingAction(pending, localApprovalScope(this.#profileId, session.estacodaSessionId, await verifyHostExecution(session.workspaceRoot)), 0);
+        await session.runtime.validateExecutionHealth?.();
+        const facts = session.runtime.executionFacts?.();
+        if (!facts && (await selectedExecutionPolicy({ profileId: this.#profileId, homeDir: this.#homeDir })).backend === "docker") throw new Error("Docker approval needs current verified runtime facts.");
+        assertPendingAction(pending, localApprovalScope(this.#profileId, session.estacodaSessionId, facts ?? await verifyHostExecution(session.workspaceRoot)), 0);
         session.grants.pending.delete(pending.id);
         applyPermissionSelection(session, exactActionKey([pending.executionScope, pending.actionKey]), permissionOutcome.optionId);
         this.#notify({
@@ -1613,8 +1617,10 @@ function createAcpSecurityPolicy(
     assessor: options.assessor
   });
   const assess = async (request: SecurityRequest) => {
-    request.executionScope = options.executionScope;
-    const targetKey = exactActionKey([options.executionScope, securityActionKey(request)]);
+    const scope = request.executionScope ?? options.executionScope;
+    if (scope.profileId !== options.executionScope.profileId || scope.sessionId !== options.executionScope.sessionId || scope.workspaceIdentityHash !== options.executionScope.workspaceIdentityHash) throw new Error("ACP execution scope mismatch.");
+    request.executionScope = scope;
+    const targetKey = exactActionKey([scope, securityActionKey(request)]);
     if (assessHardlineFloor(request.command ?? "") !== undefined || !request.context.trustedWorkspace || basePolicy.decide(request) === "deny") return await assessSecurityPolicy(basePolicy, request, options.mode ?? "adaptive");
     if (
       options.allowEditorRead === true &&

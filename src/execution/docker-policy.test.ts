@@ -14,9 +14,9 @@ it("keeps host default and rejects unsupported Docker authority and mutable imag
 });
 it("probes without image acquisition and blocks a missing security floor", async () => {
   const client = new DockerClient("unix:///tmp/docker.sock");
-  const run = vi.spyOn(client, "run").mockResolvedValueOnce(JSON.stringify({ OSType: "linux", SecurityOptions: ["name=seccomp,profile=builtin"] })).mockRejectedValueOnce(new Error("missing image"));
+  const run = vi.spyOn(client, "run").mockResolvedValueOnce(JSON.stringify({ OSType: "linux", CgroupVersion: "2", SecurityOptions: ["name=seccomp,profile=builtin"] })).mockRejectedValueOnce(new Error("missing image"));
   expect(await probeDocker(client)).toEqual({ available: true, imageId: undefined });
   expect(run.mock.calls.map((call) => call[0][0])).toEqual(["info", "image"]);
-  run.mockResolvedValue(JSON.stringify({ OSType: "linux", SecurityOptions: [] }));
+  run.mockResolvedValue(JSON.stringify({ OSType: "linux", CgroupVersion: "2", SecurityOptions: [] }));
   expect((await probeDocker(client)).available).toBe(false);
 });

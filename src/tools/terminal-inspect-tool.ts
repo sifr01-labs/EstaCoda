@@ -137,7 +137,7 @@ function runInspectionCommand(input: {
     const [command, ...args] = executableArgv;
     let child: ChildProcessByStdio<null, Readable, Readable> | ChildProcessWithoutNullStreams;
     try {
-      child = input.spawnProcess === undefined ? input.processes.spawn(command!, args, { env: command === "git" ? safeGitEnv() : safeInspectEnv() }) : input.spawnProcess(command!, args, {
+      child = input.spawnProcess === undefined ? input.processes.spawn(command!, args, { env: { ...(command === "git" ? safeGitEnv() : safeInspectEnv()), PATH: input.processes.environment().PATH } }) : input.spawnProcess(command!, args, {
         cwd: input.root,
         env: command === "git" ? safeGitEnv() : safeInspectEnv(),
         shell: false,
