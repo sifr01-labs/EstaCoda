@@ -15,20 +15,24 @@ function packet() {
       try { resolve(JSON.parse(bytes.subarray(0, end))); } catch (error) { reject(error); }
     };
     process.stdin.on("data", read);
+    process.stdin.once("end", () => reject(new Error("Command packet missing")));
+    process.stdin.once("error", reject);
   });
 }
-let container, stopping;
+let container, stopping, preparing;
+let requestedStop;
 const finish = (code) => stopping ??= (async () => {
-  try { await container?.release(); process.exit(code); }
+  try { await preparing?.catch(() => {}); await container?.release(); process.exit(code); }
   catch { process.stderr.write("Owned Docker cleanup is uncertain.\n"); process.exit(125); }
 })();
-process.on("SIGTERM", () => { void finish(143); });
-process.on("SIGINT", () => { void finish(130); });
+process.on("SIGTERM", () => { requestedStop = 143; void finish(143); });
+process.on("SIGINT", () => { requestedStop = 130; void finish(130); });
 try {
   const input = await packet();
   const client = new DockerClient(input.endpoint);
-  container = await DockerContainer.prepare({ client, profileId: input.profileId, workspaceRoot: input.workspaceRoot, homeDir: input.homeDir, policy: input.policy, receipt: input.receipt });
-  if (stopping) await finish(143);
+  preparing = DockerContainer.prepare({ client, profileId: input.profileId, workspaceRoot: input.workspaceRoot, homeDir: input.homeDir, policy: input.policy, receipt: input.receipt }).then((value) => { container = value; });
+  await preparing;
+  if (requestedStop) await finish(requestedStop);
   const bootstrap = `import os,json
 b=bytearray()
 while True:

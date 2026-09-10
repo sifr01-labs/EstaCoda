@@ -33,7 +33,7 @@ export async function acquireRuntimeContext(input: {
   const container = policy.backend === "docker" ? await DockerContainer.prepare({ profileId, workspaceRoot, homeDir: options.homeDir, policy }) : undefined;
   if (container) rollback.defer(() => container.release());
   const hostEnvironment = container ? HostEnvironment.prepared(profileId, container.facts, {
-    files: (active) => new DockerWorkspaceFiles(container, active), processes: () => new DockerProcessScope(container, options.homeDir), dispose: () => container.release()
+    files: (active, processes) => new DockerWorkspaceFiles(container, active, processes, options.homeDir), processes: () => new DockerProcessScope(container, options.homeDir), dispose: () => container.release()
   }) : await HostEnvironment.create({ profileId, workspaceRoot, policy });
   rollback.defer(() => hostEnvironment.destroy());
   const executionLease = hostEnvironment.acquire({ profileId, sessionId,

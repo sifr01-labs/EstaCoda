@@ -32,7 +32,7 @@ export class HostEnvironment {
   readonly facts: Readonly<ExecutionFacts>;
   readonly profileId: string;
   readonly #content: EditorContentView;
-  readonly #driver?: { files(assertActive: () => void): WorkspaceFiles; processes(): HostProcesses & OwnedExecutionResource; dispose(): Promise<void> };
+  readonly #driver?: { files(assertActive: () => void, processes?: HostProcesses): WorkspaceFiles; processes(): HostProcesses & OwnedExecutionResource; dispose(): Promise<void> };
   readonly #scopes = new Set<Scope>();
   #retainers = 0;
   #destroyed = false;
@@ -98,7 +98,7 @@ export class HostEnvironment {
         spawn: (command, args, options) => { assertActive(); return scope.processes.spawn(command, args, options); },
         terminate: (child, signal) => scope.processes.terminate(child, signal)
       },
-      files: this.#driver?.files(assertActive) ?? new HostWorkspaceFiles(this.facts.workspace.canonicalPath, assertActive),
+      files: this.#driver?.files(assertActive, scope.processes) ?? new HostWorkspaceFiles(this.facts.workspace.canonicalPath, assertActive),
       scopeId: scope.id, context: scope.context, facts: this.facts,
       workspaceRoot: this.facts.workspace.canonicalPath, signal: scope.controller.signal,
       assertActive,
@@ -159,6 +159,6 @@ export type HostExecutionLease = {
   release(): Promise<void>;
 };
 
-type EnvironmentDriver = { files(assertActive: () => void): WorkspaceFiles; processes(): HostProcesses & OwnedExecutionResource; dispose(): Promise<void> };
+type EnvironmentDriver = { files(assertActive: () => void, processes?: HostProcesses): WorkspaceFiles; processes(): HostProcesses & OwnedExecutionResource; dispose(): Promise<void> };
 /** Compatibility export: both host and Docker implement this owned lease contract. */
 export type ExecutionLease = HostExecutionLease;

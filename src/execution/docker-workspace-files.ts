@@ -1,3 +1,5 @@
+import { DockerProcessScope } from "./docker-processes.js";
+import type { HostProcesses } from "./host-processes.js";
 import { readFile } from "node:fs/promises";
 import { resolve } from "node:path";
 import type { Stats, Dirent } from "node:fs";
@@ -8,7 +10,7 @@ import { DockerContainer } from "./docker-container.js";
 let worker: Promise<string> | undefined;
 
 export class DockerWorkspaceFiles implements WorkspaceFiles {
-  constructor(readonly container: DockerContainer, readonly assertActive: () => void = () => {}) {}
+  constructor(readonly container: DockerContainer, readonly assertActive: () => void = () => {}, readonly processes?: HostProcesses, readonly homeDir?: string) {}
   async #call(op: string, path: string | undefined, extra: Record<string, unknown> = {}): Promise<any> {
     this.assertActive();
     const root = this.container.workspace.canonicalPath;
@@ -22,10 +24,12 @@ export class DockerWorkspaceFiles implements WorkspaceFiles {
     await this.container.verify();
     const script = await (worker ??= readFile(new URL("../../workers/docker/files.py", import.meta.url), "utf8"));
     this.assertActive();
-    return new Promise((accept, reject) => {
-      const child = this.container.client.spawn(["exec", "-i", "--user", this.container.user, this.container.id, "python3", "-c", script]);
+    const owned = this.processes ? undefined : new DockerProcessScope(this.container, this.homeDir);
+    const processes = this.processes ?? owned!;
+    try { return await new Promise((accept, reject) => {
+      const child = processes.spawn("python3", ["-c", script], { input: true });
       let output = "", size = 0, failed = false;
-      const fail = (error: Error) => { if (failed) return; failed = true; child.kill(); reject(error); };
+      const fail = (error: Error) => { if (failed) return; failed = true; void processes.terminate(child).then(() => reject(error), (cleanup) => reject(new AggregateError([error, cleanup], "Docker workspace cleanup is uncertain."))); };
       const timer = setTimeout(() => fail(new Error("Docker workspace operation timed out; outcome may be uncertain.")), 30_000);
       child.stdout.on("data", (chunk: Buffer) => { size += chunk.length; if (size>12*1024*1024) fail(new Error("Docker workspace response exceeds its limit.")); else output += chunk.toString("utf8"); });
       child.stderr.on("data", () => {});
@@ -42,7 +46,7 @@ export class DockerWorkspaceFiles implements WorkspaceFiles {
         } catch (error) { reject(error); }
       });
       child.stdin.end(input);
-    });
+    }); } finally { await owned?.release(); }
   }
   async resolvePath(path: string | undefined, options: WorkspacePathOptions = {}): Promise<WorkspacePathResolution> {
     try {
