@@ -315,7 +315,7 @@ There is no top-level `channels.busyPolicy`, `channels.queueDepth`, or `channels
 
 ## Workspace selection, setup and service installation
 
-New channels use the existing setup review/apply path for workspace trust, security mode, credentials and caller authorization. No separate channel setup wizard or implicit Docker installation is introduced. The available workspace execution mode is Local host; see [channel workspace selection](workspaces.md#select-a-channel-workspace).
+New channels use the existing setup review/apply path for workspace trust, security mode, credentials and caller authorization. No separate channel setup wizard or implicit Docker installation is introduced. Local host is the default; optional Sandboxed (Docker) is selected in the same profile through Setup Editor. See [channel workspace selection](workspaces.md#select-a-channel-workspace) and [Docker authority and limits](docker-execution.md).
 
 The supervisor stores future workspace/Session bindings in the owning profile's `workspaces.sqlite`. Channel Session mapping format 2 also records the profile and uses full normalized surface keys. Old underspecified mappings and attachments are not sufficient evidence to attach an account or thread: create a new checked handoff where needed. Existing explicitly configured host operation remains available.
 

@@ -1,6 +1,6 @@
 # Host execution and lifecycle
 
-PR 3 supplies the host execution lease used by the core runtime. It runs on the operator's machine and does not provide filesystem, network, or operating-system containment. Workspace trust, command approvals and the hardline floor still apply. PR 4 adds [exclusive cross-process Session ownership and shared control](runtime-ownership.md). Docker remains a later slice.
+PR 3 supplies the host execution lease used by the core runtime. It runs on the operator's machine and does not provide filesystem, network, or operating-system containment. Workspace trust, command approvals and the hardline floor still apply. PR 4 adds [exclusive cross-process Session ownership and shared control](runtime-ownership.md). PR 6 adds [optional Docker execution](docker-execution.md) without making it a requirement for Local host.
 
 ## Ownership and execution view
 
@@ -17,7 +17,7 @@ The selected view supplies:
 
 A runtime with a selected lease does not fall back to a caller-supplied workspace or an unrelated host filesystem for these operations. Standalone tool constructors retain a host implementation for local callers and tests. Glob's fallback when ripgrep is missing traverses the selected files backend.
 
-Managed capability state is a separate boundary: profile/global configuration, credentials, memory, package installation, browser services, media caches, artifact retention and network integrations keep their existing gates. Document probes may read explicitly configured profile channel-media roots. Those roots do not become workspace roots. This slice does not make these management services container-ready; a future backend must explicitly support, adapt or reject each capability boundary.
+Managed capability state is a separate boundary: profile/global configuration, credentials, memory, package installation, browser services, media caches, artifact retention and network integrations keep their existing gates. Document probes may read explicitly configured profile channel-media roots. Those roots do not become workspace roots. The Docker backend blocks unadapted model-visible host capabilities and rejects document roots outside its workspace; see its [capability boundary](docker-execution.md#what-runs-inside-docker).
 
 ## Editor content and disk
 
@@ -66,6 +66,6 @@ PR 4 remains necessary for persisted exclusive Session ownership, fences, shared
 
 ## Script-backed cron and cancellation settlement
 
-Script-backed cron runs, including `noAgent` runs, acquire an established Session target, persisted execution owner and host lease without constructing a provider runtime. The runner requires an explicit selected-profile `scriptExecution` context and current workspace trust. Script processes use the lease's isolated environment, bounded output and process-tree termination. Trusted scheduler adapters can supply intentional configuration through `scriptExecution.childProcessEnv.extra`; scripts no longer inherit the supervisor's full environment. The CLI and supervisor supply their selected profile/state context.
+Script-backed cron runs, including `noAgent` runs, acquire an established Session target, persisted execution owner and selected execution lease without constructing a provider runtime. The runner requires an explicit selected-profile `scriptExecution` context and current workspace trust. Script processes use the lease's isolated environment, bounded output and process-tree termination. Trusted scheduler adapters can supply intentional configuration through `scriptExecution.childProcessEnv.extra`; scripts no longer inherit the supervisor's full environment. The CLI and supervisor supply their selected profile/state context.
 
 A timed-out or cancelled Python harness retains its scope until accepted nested calls settle. The Session owner also tracks actual tool promises when the caller stops awaiting an aborted operation. A non-cooperative operation may therefore keep disposal and handoff pending; cancellation is not reported as proof of successful cleanup.

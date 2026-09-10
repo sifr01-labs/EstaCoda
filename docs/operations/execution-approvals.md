@@ -1,17 +1,17 @@
 ---
 title: "Execution authority and approval reuse"
-description: "Verified host facts, scoped approvals, renewal, and revocation."
+description: "Verified execution facts, scoped approvals, renewal, and revocation."
 ---
 
 # Execution authority and approval reuse
 
-EstaCoda runs on the host in this release. A configured environment label does not establish a sandbox or reduce command risk. Ordinary trusted host workflows remain available under the selected security mode; hardline blocks and deterministic denials still take precedence over approvals.
+EstaCoda defaults to Local host and supports [optional Docker execution](docker-execution.md). A configured environment label does not establish a sandbox or reduce command risk. Ordinary trusted host workflows remain available under the selected security mode; hardline blocks and deterministic denials still take precedence over approvals.
 
 ## Host facts and requested controls
 
 Runtime construction verifies the canonical workspace directory and produces core-owned host facts. These report read/write host access, unrestricted command networking, no filesystem or network containment, unverified inherited credential isolation, host lifetime, and unverified resource limits. Existing tool-specific safety checks and limits still apply; these facts do not claim an environment-wide guarantee.
 
-The programmatic `requestedExecutionPolicy` option supports mandatory and advisory controls. A mandatory unsupported control, such as network disablement, read-only host containment, credential isolation, session lifetime or aggregate resource limits, blocks runtime construction. An advisory unsupported control appears as a degradation in `runtime.executionFacts()`. An unsupported backend never silently falls back to host execution. These are core runtime contracts; no model-visible tool or new CLI configuration surface is added.
+The programmatic `requestedExecutionPolicy` option supports mandatory and advisory controls. A mandatory unsupported control, such as network disablement, read-only host containment, credential isolation, session lifetime or aggregate resource limits, blocks runtime construction. An advisory unsupported control appears as a degradation in `runtime.executionFacts()`. An unsupported backend never silently falls back to host execution. These are core runtime contracts; the Setup Editor now records Docker backend, bind and networking choices through reviewed apply.
 
 The stable authority fingerprint includes the actual host policy and canonical workspace identity. Display names, workspace aliases, verification timestamps and process instance IDs do not change reusable authority. Host facts cannot be established by copying JSON into tool input.
 
@@ -53,7 +53,7 @@ The existing Session database and queue payload hold pending bindings. No second
 
 ## Limits
 
-PR 3 and PR 4 add owned host resources, credential filtering, fenced Session execution and cancellation after live authority revocation; see [runtime ownership and its limits](runtime-ownership.md). These checks cannot undo an external operation already dispatched or provide OS containment. Managed worktrees and Docker remain later work. This release is not evidence of multi-tenant isolation.
+PR 3 and PR 4 add owned host resources, credential filtering, fenced Session execution and cancellation after live authority revocation; see [runtime ownership and its limits](runtime-ownership.md). These checks cannot undo an external operation already dispatched or provide OS containment. Docker adds verified per-container controls and distinct approval fingerprints; writable binds retain host-equivalent workspace mutation risk. Managed worktrees remain later work. This release is not evidence of multi-tenant isolation.
 
 The tests use temporary local state, synthetic providers, separate Node processes and real SQLite/JSON persistence. They verify scope separation, one-time argument binding, reuse, legacy renewal, concurrent writes, owner death and revoke/regrant fencing. They do not establish production latency, live-provider cost or remote-environment isolation.
 
@@ -62,3 +62,7 @@ The tests use temporary local state, synthetic providers, separate Node processe
 A channel-origin cron runtime can reuse the originating surface's persistent grant across new execution Sessions when the workspace, host authority and reviewed action scope still match. Origin attribution comes from the authenticated gateway; tool arguments cannot supply it. Current channel authorization, workspace trust and target validity are rechecked before execution, during active authority validation and before delivery.
 
 The origin also restricts cron job management, upstream-output context and jobs created by a scheduled agent. Other surfaces cannot inspect or revoke a scoped grant merely by sharing a chat ID. Legacy jobs and unscoped grants are not automatically adopted. See [cron authority and migration](../subsystems/cron.md#channel-origin-recurring-authority).
+
+## Docker authority
+
+Docker fingerprints include the verified image, user, workspace access, networking and resource limits. A host grant, another image or a different bind/network policy cannot supply equivalent Docker authority. Pending decisions also bind to the live environment instance. CLI, ACP, gateway and channel-origin recurring work preserve these actual facts. A restarted Docker environment requires renewed pending approval; an equivalent persistent scoped grant can still match after current verification. Admission blocks unsupported host tools before execution, including nested code-tool calls, regardless of an allowing security policy. Changing profile execution policy invalidates live authority and runtime caches.

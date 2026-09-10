@@ -69,7 +69,7 @@ Workspace selection also supplies core-verified host facts for approval scope. A
 
 ## Limits and verification
 
-Core execution uses persisted Session ownership and fences, serialized runtime acquisition, private Unix supervisor control and active authority validation. See [runtime ownership and its limits](runtime-ownership.md). PR 5 adds scoped channel workspace selection and recurring authority. Packaged Desktop integration, managed worktrees, Windows shared control, Docker and containment remain separate delivery gates.
+Core execution uses persisted Session ownership and fences, serialized runtime acquisition, private Unix supervisor control and active authority validation. See [runtime ownership and its limits](runtime-ownership.md). PR 5 adds scoped channel workspace selection and recurring authority. Packaged Desktop integration, managed worktrees, Windows shared control and the remaining release matrix remain separate delivery gates. PR 6 supplies [optional Docker containment](docker-execution.md).
 
 Coverage includes independent-process alias/move/target/Session races, legacy database reopening, canonical path aliases, trust separation, immutable Session/Task bindings, CLI and channel pointer preservation, and ACP rejection before transcript replay. The session-continuation smoke case uses real temporary directories and SQLite targets. These are local deterministic tests, not live-provider, Desktop or multi-tenant isolation evidence.
 
@@ -83,4 +83,4 @@ Selection is blocked while work, preprocessing, queued input, debounce buffers o
 
 Alias renames preserve a selection. Moves and removals require explicit reselection; they do not redirect old Sessions or jobs. `/switch` and `/attach` select an established Session view after ownership checks. A live foreground CLI/ACP owner must settle and close before attachment can acquire it. `/detach` and `/new` leave an attached shared owner intact; `/new` starts fresh work at the channel's selected future target.
 
-The current execution choice is **Local host**. It uses existing trust and security controls, and is not OS containment. Docker is optional future work in PR 6; **Sandboxed** is not yet available through this channel flow. Existing host channels and scheduled jobs do not need Docker.
+The selected profile can use **Local host** or **Sandboxed (Docker)** through the existing Setup Editor review/apply flow. Local host is the default and provides no OS containment; existing host channels and scheduled jobs do not need Docker. Docker bind/network controls and limitations are documented in [Docker execution](docker-execution.md). Workspace switching does not change execution policy or widen a grant.
