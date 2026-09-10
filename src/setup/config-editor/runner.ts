@@ -1,3 +1,4 @@
+import { promptExecutionSetup } from "../docker-execution-setup.js";
 import { resolveStateHome } from "../../config/state-home.js";
 import { hasSavedEnvSecret } from "../../config/env-secret-store.js";
 import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "../../config/profile-home.js";
@@ -569,6 +570,13 @@ async function handleAction(
     }
     case "repair-workspace-trust":
       return handleWorkspaceTrustAction(options, initialDecision, session, action);
+    case "edit-execution-policy": {
+      try {
+        const values = await promptExecutionSetup(options.prompt, options.locale);
+        if (!values) return menuBackResult(initialDecision, action.id);
+        return reviewAndApplyAction(options, initialDecision, session, { ...requireEditorAction(action), reviewValues: values });
+      } catch (error) { return diagnosticResult(options, initialDecision, action.id, error instanceof Error ? error.message : "Execution setup failed."); }
+    }
     case "edit-security-mode":
       return handleSecurityModeAction(options, initialDecision, session, action);
     case "edit-workflow-learning":

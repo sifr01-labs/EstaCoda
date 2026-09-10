@@ -251,6 +251,7 @@ describe("runConfigEditor", () => {
       "edit-fallback-model-route",
       "edit-auxiliary-model-route",
       "edit-security-mode",
+      "edit-execution-policy",
       "edit-workflow-learning",
       "edit-budgets",
       "edit-language",

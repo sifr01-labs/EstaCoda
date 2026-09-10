@@ -1,3 +1,4 @@
+import * as docker from "../../execution/docker-client.js";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { mkdir, mkdtemp, readFile, realpath, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
@@ -2313,4 +2314,25 @@ describe("reviewed setup apply executor", () => {
       expect(report.configSources.some((s) => s.includes(join(workspaceRoot, ".estacoda", "config.json")))).toBe(false);
     });
   });
+});
+
+it("applies a reviewed Docker policy with explicit image provisioning and preserves other config", async () => {
+  const homeDir = await makeTempDir();
+  const imageId = `sha256:${"a".repeat(64)}`;
+  const build = vi.spyOn(docker, "provisionDockerImage").mockResolvedValue(imageId);
+  try {
+    await mkdir(dirname(profileConfigPath(homeDir)), { recursive: true });
+    await writeFile(profileConfigPath(homeDir), JSON.stringify({ security: { approvalMode: "strict" } }));
+    const base = telegramPlan({}, { homeDir });
+    const operation = base.operations[0]!;
+    const plan: SetupApplyPlan = { ...base, operations: [{ ...operation, target: { kind: "config-scope", path: profileConfigPath(homeDir), scope: ["execution"], preserveUnrelatedConfig: true },
+      review: { ...operation.review, summaryKey: "setupDrafts.executionPolicy.summary", values: {
+        executionBackend: "docker", buildImage: true, workspaceAccess: "read-only", commandNetwork: "disabled"
+      } } }] };
+    const result = await applyReviewedSetupPlanOperations(plan, { homeDir, workspaceRoot: homeDir });
+    expect(result.ok).toBe(true);
+    expect(build).toHaveBeenCalledOnce();
+    expect(JSON.parse(await readFile(profileConfigPath(homeDir), "utf8"))).toMatchObject({ security: { approvalMode: "strict" }, execution: { backend: "docker", imageId,
+      commandNetwork: { value: "disabled", requirement: "mandatory" } } });
+  } finally { build.mockRestore(); await rm(homeDir, { recursive: true, force: true }); }
 });

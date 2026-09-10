@@ -1,3 +1,6 @@
+import { parseExecutionPolicy } from "../../execution/docker-policy.js";
+import { provisionDockerImage } from "../../execution/docker-client.js";
+import { setupExecutionConfig } from "../../config/runtime-config.js";
 import {
   collectSetupVerificationReport,
   type SetupVerificationReport,
@@ -311,6 +314,19 @@ async function applyConfigPatch(
     case "setupModules.credentials.draft":
       await applyCredentialReference(operation, context, options);
       return [];
+    case "setupDrafts.executionPolicy.summary": {
+      const values = operation.review.values;
+      if (values.executionBackend === "host") {
+        await setupExecutionConfig({ ...configApplyTarget(operation, options), input: { backend: "host" } });
+      } else {
+        // Validate review controls before any image acquisition. A placeholder is never persisted.
+        const policy = parseExecutionPolicy({ backend: values.executionBackend, imageId: values.buildImage === true ? `sha256:${"0".repeat(64)}` : values.imageId,
+          workspaceAccess: { value: values.workspaceAccess, requirement: "mandatory" }, commandNetwork: { value: values.commandNetwork, requirement: "mandatory" } });
+        if (values.buildImage === true) policy.imageId = await provisionDockerImage();
+        await setupExecutionConfig({ ...configApplyTarget(operation, options), input: policy });
+      }
+      return [];
+    }
     case "setupDrafts.securityMode.summary":
     case "setupModules.security-mode.draft":
       await applySecurityMode(operation, options);

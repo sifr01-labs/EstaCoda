@@ -391,6 +391,11 @@ function draftFromEditorAction(
     return verificationDraft(source);
   }
 
+  if (action.id === "edit-execution-policy") {
+    return configDraft({ id: editorDraftId(action), kind: "security-mode", source, riskSurface: "security-policy",
+      scope: action.patch?.fields ?? [], configPath: options.configPath, summaryKey: "setupDrafts.executionPolicy.summary", values: action.reviewValues ?? {} });
+  }
+
   if (action.id === "edit-security-mode") {
     return configDraft({
       id: editorDraftId(action),
@@ -774,6 +779,7 @@ function kindForEditorAction(action: SetupEditorActionDraft): SetupDraftKind {
       return "fallback-model-route";
     case "edit-auxiliary-model-route":
       return "auxiliary-model-route";
+    case "edit-execution-policy":
     case "edit-security-mode":
       return "security-mode";
     case "edit-workflow-learning":

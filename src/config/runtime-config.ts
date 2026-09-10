@@ -1,3 +1,5 @@
+import { parseExecutionPolicy } from "../execution/docker-policy.js";
+import type { RequestedExecutionPolicy } from "../contracts/execution-authority.js";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { randomInt } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
@@ -420,6 +422,7 @@ export type ModelAliasDefinition = {
 };
 
 export type EstaCodaConfig = {
+  execution?: RequestedExecutionPolicy;
   model?: {
     provider?: ProviderId;
     id?: string;
@@ -951,6 +954,7 @@ export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Prom
   const profilePaths = resolveProfileStateHome({ homeDir, profileId });
   const loadedConfig = await readConfig(profilePaths.configPath);
   const config = patchConfig(loadedConfig.config);
+  if (config.execution !== undefined) config.execution = parseExecutionPolicy(config.execution);
   const catalogProfiles = await resolveModelProfilesFromCatalog({
     homeDir,
     allowNetwork: false,
@@ -1182,6 +1186,7 @@ export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Prom
 
 function patchConfig(...configs: EstaCodaConfig[]): EstaCodaConfig {
   return compactConfig(configs.reduce<EstaCodaConfig>((merged, config) => ({
+    execution: config.execution ?? merged.execution,
     model: {
       ...(merged.model ?? {}),
       ...(config.model ?? {})
@@ -4494,4 +4499,13 @@ function normalizeTextDebounceMaxMessages(value: unknown): number {
 
 function normalizeTextDebounceMaxChars(value: unknown): number {
   return coercePositiveInteger(value, { default: 8_000, max: 100_000 });
+}
+
+export async function setupExecutionConfig(options: { workspaceRoot: string; homeDir?: string; input: unknown }) {
+  const policy = parseExecutionPolicy(options.input);
+  const path = resolveConfigMutationPath(options);
+  const existing = await readConfig(path);
+  const config = patchConfig(existing.config, { execution: policy });
+  await saveRuntimeConfig(path, config);
+  return { path, config };
 }

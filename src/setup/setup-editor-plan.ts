@@ -313,6 +313,8 @@ function securityModeSection(state: SetupEntryState): SetupEditorSection {
     warnings: [],
     blockers: [],
     actions: [
+      setupEditorAction({ id: "edit-execution-policy", copyKey: "setupEditor.actions.editExecutionPolicy", sectionId: "security-mode",
+        effect: "draft-config-patch", readOnly: false, requiresExplicitApply: true, patch: scopedPatch(["execution"]) }),
       setupEditorAction({
         id: "edit-security-mode",
         copyKey: "setupEditor.actions.editSecurityMode",

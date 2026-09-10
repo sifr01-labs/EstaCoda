@@ -1,3 +1,4 @@
+import { selectedExecutionPolicy } from "../execution/docker-policy.js";
 import { RuntimeSessionOwner } from "./session-execution-owner.js";
 import { HostEnvironment } from "../execution/host-environment.js";
 import { ensureRuntimeSession } from "../session/session-workspace-ownership.js";
@@ -25,7 +26,7 @@ export async function acquireRuntimeContext(input: {
     spendingLimit: options.budgets?.session });
   const executionOwner = await RuntimeSessionOwner.acquire(sessionDb, sessionId, profileId, { workspaceRoot, homeDir: options.homeDir });
   rollback.afterRelease(() => executionOwner.release());
-  const hostEnvironment = await HostEnvironment.create({ profileId, workspaceRoot, policy: options.requestedExecutionPolicy });
+  const hostEnvironment = await HostEnvironment.create({ profileId, workspaceRoot, policy: await selectedExecutionPolicy({ profileId, homeDir: options.homeDir }, options.requestedExecutionPolicy) });
   rollback.defer(() => hostEnvironment.destroy());
   const executionLease = hostEnvironment.acquire({ profileId, sessionId,
     surface: String(options.sessionMetadata?.originSurface ?? "local") });

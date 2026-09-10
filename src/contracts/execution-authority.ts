@@ -1,9 +1,10 @@
 import type { WorkspaceIdentity } from "./workspace.js";
 
 export type RequestedControl<T> = { value: T; requirement: "mandatory" | "advisory" };
-/** Only the implemented host backend can be requested. No label implies isolation. */
+/** Requested policy is validated separately from effective backend facts. */
 export type RequestedExecutionPolicy = {
-  backend: "host";
+  backend: "host" | "docker";
+  imageId?: string;
   workspaceAccess?: RequestedControl<"read-only" | "read-write">;
   commandNetwork?: RequestedControl<"unrestricted" | "disabled">;
   credentialCapabilities?: RequestedControl<readonly string[]>;
