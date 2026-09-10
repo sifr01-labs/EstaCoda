@@ -3091,8 +3091,9 @@ describe("supervisor lifecycle hooks", () => {
     const flushGate = new Promise<void>((resolve) => { releaseFlush = resolve; });
     let flushStarted = false;
     let stopped = false;
+    let started = false;
     const gateway = {
-      start: async () => {},
+      start: async () => { started = true; },
       flushPendingDebounces: async () => {
         flushStarted = true;
         await flushGate;
@@ -3113,7 +3114,8 @@ describe("supervisor lifecycle hooks", () => {
       },
     });
 
-    await waitForCondition(() => process.listenerCount("SIGTERM") > beforeSigterm);
+    // Signal handlers install before the gateway. This case tests draining a started gateway.
+    await waitForCondition(() => started && process.listenerCount("SIGTERM") > beforeSigterm);
     process.emit("SIGTERM");
     await waitForCondition(() => flushStarted);
 

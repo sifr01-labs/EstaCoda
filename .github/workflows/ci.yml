@@ -80,9 +80,9 @@ jobs:
         run: pnpm run smoke:dist
 
   execution-docker:
-    name: Docker execution parity
+    name: Host and Docker release gate
     runs-on: ubuntu-24.04
-    timeout-minutes: 20
+    timeout-minutes: 30
     env:
       CI: true
       NODE_ENV: test
@@ -95,11 +95,7 @@ jobs:
           node-version: 22.18.0
       - name: Enable Corepack
         run: corepack enable
-      - name: Install dependencies
-        run: pnpm install --frozen-lockfile
       - name: Prepare controlled execution image
         run: docker build --pull --file workers/docker/Dockerfile --tag estacoda-execution:v1 workers
-      - name: Run mandatory Docker execution gate
-        run: pnpm run validate:execution-docker
-      - name: Validate existing package image
-        run: ESTACODA_REQUIRE_DOCKER=1 pnpm run validate:docker
+      - name: Run required host and Docker release validation
+        run: pnpm run validate:execution-release

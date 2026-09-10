@@ -1,3 +1,4 @@
+import { executionObservations } from "../trajectory/execution-observations.js";
 import { CONTROL_RECEIPT_SCHEMA_VERSION, migrateControlReceiptsV35 } from "../gateway/control-receipts.js";
 import { executionFencedDatabase } from "./execution-fence-context.js";
 import { EXECUTION_OWNERSHIP_SCHEMA_VERSION, migrateExecutionOwnershipV34 } from "./execution-ownership.js";
@@ -759,6 +760,10 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
   // ── Trajectory persistence ────────────────────────────────────────────────
 
   async saveTrajectory(trajectory: Trajectory): Promise<void> {
+    const observations = executionObservations(trajectory);
+    const events = trajectory.events.filter((event) => event.kind !== "execution-observations");
+    if (Object.keys(observations).length) events.push({ id: `${trajectory.id}:execution-observations`, kind: "execution-observations",
+      timestamp: this.#now().toISOString(), data: observations });
     this.#db
       .query(
         `insert into trajectories (
@@ -779,8 +784,8 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
         trajectory.modelId,
         trajectory.events[0]?.timestamp ?? this.#now().toISOString(),
         trajectory.outcome !== undefined ? this.#now().toISOString() : null,
-        trajectory.events.length,
-        JSON.stringify(trajectory.events),
+        events.length,
+        JSON.stringify(events),
         trajectory.outcome !== undefined ? JSON.stringify(trajectory.outcome) : null,
         null
       );
@@ -1329,12 +1334,15 @@ function isSessionModelOverride(value: unknown): value is SessionModelOverride {
 }
 
 function rowToTrajectory(row: TrajectoryRow): Trajectory {
+  const events = JSON.parse(row.events_json) as Trajectory["events"];
+  const observations = events[events.length - 1];
   return {
     id: row.id,
     sessionId: row.session_id,
     profileId: row.profile_id,
     modelId: row.model_id,
-    events: JSON.parse(row.events_json) as Trajectory["events"],
+    events,
+    ...executionObservations(observations?.kind === "execution-observations" ? observations.data : undefined),
     outcome:
       row.outcome_json === null
         ? undefined

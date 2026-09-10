@@ -7,6 +7,7 @@ import type {
 } from "./execution-plan.js";
 
 export type TrajectoryEventKind =
+  | "execution-observations"
   | "session-start"
   | "user-input"
   | "context-expanded"

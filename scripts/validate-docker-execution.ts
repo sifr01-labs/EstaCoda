@@ -1,45 +1,52 @@
-import { prepareTemporaryCopy } from "../src/workspaces/temporary-copy.js";
-import { ChangeApplicationStore } from "../src/workspaces/change-application.js";
-import { HostWorkspaceFiles } from "../src/execution/host-workspace-files.js";
-import { ToolRegistry } from "../src/tools/tool-registry.js";
-import { ToolExecutor } from "../src/tools/tool-executor.js";
-import { InMemorySessionDB } from "../src/session/in-memory-session-db.js";
-import { TrajectoryRecorder } from "../src/trajectory/trajectory-recorder.js";
-import { dockerToolAdmissionGuard } from "../src/execution/docker-tool-boundary.js";
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, resolve } from "node:path";
-import { DockerClient, probeDocker } from "../src/execution/docker-client.js";
-import { DockerContainer } from "../src/execution/docker-container.js";
-import { DockerProcessScope } from "../src/execution/docker-processes.js";
-import { DockerWorkspaceFiles } from "../src/execution/docker-workspace-files.js";
-import { HostEnvironment, type ExecutionLease } from "../src/execution/host-environment.js";
-import { createWorkspaceTools } from "../src/tools/workspace-tools.js";
-import { createExecuteCodeTool } from "../src/tools/execute-code-tool.js";
-import { createGrepTools } from "../src/tools/grep-tools.js";
-import { createGlobTools } from "../src/tools/glob-tools.js";
-import { createNotebookTools } from "../src/tools/notebook-tools.js";
-import { createPythonTools } from "../src/tools/python-tools.js";
-import { ProcessManager } from "../src/process/process-manager.js";
-import { executionAuthorityFingerprint } from "../src/execution/execution-authority.js";
+import type { ExecutionLease } from "../src/execution/host-environment.js";
 import type { RequestedExecutionPolicy } from "../src/contracts/execution-authority.js";
+const runtimeRoot = process.argv.includes("--dist") ? "../dist" : "../src";
+const { prepareTemporaryCopy } = await import(new URL(`${runtimeRoot}/workspaces/temporary-copy.js`, import.meta.url).href);
+const { ChangeApplicationStore } = await import(new URL(`${runtimeRoot}/workspaces/change-application.js`, import.meta.url).href);
+const { HostWorkspaceFiles } = await import(new URL(`${runtimeRoot}/execution/host-workspace-files.js`, import.meta.url).href);
+const { ToolRegistry } = await import(new URL(`${runtimeRoot}/tools/tool-registry.js`, import.meta.url).href);
+const { ToolExecutor } = await import(new URL(`${runtimeRoot}/tools/tool-executor.js`, import.meta.url).href);
+const { InMemorySessionDB } = await import(new URL(`${runtimeRoot}/session/in-memory-session-db.js`, import.meta.url).href);
+const { TrajectoryRecorder } = await import(new URL(`${runtimeRoot}/trajectory/trajectory-recorder.js`, import.meta.url).href);
+const { dockerToolAdmissionGuard } = await import(new URL(`${runtimeRoot}/execution/docker-tool-boundary.js`, import.meta.url).href);
+const { DockerClient, probeDocker } = await import(new URL(`${runtimeRoot}/execution/docker-client.js`, import.meta.url).href);
+const { DockerContainer } = await import(new URL(`${runtimeRoot}/execution/docker-container.js`, import.meta.url).href);
+const { DockerProcessScope } = await import(new URL(`${runtimeRoot}/execution/docker-processes.js`, import.meta.url).href);
+const { DockerWorkspaceFiles } = await import(new URL(`${runtimeRoot}/execution/docker-workspace-files.js`, import.meta.url).href);
+const { HostEnvironment } = await import(new URL(`${runtimeRoot}/execution/host-environment.js`, import.meta.url).href);
+const { createWorkspaceTools } = await import(new URL(`${runtimeRoot}/tools/workspace-tools.js`, import.meta.url).href);
+const { createExecuteCodeTool } = await import(new URL(`${runtimeRoot}/tools/execute-code-tool.js`, import.meta.url).href);
+const { createGrepTools } = await import(new URL(`${runtimeRoot}/tools/grep-tools.js`, import.meta.url).href);
+const { createGlobTools } = await import(new URL(`${runtimeRoot}/tools/glob-tools.js`, import.meta.url).href);
+const { createNotebookTools } = await import(new URL(`${runtimeRoot}/tools/notebook-tools.js`, import.meta.url).href);
+const { createPythonTools } = await import(new URL(`${runtimeRoot}/tools/python-tools.js`, import.meta.url).href);
+const { ProcessManager } = await import(new URL(`${runtimeRoot}/process/process-manager.js`, import.meta.url).href);
+const { executionAuthorityFingerprint } = await import(new URL(`${runtimeRoot}/execution/execution-authority.js`, import.meta.url).href);
 // This gate intentionally has no skip path and never downloads an image.
 const client = await DockerClient.connect();
 const probe = await probeDocker(client);
 assert(probe.available && probe.imageId, "Docker gate requires Linux/cgroup v2/seccomp and the explicitly prepared estacoda-execution:v1 image.");
-const parent = resolve(process.argv[2] ?? process.cwd());
+const parent = resolve(process.argv.slice(2).find((arg) => arg !== "--dist") ?? process.cwd());
 const root = await mkdtemp(join(parent, ".estacoda-docker-test-"));
 const copyRoot = `${root}-copy`;
 const home = await mkdtemp(join(tmpdir(), "estacoda-docker-gate-home-"));
 const profileId = "docker-gate";
 const policy: RequestedExecutionPolicy = { backend: "docker", imageId: probe.imageId };
 async function prepared(request: RequestedExecutionPolicy = policy, workspaceRoot = root) {
+  const acquisitionStart = performance.now();
   const container = await DockerContainer.prepare({ client, profileId, workspaceRoot, homeDir: home, policy: request });
   const environment = HostEnvironment.prepared(profileId, container.facts, {
     files: (active, processes) => new DockerWorkspaceFiles(container, active, processes, home),
     processes: () => new DockerProcessScope(container, home), dispose: () => container.release()
   });
+  const acquisitionMs = performance.now() - acquisitionStart;
+  if (acquisitionMs > 60_000) await environment.destroy();
+  assert(acquisitionMs <= 60_000, "Docker cold acquisition exceeded the 60s fixture budget");
+  console.log(`MEASURE: Docker cold acquisition ${Math.round(acquisitionMs)}ms`);
   const lease = environment.acquire({ profileId, sessionId: "gate", surface: "test" });
   return { container, environment, lease, async close() { await lease.release(); await environment.destroy(); } };
 }
@@ -70,9 +77,10 @@ try {
     const originalRun = client.run.bind(client);
     client.run = async (args, timeout) => { if (args[0] === "create") creations++; return originalRun(args, timeout); };
     const start = performance.now();
-    try { for (let i = 0; i < 3; i++) assert((await lease.files.readFile("example.txt", "utf8")).includes("مرحبا")); }
+    try { for (let i = 0; i < 3; i++) assert.deepEqual(await lease.files.readFile("large.bin"), payload); }
     finally { client.run = originalRun; }
     assert.equal(creations, 0, "Warm file reads must reuse their owned container");
+    assert(performance.now() - start <= 30_000, "Docker warm read fixture exceeded the 30s budget");
     console.log(`PASS: 8 MiB Host/Docker parity; three warm reads ${Math.round(performance.now() - start)}ms, zero new containers`);
     assert.equal((await lease.files.resolvePath("escape")).ok, false);
     assert.equal((await lease.files.resolvePath("../outside")).ok, false);
