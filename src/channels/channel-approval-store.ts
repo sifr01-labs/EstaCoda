@@ -1,6 +1,6 @@
 import type { SecurityRequest } from "../contracts/security.js";
 import { hasApprovalGrant, approvalAuthorityRevision, recordApprovalRevocation, readApprovalFile, updateApprovalFile, type ApprovalAuthority } from "../security/approval-file.js";
-import { sameReusableAuthority, validApprovalScope, type ApprovalExecutionScope } from "../security/approval-scope.js";
+import { channelApprovalScope, sameReusableAuthority, validApprovalScope, type ApprovalExecutionScope } from "../security/approval-scope.js";
 import { join } from "node:path";
 import { resolveHomeDir } from "../config/home-dir.js";
 import type { ChannelSessionKey } from "../contracts/channel.js";
@@ -55,7 +55,7 @@ export class ChannelApprovalStore {
     sessionKey: ChannelSessionKey; toolName: string; riskClass: string;
     targetKey?: string; targetSummary?: string; executionScope?: ApprovalExecutionScope; expectedRevision?: number;
   }): Promise<PersistedApprovalGrant> {
-    if (input.executionScope !== undefined && !validApprovalScope(input.executionScope)) throw new Error("Invalid approval execution scope.");
+    if (input.executionScope !== undefined && (!validApprovalScope(input.executionScope) || input.executionScope.surfaceKey !== channelApprovalScope(input.executionScope, input.sessionKey).surfaceKey)) throw new Error("Invalid approval execution scope.");
     return updateApprovalFile(this.#path, isGrant, (file) => {
       if (input.expectedRevision !== undefined && input.expectedRevision !== approvalAuthorityRevision(file, input)) throw new Error("Approval authority changed. Review the current action to renew approval.");
       const existing = file.grants.find((grant) => matchesSessionScope(grant, input.sessionKey) && grant.toolName === input.toolName &&
@@ -85,6 +85,7 @@ export class ChannelApprovalStore {
 }
 
 function matchesSessionScope(grant: PersistedApprovalGrant, sessionKey: ChannelSessionKey): boolean {
+  if (validApprovalScope(grant.executionScope) && grant.executionScope.surfaceKey !== channelApprovalScope(grant.executionScope, sessionKey).surfaceKey) return false;
   if (grant.platform !== sessionKey.platform) {
     return false;
   }

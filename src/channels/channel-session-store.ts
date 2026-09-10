@@ -18,7 +18,8 @@ export type ChannelSessionPolicy = {
 };
 
 type ChannelSessionFile = {
-  version: 1;
+  version: 1 | 2;
+  profileId?: string;
   entries: ChannelSessionEntry[];
 };
 
@@ -161,11 +162,10 @@ export class PersistentChannelSessionStore implements ChannelSessionStore {
       return;
     }
 
-    this.#loaded = true;
-
     try {
       const parsed = JSON.parse(await readFile(this.#path, "utf8")) as Partial<ChannelSessionFile>;
-      const entries = Array.isArray(parsed.entries) ? parsed.entries : [];
+      if (![1, 2].includes(parsed.version!) || (parsed.version === 2 && parsed.profileId !== this.#profileId) || !Array.isArray(parsed.entries)) throw new Error("Unsupported channel session state or profile mismatch. Renew attachment explicitly.");
+      const entries = parsed.entries;
 
       for (const entry of entries) {
         if (typeof entry.key !== "string" || typeof entry.sessionId !== "string") {
@@ -189,11 +189,13 @@ export class PersistentChannelSessionStore implements ChannelSessionStore {
         throw error;
       }
     }
+    this.#loaded = true;
   }
 
   async #flush(): Promise<void> {
     const file: ChannelSessionFile = {
-      version: 1,
+      version: this.#profileId === undefined ? 1 : 2,
+      ...(this.#profileId === undefined ? {} : { profileId: this.#profileId }),
       entries: [...this.#entries.values()].sort((left, right) => left.key.localeCompare(right.key))
     };
 

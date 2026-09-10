@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
-import { chmod, mkdir, mkdtemp, rm, stat, writeFile, readFile } from "node:fs/promises";
+import { chmod, mkdir, mkdtemp, rm, stat, writeFile, readFile, symlink, realpath } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { acquireGatewayLock } from "./gateway-lock.js";
@@ -157,6 +157,7 @@ describe("service manager", () => {
     tmpDir = await makeTempDir();
     originalPath = process.env.PATH;
     originalPlatform = process.platform;
+    await Promise.all(["workspace with spaces", "workspace quote", "%i-work"].map((name) => mkdir(join(tmpDir, name))));
     originalUser = process.env.USER;
     originalLogname = process.env.LOGNAME;
     process.env.PATH = "";
@@ -187,6 +188,25 @@ describe("service manager", () => {
     restoreEnvVar("LOGNAME", originalLogname);
     vi.restoreAllMocks();
     await rm(tmpDir, { recursive: true, force: true });
+  });
+
+  it("pins service installation to a physical workspace instead of following a symlink", async () => {
+    const binDir = join(tmpDir, "bin");
+    await addExecutable(binDir, "systemctl");
+    process.env.PATH = binDir;
+    setPlatform("linux");
+    mockSpawn();
+    const actual = join(tmpDir, "workspace with spaces"), alias = join(tmpDir, "alias");
+    await symlink(actual, alias);
+    resolverMock.resolveGatewayExec.mockImplementation(({ workspaceRoot }) => ({ ok: true,
+      resolved: { mode: "compiled", command: "/usr/bin/node", args: [join(workspaceRoot, "dist/index.js")], cwd: workspaceRoot } }));
+    expect(await installService({ stateHomeDir: tmpDir, serviceUserHomeDir: tmpDir, workspaceRoot: alias, profileId: "default" })).toMatchObject({ ok: true });
+    const unit = await readFile(systemdUnitPath({ serviceUserHomeDir: tmpDir, profileId: "default" }), "utf8");
+    expect(unit).toContain(`WorkingDirectory=${await realpath(actual)}`);
+    expect(unit).not.toContain(alias);
+    await rm(alias);
+    await symlink(join(tmpDir, "workspace quote"), alias);
+    expect(await readFile(systemdUnitPath({ serviceUserHomeDir: tmpDir, profileId: "default" }), "utf8")).toBe(unit);
   });
 
   it("detects systemd user, launchd, or none", async () => {

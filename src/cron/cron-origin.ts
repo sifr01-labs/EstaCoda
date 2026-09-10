@@ -21,6 +21,7 @@ export function parseCronExecutionOrigin(value: unknown): CronExecutionOrigin {
   if (!origin || origin.schemaVersion !== 1 || typeof origin.profileId !== "string" || !origin.profileId ||
     typeof origin.principalId !== "string" || !origin.principalId || !origin.sessionKey ||
     !["telegram", "whatsapp", "discord", "email"].includes(origin.sessionKey.platform) ||
+    (origin.sessionKey.chatType !== undefined && !["dm", "group", "channel", "thread"].includes(origin.sessionKey.chatType)) ||
     typeof origin.sessionKey.chatId !== "string" || !origin.sessionKey.chatId ||
     [origin.sessionKey.accountId, origin.sessionKey.userId, origin.sessionKey.threadId, origin.guildId].some((v) => v !== undefined && typeof v !== "string")) {
     throw new Error("Invalid recurring execution origin; renew this workflow from its authorized channel.");

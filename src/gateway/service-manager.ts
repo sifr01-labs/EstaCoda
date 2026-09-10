@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { accessSync, constants } from "node:fs";
-import { chmod, mkdir, readFile, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
 import { userInfo } from "node:os";
 import { dirname, delimiter, isAbsolute, join, resolve } from "node:path";
 import { resolveProfileStateHome } from "../config/profile-home.js";
@@ -63,7 +63,7 @@ export async function installService(options: {
 }): Promise<InstallResult> {
   const stateHomeDir = resolve(options.stateHomeDir);
   let serviceUserHomeDir = resolve(options.serviceUserHomeDir);
-  const workspaceRoot = resolve(options.workspaceRoot);
+  let workspaceRoot = resolve(options.workspaceRoot);
   const kind = targetKind(options);
 
   if (kind === "none") {
@@ -100,6 +100,13 @@ export async function installService(options: {
   ]);
   if (!baseValidation.ok) return baseValidation;
 
+  // Pin installation metadata to the physical directory, never a mutable alias/symlink.
+  try {
+    workspaceRoot = await realpath(workspaceRoot);
+    if (!(await stat(workspaceRoot)).isDirectory()) throw new Error("Not a directory");
+  } catch {
+    return { ok: false, error: "Service workspace is unavailable. Select an existing directory and reinstall explicitly." };
+  }
   const resolved = resolveGatewayExec({ workspaceRoot });
   if (!resolved.ok) {
     return resolved;

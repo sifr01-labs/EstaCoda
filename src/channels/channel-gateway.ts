@@ -1491,6 +1491,12 @@ export class ChannelGateway {
       }
     }
 
+    // Command dispatch yielded: selection may have started during that boundary.
+    if (this.#selectionLocks.has(selectionKey)) {
+      const text = "Workspace selection is busy. Retry once selection finishes.";
+      await this.#deliverText(adapter, authorizedMessage.sessionKey, text);
+      return { sessionId: "", replyText: text, artifactCount: 0, progressCount: 0 };
+    }
     this.#admitting.set(selectionKey, (this.#admitting.get(selectionKey) ?? 0) + 1);
     try {
       const processedMessage = await this.#preprocessMessage?.(authorizedMessage) ?? authorizedMessage;
@@ -3785,12 +3791,15 @@ export class ChannelGateway {
 
     if (command === "/cron") {
       const sessionId = await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt });
-      const result = this.#cronCommand ? await this.#cronCommand(tokenizeCommandArgs(message.text).slice(1), message, sessionId) : await runCronCommand({
+      let result: { ok: boolean; output: string };
+      try { result = this.#cronCommand ? await this.#cronCommand(tokenizeCommandArgs(message.text).slice(1), message, sessionId) : await runCronCommand({
         args: tokenizeCommandArgs(message.text).slice(1),
         store: new CronStore({ path: join(resolveProfileStateHome({ homeDir: this.#homeDir, profileId: this.#profileId }).cronPath, "jobs.json") }),
         origin: originFromSessionKey(message.sessionKey, message.channel),
         defaultDelivery: "origin"
-      });
+      }); } catch {
+        result = { ok: false, output: "Cron request blocked. Check the selected workspace and job authority; manage legacy jobs through the local operator flow." };
+      }
       await this.#deliverText(adapter, message.sessionKey, result.output);
 
       return {
@@ -4000,8 +4009,9 @@ export class ChannelGateway {
       const key = stableSessionKey(message.sessionKey, this.#sessionPolicy);
       const previousSessionId = this.#sessionIdByTurnKey.get(key)
         ?? await this.#sessionStore.getOrCreateSessionId(message.sessionKey, { receivedAt: message.receivedAt });
+      const attached = await this.#surfacePointerStore?.getPointer(message.sessionKey.platform as SurfaceType, this.#surfaceId(message.sessionKey));
       try {
-        await this.#enqueueSessionFinalization?.({
+        if (attached === undefined) await this.#enqueueSessionFinalization?.({
           sessionId: previousSessionId,
           reason: "channel-reset",
         });
@@ -4682,7 +4692,7 @@ export class ChannelGateway {
     }
 
     const originalMessage = channelMessageFromApprovalPayload(durable.requestPayload.originalMessage);
-    if (originalMessage === undefined) {
+    if (originalMessage === undefined || channelSurfaceId(originalMessage.sessionKey, this.#sessionPolicy) !== channelSurfaceId(message.sessionKey, this.#sessionPolicy)) {
       return undefined;
     }
     const capability: AgentLoopPythonCapabilitySetupApprovalRequest = {

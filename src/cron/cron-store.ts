@@ -1,7 +1,8 @@
 import { currentCronExecutionOrigin, parseCronExecutionOrigin, sameCronExecutionOrigin, type CronExecutionOrigin } from "./cron-origin.js";
 import { randomUUID } from "node:crypto";
-import { mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { readJsonState, updateJsonState } from "../storage/json-state.js";
 import { dirname, join } from "node:path";
+import { mkdir, writeFile } from "node:fs/promises";
 import { resolveHomeDir } from "../config/home-dir.js";
 import { assertCronPromptSafe } from "./cron-safety.js";
 
@@ -281,29 +282,18 @@ export class CronStore {
     return updated === undefined ? undefined : structuredClone(updated);
   }
 
-  async #load(): Promise<CronStoreSnapshot> {
-    try {
-      const raw = await readFile(this.path, "utf8");
-      const parsed = JSON.parse(raw) as Partial<CronStoreSnapshot>;
-      return {
-        jobs: Array.isArray(parsed.jobs) ? parsed.jobs.map(normalizeJob) : []
-      };
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code === "ENOENT") return { jobs: [] };
-      throw error;
-    }
+  #read(): CronStoreSnapshot {
+    return readJsonState(this.path, () => ({ jobs: [] }), (value) => {
+      const file = value as CronStoreSnapshot;
+      if (!file || !Array.isArray(file.jobs)) throw new Error("Unsupported or corrupt cron store. Restore compatible state.");
+      return { jobs: file.jobs.map(normalizeJob) };
+    });
   }
-
-  async #save(snapshot: CronStoreSnapshot): Promise<void> {
-    await mkdir(dirname(this.path), { recursive: true });
-    const temp = `${this.path}.tmp`;
-    await writeFile(temp, `${JSON.stringify(snapshot, null, 2)}\n`, "utf8");
-    await rename(temp, this.path);
-  }
+  async #load(): Promise<CronStoreSnapshot> { return this.#read(); }
 
   async #mutate(fn: (jobs: CronJob[]) => CronJob[]): Promise<void> {
-    const snapshot = await this.#load();
-    const next = fn(snapshot.jobs).map((job) => structuredClone(job));
+    updateJsonState(this.path, () => this.#read(), (snapshot) => {
+    const next = fn(structuredClone(snapshot.jobs)).map((job) => structuredClone(job));
     const origin = currentCronExecutionOrigin();
     if (origin) {
       for (const job of snapshot.jobs) {
@@ -314,7 +304,8 @@ export class CronStore {
       if (job.workdir !== job.executionOrigin.target.workspace.canonicalPath) throw new Error("Recurring work cannot change its execution target. Create new work explicitly.");
       if (!["local", "origin"].includes(job.delivery)) throw new Error("Recurring delivery exceeds its authorized origin.");
     }
-    await this.#save({ jobs: next });
+    snapshot.jobs = next;
+    });
   }
 }
 

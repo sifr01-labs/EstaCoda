@@ -1,5 +1,5 @@
-import { chmod, mkdir, readFile, rename, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import { readJsonState, updateJsonState } from "../storage/json-state.js";
+import { join } from "node:path";
 import { resolveHomeDir } from "../config/home-dir.js";
 import type { SurfacePointerRecord, SurfaceType } from "./surface-pointer.js";
 import { surfacePointerKey } from "./surface-pointer.js";
@@ -18,88 +18,30 @@ type SurfacePointerFile = {
 
 export class FileSurfacePointerStore implements SurfacePointerStore {
   readonly #path: string;
-  readonly #pointers = new Map<string, SurfacePointerRecord>();
-  #loaded = false;
-
   constructor(options: { path?: string; homeDir?: string } = {}) {
     this.#path = options.path ?? join(resolveHomeDir(options.homeDir), ".estacoda", "surface-pointers.json");
   }
-
-  get path(): string {
-    return this.#path;
+  get path(): string { return this.#path; }
+  #read(): SurfacePointerFile {
+    return readJsonState(this.#path, () => ({ version: 1, pointers: {} }), (value) => {
+      const file = value as SurfacePointerFile;
+      if (file?.version !== 1 || !file.pointers || typeof file.pointers !== "object" || Array.isArray(file.pointers) ||
+        Object.values(file.pointers).some((pointer) => !pointer || typeof pointer.sessionId !== "string" || typeof pointer.attachedAt !== "string")) throw new Error("Unsupported or corrupt surface pointer state. Renew attachment explicitly.");
+      return file;
+    });
   }
-
-  async getPointer(surfaceType: SurfaceType, surfaceId: string): Promise<SurfacePointerRecord | undefined> {
-    await this.#ensureLoaded();
-    return this.#pointers.get(surfacePointerKey(surfaceType, surfaceId));
+  async getPointer(type: SurfaceType, id: string): Promise<SurfacePointerRecord | undefined> { return this.#read().pointers[surfacePointerKey(type, id)]; }
+  async setPointer(type: SurfaceType, id: string, record: SurfacePointerRecord): Promise<void> {
+    updateJsonState(this.#path, () => this.#read(), (file) => { file.pointers[surfacePointerKey(type, id)] = structuredClone(record); });
   }
-
-  async setPointer(surfaceType: SurfaceType, surfaceId: string, record: SurfacePointerRecord): Promise<void> {
-    await this.#ensureLoaded();
-    this.#pointers.set(surfacePointerKey(surfaceType, surfaceId), record);
-    await this.#flush();
+  async removePointer(type: SurfaceType, id: string): Promise<void> {
+    updateJsonState(this.#path, () => this.#read(), (file) => { delete file.pointers[surfacePointerKey(type, id)]; });
   }
-
-  async removePointer(surfaceType: SurfaceType, surfaceId: string): Promise<void> {
-    await this.#ensureLoaded();
-    if (this.#pointers.delete(surfacePointerKey(surfaceType, surfaceId))) {
-      await this.#flush();
-    }
-  }
-
   async listPointers(): Promise<Array<{ surfaceType: SurfaceType; surfaceId: string; record: SurfacePointerRecord }>> {
-    await this.#ensureLoaded();
-    const result: Array<{ surfaceType: SurfaceType; surfaceId: string; record: SurfacePointerRecord }> = [];
-    for (const [key, record] of this.#pointers) {
-      const separatorIndex = key.indexOf(":");
-      if (separatorIndex === -1) continue;
-      const surfaceType = key.slice(0, separatorIndex) as SurfaceType;
-      const surfaceId = key.slice(separatorIndex + 1);
-      result.push({ surfaceType, surfaceId, record });
-    }
-    return result;
-  }
-
-  async #ensureLoaded(): Promise<void> {
-    if (this.#loaded) {
-      return;
-    }
-    this.#loaded = true;
-    try {
-      const parsed = JSON.parse(await readFile(this.#path, "utf8")) as Partial<SurfacePointerFile>;
-      if (parsed.version === 1 && typeof parsed.pointers === "object" && parsed.pointers !== null) {
-        for (const [key, value] of Object.entries(parsed.pointers)) {
-          if (value !== null && typeof value === "object" &&
-              typeof value.sessionId === "string" && typeof value.attachedAt === "string") {
-            this.#pointers.set(key, {
-              sessionId: value.sessionId,
-              attachedAt: value.attachedAt,
-              homeDelivery: typeof value.homeDelivery === "string" ? value.homeDelivery : undefined
-            });
-          }
-        }
-      }
-    } catch (error) {
-      if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
-        throw error;
-      }
-    }
-  }
-
-  async #flush(): Promise<void> {
-    const file: SurfacePointerFile = {
-      version: 1,
-      pointers: Object.fromEntries(this.#pointers)
-    };
-    const tempPath = `${this.#path}.tmp`;
-    await mkdir(dirname(this.#path), { recursive: true });
-    await writeFile(tempPath, `${JSON.stringify(file, null, 2)}\n`, { encoding: "utf8", mode: 0o600 });
-    await rename(tempPath, this.#path);
-    try {
-      await chmod(this.#path, 0o600);
-    } catch {
-      // Platform may not support chmod (e.g. Windows); atomic write already succeeded.
-    }
+    return Object.entries(this.#read().pointers).map(([key, record]) => {
+      const separator = key.indexOf(":");
+      return { surfaceType: key.slice(0, separator) as SurfaceType, surfaceId: key.slice(separator + 1), record };
+    });
   }
 }
 

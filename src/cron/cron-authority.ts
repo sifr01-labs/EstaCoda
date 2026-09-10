@@ -81,7 +81,11 @@ export async function recurringCronSecurityPolicy(job: CronJob, context: { profi
         if (revision !== store.revision(request) || (grant && !store.hasGrant(grant)) || !samePendingAuthority(originalScope, await scope()) ||
           action !== securityActionKey(request) || !request.context.trustedWorkspace) throw new Error("Recurring execution approval was revoked.");
       };
-      return withDispatchAuthorization(result, validate, validate);
+      let dispatched = false;
+      return withDispatchAuthorization(result, async () => {
+        if (dispatched) throw new Error("Recurring dispatch approval was already consumed.");
+        dispatched = true; await validate();
+      }, validate);
     }
   };
 }
