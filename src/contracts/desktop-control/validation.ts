@@ -1,4 +1,4 @@
-import { CONTROL_LIMITS, ControlProtocolError, DESKTOP_PROTOCOL_VERSION, assertEnvelope, exactKeys, isControlId, isRecord, type RpcFailure } from "./envelopes.js";
+import { CONTROL_LIMITS, ControlProtocolError, DESKTOP_PROTOCOL_VERSION, assertEnvelope, exactKeys, isControlId, isControlOperationId, isRecord, type RpcFailure } from "./envelopes.js";
 import { CONTROL_EVENTS, CONTROL_METHODS, assertInitializeParams, isControlCursor, isProtocolVersion, type Capabilities, type ControlEventType } from "./bootstrap.js";
 import { WORK_STATUSES } from "./projections.js";
 import type { ControlEvent, EventNotification, MethodContracts, MethodRequest, MethodSuccess, OperationReceipt } from "./methods.js";
@@ -49,9 +49,9 @@ const connection = shape({ id, profileId: id, channel: choice(["telegram", "disc
 const page = (check: Check): Check => shape({ items: array(check), nextCursor: nullable(cursorToken) });
 const pageParams = { limit: integer(1, 100) };
 const optionalPage = { cursor: cursorToken };
-const sessionParams = { operationId: id, sessionId: id, target };
+const sessionParams = { operationId: isControlOperationId, sessionId: id, target };
 const mutationMethods = ["sessions.send", "sessions.cancelTurn", "approvals.resolve"] as const;
-const receiptShape = shape({ operationId: id, profileId: id, sessionId: id, target, method: choice(mutationMethods),
+const receiptShape = shape({ operationId: isControlOperationId, profileId: id, sessionId: id, target, method: choice(mutationMethods),
   state: choice(["accepted", "dispatched", "completed", "uncertain", "unknown", "expired"]), cancellation: choice(["not_requested", "requested", "confirmed"]) });
 const receipt: Check = (v) => receiptShape(v) && isRecord(v) &&
   (v.method === "sessions.cancelTurn" || v.cancellation === "not_requested") &&

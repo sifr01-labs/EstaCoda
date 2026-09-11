@@ -31,6 +31,12 @@ export function failureEnvelope(id: string | null, code: ControlErrorCode): RpcF
 export function isControlId(value: unknown): value is string {
   return typeof value === "string" && /^[A-Za-z0-9_.:-]{1,160}$/.test(value);
 }
+/** Core createControlOperationId() emits timestamp:nonce. Freshness belongs to
+ * receipt acceptance, not decoding: old IDs must remain usable for reconciliation. */
+export function isControlOperationId(value: unknown): value is string {
+  return isControlId(value) && /^(0|[1-9][0-9]*):[A-Za-z0-9_.:-]+$/.test(value) &&
+    Number.isSafeInteger(Number(value.split(":", 1)[0]));
+}
 export function isRecord(value: unknown): value is Record<string, unknown> {
   return value !== null && typeof value === "object" && !Array.isArray(value) &&
     (Object.getPrototypeOf(value) === Object.prototype || Object.getPrototypeOf(value) === null);

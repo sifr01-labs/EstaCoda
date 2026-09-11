@@ -43,3 +43,11 @@ Socket/process tests used their required execution permissions. This was not a l
 These parsers/validators are security-sensitive future trust boundaries. They fail closed on malformed data, but do not authorize send/approval/target access, create durable receipts, enforce sender identity or own shared execution. PR 3 must compose them with those core checks; passing pure protocol tests does not establish that integration. Renderer isolation and the approved visual acceptance gate remain PR 5. Multi-file credential apply consistency remains PR 6.
 
 Reverting this additive protocol removes the new exports and contract consumers; it requires no data migration or runtime-policy rollback. Existing private host APIs remain available unchanged.
+
+## PR 1/2 review follow-up
+
+The focused review correction requires timestamped operation IDs compatible with core's existing generator on Desktop mutations, inspection and receipts. Protocol validation remains independent of wall-clock freshness so old accepted operations can still be reconciled. Compatibility coverage exercises the actual core generator and receipt store, including deduplication after the acceptance window, conflicting input and rejection of unseen expired IDs. Legacy host parsing, receipt expiry, ownership and persistence behavior are unchanged.
+
+The existing CI Verify job now runs `desktop:foundation:check`, including both private workspace typechecks and the pure import-boundary guard. This makes the foundation check automatic before later bridge and renderer work.
+
+Follow-up validation: Node v24.14.1 / pnpm 10.33.0; focused regression tests passed (44 tests in three files). A clean copy of tracked files passed frozen installation (registry retry after an offline cache miss), root typecheck, the Desktop foundation check, all 10,734 tests in 638 files, all 13 source smoke cases, build, both runtime-import/ESM audits, and all 13 distribution smoke cases. Tracked files matched the validation copy exactly before this results-only documentation addition; `git diff --check` passed. Final review found no remaining gap in these two corrections. No dependency versions, lockfile, runtime receipt implementation or unrelated files changed. This validates the local source/dist suite, not a hosted CI run or Docker/Electron release certification.

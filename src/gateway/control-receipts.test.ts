@@ -1,10 +1,42 @@
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { expect, it } from "vitest";
+import { expect, it, vi } from "vitest";
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
 import { ensureRuntimeSession } from "../session/session-workspace-ownership.js";
 import { ControlReceipts, createControlOperationId } from "./control-receipts.js";
+import { validateControlRequest, type ControlContext, type MethodRequest } from "../../apps/desktop/src/control-protocol.js";
+
+it("accepts core-generated Desktop operation IDs and reconciles retries beyond the fresh acceptance window", async () => {
+  const root = await mkdtemp(join(tmpdir(), "desktop-receipts-"));
+  const db = new SQLiteSessionDB({ path: join(root, "sessions.sqlite") });
+  const clock = vi.spyOn(Date, "now");
+  try {
+    await ensureRuntimeSession({ sessionDb: db, sessionId: "session", profileId: "default", workspaceRoot: root, homeDir: root, durable: true });
+    const target = (await db.getSession("session"))!.executionTarget!;
+    const context: ControlContext = { profileId: "default", instanceId: "bridge", capabilities: { methods: ["sessions.send", "operations.inspect"], events: [] } };
+    const operationId = createControlOperationId();
+    const request: MethodRequest<"sessions.send"> = { jsonrpc: "2.0", id: "r", method: "sessions.send", params: {
+      operationId, sessionId: "session", target: { targetId: target.targetId, targetGeneration: target.targetGeneration }, text: "hello",
+    } };
+    expect(validateControlRequest(request, context)).toEqual(request);
+    const coreRequest = { method: "send" as const, sessionId: "session", targetId: target.targetId, operationId, text: "hello" };
+    const receipts = new ControlReceipts(db.db, "default", "host");
+    expect(receipts.accept(coreRequest).inserted).toBe(true);
+    clock.mockReturnValue(Date.now() + 6 * 60_000);
+    expect(validateControlRequest(request, context)).toEqual(request);
+    expect(receipts.accept(coreRequest).inserted).toBe(false);
+    expect(() => receipts.accept({ ...coreRequest, text: "changed" })).toThrow("different input");
+    const inspect: MethodRequest<"operations.inspect"> = { jsonrpc: "2.0", id: "inspect", method: "operations.inspect", params: {
+      operationId, sessionId: "session", target: request.params.target, method: "sessions.send",
+    } };
+    expect(validateControlRequest(inspect, context)).toEqual(inspect);
+    expect(receipts.inspect({ ...coreRequest, method: "inspect" })).toMatchObject([{ operationId, status: "accepted" }]);
+    const expiredId = operationId + ":unseen";
+    expect(validateControlRequest({ ...request, params: { ...request.params, operationId: expiredId } }, context)).toBeDefined();
+    expect(() => receipts.accept({ ...coreRequest, operationId: expiredId })).toThrow("expired");
+  } finally { clock.mockRestore(); db.close(); await rm(root, { recursive: true, force: true }); }
+});
 
 it("deduplicates exact inputs, rejects conflicting retries and preserves uncertainty across restart", async () => {
   const root = await mkdtemp(join(tmpdir(), "control-receipts-"));

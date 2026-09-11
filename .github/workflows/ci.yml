@@ -61,6 +61,9 @@ jobs:
       - name: Typecheck
         run: pnpm run typecheck
 
+      - name: Check Desktop protocol boundary
+        run: pnpm run desktop:foundation:check
+
       - name: Run unit tests
         run: pnpm run test
 
