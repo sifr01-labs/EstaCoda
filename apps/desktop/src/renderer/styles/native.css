@@ -1,1 +1,14 @@
 html,body,#root{margin:0;min-width:0;min-height:100%;}body{background:#131313}button,input,textarea,select{-webkit-app-region:no-drag}#ec-branded-workspace{--ec-sidebar:224px;--ec-radius:12px}#ec-branded-workspace[data-appearance=light]{color-scheme:light}#ec-branded-workspace[data-appearance=dark]{color-scheme:dark}#ec-branded-workspace .ec-sr-only{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}#ec-branded-workspace [dir=auto]{unicode-bidi:plaintext}#ec-branded-workspace button:focus-visible,#ec-branded-workspace input:focus-visible,#ec-branded-workspace textarea:focus-visible,#ec-branded-workspace select:focus-visible,#ec-branded-workspace summary:focus-visible{outline:2px solid var(--ec-accent);outline-offset:3px}#ec-branded-workspace .ec-titlebar{-webkit-app-region:drag}#ec-branded-workspace .ec-lights button{border:0;width:10px;height:10px;border-radius:50%;padding:0;background:var(--ec-line)}#ec-branded-workspace .ec-lights button:nth-child(1){background:#ff5f57}#ec-branded-workspace .ec-lights button:nth-child(2){background:#febc2e}#ec-branded-workspace .ec-lights button:nth-child(3){background:#28c840}@media(prefers-reduced-motion:reduce){#ec-branded-workspace *,#ec-branded-workspace *:before,#ec-branded-workspace *:after{animation:none!important;transition:none!important;scroll-behavior:auto!important}}
+/* Native adaptation: the window supplies height; only the Work body scrolls.
+   Fixture captures retain the approved content-sized reference geometry. */
+#ec-branded-workspace .ec-window[data-native=true]{height:100dvh;display:flex;flex-direction:column;border-radius:0;border:0;box-shadow:none}
+#ec-branded-workspace .ec-window[data-native=true] .ec-layout{flex:1;min-height:0;overflow:hidden}
+#ec-branded-workspace .ec-window[data-native=true] .ec-sidebar{min-height:0;overflow:auto}
+#ec-branded-workspace .ec-window[data-native=true] .ec-main{min-height:0;display:flex;flex-direction:column;overflow:auto}
+#ec-branded-workspace .ec-window[data-native=true] .ec-workbody{flex:1;min-height:0;overflow:auto}
+#ec-branded-workspace .ec-window[data-native=true] .ec-workcenter{min-height:0;height:100%}
+#ec-branded-workspace .ec-window[data-native=true] #ec-work-panel{min-height:0;overflow:auto;flex:1;padding:3px}
+#ec-branded-workspace .ec-window[data-native=true] .ec-newwelcome{flex:1;min-height:0;padding-top:clamp(20px,9vh,90px)}
+#ec-branded-workspace .ec-window[data-native=true] .ec-composerdock{flex-shrink:0}
+@media(max-width:850px){#ec-branded-workspace .ec-window[data-native=true] .ec-workcenter{height:auto;min-height:100%}}
+@media(max-width:590px){#ec-branded-workspace .ec-window[data-native=true] .ec-layout{grid-template-rows:auto minmax(0,1fr)}#ec-branded-workspace .ec-window[data-native=true] .ec-sidebar{overflow:visible}#ec-branded-workspace .ec-window[data-native=true] .ec-newwelcome{padding-top:20px}}

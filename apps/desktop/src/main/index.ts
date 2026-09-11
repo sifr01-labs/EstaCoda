@@ -15,7 +15,7 @@ declare const MAIN_WINDOW_VITE_NAME: string;
 declare const CREDENTIAL_WINDOW_VITE_DEV_SERVER_URL: string | undefined;
 declare const CREDENTIAL_WINDOW_VITE_NAME: string;
 async function openWindow(): Promise<void> {
-  const window = new BrowserWindow({ width: 1280, height: 860, minWidth: 320, minHeight: 480, show: false,
+  const window = new BrowserWindow({ width: 1280, height: 860, frame: false, backgroundColor: '#131313', minWidth: 320, minHeight: 480, show: false,
     webPreferences: securePreferences(path.join(__dirname, 'preload.cjs'), app.isPackaged) });
   denySessionPermissions(window.webContents.session);
   lockWindow(window);
