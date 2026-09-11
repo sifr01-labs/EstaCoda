@@ -46,6 +46,24 @@ async function main(): Promise<void> {
   const continueLastSession = parsedGlobalOptions.continueSession === true;
   const homeDir = resolveHomeDir();
 
+  // A private machine channel must bypass interactive startup, setup and profile writes.
+  if (argv[0] === "desktop-service") {
+    if (argv.length !== 2 || argv[1] !== "--stdio" || !parsedGlobalOptions.profileId ||
+      parsedGlobalOptions.continueSession || parsedGlobalOptions.workspaceAlias !== undefined) {
+      console.error("Invalid Desktop service arguments. Use desktop-service --stdio --profile <id>.");
+      process.exitCode = 2;
+      return;
+    }
+    try {
+      const { runDesktopService } = await import("./control-service/command.js");
+      await runDesktopService({ profileId: parsedGlobalOptions.profileId, homeDir, version: await getPackageVersion() });
+    } catch {
+      console.error("Desktop service could not start.");
+      process.exitCode = 1;
+    }
+    return;
+  }
+
   // Handle --version / -v immediately, before any async init
   if (argv.includes("--version") || argv.includes("-v")) {
     const version = await getPackageVersion();
