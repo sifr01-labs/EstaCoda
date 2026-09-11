@@ -6,7 +6,7 @@ import { SQLiteSessionDB } from '../session/sqlite-session-db.js';
 import { ExecutionTargetStore, targetBinding } from '../workspaces/execution-target.js';
 import { WorkspaceTrustStore } from '../security/workspace-trust-store.js';
 
-export type SessionMutationRequest = Extract<MethodRequest, { method: 'sessions.start' | 'sessions.resume' | 'sessions.send' | 'sessions.cancelTurn' | 'operations.inspect' | 'tasks.pause' | 'tasks.resume' | 'tasks.cancel' | 'tasks.retry' | 'tasks.guide' }>;
+export type SessionMutationRequest = Extract<MethodRequest, { method: 'sessions.start' | 'sessions.resume' | 'sessions.send' | 'sessions.cancelTurn' | 'approvals.resolve' | 'operations.inspect' | 'tasks.pause' | 'tasks.resume' | 'tasks.cancel' | 'tasks.retry' | 'tasks.guide' }>;
 const methods = { 'tasks.pause': 'task.pause', 'tasks.resume': 'task.resume', 'tasks.cancel': 'task.cancel', 'tasks.retry': 'task.retry', 'tasks.guide': 'task.guide', 'sessions.start': 'start', 'sessions.resume': 'resume', 'sessions.send': 'send', 'sessions.cancelTurn': 'cancel', 'approvals.resolve': 'approval' } as const;
 /** Creates only a canonical Session reference. Provider/tool construction stays in the supervisor. */
 async function prepareStart(input: { homeDir: string; profileId: string }, request: SessionMutationRequest): Promise<void> {
@@ -37,6 +37,7 @@ export async function sessionControl(input: { homeDir: string; profileId: string
   const method = request.method === 'operations.inspect' ? request.params.method : request.method;
   const control: PrivateControlRequest = { method: request.method === 'operations.inspect' ? 'inspect' : methods[method],
     sessionId: request.params.sessionId, targetId: request.params.target.targetId, targetGeneration: request.params.target.targetGeneration,
+    ...(request.method === 'approvals.resolve' ? { approvalId: request.params.approvalId, decision: request.params.decision } : {}),
     ...('taskId' in request.params ? { taskId: request.params.taskId } : {}),
     ...(request.method === 'tasks.retry' ? { stepId: request.params.stepId } : {}),
     ...(request.method === 'tasks.guide' ? { guidance: request.params.guidance } : {}),

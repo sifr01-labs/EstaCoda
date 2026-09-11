@@ -1,3 +1,6 @@
+import type { GatewayApprovalQueue } from './approval-queue.js';
+import { validPendingAction } from '../security/pending-action-approval.js';
+import { redactSensitiveText } from '../utils/redaction.js';
 import type { ControlReceipts } from "./control-receipts.js";
 import { randomUUID } from "node:crypto";
 import type { SessionDB } from "../contracts/session.js";
@@ -6,7 +9,7 @@ import type { ToolApprovalRequest } from "../contracts/tool.js";
 import { SessionCompressionLock } from "../session/session-compression-lock.js";
 import type { PrivateControlRequest } from "./private-control.js";
 
-type Active = { controller: AbortController; pending?: { id: string; request: ToolApprovalRequest; resolve(value: "approved" | "denied"): void }; runtime?: Runtime };
+type Active = { controller: AbortController; pending?: { durable?: boolean; id: string; request: ToolApprovalRequest; resolve(value: "approved" | "denied"): void }; runtime?: Runtime };
 /** Transport detach never aborts hosted execution. Normal inputs serialize by
  * Session; operator controls do not join that queue. */
 export class SharedSessionHost {
@@ -17,6 +20,7 @@ export class SharedSessionHost {
   #closed = false;
   constructor(readonly options: {
     profileId: string; sessionDb: SessionDB; receipts?: ControlReceipts;
+    approvalQueue?: GatewayApprovalQueue;
     taskControl?(request: PrivateControlRequest): unknown;
     validateTarget?(request: PrivateControlRequest): Promise<void>;
     acquire(sessionId: string): Promise<Runtime>;
@@ -73,12 +77,21 @@ export class SharedSessionHost {
     if (request.method === "approval") {
       if (active && active.pending && active.pending.id === request.approvalId) {
         const pending = active.pending;
+        // Claim before awaiting: a second resolution must not grant or resume twice.
+        active.pending = undefined;
+        try {
+          if (pending.durable) {
+            await this.options.approvalQueue!.resolveApproval(pending.id, request.decision!, 'desktop-operator', {
+              profileId: this.options.profileId, sessionId: request.sessionId });
+            return { resolved: true };
+          }
         if (request.decision === "approved") await active.runtime!.grantApproval!({
           pendingApproval: pending.request.pendingApproval, toolName: pending.request.tool.name,
           riskClass: pending.request.riskClass, targetKey: pending.request.targetKey,
           targetSummary: pending.request.targetSummary, scope: "once"
         });
-        active.pending = undefined; pending.resolve(request.decision!);
+          pending.resolve(request.decision!);
+        } catch (error) { pending.resolve('denied'); throw error; }
         return { resolved: true };
       }
       return this.options.channelApproval(request);
@@ -92,12 +105,48 @@ export class SharedSessionHost {
       try {
         state.runtime = await this.options.acquire(request.sessionId);
         const response = await state.runtime.handle({ text: request.text!, channel: "cli", signal: state.controller.signal,
-          onApprovalRequest: (approval) => new Promise((resolve) => {
-            if (state.controller.signal.aborted) { resolve("denied"); return; }
-            state.pending = { id: randomUUID(), request: approval, resolve };
-          }) });
+          onApprovalRequest: async (approval) => {
+            if (state.controller.signal.aborted) return 'denied';
+            let id: string = randomUUID(); let durable = false;
+            const queue = this.options.approvalQueue;
+            if (request.targetGeneration !== undefined) {
+              if (!queue || !validPendingAction(approval.pendingApproval)) return 'denied';
+              const pending = await queue.createPendingApproval({
+                profileId: this.options.profileId, sessionId: request.sessionId, channel: 'desktop',
+                toolName: approval.tool.name, commandPreview: redactSensitiveText(approval.targetSummary ?? approval.tool.name).slice(0, 2048),
+                commandPayload: typeof approval.input.command === 'string' ? approval.input.command : undefined,
+                commandHash: approval.pendingApproval.actionKey, executionApproval: approval.pendingApproval,
+                desktopBinding: { targetId: request.targetId, targetGeneration: request.targetGeneration, riskClass: approval.riskClass },
+                requestedAt: new Date(), expiresAt: new Date(approval.pendingApproval.expiresAt),
+              });
+              if (pending.status !== 'pending') return 'denied';
+              id = pending.id; durable = true;
+              if (state.controller.signal.aborted) {
+                await queue.resolveApproval(id, 'denied', 'owner-cancelled', { profileId: this.options.profileId, sessionId: request.sessionId });
+                return 'denied';
+              }
+            }
+            if (durable) {
+              const scope = { profileId: this.options.profileId, sessionId: request.sessionId };
+              state.pending = { id, durable, request: approval, resolve: (decision) => {
+                void queue!.resolveApproval(id, decision, 'owner-cancelled', scope).catch(() => undefined);
+              } };
+              try {
+                const result = await queue!.waitForResolution(id, scope);
+                if (result.status !== 'approved' || state.controller.signal.aborted) return 'denied';
+                await this.validate(request);
+                if (!state.runtime?.grantApproval) return 'denied';
+                await state.runtime.grantApproval({ pendingApproval: approval.pendingApproval, toolName: approval.tool.name,
+                  riskClass: approval.riskClass, targetKey: approval.targetKey, targetSummary: approval.targetSummary, scope: 'once' });
+                return 'approved';
+              } finally { if (state.pending?.id === id) state.pending = undefined; }
+            }
+            return new Promise((resolve) => { state.pending = { id, request: approval, resolve }; });
+          } });
         return { text: response.text, sessionId: state.runtime.sessionId };
       } finally {
+        if (state.pending?.durable) await this.options.approvalQueue!.resolveApproval(state.pending.id, 'denied', 'owner-settled', {
+          profileId: this.options.profileId, sessionId: request.sessionId }).catch(() => undefined);
         state.pending?.resolve("denied");
         this.#active.delete(request.sessionId);
         await state.runtime?.dispose();

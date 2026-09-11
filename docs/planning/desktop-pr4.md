@@ -63,3 +63,23 @@ are included in canonical operation payloads; inspection remains profile scoped.
 Validation: 58 protocol/receipt tests, a real SQLite Task lifecycle and authority
 regression, clean-copy typecheck, and Desktop foundation checks passed. Controls
 write canonical state; they do not acquire scheduler or worker ownership.
+
+## 5. Durable Desktop approvals
+
+Shared Desktop turns persist pending requests in GatewayApprovalQueue with exact
+profile, Session, target generation, risk class and pending-action authority.
+The supervisor retains the live continuation; reopening Desktop reads the same
+row. Resolution consumes the queue row once, then the owning runtime revalidates
+and grants once before continuation. Denials and cancellation settle the wait.
+Expiry uses the existing queue wait path. A supervisor restart expires orphaned
+Desktop continuations; it never replays an uncertain action.
+
+Task approvals route to TaskApprovalService; channel approvals continue through
+ChannelGateway's local-operator method. Desktop neither persists reusable grants
+nor mutates channel continuations. Stop/deny controls remain reachable after
+workspace trust revocation.
+
+Validation: 31 existing host/queue/Task-approval tests, one new durable
+reconnection/exactly-one-continuation regression, and clean-copy typecheck passed.
+Security review covered authority/target binding and claiming a pending resolution
+before asynchronous grant work. Runtime grant checks remain the final authority.

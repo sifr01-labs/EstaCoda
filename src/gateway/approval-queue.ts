@@ -1,5 +1,5 @@
 import { SQLiteTaskStore } from "../tasks/sqlite-task-store.js";
-import { isTerminalTaskStatus } from "../contracts/task.js";
+import { isTerminalTaskStatus, TASK_TOOL_RISK_CLASSES } from "../contracts/task.js";
 import { validPendingAction, type PendingActionApproval } from "../security/pending-action-approval.js";
 import { createHash, randomUUID } from "node:crypto";
 import type { SQLiteDatabase } from "../storage/sqlite.js";
@@ -8,7 +8,7 @@ import { assessHardlineFloor } from "../security/command-safety.js";
 import type { ChannelAttachment, ChannelSessionKey } from "../contracts/channel.js";
 
 export type PendingApprovalStatus = "pending" | "approved" | "denied" | "expired";
-export type PendingApprovalChannel = "telegram" | "discord" | "email" | "cli";
+export type PendingApprovalChannel = "telegram" | "discord" | "email" | "cli" | "desktop";
 export type PendingApprovalKind = "command" | "task" | "managed_python_capability_install";
 
 export type ManagedPythonCapabilityApprovalPayload = {
@@ -37,6 +37,7 @@ export type ManagedPythonCapabilityApprovalMessagePayload = {
 };
 
 export type PendingApproval = {
+  desktopBinding?: { targetId: string; targetGeneration: number; riskClass: import("../contracts/tool.js").ToolRiskClass };
   taskApprovalLinkId?: string;
   executionApproval?: PendingActionApproval;
   id: string;
@@ -142,6 +143,7 @@ export class GatewayApprovalQueue {
     if (!["command", "task", "managed_python_capability_install"].includes(approvalKind)) throw new Error("Unknown approval kind.");
     if (approval.executionApproval !== undefined && (!validPendingAction(approval.executionApproval) ||
       approval.executionApproval.executionScope.profileId !== profileId || approval.executionApproval.executionScope.sessionId !== sessionId)) throw new Error("Invalid pending action ownership.");
+    if (approval.channel === "desktop") this.#validateDesktopApproval(approval);
     if (approvalKind === "task") this.#validateTaskApproval(approval, "requesting");
     const id = options.idempotencyKey === undefined
       ? this.#idFactory()
@@ -230,7 +232,7 @@ export class GatewayApprovalQueue {
         approval.commandPayload ?? null,
         approval.toolName,
         approvalKind,
-        approvalKind === "task" ? JSON.stringify({ taskApprovalLinkId: approval.taskApprovalLinkId }) : approvalKind === "command" ? (approval.executionApproval === undefined ? null : JSON.stringify({ executionApproval: approval.executionApproval })) : (approval.requestPayload === undefined ? null : JSON.stringify(approval.requestPayload)),
+        approvalKind === "task" ? JSON.stringify({ taskApprovalLinkId: approval.taskApprovalLinkId }) : approvalKind === "command" ? (approval.executionApproval === undefined ? null : JSON.stringify({ executionApproval: approval.executionApproval, ...(approval.desktopBinding ? { desktopBinding: approval.desktopBinding } : {}) })) : (approval.requestPayload === undefined ? null : JSON.stringify(approval.requestPayload)),
         approval.requestedAt.toISOString(),
         approval.expiresAt.toISOString(),
         approval.channel,
@@ -297,6 +299,15 @@ export class GatewayApprovalQueue {
     });
   }
 
+  #validateDesktopApproval(approval: Omit<PendingApproval, "id" | "status">): void {
+    const binding = approval.desktopBinding;
+    const session = this.#db.query<{ execution_target_json: string | null }>('select execution_target_json from sessions where id=? and profile_id=?').get(approval.sessionId, approval.profileId);
+    const target = session?.execution_target_json ? JSON.parse(session.execution_target_json) : undefined;
+    if (!binding || !target || target.targetId !== binding.targetId || target.targetGeneration !== binding.targetGeneration ||
+      !TASK_TOOL_RISK_CLASSES.includes(binding.riskClass) || !validPendingAction(approval.executionApproval) ||
+      approval.executionApproval.executionScope.workspaceIdentityHash !== target.workspace.identityHash) throw new Error('Desktop approval target binding changed.');
+  }
+
   #validateTaskApproval(approval: Omit<PendingApproval, "id" | "status">, status: "requesting" | "pending", id?: string): void {
     const store = new SQLiteTaskStore({ db: this.#db, profileId: approval.profileId });
     const link = approval.taskApprovalLinkId === undefined ? null : store.getApprovalLink(approval.taskApprovalLinkId);
@@ -333,6 +344,7 @@ export class GatewayApprovalQueue {
     if (decision === "approved") {
       const current = this.#getScopedRow(id, { profileId, sessionId: scope.sessionId });
       if (current !== null && !["command", "task", "managed_python_capability_install"].includes(current.approval_kind)) throw new Error("Unknown approval kind.");
+      if (current?.channel === "desktop" && current.status === "pending") this.#validateDesktopApproval(rowToPendingApproval(current, { includePayload: false }));
       if (current !== null && current.status === "pending" && current.expires_at > now && current.approval_kind === "task") this.#validateTaskApproval(rowToPendingApproval(current, { includePayload: false }), "pending", current.id);
       if (current !== null && current.status === "pending" && current.expires_at > now && current.approval_kind === "command") {
         const binding = commandApprovalBinding(current);
@@ -499,6 +511,7 @@ function assertApprovalReplayMatches(
     row.requested_at !== approval.requestedAt.toISOString() ||
     row.expires_at !== approval.expiresAt.toISOString() ||
     row.channel !== approval.channel ||
+    (row.channel === "desktop" && row.status === "pending" && JSON.stringify(desktopBinding(row)) !== JSON.stringify(approval.desktopBinding)) ||
     (approvalKind === "command" && row.status === "pending" && JSON.stringify(commandApprovalBinding(row)) !== JSON.stringify(approval.executionApproval)) ||
     (approvalKind === "task" && row.status === "pending" && taskApprovalLinkId(row) !== approval.taskApprovalLinkId) ||
     row.chat_id !== (approval.chatId ?? null)
@@ -533,6 +546,7 @@ function rowToPendingApproval(
     toolName: row.tool_name,
     approvalKind: row.approval_kind ?? "command",
     taskApprovalLinkId: taskApprovalLinkId(row),
+    desktopBinding: desktopBinding(row),
     executionApproval: row.approval_kind === "command" ? commandApprovalBinding(row) : undefined,
     requestPayload: row.approval_kind === "managed_python_capability_install" && options.includeRequestPayload === true && row.request_payload !== null
       ? parseManagedPythonCapabilityApprovalPayload(row.request_payload)
@@ -677,4 +691,9 @@ function taskApprovalLinkId(row: PendingApprovalRow): string | undefined {
     const id = JSON.parse(row.request_payload).taskApprovalLinkId;
     return typeof id === "string" && id.length > 0 ? id : undefined;
   } catch { return undefined; }
+}
+
+function desktopBinding(row: PendingApprovalRow): PendingApproval['desktopBinding'] {
+  if (row.channel !== 'desktop' || !row.request_payload) return undefined;
+  try { return JSON.parse(row.request_payload).desktopBinding; } catch { return undefined; }
 }

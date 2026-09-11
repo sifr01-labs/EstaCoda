@@ -1840,12 +1840,17 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
     if (process.platform !== "win32" && Buffer.byteLength(join(profilePaths.gatewayStatePath, "c-12345678.sock")) <= 100) {
       const receipts = new ControlReceipts(sessionDb.db, profileId, state.gatewayInstanceId!);
       receipts.recover();
+      // Singleton acquisition proved the old owner gone. Never replay an orphaned live continuation.
+      sessionDb.db.query("update pending_approvals set status='expired', resolved_at=?, resolved_by='owner-restart', command_payload=null, request_payload=null where profile_id=? and channel='desktop' and status='pending'")
+        .run(new Date().toISOString(), profileId);
       const sharedHost = new SharedSessionHost({
-        profileId, sessionDb, receipts,
+        profileId, sessionDb, receipts, approvalQueue: gatewayApprovalQueue,
         taskControl: (request) => desktopTaskControl(taskStore, request),
         validateTarget: async (request) => {
           const session = await sessionDb.getSessionForProfile(request.sessionId, profileId);
           if (!session?.executionTarget || session.executionTarget.targetGeneration !== request.targetGeneration) throw new Error('Stale Session target.');
+          if (request.method === 'cancel' || request.method === 'task.cancel' || request.method === 'task.pause' ||
+            (request.method === 'approval' && request.decision === 'denied')) return;
           await validateSessionWorkspaceOwnership({ homeDir, profileId, session, workspaceRoot: session.executionTarget.workspace.canonicalPath });
           if (!await trustStore.isTrusted(session.executionTarget.workspace.canonicalPath)) throw new Error('Workspace trust required.');
         },
@@ -1863,6 +1868,9 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
         },
         channelCancel: (sessionId) => gateway instanceof ChannelGateway && gateway.cancelOperatorSession(sessionId),
         channelApproval: async (request) => {
+          if (taskApprovalService.listPendingForSession(request.sessionId).some((approval) => approval.approvalId === request.approvalId)) {
+            return taskApprovalService.resolvePendingForSession({ authorizedSessionId: request.sessionId, approvalId: request.approvalId!, decision: request.decision! });
+          }
           if (!(gateway instanceof ChannelGateway)) throw new Error("Gateway operator controls unavailable.");
           return gateway.resolveOperatorApproval({ sessionId: request.sessionId, approvalId: request.approvalId!, decision: request.decision! });
         }
