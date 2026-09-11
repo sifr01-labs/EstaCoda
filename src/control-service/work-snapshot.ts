@@ -1,3 +1,5 @@
+import { profileAttention } from './profile-attention.js';
+import { appendInbox } from './inbox-projections.js';
 import { SQLiteTaskStore } from '../tasks/sqlite-task-store.js';
 import { appendTaskWork } from './task-projections.js';
 import { INTERNAL_SESSION_KINDS } from '../session/session-presentation.js';
@@ -5,20 +7,21 @@ import { randomBytes } from 'node:crypto';
 import { lstat } from 'node:fs/promises';
 import { resolveGlobalStateHome } from '../config/profile-home.js';
 import { SQLiteSessionDB } from '../session/sqlite-session-db.js';
-import { ControlProtocolError, type ActivityProjection, type Page, type WorkProjection } from '../contracts/desktop-control/index.js';
+import { ControlProtocolError, type InboxProjection, type ActivityProjection, type Page, type WorkProjection } from '../contracts/desktop-control/index.js';
 import { sessionActivity, sessionWork } from './work-projections.js';
 import type { SessionEvent, SessionMessage } from '../contracts/session.js';
 
-export type WorkState = { work: WorkProjection[]; activity: Record<string, ActivityProjection[]> };
+export type WorkState = { inbox?: InboxProjection[]; work: WorkProjection[]; activity: Record<string, ActivityProjection[]> };
 /** Materialized, bounded epoch. No open SQLite transaction or live executor survives capture. */
-export async function captureWork(input: { homeDir: string; profileId: string }, signal: AbortSignal): Promise<WorkState> {
+export async function captureWork(input: { homeDir: string; profileId: string; version?: string }, signal: AbortSignal): Promise<WorkState> {
+  const attention = await profileAttention(input);
   const path = resolveGlobalStateHome(input).sessionsSqlitePath;
   try { const info = await lstat(path); if (!info.isFile() || info.isSymbolicLink()) throw new ControlProtocolError('-32007'); }
-  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { work: [], activity: {} }; throw error; }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { work: [], activity: {}, inbox: attention.inbox }; throw error; }
   const sessions = new SQLiteSessionDB({ path, readonly: true });
   try {
     sessions.db.exec('begin');
-    const state: WorkState = { work: [], activity: {} };
+    const state: WorkState = { work: [], activity: {}, inbox: attention.inbox };
     // Refuse an oversized capture, rather than silently presenting incomplete Work as complete.
     const ids = sessions.db.query<{ id: string }>('select id from sessions where profile_id = ? order by updated_at desc, id limit 1001').all(input.profileId);
     if (ids.length > 1000) throw new ControlProtocolError('-32007');
@@ -39,6 +42,7 @@ export async function captureWork(input: { homeDir: string; profileId: string },
     const taskCount = sessions.db.query<{ count: number }>('select count(*) as count from tasks where profile_id = ?').get(input.profileId);
     if ((taskCount?.count ?? 0) > 1000) throw new ControlProtocolError('-32007');
     appendTaskWork(state, new SQLiteTaskStore({ db: sessions.db, profileId: input.profileId }));
+    await appendInbox(state, sessions, input, attention.jobs);
     if (Buffer.byteLength(JSON.stringify(state)) > 8 * 1024 * 1024) throw new ControlProtocolError('-32007');
     sessions.db.exec('commit');
     return state;

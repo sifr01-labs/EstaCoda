@@ -1,3 +1,4 @@
+import { WorkMonitor } from './work-monitor.js';
 import { sessionControl, type SessionMutationRequest } from './session-controls.js';
 import { captureWork, WorkSnapshot, type WorkState } from './work-snapshot.js';
 import { ControlSubscriptions } from './subscriptions.js';
@@ -15,15 +16,21 @@ export class DesktopBridge {
   readonly subscriptions: ControlSubscriptions;
   #generation = 0;
   #work: WorkSnapshot | undefined;
+  #workMonitor: WorkMonitor | undefined;
   #monitor: RuntimeStateMonitor | undefined;
   #capture: AbortController | undefined;
   #snapshot: BootstrapResult | undefined;
   constructor(readonly options: { input: Readable; output: Writable; homeDir: string; profileId: string; version: string;
     readWork?: (signal: AbortSignal) => Promise<WorkState>;
     readState?: (signal: AbortSignal) => Promise<BootstrapState> }) {
-    this.server = new StdioControlServer({ ...options, events: ['control.ready', 'service.warning', 'service.shutdown'], handlers: {
+    this.server = new StdioControlServer({ ...options, events: ['work.changed', 'activity.appended', 'attention.changed', 'control.ready', 'service.warning', 'service.shutdown'], handlers: {
       ...Object.fromEntries(['approvals.resolve', 'tasks.pause', 'tasks.resume', 'tasks.cancel', 'tasks.retry', 'tasks.guide', 'sessions.start', 'sessions.resume', 'sessions.send', 'sessions.cancelTurn', 'operations.inspect'].map((method) =>
         [method, async (request: SessionMutationRequest, signal: AbortSignal) => ({ result: await sessionControl(this.options, request, signal) })])),
+      'inbox.list': (request) => {
+        if (request.method !== 'inbox.list') throw new ControlProtocolError('-32601');
+        const snapshot = this.workSnapshot();
+        return { result: snapshot.page('inbox', snapshot.state.inbox ?? [], request.params) };
+      },
       'work.list': (request) => {
         if (request.method !== 'work.list') throw new ControlProtocolError('-32601');
         const snapshot = this.workSnapshot();
@@ -49,12 +56,12 @@ export class DesktopBridge {
       },
     } });
     this.subscriptions = new ControlSubscriptions(this.server);
-    this.server.onDispose(() => { this.#capture?.abort(); this.#monitor?.dispose(); this.#snapshot = undefined; this.#work = undefined; });
+    this.server.onDispose(() => { this.#capture?.abort(); this.#monitor?.dispose(); this.#workMonitor?.dispose(); this.#snapshot = undefined; this.#work = undefined; });
   }
   get snapshot(): BootstrapResult | undefined { return this.#snapshot ? structuredClone(this.#snapshot) : undefined; }
   async bootstrap(signal: AbortSignal): Promise<BootstrapResult> {
     const generation = ++this.#generation;
-    this.#monitor?.dispose(); this.subscriptions.reset();
+    this.#monitor?.dispose(); this.#workMonitor?.dispose(); this.subscriptions.reset();
     this.#capture?.abort(); this.#capture = new AbortController(); this.#snapshot = undefined; this.#work = undefined;
     const combined = AbortSignal.any([signal, this.#capture.signal]);
     let state: BootstrapState;
@@ -73,6 +80,8 @@ export class DesktopBridge {
     this.subscriptions.publish({ type: 'control.ready', payload: { state: 'ready' } });
     this.#monitor = new RuntimeStateMonitor(state, (signal) => this.options.readState ? this.options.readState(signal) : this.readState(signal),
       (event) => { if (generation === this.#generation && !this.server.closed) { this.subscriptions.publish(event); } });
+    this.#workMonitor = new WorkMonitor(work, (signal) => this.options.readWork ? this.options.readWork(signal) : captureWork(this.options, signal),
+      (event) => { if (generation === this.#generation && !this.server.closed) this.subscriptions.publish(event); });
     return structuredClone(this.#snapshot);
   }
   private workSnapshot(): WorkSnapshot {

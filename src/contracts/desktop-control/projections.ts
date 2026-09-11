@@ -5,7 +5,7 @@ export const WORK_STATUSES = ["draft", "queued", "running", "needs_attention", "
 export type WorkDisplayStatus = typeof WORK_STATUSES[number];
 export type WorkProjection = {
   id: string; canonicalId: string; profileId: string;
-  kind: "session" | "task" | "task_attempt" | "scheduled_execution" | "evolution_review";
+  kind: "session" | "task" | "task_attempt" | "schedule" | "scheduled_execution" | "evolution_review";
   parentWorkId?: string;
   title: string; status: WorkDisplayStatus; reason?: string; updatedAt: number;
   target: TargetProjection | null;

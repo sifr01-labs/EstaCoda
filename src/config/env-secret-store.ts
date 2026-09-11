@@ -161,3 +161,12 @@ export function presentEnvSecretNames(content: string): string[] {
   }
   return [...available].filter(([, present]) => present).map(([key]) => key);
 }
+
+/** Read-only presence projection for callers that already bounded a selected-profile file. */
+export function envContentHasSecret(content: string, key: string): boolean {
+  const normalized = normalizeEnvKey(key);
+  return content.split(/\r?\n/u).some((line) => {
+    const parsed = parseDotEnvLine(line);
+    return parsed?.key === normalized && parsed.value.trim().length > 0;
+  });
+}

@@ -45,6 +45,6 @@ it('captures one immutable profile snapshot and invalidates overlapping bootstra
   pending[0]!(state); await rejection;
   expect(snapshot.cursor.instanceId).toBe(bridge.server.instanceId); expect(snapshot.cursor.sequence).toBe(0);
   snapshot.profile.label = 'changed'; expect(bridge.snapshot?.profile.label).toBe('P');
-  expect(bridge.server.context?.capabilities.methods).not.toContain('sessions.send');
+  expect(bridge.server.context?.capabilities.methods).toContain('sessions.send');
   bridge.server.close(); await bridge.server.done; expect(bridge.snapshot).toBeUndefined();
 });

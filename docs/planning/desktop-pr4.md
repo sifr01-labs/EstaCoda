@@ -83,3 +83,24 @@ Validation: 31 existing host/queue/Task-approval tests, one new durable
 reconnection/exactly-one-continuation regression, and clean-copy typecheck passed.
 Security review covered authority/target binding and claiming a pending resolution
 before asynchronous grant work. Runtime grant checks remain the final authority.
+
+## 6. Inbox and canonical change notifications
+
+Inbox now projects durable approvals, Task input/host waits, failed/partial Work,
+uncertain receipts, missing model/credential state, OAuth expiry, supervisor
+connection problems, workspace trust, failed schedules, Evolution proposals and
+Task/schedule delivery failures. Approval actions contain only an exact reference,
+summary and once/deny choices. Raw command payloads, fingerprints, credentials and
+proposal patches are not exported.
+
+Profile files are selected by backend paths and bounded reads; linked profile
+state is rejected. Credential inspection does not load `.env` into process.env,
+refresh tokens or contact a provider. Schedule executions group beneath their
+profile-owned schedules. Work and Inbox changes use the bounded subscription
+journal; canonical polling is every five seconds, with no overlapping captures.
+Rewritten activity/deleted Work requests a fresh snapshot instead of inventing
+an append event. Existing page tokens continue to refer to their original epoch.
+
+Validation: eleven focused projection, profile isolation, notification,
+subscription and bootstrap tests and clean-copy typecheck passed. The protocol
+capability expectation was updated for the lifecycle handlers now implemented.
