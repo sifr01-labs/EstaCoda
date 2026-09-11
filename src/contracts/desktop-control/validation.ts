@@ -50,7 +50,7 @@ const page = (check: Check): Check => shape({ items: array(check), nextCursor: n
 const pageParams = { limit: integer(1, 100) };
 const optionalPage = { cursor: cursorToken };
 const sessionParams = { operationId: isControlOperationId, sessionId: id, target };
-const mutationMethods = ["sessions.send", "sessions.cancelTurn", "approvals.resolve"] as const;
+const mutationMethods = ["sessions.start", "sessions.resume", "sessions.send", "sessions.cancelTurn", "approvals.resolve"] as const;
 const receiptShape = shape({ operationId: isControlOperationId, profileId: id, sessionId: id, target, method: choice(mutationMethods),
   state: choice(["accepted", "dispatched", "completed", "uncertain", "unknown", "expired"]), cancellation: choice(["not_requested", "requested", "confirmed"]) });
 const receipt: Check = (v) => receiptShape(v) && isRecord(v) &&
@@ -78,6 +78,8 @@ const contracts: { [M in keyof MethodContracts]: { params: Check; result: Check 
   "providers.list": { params: shape(pageParams, optionalPage), result: page(provider) },
   "connections.list": { params: shape(pageParams, optionalPage), result: page(connection) },
   "connections.get": { params: shape({ connectionId: id }), result: connection },
+  "sessions.start": { params: shape(sessionParams), result: receipt },
+  "sessions.resume": { params: shape(sessionParams), result: receipt },
   "sessions.send": { params: shape({ ...sessionParams, text: text(32_768, 1) }), result: receipt },
   "sessions.cancelTurn": { params: shape(sessionParams), result: receipt },
   "approvals.resolve": { params: shape({ ...sessionParams, approvalId: id, decision: choice(["approved", "denied"]) }), result: receipt },

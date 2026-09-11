@@ -43,6 +43,8 @@ const cases = {
   "providers.list": { params: { limit: 10 }, result: { items: [{ id: "local", label: "Local", authMethods: ["none"], state: "ready" }], nextCursor: null } },
   "connections.list": { params: { limit: 10 }, result: { items: [connection], nextCursor: null } },
   "connections.get": { params: { connectionId: "telegram" }, result: connection },
+  "sessions.start": { params: binding, result: { ...receipt, method: "sessions.start" } },
+  "sessions.resume": { params: binding, result: { ...receipt, method: "sessions.resume" } },
   "sessions.send": { params: { ...binding, text: "Hello" }, result: receipt },
   "sessions.cancelTurn": { params: binding, result: { ...receipt, method: "sessions.cancelTurn", state: "completed", cancellation: "requested" } },
   "approvals.resolve": { params: { ...binding, approvalId: "a", decision: "denied" }, result: { ...receipt, method: "approvals.resolve" } },

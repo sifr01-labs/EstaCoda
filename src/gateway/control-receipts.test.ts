@@ -101,3 +101,18 @@ it("records control revisions once and rejects another live process before accep
     store.release(claim);
   } finally { db.close(); await rm(root, { recursive: true, force: true }); }
 });
+it('persists the generation in receipt identity and rejects stale or re-bound Desktop requests', async () => {
+  const root = await mkdtemp(join(tmpdir(), 'generation-receipts-'));
+  const db = new SQLiteSessionDB({ path: join(root, 'sessions.sqlite') });
+  try {
+    await ensureRuntimeSession({ sessionDb: db, sessionId: 's', profileId: 'default', workspaceRoot: root, homeDir: root, durable: true });
+    const target = (await db.getSession('s'))!.executionTarget!;
+    const request = { method: 'send' as const, sessionId: 's', targetId: target.targetId, targetGeneration: target.targetGeneration, operationId: createControlOperationId(), text: 'hello' };
+    const receipts = new ControlReceipts(db.db, 'default', 'owner');
+    expect(receipts.accept(request).receipt).toMatchObject({ targetGeneration: target.targetGeneration, targetId: target.targetId });
+    expect(() => receipts.accept({ ...request, targetGeneration: target.targetGeneration + 1 })).toThrow('different input');
+    expect(() => receipts.accept({ ...request, targetGeneration: target.targetGeneration + 1, operationId: createControlOperationId() })).toThrow('binding changed');
+    expect(receipts.inspect({ ...request, method: 'inspect' })).toMatchObject([{ targetGeneration: target.targetGeneration }]);
+    expect(receipts.inspect({ ...request, method: 'inspect', targetGeneration: target.targetGeneration + 1 })).toEqual([]);
+  } finally { db.close(); await rm(root, { recursive: true, force: true }); }
+});

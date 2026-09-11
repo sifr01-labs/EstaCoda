@@ -1841,6 +1841,12 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
       receipts.recover();
       const sharedHost = new SharedSessionHost({
         profileId, sessionDb, receipts,
+        validateTarget: async (request) => {
+          const session = await sessionDb.getSessionForProfile(request.sessionId, profileId);
+          if (!session?.executionTarget || session.executionTarget.targetGeneration !== request.targetGeneration) throw new Error('Stale Session target.');
+          await validateSessionWorkspaceOwnership({ homeDir, profileId, session, workspaceRoot: session.executionTarget.workspace.canonicalPath });
+          if (!await trustStore.isTrusted(session.executionTarget.workspace.canonicalPath)) throw new Error('Workspace trust required.');
+        },
         acquire: async (sessionId) => {
           const current = await loadConfig();
           const session = await sessionDb.getSessionForProfile(sessionId, profileId);
@@ -1861,7 +1867,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
       });
       state.sharedSessionHost = sharedHost;
       state.privateControl = await startPrivateControl({ directory: profilePaths.gatewayStatePath,
-        instanceId: state.gatewayInstanceId!, profileId, version, handle: (request) => sharedHost.handle(request) });
+        instanceId: state.gatewayInstanceId!, profileId, version, targetGeneration: true, handle: (request) => sharedHost.handle(request) });
      } else {
       logWarning("Shared control unavailable: use a shorter profile home on Unix; Windows requires protected named-pipe support. Foreground and background services remain available.");
     }

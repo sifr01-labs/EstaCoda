@@ -1,3 +1,4 @@
+import { sessionControl, type SessionMutationRequest } from './session-controls.js';
 import { captureWork, WorkSnapshot, type WorkState } from './work-snapshot.js';
 import { ControlSubscriptions } from './subscriptions.js';
 import { RuntimeStateMonitor } from './runtime-notifications.js';
@@ -21,6 +22,8 @@ export class DesktopBridge {
     readWork?: (signal: AbortSignal) => Promise<WorkState>;
     readState?: (signal: AbortSignal) => Promise<BootstrapState> }) {
     this.server = new StdioControlServer({ ...options, events: ['control.ready', 'service.warning', 'service.shutdown'], handlers: {
+      ...Object.fromEntries(['sessions.start', 'sessions.resume', 'sessions.send', 'sessions.cancelTurn', 'operations.inspect'].map((method) =>
+        [method, async (request: SessionMutationRequest, signal: AbortSignal) => ({ result: await sessionControl(this.options, request, signal) })])),
       'work.list': (request) => {
         if (request.method !== 'work.list') throw new ControlProtocolError('-32601');
         const snapshot = this.workSnapshot();

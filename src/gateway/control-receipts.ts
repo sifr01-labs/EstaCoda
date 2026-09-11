@@ -16,16 +16,19 @@ export function migrateControlReceiptsV35(db: SQLiteDatabase): void {
 }
 type ReceiptRow = { method: string; operation_id: string; session_id: string; target_id: string;
   input_event_id: string; instance_id: string; status: string; accepted_at: number; result_json: string | null };
-export type ControlReceipt = { operationId: string; method: string; sessionId: string; status: string; result?: unknown };
+export type ControlReceipt = { targetId?: string; targetGeneration?: number; operationId: string; method: string; sessionId: string; status: string; result?: unknown };
 const RETENTION_MS = 30 * 86_400_000;
 const ACCEPT_WINDOW_MS = 5 * 60_000;
 function canonical(request: PrivateControlRequest): string {
   return JSON.stringify({ method: request.method, sessionId: request.sessionId, targetId: request.targetId,
+    ...(request.targetGeneration === undefined ? {} : { targetGeneration: request.targetGeneration }),
     operationId: request.operationId, ...(request.method === "send" ? { text: request.text } : {}),
     ...(request.method === "approval" ? { approvalId: request.approvalId, decision: request.decision } : {}) });
 }
-function projection(row: ReceiptRow): ControlReceipt {
-  return { operationId: row.operation_id, method: row.method, sessionId: row.session_id, status: row.status,
+function projection(row: ReceiptRow, db: SQLiteDatabase): ControlReceipt {
+  const event = db.query<{ event_json: string }>('select event_json from session_events where id=?').get(row.input_event_id);
+  const binding = event ? JSON.parse(JSON.parse(event.event_json).payload) as PrivateControlRequest : undefined;
+  return { targetId: row.target_id, ...(binding?.targetGeneration === undefined ? {} : { targetGeneration: binding.targetGeneration }), operationId: row.operation_id, method: row.method, sessionId: row.session_id, status: row.status,
     ...(row.result_json ? { result: JSON.parse(row.result_json) } : {}) };
 }
 /** Payloads use the existing bounded Session event store. Receipts contain only
@@ -49,7 +52,7 @@ export class ControlReceipts {
   }
   inspect(request: PrivateControlRequest): ControlReceipt[] {
     return this.db.query<ReceiptRow>(`select * from session_control_receipts where profile_id=? and principal=? and operation_id=? and session_id=? and target_id=?`)
-      .all(this.profileId, this.#principal, request.operationId, request.sessionId, request.targetId).map(projection);
+      .all(this.profileId, this.#principal, request.operationId, request.sessionId, request.targetId).map((row) => projection(row, this.db)).filter((receipt) => request.targetGeneration === undefined || receipt.targetGeneration === request.targetGeneration);
   }
   accept(request: PrivateControlRequest): { inserted: boolean; receipt: ControlReceipt } {
     validatePrivateControlRequest(request);
@@ -61,14 +64,14 @@ export class ControlReceipts {
       if (existing) {
         const event = this.db.query<{ event_json: string }>("select event_json from session_events where id=?").get(existing.input_event_id);
         if (!event || JSON.parse(event.event_json).payload !== binding) throw new Error("Operation ID was already bound to different input, or its payload expired.");
-        this.db.exec("commit"); return { inserted: false, receipt: projection(existing) };
+        this.db.exec("commit"); return { inserted: false, receipt: projection(existing, this.db) };
       }
       const timestamp = Number(request.operationId.split(":", 1)[0]);
       if (!Number.isSafeInteger(timestamp) || Math.abs(Date.now() - timestamp) > ACCEPT_WINDOW_MS) throw new Error("Unknown or expired operation ID. Reconcile before submitting new work.");
       const count = this.db.query<{ count: number }>("select count(*) as count from session_control_receipts where profile_id=?").get(this.profileId)!.count;
       if (count >= 10_000) throw new Error("Control receipt retention capacity reached.");
-      const session = this.db.query<{ target: string; profile_id: string; ended_at: string | null }>("select profile_id, ended_at, json_extract(execution_target_json, '$.targetId') as target from sessions where id=?").get(request.sessionId);
-      if (!session || session.profile_id !== this.profileId || session.target !== request.targetId || session.ended_at) throw new Error("Control Session binding changed.");
+      const session = this.db.query<{ target: string; generation: number; profile_id: string; ended_at: string | null }>("select profile_id, ended_at, json_extract(execution_target_json, '$.targetGeneration') as generation, json_extract(execution_target_json, '$.targetId') as target from sessions where id=?").get(request.sessionId);
+      if (!session || session.profile_id !== this.profileId || session.target !== request.targetId || session.ended_at || (request.targetGeneration !== undefined && session.generation !== request.targetGeneration)) throw new Error("Control Session binding changed.");
       const owner = this.db.query<{ owner_id: string | null; owner_pid: number | null }>(
         "select owner_id, owner_pid from session_execution_owners where session_id=?"
       ).get(request.sessionId);
@@ -81,7 +84,7 @@ export class ControlReceipts {
       this.db.query("insert into session_control_receipts values (?, ?, ?, ?, ?, ?, ?, ?, 'accepted', ?, null)")
         .run(this.profileId, this.#principal, request.method, request.operationId, request.sessionId, request.targetId, eventId, this.instanceId, now);
       this.db.exec("commit");
-      return { inserted: true, receipt: { operationId: request.operationId, method: request.method, sessionId: request.sessionId, status: "accepted" } };
+      return { inserted: true, receipt: { targetId: request.targetId, ...(request.targetGeneration === undefined ? {} : { targetGeneration: request.targetGeneration }), operationId: request.operationId, method: request.method, sessionId: request.sessionId, status: "accepted" } };
     } catch (error) { this.db.exec("rollback"); throw error; }
   }
   transition(request: PrivateControlRequest, status: "dispatched" | "completed" | "uncertain", result?: unknown): void {

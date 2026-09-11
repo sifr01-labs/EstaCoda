@@ -32,3 +32,22 @@ assert verified external effects, and unavailable cost remains null.
 
 Validation: three canonical SQLite snapshot/pagination/grouping tests passed;
 clean-copy typecheck passed. No Task lifecycle writes or new scheduler were added.
+
+## 3. Session lifecycle and generation fencing
+
+Session start creates a canonical, trusted target-bound Session reference with an
+operation binding; resume validates that reference. Send/cancel/start/resume and
+inspection use the existing authenticated supervisor client and on-demand host
+startup path. The bridge never constructs an agent. Supervisor capability probes
+now explicitly report generation support; Desktop refuses incompatible hosts.
+
+Generation is included in canonical receipt payload identity and returned from
+that persisted binding. New receipt acceptance checks the Session generation;
+the supervisor revalidates the target before execution. Exact retries return the
+original receipt, including after the normal acceptance window. Cancellation
+remains a request, not proof that external work stopped. Existing generationless
+CLI controls retain their previous semantics.
+
+Validation: 57 protocol/receipt/host tests and seven local socket/process tests
+passed; clean-copy typecheck passed. Security review covered profile/target
+mismatch, missing enforcement, conflicting retries and stale generations.

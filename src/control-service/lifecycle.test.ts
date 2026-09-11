@@ -58,7 +58,7 @@ it.skipIf(process.platform === 'win32')('reconnects independent bridges to the s
     expect(ai.result.instanceId).not.toBe(bi.result.instanceId);
     expect((await foreign.initialize('p')).error.code).toBe(-32003); await foreign.initialize();
     const boot = (await a.rpc('control.bootstrap', {})).result;
-    expect(boot.runtime.state).toBe('ready'); expect(boot.capabilities.methods).not.toContain('sessions.send');
+    expect(boot.runtime.state).toBe('ready'); expect(boot.capabilities.methods).toContain('sessions.send');
     expect((await foreign.rpc('control.bootstrap', {})).result.runtime.state).toBe('stopped');
     const scope = { windowId: 'w', generation: 1, purpose: 'provider', providerId: 'local', authMethod: 'api_key', endpoint: 'http://localhost:8000' };
     expect((await a.rpc('credentials.stage', { scope, value: 'restart-credential-canary' })).error.code).toBe(-32601);

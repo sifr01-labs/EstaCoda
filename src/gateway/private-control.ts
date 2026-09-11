@@ -18,6 +18,7 @@ async function assertPrivate(path: string, directory = false): Promise<void> {
 
 export async function startPrivateControl(input: {
   directory: string; instanceId: string; profileId: string; version: string;
+  targetGeneration?: boolean;
   handle(request: PrivateControlRequest): Promise<unknown>;
 }): Promise<{ close(): Promise<void> }> {
   if (process.platform === "win32") throw new Error("Shared control requires a protected named pipe on Windows; use foreground execution.");
@@ -51,7 +52,7 @@ export async function startPrivateControl(input: {
           if (message.probe === true) {
             if (Object.keys(message).some((key) => !["protocol", "version", "instanceId", "profileId", "socket", "token", "probe"].includes(key))) throw new Error("Invalid probe.");
             socket.end(JSON.stringify({ ok: true, result: { profileId: input.profileId, instanceId: input.instanceId,
-              version: input.version, capabilities: { readiness: true, targetGeneration: false } } }) + "\n");
+              version: input.version, capabilities: { readiness: true, targetGeneration: input.targetGeneration === true } } }) + "\n");
             return;
           }
           validatePrivateControlRequest(message.request);
@@ -83,7 +84,7 @@ export async function startPrivateControl(input: {
   } };
 }
 
-export async function callPrivateControl(input: { directory: string; profileId: string; version: string; request: PrivateControlRequest; startIfNeeded?: { homeDir: string } }): Promise<unknown> {
+export async function callPrivateControl(input: { directory: string; profileId: string; version: string; request: PrivateControlRequest; startIfNeeded?: { homeDir: string }; requireTargetGeneration?: boolean; signal?: AbortSignal }): Promise<unknown> {
   validatePrivateControlRequest(input.request);
   if (input.startIfNeeded) {
     if (resolveProfileStateHome({ homeDir: input.startIfNeeded.homeDir, profileId: input.profileId }).gatewayStatePath !== input.directory) throw new Error("Control directory is outside the selected profile.");
@@ -104,6 +105,7 @@ export async function callPrivateControl(input: { directory: string; profileId: 
     if (!ready) throw new Error("Shared supervisor is unavailable or incompatible. Inspect its existing service; do not start a duplicate host.");
   }
 
+  if (input.requireTargetGeneration && !(await probePrivateControl(input)).targetGeneration) throw new PrivateControlCompatibilityError("Supervisor cannot enforce target generations.");
   return exchangePrivateControl(input, { request: input.request });
 }
 
@@ -146,11 +148,11 @@ async function exchangePrivateControl(input: { directory: string; profileId: str
 }
 
 /** Authenticated read-only handshake. Older hosts reject it; never infer readiness from discovery alone. */
-export async function probePrivateControl(input: { directory: string; profileId: string; version: string; signal?: AbortSignal }): Promise<{ instanceId: string; targetGeneration: false }> {
+export async function probePrivateControl(input: { directory: string; profileId: string; version: string; signal?: AbortSignal }): Promise<{ instanceId: string; targetGeneration: boolean }> {
   const result = await exchangePrivateControl(input, { probe: true }) as Record<string, unknown> | null;
   if (!result || Object.keys(result).sort().join(",") !== "capabilities,instanceId,profileId,version" || result.profileId !== input.profileId || result.version !== input.version ||
     typeof result.instanceId !== "string" || !/^[A-Za-z0-9_.:-]{1,160}$/.test(result.instanceId)) throw new PrivateControlCompatibilityError("Incompatible supervisor readiness contract.");
   const caps = result.capabilities as Record<string, unknown> | null;
-  if (!caps || Object.keys(caps).sort().join(",") !== "readiness,targetGeneration" || caps.readiness !== true || caps.targetGeneration !== false) throw new PrivateControlCompatibilityError("Incompatible supervisor capabilities.");
-  return { instanceId: result.instanceId, targetGeneration: false };
+  if (!caps || Object.keys(caps).sort().join(",") !== "readiness,targetGeneration" || caps.readiness !== true || typeof caps.targetGeneration !== "boolean") throw new PrivateControlCompatibilityError("Incompatible supervisor capabilities.");
+  return { instanceId: result.instanceId, targetGeneration: caps.targetGeneration as boolean };
 }

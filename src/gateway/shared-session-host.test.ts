@@ -37,3 +37,14 @@ it("routes priority channel cancellation and never invents termination confirmat
   expect(channelCancel).toHaveBeenCalledWith("session");
   await host.close();
 });
+it('requires trusted generation validation before Desktop runtime construction', async () => {
+  const acquire = vi.fn(), validateTarget = vi.fn(async () => { throw new Error('Target was archived'); });
+  const sessionDb = { getSessionForProfile: async () => ({ executionTarget: { targetId: 'target', targetGeneration: 2 } }) } as unknown as SessionDB;
+  const request = { method: 'send' as const, sessionId: 's', targetId: 'target', targetGeneration: 2, operationId: 'op', text: 'work' };
+  const host = new SharedSessionHost({ profileId: 'p', acquire, sessionDb, validateTarget, channelApproval: vi.fn() });
+  await expect(host.handle({ ...request, targetGeneration: 1 })).rejects.toThrow('generation');
+  expect(validateTarget).not.toHaveBeenCalled();
+  await expect(host.handle(request)).rejects.toThrow('archived'); expect(acquire).not.toHaveBeenCalled();
+  const legacy = new SharedSessionHost({ profileId: 'p', acquire, sessionDb, channelApproval: vi.fn() });
+  await expect(legacy.handle(request)).rejects.toThrow('generation');
+});

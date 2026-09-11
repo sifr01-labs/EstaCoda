@@ -17,6 +17,7 @@ export class SharedSessionHost {
   #closed = false;
   constructor(readonly options: {
     profileId: string; sessionDb: SessionDB; receipts?: ControlReceipts;
+    validateTarget?(request: PrivateControlRequest): Promise<void>;
     acquire(sessionId: string): Promise<Runtime>;
     channelCancel?(sessionId: string): boolean | Promise<boolean>;
     channelApproval(request: PrivateControlRequest): Promise<unknown>;
@@ -24,6 +25,10 @@ export class SharedSessionHost {
   async validate(request: PrivateControlRequest, allowEnded = false): Promise<void> {
     if (this.#closed) throw new Error("Shared host is draining.");
     const session = await this.options.sessionDb.getSessionForProfile(request.sessionId, this.options.profileId);
+    if (request.targetGeneration !== undefined && request.method !== "inspect" && !allowEnded) {
+      if (session?.executionTarget?.targetGeneration !== request.targetGeneration || !this.options.validateTarget) throw new Error("Shared Session target generation does not match.");
+      await this.options.validateTarget(request);
+    }
     if (!session || (session.endedAt && !allowEnded) || session.executionTarget?.targetId !== request.targetId) throw new Error("Shared Session target does not match.");
   }
   async handle(request: PrivateControlRequest): Promise<unknown> {
@@ -52,6 +57,7 @@ export class SharedSessionHost {
       id: active.pending.id, tool: active.pending.request.tool.name,
       riskClass: active.pending.request.riskClass, targetSummary: active.pending.request.targetSummary,
     } : undefined };
+    if (request.method === "start" || request.method === "resume") return { sessionId: request.sessionId };
     if (request.method === "cancel") {
       this.#cancelGeneration.set(request.sessionId, generation + 1);
       active?.controller.abort(); active?.pending?.resolve("denied");

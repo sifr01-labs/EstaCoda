@@ -6,7 +6,7 @@ export type SessionControl = { operationId: string; sessionId: string; target: T
 /** These acknowledge acceptance/settlement only; none proves an external effect occurred exactly once. */
 export type OperationReceipt = {
   operationId: string; profileId: string; sessionId: string; target: TargetReference;
-  method: "sessions.send" | "sessions.cancelTurn" | "approvals.resolve";
+  method: "sessions.start" | "sessions.resume" | "sessions.send" | "sessions.cancelTurn" | "approvals.resolve";
   state: "accepted" | "dispatched" | "completed" | "uncertain" | "unknown" | "expired";
   cancellation: "not_requested" | "requested" | "confirmed";
 };
@@ -28,6 +28,8 @@ export type MethodContracts = {
   "providers.list": { params: PageParams; result: Page<ProviderProjection> };
   "connections.list": { params: PageParams; result: Page<ConnectionProjection> };
   "connections.get": { params: { connectionId: string }; result: ConnectionProjection };
+  "sessions.start": { params: SessionControl; result: OperationReceipt };
+  "sessions.resume": { params: SessionControl; result: OperationReceipt };
   "sessions.send": { params: SessionControl & { text: string }; result: OperationReceipt };
   "sessions.cancelTurn": { params: SessionControl; result: OperationReceipt };
   "approvals.resolve": { params: SessionControl & { approvalId: string; decision: "approved" | "denied" }; result: OperationReceipt };
