@@ -20,3 +20,15 @@ it returns snapshot-required instead of silently truncating the Work list.
 Validation: focused snapshot, subscription and bootstrap tests (8 tests) passed.
 Security review: reads are profile scoped; capture uses a read-only connection;
 no new execution or approval authority is exposed in this slice.
+
+## 2. Task and run projections
+
+Tasks use the existing profile-bound Task store and operator projections. Root
+Tasks group beneath their user-facing origin Session; independent operator Tasks
+remain roots. Attempts retain their own identities beneath Tasks. Internal host
+and worker Sessions are omitted from navigation. Plans and bounded result
+summaries are available through Work activity. Result availability does not
+assert verified external effects, and unavailable cost remains null.
+
+Validation: three canonical SQLite snapshot/pagination/grouping tests passed;
+clean-copy typecheck passed. No Task lifecycle writes or new scheduler were added.

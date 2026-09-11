@@ -1,3 +1,6 @@
+import { SQLiteTaskStore } from '../tasks/sqlite-task-store.js';
+import { appendTaskWork } from './task-projections.js';
+import { INTERNAL_SESSION_KINDS } from '../session/session-presentation.js';
 import { randomBytes } from 'node:crypto';
 import { lstat } from 'node:fs/promises';
 import { resolveGlobalStateHome } from '../config/profile-home.js';
@@ -22,7 +25,7 @@ export async function captureWork(input: { homeDir: string; profileId: string },
     for (const { id } of ids) {
       signal.throwIfAborted();
       const session = await sessions.getSessionForProfile(id, input.profileId);
-      if (!session) continue;
+      if (!session || INTERNAL_SESSION_KINDS.includes(session.metadata?.kind as typeof INTERNAL_SESSION_KINDS[number])) continue;
       const events = sessions.db.query<{ event_json: string }>('select event_json from session_events where session_id = ? order by rowid desc limit 1000').all(id)
         .reverse().map((row) => JSON.parse(row.event_json) as SessionEvent);
       const active = sessions.db.query<{ active: number }>('select count(*) as active from session_execution_owners where session_id = ? and profile_id = ? and owner_id is not null and expires_at > ?').get(id, input.profileId, Date.now());
@@ -33,6 +36,10 @@ export async function captureWork(input: { homeDir: string; profileId: string },
       state.activity[`session:${id}`] = sessionActivity(session, messages.map((m) => ({ ...m, sessionId: id, createdAt: m.created_at })));
       if (Buffer.byteLength(JSON.stringify(state)) > 8 * 1024 * 1024) throw new ControlProtocolError('-32007');
     }
+    const taskCount = sessions.db.query<{ count: number }>('select count(*) as count from tasks where profile_id = ?').get(input.profileId);
+    if ((taskCount?.count ?? 0) > 1000) throw new ControlProtocolError('-32007');
+    appendTaskWork(state, new SQLiteTaskStore({ db: sessions.db, profileId: input.profileId }));
+    if (Buffer.byteLength(JSON.stringify(state)) > 8 * 1024 * 1024) throw new ControlProtocolError('-32007');
     sessions.db.exec('commit');
     return state;
   } finally { sessions.close(); }
