@@ -2,7 +2,7 @@ const { VitePlugin } = require('@electron-forge/plugin-vite');
 const { FusesPlugin } = require('@electron-forge/plugin-fuses');
 const { FuseVersion, FuseV1Options } = require('@electron/fuses');
 module.exports = {
-  packagerConfig: { asar: true, name: 'EstaCoda', executableName: 'EstaCoda', appBundleId: 'com.estacoda.desktop', prune: false, extraResource: ['.runtime'] },
+  packagerConfig: { asar: true, name: 'EstaCoda', executableName: 'EstaCoda', appBundleId: 'com.estacoda.desktop', icon: 'assets/icons/pr5-app.icns', prune: false, extraResource: ['.runtime'] },
   hooks: { generateAssets: async () => { require('node:child_process').execFileSync(process.execPath, ['scripts/stage-runtime.mjs'], { cwd: __dirname, stdio: 'inherit' }); } },
   rebuildConfig: { onlyModules: [] },
   makers: [],
