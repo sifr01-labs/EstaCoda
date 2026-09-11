@@ -1,0 +1,5 @@
+out/
+.vite/
+test-results/
+playwright-report/
+.runtime/
