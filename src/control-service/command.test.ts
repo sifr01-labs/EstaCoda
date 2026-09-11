@@ -42,3 +42,26 @@ it('requires explicit stdio and profile without falling through to interactive s
     expect(await readdir(home)).toEqual([]);
   } finally { await rm(home, { recursive: true, force: true }); }
 }, 15_000);
+it('isolates credential submissions and acknowledgements on inherited descriptor 3', async () => {
+  const home = await mkdtemp(join(tmpdir(), 'desktop-credential-command-'));
+  const child = spawn(process.execPath, ['--import', 'tsx', entry, 'desktop-service', '--stdio', '--profile', 'p', '--credential-fd=3'], {
+    env: { ...process.env, ESTACODA_HOME: home }, stdio: ['pipe', 'pipe', 'pipe', 'pipe'],
+  });
+  let ordinary = '';
+  child.stdout!.on('data', (chunk) => { ordinary += chunk; }); child.stderr!.on('data', (chunk) => { ordinary += chunk; });
+  const closed = new Promise<number | null>((resolve, reject) => { child.once('error', reject); child.once('exit', resolve); });
+  const pipe = child.stdio[3] as import('node:stream').Duplex;
+  try {
+    const reply = new Promise<string>((resolve, reject) => {
+      const timer = setTimeout(() => reject(new Error('Credential pipe timed out')), 10_000);
+      pipe.once('data', (chunk) => { clearTimeout(timer); resolve(String(chunk)); });
+      child.once('exit', () => { clearTimeout(timer); reject(new Error('Desktop exited before credential acknowledgement')); });
+    });
+    pipe.write(JSON.stringify({ jsonrpc: '2.0', id: 'stage', method: 'credentials.stage', params: {
+      scope: { windowId: 'w', generation: 1, purpose: 'provider', providerId: 'local', authMethod: 'api_key', endpoint: 'http://localhost:8000' }, value: 'credential-canary',
+    } }) + '\n');
+    const response = await reply; expect(JSON.parse(response).result.candidateId).toMatch(/^[a-f0-9-]{36}$/);
+    expect(response).not.toContain('credential-canary'); expect(ordinary).toBe('');
+    pipe.end(); expect(await closed).toBe(0); expect(await readdir(home)).toEqual([]);
+  } finally { child.kill('SIGKILL'); await closed; await rm(home, { recursive: true, force: true }); }
+}, 15_000);

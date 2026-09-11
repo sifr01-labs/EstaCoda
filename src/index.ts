@@ -48,7 +48,8 @@ async function main(): Promise<void> {
 
   // A private machine channel must bypass interactive startup, setup and profile writes.
   if (argv[0] === "desktop-service") {
-    if (argv.length !== 2 || argv[1] !== "--stdio" || !parsedGlobalOptions.profileId ||
+    if (!argv.includes("--stdio") || argv.slice(1).some((arg) => !["--stdio", "--credential-fd=3"].includes(arg)) ||
+      new Set(argv).size !== argv.length || !parsedGlobalOptions.profileId ||
       parsedGlobalOptions.continueSession || parsedGlobalOptions.workspaceAlias !== undefined) {
       console.error("Invalid Desktop service arguments. Use desktop-service --stdio --profile <id>.");
       process.exitCode = 2;
@@ -56,7 +57,8 @@ async function main(): Promise<void> {
     }
     try {
       const { runDesktopService } = await import("./control-service/command.js");
-      await runDesktopService({ profileId: parsedGlobalOptions.profileId, homeDir, version: await getPackageVersion() });
+      await runDesktopService({ profileId: parsedGlobalOptions.profileId, homeDir, version: await getPackageVersion(),
+        ...(argv.includes("--credential-fd=3") ? { credentialFd: 3 as const } : {}) });
     } catch {
       console.error("Desktop service could not start.");
       process.exitCode = 1;

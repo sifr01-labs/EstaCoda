@@ -1,0 +1,45 @@
+import { duplexPair } from 'node:stream';
+import { setImmediate } from 'node:timers/promises';
+import { expect, it } from 'vitest';
+import { CredentialCandidates, type CandidateScope } from './credential-candidates.js';
+import { attachCredentialPipe } from './credential-pipe.js';
+const scope: CandidateScope = { windowId: 'w', generation: 1, purpose: 'provider', providerId: 'local', authMethod: 'api_key', endpoint: 'http://localhost:8000' };
+it('fences candidates by scope, monotonic expiry, window generation and bridge lifetime', () => {
+  let now = 0;
+  const store = new CredentialCandidates('p', 'bridge', () => now);
+  const id = store.stage(scope, 'canary');
+  for (const changed of [{ ...scope, endpoint: 'https://other.example' }, { ...scope, windowId: 'other' }, { ...scope, generation: 2 }]) expect(() => store.read(id, changed)).toThrow('scope');
+  expect(() => new CredentialCandidates('other', 'bridge2').read(id, scope)).toThrow('scope');
+  now = 299_999; expect(store.read(id, scope)).toBe('canary');
+  now = 599_998; expect(store.read(id, scope)).toBe('canary');
+  now = 899_997; expect(store.read(id, scope)).toBe('canary');
+  now = 900_000; expect(() => store.read(id, scope)).toThrow('scope');
+  const next = store.stage(scope, 'next'); now += 300_000; expect(() => store.read(next, scope)).toThrow('scope');
+  const stale = store.stage(scope, 'stale'); store.closeWindow('w', 1);
+  expect(() => store.read(stale, scope)).toThrow('scope'); expect(() => store.stage(scope, 'late callback')).toThrow('scope');
+  const fresh = { ...scope, generation: 2 }; store.stage(fresh, 'fresh');
+  store.dispose(); expect(() => store.stage(fresh, 'after close')).toThrow();
+});
+it('enforces per-window and bridge capacity and generation changes discard old values', () => {
+  const store = new CredentialCandidates('p', 'b');
+  for (let w = 0; w < 4; w++) for (let i = 0; i < 8; i++) store.stage({ ...scope, windowId: String(w) }, 'secret');
+  expect(() => store.stage({ ...scope, windowId: '0' }, 'overflow')).toThrow('limit');
+  expect(() => store.stage({ ...scope, windowId: '4' }, 'overflow')).toThrow('limit');
+  store.closeWindow('0', 1);
+  const id = store.stage({ ...scope, windowId: '0', generation: 2 }, 'next');
+  store.stage({ ...scope, windowId: '0', generation: 3 }, 'new route');
+  expect(() => store.read(id, { ...scope, windowId: '0', generation: 2 })).toThrow('scope'); store.dispose();
+});
+it('returns only opaque IDs on the dedicated pipe and disposes on malformed byte input', async () => {
+  const [parent, service] = duplexPair();
+  const store = new CredentialCandidates('p', 'b'); let closed = false, replies = '';
+  parent.on('data', (chunk) => { replies += chunk; });
+  const dispose = attachCredentialPipe(service, store, () => { closed = true; });
+  parent.write(JSON.stringify({ jsonrpc: '2.0', id: 'r', method: 'credentials.stage', params: { scope, value: 'credential-canary' } }) + '\n');
+  await setImmediate(); const id = JSON.parse(replies.trim()).result.candidateId;
+  expect(store.read(id, scope)).toBe('credential-canary'); expect(replies).not.toContain('credential-canary');
+  parent.write(JSON.stringify({ jsonrpc: '2.0', id: 'bad', method: 'credentials.stage', params: { scope, value: 'credential-canary', profileId: 'other' } }) + '\n');
+  await setImmediate(); expect(replies).not.toContain('credential-canary'); expect(JSON.parse(replies.trim().split('\n').at(-1)!).error.code).toBe(-32602);
+  parent.write(Buffer.alloc(65_537, 65)); await setImmediate();
+  expect(closed).toBe(true); expect(() => store.read(id, scope)).toThrow('scope'); dispose(); parent.destroy();
+});
