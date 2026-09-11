@@ -39,6 +39,8 @@ const cases = {
   "work.get": { params: { workId: "w" }, result: work },
   "work.activity": { params: { workId: "w", limit: 10 }, result: { items: activities, nextCursor: "next_page" } },
   "inbox.list": { params: { limit: 10 }, result: { items: [inbox], nextCursor: null } },
+  "models.verifyCandidate": {params:{windowId:'w',generation:1,spendApproved:true,route:{providerId:'local',modelId:'model',endpoint:'http://127.0.0.1:8080/v1',authMethod:'none',apiMode:'custom_openai_compatible',allowPrivateEndpoint:true}},
+    result:{state:'passed',reason:'none',streaming:true,tools:true,latencyMs:1,inputTokens:1,outputTokens:1,estimatedCost:null}},
   "models.list": { params: { limit: 10 }, result: { items: [model], nextCursor: null } },
   "providers.list": { params: { limit: 10 }, result: { items: [{ id: "local", label: "Local", authMethods: ["none"], state: "ready" }], nextCursor: null } },
   "connections.list": { params: { limit: 10 }, result: { items: [connection], nextCursor: null } },

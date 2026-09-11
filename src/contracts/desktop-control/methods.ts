@@ -1,3 +1,4 @@
+import type {VerifyCandidateParams, CandidateVerification} from './model-setup.js';
 import type { BootstrapResult, Capabilities, ControlCursor, InitializeParams, InitializeResult } from "./bootstrap.js";
 import type { ActivityProjection, ConnectionProjection, InboxProjection, ModelProjection, Page, ProviderProjection, TargetReference, WorkProjection } from "./projections.js";
 
@@ -16,6 +17,7 @@ export type SubscribeResult =
   | { state: "subscribed"; subscriptionId: string; cursor: ControlCursor }
   | { state: "snapshot_required"; reason: "instance_changed" | "stream_changed" | "cursor_expired" | "overflow" };
 export type MethodContracts = {
+  "models.verifyCandidate": {params: VerifyCandidateParams; result: CandidateVerification};
   "control.initialize": { params: InitializeParams; result: InitializeResult };
   "control.bootstrap": { params: Record<string, never>; result: BootstrapResult };
   "control.subscribe": { params: SubscribeParams; result: SubscribeResult };

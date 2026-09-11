@@ -1,3 +1,5 @@
+import {CandidateVerifier} from './candidate-verification.js';
+import {CredentialCandidates} from './credential-candidates.js';
 import {captureModelCatalog} from './model-catalog.js';
 import { WorkMonitor } from './work-monitor.js';
 import { sessionControl, type SessionMutationRequest } from './session-controls.js';
@@ -14,6 +16,8 @@ export type BootstrapState = Pick<BootstrapResult, 'profile' | 'runtime'>;
 /** One bridge per trusted Main client context; Work and execution remain core-owned. */
 export class DesktopBridge {
   readonly server: StdioControlServer;
+  readonly candidates: CredentialCandidates;
+  readonly verifier: CandidateVerifier;
   readonly subscriptions: ControlSubscriptions;
   #catalog: ReturnType<typeof captureModelCatalog> | undefined;
   #generation = 0;
@@ -28,6 +32,10 @@ export class DesktopBridge {
     this.server = new StdioControlServer({ ...options, events: ['work.changed', 'activity.appended', 'attention.changed', 'control.ready', 'service.warning', 'service.shutdown'], handlers: {
       ...Object.fromEntries(['approvals.resolve', 'tasks.pause', 'tasks.resume', 'tasks.cancel', 'tasks.retry', 'tasks.guide', 'sessions.start', 'sessions.resume', 'sessions.send', 'sessions.cancelTurn', 'operations.inspect'].map((method) =>
         [method, async (request: SessionMutationRequest, signal: AbortSignal) => ({ result: await sessionControl(this.options, request, signal) })])),
+      'models.verifyCandidate': async(request, signal) => {
+        if(request.method!=='models.verifyCandidate')throw new ControlProtocolError('-32601');
+        return {result:await this.verifier.verify(request.params,signal)};
+      },
       'providers.list': async(request) => {
         if(request.method!=='providers.list')throw new ControlProtocolError('-32601');
         const catalog=await this.modelCatalog();return{result:catalog.pages.page('providers',catalog.providers,request.params)};
@@ -65,6 +73,9 @@ export class DesktopBridge {
         return { result: { removed: this.subscriptions.unsubscribe(request.params.subscriptionId) } };
       },
     } });
+    this.candidates = new CredentialCandidates(this.server.profileId,this.server.instanceId);
+    this.verifier = new CandidateVerifier(this.candidates);
+    this.server.onDispose(() => {this.verifier.dispose();this.candidates.dispose();});
     this.subscriptions = new ControlSubscriptions(this.server);
     this.server.onDispose(() => { this.#capture?.abort(); this.#monitor?.dispose(); this.#workMonitor?.dispose(); this.#snapshot = undefined; this.#work = undefined; this.#catalog=undefined; });
   }
