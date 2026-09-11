@@ -5,8 +5,9 @@ export type PageParams = { limit: number; cursor?: string };
 export type SessionControl = { operationId: string; sessionId: string; target: TargetReference };
 /** These acknowledge acceptance/settlement only; none proves an external effect occurred exactly once. */
 export type OperationReceipt = {
+  taskId?: string;
   operationId: string; profileId: string; sessionId: string; target: TargetReference;
-  method: "sessions.start" | "sessions.resume" | "sessions.send" | "sessions.cancelTurn" | "approvals.resolve";
+  method: "tasks.pause" | "tasks.resume" | "tasks.cancel" | "tasks.retry" | "tasks.guide" | "sessions.start" | "sessions.resume" | "sessions.send" | "sessions.cancelTurn" | "approvals.resolve";
   state: "accepted" | "dispatched" | "completed" | "uncertain" | "unknown" | "expired";
   cancellation: "not_requested" | "requested" | "confirmed";
 };
@@ -28,12 +29,17 @@ export type MethodContracts = {
   "providers.list": { params: PageParams; result: Page<ProviderProjection> };
   "connections.list": { params: PageParams; result: Page<ConnectionProjection> };
   "connections.get": { params: { connectionId: string }; result: ConnectionProjection };
+  "tasks.pause": { params: SessionControl & { taskId: string }; result: OperationReceipt };
+  "tasks.resume": { params: SessionControl & { taskId: string }; result: OperationReceipt };
+  "tasks.cancel": { params: SessionControl & { taskId: string }; result: OperationReceipt };
+  "tasks.retry": { params: SessionControl & { taskId: string; stepId?: string }; result: OperationReceipt };
+  "tasks.guide": { params: SessionControl & { taskId: string; guidance: string }; result: OperationReceipt };
   "sessions.start": { params: SessionControl; result: OperationReceipt };
   "sessions.resume": { params: SessionControl; result: OperationReceipt };
   "sessions.send": { params: SessionControl & { text: string }; result: OperationReceipt };
   "sessions.cancelTurn": { params: SessionControl; result: OperationReceipt };
   "approvals.resolve": { params: SessionControl & { approvalId: string; decision: "approved" | "denied" }; result: OperationReceipt };
-  "operations.inspect": { params: SessionControl & { method: OperationReceipt["method"] }; result: OperationReceipt };
+  "operations.inspect": { params: SessionControl & { taskId?: string; method: OperationReceipt["method"] }; result: OperationReceipt };
 };
 export type MethodRequest<M extends keyof MethodContracts = keyof MethodContracts> = M extends keyof MethodContracts
   ? { jsonrpc: "2.0"; id: string; method: M; params: MethodContracts[M]["params"] } : never;

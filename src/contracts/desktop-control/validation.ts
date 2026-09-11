@@ -50,9 +50,9 @@ const page = (check: Check): Check => shape({ items: array(check), nextCursor: n
 const pageParams = { limit: integer(1, 100) };
 const optionalPage = { cursor: cursorToken };
 const sessionParams = { operationId: isControlOperationId, sessionId: id, target };
-const mutationMethods = ["sessions.start", "sessions.resume", "sessions.send", "sessions.cancelTurn", "approvals.resolve"] as const;
+const mutationMethods = ["tasks.pause", "tasks.resume", "tasks.cancel", "tasks.retry", "tasks.guide", "sessions.start", "sessions.resume", "sessions.send", "sessions.cancelTurn", "approvals.resolve"] as const;
 const receiptShape = shape({ operationId: isControlOperationId, profileId: id, sessionId: id, target, method: choice(mutationMethods),
-  state: choice(["accepted", "dispatched", "completed", "uncertain", "unknown", "expired"]), cancellation: choice(["not_requested", "requested", "confirmed"]) });
+  state: choice(["accepted", "dispatched", "completed", "uncertain", "unknown", "expired"]), cancellation: choice(["not_requested", "requested", "confirmed"]) }, { taskId: id });
 const receipt: Check = (v) => receiptShape(v) && isRecord(v) &&
   (v.method === "sessions.cancelTurn" || v.cancellation === "not_requested") &&
   (!["unknown", "expired"].includes(String(v.state)) || v.cancellation === "not_requested");
@@ -78,12 +78,17 @@ const contracts: { [M in keyof MethodContracts]: { params: Check; result: Check 
   "providers.list": { params: shape(pageParams, optionalPage), result: page(provider) },
   "connections.list": { params: shape(pageParams, optionalPage), result: page(connection) },
   "connections.get": { params: shape({ connectionId: id }), result: connection },
+  "tasks.pause": { params: shape({ ...sessionParams, taskId: id }), result: receipt },
+  "tasks.resume": { params: shape({ ...sessionParams, taskId: id }), result: receipt },
+  "tasks.cancel": { params: shape({ ...sessionParams, taskId: id }), result: receipt },
+  "tasks.retry": { params: shape({ ...sessionParams, taskId: id }, { stepId: id }), result: receipt },
+  "tasks.guide": { params: shape({ ...sessionParams, taskId: id, guidance: text(4000, 1) }), result: receipt },
   "sessions.start": { params: shape(sessionParams), result: receipt },
   "sessions.resume": { params: shape(sessionParams), result: receipt },
   "sessions.send": { params: shape({ ...sessionParams, text: text(32_768, 1) }), result: receipt },
   "sessions.cancelTurn": { params: shape(sessionParams), result: receipt },
   "approvals.resolve": { params: shape({ ...sessionParams, approvalId: id, decision: choice(["approved", "denied"]) }), result: receipt },
-  "operations.inspect": { params: shape({ ...sessionParams, method: choice(mutationMethods) }), result: receipt },
+  "operations.inspect": { params: shape({ ...sessionParams, method: choice(mutationMethods) }, { taskId: id }), result: receipt },
 };
 /** Established by the trusted connection, never populated from request authority fields. */
 export type ControlContext = { profileId: string; instanceId: string; capabilities: Capabilities };
@@ -150,6 +155,7 @@ export function validateControlResponse<M extends keyof MethodContracts>(value: 
       const receipt = value.result as unknown as OperationReceipt;
       const method = request.method === "operations.inspect" ? request.params.method : request.method;
       if (receipt.operationId !== request.params.operationId || receipt.sessionId !== request.params.sessionId || receipt.method !== method ||
+        (receipt.taskId !== ("taskId" in request.params ? request.params.taskId : undefined)) ||
         receipt.target.targetId !== request.params.target.targetId || receipt.target.targetGeneration !== request.params.target.targetGeneration) throw new ControlProtocolError("-32003");
     }
   }

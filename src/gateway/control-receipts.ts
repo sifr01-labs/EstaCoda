@@ -16,19 +16,22 @@ export function migrateControlReceiptsV35(db: SQLiteDatabase): void {
 }
 type ReceiptRow = { method: string; operation_id: string; session_id: string; target_id: string;
   input_event_id: string; instance_id: string; status: string; accepted_at: number; result_json: string | null };
-export type ControlReceipt = { targetId?: string; targetGeneration?: number; operationId: string; method: string; sessionId: string; status: string; result?: unknown };
+export type ControlReceipt = { taskId?: string; targetId?: string; targetGeneration?: number; operationId: string; method: string; sessionId: string; status: string; result?: unknown };
 const RETENTION_MS = 30 * 86_400_000;
 const ACCEPT_WINDOW_MS = 5 * 60_000;
 function canonical(request: PrivateControlRequest): string {
   return JSON.stringify({ method: request.method, sessionId: request.sessionId, targetId: request.targetId,
     ...(request.targetGeneration === undefined ? {} : { targetGeneration: request.targetGeneration }),
+    ...(request.taskId === undefined ? {} : { taskId: request.taskId }),
+    ...(request.stepId === undefined ? {} : { stepId: request.stepId }),
+    ...(request.guidance === undefined ? {} : { guidance: request.guidance }),
     operationId: request.operationId, ...(request.method === "send" ? { text: request.text } : {}),
     ...(request.method === "approval" ? { approvalId: request.approvalId, decision: request.decision } : {}) });
 }
 function projection(row: ReceiptRow, db: SQLiteDatabase): ControlReceipt {
   const event = db.query<{ event_json: string }>('select event_json from session_events where id=?').get(row.input_event_id);
   const binding = event ? JSON.parse(JSON.parse(event.event_json).payload) as PrivateControlRequest : undefined;
-  return { targetId: row.target_id, ...(binding?.targetGeneration === undefined ? {} : { targetGeneration: binding.targetGeneration }), operationId: row.operation_id, method: row.method, sessionId: row.session_id, status: row.status,
+  return { ...(binding?.taskId === undefined ? {} : { taskId: binding.taskId }), targetId: row.target_id, ...(binding?.targetGeneration === undefined ? {} : { targetGeneration: binding.targetGeneration }), operationId: row.operation_id, method: row.method, sessionId: row.session_id, status: row.status,
     ...(row.result_json ? { result: JSON.parse(row.result_json) } : {}) };
 }
 /** Payloads use the existing bounded Session event store. Receipts contain only
@@ -52,7 +55,7 @@ export class ControlReceipts {
   }
   inspect(request: PrivateControlRequest): ControlReceipt[] {
     return this.db.query<ReceiptRow>(`select * from session_control_receipts where profile_id=? and principal=? and operation_id=? and session_id=? and target_id=?`)
-      .all(this.profileId, this.#principal, request.operationId, request.sessionId, request.targetId).map((row) => projection(row, this.db)).filter((receipt) => request.targetGeneration === undefined || receipt.targetGeneration === request.targetGeneration);
+      .all(this.profileId, this.#principal, request.operationId, request.sessionId, request.targetId).map((row) => projection(row, this.db)).filter((receipt) => request.targetGeneration === undefined || receipt.targetGeneration === request.targetGeneration).filter((receipt) => request.taskId === undefined || receipt.taskId === request.taskId);
   }
   accept(request: PrivateControlRequest): { inserted: boolean; receipt: ControlReceipt } {
     validatePrivateControlRequest(request);
@@ -84,7 +87,7 @@ export class ControlReceipts {
       this.db.query("insert into session_control_receipts values (?, ?, ?, ?, ?, ?, ?, ?, 'accepted', ?, null)")
         .run(this.profileId, this.#principal, request.method, request.operationId, request.sessionId, request.targetId, eventId, this.instanceId, now);
       this.db.exec("commit");
-      return { inserted: true, receipt: { targetId: request.targetId, ...(request.targetGeneration === undefined ? {} : { targetGeneration: request.targetGeneration }), operationId: request.operationId, method: request.method, sessionId: request.sessionId, status: "accepted" } };
+      return { inserted: true, receipt: { ...(request.taskId === undefined ? {} : { taskId: request.taskId }), targetId: request.targetId, ...(request.targetGeneration === undefined ? {} : { targetGeneration: request.targetGeneration }), operationId: request.operationId, method: request.method, sessionId: request.sessionId, status: "accepted" } };
     } catch (error) { this.db.exec("rollback"); throw error; }
   }
   transition(request: PrivateControlRequest, status: "dispatched" | "completed" | "uncertain", result?: unknown): void {

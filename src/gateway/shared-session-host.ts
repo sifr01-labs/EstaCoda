@@ -17,6 +17,7 @@ export class SharedSessionHost {
   #closed = false;
   constructor(readonly options: {
     profileId: string; sessionDb: SessionDB; receipts?: ControlReceipts;
+    taskControl?(request: PrivateControlRequest): unknown;
     validateTarget?(request: PrivateControlRequest): Promise<void>;
     acquire(sessionId: string): Promise<Runtime>;
     channelCancel?(sessionId: string): boolean | Promise<boolean>;
@@ -57,6 +58,10 @@ export class SharedSessionHost {
       id: active.pending.id, tool: active.pending.request.tool.name,
       riskClass: active.pending.request.riskClass, targetSummary: active.pending.request.targetSummary,
     } : undefined };
+    if (request.method.startsWith("task.")) {
+      if (!this.options.taskControl) throw new Error("Task operator controls unavailable.");
+      return this.options.taskControl(request);
+    }
     if (request.method === "start" || request.method === "resume") return { sessionId: request.sessionId };
     if (request.method === "cancel") {
       this.#cancelGeneration.set(request.sessionId, generation + 1);

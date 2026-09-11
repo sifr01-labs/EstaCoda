@@ -51,3 +51,15 @@ CLI controls retain their previous semantics.
 Validation: 57 protocol/receipt/host tests and seven local socket/process tests
 passed; clean-copy typecheck passed. Security review covered profile/target
 mismatch, missing enforcement, conflicting retries and stale generations.
+
+## 4. Task lifecycle and guidance
+
+Desktop Task controls are dispatched by the supervisor to TaskOperatorService
+and FixedTaskService. They require the exact origin Session and Task target
+binding. Core retry eligibility, attempt budgets, terminal-state restrictions,
+and guidance limits remain authoritative. Task IDs, optional Step IDs and guidance
+are included in canonical operation payloads; inspection remains profile scoped.
+
+Validation: 58 protocol/receipt tests, a real SQLite Task lifecycle and authority
+regression, clean-copy typecheck, and Desktop foundation checks passed. Controls
+write canonical state; they do not acquire scheduler or worker ownership.

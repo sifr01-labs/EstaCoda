@@ -6,8 +6,8 @@ import { SQLiteSessionDB } from '../session/sqlite-session-db.js';
 import { ExecutionTargetStore, targetBinding } from '../workspaces/execution-target.js';
 import { WorkspaceTrustStore } from '../security/workspace-trust-store.js';
 
-export type SessionMutationRequest = Extract<MethodRequest, { method: 'sessions.start' | 'sessions.resume' | 'sessions.send' | 'sessions.cancelTurn' | 'operations.inspect' }>;
-const methods = { 'sessions.start': 'start', 'sessions.resume': 'resume', 'sessions.send': 'send', 'sessions.cancelTurn': 'cancel', 'approvals.resolve': 'approval' } as const;
+export type SessionMutationRequest = Extract<MethodRequest, { method: 'sessions.start' | 'sessions.resume' | 'sessions.send' | 'sessions.cancelTurn' | 'operations.inspect' | 'tasks.pause' | 'tasks.resume' | 'tasks.cancel' | 'tasks.retry' | 'tasks.guide' }>;
+const methods = { 'tasks.pause': 'task.pause', 'tasks.resume': 'task.resume', 'tasks.cancel': 'task.cancel', 'tasks.retry': 'task.retry', 'tasks.guide': 'task.guide', 'sessions.start': 'start', 'sessions.resume': 'resume', 'sessions.send': 'send', 'sessions.cancelTurn': 'cancel', 'approvals.resolve': 'approval' } as const;
 /** Creates only a canonical Session reference. Provider/tool construction stays in the supervisor. */
 async function prepareStart(input: { homeDir: string; profileId: string }, request: SessionMutationRequest): Promise<void> {
   const targets = new ExecutionTargetStore(input);
@@ -37,16 +37,19 @@ export async function sessionControl(input: { homeDir: string; profileId: string
   const method = request.method === 'operations.inspect' ? request.params.method : request.method;
   const control: PrivateControlRequest = { method: request.method === 'operations.inspect' ? 'inspect' : methods[method],
     sessionId: request.params.sessionId, targetId: request.params.target.targetId, targetGeneration: request.params.target.targetGeneration,
+    ...('taskId' in request.params ? { taskId: request.params.taskId } : {}),
+    ...(request.method === 'tasks.retry' ? { stepId: request.params.stepId } : {}),
+    ...(request.method === 'tasks.guide' ? { guidance: request.params.guidance } : {}),
     operationId: request.params.operationId, ...(request.method === 'sessions.send' ? { text: request.params.text } : {}) };
   const response = await callPrivateControl({ ...input, directory: resolveProfileStateHome(input).gatewayStatePath, request: control,
     requireTargetGeneration: true, signal, ...(request.method === 'operations.inspect' ? {} : { startIfNeeded: { homeDir: input.homeDir } }) });
   const receipt = request.method === 'operations.inspect'
     ? (response as { receipts: ControlReceipt[] }).receipts.find((receipt) => receipt.method === methods[method]) : response as ControlReceipt;
-  if (receipt && (receipt.operationId !== control.operationId || receipt.sessionId !== control.sessionId || receipt.method !== methods[method] ||
+  if (receipt && (receipt.taskId !== control.taskId || receipt.operationId !== control.operationId || receipt.sessionId !== control.sessionId || receipt.method !== methods[method] ||
     receipt.targetId !== control.targetId || receipt.targetGeneration !== control.targetGeneration)) throw new ControlProtocolError('-32003');
   const state = receipt?.status ?? (Date.now() - Number(control.operationId.split(':')[0]) > 30 * 86_400_000 ? 'expired' : 'unknown');
   if (!['accepted', 'dispatched', 'completed', 'uncertain', 'unknown', 'expired'].includes(state)) throw new ControlProtocolError('-32603');
-  return { profileId: input.profileId, operationId: control.operationId, sessionId: control.sessionId,
+  return { ...(control.taskId === undefined ? {} : { taskId: control.taskId }), profileId: input.profileId, operationId: control.operationId, sessionId: control.sessionId,
     target: { targetId: receipt?.targetId ?? control.targetId, targetGeneration: receipt?.targetGeneration ?? control.targetGeneration! },
     method, state: state as OperationReceipt['state'], cancellation: method === 'sessions.cancelTurn' && receipt ? 'requested' : 'not_requested' };
 }

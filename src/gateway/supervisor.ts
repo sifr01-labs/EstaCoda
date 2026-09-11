@@ -1,3 +1,4 @@
+import { desktopTaskControl } from './desktop-task-controls.js';
 import { selectedExecutionPolicy } from "../execution/docker-policy.js";
 import { recurringCronRuntimeOptions } from "../cron/cron-authority.js";
 import { withCronExecutionOrigin } from "../cron/cron-origin.js";
@@ -1841,6 +1842,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
       receipts.recover();
       const sharedHost = new SharedSessionHost({
         profileId, sessionDb, receipts,
+        taskControl: (request) => desktopTaskControl(taskStore, request),
         validateTarget: async (request) => {
           const session = await sessionDb.getSessionForProfile(request.sessionId, profileId);
           if (!session?.executionTarget || session.executionTarget.targetGeneration !== request.targetGeneration) throw new Error('Stale Session target.');
