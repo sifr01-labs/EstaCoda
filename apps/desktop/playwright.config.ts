@@ -1,0 +1,2 @@
+import {defineConfig} from '@playwright/test';
+export default defineConfig({testDir:'tests/e2e',workers:1,timeout:30000,expect:{timeout:5000,toHaveScreenshot:{maxDiffPixels:50}},use:{baseURL:'http://127.0.0.1:5317',viewport:{width:1024,height:900},deviceScaleFactor:1,reducedMotion:'reduce'},webServer:{command:'pnpm exec vite --config vite.fixture.config.ts --host 127.0.0.1 --port 5317 --strictPort',url:'http://127.0.0.1:5317/fixture.html',reuseExistingServer:false},reporter:[['line'],['json',{outputFile:'test-results/results.json'}]]});

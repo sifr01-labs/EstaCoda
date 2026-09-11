@@ -1,0 +1,214 @@
+{
+  "reference": {
+    ".ec-window": {
+      "x": 0,
+      "y": 0,
+      "w": 736,
+      "h": 1554.625,
+      "display": "block",
+      "margin": "0px",
+      "padding": "0px",
+      "lineHeight": "21.7px"
+    },
+    ".ec-workcenter": {
+      "x": 225,
+      "y": 88.59375,
+      "w": 510,
+      "h": 868.265625,
+      "display": "flex",
+      "margin": "0px",
+      "padding": "27px 23px 13px",
+      "lineHeight": "21.7px"
+    },
+    ".ec-newwelcome": null,
+    ".ec-wordmark": null,
+    ".ec-newwelcome p": null,
+    ".ec-workspacehint": null,
+    ".ec-tasklist": {
+      "x": 13,
+      "y": 533.984375,
+      "w": 200,
+      "h": 225.5,
+      "display": "grid",
+      "margin": "6px 0px 0px",
+      "padding": "0px",
+      "lineHeight": "21.7px"
+    },
+    ".ec-taskbutton": {
+      "x": 13,
+      "y": 386.75,
+      "w": 174,
+      "h": 58.5,
+      "display": "flex",
+      "margin": "0px",
+      "padding": "10px 9px 10px 10px",
+      "lineHeight": "18px"
+    },
+    ".ec-composer": {
+      "x": 248,
+      "y": 812.125,
+      "w": 464,
+      "h": 107.6875,
+      "display": "block",
+      "margin": "0px",
+      "padding": "14px 14px 10px",
+      "lineHeight": "21.7px"
+    },
+    ".ec-composer textarea": {
+      "x": 263,
+      "y": 827.125,
+      "w": 434,
+      "h": 44,
+      "display": "inline-block",
+      "margin": "0px",
+      "padding": "0px",
+      "lineHeight": "21.7px"
+    },
+    ".ec-drafthint": {
+      "x": 248,
+      "y": 926.8125,
+      "w": 464,
+      "h": 17.046875,
+      "display": "block",
+      "margin": "7px 0px 0px",
+      "padding": "0px",
+      "lineHeight": "17.05px"
+    },
+    ".ec-runtimebar": {
+      "x": 1,
+      "y": 1515.578125,
+      "w": 734,
+      "h": 38.046875,
+      "display": "flex",
+      "margin": "0px",
+      "padding": "6px 14px",
+      "lineHeight": "17.05px"
+    },
+    ".ec-profile": {
+      "x": 13,
+      "y": 1443.9375,
+      "w": 200,
+      "h": 59.640625,
+      "display": "flex",
+      "margin": "13px 0px 0px",
+      "padding": "17px 9px 6px",
+      "lineHeight": "18.6px"
+    },
+    ".ec-workheading": {
+      "x": 248,
+      "y": 115.59375,
+      "w": 464,
+      "h": 83.9375,
+      "display": "block",
+      "margin": "0px",
+      "padding": "0px",
+      "lineHeight": "21.7px"
+    }
+  },
+  "react": {
+    ".ec-window": {
+      "x": 0,
+      "y": 0,
+      "w": 736,
+      "h": 1554.625,
+      "display": "block",
+      "margin": "0px",
+      "padding": "0px",
+      "lineHeight": "21.7px"
+    },
+    ".ec-workcenter": {
+      "x": 225,
+      "y": 88.59375,
+      "w": 510,
+      "h": 868.265625,
+      "display": "flex",
+      "margin": "0px",
+      "padding": "27px 23px 13px",
+      "lineHeight": "21.7px"
+    },
+    ".ec-newwelcome": null,
+    ".ec-wordmark": null,
+    ".ec-newwelcome p": null,
+    ".ec-workspacehint": null,
+    ".ec-tasklist": {
+      "x": 13,
+      "y": 533.984375,
+      "w": 200,
+      "h": 225.5,
+      "display": "grid",
+      "margin": "6px 0px 0px",
+      "padding": "0px",
+      "lineHeight": "21.7px"
+    },
+    ".ec-taskbutton": {
+      "x": 13,
+      "y": 386.75,
+      "w": 174,
+      "h": 58.5,
+      "display": "flex",
+      "margin": "0px",
+      "padding": "10px 9px 10px 10px",
+      "lineHeight": "18px"
+    },
+    ".ec-composer": {
+      "x": 248,
+      "y": 812.125,
+      "w": 464,
+      "h": 107.6875,
+      "display": "block",
+      "margin": "0px",
+      "padding": "14px 14px 10px",
+      "lineHeight": "21.7px"
+    },
+    ".ec-composer textarea": {
+      "x": 263,
+      "y": 827.125,
+      "w": 434,
+      "h": 44,
+      "display": "inline-block",
+      "margin": "0px",
+      "padding": "0px",
+      "lineHeight": "21.7px"
+    },
+    ".ec-drafthint": {
+      "x": 248,
+      "y": 926.8125,
+      "w": 464,
+      "h": 17.046875,
+      "display": "block",
+      "margin": "7px 0px 0px",
+      "padding": "0px",
+      "lineHeight": "17.05px"
+    },
+    ".ec-runtimebar": {
+      "x": 1,
+      "y": 1515.578125,
+      "w": 734,
+      "h": 38.046875,
+      "display": "flex",
+      "margin": "0px",
+      "padding": "6px 14px",
+      "lineHeight": "17.05px"
+    },
+    ".ec-profile": {
+      "x": 13,
+      "y": 1443.9375,
+      "w": 200,
+      "h": 59.640625,
+      "display": "flex",
+      "margin": "13px 0px 0px",
+      "padding": "17px 9px 6px",
+      "lineHeight": "18.6px"
+    },
+    ".ec-workheading": {
+      "x": 248,
+      "y": 115.59375,
+      "w": 464,
+      "h": 83.9375,
+      "display": "block",
+      "margin": "0px",
+      "padding": "0px",
+      "lineHeight": "21.7px"
+    }
+  }
+}

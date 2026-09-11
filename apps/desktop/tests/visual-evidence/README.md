@@ -1,0 +1,15 @@
+# PR5 visual review
+
+Reviewed reference/React pairs and 50% overlays cover V01–V19 in the acceptance matrix: 84 complete-window cases, plus two 2× brand captures. All 86 pairs have identical image dimensions. Excluding Appearance preview cards, at most 28 pixels per pair differ by more than 24/255 in any RGB channel. No text or controls are masked. `differences.json` records each comparison; `environment.json` records the frozen reference hash, source revision/patch fingerprint, pinned libraries, OS, Chromium, fonts, clocks and scale. `contact-sheet.png` is a review index, not a baseline.
+
+The source prototype is unchanged. Reference instrumentation operates on an in-memory copy, in standards mode, with the inspection wrapper excluded. It only sets the existing demo state and invokes its renderer. The pinned reference Lucide library is vendored with its license; no CDN is used by the app or test runner.
+
+Reviewed deviations:
+
+- Appearance cards use the actual theme palettes instead of the prototype's approximations, as explicitly required by the visual contract. This accounts for the larger V13 difference (1.080% dark; 0.033% light).
+- Remaining small differences are bundled Lucide path/antialiasing details and bidirectional isolation around technical identifiers. Typography, layout, color surfaces, brand paths, and interaction-state geometry match.
+- Native windows supply their own viewport height and operating-system chrome; recovery and unavailable-production messages are additional canonical states. Native lifecycle, resize and trust-boundary evidence is recorded separately in the PR5 implementation record.
+
+`pnpm run desktop:e2e` reruns 104 tests without updating baselines. Golden comparisons allow at most 50 differing pixels for rendering noise, not a percentage of the screen. To propose updates: `CAPTURE_REFERENCE=1 pnpm --filter @estacoda/desktop exec playwright test --update-snapshots`, then review every changed pair before committing. From the repository root, `python3 apps/desktop/tests/compare-reference.py` regenerates measured differences and overlays (requires Pillow). Never accept a generated baseline solely because the command wrote it.
+
+Behavior checks cover per-draft preservation, metadata-only file selection/cancellation/removal, search/pins, tab keyboard behavior, approval versus cancellation acknowledgement, inert modal/focus restoration, artifact provenance, channel scope, all nine theme/mode choices, OS appearance changes, six palette contrast checks (WCAG normal-text 4.5:1), 320–1440px layouts, reduced motion and fixture isolation. Live mutations remain assigned to subsequent PRs.

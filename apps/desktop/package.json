@@ -8,7 +8,8 @@
     "dev": "electron-forge start",
     "package": "electron-forge package",
     "test": "vitest run --config vitest.config.ts",
-    "build:renderer": "vite build --config vite.renderer.config.ts"
+    "build:renderer": "vite build --config vite.renderer.config.ts",
+    "e2e": "playwright test --config playwright.config.ts"
   },
   "dependencies": {
     "@estacoda/control-protocol": "workspace:*",

@@ -1,0 +1,124 @@
+{
+  "reference": {
+    ".ec-window": {
+      "x": 0,
+      "y": 0,
+      "w": 360,
+      "h": 976.21875,
+      "display": "block",
+      "margin": "0px",
+      "padding": "0px",
+      "lineHeight": "21.7px"
+    },
+    ".ec-workcenter": null,
+    ".ec-newwelcome": null,
+    ".ec-wordmark": null,
+    ".ec-newwelcome p": null,
+    ".ec-workspacehint": null,
+    ".ec-tasklist": {
+      "x": 0,
+      "y": 0,
+      "w": 0,
+      "h": 0,
+      "display": "grid",
+      "margin": "6px 0px 0px",
+      "padding": "0px",
+      "lineHeight": "21.7px"
+    },
+    ".ec-taskbutton": {
+      "x": 0,
+      "y": 0,
+      "w": 0,
+      "h": 0,
+      "display": "flex",
+      "margin": "0px",
+      "padding": "10px 9px 10px 10px",
+      "lineHeight": "18px"
+    },
+    ".ec-composer": null,
+    ".ec-composer textarea": null,
+    ".ec-drafthint": null,
+    ".ec-runtimebar": {
+      "x": 1,
+      "y": 910.125,
+      "w": 358,
+      "h": 65.09375,
+      "display": "flex",
+      "margin": "0px",
+      "padding": "6px",
+      "lineHeight": "17.05px"
+    },
+    ".ec-profile": {
+      "x": 0,
+      "y": 0,
+      "w": 0,
+      "h": 0,
+      "display": "flex",
+      "margin": "13px 0px 0px",
+      "padding": "17px 9px 6px",
+      "lineHeight": "18.6px"
+    },
+    ".ec-workheading": null
+  },
+  "react": {
+    ".ec-window": {
+      "x": 0,
+      "y": 0,
+      "w": 360,
+      "h": 976.21875,
+      "display": "block",
+      "margin": "0px",
+      "padding": "0px",
+      "lineHeight": "21.7px"
+    },
+    ".ec-workcenter": null,
+    ".ec-newwelcome": null,
+    ".ec-wordmark": null,
+    ".ec-newwelcome p": null,
+    ".ec-workspacehint": null,
+    ".ec-tasklist": {
+      "x": 0,
+      "y": 0,
+      "w": 0,
+      "h": 0,
+      "display": "grid",
+      "margin": "6px 0px 0px",
+      "padding": "0px",
+      "lineHeight": "21.7px"
+    },
+    ".ec-taskbutton": {
+      "x": 0,
+      "y": 0,
+      "w": 0,
+      "h": 0,
+      "display": "flex",
+      "margin": "0px",
+      "padding": "10px 9px 10px 10px",
+      "lineHeight": "18px"
+    },
+    ".ec-composer": null,
+    ".ec-composer textarea": null,
+    ".ec-drafthint": null,
+    ".ec-runtimebar": {
+      "x": 1,
+      "y": 910.125,
+      "w": 358,
+      "h": 65.09375,
+      "display": "flex",
+      "margin": "0px",
+      "padding": "6px",
+      "lineHeight": "17.05px"
+    },
+    ".ec-profile": {
+      "x": 0,
+      "y": 0,
+      "w": 0,
+      "h": 0,
+      "display": "flex",
+      "margin": "13px 0px 0px",
+      "padding": "17px 9px 6px",
+      "lineHeight": "18.6px"
+    },
+    ".ec-workheading": null
+  }
+}

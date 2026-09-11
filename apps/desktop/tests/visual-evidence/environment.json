@@ -1,0 +1,26 @@
+{
+  "referenceSha256": "75d515400bc5bd9f61429e89872faa039c49b530a94b5f80643f0d53e2be70f9",
+  "platform": "darwin",
+  "os": "25.5.0",
+  "chromium": "153.0.8010.12",
+  "widths": [
+    1024,
+    736,
+    360
+  ],
+  "height": 900,
+  "deviceScaleFactor": 1,
+  "fonts": "-apple-system, BlinkMacSystemFont, Segoe UI, sans-serif",
+  "clock": "2026-09-10T10:42:00Z",
+  "animations": "disabled",
+  "referenceLucide": "1.17.0",
+  "reactLucide": "1.45.0",
+  "harness": 1,
+  "implementationBaseCommit": "42842a421c0ffc598fbd884c7751d25208f8a96c",
+  "implementationPatchSha256": "cdcdd9305049084bbfbf0ec517d3043fe9b469fa49e6f263c24976df7f4c6d76",
+  "deviceScaleFactors": [
+    1,
+    2
+  ],
+  "referenceLibrarySha256": "fde878a4f7aebe548b071eaaf343d898f66d275e93970abe95d8ca5fda290b51"
+}

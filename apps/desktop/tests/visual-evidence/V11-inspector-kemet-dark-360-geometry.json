@@ -1,0 +1,214 @@
+{
+  "reference": {
+    ".ec-window": {
+      "x": 0,
+      "y": 0,
+      "w": 360,
+      "h": 1977.328125,
+      "display": "block",
+      "margin": "0px",
+      "padding": "0px",
+      "lineHeight": "21.7px"
+    },
+    ".ec-workcenter": {
+      "x": 1,
+      "y": 232.046875,
+      "w": 358,
+      "h": 943.09375,
+      "display": "flex",
+      "margin": "0px",
+      "padding": "22px 16px 12px",
+      "lineHeight": "21.7px"
+    },
+    ".ec-newwelcome": null,
+    ".ec-wordmark": null,
+    ".ec-newwelcome p": null,
+    ".ec-workspacehint": null,
+    ".ec-tasklist": {
+      "x": 0,
+      "y": 0,
+      "w": 0,
+      "h": 0,
+      "display": "grid",
+      "margin": "6px 0px 0px",
+      "padding": "0px",
+      "lineHeight": "21.7px"
+    },
+    ".ec-taskbutton": {
+      "x": 0,
+      "y": 0,
+      "w": 0,
+      "h": 0,
+      "display": "flex",
+      "margin": "0px",
+      "padding": "10px 9px 10px 10px",
+      "lineHeight": "18px"
+    },
+    ".ec-composer": {
+      "x": 17,
+      "y": 1034.40625,
+      "w": 326,
+      "h": 104.6875,
+      "display": "block",
+      "margin": "0px",
+      "padding": "12px 10px 9px",
+      "lineHeight": "21.7px"
+    },
+    ".ec-composer textarea": {
+      "x": 28,
+      "y": 1047.40625,
+      "w": 304,
+      "h": 44,
+      "display": "inline-block",
+      "margin": "0px",
+      "padding": "0px",
+      "lineHeight": "21.7px"
+    },
+    ".ec-drafthint": {
+      "x": 17,
+      "y": 1146.09375,
+      "w": 326,
+      "h": 17.046875,
+      "display": "block",
+      "margin": "7px 0px 0px",
+      "padding": "0px",
+      "lineHeight": "17.05px"
+    },
+    ".ec-runtimebar": {
+      "x": 1,
+      "y": 1911.234375,
+      "w": 358,
+      "h": 65.09375,
+      "display": "flex",
+      "margin": "0px",
+      "padding": "6px",
+      "lineHeight": "17.05px"
+    },
+    ".ec-profile": {
+      "x": 0,
+      "y": 0,
+      "w": 0,
+      "h": 0,
+      "display": "flex",
+      "margin": "13px 0px 0px",
+      "padding": "17px 9px 6px",
+      "lineHeight": "18.6px"
+    },
+    ".ec-workheading": {
+      "x": 17,
+      "y": 254.046875,
+      "w": 326,
+      "h": 81.34375,
+      "display": "block",
+      "margin": "0px",
+      "padding": "0px",
+      "lineHeight": "21.7px"
+    }
+  },
+  "react": {
+    ".ec-window": {
+      "x": 0,
+      "y": 0,
+      "w": 360,
+      "h": 1977.328125,
+      "display": "block",
+      "margin": "0px",
+      "padding": "0px",
+      "lineHeight": "21.7px"
+    },
+    ".ec-workcenter": {
+      "x": 1,
+      "y": 232.046875,
+      "w": 358,
+      "h": 943.09375,
+      "display": "flex",
+      "margin": "0px",
+      "padding": "22px 16px 12px",
+      "lineHeight": "21.7px"
+    },
+    ".ec-newwelcome": null,
+    ".ec-wordmark": null,
+    ".ec-newwelcome p": null,
+    ".ec-workspacehint": null,
+    ".ec-tasklist": {
+      "x": 0,
+      "y": 0,
+      "w": 0,
+      "h": 0,
+      "display": "grid",
+      "margin": "6px 0px 0px",
+      "padding": "0px",
+      "lineHeight": "21.7px"
+    },
+    ".ec-taskbutton": {
+      "x": 0,
+      "y": 0,
+      "w": 0,
+      "h": 0,
+      "display": "flex",
+      "margin": "0px",
+      "padding": "10px 9px 10px 10px",
+      "lineHeight": "18px"
+    },
+    ".ec-composer": {
+      "x": 17,
+      "y": 1034.40625,
+      "w": 326,
+      "h": 104.6875,
+      "display": "block",
+      "margin": "0px",
+      "padding": "12px 10px 9px",
+      "lineHeight": "21.7px"
+    },
+    ".ec-composer textarea": {
+      "x": 28,
+      "y": 1047.40625,
+      "w": 304,
+      "h": 44,
+      "display": "inline-block",
+      "margin": "0px",
+      "padding": "0px",
+      "lineHeight": "21.7px"
+    },
+    ".ec-drafthint": {
+      "x": 17,
+      "y": 1146.09375,
+      "w": 326,
+      "h": 17.046875,
+      "display": "block",
+      "margin": "7px 0px 0px",
+      "padding": "0px",
+      "lineHeight": "17.05px"
+    },
+    ".ec-runtimebar": {
+      "x": 1,
+      "y": 1911.234375,
+      "w": 358,
+      "h": 65.09375,
+      "display": "flex",
+      "margin": "0px",
+      "padding": "6px",
+      "lineHeight": "17.05px"
+    },
+    ".ec-profile": {
+      "x": 0,
+      "y": 0,
+      "w": 0,
+      "h": 0,
+      "display": "flex",
+      "margin": "13px 0px 0px",
+      "padding": "17px 9px 6px",
+      "lineHeight": "18.6px"
+    },
+    ".ec-workheading": {
+      "x": 17,
+      "y": 254.046875,
+      "w": 326,
+      "h": 81.34375,
+      "display": "block",
+      "margin": "0px",
+      "padding": "0px",
+      "lineHeight": "21.7px"
+    }
+  }
+}

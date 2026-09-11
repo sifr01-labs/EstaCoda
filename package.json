@@ -84,7 +84,8 @@
     "desktop:dev": "pnpm --filter @estacoda/desktop dev",
     "desktop:typecheck": "pnpm --filter @estacoda/desktop typecheck",
     "desktop:test": "pnpm --filter @estacoda/desktop test",
-    "desktop:package": "pnpm --filter @estacoda/desktop package"
+    "desktop:package": "pnpm --filter @estacoda/desktop package",
+    "desktop:e2e": "pnpm --filter @estacoda/desktop e2e"
   },
   "devDependencies": {
     "@types/better-sqlite3": "^7.6.13",

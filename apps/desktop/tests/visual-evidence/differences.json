@@ -1,0 +1,1120 @@
+[
+  {
+    "id": "V01-brand-retina-dark",
+    "referenceSize": [
+      1468,
+      936
+    ],
+    "reactSize": [
+      1468,
+      936
+    ],
+    "changedPixelsOver24": 0,
+    "ratio": 0.0
+  },
+  {
+    "id": "V01-brand-retina-light",
+    "referenceSize": [
+      1468,
+      936
+    ],
+    "reactSize": [
+      1468,
+      936
+    ],
+    "changedPixelsOver24": 0,
+    "ratio": 0.0
+  },
+  {
+    "id": "V01-new-chat-graphite-dark-1024",
+    "referenceSize": [
+      1024,
+      916
+    ],
+    "reactSize": [
+      1024,
+      916
+    ],
+    "changedPixelsOver24": 0,
+    "ratio": 0.0
+  },
+  {
+    "id": "V01-new-chat-graphite-light-1024",
+    "referenceSize": [
+      1024,
+      916
+    ],
+    "reactSize": [
+      1024,
+      916
+    ],
+    "changedPixelsOver24": 0,
+    "ratio": 0.0
+  },
+  {
+    "id": "V01-new-chat-kemet-dark-1024",
+    "referenceSize": [
+      1024,
+      916
+    ],
+    "reactSize": [
+      1024,
+      916
+    ],
+    "changedPixelsOver24": 0,
+    "ratio": 0.0
+  },
+  {
+    "id": "V01-new-chat-kemet-dark-360",
+    "referenceSize": [
+      360,
+      959
+    ],
+    "reactSize": [
+      360,
+      959
+    ],
+    "changedPixelsOver24": 0,
+    "ratio": 0.0
+  },
+  {
+    "id": "V01-new-chat-kemet-dark-736",
+    "referenceSize": [
+      736,
+      916
+    ],
+    "reactSize": [
+      736,
+      916
+    ],
+    "changedPixelsOver24": 0,
+    "ratio": 0.0
+  },
+  {
+    "id": "V01-new-chat-kemet-light-1024",
+    "referenceSize": [
+      1024,
+      916
+    ],
+    "reactSize": [
+      1024,
+      916
+    ],
+    "changedPixelsOver24": 0,
+    "ratio": 0.0
+  },
+  {
+    "id": "V01-new-chat-kemet-light-360",
+    "referenceSize": [
+      360,
+      959
+    ],
+    "reactSize": [
+      360,
+      959
+    ],
+    "changedPixelsOver24": 0,
+    "ratio": 0.0
+  },
+  {
+    "id": "V01-new-chat-kemet-light-736",
+    "referenceSize": [
+      736,
+      916
+    ],
+    "reactSize": [
+      736,
+      916
+    ],
+    "changedPixelsOver24": 0,
+    "ratio": 0.0
+  },
+  {
+    "id": "V01-new-chat-sand-dark-1024",
+    "referenceSize": [
+      1024,
+      916
+    ],
+    "reactSize": [
+      1024,
+      916
+    ],
+    "changedPixelsOver24": 0,
+    "ratio": 0.0
+  },
+  {
+    "id": "V01-new-chat-sand-light-1024",
+    "referenceSize": [
+      1024,
+      916
+    ],
+    "reactSize": [
+      1024,
+      916
+    ],
+    "changedPixelsOver24": 0,
+    "ratio": 0.0
+  },
+  {
+    "id": "V02-draft-kemet-dark-1024",
+    "referenceSize": [
+      1024,
+      916
+    ],
+    "reactSize": [
+      1024,
+      916
+    ],
+    "changedPixelsOver24": 0,
+    "ratio": 0.0
+  },
+  {
+    "id": "V02-draft-kemet-light-1024",
+    "referenceSize": [
+      1024,
+      916
+    ],
+    "reactSize": [
+      1024,
+      916
+    ],
+    "changedPixelsOver24": 0,
+    "ratio": 0.0
+  },
+  {
+    "id": "V03-attachment-kemet-dark-1024",
+    "referenceSize": [
+      1024,
+      916
+    ],
+    "reactSize": [
+      1024,
+      916
+    ],
+    "changedPixelsOver24": 2,
+    "ratio": 2.1322325327510916e-06
+  },
+  {
+    "id": "V03-attachment-kemet-dark-360",
+    "referenceSize": [
+      360,
+      959
+    ],
+    "reactSize": [
+      360,
+      959
+    ],
+    "changedPixelsOver24": 2,
+    "ratio": 5.793071486502144e-06
+  },
+  {
+    "id": "V03-attachment-kemet-dark-736",
+    "referenceSize": [
+      736,
+      916
+    ],
+    "reactSize": [
+      736,
+      916
+    ],
+    "changedPixelsOver24": 2,
+    "ratio": 2.966584393392823e-06
+  },
+  {
+    "id": "V03-attachment-kemet-light-1024",
+    "referenceSize": [
+      1024,
+      916
+    ],
+    "reactSize": [
+      1024,
+      916
+    ],
+    "changedPixelsOver24": 1,
+    "ratio": 1.0661162663755458e-06
+  },
+  {
+    "id": "V03-attachment-kemet-light-360",
+    "referenceSize": [
+      360,
+      959
+    ],
+    "reactSize": [
+      360,
+      959
+    ],
+    "changedPixelsOver24": 1,
+    "ratio": 2.896535743251072e-06
+  },
+  {
+    "id": "V03-attachment-kemet-light-736",
+    "referenceSize": [
+      736,
+      916
+    ],
+    "reactSize": [
+      736,
+      916
+    ],
+    "changedPixelsOver24": 1,
+    "ratio": 1.4832921966964116e-06
+  },
+  {
+    "id": "V03-attachment-menu-kemet-dark-1024",
+    "referenceSize": [
+      1024,
+      916
+    ],
+    "reactSize": [
+      1024,
+      916
+    ],
+    "changedPixelsOver24": 0,
+    "ratio": 0.0
+  },
+  {
+    "id": "V03-attachment-menu-kemet-light-1024",
+    "referenceSize": [
+      1024,
+      916
+    ],
+    "reactSize": [
+      1024,
+      916
+    ],
+    "changedPixelsOver24": 0,
+    "ratio": 0.0
+  },
+  {
+    "id": "V04-empty-search-kemet-dark-1024",
+    "referenceSize": [
+      1024,
+      916
+    ],
+    "reactSize": [
+      1024,
+      916
+    ],
+    "changedPixelsOver24": 0,
+    "ratio": 0.0
+  },
+  {
+    "id": "V04-empty-search-kemet-light-1024",
+    "referenceSize": [
+      1024,
+      916
+    ],
+    "reactSize": [
+      1024,
+      916
+    ],
+    "changedPixelsOver24": 0,
+    "ratio": 0.0
+  },
+  {
+    "id": "V04-search-kemet-dark-1024",
+    "referenceSize": [
+      1024,
+      916
+    ],
+    "reactSize": [
+      1024,
+      916
+    ],
+    "changedPixelsOver24": 0,
+    "ratio": 0.0
+  },
+  {
+    "id": "V04-search-kemet-light-1024",
+    "referenceSize": [
+      1024,
+      916
+    ],
+    "reactSize": [
+      1024,
+      916
+    ],
+    "changedPixelsOver24": 0,
+    "ratio": 0.0
+  },
+  {
+    "id": "V05-empty-pins-kemet-dark-1024",
+    "referenceSize": [
+      1024,
+      937
+    ],
+    "reactSize": [
+      1024,
+      937
+    ],
+    "changedPixelsOver24": 5,
+    "ratio": 5.211112593383138e-06
+  },
+  {
+    "id": "V05-empty-pins-kemet-light-1024",
+    "referenceSize": [
+      1024,
+      937
+    ],
+    "reactSize": [
+      1024,
+      937
+    ],
+    "changedPixelsOver24": 4,
+    "ratio": 4.16889007470651e-06
+  },
+  {
+    "id": "V06-approval-graphite-dark-1024",
+    "referenceSize": [
+      1024,
+      952
+    ],
+    "reactSize": [
+      1024,
+      952
+    ],
+    "changedPixelsOver24": 0,
+    "ratio": 0.0
+  },
+  {
+    "id": "V06-approval-graphite-light-1024",
+    "referenceSize": [
+      1024,
+      952
+    ],
+    "reactSize": [
+      1024,
+      952
+    ],
+    "changedPixelsOver24": 0,
+    "ratio": 0.0
+  },
+  {
+    "id": "V06-approval-kemet-dark-1024",
+    "referenceSize": [
+      1024,
+      952
+    ],
+    "reactSize": [
+      1024,
+      952
+    ],
+    "changedPixelsOver24": 0,
+    "ratio": 0.0
+  },
+  {
+    "id": "V06-approval-kemet-dark-360",
+    "referenceSize": [
+      360,
+      1242
+    ],
+    "reactSize": [
+      360,
+      1242
+    ],
+    "changedPixelsOver24": 0,
+    "ratio": 0.0
+  },
+  {
+    "id": "V06-approval-kemet-dark-736",
+    "referenceSize": [
+      736,
+      996
+    ],
+    "reactSize": [
+      736,
+      996
+    ],
+    "changedPixelsOver24": 0,
+    "ratio": 0.0
+  },
+  {
+    "id": "V06-approval-kemet-light-1024",
+    "referenceSize": [
+      1024,
+      952
+    ],
+    "reactSize": [
+      1024,
+      952
+    ],
+    "changedPixelsOver24": 0,
+    "ratio": 0.0
+  },
+  {
+    "id": "V06-approval-kemet-light-360",
+    "referenceSize": [
+      360,
+      1242
+    ],
+    "reactSize": [
+      360,
+      1242
+    ],
+    "changedPixelsOver24": 0,
+    "ratio": 0.0
+  },
+  {
+    "id": "V06-approval-kemet-light-736",
+    "referenceSize": [
+      736,
+      996
+    ],
+    "reactSize": [
+      736,
+      996
+    ],
+    "changedPixelsOver24": 0,
+    "ratio": 0.0
+  },
+  {
+    "id": "V06-approval-sand-dark-1024",
+    "referenceSize": [
+      1024,
+      952
+    ],
+    "reactSize": [
+      1024,
+      952
+    ],
+    "changedPixelsOver24": 0,
+    "ratio": 0.0
+  },
+  {
+    "id": "V06-approval-sand-light-1024",
+    "referenceSize": [
+      1024,
+      952
+    ],
+    "reactSize": [
+      1024,
+      952
+    ],
+    "changedPixelsOver24": 0,
+    "ratio": 0.0
+  },
+  {
+    "id": "V07-completed-kemet-dark-1024",
+    "referenceSize": [
+      1024,
+      916
+    ],
+    "reactSize": [
+      1024,
+      916
+    ],
+    "changedPixelsOver24": 13,
+    "ratio": 1.3859511462882096e-05
+  },
+  {
+    "id": "V07-completed-kemet-light-1024",
+    "referenceSize": [
+      1024,
+      916
+    ],
+    "reactSize": [
+      1024,
+      916
+    ],
+    "changedPixelsOver24": 13,
+    "ratio": 1.3859511462882096e-05
+  },
+  {
+    "id": "V07-running-kemet-dark-1024",
+    "referenceSize": [
+      1024,
+      916
+    ],
+    "reactSize": [
+      1024,
+      916
+    ],
+    "changedPixelsOver24": 0,
+    "ratio": 0.0
+  },
+  {
+    "id": "V07-running-kemet-light-1024",
+    "referenceSize": [
+      1024,
+      916
+    ],
+    "reactSize": [
+      1024,
+      916
+    ],
+    "changedPixelsOver24": 0,
+    "ratio": 0.0
+  },
+  {
+    "id": "V08-cancelled-kemet-dark-1024",
+    "referenceSize": [
+      1024,
+      916
+    ],
+    "reactSize": [
+      1024,
+      916
+    ],
+    "changedPixelsOver24": 0,
+    "ratio": 0.0
+  },
+  {
+    "id": "V08-cancelled-kemet-light-1024",
+    "referenceSize": [
+      1024,
+      916
+    ],
+    "reactSize": [
+      1024,
+      916
+    ],
+    "changedPixelsOver24": 0,
+    "ratio": 0.0
+  },
+  {
+    "id": "V08-stopping-kemet-dark-1024",
+    "referenceSize": [
+      1024,
+      916
+    ],
+    "reactSize": [
+      1024,
+      916
+    ],
+    "changedPixelsOver24": 0,
+    "ratio": 0.0
+  },
+  {
+    "id": "V08-stopping-kemet-light-1024",
+    "referenceSize": [
+      1024,
+      916
+    ],
+    "reactSize": [
+      1024,
+      916
+    ],
+    "changedPixelsOver24": 0,
+    "ratio": 0.0
+  },
+  {
+    "id": "V09-partial-kemet-dark-1024",
+    "referenceSize": [
+      1024,
+      916
+    ],
+    "reactSize": [
+      1024,
+      916
+    ],
+    "changedPixelsOver24": 0,
+    "ratio": 0.0
+  },
+  {
+    "id": "V09-partial-kemet-light-1024",
+    "referenceSize": [
+      1024,
+      916
+    ],
+    "reactSize": [
+      1024,
+      916
+    ],
+    "changedPixelsOver24": 0,
+    "ratio": 0.0
+  },
+  {
+    "id": "V09-rejected-kemet-dark-1024",
+    "referenceSize": [
+      1024,
+      916
+    ],
+    "reactSize": [
+      1024,
+      916
+    ],
+    "changedPixelsOver24": 0,
+    "ratio": 0.0
+  },
+  {
+    "id": "V09-rejected-kemet-light-1024",
+    "referenceSize": [
+      1024,
+      916
+    ],
+    "reactSize": [
+      1024,
+      916
+    ],
+    "changedPixelsOver24": 0,
+    "ratio": 0.0
+  },
+  {
+    "id": "V10-changes-kemet-dark-1024",
+    "referenceSize": [
+      1024,
+      916
+    ],
+    "reactSize": [
+      1024,
+      916
+    ],
+    "changedPixelsOver24": 0,
+    "ratio": 0.0
+  },
+  {
+    "id": "V10-changes-kemet-light-1024",
+    "referenceSize": [
+      1024,
+      916
+    ],
+    "reactSize": [
+      1024,
+      916
+    ],
+    "changedPixelsOver24": 0,
+    "ratio": 0.0
+  },
+  {
+    "id": "V10-results-kemet-dark-1024",
+    "referenceSize": [
+      1024,
+      916
+    ],
+    "reactSize": [
+      1024,
+      916
+    ],
+    "changedPixelsOver24": 16,
+    "ratio": 1.7057860262008733e-05
+  },
+  {
+    "id": "V10-results-kemet-light-1024",
+    "referenceSize": [
+      1024,
+      916
+    ],
+    "reactSize": [
+      1024,
+      916
+    ],
+    "changedPixelsOver24": 16,
+    "ratio": 1.7057860262008733e-05
+  },
+  {
+    "id": "V11-inspector-kemet-dark-1024",
+    "referenceSize": [
+      1024,
+      996
+    ],
+    "reactSize": [
+      1024,
+      996
+    ],
+    "changedPixelsOver24": 12,
+    "ratio": 1.1765813253012049e-05
+  },
+  {
+    "id": "V11-inspector-kemet-dark-360",
+    "referenceSize": [
+      360,
+      1978
+    ],
+    "reactSize": [
+      360,
+      1978
+    ],
+    "changedPixelsOver24": 12,
+    "ratio": 1.6852039096730706e-05
+  },
+  {
+    "id": "V11-inspector-kemet-dark-736",
+    "referenceSize": [
+      736,
+      1555
+    ],
+    "reactSize": [
+      736,
+      1555
+    ],
+    "changedPixelsOver24": 12,
+    "ratio": 1.0485111142178108e-05
+  },
+  {
+    "id": "V11-inspector-kemet-light-1024",
+    "referenceSize": [
+      1024,
+      996
+    ],
+    "reactSize": [
+      1024,
+      996
+    ],
+    "changedPixelsOver24": 14,
+    "ratio": 1.3726782128514056e-05
+  },
+  {
+    "id": "V11-inspector-kemet-light-360",
+    "referenceSize": [
+      360,
+      1978
+    ],
+    "reactSize": [
+      360,
+      1978
+    ],
+    "changedPixelsOver24": 14,
+    "ratio": 1.9660712279519154e-05
+  },
+  {
+    "id": "V11-inspector-kemet-light-736",
+    "referenceSize": [
+      736,
+      1555
+    ],
+    "reactSize": [
+      736,
+      1555
+    ],
+    "changedPixelsOver24": 14,
+    "ratio": 1.2232629665874458e-05
+  },
+  {
+    "id": "V12-inbox-kemet-dark-1024",
+    "referenceSize": [
+      1024,
+      916
+    ],
+    "reactSize": [
+      1024,
+      916
+    ],
+    "changedPixelsOver24": 0,
+    "ratio": 0.0
+  },
+  {
+    "id": "V12-inbox-kemet-light-1024",
+    "referenceSize": [
+      1024,
+      916
+    ],
+    "reactSize": [
+      1024,
+      916
+    ],
+    "changedPixelsOver24": 0,
+    "ratio": 0.0
+  },
+  {
+    "id": "V13-appearance-kemet-dark-1024",
+    "referenceSize": [
+      1024,
+      916
+    ],
+    "reactSize": [
+      1024,
+      916
+    ],
+    "changedPixelsOver24": 10129,
+    "ratio": 0.010798691662117905
+  },
+  {
+    "id": "V13-appearance-kemet-light-1024",
+    "referenceSize": [
+      1024,
+      916
+    ],
+    "reactSize": [
+      1024,
+      916
+    ],
+    "changedPixelsOver24": 314,
+    "ratio": 0.0003347605076419214
+  },
+  {
+    "id": "V15-configure-kemet-dark-1024",
+    "referenceSize": [
+      1024,
+      916
+    ],
+    "reactSize": [
+      1024,
+      916
+    ],
+    "changedPixelsOver24": 0,
+    "ratio": 0.0
+  },
+  {
+    "id": "V15-configure-kemet-dark-360",
+    "referenceSize": [
+      360,
+      977
+    ],
+    "reactSize": [
+      360,
+      977
+    ],
+    "changedPixelsOver24": 0,
+    "ratio": 0.0
+  },
+  {
+    "id": "V15-configure-kemet-dark-736",
+    "referenceSize": [
+      736,
+      916
+    ],
+    "reactSize": [
+      736,
+      916
+    ],
+    "changedPixelsOver24": 0,
+    "ratio": 0.0
+  },
+  {
+    "id": "V15-configure-kemet-light-1024",
+    "referenceSize": [
+      1024,
+      916
+    ],
+    "reactSize": [
+      1024,
+      916
+    ],
+    "changedPixelsOver24": 0,
+    "ratio": 0.0
+  },
+  {
+    "id": "V15-configure-kemet-light-360",
+    "referenceSize": [
+      360,
+      977
+    ],
+    "reactSize": [
+      360,
+      977
+    ],
+    "changedPixelsOver24": 0,
+    "ratio": 0.0
+  },
+  {
+    "id": "V15-configure-kemet-light-736",
+    "referenceSize": [
+      736,
+      916
+    ],
+    "reactSize": [
+      736,
+      916
+    ],
+    "changedPixelsOver24": 0,
+    "ratio": 0.0
+  },
+  {
+    "id": "V15-models-kemet-dark-1024",
+    "referenceSize": [
+      1024,
+      916
+    ],
+    "reactSize": [
+      1024,
+      916
+    ],
+    "changedPixelsOver24": 0,
+    "ratio": 0.0
+  },
+  {
+    "id": "V15-models-kemet-light-1024",
+    "referenceSize": [
+      1024,
+      916
+    ],
+    "reactSize": [
+      1024,
+      916
+    ],
+    "changedPixelsOver24": 0,
+    "ratio": 0.0
+  },
+  {
+    "id": "V15-ready-kemet-dark-1024",
+    "referenceSize": [
+      1024,
+      916
+    ],
+    "reactSize": [
+      1024,
+      916
+    ],
+    "changedPixelsOver24": 8,
+    "ratio": 8.528930131004366e-06
+  },
+  {
+    "id": "V15-ready-kemet-light-1024",
+    "referenceSize": [
+      1024,
+      916
+    ],
+    "reactSize": [
+      1024,
+      916
+    ],
+    "changedPixelsOver24": 15,
+    "ratio": 1.5991743995633188e-05
+  },
+  {
+    "id": "V15-review-kemet-dark-1024",
+    "referenceSize": [
+      1024,
+      916
+    ],
+    "reactSize": [
+      1024,
+      916
+    ],
+    "changedPixelsOver24": 28,
+    "ratio": 2.9851255458515282e-05
+  },
+  {
+    "id": "V15-review-kemet-light-1024",
+    "referenceSize": [
+      1024,
+      916
+    ],
+    "reactSize": [
+      1024,
+      916
+    ],
+    "changedPixelsOver24": 26,
+    "ratio": 2.7719022925764192e-05
+  },
+  {
+    "id": "V16-artifacts-kemet-dark-1024",
+    "referenceSize": [
+      1024,
+      916
+    ],
+    "reactSize": [
+      1024,
+      916
+    ],
+    "changedPixelsOver24": 0,
+    "ratio": 0.0
+  },
+  {
+    "id": "V16-artifacts-kemet-light-1024",
+    "referenceSize": [
+      1024,
+      916
+    ],
+    "reactSize": [
+      1024,
+      916
+    ],
+    "changedPixelsOver24": 0,
+    "ratio": 0.0
+  },
+  {
+    "id": "V16-preview-kemet-dark-1024",
+    "referenceSize": [
+      1024,
+      916
+    ],
+    "reactSize": [
+      1024,
+      916
+    ],
+    "changedPixelsOver24": 0,
+    "ratio": 0.0
+  },
+  {
+    "id": "V16-preview-kemet-light-1024",
+    "referenceSize": [
+      1024,
+      916
+    ],
+    "reactSize": [
+      1024,
+      916
+    ],
+    "changedPixelsOver24": 0,
+    "ratio": 0.0
+  },
+  {
+    "id": "V17-capability-kemet-dark-1024",
+    "referenceSize": [
+      1024,
+      916
+    ],
+    "reactSize": [
+      1024,
+      916
+    ],
+    "changedPixelsOver24": 0,
+    "ratio": 0.0
+  },
+  {
+    "id": "V17-capability-kemet-light-1024",
+    "referenceSize": [
+      1024,
+      916
+    ],
+    "reactSize": [
+      1024,
+      916
+    ],
+    "changedPixelsOver24": 0,
+    "ratio": 0.0
+  },
+  {
+    "id": "V18-connections-kemet-dark-1024",
+    "referenceSize": [
+      1024,
+      916
+    ],
+    "reactSize": [
+      1024,
+      916
+    ],
+    "changedPixelsOver24": 0,
+    "ratio": 0.0
+  },
+  {
+    "id": "V18-connections-kemet-light-1024",
+    "referenceSize": [
+      1024,
+      916
+    ],
+    "reactSize": [
+      1024,
+      916
+    ],
+    "changedPixelsOver24": 0,
+    "ratio": 0.0
+  },
+  {
+    "id": "V19-background-kemet-dark-1024",
+    "referenceSize": [
+      1024,
+      916
+    ],
+    "reactSize": [
+      1024,
+      916
+    ],
+    "changedPixelsOver24": 0,
+    "ratio": 0.0
+  },
+  {
+    "id": "V19-background-kemet-light-1024",
+    "referenceSize": [
+      1024,
+      916
+    ],
+    "reactSize": [
+      1024,
+      916
+    ],
+    "changedPixelsOver24": 0,
+    "ratio": 0.0
+  }
+]
