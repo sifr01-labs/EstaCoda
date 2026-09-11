@@ -5,11 +5,11 @@ import { CONTROL_METHODS, CONTROL_LIMITS } from '../contracts/desktop-control/in
 import { StdioControlServer, type ControlHandlers } from './stdio-server.js';
 import { BoundedLines } from './framing.js';
 
-function fixture(handlers: ControlHandlers = {}) {
+function fixture(handlers: ControlHandlers = {}, requestTimeoutMs = 30_000) {
   const input = new PassThrough(), output = new PassThrough();
   const messages: any[] = [];
   output.on('data', (chunk) => { for (const line of String(chunk).trim().split('\n')) messages.push(JSON.parse(line)); });
-  const server = new StdioControlServer({ input, output, profileId: 'p', version: 'test', handlers });
+  const server = new StdioControlServer({ input, output, profileId: 'p', version: 'test', handlers, requestTimeoutMs });
   const send = (id: string, method: string, params: unknown) => input.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n');
   const init = async (profileId = 'p') => { send('init', 'control.initialize', { protocolVersion: { major: 1, minor: 0 }, clientVersion: 'test', profileId, capabilities: { methods: [...CONTROL_METHODS], events: [] } }); await setImmediate(); };
   return { input, output, messages, server, send, init };
@@ -62,4 +62,15 @@ it('aborts pending handlers on close and disposes exactly once', async () => {
   await f.init(); f.send('r', 'work.list', { limit: 1 }); await setImmediate();
   f.server.close(); f.server.close(); await f.server.done;
   expect(signal.aborted).toBe(true); expect(disposed).toBe(1);
+});
+
+it('keeps timed-out handlers inside the concurrency bound until they actually settle', async () => {
+  let calls = 0;
+  const f = fixture({ 'work.list': async () => { calls++; return await new Promise(() => {}); } }, 20);
+  await f.init();
+  for (let i = 0; i < 28; i++) f.send('slow' + i, 'work.list', { limit: 1 });
+  await new Promise((resolve) => setTimeout(resolve, 40));
+  f.send('overflow', 'work.list', { limit: 1 }); await setImmediate();
+  expect(calls).toBe(28); expect(f.messages.at(-1).error.code).toBe(-32009);
+  f.server.close(); await f.server.done;
 });

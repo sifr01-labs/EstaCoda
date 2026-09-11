@@ -90,7 +90,7 @@ export class StdioControlServer {
     }
     const controller = new AbortController();
     const timer = setTimeout(() => {
-      controller.abort(); this.#pending.delete(request.id);
+      controller.abort();
       this.write(failureEnvelope(request.id, '-32010'));
     }, this.options.requestTimeoutMs ?? 30_000);
     this.#pending.set(request.id, { controller, timer });
@@ -122,11 +122,12 @@ export class StdioControlServer {
     }
     if (request.method === 'control.cancelRequest') {
       const pending = this.#pending.get(request.params.requestId);
-      if (pending) {
-        pending.controller.abort(); clearTimeout(pending.timer); this.#pending.delete(request.params.requestId);
+      const cancellable = Boolean(pending && !pending.controller.signal.aborted);
+      if (pending && cancellable) {
+        pending.controller.abort(); clearTimeout(pending.timer);
         this.write(failureEnvelope(request.params.requestId, '-32010'));
       }
-      return { result: { cancellationRequested: Boolean(pending) } };
+      return { result: { cancellationRequested: cancellable } };
     }
     const handler = this.#handlers[request.method];
     if (!handler) throw new ControlProtocolError('-32601');

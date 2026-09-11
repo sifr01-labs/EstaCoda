@@ -1,3 +1,4 @@
+import { RuntimeStateMonitor, type RuntimeNotification } from './runtime-notifications.js';
 import { randomUUID } from 'node:crypto';
 import type { Readable, Writable } from 'node:stream';
 import { ControlProtocolError, type BootstrapResult, type ControlCursor } from '../contracts/desktop-control/index.js';
@@ -9,18 +10,20 @@ export type BootstrapState = Pick<BootstrapResult, 'profile' | 'runtime'>;
 export class DesktopBridge {
   readonly server: StdioControlServer;
   #generation = 0;
+  #monitor: RuntimeStateMonitor | undefined;
   #capture: AbortController | undefined;
   #snapshot: BootstrapResult | undefined;
   constructor(readonly options: { input: Readable; output: Writable; homeDir: string; profileId: string; version: string;
-    readState?: (signal: AbortSignal) => Promise<BootstrapState> }) {
+    readState?: (signal: AbortSignal) => Promise<BootstrapState>; onNotification?: (event: RuntimeNotification) => void }) {
     this.server = new StdioControlServer({ ...options, handlers: {
       'control.bootstrap': async (_request, signal) => ({ result: await this.bootstrap(signal) }),
     } });
-    this.server.onDispose(() => { this.#capture?.abort(); this.#snapshot = undefined; });
+    this.server.onDispose(() => { this.#capture?.abort(); this.#monitor?.dispose(); this.#snapshot = undefined; });
   }
   get snapshot(): BootstrapResult | undefined { return this.#snapshot ? structuredClone(this.#snapshot) : undefined; }
   async bootstrap(signal: AbortSignal): Promise<BootstrapResult> {
     const generation = ++this.#generation;
+    this.#monitor?.dispose();
     this.#capture?.abort(); this.#capture = new AbortController(); this.#snapshot = undefined;
     const combined = AbortSignal.any([signal, this.#capture.signal]);
     let state: BootstrapState;
@@ -33,6 +36,8 @@ export class DesktopBridge {
     if (!context) throw new ControlProtocolError('-32002');
     const cursor: ControlCursor = { instanceId: this.server.instanceId, streamId: randomUUID(), sequence: 0 };
     this.#snapshot = structuredClone({ ...state, capabilities: context.capabilities, cursor });
+    this.#monitor = new RuntimeStateMonitor(state, (signal) => this.options.readState ? this.options.readState(signal) : this.readState(signal),
+      (event) => { if (generation === this.#generation && !this.server.closed) this.options.onNotification?.(event); });
     return structuredClone(this.#snapshot);
   }
   private async readState(signal: AbortSignal): Promise<BootstrapState> {
