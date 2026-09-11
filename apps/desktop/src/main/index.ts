@@ -1,5 +1,7 @@
 import { app, BrowserWindow } from 'electron';
 import path from 'node:path';
+import { Profiles } from './profiles.js';
+import { installSemanticIpc } from './semantic-ipc.js';
 import { pathToFileURL } from 'node:url';
 import { CredentialWindow } from './credential-window.js';
 import { CredentialPipeClient } from './credential-pipe-client.js';
@@ -23,8 +25,11 @@ async function openWindow(): Promise<void> {
   let credentialPipe: CredentialPipeClient | undefined;
   connection.on('credentials', (pipe: Duplex) => { credentialPipe?.dispose(); credentialPipe = new CredentialPipeClient(pipe); });
   connection.on('invalidate', () => { credentials.close(); credentialPipe?.dispose(); credentialPipe = undefined; });
-  window.once('closed', () => connection.close());
-  connection.switchProfile('default');
+  const documentUrl = MAIN_WINDOW_VITE_DEV_SERVER_URL ? new URL(MAIN_WINDOW_VITE_DEV_SERVER_URL).href : pathToFileURL(path.join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`)).href;
+  const profiles = new Profiles(app.getPath('home'));
+  const disposeIpc = installSemanticIpc(window, documentUrl, connection, profiles);
+  window.once('closed', () => { disposeIpc(); connection.close(); });
+  connection.switchProfile(profiles.initial());
   window.once('ready-to-show', () => window.show());
   if (MAIN_WINDOW_VITE_DEV_SERVER_URL) await window.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
   else await window.loadFile(path.join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`));
