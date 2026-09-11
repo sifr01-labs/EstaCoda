@@ -6,6 +6,7 @@ import { join, dirname } from "node:path";
 
 import { PRIVATE_CONTROL_MAX_BYTES as MAX_BYTES, validatePrivateControlRequest, type PrivateControlRequest } from "../contracts/control-protocol.js";
 export { validatePrivateControlRequest, type PrivateControlRequest } from "../contracts/control-protocol.js";
+export class PrivateControlCompatibilityError extends Error {}
 type Discovery = { protocol: 1; version: string; instanceId: string; profileId: string; socket: string; token: string };
 async function assertPrivate(path: string, directory = false): Promise<void> {
   const info = await lstat(path);
@@ -47,6 +48,12 @@ export async function startPrivateControl(input: {
           const expected = Buffer.from(discovery.token);
           if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected) ||
             message.instanceId !== discovery.instanceId || message.protocol !== 1 || message.version !== discovery.version) throw new Error("Authentication or version mismatch.");
+          if (message.probe === true) {
+            if (Object.keys(message).some((key) => !["protocol", "version", "instanceId", "profileId", "socket", "token", "probe"].includes(key))) throw new Error("Invalid probe.");
+            socket.end(JSON.stringify({ ok: true, result: { profileId: input.profileId, instanceId: input.instanceId,
+              version: input.version, capabilities: { readiness: true, targetGeneration: false } } }) + "\n");
+            return;
+          }
           validatePrivateControlRequest(message.request);
           // Profile and principal are bound by this instance; caller labels are ignored.
           const result = await input.handle(message.request);
@@ -97,16 +104,25 @@ export async function callPrivateControl(input: { directory: string; profileId: 
     if (!ready) throw new Error("Shared supervisor is unavailable or incompatible. Inspect its existing service; do not start a duplicate host.");
   }
 
+  return exchangePrivateControl(input, { request: input.request });
+}
+
+async function exchangePrivateControl(input: { directory: string; profileId: string; version: string; signal?: AbortSignal }, payload: { request: PrivateControlRequest } | { probe: true }): Promise<unknown> {
+  input.signal?.throwIfAborted();
   await assertPrivate(input.directory, true);
   const path = join(input.directory, "control.json");
   await assertPrivate(path);
   const discovery = JSON.parse(await readFile(path, "utf8")) as Discovery;
   if (discovery.protocol !== 1 || discovery.version !== input.version || discovery.profileId !== input.profileId ||
-    dirname(discovery.socket) !== input.directory) throw new Error("Shared host version/profile mismatch. Restart the compatible supervisor; do not start a second host.");
+    dirname(discovery.socket) !== input.directory) throw new PrivateControlCompatibilityError("Shared host version/profile mismatch. Restart the compatible supervisor; do not start a second host.");
   return await new Promise((resolve, reject) => {
+    input.signal?.throwIfAborted();
     const socket = createConnection(discovery.socket);
+    const abort = () => socket.destroy(new Error("Private control request cancelled."));
+    input.signal?.addEventListener("abort", abort, { once: true });
+    socket.once("close", () => input.signal?.removeEventListener("abort", abort));
     let buffer = Buffer.alloc(0);
-    socket.on("connect", () => socket.write(JSON.stringify({ ...discovery, request: input.request }) + "\n"));
+    socket.on("connect", () => socket.write(JSON.stringify({ ...discovery, ...payload }) + "\n"));
     socket.setTimeout(10_000, () => socket.destroy(new Error("Control response unavailable. Query the same operation ID before retrying.")));
     socket.on("error", reject);
     socket.on("close", () => { if (!socket.readableEnded) reject(new Error("Control response lost; inspect the same operation ID.")); });
@@ -115,8 +131,26 @@ export async function callPrivateControl(input: { directory: string; profileId: 
       buffer = Buffer.concat([buffer, chunk]);
     });
     socket.on("end", () => {
-      try { const response = JSON.parse(buffer.toString("utf8")); if (!response.ok) throw new Error(response.error); resolve(response.result); }
+      try {
+        const response = JSON.parse(buffer.toString("utf8"));
+        if (!response.ok) {
+          if ("probe" in payload) throw new PrivateControlCompatibilityError("Supervisor readiness probe rejected.");
+          throw new Error(response.error);
+        }
+        if ("probe" in payload && response.result?.instanceId !== discovery.instanceId) throw new PrivateControlCompatibilityError("Supervisor instance changed.");
+        resolve(response.result);
+      }
       catch (error) { reject(error); }
     });
   });
+}
+
+/** Authenticated read-only handshake. Older hosts reject it; never infer readiness from discovery alone. */
+export async function probePrivateControl(input: { directory: string; profileId: string; version: string; signal?: AbortSignal }): Promise<{ instanceId: string; targetGeneration: false }> {
+  const result = await exchangePrivateControl(input, { probe: true }) as Record<string, unknown> | null;
+  if (!result || Object.keys(result).sort().join(",") !== "capabilities,instanceId,profileId,version" || result.profileId !== input.profileId || result.version !== input.version ||
+    typeof result.instanceId !== "string" || !/^[A-Za-z0-9_.:-]{1,160}$/.test(result.instanceId)) throw new PrivateControlCompatibilityError("Incompatible supervisor readiness contract.");
+  const caps = result.capabilities as Record<string, unknown> | null;
+  if (!caps || Object.keys(caps).sort().join(",") !== "readiness,targetGeneration" || caps.readiness !== true || caps.targetGeneration !== false) throw new PrivateControlCompatibilityError("Incompatible supervisor capabilities.");
+  return { instanceId: result.instanceId, targetGeneration: false };
 }
