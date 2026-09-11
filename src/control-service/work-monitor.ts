@@ -25,7 +25,7 @@ export class WorkMonitor {
         oldInbox.delete(item.id);
       }
       for (const itemId of oldInbox.keys()) this.publish({ type: 'attention.changed', payload: { itemId, item: null } });
-      let resync = this.#previous.work.some((old) => !next.work.some((work) => work.id === old.id));
+      let resync = Object.keys(this.#previous.activity).some((id) => !Object.hasOwn(next.activity, id)) || this.#previous.work.some((old) => !next.work.some((work) => work.id === old.id));
       for (const [workId, activity] of Object.entries(next.activity)) {
         const previous = new Map((this.#previous.activity[workId] ?? []).map((item) => [item.id, JSON.stringify(item)]));
         for (const item of activity) {

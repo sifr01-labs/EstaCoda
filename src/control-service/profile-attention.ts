@@ -22,7 +22,11 @@ export async function readProfileFile(root: string, path: string): Promise<strin
     const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
     try {
       const info = await file.stat(); if (!info.isFile() || info.size > 1_048_576) throw new Error('Profile state exceeds bound');
-      const buffer = Buffer.alloc(1_048_577); const { bytesRead } = await file.read(buffer, 0, buffer.length, 0);
+      const buffer = Buffer.alloc(1_048_577); let bytesRead = 0;
+      while (bytesRead < buffer.length) {
+        const chunk = await file.read(buffer, bytesRead, buffer.length - bytesRead, bytesRead);
+        if (!chunk.bytesRead) break; bytesRead += chunk.bytesRead;
+      }
       if (bytesRead > 1_048_576) throw new Error('Profile state exceeds bound');
       return new TextDecoder('utf-8', { fatal: true }).decode(buffer.subarray(0, bytesRead));
     } finally { await file.close(); }

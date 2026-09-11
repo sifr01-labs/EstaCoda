@@ -74,12 +74,12 @@ export class ControlReceipts {
       const count = this.db.query<{ count: number }>("select count(*) as count from session_control_receipts where profile_id=?").get(this.profileId)!.count;
       if (count >= 10_000) throw new Error("Control receipt retention capacity reached.");
       const session = this.db.query<{ target: string; generation: number; profile_id: string; ended_at: string | null }>("select profile_id, ended_at, json_extract(execution_target_json, '$.targetGeneration') as generation, json_extract(execution_target_json, '$.targetId') as target from sessions where id=?").get(request.sessionId);
-      if (!session || session.profile_id !== this.profileId || session.target !== request.targetId || session.ended_at || (request.targetGeneration !== undefined && session.generation !== request.targetGeneration)) throw new Error("Control Session binding changed.");
+      if (!session || session.profile_id !== this.profileId || session.target !== request.targetId || (session.ended_at && !request.method.startsWith("task.")) || (request.targetGeneration !== undefined && session.generation !== request.targetGeneration)) throw new Error("Control Session binding changed.");
       const owner = this.db.query<{ owner_id: string | null; owner_pid: number | null }>(
         "select owner_id, owner_pid from session_execution_owners where session_id=?"
       ).get(request.sessionId);
-      if (owner?.owner_id && owner.owner_pid !== process.pid && !processDefinitelyAbsent(owner.owner_pid ?? 0)) throw new Error("Session is owned by another process; wait for a settled handoff.");
-      if (request.method !== "send") this.db.query(`update session_execution_owners set control_revision=control_revision+1
+      if (!request.method.startsWith("task.") && owner?.owner_id && owner.owner_pid !== process.pid && !processDefinitelyAbsent(owner.owner_pid ?? 0)) throw new Error("Session is owned by another process; wait for a settled handoff.");
+      if (request.method !== "send" && !request.method.startsWith("task.")) this.db.query(`update session_execution_owners set control_revision=control_revision+1
         where session_id=? and profile_id=? and target_id=? and owner_pid=? and owner_id is not null`)
         .run(request.sessionId, this.profileId, request.targetId, process.pid);
       const eventId = randomUUID(), now = Date.now();

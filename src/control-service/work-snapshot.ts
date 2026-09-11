@@ -1,3 +1,4 @@
+import { sessionDisplayEvents } from './session-display-events.js';
 import { profileAttention } from './profile-attention.js';
 import { appendInbox } from './inbox-projections.js';
 import { SQLiteTaskStore } from '../tasks/sqlite-task-store.js';
@@ -8,8 +9,8 @@ import { lstat } from 'node:fs/promises';
 import { resolveGlobalStateHome } from '../config/profile-home.js';
 import { SQLiteSessionDB } from '../session/sqlite-session-db.js';
 import { ControlProtocolError, type InboxProjection, type ActivityProjection, type Page, type WorkProjection } from '../contracts/desktop-control/index.js';
-import { sessionActivity, sessionWork } from './work-projections.js';
-import type { SessionEvent, SessionMessage } from '../contracts/session.js';
+import { appendSessionEvents, sessionActivity, sessionWork } from './work-projections.js';
+import type { SessionMessage } from '../contracts/session.js';
 
 export type WorkState = { inbox?: InboxProjection[]; work: WorkProjection[]; activity: Record<string, ActivityProjection[]> };
 /** Materialized, bounded epoch. No open SQLite transaction or live executor survives capture. */
@@ -25,19 +26,26 @@ export async function captureWork(input: { homeDir: string; profileId: string; v
     // Refuse an oversized capture, rather than silently presenting incomplete Work as complete.
     const ids = sessions.db.query<{ id: string }>('select id from sessions where profile_id = ? order by updated_at desc, id limit 1001').all(input.profileId);
     if (ids.length > 1000) throw new ControlProtocolError('-32007');
+    let capturedBytes = 0;
     for (const { id } of ids) {
       signal.throwIfAborted();
       const session = await sessions.getSessionForProfile(id, input.profileId);
       if (!session || INTERNAL_SESSION_KINDS.includes(session.metadata?.kind as typeof INTERNAL_SESSION_KINDS[number])) continue;
-      const events = sessions.db.query<{ event_json: string }>('select event_json from session_events where session_id = ? order by rowid desc limit 1000').all(id)
-        .reverse().map((row) => JSON.parse(row.event_json) as SessionEvent);
+      const events = sessionDisplayEvents(sessions.db, id);
+      const latestUser = sessions.db.query<{ created_at: string }>("select created_at from messages where session_id=? and role='user' order by created_at desc, rowid desc limit 1").get(id);
+      const currentEvents = events.filter((event) => !latestUser || event.createdAt >= latestUser.created_at).map((event) => event.event);
       const active = sessions.db.query<{ active: number }>('select count(*) as active from session_execution_owners where session_id = ? and profile_id = ? and owner_id is not null and expires_at > ?').get(id, input.profileId, Date.now());
-      state.work.push(sessionWork(session, events, Boolean(active?.active)));
+      const work = sessionWork(session, currentEvents, Boolean(active?.active));
+      const queued = sessions.db.query<{ count: number }>("select count(*) as count from session_control_receipts where session_id=? and profile_id=? and method='send' and status in ('accepted','dispatched')").get(id, input.profileId);
+      if (!active?.active && queued?.count) work.status = 'queued';
+      else if (latestUser && work.status === 'draft') { work.status = 'needs_attention'; work.reason = 'No confirmed outcome is available for the latest turn.'; }
+      state.work.push(work);
       const messages = sessions.db.query<{ id: string; role: SessionMessage['role']; content: string; created_at: string }>(
         'select id, role, substr(content, 1, 16384) as content, created_at from messages where session_id = ? order by created_at, rowid limit 1001').all(id);
       if (messages.length > 1000) throw new ControlProtocolError('-32007');
-      state.activity[`session:${id}`] = sessionActivity(session, messages.map((m) => ({ ...m, sessionId: id, createdAt: m.created_at })));
-      if (Buffer.byteLength(JSON.stringify(state)) > 8 * 1024 * 1024) throw new ControlProtocolError('-32007');
+      state.activity[`session:${id}`] = appendSessionEvents(session, sessionActivity(session, messages.map((m) => ({ ...m, sessionId: id, createdAt: m.created_at }))), events);
+      capturedBytes += Buffer.byteLength(JSON.stringify(work)) + Buffer.byteLength(JSON.stringify(state.activity[`session:${id}`]));
+      if (capturedBytes > 8 * 1024 * 1024) throw new ControlProtocolError('-32007');
     }
     const taskCount = sessions.db.query<{ count: number }>('select count(*) as count from tasks where profile_id = ?').get(input.profileId);
     if ((taskCount?.count ?? 0) > 1000) throw new ControlProtocolError('-32007');

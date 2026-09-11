@@ -26,3 +26,24 @@ export function sessionActivity(session: SessionRecord, messages: readonly Sessi
     timestamp: timestamp(message.createdAt), kind: 'message', role: message.role === 'user' ? 'user' : 'assistant', text: safeText(message.content, 16_384),
   }));
 }
+export type DisplayEvent = { id: string; createdAt: string; event: SessionEvent };
+/** Only allowlisted display events enter this projection; raw tool inputs/results are never copied. */
+export function appendSessionEvents(session: SessionRecord, activity: ActivityProjection[], events: DisplayEvent[]): ActivityProjection[] {
+  for (const { id, createdAt, event } of events) {
+    const base = { id: `event:${id}`, workId: `session:${session.id}`, profileId: session.profileId, sequence: 0, timestamp: timestamp(createdAt) };
+    if (event.kind === 'tool-called' || event.kind === 'tool-result') activity.push({ ...base, kind: 'tool', name: safeText(event.tool, 160),
+      state: event.kind === 'tool-called' ? 'running' : event.result.ok ? 'completed' : 'failed',
+      summary: event.kind === 'tool-called' ? 'Tool started' : event.result.ok ? 'Tool completed' : 'Tool failed' });
+    else if ('plan' in event && event.kind.startsWith('execution-plan-') && 'items' in event.plan) activity.push({ ...base, kind: 'plan',
+      steps: event.plan.items.slice(0, 64).map((step) => ({ id: step.id, title: safeText(step.content, 240),
+        status: step.status === 'completed' ? 'completed' : step.status === 'in_progress' ? 'running' : 'pending' })) });
+    else if (event.kind === 'execution-final-outcome-recorded') {
+      const status = sessionWork(session, [event], false).status;
+      activity.push({ ...base, kind: 'result', status,
+        evidence: { state: status === 'failed' ? 'failed' : status === 'partial' ? 'partial' : 'unverified',
+          summary: 'Canonical execution outcome. Inspect evidence before relying on external effects.', artifactIds: [] },
+        usage: { reportedTokens: null, cost: null } });
+    } else if (event.kind === 'agent-cancelled') activity.push({ ...base, kind: 'status', status: 'cancelled', reason: 'Execution cancelled' });
+  }
+  return activity.sort((a, b) => a.timestamp - b.timestamp).map((item, sequence) => ({ ...item, sequence }));
+}

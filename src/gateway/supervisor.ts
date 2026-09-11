@@ -1,3 +1,4 @@
+import { ExecutionTargetStore } from '../workspaces/execution-target.js';
 import { desktopTaskControl } from './desktop-task-controls.js';
 import { selectedExecutionPolicy } from "../execution/docker-policy.js";
 import { recurringCronRuntimeOptions } from "../cron/cron-authority.js";
@@ -1849,7 +1850,16 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
         validateTarget: async (request) => {
           const session = await sessionDb.getSessionForProfile(request.sessionId, profileId);
           if (!session?.executionTarget || session.executionTarget.targetGeneration !== request.targetGeneration) throw new Error('Stale Session target.');
-          if (request.method === 'cancel' || request.method === 'task.cancel' || request.method === 'task.pause' ||
+          if (request.method.startsWith('task.')) {
+            const task = request.taskId ? taskStore.getTask(request.taskId) : null;
+            if (!task?.executionTarget || task.originSessionId !== request.sessionId || task.executionTarget.targetId !== request.targetId || task.executionTarget.targetGeneration !== request.targetGeneration) throw new Error('Task target changed.');
+            if (request.method === 'task.pause' || request.method === 'task.cancel') return;
+            const targets = new ExecutionTargetStore({ homeDir, profileId });
+            try { await targets.validate(task.executionTarget, task.executionTarget.workspace.canonicalPath); } finally { targets.close(); }
+            if (!await trustStore.isTrusted(task.executionTarget.workspace.canonicalPath)) throw new Error('Workspace trust required.');
+            return;
+          }
+          if (request.method === 'cancel'  || request.method === 'task.cancel' || request.method === 'task.pause' ||
             (request.method === 'approval' && request.decision === 'denied')) return;
           await validateSessionWorkspaceOwnership({ homeDir, profileId, session, workspaceRoot: session.executionTarget.workspace.canonicalPath });
           if (!await trustStore.isTrusted(session.executionTarget.workspace.canonicalPath)) throw new Error('Workspace trust required.');

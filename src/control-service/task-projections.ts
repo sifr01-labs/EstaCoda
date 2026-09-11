@@ -34,7 +34,7 @@ export function appendTaskWork(state: WorkState, store: TaskStore): void {
       status: step.status === 'completed' ? 'completed' : step.status === 'failed' ? 'failed' : step.status === 'running' ? 'running' : 'pending' })) }];
     for (const result of projection.results) activity.push({ ...base(), kind: 'result', status: work.status,
       evidence: { state: 'unverified', summary: safeText(result.displaySummary ?? result.summary ?? 'Result available'), artifactIds: [] },
-      usage: { reportedTokens: projection.usage.totalTokens ?? null, cost: null } });
+      usage: { reportedTokens: projection.usage.usageComplete ? projection.usage.totalTokens : null, cost: projection.usage.pricingComplete && projection.usage.usageComplete && projection.usage.providerCalls > 0 ? { amount: projection.usage.estimatedCostUsd, currency: 'USD' } : null } });
     state.activity[work.id] = activity;
     for (const attempt of store.listAttempts(task.id)) {
       const run = attemptWork(work, attempt); state.work.push(run);

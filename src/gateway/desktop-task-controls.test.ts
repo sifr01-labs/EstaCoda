@@ -32,3 +32,25 @@ it('uses core lifecycle and guidance while rejecting foreign Sessions and stale 
     expect(() => desktopTaskControl(store, request)).toThrow('settled');
   } finally { db.close(); await rm(root, { recursive: true, force: true }); }
 });
+it('allows durable Task controls after the originating Session ends without taking its execution lease', async () => {
+  const { SharedSessionHost } = await import('./shared-session-host.js');
+  const root = await mkdtemp('/tmp/ec-task-ended-'); const db = new SQLiteSessionDB({ path: join(root, 'sessions.sqlite') });
+  try {
+    await ensureRuntimeSession({ sessionDb: db, sessionId: 's', profileId: 'p', workspaceRoot: root, homeDir: root, durable: true });
+    const binding = (await db.getSession('s'))!.executionTarget!;
+    const store = new SQLiteTaskStore({ db: db.db, profileId: 'p' });
+    const created = new TaskOperatorService({ store }).begin({ objective: 'Continue independently', workspace: binding.workspace, creatorSessionId: 's' });
+    await db.endSession('s', 'operator-exit');
+    const receipts = new ControlReceipts(db.db, 'p', 'owner');
+    const host = new SharedSessionHost({ profileId: 'p', sessionDb: db, receipts, validateTarget: async () => undefined,
+      acquire: async () => { throw new Error('Must not acquire a Session runtime'); }, channelApproval: async () => undefined,
+      taskControl: (request) => desktopTaskControl(store, request) });
+    const request = { method: 'task.pause' as const, sessionId: 's', taskId: created.taskId, targetId: binding.targetId,
+      targetGeneration: binding.targetGeneration, operationId: createControlOperationId() };
+    expect(await host.handle(request)).toMatchObject({ status: 'accepted' });
+    while (host.hasPendingWork()) await new Promise((resolve) => setTimeout(resolve, 1));
+    expect(store.getTask(created.taskId)?.status).toBe('paused');
+    expect(receipts.inspect({ ...request, method: 'inspect' })).toMatchObject([{ status: 'completed' }]);
+    await host.close();
+  } finally { db.close(); await rm(root, { recursive: true, force: true }); }
+});

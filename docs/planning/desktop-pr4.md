@@ -104,3 +104,22 @@ an append event. Existing page tokens continue to refer to their original epoch.
 Validation: eleven focused projection, profile isolation, notification,
 subscription and bootstrap tests and clean-copy typecheck passed. The protocol
 capability expectation was updated for the lifecycle handlers now implemented.
+
+## 7. Grouping and status regression review
+
+Added semantic coverage for terminal outcomes, live ownership, Task waits,
+interrupted Attempts, child/independent Task grouping, new turns after success,
+and colliding cross-profile schedule IDs. Review corrected three edges: new
+turns no longer inherit prior completion, Task controls survive ended origin
+Sessions without taking a Session lease, and run projection requires a
+profile-owned Session rather than trusting a schedule identifier alone.
+
+Session activity now includes allowlisted tools, plans and canonical outcome
+records. SQL selects display fields rather than buffering raw tool payloads.
+Event histories are bounded at 1,000 display events per Session, with explicit
+snapshot-required on overflow. Missing usage/cost remains unavailable; priced
+Task totals come from canonical accounting. Capture byte accounting is linear,
+and repeated workspace trust checks are cached within one capture.
+
+Validation: 64 focused protocol/projection/Task-control tests passed; the prior
+expanded socket/process regression passed 98 tests. Clean-copy typecheck passed.

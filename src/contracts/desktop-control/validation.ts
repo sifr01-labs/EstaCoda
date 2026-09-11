@@ -54,6 +54,7 @@ const mutationMethods = ["tasks.pause", "tasks.resume", "tasks.cancel", "tasks.r
 const receiptShape = shape({ operationId: isControlOperationId, profileId: id, sessionId: id, target, method: choice(mutationMethods),
   state: choice(["accepted", "dispatched", "completed", "uncertain", "unknown", "expired"]), cancellation: choice(["not_requested", "requested", "confirmed"]) }, { taskId: id });
 const receipt: Check = (v) => receiptShape(v) && isRecord(v) &&
+  (String(v.method).startsWith("tasks.") ? id(v.taskId) : v.taskId === undefined) &&
   (v.method === "sessions.cancelTurn" || v.cancellation === "not_requested") &&
   (!["unknown", "expired"].includes(String(v.state)) || v.cancellation === "not_requested");
 const initializeResult = shape({ protocolVersion: isProtocolVersion, serviceVersion: (v) => typeof v === "string" && /^[A-Za-z0-9_.+-]{1,80}$/.test(v),
@@ -102,6 +103,8 @@ export function validateControlRequest(value: unknown, context: ControlContext |
   if (!Object.hasOwn(contracts, value.method)) throw new ControlProtocolError("-32601");
   const method = value.method as keyof MethodContracts;
   if (!contracts[method].params(value.params)) throw new ControlProtocolError("-32602");
+  if (method === "operations.inspect" && isRecord(value.params) &&
+    (String(value.params.method).startsWith("tasks.") ? !id(value.params.taskId) : value.params.taskId !== undefined)) throw new ControlProtocolError("-32602");
   if (method === "control.initialize") {
     if (context !== null) throw new ControlProtocolError("-32600");
   } else {

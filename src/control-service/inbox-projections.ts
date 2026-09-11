@@ -48,11 +48,15 @@ export async function appendInbox(state: WorkState, sessions: SQLiteSessionDB, i
     "select operation_id, session_id, accepted_at from session_control_receipts where profile_id=? and status='uncertain' order by accepted_at desc limit 1000").all(input.profileId);
   for (const row of uncertain) add(`uncertain:${row.operation_id}`, `session:${row.session_id}`, 'input', 'Review interrupted operation', 'The previous owner could not confirm this operation. Inspect its effects before retrying.', row.accepted_at);
   const trust = new WorkspaceTrustStore(input);
+  const trustByPath = new Map<string, boolean>();
   for (const work of state.work.filter((work) => work.kind === 'session')) {
     const session = await sessions.getSessionForProfile(work.canonicalId, input.profileId);
     if (session?.executionTarget) {
       let trusted = false;
-      try { trusted = await trust.isTrusted(session.executionTarget.workspace.canonicalPath); } catch { /* unavailable path */ }
+      try {
+        const path = session.executionTarget.workspace.canonicalPath;
+        trusted = trustByPath.get(path) ?? await trust.isTrusted(path); trustByPath.set(path, trusted);
+      } catch { /* unavailable path */ }
       if (!trusted) add(`trust:${session.id}`, work.id, 'trust', 'Workspace trust required', 'Review workspace trust before continuing execution.', work.updatedAt);
     }
     if (work.status === 'failed' || work.status === 'partial') add(`session-failure:${work.canonicalId}`, work.id, 'failure', 'Work needs review', 'Review the final outcome and evidence before continuing.', work.updatedAt);
@@ -68,7 +72,7 @@ function appendSchedules(state: WorkState, sessions: SQLiteSessionDB, profileId:
     if (job.lastStatus === 'failed') add(`schedule-failure:${job.id}`, workId, 'failure', 'Schedule failed', 'Review the latest schedule execution.', timestamp(job.updatedAt));
     if (!exists) continue;
     const rows = sessions.db.query<{ id: string; session_id: string | null; status: string; started_at: string; delivery_results_json: string | null }>(
-      'select id, session_id, status, started_at, delivery_results_json from cron_executions where job_id=? order by started_at desc limit 100').all(job.id);
+      'select id, session_id, status, started_at, delivery_results_json from cron_executions where job_id=? and session_id in (select id from sessions where profile_id=?) order by started_at desc limit 100').all(job.id, profileId);
     for (const row of rows) {
       const sessionWork = state.work.find((work) => work.id === `session:${row.session_id}`);
       const id = `schedule-run:${row.id}`;
