@@ -42,10 +42,16 @@ const approval = shape({ id, sessionId: id, target, actionSummary: text(2_048, 1
 const inboxShape = shape({ id, profileId: id, workId: nullable(id), kind: choice(["approval", "input", "trust", "setup", "failure", "evolution", "delivery"]),
   title: text(240, 1), summary: text(2_048), createdAt: integer(), approval: nullable(approval) }, { actions });
 const inbox: Check = (v) => inboxShape(v) && isRecord(v) && (v.kind === "approval" ? v.approval !== null && v.workId !== null : v.approval === null);
+const nonnegative: Check = (v) => typeof v === 'number' && Number.isFinite(v) && v >= 0;
+const modelCatalog = shape({configured:boolean,catalogOnly:boolean,contextTokens:nullable(integer()),outputTokens:nullable(integer()),tools:boolean,vision:boolean,
+  lifecycle:choice(['available','deprecated','retired']),source:choice(['models-dev','configured','manual','fallback-known']),
+  price:nullable(shape({inputPerMillion:nullable(nonnegative),outputPerMillion:nullable(nonnegative)}))});
 const modelShape = shape({ id: text(200, 1), providerId: id, label: text(240, 1), runnable: boolean,
-  credentialState: choice(["not_required", "missing", "present", "expired"]), role: nullable(choice(["primary", "fallback", "auxiliary", "session_override"])) });
-const model: Check = (v) => modelShape(v) && isRecord(v) && (!v.runnable || v.credentialState === "present" || v.credentialState === "not_required");
-const provider = shape({ id, label: text(240, 1), authMethods: unique(choice(["api_key", "oauth", "none"]), 3, 1), state: choice(["ready", "unconfigured", "repair_required", "unknown"]) });
+  credentialState: choice(["not_required", "missing", "present", "expired"]), role: nullable(choice(["primary", "fallback", "auxiliary", "session_override"])) }, {catalog:modelCatalog});
+const model: Check = (v) => modelShape(v) && isRecord(v) && (!v.runnable ||
+  ((v.credentialState === "present" || v.credentialState === "not_required") &&
+    (!isRecord(v.catalog) || (!v.catalog.catalogOnly && v.catalog.lifecycle !== 'retired'))));
+const provider = shape({ id, label: text(240, 1), authMethods: unique(choice(["api_key", "oauth", "none"]), 3, 1), state: choice(["ready", "unconfigured", "repair_required", "unknown"]) }, {metadata:shape({configurable:boolean,runnable:boolean,catalogOnly:boolean,apiMode:text(80,1),defaultEndpoint:nullable(text(2048,1))})});
 const connection = shape({ id, profileId: id, channel: choice(["telegram", "discord", "email", "whatsapp"]),
   configurationState: choice(["configured", "unconfigured", "repair_required"]), runtimeState: choice(["running", "stopped", "disconnected", "unknown"]),
   authorizationState: choice(["denied", "configured", "pairing_required", "unknown"]), summary: text(2_048) });

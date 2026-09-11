@@ -35,12 +35,19 @@ export type InboxProjection = {
   approval: { id: string; sessionId: string; target: TargetReference; actionSummary: string;
     scope: "once"; decisions: ("approved" | "denied")[] } | null;
 };
+export type ModelCatalogProjection = {
+  configured: boolean; catalogOnly: boolean; contextTokens: number | null; outputTokens: number | null;
+  tools: boolean; vision: boolean; lifecycle: "available" | "deprecated" | "retired";
+  source: "models-dev" | "configured" | "manual" | "fallback-known";
+  price: { inputPerMillion: number | null; outputPerMillion: number | null } | null;
+};
 export type ModelProjection = {
+  catalog?: ModelCatalogProjection;
   id: string; providerId: string; label: string; runnable: boolean;
   credentialState: "not_required" | "missing" | "present" | "expired";
   role: "primary" | "fallback" | "auxiliary" | "session_override" | null;
 };
-export type ProviderProjection = { id: string; label: string; authMethods: ("api_key" | "oauth" | "none")[];
+export type ProviderProjection = { metadata?: { configurable: boolean; runnable: boolean; catalogOnly: boolean; apiMode: string; defaultEndpoint: string | null }; id: string; label: string; authMethods: ("api_key" | "oauth" | "none")[];
   state: "ready" | "unconfigured" | "repair_required" | "unknown" };
 export type ConnectionProjection = {
   id: string; profileId: string; channel: "telegram" | "discord" | "email" | "whatsapp";

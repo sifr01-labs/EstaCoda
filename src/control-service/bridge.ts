@@ -1,3 +1,4 @@
+import {captureModelCatalog} from './model-catalog.js';
 import { WorkMonitor } from './work-monitor.js';
 import { sessionControl, type SessionMutationRequest } from './session-controls.js';
 import { captureWork, WorkSnapshot, type WorkState } from './work-snapshot.js';
@@ -14,6 +15,7 @@ export type BootstrapState = Pick<BootstrapResult, 'profile' | 'runtime'>;
 export class DesktopBridge {
   readonly server: StdioControlServer;
   readonly subscriptions: ControlSubscriptions;
+  #catalog: ReturnType<typeof captureModelCatalog> | undefined;
   #generation = 0;
   #work: WorkSnapshot | undefined;
   #workMonitor: WorkMonitor | undefined;
@@ -26,6 +28,14 @@ export class DesktopBridge {
     this.server = new StdioControlServer({ ...options, events: ['work.changed', 'activity.appended', 'attention.changed', 'control.ready', 'service.warning', 'service.shutdown'], handlers: {
       ...Object.fromEntries(['approvals.resolve', 'tasks.pause', 'tasks.resume', 'tasks.cancel', 'tasks.retry', 'tasks.guide', 'sessions.start', 'sessions.resume', 'sessions.send', 'sessions.cancelTurn', 'operations.inspect'].map((method) =>
         [method, async (request: SessionMutationRequest, signal: AbortSignal) => ({ result: await sessionControl(this.options, request, signal) })])),
+      'providers.list': async(request) => {
+        if(request.method!=='providers.list')throw new ControlProtocolError('-32601');
+        const catalog=await this.modelCatalog();return{result:catalog.pages.page('providers',catalog.providers,request.params)};
+      },
+      'models.list': async(request) => {
+        if(request.method!=='models.list')throw new ControlProtocolError('-32601');
+        const catalog=await this.modelCatalog();return{result:catalog.pages.page('models',catalog.models,request.params)};
+      },
       'inbox.list': (request) => {
         if (request.method !== 'inbox.list') throw new ControlProtocolError('-32601');
         const snapshot = this.workSnapshot();
@@ -56,7 +66,10 @@ export class DesktopBridge {
       },
     } });
     this.subscriptions = new ControlSubscriptions(this.server);
-    this.server.onDispose(() => { this.#capture?.abort(); this.#monitor?.dispose(); this.#workMonitor?.dispose(); this.#snapshot = undefined; this.#work = undefined; });
+    this.server.onDispose(() => { this.#capture?.abort(); this.#monitor?.dispose(); this.#workMonitor?.dispose(); this.#snapshot = undefined; this.#work = undefined; this.#catalog=undefined; });
+  }
+  private modelCatalog() {
+    return this.#catalog ??= captureModelCatalog(this.options).catch(error=>{this.#catalog=undefined;throw error;});
   }
   get snapshot(): BootstrapResult | undefined { return this.#snapshot ? structuredClone(this.#snapshot) : undefined; }
   async bootstrap(signal: AbortSignal): Promise<BootstrapResult> {
