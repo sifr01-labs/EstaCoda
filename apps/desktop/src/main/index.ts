@@ -1,3 +1,4 @@
+import{AppearanceSettings}from'./appearance-store.js';
 import { app, BrowserWindow } from 'electron';
 import path from 'node:path';
 import { Profiles } from './profiles.js';
@@ -27,7 +28,7 @@ async function openWindow(): Promise<void> {
   connection.on('invalidate', () => { credentials.close(); credentialPipe?.dispose(); credentialPipe = undefined; });
   const documentUrl = MAIN_WINDOW_VITE_DEV_SERVER_URL ? new URL(MAIN_WINDOW_VITE_DEV_SERVER_URL).href : pathToFileURL(path.join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`)).href;
   const profiles = new Profiles(app.getPath('home'));
-  const disposeIpc = installSemanticIpc(window, documentUrl, connection, profiles);
+  const disposeIpc = installSemanticIpc(window, documentUrl, connection, profiles, new AppearanceSettings(app.getPath('userData')));
   window.once('closed', () => { disposeIpc(); connection.close(); });
   connection.switchProfile(profiles.initial());
   window.once('ready-to-show', () => window.show());

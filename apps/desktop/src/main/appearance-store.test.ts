@@ -1,0 +1,3 @@
+import{mkdtempSync,rmSync}from'node:fs';import{tmpdir}from'node:os';import{join}from'node:path';
+import{expect,it}from'vitest';import{AppearanceSettings}from'./appearance-store.js';
+it('persists only bounded presentation settings',()=>{const dir=mkdtempSync(join(tmpdir(),'ec-appearance-'));try{const store=new AppearanceSettings(dir);expect(store.read()).toEqual({theme:'kemet',appearance:'system',density:'comfortable'});store.write({theme:'sand',appearance:'dark',density:'compact'});expect(store.read().theme).toBe('sand');expect(()=>store.write({theme:'sand',appearance:'dark',density:'compact',profileId:'other'})).toThrow();expect(store.read().density).toBe('compact');}finally{rmSync(dir,{recursive:true,force:true});}});

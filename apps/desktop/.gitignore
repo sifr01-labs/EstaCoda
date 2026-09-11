@@ -3,3 +3,5 @@ out/
 test-results/
 playwright-report/
 .runtime/
+
+.fixture/

@@ -1,3 +1,5 @@
+import{validAppearance}from'../shared/appearance.js';
+import type{AppearanceSettings}from'./appearance-store.js';
 import { ipcMain, type BrowserWindow } from 'electron';
 import { exactKeys, isControlId, isRecord } from '@estacoda/control-protocol';
 import type { DesktopSnapshot } from '../shared/desktop-api.js';
@@ -9,14 +11,14 @@ export function rendererSnapshot(state:ConnectionState):DesktopSnapshot {
 }
 export function validateSemanticPayload(method:string,payload:unknown):void {
   if(!isRecord(payload))throw new Error('Desktop request rejected.');
-  const valid=method==='activity'?exactKeys(payload,['workId'],['cursor'])&&isControlId(payload.workId)&&(payload.cursor===undefined||typeof payload.cursor==='string'&&payload.cursor.length<=2048)
+  const valid=method==='setAppearance'?validAppearance(payload):method==='activity'?exactKeys(payload,['workId'],['cursor'])&&isControlId(payload.workId)&&(payload.cursor===undefined||typeof payload.cursor==='string'&&payload.cursor.length<=2048)
     :method==='switchProfile'?exactKeys(payload,['id'])&&isControlId(payload.id):exactKeys(payload,[]);
   if(!valid)throw new Error('Desktop request rejected.');
 }
-export function installSemanticIpc(window:BrowserWindow,documentUrl:string,connection:DesktopConnection,profiles:Profiles):()=>void {
+export function installSemanticIpc(window:BrowserWindow,documentUrl:string,connection:DesktopConnection,profiles:Profiles,appearance:AppearanceSettings):()=>void {
   const authority=new WindowAuthority(window,documentUrl);
   const contents=window.webContents;
-  const methods=['snapshot','activity','profiles','switchProfile','minimize','toggleMaximize','close'];
+  const methods=['appearance','setAppearance','snapshot','activity','profiles','switchProfile','minimize','toggleMaximize','close'];
   const handlers:string[]=[];
   let connectionGeneration=connection.state.generation;
   const state=(value:ConnectionState)=>{if(value.generation!==connectionGeneration){authority.invalidate();connectionGeneration=value.generation;}if(!window.isDestroyed())contents.send('desktop:state',{generation:authority.generation,snapshot:rendererSnapshot(value)});};
@@ -29,6 +31,8 @@ export function installSemanticIpc(window:BrowserWindow,documentUrl:string,conne
       const payload=envelope.payload as Record<string,unknown>;
       const generation=authority.generation;
       try {
+        if(method==='appearance')return appearance.read();
+        if(method==='setAppearance'){appearance.write(payload);return;}
         if(method==='snapshot')return rendererSnapshot(connection.state);
         if(method==='profiles')return profiles.list();
         if(method==='switchProfile'){profiles.assertSelectable(payload.id);connection.switchProfile(payload.id);return;}

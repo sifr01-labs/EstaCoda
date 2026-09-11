@@ -31,3 +31,14 @@ writeFileSync(new URL('styles/components.css',output),'/* Consolidated approved 
 const masks=[...source.matchAll(/data:image\/svg\+xml;base64,([A-Za-z0-9+/=]+)/g)].map(m=>Buffer.from(m[1],'base64'));
 writeFileSync(new URL('assets/estacoda-eye.svg',output),masks[0]);
 writeFileSync(new URL('assets/estacoda-wordmark.svg',output),masks[1]);
+
+// Theme previews consume the same final palette values as the real surfaces.
+let previews='/* Theme previews derived from the approved palette, not separate swatches. */\n';
+for(const theme of ['kemet','graphite','sand']){
+ const palette=new Map();
+ tokens.walkRules(rule=>{if(rule.selector===`#ec-branded-workspace[data-theme="${theme}"]`)rule.walkDecls(decl=>palette.set(decl.prop,decl.value));});
+ let sidebar=palette.get('--ec-nav');
+ stylesheet.walkRules(rule=>{if(rule.selector===`#ec-branded-workspace[data-theme="${theme}"] .ec-sidebar`)rule.walkDecls('--ec-nav',decl=>sidebar=decl.value);});
+ previews+=`#ec-branded-workspace .ec-mini[data-theme-preview="${theme}"] {${[...palette].map(([key,value])=>key+':'+value+';').join('')}--ec-mini-bg:var(--ec-bg);--ec-mini-accent:var(--ec-accent);--ec-mini-nav:${sidebar};}\n`;
+}
+writeFileSync(new URL('styles/theme-previews.css',output),previews);
