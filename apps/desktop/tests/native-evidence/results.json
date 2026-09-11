@@ -1,0 +1,14 @@
+{
+  "platform": "darwin",
+  "arch": "arm64",
+  "electron": "44.3.0",
+  "checks": [
+    "Canonical existing Work and persisted activity loaded through real Main/preload/bridge.",
+    "No Node/credential/generic IPC API; arbitrary local-file fetch, navigation, popups, notifications and forged profile rejected.",
+    "Native 1280/736/360px resize and 200% zoom retain a reachable composer without horizontal overflow.",
+    "Synthetic credential stages over real fd3, input clears, reload closes its authority, ordinary renderer receives no credential or staging API.",
+    "Terminating the owned bridge reconnects automatically to the same supervisor.",
+    "Profile switch, quit/relaunch, reconnect and supervisor restart preserve canonical ownership; no dispatch or global pointer mutation.",
+    "Incompatible existing host stays inspectable and cannot be replaced or dispatched by Desktop."
+  ]
+}

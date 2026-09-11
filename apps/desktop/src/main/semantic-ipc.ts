@@ -49,7 +49,7 @@ export function installSemanticIpc(window:BrowserWindow,documentUrl:string,conne
   // Used only by sandboxed preload to obtain its first Main-owned binding.
   ipcMain.handle('desktop:bind',event=>{authority.assertSender(event,authority.generation);return{generation:authority.generation,snapshot:rendererSnapshot(connection.state)};});
   let loaded=false;
-  const navigation=()=>{if(loaded){authority.invalidate();connection.close();}};
+  const navigation=(_event:unknown,url:string,isInPlace:boolean,isMainFrame:boolean)=>{if(loaded&&isMainFrame&&!isInPlace&&url===documentUrl){authority.invalidate();connection.close();}};
   const finished=()=>{if(loaded)connection.switchProfile(connection.state.profileId);loaded=true;};
   contents.on('did-start-navigation',navigation);contents.on('did-finish-load',finished);
   return()=>{authority.invalidate();connection.off('state',state);for(const channel of [...handlers,'desktop:bind'])ipcMain.removeHandler(channel);contents.off('did-start-navigation',navigation).off('did-finish-load',finished);};

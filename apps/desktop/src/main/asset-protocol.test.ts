@@ -1,0 +1,6 @@
+import{mkdtempSync,mkdirSync,writeFileSync,symlinkSync,rmSync}from'node:fs';import{join}from'node:path';import{expect,it,vi}from'vitest';
+vi.mock('electron',()=>({net:{},protocol:{}}));
+import{assetManifest,assetUrl}from'./asset-protocol.js';
+it('serves only fixed host build assets and rejects foreign paths, schemes and symlinks',()=>{
+ const root=mkdtempSync('/tmp/ec-assets-');try{mkdirSync(join(root,'assets'));writeFileSync(join(root,'index.html'),'app');writeFileSync(join(root,'assets/app.js'),'app');symlinkSync('/etc/passwd',join(root,'assets/escape.js'));const files=assetManifest(root,'app');expect(assetUrl('estacoda://app/assets/app.js','app',files)).toMatch(/\/assets\/app.js$/);for(const url of ['file:///etc/passwd','estacoda://credential/credential.html','estacoda://app/assets/escape.js','estacoda://app/../../etc/passwd','estacoda://app/assets/%2e%2e%2fprivate','estacoda://user@app/index.html','estacoda://app/index.html?path=/etc/passwd'])expect(assetUrl(url,'app',files)).toBeUndefined();}finally{rmSync(root,{recursive:true,force:true});}
+});

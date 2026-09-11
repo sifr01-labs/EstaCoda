@@ -8,6 +8,8 @@ import { execFileSync } from 'node:child_process';
 const root = resolve(import.meta.dirname, '../../..');
 const output = resolve(import.meta.dirname, '../.runtime');
 const packageJson = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+// Packaging must never silently reuse a distribution from an older checkout.
+execFileSync(process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm', ['run', 'build'], {cwd:root,stdio:'inherit'});
 if (!readFileSync(join(root, 'dist/index.js'), 'utf8').includes('desktop-service')) throw new Error('Build the core distribution first.');
 rmSync(output, { recursive: true, force: true }); mkdirSync(output, { recursive: true });
 const executable = join(output, process.platform === 'win32' ? 'node.exe' : 'node');

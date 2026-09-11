@@ -32,7 +32,7 @@ export class DesktopConnection extends EventEmitter {
       await client.request('control.initialize', { profileId: this.state.profileId, clientVersion: '0.0.0', protocolVersion: DESKTOP_PROTOCOL_VERSION,
         capabilities: { methods: ['control.bootstrap','control.subscribe','control.unsubscribe','work.list','work.get','work.activity','inbox.list'], events: [...CONTROL_EVENTS] } });
       if (generation !== this.state.generation) return;
-      await this.refresh(); this.#attempt = 0;
+      await this.refresh(); if(client===this.#client&&this.state.status==='ready')this.#attempt = 0;
     } catch (error) {
       if (generation !== this.state.generation) return;
       if (error && typeof error === 'object' && 'code' in error && error.code === '-32001') this.lost('incompatible');

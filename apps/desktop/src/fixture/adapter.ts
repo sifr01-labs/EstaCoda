@@ -18,6 +18,6 @@ export function fixtureAdapter():DesktopAdapter {
   else if(action==='stop'&&fixture.phase==='running'){clearTimeout(timer);fixture.phase='stopping';changed();timer=setTimeout(()=>{fixture.phase='stopped';changed();},1100);}
  };
  fixture.addRoute=(provider,model)=>{fixture.addedRoute={provider,model};changed();};
- const api:DesktopAdapter['api']={reconnect:async()=>{},moreWork:async()=>{},moreInbox:async()=>{},snapshot:async()=>snapshot(),onSnapshot:listener=>{listeners.add(listener);listener(snapshot());return()=>{listeners.delete(listener);};},activity:async()=>({items:[],nextCursor:null}),profiles:async()=>[{id:'personal',label:'Personal'}],switchProfile:async()=>{},appearance:async()=>({...preferences}),setAppearance:async value=>{preferences={...value};},minimize:async()=>{},toggleMaximize:async()=>{},close:async()=>{}};
+ const api:DesktopAdapter['api']={platform:'darwin',reconnect:async()=>{},moreWork:async()=>{},moreInbox:async()=>{},snapshot:async()=>snapshot(),onSnapshot:listener=>{listeners.add(listener);listener(snapshot());return()=>{listeners.delete(listener);};},activity:async()=>({items:[],nextCursor:null}),profiles:async()=>[{id:'personal',label:'Personal'}],switchProfile:async()=>{},appearance:async()=>({...preferences}),setAppearance:async value=>{preferences={...value};},minimize:async()=>{},toggleMaximize:async()=>{},close:async()=>{}};
  return{kind:'fixture',api,fixture,appearance:{read:api.appearance,write:api.setAppearance}};
 }

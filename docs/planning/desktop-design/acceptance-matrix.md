@@ -1,6 +1,6 @@
 # Desktop PR 5 acceptance matrix
 
-Status: required checks; implementation evidence pending. See the [contract](../desktop-visual-contract.md) and [approved reference](README.md). No rows below are claims that production tests already pass.
+Status: PR5 checks implemented and verified on macOS arm64. See the [implementation record](../desktop-pr5.md), [visual evidence](../../../apps/desktop/tests/visual-evidence/README.md), and [native evidence](../../../apps/desktop/tests/native-evidence/README.md). The rows below retain their original acceptance criteria. Fixture results do not claim later live integrations are complete. The [contract](../desktop-visual-contract.md) and [approved reference](README.md) remain authoritative.
 
 ## Capture setup
 

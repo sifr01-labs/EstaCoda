@@ -18,3 +18,5 @@ html,body,#root{margin:0;min-width:0;min-height:100%;}body{background:#131313}bu
 #ec-branded-workspace .ec-production-notice p{margin:6px 0;overflow-wrap:anywhere}
 #ec-branded-workspace .ec-production-notice code{user-select:text;overflow-wrap:anywhere}
 #ec-branded-workspace .ec-profile-select{max-width:100%;min-width:0}
+
+#ec-branded-workspace .ec-lights .ec-native-traffic-space{width:48px;background:transparent;pointer-events:none}

@@ -1,3 +1,4 @@
+import{installAssetProtocol}from'./asset-protocol.js';
 import { BrowserWindow, ipcMain } from 'electron';
 import { randomUUID } from 'node:crypto';
 import { WindowAuthority, denySessionPermissions, lockWindow, securePreferences } from './window-policy.js';
@@ -7,7 +8,7 @@ import { CredentialPipeClient, type CredentialScope } from './credential-pipe-cl
 export class CredentialWindow {
   #window: BrowserWindow | null = null;
   #cleanup: (() => void) | null = null;
-  constructor(readonly owner: BrowserWindow, readonly preload: string, readonly url: string, readonly packaged: boolean) {}
+  constructor(readonly owner: BrowserWindow, readonly preload: string, readonly url: string, readonly packaged: boolean, readonly assetRoot: string) {}
   open(pipe: CredentialPipeClient, binding: Omit<CredentialScope,'windowId'>, accepted: (candidateId: string) => void): void {
     this.close();
     const window = new BrowserWindow({parent:this.owner,modal:true,width:460,height:350,resizable:false,show:false,
@@ -31,8 +32,13 @@ export class CredentialWindow {
       void pipe.closeWindow(scope.windowId,scope.generation).catch(()=>{});
     };
     window.once('closed',()=>{if(this.#window===window){this.#cleanup?.();this.#cleanup=null;this.#window=null;}});
+    // A reload must discard staged candidates before a fresh document can submit.
+    let loaded=false;
+    window.webContents.on('did-start-navigation',()=>{if(loaded)this.close();});
+    window.webContents.once('did-finish-load',()=>{loaded=true;});
     window.once('ready-to-show',()=>window.show());
-    void window.loadURL(this.url).catch(()=>this.close());
+    const prepared=this.url.startsWith('estacoda:')?installAssetProtocol(window.webContents.session,'credential',this.assetRoot):Promise.resolve();
+    void prepared.then(()=>window.loadURL(this.url)).catch(()=>this.close());
   }
   close():void {this.#cleanup?.();this.#cleanup=null;const window=this.#window;this.#window=null;if(window&&!window.isDestroyed())window.destroy();}
 }

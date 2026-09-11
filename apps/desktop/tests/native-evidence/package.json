@@ -1,0 +1,23 @@
+{
+  "platform": "darwin",
+  "arch": "arm64",
+  "archiveEntries": 18,
+  "fixtureExcluded": true,
+  "csp": true,
+  "signature": "Strict deep verification of the relocated data-and-symlink copy; excludes File Provider FinderInfo metadata",
+  "fuses": {
+    "0": 48,
+    "1": 49,
+    "2": 48,
+    "3": 48,
+    "4": 49,
+    "5": 49,
+    "6": 48,
+    "7": 48,
+    "8": 49,
+    "version": "1"
+  },
+  "packagedIconSha256": "c54413caef18487454132f549eb57bd90642459f674b0c0bfb18797c9ec2eee3",
+  "relocatedLaunch": "unchanged hardened app; space and Arabic path; owned Node bridge observed",
+  "inspection": "Canonical UI/IPC tests run the same bundles with the development Electron binary so Playwright can attach; production fuses remain enforced."
+}

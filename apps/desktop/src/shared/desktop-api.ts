@@ -6,6 +6,7 @@ export type DesktopSnapshot = { status: 'connecting' | 'ready' | 'disconnected' 
   work:Page<WorkProjection>;inbox:Page<InboxProjection> };
 export type ProfileChoice = {id:string;label:string};
 export type DesktopApi = {
+  readonly platform:string;
   appearance():Promise<AppearancePreferences>;
   setAppearance(value:AppearancePreferences):Promise<void>;
   reconnect():Promise<void>;
