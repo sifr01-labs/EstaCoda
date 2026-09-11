@@ -9,3 +9,5 @@ The frozen visual contract and acceptance matrix govern this implementation. Pro
 ## Risk and scope
 
 Electron Main, preloads, process launching and credential staging are trust boundaries. Renderer-visible capability hints never authorize execution. Signing, notarization and updates remain PR16.
+
+2. Window policy: sandbox, context isolation, Node/webview/permission/navigation/download denial, production DevTools disabled, hardened fuses, exact top-frame/document/window/generation authority. Reviewed fail-closed sender checks; two unit tests, Desktop typecheck and hardened Forge package pass.

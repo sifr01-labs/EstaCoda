@@ -1,9 +1,11 @@
 const { VitePlugin } = require('@electron-forge/plugin-vite');
+const { FusesPlugin } = require('@electron-forge/plugin-fuses');
+const { FuseVersion, FuseV1Options } = require('@electron/fuses');
 module.exports = {
   packagerConfig: { asar: true, name: 'EstaCoda', executableName: 'EstaCoda', appBundleId: 'com.estacoda.desktop', prune: false },
   rebuildConfig: { onlyModules: [] },
   makers: [],
-  plugins: [new VitePlugin({ build: [
+  plugins: [new FusesPlugin({ version: FuseVersion.V1, [FuseV1Options.RunAsNode]: false, [FuseV1Options.EnableCookieEncryption]: true, [FuseV1Options.EnableNodeOptionsEnvironmentVariable]: false, [FuseV1Options.EnableNodeCliInspectArguments]: false, [FuseV1Options.EnableEmbeddedAsarIntegrityValidation]: true, [FuseV1Options.OnlyLoadAppFromAsar]: true }), new VitePlugin({ build: [
     { entry: 'src/main/index.ts', config: 'vite.main.config.ts', target: 'main' },
     { entry: 'src/preload/index.ts', config: 'vite.preload.config.ts', target: 'preload' },
   ], renderer: [{ name: 'main_window', config: 'vite.renderer.config.ts' }] })],
