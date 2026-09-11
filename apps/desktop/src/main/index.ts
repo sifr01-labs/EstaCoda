@@ -1,10 +1,16 @@
 import { app, BrowserWindow } from 'electron';
 import path from 'node:path';
+import { pathToFileURL } from 'node:url';
+import { CredentialWindow } from './credential-window.js';
+import { CredentialPipeClient } from './credential-pipe-client.js';
+import type { Duplex } from 'node:stream';
 import { DesktopConnection } from './connection.js';
 import { ServiceProcess } from './service-process.js';
 import { denySessionPermissions, lockWindow, securePreferences } from './window-policy.js';
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string | undefined;
 declare const MAIN_WINDOW_VITE_NAME: string;
+declare const CREDENTIAL_WINDOW_VITE_DEV_SERVER_URL: string | undefined;
+declare const CREDENTIAL_WINDOW_VITE_NAME: string;
 async function openWindow(): Promise<void> {
   const window = new BrowserWindow({ width: 1280, height: 860, minWidth: 320, minHeight: 480, show: false,
     webPreferences: securePreferences(path.join(__dirname, 'preload.cjs'), app.isPackaged) });
@@ -12,6 +18,11 @@ async function openWindow(): Promise<void> {
   lockWindow(window);
   const runtimeRoot = app.isPackaged ? path.join(process.resourcesPath, '.runtime') : path.join(app.getAppPath(), '.runtime');
   const connection = new DesktopConnection(new ServiceProcess(runtimeRoot, app.getPath('home')));
+  const credentialUrl = CREDENTIAL_WINDOW_VITE_DEV_SERVER_URL ? new URL('credential.html', CREDENTIAL_WINDOW_VITE_DEV_SERVER_URL).href : pathToFileURL(path.join(__dirname, `../renderer/${CREDENTIAL_WINDOW_VITE_NAME}/credential.html`)).href;
+  const credentials = new CredentialWindow(window, path.join(__dirname, 'credential-preload.cjs'), credentialUrl, app.isPackaged);
+  let credentialPipe: CredentialPipeClient | undefined;
+  connection.on('credentials', (pipe: Duplex) => { credentialPipe?.dispose(); credentialPipe = new CredentialPipeClient(pipe); });
+  connection.on('invalidate', () => { credentials.close(); credentialPipe?.dispose(); credentialPipe = undefined; });
   window.once('closed', () => connection.close());
   connection.switchProfile('default');
   window.once('ready-to-show', () => window.show());
