@@ -6,6 +6,7 @@ export type WorkDisplayStatus = typeof WORK_STATUSES[number];
 export type WorkProjection = {
   id: string; canonicalId: string; profileId: string;
   kind: "session" | "task" | "scheduled_execution" | "evolution_review";
+  parentWorkId?: string;
   title: string; status: WorkDisplayStatus; reason?: string; updatedAt: number;
   target: TargetProjection | null;
 };

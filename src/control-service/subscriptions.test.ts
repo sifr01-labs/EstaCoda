@@ -7,6 +7,7 @@ async function fixture() {
   const input = new PassThrough(), output = new PassThrough(); const messages: any[] = [];
   output.on('data', (chunk) => { messages.push(JSON.parse(String(chunk))); });
   const bridge = new DesktopBridge({ input, output, homeDir: '/unused', profileId: 'p', version: 'test',
+    readWork: async () => ({ work: [], activity: {} }),
     readState: async () => ({ profile: { id: 'p', label: 'P', configuration: 'unconfigured' }, runtime: { state: 'stopped' } }) });
   const send = async (id: string, method: string, params: unknown) => { input.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n'); await setImmediate(); return messages.find((message) => message.id === id); };
   await send('init', 'control.initialize', { protocolVersion: { major: 1, minor: 0 }, clientVersion: 'test', profileId: 'p', capabilities: { methods: [...CONTROL_METHODS], events: [...CONTROL_EVENTS] } });

@@ -34,6 +34,7 @@ it('captures one immutable profile snapshot and invalidates overlapping bootstra
   const input = new PassThrough(), output = new PassThrough(); output.resume();
   const pending: ((value: BootstrapState) => void)[] = [];
   const bridge = new DesktopBridge({ input, output, homeDir: '/unused', profileId: 'p', version: 'test',
+    readWork: async () => ({ work: [], activity: {} }),
     readState: () => new Promise((resolve) => { pending.push(resolve); }) });
   const state: BootstrapState = { profile: { id: 'p', label: 'P', configuration: 'unconfigured' }, runtime: { state: 'stopped' } };
   input.write(JSON.stringify({ jsonrpc: '2.0', id: 'init', method: 'control.initialize', params: { protocolVersion: { major: 1, minor: 0 }, clientVersion: 'test', profileId: 'p', capabilities: { methods: [...CONTROL_METHODS], events: [] } } }) + '\n');

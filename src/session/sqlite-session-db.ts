@@ -172,12 +172,12 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
   readonly #id: () => string;
   readonly #path: string;
 
-  constructor(options: { path: string; db?: SQLiteDatabase; now?: () => Date; id?: () => string }) {
+  constructor(options: { path: string; db?: SQLiteDatabase; readonly?: boolean; now?: () => Date; id?: () => string }) {
     this.#path = options.path;
-    this.#db = executionFencedDatabase(options.db ?? openDefaultSQLiteDatabase({ path: options.path }));
+    this.#db = executionFencedDatabase(options.db ?? openDefaultSQLiteDatabase({ path: options.path, readonly: options.readonly }));
     this.#now = options.now ?? (() => new Date());
     this.#id = options.id ?? (() => crypto.randomUUID());
-    this.#migrate();
+    if (!options.readonly) this.#migrate();
   }
 
   get db(): SQLiteDatabase {

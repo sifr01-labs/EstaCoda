@@ -21,7 +21,7 @@ const capabilities = shape({ methods: unique(choice(CONTROL_METHODS)), events: u
 const target = shape({ targetId: id, targetGeneration: integer(1) });
 const targetProjection = shape({ targetId: id, targetGeneration: integer(1), label: text(240, 1), isolation: choice(["host", "sandboxed", "unknown"]) });
 const work = shape({ id, canonicalId: id, profileId: id, kind: choice(["session", "task", "scheduled_execution", "evolution_review"]),
-  title: text(240, 1), status: choice(WORK_STATUSES), updatedAt: integer(), target: nullable(targetProjection) }, { reason: text(2_048) });
+  title: text(240, 1), status: choice(WORK_STATUSES), updatedAt: integer(), target: nullable(targetProjection) }, { reason: text(2_048), parentWorkId: id });
 const usage = shape({ reportedTokens: nullable(integer()), cost: nullable(shape({ amount: (v) => typeof v === "number" && Number.isFinite(v) && v >= 0,
   currency: (v) => typeof v === "string" && /^[A-Z]{3}$/.test(v) })) });
 const evidence = shape({ state: choice(["verified", "unverified", "partial", "failed"]), summary: text(2_048), artifactIds: unique(id, 100) });
