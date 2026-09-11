@@ -8,6 +8,9 @@ export type ProfileChoice = {id:string;label:string};
 export type DesktopApi = {
   appearance():Promise<AppearancePreferences>;
   setAppearance(value:AppearancePreferences):Promise<void>;
+  reconnect():Promise<void>;
+  moreWork():Promise<void>;
+  moreInbox():Promise<void>;
   snapshot():Promise<DesktopSnapshot>;
   onSnapshot(listener:(snapshot:DesktopSnapshot)=>void):()=>void;
   activity(workId:string,cursor?:string):Promise<Page<ActivityProjection>>;

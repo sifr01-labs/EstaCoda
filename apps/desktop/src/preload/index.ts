@@ -12,6 +12,7 @@ const ready=ipcRenderer.invoke('desktop:bind').then((binding:{generation:number;
 });
 const invoke=async(method:string,payload:Record<string,unknown>={})=>{await ready;return ipcRenderer.invoke('desktop:'+method,{generation,payload});};
 const api:DesktopApi={
+  reconnect:()=>invoke('reconnect'),moreWork:()=>invoke('moreWork'),moreInbox:()=>invoke('moreInbox'),
   appearance:()=>invoke('appearance'),setAppearance:value=>invoke('setAppearance',value),
   snapshot:async()=>{await ready;return snapshot;},
   onSnapshot:listener=>{listeners.add(listener);void ready.then(()=>{if(listeners.has(listener))listener(snapshot);});return()=>{listeners.delete(listener);};},

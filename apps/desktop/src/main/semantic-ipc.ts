@@ -18,7 +18,7 @@ export function validateSemanticPayload(method:string,payload:unknown):void {
 export function installSemanticIpc(window:BrowserWindow,documentUrl:string,connection:DesktopConnection,profiles:Profiles,appearance:AppearanceSettings):()=>void {
   const authority=new WindowAuthority(window,documentUrl);
   const contents=window.webContents;
-  const methods=['appearance','setAppearance','snapshot','activity','profiles','switchProfile','minimize','toggleMaximize','close'];
+  const methods=['reconnect','moreWork','moreInbox','appearance','setAppearance','snapshot','activity','profiles','switchProfile','minimize','toggleMaximize','close'];
   const handlers:string[]=[];
   let connectionGeneration=connection.state.generation;
   const state=(value:ConnectionState)=>{if(value.generation!==connectionGeneration){authority.invalidate();connectionGeneration=value.generation;}if(!window.isDestroyed())contents.send('desktop:state',{generation:authority.generation,snapshot:rendererSnapshot(value)});};
@@ -31,6 +31,8 @@ export function installSemanticIpc(window:BrowserWindow,documentUrl:string,conne
       const payload=envelope.payload as Record<string,unknown>;
       const generation=authority.generation;
       try {
+        if(method==='reconnect'){connection.switchProfile(connection.state.profileId);return;}
+        if(method==='moreWork'||method==='moreInbox'){await connection.more(method==='moreWork'?'work':'inbox');authority.assertSender(event,generation);return;}
         if(method==='appearance')return appearance.read();
         if(method==='setAppearance'){appearance.write(payload);return;}
         if(method==='snapshot')return rendererSnapshot(connection.state);

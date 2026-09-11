@@ -1,0 +1,11 @@
+import type{DesktopSnapshot}from'../../shared/desktop-api.js';import{Topline,Button,Icon}from'./primitives.js';
+export function RecoveryView({snapshot,retry}:{snapshot:DesktopSnapshot;retry:()=>void}){
+ const copy={connecting:['Connecting to your runtime','Loading this profile’s canonical Work and attention items.'],disconnected:['Connection interrupted','Reconnecting to the runtime. Work continues under its existing execution owner.'],unavailable:['Profile inspection unavailable','The runtime could not inspect this profile. Retry, or use the CLI to check profile compatibility and repair the installation.'],incompatible:['Runtime update required','This app and the control service use incompatible protocol versions. Update the installation before reconnecting.'],ready:['Ready','Your profile is connected.']}[snapshot.status];
+ return <><Topline label="Runtime" profile={snapshot.profile.label}/><div className="ec-page"><div className="ec-empty" role="status"><Icon name={snapshot.status==='connecting'?'loader-circle':'circle-alert'}/><h1>{copy[0]}</h1><p>{copy[1]}</p>{snapshot.status!=='connecting'&&<div className="ec-actions" style={{justifyContent:'center'}}><Button onClick={retry}>Reconnect</Button></div>}</div></div></>;
+}
+export function SetupNotice({snapshot}:{snapshot:DesktopSnapshot}){
+ if(snapshot.status!=='ready')return null;
+ const configuration=snapshot.profile.configuration;
+ if(configuration==='ready'&&snapshot.runtime!=='incompatible')return null;
+ return <div className="ec-production-notice" role="status"><Icon name="circle-alert"/><div><b>{snapshot.runtime==='incompatible'?'Execution host update required':configuration==='repair_required'?'Profile needs repair':'Set up your profile'}</b><p>{snapshot.runtime==='incompatible'?'The existing host is incompatible. Existing Work remains inspectable; no second execution host is started.':configuration==='repair_required'?'Repair this selected profile with the CLI setup editor. Existing Work remains available for inspection.':'This profile has no configured model route. Use CLI setup for now; desktop provider setup is not available in this version.'}</p>{configuration!=='ready'&&<code>estacoda --profile {snapshot.profile.id} setup</code>}</div></div>;
+}

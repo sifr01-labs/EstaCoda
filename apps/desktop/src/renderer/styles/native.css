@@ -14,3 +14,7 @@ html,body,#root{margin:0;min-width:0;min-height:100%;}body{background:#131313}bu
 @media(max-width:590px){#ec-branded-workspace .ec-window[data-native=true] .ec-layout{grid-template-rows:auto minmax(0,1fr)}#ec-branded-workspace .ec-window[data-native=true] .ec-sidebar{overflow:visible}#ec-branded-workspace .ec-window[data-native=true] .ec-newwelcome{padding-top:20px}}
 #ec-branded-workspace .ec-modalback{overflow:auto}
 #ec-branded-workspace .ec-modal{flex-shrink:0;overflow-wrap:anywhere}
+#ec-branded-workspace .ec-production-notice{display:flex;gap:10px;margin:14px 24px;padding:14px;border:1px solid var(--ec-line);border-radius:8px;font-size:12px;background:var(--ec-warning-bg);color:var(--ec-warning)}
+#ec-branded-workspace .ec-production-notice p{margin:6px 0;overflow-wrap:anywhere}
+#ec-branded-workspace .ec-production-notice code{user-select:text;overflow-wrap:anywhere}
+#ec-branded-workspace .ec-profile-select{max-width:100%;min-width:0}

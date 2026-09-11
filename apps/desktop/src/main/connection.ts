@@ -47,14 +47,49 @@ export class DesktopConnection extends EventEmitter {
       do {
         this.#refreshAgain = false;
         const bootstrap = await client.request('control.bootstrap', {});
-        const [work, inbox] = await Promise.all([client.request('work.list', {limit:100}), client.request('inbox.list', {limit:100})]);
+        // Rebuild the inspected extent with fresh cursors; never append stale pages.
+        const [work, inbox] = await Promise.all([
+          this.readWork(client, Math.max(100, this.state.work.items.length)),
+          this.readInbox(client, Math.max(100, this.state.inbox.items.length)),
+        ]);
         const sub = await client.request('control.subscribe', {after:bootstrap.cursor, events:client.context!.capabilities.events});
         if (client !== this.#client) return;
         if (sub.state !== 'subscribed') throw new Error();
         this.state = {...this.state, status:'ready', bootstrap, work, inbox}; this.publish();
       } while (this.#refreshAgain && client === this.#client);
-    } catch { if (client === this.#client) this.lost(); }
+    } catch { if (client === this.#client) this.lost('unavailable'); }
     finally { this.#refreshing = false; if (this.#refreshAgain && !this.#stopped) { this.#refreshAgain = false; void this.refresh(); } }
+  }
+  private async readWork(client: ProtocolClient, count: number): Promise<Page<WorkProjection>> {
+    const result = await client.request('work.list', {limit: 100});
+    while (result.nextCursor && result.items.length < Math.min(count, 2000)) {
+      const page = await client.request('work.list', {limit: 100, cursor: result.nextCursor});
+      result.items.push(...page.items); result.nextCursor = page.nextCursor;
+    }
+    return result;
+  }
+  private async readInbox(client: ProtocolClient, count: number): Promise<Page<InboxProjection>> {
+    const result = await client.request('inbox.list', {limit: 100});
+    while (result.nextCursor && result.items.length < Math.min(count, 2000)) {
+      const page = await client.request('inbox.list', {limit: 100, cursor: result.nextCursor});
+      result.items.push(...page.items); result.nextCursor = page.nextCursor;
+    }
+    return result;
+  }
+  async more(kind:'work'|'inbox'):Promise<void> {
+    const client=this.#client, previous=this.state, cursor=this.state[kind].nextCursor;
+    if(!client||this.state.status!=='ready'||!cursor||this.#refreshing)throw new Error('Snapshot unavailable.');
+    if(this.state[kind].items.length>=2000)throw new Error('Inspection limit reached.');
+    if(kind==='work'){
+      const page=await client.request('work.list',{limit:100,cursor});
+      if(client!==this.#client||this.state!==previous)throw new Error('Snapshot changed.');
+      this.state={...this.state,work:{items:[...previous.work.items,...page.items],nextCursor:page.nextCursor}};
+    }else{
+      const page=await client.request('inbox.list',{limit:100,cursor});
+      if(client!==this.#client||this.state!==previous)throw new Error('Snapshot changed.');
+      this.state={...this.state,inbox:{items:[...previous.inbox.items,...page.items],nextCursor:page.nextCursor}};
+    }
+    this.publish();
   }
   async activity(workId: string, cursor?: string): Promise<Page<ActivityProjection>> {
     const client = this.#client, generation = this.state.generation;
