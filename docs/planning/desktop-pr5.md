@@ -11,3 +11,5 @@ The frozen visual contract and acceptance matrix govern this implementation. Pro
 Electron Main, preloads, process launching and credential staging are trust boundaries. Renderer-visible capability hints never authorize execution. Signing, notarization and updates remain PR16.
 
 2. Window policy: sandbox, context isolation, Node/webview/permission/navigation/download denial, production DevTools disabled, hardened fuses, exact top-frame/document/window/generation authority. Reviewed fail-closed sender checks; two unit tests, Desktop typecheck and hardened Forge package pass.
+
+3. Service ownership: stage a relocatable standalone Node/core dependency closure, verify SQLite's Node ABI and executable/entry digests, spawn with fixed arguments and a minimal environment, isolate credential descriptor 3, and detach only the owned bridge. Profile validation preserves core identifier syntax. Desktop typecheck/four tests and initialization through the staged real bridge in a temporary profile pass. The checkout's stale dist was rebuilt from tracked sources in the clean validation copy; staging now rejects distributions without the private command.
