@@ -1850,10 +1850,12 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
         validateTarget: async (request) => {
           const session = await sessionDb.getSessionForProfile(request.sessionId, profileId);
           if (!session?.executionTarget || session.executionTarget.targetGeneration !== request.targetGeneration) throw new Error('Stale Session target.');
-          if (request.method.startsWith('task.')) {
-            const task = request.taskId ? taskStore.getTask(request.taskId) : null;
+          const pendingTask = request.method === 'approval' ? taskApprovalService.listPendingForSession(request.sessionId).find((approval) => approval.approvalId === request.approvalId) : undefined;
+          if (request.method.startsWith('task.') || pendingTask) {
+            const taskId = request.taskId ?? pendingTask?.taskId;
+            const task = taskId ? taskStore.getTask(taskId) : null;
             if (!task?.executionTarget || task.originSessionId !== request.sessionId || task.executionTarget.targetId !== request.targetId || task.executionTarget.targetGeneration !== request.targetGeneration) throw new Error('Task target changed.');
-            if (request.method === 'task.pause' || request.method === 'task.cancel') return;
+            if (request.method === 'task.pause' || request.method === 'task.cancel' || (pendingTask && request.decision === 'denied')) return;
             const targets = new ExecutionTargetStore({ homeDir, profileId });
             try { await targets.validate(task.executionTarget, task.executionTarget.workspace.canonicalPath); } finally { targets.close(); }
             if (!await trustStore.isTrusted(task.executionTarget.workspace.canonicalPath)) throw new Error('Workspace trust required.');

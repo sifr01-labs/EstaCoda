@@ -30,11 +30,15 @@ export class SharedSessionHost {
   async validate(request: PrivateControlRequest, allowEnded = false): Promise<void> {
     if (this.#closed) throw new Error("Shared host is draining.");
     const session = await this.options.sessionDb.getSessionForProfile(request.sessionId, this.options.profileId);
+    const durableApproval = request.method === 'approval' && request.targetGeneration !== undefined && !allowEnded
+      ? await this.options.approvalQueue?.getApproval(request.approvalId!, { profileId: this.options.profileId, sessionId: request.sessionId }) : undefined;
+    if (request.method === 'approval' && request.targetGeneration !== undefined && !allowEnded &&
+      (!durableApproval || durableApproval.status !== 'pending' || durableApproval.expiresAt.getTime() <= Date.now())) throw new Error('Approval is not pending in this Session.');
     if (request.targetGeneration !== undefined && request.method !== "inspect" && !allowEnded) {
       if (session?.executionTarget?.targetGeneration !== request.targetGeneration || !this.options.validateTarget) throw new Error("Shared Session target generation does not match.");
       await this.options.validateTarget(request);
     }
-    if (!session || (session.endedAt && !allowEnded && !request.method.startsWith("task.")) || session.executionTarget?.targetId !== request.targetId) throw new Error("Shared Session target does not match.");
+    if (!session || (session.endedAt && !allowEnded && !request.method.startsWith("task.") && durableApproval?.approvalKind !== "task") || session.executionTarget?.targetId !== request.targetId) throw new Error("Shared Session target does not match.");
   }
   async handle(request: PrivateControlRequest): Promise<unknown> {
     const receipts = this.options.receipts;

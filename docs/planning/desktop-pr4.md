@@ -1,6 +1,6 @@
 # Desktop PR 4 implementation record
 
-Branch: `ame/desktop-foundation`. Eight planned slices; implementation in progress.
+Branch: `ame/desktop-foundation`. All eight planned slices implemented and reviewed.
 
 ## 1. Session Work projections
 
@@ -123,3 +123,56 @@ and repeated workspace trust checks are cached within one capture.
 
 Validation: 64 focused protocol/projection/Task-control tests passed; the prior
 expanded socket/process regression passed 98 tests. Clean-copy typecheck passed.
+
+## 8. Approval rejection and process lifecycle proof
+
+A real Node Desktop child process starts a Session, sends to a shared fake runtime,
+disconnects at its durable approval, and reconnects through a new process. The
+new client reconstructs Inbox, rejects forged IDs, wrong Sessions and stale
+generations, approves once, and inspects/retries the original operation without
+redispatch. Additional queue tests reject cross-profile/cross-session resolutions,
+hardline requests, stale-generation rows and expiry.
+
+Review tightened pre-acceptance checks for Desktop approval references. An exact
+previously accepted operation remains inspectable; a new operation cannot claim
+an already consumed approval. Durable Task approvals, like Task lifecycle
+controls, can be resolved after their origin Session ends while retaining Task
+scope and target checks. Ordinary Session controls keep their ownership checks.
+
+## Final validation
+
+Validated the exact executable source in an isolated clean copy, excluding the
+operator checkout's pre-existing untracked duplicates. No dependency or lockfile
+change was needed. Node v24.14.1; pnpm 10.33.0.
+
+- `desktop:foundation:check`: both workspace typechecks and pure import boundary passed.
+- `validate:execution-release`: complete host/Docker wrapper passed.
+- Frozen install, root typecheck and conformance inventory check passed.
+- Full suite: **10,783 tests / 652 files passed** (two workers).
+- Source smoke and dist smoke: all 13 cases passed in each run.
+- Build, runtime-import audit and ESM audit passed.
+- Execution budget fixture gate passed with PR0 call/token ceilings preserved.
+- Source and dist Docker parity, containment, cancellation, copy/apply/rollback,
+  CLI/channel/recurring execution, ownership and missing-image refusal passed.
+- Docker image build/validation passed.
+- Executable source comparison against the validated copy had zero mismatches;
+  final patch hygiene passed.
+
+The first wrapper attempt inherited Git location variables into temporary-repo
+tests, and one Bun interoperability test timed out under full parallelism. The
+harness was corrected to use its own Git metadata and two workers; the working
+repository location/commit identity were restored before rerunning. The final
+complete wrapper above passed without changing product behavior for those failures.
+
+## Limits and risk note
+
+This is the Desktop backend foundation, not the signed Electron delivery gate.
+The process test uses a fake provider/runtime; it proves transport, durable state,
+ownership and control behavior without live provider calls. Persisted activity is
+polled every five seconds; token streaming is not claimed. Snapshot size/history
+bounds above remain explicit alpha limits and do not certify large-profile scaling.
+
+Security-sensitive changes are confined to canonical projection reads, trusted
+supervisor controls, receipt identity and the existing approval queue. Hardline,
+trust, profile isolation, once-only grants and owner-held continuations remain
+mandatory. PR5 still owns Electron isolation and the approved visual contract.

@@ -34,9 +34,33 @@ it('keeps a durable exact-target approval across client reconnection and resumes
     // A fresh reader represents a restarted Desktop client; the owner remains independent.
     const reconnected = new GatewayApprovalQueue({ db: db.db, controller: new WorkspaceApprovalController() });
     expect((await reconnected.listPending({ profileId: 'p' }))[0]?.id).toBe(pending!.id);
+    await expect(queue.resolveApproval(pending!.id, 'approved', 'forged', { profileId: 'q', sessionId: 's' })).rejects.toThrow();
+    await expect(queue.resolveApproval(pending!.id, 'approved', 'forged', { profileId: 'p', sessionId: 'other-session' })).rejects.toThrow();
+    expect(grantApproval).not.toHaveBeenCalled();
     await host.handle({ ...base, method: 'approval', approvalId: pending!.id, decision: 'approved' });
     await expect(host.handle({ ...base, method: 'approval', approvalId: pending!.id, decision: 'approved' })).rejects.toThrow();
     await turn; expect(decision).toBe('approved'); expect(grantApproval).toHaveBeenCalledOnce();
     expect(await queue.listPending({ profileId: 'p' })).toEqual([]);
   } finally { await host?.close(); db.close(); await rm(root, { recursive: true, force: true }); }
+});
+
+it('refuses hardline Desktop requests and expired or stale-generation queue resolutions', async () => {
+  const root = await mkdtemp('/tmp/ec-desktop-approval-floor-'); const db = new SQLiteSessionDB({ path: join(root, 'sessions.sqlite') });
+  try {
+    await ensureRuntimeSession({ sessionDb: db, sessionId: 's', profileId: 'p', workspaceRoot: root, homeDir: root, durable: true });
+    const target = (await db.getSession('s'))!.executionTarget!;
+    const queue = new GatewayApprovalQueue({ db: db.db, controller: new WorkspaceApprovalController() });
+    const request = { profileId: 'p', sessionId: 's', channel: 'desktop' as const, toolName: 'terminal.run', commandPreview: 'Read workspace', commandHash: 'a'.repeat(64),
+      requestedAt: new Date(), expiresAt: new Date(Date.now() + 60_000),
+      desktopBinding: { targetId: target.targetId, targetGeneration: target.targetGeneration, riskClass: 'read-only-local' as const },
+      executionApproval: { schemaVersion: 1 as const, id: 'action', actionKey: 'a'.repeat(64), authorizationRevision: 0, expiresAt: Date.now() + 60_000,
+        executionScope: { schemaVersion: 1 as const, profileId: 'p', sessionId: 's', workspaceIdentityHash: target.workspace.identityHash, authorityFingerprint: 'b'.repeat(64), environmentInstanceId: 'env', surfaceKey: 'local' } } };
+    const hardline = await queue.createPendingApproval({ ...request, commandPayload: 'rm -rf /' });
+    expect(hardline.status).toBe('denied'); expect(await queue.listPending({ profileId: 'p' })).toEqual([]);
+    await expect(queue.createPendingApproval({ ...request, desktopBinding: { ...request.desktopBinding, targetGeneration: 99 } })).rejects.toThrow('binding');
+    const expired = await queue.createPendingApproval(request);
+    db.db.query("update pending_approvals set expires_at='2000-01-01T00:00:00.000Z' where id=?").run(expired.id);
+    await expect(queue.resolveApproval(expired.id, 'approved', 'desktop', { profileId: 'p', sessionId: 's' })).rejects.toThrow();
+    expect(await queue.listPending({ profileId: 'p' })).toEqual([]);
+  } finally { db.close(); await rm(root, { recursive: true, force: true }); }
 });

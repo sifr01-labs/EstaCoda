@@ -2,11 +2,13 @@
 
 Status: implementation plan with approved Desktop visual direction, version 1 · 10 September 2026. PR 5 now includes the complete approved interface and visual acceptance gate; production integrations remain sequenced below. Planned capabilities are not claims of shipped functionality.
 
-Desktop PR 1 is implemented as an architecture and shared-package foundation; see the [implementation record and validation](desktop-pr1.md). The Electron app, bridge, and visual implementation remain later PRs.
+Desktop PR 1 is implemented as an architecture and shared-package foundation; see the [implementation record and validation](desktop-pr1.md). The Electron app and visual implementation remain PR 5; the bridge is described below.
 
 Desktop PR 2 adds the pure control protocol and conformance suite; see its [implementation record](desktop-pr2.md) for exact coverage and validation. A declared method remains unavailable until its service handler and authority checks are implemented.
 
-Desktop PR 3 implements the private control bridge and isolated credential staging; see its [implementation record](desktop-pr3.md) and [service reference](../architecture/desktop/control-service.md). Work/mutation handlers and trusted target-generation enforcement remain PR 4 delivery gates.
+Desktop PR 3 implements the private control bridge and isolated credential staging; see its [implementation record](desktop-pr3.md) and [service reference](../architecture/desktop/control-service.md). Its initial read-only boundary is extended by PR 4 below.
+
+Desktop PR 4 implements canonical Work/Inbox projections, Session/Task lifecycle controls and durable Desktop approvals with supervisor generation fencing; see its [implementation and validation record](desktop-pr4.md).
 
 The [Desktop visual and interaction contract](desktop-visual-contract.md), [frozen branded prototype](desktop-design/README.md), and [acceptance matrix](desktop-design/acceptance-matrix.md) are required inputs to PR 5 and subsequent UI work. They supersede earlier visual concepts. PR numbers in this document refer to Desktop, not the workspace-execution series.
 

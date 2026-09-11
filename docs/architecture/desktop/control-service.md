@@ -1,6 +1,6 @@
 # Desktop control service
 
-Status: implemented in Desktop PR 3. This is a private Node bridge and read-only runtime status surface. Electron Main/preload/windows remain PR 5; Session/Task/approval projections and execution controls remain PR 4. See the [protocol](control-protocol.md), [ownership decisions](../../planning/workspace-execution-ownership-decisions.md) and [implementation record](../../planning/desktop-pr3.md).
+Status: implemented in Desktop PRs 3–4. The private Node bridge exposes canonical Work/Inbox projections and supervisor-owned execution controls. Electron Main/preload/windows remain PR 5. See the [protocol](control-protocol.md), [ownership decisions](../../planning/workspace-execution-ownership-decisions.md) and [bridge record](../../planning/desktop-pr3.md) and [Work/approval record](../../planning/desktop-pr4.md).
 
 ## Launch and ownership
 
@@ -10,17 +10,24 @@ Credential-capable Main adds `--credential-fd=3` and supplies a separate duplex 
 
 The bridge probes the existing supervisor through its private discovery and authenticated socket transport. The additive `{ probe: true }` handshake is handled only after token/instance/version validation, never by the Session executor. It returns identity and explicit readiness/generation capability metadata. Legacy `send`, `cancel`, `approval` and `inspect` request semantics are unchanged. Old hosts that cannot answer the probe require a compatible restart; Desktop never starts a competing host to repair compatibility.
 
-Readiness is an observation, not execution ownership. A failed connection or a missing endpoint with a remaining ownership record reports disconnected; it does not prove Work stopped. There is no service install/start/stop action in this slice. Closing a bridge disposes its own input, output, observer, subscriptions and credential candidates without stopping the supervisor.
+Readiness is an observation, not execution ownership. A failed connection or a missing endpoint with a remaining ownership record reports disconnected; it does not prove Work stopped. There is no service install/enable action. Execution mutations reuse core on-demand startup, including installed-service ownership checks. Bootstrap itself does not start a host. Closing a bridge disposes its own input, output, observer, subscriptions and credential candidates without stopping the supervisor.
 
 ## Available methods and snapshots
 
-Advertised methods are `control.initialize`, `control.bootstrap`, `control.subscribe`, `control.unsubscribe`, and `control.cancelRequest`, intersected with the client's request. Events are `control.ready`, `service.warning`, and `service.shutdown`. No Work, mutation, model, connection or credential method is advertised merely because its schema exists.
+Implemented handlers, intersected with the client's requested capabilities, are:
 
-Bootstrap reads the selected profile through core's `configurationInspection` mode: a regular, non-symlink config file, at most 1 MiB, bounded on the same opened descriptor, without loading profile `.env` values into the bridge environment or emitting raw configuration warnings. Normal CLI/runtime config loading remains unchanged. The profile label is the selected profile ID. Configuration `ready` means core can normalize a configured model route; it does **not** certify credentials, provider availability, workspace trust or task readiness. Richer diagnostics belong to PRs 4/6.
+- `control.initialize/bootstrap/subscribe/unsubscribe/cancelRequest`.
+- `work.list/get/activity` and `inbox.list`.
+- `sessions.start/resume/send/cancelTurn` and `operations.inspect`.
+- `tasks.pause/resume/cancel/retry/guide` and `approvals.resolve`.
 
-Each completed bootstrap retains one immutable snapshot with its own stream cursor. A newer bootstrap invalidates older subscriptions, pending capture and snapshot. Old asynchronous captures cannot overwrite a successor. Work pagination is not implemented yet; PR 4 must bind its initial paged projections to this snapshot epoch rather than independently reading mutable pages under an old cursor.
+Events are `control.ready`, `work.changed`, `activity.appended`, `attention.changed`, `service.warning`, and `service.shutdown`. Model/provider/connection and ordinary credential methods remain unavailable until their handlers ship. Session start requires an existing canonical target reference; target creation/selection extensions remain PR 9.
 
-After bootstrap, a single observer polls status every five seconds, with cancellation and a two-second supervisor-probe timeout. It emits fixed resync/configuration-change guidance on changes. It never forwards raw config, provider errors, tool arguments or host bodies. A new snapshot supplies updated state. `control.ready` identifies the bridge stream, not a running agent. There is no second agent loop or scheduler.
+Bootstrap reads the selected profile through core's `configurationInspection` mode: a regular, non-symlink config file, at most 1 MiB, bounded on the same opened descriptor, without loading profile `.env` values into the bridge environment or emitting raw configuration warnings. Normal CLI/runtime config loading remains unchanged. The profile label is the selected profile ID. Configuration `ready` means core can normalize a configured model route; it does **not** certify credentials, provider availability, workspace trust or task readiness. Inbox separately reports missing credentials, authorization expiry, trust and supervisor problems. Active provider verification belongs to PR 6.
+
+Each completed bootstrap retains one immutable snapshot with its own stream cursor. A newer bootstrap invalidates older subscriptions, pending capture and snapshot. Old asynchronous captures cannot overwrite a successor. Work/Inbox pagination uses opaque tokens bound to this bridge, snapshot epoch, query and page size. Snapshot pages remain immutable while events describe later changes; consumers must merge by canonical identity and resnapshot on gaps or history rewrites.
+
+After bootstrap, runtime status and canonical Work observers poll every five seconds without overlapping their own reads. Supervisor probes time out after two seconds. Work/attention changes and new persisted activity enter the bounded journal; rewrites and removals require resync. This is persisted activity polling, not token streaming. Raw config, provider errors, tool arguments/results and host bodies are not forwarded. `control.ready` identifies the bridge stream, not a running agent. There is no second agent loop or scheduler.
 
 ## Bounds, cancellation and reconnect
 
@@ -31,7 +38,7 @@ After bootstrap, a single observer polls status every five seconds, with cancell
 - Replay retains at most 256 events / 1 MiB and 32 subscriptions. One ordered pump per subscription serves replay and live notifications, yielding after 16 events. The acknowledgement precedes replay. Event coverage must equal the negotiated stream's event set.
 - Expired, future or replaced cursors require a snapshot. Unsubscribe and pre-ack cancellation remove their reservation. If a slow consumer falls behind retention or exceeds output bounds, the connection closes and the client must initialize/bootstrap again. No best-effort stream becomes a durable mutation queue.
 
-A bridge restart creates a new instance and rejects old cursors/candidates. Reuse the original core-generated operation ID when inspecting uncertain mutations; do not blindly replay under a new ID. PR 4 must implement trusted target-generation checks and receipt binding before advertising mutations: the current host explicitly reports `targetGeneration: false`.
+A bridge restart creates a new instance and rejects old cursors/candidates. Reuse the original core-generated operation ID when inspecting uncertain mutations; do not blindly replay under a new ID. Desktop requires explicit supervisor `targetGeneration: true` before dispatch. The host validates the selected target generation, and canonical receipt identity includes it. Older hosts are refused; generationless CLI requests retain their existing behavior.
 
 ## Credential descriptor
 
@@ -51,4 +58,27 @@ Replies contain opaque IDs or fixed errors, never values. No ordinary RPC creden
 
 Tests exercise real Node child processes and inherited descriptor 3, authenticated temporary supervisor endpoints, multiple same-profile bridges, another profile, bridge and host replacement, stale cursors/candidates, immutable snapshots, UTF-8/frame limits, replay ordering/eviction, cancellation and slow output. Canary credentials are absent from ordinary output and candidate acknowledgements, and active-profile selection remains unchanged.
 
-The lifecycle harness uses a fake execution handler behind the real private endpoint. It proves bridge ownership/isolation and does not claim live provider execution, signed Electron behavior, OS credential-window isolation or target-generation enforcement. PRs 4–6 and the packaged release gates retain those obligations.
+The PR 4 lifecycle harness runs real Desktop CLI child processes against the authenticated private endpoint and a fake runtime owned by SharedSessionHost. It covers start/send, disconnect/reopen at approval, forged resolutions and receipt reconciliation without redispatch. Core tests cover generation binding, queue expiry/hardline policy, profile isolation, ended Task origins and status/grouping. These tests do not claim live provider execution, signed Electron behavior or OS credential-window isolation.
+
+## Work and approval policy
+
+Work is a projection of Sessions, Tasks, attempts and profile-owned schedules;
+there is no second lifecycle database. SQLite capture is read-only and does not
+migrate state. The alpha snapshot refuses more than 1,000 Sessions or Tasks,
+1,000 messages or display events per Session, or 8 MiB of projected state. Pages
+are capped at 100 items and 96,000 serialized item bytes, with up to 4,096 opaque
+continuations per snapshot. Large-profile incremental capture is a future
+extension; overflow requires recovery rather than a silently incomplete list.
+
+Completion comes from canonical outcome records. A new user turn cannot inherit
+an older completion. Queued, active, blocked, partial, failed and cancelled states
+remain distinct; completion and result availability do not prove external effects.
+Display text is redacted and bounded. Unavailable usage/cost is null.
+
+Desktop approvals use GatewayApprovalQueue. Pending action authority, tool/risk,
+profile, Session and target generation remain backend-bound. The runtime grants
+once after queue resolution and revalidates immediately before continuation.
+Desktop exposes no reusable approval grants. Task approvals use TaskApprovalService;
+channel continuations stay in ChannelGateway. App exit leaves the owner running.
+Supervisor restart expires orphaned Desktop waits rather than replaying an action.
+Stop/deny and durable Task controls preserve their core lifecycle semantics.

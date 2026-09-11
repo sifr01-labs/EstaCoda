@@ -112,3 +112,20 @@ The owner binds operation ID to profile, trusted principal, method and exact can
 `failureEnvelope` produces fixed messages from `CONTROL_ERRORS`. Standard codes cover malformed JSON/envelope, unavailable method, invalid parameters and internal failure. Application codes `-32001` through `-32010` cover version, initialization, scope, stale binding, operation conflict, unavailable service, snapshot required, uncertain outcome, limit and cancellation respectively. Error bodies accept no arbitrary message, stack or data field; raw exceptions must never be interpolated. An uncorrelated null-ID parse error is a transport diagnostic, not completion of an outstanding request.
 
 PR 2 tests cover every declared method/event through the Desktop package, malformed/ambiguous inputs, field/byte/depth limits, safe errors, profile/request/target correlation, negotiation, subscription scope and cursor continuity. They are not live authority, durable receipt, byte-stream, backpressure or packaged lifecycle proofs. PRs 3–5 must enforce those obligations and rerun both core and protocol conformance suites. No migration or host wire-version change is part of this protocol addition.
+
+## PR 4 service extensions
+
+The same pure protocol now declares Session start/resume and Task
+pause/resume/cancel/retry/guide. Task receipts additionally bind the Task ID;
+inspection requires it for Task methods. Guidance is bounded to 4,000 characters
+and retries may select a Step ID. Work adds optional `parentWorkId` and explicit
+`task_attempt`/`schedule` kinds. These are canonical display identities, never
+execution authority.
+
+The bridge implements epoch-bound pagination and persisted Work/Inbox events.
+Generation-aware requests use the existing authenticated supervisor transport;
+its capability probe explicitly promises target-generation enforcement. Receipt
+payload identity persists that generation alongside Task/Step/guidance fields
+where relevant. See [the service reference](control-service.md) for current
+handlers, limits and read-only projection behavior. The pure facade still imports
+no Node/Electron APIs.
