@@ -1,5 +1,5 @@
 import { ControlSubscriptions } from './subscriptions.js';
-import { RuntimeStateMonitor, type RuntimeNotification } from './runtime-notifications.js';
+import { RuntimeStateMonitor } from './runtime-notifications.js';
 import { randomUUID } from 'node:crypto';
 import type { Readable, Writable } from 'node:stream';
 import { ControlProtocolError, type BootstrapResult, type ControlCursor } from '../contracts/desktop-control/index.js';
@@ -16,7 +16,7 @@ export class DesktopBridge {
   #capture: AbortController | undefined;
   #snapshot: BootstrapResult | undefined;
   constructor(readonly options: { input: Readable; output: Writable; homeDir: string; profileId: string; version: string;
-    readState?: (signal: AbortSignal) => Promise<BootstrapState>; onNotification?: (event: RuntimeNotification) => void }) {
+    readState?: (signal: AbortSignal) => Promise<BootstrapState> }) {
     this.server = new StdioControlServer({ ...options, events: ['control.ready', 'service.warning', 'service.shutdown'], handlers: {
       'control.bootstrap': async (_request, signal) => ({ result: await this.bootstrap(signal) }),
       'control.subscribe': (request, signal) => {
@@ -50,7 +50,7 @@ export class DesktopBridge {
     this.subscriptions.reset(cursor);
     this.subscriptions.publish({ type: 'control.ready', payload: { state: 'ready' } });
     this.#monitor = new RuntimeStateMonitor(state, (signal) => this.options.readState ? this.options.readState(signal) : this.readState(signal),
-      (event) => { if (generation === this.#generation && !this.server.closed) { this.subscriptions.publish(event); this.options.onNotification?.(event); } });
+      (event) => { if (generation === this.#generation && !this.server.closed) { this.subscriptions.publish(event); } });
     return structuredClone(this.#snapshot);
   }
   close(): void {

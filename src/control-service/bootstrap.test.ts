@@ -3,7 +3,7 @@ import { setImmediate } from 'node:timers/promises';
 import { mkdtemp, mkdir, writeFile, readdir, rm, symlink } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { resolveProfileStateHome } from '../config/profile-home.js';
 import { profileConfiguration } from './bootstrap.js';
 import { DesktopBridge, type BootstrapState } from './bridge.js';
@@ -12,16 +12,23 @@ it('loads selected-profile configuration read-only and reports missing, broken a
   const homeDir = await mkdtemp(join(tmpdir(), 'desktop-bootstrap-'));
   const input = { homeDir, profileId: 'p' };
   const paths = resolveProfileStateHome(input);
+  vi.stubEnv('DESKTOP_INSPECTION_SECRET', undefined);
+  const warnings = vi.spyOn(console, 'warn').mockImplementation(() => {});
   try {
     expect(await profileConfiguration(input)).toBe('unconfigured'); expect(await readdir(homeDir)).toEqual([]);
     await mkdir(paths.profileRoot, { recursive: true });
     await writeFile(paths.configPath, '{'); expect(await profileConfiguration(input)).toBe('repair_required');
-    await writeFile(paths.configPath, JSON.stringify({ model: { provider: 'local', id: 'test' } }));
+    await writeFile(paths.configPath, JSON.stringify({ model: { provider: 'local', id: 'test' }, channels: { telegram: { busyPolicy: 'config-warning-canary' } } }));
+    await writeFile(paths.envPath, 'DESKTOP_INSPECTION_SECRET=credential-canary\n');
     expect(await profileConfiguration(input)).toBe('ready');
+    expect(process.env.DESKTOP_INSPECTION_SECRET).toBeUndefined(); expect(warnings).not.toHaveBeenCalled();
+    expect(await readdir(join(homeDir, '.estacoda'))).toEqual(['profiles']);
+    await writeFile(paths.configPath, ' '.repeat(1_048_577)); expect(await profileConfiguration(input)).toBe('repair_required');
+    await writeFile(paths.configPath, '[]'); expect(await profileConfiguration(input)).toBe('repair_required');
     expect(await profileConfiguration({ ...input, profileId: 'other' })).toBe('unconfigured');
     await rm(paths.configPath); await symlink(join(homeDir, 'foreign.json'), paths.configPath);
     expect(await profileConfiguration(input)).toBe('repair_required');
-  } finally { await rm(homeDir, { recursive: true, force: true }); }
+  } finally { warnings.mockRestore(); vi.unstubAllEnvs(); await rm(homeDir, { recursive: true, force: true }); }
 });
 it('captures one immutable profile snapshot and invalidates overlapping bootstrap epochs', async () => {
   const input = new PassThrough(), output = new PassThrough(); output.resume();

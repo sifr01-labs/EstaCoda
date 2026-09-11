@@ -1,4 +1,4 @@
-import { chmod, mkdir, mkdtemp, rm } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { expect, it, vi } from 'vitest';
@@ -29,4 +29,14 @@ it('reports a missing supervisor without creating state', async () => {
   const homeDir = await mkdtemp(join(tmpdir(), 'desktop-probe-'));
   try { expect(await supervisorReadiness({ homeDir, profileId: 'p', version: 'test' })).toEqual({ state: 'stopped' }); }
   finally { await rm(homeDir, { recursive: true, force: true }); }
+});
+
+it('does not label a missing endpoint as stopped when an ownership record remains', async () => {
+  const homeDir = await mkdtemp(join(tmpdir(), 'desktop-lock-'));
+  const directory = resolveProfileStateHome({ homeDir, profileId: 'p' }).gatewayStatePath;
+  try {
+    await mkdir(directory, { recursive: true, mode: 0o700 });
+    await writeFile(join(directory, 'gateway.lock'), JSON.stringify({ pid: process.pid, startedAt: new Date().toISOString() }));
+    expect(await supervisorReadiness({ homeDir, profileId: 'p', version: 'test' })).toEqual({ state: 'disconnected' });
+  } finally { await rm(homeDir, { recursive: true, force: true }); }
 });

@@ -1,6 +1,6 @@
 # Desktop control protocol v1.0
 
-Status: pure contracts, framing helpers, validators and conformance tests implemented in Desktop PR 2. There is no running Desktop service, byte-stream reader, subscription store or executor in this slice. PR 3 implements those consumers. [Process decisions](decisions.md) and [shared ownership](../../planning/workspace-execution-ownership-decisions.md) remain authoritative.
+Status: pure contracts, framing helpers, validators and conformance tests implemented in Desktop PR 2. PR 3 implements the [private service, byte-stream reader and bounded subscriptions](control-service.md). Execution/projection handlers remain later consumer work. [Process decisions](decisions.md) and [shared ownership](../../planning/workspace-execution-ownership-decisions.md) remain authoritative.
 
 Source: [Desktop control modules](../../../src/contracts/desktop-control/index.ts), exposed through the private `@estacoda/control-protocol` package and Desktop's source facade. These modules have no Node/Electron runtime imports. Core's legacy private-host contract, authentication, framing and exports are unchanged.
 

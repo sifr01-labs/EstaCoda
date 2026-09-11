@@ -39,8 +39,9 @@ async function main(): Promise<void> {
   const initialArgv = rawArgv[0] === "--" ? rawArgv.slice(1) : rawArgv;
   const parsedGlobalOptions = parseGlobalCliOptions(initialArgv);
   if (!parsedGlobalOptions.ok) {
-    console.error(parsedGlobalOptions.error);
-    process.exit(1);
+    const privateService = initialArgv.includes("desktop-service");
+    console.error(privateService ? "Invalid Desktop service arguments." : parsedGlobalOptions.error);
+    process.exit(privateService ? 2 : 1);
   }
   let argv = parsedGlobalOptions.argv;
   const continueLastSession = parsedGlobalOptions.continueSession === true;

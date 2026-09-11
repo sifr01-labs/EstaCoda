@@ -19,7 +19,7 @@ export class StdioControlServer {
   readonly profileId: string;
   readonly done: Promise<void>;
   readonly #handlers: ControlHandlers;
-  readonly #pending = new Map<string, { controller: AbortController; timer: ReturnType<typeof setTimeout> }>();
+  readonly #pending = new Map<string, { controller: AbortController; timer: ReturnType<typeof setTimeout>; mutation: boolean }>();
   readonly #frames: string[] = [];
   #queuedBytes = 0;
   #blocked = false;
@@ -35,12 +35,13 @@ export class StdioControlServer {
   }) {
     this.profileId = normalizeProfileId(options.profileId);
     if (!isControlId(this.profileId)) throw new Error('Invalid Desktop profile.');
-    this.#handlers = { ...options.handlers };
+    this.#handlers = Object.fromEntries(Object.entries(options.handlers ?? {}).filter(([, handler]) => typeof handler === 'function'));
     this.done = new Promise((resolve) => { this.#finish = resolve; });
     this.#lines = new BoundedLines(CONTROL_LIMITS.frameBytes, (frame) => this.receive(frame), () => this.fault());
     options.input.on('data', this.onData);
     options.input.on('end', this.onEnd);
     options.input.on('error', this.onError);
+    options.input.on('close', this.onError);
     options.output.on('error', this.onError);
     options.output.on('close', this.onError);
     options.output.on('drain', this.onDrain);
@@ -89,11 +90,12 @@ export class StdioControlServer {
       return;
     }
     const controller = new AbortController();
+    const mutation = 'operationId' in request.params && request.method !== 'operations.inspect';
     const timer = setTimeout(() => {
       controller.abort();
-      this.write(failureEnvelope(request.id, '-32010'));
+      this.write(failureEnvelope(request.id, mutation ? '-32008' : '-32010'));
     }, this.options.requestTimeoutMs ?? 30_000);
-    this.#pending.set(request.id, { controller, timer });
+    this.#pending.set(request.id, { controller, timer, mutation });
     if (request.method === 'control.initialize') this.#initializing = true;
     void this.dispatch(request, controller.signal).then((reply) => {
       if (controller.signal.aborted || this.#closed) return;
@@ -107,7 +109,7 @@ export class StdioControlServer {
         try { reply.afterReply?.(); } catch { this.close(true); }
       }
     }).catch((error: unknown) => {
-      if (!controller.signal.aborted) this.write(failureEnvelope(request.id, error instanceof ControlProtocolError ? error.code : '-32603'));
+      if (!controller.signal.aborted) this.write(failureEnvelope(request.id, error instanceof ControlProtocolError ? error.code : mutation ? '-32008' : '-32603'));
     }).finally(() => {
       clearTimeout(timer);
       // A timed-out request may already have been replaced; do not remove its successor.
@@ -125,7 +127,7 @@ export class StdioControlServer {
       const cancellable = Boolean(pending && !pending.controller.signal.aborted);
       if (pending && cancellable) {
         pending.controller.abort(); clearTimeout(pending.timer);
-        this.write(failureEnvelope(request.params.requestId, '-32010'));
+        this.write(failureEnvelope(request.params.requestId, pending.mutation ? '-32008' : '-32010'));
       }
       return { result: { cancellationRequested: cancellable } };
     }
@@ -138,7 +140,7 @@ export class StdioControlServer {
     this.#closed = true; this.#lines.dispose();
     for (const pending of this.#pending.values()) { clearTimeout(pending.timer); pending.controller.abort(); }
     this.#pending.clear(); this.#frames.length = 0; this.#queuedBytes = 0;
-    this.options.input.off('data', this.onData).off('end', this.onEnd).off('error', this.onError).pause();
+    this.options.input.off('data', this.onData).off('end', this.onEnd).off('close', this.onError).pause();
     this.options.output.off('drain', this.onDrain);
     for (const dispose of this.#disposers) { try { dispose(); } catch { /* No raw disposal errors on the control stream. */ } }
     this.#disposers.clear();

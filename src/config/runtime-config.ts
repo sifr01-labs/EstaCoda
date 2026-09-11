@@ -1,6 +1,7 @@
 import { parseExecutionPolicy } from "../execution/docker-policy.js";
 import type { RequestedExecutionPolicy } from "../contracts/execution-authority.js";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { lstat, mkdir, open, readFile, writeFile } from "node:fs/promises";
+import { constants as fsConstants } from "node:fs";
 import { randomInt } from "node:crypto";
 import { dirname, join, resolve } from "node:path";
 import type { BrowserBackendKind, BrowserCloudProviderKind } from "../contracts/browser.js";
@@ -945,14 +946,18 @@ export type LoadRuntimeConfigOptions = {
   profileId?: string;
   providerFetch?: ProviderFetchLike;
   modelsDevOptions?: ModelsDevRegistryOptions;
+  /** Metadata inspection only: bounded config read, no secret loading or raw diagnostics. */
+  configurationInspection?: true;
 };
 
 export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Promise<LoadedRuntimeConfig> {
   const homeDir = resolveHomeDir(options.homeDir);
   const profileId = options.profileId ?? readActiveProfile({ homeDir })?.profileId ?? defaultProfileId();
-  await loadDotEnvSecrets({ homeDir, profileId });
+  if (!options.configurationInspection) await loadDotEnvSecrets({ homeDir, profileId });
   const profilePaths = resolveProfileStateHome({ homeDir, profileId });
-  const loadedConfig = await readConfig(profilePaths.configPath);
+  const loadedConfig = options.configurationInspection
+    ? await readConfigurationForInspection(profilePaths.configPath)
+    : await readConfig(profilePaths.configPath);
   const config = patchConfig(loadedConfig.config);
   if (config.execution !== undefined) config.execution = parseExecutionPolicy(config.execution);
   const catalogProfiles = await resolveModelProfilesFromCatalog({
@@ -1019,7 +1024,7 @@ export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Prom
   }
   const warnedInvalidBusyPolicies = new Set<string>();
   const normalizedFallbacks = normalizeModelFallbacks(config);
-  if (normalizedFallbacks.warnings.length > 0) {
+  if (!options.configurationInspection && normalizedFallbacks.warnings.length > 0) {
     for (const warning of normalizedFallbacks.warnings) {
       console.warn(`[config] ${warning}`);
     }
@@ -1133,7 +1138,7 @@ export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Prom
         ...telegram,
         ready: telegram.enabled === true && telegram.botTokenEnv !== undefined && telegramMissing.length === 0,
         missing: telegramMissing.length === 0 ? undefined : telegramMissing,
-        busyPolicy: normalizeChannelBusyPolicy(telegram.busyPolicy, "telegram", warnedInvalidBusyPolicies),
+        busyPolicy: normalizeChannelBusyPolicy(telegram.busyPolicy, "telegram", warnedInvalidBusyPolicies, options.configurationInspection),
         queueDepth: normalizeQueueDepth(telegram.queueDepth),
         busyTextCoalescing: normalizeBusyTextCoalescing(telegram.busyTextCoalescing),
         textDebounceMs: normalizeTextDebounceMs(telegram.textDebounceMs, 1_500),
@@ -1150,7 +1155,7 @@ export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Prom
         },
         ready: discord.enabled === true && discordMissing.length === 0,
         missing: discordMissing.length === 0 ? undefined : discordMissing,
-        busyPolicy: normalizeChannelBusyPolicy(discord.busyPolicy, "discord", warnedInvalidBusyPolicies),
+        busyPolicy: normalizeChannelBusyPolicy(discord.busyPolicy, "discord", warnedInvalidBusyPolicies, options.configurationInspection),
         queueDepth: normalizeQueueDepth(discord.queueDepth),
         busyTextCoalescing: normalizeBusyTextCoalescing(discord.busyTextCoalescing)
       },
@@ -1158,7 +1163,7 @@ export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Prom
         ...email,
         ready: email.enabled === true && emailMissing.length === 0,
         missing: emailMissing.length === 0 ? undefined : emailMissing,
-        busyPolicy: normalizeChannelBusyPolicy(email.busyPolicy, "email", warnedInvalidBusyPolicies),
+        busyPolicy: normalizeChannelBusyPolicy(email.busyPolicy, "email", warnedInvalidBusyPolicies, options.configurationInspection),
         queueDepth: normalizeQueueDepth(email.queueDepth),
         busyTextCoalescing: normalizeBusyTextCoalescing(email.busyTextCoalescing)
       },
@@ -1173,7 +1178,7 @@ export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Prom
         replyPrefix: whatsapp.replyPrefix ?? WHATSAPP_DEFAULT_REPLY_PREFIX,
         ready: whatsapp.enabled === true && whatsappMissing.length === 0,
         missing: whatsappMissing.length === 0 ? undefined : whatsappMissing,
-        busyPolicy: normalizeChannelBusyPolicy(whatsapp.busyPolicy, "whatsapp", warnedInvalidBusyPolicies),
+        busyPolicy: normalizeChannelBusyPolicy(whatsapp.busyPolicy, "whatsapp", warnedInvalidBusyPolicies, options.configurationInspection),
         queueDepth: normalizeQueueDepth(whatsapp.queueDepth),
         busyTextCoalescing: normalizeBusyTextCoalescing(whatsapp.busyTextCoalescing),
         textDebounceMs: normalizeTextDebounceMs(whatsapp.textDebounceMs, 5_000),
@@ -3792,6 +3797,29 @@ export async function consumeTelegramPairingCode(options: {
   };
 }
 
+/** Keep the bound and bytes on the same descriptor; a stat-then-reopen preflight is insufficient. */
+async function readConfigurationForInspection(path: string): Promise<{ path: string; loaded: boolean; config: EstaCodaConfig }> {
+  let file;
+  try {
+    if ((await lstat(path)).isSymbolicLink()) throw new Error("Configuration inspection refuses symlinks.");
+    file = await open(path, fsConstants.O_RDONLY | fsConstants.O_NOFOLLOW | fsConstants.O_NONBLOCK);
+  }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return { path, loaded: false, config: {} }; throw error; }
+  try {
+    const limit = 1_048_576, info = await file.stat();
+    if (!info.isFile() || info.size > limit) throw new Error("Configuration inspection limit exceeded.");
+    const buffer = Buffer.alloc(limit + 1); let length = 0;
+    while (length < buffer.length) {
+      const { bytesRead } = await file.read(buffer, length, buffer.length - length, null);
+      if (!bytesRead) break; length += bytesRead;
+    }
+    if (length > limit) throw new Error("Configuration inspection limit exceeded.");
+    const config: unknown = JSON.parse(new TextDecoder("utf-8", { fatal: true, ignoreBOM: true }).decode(buffer.subarray(0, length)));
+    if (!config || typeof config !== "object" || Array.isArray(config)) throw new Error("Invalid profile configuration.");
+    return { path, loaded: true, config: config as EstaCodaConfig };
+  } finally { await file.close(); }
+}
+
 export async function readConfig(path: string): Promise<{ path: string; loaded: boolean; config: EstaCodaConfig }> {
   try {
     return {
@@ -4464,12 +4492,13 @@ export function normalizeModelFallbacks(
 function normalizeChannelBusyPolicy(
   value: unknown,
   channelName: string,
-  warned: Set<string>
+  warned: Set<string>,
+  quiet = false
 ): ChannelBusyPolicy {
   if (value === "reject" || value === "queue" || value === "interrupt") {
     return value;
   }
-  if (value !== undefined && !warned.has(`${channelName}:${String(value)}`)) {
+  if (!quiet && value !== undefined && !warned.has(`${channelName}:${String(value)}`)) {
     warned.add(`${channelName}:${String(value)}`);
     console.warn(`Invalid busyPolicy "${String(value)}" for ${channelName}; falling back to "reject"`);
   }

@@ -46,3 +46,16 @@ it('bounds subscription reservations and drops a reservation cancelled before ac
   expect(() => f.bridge.subscriptions.subscribe(params, new AbortController().signal)).toThrow('limit');
   f.bridge.close(); await f.bridge.server.done;
 });
+it('expires replay by total byte budget even before the event-count limit', async () => {
+  const { StdioControlServer } = await import('./stdio-server.js');
+  const { ControlSubscriptions } = await import('./subscriptions.js');
+  const input = new PassThrough(), output = new PassThrough(); output.resume();
+  const server = new StdioControlServer({ input, output, profileId: 'p', version: 'test', events: ['activity.appended'] });
+  input.write(JSON.stringify({ jsonrpc: '2.0', id: 'init', method: 'control.initialize', params: { protocolVersion: { major: 1, minor: 0 }, clientVersion: 'test', profileId: 'p', capabilities: { methods: ['control.initialize'], events: ['activity.appended'] } } }) + '\n');
+  await setImmediate();
+  const subscriptions = new ControlSubscriptions(server);
+  const cursor = { instanceId: server.instanceId, streamId: 'stream', sequence: 0 }; subscriptions.reset(cursor);
+  for (let i = 0; i < 70; i++) subscriptions.publish({ type: 'activity.appended', payload: { id: 'a' + i, workId: 'w', profileId: 'p', sequence: i, timestamp: 1, kind: 'message', role: 'assistant', text: 'x'.repeat(16_000) } });
+  expect(subscriptions.subscribe({ after: cursor, events: ['activity.appended'] }, new AbortController().signal).result).toEqual({ state: 'snapshot_required', reason: 'cursor_expired' });
+  server.close(); await server.done;
+});

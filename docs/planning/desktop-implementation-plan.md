@@ -6,6 +6,8 @@ Desktop PR 1 is implemented as an architecture and shared-package foundation; se
 
 Desktop PR 2 adds the pure control protocol and conformance suite; see its [implementation record](desktop-pr2.md) for exact coverage and validation. A declared method remains unavailable until its service handler and authority checks are implemented.
 
+Desktop PR 3 implements the private control bridge and isolated credential staging; see its [implementation record](desktop-pr3.md) and [service reference](../architecture/desktop/control-service.md). Work/mutation handlers and trusted target-generation enforcement remain PR 4 delivery gates.
+
 The [Desktop visual and interaction contract](desktop-visual-contract.md), [frozen branded prototype](desktop-design/README.md), and [acceptance matrix](desktop-design/acceptance-matrix.md) are required inputs to PR 5 and subsequent UI work. They supersede earlier visual concepts. PR numbers in this document refer to Desktop, not the workspace-execution series.
 
 Shared contract and ownership decisions are defined in [Shared workspace, target, and execution ownership decisions](workspace-execution-ownership-decisions.md). That document is authoritative for overlap with the workspace plan. The architecture below consumes its core target bindings and supervisor ownership; these are proposed capabilities, not shipped behavior.

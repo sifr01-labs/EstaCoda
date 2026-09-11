@@ -15,7 +15,7 @@ function fixture(handlers: ControlHandlers = {}, requestTimeoutMs = 30_000) {
   return { input, output, messages, server, send, init };
 }
 it('binds initialization and advertised handlers to one profile and rejects premature requests', async () => {
-  const f = fixture();
+  const f = fixture({ 'work.list': undefined });
   f.send('first', 'work.list', { limit: 1 }); await setImmediate();
   expect(f.messages[0].error.code).toBe(-32002);
   await f.init('other'); expect(f.messages[1].error.code).toBe(-32003);
@@ -73,4 +73,20 @@ it('keeps timed-out handlers inside the concurrency bound until they actually se
   f.send('overflow', 'work.list', { limit: 1 }); await setImmediate();
   expect(calls).toBe(28); expect(f.messages.at(-1).error.code).toBe(-32009);
   f.server.close(); await f.server.done;
+});
+it('never labels bridge cancellation of a dispatched mutation as confirmed execution cancellation', async () => {
+  const f = fixture({ 'sessions.send': async () => await new Promise(() => {}) });
+  await f.init(); f.send('mutation', 'sessions.send', { operationId: '100:op', sessionId: 's', target: { targetId: 't', targetGeneration: 1 }, text: 'work' }); await setImmediate();
+  f.send('cancel', 'control.cancelRequest', { requestId: 'mutation' }); await setImmediate();
+  expect(f.messages.find((m) => m.id === 'mutation').error.code).toBe(-32008);
+  expect(f.messages.find((m) => m.id === 'cancel').result).toEqual({ cancellationRequested: true });
+  f.server.close(); await f.server.done;
+});
+
+it('disposes on abrupt input closure and safely ignores late stream errors', async () => {
+  const f = fixture(); let disposed = false; f.server.onDispose(() => { disposed = true; });
+  await f.init(); f.input.destroy(); await f.server.done;
+  expect(disposed).toBe(true);
+  expect(() => f.input.emit('error', new Error('late-stream-canary'))).not.toThrow();
+  expect(JSON.stringify(f.messages)).not.toContain('late-stream-canary');
 });

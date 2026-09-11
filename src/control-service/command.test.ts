@@ -32,12 +32,12 @@ it('runs the real private CLI without setup banners or profile writes and shuts 
 it('requires explicit stdio and profile without falling through to interactive startup', async () => {
   const home = await mkdtemp(join(tmpdir(), 'desktop-args-'));
   try {
-    for (const args of [['desktop-service', '--stdio'], ['desktop-service', '--profile', 'p'], ['desktop-service', '--stdio', '--profile', 'p', '--version']]) {
+    for (const args of [['desktop-service', '--stdio'], ['desktop-service', '--profile', 'p'], ['desktop-service', '--stdio', '--profile', 'p', '--version'], ['desktop-service', '--stdio', '--profile', '../argument-canary']]) {
       const child = spawn(process.execPath, ['--import', 'tsx', entry, ...args], { env: { ...process.env, ESTACODA_HOME: home } });
       let stdout = '', stderr = '';
       child.stdout.on('data', (chunk) => { stdout += chunk; }); child.stderr.on('data', (chunk) => { stderr += chunk; });
       const status = await new Promise<number | null>((resolve, reject) => { child.once('error', reject); child.once('exit', resolve); });
-      expect(status).toBe(2); expect(stdout).toBe(''); expect(stderr).toContain('Invalid Desktop service arguments');
+      expect(status).toBe(2); expect(stdout).toBe(''); expect(stderr).toContain('Invalid Desktop service arguments'); expect(stderr).not.toContain('argument-canary');
     }
     expect(await readdir(home)).toEqual([]);
   } finally { await rm(home, { recursive: true, force: true }); }
