@@ -1,3 +1,4 @@
+import{liveAdapter}from'./live-adapter.js';
 import {AppearanceProvider} from './appearance.js';
 import {App} from './app.js';
 import React from 'react';
@@ -6,5 +7,5 @@ import './styles/tokens.css';
 import './styles/components.css';
 import './styles/native.css';
 import './styles/theme-previews.css';
-const store={read:()=>window.desktop.appearance(),write:(value:import('../shared/appearance.js').AppearancePreferences)=>window.desktop.setAppearance(value)};
-createRoot(document.getElementById('root')!).render(<React.StrictMode><AppearanceProvider store={store}><App/></AppearanceProvider></React.StrictMode>);
+const adapter=liveAdapter();
+createRoot(document.getElementById('root')!).render(<React.StrictMode><AppearanceProvider store={adapter.appearance}><App adapter={adapter}/></AppearanceProvider></React.StrictMode>);
