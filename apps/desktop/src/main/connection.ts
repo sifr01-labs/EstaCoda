@@ -91,6 +91,13 @@ export class DesktopConnection extends EventEmitter {
     }
     this.publish();
   }
+  async getWork(workId: string): Promise<WorkProjection> {
+    const client = this.#client, generation = this.state.generation;
+    if (!client || this.state.status !== 'ready') throw new Error('Runtime disconnected.');
+    const work = await client.request('work.get', {workId});
+    if (client !== this.#client || generation !== this.state.generation) throw new Error('Desktop context changed.');
+    return work;
+  }
   async activity(workId: string, cursor?: string): Promise<Page<ActivityProjection>> {
     const client = this.#client, generation = this.state.generation;
     if (!client || this.state.status !== 'ready') throw new Error('Runtime disconnected.');

@@ -29,8 +29,9 @@ const record=(text:string)=>{observations.push(text);console.log(text);};
 try{
  app=await launch();let page=await app.firstWindow();await expect.poll(()=>page.evaluate(async()=>(await window.desktop.snapshot()).status),{timeout:20000}).toBe('ready');
  const exposed=await page.evaluate(()=>({keys:Object.keys(window.desktop).sort(),node:typeof (window as any).require,process:typeof(window as any).process,credential:typeof(window as any).credential}));
- expect(exposed.node).toBe('undefined');expect(exposed.process).toBe('undefined');expect(exposed.credential).toBe('undefined');expect(exposed.keys).toEqual(['activity','appearance','close','minimize','moreInbox','moreWork','onSnapshot','platform','profiles','reconnect','setAppearance','snapshot','switchProfile','toggleMaximize'].sort());
+ expect(exposed.node).toBe('undefined');expect(exposed.process).toBe('undefined');expect(exposed.credential).toBe('undefined');expect(exposed.keys).toEqual(['activity','getWork','appearance','close','minimize','moreInbox','moreWork','onSnapshot','platform','profiles','reconnect','setAppearance','snapshot','switchProfile','toggleMaximize'].sort());
  expect(await page.evaluate(async()=>(await window.desktop.snapshot()).runtime)).toBe('ready');
+ expect(await page.evaluate(async()=>(await window.desktop.getWork((await window.desktop.snapshot()).work.items.find(item=>item.canonicalId==='desktop-existing')!.id)).canonicalId)).toBe('desktop-existing');
  await page.locator('.ec-taskbutton').first().click();await expect(page.getByText('Canonical persisted activity from the existing owner.',{exact:true})).toBeVisible();
  await expect(page.getByRole('region',{name:'Pending attention'}).filter({hasText:'Approval required'})).toBeVisible();await page.screenshot({path:join(evidence,'canonical-work.png')});record('Canonical existing Work and persisted activity loaded through real Main/preload/bridge.');
  const privateFile=join(home,'private-canary.txt');writeFileSync(privateFile,'private-file-canary');expect(await page.evaluate(async path=>{try{return await(await fetch('file://'+path)).text();}catch{return 'blocked';}},privateFile)).toBe('blocked');

@@ -19,6 +19,7 @@ const api:DesktopApi={
   appearance:()=>invoke('appearance'),setAppearance:value=>invoke('setAppearance',value),
   snapshot:async()=>{await ready;return snapshot;},
   onSnapshot:listener=>{listeners.add(listener);void ready.then(()=>{if(listeners.has(listener))listener(snapshot);},()=>{if(listeners.has(listener))listener({status:'unavailable',profile:{id:'default',label:'default',configuration:'unconfigured'},runtime:'unavailable',work:{items:[],nextCursor:null},inbox:{items:[],nextCursor:null}});});return()=>{listeners.delete(listener);};},
+  getWork:workId=>invoke('getWork',{workId}),
   activity:(workId,cursor)=>invoke('activity',{workId,...(cursor?{cursor}:{})}),
   profiles:()=>invoke('profiles'),switchProfile:id=>invoke('switchProfile',{id}),
   minimize:()=>invoke('minimize'),toggleMaximize:()=>invoke('toggleMaximize'),close:()=>invoke('close'),

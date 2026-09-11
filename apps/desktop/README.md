@@ -1,6 +1,6 @@
 # EstaCoda desktop
 
-Private Electron client workspace. Run `pnpm desktop:dev` from the repository root. PR5 delivers the approved interface and isolated fixture journeys, with live profile bootstrap, existing Work/activity/attention inspection, reconnect and presentation preferences. Provider setup, new execution, approvals, attachments, search, pins and integrations become live in their subsequent planned PRs; release controls identify their current availability.
+Private Electron client workspace. Run `pnpm desktop:dev` from the repository root. PR5 delivers the approved interface and isolated fixture journeys, with live profile bootstrap, existing Work/activity/attention inspection, reconnect and presentation preferences. Work reached through Inbox resolves independently of list pagination. Tabs, inspector visibility and loaded history extent survive navigation within a profile; switching profile clears them. Activity inspection is bounded to 2,000 loaded items without changing canonical history. Provider setup, new execution, approvals, attachments, search, pins and integrations become live in their subsequent planned PRs; release controls identify their current availability.
 
 ## Build and validate
 

@@ -14,6 +14,7 @@ export type DesktopApi = {
   moreInbox():Promise<void>;
   snapshot():Promise<DesktopSnapshot>;
   onSnapshot(listener:(snapshot:DesktopSnapshot)=>void):()=>void;
+  getWork(workId:string):Promise<WorkProjection>;
   activity(workId:string,cursor?:string):Promise<Page<ActivityProjection>>;
   profiles():Promise<ProfileChoice[]>;
   switchProfile(id:string):Promise<void>;
