@@ -1,6 +1,6 @@
 import { CONTROL_LIMITS, ControlProtocolError, DESKTOP_PROTOCOL_VERSION, assertEnvelope, exactKeys, isControlId, isControlOperationId, isRecord, type RpcFailure } from "./envelopes.js";
 import { CONTROL_EVENTS, CONTROL_METHODS, assertInitializeParams, isControlCursor, isProtocolVersion, type Capabilities, type ControlEventType } from "./bootstrap.js";
-import { ACTION_IDS, WORK_STATUSES } from "./projections.js";
+import { ACTION_IDS, WORK_STATUSES, ROUTE_HEALTH_STATES } from "./projections.js";
 import type { ControlEvent, EventNotification, MethodContracts, MethodRequest, MethodSuccess, OperationReceipt } from "./methods.js";
 
 type Check = (value: unknown) => boolean;
@@ -47,7 +47,7 @@ const modelCatalog = shape({configured:boolean,catalogOnly:boolean,contextTokens
   lifecycle:choice(['available','deprecated','retired']),source:choice(['models-dev','configured','manual','fallback-known']),
   price:nullable(shape({inputPerMillion:nullable(nonnegative),outputPerMillion:nullable(nonnegative)}))});
 const modelShape = shape({ id: text(200, 1), providerId: id, label: text(240, 1), runnable: boolean,
-  credentialState: choice(["not_required", "missing", "present", "expired"]), role: nullable(choice(["primary", "fallback", "auxiliary", "session_override"])) }, {catalog:modelCatalog});
+  credentialState: choice(["not_required", "missing", "present", "expired"]), role: nullable(choice(["primary", "fallback", "auxiliary", "session_override"])) }, {catalog:modelCatalog, health:choice(ROUTE_HEALTH_STATES)});
 const model: Check = (v) => modelShape(v) && isRecord(v) && (!v.runnable ||
   ((v.credentialState === "present" || v.credentialState === "not_required") &&
     (!isRecord(v.catalog) || (!v.catalog.catalogOnly && v.catalog.lifecycle !== 'retired'))));

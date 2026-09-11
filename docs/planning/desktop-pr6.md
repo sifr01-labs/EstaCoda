@@ -11,3 +11,9 @@ Review: existing paging enforces response limits and capture/query fencing. Prot
 Validation: catalog and protocol validation tests (8 passing); root TypeScript check in the isolated tracked-source checkout; desktop foundation typechecks and protocol boundary check; `git diff --check`. Full release and desktop visual/native validation remain pending until PR6 is integrated.
 
 Risk: this slice exposes read-only metadata; it grants no setup mutation or execution authority. Existing unrelated untracked files are excluded from commits and from the isolated validation checkout.
+
+## 2. Route health and credential presence
+
+Selected-profile credential inspection uses bounded, no-follow reads of `.env` and `auth.json`, without importing values into process environment or refreshing OAuth. Models report configured, missing/expired credential, catalog-only, unsupported, retired, or network-disabled states, and identify primary/fallback roles. A configured runnable route is not described as live-verified.
+
+Review and validation: profile-isolation, secret-omission, OAuth-expiry and linked-file rejection tests; existing catalog tests (62 passing); catalog/protocol tests; root typecheck and desktop foundation checks. Risk: presence is deliberately weaker than validity; live health requires the explicit verification action in slice 3.

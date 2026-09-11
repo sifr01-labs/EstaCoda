@@ -41,7 +41,9 @@ export type ModelCatalogProjection = {
   source: "models-dev" | "configured" | "manual" | "fallback-known";
   price: { inputPerMillion: number | null; outputPerMillion: number | null } | null;
 };
+export const ROUTE_HEALTH_STATES = ['not_configured', 'credential_required', 'authorization_expired', 'configured', 'ready', 'unreachable', 'invalid_credential', 'model_unavailable', 'catalog_only', 'unsupported', 'network_disabled'] as const;
 export type ModelProjection = {
+  health?: typeof ROUTE_HEALTH_STATES[number];
   catalog?: ModelCatalogProjection;
   id: string; providerId: string; label: string; runnable: boolean;
   credentialState: "not_required" | "missing" | "present" | "expired";

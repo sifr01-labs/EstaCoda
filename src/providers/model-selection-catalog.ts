@@ -95,6 +95,8 @@ export type CreateModelSelectionCatalogOptions = {
   modelsDevOptions?: ModelsDevRegistryOptions;
   modelCatalogOverrides?: ModelCatalogOverrideRegistry;
   allowNetwork?: boolean;
+  /** A profile-scoped inspector may supply presence without loading secrets into process.env. */
+  credentialReady?: (providerId: ProviderId, apiKeyEnv?: string) => Promise<boolean>;
 };
 
 export type ModelSelectionCatalog = {
@@ -772,8 +774,9 @@ function providerDisplayName(providerId: ProviderId, snapshot: ModelsDevSnapshot
 }
 
 function createCredentialReadyResolver(
-  options: Pick<CreateModelSelectionCatalogOptions, "homeDir" | "profileId">
+  options: Pick<CreateModelSelectionCatalogOptions, "homeDir" | "profileId" | "credentialReady">
 ): CredentialReadyResolver {
+  if (options.credentialReady) return options.credentialReady;
   const cache = new Map<string, Promise<boolean>>();
   return (providerId, apiKeyEnv) => {
     const key = routeKey(providerId, apiKeyEnv ?? "");
