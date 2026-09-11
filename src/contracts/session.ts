@@ -514,6 +514,8 @@ export type SessionEvent =
     }
   | {
       kind: "execution-final-outcome-recorded";
+      /** Canonical user turn at persistence; absent on legacy records. */
+      turnMessageId?: string;
       status: import("./execution-plan.js").ExecutionFinalOutcomeStatus;
       terminationCause: import("./execution-plan.js").ExecutionTerminationCause;
       completionFloor: import("./execution-plan.js").ExecutionCompletionFloor;

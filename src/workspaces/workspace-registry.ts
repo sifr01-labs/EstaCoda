@@ -28,15 +28,21 @@ export class WorkspaceRegistry {
   readonly profileId: string;
   protected readonly db: SQLiteDatabase;
 
-  constructor(options: { homeDir?: string; profileId: string }) {
+  constructor(options: { homeDir?: string; profileId: string; readonly?: boolean }) {
     const paths = resolveProfileStateHome(options);
     this.profileId = paths.profileId;
-    mkdirSync(paths.profileRoot, { recursive: true, mode: 0o700 });
+    if (!options.readonly) mkdirSync(paths.profileRoot, { recursive: true, mode: 0o700 });
+    else if (lstatSync(paths.profileRoot).isSymbolicLink()) throw new Error("Workspace profile must not be a symbolic link.");
     const path = join(paths.profileRoot, "workspaces.sqlite");
     try { if (lstatSync(path).isSymbolicLink()) throw new Error("Workspace registry must not be a symbolic link."); }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
-    this.db = openDefaultSQLiteDatabase({ path });
+    this.db = openDefaultSQLiteDatabase({ path, readonly: options.readonly });
     try {
+      if (options.readonly) {
+        const version = this.db.query<{ user_version: number }>("pragma user_version").get()!.user_version;
+        if (version !== 1 && version !== 2) throw new Error("Unsupported workspace registry version.");
+        return;
+      }
       chmodSync(path, 0o600);
       this.transaction(() => {
         const version = this.db.query<{ user_version: number }>("pragma user_version").get()!.user_version;

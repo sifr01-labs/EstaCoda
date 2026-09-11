@@ -40,10 +40,10 @@ export class DesktopBridge {
         if (request.method !== 'work.get') throw new ControlProtocolError('-32601');
         return { result: this.workSnapshot().get(request.params.workId) };
       },
-      'work.activity': (request) => {
+      'work.activity': async (request) => {
         if (request.method !== 'work.activity') throw new ControlProtocolError('-32601');
         const snapshot = this.workSnapshot(); snapshot.get(request.params.workId);
-        return { result: snapshot.page(request.params.workId, snapshot.state.activity[request.params.workId] ?? [], request.params) };
+        return { result: await snapshot.activity(request.params.workId, request.params) };
       },
       'control.bootstrap': async (_request, signal) => ({ result: await this.bootstrap(signal) }),
       'control.subscribe': (request, signal) => {
@@ -74,7 +74,7 @@ export class DesktopBridge {
     const context = this.server.context;
     if (!context) throw new ControlProtocolError('-32002');
     const cursor: ControlCursor = { instanceId: this.server.instanceId, streamId: randomUUID(), sequence: 0 };
-    this.#work = new WorkSnapshot(work);
+    this.#work = new WorkSnapshot(work, this.options);
     this.#snapshot = structuredClone({ ...state, capabilities: context.capabilities, cursor });
     this.subscriptions.reset(cursor);
     this.subscriptions.publish({ type: 'control.ready', payload: { state: 'ready' } });

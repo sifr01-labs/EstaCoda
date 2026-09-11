@@ -1,3 +1,6 @@
+import { setImmediate } from 'node:timers/promises';
+import { taskActions } from './action-projections.js';
+import { taskListCursor, type TaskListCursor } from '../tasks/task-store.js';
 import type { Task, TaskAttempt, TaskStatus } from '../contracts/task.js';
 import type { ActivityProjection, WorkDisplayStatus, WorkProjection } from '../contracts/desktop-control/index.js';
 import type { TaskStore } from '../tasks/task-store.js';
@@ -5,7 +8,7 @@ import { TaskOperatorService } from '../tasks/task-operator-service.js';
 import { safeText, timestamp } from './work-projections.js';
 import type { WorkState } from './work-snapshot.js';
 const statuses: Record<TaskStatus, WorkDisplayStatus> = {
-  planning: 'draft', queued: 'queued', running: 'running', waiting_for_host: 'needs_attention', waiting_for_input: 'needs_attention',
+  planning: 'draft', queued: 'queued', running: 'running', waiting_for_host: 'queued', waiting_for_input: 'needs_attention',
   waiting_for_approval: 'needs_attention', paused: 'paused', completed: 'completed', partial: 'partial', failed: 'failed', cancelled: 'cancelled',
 };
 export function taskWork(task: Task, visibleSessions: ReadonlySet<string>): WorkProjection {
@@ -18,15 +21,16 @@ export function taskWork(task: Task, visibleSessions: ReadonlySet<string>): Work
 export function attemptWork(task: WorkProjection, attempt: TaskAttempt): WorkProjection {
   const status: WorkDisplayStatus = ({ queued: 'queued', leased: 'running', running: 'running', waiting_for_input: 'needs_attention',
     waiting_for_approval: 'needs_attention', completed: 'completed', failed: 'failed', cancelled: 'cancelled', interrupted: 'partial', expired: 'partial' } as const)[attempt.status];
-  return { ...task, id: `attempt:${attempt.id}`, canonicalId: attempt.id, kind: 'task_attempt', parentWorkId: task.id,
+  return { ...task, actions: [{ id: 'inspect_result', enabled: true }], id: `attempt:${attempt.id}`, canonicalId: attempt.id, kind: 'task_attempt', parentWorkId: task.id,
     title: `Attempt ${attempt.attemptNumber}`, status, updatedAt: timestamp(attempt.updatedAt) };
 }
-export function appendTaskWork(state: WorkState, store: TaskStore): void {
+export async function appendTaskWork(state: WorkState, store: TaskStore, signal?: AbortSignal): Promise<void> {
   const service = new TaskOperatorService({ store });
   const visible = new Set(state.work.filter((w) => w.kind === 'session' && !w.parentWorkId).map((w) => w.canonicalId));
-  const tasks = store.listTasks({ limit: 1000, order: 'updated_desc' });
-  for (const task of tasks) {
-    const work = taskWork(task, visible); state.work.push(work);
+  let visited = 0;
+  for (const task of allTasks(store)) {
+    if (++visited % 32 === 0) { await setImmediate(); signal?.throwIfAborted(); }
+    const work = taskWork(task, visible); work.actions = taskActions(task, store); state.work.push(work);
     const projection = service.status(task.id);
     let sequence = 0;
     const base = () => ({ id: `activity:${task.id}:${sequence}`, profileId: task.profileId, workId: work.id, sequence: sequence++, timestamp: timestamp(task.updatedAt) });
@@ -43,4 +47,14 @@ export function appendTaskWork(state: WorkState, store: TaskStore): void {
     }
   }
   state.work.sort((a, b) => b.updatedAt - a.updatedAt || a.id.localeCompare(b.id));
+}
+
+export function* allTasks(store: TaskStore): Generator<Task> {
+  let cursor: TaskListCursor | undefined;
+  for (;;) {
+    const tasks = store.listTasks({ limit: 100, order: 'updated_desc', cursor });
+    for (const task of tasks) yield task;
+    if (tasks.length < 100) return;
+    cursor = taskListCursor(tasks[tasks.length - 1]!, 'updated_desc');
+  }
 }

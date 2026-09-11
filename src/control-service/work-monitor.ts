@@ -15,7 +15,9 @@ export class WorkMonitor {
     if (this.#disposed || this.#running) return;
     this.#running = true;
     try {
-      const next = await this.read(AbortSignal.any([this.#abort.signal, AbortSignal.timeout(3_000)]));
+      const signal = AbortSignal.any([this.#abort.signal, AbortSignal.timeout(3_000)]);
+      const next = await this.read(signal);
+      signal.throwIfAborted();
       if (this.#disposed) return;
       const oldWork = new Map(this.#previous.work.map((work) => [work.id, JSON.stringify(work)]));
       for (const work of next.work) if (oldWork.get(work.id) !== JSON.stringify(work)) this.publish({ type: 'work.changed', payload: work });
@@ -26,6 +28,11 @@ export class WorkMonitor {
       }
       for (const itemId of oldInbox.keys()) this.publish({ type: 'attention.changed', payload: { itemId, item: null } });
       let resync = Object.keys(this.#previous.activity).some((id) => !Object.hasOwn(next.activity, id)) || this.#previous.work.some((old) => !next.work.some((work) => work.id === old.id));
+      for (const [workId, boundary] of Object.entries(next.history ?? {})) {
+        const previous = this.#previous.history?.[workId];
+        if (previous && (previous.revision !== boundary.revision ||
+          ((!next.activity[workId] || !this.#previous.activity[workId]) && JSON.stringify(previous) !== JSON.stringify(boundary)))) resync = true;
+      }
       for (const [workId, activity] of Object.entries(next.activity)) {
         const previous = new Map((this.#previous.activity[workId] ?? []).map((item) => [item.id, JSON.stringify(item)]));
         for (const item of activity) {

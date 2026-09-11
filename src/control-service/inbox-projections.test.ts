@@ -47,3 +47,17 @@ it('publishes canonical changes once and requests resync for rewritten history',
     expect(events).toContainEqual({ type: 'service.warning', payload: { reason: 'resync_required' } });
   } finally { monitor.dispose(); }
 });
+
+it('requests resync when history outside the preview budget changes or is rewritten', async () => {
+  let state: WorkState = { work: [], activity: {}, history: { 'session:s': { messages: 1, events: 1, count: 1, revision: 0 } } };
+  const events: SafeNotification[] = [];
+  const monitor = new WorkMonitor(state, async () => state, event => events.push(event));
+  try {
+    state = { ...state, history: { 'session:s': { messages: 2, events: 1, count: 2, revision: 0 } } };
+    await monitor.tick();
+    expect(events).toEqual([{ type: 'service.warning', payload: { reason: 'resync_required' } }]);
+    events.length = 0; await monitor.tick(); expect(events).toEqual([]);
+    state = { ...state, history: { 'session:s': { messages: 2, events: 1, count: 2, revision: 1 } } };
+    await monitor.tick(); expect(events).toHaveLength(1);
+  } finally { monitor.dispose(); }
+});

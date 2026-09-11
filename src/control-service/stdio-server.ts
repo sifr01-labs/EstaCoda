@@ -83,7 +83,8 @@ export class StdioControlServer {
       if ('id' in envelope && typeof envelope.id === 'string') requestId = envelope.id;
       request = validateControlRequest(envelope, this.#context);
       if (this.#pending.has(request.id) || (request.method === 'control.initialize' && this.#initializing)) { this.fault(); return; }
-      const priority = request.method === 'control.cancelRequest' || request.method === 'control.unsubscribe';
+      const priority = request.method === 'control.cancelRequest' || request.method === 'control.unsubscribe' ||
+        request.method === 'sessions.cancelTurn' || request.method === 'tasks.cancel' || request.method === 'tasks.pause' || request.method === 'approvals.resolve';
       if (this.#pending.size >= (priority ? 32 : 28)) throw new ControlProtocolError('-32009');
     } catch (error) {
       this.write(failureEnvelope(requestId, error instanceof ControlProtocolError ? error.code : '-32603'));

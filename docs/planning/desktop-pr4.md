@@ -1,6 +1,7 @@
 # Desktop PR 4 implementation record
 
 Branch: `ame/desktop-foundation`. All eight planned slices implemented and reviewed.
+A subsequent PR3/PR4 review correction supersedes the historical limits below; see [the correction record](desktop-pr3-pr4-corrections.md).
 
 ## 1. Session Work projections
 

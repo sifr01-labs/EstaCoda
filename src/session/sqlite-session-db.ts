@@ -467,7 +467,7 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
           message.sessionId,
           deriveSessionDescription(session.title, message.content)
         );
-        const nextMetadata = withImmutableSessionOrigin(session.metadata, message.channel);
+        const nextMetadata = { ...withImmutableSessionOrigin(session.metadata, message.channel), latestUserTurn: { id: message.id, createdAt: message.createdAt } };
         if (nextMetadata !== session.metadata) {
           this.#db
             .query("update sessions set metadata_json = ? where id = ?")
@@ -618,6 +618,10 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
           .query("insert into messages_fts(rowid, message_id, content) values ((select rowid from messages where id = ?), ?, ?)")
           .run(message.id, message.id, message.content);
       }
+
+      const metadata = parseJson(session.metadata_json) ?? {};
+      this.#db.query("update sessions set metadata_json=? where id=?").run(
+        JSON.stringify({ ...metadata, transcriptRevision: Number(metadata.transcriptRevision ?? 0) + 1 }), input.sessionId);
 
       for (const event of input.events ?? []) {
         this.#insertSessionEvent(input.sessionId, event);
@@ -1254,6 +1258,12 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
   }
 
   #insertSessionEvent(sessionId: string, event: SessionEvent): void {
+    if (event.kind === "execution-final-outcome-recorded") {
+      const turn = this.#db.query<{ id: string }>("select id from messages where session_id=? and role='user' order by rowid desc limit 1").get(sessionId);
+      // Derive the reference here; callers cannot attach an outcome to a different turn.
+      const persisted = this.#db.query<{ id: string | null }>("select json_extract(metadata_json,'$.latestUserTurn.id') as id from sessions where id=?").get(sessionId);
+      event = { ...event, turnMessageId: persisted?.id ?? turn?.id };
+    }
     this.#db
       .query("insert into session_events (id, session_id, created_at, event_json) values (?, ?, ?, ?)")
       .run(this.#id(), sessionId, this.#now().toISOString(), JSON.stringify(event));

@@ -1,6 +1,6 @@
 import { CONTROL_LIMITS, ControlProtocolError, DESKTOP_PROTOCOL_VERSION, assertEnvelope, exactKeys, isControlId, isControlOperationId, isRecord, type RpcFailure } from "./envelopes.js";
 import { CONTROL_EVENTS, CONTROL_METHODS, assertInitializeParams, isControlCursor, isProtocolVersion, type Capabilities, type ControlEventType } from "./bootstrap.js";
-import { WORK_STATUSES } from "./projections.js";
+import { ACTION_IDS, WORK_STATUSES } from "./projections.js";
 import type { ControlEvent, EventNotification, MethodContracts, MethodRequest, MethodSuccess, OperationReceipt } from "./methods.js";
 
 type Check = (value: unknown) => boolean;
@@ -20,8 +20,11 @@ const cursorToken: Check = (v) => typeof v === "string" && /^[A-Za-z0-9_-]{1,512
 const capabilities = shape({ methods: unique(choice(CONTROL_METHODS)), events: unique(choice(CONTROL_EVENTS)) });
 const target = shape({ targetId: id, targetGeneration: integer(1) });
 const targetProjection = shape({ targetId: id, targetGeneration: integer(1), label: text(240, 1), isolation: choice(["host", "sandboxed", "unknown"]) });
+const actionShape = shape({ id: choice(ACTION_IDS), enabled: boolean }, { reason: text(2_048, 1), stepId: id, sessionId: id });
+const actions: Check = (v) => array((a) => actionShape(a) && isRecord(a) && (a.enabled === true || typeof a.reason === "string"), 128)(v) &&
+  new Set((v as { id: string; stepId?: string }[]).map(a => `${a.id}:${a.stepId ?? ''}`)).size === (v as unknown[]).length;
 const work = shape({ id, canonicalId: id, profileId: id, kind: choice(["session", "task", "task_attempt", "schedule", "scheduled_execution", "evolution_review"]),
-  title: text(240, 1), status: choice(WORK_STATUSES), updatedAt: integer(), target: nullable(targetProjection) }, { reason: text(2_048), parentWorkId: id });
+  title: text(240, 1), status: choice(WORK_STATUSES), updatedAt: integer(), target: nullable(targetProjection) }, { reason: text(2_048), parentWorkId: id, actions });
 const usage = shape({ reportedTokens: nullable(integer()), cost: nullable(shape({ amount: (v) => typeof v === "number" && Number.isFinite(v) && v >= 0,
   currency: (v) => typeof v === "string" && /^[A-Z]{3}$/.test(v) })) });
 const evidence = shape({ state: choice(["verified", "unverified", "partial", "failed"]), summary: text(2_048), artifactIds: unique(id, 100) });
@@ -37,7 +40,7 @@ const activityVariants: Record<string, Check> = {
 const activity: Check = (v) => isRecord(v) && typeof v.kind === "string" && Object.hasOwn(activityVariants, v.kind) && activityVariants[v.kind]!(v);
 const approval = shape({ id, sessionId: id, target, actionSummary: text(2_048, 1), scope: choice(["once"]), decisions: unique(choice(["approved", "denied"]), 2, 1) });
 const inboxShape = shape({ id, profileId: id, workId: nullable(id), kind: choice(["approval", "input", "trust", "setup", "failure", "evolution", "delivery"]),
-  title: text(240, 1), summary: text(2_048), createdAt: integer(), approval: nullable(approval) });
+  title: text(240, 1), summary: text(2_048), createdAt: integer(), approval: nullable(approval) }, { actions });
 const inbox: Check = (v) => inboxShape(v) && isRecord(v) && (v.kind === "approval" ? v.approval !== null && v.workId !== null : v.approval === null);
 const modelShape = shape({ id: text(200, 1), providerId: id, label: text(240, 1), runnable: boolean,
   credentialState: choice(["not_required", "missing", "present", "expired"]), role: nullable(choice(["primary", "fallback", "auxiliary", "session_override"])) });

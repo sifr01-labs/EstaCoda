@@ -1,9 +1,15 @@
+export const ACTION_IDS = ['sessions.resume', 'sessions.send', 'sessions.cancelTurn', 'tasks.pause', 'tasks.resume', 'tasks.cancel', 'tasks.retry', 'tasks.guide',
+  'approve_once', 'reject', 'open_work', 'inspect_result', 'review_setup', 'review_trust', 'review_evolution', 'review_delivery'] as const;
+export type ActionId = typeof ACTION_IDS[number];
+/** Omitted actions on older peers mean unknown, never permission to execute. */
+export type ActionProjection = { id: ActionId; enabled: boolean; reason?: string; stepId?: string; sessionId?: string };
 /** Display references only; core resolves ownership, paths and current authority. */
 export type TargetReference = { targetId: string; targetGeneration: number };
 export type TargetProjection = TargetReference & { label: string; isolation: "host" | "sandboxed" | "unknown" };
 export const WORK_STATUSES = ["draft", "queued", "running", "needs_attention", "paused", "completed", "partial", "failed", "cancelled"] as const;
 export type WorkDisplayStatus = typeof WORK_STATUSES[number];
 export type WorkProjection = {
+  actions?: ActionProjection[];
   id: string; canonicalId: string; profileId: string;
   kind: "session" | "task" | "task_attempt" | "schedule" | "scheduled_execution" | "evolution_review";
   parentWorkId?: string;
@@ -22,6 +28,7 @@ export type ActivityProjection = ActivityBase & (
   | { kind: "status"; status: WorkDisplayStatus; reason?: string }
 );
 export type InboxProjection = {
+  actions?: ActionProjection[];
   id: string; profileId: string; workId: string | null;
   kind: "approval" | "input" | "trust" | "setup" | "failure" | "evolution" | "delivery";
   title: string; summary: string; createdAt: number;

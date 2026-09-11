@@ -90,3 +90,23 @@ it('disposes on abrupt input closure and safely ignores late stream errors', asy
   expect(() => f.input.emit('error', new Error('late-stream-canary'))).not.toThrow();
   expect(JSON.stringify(f.messages)).not.toContain('late-stream-canary');
 });
+
+it('keeps execution stop, pause and approval resolution reachable when ordinary requests saturate', async () => {
+  const reached: string[] = [];
+  const priority: ControlHandlers['sessions.cancelTurn'] = async (request) => { reached.push(request.method); return await new Promise(() => {}); };
+  const f = fixture({ 'work.list': async () => await new Promise(() => {}), 'sessions.cancelTurn': priority,
+    'tasks.cancel': priority, 'tasks.pause': priority, 'approvals.resolve': priority });
+  try {
+    await f.init();
+    for (let i = 0; i < 28; i++) f.send('ordinary-' + i, 'work.list', { limit: 1 });
+    const scope = { operationId: '100:review', sessionId: 's', target: { targetId: 't', targetGeneration: 1 } };
+    f.send('stop', 'sessions.cancelTurn', scope);
+    f.send('task-stop', 'tasks.cancel', { ...scope, taskId: 't' });
+    f.send('pause', 'tasks.pause', { ...scope, taskId: 't' });
+    f.send('deny', 'approvals.resolve', { ...scope, approvalId: 'a', decision: 'denied' });
+    await setImmediate();
+    expect(reached).toEqual(['sessions.cancelTurn', 'tasks.cancel', 'tasks.pause', 'approvals.resolve']);
+    f.send('overflow', 'work.list', { limit: 1 }); await setImmediate();
+    expect(f.messages.find(m => m.id === 'overflow').error.code).toBe(-32009);
+  } finally { f.server.close(); await f.server.done; }
+});

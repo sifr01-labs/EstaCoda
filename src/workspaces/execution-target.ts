@@ -35,8 +35,9 @@ export function targetSessionMetadata(metadata: Record<string, unknown> | undefi
 /** One core database owns optional names and local targets. Source snapshots are
  * immutable, so alias moves/removal cannot retarget historical Sessions or Tasks. */
 export class ExecutionTargetStore extends WorkspaceRegistry {
-  constructor(options: { homeDir?: string; profileId: string }) {
+  constructor(options: { homeDir?: string; profileId: string; readonly?: boolean }) {
     super(options);
+    if (options.readonly) return;
     try { this.db.exec(`create table if not exists execution_targets (
       id text primary key, selection_key text not null unique, record_json text not null
     ); create table if not exists copy_manifests (target_id text primary key, record_json text not null)`); } catch (error) { this.close(); throw error; }

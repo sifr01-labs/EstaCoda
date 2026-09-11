@@ -148,3 +148,14 @@ it("survives a deterministic malformed-input corpus with safe errors", () => {
     catch (error) { expect((error as Error).message).toMatch(/^(Malformed JSON frame\.|Invalid control envelope\.)$/); }
   }
 });
+
+it('validates backend action hints and requires explanations for disabled actions', () => {
+  const request = validateControlRequest({ jsonrpc: '2.0', id: 'actions', method: 'work.get', params: { workId: work.id } }, context);
+  const validate = (actions: unknown) => validateControlResponse({ jsonrpc: '2.0', id: 'actions', result: { ...work, actions } }, request, context);
+  expect(() => validate([{ id: 'sessions.send', enabled: false, reason: 'Workspace trust required.' }])).not.toThrow();
+  expect(() => validate([{ id: 'tasks.retry', enabled: true, stepId: 'step' }])).not.toThrow();
+  expect(() => validate([{ id: 'sessions.send', enabled: false }])).toThrow();
+  expect(() => validate([{ id: 'shell.exec', enabled: true }])).toThrow();
+  expect(() => validate([{ id: 'sessions.send', enabled: true }, { id: 'sessions.send', enabled: true }])).toThrow();
+  expect(() => validate([{ id: 'sessions.send', enabled: true, command: 'untrusted' }])).toThrow();
+});

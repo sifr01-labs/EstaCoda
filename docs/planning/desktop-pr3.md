@@ -2,6 +2,8 @@
 
 Branch: `ame/desktop-foundation`, continuing Desktop PRs 1/2 and their review correction. Scope: private control service, authenticated supervisor readiness, bootstrap snapshots, isolated credential staging, safe state notifications and bounded replay. [Service reference](../architecture/desktop/control-service.md).
 
+The later [PR3/PR4 correction](desktop-pr3-pr4-corrections.md) extends priority admission to execution controls.
+
 ## Eight commit slices
 
 | Slice | Delivered and reviewed |

@@ -129,3 +129,17 @@ payload identity persists that generation alongside Task/Step/guidance fields
 where relevant. See [the service reference](control-service.md) for current
 handlers, limits and read-only projection behavior. The pure facade still imports
 no Node/Electron APIs.
+
+### PR 3/4 review correction
+
+Work and Inbox accept optional validated `actions`: semantic action ID, enabled
+state, a required reason when disabled, and optional origin Session/retry Step
+references. Unknown action IDs, duplicate action/Step pairs and unknown fields
+are rejected. Absence on an older projection means unknown, not authorized.
+Core dispatch remains authoritative. Navigation actions open the corresponding
+review surface; they do not authorize configuration, trust or Evolution changes.
+
+Session history pages are pinned by append high water marks and transcript rewrite
+revision. Cursors authenticate their snapshot/query/page size without accumulating
+server-side continuation entries. Metadata remains reconstructed from core state;
+no new Work database or execution owner is introduced.

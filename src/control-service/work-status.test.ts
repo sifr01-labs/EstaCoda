@@ -16,7 +16,7 @@ it('distinguishes partial, blocked, failed and cancelled outcomes from success a
 it('distinguishes Task waits and interrupted attempts without promoting them to completed Work', () => {
   for (const status of ['waiting_for_approval', 'waiting_for_host', 'waiting_for_input'] as const) {
     const task = { id: 't', profileId: 'p', originSessionId: 's', objective: 'Review', status, updatedAt: '2026-01-01' } as Task;
-    const work = taskWork(task, new Set(['s'])); expect(work.status).toBe('needs_attention'); expect(work.parentWorkId).toBe('session:s');
+    const work = taskWork(task, new Set(['s'])); expect(work.status).toBe(status === 'waiting_for_host' ? 'queued' : 'needs_attention'); expect(work.parentWorkId).toBe('session:s');
     for (const attemptStatus of ['interrupted', 'expired'] as const) {
       expect(attemptWork(work, { id: 'a', attemptNumber: 2, status: attemptStatus, updatedAt: '2026-01-01' } as TaskAttempt)).toMatchObject({ parentWorkId: 'task:t', status: 'partial' });
     }

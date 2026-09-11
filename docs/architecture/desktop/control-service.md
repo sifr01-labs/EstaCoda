@@ -64,14 +64,22 @@ The PR 4 lifecycle harness runs real Desktop CLI child processes against the aut
 
 Work is a projection of Sessions, Tasks, attempts and profile-owned schedules;
 there is no second lifecycle database. SQLite capture is read-only and does not
-migrate state. The alpha snapshot refuses more than 1,000 Sessions or Tasks,
-1,000 messages or display events per Session, or 8 MiB of projected state. Pages
-are capped at 100 items and 96,000 serialized item bytes, with up to 4,096 opaque
-continuations per snapshot. Large-profile incremental capture is a future
-extension; overflow requires recovery rather than a silently incomplete list.
+migrate state. Bootstrap captures navigation metadata and a recent Session activity
+preview capped at 1 MiB across the profile. Full transcripts load through bounded
+`work.activity` pages using append-only message/event high water marks. Core
+transcript rewrite revisions invalidate old history pages; new messages do not
+shift an existing page. Sessions and Tasks no longer have the 1,000-record cutoff,
+and long histories do not prevent access to Work or Inbox. Navigation metadata
+still scales with the number of Work items; this is not a large-profile load-test
+certification. Task activity retains the existing core result/plan summary limits.
+
+Pages are capped at 100 items and 96,000 serialized item bytes. Opaque continuations
+are authenticated with a fresh per-snapshot key and bind query, offset and page
+size. Repeated reads are stable and forward paging does not consume a token cache.
 
 Completion comes from canonical outcome records. A new user turn cannot inherit
-an older completion. Queued, active, blocked, partial, failed and cancelled states
+an older completion. New outcomes reference the canonical user turn; compression
+preserves that identity, and ambiguous legacy timestamp ties remain unconfirmed. Queued, active, blocked, partial, failed and cancelled states
 remain distinct; completion and result availability do not prove external effects.
 Display text is redacted and bounded. Unavailable usage/cost is null.
 
@@ -82,3 +90,16 @@ Desktop exposes no reusable approval grants. Task approvals use TaskApprovalServ
 channel continuations stay in ChannelGateway. App exit leaves the owner running.
 Supervisor restart expires orphaned Desktop waits rather than replaying an action.
 Stop/deny and durable Task controls preserve their core lifecycle semantics.
+
+Work and Inbox expose backend-computed `actions` with enabled/disabled state and
+fixed disabled reasons. Task control hints include the origin Session and optional
+retry Step, so independent Tasks need no renderer inference. Retry hints account
+for waiting state and Attempt limits. Target checks use the core read-only target
+store; trust/setup blockers disable continuation hints while Stop/Pause/Reject
+remain available. Hints are not grants: the owning core service revalidates every
+mutation. Older projections without `actions` mean unknown availability.
+
+Blocked Session outcomes appear in Inbox, and `waiting_for_host` Tasks display as
+queued with their wait reason. Execution cancel, Task pause/cancel, and approval
+resolution share the reserved request capacity with RPC cancellation/unsubscribe;
+ordinary reads cannot exhaust those slots.

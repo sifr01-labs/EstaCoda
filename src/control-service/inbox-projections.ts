@@ -1,3 +1,7 @@
+import { setImmediate } from 'node:timers/promises';
+import { ExecutionTargetStore } from '../workspaces/execution-target.js';
+import { allTasks } from './task-projections.js';
+import { constrainActions, inboxActions, action } from './action-projections.js';
 import type { SQLiteSessionDB } from '../session/sqlite-session-db.js';
 import { SQLiteTaskStore } from '../tasks/sqlite-task-store.js';
 import { validPendingAction } from '../security/pending-action-approval.js';
@@ -7,12 +11,14 @@ import type { WorkState } from './work-snapshot.js';
 import { safeText, timestamp } from './work-projections.js';
 import type { CronJob } from '../cron/cron-store.js';
 
-export async function appendInbox(state: WorkState, sessions: SQLiteSessionDB, input: { homeDir: string; profileId: string }, jobs: CronJob[]): Promise<void> {
+export async function appendInbox(state: WorkState, sessions: SQLiteSessionDB, input: { homeDir: string; profileId: string }, jobs: CronJob[], signal?: AbortSignal): Promise<void> {
   const inbox = state.inbox ??= [], store = new SQLiteTaskStore({ db: sessions.db, profileId: input.profileId });
   const add = (id: string, workId: string | null, kind: InboxProjection['kind'], title: string, summary: string, createdAt: number) => {
     inbox.push({ id, profileId: input.profileId, workId, kind, title, summary: safeText(summary), createdAt, approval: null });
   };
-  for (const task of store.listTasks({ limit: 1000 })) {
+  let visited = 0;
+  for (const task of allTasks(store)) {
+    if (++visited % 32 === 0) { await setImmediate(); signal?.throwIfAborted(); }
     const workId = `task:${task.id}`;
     if (task.waitReason) add(`wait:${task.id}`, workId, task.waitReason.kind === 'eligible_host' ? 'setup' : 'input', 'Task needs attention', task.waitReason.summary, timestamp(task.waitReason.requestedAt));
     if (task.status === 'failed' || task.status === 'partial') add(`failure:${task.id}`, workId, 'failure', task.status === 'partial' ? 'Task partially completed' : 'Task failed',
@@ -22,9 +28,10 @@ export async function appendInbox(state: WorkState, sessions: SQLiteSessionDB, i
     add(`delivery:${delivery.id}`, `task:${delivery.taskId}`, 'delivery', 'Result delivery failed', 'The result was retained. Review the delivery destination before retrying.', timestamp(delivery.createdAt));
   }
   const approvals = sessions.db.query<{ id: string; session_id: string; channel: string; approval_kind: string; command_preview: string; request_payload: string | null; requested_at: string }>(
-    "select id, session_id, channel, approval_kind, substr(command_preview,1,2048) as command_preview, request_payload, requested_at from pending_approvals where profile_id=? and status='pending' and expires_at>? order by requested_at, id limit 1001"
+    "select id, session_id, channel, approval_kind, substr(command_preview,1,2048) as command_preview, request_payload, requested_at from pending_approvals where profile_id=? and status='pending' and expires_at>? order by requested_at, id"
   ).all(input.profileId, new Date().toISOString());
   for (const row of approvals) {
+    if (++visited % 32 === 0) { await setImmediate(); signal?.throwIfAborted(); }
     const session = await sessions.getSessionForProfile(row.session_id, input.profileId);
     const target = session?.executionTarget;
     if (!session || !target) continue;
@@ -45,11 +52,12 @@ export async function appendInbox(state: WorkState, sessions: SQLiteSessionDB, i
     const work = state.work.find((work) => work.id === workId); if (work) work.status = 'needs_attention';
   }
   const uncertain = sessions.db.query<{ operation_id: string; session_id: string; accepted_at: number }>(
-    "select operation_id, session_id, accepted_at from session_control_receipts where profile_id=? and status='uncertain' order by accepted_at desc limit 1000").all(input.profileId);
+    "select operation_id, session_id, accepted_at from session_control_receipts where profile_id=? and status='uncertain' order by accepted_at desc").all(input.profileId);
   for (const row of uncertain) add(`uncertain:${row.operation_id}`, `session:${row.session_id}`, 'input', 'Review interrupted operation', 'The previous owner could not confirm this operation. Inspect its effects before retrying.', row.accepted_at);
   const trust = new WorkspaceTrustStore(input);
   const trustByPath = new Map<string, boolean>();
   for (const work of state.work.filter((work) => work.kind === 'session')) {
+    if (++visited % 32 === 0) { await setImmediate(); signal?.throwIfAborted(); }
     const session = await sessions.getSessionForProfile(work.canonicalId, input.profileId);
     if (session?.executionTarget) {
       let trusted = false;
@@ -59,9 +67,37 @@ export async function appendInbox(state: WorkState, sessions: SQLiteSessionDB, i
       } catch { /* unavailable path */ }
       if (!trusted) add(`trust:${session.id}`, work.id, 'trust', 'Workspace trust required', 'Review workspace trust before continuing execution.', work.updatedAt);
     }
+    if (work.status === 'needs_attention' && !inbox.some(item => item.workId === work.id && ['approval', 'input'].includes(item.kind)))
+      add(`session-input:${work.canonicalId}`, work.id, 'input', 'Work needs your input', work.reason ?? 'Review the latest turn and provide the information needed to continue.', work.updatedAt);
     if (work.status === 'failed' || work.status === 'partial') add(`session-failure:${work.canonicalId}`, work.id, 'failure', 'Work needs review', 'Review the final outcome and evidence before continuing.', work.updatedAt);
   }
   appendSchedules(state, sessions, input.profileId, jobs, add);
+  const configured = !inbox.some(item => ['setup:model', 'setup:credential', 'setup:authorization', 'setup:repair'].includes(item.id));
+  const targetStates = new Map<string, boolean>();
+  for (const work of state.work) {
+    if (++visited % 32 === 0) { await setImmediate(); signal?.throwIfAborted(); }
+    const binding = work.kind === 'task' ? store.getTask(work.canonicalId)?.executionTarget
+      : work.kind === 'session' ? (await sessions.getSessionForProfile(work.canonicalId, input.profileId))?.executionTarget : undefined;
+    const path = binding?.workspace.canonicalPath;
+    let trusted = false;
+    if (path) { try { trusted = trustByPath.get(path) ?? await trust.isTrusted(path); trustByPath.set(path, trusted); } catch { /* unavailable */ } }
+    if (trusted && binding && path) {
+      const key = JSON.stringify(binding);
+      if (!targetStates.has(key)) {
+        let targets: ExecutionTargetStore | undefined;
+        try { targets = new ExecutionTargetStore({ ...input, readonly: true }); await targets.validate(binding, path); targetStates.set(key, true); }
+        catch { targetStates.set(key, false); }
+        finally { targets?.close(); }
+      }
+      trusted = targetStates.get(key)!;
+    }
+    constrainActions(work, trusted, configured);
+    for (const item of inbox.filter(item => item.workId === work.id && item.approval)) {
+      if (!trusted || !configured) item.approval!.decisions = ['denied'];
+    }
+    work.actions ??= [action('inspect_result')];
+  }
+  for (const item of inbox) item.actions = inboxActions(item, state.work.find(work => work.id === item.workId));
 }
 function appendSchedules(state: WorkState, sessions: SQLiteSessionDB, profileId: string, jobs: CronJob[], add: (id: string, workId: string | null, kind: InboxProjection['kind'], title: string, summary: string, createdAt: number) => void): void {
   const exists = sessions.db.query("select name from sqlite_master where type='table' and name='cron_executions'").get();

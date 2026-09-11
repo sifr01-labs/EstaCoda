@@ -23,7 +23,7 @@ import {
 import type { InitialTaskHostLeaseInput, TaskStore } from "./task-store.js";
 import { assertSpendingLimit, cloneSpendingLimit, type SpendingLimit } from "../contracts/budget.js";
 
-const MAX_GUIDANCE_RECORDS = 64;
+export const MAX_GUIDANCE_RECORDS = 64;
 
 export type FixedTaskStepInput = Pick<
   TaskStep,
