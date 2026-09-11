@@ -1,3 +1,6 @@
+import{LibraryView}from'./components/library-view.js';
+import{ConnectionsView}from'./components/connections-view.js';
+import{BackgroundView}from'./components/background-view.js';
 import{useEffect,useRef,useState,type ReactNode}from'react';
 import type{DesktopAdapter}from'./adapter.js';import{emptySnapshot}from'./adapter.js';
 import{Topline,Button,Icon}from'./components/primitives.js';
@@ -28,6 +31,9 @@ export function App({adapter}:{adapter:DesktopAdapter}){
  if(page==='appearance')content=<AppearanceView back={()=>setPage('work')}/>;
  else if(page==='settings')content=<><Topline label="Settings"/><div className="ec-page"><h1>Settings</h1><p className="ec-pageintro">Make EstaCoda yours.</p>{(['appearance','models'] as const).map(name=><button key={name} className="ec-settingslink" onClick={()=>setPage(name)}><Icon name={name==='appearance'?'palette':'cpu'}/><span><b>{name==='appearance'?'Appearance':'Models & providers'}</b><small>{name==='appearance'?'Themes, color mode, and density':'Model routes and provider setup'}</small></span><Icon name="chevron-right"/></button>)}</div></>;
  else if(page==='search')content=<><Topline label="Search"/><div className="ec-page"><h1>Find your work.</h1><div className="ec-searchfield"><Icon name="search"/><input type="search" aria-label="Search chats" placeholder="Search chats…" autoFocus value={query} onChange={event=>setQuery(event.target.value)}/></div>{searchResults.map(item=><button key={item.id} className="ec-searchresult" onClick={()=>select(item.id)}><Icon name={item.status==='draft'?'square-pen':'message-square'}/><span>{item.title}<small>payments-api · {item.status==='draft'?'Draft':adapter.fixture?.work[item.id]?.displayId}</small></span><Icon name="arrow-up-right"/></button>)}{searchResults.length===0&&<p className="ec-footnote">No matching chats. Try a different search.</p>}</div></>;
+ else if(page==='library')content=<LibraryView fixture={adapter.fixture} select={select}/>;
+ else if(page==='connections')content=<ConnectionsView fixture={fixture} inbox={()=>setPage('inbox')}/>;
+ else if(page==='background')content=<BackgroundView snapshot={snapshot} fixture={adapter.fixture} select={select}/>;
  else if(page==='inbox')content=<InboxView items={snapshot.inbox.items} fixture={fixture} select={select}/>;
  else if(page==='work')content=<WorkView key={selected} adapter={adapter} work={work} draft={draft} change={changeDraft} pinned={pinned.includes(selected)} togglePin={()=>togglePin(selected)} models={()=>setPage('models')} profile={snapshot.profile.label} attention={snapshot.inbox.items.filter(item=>item.workId===selected)}/>;
  else content=<><Topline label={page[0]!.toUpperCase()+page.slice(1)}/><div className="ec-page"><h1>{page[0]!.toUpperCase()+page.slice(1)}</h1><p className="ec-pageintro">This view is being connected.</p></div></>;
