@@ -1,3 +1,4 @@
+import {ExecutionTargetStore} from "../workspaces/execution-target.js";
 import { DockerContainer } from "../execution/docker-container.js";
 import { DockerWorkspaceFiles } from "../execution/docker-workspace-files.js";
 import { DockerProcessScope } from "../execution/docker-processes.js";
@@ -27,6 +28,16 @@ export async function acquireRuntimeContext(input: {
     durable: sessionDb instanceof SQLiteSessionDB, sourceWorkspace: options.sourceWorkspace,
     allowLegacyLocalBinding: options.allowLegacyLocalBinding, metadata: options.sessionMetadata,
     spendingLimit: options.budgets?.session });
+  const binding=(await sessionDb.getSession(sessionId))?.executionTarget;
+  let releaseTarget: (()=>void)|undefined;
+  if(binding){
+    const targets=new ExecutionTargetStore({homeDir:options.homeDir,profileId});
+    try{
+      const release=await targets.borrow(binding);let released=false;
+      releaseTarget=()=>{if(!released){release();targets.close();released=true;}};
+      rollback.afterRelease(releaseTarget);
+    }catch(error){targets.close();throw error;}
+  }
   const executionOwner = await RuntimeSessionOwner.acquire(sessionDb, sessionId, profileId, { workspaceRoot, homeDir: options.homeDir });
   rollback.afterRelease(() => executionOwner.release());
   const policy = await selectedExecutionPolicy({ profileId, homeDir: options.homeDir }, options.requestedExecutionPolicy);
@@ -39,5 +50,5 @@ export async function acquireRuntimeContext(input: {
   const executionLease = hostEnvironment.acquire({ profileId, sessionId,
     surface: String(options.sessionMetadata?.originSurface ?? "local") });
   rollback.defer(() => executionLease.release());
-  return { executionOwner, profileId, workspaceRoot, hostEnvironment, executionLease, executionFacts: hostEnvironment.facts };
+  return { executionOwner, releaseTarget, profileId, workspaceRoot, hostEnvironment, executionLease, executionFacts: hostEnvironment.facts };
 }

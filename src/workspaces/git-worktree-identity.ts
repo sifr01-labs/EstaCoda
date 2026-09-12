@@ -33,3 +33,9 @@ export function verifyWorktreeIdentity(target:ManagedGitWorktreeTarget):void{
  const entries=targetGit(target.source.identity.canonicalPath,['worktree','list','--porcelain','-z']).split('\0');
  if(!entries.includes(`worktree ${target.workspace.canonicalPath}`))throw new Error('Worktree is no longer registered.');
 }
+
+export function disabledGitFilters(root:string):string[]{
+ const names=targetGit(root,['config','--null','--name-only','--list']).split('\0');
+ const filters=new Set(names.filter(name=>/^filter\..+\.(?:process|smudge|clean|required)$/u.test(name)).map(name=>name.replace(/\.[^.]+$/u,'')));
+ return [...filters].flatMap(name=>['-c',`${name}.process=`,'-c',`${name}.smudge=`,'-c',`${name}.clean=`,'-c',`${name}.required=false`]);
+}

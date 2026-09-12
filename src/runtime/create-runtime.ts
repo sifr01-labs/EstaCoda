@@ -456,7 +456,7 @@ async function buildRuntime(options: RuntimeOptions, rollback: ResourceCleanup):
     if (closeSessionDbOnDispose) await (sessionDb as { close?: () => void | Promise<void> }).close?.();
   };
   rollback.afterRelease(closeSessionDb);
-  const { executionOwner, workspaceRoot, hostEnvironment, executionLease, executionFacts } = await acquireRuntimeContext({
+  const { executionOwner, releaseTarget, workspaceRoot, hostEnvironment, executionLease, executionFacts } = await acquireRuntimeContext({
     options, sessionDb, sessionId, rollback
   });
   const taskWorkspace = taskStore === undefined ? undefined : await resolveTaskWorkspaceBinding(workspaceRoot);
@@ -1547,6 +1547,7 @@ async function buildRuntime(options: RuntimeOptions, rollback: ResourceCleanup):
         await hostEnvironment.retire(async () => {
           await resources.release();
           executionOwner.release();
+          releaseTarget?.();
           await closeSessionDb();
         });
       })();

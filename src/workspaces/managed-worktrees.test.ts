@@ -33,3 +33,18 @@ it('freezes HEAD at review and disables checkout hooks and smudge filters',async
  const {readFile,stat}=await import('node:fs/promises');expect(await readFile(join(target.workspace.canonicalPath,'file'),'utf8')).toBe('original\n');await expect(stat(marker)).rejects.toMatchObject({code:'ENOENT'});
  git(['config','filter.bad.required','false']);const stale=await store.review(targetBinding(source));git(['-c','user.name=Test','-c','user.email=test@example.invalid','commit','--allow-empty','-qm','Next']);await expect(store.create(stale,true)).rejects.toThrow('changed after review');
 });
+it('archives without deleting dirty data, blocks borrowers and only cleans owned clean worktrees',async()=>{
+ await new WorkspaceTrustStore({homeDir}).grant(root);const source=await store.acquireLocal(root);
+ const target=await store.create(await store.review(targetBinding(source)),true);const ref={targetId:target.id,targetGeneration:1};
+ const release=await store.borrow(targetBinding(target));
+ const archived=store.archive(ref);const next={targetId:target.id,targetGeneration:archived.generation};
+ await expect(store.borrow(targetBinding(target))).rejects.toThrow('stale');
+ await expect(store.cleanup(next)).rejects.toThrow('borrowers');release();
+ await writeFile(join(target.workspace.canonicalPath,'untracked'),'valuable');
+ await expect(store.cleanup(next)).rejects.toThrow('Dirty');
+ await rm(join(target.workspace.canonicalPath,'untracked'));
+ expect((await store.cleanup(next)).cleanup).toBe('removed');
+ expect(git(['branch','--list',target.creation.branch])).toContain(target.creation.branch);
+ expect(git(['status','--porcelain'])).toBe('');
+ await expect(store.cleanup(next)).rejects.toThrow('stale');
+});

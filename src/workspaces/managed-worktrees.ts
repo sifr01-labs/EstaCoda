@@ -7,7 +7,7 @@ import {WorkspaceTrustStore} from '../security/workspace-trust-store.js';
 import {ExecutionTargetStore, targetBinding} from './execution-target.js';
 import {resolveWorkspaceDirectory} from './workspace-registry.js';
 import {checkStamp, stamp, separateRoots} from './copy-files.js';
-import {repositoryIdentity, targetGit, verifyWorktreeIdentity} from './git-worktree-identity.js';
+import {repositoryIdentity, targetGit, verifyWorktreeIdentity, disabledGitFilters} from './git-worktree-identity.js';
 
 export type WorktreeCreationReview = {
   operationId:string; source:ExecutionTargetBinding; destination:string; branch:string; baseCommit:string;
@@ -67,9 +67,7 @@ export class ManagedWorktrees extends ExecutionTargetStore {
       targetGit(source.workspace.canonicalPath,['worktree','add','--no-checkout','-b',review.branch,review.destination,review.baseCommit]);
       // Local filters can execute programs during checkout. Disable every configured
       // filter (including LFS) for managed materialization; no download is implied.
-      const names=targetGit(review.destination,['config','--null','--name-only','--list']).split('\0');
-      const filters=new Set(names.filter(name=>/^filter\..+\.(?:process|smudge|clean|required)$/u.test(name)).map(name=>name.replace(/\.[^.]+$/u,'')));
-      const overrides=[...filters].flatMap(name=>['-c',`${name}.process=`,'-c',`${name}.smudge=`,'-c',`${name}.clean=`,'-c',`${name}.required=false`]);
+      const overrides=disabledGitFilters(review.destination);
       targetGit(review.destination,[...overrides,'-c','core.sparseCheckout=false','reset','--hard',review.baseCommit]);
       const workspace=await resolveWorkspaceDirectory(review.destination);
       const gitDirectory=realpathSync(targetGit(workspace.canonicalPath,['rev-parse','--absolute-git-dir']).trim());
@@ -89,6 +87,47 @@ export class ManagedWorktrees extends ExecutionTargetStore {
       this.saveReceipt({operationId:review.operationId,state:'created',targetId});
       return target;
     }catch(error){this.saveReceipt({operationId:review.operationId,state:'attention',targetId});throw error;}
+  }
+  private owned(reference:{targetId:string;targetGeneration:number}):ManagedGitWorktreeTarget{
+    const target=this.getTarget(reference.targetId);
+    if(!target||target.kind!=='git-worktree'||target.generation!==reference.targetGeneration||target.creation.owner!=='estacoda'||target.workspace.canonicalPath!==join(this.managedRoot(),target.creation.operationId))throw new Error('Managed target is missing, stale or not owned by this profile.');
+    return target;
+  }
+  dirty(reference:{targetId:string;targetGeneration:number}):boolean{
+    const target=this.owned(reference);verifyWorktreeIdentity(target);
+    return targetGit(target.workspace.canonicalPath,[...disabledGitFilters(target.workspace.canonicalPath),'status','--porcelain=v1','-z','--untracked-files=all','--ignored=matching']).length>0;
+  }
+  archive(reference:{targetId:string;targetGeneration:number}):ManagedGitWorktreeTarget{
+    return this.transaction(()=>{
+      const target=this.owned(reference);
+      if(target.status!=='available')throw new Error('Target is already archived.');
+      // Archive is a metadata fence even if the backing path has gone missing.
+      const next={...target,status:'archived' as const,generation:target.generation+1};
+      this.db.query('update execution_targets set record_json=? where id=?').run(JSON.stringify(next),target.id);
+      return next;
+    });
+  }
+  async cleanup(reference:{targetId:string;targetGeneration:number}):Promise<ManagedGitWorktreeTarget>{
+    const original=this.owned(reference);
+    if(original.status!=='archived'||original.cleanup!=='retained')throw new Error('Archive this target before cleanup.');
+    this.assertNoBorrowers(original.id);
+    verifyWorktreeIdentity(original);
+    if(this.dirty(reference))throw new Error('Dirty worktree retained. Commit or preserve all tracked, untracked and ignored files first.');
+    const trust=new WorkspaceTrustStore(this.input);
+    if(!await trust.isTrusted(original.workspace.canonicalPath)||!await trust.isTrusted(original.source.identity.canonicalPath))throw new Error('Source and worktree trust are required for cleanup.');
+    return this.transaction(()=>{
+      const target=this.owned(reference);
+      this.assertNoBorrowers(target.id);verifyWorktreeIdentity(target);
+      if(this.dirty(reference))throw new Error('Dirty worktree retained.');
+      // No force removal, branch deletion, recursive fallback, or source cleanup.
+      targetGit(target.source.identity.canonicalPath,[...disabledGitFilters(target.workspace.canonicalPath),'worktree','remove','--',target.workspace.canonicalPath]);
+      const next={...target,cleanup:'removed' as const,generation:target.generation+1};
+      this.db.query('update execution_targets set record_json=? where id=?').run(JSON.stringify(next),target.id);
+      return next;
+    });
+  }
+  private assertNoBorrowers(targetId:string):void{
+    if(this.db.query<{n:number}>('select count(*) as n from target_borrowers where target_id=?').get(targetId)!.n)throw new Error('Target still has execution or inspection borrowers. Settle them before cleanup; interrupted borrowers require recovery.');
   }
   private saveReceipt(receipt:WorktreeCreationReceipt):void{
     this.transaction(()=>this.db.query('update worktree_operations set receipt_json=? where id=?').run(JSON.stringify(receipt),receipt.operationId));

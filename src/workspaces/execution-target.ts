@@ -41,7 +41,7 @@ export class ExecutionTargetStore extends WorkspaceRegistry {
     if (options.readonly) return;
     try { this.db.exec(`create table if not exists execution_targets (
       id text primary key, selection_key text not null unique, record_json text not null
-    ); create table if not exists copy_manifests (target_id text primary key, record_json text not null)`); } catch (error) { this.close(); throw error; }
+    ); create table if not exists target_borrowers (id text primary key, target_id text not null, pid integer not null); create table if not exists copy_manifests (target_id text primary key, record_json text not null)`); } catch (error) { this.close(); throw error; }
   }
 
   listTargets(limit=100): ExecutionTarget[] {
@@ -118,6 +118,19 @@ export class ExecutionTargetStore extends WorkspaceRegistry {
       this.db.query("insert into execution_targets values (?, ?, ?)").run(target.id, key, JSON.stringify(target));
       return target;
     });
+  }
+
+  /** Durable cleanup guard shared by runtime and future inspection/PTY consumers.
+   * A dead process leaves a recovery blocker; PID expiry never proves its children settled. */
+  async borrow(binding: ExecutionTargetBinding): Promise<() => void> {
+    await this.validate(binding, binding.workspace.canonicalPath);
+    const id = randomUUID();
+    this.transaction(() => {
+      const target = this.getTarget(binding.targetId);
+      if (target?.status !== "available" || target.generation !== binding.targetGeneration) throw new Error("Target changed before acquisition.");
+      this.db.query("insert into target_borrowers values (?,?,?)").run(id, target.id, process.pid);
+    });
+    return () => { this.db.query("delete from target_borrowers where id=?").run(id); };
   }
 
   async validate(value: ExecutionTargetBinding, path: string): Promise<ExecutionTarget> {
