@@ -14,16 +14,18 @@ export async function inspectFiles<M extends 'files.list'|'files.preview'>(input
    const {bytes,size}=await lease.files.preview(checked.path),binary=isLikelyBinary(bytes);
    return {path:params.path,size,binary,text:binary?null:bytes.toString('utf8'),truncated:size>bytes.length} as MethodContracts[M]['result'];
   }
-  const entries=await lease.files.readdir(checked.path,{withFileTypes:true}),items=[];
+  const cursor=(params as MethodContracts['files.list']['params']).cursor;
+  if(cursor)inspectionPath(cursor);
+  const entries=(await lease.files.readdir(checked.path,{withFileTypes:true})).sort((a,b)=>a.name<b.name?-1:a.name>b.name?1:0),items=[];
   let truncated=false;
   for(const entry of entries){
    signal.throwIfAborted();const child=params.path==='.'?entry.name:params.path+'/'+entry.name;
    try{inspectionPath(child);}catch{continue;}
-   if(explainPathBlock(root,resolve(root,child)))continue;
+   if(explainPathBlock(root,resolve(root,child))||cursor&&child<=cursor)continue;
    if(items.length===32){truncated=true;break;}
    items.push({path:child,name:entry.name,kind:entry.isSymbolicLink()?'symlink' as const:entry.isDirectory()?'directory' as const:entry.isFile()?'file' as const:'special' as const});
   }
   const again=await lease.files.resolvePath(path,{allowDirectory:true,forbidSymlinks:true});if(!again.ok)throw new Error('Directory changed.');
-  return {items,truncated} as MethodContracts[M]['result'];
+  return {items,truncated,...(truncated?{nextCursor:items.at(-1)!.path}:{})} as MethodContracts[M]['result'];
  });
 }

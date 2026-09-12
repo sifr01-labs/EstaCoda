@@ -98,7 +98,7 @@ const contracts: { [M in keyof MethodContracts]: { params: Check; result: Check 
   "terminal.release":{params:shape({capabilityId:id,settled:v=>v===true}),result:shape({released:boolean})},
   "diff.list":{params:shape({target}),result:shape({items:array(shape({path:text(1024,1),previousPath:nullable(text(1024,1)),stage:choice(['staged','unstaged','untracked']),status:choice(['added','modified','deleted','renamed','copied','type_changed','conflicted']),binary:nullable(boolean),previewable:boolean}),32),truncated:boolean})},
   "diff.patch":{params:shape({target,path:text(1024,1),stage:choice(['staged','unstaged','untracked'])}),result:shape({path:text(1024,1),stage:choice(['staged','unstaged','untracked']),binary:boolean,text:nullable(text(16384)),truncated:boolean})},
-  "files.list":{params:shape({target,path:text(1024,1)}),result:shape({items:array(shape({path:text(1024,1),name:text(255,1),kind:choice(['file','directory','symlink','special'])})),truncated:boolean})},
+  "files.list":{params:shape({target,path:text(1024,1)},{cursor:text(1024,1)}),result:shape({items:array(shape({path:text(1024,1),name:text(255,1),kind:choice(['file','directory','symlink','special'])})),truncated:boolean},{nextCursor:text(1024,1)})},
   "files.preview":{params:shape({target,path:text(1024,1)}),result:shape({path:text(1024,1),size:integer(),binary:boolean,text:nullable(text(16384)),truncated:boolean})},
   "models.reviewConfigured": {params:shape({windowId:id,generation:integer(1),providerId:id,modelId:text(200,1),role:choice(["primary","fallback","auxiliary"])},{slot:choice(AUXILIARY_SLOTS),fallbackToMain:boolean}),result:modelRouteDraft},
   "models.validateRoute": {params:shape({route:candidateRoute}),result:shape({valid:v=>v===true})},

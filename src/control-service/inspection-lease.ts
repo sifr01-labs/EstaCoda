@@ -1,3 +1,4 @@
+import {lstat} from 'node:fs/promises';
 import {randomUUID} from 'node:crypto';
 import {ExecutionTargetStore,targetBinding} from '../workspaces/execution-target.js';
 import {WorkspaceTrustStore} from '../security/workspace-trust-store.js';
@@ -9,13 +10,15 @@ import {DockerProcessScope} from '../execution/docker-processes.js';
 import type {TargetReference} from '../contracts/desktop-control/index.js';
 /** Independent inspection owner; shares target identity and execution policy, never a Session owner. */
 export async function withInspection<T>(input:{homeDir:string;profileId:string},reference:TargetReference,signal:AbortSignal,read:(lease:ExecutionLease,root:string)=>Promise<T>):Promise<T>{
- const store=new ExecutionTargetStore(input);let release:(()=>void)|undefined,environment:HostEnvironment|undefined,lease:ExecutionLease|undefined;
+ const store=new ExecutionTargetStore(input);let stamp:{dev:number;ino:number}|undefined;let release:(()=>void)|undefined,environment:HostEnvironment|undefined,lease:ExecutionLease|undefined;
  const verify=async()=>{
   signal.throwIfAborted();const target=store.getTarget(reference.targetId);
   if(!target||target.generation!==reference.targetGeneration)throw new Error('Target unavailable.');
   await store.validate(targetBinding(target),target.workspace.canonicalPath,signal);
   if(!await new WorkspaceTrustStore(input).isTrusted(target.workspace.canonicalPath))throw new Error('Workspace trust required.');
-  signal.throwIfAborted();return target;
+  const info=await lstat(target.workspace.canonicalPath);
+  if(!info.isDirectory()||info.isSymbolicLink()||stamp&&(stamp.dev!==info.dev||stamp.ino!==info.ino))throw new Error('Target directory changed.');
+  stamp??={dev:info.dev,ino:info.ino};signal.throwIfAborted();return target;
  };
  try{
   const target=await verify();release=await store.borrow(targetBinding(target));

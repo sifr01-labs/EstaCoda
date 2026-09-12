@@ -32,7 +32,7 @@ export type MethodContracts = {
   "terminal.release":{params:{capabilityId:string;settled:true};result:{released:boolean}};
   "diff.list":{params:{target:TargetReference};result:{items:{path:string;previousPath:string|null;stage:'staged'|'unstaged'|'untracked';status:'added'|'modified'|'deleted'|'renamed'|'copied'|'type_changed'|'conflicted';binary:boolean|null;previewable:boolean}[];truncated:boolean}};
   "diff.patch":{params:{target:TargetReference;path:string;stage:'staged'|'unstaged'|'untracked'};result:{path:string;stage:'staged'|'unstaged'|'untracked';binary:boolean;text:string|null;truncated:boolean}};
-  "files.list":{params:{target:TargetReference;path:string};result:{items:{path:string;name:string;kind:'file'|'directory'|'symlink'|'special'}[];truncated:boolean}};
+  "files.list":{params:{target:TargetReference;path:string;cursor?:string};result:{nextCursor?:string;items:{path:string;name:string;kind:'file'|'directory'|'symlink'|'special'}[];truncated:boolean}};
   "files.preview":{params:{target:TargetReference;path:string};result:{path:string;size:number;binary:boolean;text:string|null;truncated:boolean}};
   "targets.inspectOperation":{params:{operationId:string};result:TargetOperation};
   "targets.execute":{params:{operationId:string;action:'archive'|'cleanup';target:TargetReference;confirmed:true};result:TargetOperation};
