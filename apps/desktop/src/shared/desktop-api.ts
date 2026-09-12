@@ -77,7 +77,12 @@ export type DesktopTargetsApi={
  execute(action:'archive'|'cleanup',target:import('@estacoda/control-protocol').TargetReference,confirmed:true):Promise<MethodContracts['targets.execute']['result']>;
  operation():Promise<MethodContracts['targets.inspectOperation']['result']|null>;
 };
+export type DesktopFilesApi={
+ list(input:MethodContracts['files.list']['params']):Promise<MethodContracts['files.list']['result']>;
+ preview(input:MethodContracts['files.preview']['params']):Promise<MethodContracts['files.preview']['result']>;
+};
 export type DesktopApi = {
+  readonly files?:DesktopFilesApi;
   readonly targets?:DesktopTargetsApi;
   readonly connections?:DesktopConnectionsApi;
   readonly work?:DesktopWorkApi;

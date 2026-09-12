@@ -1,0 +1,10 @@
+import {test,expect} from '@playwright/test';
+test('browses files without rendering HTML, clears disconnected data and restores focus',async({page})=>{
+ await page.goto('/fixture.html');await page.evaluate(async()=>{
+ const reactPath='/node_modules/.vite/deps/react.js',domPath='/node_modules/.vite/deps/react-dom_client.js',componentPath='/src/renderer/components/file-browser.tsx';
+ const React=(await import(reactPath)).default,{createRoot}=(await import(domPath)).default,{FileBrowser}=await import(componentPath);
+ const host=document.querySelector('#ec-branded-workspace .ec-window')!;(host as HTMLElement).style.minHeight='740px';host.innerHTML='<button id="openfiles">Open files</button><div id="files-test"></div>';
+ const state={disconnect:()=>{}};const api={onSnapshot:(listener:any)=>{state.disconnect=()=>listener({status:'disconnected'});return()=>{};},files:{list:async()=>({items:[{name:'app.ts',path:'app.ts',kind:'file'},{name:'link',path:'link',kind:'symlink'}],truncated:false}),preview:async()=>({path:'app.ts',size:30,binary:false,text:'<img src=x onerror=alert(1)>',truncated:true})}};
+ const root=createRoot(document.querySelector('#files-test')!);document.getElementById('openfiles')!.onclick=()=>root.render(React.createElement(FileBrowser,{api,target:{targetId:'t',targetGeneration:1},close:()=>root.render(null)}));(window as any).fileTest=state;
+ });await page.getByRole('button',{name:'Open files'}).click();await page.getByRole('button',{name:'app.ts',exact:true}).click();await expect(page.getByText('<img src=x onerror=alert(1)>')).toBeVisible();await expect(page.getByRole('button',{name:'link (symlink)'})).toBeDisabled();await expect(page.getByText(/Preview truncated/)).toBeVisible();await page.evaluate(()=>(window as any).fileTest.disconnect());await expect(page.getByText(/Files disconnected/)).toBeVisible();await expect(page.getByText('<img src=x onerror=alert(1)>')).toHaveCount(0);await page.keyboard.press('Escape');await expect(page.getByRole('dialog')).toHaveCount(0);await expect(page.getByRole('button',{name:'Open files'})).toBeFocused();
+});

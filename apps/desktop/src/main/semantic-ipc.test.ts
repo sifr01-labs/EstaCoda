@@ -43,3 +43,10 @@ it('accepts bounded target paging and direct lookup without accepting paths or c
  expect(()=>validateSemanticPayload('workTargets',{target})).not.toThrow();
  for(const payload of [{cursor:'../escape'},{target,profileId:'other'},{path:'/tmp/source'},{target:{...target,targetGeneration:0}}])expect(()=>validateSemanticPayload('workTargets',payload)).toThrow();
 });
+it('accepts only target-scoped read inputs, never renderer filesystem authority',()=>{
+ const payload={target:{targetId:'target',targetGeneration:1},path:'src/app.ts'};
+ for(const method of ['filesList','filesPreview']){
+  expect(()=>validateSemanticPayload(method,payload)).not.toThrow();
+  for(const extra of [{profileId:'other'},{root:'/private'},{command:'cat'},{write:true}])expect(()=>validateSemanticPayload(method,{...payload,...extra})).toThrow();
+ }
+});
