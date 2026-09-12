@@ -76,6 +76,8 @@ const subscribeResult: Check = (v) => shape({ state: choice(["subscribed"]), sub
   shape({ state: choice(["snapshot_required"]), reason: choice(["instance_changed", "stream_changed", "cursor_expired", "overflow"]) })(v);
 const initialize: Check = (v) => { try { assertInitializeParams(v); return true; } catch { return false; } };
 const candidateRoute=shape({providerId:id,modelId:text(200,1),endpoint:text(2048,1),authMethod:choice(['api_key','oauth','none']),apiMode:choice(['openai_chat_completions','openai_responses','custom_openai_compatible']),allowPrivateEndpoint:boolean});
+const modelRouteDraftShape=shape({draftId:id,expiresInMs:integer(1,900000),credentialState:choice(['staged','not_required']),role:choice(['primary','fallback','fallback_order'])},{route:candidateRoute});
+const modelRouteDraft:Check=v=>modelRouteDraftShape(v)&&isRecord(v)&&(v.role==='fallback_order'?v.route===undefined:candidateRoute(v.route));
 const modelDraftBinding=shape({draftId:id,windowId:id,generation:integer(1)});
 const modelApplyReceipt=shape({operationId:id,state:choice(['applied','uncertain','unknown']),verification:choice(['configured','repair_required','not_tested'])});
 const contracts: { [M in keyof MethodContracts]: { params: Check; result: Check } } = {
@@ -88,7 +90,10 @@ const contracts: { [M in keyof MethodContracts]: { params: Check; result: Check 
   "work.get": { params: shape({ workId: id }), result: work },
   "work.activity": { params: shape({ ...pageParams, workId: id }, optionalPage), result: page(activity) },
   "inbox.list": { params: shape(pageParams, optionalPage), result: page(inbox) },
-  "models.reviewPrimary": {params:shape({windowId:id,generation:integer(1),route:candidateRoute},{candidateId:id}),result:shape({draftId:id,route:candidateRoute,expiresInMs:integer(1,900000),credentialState:choice(['staged','not_required']),role:choice(['primary'])})},
+  "models.fallbacks": {params:shape({}),result:shape({revision:id,items:array(shape({index:integer(0,31),providerId:id,modelId:text(200,1)}),32)})},
+  "models.reviewFallback": {params:shape({windowId:id,generation:integer(1),route:candidateRoute},{candidateId:id}),result:modelRouteDraft},
+  "models.reviewFallbackOrder": {params:shape({windowId:id,generation:integer(1),revision:id,order:unique(integer(0,31),32)}),result:modelRouteDraft},
+  "models.reviewPrimary": {params:shape({windowId:id,generation:integer(1),route:candidateRoute},{candidateId:id}),result:modelRouteDraft},
   "models.applyDraft": {params:modelDraftBinding,result:modelApplyReceipt},
   "models.cancelDraft": {params:modelDraftBinding,result:shape({cancelled:boolean})},
   "models.inspectApply": {params:shape({operationId:id}),result:modelApplyReceipt},
@@ -176,9 +181,12 @@ export function validateControlResponse<M extends keyof MethodContracts>(value: 
       if (!context!.capabilities.events.every((event) => request.params.events.includes(event)) ||
         cursor.instanceId !== context!.instanceId || cursor.streamId !== request.params.after.streamId || cursor.sequence !== request.params.after.sequence) throw new ControlProtocolError("-32007");
     }
+    const expectedRole:Record<string,string>={'models.reviewPrimary':'primary','models.reviewFallback':'fallback','models.reviewFallbackOrder':'fallback_order'};
+    const requiredRole=expectedRole[request.method];
+    if(requiredRole && result.role!==requiredRole)throw new ControlProtocolError('-32003');
     if (request.method === 'models.inspectApply' && result.operationId !== request.params.operationId) throw new ControlProtocolError('-32003');
     if (request.method === 'models.applyDraft' && result.operationId !== request.params.draftId) throw new ControlProtocolError('-32003');
-    if (request.method === 'models.reviewPrimary' && candidateRouteBinding(result.route as CandidateRoute) !== candidateRouteBinding(request.params.route)) throw new ControlProtocolError('-32003');
+    if ((request.method === 'models.reviewPrimary' || request.method === 'models.reviewFallback') && candidateRouteBinding(result.route as CandidateRoute) !== candidateRouteBinding(request.params.route)) throw new ControlProtocolError('-32003');
     if ("operationId" in request.params && 'sessionId' in request.params && 'target' in request.params) {
       const receipt = value.result as unknown as OperationReceipt;
       const method = request.method === "operations.inspect" ? request.params.method : request.method;

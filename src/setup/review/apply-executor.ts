@@ -303,6 +303,15 @@ async function applyConfigPatch(
     case "setupModules.provider.draft":
       await applyProviderRoute(operation, context, options);
       return [];
+    case "setupDrafts.fallbackModelRoutes.order.summary": {
+      const target=configApplyTarget(operation,options);
+      const profileId=target.profileId ?? defaultProfileId();
+      const current=await readConfig(resolveProfileStateHome({...target,profileId}).configPath);
+      const fallbacks=current.config.model?.fallbacks ?? [];
+      const indices=arrayValue(operation.review.values.indices);
+      if(new Set(indices).size!==indices.length || indices.some(index=>!/^\d+$/.test(index)||Number(index)>=fallbacks.length))throw new Error('Fallback list changed; review again');
+      await setupModelFallbackConfig({...target,input:{fallbacks:indices.map(index=>fallbacks[Number(index)]!)}});return [];
+    }
     case "setupDrafts.fallbackModelRoute.add.summary":
     case "setupDrafts.fallbackModelRoute.replace.summary":
       await applyFallbackRoute(operation, context, options);
@@ -460,7 +469,8 @@ async function applyFallbackRoute(
     ? replaceFallbackAtIndex(currentFallbacks, fallbackIndex, nextFallback)
     : [...currentFallbacks, nextFallback];
 
-  await registerProviderConfig({
+  const providerAlreadyConfigured=existing.config.providers?.[provider] !== undefined;
+  if (!options.persistRouteTransport || !providerAlreadyConfigured) await registerProviderConfig({
     ...target,
     input: {
       provider,
@@ -471,7 +481,7 @@ async function applyFallbackRoute(
       authMethod: authMethod === "api_key" ? undefined : authMethod,
     },
   });
-  if (apiKeyEnv !== undefined) {
+  if (apiKeyEnv !== undefined && (!options.persistRouteTransport || !providerAlreadyConfigured)) {
     await storeProviderCredential({
       ...target,
       input: {
@@ -577,7 +587,7 @@ async function applyCredentialReference(
   options: ReviewedSetupApplyExecutorOptions
 ): Promise<void> {
   ensureCredentialReferenceCanApply(operation, context);
-  if (operation.review.values.credentialSurface === "oauth") {
+  if (operation.review.values.credentialSurface === "oauth" || operation.review.values.routeCredentialOnly === true) {
     return;
   }
   const provider = providerIdValue(operation.review.values.provider) ?? context.provider;

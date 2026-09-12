@@ -15,10 +15,13 @@ export type CandidateVerification = {
   inputTokens: number | null; outputTokens: number | null;
   estimatedCost: number | null;
 };
-export type ModelRouteDraft = {draftId:string;route:CandidateRoute;expiresInMs:number;credentialState:'staged'|'not_required';role:'primary'};
+export type ModelRouteDraft = {draftId:string;route?:CandidateRoute;expiresInMs:number;credentialState:'staged'|'not_required';role:'primary'|'fallback'|'fallback_order'};
 export type ModelDraftBinding = {draftId:string;windowId:string;generation:number};
 export type ModelApplyReceipt = {operationId:string;state:'applied'|'uncertain'|'unknown';verification:'configured'|'repair_required'|'not_tested'};
 
 export function candidateRouteBinding(route:CandidateRoute):string {
   return JSON.stringify([route.providerId,route.modelId,route.endpoint,route.authMethod,route.apiMode,route.allowPrivateEndpoint]);
 }
+
+export type FallbackList={revision:string;items:{index:number;providerId:string;modelId:string}[]};
+export type FallbackOrderParams={windowId:string;generation:number;revision:string;order:number[]};

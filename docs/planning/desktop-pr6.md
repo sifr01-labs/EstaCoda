@@ -37,3 +37,9 @@ Existing CLI setup retains its transport-field persistence behavior. Desktop exp
 Risk: persistence, credentials and cache invalidation are security-sensitive. An incomplete commit blocks affected profile activation rather than exposing partial state. Completed credential references are retained for settling runtimes; automated old-reference cleanup is not introduced here.
 
 Validation: full root suite, 660 files / 10,814 tests passing after correcting three regressions; 54 final focused protocol/setup/credential tests, 15 recovery/authority tests, endpoint/header rejection tests, root typecheck and desktop foundation checks. Lock tests include overlapping writers, awaited nested writes and process-death release. Native and visual desktop validation remains pending until the live UI slices are integrated.
+
+## 5. Fallback route management
+
+The bridge supports reviewed fallback setup plus a revision-bound fallback list for reorder/removal. Duplicate routes, duplication of the primary, invalid indices and stale list revisions are rejected. The same reviewed transaction handles Apply and recovery. Fallback credentials and endpoints remain route-local when their provider already exists, preserving the primary provider configuration. Lists are bounded to 32 routes.
+
+Validation: 96 focused setup/protocol tests, including adding two fallbacks, reordering, removing, stale-index rejection, duplicate-primary rejection and primary endpoint/credential preservation; root typecheck and desktop foundation checks. Risk: fallback changes affect execution routing, so review snapshots and canonical configuration checks remain mandatory.
