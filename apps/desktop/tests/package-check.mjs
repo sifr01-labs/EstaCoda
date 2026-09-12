@@ -7,6 +7,7 @@ assert(files.filter(p=>p.includes('/node_modules/')).every(p=>p==='/node_modules
 assert(files.some(p=>p.endsWith('/pty.node'))&&files.some(p=>p.endsWith('/spawn-helper')),'Missing native PTY assets.');
 const index=asar.extractFile(archive,'.vite/renderer/main_window/index.html').toString();assert(index.includes("script-src 'self'")&&!index.includes('unsafe-eval')&&!index.includes('nonce-'),'Invalid release CSP.');
 const main=asar.extractFile(archive,'.vite/build/main.cjs').toString();assert(!main.includes('desktopTest')&&!main.includes('connectionForTest'),'Test hook in release.');
+const preload=asar.extractFile(archive,'.vite/build/preload.cjs').toString();assert(preload.includes('browserControlWorkspace')&&preload.includes('browserControlSignIn'),'Missing semantic browser workspace preload.');assert(main.includes('credentials.browserDeliver'),'Missing dedicated protected browser delivery pipe.');
 const fuse=await getCurrentFuseWire(join(app,'Contents/MacOS/EstaCoda'));
 for(const key of [FuseV1Options.RunAsNode,FuseV1Options.GrantFileProtocolExtraPrivileges,FuseV1Options.EnableNodeOptionsEnvironmentVariable,FuseV1Options.EnableNodeCliInspectArguments])assert(fuse[key]===48,'Unsafe Electron fuse.');
 for(const key of [FuseV1Options.EnableEmbeddedAsarIntegrityValidation,FuseV1Options.OnlyLoadAppFromAsar,FuseV1Options.EnableCookieEncryption])assert(fuse[key]===49,'Required Electron fuse missing.');

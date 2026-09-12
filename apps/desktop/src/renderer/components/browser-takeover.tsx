@@ -17,7 +17,7 @@ export function BrowserTakeover({api,workId,reference,active}:{api:NonNullable<D
  const session=workspace?.sessions.find(s=>s.id===workspace.selectedSessionId);
  return <section className="ec-browsercontrol" aria-label="Browser control">
   <Badge>{id?'You control this browser':'Human takeover'}</Badge>
-  <p className="ec-footnote">Takeover supports existing supervised local browsers. Closing this view leaves browser execution paused; use Return to agent when finished.</p>
+  <p className="ec-footnote">Agent browser actions pause during takeover. Closing this view keeps them paused; use Return to agent when finished.</p>
   {!id?<Button disabled={busy||workspace?.supported===false} onClick={()=>void open()}>Take control</Button>:<><Button disabled={busy} onClick={()=>void refresh()}>Refresh live view</Button><Button disabled={busy} onClick={()=>void release()}>Return to agent</Button></>}
   {workspace?.reason&&<p className="ec-footnote">{workspace.reason}</p>}
   {api.workspace&&workspace?.supported&&<div className="ec-browserworkspace">

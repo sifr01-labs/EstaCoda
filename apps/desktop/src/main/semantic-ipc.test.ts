@@ -77,3 +77,10 @@ it('accepts only bounded browser input behind a Main handle',()=>{
  for(const extra of [{lease:{id:'forged',generation:1}},{holder:'other'},{sequence:1},{profileId:'other'},{cdp:'Input.dispatchKeyEvent'}])expect(()=>validateSemanticPayload('browserControlFrame',{...payload,...extra})).toThrow();
  expect(()=>validateSemanticPayload('browserControlFrame',{id:'handle',input:{kind:'key',frameId:'frame',key:'Enter',ctrl:true}})).toThrow();
 });
+
+it('exposes semantic workspace and protected-entry metadata without accepting secrets or CDP',()=>{
+ expect(()=>validateSemanticPayload('browserControlWorkspace',{id:'handle',operation:{kind:'navigate',url:'https://example.com'}})).not.toThrow();
+ expect(()=>validateSemanticPayload('browserControlSignIn',{id:'handle',frameId:'frame',submitRef:'@e3',kind:'password'})).not.toThrow();
+ for(const extra of [{value:'canary'},{entryId:'forged'},{lease:{id:'l',generation:1}},{profileId:'other'},{method:'Runtime.evaluate'}])expect(()=>validateSemanticPayload('browserControlSignIn',{id:'handle',frameId:'frame',submitRef:'@e3',kind:'password',...extra})).toThrow();
+ for(const operation of [{kind:'navigate',url:'https://example.com',script:'alert(1)'},{kind:'cdp'},{kind:'signin-deliver',value:'canary'},{kind:'switch-tab',tabRef:'raw-cdp-target'}])expect(()=>validateSemanticPayload('browserControlWorkspace',{id:'handle',operation})).toThrow();
+});

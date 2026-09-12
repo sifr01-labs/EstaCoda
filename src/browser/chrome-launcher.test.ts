@@ -303,7 +303,7 @@ describe("launchChrome", () => {
     await launched.kill();
 
     expect(harness.child.kill).toHaveBeenCalledWith("SIGTERM");
-    expect(harness.rm).toHaveBeenCalledWith("/tmp/estacoda-chrome-test", { recursive: true, force: true });
+    expect(harness.rm).toHaveBeenCalledWith("/tmp/estacoda-chrome-test", { recursive: true, force: true, maxRetries:3, retryDelay:100 });
   });
 
   it("does not throw when cleanup sees an already-exited process", async () => {
@@ -314,7 +314,7 @@ describe("launchChrome", () => {
 
     await expect(launched.kill()).resolves.toBeUndefined();
     expect(child.kill).not.toHaveBeenCalled();
-    expect(harness.rm).toHaveBeenCalledWith("/tmp/estacoda-chrome-test", { recursive: true, force: true });
+    expect(harness.rm).toHaveBeenCalledWith("/tmp/estacoda-chrome-test", { recursive: true, force: true, maxRetries:3, retryDelay:100 });
   });
 
   it("kills the process and cleans a temporary dir on spawn error", async () => {
@@ -332,7 +332,7 @@ describe("launchChrome", () => {
 
     await expect(launch).rejects.toThrow("spawn failed");
     expect(child.kill).toHaveBeenCalledWith("SIGTERM");
-    expect(harness.rm).toHaveBeenCalledWith("/tmp/estacoda-chrome-test", { recursive: true, force: true });
+    expect(harness.rm).toHaveBeenCalledWith("/tmp/estacoda-chrome-test", { recursive: true, force: true, maxRetries:3, retryDelay:100 });
   });
 
   it("throws a clear error and cleans up on health check failure", async () => {
@@ -344,7 +344,7 @@ describe("launchChrome", () => {
       "Chrome DevTools endpoint health check failed for http://127.0.0.1:9333/json/version"
     );
     expect(harness.child.kill).toHaveBeenCalledWith("SIGTERM");
-    expect(harness.rm).toHaveBeenCalledWith("/tmp/estacoda-chrome-test", { recursive: true, force: true });
+    expect(harness.rm).toHaveBeenCalledWith("/tmp/estacoda-chrome-test", { recursive: true, force: true, maxRetries:3, retryDelay:100 });
   });
 
   it("throws a clear error when DevToolsActivePort never appears", async () => {
@@ -359,7 +359,7 @@ describe("launchChrome", () => {
       timeoutMs: 1
     })).rejects.toThrow("Timed out waiting for Chrome DevToolsActivePort");
     expect(harness.child.kill).toHaveBeenCalledWith("SIGTERM");
-    expect(harness.rm).toHaveBeenCalledWith("/tmp/estacoda-chrome-test", { recursive: true, force: true });
+    expect(harness.rm).toHaveBeenCalledWith("/tmp/estacoda-chrome-test", { recursive: true, force: true, maxRetries:3, retryDelay:100 });
   });
 
   it("throws a clear error for invalid DevToolsActivePort values", async () => {
@@ -384,6 +384,13 @@ describe("launchChrome", () => {
     });
 
     await expect(launchChrome(harness.options)).rejects.toThrow("Chrome exited before DevToolsActivePort was available");
-    expect(harness.rm).toHaveBeenCalledWith("/tmp/estacoda-chrome-test", { recursive: true, force: true });
+    expect(harness.rm).toHaveBeenCalledWith("/tmp/estacoda-chrome-test", { recursive: true, force: true, maxRetries:3, retryDelay:100 });
   });
+});
+
+it('waits for Chromium exit before removing its managed profile',async()=>{
+ const child=new FakeChildProcess();child.kill.mockImplementation(()=>{child.killed=true;return true;});
+ const harness=createHarness({child}),launched=await launchChrome(harness.options),closing=launched.kill();
+ await vi.waitFor(()=>expect(child.kill).toHaveBeenCalled());expect(harness.rm).not.toHaveBeenCalled();
+ child.signalCode='SIGTERM';await closing;expect(harness.rm).toHaveBeenCalledOnce();
 });

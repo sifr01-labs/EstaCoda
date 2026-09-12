@@ -318,8 +318,13 @@ async function cleanupChrome(options: {
   if (child !== undefined && !childHasExited(child) && !child.killed) {
     child.kill("SIGTERM");
   }
+  if(child!==undefined&&!childHasExited(child)){
+    for(let attempt=0;attempt<80&&!childHasExited(child);attempt++)await delay(25);
+    if(!childHasExited(child)){child.kill('SIGKILL');for(let attempt=0;attempt<80&&!childHasExited(child);attempt++)await delay(25);}
+    if(!childHasExited(child))throw new Error('Browser shutdown is unconfirmed; its temporary profile was retained.');
+  }
   if (options.deleteUserDataDir) {
-    await options.rm(options.userDataDir, { recursive: true, force: true });
+    await options.rm(options.userDataDir, { recursive: true, force: true, maxRetries:3, retryDelay:100 });
   }
 }
 
