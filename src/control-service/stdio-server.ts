@@ -91,7 +91,7 @@ export class StdioControlServer {
       return;
     }
     const controller = new AbortController();
-    const mutation = 'operationId' in request.params && request.method !== 'operations.inspect';
+    const mutation = request.method === 'targets.create' || 'operationId' in request.params && !['operations.inspect','targets.inspectOperation','connections.inspectOperation','models.inspectApply','telegram.inspectApply'].includes(request.method);
     const timer = setTimeout(() => {
       controller.abort();
       this.write(failureEnvelope(request.id, mutation ? '-32008' : '-32010'));

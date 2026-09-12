@@ -2,7 +2,9 @@ import { verifyWorktreeIdentity } from "./git-worktree-identity.js";
 import { checkStamp } from "./copy-files.js";
 import type { SourceManifest } from "./temporary-copy.js";
 import { createHash, randomUUID } from "node:crypto";
-import { isAbsolute } from "node:path";
+import { isAbsolute, relative, sep } from "node:path";
+import {realpathSync} from "node:fs";
+import {resolveGlobalStateHome} from "../config/profile-home.js";
 import type { ExecutionTarget, TemporaryCopyTarget, ExecutionTargetBinding, LocalExecutionTarget, SourceWorkspaceBinding, WorkspaceIdentity } from "../contracts/workspace.js";
 import { WorkspaceRegistry, resolveWorkspaceDirectory } from "./workspace-registry.js";
 
@@ -36,8 +38,10 @@ export function targetSessionMetadata(metadata: Record<string, unknown> | undefi
 /** One core database owns optional names and local targets. Source snapshots are
  * immutable, so alias moves/removal cannot retarget historical Sessions or Tasks. */
 export class ExecutionTargetStore extends WorkspaceRegistry {
+  private readonly profilesRoot:string;
   constructor(options: { homeDir?: string; profileId: string; readonly?: boolean }) {
     super(options);
+    this.profilesRoot=realpathSync(resolveGlobalStateHome(options).profilesRoot);
     if (options.readonly) return;
     try { this.db.exec(`create table if not exists execution_targets (
       id text primary key, selection_key text not null unique, record_json text not null
@@ -95,6 +99,8 @@ export class ExecutionTargetStore extends WorkspaceRegistry {
     const workspace = await resolveWorkspaceDirectory(path);
     const copy = this.db.query<{ id: string }>("select id from execution_targets where selection_key=?").get(`copy:${workspace.identityHash}`) ?? this.db.query<{ id: string }>("select id from execution_targets where selection_key=?").get(`worktree:${workspace.identityHash}`);
     if (copy) { const target = this.getTarget(copy.id)!; return this.validate(targetBinding(target), path); }
+    const managedParts=relative(this.profilesRoot,workspace.canonicalPath).split(sep);
+    if(managedParts[0]!==".."&&managedParts[1]==="worktrees")throw new Error("Managed worktree paths require their original profile-owned target; they cannot become local targets.");
     const snapshot: SourceWorkspaceBinding = source === undefined ? { identity: workspace } : structuredClone(source);
     parseWorkspaceIdentity(snapshot.identity);
     if (snapshot.identity.identityHash !== workspace.identityHash) throw new Error("Local target source must match its working directory.");
@@ -142,6 +148,8 @@ export class ExecutionTargetStore extends WorkspaceRegistry {
     if (actual.identityHash !== target.workspace.identityHash) throw new Error("Session execution target belongs to a different workspace.");
     if (target.kind === "git-worktree") verifyWorktreeIdentity(target);
     if (target.kind === "temporary-copy") { checkStamp(actual.canonicalPath, target.directoryStamp); this.copyManifest(target.id); }
+    const current=this.getTarget(binding.targetId);
+    if(!current||current.status!=="available"||current.generation!==binding.targetGeneration)throw new Error("Execution target changed during validation.");
     return target;
   }
 }

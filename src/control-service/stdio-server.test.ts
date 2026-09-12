@@ -110,3 +110,10 @@ it('keeps execution stop, pause and approval resolution reachable when ordinary 
     expect(f.messages.find(m => m.id === 'overflow').error.code).toBe(-32009);
   } finally { f.server.close(); await f.server.done; }
 });
+it('treats cancelled target creation as uncertain even though its operation identity is held in the review',async()=>{
+ const f=fixture({'targets.create':async()=>await new Promise(()=>{})});
+ await f.init();f.send('create','targets.create',{reviewId:'r',source:{targetId:'t',targetGeneration:1},trustNewPath:true});await setImmediate();
+ f.send('cancel','control.cancelRequest',{requestId:'create'});await setImmediate();
+ expect(f.messages.find(message=>message.id==='create').error.code).toBe(-32008);
+ f.server.close();await f.server.done;
+});

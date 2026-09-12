@@ -32,7 +32,7 @@ export class WorkspaceRegistry {
     const paths = resolveProfileStateHome(options);
     this.profileId = paths.profileId;
     if (!options.readonly) mkdirSync(paths.profileRoot, { recursive: true, mode: 0o700 });
-    else if (lstatSync(paths.profileRoot).isSymbolicLink()) throw new Error("Workspace profile must not be a symbolic link.");
+    if (lstatSync(paths.profileRoot).isSymbolicLink()) throw new Error("Workspace profile must not be a symbolic link.");
     const path = join(paths.profileRoot, "workspaces.sqlite");
     try { if (lstatSync(path).isSymbolicLink()) throw new Error("Workspace registry must not be a symbolic link."); }
     catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }

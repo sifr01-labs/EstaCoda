@@ -66,6 +66,7 @@ export class ManagedWorktrees extends ExecutionTargetStore {
     });
     try{
       targetGit(source.workspace.canonicalPath,['worktree','add','--no-checkout','-b',review.branch,review.destination,review.baseCommit]);
+      if(repositoryIdentity(review.destination).commonDirectory!==review.repository.commonDirectory)throw new Error('Created worktree belongs to a different repository.');
       // Local filters can execute programs during checkout. Disable every configured
       // filter (including LFS) for managed materialization; no download is implied.
       const overrides=disabledGitFilters(review.destination);
