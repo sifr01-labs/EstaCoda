@@ -109,3 +109,9 @@ Validation: 31 desktop tests and 62 protocol tests passed, plus desktop foundati
 Added cancellation/profile-switch race tests at Main, rejection tests for renderer-supplied credential/scope fields, and service tests for cross-profile candidate use and closed-window no-auth drafts. Setup creation is serialized, late responses are discarded, uncertain Apply cannot be silently replaced, and every reviewed draft is bound to its owning window lifetime. Credential presence follows the final profile `.env` assignment, including explicit empty values.
 
 Validation: 41 focused core tests, 34 desktop tests, desktop foundation and root typecheck passed. The recoverable Apply tests interrupt each of the three profile-file writes and verify activation blocking, 0600 recovery state, replay, and preserved unrelated settings. These changes tighten credential/configuration boundaries without granting new execution authority.
+
+## 16. Route and execution behavior acceptance
+
+Expanded real Task-executor coverage for step defaults, Task overrides and reset. A resumed worker now restores its saved override instead of accepting a later choice for future attempts. Re-selecting the configured primary preserves its context/output limits. The catalog retains explicitly configured custom models with unknown metadata; known non-chat categories stay excluded. Read-only saved checks account for intentional network disabling and optional automatic specialist slots that have no route.
+
+Validation: 67 focused route/catalog/executor tests passed; root typecheck and desktop foundation passed. The full core suite is running for final acceptance. No provider request was required for these deterministic routing and ownership checks.

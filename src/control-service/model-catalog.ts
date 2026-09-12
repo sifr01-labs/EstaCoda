@@ -12,7 +12,7 @@ export async function captureModelCatalog(input: {homeDir: string; profileId: st
   const catalog = await createModelSelectionCatalog({...input, config: loaded.config, providerRegistry: loaded.providerRegistry, allowNetwork: false, credentialReady: async (provider, apiKeyEnv) => ['present', 'not_required'].includes(presence(provider, {apiKeyEnv}))});
   const providerRows = await catalog.listProviders({includeCatalogOnly: true});
   const models: ModelProjection[] = (await catalog.listModels({includeCatalogOnly: true, includeRetired: true, includeDeprecated: true, includeAlpha: true, includeBeta: true}))
-    .filter(row => isControlId(row.provider) && row.id.length > 0 && row.id.length <= 200 && row.usageClass === 'primary-chat')
+    .filter(row => isControlId(row.provider) && row.id.length > 0 && row.id.length <= 200 && (row.usageClass === 'primary-chat' || row.usageClass==='other' && (row.configured || row.source==='manual')))
     .map(row => {
       const metadata = getProviderMetadata(row.provider);
       const cost = row.profile.cost;

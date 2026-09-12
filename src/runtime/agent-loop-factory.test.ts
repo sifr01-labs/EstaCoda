@@ -205,7 +205,8 @@ describe("DefaultChildAgentLoopFactory", () => {
       trustedWorkspace: true,
       parentVisibleTools: readOnlyParentTools(),
       taskExecution,
-      resumeSessionId: first.childSessionId
+      resumeSessionId: first.childSessionId,
+      modelOverride: {provider:"unconfigured-provider",model:"later-task-choice"}
     });
 
     expect(resumed.childSessionId).toBe(first.childSessionId);

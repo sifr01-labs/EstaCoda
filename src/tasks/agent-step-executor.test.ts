@@ -67,9 +67,12 @@ describe("AgentStepExecutor", () => {
     rmSync(tempDir, { recursive: true, force: true });
   });
 
-  it("runs a fenced read-only child and durably settles its full result, usage, and ownership", async () => {
+  it.each(["step default","Task override","cleared override"])("runs a fenced child with %s and durably settles its result and ownership", async (mode) => {
     const graph = makeGraph();
     store.createTaskGraph(graph);
+    if(mode!=="step default")store.appendEvent({id:"model-choice",profileId:graph.task.profileId,taskId:graph.task.id,kind:"model-override-changed",timestamp:NOW,data:{selection:{providerId:"local",modelId:"operator-model"}}});
+    if(mode==="cleared override")store.appendEvent({id:"model-clear",profileId:graph.task.profileId,taskId:graph.task.id,kind:"model-override-changed",timestamp:new Date(Date.parse(NOW)+1).toISOString(),data:{selection:null}});
+
     store.atomicWrite((transaction) => transaction.createGuidance({
       id: "guidance-alpha",
       profileId: "alpha",
@@ -159,7 +162,7 @@ describe("AgentStepExecutor", () => {
     }));
     expect(childInput).toMatchObject({
       depth: 1,
-      modelOverride: { provider: "openai", model: "child-model" },
+      modelOverride: mode==="Task override"?{provider:"local",model:"operator-model"}:{ provider: "openai", model: "child-model" },
       parentVisibleTools: [{ name: "file.read" }],
       taskExecution: {
         taskId: graph.task.id,

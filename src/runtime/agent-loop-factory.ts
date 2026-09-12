@@ -220,13 +220,23 @@ export class DefaultChildAgentLoopFactory implements ChildAgentLoopFactory {
     const allowedToolsets = input.allowedToolsets ?? [];
     const allowedTools = input.allowedTools ?? [];
     const approvalMode = input.taskExecution === undefined ? CHILD_APPROVAL_MODE : TASK_STEP_APPROVAL_MODE;
+    // A handoff resumes the same Attempt; a later Task choice cannot replace its model.
+    const savedOverride = resumedSession?.metadata?.modelOverride;
+    let requestedOverride = input.modelOverride;
+    if (resumedSession !== undefined) {
+      requestedOverride = undefined;
+      if (savedOverride !== undefined) {
+        if (!savedOverride || typeof savedOverride !== 'object' || !('status' in savedOverride) || savedOverride.status !== 'applied' || !('provider' in savedOverride) || typeof savedOverride.provider !== 'string' || !('model' in savedOverride) || typeof savedOverride.model !== 'string') throw new Error('Saved worker model needs repair.');
+        requestedOverride = {provider:savedOverride.provider,model:savedOverride.model};
+      }
+    }
     const modelOverride = await deriveChildRoutes({
       parentRoutes: this.#parentRoutes,
       providerRegistry: this.#providerRegistry,
       providerConfigs: this.#providerConfigs,
       homeDir: this.#homeDir,
       profileId: this.#profileId,
-      override: input.modelOverride
+      override: requestedOverride
     });
     const suppressedRuntimeFeatures = suppressedFeaturesFromConfig(this.#delegationConfig);
     const enabledRuntimeFeatures = [

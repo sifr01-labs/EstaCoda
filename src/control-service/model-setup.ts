@@ -89,9 +89,10 @@ export class ModelSetup {
     if(!provider?.enableNetwork)throw new ControlProtocolError('-32602');
     const endpoint=row.baseUrl??provider.baseUrl??metadata.defaultBaseUrl;if(!endpoint)throw new ControlProtocolError('-32602');
     const fallback=loaded.modelFallbackRoutes.find(route=>route.provider===params.providerId&&route.id===params.modelId&&(route.baseUrl??metadata.defaultBaseUrl)===endpoint);
+    const limits=fallback??(loaded.primaryModelRoute.provider===params.providerId&&loaded.primaryModelRoute.id===params.modelId?loaded.config.model:undefined);
     const authMethod=provider.authMethod??metadata.defaultAuthMethod,credentialEnv=fallback?.apiKeyEnv??provider.apiKeyEnv??metadata.defaultApiKeyEnv;
     if(!['present','not_required'].includes(presence(params.providerId,{apiKeyEnv:credentialEnv,authMethod})))throw new ControlProtocolError('-32602');
-    const route:CandidateRoute={providerId:params.providerId,modelId:params.modelId,endpoint,authMethod:authMethod==='none'?'none':authMethod==='api_key'?'api_key':'oauth',apiMode:(provider.apiMode??metadata.apiMode) as CandidateRoute['apiMode'],allowPrivateEndpoint:true,enableNetwork:true,...(fallback?.contextWindowTokens?{contextWindowTokens:fallback.contextWindowTokens}:{}),...(params.role!=='auxiliary'&&fallback?.maxTokens?{maxTokens:fallback.maxTokens}:{})};
+    const route:CandidateRoute={providerId:params.providerId,modelId:params.modelId,endpoint,authMethod:authMethod==='none'?'none':authMethod==='api_key'?'api_key':'oauth',apiMode:(provider.apiMode??metadata.apiMode) as CandidateRoute['apiMode'],allowPrivateEndpoint:true,enableNetwork:true,...(limits?.contextWindowTokens?{contextWindowTokens:limits.contextWindowTokens}:{}),...(params.role!=='auxiliary'&&limits?.maxTokens?{maxTokens:limits.maxTokens}:{})};
     return this.review({windowId:params.windowId,generation:params.generation,route},params.role,params.role==='auxiliary'?{slot:params.slot!,fallbackToMain:params.fallbackToMain===true}:undefined,{snapshot,credentialEnv:route.authMethod==='api_key'?credentialEnv:undefined});
   }
   async auxiliary():Promise<AuxiliaryList>{
@@ -169,7 +170,7 @@ export class ModelSetup {
     return {cancelled:!draft.consumed&&!draft.applying};
   }
   async inspect(operationId:string):Promise<ModelApplyReceipt>{const receipt=await inspectProfileApply(this.input,operationId);return {...receipt,state:receipt.state,verification:receipt.state==='applied'?await this.verifySaved():'not_tested'};}
-  private async verifySaved():Promise<ModelApplyReceipt['verification']>{try {const catalog=await captureModelCatalog(this.input);return catalog.models.some(model=>model.role==='primary'&&model.runnable)?'configured':'repair_required';}catch{return 'repair_required';}}
+  private async verifySaved():Promise<ModelApplyReceipt['verification']>{try {const catalog=await captureModelCatalog(this.input);const routes=catalog.models.filter(model=>model.role==='primary'||model.role==='fallback');if(!routes.some(model=>model.role==='primary')||routes.some(model=>!['configured','network_disabled'].includes(model.health??'')))return 'repair_required';const auxiliary=await this.auxiliary();const loaded=await loadRuntimeConfig({...this.input,workspaceRoot:this.input.homeDir,configurationInspection:true});return auxiliary.items.every(item=>item.mode==='disabled'||item.mode==='auto'&&item.providerId===null||item.runnable||item.providerId!==null&&loaded.config.providers?.[item.providerId]?.enableNetwork===false&&['present','not_required'].includes(item.credentialState))?'configured':'repair_required';}catch{return 'repair_required';}}
   dispose(){for(const draft of this.#drafts.values()){draft.abort.abort();clearTimeout(draft.timer);}this.#drafts.clear();this.#fallbackListing=undefined;this.#closed=true;}
   private require(binding:ModelDraftBinding):Draft{const draft=this.#drafts.get(binding.draftId);if(this.#closed||!draft||(!draft.consumed && performance.now()>=draft.expires)||draft.params.windowId!==binding.windowId||draft.params.generation!==binding.generation)throw new ControlProtocolError('-32003');return draft;}
 }

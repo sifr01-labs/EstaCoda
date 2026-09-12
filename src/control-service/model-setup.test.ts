@@ -88,7 +88,7 @@ it('reviews custom transport, network and limits without a key',async()=>{
  try{
   const route={providerId:'custom-office',modelId:'office-model',endpoint:'http://127.0.0.1:11434/v1',authMethod:'none' as const,apiMode:'openai_responses' as const,allowPrivateEndpoint:true,enableNetwork:false,contextWindowTokens:32000,maxTokens:512};
   const draft=await setup.review({windowId:'w',generation:1,route});expect(draft.route).toEqual(route);
-  expect(await setup.apply({windowId:'w',generation:1,draftId:draft.draftId},new AbortController().signal)).toMatchObject({state:'applied'});
+  expect(await setup.apply({windowId:'w',generation:1,draftId:draft.draftId},new AbortController().signal)).toMatchObject({state:'applied',verification:'configured'});
   const config=JSON.parse(await readFile(join(home,'.estacoda/profiles/p/config.json'),'utf8'));
   expect(config.providers['custom-office']).toMatchObject({authMethod:'none',apiMode:'openai_responses',enableNetwork:false});expect(config.model).toMatchObject({provider:'custom-office',id:'office-model',maxTokens:512});
   expect(config.model.contextWindowTokens).toBe(32000);
@@ -115,4 +115,8 @@ it('invalidates reviewed no-auth configuration when its owning window closes',as
 it('rejects another profile or bridge candidate and never changes the other profile',async()=>{
  const homeDir=await mkdtemp('/tmp/ec-profile-candidate-'),a=new CredentialCandidates('a','bridge-a'),b=new CredentialCandidates('b','bridge-b'),setup=new ModelSetup({homeDir,profileId:'b'},b,()=>{});
  try{const route:CandidateRoute={providerId:'kimi',modelId:'m',endpoint:'https://api.moonshot.ai/v1',authMethod:'api_key',apiMode:'openai_chat_completions',allowPrivateEndpoint:false};const candidateId=a.stage({windowId:'w',generation:1,purpose:'provider',providerId:'kimi',authMethod:'api_key',endpoint:route.endpoint},'synthetic-other-profile');await expect(setup.review({windowId:'w',generation:1,route,candidateId})).rejects.toThrow();for(const profileId of ['a','b'])await expect(readFile(resolveProfileStateHome({homeDir,profileId}).envPath)).rejects.toThrow();}finally{setup.dispose();a.dispose();b.dispose();await rm(homeDir,{recursive:true,force:true});}
+});
+it('preserves current primary limits when selecting its configured route again',async()=>{
+ const homeDir=await mkdtemp('/tmp/ec-primary-limits-'),input={homeDir,profileId:'p'},paths=resolveProfileStateHome(input),candidates=new CredentialCandidates('p','b'),setup=new ModelSetup(input,candidates,()=>{});
+ try{await mkdir(paths.profileRoot,{recursive:true});await writeFile(paths.configPath,JSON.stringify({model:{provider:'local',id:'m',contextWindowTokens:32000,maxTokens:512},providers:{local:{baseUrl:'http://localhost:11434/v1',authMethod:'none',apiMode:'custom_openai_compatible',enableNetwork:true,models:['m']}}}));const draft=await setup.reviewConfigured({windowId:'w',generation:1,providerId:'local',modelId:'m',role:'primary'});expect(draft.route).toMatchObject({contextWindowTokens:32000,maxTokens:512});expect(await setup.apply({windowId:'w',generation:1,draftId:draft.draftId},new AbortController().signal)).toMatchObject({state:'applied',verification:'configured'});}finally{setup.dispose();candidates.dispose();await rm(homeDir,{recursive:true,force:true});}
 });
