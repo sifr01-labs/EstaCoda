@@ -1,3 +1,4 @@
+import type {OAuthStatus,OAuthBinding} from './model-setup.js';
 import type {AuxiliaryList,AuxiliarySlot,AuxiliaryModeParams} from './model-setup.js';
 import type {VerifyCandidateParams, CandidateVerification, ModelRouteDraft, ModelDraftBinding, ModelApplyReceipt, FallbackList, FallbackOrderParams} from './model-setup.js';
 import type { BootstrapResult, Capabilities, ControlCursor, InitializeParams, InitializeResult } from "./bootstrap.js";
@@ -18,6 +19,9 @@ export type SubscribeResult =
   | { state: "subscribed"; subscriptionId: string; cursor: ControlCursor }
   | { state: "snapshot_required"; reason: "instance_changed" | "stream_changed" | "cursor_expired" | "overflow" };
 export type MethodContracts = {
+  "models.oauthStart": {params:{windowId:string;generation:number};result:OAuthStatus};
+  "models.oauthStatus": {params:OAuthBinding;result:OAuthStatus};
+  "models.oauthCancel": {params:OAuthBinding;result:{cancelled:boolean}};
   "models.workOverride": {params:{sessionId:string;target:TargetReference;taskId?:string};result:{selection:{providerId:string;modelId:string}|null;effective:"next_turn"|"next_attempt"}};
   "sessions.setModel": {params:SessionControl & {selection:{providerId:string;modelId:string}|null};result:OperationReceipt};
   "tasks.setModel": {params:SessionControl & {taskId:string;selection:{providerId:string;modelId:string}|null};result:OperationReceipt};

@@ -1,3 +1,4 @@
+import {validateOAuthStore} from '../providers/oauth/oauth-store.js';
 import {candidateRouteBinding, ControlProtocolError, type VerifyCandidateParams, type CandidateVerification} from '../contracts/desktop-control/index.js';
 import {getProviderMetadata} from '../providers/provider-metadata.js';
 import {createOpenAICompatibleProvider, type FetchLike} from '../providers/openai-compatible-provider.js';
@@ -39,7 +40,11 @@ export class CandidateVerifier {
     const scope: CandidateScope = {windowId:params.windowId,generation:params.generation,purpose:'provider',providerId:route.providerId,
       authMethod:route.authMethod === 'oauth' ? 'oauth' : 'api_key',endpoint:route.endpoint};
     if(params.candidateId)this.candidates.bindRoute(params.candidateId,scope,candidateRouteBinding(route));
-    const value = params.candidateId ? this.candidates.read(params.candidateId, scope) : undefined;
+    let value = params.candidateId ? this.candidates.read(params.candidateId, scope) : undefined;
+    if(route.authMethod==='oauth' && value){
+      try{const store=validateOAuthStore({version:1,providers:{[route.providerId]:JSON.parse(value)}});const token=store.store.providers[route.providerId];if(store.diagnostics.length || !token || token.expiresAt && (!Number.isFinite(Date.parse(token.expiresAt)) || Date.parse(token.expiresAt)<=Date.now()))throw new Error('Expired');value=token.accessToken;}
+      catch{if(params.candidateId)this.candidates.discard(params.candidateId,scope);throw new ControlProtocolError('-32602');}
+    }
     const combined = AbortSignal.any([signal, this.#abort.signal, AbortSignal.timeout(12_000),
       ...(params.candidateId ? [this.candidates.signal(params.candidateId, scope)] : [])]);
     this.#busy.add(binding);

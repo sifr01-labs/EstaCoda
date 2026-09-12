@@ -80,7 +80,13 @@ const modelRouteDraftShape=shape({draftId:id,expiresInMs:integer(1,900000),crede
 const modelRouteDraft:Check=v=>modelRouteDraftShape(v)&&isRecord(v)&&(['fallback_order','auxiliary_mode'].includes(String(v.role))?v.route===undefined:candidateRoute(v.route))&&(['auxiliary','auxiliary_mode'].includes(String(v.role))?choice(AUXILIARY_SLOTS)(v.slot):v.slot===undefined);
 const modelDraftBinding=shape({draftId:id,windowId:id,generation:integer(1)});
 const modelApplyReceipt=shape({operationId:id,state:choice(['applied','uncertain','unknown']),verification:choice(['configured','repair_required','not_tested'])});
+const oauthBinding=shape({authorizationId:id,windowId:id,generation:integer(1)});
+const oauthStatusShape=shape({authorizationId:id,state:choice(['starting','pending','authorized','failed','cancelled','expired']),verificationUrl:nullable(choice(['https://auth.openai.com/codex/device'])),userCode:nullable((v)=>typeof v==='string' && /^[-A-Z0-9]{1,32}$/i.test(v)),candidateId:nullable(id)});
+const oauthStatus:Check=v=>oauthStatusShape(v)&&isRecord(v)&&(v.state==='pending'?v.verificationUrl!==null&&v.userCode!==null:v.verificationUrl===null&&v.userCode===null)&&(v.state==='authorized'?v.candidateId!==null:v.candidateId===null);
 const contracts: { [M in keyof MethodContracts]: { params: Check; result: Check } } = {
+  "models.oauthStart": {params:shape({windowId:id,generation:integer(1)}),result:oauthStatus},
+  "models.oauthStatus": {params:oauthBinding,result:oauthStatus},
+  "models.oauthCancel": {params:oauthBinding,result:shape({cancelled:boolean})},
   "models.workOverride": {params:shape({sessionId:id,target},{taskId:id}),result:shape({selection:nullable(shape({providerId:id,modelId:text(200,1)})),effective:choice(["next_turn","next_attempt"])})},
   "sessions.setModel": {params:shape({...sessionParams,selection:nullable(shape({providerId:id,modelId:text(200,1)}))}),result:receipt},
   "tasks.setModel": {params:shape({...sessionParams,taskId:id,selection:nullable(shape({providerId:id,modelId:text(200,1)}))}),result:receipt},
@@ -173,6 +179,7 @@ export function validateControlResponse<M extends keyof MethodContracts>(value: 
   } else {
     const result = value.result as Record<string, unknown>;
     if (!scoped(result, context!.profileId) || (Array.isArray(result.items) && !result.items.every((item) => scoped(item, context!.profileId)))) throw new ControlProtocolError("-32003");
+    if(request.method==="models.oauthStatus" && result.authorizationId!==(request.params as MethodContracts["models.oauthStatus"]["params"]).authorizationId)throw new ControlProtocolError("-32003");
     if ("limit" in request.params && Array.isArray(result.items) && result.items.length > request.params.limit) throw new ControlProtocolError("-32009");
     if (request.method === "work.get" && result.id !== request.params.workId) throw new ControlProtocolError("-32003");
     if (request.method === "connections.get" && result.id !== request.params.connectionId) throw new ControlProtocolError("-32003");

@@ -16,17 +16,22 @@ export function validateCandidateScope(value: unknown): asserts value is Candida
 /** Memory only. This does not verify credentials, authorize apply or write configuration. */
 export class CredentialCandidates {
   readonly #entries = new Map<string, Candidate>();
-  readonly #windows = new Map<string, { generation: number; closed: boolean }>();
+  readonly #windows = new Map<string, { generation: number; closed: boolean; abort:AbortController }>();
   #closed = false;
   constructor(readonly profileId: string, readonly instanceId: string, readonly now = () => performance.now()) {}
+  windowSignal(windowId:string,generation:number):AbortSignal {
+    if(this.#closed || !isControlId(windowId) || !Number.isSafeInteger(generation) || generation<1)throw new ControlProtocolError('-32602');
+    const window=this.#windows.get(windowId);
+    if(window && (generation<window.generation || generation===window.generation && window.closed))throw new ControlProtocolError('-32003');
+    if(!window && this.#windows.size>=64)throw new ControlProtocolError('-32009');
+    if(window && generation===window.generation)return window.abort.signal;
+    if(window){window.abort.abort();this.removeWindow(windowId);}
+    const next={generation,closed:false,abort:new AbortController()};this.#windows.set(windowId,next);return next.abort.signal;
+  }
   stage(scope: CandidateScope, value: string): string {
     validateCandidateScope(scope);
     if (this.#closed || typeof value !== 'string' || !value.length || Buffer.byteLength(value) > 49_152 || (scope.authMethod === 'api_key' && /[\r\n\0]/u.test(value))) throw new ControlProtocolError('-32602');
-    const window = this.#windows.get(scope.windowId);
-    if (window && (scope.generation < window.generation || (scope.generation === window.generation && window.closed))) throw new ControlProtocolError('-32003');
-    if (!window && this.#windows.size >= 64) throw new ControlProtocolError('-32009');
-    if (window && scope.generation > window.generation) this.removeWindow(scope.windowId);
-    this.#windows.set(scope.windowId, { generation: scope.generation, closed: false });
+    this.windowSignal(scope.windowId,scope.generation);
     this.expire();
     if (this.#entries.size >= 32 || [...this.#entries.values()].filter((entry) => entry.scope.windowId === scope.windowId).length >= 8) throw new ControlProtocolError('-32009');
     const id = randomUUID(), now = this.now();
@@ -53,9 +58,9 @@ export class CredentialCandidates {
     const window = this.#windows.get(windowId);
     if (window && generation < window.generation) throw new ControlProtocolError('-32003');
     if (!window && this.#windows.size >= 64) throw new ControlProtocolError('-32009');
-    this.#windows.set(windowId, { generation, closed: true }); this.removeWindow(windowId);
+    window?.abort.abort();this.#windows.set(windowId, { generation, closed: true,abort:new AbortController() }); this.removeWindow(windowId);
   }
-  dispose(): void { this.#closed = true; for (const id of this.#entries.keys()) this.remove(id); this.#windows.clear(); }
+  dispose(): void { this.#closed = true; for (const id of this.#entries.keys()) this.remove(id); for(const window of this.#windows.values())window.abort.abort();this.#windows.clear(); }
   private require(id: string, scope: CandidateScope): Candidate {
     validateCandidateScope(scope); this.expire();
     const entry = this.#entries.get(id);

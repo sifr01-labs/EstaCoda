@@ -59,3 +59,9 @@ it('aborts an in-flight request when its credential window closes', async () => 
     expect(await running).toMatchObject({state:'cancelled'});
   } finally {verifier.dispose();candidates.dispose();}
 });
+it('uses only the staged OAuth access token for a Codex verification request',async()=>{
+ const candidates=new CredentialCandidates('p','b');const oauthScope={...scope,providerId:'codex',authMethod:'oauth' as const,endpoint:'https://chatgpt.com/backend-api/codex'};
+ const candidateId=candidates.stage(oauthScope,JSON.stringify({authMethod:'oauth_device_pkce',accessToken:'access-canary',refreshToken:'refresh-canary'}));
+ let calls=0;const verifier=new CandidateVerifier(candidates,()=>async(_url,init)=>{calls++;expect(init.headers.authorization).toBe('Bearer access-canary');expect(JSON.stringify(init)).not.toContain('refresh-canary');return {ok:false,status:401,statusText:'',json:async()=>({}),text:async()=>''};});
+ try{const result=await verifier.verify({windowId:'w',generation:1,candidateId,spendApproved:true,route:{providerId:'codex',modelId:'gpt-5.5',endpoint:oauthScope.endpoint,authMethod:'oauth',apiMode:'openai_responses',allowPrivateEndpoint:false}},new AbortController().signal);expect(calls).toBe(1);expect(result.reason).toBe('invalid_credential');}finally{verifier.dispose();candidates.dispose();}
+});

@@ -30,3 +30,6 @@ export const AUXILIARY_SLOTS=['assessor','compression','session_search','memory_
 export type AuxiliarySlot=typeof AUXILIARY_SLOTS[number];
 export type AuxiliaryList={items:{slot:AuxiliarySlot;mode:'main'|'auto'|'dedicated'|'disabled';providerId:string|null;modelId:string|null;fallbackToMain:boolean;credentialState:'missing'|'present'|'expired'|'not_required';runnable:boolean}[]};
 export type AuxiliaryModeParams={windowId:string;generation:number;slot:AuxiliarySlot;mode:'main'|'auto'|'disabled';fallbackToMain:boolean};
+
+export type OAuthBinding={authorizationId:string;windowId:string;generation:number};
+export type OAuthStatus={authorizationId:string;state:'starting'|'pending'|'authorized'|'failed'|'cancelled'|'expired';verificationUrl:string|null;userCode:string|null;candidateId:string|null};

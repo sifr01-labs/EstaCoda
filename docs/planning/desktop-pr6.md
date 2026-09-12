@@ -57,3 +57,9 @@ Validation: 100 setup/protocol tests and 105 specialist resolver/protocol tests 
 Schema v36 preserves existing Task events while admitting model-selection events. The normal migration backup/recovery path applies. Read-only projections describe next-turn/next-attempt semantics and do not claim the current worker has switched.
 
 Validation: 110 focused protocol, ownership, Session database and Task executor tests; migration/setup tests; root typecheck; desktop foundation checks. Regression coverage includes queued changes, priority cancellation, foreign ownership refusal, ended originating Sessions, profile/target mismatch, set/clear and operation-ID rebinding. Risk: execution routing and persisted state are sensitive; no lease is stolen and no in-flight runtime is edited.
+
+## 8. Service-owned Codex OAuth
+
+Authorization uses the existing Codex device/PKCE flow with fixed OpenAI endpoints, pinned URL-checked requests, 15-second request deadlines, bounded responses, no redirects and a 15-minute operation lifetime. Ordinary RPC returns only the verification URL, user code, state and candidate handle. Tokens remain in the service candidate store until reviewed Apply. Window generation changes, cancellation and disposal abort the flow and discard late token exchanges. Verification extracts only the access token from the validated staged record.
+
+Validation: 93 OAuth, candidate, private-pipe and protocol tests passed; root typecheck and desktop foundation checks passed. Cancellation tests cover late exchange completion after explicit cancel, window closure and service shutdown. These are synthetic endpoint tests; no live account authorization or paid provider call was performed. Risk: OAuth is a credential boundary; browser opening remains a separate explicit Main action in the desktop setup slice.

@@ -30,6 +30,9 @@ const activities: ActivityProjection[] = [
   { ...activityBase, kind: "status", status: "needs_attention", reason: "Waiting for approval" },
 ];
 const cases = {
+ "models.oauthStart": {params:{windowId:'w',generation:1},result:{authorizationId:'auth',state:'starting',verificationUrl:null,userCode:null,candidateId:null}},
+ "models.oauthStatus": {params:{windowId:'w',generation:1,authorizationId:'auth'},result:{authorizationId:'auth',state:'pending',verificationUrl:'https://auth.openai.com/codex/device',userCode:'CODE-123',candidateId:null}},
+ "models.oauthCancel": {params:{windowId:'w',generation:1,authorizationId:'auth'},result:{cancelled:true}},
   "models.workOverride": {params:{sessionId:"s",target},result:{selection:null,effective:"next_turn"}},
   "sessions.setModel": {params:{...binding,selection:null},result:{...receipt,method:"sessions.setModel"}},
   "tasks.setModel": {params:{...binding,taskId:"task",selection:{providerId:"local",modelId:"m"}},result:{...receipt,taskId:"task",method:"tasks.setModel"}},

@@ -1,3 +1,4 @@
+import {CodexAuthorization} from './codex-authorization.js';
 import {workModel} from './work-model.js';
 import {notifyPrivateConfigurationChanged} from '../gateway/private-control.js';
 import {resolveProfileStateHome} from '../config/profile-home.js';
@@ -32,12 +33,16 @@ export class DesktopBridge {
   #monitor: RuntimeStateMonitor | undefined;
   #capture: AbortController | undefined;
   #snapshot: BootstrapResult | undefined;
+  readonly oauth:CodexAuthorization;
   constructor(readonly options: { input: Readable; output: Writable; homeDir: string; profileId: string; version: string;
     readWork?: (signal: AbortSignal) => Promise<WorkState>;
     readState?: (signal: AbortSignal) => Promise<BootstrapState> }) {
     this.server = new StdioControlServer({ ...options, events: ['work.changed', 'activity.appended', 'attention.changed', 'control.ready', 'service.warning', 'service.shutdown'], handlers: {
       ...Object.fromEntries(['sessions.setModel', 'tasks.setModel', 'approvals.resolve', 'tasks.pause', 'tasks.resume', 'tasks.cancel', 'tasks.retry', 'tasks.guide', 'sessions.start', 'sessions.resume', 'sessions.send', 'sessions.cancelTurn', 'operations.inspect'].map((method) =>
         [method, async (request: SessionMutationRequest, signal: AbortSignal) => ({ result: await sessionControl(this.options, request, signal) })])),
+      'models.oauthStart': request=>{if(request.method!=='models.oauthStart')throw new ControlProtocolError('-32601');return {result:this.oauth.start(request.params)};},
+      'models.oauthStatus': request=>{if(request.method!=='models.oauthStatus')throw new ControlProtocolError('-32601');return {result:this.oauth.status(request.params)};},
+      'models.oauthCancel': request=>{if(request.method!=='models.oauthCancel')throw new ControlProtocolError('-32601');return {result:this.oauth.cancel(request.params)};},
       'models.workOverride': async(request)=>{if(request.method!=='models.workOverride')throw new ControlProtocolError('-32601');return {result:await workModel(this.options,request.params)};},
       'models.auxiliary': async()=>({result:await this.modelSetup.auxiliary()}),
       'models.reviewAuxiliary': async(request)=>{if(request.method!=='models.reviewAuxiliary')throw new ControlProtocolError('-32601');return {result:await this.modelSetup.review(request.params,'auxiliary',{slot:request.params.slot,fallbackToMain:request.params.fallbackToMain})};},
@@ -95,7 +100,8 @@ export class DesktopBridge {
       try {await notifyPrivateConfigurationChanged({directory:resolveProfileStateHome(this.options).gatewayStatePath,profileId:this.options.profileId,version:this.options.version,signal:AbortSignal.timeout(2000)});}catch{/* An absent owner will load the committed configuration on its next startup. */}
     });
     this.verifier = new CandidateVerifier(this.candidates);
-    this.server.onDispose(() => {this.modelSetup.dispose();this.verifier.dispose();this.candidates.dispose();});
+    this.oauth=new CodexAuthorization(this.candidates);
+    this.server.onDispose(() => {this.oauth.dispose();this.modelSetup.dispose();this.verifier.dispose();this.candidates.dispose();});
     this.subscriptions = new ControlSubscriptions(this.server);
     this.server.onDispose(() => { this.#capture?.abort(); this.#monitor?.dispose(); this.#workMonitor?.dispose(); this.#snapshot = undefined; this.#work = undefined; this.#catalog=undefined; });
   }
