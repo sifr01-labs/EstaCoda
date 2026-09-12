@@ -49,3 +49,9 @@ Validation: 71 approval/protocol tests including hardline, expiry and stale-gene
 Inbox supports category filtering, off-page Work review, return/next-request navigation, and provider setup routing for unbound setup requests. Other repair and governance requests expose their canonical details and the currently available repair path; they do not invent desktop mutations for later milestones. Profile-only attention carries canonical action hints even before a Session database exists. Decisions remain visible until canonical state removes them.
 
 Validation: five focused bootstrap/Inbox tests, eighteen browser Work/Inbox journeys, root and desktop typechecks. Review covered unbound setup entries, resolved-item focus, filtering and navigation continuity.
+
+## 9. Canonical usage and runtime counts
+
+The inspector reads the canonical provider ledger, including Session compression lineage and originating Task spend, within a 4,096-entry/128-root-Task inspection bound. Missing usage, missing prices, provisional totals, truncation and unavailable context are explicit. Runtime counts distinguish root Sessions, Tasks, approvals and schedules without double-counting attempts or child workers. Completed turn outcomes take precedence over cached ownership leases. Target groups use identity rather than display labels, and requested Docker policy is never presented as verified isolation.
+
+Validation: 87 focused core/protocol tests, an additional real-ledger truncation check, 39 desktop unit tests, nineteen browser Work journeys, root and desktop typechecks. Review covered profile isolation, context invalidation, stale Work selection and bounded lower-bound accounting.

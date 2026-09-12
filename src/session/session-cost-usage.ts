@@ -12,8 +12,8 @@ const MAX_SESSION_TASK_PAGES = 100;
 
 /** Projects conversation and originating Task spend from the one canonical request ledger. */
 export async function loadSessionCostUsage(input: {
-  sessionDb: SessionDB;
-  taskStore?: TaskStore;
+  sessionDb: Pick<SessionDB,"getSession"|"listProviderUsageEntries">;
+  taskStore?: Pick<TaskStore,"listTasks"|"listProviderUsageEntries">;
   profileId: string;
   sessionId: string;
   spendingScope?: (ownerId: string) => ProviderSpendingScope | null;

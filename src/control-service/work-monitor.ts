@@ -27,7 +27,7 @@ export class WorkMonitor {
         oldInbox.delete(item.id);
       }
       for (const itemId of oldInbox.keys()) this.publish({ type: 'attention.changed', payload: { itemId, item: null } });
-      let resync = Object.keys(this.#previous.activity).some((id) => !Object.hasOwn(next.activity, id)) || this.#previous.work.some((old) => !next.work.some((work) => work.id === old.id));
+      let resync = this.#previous.activeSchedules!==next.activeSchedules || Object.keys(this.#previous.activity).some((id) => !Object.hasOwn(next.activity, id)) || this.#previous.work.some((old) => !next.work.some((work) => work.id === old.id));
       for (const [workId, boundary] of Object.entries(next.history ?? {})) {
         const previous = this.#previous.history?.[workId];
         if (previous && (previous.revision !== boundary.revision ||

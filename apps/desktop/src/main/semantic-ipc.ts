@@ -11,11 +11,11 @@ import type { DesktopConnection, ConnectionState } from './connection.js';
 import { WindowAuthority } from './window-policy.js';
 import type { Profiles } from './profiles.js';
 export function rendererSnapshot(state:ConnectionState):DesktopSnapshot {
-  return {status:state.status,profile:state.bootstrap?.profile??{id:state.profileId,label:state.profileId,configuration:'unconfigured'},runtime:state.bootstrap?.runtime.state??'disconnected',work:state.work,inbox:state.inbox};
+  return {counts:state.status==='ready'?state.counts??null:null,status:state.status,profile:state.bootstrap?.profile??{id:state.profileId,label:state.profileId,configuration:'unconfigured'},runtime:state.bootstrap?.runtime.state??'disconnected',work:state.work,inbox:state.inbox};
 }
 export function validateSemanticPayload(method:string,payload:unknown):void {
   if(!isRecord(payload))throw new Error('Desktop request rejected.');
-  if((method==='workInspect'||method==='workLive')){if(!exactKeys(payload,['workId'])||!isControlId(payload.workId))throw new Error('Invalid Work');return;}
+  if((method==='workInspect'||method==='workLive'||method==='workUsage')){if(!exactKeys(payload,['workId'])||!isControlId(payload.workId))throw new Error('Invalid Work');return;}
   if(method==='workDecide'||method==='workInspectDecision'){if(!exactKeys(payload,method==='workDecide'?['itemId','decision']:['itemId'])||!isControlId(payload.itemId)||method==='workDecide'&&!['approved','denied'].includes(String(payload.decision)))throw new Error('Invalid approval decision');return;}
   if(method==='workAct'){if(!exactKeys(payload,['workId','action'],['stepId','guidance'])||!isControlId(payload.workId)||!['sessions.resume','sessions.cancelTurn','tasks.pause','tasks.resume','tasks.cancel','tasks.retry','tasks.guide'].includes(String(payload.action))||payload.stepId!==undefined&&!isControlId(payload.stepId)||payload.guidance!==undefined&&(typeof payload.guidance!=='string'||payload.guidance.length<1||payload.guidance.length>4000)||payload.action==='tasks.guide'&&typeof payload.guidance!=='string')throw new Error('Invalid Work action');return;}
   if(method==='workAttach'||method==='workSubmit'){
@@ -41,7 +41,7 @@ export function validateSemanticPayload(method:string,payload:unknown):void {
 export function installSemanticIpc(window:BrowserWindow,documentUrl:string,connection:DesktopConnection,profiles:Profiles,appearance:AppearanceSettings,models?:DesktopModelSetup,pins?:WorkPins,workControls?:DesktopWorkControls):()=>void {
   const authority=new WindowAuthority(window,documentUrl);
   const contents=window.webContents;
-  const methods=['workDecide','workInspectDecision','workAct','workChildren','workLive','workTargets','workAttach','workSubmit','workInspect','workSearch','workPins','workPin','workOverride','setOverride','inspectOverride','setupVerifyReviewed','modelRoutes','setupConfigured','setupOrder','setupMode','setupOAuthStart','setupOAuthStatus','setupOAuthOpen','setupBegin','setupStage','setupVerify','setupReview','setupApply','setupCancel','setupInspect','modelPage','providerPage','refreshCatalog','reconnect','moreWork','moreInbox','appearance','setAppearance','snapshot','getWork','activity','profiles','switchProfile','minimize','toggleMaximize','close'];
+  const methods=['workUsage','workDecide','workInspectDecision','workAct','workChildren','workLive','workTargets','workAttach','workSubmit','workInspect','workSearch','workPins','workPin','workOverride','setOverride','inspectOverride','setupVerifyReviewed','modelRoutes','setupConfigured','setupOrder','setupMode','setupOAuthStart','setupOAuthStatus','setupOAuthOpen','setupBegin','setupStage','setupVerify','setupReview','setupApply','setupCancel','setupInspect','modelPage','providerPage','refreshCatalog','reconnect','moreWork','moreInbox','appearance','setAppearance','snapshot','getWork','activity','profiles','switchProfile','minimize','toggleMaximize','close'];
   const handlers:string[]=[];
   let connectionGeneration=connection.state.generation;
   const state=(value:ConnectionState)=>{if(value.generation!==connectionGeneration){authority.invalidate();connectionGeneration=value.generation;}if(!window.isDestroyed())contents.send('desktop:state',{generation:authority.generation,snapshot:rendererSnapshot(value)});};
@@ -57,7 +57,7 @@ export function installSemanticIpc(window:BrowserWindow,documentUrl:string,conne
         if(method==='workDecide'||method==='workInspectDecision'){if(!workControls)throw new Error('Work unavailable');const result=method==='workDecide'?await workControls.decide(payload.itemId as string,payload.decision as 'approved'|'denied'):await workControls.inspectDecision(payload.itemId as string);authority.assertSender(event,generation);return result;}
         if(method==='workAct'){if(!workControls)throw new Error('Work unavailable');const result=await workControls.act(payload as Parameters<DesktopWorkControls['act']>[0]);authority.assertSender(event,generation);return result;}
         if(method==='workChildren'){await connection.getWork(payload.workId as string);authority.assertSender(event,generation);const result=await connection.search('',payload.cursor as string|undefined,payload.workId as string);authority.assertSender(event,generation);return result;}
-        if(method==='workLive'){const result=await connection.workRequest('work.live',{workId:payload.workId as string});authority.assertSender(event,generation);return result;}
+        if(method==='workLive'||method==='workUsage'){const result=await connection.workRequest(method==='workLive'?'work.live':'work.usage',{workId:payload.workId as string});authority.assertSender(event,generation);return result;}
         if(['workTargets','workAttach','workSubmit','workInspect'].includes(method)){
           if(!workControls)throw new Error('Work unavailable');
           const result=method==='workTargets'?await connection.workRequest('work.targets',{}):method==='workAttach'?await workControls.attach(payload as Parameters<DesktopWorkControls['attach']>[0]):method==='workSubmit'?await workControls.submit(payload as Parameters<DesktopWorkControls['submit']>[0]):await workControls.inspect(payload.workId as string);

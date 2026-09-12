@@ -1,0 +1,9 @@
+import {useEffect,useState} from 'react';
+import type {WorkProjection,WorkUsageProjection} from '@estacoda/control-protocol';
+import type {DesktopWorkApi} from '../../shared/desktop-api.js';
+export function WorkUsage({api,work}:{api:DesktopWorkApi;work:WorkProjection}){
+ const[value,setValue]=useState<WorkUsageProjection|null>(null),[error,setError]=useState(false);
+ useEffect(()=>{if(!api.usage||!['session','task','task_attempt'].includes(work.kind))return;let active=true;void api.usage(work.id).then(result=>{if(active){setValue(result);setError(false);}},()=>{if(active){setValue(null);setError(true);}});return()=>{active=false;};},[api,work]);
+ const number=(n:number)=>n.toLocaleString();
+ return <section className="ec-inspectsection" aria-label="Canonical Work usage"><div className="ec-inspecttitle">Usage</div><dl><div className="ec-kv"><dt>Reported tokens{value&&!value.usageComplete?' · partial':''}</dt><dd>{value?.reportedTokens==null?'Unavailable':number(value.reportedTokens)}</dd></div><div className="ec-kv"><dt>Cost estimate{value&&!value.pricingComplete?' · partial':''}</dt><dd>{value?.cost?new Intl.NumberFormat(undefined,{style:'currency',currency:value.cost.currency,maximumFractionDigits:4}).format(value.cost.amount):'Unavailable'}</dd></div><div className="ec-kv"><dt>Reported provider calls</dt><dd>{value?number(value.providerCalls):'Unavailable'}</dd></div><div className="ec-kv"><dt>Context window</dt><dd>{value?.context?number(value.context.usedTokens)+' / '+number(value.context.totalTokens):'Unavailable'}</dd>{value?.context&&<dd><bdi>{value.context.provider} / {value.context.model}</bdi></dd>}</div></dl><p className="ec-footnote">{error?'Usage could not be refreshed.':value?.provisional?'Latest settled calls; active Work can add usage.':'Reported usage from settled provider calls.'}{value?.truncated?' Inspection limit reached; totals shown are lower bounds.':''}</p></section>;
+}

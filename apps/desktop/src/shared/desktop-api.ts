@@ -1,7 +1,7 @@
 import type {MethodContracts} from '@estacoda/control-protocol';
 import type {AppearancePreferences} from './appearance.js';
 import type { ActivityProjection, Page, WorkProjection, InboxProjection } from '@estacoda/control-protocol';
-export type DesktopSnapshot = { status: 'connecting' | 'ready' | 'disconnected' | 'incompatible' | 'unavailable';
+export type DesktopSnapshot = {counts?:import('@estacoda/control-protocol').RuntimeCounts|null; status: 'connecting' | 'ready' | 'disconnected' | 'incompatible' | 'unavailable';
   profile: {id:string;label:string;configuration:'unconfigured'|'ready'|'repair_required'};
   runtime: 'stopped'|'starting'|'ready'|'disconnected'|'incompatible'|'unavailable';
   work:Page<WorkProjection>;inbox:Page<InboxProjection> };
@@ -36,6 +36,7 @@ export type DesktopModelsApi={
 export type WorkAction={workId:string;action:'sessions.resume'|'sessions.cancelTurn'|'tasks.pause'|'tasks.resume'|'tasks.cancel'|'tasks.retry'|'tasks.guide';stepId?:string;guidance?:string};
 export type WorkSubmission={kind?:'session'|'task';limits?:{maxProviderCalls:number;maxTotalTokens:number;maxWallClockMs:number};draftId:string;workId?:string;target:import('@estacoda/control-protocol').TargetReference;text:string;attachmentIds:string[];selection?:{providerId:string;modelId:string}|null};
 export type DesktopWorkApi = {
+ usage(workId:string):Promise<import('@estacoda/control-protocol').WorkUsageProjection>;
  decide(itemId:string,decision:'approved'|'denied'):Promise<import('@estacoda/control-protocol').OperationReceipt>;
  inspectDecision(itemId:string):Promise<import('@estacoda/control-protocol').OperationReceipt|null>;
  act(input:WorkAction):Promise<import('@estacoda/control-protocol').OperationReceipt>;

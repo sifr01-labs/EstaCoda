@@ -2,7 +2,7 @@ import{EventEmitter}from'node:events';
 import{afterEach,expect,it,vi}from'vitest';
 const controls=vi.hoisted(()=>({fail:false,clients:[] as any[],lookup:null as null|((work:unknown)=>void)}));
 vi.mock('./protocol-client.js',()=>({ProtocolClient:class extends EventEmitter{
- context={capabilities:{events:[]}};profile='default';closed=false;
+ context={capabilities:{events:[],methods:[]}};profile='default';closed=false;
  constructor(){super();controls.clients.push(this);}
  async request(method:string,params:any){
   if(method==='control.initialize'){this.profile=params.profileId;return{};}

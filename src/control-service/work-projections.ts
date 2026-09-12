@@ -1,3 +1,4 @@
+import {basename} from 'node:path';
 import type { SessionEvent, SessionMessage, SessionRecord } from '../contracts/session.js';
 import type { ActivityProjection, WorkDisplayStatus, WorkProjection } from '../contracts/desktop-control/index.js';
 import { deriveSessionDescription } from '../session/session-presentation.js';
@@ -13,12 +14,12 @@ export function sessionWork(session: SessionRecord, events: readonly SessionEven
     status = ({ completed: 'completed', completed_with_recovered_errors: 'completed', partially_completed: 'partial',
       blocked: 'needs_attention', failed: 'failed', cancelled: 'cancelled' } as const)[outcome.status];
   } else if (session.endedAt) status = session.endReason === 'cancelled' ? 'cancelled' : 'partial';
-  if (active) status = 'running';
+  if (active && !outcome && !session.endedAt) status = 'running';
   return { id: `session:${session.id}`, canonicalId: session.id, profileId: session.profileId, kind: 'session', modelBinding:{sessionId:session.id},
     ...(session.parentSessionId ? { parentWorkId: `session:${session.parentSessionId}` } : {}),
     title: deriveSessionDescription(session.title).slice(0, 240), status, updatedAt: timestamp(session.updatedAt),
     target: session.executionTarget ? { targetId: session.executionTarget.targetId, targetGeneration: session.executionTarget.targetGeneration,
-      label: 'Workspace', isolation: 'unknown' } : null };
+      label: safeText(basename(session.executionTarget.workspace.canonicalPath),240)||'Workspace', isolation: 'unknown' } : null };
 }
 export function sessionActivity(session: SessionRecord, messages: readonly SessionMessage[]): ActivityProjection[] {
   return messages.filter((message) => message.role === 'user' || message.role === 'agent').map((message, sequence) => ({

@@ -116,8 +116,10 @@ function compactedFromSessionId(metadataJson: string | null): string | undefined
 export function selectProviderUsageEntries(
   db: SQLiteDatabase,
   profileId: string,
-  query: ProviderUsageQuery = {}
+  query: ProviderUsageQuery = {},
+  limit?:number
 ): ProviderUsageEntry[] {
+  if(limit!==undefined&&(!Number.isSafeInteger(limit)||limit<1||limit>4097))throw new Error("Invalid usage inspection limit.");
   const clauses = ["profile_id = ?"];
   const values: SQLiteValue[] = [profileId];
   for (const [column, value] of [
@@ -134,8 +136,8 @@ export function selectProviderUsageEntries(
   }
   return db.query<ProviderUsageRow>(
     `select * from provider_usage_entries where ${clauses.join(" and ")}
-     order by dispatched_at, provider_attempt_index, id`
-  ).all(...values).map(rowToProviderUsageEntry);
+     order by dispatched_at, provider_attempt_index, id${limit===undefined?'':' limit ?'}`
+  ).all(...values,...(limit===undefined?[]:[limit])).map(rowToProviderUsageEntry);
 }
 
 function rowToProviderUsageEntry(row: ProviderUsageRow): ProviderUsageEntry {

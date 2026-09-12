@@ -1,3 +1,4 @@
+import {basename} from 'node:path';
 import { setImmediate } from 'node:timers/promises';
 import { taskActions } from './action-projections.js';
 import { taskListCursor, type TaskListCursor } from '../tasks/task-store.js';
@@ -16,7 +17,7 @@ export function taskWork(task: Task, visibleSessions: ReadonlySet<string>): Work
     ...(task.parentTaskId ? { parentWorkId: `task:${task.parentTaskId}` } : visibleSessions.has(task.originSessionId) ? { parentWorkId: `session:${task.originSessionId}` } : {}),
     title: safeText(task.objective, 240) || 'Task', status: statuses[task.status],
     ...(task.waitReason ? { reason: safeText(task.waitReason.summary) } : {}), updatedAt: timestamp(task.updatedAt),
-    target: task.executionTarget ? { targetId: task.executionTarget.targetId, targetGeneration: task.executionTarget.targetGeneration, label: 'Workspace', isolation: 'unknown' } : null };
+    target: task.executionTarget ? { targetId: task.executionTarget.targetId, targetGeneration: task.executionTarget.targetGeneration, label: safeText(basename(task.executionTarget.workspace.canonicalPath),240)||'Workspace', isolation: 'unknown' } : null };
 }
 export function attemptWork(task: WorkProjection, attempt: TaskAttempt): WorkProjection {
   const status: WorkDisplayStatus = ({ queued: 'queued', leased: 'running', running: 'running', waiting_for_input: 'needs_attention',

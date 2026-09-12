@@ -8,7 +8,8 @@ it('distinguishes partial, blocked, failed and cancelled outcomes from success a
   for (const [outcome, expected] of [['completed', 'completed'], ['completed_with_recovered_errors', 'completed'], ['partially_completed', 'partial'], ['blocked', 'needs_attention'], ['failed', 'failed'], ['cancelled', 'cancelled']] as const) {
     const event: SessionEvent = { kind: 'execution-final-outcome-recorded', status: outcome, terminationCause: 'normal', completionFloor: 'none' };
     expect(sessionWork(session, [event], false).status).toBe(expected);
-    expect(sessionWork(session, [event], true).status).toBe('running');
+    // A cached ownership lease cannot override the latest canonical outcome.
+    expect(sessionWork(session, [event], true).status).toBe(expected);
   }
   expect(sessionWork(session, [], false).status).toBe('draft');
   expect(sessionWork({ ...session, endedAt: '2026-01-02' }, [], false).status).toBe('partial');

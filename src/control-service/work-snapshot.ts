@@ -14,17 +14,17 @@ import { SQLiteSessionDB } from '../session/sqlite-session-db.js';
 import { ControlProtocolError, type InboxProjection, type ActivityProjection, type Page, type PageParams, type WorkProjection } from '../contracts/desktop-control/index.js';
 import { sessionWork } from './work-projections.js';
 
-export type WorkState = { inbox?: InboxProjection[]; work: WorkProjection[]; activity: Record<string, ActivityProjection[]>; history?: Record<string, HistoryBoundary> };
+export type WorkState = { inbox?: InboxProjection[]; work: WorkProjection[]; activity: Record<string, ActivityProjection[]>; history?: Record<string, HistoryBoundary>; activeSchedules?:number|null;capturedAt?:number };
 /** Metadata epoch with bounded history previews. No open SQLite transaction or live executor survives capture. */
 export async function captureWork(input: { homeDir: string; profileId: string; version?: string }, signal: AbortSignal): Promise<WorkState> {
   const attention = await profileAttention(input);
   const path = resolveGlobalStateHome(input).sessionsSqlitePath;
   try { const info = await lstat(path); if (!info.isFile() || info.isSymbolicLink()) throw new ControlProtocolError('-32007'); }
-  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { work: [], activity: {}, inbox: attention.inbox.map(item => ({ ...item, actions: inboxActions(item) })) }; throw error; }
+  catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return { capturedAt:Date.now(),activeSchedules:attention.inbox.some(item=>item.id==='setup:schedules')?null:attention.jobs.filter(job=>job.status==='active').length,work: [], activity: {}, inbox: attention.inbox.map(item => ({ ...item, actions: inboxActions(item) })) }; throw error; }
   const sessions = new SQLiteSessionDB({ path, readonly: true });
   try {
     sessions.db.exec('begin');
-    const state: WorkState = { work: [], activity: {}, inbox: attention.inbox, history: {} };
+    const state: WorkState = { capturedAt:Date.now(), work: [], activity: {}, inbox: attention.inbox, activeSchedules:attention.inbox.some(item=>item.id==='setup:schedules')?null:attention.jobs.filter(job=>job.status==='active').length, history: {} };
     // Capture navigation metadata; transcript bodies are paged separately.
     const ids = sessions.db.query<{ id: string }>('select id from sessions where profile_id = ? order by updated_at desc, id').all(input.profileId);
     let capturedBytes = 0;

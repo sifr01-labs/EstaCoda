@@ -3,9 +3,9 @@ import { CONTROL_METHODS,type MethodContracts,CONTROL_EVENTS, DESKTOP_PROTOCOL_V
 import { ProtocolClient } from './protocol-client.js';
 import { ServiceProcess, validateProfileId } from './service-process.js';
 export type ConnectionState = { status: 'connecting' | 'ready' | 'disconnected' | 'incompatible' | 'unavailable'; generation: number;
-  profileId: string; bootstrap: BootstrapResult | null; work: Page<WorkProjection>; inbox: Page<InboxProjection> };
+  profileId: string; counts?:MethodContracts['work.counts']['result']|null;bootstrap: BootstrapResult | null; work: Page<WorkProjection>; inbox: Page<InboxProjection> };
 export const MODEL_METHODS=CONTROL_METHODS.filter(method=>method.startsWith('models.') || ['providers.list','sessions.setModel','tasks.setModel','operations.inspect'].includes(method));
-export const WORK_METHODS=CONTROL_METHODS.filter(method=>method==='inbox.get'||method==='work.targets'||method==='work.live'||method.startsWith('sessions.')||method.startsWith('tasks.')||method==='approvals.resolve'||method==='operations.inspect');
+export const WORK_METHODS=CONTROL_METHODS.filter(method=>method==='work.usage'||method==='work.counts'||method==='inbox.get'||method==='work.targets'||method==='work.live'||method.startsWith('sessions.')||method.startsWith('tasks.')||method==='approvals.resolve'||method==='operations.inspect');
 export class DesktopConnection extends EventEmitter {
   #client: ProtocolClient | null = null;
   #timer: ReturnType<typeof setTimeout> | undefined;
@@ -50,14 +50,15 @@ export class DesktopConnection extends EventEmitter {
         this.#refreshAgain = false;
         const bootstrap = await client.request('control.bootstrap', {});
         // Rebuild the inspected extent with fresh cursors; never append stale pages.
-        const [work, inbox] = await Promise.all([
+        const [work, inbox,counts] = await Promise.all([
           this.readWork(client, Math.max(100, this.state.work.items.length)),
           this.readInbox(client, Math.max(100, this.state.inbox.items.length)),
+          client.context?.capabilities.methods.includes('work.counts')?client.request('work.counts',{}):Promise.resolve(null),
         ]);
         const sub = await client.request('control.subscribe', {after:bootstrap.cursor, events:client.context!.capabilities.events});
         if (client !== this.#client) return;
         if (sub.state !== 'subscribed') throw new Error();
-        this.state = {...this.state, status:'ready', bootstrap, work, inbox}; this.publish();
+        this.state = {...this.state, status:'ready', bootstrap, work, inbox,counts}; this.publish();
       } while (this.#refreshAgain && client === this.#client);
     } catch { if (client === this.#client) this.lost('unavailable'); }
     finally { this.#refreshing = false; if (this.#refreshAgain && !this.#stopped) { this.#refreshAgain = false; void this.refresh(); } }
@@ -130,7 +131,7 @@ export class DesktopConnection extends EventEmitter {
   private lost(status: ConnectionState['status'] = 'disconnected'): void {
     if (this.#stopped || this.#timer) return;
     this.#client?.dispose(); this.#client = null; this.service.stop(); this.emit('invalidate');
-    this.state = {...this.state, generation:this.state.generation+1, status, bootstrap:null, work:{items:[],nextCursor:null}, inbox:{items:[],nextCursor:null}}; this.publish();
+    this.state = {...this.state, generation:this.state.generation+1, status, counts:null,bootstrap:null, work:{items:[],nextCursor:null}, inbox:{items:[],nextCursor:null}}; this.publish();
     if (status === 'incompatible') return;
     this.#timer = setTimeout(() => { this.#timer = undefined; void this.connect(); }, Math.min(30_000, 500 * 2 ** this.#attempt++));
   }

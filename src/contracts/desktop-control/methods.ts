@@ -19,7 +19,11 @@ export type SubscribeParams = { after: ControlCursor; events: Capabilities["even
 export type SubscribeResult =
   | { state: "subscribed"; subscriptionId: string; cursor: ControlCursor }
   | { state: "snapshot_required"; reason: "instance_changed" | "stream_changed" | "cursor_expired" | "overflow" };
+export type WorkUsageProjection={scope:'session'|'task'|'attempt';reportedTokens:number|null;providerCalls:number;cost:{amount:number;currency:'USD'}|null;usageComplete:boolean;pricingComplete:boolean;context:{usedTokens:number;totalTokens:number;provider:string;model:string}|null;truncated:boolean;provisional:boolean};
+export type RuntimeCounts={runningSessions:number;runningTasks:number;queuedTasks:number;approvals:number;attention:number;scheduled:number|null;asOf:number};
 export type MethodContracts = {
+  "work.usage":{params:{workId:string};result:WorkUsageProjection};
+  "work.counts":{params:Record<string,never>;result:RuntimeCounts};
   "tasks.create":{params:SessionControl&{taskId:string;objective:string;limits:{maxProviderCalls:number;maxTotalTokens:number;maxWallClockMs:number};selection:{providerId:string;modelId:string}|null};result:OperationReceipt};
   "work.live": {params:{workId:string};result:{active:boolean;turnId:string|null;text:string;truncated:boolean}};
   "work.targets": {params:Record<string,never>;result:{items:TargetProjection[];truncated:boolean}};

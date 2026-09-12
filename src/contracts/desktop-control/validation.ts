@@ -99,6 +99,8 @@ const contracts: { [M in keyof MethodContracts]: { params: Check; result: Check 
   "control.subscribe": { params: shape({ after: isControlCursor, events: unique(choice(CONTROL_EVENTS), 64, 1) }), result: subscribeResult },
   "control.unsubscribe": { params: shape({ subscriptionId: id }), result: shape({ removed: boolean }) },
   "control.cancelRequest": { params: shape({ requestId: id }), result: shape({ cancellationRequested: boolean }) },
+  "work.counts":{params:shape({}),result:shape({runningSessions:integer(),runningTasks:integer(),queuedTasks:integer(),approvals:integer(),attention:integer(),scheduled:nullable(integer()),asOf:integer()})},
+  "work.usage":{params:shape({workId:id}),result:shape({scope:choice(['session','task','attempt']),reportedTokens:nullable(integer()),providerCalls:integer(),cost:nullable(shape({amount:v=>typeof v==='number'&&Number.isFinite(v)&&v>=0,currency:choice(['USD'])})),usageComplete:boolean,pricingComplete:boolean,context:nullable(shape({usedTokens:integer(),totalTokens:integer(1),provider:text(240,1),model:text(240,1)})),truncated:boolean,provisional:boolean})},
   "work.live": {params:shape({workId:id}),result:shape({active:boolean,turnId:nullable(id),text:text(16384),truncated:boolean})},
   "work.targets": {params:shape({}),result:shape({items:array(targetProjection),truncated:boolean})},
   "work.list": { params: shape(pageParams, {...optionalPage, query:text(200),parentWorkId:id}), result: page(work) },
