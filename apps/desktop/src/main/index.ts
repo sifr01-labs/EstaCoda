@@ -1,7 +1,7 @@
 import {DesktopModelSetup} from './model-setup.js';
 import{registerUiScheme,installAssetProtocol}from'./asset-protocol.js';
 import{AppearanceSettings}from'./appearance-store.js';
-import { app, BrowserWindow } from 'electron';
+import { shell,app, BrowserWindow } from 'electron';
 import path from 'node:path';
 import { Profiles } from './profiles.js';
 import { installSemanticIpc } from './semantic-ipc.js';
@@ -31,7 +31,7 @@ async function openWindow(): Promise<void> {
   connection.on('invalidate', () => { credentials.close(); credentialPipe?.dispose(); credentialPipe = undefined; });
   const documentUrl = MAIN_WINDOW_VITE_DEV_SERVER_URL ? new URL(MAIN_WINDOW_VITE_DEV_SERVER_URL).href : 'estacoda://app/index.html';
   const profiles = new Profiles(app.getPath('home'));
-  const disposeIpc = installSemanticIpc(window, documentUrl, connection, profiles, new AppearanceSettings(app.getPath('userData')),new DesktopModelSetup(connection,credentials,()=>credentialPipe));
+  const disposeIpc = installSemanticIpc(window, documentUrl, connection, profiles, new AppearanceSettings(app.getPath('userData')),new DesktopModelSetup(connection,credentials,()=>credentialPipe,url=>shell.openExternal(url)));
   window.once('closed', () => { disposeIpc(); connection.close(); });
   connection.switchProfile(profiles.initial());
   window.once('ready-to-show', () => window.show());

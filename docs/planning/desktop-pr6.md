@@ -75,3 +75,9 @@ Validation: 63 catalog/health/protocol tests and 24 desktop unit tests passed, p
 The live Add Provider dialog now validates the endpoint/API mode, opens the dedicated credential window, offers explicit bounded candidate verification, reviews the primary-route change, and applies through the service transaction. Main owns the setup identity and credential scope. Successful private entry transfers the staged handle to Main; the ordinary renderer has no key-input API. Cancel/profile change discards staging. Apply failures retain a profile-bound receipt pointer for explicit reconciliation, without automatic resubmission.
 
 Validation: 27 desktop unit tests passed, including private-scope binding, cancellation, profile invalidation and uncertain-Apply inspection; focused core setup/credential/protocol tests; root typecheck and desktop foundation checks. The live dialog uses the approved modal components and styles, preserves keyboard focus and keeps setup-only values out of ordinary browser storage. Native credential-window integration remains part of the final PR6 acceptance run.
+
+## 11. Desktop Codex OAuth setup
+
+The live provider dialog supports Codex device authorization, displays the service-issued code, polls bounded status, and opens sign-in only on an explicit click. Main rechecks the service status and permits only the fixed HTTPS Codex verification URL. Authorized candidates enter the same verification/review/Apply flow as API-key routes. Staged token records are validated again at Apply, including when optional verification was skipped.
+
+Validation: 28 desktop tests and 13 focused OAuth/verification/setup tests passed, plus root typecheck and desktop foundation checks. Main tests verify the exact browser destination, candidate handoff, no API-key window for OAuth, and cancellation. Live user-account authorization remains an explicit interactive acceptance step; no account login was performed during these tests.

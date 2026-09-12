@@ -24,3 +24,14 @@ it('does not blindly resend an Apply after transport failure',async()=>{
  await expect(f.setup.apply(setupId)).rejects.toThrow('Disconnected');f.connection.emit('invalidate');expect(await f.setup.inspect()).toMatchObject({state:'uncertain'});
  expect(f.connection.modelRequest.mock.calls.filter(c=>c[0]==='models.applyDraft')).toHaveLength(1);
 });
+it('opens only the service-confirmed Codex URL and carries the authorized candidate into review',async()=>{
+ const f=fixture(),open=vi.fn(async()=>{});const setup=new DesktopModelSetup(f.connection as any,f.credentials as any,()=>f.pipe as any,open);
+ let authorized=false;f.connection.modelRequest.mockImplementation(async(method:string,params:any)=>{
+  f.calls.push({method,params});if(method==='models.oauthStart'||method==='models.oauthStatus')return {authorizationId:'auth',state:authorized?'authorized':'pending',verificationUrl:authorized?null:'https://auth.openai.com/codex/device',userCode:authorized?null:'CODE',candidateId:authorized?'oauth-candidate':null} as any;
+  return {valid:true,cancelled:true} as any;
+ });
+ const {setupId}=await setup.begin({...route,providerId:'codex',endpoint:'https://chatgpt.com/backend-api/codex',authMethod:'oauth',apiMode:'openai_responses'});
+ await setup.oauthStart(setupId);await setup.oauthOpen(setupId);expect(open).toHaveBeenCalledWith('https://auth.openai.com/codex/device');
+ authorized=true;await setup.oauthStatus(setupId);await expect(setup.oauthOpen(setupId)).rejects.toThrow();await setup.review(setupId);expect(f.calls.at(-1).params.candidateId).toBe('oauth-candidate');
+ expect(f.credentials.open).not.toHaveBeenCalled();await setup.cancel(setupId);expect(f.calls.some(c=>c.method==='models.oauthCancel')).toBe(true);
+});

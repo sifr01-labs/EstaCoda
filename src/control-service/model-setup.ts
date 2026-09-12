@@ -1,3 +1,4 @@
+import {oauthCandidate} from './oauth-candidate.js';
 import {captureCredentialPresence} from './route-health.js';
 import {AUXILIARY_SLOTS,type AuxiliarySlot,type AuxiliaryList,type AuxiliaryModeParams} from '../contracts/desktop-control/index.js';
 import {resolveAuxiliaryModelRoute} from '../providers/auxiliary-model-resolver.js';
@@ -106,7 +107,7 @@ export class ModelSetup {
     try{
       const receipt=await applyProfilePlan({...this.input,operationId:binding.draftId,snapshot:draft.snapshot,plan,signal:combined,
         secrets:value&&env?[{envVarName:env,value}]:[],
-        oauth:route?.authMethod==='oauth'&&value?[{providerId:route.providerId,authMethod:'oauth_device_pkce',tokenRecord:JSON.parse(value)}]:[]});
+        oauth:route?.authMethod==='oauth'&&value?[{providerId:route.providerId,authMethod:'oauth_device_pkce',tokenRecord:oauthCandidate(value,route.providerId)}]:[]});
       draft.consumed=true;draft.snapshot={files:{'.env':null,'auth.json':null,'config.json':null}};await this.changed();return {...receipt,state:receipt.state,verification:receipt.state==='applied'?await this.verifySaved():'not_tested'};
     }finally{draft.applying=false;clearTimeout(draft.timer);if(!draft.consumed)this.#drafts.delete(binding.draftId);if(params.candidateId){try{this.candidates.discard(params.candidateId,draft.scope!);}catch{/* Already invalidated. */}}}
   }
