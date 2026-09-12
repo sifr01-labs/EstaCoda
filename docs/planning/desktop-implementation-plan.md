@@ -1135,6 +1135,8 @@ PR10 implementation and its verified bounds are recorded in [desktop-pr10-valida
 - `test(evidence): distinguish verified partial and unverified outcomes`
 - `docs(desktop): document artifact and evidence guarantees`
 
+PR11 implementation and inspection bounds are recorded in [desktop-pr11-validation.md](desktop-pr11-validation.md). The live Library reuses retained Session artifacts and Task Results; Results distinguish completion, execution evidence, and retained-content integrity.
+
 ### PR 12 — Browser view
 
 - `feat(control-service): project browser session state`
