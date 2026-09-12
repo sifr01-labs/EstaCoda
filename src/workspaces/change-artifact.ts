@@ -55,6 +55,7 @@ export class ChangeArtifactStore extends ExecutionTargetStore {
     const capturePath = join(staging, randomUUID()); await writeFile(capturePath, bytes, { flag: "wx", mode: 0o600 });
     try {
       return await this.artifacts.retainSessionArtifact({ sessionId, profileId: this.profileId, capturePath, kind: "data", bytes: bytes.length,
+        provenance: { target: { targetId: target.id, targetGeneration: target.generation }, ...(target.source.registeredWorkspaceId ? { sourceWorkspaceId: target.source.registeredWorkspaceId } : {}) },
         mimeType: "application/json", sha256: hash(bytes), summary: `${changes.length} workspace changes; source files are unchanged.`,
         source: { kind: "workspace.changes", filename: "workspace-changes.json", origin: `workspace:${target.id}`, description: "Temporary-copy changes with source baseline" },
         persist: async (registration) => {
