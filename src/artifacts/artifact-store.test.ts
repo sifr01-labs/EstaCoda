@@ -46,6 +46,8 @@ describe("ArtifactStore durable session artifacts", () => {
     expect(first.get(retained.id, { ...scope(), profileId: "profile-2" })).toBeUndefined();
     expect(first.get(retained.id)).toBeUndefined();
 
+    expect((await recreatedPreview(root, registration!)).text).toBe(content);
+
     // Older or altered format metadata cannot override inspection of verified bytes.
     registration!.apiDescription = { format: "Swagger", version: "2.0" };
     const recreated = store(root);
@@ -181,3 +183,7 @@ it('preserves bounded provenance without publishing backing paths and rejects ma
   expect(parseRegistration({...saved,provenance:{target:{targetId:'../foreign',targetGeneration:2}}})).toBeUndefined();
   expect(parseRegistration({...saved,provenance:{evidenceCallIds:Array(65).fill('call')}})).toBeUndefined();
 });
+
+async function recreatedPreview(root: string, registration: SessionArtifactRegistration) {
+  return store(root).previewRegistration(registration, scope());
+}

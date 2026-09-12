@@ -1,6 +1,7 @@
 import { reviewedApiDescription } from "../contracts/artifact.js";
 import { createHash, randomUUID } from "node:crypto";
-import { chmod, link, lstat, mkdir, readFile, realpath, unlink } from "node:fs/promises";
+import { chmod, lstat, mkdir, open, realpath, unlink, writeFile } from "node:fs/promises";
+import { constants } from "node:fs";
 import { isAbsolute, resolve, sep } from "node:path";
 import {
   isArtifactKind,
@@ -109,7 +110,7 @@ export class ArtifactStore {
     if (!capture.isFile() || capture.isSymbolicLink() || capture.size !== input.bytes) {
       throw new Error("Session artifact capture is invalid.");
     }
-    const content = await readFile(capturePath);
+    const content = await readArtifactBytes(capturePath, input.bytes);
     const inspection = inspectBrowserDownload(source.filename, content);
     const actualHash = createHash("sha256").update(content).digest("hex");
     if (
@@ -124,7 +125,8 @@ export class ArtifactStore {
     const id = validArtifactId(this.#id());
     const storageKey = validStorageKey(`objects/${this.#storageId()}`);
     const finalPath = await this.#resolveStorageKey(storageKey, true);
-    await link(capturePath, finalPath);
+    // A fresh inode prevents a writer holding the capture from mutating retained bytes.
+    await writeFile(finalPath, content, { flag: "wx", mode: 0o600 });
     await unlink(capturePath);
     await chmod(finalPath, 0o600);
 
@@ -172,7 +174,7 @@ export class ArtifactStore {
         localPath = await this.#resolveStorageKey(registration.storageKey, false);
         const file = await lstat(localPath);
         if (!file.isFile() || file.isSymbolicLink() || file.size !== registration.bytes) continue;
-        const content = await readFile(localPath);
+        const content = await readArtifactBytes(localPath, registration.bytes);
         const inspection = inspectBrowserDownload(registration.source.filename, content);
         if (
           inspection.allowed === false ||
@@ -195,6 +197,18 @@ export class ArtifactStore {
       hydrated.push(cloneArtifact(artifact));
     }
     return hydrated;
+  }
+
+  /** Reverify on every preview; hydration alone is never a lasting integrity grant. */
+  async previewRegistration(value: unknown, scope: SessionArtifactScope): Promise<{metadata: RetainedArtifactMetadata; text: string | null; truncated: boolean}> {
+    const registration = parseRegistration(value);
+    if (!registration || registration.sessionId !== scope.sessionId || registration.profileId !== scope.profileId) throw new Error("Artifact unavailable.");
+    const path = await this.#resolveStorageKey(registration.storageKey, false);
+    const content = await readArtifactBytes(path, registration.bytes);
+    const inspection = inspectBrowserDownload(registration.source.filename, content);
+    if (!inspection.allowed || inspection.kind !== registration.kind || inspection.mimeType !== registration.mimeType || createHash("sha256").update(content).digest("hex") !== registration.sha256) throw new Error("Artifact integrity check failed.");
+    const text = registration.mimeType.startsWith("text/") || ["application/json", "application/yaml", "application/xml"].includes(registration.mimeType);
+    return { metadata: retainedArtifactMetadata(registration), text: text ? redactSensitiveText(content.subarray(0, 16384).toString("utf8")) : null, truncated: text && content.length > 16384 };
   }
 
   list(scope?: SessionArtifactScope): ArtifactRecord[] {
@@ -377,4 +391,22 @@ export function retainedArtifactMetadata(registration: SessionArtifactRegistrati
     mimeType: registration.mimeType, bytes: registration.bytes, sha256: registration.sha256,
     createdAt: registration.createdAt, retention: "retained", sourceKind: registration.source.kind,
     sourceOrigin: registration.source.origin, ...(registration.provenance ? { provenance: structuredClone(registration.provenance) } : {}) };
+}
+
+/** Bounded, no-follow, regular-file reads for retention and every consumer. */
+async function readArtifactBytes(path: string, expected: number): Promise<Buffer> {
+  if (!Number.isSafeInteger(expected) || expected < 0 || expected > 96 * 1024 * 1024) throw new Error("Artifact exceeds retention read limit.");
+  const canonical = await realpath(path);
+  const leaf = await lstat(path);
+  if (!leaf.isFile() || leaf.isSymbolicLink()) throw new Error("Artifact path changed.");
+  const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+  try {
+    const before = await file.stat();
+    if (!before.isFile() || before.size !== expected) throw new Error("Artifact content unavailable.");
+    const bytes = Buffer.alloc(expected); let offset = 0;
+    while (offset < expected) { const {bytesRead} = await file.read(bytes, offset, expected - offset, offset); if (!bytesRead) throw new Error("Artifact read incomplete."); offset += bytesRead; }
+    const after = await file.stat(), current = await lstat(path);
+    if (!current.isFile() || current.isSymbolicLink() || current.ino !== before.ino || current.dev !== before.dev || after.size !== before.size || after.mtimeMs !== before.mtimeMs || after.ctimeMs !== before.ctimeMs || await realpath(path) !== canonical) throw new Error("Artifact changed during read.");
+    return bytes;
+  } finally { await file.close(); }
 }
