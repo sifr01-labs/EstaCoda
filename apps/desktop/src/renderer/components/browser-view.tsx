@@ -33,10 +33,10 @@ export function BrowserView({api,work,close}:{api:DesktopApi;work:WorkProjection
    {api.browserControl?.workspace&&ready&&<BrowserTakeover api={api.browserControl} workId={work.id} active={setControlling}/>}
    {!selected?<p className="ec-footnote">{t("Select a browser session to inspect its recorded state.")}</p>:<>
     <h3 dir="auto">{selected.title??t("Browser observation")}</h3>
-    {selected.url&&<p className="ec-browserurl"><bdi>{selected.url}</bdi></p>}
-    <p className="ec-footnote">{t("Observed:")+" "}<bdi>{selected.observedAt}</bdi> · {status(selected.readiness)} · <bdi>{selected.lastAction}</bdi></p>
+    {selected.url&&<p className="ec-browserurl"><bdi dir="ltr">{selected.url}</bdi></p>}
+    <p className="ec-footnote">{t("Observed:")+" "}<bdi dir="ltr">{selected.observedAt}</bdi> · {status(selected.readiness)} · <bdi>{selected.lastAction}</bdi></p>
     {api.browserControl&&!api.browserControl.workspace&&selected.state==='recorded'&&<BrowserTakeover key={selected.reference.browserId} api={api.browserControl} workId={work.id} reference={selected.reference} active={setControlling}/>}
-    {!controlling&&(snapshot?.image?<figure><img src={'data:image/jpeg;base64,'+snapshot.image.base64} alt={t("Sanitized recorded browser viewport")}/><figcaption className="ec-footnote">{t("Capture:")+" "}<bdi>{snapshot.image.observedAt}</bdi> {" "+t("· Bounded preview")}</figcaption></figure>:<p className="ec-footnote">{snapshot?.reason||error?t("Preview unavailable. Refresh to inspect the current state."):t("Checking retained capture…")}</p>)}
+    {!controlling&&(snapshot?.image?<figure><img src={'data:image/jpeg;base64,'+snapshot.image.base64} alt={t("Sanitized recorded browser viewport")}/><figcaption className="ec-footnote">{t("Capture:")+" "}<bdi dir="ltr">{snapshot.image.observedAt}</bdi> {" "+t("· Bounded preview")}</figcaption></figure>:<p className="ec-footnote">{snapshot?.reason||error?t("Preview unavailable. Refresh to inspect the current state."):t("Checking retained capture…")}</p>)}
     {selected.artifacts.map((reference,index)=><Button key={JSON.stringify(reference)} disabled={!ready||!snapshot||!api.artifacts} icon="file-text" onClick={()=>void artifact(reference)}>{t("Inspect Work artifact")+" "}{index+1}</Button>)}
     {output&&<article className="ec-docpreview"><h3 dir="auto">{output.artifact.displayName}</h3><p>{t("Integrity:")+" "}{status(output.integrity)}</p><pre dir="auto">{output.text??t("Binary artifact. Text preview unavailable.")}</pre>{output.truncated&&<p>{t("Preview truncated.")}</p>}</article>}
    </>}

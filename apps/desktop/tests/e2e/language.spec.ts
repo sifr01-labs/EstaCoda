@@ -24,3 +24,11 @@ test('mirrors shell placement and follows RTL arrow navigation without changing 
  await page.getByRole('button',{name:'إظهار لوحة التفاصيل',exact:true}).click();
  const inspector=await page.locator('.ec-inspector').boundingBox(),center=await page.locator('.ec-workcenter').boundingBox();expect(inspector!.x).toBeLessThan(center!.x);
 });
+test('loads the bundled Arabic font and keeps technical commands LTR',async({page})=>{
+ const fonts:string[]=[];page.on('response',r=>{if(r.url().endsWith('.ttf')&&r.ok())fonts.push(r.url());});
+ await page.goto('/fixture.html?language=ar');await page.evaluate(()=>document.fonts.ready);
+ expect(await page.locator('#ec-branded-workspace').evaluate(e=>getComputedStyle(e).fontFamily)).toContain('Noto Sans Arabic');
+ expect(await page.evaluate(()=>document.fonts.check('14px "Noto Sans Arabic"','الموافقة'))).toBe(true);expect(fonts).toEqual([expect.stringContaining('/assets/NotoSansArabic.ttf')]);
+ await page.locator('[data-task="retry"]').click();const code=page.locator('.ec-command code');await expect(code).toHaveText('pnpm test -- retry');
+ expect(await code.evaluate(e=>getComputedStyle(e).direction)).toBe('ltr');expect(await code.evaluate(e=>getComputedStyle(e).unicodeBidi)).toBe('isolate');
+});

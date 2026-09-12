@@ -29,7 +29,7 @@ export function BrowserWatch({api,workId,controlling}:{api:NonNullable<DesktopAp
   {controlling?<p className="ec-footnote">{t("Live watching resumes after Return to agent.")}</p>:watching&&<>
    {!!workspace?.sessions.length&&<label>{t("Watch session")+" "}<select aria-label={t("Watch browser session")} value={workspace.sessions.some(s=>s.id===selected)?selected:workspace.sessions[0]?.id} onChange={event=>{setFrame(undefined);setSelected(event.target.value);}}>{workspace.sessions.map(session=><option key={session.id} value={session.id}>{session.tabs.find(tab=>tab.controlled)?.title??session.id}</option>)}</select></label>}
    {status&&<p role="status">{owned(status)}</p>}
-   {frame&&<figure><img src={'data:image/jpeg;base64,'+frame.image} alt={t("Current sanitized browser observation")}/><figcaption className="ec-browserurl"><bdi>{frame.url}</bdi> · {displayState(frame.readiness??"unknown")} {" "+t("· Observed")+" "}<bdi>{frame.observedAt}</bdi></figcaption></figure>}
+   {frame&&<figure><img src={'data:image/jpeg;base64,'+frame.image} alt={t("Current sanitized browser observation")}/><figcaption className="ec-browserurl"><bdi dir="ltr">{frame.url}</bdi> · {displayState(frame.readiness??"unknown")} {" "+t("· Observed")+" "}<bdi dir="ltr">{frame.observedAt}</bdi></figcaption></figure>}
    <p className="ec-footnote">{t("Updates between browser actions. Viewing does not take control.")}</p>
   </>}
  </section>;

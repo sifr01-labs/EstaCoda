@@ -10,7 +10,7 @@ export function assetManifest(root:string,host:'app'|'credential'):Map<string,st
  const entry=host==='app'?'index.html':'credential.html';
  const files=new Map([[`/${entry}`,pathToFileURL(join(root,entry)).href]]);
  for(const item of readdirSync(join(root,'assets'),{withFileTypes:true})){
-  if(!item.isFile()||!/^[A-Za-z0-9_.-]+\.(js|css|svg|png|woff2?)$/.test(item.name))continue;
+  if(!item.isFile()||!/^[A-Za-z0-9_.-]+\.(js|css|svg|png|ttf|txt|woff2?)$/.test(item.name))continue;
   const file=join(root,'assets',item.name);if(lstatSync(file).size>4_194_304)throw Error('UI asset exceeds its build limit.');
   files.set('/assets/'+item.name,pathToFileURL(file).href);
  }
