@@ -45,3 +45,13 @@ it('saves independent STT/TTS routes and rejects invalid provider/speed without 
  const before=await readFile(paths.configPath,'utf8');for(const [fieldId,value] of [['tts.speed',99],['stt.provider','made-up']] as const)await expect(owner.review({...b,changes:[{fieldId,selectors:[],value}]})).rejects.toThrow();expect(await readFile(paths.configPath,'utf8')).toBe(before);
  }finally{owner.dispose();candidates.dispose();await rm(homeDir,{recursive:true,force:true});}
 });
+it('saves browser and search policy without launching a browser or granting implicit cloud spend',async()=>{
+ const homeDir=await mkdtemp(join(tmpdir(),'ec-settings-')),input={homeDir,profileId:'default'},paths=resolveProfileStateHome(input),candidates=new CredentialCandidates('default','instance'),owner=new PublicSettings(input,candidates);
+ try{await mkdir(paths.profileRoot,{recursive:true});await writeFile(paths.configPath,'{}');const b={windowId:'w',generation:1};const review=await owner.review({...b,changes:[{fieldId:'browser.backend',selectors:[],value:'local-cdp'},{fieldId:'browser.cdpUrl',selectors:[],value:'http://127.0.0.1:9222'},{fieldId:'browser.cloudSpendApproved',selectors:[],value:'pending'},{fieldId:'web.enableNetwork',selectors:[],value:false}]});await owner.apply({...b,draftId:review.draftId},new AbortController().signal);const config=JSON.parse(await readFile(paths.configPath,'utf8'));expect(config.browser).toMatchObject({backend:'local-cdp',cloudSpendApproved:'pending'});expect(config.web.enableNetwork).toBe(false);
+ }finally{owner.dispose();candidates.dispose();await rm(homeDir,{recursive:true,force:true});}
+});
+it('stages Browserbase credentials through the existing profile env contract without putting secrets in config',async()=>{
+ const homeDir=await mkdtemp(join(tmpdir(),'ec-settings-')),input={homeDir,profileId:'default'},paths=resolveProfileStateHome(input),candidates=new CredentialCandidates('default','instance'),owner=new PublicSettings(input,candidates);
+ try{await mkdir(paths.profileRoot,{recursive:true});await writeFile(paths.configPath,'{}');const b={windowId:'w',generation:1},candidate=candidates.stage(owner.scope(b,'browserbase.apiKey'),'browserbase-fixture-secret');const review=await owner.review({...b,changes:[{fieldId:'browserbase.apiKey',selectors:[],value:candidate}]});await owner.apply({...b,draftId:review.draftId},new AbortController().signal);expect(await readFile(paths.envPath,'utf8')).toContain('BROWSERBASE_API_KEY=');expect(await readFile(paths.configPath,'utf8')).not.toContain('browserbase-fixture-secret');expect((await owner.value({fieldId:'browserbase.apiKey',selectors:[]})).value).toBe('configured');
+ }finally{owner.dispose();candidates.dispose();await rm(homeDir,{recursive:true,force:true});}
+});

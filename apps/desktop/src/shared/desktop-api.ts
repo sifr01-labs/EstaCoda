@@ -1,4 +1,7 @@
 export type DesktopSettingsApi={
+ dependencies():Promise<MethodContracts['settings.dependencies']['result']>;
+ install(capabilityId:string,groups:string[],downloadApproved:true):Promise<MethodContracts['settings.installDependency']['result']>;
+ inspectDependency():Promise<MethodContracts['settings.inspectDependency']['result']|null>;
  value(fieldId:string,selectors:string[]):Promise<import('@estacoda/control-protocol').SettingChange>;
  read(section:import('@estacoda/control-protocol').SettingsSection,offset?:number):Promise<import('@estacoda/control-protocol').SettingsPage>;
  begin():Promise<{setupId:string}>;

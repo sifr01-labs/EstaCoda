@@ -12,9 +12,10 @@ export class ConnectionOperations {
  private async read():Promise<ConnectionOperation[]>{const rows=JSON.parse(await readProfileFile(this.root,this.path)??'[]');if(!Array.isArray(rows)||rows.length>1000||rows.some(row=>typeof row.operationId!=='string'||typeof row.action!=='string'||!['completed','failed','uncertain'].includes(row.state)))throw new ControlProtocolError('-32003');return rows;}
  private async write(rows:ConnectionOperation[]){const temp=this.path+'.'+randomUUID();const file=await open(temp,'wx',0o600);try{await file.writeFile(JSON.stringify(rows));await file.sync();}finally{await file.close();}try{await rename(temp,this.path);const dir=await open(this.root,'r');try{await dir.sync();}finally{await dir.close();}}finally{await rm(temp,{force:true});}}
  async inspect(operationId:string):Promise<ConnectionOperation>{return(await this.read()).find(row=>row.operationId===operationId)??{operationId,action:'unknown',state:'unknown'};}
- async execute(operationId:string,action:string,run:()=>Promise<boolean>):Promise<ConnectionOperation>{
+ async execute(operationId:string,action:string,run:()=>Promise<boolean>,accepted?:()=>void):Promise<ConnectionOperation>{
   const reserved=await withProfileWriteLock(this.root,async()=>{const rows=await this.read(),old=rows.find(row=>row.operationId===operationId);if(old){if(old.action!==action)throw new ControlProtocolError('-32602');return false;}if(rows.length>=1000)throw new ControlProtocolError('-32009');rows.push({operationId,action,state:'uncertain'});await this.write(rows);return true;});
   if(!reserved)return this.inspect(operationId);
+  accepted?.();
   let state:ConnectionOperation['state']='uncertain';try{state=await run()?'completed':'failed';}catch{/* The external effect may have occurred. Reconcile; never infer failure or repeat. */}
   await withProfileWriteLock(this.root,async()=>{const rows=await this.read(),row=rows.find(item=>item.operationId===operationId);if(!row)throw new ControlProtocolError('-32003');row.state=state;await this.write(rows);});return this.inspect(operationId);
  }

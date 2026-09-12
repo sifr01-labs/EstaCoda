@@ -24,7 +24,7 @@ const cursorToken: Check = (v) => typeof v === "string" && /^[A-Za-z0-9_-]{1,512
 const capabilities = shape({ methods: unique(choice(CONTROL_METHODS),128), events: unique(choice(CONTROL_EVENTS)) });
 const settingValue:Check=v=>v===null||text(4096)(v)||boolean(v)||typeof v==='number'&&Number.isFinite(v)||array(text(2048),128)(v);
 const settingChange=shape({fieldId:text(240,1),selectors:array(text(128,1),8),value:settingValue});
-const settingField=shape({id:text(240,1),section:choice(SETTINGS_SECTIONS),path:array(text(128,1),12),kind:choice(['text','number','boolean','choice','strings','secret'])},{choices:array(settingValue,128),min:(v)=>typeof v==='number'&&Number.isFinite(v),max:(v)=>typeof v==='number'&&Number.isFinite(v)});
+const settingField=shape({id:text(240,1),section:choice(SETTINGS_SECTIONS),path:array(text(128,1),12),kind:choice(['text','number','boolean','choice','strings','secret'])},{choices:array(settingValue,128),min:(v)=>typeof v==='number'&&Number.isFinite(v),max:(v)=>typeof v==='number'&&Number.isFinite(v),envName:text(128,1)});
 const settingsBinding=shape({draftId:id,windowId:id,generation:integer(1)});
 const targetId:Check=(v)=>typeof v==='string'&&/^target_[a-f0-9-]{36}$/.test(v);
 const target = shape({ targetId: id, targetGeneration: integer(1) });
@@ -94,6 +94,7 @@ const candidateRoute=shape({providerId:id,modelId:text(200,1),endpoint:text(2048
 const modelRouteDraftShape=shape({draftId:id,expiresInMs:integer(1,900000),credentialState:choice(['staged','existing','not_required']),role:choice(['primary','fallback','fallback_order','auxiliary','auxiliary_mode'])},{route:candidateRoute,slot:choice(AUXILIARY_SLOTS)});
 const modelRouteDraft:Check=v=>modelRouteDraftShape(v)&&isRecord(v)&&(['fallback_order','auxiliary_mode'].includes(String(v.role))?v.route===undefined:candidateRoute(v.route))&&(['auxiliary','auxiliary_mode'].includes(String(v.role))?choice(AUXILIARY_SLOTS)(v.slot):v.slot===undefined);
 const modelDraftBinding=shape({draftId:id,windowId:id,generation:integer(1)});
+const connectionOperation=shape({operationId:id,action:text(80,1),state:choice(['completed','failed','uncertain','unknown'])});
 const modelApplyReceipt=shape({operationId:id,state:choice(['applied','uncertain','unknown']),verification:choice(['configured','repair_required','not_tested'])});
 const oauthBinding=shape({authorizationId:id,windowId:id,generation:integer(1)});
 const oauthStatusShape=shape({authorizationId:id,state:choice(['starting','pending','authorized','failed','cancelled','expired']),verificationUrl:nullable(choice(['https://auth.openai.com/codex/device'])),userCode:nullable((v)=>typeof v==='string' && /^[-A-Z0-9]{1,32}$/i.test(v)),candidateId:nullable(id)});
@@ -161,6 +162,9 @@ const contracts: { [M in keyof MethodContracts]: { params: Check; result: Check 
   "settings.inspect":{params:shape({},{operationId:id}),result:shape({operationId:id,state:choice(['applied','uncertain','unknown'])})},
   "settings.verify":{params:shape({}),result:shape({state:choice(['configured','repair_required'])})},
   "settings.value":{params:shape({fieldId:text(240,1),selectors:array(text(128,1),8)}),result:settingChange},
+  "settings.dependencies":{params:shape({}),result:shape({items:array(shape({id,version:text(64,1),packages:array(text(240,1),64),groups:array(id,8),estimatedMb:nullable(integer()),state:choice(['installed','install_required'])}),32)})},
+  "settings.installDependency":{params:shape({operationId:id,capabilityId:id,groups:unique(id,8),downloadApproved:v=>v===true}),result:connectionOperation},
+  "settings.inspectDependency":{params:shape({operationId:id}),result:connectionOperation},
   "settings.read":{params:shape({section:choice(SETTINGS_SECTIONS)},{offset:integer(0,10000)}),result:shape({fields:array(settingField,100),values:array(settingChange,100),truncated:boolean},{nextOffset:integer(0,10000)})},
   "settings.review":{params:shape({windowId:id,generation:integer(1),changes:array(settingChange,32,1)}),result:shape({draftId:id,changes:array(settingChange,32,1),previous:array(settingChange,32),expiresInMs:integer(1,300000)})},
   "settings.cancel":{params:settingsBinding,result:shape({cancelled:boolean})},

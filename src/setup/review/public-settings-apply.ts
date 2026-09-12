@@ -8,7 +8,7 @@ export async function applyPublicSettings(changes:SettingChange[],input:{homeDir
  if(changes.some(c=>c.fieldId.startsWith('imageGen.'))&&!config.imageGen&&config.image_gen)config.imageGen=structuredClone(config.image_gen);
  if(!Array.isArray(changes)||!changes.length||changes.length>32)throw new Error('Invalid settings changes');
  for(const change of changes){
-  const field=settingField(change,true),path=settingPath(field,change.selectors);let node=config as Record<string,unknown>;
+  const field=settingField(change,true);if(field.envName)continue;const path=settingPath(field,change.selectors);let node=config as Record<string,unknown>;
   for(const [index,part] of path.slice(0,-1).entries()){if(index===1&&path[0]==='auxiliaryModels'&&typeof node[part]==='string')node[part]=normalizeAuxiliarySlotInput(node[part] as string,field.id); if(node[part]===undefined)node[part]={};if(!node[part]||typeof node[part]!=='object'||Array.isArray(node[part]))throw new Error('Unsupported settings shape');node=node[part] as Record<string,unknown>;}
   if(path.includes('headerRefs')){const owner=path.slice(0,-2).reduce((o,k)=>(o as Record<string,unknown>)[k],config as unknown) as Record<string,unknown>;const headers=owner.headers;if(headers&&typeof headers==='object')delete (headers as Record<string,unknown>)[path.at(-1)!];}
   const key=path.at(-1)!;if(change.value===null)delete node[key];else node[key]=structuredClone(change.value);

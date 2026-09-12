@@ -1,3 +1,4 @@
+import type {DesktopConnectionControls} from './connection-controls.js';
 import {randomUUID} from 'node:crypto';
 import type {SettingChange,SettingField,SettingsSection,SettingsReview} from '@estacoda/control-protocol';
 import type {DesktopConnection} from './connection.js';
@@ -6,8 +7,11 @@ import type {CredentialPipeClient,CredentialScope} from './credential-pipe-clien
 type Setup={id:string;windowId:string;generation:number;profileId:string;connectionGeneration:number;draft?:SettingsReview;candidates:Map<string,string>;applying:boolean};
 export class DesktopPublicSettings {
  #setup?:Setup;#counter=0;#busy=false;readonly #windowId=randomUUID();readonly #fields=new Map<string,SettingField>();
- constructor(readonly connection:DesktopConnection,readonly credentials:CredentialWindow,readonly pipe:()=>CredentialPipeClient|undefined){connection.on('invalidate',()=>{this.credentials.close();this.#setup=undefined;this.#fields.clear();});}
+ constructor(readonly connection:DesktopConnection,readonly credentials:CredentialWindow,readonly pipe:()=>CredentialPipeClient|undefined,readonly operations?:DesktopConnectionControls){connection.on('invalidate',()=>{this.credentials.close();this.#setup=undefined;this.#fields.clear();});}
  async read(section:SettingsSection,offset?:number){const page=await this.connection.settingsRequest('settings.read',{section,...(offset===undefined?{}:{offset})});for(const f of page.fields)this.#fields.set(f.id,f);return page;}
+ async dependencies(){return this.connection.settingsRequest('settings.dependencies',{});}
+ async install(capabilityId:string,groups:string[]){if(!this.operations)throw new Error('Dependency operations unavailable.');return this.operations.perform('dependency.install',operationId=>this.connection.settingsRequest('settings.installDependency',{operationId,capabilityId,groups,downloadApproved:true}));}
+ async inspectDependency(){return this.operations?this.operations.inspect():null;}
  async value(fieldId:string,selectors:string[]){return this.connection.settingsRequest('settings.value',{fieldId,selectors});}
  begin(){if(this.#setup)throw new Error('Finish the current review first.');const setup:Setup={id:randomUUID(),windowId:this.#windowId,generation:++this.#counter,profileId:this.connection.state.profileId,connectionGeneration:this.connection.state.generation,candidates:new Map(),applying:false};this.#setup=setup;return {setupId:setup.id};}
  require(id:string){const s=this.#setup;if(!s||s.id!==id||s.profileId!==this.connection.state.profileId||s.connectionGeneration!==this.connection.state.generation)throw new Error('Settings context changed.');return s;}

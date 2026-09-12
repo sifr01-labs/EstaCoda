@@ -32,6 +32,9 @@ const activities: ActivityProjection[] = [
 const artifactReference={source:'session' as const,ownerId:'s',artifactId:'a'};
 const artifactPreview={artifact:{reference:artifactReference,displayName:'report.txt',mimeType:'text/plain',bytes:0,sha256:'a'.repeat(64),createdAt:'2026-09-12',retention:'retained' as const,sourceOrigin:null,workIds:['session:s'],target:null},integrity:'verified' as const,text:'',truncated:false,reason:null};
 const cases = {
+ 'settings.dependencies':{params:{},result:{items:[{id:'edge-tts',version:'1',packages:['edge-tts'],groups:[],estimatedMb:null,state:'install_required'}]}},
+ 'settings.installDependency':{params:{operationId:'install',capabilityId:'edge-tts',groups:[],downloadApproved:true},result:{operationId:'install',action:'dependency.install',state:'uncertain'}},
+ 'settings.inspectDependency':{params:{operationId:'install'},result:{operationId:'install',action:'dependency.install',state:'completed'}},
  'settings.value':{params:{fieldId:'ui.language',selectors:[]},result:{fieldId:'ui.language',selectors:[],value:'en'}},
  "settings.apply":{params:{draftId:'draft',windowId:'window',generation:1},result:{operationId:'draft',state:'applied'}},
  "settings.inspect":{params:{},result:{operationId:'none',state:'unknown'}},
