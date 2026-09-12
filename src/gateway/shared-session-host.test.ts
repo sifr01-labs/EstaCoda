@@ -78,3 +78,8 @@ it('routes human browser control directly to the existing owner without receipts
  await expect(host.handle(request)).resolves.toHaveProperty('state','human');expect(browserControl).toHaveBeenCalledTimes(1);expect(acquire).not.toHaveBeenCalled();
  await expect(host.handle({...request,targetGeneration:2})).rejects.toThrow();expect(browserControl).toHaveBeenCalledTimes(1);
 });
+it('drains accepted human browser input before closing the supervisor host',async()=>{
+ let finish!:(value:unknown)=>void;const browserControl=vi.fn(()=>new Promise(resolve=>finish=resolve));
+ const host=new SharedSessionHost({profileId:'p',sessionDb:{getSessionForProfile:async()=>({executionTarget:{targetId:'t',targetGeneration:1}})} as unknown as SessionDB,acquire:vi.fn(),channelApproval:vi.fn(),validateTarget:async()=>{},browserControl});
+ const pending=host.handle({method:'browser.control',sessionId:'s',targetId:'t',targetGeneration:1,operationId:'o',browserControl:{action:'acquire',browserId:'b',holder:'w'}});await vi.waitFor(()=>expect(browserControl).toHaveBeenCalled());let closed=false;const shutdown=host.close().then(()=>{closed=true;});await Promise.resolve();expect(closed).toBe(false);finish({state:'human'});await pending;await shutdown;expect(closed).toBe(true);
+});

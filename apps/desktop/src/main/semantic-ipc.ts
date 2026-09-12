@@ -1,3 +1,5 @@
+import {validateHumanBrowserInput} from '@estacoda/control-protocol';
+import type {DesktopBrowserControls} from './browser-controls.js';
 import type {DesktopTerminalControls} from './terminal-controls.js';
 import type {DesktopTargetControls} from './target-controls.js';
 import type {DesktopConnectionControls} from './connection-controls.js';
@@ -18,6 +20,11 @@ export function rendererSnapshot(state:ConnectionState):DesktopSnapshot {
   return {counts:state.status==='ready'?state.counts??null:null,status:state.status,profile:state.bootstrap?.profile??{id:state.profileId,label:state.profileId,configuration:'unconfigured'},runtime:state.bootstrap?.runtime.state??'disconnected',work:state.work,inbox:state.inbox};
 }
 export function validateSemanticPayload(method:string,payload:unknown):void {
+  if(method==='browserControlOpen'){validateSemanticPayload('browserSnapshot',payload);return;}
+  if(['browserControlFrame','browserControlRelease','browserControlAbandon'].includes(method)){
+    if(!isRecord(payload)||!isControlId(payload.id)||!exactKeys(payload,['id'],method==='browserControlFrame'?['input']:[]))throw new Error('Invalid browser handle.');
+    if(payload.input!==undefined)validateHumanBrowserInput(payload.input);return;
+  }
   if(method==='browserList'||method==='browserSnapshot'){validateControlRequest({jsonrpc:'2.0',id:'validation',method:method==='browserList'?'browser.list':'browser.snapshot',params:payload},{profileId:'validation',instanceId:'validation',capabilities:{methods:[...CONTROL_METHODS],events:[...CONTROL_EVENTS]}});return;}
   if(method.startsWith('terminal')){
     if(method==='terminalOpen'){validateControlRequest({jsonrpc:'2.0',id:'validation',method:'terminal.acquire',params:payload},{profileId:'validation',instanceId:'validation',capabilities:{methods:[...CONTROL_METHODS],events:[...CONTROL_EVENTS]}});return;}
@@ -63,10 +70,10 @@ export function validateSemanticPayload(method:string,payload:unknown):void {
     :method==='switchProfile'?exactKeys(payload,['id'])&&isControlId(payload.id):exactKeys(payload,[]);
   if(!valid)throw new Error('Desktop request rejected.');
 }
-export function installSemanticIpc(window:BrowserWindow,documentUrl:string,connection:DesktopConnection,profiles:Profiles,appearance:AppearanceSettings,models?:DesktopModelSetup,pins?:WorkPins,workControls?:DesktopWorkControls,telegram?:DesktopTelegramSetup,connectionControls?:DesktopConnectionControls,targets?:DesktopTargetControls,terminals?:DesktopTerminalControls):()=>void {
+export function installSemanticIpc(window:BrowserWindow,documentUrl:string,connection:DesktopConnection,profiles:Profiles,appearance:AppearanceSettings,models?:DesktopModelSetup,pins?:WorkPins,workControls?:DesktopWorkControls,telegram?:DesktopTelegramSetup,connectionControls?:DesktopConnectionControls,targets?:DesktopTargetControls,terminals?:DesktopTerminalControls,browsers?:DesktopBrowserControls):()=>void {
   const authority=new WindowAuthority(window,documentUrl);
   const contents=window.webContents;
-  const methods=['browserList','browserSnapshot','artifactsList','artifactsGet','artifactsOpen','evidenceGet','terminalOpen','terminalRead','terminalWrite','terminalResize','terminalClose','diffList','diffPatch','filesList','filesPreview','targetList','targetInspect','targetReview','targetCreate','targetCancel','targetExecute','targetOperation','telegramExecute','telegramPairing','telegramSessions','telegramDetails','telegramHandoff','gatewayDiagnostics','gatewayExecute','connectionInspect','telegramReview','telegramApply','telegramInspectApply','telegramBegin','telegramStage','telegramVerify','telegramCancel','connectionsList','workUsage','workDecide','workInspectDecision','workAct','workChildren','workLive','workTargets','workAttach','workSubmit','workInspect','workSearch','workPins','workPin','workOverride','setOverride','inspectOverride','setupVerifyReviewed','modelRoutes','setupConfigured','setupOrder','setupMode','setupOAuthStart','setupOAuthStatus','setupOAuthOpen','setupBegin','setupStage','setupVerify','setupReview','setupApply','setupCancel','setupInspect','modelPage','providerPage','refreshCatalog','reconnect','moreWork','moreInbox','appearance','setAppearance','snapshot','getWork','activity','profiles','switchProfile','minimize','toggleMaximize','close'];
+  const methods=['browserControlOpen','browserControlFrame','browserControlRelease','browserControlAbandon','browserList','browserSnapshot','artifactsList','artifactsGet','artifactsOpen','evidenceGet','terminalOpen','terminalRead','terminalWrite','terminalResize','terminalClose','diffList','diffPatch','filesList','filesPreview','targetList','targetInspect','targetReview','targetCreate','targetCancel','targetExecute','targetOperation','telegramExecute','telegramPairing','telegramSessions','telegramDetails','telegramHandoff','gatewayDiagnostics','gatewayExecute','connectionInspect','telegramReview','telegramApply','telegramInspectApply','telegramBegin','telegramStage','telegramVerify','telegramCancel','connectionsList','workUsage','workDecide','workInspectDecision','workAct','workChildren','workLive','workTargets','workAttach','workSubmit','workInspect','workSearch','workPins','workPin','workOverride','setOverride','inspectOverride','setupVerifyReviewed','modelRoutes','setupConfigured','setupOrder','setupMode','setupOAuthStart','setupOAuthStatus','setupOAuthOpen','setupBegin','setupStage','setupVerify','setupReview','setupApply','setupCancel','setupInspect','modelPage','providerPage','refreshCatalog','reconnect','moreWork','moreInbox','appearance','setAppearance','snapshot','getWork','activity','profiles','switchProfile','minimize','toggleMaximize','close'];
   const handlers:string[]=[];
   let connectionGeneration=connection.state.generation;
   const state=(value:ConnectionState)=>{if(value.generation!==connectionGeneration){authority.invalidate();connectionGeneration=value.generation;}if(!window.isDestroyed())contents.send('desktop:state',{generation:authority.generation,snapshot:rendererSnapshot(value)});};
@@ -79,6 +86,11 @@ export function installSemanticIpc(window:BrowserWindow,documentUrl:string,conne
       const payload=envelope.payload as Record<string,unknown>;
       const generation=authority.generation;
       try {
+        if(method.startsWith('browserControl')){
+          if(!browsers)throw new Error('Browser controls unavailable.');
+          const result=method==='browserControlOpen'?await browsers.open(payload.workId as string,payload.reference as import('@estacoda/control-protocol').BrowserViewReference):method==='browserControlFrame'?await browsers.frame(payload.id as string,payload.input as import('@estacoda/control-protocol').HumanBrowserInput|undefined):method==='browserControlRelease'?await browsers.release(payload.id as string):browsers.abandon(payload.id as string);
+          authority.assertSender(event,generation);return result;
+        }
         if(method==='browserList'||method==='browserSnapshot'){
           const result=method==='browserList'?await connection.inspectionRequest('browser.list',payload as {workId:string}):await connection.inspectionRequest('browser.snapshot',payload as import('@estacoda/control-protocol').MethodContracts['browser.snapshot']['params']);
           authority.assertSender(event,generation);return result;

@@ -14,6 +14,7 @@ const ready=ipcRenderer.invoke('desktop:bind').then((binding:{generation:number;
 void ready.catch(()=>{});
 const invoke=async(method:string,payload:Record<string,unknown>={})=>{await ready;return ipcRenderer.invoke('desktop:'+method,{generation,payload});};
 const api:DesktopApi={
+  browserControl:Object.freeze({open:(workId,reference)=>invoke('browserControlOpen',{workId,reference}),frame:(id,input)=>invoke('browserControlFrame',{id,...(input?{input}:{})}),release:id=>invoke('browserControlRelease',{id}),abandon:id=>invoke('browserControlAbandon',{id})}),
   browser:Object.freeze({list:workId=>invoke('browserList',{workId}),snapshot:(workId,reference)=>invoke('browserSnapshot',{workId,reference})}),
   artifacts:Object.freeze({list:cursor=>invoke('artifactsList',cursor?{cursor}:{}),get:reference=>invoke('artifactsGet',{reference}),open:reference=>invoke('artifactsOpen',{reference})}),
   evidence:Object.freeze({get:workId=>invoke('evidenceGet',{workId})}),

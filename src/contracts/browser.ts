@@ -326,6 +326,8 @@ export type BrowserSwitchTabResult = {
 };
 
 export type BrowserActionInput = {
+  /** Runtime-only lease check immediately before native human input dispatch. */
+  assertHumanControl?:()=>void;
   sessionId?: string;
   full?: boolean;
   ref?: string;

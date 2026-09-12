@@ -18,3 +18,7 @@ it('requires quiescence in both directions and does not resume on expiry or unce
  const uncertain=owner.acquire('window');await expect(owner.human('window',uncertain,1,async()=>{throw new Error('lost');})).rejects.toThrow('lost');await expect(owner.agent(async()=>1)).rejects.toThrow('paused');
  owner.close();expect(()=>owner.acquire('next')).toThrow();
 });
+it('never resurrects an owner closed while human input was in flight',async()=>{
+ const owner=new BrowserControlOwner(),lease=owner.acquire('w');let finish!:()=>void;
+ const pending=owner.human('w',lease,1,()=>new Promise<void>(resolve=>finish=resolve));owner.close();finish();await expect(pending).rejects.toThrow('stale');expect(()=>owner.acquire('w')).toThrow('busy');await expect(owner.agent(async()=>1)).rejects.toThrow('paused');
+});

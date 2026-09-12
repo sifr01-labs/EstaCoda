@@ -71,3 +71,9 @@ it('accepts browser inspection references and rejects renderer control or networ
  for(const extra of [{url:'https://example.com'},{cdpUrl:'ws://secret'},{profileId:'other'},{human:true},{control:true}])expect(()=>validateSemanticPayload('browserSnapshot',{workId:'session:s',reference,...extra})).toThrow();
  for(const method of ['browserNavigate','browserClick','browserCDP','browserTakeover'])expect(()=>validateSemanticPayload(method,{workId:'session:s',reference})).toThrow();
 });
+it('accepts only bounded browser input behind a Main handle',()=>{
+ const payload={id:'handle',input:{kind:'key',frameId:'frame',key:'ب'}};
+ expect(()=>validateSemanticPayload('browserControlFrame',payload)).not.toThrow();
+ for(const extra of [{lease:{id:'forged',generation:1}},{holder:'other'},{sequence:1},{profileId:'other'},{cdp:'Input.dispatchKeyEvent'}])expect(()=>validateSemanticPayload('browserControlFrame',{...payload,...extra})).toThrow();
+ expect(()=>validateSemanticPayload('browserControlFrame',{id:'handle',input:{kind:'key',frameId:'frame',key:'Enter',ctrl:true}})).toThrow();
+});

@@ -929,3 +929,13 @@ it("validates health before reuse and retains uncertain cleanup", async () => {
   await expect(cache.get("s", fakeFingerprint(), fakeSecurityPolicy)).rejects.toThrow("uncertain");
   expect(factory).toHaveBeenCalledOnce(); expect(cache.stats().totalEntries).toBe(1);
 });
+
+it('browser control borrows only the existing runtime and keeps it pinned through invalidation',async()=>{
+ let finish!:(value:import('../contracts/desktop-control/browser-human.js').HumanBrowserResult)=>void;
+ const runtime=createMockRuntime({sessionId:'s',browserControl:vi.fn(()=>new Promise<import('../contracts/desktop-control/browser-human.js').HumanBrowserResult>(resolve=>finish=resolve))}),factory=vi.fn(async()=>runtime),cache=createCache({createRuntime:factory});
+ const command={action:'acquire' as const,holder:'w',browserId:'b'};
+ await expect(cache.browserControl('s',command)).rejects.toThrow('unavailable');expect(factory).not.toHaveBeenCalled();
+ const proxy=await cache.get('s',fakeFingerprint(),fakeSecurityPolicy);await proxy.dispose();const pending=cache.browserControl('s',command);await vi.waitFor(()=>expect(runtime.browserControl).toHaveBeenCalled());
+ await cache.invalidate('s');expect(runtime.disposeCalls).toBe(0);await expect(cache.get('s',fakeFingerprint(),fakeSecurityPolicy)).rejects.toThrow('settling');
+ finish({lease:{id:'lease',generation:1},state:'human',frame:null});await pending;expect(runtime.disposeCalls).toBe(1);await cache.disposeAll();
+});

@@ -43,9 +43,9 @@ export class HumanBrowserControl {
     if(!frame||frame.id!==input.frameId)throw new Error('Browser frame is stale.');
     const snapshot=await this.backend.snapshot!({sessionId:command.browserId});await this.#safe(snapshot.url);
     if(snapshot.sensitiveInputActive||snapshot.identity.documentEpoch!==frame.observation.identity!.documentEpoch||snapshot.identity.actionRevision!==frame.observation.identity!.actionRevision||snapshot.tab?.ref!==frame.observation.tabRef)throw new Error('Browser document changed.');
-    const bound={sessionId:command.browserId,identity:frame.observation.identity,tabRef:frame.observation.tabRef};
-    if(input.kind==='pointer'){const point={...bound,visualTarget:{screenshotId:frame.observation.screenshotId,x:Math.floor(input.x*frame.observation.viewport.pixelWidth),y:Math.floor(input.y*frame.observation.viewport.pixelHeight)}};const preflight=await this.backend.preflightAction!('click',point);await this.#safe(preflight.url);if(!preflight.target?.ref)throw new Error('No grounded pointer target.');await this.backend.click!({...bound,ref:preflight.target.ref});}
-    else {const preflight=await this.backend.preflightAction!('press',bound);await this.#safe(preflight.url);await this.backend.press!({...bound,ref:preflight.target?.ref,key:input.key,...([...input.key].length===1?{text:input.key}:{})});}
+    const bound={assertHumanControl:()=>this.owner.verify(command.holder,command.lease),sessionId:command.browserId,identity:frame.observation.identity,tabRef:frame.observation.tabRef};
+    if(input.kind==='pointer'){const point={...bound,visualTarget:{screenshotId:frame.observation.screenshotId,x:Math.floor(input.x*frame.observation.viewport.pixelWidth),y:Math.floor(input.y*frame.observation.viewport.pixelHeight)}};const preflight=await this.backend.preflightAction!('click',point);await this.#safe(preflight.url);if(!preflight.target?.ref)throw new Error('No grounded pointer target.');bound.assertHumanControl();await this.backend.click!({...bound,ref:preflight.target.ref});}
+    else {const preflight=await this.backend.preflightAction!('press',bound);await this.#safe(preflight.url);bound.assertHumanControl();await this.backend.press!({...bound,ref:preflight.target?.ref,key:input.key,...([...input.key].length===1?{text:input.key}:{})});}
    }
    const frame=await this.#observe();await this.validate();return{lease:command.lease,frame,state:'human'};
   });

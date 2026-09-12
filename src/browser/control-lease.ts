@@ -14,12 +14,13 @@ export class BrowserControlOwner {
   this.#lease={id:this.#instance,generation:++this.#generation};return{...this.#lease};
  }
  #assert(holder:string,lease:BrowserControlLease){this.#expire();if(this.#phase!=='human'||this.#holder!==holder||lease.id!==this.#lease?.id||lease.generation!==this.#lease.generation)throw new Error('Browser control lease is stale.');}
+ verify(holder:string,lease:BrowserControlLease){this.#assert(holder,lease);}
  renew(holder:string,lease:BrowserControlLease){this.#assert(holder,lease);this.#deadline=this.now()+this.ttlMs;}
  async human<T>(holder:string,lease:BrowserControlLease,sequence:number,operation:()=>Promise<T>):Promise<T>{
   this.#assert(holder,lease);if(this.#busy||!Number.isSafeInteger(sequence)||sequence!==this.#sequence+1)throw new Error('Concurrent or replayed browser input.');
   this.#sequence=sequence;this.#busy++;
   try{const result=await operation();this.#assert(holder,lease);return result;}
-  catch(error){this.#phase='paused';this.#lease=undefined;this.#holder=undefined;this.#generation++;throw error;}
+  catch(error){if(this.#phase!=='closed'){this.#phase='paused';this.#lease=undefined;this.#holder=undefined;this.#generation++;}throw error;}
   finally{this.#busy--;}
  }
  release(holder:string,lease:BrowserControlLease){this.#assert(holder,lease);if(this.#busy)throw new Error('Browser input is still settling.');this.#lease=undefined;this.#holder=undefined;this.#generation++;this.#phase='agent';}

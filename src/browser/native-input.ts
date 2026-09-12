@@ -24,10 +24,12 @@ export class NativeBrowserInputDispatchError extends Error {
  */
 export async function dispatchNativeBrowserClick(
   client: NativeInputClient,
-  ref: string
+  ref: string,
+  assertControl?:()=>void
 ): Promise<void> {
   const target = refTarget(ref);
   const guard = browserInteractabilityGuardSource(target.expression, ref);
+  assertControl?.();
   const evaluation = await client.send("Runtime.evaluate", {
     expression: `(() => {
       ${guard}
@@ -66,7 +68,9 @@ export async function dispatchNativeBrowserClick(
 
   let pressAttempted = false;
   try {
+    assertControl?.();
     await client.send("Input.dispatchMouseEvent", { type: "mouseMoved", x: point.x, y: point.y });
+    assertControl?.();
     pressAttempted = true;
     await client.send("Input.dispatchMouseEvent", {
       type: "mousePressed",

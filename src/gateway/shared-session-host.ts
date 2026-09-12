@@ -46,7 +46,10 @@ export class SharedSessionHost {
   async handle(request: PrivateControlRequest): Promise<unknown> {
     const receipts = this.options.receipts;
     await this.validate(request, request.method === "inspect" || (receipts?.inspect(request).length ?? 0) > 0);
-    if(request.method==='browser.control')return this.execute(request);
+    if(request.method==='browser.control'){
+      const execution=this.execute(request);this.#controls.add(execution);
+      try{return await execution;}finally{this.#controls.delete(execution);}
+    }
     if (!receipts) return this.execute(request);
     if (request.method === "inspect") return { receipts: receipts.inspect(request), execution: await this.execute(request) };
     const accepted = receipts.accept(request);

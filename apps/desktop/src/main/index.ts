@@ -1,3 +1,4 @@
+import {DesktopBrowserControls} from './browser-controls.js';
 import {DesktopTerminalControls} from './terminal-controls.js';
 import {DesktopTargetControls} from './target-controls.js';
 import {DesktopConnectionControls} from './connection-controls.js';
@@ -38,12 +39,17 @@ async function openWindow(): Promise<void> {
   connection.on('invalidate', () => { credentials.close(); credentialPipe?.dispose(); credentialPipe = undefined; });
   const documentUrl = MAIN_WINDOW_VITE_DEV_SERVER_URL ? new URL(MAIN_WINDOW_VITE_DEV_SERVER_URL).href : 'estacoda://app/index.html';
   const profiles = new Profiles(app.getPath('home'));
+  const browsers=new DesktopBrowserControls(connection,async url=>{const result=await dialog.showMessageBox(window,{type:'warning',title:'Take browser control',message:'Take control of this browser?',detail:url+'\n\nBrowser actions by the agent will pause. Your clicks and keys can submit forms or change external services. Return control explicitly when finished. Closing or losing this window leaves browser execution paused.',buttons:['Cancel','Take control'],defaultId:0,cancelId:0,noLink:true});return result.response===1;});
+  window.on('closed',()=>browsers.dispose());
+  window.on('close',()=>browsers.detach());
+  window.webContents.on('render-process-gone',()=>browsers.detach());
+  window.on('unresponsive',()=>browsers.detach());
   const terminals=new DesktopTerminalControls(connection,async root=>{
     const result=await dialog.showMessageBox(window,{type:'warning',title:'Open workspace terminal',message:'Open a terminal for this workspace?',detail:root+'\n\nCommands run with your selected execution policy. A Local host terminal can access files beyond this directory. Terminal input does not approve agent actions.',buttons:['Cancel','Open terminal'],defaultId:0,cancelId:0,noLink:true});return result.response===1;
   },app.getPath('home'));
   let closing=false;
   window.on('close',event=>{if(closing)return;event.preventDefault();void terminals.dispose().then(()=>{closing=true;window.close();}).catch(()=>{void dialog.showMessageBox(window,{type:'error',message:'Terminal shutdown could not be confirmed.',detail:'The target remains protected from cleanup. Retry closing after checking the terminal process.'});});});
-  const disposeIpc = installSemanticIpc(window, documentUrl, connection, profiles, new AppearanceSettings(app.getPath('userData')),new DesktopModelSetup(connection,credentials,()=>credentialPipe,new WorkOperationReferences(connection,app.getPath('userData')),url=>shell.openExternal(url)),new WorkPins(app.getPath('userData'),connection),new DesktopWorkControls(connection,app.getPath('userData'),async()=>{const result=await dialog.showOpenDialog(window,{title:'Attach text files (up to 8 KB each)',properties:['openFile','multiSelections']});return result.canceled?[]:result.filePaths;}),new DesktopTelegramSetup(connection,credentials,()=>credentialPipe),new DesktopConnectionControls(connection,app.getPath('userData')),new DesktopTargetControls(connection,app.getPath('userData')),terminals);
+  const disposeIpc = installSemanticIpc(window, documentUrl, connection, profiles, new AppearanceSettings(app.getPath('userData')),new DesktopModelSetup(connection,credentials,()=>credentialPipe,new WorkOperationReferences(connection,app.getPath('userData')),url=>shell.openExternal(url)),new WorkPins(app.getPath('userData'),connection),new DesktopWorkControls(connection,app.getPath('userData'),async()=>{const result=await dialog.showOpenDialog(window,{title:'Attach text files (up to 8 KB each)',properties:['openFile','multiSelections']});return result.canceled?[]:result.filePaths;}),new DesktopTelegramSetup(connection,credentials,()=>credentialPipe),new DesktopConnectionControls(connection,app.getPath('userData')),new DesktopTargetControls(connection,app.getPath('userData')),terminals,browsers);
   window.once('closed', () => { disposeIpc(); connection.close(); });
   connection.switchProfile(profiles.initial());
   window.once('ready-to-show', () => window.show());

@@ -93,6 +93,7 @@ export type DesktopTerminalApi={
  close(id:string):Promise<void>;
 };
 export type DesktopApi = {
+  readonly browserControl?:{open(workId:string,reference:import('@estacoda/control-protocol').BrowserViewReference):Promise<{id:string}>;frame(id:string,input?:import('@estacoda/control-protocol').HumanBrowserInput):Promise<import('@estacoda/control-protocol').HumanBrowserFrame>;release(id:string):Promise<void>;abandon(id:string):Promise<void>};
   readonly browser?:{list(workId:string):Promise<MethodContracts['browser.list']['result']>;snapshot(workId:string,reference:import('@estacoda/control-protocol').BrowserViewReference):Promise<MethodContracts['browser.snapshot']['result']>};
   artifacts?:{list(cursor?:string):Promise<MethodContracts['artifacts.list']['result']>;get(reference:import('@estacoda/control-protocol').ArtifactReference):Promise<MethodContracts['artifacts.get']['result']>;open(reference:import('@estacoda/control-protocol').ArtifactReference):Promise<MethodContracts['artifacts.open']['result']>};
   evidence?:{get(workId:string):Promise<MethodContracts['evidence.get']['result']>};

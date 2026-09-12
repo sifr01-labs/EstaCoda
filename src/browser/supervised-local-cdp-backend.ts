@@ -1027,7 +1027,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
         return captureSessionSnapshot(session, openedTabs, targetState.full);
       };
       try {
-        await dispatchNativeBrowserClick(actionSupervisor, target.ref);
+        await dispatchNativeBrowserClick(actionSupervisor, target.ref,input.assertHumanControl);
       } catch (error) {
         if (!(error instanceof NativeBrowserInputDispatchError) || !error.actionDispatched) throw error;
         const unverified = await preserveDispatchedSettlementFailure({
@@ -1198,6 +1198,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
       }
       const key = input.key ?? "Enter";
       if(input.text!==undefined&&(input.text!==key||[...input.text].length!==1||/[\p{C}]/u.test(input.text)))throw new Error('Invalid human key text.');
+      input.assertHumanControl?.();
       await session.supervisor.send("Input.dispatchKeyEvent", { type: "keyDown", key,...(input.text===undefined?{}:{text:input.text}) });
       await session.supervisor.send("Input.dispatchKeyEvent", { type: "keyUp", key });
       return settleAction({ session, before, actionInput: input, target, actionDispatched: true });

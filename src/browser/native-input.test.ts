@@ -48,3 +48,11 @@ describe("native browser input", () => {
     expect(releaseAttempts).toBe(2);
   });
 });
+
+it('checks human ownership again after async geometry and before mouse press',async()=>{
+ for(const point of ['geometry','movement']){
+  let valid=true;const send=vi.fn(async(method:string,params?:Record<string,unknown>)=>{if(method==='Runtime.evaluate'){if(point==='geometry')valid=false;return{result:{value:{x:20,y:30}}};}if(params?.type==='mouseMoved')valid=false;return{};});
+  await expect(dispatchNativeBrowserClick({send},'@e1',()=>{if(!valid)throw new Error('Lease expired');})).rejects.toThrow();
+  expect(send.mock.calls.some(([,params])=>params?.type==='mousePressed')).toBe(false);
+ }
+});
