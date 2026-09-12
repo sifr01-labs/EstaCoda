@@ -116,3 +116,25 @@ ordinary reads cannot exhaust those slots.
 ## PR7 Work
 
 `work.list` supports bounded metadata search and parent filtering; cursors bind both filters. `work.targets` discovers existing trusted target records, `work.live` reads a bounded preview from the existing owner, and `work.usage`/`work.counts` expose canonical accounting and status. `inbox.get` resolves off-page attention by scoped ID. `tasks.create` routes bounded, idempotent operator Task creation to the supervisor; it does not construct a second desktop execution store. See [Desktop Work](work.md) for attachment bounds, lifecycle semantics and recovery.
+
+
+## PR8 Connections and Telegram
+
+`connections.list/get` separate selected-profile configuration, authorization, authenticated
+gateway liveness and fresh polling observations. `telegram.settings/review/apply/cancel`
+reuse the reviewed profile transaction and private candidate transport. `telegram.verify`
+performs explicit bounded `getMe` verification; `telegram.inspectApply` uses a Telegram
+reference rather than attributing another provider transaction to Telegram.
+
+`gateway.execute` uses existing user-service lifecycle paths after explicit acknowledgement;
+`gateway.diagnostics` returns redacted service, polling, queue and delivery counts.
+`telegram.execute` exposes only reviewed pairing creation/cancellation, command-menu sync
+and fixed test delivery to allowlisted destinations. `connections.inspectOperation`
+reconciles durable receipts without external redispatch.
+
+`telegram.sessions` returns bounded canonical Work references. `telegram.sessionDetails`
+and `telegram.handoff` use shared handoff/surface-pointer stores with selected-profile
+checks, trust/target validation, revocation and conditional detach. Redemption retains
+ChannelGateway's execution-owner checks. No connection projection or code grants runtime
+ownership. See [Connections and Telegram](connections-and-telegram.md) for operator flow,
+restart requirements, bounded receipt retention and the remaining real-account check.

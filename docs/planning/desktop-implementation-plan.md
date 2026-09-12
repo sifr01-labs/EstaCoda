@@ -1075,6 +1075,8 @@ Connect the approved Work, Inbox, search, pin references, composer, and runtime-
 
 ### PR 8 — Connections and Telegram
 
+Implemented on the desktop branch; see the [PR8 implementation and validation record](desktop-pr8.md) and [operator guide](../architecture/desktop/connections-and-telegram.md). The original sequence below remains the delivery contract.
+
 Connect the PR 5 Connections components to real readiness, authorization, and gateway projections. The Email fixture is not alpha scope or proof of a supported connection. Retain the approved visual gate.
 
 - `feat(control-service): project channel readiness and gateway liveness`

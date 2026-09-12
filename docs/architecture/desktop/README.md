@@ -1,12 +1,12 @@
 # Desktop architecture foundation
 
-Status: Desktop PRs 1–6 are implemented on the desktop branch. The Electron shell, profile-bound control-service bridge, existing Work inspection, approved visual fixtures and live Models/Providers flows are available. The shared supervisor retains execution ownership.
+Status: Desktop PRs 1–8 are implemented on the desktop branch. The Electron shell, profile-bound control-service bridge, live Work/Inbox controls, approved visual fixtures, Models/Providers and Telegram flows are available. The shared supervisor retains execution ownership.
 
 Read this alongside the [Desktop delivery plan](../../planning/desktop-implementation-plan.md), [approved visual contract](../../planning/desktop-visual-contract.md), and [shared ownership decisions](../../planning/workspace-execution-ownership-decisions.md). Shared ownership decisions govern core authority; the visual contract governs presentation. Neither fixture data nor a UI projection grants execution authority.
 
 ## Product and delivery scope
 
-Desktop is a local operator application for governed, persistent Work. Users can configure models and providers, inspect existing Work and select Work-scoped model overrides. New Work submission, approval actions, files/evidence and Telegram remain subsequent delivery milestones. See the [Models and Providers guide](models-and-providers.md).
+Desktop is a local operator application for governed, persistent Work. Users can configure models and providers, create and inspect Work, resolve approvals, select Work-scoped model overrides, and configure Telegram. Dedicated target management, files/diff/terminal and artifact workflows remain subsequent milestones. See the [Models and Providers guide](models-and-providers.md), [Work guide](work.md), and [Connections and Telegram guide](connections-and-telegram.md).
 
 | Delivery | Scope |
 | --- | --- |
@@ -14,7 +14,8 @@ Desktop is a local operator application for governed, persistent Work. Users can
 | PRs 2–4 | Validated protocol, profile-bound bridge, canonical Work/Task/approval projections and controls |
 | PR 5 | Secure Electron shell, existing-Work inspection proof, complete approved visual fixtures and regression gate |
 | PR 6 | Live Models/Providers, reviewed setup/recovery, Session/Task model overrides |
-| PRs 7–8 | Planned live Work/Inbox controls and Telegram |
+| PR 7 | Live Work/Inbox controls, bounded attachments, canonical usage and restart recovery |
+| PR 8 | Reviewed Telegram setup, gateway operations, canonical conversations and handoff |
 | PRs 9–12 and 16 | Managed worktrees, files/diff/terminal, artifacts/evidence, view-only browser, packaged macOS alpha |
 | PRs 13–15 | Browser takeover, governed Library/settings, scheduling |
 

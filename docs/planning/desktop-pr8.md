@@ -1,6 +1,6 @@
 # Desktop PR8 — Connections and Telegram
 
-Branch: `ame/desktop-foundation`. Fifteen planned commits; implementation in progress.
+Branch: `ame/desktop-foundation`. Implemented in the fifteen planned commits. Each implementation step was reviewed and checked before committing.
 
 ## 1. Channel readiness and gateway liveness
 
@@ -174,3 +174,16 @@ wrapper passed all 10,896 core tests, smoke/build/import/ESM/distribution checks
 budgets, source/distribution Docker conformance and Docker image validation. One initial
 existing Bun/SQLite compatibility test timed out under concurrent load; its isolated
 rerun and the complete release rerun passed. No test contacted a real Telegram account.
+
+
+## Step 15 — Operator documentation and final review
+
+Added the Connections/Telegram guide covering setup, separate readiness dimensions,
+explicit lifecycle and delivery actions, authorization, pairing, canonical handoff,
+disconnect choices and uncertain-operation recovery. Updated the desktop architecture
+index and control-service method guide to reflect PR7/PR8 delivery.
+
+Final review confirmed that shared execution/approval ownership, selected-profile scope,
+private credentials and the approved visual references are preserved. No real Telegram
+account was contacted. Real-bot delivery and long-running operational monitoring remain
+external acceptance work; native and synthetic checks are reported separately above.
