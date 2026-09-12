@@ -1,3 +1,4 @@
+import {ChannelSessions} from './channel-sessions.js';
 import {TelegramOperations} from './telegram-operations.js';
 import {GatewayControls} from './gateway-controls.js';
 import {TelegramVerifier} from './telegram-verification.js';
@@ -34,6 +35,7 @@ export class DesktopBridge {
   readonly server: StdioControlServer;
   readonly candidates: CredentialCandidates;
   readonly modelSetup: ModelSetup;
+  readonly channelSessions:ChannelSessions;
   readonly telegramOperations:TelegramOperations;
   readonly gatewayControls:GatewayControls;
   readonly telegramVerifier:TelegramVerifier;
@@ -54,6 +56,9 @@ export class DesktopBridge {
     this.server = new StdioControlServer({ ...options, events: ['work.changed', 'activity.appended', 'attention.changed', 'control.ready', 'service.warning', 'service.shutdown'], handlers: {
       ...Object.fromEntries(['tasks.create','sessions.setModel', 'tasks.setModel', 'approvals.resolve', 'tasks.pause', 'tasks.resume', 'tasks.cancel', 'tasks.retry', 'tasks.guide', 'sessions.start', 'sessions.resume', 'sessions.send', 'sessions.cancelTurn', 'operations.inspect'].map((method) =>
         [method, async (request: SessionMutationRequest, signal: AbortSignal) => ({ result: await sessionControl(this.options, request, signal) })])),
+      'telegram.sessions':async()=>({result:await this.channelSessions.list()}),
+      'telegram.sessionDetails':async request=>{if(request.method!=='telegram.sessionDetails')throw new ControlProtocolError('-32601');return{result:await this.channelSessions.details(request.params.sessionId)};},
+      'telegram.handoff':async request=>{if(request.method!=='telegram.handoff')throw new ControlProtocolError('-32601');return{result:await this.channelSessions.execute(request.params)};},
       'telegram.execute':async(request,signal)=>{if(request.method!=='telegram.execute')throw new ControlProtocolError('-32601');return{result:await this.telegramOperations.execute(request.params,signal)};},
       'telegram.pairing':async()=>({result:await this.telegramOperations.pairing()}),
       'gateway.execute':async request=>{if(request.method!=='gateway.execute')throw new ControlProtocolError('-32601');return{result:await this.gatewayControls.execute(request.params.operationId,request.params.action)};},
@@ -135,6 +140,7 @@ export class DesktopBridge {
     this.modelSetup = new ModelSetup(this.options,this.candidates,async()=>{this.#catalog=undefined;this.subscriptions.publish({type:'service.warning',payload:{reason:'configuration_changed'}});
       try {await notifyPrivateConfigurationChanged({directory:resolveProfileStateHome(this.options).gatewayStatePath,profileId:this.options.profileId,version:this.options.version,signal:AbortSignal.timeout(2000)});}catch{/* An absent owner will load the committed configuration on its next startup. */}
     });
+    this.channelSessions=new ChannelSessions(this.options);
     this.telegramOperations=new TelegramOperations(this.options);
     this.gatewayControls=new GatewayControls(this.options);
     this.telegramVerifier=new TelegramVerifier(this.options,this.candidates);

@@ -19,3 +19,6 @@ export type GatewayDiagnostics={service:'installed'|'absent'|'unknown';manager:'
 
 export type TelegramOperationAction='pairingCreate'|'pairingCancel'|'sync'|'test';
 export type TelegramPairing={code:string|null;expiresAt:number|null};
+
+export type TelegramSession={sessionId:string;workId:string;title:string;attached:boolean};
+export type TelegramSessionDetails={codes:{code:string;expiresAt:number}[];attachments:{id:string;attachedAt:number}[]};

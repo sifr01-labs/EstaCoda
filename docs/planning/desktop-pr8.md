@@ -64,3 +64,15 @@ Tests use a synthetic Telegram transport; no real account receives messages.
 
 Validation: authorization, profile isolation, pairing cancellation and no-replay tests,
 protocol conformance and core/Desktop type checks.
+
+## Step 6 — Canonical channel sessions and handoff
+
+Telegram conversation rows reference existing canonical Work; no transcript is copied.
+Session-scoped handoff inspection, short-lived code creation/revocation and conditional
+attachment removal use the shared core stores. Creation validates profile, target and
+workspace trust; redemption still runs ChannelGateway's existing owner checks. A code
+never transfers a live foreground CLI/editor runtime. Detach changes access only and
+preserves canonical Work. Explicit code reads stay out of ordinary connection projections.
+
+Validation: cross-profile projection/lookup, revoke/detach preservation, untrusted creation,
+shared pointer tests, protocol conformance and core/Desktop type checks.

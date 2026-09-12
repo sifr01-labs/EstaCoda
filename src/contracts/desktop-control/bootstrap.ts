@@ -1,7 +1,7 @@
 import { CONTROL_LIMITS, ControlProtocolError, DESKTOP_PROTOCOL_VERSION, assertBoundedJson, exactKeys, isControlId, isRecord, type ProtocolVersion } from "./envelopes.js";
 
 /** Schema availability is not service availability. Advertise only implemented handlers. */
-export const CONTROL_METHODS = ["telegram.pairing","telegram.execute","gateway.diagnostics","gateway.execute","connections.inspectOperation","telegram.verify","telegram.settings","telegram.review","telegram.apply","telegram.cancel","telegram.inspectApply","models.verifyDraft", "models.reviewConfigured", "models.validateRoute", "models.refreshCatalog", "models.oauthStart", "models.oauthStatus", "models.oauthCancel", "models.workOverride", "sessions.setModel", "tasks.setModel", "control.initialize", "control.bootstrap", "control.subscribe", "control.unsubscribe", "control.cancelRequest",
+export const CONTROL_METHODS = ["telegram.handoff","telegram.sessionDetails","telegram.sessions","telegram.pairing","telegram.execute","gateway.diagnostics","gateway.execute","connections.inspectOperation","telegram.verify","telegram.settings","telegram.review","telegram.apply","telegram.cancel","telegram.inspectApply","models.verifyDraft", "models.reviewConfigured", "models.validateRoute", "models.refreshCatalog", "models.oauthStart", "models.oauthStatus", "models.oauthCancel", "models.workOverride", "sessions.setModel", "tasks.setModel", "control.initialize", "control.bootstrap", "control.subscribe", "control.unsubscribe", "control.cancelRequest",
   "work.usage", "work.counts", "work.live", "work.targets", "work.list", "work.get", "work.activity", "inbox.get", "inbox.list", "models.list", "models.verifyCandidate", "models.reviewPrimary", "models.fallbacks", "models.auxiliary", "models.reviewAuxiliary", "models.reviewAuxiliaryMode", "models.reviewFallback", "models.reviewFallbackOrder", "models.applyDraft", "models.cancelDraft", "models.inspectApply", "providers.list", "connections.list", "connections.get",
   "tasks.create", "tasks.pause", "tasks.resume", "tasks.cancel", "tasks.retry", "tasks.guide", "sessions.start", "sessions.resume", "sessions.send", "sessions.cancelTurn", "approvals.resolve", "operations.inspect"] as const;
 export type ControlMethod = typeof CONTROL_METHODS[number];
@@ -28,7 +28,7 @@ export function isProtocolVersion(value: unknown): value is ProtocolVersion {
     [value.major, value.minor].every((n) => Number.isSafeInteger(n) && Number(n) >= 0 && Number(n) <= 65_535);
 }
 function nameList(value: unknown): value is string[] {
-  return Array.isArray(value) && value.length <= 64 && new Set(value).size === value.length &&
+  return Array.isArray(value) && value.length <= 128 && new Set(value).size === value.length &&
     value.every((name) => typeof name === "string" && /^[a-z][A-Za-z0-9]{0,63}\.[a-z][A-Za-z0-9]{0,63}$/.test(name));
 }
 export function assertInitializeParams(value: unknown): asserts value is InitializeParams {

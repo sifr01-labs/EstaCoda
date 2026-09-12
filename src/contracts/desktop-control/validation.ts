@@ -18,7 +18,7 @@ const shape = (required: Record<string, Check>, optional: Record<string, Check> 
   Object.entries(optional).every(([key, check]) => !Object.hasOwn(v, key) || check(v[key]));
 const id = isControlId;
 const cursorToken: Check = (v) => typeof v === "string" && /^[A-Za-z0-9_-]{1,512}$/.test(v);
-const capabilities = shape({ methods: unique(choice(CONTROL_METHODS)), events: unique(choice(CONTROL_EVENTS)) });
+const capabilities = shape({ methods: unique(choice(CONTROL_METHODS),128), events: unique(choice(CONTROL_EVENTS)) });
 const target = shape({ targetId: id, targetGeneration: integer(1) });
 const targetProjection = shape({ targetId: id, targetGeneration: integer(1), label: text(240, 1), isolation: choice(["host", "sandboxed", "unknown"]) }, {approvalMode:choice(["strict","adaptive","open"])});
 const actionShape = shape({ id: choice(ACTION_IDS), enabled: boolean }, { reason: text(2_048, 1), stepId: id, sessionId: id });
@@ -126,6 +126,9 @@ const contracts: { [M in keyof MethodContracts]: { params: Check; result: Check 
   "gateway.diagnostics":{params:shape({}),result:shape({service:choice(['installed','absent','unknown']),manager:choice(['launchd','systemd-user','systemd-system','none']),runtime:choice(['running','stopped','disconnected']),polling:choice(['unknown','starting','healthy','degraded','stopped']),observedAt:nullable(integer())})},
   "telegram.execute":{params:shape({operationId:id,action:choice(['pairingCreate','pairingCancel','sync','test']),confirmed:v=>v===true},{destination:text(21,1)}),result:shape({operationId:id,action:text(80,1),state:choice(['completed','failed','uncertain','unknown'])})},
   "telegram.pairing":{params:shape({}),result:shape({code:nullable(text(64,4)),expiresAt:nullable(integer())})},
+  "telegram.sessions":{params:shape({}),result:shape({items:array(shape({sessionId:id,workId:id,title:text(240),attached:boolean}),100),truncated:boolean})},
+  "telegram.sessionDetails":{params:shape({sessionId:id}),result:shape({codes:array(shape({code:text(64,4),expiresAt:integer()}),10),attachments:array(shape({id:text(512,1),attachedAt:integer()}),100)})},
+  "telegram.handoff":{params:shape({operationId:id,sessionId:id,action:choice(['create','revoke','detach']),confirmed:v=>v===true},{attachmentId:text(512,1)}),result:shape({operationId:id,action:text(80,1),state:choice(['completed','failed','uncertain','unknown'])})},
   "telegram.verify":{params:shape({windowId:id,generation:integer(1)},{candidateId:id}),result:shape({state:choice(['passed','failed']),reason:choice(['none','credential_missing','invalid_credential','invalid_response','unavailable','cancelled']),verifiedAt:nullable(integer()),botUsername:nullable(text(64,1)),latencyMs:integer()})},
   "telegram.settings":{params:shape({}),result:telegramSettings},
   "telegram.review":{params:shape({windowId:id,generation:integer(1),settings:telegramSettings},{candidateId:id}),result:shape({draftId:id,expiresInMs:integer(1),settings:telegramSettings,credentialState:choice(['staged','existing','missing'])})},

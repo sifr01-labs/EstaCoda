@@ -30,6 +30,9 @@ const activities: ActivityProjection[] = [
   { ...activityBase, kind: "status", status: "needs_attention", reason: "Waiting for approval" },
 ];
 const cases = {
+ "telegram.handoff":{params:{operationId:'op',sessionId:'s',action:'create',confirmed:true},result:{operationId:'op',action:'handoff.create',state:'completed'}},
+ "telegram.sessionDetails":{params:{sessionId:'s'},result:{codes:[],attachments:[]}},
+ "telegram.sessions":{params:{},result:{items:[],truncated:false}},
  "telegram.pairing":{params:{},result:{code:null,expiresAt:null}},
  "telegram.execute":{params:{operationId:'op',action:'sync',confirmed:true},result:{operationId:'op',action:'telegram.sync',state:'completed'}},
  "gateway.diagnostics":{params:{},result:{service:'absent',manager:'none',runtime:'stopped',polling:'unknown',observedAt:null}},

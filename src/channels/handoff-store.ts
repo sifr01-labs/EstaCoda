@@ -99,6 +99,7 @@ export class FileHandoffStore implements HandoffStore {
       return { ok: true, handoff };
     });
   }
+  async revokeSession(sessionId:string,surfaceType:string):Promise<number>{return updateJsonState(this.#path,()=>this.#read(),file=>{let count=0;for(const row of file.codes)if(row.sessionId===sessionId&&row.surfaceType===surfaceType&&!row.redeemed){row.redeemed=true;count++;}return count;});}
   async get(code: string): Promise<HandoffCode | undefined> { return this.#read().codes.find((entry) => entry.code === code.toUpperCase()); }
   async list(): Promise<HandoffCode[]> { return this.#read().codes; }
   async purgeExpired(now = new Date()): Promise<number> {

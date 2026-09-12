@@ -34,6 +34,7 @@ export class FileSurfacePointerStore implements SurfacePointerStore {
   async setPointer(type: SurfaceType, id: string, record: SurfacePointerRecord): Promise<void> {
     updateJsonState(this.#path, () => this.#read(), (file) => { file.pointers[surfacePointerKey(type, id)] = structuredClone(record); });
   }
+  async removePointerForSession(type:SurfaceType,id:string,sessionId:string):Promise<boolean>{return updateJsonState(this.#path,()=>this.#read(),file=>{const key=surfacePointerKey(type,id);if(file.pointers[key]?.sessionId!==sessionId)return false;delete file.pointers[key];return true;});}
   async removePointer(type: SurfaceType, id: string): Promise<void> {
     updateJsonState(this.#path, () => this.#read(), (file) => { delete file.pointers[surfacePointerKey(type, id)]; });
   }
