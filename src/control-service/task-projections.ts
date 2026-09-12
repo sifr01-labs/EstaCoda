@@ -42,6 +42,8 @@ export async function appendTaskWork(state: WorkState, store: TaskStore, signal?
     state.activity[work.id] = activity;
     for (const attempt of store.listAttempts(task.id)) {
       const run = attemptWork(work, attempt); state.work.push(run);
+      const worker=attempt.workerSessionId?state.work.find(item=>item.id==='session:'+attempt.workerSessionId):undefined;
+      if(worker){worker.parentWorkId=run.id;worker.actions=[{id:'inspect_result',enabled:true}];delete worker.modelBinding;}
       state.activity[run.id] = [{ id: `status:${attempt.id}`, profileId: task.profileId, workId: run.id,
         sequence: 0, timestamp: timestamp(attempt.updatedAt), kind: 'status', status: run.status }];
     }

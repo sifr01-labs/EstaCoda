@@ -16,7 +16,7 @@ async function live(page: Page) {
     const historyPending:Array<()=>void>=[];
     const control={preview:{active:false,turnId:null as string|null,text:'',truncated:false},freezeWorkTime:false,delay:false,fail:false,delayHistory:false,total:300,releaseHistory:()=>historyPending.splice(0).forEach(done=>done()),refresh:()=>{revision++;listener(snapshot());},flush:()=>pending.splice(0).forEach(done=>done()),reads};
     const submissions:unknown[]=[];(control as any).submissions=submissions;
-    const api={work:{live:async()=>control.preview,targets:async()=>({items:[{targetId:'target',targetGeneration:1,label:'Trusted repo',isolation:'host'}],truncated:false}),attach:async()=>[{id:'attachment',name:'notes.md',size:20,type:'text/plain'}],submit:async(input:unknown)=>{submissions.push(input);return{workId:'session:new',receipt:{method:'sessions.send',state:'accepted'}};},inspect:async()=>null,search:async(query:string)=>({items:query.toLowerCase().includes('older')?[work('old')]:[],nextCursor:null}),pins:async()=>[],pin:async(id:string,pinned:boolean)=>pinned?[work(id)]:[]},platform:'darwin',onSnapshot:(fn:typeof listener)=>{listener=fn;fn(snapshot());return()=>{};},
+    const api={work:{children:async(id:string)=>({items:id==='listed'?[{...work('old'),kind:'task',parentWorkId:'listed',title:'Child Task'}]:[],nextCursor:null}),live:async()=>control.preview,targets:async()=>({items:[{targetId:'target',targetGeneration:1,label:'Trusted repo',isolation:'host'}],truncated:false}),attach:async()=>[{id:'attachment',name:'notes.md',size:20,type:'text/plain'}],submit:async(input:unknown)=>{submissions.push(input);return{workId:'session:new',receipt:{method:'sessions.send',state:'accepted'}};},inspect:async()=>null,search:async(query:string)=>({items:query.toLowerCase().includes('older')?[work('old')]:[],nextCursor:null}),pins:async()=>[],pin:async(id:string,pinned:boolean)=>pinned?[work(id)]:[]},platform:'darwin',onSnapshot:(fn:typeof listener)=>{listener=fn;fn(snapshot());return()=>{};},
       getWork:async(id:string)=>{const selected=work(id);if(control.delay)await new Promise<void>(resolve=>pending.push(resolve));if(control.fail)throw Error('Unavailable');return selected;},
       activity:async(_id:string,cursor?:string)=>{reads.push(cursor??'first');const [version,offset]=cursor?cursor.split(':').map(Number):[revision,0];if(version!==revision)throw Error('Stale cursor');if(control.delayHistory&&cursor)await new Promise<void>(resolve=>historyPending.push(resolve));return{items:Array.from({length:100},(_,i)=>({id:'message-'+(offset+i),kind:'message',role:'agent',text:'History '+(offset+i)})),nextCursor:offset<control.total-100?version+':'+(offset+100):null};},
       profiles:async()=>['default','other'].map(id=>({id,label:id})),switchProfile:async(id:string)=>{profile=id;listener(snapshot());},
@@ -189,4 +189,12 @@ test('shows owner preview while active and removes it when the turn settles',asy
  await expect(page.getByLabel('Live assistant activity')).toContainText('Working on the live answer');
  await page.evaluate(()=>{(window as any).continuity.preview={active:false,turnId:null,text:'',truncated:false};});
  await expect(page.getByLabel('Live assistant activity')).toHaveCount(0);
+});
+
+
+test('navigates canonical child Tasks outside the sidebar page',async({page})=>{
+ await live(page);
+ await page.locator('.ec-taskbutton').filter({hasText:'Listed Work'}).click();
+ await page.getByLabel('Related Work').getByRole('button',{name:/Child Task/}).click();
+ await expect(page.getByRole('heading',{name:'Older Work'})).toBeVisible();
 });

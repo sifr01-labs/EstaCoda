@@ -100,3 +100,8 @@ it('searches canonical Work beyond the first page and fences cursors to the quer
  expect(()=>snapshot.search({limit:10,query:'Billing',cursor:page.nextCursor!})).toThrow();
  expect(snapshot.search({limit:10,query:'Other',cursor:page.nextCursor!}).items[0]?.id).toBe('s10');
 });
+
+it('projects child-agent history under its parent without granting independent execution controls',async()=>{
+ const homeDir=await mkdtemp('/tmp/ec-child-work-'),path=resolveGlobalStateHome({homeDir}).sessionsSqlitePath;await mkdir(join(path,'..'),{recursive:true});const db=new SQLiteSessionDB({path});
+ try{await db.createSession({id:'parent',profileId:'p'});await db.createSession({id:'child',profileId:'p',parentSessionId:'parent',metadata:{kind:'delegated-child'}});await db.appendMessage({sessionId:'child',role:'agent',content:'Child evidence'});const state=await captureWork({homeDir,profileId:'p'},new AbortController().signal);expect(state.work.find(work=>work.canonicalId==='child')).toMatchObject({parentWorkId:'session:parent',actions:[{id:'inspect_result',enabled:true}]});const snapshot=new WorkSnapshot(state,{homeDir,profileId:'p'});expect(snapshot.search({limit:10,parentWorkId:'session:parent'}).items.map(item=>item.id)).toEqual(['session:child']);expect((await snapshot.activity('session:child',{limit:10})).items[0]).toMatchObject({text:'Child evidence'});}finally{db.close();await rm(homeDir,{recursive:true,force:true});}
+});

@@ -25,3 +25,9 @@ Validation: 70 core/protocol tests, 37 desktop unit tests, nine browser continui
 The shared owner keeps a 16 KB ephemeral assistant preview, reset at tool boundaries and discarded when the turn settles. A selected Work view reads it through authenticated, target-fenced private inspection at most once per second, with one request outstanding. This read does not start a host or persist a second transcript. Canonical tool/message history continues through the bounded snapshot subscription path; history now refreshes even when a new event leaves the Work timestamp unchanged. Disconnects discard previews, and canonical outcomes remain the source of completion truth.
 
 Validation: shared-host preview/cancellation tests, protocol conformance, root and desktop typechecks, and eleven Work continuity browser journeys. Review: preview memory and response sizes are bounded; profile and target generation are checked; no raw tool input or result enters the preview.
+
+## 5. Plans, Tasks and child agents
+
+Work has bounded, canonical parent/child navigation and the inspector renders the latest plan. Child queries are cursor-bound to the parent and preserve their loaded extent across refreshes. Delegated agent Sessions expose their canonical history under the parent, while Task worker Sessions link under their actual attempt. These child views expose inspection only; they do not acquire independent send/model authority. Operator-only host Sessions remain outside navigation.
+
+Validation: 71 core/protocol tests, desktop unit and foundation checks, root typecheck, and twelve browser Work journeys. Review covered off-page descendants, same-profile parents and child execution controls.

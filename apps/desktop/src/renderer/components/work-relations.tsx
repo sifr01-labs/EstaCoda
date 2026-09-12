@@ -1,0 +1,13 @@
+import {useEffect,useRef,useState} from 'react';
+import type {Page,WorkProjection} from '@estacoda/control-protocol';
+import type {DesktopWorkApi} from '../../shared/desktop-api.js';
+import {Button,Icon} from './primitives.js';
+import {statusLabel} from './sidebar.js';
+export function WorkRelations({api,work,select}:{api:DesktopWorkApi;work:WorkProjection;select:(id:string)=>void}){
+ const[children,setChildren]=useState<Page<WorkProjection>>({items:[],nextCursor:null}),[error,setError]=useState(''),[busy,setBusy]=useState(false);
+ const epoch=useRef(0),extent=useRef(50);
+ useEffect(()=>{if(!api.children)return;const current=++epoch.current;setBusy(true);setError('');void (async()=>{const page=await api.children(work.id);while(current===epoch.current&&page.nextCursor&&page.items.length<extent.current){const next=await api.children(work.id,page.nextCursor);page.items.push(...next.items);page.nextCursor=next.nextCursor;}return page;})().then(page=>{if(current===epoch.current)setChildren(page);},()=>{if(current===epoch.current)setError('Related Work could not be loaded.');}).finally(()=>{if(current===epoch.current)setBusy(false);});return()=>{epoch.current++;};},[api,work]);
+ const more=async()=>{const current=epoch.current;setBusy(true);try{const page=await api.children(work.id,children.nextCursor!);if(current===epoch.current)setChildren(old=>{extent.current=Math.min(2000,old.items.length+page.items.length);return{items:[...old.items,...page.items],nextCursor:page.nextCursor};});}catch{if(current===epoch.current)setError('Related Work changed. Reopen Work to refresh.');}finally{if(current===epoch.current)setBusy(false);}};
+ if(!work.parentWorkId&&!children.items.length&&!error)return null;
+ return <section className="ec-inspectsection" aria-label="Related Work">{work.parentWorkId&&<Button className="ec-ghost" icon="arrow-up-right" onClick={()=>select(work.parentWorkId!)}>Open parent Work</Button>}{children.items.length>0&&<details open><summary>Tasks and child agents · {children.items.length}{children.nextCursor?'+':''}</summary>{children.items.map(child=><button className="ec-searchresult" key={child.id} onClick={()=>select(child.id)}><Icon name={child.kind==='task_attempt'?'cpu':'layers-2'}/><span><bdi>{child.title}</bdi><small>{child.kind.replaceAll('_',' ')} · {statusLabel(child)}</small></span><Icon name="arrow-up-right"/></button>)}</details>}{children.nextCursor&&<Button disabled={busy||!!error||children.items.length>=2000} onClick={()=>void more()}>{children.items.length>=2000?'First 2,000 related items shown':'More related Work'}</Button>}{error&&<p role="alert">{error}</p>}</section>;
+}

@@ -101,7 +101,7 @@ const contracts: { [M in keyof MethodContracts]: { params: Check; result: Check 
   "control.cancelRequest": { params: shape({ requestId: id }), result: shape({ cancellationRequested: boolean }) },
   "work.live": {params:shape({workId:id}),result:shape({active:boolean,turnId:nullable(id),text:text(16384),truncated:boolean})},
   "work.targets": {params:shape({}),result:shape({items:array(targetProjection),truncated:boolean})},
-  "work.list": { params: shape(pageParams, {...optionalPage, query:text(200)}), result: page(work) },
+  "work.list": { params: shape(pageParams, {...optionalPage, query:text(200),parentWorkId:id}), result: page(work) },
   "work.get": { params: shape({ workId: id }), result: work },
   "work.activity": { params: shape({ ...pageParams, workId: id }, optionalPage), result: page(activity) },
   "inbox.list": { params: shape(pageParams, optionalPage), result: page(inbox) },

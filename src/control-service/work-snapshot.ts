@@ -33,7 +33,10 @@ export async function captureWork(input: { homeDir: string; profileId: string; v
       if (++visited % 32 === 0) await setImmediate();
       signal.throwIfAborted();
       const session = await sessions.getSessionForProfile(id, input.profileId);
-      if (!session || INTERNAL_SESSION_KINDS.includes(session.metadata?.kind as typeof INTERNAL_SESSION_KINDS[number])) continue;
+      if(!session)continue;
+      const child=session.metadata?.kind==='delegated-child'||session.metadata?.kind==='task-step-worker';
+      if(INTERNAL_SESSION_KINDS.includes(session.metadata?.kind as typeof INTERNAL_SESSION_KINDS[number])&&!child)continue;
+      if(child&&(!session.parentSessionId||!await sessions.getSessionForProfile(session.parentSessionId,input.profileId)))continue;
       const events = sessionDisplayEvents(sessions.db, id, { outcomeOnly: true, limit: 1 });
       const latestUserMessage = sessions.db.query<{ id: string; created_at: string }>("select id, created_at from messages where session_id=? and role='user' order by rowid desc limit 1").get(id);
       const savedTurn = session.metadata?.latestUserTurn as { id?: unknown; createdAt?: unknown } | undefined;
@@ -45,7 +48,8 @@ export async function captureWork(input: { homeDir: string; profileId: string; v
       const queued = sessions.db.query<{ count: number }>("select count(*) as count from session_control_receipts where session_id=? and profile_id=? and method='send' and status in ('accepted','dispatched')").get(id, input.profileId);
       if (!active?.active && queued?.count) work.status = 'queued';
       else if (latestUser && work.status === 'draft') { work.status = 'needs_attention'; work.reason = 'No confirmed outcome is available for the latest turn.'; }
-      work.actions = sessionActions(session, work);
+      work.actions = child?[{id:'inspect_result',enabled:true}]:sessionActions(session, work);
+      if(child)delete work.modelBinding;
       state.work.push(work);
       const boundary = historyBoundary(sessions.db, session);
       state.history![work.id] = boundary;
@@ -67,10 +71,11 @@ export async function captureWork(input: { homeDir: string; profileId: string; v
 export class WorkSnapshot {
   readonly #cursorKey = randomBytes(32);
   constructor(readonly state: WorkState, readonly input?: { homeDir: string; profileId: string }) {}
-  search(params: PageParams & {query?:string}): Page<WorkProjection> {
+  search(params: PageParams & {query?:string;parentWorkId?:string}): Page<WorkProjection> {
     const query=(params.query??'').trim().toLocaleLowerCase('en-US');
-    const items=query?this.state.work.filter(work=>[work.title,work.canonicalId,work.target?.label??''].some(value=>value.toLocaleLowerCase('en-US').includes(query))):this.state.work;
-    return this.page('work:'+query,items,params);
+    const related=params.parentWorkId?this.state.work.filter(work=>work.parentWorkId===params.parentWorkId):this.state.work;
+    const items=query?related.filter(work=>[work.title,work.canonicalId,work.target?.label??''].some(value=>value.toLocaleLowerCase('en-US').includes(query))):related;
+    return this.page('work:'+JSON.stringify([query,params.parentWorkId??null]),items,params);
   }
   get(id: string): WorkProjection {
     const work = this.state.work.find((work) => work.id === id);

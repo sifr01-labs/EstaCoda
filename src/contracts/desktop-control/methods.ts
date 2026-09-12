@@ -48,7 +48,7 @@ export type MethodContracts = {
   "control.subscribe": { params: SubscribeParams; result: SubscribeResult };
   "control.unsubscribe": { params: { subscriptionId: string }; result: { removed: boolean } };
   "control.cancelRequest": { params: { requestId: string }; result: { cancellationRequested: boolean } };
-  "work.list": { params: PageParams & { query?: string }; result: Page<WorkProjection> };
+  "work.list": { params: PageParams & { query?: string; parentWorkId?:string }; result: Page<WorkProjection> };
   "work.get": { params: { workId: string }; result: WorkProjection };
   "work.activity": { params: PageParams & { workId: string }; result: Page<ActivityProjection> };
   "inbox.list": { params: PageParams; result: Page<InboxProjection> };

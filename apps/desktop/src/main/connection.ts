@@ -106,10 +106,10 @@ export class DesktopConnection extends EventEmitter {
     const result=await client.request(method,params);
     if(client!==this.#client||generation!==this.state.generation)throw new Error('Desktop context changed.');return result;
   }
-  async search(query:string,cursor?:string):Promise<Page<WorkProjection>> {
+  async search(query:string,cursor?:string,parentWorkId?:string):Promise<Page<WorkProjection>> {
     const client=this.#client,generation=this.state.generation;
     if(!client||this.state.status!=='ready')throw new Error('Work unavailable.');
-    const result=await client.request('work.list',{query,limit:50,...(cursor?{cursor}:{})});
+    const result=await client.request('work.list',{query,limit:50,...(cursor?{cursor}:{}),...(parentWorkId?{parentWorkId}:{})});
     if(client!==this.#client||generation!==this.state.generation)throw new Error('Desktop context changed.');
     return result;
   }
