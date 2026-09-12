@@ -6,6 +6,8 @@ import {
   isArtifactKind,
   SESSION_ARTIFACT_VERSION,
   type ArtifactKind,
+  type ArtifactProvenance,
+  type RetainedArtifactMetadata,
   type ArtifactRecord,
   type SessionArtifactRegistration,
   type SessionArtifactSource
@@ -27,6 +29,7 @@ export type SessionArtifactScope = {
 };
 
 export type RetainSessionArtifactInput = SessionArtifactScope & {
+  provenance?: ArtifactProvenance;
   capturePath: string;
   kind: ArtifactKind;
   bytes: number;
@@ -99,6 +102,8 @@ export class ArtifactStore {
       throw new Error("Session artifact metadata is invalid.");
     }
     const source = validateSource(input.source);
+    const provenance = parseProvenance(input.provenance);
+    if (input.provenance !== undefined && provenance === undefined) throw new Error("Artifact provenance is invalid.");
     const capturePath = resolve(input.capturePath);
     const capture = await lstat(capturePath);
     if (!capture.isFile() || capture.isSymbolicLink() || capture.size !== input.bytes) {
@@ -135,6 +140,7 @@ export class ArtifactStore {
       sha256: input.sha256,
       createdAt: this.#now().toISOString(),
       source,
+      ...(provenance === undefined ? {} : { provenance }),
       ...(reviewedApiDescription(inspection.apiDescription) === undefined ? {} : { apiDescription: reviewedApiDescription(inspection.apiDescription) })
     };
 
@@ -249,9 +255,9 @@ function artifactFromRegistration(
   };
 }
 
-function parseRegistration(value: unknown): SessionArtifactRegistration | undefined {
+export function parseRegistration(value: unknown): SessionArtifactRegistration | undefined {
   if (!isRecord(value) || Object.keys(value).some((key) => ![
-    "version", "id", "sessionId", "profileId", "storageKey", "kind", "bytes", "mimeType", "sha256", "createdAt", "source", "apiDescription"
+    "version", "id", "sessionId", "profileId", "storageKey", "kind", "bytes", "mimeType", "sha256", "createdAt", "source", "apiDescription", "provenance"
   ].includes(key))) return undefined;
   if (
     value.version !== SESSION_ARTIFACT_VERSION ||
@@ -264,6 +270,8 @@ function parseRegistration(value: unknown): SessionArtifactRegistration | undefi
     typeof value.sha256 !== "string" || !SHA256.test(value.sha256) ||
     typeof value.createdAt !== "string" || !Number.isFinite(Date.parse(value.createdAt))
   ) return undefined;
+  const provenance = parseProvenance(value.provenance);
+  if (value.provenance !== undefined && provenance === undefined) return undefined;
   let source: SessionArtifactSource;
   try {
     source = validateSource(value.source);
@@ -282,6 +290,7 @@ function parseRegistration(value: unknown): SessionArtifactRegistration | undefi
     sha256: value.sha256,
     createdAt: value.createdAt,
     source,
+    ...(provenance === undefined ? {} : { provenance }),
     ...(reviewedApiDescription(value.apiDescription) === undefined ? {} : { apiDescription: reviewedApiDescription(value.apiDescription) })
   };
 }
@@ -353,4 +362,19 @@ function cloneArtifact(artifact: ArtifactRecord): ArtifactRecord {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+function parseProvenance(value: unknown): ArtifactProvenance | undefined {
+  if (!isRecord(value) || Object.keys(value).some(key => !["target", "sourceWorkspaceId", "applicationTargetId", "evidenceCallIds"].includes(key))) return undefined;
+  for (const key of ["sourceWorkspaceId", "applicationTargetId"] as const) if (value[key] !== undefined && (typeof value[key] !== "string" || !SAFE_TOKEN.test(value[key]))) return undefined;
+  if (value.target !== undefined && (!isRecord(value.target) || Object.keys(value.target).some(key => !["targetId", "targetGeneration"].includes(key)) || typeof value.target.targetId !== "string" || !SAFE_TOKEN.test(value.target.targetId) || !Number.isSafeInteger(value.target.targetGeneration) || Number(value.target.targetGeneration) < 1)) return undefined;
+  if (value.evidenceCallIds !== undefined && (!Array.isArray(value.evidenceCallIds) || value.evidenceCallIds.length > 64 || value.evidenceCallIds.some(id => typeof id !== "string" || !SAFE_TOKEN.test(id)))) return undefined;
+  return structuredClone(value) as ArtifactProvenance;
+}
+/** Allowlisted display metadata; storage keys and local paths stay in core. */
+export function retainedArtifactMetadata(registration: SessionArtifactRegistration): RetainedArtifactMetadata {
+  return { id: registration.id, displayName: registration.source.filename, kind: registration.kind,
+    mimeType: registration.mimeType, bytes: registration.bytes, sha256: registration.sha256,
+    createdAt: registration.createdAt, retention: "retained", sourceKind: registration.source.kind,
+    sourceOrigin: registration.source.origin, ...(registration.provenance ? { provenance: structuredClone(registration.provenance) } : {}) };
 }

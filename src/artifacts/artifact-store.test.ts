@@ -170,3 +170,14 @@ async function temporaryRoot(): Promise<string> {
   roots.push(root);
   return root;
 }
+
+it('preserves bounded provenance without publishing backing paths and rejects malformed references', async () => {
+  const {parseRegistration,retainedArtifactMetadata}=await import('./artifact-store.js');
+  const root=await temporaryRoot(),capture=join(root,'capture.json');await writeFile(capture,content);
+  let saved:SessionArtifactRegistration|undefined;
+  await store(root).retainSessionArtifact({...scope(),capturePath:capture,kind:'data',bytes:Buffer.byteLength(content),mimeType:'application/json',sha256,source:source(),provenance:{target:{targetId:'target-1',targetGeneration:2},evidenceCallIds:['call-1']},persist:async value=>{saved=value;}});
+  expect(parseRegistration(saved)?.provenance?.target?.targetGeneration).toBe(2);
+  expect(JSON.stringify(retainedArtifactMetadata(saved!))).not.toContain('objects/');
+  expect(parseRegistration({...saved,provenance:{target:{targetId:'../foreign',targetGeneration:2}}})).toBeUndefined();
+  expect(parseRegistration({...saved,provenance:{evidenceCallIds:Array(65).fill('call')}})).toBeUndefined();
+});

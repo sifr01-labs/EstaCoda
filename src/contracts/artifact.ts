@@ -51,6 +51,8 @@ export type SessionArtifactRegistration = {
   createdAt: string;
   source: SessionArtifactSource;
   apiDescription?: ApiDescriptionMetadata;
+  /** Core supplied provenance; never a filesystem path or execution authority. */
+  provenance?: ArtifactProvenance;
 };
 
 export function isArtifactKind(value: unknown): value is ArtifactKind {
@@ -70,3 +72,17 @@ export function reviewedApiDescription(value: unknown): ApiDescriptionMetadata |
     !/^\d{1,3}(?:\.\d{1,3}){0,2}$/u.test(record.version))) return undefined;
   return { format: record.format, ...(record.version === undefined ? {} : { version: record.version as string }) };
 }
+
+/** References describe where content came from; they never authorize access. */
+export type ArtifactProvenance = {
+  target?: { targetId: string; targetGeneration: number };
+  sourceWorkspaceId?: string;
+  applicationTargetId?: string;
+  evidenceCallIds?: string[];
+};
+export type RetainedArtifactMetadata = {
+  id: string; displayName: string; kind: ArtifactKind; mimeType: string;
+  bytes: number; sha256: string; createdAt: string;
+  retention: "retained"; sourceKind: SessionArtifactSource["kind"];
+  sourceOrigin: string; provenance?: ArtifactProvenance;
+};
