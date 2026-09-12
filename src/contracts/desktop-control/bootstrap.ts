@@ -2,7 +2,7 @@ import { CONTROL_LIMITS, ControlProtocolError, DESKTOP_PROTOCOL_VERSION, assertB
 
 /** Schema availability is not service availability. Advertise only implemented handlers. */
 export const CONTROL_METHODS = ["control.initialize", "control.bootstrap", "control.subscribe", "control.unsubscribe", "control.cancelRequest",
-  "work.list", "work.get", "work.activity", "inbox.list", "models.list", "models.verifyCandidate", "providers.list", "connections.list", "connections.get",
+  "work.list", "work.get", "work.activity", "inbox.list", "models.list", "models.verifyCandidate", "models.reviewPrimary", "models.applyDraft", "models.cancelDraft", "models.inspectApply", "providers.list", "connections.list", "connections.get",
   "tasks.pause", "tasks.resume", "tasks.cancel", "tasks.retry", "tasks.guide", "sessions.start", "sessions.resume", "sessions.send", "sessions.cancelTurn", "approvals.resolve", "operations.inspect"] as const;
 export type ControlMethod = typeof CONTROL_METHODS[number];
 export const CONTROL_EVENTS = ["control.ready", "work.changed", "activity.appended", "attention.changed", "modelRoute.changed",

@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import { ControlProtocolError, assertBoundedJson, exactKeys, isControlId, isRecord } from '../contracts/desktop-control/index.js';
 export type CandidateScope = { windowId: string; generation: number; purpose: 'provider' | 'telegram'; providerId: string; authMethod: 'api_key' | 'oauth'; endpoint: string };
-type Candidate = { abort: AbortController; scope: CandidateScope; value: string; absolute: number; idle: number; timer: ReturnType<typeof setTimeout> };
+type Candidate = { routeBinding?: string; abort: AbortController; scope: CandidateScope; value: string; absolute: number; idle: number; timer: ReturnType<typeof setTimeout> };
 export function validateCandidateScope(value: unknown): asserts value is CandidateScope {
   assertBoundedJson(value);
   if (!isRecord(value) || !exactKeys(value, ['windowId', 'generation', 'purpose', 'providerId', 'authMethod', 'endpoint']) ||
@@ -21,7 +21,7 @@ export class CredentialCandidates {
   constructor(readonly profileId: string, readonly instanceId: string, readonly now = () => performance.now()) {}
   stage(scope: CandidateScope, value: string): string {
     validateCandidateScope(scope);
-    if (this.#closed || typeof value !== 'string' || !value.length || Buffer.byteLength(value) > 49_152) throw new ControlProtocolError('-32602');
+    if (this.#closed || typeof value !== 'string' || !value.length || Buffer.byteLength(value) > 49_152 || (scope.authMethod === 'api_key' && /[\r\n\0]/u.test(value))) throw new ControlProtocolError('-32602');
     const window = this.#windows.get(scope.windowId);
     if (window && (scope.generation < window.generation || (scope.generation === window.generation && window.closed))) throw new ControlProtocolError('-32003');
     if (!window && this.#windows.size >= 64) throw new ControlProtocolError('-32009');
@@ -40,6 +40,11 @@ export class CredentialCandidates {
     entry.idle = Math.min(this.now() + 300_000, entry.absolute);
     clearTimeout(entry.timer); entry.timer = setTimeout(() => this.alarm(id), Math.max(1, entry.idle - this.now())); entry.timer.unref();
     return entry.value;
+  }
+  bindRoute(id: string, scope: CandidateScope, binding: string): void {
+    const entry=this.require(id,scope);
+    if(entry.routeBinding!==undefined && entry.routeBinding!==binding){this.remove(id);throw new ControlProtocolError('-32003');}
+    entry.routeBinding=binding;
   }
   signal(id: string, scope: CandidateScope): AbortSignal { return this.require(id, scope).abort.signal; }
   discard(id: string, scope: CandidateScope): void { this.require(id, scope); this.remove(id); }

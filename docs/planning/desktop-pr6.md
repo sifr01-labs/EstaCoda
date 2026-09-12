@@ -25,3 +25,15 @@ The bridge negotiates `models.verifyCandidate`. Explicitly approved tests use th
 Failed or cancelled verification discards the initial candidate. Window closure, expiry and bridge disposal abort credential-backed tests, and concurrent tests of the same candidate are refused. Ordinary RPC carries no credential values.
 
 Validation: all control-service/protocol tests (106 passing), including loopback redirect/size-limit tests, stream compatibility, endpoint rebinding, failed-key disposal and window cancellation; root typecheck; desktop foundation checks. Review caught and fixed a response-limit settlement race. The isolated checkout's dependency files were restored from the frozen local pnpm cache before validation. These are synthetic tests, not live provider-account tests.
+
+## 4. Reviewed primary-route Apply
+
+Primary-route drafts are bound to a bridge-owned profile, requesting window/generation, exact route and staged candidate. Apply reuses core setup manifests and the reviewed executor. Candidate API keys receive a new explicit profile-local environment reference per accepted change, so cached routes cannot accidentally send a replacement key to an earlier endpoint. Older references remain available to settling runtimes. No raw credentials enter ordinary RPC or receipts.
+
+Core profile writers now serialize through a SQLite-backed OS lock. Desktop Apply checks the reviewed file snapshot under that lock, stages through the existing setup executor in a restricted temporary profile, and durably records its authorized commit before replacing `.env`, `auth.json` and config. An interrupted commit blocks runtime configuration loading and is completed on bridge recovery. Receipts distinguish applied, uncertain and unknown; post-save checks are read-only. Recovery files containing secrets use mode 0600. This is recoverable multi-file consistency, not a claim of atomic cross-file rename.
+
+Existing CLI setup retains its transport-field persistence behavior. Desktop explicitly persists its reviewed API/auth mode. OAuth writers reject stale store snapshots, and delayed refresh results cannot overwrite a replacement authorization. An authenticated notification retires supervisor cache entries; borrowed runtimes retain ownership until release.
+
+Risk: persistence, credentials and cache invalidation are security-sensitive. An incomplete commit blocks affected profile activation rather than exposing partial state. Completed credential references are retained for settling runtimes; automated old-reference cleanup is not introduced here.
+
+Validation: full root suite, 660 files / 10,814 tests passing after correcting three regressions; 54 final focused protocol/setup/credential tests, 15 recovery/authority tests, endpoint/header rejection tests, root typecheck and desktop foundation checks. Lock tests include overlapping writers, awaited nested writes and process-death release. Native and visual desktop validation remains pending until the live UI slices are integrated.

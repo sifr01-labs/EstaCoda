@@ -70,6 +70,8 @@ import { resolveSetupCopy } from "../setup-copy.js";
 import { loadOAuthStore, writeOAuthStore } from "../../providers/oauth/oauth-store.js";
 
 export type ReviewedSetupApplyExecutorOptions = {
+  readonly isolateCredentialEnvironment?: boolean;
+  readonly persistRouteTransport?: boolean;
   readonly workspaceRoot: string;
   readonly homeDir?: string;
   readonly profileId?: string;
@@ -202,7 +204,7 @@ export async function applyReviewedSetupDeferredSecrets(
         key: write.envVarName,
         value: write.value,
       });
-      process.env[result.key] = write.value;
+      if (!options.isolateCredentialEnvironment) process.env[result.key] = write.value;
       appliedSecretCount += 1;
     }
 
@@ -255,7 +257,7 @@ export async function applyReviewedSetupDeferredOAuth(
           ...loaded.store.providers,
           [write.providerId]: write.tokenRecord,
         },
-      }, { homeDir: options.homeDir, profileId });
+      }, { homeDir: options.homeDir, profileId, expectedStore: loaded.store });
       appliedOAuthCount += 1;
     }
 
@@ -390,11 +392,10 @@ async function applyProviderRoute(
       provider,
       baseUrl,
       kind: "openai-compatible",
-      enableNetwork: true,
-      apiMode: authMethod === undefined || authMethod === "api_key"
-        ? undefined
-        : providerApiModeValue(operation.review.values.apiMode),
-      authMethod: authMethod === "api_key" ? undefined : authMethod,
+      enableNetwork: operation.review.values.enableNetwork !== false,
+      apiMode: options.persistRouteTransport || (authMethod !== undefined && authMethod !== 'api_key')
+        ? providerApiModeValue(operation.review.values.apiMode) : undefined,
+      authMethod: options.persistRouteTransport || authMethod !== 'api_key' ? authMethod : undefined,
     },
   });
   if (context.credentialEnv !== undefined) {
@@ -421,6 +422,7 @@ async function applyProviderRoute(
       baseUrl,
       apiKeyEnv: context.credentialEnv,
       contextWindowTokens,
+      maxTokens: numberValue(operation.review.values.maxTokens),
     },
   });
 }

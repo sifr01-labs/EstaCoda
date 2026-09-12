@@ -20,6 +20,7 @@ export async function startPrivateControl(input: {
   directory: string; instanceId: string; profileId: string; version: string;
   targetGeneration?: boolean;
   handle(request: PrivateControlRequest): Promise<unknown>;
+  configurationChanged?: () => Promise<void>;
 }): Promise<{ close(): Promise<void> }> {
   if (process.platform === "win32") throw new Error("Shared control requires a protected named pipe on Windows; use foreground execution.");
   await assertPrivate(input.directory, true);
@@ -54,6 +55,10 @@ export async function startPrivateControl(input: {
             socket.end(JSON.stringify({ ok: true, result: { profileId: input.profileId, instanceId: input.instanceId,
               version: input.version, capabilities: { readiness: true, targetGeneration: input.targetGeneration === true } } }) + "\n");
             return;
+          }
+          if (message.configurationChanged === true) {
+            if (!input.configurationChanged || message.profileId !== input.profileId || Object.keys(message).some(key => !['protocol','version','instanceId','profileId','socket','token','configurationChanged'].includes(key))) throw new Error('Invalid configuration notification');
+            await input.configurationChanged();socket.end(JSON.stringify({ok:true,result:{acknowledged:true}})+'\n');return;
           }
           validatePrivateControlRequest(message.request);
           // Profile and principal are bound by this instance; caller labels are ignored.
@@ -109,7 +114,7 @@ export async function callPrivateControl(input: { directory: string; profileId: 
   return exchangePrivateControl(input, { request: input.request });
 }
 
-async function exchangePrivateControl(input: { directory: string; profileId: string; version: string; signal?: AbortSignal }, payload: { request: PrivateControlRequest } | { probe: true }): Promise<unknown> {
+async function exchangePrivateControl(input: { directory: string; profileId: string; version: string; signal?: AbortSignal }, payload: { request: PrivateControlRequest } | { probe: true } | {configurationChanged:true}): Promise<unknown> {
   input.signal?.throwIfAborted();
   await assertPrivate(input.directory, true);
   const path = join(input.directory, "control.json");
@@ -155,4 +160,10 @@ export async function probePrivateControl(input: { directory: string; profileId:
   const caps = result.capabilities as Record<string, unknown> | null;
   if (!caps || Object.keys(caps).sort().join(",") !== "readiness,targetGeneration" || caps.readiness !== true || typeof caps.targetGeneration !== "boolean") throw new PrivateControlCompatibilityError("Incompatible supervisor capabilities.");
   return { instanceId: result.instanceId, targetGeneration: caps.targetGeneration as boolean };
+}
+
+/** Notify an existing authenticated owner; never starts or replaces a supervisor. */
+export async function notifyPrivateConfigurationChanged(input:{directory:string;profileId:string;version:string;signal?:AbortSignal}):Promise<void>{
+  const result=await exchangePrivateControl(input,{configurationChanged:true}) as {acknowledged?:boolean};
+  if(result?.acknowledged!==true)throw new Error('Configuration notification was not acknowledged');
 }

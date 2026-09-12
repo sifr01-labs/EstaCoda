@@ -1,3 +1,4 @@
+import {withProfileWriteLock, assertProfileApplySettled} from './profile-write-lock.js';
 import { parseExecutionPolicy } from "../execution/docker-policy.js";
 import type { RequestedExecutionPolicy } from "../contracts/execution-authority.js";
 import { lstat, mkdir, open, readFile, writeFile } from "node:fs/promises";
@@ -953,11 +954,13 @@ export type LoadRuntimeConfigOptions = {
 export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Promise<LoadedRuntimeConfig> {
   const homeDir = resolveHomeDir(options.homeDir);
   const profileId = options.profileId ?? readActiveProfile({ homeDir })?.profileId ?? defaultProfileId();
+  await assertProfileApplySettled(resolveProfileStateHome({homeDir,profileId}).profileRoot);
   if (!options.configurationInspection) await loadDotEnvSecrets({ homeDir, profileId });
   const profilePaths = resolveProfileStateHome({ homeDir, profileId });
   const loadedConfig = options.configurationInspection
     ? await readConfigurationForInspection(profilePaths.configPath)
     : await readConfig(profilePaths.configPath);
+  await assertProfileApplySettled(profilePaths.profileRoot);
   const config = patchConfig(loadedConfig.config);
   if (config.execution !== undefined) config.execution = parseExecutionPolicy(config.execution);
   const catalogProfiles = await resolveModelProfilesFromCatalog({
@@ -2555,7 +2558,7 @@ export function buildProviderRegistry(config: EstaCodaConfig, options: {
         continue;
       }
 
-      if (metadata.apiMode === "openai_responses") {
+      if ((providerConfig.apiMode ?? metadata.apiMode) === "openai_responses") {
         registry.register(createOpenAIResponsesProvider({
           id: providerId,
           endpoint: {
@@ -2636,8 +2639,11 @@ function mergeProviderEndpointHeaders(
 }
 
 export async function saveRuntimeConfig(path: string, config: EstaCodaConfig): Promise<void> {
+  return withProfileWriteLock(dirname(path), async () => {
+  await assertProfileApplySettled(dirname(path));
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, `${JSON.stringify(config, null, 2)}\n`, "utf8");
+  });
 }
 
 function resolveSelectedProfileId(options: { homeDir?: string; profileId?: string }): string {
@@ -2674,6 +2680,8 @@ export async function setupProviderConfig(options: {
 }> {
   validateProviderSetupInput(options.input);
   const targetPath = resolveConfigMutationPath(options);
+  return withProfileWriteLock(dirname(targetPath), async () => {
+    await assertProfileApplySettled(dirname(targetPath));
   const existing = await readConfig(targetPath);
   const explicitlyProvidesCredential = options.input.apiKeyEnv !== undefined || options.input.apiKey !== undefined;
   const usesApiKeyCredential = options.input.authMethod === undefined || options.input.authMethod === "api_key";
@@ -2756,6 +2764,7 @@ export async function setupProviderConfig(options: {
     config,
     secretPath
   };
+  });
 }
 
 export async function setupModelFallbackConfig(options: {
@@ -2768,6 +2777,8 @@ export async function setupModelFallbackConfig(options: {
 }> {
   validateModelFallbackSetupInput(options.input);
   const targetPath = resolveConfigMutationPath(options);
+  return withProfileWriteLock(dirname(targetPath), async () => {
+    await assertProfileApplySettled(dirname(targetPath));
   const existing = await readConfig(targetPath);
   const merged = patchConfig(existing.config, {
     model: {
@@ -2789,6 +2800,7 @@ export async function setupModelFallbackConfig(options: {
     path: targetPath,
     config
   };
+  });
 }
 
 export async function setupAuxiliaryModelConfig(options: {
@@ -2802,6 +2814,8 @@ export async function setupAuxiliaryModelConfig(options: {
 }> {
   validateAuxiliaryModelRouteSetupInput(options.input);
   const targetPath = resolveConfigMutationPath(options);
+  return withProfileWriteLock(dirname(targetPath), async () => {
+    await assertProfileApplySettled(dirname(targetPath));
   const existing = await readConfig(targetPath);
   const mergedAuxiliaryModels: AuxiliaryModelConfig = {
     ...(existing.config.auxiliaryModels ?? {}),
@@ -2840,6 +2854,7 @@ export async function setupAuxiliaryModelConfig(options: {
     path: targetPath,
     config
   };
+  });
 }
 
 export async function removeModelFallbackConfig(options: {
@@ -2855,6 +2870,8 @@ export async function removeModelFallbackConfig(options: {
   config: EstaCodaConfig;
 }> {
   const targetPath = resolveConfigMutationPath(options);
+  return withProfileWriteLock(dirname(targetPath), async () => {
+    await assertProfileApplySettled(dirname(targetPath));
   const existing = await readConfig(targetPath);
   const targetKey = `${options.input.provider}/${options.input.id}/${options.input.baseUrl ?? ""}`;
   const remaining = (existing.config.model?.fallbacks ?? []).filter((fb) => {
@@ -2872,6 +2889,7 @@ export async function removeModelFallbackConfig(options: {
     path: targetPath,
     config
   };
+  });
 }
 
 export async function reorderModelFallbackConfig(options: {
@@ -2885,6 +2903,8 @@ export async function reorderModelFallbackConfig(options: {
   config: EstaCodaConfig;
 }> {
   const targetPath = resolveConfigMutationPath(options);
+  return withProfileWriteLock(dirname(targetPath), async () => {
+    await assertProfileApplySettled(dirname(targetPath));
   const existing = await readConfig(targetPath);
   const current = existing.config.model?.fallbacks ?? [];
   const orderKeys = new Set(options.input.order.map((o) => `${o.provider}/${o.id}/${o.baseUrl ?? ""}`));
@@ -2904,6 +2924,7 @@ export async function reorderModelFallbackConfig(options: {
     path: targetPath,
     config
   };
+  });
 }
 
 export async function clearModelFallbackConfig(options: {
@@ -2914,6 +2935,8 @@ export async function clearModelFallbackConfig(options: {
   config: EstaCodaConfig;
 }> {
   const targetPath = resolveConfigMutationPath(options);
+  return withProfileWriteLock(dirname(targetPath), async () => {
+    await assertProfileApplySettled(dirname(targetPath));
   const existing = await readConfig(targetPath);
   const config = patchConfig(existing.config, {
     model: {
@@ -2927,6 +2950,7 @@ export async function clearModelFallbackConfig(options: {
     path: targetPath,
     config
   };
+  });
 }
 
 export async function setupWebConfig(options: {
@@ -2939,6 +2963,8 @@ export async function setupWebConfig(options: {
 }> {
   validateWebSetupInput(options.input);
   const targetPath = resolveConfigMutationPath(options);
+  return withProfileWriteLock(dirname(targetPath), async () => {
+    await assertProfileApplySettled(dirname(targetPath));
   const existing = await readConfig(targetPath);
   const webPatch: NonNullable<EstaCodaConfig["web"]> = {
     enableNetwork: options.input.enableNetwork ?? true
@@ -2963,6 +2989,7 @@ export async function setupWebConfig(options: {
     path: targetPath,
     config
   };
+  });
 }
 
 export async function setupBrowserConfig(options: {
@@ -2976,6 +3003,8 @@ export async function setupBrowserConfig(options: {
 }> {
   validateBrowserSetupInput(options.input);
   const targetPath = resolveConfigMutationPath(options);
+  return withProfileWriteLock(dirname(targetPath), async () => {
+    await assertProfileApplySettled(dirname(targetPath));
   const existing = await readConfig(targetPath);
   const current = options.preserveExisting === true ? existing.config.browser : undefined;
   const config = patchConfig(existing.config, {
@@ -3008,6 +3037,7 @@ export async function setupBrowserConfig(options: {
     path: targetPath,
     config
   };
+  });
 }
 
 export async function setupBrowserCloudSpendApproval(options: {
@@ -3019,6 +3049,8 @@ export async function setupBrowserCloudSpendApproval(options: {
   config: EstaCodaConfig;
 }> {
   const targetPath = resolveConfigMutationPath(options);
+  return withProfileWriteLock(dirname(targetPath), async () => {
+    await assertProfileApplySettled(dirname(targetPath));
   const existing = await readConfig(targetPath);
   const config = patchConfig(existing.config, {
     browser: {
@@ -3032,6 +3064,7 @@ export async function setupBrowserCloudSpendApproval(options: {
     path: targetPath,
     config
   };
+  });
 }
 
 export async function setupVoiceConfig(options: {
@@ -3045,6 +3078,8 @@ export async function setupVoiceConfig(options: {
 }> {
   validateVoiceSetupInput(options.input);
   const targetPath = resolveConfigMutationPath(options);
+  return withProfileWriteLock(dirname(targetPath), async () => {
+    await assertProfileApplySettled(dirname(targetPath));
   const existing = await readConfig(targetPath);
   const previousTts = normalizeTtsConfig(existing.config.tts);
   const previousStt = normalizeSttConfig(existing.config.stt);
@@ -3141,6 +3176,7 @@ export async function setupVoiceConfig(options: {
     config,
     secretPaths: [...new Set(secretPaths)]
   };
+  });
 }
 
 export async function setupImageGenerationConfig(options: {
@@ -3154,6 +3190,8 @@ export async function setupImageGenerationConfig(options: {
 }> {
   validateImageGenerationSetupInput(options.input);
   const targetPath = resolveConfigMutationPath(options);
+  return withProfileWriteLock(dirname(targetPath), async () => {
+    await assertProfileApplySettled(dirname(targetPath));
   const existing = await readConfig(targetPath);
   const previous = normalizeImageGenerationConfig(existing.config.imageGen ?? existing.config.image_gen);
   const provider = options.input.provider ?? previous.provider;
@@ -3195,6 +3233,7 @@ export async function setupImageGenerationConfig(options: {
     config,
     secretPath
   };
+  });
 }
 
 function resolveImageSetupModel(provider: ImageGenerationProvider, input: ImageGenerationSetupInput): string | undefined {
@@ -3220,6 +3259,8 @@ export async function setupMcpConfig(options: {
   config: EstaCodaConfig;
 }> {
   const targetPath = resolveConfigMutationPath(options);
+  return withProfileWriteLock(dirname(targetPath), async () => {
+    await assertProfileApplySettled(dirname(targetPath));
   const existing = await readConfig(targetPath);
   const serverName = options.input.name.trim();
   const servers = normalizeMcpServers(existing.config.mcpServers ?? existing.config.mcp_servers, options.homeDir);
@@ -3271,6 +3312,7 @@ export async function setupMcpConfig(options: {
     path: targetPath,
     config
   };
+  });
 }
 
 export async function setupSecurityConfig(options: {
@@ -3283,6 +3325,8 @@ export async function setupSecurityConfig(options: {
 }> {
   validateSecuritySetupInput(options.input);
   const targetPath = resolveConfigMutationPath(options);
+  return withProfileWriteLock(dirname(targetPath), async () => {
+    await assertProfileApplySettled(dirname(targetPath));
   const existing = await readConfig(targetPath);
   const assessorPatch = options.input.assessorEnabled !== undefined ||
     options.input.assessorProvider !== undefined ||
@@ -3312,6 +3356,7 @@ export async function setupSecurityConfig(options: {
     path: targetPath,
     config
   };
+  });
 }
 
 export async function setupSkillConfig(options: {
@@ -3324,6 +3369,8 @@ export async function setupSkillConfig(options: {
 }> {
   validateSkillSetupInput(options.input);
   const targetPath = resolveConfigMutationPath(options);
+  return withProfileWriteLock(dirname(targetPath), async () => {
+    await assertProfileApplySettled(dirname(targetPath));
   const existing = await readConfig(targetPath);
   const config = patchConfig(existing.config, {
     skills: {
@@ -3336,6 +3383,7 @@ export async function setupSkillConfig(options: {
     path: targetPath,
     config
   };
+  });
 }
 
 export async function setupBudgetConfig(options: {
@@ -3354,6 +3402,8 @@ export async function setupBudgetConfig(options: {
     assertSpendingLimit(options.input.spendingLimit, `${options.input.scope} spending limit`);
   }
   const targetPath = resolveConfigMutationPath(options);
+  return withProfileWriteLock(dirname(targetPath), async () => {
+    await assertProfileApplySettled(dirname(targetPath));
   const existing = await readConfig(targetPath);
   const budgets: NonNullable<EstaCodaConfig["budgets"]> = {
     ...(existing.config.budgets ?? {}),
@@ -3379,6 +3429,7 @@ export async function setupBudgetConfig(options: {
     path: targetPath,
     config,
   };
+  });
 }
 
 export async function setupUiConfig(options: {
@@ -3391,6 +3442,8 @@ export async function setupUiConfig(options: {
 }> {
   validateUiSetupInput(options.input);
   const targetPath = resolveConfigMutationPath(options);
+  return withProfileWriteLock(dirname(targetPath), async () => {
+    await assertProfileApplySettled(dirname(targetPath));
   const existing = await readConfig(targetPath);
   const previous = normalizeUiConfig(existing.config.ui);
   const nextLanguage = options.input.language ?? previous.language;
@@ -3416,6 +3469,7 @@ export async function setupUiConfig(options: {
     path: targetPath,
     config
   };
+  });
 }
 
 export async function setupProfileConfig(options: {
@@ -3428,6 +3482,8 @@ export async function setupProfileConfig(options: {
 }> {
   validateProfileSetupInput(options.input);
   const targetPath = resolveConfigMutationPath(options);
+  return withProfileWriteLock(dirname(targetPath), async () => {
+    await assertProfileApplySettled(dirname(targetPath));
   const existing = await readConfig(targetPath);
   const previous = normalizeProfileConfig(existing.config.profile);
   const config = patchConfig(existing.config, {
@@ -3442,6 +3498,7 @@ export async function setupProfileConfig(options: {
     path: targetPath,
     config
   };
+  });
 }
 
 function isToolRiskClass(value: unknown): value is ToolRiskClass {
@@ -3468,6 +3525,8 @@ export async function setupTelegramConfig(options: {
 }> {
   validateTelegramSetupInput(options.input);
   const targetPath = resolveConfigMutationPath(options);
+  return withProfileWriteLock(dirname(targetPath), async () => {
+    await assertProfileApplySettled(dirname(targetPath));
   const existing = await readConfig(targetPath);
   const envName = options.input.botTokenEnv ??
     existing.config.channels?.telegram?.botTokenEnv ??
@@ -3518,6 +3577,7 @@ export async function setupTelegramConfig(options: {
     config,
     secretPath
   };
+  });
 }
 
 export async function setupDiscordConfig(options: {
@@ -3538,6 +3598,8 @@ export async function setupDiscordConfig(options: {
     throw new Error("Discord setup requires at least one allowed user or channel.");
   }
   const targetPath = resolveConfigMutationPath(options);
+  return withProfileWriteLock(dirname(targetPath), async () => {
+    await assertProfileApplySettled(dirname(targetPath));
   const existing = await readConfig(targetPath);
   const envName = options.input.botTokenEnv ?? "ESTACODA_DISCORD_BOT_TOKEN";
   let secretPath: string | undefined;
@@ -3572,6 +3634,7 @@ export async function setupDiscordConfig(options: {
     config,
     secretPath
   };
+  });
 }
 
 export async function setupWhatsAppConfig(options: {
@@ -3596,6 +3659,8 @@ export async function setupWhatsAppConfig(options: {
   }
   const enabled = options.input.enabled ?? true;
   const targetPath = resolveConfigMutationPath(options);
+  return withProfileWriteLock(dirname(targetPath), async () => {
+    await assertProfileApplySettled(dirname(targetPath));
   const existing = await readConfig(targetPath);
   const profileId = resolveSelectedProfileId(options);
   const gatewayStatePath = resolveProfileStateHome({ homeDir: options.homeDir, profileId }).gatewayStatePath;
@@ -3635,6 +3700,7 @@ export async function setupWhatsAppConfig(options: {
     path: targetPath,
     config
   };
+  });
 }
 
 export async function addWhatsAppAllowedUser(options: {
@@ -3648,6 +3714,8 @@ export async function addWhatsAppAllowedUser(options: {
   added: boolean;
 }> {
   const targetPath = resolveConfigMutationPath(options);
+  return withProfileWriteLock(dirname(targetPath), async () => {
+    await assertProfileApplySettled(dirname(targetPath));
   const existing = await readConfig(targetPath);
   const whatsapp = existing.config.channels?.whatsapp ?? {};
   const normalizedUserId = normalizeWhatsAppUserId(options.userId);
@@ -3687,6 +3755,7 @@ export async function addWhatsAppAllowedUser(options: {
     config,
     added: !(whatsapp.allowedUsers ?? []).includes(normalizedUserId)
   };
+  });
 }
 
 export async function createTelegramPairingCode(options: {
@@ -3703,6 +3772,8 @@ export async function createTelegramPairingCode(options: {
 }> {
   const input = options.input ?? {};
   const targetPath = resolveConfigMutationPath(options);
+  return withProfileWriteLock(dirname(targetPath), async () => {
+    await assertProfileApplySettled(dirname(targetPath));
   const existing = await readConfig(targetPath);
   const now = options.now?.() ?? new Date();
   const ttlMinutes = input.ttlMinutes ?? 10;
@@ -3729,6 +3800,7 @@ export async function createTelegramPairingCode(options: {
     code,
     expiresAt
   };
+  });
 }
 
 export async function consumeTelegramPairingCode(options: {
@@ -3745,6 +3817,8 @@ export async function consumeTelegramPairingCode(options: {
   config: EstaCodaConfig;
 }> {
   const targetPath = resolveConfigMutationPath(options);
+  return withProfileWriteLock(dirname(targetPath), async () => {
+    await assertProfileApplySettled(dirname(targetPath));
   const existing = await readConfig(targetPath);
   const pairing = existing.config.channels?.telegram?.pairing;
   const now = options.now?.() ?? new Date();
@@ -3795,6 +3869,7 @@ export async function consumeTelegramPairingCode(options: {
     path: targetPath,
     config
   };
+  });
 }
 
 /** Keep the bound and bytes on the same descriptor; a stat-then-reopen preflight is insufficient. */
@@ -4533,8 +4608,11 @@ function normalizeTextDebounceMaxChars(value: unknown): number {
 export async function setupExecutionConfig(options: { workspaceRoot: string; homeDir?: string; input: unknown }) {
   const policy = parseExecutionPolicy(options.input);
   const path = resolveConfigMutationPath(options);
+  return withProfileWriteLock(dirname(path), async () => {
+    await assertProfileApplySettled(dirname(path));
   const existing = await readConfig(path);
   const config = patchConfig(existing.config, { execution: policy });
   await saveRuntimeConfig(path, config);
   return { path, config };
+  });
 }

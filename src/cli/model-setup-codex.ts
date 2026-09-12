@@ -1,3 +1,5 @@
+import {withProfileWriteLock} from '../config/profile-write-lock.js';
+import {dirname} from 'node:path';
 import { readConfig, saveRuntimeConfig } from "../config/runtime-config.js";
 import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "../config/profile-home.js";
 import {
@@ -118,7 +120,7 @@ async function handleExistingCredentials(
     }
   };
 
-  await writeOAuthStore(updatedStore, { homeDir: options.homeDir, profileId: options.profileId });
+  await writeOAuthStore(updatedStore, { homeDir: options.homeDir, profileId: options.profileId, expectedStore: existingStore });
 
   // Configure route
   const configResult = await configureCodexRoute(options);
@@ -190,7 +192,7 @@ async function handleNewAuthentication(
     }
   };
 
-  await writeOAuthStore(updatedStore, { homeDir: options.homeDir, profileId: options.profileId });
+  await writeOAuthStore(updatedStore, { homeDir: options.homeDir, profileId: options.profileId, expectedStore: oauthResult.store });
 
   // Configure route
   const configResult = await configureCodexRoute(options);
@@ -220,6 +222,7 @@ async function configureCodexRoute(
   const targetPath = resolveProfileStateHome({ homeDir: options.homeDir, profileId }).configPath;
 
   try {
+    return await withProfileWriteLock(dirname(targetPath), async () => {
     const existing = await readConfig(targetPath);
 
     const config = {
@@ -241,7 +244,8 @@ async function configureCodexRoute(
     };
 
     await saveRuntimeConfig(targetPath, config);
-    return { ok: true };
+    return { ok: true as const };
+    });
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error);
     return {

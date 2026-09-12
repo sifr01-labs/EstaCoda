@@ -2,7 +2,16 @@ import { mkdtemp, chmod, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { expect, it, vi } from "vitest";
-import { startPrivateControl, callPrivateControl, validatePrivateControlRequest } from "./private-control.js";
+import { startPrivateControl, callPrivateControl, validatePrivateControlRequest, notifyPrivateConfigurationChanged } from "./private-control.js";
+
+it.skipIf(process.platform === 'win32')('binds configuration notifications to the authenticated profile owner',async()=>{
+  const directory=await mkdtemp(join(tmpdir(),'ipc-config-'));await chmod(directory,0o700);const configurationChanged=vi.fn(async()=>{});
+  const server=await startPrivateControl({directory,instanceId:'instance',profileId:'p',version:'test',handle:async()=>({}),configurationChanged});
+  try{
+    await notifyPrivateConfigurationChanged({directory,profileId:'p',version:'test'});expect(configurationChanged).toHaveBeenCalledTimes(1);
+    await expect(notifyPrivateConfigurationChanged({directory,profileId:'other',version:'test'})).rejects.toThrow();expect(configurationChanged).toHaveBeenCalledTimes(1);
+  }finally{await server.close();await rm(directory,{recursive:true,force:true});}
+});
 
 it.skipIf(process.platform === "win32")("authenticates the instance/profile and rejects incompatible clients", async () => {
   const directory = await mkdtemp(join(tmpdir(), "ipc-"));

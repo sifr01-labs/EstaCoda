@@ -23,7 +23,7 @@ export async function captureModelCatalog(input: {homeDir: string; profileId: st
       const health: ModelProjection['health'] = row.catalogOnly ? 'catalog_only' : !metadata.runnable ? 'unsupported' :
         row.lifecycle === 'retired' ? 'model_unavailable' : !row.configured ? 'not_configured' :
         credentialState === 'missing' ? 'credential_required' : credentialState === 'expired' ? 'authorization_expired' :
-        !loaded.web.enableNetwork ? 'network_disabled' : !row.endpointReady ? 'not_configured' : 'configured';
+        !loaded.config.providers?.[row.provider]?.enableNetwork ? 'network_disabled' : !(row.endpointReady || metadata.defaultBaseUrl) ? 'not_configured' : 'configured';
       return {id: row.id, providerId: row.provider, label: row.id, runnable: health === 'configured',
         credentialState, role: primary ? 'primary' : fallback ? 'fallback' : null, health,
         catalog: {configured: row.configured, catalogOnly: row.catalogOnly, contextTokens: row.profile.contextWindowTokens || null,

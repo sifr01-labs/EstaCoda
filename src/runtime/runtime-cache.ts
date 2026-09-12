@@ -121,6 +121,7 @@ export class RuntimeCache {
   readonly #epochs = new Map<string, number>();
   readonly #acquiring = new Set<Promise<Runtime>>();
   #closed = false;
+  #configurationEpoch = 0;
   #prepare?: RuntimeCacheOptions["prepare"];
   #maxEntries: number;
   #idleTtlMs: number;
@@ -164,10 +165,11 @@ export class RuntimeCache {
     const operation = this.#acquisition.runExclusive(sessionId, async () => {
       if (this.#closed) throw new Error("Runtime cache is closed.");
       const epoch = this.#epochs.get(sessionId) ?? 0;
+      const configurationEpoch = this.#configurationEpoch;
       const prepared = await this.#prepare?.(sessionId, metadata);
       if (prepared) fingerprint = prepared.fingerprint;
       const ensureCurrent = () => {
-        if (this.#closed || epoch !== (this.#epochs.get(sessionId) ?? 0)) throw new Error("Runtime acquisition was invalidated.");
+        if (this.#closed || configurationEpoch !== this.#configurationEpoch || epoch !== (this.#epochs.get(sessionId) ?? 0)) throw new Error("Runtime acquisition was invalidated.");
       };
       ensureCurrent();
       // Retired runtimes may still own execution. Never construct a competing one.
@@ -284,6 +286,12 @@ export class RuntimeCache {
       this.#emitEvict(entry);
       this.#pendingEntries.delete(entry.entryId);
     }
+  }
+
+  /** Retire cached routes without disposing borrowed runtimes or creating a competing owner. */
+  async configurationChanged(): Promise<void> {
+    this.#configurationEpoch++;
+    await Promise.all([...this.#activeEntries.keys()].map(sessionId => this.invalidate(sessionId)));
   }
 
   async invalidate(sessionId: string): Promise<void> {

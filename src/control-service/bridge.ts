@@ -1,3 +1,7 @@
+import {notifyPrivateConfigurationChanged} from '../gateway/private-control.js';
+import {resolveProfileStateHome} from '../config/profile-home.js';
+import {ModelSetup} from './model-setup.js';
+import {recoverProfileApply} from '../setup/review/profile-apply.js';
 import {CandidateVerifier} from './candidate-verification.js';
 import {CredentialCandidates} from './credential-candidates.js';
 import {captureModelCatalog} from './model-catalog.js';
@@ -17,6 +21,7 @@ export type BootstrapState = Pick<BootstrapResult, 'profile' | 'runtime'>;
 export class DesktopBridge {
   readonly server: StdioControlServer;
   readonly candidates: CredentialCandidates;
+  readonly modelSetup: ModelSetup;
   readonly verifier: CandidateVerifier;
   readonly subscriptions: ControlSubscriptions;
   #catalog: ReturnType<typeof captureModelCatalog> | undefined;
@@ -32,6 +37,10 @@ export class DesktopBridge {
     this.server = new StdioControlServer({ ...options, events: ['work.changed', 'activity.appended', 'attention.changed', 'control.ready', 'service.warning', 'service.shutdown'], handlers: {
       ...Object.fromEntries(['approvals.resolve', 'tasks.pause', 'tasks.resume', 'tasks.cancel', 'tasks.retry', 'tasks.guide', 'sessions.start', 'sessions.resume', 'sessions.send', 'sessions.cancelTurn', 'operations.inspect'].map((method) =>
         [method, async (request: SessionMutationRequest, signal: AbortSignal) => ({ result: await sessionControl(this.options, request, signal) })])),
+      'models.reviewPrimary': async(request) => {if(request.method!=='models.reviewPrimary')throw new ControlProtocolError('-32601');return {result:await this.modelSetup.review(request.params)};},
+      'models.applyDraft': async(request,signal) => {if(request.method!=='models.applyDraft')throw new ControlProtocolError('-32601');return {result:await this.modelSetup.apply(request.params,signal)};},
+      'models.cancelDraft': request => {if(request.method!=='models.cancelDraft')throw new ControlProtocolError('-32601');return {result:this.modelSetup.cancel(request.params)};},
+      'models.inspectApply': async(request) => {if(request.method!=='models.inspectApply')throw new ControlProtocolError('-32601');return {result:await this.modelSetup.inspect(request.params.operationId)};},
       'models.verifyCandidate': async(request, signal) => {
         if(request.method!=='models.verifyCandidate')throw new ControlProtocolError('-32601');
         return {result:await this.verifier.verify(request.params,signal)};
@@ -74,8 +83,11 @@ export class DesktopBridge {
       },
     } });
     this.candidates = new CredentialCandidates(this.server.profileId,this.server.instanceId);
+    this.modelSetup = new ModelSetup(this.options,this.candidates,async()=>{this.#catalog=undefined;this.subscriptions.publish({type:'service.warning',payload:{reason:'configuration_changed'}});
+      try {await notifyPrivateConfigurationChanged({directory:resolveProfileStateHome(this.options).gatewayStatePath,profileId:this.options.profileId,version:this.options.version,signal:AbortSignal.timeout(2000)});}catch{/* An absent owner will load the committed configuration on its next startup. */}
+    });
     this.verifier = new CandidateVerifier(this.candidates);
-    this.server.onDispose(() => {this.verifier.dispose();this.candidates.dispose();});
+    this.server.onDispose(() => {this.modelSetup.dispose();this.verifier.dispose();this.candidates.dispose();});
     this.subscriptions = new ControlSubscriptions(this.server);
     this.server.onDispose(() => { this.#capture?.abort(); this.#monitor?.dispose(); this.#workMonitor?.dispose(); this.#snapshot = undefined; this.#work = undefined; this.#catalog=undefined; });
   }
@@ -117,6 +129,8 @@ export class DesktopBridge {
     this.server.close();
   }
   private async readState(signal: AbortSignal): Promise<BootstrapState> {
+    if(await recoverProfileApply(this.options))await this.modelSetup.changed();
+    signal.throwIfAborted();
     const [configuration, runtime] = await Promise.all([profileConfiguration(this.options), supervisorReadiness({ ...this.options, signal })]);
     return { profile: { id: this.server.profileId, label: this.server.profileId, configuration }, runtime };
   }

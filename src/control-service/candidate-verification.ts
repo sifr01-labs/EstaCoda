@@ -1,25 +1,22 @@
-import {ControlProtocolError, type VerifyCandidateParams, type CandidateVerification} from '../contracts/desktop-control/index.js';
+import {candidateRouteBinding, ControlProtocolError, type VerifyCandidateParams, type CandidateVerification} from '../contracts/desktop-control/index.js';
 import {getProviderMetadata} from '../providers/provider-metadata.js';
 import {createOpenAICompatibleProvider, type FetchLike} from '../providers/openai-compatible-provider.js';
 import {createOpenAIResponsesProvider} from '../providers/openai-responses-provider.js';
 import {inferModelProfile} from '../providers/model-catalog.js';
-import {isAlwaysBlockedUrl, scanUrlForSecrets} from '../browser/url-safety.js';
+import {isAlwaysBlockedUrl, scanUrlForSecrets, normalizeHostname, normalizeIpForChecks, isPrivateOrInternalIp} from '../browser/url-safety.js';
 import {CredentialCandidates, type CandidateScope} from './credential-candidates.js';
 import {verificationFetch} from './verification-fetch.js';
 
-export class CandidateVerifier {
-  readonly #busy = new Set<string>();
-  readonly #abort = new AbortController();
-  constructor(readonly candidates: CredentialCandidates, readonly fetchFactory = verificationFetch) {}
-  dispose() {this.#abort.abort();}
-  async verify(params: VerifyCandidateParams, signal: AbortSignal): Promise<CandidateVerification> {
+export function validateCandidateRequest(params: VerifyCandidateParams): void {
     const {route} = params;
     const metadata = getProviderMetadata(route.providerId);
     let endpoint: URL;
     try {endpoint = new URL(route.endpoint);} catch {throw new ControlProtocolError('-32602');}
+    const host=normalizeHostname(endpoint.hostname), ip=normalizeIpForChecks(host);
+    const localHttp=route.allowPrivateEndpoint && (host==='localhost' || (ip!==undefined && isPrivateOrInternalIp(ip)));
     if (!params.spendApproved || isAlwaysBlockedUrl(route.endpoint) || scanUrlForSecrets(route.endpoint) ||
       endpoint.username || endpoint.password || endpoint.search || endpoint.hash ||
-      (endpoint.protocol !== 'https:' && !(endpoint.protocol === 'http:' && route.allowPrivateEndpoint)) ||
+      (endpoint.protocol !== 'https:' && !(endpoint.protocol === 'http:' && localHttp)) ||
       !metadata.configurable || !metadata.runnable ||
       (!metadata.allowsCustomBaseUrl && route.endpoint !== metadata.defaultBaseUrl) ||
       (metadata.catalogKnown && route.apiMode !== metadata.apiMode) ||
@@ -27,10 +24,21 @@ export class CandidateVerifier {
       (route.authMethod === 'oauth' && !metadata.authMethods.some(method => method.startsWith('oauth'))) ||
       (route.authMethod === 'none' && !metadata.authMethods.includes('none')) ||
       (route.authMethod !== 'none' && !params.candidateId) || (route.authMethod === 'none' && params.candidateId)) throw new ControlProtocolError('-32602');
+}
+
+export class CandidateVerifier {
+  readonly #busy = new Set<string>();
+  readonly #abort = new AbortController();
+  constructor(readonly candidates: CredentialCandidates, readonly fetchFactory = verificationFetch) {}
+  dispose() {this.#abort.abort();}
+  async verify(params: VerifyCandidateParams, signal: AbortSignal): Promise<CandidateVerification> {
+    validateCandidateRequest(params);
+    const {route}=params;
     const binding = params.candidateId ?? `${params.windowId}:${params.generation}`;
     if (this.#busy.has(binding) || this.#busy.size >= 8) throw new ControlProtocolError('-32009');
     const scope: CandidateScope = {windowId:params.windowId,generation:params.generation,purpose:'provider',providerId:route.providerId,
       authMethod:route.authMethod === 'oauth' ? 'oauth' : 'api_key',endpoint:route.endpoint};
+    if(params.candidateId)this.candidates.bindRoute(params.candidateId,scope,candidateRouteBinding(route));
     const value = params.candidateId ? this.candidates.read(params.candidateId, scope) : undefined;
     const combined = AbortSignal.any([signal, this.#abort.signal, AbortSignal.timeout(12_000),
       ...(params.candidateId ? [this.candidates.signal(params.candidateId, scope)] : [])]);

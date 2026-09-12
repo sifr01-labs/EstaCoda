@@ -1,3 +1,4 @@
+import {withProfileWriteLock, assertProfileApplySettled} from './profile-write-lock.js';
 import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { resolveHomeDir } from "./home-dir.js";
@@ -27,6 +28,8 @@ export async function writeEnvSecret(options: {
   const path = options.path ?? (options.profileId === undefined
     ? defaultEnvPath(options.homeDir)
     : resolveProfileStateHome({ homeDir: options.homeDir, profileId: options.profileId }).envPath);
+  return withProfileWriteLock(dirname(path), async () => {
+    await assertProfileApplySettled(dirname(path));
   const key = normalizeEnvKey(options.key);
   const nextLine = `${key}=${quoteDotEnvValue(options.value)}`;
   const existing = await readEnvFile(path);
@@ -49,6 +52,7 @@ export async function writeEnvSecret(options: {
   await chmod(path, 0o600);
 
   return { path, key };
+  });
 }
 
 export async function loadDotEnvSecrets(options: {

@@ -1,3 +1,4 @@
+import {withProfileWriteLock, assertProfileApplySettled} from '../../config/profile-write-lock.js';
 import { chmod, mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "../../config/profile-home.js";
@@ -150,9 +151,12 @@ export function validateOAuthStore(data: unknown): OAuthStoreLoadResult {
 
 export async function writeOAuthStore(
   store: OAuthAuthStore,
-  options?: { homeDir?: string; profileId?: string; path?: string }
+  options?: { homeDir?: string; profileId?: string; path?: string; expectedStore?: OAuthAuthStore }
 ): Promise<OAuthStoreWriteResult> {
   const path = options?.path ?? defaultOAuthStorePath(options?.homeDir, options?.profileId);
+  return withProfileWriteLock(dirname(path), async () => {
+    await assertProfileApplySettled(dirname(path));
+    if (options?.expectedStore && JSON.stringify((await loadOAuthStore({path})).store) !== JSON.stringify(options.expectedStore)) throw new Error('Authorization changed; review again');
   await mkdir(dirname(path), { recursive: true });
   await writeFile(path, `${JSON.stringify(store, null, 2)}\n`, "utf8");
 
@@ -163,4 +167,5 @@ export async function writeOAuthStore(
   }
 
   return { path };
+  });
 }

@@ -1,5 +1,5 @@
 import {expect, it} from 'vitest';
-import {CandidateVerifier} from './candidate-verification.js';
+import {CandidateVerifier,validateCandidateRequest} from './candidate-verification.js';
 import {CredentialCandidates, type CandidateScope} from './credential-candidates.js';
 import type {VerifyCandidateParams} from '../contracts/desktop-control/index.js';
 const scope: CandidateScope = {windowId:'w',generation:1,purpose:'provider',providerId:'kimi',authMethod:'api_key',endpoint:'https://api.moonshot.ai/v1'};
@@ -9,6 +9,13 @@ function fixture() {
   const params: VerifyCandidateParams={windowId:'w',generation:1,candidateId,spendApproved:true,route:{providerId:'kimi',modelId:'kimi-k2',endpoint:scope.endpoint,authMethod:'api_key',apiMode:'openai_chat_completions',allowPrivateEndpoint:false}};
   return {candidates,params};
 }
+it('rejects public HTTP and cloud metadata even when private endpoints are selected',()=>{
+  const {candidates,params}=fixture();try{
+    for(const endpoint of ['http://example.com/v1','http://169.254.169.254/v1'])
+      expect(()=>validateCandidateRequest({...params,route:{...params.route,endpoint,allowPrivateEndpoint:true}})).toThrow();
+    expect(()=>candidates.stage(scope,'invalid\nheader')).toThrow();
+  }finally{candidates.dispose();}
+});
 it('verifies one bounded stream without returning content or executing tool calls', async () => {
   const {candidates,params}=fixture(); let calls=0;
   const verifier=new CandidateVerifier(candidates,()=>async (_url,init)=>{

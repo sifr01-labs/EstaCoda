@@ -1,3 +1,4 @@
+import {assertProfileApplySettled} from '../config/profile-write-lock.js';
 import { presentEnvSecretNames } from "../config/env-secret-store.js";
 import { validateOAuthStore } from "../providers/oauth/oauth-store.js";
 import { stableJsonHash } from "./runtime-fingerprint.js";
@@ -56,6 +57,7 @@ export function retainExecutionAuthority(check: Check): void {
   state.checks.add(check);
 }
 async function governance(profileRoot: string): Promise<string> {
+  await assertProfileApplySettled(profileRoot);
   let config: Record<string, unknown> = {};
   try {
     const path = join(profileRoot, "config.json");

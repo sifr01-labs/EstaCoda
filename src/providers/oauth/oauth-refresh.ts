@@ -118,6 +118,10 @@ export async function refreshOAuthToken(options: {
 
   // Update auth.json atomically
   const loadResult = await loadOAuthStore({ homeDir: options.homeDir, profileId: options.profileId });
+  const currentRecord = loadResult.store.providers[options.providerId];
+  if (currentRecord && (currentRecord.accessToken !== options.record.accessToken || currentRecord.refreshToken !== options.record.refreshToken)) {
+    return {kind:'error',reason:'Authorization changed while refreshing; reacquire the route.',needsReauthentication:false};
+  }
   const updatedStore = {
     ...loadResult.store,
     providers: {
@@ -133,7 +137,7 @@ export async function refreshOAuthToken(options: {
     }
   };
 
-  await writeOAuthStore(updatedStore, { homeDir: options.homeDir, profileId: options.profileId });
+  await writeOAuthStore(updatedStore, { homeDir: options.homeDir, profileId: options.profileId, expectedStore: loadResult.store });
 
   return {
     kind: "success",

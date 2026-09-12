@@ -1,3 +1,5 @@
+import {dirname} from 'node:path';
+import {withProfileWriteLock, assertProfileApplySettled} from './profile-write-lock.js';
 import type {
   AuxiliaryModelSlotConfig,
   ProviderId,
@@ -86,6 +88,7 @@ export function applyRegisterProviderConfig(
   if (input.apiKeyEnv !== undefined) providerConfig.apiKeyEnv = input.apiKeyEnv;
   if (input.apiMode !== undefined) providerConfig.apiMode = input.apiMode;
   if (input.authMethod !== undefined) providerConfig.authMethod = input.authMethod;
+  if (input.authMethod === "none") delete providerConfig.apiKeyEnv;
   if (input.enableNetwork !== undefined) providerConfig.enableNetwork = input.enableNetwork;
   if (input.headers !== undefined) providerConfig.headers = input.headers;
 
@@ -282,60 +285,78 @@ export async function registerProviderConfig(
   options: MutationOptions & { input: RegisterProviderConfigInput }
 ): Promise<{ path: string; config: EstaCodaConfig }> {
   const targetPath = await resolveTargetPath(options);
+  return withProfileWriteLock(dirname(targetPath), async () => {
+    await assertProfileApplySettled(dirname(targetPath));
   const existing = await readConfig(targetPath);
   const config = applyRegisterProviderConfig(existing.config, options.input);
   await saveRuntimeConfig(targetPath, config);
   return { path: targetPath, config };
+  });
 }
 
 export async function storeProviderCredential(
   options: MutationOptions & { input: StoreProviderCredentialInput }
 ): Promise<{ path: string; config: EstaCodaConfig }> {
   const targetPath = await resolveTargetPath(options);
+  return withProfileWriteLock(dirname(targetPath), async () => {
+    await assertProfileApplySettled(dirname(targetPath));
   const existing = await readConfig(targetPath);
   const config = applyStoreProviderCredential(existing.config, options.input);
   await saveRuntimeConfig(targetPath, config);
   return { path: targetPath, config };
+  });
 }
 
 export async function registerProviderModel(
   options: MutationOptions & { input: RegisterProviderModelInput }
 ): Promise<{ path: string; config: EstaCodaConfig }> {
   const targetPath = await resolveTargetPath(options);
+  return withProfileWriteLock(dirname(targetPath), async () => {
+    await assertProfileApplySettled(dirname(targetPath));
   const existing = await readConfig(targetPath);
   const config = applyRegisterProviderModel(existing.config, options.input);
   await saveRuntimeConfig(targetPath, config);
   return { path: targetPath, config };
+  });
 }
 
 export async function setPreferredModelRoute(
   options: MutationOptions & { input: SetPreferredModelRouteInput }
 ): Promise<{ path: string; config: EstaCodaConfig }> {
   const targetPath = await resolveTargetPath(options);
+  return withProfileWriteLock(dirname(targetPath), async () => {
+    await assertProfileApplySettled(dirname(targetPath));
   const existing = await readConfig(targetPath);
   const config = applySetPreferredModelRoute(existing.config, options.input);
   await saveRuntimeConfig(targetPath, config);
   return { path: targetPath, config };
+  });
 }
 
 export async function addFallbackRoute(
   options: MutationOptions & { input: AddFallbackRouteInput }
 ): Promise<{ path: string; config: EstaCodaConfig }> {
   const targetPath = await resolveTargetPath(options);
+  return withProfileWriteLock(dirname(targetPath), async () => {
+    await assertProfileApplySettled(dirname(targetPath));
   const existing = await readConfig(targetPath);
   const config = applyAddFallbackRoute(existing.config, options.input);
   await saveRuntimeConfig(targetPath, config);
   return { path: targetPath, config };
+  });
 }
 
 export async function setAuxiliaryModelRoute(
   options: MutationOptions & { input: AuxiliaryModelRouteSetupInput }
 ): Promise<{ path: string; config: EstaCodaConfig }> {
   const targetPath = await resolveTargetPath(options);
+  return withProfileWriteLock(dirname(targetPath), async () => {
+    await assertProfileApplySettled(dirname(targetPath));
   const existing = await readConfig(targetPath);
   const config = applySetAuxiliaryModelRoute(existing.config, options.input);
   await saveRuntimeConfig(targetPath, config);
   return { path: targetPath, config };
+  });
 }
 
 // ── Internal helpers ─────────────────────────────────────────────────────────

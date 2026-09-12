@@ -221,6 +221,17 @@ describe("RuntimeCache", () => {
     await proxy.dispose();
   });
 
+  it('defers disposal of borrowed routes when profile configuration changes', async () => {
+    const cache=createCache();const fp=fakeFingerprint();
+    const proxy=await cache.get('s1',fp,fakeSecurityPolicy);
+    await cache.configurationChanged();
+    expect(cache.stats().totalDisposed).toBe(0);
+    await expect(cache.get('s1',fp,fakeSecurityPolicy)).rejects.toThrow('previous owner');
+    await proxy.dispose();
+    const fresh=await cache.get('s1',fp,fakeSecurityPolicy);
+    expect(cache.stats().totalCreated).toBe(2);await fresh.dispose();await cache.disposeAll();
+  });
+
   it("prune() disposes idle entries past TTL", async () => {
     const cache = createCache({ idleTtlMs: 10 });
     const fp = fakeFingerprint();

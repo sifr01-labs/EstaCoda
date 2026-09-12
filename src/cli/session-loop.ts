@@ -1,6 +1,7 @@
+import {withProfileWriteLock} from '../config/profile-write-lock.js';
 import { validApprovalScope } from "../security/approval-scope.js";
 import { stdin as defaultInput, stdout as defaultOutput } from "node:process";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 import type { Readable } from "node:stream";
 import type { Runtime } from "../runtime/create-runtime.js";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
@@ -93,7 +94,7 @@ import { resolveInputKeymapMode } from "./input-keymap-mode.js";
 import { promptUiContextForLocale } from "../contracts/ui.js";
 import { resolveHomeDir } from "../config/home-dir.js";
 import { resolveGlobalStateHome, resolveProfileStateHome } from "../config/profile-home.js";
-import { loadRuntimeConfig, saveRuntimeConfig } from "../config/runtime-config.js";
+import { loadRuntimeConfig, saveRuntimeConfig, readConfig } from "../config/runtime-config.js";
 import { getPackageVersion } from "./version-command.js";
 import {
   playCliTtsResponse,
@@ -2380,8 +2381,11 @@ async function handleGlobalModelSet(
     homeDir: resolveHomeDir(input.homeDir),
     profileId
   }).configPath;
-  const mutated = applyModelSwitchPrimaryRoute(context.config, resolution.route);
-  await saveRuntimeConfig(targetPath, mutated);
+  await withProfileWriteLock(dirname(targetPath), async () => {
+    const current = await readConfig(targetPath);
+    const mutated = applyModelSwitchPrimaryRoute(current.config, resolution.route);
+    await saveRuntimeConfig(targetPath, mutated);
+  });
   await input.runtime.sessionDb.clearSessionModelOverride(input.runtime.sessionId);
 
   const refreshed = await refreshCurrentRuntime(input);
