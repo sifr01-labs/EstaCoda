@@ -32,6 +32,20 @@ it('retains sanitized tool captures, verifies them on read and fences stale obse
   const preview=await browserViewSnapshot(input,work,reference,signal);expect(preview.image?.mimeType).toBe('image/jpeg');expect(preview.image!.base64.length).toBeLessThanOrEqual(60000);
   const request={jsonrpc:'2.0' as const,id:'snapshot',method:'browser.snapshot' as const,params:{workId:work.id,reference}},response={jsonrpc:'2.0' as const,id:'snapshot',result:preview};
   expect(()=>validateControlResponse(response,request,{profileId:'p',instanceId:'b',capabilities:{methods:[...CONTROL_METHODS],events:[...CONTROL_EVENTS]}})).not.toThrow();expect(()=>serializeControlFrame(response as never)).not.toThrow();
+  // Read-only inspection cannot invoke the backend, even when no safe image exists.
+  backend.screenshot=async()=>{throw new Error('Desktop attempted browser capture');};
+  const originalMetadata=result.metadata!;
+  const screenshotRow=db.db.query<{id:number}>("select rowid as id from session_events where session_id='s' and json_extract(event_json,'$.tool')='browser.screenshot' order by rowid desc limit 1").get()!.id;
+  for(const change of [{sanitized:false},{sessionId:'foreign-browser'},{tabRef:'other-tab'},{identity:{...identity,documentEpoch:2}},{identity:{...identity,actionRevision:2}}]){
+   const changed={...result,metadata:{...originalMetadata,observation:{...(originalMetadata.observation as object),...change}}};
+   db.db.query('update session_events set event_json=? where rowid=?').run(JSON.stringify({kind:'tool-result',tool:'browser.screenshot',result:changed}),screenshotRow);
+   expect((await browserViewSnapshot(input,work,reference,signal)).image,JSON.stringify(change)).toBeNull();
+  }
+  db.db.query('update session_events set event_json=? where rowid=?').run(JSON.stringify({kind:'tool-result',tool:'browser.screenshot',result}),screenshotRow);
+  expect((await browserViewSnapshot(input,work,reference,signal)).image).not.toBeNull();
+  await expect(browserViewSnapshot({...input,profileId:'other'},work,reference,signal)).rejects.toThrow();
+  await expect(browserViewSnapshot(input,work,{...reference,target:{...reference.target,targetGeneration:2}},signal)).rejects.toThrow();
+  await expect(browserViewSnapshot(input,work,{...reference,sessionId:'foreign'},signal)).rejects.toThrow();
   const retained=artifacts.get(result.metadata!.artifactId as string,{profileId:'p',sessionId:'s'})!;await writeFile(retained.localPath!,'tampered');
   expect((await browserViewSnapshot(input,work,reference,signal)).image).toBeNull();
   await db.appendEvent('s',event);await expect(browserViewSnapshot(input,work,reference,signal)).rejects.toThrow('changed');

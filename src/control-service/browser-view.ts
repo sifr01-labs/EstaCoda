@@ -38,20 +38,24 @@ export async function listBrowserViews(input:Input,work:WorkProjection,signal:Ab
   const config=await loadRuntimeConfig({...input,workspaceRoot:input.homeDir,configurationInspection:true});
   const policy=loadWebsiteBlocklist(config.security.websiteBlocklist??{});
   const rows=db.db.query<{id:number;created_at:string;data:string|null}>(`select rowid as id,created_at,case when length(event_json)<=65536 then event_json else null end as data from session_events where session_id=? and json_valid(event_json) and json_extract(event_json,'$.kind')='tool-result' and json_extract(event_json,'$.tool') like 'browser.%' order by rowid desc limit 65`).all(session.id);
-  const items:BrowserViewState[]=[],seen=new Set<string>();
+  const pending:Promise<BrowserViewState>[]=[],seen=new Set<string>();
   for(const row of rows.slice(0,64)){
    signal.throwIfAborted();if(!row.data)continue;
    const event=JSON.parse(row.data),snapshot=event.result?.metadata?.snapshot;
    if(!snapshot||!token(snapshot.sessionId)||seen.has(snapshot.sessionId))continue;
-   seen.add(snapshot.sessionId);if(items.length===8)break;
+   seen.add(snapshot.sessionId);if(pending.length===8)break;
+   pending.push((async():Promise<BrowserViewState>=>{
    const rawUrl=typeof snapshot.url==='string'&&snapshot.url.length<=4096?snapshot.url:null;
    const allowed=event.result?.ok===true&&snapshot.sensitiveInputActive!==true&&rawUrl!==null&&
     credentialFree(rawUrl)&&scanUrlForSecrets(rawUrl)===undefined&&await safeUrl(rawUrl,config.security.allowPrivateUrls===true,signal)&&checkWebsiteAccess(rawUrl,policy)?.allowed!==false;
    signal.throwIfAborted();
-   items.push({reference:{sessionId:session.id,browserId:snapshot.sessionId,eventId:row.id,target:{targetId:session.executionTarget!.targetId,targetGeneration:session.executionTarget!.targetGeneration}},
+   return {reference:{sessionId:session.id,browserId:snapshot.sessionId,eventId:row.id,target:{targetId:session.executionTarget!.targetId,targetGeneration:session.executionTarget!.targetGeneration}},
     url:allowed?redactUrlForMetadata(rawUrl!).slice(0,2048):null,title:allowed&&typeof snapshot.title==='string'?safeText(snapshot.title,160):null,
-    observedAt:row.created_at,readiness:allowed&&['loading','interactive','complete'].includes(snapshot.readiness)?snapshot.readiness:'unknown',state:allowed?'recorded':'blocked',lastAction:safeText(event.tool,160),artifacts:[]});
+    observedAt:row.created_at,readiness:allowed&&['loading','interactive','complete'].includes(snapshot.readiness)?snapshot.readiness:'unknown',state:allowed?'recorded':'blocked',lastAction:safeText(event.tool,160),artifacts:[]};
+   })());
   }
+  // Bound DNS policy checks concurrently so eight unavailable hosts cannot exhaust the IPC deadline.
+  const items=await Promise.all(pending);
   const outputs=await workArtifactReferences(input,work,signal);for(const item of items)if(item.state==='recorded')item.artifacts=outputs.references;
   const current=await browserOwner(input,work,signal);
   if(JSON.stringify(current.executionTarget)!==JSON.stringify(session.executionTarget))throw new Error('Browser target changed.');
