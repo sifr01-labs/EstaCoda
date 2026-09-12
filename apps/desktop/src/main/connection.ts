@@ -4,6 +4,7 @@ import { ProtocolClient } from './protocol-client.js';
 import { ServiceProcess, validateProfileId } from './service-process.js';
 export type ConnectionState = { status: 'connecting' | 'ready' | 'disconnected' | 'incompatible' | 'unavailable'; generation: number;
   profileId: string; counts?:MethodContracts['work.counts']['result']|null;bootstrap: BootstrapResult | null; work: Page<WorkProjection>; inbox: Page<InboxProjection> };
+export const TARGET_METHODS=CONTROL_METHODS.filter(method=>method.startsWith('targets.'));
 export const CONNECTION_METHODS=CONTROL_METHODS.filter(method=>method.startsWith('connections.')||method.startsWith('telegram.')||method.startsWith('gateway.'));
 export const MODEL_METHODS=CONTROL_METHODS.filter(method=>method.startsWith('models.') || ['providers.list','sessions.setModel','tasks.setModel','operations.inspect'].includes(method));
 export const WORK_METHODS=CONTROL_METHODS.filter(method=>method==='work.usage'||method==='work.counts'||method==='inbox.get'||method==='work.targets'||method==='work.live'||method.startsWith('sessions.')||method.startsWith('tasks.')||method==='approvals.resolve'||method==='operations.inspect');
@@ -33,7 +34,7 @@ export class DesktopConnection extends EventEmitter {
         else if (event.type !== 'control.ready') void this.refresh();
       });
       await client.request('control.initialize', { profileId: this.state.profileId, clientVersion: '0.0.0', protocolVersion: DESKTOP_PROTOCOL_VERSION,
-        capabilities: { methods: ['control.bootstrap','control.subscribe','control.unsubscribe','work.list','work.get','work.activity','inbox.list',...new Set([...MODEL_METHODS,...WORK_METHODS,...CONNECTION_METHODS])], events: [...CONTROL_EVENTS] } });
+        capabilities: { methods: ['control.bootstrap','control.subscribe','control.unsubscribe','work.list','work.get','work.activity','inbox.list',...new Set([...MODEL_METHODS,...WORK_METHODS,...CONNECTION_METHODS,...TARGET_METHODS])], events: [...CONTROL_EVENTS] } });
       if (generation !== this.state.generation) return;
       await this.refresh(); if(client===this.#client&&this.state.status==='ready')this.#attempt = 0;
     } catch (error) {
@@ -94,6 +95,13 @@ export class DesktopConnection extends EventEmitter {
       this.state={...this.state,inbox:{items:[...previous.inbox.items,...page.items],nextCursor:page.nextCursor}};
     }
     this.publish();
+  }
+  async targetRequest<M extends keyof MethodContracts>(method:M,params:MethodContracts[M]['params']):Promise<MethodContracts[M]['result']>{
+    const client=this.#client,generation=this.state.generation;
+    if(!client || this.state.status!=='ready' || !TARGET_METHODS.includes(method))throw new Error('Targets unavailable.');
+    const result=await client.request(method,params);
+    if(client!==this.#client || generation!==this.state.generation)throw new Error('Desktop context changed.');
+    return result;
   }
   async connectionRequest<M extends keyof MethodContracts>(method:M,params:MethodContracts[M]['params']):Promise<MethodContracts[M]['result']>{
     const client=this.#client,generation=this.state.generation;

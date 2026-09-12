@@ -34,7 +34,8 @@ const record=(text:string)=>{observations.push(text);console.log(text);};
 try{
  app=await launch();let page=await app.firstWindow();await expect.poll(()=>page.evaluate(async()=>(await window.desktop.snapshot()).status),{timeout:20000}).toBe('ready');
  const exposed=await page.evaluate(()=>({keys:Object.keys(window.desktop).sort(),node:typeof (window as any).require,process:typeof(window as any).process,credential:typeof(window as any).credential}));
- expect(exposed.node).toBe('undefined');expect(exposed.process).toBe('undefined');expect(exposed.credential).toBe('undefined');expect(exposed.keys).toEqual(['connections','work','models','activity','getWork','appearance','close','minimize','moreInbox','moreWork','onSnapshot','platform','profiles','reconnect','setAppearance','snapshot','switchProfile','toggleMaximize'].sort());
+ expect(await page.evaluate(()=>Object.keys(window.desktop.targets!).sort())).toEqual(['list','inspect','review','create','cancel','execute','operation'].sort());
+ expect(exposed.node).toBe('undefined');expect(exposed.process).toBe('undefined');expect(exposed.credential).toBe('undefined');expect(exposed.keys).toEqual(['targets','connections','work','models','activity','getWork','appearance','close','minimize','moreInbox','moreWork','onSnapshot','platform','profiles','reconnect','setAppearance','snapshot','switchProfile','toggleMaximize'].sort());
  expect(await page.evaluate(async()=>(await window.desktop.snapshot()).runtime)).toBe('ready');
  expect(await page.evaluate(async()=>(await window.desktop.getWork((await window.desktop.snapshot()).work.items.find(item=>item.canonicalId==='desktop-existing')!.id)).canonicalId)).toBe('desktop-existing');
  await page.locator('.ec-taskbutton').first().click();await expect(page.getByText('Canonical persisted activity from the existing owner.',{exact:true})).toBeVisible();

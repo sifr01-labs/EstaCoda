@@ -1,3 +1,4 @@
+import type {DesktopTargetControls} from './target-controls.js';
 import type {DesktopConnectionControls} from './connection-controls.js';
 import type {DesktopTelegramSetup} from './telegram-setup.js';
 import {WorkAttachmentError} from './work-attachments.js';
@@ -16,6 +17,12 @@ export function rendererSnapshot(state:ConnectionState):DesktopSnapshot {
   return {counts:state.status==='ready'?state.counts??null:null,status:state.status,profile:state.bootstrap?.profile??{id:state.profileId,label:state.profileId,configuration:'unconfigured'},runtime:state.bootstrap?.runtime.state??'disconnected',work:state.work,inbox:state.inbox};
 }
 export function validateSemanticPayload(method:string,payload:unknown):void {
+  if(method.startsWith('target')){
+    const mapping:Record<string,string>={targetList:'targets.list',targetInspect:'targets.inspect',targetReview:'targets.reviewCreate',targetCancel:'targets.cancelReview',targetExecute:'targets.execute',targetOperation:'targets.list'};
+    if(method==='targetCreate'){if(!isRecord(payload)||!exactKeys(payload,['reviewId','trustNewPath'])||!isControlId(payload.reviewId)||payload.trustNewPath!==true)throw new Error('Invalid target creation');return;}
+    if(!isRecord(payload)||'operationId' in payload||!mapping[method])throw new Error('Invalid target operation');
+    validateControlRequest({jsonrpc:'2.0',id:'validation',method:mapping[method],params:method==='targetExecute'?{...payload,operationId:'validation'}:payload},{profileId:'validation',instanceId:'validation',capabilities:{methods:[...CONTROL_METHODS],events:[...CONTROL_EVENTS]}});return;
+  }
   if(!isRecord(payload))throw new Error('Desktop request rejected.');
   if((method==='workInspect'||method==='workLive'||method==='workUsage')){if(!exactKeys(payload,['workId'])||!isControlId(payload.workId))throw new Error('Invalid Work');return;}
   if(method==='workDecide'||method==='workInspectDecision'){if(!exactKeys(payload,method==='workDecide'?['itemId','decision']:['itemId'])||!isControlId(payload.itemId)||method==='workDecide'&&!['approved','denied'].includes(String(payload.decision)))throw new Error('Invalid approval decision');return;}
@@ -44,10 +51,10 @@ export function validateSemanticPayload(method:string,payload:unknown):void {
     :method==='switchProfile'?exactKeys(payload,['id'])&&isControlId(payload.id):exactKeys(payload,[]);
   if(!valid)throw new Error('Desktop request rejected.');
 }
-export function installSemanticIpc(window:BrowserWindow,documentUrl:string,connection:DesktopConnection,profiles:Profiles,appearance:AppearanceSettings,models?:DesktopModelSetup,pins?:WorkPins,workControls?:DesktopWorkControls,telegram?:DesktopTelegramSetup,connectionControls?:DesktopConnectionControls):()=>void {
+export function installSemanticIpc(window:BrowserWindow,documentUrl:string,connection:DesktopConnection,profiles:Profiles,appearance:AppearanceSettings,models?:DesktopModelSetup,pins?:WorkPins,workControls?:DesktopWorkControls,telegram?:DesktopTelegramSetup,connectionControls?:DesktopConnectionControls,targets?:DesktopTargetControls):()=>void {
   const authority=new WindowAuthority(window,documentUrl);
   const contents=window.webContents;
-  const methods=['telegramExecute','telegramPairing','telegramSessions','telegramDetails','telegramHandoff','gatewayDiagnostics','gatewayExecute','connectionInspect','telegramReview','telegramApply','telegramInspectApply','telegramBegin','telegramStage','telegramVerify','telegramCancel','connectionsList','workUsage','workDecide','workInspectDecision','workAct','workChildren','workLive','workTargets','workAttach','workSubmit','workInspect','workSearch','workPins','workPin','workOverride','setOverride','inspectOverride','setupVerifyReviewed','modelRoutes','setupConfigured','setupOrder','setupMode','setupOAuthStart','setupOAuthStatus','setupOAuthOpen','setupBegin','setupStage','setupVerify','setupReview','setupApply','setupCancel','setupInspect','modelPage','providerPage','refreshCatalog','reconnect','moreWork','moreInbox','appearance','setAppearance','snapshot','getWork','activity','profiles','switchProfile','minimize','toggleMaximize','close'];
+  const methods=['targetList','targetInspect','targetReview','targetCreate','targetCancel','targetExecute','targetOperation','telegramExecute','telegramPairing','telegramSessions','telegramDetails','telegramHandoff','gatewayDiagnostics','gatewayExecute','connectionInspect','telegramReview','telegramApply','telegramInspectApply','telegramBegin','telegramStage','telegramVerify','telegramCancel','connectionsList','workUsage','workDecide','workInspectDecision','workAct','workChildren','workLive','workTargets','workAttach','workSubmit','workInspect','workSearch','workPins','workPin','workOverride','setOverride','inspectOverride','setupVerifyReviewed','modelRoutes','setupConfigured','setupOrder','setupMode','setupOAuthStart','setupOAuthStatus','setupOAuthOpen','setupBegin','setupStage','setupVerify','setupReview','setupApply','setupCancel','setupInspect','modelPage','providerPage','refreshCatalog','reconnect','moreWork','moreInbox','appearance','setAppearance','snapshot','getWork','activity','profiles','switchProfile','minimize','toggleMaximize','close'];
   const handlers:string[]=[];
   let connectionGeneration=connection.state.generation;
   const state=(value:ConnectionState)=>{if(value.generation!==connectionGeneration){authority.invalidate();connectionGeneration=value.generation;}if(!window.isDestroyed())contents.send('desktop:state',{generation:authority.generation,snapshot:rendererSnapshot(value)});};
@@ -60,7 +67,12 @@ export function installSemanticIpc(window:BrowserWindow,documentUrl:string,conne
       const payload=envelope.payload as Record<string,unknown>;
       const generation=authority.generation;
       try {
-        if(method==='workDecide'||method==='workInspectDecision'){if(!workControls)throw new Error('Work unavailable');const result=method==='workDecide'?await workControls.decide(payload.itemId as string,payload.decision as 'approved'|'denied'):await workControls.inspectDecision(payload.itemId as string);authority.assertSender(event,generation);return result;}
+        if(method.startsWith('target')){
+          if(!targets)throw new Error('Targets unavailable');
+          const result=method==='targetList'?await connection.targetRequest('targets.list',{}):method==='targetInspect'?await connection.targetRequest('targets.inspect',{target:payload.target as import('@estacoda/control-protocol').TargetReference}):method==='targetReview'?await targets.review(payload.source as import('@estacoda/control-protocol').TargetReference):method==='targetCreate'?await targets.create(payload.reviewId as string,true):method==='targetCancel'?await targets.cancel(payload.reviewId as string):method==='targetOperation'?await targets.operation():await targets.execute(payload.action as 'archive'|'cleanup',payload.target as import('@estacoda/control-protocol').TargetReference,true);
+          authority.assertSender(event,generation);return result;
+        }
+        if(method==='workDecide' ||method==='workInspectDecision'){if(!workControls)throw new Error('Work unavailable');const result=method==='workDecide'?await workControls.decide(payload.itemId as string,payload.decision as 'approved'|'denied'):await workControls.inspectDecision(payload.itemId as string);authority.assertSender(event,generation);return result;}
         if(method==='workAct'){if(!workControls)throw new Error('Work unavailable');const result=await workControls.act(payload as Parameters<DesktopWorkControls['act']>[0]);authority.assertSender(event,generation);return result;}
         if(method==='workChildren'){await connection.getWork(payload.workId as string);authority.assertSender(event,generation);const result=await connection.search('',payload.cursor as string|undefined,payload.workId as string);authority.assertSender(event,generation);return result;}
         if(method==='workLive'||method==='workUsage'){const result=await connection.workRequest(method==='workLive'?'work.live':'work.usage',{workId:payload.workId as string});authority.assertSender(event,generation);return result;}

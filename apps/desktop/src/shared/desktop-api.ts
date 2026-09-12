@@ -68,7 +68,17 @@ export type DesktopConnectionsApi={
  verify(setupId:string):Promise<MethodContracts['telegram.verify']['result']>;
  cancel(setupId:string):Promise<{cancelled:boolean}>;
  list():Promise<MethodContracts['connections.list']['result']>};
+export type DesktopTargetsApi={
+ list():Promise<MethodContracts['targets.list']['result']>;
+ inspect(target:import('@estacoda/control-protocol').TargetReference):Promise<MethodContracts['targets.inspect']['result']>;
+ review(source:import('@estacoda/control-protocol').TargetReference):Promise<MethodContracts['targets.reviewCreate']['result']>;
+ create(reviewId:string,trustNewPath:true):Promise<MethodContracts['targets.create']['result']>;
+ cancel(reviewId:string):Promise<{cancelled:boolean}>;
+ execute(action:'archive'|'cleanup',target:import('@estacoda/control-protocol').TargetReference,confirmed:true):Promise<MethodContracts['targets.execute']['result']>;
+ operation():Promise<MethodContracts['targets.inspectOperation']['result']|null>;
+};
 export type DesktopApi = {
+  readonly targets?:DesktopTargetsApi;
   readonly connections?:DesktopConnectionsApi;
   readonly work?:DesktopWorkApi;
   readonly models?:DesktopModelsApi;

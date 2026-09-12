@@ -27,3 +27,12 @@ it('rejects Telegram credential/authority injection and requires operation confi
  for(const method of ['telegramStage','telegramVerify','telegramApply','telegramCancel'])for(const extra of [{token:'secret'},{candidateId:'other'},{windowId:'forged'},{profileId:'other'},{generation:3}])expect(()=>validateSemanticPayload(method,{setupId:'setup',...extra})).toThrow();
  expect(()=>validateSemanticPayload('gatewayExecute',{action:'stop',acknowledgeSharedWork:false})).toThrow();expect(()=>validateSemanticPayload('telegramExecute',{action:'test',confirmed:true,destination:'123;command'})).toThrow();expect(()=>validateSemanticPayload('telegramHandoff',{workId:'session:s',action:'create',confirmed:true,sessionId:'other'})).toThrow();expect(()=>validateSemanticPayload('telegramExecute',{action:'test',confirmed:true,destination:'123'})).not.toThrow();
 });
+it('requires narrow target references and keeps paths, commands and operation IDs out of renderer mutations',()=>{
+ const target={targetId:'t',targetGeneration:1};
+ expect(()=>validateSemanticPayload('targetReview',{source:target})).not.toThrow();
+ expect(()=>validateSemanticPayload('targetCreate',{reviewId:'r',trustNewPath:true})).not.toThrow();
+ for(const extra of [{path:'/tmp/other'},{gitArgs:['--force']},{profileId:'other'},{operationId:'forged'},{generation:5}])expect(()=>validateSemanticPayload('targetExecute',{action:'archive',target,confirmed:true,...extra})).toThrow();
+ expect(()=>validateSemanticPayload('targetCreate',{reviewId:'r',trustNewPath:false})).toThrow();
+ expect(()=>validateSemanticPayload('targetExecute',{action:'cleanup',target,confirmed:false})).toThrow();
+ expect(()=>validateSemanticPayload('targetInspect',{target:{...target,targetGeneration:0}})).toThrow();
+});

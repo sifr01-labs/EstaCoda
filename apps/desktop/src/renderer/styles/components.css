@@ -314,3 +314,20 @@
     @media(max-width:590px) { #ec-branded-workspace .ec-pinned { display:none; } #ec-branded-workspace .ec-navgroup { grid-template-columns:repeat(4,minmax(0,1fr)); } #ec-branded-workspace .ec-navbutton { flex-direction:column;font-size:11px; } #ec-branded-workspace .ec-newwelcome { padding-top:60px; } #ec-branded-workspace .ec-newwelcome p { font-size:13px; } #ec-branded-workspace .ec-runtimebar { padding-inline:6px;gap:2px; } #ec-branded-workspace .ec-runtimenote { display:none; } #ec-branded-workspace .ec-libraryrow { flex-wrap:wrap;gap:10px; } #ec-branded-workspace .ec-libraryrow .ec-badge { margin-left:26px; } #ec-branded-workspace .ec-docpreview { padding:19px; } #ec-branded-workspace .ec-brand-name { gap:6px;font-size:15px; } #ec-branded-workspace .ec-brand-name .ec-official-icon { width:23px; } }
   #ec-branded-workspace { }
   
+
+/* Target management extends the existing neutral dialog vocabulary. */
+#ec-branded-workspace .ec-targetdialog { width: min(660px, calc(100vw - 32px)); max-height: calc(100vh - 64px); overflow: auto; }
+#ec-branded-workspace .ec-targetheading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+#ec-branded-workspace .ec-targetheading h2 { margin: 0; font-size: 20px; }
+#ec-branded-workspace .ec-targetlist { display: grid; gap: 4px; margin: 16px 0; max-height: 220px; overflow: auto; }
+#ec-branded-workspace .ec-targetlist button { display: flex; justify-content: space-between; gap: 12px; text-align: start; padding: 10px 12px; border: 1px solid var(--ec-line); border-radius: 8px; color: var(--ec-text); background: var(--ec-panel); }
+#ec-branded-workspace .ec-targetlist button[aria-pressed="true"] { background: var(--ec-tint); border-color: var(--ec-accent); }
+#ec-branded-workspace .ec-targetlist small { display: block; color: var(--ec-muted); margin-top: 3px; }
+#ec-branded-workspace .ec-targetfacts { display: grid; grid-template-columns: 130px minmax(0,1fr); gap: 8px 12px; font-size: 12px; }
+#ec-branded-workspace .ec-targetfacts dt { color: var(--ec-muted); }
+#ec-branded-workspace .ec-targetfacts dd { margin: 0; overflow-wrap: anywhere; }
+#ec-branded-workspace .ec-targetdialog p { overflow-wrap: anywhere; }
+#ec-branded-workspace .ec-targetactions { display: flex; gap: 8px; flex-wrap: wrap; margin-top: 16px; }
+#ec-branded-workspace .ec-targettrust { display: flex; gap: 8px; align-items: flex-start; font-size: 13px; }
+#ec-branded-workspace .ec-targetdetail { border-top: 1px solid var(--ec-line); padding-top: 8px; }
+@media (max-width: 590px) { #ec-branded-workspace .ec-targetfacts { grid-template-columns: minmax(0,1fr); gap: 4px; } #ec-branded-workspace .ec-targetfacts dd { margin-bottom: 8px; } }
