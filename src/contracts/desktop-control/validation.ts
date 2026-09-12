@@ -104,6 +104,7 @@ const contracts: { [M in keyof MethodContracts]: { params: Check; result: Check 
   "work.list": { params: shape(pageParams, {...optionalPage, query:text(200),parentWorkId:id}), result: page(work) },
   "work.get": { params: shape({ workId: id }), result: work },
   "work.activity": { params: shape({ ...pageParams, workId: id }, optionalPage), result: page(activity) },
+  "inbox.get":{params:shape({itemId:id}),result:inbox},
   "inbox.list": { params: shape(pageParams, optionalPage), result: page(inbox) },
   "models.auxiliary": {params:shape({}),result:shape({items:array(shape({slot:choice(AUXILIARY_SLOTS),mode:choice(['main','auto','dedicated','disabled']),providerId:nullable(id),modelId:nullable(text(200,1)),fallbackToMain:boolean,credentialState:choice(['missing','present','expired','not_required']),runnable:boolean}),5)})},
   "models.reviewAuxiliary": {params:shape({windowId:id,generation:integer(1),route:candidateRoute,slot:choice(AUXILIARY_SLOTS),fallbackToMain:boolean},{candidateId:id}),result:modelRouteDraft},
@@ -185,6 +186,7 @@ export function validateControlResponse<M extends keyof MethodContracts>(value: 
     if (!scoped(result, context!.profileId) || (Array.isArray(result.items) && !result.items.every((item) => scoped(item, context!.profileId)))) throw new ControlProtocolError("-32003");
     if(request.method==="models.oauthStatus" && result.authorizationId!==(request.params as MethodContracts["models.oauthStatus"]["params"]).authorizationId)throw new ControlProtocolError("-32003");
     if ("limit" in request.params && Array.isArray(result.items) && result.items.length > request.params.limit) throw new ControlProtocolError("-32009");
+    if(request.method==='inbox.get'&&result.id!==request.params.itemId)throw new ControlProtocolError('-32003');
     if (request.method === "work.get" && result.id !== request.params.workId) throw new ControlProtocolError("-32003");
     if (request.method === "connections.get" && result.id !== request.params.connectionId) throw new ControlProtocolError("-32003");
     if (request.method === "work.activity" && !(result.items as { workId: string }[]).every((item) => item.workId === request.params.workId)) throw new ControlProtocolError("-32003");

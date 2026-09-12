@@ -73,6 +73,7 @@ export class DesktopBridge {
         if(request.method!=='models.list')throw new ControlProtocolError('-32601');
         const catalog=await this.modelCatalog();return{result:catalog.pages.page('models',catalog.models,request.params)};
       },
+      'inbox.get':request=>{if(request.method!=='inbox.get')throw new ControlProtocolError('-32601');const item=this.workSnapshot().state.inbox?.find(item=>item.id===request.params.itemId);if(!item)throw new ControlProtocolError('-32003');return{result:structuredClone(item)};},
       'inbox.list': (request) => {
         if (request.method !== 'inbox.list') throw new ControlProtocolError('-32601');
         const snapshot = this.workSnapshot();

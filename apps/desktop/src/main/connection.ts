@@ -5,7 +5,7 @@ import { ServiceProcess, validateProfileId } from './service-process.js';
 export type ConnectionState = { status: 'connecting' | 'ready' | 'disconnected' | 'incompatible' | 'unavailable'; generation: number;
   profileId: string; bootstrap: BootstrapResult | null; work: Page<WorkProjection>; inbox: Page<InboxProjection> };
 export const MODEL_METHODS=CONTROL_METHODS.filter(method=>method.startsWith('models.') || ['providers.list','sessions.setModel','tasks.setModel','operations.inspect'].includes(method));
-export const WORK_METHODS=CONTROL_METHODS.filter(method=>method==='work.targets'||method==='work.live'||method.startsWith('sessions.')||method.startsWith('tasks.')||method==='approvals.resolve'||method==='operations.inspect');
+export const WORK_METHODS=CONTROL_METHODS.filter(method=>method==='inbox.get'||method==='work.targets'||method==='work.live'||method.startsWith('sessions.')||method.startsWith('tasks.')||method==='approvals.resolve'||method==='operations.inspect');
 export class DesktopConnection extends EventEmitter {
   #client: ProtocolClient | null = null;
   #timer: ReturnType<typeof setTimeout> | undefined;

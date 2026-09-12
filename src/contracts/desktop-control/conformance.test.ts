@@ -50,6 +50,7 @@ const cases = {
   "work.list": { params: { limit: 10 }, result: { items: [work], nextCursor: null } },
   "work.get": { params: { workId: "w" }, result: work },
   "work.activity": { params: { workId: "w", limit: 10 }, result: { items: activities, nextCursor: "next_page" } },
+  "inbox.get":{params:{itemId:inbox.id},result:inbox},
   "inbox.list": { params: { limit: 10 }, result: { items: [inbox], nextCursor: null } },
   "models.auxiliary": {params:{},result:{items:[{slot:'assessor',mode:'main',providerId:'local',modelId:'model',fallbackToMain:false,credentialState:'not_required',runnable:true}]}},
   "models.reviewAuxiliary": {params:{windowId:'w',generation:1,slot:'assessor',fallbackToMain:true,route:{providerId:'local',modelId:'model',endpoint:'http://127.0.0.1:8080/v1',authMethod:'none',apiMode:'custom_openai_compatible',allowPrivateEndpoint:true}},result:{draftId:'draft',route:{providerId:'local',modelId:'model',endpoint:'http://127.0.0.1:8080/v1',authMethod:'none',apiMode:'custom_openai_compatible',allowPrivateEndpoint:true},expiresInMs:300000,credentialState:'not_required',role:'auxiliary',slot:'assessor'}},

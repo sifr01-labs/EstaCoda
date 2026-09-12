@@ -267,7 +267,8 @@ export class TaskOperatorService {
     initialHostLease?: InitialTaskHostLeaseInput;
   }): TaskStatusProjection {
     const objective = normalizeTaskOperatorObjective(input.objective);
-    const limits=input.executionLimits??{maxProviderCalls:45,maxTotalTokens:1_000_000,maxWallClockMs:30*60*1000};
+    const requestedLimits=input.executionLimits??{maxProviderCalls:45,maxTotalTokens:1_000_000,maxWallClockMs:30*60*1000};
+    const limits={maxProviderCalls:requestedLimits.maxProviderCalls,maxTotalTokens:requestedLimits.maxTotalTokens,maxWallClockMs:requestedLimits.maxWallClockMs};
     for(const[key,max]of Object.entries({maxProviderCalls:45,maxTotalTokens:1_000_000,maxWallClockMs:30*60*1000})){const value=limits[key as keyof typeof limits];if(!Number.isSafeInteger(value)||value<1||value>max)throw new Error('Task limits may only narrow operator defaults.');}
     if(input.taskId&&!input.creationKey)throw new Error('An explicit Task ID needs an idempotent creation key.');
     const authority = operatorTaskAuthority();

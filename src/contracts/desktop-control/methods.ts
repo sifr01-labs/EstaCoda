@@ -52,6 +52,7 @@ export type MethodContracts = {
   "work.list": { params: PageParams & { query?: string; parentWorkId?:string }; result: Page<WorkProjection> };
   "work.get": { params: { workId: string }; result: WorkProjection };
   "work.activity": { params: PageParams & { workId: string }; result: Page<ActivityProjection> };
+  "inbox.get":{params:{itemId:string};result:InboxProjection};
   "inbox.list": { params: PageParams; result: Page<InboxProjection> };
   "models.list": { params: PageParams; result: Page<ModelProjection> };
   "providers.list": { params: PageParams; result: Page<ProviderProjection> };

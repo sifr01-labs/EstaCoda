@@ -24,6 +24,21 @@ export class DesktopWorkControls {
   }
  }
 
+ async inspectDecision(itemId:string){const record=this.records()['approval:'+itemId];return record?this.connection.workRequest('operations.inspect',record):null;}
+ async decide(itemId:string,decision:'approved'|'denied'):Promise<OperationReceipt>{
+  const check=this.fence(),key=this.connection.state.profileId+':approval:'+itemId;
+  if(this.#busy.has(key))throw new Error('Decision is settling.');this.#busy.add(key);
+  try{
+   const item=await this.connection.workRequest('inbox.get',{itemId});check();const approval=item.approval;
+   if(item.profileId!==this.connection.state.profileId||item.kind!=='approval'||!item.workId||!approval||approval.scope!=='once'||!approval.decisions.includes(decision)||!item.actions?.some(action=>action.id===(decision==='approved'?'approve_once':'reject')&&action.enabled))throw new Error('Approval no longer available.');
+   const work=await this.connection.getWork(item.workId);check();if(work.profileId!==item.profileId||work.target?.targetId!==approval.target.targetId||work.target.targetGeneration!==approval.target.targetGeneration)throw new Error('Approval target changed.');
+   const previous=this.records()['approval:'+itemId];if(previous)return this.connection.workRequest('operations.inspect',previous);
+   await this.makeRoom(check);check();
+   const operationId=Date.now()+':'+randomUUID(),binding={operationId,sessionId:approval.sessionId,target:approval.target};
+   this.save('approval:'+itemId,{...binding,method:'approvals.resolve'});
+   return this.connection.workRequest('approvals.resolve',{...binding,approvalId:approval.id,decision});
+  }finally{this.#busy.delete(key);}
+ }
  async act(input:WorkAction):Promise<OperationReceipt>{
   const check=this.fence(),key=this.connection.state.profileId+':'+input.workId;
   if(this.#busy.has(key))throw new Error('Work control is settling.');this.#busy.add(key);

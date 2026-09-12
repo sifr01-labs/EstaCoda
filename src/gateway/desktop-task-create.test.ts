@@ -18,3 +18,8 @@ it('creates an idempotent background Task with narrowed limits, inherited target
  await expect(desktopCreateTask({...input,request:{...request,targetGeneration:9}})).rejects.toThrow('binding');
  }finally{db.close();await rm(homeDir,{recursive:true,force:true});}
 });
+
+it('rejects extra private Task limit fields that could override concurrency',async()=>{
+ const {validatePrivateControlRequest}=await import('../contracts/control-protocol.js');
+ expect(()=>validatePrivateControlRequest({method:'task.create',sessionId:'s',taskId:'t',targetId:'target',targetGeneration:1,operationId:createControlOperationId(),selection:null,objective:'Work',limits:{maxProviderCalls:1,maxTotalTokens:100,maxWallClockMs:1000,maxConcurrentAttempts:10}})).toThrow('Invalid Task');
+});
