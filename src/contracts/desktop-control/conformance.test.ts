@@ -30,6 +30,9 @@ const activities: ActivityProjection[] = [
   { ...activityBase, kind: "status", status: "needs_attention", reason: "Waiting for approval" },
 ];
 const cases = {
+  "models.workOverride": {params:{sessionId:"s",target},result:{selection:null,effective:"next_turn"}},
+  "sessions.setModel": {params:{...binding,selection:null},result:{...receipt,method:"sessions.setModel"}},
+  "tasks.setModel": {params:{...binding,taskId:"task",selection:{providerId:"local",modelId:"m"}},result:{...receipt,taskId:"task",method:"tasks.setModel"}},
   "control.initialize": { params: initialize, result: initialized },
   "control.bootstrap": { params: {}, result: { profile: { id: "p", label: "Personal", configuration: "unconfigured" }, runtime: { state: "unavailable" }, capabilities: context.capabilities, cursor } },
   "control.subscribe": { params: { after: cursor, events: [...CONTROL_EVENTS] }, result: { state: "subscribed", subscriptionId: "sub", cursor } },

@@ -9,7 +9,7 @@ export type SessionControl = { operationId: string; sessionId: string; target: T
 export type OperationReceipt = {
   taskId?: string;
   operationId: string; profileId: string; sessionId: string; target: TargetReference;
-  method: "tasks.pause" | "tasks.resume" | "tasks.cancel" | "tasks.retry" | "tasks.guide" | "sessions.start" | "sessions.resume" | "sessions.send" | "sessions.cancelTurn" | "approvals.resolve";
+  method: "sessions.setModel" | "tasks.setModel" | "tasks.pause" | "tasks.resume" | "tasks.cancel" | "tasks.retry" | "tasks.guide" | "sessions.start" | "sessions.resume" | "sessions.send" | "sessions.cancelTurn" | "approvals.resolve";
   state: "accepted" | "dispatched" | "completed" | "uncertain" | "unknown" | "expired";
   cancellation: "not_requested" | "requested" | "confirmed";
 };
@@ -18,6 +18,9 @@ export type SubscribeResult =
   | { state: "subscribed"; subscriptionId: string; cursor: ControlCursor }
   | { state: "snapshot_required"; reason: "instance_changed" | "stream_changed" | "cursor_expired" | "overflow" };
 export type MethodContracts = {
+  "models.workOverride": {params:{sessionId:string;target:TargetReference;taskId?:string};result:{selection:{providerId:string;modelId:string}|null;effective:"next_turn"|"next_attempt"}};
+  "sessions.setModel": {params:SessionControl & {selection:{providerId:string;modelId:string}|null};result:OperationReceipt};
+  "tasks.setModel": {params:SessionControl & {taskId:string;selection:{providerId:string;modelId:string}|null};result:OperationReceipt};
   "models.auxiliary": {params:Record<string,never>;result:AuxiliaryList};
   "models.reviewAuxiliary": {params:Omit<VerifyCandidateParams,'spendApproved'>&{slot:AuxiliarySlot;fallbackToMain:boolean};result:ModelRouteDraft};
   "models.reviewAuxiliaryMode": {params:AuxiliaryModeParams;result:ModelRouteDraft};

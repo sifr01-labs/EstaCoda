@@ -5,7 +5,7 @@ import { afterEach, describe, expect, it } from "vitest";
 import type { ChannelMessage } from "../contracts/channel.js";
 import type { SQLiteDatabase } from "../storage/sqlite.js";
 import { createSQLiteSessionDB } from "../session/session-setup.js";
-import { CONTROL_RECEIPT_SCHEMA_VERSION } from "../gateway/control-receipts.js";
+import { TASK_MODEL_OVERRIDE_SCHEMA_VERSION } from "../tasks/task-schema.js";
 import {
   PendingTurnStoreError,
   SQLitePendingTurnStore,
@@ -42,7 +42,7 @@ describe("pending turn schema", () => {
     const migrated = await createSQLiteSessionDB({ path: dbPath });
     try {
       expect(migrated.db.query<{ version: number }>("select max(version) as version from schema_version").get())
-        .toEqual({ version: CONTROL_RECEIPT_SCHEMA_VERSION });
+        .toEqual({ version: TASK_MODEL_OVERRIDE_SCHEMA_VERSION });
       expect(migrated.db.query<{ name: string }>(`
         select name from sqlite_master where type = 'table' and name = 'pending_channel_turns'
       `).get()).toEqual({ name: "pending_channel_turns" });

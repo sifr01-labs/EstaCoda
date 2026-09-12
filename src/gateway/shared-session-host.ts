@@ -21,6 +21,7 @@ export class SharedSessionHost {
   constructor(readonly options: {
     profileId: string; sessionDb: SessionDB; receipts?: ControlReceipts;
     approvalQueue?: GatewayApprovalQueue;
+    modelControl?(request: PrivateControlRequest): Promise<unknown>;
     taskControl?(request: PrivateControlRequest): unknown;
     validateTarget?(request: PrivateControlRequest): Promise<void>;
     acquire(sessionId: string): Promise<Runtime>;
@@ -66,6 +67,16 @@ export class SharedSessionHost {
       id: active.pending.id, tool: active.pending.request.tool.name,
       riskClass: active.pending.request.riskClass, targetSummary: active.pending.request.targetSummary,
     } : undefined };
+    if (request.method === "model" || request.method === "task.model") {
+      if (!this.options.modelControl) throw new Error("Model controls unavailable.");
+      if (this.#turns.size >= 128) throw new Error("Shared input queue is full.");
+      const change = this.#serial.runExclusive(request.sessionId, async () => {
+        await this.validate(request);
+        return this.options.modelControl!(request);
+      });
+      this.#turns.add(change);
+      try { return await change; } finally { this.#turns.delete(change); }
+    }
     if (request.method.startsWith("task.")) {
       if (!this.options.taskControl) throw new Error("Task operator controls unavailable.");
       return this.options.taskControl(request);

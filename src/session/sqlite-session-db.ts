@@ -29,6 +29,8 @@ import type { SQLiteDatabase } from "../storage/sqlite.js";
 import { openDefaultSQLiteDatabase } from "../storage/factory.js";
 import { toFtsQuery } from "../search/fts-query.js";
 import {
+  TASK_MODEL_OVERRIDE_SCHEMA_VERSION,
+  migrateTaskModelOverrideSchemaV36,
   migrateTaskAgentExecutorSchemaV12,
   migrateTaskBackgroundHostSchemaV13,
   migrateTaskChildGovernanceSchemaV16,
@@ -982,7 +984,7 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
       `);
     });
 
-    if (this.#readSchemaVersion() > CONTROL_RECEIPT_SCHEMA_VERSION) throw new Error("Session database was created by a newer EstaCoda version.");
+    if (this.#readSchemaVersion() > TASK_MODEL_OVERRIDE_SCHEMA_VERSION) throw new Error("Session database was created by a newer EstaCoda version.");
     this.#runMigrationStep(4, "v0.9-schema-v4-cron-executions", () => this.#migrateV4());
     this.#runMigrationStep(5, "v0.9-schema-v5-pending-approvals", () => this.#migrateV5());
     this.#runMigrationStep(6, "v0.9-schema-v6-session-lineage", () => this.#migrateV6());
@@ -1026,6 +1028,7 @@ export class SQLiteSessionDB implements SessionDB, TrajectoryStore {
     this.#runMigrationStep(EXECUTION_TARGET_SCHEMA_VERSION, "workspace-target-bindings-v33", () => migrateExecutionTargetSchemaV33(this.#db));
     this.#runMigrationStep(EXECUTION_OWNERSHIP_SCHEMA_VERSION, "session-execution-ownership-v34", () => migrateExecutionOwnershipV34(this.#db));
     this.#runMigrationStep(CONTROL_RECEIPT_SCHEMA_VERSION, "session-control-receipts-v35", () => migrateControlReceiptsV35(this.#db));
+    this.#runMigrationStep(TASK_MODEL_OVERRIDE_SCHEMA_VERSION, "task-model-overrides-v36", () => migrateTaskModelOverrideSchemaV36(this.#db));
   }
 
   #withMigrationLock(migrate: () => void): void {
@@ -1331,7 +1334,7 @@ function isSessionModelOverride(value: unknown): value is SessionModelOverride {
   const candidate = value as Partial<SessionModelOverride>;
   return (
     typeof candidate.setAt === "string" &&
-    (candidate.source === "cli" || candidate.source === "gateway") &&
+    (candidate.source === "desktop" || candidate.source === "cli" || candidate.source === "gateway") &&
     typeof candidate.route === "object" &&
     candidate.route !== null &&
     typeof candidate.route.provider === "string" &&

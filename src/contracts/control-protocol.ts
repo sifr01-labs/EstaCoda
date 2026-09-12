@@ -1,8 +1,9 @@
 /** Existing shared-host v1 semantics. Pure contract only: no transport or authority. */
 export const PRIVATE_CONTROL_MAX_BYTES = 131_072;
 export type PrivateControlRequest = {
-  method: "send" | "cancel" | "approval" | "inspect" | "start" | "resume" | "task.pause" | "task.resume" | "task.cancel" | "task.retry" | "task.guide";
+  method: "model" | "task.model" | "send" | "cancel" | "approval" | "inspect" | "start" | "resume" | "task.pause" | "task.resume" | "task.cancel" | "task.retry" | "task.guide";
   sessionId: string; targetId: string; operationId: string;
+  selection?: {providerId:string;modelId:string}|null;
   taskId?: string; stepId?: string; guidance?: string;
   targetGeneration?: number;
   text?: string; approvalId?: string; decision?: "approved" | "denied";
@@ -11,7 +12,8 @@ export type PrivateControlRequest = {
 export function validatePrivateControlRequest(value: unknown): asserts value is PrivateControlRequest {
   if (!value || typeof value !== "object") throw new Error("Invalid control request.");
   const request = value as PrivateControlRequest;
-  if (!["send", "cancel", "approval", "inspect", "start", "resume", "task.pause", "task.resume", "task.cancel", "task.retry", "task.guide"].includes(request.method) ||
+  if (!["model", "task.model", "send", "cancel", "approval", "inspect", "start", "resume", "task.pause", "task.resume", "task.cancel", "task.retry", "task.guide"].includes(request.method) ||
+    ((request.method === "model" || request.method === "task.model") && (request.targetGeneration === undefined || request.selection !== null && (!request.selection || typeof request.selection.providerId !== "string" || !/^[A-Za-z0-9_.:-]{1,160}$/.test(request.selection.providerId) || typeof request.selection.modelId !== "string" || request.selection.modelId.length < 1 || request.selection.modelId.length > 200))) ||
     [request.sessionId, request.targetId, request.operationId].some((id) => typeof id !== "string" || !/^[A-Za-z0-9_.:-]{1,160}$/.test(id)) ||
     (request.method.startsWith("task.") && (typeof request.taskId !== "string" || !/^[A-Za-z0-9_.:-]{1,160}$/.test(request.taskId) || request.targetGeneration === undefined)) ||
     (request.stepId !== undefined && !/^[A-Za-z0-9_.:-]{1,160}$/.test(request.stepId)) ||

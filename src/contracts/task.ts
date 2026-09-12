@@ -480,6 +480,7 @@ function isBoundedDeliveryToken(value: unknown, maxChars: number): value is stri
 }
 
 export type TaskEventKind =
+  | "model-override-changed"
   | "task-created"
   | "task-state-changed"
   | "plan-revision-created"

@@ -75,7 +75,7 @@ export type SessionModelOverride = {
   };
   modelProfile: ModelProfile;
   setAt: string;
-  source: "cli" | "gateway";
+  source: "cli" | "gateway" | "desktop";
 };
 
 export type SessionMessage = {

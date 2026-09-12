@@ -438,7 +438,7 @@ function isSessionModelOverride(value: unknown): value is SessionModelOverride {
   const candidate = value as Partial<SessionModelOverride>;
   return (
     typeof candidate.setAt === "string" &&
-    (candidate.source === "cli" || candidate.source === "gateway") &&
+    (candidate.source === "desktop" || candidate.source === "cli" || candidate.source === "gateway") &&
     typeof candidate.route === "object" &&
     candidate.route !== null &&
     typeof candidate.route.provider === "string" &&

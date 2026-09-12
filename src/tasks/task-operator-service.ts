@@ -1210,6 +1210,7 @@ function taskActivityLabel(event: TaskEvent, stepTitles: ReadonlyMap<string, str
     case "attempt-expired": return `Attempt lease expired${suffix}`;
     case "approval-requested": return `Approval requested${suffix}`;
     case "approval-resolved": return `Approval resolved${suffix}`;
+    case "model-override-changed": return "Model selection updated for future attempts";
     case "task-steered": return "Operator guidance queued";
     case "provider-spending-warning": return "Estimated spending warning reached";
     case "usage-recorded": return `Usage recorded${suffix}`;

@@ -20,7 +20,7 @@ export type ControlReceipt = { taskId?: string; targetId?: string; targetGenerat
 const RETENTION_MS = 30 * 86_400_000;
 const ACCEPT_WINDOW_MS = 5 * 60_000;
 function canonical(request: PrivateControlRequest): string {
-  return JSON.stringify({ method: request.method, sessionId: request.sessionId, targetId: request.targetId,
+  return JSON.stringify({ ...(["model","task.model"].includes(request.method)?{selection:request.selection}:{}), method: request.method, sessionId: request.sessionId, targetId: request.targetId,
     ...(request.targetGeneration === undefined ? {} : { targetGeneration: request.targetGeneration }),
     ...(request.taskId === undefined ? {} : { taskId: request.taskId }),
     ...(request.stepId === undefined ? {} : { stepId: request.stepId }),

@@ -49,3 +49,11 @@ Validation: 96 focused setup/protocol tests, including adding two fallbacks, reo
 The service exposes assessor, compression, session search, memory compaction and profile context. Each slot supports dedicated, primary, automatic or disabled routing, with an explicit fallback-to-primary choice. Dedicated routes reuse credential candidates and the reviewed transaction; mode changes use the same snapshot and recovery checks. Read-only projections distinguish credential presence from runnable configuration. Vision remains outside this editor.
 
 Validation: 100 setup/protocol tests and 105 specialist resolver/protocol tests passed; root typecheck and desktop foundation checks passed. Review verified that specialist changes preserve primary, fallback and Vision configuration. Risk: specialist routing affects provider execution, so credentials remain profile-local and route changes use the existing resolver and setup executor.
+
+## 7. Session and Task model overrides
+
+`models.workOverride` inspects a profile/target-bound selection. Session and Task set/clear controls use authenticated supervisor requests and input-bound durable receipts. A shared Session queues its model change behind the active turn. The supervisor retires idle cache entries and requires canonical ownership before writing the Session override; another live owner remains a refusal. Profile defaults stay unchanged. A Task records an explicit operator selection in its existing event store for future child construction, preserving active workers and immutable step definitions. Clearing restores the original routing policy.
+
+Schema v36 preserves existing Task events while admitting model-selection events. The normal migration backup/recovery path applies. Read-only projections describe next-turn/next-attempt semantics and do not claim the current worker has switched.
+
+Validation: 110 focused protocol, ownership, Session database and Task executor tests; migration/setup tests; root typecheck; desktop foundation checks. Regression coverage includes queued changes, priority cancellation, foreign ownership refusal, ended originating Sessions, profile/target mismatch, set/clear and operation-ID rebinding. Risk: execution routing and persisted state are sensitive; no lease is stolen and no in-flight runtime is edited.

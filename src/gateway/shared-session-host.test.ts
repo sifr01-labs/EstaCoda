@@ -48,3 +48,14 @@ it('requires trusted generation validation before Desktop runtime construction',
   const legacy = new SharedSessionHost({ profileId: 'p', acquire, sessionDb, channelApproval: vi.fn() });
   await expect(legacy.handle(request)).rejects.toThrow('generation');
 });
+
+it('defers model changes until a shared turn disposes without blocking cancellation',async()=>{
+ let started!:()=>void;const running=new Promise<void>(resolve=>started=resolve);
+ const order:string[]=[];
+ const runtime={sessionId:'s',handle:async(input:any)=>{started();await new Promise(resolve=>input.signal.addEventListener('abort',resolve,{once:true}));return {text:'done'};},dispose:async()=>{order.push('disposed');}} as unknown as Runtime;
+ const host=new SharedSessionHost({profileId:'p',sessionDb:{getSessionForProfile:async()=>({executionTarget:{targetId:'t'}})} as unknown as SessionDB,acquire:async()=>runtime,channelApproval:vi.fn(),modelControl:async()=>{order.push('changed');return {effective:'next_turn'};}});
+ const base={sessionId:'s',targetId:'t',operationId:'op'};
+ const turn=host.handle({...base,method:'send',text:'work'});await running;
+ const change=host.handle({...base,method:'model',selection:null});await Promise.resolve();expect(order).toEqual([]);
+ await host.handle({...base,method:'cancel'});await turn;await change;expect(order).toEqual(['disposed','changed']);await host.close();
+});

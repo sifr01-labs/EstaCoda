@@ -1,3 +1,4 @@
+import {desktopModelControl} from './desktop-model-controls.js';
 import { ExecutionTargetStore } from '../workspaces/execution-target.js';
 import { desktopTaskControl } from './desktop-task-controls.js';
 import { selectedExecutionPolicy } from "../execution/docker-policy.js";
@@ -1846,6 +1847,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
         .run(new Date().toISOString(), profileId);
       const sharedHost = new SharedSessionHost({
         profileId, sessionDb, receipts, approvalQueue: gatewayApprovalQueue,
+        modelControl: async (request) => {const current=await loadConfig();return desktopModelControl({request,profileId,sessionDb,tasks:taskStore,context:{config:current.config,providerRegistry:current.providerRegistry,homeDir,profileId},invalidate:id=>runtimeCache.invalidate(id)});},
         taskControl: (request) => desktopTaskControl(taskStore, request),
         validateTarget: async (request) => {
           const session = await sessionDb.getSessionForProfile(request.sessionId, profileId);

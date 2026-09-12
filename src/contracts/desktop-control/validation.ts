@@ -60,7 +60,7 @@ const page = (check: Check): Check => shape({ items: array(check), nextCursor: n
 const pageParams = { limit: integer(1, 100) };
 const optionalPage = { cursor: cursorToken };
 const sessionParams = { operationId: isControlOperationId, sessionId: id, target };
-const mutationMethods = ["tasks.pause", "tasks.resume", "tasks.cancel", "tasks.retry", "tasks.guide", "sessions.start", "sessions.resume", "sessions.send", "sessions.cancelTurn", "approvals.resolve"] as const;
+const mutationMethods = ["sessions.setModel", "tasks.setModel", "tasks.pause", "tasks.resume", "tasks.cancel", "tasks.retry", "tasks.guide", "sessions.start", "sessions.resume", "sessions.send", "sessions.cancelTurn", "approvals.resolve"] as const;
 const receiptShape = shape({ operationId: isControlOperationId, profileId: id, sessionId: id, target, method: choice(mutationMethods),
   state: choice(["accepted", "dispatched", "completed", "uncertain", "unknown", "expired"]), cancellation: choice(["not_requested", "requested", "confirmed"]) }, { taskId: id });
 const receipt: Check = (v) => receiptShape(v) && isRecord(v) &&
@@ -81,6 +81,9 @@ const modelRouteDraft:Check=v=>modelRouteDraftShape(v)&&isRecord(v)&&(['fallback
 const modelDraftBinding=shape({draftId:id,windowId:id,generation:integer(1)});
 const modelApplyReceipt=shape({operationId:id,state:choice(['applied','uncertain','unknown']),verification:choice(['configured','repair_required','not_tested'])});
 const contracts: { [M in keyof MethodContracts]: { params: Check; result: Check } } = {
+  "models.workOverride": {params:shape({sessionId:id,target},{taskId:id}),result:shape({selection:nullable(shape({providerId:id,modelId:text(200,1)})),effective:choice(["next_turn","next_attempt"])})},
+  "sessions.setModel": {params:shape({...sessionParams,selection:nullable(shape({providerId:id,modelId:text(200,1)}))}),result:receipt},
+  "tasks.setModel": {params:shape({...sessionParams,taskId:id,selection:nullable(shape({providerId:id,modelId:text(200,1)}))}),result:receipt},
   "control.initialize": { params: initialize, result: initializeResult },
   "control.bootstrap": { params: shape({}), result: bootstrap },
   "control.subscribe": { params: shape({ after: isControlCursor, events: unique(choice(CONTROL_EVENTS), 64, 1) }), result: subscribeResult },

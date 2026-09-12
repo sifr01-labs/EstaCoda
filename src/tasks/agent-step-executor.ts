@@ -1,3 +1,4 @@
+import {taskModelOverride} from './task-model-override.js';
 import type { ArtifactRecord } from "../contracts/artifact.js";
 import type { DelegateModelOverride, DelegateRole, DelegationConfig } from "../contracts/delegation.js";
 import type { RuntimeEvent, RuntimeEventSink } from "../contracts/runtime-event.js";
@@ -156,7 +157,7 @@ export class AgentStepExecutor implements TaskStepExecutor {
     );
     const attemptFencingToken = input.attempt.lease?.fencingToken;
     if (attemptFencingToken === undefined) return failed("lease-missing", true);
-    const modelOverride = toModelOverride(input.step);
+    const modelOverride = taskModelOverride(this.#taskStore,input.task.id) ?? toModelOverride(input.step);
     let endReason = "task-step-failed";
     const childController = new AbortController();
     const abortChild = () => {

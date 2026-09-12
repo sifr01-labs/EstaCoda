@@ -1,3 +1,4 @@
+import {workModel} from './work-model.js';
 import {notifyPrivateConfigurationChanged} from '../gateway/private-control.js';
 import {resolveProfileStateHome} from '../config/profile-home.js';
 import {ModelSetup} from './model-setup.js';
@@ -35,8 +36,9 @@ export class DesktopBridge {
     readWork?: (signal: AbortSignal) => Promise<WorkState>;
     readState?: (signal: AbortSignal) => Promise<BootstrapState> }) {
     this.server = new StdioControlServer({ ...options, events: ['work.changed', 'activity.appended', 'attention.changed', 'control.ready', 'service.warning', 'service.shutdown'], handlers: {
-      ...Object.fromEntries(['approvals.resolve', 'tasks.pause', 'tasks.resume', 'tasks.cancel', 'tasks.retry', 'tasks.guide', 'sessions.start', 'sessions.resume', 'sessions.send', 'sessions.cancelTurn', 'operations.inspect'].map((method) =>
+      ...Object.fromEntries(['sessions.setModel', 'tasks.setModel', 'approvals.resolve', 'tasks.pause', 'tasks.resume', 'tasks.cancel', 'tasks.retry', 'tasks.guide', 'sessions.start', 'sessions.resume', 'sessions.send', 'sessions.cancelTurn', 'operations.inspect'].map((method) =>
         [method, async (request: SessionMutationRequest, signal: AbortSignal) => ({ result: await sessionControl(this.options, request, signal) })])),
+      'models.workOverride': async(request)=>{if(request.method!=='models.workOverride')throw new ControlProtocolError('-32601');return {result:await workModel(this.options,request.params)};},
       'models.auxiliary': async()=>({result:await this.modelSetup.auxiliary()}),
       'models.reviewAuxiliary': async(request)=>{if(request.method!=='models.reviewAuxiliary')throw new ControlProtocolError('-32601');return {result:await this.modelSetup.review(request.params,'auxiliary',{slot:request.params.slot,fallbackToMain:request.params.fallbackToMain})};},
       'models.reviewAuxiliaryMode': async(request)=>{if(request.method!=='models.reviewAuxiliaryMode')throw new ControlProtocolError('-32601');return {result:await this.modelSetup.reviewAuxiliaryMode(request.params)};},
