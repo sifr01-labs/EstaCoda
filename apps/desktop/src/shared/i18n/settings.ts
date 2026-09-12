@@ -1,4 +1,9 @@
 export const settingsArabic={
+ 'Image analysis':'تحليل الصور',
+ 'Image analysis and image generation':'تحليل الصور وتوليدها',
+ 'Automatic uses the configured model route. Dedicated analysis uses the vision provider and model below. Off disables analysis.':'يستخدم الوضع التلقائي مسار النموذج المضبوط. يستخدم التحليل المخصص مزوّد الرؤية ونموذجه أدناه. يوقف خيار الإيقاف التحليل.',
+ 'Image generation has its own provider and credential. Saving settings does not generate an image or approve cloud spending.':'لتوليد الصور مزوّد وبيانات اعتماد مستقلان. لا يؤدي حفظ الإعدادات إلى توليد صورة أو الموافقة على الإنفاق السحابي.',
+ 'Off':'إيقاف',
  'Load current value':'تحميل القيمة الحالية',
  'Load more settings':'تحميل إعدادات إضافية',
  'Select':'اختيار',

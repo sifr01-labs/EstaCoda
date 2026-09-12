@@ -33,3 +33,9 @@ it('round trips public specialist options and pages every registered model setti
  await expect(owner.review({...binding,changes:[{fieldId:'providers.*.baseUrl',selectors:['test'],value:'https://user:secret@example.com'}]})).rejects.toThrow();
  }finally{owner.dispose();candidates.dispose();await rm(homeDir,{recursive:true,force:true});}
 });
+it('keeps image generation independent of vision routing and preserves legacy image options',async()=>{
+ const homeDir=await mkdtemp(join(tmpdir(),'ec-settings-')),input={homeDir,profileId:'default'},paths=resolveProfileStateHome(input),candidates=new CredentialCandidates('default','instance'),owner=new PublicSettings(input,candidates);
+ try{await mkdir(paths.profileRoot,{recursive:true});await writeFile(paths.configPath,JSON.stringify({image_gen:{provider:'fal',model:'previous'},auxiliaryModels:{vision:{provider:'auto'}}}));const b={windowId:'w',generation:1};const review=await owner.review({...b,changes:[{fieldId:'imageGen.model',selectors:[],value:'new-image-model'},{fieldId:'auxiliaryModels.vision.hostedProcessing',selectors:[],value:'local-only'},{fieldId:'auxiliaryModels.vision.enabled',selectors:[],value:false}]});await owner.apply({...b,draftId:review.draftId},new AbortController().signal);const config=JSON.parse(await readFile(paths.configPath,'utf8'));expect(config.imageGen).toMatchObject({provider:'fal',model:'new-image-model'});expect(config.auxiliaryModels.vision).toMatchObject({provider:'auto',enabled:false,hostedProcessing:'local-only'});
+ await expect(owner.review({...b,changes:[{fieldId:'auxiliaryModels.vision.hostedProcessing',selectors:[],value:'allow-all'}]})).rejects.toThrow();
+ }finally{owner.dispose();candidates.dispose();await rm(homeDir,{recursive:true,force:true});}
+});

@@ -1,0 +1,27 @@
+import type {SettingField} from '../contracts/desktop-control/index.js';
+export const visionSettings:readonly SettingField[]=[
+ {"id":"imageGen.provider","path":["imageGen","provider"],"section":"vision","kind":"choice","choices":["openai","fal","byteplus"]},
+ {"id":"imageGen.model","path":["imageGen","model"],"section":"vision","kind":"text"},
+ {"id":"imageGen.useGateway","path":["imageGen","useGateway"],"section":"vision","kind":"choice","choices":[false,true]},
+ {"id":"imageGen.apiKeyEnv","path":["imageGen","apiKeyEnv"],"section":"vision","kind":"secret"},
+ {"id":"imageGen.baseUrl","path":["imageGen","baseUrl"],"section":"vision","kind":"text"},
+ {"id":"imageGen.fal.model","path":["imageGen","fal","model"],"section":"vision","kind":"text"},
+ {"id":"imageGen.fal.apiKeyEnv","path":["imageGen","fal","apiKeyEnv"],"section":"vision","kind":"secret"},
+ {"id":"imageGen.fal.baseUrl","path":["imageGen","fal","baseUrl"],"section":"vision","kind":"text"},
+ {"id":"imageGen.byteplus.model","path":["imageGen","byteplus","model"],"section":"vision","kind":"text"},
+ {"id":"imageGen.byteplus.apiKeyEnv","path":["imageGen","byteplus","apiKeyEnv"],"section":"vision","kind":"secret"},
+ {"id":"imageGen.byteplus.baseUrl","path":["imageGen","byteplus","baseUrl"],"section":"vision","kind":"text"},
+ {"id":"imageGen.openai.model","path":["imageGen","openai","model"],"section":"vision","kind":"text"},
+ {"id":"imageGen.openai.apiKeyEnv","path":["imageGen","openai","apiKeyEnv"],"section":"vision","kind":"secret"},
+ {"id":"imageGen.openai.baseUrl","path":["imageGen","openai","baseUrl"],"section":"vision","kind":"text"},
+ {"id":"auxiliaryModels.vision.provider","path":["auxiliaryModels","vision","provider"],"section":"vision","kind":"text"},
+ {"id":"auxiliaryModels.vision.id","path":["auxiliaryModels","vision","id"],"section":"vision","kind":"text"},
+ {"id":"auxiliaryModels.vision.baseUrl","path":["auxiliaryModels","vision","baseUrl"],"section":"vision","kind":"text"},
+ {"id":"auxiliaryModels.vision.apiKeyEnv","path":["auxiliaryModels","vision","apiKeyEnv"],"section":"vision","kind":"secret"},
+ {"id":"auxiliaryModels.vision.contextWindowTokens","path":["auxiliaryModels","vision","contextWindowTokens"],"section":"vision","kind":"number","min":1,"max":10000000},
+ {"id":"auxiliaryModels.vision.timeoutMs","path":["auxiliaryModels","vision","timeoutMs"],"section":"vision","kind":"number","min":1,"max":10000000},
+ {"id":"auxiliaryModels.vision.maxConcurrency","path":["auxiliaryModels","vision","maxConcurrency"],"section":"vision","kind":"number","min":1,"max":32},
+ {"id":"auxiliaryModels.vision.fallbackToMain","path":["auxiliaryModels","vision","fallbackToMain"],"section":"vision","kind":"boolean"},
+ {"id":"auxiliaryModels.vision.enabled","path":["auxiliaryModels","vision","enabled"],"section":"vision","kind":"boolean"},
+ {"id":"auxiliaryModels.vision.hostedProcessing","path":["auxiliaryModels","vision","hostedProcessing"],"section":"vision","kind":"choice","choices":["allow-with-approval","local-only"]}
+];
