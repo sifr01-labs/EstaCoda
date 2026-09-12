@@ -7,7 +7,8 @@ type Setup={id:string;windowId:string;generation:number;profileId:string;connect
 export class DesktopPublicSettings {
  #setup?:Setup;#counter=0;#busy=false;readonly #windowId=randomUUID();readonly #fields=new Map<string,SettingField>();
  constructor(readonly connection:DesktopConnection,readonly credentials:CredentialWindow,readonly pipe:()=>CredentialPipeClient|undefined){connection.on('invalidate',()=>{this.credentials.close();this.#setup=undefined;this.#fields.clear();});}
- async read(section:SettingsSection){const page=await this.connection.settingsRequest('settings.read',{section});for(const f of page.fields)this.#fields.set(f.id,f);return page;}
+ async read(section:SettingsSection,offset?:number){const page=await this.connection.settingsRequest('settings.read',{section,...(offset===undefined?{}:{offset})});for(const f of page.fields)this.#fields.set(f.id,f);return page;}
+ async value(fieldId:string,selectors:string[]){return this.connection.settingsRequest('settings.value',{fieldId,selectors});}
  begin(){if(this.#setup)throw new Error('Finish the current review first.');const setup:Setup={id:randomUUID(),windowId:this.#windowId,generation:++this.#counter,profileId:this.connection.state.profileId,connectionGeneration:this.connection.state.generation,candidates:new Map(),applying:false};this.#setup=setup;return {setupId:setup.id};}
  require(id:string){const s=this.#setup;if(!s||s.id!==id||s.profileId!==this.connection.state.profileId||s.connectionGeneration!==this.connection.state.generation)throw new Error('Settings context changed.');return s;}
  async stage(id:string,fieldId:string,selectors:string[]){const s=this.require(id),pipe=this.pipe(),field=this.#fields.get(fieldId);if(!pipe||!field||field.kind!=='secret'||s.draft||s.applying||this.#busy)throw new Error('Credential entry unavailable.');this.#busy=true;

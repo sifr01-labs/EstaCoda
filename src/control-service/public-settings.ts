@@ -13,12 +13,13 @@ export class PublicSettings {
  readonly drafts=new Map<string,Draft>();
  #closed=false;
  constructor(readonly input:{homeDir:string;profileId:string},readonly candidates:CredentialCandidates,readonly changed:()=>void|Promise<void>=()=>{}){}
- async read(section:SettingsSection):Promise<SettingsPage>{
+ async read(section:SettingsSection,offset=0):Promise<SettingsPage>{
   const snapshot=await captureProfileApplySnapshot(this.input),config=JSON.parse(snapshot.files['config.json']??'{}');
-  const all=PUBLIC_SETTINGS.filter(field=>field.section===section),fields=all.slice(0,100);
+  const all=PUBLIC_SETTINGS.filter(field=>field.section===section),fields=all.slice(offset,offset+100);
   const values=fields.filter(f=>!f.path.includes('*')&&!f.path.includes('#')&&f.kind!=='secret').map(field=>({fieldId:field.id,selectors:[],value:settingValue(config,field.path)}));
-  return {fields:structuredClone(fields),values,truncated:all.length>100};
+  return {fields:structuredClone(fields),values,truncated:all.length>offset+100,...(all.length>offset+100?{nextOffset:offset+100}:{})};
  }
+ async value(params:{fieldId:string;selectors:string[]}){const change={...params,value:null},field=settingField(change);const snapshot=await captureProfileApplySnapshot(this.input);const value=settingValue(JSON.parse(snapshot.files['config.json']??'{}'),settingPath(field,params.selectors));return {...params,value:field.kind==='secret'?(value===null?null:'configured'):value};}
  async review(params:{windowId:string;generation:number;changes:SettingChange[]}):Promise<SettingsReview>{
   if(this.#closed)throw new ControlProtocolError('-32003');
   const signal=this.candidates.windowSignal(params.windowId,params.generation);if(this.drafts.size>=32)throw new ControlProtocolError('-32009');

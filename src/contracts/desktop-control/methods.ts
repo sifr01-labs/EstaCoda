@@ -31,7 +31,8 @@ export type MethodContracts = {
   "settings.inspect":{params:{operationId?:string};result:{operationId:string;state:'applied'|'uncertain'|'unknown'}};
   "settings.verify":{params:Record<string,never>;result:{state:'configured'|'repair_required'}};
 
-  "settings.read":{params:{section:import('./settings.js').SettingsSection};result:import('./settings.js').SettingsPage};
+  "settings.value":{params:{fieldId:string;selectors:string[]};result:import('./settings.js').SettingChange};
+  "settings.read":{params:{offset?:number;section:import('./settings.js').SettingsSection};result:import('./settings.js').SettingsPage};
   "settings.review":{params:{windowId:string;generation:number;changes:import('./settings.js').SettingChange[]};result:import('./settings.js').SettingsReview};
   "settings.cancel":{params:import('./settings.js').SettingsBinding;result:{cancelled:boolean}};
   "artifacts.list":{params:{cursor?:string};result:{items:import('./artifacts.js').ArtifactProjection[];nextCursor:string|null}};

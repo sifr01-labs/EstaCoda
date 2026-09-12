@@ -26,3 +26,10 @@ it('uses the recoverable profile transaction, rejects stale review and keeps can
  const discard=candidates.stage(owner.scope(binding,'web.brave.apiKeyEnv'),'cancelled-test-value');const cancelled=await owner.review({...binding,changes:[{fieldId:'web.brave.apiKeyEnv',selectors:[],value:discard}]});owner.cancel({...binding,draftId:cancelled.draftId});expect(()=>candidates.read(discard,owner.scope(binding,'web.brave.apiKeyEnv'))).toThrow();expect(await readFile(paths.envPath,'utf8')).not.toContain('cancelled-test-value');
  }finally{owner.dispose();candidates.dispose();await rm(homeDir,{recursive:true,force:true});}
 });
+it('round trips public specialist options and pages every registered model setting',async()=>{
+ const homeDir=await mkdtemp(join(tmpdir(),'ec-settings-')),input={homeDir,profileId:'default'},paths=resolveProfileStateHome(input),candidates=new CredentialCandidates('default','instance'),owner=new PublicSettings(input,candidates);
+ try{await mkdir(paths.profileRoot,{recursive:true});await writeFile(paths.configPath,JSON.stringify({auxiliaryModels:{compression:'local/test-model'}}));const first=await owner.read('models');expect(first.nextOffset).toBe(100);const second=await owner.read('models',first.nextOffset);expect(second.fields.some(f=>f.id==='auxiliaryModels.profile_context.timeoutMs')).toBe(true);
+ const binding={windowId:'w',generation:1};const review=await owner.review({...binding,changes:[{fieldId:'auxiliaryModels.compression.timeoutMs',selectors:[],value:12000},{fieldId:'model.maxTokens',selectors:[],value:4096}]});await owner.apply({...binding,draftId:review.draftId},new AbortController().signal);const config=JSON.parse(await readFile(paths.configPath,'utf8'));expect(config.auxiliaryModels.compression).toMatchObject({provider:'local',id:'test-model',timeoutMs:12000});expect((await owner.value({fieldId:'model.maxTokens',selectors:[]})).value).toBe(4096);
+ await expect(owner.review({...binding,changes:[{fieldId:'providers.*.baseUrl',selectors:['test'],value:'https://user:secret@example.com'}]})).rejects.toThrow();
+ }finally{owner.dispose();candidates.dispose();await rm(homeDir,{recursive:true,force:true});}
+});

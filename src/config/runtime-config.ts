@@ -1,3 +1,4 @@
+import {profileHeaderEnvironment,resolveHeaderReferences} from './header-secret-references.js';
 import {withProfileWriteLock, assertProfileApplySettled} from './profile-write-lock.js';
 import { parseExecutionPolicy } from "../execution/docker-policy.js";
 import type { RequestedExecutionPolicy } from "../contracts/execution-authority.js";
@@ -447,6 +448,7 @@ export type EstaCodaConfig = {
     timeoutMs?: number;
     staleTimeoutMs?: number;
     headers?: Record<string, string>;
+    headerRefs?: Record<string,string>;
   }>;
   auxiliaryModels?: AuxiliaryModelConfig;
   web?: {
@@ -980,6 +982,7 @@ export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Prom
     ...options.modelsDevOptions
   });
   const providerRegistry = buildProviderRegistry(config, {
+    headerEnvironment:options.configurationInspection||!Object.values(config.providers??{}).some(p=>Object.keys(p.headerRefs??{}).length)?{}:await profileHeaderEnvironment({homeDir,profileId}),
     fetch: options.providerFetch,
     catalogProfiles
   });
@@ -1513,7 +1516,7 @@ export function normalizeAuxiliaryModels(
   return normalized;
 }
 
-function normalizeAuxiliarySlotInput(
+export function normalizeAuxiliarySlotInput(
   slot: AuxiliaryModelSlotInput | undefined,
   path: string
 ): AuxiliaryModelSlotConfig | undefined {
@@ -2542,6 +2545,7 @@ function normalizeToolResultContinuityPaths(value: unknown): Record<string, stri
 }
 
 export function buildProviderRegistry(config: EstaCodaConfig, options: {
+  headerEnvironment?:Readonly<Record<string,string|undefined>>;
   fetch?: ProviderFetchLike;
   catalogProfiles?: readonly ModelProfile[];
 } = {}): ProviderRegistry {
@@ -2550,6 +2554,7 @@ export function buildProviderRegistry(config: EstaCodaConfig, options: {
   for (const [provider, providerConfig] of Object.entries(config.providers ?? {})) {
     const providerId = provider as ProviderId;
     const models = providerConfig.models ?? [];
+    const headerState=resolveHeaderReferences(providerConfig.headers,providerConfig.headerRefs,options.headerEnvironment??{});
 
     const kind = providerConfig.kind ?? "openai-compatible";
     if (kind === "openai-compatible") {
@@ -2569,14 +2574,14 @@ export function buildProviderRegistry(config: EstaCodaConfig, options: {
             apiKey: providerConfig.apiKeyEnv === undefined
               ? { kind: "none" }
               : { kind: "env", name: providerConfig.apiKeyEnv },
-            headers: mergeProviderEndpointHeaders(metadata.defaultHeaders, providerConfig.headers)
+            headers: mergeProviderEndpointHeaders(metadata.defaultHeaders, headerState.headers)
           } satisfies ProviderEndpoint,
           models: enrichModelProfiles({
             provider: providerId,
             models,
             catalogProfiles: options.catalogProfiles
           }),
-          enableNetwork: providerConfig.enableNetwork ?? false,
+          enableNetwork: headerState.configured && (providerConfig.enableNetwork ?? false),
           fetch: options.fetch
         }));
         continue;
@@ -2589,14 +2594,14 @@ export function buildProviderRegistry(config: EstaCodaConfig, options: {
           apiKey: providerConfig.apiKeyEnv === undefined
             ? { kind: "none" }
             : { kind: "env", name: providerConfig.apiKeyEnv },
-          headers: mergeProviderEndpointHeaders(metadata.defaultHeaders, providerConfig.headers)
+          headers: mergeProviderEndpointHeaders(metadata.defaultHeaders, headerState.headers)
         } satisfies ProviderEndpoint,
         models: enrichModelProfiles({
           provider: providerId,
           models,
           catalogProfiles: options.catalogProfiles
         }),
-        enableNetwork: providerConfig.enableNetwork ?? false,
+        enableNetwork: headerState.configured && (providerConfig.enableNetwork ?? false),
         fetch: options.fetch
       }));
       continue;

@@ -1,5 +1,6 @@
 export type DesktopSettingsApi={
- read(section:import('@estacoda/control-protocol').SettingsSection):Promise<import('@estacoda/control-protocol').SettingsPage>;
+ value(fieldId:string,selectors:string[]):Promise<import('@estacoda/control-protocol').SettingChange>;
+ read(section:import('@estacoda/control-protocol').SettingsSection,offset?:number):Promise<import('@estacoda/control-protocol').SettingsPage>;
  begin():Promise<{setupId:string}>;
  stage(setupId:string,fieldId:string,selectors:string[]):Promise<{staged:boolean}>;
  review(setupId:string,changes:import('@estacoda/control-protocol').SettingChange[]):Promise<import('@estacoda/control-protocol').SettingsReview>;

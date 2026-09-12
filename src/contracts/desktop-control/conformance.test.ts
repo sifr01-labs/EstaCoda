@@ -32,6 +32,7 @@ const activities: ActivityProjection[] = [
 const artifactReference={source:'session' as const,ownerId:'s',artifactId:'a'};
 const artifactPreview={artifact:{reference:artifactReference,displayName:'report.txt',mimeType:'text/plain',bytes:0,sha256:'a'.repeat(64),createdAt:'2026-09-12',retention:'retained' as const,sourceOrigin:null,workIds:['session:s'],target:null},integrity:'verified' as const,text:'',truncated:false,reason:null};
 const cases = {
+ 'settings.value':{params:{fieldId:'ui.language',selectors:[]},result:{fieldId:'ui.language',selectors:[],value:'en'}},
  "settings.apply":{params:{draftId:'draft',windowId:'window',generation:1},result:{operationId:'draft',state:'applied'}},
  "settings.inspect":{params:{},result:{operationId:'none',state:'unknown'}},
  "settings.verify":{params:{},result:{state:'configured'}},

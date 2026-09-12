@@ -1,4 +1,6 @@
 export const settingsArabic={
+ 'Load current value':'تحميل القيمة الحالية',
+ 'Load more settings':'تحميل إعدادات إضافية',
  'Select':'اختيار',
  'More settings are available. Narrow the selection.':'توجد إعدادات إضافية. حدّد نطاق الاختيار.',
  'Advanced settings':'الإعدادات المتقدمة',
