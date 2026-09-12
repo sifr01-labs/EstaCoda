@@ -1,3 +1,5 @@
+import {ArtifactStore} from '../../../src/artifacts/artifact-store.ts';
+import {createHash} from 'node:crypto';
 import {nativeWorkOwner} from './native-work-owner.mts';
 import{createServer}from'node:http';
 import{_electron,expect}from'@playwright/test';
@@ -20,6 +22,8 @@ await ensureRuntimeSession({sessionDb:db,sessionId:'desktop-existing',profileId:
 await db.appendMessage({sessionId:'desktop-existing',role:'user',content:'Inspect the existing fixture workspace.'});
 await db.appendMessage({sessionId:'desktop-existing',role:'agent',content:'Canonical persisted activity from the existing owner.'});
 for(let i=0;i<20;i++)await db.appendMessage({sessionId:'desktop-existing',role:'agent',content:'Activity sample '+i+': '+ 'Reviewable evidence remains attached to its owning Work. '.repeat(8)});
+const artifactCapture=join(home,'report.txt'),artifactBody='Native retained report';writeFileSync(artifactCapture,artifactBody);
+const nativeArtifact=await new ArtifactStore({storageRoot:join(paths.profileRoot,'artifacts')}).retainSessionArtifact({sessionId:'desktop-existing',profileId:'default',capturePath:artifactCapture,kind:'document',bytes:Buffer.byteLength(artifactBody),mimeType:'text/plain',sha256:createHash('sha256').update(artifactBody).digest('hex'),source:{kind:'browser.download',filename:'report.txt',description:'Native report',origin:'https://example.com'},persist:async artifact=>db.appendEvent('desktop-existing',{kind:'session-artifact-registered',artifact})});
 const target=(await db.getSession('desktop-existing'))!.executionTarget!;
 const approvals=new GatewayApprovalQueue({db:db.db,controller:new WorkspaceApprovalController({store:new WorkspaceApprovalStore({path:join(home,'approvals.json')})})});
 const pending=await approvals.createPendingApproval({sessionId:'desktop-existing',profileId:'default',commandPreview:'printf fixture',commandPayload:'printf fixture',commandHash:createCommandHash('printf fixture'),toolName:'terminal.run',requestedAt:new Date(),expiresAt:new Date(Date.now()+3600000),channel:'telegram',chatId:'fixture-chat',executionApproval:{schemaVersion:1,id:'fixture-action',actionKey:'a'.repeat(64),authorizationRevision:0,expiresAt:Date.now()+3600000,executionScope:{schemaVersion:1,profileId:'default',sessionId:'desktop-existing',workspaceIdentityHash:target.workspace.identityHash,authorityFingerprint:'b'.repeat(64),environmentInstanceId:'fixture-owner',surfaceKey:'channel:'+'c'.repeat(64)}}});
@@ -35,7 +39,12 @@ try{
  app=await launch();let page=await app.firstWindow();await expect.poll(()=>page.evaluate(async()=>(await window.desktop.snapshot()).status),{timeout:20000}).toBe('ready');
  const exposed=await page.evaluate(()=>({keys:Object.keys(window.desktop).sort(),node:typeof (window as any).require,process:typeof(window as any).process,credential:typeof(window as any).credential}));
  expect(await page.evaluate(()=>Object.keys(window.desktop.targets!).sort())).toEqual(['list','inspect','review','create','cancel','execute','operation'].sort());
- expect(exposed.node).toBe('undefined');expect(exposed.process).toBe('undefined');expect(exposed.credential).toBe('undefined');expect(exposed.keys).toEqual(['files','diff','terminal','targets','connections','work','models','activity','getWork','appearance','close','minimize','moreInbox','moreWork','onSnapshot','platform','profiles','reconnect','setAppearance','snapshot','switchProfile','toggleMaximize'].sort());
+ expect(exposed.node).toBe('undefined');expect(exposed.process).toBe('undefined');expect(exposed.credential).toBe('undefined');expect(exposed.keys).toEqual(['artifacts','evidence','files','diff','terminal','targets','connections','work','models','activity','getWork','appearance','close','minimize','moreInbox','moreWork','onSnapshot','platform','profiles','reconnect','setAppearance','snapshot','switchProfile','toggleMaximize'].sort());
+ const artifactReference={source:'session' as const,ownerId:'desktop-existing',artifactId:nativeArtifact.id};
+ expect((await page.evaluate(()=>window.desktop.artifacts!.list())).items.some(item=>item.reference.artifactId===nativeArtifact.id)).toBe(true);
+ expect(await page.evaluate(reference=>window.desktop.artifacts!.open(reference),artifactReference)).toMatchObject({integrity:'verified',text:artifactBody});
+ expect((await page.evaluate(()=>window.desktop.evidence!.get('session:desktop-existing'))).state).toBe('unverified');
+ record('Native retained artifact preview and unverified completion evidence passed.');
  expect(await page.evaluate(async()=>(await window.desktop.snapshot()).runtime)).toBe('ready');
  expect(await page.evaluate(async()=>(await window.desktop.getWork((await window.desktop.snapshot()).work.items.find(item=>item.canonicalId==='desktop-existing')!.id)).canonicalId)).toBe('desktop-existing');
  await page.locator('.ec-taskbutton').first().click();await expect(page.getByText('Canonical persisted activity from the existing owner.',{exact:true})).toBeVisible();

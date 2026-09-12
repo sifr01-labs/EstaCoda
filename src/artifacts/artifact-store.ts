@@ -233,6 +233,8 @@ export class ArtifactStore {
     if (createRoot) {
       await mkdir(configuredObjectsRoot, { recursive: true, mode: 0o700 });
     }
+    const rootInfo = await lstat(this.#storageRoot);
+    if (!rootInfo.isDirectory() || rootInfo.isSymbolicLink()) throw new Error("Artifact root is not a private directory.");
     const resolvedRoot = await realpath(this.#storageRoot);
     const resolvedObjectsRoot = await realpath(configuredObjectsRoot);
     if (resolvedObjectsRoot !== resolve(resolvedRoot, "objects")) {

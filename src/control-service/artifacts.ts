@@ -1,5 +1,5 @@
-import {lstat} from 'node:fs/promises';
-import {join} from 'node:path';
+import {lstat,realpath} from 'node:fs/promises';
+import {join,relative} from 'node:path';
 import {SQLiteSessionDB} from '../session/sqlite-session-db.js';
 import {SQLiteTaskStore} from '../tasks/sqlite-task-store.js';
 import {TaskResultService} from '../tasks/task-result-service.js';
@@ -25,7 +25,7 @@ async function resolveArtifact(input:Input,db:SQLiteSessionDB,reference:Artifact
   const attempt=attemptRow?tasks.getAttempt(attemptRow.id):null,task=attempt?tasks.getTask(attempt.taskId):null;
   const links=sessionArtifactLinks(input.profileId,session,task??undefined,attempt??undefined),metadata=retainedArtifactMetadata(registration);
   return {artifact:{reference,displayName:metadata.displayName,mimeType:metadata.mimeType,bytes:metadata.bytes,sha256:metadata.sha256,createdAt:metadata.createdAt,retention:'retained',sourceOrigin:metadata.sourceOrigin,workIds:links.workIds,target:metadata.provenance?.target??(session.executionTarget?{targetId:session.executionTarget.targetId,targetGeneration:session.executionTarget.targetGeneration}:null)},
-   preview:()=>new ArtifactStore({storageRoot:join(paths.profileRoot,'artifacts')}).previewRegistration(registration,{sessionId:session.id,profileId:input.profileId})};
+   preview:async()=>{await assertProfileContentRoot(input,join(paths.profileRoot,'artifacts'));return new ArtifactStore({storageRoot:join(paths.profileRoot,'artifacts')}).previewRegistration(registration,{sessionId:session.id,profileId:input.profileId});}};
  }
  const task=tasks.getTask(reference.ownerId),result=tasks.getResult(reference.artifactId);
  if(!task||!result||result.taskId!==task.id)throw new Error('Result unavailable.');
@@ -33,8 +33,8 @@ async function resolveArtifact(input:Input,db:SQLiteSessionDB,reference:Artifact
  // Source navigation must not open a session from a different profile.
  const session=await db.getSessionForProfile(task.originSessionId,input.profileId);
  const workIds=links.workIds.filter(id=>!id.startsWith('session:')||session!==null);
- return {artifact:{reference,displayName:safeText(result.displaySummary??'Task result',160),mimeType:result.mimeType??'application/octet-stream',bytes:result.byteLength,sha256:result.contentHash,createdAt:result.createdAt,retention:result.status==='pruned'?'pruned':result.expiresAt&&Date.parse(result.expiresAt)<=Date.now()?'expired':'retained',sourceOrigin:null,workIds,target:task.executionTarget?{targetId:task.executionTarget.targetId,targetGeneration:task.executionTarget.targetGeneration}:null},
-  preview:async()=>{if(!session)throw new Error('Source session unavailable.');const value=await new TaskResultService({store:tasks,profileId:input.profileId,contentRoot:paths.taskResultsPath}).preview({taskId:task.id,resultId:result.id,sessionId:session.id});return{...value,text:value.text===null?null:safeText(value.text,16384)};}};
+ return {artifact:{reference,displayName:safeText(result.displaySummary??'Task result',160),mimeType:result.mimeType??'application/octet-stream',bytes:result.byteLength,sha256:result.contentHash.replace(/^sha256:/u,''),createdAt:result.createdAt,retention:result.status==='pruned'?'pruned':result.expiresAt&&Date.parse(result.expiresAt)<=Date.now()?'expired':'retained',sourceOrigin:null,workIds,target:task.executionTarget?{targetId:task.executionTarget.targetId,targetGeneration:task.executionTarget.targetGeneration}:null},
+  preview:async()=>{await assertProfileContentRoot(input,paths.taskResultsPath);if(!session)throw new Error('Source session unavailable.');const value=await new TaskResultService({store:tasks,profileId:input.profileId,contentRoot:paths.taskResultsPath}).preview({taskId:task.id,resultId:result.id,sessionId:session.id});return{...value,text:value.text===null?null:safeText(value.text,16384)};}};
 }
 export async function listArtifacts(input:Input,params:{cursor?:string},signal:AbortSignal):Promise<{items:ArtifactProjection[];nextCursor:string|null}>{
  // A bounded keyset, not a scan of all transcripts. Cursors carry no authority.
@@ -56,4 +56,9 @@ export async function inspectArtifact(input:Input,reference:ArtifactReference,op
   try{const result=await preview();signal.throwIfAborted();return{artifact,integrity:'verified',...result,reason:null};}
   catch{signal.throwIfAborted();return{artifact,integrity:'unavailable',text:null,truncated:false,reason:'Content is missing, expired, pruned, unsupported, or failed its integrity check.'};}
  }finally{db.close();}
+}
+
+async function assertProfileContentRoot(input:Input,path:string):Promise<void>{
+ const state=resolveGlobalStateHome(input).stateRoot;
+ if(await realpath(path)!==join(await realpath(state),relative(state,path)))throw new Error('Profile content root changed.');
 }

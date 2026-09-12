@@ -17,6 +17,10 @@ it('projects durable artifacts and current-turn evidence with profile isolation'
   const retained=await new ArtifactStore({storageRoot:root}).retainSessionArtifact({sessionId:'s',profileId:'p',capturePath:capture,kind:'document',bytes:Buffer.byteLength(content),mimeType:'text/plain',sha256:createHash('sha256').update(content).digest('hex'),source:{kind:'browser.download',filename:'report.txt',description:'Report',origin:'https://example.com'},persist:async artifact=>db.appendEvent('s',{kind:'session-artifact-registered',artifact})});
   const page=await listArtifacts(input,{},signal);expect(page.items).toHaveLength(1);expect(JSON.stringify(page)).not.toContain(root);
   const reference={source:'session' as const,ownerId:'s',artifactId:retained.id};expect(await inspectArtifact(input,reference,true,signal)).toMatchObject({integrity:'verified',text:content});
+  const {rename,symlink}=await import('node:fs/promises');
+  await rename(root,root+'-outside');await symlink(root+'-outside',root);
+  expect((await inspectArtifact(input,reference,true,signal)).integrity).toBe('unavailable');
+  await rm(root);await rename(root+'-outside',root);
   expect((await listArtifacts({...input,profileId:'other'},{},signal)).items).toEqual([]);await expect(inspectArtifact({...input,profileId:'other'},reference,true,signal)).rejects.toThrow();
   await db.appendMessage({id:'turn',sessionId:'s',role:'user',content:'Read the report'});
   await db.appendEvent('s',{kind:'execution-evidence-recorded',toolCallId:'read',tool:'file.read',status:'success',riskClass:'read-only-local',visibleTurnId:'turn',executionEffect:{kind:'read'}});

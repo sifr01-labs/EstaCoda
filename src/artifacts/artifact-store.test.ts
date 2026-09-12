@@ -187,3 +187,18 @@ it('preserves bounded provenance without publishing backing paths and rejects ma
 async function recreatedPreview(root: string, registration: SessionArtifactRegistration) {
   return store(root).previewRegistration(registration, scope());
 }
+
+it('keeps a fresh retained inode and rejects altered, missing, and linked content on every preview',async()=>{
+ const {open,unlink,symlink}=await import('node:fs/promises');
+ const root=await temporaryRoot(),capture=join(root,'capture.json');await writeFile(capture,content);
+ const writer=await open(capture,'r+');let registration:SessionArtifactRegistration|undefined;
+ try{
+  await store(root).retainSessionArtifact({...scope(),capturePath:capture,kind:'data',bytes:Buffer.byteLength(content),mimeType:'application/json',sha256,source:source(),persist:async value=>{registration=value;}});
+  await writer.write(Buffer.from('X'),0,1,0);
+  expect((await recreatedPreview(root,registration!)).text).toBe(content);
+ }finally{await writer.close();}
+ const object=join(root,'artifacts','objects','object-1');
+ await writeFile(object,'X'.repeat(content.length));await expect(recreatedPreview(root,registration!)).rejects.toThrow();
+ await unlink(object);await expect(recreatedPreview(root,registration!)).rejects.toThrow();
+ const foreign=join(root,'foreign.json');await writeFile(foreign,content);await symlink(foreign,object);await expect(recreatedPreview(root,registration!)).rejects.toThrow();
+});

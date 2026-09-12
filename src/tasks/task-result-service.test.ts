@@ -457,6 +457,30 @@ describe("TaskResultService", () => {
     expect(() => store.updateResult({ ...result, status: "available" })).toThrow(/immutable|Illegal Result/u);
   });
 
+  it("projects canonical Results in Desktop and preserves pruning and integrity", async () => {
+    const {renameSync}=await import('node:fs');
+    const {resolveGlobalStateHome,resolveProfileStateHome}=await import('../config/profile-home.js');
+    const {listArtifacts,inspectArtifact}=await import('../control-service/artifacts.js');
+    const input={homeDir:tempDir,profileId:'alpha'},signal=new AbortController().signal;
+    const database=resolveGlobalStateHome(input).sessionsSqlitePath;
+    sessionDb.close();mkdirSync(join(tempDir,'.estacoda'),{recursive:true});renameSync(join(tempDir,'sessions.sqlite'),database);
+    sessionDb=new SQLiteSessionDB({path:database});store=new SQLiteTaskStore({db:sessionDb.db,profileId:'alpha'});
+    contentRoot=resolveProfileStateHome(input).taskResultsPath;service=createService();
+    const result=service.record({taskId:'task-alpha',kind:'summary',content:'retained result'});
+    const reference={source:'task' as const,ownerId:'task-alpha',artifactId:result.id};
+    const page=await listArtifacts(input,{cursor:'task:0'},signal);expect(page.items).toHaveLength(1);expect(page.items[0]?.sha256).toHaveLength(64);
+    const opened=await inspectArtifact(input,reference,true,signal);expect(opened).toMatchObject({integrity:'verified',text:'retained result'});
+    expect(JSON.stringify(opened)).not.toContain(contentRoot);
+    await expect(inspectArtifact({...input,profileId:'beta'},reference,true,signal)).rejects.toThrow();
+    writeFileSync(contentPath(result.handle),'altered result!');expect((await inspectArtifact(input,reference,true,signal)).integrity).toBe('unavailable');
+    service.prune(result.taskId,result.id);expect(await inspectArtifact(input,reference,true,signal)).toMatchObject({artifact:{retention:'pruned'},integrity:'unavailable',text:null});
+  });
+
+  it("refuses an expired retained Result through the shared preview", async () => {
+    const result=service.record({taskId:'task-alpha',kind:'summary',content:'old',expiresAt:'2029-12-31T00:00:00.000Z'});
+    await expect(service.preview({taskId:result.taskId,resultId:result.id,sessionId:'creator-alpha'})).rejects.toThrow(TaskResultAccessError);
+  });
+
   function createService(): TaskResultService {
     return new TaskResultService({
       store,

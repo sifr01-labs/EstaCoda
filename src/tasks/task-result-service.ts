@@ -9,6 +9,7 @@ import {
   mkdirSync,
   openSync,
   readFileSync,
+  readSync,
   readdirSync,
   renameSync,
   unlinkSync,
@@ -574,18 +575,21 @@ export class TaskResultService {
       if (pathStat.isSymbolicLink() || !pathStat.isFile()) {
         throw new TaskResultContentError("content-path-invalid", "Task result content path is not a regular file.");
       }
-      descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW);
+      descriptor = openSync(path, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
       const stat = fstatSync(descriptor);
       if (!stat.isFile()) {
         throw new TaskResultContentError("content-path-invalid", "Task result content path is not a regular file.");
       }
-      if (stat.size !== result.byteLength) {
+      if (stat.size !== result.byteLength || !Number.isSafeInteger(result.byteLength) || result.byteLength < 0 || result.byteLength > TASK_GRAPH_LIMITS.maxResultBytesPerStep) {
         throw new TaskResultContentError(
           "content-integrity-failed",
           "Task result content failed integrity verification."
         );
       }
-      bytes = readFileSync(descriptor);
+      bytes = Buffer.alloc(result.byteLength); let offset = 0;
+      while (offset < bytes.length) { const count = readSync(descriptor, bytes, offset, bytes.length - offset, offset); if (!count) throw new TaskResultContentError("content-integrity-failed", "Task result read incomplete."); offset += count; }
+      const after = fstatSync(descriptor), current = lstatSync(path);
+      if (after.size !== stat.size || after.mtimeMs !== stat.mtimeMs || after.ctimeMs !== stat.ctimeMs || current.ino !== stat.ino || current.dev !== stat.dev || current.isSymbolicLink()) throw new TaskResultContentError("content-integrity-failed", "Task result changed during read.");
     } catch (error) {
       if (error instanceof TaskResultContentError) throw error;
       throw new TaskResultContentError("content-missing", "Task result content is unavailable.", { cause: error });
