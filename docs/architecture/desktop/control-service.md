@@ -138,3 +138,20 @@ checks, trust/target validation, revocation and conditional detach. Redemption r
 ChannelGateway's execution-owner checks. No connection projection or code grants runtime
 ownership. See [Connections and Telegram](connections-and-telegram.md) for operator flow,
 restart requirements, bounded receipt retention and the remaining real-account check.
+
+
+## PR9 target lifecycle
+
+All handlers use the selected profile's shared core target store. The renderer supplies opaque target references; it cannot supply a Git command, arbitrary destination or profile authority. Main retains creation reviews and creates lifecycle operation IDs. No new execution owner is involved.
+
+| Method | Contract |
+| --- | --- |
+| `targets.list` | First 100 core target records, including blockers/archived entries; explicit truncation |
+| `targets.inspect` | Target ID + expected generation → source/working roots, verified readiness, dirty/unknown state, borrowers and cleanup state |
+| `targets.reviewCreate` | Source target reference → bridge-local five-minute review of generated destination/branch and frozen commit |
+| `targets.create` | Matching review/source reference and explicit new-path trust → canonical creation receipt |
+| `targets.cancelReview` | Discard the ephemeral review; no Git creation or trust mutation |
+| `targets.execute` | Main operation ID, current target reference, archive/cleanup action and confirmation → durable lifecycle receipt |
+| `targets.inspectOperation` | Selected-profile operation lookup; unknown/uncertain results do not authorize replay |
+
+`work.targets` remains the trusted-target picker for new Work. Existing Work's target binding is immutable. Target creation is classified as a mutation for timeout/cancellation reporting even though its operation ID comes from a review token. Readiness and displayed paths never replace core execution/ownership checks. See [worktree operations and recovery](worktrees.md).

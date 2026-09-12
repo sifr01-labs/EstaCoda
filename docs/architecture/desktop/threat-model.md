@@ -28,6 +28,7 @@ The local OS account is the operator trust boundary. This is not isolation again
 | D14 | Artifact/Evolution content becomes authority | Bounded inert preview with provenance; no executable auto-open; reuse integrity/retention and governed promotion | PRs 11/14: wrong source/profile, poisoned content, missing/tampered artifact and rejected promotion |
 | D15 | Packaged app launches arbitrary binary or breaks CLI | Resolve owned compatible runtime assets in Main; no renderer executable selector; preserve signing and native-module ABI; independent CLI packaging | PRs 5/16: relocation, spaces/Unicode, installed CLI coexistence, compatible binary and quit/relaunch |
 | D16 | Demo code impersonates healthy runtime | Isolated fixture entry point excluded from release; no real credentials/service access; unavailable live state never falls back to demo success | PR 5: fixture isolation and release-entry checks; visual tests are not live security tests |
+| D17 | Worktree creation or cleanup loses trust, crosses a profile, or deletes active/dirty data | Core immutable provenance and generations, bridge-bound review, explicit new-path trust, serialized atomic trust writes, durable receipts/borrowers and no force removal | PR 9: source/root replacement, cross-profile local reinterpretation, archive race, hooks/filters, concurrent trust changes, interrupted borrowers, dirty/ignored/locked cleanup, real host/Docker and native Work bindings |
 
 ## Authority routing
 

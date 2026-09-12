@@ -1097,6 +1097,8 @@ Connect the PR 5 Connections components to real readiness, authorization, and ga
 
 ### PR 9 — Execution targets
 
+Implemented on the desktop branch; see the [PR9 implementation and validation record](desktop-pr9.md) and [worktree trust/recovery guide](../architecture/desktop/worktrees.md). Live file/diff/PTY consumers remain PR10.
+
 - `feat(control-service): project shared core target contracts and bindings`
 - `feat(execution-targets): extend core targets with managed Git worktree provenance`
 - `feat(worktrees): implement creation and verification`

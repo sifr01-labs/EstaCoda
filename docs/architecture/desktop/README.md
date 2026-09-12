@@ -1,12 +1,12 @@
 # Desktop architecture foundation
 
-Status: Desktop PRs 1–8 are implemented on the desktop branch. The Electron shell, profile-bound control-service bridge, live Work/Inbox controls, approved visual fixtures, Models/Providers and Telegram flows are available. The shared supervisor retains execution ownership.
+Status: Desktop PRs 1–9 are implemented on the desktop branch. The Electron shell, profile-bound control-service bridge, live Work/Inbox controls, approved visual fixtures, Models/Providers, Telegram and managed worktree flows are available. The shared supervisor retains execution ownership.
 
 Read this alongside the [Desktop delivery plan](../../planning/desktop-implementation-plan.md), [approved visual contract](../../planning/desktop-visual-contract.md), and [shared ownership decisions](../../planning/workspace-execution-ownership-decisions.md). Shared ownership decisions govern core authority; the visual contract governs presentation. Neither fixture data nor a UI projection grants execution authority.
 
 ## Product and delivery scope
 
-Desktop is a local operator application for governed, persistent Work. Users can configure models and providers, create and inspect Work, resolve approvals, select Work-scoped model overrides, and configure Telegram. Dedicated target management, files/diff/terminal and artifact workflows remain subsequent milestones. See the [Models and Providers guide](models-and-providers.md), [Work guide](work.md), and [Connections and Telegram guide](connections-and-telegram.md).
+Desktop is a local operator application for governed, persistent Work. Users can configure models and providers, create and inspect Work, resolve approvals, select Work-scoped model overrides, configure Telegram, and create/select managed worktrees. Files/diff/terminal and artifact workflows remain subsequent milestones. See the [Models and Providers guide](models-and-providers.md), [Work guide](work.md), [Connections and Telegram guide](connections-and-telegram.md), and [worktree guide](worktrees.md).
 
 | Delivery | Scope |
 | --- | --- |
@@ -16,7 +16,8 @@ Desktop is a local operator application for governed, persistent Work. Users can
 | PR 6 | Live Models/Providers, reviewed setup/recovery, Session/Task model overrides |
 | PR 7 | Live Work/Inbox controls, bounded attachments, canonical usage and restart recovery |
 | PR 8 | Reviewed Telegram setup, gateway operations, canonical conversations and handoff |
-| PRs 9–12 and 16 | Managed worktrees, files/diff/terminal, artifacts/evidence, view-only browser, packaged macOS alpha |
+| PR 9 | Core managed worktrees, reviewed creation/trust, fenced selection, archive and safe cleanup |
+| PRs 10–12 and 16 | Files/diff/terminal, artifacts/evidence, view-only browser, packaged macOS alpha |
 | PRs 13–15 | Browser takeover, governed Library/settings, scheduling |
 
 General plugins, remote execution environments, organization/multi-tenant controls, automatic updates, and Desktop Docker management are outside the first alpha. Existing core Docker/copy support does not automatically expose a Desktop capability. Windows shared control remains gated on protected named-pipe support; macOS is the initial packaged target. The CLI stays independently installable and runnable.
