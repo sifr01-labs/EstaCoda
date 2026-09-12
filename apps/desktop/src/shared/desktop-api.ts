@@ -51,6 +51,12 @@ export type DesktopWorkApi = {
  pin(workId:string,pinned:boolean):Promise<WorkProjection[]>;
 };
 export type DesktopConnectionsApi={
+ execute(action:import('@estacoda/control-protocol').TelegramOperationAction,confirmed:true,destination?:string):Promise<import('@estacoda/control-protocol').ConnectionOperation>;
+ pairing():Promise<MethodContracts['telegram.pairing']['result']>;
+ sessions():Promise<MethodContracts['telegram.sessions']['result']>;
+ sessionDetails(workId:string):Promise<MethodContracts['telegram.sessionDetails']['result']>;
+ handoff(workId:string,action:'create'|'revoke'|'detach',confirmed:true,attachmentId?:string):Promise<import('@estacoda/control-protocol').ConnectionOperation>;
+
  diagnostics():Promise<MethodContracts['gateway.diagnostics']['result']>;
  gateway(action:import('@estacoda/control-protocol').GatewayAction,acknowledgeSharedWork:true):Promise<import('@estacoda/control-protocol').ConnectionOperation>;
  inspectOperation():Promise<import('@estacoda/control-protocol').ConnectionOperation|null>;

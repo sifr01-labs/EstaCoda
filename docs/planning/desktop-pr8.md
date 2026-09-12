@@ -116,3 +116,14 @@ silently repeated under a new identity for the same action. The UI explains that
 lifecycle affects shared Work and is independent of the Desktop window.
 
 Validation: Desktop foundation/boundary check and desktop unit suite.
+
+## Step 11 — Telegram operations and Work handoff
+
+Added reviewed pairing, command-menu sync, authorized delivery testing, canonical
+conversation navigation and Work-scoped handoff create/inspect/revoke/detach controls.
+Main resolves Work references to canonical selected-profile Sessions and creates operation
+IDs. The renderer cannot supply credentials, raw commands, filesystem paths or execution
+ownership. Profile switching remounts Connections to clear prior-profile details immediately.
+
+Validation: Desktop foundation/boundary check and desktop unit suite. External delivery
+remains an explicit operator action; automated checks use synthetic transports.
