@@ -437,6 +437,7 @@ async function applyProviderRoute(
       apiKeyEnv: context.credentialEnv,
       contextWindowTokens,
       maxTokens: numberValue(operation.review.values.maxTokens),
+      resetLimits: options.persistRouteTransport,
     },
   });
 }
@@ -464,6 +465,7 @@ async function applyFallbackRoute(
     ...(baseUrl !== undefined ? { baseUrl } : {}),
     ...(apiKeyEnv !== undefined ? { apiKeyEnv } : {}),
     ...(contextWindowTokens !== undefined ? { contextWindowTokens } : {}),
+    ...(numberValue(operation.review.values.maxTokens)!==undefined?{maxTokens:numberValue(operation.review.values.maxTokens)}:{}),
   };
   const target = configApplyTarget(operation, options);
   const profileId = target.profileId ?? readActiveProfile({ homeDir: target.homeDir }).profileId ?? defaultProfileId();
@@ -481,9 +483,9 @@ async function applyFallbackRoute(
       provider,
       baseUrl,
       kind: "openai-compatible",
-      enableNetwork: true,
-      apiMode: authMethod === undefined || authMethod === "api_key" ? undefined : apiMode,
-      authMethod: authMethod === "api_key" ? undefined : authMethod,
+      enableNetwork: operation.review.values.enableNetwork !== false,
+      apiMode: options.persistRouteTransport?apiMode:authMethod === undefined || authMethod === "api_key" ? undefined : apiMode,
+      authMethod: options.persistRouteTransport?authMethod:authMethod === "api_key" ? undefined : authMethod,
     },
   });
   if (apiKeyEnv !== undefined && (!options.persistRouteTransport || !providerAlreadyConfigured)) {
@@ -560,7 +562,7 @@ async function applyAuxiliaryModelRoute(
   if(options.persistRouteTransport && model && resolvedProvider!=='main' && resolvedProvider!=='auto') {
     const profileId=target.profileId ?? defaultProfileId();
     const existing=await readConfig(resolveProfileStateHome({...target,profileId}).configPath);
-    if(!existing.config.providers?.[resolvedProvider])await registerProviderConfig({...target,input:{provider:resolvedProvider,baseUrl,apiKeyEnv,authMethod:providerAuthMethodValue(operation.review.values.authMethod),apiMode:providerApiModeValue(operation.review.values.apiMode),kind:'openai-compatible',enableNetwork:true}});
+    if(!existing.config.providers?.[resolvedProvider])await registerProviderConfig({...target,input:{provider:resolvedProvider,baseUrl,apiKeyEnv,authMethod:providerAuthMethodValue(operation.review.values.authMethod),apiMode:providerApiModeValue(operation.review.values.apiMode),kind:'openai-compatible',enableNetwork:operation.review.values.enableNetwork!==false}});
     await registerProviderModel({...target,input:{provider:resolvedProvider,models:[model]}});
   }
   await setupAuxiliaryModelConfig({

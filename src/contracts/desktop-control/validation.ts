@@ -75,7 +75,7 @@ const bootstrap = shape({ profile: shape({ id, label: text(240, 1), configuratio
 const subscribeResult: Check = (v) => shape({ state: choice(["subscribed"]), subscriptionId: id, cursor: isControlCursor })(v) ||
   shape({ state: choice(["snapshot_required"]), reason: choice(["instance_changed", "stream_changed", "cursor_expired", "overflow"]) })(v);
 const initialize: Check = (v) => { try { assertInitializeParams(v); return true; } catch { return false; } };
-const candidateRoute=shape({providerId:id,modelId:text(200,1),endpoint:text(2048,1),authMethod:choice(['api_key','oauth','none']),apiMode:choice(['openai_chat_completions','openai_responses','custom_openai_compatible']),allowPrivateEndpoint:boolean});
+const candidateRoute=shape({providerId:id,modelId:text(200,1),endpoint:text(2048,1),authMethod:choice(['api_key','oauth','none']),apiMode:choice(['openai_chat_completions','openai_responses','custom_openai_compatible']),allowPrivateEndpoint:boolean},{enableNetwork:boolean,contextWindowTokens:integer(1,1000000000),maxTokens:integer(1,1000000000)});
 const modelRouteDraftShape=shape({draftId:id,expiresInMs:integer(1,900000),credentialState:choice(['staged','not_required']),role:choice(['primary','fallback','fallback_order','auxiliary','auxiliary_mode'])},{route:candidateRoute,slot:choice(AUXILIARY_SLOTS)});
 const modelRouteDraft:Check=v=>modelRouteDraftShape(v)&&isRecord(v)&&(['fallback_order','auxiliary_mode'].includes(String(v.role))?v.route===undefined:candidateRoute(v.route))&&(['auxiliary','auxiliary_mode'].includes(String(v.role))?choice(AUXILIARY_SLOTS)(v.slot):v.slot===undefined);
 const modelDraftBinding=shape({draftId:id,windowId:id,generation:integer(1)});

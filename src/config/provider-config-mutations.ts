@@ -43,6 +43,8 @@ export type RegisterProviderModelInput = {
 };
 
 export type SetPreferredModelRouteInput = {
+  /** A complete reviewed route replaces limits rather than inheriting the previous model. */
+  resetLimits?: boolean;
   provider: ProviderId;
   model: string;
   baseUrl?: string;
@@ -186,7 +188,9 @@ export function applySetPreferredModelRoute(
       [input.provider]: providerPatch as NonNullable<EstaCodaConfig["providers"]>[string]
     }
   };
-  return patchConfig(existing, patch);
+  const result=patchConfig(existing, patch);
+  if(input.resetLimits && result.model){if(input.contextWindowTokens===undefined)delete result.model.contextWindowTokens;if(input.maxTokens===undefined)delete result.model.maxTokens;}
+  return result;
 }
 
 /**

@@ -81,3 +81,11 @@ Validation: 27 desktop unit tests passed, including private-scope binding, cance
 The live provider dialog supports Codex device authorization, displays the service-issued code, polls bounded status, and opens sign-in only on an explicit click. Main rechecks the service status and permits only the fixed HTTPS Codex verification URL. Authorized candidates enter the same verification/review/Apply flow as API-key routes. Staged token records are validated again at Apply, including when optional verification was skipped.
 
 Validation: 28 desktop tests and 13 focused OAuth/verification/setup tests passed, plus root typecheck and desktop foundation checks. Main tests verify the exact browser destination, candidate handoff, no API-key window for OAuth, and cancellation. Live user-account authorization remains an explicit interactive acceptance step; no account login was performed during these tests.
+
+## 12. Local and custom endpoints
+
+The provider dialog supports the built-in local provider and named OpenAI-compatible endpoints, with reviewed URL, authentication, API mode, network enablement, context override and output cap. No-auth setup never opens the key window. Private/loopback verification requires an explicit choice; disabled provider requests cannot be verified. Verification honors a smaller reviewed output cap. Network/limit changes participate in the exact candidate binding.
+
+Desktop primary Apply now resets omitted limits to defaults instead of silently carrying the previous model's caps forward. Existing CLI partial-update semantics remain unchanged. Fallback transport fields and output caps are preserved by reviewed setup; specialist output-cap editing remains excluded because that core slot has no output-cap field.
+
+Validation: 115 focused core tests and 97 final limit/setup tests passed, 28 desktop tests passed, plus root typecheck and desktop foundation checks. Tests cover no-auth writes, disabled network, Responses transport, context/output persistence and reset, and credential invalidation after a cap change.

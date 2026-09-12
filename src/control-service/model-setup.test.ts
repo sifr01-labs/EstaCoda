@@ -1,3 +1,4 @@
+import {join} from 'node:path';
 import {mkdtemp,rm,readFile,mkdir,writeFile} from 'node:fs/promises';
 import {expect,it} from 'vitest';
 import {ModelSetup} from './model-setup.js';
@@ -81,4 +82,17 @@ it('manages only the five exposed specialist slots and preserves primary, fallba
     const config=JSON.parse(await readFile(paths.configPath,'utf8'));expect(config.model.id).toBe('primary');expect(config.model.fallbacks).toEqual([]);expect(config.auxiliaryModels.vision).toMatchObject({provider:'main',enabled:true});
     await expect(setup.reviewAuxiliaryMode({windowId:'w',generation:1,slot:'vision' as never,mode:'disabled',fallbackToMain:false})).rejects.toThrow();
   }finally{setup.dispose();candidates.dispose();await rm(homeDir,{recursive:true,force:true});}
+});
+it('reviews custom transport, network and limits without a key',async()=>{
+ const home=await mkdtemp('/tmp/ec-custom-limits-');const candidates=new CredentialCandidates('p','b'),setup=new ModelSetup({homeDir:home,profileId:'p'},candidates,()=>{});
+ try{
+  const route={providerId:'custom-office',modelId:'office-model',endpoint:'http://127.0.0.1:11434/v1',authMethod:'none' as const,apiMode:'openai_responses' as const,allowPrivateEndpoint:true,enableNetwork:false,contextWindowTokens:32000,maxTokens:512};
+  const draft=await setup.review({windowId:'w',generation:1,route});expect(draft.route).toEqual(route);
+  expect(await setup.apply({windowId:'w',generation:1,draftId:draft.draftId},new AbortController().signal)).toMatchObject({state:'applied'});
+  const config=JSON.parse(await readFile(join(home,'.estacoda/profiles/p/config.json'),'utf8'));
+  expect(config.providers['custom-office']).toMatchObject({authMethod:'none',apiMode:'openai_responses',enableNetwork:false});expect(config.model).toMatchObject({provider:'custom-office',id:'office-model',maxTokens:512});
+  expect(config.model.contextWindowTokens).toBe(32000);
+  const {contextWindowTokens:_context,maxTokens:_output,...defaults}=route;const reset=await setup.review({windowId:'w',generation:1,route:defaults});await setup.apply({windowId:'w',generation:1,draftId:reset.draftId},new AbortController().signal);const resetConfig=JSON.parse(await readFile(join(home,'.estacoda/profiles/p/config.json'),'utf8'));expect(resetConfig.model.contextWindowTokens).toBeUndefined();expect(resetConfig.model.maxTokens).toBeUndefined();
+  expect(await readFile(join(home,'.estacoda/profiles/p/.env'),'utf8').catch(()=>null)).toBeNull();
+ }finally{setup.dispose();candidates.dispose();await rm(home,{recursive:true,force:true});}
 });

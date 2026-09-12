@@ -20,7 +20,7 @@ export function validateCandidateRequest(params: VerifyCandidateParams): void {
       (endpoint.protocol !== 'https:' && !(endpoint.protocol === 'http:' && localHttp)) ||
       !metadata.configurable || !metadata.runnable ||
       (!metadata.allowsCustomBaseUrl && route.endpoint !== metadata.defaultBaseUrl) ||
-      (metadata.catalogKnown && route.apiMode !== metadata.apiMode) ||
+      (metadata.catalogKnown && route.providerId!=='local' && route.apiMode !== metadata.apiMode) ||
       (route.authMethod === 'api_key' && !metadata.authMethods.includes('api_key')) ||
       (route.authMethod === 'oauth' && !metadata.authMethods.some(method => method.startsWith('oauth'))) ||
       (route.authMethod === 'none' && !metadata.authMethods.includes('none')) ||
@@ -35,6 +35,7 @@ export class CandidateVerifier {
   async verify(params: VerifyCandidateParams, signal: AbortSignal): Promise<CandidateVerification> {
     validateCandidateRequest(params);
     const {route}=params;
+    if(route.enableNetwork===false)throw new ControlProtocolError('-32602');
     const binding = params.candidateId ?? `${params.windowId}:${params.generation}`;
     if (this.#busy.has(binding) || this.#busy.size >= 8) throw new ControlProtocolError('-32009');
     const scope: CandidateScope = {windowId:params.windowId,generation:params.generation,purpose:'provider',providerId:route.providerId,
@@ -45,7 +46,7 @@ export class CandidateVerifier {
       try{value=oauthCandidate(value,route.providerId).accessToken;}
       catch{if(params.candidateId)this.candidates.discard(params.candidateId,scope);throw new ControlProtocolError('-32602');}
     }
-    const combined = AbortSignal.any([signal, this.#abort.signal, AbortSignal.timeout(12_000),
+    const combined = AbortSignal.any([this.candidates.windowSignal(params.windowId,params.generation),signal, this.#abort.signal, AbortSignal.timeout(12_000),
       ...(params.candidateId ? [this.candidates.signal(params.candidateId, scope)] : [])]);
     this.#busy.add(binding);
     const started = performance.now();
@@ -57,7 +58,7 @@ export class CandidateVerifier {
       const provider = route.apiMode === 'openai_responses' ? createOpenAIResponsesProvider(options) : createOpenAICompatibleProvider(options);
       if (!provider.stream) {result.reason='unsupported';return result;}
       let done = false;
-      for await (const event of provider.stream({model:route.modelId,stream:true,maxTokens:64,
+      for await (const event of provider.stream({model:route.modelId,stream:true,maxTokens:Math.min(64,route.maxTokens??64),
         messages:[{role:'user',content:'Call the verification_ping tool with an empty object. This is a connectivity test.'}],
         tools:[{type:'function',function:{name:'verification_ping',description:'Connectivity test; never executed.',parameters:{type:'object',properties:{},additionalProperties:false}}}]},
         {credential:{id:'candidate',value},signal:combined,timeoutMs:12_000,staleTimeoutMs:12_000})) {

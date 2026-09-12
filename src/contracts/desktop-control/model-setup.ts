@@ -3,6 +3,7 @@ export type CandidateRoute = {
   authMethod: 'api_key' | 'oauth' | 'none';
   apiMode: 'openai_chat_completions' | 'openai_responses' | 'custom_openai_compatible';
   allowPrivateEndpoint: boolean;
+  enableNetwork?:boolean;contextWindowTokens?:number;maxTokens?:number;
 };
 export type VerifyCandidateParams = {
   windowId: string; generation: number; candidateId?: string;
@@ -20,7 +21,7 @@ export type ModelDraftBinding = {draftId:string;windowId:string;generation:numbe
 export type ModelApplyReceipt = {operationId:string;state:'applied'|'uncertain'|'unknown';verification:'configured'|'repair_required'|'not_tested'};
 
 export function candidateRouteBinding(route:CandidateRoute):string {
-  return JSON.stringify([route.providerId,route.modelId,route.endpoint,route.authMethod,route.apiMode,route.allowPrivateEndpoint]);
+  return JSON.stringify([route.providerId,route.modelId,route.endpoint,route.authMethod,route.apiMode,route.allowPrivateEndpoint,route.enableNetwork??true,route.contextWindowTokens??null,route.maxTokens??null]);
 }
 
 export type FallbackList={revision:string;items:{index:number;providerId:string;modelId:string}[]};

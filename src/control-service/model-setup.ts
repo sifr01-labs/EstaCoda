@@ -24,6 +24,7 @@ export class ModelSetup {
   async review(params:MethodContracts['models.reviewPrimary']['params'],role:'primary'|'fallback'|'auxiliary'='primary',auxiliary?:{slot:AuxiliarySlot;fallbackToMain:boolean}):Promise<ModelRouteDraft>{
     for(const [id,draft] of this.#drafts){if(this.#drafts.size<32)break;if(draft.consumed)this.#drafts.delete(id);}
     if(this.#closed || this.#drafts.size>=32)throw new ControlProtocolError('-32009');
+    if(role==='auxiliary' && params.route.maxTokens!==undefined)throw new ControlProtocolError('-32602');
     if(role==='auxiliary' && (!auxiliary || !AUXILIARY_SLOTS.includes(auxiliary.slot)))throw new ControlProtocolError('-32602');
     validateCandidateRequest({...params,spendApproved:true});
     const scope:CandidateScope={windowId:params.windowId,generation:params.generation,purpose:'provider',providerId:params.route.providerId,authMethod:params.route.authMethod==='oauth'?'oauth':'api_key',endpoint:params.route.endpoint};
@@ -36,6 +37,7 @@ export class ModelSetup {
       if(role==='fallback' && ([loaded.primaryModelRoute,...loaded.modelFallbackRoutes].some(route=>identity(route.provider,route.id,route.baseUrl)===key) || loaded.modelFallbackRoutes.length>=32))throw new ControlProtocolError('-32602');
       const provider=loaded.config.providers?.[params.route.providerId];
       const metadata=getProviderMetadata(params.route.providerId);
+      if(provider && Boolean(provider.enableNetwork)!==(params.route.enableNetwork??true))throw new ControlProtocolError('-32602');
       if(provider && ((provider.authMethod ?? metadata.defaultAuthMethod)!==(params.route.authMethod==='oauth'?'oauth_device_pkce':params.route.authMethod) || (provider.apiMode ?? metadata.apiMode)!==params.route.apiMode))throw new ControlProtocolError('-32602');
     }
     if(JSON.stringify(snapshot.files)!==JSON.stringify((await captureProfileApplySnapshot(this.input)).files))throw new ControlProtocolError('-32007');
@@ -44,7 +46,7 @@ export class ModelSetup {
     const draftId=randomUUID(),projection:ModelRouteDraft={draftId,route:structuredClone(params.route),expiresInMs:300000,credentialState:params.candidateId?'staged':'not_required',role,...(auxiliary?{slot:auxiliary.slot}:{})};
     const credentialEnv=params.route.authMethod==='api_key'?`${getProviderMetadata(params.route.providerId).defaultApiKeyEnv ?? 'PROVIDER_API_KEY'}_${draftId.replaceAll('-','').toUpperCase()}`:undefined;
     const route=params.route;
-    const plan=primaryRoutePlan({provider:route.providerId,model:route.modelId,baseUrl:route.endpoint,apiMode:route.apiMode,authMethod:route.authMethod==='oauth'?'oauth_device_pkce':route.authMethod,enableNetwork:true,...(auxiliary?{auxiliaryTask:auxiliary.slot,fallbackToMain:auxiliary.fallbackToMain}:{})},credentialEnv,role);
+    const plan=primaryRoutePlan({provider:route.providerId,model:route.modelId,baseUrl:route.endpoint,apiMode:route.apiMode,authMethod:route.authMethod==='oauth'?'oauth_device_pkce':route.authMethod,enableNetwork:route.enableNetwork??true,...(route.contextWindowTokens!==undefined?{contextWindowTokens:route.contextWindowTokens}:{}),...(route.maxTokens!==undefined?{maxTokens:route.maxTokens}:{}),...(auxiliary?{auxiliaryTask:auxiliary.slot,fallbackToMain:auxiliary.fallbackToMain}:{})},credentialEnv,role);
     const timer=setTimeout(()=>this.cancel({draftId,windowId:params.windowId,generation:params.generation}),300000);timer.unref();
     this.#drafts.set(draftId,{expires:performance.now()+300000,params:structuredClone(params),projection,snapshot,credentialEnv,scope,plan,abort:new AbortController(),timer,applying:false,consumed:false});
     return projection;

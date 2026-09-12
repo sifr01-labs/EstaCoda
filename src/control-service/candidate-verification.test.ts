@@ -1,7 +1,7 @@
 import {expect, it} from 'vitest';
 import {CandidateVerifier,validateCandidateRequest} from './candidate-verification.js';
 import {CredentialCandidates, type CandidateScope} from './credential-candidates.js';
-import type {VerifyCandidateParams} from '../contracts/desktop-control/index.js';
+import {candidateRouteBinding, type VerifyCandidateParams} from '../contracts/desktop-control/index.js';
 const scope: CandidateScope = {windowId:'w',generation:1,purpose:'provider',providerId:'kimi',authMethod:'api_key',endpoint:'https://api.moonshot.ai/v1'};
 function fixture() {
   const candidates=new CredentialCandidates('p','b');
@@ -64,4 +64,9 @@ it('uses only the staged OAuth access token for a Codex verification request',as
  const candidateId=candidates.stage(oauthScope,JSON.stringify({authMethod:'oauth_device_pkce',accessToken:'access-canary',refreshToken:'refresh-canary'}));
  let calls=0;const verifier=new CandidateVerifier(candidates,()=>async(_url,init)=>{calls++;expect(init.headers.authorization).toBe('Bearer access-canary');expect(JSON.stringify(init)).not.toContain('refresh-canary');return {ok:false,status:401,statusText:'',json:async()=>({}),text:async()=>''};});
  try{const result=await verifier.verify({windowId:'w',generation:1,candidateId,spendApproved:true,route:{providerId:'codex',modelId:'gpt-5.5',endpoint:oauthScope.endpoint,authMethod:'oauth',apiMode:'openai_responses',allowPrivateEndpoint:false}},new AbortController().signal);expect(calls).toBe(1);expect(result.reason).toBe('invalid_credential');}finally{verifier.dispose();candidates.dispose();}
+});
+
+it('invalidates a credential when a reviewed output cap changes',async()=>{
+ const {candidates,params}=fixture();const verifier=new CandidateVerifier(candidates,()=>async()=>{throw new Error('Must not dispatch');});
+ try{candidates.bindRoute(params.candidateId!,scope,candidateRouteBinding(params.route));await expect(verifier.verify({...params,route:{...params.route,maxTokens:32}},new AbortController().signal)).rejects.toThrow();expect(()=>candidates.read(params.candidateId!,scope)).toThrow();}finally{verifier.dispose();candidates.dispose();}
 });
