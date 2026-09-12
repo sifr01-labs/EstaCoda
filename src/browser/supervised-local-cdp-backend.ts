@@ -1510,12 +1510,33 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
         catch(error){await closeSession(sessionId);throw error;}
       }else if(action.kind!=='list'){
         await getSession({sessionId});assertHumanControl();
-        if(action.kind==='close-session')await closeSession(sessionId);
+        if(action.kind==='navigate')await backend.navigate({sessionId,url:action.url,assertHumanControl});
+        else if(action.kind==='back'||action.kind==='forward'||action.kind==='reload'){
+          const session=await getSession({sessionId});
+          const before=await captureSessionSnapshot(session);
+          let entryId:number|undefined;
+          let destination=before.url;
+          if(action.kind!=='reload'){
+            const history=await session.supervisor.send('Page.getNavigationHistory') as {currentIndex:number;entries:Array<{id:number;url:string}>};
+            if(!Number.isSafeInteger(history.currentIndex)||!Array.isArray(history.entries)||history.entries.length>1000)throw new Error('Browser history unavailable.');
+            const entry=history.entries[history.currentIndex+(action.kind==='back'?-1:1)];
+            if(!entry)return await backend.workspace!({sessionId,action:{kind:'list'},assertHumanControl});
+            if(!Number.isSafeInteger(entry.id)||typeof entry.url!=='string')throw new Error('Browser history unavailable.');
+            entryId=entry.id;destination=entry.url;
+          }
+          if(!await tabUrlIsAllowed(destination)||destination==='about:blank')throw new Error('Browser history destination blocked.');
+          await protectedFields.invalidateSession(session);
+          assertHumanControl();
+          await session.supervisor.send(action.kind==='reload'?'Page.reload':'Page.navigateToHistoryEntry',entryId===undefined?{}:{entryId});
+          await settleAction({session,before,actionInput:{},actionDispatched:true});
+          clearVisualLeasesForSession(sessionId);
+        }
+        else if(action.kind==='close-session')await closeSession(sessionId);
         else if(action.kind==='new-tab'){
           if((await listManagedTabs(sessionId)).length>=16)throw new Error('Tab limit reached.');
           await backend.navigate({sessionId,url:action.url,disposition:'new-tab',assertHumanControl});
         }else if(action.kind==='switch-tab')await backend.switchTab!({sessionId,tabRef:action.tabRef,assertHumanControl});
-        else {
+        else if(action.kind==='close-tab'){
           const manager=sessionStacks.get(sessionId)!.sessionManager;
           if(!manager.closeTab)throw new Error('Tab closing is unavailable.');
           await manager.closeTab(sessionId,action.tabRef,assertHumanControl);

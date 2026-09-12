@@ -3130,3 +3130,20 @@ it('exposes bounded owned workspace sessions and rejects unsafe creation before 
   expect((await backend.workspace!({sessionId:'b',action:{kind:'list'},assertHumanControl})).sessions).toEqual([]);
  }finally{await backend.close!();}
 });
+
+it('checks leased history destinations and expiry before native navigation',async()=>{
+ const harness=createSocketFactory(),backend=createSupervisedLocalCdpBrowserBackend({cdpUrl:'http://127.0.0.1:9222',fetch:createFetch(),webSocketFactory:harness.webSocketFactory,resolveHostname:()=>['93.184.216.34']});
+ let stale=false;const assertHumanControl=()=>{if(stale)throw new Error('stale');};
+ try{
+  await backend.workspace!({sessionId:'b',action:{kind:'create',url:'https://example.com'},assertHumanControl});
+  const socket=harness.pageSocket()!;
+  for(const kind of ['back','forward','reload'] as const)await backend.workspace!({sessionId:'b',action:{kind},assertHumanControl});
+  expect(socket.sent.filter(m=>m.method==='Page.navigateToHistoryEntry').map(m=>m.params)).toEqual([{entryId:1},{entryId:3}]);
+  expect(socket.sent.filter(m=>m.method==='Page.reload')).toHaveLength(1);
+  socket.navigationHistory.entries[0]!.url='http://169.254.169.254/latest';
+  await expect(backend.workspace!({sessionId:'b',action:{kind:'back'},assertHumanControl})).rejects.toThrow('blocked');
+  stale=true;await expect(backend.workspace!({sessionId:'b',action:{kind:'navigate',url:'https://example.com'},assertHumanControl})).rejects.toThrow('stale');
+  expect(socket.sent.filter(m=>m.method==='Page.navigate')).toHaveLength(1);
+  expect(socket.sent.filter(m=>m.method==='Page.navigateToHistoryEntry')).toHaveLength(2);
+ }finally{await backend.close!();}
+});

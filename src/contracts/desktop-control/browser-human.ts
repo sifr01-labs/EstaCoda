@@ -28,11 +28,11 @@ export function validateHumanBrowserCommand(value:unknown):asserts value is Huma
 export type BrowserWorkspaceState = {
  supported:boolean; reason:string|null; sessions:Array<{id:string;tabs:Array<{ref:string;url:string;title:string;controlled:boolean;closable:boolean}>}>;
 };
-export type BrowserWorkspaceAction = {kind:'list'}|{kind:'create';url:string}|{kind:'close-session'}|{kind:'new-tab';url:string}|{kind:'switch-tab'|'close-tab';tabRef:string};
+export type BrowserWorkspaceAction = {kind:'list'}|{kind:'back'|'forward'|'reload'}|{kind:'navigate'|'create';url:string}|{kind:'close-session'}|{kind:'new-tab';url:string}|{kind:'switch-tab'|'close-tab';tabRef:string};
 export function validateBrowserWorkspaceAction(value:unknown):asserts value is BrowserWorkspaceAction {
  if(!object(value))throw new Error('Invalid browser workspace action.');
- const fields=value.kind==='create'||value.kind==='new-tab'?['kind','url']:value.kind==='switch-tab'||value.kind==='close-tab'?['kind','tabRef']:['kind'];
- if(!['list','create','close-session','new-tab','switch-tab','close-tab'].includes(String(value.kind))||Object.keys(value).sort().join(',')!==fields.sort().join(','))throw new Error('Invalid browser workspace action.');
+ const fields=value.kind==='navigate'||value.kind==='create'||value.kind==='new-tab'?['kind','url']:value.kind==='switch-tab'||value.kind==='close-tab'?['kind','tabRef']:['kind'];
+ if(!['list','navigate','back','forward','reload','create','close-session','new-tab','switch-tab','close-tab'].includes(String(value.kind))||Object.keys(value).sort().join(',')!==fields.sort().join(','))throw new Error('Invalid browser workspace action.');
  if(fields.includes('url')&&(typeof value.url!=='string'||value.url.length<1||value.url.length>2048))throw new Error('Invalid browser address.');
  if(fields.includes('tabRef')&&(typeof value.tabRef!=='string'||!/^@t[1-9][0-9]{0,8}$/.test(value.tabRef)))throw new Error('Invalid browser tab.');
 }

@@ -52,6 +52,7 @@ export class FakeCdpAuthPortalSocket implements CdpWebSocketLike {
     text: "Supervised text",
     elements: [{ ref: "@e1", role: "button", name: "Open" }],
   };
+  navigationHistory={currentIndex:1,entries:[{id:1,url:'https://example.com/first'},{id:2,url:'https://example.com/second'},{id:3,url:'https://example.com/third'}]};
   axTree: unknown;
   protectedFieldInspection = {
     connected: true,
@@ -191,6 +192,7 @@ export class FakeCdpAuthPortalSocket implements CdpWebSocketLike {
   }
 
   #resultFor(message: { method: string; params?: Record<string, unknown> }): unknown {
+    if(message.method==='Page.getNavigationHistory')return this.navigationHistory;
     const method = message.method;
     if (method === "Target.createBrowserContext") {
       return { browserContextId: `context-${++this.#contextCounter}` };
