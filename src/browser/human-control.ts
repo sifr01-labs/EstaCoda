@@ -25,8 +25,8 @@ export class HumanBrowserControl {
   await this.validate();const latest=await this.backend.snapshot!({sessionId});await this.#safe(latest.url);
   if(latest.sensitiveInputActive||latest.identity.documentEpoch!==observation.identity.documentEpoch||latest.identity.actionRevision!==observation.identity.actionRevision||latest.tab?.ref!==observation.tabRef)throw new Error('Browser changed during capture.');
   const bytes=Buffer.from(capture.base64,'base64');let preview:Buffer|undefined;
-  for(const width of [960,640,320]){preview=await sharp(bytes,{limitInputPixels:16_000_000}).resize({width,height:640,fit:'inside',withoutEnlargement:true}).jpeg({quality:50}).toBuffer();if(preview.length<=45000)break;}
-  if(!preview||preview.length>45000)throw new Error('Browser preview exceeds limit.');
+  for(const width of [960,640,320]){preview=await sharp(bytes,{limitInputPixels:16_000_000}).resize({width,height:640,fit:'inside',withoutEnlargement:true}).jpeg({quality:50}).toBuffer();if(preview.length<=34000)break;}
+  if(!preview||preview.length>34000)throw new Error('Browser preview exceeds limit.');
   const focused=await this.backend.preflightAction!('press',{sessionId,identity:latest.identity,tabRef:latest.tab?.ref});
   const id=randomUUID();this.#frame={id,observation};return{frameId:id,url:latest.url.slice(0,2048),title:redactSensitiveText(latest.title??'Browser').slice(0,160),image:preview.toString('base64'),observedAt:new Date().toISOString(),readiness:latest.readiness??'unknown',protectedFieldFocused:focused.target?.protectedInput===true,submitTargets:(latest.elements??[]).filter(element=>element.role==='button').slice(0,16).map(element=>({ref:element.ref,label:redactSensitiveText(element.name??'Submit').slice(0,120)}))};
  }
@@ -36,7 +36,7 @@ export class HumanBrowserControl {
  async #execute(command:HumanBrowserCommand):Promise<HumanBrowserResult>{
   validateHumanBrowserCommand(command);await this.validate();
   if(command.action==='inventory'){
-   const workspace=this.backend.kind==='local-cdp'&&this.backend.workspace
+   const workspace=this.backend.kind==='local-cdp'&&this.backend.workspace&&(await this.backend.status()).available
     ?await this.owner.agent(()=>this.backend.workspace!({sessionId:command.browserId,action:{kind:'list'},assertHumanControl:()=>{}}))
     :{supported:false,reason:'Configure a supervised local browser in Settings. Cloud and legacy browsers support recorded viewing only.',truncated:false,sessions:[]};
    await this.validate();return {lease:null,frame:null,state:'agent',workspace};
@@ -47,9 +47,9 @@ export class HumanBrowserControl {
    const lease=this.owner.acquire(command.holder);await this.#clearEntry();this.owner.verify(command.holder,lease);this.#browserId=command.browserId;this.#frame=undefined;
    return{lease,frame:null,state:'human'};
   }
+  if(command.action==='renew'){this.owner.renew(command.holder,command.lease);return{lease:command.lease,frame:null,state:'human'};}
   if(command.browserId!==this.#browserId)throw new Error('Browser owner changed.');
   if(command.action==='release'){if(this.#pending)throw new Error('Cancel protected entry before returning control.');this.owner.release(command.holder,command.lease);this.#frame=undefined;this.#browserId=undefined;return{lease:null,frame:null,state:'agent'};}
-  if(command.action==='renew'){this.owner.renew(command.holder,command.lease);return{lease:command.lease,frame:null,state:'human'};}
   return this.owner.human(command.holder,command.lease,command.sequence,async()=>{
    await this.validate();
    if(command.action==='signin-cancel'){await this.#clearEntry();return {lease:command.lease,frame:null,state:'human'};}

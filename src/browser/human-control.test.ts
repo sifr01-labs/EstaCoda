@@ -37,6 +37,7 @@ it('routes workspace operations through the held lease and keeps creation IDs ru
  expect(result.workspace!.selectedSessionId).not.toBe(base.browserId);
  expect(workspace).toHaveBeenLastCalledWith(expect.objectContaining({sessionId:result.workspace!.selectedSessionId,action:{kind:'create',url:'https://93.184.216.34/'}}));
  await expect(control.execute({...base,lease,sequence:2,action:'workspace',operation:{kind:'list'}})).rejects.toThrow('owner changed');
+ await expect(control.execute({...base,lease,action:'renew'})).resolves.toMatchObject({state:'human'});
  const next={...base,browserId:result.workspace!.selectedSessionId!};
  await expect(control.execute({...next,lease,sequence:2,action:'workspace',operation:{kind:'select-session',sessionId:'other-profile'}})).rejects.toThrow('not owned');
  await expect(owner.agent(async()=>true)).rejects.toThrow('paused');
@@ -77,4 +78,16 @@ it.each(['submit','cancel','stale','expired'])('protects sign-in values and clea
   expect(delivery).toBeDefined();expect(String(delivery.params?.functionDeclaration)).not.toContain('fixture-password');
   await control.execute({...base,lease,action:'release'});
  }finally{await backend.close!();}
+});
+
+it('reports a configured but unavailable local backend without creating it',async()=>{
+ const backend={...createMockBrowserBackend(),kind:'local-cdp' as const,workspace:vi.fn(),status:()=>({backend:'local-cdp' as const,available:false})};
+ const control=new HumanBrowserControl(backend,new BrowserControlOwner(),async()=>{});
+ expect((await control.execute({action:'inventory',browserId:'b',holder:'h'})).workspace).toMatchObject({supported:false});expect(backend.workspace).not.toHaveBeenCalled();
+});
+it.each(['javascript:alert(1)','file:///etc/passwd','http://localhost/','http://169.254.169.254/latest','https://user:password@example.com/'])('rejects human navigation to %s before backend dispatch',async url=>{
+ const backend={...createMockBrowserBackend(),kind:'local-cdp' as const,workspace:vi.fn(),preflightAction:vi.fn(),click:vi.fn(),press:vi.fn()};
+ const owner=new BrowserControlOwner(),control=new HumanBrowserControl(backend,owner,async()=>{}),base={holder:'h',browserId:'b'};
+ const lease=(await control.execute({...base,action:'acquire'})).lease!;
+ await expect(control.execute({...base,lease,sequence:1,action:'workspace',operation:{kind:'navigate',url}})).rejects.toThrow();expect(backend.workspace).not.toHaveBeenCalled();await expect(owner.agent(async()=>1)).rejects.toThrow('paused');
 });

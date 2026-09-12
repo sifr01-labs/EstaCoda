@@ -24,6 +24,7 @@ export async function browserOwner(input:Input,work:WorkProjection,signal:AbortS
   const owner=work.kind==='session'?work.canonicalId:work.kind==='task_attempt'?tasks.getAttempt(work.canonicalId)?.workerSessionId:undefined;
   const session=owner?await db.getSessionForProfile(owner,input.profileId):null;
   if(!session?.executionTarget)throw new Error('Browser owner unavailable.');
+  if(!work.target||work.target.targetId!==session.executionTarget.targetId||work.target.targetGeneration!==session.executionTarget.targetGeneration)throw new Error('Browser Work target changed.');
   const store=new ExecutionTargetStore(input);
   try{await store.validate(session.executionTarget,session.executionTarget.workspace.canonicalPath,signal);
    if(!await new WorkspaceTrustStore(input).isTrusted(session.executionTarget.workspace.canonicalPath))throw new Error('Workspace trust required.');

@@ -586,3 +586,8 @@ it('closes only owned secondary tabs and fences activation and closing',async()=
  expect((await manager.listTabs('two'))).toHaveLength(1);
  await manager.closeAll();
 });
+it('does not close a tab when the lease expires while returning focus to the original tab',async()=>{
+ const targetManager=new FakeTargetManager([]),manager=new BrowserSessionManager({targetManager});await manager.acquire('session');const tab=await manager.openTab('session','https://example.com');let checks=0;
+ await expect(manager.closeTab('session',tab.tabRef,()=>{if(++checks===3)throw new Error('expired during activation');})).rejects.toThrow('expired');
+ expect(targetManager.closePageTarget).not.toHaveBeenCalled();expect(await manager.listTabs('session')).toHaveLength(2);await manager.closeAll();
+});

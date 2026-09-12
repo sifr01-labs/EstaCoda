@@ -868,7 +868,8 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
         }
         const supervisor = session.supervisor;
         input.assertHumanControl?.();
-        await supervisor.send("Page.navigate", { url: input.url });
+        const navigation=await supervisor.send("Page.navigate", { url: input.url }) as {errorText?:string}|undefined;
+        if(input.assertHumanControl&&navigation?.errorText)throw new Error("Browser navigation failed.");
         const capture = () => captureSessionSnapshot(session!);
         let snapshot: BrowserSnapshot;
         try {
