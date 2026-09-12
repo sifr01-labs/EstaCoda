@@ -23,10 +23,16 @@ export class HumanBrowserControl {
   const bytes=Buffer.from(capture.base64,'base64');let preview:Buffer|undefined;
   for(const width of [960,640,320]){preview=await sharp(bytes,{limitInputPixels:16_000_000}).resize({width,height:640,fit:'inside',withoutEnlargement:true}).jpeg({quality:50}).toBuffer();if(preview.length<=45000)break;}
   if(!preview||preview.length>45000)throw new Error('Browser preview exceeds limit.');
-  const id=randomUUID();this.#frame={id,observation};return{frameId:id,url:latest.url.slice(0,2048),title:redactSensitiveText(latest.title??'Browser').slice(0,160),image:preview.toString('base64'),observedAt:new Date().toISOString()};
+  const id=randomUUID();this.#frame={id,observation};return{frameId:id,url:latest.url.slice(0,2048),title:redactSensitiveText(latest.title??'Browser').slice(0,160),image:preview.toString('base64'),observedAt:new Date().toISOString(),readiness:latest.readiness??'unknown'};
  }
  async execute(command:HumanBrowserCommand):Promise<HumanBrowserResult>{
   validateHumanBrowserCommand(command);await this.validate();
+  if(command.action==='inventory'){
+   const workspace=this.backend.kind==='local-cdp'&&this.backend.workspace
+    ?await this.owner.agent(()=>this.backend.workspace!({sessionId:command.browserId,action:{kind:'list'},assertHumanControl:()=>{}}))
+    :{supported:false,reason:'Configure a supervised local browser in Settings. Cloud and legacy browsers support recorded viewing only.',truncated:false,sessions:[]};
+   await this.validate();return {lease:null,frame:null,state:'agent',workspace};
+  }
   if(command.action==='acquire'){
    // Only supervised sessions have current grounded input and sanitized visual leases.
    if(this.backend.kind!=='local-cdp'||!this.backend.preflightAction||!this.backend.snapshot||!this.backend.screenshot||!this.backend.click||!this.backend.press)throw new Error('Human control requires a supervised local browser.');
@@ -38,6 +44,22 @@ export class HumanBrowserControl {
   if(command.action==='renew'){this.owner.renew(command.holder,command.lease);return{lease:command.lease,frame:null,state:'human'};}
   return this.owner.human(command.holder,command.lease,command.sequence,async()=>{
    await this.validate();
+   if(command.action==='workspace'){
+    if(!this.backend.workspace||this.backend.kind!=='local-cdp')throw new Error('Browser workspace unavailable.');
+    this.#frame=undefined;const operation=command.operation;
+    const assertHumanControl=()=>this.owner.verify(command.holder,command.lease);
+    let nextId=this.#browserId!;
+    if(operation.kind==='create')nextId=randomUUID();
+    if(operation.kind==='navigate'||operation.kind==='create'||operation.kind==='new-tab')await this.#safe(operation.url);
+    let workspace;
+    if(operation.kind==='select-session'){
+     workspace=await this.backend.workspace({sessionId:nextId,action:{kind:'list'},assertHumanControl});
+     if(!workspace.sessions.some(session=>session.id===operation.sessionId))throw new Error('Browser session is not owned by this runtime.');
+     nextId=operation.sessionId;
+    }else workspace=await this.backend.workspace({sessionId:nextId,action:operation,assertHumanControl});
+    await this.validate();assertHumanControl();this.#browserId=nextId;
+    return {lease:command.lease,frame:null,state:'human',workspace:{...workspace,selectedSessionId:nextId}};
+   }
    if(command.action==='input'){
     const frame=this.#frame,input=command.input!;this.#frame=undefined;
     if(!frame||frame.id!==input.frameId)throw new Error('Browser frame is stale.');

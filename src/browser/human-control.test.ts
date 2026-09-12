@@ -26,3 +26,24 @@ it('rejects modifiers, script, arbitrary URLs and malformed or unbounded input',
  expect(()=>validateHumanBrowserCommand({action:'acquire',holder:'w',browserId:'b',url:'http://localhost',cdp:'Runtime.evaluate'})).toThrow();
  expect(()=>validateHumanBrowserCommand({action:'input',holder:'w',browserId:'b',lease:{id:'l',generation:1},sequence:1,input:{kind:'key',frameId:'f',key:'ب'}})).not.toThrow();
 });
+it('routes workspace operations through the held lease and keeps creation IDs runtime owned',async()=>{
+ const workspace=vi.fn(async()=>({supported:true,reason:null,truncated:false,sessions:[{id:'existing',tabs:[]}]}));
+ const backend={...createMockBrowserBackend(),kind:'local-cdp' as const,workspace,preflightAction:vi.fn(),click:vi.fn(),press:vi.fn()};
+ const owner=new BrowserControlOwner(),control=new HumanBrowserControl(backend,owner,async()=>{}),base={holder:'desktop',browserId:'existing'};
+ expect((await control.execute({...base,action:'inventory'})).workspace!.sessions).toHaveLength(1);
+ expect(await owner.agent(async()=>true)).toBe(true);
+ const lease=(await control.execute({...base,action:'acquire'})).lease!;
+ const result=await control.execute({...base,lease,sequence:1,action:'workspace',operation:{kind:'create',url:'https://93.184.216.34/'}});
+ expect(result.workspace!.selectedSessionId).not.toBe(base.browserId);
+ expect(workspace).toHaveBeenLastCalledWith(expect.objectContaining({sessionId:result.workspace!.selectedSessionId,action:{kind:'create',url:'https://93.184.216.34/'}}));
+ await expect(control.execute({...base,lease,sequence:2,action:'workspace',operation:{kind:'list'}})).rejects.toThrow('owner changed');
+ const next={...base,browserId:result.workspace!.selectedSessionId!};
+ await expect(control.execute({...next,lease,sequence:2,action:'workspace',operation:{kind:'select-session',sessionId:'other-profile'}})).rejects.toThrow('not owned');
+ await expect(owner.agent(async()=>true)).rejects.toThrow('paused');
+});
+it('declares unsupported backends without creating sessions or spending cloud credit',async()=>{
+ const backend={...createMockBrowserBackend(),kind:'browserbase' as const,navigate:vi.fn()},control=new HumanBrowserControl(backend,new BrowserControlOwner(),async()=>{});
+ const result=await control.execute({browserId:'b',holder:'desktop',action:'inventory'});
+ expect(result.workspace).toMatchObject({supported:false,sessions:[]});expect(backend.navigate).not.toHaveBeenCalled();
+ await expect(control.execute({browserId:'b',holder:'desktop',action:'acquire'})).rejects.toThrow('supervised local');
+});

@@ -1503,6 +1503,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
     },
     workspace: async ({sessionId,action,assertHumanControl}) => {
       if(closed)throw new Error('Browser backend is closed.');
+      if(action.kind==='select-session')throw new Error('Session selection belongs to the runtime controller.');
       if(action.kind==='create'){
         if(sessionStacks.has(sessionId))throw new Error('Browser session already exists.');
         if(sessionStacks.size>=8)throw new Error('Close a browser session before opening another.');
@@ -1543,13 +1544,13 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
           clearVisualLeasesForSession(sessionId);latestSnapshots.delete(sessionId);
         }
       }
-      const sessions=[];
+      const sessions=[];let remaining=16,truncated=sessionStacks.size>8;
       for(const id of [...sessionStacks.keys()].slice(0,8)){
-        const candidates=(await listManagedTabs(id)).slice(0,16);
+        const all=await listManagedTabs(id);truncated ||= all.length>remaining;const candidates=all.slice(0,remaining);remaining-=candidates.length;
         const tabs=[];for(const tab of candidates)if(await tabIsAllowed(tab))tabs.push(toBrowserTab(tab));
         sessions.push({id,tabs:tabs.map(tab=>({ref:tab.ref,url:tab.url.slice(0,2048),title:redactSensitiveText(tab.title??'Browser').slice(0,160),controlled:tab.controlled,closable:tab.ref!=='@t1'}))});
       }
-      return {supported:true,reason:null,sessions};
+      return {supported:true,reason:null,truncated,sessions};
     },
     closeSession,
     close: closeBackend
