@@ -1,5 +1,5 @@
 import {resolveProfileStateHome} from '../config/profile-home.js';
-import {envContentHasSecret} from '../config/env-secret-store.js';
+import {readEnvSecretValue} from '../config/env-secret-store.js';
 import {validateOAuthStore} from '../providers/oauth/oauth-store.js';
 import {isOAuthAuthMethod} from '../providers/oauth/oauth-types.js';
 import {getProviderMetadata} from '../providers/provider-metadata.js';
@@ -27,6 +27,6 @@ export async function captureCredentialPresence(loaded: LoadedRuntimeConfig) {
     }
     if (method === 'none' && !route?.apiKeyEnv && !provider?.apiKeyEnv) return 'not_required';
     const key = route?.apiKeyEnv ?? provider?.apiKeyEnv ?? metadata.defaultApiKeyEnv;
-    return key && (envContentHasSecret(env ?? '', key) || Boolean(process.env[key]?.trim())) ? 'present' : 'missing';
+    return key && Boolean((readEnvSecretValue(env ?? '', key) ?? process.env[key])?.trim()) ? 'present' : 'missing';
   };
 }

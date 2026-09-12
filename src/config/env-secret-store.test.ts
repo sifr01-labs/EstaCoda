@@ -257,3 +257,10 @@ async function writeFile(path: string, content: string, encoding: BufferEncoding
   const { writeFile: wf } = await import("node:fs/promises");
   await wf(path, content, encoding);
 }
+
+it('uses the final profile assignment for credential presence',async()=>{
+ const {envContentHasSecret,readEnvSecretValue}=await import('./env-secret-store.js');
+ expect(envContentHasSecret('KEY=synthetic\nKEY=\n','KEY')).toBe(false);
+ expect(envContentHasSecret('KEY=\nKEY=synthetic\n','KEY')).toBe(true);
+ expect(readEnvSecretValue('KEY=synthetic\nKEY=\n','KEY')).toBe('');
+});

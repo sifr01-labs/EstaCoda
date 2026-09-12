@@ -168,11 +168,7 @@ export function presentEnvSecretNames(content: string): string[] {
 
 /** Read-only presence projection for callers that already bounded a selected-profile file. */
 export function envContentHasSecret(content: string, key: string): boolean {
-  const normalized = normalizeEnvKey(key);
-  return content.split(/\r?\n/u).some((line) => {
-    const parsed = parseDotEnvLine(line);
-    return parsed?.key === normalized && parsed.value.trim().length > 0;
-  });
+  return Boolean(readEnvSecretValue(content,key)?.trim());
 }
 
 /** Private consumers may resolve one reference from an already bounded profile snapshot. */

@@ -108,3 +108,11 @@ it('reuses and verifies a configured key without replacing it or importing it in
   expect(await readFile(paths.envPath,'utf8')).toBe(before);expect(JSON.parse(await readFile(paths.configPath,'utf8')).model.id).toBe('second');
  }finally{verifier.dispose();setup.dispose();candidates.dispose();await rm(homeDir,{recursive:true,force:true});}
 });
+it('invalidates reviewed no-auth configuration when its owning window closes',async()=>{
+ const homeDir=await mkdtemp('/tmp/ec-window-draft-'),candidates=new CredentialCandidates('p','b'),setup=new ModelSetup({homeDir,profileId:'p'},candidates,()=>{});
+ try{const draft=await setup.review({windowId:'w',generation:1,route:{providerId:'local',modelId:'m',endpoint:'http://127.0.0.1:8080/v1',authMethod:'none',apiMode:'custom_openai_compatible',allowPrivateEndpoint:true}});candidates.closeWindow('w',1);await expect(setup.apply({windowId:'w',generation:1,draftId:draft.draftId},new AbortController().signal)).rejects.toThrow();await expect(readFile(resolveProfileStateHome({homeDir,profileId:'p'}).configPath)).rejects.toThrow();}finally{setup.dispose();candidates.dispose();await rm(homeDir,{recursive:true,force:true});}
+});
+it('rejects another profile or bridge candidate and never changes the other profile',async()=>{
+ const homeDir=await mkdtemp('/tmp/ec-profile-candidate-'),a=new CredentialCandidates('a','bridge-a'),b=new CredentialCandidates('b','bridge-b'),setup=new ModelSetup({homeDir,profileId:'b'},b,()=>{});
+ try{const route:CandidateRoute={providerId:'kimi',modelId:'m',endpoint:'https://api.moonshot.ai/v1',authMethod:'api_key',apiMode:'openai_chat_completions',allowPrivateEndpoint:false};const candidateId=a.stage({windowId:'w',generation:1,purpose:'provider',providerId:'kimi',authMethod:'api_key',endpoint:route.endpoint},'synthetic-other-profile');await expect(setup.review({windowId:'w',generation:1,route,candidateId})).rejects.toThrow();for(const profileId of ['a','b'])await expect(readFile(resolveProfileStateHome({homeDir,profileId}).envPath)).rejects.toThrow();}finally{setup.dispose();a.dispose();b.dispose();await rm(homeDir,{recursive:true,force:true});}
+});

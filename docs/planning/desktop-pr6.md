@@ -103,3 +103,9 @@ Validation: 105 core catalog/route/credential/protocol tests and 29 desktop test
 The composer now exposes the live model picker on bound Sessions and Tasks, with profile defaults unchanged. Main resolves the canonical Work/session/target binding and supplies operation identity; renderer input is limited to Work and model IDs. Accepted changes display their next-turn/next-attempt boundary, poll receipts, and block another change while uncertain. Task attempts remain read-only. New Work drafts retain a local selection for the later live-submission milestone.
 
 Validation: 31 desktop tests and 62 protocol tests passed, plus desktop foundation and root typecheck. Tests cover canonical Task binding, reset, pending-operation reconciliation, profile isolation, and refusal of attempt controls. Browser/native journey coverage follows in the acceptance slice.
+
+## 15. Secret and profile isolation acceptance
+
+Added cancellation/profile-switch race tests at Main, rejection tests for renderer-supplied credential/scope fields, and service tests for cross-profile candidate use and closed-window no-auth drafts. Setup creation is serialized, late responses are discarded, uncertain Apply cannot be silently replaced, and every reviewed draft is bound to its owning window lifetime. Credential presence follows the final profile `.env` assignment, including explicit empty values.
+
+Validation: 41 focused core tests, 34 desktop tests, desktop foundation and root typecheck passed. The recoverable Apply tests interrupt each of the three profile-file writes and verify activation blocking, 0600 recovery state, replay, and preserved unrelated settings. These changes tighten credential/configuration boundaries without granting new execution authority.

@@ -27,6 +27,7 @@ export class ModelSetup {
   #fallbackListing:{projection:FallbackList;snapshot:ProfileApplySnapshot}|undefined;
   constructor(readonly input:{homeDir:string;profileId:string},readonly candidates:CredentialCandidates,readonly changed:()=>void|Promise<void>){}
   async review(params:MethodContracts['models.reviewPrimary']['params'],role:'primary'|'fallback'|'auxiliary'='primary',auxiliary?:{slot:AuxiliarySlot;fallbackToMain:boolean},existing?:{snapshot:ProfileApplySnapshot;credentialEnv?:string}):Promise<ModelRouteDraft>{
+    const windowSignal=this.candidates.windowSignal(params.windowId,params.generation);
     for(const [id,draft] of this.#drafts){if(this.#drafts.size<32)break;if(draft.consumed)this.#drafts.delete(id);}
     if(this.#closed || this.#drafts.size>=32)throw new ControlProtocolError('-32009');
     if(role==='auxiliary' && params.route.maxTokens!==undefined)throw new ControlProtocolError('-32602');
@@ -54,7 +55,9 @@ export class ModelSetup {
     const route=params.route;
     const plan=primaryRoutePlan({provider:route.providerId,model:route.modelId,baseUrl:route.endpoint,apiMode:route.apiMode,authMethod:route.authMethod==='oauth'?'oauth_device_pkce':route.authMethod,enableNetwork:route.enableNetwork??true,...(route.contextWindowTokens!==undefined?{contextWindowTokens:route.contextWindowTokens}:{}),...(route.maxTokens!==undefined?{maxTokens:route.maxTokens}:{}),...(auxiliary?{auxiliaryTask:auxiliary.slot,fallbackToMain:auxiliary.fallbackToMain}:{})},credentialEnv,role);
     const timer=setTimeout(()=>this.cancel({draftId,windowId:params.windowId,generation:params.generation}),300000);timer.unref();
+    windowSignal.throwIfAborted();
     this.#drafts.set(draftId,{expires:performance.now()+300000,params:structuredClone(params),projection,snapshot,credentialEnv,scope,plan,abort:new AbortController(),timer,applying:false,consumed:false});
+    windowSignal.addEventListener('abort',()=>{try{this.cancel({draftId,windowId:params.windowId,generation:params.generation});}catch{}},{once:true});
     return projection;
   }
   async verifyDraft(params:MethodContracts['models.verifyDraft']['params'],signal:AbortSignal,verifier:CandidateVerifier){
@@ -105,6 +108,7 @@ export class ModelSetup {
     if(this.#closed)throw new ControlProtocolError('-32003');return {items};
   }
   async reviewAuxiliaryMode(params:AuxiliaryModeParams):Promise<ModelRouteDraft>{
+    const windowSignal=this.candidates.windowSignal(params.windowId,params.generation);
     for(const [id,draft] of this.#drafts){if(this.#drafts.size<32)break;if(draft.consumed)this.#drafts.delete(id);}
     if(this.#closed||this.#drafts.size>=32||!AUXILIARY_SLOTS.includes(params.slot)||!['main','auto','disabled'].includes(params.mode))throw new ControlProtocolError('-32602');
     const snapshot=await captureProfileApplySnapshot(this.input);
@@ -112,7 +116,9 @@ export class ModelSetup {
     const draftId=randomUUID(),projection:ModelRouteDraft={draftId,expiresInMs:300000,credentialState:'not_required',role:'auxiliary_mode',slot:params.slot};
     const plan=primaryRoutePlan({auxiliaryTask:params.slot,mode:params.mode,fallbackToMain:params.fallbackToMain},undefined,'auxiliary_mode');
     const timer=setTimeout(()=>this.cancel({draftId,windowId:params.windowId,generation:params.generation}),300000);timer.unref();
+    windowSignal.throwIfAborted();
     this.#drafts.set(draftId,{expires:performance.now()+300000,params:{windowId:params.windowId,generation:params.generation},projection,plan,snapshot,abort:new AbortController(),timer,applying:false,consumed:false});
+    windowSignal.addEventListener('abort',()=>{try{this.cancel({draftId,windowId:params.windowId,generation:params.generation});}catch{}},{once:true});
     return projection;
   }
   async fallbacks():Promise<FallbackList>{
@@ -124,6 +130,7 @@ export class ModelSetup {
     this.#fallbackListing={projection,snapshot};return projection;
   }
   async reviewFallbackOrder(params:FallbackOrderParams):Promise<ModelRouteDraft>{
+    const windowSignal=this.candidates.windowSignal(params.windowId,params.generation);
     for(const [id,draft] of this.#drafts){if(this.#drafts.size<32)break;if(draft.consumed)this.#drafts.delete(id);}
     const listing=this.#fallbackListing;
     if(this.#closed||this.#drafts.size>=32||!listing||listing.projection.revision!==params.revision||new Set(params.order).size!==params.order.length||params.order.some(i=>!Number.isInteger(i)||i<0||i>=listing.projection.items.length))throw new ControlProtocolError('-32007');
@@ -132,14 +139,16 @@ export class ModelSetup {
     const draftId=randomUUID(),projection:ModelRouteDraft={draftId,expiresInMs:300000,credentialState:'not_required',role:'fallback_order'};
     const plan=primaryRoutePlan({indices:params.order.map(String)},undefined,'fallback_order');
     const timer=setTimeout(()=>this.cancel({draftId,windowId:params.windowId,generation:params.generation}),300000);timer.unref();
+    windowSignal.throwIfAborted();
     this.#drafts.set(draftId,{expires:performance.now()+300000,params:{windowId:params.windowId,generation:params.generation},projection,plan,snapshot:current,abort:new AbortController(),timer,applying:false,consumed:false});
+    windowSignal.addEventListener('abort',()=>{try{this.cancel({draftId,windowId:params.windowId,generation:params.generation});}catch{}},{once:true});
     return projection;
   }
   async apply(binding:ModelDraftBinding,signal:AbortSignal):Promise<ModelApplyReceipt>{
     const draft=this.require(binding);
     if(draft.applying || draft.consumed)return this.inspect(binding.draftId);
     const {params}=draft,route=params.route;
-    const combined=AbortSignal.any([signal,draft.abort.signal,...(params.candidateId?[this.candidates.signal(params.candidateId,draft.scope!)]:[])]);
+    const combined=AbortSignal.any([signal,draft.abort.signal,this.candidates.windowSignal(params.windowId,params.generation),...(params.candidateId?[this.candidates.signal(params.candidateId,draft.scope!)]:[])]);
     combined.throwIfAborted();
     const value=params.candidateId?this.candidates.read(params.candidateId,draft.scope!):undefined;
     const env=draft.credentialEnv;

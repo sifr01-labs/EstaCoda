@@ -56,3 +56,10 @@ it('rejects attempt Work and stale profile bindings before sending an override',
  const f=fixture();Object.assign(f.connection,{getWork:vi.fn(async()=>({canonicalId:'attempt',profileId:'p',kind:'task_attempt',target:{targetId:'target',targetGeneration:3},modelBinding:{sessionId:'origin',taskId:'task'}}))});
  await expect(f.setup.setOverride('attempt:a',null)).rejects.toThrow('unavailable');expect(f.calls).toEqual([]);
 });
+it('serializes setup creation and drops late validation after cancellation or profile change',async()=>{
+ for(const interrupt of ['cancel','profile']){const f=fixture();let release!:(value:any)=>void;f.connection.modelRequest.mockImplementation(()=>new Promise(resolve=>{release=resolve;}));const pending=f.setup.begin(route);await vi.waitFor(()=>expect(release).toBeTypeOf('function'));await expect(f.setup.begin(route)).rejects.toThrow('settling');if(interrupt==='cancel')await f.setup.cancel();else{f.connection.state={profileId:'other',generation:2};f.connection.emit('invalidate');}release({valid:true});await expect(pending).rejects.toThrow('changed');expect(f.credentials.open).not.toHaveBeenCalled();}
+});
+it('keeps an uncertain Apply blocking new setup until it is reconciled',async()=>{
+ const f=fixture(),{setupId}=await f.setup.begin(route);await f.setup.review(setupId);f.connection.modelRequest.mockImplementation(async()=>({cancelled:false}) as any);
+ expect(await f.setup.cancel(setupId)).toEqual({cancelled:false});await expect(f.setup.begin(route)).rejects.toThrow('Reconcile');
+});

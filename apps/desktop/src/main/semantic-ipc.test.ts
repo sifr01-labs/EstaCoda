@@ -17,3 +17,9 @@ it('bounds catalog paging and forbids network or profile authority in ordinary p
  for(const payload of [{cursor:'../bad'},{profileId:'other'},{limit:999},{credential:'secret'}])expect(()=>validateSemanticPayload('modelPage',payload)).toThrow();
  expect(()=>validateSemanticPayload('refreshCatalog',{})).not.toThrow();expect(()=>validateSemanticPayload('refreshCatalog',{url:'https://other'})).toThrow();
 });
+it('rejects credential values and caller-owned scope on every setup and override input',()=>{
+ for(const method of ['setupStage','setupApply','setupCancel','setupVerify','setupOAuthStart','setupOAuthStatus'])for(const extra of [{credential:'canary'},{profileId:'other'},{windowId:'other'},{generation:100}])expect(()=>validateSemanticPayload(method,{setupId:'setup',...extra})).toThrow();
+ for(const extra of [{profileId:'other'},{target:{targetId:'x',targetGeneration:1}},{sessionId:'other'},{operationId:'operation'}])expect(()=>validateSemanticPayload('setOverride',{workId:'session:s',selection:null,...extra})).toThrow();
+ expect(()=>validateSemanticPayload('setupReview',{setupId:'s',role:{role:'primary',slot:'assessor'}})).toThrow();
+ expect(()=>validateSemanticPayload('setupReview',{setupId:'s',role:{role:'auxiliary',slot:'vision',fallbackToMain:true}})).toThrow();
+});
