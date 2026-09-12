@@ -18,7 +18,7 @@ export async function availableWorkTargets(input:{homeDir:string;profileId:strin
    signal.throwIfAborted();if(target.status!=='available')continue;
    try{await store.validate(targetBinding(target),target.workspace.canonicalPath);if(!await new WorkspaceTrustStore(input).isTrusted(target.workspace.canonicalPath))continue;}catch{continue;}
    // A target is a directory binding, not a sandbox grant.
-   items.push({targetId:target.id,targetGeneration:target.generation,label:basename(target.workspace.canonicalPath).slice(0,240)||'Workspace',isolation});
+   items.push({targetId:target.id,targetGeneration:target.generation,label:basename(target.workspace.canonicalPath).slice(0,240)||'Workspace',isolation,approvalMode:config.security.approvalMode});
   }
   return{items,truncated:records.length>100};
  }finally{store.close();}

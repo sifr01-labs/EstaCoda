@@ -35,3 +35,23 @@ it('bounds concurrent attachment staging and expires content without accepting s
  const now=Date.now();vi.spyOn(Date,'now').mockReturnValue(now+16*60_000);expect(()=>store.compose(scope,[accepted[0]!.id],'Review')).toThrow('expired');
  }finally{vi.restoreAllMocks();rmSync(directory,{recursive:true,force:true});}
 });
+
+it('continues delayed Task preparation after Main restart without recreating the Session or Task',async()=>{
+ const directory=mkdtempSync('/tmp/ec-preparation-');let settled=false;
+ const connection=Object.assign(new EventEmitter(),{state:{profileId:'p',generation:1,status:'ready'},workRequest:vi.fn(async(method:string,params:any)=>{
+  if(method==='work.targets')return{items:[target,{...target,targetGeneration:2}],truncated:false};
+  if(method==='sessions.start')throw new Error('Reply lost');
+  return{...params,profileId:'p',method:method==='operations.inspect'?params.method:method,state:settled?'completed':'accepted',cancellation:'not_requested'};
+ })});
+ const input={draftId:'draft',kind:'task' as const,target,text:'Inspect safely',attachmentIds:[],limits:{maxProviderCalls:3,maxTotalTokens:8000,maxWallClockMs:60000}};
+ try{
+  await expect(new DesktopWorkControls(connection as any,directory,async()=>[]).submit(input)).rejects.toThrow('Reply lost');
+  const restarted=new DesktopWorkControls(connection as any,directory,async()=>[]);
+  await expect(restarted.submit(input)).rejects.toThrow('Preparation');
+  await expect(restarted.submit({...input,target:{...target,targetGeneration:2}})).rejects.toThrow('target changed');
+  settled=true;const result=await restarted.submit(input);expect(result.workId).toMatch(/^task:/);expect(result.receipt.method).toBe('tasks.create');
+  expect(await restarted.submit(input)).toMatchObject({workId:result.workId});
+  expect(connection.workRequest.mock.calls.filter(call=>call[0]==='sessions.start')).toHaveLength(1);
+  expect(connection.workRequest.mock.calls.filter(call=>call[0]==='tasks.create')).toHaveLength(1);
+ }finally{rmSync(directory,{recursive:true,force:true});}
+});

@@ -2,9 +2,9 @@ import {test, expect, type Page} from '@playwright/test';
 
 // Mount production components against bounded synthetic reads. No preload or
 // production state is involved; this harness is excluded from release builds.
-async function live(page: Page) {
+async function live(page: Page, withModels=false) {
   await page.goto('/fixture.html');
-  await page.evaluate(async () => {
+  await page.evaluate(async (withModels) => {
     const reactPath='/node_modules/.vite/deps/react.js', domPath='/node_modules/.vite/deps/react-dom_client.js', appPath='/src/renderer/app.tsx';
     const React=(await import(reactPath)).default, {createRoot}=(await import(domPath)).default, {App}=await import(appPath);
     document.getElementById('root')!.remove();
@@ -16,14 +16,15 @@ async function live(page: Page) {
     const historyPending:Array<()=>void>=[];
     const control={counts:null as any,usage:{scope:'session',reportedTokens:120,providerCalls:2,cost:{amount:0.25,currency:'USD'},usageComplete:false,pricingComplete:false,context:{usedTokens:400,totalTokens:8000,provider:'local',model:'model'},truncated:true,provisional:true},extraInbox:[] as any[],approval:null as any,decisionReceipt:null as any,decisions:[] as any[],receipt:null as any,actions:[] as unknown[],preview:{active:false,turnId:null as string|null,text:'',truncated:false},freezeWorkTime:false,delay:false,fail:false,delayHistory:false,total:300,releaseHistory:()=>historyPending.splice(0).forEach(done=>done()),refresh:()=>{revision++;listener(snapshot());},flush:()=>pending.splice(0).forEach(done=>done()),reads};
     const submissions:unknown[]=[];(control as any).submissions=submissions;
-    const api={work:{usage:async()=>control.usage,inspectDecision:async()=>control.decisionReceipt,decide:async(itemId:string,decision:string)=>{control.decisions.push({itemId,decision});control.decisionReceipt={method:'approvals.resolve',state:'completed',cancellation:'not_requested'};return control.decisionReceipt;},act:async(input:any)=>{control.actions.push(input);control.receipt={method:input.action,state:'accepted',cancellation:input.action==='sessions.cancelTurn'?'requested':'not_requested'};return control.receipt;},children:async(id:string)=>({items:id==='listed'?[{...work('old'),kind:'task',parentWorkId:'listed',title:'Child Task'}]:[],nextCursor:null}),live:async()=>control.preview,targets:async()=>({items:[{targetId:'target',targetGeneration:1,label:'Trusted repo',isolation:'host'}],truncated:false}),attach:async()=>[{id:'attachment',name:'notes.md',size:20,type:'text/plain'}],submit:async(input:unknown)=>{submissions.push(input);return{workId:(input as any).kind==='task'?'task:new':'session:new',receipt:{method:(input as any).kind==='task'?'tasks.create':'sessions.send',state:'accepted'}};},inspect:async()=>control.receipt,search:async(query:string)=>({items:query.toLowerCase().includes('older')?[work('old')]:[],nextCursor:null}),pins:async()=>[],pin:async(id:string,pinned:boolean)=>pinned?[work(id)]:[]},platform:'darwin',onSnapshot:(fn:typeof listener)=>{listener=fn;fn(snapshot());return()=>{};},
+    const api={models:{models:async()=>({items:[{id:'model',providerId:'local',role:'primary',runnable:true}],nextCursor:null}),workOverride:async()=>({selection:null,effective:'next_turn'}),inspectOverride:async()=>null},work:{usage:async()=>control.usage,inspectDecision:async()=>control.decisionReceipt,decide:async(itemId:string,decision:string)=>{control.decisions.push({itemId,decision});control.decisionReceipt={method:'approvals.resolve',state:'completed',cancellation:'not_requested'};return control.decisionReceipt;},act:async(input:any)=>{control.actions.push(input);control.receipt={method:input.action,state:'accepted',cancellation:input.action==='sessions.cancelTurn'?'requested':'not_requested'};return control.receipt;},children:async(id:string)=>({items:id==='listed'?[{...work('old'),kind:'task',parentWorkId:'listed',title:'Child Task'}]:[],nextCursor:null}),live:async()=>control.preview,targets:async()=>({items:[{targetId:'target',targetGeneration:1,label:'Trusted repo',isolation:'host',approvalMode:'strict'}],truncated:false}),attach:async()=>[{id:'attachment',name:'notes.md',size:20,type:'text/plain'}],submit:async(input:unknown)=>{submissions.push(input);return{workId:(input as any).kind==='task'?'task:new':'session:new',receipt:{method:(input as any).kind==='task'?'tasks.create':'sessions.send',state:'accepted'}};},inspect:async()=>control.receipt,search:async(query:string)=>({items:query.toLowerCase().includes('older')?[work('old')]:[],nextCursor:null}),pins:async()=>[],pin:async(id:string,pinned:boolean)=>pinned?[work(id)]:[]},platform:'darwin',onSnapshot:(fn:typeof listener)=>{listener=fn;fn(snapshot());return()=>{};},
       getWork:async(id:string)=>{const selected=work(id);if(control.delay)await new Promise<void>(resolve=>pending.push(resolve));if(control.fail)throw Error('Unavailable');return selected;},
       activity:async(_id:string,cursor?:string)=>{reads.push(cursor??'first');const [version,offset]=cursor?cursor.split(':').map(Number):[revision,0];if(version!==revision)throw Error('Stale cursor');if(control.delayHistory&&cursor)await new Promise<void>(resolve=>historyPending.push(resolve));return{items:Array.from({length:100},(_,i)=>({id:'message-'+(offset+i),kind:'message',role:'agent',text:'History '+(offset+i)})),nextCursor:offset<control.total-100?version+':'+(offset+100):null};},
       profiles:async()=>['default','other'].map(id=>({id,label:id})),switchProfile:async(id:string)=>{profile=id;listener(snapshot());},
       appearance:async()=>({theme:'kemet',appearance:'system',density:'comfortable'}),setAppearance:async()=>{},reconnect:async()=>listener(snapshot())};
+    if(!withModels)delete (api as any).models;
     (window as any).continuity=control;
     createRoot(host).render(React.createElement(App,{adapter:{kind:'live',api,appearance:{read:api.appearance,write:api.setAppearance}}}));
-  });
+  },withModels);
   await expect(page.getByRole('button',{name:'Settings',exact:true})).toBeVisible();
 }
 
@@ -290,4 +291,17 @@ test('new Work controls stay below the welcome text in a short native viewport',
  await page.getByLabel('Work type').selectOption('task');await page.getByText('Review Task limits and authority',{exact:true}).click();
  expect((await workspace.boundingBox())!.y).toBeGreaterThanOrEqual((await welcome.boundingBox())!.y+(await welcome.boundingBox())!.height);
  await page.getByRole('textbox',{name:'Draft guidance',exact:true}).scrollIntoViewIfNeeded();await expect(page.getByRole('textbox',{name:'Draft guidance',exact:true})).toBeInViewport();
+});
+
+
+test('draft inspection follows the selected target and shows canonical route and profile policy',async({page})=>{
+ await live(page,true);
+ await page.getByRole('button',{name:'New chat',exact:true}).click();
+ await page.getByLabel('Work target').selectOption('target');
+ await page.getByRole('button',{name:'Execution details',exact:true}).click();
+ const inspector=page.getByRole('complementary',{name:'Draft details'});
+ await expect(inspector).toContainText('Trusted repo');
+ await expect(inspector).toContainText('Profile approval mode: strict');
+ await expect(inspector).toContainText('local / model');
+ await expect(inspector).not.toContainText('No execution target is selected');
 });

@@ -1,11 +1,15 @@
+import {mkdtempSync,rmSync} from 'node:fs';
+import {WorkOperationReferences} from './work-operation-references.js';
 import {EventEmitter} from 'node:events';
-import {it,expect,vi} from 'vitest';
+import {it,expect,vi,afterEach} from 'vitest';
 import {DesktopModelSetup} from './model-setup.js';
+const directories:string[]=[];afterEach(()=>{for(const directory of directories.splice(0))rmSync(directory,{recursive:true,force:true});});
 const route={providerId:'kimi',modelId:'m',endpoint:'https://api.moonshot.ai/v1',apiMode:'openai_chat_completions' as const,authMethod:'api_key' as const,allowPrivateEndpoint:false};
 function fixture(){
  const calls:any[]=[];const connection=Object.assign(new EventEmitter(),{state:{profileId:'p',generation:1},modelRequest:vi.fn(async(method:string,params:any)=>{calls.push({method,params});return method==='models.reviewPrimary'?{draftId:'draft',role:'primary',route,expiresInMs:300000,credentialState:'staged'}:method==='models.applyDraft'?{operationId:'draft',state:'applied',verification:'configured'}:method==='models.cancelDraft'?{cancelled:true}:{valid:true};})});
+ const directory=mkdtempSync('/tmp/ec-model-references-');directories.push(directory);const references=new WorkOperationReferences(connection as any,directory);
  const pipe={closeWindow:vi.fn(async()=>{})};const credentials={open:vi.fn((_pipe,scope,accepted)=>accepted('candidate')),close:vi.fn()};
- return {calls,connection,pipe,credentials,setup:new DesktopModelSetup(connection as any,credentials as any,()=>pipe as any)};
+ return {calls,connection,pipe,credentials,references,setup:new DesktopModelSetup(connection as any,credentials as any,()=>pipe as any,references)};
 }
 it('binds private entry and reviewed Apply to Main-owned identity and retains a reconciliation pointer',async()=>{
  const f=fixture();const {setupId}=await f.setup.begin(route);await f.setup.stage(setupId);await f.setup.review(setupId);expect(await f.setup.apply(setupId)).toMatchObject({state:'applied'});
@@ -25,7 +29,7 @@ it('does not blindly resend an Apply after transport failure',async()=>{
  expect(f.connection.modelRequest.mock.calls.filter(c=>c[0]==='models.applyDraft')).toHaveLength(1);
 });
 it('opens only the service-confirmed Codex URL and carries the authorized candidate into review',async()=>{
- const f=fixture(),open=vi.fn(async()=>{});const setup=new DesktopModelSetup(f.connection as any,f.credentials as any,()=>f.pipe as any,open);
+ const f=fixture(),open=vi.fn(async()=>{});const setup=new DesktopModelSetup(f.connection as any,f.credentials as any,()=>f.pipe as any,f.references,open);
  let authorized=false;f.connection.modelRequest.mockImplementation(async(method:string,params:any)=>{
   f.calls.push({method,params});if(method==='models.oauthStart'||method==='models.oauthStatus')return {authorizationId:'auth',state:authorized?'authorized':'pending',verificationUrl:authorized?null:'https://auth.openai.com/codex/device',userCode:authorized?null:'CODE',candidateId:authorized?'oauth-candidate':null} as any;
   return {valid:true,cancelled:true} as any;
@@ -62,4 +66,16 @@ it('serializes setup creation and drops late validation after cancellation or pr
 it('keeps an uncertain Apply blocking new setup until it is reconciled',async()=>{
  const f=fixture(),{setupId}=await f.setup.begin(route);await f.setup.review(setupId);f.connection.modelRequest.mockImplementation(async()=>({cancelled:false}) as any);
  expect(await f.setup.cancel(setupId)).toEqual({cancelled:false});await expect(f.setup.begin(route)).rejects.toThrow('Reconcile');
+});
+
+it('recovers pending model overrides across Main restart and keeps profile journals separate',async()=>{
+ const f=fixture();Object.assign(f.connection,{getWork:async()=>({canonicalId:'s',profileId:f.connection.state.profileId,kind:'session',target:{targetId:'target',targetGeneration:1},modelBinding:{sessionId:'s'}})});
+ let state='accepted';f.connection.modelRequest.mockImplementation(async(method:string,params:any)=>{f.calls.push({method,params});if(method==='sessions.setModel')throw new Error('Reply lost');return{...params,state} as any;});
+ await expect(f.setup.setOverride('session:s',{providerId:'kimi',modelId:'m'})).rejects.toThrow('Reply lost');
+ const restarted=new DesktopModelSetup(f.connection as any,f.credentials as any,()=>f.pipe as any,new WorkOperationReferences(f.connection as any,f.references.directory));
+ expect(await restarted.inspectOverride('session:s')).toMatchObject({state:'accepted',method:'sessions.setModel'});
+ await expect(restarted.setOverride('session:s',null)).rejects.toThrow('Reconcile');
+ f.connection.state.profileId='q';expect(await restarted.inspectOverride('session:s')).toBeNull();
+ f.connection.state.profileId='p';state='completed';expect(await restarted.inspectOverride('session:s')).toMatchObject({state:'completed'});
+ expect(f.calls.filter(call=>call.method==='sessions.setModel')).toHaveLength(1);
 });

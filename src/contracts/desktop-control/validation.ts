@@ -20,7 +20,7 @@ const id = isControlId;
 const cursorToken: Check = (v) => typeof v === "string" && /^[A-Za-z0-9_-]{1,512}$/.test(v);
 const capabilities = shape({ methods: unique(choice(CONTROL_METHODS)), events: unique(choice(CONTROL_EVENTS)) });
 const target = shape({ targetId: id, targetGeneration: integer(1) });
-const targetProjection = shape({ targetId: id, targetGeneration: integer(1), label: text(240, 1), isolation: choice(["host", "sandboxed", "unknown"]) });
+const targetProjection = shape({ targetId: id, targetGeneration: integer(1), label: text(240, 1), isolation: choice(["host", "sandboxed", "unknown"]) }, {approvalMode:choice(["strict","adaptive","open"])});
 const actionShape = shape({ id: choice(ACTION_IDS), enabled: boolean }, { reason: text(2_048, 1), stepId: id, sessionId: id });
 const actions: Check = (v) => array((a) => actionShape(a) && isRecord(a) && (a.enabled === true || typeof a.reason === "string"), 128)(v) &&
   new Set((v as { id: string; stepId?: string }[]).map(a => `${a.id}:${a.stepId ?? ''}`)).size === (v as unknown[]).length;

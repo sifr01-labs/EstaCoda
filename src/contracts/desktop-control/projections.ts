@@ -5,7 +5,7 @@ export type ActionId = typeof ACTION_IDS[number];
 export type ActionProjection = { id: ActionId; enabled: boolean; reason?: string; stepId?: string; sessionId?: string };
 /** Display references only; core resolves ownership, paths and current authority. */
 export type TargetReference = { targetId: string; targetGeneration: number };
-export type TargetProjection = TargetReference & { label: string; isolation: "host" | "sandboxed" | "unknown" };
+export type TargetProjection = TargetReference & { label: string; isolation: "host" | "sandboxed" | "unknown"; approvalMode?: "strict" | "adaptive" | "open" };
 export const WORK_STATUSES = ["draft", "queued", "running", "needs_attention", "paused", "completed", "partial", "failed", "cancelled"] as const;
 export type WorkDisplayStatus = typeof WORK_STATUSES[number];
 export type WorkProjection = {

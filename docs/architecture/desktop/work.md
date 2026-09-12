@@ -35,3 +35,23 @@ The status bar separately counts running root Sessions, running Tasks, approvals
 ## Trust review
 
 The Main API accepts semantic intents and opaque references. Main owns operation IDs and draft-to-Session/Task mappings. Core rechecks selected-profile membership, workspace trust, target generation, lifecycle eligibility, hardline policy and approval scope. The desktop does not write canonical execution records or adopt a supervisor. Tests cover stale profiles/targets, unsafe attachments, uncertain dispatch, duplicate decisions and restart inspection.
+
+### Recovery and execution inspection
+
+A delayed new-Work preparation remains a draft until its canonical receipt
+settles. Retrying continues from the prepared Session and creates the requested
+Task or sends the prompt once. Changing the target of a prepared draft requires a
+new draft. Pending per-Work model changes retain a bounded profile-scoped operation
+reference across app restarts and must be reconciled before another model change.
+
+The inspector follows the selected draft target and shows its profile approval
+mode and the model selected for the next turn or Task attempt. These labels do not
+claim that configuration changes alter an already-running turn. Unavailable
+metadata stays unavailable. Cancellation notices wait for a canonical terminal
+outcome, then show cancellation or acknowledge that execution ended with another
+outcome.
+
+On macOS, run `pnpm run desktop:package` followed by
+`pnpm run desktop:native:execution` to exercise the real supervisor/runtime/Task
+worker through Desktop with a controlled loopback provider, app restart, persisted
+completion and duplicate-request checks. No paid provider or account is used.

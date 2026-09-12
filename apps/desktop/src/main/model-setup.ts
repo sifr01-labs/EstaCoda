@@ -1,3 +1,4 @@
+import {WorkOperationReferences} from './work-operation-references.js';
 import {randomUUID} from 'node:crypto';
 import type{MethodContracts,RouteRole,OAuthStatus,CandidateRoute,ModelRouteDraft,ModelApplyReceipt}from'@estacoda/control-protocol';
 import type{DesktopConnection}from'./connection.js';
@@ -6,14 +7,26 @@ import type{CredentialWindow}from'./credential-window.js';
 type Setup={oauth?:OAuthStatus;id:string;scope:CredentialScope;route:CandidateRoute;candidateId?:string;draft?:ModelRouteDraft;profileId:string;generation:number;applying:boolean};
 /** Main owns setup identity. The ordinary renderer never selects a credential scope or sees a key. */
 export class DesktopModelSetup {
- #overrides=new Map<string,MethodContracts['operations.inspect']['params']>();
+ #overrideBusy=new Set<string>();
  #preparing=false;#epoch=0;
  #setup:Setup|undefined;readonly #windowId=randomUUID();#generation=0;#lastApply=new Map<string,string>();
- constructor(readonly connection:DesktopConnection,readonly credentials:CredentialWindow,readonly pipe:()=>CredentialPipeClient|undefined,readonly openBrowser:(url:string)=>Promise<void>=async()=>{throw new Error('Browser unavailable');}){connection.on('invalidate',()=>{this.#epoch++;this.credentials.close();this.#setup=undefined;});}
+ constructor(readonly connection:DesktopConnection,readonly credentials:CredentialWindow,readonly pipe:()=>CredentialPipeClient|undefined,readonly references:WorkOperationReferences,readonly openBrowser:(url:string)=>Promise<void>=async()=>{throw new Error('Browser unavailable');}){connection.on('invalidate',()=>{this.#epoch++;this.credentials.close();this.#setup=undefined;});}
  private async workBinding(workId:string){const generation=this.connection.state.generation,profileId=this.connection.state.profileId;const work=await this.connection.getWork(workId);if(generation!==this.connection.state.generation||profileId!==this.connection.state.profileId||work.profileId!==profileId||!work.target||!work.modelBinding||!['session','task'].includes(work.kind))throw new Error('Work model unavailable.');if(work.kind==='task'?work.modelBinding.taskId!==work.canonicalId:work.modelBinding.sessionId!==work.canonicalId||work.modelBinding.taskId)throw new Error('Invalid Work binding.');return{sessionId:work.modelBinding.sessionId,target:{targetId:work.target.targetId,targetGeneration:work.target.targetGeneration},...(work.kind==='task'?{taskId:work.canonicalId}:{})};}
  async workOverride(workId:string){return this.connection.modelRequest('models.workOverride',await this.workBinding(workId));}
- async setOverride(workId:string,selection:{providerId:string;modelId:string}|null){const binding=await this.workBinding(workId),key=this.connection.state.profileId+':'+workId;const previous=this.#overrides.get(key);if(previous){const receipt=await this.connection.modelRequest('operations.inspect',previous);if(receipt.state!=='completed')throw new Error('Reconcile the previous model change first.');}const params={...binding,operationId:Date.now()+':'+randomUUID(),method:binding.taskId?'tasks.setModel' as const:'sessions.setModel' as const};this.#overrides.set(key,params);return params.method==='tasks.setModel'?this.connection.modelRequest('tasks.setModel',{...binding,taskId:binding.taskId!,operationId:params.operationId,selection}):this.connection.modelRequest('sessions.setModel',{...binding,operationId:params.operationId,selection});}
- async inspectOverride(workId:string){await this.workBinding(workId);const params=this.#overrides.get(this.connection.state.profileId+':'+workId);return params?this.connection.modelRequest('operations.inspect',params):null;}
+ async setOverride(workId:string,selection:{providerId:string;modelId:string}|null){
+  const key=this.connection.state.profileId+':'+workId,profileId=this.connection.state.profileId,generation=this.connection.state.generation;
+  const check=()=>{if(profileId!==this.connection.state.profileId||generation!==this.connection.state.generation)throw new Error('Work context changed.');};
+  if(this.#overrideBusy.has(key))throw new Error('Model change is settling.');this.#overrideBusy.add(key);
+  try{
+   const binding=await this.workBinding(workId);check();await this.references.makeRoom(check);check();
+   const previous=this.references.records()['model:'+workId];
+   if(previous){const receipt=await this.connection.modelRequest('operations.inspect',previous);check();if(receipt.state!=='completed')throw new Error('Reconcile the previous model change first.');}
+   const params={...binding,operationId:Date.now()+':'+randomUUID(),method:binding.taskId?'tasks.setModel' as const:'sessions.setModel' as const};
+   this.references.save('model:'+workId,params);
+   return params.method==='tasks.setModel'?this.connection.modelRequest('tasks.setModel',{...binding,taskId:binding.taskId!,operationId:params.operationId,selection}):this.connection.modelRequest('sessions.setModel',{...binding,operationId:params.operationId,selection});
+  }finally{this.#overrideBusy.delete(key);}
+ }
+ async inspectOverride(workId:string){await this.workBinding(workId);const params=this.references.records()['model:'+workId];return params?this.connection.modelRequest('operations.inspect',params):null;}
  private async prepare<T>(build:(check:()=>void)=>Promise<T>):Promise<T>{if(this.#preparing||this.#setup?.applying)throw new Error('Setup is settling.');this.#preparing=true;const epoch=++this.#epoch,profileId=this.connection.state.profileId,generation=this.connection.state.generation;const check=()=>{if(epoch!==this.#epoch||profileId!==this.connection.state.profileId||generation!==this.connection.state.generation)throw new Error('Setup changed.');};try{if(!(await this.cancel(undefined,true)).cancelled)throw new Error('Reconcile the previous Apply first.');check();return await build(check);}finally{this.#preparing=false;}}
  async begin(route:CandidateRoute){return this.prepare(async check=>{await this.connection.modelRequest('models.validateRoute',{route});check();const setup:Setup={id:randomUUID(),scope:{windowId:this.#windowId,generation:++this.#generation,purpose:'provider',providerId:route.providerId,authMethod:route.authMethod==='oauth'?'oauth':'api_key',endpoint:route.endpoint},route:structuredClone(route),profileId:this.connection.state.profileId,generation:this.connection.state.generation,applying:false};this.#setup=setup;return {setupId:setup.id};});}
  async verifyReviewed(setupId:string,allowPrivateEndpoint:boolean){const setup=this.require(setupId);if(!setup.draft)throw new Error('Review required.');return this.connection.modelRequest('models.verifyDraft',{draftId:setup.draft.draftId,windowId:setup.scope.windowId,generation:setup.scope.generation,spendApproved:true,allowPrivateEndpoint});}

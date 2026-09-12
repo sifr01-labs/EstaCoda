@@ -86,6 +86,7 @@
     "desktop:test": "pnpm --filter @estacoda/desktop test",
     "desktop:package": "pnpm --filter @estacoda/desktop package",
     "desktop:e2e": "pnpm --filter @estacoda/desktop e2e",
+    "desktop:native:execution": "node --import tsx apps/desktop/tests/native-real-execution.mts",
     "desktop:native": "pnpm --filter @estacoda/desktop exec vite build --config tests/vite.harness.config.ts && node --import tsx apps/desktop/tests/native-integration.mts && node apps/desktop/tests/recovery-smoke.mjs && node apps/desktop/tests/package-check.mjs"
   },
   "devDependencies": {

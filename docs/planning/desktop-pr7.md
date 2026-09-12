@@ -74,3 +74,39 @@ Validation:
 Root validation and packaging use a tracked-source checkout on this machine so pre-existing untracked duplicate source files do not contaminate TypeScript discovery; those user files remain untouched. The tested desktop bundles are copied back after packaging/signing completes. Desktop unit and browser checks run from the working repository.
 
 Risk/limits: PR7 crosses execution, approval, attachment and profile boundaries; Main owns presentation references, while core retains all execution and grant authority. The native Work runtime is deterministic, not a paid-model production soak. Windows/Linux native releases, real-account OAuth, large-profile load testing, binary attachment extraction and later target/file/artifact/integration milestones remain outside this PR. Existing trusted targets and the documented payload/inspection bounds are required.
+
+## PR6/PR7 review follow-up
+
+The focused follow-up fixes delayed Task preparation recovery, persists pending
+Work model-control references across Main restarts, connects draft inspection to
+the selected target and canonical next-turn route, and reconciles cancellation
+notices with terminal Work outcomes. Profile approval mode is explicitly labelled
+as profile policy; the next-turn/next-attempt model is not claimed to be the model
+of an already-running turn. Missing reads remain unavailable.
+
+Recovery reuses the bounded, profile-scoped, reference-only operation journal.
+Preparation receipts cannot be evicted as if they were completed submissions.
+Targets are revalidated before continuing; uncertain operations are inspected,
+not replayed. No prompt, attachment contents, credentials, or model selection is
+written into the journal, and execution ownership remains with the supervisor.
+
+`pnpm run desktop:native:execution` adds a macOS native acceptance journey after
+`pnpm run desktop:package`. It starts the real supervisor, uses the production
+Desktop/Main/preload/bridge and runtime/Task scheduler/worker, and scripts only a
+no-auth loopback provider. It proves canonical Session completion, keeps a Task's
+provider request in flight across full app restart, verifies no request replay,
+and checks its completed result persists through another app restart. This tests
+app restart, not an executing owner's crash or real-provider availability.
+
+Validation for this follow-up: 44 desktop unit tests, 132 browser/visual tests,
+69 focused protocol/target tests, and 10,866 core tests passed. Frozen dependency
+installation, typechecks, smoke, build, runtime-import/ESM audits, distribution
+smoke and execution budgets passed. The isolated source copy excludes unrelated
+untracked duplicate files in the working checkout; Docker checks use a workspace
+under the engine-shared repository path. Source/dist Docker conformance and image
+validation passed there. The native execution journey and existing macOS native
+integration, recovery and package checks passed.
+
+Risk review: changes touch recovery references and display-only policy metadata.
+They preserve profile/target fences, canonical receipts, trust and approval gates,
+and introduce no new execution authority or credential transport.
