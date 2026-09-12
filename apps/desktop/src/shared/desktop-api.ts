@@ -7,6 +7,10 @@ export type DesktopSnapshot = { status: 'connecting' | 'ready' | 'disconnected' 
   work:Page<WorkProjection>;inbox:Page<InboxProjection> };
 export type ProfileChoice = {id:string;label:string};
 export type DesktopModelsApi={
+ workOverride(workId:string):Promise<MethodContracts['models.workOverride']['result']>;
+ setOverride(workId:string,selection:{providerId:string;modelId:string}|null):Promise<MethodContracts['sessions.setModel']['result']>;
+ inspectOverride(workId:string):Promise<MethodContracts['operations.inspect']['result']|null>;
+
  verifyReviewed(setupId:string,allowPrivateEndpoint:boolean):Promise<MethodContracts['models.verifyDraft']['result']>;
  routes():Promise<{fallbacks:MethodContracts['models.fallbacks']['result'];auxiliary:MethodContracts['models.auxiliary']['result']}>;
  reviewConfigured(selection:Omit<MethodContracts['models.reviewConfigured']['params'],'windowId'|'generation'>):Promise<{setupId:string;draft:MethodContracts['models.reviewPrimary']['result']}>;

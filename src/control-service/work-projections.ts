@@ -14,7 +14,7 @@ export function sessionWork(session: SessionRecord, events: readonly SessionEven
       blocked: 'needs_attention', failed: 'failed', cancelled: 'cancelled' } as const)[outcome.status];
   } else if (session.endedAt) status = session.endReason === 'cancelled' ? 'cancelled' : 'partial';
   if (active) status = 'running';
-  return { id: `session:${session.id}`, canonicalId: session.id, profileId: session.profileId, kind: 'session',
+  return { id: `session:${session.id}`, canonicalId: session.id, profileId: session.profileId, kind: 'session', modelBinding:{sessionId:session.id},
     ...(session.parentSessionId ? { parentWorkId: `session:${session.parentSessionId}` } : {}),
     title: deriveSessionDescription(session.title).slice(0, 240), status, updatedAt: timestamp(session.updatedAt),
     target: session.executionTarget ? { targetId: session.executionTarget.targetId, targetGeneration: session.executionTarget.targetGeneration,

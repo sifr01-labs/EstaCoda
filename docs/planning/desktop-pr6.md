@@ -97,3 +97,9 @@ The live Models screen supports reviewed primary selection, fallback add/reorder
 Provider setup also offers primary/fallback/specialist roles before staging. The dashboard prioritizes configured providers and keeps the wider provider catalog behind Browse Providers. Local and Codex setup metadata are available even when absent from the offline model snapshot. A development-mode mount cleanup issue was fixed so opening a review does not cancel its draft.
 
 Validation: 105 core catalog/route/credential/protocol tests and 29 desktop tests passed, plus root typecheck and desktop foundation checks. Tests verify existing-key reuse, no process-environment import, read-only failed verification, role dispatch and reviewed ordering. Integrated visual and native journeys remain pending for the acceptance slice.
+
+## 14. Work-scoped model picker
+
+The composer now exposes the live model picker on bound Sessions and Tasks, with profile defaults unchanged. Main resolves the canonical Work/session/target binding and supplies operation identity; renderer input is limited to Work and model IDs. Accepted changes display their next-turn/next-attempt boundary, poll receipts, and block another change while uncertain. Task attempts remain read-only. New Work drafts retain a local selection for the later live-submission milestone.
+
+Validation: 31 desktop tests and 62 protocol tests passed, plus desktop foundation and root typecheck. Tests cover canonical Task binding, reset, pending-operation reconciliation, profile isolation, and refusal of attempt controls. Browser/native journey coverage follows in the acceptance slice.

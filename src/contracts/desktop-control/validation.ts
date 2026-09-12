@@ -25,7 +25,7 @@ const actionShape = shape({ id: choice(ACTION_IDS), enabled: boolean }, { reason
 const actions: Check = (v) => array((a) => actionShape(a) && isRecord(a) && (a.enabled === true || typeof a.reason === "string"), 128)(v) &&
   new Set((v as { id: string; stepId?: string }[]).map(a => `${a.id}:${a.stepId ?? ''}`)).size === (v as unknown[]).length;
 const work = shape({ id, canonicalId: id, profileId: id, kind: choice(["session", "task", "task_attempt", "schedule", "scheduled_execution", "evolution_review"]),
-  title: text(240, 1), status: choice(WORK_STATUSES), updatedAt: integer(), target: nullable(targetProjection) }, { reason: text(2_048), parentWorkId: id, actions });
+  title: text(240, 1), status: choice(WORK_STATUSES), updatedAt: integer(), target: nullable(targetProjection) }, { reason: text(2_048), parentWorkId: id, actions, modelBinding:shape({sessionId:id},{taskId:id}) });
 const usage = shape({ reportedTokens: nullable(integer()), cost: nullable(shape({ amount: (v) => typeof v === "number" && Number.isFinite(v) && v >= 0,
   currency: (v) => typeof v === "string" && /^[A-Z]{3}$/.test(v) })) });
 const evidence = shape({ state: choice(["verified", "unverified", "partial", "failed"]), summary: text(2_048), artifactIds: unique(id, 100) });

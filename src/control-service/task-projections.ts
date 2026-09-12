@@ -12,7 +12,7 @@ const statuses: Record<TaskStatus, WorkDisplayStatus> = {
   waiting_for_approval: 'needs_attention', paused: 'paused', completed: 'completed', partial: 'partial', failed: 'failed', cancelled: 'cancelled',
 };
 export function taskWork(task: Task, visibleSessions: ReadonlySet<string>): WorkProjection {
-  return { id: `task:${task.id}`, canonicalId: task.id, profileId: task.profileId, kind: 'task',
+  return { id: `task:${task.id}`, canonicalId: task.id, profileId: task.profileId, kind: 'task', modelBinding:{sessionId:task.originSessionId,taskId:task.id},
     ...(task.parentTaskId ? { parentWorkId: `task:${task.parentTaskId}` } : visibleSessions.has(task.originSessionId) ? { parentWorkId: `session:${task.originSessionId}` } : {}),
     title: safeText(task.objective, 240) || 'Task', status: statuses[task.status],
     ...(task.waitReason ? { reason: safeText(task.waitReason.summary) } : {}), updatedAt: timestamp(task.updatedAt),

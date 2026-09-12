@@ -11,7 +11,7 @@ import{Topline,Button,Icon}from'./components/primitives.js';
 import{AppearanceView}from'./components/appearance-view.js';
 import{Sidebar,type PageName}from'./components/sidebar.js';
 import{WorkView}from'./components/work-view.js';import{InboxView}from'./components/inbox-view.js';
-export type Draft={text:string;attachments:{name:string;type:string;size:number}[];model:string;note:string};
+export type Draft={modelSelection?:{providerId:string;modelId:string}|null;text:string;attachments:{name:string;type:string;size:number}[];model:string;note:string};
 export type WorkViewState={tab:'activity'|'changes'|'results';inspector:boolean;activityExtent:number};
 export const emptyWorkView=():WorkViewState=>({tab:'activity',inspector:false,activityExtent:100});
 export const emptyDraft=():Draft=>({text:'',attachments:[],model:'Kimi K3',note:''});

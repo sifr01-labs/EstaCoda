@@ -44,3 +44,15 @@ it('uses reviewed fallback and specialist service methods without exposing crede
  const reviewed=await f.setup.reviewed('models.reviewFallbackOrder',{revision:'rev',order:[1,0]});expect(reviewed.draft.role).toBe('fallback_order');expect(f.calls.at(-1)).toMatchObject({method:'models.reviewFallbackOrder',params:{revision:'rev',order:[1,0]}});
  expect(f.calls.filter(c=>c.method==='models.applyDraft')).toHaveLength(0);
 });
+it('resolves canonical Work bindings in Main and blocks resend until a previous override settles',async()=>{
+ const f=fixture();Object.assign(f.connection,{getWork:vi.fn(async()=>({canonicalId:'task',profileId:'p',kind:'task',target:{targetId:'target',targetGeneration:3},modelBinding:{sessionId:'origin',taskId:'task'}}))});
+ let state='accepted';f.connection.modelRequest.mockImplementation(async(method:string,params:any)=>{f.calls.push({method,params});return{...params,state} as any;});
+ await f.setup.setOverride('task:task',{providerId:'kimi',modelId:'m'});expect(f.calls.at(-1)).toMatchObject({method:'tasks.setModel',params:{sessionId:'origin',taskId:'task',target:{targetId:'target',targetGeneration:3},selection:{providerId:'kimi',modelId:'m'}}});
+ await expect(f.setup.setOverride('task:task',null)).rejects.toThrow('Reconcile');expect(f.calls.filter(c=>c.method==='tasks.setModel')).toHaveLength(1);
+ state='completed';await f.setup.setOverride('task:task',null);expect(f.calls.at(-1).params.selection).toBeNull();expect(f.calls.filter(c=>c.method==='tasks.setModel')).toHaveLength(2);
+ f.connection.state.profileId='other';await expect(f.setup.workOverride('task:task')).rejects.toThrow('unavailable');
+});
+it('rejects attempt Work and stale profile bindings before sending an override',async()=>{
+ const f=fixture();Object.assign(f.connection,{getWork:vi.fn(async()=>({canonicalId:'attempt',profileId:'p',kind:'task_attempt',target:{targetId:'target',targetGeneration:3},modelBinding:{sessionId:'origin',taskId:'task'}}))});
+ await expect(f.setup.setOverride('attempt:a',null)).rejects.toThrow('unavailable');expect(f.calls).toEqual([]);
+});

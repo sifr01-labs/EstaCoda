@@ -9,6 +9,7 @@ export type TargetProjection = TargetReference & { label: string; isolation: "ho
 export const WORK_STATUSES = ["draft", "queued", "running", "needs_attention", "paused", "completed", "partial", "failed", "cancelled"] as const;
 export type WorkDisplayStatus = typeof WORK_STATUSES[number];
 export type WorkProjection = {
+  modelBinding?: {sessionId:string;taskId?:string};
   actions?: ActionProjection[];
   id: string; canonicalId: string; profileId: string;
   kind: "session" | "task" | "task_attempt" | "schedule" | "scheduled_execution" | "evolution_review";
