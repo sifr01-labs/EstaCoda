@@ -112,3 +112,7 @@ ordinary reads cannot exhaust those slots.
 `models.inspectApply` accepts a specific operation ID or an empty request to inspect the selected profile's latest durable Apply after restart. With no history it returns `operationId: "none"`, `state: "unknown"`; Main maps that to no saved change. Pending journal contents never cross RPC.
 
 `models.workOverride` reads a scoped selection. `sessions.setModel` and `tasks.setModel` delegate to the authenticated execution owner and return canonical control receipts. Optional Work `modelBinding` contains a Session ID and, for a Task, Task ID; Main still resolves the canonical Work and target generation before mutation. The reference is not authority. See [Models and Providers](models-and-providers.md) for limits and operator recovery.
+
+## PR7 Work
+
+`work.list` supports bounded metadata search and parent filtering; cursors bind both filters. `work.targets` discovers existing trusted target records, `work.live` reads a bounded preview from the existing owner, and `work.usage`/`work.counts` expose canonical accounting and status. `inbox.get` resolves off-page attention by scoped ID. `tasks.create` routes bounded, idempotent operator Task creation to the supervisor; it does not construct a second desktop execution store. See [Desktop Work](work.md) for attachment bounds, lifecycle semantics and recovery.

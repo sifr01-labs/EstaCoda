@@ -100,7 +100,7 @@ it('computes Task lifecycle and retry budget hints in the backend and preserves 
     const { taskId } = service.begin({ objective: 'Task', creatorSessionId: 's', workspace: { canonicalPath: '/tmp', identityHash: 'x' } });
     const task = store.getTask(taskId)!;
     // Availability requires an exact target; final dispatch still validates the real record.
-    task.executionTarget = { targetId: 't', targetGeneration: 1 } as typeof task.executionTarget;
+    task.executionTarget = { schemaVersion: 1, targetId: 't', targetGeneration: 1, workspace: task.workspace };
     let actions = taskActions(task, store);
     expect(actions.find(a => a.id === 'tasks.resume')?.enabled).toBe(false);
     expect(actions.find(a => a.id === 'tasks.retry')?.reason).toBeTruthy();

@@ -55,3 +55,22 @@ Validation: five focused bootstrap/Inbox tests, eighteen browser Work/Inbox jour
 The inspector reads the canonical provider ledger, including Session compression lineage and originating Task spend, within a 4,096-entry/128-root-Task inspection bound. Missing usage, missing prices, provisional totals, truncation and unavailable context are explicit. Runtime counts distinguish root Sessions, Tasks, approvals and schedules without double-counting attempts or child workers. Completed turn outcomes take precedence over cached ownership leases. Target groups use identity rather than display labels, and requested Docker policy is never presented as verified isolation.
 
 Validation: 87 focused core/protocol tests, an additional real-ledger truncation check, 39 desktop unit tests, nineteen browser Work journeys, root and desktop typechecks. Review covered profile isolation, context invalidation, stale Work selection and bounded lower-bound accounting.
+
+## 10. Integration, restart, visual and release validation
+
+Native acceptance now exercises production Main/preload, the standalone bridge, the private socket, real supervisor ownership locks, durable receipts and core Task/model/approval services. A deterministic runtime receives actual native-picker attachment contents once, waits for approval through application restart, and continues after approve-once. Search, pins, model overrides, bounded Task creation/pause, bridge termination, profile switching, application restart and supervisor restart are checked without automatic replay. The unchanged hardened macOS package is also launched from a path containing spaces and Arabic.
+
+Final review corrected concurrent attachment staging so simultaneous requests cannot exceed the 64-handle limit, counted running compression-successor Sessions without counting child workers, and replaced the stale pre-PR6 setup banner with a direct Models & providers action. The native welcome area retains its content height so new workspace/Task controls cannot overlap its text in short windows. The older lifecycle fixture now supplies the complete target workspace identity required by its type. No safety check or visual golden was relaxed.
+
+Validation:
+
+- `validate:execution-release`: frozen install, conformance, root typecheck, **666 core test files / 10,866 tests**, smoke, build, runtime-import/ESM audits, distribution smoke, call/token budgets, source and built Docker execution, and Docker image validation.
+- `desktop:foundation:check`: pure protocol, desktop typecheck and Node/Electron import boundary.
+- `desktop:test`: **12 files / 41 tests**, including concurrent attachment staging, expiration and disconnected/profile-scoped counts.
+- `desktop:e2e`: **131 visual/interaction checks**, including twenty live Work continuity journeys; frozen prototype and golden images unchanged.
+- `desktop:package` and `desktop:native`: macOS arm64 package/signature, CSP, fuses, supplied icon, native resize/200% zoom, credential isolation, Work controls and restart journeys. Native evidence was regenerated intentionally and visually inspected.
+- `git diff --check`.
+
+Root validation and packaging use a tracked-source checkout on this machine so pre-existing untracked duplicate source files do not contaminate TypeScript discovery; those user files remain untouched. The tested desktop bundles are copied back after packaging/signing completes. Desktop unit and browser checks run from the working repository.
+
+Risk/limits: PR7 crosses execution, approval, attachment and profile boundaries; Main owns presentation references, while core retains all execution and grant authority. The native Work runtime is deterministic, not a paid-model production soak. Windows/Linux native releases, real-account OAuth, large-profile load testing, binary attachment extraction and later target/file/artifact/integration milestones remain outside this PR. Existing trusted targets and the documented payload/inspection bounds are required.

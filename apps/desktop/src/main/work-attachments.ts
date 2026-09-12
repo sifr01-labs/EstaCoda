@@ -28,7 +28,7 @@ export class WorkAttachments {
     staged.push({scope:this.scope(scope),created:now,preview,text});
    }finally{await file.close();}
   }
-  check();for(const item of staged)this.#items.set(item.preview.id,item);return staged.map(item=>item.preview);
+  check();if(this.#items.size+staged.length>64)throw new WorkAttachmentError('Attachment staging is full. Reconnect to clear expired drafts.');for(const item of staged)this.#items.set(item.preview.id,item);return staged.map(item=>item.preview);
  }
  compose(scope:AttachmentScope,ids:string[],text:string):string{
   if(ids.length>4||new Set(ids).size!==ids.length)throw new WorkAttachmentError('Choose up to four different attachments.');

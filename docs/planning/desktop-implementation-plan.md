@@ -1058,6 +1058,8 @@ Connect the PR 5 Settings/Models and composer components to live route/setup ser
 
 ### PR 7 — Core Work experience
 
+Implemented on `ame/desktop-foundation`; see the [PR7 implementation record](desktop-pr7.md) and [Work behavior and limits](../architecture/desktop/work.md).
+
 Connect the approved Work, Inbox, search, pin references, composer, and runtime-count views to canonical projections. Extend the narrow protocol/Main API for bounded search and validated attachments if not already supported; include profile/target fencing and payload limits. No filename-only mock may count as live attachment submission.
 
 - `feat(desktop-work): add work list and detail routing`

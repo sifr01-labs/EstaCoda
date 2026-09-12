@@ -280,3 +280,14 @@ test('canonical usage distinguishes lower bounds and unavailable execution count
  await expect(page.getByRole('button',{name:'5 need approval',exact:true})).toBeVisible();
  await expect(page.getByRole('button',{name:'Schedules unavailable',exact:true})).toBeVisible();
 });
+
+
+test('new Work controls stay below the welcome text in a short native viewport',async({page})=>{
+ await page.setViewportSize({width:1280,height:600});await live(page);
+ const welcome=page.locator('.ec-newwelcome p'),workspace=page.getByLabel('Work target');
+ await expect(welcome).toBeVisible();await expect(workspace).toBeVisible();
+ expect((await workspace.boundingBox())!.y).toBeGreaterThanOrEqual((await welcome.boundingBox())!.y+(await welcome.boundingBox())!.height);
+ await page.getByLabel('Work type').selectOption('task');await page.getByText('Review Task limits and authority',{exact:true}).click();
+ expect((await workspace.boundingBox())!.y).toBeGreaterThanOrEqual((await welcome.boundingBox())!.y+(await welcome.boundingBox())!.height);
+ await page.getByRole('textbox',{name:'Draft guidance',exact:true}).scrollIntoViewIfNeeded();await expect(page.getByRole('textbox',{name:'Draft guidance',exact:true})).toBeInViewport();
+});

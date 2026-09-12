@@ -8,7 +8,7 @@ html,body,#root{margin:0;min-width:0;min-height:100%;}body{background:#131313}bu
 #ec-branded-workspace .ec-window[data-native=true] .ec-workbody{flex:1;min-height:0;overflow:auto}
 #ec-branded-workspace .ec-window[data-native=true] .ec-workcenter{min-height:0;height:100%}
 #ec-branded-workspace .ec-window[data-native=true] #ec-work-panel{min-height:0;overflow:auto;flex:1;padding:3px}
-#ec-branded-workspace .ec-window[data-native=true] .ec-newwelcome{flex:1;min-height:0;padding-top:clamp(20px,9vh,90px)}
+#ec-branded-workspace .ec-window[data-native=true] .ec-newwelcome{flex:1 0 auto;min-height:min-content;padding-top:clamp(20px,9vh,90px)}
 #ec-branded-workspace .ec-window[data-native=true] .ec-composerdock{flex-shrink:0}
 @media(max-width:850px){#ec-branded-workspace .ec-window[data-native=true] .ec-workcenter{height:auto;min-height:100%}}
 @media(max-width:590px){#ec-branded-workspace .ec-window[data-native=true] .ec-layout{grid-template-rows:auto minmax(0,1fr)}#ec-branded-workspace .ec-window[data-native=true] .ec-sidebar{overflow:visible}#ec-branded-workspace .ec-window[data-native=true] .ec-newwelcome{padding-top:20px}}

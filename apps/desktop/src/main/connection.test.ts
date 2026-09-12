@@ -2,11 +2,12 @@ import{EventEmitter}from'node:events';
 import{afterEach,expect,it,vi}from'vitest';
 const controls=vi.hoisted(()=>({fail:false,clients:[] as any[],lookup:null as null|((work:unknown)=>void)}));
 vi.mock('./protocol-client.js',()=>({ProtocolClient:class extends EventEmitter{
- context={capabilities:{events:[],methods:[]}};profile='default';closed=false;
+ context={capabilities:{events:[],methods:['work.counts']}};profile='default';closed=false;
  constructor(){super();controls.clients.push(this);}
  async request(method:string,params:any){
   if(method==='control.initialize'){this.profile=params.profileId;return{};}
   if(controls.fail)throw Error('Unavailable');
+  if(method==='work.counts')return{runningSessions:this.profile==='default'?2:0,runningTasks:1,queuedTasks:0,approvals:3,attention:3,scheduled:null,asOf:1};
   if(method==='work.get')return new Promise(resolve=>{controls.lookup=resolve;});
   if(method==='control.bootstrap')return{profile:{id:this.profile,label:this.profile,configuration:'ready'},runtime:{state:'ready'},cursor:{sequence:0}};
   if(method==='control.subscribe')return{state:'subscribed'};
@@ -33,4 +34,8 @@ it('reads off-page Work and rejects a late reply after a profile switch',async()
   const late=connection.getWork('old');const rejected=expect(late).rejects.toThrow('Desktop context changed');
   connection.switchProfile('other');controls.lookup!({id:'old',profileId:'default'});await rejected;
  }finally{connection.close();}
+});
+
+it('clears canonical counts on disconnect and refreshes them within the selected profile',async()=>{
+ const{connection}=create();try{connection.switchProfile('default');await vi.waitFor(()=>expect(connection.state.status).toBe('ready'));expect(connection.state.counts).toMatchObject({runningSessions:2,approvals:3,scheduled:null});controls.clients[0].emit('disconnected');expect(connection.state.status).toBe('disconnected');expect(connection.state.counts).toBeNull();connection.switchProfile('other');expect(connection.state.counts).toBeUndefined();await vi.waitFor(()=>expect(connection.state.status).toBe('ready'));expect(connection.state.counts?.runningSessions).toBe(0);}finally{connection.close();}
 });

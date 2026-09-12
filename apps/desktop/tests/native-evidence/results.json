@@ -8,9 +8,11 @@
     "Native 1280/736/360px resize and 200% zoom retain a reachable composer without horizontal overflow.",
     "Production API-key entry stages through fd3, closes the private window, rejects a foreign sender, and cancellation writes no credential or config.",
     "Local no-auth setup performs one bounded streamed verification, reviews before writing, and persists the selected primary only on Apply.",
+    "Application restart reconnects to an outstanding execution approval without resending its attached prompt.",
+    "Native attachment contents reach the real shared owner once; search, pins, approve-once, model override and bounded Task creation/pause persist through canonical services.",
     "Terminating the owned bridge reconnects automatically to the same supervisor.",
     "A full application restart reconciles the last saved model Apply from its profile receipt.",
-    "Profile switch, quit/relaunch, reconnect and supervisor restart preserve canonical ownership; no dispatch or global pointer mutation.",
+    "Profile switch, quit/relaunch, reconnect and supervisor restart preserve canonical ownership; no replay or global pointer mutation.",
     "Incompatible existing host stays inspectable and cannot be replaced or dispatched by Desktop."
   ]
 }

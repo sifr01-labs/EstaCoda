@@ -26,3 +26,8 @@ it('counts canonical sessions and Tasks without counting attempts or approvals a
  const base={canonicalId:'s',profileId:'p',title:'Work',target:null,updatedAt:0};
  expect(workCounts({work:[{...base,id:'s',kind:'session',status:'needs_attention'},{...base,id:'t',kind:'task',status:'running'},{...base,id:'a',parentWorkId:'t',kind:'task_attempt',status:'running'},{...base,id:'child',parentWorkId:'a',kind:'session',status:'running'}],inbox:[{id:'approval',workId:'s',profileId:'p',kind:'approval',title:'Review',summary:'',createdAt:0,approval:null}],activity:{},activeSchedules:null})).toMatchObject({runningSessions:0,runningTasks:1,approvals:1,scheduled:null});
 });
+
+it('counts a running compression successor while excluding inspection-only child Sessions',()=>{
+ const base={canonicalId:'s',profileId:'p',title:'Work',target:null,updatedAt:0,kind:'session' as const,status:'running' as const,parentWorkId:'session:previous'};
+ expect(workCounts({work:[{...base,id:'compressed',modelBinding:{sessionId:'s'}},{...base,id:'worker'}],activity:{}}).runningSessions).toBe(1);
+});
