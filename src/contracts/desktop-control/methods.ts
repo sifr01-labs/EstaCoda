@@ -1,3 +1,4 @@
+import type {ConnectionOperation,GatewayAction,GatewayDiagnostics} from './telegram.js';
 import type {TelegramSettings,TelegramDraft,TelegramReview,TelegramVerify,TelegramVerification} from './telegram.js';
 import type {ConfiguredRouteReview} from './model-setup.js';
 import type {OAuthStatus,OAuthBinding} from './model-setup.js';
@@ -23,6 +24,9 @@ export type SubscribeResult =
 export type WorkUsageProjection={scope:'session'|'task'|'attempt';reportedTokens:number|null;providerCalls:number;cost:{amount:number;currency:'USD'}|null;usageComplete:boolean;pricingComplete:boolean;context:{usedTokens:number;totalTokens:number;provider:string;model:string}|null;truncated:boolean;provisional:boolean};
 export type RuntimeCounts={runningSessions:number;runningTasks:number;queuedTasks:number;approvals:number;attention:number;scheduled:number|null;asOf:number};
 export type MethodContracts = {
+  "gateway.diagnostics":{params:Record<string,never>;result:GatewayDiagnostics};
+  "gateway.execute":{params:{operationId:string;action:GatewayAction;acknowledgeSharedWork:true};result:ConnectionOperation};
+  "connections.inspectOperation":{params:{operationId:string};result:ConnectionOperation};
   "telegram.verify":{params:TelegramVerify;result:TelegramVerification};
   "telegram.settings":{params:Record<string,never>;result:TelegramSettings};
   "telegram.review":{params:TelegramReview;result:TelegramDraft};

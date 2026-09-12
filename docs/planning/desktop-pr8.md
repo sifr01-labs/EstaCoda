@@ -39,3 +39,16 @@ No polling, message delivery, profile write, transcript or memory entry occurs.
 Validation: candidate cancellation, endpoint/error redaction, oversized-response,
 reviewed-Apply and protocol tests, plus core/Desktop typechecks. Network tests use
 synthetic responses and do not access a Telegram account.
+
+## Step 4 — Gateway lifecycle and diagnostics
+
+Added selected-profile gateway lifecycle controls through the existing service manager,
+with durable reference-only operation receipts and redacted status diagnostics. Installation
+uses the backend's runtime package location. Existing service installation also starts the
+service; Desktop must label that action **Install and start**. Stop/restart explicitly
+acknowledge their effect on shared Work. No service actions run during inspection or Apply.
+Repeated operation IDs reconcile without redispatch, including after bridge restart;
+exceptions remain uncertain. Configuration Apply now notifies the authenticated gateway.
+
+Validation: focused lifecycle replay/concurrency/profile tests and protocol conformance;
+core and desktop type checks. Risk: lifecycle actions affect all shared Work in the profile.
