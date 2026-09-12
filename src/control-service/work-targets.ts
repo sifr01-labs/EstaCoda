@@ -34,6 +34,6 @@ export async function inspectCoreTarget(input:{homeDir:string;profileId:string},
   if(target.status==='available'){
    try{await store.validate(targetBinding(target),target.workspace.canonicalPath);readiness=await new WorkspaceTrustStore(input).isTrusted(target.workspace.canonicalPath)?'ready':'untrusted';}catch{readiness='unavailable';}
   }
-  return {...reference,kind:target.kind,label:basename(target.workspace.canonicalPath).slice(0,240)||'Workspace',workingRoot:target.workspace.canonicalPath,sourceRoot:target.source.identity.canonicalPath,status:target.status,readiness,managed:false};
+  return {...reference,kind:target.kind,label:basename(target.workspace.canonicalPath).slice(0,240)||'Workspace',workingRoot:target.workspace.canonicalPath,sourceRoot:target.source.identity.canonicalPath,status:target.status,readiness,managed:target.kind==='git-worktree'};
  }finally{store.close();}
 }

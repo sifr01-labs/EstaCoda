@@ -42,4 +42,14 @@ export type TemporaryCopyTarget = Omit<LocalExecutionTarget, "kind"> & {
   manifestHash: string;
   directoryStamp: { dev: number; ino: number };
 };
-export type ExecutionTarget = LocalExecutionTarget | TemporaryCopyTarget;
+export type ManagedGitWorktreeTarget = Omit<LocalExecutionTarget, "kind"> & {
+  kind: "git-worktree";
+  repository: { commonDirectory: string; commonDirectoryStamp: { dev: number; ino: number } };
+  directoryStamp: { dev: number; ino: number };
+  sourceDirectoryStamp: { dev: number; ino: number };
+  gitDirectory: string;
+  gitDirectoryStamp: { dev: number; ino: number };
+  creation: { owner: "estacoda"; operationId: string; branch: string; baseCommit: string };
+  cleanup: "retained" | "removed";
+};
+export type ExecutionTarget = LocalExecutionTarget | TemporaryCopyTarget | ManagedGitWorktreeTarget;

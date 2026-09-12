@@ -1,3 +1,4 @@
+import { verifyWorktreeIdentity } from "./git-worktree-identity.js";
 import { checkStamp } from "./copy-files.js";
 import type { SourceManifest } from "./temporary-copy.js";
 import { createHash, randomUUID } from "node:crypto";
@@ -54,11 +55,19 @@ export class ExecutionTargetStore extends WorkspaceRegistry {
     const target = JSON.parse(row.record_json) as ExecutionTarget;
     parseExecutionTargetBinding(targetBinding(target));
     parseWorkspaceIdentity(target.source?.identity);
-    if (target.schemaVersion !== 1 || target.id !== id || target.profileId !== this.profileId || !["local", "temporary-copy"].includes(target.kind) ||
+    if (target.schemaVersion !== 1 || target.id !== id || target.profileId !== this.profileId || !["local", "temporary-copy", "git-worktree"].includes(target.kind) ||
       !["available", "archived"].includes(target.status) || (target.kind === "local" && target.source.identity.identityHash !== target.workspace.identityHash)) {
       throw new Error("Invalid execution target ownership record.");
     }
     if (target.kind === "temporary-copy" && (!/^[a-f0-9]{64}$/u.test(target.manifestHash) || !Number.isSafeInteger(target.directoryStamp?.dev) || !Number.isSafeInteger(target.directoryStamp?.ino))) throw new Error("Invalid temporary copy provenance.");
+    if (target.kind === "git-worktree") {
+      const validStamp = (value: {dev:number;ino:number}) => value && Number.isSafeInteger(value.dev) && Number.isSafeInteger(value.ino);
+      if (!isAbsolute(target.repository?.commonDirectory ?? "") || !isAbsolute(target.gitDirectory ?? "") ||
+        ![target.directoryStamp,target.sourceDirectoryStamp,target.gitDirectoryStamp,target.repository.commonDirectoryStamp].every(validStamp) ||
+        target.creation?.owner !== "estacoda" || !/^[a-f0-9-]{36}$/u.test(target.creation.operationId) ||
+        !/^estacoda\/[a-f0-9-]{36}$/u.test(target.creation.branch) || !/^[a-f0-9]{40,64}$/u.test(target.creation.baseCommit) ||
+        !["retained","removed"].includes(target.cleanup)) throw new Error("Invalid managed worktree provenance.");
+    }
     return target;
   }
 
@@ -71,7 +80,7 @@ export class ExecutionTargetStore extends WorkspaceRegistry {
         source: input.source, workspace, status: "available", manifestHash: input.manifestHash, directoryStamp: input.directoryStamp };
       this.db.query("insert into execution_targets values (?, ?, ?)").run(target.id, `copy:${workspace.identityHash}`, JSON.stringify(target));
       this.db.query("insert into copy_manifests values (?, ?)").run(target.id, JSON.stringify(input.manifest));
-      this.db.exec("pragma user_version = 2"); // Older readers must not reinterpret a copy root as a local target.
+      this.db.exec("pragma user_version = " + Math.max(2, this.db.query<{user_version:number}>("pragma user_version").get()!.user_version)); // Older readers must not reinterpret a copy root as a local target.
       return target;
     });
   }
@@ -84,7 +93,7 @@ export class ExecutionTargetStore extends WorkspaceRegistry {
 
   async acquireLocal(path: string, source?: SourceWorkspaceBinding): Promise<ExecutionTarget> {
     const workspace = await resolveWorkspaceDirectory(path);
-    const copy = this.db.query<{ id: string }>("select id from execution_targets where selection_key=?").get(`copy:${workspace.identityHash}`);
+    const copy = this.db.query<{ id: string }>("select id from execution_targets where selection_key=?").get(`copy:${workspace.identityHash}`) ?? this.db.query<{ id: string }>("select id from execution_targets where selection_key=?").get(`worktree:${workspace.identityHash}`);
     if (copy) { const target = this.getTarget(copy.id)!; return this.validate(targetBinding(target), path); }
     const snapshot: SourceWorkspaceBinding = source === undefined ? { identity: workspace } : structuredClone(source);
     parseWorkspaceIdentity(snapshot.identity);
@@ -118,6 +127,7 @@ export class ExecutionTargetStore extends WorkspaceRegistry {
       target.workspace.identityHash !== binding.workspace.identityHash) throw new Error("Execution target is missing, stale or belongs to another profile.");
     const actual = await resolveWorkspaceDirectory(path);
     if (actual.identityHash !== target.workspace.identityHash) throw new Error("Session execution target belongs to a different workspace.");
+    if (target.kind === "git-worktree") verifyWorktreeIdentity(target);
     if (target.kind === "temporary-copy") { checkStamp(actual.canonicalPath, target.directoryStamp); this.copyManifest(target.id); }
     return target;
   }
