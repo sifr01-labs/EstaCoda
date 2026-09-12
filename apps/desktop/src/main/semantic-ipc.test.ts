@@ -64,3 +64,10 @@ it('exposes terminal handles without accepting capability, process or approval a
  expect(()=>validateSemanticPayload('terminalResize',{id:'terminal',cols:500,rows:24})).toThrow();
  expect(()=>validateSemanticPayload('terminalVerify',{id:'terminal'})).toThrow();
 });
+it('accepts browser inspection references and rejects renderer control or network authority',()=>{
+ const reference={sessionId:'s',browserId:'b',eventId:1,target:{targetId:'t',targetGeneration:1}};
+ expect(()=>validateSemanticPayload('browserList',{workId:'session:s'})).not.toThrow();
+ expect(()=>validateSemanticPayload('browserSnapshot',{workId:'session:s',reference})).not.toThrow();
+ for(const extra of [{url:'https://example.com'},{cdpUrl:'ws://secret'},{profileId:'other'},{human:true},{control:true}])expect(()=>validateSemanticPayload('browserSnapshot',{workId:'session:s',reference,...extra})).toThrow();
+ for(const method of ['browserNavigate','browserClick','browserCDP','browserTakeover'])expect(()=>validateSemanticPayload(method,{workId:'session:s',reference})).toThrow();
+});
