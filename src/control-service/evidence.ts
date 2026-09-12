@@ -1,7 +1,7 @@
 import type {WorkProjection} from '../contracts/desktop-control/index.js';
 import type {EvidenceReport} from '../contracts/desktop-control/evidence.js';
 import {projectExecutionEvidence} from '../evidence/execution-evidence.js';
-import {artifactDatabase} from './artifacts.js';
+import {artifactDatabase,workArtifactReferences} from './artifacts.js';
 import type {SQLiteSessionDB} from '../session/sqlite-session-db.js';
 import {SQLiteTaskStore} from '../tasks/sqlite-task-store.js';
 type Input={homeDir:string;profileId:string};
@@ -14,7 +14,7 @@ async function sessionEvidence(input:Input,db:SQLiteSessionDB,id:string,workId:s
  const rows=db.db.query<{data:string|null}>(`select case when length(event_json)<=4096 then event_json else null end as data from session_events where session_id=? and rowid<=? and json_valid(event_json) and json_extract(event_json,'$.kind')='execution-evidence-recorded' and json_extract(event_json,'$.visibleTurnId')=? order by rowid desc limit 1025`).all(id,outcome?.row??Number.MAX_SAFE_INTEGER,turnId);
  signal.throwIfAborted();return projectExecutionEvidence({workId,turnId,outcome:outcome??null,events:rows.slice(0,1024).reverse().flatMap(row=>row.data?[JSON.parse(row.data)]:[]),truncated:rows.length>1024||rows.some(row=>!row.data)});
 }
-export async function workEvidence(input:Input,work:WorkProjection,signal:AbortSignal):Promise<EvidenceReport>{
+async function deriveWorkEvidence(input:Input,work:WorkProjection,signal:AbortSignal):Promise<EvidenceReport>{
  if(work.profileId!==input.profileId)throw new Error('Evidence profile unavailable.');
  const db=await artifactDatabase(input);
  try{
@@ -24,7 +24,7 @@ export async function workEvidence(input:Input,work:WorkProjection,signal:AbortS
   if(work.kind==='task_attempt'){
    const attempt=store.getAttempt(work.canonicalId);if(!attempt)throw new Error('Attempt unavailable.');
    const report=attempt.workerSessionId?await sessionEvidence(input,db,attempt.workerSessionId,work.id,signal):projectExecutionEvidence({workId:work.id,turnId:null,outcome:null,events:[],truncated:false});
-   if(attempt.status!=='completed'){report.state=attempt.status==='failed'?'failed':'unverified';report.completion=attempt.status==='failed'?'failed':'unconfirmed';report.limitations.push('This attempt has not completed successfully.');}
+   if(attempt.status!=='completed'){report.state=attempt.status==='failed'?'failed':'unverified';report.completion=attempt.status==='failed'?'failed':'unconfirmed';report.summary='The owning attempt has not established successful completion.';report.limitations.push('This attempt has not completed successfully.');}
    return report;
   }
   if(work.kind!=='task')throw new Error('Evidence unavailable.');
@@ -40,6 +40,14 @@ export async function workEvidence(input:Input,work:WorkProjection,signal:AbortS
   const completePlan=planSteps.length>0&&planSteps.every(step=>step.status==='completed'&&steps.has(step.id));
   const facts=reports.flatMap(report=>report.facts),truncated=rows.length>128||facts.length>64||reports.some(report=>report.truncated);
   const state=task.status==='failed'?'failed':task.status==='completed'&&completePlan&&reports.length>0&&reports.every(report=>report.state==='verified')&&!truncated?'verified':task.status==='partial'?'partial':'unverified';
-  return{workId:work.id,state,completion:task.status==='completed'?'completed':task.status==='failed'?'failed':task.status==='partial'?'partial':task.status==='cancelled'?'cancelled':'unconfirmed',summary:state==='verified'?'The completed Task has verified latest-attempt evidence.':'Task Results and completion do not by themselves establish verified effects.',facts:facts.slice(0,64),truncated,limitations:[...new Set(reports.flatMap(report=>report.limitations))].slice(0,8).concat(state==='verified'?[]:['Inspect the latest attempts and retained Results before relying on Task effects.'])};
+  return{workId:work.id,state,artifacts:[],completion:task.status==='completed'?'completed':task.status==='failed'?'failed':task.status==='partial'?'partial':task.status==='cancelled'?'cancelled':'unconfirmed',summary:state==='verified'?'The completed Task has verified latest-attempt evidence.':'Task Results and completion do not by themselves establish verified effects.',facts:facts.slice(0,64),truncated,limitations:[...new Set(reports.flatMap(report=>report.limitations))].slice(0,8).concat(state==='verified'?[]:['Inspect the latest attempts and retained Results before relying on Task effects.'])};
  }finally{db.close();}
+}
+
+export async function workEvidence(input:Input,work:WorkProjection,signal:AbortSignal):Promise<EvidenceReport>{
+ const report=await deriveWorkEvidence(input,work,signal);
+ const outputs=await workArtifactReferences(input,work,signal);
+ report.artifacts=outputs.references;
+ if(outputs.truncated)report.limitations.push('Only the first 16 retained output references are shown.');
+ return report;
 }

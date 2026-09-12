@@ -230,11 +230,10 @@ export class ArtifactStore {
     if (this.#storageRoot === undefined) throw new Error("Durable artifact storage is unavailable.");
     validStorageKey(storageKey);
     const configuredObjectsRoot = resolve(this.#storageRoot, "objects");
-    if (createRoot) {
-      await mkdir(configuredObjectsRoot, { recursive: true, mode: 0o700 });
-    }
+    if (createRoot) await mkdir(this.#storageRoot, { recursive: true, mode: 0o700 });
     const rootInfo = await lstat(this.#storageRoot);
     if (!rootInfo.isDirectory() || rootInfo.isSymbolicLink()) throw new Error("Artifact root is not a private directory.");
+    if (createRoot) await mkdir(configuredObjectsRoot, { recursive: true, mode: 0o700 });
     const resolvedRoot = await realpath(this.#storageRoot);
     const resolvedObjectsRoot = await realpath(configuredObjectsRoot);
     if (resolvedObjectsRoot !== resolve(resolvedRoot, "objects")) {

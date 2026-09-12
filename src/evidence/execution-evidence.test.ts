@@ -10,3 +10,16 @@ it('requires matching current-turn mutation and validation receipts',()=>{
  expect(projectExecutionEvidence({...input,events:[{kind:'message',content:'All tests passed'}]}).state).toBe('unverified');
  expect(projectExecutionEvidence({...input,events:[mutation,check],truncated:true}).state).not.toBe('verified');
 });
+it('does not promote unrelated, failed, unclassified or out-of-order receipts',()=>{
+ for(const events of [[mutation,{...check,verifiedMutation:{toolCallId:'another',tool:'file.write'}}],[mutation,check,{...mutation,toolCallId:'failed',status:'failed'}],[mutation,check,{...mutation,toolCallId:'unknown',executionEffect:undefined}],[check,mutation]])expect(projectExecutionEvidence({...input,events}).state).not.toBe('verified');
+ expect(projectExecutionEvidence({...input,events:[mutation,check],outcome:{...input.outcome,status:'failed'}}).state).toBe('failed');
+ expect(projectExecutionEvidence({...input,events:[mutation,check],outcome:{...input.outcome,status:'partially_completed'}}).state).toBe('partial');
+ expect(projectExecutionEvidence({...input,events:[mutation,check],outcome:null}).state).not.toBe('verified');
+});
+it('distinguishes observed reads from conversational claims and limits',()=>{
+ const read={...mutation,toolCallId:'read',tool:'file.read',riskClass:'read-only-local',executionEffect:{kind:'read'}};
+ expect(projectExecutionEvidence({...input,events:[read],outcome:{status:'completed',completionFloor:'read'}}).state).toBe('verified');
+ expect(projectExecutionEvidence({...input,events:[read],outcome:{status:'completed',completionFloor:'none'}}).state).toBe('unverified');
+ const many=Array.from({length:65},(_,index)=>({...read,toolCallId:'read-'+index}));
+ const bounded=projectExecutionEvidence({...input,events:many,outcome:{status:'completed',completionFloor:'read'}});expect(bounded.facts).toHaveLength(64);expect(bounded.truncated).toBe(true);expect(bounded.state).not.toBe('verified');
+});

@@ -9,6 +9,7 @@ test('browses retained output, renders text safely and scopes source navigation'
   createRoot(document.querySelector('#artifact-test')!).render(React.createElement(LiveArtifacts,{api,profile:'p',status:'ready',select:(id:string)=>{state.selected=id;}}));(window as any).artifactTest=state;
  });
  await page.getByRole('button',{name:/Quarterly report/}).click();await expect(page.getByText(/<img src=x/)).toBeVisible();await expect(page.getByText('Integrity verified',{exact:true})).toBeVisible();await page.screenshot({path:test.info().outputPath('artifact.png')});
+ await page.setViewportSize({width:360,height:800});await expect.poll(()=>page.getByRole('region',{name:'Artifact preview'}).evaluate(element=>element.scrollWidth<=element.clientWidth)).toBe(true);
  await page.getByRole('button',{name:'Open source Work'}).click();expect(await page.evaluate(()=>(window as any).artifactTest.selected)).toBe('session:s');
  await page.getByRole('button',{name:'All artifacts'}).click();await expect(page.getByRole('button',{name:/Quarterly report/})).toBeFocused();
  await page.evaluate(()=>(window as any).artifactTest.disconnect());await expect(page.getByText('Artifacts disconnected.')).toBeVisible();await expect(page.getByRole('button',{name:/Quarterly report/})).toHaveCount(0);

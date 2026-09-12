@@ -202,3 +202,10 @@ it('keeps a fresh retained inode and rejects altered, missing, and linked conten
  await unlink(object);await expect(recreatedPreview(root,registration!)).rejects.toThrow();
  const foreign=join(root,'foreign.json');await writeFile(foreign,content);await symlink(foreign,object);await expect(recreatedPreview(root,registration!)).rejects.toThrow();
 });
+
+it('rejects a linked retention root before creating objects in its destination',async()=>{
+ const {mkdir,symlink}=await import('node:fs/promises');
+ const root=await temporaryRoot(),outside=join(root,'outside'),capture=join(root,'capture.json');await mkdir(outside);await symlink(outside,join(root,'artifacts'));await writeFile(capture,content);
+ await expect(store(root).retainSessionArtifact({...scope(),capturePath:capture,kind:'data',bytes:Buffer.byteLength(content),mimeType:'application/json',sha256,source:source(),persist:async()=>{throw new Error('Must not publish');}})).rejects.toThrow('private directory');
+ expect(await readdir(outside)).toEqual([]);
+});

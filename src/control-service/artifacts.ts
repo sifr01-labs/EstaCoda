@@ -53,7 +53,7 @@ export async function inspectArtifact(input:Input,reference:ArtifactReference,op
  const db=await artifactDatabase(input);
  try{signal.throwIfAborted();const {artifact,preview}=await resolveArtifact(input,db,reference);
   if(!open)return{artifact,integrity:'unavailable',text:null,truncated:false,reason:'Content has not been checked.'};
-  try{const result=await preview();signal.throwIfAborted();return{artifact,integrity:'verified',...result,reason:null};}
+  try{const result=await preview();signal.throwIfAborted();return{artifact,integrity:'verified',text:result.text,truncated:result.truncated,reason:null};}
   catch{signal.throwIfAborted();return{artifact,integrity:'unavailable',text:null,truncated:false,reason:'Content is missing, expired, pruned, unsupported, or failed its integrity check.'};}
  }finally{db.close();}
 }
@@ -61,4 +61,27 @@ export async function inspectArtifact(input:Input,reference:ArtifactReference,op
 async function assertProfileContentRoot(input:Input,path:string):Promise<void>{
  const state=resolveGlobalStateHome(input).stateRoot;
  if(await realpath(path)!==join(await realpath(state),relative(state,path)))throw new Error('Profile content root changed.');
+}
+
+/** Output links remain separate from execution verification. */
+export async function workArtifactReferences(input:Input,work:import('../contracts/desktop-control/index.js').WorkProjection,signal:AbortSignal):Promise<{references:ArtifactReference[];truncated:boolean}>{
+ if(work.profileId!==input.profileId)throw new Error('Artifact profile unavailable.');
+ const db=await artifactDatabase(input);
+ try{
+  const tasks=new SQLiteTaskStore({db:db.db,profileId:input.profileId});
+  let references:ArtifactReference[]=[];
+  if(work.kind==='session'){
+   if(!await db.getSessionForProfile(work.canonicalId,input.profileId))throw new Error('Source unavailable.');
+   const rows=db.db.query<{id:string}>("select json_extract(event_json,'$.artifact.id') as id from session_events where session_id=? and json_valid(event_json) and json_extract(event_json,'$.kind')='session-artifact-registered' order by rowid desc limit 17").all(work.canonicalId);
+   references=rows.map(row=>({source:'session',ownerId:work.canonicalId,artifactId:row.id}));
+  }else{
+   const attempt=work.kind==='task_attempt'?tasks.getAttempt(work.canonicalId):null;
+   const task=tasks.getTask(attempt?.taskId??work.canonicalId);if(!task)throw new Error('Source unavailable.');
+   const rows=db.db.query<{id:string}>('select id from task_results where profile_id=? and task_id=?'+(attempt?' and attempt_id=?':'')+' order by created_at desc,id limit 17').all(input.profileId,task.id,...(attempt?[attempt.id]:[]));
+   references=rows.map(row=>({source:'task',ownerId:task.id,artifactId:row.id}));
+  }
+  const selected:ArtifactReference[]=[];
+  for(const reference of references.slice(0,16)){signal.throwIfAborted();try{await resolveArtifact(input,db,reference);selected.push(reference);}catch{/* Invalid ownership never becomes a link. */}}
+  return{references:selected,truncated:references.length>16};
+ }finally{db.close();}
 }

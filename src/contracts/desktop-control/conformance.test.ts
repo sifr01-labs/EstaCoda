@@ -35,7 +35,7 @@ const cases = {
  "artifacts.list":{params:{},result:{items:[],nextCursor:null}},
  "artifacts.get":{params:{reference:artifactReference},result:artifactPreview},
  "artifacts.open":{params:{reference:artifactReference},result:artifactPreview},
- "evidence.get":{params:{workId:'session:s'},result:{workId:'session:s',state:'unverified',completion:'unconfirmed',summary:'No evidence',facts:[],limitations:[],truncated:false}},
+ "evidence.get":{params:{workId:'session:s'},result:{workId:'session:s',state:'unverified',completion:'unconfirmed',summary:'No evidence',artifacts:[],facts:[],limitations:[],truncated:false}},
  "terminal.acquire":{params:{target},result:{capabilityId:'cap',target,workingRoot:'/repo',backend:'host',expiresAt:3000,container:null}},
  "terminal.verify":{params:{capabilityId:'cap'},result:{expiresAt:3000}},
  "terminal.release":{params:{capabilityId:'cap',settled:true},result:{released:true}},
