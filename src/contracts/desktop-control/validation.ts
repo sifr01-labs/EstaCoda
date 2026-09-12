@@ -20,6 +20,11 @@ const id = isControlId;
 const cursorToken: Check = (v) => typeof v === "string" && /^[A-Za-z0-9_-]{1,512}$/.test(v);
 const capabilities = shape({ methods: unique(choice(CONTROL_METHODS),128), events: unique(choice(CONTROL_EVENTS)) });
 const target = shape({ targetId: id, targetGeneration: integer(1) });
+const targetDetailsFields={targetId:id,targetGeneration:integer(1),kind:choice(['local','temporary-copy','git-worktree']),label:text(240,1),workingRoot:text(4096,1),sourceRoot:text(4096,1),status:choice(['available','archived']),readiness:choice(['ready','untrusted','unavailable','archived']),managed:boolean};
+const targetDetails=shape(targetDetailsFields);
+const targetInspection=shape({...targetDetailsFields,dirty:nullable(boolean),borrowers:integer(),branch:nullable(text(200,1)),cleanup:nullable(choice(['retained','removed']))});
+const targetOperation=shape({operationId:id,action:choice(['create','archive','cleanup','unknown']),state:choice(['completed','uncertain','unknown']),target:nullable(target)});
+const targetCreation=shape({reviewId:id,operationId:id,source:target,sourceRoot:text(4096,1),destination:text(4096,1),branch:text(200,1),baseCommit:text(64,40),expiresAt:integer()});
 const targetProjection = shape({ targetId: id, targetGeneration: integer(1), label: text(240, 1), isolation: choice(["host", "sandboxed", "unknown"]) }, {approvalMode:choice(["strict","adaptive","open"])});
 const actionShape = shape({ id: choice(ACTION_IDS), enabled: boolean }, { reason: text(2_048, 1), stepId: id, sessionId: id });
 const actions: Check = (v) => array((a) => actionShape(a) && isRecord(a) && (a.enabled === true || typeof a.reason === "string"), 128)(v) &&
@@ -104,6 +109,13 @@ const contracts: { [M in keyof MethodContracts]: { params: Check; result: Check 
   "work.counts":{params:shape({}),result:shape({runningSessions:integer(),runningTasks:integer(),queuedTasks:integer(),approvals:integer(),attention:integer(),scheduled:nullable(integer()),asOf:integer()})},
   "work.usage":{params:shape({workId:id}),result:shape({scope:choice(['session','task','attempt']),reportedTokens:nullable(integer()),providerCalls:integer(),cost:nullable(shape({amount:v=>typeof v==='number'&&Number.isFinite(v)&&v>=0,currency:choice(['USD'])})),usageComplete:boolean,pricingComplete:boolean,context:nullable(shape({usedTokens:integer(),totalTokens:integer(1),provider:text(240,1),model:text(240,1)})),truncated:boolean,provisional:boolean})},
   "work.live": {params:shape({workId:id}),result:shape({active:boolean,turnId:nullable(id),text:text(16384),truncated:boolean})},
+  "targets.list":{params:shape({}),result:shape({items:array(targetDetails),truncated:boolean})},
+  "targets.inspect":{params:shape({target}),result:targetInspection},
+  "targets.reviewCreate":{params:shape({source:target}),result:targetCreation},
+  "targets.create":{params:shape({reviewId:id,source:target,trustNewPath:v=>v===true}),result:targetOperation},
+  "targets.cancelReview":{params:shape({reviewId:id}),result:shape({cancelled:boolean})},
+  "targets.execute":{params:shape({operationId:id,action:choice(['archive','cleanup']),target,confirmed:v=>v===true}),result:targetOperation},
+  "targets.inspectOperation":{params:shape({operationId:id}),result:targetOperation},
   "work.targets": {params:shape({}),result:shape({items:array(targetProjection),truncated:boolean})},
   "work.list": { params: shape(pageParams, {...optionalPage, query:text(200),parentWorkId:id}), result: page(work) },
   "work.get": { params: shape({ workId: id }), result: work },

@@ -1,3 +1,4 @@
+import type {TargetDetails,TargetInspection,TargetCreationReview,TargetOperation} from './targets.js';
 import type {TelegramSession,TelegramSessionDetails} from './telegram.js';
 import type {TelegramOperationAction,TelegramPairing} from './telegram.js';
 import type {ConnectionOperation,GatewayAction,GatewayDiagnostics} from './telegram.js';
@@ -26,6 +27,13 @@ export type SubscribeResult =
 export type WorkUsageProjection={scope:'session'|'task'|'attempt';reportedTokens:number|null;providerCalls:number;cost:{amount:number;currency:'USD'}|null;usageComplete:boolean;pricingComplete:boolean;context:{usedTokens:number;totalTokens:number;provider:string;model:string}|null;truncated:boolean;provisional:boolean};
 export type RuntimeCounts={runningSessions:number;runningTasks:number;queuedTasks:number;approvals:number;attention:number;scheduled:number|null;asOf:number};
 export type MethodContracts = {
+  "targets.inspectOperation":{params:{operationId:string};result:TargetOperation};
+  "targets.execute":{params:{operationId:string;action:'archive'|'cleanup';target:TargetReference;confirmed:true};result:TargetOperation};
+  "targets.cancelReview":{params:{reviewId:string};result:{cancelled:boolean}};
+  "targets.create":{params:{reviewId:string;source:TargetReference;trustNewPath:true};result:TargetOperation};
+  "targets.reviewCreate":{params:{source:TargetReference};result:TargetCreationReview};
+  "targets.inspect":{params:{target:TargetReference};result:TargetInspection};
+  "targets.list":{params:Record<string,never>;result:{items:TargetDetails[];truncated:boolean}};
   "telegram.handoff":{params:{operationId:string;sessionId:string;action:'create'|'revoke'|'detach';attachmentId?:string;confirmed:true};result:ConnectionOperation};
   "telegram.sessionDetails":{params:{sessionId:string};result:TelegramSessionDetails};
   "telegram.sessions":{params:Record<string,never>;result:{items:TelegramSession[];truncated:boolean}};

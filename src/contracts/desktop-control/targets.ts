@@ -9,3 +9,14 @@ export type TargetDetails = TargetReference & {
   readiness: 'ready' | 'untrusted' | 'unavailable' | 'archived';
   managed: boolean;
 };
+export type TargetCreationReview = {
+  reviewId:string; operationId:string; source:TargetReference; sourceRoot:string; destination:string;
+  branch:string; baseCommit:string; expiresAt:number;
+};
+export type TargetOperation = {
+  operationId:string; action:'create'|'archive'|'cleanup'|'unknown';
+  state:'completed'|'uncertain'|'unknown'; target:TargetReference|null;
+};
+export type TargetInspection = TargetDetails & {
+  dirty:boolean|null; borrowers:number; branch:string|null; cleanup:'retained'|'removed'|null;
+};

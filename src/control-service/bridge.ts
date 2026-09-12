@@ -1,3 +1,4 @@
+import {TargetControls} from './target-controls.js';
 import {ChannelSessions} from './channel-sessions.js';
 import {TelegramOperations} from './telegram-operations.js';
 import {GatewayControls} from './gateway-controls.js';
@@ -32,6 +33,7 @@ import { StdioControlServer } from './stdio-server.js';
 export type BootstrapState = Pick<BootstrapResult, 'profile' | 'runtime'>;
 /** One bridge per trusted Main client context; Work and execution remain core-owned. */
 export class DesktopBridge {
+  readonly targets:TargetControls;
   readonly server: StdioControlServer;
   readonly candidates: CredentialCandidates;
   readonly modelSetup: ModelSetup;
@@ -111,6 +113,13 @@ export class DesktopBridge {
       'work.usage':async(request,signal)=>{if(request.method!=='work.usage')throw new ControlProtocolError('-32601');return{result:await workUsage(this.options,this.workSnapshot().get(request.params.workId),signal)};},
       'work.counts':()=>({result:workCounts(this.workSnapshot().state)}),
       'work.live':async(request,signal)=>{if(request.method!=='work.live')throw new ControlProtocolError('-32601');return{result:await liveWork(this.options,this.workSnapshot().get(request.params.workId),signal)};},
+      'targets.list':async(_request,signal)=>({result:await this.targets.list(signal)}),
+      'targets.inspect':async request=>{if(request.method!=='targets.inspect')throw new ControlProtocolError('-32601');return{result:await this.targets.inspect(request.params.target)};},
+      'targets.reviewCreate':async request=>{if(request.method!=='targets.reviewCreate')throw new ControlProtocolError('-32601');return{result:await this.targets.review(request.params.source)};},
+      'targets.create':async(request,signal)=>{if(request.method!=='targets.create')throw new ControlProtocolError('-32601');return{result:await this.targets.create(request.params,signal)};},
+      'targets.cancelReview':request=>{if(request.method!=='targets.cancelReview')throw new ControlProtocolError('-32601');return{result:this.targets.cancel(request.params.reviewId)};},
+      'targets.execute':async(request,signal)=>{if(request.method!=='targets.execute')throw new ControlProtocolError('-32601');return{result:await this.targets.execute(request.params,signal)};},
+      'targets.inspectOperation':async request=>{if(request.method!=='targets.inspectOperation')throw new ControlProtocolError('-32601');return{result:await this.targets.operation(request.params.operationId)};},
       'work.targets':async(_request,signal)=>({result:await availableWorkTargets(this.options,signal)}),
       'work.list': (request) => {
         if (request.method !== 'work.list') throw new ControlProtocolError('-32601');
@@ -136,6 +145,7 @@ export class DesktopBridge {
         return { result: { removed: this.subscriptions.unsubscribe(request.params.subscriptionId) } };
       },
     } });
+    this.targets=new TargetControls(options);
     this.candidates = new CredentialCandidates(this.server.profileId,this.server.instanceId);
     this.modelSetup = new ModelSetup(this.options,this.candidates,async()=>{this.#catalog=undefined;this.subscriptions.publish({type:'service.warning',payload:{reason:'configuration_changed'}});
       try {await notifyPrivateConfigurationChanged({directory:resolveProfileStateHome(this.options).gatewayStatePath,profileId:this.options.profileId,version:this.options.version,signal:AbortSignal.timeout(2000)});}catch{/* An absent owner will load the committed configuration on its next startup. */}
@@ -146,7 +156,7 @@ export class DesktopBridge {
     this.telegramVerifier=new TelegramVerifier(this.options,this.candidates);
     this.server.onDispose(()=>this.telegramVerifier.dispose());
     this.telegramSetup=new TelegramSetup(this.options,this.candidates,async()=>{this.subscriptions.publish({type:'service.warning',payload:{reason:'configuration_changed'}});try{await notifyPrivateConfigurationChanged({directory:resolveProfileStateHome(this.options).gatewayStatePath,profileId:this.options.profileId,version:this.options.version,signal:AbortSignal.timeout(2000)});}catch{}},this.telegramVerifier);
-    this.server.onDispose(()=>this.telegramSetup.dispose());
+    this.server.onDispose(()=>{this.telegramSetup.dispose();this.targets.dispose();});
     this.verifier = new CandidateVerifier(this.candidates);
     this.oauth=new CodexAuthorization(this.candidates);
     this.server.onDispose(() => {this.oauth.dispose();this.modelSetup.dispose();this.verifier.dispose();this.candidates.dispose();});

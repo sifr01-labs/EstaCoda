@@ -53,3 +53,9 @@ export type ManagedGitWorktreeTarget = Omit<LocalExecutionTarget, "kind"> & {
   cleanup: "retained" | "removed";
 };
 export type ExecutionTarget = LocalExecutionTarget | TemporaryCopyTarget | ManagedGitWorktreeTarget;
+
+/** Core lifecycle receipt; display clients cannot use it as execution authority. */
+export type TargetOperationReceipt = {
+  operationId:string; action:'create'|'archive'|'cleanup'|'unknown';
+  state:'completed'|'uncertain'|'unknown'; target:Pick<ExecutionTargetBinding,'targetId'|'targetGeneration'>|null;
+};

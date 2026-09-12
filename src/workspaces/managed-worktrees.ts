@@ -19,7 +19,7 @@ export type WorktreeCreationReceipt = {operationId:string;state:'preparing'|'cre
 export class ManagedWorktrees extends ExecutionTargetStore {
   constructor(private readonly input:{homeDir:string;profileId:string}){
     super(input);
-    try{this.db.exec('create table if not exists worktree_operations (id text primary key, review_json text not null, receipt_json text not null)');}catch(error){this.close();throw error;}
+    try{this.db.exec('create table if not exists worktree_operations (id text primary key, review_json text not null, receipt_json text not null); create table if not exists target_operations (id text primary key, request_json text not null, receipt_json text not null)');}catch(error){this.close();throw error;}
   }
   private managedRoot():string{
     const profile=resolveProfileStateHome(this.input).profileRoot;
@@ -48,7 +48,7 @@ export class ManagedWorktrees extends ExecutionTargetStore {
   async create(review:WorktreeCreationReview,trustNewPath:boolean):Promise<ManagedGitWorktreeTarget>{
     if(trustNewPath!==true)throw new Error('Explicit trust of the new worktree path is required.');
     if(!/^[a-f0-9-]{36}$/u.test(review.operationId)||review.destination!==join(this.managedRoot(),review.operationId)||review.branch!==`estacoda/${review.operationId}`)throw new Error('Invalid managed worktree destination.');
-    if(this.inspectCreation(review.operationId))throw new Error('Creation already attempted. Inspect its receipt; do not replay it.');
+    if(this.inspectOperation(review.operationId).state!=='unknown')throw new Error('Creation already attempted. Inspect its receipt; do not replay it.');
     const source=await this.validate(review.source,review.source.workspace.canonicalPath);
     if(source.kind!=='local'||!await new WorkspaceTrustStore(this.input).isTrusted(source.workspace.canonicalPath))throw new Error('Source is unavailable or untrusted.');
     separateRoots(source.workspace.canonicalPath,review.destination);
@@ -60,6 +60,7 @@ export class ManagedWorktrees extends ExecutionTargetStore {
     this.transaction(()=>{
       const current=this.getTarget(source.id);
       if(current?.status!=='available'||current.generation!==source.generation)throw new Error('Source target changed.');
+      if(this.db.query<{n:number}>('select count(*) as n from worktree_operations').get()!.n>=1000)throw new Error('Creation history is full.');
       const receipt:WorktreeCreationReceipt={operationId:review.operationId,state:'preparing',targetId};
       this.db.query('insert into worktree_operations values (?,?,?)').run(review.operationId,JSON.stringify(review),JSON.stringify(receipt));
     });
@@ -87,6 +88,37 @@ export class ManagedWorktrees extends ExecutionTargetStore {
       this.saveReceipt({operationId:review.operationId,state:'created',targetId});
       return target;
     }catch(error){this.saveReceipt({operationId:review.operationId,state:'attention',targetId});throw error;}
+  }
+  borrowers(targetId:string):number{
+    if(!this.getTarget(targetId))throw new Error('Target not found.');
+    return this.db.query<{n:number}>('select count(*) as n from target_borrowers where target_id=?').get(targetId)!.n;
+  }
+  inspectOperation(operationId:string):import('../contracts/workspace.js').TargetOperationReceipt{
+    const row=this.db.query<{receipt_json:string}>('select receipt_json from target_operations where id=?').get(operationId);
+    if(row)return JSON.parse(row.receipt_json);
+    const creation=this.inspectCreation(operationId);
+    const target=creation?this.getTarget(creation.targetId):undefined;
+    return {operationId,action:creation?'create':'unknown',state:creation?.state==='created'?'completed':creation?'uncertain':'unknown',target:target?{targetId:target.id,targetGeneration:target.generation}:null};
+  }
+  async executeLifecycle(operationId:string,action:'archive'|'cleanup',reference:{targetId:string;targetGeneration:number}):Promise<import('../contracts/workspace.js').TargetOperationReceipt>{
+    if(!/^[a-f0-9-]{36}$/u.test(operationId))throw new Error('Invalid operation identity.');
+    const request=JSON.stringify({action,reference});
+    const reserved=this.transaction(()=>{
+      const old=this.db.query<{request_json:string}>('select request_json from target_operations where id=?').get(operationId);
+      if(old){if(old.request_json!==request)throw new Error('Operation binding changed.');return false;}
+      if(this.inspectCreation(operationId))throw new Error('Operation identity already used.');
+      this.owned(reference);
+      if(this.db.query<{n:number}>('select count(*) as n from target_operations').get()!.n>=1000)throw new Error('Operation history is full.');
+      this.db.query('insert into target_operations values (?,?,?)').run(operationId,request,JSON.stringify({operationId,action,state:'uncertain',target:reference}));return true;
+    });
+    if(!reserved)return this.inspectOperation(operationId);
+    // A failed external effect remains uncertain. Inspect state, never auto-replay.
+    try{
+      const target=action==='archive'?this.archive(reference):await this.cleanup(reference);
+      const receipt={operationId,action,state:'completed',target:{targetId:target.id,targetGeneration:target.generation}};
+      this.transaction(()=>this.db.query('update target_operations set receipt_json=? where id=?').run(JSON.stringify(receipt),operationId));
+    }catch{/* Retain the reserved receipt. */}
+    return this.inspectOperation(operationId);
   }
   private owned(reference:{targetId:string;targetGeneration:number}):ManagedGitWorktreeTarget{
     const target=this.getTarget(reference.targetId);
