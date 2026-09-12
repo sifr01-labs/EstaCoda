@@ -27,6 +27,9 @@ export type SubscribeResult =
 export type WorkUsageProjection={scope:'session'|'task'|'attempt';reportedTokens:number|null;providerCalls:number;cost:{amount:number;currency:'USD'}|null;usageComplete:boolean;pricingComplete:boolean;context:{usedTokens:number;totalTokens:number;provider:string;model:string}|null;truncated:boolean;provisional:boolean};
 export type RuntimeCounts={runningSessions:number;runningTasks:number;queuedTasks:number;approvals:number;attention:number;scheduled:number|null;asOf:number};
 export type MethodContracts = {
+  "terminal.acquire":{params:{target:TargetReference};result:{capabilityId:string;target:TargetReference;workingRoot:string;backend:'host'|'docker';expiresAt:number;container:{id:string;user:string;endpoint:string}|null}};
+  "terminal.verify":{params:{capabilityId:string};result:{expiresAt:number}};
+  "terminal.release":{params:{capabilityId:string;settled:true};result:{released:boolean}};
   "diff.list":{params:{target:TargetReference};result:{items:{path:string;previousPath:string|null;stage:'staged'|'unstaged'|'untracked';status:'added'|'modified'|'deleted'|'renamed'|'copied'|'type_changed'|'conflicted';binary:boolean|null;previewable:boolean}[];truncated:boolean}};
   "diff.patch":{params:{target:TargetReference;path:string;stage:'staged'|'unstaged'|'untracked'};result:{path:string;stage:'staged'|'unstaged'|'untracked';binary:boolean;text:string|null;truncated:boolean}};
   "files.list":{params:{target:TargetReference;path:string};result:{items:{path:string;name:string;kind:'file'|'directory'|'symlink'|'special'}[];truncated:boolean}};

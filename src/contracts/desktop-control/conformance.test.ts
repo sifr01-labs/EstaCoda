@@ -30,6 +30,9 @@ const activities: ActivityProjection[] = [
   { ...activityBase, kind: "status", status: "needs_attention", reason: "Waiting for approval" },
 ];
 const cases = {
+ "terminal.acquire":{params:{target},result:{capabilityId:'cap',target,workingRoot:'/repo',backend:'host',expiresAt:3000,container:null}},
+ "terminal.verify":{params:{capabilityId:'cap'},result:{expiresAt:3000}},
+ "terminal.release":{params:{capabilityId:'cap',settled:true},result:{released:true}},
  "diff.list":{params:{target},result:{items:[],truncated:false}},
  "diff.patch":{params:{target,path:'file.txt',stage:'staged'},result:{path:'file.txt',stage:'staged',binary:false,text:'',truncated:false}},
  "files.list":{params:{target,path:'.'},result:{items:[],truncated:false}},

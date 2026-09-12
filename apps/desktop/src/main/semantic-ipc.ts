@@ -1,3 +1,4 @@
+import type {DesktopTerminalControls} from './terminal-controls.js';
 import type {DesktopTargetControls} from './target-controls.js';
 import type {DesktopConnectionControls} from './connection-controls.js';
 import type {DesktopTelegramSetup} from './telegram-setup.js';
@@ -17,6 +18,12 @@ export function rendererSnapshot(state:ConnectionState):DesktopSnapshot {
   return {counts:state.status==='ready'?state.counts??null:null,status:state.status,profile:state.bootstrap?.profile??{id:state.profileId,label:state.profileId,configuration:'unconfigured'},runtime:state.bootstrap?.runtime.state??'disconnected',work:state.work,inbox:state.inbox};
 }
 export function validateSemanticPayload(method:string,payload:unknown):void {
+  if(method.startsWith('terminal')){
+    if(method==='terminalOpen'){validateControlRequest({jsonrpc:'2.0',id:'validation',method:'terminal.acquire',params:payload},{profileId:'validation',instanceId:'validation',capabilities:{methods:[...CONTROL_METHODS],events:[...CONTROL_EVENTS]}});return;}
+    if(!isRecord(payload)||!exactKeys(payload,method==='terminalWrite'?['id','data']:method==='terminalResize'?['id','cols','rows']:['id'])||!isControlId(payload.id)||!['terminalRead','terminalWrite','terminalResize','terminalClose'].includes(method))throw new Error('Invalid terminal input.');
+    if(method==='terminalWrite'&&(typeof payload.data!=='string'||payload.data.length<1||payload.data.length>4096))throw new Error('Terminal input exceeds limit.');
+    if(method==='terminalResize'&&(!Number.isSafeInteger(payload.cols)||!Number.isSafeInteger(payload.rows)||Number(payload.cols)<2||Number(payload.cols)>400||Number(payload.rows)<2||Number(payload.rows)>200))throw new Error('Invalid terminal size.');return;
+  }
   if(method==='diffList'||method==='diffPatch'){validateControlRequest({jsonrpc:'2.0',id:'validation',method:method==='diffList'?'diff.list':'diff.patch',params:payload},{profileId:'validation',instanceId:'validation',capabilities:{methods:[...CONTROL_METHODS],events:[...CONTROL_EVENTS]}});return;}
   if(method==='filesList'||method==='filesPreview'){validateControlRequest({jsonrpc:'2.0',id:'validation',method:method==='filesList'?'files.list':'files.preview',params:payload},{profileId:'validation',instanceId:'validation',capabilities:{methods:[...CONTROL_METHODS],events:[...CONTROL_EVENTS]}});return;}
   if(method==='workTargets'){validateControlRequest({jsonrpc:'2.0',id:'validation',method:'work.targets',params:payload},{profileId:'validation',instanceId:'validation',capabilities:{methods:[...CONTROL_METHODS],events:[...CONTROL_EVENTS]}});return;}
@@ -54,10 +61,10 @@ export function validateSemanticPayload(method:string,payload:unknown):void {
     :method==='switchProfile'?exactKeys(payload,['id'])&&isControlId(payload.id):exactKeys(payload,[]);
   if(!valid)throw new Error('Desktop request rejected.');
 }
-export function installSemanticIpc(window:BrowserWindow,documentUrl:string,connection:DesktopConnection,profiles:Profiles,appearance:AppearanceSettings,models?:DesktopModelSetup,pins?:WorkPins,workControls?:DesktopWorkControls,telegram?:DesktopTelegramSetup,connectionControls?:DesktopConnectionControls,targets?:DesktopTargetControls):()=>void {
+export function installSemanticIpc(window:BrowserWindow,documentUrl:string,connection:DesktopConnection,profiles:Profiles,appearance:AppearanceSettings,models?:DesktopModelSetup,pins?:WorkPins,workControls?:DesktopWorkControls,telegram?:DesktopTelegramSetup,connectionControls?:DesktopConnectionControls,targets?:DesktopTargetControls,terminals?:DesktopTerminalControls):()=>void {
   const authority=new WindowAuthority(window,documentUrl);
   const contents=window.webContents;
-  const methods=['diffList','diffPatch','filesList','filesPreview','targetList','targetInspect','targetReview','targetCreate','targetCancel','targetExecute','targetOperation','telegramExecute','telegramPairing','telegramSessions','telegramDetails','telegramHandoff','gatewayDiagnostics','gatewayExecute','connectionInspect','telegramReview','telegramApply','telegramInspectApply','telegramBegin','telegramStage','telegramVerify','telegramCancel','connectionsList','workUsage','workDecide','workInspectDecision','workAct','workChildren','workLive','workTargets','workAttach','workSubmit','workInspect','workSearch','workPins','workPin','workOverride','setOverride','inspectOverride','setupVerifyReviewed','modelRoutes','setupConfigured','setupOrder','setupMode','setupOAuthStart','setupOAuthStatus','setupOAuthOpen','setupBegin','setupStage','setupVerify','setupReview','setupApply','setupCancel','setupInspect','modelPage','providerPage','refreshCatalog','reconnect','moreWork','moreInbox','appearance','setAppearance','snapshot','getWork','activity','profiles','switchProfile','minimize','toggleMaximize','close'];
+  const methods=['terminalOpen','terminalRead','terminalWrite','terminalResize','terminalClose','diffList','diffPatch','filesList','filesPreview','targetList','targetInspect','targetReview','targetCreate','targetCancel','targetExecute','targetOperation','telegramExecute','telegramPairing','telegramSessions','telegramDetails','telegramHandoff','gatewayDiagnostics','gatewayExecute','connectionInspect','telegramReview','telegramApply','telegramInspectApply','telegramBegin','telegramStage','telegramVerify','telegramCancel','connectionsList','workUsage','workDecide','workInspectDecision','workAct','workChildren','workLive','workTargets','workAttach','workSubmit','workInspect','workSearch','workPins','workPin','workOverride','setOverride','inspectOverride','setupVerifyReviewed','modelRoutes','setupConfigured','setupOrder','setupMode','setupOAuthStart','setupOAuthStatus','setupOAuthOpen','setupBegin','setupStage','setupVerify','setupReview','setupApply','setupCancel','setupInspect','modelPage','providerPage','refreshCatalog','reconnect','moreWork','moreInbox','appearance','setAppearance','snapshot','getWork','activity','profiles','switchProfile','minimize','toggleMaximize','close'];
   const handlers:string[]=[];
   let connectionGeneration=connection.state.generation;
   const state=(value:ConnectionState)=>{if(value.generation!==connectionGeneration){authority.invalidate();connectionGeneration=value.generation;}if(!window.isDestroyed())contents.send('desktop:state',{generation:authority.generation,snapshot:rendererSnapshot(value)});};
@@ -70,6 +77,11 @@ export function installSemanticIpc(window:BrowserWindow,documentUrl:string,conne
       const payload=envelope.payload as Record<string,unknown>;
       const generation=authority.generation;
       try {
+        if(method.startsWith('terminal')){
+          if(!terminals)throw new Error('Terminal unavailable.');
+          const result=method==='terminalOpen'?await terminals.open(payload.target as import('@estacoda/control-protocol').TargetReference):method==='terminalRead'?terminals.read(payload.id as string):method==='terminalWrite'?terminals.write(payload.id as string,payload.data as string):method==='terminalResize'?terminals.resize(payload.id as string,payload.cols as number,payload.rows as number):await terminals.close(payload.id as string);
+          authority.assertSender(event,generation);return result;
+        }
         if(method==='diffList'||method==='diffPatch'){
           const result=await connection.inspectionRequest(method==='diffList'?'diff.list':'diff.patch',payload as import('@estacoda/control-protocol').MethodContracts['diff.patch']['params']);
           authority.assertSender(event,generation);return result;
@@ -111,7 +123,7 @@ export function installSemanticIpc(window:BrowserWindow,documentUrl:string,conne
         if(method==='setAppearance'){appearance.write(payload);return;}
         if(method==='snapshot')return rendererSnapshot(connection.state);
         if(method==='profiles')return profiles.list();
-        if(method==='switchProfile'){profiles.assertSelectable(payload.id);connection.switchProfile(payload.id);return;}
+        if(method==='switchProfile'){profiles.assertSelectable(payload.id);await terminals?.closeCurrent();authority.assertSender(event,generation);connection.switchProfile(payload.id);return;}
         if(method==='minimize'){window.minimize();return;}
         if(method==='toggleMaximize'){window.isMaximized()?window.unmaximize():window.maximize();return;}
         if(method==='close'){window.close();return;}

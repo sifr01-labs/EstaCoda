@@ -1,3 +1,4 @@
+import {DesktopTerminalControls} from './terminal-controls.js';
 import {DesktopTargetControls} from './target-controls.js';
 import {DesktopConnectionControls} from './connection-controls.js';
 import {DesktopTelegramSetup} from './telegram-setup.js';
@@ -37,7 +38,12 @@ async function openWindow(): Promise<void> {
   connection.on('invalidate', () => { credentials.close(); credentialPipe?.dispose(); credentialPipe = undefined; });
   const documentUrl = MAIN_WINDOW_VITE_DEV_SERVER_URL ? new URL(MAIN_WINDOW_VITE_DEV_SERVER_URL).href : 'estacoda://app/index.html';
   const profiles = new Profiles(app.getPath('home'));
-  const disposeIpc = installSemanticIpc(window, documentUrl, connection, profiles, new AppearanceSettings(app.getPath('userData')),new DesktopModelSetup(connection,credentials,()=>credentialPipe,new WorkOperationReferences(connection,app.getPath('userData')),url=>shell.openExternal(url)),new WorkPins(app.getPath('userData'),connection),new DesktopWorkControls(connection,app.getPath('userData'),async()=>{const result=await dialog.showOpenDialog(window,{title:'Attach text files (up to 8 KB each)',properties:['openFile','multiSelections']});return result.canceled?[]:result.filePaths;}),new DesktopTelegramSetup(connection,credentials,()=>credentialPipe),new DesktopConnectionControls(connection,app.getPath('userData')),new DesktopTargetControls(connection,app.getPath('userData')));
+  const terminals=new DesktopTerminalControls(connection,async root=>{
+    const result=await dialog.showMessageBox(window,{type:'warning',title:'Open workspace terminal',message:'Open a terminal for this workspace?',detail:root+'\n\nCommands run with your selected execution policy. A Local host terminal can access files beyond this directory. Terminal input does not approve agent actions.',buttons:['Cancel','Open terminal'],defaultId:0,cancelId:0,noLink:true});return result.response===1;
+  },app.getPath('home'));
+  let closing=false;
+  window.on('close',event=>{if(closing)return;event.preventDefault();void terminals.dispose().then(()=>{closing=true;window.close();}).catch(()=>{void dialog.showMessageBox(window,{type:'error',message:'Terminal shutdown could not be confirmed.',detail:'The target remains protected from cleanup. Retry closing after checking the terminal process.'});});});
+  const disposeIpc = installSemanticIpc(window, documentUrl, connection, profiles, new AppearanceSettings(app.getPath('userData')),new DesktopModelSetup(connection,credentials,()=>credentialPipe,new WorkOperationReferences(connection,app.getPath('userData')),url=>shell.openExternal(url)),new WorkPins(app.getPath('userData'),connection),new DesktopWorkControls(connection,app.getPath('userData'),async()=>{const result=await dialog.showOpenDialog(window,{title:'Attach text files (up to 8 KB each)',properties:['openFile','multiSelections']});return result.canceled?[]:result.filePaths;}),new DesktopTelegramSetup(connection,credentials,()=>credentialPipe),new DesktopConnectionControls(connection,app.getPath('userData')),new DesktopTargetControls(connection,app.getPath('userData')),terminals);
   window.once('closed', () => { disposeIpc(); connection.close(); });
   connection.switchProfile(profiles.initial());
   window.once('ready-to-show', () => window.show());

@@ -1,0 +1,11 @@
+# Desktop PR10 implementation and validation
+
+PR10 connects Files and Changes to core target leases and adds an ephemeral Main-owned terminal. The approved fixture's appearance remains the visual reference; live inspection never substitutes fixture data.
+
+Files and Git inspection borrow the selected target, recheck profile/generation/root/trust, and use its configured host or Docker environment. Files exclude protected paths, traversal, Git internals and symlink traversal. Text previews and patches are limited to 16 KiB, directory/changed-file responses to 32 entries, and all responses disclose truncation. Binary preview is metadata only. Git uses fixed argument arrays with external diff/textconv/filter execution disabled. A worktree whose common Git metadata is outside the Docker mount reports unavailable rather than reading it through the host. Changes show current repository state, not proof of agent authorship.
+
+Terminal open requires a Main-owned native confirmation. Core issues a private target capability with a three-second renewable deadline. Main owns one PTY per window, its output buffer and process group. Docker terminals additionally own a dedicated verified container. Renderer APIs accept only target references or Main handles and bounded input/size values; neither capability tokens nor executable/environment selection are exposed. Terminal input grants no agent approval. xterm has no link/clipboard addons and consumes clipboard/hyperlink escape requests.
+
+Closing the terminal, switching profile, closing the window, losing the verified connection, or failing a capability refresh closes the owned terminal. Output is bounded and transient, never appended to model transcripts. Host shells are explicitly not filesystem confinement: normal shell jobs share a process group, but deliberately daemonized/detached programs can escape that group. Docker teardown additionally removes its owned container. A crashed/disconnected host owner leaves its durable target borrower as a cleanup blocker when settlement cannot be proven; there is no automatic PID-only reclamation.
+
+Validation records are added as the final PR10 regression and release checks complete. No live model-provider or Telegram request is required for this feature.

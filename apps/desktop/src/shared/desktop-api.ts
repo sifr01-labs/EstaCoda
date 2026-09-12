@@ -85,7 +85,15 @@ export type DesktopDiffApi={
  list(input:MethodContracts['diff.list']['params']):Promise<MethodContracts['diff.list']['result']>;
  patch(input:MethodContracts['diff.patch']['params']):Promise<MethodContracts['diff.patch']['result']>;
 };
+export type DesktopTerminalApi={
+ open(target:import('@estacoda/control-protocol').TargetReference):Promise<{id:string;backend:'host'|'docker'}>;
+ read(id:string):Promise<{data:string;truncated:boolean;state:'running'|'closed'}>;
+ write(id:string,data:string):Promise<void>;
+ resize(id:string,cols:number,rows:number):Promise<void>;
+ close(id:string):Promise<void>;
+};
 export type DesktopApi = {
+  readonly terminal?:DesktopTerminalApi;
   readonly diff?:DesktopDiffApi;
   readonly files?:DesktopFilesApi;
   readonly targets?:DesktopTargetsApi;

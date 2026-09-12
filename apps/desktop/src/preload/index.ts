@@ -14,6 +14,7 @@ const ready=ipcRenderer.invoke('desktop:bind').then((binding:{generation:number;
 void ready.catch(()=>{});
 const invoke=async(method:string,payload:Record<string,unknown>={})=>{await ready;return ipcRenderer.invoke('desktop:'+method,{generation,payload});};
 const api:DesktopApi={
+  terminal:Object.freeze({open:target=>invoke('terminalOpen',{target}),read:id=>invoke('terminalRead',{id}),write:(id,data)=>invoke('terminalWrite',{id,data}),resize:(id,cols,rows)=>invoke('terminalResize',{id,cols,rows}),close:id=>invoke('terminalClose',{id})}),
   diff:Object.freeze({list:input=>invoke('diffList',input),patch:input=>invoke('diffPatch',input)}),
   files:Object.freeze({list:input=>invoke('filesList',input),preview:input=>invoke('filesPreview',input)}),
   targets:Object.freeze({list:cursor=>invoke('targetList',cursor?{cursor}:{}),inspect:target=>invoke('targetInspect',{target}),review:source=>invoke('targetReview',{source}),create:(reviewId,trustNewPath)=>invoke('targetCreate',{reviewId,trustNewPath}),cancel:reviewId=>invoke('targetCancel',{reviewId}),execute:(action,target,confirmed)=>invoke('targetExecute',{action,target,confirmed}),operation:()=>invoke('targetOperation')}),

@@ -1,3 +1,4 @@
+import {TerminalCapabilities} from './terminal-capabilities.js';
 import {inspectDiff} from './workspace-diff.js';
 import {inspectFiles} from './workspace-files.js';
 import {TargetControls} from './target-controls.js';
@@ -35,6 +36,7 @@ import { StdioControlServer } from './stdio-server.js';
 export type BootstrapState = Pick<BootstrapResult, 'profile' | 'runtime'>;
 /** One bridge per trusted Main client context; Work and execution remain core-owned. */
 export class DesktopBridge {
+  readonly terminals:TerminalCapabilities;
   readonly targets:TargetControls;
   readonly server: StdioControlServer;
   readonly candidates: CredentialCandidates;
@@ -115,6 +117,9 @@ export class DesktopBridge {
       'work.usage':async(request,signal)=>{if(request.method!=='work.usage')throw new ControlProtocolError('-32601');return{result:await workUsage(this.options,this.workSnapshot().get(request.params.workId),signal)};},
       'work.counts':()=>({result:workCounts(this.workSnapshot().state)}),
       'work.live':async(request,signal)=>{if(request.method!=='work.live')throw new ControlProtocolError('-32601');return{result:await liveWork(this.options,this.workSnapshot().get(request.params.workId),signal)};},
+      'terminal.acquire':async(request,signal)=>{if(request.method!=='terminal.acquire')throw new ControlProtocolError('-32601');return{result:await this.terminals.acquire(request.params.target,signal)};},
+      'terminal.verify':async(request,signal)=>{if(request.method!=='terminal.verify')throw new ControlProtocolError('-32601');return{result:await this.terminals.verify(request.params.capabilityId,signal)};},
+      'terminal.release':async(request)=>{if(request.method!=='terminal.release')throw new ControlProtocolError('-32601');return{result:await this.terminals.release(request.params.capabilityId)};},
       'diff.list':async(request,signal)=>{if(request.method!=='diff.list')throw new ControlProtocolError('-32601');return{result:await inspectDiff(this.options,request.method,request.params,signal)};},
       'diff.patch':async(request,signal)=>{if(request.method!=='diff.patch')throw new ControlProtocolError('-32601');return{result:await inspectDiff(this.options,request.method,request.params,signal)};},
       'files.list':async(request,signal)=>{if(request.method!=='files.list')throw new ControlProtocolError('-32601');return{result:await inspectFiles(this.options,request.method,request.params,signal)};},
@@ -151,6 +156,7 @@ export class DesktopBridge {
         return { result: { removed: this.subscriptions.unsubscribe(request.params.subscriptionId) } };
       },
     } });
+    this.terminals=new TerminalCapabilities(options);
     this.targets=new TargetControls(options);
     this.candidates = new CredentialCandidates(this.server.profileId,this.server.instanceId);
     this.modelSetup = new ModelSetup(this.options,this.candidates,async()=>{this.#catalog=undefined;this.subscriptions.publish({type:'service.warning',payload:{reason:'configuration_changed'}});
@@ -162,7 +168,7 @@ export class DesktopBridge {
     this.telegramVerifier=new TelegramVerifier(this.options,this.candidates);
     this.server.onDispose(()=>this.telegramVerifier.dispose());
     this.telegramSetup=new TelegramSetup(this.options,this.candidates,async()=>{this.subscriptions.publish({type:'service.warning',payload:{reason:'configuration_changed'}});try{await notifyPrivateConfigurationChanged({directory:resolveProfileStateHome(this.options).gatewayStatePath,profileId:this.options.profileId,version:this.options.version,signal:AbortSignal.timeout(2000)});}catch{}},this.telegramVerifier);
-    this.server.onDispose(()=>{this.telegramSetup.dispose();this.targets.dispose();});
+    this.server.onDispose(()=>{this.telegramSetup.dispose();this.terminals.dispose();this.targets.dispose();});
     this.verifier = new CandidateVerifier(this.candidates);
     this.oauth=new CodexAuthorization(this.candidates);
     this.server.onDispose(() => {this.oauth.dispose();this.modelSetup.dispose();this.verifier.dispose();this.candidates.dispose();});

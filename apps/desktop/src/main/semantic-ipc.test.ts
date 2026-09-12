@@ -56,3 +56,11 @@ it('keeps Git command and configuration selection out of Changes IPC',()=>{
  for(const extra of [{args:['--ext-diff']},{gitDir:'/other'},{profileId:'other'}])expect(()=>validateSemanticPayload('diffList',{target,...extra})).toThrow();
  expect(()=>validateSemanticPayload('diffPatch',{target,path:'file',stage:'HEAD~1'})).toThrow();
 });
+it('exposes terminal handles without accepting capability, process or approval authority',()=>{
+ expect(()=>validateSemanticPayload('terminalOpen',{target:{targetId:'t',targetGeneration:1}})).not.toThrow();
+ expect(()=>validateSemanticPayload('terminalWrite',{id:'terminal',data:'ls\r'})).not.toThrow();
+ for(const extra of [{capabilityId:'core'},{cwd:'/other'},{env:{TOKEN:'secret'}},{human:true},{approvalId:'pending'},{pid:123}])expect(()=>validateSemanticPayload('terminalWrite',{id:'terminal',data:'x',...extra})).toThrow();
+ expect(()=>validateSemanticPayload('terminalWrite',{id:'terminal',data:'x'.repeat(4097)})).toThrow();
+ expect(()=>validateSemanticPayload('terminalResize',{id:'terminal',cols:500,rows:24})).toThrow();
+ expect(()=>validateSemanticPayload('terminalVerify',{id:'terminal'})).toThrow();
+});
