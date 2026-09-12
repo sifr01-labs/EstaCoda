@@ -1,19 +1,20 @@
 # Desktop architecture foundation
 
-Status: Desktop PR 1 design baseline. Electron, the DesktopControlService bridge, and Desktop UI are not implemented by this slice. The shared supervisor and workspace contracts already exist in core.
+Status: Desktop PRs 1–6 are implemented on the desktop branch. The Electron shell, profile-bound control-service bridge, existing Work inspection, approved visual fixtures and live Models/Providers flows are available. The shared supervisor retains execution ownership.
 
 Read this alongside the [Desktop delivery plan](../../planning/desktop-implementation-plan.md), [approved visual contract](../../planning/desktop-visual-contract.md), and [shared ownership decisions](../../planning/workspace-execution-ownership-decisions.md). Shared ownership decisions govern core authority; the visual contract governs presentation. Neither fixture data nor a UI projection grants execution authority.
 
 ## Product and delivery scope
 
-Desktop is a local operator application for governed, persistent Work. A user can eventually configure a model, attach a trusted workspace, start and supervise Work, resolve approvals, inspect changes and evidence, and connect an authorized Telegram surface. These are delivery goals, not claims of current Desktop support.
+Desktop is a local operator application for governed, persistent Work. Users can configure models and providers, inspect existing Work and select Work-scoped model overrides. New Work submission, approval actions, files/evidence and Telegram remain subsequent delivery milestones. See the [Models and Providers guide](models-and-providers.md).
 
 | Delivery | Scope |
 | --- | --- |
 | PR 1 | Product/ownership decisions, threat model, credential transaction, protocol/process decisions, and a minimal shared protocol workspace foundation |
 | PRs 2–4 | Validated protocol, profile-bound bridge, canonical Work/Task/approval projections and controls |
 | PR 5 | Secure Electron shell, existing-Work inspection proof, complete approved visual fixtures and regression gate |
-| PRs 6–8 | Live Models, Work/Inbox, and Telegram |
+| PR 6 | Live Models/Providers, reviewed setup/recovery, Session/Task model overrides |
+| PRs 7–8 | Planned live Work/Inbox controls and Telegram |
 | PRs 9–12 and 16 | Managed worktrees, files/diff/terminal, artifacts/evidence, view-only browser, packaged macOS alpha |
 | PRs 13–15 | Browser takeover, governed Library/settings, scheduling |
 
@@ -33,7 +34,7 @@ General plugins, remote execution environments, organization/multi-tenant contro
 | Models / credentials | [runtime credential resolver](../../../src/providers/runtime-credential-resolver.ts), [reviewed setup executor](../../../src/setup/review/apply-executor.ts) | Safe metadata, bounded candidate verification and reviewed profile-local apply |
 | Usage | [provider usage ledger](../../../src/providers/provider-usage-ledger.ts) | Report known values and unavailable estimates honestly |
 | Scheduling | Existing Cron store and execution records | Project schedules; closing a window does not cancel an enabled job |
-| Bridge / windows / human PTYs | Electron Main, planned | Own client and ephemeral human resources only; dispose on profile/window changes as specified |
+| Bridge / windows / human PTYs | Electron Main; human PTYs remain planned | Own client and ephemeral human resources only; dispose on profile/window changes as specified |
 
 Global trust, workspace approvals, Session DB, and shared memory remain global with their existing scoping rules. Config, `.env`, `auth.json`, ordinary memory, skills, gateway state and caches remain profile-local. Never infer authority from a session ID, target ID, process ID, alias, or cache hit.
 
@@ -53,12 +54,12 @@ Keyboard access, visible focus, named icon actions, Escape/focus restoration, re
 
 The [threat model](threat-model.md) maps renderer, service, provider and channel attacks to required controls and their implementing PRs.
 
-The [credential transaction design](credential-transactions.md) defines candidate lifetime, isolated transport, reviewed apply, cancellation races and the existing multi-file atomicity gap.
+The [credential transaction design](credential-transactions.md) defines candidate lifetime, isolated transport, reviewed apply, cancellation races and the implemented recoverable profile Apply boundary.
 
 The [protocol/process/packaging decisions](decisions.md) distinguish existing host wire v1 from the planned Desktop JSON-RPC transport and preserve CLI packaging through a pure shared-source facade.
 
 [Desktop control protocol v1.0](control-protocol.md) documents the PR 2 executable schemas, negotiation, bounds and reconnect requirements. A declared contract does not imply an implemented service handler.
 
-PR 1 establishes decisions and the minimal package boundary; it cannot prove Electron sandboxing, staged credential isolation, two-window behavior, or packaged quit/relaunch. Those need actual process tests in PRs 2–5 and packaged release validation. The early bridge/supervisor lifecycle proof belongs to PRs 3–5; no shell or service is claimed here merely because Milestone 0 lists that proof as a prerequisite for later UI delivery.
+The [PR6 implementation record](../../planning/desktop-pr6.md) records core, browser/visual, native credential-window and packaged restart validation. Paid provider requests and real-account Codex authorization remain manual checks. Developer ID signing/notarization and distribution remain later gates.
 
-Risk: downstream code could confuse a client bridge or a display projection with an authority owner. Review subsequent implementations against this matrix and the shared conformance cases. PR 1 changes no storage schema, grants, profile configuration, services, or execution lifetime.
+Risk: downstream code could confuse a client bridge or a display projection with an authority owner. Review implementations against this matrix and the shared conformance cases. PR6 introduces reviewed profile persistence and Task model-event schema v36, with regression coverage for credential isolation, ownership and recovery.

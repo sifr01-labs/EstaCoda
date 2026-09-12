@@ -23,7 +23,7 @@ Implemented handlers, intersected with the client's requested capabilities, are:
 
 Events are `control.ready`, `work.changed`, `activity.appended`, `attention.changed`, `service.warning`, and `service.shutdown`. Model/provider/connection and ordinary credential methods remain unavailable until their handlers ship. Session start requires an existing canonical target reference; target creation/selection extensions remain PR 9.
 
-Bootstrap reads the selected profile through core's `configurationInspection` mode: a regular, non-symlink config file, at most 1 MiB, bounded on the same opened descriptor, without loading profile `.env` values into the bridge environment or emitting raw configuration warnings. Normal CLI/runtime config loading remains unchanged. The profile label is the selected profile ID. Configuration `ready` means core can normalize a configured model route; it does **not** certify credentials, provider availability, workspace trust or task readiness. Inbox separately reports missing credentials, authorization expiry, trust and supervisor problems. Active provider verification belongs to PR 6.
+Bootstrap reads the selected profile through core's `configurationInspection` mode: a regular, non-symlink config file, at most 1 MiB, bounded on the same opened descriptor, without loading profile `.env` values into the bridge environment or emitting raw configuration warnings. Normal CLI/runtime config loading remains unchanged. The profile label is the selected profile ID. Configuration `ready` means core can normalize a configured model route; it does **not** certify credentials, provider availability, workspace trust or task readiness. Inbox separately reports missing credentials, authorization expiry, trust and supervisor problems. PR6 implements active provider verification through a separate explicit, bounded candidate request.
 
 Each completed bootstrap retains one immutable snapshot with its own stream cursor. A newer bootstrap invalidates older subscriptions, pending capture and snapshot. Old asynchronous captures cannot overwrite a successor. Work/Inbox pagination uses opaque tokens bound to this bridge, snapshot epoch, query and page size. Snapshot pages remain immutable while events describe later changes; consumers must merge by canonical identity and resnapshot on gaps or history rewrites.
 
@@ -48,11 +48,11 @@ Descriptor 3 uses bounded LF JSON-RPC frames (65,536 bytes), independently of st
 - `credentials.discard`: `{ scope, candidateId }` → `{ discarded: true }`.
 - `credentials.closeWindow`: `{ windowId, generation }` → `{ closed: true }`.
 
-`scope` contains `windowId`, positive `generation`, `purpose` (provider/telegram), `providerId`, `authMethod` (api_key/oauth), and exact `endpoint`. Profile and bridge identity come from the trusted process, not message fields. Telegram scope uses its fixed API endpoint. Staging does not contact endpoints; provider verification must apply URL/spend policy in PR 6.
+`scope` contains `windowId`, positive `generation`, `purpose` (provider/telegram), `providerId`, `authMethod` (api_key/oauth), and exact `endpoint`. Profile and bridge identity come from the trusted process, not message fields. Telegram scope uses its fixed API endpoint. Staging does not contact endpoints; provider verification applies the PR6 URL/spend policy.
 
 Values stay only in memory, with an idle TTL of five minutes and an absolute TTL of fifteen minutes measured monotonically. Limits are eight candidates/window, 32/bridge, 64 window-generation records and 49,152 value bytes (also subject to the whole frame bound). Advancing a window generation discards its older candidates; closing it fences late callbacks. Main must advance/invalidate that generation when the user's route/purpose/window changes. Idle touches cannot extend absolute expiry. Pipe/bridge close drops all candidates.
 
-Replies contain opaque IDs or fixed errors, never values. No ordinary RPC credential route exists. There is no verification, OAuth exchange, Apply or secret persistence in PR 3. PR 6 must compose this staging with reviewed single-use transactions and recovery; internal candidate access grants no Apply authority. JavaScript cannot guarantee memory zeroization.
+Replies contain opaque IDs or fixed errors, never values. No ordinary RPC credential route exists. PR6 composes staging with bounded verification, service-owned OAuth, reviewed single-use Apply and recovery; internal candidate access grants no Apply authority. JavaScript cannot guarantee memory zeroization.
 
 ## Proof and remaining gates
 
@@ -103,3 +103,12 @@ Blocked Session outcomes appear in Inbox, and `waiting_for_host` Tasks display a
 queued with their wait reason. Execution cancel, Task pause/cancel, and approval
 resolution share the reserved request capacity with RPC cancellation/unsubscribe;
 ordinary reads cannot exhaust those slots.
+
+
+## PR6 Models and Providers
+
+`providers.list` and `models.list` project offline metadata and selected-profile credential presence. Explicit `models.refreshCatalog` fetches fixed public catalog metadata. `models.validateRoute`, `models.verifyCandidate`, `models.verifyDraft` and the `models.oauth*` operations return safe candidate/authorization state without exposing values. Review methods cover primary, fallback, configured-route reuse, fallback order and five specialist slots. Apply/cancel bind the opaque draft to its Main-owned window and generation.
+
+`models.inspectApply` accepts a specific operation ID or an empty request to inspect the selected profile's latest durable Apply after restart. With no history it returns `operationId: "none"`, `state: "unknown"`; Main maps that to no saved change. Pending journal contents never cross RPC.
+
+`models.workOverride` reads a scoped selection. `sessions.setModel` and `tasks.setModel` delegate to the authenticated execution owner and return canonical control receipts. Optional Work `modelBinding` contains a Session ID and, for a Task, Task ID; Main still resolves the canonical Work and target generation before mutation. The reference is not authority. See [Models and Providers](models-and-providers.md) for limits and operator recovery.

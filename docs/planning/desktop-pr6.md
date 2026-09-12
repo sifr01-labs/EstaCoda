@@ -1,6 +1,6 @@
 # Desktop PR6 implementation record
 
-PR6 is in progress on `ame/desktop-foundation`, based on `644e49da`. The desktop implementation plan and frozen visual contract remain the acceptance references.
+PR6 is complete in the 18 planned commits on `ame/desktop-foundation`, based on `644e49da`. The desktop implementation plan and frozen visual contract remain the acceptance references.
 
 ## 1. Provider metadata and offline model catalog
 
@@ -125,3 +125,12 @@ The native harness now uses the real Models dialog, Main, private credential win
 Validation: 34 desktop unit tests, 117 browser/visual tests, 109 focused migration/setup/protocol tests and 73 final catalog/setup/protocol tests passed. Desktop foundation and the final macOS package/native suite passed, including strict relocated signature, CSP/fuses, icon and owned-runtime startup. The full release gate passed: 10,851 core tests in 663 files, smoke/build/import/ESM/dist checks, execution budgets, source/dist host–Docker conformance and Docker image validation. The final duplicate guard also passed the focused suite; a final full core rerun is recorded below when settled. Native evidence was regenerated intentionally and visually reviewed; frozen reference assets were not changed.
 
 Acceptance scope: local provider transport is tested live against a deterministic loopback server. Paid provider requests and real-account Codex authorization were not performed. Developer ID signing/notarization remain the later distribution milestone.
+
+
+## 18. Provider and model management documentation
+
+Added the operator guide for API-key/Codex/local setup, offline catalog browsing, reviewed primary/fallback/specialist changes, Work overrides, verification measurements and interrupted-Apply recovery. Updated architecture/protocol/credential references and desktop/native test instructions to distinguish implemented PR6 behavior from later Work and distribution milestones.
+
+Final acceptance: the final source rerun passed **10,851 tests across 663 core files**, root typecheck passed, desktop unit tests passed **34/34**, and browser/visual tests passed **117/117** with seven focused live Models journeys also rerun after the last presentation changes. The final macOS package and native suite passed, including local streamed verification, cancellation without writes, full-app receipt recovery, strict signature, fuses/CSP, supplied icon and relocated owned-runtime launch. The full host/Docker release wrapper passed; the final narrow duplicate-primary guard received focused and full-suite follow-up validation. Documentation links and patch whitespace were checked.
+
+Validation used an isolated tracked-source checkout for core typecheck/build/full tests because this working directory contains unrelated untracked duplicate source files. Those files were left unchanged. No dependency or lockfile update, remote push, paid provider request, real Codex account login, or distribution publication was needed for this implementation. Manual account/provider checks and Developer ID/notarization remain the explicit acceptance limits above.

@@ -143,3 +143,10 @@ Session history pages are pinned by append high water marks and transcript rewri
 revision. Cursors authenticate their snapshot/query/page size without accumulating
 server-side continuation entries. Metadata remains reconstructed from core state;
 no new Work database or execution owner is introduced.
+
+
+## PR6 model contracts
+
+The pure facade includes provider/model metadata, bounded candidate verification, Main-owned draft bindings, safe Apply receipts, five specialist slots and Codex device-authorization state. Route identity includes provider/model, endpoint, auth/API mode, private-endpoint choice, network enablement and optional context/output limits. Ordinary protocol payloads never contain candidate credential values or raw provider headers.
+
+Work may include `modelBinding: { sessionId, taskId? }`. Session/Task model mutations carry the exact target generation and operation identity; Task receipts additionally bind Task ID. Main's renderer API accepts semantic Work/model IDs and resolves those canonical bindings itself. `models.inspectApply` with no operation ID supports latest selected-profile receipt recovery across application restart. All fields remain schema-validated and capability-negotiated. The [service reference](control-service.md) and [operating guide](models-and-providers.md) describe current handlers and recovery behavior.

@@ -1033,6 +1033,8 @@ Dependency and lockfile changes stay in the scaffold or feature commit that requ
 
 ### PR 6 — Models and Providers
 
+Implemented in the 18 planned commits on the desktop branch; see the [implementation and acceptance record](desktop-pr6.md) and [operator guide](../architecture/desktop/models-and-providers.md).
+
 Connect the PR 5 Settings/Models and composer components to live route/setup services. Preserve their approved appearance and rerun the visual gate; do not create a second dashboard design.
 
 - `feat(control-service): expose provider metadata and model catalog`
