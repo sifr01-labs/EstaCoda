@@ -1,0 +1,15 @@
+import {randomUUID} from 'node:crypto';
+import type {TelegramDraft,TelegramSettings} from '@estacoda/control-protocol';
+import type {DesktopConnection} from './connection.js';
+import type {CredentialWindow} from './credential-window.js';
+import type {CredentialPipeClient,CredentialScope} from './credential-pipe-client.js';
+type Setup={id:string;profileId:string;generation:number;scope:CredentialScope;candidateId?:string;draft?:TelegramDraft;applying:boolean};
+export class DesktopTelegramSetup {
+ #setup:Setup|undefined;#generation=0;#windowId=randomUUID();#preparing=false;
+ constructor(readonly connection:DesktopConnection,readonly credentials:CredentialWindow,readonly pipe:()=>CredentialPipeClient|undefined){connection.on('invalidate',()=>{this.#setup=undefined;});}
+ private require(id:string){const setup=this.#setup;if(!setup||setup.id!==id||setup.profileId!==this.connection.state.profileId||setup.generation!==this.connection.state.generation)throw new Error('Telegram setup changed.');return setup;}
+ async begin(){if(this.#preparing||this.#setup?.applying)throw new Error('Setup is settling.');this.#preparing=true;try{if(!(await this.cancel()).cancelled)throw new Error('Reconcile Apply first.');const profileId=this.connection.state.profileId,generation=this.connection.state.generation;const settings=await this.connection.connectionRequest('telegram.settings',{});if(profileId!==this.connection.state.profileId||generation!==this.connection.state.generation)throw new Error('Profile changed.');this.#setup={id:randomUUID(),profileId,generation,scope:{windowId:this.#windowId,generation:++this.#generation,purpose:'telegram',providerId:'telegram',authMethod:'api_key',endpoint:'https://api.telegram.org'},applying:false};return{setupId:this.#setup.id,settings};}finally{this.#preparing=false;}}
+ async stage(id:string){const setup=this.require(id),pipe=this.pipe();if(!pipe||setup.candidateId||setup.draft)throw new Error('Credential entry unavailable.');await new Promise<void>((resolve,reject)=>this.credentials.open(pipe,setup.scope,candidateId=>{try{this.require(id);setup.candidateId=candidateId;resolve();}catch{reject(new Error('Setup changed.'));}},()=>reject(new Error('Credential entry cancelled.'))));this.require(id);return{staged:true};}
+ async verify(id:string){const setup=this.require(id);const result=await this.connection.connectionRequest('telegram.verify',{windowId:setup.scope.windowId,generation:setup.scope.generation,...(setup.candidateId?{candidateId:setup.candidateId}:{})});this.require(id);return result;}
+ async cancel(id?:string){const setup=this.#setup;if(!setup)return{cancelled:true};if(id)this.require(id);this.credentials.close();if(setup.draft){const result=await this.connection.connectionRequest('telegram.cancel',{draftId:setup.draft.draftId,windowId:setup.scope.windowId,generation:setup.scope.generation});if(!result.cancelled)return result;}await this.pipe()?.closeWindow(setup.scope.windowId,setup.scope.generation);if(this.#setup===setup)this.#setup=undefined;return{cancelled:true};}
+}

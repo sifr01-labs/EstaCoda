@@ -50,7 +50,12 @@ export type DesktopWorkApi = {
  pins():Promise<WorkProjection[]>;
  pin(workId:string,pinned:boolean):Promise<WorkProjection[]>;
 };
-export type DesktopConnectionsApi={list():Promise<MethodContracts['connections.list']['result']>};
+export type DesktopConnectionsApi={
+ begin():Promise<{setupId:string;settings:import('@estacoda/control-protocol').TelegramSettings}>;
+ stage(setupId:string):Promise<{staged:boolean}>;
+ verify(setupId:string):Promise<MethodContracts['telegram.verify']['result']>;
+ cancel(setupId:string):Promise<{cancelled:boolean}>;
+ list():Promise<MethodContracts['connections.list']['result']>};
 export type DesktopApi = {
   readonly connections?:DesktopConnectionsApi;
   readonly work?:DesktopWorkApi;

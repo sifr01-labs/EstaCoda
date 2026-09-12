@@ -85,3 +85,14 @@ Loading/disconnected states clear previous data; the Email row remains fixture-o
 The approved neutral surfaces and existing row/detail classes are retained.
 
 Validation: Desktop foundation/boundary check and all 44 desktop unit tests passed.
+
+## Step 8 — Bot and authorization setup
+
+Added Main-owned Telegram setup identities and the existing private credential window.
+The normal renderer receives only stage/verification metadata. Setup offers BotFather
+guidance, bounded allowlists or pairing, protected-handoff defaults, streaming/poll controls,
+and an explicit warning/acknowledgement for direct-DM secret entry. Profile changes,
+window invalidation and cancellation dispose staged credentials. Modal keyboard focus
+is contained and restored to its invoking control.
+
+Validation: Desktop foundation/boundary check and desktop unit suite.
