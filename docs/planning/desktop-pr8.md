@@ -76,3 +76,12 @@ preserves canonical Work. Explicit code reads stay out of ordinary connection pr
 
 Validation: cross-profile projection/lookup, revoke/detach preservation, untrusted creation,
 shared pointer tests, protocol conformance and core/Desktop type checks.
+
+## Step 7 — Live Connections dashboard
+
+Connected production Telegram rows to negotiated, selected-profile metadata through a
+narrow Main/preload API. Configuration, authorization, gateway and polling remain separate.
+Loading/disconnected states clear previous data; the Email row remains fixture-only.
+The approved neutral surfaces and existing row/detail classes are retained.
+
+Validation: Desktop foundation/boundary check and all 44 desktop unit tests passed.

@@ -50,7 +50,9 @@ export type DesktopWorkApi = {
  pins():Promise<WorkProjection[]>;
  pin(workId:string,pinned:boolean):Promise<WorkProjection[]>;
 };
+export type DesktopConnectionsApi={list():Promise<MethodContracts['connections.list']['result']>};
 export type DesktopApi = {
+  readonly connections?:DesktopConnectionsApi;
   readonly work?:DesktopWorkApi;
   readonly models?:DesktopModelsApi;
   readonly platform:string;
