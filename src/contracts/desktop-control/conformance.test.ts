@@ -45,6 +45,7 @@ const cases = {
   "control.subscribe": { params: { after: cursor, events: [...CONTROL_EVENTS] }, result: { state: "subscribed", subscriptionId: "sub", cursor } },
   "control.unsubscribe": { params: { subscriptionId: "sub" }, result: { removed: true } },
   "control.cancelRequest": { params: { requestId: "old" }, result: { cancellationRequested: true } },
+  "work.targets": {params:{},result:{items:[],truncated:false}},
   "work.list": { params: { limit: 10 }, result: { items: [work], nextCursor: null } },
   "work.get": { params: { workId: "w" }, result: work },
   "work.activity": { params: { workId: "w", limit: 10 }, result: { items: activities, nextCursor: "next_page" } },

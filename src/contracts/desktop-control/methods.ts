@@ -3,7 +3,7 @@ import type {OAuthStatus,OAuthBinding} from './model-setup.js';
 import type {AuxiliaryList,AuxiliarySlot,AuxiliaryModeParams} from './model-setup.js';
 import type {VerifyCandidateParams, CandidateVerification, ModelRouteDraft, ModelDraftBinding, ModelApplyReceipt, FallbackList, FallbackOrderParams} from './model-setup.js';
 import type { BootstrapResult, Capabilities, ControlCursor, InitializeParams, InitializeResult } from "./bootstrap.js";
-import type { ActivityProjection, ConnectionProjection, InboxProjection, ModelProjection, Page, ProviderProjection, TargetReference, WorkProjection } from "./projections.js";
+import type { ActivityProjection, ConnectionProjection, InboxProjection, ModelProjection, Page, ProviderProjection, TargetProjection, TargetReference, WorkProjection } from "./projections.js";
 
 export type PageParams = { limit: number; cursor?: string };
 export type SessionControl = { operationId: string; sessionId: string; target: TargetReference };
@@ -20,6 +20,7 @@ export type SubscribeResult =
   | { state: "subscribed"; subscriptionId: string; cursor: ControlCursor }
   | { state: "snapshot_required"; reason: "instance_changed" | "stream_changed" | "cursor_expired" | "overflow" };
 export type MethodContracts = {
+  "work.targets": {params:Record<string,never>;result:{items:TargetProjection[];truncated:boolean}};
   "models.verifyDraft": {params:ModelDraftBinding&{spendApproved:true;allowPrivateEndpoint:boolean};result:CandidateVerification};
   "models.reviewConfigured": {params:ConfiguredRouteReview;result:ModelRouteDraft};
   "models.validateRoute": {params:{route:VerifyCandidateParams["route"]};result:{valid:true}};

@@ -43,6 +43,11 @@ export class ExecutionTargetStore extends WorkspaceRegistry {
     ); create table if not exists copy_manifests (target_id text primary key, record_json text not null)`); } catch (error) { this.close(); throw error; }
   }
 
+  listTargets(limit=100): ExecutionTarget[] {
+    if(!Number.isSafeInteger(limit)||limit<1||limit>101)throw new Error('Invalid target limit.');
+    return this.db.query<{id:string}>("select id from execution_targets order by id limit ?").all(limit).map(row=>this.getTarget(row.id)!);
+  }
+
   getTarget(id: string): ExecutionTarget | undefined {
     const row = this.db.query<{ record_json: string }>("select record_json from execution_targets where id = ?").get(id);
     if (!row) return undefined;

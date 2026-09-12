@@ -11,7 +11,7 @@ import { randomBytes, createHmac, timingSafeEqual } from 'node:crypto';
 import { lstat } from 'node:fs/promises';
 import { resolveGlobalStateHome } from '../config/profile-home.js';
 import { SQLiteSessionDB } from '../session/sqlite-session-db.js';
-import { ControlProtocolError, type InboxProjection, type ActivityProjection, type Page, type WorkProjection } from '../contracts/desktop-control/index.js';
+import { ControlProtocolError, type InboxProjection, type ActivityProjection, type Page, type PageParams, type WorkProjection } from '../contracts/desktop-control/index.js';
 import { sessionWork } from './work-projections.js';
 
 export type WorkState = { inbox?: InboxProjection[]; work: WorkProjection[]; activity: Record<string, ActivityProjection[]>; history?: Record<string, HistoryBoundary> };

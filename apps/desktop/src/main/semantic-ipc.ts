@@ -1,3 +1,4 @@
+import type {DesktopWorkControls} from './work-controls.js';
 import type {WorkPins} from './work-pins.js';
 import type{DesktopModelSetup}from'./model-setup.js';
 import{validAppearance}from'../shared/appearance.js';
@@ -13,6 +14,14 @@ export function rendererSnapshot(state:ConnectionState):DesktopSnapshot {
 }
 export function validateSemanticPayload(method:string,payload:unknown):void {
   if(!isRecord(payload))throw new Error('Desktop request rejected.');
+  if(method==='workInspect'){if(!exactKeys(payload,['workId'])||!isControlId(payload.workId))throw new Error('Invalid Work');return;}
+  if(method==='workAttach'||method==='workSubmit'){
+    if(!exactKeys(payload,method==='workAttach'?['draftId','target']:['draftId','target','text','attachmentIds'],method==='workAttach'?[]:['workId','selection'])||!isControlId(payload.draftId)||!isRecord(payload.target)||!exactKeys(payload.target,['targetId','targetGeneration'])||!isControlId(payload.target.targetId)||!Number.isSafeInteger(payload.target.targetGeneration)||Number(payload.target.targetGeneration)<1)throw new Error('Invalid Work input');
+    if(method==='workSubmit'){
+      if(typeof payload.text!=='string'||payload.text.length>32768||!Array.isArray(payload.attachmentIds)||payload.attachmentIds.length>4||!payload.attachmentIds.every(isControlId)||payload.workId!==undefined&&!isControlId(payload.workId))throw new Error('Invalid prompt');
+      if(payload.selection!==undefined)validateSemanticPayload('setOverride',{workId:'validation',selection:payload.selection});
+    }return;
+  }
   if(method==='workSearch'){if(!exactKeys(payload,['query'],['cursor'])||typeof payload.query!=='string'||payload.query.length>200||payload.cursor!==undefined&&(typeof payload.cursor!=='string'||!/^[A-Za-z0-9_-]{1,512}$/.test(payload.cursor)))throw new Error('Invalid search');return;}
   if(method==='workPin'){if(!exactKeys(payload,['workId','pinned'])||!isControlId(payload.workId)||typeof payload.pinned!=='boolean')throw new Error('Invalid pin');return;}
   if(['workOverride','inspectOverride','setOverride'].includes(method)){if(!exactKeys(payload,method==='setOverride'?['workId','selection']:['workId'])||!isControlId(payload.workId))throw new Error('Invalid Work');if(method==='setOverride'&&payload.selection!==null){const s=payload.selection;if(!isRecord(s)||!exactKeys(s,['providerId','modelId'])||!isControlId(s.providerId)||typeof s.modelId!=='string'||!s.modelId.length||s.modelId.length>200)throw new Error('Invalid model');}return;}
@@ -24,10 +33,10 @@ export function validateSemanticPayload(method:string,payload:unknown):void {
     :method==='switchProfile'?exactKeys(payload,['id'])&&isControlId(payload.id):exactKeys(payload,[]);
   if(!valid)throw new Error('Desktop request rejected.');
 }
-export function installSemanticIpc(window:BrowserWindow,documentUrl:string,connection:DesktopConnection,profiles:Profiles,appearance:AppearanceSettings,models?:DesktopModelSetup,pins?:WorkPins):()=>void {
+export function installSemanticIpc(window:BrowserWindow,documentUrl:string,connection:DesktopConnection,profiles:Profiles,appearance:AppearanceSettings,models?:DesktopModelSetup,pins?:WorkPins,workControls?:DesktopWorkControls):()=>void {
   const authority=new WindowAuthority(window,documentUrl);
   const contents=window.webContents;
-  const methods=['workSearch','workPins','workPin','workOverride','setOverride','inspectOverride','setupVerifyReviewed','modelRoutes','setupConfigured','setupOrder','setupMode','setupOAuthStart','setupOAuthStatus','setupOAuthOpen','setupBegin','setupStage','setupVerify','setupReview','setupApply','setupCancel','setupInspect','modelPage','providerPage','refreshCatalog','reconnect','moreWork','moreInbox','appearance','setAppearance','snapshot','getWork','activity','profiles','switchProfile','minimize','toggleMaximize','close'];
+  const methods=['workTargets','workAttach','workSubmit','workInspect','workSearch','workPins','workPin','workOverride','setOverride','inspectOverride','setupVerifyReviewed','modelRoutes','setupConfigured','setupOrder','setupMode','setupOAuthStart','setupOAuthStatus','setupOAuthOpen','setupBegin','setupStage','setupVerify','setupReview','setupApply','setupCancel','setupInspect','modelPage','providerPage','refreshCatalog','reconnect','moreWork','moreInbox','appearance','setAppearance','snapshot','getWork','activity','profiles','switchProfile','minimize','toggleMaximize','close'];
   const handlers:string[]=[];
   let connectionGeneration=connection.state.generation;
   const state=(value:ConnectionState)=>{if(value.generation!==connectionGeneration){authority.invalidate();connectionGeneration=value.generation;}if(!window.isDestroyed())contents.send('desktop:state',{generation:authority.generation,snapshot:rendererSnapshot(value)});};
@@ -40,6 +49,11 @@ export function installSemanticIpc(window:BrowserWindow,documentUrl:string,conne
       const payload=envelope.payload as Record<string,unknown>;
       const generation=authority.generation;
       try {
+        if(['workTargets','workAttach','workSubmit','workInspect'].includes(method)){
+          if(!workControls)throw new Error('Work unavailable');
+          const result=method==='workTargets'?await connection.workRequest('work.targets',{}):method==='workAttach'?await workControls.attach(payload as Parameters<DesktopWorkControls['attach']>[0]):method==='workSubmit'?await workControls.submit(payload as Parameters<DesktopWorkControls['submit']>[0]):await workControls.inspect(payload.workId as string);
+          authority.assertSender(event,generation);return result;
+        }
         if(method==='workSearch'||method==='workPins'||method==='workPin'){
           const result=method==='workSearch'?await connection.search(payload.query as string,payload.cursor as string|undefined):method==='workPin'?await pins?.set(payload.workId as string,payload.pinned as boolean):await pins?.list();
           authority.assertSender(event,generation);if(!result)throw new Error('Work unavailable');return result;

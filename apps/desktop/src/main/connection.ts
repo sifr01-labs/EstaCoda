@@ -5,6 +5,7 @@ import { ServiceProcess, validateProfileId } from './service-process.js';
 export type ConnectionState = { status: 'connecting' | 'ready' | 'disconnected' | 'incompatible' | 'unavailable'; generation: number;
   profileId: string; bootstrap: BootstrapResult | null; work: Page<WorkProjection>; inbox: Page<InboxProjection> };
 export const MODEL_METHODS=CONTROL_METHODS.filter(method=>method.startsWith('models.') || ['providers.list','sessions.setModel','tasks.setModel','operations.inspect'].includes(method));
+export const WORK_METHODS=CONTROL_METHODS.filter(method=>method==='work.targets'||method.startsWith('sessions.')||method.startsWith('tasks.')||method==='approvals.resolve'||method==='operations.inspect');
 export class DesktopConnection extends EventEmitter {
   #client: ProtocolClient | null = null;
   #timer: ReturnType<typeof setTimeout> | undefined;
@@ -31,7 +32,7 @@ export class DesktopConnection extends EventEmitter {
         else if (event.type !== 'control.ready') void this.refresh();
       });
       await client.request('control.initialize', { profileId: this.state.profileId, clientVersion: '0.0.0', protocolVersion: DESKTOP_PROTOCOL_VERSION,
-        capabilities: { methods: ['control.bootstrap','control.subscribe','control.unsubscribe','work.list','work.get','work.activity','inbox.list',...MODEL_METHODS], events: [...CONTROL_EVENTS] } });
+        capabilities: { methods: ['control.bootstrap','control.subscribe','control.unsubscribe','work.list','work.get','work.activity','inbox.list',...new Set([...MODEL_METHODS,...WORK_METHODS])], events: [...CONTROL_EVENTS] } });
       if (generation !== this.state.generation) return;
       await this.refresh(); if(client===this.#client&&this.state.status==='ready')this.#attempt = 0;
     } catch (error) {
@@ -98,6 +99,12 @@ export class DesktopConnection extends EventEmitter {
     const result=await client.request(method,params);
     if(client!==this.#client || generation!==this.state.generation)throw new Error('Desktop context changed.');
     return result;
+  }
+  async workRequest<M extends keyof MethodContracts>(method:M,params:MethodContracts[M]['params']):Promise<MethodContracts[M]['result']>{
+    const client=this.#client,generation=this.state.generation;
+    if(!client||this.state.status!=='ready'||!WORK_METHODS.includes(method))throw new Error('Work unavailable.');
+    const result=await client.request(method,params);
+    if(client!==this.#client||generation!==this.state.generation)throw new Error('Desktop context changed.');return result;
   }
   async search(query:string,cursor?:string):Promise<Page<WorkProjection>> {
     const client=this.#client,generation=this.state.generation;

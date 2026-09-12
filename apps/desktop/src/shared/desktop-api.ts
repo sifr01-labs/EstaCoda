@@ -33,7 +33,12 @@ export type DesktopModelsApi={
  providers(cursor?:string):Promise<MethodContracts['providers.list']['result']>;
  refreshCatalog():Promise<{refreshed:boolean}>;
 };
+export type WorkSubmission={draftId:string;workId?:string;target:import('@estacoda/control-protocol').TargetReference;text:string;attachmentIds:string[];selection?:{providerId:string;modelId:string}|null};
 export type DesktopWorkApi = {
+ targets():Promise<MethodContracts['work.targets']['result']>;
+ attach(input:Pick<WorkSubmission,'draftId'|'target'>):Promise<{id:string;name:string;size:number;type:string}[]>;
+ submit(input:WorkSubmission):Promise<{workId:string;receipt:import('@estacoda/control-protocol').OperationReceipt}>;
+ inspect(workId:string):Promise<import('@estacoda/control-protocol').OperationReceipt|null>;
  search(query:string,cursor?:string):Promise<Page<WorkProjection>>;
  pins():Promise<WorkProjection[]>;
  pin(workId:string,pinned:boolean):Promise<WorkProjection[]>;
