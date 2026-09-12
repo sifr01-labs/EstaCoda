@@ -313,6 +313,7 @@ export type BrowserStateProjection = {
 };
 
 export type BrowserSwitchTabInput = {
+  assertHumanControl?:()=>void;
   sessionId?: string;
   tabRef: string;
   waitFor?: BrowserWaitCondition;
@@ -494,6 +495,7 @@ export type BrowserProtectedSourceReadResult =
   | { status: "rejected"; reason: BrowserProtectedSourceRejectionReason };
 
 export type BrowserNavigateInput = {
+  assertHumanControl?:()=>void;
   url: string;
   sessionId?: string;
   disposition?: "current-tab" | "new-tab";
@@ -526,6 +528,8 @@ export type BrowserBackendStatus = {
 };
 
 export type BrowserBackend = {
+  /** Optional supervised runtime workspace; unavailable on cloud/legacy backends. */
+  workspace?(input:{sessionId:string;action:import('./desktop-control/browser-human.js').BrowserWorkspaceAction;assertHumanControl:()=>void}):Promise<import('./desktop-control/browser-human.js').BrowserWorkspaceState>;
   kind: BrowserBackendKind;
   capabilities: BrowserBackendCapabilities;
   isAvailable(): Promise<boolean> | boolean;

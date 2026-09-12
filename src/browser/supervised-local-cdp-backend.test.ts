@@ -3116,3 +3116,17 @@ describe("supervised local CDP backend", () => {
     expect(launchedChrome.kill).toHaveBeenCalledTimes(1);
   });
 });
+
+it('exposes bounded owned workspace sessions and rejects unsafe creation before dispatch',async()=>{
+ const backend=createSupervisedLocalCdpBrowserBackend({cdpUrl:'http://127.0.0.1:9222',fetch:createFetch(),webSocketFactory:createSocketFactory().webSocketFactory,resolveHostname:()=>['93.184.216.34']});
+ const assertHumanControl=vi.fn();
+ try{
+  expect((await backend.workspace!({sessionId:'b',action:{kind:'list'},assertHumanControl})).sessions).toEqual([]);
+  await expect(backend.workspace!({sessionId:'b',action:{kind:'create',url:'http://169.254.169.254/latest'},assertHumanControl})).rejects.toThrow('blocked');
+  await backend.workspace!({sessionId:'b',action:{kind:'create',url:'https://example.com'},assertHumanControl});
+  expect((await backend.workspace!({sessionId:'b',action:{kind:'list'},assertHumanControl})).sessions.map(s=>s.id)).toEqual(['b']);
+  await expect(backend.workspace!({sessionId:'other',action:{kind:'close-session'},assertHumanControl})).rejects.toThrow();
+  await backend.workspace!({sessionId:'b',action:{kind:'close-session'},assertHumanControl});
+  expect((await backend.workspace!({sessionId:'b',action:{kind:'list'},assertHumanControl})).sessions).toEqual([]);
+ }finally{await backend.close!();}
+});

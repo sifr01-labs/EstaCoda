@@ -115,7 +115,7 @@ type TargetManagerLike = Pick<CdpTargetManager, "createTarget" | "close"> & Part
 >>;
 
 type BrowserSessionManagerLike = Pick<BrowserSessionManager, "acquire" | "close" | "closeAll" | "has" | "observeSnapshot"> &
-  Partial<Pick<BrowserSessionManager, "listTabs" | "visibleTab" | "switchTab" | "openTab">>;
+  Partial<Pick<BrowserSessionManager, "listTabs" | "visibleTab" | "switchTab" | "openTab" | "closeTab">>;
 
 type BrowserSessionStack = {
   endpoint: string;
@@ -217,12 +217,12 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
     return listTabs.call(stack.sessionManager, sessionId);
   };
 
-  const listSafeTabs = async (sessionId: string): Promise<BrowserTabList> => {
+  const listSafeTabs = async (sessionId: string, passive=false): Promise<BrowserTabList> => {
     let managedTabs = await listManagedTabs(sessionId);
     const stack = sessionStacks.get(sessionId)!;
     const visibleTab = await stack.sessionManager.visibleTab?.call(stack.sessionManager, sessionId);
     if (
-      visibleTab !== undefined &&
+      !passive && visibleTab !== undefined &&
       !visibleTab.controlled &&
       await tabIsAllowed(visibleTab) &&
       stack.sessionManager.switchTab !== undefined
@@ -428,7 +428,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
     snapshot: BrowserSnapshot;
   }> => {
     const sessionId = requireSessionId(input.sessionId);
-    const tabs = await listSafeTabs(sessionId);
+    const tabs = await listSafeTabs(sessionId, !!input.assertHumanControl);
     const requestedTab = tabs.tabs.find((tab) => tab.ref === input.tabRef);
     if (requestedTab === undefined) {
       throw new BrowserSessionStateError(
@@ -442,11 +442,11 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
       throw new Error("Browser backend does not support tab switching.");
     }
     const previousTab = tabs.tabs.find((tab) => tab.controlled);
-    const session = asBackendSession(await switchTab.call(stack.sessionManager, sessionId, input.tabRef));
+    const session = asBackendSession(await switchTab.call(stack.sessionManager, sessionId, input.tabRef, ...(input.assertHumanControl?[input.assertHumanControl]:[])));
     const rawSnapshot = withSessionTab(session, await session.supervisor.getSnapshot(session.key));
     if (!await tabUrlIsAllowed(rawSnapshot.url)) {
       if (previousTab !== undefined && previousTab.ref !== input.tabRef) {
-        await switchTab.call(stack.sessionManager, sessionId, previousTab.ref).catch(() => undefined);
+        await switchTab.call(stack.sessionManager, sessionId, previousTab.ref, ...(input.assertHumanControl?[input.assertHumanControl]:[])).catch(() => undefined);
       }
       throw new Error("Browser tab changed to a URL blocked by browser policy before it could be controlled.");
     }
@@ -796,6 +796,8 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
     status: resolveAvailabilityStatus,
     async navigate(input: BrowserNavigateInput): Promise<BrowserNavigateResult> {
       normalizeBrowserActionSettlementInput(input);
+      if(input.assertHumanControl&&(!await tabUrlIsAllowed(input.url)||input.url==='about:blank'))throw new Error('Browser URL blocked.');
+      input.assertHumanControl?.();
       const disposition = input.disposition ?? "current-tab";
       if (disposition !== "current-tab" && disposition !== "new-tab") {
         throw new Error("Browser navigation disposition must be current-tab or new-tab.");
@@ -815,14 +817,14 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
 
       try {
         try {
-          session = asBackendSession(await resolved.stack.sessionManager.acquire(sessionId));
+          session = asBackendSession(await resolved.stack.sessionManager.acquire(sessionId, ...(input.assertHumanControl?[input.assertHumanControl]:[])));
         } catch (error) {
           if (resolved.stack === configuredStack && options.autoLaunch === true) {
             await closeStack(configuredStack).catch(() => undefined);
             configuredStack = undefined;
             const launched = await resolveLaunchedSessionStack(error);
             try {
-              session = asBackendSession(await launched.stack.sessionManager.acquire(sessionId));
+              session = asBackendSession(await launched.stack.sessionManager.acquire(sessionId, ...(input.assertHumanControl?[input.assertHumanControl]:[])));
               sessionStack = launched.stack;
             } catch (fallbackError) {
               if (launched.launchedDuringCall) {
@@ -862,9 +864,10 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
           if (openTab === undefined) {
             throw new Error("Browser backend does not support controlled new-tab navigation.");
           }
-          session = asBackendSession(await openTab.call(sessionStack.sessionManager, sessionId, "about:blank"));
+          session = asBackendSession(await openTab.call(sessionStack.sessionManager, sessionId, "about:blank", ...(input.assertHumanControl?[input.assertHumanControl]:[])));
         }
         const supervisor = session.supervisor;
+        input.assertHumanControl?.();
         await supervisor.send("Page.navigate", { url: input.url });
         const capture = () => captureSessionSnapshot(session!);
         let snapshot: BrowserSnapshot;
@@ -1497,6 +1500,35 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
         promptText: input.promptText
       });
       return settleAction({ session, before, actionInput: input, actionDispatched: true });
+    },
+    workspace: async ({sessionId,action,assertHumanControl}) => {
+      if(closed)throw new Error('Browser backend is closed.');
+      if(action.kind==='create'){
+        if(sessionStacks.has(sessionId))throw new Error('Browser session already exists.');
+        if(sessionStacks.size>=8)throw new Error('Close a browser session before opening another.');
+        try{await backend.navigate({sessionId,url:action.url,assertHumanControl});}
+        catch(error){await closeSession(sessionId);throw error;}
+      }else if(action.kind!=='list'){
+        await getSession({sessionId});assertHumanControl();
+        if(action.kind==='close-session')await closeSession(sessionId);
+        else if(action.kind==='new-tab'){
+          if((await listManagedTabs(sessionId)).length>=16)throw new Error('Tab limit reached.');
+          await backend.navigate({sessionId,url:action.url,disposition:'new-tab',assertHumanControl});
+        }else if(action.kind==='switch-tab')await backend.switchTab!({sessionId,tabRef:action.tabRef,assertHumanControl});
+        else {
+          const manager=sessionStacks.get(sessionId)!.sessionManager;
+          if(!manager.closeTab)throw new Error('Tab closing is unavailable.');
+          await manager.closeTab(sessionId,action.tabRef,assertHumanControl);
+          clearVisualLeasesForSession(sessionId);latestSnapshots.delete(sessionId);
+        }
+      }
+      const sessions=[];
+      for(const id of [...sessionStacks.keys()].slice(0,8)){
+        const candidates=(await listManagedTabs(id)).slice(0,16);
+        const tabs=[];for(const tab of candidates)if(await tabIsAllowed(tab))tabs.push(toBrowserTab(tab));
+        sessions.push({id,tabs:tabs.map(tab=>({ref:tab.ref,url:tab.url.slice(0,2048),title:redactSensitiveText(tab.title??'Browser').slice(0,160),controlled:tab.controlled,closable:tab.ref!=='@t1'}))});
+      }
+      return {supported:true,reason:null,sessions};
     },
     closeSession,
     close: closeBackend

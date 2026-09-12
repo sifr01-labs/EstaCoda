@@ -69,7 +69,7 @@ export class BrowserSessionManager {
     this.#now = options.now ?? Date.now;
   }
 
-  async acquire(key: string): Promise<BrowserManagedSession> {
+  async acquire(key: string, assertControl:()=>void=()=>{}): Promise<BrowserManagedSession> {
     const sessionKey = validateSessionKey(key);
     const existing = this.#sessions.get(sessionKey);
     if (existing !== undefined) {
@@ -79,6 +79,7 @@ export class BrowserSessionManager {
 
     let target: ManagedCdpTarget;
     try {
+      assertControl();
       target = await this.#targetManager.createTarget();
     } catch (error) {
       throw new Error(`Failed to create browser session for key ${sessionKey}: ${errorMessage(error)}`, {
@@ -150,7 +151,7 @@ export class BrowserSessionManager {
     return (await this.listTabs(session.key)).find((tab) => tab.targetId === targetId);
   }
 
-  async switchTab(key: string, tabRef: string): Promise<BrowserManagedSession> {
+  async switchTab(key: string, tabRef: string, assertControl:()=>void=()=>{}): Promise<BrowserManagedSession> {
     const session = this.#requireSession(key);
     const attachTarget = this.#targetManager.attachTarget;
     const activateTarget = this.#targetManager.activateTarget;
@@ -164,6 +165,7 @@ export class BrowserSessionManager {
     }
 
     if (target.targetId === session.targetId) {
+      assertControl();
       await activateTarget.call(this.#targetManager, session.browserContextId, target.targetId);
       this.#touch(session);
       return session;
@@ -175,6 +177,7 @@ export class BrowserSessionManager {
       if (!switchingToOwner) {
         nextAttachment = await attachTarget.call(this.#targetManager, session.browserContextId, target.targetId);
       }
+      assertControl();
       await activateTarget.call(this.#targetManager, session.browserContextId, target.targetId);
     } catch (error) {
       if (nextAttachment !== undefined) {
@@ -204,16 +207,17 @@ export class BrowserSessionManager {
     return session;
   }
 
-  async openTab(key: string, url: string): Promise<BrowserManagedSession> {
+  async openTab(key: string, url: string, assertControl:()=>void=()=>{}): Promise<BrowserManagedSession> {
     const session = this.#requireSession(key);
     const createPageTarget = this.#targetManager.createPageTarget;
     if (createPageTarget === undefined) {
       throw new Error("Browser target manager does not support controlled tab creation.");
     }
+    assertControl();
     const target = await createPageTarget.call(this.#targetManager, session.browserContextId, url);
     const tabRef = this.#tabRef(session, target.targetId);
     try {
-      return await this.switchTab(session.key, tabRef);
+      return await this.switchTab(session.key, tabRef, assertControl);
     } catch (error) {
       await this.#targetManager.closePageTarget?.call(
         this.#targetManager,
@@ -223,6 +227,20 @@ export class BrowserSessionManager {
       session.tabRefs.delete(target.targetId);
       throw new Error(`Failed to open controlled browser tab ${tabRef}: ${errorMessage(error)}`, { cause: error });
     }
+  }
+
+  async closeTab(key:string,tabRef:string,assertControl:()=>void):Promise<void> {
+    const session=this.#requireSession(key);
+    const target=(await this.listTabs(key)).find(tab=>tab.ref===validateTabRef(tabRef));
+    if(!target)throw new BrowserSessionStateError('tab_missing','Browser tab is missing.');
+    // The original target owns the isolated context. Close that context via closeSession instead.
+    if(target.targetId===session.ownerTarget.targetId)throw new Error('Close the session to close its original tab.');
+    if(!this.#targetManager.closePageTarget)throw new Error('Tab closing is unavailable.');
+    assertControl();
+    if(target.controlled)await this.switchTab(key,session.tabRefs.get(session.ownerTarget.targetId)!,assertControl);
+    assertControl();
+    await this.#targetManager.closePageTarget(session.browserContextId,target.targetId);
+    session.tabRefs.delete(target.targetId);
   }
 
   async close(key: string): Promise<void> {

@@ -572,3 +572,17 @@ describe("BrowserSessionManager", () => {
     lifecycle.stop();
   });
 });
+
+it('closes only owned secondary tabs and fences activation and closing',async()=>{
+ const targetManager=new FakeTargetManager([]),manager=new BrowserSessionManager({targetManager});
+ await manager.acquire('one');await manager.acquire('two');
+ const opened=await manager.openTab('one','https://example.com');const ref=opened.tabRef;
+ await expect(manager.closeTab('two',ref,()=>{})).rejects.toThrow('missing');
+ await expect(manager.closeTab('one','@t1',()=>{})).rejects.toThrow('original');
+ await expect(manager.closeTab('one',ref,()=>{throw new Error('stale');})).rejects.toThrow('stale');
+ expect(targetManager.closePageTarget).not.toHaveBeenCalled();
+ await manager.closeTab('one',ref,()=>{});
+ expect((await manager.listTabs('one')).map(tab=>tab.ref)).toEqual(['@t1']);
+ expect((await manager.listTabs('two'))).toHaveLength(1);
+ await manager.closeAll();
+});
