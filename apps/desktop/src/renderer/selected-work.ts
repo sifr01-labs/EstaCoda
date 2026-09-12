@@ -7,7 +7,7 @@ import type {DesktopSnapshot} from '../shared/desktop-api.js';
 export function useSelectedWork(adapter: DesktopAdapter, snapshot: DesktopSnapshot, id: string) {
   const profile = snapshot.profile.id;
   const listed = snapshot.work.items.find(item => item.id === id);
-  const required = adapter.kind === 'live' && id !== 'welcome' && !listed;
+  const required = adapter.kind === 'live' && id !== 'welcome' && id !== 'work-list' && !id.startsWith('draft-') && !listed;
   const [attempt, retry] = useState(0);
   const [lookup, setLookup] = useState<{profile: string; id: string; work?: WorkProjection; failed?: boolean}>();
   useEffect(() => {

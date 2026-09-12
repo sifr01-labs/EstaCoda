@@ -75,6 +75,7 @@ test('loaded history and Results survive canonical updates using fresh cursors',
   await expect(page.locator('section.ec-agent')).toHaveCount(200);
   await page.getByRole('button',{name:'Settings',exact:true}).click();
   await page.locator('.ec-navgroup').getByRole('button',{name:'Work',exact:true}).click();
+  await page.locator('.ec-searchresult').filter({hasText:'Listed Work'}).click();
   await expect(page.locator('section.ec-agent')).toHaveCount(200);
 });
 
@@ -126,4 +127,15 @@ test('activity inspection has an explicit bounded extent',async({page})=>{
   }
   await expect(page.getByRole('button',{name:'First 2,000 activity items shown'})).toBeDisabled();
   expect(await page.evaluate(()=>(window as any).continuity.reads.includes('1:2000'))).toBe(false);
+});
+
+test('live Work navigation lists canonical items and routes back to detail',async({page})=>{
+ await live(page);
+ await page.locator('.ec-navgroup').getByRole('button',{name:'Work',exact:true}).click();
+ await expect(page.getByRole('heading',{name:'Your work.'})).toBeVisible();
+ await page.getByLabel('Filter Work').selectOption('task');
+ await expect(page.getByText('No matching Work in the loaded results.')).toBeVisible();
+ await page.getByLabel('Filter Work').selectOption('session');
+ await page.locator('.ec-searchresult').filter({hasText:'Listed Work'}).click();
+ await expect(page.getByRole('heading',{name:'Listed Work'})).toBeVisible();
 });
