@@ -1,3 +1,4 @@
+import {telegramConnection} from './connections.js';
 import {workUsage} from './work-usage.js';
 import {workCounts} from './work-counts.js';
 import {liveWork} from './work-live.js';
@@ -45,6 +46,8 @@ export class DesktopBridge {
     this.server = new StdioControlServer({ ...options, events: ['work.changed', 'activity.appended', 'attention.changed', 'control.ready', 'service.warning', 'service.shutdown'], handlers: {
       ...Object.fromEntries(['tasks.create','sessions.setModel', 'tasks.setModel', 'approvals.resolve', 'tasks.pause', 'tasks.resume', 'tasks.cancel', 'tasks.retry', 'tasks.guide', 'sessions.start', 'sessions.resume', 'sessions.send', 'sessions.cancelTurn', 'operations.inspect'].map((method) =>
         [method, async (request: SessionMutationRequest, signal: AbortSignal) => ({ result: await sessionControl(this.options, request, signal) })])),
+      'connections.list':async(request,signal)=>{if(request.method!=='connections.list')throw new ControlProtocolError('-32601');if(request.params.cursor)throw new ControlProtocolError('-32007');return{result:{items:[await telegramConnection(this.options,signal)],nextCursor:null}};},
+      'connections.get':async(request,signal)=>{if(request.method!=='connections.get'||request.params.connectionId!=='telegram')throw new ControlProtocolError('-32003');return{result:await telegramConnection(this.options,signal)};},
       'models.verifyDraft':async(request,signal)=>{if(request.method!=='models.verifyDraft')throw new ControlProtocolError('-32601');return {result:await this.modelSetup.verifyDraft(request.params,signal,this.verifier)};},
       'models.reviewConfigured':async(request)=>{if(request.method!=='models.reviewConfigured')throw new ControlProtocolError('-32601');return {result:await this.modelSetup.reviewConfigured(request.params)};},
       'models.validateRoute':request=>{if(request.method!=='models.validateRoute')throw new ControlProtocolError('-32601');validateCandidateRequest({windowId:'validation',generation:1,route:request.params.route,spendApproved:true,...(request.params.route.authMethod==='none'?{}:{candidateId:'validation'})});return {result:{valid:true}};},

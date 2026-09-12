@@ -55,7 +55,8 @@ const model: Check = (v) => modelShape(v) && isRecord(v) && (!v.runnable ||
 const provider = shape({ id, label: text(240, 1), authMethods: unique(choice(["api_key", "oauth", "none"]), 3, 1), state: choice(["ready", "unconfigured", "repair_required", "unknown"]) }, {health:choice(ROUTE_HEALTH_STATES),metadata:shape({configurable:boolean,runnable:boolean,catalogOnly:boolean,apiMode:text(80,1),defaultEndpoint:nullable(text(2048,1))})});
 const connection = shape({ id, profileId: id, channel: choice(["telegram", "discord", "email", "whatsapp"]),
   configurationState: choice(["configured", "unconfigured", "repair_required"]), runtimeState: choice(["running", "stopped", "disconnected", "unknown"]),
-  authorizationState: choice(["denied", "configured", "pairing_required", "unknown"]), summary: text(2_048) });
+  authorizationState: choice(["denied", "configured", "pairing_required", "unknown"]), summary: text(2_048) }, {
+ telegram:shape({status:choice(["disabled","credential_missing","authorization_missing","pairing_pending","ready"]),allowedUsers:integer(0,1000),allowedChats:integer(0,1000),pairingExpiresAt:nullable(integer()),polling:choice(["unknown","starting","healthy","degraded","stopped"]),observedAt:nullable(integer()),lastVerifiedAt:nullable(integer())}) });
 const page = (check: Check): Check => shape({ items: array(check), nextCursor: nullable(cursorToken) });
 const pageParams = { limit: integer(1, 100) };
 const optionalPage = { cursor: cursorToken };
