@@ -8,6 +8,7 @@ export type GlobalStatePaths = {
   homeDir: string;
   stateRoot: string;
   profilesRoot: string;
+  worktreesRoot: string;
   activeProfilePath: string;
   trustJsonPath: string;
   workspaceApprovalsPath: string;
@@ -52,6 +53,7 @@ export function resolveGlobalStateHome(options?: { homeDir?: string }): GlobalSt
     homeDir,
     stateRoot,
     profilesRoot: join(stateRoot, "profiles"),
+    worktreesRoot: join(homeDir, ".estacoda-worktrees"),
     activeProfilePath: join(stateRoot, "active-profile.json"),
     trustJsonPath: join(stateRoot, "trust.json"),
     workspaceApprovalsPath: join(stateRoot, "workspace-approvals.json"),

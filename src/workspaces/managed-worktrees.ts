@@ -1,8 +1,8 @@
 import {randomUUID} from 'node:crypto';
 import {lstatSync, mkdirSync, realpathSync} from 'node:fs';
-import {join} from 'node:path';
+import {join,dirname,basename} from 'node:path';
 import type {ExecutionTargetBinding, ManagedGitWorktreeTarget} from '../contracts/workspace.js';
-import {resolveProfileStateHome} from '../config/profile-home.js';
+import {resolveProfileStateHome,resolveGlobalStateHome} from '../config/profile-home.js';
 import {WorkspaceTrustStore} from '../security/workspace-trust-store.js';
 import {ExecutionTargetStore, targetBinding} from './execution-target.js';
 import {resolveWorkspaceDirectory} from './workspace-registry.js';
@@ -25,7 +25,10 @@ export class ManagedWorktrees extends ExecutionTargetStore {
     const profile=resolveProfileStateHome(this.input).profileRoot;
     stamp(realpathSync(profile));
     if(lstatSync(profile).isSymbolicLink())throw new Error('Profile root must not be a symlink.');
-    const root=join(realpathSync(profile),'worktrees');
+    const paths=resolveGlobalStateHome(this.input);
+    const parent=join(realpathSync(dirname(paths.worktreesRoot)),basename(paths.worktreesRoot));
+    try{mkdirSync(parent,{mode:0o700});}catch(error){if((error as NodeJS.ErrnoException).code!=='EEXIST')throw error;}stamp(parent);
+    const root=join(parent,this.profileId);
     try{mkdirSync(root,{mode:0o700});}catch(error){if((error as NodeJS.ErrnoException).code!=='EEXIST')throw error;}
     stamp(root);return root;
   }

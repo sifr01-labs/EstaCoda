@@ -1,5 +1,7 @@
-import { mkdir, readFile, realpath, writeFile } from "node:fs/promises";
+import { mkdir, readFile, realpath, open, rename, rm } from "node:fs/promises";
 import { dirname, join, relative, resolve } from "node:path";
+import {randomUUID} from "node:crypto";
+import {withProfileWriteLock} from "../config/profile-write-lock.js";
 import { resolveHomeDir } from "../config/home-dir.js";
 
 export type WorkspaceTrustGrant = {
@@ -40,6 +42,10 @@ export class WorkspaceTrustStore {
   }
 
   async grant(workspaceRoot: string, options: { label?: string } = {}): Promise<WorkspaceTrustGrant> {
+    return withProfileWriteLock(dirname(this.#path), () => this.#grant(workspaceRoot, options));
+  }
+
+  async #grant(workspaceRoot: string, options: { label?: string }): Promise<WorkspaceTrustGrant> {
     const canonicalRoot = await canonicalizeExistingPath(workspaceRoot);
     const trustFile = await this.#read();
     const existing = trustFile.grants.find((grant) => grant.root === canonicalRoot);
@@ -62,6 +68,10 @@ export class WorkspaceTrustStore {
   }
 
   async revoke(workspaceRoot: string): Promise<boolean> {
+    return withProfileWriteLock(dirname(this.#path), () => this.#revoke(workspaceRoot));
+  }
+
+  async #revoke(workspaceRoot: string): Promise<boolean> {
     const canonicalRoot = await canonicalizeExistingPath(workspaceRoot);
     const trustFile = await this.#read();
     const before = trustFile.grants.length;
@@ -100,7 +110,13 @@ export class WorkspaceTrustStore {
 
   async #write(file: WorkspaceTrustFile): Promise<void> {
     await mkdir(dirname(this.#path), { recursive: true });
-    await writeFile(this.#path, `${JSON.stringify(file, null, 2)}\n`, "utf8");
+    const temporary=this.#path+"."+randomUUID()+".tmp";
+    try {
+      const handle=await open(temporary,"wx",0o600);
+      try { await handle.writeFile(`${JSON.stringify(file, null, 2)}\n`,"utf8");await handle.sync(); }
+      finally { await handle.close(); }
+      await rename(temporary,this.#path);
+    } finally { await rm(temporary,{force:true}); }
   }
 }
 

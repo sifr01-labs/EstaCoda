@@ -76,3 +76,19 @@ it("persists definition references for the final tool registry and stable author
     expect(references[0]!.authorityRevision).toBe(references[1]!.authorityRevision);
   } finally { db.close(); await rm(root, { recursive: true, force: true }); }
 });
+it('keeps runtime tools on the managed worktree and releases its guard after settlement',async()=>{
+ const {execFileSync}=await import('node:child_process');const {mkdir,writeFile,readFile}=await import('node:fs/promises');
+ const {ManagedWorktrees}=await import('../workspaces/managed-worktrees.js');const {targetBinding}=await import('../workspaces/execution-target.js');
+ const homeDir=await mkdtemp(join(tmpdir(),'runtime-worktree-')),source=join(homeDir,'repo');await mkdir(source);
+ execFileSync('git',['init','-q',source]);await writeFile(join(source,'file'),'source');execFileSync('git',['-C',source,'add','file']);execFileSync('git',['-C',source,'-c','user.name=Test','-c','user.email=test@example.invalid','commit','-qm','Initial']);
+ const store=new ManagedWorktrees({homeDir,profileId:'default'}),db=new SQLiteSessionDB({path:join(homeDir,'sessions.sqlite')});
+ let runtime:Awaited<ReturnType<typeof createRuntime>>|undefined;
+ try{
+  await new WorkspaceTrustStore({homeDir}).grant(source);const target=await store.create(await store.review(targetBinding(await store.acquireLocal(source))),true);
+  runtime=await createRuntime({tokens:resolveTokens('standard','dark','kemetBlue'),model:{provider:'unconfigured',id:'fixture',contextWindowTokens:8192,supportsTools:false,supportsVision:false,supportsStructuredOutput:false},providerRegistry:new ProviderRegistry(),homeDir,workspaceRoot:target.workspace.canonicalPath,profileId:'default',sessionId:'tree-runtime',sessionDb:db,closeSessionDbOnDispose:false,securityMode:'open'});
+  await runtime.executeTool!({tool:'terminal.run',toolInput:{command:'printf worktree > file'}});
+  expect(await readFile(join(target.workspace.canonicalPath,'file'),'utf8')).toBe('worktree');expect(await readFile(join(source,'file'),'utf8')).toBe('source');
+  expect((await db.getSession('tree-runtime'))!.executionTarget).toEqual(targetBinding(target));
+  expect(store.borrowers(target.id)).toBe(1);await runtime.dispose();runtime=undefined;expect(store.borrowers(target.id)).toBe(0);
+ }finally{await runtime?.dispose();db.close();store.close();await rm(homeDir,{recursive:true,force:true});}
+});

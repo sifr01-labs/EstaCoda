@@ -110,3 +110,16 @@ describe("WorkspaceTrustStore", () => {
     await expect(store.isTrusted(realRoot)).resolves.toBe(true);
   });
 });
+
+it('preserves unrelated trust changes from concurrent store instances',async()=>{
+ const homeDir=await mkdtemp(join(tmpdir(),'trust-concurrency-'));
+ try{
+  const roots=await Promise.all(['one','two','three'].map(async name=>{const root=join(homeDir,name);await mkdir(root);return root;}));
+  await Promise.all(roots.map(root=>new WorkspaceTrustStore({homeDir}).grant(root)));
+  expect((await new WorkspaceTrustStore({homeDir}).list()).length).toBe(3);
+  await Promise.all([new WorkspaceTrustStore({homeDir}).revoke(roots[0]!),new WorkspaceTrustStore({homeDir}).revoke(roots[1]!)]);
+  expect(await new WorkspaceTrustStore({homeDir}).isTrusted(roots[0]!)).toBe(false);
+  expect(await new WorkspaceTrustStore({homeDir}).isTrusted(roots[1]!)).toBe(false);
+  expect(await new WorkspaceTrustStore({homeDir}).isTrusted(roots[2]!)).toBe(true);
+ }finally{await rm(homeDir,{recursive:true,force:true});}
+});

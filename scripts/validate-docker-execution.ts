@@ -1,3 +1,4 @@
+import {validateDockerWorktree} from './docker-worktree-workflow.js';
 import { validateDockerRuntimeWorkflows } from "./docker-runtime-workflows.js";
 import assert from "node:assert/strict";
 import { mkdtemp, readFile, readdir, rm, symlink, writeFile } from "node:fs/promises";
@@ -59,6 +60,7 @@ async function command(lease: ExecutionLease, program: string, args: string[]) {
   return { code, stdout, stderr };
 }
 try {
+  await validateDockerWorktree(runtimeRoot,parent,client,policy);
   await writeFile(join(root, "example.txt"), "selected needle مرحبا\n");
   await writeFile(join(root, "example.ipynb"), JSON.stringify({ cells: [{ id: "one", cell_type: "markdown", source: "old" }], metadata: {}, nbformat: 4, nbformat_minor: 5 }));
   await symlink("/etc/shadow", join(root, "escape"));
