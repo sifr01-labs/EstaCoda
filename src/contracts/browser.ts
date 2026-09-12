@@ -556,7 +556,8 @@ export type BrowserBackend = {
   tabs?(input?: BrowserActionInput): Promise<BrowserTabList>;
   switchTab?(input: BrowserSwitchTabInput): Promise<BrowserSwitchTabResult>;
   cdp?(input: BrowserActionInput): Promise<unknown>;
-  screenshot?(input?: BrowserActionInput): Promise<BrowserScreenshotResult>;
+  /** Observation-only captures must not replace or grant agent visual input leases. */
+  screenshot?(input?: BrowserActionInput & { observationOnly?: boolean }): Promise<BrowserScreenshotResult>;
   /** Captures only a current, identity-bound page target into a runtime-selected constrained directory. */
   download?(input: BrowserDownloadInput): Promise<BrowserDownloadCaptureResult>;
   /** Resolves a current semantic target to runtime-observed destination metadata. */

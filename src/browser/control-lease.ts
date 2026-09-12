@@ -3,11 +3,22 @@ export type BrowserControlLease={id:string;generation:number};
 /** Runtime-owned, monotonic lease. Expiry fences input but NEVER resumes the agent. */
 export class BrowserControlOwner {
  readonly #instance=randomUUID();#generation=0;#phase:'agent'|'human'|'paused'|'closed'='agent';
+ #inspection?:Promise<void>;
  #lease?:BrowserControlLease;#holder?:string;#deadline=0;#busy=0;#sequence=0;
  constructor(readonly now:()=>number=()=>performance.now(),readonly ttlMs=10_000){}
  #expire(){if(this.#phase==='human'&&this.now()>=this.#deadline){this.#phase='paused';this.#lease=undefined;this.#holder=undefined;this.#generation++;}}
+ get state():'agent'|'human'|'paused'{this.#expire();if(this.#phase==='closed')throw new Error('Browser owner closed.');return this.#phase;}
  agentSync<T>(operation:()=>T):T{this.#expire();if(this.#phase!=='agent')throw new Error('Browser agent actions paused for human control.');this.#busy++;try{return operation();}finally{this.#busy--;}}
- async agent<T>(operation:()=>Promise<T>):Promise<T>{this.#expire();if(this.#phase!=='agent')throw new Error('Browser agent actions paused for human control.');this.#busy++;try{return await operation();}finally{this.#busy--;}}
+ async agent<T>(operation:()=>Promise<T>):Promise<T>{while(this.#inspection)await this.#inspection;this.#expire();if(this.#phase!=='agent')throw new Error('Browser agent actions paused for human control.');this.#busy++;try{return await operation();}finally{this.#busy--;}}
+ /** Read the existing backend at a quiescent boundary without transferring ownership.
+  * Agent calls arriving during a read wait; reads never overlap input or resurrect a paused owner. */
+ async inspect<T>(operation:()=>Promise<T>):Promise<T>{
+  this.#expire();if(this.#phase==='closed'||this.#phase==='human'||this.#busy)throw new Error('Browser observation is busy. Try again.');
+  const generation=this.#generation;let settle!:()=>void;
+  this.#inspection=new Promise<void>(resolve=>{settle=resolve;});this.#busy++;
+  try{const result=await operation();if(this.#generation!==generation)throw new Error('Browser owner changed during observation.');return result;}
+  finally{this.#busy--;this.#inspection=undefined;settle();}
+ }
  acquire(holder:string):BrowserControlLease{
   this.#expire();if(this.#phase==='closed'||this.#busy||this.#phase==='human')throw new Error('Browser control is busy or already owned.');
   this.#phase='human';this.#holder=holder;this.#sequence=0;this.#deadline=this.now()+this.ttlMs;

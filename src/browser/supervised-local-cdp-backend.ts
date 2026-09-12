@@ -1288,10 +1288,12 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
         tabRef: snapshot.tab?.ref,
         identity: snapshot.identity
       });
-      for (const [id, lease] of visualLeases) {
-        if (lease.sessionId === session.key) visualLeases.delete(id);
+      if (!input.observationOnly) {
+        for (const [id, lease] of visualLeases) {
+          if (lease.sessionId === session.key) visualLeases.delete(id);
+        }
+        visualLeases.set(captured.lease.screenshotId, captured.lease);
       }
-      visualLeases.set(captured.lease.screenshotId, captured.lease);
       return captured.screenshot;
     },
     download: async (input: BrowserDownloadInput): Promise<BrowserDownloadCaptureResult> => {
@@ -1546,8 +1548,10 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
         }
       }
       const sessions=[];let remaining=16,truncated=sessionStacks.size>8;
-      for(const id of [...sessionStacks.keys()].slice(0,8)){
-        const all=await listManagedTabs(id);truncated ||= all.length>remaining;const candidates=all.slice(0,remaining);remaining-=candidates.length;
+      // Keep the selected session and its controlled tab visible within the shared budget.
+      const ordered=[...sessionStacks.keys()].sort((a,b)=>Number(b===sessionId)-Number(a===sessionId));
+      for(const id of ordered.slice(0,8)){
+        const all=(await listManagedTabs(id)).sort((a,b)=>Number(b.controlled)-Number(a.controlled));truncated ||= all.length>remaining;const candidates=all.slice(0,remaining);remaining-=candidates.length;
         const tabs=[];for(const tab of candidates)if(await tabIsAllowed(tab))tabs.push(toBrowserTab(tab));
         sessions.push({id,tabs:tabs.map(tab=>({ref:tab.ref,url:tab.url.slice(0,2048),title:redactSensitiveText(tab.title??'Browser').slice(0,160),controlled:tab.controlled,closable:tab.ref!=='@t1'}))});
       }

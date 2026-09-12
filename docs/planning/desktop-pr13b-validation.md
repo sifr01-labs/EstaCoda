@@ -64,3 +64,7 @@ Passed:
 Reproduce the live local fixture with `node --import tsx apps/desktop/tests/native-browser-workspace.mts`. It uses the installed Playwright Chromium; it does not download a browser or require an external account. Reproduce packaging with `pnpm run desktop:package` and `node apps/desktop/tests/package-check.mjs` on macOS arm64.
 
 The remaining acceptance gate is PR14B's complete reviewed browser setup flow. External websites, CAPTCHA/provider-specific authentication, cloud takeover, Windows/Linux packaging, and long-running reliability were not established by this local fixture or package smoke. Existing trust, profile isolation and approval policies remain required.
+
+## Browser review follow-up
+
+[The focused browser correction](desktop-browser-review-fixes.md) adds current observation without takeover, restores paused-owner reacquisition, queues bounded typing, and prioritizes selected tabs. It supersedes the recorded-only viewing and one-input-at-a-time UI limitations described above; recorded inspection remains available.

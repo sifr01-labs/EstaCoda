@@ -91,3 +91,39 @@ it.each(['javascript:alert(1)','file:///etc/passwd','http://localhost/','http://
  const lease=(await control.execute({...base,action:'acquire'})).lease!;
  await expect(control.execute({...base,lease,sequence:1,action:'workspace',operation:{kind:'navigate',url}})).rejects.toThrow();expect(backend.workspace).not.toHaveBeenCalled();await expect(owner.agent(async()=>1)).rejects.toThrow('paused');
 });
+it('recovers the production Desktop inventory-before-acquire path after abandonment and failure',async()=>{
+ const {EventEmitter}=await import('node:events');
+ // Load Main without pulling desktop build files into the core compiler's source graph.
+ const mainPath=new URL('../../apps/desktop/src/main/browser-controls.ts',import.meta.url).href;
+ const {DesktopBrowserControls}=await import(mainPath);
+ let now=0;const owner=new BrowserControlOwner(()=>now,100);
+ const backend={...createMockBrowserBackend(),kind:'local-cdp' as const,workspace:vi.fn(async()=>({supported:true,reason:null,truncated:false,sessions:[{id:'b',tabs:[]}]})),preflightAction:vi.fn(),click:vi.fn(),press:vi.fn()};
+ const control=new HumanBrowserControl(backend,owner,async()=>{});
+ const connection=Object.assign(new EventEmitter(),{state:{status:'ready',generation:1},browserRequest:({command}:{command:Parameters<typeof control.execute>[0]})=>control.execute(command)});
+ const main=new DesktopBrowserControls(connection,async()=>true);
+ try{
+  const first=await main.open('session:s');main.abandon(first.id);now=101;
+  expect((await control.execute({action:'inventory',browserId:'b',holder:'read'})).state).toBe('paused');
+  const next=await main.open('session:s');await main.release(next.id);expect(await owner.agent(async()=>true)).toBe(true);
+  const failing=await main.open('session:s');await expect(main.workspace(failing.id,{kind:'navigate',url:'file:///blocked'})).rejects.toThrow();
+  const recovered=await main.open('session:s');await main.release(recovered.id);expect(await owner.agent(async()=>true)).toBe(true);
+ }finally{main.dispose();}
+});
+it('watches current owned sessions without a lease, input authority, navigation or retained output',async()=>{
+ const png=await sharp({create:{width:30,height:20,channels:3,background:'#147dab'}}).png().toBuffer();
+ const identity={documentEpoch:1,actionRevision:1,observationId:1},url='https://93.184.216.34/';
+ const backend={...createMockBrowserBackend(),kind:'local-cdp' as const,workspace:vi.fn(async()=>({supported:true,reason:null,truncated:false,sessions:[{id:'b',tabs:[]}]})),
+ snapshot:vi.fn(async():Promise<import('../contracts/browser.js').BrowserSnapshot>=>({sessionId:'b',identity,url,observedAt:'now',tab:{ref:'@t1',url,controlled:true}})),
+ preflightAction:vi.fn(async()=>({action:'press' as const,sessionId:'b',identity,url,observedAt:'now',tabRef:'@t1'})),click:vi.fn(),press:vi.fn(),navigate:vi.fn(),
+ screenshot:vi.fn(async()=>({mimeType:'image/png' as const,base64:png.toString('base64'),observation:{screenshotId:'shot',sessionId:'b',tabRef:'@t1',identity,captureScope:'viewport' as const,sanitized:true as const,maskedRegionCount:0,viewport:{cssWidth:30,cssHeight:20,pixelWidth:30,pixelHeight:20}}}))};
+ const owner=new BrowserControlOwner(),validate=vi.fn(async()=>{}),control=new HumanBrowserControl(backend,owner,validate),base={holder:'viewer',browserId:'b'};
+ const watched=await control.execute({...base,action:'watch'});expect(watched).toMatchObject({lease:null,state:'agent',frame:{url}});expect(await owner.agent(async()=>true)).toBe(true);
+ await expect(control.execute({...base,browserId:'foreign',action:'watch'})).rejects.toThrow('not owned');
+ const lease=(await control.execute({...base,action:'acquire'})).lease!;
+ await expect(control.execute({...base,action:'watch'})).rejects.toThrow('busy');
+ await expect(control.execute({...base,lease,action:'input',sequence:1,input:{kind:'key',frameId:watched.frame!.frameId,key:'a'}})).rejects.toThrow('stale');
+ expect(backend.press).not.toHaveBeenCalled();expect(backend.click).not.toHaveBeenCalled();expect(backend.navigate).not.toHaveBeenCalled();
+ backend.snapshot.mockImplementation(async()=>({sessionId:'b',identity,url,observedAt:'now',tab:{ref:'@t1',url,controlled:true},sensitiveInputActive:true}));
+ await expect(control.execute({...base,action:'watch'})).rejects.toThrow('Protected');expect(owner.state).toBe('paused');
+ validate.mockRejectedValue(new Error('Trust revoked'));await expect(control.execute({...base,action:'watch'})).rejects.toThrow('Trust revoked');
+});

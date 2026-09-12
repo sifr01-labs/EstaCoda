@@ -40,3 +40,12 @@ it('collects sign-in only in the protected Main callback and returns metadata',a
  expect(secretPipe.mock.calls[0]![0].command).toMatchObject({entryId:'entry',value:'fixture-secret',sequence:2});expect(JSON.stringify(request.mock.calls)).not.toContain('fixture-secret');
  }finally{controls.dispose();}
 });
+
+it('watches without consent or a lease and discards late frames after invalidation',async()=>{
+ const {connection,request}=fixture(),confirm=vi.fn(async()=>true),controls=new DesktopBrowserControls(connection,confirm);
+ try{
+  request.mockResolvedValueOnce({lease:null,state:'agent',frame:{frameId:'watch'}} as any);
+  expect(await controls.watch('session:s','b')).toMatchObject({frameId:'watch'});expect(confirm).not.toHaveBeenCalled();expect(request.mock.calls[0]![0].command.action).toBe('watch');
+  let finish!:(value:any)=>void;request.mockImplementationOnce(()=>new Promise(resolve=>finish=resolve));const pending=controls.watch('session:s','b');connection.emit('invalidate');finish({frame:{frameId:'late'}});await expect(pending).rejects.toThrow('changed');
+ }finally{controls.dispose();}
+});

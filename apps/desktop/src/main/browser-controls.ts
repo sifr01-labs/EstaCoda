@@ -32,6 +32,12 @@ export class DesktopBrowserControls{
   const result=await this.connection.browserRequest({workId,command:{action:'inventory',holder:randomUUID(),browserId:'inventory'}});
   this.#assert(epoch);if(!result.workspace)throw new Error('Browser inventory unavailable.');return result.workspace;
  }
+ async watch(workId:string,browserId:string):Promise<HumanBrowserFrame>{
+  const epoch=this.#epoch;this.#assert(epoch);
+  if(this.#entry||this.#opening)throw new Error('Use the controlled browser view during takeover.');
+  const result=await this.connection.browserRequest({workId,command:{action:'watch',holder:randomUUID(),browserId}});
+  this.#assert(epoch);if(this.#entry||this.#opening||!result.frame)throw new Error('Browser observation changed.');return result.frame;
+ }
  async workspace(id:string,operation:BrowserWorkspaceAction):Promise<BrowserWorkspaceState>{
   const entry=this.#active(id);if(entry.busy)throw new Error('Browser input is settling.');entry.busy=true;
   try{

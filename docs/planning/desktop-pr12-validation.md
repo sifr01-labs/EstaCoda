@@ -32,3 +32,7 @@ Checks on 2026-09-12:
 - Final whitespace/diff checks passed. No dependencies or lockfiles changed.
 
 The checkout contains pre-existing untracked duplicate TypeScript files, so broad validation used an isolated copy of tracked sources; those unrelated files were preserved. The full core suite used two workers to avoid previously observed process-startup contention. Tests use temporary profiles, local browser fixtures and a scripted screenshot backend. This PR did not rebuild or rerun the packaged native application, or exercise a live model provider or cloud browser.
+
+## Browser review follow-up
+
+[The focused browser correction](desktop-browser-review-fixes.md) adds current observation without takeover, restores paused-owner reacquisition, queues bounded typing, and prioritizes selected tabs. It supersedes the recorded-only viewing and one-input-at-a-time UI limitations described above; recorded inspection remains available.

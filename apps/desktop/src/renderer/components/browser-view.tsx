@@ -1,3 +1,4 @@
+import {BrowserWatch} from './browser-watch.js';
 import {BrowserTakeover} from './browser-takeover.js';
 import {useEffect,useRef,useState} from 'react';
 import type {BrowserViewState,BrowserViewSnapshot,ArtifactPreview,ArtifactReference,WorkProjection} from '@estacoda/control-protocol';
@@ -16,7 +17,7 @@ export function BrowserView({api,work,close}:{api:DesktopApi;work:WorkProjection
  const open=async(item:BrowserViewState)=>{const revision=++epoch.current;setSelected(item);setSnapshot(null);setOutput(null);setError('');try{const value=await api.browser!.snapshot(work.id,item.reference);if(revision===epoch.current){setSnapshot(value);setSelected(value.state);}}catch{if(revision===epoch.current)setError('Browser observation changed. Refresh the list.');}};
  const artifact=async(reference:ArtifactReference)=>{const revision=++epoch.current;setOutput(null);try{const value=await api.artifacts?.open(reference);if(revision===epoch.current&&value)setOutput(value);}catch{if(revision===epoch.current)setError('Retained browser output unavailable.');}};
  return <dialog ref={dialog} className="ec-filedialog ec-browserdialog" aria-labelledby="ec-browser-title" onCancel={close}>
-  <header><h2 id="ec-browser-title">Browser</h2><Badge>{controlling?'You control the browser':'Recorded view'}</Badge><Button className="ec-ghost ec-iconbutton" icon="x" aria-label="Close browser view" onClick={close}/></header>
+  <header><h2 id="ec-browser-title">Browser</h2><Badge>{controlling?'You control the browser':api.browserControl?.watch?'Browser views':'Recorded view'}</Badge><Button className="ec-ghost ec-iconbutton" icon="x" aria-label="Close browser view" onClick={close}/></header>
   <p className="ec-footnote">Latest recorded observations from this Work. Refresh checks for new observations; it does not navigate, capture a page, or take control.</p>
   <Button disabled={!ready||controlling} icon="refresh-cw" onClick={()=>setRefresh(value=>value+1)}>Refresh browser view</Button>
   {error&&<p role="alert">{error}</p>}
@@ -26,6 +27,7 @@ export function BrowserView({api,work,close}:{api:DesktopApi;work:WorkProjection
    {items?.map(item=><button key={item.reference.browserId} disabled={!ready||controlling} aria-current={selected?.reference.browserId===item.reference.browserId?'true':undefined} onClick={()=>void open(item)}><Icon name="globe"/><span dir="auto">{item.title??(item.state==='blocked'?'Observation withheld':item.reference.browserId)}</span></button>)}
    {truncated&&<p className="ec-footnote">Showing up to 8 browser sessions from the latest 64 browser events.</p>}
   </nav><section aria-label="Browser observation">
+   {api.browserControl?.watch&&ready&&<BrowserWatch api={api.browserControl} workId={work.id} controlling={controlling}/>}
    {api.browserControl?.workspace&&ready&&<BrowserTakeover api={api.browserControl} workId={work.id} active={setControlling}/>}
    {!selected?<p className="ec-footnote">Select a browser session to inspect its recorded state.</p>:<>
     <h3 dir="auto">{selected.title??'Browser observation'}</h3>

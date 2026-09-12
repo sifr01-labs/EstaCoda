@@ -5,12 +5,32 @@ import {Button,Badge} from './primitives.js';
 export function BrowserTakeover({api,workId,reference,active}:{api:NonNullable<DesktopApi['browserControl']>;workId:string;reference?:BrowserViewReference;active:(value:boolean)=>void}){
  const[submitRef,setSubmitRef]=useState(''),[secretKind,setSecretKind]=useState<'password'|'one-time-code'>('password');
  const[workspace,setWorkspace]=useState<BrowserWorkspaceState>(),[address,setAddress]=useState('');
- const[id,setId]=useState<string>(),[frame,setFrame]=useState<HumanBrowserFrame>(),[busy,setBusy]=useState(false),[error,setError]=useState('');const handle=useRef<string|undefined>(undefined),epoch=useRef(0);
- useEffect(()=>{let live=true;const revision=epoch.current;if(api.inventory)void api.inventory(workId).then(value=>{if(live&&revision===epoch.current)setWorkspace(value);}).catch(()=>{if(live&&revision===epoch.current)setWorkspace({supported:false,reason:'No active supervised browser owner. Start work with a configured local browser; recorded views remain available.',sessions:[],truncated:false});});return()=>{live=false;};},[api,workId]);
- useEffect(()=>()=>{epoch.current++;if(handle.current)void api.abandon(handle.current).catch(()=>{});active(false);},[api,active]);
- const failure=()=>{if(handle.current)void api.abandon(handle.current).catch(()=>{});handle.current=undefined;setId(undefined);setFrame(undefined);active(false);setError('Control unavailable or uncertain. Browser execution remains paused if takeover began. Reacquire control to inspect or explicitly return it to the agent.');};
+ const[id,setId]=useState<string>(),[frame,setFrame]=useState<HumanBrowserFrame>(),[busy,setBusy]=useState(false),[error,setError]=useState('');const queuedKeys=useRef<Array<{key:string;context:string}>>([]),inputRunning=useRef(false);
+ const handle=useRef<string|undefined>(undefined),epoch=useRef(0);
+ useEffect(()=>{let live=true;const revision=epoch.current;if(api.inventory)void api.inventory(workId).then(value=>{if(live&&revision===epoch.current)setWorkspace(value);}).catch(()=>{if(live&&revision===epoch.current)setError('Browser inventory is busy or unavailable. Try Take control again once browser work settles; an abandoned lease may need up to ten seconds to expire.');});return()=>{live=false;};},[api,workId]);
+ useEffect(()=>()=>{epoch.current++;queuedKeys.current=[];if(handle.current)void api.abandon(handle.current).catch(()=>{});active(false);},[api,active]);
+ const failure=()=>{queuedKeys.current=[];if(handle.current)void api.abandon(handle.current).catch(()=>{});handle.current=undefined;setId(undefined);setFrame(undefined);active(false);setError('Control unavailable or uncertain. Browser execution remains paused if takeover began. Reacquire control to inspect or explicitly return it to the agent.');};
  const open=async()=>{const revision=++epoch.current;setBusy(true);setError('');try{const value=await (reference?api.open(workId,reference):api.openWorkspace!(workId));if(revision!==epoch.current){void api.abandon(value.id);return;}handle.current=value.id;setId(value.id);active(true);if(api.workspace){const state=await api.workspace(value.id,{kind:'list'});if(revision===epoch.current)setWorkspace(state);}}catch{if(revision===epoch.current)failure();}finally{if(revision===epoch.current)setBusy(false);}};
- const refresh=async(input?:HumanBrowserInput)=>{if(!id||busy)return;const revision=++epoch.current;setBusy(true);setError('');try{const value=await api.frame(id,input);if(revision===epoch.current){setFrame(value);setSubmitRef('');setAddress(value.url);}}catch{if(revision===epoch.current)failure();}finally{if(revision===epoch.current)setBusy(false);}};
+ const refresh=async(input?:HumanBrowserInput)=>{
+  if(!id)return;
+  if(inputRunning.current&&input?.kind==='key'){
+   if(!frame?.inputContextId||queuedKeys.current.length>=64){setError('Typing queue is full or the field cannot be verified. Wait for the browser, then re-enter the remaining text.');return;}
+   queuedKeys.current.push({key:input.key,context:frame.inputContextId});return;
+  }
+  if(busy||inputRunning.current){if(input)setError('Browser is busy. This input was not sent; wait and try again.');return;}
+  const revision=++epoch.current;inputRunning.current=true;setBusy(true);setError('');
+  try{
+   let next=input;
+   while(true){
+    const value=await api.frame(id,next);if(revision!==epoch.current)return;
+    setFrame(value);setSubmitRef('');setAddress(value.url);
+    const queued=queuedKeys.current.shift();if(!queued)break;
+    if(value.protectedFieldFocused||!value.inputContextId||queued.context!==value.inputContextId){queuedKeys.current=[];setError('The page or focused field changed. Remaining queued text was not sent; inspect the browser before typing again.');break;}
+    next={kind:'key',frameId:value.frameId,key:queued.key};
+   }
+  }catch{if(revision===epoch.current)failure();}
+  finally{queuedKeys.current=[];inputRunning.current=false;if(revision===epoch.current)setBusy(false);}
+ };
  const release=async()=>{if(!id||busy)return;const revision=++epoch.current;setBusy(true);try{await api.release(id);if(revision===epoch.current){handle.current=undefined;setId(undefined);setFrame(undefined);active(false);setError('Control returned to the agent.');}}catch{if(revision===epoch.current)failure();}finally{if(revision===epoch.current)setBusy(false);}};
  const operate=async(operation:BrowserWorkspaceAction)=>{if(!id||busy||!api.workspace)return;const revision=++epoch.current;setBusy(true);setFrame(undefined);setError('');try{const state=await api.workspace(id,operation);if(revision===epoch.current){setWorkspace(state);setAddress(state.sessions.find(s=>s.id===state.selectedSessionId)?.tabs.find(t=>t.controlled)?.url??'');}}catch{if(revision===epoch.current)failure();}finally{if(revision===epoch.current)setBusy(false);}};
  const signIn=async()=>{if(!id||!frame||busy||!submitRef||!api.signIn)return;const revision=++epoch.current;setBusy(true);setError('');try{const result=await api.signIn(id,frame.frameId,submitRef,secretKind);if(revision===epoch.current){setFrame(undefined);setError(result.submitted?'Entry submitted. Refresh the live view to check the result.':'Protected entry cancelled. Refresh the live view to continue.');}}catch{if(revision===epoch.current)failure();}finally{if(revision===epoch.current)setBusy(false);}};

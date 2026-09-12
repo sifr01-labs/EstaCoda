@@ -346,3 +346,5 @@
 .ec-browserbar input,.ec-browserbar select { color:var(--ec-text); background:var(--ec-panel); border:1px solid var(--ec-line); border-radius:8px; padding:8px; max-width:100%; }
 .ec-browserbar button[aria-pressed="true"] { color:var(--ec-accent); }
 #ec-branded-workspace .ec-browserbar input { min-width:min(240px,100%); flex:1 1 240px; box-sizing:border-box; }
+
+.ec-browserwatch select{max-width:100%}

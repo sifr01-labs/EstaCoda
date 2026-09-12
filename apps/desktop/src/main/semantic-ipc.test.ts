@@ -84,3 +84,8 @@ it('exposes semantic workspace and protected-entry metadata without accepting se
  for(const extra of [{value:'canary'},{entryId:'forged'},{lease:{id:'l',generation:1}},{profileId:'other'},{method:'Runtime.evaluate'}])expect(()=>validateSemanticPayload('browserControlSignIn',{id:'handle',frameId:'frame',submitRef:'@e3',kind:'password',...extra})).toThrow();
  for(const operation of [{kind:'navigate',url:'https://example.com',script:'alert(1)'},{kind:'cdp'},{kind:'signin-deliver',value:'canary'},{kind:'switch-tab',tabRef:'raw-cdp-target'}])expect(()=>validateSemanticPayload('browserControlWorkspace',{id:'handle',operation})).toThrow();
 });
+
+it('accepts only scoped observation references without control authority',()=>{
+ expect(()=>validateSemanticPayload('browserControlWatch',{workId:'session:s',browserId:'b'})).not.toThrow();
+ for(const extra of [{lease:{id:'l',generation:1}},{value:'secret'},{url:'https://example.com'},{profileId:'other'}])expect(()=>validateSemanticPayload('browserControlWatch',{workId:'session:s',browserId:'b',...extra})).toThrow();
+});

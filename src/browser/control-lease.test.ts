@@ -22,3 +22,15 @@ it('never resurrects an owner closed while human input was in flight',async()=>{
  const owner=new BrowserControlOwner(),lease=owner.acquire('w');let finish!:()=>void;
  const pending=owner.human('w',lease,1,()=>new Promise<void>(resolve=>finish=resolve));owner.close();finish();await expect(pending).rejects.toThrow('stale');expect(()=>owner.acquire('w')).toThrow('busy');await expect(owner.agent(async()=>1)).rejects.toThrow('paused');
 });
+it('allows bounded inspection of paused owners without resuming them and serializes agent arrivals',async()=>{
+ let now=0,finish!:()=>void;const owner=new BrowserControlOwner(()=>now,100);
+ owner.acquire('old');now=101;
+ await owner.inspect(async()=>true);expect(owner.state).toBe('paused');await expect(owner.agent(async()=>1)).rejects.toThrow('paused');
+ const recovered=owner.acquire('next');owner.release('next',recovered);
+ const read=owner.inspect(()=>new Promise<void>(resolve=>finish=resolve));let ran=false;
+ const agent=owner.agent(async()=>{ran=true;});await Promise.resolve();expect(ran).toBe(false);
+ expect(()=>owner.acquire('other')).toThrow('busy');await expect(owner.inspect(async()=>1)).rejects.toThrow('busy');
+ finish();await read;await agent;expect(ran).toBe(true);
+ const lease=owner.acquire('human');await expect(owner.inspect(async()=>1)).rejects.toThrow('busy');owner.release('human',lease);
+ const late=owner.inspect(()=>new Promise<void>(resolve=>finish=resolve));owner.close();finish();await expect(late).rejects.toThrow('changed');
+});

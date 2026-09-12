@@ -2198,6 +2198,11 @@ describe("supervised local CDP backend", () => {
     await backend.navigate({ url: "https://example.com/start", sessionId: "session-visual-target" });
     const page = sockets.pageSocket()!;
     const first = await backend.screenshot?.({ sessionId: "session-visual-target" });
+    const watched = await backend.screenshot?.({ sessionId: "session-visual-target", observationOnly: true });
+    await expect(backend.preflightAction?.("click", {
+      sessionId: "session-visual-target",
+      visualTarget: { screenshotId: watched!.observation!.screenshotId, x: 8, y: 8 }
+    })).rejects.toThrow(/expired/u);
 
     await expect(backend.preflightAction?.("click", {
       sessionId: "session-visual-target",
@@ -3145,5 +3150,15 @@ it('checks leased history destinations and expiry before native navigation',asyn
   stale=true;await expect(backend.workspace!({sessionId:'b',action:{kind:'navigate',url:'https://example.com'},assertHumanControl})).rejects.toThrow('stale');
   expect(socket.sent.filter(m=>m.method==='Page.navigate')).toHaveLength(1);
   expect(socket.sent.filter(m=>m.method==='Page.navigateToHistoryEntry')).toHaveLength(2);
+ }finally{await backend.close!();}
+});
+it('reserves bounded inventory for the selected session and controlled tab',async()=>{
+ const supervisor={send:vi.fn(async()=>({})),waitFor:vi.fn(async()=>undefined),getSnapshot:vi.fn(async()=>({sessionId:'s',url:'https://example.com',title:'Page',text:'Page',elements:[]})),consoleHistory:vi.fn(()=>[]),respondToDialog:vi.fn(async()=>undefined),close:vi.fn()};
+ const manager={acquire:vi.fn(async(key:string)=>({key,browserContextId:key,targetId:'target',tabRef:'@t20',pageWebSocketDebuggerUrl:'ws://target',supervisor,lastActiveAt:1,touch:vi.fn(),close:vi.fn(async()=>undefined)})),close:vi.fn(async()=>undefined),closeAll:vi.fn(async()=>undefined),has:vi.fn(()=>true),observeSnapshot:createSnapshotObserver(),listTabs:vi.fn(async()=>Array.from({length:20},(_,i)=>({browserContextId:'context',targetId:'target'+i,pageWebSocketDebuggerUrl:'ws://target',url:'https://example.com',title:'Tab '+i,ref:'@t'+(i+1),controlled:i===19})))};
+ const backend=createSupervisedLocalCdpBrowserBackend({cdpUrl:'http://127.0.0.1:9222',fetch:createFetch(),resolveHostname:()=>['93.184.216.34'],createTargetManager:()=>({createTarget:vi.fn(async()=>{throw new Error('unused');}),close:vi.fn(async()=>undefined)}),createSessionManager:()=>manager});
+ try{
+  await backend.navigate({sessionId:'first',url:'https://example.com'});await backend.navigate({sessionId:'selected',url:'https://example.com'});
+  const inventory=await backend.workspace!({sessionId:'selected',action:{kind:'list'},assertHumanControl:()=>{}});
+  expect(inventory.truncated).toBe(true);expect(inventory.sessions[0]!.id).toBe('selected');expect(inventory.sessions[0]!.tabs[0]).toMatchObject({ref:'@t20',controlled:true});expect(inventory.sessions.flatMap(s=>s.tabs)).toHaveLength(16);
  }finally{await backend.close!();}
 });

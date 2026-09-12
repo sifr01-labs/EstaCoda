@@ -17,7 +17,7 @@ await new Promise<void>(resolve=>server.listen(0,'127.0.0.1',resolve));
 const url='http://127.0.0.1:'+(server.address() as {port:number}).port+'/';
 const backend=createSupervisedLocalCdpBrowserBackend({autoLaunch:true,headless:true,chromeFlags:['--headless=new'],launchExecutable:chromium.executablePath(),securityConfig:{allowPrivateUrls:true}});
 const owner=new BrowserControlOwner(),control=new HumanBrowserControl(backend,owner,async()=>{},{allowPrivateUrls:true});
-let browserId='new',sequence=0;const holder='native-test',lease=(await control.execute({action:'acquire',browserId,holder})).lease!;
+let browserId='new',sequence=0;const holder='native-test';let lease=(await control.execute({action:'acquire',browserId,holder})).lease!;
 const renew=setInterval(()=>{try{owner.renew(holder,lease);}catch{}},2000);
 const action=async(operation:import('../../../src/contracts/desktop-control/browser-human.js').BrowserWorkspaceAction)=>{
  const result=await control.execute({action:'workspace',operation,browserId,holder,lease,sequence:++sequence});browserId=result.workspace!.selectedSessionId!;return result.workspace!;
@@ -30,6 +30,9 @@ try{
  const result=await control.execute({action:'signin-deliver',browserId,holder,lease,sequence:++sequence,entryId:prepared.entry!.id,value:'synthetic-browser-canary'});
  expect(JSON.stringify(result)).not.toContain('synthetic-browser-canary');expect(submissions).toBe(1);
  const signedIn=(await control.execute({action:'observe',browserId,holder,lease,sequence:++sequence})).frame!;expect(signedIn.title).toBe('Signed in');
+ await control.execute({action:'release',browserId,holder,lease});
+ const watched=await control.execute({action:'watch',browserId,holder});expect(watched.lease).toBeNull();expect(watched.frame!.title).toBe('Signed in');expect(await owner.agent(async()=>true)).toBe(true);
+ lease=(await control.execute({action:'acquire',browserId,holder})).lease!;sequence=0;
  const tabs=await action({kind:'new-tab',url});expect(tabs.sessions[0]!.tabs).toHaveLength(2);
  await action({kind:'close-tab',tabRef:tabs.sessions[0]!.tabs.find(tab=>tab.closable)!.ref});
  await action({kind:'navigate',url});await action({kind:'reload'});await action({kind:'back'});await action({kind:'forward'});

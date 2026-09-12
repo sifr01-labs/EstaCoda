@@ -36,3 +36,7 @@ Checks on 2026-09-12:
 - No dependencies, lockfiles or approved screenshot goldens changed. No packaged Electron application rebuild, real external website takeover, live provider or cloud-browser test was performed for this PR.
 
 Broad checks use an isolated tracked-source copy because this checkout contains pre-existing untracked duplicate TypeScript files. Concurrent planning/design-document edits are preserved and excluded from these commits. Initial validation caught a new test's Promise typing error and asynchronous React-cleanup assertion timing; both were corrected. The last complete core run uses a frozen source tree after an earlier run overlapped synchronization of the dispatch regression and implementation.
+
+## Browser review follow-up
+
+[The focused browser correction](desktop-browser-review-fixes.md) adds current observation without takeover, restores paused-owner reacquisition, queues bounded typing, and prioritizes selected tabs. It supersedes the recorded-only viewing and one-input-at-a-time UI limitations described above; recorded inspection remains available.

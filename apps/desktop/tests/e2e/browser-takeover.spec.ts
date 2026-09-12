@@ -4,8 +4,9 @@ async function mount(page:import('@playwright/test').Page,workspace=false,unsupp
  const React=(await import(react)).default,{createRoot}=(await import(dom)).default,{BrowserTakeover}=await import(path);
  const host=document.querySelector('#ec-branded-workspace .ec-window')!;host.innerHTML='<div class="ec-filedialog ec-browserdialog" id="takeover-test"></div>';
  const canvas=document.createElement('canvas');canvas.width=600;canvas.height=320;const ctx=canvas.getContext('2d')!;ctx.fillStyle='#edf0f2';ctx.fillRect(0,0,600,320);ctx.fillStyle='#147dab';ctx.font='24px sans-serif';ctx.fillText('Browser under human control',28,60);
- const state={calls:[] as any[],unmount:()=>{},defer:false,fail:false,resolve:()=>{}},frame={frameId:'frame',url:'https://example.com',title:'Page',image:canvas.toDataURL('image/jpeg').split(',')[1],observedAt:'2026-09-12T12:00:00Z',submitTargets:[{ref:'@e3',label:'Log in'}]};
- const api={open:async()=>{state.calls.push('open');return{id:'handle'};},frame:async(_id:string,input:any)=>{state.calls.push(input??'observe');return state.defer?new Promise(resolve=>{state.resolve=()=>resolve(frame);}):frame;},release:async()=>{state.calls.push('release');},abandon:async()=>{state.calls.push('abandon');}};
+ const state={calls:[] as any[],unmount:()=>{},defer:false,fail:false,fresh:false,resolve:()=>{}},frame={frameId:'frame',inputContextId:'field-1',url:'https://example.com',title:'Page',image:canvas.toDataURL('image/jpeg').split(',')[1],observedAt:'2026-09-12T12:00:00Z',submitTargets:[{ref:'@e3',label:'Log in'}]};
+ Object.assign(state,{frame});
+ const api={open:async()=>{state.calls.push('open');return{id:'handle'};},frame:async(_id:string,input:any)=>{state.calls.push(input??'observe');const reply=()=>({...frame,frameId:state.fresh?'frame-'+state.calls.length:frame.frameId});return state.defer?new Promise(resolve=>{state.resolve=()=>resolve(reply());}):reply();},release:async()=>{state.calls.push('release');},abandon:async()=>{state.calls.push('abandon');}};
  if(workspace)Object.assign(api,{signIn:async(...args:any[])=>{state.calls.push({signIn:args});return {submitted:true};},inventory:async()=>({supported:!unsupported,reason:unsupported?'This backend supports recorded viewing only.':null,truncated:false,sessions:[]}),openWorkspace:api.open,workspace:async(_id:string,operation:any)=>{state.calls.push(operation);if(state.fail)throw new Error('Uncertain action');return{supported:true,reason:null,truncated:false,selectedSessionId:'b',sessions:operation.kind==='list'?[]:[{id:'b',tabs:[{ref:'@t1',title:'Page',url:operation.url??frame.url,controlled:true,closable:false}]}]};}});
  const root=createRoot(document.getElementById('takeover-test')!);state.unmount=()=>root.render(null);root.render(React.createElement(BrowserTakeover,{api,workId:'session:s',reference:{sessionId:'s',browserId:'b',eventId:1,target:{targetId:'t',targetGeneration:1}},active:()=>{}}));(window as any).takeover=state;
  },{workspace,unsupported});}
@@ -43,4 +44,31 @@ test('never retries an uncertain navigation or returns control implicitly',async
 test('fits narrow windows and preserves theme styling around workspace controls',async({page})=>{
  await page.setViewportSize({width:420,height:900});await mount(page,true);await page.getByRole('button',{name:'Take control',exact:true}).click();await page.getByRole('textbox',{name:'Browser address'}).fill('https://example.com');await page.getByRole('button',{name:'Open session',exact:true}).click();
  expect(await page.locator('#takeover-test').evaluate(el=>el.scrollWidth<=el.clientWidth+1)).toBe(true);await page.screenshot({path:test.info().outputPath('browser-workspace-narrow.png')});
+});
+
+test('delivers rapid typing in order using each new frame',async({page})=>{
+ await mount(page,true);await page.getByRole('button',{name:'Take control',exact:true}).click();await page.getByRole('button',{name:'Refresh live view'}).click();
+ const viewport=page.getByRole('group',{name:'Controlled browser viewport'});await expect(viewport).toBeVisible();
+ await page.evaluate(()=>{const state=(window as any).takeover;state.defer=true;state.fresh=true;});await viewport.dispatchEvent('keydown',{key:'a'});await expect(viewport).toHaveAttribute('aria-busy','true');
+ await viewport.dispatchEvent('keydown',{key:'ب'});await viewport.dispatchEvent('keydown',{key:'c'});
+ await page.evaluate(()=>{const state=(window as any).takeover;state.frame={...state.frame};state.defer=false;state.resolve();});
+ await expect(viewport).toHaveAttribute('aria-busy','false');
+ expect(await page.evaluate(()=>(window as any).takeover.calls.filter((c:any)=>c.kind==='key').map((c:any)=>[c.key,c.frameId]))).toEqual([['a','frame'],['ب','frame-4'],['c','frame-5']]);
+});
+test('discards queued text when focus changes and reports it',async({page})=>{
+ await mount(page,true);await page.getByRole('button',{name:'Take control',exact:true}).click();await page.getByRole('button',{name:'Refresh live view'}).click();
+ const viewport=page.getByRole('group',{name:'Controlled browser viewport'});await expect(viewport).toBeVisible();await page.evaluate(()=>(window as any).takeover.defer=true);
+ await viewport.dispatchEvent('keydown',{key:'Tab'});await expect(viewport).toHaveAttribute('aria-busy','true');await viewport.dispatchEvent('keydown',{key:'x'});
+ await page.evaluate(()=>{const state=(window as any).takeover;state.frame.inputContextId='different-field';state.resolve();});
+ await expect(page.getByText(/Remaining queued text was not sent/)).toBeVisible();
+ expect(await page.evaluate(()=>(window as any).takeover.calls.filter((c:any)=>c.kind==='key').map((c:any)=>c.key))).toEqual(['Tab']);
+});
+test('bounds typing and drops pending keys when the view closes',async({page})=>{
+ await mount(page,true);await page.getByRole('button',{name:'Take control',exact:true}).click();await page.getByRole('button',{name:'Refresh live view'}).click();
+ const viewport=page.getByRole('group',{name:'Controlled browser viewport'});await expect(viewport).toBeVisible();await page.evaluate(()=>(window as any).takeover.defer=true);
+ await viewport.dispatchEvent('keydown',{key:'a'});await expect(viewport).toHaveAttribute('aria-busy','true');
+ for(let i=0;i<65;i++)await viewport.dispatchEvent('keydown',{key:'b'});
+ await expect(page.getByText(/Typing queue is full/)).toBeVisible();await page.evaluate(()=>{const state=(window as any).takeover;state.unmount();});await expect(viewport).toHaveCount(0);
+ await page.evaluate(()=>(window as any).takeover.resolve());
+ expect(await page.evaluate(()=>(window as any).takeover.calls.filter((c:any)=>c.kind==='key').map((c:any)=>c.key))).toEqual(['a']);
 });

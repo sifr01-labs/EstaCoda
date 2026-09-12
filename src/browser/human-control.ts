@@ -1,4 +1,4 @@
-import {randomUUID} from 'node:crypto';
+import {createHash,randomUUID} from 'node:crypto';
 import sharp from 'sharp';
 import type {BrowserBackend,BrowserScreenshotResult} from '../contracts/browser.js';
 import {validateHumanBrowserCommand,type HumanBrowserCommand,type HumanBrowserResult,type HumanBrowserFrame} from '../contracts/desktop-control/browser-human.js';
@@ -17,10 +17,9 @@ export class HumanBrowserControl {
  async #safe(url:string){let parsed:URL;try{parsed=new URL(url);}catch{throw new Error('Browser URL unavailable.');}
   if(parsed.username||parsed.password||scanUrlForSecrets(url)||!await isSafeUrl(url,{allowPrivateUrls:this.security.allowPrivateUrls===true})||checkWebsiteAccess(url,loadWebsiteBlocklist(this.security.websiteBlocklist??{}))?.allowed===false)throw new Error('Browser URL blocked.');
  }
- async #observe():Promise<HumanBrowserFrame>{
-  const sessionId=this.#browserId!;const snapshot=await this.backend.snapshot!({sessionId});await this.#safe(snapshot.url);
+ async #observe(sessionId=this.#browserId!,interactive=true):Promise<HumanBrowserFrame>{const snapshot=await this.backend.snapshot!({sessionId});await this.#safe(snapshot.url);
   if(snapshot.sensitiveInputActive||this.backend.isSensitiveInputActive?.(sessionId))throw new Error('Protected browser input is active.');
-  const capture=await this.backend.screenshot!({sessionId}),observation=capture.observation;
+  const capture=await this.backend.screenshot!({sessionId,...(!interactive?{observationOnly:true}:{})}),observation=capture.observation;
   if(!observation?.sanitized||observation.sessionId!==sessionId||!observation.identity||!observation.tabRef||capture.base64.length>12_000_000)throw new Error('Sanitized browser capture unavailable.');
   await this.validate();const latest=await this.backend.snapshot!({sessionId});await this.#safe(latest.url);
   if(latest.sensitiveInputActive||latest.identity.documentEpoch!==observation.identity.documentEpoch||latest.identity.actionRevision!==observation.identity.actionRevision||latest.tab?.ref!==observation.tabRef)throw new Error('Browser changed during capture.');
@@ -28,7 +27,7 @@ export class HumanBrowserControl {
   for(const width of [960,640,320]){preview=await sharp(bytes,{limitInputPixels:16_000_000}).resize({width,height:640,fit:'inside',withoutEnlargement:true}).jpeg({quality:50}).toBuffer();if(preview.length<=34000)break;}
   if(!preview||preview.length>34000)throw new Error('Browser preview exceeds limit.');
   const focused=await this.backend.preflightAction!('press',{sessionId,identity:latest.identity,tabRef:latest.tab?.ref});
-  const id=randomUUID();this.#frame={id,observation};return{frameId:id,url:latest.url.slice(0,2048),title:redactSensitiveText(latest.title??'Browser').slice(0,160),image:preview.toString('base64'),observedAt:new Date().toISOString(),readiness:latest.readiness??'unknown',protectedFieldFocused:focused.target?.protectedInput===true,submitTargets:(latest.elements??[]).filter(element=>element.role==='button').slice(0,16).map(element=>({ref:element.ref,label:redactSensitiveText(element.name??'Submit').slice(0,120)}))};
+  const id=randomUUID();if(interactive)this.#frame={id,observation};return{frameId:id,inputContextId:createHash('sha256').update(JSON.stringify([sessionId,latest.identity.documentEpoch,latest.tab?.ref,focused.target?.ref])).digest('hex'),url:latest.url.slice(0,2048),title:redactSensitiveText(latest.title??'Browser').slice(0,160),image:preview.toString('base64'),observedAt:new Date().toISOString(),readiness:latest.readiness??'unknown',protectedFieldFocused:focused.target?.protectedInput===true,submitTargets:(latest.elements??[]).filter(element=>element.role==='button').slice(0,16).map(element=>({ref:element.ref,label:redactSensitiveText(element.name??'Submit').slice(0,120)}))};
  }
  async execute(command:HumanBrowserCommand):Promise<HumanBrowserResult>{
   try{return await this.#execute(command);}finally{if(command.action==='signin-deliver')command.value='';}
@@ -37,9 +36,19 @@ export class HumanBrowserControl {
   validateHumanBrowserCommand(command);await this.validate();
   if(command.action==='inventory'){
    const workspace=this.backend.kind==='local-cdp'&&this.backend.workspace&&(await this.backend.status()).available
-    ?await this.owner.agent(()=>this.backend.workspace!({sessionId:command.browserId,action:{kind:'list'},assertHumanControl:()=>{}}))
+    ?await this.owner.inspect(()=>this.backend.workspace!({sessionId:command.browserId,action:{kind:'list'},assertHumanControl:()=>{}}))
     :{supported:false,reason:'Configure a supervised local browser in Settings. Cloud and legacy browsers support recorded viewing only.',truncated:false,sessions:[]};
-   await this.validate();return {lease:null,frame:null,state:'agent',workspace};
+   await this.validate();return {lease:null,frame:null,state:this.owner.state,workspace};
+  }
+  if(command.action==='watch'){
+   if(this.backend.kind!=='local-cdp'||!this.backend.workspace)throw new Error('Live browser observation unavailable.');
+   return this.owner.inspect(async()=>{
+    if(this.#pending)throw new Error('Protected browser input is active.');
+    const inventory=await this.backend.workspace!({sessionId:command.browserId,action:{kind:'list'},assertHumanControl:()=>{}});
+    if(!inventory.sessions.some(session=>session.id===command.browserId))throw new Error('Browser session is not owned by this runtime.');
+    const frame=await this.#observe(command.browserId,false);await this.validate();
+    return {lease:null,frame,state:this.owner.state};
+   });
   }
   if(command.action==='acquire'){
    // Only supervised sessions have current grounded input and sanitized visual leases.
@@ -88,7 +97,7 @@ export class HumanBrowserControl {
     if(operation.kind==='navigate'||operation.kind==='create'||operation.kind==='new-tab')await this.#safe(operation.url);
     let workspace;
     if(operation.kind==='select-session'){
-     workspace=await this.backend.workspace({sessionId:nextId,action:{kind:'list'},assertHumanControl});
+     workspace=await this.backend.workspace({sessionId:operation.sessionId,action:{kind:'list'},assertHumanControl});
      if(!workspace.sessions.some(session=>session.id===operation.sessionId))throw new Error('Browser session is not owned by this runtime.');
      nextId=operation.sessionId;
     }else workspace=await this.backend.workspace({sessionId:nextId,action:operation,assertHumanControl});
