@@ -6,7 +6,7 @@ const server = { profileId: "default", instanceId: "bridge1", serviceVersion: "t
   implemented: { methods: ["control.bootstrap" as const], events: ["work.changed" as const] } };
 it("negotiates same-major capabilities without exposing unimplemented methods", () => {
   const result = negotiateControl(client, server);
-  expect(result.protocolVersion).toEqual({ major: 1, minor: 0 });
+  expect(result.protocolVersion).toEqual({ major: 1, minor: 1 });
   expect(result.capabilities).toEqual({ methods: ["control.bootstrap"], events: ["work.changed"] });
   expect(() => negotiateControl({ ...client, profileId: "other" }, server)).toThrow("scope");
   expect(() => negotiateControl({ ...client, protocolVersion: { major: 2, minor: 0 } }, server)).toThrow("Incompatible");

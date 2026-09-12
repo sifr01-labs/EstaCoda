@@ -1,0 +1,78 @@
+[
+  {
+    "role": "button",
+    "name": "Local runtime"
+  },
+  {
+    "role": "button",
+    "name": "No active runs"
+  },
+  {
+    "role": "button",
+    "name": "1 needs approval"
+  },
+  {
+    "role": "button",
+    "name": "1 scheduled"
+  },
+  {
+    "role": "button",
+    "name": "Settings"
+  },
+  {
+    "role": "button",
+    "name": "Search chats"
+  },
+  {
+    "role": "button",
+    "name": "New chat"
+  },
+  {
+    "role": "combobox",
+    "name": "Display language"
+  },
+  {
+    "role": "button",
+    "name": "Appearance Themes, color mode, and density"
+  },
+  {
+    "role": "button",
+    "name": "Models & providers Model routes and provider setup"
+  },
+  {
+    "role": "button",
+    "name": "Work"
+  },
+  {
+    "role": "button",
+    "name": "Inbox 1"
+  },
+  {
+    "role": "button",
+    "name": "Library"
+  },
+  {
+    "role": "button",
+    "name": "Connections"
+  },
+  {
+    "role": "button",
+    "name": "Review webhook security Completed"
+  },
+  {
+    "role": "button",
+    "name": "Unpin Review webhook security"
+  },
+  {
+    "role": "button",
+    "name": "New chat Draft"
+  },
+  {
+    "role": "button",
+    "name": "Make billing retries resilient Needs approval"
+  },
+  {
+    "role": "button",
+    "name": "Summarize deployment logs Partially completed"
+  }
+]

@@ -11,7 +11,7 @@ function fixture(handlers: ControlHandlers = {}, requestTimeoutMs:number|undefin
   output.on('data', (chunk) => { for (const line of String(chunk).trim().split('\n')) messages.push(JSON.parse(line)); });
   const server = new StdioControlServer({ input, output, profileId: 'p', version: 'test', handlers, requestTimeoutMs });
   const send = (id: string, method: string, params: unknown) => input.write(JSON.stringify({ jsonrpc: '2.0', id, method, params }) + '\n');
-  const init = async (profileId = 'p') => { send('init', 'control.initialize', { protocolVersion: { major: 1, minor: 0 }, clientVersion: 'test', profileId, capabilities: { methods: [...CONTROL_METHODS], events: [] } }); await setImmediate(); };
+  const init = async (profileId = 'p',minor=0) => { send('init', 'control.initialize', { protocolVersion: { major: 1, minor }, clientVersion: 'test', profileId, capabilities: { methods: [...CONTROL_METHODS], events: [] } }); await setImmediate(); };
   return { input, output, messages, server, send, init };
 }
 it('binds initialization and advertised handlers to one profile and rejects premature requests', async () => {
@@ -130,4 +130,12 @@ it('times out slow target reads before Main disconnects and continues serving re
   f.send('receipt','targets.inspectOperation',{operationId:'op'});await vi.advanceTimersByTimeAsync(0);
   expect(f.messages.find(row=>row.id==='receipt').result.state).toBe('unknown');
  }finally{f.server.close();await f.server.done;vi.useRealTimers();}
+});
+
+it('negotiates evidence explanation codes without breaking older strict response readers',async()=>{
+ for(const minor of [0,1]){
+  const f=fixture({'evidence.get':()=>({result:{workId:'session:s',state:'unverified',completion:'unconfirmed',summary:'Not verified',summaryCode:'unverified',limitationCodes:['receipts_missing'],limitations:['No receipts'],truncated:false,artifacts:[],facts:[]}})});
+  await f.init('p',minor);f.send('evidence','evidence.get',{workId:'session:s'});await setImmediate();
+  const result=f.messages.at(-1).result;expect(result.summary).toBe('Not verified');expect(result.summaryCode).toBe(minor===1?'unverified':undefined);expect(result.limitationCodes).toEqual(minor===1?['receipts_missing']:undefined);f.server.close();await f.server.done;
+ }
 });

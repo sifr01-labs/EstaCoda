@@ -1,0 +1,154 @@
+{
+  "environment": {
+    "platform": "macOS 26.5.2 (25F84)",
+    "arch": "arm64",
+    "electron": "44.3.0",
+    "playwright": "1.63.0"
+  },
+  "files": [
+    {
+      "path": "native-ar-dark-zoom200.png",
+      "sha256": "c748d8170980ada6630116f0dfb9fdec9d82ecb8b4b1f5211f76587f68091796"
+    },
+    {
+      "path": "native-ar-light-zoom200.png",
+      "sha256": "108fa5e53a195f69a2aba68a437029d680371c6d8c12eb39a6cfb18897c964e4"
+    },
+    {
+      "path": "native-en-dark-zoom200.png",
+      "sha256": "c3946e1a9fff00e6815fba5abb020aaef83537913cd15e86a35816c08aca3124"
+    },
+    {
+      "path": "native-en-light-zoom200.png",
+      "sha256": "b414c88051889dd084d829c4df10715328d22b1bcbbd36405807012c49c8528b"
+    },
+    {
+      "path": "native-Electron-zoom-and-accessibility-ar-dark.json",
+      "sha256": "ff0f8f7c0d23742bbc84dd4960a7fe2415afd4c6fad3dc0a4a24308f94b262f8"
+    },
+    {
+      "path": "native-Electron-zoom-and-accessibility-ar-light.json",
+      "sha256": "ff0f8f7c0d23742bbc84dd4960a7fe2415afd4c6fad3dc0a4a24308f94b262f8"
+    },
+    {
+      "path": "native-Electron-zoom-and-accessibility-en-dark.json",
+      "sha256": "5e985efe3456b5870cef177340ff737a32d0959c46311fbe79ab571dcb254f32"
+    },
+    {
+      "path": "native-Electron-zoom-and-accessibility-en-light.json",
+      "sha256": "5e985efe3456b5870cef177340ff737a32d0959c46311fbe79ab571dcb254f32"
+    },
+    {
+      "path": "../../e2e/bilingual.spec.ts-snapshots/pr14a-ar-dark-1280-approval-darwin.png",
+      "sha256": "0cdbff08e6e1157c1660a44fffd676bf9342b1a840620ba914ea9e318d814d8b"
+    },
+    {
+      "path": "../../e2e/bilingual.spec.ts-snapshots/pr14a-ar-dark-1280-models-darwin.png",
+      "sha256": "646734e5c7942ae876b5a58d5869889b31d9f6758a0b0075e64eee93fc5b32eb"
+    },
+    {
+      "path": "../../e2e/bilingual.spec.ts-snapshots/pr14a-ar-dark-1280-settings-darwin.png",
+      "sha256": "203dd0016c3ffc944339404d7379cf71a28dee236ee0864e9999cdd8c3c1208a"
+    },
+    {
+      "path": "../../e2e/bilingual.spec.ts-snapshots/pr14a-ar-dark-360-approval-darwin.png",
+      "sha256": "cfe74cb503f3b1608d69c4b406bc65aeaeecff37e7163b36cff02a31f93bfe22"
+    },
+    {
+      "path": "../../e2e/bilingual.spec.ts-snapshots/pr14a-ar-dark-360-models-darwin.png",
+      "sha256": "b954c24beb7e8cd5cbd00c7e1b2ba8bb53cc8710af798b860d824dad890b904e"
+    },
+    {
+      "path": "../../e2e/bilingual.spec.ts-snapshots/pr14a-ar-dark-360-settings-darwin.png",
+      "sha256": "5d3c940b4c7d8517ae9f0928f4ea3e9b9f98e5cb4eb879bce99dcd25854d96e4"
+    },
+    {
+      "path": "../../e2e/bilingual.spec.ts-snapshots/pr14a-ar-dark-zoom200-darwin.png",
+      "sha256": "04004bbc0290da1c766342c23d17f4049da98f26c58affd9cd9ffab1c4b66ce5"
+    },
+    {
+      "path": "../../e2e/bilingual.spec.ts-snapshots/pr14a-ar-light-1280-approval-darwin.png",
+      "sha256": "e65ff64f388c56f206883e6d0c25737c3efa1bec1660b4d3f57febcc42e400e9"
+    },
+    {
+      "path": "../../e2e/bilingual.spec.ts-snapshots/pr14a-ar-light-1280-models-darwin.png",
+      "sha256": "74f6eda011efa7496538bf2ca86220288efd4ba460a92f50a3fe472e62b69ed6"
+    },
+    {
+      "path": "../../e2e/bilingual.spec.ts-snapshots/pr14a-ar-light-1280-settings-darwin.png",
+      "sha256": "5e52e4fe8db37207b99e1b000ce2b780e07adec9439f8b8f7aefedecbefe7be9"
+    },
+    {
+      "path": "../../e2e/bilingual.spec.ts-snapshots/pr14a-ar-light-360-approval-darwin.png",
+      "sha256": "2129d74390a51b027ed174fc764e2c8a0f4b2a9aed8468a39add3bd1794cea7b"
+    },
+    {
+      "path": "../../e2e/bilingual.spec.ts-snapshots/pr14a-ar-light-360-models-darwin.png",
+      "sha256": "de5a74df040ff4cf5b838d3146d955f764a714776f984935c631d2098cbc7ee0"
+    },
+    {
+      "path": "../../e2e/bilingual.spec.ts-snapshots/pr14a-ar-light-360-settings-darwin.png",
+      "sha256": "6569943246e7fea965d79d39a53785eeb56f36ffb8091eff6e2f40b502d7eb83"
+    },
+    {
+      "path": "../../e2e/bilingual.spec.ts-snapshots/pr14a-ar-light-zoom200-darwin.png",
+      "sha256": "e2eb03f33142286cbaf2a2ffa18d328f52e0d92c7b576950cd975bbacccf0630"
+    },
+    {
+      "path": "../../e2e/bilingual.spec.ts-snapshots/pr14a-en-dark-1280-approval-darwin.png",
+      "sha256": "df52bdae9237f314797c7fb33847dc5cd28cf00f60b37d55b6838e9a2c19f13a"
+    },
+    {
+      "path": "../../e2e/bilingual.spec.ts-snapshots/pr14a-en-dark-1280-models-darwin.png",
+      "sha256": "eb61828e8e28d42f847b10a383f9bec6c4029d3764197f425ba15a4682faec60"
+    },
+    {
+      "path": "../../e2e/bilingual.spec.ts-snapshots/pr14a-en-dark-1280-settings-darwin.png",
+      "sha256": "72cd4238887519db4fbe808cd983bdbe6deb91cd8ea487365ae30a6301df5b52"
+    },
+    {
+      "path": "../../e2e/bilingual.spec.ts-snapshots/pr14a-en-dark-360-approval-darwin.png",
+      "sha256": "dfca1dbb9e0ad824403e825742d044effe3c63618ce2acd052cba7224d4d6d08"
+    },
+    {
+      "path": "../../e2e/bilingual.spec.ts-snapshots/pr14a-en-dark-360-models-darwin.png",
+      "sha256": "11176f2308e333631dc1f17404f05f1e8b70780b575c51a2a03340a322d7fe7f"
+    },
+    {
+      "path": "../../e2e/bilingual.spec.ts-snapshots/pr14a-en-dark-360-settings-darwin.png",
+      "sha256": "dc3b4935079fd590d3821086f74a1b632b3d86b9b0240463955e04bc1036be64"
+    },
+    {
+      "path": "../../e2e/bilingual.spec.ts-snapshots/pr14a-en-dark-zoom200-darwin.png",
+      "sha256": "3109e1f3638d1b76f18a48e726748a0a2df645d46af0b4818267c9fde166f216"
+    },
+    {
+      "path": "../../e2e/bilingual.spec.ts-snapshots/pr14a-en-light-1280-approval-darwin.png",
+      "sha256": "028c9f2d1c8674c1d3b5e7cc45c2019e3394fdbca1191998039ab7025d8cabb7"
+    },
+    {
+      "path": "../../e2e/bilingual.spec.ts-snapshots/pr14a-en-light-1280-models-darwin.png",
+      "sha256": "68eba098cfb89906b33e86c29c3328c1002e3d9843ad37df416c29974bd099be"
+    },
+    {
+      "path": "../../e2e/bilingual.spec.ts-snapshots/pr14a-en-light-1280-settings-darwin.png",
+      "sha256": "c6b18fb24694be893a8e912377ea3d0a404ab4d2480a27a50f708c88aabc67f7"
+    },
+    {
+      "path": "../../e2e/bilingual.spec.ts-snapshots/pr14a-en-light-360-approval-darwin.png",
+      "sha256": "03764c8f02d339289292bd116f89538b7bb102c4bb745a94751a748731c08c0d"
+    },
+    {
+      "path": "../../e2e/bilingual.spec.ts-snapshots/pr14a-en-light-360-models-darwin.png",
+      "sha256": "34f54ab2bfbc66a0a10aecb09bf23f09d7152a5a6cc0c857e0ed6d7362bbcd3b"
+    },
+    {
+      "path": "../../e2e/bilingual.spec.ts-snapshots/pr14a-en-light-360-settings-darwin.png",
+      "sha256": "df01eb69f7d3cf29b61037196996c3dd17ff0098f891d42b43409459fa3a5706"
+    },
+    {
+      "path": "../../e2e/bilingual.spec.ts-snapshots/pr14a-en-light-zoom200-darwin.png",
+      "sha256": "39e7d9b7b3ad331c087c3132c226ebbb158c0ef627b9bebd3c2b9e85da0de49c"
+    }
+  ]
+}

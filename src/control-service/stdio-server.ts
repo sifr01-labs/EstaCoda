@@ -26,6 +26,7 @@ export class StdioControlServer {
   #closed = false;
   #context: ControlContext | null = null;
   #initializing = false;
+  #protocolMinor = 0;
   #finish!: () => void;
   readonly #lines: BoundedLines;
   readonly #disposers = new Set<() => void>();
@@ -103,8 +104,14 @@ export class StdioControlServer {
       const response = { jsonrpc: '2.0' as const, id: request.id, result: reply.result };
       validateControlResponse(response, request, this.#context);
       if (request.method === 'control.initialize') {
-        const result = reply.result as unknown as { capabilities: Capabilities };
+        const result = reply.result as unknown as { capabilities: Capabilities; protocolVersion:{minor:number} };
+        this.#protocolMinor=result.protocolVersion.minor;
         this.#context = { profileId: this.profileId, instanceId: this.instanceId, capabilities: result.capabilities };
+      }
+      // v1.0 clients reject unknown fields. Codes are additive only for peers
+      // that negotiated v1.1; validate the complete result before down-projecting.
+      if(request.method==='evidence.get'&&this.#protocolMinor<1){
+        const {summaryCode:_summary,limitationCodes:_limitations,...legacy}=response.result as {[key:string]:JsonValue};response.result=legacy;
       }
       if (this.write(response)) {
         try { reply.afterReply?.(); } catch { this.close(true); }

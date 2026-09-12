@@ -1,0 +1,78 @@
+[
+  {
+    "role": "button",
+    "name": "بيئة تشغيل محلية"
+  },
+  {
+    "role": "button",
+    "name": "لا توجد عمليات تنفيذ نشطة"
+  },
+  {
+    "role": "button",
+    "name": "عنصر واحد يتطلب الموافقة"
+  },
+  {
+    "role": "button",
+    "name": "عنصر واحد مجدول"
+  },
+  {
+    "role": "button",
+    "name": "الإعدادات"
+  },
+  {
+    "role": "button",
+    "name": "البحث في المحادثات"
+  },
+  {
+    "role": "button",
+    "name": "محادثة جديدة"
+  },
+  {
+    "role": "combobox",
+    "name": "لغة العرض"
+  },
+  {
+    "role": "button",
+    "name": "المظهر السمات ونمط الألوان والكثافة"
+  },
+  {
+    "role": "button",
+    "name": "النماذج والمزوّدون مسارات النماذج وإعداد المزوّدين"
+  },
+  {
+    "role": "button",
+    "name": "العمل"
+  },
+  {
+    "role": "button",
+    "name": "صندوق الوارد 1"
+  },
+  {
+    "role": "button",
+    "name": "المكتبة"
+  },
+  {
+    "role": "button",
+    "name": "الاتصالات"
+  },
+  {
+    "role": "button",
+    "name": "Review webhook security مكتمل"
+  },
+  {
+    "role": "button",
+    "name": "إلغاء تثبيت Review webhook security"
+  },
+  {
+    "role": "button",
+    "name": "محادثة جديدة مسودة"
+  },
+  {
+    "role": "button",
+    "name": "Make billing retries resilient يتطلب الموافقة"
+  },
+  {
+    "role": "button",
+    "name": "Summarize deployment logs مكتمل جزئيًا"
+  }
+]

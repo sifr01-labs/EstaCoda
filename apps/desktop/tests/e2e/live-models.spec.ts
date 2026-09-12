@@ -1,7 +1,8 @@
+import {translate,type DisplayLanguage} from '../../src/shared/i18n/index.js';
 import{test,expect,type Page}from'@playwright/test';
-async function mount(page:Page,view='models'){
+async function mount(page:Page,view='models',language:DisplayLanguage='en'){
  await page.goto('/fixture.html');
- await page.evaluate(async view=>{
+ await page.evaluate(async({view,language})=>{
   const reactPath='/node_modules/.vite/deps/react.js',domPath='/node_modules/.vite/deps/react-dom_client.js';
   const React=(await import(reactPath)).default,{createRoot}=(await import(domPath)).default;
   const componentPath=view==='models'?'/src/renderer/components/live-models.tsx':'/src/renderer/components/work-model-picker.tsx';const component=await import(componentPath);
@@ -18,13 +19,14 @@ async function mount(page:Page,view='models'){
    workOverride:async()=>({selection:state.selection,effective:'next_turn'}),inspectOverride:async()=>calls.some(c=>c[0]==='override')?{state:state.receipt}:null,setOverride:async(id:string,selection:any)=>{calls.push(['override',id,selection]);state.selection=selection;return{state:state.receipt};}};
   (window as any).modelTest=state;
   if(view==='models'){
-   host.className='';const appPath='/src/renderer/app.tsx',{App}=await import(appPath);const appearance={theme:'kemet',appearance:'light',density:'comfortable'};
+   host.className='';const appPath='/src/renderer/app.tsx',{App}=await import(appPath);const appearance={theme:'kemet',appearance:'light',density:'comfortable',language};
    const desktop={models:api,platform:'darwin',onSnapshot:(listener:any)=>{listener({status:'ready',profile:{id:'test',label:'test',configuration:'ready'},runtime:'ready',work:{items:[],nextCursor:null},inbox:{items:[],nextCursor:null}});return()=>{};},profiles:async()=>[{id:'test',label:'test'}],appearance:async()=>appearance,setAppearance:async()=>{}};
-   createRoot(host).render(React.createElement(React.StrictMode,null,React.createElement(App,{adapter:{kind:'live',api:desktop,appearance:{read:desktop.appearance,write:desktop.setAppearance}}})));
+   const pp='/src/renderer/appearance.tsx',{AppearanceProvider}=await import(pp),store={read:desktop.appearance,write:desktop.setAppearance};
+   createRoot(host).render(React.createElement(React.StrictMode,null,React.createElement(AppearanceProvider,{store},React.createElement(App,{adapter:{kind:'live',api:desktop,appearance:store}}))));
   }else createRoot(host).render(React.createElement(React.StrictMode,null,React.createElement(component.WorkModelPicker,{api,work:{id:'session:s',canonicalId:'s',kind:'session',target:{targetId:'t',targetGeneration:1},modelBinding:{sessionId:'s'}},draft:{model:'',text:'',attachments:[],note:''},change:()=>{}})));
 
- },view);
- if(view==='models'){await page.getByRole('button',{name:'Settings',exact:true}).click();await page.locator('.ec-settingslink').filter({hasText:'Models & providers'}).click();}
+ },{view,language});
+ if(view==='models'){await page.getByRole('button',{name:translate(language,'Settings'),exact:true}).click();await page.locator('.ec-settingslink').filter({hasText:translate(language,'Models & providers')}).click();}
 }
 const calls=(page:Page)=>page.evaluate(()=>(window as any).modelTest.calls);
 test('private key staging, failed verification and cancellation never Apply',async({page})=>{
@@ -50,4 +52,10 @@ test('cancels an in-flight verification and ignores its late success',async({pag
 test('live Models and custom setup remain contained at narrow and desktop widths',async({page})=>{
  await mount(page);for(const width of [360,736,1280]){await page.setViewportSize({width,height:900});await expect(page.locator('.ec-page')).toBeVisible();expect(await page.locator('.ec-main').evaluate(e=>e.scrollWidth<=e.clientWidth+1)).toBe(true);}
  await page.setViewportSize({width:360,height:900});await page.getByRole('button',{name:'Add provider',exact:true}).click();await page.getByLabel('Provider',{exact:true}).selectOption('__custom');await page.getByLabel('Model ID',{exact:true}).fill('local-chat');await page.getByRole('button',{name:'Continue without a credential'}).click();await page.getByRole('button',{name:'Review',exact:true}).click();await expect(page.getByRole('button',{name:'Apply configuration'})).toBeVisible();expect(await page.getByRole('dialog').evaluate(e=>e.scrollWidth<=e.clientWidth+1)).toBe(true);
+});
+
+test('Arabic provider verification preserves technical fields and keeps Apply gated',async({page})=>{
+ await mount(page,'models','ar');const t=(key:Parameters<typeof translate>[1])=>translate('ar',key);
+ await page.getByRole('button',{name:t('Add provider'),exact:true}).click();await page.getByLabel(t('Model ID'),{exact:true}).fill('kimi-k2');await page.getByRole('button',{name:t('Enter API key privately')}).click();await page.evaluate(()=>(window as any).modelTest.failVerify=true);await page.getByRole('button',{name:t('Verify candidate · may incur cost')}).click();
+ await expect(page.getByText(t('Invalid credential'),{exact:true})).toBeVisible();await expect(page.getByRole('button',{name:t('Review'),exact:true})).toBeDisabled();await expect(page.getByLabel(t('Model ID'),{exact:true})).toHaveValue('kimi-k2');await page.keyboard.press('Escape');expect((await calls(page)).some((c:any)=>c[0]==='apply')).toBe(false);await expect(page.getByRole('button',{name:t('Add provider'),exact:true})).toBeFocused();
 });

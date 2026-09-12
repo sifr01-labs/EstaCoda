@@ -1,5 +1,5 @@
 /** Desktop protocol version; independent of private supervisor wire v1. */
-export const DESKTOP_PROTOCOL_VERSION = Object.freeze({ major: 1, minor: 0 });
+export const DESKTOP_PROTOCOL_VERSION = Object.freeze({ major: 1, minor: 1 });
 export type ProtocolVersion = { major: number; minor: number };
 export const CONTROL_LIMITS = Object.freeze({ frameBytes: 262_144, depth: 12, nodes: 8_192, array: 256, keys: 64, text: 65_536 });
 export type JsonValue = null | boolean | number | string | JsonValue[] | { [key: string]: JsonValue };

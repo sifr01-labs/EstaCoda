@@ -603,7 +603,7 @@ export const setupArabic = {
  "Authorization required": "يلزم التفويض",
  "Pairing pending": "الاقتران قيد الانتظار",
  "Pairing required": "يلزم الاقتران",
- "Staged": "محفوظ مؤقتًا",
+ "Staged": "مُدرج",
  "Existing": "موجود",
  "Present": "متوفر",
  "Expired": "منتهي الصلاحية",
@@ -695,5 +695,9 @@ export const setupArabic = {
  "Saved proposal state needs repair.": "تحتاج حالة المقترحات المحفوظة إلى إصلاح.",
  "Shared execution needs attention": "التنفيذ المشترك يحتاج إلى انتباه",
  "Review the shared supervisor connection before continuing.": "راجع اتصال المشرف المشترك قبل المتابعة.",
- "Conflicted": "متعارض"
+ "Conflicted": "متعارض",
+ "This backend supports recorded viewing only.": "تدعم هذه الخلفية عرض التسجيلات فقط.",
+ "Create": "إنشاء",
+ "Archive": "أرشفة",
+ "Cleanup": "تنظيف"
 } as const;

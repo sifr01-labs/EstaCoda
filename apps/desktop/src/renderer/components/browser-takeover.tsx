@@ -2,7 +2,7 @@ import {useI18n} from '../i18n.js';
 import {useEffect,useRef,useState} from 'react';
 import {humanBrowserKey,type BrowserViewReference,type HumanBrowserFrame,type HumanBrowserInput,type BrowserWorkspaceState,type BrowserWorkspaceAction} from '@estacoda/control-protocol';
 import type {DesktopApi} from '../../shared/desktop-api.js';
-import {Button,Badge} from './primitives.js';
+import {Button,Badge,Icon} from './primitives.js';
 export function BrowserTakeover({api,workId,reference,active}:{api:NonNullable<DesktopApi['browserControl']>;workId:string;reference?:BrowserViewReference;active:(value:boolean)=>void}){
  const {t,owned,status}=useI18n();
  const[submitRef,setSubmitRef]=useState(''),[secretKind,setSecretKind]=useState<'password'|'one-time-code'>('password');
@@ -41,12 +41,12 @@ export function BrowserTakeover({api,workId,reference,active}:{api:NonNullable<D
   <Badge>{id?t("You control this browser"):t("Human takeover")}</Badge>
   <p className="ec-footnote">{t("Agent browser actions pause during takeover. Closing this view keeps them paused; use Return to agent when finished.")}</p>
   {!id?<Button disabled={busy||workspace?.supported===false} onClick={()=>void open()}>{t("Take control")}</Button>:<><Button disabled={busy} onClick={()=>void refresh()}>{t("Refresh live view")}</Button><Button disabled={busy} onClick={()=>void release()}>{t("Return to agent")}</Button></>}
-  {workspace?.reason&&<p className="ec-footnote">{t("Live viewing unavailable. Recorded views remain available.")}</p>}
+  {workspace?.reason&&<p className="ec-footnote">{workspace.supported?t("Live viewing unavailable. Recorded views remain available."):t("This backend supports recorded viewing only.")}</p>}
   {api.workspace&&workspace?.supported&&<div className="ec-browserworkspace">
    <div className="ec-browserbar"><label>{t("Session")+" "}<select aria-label={t("Browser session")} disabled={!id||busy} value={workspace.selectedSessionId??''} onChange={e=>void operate({kind:'select-session',sessionId:e.target.value})}><option value="" disabled>{t("Select session")}</option>{workspace.sessions.map(s=><option key={s.id} value={s.id}>{s.tabs.find(t=>t.controlled)?.title??s.id}</option>)}</select></label><Button disabled={!id||busy||!session} onClick={()=>void operate({kind:'close-session'})}>{t("Close session")}</Button></div>
    <div className="ec-browserbar" role="group" aria-label={t("Browser tabs")}>{session?.tabs.map(tab=><span key={tab.ref}><Button disabled={!id||busy} aria-pressed={tab.controlled} onClick={()=>void operate({kind:'switch-tab',tabRef:tab.ref})}>{tab.title||tab.ref}</Button>{tab.closable&&<Button aria-label={t("Close tab")+" "+tab.title} disabled={!id||busy} onClick={()=>void operate({kind:'close-tab',tabRef:tab.ref})}>×</Button>}</span>)}</div>
    <form className="ec-browserbar" onSubmit={e=>{e.preventDefault();void operate({kind:session?'navigate':'create',url:address});}}>
-    <Button type="button" aria-label={t("Back")} disabled={!id||busy||!session} onClick={()=>void operate({kind:'back'})}>←</Button><Button type="button" aria-label={t("Forward")} disabled={!id||busy||!session} onClick={()=>void operate({kind:'forward'})}>→</Button><Button type="button" disabled={!id||busy||!session} onClick={()=>void operate({kind:'reload'})}>{t("Reload")}</Button>
+    <Button type="button" aria-label={t("Back")} disabled={!id||busy||!session} onClick={()=>void operate({kind:'back'})}><Icon name="arrow-left"/></Button><Button type="button" aria-label={t("Forward")} disabled={!id||busy||!session} onClick={()=>void operate({kind:'forward'})}><Icon name="arrow-right"/></Button><Button type="button" disabled={!id||busy||!session} onClick={()=>void operate({kind:'reload'})}>{t("Reload")}</Button>
     <input aria-label={t("Browser address")} dir="ltr" type="url" placeholder="https://" value={address} disabled={!id||busy} onChange={e=>setAddress(e.target.value)}/><Button type="submit" disabled={!id||busy||!address}>{session?t("Go"):t("Open session")}</Button>
     <Button type="button" disabled={!id||busy||!address||!session} onClick={()=>void operate({kind:'new-tab',url:address})}>{t("New tab")}</Button><Button type="button" disabled={!id||busy||!address} onClick={()=>void operate({kind:'create',url:address})}>{t("New session")}</Button>
    </form>{workspace.truncated&&<p className="ec-footnote">{t("Inventory is limited to 8 sessions and 16 tabs.")}</p>}
