@@ -20,6 +20,7 @@ export const emptyWorkView=():WorkViewState=>({tab:'activity',inspector:false,ac
 export const emptyDraft=():Draft=>({id:crypto.randomUUID(),text:'',attachments:[],model:'Kimi K3',note:''});
 export function App({adapter}:{adapter:DesktopAdapter}){
  const[page,setPage]=useState<PageName>('work');
+ const[reviewingAttention,setReviewingAttention]=useState(false);
  const[selected,setSelected]=useState('welcome');
  const[snapshot,setSnapshot]=useState(emptySnapshot);
  const[pinned,setPinned]=useState<string[]>(adapter.kind==='fixture'?['webhook']:[]);
@@ -32,15 +33,15 @@ export function App({adapter}:{adapter:DesktopAdapter}){
  const draftNumber=useRef(0);
  const[profiles,setProfiles]=useState<ProfileChoice[]>([]),[operationError,setOperationError]=useState(''),[loadingMore,setLoadingMore]=useState(false);
  const operate=(operation:()=>Promise<void>)=>{setOperationError('');void Promise.resolve().then(operation).catch(()=>setOperationError('The operation could not complete. Refresh the connection and try again.'));};
- useEffect(()=>{if(!adapter.api){setSnapshot({...emptySnapshot,status:'unavailable'});return;}let previous='';return adapter.api.onSnapshot(next=>{if(previous&&previous!==next.profile.id){setSelected('welcome');setPage('work');setPinned([]);setPinWork([]);setViews({});setDrafts({welcome:emptyDraft()});setQuery('');setOperationError('');draftNumber.current=0;}previous=next.profile.id;setSnapshot(next);});},[adapter]);
+ useEffect(()=>{if(!adapter.api){setSnapshot({...emptySnapshot,status:'unavailable'});return;}let previous='';return adapter.api.onSnapshot(next=>{if(previous&&previous!==next.profile.id){setSelected('welcome');setReviewingAttention(false);setPage('work');setPinned([]);setPinWork([]);setViews({});setDrafts({welcome:emptyDraft()});setQuery('');setOperationError('');draftNumber.current=0;}previous=next.profile.id;setSnapshot(next);});},[adapter]);
  useEffect(()=>{if(page==='settings'&&adapter.kind==='live'&&adapter.api)void adapter.api.profiles().then(setProfiles).catch(()=>setOperationError('Profile choices could not be loaded.'));},[page,adapter]);
  const pinEpoch=useRef(0);useEffect(()=>{pinEpoch.current++;},[snapshot.profile.id,snapshot.status]);
  useEffect(()=>{if(!adapter.api?.work||snapshot.status!=='ready')return;let active=true;const epoch=++pinEpoch.current;void adapter.api.work.pins().then(items=>{if(active&&epoch===pinEpoch.current){setPinWork(items);setPinned(items.map(item=>item.id));}}).catch(()=>{});return()=>{active=false;};},[adapter,snapshot.profile.id,snapshot.status,snapshot.work]);
  const moreWork=()=>{setLoadingMore(true);void adapter.api.moreWork().catch(()=>setOperationError('Work changed while loading. Reconnect to refresh the list.')).finally(()=>setLoadingMore(false));};
  const navigate=(next:PageName)=>{if(next==='work'&&adapter.kind==='live')setSelected('work-list');setPage(next);};
- const select=(id:string)=>{setSelected(id);setPage('work');};
+ const select=(id:string)=>{setReviewingAttention(false);setSelected(id);setPage('work');};
  // Explicit attention navigation reveals the pending action; ordinary navigation retains the tab.
- const reviewWork=(id:string)=>{setViews(previous=>({...previous,[id]:{...(previous[id]??emptyWorkView()),tab:'activity'}}));select(id);};
+ const reviewWork=(id:string)=>{setViews(previous=>({...previous,[id]:{...(previous[id]??emptyWorkView()),tab:'activity'}}));select(id);setReviewingAttention(true);};
  const newChat=()=>{const id='draft-'+(++draftNumber.current);setDrafts(previous=>({...previous,[id]:emptyDraft()}));select(id);};
  const togglePin=(id:string)=>{if(adapter.kind==='fixture')setPinned(previous=>previous.includes(id)?previous.filter(value=>value!==id):[...previous,id]);else if(adapter.api.work){const epoch=++pinEpoch.current;void adapter.api.work.pin(id,!pinned.includes(id)).then(items=>{if(epoch===pinEpoch.current){setPinWork(items);setPinned(items.map(item=>item.id));}}).catch(()=>{if(epoch===pinEpoch.current)setOperationError('Pins could not be saved.');});}};
  const draft=drafts[selected]??emptyDraft();
@@ -60,10 +61,10 @@ export function App({adapter}:{adapter:DesktopAdapter}){
  else if(page==='library')content=<LibraryView fixture={adapter.fixture} select={select}/>;
  else if(page==='connections')content=<ConnectionsView fixture={fixture} inbox={()=>setPage('inbox')}/>;
  else if(page==='background')content=<BackgroundView snapshot={snapshot} fixture={adapter.fixture} select={select}/>;
- else if(page==='inbox')content=<><InboxView items={snapshot.inbox.items} fixture={fixture} select={reviewWork}/>{snapshot.inbox.nextCursor&&<Button disabled={snapshot.inbox.items.length>=2000} onClick={()=>operate(()=>adapter.api.moreInbox())}>{snapshot.inbox.items.length>=2000?'First 2,000 attention items shown':'Load more attention items'}</Button>}</>;
+ else if(page==='inbox')content=<><InboxView setup={()=>setPage('models')} background={()=>setPage('background')} items={snapshot.inbox.items} fixture={fixture} select={reviewWork}/>{snapshot.inbox.nextCursor&&<Button disabled={snapshot.inbox.items.length>=2000} onClick={()=>operate(()=>adapter.api.moreInbox())}>{snapshot.inbox.items.length>=2000?'First 2,000 attention items shown':'Load more attention items'}</Button>}</>;
  else if(page==='work'&&selected==='work-list')content=<WorkList items={snapshot.work.items} select={select} more={snapshot.work.nextCursor?moreWork:undefined} loading={loadingMore} limited={snapshot.work.items.length>=2000}/>;
  else if(page==='work'&&(selection.loading||selection.failed))content=<><Topline label="Work" profile={snapshot.profile.label}/><div className="ec-page"><div className="ec-empty" role="status"><Icon name={selection.loading?'loader-circle':'circle-alert'}/><h1>{selection.loading?'Loading Work':'Work unavailable'}</h1><p>{selection.loading?'Loading the selected Work from this profile.':'This Work could not be loaded. It may have been removed or become unavailable.'}</p>{selection.failed&&<Button onClick={selection.retry}>Retry Work</Button>}</div></div></>;
- else if(page==='work')content=<>{!fixture&&<SetupNotice snapshot={snapshot}/>}<WorkView key={snapshot.profile.id+':'+selected} view={view} changeView={changeView} adapter={adapter} work={work} draft={draft} change={changeDraft} pinned={pinned.includes(selected)} togglePin={()=>togglePin(selected)} models={()=>setPage('models')} profile={snapshot.profile.label} select={id=>{setDrafts(previous=>({...previous,[id]:previous[selected]??draft}));select(id);}} attention={snapshot.inbox.items.filter(item=>item.workId===selected)}/></>;
+ else if(page==='work')content=<>{!fixture&&<SetupNotice snapshot={snapshot}/>}<WorkView attentionNavigation={!fixture&&reviewingAttention?<><Button className="ec-ghost" onClick={()=>setPage('inbox')}>Back to Inbox</Button>{snapshot.inbox.items.some(item=>item.workId&&item.workId!==selected)&&<Button className="ec-ghost" onClick={()=>reviewWork(snapshot.inbox.items.find(item=>item.workId&&item.workId!==selected)!.workId!)}>Next request</Button>}</>:undefined} key={snapshot.profile.id+':'+selected} view={view} changeView={changeView} adapter={adapter} work={work} draft={draft} change={changeDraft} pinned={pinned.includes(selected)} togglePin={()=>togglePin(selected)} models={()=>setPage('models')} profile={snapshot.profile.label} select={id=>{setDrafts(previous=>({...previous,[id]:previous[selected]??draft}));select(id);}} attention={snapshot.inbox.items.filter(item=>item.workId===selected)}/></>;
  else content=null;
  useEffect(()=>{const root=document.getElementById('ec-branded-workspace');if(root&&adapter.fixture)root.dataset.runtimePhase=adapter.fixture.phase;return()=>{if(root)delete root.dataset.runtimePhase;};},[adapter.fixture?.phase]);
  const active=adapter.fixture&&['running','stopping'].includes(adapter.fixture.phase);

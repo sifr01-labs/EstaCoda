@@ -43,3 +43,9 @@ Validation: 87 targeted lifecycle/protocol/Task tests, 38 desktop unit tests, fo
 Live cards show the pending action, profile, target and isolation, with approve-once/reject choices from the canonical projection. Main looks up the Inbox item independently of pagination, validates its Work target and records a decision reference before routing to the supervisor. Repeated clicks inspect the original operation. Cards never label a decision as Task completion, and lost replies expose receipt inspection. No persistent grants or queue writes originate in Electron.
 
 Validation: 71 approval/protocol tests including hardline, expiry and stale-generation rejection; 39 desktop unit tests; sixteen Work browser journeys; root and desktop typechecks. Boundary review also rejected extra private Task-limit fields that could override concurrency and preserved safe attachment-expiry/input-limit errors without exposing filesystem paths.
+
+## 8. Needs-attention workflow
+
+Inbox supports category filtering, off-page Work review, return/next-request navigation, and provider setup routing for unbound setup requests. Other repair and governance requests expose their canonical details and the currently available repair path; they do not invent desktop mutations for later milestones. Profile-only attention carries canonical action hints even before a Session database exists. Decisions remain visible until canonical state removes them.
+
+Validation: five focused bootstrap/Inbox tests, eighteen browser Work/Inbox journeys, root and desktop typechecks. Review covered unbound setup entries, resolved-item focus, filtering and navigation continuity.

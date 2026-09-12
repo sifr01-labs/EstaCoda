@@ -12,9 +12,9 @@ async function live(page: Page) {
     let profile='default', revision=1, listener:(value:unknown)=>void=()=>{};
     const pending:Array<()=>void>=[], reads:string[]=[];
     const work=(id:string)=>({id,canonicalId:id,profileId:profile,kind:id.startsWith('task:')?'task':'session',actions:id.startsWith('task:')?[{id:'tasks.pause',enabled:true},{id:'tasks.resume',enabled:false,reason:'Not paused'},{id:'tasks.guide',enabled:true}]:[{id:'sessions.cancelTurn',enabled:true},{id:'sessions.send',enabled:true}],target:{targetId:'target',targetGeneration:1,label:'Trusted repo',isolation:'host'},title:id==='old'?'Older Work':'Listed Work',status:'running',updatedAt:control.freezeWorkTime?1:revision});
-    const snapshot=()=>({status:'ready',profile:{id:profile,label:profile,configuration:'ready'},runtime:'ready',work:{items:[work('listed')],nextCursor:'next'},inbox:{items:[{id:'attention',profileId:profile,workId:'old',kind:'approval',title:'Old request',summary:'Review older Work',createdAt:0,approval:control.approval,actions:[{id:'approve_once',enabled:true},{id:'reject',enabled:true}]}],nextCursor:null}});
+    const snapshot=()=>({status:'ready',profile:{id:profile,label:profile,configuration:'ready'},runtime:'ready',work:{items:[work('listed')],nextCursor:'next'},inbox:{items:[{id:'attention',profileId:profile,workId:'old',kind:'approval',title:'Old request',summary:'Review older Work',createdAt:0,approval:control.approval,actions:[{id:'approve_once',enabled:true},{id:'reject',enabled:true}]},...control.extraInbox],nextCursor:null}});
     const historyPending:Array<()=>void>=[];
-    const control={approval:null as any,decisionReceipt:null as any,decisions:[] as any[],receipt:null as any,actions:[] as unknown[],preview:{active:false,turnId:null as string|null,text:'',truncated:false},freezeWorkTime:false,delay:false,fail:false,delayHistory:false,total:300,releaseHistory:()=>historyPending.splice(0).forEach(done=>done()),refresh:()=>{revision++;listener(snapshot());},flush:()=>pending.splice(0).forEach(done=>done()),reads};
+    const control={extraInbox:[] as any[],approval:null as any,decisionReceipt:null as any,decisions:[] as any[],receipt:null as any,actions:[] as unknown[],preview:{active:false,turnId:null as string|null,text:'',truncated:false},freezeWorkTime:false,delay:false,fail:false,delayHistory:false,total:300,releaseHistory:()=>historyPending.splice(0).forEach(done=>done()),refresh:()=>{revision++;listener(snapshot());},flush:()=>pending.splice(0).forEach(done=>done()),reads};
     const submissions:unknown[]=[];(control as any).submissions=submissions;
     const api={work:{inspectDecision:async()=>control.decisionReceipt,decide:async(itemId:string,decision:string)=>{control.decisions.push({itemId,decision});control.decisionReceipt={method:'approvals.resolve',state:'completed',cancellation:'not_requested'};return control.decisionReceipt;},act:async(input:any)=>{control.actions.push(input);control.receipt={method:input.action,state:'accepted',cancellation:input.action==='sessions.cancelTurn'?'requested':'not_requested'};return control.receipt;},children:async(id:string)=>({items:id==='listed'?[{...work('old'),kind:'task',parentWorkId:'listed',title:'Child Task'}]:[],nextCursor:null}),live:async()=>control.preview,targets:async()=>({items:[{targetId:'target',targetGeneration:1,label:'Trusted repo',isolation:'host'}],truncated:false}),attach:async()=>[{id:'attachment',name:'notes.md',size:20,type:'text/plain'}],submit:async(input:unknown)=>{submissions.push(input);return{workId:(input as any).kind==='task'?'task:new':'session:new',receipt:{method:(input as any).kind==='task'?'tasks.create':'sessions.send',state:'accepted'}};},inspect:async()=>control.receipt,search:async(query:string)=>({items:query.toLowerCase().includes('older')?[work('old')]:[],nextCursor:null}),pins:async()=>[],pin:async(id:string,pinned:boolean)=>pinned?[work(id)]:[]},platform:'darwin',onSnapshot:(fn:typeof listener)=>{listener=fn;fn(snapshot());return()=>{};},
       getWork:async(id:string)=>{const selected=work(id);if(control.delay)await new Promise<void>(resolve=>pending.push(resolve));if(control.fail)throw Error('Unavailable');return selected;},
@@ -241,4 +241,25 @@ for(const decision of ['approved','denied'] as const)test('records '+decision+' 
  await expect(card.getByRole('button',{name:'Approve once',exact:true})).toBeDisabled();
  expect(await page.evaluate(()=>(window as any).continuity.decisions)).toEqual([{itemId:'attention',decision}]);
  await expect(page.locator('.ec-workmeta')).toContainText('Running');
+});
+
+
+test('Inbox filters attention and routes unbound provider setup without a fake Work reference',async({page})=>{
+ await live(page);
+ await page.evaluate(()=>{const c=(window as any).continuity;c.extraInbox=[{id:'setup:model',profileId:'default',workId:null,kind:'setup',title:'Choose a model',summary:'Configure a model',createdAt:0,approval:null},{id:'evolution:proposal',profileId:'default',workId:null,kind:'evolution',title:'Review proposal',summary:'A bounded proposal awaits review',createdAt:0,approval:null}];c.refresh();});
+ await page.locator('.ec-navgroup').getByRole('button',{name:/Inbox/}).click();
+ await page.getByLabel('Filter attention').selectOption('evolution');
+ await page.getByRole('button',{name:'View details',exact:true}).click();
+ await expect(page.getByLabel('Attention details')).toContainText('Agent Evolution in the CLI');
+ await page.getByLabel('Filter attention').selectOption('setup');
+ await page.getByRole('button',{name:'Review setup',exact:true}).click();
+ await expect(page.getByRole('heading',{name:'Models & providers'})).toBeVisible();
+});
+
+test('attention review returns to Inbox while preserving the selected Work',async({page})=>{
+ await live(page);await page.locator('.ec-navgroup').getByRole('button',{name:/Inbox/}).click();
+ await page.getByRole('button',{name:'Review request',exact:true}).click();
+ await expect(page.getByRole('heading',{name:'Older Work'})).toBeVisible();
+ await page.getByRole('button',{name:'Back to Inbox',exact:true}).click();
+ await expect(page.getByRole('heading',{name:'Inbox',exact:true})).toBeVisible();
 });

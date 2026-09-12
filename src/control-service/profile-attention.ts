@@ -1,3 +1,4 @@
+import {inboxActions} from './action-projections.js';
 import { supervisorReadiness } from './supervisor-client.js';
 import { isOAuthAuthMethod } from '../providers/oauth/oauth-types.js';
 import { constants } from 'node:fs';
@@ -76,5 +77,6 @@ export async function profileAttention(input: { homeDir: string; profileId: stri
     const runtime = await supervisorReadiness({ ...input, version: input.version });
     if (runtime.state === 'disconnected' || runtime.state === 'incompatible') add('setup:supervisor', 'Shared execution needs attention', 'Review the shared supervisor connection before continuing.');
   }
+  for(const item of inbox)item.actions=inboxActions(item);
   return { inbox, jobs };
 }
