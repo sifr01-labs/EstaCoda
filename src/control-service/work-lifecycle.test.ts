@@ -1,3 +1,6 @@
+import {SQLiteTaskStore} from '../tasks/sqlite-task-store.js';
+import {desktopCreateTask} from '../gateway/desktop-task-create.js';
+import {desktopTaskControl} from '../gateway/desktop-task-controls.js';
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { mkdtemp, rm } from 'node:fs/promises';
@@ -50,6 +53,7 @@ it.skipIf(process.platform === 'win32')('starts and controls Work through a real
     const grantApproval = vi.fn(async () => undefined);
     const receipts = new ControlReceipts(db.db, 'p', lock.instanceId!);
     host = new SharedSessionHost({ profileId: 'p', sessionDb: db, receipts, approvalQueue: queue,
+      taskControl:async request=>{const store=new SQLiteTaskStore({db:db.db,profileId:'p'});return request.method==='task.create'?desktopCreateTask({store,request,session:(await db.getSessionForProfile(request.sessionId,'p'))!,context:{} as any}):desktopTaskControl(store,request);},
       validateTarget: async (request) => {
         const session = (await db.getSessionForProfile(request.sessionId, 'p'))!;
         await validateSessionWorkspaceOwnership({ homeDir, profileId: 'p', session, workspaceRoot: homeDir });
@@ -86,6 +90,15 @@ it.skipIf(process.platform === 'win32')('starts and controls Work through a real
     expect((await next.rpc('sessions.send', { ...binding, operationId: sendId, text: 'Read a file' })).result?.state).toBe('completed');
     expect((await next.rpc('approvals.resolve', { ...binding, operationId: createControlOperationId(), approvalId: approval.id, decision: 'approved' })).error).toBeDefined();
     expect(grantApproval).toHaveBeenCalledOnce();
+    const taskId='desktop-task',createId=createControlOperationId();
+    expect((await next.rpc('tasks.create',{...binding,taskId,operationId:createId,objective:'Inspect safely',limits:{maxProviderCalls:3,maxTotalTokens:8000,maxWallClockMs:60000},selection:null})).result).toMatchObject({state:'accepted',taskId});
+    while(host.hasPendingWork())await new Promise(resolve=>setTimeout(resolve,1));
+    expect((await next.rpc('operations.inspect',{...binding,taskId,operationId:createId,method:'tasks.create'})).result?.state).toBe('completed');
+    await next.rpc('control.bootstrap',{});
+    expect((await next.rpc('work.get',{workId:'task:'+taskId})).result).toMatchObject({kind:'task',status:'queued'});
+    expect((await next.rpc('tasks.pause',{...binding,taskId,operationId:createControlOperationId()})).result?.state).toBe('accepted');
+    while(host.hasPendingWork())await new Promise(resolve=>setTimeout(resolve,1));
+    expect(new SQLiteTaskStore({db:db.db,profileId:'p'}).getTask(taskId)?.status).toBe('paused');
     expect(clients.map((c) => c.diagnostics()).join('')).toBe('');
   } finally { for (const c of clients) await c.close(); await host?.close(); await transport?.close(); await releaseGatewayLock(paths, lock.instanceId); db.close(); await rm(homeDir, { recursive: true, force: true }); }
 }, 20_000);

@@ -11,7 +11,7 @@ export type SessionControl = { operationId: string; sessionId: string; target: T
 export type OperationReceipt = {
   taskId?: string;
   operationId: string; profileId: string; sessionId: string; target: TargetReference;
-  method: "sessions.setModel" | "tasks.setModel" | "tasks.pause" | "tasks.resume" | "tasks.cancel" | "tasks.retry" | "tasks.guide" | "sessions.start" | "sessions.resume" | "sessions.send" | "sessions.cancelTurn" | "approvals.resolve";
+  method: "tasks.create" | "sessions.setModel" | "tasks.setModel" | "tasks.pause" | "tasks.resume" | "tasks.cancel" | "tasks.retry" | "tasks.guide" | "sessions.start" | "sessions.resume" | "sessions.send" | "sessions.cancelTurn" | "approvals.resolve";
   state: "accepted" | "dispatched" | "completed" | "uncertain" | "unknown" | "expired";
   cancellation: "not_requested" | "requested" | "confirmed";
 };
@@ -20,6 +20,7 @@ export type SubscribeResult =
   | { state: "subscribed"; subscriptionId: string; cursor: ControlCursor }
   | { state: "snapshot_required"; reason: "instance_changed" | "stream_changed" | "cursor_expired" | "overflow" };
 export type MethodContracts = {
+  "tasks.create":{params:SessionControl&{taskId:string;objective:string;limits:{maxProviderCalls:number;maxTotalTokens:number;maxWallClockMs:number};selection:{providerId:string;modelId:string}|null};result:OperationReceipt};
   "work.live": {params:{workId:string};result:{active:boolean;turnId:string|null;text:string;truncated:boolean}};
   "work.targets": {params:Record<string,never>;result:{items:TargetProjection[];truncated:boolean}};
   "models.verifyDraft": {params:ModelDraftBinding&{spendApproved:true;allowPrivateEndpoint:boolean};result:CandidateVerification};

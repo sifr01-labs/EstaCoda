@@ -67,6 +67,7 @@ const cases = {
   "providers.list": { params: { limit: 10 }, result: { items: [{ id: "local", label: "Local", authMethods: ["none"], state: "ready" }], nextCursor: null } },
   "connections.list": { params: { limit: 10 }, result: { items: [connection], nextCursor: null } },
   "connections.get": { params: { connectionId: "telegram" }, result: connection },
+  "tasks.create": {params:{...binding,taskId:"task",objective:"Review",limits:{maxProviderCalls:10,maxTotalTokens:10000,maxWallClockMs:60000},selection:null},result:{...receipt,method:"tasks.create",taskId:"task"}},
   "tasks.pause": { params: { ...binding, taskId: "task" }, result: { ...receipt, taskId: "task", method: "tasks.pause" } },
   "tasks.resume": { params: { ...binding, taskId: "task" }, result: { ...receipt, taskId: "task", method: "tasks.resume" } },
   "tasks.cancel": { params: { ...binding, taskId: "task" }, result: { ...receipt, taskId: "task", method: "tasks.cancel" } },

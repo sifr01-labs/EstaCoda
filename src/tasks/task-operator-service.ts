@@ -257,6 +257,7 @@ export class TaskOperatorService {
   }
 
   begin(input: {
+    taskId?:string;creationKey?:string;executionLimits?:{maxProviderCalls:number;maxTotalTokens:number;maxWallClockMs:number};
     objective: string;
     workspace: TaskWorkspaceBinding;
     creatorSessionId: string;
@@ -266,10 +267,14 @@ export class TaskOperatorService {
     initialHostLease?: InitialTaskHostLeaseInput;
   }): TaskStatusProjection {
     const objective = normalizeTaskOperatorObjective(input.objective);
+    const limits=input.executionLimits??{maxProviderCalls:45,maxTotalTokens:1_000_000,maxWallClockMs:30*60*1000};
+    for(const[key,max]of Object.entries({maxProviderCalls:45,maxTotalTokens:1_000_000,maxWallClockMs:30*60*1000})){const value=limits[key as keyof typeof limits];if(!Number.isSafeInteger(value)||value<1||value>max)throw new Error('Task limits may only narrow operator defaults.');}
+    if(input.taskId&&!input.creationKey)throw new Error('An explicit Task ID needs an idempotent creation key.');
     const authority = operatorTaskAuthority();
     const source = input.source ?? "cli";
     const executionPreference = input.executionPreference ?? (source === "gateway" ? "background" : "auto");
-    const graph = new FixedTaskService({ store: this.#store, now: this.#now }).create({
+    const graph = new FixedTaskService({ store: this.#store, now: this.#now,...(input.taskId?{id:(kind)=>kind==='task'?input.taskId!:kind+'_'+randomUUID()}:{} ) }).create({
+      ...(input.creationKey?{creationKey:input.creationKey}:{}),
       creatorSessionId: input.creatorSessionId,
       source,
       executionPreference,
@@ -279,9 +284,7 @@ export class TaskOperatorService {
       ...(this.#defaultTaskSpendingLimit === undefined ? {} : { spendingLimit: this.#defaultTaskSpendingLimit }),
       executionLimits: {
         maxConcurrentAttempts: 1,
-        maxProviderCalls: 45,
-        maxTotalTokens: 1_000_000,
-        maxWallClockMs: 30 * 60 * 1_000
+        ...limits
       },
       steps: [{
         key: "task",
@@ -292,9 +295,7 @@ export class TaskOperatorService {
         childTaskPolicy: "forbid",
         authorityPolicy: authority,
         executionLimits: {
-          maxProviderCalls: 45,
-          maxTotalTokens: 1_000_000,
-          maxWallClockMs: 30 * 60 * 1_000
+          ...limits
         },
         retryPolicy: {
           maxAttempts: TASK_GRAPH_LIMITS.maxAttemptsPerStep,

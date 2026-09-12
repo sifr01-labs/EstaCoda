@@ -1848,12 +1848,18 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
       const sharedHost = new SharedSessionHost({
         profileId, sessionDb, receipts, approvalQueue: gatewayApprovalQueue,
         modelControl: async (request) => {const current=await loadConfig();return desktopModelControl({request,profileId,sessionDb,tasks:taskStore,context:{config:current.config,providerRegistry:current.providerRegistry,homeDir,profileId},invalidate:id=>runtimeCache.invalidate(id)});},
-        taskControl: (request) => desktopTaskControl(taskStore, request),
+        taskControl: async(request) => {
+          if(request.method!=='task.create')return desktopTaskControl(taskStore,request);
+          const current=await loadConfig();const session=await sessionDb.getSessionForProfile(request.sessionId,profileId);
+          if(!session)throw new Error('Origin unavailable.');
+          const {desktopCreateTask}=await import('./desktop-task-create.js');
+          return desktopCreateTask({store:taskStore,request,session,context:{config:current.config,providerRegistry:current.providerRegistry,homeDir,profileId},spendingLimit:current.budgets.task});
+        },
         validateTarget: async (request) => {
           const session = await sessionDb.getSessionForProfile(request.sessionId, profileId);
           if (!session?.executionTarget || session.executionTarget.targetGeneration !== request.targetGeneration) throw new Error('Stale Session target.');
           const pendingTask = request.method === 'approval' ? taskApprovalService.listPendingForSession(request.sessionId).find((approval) => approval.approvalId === request.approvalId) : undefined;
-          if (request.method.startsWith('task.') || pendingTask) {
+          if (request.method.startsWith('task.') && request.method!=='task.create' || pendingTask) {
             const taskId = request.taskId ?? pendingTask?.taskId;
             const task = taskId ? taskStore.getTask(taskId) : null;
             if (!task?.executionTarget || task.originSessionId !== request.sessionId || task.executionTarget.targetId !== request.targetId || task.executionTarget.targetGeneration !== request.targetGeneration) throw new Error('Task target changed.');

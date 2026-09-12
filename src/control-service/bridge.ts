@@ -41,7 +41,7 @@ export class DesktopBridge {
     readWork?: (signal: AbortSignal) => Promise<WorkState>;
     readState?: (signal: AbortSignal) => Promise<BootstrapState> }) {
     this.server = new StdioControlServer({ ...options, events: ['work.changed', 'activity.appended', 'attention.changed', 'control.ready', 'service.warning', 'service.shutdown'], handlers: {
-      ...Object.fromEntries(['sessions.setModel', 'tasks.setModel', 'approvals.resolve', 'tasks.pause', 'tasks.resume', 'tasks.cancel', 'tasks.retry', 'tasks.guide', 'sessions.start', 'sessions.resume', 'sessions.send', 'sessions.cancelTurn', 'operations.inspect'].map((method) =>
+      ...Object.fromEntries(['tasks.create','sessions.setModel', 'tasks.setModel', 'approvals.resolve', 'tasks.pause', 'tasks.resume', 'tasks.cancel', 'tasks.retry', 'tasks.guide', 'sessions.start', 'sessions.resume', 'sessions.send', 'sessions.cancelTurn', 'operations.inspect'].map((method) =>
         [method, async (request: SessionMutationRequest, signal: AbortSignal) => ({ result: await sessionControl(this.options, request, signal) })])),
       'models.verifyDraft':async(request,signal)=>{if(request.method!=='models.verifyDraft')throw new ControlProtocolError('-32601');return {result:await this.modelSetup.verifyDraft(request.params,signal,this.verifier)};},
       'models.reviewConfigured':async(request)=>{if(request.method!=='models.reviewConfigured')throw new ControlProtocolError('-32601');return {result:await this.modelSetup.reviewConfigured(request.params)};},

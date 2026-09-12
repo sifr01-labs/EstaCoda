@@ -14,7 +14,7 @@ import{Topline,Button,Icon}from'./components/primitives.js';
 import{AppearanceView}from'./components/appearance-view.js';
 import{Sidebar,type PageName}from'./components/sidebar.js';
 import{WorkView}from'./components/work-view.js';import{InboxView}from'./components/inbox-view.js';
-export type Draft={id?:string;target?:import('@estacoda/control-protocol').TargetReference;modelSelection?:{providerId:string;modelId:string}|null;text:string;attachments:{id?:string;name:string;type:string;size:number}[];model:string;note:string};
+export type Draft={limitsReviewed?:boolean;kind?:'session'|'task';limits?:{maxProviderCalls:number;maxTotalTokens:number;maxWallClockMs:number};id?:string;target?:import('@estacoda/control-protocol').TargetReference;modelSelection?:{providerId:string;modelId:string}|null;text:string;attachments:{id?:string;name:string;type:string;size:number}[];model:string;note:string};
 export type WorkViewState={tab:'activity'|'changes'|'results';inspector:boolean;activityExtent:number};
 export const emptyWorkView=():WorkViewState=>({tab:'activity',inspector:false,activityExtent:100});
 export const emptyDraft=():Draft=>({id:crypto.randomUUID(),text:'',attachments:[],model:'Kimi K3',note:''});

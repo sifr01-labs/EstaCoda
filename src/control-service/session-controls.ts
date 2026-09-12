@@ -6,8 +6,8 @@ import { SQLiteSessionDB } from '../session/sqlite-session-db.js';
 import { ExecutionTargetStore, targetBinding } from '../workspaces/execution-target.js';
 import { WorkspaceTrustStore } from '../security/workspace-trust-store.js';
 
-export type SessionMutationRequest = Extract<MethodRequest, { method: 'sessions.start' | 'sessions.resume' | 'sessions.send' | 'sessions.cancelTurn' | 'approvals.resolve' | 'operations.inspect' | 'sessions.setModel' | 'tasks.setModel' | 'tasks.pause' | 'tasks.resume' | 'tasks.cancel' | 'tasks.retry' | 'tasks.guide' }>;
-const methods = { 'sessions.setModel':'model', 'tasks.setModel':'task.model', 'tasks.pause': 'task.pause', 'tasks.resume': 'task.resume', 'tasks.cancel': 'task.cancel', 'tasks.retry': 'task.retry', 'tasks.guide': 'task.guide', 'sessions.start': 'start', 'sessions.resume': 'resume', 'sessions.send': 'send', 'sessions.cancelTurn': 'cancel', 'approvals.resolve': 'approval' } as const;
+export type SessionMutationRequest = Extract<MethodRequest, { method: 'tasks.create' | 'sessions.start' | 'sessions.resume' | 'sessions.send' | 'sessions.cancelTurn' | 'approvals.resolve' | 'operations.inspect' | 'sessions.setModel' | 'tasks.setModel' | 'tasks.pause' | 'tasks.resume' | 'tasks.cancel' | 'tasks.retry' | 'tasks.guide' }>;
+const methods = { 'tasks.create':'task.create', 'sessions.setModel':'model', 'tasks.setModel':'task.model', 'tasks.pause': 'task.pause', 'tasks.resume': 'task.resume', 'tasks.cancel': 'task.cancel', 'tasks.retry': 'task.retry', 'tasks.guide': 'task.guide', 'sessions.start': 'start', 'sessions.resume': 'resume', 'sessions.send': 'send', 'sessions.cancelTurn': 'cancel', 'approvals.resolve': 'approval' } as const;
 /** Creates only a canonical Session reference. Provider/tool construction stays in the supervisor. */
 async function prepareStart(input: { homeDir: string; profileId: string }, request: SessionMutationRequest): Promise<void> {
   const targets = new ExecutionTargetStore(input);
@@ -38,6 +38,7 @@ export async function sessionControl(input: { homeDir: string; profileId: string
   const control: PrivateControlRequest = { method: request.method === 'operations.inspect' ? 'inspect' : methods[method],
     sessionId: request.params.sessionId, targetId: request.params.target.targetId, targetGeneration: request.params.target.targetGeneration,
     ...(request.method === 'approvals.resolve' ? { approvalId: request.params.approvalId, decision: request.params.decision } : {}),
+    ...(request.method==='tasks.create'?{objective:request.params.objective,limits:request.params.limits}:{}),
     ...('taskId' in request.params ? { taskId: request.params.taskId } : {}),
     ...('selection' in request.params ? {selection:request.params.selection} : {}),
     ...(request.method === 'tasks.retry' ? { stepId: request.params.stepId } : {}),
