@@ -1,4 +1,6 @@
 export const settingsArabic={
+ 'Independent speech-to-text and text-to-speech':'تحويل مستقل بين الكلام والنص',
+ 'Speech-to-text and text-to-speech have separate providers, credentials and enabled states. These are batch media tools, not a realtime conversation. Local models require an explicit dependency installation.':'لتحويل الكلام إلى نص وتحويل النص إلى كلام مزوّدون وبيانات اعتماد وحالات تفعيل مستقلة. تعالج هذه الأدوات المقاطع المسجّلة ولا تقدّم محادثة فورية. تتطلب النماذج المحلية تثبيت الاعتماديات صراحةً.',
  'Image analysis':'تحليل الصور',
  'Image analysis and image generation':'تحليل الصور وتوليدها',
  'Automatic uses the configured model route. Dedicated analysis uses the vision provider and model below. Off disables analysis.':'يستخدم الوضع التلقائي مسار النموذج المضبوط. يستخدم التحليل المخصص مزوّد الرؤية ونموذجه أدناه. يوقف خيار الإيقاف التحليل.',

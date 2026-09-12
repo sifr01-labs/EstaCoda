@@ -39,3 +39,9 @@ it('keeps image generation independent of vision routing and preserves legacy im
  await expect(owner.review({...b,changes:[{fieldId:'auxiliaryModels.vision.hostedProcessing',selectors:[],value:'allow-all'}]})).rejects.toThrow();
  }finally{owner.dispose();candidates.dispose();await rm(homeDir,{recursive:true,force:true});}
 });
+it('saves independent STT/TTS routes and rejects invalid provider/speed without changing the profile',async()=>{
+ const homeDir=await mkdtemp(join(tmpdir(),'ec-settings-')),input={homeDir,profileId:'default'},paths=resolveProfileStateHome(input),candidates=new CredentialCandidates('default','instance'),owner=new PublicSettings(input,candidates);
+ try{await mkdir(paths.profileRoot,{recursive:true});await writeFile(paths.configPath,'{}');const b={windowId:'w',generation:1};const review=await owner.review({...b,changes:[{fieldId:'stt.provider',selectors:[],value:'local'},{fieldId:'stt.enabled',selectors:[],value:false},{fieldId:'tts.provider',selectors:[],value:'edge'},{fieldId:'tts.enabled',selectors:[],value:true},{fieldId:'tts.speed',selectors:[],value:1.25},{fieldId:'tts.minimax.pitch',selectors:[],value:-8}]});await owner.apply({...b,draftId:review.draftId},new AbortController().signal);const config=JSON.parse(await readFile(paths.configPath,'utf8'));expect(config.stt).toMatchObject({provider:'local',enabled:false});expect(config.tts).toMatchObject({provider:'edge',enabled:true,speed:1.25,minimax:{pitch:-8}});
+ const before=await readFile(paths.configPath,'utf8');for(const [fieldId,value] of [['tts.speed',99],['stt.provider','made-up']] as const)await expect(owner.review({...b,changes:[{fieldId,selectors:[],value}]})).rejects.toThrow();expect(await readFile(paths.configPath,'utf8')).toBe(before);
+ }finally{owner.dispose();candidates.dispose();await rm(homeDir,{recursive:true,force:true});}
+});
