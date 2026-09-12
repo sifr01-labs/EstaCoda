@@ -111,7 +111,7 @@ export class ArtifactStore {
       throw new Error("Session artifact capture is invalid.");
     }
     const content = await readArtifactBytes(capturePath, input.bytes);
-    const inspection = inspectBrowserDownload(source.filename, content);
+    const inspection = inspectRetainedContent(source, content);
     const actualHash = createHash("sha256").update(content).digest("hex");
     if (
       inspection.allowed === false ||
@@ -175,7 +175,7 @@ export class ArtifactStore {
         const file = await lstat(localPath);
         if (!file.isFile() || file.isSymbolicLink() || file.size !== registration.bytes) continue;
         const content = await readArtifactBytes(localPath, registration.bytes);
-        const inspection = inspectBrowserDownload(registration.source.filename, content);
+        const inspection = inspectRetainedContent(registration.source, content);
         if (
           inspection.allowed === false ||
           inspection.kind !== registration.kind ||
@@ -201,15 +201,25 @@ export class ArtifactStore {
 
   /** Reverify on every preview; hydration alone is never a lasting integrity grant. */
   async previewRegistration(value: unknown, scope: SessionArtifactScope): Promise<{metadata: RetainedArtifactMetadata; text: string | null; truncated: boolean}> {
+    const {registration,content} = await this.#verifiedContent(value,scope);
+    const text = registration.mimeType.startsWith("text/") || ["application/json", "application/yaml", "application/xml"].includes(registration.mimeType);
+    const display = text ? redactSensitiveText(content.subarray(0, 16384).toString("utf8")) : null;
+    return { metadata: retainedArtifactMetadata(registration), text: display?.slice(0, 16384) ?? null, truncated: text && (content.length > 16384 || display!.length > 16384) };
+  }
+
+  async verifiedImage(value:unknown,scope:SessionArtifactScope):Promise<Buffer> {
+    const parsed=parseRegistration(value);
+    if(!parsed || parsed.bytes>8*1024*1024 || !["image/png","image/jpeg"].includes(parsed.mimeType))throw new Error("Image preview unavailable.");
+    return (await this.#verifiedContent(value,scope)).content;
+  }
+  async #verifiedContent(value:unknown,scope:SessionArtifactScope){
     const registration = parseRegistration(value);
     if (!registration || registration.sessionId !== scope.sessionId || registration.profileId !== scope.profileId) throw new Error("Artifact unavailable.");
     const path = await this.#resolveStorageKey(registration.storageKey, false);
     const content = await readArtifactBytes(path, registration.bytes);
-    const inspection = inspectBrowserDownload(registration.source.filename, content);
+    const inspection = inspectRetainedContent(registration.source, content);
     if (!inspection.allowed || inspection.kind !== registration.kind || inspection.mimeType !== registration.mimeType || createHash("sha256").update(content).digest("hex") !== registration.sha256) throw new Error("Artifact integrity check failed.");
-    const text = registration.mimeType.startsWith("text/") || ["application/json", "application/yaml", "application/xml"].includes(registration.mimeType);
-    const display = text ? redactSensitiveText(content.subarray(0, 16384).toString("utf8")) : null;
-    return { metadata: retainedArtifactMetadata(registration), text: display?.slice(0, 16384) ?? null, truncated: text && (content.length > 16384 || display!.length > 16384) };
+    return {registration,content};
   }
 
   list(scope?: SessionArtifactScope): ArtifactRecord[] {
@@ -266,7 +276,7 @@ function artifactFromRegistration(
       sourceOrigin: registration.source.origin,
       source: registration.source.kind,
       ...(registration.apiDescription === undefined ? {} : { apiDescription: registration.apiDescription }),
-      outcome: registration.source.kind === "workspace.changes" ? "changes-exported" : "download-completed"
+      outcome: registration.source.kind === "workspace.changes" ? "changes-exported" : registration.source.kind === "browser.screenshot" ? "screenshot-captured" : "download-completed"
     }
   };
 }
@@ -313,7 +323,7 @@ export function parseRegistration(value: unknown): SessionArtifactRegistration |
 
 function validateSource(value: unknown): SessionArtifactSource {
   if (!isRecord(value) || Object.keys(value).some((key) => !["kind", "description", "filename", "origin"].includes(key)) ||
-    !["browser.download", "workspace.changes"].includes(String(value.kind)) ||
+    !["browser.download", "browser.screenshot", "workspace.changes"].includes(String(value.kind)) ||
     typeof value.description !== "string" || value.description.length === 0 || value.description.length > 320 ||
     redactSensitiveText(value.description) !== value.description ||
     typeof value.filename !== "string" || value.filename.length === 0 || value.filename.length > 160 ||
@@ -324,6 +334,10 @@ function validateSource(value: unknown): SessionArtifactSource {
   if (value.kind === "workspace.changes") {
     if (!/^workspace:target_[a-f0-9-]{36}$/u.test(value.origin) || value.filename !== "workspace-changes.json") throw new Error("Invalid workspace artifact origin.");
     return { kind: "workspace.changes", description: value.description, filename: value.filename, origin: value.origin };
+  }
+  if (value.kind === "browser.screenshot") {
+    if (!/^browser:[a-f0-9]{64}$/u.test(value.origin) || !["browser.png", "browser.jpg"].includes(value.filename)) throw new Error("Invalid screenshot origin.");
+    return {kind:"browser.screenshot",description:value.description,filename:value.filename,origin:value.origin};
   }
   const origin = new URL(value.origin);
   if ((origin.protocol !== "http:" && origin.protocol !== "https:") || origin.origin !== value.origin || origin.username || origin.password) {
@@ -411,4 +425,11 @@ async function readArtifactBytes(path: string, expected: number): Promise<Buffer
     if (!current.isFile() || current.isSymbolicLink() || current.ino !== before.ino || current.dev !== before.dev || after.size !== before.size || after.mtimeMs !== before.mtimeMs || after.ctimeMs !== before.ctimeMs || await realpath(path) !== canonical) throw new Error("Artifact changed during read.");
     return bytes;
   } finally { await file.close(); }
+}
+
+function inspectRetainedContent(source:SessionArtifactSource,content:Buffer): ReturnType<typeof inspectBrowserDownload>|{allowed:true;kind:"image";mimeType:string;apiDescription?:never} {
+  if(source.kind!=="browser.screenshot")return inspectBrowserDownload(source.filename,content);
+  if(source.filename==="browser.png"&&content.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])))return{allowed:true,kind:"image",mimeType:"image/png"};
+  if(source.filename==="browser.jpg"&&content[0]===255&&content[1]===216&&content[2]===255)return{allowed:true,kind:"image",mimeType:"image/jpeg"};
+  return{allowed:false,reason:"invalid-screenshot-content"};
 }

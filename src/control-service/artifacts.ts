@@ -62,7 +62,7 @@ export async function inspectArtifact(input:Input,reference:ArtifactReference,op
  }finally{db.close();}
 }
 
-async function assertProfileContentRoot(input:Input,path:string):Promise<void>{
+export async function assertProfileContentRoot(input:Input,path:string):Promise<void>{
  const state=resolveGlobalStateHome(input).stateRoot;
  if(await realpath(path)!==join(await realpath(state),relative(state,path)))throw new Error('Profile content root changed.');
 }

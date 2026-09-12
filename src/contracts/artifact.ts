@@ -31,7 +31,7 @@ export type ArtifactRecord = {
 export const SESSION_ARTIFACT_VERSION = 1 as const;
 
 export type SessionArtifactSource = {
-  kind: "browser.download" | "workspace.changes";
+  kind: "browser.download" | "browser.screenshot" | "workspace.changes";
   description: string;
   filename: string;
   origin: string;

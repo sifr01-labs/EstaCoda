@@ -653,6 +653,20 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
           options.artifactStore,
           context?.visibleTurnId
         );
+        let retainedArtifactId:string|undefined;
+        const owner=options.currentSessionId?.();
+        if(saved.bytes<=8*1024*1024&&owner&&options.profileId&&options.artifactStore&&options.persistSessionArtifact&&screenshot.observation?.sanitized===true&&screenshot.observation.sessionId){
+          const staging=join(dirname(saved.path),randomUUID()+'.capture');
+          try{
+            await writeFile(staging,Buffer.from(screenshot.base64,'base64'),{flag:'wx',mode:0o600});
+            const artifact=await options.artifactStore.retainSessionArtifact({capturePath:staging,sessionId:owner,profileId:options.profileId,
+              kind:"image",bytes:saved.bytes,mimeType:screenshot.mimeType,sha256:createHash("sha256").update(Buffer.from(screenshot.base64,"base64")).digest("hex"),
+              source:{kind:"browser.screenshot",description:"Sanitized governed browser capture",filename:screenshot.mimeType==="image/png"?"browser.png":"browser.jpg",origin:"browser:"+createHash("sha256").update(screenshot.observation.sessionId).digest("hex")},
+              persist:registration=>options.persistSessionArtifact!(owner,registration)});
+            retainedArtifactId=artifact.id;
+          }catch{/* A failed optional retention does not replay capture or expose a backing path to Desktop. */}
+          finally{await rm(staging,{force:true});}
+        }
         return {
           ok: true,
           content: [
@@ -666,6 +680,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
           metadata: {
             backend: browserBackend.kind,
             path: saved.path,
+            ...(retainedArtifactId?{artifactId:retainedArtifactId}:{}),
             mimeType: screenshot.mimeType,
             bytes: saved.bytes,
             ...(screenshot.observation === undefined ? {} : { observation: screenshot.observation })
