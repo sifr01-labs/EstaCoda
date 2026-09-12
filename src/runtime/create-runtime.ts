@@ -1,3 +1,5 @@
+import {BrowserControlOwner} from '../browser/control-lease.js';
+import {gateBrowserBackend} from '../browser/control-gate.js';
 import { workspaceChangeSummary } from "../ui/workspace-change-summary.js";
 import { ChangeApplicationStore } from "../workspaces/change-application.js";
 import { resolveSessionOriginSurface } from "../session/session-presentation.js";
@@ -671,7 +673,7 @@ async function buildRuntime(options: RuntimeOptions, rollback: ResourceCleanup):
   resources.defer(() => unregisterBrowserEmergencyCleanup?.());
   resources.defer(async () => { browserSessionLifecycle?.stop(); await browserSessionLifecycle?.cleanupAll(); });
   resources.defer(async () => { await ownedBrowserBackend?.close?.(); });
-  const browserBackend = options.browserBackend ?? (() => {
+  const rawBrowserBackend = options.browserBackend ?? (() => {
     const created = supervisedLocalCdp
       ? createSupervisedLocalCdpBrowserBackend({
         cdpUrl: options.browser?.cdpUrl,
@@ -709,6 +711,9 @@ async function buildRuntime(options: RuntimeOptions, rollback: ResourceCleanup):
     };
     return created;
   })();
+  const browserControlOwner = new BrowserControlOwner();
+  resources.defer(() => browserControlOwner.close());
+  const browserBackend = gateBrowserBackend(rawBrowserBackend,browserControlOwner);
   browserLifecycleBackend = browserBackend as BrowserBackend & {
     closeSession?: (sessionId: string) => void | Promise<void>;
   };

@@ -6,6 +6,7 @@ export class BrowserControlOwner {
  #lease?:BrowserControlLease;#holder?:string;#deadline=0;#busy=0;#sequence=0;
  constructor(readonly now:()=>number=()=>performance.now(),readonly ttlMs=10_000){}
  #expire(){if(this.#phase==='human'&&this.now()>=this.#deadline){this.#phase='paused';this.#lease=undefined;this.#holder=undefined;this.#generation++;}}
+ agentSync<T>(operation:()=>T):T{this.#expire();if(this.#phase!=='agent')throw new Error('Browser agent actions paused for human control.');this.#busy++;try{return operation();}finally{this.#busy--;}}
  async agent<T>(operation:()=>Promise<T>):Promise<T>{this.#expire();if(this.#phase!=='agent')throw new Error('Browser agent actions paused for human control.');this.#busy++;try{return await operation();}finally{this.#busy--;}}
  acquire(holder:string):BrowserControlLease{
   this.#expire();if(this.#phase==='closed'||this.#busy||this.#phase==='human')throw new Error('Browser control is busy or already owned.');
