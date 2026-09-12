@@ -2356,6 +2356,8 @@ function createBrowserDownloadTool(
         const artifact = runtimeSessionId !== undefined && options.profileId !== undefined && options.persistSessionArtifact !== undefined
           ? await artifactStore.retainSessionArtifact({
               capturePath: localPath,
+              ...(context?.toolCallId && /^[A-Za-z0-9][A-Za-z0-9_.:-]{0,255}$/u.test(context.toolCallId) && redactSensitiveText(context.toolCallId) === context.toolCallId
+                ? { provenance: { evidenceCallIds: [context.toolCallId] } } : {}),
               sessionId: runtimeSessionId,
               profileId: options.profileId,
               kind: inspection.kind,

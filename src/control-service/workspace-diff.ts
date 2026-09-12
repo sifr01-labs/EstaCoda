@@ -24,8 +24,9 @@ async function git(lease:ExecutionLease,args:string[],signal:AbortSignal,limit=1
  }finally{clearTimeout(timer);signal.removeEventListener('abort',stop);await lease.processes.terminate(child,'SIGKILL');}
 }
 async function config(lease:ExecutionLease,signal:AbortSignal):Promise<string[]>{
- // `--get-regexp` returns 1 for no filters. `--list` is bounded and its values never leave core.
- const {text}=await git(lease,['config','--local','--name-only','--list','-z'],signal);
+ // Read the same effective scopes as diff, including conditional includes and
+ // worktree config. Explicit --local would omit those executable filters.
+ const {text}=await git(lease,['config','--includes','--name-only','--list','-z'],signal);
  const names=new Set(text.split('\0').map(key=>/^filter\.(.+)\.(?:process|smudge|clean|required)$/u.exec(key)?.[1]).filter((key):key is string=>!!key));
  if(names.size>64)throw new Error('Too many Git filters.');
  return [...names].flatMap(name=>['-c',`filter.${name}.process=`,'-c',`filter.${name}.smudge=`,'-c',`filter.${name}.clean=`,'-c',`filter.${name}.required=false`]);

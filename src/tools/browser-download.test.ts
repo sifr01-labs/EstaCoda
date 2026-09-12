@@ -115,7 +115,7 @@ describe("browser.download", () => {
       registrations.push(artifact);
     });
 
-    const result = await download.run(groundedInput());
+    const result = await download.run(groundedInput(), {toolCallId:"download-call",sessionId:"runtime-session",profileId:"profile-1"});
 
     expect(result.ok).toBe(true);
     expect(result.metadata).toEqual({
@@ -164,7 +164,8 @@ describe("browser.download", () => {
       id: "artifact-1",
       sessionId: "runtime-session",
       profileId: "profile-1",
-      storageKey: "objects/object-1"
+      storageKey: "objects/object-1",
+      provenance: {evidenceCallIds:["download-call"]}
     })]);
     expect(JSON.stringify(registrations)).not.toContain(root);
   });

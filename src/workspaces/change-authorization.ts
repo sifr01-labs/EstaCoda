@@ -1,3 +1,5 @@
+import type { ArtifactProvenance } from "../contracts/artifact.js";
+import type { TemporaryCopyTarget } from "../contracts/workspace.js";
 import { ChangeArtifactStore, type ChangeBundle } from "./change-artifact.js";
 import { COPY_LIMITS, checkStamp, copyPath, hash, snapshot } from "./copy-files.js";
 import { WorkspaceApprovalStore, type PersistedWorkspaceApprovalGrant } from "../security/workspace-approval-controller.js";
@@ -7,7 +9,7 @@ import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
 import { targetBinding } from "./execution-target.js";
 
 export type ApplicationPlan = { version: 1; outcome: "review" | "apply"; paths: Array<{ path: string; operations: Array<"create" | "update" | "delete"> }> };
-export type ApplicationAuthorization = { version: 1; targetId: string; manifestHash: string; plan: ApplicationPlan; grant?: PersistedWorkspaceApprovalGrant };
+export type ApplicationAuthorization = { version: 1; targetId: string; manifestHash: string; plan: ApplicationPlan; applicationTargetId?: string; grant?: PersistedWorkspaceApprovalGrant };
 export function parseApplicationPlan(value: unknown): ApplicationPlan {
   const plan = value as ApplicationPlan;
   if (!plan || plan.version !== 1 || !["review", "apply"].includes(plan.outcome) || !Array.isArray(plan.paths) || plan.paths.length > COPY_LIMITS.files || plan.outcome === "apply" && !plan.paths.length) throw new Error("Application plan requires an outcome and bounded exact paths/mutation types.");
@@ -33,7 +35,18 @@ export class ChangeAuthorizationStore extends ChangeArtifactStore {
     const value = JSON.parse(row.record_json) as ApplicationAuthorization;
     parseApplicationPlan(value.plan);
     if (value.version !== 1 || value.targetId !== targetId || !/^[a-f0-9]{64}$/u.test(value.manifestHash)) throw new Error("Invalid application authorization.");
+    if (value.applicationTargetId !== undefined) {
+      const destination = typeof value.applicationTargetId === "string" ? this.getTarget(value.applicationTargetId) : undefined;
+      const copy = this.getTarget(targetId);
+      if (value.plan.outcome !== "apply" || !destination || !copy || destination.workspace.identityHash !== copy.source.identity.identityHash) throw new Error("Invalid application destination provenance.");
+    }
     return value;
+  }
+  protected override artifactProvenance(target: TemporaryCopyTarget): ArtifactProvenance {
+    const authorization = this.authorization(target.id);
+    return { ...super.artifactProvenance(target),
+      ...(authorization?.plan.outcome === "apply" && authorization.applicationTargetId
+        ? { applicationTargetId: authorization.applicationTargetId } : {}) };
   }
   /** Local operator entry point only. Exports and model output never call grant(). */
   async authorize(targetId: string, input: unknown): Promise<ApplicationAuthorization> {
@@ -54,6 +67,10 @@ export class ChangeAuthorizationStore extends ChangeArtifactStore {
     }
     const record: ApplicationAuthorization = { version: 1, targetId, manifestHash: target.manifestHash, plan };
     if (plan.outcome === "apply") {
+      // Record the reviewed destination through the existing profile target store.
+      // This reference does not extend the exact-path application grant below.
+      const destination = await this.acquireLocal(target.source.identity.canonicalPath, target.source);
+      record.applicationTargetId = destination.id;
       const executionScope = localApprovalScope(this.profileId, target.id, await verifyHostExecution(target.source.identity.canonicalPath));
       record.grant = await this.approvals.grant({ workspaceRoot: target.source.identity.canonicalPath, toolName: "workspace.apply",
         riskClass: plan.paths.some((entry) => entry.operations.includes("delete")) ? "destructive-local" : "workspace-write",

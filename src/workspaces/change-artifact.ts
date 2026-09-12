@@ -3,7 +3,7 @@ import { readdirSync, lstatSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
 import { ArtifactStore } from "../artifacts/artifact-store.js";
-import type { ArtifactRecord, SessionArtifactRegistration } from "../contracts/artifact.js";
+import type { ArtifactProvenance, ArtifactRecord, SessionArtifactRegistration } from "../contracts/artifact.js";
 import type { ExecutionTargetBinding, SourceWorkspaceBinding, TemporaryCopyTarget } from "../contracts/workspace.js";
 import { resolveProfileStateHome } from "../config/profile-home.js";
 import { ExecutionTargetStore, targetBinding } from "./execution-target.js";
@@ -20,6 +20,10 @@ export class ChangeArtifactStore extends ExecutionTargetStore {
     this.artifacts = new ArtifactStore({ storageRoot: this.artifactRoot });
     try { this.db.exec("create table if not exists workspace_change_artifacts (id text primary key, record_json text not null)"); }
     catch (error) { this.close(); throw error; }
+  }
+  protected artifactProvenance(target: TemporaryCopyTarget): ArtifactProvenance {
+    return { target: { targetId: target.id, targetGeneration: target.generation },
+      ...(target.source.registeredWorkspaceId ? { sourceWorkspaceId: target.source.registeredWorkspaceId } : {}) };
   }
   async export(targetId: string, sessionId: string, persist?: (registration: SessionArtifactRegistration) => Promise<void>): Promise<ArtifactRecord> {
     const target = this.getTarget(targetId);
@@ -55,7 +59,7 @@ export class ChangeArtifactStore extends ExecutionTargetStore {
     const capturePath = join(staging, randomUUID()); await writeFile(capturePath, bytes, { flag: "wx", mode: 0o600 });
     try {
       return await this.artifacts.retainSessionArtifact({ sessionId, profileId: this.profileId, capturePath, kind: "data", bytes: bytes.length,
-        provenance: { target: { targetId: target.id, targetGeneration: target.generation }, ...(target.source.registeredWorkspaceId ? { sourceWorkspaceId: target.source.registeredWorkspaceId } : {}) },
+        provenance: this.artifactProvenance(target),
         mimeType: "application/json", sha256: hash(bytes), summary: `${changes.length} workspace changes; source files are unchanged.`,
         source: { kind: "workspace.changes", filename: "workspace-changes.json", origin: `workspace:${target.id}`, description: "Temporary-copy changes with source baseline" },
         persist: async (registration) => {

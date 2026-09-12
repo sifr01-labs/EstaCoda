@@ -10,7 +10,10 @@ it("uses task-start exact path/mutation scope and honors existing approval revoc
     const target = await prepareTemporaryCopy({ ...f, source: "source", manifest: f.input });
     const authorization = await store.authorize(target.id, { version: 1, outcome: "apply", paths: [{ path: "hello.bin", operations: ["update"] }] });
     await writeFile(join(f.destination, "hello.bin"), "changed");
-    const { bundle } = await store.load((await store.export(target.id, "s")).id);
+    let registration: import('../contracts/artifact.js').SessionArtifactRegistration | undefined;
+    const { bundle } = await store.load((await store.export(target.id, "s", async value => { registration = value; })).id);
+    expect(registration?.provenance).toMatchObject({sourceWorkspaceId:target.source.registeredWorkspaceId,applicationTargetId:authorization.applicationTargetId});
+    expect(store.getTarget(authorization.applicationTargetId!)?.workspace.identityHash).toBe(target.source.identity.identityHash);
     const check = await store.checkAuthorization(bundle); check();
     await expect(store.checkAuthorization({ ...bundle, changes: [{ ...bundle.changes[0]!, operation: "delete" }] })).rejects.toThrow("exceed");
     expect(await store.approvals.revoke(authorization.grant!.id, authorization.grant!.workspaceRoot)).toBe(true);

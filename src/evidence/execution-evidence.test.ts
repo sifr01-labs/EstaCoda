@@ -11,7 +11,7 @@ it('requires matching current-turn mutation and validation receipts',()=>{
  expect(projectExecutionEvidence({...input,events:[mutation,check],truncated:true}).state).not.toBe('verified');
 });
 it('does not promote unrelated, failed, unclassified or out-of-order receipts',()=>{
- for(const events of [[mutation,{...check,verifiedMutation:{toolCallId:'another',tool:'file.write'}}],[mutation,check,{...mutation,toolCallId:'failed',status:'failed'}],[mutation,check,{...mutation,toolCallId:'unknown',executionEffect:undefined}],[check,mutation]])expect(projectExecutionEvidence({...input,events}).state).not.toBe('verified');
+ for(const events of [[mutation,{...check,verifiedMutation:{toolCallId:'another',tool:'file.write'}}],[mutation,check,{...mutation,toolCallId:'failed',status:'failed'}],[mutation,check,{...mutation,toolCallId:'unknown',executionEffect:undefined}],[check,mutation],[mutation,check,mutation]])expect(projectExecutionEvidence({...input,events}).state).not.toBe('verified');
  expect(projectExecutionEvidence({...input,events:[mutation,check],outcome:{...input.outcome,status:'failed'}}).state).toBe('failed');
  expect(projectExecutionEvidence({...input,events:[mutation,check],outcome:{...input.outcome,status:'partially_completed'}}).state).toBe('partial');
  expect(projectExecutionEvidence({...input,events:[mutation,check],outcome:null}).state).not.toBe('verified');
@@ -22,4 +22,15 @@ it('distinguishes observed reads from conversational claims and limits',()=>{
  expect(projectExecutionEvidence({...input,events:[read],outcome:{status:'completed',completionFloor:'none'}}).state).toBe('unverified');
  const many=Array.from({length:65},(_,index)=>({...read,toolCallId:'read-'+index}));
  const bounded=projectExecutionEvidence({...input,events:many,outcome:{status:'completed',completionFloor:'read'}});expect(bounded.facts).toHaveLength(64);expect(bounded.truncated).toBe(true);expect(bounded.state).not.toBe('verified');
+});
+
+it('ignores planning/delegation proof-ineligible receipts without masking real failures',()=>{
+ const read={...mutation,toolCallId:'read',tool:'file.read',executionEffect:{kind:'read'}};
+ const outcome={status:'completed',completionFloor:'read'};
+ const planning=['plan','delegate_task'].map(tool=>({kind:'execution-evidence-recorded',tool,toolCallId:tool,status:'ineligible',visibleTurnId:'turn'}));
+ const report=projectExecutionEvidence({...input,outcome,events:[...planning,read]});
+ expect(report.state).toBe('verified');expect(report.facts).toEqual([expect.objectContaining({tool:'file.read',kind:'read'})]);
+ expect(projectExecutionEvidence({...input,outcome,events:planning}).state).toBe('unverified');
+ expect(projectExecutionEvidence({...input,outcome,events:[...planning,read,{...read,toolCallId:'failed',status:'failed'}]}).state).toBe('unverified');
+ expect(projectExecutionEvidence({...input,events:[...planning,mutation,check]}).state).toBe('verified');
 });

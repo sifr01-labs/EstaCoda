@@ -22,3 +22,9 @@ The checks below cover PR10 regression and release behavior. No live model-provi
 - Final smoke, runtime-import and ESM audits, distribution smoke, execution budgets, source/distribution Docker execution checks, and Docker image validation passed. Execution conformance confirmed all 40 required files. Final diff whitespace checks passed.
 
 Core and packaging validation use an isolated copy of tracked sources to avoid the checkout's pre-existing untracked duplicate TypeScript files. The full core suite uses four workers because this machine previously showed Bun-startup timeout contention with nine. Native tests exercise the actual Electron and PTY binaries; native confirmation is programmatically accepted only inside the test harness, and no confirmation bypass is shipped.
+
+## PR10/PR11 review correction
+
+Diff filter discovery now reads the effective Git configuration, including conditional includes and worktree configuration, before disabling configured helpers. Regression cases verify that list and patch inspection do not execute clean helpers from any of those scopes. Fixed commands, output/process bounds, target checks and existing command approval rules remain in place.
+
+Security review: this closes a read-only inspection path that could invoke an included clean helper. Artifact provenance is display metadata; recording an intended application destination does not broaden the existing exact-path/mutation grant or confirm successful application.

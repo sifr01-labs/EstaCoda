@@ -24,7 +24,11 @@ async function resolveArtifact(input:Input,db:SQLiteSessionDB,reference:Artifact
   const attemptRow=db.db.query<{id:string}>('select id from task_attempts where profile_id=? and worker_session_id=? order by created_at desc limit 1').get(input.profileId,session.id);
   const attempt=attemptRow?tasks.getAttempt(attemptRow.id):null,task=attempt?tasks.getTask(attempt.taskId):null;
   const links=sessionArtifactLinks(input.profileId,session,task??undefined,attempt??undefined),metadata=retainedArtifactMetadata(registration);
-  return {artifact:{reference,displayName:metadata.displayName,mimeType:metadata.mimeType,bytes:metadata.bytes,sha256:metadata.sha256,createdAt:metadata.createdAt,retention:'retained',sourceOrigin:metadata.sourceOrigin,workIds:links.workIds,target:metadata.provenance?.target??(session.executionTarget?{targetId:session.executionTarget.targetId,targetGeneration:session.executionTarget.targetGeneration}:null)},
+  const provenance=metadata.provenance;
+  const provenanceFields={...(provenance?.sourceWorkspaceId?{sourceWorkspaceId:provenance.sourceWorkspaceId}:{}),
+   ...(provenance?.applicationTargetId?{applicationTargetId:provenance.applicationTargetId}:{}),
+   ...(provenance?.evidenceCallIds?{evidenceCallIds:[...provenance.evidenceCallIds]}:{})};
+  return {artifact:{...provenanceFields,reference,displayName:metadata.displayName,mimeType:metadata.mimeType,bytes:metadata.bytes,sha256:metadata.sha256,createdAt:metadata.createdAt,retention:'retained',sourceOrigin:metadata.sourceOrigin,workIds:links.workIds,target:provenance?.target??(session.executionTarget?{targetId:session.executionTarget.targetId,targetGeneration:session.executionTarget.targetGeneration}:null)},
    preview:async()=>{await assertProfileContentRoot(input,join(paths.profileRoot,'artifacts'));return new ArtifactStore({storageRoot:join(paths.profileRoot,'artifacts')}).previewRegistration(registration,{sessionId:session.id,profileId:input.profileId});}};
  }
  const task=tasks.getTask(reference.ownerId),result=tasks.getResult(reference.artifactId);

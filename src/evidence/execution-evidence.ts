@@ -7,8 +7,10 @@ export function projectExecutionEvidence(input:{workId:string;turnId:string|null
  for(const event of input.events.slice(0,1024)) {
   if(!event||typeof event!=='object'||(event as {kind?:unknown}).kind!=='execution-evidence-recorded')continue;
   const record=normalizeExecutionEvidenceRecord(event as ExecutionEvidenceRecord);
-  if(record&&input.turnId&&record.visibleTurnId===input.turnId)records.set(record.toolCallId,record);
+  if(record&&input.turnId&&record.visibleTurnId===input.turnId){records.delete(record.toolCallId);records.set(record.toolCallId,record);}
  }
+ // Planning/delegation receipts are not execution proof and are not failures.
+ for(const [id,record] of records)if(record.status==='ineligible')records.delete(id);
  const successful=[...records.values()].filter(record=>record.status==='success');
  const mutations=successful.filter(record=>record.executionEffect?.kind==='mutation');
  const order=new Map([...records.keys()].map((id,index)=>[id,index]));

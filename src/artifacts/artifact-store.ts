@@ -208,7 +208,8 @@ export class ArtifactStore {
     const inspection = inspectBrowserDownload(registration.source.filename, content);
     if (!inspection.allowed || inspection.kind !== registration.kind || inspection.mimeType !== registration.mimeType || createHash("sha256").update(content).digest("hex") !== registration.sha256) throw new Error("Artifact integrity check failed.");
     const text = registration.mimeType.startsWith("text/") || ["application/json", "application/yaml", "application/xml"].includes(registration.mimeType);
-    return { metadata: retainedArtifactMetadata(registration), text: text ? redactSensitiveText(content.subarray(0, 16384).toString("utf8")) : null, truncated: text && content.length > 16384 };
+    const display = text ? redactSensitiveText(content.subarray(0, 16384).toString("utf8")) : null;
+    return { metadata: retainedArtifactMetadata(registration), text: display?.slice(0, 16384) ?? null, truncated: text && (content.length > 16384 || display!.length > 16384) };
   }
 
   list(scope?: SessionArtifactScope): ArtifactRecord[] {
