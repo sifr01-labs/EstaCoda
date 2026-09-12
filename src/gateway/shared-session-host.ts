@@ -21,6 +21,7 @@ export class SharedSessionHost {
   constructor(readonly options: {
     profileId: string; sessionDb: SessionDB; receipts?: ControlReceipts;
     approvalQueue?: GatewayApprovalQueue;
+    browserControl?(request:PrivateControlRequest):Promise<unknown>;
     modelControl?(request: PrivateControlRequest): Promise<unknown>;
     taskControl?(request: PrivateControlRequest): unknown;
     validateTarget?(request: PrivateControlRequest): Promise<void>;
@@ -45,6 +46,7 @@ export class SharedSessionHost {
   async handle(request: PrivateControlRequest): Promise<unknown> {
     const receipts = this.options.receipts;
     await this.validate(request, request.method === "inspect" || (receipts?.inspect(request).length ?? 0) > 0);
+    if(request.method==='browser.control')return this.execute(request);
     if (!receipts) return this.execute(request);
     if (request.method === "inspect") return { receipts: receipts.inspect(request), execution: await this.execute(request) };
     const accepted = receipts.accept(request);
@@ -63,6 +65,7 @@ export class SharedSessionHost {
   private async execute(request: PrivateControlRequest): Promise<unknown> {
     const generation = this.#cancelGeneration.get(request.sessionId) ?? 0;
     await this.validate(request, request.method === "inspect");
+    if(request.method==='browser.control'){if(!this.options.browserControl)throw new Error('Browser controls unavailable.');return this.options.browserControl(request);}
     const active = this.#active.get(request.sessionId);
     if (request.method === "inspect") return { active: Boolean(active), preview:active?.preview?{...active.preview,text:redactSensitiveText(active.preview.text)}:undefined, approval: active?.pending ? {
       id: active.pending.id, tool: active.pending.request.tool.name,

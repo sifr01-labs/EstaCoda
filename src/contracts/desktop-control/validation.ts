@@ -1,3 +1,4 @@
+import {validateHumanBrowserCommand} from './browser-human.js';
 import {AUXILIARY_SLOTS, candidateRouteBinding, type CandidateRoute} from './model-setup.js';
 import { CONTROL_LIMITS, ControlProtocolError, DESKTOP_PROTOCOL_VERSION, assertEnvelope, exactKeys, isControlId, isControlOperationId, isRecord, type RpcFailure } from "./envelopes.js";
 import { CONTROL_EVENTS, CONTROL_METHODS, assertInitializeParams, isControlCursor, isProtocolVersion, type Capabilities, type ControlEventType } from "./bootstrap.js";
@@ -98,6 +99,7 @@ const browserReference=shape({sessionId:id,browserId:id,eventId:integer(1),targe
 const browserState=shape({reference:browserReference,url:nullable(text(2048)),title:nullable(text(160)),observedAt:text(64,1),readiness:choice(['loading','interactive','complete','unknown']),state:choice(['recorded','blocked']),lastAction:text(160),artifacts:array(artifactReference,16)});
 const artifactPreview=shape({artifact:artifactProjection,integrity:choice(['verified','unavailable']),text:nullable(text(16384)),truncated:boolean,reason:nullable(text(2048))});
 const contracts: { [M in keyof MethodContracts]: { params: Check; result: Check } } = {
+  "browser.control":{params:shape({workId:id,command:value=>{try{validateHumanBrowserCommand(value);return true;}catch{return false;}}}),result:shape({lease:nullable(shape({id,generation:integer(1)})),state:choice(['human','agent']),frame:nullable(shape({frameId:id,url:text(2048,1),title:text(160),image:text(60000,1),observedAt:text(64,1)}))})},
   "browser.snapshot":{params:shape({workId:id,reference:browserReference}),result:shape({state:browserState,image:nullable(shape({mimeType:choice(['image/jpeg']),base64:text(60000,1),observedAt:text(64,1)})),reason:nullable(text(2048))})},
   "browser.list":{params:shape({workId:id}),result:shape({items:array(browserState,8),truncated:boolean})},
   "artifacts.list":{params:shape({},{cursor:text(40,1)}),result:shape({items:array(artifactProjection,32),nextCursor:nullable(text(40,1))})},

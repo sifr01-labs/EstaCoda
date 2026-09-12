@@ -32,6 +32,7 @@ const activities: ActivityProjection[] = [
 const artifactReference={source:'session' as const,ownerId:'s',artifactId:'a'};
 const artifactPreview={artifact:{reference:artifactReference,displayName:'report.txt',mimeType:'text/plain',bytes:0,sha256:'a'.repeat(64),createdAt:'2026-09-12',retention:'retained' as const,sourceOrigin:null,workIds:['session:s'],target:null},integrity:'verified' as const,text:'',truncated:false,reason:null};
 const cases = {
+ "browser.control":{params:{workId:'session:s',command:{action:'acquire',browserId:'b',holder:'window'}},result:{lease:{id:'lease',generation:1},state:'human',frame:null}},
  "browser.snapshot":{params:{workId:'session:s',reference:{sessionId:'s',browserId:'b',eventId:1,target}},result:{state:{reference:{sessionId:'s',browserId:'b',eventId:1,target},url:null,title:null,observedAt:'2026-09-12',readiness:'unknown',state:'blocked',lastAction:'browser.navigate',artifacts:[]},image:null,reason:'Unavailable'}},
  "browser.list":{params:{workId:'session:s'},result:{items:[],truncated:false}},
  "artifacts.list":{params:{},result:{items:[],nextCursor:null}},

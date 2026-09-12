@@ -1,0 +1,28 @@
+import {it,expect,vi} from 'vitest';
+import sharp from 'sharp';
+import {createMockBrowserBackend} from './browser-backend.js';
+import {HumanBrowserControl} from './human-control.js';
+import {BrowserControlOwner} from './control-lease.js';
+import {validateHumanBrowserCommand,validateHumanBrowserInput} from '../contracts/desktop-control/browser-human.js';
+it('controls an existing browser with current sanitized frames and no raw renderer commands',async()=>{
+ const png=await sharp({create:{width:100,height:80,channels:3,background:'#147dab'}}).png().toBuffer();
+ const identity={documentEpoch:1,actionRevision:1,observationId:1};let url='https://93.184.216.34/';
+ const backend={...createMockBrowserBackend(),kind:'local-cdp' as const,snapshot:vi.fn(async()=>({sessionId:'b',identity,url,observedAt:'2026-09-12',tab:{ref:'t',url,controlled:true}})),
+ preflightAction:vi.fn(async()=>({action:'press' as const,sessionId:'b',identity,url,observedAt:'2026-09-12',tabRef:'t',target:{ref:'@e1',kind:'button' as const,formAssociated:false,submit:false}})),click:vi.fn(async()=>({sessionId:'b',identity,url,observedAt:'2026-09-12'})),press:vi.fn(async()=>({sessionId:'b',identity,url,observedAt:'2026-09-12'})),
+ screenshot:vi.fn(async()=>({mimeType:'image/png' as const,base64:png.toString('base64'),observation:{screenshotId:'shot',sessionId:'b',tabRef:'t',identity,captureScope:'viewport' as const,sanitized:true as const,maskedRegionCount:0,viewport:{cssWidth:100,cssHeight:80,pixelWidth:100,pixelHeight:80}}}))};
+ const owner=new BrowserControlOwner(),validate=vi.fn(async()=>{}),control=new HumanBrowserControl(backend,owner,validate),base={holder:'window',browserId:'b'};
+ const acquired=await control.execute({...base,action:'acquire'}),lease=acquired.lease!;
+ expect(backend.snapshot).not.toHaveBeenCalled();const view=await control.execute({...base,lease,action:'observe',sequence:1});expect(view.frame!.image.length).toBeLessThanOrEqual(60000);
+ const clicked=await control.execute({...base,lease,action:'input',sequence:2,input:{kind:'pointer',frameId:view.frame!.frameId,x:.5,y:.5}});expect(backend.preflightAction).toHaveBeenCalledWith('click',expect.objectContaining({visualTarget:{screenshotId:'shot',x:50,y:40}}));expect(backend.click).toHaveBeenCalledWith(expect.objectContaining({ref:'@e1'}));
+ await control.execute({...base,lease,action:'input',sequence:3,input:{kind:'key',frameId:clicked.frame!.frameId,key:'ب'}});expect(backend.press).toHaveBeenCalledWith(expect.objectContaining({key:'ب',text:'ب'}));
+ await expect(control.execute({...base,lease,action:'input',sequence:3,input:{kind:'key',frameId:view.frame!.frameId,key:'Enter'}})).rejects.toThrow('replayed');expect(backend.press).toHaveBeenCalledTimes(1);
+ url='http://169.254.169.254/';await expect(control.execute({...base,lease,action:'observe',sequence:4})).rejects.toThrow('blocked');await expect(owner.agent(async()=>1)).rejects.toThrow('paused');
+ // Explicit recovery can acquire and return control without dispatching or replaying input.
+ const recovery=await control.execute({...base,action:'acquire'});await control.execute({...base,lease:recovery.lease!,action:'release'});expect(await owner.agent(async()=>1)).toBe(1);
+ validate.mockRejectedValue(new Error('Trust revoked'));await expect(control.execute({...base,action:'acquire'})).rejects.toThrow('Trust revoked');
+});
+it('rejects modifiers, script, arbitrary URLs and malformed or unbounded input',()=>{
+ for(const value of [{kind:'pointer',frameId:'f',x:NaN,y:0},{kind:'pointer',frameId:'f',x:1,y:0},{kind:'key',frameId:'f',key:'Enter',ctrl:true},{kind:'key',frameId:'f',key:'a'.repeat(100)},{kind:'key',frameId:'f',key:'\n'}])expect(()=>validateHumanBrowserInput(value)).toThrow();
+ expect(()=>validateHumanBrowserCommand({action:'acquire',holder:'w',browserId:'b',url:'http://localhost',cdp:'Runtime.evaluate'})).toThrow();
+ expect(()=>validateHumanBrowserCommand({action:'input',holder:'w',browserId:'b',lease:{id:'l',generation:1},sequence:1,input:{kind:'key',frameId:'f',key:'ب'}})).not.toThrow();
+});

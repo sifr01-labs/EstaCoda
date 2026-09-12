@@ -10,3 +10,5 @@ export * from './targets.js';
 export * from './artifacts.js';
 export * from './evidence.js';
 export * from './browser.js';
+
+export * from './browser-human.js';

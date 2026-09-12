@@ -28,6 +28,7 @@ export type WorkUsageProjection={scope:'session'|'task'|'attempt';reportedTokens
 export type RuntimeCounts={runningSessions:number;runningTasks:number;queuedTasks:number;approvals:number;attention:number;scheduled:number|null;asOf:number};
 export type MethodContracts = {
   "artifacts.list":{params:{cursor?:string};result:{items:import('./artifacts.js').ArtifactProjection[];nextCursor:string|null}};
+  "browser.control":{params:{workId:string;command:import('./browser-human.js').HumanBrowserCommand};result:import('./browser-human.js').HumanBrowserResult};
   "browser.snapshot":{params:{workId:string;reference:import('./browser.js').BrowserViewReference};result:import('./browser.js').BrowserViewSnapshot};
   "browser.list":{params:{workId:string};result:{items:import('./browser.js').BrowserViewState[];truncated:boolean}};
   "artifacts.get":{params:{reference:import('./artifacts.js').ArtifactReference};result:import('./artifacts.js').ArtifactPreview};

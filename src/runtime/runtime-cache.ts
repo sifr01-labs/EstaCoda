@@ -149,6 +149,14 @@ export class RuntimeCache {
     this.#hookRegistry = options.hookRegistry;
   }
 
+  async browserControl(sessionId:string,command:import('../contracts/desktop-control/browser-human.js').HumanBrowserCommand){
+    const entry=this.#activeEntries.get(sessionId);
+    if(this.#closed||!entry||entry.suspended||entry.disposePending||entry.runtime.sessionId!==sessionId||!entry.runtime.browserControl)throw new Error('Existing browser runtime unavailable.');
+    entry.borrowCount++;entry.lastUsedAt=Date.now();
+    try{await entry.runtime.validateExecutionHealth?.();return await entry.runtime.browserControl(command);}
+    finally{await this.releaseLease(sessionId,entry.entryId);}
+  }
+
   async currentExecutionFacts(sessionId: string) {
     const entry = this.#activeEntries.get(sessionId);
     if (!entry || entry.suspended || entry.disposePending) return undefined;

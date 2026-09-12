@@ -70,3 +70,11 @@ it('exposes a bounded ephemeral assistant preview, clears it at tool boundaries,
  input.onDelta('After tool');expect(await host.handle({...base,method:'inspect'})).toMatchObject({preview:{text:'After tool'}});
  release();await turn;expect(await host.handle({...base,method:'inspect'})).toMatchObject({active:false,preview:undefined});await host.close();
 });
+
+it('routes human browser control directly to the existing owner without receipts or runtime acquisition',async()=>{
+ const acquire=vi.fn(),browserControl=vi.fn(async()=>({state:'human',lease:{id:'lease',generation:1},frame:null}));
+ const host=new SharedSessionHost({profileId:'p',sessionDb:{getSessionForProfile:async()=>({executionTarget:{targetId:'t',targetGeneration:1}})} as unknown as SessionDB,acquire,channelApproval:vi.fn(),validateTarget:async()=>{},browserControl});
+ const request={method:'browser.control' as const,sessionId:'s',targetId:'t',targetGeneration:1,operationId:'o',browserControl:{action:'acquire' as const,browserId:'b',holder:'w'}};
+ await expect(host.handle(request)).resolves.toHaveProperty('state','human');expect(browserControl).toHaveBeenCalledTimes(1);expect(acquire).not.toHaveBeenCalled();
+ await expect(host.handle({...request,targetGeneration:2})).rejects.toThrow();expect(browserControl).toHaveBeenCalledTimes(1);
+});

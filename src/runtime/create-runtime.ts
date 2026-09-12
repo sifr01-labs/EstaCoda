@@ -1,3 +1,4 @@
+import {HumanBrowserControl} from '../browser/human-control.js';
 import {BrowserControlOwner} from '../browser/control-lease.js';
 import {gateBrowserBackend} from '../browser/control-gate.js';
 import { workspaceChangeSummary } from "../ui/workspace-change-summary.js";
@@ -276,6 +277,7 @@ function resolveRuntimeUiIdentity(options: RuntimeOptions): string {
 }
 
 export type Runtime = {
+  browserControl?(command:import('../contracts/desktop-control/browser-human.js').HumanBrowserCommand):Promise<import('../contracts/desktop-control/browser-human.js').HumanBrowserResult>;
   validateExecutionHealth?(): Promise<void>;
   readEditorFile?(path: string): Promise<string>;
   executionFacts?(): Readonly<ExecutionFacts>;
@@ -714,6 +716,7 @@ async function buildRuntime(options: RuntimeOptions, rollback: ResourceCleanup):
   const browserControlOwner = new BrowserControlOwner();
   resources.defer(() => browserControlOwner.close());
   const browserBackend = gateBrowserBackend(rawBrowserBackend,browserControlOwner);
+  const humanBrowserControl = new HumanBrowserControl(rawBrowserBackend,browserControlOwner,validateLiveAuthority,options.securityConfig);
   browserLifecycleBackend = browserBackend as BrowserBackend & {
     closeSession?: (sessionId: string) => void | Promise<void>;
   };
@@ -1219,6 +1222,7 @@ async function buildRuntime(options: RuntimeOptions, rollback: ResourceCleanup):
       });
 
   return {
+    browserControl:command=>humanBrowserControl.execute(command),
     async validateExecutionHealth() {
       await executionOwner.validate(); executionLease.assertActive();
       const session = await sessionDb.getSessionForProfile(sessionRuntimeContext.currentSessionId(), profileId);

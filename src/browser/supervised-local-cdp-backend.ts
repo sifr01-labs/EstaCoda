@@ -1197,7 +1197,8 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
         }
       }
       const key = input.key ?? "Enter";
-      await session.supervisor.send("Input.dispatchKeyEvent", { type: "keyDown", key });
+      if(input.text!==undefined&&(input.text!==key||[...input.text].length!==1||/[\p{C}]/u.test(input.text)))throw new Error('Invalid human key text.');
+      await session.supervisor.send("Input.dispatchKeyEvent", { type: "keyDown", key,...(input.text===undefined?{}:{text:input.text}) });
       await session.supervisor.send("Input.dispatchKeyEvent", { type: "keyUp", key });
       return settleAction({ session, before, actionInput: input, target, actionDispatched: true });
     },

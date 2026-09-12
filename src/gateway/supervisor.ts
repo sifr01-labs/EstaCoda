@@ -1850,6 +1850,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
         .run(new Date().toISOString(), profileId);
       const sharedHost = new SharedSessionHost({
         profileId, sessionDb, receipts, approvalQueue: gatewayApprovalQueue,
+        browserControl:request=>runtimeCache.browserControl(request.sessionId,request.browserControl!),
         modelControl: async (request) => {const current=await loadConfig();return desktopModelControl({request,profileId,sessionDb,tasks:taskStore,context:{config:current.config,providerRegistry:current.providerRegistry,homeDir,profileId},invalidate:id=>runtimeCache.invalidate(id)});},
         taskControl: async(request) => {
           if(request.method!=='task.create')return desktopTaskControl(taskStore,request);
