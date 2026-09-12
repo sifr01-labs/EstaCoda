@@ -9,7 +9,7 @@ export async function runDesktopService(input: { profileId: string; homeDir: str
   if (input.credentialFd === 3) {
     try {
       const pipe = new Socket({ fd: 3, readable: true, writable: true });
-      server.onDispose(attachCredentialPipe(pipe, bridge.candidates, () => server.close()));
+      server.onDispose(attachCredentialPipe(pipe, bridge.candidates, () => server.close(),(params,signal)=>bridge.deliverBrowserInput(params,signal)));
     } catch { server.close(true); throw new Error('Credential pipe unavailable.'); }
   }
   const stop = () => bridge.close();

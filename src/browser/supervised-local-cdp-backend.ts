@@ -1710,7 +1710,7 @@ function browserActionPreflightExpression(targetRef: { kind: "element" | "region
     else if (el instanceof HTMLInputElement || el instanceof HTMLSelectElement || el instanceof HTMLTextAreaElement) kind = 'form-control';
     else if (inlineScripted || controlRole) kind = 'scripted-control';
     const label = clean(el.getAttribute('aria-label') || el.innerText || el.textContent || el.getAttribute('value') || el.getAttribute('title') || '');
-    return { ref: boundElementIndex >= 0 ? '@e' + (boundElementIndex + 1) : boundRegionIndex >= 0 ? '@r' + (boundRegionIndex + 1) : undefined, kind, tag, role: role || undefined, label: label || undefined, href, formAssociated, submit, interactable: interactability.interactable, interactabilityReason: interactability.reason };
+    return { ref: boundElementIndex >= 0 ? '@e' + (boundElementIndex + 1) : boundRegionIndex >= 0 ? '@r' + (boundRegionIndex + 1) : undefined, kind, tag, role: role || undefined, label: label || undefined, href, formAssociated, submit, protectedInput: el instanceof HTMLInputElement && (el.type === 'password' || /password|one-time-code/u.test(el.autocomplete)), interactable: interactability.interactable, interactabilityReason: interactability.reason };
   })()`;
 }
 
@@ -1729,6 +1729,7 @@ function parseBrowserActionTargetSemantics(value: unknown): BrowserActionTargetS
     ...(boundedStructuralValue(value.role, 48) === undefined ? {} : { role: boundedStructuralValue(value.role, 48) }),
     ...(boundedRedactedActionLabel(value.label) === undefined ? {} : { label: boundedRedactedActionLabel(value.label) }),
     ...(typeof value.href !== "string" ? {} : { href: redactUrlForMetadata(value.href) }),
+    ...(value.protectedInput===true?{protectedInput:true}:{}),
     formAssociated: value.formAssociated,
     submit: value.submit
   };

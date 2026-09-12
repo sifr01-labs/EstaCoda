@@ -47,3 +47,34 @@ it('declares unsupported backends without creating sessions or spending cloud cr
  expect(result.workspace).toMatchObject({supported:false,sessions:[]});expect(backend.navigate).not.toHaveBeenCalled();
  await expect(control.execute({browserId:'b',holder:'desktop',action:'acquire'})).rejects.toThrow('supervised local');
 });
+it.each(['submit','cancel','stale','expired'])('protects sign-in values and cleans up the %s outcome',async outcome=>{
+ const {createSupervisedLocalCdpBrowserBackend}=await import('./supervised-local-cdp-backend.js');
+ const {createFakeCdpAuthPortalSocketFactory,createFakeCdpFetch,showCredentialLoginPage}=await import('../test/fakes/fake-cdp-auth-portal.js');
+ const harness=createFakeCdpAuthPortalSocketFactory(),backend=createSupervisedLocalCdpBrowserBackend({cdpUrl:'http://127.0.0.1:9222',fetch:createFakeCdpFetch(),webSocketFactory:harness.webSocketFactory,resolveHostname:()=>['93.184.216.34']});
+ try{
+  await backend.navigate({sessionId:'b',url:'https://93.184.216.34/'});
+  const socket=harness.pageSocket()!;showCredentialLoginPage(socket);socket.snapshot.url='https://93.184.216.34/login';socket.browserActionPreflight={ref:'@e2',kind:'form-control',tag:'input',formAssociated:true,submit:false,protectedInput:true};
+  let now=0;const owner=new BrowserControlOwner(()=>now),control=new HumanBrowserControl(backend,owner,async()=>{}),base={browserId:'b',holder:'main'},lease=(await control.execute({...base,action:'acquire'})).lease!;
+  const frame=(await control.execute({...base,lease,sequence:1,action:'observe'})).frame!;
+  expect(frame.protectedFieldFocused).toBe(true);expect(frame.submitTargets).toContainEqual({ref:'@e3',label:'Log in'});
+  const prepared=await control.execute({...base,lease,sequence:2,action:'signin-prepare',frameId:frame.frameId,submitRef:'@e3',kind:'password'});
+  expect(prepared.entry?.origin).toBe('https://93.184.216.34');expect(backend.isSensitiveInputActive!('b')).toBe(true);
+  if(outcome==='cancel'){
+   await control.execute({...base,lease,sequence:3,action:'signin-cancel'});expect(backend.isSensitiveInputActive!('b')).toBe(false);
+   await control.execute({...base,lease,action:'release'});return;
+  }
+  if(outcome==='stale'||outcome==='expired'){
+   if(outcome==='stale')socket.protectedFieldInspection.current=false;else now=20_000;
+   const before=socket.sent.length;
+   await expect(control.execute({...base,lease,sequence:3,action:'signin-deliver',entryId:prepared.entry!.id,value:'fixture-rejected-secret'})).rejects.toThrow();
+   expect(JSON.stringify(socket.sent.slice(before))).not.toContain('fixture-rejected-secret');
+   await expect(owner.agent(async()=>true)).rejects.toThrow('paused');return;
+  }
+  const request={...base,lease,sequence:3,action:'signin-deliver' as const,entryId:prepared.entry!.id,value:'fixture-password-unique'};
+  const result=await control.execute(request);expect(request.value).toBe('');expect(JSON.stringify(result)).not.toContain('fixture-password');
+  expect(backend.isSensitiveInputActive!('b')).toBe(false);
+  const delivery=socket.sent.find(message=>message.method==='Runtime.callFunctionOn'&&JSON.stringify(message.params?.arguments??[]).includes('fixture-password-unique'))!;
+  expect(delivery).toBeDefined();expect(String(delivery.params?.functionDeclaration)).not.toContain('fixture-password');
+  await control.execute({...base,lease,action:'release'});
+ }finally{await backend.close!();}
+});

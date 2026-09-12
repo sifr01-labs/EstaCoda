@@ -224,3 +224,6 @@ it('validates backend action hints and requires explanations for disabled action
   expect(() => validate([{ id: 'sessions.send', enabled: true }, { id: 'sessions.send', enabled: true }])).toThrow();
   expect(() => validate([{ id: 'sessions.send', enabled: true, command: 'untrusted' }])).toThrow();
 });
+it('rejects raw sign-in values on ordinary RPC; protected delivery requires the separate pipe',()=>{
+ expect(()=>validateControlRequest({jsonrpc:'2.0',id:'r',method:'browser.control',params:{workId:'session:s',command:{action:'signin-deliver',browserId:'b',holder:'main',lease:{id:'l',generation:1},sequence:1,entryId:'entry',value:'sign-in-canary'}}},context)).toThrow();
+});

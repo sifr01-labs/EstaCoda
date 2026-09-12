@@ -148,6 +148,7 @@ export type BrowserActionTargetSemantics = {
   role?: string;
   label?: string;
   href?: string;
+  protectedInput?:boolean;
   formAssociated: boolean;
   submit: boolean;
 };
@@ -439,6 +440,7 @@ export type BrowserProtectedFieldInput = {
 };
 
 export type BrowserProtectedFieldDeliveryInput = {
+  assertHumanControl?:()=>void;
   destination: import("./secure-input.js").BrowserFieldSecureInputDestination;
   kind: import("./secure-input.js").SecureInputKind;
   value: Uint8Array;

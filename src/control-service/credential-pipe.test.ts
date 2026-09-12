@@ -43,3 +43,12 @@ it('returns only opaque IDs on the dedicated pipe and disposes on malformed byte
   parent.write(Buffer.alloc(65_537, 65)); await setImmediate();
   expect(closed).toBe(true); expect(() => store.read(id, scope)).toThrow('scope'); dispose(); parent.destroy();
 });
+it('bounds protected browser delivery concurrency and returns no value or raw failure',async()=>{
+ const[parent,service]=duplexPair(),store=new CredentialCandidates('p','b');let replies='',finish!:()=>void,signal:AbortSignal|undefined;
+ parent.on('data',chunk=>{replies+=chunk;});
+ const dispose=attachCredentialPipe(service,store,()=>{},async(_params,abort)=>{signal=abort;await new Promise<void>(resolve=>finish=resolve);throw new Error('secret-canary');});
+ const send=(id:string)=>parent.write(JSON.stringify({jsonrpc:'2.0',id,method:'credentials.browserDeliver',params:{value:'secret-canary'}})+'\n');
+ send('one');await setImmediate();send('two');await setImmediate();expect(JSON.parse(replies.trim()).error.code).toBe(-32009);
+ finish();await setImmediate();expect(replies).not.toContain('secret-canary');expect(replies.trim().split('\n')).toHaveLength(2);
+ dispose();expect(signal?.aborted).toBe(true);parent.destroy();
+});

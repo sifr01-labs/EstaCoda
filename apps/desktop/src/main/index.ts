@@ -39,7 +39,10 @@ async function openWindow(): Promise<void> {
   connection.on('invalidate', () => { credentials.close(); credentialPipe?.dispose(); credentialPipe = undefined; });
   const documentUrl = MAIN_WINDOW_VITE_DEV_SERVER_URL ? new URL(MAIN_WINDOW_VITE_DEV_SERVER_URL).href : 'estacoda://app/index.html';
   const profiles = new Profiles(app.getPath('home'));
-  const browsers=new DesktopBrowserControls(connection,async url=>{const result=await dialog.showMessageBox(window,{type:'warning',title:'Take browser control',message:'Take control of this browser?',detail:url+'\n\nBrowser actions by the agent will pause. Your clicks and keys can submit forms or change external services. Return control explicitly when finished. Closing or losing this window leaves browser execution paused.',buttons:['Cancel','Take control'],defaultId:0,cancelId:0,noLink:true});return result.response===1;});
+  const browsers=new DesktopBrowserControls(connection,async url=>{const result=await dialog.showMessageBox(window,{type:'warning',title:'Take browser control',message:'Take control of this browser?',detail:url+'\n\nBrowser actions by the agent will pause. Your clicks and keys can submit forms or change external services. Return control explicitly when finished. Closing or losing this window leaves browser execution paused.',buttons:['Cancel','Take control'],defaultId:0,cancelId:0,noLink:true});return result.response===1;},async(entry,deliver)=>new Promise<boolean>(resolve=>{
+    credentials.open({stage:async(_scope,value)=>{await deliver(value);return 'delivered';},closeWindow:async()=>{}},
+      {windowId:'browser-signin',generation:connection.state.generation,purpose:'provider',providerId:entry.kind+' at '+entry.origin,authMethod:'api_key',endpoint:entry.origin},()=>resolve(true),()=>resolve(false),'browser');
+  }),params=>{if(!credentialPipe)throw new Error('Protected entry pipe unavailable.');return credentialPipe.deliverBrowser(params);});
   window.on('closed',()=>browsers.dispose());
   window.on('close',()=>browsers.detach());
   window.webContents.on('render-process-gone',()=>browsers.detach());

@@ -22,3 +22,8 @@ it('drops in-flight candidates on disposal and bounds credential size',async()=>
  const {client,frames}=fixture();await expect(client.stage(scope,'a'.repeat(49153))).rejects.toThrow();expect(frames).toHaveLength(0);
  const rejected=expect(client.stage(scope,'fixture')).rejects.toThrow();client.dispose();await rejected;
 });
+it('uses the dedicated pipe for browser sign-in and clears the caller value after delivery',async()=>{
+ const{client,pipe,frames}=fixture(),params={workId:'session:s',command:{action:'signin-deliver' as const,browserId:'b',holder:'main',lease:{id:'l',generation:1},sequence:1,entryId:'entry',value:'secret-canary'}};
+ const delivery=client.deliverBrowser(params),request=JSON.parse(frames[0]!);expect(request.method).toBe('credentials.browserDeliver');
+ pipe.push(JSON.stringify({jsonrpc:'2.0',id:request.id,result:{delivered:true}})+'\n');await delivery;expect(params.command.value).toBe('');client.dispose();
+});

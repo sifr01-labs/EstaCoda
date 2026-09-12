@@ -287,6 +287,7 @@ export class ProtectedBrowserFormTransactionController {
     try {
       transaction.state = "delivering";
       active.deliveryAttempted = true;
+      input.assertHumanControl?.();
       const result = await session.supervisor.send("Runtime.callFunctionOn", {
         objectId: active.objectId,
         functionDeclaration: PROTECTED_FIELD_DELIVERY_FUNCTION,
@@ -327,6 +328,7 @@ export class ProtectedBrowserFormTransactionController {
         transaction.submission = "failed";
         return { submission: "failed" };
       }
+      input.assertHumanControl?.();
       const clicked = await session.supervisor.send("Runtime.callFunctionOn", {
         objectId: transaction.submit.objectId,
         functionDeclaration: PROTECTED_SUBMIT_FUNCTION,

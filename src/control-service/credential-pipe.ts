@@ -3,10 +3,10 @@ import { ControlProtocolError, exactKeys, failureEnvelope, isControlId, parseCon
 import { CredentialCandidates, validateCandidateScope } from './credential-candidates.js';
 import { BoundedLines } from './framing.js';
 /** Dedicated inherited descriptor, never stdout or an ordinary preload/RPC route. */
-export function attachCredentialPipe(pipe: Duplex, candidates: CredentialCandidates, onClosed: () => void): () => void {
-  let closed = false;
+export function attachCredentialPipe(pipe: Duplex, candidates: CredentialCandidates, onClosed: () => void, browserDeliver?:(params:unknown,signal:AbortSignal)=>Promise<void>): () => void {
+  let closed = false,browserBusy=false;const abort=new AbortController();
   const close = () => {
-    if (closed) return; closed = true; lines.dispose(); candidates.dispose(); pipe.destroy(); onClosed();
+    if (closed) return; closed = true; abort.abort(); lines.dispose(); candidates.dispose(); pipe.destroy(); onClosed();
   };
   const send = (id: string, result: JsonValue) => {
     if (pipe.writableLength > 65_536) { close(); return; }
@@ -19,7 +19,11 @@ export function attachCredentialPipe(pipe: Duplex, candidates: CredentialCandida
       if (!('method' in message) || !('id' in message)) throw new ControlProtocolError('-32600');
       id = message.id;
       const params = message.params;
-      if (message.method === 'credentials.stage') {
+      if(message.method==='credentials.browserDeliver'){
+        if(!browserDeliver||browserBusy)throw new ControlProtocolError('-32009');
+        browserBusy=true;
+        void browserDeliver(params,abort.signal).then(()=>{if(!closed)send(id!,{delivered:true});},()=>{if(!closed)pipe.write(serializeControlFrame(failureEnvelope(id,'-32003')));}).finally(()=>{browserBusy=false;});
+      } else if (message.method === 'credentials.stage') {
         if (!exactKeys(params, ['scope', 'value']) || typeof params.value !== 'string') throw new ControlProtocolError('-32602');
         validateCandidateScope(params.scope);
         const candidateId = candidates.stage(params.scope, params.value);

@@ -6,7 +6,7 @@ type Entry={id:string;holder:string;workId:string;browserId:string;lease:HumanBr
 export class DesktopBrowserControls{
  #entry?:Entry;#opening=false;#epoch=0;#closed=false;
  readonly #invalidate=()=>{this.#epoch++;if(this.#entry)clearInterval(this.#entry.timer);this.#entry=undefined;};
- constructor(readonly connection:DesktopConnection,readonly confirm:(url:string)=>Promise<boolean>){connection.on('invalidate',this.#invalidate);}
+ constructor(readonly connection:DesktopConnection,readonly confirm:(url:string)=>Promise<boolean>,readonly collect?:(entry:{origin:string;kind:'password'|'one-time-code'},deliver:(value:string)=>Promise<void>)=>Promise<boolean>,readonly deliverSecret?:(params:{workId:string;command:Extract<HumanBrowserCommand,{action:'signin-deliver'}>})=>Promise<void>){connection.on('invalidate',this.#invalidate);}
  #assert(epoch:number){if(this.#closed||epoch!==this.#epoch||this.connection.state.status!=='ready')throw new Error('Browser connection changed.');}
  async open(workId:string,reference?:BrowserViewReference):Promise<{id:string}>{
   if(this.#opening||this.#entry)throw new Error('Browser control is already open.');this.#opening=true;const epoch=this.#epoch,generation=this.connection.state.generation;
@@ -48,6 +48,19 @@ export class DesktopBrowserControls{
   try{const base={holder:entry.holder,browserId:entry.browserId,lease:entry.lease,sequence:++entry.sequence};const command:HumanBrowserCommand=input?{...base,action:'input',input}:{...base,action:'observe'};
    const result=await this.connection.browserRequest({workId:entry.workId,command});if(this.#entry!==entry||!result.frame)throw new Error('Browser observation unavailable.');this.#active(id);return result.frame;
   }catch(error){if(this.#entry===entry)this.#invalidate();throw error;}finally{entry.busy=false;}
+ }
+ async signIn(id:string,frameId:string,submitRef:string,kind:'password'|'one-time-code'):Promise<{submitted:boolean}>{
+  const entry=this.#active(id);if(entry.busy||!this.collect||!this.deliverSecret)throw new Error('Protected entry unavailable.');entry.busy=true;
+  const base=()=>({holder:entry.holder,browserId:entry.browserId,lease:entry.lease,sequence:++entry.sequence});
+  try{
+   const prepared=await this.connection.browserRequest({workId:entry.workId,command:{...base(),action:'signin-prepare',frameId,submitRef,kind}});
+   this.#active(id);if(this.#entry!==entry||!prepared.entry)throw new Error('Protected entry unavailable.');
+   const submitted=await this.collect({origin:prepared.entry.origin,kind},async value=>{
+    try{this.#active(id);await this.deliverSecret!({workId:entry.workId,command:{...base(),action:'signin-deliver',entryId:prepared.entry!.id,value}});this.#active(id);}finally{value='';}
+   });
+   this.#active(id);await this.connection.browserRequest({workId:entry.workId,command:{...base(),action:'signin-cancel'}});
+   this.#active(id);return {submitted};
+  }catch{if(this.#entry===entry)this.#invalidate();throw new Error('Protected entry failed. Reacquire control to inspect the browser.');}finally{entry.busy=false;}
  }
  async release(id:string){const entry=this.#active(id);if(entry.busy)throw new Error('Browser input is settling.');entry.busy=true;
   try{await this.connection.browserRequest({workId:entry.workId,command:{action:'release',holder:entry.holder,browserId:entry.browserId,lease:entry.lease}});this.#active(id);this.#invalidate();}

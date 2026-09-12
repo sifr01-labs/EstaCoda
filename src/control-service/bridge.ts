@@ -1,3 +1,4 @@
+import {validateHumanBrowserCommand,exactKeys,isRecord,isControlId} from '../contracts/desktop-control/index.js';
 import {browserControl} from './browser-control.js';
 import {browserViewSnapshot} from './browser-snapshot.js';
 import {listBrowserViews} from './browser-view.js';
@@ -61,6 +62,13 @@ export class DesktopBridge {
   #capture: AbortController | undefined;
   #snapshot: BootstrapResult | undefined;
   readonly oauth:CodexAuthorization;
+  async deliverBrowserInput(params:unknown,signal:AbortSignal):Promise<void>{
+    if(!isRecord(params)||!exactKeys(params,['workId','command'])||!isControlId(params.workId))throw new ControlProtocolError('-32602');
+    validateHumanBrowserCommand(params.command);
+    if(params.command.action!=='signin-deliver')throw new ControlProtocolError('-32602');
+    try{await browserControl(this.options,this.workSnapshot().get(params.workId),params.command,signal);}
+    finally{params.command.value='';}
+  }
   constructor(readonly options: { input: Readable; output: Writable; homeDir: string; profileId: string; version: string;
     readWork?: (signal: AbortSignal) => Promise<WorkState>;
     readState?: (signal: AbortSignal) => Promise<BootstrapState> }) {

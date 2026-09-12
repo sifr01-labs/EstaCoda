@@ -9,6 +9,9 @@ export class CredentialPipeClient {
   constructor(readonly pipe: Duplex) {
     pipe.on('data', this.receive); pipe.once('error', this.dispose); pipe.once('close', this.dispose); pipe.once('end', this.dispose);
   }
+  async deliverBrowser(params:{workId:string;command:Extract<import('@estacoda/control-protocol').HumanBrowserCommand,{action:'signin-deliver'}>}):Promise<void>{
+    try{await this.request('credentials.browserDeliver',params);}finally{params.command.value='';}
+  }
   async stage(scope: CredentialScope, value: string): Promise<string> {
     if (typeof value !== 'string' || value.length === 0 || Buffer.byteLength(value) > 49_152) throw new Error('Credential rejected.');
     return (await this.request('credentials.stage', { scope, value })).candidateId as string;
@@ -39,7 +42,7 @@ export class CredentialPipeClient {
         const pending=this.#pending.get(response.id);if(!pending)throw new Error();
         if('error' in response) { this.#pending.delete(response.id);clearTimeout(pending.timer);pending.reject(new Error('Credential rejected.'));continue; }
         const result=response.result;
-        if(!isRecord(result) || (pending.method==='credentials.stage' ? !exactKeys(result,['candidateId'])||!isControlId(result.candidateId) : !exactKeys(result,['closed'])||result.closed!==true))throw new Error();
+        if(!isRecord(result) || (pending.method==='credentials.browserDeliver' ? !exactKeys(result,['delivered'])||result.delivered!==true : pending.method==='credentials.stage' ? !exactKeys(result,['candidateId'])||!isControlId(result.candidateId) : !exactKeys(result,['closed'])||result.closed!==true))throw new Error();
         this.#pending.delete(response.id);clearTimeout(pending.timer);pending.resolve(result as Record<string,JsonValue>);
       }
     }catch {this.dispose();}

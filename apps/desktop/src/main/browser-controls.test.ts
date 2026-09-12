@@ -31,3 +31,12 @@ it('opens an empty supported workspace with consent and tracks runtime generated
  await controls.release(opened.id);expect(request.mock.calls.at(-1)![0].command.browserId).toBe('runtime-created');
  }finally{controls.dispose();}
 });
+it('collects sign-in only in the protected Main callback and returns metadata',async()=>{
+ const{connection,request}=fixture();request.mockImplementation(async({command}:any)=>({lease:{id:'private-lease',generation:1},frame:null,state:'human',...(command.action==='signin-prepare'?{entry:{id:'entry',origin:'https://example.com'}}:{})}) as any);
+ const collect=vi.fn(async(_entry:any,deliver:(value:string)=>Promise<void>)=>{await deliver('fixture-secret');return true;});
+ const secretPipe=vi.fn(async(_params:any)=>{}),controls=new DesktopBrowserControls(connection,async()=>true,collect,secretPipe);
+ try{const opened=await controls.open('session:s',reference);expect(await controls.signIn(opened.id,'f','@e3','password')).toEqual({submitted:true});
+ expect(collect.mock.calls[0]![0]).toEqual({origin:'https://example.com',kind:'password'});expect(request.mock.calls.map(([v])=>v.command.action)).toEqual(['acquire','signin-prepare','signin-cancel']);
+ expect(secretPipe.mock.calls[0]![0].command).toMatchObject({entryId:'entry',value:'fixture-secret',sequence:2});expect(JSON.stringify(request.mock.calls)).not.toContain('fixture-secret');
+ }finally{controls.dispose();}
+});
