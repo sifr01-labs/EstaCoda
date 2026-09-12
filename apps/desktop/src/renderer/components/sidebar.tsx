@@ -1,7 +1,7 @@
 import {useI18n} from '../i18n.js';
 import type{WorkProjection}from'@estacoda/control-protocol';
 import{BrandEye,Button,Icon}from'./primitives.js';
-export type PageName='work'|'inbox'|'library'|'connections'|'settings'|'appearance'|'models'|'search'|'background';
+export type PageName='advanced'|'work'|'inbox'|'library'|'connections'|'settings'|'appearance'|'models'|'search'|'background';
 export const statusLabel=(work:WorkProjection)=>({draft:'Draft',queued:'Queued',running:work.reason==='cancellation_requested'?'Cancellation requested':'Running',needs_attention:work.reason==='approval_required'?'Needs approval':'Needs attention',paused:'Paused',completed:'Completed',partial:'Partially completed',failed:'Failed',cancelled:'Cancelled'})[work.status];
 export function Sidebar({page,navigate,selected,select,work,pinned,togglePin,newChat,fixture,liveSearch,liveCreate,inboxCount,profile,more,loadingMore,limitReached}:{page:PageName;navigate:(page:PageName)=>void;selected:string;select:(id:string)=>void;work:WorkProjection[];pinned:string[];togglePin:(id:string)=>void;newChat:()=>void;fixture:boolean;liveSearch?:boolean;liveCreate?:boolean;inboxCount:number;profile:string;more?:()=>void;loadingMore?:boolean;limitReached?:boolean}){
  const {t,owned,status}=useI18n();

@@ -1,3 +1,13 @@
+export type DesktopSettingsApi={
+ read(section:import('@estacoda/control-protocol').SettingsSection):Promise<import('@estacoda/control-protocol').SettingsPage>;
+ begin():Promise<{setupId:string}>;
+ stage(setupId:string,fieldId:string,selectors:string[]):Promise<{staged:boolean}>;
+ review(setupId:string,changes:import('@estacoda/control-protocol').SettingChange[]):Promise<import('@estacoda/control-protocol').SettingsReview>;
+ apply(setupId:string):Promise<MethodContracts['settings.apply']['result']>;
+ cancel(setupId:string):Promise<{cancelled:boolean}>;
+ inspect():Promise<MethodContracts['settings.inspect']['result']>;
+ verify():Promise<MethodContracts['settings.verify']['result']>;
+};
 import type {MethodContracts} from '@estacoda/control-protocol';
 import type {AppearancePreferences} from './appearance.js';
 import type { ActivityProjection, Page, WorkProjection, InboxProjection } from '@estacoda/control-protocol';
@@ -92,7 +102,7 @@ export type DesktopTerminalApi={
  resize(id:string,cols:number,rows:number):Promise<void>;
  close(id:string):Promise<void>;
 };
-export type DesktopApi = {
+export type DesktopApi = {settings?:DesktopSettingsApi;
   readonly browserControl?:{watch?(workId:string,browserId:string):Promise<import('@estacoda/control-protocol').HumanBrowserFrame>;signIn?(id:string,frameId:string,submitRef:string,kind:'password'|'one-time-code'):Promise<{submitted:boolean}>;inventory?(workId:string):Promise<import('@estacoda/control-protocol').BrowserWorkspaceState>;openWorkspace?(workId:string):Promise<{id:string}>;workspace?(id:string,operation:import('@estacoda/control-protocol').BrowserWorkspaceAction):Promise<import('@estacoda/control-protocol').BrowserWorkspaceState>;open(workId:string,reference:import('@estacoda/control-protocol').BrowserViewReference):Promise<{id:string}>;frame(id:string,input?:import('@estacoda/control-protocol').HumanBrowserInput):Promise<import('@estacoda/control-protocol').HumanBrowserFrame>;release(id:string):Promise<void>;abandon(id:string):Promise<void>};
   readonly browser?:{list(workId:string):Promise<MethodContracts['browser.list']['result']>;snapshot(workId:string,reference:import('@estacoda/control-protocol').BrowserViewReference):Promise<MethodContracts['browser.snapshot']['result']>};
   artifacts?:{list(cursor?:string):Promise<MethodContracts['artifacts.list']['result']>;get(reference:import('@estacoda/control-protocol').ArtifactReference):Promise<MethodContracts['artifacts.get']['result']>;open(reference:import('@estacoda/control-protocol').ArtifactReference):Promise<MethodContracts['artifacts.open']['result']>};

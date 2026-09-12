@@ -348,3 +348,5 @@
 #ec-branded-workspace .ec-browserbar input { min-width:min(240px,100%); flex:1 1 240px; box-sizing:border-box; }
 
 .ec-browserwatch select{max-width:100%}
+
+.ec-settingsform{display:grid;gap:16px;max-inline-size:820px}.ec-settingsform label{display:grid;gap:8px}.ec-settingsform input,.ec-settingsform select,.ec-settingsform textarea{max-inline-size:100%;min-inline-size:0;padding:10px;font:inherit;color:inherit;background:var(--ec-panel);border:1px solid var(--ec-line);border-radius:8px}.ec-settingsform code{overflow-wrap:anywhere}.ec-settingsform .ec-settingsrow{flex-wrap:wrap;gap:12px}

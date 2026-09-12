@@ -7,6 +7,7 @@ export type ConnectionState = { status: 'connecting' | 'ready' | 'disconnected' 
 export const INSPECTION_METHODS=CONTROL_METHODS.filter(method=>method==='browser.control'||method==='browser.list'||method==='browser.snapshot'||method.startsWith('artifacts.')||method==='evidence.get'||method.startsWith('files.')||method.startsWith('diff.')||method.startsWith('terminal.'));
 export const TARGET_METHODS=CONTROL_METHODS.filter(method=>method.startsWith('targets.'));
 export const CONNECTION_METHODS=CONTROL_METHODS.filter(method=>method.startsWith('connections.')||method.startsWith('telegram.')||method.startsWith('gateway.'));
+export const SETTINGS_METHODS=CONTROL_METHODS.filter(method=>method.startsWith('settings.'));
 export const MODEL_METHODS=CONTROL_METHODS.filter(method=>method.startsWith('models.') || ['providers.list','sessions.setModel','tasks.setModel','operations.inspect'].includes(method));
 export const WORK_METHODS=CONTROL_METHODS.filter(method=>method==='work.usage'||method==='work.counts'||method==='inbox.get'||method==='work.targets'||method==='work.live'||method.startsWith('sessions.')||method.startsWith('tasks.')||method==='approvals.resolve'||method==='operations.inspect');
 export class DesktopConnection extends EventEmitter {
@@ -35,7 +36,7 @@ export class DesktopConnection extends EventEmitter {
         else if (event.type !== 'control.ready') void this.refresh();
       });
       await client.request('control.initialize', { profileId: this.state.profileId, clientVersion: '0.0.0', protocolVersion: DESKTOP_PROTOCOL_VERSION,
-        capabilities: { methods: ['control.bootstrap','control.subscribe','control.unsubscribe','work.list','work.get','work.activity','inbox.list',...new Set([...MODEL_METHODS,...WORK_METHODS,...CONNECTION_METHODS,...TARGET_METHODS,...INSPECTION_METHODS])], events: [...CONTROL_EVENTS] } });
+        capabilities: { methods: ['control.bootstrap','control.subscribe','control.unsubscribe','work.list','work.get','work.activity','inbox.list',...new Set([...SETTINGS_METHODS,...MODEL_METHODS,...WORK_METHODS,...CONNECTION_METHODS,...TARGET_METHODS,...INSPECTION_METHODS])], events: [...CONTROL_EVENTS] } });
       if (generation !== this.state.generation) return;
       await this.refresh(); if(client===this.#client&&this.state.status==='ready')this.#attempt = 0;
     } catch (error) {
@@ -120,6 +121,11 @@ export class DesktopConnection extends EventEmitter {
     const result=await client.request(method,params);
     if(client!==this.#client || generation!==this.state.generation)throw new Error('Desktop context changed.');
     return result;
+  }
+  async settingsRequest<M extends keyof MethodContracts>(method:M,params:MethodContracts[M]['params']):Promise<MethodContracts[M]['result']>{
+    const client=this.#client,generation=this.state.generation;
+    if(!client||this.state.status!=='ready'||!SETTINGS_METHODS.includes(method))throw new Error('Settings unavailable.');
+    const result=await client.request(method,params);if(client!==this.#client||generation!==this.state.generation)throw new Error('Desktop context changed.');return result;
   }
   async modelRequest<M extends keyof MethodContracts>(method:M,params:MethodContracts[M]['params']):Promise<MethodContracts[M]['result']>{
     const client=this.#client,generation=this.state.generation;

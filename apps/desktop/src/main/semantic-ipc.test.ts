@@ -89,3 +89,8 @@ it('accepts only scoped observation references without control authority',()=>{
  expect(()=>validateSemanticPayload('browserControlWatch',{workId:'session:s',browserId:'b'})).not.toThrow();
  for(const extra of [{lease:{id:'l',generation:1}},{value:'secret'},{url:'https://example.com'},{profileId:'other'}])expect(()=>validateSemanticPayload('browserControlWatch',{workId:'session:s',browserId:'b',...extra})).toThrow();
 });
+it('keeps settings identity and credentials out of ordinary semantic requests',()=>{
+ for(const method of ['settingsApply','settingsCancel','settingsStage','settingsReview'])for(const extra of [{profileId:'other'},{windowId:'other'},{generation:2},{credential:'raw'}])expect(()=>validateSemanticPayload(method,{setupId:'s',...extra})).toThrow();
+ expect(()=>validateSemanticPayload('settingsRead',{section:'runtime',path:'/tmp/config.json'})).toThrow();expect(()=>validateSemanticPayload('settingsRead',{section:'runtime'})).not.toThrow();
+ expect(()=>validateSemanticPayload('settingsReview',{setupId:'s',changes:[{fieldId:'ui.language',selectors:[],value:'ar'}]})).not.toThrow();
+});
