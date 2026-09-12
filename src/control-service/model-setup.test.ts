@@ -4,6 +4,7 @@ import {ModelSetup} from './model-setup.js';
 import {CredentialCandidates,type CandidateScope} from './credential-candidates.js';
 import {resolveProfileStateHome} from '../config/profile-home.js';
 import type {CandidateRoute} from '../contracts/desktop-control/index.js';
+import {AUXILIARY_SLOTS} from '../contracts/desktop-control/index.js';
 it('reviews and applies only the bound candidate, preserves the profile and reconciles duplicate Apply',async()=>{
   const homeDir=await mkdtemp('/tmp/ec-model-setup-');const input={homeDir,profileId:'p'};
   const candidates=new CredentialCandidates('p','b');let changes=0;const setup=new ModelSetup(input,candidates,()=>{changes++;});
@@ -57,5 +58,27 @@ it('adds, reorders and removes fallbacks without redirecting the primary or acce
     const route:CandidateRoute={providerId:'kimi',modelId:'primary',endpoint:'https://api.moonshot.ai/v1',authMethod:'api_key',apiMode:'openai_chat_completions',allowPrivateEndpoint:false};
     const candidateId=candidates.stage({windowId:'w',generation:1,purpose:'provider',providerId:'kimi',authMethod:'api_key',endpoint:route.endpoint},'synthetic-duplicate');
     await expect(setup.review({windowId:'w',generation:1,candidateId,route},'fallback')).rejects.toThrow();
+  }finally{setup.dispose();candidates.dispose();await rm(homeDir,{recursive:true,force:true});}
+});
+
+it('manages only the five exposed specialist slots and preserves primary, fallback and Vision settings',async()=>{
+  const homeDir=await mkdtemp('/tmp/ec-specialists-');const input={homeDir,profileId:'p'},paths=resolveProfileStateHome(input);
+  const candidates=new CredentialCandidates('p','b'),setup=new ModelSetup(input,candidates,()=>{});
+  await mkdir(paths.profileRoot,{recursive:true});
+  await writeFile(paths.configPath,JSON.stringify({model:{provider:'local',id:'primary',fallbacks:[]},providers:{local:{baseUrl:'http://127.0.0.1:8080/v1',authMethod:'none',enableNetwork:true,models:['primary']}},auxiliaryModels:{vision:{provider:'main',enabled:true}}}));
+  const apply=async(draftId:string)=>setup.apply({draftId,windowId:'w',generation:1},new AbortController().signal);
+  try{
+    expect((await setup.auxiliary()).items.map(row=>row.slot)).toEqual([...AUXILIARY_SLOTS]);
+    for(const slot of AUXILIARY_SLOTS){
+      const draft=await setup.reviewAuxiliaryMode({windowId:'w',generation:1,slot,mode:'disabled',fallbackToMain:false});expect(await apply(draft.draftId)).toMatchObject({state:'applied'});
+    }
+    expect((await setup.auxiliary()).items.every(row=>row.mode==='disabled')).toBe(true);
+    const dedicated=await setup.review({windowId:'w',generation:1,route:{providerId:'local-specialist',modelId:'specialist',endpoint:'http://127.0.0.1:8081/v1',authMethod:'none',apiMode:'custom_openai_compatible',allowPrivateEndpoint:true}},'auxiliary',{slot:'assessor',fallbackToMain:true});
+    await apply(dedicated.draftId);
+    expect((await setup.auxiliary()).items.find(row=>row.slot==='assessor')).toMatchObject({mode:'dedicated',modelId:'specialist',fallbackToMain:true});
+    const main=await setup.reviewAuxiliaryMode({windowId:'w',generation:1,slot:'assessor',mode:'main',fallbackToMain:false});await apply(main.draftId);
+    expect((await setup.auxiliary()).items.find(row=>row.slot==='assessor')).toMatchObject({mode:'main',modelId:'primary'});
+    const config=JSON.parse(await readFile(paths.configPath,'utf8'));expect(config.model.id).toBe('primary');expect(config.model.fallbacks).toEqual([]);expect(config.auxiliaryModels.vision).toMatchObject({provider:'main',enabled:true});
+    await expect(setup.reviewAuxiliaryMode({windowId:'w',generation:1,slot:'vision' as never,mode:'disabled',fallbackToMain:false})).rejects.toThrow();
   }finally{setup.dispose();candidates.dispose();await rm(homeDir,{recursive:true,force:true});}
 });

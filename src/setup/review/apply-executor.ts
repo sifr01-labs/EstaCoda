@@ -316,6 +316,11 @@ async function applyConfigPatch(
     case "setupDrafts.fallbackModelRoute.replace.summary":
       await applyFallbackRoute(operation, context, options);
       return [];
+    case "setupDrafts.auxiliaryMode.summary": {
+      const task=operation.review.values.auxiliaryTask,mode=operation.review.values.mode;
+      if(!['assessor','compression','session_search','memory_compaction','profile_context'].includes(String(task))||!['main','auto','disabled'].includes(String(mode)))throw new Error('Invalid specialist mode');
+      await setupAuxiliaryModelConfig({...configApplyTarget(operation,options),input:{task:task as AuxiliaryModelTask,provider:mode==='main'?'main':'auto',enabled:mode!=='disabled',fallbackToMain:operation.review.values.fallbackToMain===true}});return [];
+    }
     case "setupDrafts.auxiliaryModelRoute.summary":
     case "setupDrafts.visionAnalysisRoute.summary":
     case "setupDrafts.visionAnalysisRoute.basic.summary":
@@ -552,10 +557,17 @@ async function applyAuxiliaryModelRoute(
     throw new Error("Auxiliary route apply requires a provider review value.");
   }
   const target = configApplyTarget(operation, options);
+  if(options.persistRouteTransport && model && resolvedProvider!=='main' && resolvedProvider!=='auto') {
+    const profileId=target.profileId ?? defaultProfileId();
+    const existing=await readConfig(resolveProfileStateHome({...target,profileId}).configPath);
+    if(!existing.config.providers?.[resolvedProvider])await registerProviderConfig({...target,input:{provider:resolvedProvider,baseUrl,apiKeyEnv,authMethod:providerAuthMethodValue(operation.review.values.authMethod),apiMode:providerApiModeValue(operation.review.values.apiMode),kind:'openai-compatible',enableNetwork:true}});
+    await registerProviderModel({...target,input:{provider:resolvedProvider,models:[model]}});
+  }
   await setupAuxiliaryModelConfig({
     ...target,
     input: {
       task: auxiliaryTask,
+      ...(options.persistRouteTransport ? {fallbackToMain:operation.review.values.fallbackToMain===true} : {}),
       provider: resolvedProvider,
       ...(model !== undefined && resolvedProvider !== "auto" && resolvedProvider !== "main" ? { id: model } : {}),
       ...(baseUrl !== undefined ? { baseUrl } : {}),

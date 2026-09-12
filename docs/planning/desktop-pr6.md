@@ -43,3 +43,9 @@ Validation: full root suite, 660 files / 10,814 tests passing after correcting t
 The bridge supports reviewed fallback setup plus a revision-bound fallback list for reorder/removal. Duplicate routes, duplication of the primary, invalid indices and stale list revisions are rejected. The same reviewed transaction handles Apply and recovery. Fallback credentials and endpoints remain route-local when their provider already exists, preserving the primary provider configuration. Lists are bounded to 32 routes.
 
 Validation: 96 focused setup/protocol tests, including adding two fallbacks, reordering, removing, stale-index rejection, duplicate-primary rejection and primary endpoint/credential preservation; root typecheck and desktop foundation checks. Risk: fallback changes affect execution routing, so review snapshots and canonical configuration checks remain mandatory.
+
+## 6. Reviewed specialist routes
+
+The service exposes assessor, compression, session search, memory compaction and profile context. Each slot supports dedicated, primary, automatic or disabled routing, with an explicit fallback-to-primary choice. Dedicated routes reuse credential candidates and the reviewed transaction; mode changes use the same snapshot and recovery checks. Read-only projections distinguish credential presence from runnable configuration. Vision remains outside this editor.
+
+Validation: 100 setup/protocol tests and 105 specialist resolver/protocol tests passed; root typecheck and desktop foundation checks passed. Review verified that specialist changes preserve primary, fallback and Vision configuration. Risk: specialist routing affects provider execution, so credentials remain profile-local and route changes use the existing resolver and setup executor.

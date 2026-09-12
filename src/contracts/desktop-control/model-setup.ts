@@ -15,7 +15,7 @@ export type CandidateVerification = {
   inputTokens: number | null; outputTokens: number | null;
   estimatedCost: number | null;
 };
-export type ModelRouteDraft = {draftId:string;route?:CandidateRoute;expiresInMs:number;credentialState:'staged'|'not_required';role:'primary'|'fallback'|'fallback_order'};
+export type ModelRouteDraft = {draftId:string;route?:CandidateRoute;expiresInMs:number;credentialState:'staged'|'not_required';role:'primary'|'fallback'|'fallback_order'|'auxiliary'|'auxiliary_mode';slot?:AuxiliarySlot};
 export type ModelDraftBinding = {draftId:string;windowId:string;generation:number};
 export type ModelApplyReceipt = {operationId:string;state:'applied'|'uncertain'|'unknown';verification:'configured'|'repair_required'|'not_tested'};
 
@@ -25,3 +25,8 @@ export function candidateRouteBinding(route:CandidateRoute):string {
 
 export type FallbackList={revision:string;items:{index:number;providerId:string;modelId:string}[]};
 export type FallbackOrderParams={windowId:string;generation:number;revision:string;order:number[]};
+
+export const AUXILIARY_SLOTS=['assessor','compression','session_search','memory_compaction','profile_context'] as const;
+export type AuxiliarySlot=typeof AUXILIARY_SLOTS[number];
+export type AuxiliaryList={items:{slot:AuxiliarySlot;mode:'main'|'auto'|'dedicated'|'disabled';providerId:string|null;modelId:string|null;fallbackToMain:boolean;credentialState:'missing'|'present'|'expired'|'not_required';runnable:boolean}[]};
+export type AuxiliaryModeParams={windowId:string;generation:number;slot:AuxiliarySlot;mode:'main'|'auto'|'disabled';fallbackToMain:boolean};

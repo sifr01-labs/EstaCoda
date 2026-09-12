@@ -1,3 +1,6 @@
+import {captureCredentialPresence} from './route-health.js';
+import {AUXILIARY_SLOTS,type AuxiliarySlot,type AuxiliaryList,type AuxiliaryModeParams} from '../contracts/desktop-control/index.js';
+import {resolveAuxiliaryModelRoute} from '../providers/auxiliary-model-resolver.js';
 import type {SetupApplyPlan} from '../setup/setup-apply-plan.js';
 import type {CandidateRoute,FallbackList,FallbackOrderParams} from '../contracts/desktop-control/index.js';
 import {captureModelCatalog} from './model-catalog.js';
@@ -17,18 +20,19 @@ export class ModelSetup {
   #closed=false;
   #fallbackListing:{projection:FallbackList;snapshot:ProfileApplySnapshot}|undefined;
   constructor(readonly input:{homeDir:string;profileId:string},readonly candidates:CredentialCandidates,readonly changed:()=>void|Promise<void>){}
-  async review(params:MethodContracts['models.reviewPrimary']['params'],role:'primary'|'fallback'='primary'):Promise<ModelRouteDraft>{
+  async review(params:MethodContracts['models.reviewPrimary']['params'],role:'primary'|'fallback'|'auxiliary'='primary',auxiliary?:{slot:AuxiliarySlot;fallbackToMain:boolean}):Promise<ModelRouteDraft>{
     for(const [id,draft] of this.#drafts){if(this.#drafts.size<32)break;if(draft.consumed)this.#drafts.delete(id);}
     if(this.#closed || this.#drafts.size>=32)throw new ControlProtocolError('-32009');
+    if(role==='auxiliary' && (!auxiliary || !AUXILIARY_SLOTS.includes(auxiliary.slot)))throw new ControlProtocolError('-32602');
     validateCandidateRequest({...params,spendApproved:true});
     const scope:CandidateScope={windowId:params.windowId,generation:params.generation,purpose:'provider',providerId:params.route.providerId,authMethod:params.route.authMethod==='oauth'?'oauth':'api_key',endpoint:params.route.endpoint};
     if(params.candidateId){this.candidates.bindRoute(params.candidateId,scope,candidateRouteBinding(params.route));this.candidates.read(params.candidateId,scope);}
     const snapshot=await captureProfileApplySnapshot(this.input);
     const loaded=await loadRuntimeConfig({...this.input,workspaceRoot:this.input.homeDir,configurationInspection:true});
-    if(role==='fallback'){
+    if(role==='fallback'||role==='auxiliary'){
       const identity=(provider:string,id:string,endpoint?:string)=>JSON.stringify([provider,id,new URL(endpoint ?? getProviderMetadata(provider).defaultBaseUrl ?? 'http://invalid').href.replace(/\/$/,'')]);
       const key=identity(params.route.providerId,params.route.modelId,params.route.endpoint);
-      if([loaded.primaryModelRoute,...loaded.modelFallbackRoutes].some(route=>identity(route.provider,route.id,route.baseUrl)===key) || loaded.modelFallbackRoutes.length>=32)throw new ControlProtocolError('-32602');
+      if(role==='fallback' && ([loaded.primaryModelRoute,...loaded.modelFallbackRoutes].some(route=>identity(route.provider,route.id,route.baseUrl)===key) || loaded.modelFallbackRoutes.length>=32))throw new ControlProtocolError('-32602');
       const provider=loaded.config.providers?.[params.route.providerId];
       const metadata=getProviderMetadata(params.route.providerId);
       if(provider && ((provider.authMethod ?? metadata.defaultAuthMethod)!==(params.route.authMethod==='oauth'?'oauth_device_pkce':params.route.authMethod) || (provider.apiMode ?? metadata.apiMode)!==params.route.apiMode))throw new ControlProtocolError('-32602');
@@ -36,12 +40,36 @@ export class ModelSetup {
     if(JSON.stringify(snapshot.files)!==JSON.stringify((await captureProfileApplySnapshot(this.input)).files))throw new ControlProtocolError('-32007');
     if(params.candidateId)this.candidates.read(params.candidateId,scope);
     if(this.#closed || this.#drafts.size>=32)throw new ControlProtocolError('-32003');
-    const draftId=randomUUID(),projection:ModelRouteDraft={draftId,route:structuredClone(params.route),expiresInMs:300000,credentialState:params.candidateId?'staged':'not_required',role};
+    const draftId=randomUUID(),projection:ModelRouteDraft={draftId,route:structuredClone(params.route),expiresInMs:300000,credentialState:params.candidateId?'staged':'not_required',role,...(auxiliary?{slot:auxiliary.slot}:{})};
     const credentialEnv=params.route.authMethod==='api_key'?`${getProviderMetadata(params.route.providerId).defaultApiKeyEnv ?? 'PROVIDER_API_KEY'}_${draftId.replaceAll('-','').toUpperCase()}`:undefined;
     const route=params.route;
-    const plan=primaryRoutePlan({provider:route.providerId,model:route.modelId,baseUrl:route.endpoint,apiMode:route.apiMode,authMethod:route.authMethod==='oauth'?'oauth_device_pkce':route.authMethod,enableNetwork:true},credentialEnv,role);
+    const plan=primaryRoutePlan({provider:route.providerId,model:route.modelId,baseUrl:route.endpoint,apiMode:route.apiMode,authMethod:route.authMethod==='oauth'?'oauth_device_pkce':route.authMethod,enableNetwork:true,...(auxiliary?{auxiliaryTask:auxiliary.slot,fallbackToMain:auxiliary.fallbackToMain}:{})},credentialEnv,role);
     const timer=setTimeout(()=>this.cancel({draftId,windowId:params.windowId,generation:params.generation}),300000);timer.unref();
     this.#drafts.set(draftId,{expires:performance.now()+300000,params:structuredClone(params),projection,snapshot,credentialEnv,scope,plan,abort:new AbortController(),timer,applying:false,consumed:false});
+    return projection;
+  }
+  async auxiliary():Promise<AuxiliaryList>{
+    const loaded=await loadRuntimeConfig({...this.input,workspaceRoot:this.input.homeDir,configurationInspection:true});
+    const providerModels=await loaded.providerRegistry.listModels();
+    const presence=await captureCredentialPresence(loaded);
+    const items:AuxiliaryList['items']=AUXILIARY_SLOTS.map(slot=>{
+      const resolved=resolveAuxiliaryModelRoute(slot,loaded.auxiliaryModels,{mainRoute:loaded.primaryModelRoute,providerRegistry:loaded.providerRegistry,providerModels});
+      const credentialState=resolved.route?presence(resolved.route.provider,resolved.route):'not_required';
+      const adapter=resolved.route?loaded.providerRegistry.get(resolved.route.provider):undefined;
+      const runnable=Boolean(adapter && adapter.executable!==false && resolved.route && loaded.config.providers?.[resolved.route.provider]?.enableNetwork && ['present','not_required'].includes(credentialState));
+      return {slot,credentialState,runnable,mode:resolved.source==='disabled'?'disabled':resolved.source==='main'?'main':resolved.source.startsWith('auto')?'auto':'dedicated',providerId:resolved.route?.provider??null,modelId:resolved.route?.id??null,fallbackToMain:resolved.fallbackToMain};
+    });
+    if(this.#closed)throw new ControlProtocolError('-32003');return {items};
+  }
+  async reviewAuxiliaryMode(params:AuxiliaryModeParams):Promise<ModelRouteDraft>{
+    for(const [id,draft] of this.#drafts){if(this.#drafts.size<32)break;if(draft.consumed)this.#drafts.delete(id);}
+    if(this.#closed||this.#drafts.size>=32||!AUXILIARY_SLOTS.includes(params.slot)||!['main','auto','disabled'].includes(params.mode))throw new ControlProtocolError('-32602');
+    const snapshot=await captureProfileApplySnapshot(this.input);
+    if(this.#closed)throw new ControlProtocolError('-32003');
+    const draftId=randomUUID(),projection:ModelRouteDraft={draftId,expiresInMs:300000,credentialState:'not_required',role:'auxiliary_mode',slot:params.slot};
+    const plan=primaryRoutePlan({auxiliaryTask:params.slot,mode:params.mode,fallbackToMain:params.fallbackToMain},undefined,'auxiliary_mode');
+    const timer=setTimeout(()=>this.cancel({draftId,windowId:params.windowId,generation:params.generation}),300000);timer.unref();
+    this.#drafts.set(draftId,{expires:performance.now()+300000,params:{windowId:params.windowId,generation:params.generation},projection,plan,snapshot,abort:new AbortController(),timer,applying:false,consumed:false});
     return projection;
   }
   async fallbacks():Promise<FallbackList>{

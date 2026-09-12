@@ -1,3 +1,4 @@
+import type {AuxiliaryList,AuxiliarySlot,AuxiliaryModeParams} from './model-setup.js';
 import type {VerifyCandidateParams, CandidateVerification, ModelRouteDraft, ModelDraftBinding, ModelApplyReceipt, FallbackList, FallbackOrderParams} from './model-setup.js';
 import type { BootstrapResult, Capabilities, ControlCursor, InitializeParams, InitializeResult } from "./bootstrap.js";
 import type { ActivityProjection, ConnectionProjection, InboxProjection, ModelProjection, Page, ProviderProjection, TargetReference, WorkProjection } from "./projections.js";
@@ -17,6 +18,9 @@ export type SubscribeResult =
   | { state: "subscribed"; subscriptionId: string; cursor: ControlCursor }
   | { state: "snapshot_required"; reason: "instance_changed" | "stream_changed" | "cursor_expired" | "overflow" };
 export type MethodContracts = {
+  "models.auxiliary": {params:Record<string,never>;result:AuxiliaryList};
+  "models.reviewAuxiliary": {params:Omit<VerifyCandidateParams,'spendApproved'>&{slot:AuxiliarySlot;fallbackToMain:boolean};result:ModelRouteDraft};
+  "models.reviewAuxiliaryMode": {params:AuxiliaryModeParams;result:ModelRouteDraft};
   "models.fallbacks": {params:Record<string,never>;result:FallbackList};
   "models.reviewFallback": {params:Omit<VerifyCandidateParams,'spendApproved'>;result:ModelRouteDraft};
   "models.reviewFallbackOrder": {params:FallbackOrderParams;result:ModelRouteDraft};

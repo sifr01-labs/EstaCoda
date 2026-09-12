@@ -37,6 +37,9 @@ export class DesktopBridge {
     this.server = new StdioControlServer({ ...options, events: ['work.changed', 'activity.appended', 'attention.changed', 'control.ready', 'service.warning', 'service.shutdown'], handlers: {
       ...Object.fromEntries(['approvals.resolve', 'tasks.pause', 'tasks.resume', 'tasks.cancel', 'tasks.retry', 'tasks.guide', 'sessions.start', 'sessions.resume', 'sessions.send', 'sessions.cancelTurn', 'operations.inspect'].map((method) =>
         [method, async (request: SessionMutationRequest, signal: AbortSignal) => ({ result: await sessionControl(this.options, request, signal) })])),
+      'models.auxiliary': async()=>({result:await this.modelSetup.auxiliary()}),
+      'models.reviewAuxiliary': async(request)=>{if(request.method!=='models.reviewAuxiliary')throw new ControlProtocolError('-32601');return {result:await this.modelSetup.review(request.params,'auxiliary',{slot:request.params.slot,fallbackToMain:request.params.fallbackToMain})};},
+      'models.reviewAuxiliaryMode': async(request)=>{if(request.method!=='models.reviewAuxiliaryMode')throw new ControlProtocolError('-32601');return {result:await this.modelSetup.reviewAuxiliaryMode(request.params)};},
       'models.fallbacks': async()=>({result:await this.modelSetup.fallbacks()}),
       'models.reviewFallback': async(request)=>{if(request.method!=='models.reviewFallback')throw new ControlProtocolError('-32601');return {result:await this.modelSetup.review(request.params,'fallback')};},
       'models.reviewFallbackOrder': async(request)=>{if(request.method!=='models.reviewFallbackOrder')throw new ControlProtocolError('-32601');return {result:await this.modelSetup.reviewFallbackOrder(request.params)};},
