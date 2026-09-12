@@ -69,3 +69,9 @@ Validation: 93 OAuth, candidate, private-pipe and protocol tests passed; root ty
 The approved Models component now has a live data path through narrow Main/preload methods. It shows provider route health, the primary route, and paged offline model metadata: context/output limits, tool/vision support, lifecycle, source and available pricing. Configured routes sort ahead of catalog-only entries. An explicit confirmation fetches public models.dev metadata with a deadline, response-size limit and redirect rejection; credentials and prompts are excluded.
 
 Validation: 63 catalog/health/protocol tests and 24 desktop unit tests passed, plus root typecheck and desktop foundation checks. Refresh tests cover the fixed public destination, credential omission and oversized responses. The frozen fixture layout remains unchanged; integrated visual/native validation follows after setup and route editors are connected.
+
+## 10. Private API-key setup
+
+The live Add Provider dialog now validates the endpoint/API mode, opens the dedicated credential window, offers explicit bounded candidate verification, reviews the primary-route change, and applies through the service transaction. Main owns the setup identity and credential scope. Successful private entry transfers the staged handle to Main; the ordinary renderer has no key-input API. Cancel/profile change discards staging. Apply failures retain a profile-bound receipt pointer for explicit reconciliation, without automatic resubmission.
+
+Validation: 27 desktop unit tests passed, including private-scope binding, cancellation, profile invalidation and uncertain-Apply inspection; focused core setup/credential/protocol tests; root typecheck and desktop foundation checks. The live dialog uses the approved modal components and styles, preserves keyboard focus and keeps setup-only values out of ordinary browser storage. Native credential-window integration remains part of the final PR6 acceptance run.

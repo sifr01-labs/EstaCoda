@@ -30,6 +30,7 @@ const activities: ActivityProjection[] = [
   { ...activityBase, kind: "status", status: "needs_attention", reason: "Waiting for approval" },
 ];
 const cases = {
+  "models.validateRoute": {params:{route:{providerId:"local",modelId:"m",endpoint:"http://localhost:11434/v1",authMethod:"none",apiMode:"openai_chat_completions",allowPrivateEndpoint:true}},result:{valid:true}},
   "models.refreshCatalog": {params:{networkApproved:true},result:{refreshed:true}},
  "models.oauthStart": {params:{windowId:'w',generation:1},result:{authorizationId:'auth',state:'starting',verificationUrl:null,userCode:null,candidateId:null}},
  "models.oauthStatus": {params:{windowId:'w',generation:1,authorizationId:'auth'},result:{authorizationId:'auth',state:'pending',verificationUrl:'https://auth.openai.com/codex/device',userCode:'CODE-123',candidateId:null}},

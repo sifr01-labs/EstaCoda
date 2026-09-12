@@ -84,6 +84,7 @@ const oauthBinding=shape({authorizationId:id,windowId:id,generation:integer(1)})
 const oauthStatusShape=shape({authorizationId:id,state:choice(['starting','pending','authorized','failed','cancelled','expired']),verificationUrl:nullable(choice(['https://auth.openai.com/codex/device'])),userCode:nullable((v)=>typeof v==='string' && /^[-A-Z0-9]{1,32}$/i.test(v)),candidateId:nullable(id)});
 const oauthStatus:Check=v=>oauthStatusShape(v)&&isRecord(v)&&(v.state==='pending'?v.verificationUrl!==null&&v.userCode!==null:v.verificationUrl===null&&v.userCode===null)&&(v.state==='authorized'?v.candidateId!==null:v.candidateId===null);
 const contracts: { [M in keyof MethodContracts]: { params: Check; result: Check } } = {
+  "models.validateRoute": {params:shape({route:candidateRoute}),result:shape({valid:v=>v===true})},
   "models.refreshCatalog": {params:shape({networkApproved:v=>v===true}),result:shape({refreshed:boolean})},
   "models.oauthStart": {params:shape({windowId:id,generation:integer(1)}),result:oauthStatus},
   "models.oauthStatus": {params:oauthBinding,result:oauthStatus},

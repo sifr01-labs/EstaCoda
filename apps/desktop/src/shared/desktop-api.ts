@@ -7,6 +7,14 @@ export type DesktopSnapshot = { status: 'connecting' | 'ready' | 'disconnected' 
   work:Page<WorkProjection>;inbox:Page<InboxProjection> };
 export type ProfileChoice = {id:string;label:string};
 export type DesktopModelsApi={
+ begin(route:MethodContracts['models.validateRoute']['params']['route']):Promise<{setupId:string}>;
+ stage(setupId:string):Promise<{staged:boolean}>;
+ verify(setupId:string):Promise<MethodContracts['models.verifyCandidate']['result']>;
+ review(setupId:string):Promise<MethodContracts['models.reviewPrimary']['result']>;
+ apply(setupId:string):Promise<MethodContracts['models.applyDraft']['result']>;
+ cancel(setupId:string):Promise<{cancelled:boolean}>;
+ inspect():Promise<MethodContracts['models.inspectApply']['result']|null>;
+
  models(cursor?:string):Promise<MethodContracts['models.list']['result']>;
  providers(cursor?:string):Promise<MethodContracts['providers.list']['result']>;
  refreshCatalog():Promise<{refreshed:boolean}>;

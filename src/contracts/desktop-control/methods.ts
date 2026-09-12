@@ -19,6 +19,7 @@ export type SubscribeResult =
   | { state: "subscribed"; subscriptionId: string; cursor: ControlCursor }
   | { state: "snapshot_required"; reason: "instance_changed" | "stream_changed" | "cursor_expired" | "overflow" };
 export type MethodContracts = {
+  "models.validateRoute": {params:{route:VerifyCandidateParams["route"]};result:{valid:true}};
   "models.refreshCatalog": {params:{networkApproved:true};result:{refreshed:boolean}};
   "models.oauthStart": {params:{windowId:string;generation:number};result:OAuthStatus};
   "models.oauthStatus": {params:OAuthBinding;result:OAuthStatus};

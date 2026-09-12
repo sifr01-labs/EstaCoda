@@ -5,7 +5,7 @@ import {notifyPrivateConfigurationChanged} from '../gateway/private-control.js';
 import {resolveProfileStateHome} from '../config/profile-home.js';
 import {ModelSetup} from './model-setup.js';
 import {recoverProfileApply} from '../setup/review/profile-apply.js';
-import {CandidateVerifier} from './candidate-verification.js';
+import {validateCandidateRequest,CandidateVerifier} from './candidate-verification.js';
 import {CredentialCandidates} from './credential-candidates.js';
 import {captureModelCatalog} from './model-catalog.js';
 import { WorkMonitor } from './work-monitor.js';
@@ -41,6 +41,7 @@ export class DesktopBridge {
     this.server = new StdioControlServer({ ...options, events: ['work.changed', 'activity.appended', 'attention.changed', 'control.ready', 'service.warning', 'service.shutdown'], handlers: {
       ...Object.fromEntries(['sessions.setModel', 'tasks.setModel', 'approvals.resolve', 'tasks.pause', 'tasks.resume', 'tasks.cancel', 'tasks.retry', 'tasks.guide', 'sessions.start', 'sessions.resume', 'sessions.send', 'sessions.cancelTurn', 'operations.inspect'].map((method) =>
         [method, async (request: SessionMutationRequest, signal: AbortSignal) => ({ result: await sessionControl(this.options, request, signal) })])),
+      'models.validateRoute':request=>{if(request.method!=='models.validateRoute')throw new ControlProtocolError('-32601');validateCandidateRequest({windowId:'validation',generation:1,route:request.params.route,spendApproved:true,...(request.params.route.authMethod==='none'?{}:{candidateId:'validation'})});return {result:{valid:true}};},
       'models.refreshCatalog':async(_request,signal)=>{const result=await refreshDesktopCatalog(this.options.homeDir,signal);if(result.refreshed)this.#catalog=undefined;return {result};},
       'models.oauthStart': request=>{if(request.method!=='models.oauthStart')throw new ControlProtocolError('-32601');return {result:this.oauth.start(request.params)};},
       'models.oauthStatus': request=>{if(request.method!=='models.oauthStatus')throw new ControlProtocolError('-32601');return {result:this.oauth.status(request.params)};},
