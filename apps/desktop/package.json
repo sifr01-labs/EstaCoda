@@ -9,11 +9,15 @@
     "package": "electron-forge package",
     "test": "vitest run --config vitest.config.ts",
     "build:renderer": "vite build --config vite.renderer.config.ts",
-    "e2e": "playwright test --config playwright.config.ts"
+    "e2e": "playwright test --config playwright.config.ts",
+    "postinstall": "node scripts/prepare-pty.mjs"
   },
   "dependencies": {
     "@estacoda/control-protocol": "workspace:*",
+    "@xterm/addon-fit": "0.11.0",
+    "@xterm/xterm": "6.0.0",
     "lucide-react": "1.45.0",
+    "node-pty": "1.1.0",
     "react": "19.3.0",
     "react-dom": "19.3.0"
   },

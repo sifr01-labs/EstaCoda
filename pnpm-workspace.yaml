@@ -13,5 +13,7 @@ allowBuilds:
   esbuild: true
   # Electron downloads its pinned desktop runtime; core native modules remain on Node.
   electron: true
+  # Reviewed native PTY install selects the pinned package prebuild / local compiler.
+  node-pty: true
   protobufjs: false
   sharp: false
