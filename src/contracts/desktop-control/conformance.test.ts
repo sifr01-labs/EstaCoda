@@ -30,6 +30,7 @@ const activities: ActivityProjection[] = [
   { ...activityBase, kind: "status", status: "needs_attention", reason: "Waiting for approval" },
 ];
 const cases = {
+ "telegram.verify":{params:{windowId:'w',generation:1,candidateId:'candidate'},result:{state:'passed',reason:'none',verifiedAt:1,botUsername:'bot',latencyMs:1}},
  "telegram.settings":{params:{},result:{enabled:false,authorization:'allowlist',allowedUserIds:[],allowedChatIds:[],secureInputMode:'protected-handoff',directDmAcknowledged:false,streaming:true,pollTimeoutSeconds:25}},
  "telegram.review":{params:{windowId:'w',generation:1,settings:{enabled:true,authorization:'allowlist',allowedUserIds:['123'],allowedChatIds:[],secureInputMode:'protected-handoff',directDmAcknowledged:false,streaming:true,pollTimeoutSeconds:25}},result:{draftId:'draft',expiresInMs:300000,credentialState:'existing',settings:{enabled:true,authorization:'allowlist',allowedUserIds:['123'],allowedChatIds:[],secureInputMode:'protected-handoff',directDmAcknowledged:false,streaming:true,pollTimeoutSeconds:25}}},
  "telegram.apply":{params:{draftId:'draft',windowId:'w',generation:1},result:{operationId:'draft',state:'applied',verification:'configured'}},

@@ -26,3 +26,16 @@ settings clears old pairing authority. Persisted verification is read-only.
 Validation: setup, transaction, executor and protocol regressions (122 tests), plus
 core/Desktop typechecks. Review checked profile staging, expiry/cancellation,
 existing credential references and unchanged CLI allowlist requirements.
+
+## 3. Candidate verification
+
+Added an explicit fixed-endpoint `getMe` verifier with an eight-second deadline,
+64 KiB response bound, four-request concurrency limit, denied redirects, candidate
+scope checks and window/disposal cancellation. Results contain only bounded bot
+identity, status, latency and verification time. A failed recheck clears prior
+candidate acceptance; enabling a newly staged token requires successful verification.
+No polling, message delivery, profile write, transcript or memory entry occurs.
+
+Validation: candidate cancellation, endpoint/error redaction, oversized-response,
+reviewed-Apply and protocol tests, plus core/Desktop typechecks. Network tests use
+synthetic responses and do not access a Telegram account.

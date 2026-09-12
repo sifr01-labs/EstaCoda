@@ -121,6 +121,7 @@ const contracts: { [M in keyof MethodContracts]: { params: Check; result: Check 
   "models.cancelDraft": {params:modelDraftBinding,result:shape({cancelled:boolean})},
   "models.inspectApply": {params:shape({},{operationId:id}),result:modelApplyReceipt},
   "models.verifyCandidate": {params:shape({windowId:id,generation:integer(1),spendApproved:v=>v===true,route:candidateRoute},{candidateId:id}),result:candidateVerification},
+  "telegram.verify":{params:shape({windowId:id,generation:integer(1)},{candidateId:id}),result:shape({state:choice(['passed','failed']),reason:choice(['none','credential_missing','invalid_credential','invalid_response','unavailable','cancelled']),verifiedAt:nullable(integer()),botUsername:nullable(text(64,1)),latencyMs:integer()})},
   "telegram.settings":{params:shape({}),result:telegramSettings},
   "telegram.review":{params:shape({windowId:id,generation:integer(1),settings:telegramSettings},{candidateId:id}),result:shape({draftId:id,expiresInMs:integer(1),settings:telegramSettings,credentialState:choice(['staged','existing','missing'])})},
   "telegram.apply":{params:shape({draftId:id,windowId:id,generation:integer(1)}),result:shape({operationId:id,state:choice(['applied','uncertain','unknown']),verification:choice(['configured','repair_required','not_tested'])})},

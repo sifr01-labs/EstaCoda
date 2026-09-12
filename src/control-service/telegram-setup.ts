@@ -1,16 +1,18 @@
+import {TelegramVerifier,telegramScope} from './telegram-verification.js';
+export {telegramScope} from './telegram-verification.js';
 import {randomUUID} from 'node:crypto';
 import {loadRuntimeConfig} from '../config/runtime-config.js';
 import {readEnvSecretValue} from '../config/env-secret-store.js';
 import {telegramPlan} from '../setup/review/telegram-plan.js';
 import {applyProfilePlan,captureProfileApplySnapshot,inspectProfileApply,latestProfileApplyOperation,type ProfileApplySnapshot} from '../setup/review/profile-apply.js';
 import {ControlProtocolError,validateTelegramSettings,type TelegramSettings,type TelegramReview,type TelegramDraft,type ModelDraftBinding,type ModelApplyReceipt} from '../contracts/desktop-control/index.js';
-import {CredentialCandidates,type CandidateScope} from './credential-candidates.js';
+import {CredentialCandidates} from './credential-candidates.js';
 type Draft={params:TelegramReview;projection:TelegramDraft;snapshot:ProfileApplySnapshot;env:string;abort:AbortController;timer:ReturnType<typeof setTimeout>;applying:boolean;consumed:boolean};
-export const telegramScope=(binding:{windowId:string;generation:number}):CandidateScope=>({...binding,purpose:'telegram',providerId:'telegram',authMethod:'api_key',endpoint:'https://api.telegram.org'});
+
 /** Reviewed profile transaction; no setup action starts a gateway or sends a message. */
 export class TelegramSetup {
  readonly #drafts=new Map<string,Draft>();#closed=false;
- constructor(readonly input:{homeDir:string;profileId:string},readonly candidates:CredentialCandidates,readonly changed:()=>void|Promise<void>){}
+ constructor(readonly input:{homeDir:string;profileId:string},readonly candidates:CredentialCandidates,readonly changed:()=>void|Promise<void>,readonly verifier:TelegramVerifier){}
  async settings():Promise<TelegramSettings>{
   const loaded=await loadRuntimeConfig({...this.input,workspaceRoot:this.input.homeDir,configurationInspection:true}),config=loaded.config.channels?.telegram;
   return{enabled:config?.enabled===true,authorization:config?.pairing?.code?'pairing':'allowlist',allowedUserIds:config?.allowedUserIds??[],allowedChatIds:config?.allowedChatIds??[],secureInputMode:config?.secureInputMode??'protected-handoff',directDmAcknowledged:false,streaming:config?.streaming?.enabled!==false,pollTimeoutSeconds:config?.pollTimeoutSeconds??25};
@@ -36,7 +38,7 @@ export class TelegramSetup {
   const draft=this.require(binding);if(draft.applying||draft.consumed)return this.inspect(binding.draftId);
   const scope=telegramScope({windowId:binding.windowId,generation:binding.generation}),candidate=draft.params.candidateId;
   const combined=AbortSignal.any([signal,draft.abort.signal,this.candidates.windowSignal(binding.windowId,binding.generation),...(candidate?[this.candidates.signal(candidate,scope)]:[])]);
-  combined.throwIfAborted();const token=candidate?this.candidates.read(candidate,scope):undefined;draft.applying=true;
+  combined.throwIfAborted();if(candidate&&draft.params.settings.enabled&&!this.verifier.verified({windowId:binding.windowId,generation:binding.generation,candidateId:candidate}))throw new ControlProtocolError('-32602');const token=candidate?this.candidates.read(candidate,scope):undefined;draft.applying=true;
   try{
    const receipt=await applyProfilePlan({...this.input,operationId:binding.draftId,snapshot:draft.snapshot,plan:telegramPlan(draft.params.settings,draft.env),secrets:token?[{envVarName:draft.env,value:token}]:[],signal:combined});
    draft.consumed=true;draft.snapshot={files:{'.env':null,'auth.json':null,'config.json':null}};await this.changed();return{...receipt,verification:receipt.state==='applied'?await this.verifySaved():'not_tested'};

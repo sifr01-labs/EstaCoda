@@ -10,3 +10,6 @@ export function validateTelegramSettings(settings:TelegramSettings):void{
  !['protected-handoff','direct-dm','disabled'].includes(settings.secureInputMode)||settings.secureInputMode==='direct-dm'&&!settings.directDmAcknowledged||
  !Number.isInteger(settings.pollTimeoutSeconds)||settings.pollTimeoutSeconds<1||settings.pollTimeoutSeconds>50)throw new ControlProtocolError('-32602');
 }
+
+export type TelegramVerify={windowId:string;generation:number;candidateId?:string};
+export type TelegramVerification={state:'passed'|'failed';reason:'none'|'credential_missing'|'invalid_credential'|'invalid_response'|'unavailable'|'cancelled';verifiedAt:number|null;botUsername:string|null;latencyMs:number};
