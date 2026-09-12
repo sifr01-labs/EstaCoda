@@ -52,3 +52,15 @@ exceptions remain uncertain. Configuration Apply now notifies the authenticated 
 
 Validation: focused lifecycle replay/concurrency/profile tests and protocol conformance;
 core and desktop type checks. Risk: lifecycle actions affect all shared Work in the profile.
+
+## Step 5 — Pairing, command sync and delivery tests
+
+Added explicit one-use pairing creation/cancellation using the shared core configuration
+path, and bounded command synchronization using the gateway command registry. Delivery
+tests accept only a selected-profile allowlisted user/chat ID and fixed test text. Network
+responses and errors are redacted; timeout/lost-response receipts remain uncertain and
+are not resent. Pairing codes are available only through an explicit operator read.
+Tests use a synthetic Telegram transport; no real account receives messages.
+
+Validation: authorization, profile isolation, pairing cancellation and no-replay tests,
+protocol conformance and core/Desktop type checks.

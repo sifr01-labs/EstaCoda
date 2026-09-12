@@ -30,6 +30,8 @@ const activities: ActivityProjection[] = [
   { ...activityBase, kind: "status", status: "needs_attention", reason: "Waiting for approval" },
 ];
 const cases = {
+ "telegram.pairing":{params:{},result:{code:null,expiresAt:null}},
+ "telegram.execute":{params:{operationId:'op',action:'sync',confirmed:true},result:{operationId:'op',action:'telegram.sync',state:'completed'}},
  "gateway.diagnostics":{params:{},result:{service:'absent',manager:'none',runtime:'stopped',polling:'unknown',observedAt:null}},
  "gateway.execute":{params:{operationId:'op',action:'stop',acknowledgeSharedWork:true},result:{operationId:'op',action:'gateway.stop',state:'completed'}},
  "connections.inspectOperation":{params:{operationId:'op'},result:{operationId:'op',action:'unknown',state:'unknown'}},

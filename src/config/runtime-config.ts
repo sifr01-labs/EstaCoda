@@ -3569,7 +3569,6 @@ export async function setupTelegramConfig(options: {
 
   if(options.input.streaming!==undefined)telegramPatch.streaming=options.input.streaming;
   if(options.input.busyPolicy!==undefined)telegramPatch.busyPolicy=options.input.busyPolicy;
-  if(options.input.clearPairing)delete telegramPatch.pairing;
 
   const config = patchConfig(existing.config, {
     channels: {
@@ -3577,6 +3576,7 @@ export async function setupTelegramConfig(options: {
     }
   });
 
+  if(options.input.clearPairing && config.channels?.telegram)delete config.channels.telegram.pairing;
   await saveRuntimeConfig(targetPath, config);
 
   return {
@@ -3766,6 +3766,7 @@ export async function addWhatsAppAllowedUser(options: {
 }
 
 export async function createTelegramPairingCode(options: {
+  profileId?: string;
   workspaceRoot: string;
   homeDir?: string;
   input?: TelegramPairingInput;
