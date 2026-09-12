@@ -27,6 +27,7 @@ export type SetupEditorActionId =
   | "cancel-setup-editor";
 
 export type SetupEditorPatchField =
+  | "publicSettings"
   | "model.provider"
   | "model.id"
   | "model.fallbacks"

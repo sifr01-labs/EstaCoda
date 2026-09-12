@@ -1,16 +1,17 @@
 import { randomUUID } from 'node:crypto';
 import { ControlProtocolError, assertBoundedJson, exactKeys, isControlId, isRecord } from '../contracts/desktop-control/index.js';
-export type CandidateScope = { windowId: string; generation: number; purpose: 'provider' | 'telegram'; providerId: string; authMethod: 'api_key' | 'oauth'; endpoint: string };
+export type CandidateScope = { windowId: string; generation: number; purpose: 'provider' | 'telegram' | 'settings'; providerId: string; authMethod: 'api_key' | 'oauth'; endpoint: string };
 type Candidate = { routeBinding?: string; abort: AbortController; scope: CandidateScope; value: string; absolute: number; idle: number; timer: ReturnType<typeof setTimeout> };
 export function validateCandidateScope(value: unknown): asserts value is CandidateScope {
   assertBoundedJson(value);
   if (!isRecord(value) || !exactKeys(value, ['windowId', 'generation', 'purpose', 'providerId', 'authMethod', 'endpoint']) ||
     !isControlId(value.windowId) || !isControlId(value.providerId) || !Number.isSafeInteger(value.generation) || Number(value.generation) < 1 ||
-    !['provider', 'telegram'].includes(String(value.purpose)) || !['api_key', 'oauth'].includes(String(value.authMethod)) ||
+    !['provider', 'telegram', 'settings'].includes(String(value.purpose)) || !['api_key', 'oauth'].includes(String(value.authMethod)) ||
     typeof value.endpoint !== 'string' || value.endpoint.length > 2_048) throw new ControlProtocolError('-32602');
   let url: URL;
   try { url = new URL(value.endpoint); } catch { throw new ControlProtocolError('-32602'); }
   if (!['http:', 'https:'].includes(url.protocol) || url.username || url.password || url.hash) throw new ControlProtocolError('-32602');
+  if(value.purpose==='settings'&&(value.authMethod!=='api_key'||value.endpoint!=='https://settings.estacoda.invalid'))throw new ControlProtocolError('-32602');
   if (value.purpose === 'telegram' && (value.providerId !== 'telegram' || value.authMethod !== 'api_key' || value.endpoint !== 'https://api.telegram.org')) throw new ControlProtocolError('-32602');
 }
 /** Memory only. This does not verify credentials, authorize apply or write configuration. */

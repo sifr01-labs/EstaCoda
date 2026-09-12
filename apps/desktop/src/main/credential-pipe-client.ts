@@ -1,7 +1,7 @@
 import { randomUUID } from 'node:crypto';
 import type { Duplex } from 'node:stream';
 import { exactKeys, isControlId, isRecord, parseControlFrame, serializeControlFrame, type JsonValue } from '@estacoda/control-protocol';
-export type CredentialScope = { windowId: string; generation: number; purpose: 'provider' | 'telegram'; providerId: string; authMethod: 'api_key' | 'oauth'; endpoint: string };
+export type CredentialScope = { windowId: string; generation: number; purpose: 'provider' | 'telegram' | 'settings'; providerId: string; authMethod: 'api_key' | 'oauth'; endpoint: string };
 /** Private fd3 only. Never forwards transport errors, values or frames to logging. */
 export class CredentialPipeClient {
   #buffer = Buffer.alloc(0); #closed = false;

@@ -27,6 +27,10 @@ export type SubscribeResult =
 export type WorkUsageProjection={scope:'session'|'task'|'attempt';reportedTokens:number|null;providerCalls:number;cost:{amount:number;currency:'USD'}|null;usageComplete:boolean;pricingComplete:boolean;context:{usedTokens:number;totalTokens:number;provider:string;model:string}|null;truncated:boolean;provisional:boolean};
 export type RuntimeCounts={runningSessions:number;runningTasks:number;queuedTasks:number;approvals:number;attention:number;scheduled:number|null;asOf:number};
 export type MethodContracts = {
+  "settings.apply":{params:import('./settings.js').SettingsBinding;result:{operationId:string;state:'applied'|'uncertain'|'unknown'}};
+  "settings.inspect":{params:{operationId?:string};result:{operationId:string;state:'applied'|'uncertain'|'unknown'}};
+  "settings.verify":{params:Record<string,never>;result:{state:'configured'|'repair_required'}};
+
   "settings.read":{params:{section:import('./settings.js').SettingsSection};result:import('./settings.js').SettingsPage};
   "settings.review":{params:{windowId:string;generation:number;changes:import('./settings.js').SettingChange[]};result:import('./settings.js').SettingsReview};
   "settings.cancel":{params:import('./settings.js').SettingsBinding;result:{cancelled:boolean}};

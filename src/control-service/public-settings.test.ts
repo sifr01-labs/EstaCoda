@@ -14,3 +14,15 @@ it('projects only registered values and binds read-only review/cancel to one win
  const next=await owner.review(params);candidates.closeWindow('window',1);expect(()=>owner.require({...params,draftId:next.draftId})).toThrow();
  }finally{owner.dispose();candidates.dispose();await rm(homeDir,{recursive:true,force:true});}
 });
+it('uses the recoverable profile transaction, rejects stale review and keeps candidate secrets out of projections',async()=>{
+ const homeDir=await mkdtemp(join(tmpdir(),'ec-settings-')),input={homeDir,profileId:'default'},paths=resolveProfileStateHome(input),candidates=new CredentialCandidates('default','instance'),owner=new PublicSettings(input,candidates);
+ try{await mkdir(paths.profileRoot,{recursive:true});await writeFile(paths.configPath,JSON.stringify({ui:{language:'en'},profile:{mode:'focused'}}));
+ const binding={windowId:'w',generation:1};const review=await owner.review({...binding,changes:[{fieldId:'ui.language',selectors:[],value:'ar'}]});
+ expect((await owner.apply({...binding,draftId:review.draftId},new AbortController().signal)).state).toBe('applied');expect(JSON.parse(await readFile(paths.configPath,'utf8')).ui.language).toBe('ar');expect((await owner.inspect(review.draftId)).state).toBe('applied');
+ const stale=await owner.review({...binding,changes:[{fieldId:'ui.language',selectors:[],value:'en'}]});await writeFile(paths.configPath,JSON.stringify({ui:{language:'ar'},profile:{mode:'builder'}}));await expect(owner.apply({...binding,draftId:stale.draftId},new AbortController().signal)).rejects.toThrow('Profile changed');owner.cancel({...binding,draftId:stale.draftId});
+ const id=candidates.stage(owner.scope(binding,'web.brave.apiKeyEnv'),'private-test-value');const credential=await owner.review({...binding,changes:[{fieldId:'web.brave.apiKeyEnv',selectors:[],value:id}]});expect(JSON.stringify(credential)).not.toContain(id);expect(JSON.stringify(credential)).not.toContain('private-test-value');
+ expect((await owner.apply({...binding,draftId:credential.draftId},new AbortController().signal)).state).toBe('applied');const config=JSON.parse(await readFile(paths.configPath,'utf8'));expect(config.web.brave.apiKeyEnv).toMatch(/^ESTACODA_CREDENTIAL_/);expect(await readFile(paths.envPath,'utf8')).toContain('private-test-value');expect(JSON.stringify(await owner.read('browser'))).not.toContain('private-test-value');
+ expect(()=>candidates.read(id,owner.scope(binding,'web.brave.apiKeyEnv'))).toThrow();expect((await owner.verify()).state).toBe('configured');
+ const discard=candidates.stage(owner.scope(binding,'web.brave.apiKeyEnv'),'cancelled-test-value');const cancelled=await owner.review({...binding,changes:[{fieldId:'web.brave.apiKeyEnv',selectors:[],value:discard}]});owner.cancel({...binding,draftId:cancelled.draftId});expect(()=>candidates.read(discard,owner.scope(binding,'web.brave.apiKeyEnv'))).toThrow();expect(await readFile(paths.envPath,'utf8')).not.toContain('cancelled-test-value');
+ }finally{owner.dispose();candidates.dispose();await rm(homeDir,{recursive:true,force:true});}
+});

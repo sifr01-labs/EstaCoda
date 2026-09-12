@@ -1,3 +1,4 @@
+import {applyPublicSettings} from './public-settings-apply.js';
 import {removeTelegramConfig,createTelegramPairingCode} from '../../config/runtime-config.js';
 import { parseExecutionPolicy } from "../../execution/docker-policy.js";
 import { provisionDockerImage } from "../../execution/docker-client.js";
@@ -299,6 +300,10 @@ async function applyConfigPatch(
   options: ReviewedSetupApplyExecutorOptions
 ): Promise<readonly OptionalCapabilityApplyWarning[]> {
   switch (operation.review.summaryKey) {
+    case "setupDrafts.publicSettings.summary": {
+      if(!options.isolateCredentialEnvironment||!options.homeDir||!options.profileId)throw new Error('Settings require a profile transaction');
+      await applyPublicSettings(JSON.parse(String(operation.review.values.changes)),{homeDir:options.homeDir,profileId:options.profileId});return [];
+    }
     case "setupDrafts.providerModelRoute.summary":
     case "setupDrafts.providerModelEndpointRoute.summary":
     case "setupModules.provider.draft":
