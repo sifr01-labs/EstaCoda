@@ -7,3 +7,10 @@ test('changes local language in place and preserves the selected draft',async({p
  await expect(page.getByRole('combobox',{name:'Display language',exact:true})).toBeFocused();
  await page.locator('[data-task="welcome"]').click();await expect(page.locator('.ec-composer textarea')).toHaveValue('Keep العربية and /tmp/example.ts unchanged');
 });
+test('localizes Work and approval controls while preserving commands and user content',async({page})=>{
+ await page.goto('/fixture.html?language=ar');await expect(page.getByText('على ماذا تودّ العمل؟',{exact:false})).toBeVisible();
+ await page.locator('[data-task="retry"]').click();await expect(page.getByRole('button',{name:'الموافقة مرة واحدة',exact:true})).toBeVisible();
+ await expect(page.getByText('pnpm test -- retry',{exact:true})).toBeVisible();
+ await page.getByRole('button',{name:'رفض',exact:true}).click();await expect(page.getByText('رُفض أمر الاختبار. لم يُتحقق من التعديلات بعد.',{exact:true})).toBeVisible();
+ await expect(page.locator('.ec-usernote')).toContainText('billing');
+});
