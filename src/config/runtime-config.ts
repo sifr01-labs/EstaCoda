@@ -3587,6 +3587,15 @@ export async function setupTelegramConfig(options: {
   });
 }
 
+/** Reviewed removal preserves other channels and refuses deletion of a shared credential reference. */
+export async function removeTelegramConfig(options:{workspaceRoot:string;homeDir?:string;profileId?:string;deleteCredential:boolean}):Promise<void>{
+ const targetPath=resolveConfigMutationPath(options);await withProfileWriteLock(dirname(targetPath),async()=>{await assertProfileApplySettled(dirname(targetPath));const existing=await readConfig(targetPath),key=existing.config.channels?.telegram?.botTokenEnv;
+ if(existing.config.channels)delete existing.config.channels.telegram;
+ if(options.deleteCredential&&key){if(JSON.stringify(existing.config).includes(JSON.stringify(key)))throw new Error('Credential is referenced by another configuration.');await writeEnvSecret({homeDir:options.homeDir,profileId:resolveSelectedProfileId(options),key,value:''});}
+ await saveRuntimeConfig(targetPath,existing.config);
+ });
+}
+
 export async function setupDiscordConfig(options: {
   workspaceRoot: string;
   homeDir?: string;

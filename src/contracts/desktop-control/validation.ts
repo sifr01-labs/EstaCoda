@@ -53,7 +53,7 @@ const model: Check = (v) => modelShape(v) && isRecord(v) && (!v.runnable ||
   ((v.credentialState === "present" || v.credentialState === "not_required") &&
     (!isRecord(v.catalog) || (!v.catalog.catalogOnly && v.catalog.lifecycle !== 'retired'))));
 const provider = shape({ id, label: text(240, 1), authMethods: unique(choice(["api_key", "oauth", "none"]), 3, 1), state: choice(["ready", "unconfigured", "repair_required", "unknown"]) }, {health:choice(ROUTE_HEALTH_STATES),metadata:shape({configurable:boolean,runnable:boolean,catalogOnly:boolean,apiMode:text(80,1),defaultEndpoint:nullable(text(2048,1))})});
-const telegramSettings=shape({enabled:boolean,authorization:choice(['allowlist','pairing']),allowedUserIds:unique(text(20,1),1000),allowedChatIds:unique(text(21,1),1000),secureInputMode:choice(['protected-handoff','direct-dm','disabled']),directDmAcknowledged:boolean,streaming:boolean,pollTimeoutSeconds:integer(1,50)});
+const telegramSettings=shape({enabled:boolean,authorization:choice(['allowlist','pairing']),allowedUserIds:unique(text(20,1),1000),allowedChatIds:unique(text(21,1),1000),secureInputMode:choice(['protected-handoff','direct-dm','disabled']),directDmAcknowledged:boolean,streaming:boolean,pollTimeoutSeconds:integer(1,50)},{removeConfiguration:boolean,deleteCredential:boolean});
 const connection = shape({ id, profileId: id, channel: choice(["telegram", "discord", "email", "whatsapp"]),
   configurationState: choice(["configured", "unconfigured", "repair_required"]), runtimeState: choice(["running", "stopped", "disconnected", "unknown"]),
   authorizationState: choice(["denied", "configured", "pairing_required", "unknown"]), summary: text(2_048) }, {

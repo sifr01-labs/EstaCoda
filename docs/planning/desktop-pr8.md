@@ -127,3 +127,16 @@ ownership. Profile switching remounts Connections to clear prior-profile details
 
 Validation: Desktop foundation/boundary check and desktop unit suite. External delivery
 remains an explicit operator action; automated checks use synthetic transports.
+
+## Step 12 — Credential and profile boundary coverage
+
+Added regression coverage for cancellation byte preservation, unverified/foreign-window
+candidates, redacted projections, uncertain action recovery across app restart, and profile
+isolation. Completed reviewed disconnect choices: disable keeps setup; removal preserves
+other channels; deleting the current credential is separately selected and refuses a key
+shared by another route. Saved bot verification records only a timestamp/reference and
+file identity; credential changes invalidate the displayed verification.
+
+Validation: focused credential/profile tests, Desktop unit suite, core/Desktop type checks.
+Risk review: no token enters ordinary IPC/events or operation receipts; no service starts
+or messages send during setup Apply. Deletion does not revoke the token at Telegram.

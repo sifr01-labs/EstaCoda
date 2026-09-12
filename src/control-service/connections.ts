@@ -1,3 +1,4 @@
+import {telegramVerifiedAt} from './telegram-verification-state.js';
 import {join} from 'node:path';
 import {resolveProfileStateHome} from '../config/profile-home.js';
 import {loadRuntimeConfig} from '../config/runtime-config.js';
@@ -33,7 +34,7 @@ export async function telegramConnection(input:{homeDir:string;profileId:string;
     }
    }catch{/* Unreadable or stale diagnostics cannot prove polling health. */}
   }
-  base.telegram={status,allowedUsers:users.length,allowedChats:chats.length,pairingExpiresAt:pairing?expires:null,polling,observedAt,lastVerifiedAt:null};
+  base.telegram={status,allowedUsers:users.length,allowedChats:chats.length,pairingExpiresAt:pairing?expires:null,polling,observedAt,lastVerifiedAt:await telegramVerifiedAt(input,config?.botTokenEnv)};
   base.summary=status==='ready'?'Configured with bounded Telegram access. Gateway and polling state are shown separately.':status==='disabled'?'Telegram is disabled.':status==='credential_missing'?'Add a bot token.':status==='pairing_pending'?'Waiting for an authorized pairing.':'Configure an allowlist or a pairing policy.';
   signal.throwIfAborted();return base;
  }catch(error){signal.throwIfAborted();return base;}

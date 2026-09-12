@@ -1,4 +1,4 @@
-import {createTelegramPairingCode} from '../../config/runtime-config.js';
+import {removeTelegramConfig,createTelegramPairingCode} from '../../config/runtime-config.js';
 import { parseExecutionPolicy } from "../../execution/docker-policy.js";
 import { provisionDockerImage } from "../../execution/docker-client.js";
 import { setupExecutionConfig } from "../../config/runtime-config.js";
@@ -756,6 +756,7 @@ async function applyTelegramCapability(
     throw new Error("Telegram apply requires allowed user or chat identities.");
   }
   const target = configApplyTarget(operation, options);
+  if(desktop&&operation.review.values.removeConfiguration===true){if(enabled)throw new Error('Disable before removal');await removeTelegramConfig({...target,deleteCredential:operation.review.values.deleteCredential===true});return;}
   await setupTelegramConfig({
     ...target,
     input: {

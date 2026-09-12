@@ -23,7 +23,7 @@ export class TelegramSetup {
   return{enabled:config?.enabled===true,authorization:config?.pairing?.code?'pairing':'allowlist',allowedUserIds:config?.allowedUserIds??[],allowedChatIds:config?.allowedChatIds??[],secureInputMode:config?.secureInputMode??'protected-handoff',directDmAcknowledged:false,streaming:config?.streaming?.enabled!==false,pollTimeoutSeconds:config?.pollTimeoutSeconds??25};
  }
  async review(params:TelegramReview):Promise<TelegramDraft>{
-  validateTelegramSettings(params.settings);const signal=this.candidates.windowSignal(params.windowId,params.generation);
+  validateTelegramSettings(params.settings);if(params.settings.removeConfiguration&&params.candidateId)throw new ControlProtocolError('-32602');const signal=this.candidates.windowSignal(params.windowId,params.generation);
   for(const[id,draft]of this.#drafts)if(draft.consumed)this.#drafts.delete(id);
   if(this.#closed||this.#drafts.size>=32)throw new ControlProtocolError('-32009');
   const snapshot=await captureProfileApplySnapshot(this.input),config=JSON.parse(snapshot.files['config.json']??'{}');

@@ -1,3 +1,4 @@
+import {rememberTelegramVerification} from './telegram-verification-state.js';
 import {performance} from 'node:perf_hooks';
 import {captureProfileApplySnapshot} from '../setup/review/profile-apply.js';
 import {readEnvSecretValue} from '../config/env-secret-store.js';
@@ -29,16 +30,17 @@ export class TelegramVerifier {
   this.#inflight++;const started=performance.now();
   const failed=(reason:TelegramVerification['reason']):TelegramVerification=>({state:'failed',reason,verifiedAt:null,botUsername:null,latencyMs:Math.round(performance.now()-started)});
   try{
-   let token:string|undefined;
+   let token:string|undefined,savedEnv:string|undefined,savedReference:string|undefined;
    if(params.candidateId)token=this.candidates.read(params.candidateId,scope);
-   else{const snapshot=await captureProfileApplySnapshot(this.input),config=JSON.parse(snapshot.files['config.json']??'{}'),key=config.channels?.telegram?.botTokenEnv;token=typeof key==='string'?readEnvSecretValue(snapshot.files['.env']??'',key):undefined;}
+   else{const snapshot=await captureProfileApplySnapshot(this.input),config=JSON.parse(snapshot.files['config.json']??'{}'),key=config.channels?.telegram?.botTokenEnv;token=typeof key==='string'?readEnvSecretValue(snapshot.files['.env']??'',key):undefined;savedEnv=snapshot.files['.env']??undefined;savedReference=key;}
    if(!token)return failed('credential_missing');
    const response=await telegramRequest(token,'getMe',{},combined,this.fetcher);combined.throwIfAborted();
    const bot=response.result as {is_bot?:boolean;username?:string};
    if(!response.ok)return failed(response.invalidCredential?'invalid_credential':'unavailable');
    if(bot?.is_bot!==true||typeof bot.username!=='string'||!/^\w{1,64}$/.test(bot.username))return failed('invalid_response');
    if(params.candidateId){const id=params.candidateId;this.candidates.read(id,scope);this.#verified.add(id);if(!this.#watched.has(id)){this.#watched.add(id);this.candidates.signal(id,scope).addEventListener('abort',()=>{this.#verified.delete(id);this.#watched.delete(id);},{once:true});}}
-   return{state:'passed',reason:'none',verifiedAt:Date.now(),botUsername:bot.username,latencyMs:Math.round(performance.now()-started)};
+   const verifiedAt=Date.now();if(savedEnv!==undefined&&savedReference)await rememberTelegramVerification(this.input,savedEnv,savedReference,verifiedAt);
+   return{state:'passed',reason:'none',verifiedAt,botUsername:bot.username,latencyMs:Math.round(performance.now()-started)};
   }catch{return failed(combined.aborted?'cancelled':'unavailable');}finally{this.#inflight--;}
  }
  dispose(){this.#abort.abort();this.#verified.clear();this.#watched.clear();}
