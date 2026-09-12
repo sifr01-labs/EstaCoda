@@ -1,3 +1,4 @@
+import {inspectFiles} from './workspace-files.js';
 import {TargetControls} from './target-controls.js';
 import {ChannelSessions} from './channel-sessions.js';
 import {TelegramOperations} from './telegram-operations.js';
@@ -113,6 +114,8 @@ export class DesktopBridge {
       'work.usage':async(request,signal)=>{if(request.method!=='work.usage')throw new ControlProtocolError('-32601');return{result:await workUsage(this.options,this.workSnapshot().get(request.params.workId),signal)};},
       'work.counts':()=>({result:workCounts(this.workSnapshot().state)}),
       'work.live':async(request,signal)=>{if(request.method!=='work.live')throw new ControlProtocolError('-32601');return{result:await liveWork(this.options,this.workSnapshot().get(request.params.workId),signal)};},
+      'files.list':async(request,signal)=>{if(request.method!=='files.list')throw new ControlProtocolError('-32601');return{result:await inspectFiles(this.options,request.method,request.params,signal)};},
+      'files.preview':async(request,signal)=>{if(request.method!=='files.preview')throw new ControlProtocolError('-32601');return{result:await inspectFiles(this.options,request.method,request.params,signal)};},
       'targets.list':async(request,signal)=>{if(request.method!=='targets.list')throw new ControlProtocolError('-32601');return{result:await this.targets.list(signal,request.params.cursor)};},
       'targets.inspect':async(request,signal)=>{if(request.method!=='targets.inspect')throw new ControlProtocolError('-32601');return{result:await this.targets.inspect(request.params.target,signal)};},
       'targets.reviewCreate':async(request,signal)=>{if(request.method!=='targets.reviewCreate')throw new ControlProtocolError('-32601');return{result:await this.targets.review(request.params.source,signal)};},

@@ -56,6 +56,10 @@ export class DockerWorkspaceFiles implements WorkspaceFiles {
     const result = Buffer.from(await this.#call("read", await this.#resolved(path)), "base64");
     return encoding ? result.toString(encoding) : result;
   }
+  async preview(path: string): Promise<{bytes:Buffer;size:number}> {
+    const result = await this.#call("preview", path);
+    return {bytes:Buffer.from(result.bytes,"base64"),size:result.size};
+  }
   async writeFile(path: string, content: string, options: "utf8" | { encoding: "utf8"; flag: string } = "utf8"): Promise<void> { await this.#call("write", path, { content, options: typeof options === "string" ? {} : options }); }
   async stat(path: string): Promise<Stats> { return nodeStats(await this.#call("stat", await this.#resolved(path, { allowDirectory: true }))) as Stats; }
   async lstat(path: string): Promise<Stats> { await this.#resolved(path, { allowDirectory: true }); return nodeStats(await this.#call("lstat", path)) as Stats; }

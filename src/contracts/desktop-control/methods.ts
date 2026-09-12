@@ -27,6 +27,8 @@ export type SubscribeResult =
 export type WorkUsageProjection={scope:'session'|'task'|'attempt';reportedTokens:number|null;providerCalls:number;cost:{amount:number;currency:'USD'}|null;usageComplete:boolean;pricingComplete:boolean;context:{usedTokens:number;totalTokens:number;provider:string;model:string}|null;truncated:boolean;provisional:boolean};
 export type RuntimeCounts={runningSessions:number;runningTasks:number;queuedTasks:number;approvals:number;attention:number;scheduled:number|null;asOf:number};
 export type MethodContracts = {
+  "files.list":{params:{target:TargetReference;path:string};result:{items:{path:string;name:string;kind:'file'|'directory'|'symlink'|'special'}[];truncated:boolean}};
+  "files.preview":{params:{target:TargetReference;path:string};result:{path:string;size:number;binary:boolean;text:string|null;truncated:boolean}};
   "targets.inspectOperation":{params:{operationId:string};result:TargetOperation};
   "targets.execute":{params:{operationId:string;action:'archive'|'cleanup';target:TargetReference;confirmed:true};result:TargetOperation};
   "targets.cancelReview":{params:{reviewId:string};result:{cancelled:boolean}};

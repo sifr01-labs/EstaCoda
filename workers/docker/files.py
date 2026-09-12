@@ -49,12 +49,21 @@ def main(request):
     options = request.get("options", {})
     if op == "resolve": return checked(root, path, options)
     mutation = op in ("write", "mkdir", "rm", "rename")
-    resolved = checked(root, path, {"allowDirectory":op in ("stat", "lstat", "readdir", "mkdir"), "allowMissingLeaf":op in ("write", "mkdir") or (op=="rm" and options.get("force")), "forbidSymlinks":mutation})
+    resolved = checked(root, path, {"allowDirectory":op in ("stat", "lstat", "readdir", "mkdir"), "allowMissingLeaf":op in ("write", "mkdir") or (op=="rm" and options.get("force")), "forbidSymlinks":mutation or op == "preview"})
     if mutation and resolved == root: raise PermissionError("cannot replace workspace root")
     if op == "lstat": resolved = os.path.join(os.path.realpath(os.path.dirname(os.path.abspath(os.path.join(root,path)))), os.path.basename(path))
     fd, leaf = parent_fd(root, resolved)
     try:
         if op in ("stat", "lstat"): return metadata(os.stat(leaf, dir_fd=fd, follow_symlinks=False))
+        if op == "preview":
+            file = os.open(leaf, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
+            with os.fdopen(file,"rb") as source:
+                info = os.fstat(source.fileno())
+                if not stat.S_ISREG(info.st_mode): raise ValueError("preview requires a regular file")
+                data = source.read(16384)
+                after = os.stat(leaf, dir_fd=fd, follow_symlinks=False)
+                if (info.st_ino, info.st_size, info.st_mtime_ns) != (after.st_ino, after.st_size, after.st_mtime_ns): raise ValueError("file changed")
+                return {"bytes":base64.b64encode(data).decode("ascii"),"size":info.st_size}
         if op == "read":
             file = os.open(leaf, os.O_RDONLY | os.O_NOFOLLOW | os.O_NONBLOCK, dir_fd=fd)
             with os.fdopen(file,"rb") as source:

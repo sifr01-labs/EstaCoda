@@ -93,6 +93,8 @@ const oauthStatusShape=shape({authorizationId:id,state:choice(['starting','pendi
 const oauthStatus:Check=v=>oauthStatusShape(v)&&isRecord(v)&&(v.state==='pending'?v.verificationUrl!==null&&v.userCode!==null:v.verificationUrl===null&&v.userCode===null)&&(v.state==='authorized'?v.candidateId!==null:v.candidateId===null);
 const candidateVerification=shape({state:choice(['passed','failed','cancelled']),reason:choice(['none','unreachable','invalid_credential','model_unavailable','unsupported','incomplete','cancelled']),streaming:boolean,tools:boolean,latencyMs:integer(),inputTokens:nullable(integer()),outputTokens:nullable(integer()),estimatedCost:nullable(nonnegative)});
 const contracts: { [M in keyof MethodContracts]: { params: Check; result: Check } } = {
+  "files.list":{params:shape({target,path:text(1024,1)}),result:shape({items:array(shape({path:text(1024,1),name:text(255,1),kind:choice(['file','directory','symlink','special'])})),truncated:boolean})},
+  "files.preview":{params:shape({target,path:text(1024,1)}),result:shape({path:text(1024,1),size:integer(),binary:boolean,text:nullable(text(16384)),truncated:boolean})},
   "models.reviewConfigured": {params:shape({windowId:id,generation:integer(1),providerId:id,modelId:text(200,1),role:choice(["primary","fallback","auxiliary"])},{slot:choice(AUXILIARY_SLOTS),fallbackToMain:boolean}),result:modelRouteDraft},
   "models.validateRoute": {params:shape({route:candidateRoute}),result:shape({valid:v=>v===true})},
   "models.refreshCatalog": {params:shape({networkApproved:v=>v===true}),result:shape({refreshed:boolean})},

@@ -1,3 +1,4 @@
+import { constants } from "node:fs";
 import { explainPathBlock } from "../context/context-security.js";
 import * as fs from "node:fs/promises";
 import type { Dirent, Stats } from "node:fs";
@@ -8,6 +9,7 @@ export type WorkspacePathOptions = { allowMissingLeaf?: boolean; allowDirectory?
 /** Only operations used by workspace tools and inspection. Paths belong to this
  * execution view; implementations must not fall back to the caller's host FS. */
 export interface WorkspaceFiles {
+  preview(path: string): Promise<{ bytes: Buffer; size: number }>;
   realpath(path: string): Promise<string>;
   resolvePath(path: string | undefined, options?: WorkspacePathOptions): Promise<WorkspacePathResolution>;
   readFile(path: string): Promise<Buffer>;
@@ -90,6 +92,23 @@ export class HostWorkspaceFiles implements WorkspaceFiles {
       this.#assertActive();
       const bytes = buffer.subarray(0, bytesRead);
       return encoding === undefined ? bytes : bytes.toString(encoding);
+    } finally { await handle.close(); }
+  }
+  async preview(path: string): Promise<{ bytes: Buffer; size: number }> {
+    const options = { forbidSymlinks: true };
+    const checked = await this.#checked(path, options);
+    const before = await fs.lstat(checked);
+    const handle = await fs.open(checked, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
+    try {
+      const info = await handle.stat();
+      if (!info.isFile() || info.ino !== before.ino || info.dev !== before.dev) throw new Error("File changed.");
+      const bytes = Buffer.alloc(Math.min(info.size, 16_384));
+      const { bytesRead } = await handle.read(bytes, 0, bytes.length, 0);
+      await this.#checked(path, options);
+      const after = await fs.lstat(checked);
+      if (after.ino !== info.ino || after.dev !== info.dev || after.mtimeMs !== info.mtimeMs || after.size !== info.size) throw new Error("File changed.");
+      this.#assertActive();
+      return { bytes: bytes.subarray(0, bytesRead), size: info.size };
     } finally { await handle.close(); }
   }
   async writeFile(path: string, content: string, options: "utf8" | { encoding: "utf8"; flag: string } = "utf8"): Promise<void> {
