@@ -1,6 +1,6 @@
 import {captureCredentialPresence} from './route-health.js';
 import {loadRuntimeConfig} from '../config/runtime-config.js';
-import {getProviderMetadata, isProviderMediaOnly} from '../providers/provider-metadata.js';
+import {listProvidersVisibleInSetup,getProviderMetadata, isProviderMediaOnly} from '../providers/provider-metadata.js';
 import {createModelSelectionCatalog} from '../providers/model-selection-catalog.js';
 import {isControlId, type ModelProjection, type ProviderProjection} from '../contracts/desktop-control/index.js';
 import {WorkSnapshot} from './work-snapshot.js';
@@ -33,12 +33,13 @@ export async function captureModelCatalog(input: {homeDir: string; profileId: st
   const providers: ProviderProjection[] = providerRows.filter(row => isControlId(row.id) && row.id !== 'unconfigured' && !isProviderMediaOnly(row.id)).map(row => {
     const metadata = getProviderMetadata(row.id);
     const routeHealth=models.find(model=>model.providerId===row.id && model.role==='primary')?.health ?? models.find(model=>model.providerId===row.id && model.catalog?.configured)?.health;
-    const health:ProviderProjection['health']=row.catalogOnly?'catalog_only':!metadata.runnable?'unsupported':routeHealth ?? (!row.configured?'not_configured':row.credentialReady?'configured':'credential_required');
+    const health:ProviderProjection['health']=row.catalogOnly&&!metadata.configurable?'catalog_only':!metadata.runnable?'unsupported':routeHealth ?? (!row.configured?'not_configured':row.credentialReady?'configured':'credential_required');
     return {health,id: row.id, label: metadata.displayName.slice(0,240), authMethods: [...new Set(metadata.authMethods.map(method => method === 'none' || method === 'api_key' ? method : 'oauth' as const))], state: !row.configured ? 'unconfigured' : models.some(model => model.providerId === row.id && ['credential_required','authorization_expired','unsupported'].includes(model.health ?? '')) ? 'repair_required' : 'unknown',
       metadata: {configurable: metadata.configurable && (metadata.catalogKnown || row.configured), runnable: metadata.runnable,
-        catalogOnly: row.catalogOnly, apiMode: metadata.apiMode, defaultEndpoint: metadata.defaultBaseUrl ?? null}};
+        catalogOnly: row.catalogOnly&&!metadata.configurable, apiMode: metadata.apiMode, defaultEndpoint: metadata.defaultBaseUrl ?? null}};
   });
+  for(const metadata of listProvidersVisibleInSetup())if(!providers.some(p=>p.id===metadata.id)&&!isProviderMediaOnly(metadata.id))providers.push({id:metadata.id,label:metadata.displayName,authMethods:[...new Set(metadata.authMethods.map(method=>method==='api_key'||method==='none'?method:'oauth' as const))],state:'unconfigured',health:'not_configured',metadata:{configurable:metadata.configurable,runnable:metadata.runnable,catalogOnly:false,apiMode:metadata.apiMode,defaultEndpoint:metadata.defaultBaseUrl??null}});
   models.sort((a,b)=>Number(b.role==='primary')-Number(a.role==='primary') || Number(b.runnable)-Number(a.runnable) || Number(Boolean(b.catalog?.configured))-Number(Boolean(a.catalog?.configured)));
-  providers.sort((a,b)=>Number(b.state!=='unconfigured')-Number(a.state!=='unconfigured'));
+  providers.sort((a,b)=>Number(b.state!=='unconfigured')-Number(a.state!=='unconfigured')||Number(Boolean(b.metadata?.configurable))-Number(Boolean(a.metadata?.configurable)));
   return {providers, models, pages: new WorkSnapshot({work: [], activity: {}})};
 }

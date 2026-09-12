@@ -89,3 +89,11 @@ The provider dialog supports the built-in local provider and named OpenAI-compat
 Desktop primary Apply now resets omitted limits to defaults instead of silently carrying the previous model's caps forward. Existing CLI partial-update semantics remain unchanged. Fallback transport fields and output caps are preserved by reviewed setup; specialist output-cap editing remains excluded because that core slot has no output-cap field.
 
 Validation: 115 focused core tests and 97 final limit/setup tests passed, 28 desktop tests passed, plus root typecheck and desktop foundation checks. Tests cover no-auth writes, disabled network, Responses transport, context/output persistence and reset, and credential invalidation after a cap change.
+
+## 13. Primary, fallback and specialist editors
+
+The live Models screen supports reviewed primary selection, fallback add/reorder/remove, and dedicated/primary/automatic/disabled choices for the five exposed specialist slots. Configured models reuse their exact existing profile credential reference. Verification of a reviewed configured route stages an ephemeral service-only copy, runs the bounded verifier, and drops that copy without modifying the saved credential. Ambiguous configured endpoint matches are rejected.
+
+Provider setup also offers primary/fallback/specialist roles before staging. The dashboard prioritizes configured providers and keeps the wider provider catalog behind Browse Providers. Local and Codex setup metadata are available even when absent from the offline model snapshot. A development-mode mount cleanup issue was fixed so opening a review does not cancel its draft.
+
+Validation: 105 core catalog/route/credential/protocol tests and 29 desktop tests passed, plus root typecheck and desktop foundation checks. Tests verify existing-key reuse, no process-environment import, read-only failed verification, role dispatch and reviewed ordering. Integrated visual and native journeys remain pending for the acceptance slice.

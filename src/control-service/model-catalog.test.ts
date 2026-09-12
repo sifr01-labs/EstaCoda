@@ -10,7 +10,7 @@ it('projects the offline catalog without network calls, profile writes, or usabl
     const catalog = await captureModelCatalog({homeDir, profileId: 'catalog-test'});
     expect(catalog.providers.length).toBeGreaterThan(0);
     expect(catalog.models.length).toBeGreaterThan(0);
-    expect(catalog.providers.find(p => p.id === 'kimi')?.metadata).toMatchObject({configurable: true});
+    for(const id of ['kimi','local','codex'])expect(catalog.providers.find(p=>p.id===id)?.metadata).toMatchObject({configurable:true,catalogOnly:false});
     expect(catalog.models.some(m => m.catalog?.tools)).toBe(true);
     expect(catalog.models.every(m => !m.runnable)).toBe(true);
     expect(fetch).not.toHaveBeenCalled();

@@ -1,3 +1,4 @@
+import type {ConfiguredRouteReview} from './model-setup.js';
 import type {OAuthStatus,OAuthBinding} from './model-setup.js';
 import type {AuxiliaryList,AuxiliarySlot,AuxiliaryModeParams} from './model-setup.js';
 import type {VerifyCandidateParams, CandidateVerification, ModelRouteDraft, ModelDraftBinding, ModelApplyReceipt, FallbackList, FallbackOrderParams} from './model-setup.js';
@@ -19,6 +20,8 @@ export type SubscribeResult =
   | { state: "subscribed"; subscriptionId: string; cursor: ControlCursor }
   | { state: "snapshot_required"; reason: "instance_changed" | "stream_changed" | "cursor_expired" | "overflow" };
 export type MethodContracts = {
+  "models.verifyDraft": {params:ModelDraftBinding&{spendApproved:true;allowPrivateEndpoint:boolean};result:CandidateVerification};
+  "models.reviewConfigured": {params:ConfiguredRouteReview;result:ModelRouteDraft};
   "models.validateRoute": {params:{route:VerifyCandidateParams["route"]};result:{valid:true}};
   "models.refreshCatalog": {params:{networkApproved:true};result:{refreshed:boolean}};
   "models.oauthStart": {params:{windowId:string;generation:number};result:OAuthStatus};

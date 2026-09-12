@@ -30,6 +30,8 @@ const activities: ActivityProjection[] = [
   { ...activityBase, kind: "status", status: "needs_attention", reason: "Waiting for approval" },
 ];
 const cases = {
+ "models.verifyDraft":{params:{draftId:'draft',windowId:'w',generation:1,spendApproved:true,allowPrivateEndpoint:false},result:{state:'passed',reason:'none',streaming:true,tools:true,latencyMs:1,inputTokens:1,outputTokens:1,estimatedCost:null}},
+ "models.reviewConfigured": {params:{windowId:'w',generation:1,providerId:'local',modelId:'m',role:'primary'},result:{draftId:'draft',role:'primary',credentialState:'not_required',expiresInMs:300000,route:{providerId:'local',modelId:'m',endpoint:'http://localhost:11434/v1',authMethod:'none',apiMode:'custom_openai_compatible',allowPrivateEndpoint:true}}},
   "models.validateRoute": {params:{route:{providerId:"local",modelId:"m",endpoint:"http://localhost:11434/v1",authMethod:"none",apiMode:"openai_chat_completions",allowPrivateEndpoint:true}},result:{valid:true}},
   "models.refreshCatalog": {params:{networkApproved:true},result:{refreshed:true}},
  "models.oauthStart": {params:{windowId:'w',generation:1},result:{authorizationId:'auth',state:'starting',verificationUrl:null,userCode:null,candidateId:null}},

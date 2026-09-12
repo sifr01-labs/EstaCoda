@@ -9,6 +9,8 @@ export type RuntimeCredential =
   | { kind: "bearer"; id: string; value: string; source: "env" | "oauth" };
 
 export type RuntimeCredentialResolverOptions = {
+  /** Explicit selected-profile snapshot for isolated verification. */
+  environment?: Readonly<Record<string,string|undefined>>;
   providerId: ProviderId;
   route?: {
     apiKeyEnv?: string;
@@ -52,7 +54,7 @@ export async function resolveRuntimeCredential(
 
   // 1. route explicit credential reference
   if (options.route?.apiKeyEnv !== undefined) {
-    const value = process.env[options.route.apiKeyEnv];
+    const value = (options.environment??process.env)[options.route.apiKeyEnv];
     if (value === undefined || value.length === 0) {
       return {
         diagnostic: {
@@ -74,7 +76,7 @@ export async function resolveRuntimeCredential(
 
   // 2. provider configured credential reference
   if (options.providerConfig?.apiKeyEnv !== undefined) {
-    const value = process.env[options.providerConfig.apiKeyEnv];
+    const value = (options.environment??process.env)[options.providerConfig.apiKeyEnv];
     if (value === undefined || value.length === 0) {
       return {
         diagnostic: {

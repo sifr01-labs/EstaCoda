@@ -1,3 +1,8 @@
+import {readEnvSecretValue}from'../config/env-secret-store.js';
+import {resolveRuntimeCredential}from'../providers/runtime-credential-resolver.js';
+import type {CandidateVerifier}from'./candidate-verification.js';
+import {createModelSelectionCatalog} from '../providers/model-selection-catalog.js';
+import type{ConfiguredRouteReview}from'../contracts/desktop-control/index.js';
 import {oauthCandidate} from './oauth-candidate.js';
 import {captureCredentialPresence} from './route-health.js';
 import {AUXILIARY_SLOTS,type AuxiliarySlot,type AuxiliaryList,type AuxiliaryModeParams} from '../contracts/desktop-control/index.js';
@@ -21,15 +26,16 @@ export class ModelSetup {
   #closed=false;
   #fallbackListing:{projection:FallbackList;snapshot:ProfileApplySnapshot}|undefined;
   constructor(readonly input:{homeDir:string;profileId:string},readonly candidates:CredentialCandidates,readonly changed:()=>void|Promise<void>){}
-  async review(params:MethodContracts['models.reviewPrimary']['params'],role:'primary'|'fallback'|'auxiliary'='primary',auxiliary?:{slot:AuxiliarySlot;fallbackToMain:boolean}):Promise<ModelRouteDraft>{
+  async review(params:MethodContracts['models.reviewPrimary']['params'],role:'primary'|'fallback'|'auxiliary'='primary',auxiliary?:{slot:AuxiliarySlot;fallbackToMain:boolean},existing?:{snapshot:ProfileApplySnapshot;credentialEnv?:string}):Promise<ModelRouteDraft>{
     for(const [id,draft] of this.#drafts){if(this.#drafts.size<32)break;if(draft.consumed)this.#drafts.delete(id);}
     if(this.#closed || this.#drafts.size>=32)throw new ControlProtocolError('-32009');
     if(role==='auxiliary' && params.route.maxTokens!==undefined)throw new ControlProtocolError('-32602');
     if(role==='auxiliary' && (!auxiliary || !AUXILIARY_SLOTS.includes(auxiliary.slot)))throw new ControlProtocolError('-32602');
-    validateCandidateRequest({...params,spendApproved:true});
+    validateCandidateRequest({...params,...(existing&&params.route.authMethod!=='none'?{candidateId:'configured'}:{}),spendApproved:true});
     const scope:CandidateScope={windowId:params.windowId,generation:params.generation,purpose:'provider',providerId:params.route.providerId,authMethod:params.route.authMethod==='oauth'?'oauth':'api_key',endpoint:params.route.endpoint};
     if(params.candidateId){this.candidates.bindRoute(params.candidateId,scope,candidateRouteBinding(params.route));this.candidates.read(params.candidateId,scope);}
     const snapshot=await captureProfileApplySnapshot(this.input);
+    if(existing && JSON.stringify(snapshot.files)!==JSON.stringify(existing.snapshot.files))throw new ControlProtocolError('-32007');
     const loaded=await loadRuntimeConfig({...this.input,workspaceRoot:this.input.homeDir,configurationInspection:true});
     if(role==='fallback'||role==='auxiliary'){
       const identity=(provider:string,id:string,endpoint?:string)=>JSON.stringify([provider,id,new URL(endpoint ?? getProviderMetadata(provider).defaultBaseUrl ?? 'http://invalid').href.replace(/\/$/,'')]);
@@ -43,13 +49,47 @@ export class ModelSetup {
     if(JSON.stringify(snapshot.files)!==JSON.stringify((await captureProfileApplySnapshot(this.input)).files))throw new ControlProtocolError('-32007');
     if(params.candidateId)this.candidates.read(params.candidateId,scope);
     if(this.#closed || this.#drafts.size>=32)throw new ControlProtocolError('-32003');
-    const draftId=randomUUID(),projection:ModelRouteDraft={draftId,route:structuredClone(params.route),expiresInMs:300000,credentialState:params.candidateId?'staged':'not_required',role,...(auxiliary?{slot:auxiliary.slot}:{})};
-    const credentialEnv=params.route.authMethod==='api_key'?`${getProviderMetadata(params.route.providerId).defaultApiKeyEnv ?? 'PROVIDER_API_KEY'}_${draftId.replaceAll('-','').toUpperCase()}`:undefined;
+    const draftId=randomUUID(),projection:ModelRouteDraft={draftId,route:structuredClone(params.route),expiresInMs:300000,credentialState:params.candidateId?'staged':existing&&params.route.authMethod!=='none'?'existing':'not_required',role,...(auxiliary?{slot:auxiliary.slot}:{})};
+    const credentialEnv=existing?existing.credentialEnv:params.route.authMethod==='api_key'?`${getProviderMetadata(params.route.providerId).defaultApiKeyEnv ?? 'PROVIDER_API_KEY'}_${draftId.replaceAll('-','').toUpperCase()}`:undefined;
     const route=params.route;
     const plan=primaryRoutePlan({provider:route.providerId,model:route.modelId,baseUrl:route.endpoint,apiMode:route.apiMode,authMethod:route.authMethod==='oauth'?'oauth_device_pkce':route.authMethod,enableNetwork:route.enableNetwork??true,...(route.contextWindowTokens!==undefined?{contextWindowTokens:route.contextWindowTokens}:{}),...(route.maxTokens!==undefined?{maxTokens:route.maxTokens}:{}),...(auxiliary?{auxiliaryTask:auxiliary.slot,fallbackToMain:auxiliary.fallbackToMain}:{})},credentialEnv,role);
     const timer=setTimeout(()=>this.cancel({draftId,windowId:params.windowId,generation:params.generation}),300000);timer.unref();
     this.#drafts.set(draftId,{expires:performance.now()+300000,params:structuredClone(params),projection,snapshot,credentialEnv,scope,plan,abort:new AbortController(),timer,applying:false,consumed:false});
     return projection;
+  }
+  async verifyDraft(params:MethodContracts['models.verifyDraft']['params'],signal:AbortSignal,verifier:CandidateVerifier){
+    const draft=this.require(params),route=draft.params.route;
+    if(!route||draft.applying||draft.consumed||draft.projection.credentialState==='staged'||!params.spendApproved)throw new ControlProtocolError('-32602');
+    if(JSON.stringify(draft.snapshot.files)!==JSON.stringify((await captureProfileApplySnapshot(this.input)).files))throw new ControlProtocolError('-32007');
+    const scope:CandidateScope={windowId:params.windowId,generation:params.generation,purpose:'provider',providerId:route.providerId,authMethod:route.authMethod==='oauth'?'oauth':'api_key',endpoint:route.endpoint};
+    let value:string|undefined;
+    if(route.authMethod==='api_key'){
+      const key=draft.credentialEnv;if(!key)throw new ControlProtocolError('-32602');
+      const resolution=await resolveRuntimeCredential({providerId:route.providerId,route:{apiKeyEnv:key,authMethod:'api_key'},readOnly:true,environment:{[key]:readEnvSecretValue(draft.snapshot.files['.env']??'',key)??process.env[key]}});
+      if(resolution.credential?.kind!=='bearer')throw new ControlProtocolError('-32602');value=resolution.credential.value;
+    }else if(route.authMethod==='oauth'){
+      const record=JSON.parse(draft.snapshot.files['auth.json']??'{}').providers?.[route.providerId];if(!record)throw new ControlProtocolError('-32602');value=JSON.stringify(oauthCandidate(JSON.stringify(record),route.providerId));
+    }
+    const candidateId=value?this.candidates.stage(scope,value):undefined;
+    try{return await verifier.verify({windowId:params.windowId,generation:params.generation,route:{...route,allowPrivateEndpoint:params.allowPrivateEndpoint},...(candidateId?{candidateId}:{}),spendApproved:true},AbortSignal.any([signal,draft.abort.signal]));}
+    finally{if(candidateId)try{this.candidates.discard(candidateId,scope);}catch{}}
+  }
+  async reviewConfigured(params:ConfiguredRouteReview):Promise<ModelRouteDraft>{
+    if(params.role==='auxiliary'?!params.slot||!AUXILIARY_SLOTS.includes(params.slot):params.slot!==undefined||params.fallbackToMain!==undefined)throw new ControlProtocolError('-32602');
+    const snapshot=await captureProfileApplySnapshot(this.input);
+    const loaded=await loadRuntimeConfig({...this.input,workspaceRoot:this.input.homeDir,configurationInspection:true});
+    const presence=await captureCredentialPresence(loaded);
+    const catalog=await createModelSelectionCatalog({...this.input,config:loaded.config,providerRegistry:loaded.providerRegistry,allowNetwork:false,credentialReady:async(provider,apiKeyEnv)=>['present','not_required'].includes(presence(provider,{apiKeyEnv}))});
+    const rows=(await catalog.listModels({configuredOnly:true,executableOnly:true,provider:params.providerId})).filter(row=>row.id===params.modelId&&!row.catalogOnly&&row.lifecycle!=='retired');
+    if(rows.length!==1)throw new ControlProtocolError('-32602');
+    const row=rows[0]!,provider=loaded.config.providers?.[params.providerId],metadata=getProviderMetadata(params.providerId);
+    if(!provider?.enableNetwork)throw new ControlProtocolError('-32602');
+    const endpoint=row.baseUrl??provider.baseUrl??metadata.defaultBaseUrl;if(!endpoint)throw new ControlProtocolError('-32602');
+    const fallback=loaded.modelFallbackRoutes.find(route=>route.provider===params.providerId&&route.id===params.modelId&&(route.baseUrl??metadata.defaultBaseUrl)===endpoint);
+    const authMethod=provider.authMethod??metadata.defaultAuthMethod,credentialEnv=fallback?.apiKeyEnv??provider.apiKeyEnv??metadata.defaultApiKeyEnv;
+    if(!['present','not_required'].includes(presence(params.providerId,{apiKeyEnv:credentialEnv,authMethod})))throw new ControlProtocolError('-32602');
+    const route:CandidateRoute={providerId:params.providerId,modelId:params.modelId,endpoint,authMethod:authMethod==='none'?'none':authMethod==='api_key'?'api_key':'oauth',apiMode:(provider.apiMode??metadata.apiMode) as CandidateRoute['apiMode'],allowPrivateEndpoint:true,enableNetwork:true,...(fallback?.contextWindowTokens?{contextWindowTokens:fallback.contextWindowTokens}:{}),...(params.role!=='auxiliary'&&fallback?.maxTokens?{maxTokens:fallback.maxTokens}:{})};
+    return this.review({windowId:params.windowId,generation:params.generation,route},params.role,params.role==='auxiliary'?{slot:params.slot!,fallbackToMain:params.fallbackToMain===true}:undefined,{snapshot,credentialEnv:route.authMethod==='api_key'?credentialEnv:undefined});
   }
   async auxiliary():Promise<AuxiliaryList>{
     const loaded=await loadRuntimeConfig({...this.input,workspaceRoot:this.input.homeDir,configurationInspection:true});

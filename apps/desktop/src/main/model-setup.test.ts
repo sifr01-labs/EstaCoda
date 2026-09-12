@@ -35,3 +35,12 @@ it('opens only the service-confirmed Codex URL and carries the authorized candid
  authorized=true;await setup.oauthStatus(setupId);await expect(setup.oauthOpen(setupId)).rejects.toThrow();await setup.review(setupId);expect(f.calls.at(-1).params.candidateId).toBe('oauth-candidate');
  expect(f.credentials.open).not.toHaveBeenCalled();await setup.cancel(setupId);expect(f.calls.some(c=>c.method==='models.oauthCancel')).toBe(true);
 });
+it('uses reviewed fallback and specialist service methods without exposing credentials',async()=>{
+ const f=fixture();const {setupId}=await f.setup.begin(route);await f.setup.stage(setupId);
+ await f.setup.review(setupId,{role:'fallback'});expect(f.calls.at(-1).method).toBe('models.reviewFallback');
+ await f.setup.review(setupId,{role:'auxiliary',slot:'assessor',fallbackToMain:true});expect(f.calls.at(-1)).toMatchObject({method:'models.reviewAuxiliary',params:{slot:'assessor',fallbackToMain:true,candidateId:'candidate'}});
+ await f.setup.cancel(setupId);
+ f.connection.modelRequest.mockImplementation(async(method:string,params:any)=>{f.calls.push({method,params});return {draftId:'order',role:'fallback_order',expiresInMs:300000,credentialState:'not_required'} as any;});
+ const reviewed=await f.setup.reviewed('models.reviewFallbackOrder',{revision:'rev',order:[1,0]});expect(reviewed.draft.role).toBe('fallback_order');expect(f.calls.at(-1)).toMatchObject({method:'models.reviewFallbackOrder',params:{revision:'rev',order:[1,0]}});
+ expect(f.calls.filter(c=>c.method==='models.applyDraft')).toHaveLength(0);
+});

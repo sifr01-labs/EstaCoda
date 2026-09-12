@@ -174,3 +174,10 @@ export function envContentHasSecret(content: string, key: string): boolean {
     return parsed?.key === normalized && parsed.value.trim().length > 0;
   });
 }
+
+/** Private consumers may resolve one reference from an already bounded profile snapshot. */
+export function readEnvSecretValue(content:string,key:string):string|undefined {
+  const normalized=normalizeEnvKey(key);let value:string|undefined;
+  for(const line of content.split(/\r?\n/u)){const entry=parseDotEnvLine(line);if(entry?.key===normalized)value=entry.value;}
+  return value;
+}

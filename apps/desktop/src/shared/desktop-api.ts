@@ -7,6 +7,12 @@ export type DesktopSnapshot = { status: 'connecting' | 'ready' | 'disconnected' 
   work:Page<WorkProjection>;inbox:Page<InboxProjection> };
 export type ProfileChoice = {id:string;label:string};
 export type DesktopModelsApi={
+ verifyReviewed(setupId:string,allowPrivateEndpoint:boolean):Promise<MethodContracts['models.verifyDraft']['result']>;
+ routes():Promise<{fallbacks:MethodContracts['models.fallbacks']['result'];auxiliary:MethodContracts['models.auxiliary']['result']}>;
+ reviewConfigured(selection:Omit<MethodContracts['models.reviewConfigured']['params'],'windowId'|'generation'>):Promise<{setupId:string;draft:MethodContracts['models.reviewPrimary']['result']}>;
+ reviewOrder(order:Omit<MethodContracts['models.reviewFallbackOrder']['params'],'windowId'|'generation'>):Promise<{setupId:string;draft:MethodContracts['models.reviewPrimary']['result']}>;
+ reviewMode(mode:Omit<MethodContracts['models.reviewAuxiliaryMode']['params'],'windowId'|'generation'>):Promise<{setupId:string;draft:MethodContracts['models.reviewPrimary']['result']}>;
+
  oauthStart(setupId:string):Promise<MethodContracts['models.oauthStart']['result']>;
  oauthStatus(setupId:string):Promise<MethodContracts['models.oauthStatus']['result']>;
  oauthOpen(setupId:string):Promise<void>;
@@ -14,7 +20,7 @@ export type DesktopModelsApi={
  begin(route:MethodContracts['models.validateRoute']['params']['route']):Promise<{setupId:string}>;
  stage(setupId:string):Promise<{staged:boolean}>;
  verify(setupId:string):Promise<MethodContracts['models.verifyCandidate']['result']>;
- review(setupId:string):Promise<MethodContracts['models.reviewPrimary']['result']>;
+ review(setupId:string,role?:import('@estacoda/control-protocol').RouteRole):Promise<MethodContracts['models.reviewPrimary']['result']>;
  apply(setupId:string):Promise<MethodContracts['models.applyDraft']['result']>;
  cancel(setupId:string):Promise<{cancelled:boolean}>;
  inspect():Promise<MethodContracts['models.inspectApply']['result']|null>;

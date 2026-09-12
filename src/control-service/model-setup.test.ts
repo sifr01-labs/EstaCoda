@@ -96,3 +96,15 @@ it('reviews custom transport, network and limits without a key',async()=>{
   expect(await readFile(join(home,'.estacoda/profiles/p/.env'),'utf8').catch(()=>null)).toBeNull();
  }finally{setup.dispose();candidates.dispose();await rm(home,{recursive:true,force:true});}
 });
+it('reuses and verifies a configured key without replacing it or importing it into process environment',async()=>{
+ const homeDir=await mkdtemp('/tmp/ec-existing-route-'),input={homeDir,profileId:'p'},paths=resolveProfileStateHome(input);const candidates=new CredentialCandidates('p','b'),setup=new ModelSetup(input,candidates,()=>{});
+ const {CandidateVerifier}=await import('./candidate-verification.js');let calls=0;
+ const verifier=new CandidateVerifier(candidates,()=>async(_url,init)=>{calls++;expect(init.headers.Authorization??init.headers.authorization).toBe('Bearer existing-key-canary');return {ok:false,status:401,statusText:'',json:async()=>({}),text:async()=>''};});
+ try{
+  await mkdir(paths.profileRoot,{recursive:true});await writeFile(paths.envPath,'EC_EXISTING_ROUTE_KEY=existing-key-canary\n');await writeFile(paths.configPath,JSON.stringify({model:{provider:'kimi',id:'primary'},providers:{kimi:{baseUrl:'https://api.moonshot.ai/v1',apiKeyEnv:'EC_EXISTING_ROUTE_KEY',authMethod:'api_key',enableNetwork:true,models:['primary','second']}}}));
+  const before=await readFile(paths.envPath,'utf8');const draft=await setup.reviewConfigured({windowId:'w',generation:1,providerId:'kimi',modelId:'second',role:'primary'});expect(draft.credentialState).toBe('existing');
+  const binding={windowId:'w',generation:1,draftId:draft.draftId};expect(await setup.verifyDraft({...binding,spendApproved:true,allowPrivateEndpoint:false},new AbortController().signal,verifier)).toMatchObject({reason:'invalid_credential'});expect(calls).toBe(1);
+  expect(await readFile(paths.envPath,'utf8')).toBe(before);expect(process.env.EC_EXISTING_ROUTE_KEY).toBeUndefined();expect(await setup.apply(binding,new AbortController().signal)).toMatchObject({state:'applied'});
+  expect(await readFile(paths.envPath,'utf8')).toBe(before);expect(JSON.parse(await readFile(paths.configPath,'utf8')).model.id).toBe('second');
+ }finally{verifier.dispose();setup.dispose();candidates.dispose();await rm(homeDir,{recursive:true,force:true});}
+});

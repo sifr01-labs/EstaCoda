@@ -76,14 +76,16 @@ const subscribeResult: Check = (v) => shape({ state: choice(["subscribed"]), sub
   shape({ state: choice(["snapshot_required"]), reason: choice(["instance_changed", "stream_changed", "cursor_expired", "overflow"]) })(v);
 const initialize: Check = (v) => { try { assertInitializeParams(v); return true; } catch { return false; } };
 const candidateRoute=shape({providerId:id,modelId:text(200,1),endpoint:text(2048,1),authMethod:choice(['api_key','oauth','none']),apiMode:choice(['openai_chat_completions','openai_responses','custom_openai_compatible']),allowPrivateEndpoint:boolean},{enableNetwork:boolean,contextWindowTokens:integer(1,1000000000),maxTokens:integer(1,1000000000)});
-const modelRouteDraftShape=shape({draftId:id,expiresInMs:integer(1,900000),credentialState:choice(['staged','not_required']),role:choice(['primary','fallback','fallback_order','auxiliary','auxiliary_mode'])},{route:candidateRoute,slot:choice(AUXILIARY_SLOTS)});
+const modelRouteDraftShape=shape({draftId:id,expiresInMs:integer(1,900000),credentialState:choice(['staged','existing','not_required']),role:choice(['primary','fallback','fallback_order','auxiliary','auxiliary_mode'])},{route:candidateRoute,slot:choice(AUXILIARY_SLOTS)});
 const modelRouteDraft:Check=v=>modelRouteDraftShape(v)&&isRecord(v)&&(['fallback_order','auxiliary_mode'].includes(String(v.role))?v.route===undefined:candidateRoute(v.route))&&(['auxiliary','auxiliary_mode'].includes(String(v.role))?choice(AUXILIARY_SLOTS)(v.slot):v.slot===undefined);
 const modelDraftBinding=shape({draftId:id,windowId:id,generation:integer(1)});
 const modelApplyReceipt=shape({operationId:id,state:choice(['applied','uncertain','unknown']),verification:choice(['configured','repair_required','not_tested'])});
 const oauthBinding=shape({authorizationId:id,windowId:id,generation:integer(1)});
 const oauthStatusShape=shape({authorizationId:id,state:choice(['starting','pending','authorized','failed','cancelled','expired']),verificationUrl:nullable(choice(['https://auth.openai.com/codex/device'])),userCode:nullable((v)=>typeof v==='string' && /^[-A-Z0-9]{1,32}$/i.test(v)),candidateId:nullable(id)});
 const oauthStatus:Check=v=>oauthStatusShape(v)&&isRecord(v)&&(v.state==='pending'?v.verificationUrl!==null&&v.userCode!==null:v.verificationUrl===null&&v.userCode===null)&&(v.state==='authorized'?v.candidateId!==null:v.candidateId===null);
+const candidateVerification=shape({state:choice(['passed','failed','cancelled']),reason:choice(['none','unreachable','invalid_credential','model_unavailable','unsupported','incomplete','cancelled']),streaming:boolean,tools:boolean,latencyMs:integer(),inputTokens:nullable(integer()),outputTokens:nullable(integer()),estimatedCost:nullable(nonnegative)});
 const contracts: { [M in keyof MethodContracts]: { params: Check; result: Check } } = {
+  "models.reviewConfigured": {params:shape({windowId:id,generation:integer(1),providerId:id,modelId:text(200,1),role:choice(["primary","fallback","auxiliary"])},{slot:choice(AUXILIARY_SLOTS),fallbackToMain:boolean}),result:modelRouteDraft},
   "models.validateRoute": {params:shape({route:candidateRoute}),result:shape({valid:v=>v===true})},
   "models.refreshCatalog": {params:shape({networkApproved:v=>v===true}),result:shape({refreshed:boolean})},
   "models.oauthStart": {params:shape({windowId:id,generation:integer(1)}),result:oauthStatus},
@@ -111,11 +113,8 @@ const contracts: { [M in keyof MethodContracts]: { params: Check; result: Check 
   "models.applyDraft": {params:modelDraftBinding,result:modelApplyReceipt},
   "models.cancelDraft": {params:modelDraftBinding,result:shape({cancelled:boolean})},
   "models.inspectApply": {params:shape({operationId:id}),result:modelApplyReceipt},
-  "models.verifyCandidate": {params: shape({windowId:id,generation:integer(1),spendApproved:(v)=>v===true,
-    route:shape({providerId:id,modelId:text(200,1),endpoint:text(2048,1),authMethod:choice(['api_key','oauth','none']),
-      apiMode:choice(['openai_chat_completions','openai_responses','custom_openai_compatible']),allowPrivateEndpoint:boolean})}, {candidateId:id}),
-    result:shape({state:choice(['passed','failed','cancelled']),reason:choice(['none','unreachable','invalid_credential','model_unavailable','unsupported','incomplete','cancelled']),
-      streaming:boolean,tools:boolean,latencyMs:integer(),inputTokens:nullable(integer()),outputTokens:nullable(integer()),estimatedCost:nullable(nonnegative)})},
+  "models.verifyCandidate": {params:shape({windowId:id,generation:integer(1),spendApproved:v=>v===true,route:candidateRoute},{candidateId:id}),result:candidateVerification},
+  "models.verifyDraft": {params:shape({draftId:id,windowId:id,generation:integer(1),spendApproved:v=>v===true,allowPrivateEndpoint:boolean}),result:candidateVerification},
   "models.list": { params: shape(pageParams, optionalPage), result: page(model) },
   "providers.list": { params: shape(pageParams, optionalPage), result: page(provider) },
   "connections.list": { params: shape(pageParams, optionalPage), result: page(connection) },
@@ -196,6 +195,7 @@ export function validateControlResponse<M extends keyof MethodContracts>(value: 
       if (!context!.capabilities.events.every((event) => request.params.events.includes(event)) ||
         cursor.instanceId !== context!.instanceId || cursor.streamId !== request.params.after.streamId || cursor.sequence !== request.params.after.sequence) throw new ControlProtocolError("-32007");
     }
+    if(request.method==='models.reviewConfigured' && (result.role!==request.params.role || result.slot!==request.params.slot || (result.route as CandidateRoute).providerId!==request.params.providerId || (result.route as CandidateRoute).modelId!==request.params.modelId))throw new ControlProtocolError('-32003');
     const expectedRole:Record<string,string>={'models.reviewPrimary':'primary','models.reviewFallback':'fallback','models.reviewFallbackOrder':'fallback_order','models.reviewAuxiliary':'auxiliary','models.reviewAuxiliaryMode':'auxiliary_mode'};
     const requiredRole=expectedRole[request.method];
     if(requiredRole && result.role!==requiredRole)throw new ControlProtocolError('-32003');
