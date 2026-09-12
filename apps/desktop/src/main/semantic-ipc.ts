@@ -1,3 +1,4 @@
+import type {WorkPins} from './work-pins.js';
 import type{DesktopModelSetup}from'./model-setup.js';
 import{validAppearance}from'../shared/appearance.js';
 import type{AppearanceSettings}from'./appearance-store.js';
@@ -12,6 +13,8 @@ export function rendererSnapshot(state:ConnectionState):DesktopSnapshot {
 }
 export function validateSemanticPayload(method:string,payload:unknown):void {
   if(!isRecord(payload))throw new Error('Desktop request rejected.');
+  if(method==='workSearch'){if(!exactKeys(payload,['query'],['cursor'])||typeof payload.query!=='string'||payload.query.length>200||payload.cursor!==undefined&&(typeof payload.cursor!=='string'||!/^[A-Za-z0-9_-]{1,512}$/.test(payload.cursor)))throw new Error('Invalid search');return;}
+  if(method==='workPin'){if(!exactKeys(payload,['workId','pinned'])||!isControlId(payload.workId)||typeof payload.pinned!=='boolean')throw new Error('Invalid pin');return;}
   if(['workOverride','inspectOverride','setOverride'].includes(method)){if(!exactKeys(payload,method==='setOverride'?['workId','selection']:['workId'])||!isControlId(payload.workId))throw new Error('Invalid Work');if(method==='setOverride'&&payload.selection!==null){const s=payload.selection;if(!isRecord(s)||!exactKeys(s,['providerId','modelId'])||!isControlId(s.providerId)||typeof s.modelId!=='string'||!s.modelId.length||s.modelId.length>200)throw new Error('Invalid model');}return;}
   if(method==='setupVerifyReviewed'){if(!exactKeys(payload,['setupId','allowPrivateEndpoint'])||!isControlId(payload.setupId)||typeof payload.allowPrivateEndpoint!=='boolean')throw new Error('Invalid verification');return;}
   if(['setupConfigured','setupOrder','setupMode'].includes(method)){validateControlRequest({jsonrpc:'2.0',id:'validation',method:method==='setupConfigured'?'models.reviewConfigured':method==='setupOrder'?'models.reviewFallbackOrder':'models.reviewAuxiliaryMode',params:{...payload,windowId:'validation',generation:1}},{profileId:'validation',instanceId:'validation',capabilities:{methods:[...CONTROL_METHODS],events:[...CONTROL_EVENTS]}});if('windowId' in payload||'generation' in payload)throw new Error('Invalid setup authority');return;}
@@ -21,10 +24,10 @@ export function validateSemanticPayload(method:string,payload:unknown):void {
     :method==='switchProfile'?exactKeys(payload,['id'])&&isControlId(payload.id):exactKeys(payload,[]);
   if(!valid)throw new Error('Desktop request rejected.');
 }
-export function installSemanticIpc(window:BrowserWindow,documentUrl:string,connection:DesktopConnection,profiles:Profiles,appearance:AppearanceSettings,models?:DesktopModelSetup):()=>void {
+export function installSemanticIpc(window:BrowserWindow,documentUrl:string,connection:DesktopConnection,profiles:Profiles,appearance:AppearanceSettings,models?:DesktopModelSetup,pins?:WorkPins):()=>void {
   const authority=new WindowAuthority(window,documentUrl);
   const contents=window.webContents;
-  const methods=['workOverride','setOverride','inspectOverride','setupVerifyReviewed','modelRoutes','setupConfigured','setupOrder','setupMode','setupOAuthStart','setupOAuthStatus','setupOAuthOpen','setupBegin','setupStage','setupVerify','setupReview','setupApply','setupCancel','setupInspect','modelPage','providerPage','refreshCatalog','reconnect','moreWork','moreInbox','appearance','setAppearance','snapshot','getWork','activity','profiles','switchProfile','minimize','toggleMaximize','close'];
+  const methods=['workSearch','workPins','workPin','workOverride','setOverride','inspectOverride','setupVerifyReviewed','modelRoutes','setupConfigured','setupOrder','setupMode','setupOAuthStart','setupOAuthStatus','setupOAuthOpen','setupBegin','setupStage','setupVerify','setupReview','setupApply','setupCancel','setupInspect','modelPage','providerPage','refreshCatalog','reconnect','moreWork','moreInbox','appearance','setAppearance','snapshot','getWork','activity','profiles','switchProfile','minimize','toggleMaximize','close'];
   const handlers:string[]=[];
   let connectionGeneration=connection.state.generation;
   const state=(value:ConnectionState)=>{if(value.generation!==connectionGeneration){authority.invalidate();connectionGeneration=value.generation;}if(!window.isDestroyed())contents.send('desktop:state',{generation:authority.generation,snapshot:rendererSnapshot(value)});};
@@ -37,6 +40,10 @@ export function installSemanticIpc(window:BrowserWindow,documentUrl:string,conne
       const payload=envelope.payload as Record<string,unknown>;
       const generation=authority.generation;
       try {
+        if(method==='workSearch'||method==='workPins'||method==='workPin'){
+          const result=method==='workSearch'?await connection.search(payload.query as string,payload.cursor as string|undefined):method==='workPin'?await pins?.set(payload.workId as string,payload.pinned as boolean):await pins?.list();
+          authority.assertSender(event,generation);if(!result)throw new Error('Work unavailable');return result;
+        }
         if(['workOverride','setOverride','inspectOverride'].includes(method)){if(!models)throw new Error('Models unavailable');const result=method==='workOverride'?await models.workOverride(payload.workId as string):method==='setOverride'?await models.setOverride(payload.workId as string,payload.selection as {providerId:string;modelId:string}|null):await models.inspectOverride(payload.workId as string);authority.assertSender(event,generation);return result;}
         if(method==='modelRoutes'){if(!models)throw new Error('Models unavailable');const result=await models.routes();authority.assertSender(event,generation);return result;}
         if(method.startsWith('setup')){if(!models)throw new Error('Setup unavailable.');const result=method==='setupVerifyReviewed'?await models.verifyReviewed(payload.setupId as string,payload.allowPrivateEndpoint as boolean):method==='setupConfigured'?await models.reviewed('models.reviewConfigured',payload as any):method==='setupOrder'?await models.reviewed('models.reviewFallbackOrder',payload as any):method==='setupMode'?await models.reviewed('models.reviewAuxiliaryMode',payload as any):method==='setupOAuthStart'?await models.oauthStart(payload.setupId as string):method==='setupOAuthStatus'?await models.oauthStatus(payload.setupId as string):method==='setupOAuthOpen'?await models.oauthOpen(payload.setupId as string):method==='setupBegin'?await models.begin(payload.route as Parameters<DesktopModelSetup['begin']>[0]):method==='setupStage'?await models.stage(payload.setupId as string):method==='setupVerify'?await models.verify(payload.setupId as string):method==='setupReview'?await models.review(payload.setupId as string,payload.role as Parameters<DesktopModelSetup['review']>[1]):method==='setupApply'?await models.apply(payload.setupId as string):method==='setupCancel'?await models.cancel(payload.setupId as string):await models.inspect();authority.assertSender(event,generation);return result;}

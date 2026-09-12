@@ -33,7 +33,13 @@ export type DesktopModelsApi={
  providers(cursor?:string):Promise<MethodContracts['providers.list']['result']>;
  refreshCatalog():Promise<{refreshed:boolean}>;
 };
+export type DesktopWorkApi = {
+ search(query:string,cursor?:string):Promise<Page<WorkProjection>>;
+ pins():Promise<WorkProjection[]>;
+ pin(workId:string,pinned:boolean):Promise<WorkProjection[]>;
+};
 export type DesktopApi = {
+  readonly work?:DesktopWorkApi;
   readonly models?:DesktopModelsApi;
   readonly platform:string;
   appearance():Promise<AppearancePreferences>;

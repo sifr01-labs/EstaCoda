@@ -15,7 +15,7 @@ async function live(page: Page) {
     const snapshot=()=>({status:'ready',profile:{id:profile,label:profile,configuration:'ready'},runtime:'ready',work:{items:[work('listed')],nextCursor:'next'},inbox:{items:[{id:'attention',profileId:profile,workId:'old',kind:'approval',title:'Old request',summary:'Review older Work',createdAt:0,approval:null}],nextCursor:null}});
     const historyPending:Array<()=>void>=[];
     const control={delay:false,fail:false,delayHistory:false,total:300,releaseHistory:()=>historyPending.splice(0).forEach(done=>done()),refresh:()=>{revision++;listener(snapshot());},flush:()=>pending.splice(0).forEach(done=>done()),reads};
-    const api={platform:'darwin',onSnapshot:(fn:typeof listener)=>{listener=fn;fn(snapshot());return()=>{};},
+    const api={work:{search:async(query:string)=>({items:query.toLowerCase().includes('older')?[work('old')]:[],nextCursor:null}),pins:async()=>[],pin:async(id:string,pinned:boolean)=>pinned?[work(id)]:[]},platform:'darwin',onSnapshot:(fn:typeof listener)=>{listener=fn;fn(snapshot());return()=>{};},
       getWork:async(id:string)=>{const selected=work(id);if(control.delay)await new Promise<void>(resolve=>pending.push(resolve));if(control.fail)throw Error('Unavailable');return selected;},
       activity:async(_id:string,cursor?:string)=>{reads.push(cursor??'first');const [version,offset]=cursor?cursor.split(':').map(Number):[revision,0];if(version!==revision)throw Error('Stale cursor');if(control.delayHistory&&cursor)await new Promise<void>(resolve=>historyPending.push(resolve));return{items:Array.from({length:100},(_,i)=>({id:'message-'+(offset+i),kind:'message',role:'agent',text:'History '+(offset+i)})),nextCursor:offset<control.total-100?version+':'+(offset+100):null};},
       profiles:async()=>['default','other'].map(id=>({id,label:id})),switchProfile:async(id:string)=>{profile=id;listener(snapshot());},
@@ -138,4 +138,18 @@ test('live Work navigation lists canonical items and routes back to detail',asyn
  await page.getByLabel('Filter Work').selectOption('session');
  await page.locator('.ec-searchresult').filter({hasText:'Listed Work'}).click();
  await expect(page.getByRole('heading',{name:'Listed Work'})).toBeVisible();
+});
+
+
+test('live search finds off-page Work and a pin navigates to the canonical detail',async({page})=>{
+ await live(page);
+ await page.getByRole('button',{name:'Search chats',exact:true}).click();
+ await page.getByRole('searchbox',{name:'Search chats'}).fill('Older');
+ await page.locator('.ec-searchresult').filter({hasText:'Older Work'}).click();
+ await expect(page.getByRole('heading',{name:'Older Work'})).toBeVisible();
+ await page.getByRole('button',{name:'Pin Work',exact:true}).click();
+ await expect(page.getByRole('region',{name:'Pinned Work'}).getByText('Older Work')).toBeVisible();
+ await page.getByRole('button',{name:'Settings',exact:true}).click();
+ await page.getByRole('region',{name:'Pinned Work'}).getByText('Older Work').click();
+ await expect(page.getByRole('heading',{name:'Older Work'})).toBeVisible();
 });

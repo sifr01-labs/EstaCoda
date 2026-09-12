@@ -99,7 +99,7 @@ const contracts: { [M in keyof MethodContracts]: { params: Check; result: Check 
   "control.subscribe": { params: shape({ after: isControlCursor, events: unique(choice(CONTROL_EVENTS), 64, 1) }), result: subscribeResult },
   "control.unsubscribe": { params: shape({ subscriptionId: id }), result: shape({ removed: boolean }) },
   "control.cancelRequest": { params: shape({ requestId: id }), result: shape({ cancellationRequested: boolean }) },
-  "work.list": { params: shape(pageParams, optionalPage), result: page(work) },
+  "work.list": { params: shape(pageParams, {...optionalPage, query:text(200)}), result: page(work) },
   "work.get": { params: shape({ workId: id }), result: work },
   "work.activity": { params: shape({ ...pageParams, workId: id }, optionalPage), result: page(activity) },
   "inbox.list": { params: shape(pageParams, optionalPage), result: page(inbox) },

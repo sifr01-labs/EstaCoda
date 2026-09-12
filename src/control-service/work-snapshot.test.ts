@@ -90,3 +90,13 @@ it('binds schedule runs through owned Sessions even when another profile has a c
     expect(state.inbox).toContainEqual(expect.objectContaining({ kind: 'failure', workId: 'schedule:shared-job-handle' }));
   } finally { db.close(); await rm(homeDir, { recursive: true, force: true }); }
 });
+
+it('searches canonical Work beyond the first page and fences cursors to the query',()=>{
+ const work=Array.from({length:120},(_,i)=>({id:'s'+i,canonicalId:'s'+i,profileId:'p',kind:'session' as const,title:i===119?'بحث Billing':'Other',status:'completed' as const,updatedAt:0,target:null}));
+ const snapshot=new WorkSnapshot({work,activity:{}});
+ expect(snapshot.search({limit:10,query:'billing'}).items.map(item=>item.id)).toEqual(['s119']);
+ expect(snapshot.search({limit:10,query:'بحث'}).items.map(item=>item.id)).toEqual(['s119']);
+ const page=snapshot.search({limit:10,query:'Other'});
+ expect(()=>snapshot.search({limit:10,query:'Billing',cursor:page.nextCursor!})).toThrow();
+ expect(snapshot.search({limit:10,query:'Other',cursor:page.nextCursor!}).items[0]?.id).toBe('s10');
+});

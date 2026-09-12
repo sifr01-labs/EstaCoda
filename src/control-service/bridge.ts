@@ -79,7 +79,7 @@ export class DesktopBridge {
       'work.list': (request) => {
         if (request.method !== 'work.list') throw new ControlProtocolError('-32601');
         const snapshot = this.workSnapshot();
-        return { result: snapshot.page('work', snapshot.state.work, request.params) };
+        return { result: snapshot.search(request.params) };
       },
       'work.get': (request) => {
         if (request.method !== 'work.get') throw new ControlProtocolError('-32601');

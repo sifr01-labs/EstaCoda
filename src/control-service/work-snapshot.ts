@@ -67,6 +67,11 @@ export async function captureWork(input: { homeDir: string; profileId: string; v
 export class WorkSnapshot {
   readonly #cursorKey = randomBytes(32);
   constructor(readonly state: WorkState, readonly input?: { homeDir: string; profileId: string }) {}
+  search(params: PageParams & {query?:string}): Page<WorkProjection> {
+    const query=(params.query??'').trim().toLocaleLowerCase('en-US');
+    const items=query?this.state.work.filter(work=>[work.title,work.canonicalId,work.target?.label??''].some(value=>value.toLocaleLowerCase('en-US').includes(query))):this.state.work;
+    return this.page('work:'+query,items,params);
+  }
   get(id: string): WorkProjection {
     const work = this.state.work.find((work) => work.id === id);
     if (!work) throw new ControlProtocolError('-32003');
