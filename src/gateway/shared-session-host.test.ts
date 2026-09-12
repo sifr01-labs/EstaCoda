@@ -59,3 +59,14 @@ it('defers model changes until a shared turn disposes without blocking cancellat
  const change=host.handle({...base,method:'model',selection:null});await Promise.resolve();expect(order).toEqual([]);
  await host.handle({...base,method:'cancel'});await turn;await change;expect(order).toEqual(['disposed','changed']);await host.close();
 });
+
+it('exposes a bounded ephemeral assistant preview, clears it at tool boundaries, and drops it after settlement',async()=>{
+ let input:any;let release!:()=>void;let started!:()=>void;const ready=new Promise<void>(resolve=>started=resolve);
+ const runtime={sessionId:'s',dispose:async()=>{},handle:async(value:any)=>{input=value;started();await new Promise<void>(resolve=>release=resolve);return{text:'settled'};}} as unknown as Runtime;
+ const host=new SharedSessionHost({profileId:'p',sessionDb:{getSessionForProfile:async()=>({executionTarget:{targetId:'t'}})} as unknown as SessionDB,acquire:async()=>runtime,channelApproval:vi.fn()});
+ const base={sessionId:'s',targetId:'t',operationId:'turn'};const turn=host.handle({...base,method:'send',text:'Work'});await ready;
+ input.onDelta('x'.repeat(17000));const first=await host.handle({...base,method:'inspect'}) as any;expect(first.preview.text).toHaveLength(16384);expect(first.preview.truncated).toBe(true);
+ await input.onEvent({kind:'provider-tool-call'});expect(await host.handle({...base,method:'inspect'})).toMatchObject({preview:{text:'',truncated:false}});
+ input.onDelta('After tool');expect(await host.handle({...base,method:'inspect'})).toMatchObject({preview:{text:'After tool'}});
+ release();await turn;expect(await host.handle({...base,method:'inspect'})).toMatchObject({active:false,preview:undefined});await host.close();
+});

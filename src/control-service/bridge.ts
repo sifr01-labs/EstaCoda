@@ -1,3 +1,4 @@
+import {liveWork} from './work-live.js';
 import {availableWorkTargets} from './work-targets.js';
 import {refreshDesktopCatalog} from './catalog-refresh.js';
 import {CodexAuthorization} from './codex-authorization.js';
@@ -77,6 +78,7 @@ export class DesktopBridge {
         const snapshot = this.workSnapshot();
         return { result: snapshot.page('inbox', snapshot.state.inbox ?? [], request.params) };
       },
+      'work.live':async(request,signal)=>{if(request.method!=='work.live')throw new ControlProtocolError('-32601');return{result:await liveWork(this.options,this.workSnapshot().get(request.params.workId),signal)};},
       'work.targets':async(_request,signal)=>({result:await availableWorkTargets(this.options,signal)}),
       'work.list': (request) => {
         if (request.method !== 'work.list') throw new ControlProtocolError('-32601');

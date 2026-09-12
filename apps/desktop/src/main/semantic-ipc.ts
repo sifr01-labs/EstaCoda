@@ -14,7 +14,7 @@ export function rendererSnapshot(state:ConnectionState):DesktopSnapshot {
 }
 export function validateSemanticPayload(method:string,payload:unknown):void {
   if(!isRecord(payload))throw new Error('Desktop request rejected.');
-  if(method==='workInspect'){if(!exactKeys(payload,['workId'])||!isControlId(payload.workId))throw new Error('Invalid Work');return;}
+  if((method==='workInspect'||method==='workLive')){if(!exactKeys(payload,['workId'])||!isControlId(payload.workId))throw new Error('Invalid Work');return;}
   if(method==='workAttach'||method==='workSubmit'){
     if(!exactKeys(payload,method==='workAttach'?['draftId','target']:['draftId','target','text','attachmentIds'],method==='workAttach'?[]:['workId','selection'])||!isControlId(payload.draftId)||!isRecord(payload.target)||!exactKeys(payload.target,['targetId','targetGeneration'])||!isControlId(payload.target.targetId)||!Number.isSafeInteger(payload.target.targetGeneration)||Number(payload.target.targetGeneration)<1)throw new Error('Invalid Work input');
     if(method==='workSubmit'){
@@ -36,7 +36,7 @@ export function validateSemanticPayload(method:string,payload:unknown):void {
 export function installSemanticIpc(window:BrowserWindow,documentUrl:string,connection:DesktopConnection,profiles:Profiles,appearance:AppearanceSettings,models?:DesktopModelSetup,pins?:WorkPins,workControls?:DesktopWorkControls):()=>void {
   const authority=new WindowAuthority(window,documentUrl);
   const contents=window.webContents;
-  const methods=['workTargets','workAttach','workSubmit','workInspect','workSearch','workPins','workPin','workOverride','setOverride','inspectOverride','setupVerifyReviewed','modelRoutes','setupConfigured','setupOrder','setupMode','setupOAuthStart','setupOAuthStatus','setupOAuthOpen','setupBegin','setupStage','setupVerify','setupReview','setupApply','setupCancel','setupInspect','modelPage','providerPage','refreshCatalog','reconnect','moreWork','moreInbox','appearance','setAppearance','snapshot','getWork','activity','profiles','switchProfile','minimize','toggleMaximize','close'];
+  const methods=['workLive','workTargets','workAttach','workSubmit','workInspect','workSearch','workPins','workPin','workOverride','setOverride','inspectOverride','setupVerifyReviewed','modelRoutes','setupConfigured','setupOrder','setupMode','setupOAuthStart','setupOAuthStatus','setupOAuthOpen','setupBegin','setupStage','setupVerify','setupReview','setupApply','setupCancel','setupInspect','modelPage','providerPage','refreshCatalog','reconnect','moreWork','moreInbox','appearance','setAppearance','snapshot','getWork','activity','profiles','switchProfile','minimize','toggleMaximize','close'];
   const handlers:string[]=[];
   let connectionGeneration=connection.state.generation;
   const state=(value:ConnectionState)=>{if(value.generation!==connectionGeneration){authority.invalidate();connectionGeneration=value.generation;}if(!window.isDestroyed())contents.send('desktop:state',{generation:authority.generation,snapshot:rendererSnapshot(value)});};
@@ -49,6 +49,7 @@ export function installSemanticIpc(window:BrowserWindow,documentUrl:string,conne
       const payload=envelope.payload as Record<string,unknown>;
       const generation=authority.generation;
       try {
+        if(method==='workLive'){const result=await connection.workRequest('work.live',{workId:payload.workId as string});authority.assertSender(event,generation);return result;}
         if(['workTargets','workAttach','workSubmit','workInspect'].includes(method)){
           if(!workControls)throw new Error('Work unavailable');
           const result=method==='workTargets'?await connection.workRequest('work.targets',{}):method==='workAttach'?await workControls.attach(payload as Parameters<DesktopWorkControls['attach']>[0]):method==='workSubmit'?await workControls.submit(payload as Parameters<DesktopWorkControls['submit']>[0]):await workControls.inspect(payload.workId as string);

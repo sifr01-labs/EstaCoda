@@ -27,7 +27,7 @@ export function useWorkActivity(adapter: DesktopAdapter, work: WorkProjection | 
       if (current === generation.current) setError('Activity could not be refreshed. Reopen Work to retry.');
     }).finally(() => { if (current === generation.current) {busy.current = false; setLoading(false);} });
     return () => { generation.current++; };
-  }, [adapter, work?.id, work?.updatedAt]);
+  }, [adapter, work]);
   const loadMore = async () => {
     if (!work || !activity.nextCursor || busy.current || activity.items.length >= ACTIVITY_LIMIT) return;
     const current = generation.current;

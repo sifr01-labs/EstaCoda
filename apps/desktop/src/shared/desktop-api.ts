@@ -35,6 +35,7 @@ export type DesktopModelsApi={
 };
 export type WorkSubmission={draftId:string;workId?:string;target:import('@estacoda/control-protocol').TargetReference;text:string;attachmentIds:string[];selection?:{providerId:string;modelId:string}|null};
 export type DesktopWorkApi = {
+ live(workId:string):Promise<MethodContracts['work.live']['result']>;
  targets():Promise<MethodContracts['work.targets']['result']>;
  attach(input:Pick<WorkSubmission,'draftId'|'target'>):Promise<{id:string;name:string;size:number;type:string}[]>;
  submit(input:WorkSubmission):Promise<{workId:string;receipt:import('@estacoda/control-protocol').OperationReceipt}>;

@@ -9,7 +9,7 @@ import type { ToolApprovalRequest } from "../contracts/tool.js";
 import { SessionCompressionLock } from "../session/session-compression-lock.js";
 import type { PrivateControlRequest } from "./private-control.js";
 
-type Active = { controller: AbortController; pending?: { durable?: boolean; id: string; request: ToolApprovalRequest; resolve(value: "approved" | "denied"): void }; runtime?: Runtime };
+type Active = { preview?:{turnId:string;text:string;truncated:boolean}; controller: AbortController; pending?: { durable?: boolean; id: string; request: ToolApprovalRequest; resolve(value: "approved" | "denied"): void }; runtime?: Runtime };
 /** Transport detach never aborts hosted execution. Normal inputs serialize by
  * Session; operator controls do not join that queue. */
 export class SharedSessionHost {
@@ -31,6 +31,7 @@ export class SharedSessionHost {
   async validate(request: PrivateControlRequest, allowEnded = false): Promise<void> {
     if (this.#closed) throw new Error("Shared host is draining.");
     const session = await this.options.sessionDb.getSessionForProfile(request.sessionId, this.options.profileId);
+    if(request.method==='inspect'&&request.targetGeneration!==undefined&&session?.executionTarget?.targetGeneration!==request.targetGeneration)throw new Error('Shared Session target generation does not match.');
     const durableApproval = request.method === 'approval' && request.targetGeneration !== undefined && !allowEnded
       ? await this.options.approvalQueue?.getApproval(request.approvalId!, { profileId: this.options.profileId, sessionId: request.sessionId }) : undefined;
     if (request.method === 'approval' && request.targetGeneration !== undefined && !allowEnded &&
@@ -63,7 +64,7 @@ export class SharedSessionHost {
     const generation = this.#cancelGeneration.get(request.sessionId) ?? 0;
     await this.validate(request, request.method === "inspect");
     const active = this.#active.get(request.sessionId);
-    if (request.method === "inspect") return { active: Boolean(active), approval: active?.pending ? {
+    if (request.method === "inspect") return { active: Boolean(active), preview:active?.preview?{...active.preview,text:redactSensitiveText(active.preview.text)}:undefined, approval: active?.pending ? {
       id: active.pending.id, tool: active.pending.request.tool.name,
       riskClass: active.pending.request.riskClass, targetSummary: active.pending.request.targetSummary,
     } : undefined };
@@ -115,11 +116,13 @@ export class SharedSessionHost {
     const turn = this.#serial.runExclusive(request.sessionId, async () => {
       await this.validate(request);
       if (generation !== (this.#cancelGeneration.get(request.sessionId) ?? 0)) throw new Error("Queued input was cancelled.");
-      const state: Active = { controller: new AbortController() };
+      const state: Active = { controller: new AbortController(),preview:{turnId:request.operationId,text:'',truncated:false} };
       this.#active.set(request.sessionId, state);
       try {
         state.runtime = await this.options.acquire(request.sessionId);
         const response = await state.runtime.handle({ text: request.text!, channel: "cli", signal: state.controller.signal,
+          onDelta: text=>{if(!state.preview)return;const combined=state.preview.text+text;state.preview.truncated ||= combined.length>16384;state.preview.text=combined.slice(0,16384);},
+          onEvent: event=>{if(event.kind==='provider-tool-call'&&state.preview){state.preview.text='';state.preview.truncated=false;}},
           onApprovalRequest: async (approval) => {
             if (state.controller.signal.aborted) return 'denied';
             let id: string = randomUUID(); let durable = false;
