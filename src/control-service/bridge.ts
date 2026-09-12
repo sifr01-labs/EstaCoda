@@ -1,3 +1,4 @@
+import {TelegramSetup} from './telegram-setup.js';
 import {telegramConnection} from './connections.js';
 import {workUsage} from './work-usage.js';
 import {workCounts} from './work-counts.js';
@@ -30,6 +31,7 @@ export class DesktopBridge {
   readonly server: StdioControlServer;
   readonly candidates: CredentialCandidates;
   readonly modelSetup: ModelSetup;
+  readonly telegramSetup: TelegramSetup;
   readonly verifier: CandidateVerifier;
   readonly subscriptions: ControlSubscriptions;
   #catalog: ReturnType<typeof captureModelCatalog> | undefined;
@@ -46,6 +48,11 @@ export class DesktopBridge {
     this.server = new StdioControlServer({ ...options, events: ['work.changed', 'activity.appended', 'attention.changed', 'control.ready', 'service.warning', 'service.shutdown'], handlers: {
       ...Object.fromEntries(['tasks.create','sessions.setModel', 'tasks.setModel', 'approvals.resolve', 'tasks.pause', 'tasks.resume', 'tasks.cancel', 'tasks.retry', 'tasks.guide', 'sessions.start', 'sessions.resume', 'sessions.send', 'sessions.cancelTurn', 'operations.inspect'].map((method) =>
         [method, async (request: SessionMutationRequest, signal: AbortSignal) => ({ result: await sessionControl(this.options, request, signal) })])),
+      'telegram.settings':async()=>({result:await this.telegramSetup.settings()}),
+      'telegram.review':async request=>{if(request.method!=='telegram.review')throw new ControlProtocolError('-32601');return{result:await this.telegramSetup.review(request.params)};},
+      'telegram.apply':async(request,signal)=>{if(request.method!=='telegram.apply')throw new ControlProtocolError('-32601');return{result:await this.telegramSetup.apply(request.params,signal)};},
+      'telegram.cancel':request=>{if(request.method!=='telegram.cancel')throw new ControlProtocolError('-32601');return{result:this.telegramSetup.cancel(request.params)};},
+      'telegram.inspectApply':async request=>{if(request.method!=='telegram.inspectApply')throw new ControlProtocolError('-32601');return{result:await this.telegramSetup.inspect(request.params.operationId)};},
       'connections.list':async(request,signal)=>{if(request.method!=='connections.list')throw new ControlProtocolError('-32601');if(request.params.cursor)throw new ControlProtocolError('-32007');return{result:{items:[await telegramConnection(this.options,signal)],nextCursor:null}};},
       'connections.get':async(request,signal)=>{if(request.method!=='connections.get'||request.params.connectionId!=='telegram')throw new ControlProtocolError('-32003');return{result:await telegramConnection(this.options,signal)};},
       'models.verifyDraft':async(request,signal)=>{if(request.method!=='models.verifyDraft')throw new ControlProtocolError('-32601');return {result:await this.modelSetup.verifyDraft(request.params,signal,this.verifier)};},
@@ -116,6 +123,8 @@ export class DesktopBridge {
     this.modelSetup = new ModelSetup(this.options,this.candidates,async()=>{this.#catalog=undefined;this.subscriptions.publish({type:'service.warning',payload:{reason:'configuration_changed'}});
       try {await notifyPrivateConfigurationChanged({directory:resolveProfileStateHome(this.options).gatewayStatePath,profileId:this.options.profileId,version:this.options.version,signal:AbortSignal.timeout(2000)});}catch{/* An absent owner will load the committed configuration on its next startup. */}
     });
+    this.telegramSetup=new TelegramSetup(this.options,this.candidates,()=>{this.subscriptions.publish({type:'service.warning',payload:{reason:'configuration_changed'}});});
+    this.server.onDispose(()=>this.telegramSetup.dispose());
     this.verifier = new CandidateVerifier(this.candidates);
     this.oauth=new CodexAuthorization(this.candidates);
     this.server.onDispose(() => {this.oauth.dispose();this.modelSetup.dispose();this.verifier.dispose();this.candidates.dispose();});

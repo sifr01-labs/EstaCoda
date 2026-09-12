@@ -863,6 +863,9 @@ export type TelegramSetupInput = {
   pollTimeoutSeconds?: number;
   secureInputMode?: TelegramSecureInputMode;
   enabled?: boolean;
+  streaming?: TelegramStreamingConfig;
+  busyPolicy?: ChannelBusyPolicy;
+  clearPairing?: boolean;
 };
 
 export type DiscordSetupInput = {
@@ -3563,6 +3566,10 @@ export async function setupTelegramConfig(options: {
   if (options.input.secureInputMode !== undefined) {
     telegramPatch.secureInputMode = options.input.secureInputMode;
   }
+
+  if(options.input.streaming!==undefined)telegramPatch.streaming=options.input.streaming;
+  if(options.input.busyPolicy!==undefined)telegramPatch.busyPolicy=options.input.busyPolicy;
+  if(options.input.clearPairing)delete telegramPatch.pairing;
 
   const config = patchConfig(existing.config, {
     channels: {

@@ -1,3 +1,4 @@
+import type {TelegramSettings,TelegramDraft,TelegramReview} from './telegram.js';
 import type {ConfiguredRouteReview} from './model-setup.js';
 import type {OAuthStatus,OAuthBinding} from './model-setup.js';
 import type {AuxiliaryList,AuxiliarySlot,AuxiliaryModeParams} from './model-setup.js';
@@ -22,6 +23,11 @@ export type SubscribeResult =
 export type WorkUsageProjection={scope:'session'|'task'|'attempt';reportedTokens:number|null;providerCalls:number;cost:{amount:number;currency:'USD'}|null;usageComplete:boolean;pricingComplete:boolean;context:{usedTokens:number;totalTokens:number;provider:string;model:string}|null;truncated:boolean;provisional:boolean};
 export type RuntimeCounts={runningSessions:number;runningTasks:number;queuedTasks:number;approvals:number;attention:number;scheduled:number|null;asOf:number};
 export type MethodContracts = {
+  "telegram.settings":{params:Record<string,never>;result:TelegramSettings};
+  "telegram.review":{params:TelegramReview;result:TelegramDraft};
+  "telegram.apply":{params:ModelDraftBinding;result:ModelApplyReceipt};
+  "telegram.cancel":{params:ModelDraftBinding;result:{cancelled:boolean}};
+  "telegram.inspectApply":{params:{operationId?:string};result:ModelApplyReceipt};
   "work.usage":{params:{workId:string};result:WorkUsageProjection};
   "work.counts":{params:Record<string,never>;result:RuntimeCounts};
   "tasks.create":{params:SessionControl&{taskId:string;objective:string;limits:{maxProviderCalls:number;maxTotalTokens:number;maxWallClockMs:number};selection:{providerId:string;modelId:string}|null};result:OperationReceipt};

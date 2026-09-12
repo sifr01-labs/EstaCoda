@@ -30,6 +30,11 @@ const activities: ActivityProjection[] = [
   { ...activityBase, kind: "status", status: "needs_attention", reason: "Waiting for approval" },
 ];
 const cases = {
+ "telegram.settings":{params:{},result:{enabled:false,authorization:'allowlist',allowedUserIds:[],allowedChatIds:[],secureInputMode:'protected-handoff',directDmAcknowledged:false,streaming:true,pollTimeoutSeconds:25}},
+ "telegram.review":{params:{windowId:'w',generation:1,settings:{enabled:true,authorization:'allowlist',allowedUserIds:['123'],allowedChatIds:[],secureInputMode:'protected-handoff',directDmAcknowledged:false,streaming:true,pollTimeoutSeconds:25}},result:{draftId:'draft',expiresInMs:300000,credentialState:'existing',settings:{enabled:true,authorization:'allowlist',allowedUserIds:['123'],allowedChatIds:[],secureInputMode:'protected-handoff',directDmAcknowledged:false,streaming:true,pollTimeoutSeconds:25}}},
+ "telegram.apply":{params:{draftId:'draft',windowId:'w',generation:1},result:{operationId:'draft',state:'applied',verification:'configured'}},
+ "telegram.cancel":{params:{draftId:'draft',windowId:'w',generation:1},result:{cancelled:true}},
+ "telegram.inspectApply":{params:{},result:{operationId:'none',state:'unknown',verification:'not_tested'}},
  "models.verifyDraft":{params:{draftId:'draft',windowId:'w',generation:1,spendApproved:true,allowPrivateEndpoint:false},result:{state:'passed',reason:'none',streaming:true,tools:true,latencyMs:1,inputTokens:1,outputTokens:1,estimatedCost:null}},
  "models.reviewConfigured": {params:{windowId:'w',generation:1,providerId:'local',modelId:'m',role:'primary'},result:{draftId:'draft',role:'primary',credentialState:'not_required',expiresInMs:300000,route:{providerId:'local',modelId:'m',endpoint:'http://localhost:11434/v1',authMethod:'none',apiMode:'custom_openai_compatible',allowPrivateEndpoint:true}}},
   "models.validateRoute": {params:{route:{providerId:"local",modelId:"m",endpoint:"http://localhost:11434/v1",authMethod:"none",apiMode:"openai_chat_completions",allowPrivateEndpoint:true}},result:{valid:true}},

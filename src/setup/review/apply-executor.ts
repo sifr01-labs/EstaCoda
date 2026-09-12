@@ -1,3 +1,4 @@
+import {createTelegramPairingCode} from '../../config/runtime-config.js';
 import { parseExecutionPolicy } from "../../execution/docker-policy.js";
 import { provisionDockerImage } from "../../execution/docker-client.js";
 import { setupExecutionConfig } from "../../config/runtime-config.js";
@@ -748,14 +749,18 @@ async function applyTelegramCapability(
   const allowedUserIds = arrayValue(operation.review.values.allowedUserIds);
   const allowedChatIds = arrayValue(operation.review.values.allowedChatIds);
   const secureInputMode = stringValue(operation.review.values.secureInputMode);
-  if (allowedUserIds.length === 0 && allowedChatIds.length === 0) {
+  const desktop=operation.review.values.desktop===true;
+  const enabled=desktop?operation.review.values.enabled===true:true;
+  const pairing=desktop&&operation.review.values.authorization==='pairing';
+  if (enabled&&!pairing&&allowedUserIds.length === 0 && allowedChatIds.length === 0) {
     throw new Error("Telegram apply requires allowed user or chat identities.");
   }
   const target = configApplyTarget(operation, options);
   await setupTelegramConfig({
     ...target,
     input: {
-      enabled: true,
+      enabled,
+      ...(desktop?{streaming:{enabled:operation.review.values.streaming===true},busyPolicy:'queue' as const,pollTimeoutSeconds:Number(operation.review.values.pollTimeoutSeconds),clearPairing:true}:{}),
       botTokenEnv,
       allowedUserIds,
       allowedChatIds,
@@ -764,6 +769,7 @@ async function applyTelegramCapability(
         : undefined,
     },
   });
+  if(enabled&&pairing)await createTelegramPairingCode({...target,input:{ttlMinutes:10}});
 }
 
 async function applyDiscordCapability(

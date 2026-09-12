@@ -53,6 +53,7 @@ const model: Check = (v) => modelShape(v) && isRecord(v) && (!v.runnable ||
   ((v.credentialState === "present" || v.credentialState === "not_required") &&
     (!isRecord(v.catalog) || (!v.catalog.catalogOnly && v.catalog.lifecycle !== 'retired'))));
 const provider = shape({ id, label: text(240, 1), authMethods: unique(choice(["api_key", "oauth", "none"]), 3, 1), state: choice(["ready", "unconfigured", "repair_required", "unknown"]) }, {health:choice(ROUTE_HEALTH_STATES),metadata:shape({configurable:boolean,runnable:boolean,catalogOnly:boolean,apiMode:text(80,1),defaultEndpoint:nullable(text(2048,1))})});
+const telegramSettings=shape({enabled:boolean,authorization:choice(['allowlist','pairing']),allowedUserIds:unique(text(20,1),1000),allowedChatIds:unique(text(21,1),1000),secureInputMode:choice(['protected-handoff','direct-dm','disabled']),directDmAcknowledged:boolean,streaming:boolean,pollTimeoutSeconds:integer(1,50)});
 const connection = shape({ id, profileId: id, channel: choice(["telegram", "discord", "email", "whatsapp"]),
   configurationState: choice(["configured", "unconfigured", "repair_required"]), runtimeState: choice(["running", "stopped", "disconnected", "unknown"]),
   authorizationState: choice(["denied", "configured", "pairing_required", "unknown"]), summary: text(2_048) }, {
@@ -120,6 +121,11 @@ const contracts: { [M in keyof MethodContracts]: { params: Check; result: Check 
   "models.cancelDraft": {params:modelDraftBinding,result:shape({cancelled:boolean})},
   "models.inspectApply": {params:shape({},{operationId:id}),result:modelApplyReceipt},
   "models.verifyCandidate": {params:shape({windowId:id,generation:integer(1),spendApproved:v=>v===true,route:candidateRoute},{candidateId:id}),result:candidateVerification},
+  "telegram.settings":{params:shape({}),result:telegramSettings},
+  "telegram.review":{params:shape({windowId:id,generation:integer(1),settings:telegramSettings},{candidateId:id}),result:shape({draftId:id,expiresInMs:integer(1),settings:telegramSettings,credentialState:choice(['staged','existing','missing'])})},
+  "telegram.apply":{params:shape({draftId:id,windowId:id,generation:integer(1)}),result:shape({operationId:id,state:choice(['applied','uncertain','unknown']),verification:choice(['configured','repair_required','not_tested'])})},
+  "telegram.cancel":{params:shape({draftId:id,windowId:id,generation:integer(1)}),result:shape({cancelled:boolean})},
+  "telegram.inspectApply":{params:shape({},{operationId:id}),result:shape({operationId:id,state:choice(['applied','uncertain','unknown']),verification:choice(['configured','repair_required','not_tested'])})},
   "models.verifyDraft": {params:shape({draftId:id,windowId:id,generation:integer(1),spendApproved:v=>v===true,allowPrivateEndpoint:boolean}),result:candidateVerification},
   "models.list": { params: shape(pageParams, optionalPage), result: page(model) },
   "providers.list": { params: shape(pageParams, optionalPage), result: page(provider) },
