@@ -1,0 +1,35 @@
+import {mkdtemp, mkdir, rm, writeFile} from 'node:fs/promises';
+import {realpathSync} from 'node:fs';
+import {execFileSync} from 'node:child_process';
+import {join} from 'node:path';
+import {beforeEach,afterEach,it,expect} from 'vitest';
+import {ManagedWorktrees} from './managed-worktrees.js';
+import {targetBinding} from './execution-target.js';
+import {WorkspaceTrustStore} from '../security/workspace-trust-store.js';
+let homeDir:string,root:string,store:ManagedWorktrees;
+const git=(args:string[])=>execFileSync('git',['-C',root,...args],{encoding:'utf8',env:{PATH:process.env.PATH,HOME:'/nonexistent',GIT_CONFIG_NOSYSTEM:'1',GIT_CONFIG_GLOBAL:'/dev/null'}}).trim();
+beforeEach(async()=>{homeDir=realpathSync(await mkdtemp('/tmp/ec-worktree-'));root=join(homeDir,'repo');await mkdir(root);git(['init','-q']);git(['-c','user.name=Test','-c','user.email=test@example.invalid','commit','--allow-empty','-qm','Initial']);store=new ManagedWorktrees({homeDir,profileId:'p'});});
+afterEach(async()=>{store.close();await rm(homeDir,{recursive:true,force:true});});
+it('requires explicit source and destination trust, creates once and reuses the core binding',async()=>{
+ const source=await store.acquireLocal(root);
+ await expect(store.review(targetBinding(source))).rejects.toThrow('Trust');
+ const trust=new WorkspaceTrustStore({homeDir});await trust.grant(root);
+ const review=await store.review(targetBinding(source));
+ await expect(store.create(review,false)).rejects.toThrow('Explicit trust');
+ const target=await store.create(review,true);
+ expect(target.source.identity).toEqual(source.workspace);
+ expect(target.workspace.canonicalPath).not.toBe(root);
+ expect(await trust.isTrusted(target.workspace.canonicalPath)).toBe(true);
+ expect(await store.acquireLocal(target.workspace.canonicalPath)).toEqual(target);
+ expect(store.inspectCreation(review.operationId)).toMatchObject({state:'created',targetId:target.id});
+ await expect(store.create(review,true)).rejects.toThrow('already attempted');
+});
+it('freezes HEAD at review and disables checkout hooks and smudge filters',async()=>{
+ await writeFile(join(root,'.gitattributes'),'file filter=bad\n');await writeFile(join(root,'file'),'original\n');git(['add','.']);git(['-c','user.name=Test','-c','user.email=test@example.invalid','commit','-qm','Files']);
+ const marker=join(homeDir,'executed');git(['config','filter.bad.smudge',`touch ${marker}`]);git(['config','filter.bad.required','true']);
+ await writeFile(join(root,'.git/hooks/post-checkout'),`#!/bin/sh\ntouch ${marker}\n`,{mode:0o700});
+ await new WorkspaceTrustStore({homeDir}).grant(root);const source=await store.acquireLocal(root);
+ const review=await store.review(targetBinding(source));const target=await store.create(review,true);
+ const {readFile,stat}=await import('node:fs/promises');expect(await readFile(join(target.workspace.canonicalPath,'file'),'utf8')).toBe('original\n');await expect(stat(marker)).rejects.toMatchObject({code:'ENOENT'});
+ git(['config','filter.bad.required','false']);const stale=await store.review(targetBinding(source));git(['-c','user.name=Test','-c','user.email=test@example.invalid','commit','--allow-empty','-qm','Next']);await expect(store.create(stale,true)).rejects.toThrow('changed after review');
+});
