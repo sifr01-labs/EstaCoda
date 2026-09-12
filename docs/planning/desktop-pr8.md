@@ -106,3 +106,13 @@ supports save inspection after restart without mistaking a provider save for Tel
 Cancellation after the durable Apply boundary directs the user to inspect the outcome.
 
 Validation: Desktop foundation/unit suite, Telegram transaction tests and core type check.
+
+## Step 10 — Gateway status and controls
+
+Added explicit review/confirmation for install-and-start, start, stop and restart, with
+redacted diagnostics and operation inspection. Main creates and persists the latest
+profile-scoped operation reference before dispatch. An uncertain operation cannot be
+silently repeated under a new identity for the same action. The UI explains that gateway
+lifecycle affects shared Work and is independent of the Desktop window.
+
+Validation: Desktop foundation/boundary check and desktop unit suite.
