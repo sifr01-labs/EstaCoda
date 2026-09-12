@@ -1,10 +1,15 @@
+import {join} from 'node:path';
+import {writeFile,rename} from 'node:fs/promises';
+import {resolveProfileStateHome} from '../config/profile-home.js';
+import {withProfileWriteLock} from '../config/profile-write-lock.js';
+import {readProfileFile} from './profile-attention.js';
 import {TelegramVerifier,telegramScope} from './telegram-verification.js';
 export {telegramScope} from './telegram-verification.js';
 import {randomUUID} from 'node:crypto';
 import {loadRuntimeConfig} from '../config/runtime-config.js';
 import {readEnvSecretValue} from '../config/env-secret-store.js';
 import {telegramPlan} from '../setup/review/telegram-plan.js';
-import {applyProfilePlan,captureProfileApplySnapshot,inspectProfileApply,latestProfileApplyOperation,type ProfileApplySnapshot} from '../setup/review/profile-apply.js';
+import {applyProfilePlan,captureProfileApplySnapshot,inspectProfileApply,type ProfileApplySnapshot} from '../setup/review/profile-apply.js';
 import {ControlProtocolError,validateTelegramSettings,type TelegramSettings,type TelegramReview,type TelegramDraft,type ModelDraftBinding,type ModelApplyReceipt} from '../contracts/desktop-control/index.js';
 import {CredentialCandidates} from './credential-candidates.js';
 type Draft={params:TelegramReview;projection:TelegramDraft;snapshot:ProfileApplySnapshot;env:string;abort:AbortController;timer:ReturnType<typeof setTimeout>;applying:boolean;consumed:boolean};
@@ -40,11 +45,12 @@ export class TelegramSetup {
   const combined=AbortSignal.any([signal,draft.abort.signal,this.candidates.windowSignal(binding.windowId,binding.generation),...(candidate?[this.candidates.signal(candidate,scope)]:[])]);
   combined.throwIfAborted();if(candidate&&draft.params.settings.enabled&&!this.verifier.verified({windowId:binding.windowId,generation:binding.generation,candidateId:candidate}))throw new ControlProtocolError('-32602');const token=candidate?this.candidates.read(candidate,scope):undefined;draft.applying=true;
   try{
+   const root=resolveProfileStateHome(this.input).profileRoot;await withProfileWriteLock(root,async()=>{const path=join(root,'.telegram-apply-reference.json'),temp=path+'.'+randomUUID();await writeFile(temp,JSON.stringify({operationId:binding.draftId}),{flag:'wx',mode:0o600});await rename(temp,path);});
    const receipt=await applyProfilePlan({...this.input,operationId:binding.draftId,snapshot:draft.snapshot,plan:telegramPlan(draft.params.settings,draft.env),secrets:token?[{envVarName:draft.env,value:token}]:[],signal:combined});
    draft.consumed=true;draft.snapshot={files:{'.env':null,'auth.json':null,'config.json':null}};await this.changed();return{...receipt,verification:receipt.state==='applied'?await this.verifySaved():'not_tested'};
   }finally{draft.applying=false;clearTimeout(draft.timer);if(!draft.consumed)this.#drafts.delete(binding.draftId);if(candidate)try{this.candidates.discard(candidate,scope);}catch{}}
  }
- async inspect(operationId?:string):Promise<ModelApplyReceipt>{const receipt=await inspectProfileApply(this.input,operationId??await latestProfileApplyOperation(this.input)??'none');return{...receipt,verification:receipt.state==='applied'?await this.verifySaved():'not_tested'};}
+ async inspect(operationId?:string):Promise<ModelApplyReceipt>{const root=resolveProfileStateHome(this.input).profileRoot;const saved=JSON.parse(await readProfileFile(root,join(root,'.telegram-apply-reference.json'))??'null');const reference=operationId??saved?.operationId??'none';if(typeof reference!=='string')throw new ControlProtocolError('-32003');const receipt=await inspectProfileApply(this.input,reference);return{...receipt,verification:receipt.state==='applied'?await this.verifySaved():'not_tested'};}
  private async verifySaved():Promise<ModelApplyReceipt['verification']>{
   try{const settings=await this.settings();validateTelegramSettings({...settings,directDmAcknowledged:true});const snapshot=await captureProfileApplySnapshot(this.input),config=JSON.parse(snapshot.files['config.json']??'{}');return !settings.enabled||Boolean(readEnvSecretValue(snapshot.files['.env']??'',config.channels?.telegram?.botTokenEnv)?.trim())?'configured':'repair_required';}catch{return 'repair_required';}
  }

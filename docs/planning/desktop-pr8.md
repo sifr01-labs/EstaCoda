@@ -96,3 +96,13 @@ window invalidation and cancellation dispose staged credentials. Modal keyboard 
 is contained and restored to its invoking control.
 
 Validation: Desktop foundation/boundary check and desktop unit suite.
+
+## Step 9 — Review, Apply and recovery
+
+Connected the redacted review to the shared transactional profile Apply path. Enabling a
+new token requires successful candidate verification. Applied configuration, gateway state
+and bot verification are labelled separately. A profile-local Telegram operation reference
+supports save inspection after restart without mistaking a provider save for Telegram.
+Cancellation after the durable Apply boundary directs the user to inspect the outcome.
+
+Validation: Desktop foundation/unit suite, Telegram transaction tests and core type check.
