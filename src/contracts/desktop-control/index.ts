@@ -5,3 +5,4 @@ export * from "./methods.js";
 export * from "./validation.js";
 export * from "./model-setup.js";
 export * from './telegram.js';
+export * from './targets.js';

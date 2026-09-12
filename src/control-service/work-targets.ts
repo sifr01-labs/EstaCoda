@@ -23,3 +23,17 @@ export async function availableWorkTargets(input:{homeDir:string;profileId:strin
   return{items,truncated:records.length>100};
  }finally{store.close();}
 }
+
+/** Management inspection includes blockers; discovery does not imply readiness. */
+export async function inspectCoreTarget(input:{homeDir:string;profileId:string},reference:import('../contracts/desktop-control/index.js').TargetReference):Promise<import('../contracts/desktop-control/index.js').TargetDetails>{
+ const store=new ExecutionTargetStore({...input,readonly:true});
+ try{
+  const target=store.getTarget(reference.targetId);
+  if(!target||target.generation!==reference.targetGeneration)throw new Error('Target is missing or stale.');
+  let readiness:import('../contracts/desktop-control/index.js').TargetDetails['readiness']='archived';
+  if(target.status==='available'){
+   try{await store.validate(targetBinding(target),target.workspace.canonicalPath);readiness=await new WorkspaceTrustStore(input).isTrusted(target.workspace.canonicalPath)?'ready':'untrusted';}catch{readiness='unavailable';}
+  }
+  return {...reference,kind:target.kind,label:basename(target.workspace.canonicalPath).slice(0,240)||'Workspace',workingRoot:target.workspace.canonicalPath,sourceRoot:target.source.identity.canonicalPath,status:target.status,readiness,managed:false};
+ }finally{store.close();}
+}
