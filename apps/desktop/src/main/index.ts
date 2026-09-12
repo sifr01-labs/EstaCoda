@@ -1,3 +1,4 @@
+import {translate,type MessageKey} from '../shared/i18n/index.js';
 import {DesktopBrowserControls} from './browser-controls.js';
 import {DesktopTerminalControls} from './terminal-controls.js';
 import {DesktopTargetControls} from './target-controls.js';
@@ -33,13 +34,15 @@ async function openWindow(): Promise<void> {
   const connection = new DesktopConnection(new ServiceProcess(runtimeRoot, app.getPath('home')));
   const credentialRoot=path.join(__dirname,`../renderer/${CREDENTIAL_WINDOW_VITE_NAME}`);
   const credentialUrl = CREDENTIAL_WINDOW_VITE_DEV_SERVER_URL ? new URL('credential.html', CREDENTIAL_WINDOW_VITE_DEV_SERVER_URL).href : 'estacoda://credential/credential.html';
-  const credentials = new CredentialWindow(window, path.join(__dirname, 'credential-preload.cjs'), credentialUrl, app.isPackaged, credentialRoot);
+  const presentation=new AppearanceSettings(app.getPath('userData'));
+  const t=(key:MessageKey)=>translate(presentation.read().language??'en',key);
+  const credentials = new CredentialWindow(window, path.join(__dirname, 'credential-preload.cjs'), credentialUrl, app.isPackaged, credentialRoot,()=>presentation.read().language??'en');
   let credentialPipe: CredentialPipeClient | undefined;
   connection.on('credentials', (pipe: Duplex) => { credentialPipe?.dispose(); credentialPipe = new CredentialPipeClient(pipe); });
   connection.on('invalidate', () => { credentials.close(); credentialPipe?.dispose(); credentialPipe = undefined; });
   const documentUrl = MAIN_WINDOW_VITE_DEV_SERVER_URL ? new URL(MAIN_WINDOW_VITE_DEV_SERVER_URL).href : 'estacoda://app/index.html';
   const profiles = new Profiles(app.getPath('home'));
-  const browsers=new DesktopBrowserControls(connection,async url=>{const result=await dialog.showMessageBox(window,{type:'warning',title:'Take browser control',message:'Take control of this browser?',detail:url+'\n\nBrowser actions by the agent will pause. Your clicks and keys can submit forms or change external services. Return control explicitly when finished. Closing or losing this window leaves browser execution paused.',buttons:['Cancel','Take control'],defaultId:0,cancelId:0,noLink:true});return result.response===1;},async(entry,deliver)=>new Promise<boolean>(resolve=>{
+  const browsers=new DesktopBrowserControls(connection,async url=>{const result=await dialog.showMessageBox(window,{type:'warning',title:t('Take browser control'),message:t('Take control of this browser?'),detail:'\u2066'+url+'\u2069'+'\n\n'+t('Browser actions by the agent will pause. Your clicks and keys can submit forms or change external services. Return control explicitly when finished. Closing or losing this window leaves browser execution paused.'),buttons:[t('Cancel'),t('Take control')],defaultId:0,cancelId:0,noLink:true});return result.response===1;},async(entry,deliver)=>new Promise<boolean>(resolve=>{
     credentials.open({stage:async(_scope,value)=>{await deliver(value);return 'delivered';},closeWindow:async()=>{}},
       {windowId:'browser-signin',generation:connection.state.generation,purpose:'provider',providerId:entry.kind+' at '+entry.origin,authMethod:'api_key',endpoint:entry.origin},()=>resolve(true),()=>resolve(false),'browser');
   }),params=>{if(!credentialPipe)throw new Error('Protected entry pipe unavailable.');return credentialPipe.deliverBrowser(params);});
@@ -48,11 +51,11 @@ async function openWindow(): Promise<void> {
   window.webContents.on('render-process-gone',()=>browsers.detach());
   window.on('unresponsive',()=>browsers.detach());
   const terminals=new DesktopTerminalControls(connection,async root=>{
-    const result=await dialog.showMessageBox(window,{type:'warning',title:'Open workspace terminal',message:'Open a terminal for this workspace?',detail:root+'\n\nCommands run with your selected execution policy. A Local host terminal can access files beyond this directory. Terminal input does not approve agent actions.',buttons:['Cancel','Open terminal'],defaultId:0,cancelId:0,noLink:true});return result.response===1;
+    const result=await dialog.showMessageBox(window,{type:'warning',title:t('Open workspace terminal'),message:t('Open a terminal for this workspace?'),detail:'\u2066'+root+'\u2069'+'\n\n'+t('Commands run with your selected execution policy. A Local host terminal can access files beyond this directory. Terminal input does not approve agent actions.'),buttons:[t('Cancel'),t('Open terminal')],defaultId:0,cancelId:0,noLink:true});return result.response===1;
   },app.getPath('home'));
   let closing=false;
-  window.on('close',event=>{if(closing)return;event.preventDefault();void terminals.dispose().then(()=>{closing=true;window.close();}).catch(()=>{void dialog.showMessageBox(window,{type:'error',message:'Terminal shutdown could not be confirmed.',detail:'The target remains protected from cleanup. Retry closing after checking the terminal process.'});});});
-  const disposeIpc = installSemanticIpc(window, documentUrl, connection, profiles, new AppearanceSettings(app.getPath('userData')),new DesktopModelSetup(connection,credentials,()=>credentialPipe,new WorkOperationReferences(connection,app.getPath('userData')),url=>shell.openExternal(url)),new WorkPins(app.getPath('userData'),connection),new DesktopWorkControls(connection,app.getPath('userData'),async()=>{const result=await dialog.showOpenDialog(window,{title:'Attach text files (up to 8 KB each)',properties:['openFile','multiSelections']});return result.canceled?[]:result.filePaths;}),new DesktopTelegramSetup(connection,credentials,()=>credentialPipe),new DesktopConnectionControls(connection,app.getPath('userData')),new DesktopTargetControls(connection,app.getPath('userData')),terminals,browsers);
+  window.on('close',event=>{if(closing)return;event.preventDefault();void terminals.dispose().then(()=>{closing=true;window.close();}).catch(()=>{void dialog.showMessageBox(window,{type:'error',message:t('Terminal shutdown could not be confirmed.'),detail:t('The target remains protected from cleanup. Retry closing after checking the terminal process.')});});});
+  const disposeIpc = installSemanticIpc(window, documentUrl, connection, profiles, presentation,new DesktopModelSetup(connection,credentials,()=>credentialPipe,new WorkOperationReferences(connection,app.getPath('userData')),url=>shell.openExternal(url)),new WorkPins(app.getPath('userData'),connection),new DesktopWorkControls(connection,app.getPath('userData'),async()=>{const result=await dialog.showOpenDialog(window,{title:t('Attach text files (up to 8 KB each)'),properties:['openFile','multiSelections']});return result.canceled?[]:result.filePaths;}),new DesktopTelegramSetup(connection,credentials,()=>credentialPipe),new DesktopConnectionControls(connection,app.getPath('userData')),new DesktopTargetControls(connection,app.getPath('userData')),terminals,browsers);
   window.once('closed', () => { disposeIpc(); connection.close(); });
   connection.switchProfile(profiles.initial());
   window.once('ready-to-show', () => window.show());

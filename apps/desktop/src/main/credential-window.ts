@@ -1,3 +1,4 @@
+import type {DisplayLanguage} from '../shared/i18n/index.js';
 import{installAssetProtocol}from'./asset-protocol.js';
 import { BrowserWindow, ipcMain } from 'electron';
 import { randomUUID } from 'node:crypto';
@@ -8,7 +9,7 @@ import { CredentialPipeClient, type CredentialScope } from './credential-pipe-cl
 export class CredentialWindow {
   #window: BrowserWindow | null = null;
   #cleanup: (() => void) | null = null;
-  constructor(readonly owner: BrowserWindow, readonly preload: string, readonly url: string, readonly packaged: boolean, readonly assetRoot: string) {}
+  constructor(readonly owner: BrowserWindow, readonly preload: string, readonly url: string, readonly packaged: boolean, readonly assetRoot: string,readonly language:()=>DisplayLanguage=()=> 'en') {}
   open(pipe: Pick<CredentialPipeClient,'stage'|'closeWindow'>, binding: CredentialScope, accepted: (candidateId: string) => void, cancelled:()=>void=()=>{},mode:'setup'|'browser'='setup'): void {
     this.close();
     const window = new BrowserWindow({parent:this.owner,modal:true,width:460,height:350,resizable:false,show:false,
@@ -18,7 +19,7 @@ export class CredentialWindow {
     let busy=false,active=true,transferred=false;
     const authorize=(event: Parameters<WindowAuthority['assertSender']>[0])=>{authority.assertSender(event,0);if(!active)throw new Error('Credential window closed.');};
     // One modal per application. Every call is checked against its exact top frame.
-    ipcMain.handle('credential:describe', event=>{authorize(event);return{provider:binding.providerId,purpose:binding.purpose,mode};});
+    ipcMain.handle('credential:describe', event=>{authorize(event);return{provider:binding.providerId,purpose:binding.purpose,mode,language:this.language()};});
     ipcMain.handle('credential:submit',async(event,value:unknown)=>{
       authorize(event);if(busy||typeof value!=='string'||Buffer.byteLength(value)>49_152)throw new Error('Credential rejected.');
       busy=true;

@@ -10,3 +10,10 @@ it('keeps every catalog key translated and interpolation tokens in parity',()=>{
  expect(Object.keys(english)).toEqual(Object.keys(arabic));
  for(const key of Object.keys(english) as MessageKey[]){expect(arabic[key].trim(),key).not.toBe('');expect(arabic[key].match(/\{\w+\}/g)??[],key).toEqual(english[key].match(/\{\w+\}/g)??[]);}
 });
+
+it('maps stable diagnostics without exposing arbitrary backend text',async()=>{
+ const {displayStatus}=await import('./status.js');
+ expect(displayStatus('ar','invalid_credential')).toBe('بيانات الاعتماد غير صالحة');
+ expect(displayStatus('ar','private provider error /secret')).toBe(translate('ar','Unknown'));
+ expect(displayStatus('ar','constructor')).toBe(translate('ar','Unknown'));
+});
