@@ -29,3 +29,7 @@ html,body,#root{margin:0;min-width:0;min-height:100%;}body{background:#131313}bu
 #ec-branded-workspace .ec-telegram-modal .ec-actions,#ec-branded-workspace .ec-telegram-controls .ec-actions{flex-wrap:wrap;gap:8px;margin:16px 0}
 #ec-branded-workspace .ec-telegram-controls{padding-top:16px;margin-top:20px;border-top:1px solid var(--ec-line)}
 #ec-branded-workspace .ec-telegram-controls .ec-kv{flex-wrap:wrap;gap:10px}
+
+/* macOS traffic lights keep their native position; content follows the locale. */
+#ec-branded-workspace .ec-titlebar{direction:ltr}
+#ec-branded-workspace:dir(rtl) [data-directional=true]{transform:scaleX(-1)}

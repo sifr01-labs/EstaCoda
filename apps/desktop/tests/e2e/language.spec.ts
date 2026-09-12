@@ -14,3 +14,13 @@ test('localizes Work and approval controls while preserving commands and user co
  await page.getByRole('button',{name:'رفض',exact:true}).click();await expect(page.getByText('رُفض أمر الاختبار. لم يُتحقق من التعديلات بعد.',{exact:true})).toBeVisible();
  await expect(page.locator('.ec-usernote')).toContainText('billing');
 });
+test('mirrors shell placement and follows RTL arrow navigation without changing tab identity',async({page})=>{
+ await page.setViewportSize({width:1280,height:900});await page.goto('/fixture.html?language=ar');
+ await expect(page.locator('html')).toHaveAttribute('lang','ar');await expect(page.locator('html')).toHaveAttribute('dir','rtl');
+ await page.locator('[data-task="retry"]').click();
+ const sidebar=await page.locator('.ec-sidebar').boundingBox(),main=await page.locator('.ec-main').boundingBox();expect(sidebar!.x).toBeGreaterThan(main!.x);
+ await page.locator('#ec-tab-activity').focus();await page.keyboard.press('ArrowLeft');await expect(page.locator('#ec-tab-changes')).toBeFocused();await expect(page.locator('#ec-tab-changes')).toHaveAttribute('aria-selected','true');
+ await page.keyboard.press('ArrowRight');await expect(page.locator('#ec-tab-activity')).toBeFocused();
+ await page.getByRole('button',{name:'إظهار لوحة التفاصيل',exact:true}).click();
+ const inspector=await page.locator('.ec-inspector').boundingBox(),center=await page.locator('.ec-workcenter').boundingBox();expect(inspector!.x).toBeLessThan(center!.x);
+});
