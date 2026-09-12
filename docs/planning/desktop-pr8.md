@@ -154,3 +154,23 @@ Added read-only profile-scoped queued/uncertain turn counts and bounded recent d
 failure counts. Diagnostics return counts only, never message bodies or raw errors.
 Validation includes the existing ChannelGateway, canonical Desktop approval, configuration,
 attachment and new pairing/restart tests, plus protocol and core/Desktop type checks.
+
+## Step 14 — Desktop setup and operation journeys
+
+Added Main scope/cancellation tests, hostile semantic payload tests, and browser journeys
+for review, multiple allowlist IDs, candidate verification, uncertain Apply inspection,
+explicit gateway/delivery/handoff confirmation, disconnection and narrow layouts. Browser
+review fixed focus after the form-to-review transition and preserved commas while typing
+multiple IDs. Setup initialization is safe under React effect replay. Review displays exact
+authorized IDs and response defaults; new controls use existing neutral/ocean theme tokens.
+The native integration test now exercises Telegram capability negotiation and private fd3
+token staging/cancellation through real Main, preload and bridge without any network call.
+
+Validation passed: 48 Desktop unit tests; all 137 browser/visual cases, with final
+Telegram and Connections reference reruns; native Electron credential/approval/restart
+integration; packaged contents/CSP/fuses/icon/relocation checks; and real Session/Task
+execution across application restart without replay. The required host/Docker release
+wrapper passed all 10,896 core tests, smoke/build/import/ESM/distribution checks, execution
+budgets, source/distribution Docker conformance and Docker image validation. One initial
+existing Bun/SQLite compatibility test timed out under concurrent load; its isolated
+rerun and the complete release rerun passed. No test contacted a real Telegram account.

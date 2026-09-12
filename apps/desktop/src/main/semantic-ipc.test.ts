@@ -23,3 +23,7 @@ it('rejects credential values and caller-owned scope on every setup and override
  expect(()=>validateSemanticPayload('setupReview',{setupId:'s',role:{role:'primary',slot:'assessor'}})).toThrow();
  expect(()=>validateSemanticPayload('setupReview',{setupId:'s',role:{role:'auxiliary',slot:'vision',fallbackToMain:true}})).toThrow();
 });
+it('rejects Telegram credential/authority injection and requires operation confirmation',()=>{
+ for(const method of ['telegramStage','telegramVerify','telegramApply','telegramCancel'])for(const extra of [{token:'secret'},{candidateId:'other'},{windowId:'forged'},{profileId:'other'},{generation:3}])expect(()=>validateSemanticPayload(method,{setupId:'setup',...extra})).toThrow();
+ expect(()=>validateSemanticPayload('gatewayExecute',{action:'stop',acknowledgeSharedWork:false})).toThrow();expect(()=>validateSemanticPayload('telegramExecute',{action:'test',confirmed:true,destination:'123;command'})).toThrow();expect(()=>validateSemanticPayload('telegramHandoff',{workId:'session:s',action:'create',confirmed:true,sessionId:'other'})).toThrow();expect(()=>validateSemanticPayload('telegramExecute',{action:'test',confirmed:true,destination:'123'})).not.toThrow();
+});
