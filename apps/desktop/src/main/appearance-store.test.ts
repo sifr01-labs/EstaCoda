@@ -10,3 +10,12 @@ it('migrates old appearance files and persists display language without profile 
   expect(store.read().language).toBe('ar');
  }finally{rmSync(dir,{recursive:true,force:true});}
 });
+
+it('falls back for corrupt or unsupported presentation data without modifying runtime config',async()=>{
+ const {writeFileSync,readFileSync,mkdirSync}=await import('node:fs');const dir=mkdtempSync(join(tmpdir(),'ec-language-isolation-'));
+ try{
+  mkdirSync(join(dir,'profiles/default'),{recursive:true});const config=join(dir,'profiles/default/config.json'),original='{"language":"en","security":{"mode":"strict"}}\n';writeFileSync(config,original);
+  const store=new AppearanceSettings(dir);for(const value of ['{bad',JSON.stringify({theme:'kemet',appearance:'dark',density:'compact',language:'fr'}),' '.repeat(4097)]){writeFileSync(join(dir,'appearance.json'),value);expect(store.read().language).toBe('en');}
+  store.write({...store.read(),language:'ar'});expect(new AppearanceSettings(dir).read().language).toBe('ar');expect(readFileSync(config,'utf8')).toBe(original);
+ }finally{rmSync(dir,{recursive:true,force:true});}
+});

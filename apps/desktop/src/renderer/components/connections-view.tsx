@@ -4,7 +4,7 @@ import {TelegramGateway} from './telegram-gateway.js';
 import {TelegramSetupDialog} from './telegram-setup-dialog.js';
 import type {ConnectionProjection} from '@estacoda/control-protocol';
 import{useState,useEffect}from'react';import{Topline,Button,Badge,Icon}from'./primitives.js';
-export function ConnectionsView({fixture,inbox,openWork,profile='Personal'}:{fixture:boolean;inbox:()=>void;openWork?:(id:string)=>void;profile?:string}){
+export function ConnectionsView({fixture,inbox,openWork,profile}:{fixture:boolean;inbox:()=>void;openWork?:(id:string)=>void;profile?:string}){
  const {t,owned,status}=useI18n();
  const[setup,setSetup]=useState(false);
  const[selected,setSelected]=useState<string|null>(null);

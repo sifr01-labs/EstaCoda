@@ -68,3 +68,9 @@ it("binds notifications to the selected profile, bridge, stream and subscription
     { ...params, cursor: { ...params.cursor, instanceId: "old" } }, { ...params, payload: { ...work, profileId: "other" } }])
     expect(() => validateEventNotification({ ...notification, params: changed }, context, subscription)).toThrow();
 });
+it('accepts bounded evidence explanation codes and rejects arbitrary diagnostic prose as a code',()=>{
+ const get:MethodRequest<'evidence.get'>={jsonrpc:'2.0',id:'r',method:'evidence.get',params:{workId:'session:s'}};
+ const result={workId:'session:s',state:'unverified',completion:'unconfirmed',summary:'Legacy display',truncated:false,artifacts:[],facts:[],limitations:[],summaryCode:'unverified',limitationCodes:['receipts_missing']};
+ expect(()=>validateControlResponse({jsonrpc:'2.0',id:'r',result},get,context)).not.toThrow();
+ for(const invalid of [{...result,summaryCode:'arbitrary private error'},{...result,limitationCodes:['unexpected']},{...result,limitationCodes:Array(17).fill('receipts_missing')}])expect(()=>validateControlResponse({jsonrpc:'2.0',id:'r',result:invalid},get,context)).toThrow();
+});

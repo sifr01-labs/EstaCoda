@@ -1,8 +1,9 @@
+import {evidenceArabic} from './evidence.js';
 import {setupArabic} from './setup.js';
 import {workArabic} from './work.js';
 /** Product-owned message keys. Never pass provider output or backend error text here. */
 export const arabic = {
- ...workArabic,
+ ...evidenceArabic,...workArabic,
  ...setupArabic,
  'Message unavailable.':'الرسالة غير متاحة.',
  'Runtime':'بيئة التشغيل',

@@ -1,0 +1,21 @@
+export const evidenceArabic = {
+ "Recorded executions satisfy the reported completion requirement.": "تفي عمليات التنفيذ المسجلة بمتطلبات الإكمال المبلّغ عنها.",
+ "Execution recorded a failure.": "سجّل التنفيذ إخفاقًا.",
+ "Only partial completion or validation is established.": "لم يثبت إلا إكمال أو تحقق جزئي.",
+ "Completion has not been verified by recorded executions.": "لم يُتحقق من الإكمال عبر عمليات التنفيذ المسجلة.",
+ "The owning attempt has not established successful completion.": "لم تثبت المحاولة المسؤولة إكمالًا ناجحًا.",
+ "The completed Task has verified latest-attempt evidence.": "تتضمن المهمة المكتملة أدلة متحققًا منها لأحدث المحاولات.",
+ "Task Results and completion do not by themselves establish verified effects.": "نتائج المهمة واكتمالها لا تثبت وحدها آثارًا متحققًا منها.",
+ "Some successful receipts lack a classified execution effect.": "تفتقر بعض سجلات النجاح إلى تصنيف أثر التنفيذ.",
+ "Failed or unavailable executions are not established as recovered.": "لم يثبت التعافي من عمليات التنفيذ الفاشلة أو غير المتاحة.",
+ "No canonical turn binding is available.": "لا يتوفر ارتباط بالدور المرجعي.",
+ "No confirmed final outcome is available for this turn.": "لا تتوفر نتيجة نهائية مؤكدة لهذا الدور.",
+ "Observed mutations lack compatible validation.": "تفتقر التغييرات المرصودة إلى تحقق متوافق.",
+ "Evidence exceeds the inspection bound; completion cannot be fully verified.": "تتجاوز الأدلة حدود الفحص؛ لا يمكن التحقق من الإكمال بالكامل.",
+ "No current-turn execution receipts are available.": "لا تتوفر سجلات تنفيذ للدور الحالي.",
+ "A conversational completion claim does not establish verified execution.": "الادعاء بالإكمال في المحادثة لا يثبت تنفيذًا متحققًا منه.",
+ "This attempt has not completed successfully.": "لم تكتمل هذه المحاولة بنجاح.",
+ "Inspect the latest attempts and retained Results before relying on Task effects.": "افحص أحدث المحاولات والنتائج المحتفظ بها قبل الاعتماد على آثار المهمة.",
+ "Only the first 16 retained output references are shown.": "تُعرض أول 16 إشارة إلى المخرجات المحتفظ بها فقط.",
+ "Evidence details require a compatible runtime. Inspect the recorded result before relying on its effects.": "تتطلب تفاصيل الأدلة بيئة تشغيل متوافقة. افحص النتيجة المسجلة قبل الاعتماد على آثارها."
+} as const;

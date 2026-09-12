@@ -34,3 +34,8 @@ it('ignores planning/delegation proof-ineligible receipts without masking real f
  expect(projectExecutionEvidence({...input,outcome,events:[...planning,read,{...read,toolCallId:'failed',status:'failed'}]}).state).toBe('unverified');
  expect(projectExecutionEvidence({...input,events:[...planning,mutation,check]}).state).toBe('verified');
 });
+it('projects stable localized explanation codes without changing the evidence outcome',()=>{
+ const verified=projectExecutionEvidence({...input,events:[mutation,check]});expect(verified.summaryCode).toBe('verified');expect(verified.limitationCodes).toEqual([]);
+ const missing=projectExecutionEvidence({...input,events:[mutation]});expect(missing.state).toBe('unverified');expect(missing.limitationCodes).toContain('mutation_unverified');expect(missing.limitations).toContain('Observed mutations lack compatible validation.');
+ const absent=projectExecutionEvidence({...input,turnId:null,outcome:null,events:[]});expect(absent.limitationCodes).toEqual(['turn_unbound','outcome_unconfirmed','receipts_missing']);
+});

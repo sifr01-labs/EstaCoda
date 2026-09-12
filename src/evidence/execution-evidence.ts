@@ -29,15 +29,16 @@ export function projectExecutionEvidence(input:{workId:string;turnId:string|null
  const floor=input.outcome?.completionFloor;
  const meetsFloor=floor==='read'?reads&&!unverified:(floor==='mutation'||floor==='mutation_with_verification')?mutations.length>0&&!unverified:false;
  const state:EvidenceReport['state']=completion==='failed'?'failed':completion==='completed'&&meetsFloor&&!truncated&&!unknown&&!unresolved?'verified':completion==='partial'||(mutations.length>0&&verification.size>0)?'partial':'unverified';
- const limitations:string[]=[];
- if(unknown)limitations.push('Some successful receipts lack a classified execution effect.');
- if(unresolved)limitations.push('Failed or unavailable executions are not established as recovered.');
- if(!input.turnId)limitations.push('No canonical turn binding is available.');
- if(completion==='unconfirmed')limitations.push('No confirmed final outcome is available for this turn.');
- if(unverified)limitations.push('Observed mutations lack compatible validation.');
- if(truncated)limitations.push('Evidence exceeds the inspection bound; completion cannot be fully verified.');
- if(!records.size)limitations.push('No current-turn execution receipts are available.');
- if(floor==='none')limitations.push('A conversational completion claim does not establish verified execution.');
- return {workId:input.workId,state,completion,truncated,artifacts:[],summary:state==='verified'?'Recorded executions satisfy the reported completion requirement.':state==='failed'?'Execution recorded a failure.':state==='partial'?'Only partial completion or validation is established.':'Completion has not been verified by recorded executions.',
+ const limitations:string[]=[],limitationCodes:NonNullable<EvidenceReport['limitationCodes']>=[];
+ const limit=(code:NonNullable<EvidenceReport['limitationCodes']>[number],message:string)=>{limitationCodes.push(code);limitations.push(message);};
+ if(unknown)limit('unclassified_effect','Some successful receipts lack a classified execution effect.');
+ if(unresolved)limit('unrecovered_execution','Failed or unavailable executions are not established as recovered.');
+ if(!input.turnId)limit('turn_unbound','No canonical turn binding is available.');
+ if(completion==='unconfirmed')limit('outcome_unconfirmed','No confirmed final outcome is available for this turn.');
+ if(unverified)limit('mutation_unverified','Observed mutations lack compatible validation.');
+ if(truncated)limit('inspection_truncated','Evidence exceeds the inspection bound; completion cannot be fully verified.');
+ if(!records.size)limit('receipts_missing','No current-turn execution receipts are available.');
+ if(floor==='none')limit('conversation_only','A conversational completion claim does not establish verified execution.');
+ return {workId:input.workId,summaryCode:state,limitationCodes,state,completion,truncated,artifacts:[],summary:state==='verified'?'Recorded executions satisfy the reported completion requirement.':state==='failed'?'Execution recorded a failure.':state==='partial'?'Only partial completion or validation is established.':'Completion has not been verified by recorded executions.',
  facts:[...records.values()].slice(0,64).map(record=>({callId:record.toolCallId,tool:record.tool,kind:record.status!=='success'?'failure':record.executionEffect?.kind==='mutation'?verification.has(record.toolCallId)?'mutation':'unverified_mutation':record.executionEffect?.kind==='verification'?'validation':record.executionEffect?.kind==='read'?'read':'unknown',verifiedBy:verification.get(record.toolCallId)??null})),limitations};
 }

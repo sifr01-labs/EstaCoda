@@ -1,3 +1,4 @@
+import {EVIDENCE_SUMMARY_CODES,EVIDENCE_LIMITATION_CODES} from './evidence.js';
 import {validateHumanBrowserCommand} from './browser-human.js';
 import {AUXILIARY_SLOTS, candidateRouteBinding, type CandidateRoute} from './model-setup.js';
 import { CONTROL_LIMITS, ControlProtocolError, DESKTOP_PROTOCOL_VERSION, assertEnvelope, exactKeys, isControlId, isControlOperationId, isRecord, type RpcFailure } from "./envelopes.js";
@@ -105,7 +106,7 @@ const contracts: { [M in keyof MethodContracts]: { params: Check; result: Check 
   "artifacts.list":{params:shape({},{cursor:text(40,1)}),result:shape({items:array(artifactProjection,32),nextCursor:nullable(text(40,1))})},
   "artifacts.get":{params:shape({reference:artifactReference}),result:artifactPreview},
   "artifacts.open":{params:shape({reference:artifactReference}),result:artifactPreview},
-  "evidence.get":{params:shape({workId:id}),result:shape({workId:id,state:choice(['verified','unverified','partial','failed']),completion:choice(['completed','partial','failed','cancelled','unconfirmed']),summary:text(2048),truncated:boolean,artifacts:array(artifactReference,16),facts:array(shape({callId:text(256,1),tool:text(160,1),kind:choice(['read','mutation','validation','failure','unverified_mutation','unknown']),verifiedBy:nullable(text(256,1))}),64),limitations:array(text(2048),16)})},
+  "evidence.get":{params:shape({workId:id}),result:shape({workId:id,state:choice(['verified','unverified','partial','failed']),completion:choice(['completed','partial','failed','cancelled','unconfirmed']),summary:text(2048),truncated:boolean,artifacts:array(artifactReference,16),facts:array(shape({callId:text(256,1),tool:text(160,1),kind:choice(['read','mutation','validation','failure','unverified_mutation','unknown']),verifiedBy:nullable(text(256,1))}),64),limitations:array(text(2048),16)},{summaryCode:choice(EVIDENCE_SUMMARY_CODES),limitationCodes:array(choice(EVIDENCE_LIMITATION_CODES),16)})},
   "terminal.acquire":{params:shape({target}),result:shape({capabilityId:id,target,workingRoot:text(4096,1),backend:choice(['host','docker']),expiresAt:integer(),container:nullable(shape({id:text(64,64),user:text(40,1),endpoint:text(4096,1)}))})},
   "terminal.verify":{params:shape({capabilityId:id}),result:shape({expiresAt:integer()})},
   "terminal.release":{params:shape({capabilityId:id,settled:v=>v===true}),result:shape({released:boolean})},
