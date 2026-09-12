@@ -4,7 +4,7 @@ import { ProtocolClient } from './protocol-client.js';
 import { ServiceProcess, validateProfileId } from './service-process.js';
 export type ConnectionState = { status: 'connecting' | 'ready' | 'disconnected' | 'incompatible' | 'unavailable'; generation: number;
   profileId: string; counts?:MethodContracts['work.counts']['result']|null;bootstrap: BootstrapResult | null; work: Page<WorkProjection>; inbox: Page<InboxProjection> };
-export const INSPECTION_METHODS=CONTROL_METHODS.filter(method=>method.startsWith('files.')||method.startsWith('diff.')||method.startsWith('terminal.'));
+export const INSPECTION_METHODS=CONTROL_METHODS.filter(method=>method.startsWith('artifacts.')||method==='evidence.get'||method.startsWith('files.')||method.startsWith('diff.')||method.startsWith('terminal.'));
 export const TARGET_METHODS=CONTROL_METHODS.filter(method=>method.startsWith('targets.'));
 export const CONNECTION_METHODS=CONTROL_METHODS.filter(method=>method.startsWith('connections.')||method.startsWith('telegram.')||method.startsWith('gateway.'));
 export const MODEL_METHODS=CONTROL_METHODS.filter(method=>method.startsWith('models.') || ['providers.list','sessions.setModel','tasks.setModel','operations.inspect'].includes(method));

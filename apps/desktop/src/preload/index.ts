@@ -14,6 +14,8 @@ const ready=ipcRenderer.invoke('desktop:bind').then((binding:{generation:number;
 void ready.catch(()=>{});
 const invoke=async(method:string,payload:Record<string,unknown>={})=>{await ready;return ipcRenderer.invoke('desktop:'+method,{generation,payload});};
 const api:DesktopApi={
+  artifacts:Object.freeze({list:cursor=>invoke('artifactsList',cursor?{cursor}:{}),get:reference=>invoke('artifactsGet',{reference}),open:reference=>invoke('artifactsOpen',{reference})}),
+  evidence:Object.freeze({get:workId=>invoke('evidenceGet',{workId})}),
   terminal:Object.freeze({open:target=>invoke('terminalOpen',{target}),read:id=>invoke('terminalRead',{id}),write:(id,data)=>invoke('terminalWrite',{id,data}),resize:(id,cols,rows)=>invoke('terminalResize',{id,cols,rows}),close:id=>invoke('terminalClose',{id})}),
   diff:Object.freeze({list:input=>invoke('diffList',input),patch:input=>invoke('diffPatch',input)}),
   files:Object.freeze({list:input=>invoke('filesList',input),preview:input=>invoke('filesPreview',input)}),

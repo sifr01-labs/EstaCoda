@@ -29,7 +29,13 @@ const activities: ActivityProjection[] = [
   { ...activityBase, kind: "result", status: "partial", evidence: { state: "unverified", summary: "Not verified", artifactIds: [] }, usage: { reportedTokens: null, cost: null } },
   { ...activityBase, kind: "status", status: "needs_attention", reason: "Waiting for approval" },
 ];
+const artifactReference={source:'session' as const,ownerId:'s',artifactId:'a'};
+const artifactPreview={artifact:{reference:artifactReference,displayName:'report.txt',mimeType:'text/plain',bytes:0,sha256:'a'.repeat(64),createdAt:'2026-09-12',retention:'retained' as const,sourceOrigin:null,workIds:['session:s'],target:null},integrity:'verified' as const,text:'',truncated:false,reason:null};
 const cases = {
+ "artifacts.list":{params:{},result:{items:[],nextCursor:null}},
+ "artifacts.get":{params:{reference:artifactReference},result:artifactPreview},
+ "artifacts.open":{params:{reference:artifactReference},result:artifactPreview},
+ "evidence.get":{params:{workId:'session:s'},result:{workId:'session:s',state:'unverified',completion:'unconfirmed',summary:'No evidence',facts:[],limitations:[],truncated:false}},
  "terminal.acquire":{params:{target},result:{capabilityId:'cap',target,workingRoot:'/repo',backend:'host',expiresAt:3000,container:null}},
  "terminal.verify":{params:{capabilityId:'cap'},result:{expiresAt:3000}},
  "terminal.release":{params:{capabilityId:'cap',settled:true},result:{released:true}},

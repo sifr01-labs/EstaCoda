@@ -27,6 +27,10 @@ export type SubscribeResult =
 export type WorkUsageProjection={scope:'session'|'task'|'attempt';reportedTokens:number|null;providerCalls:number;cost:{amount:number;currency:'USD'}|null;usageComplete:boolean;pricingComplete:boolean;context:{usedTokens:number;totalTokens:number;provider:string;model:string}|null;truncated:boolean;provisional:boolean};
 export type RuntimeCounts={runningSessions:number;runningTasks:number;queuedTasks:number;approvals:number;attention:number;scheduled:number|null;asOf:number};
 export type MethodContracts = {
+  "artifacts.list":{params:{cursor?:string};result:{items:import('./artifacts.js').ArtifactProjection[];nextCursor:string|null}};
+  "artifacts.get":{params:{reference:import('./artifacts.js').ArtifactReference};result:import('./artifacts.js').ArtifactPreview};
+  "artifacts.open":{params:{reference:import('./artifacts.js').ArtifactReference};result:import('./artifacts.js').ArtifactPreview};
+  "evidence.get":{params:{workId:string};result:import('./evidence.js').EvidenceReport};
   "terminal.acquire":{params:{target:TargetReference};result:{capabilityId:string;target:TargetReference;workingRoot:string;backend:'host'|'docker';expiresAt:number;container:{id:string;user:string;endpoint:string}|null}};
   "terminal.verify":{params:{capabilityId:string};result:{expiresAt:number}};
   "terminal.release":{params:{capabilityId:string;settled:true};result:{released:boolean}};

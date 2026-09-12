@@ -93,6 +93,8 @@ export type DesktopTerminalApi={
  close(id:string):Promise<void>;
 };
 export type DesktopApi = {
+  artifacts?:{list(cursor?:string):Promise<MethodContracts['artifacts.list']['result']>;get(reference:import('@estacoda/control-protocol').ArtifactReference):Promise<MethodContracts['artifacts.get']['result']>;open(reference:import('@estacoda/control-protocol').ArtifactReference):Promise<MethodContracts['artifacts.open']['result']>};
+  evidence?:{get(workId:string):Promise<MethodContracts['evidence.get']['result']>};
   readonly terminal?:DesktopTerminalApi;
   readonly diff?:DesktopDiffApi;
   readonly files?:DesktopFilesApi;

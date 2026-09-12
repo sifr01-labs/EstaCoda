@@ -481,6 +481,16 @@ export class TaskResultService {
     return join(dirname(this.#contentPath(result.handle)), `${digest}.pending`);
   }
 
+  /** Bounded consumer preview with the same ownership, retention and integrity gates. */
+  async preview(input: Pick<ReadTaskResultPageInput, "taskId" | "resultId" | "sessionId">): Promise<{text:string|null;truncated:boolean}> {
+    const result = this.#store.getResult(input.resultId);
+    if (!result || result.taskId !== input.taskId || result.status !== "available" ||
+        (result.expiresAt !== undefined && Date.parse(result.expiresAt) <= this.#now().getTime()) ||
+        !await this.#isSessionAuthorized(input.taskId, input.sessionId)) throw new TaskResultAccessError();
+    const bytes = this.#readVerifiedContent(result);
+    return {text:isTextReadable(result) ? new TextDecoder("utf-8").decode(bytes.subarray(0, 16384)) : null, truncated:isTextReadable(result) && bytes.length > 16384};
+  }
+
   async readPage(input: ReadTaskResultPageInput): Promise<TaskResultPage> {
     const offset = boundedInteger(input.offset, 0, Number.MAX_SAFE_INTEGER, 0, "offset");
     const maxChars = boundedInteger(

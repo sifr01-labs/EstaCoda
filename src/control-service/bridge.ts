@@ -1,3 +1,5 @@
+import {listArtifacts,inspectArtifact} from './artifacts.js';
+import {workEvidence} from './evidence.js';
 import {TerminalCapabilities} from './terminal-capabilities.js';
 import {inspectDiff} from './workspace-diff.js';
 import {inspectFiles} from './workspace-files.js';
@@ -117,6 +119,10 @@ export class DesktopBridge {
       'work.usage':async(request,signal)=>{if(request.method!=='work.usage')throw new ControlProtocolError('-32601');return{result:await workUsage(this.options,this.workSnapshot().get(request.params.workId),signal)};},
       'work.counts':()=>({result:workCounts(this.workSnapshot().state)}),
       'work.live':async(request,signal)=>{if(request.method!=='work.live')throw new ControlProtocolError('-32601');return{result:await liveWork(this.options,this.workSnapshot().get(request.params.workId),signal)};},
+      'artifacts.list':async(request,signal)=>{if(request.method!=='artifacts.list')throw new ControlProtocolError('-32601');return{result:await listArtifacts(this.options,request.params,signal)};},
+      'artifacts.get':async(request,signal)=>{if(request.method!=='artifacts.get')throw new ControlProtocolError('-32601');return{result:await inspectArtifact(this.options,request.params.reference,false,signal)};},
+      'artifacts.open':async(request,signal)=>{if(request.method!=='artifacts.open')throw new ControlProtocolError('-32601');return{result:await inspectArtifact(this.options,request.params.reference,true,signal)};},
+      'evidence.get':async(request,signal)=>{if(request.method!=='evidence.get')throw new ControlProtocolError('-32601');return{result:await workEvidence(this.options,this.workSnapshot().get(request.params.workId),signal)};},
       'terminal.acquire':async(request,signal)=>{if(request.method!=='terminal.acquire')throw new ControlProtocolError('-32601');return{result:await this.terminals.acquire(request.params.target,signal)};},
       'terminal.verify':async(request,signal)=>{if(request.method!=='terminal.verify')throw new ControlProtocolError('-32601');return{result:await this.terminals.verify(request.params.capabilityId,signal)};},
       'terminal.release':async(request)=>{if(request.method!=='terminal.release')throw new ControlProtocolError('-32601');return{result:await this.terminals.release(request.params.capabilityId)};},

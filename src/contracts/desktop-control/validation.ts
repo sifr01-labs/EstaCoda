@@ -92,7 +92,14 @@ const oauthBinding=shape({authorizationId:id,windowId:id,generation:integer(1)})
 const oauthStatusShape=shape({authorizationId:id,state:choice(['starting','pending','authorized','failed','cancelled','expired']),verificationUrl:nullable(choice(['https://auth.openai.com/codex/device'])),userCode:nullable((v)=>typeof v==='string' && /^[-A-Z0-9]{1,32}$/i.test(v)),candidateId:nullable(id)});
 const oauthStatus:Check=v=>oauthStatusShape(v)&&isRecord(v)&&(v.state==='pending'?v.verificationUrl!==null&&v.userCode!==null:v.verificationUrl===null&&v.userCode===null)&&(v.state==='authorized'?v.candidateId!==null:v.candidateId===null);
 const candidateVerification=shape({state:choice(['passed','failed','cancelled']),reason:choice(['none','unreachable','invalid_credential','model_unavailable','unsupported','incomplete','cancelled']),streaming:boolean,tools:boolean,latencyMs:integer(),inputTokens:nullable(integer()),outputTokens:nullable(integer()),estimatedCost:nullable(nonnegative)});
+const artifactReference=shape({source:choice(['session','task']),ownerId:id,artifactId:id});
+const artifactProjection=shape({reference:artifactReference,displayName:text(160),mimeType:text(160,1),bytes:integer(),sha256:text(64,64),createdAt:text(64,1),retention:choice(['retained','pruned','expired']),sourceOrigin:nullable(text(512)),workIds:array(id,3),target:nullable(target)});
+const artifactPreview=shape({artifact:artifactProjection,integrity:choice(['verified','unavailable']),text:nullable(text(16384)),truncated:boolean,reason:nullable(text(2048))});
 const contracts: { [M in keyof MethodContracts]: { params: Check; result: Check } } = {
+  "artifacts.list":{params:shape({},{cursor:text(40,1)}),result:shape({items:array(artifactProjection,32),nextCursor:nullable(text(40,1))})},
+  "artifacts.get":{params:shape({reference:artifactReference}),result:artifactPreview},
+  "artifacts.open":{params:shape({reference:artifactReference}),result:artifactPreview},
+  "evidence.get":{params:shape({workId:id}),result:shape({workId:id,state:choice(['verified','unverified','partial','failed']),completion:choice(['completed','partial','failed','cancelled','unconfirmed']),summary:text(2048),truncated:boolean,facts:array(shape({callId:text(256,1),tool:text(160,1),kind:choice(['read','mutation','validation','failure','unverified_mutation']),verifiedBy:nullable(text(256,1))}),64),limitations:array(text(2048),16)})},
   "terminal.acquire":{params:shape({target}),result:shape({capabilityId:id,target,workingRoot:text(4096,1),backend:choice(['host','docker']),expiresAt:integer(),container:nullable(shape({id:text(64,64),user:text(40,1),endpoint:text(4096,1)}))})},
   "terminal.verify":{params:shape({capabilityId:id}),result:shape({expiresAt:integer()})},
   "terminal.release":{params:shape({capabilityId:id,settled:v=>v===true}),result:shape({released:boolean})},
