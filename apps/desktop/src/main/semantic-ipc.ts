@@ -17,6 +17,7 @@ export function rendererSnapshot(state:ConnectionState):DesktopSnapshot {
   return {counts:state.status==='ready'?state.counts??null:null,status:state.status,profile:state.bootstrap?.profile??{id:state.profileId,label:state.profileId,configuration:'unconfigured'},runtime:state.bootstrap?.runtime.state??'disconnected',work:state.work,inbox:state.inbox};
 }
 export function validateSemanticPayload(method:string,payload:unknown):void {
+  if(method==='diffList'||method==='diffPatch'){validateControlRequest({jsonrpc:'2.0',id:'validation',method:method==='diffList'?'diff.list':'diff.patch',params:payload},{profileId:'validation',instanceId:'validation',capabilities:{methods:[...CONTROL_METHODS],events:[...CONTROL_EVENTS]}});return;}
   if(method==='filesList'||method==='filesPreview'){validateControlRequest({jsonrpc:'2.0',id:'validation',method:method==='filesList'?'files.list':'files.preview',params:payload},{profileId:'validation',instanceId:'validation',capabilities:{methods:[...CONTROL_METHODS],events:[...CONTROL_EVENTS]}});return;}
   if(method==='workTargets'){validateControlRequest({jsonrpc:'2.0',id:'validation',method:'work.targets',params:payload},{profileId:'validation',instanceId:'validation',capabilities:{methods:[...CONTROL_METHODS],events:[...CONTROL_EVENTS]}});return;}
   if(method.startsWith('target')){
@@ -56,7 +57,7 @@ export function validateSemanticPayload(method:string,payload:unknown):void {
 export function installSemanticIpc(window:BrowserWindow,documentUrl:string,connection:DesktopConnection,profiles:Profiles,appearance:AppearanceSettings,models?:DesktopModelSetup,pins?:WorkPins,workControls?:DesktopWorkControls,telegram?:DesktopTelegramSetup,connectionControls?:DesktopConnectionControls,targets?:DesktopTargetControls):()=>void {
   const authority=new WindowAuthority(window,documentUrl);
   const contents=window.webContents;
-  const methods=['filesList','filesPreview','targetList','targetInspect','targetReview','targetCreate','targetCancel','targetExecute','targetOperation','telegramExecute','telegramPairing','telegramSessions','telegramDetails','telegramHandoff','gatewayDiagnostics','gatewayExecute','connectionInspect','telegramReview','telegramApply','telegramInspectApply','telegramBegin','telegramStage','telegramVerify','telegramCancel','connectionsList','workUsage','workDecide','workInspectDecision','workAct','workChildren','workLive','workTargets','workAttach','workSubmit','workInspect','workSearch','workPins','workPin','workOverride','setOverride','inspectOverride','setupVerifyReviewed','modelRoutes','setupConfigured','setupOrder','setupMode','setupOAuthStart','setupOAuthStatus','setupOAuthOpen','setupBegin','setupStage','setupVerify','setupReview','setupApply','setupCancel','setupInspect','modelPage','providerPage','refreshCatalog','reconnect','moreWork','moreInbox','appearance','setAppearance','snapshot','getWork','activity','profiles','switchProfile','minimize','toggleMaximize','close'];
+  const methods=['diffList','diffPatch','filesList','filesPreview','targetList','targetInspect','targetReview','targetCreate','targetCancel','targetExecute','targetOperation','telegramExecute','telegramPairing','telegramSessions','telegramDetails','telegramHandoff','gatewayDiagnostics','gatewayExecute','connectionInspect','telegramReview','telegramApply','telegramInspectApply','telegramBegin','telegramStage','telegramVerify','telegramCancel','connectionsList','workUsage','workDecide','workInspectDecision','workAct','workChildren','workLive','workTargets','workAttach','workSubmit','workInspect','workSearch','workPins','workPin','workOverride','setOverride','inspectOverride','setupVerifyReviewed','modelRoutes','setupConfigured','setupOrder','setupMode','setupOAuthStart','setupOAuthStatus','setupOAuthOpen','setupBegin','setupStage','setupVerify','setupReview','setupApply','setupCancel','setupInspect','modelPage','providerPage','refreshCatalog','reconnect','moreWork','moreInbox','appearance','setAppearance','snapshot','getWork','activity','profiles','switchProfile','minimize','toggleMaximize','close'];
   const handlers:string[]=[];
   let connectionGeneration=connection.state.generation;
   const state=(value:ConnectionState)=>{if(value.generation!==connectionGeneration){authority.invalidate();connectionGeneration=value.generation;}if(!window.isDestroyed())contents.send('desktop:state',{generation:authority.generation,snapshot:rendererSnapshot(value)});};
@@ -69,6 +70,10 @@ export function installSemanticIpc(window:BrowserWindow,documentUrl:string,conne
       const payload=envelope.payload as Record<string,unknown>;
       const generation=authority.generation;
       try {
+        if(method==='diffList'||method==='diffPatch'){
+          const result=await connection.inspectionRequest(method==='diffList'?'diff.list':'diff.patch',payload as import('@estacoda/control-protocol').MethodContracts['diff.patch']['params']);
+          authority.assertSender(event,generation);return result;
+        }
         if(method==='filesList'||method==='filesPreview'){
           const result=await connection.inspectionRequest(method==='filesList'?'files.list':'files.preview',payload as import('@estacoda/control-protocol').MethodContracts['files.list']['params']);
           authority.assertSender(event,generation);return result;

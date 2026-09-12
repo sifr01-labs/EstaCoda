@@ -50,3 +50,9 @@ it('accepts only target-scoped read inputs, never renderer filesystem authority'
   for(const extra of [{profileId:'other'},{root:'/private'},{command:'cat'},{write:true}])expect(()=>validateSemanticPayload(method,{...payload,...extra})).toThrow();
  }
 });
+it('keeps Git command and configuration selection out of Changes IPC',()=>{
+ const target={targetId:'t',targetGeneration:1};
+ expect(()=>validateSemanticPayload('diffPatch',{target,path:'src/app.ts',stage:'staged'})).not.toThrow();
+ for(const extra of [{args:['--ext-diff']},{gitDir:'/other'},{profileId:'other'}])expect(()=>validateSemanticPayload('diffList',{target,...extra})).toThrow();
+ expect(()=>validateSemanticPayload('diffPatch',{target,path:'file',stage:'HEAD~1'})).toThrow();
+});

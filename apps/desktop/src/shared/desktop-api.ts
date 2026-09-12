@@ -81,7 +81,12 @@ export type DesktopFilesApi={
  list(input:MethodContracts['files.list']['params']):Promise<MethodContracts['files.list']['result']>;
  preview(input:MethodContracts['files.preview']['params']):Promise<MethodContracts['files.preview']['result']>;
 };
+export type DesktopDiffApi={
+ list(input:MethodContracts['diff.list']['params']):Promise<MethodContracts['diff.list']['result']>;
+ patch(input:MethodContracts['diff.patch']['params']):Promise<MethodContracts['diff.patch']['result']>;
+};
 export type DesktopApi = {
+  readonly diff?:DesktopDiffApi;
   readonly files?:DesktopFilesApi;
   readonly targets?:DesktopTargetsApi;
   readonly connections?:DesktopConnectionsApi;
