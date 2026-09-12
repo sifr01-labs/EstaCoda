@@ -12,3 +12,4 @@ export * from './evidence.js';
 export * from './browser.js';
 
 export * from './browser-human.js';
+export * from './settings.js';

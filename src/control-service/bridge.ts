@@ -1,3 +1,4 @@
+import {PublicSettings} from './public-settings.js';
 import {validateHumanBrowserCommand,exactKeys,isRecord,isControlId} from '../contracts/desktop-control/index.js';
 import {browserControl} from './browser-control.js';
 import {browserViewSnapshot} from './browser-snapshot.js';
@@ -47,6 +48,7 @@ export class DesktopBridge {
   readonly server: StdioControlServer;
   readonly candidates: CredentialCandidates;
   readonly modelSetup: ModelSetup;
+  readonly publicSettings:PublicSettings;
   readonly channelSessions:ChannelSessions;
   readonly telegramOperations:TelegramOperations;
   readonly gatewayControls:GatewayControls;
@@ -109,6 +111,9 @@ export class DesktopBridge {
       'models.reviewFallback': async(request)=>{if(request.method!=='models.reviewFallback')throw new ControlProtocolError('-32601');return {result:await this.modelSetup.review(request.params,'fallback')};},
       'models.reviewFallbackOrder': async(request)=>{if(request.method!=='models.reviewFallbackOrder')throw new ControlProtocolError('-32601');return {result:await this.modelSetup.reviewFallbackOrder(request.params)};},
       'models.reviewPrimary': async(request) => {if(request.method!=='models.reviewPrimary')throw new ControlProtocolError('-32601');return {result:await this.modelSetup.review(request.params)};},
+      'settings.read':async request=>{if(request.method!=='settings.read')throw new ControlProtocolError('-32601');return {result:await this.publicSettings.read(request.params.section)};},
+      'settings.review':async request=>{if(request.method!=='settings.review')throw new ControlProtocolError('-32601');return {result:await this.publicSettings.review(request.params)};},
+      'settings.cancel':request=>{if(request.method!=='settings.cancel')throw new ControlProtocolError('-32601');return {result:this.publicSettings.cancel(request.params)};},
       'models.applyDraft': async(request,signal) => {if(request.method!=='models.applyDraft')throw new ControlProtocolError('-32601');return {result:await this.modelSetup.apply(request.params,signal)};},
       'models.cancelDraft': request => {if(request.method!=='models.cancelDraft')throw new ControlProtocolError('-32601');return {result:this.modelSetup.cancel(request.params)};},
       'models.inspectApply': async(request) => {if(request.method!=='models.inspectApply')throw new ControlProtocolError('-32601');return {result:await this.modelSetup.inspect(request.params.operationId)};},
@@ -179,6 +184,8 @@ export class DesktopBridge {
     this.terminals=new TerminalCapabilities(options);
     this.targets=new TargetControls(options);
     this.candidates = new CredentialCandidates(this.server.profileId,this.server.instanceId);
+    this.publicSettings=new PublicSettings(this.options,this.candidates);
+    this.server.onDispose(()=>this.publicSettings.dispose());
     this.modelSetup = new ModelSetup(this.options,this.candidates,async()=>{this.#catalog=undefined;this.subscriptions.publish({type:'service.warning',payload:{reason:'configuration_changed'}});
       try {await notifyPrivateConfigurationChanged({directory:resolveProfileStateHome(this.options).gatewayStatePath,profileId:this.options.profileId,version:this.options.version,signal:AbortSignal.timeout(2000)});}catch{/* An absent owner will load the committed configuration on its next startup. */}
     });

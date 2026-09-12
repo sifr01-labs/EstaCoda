@@ -32,6 +32,9 @@ const activities: ActivityProjection[] = [
 const artifactReference={source:'session' as const,ownerId:'s',artifactId:'a'};
 const artifactPreview={artifact:{reference:artifactReference,displayName:'report.txt',mimeType:'text/plain',bytes:0,sha256:'a'.repeat(64),createdAt:'2026-09-12',retention:'retained' as const,sourceOrigin:null,workIds:['session:s'],target:null},integrity:'verified' as const,text:'',truncated:false,reason:null};
 const cases = {
+  "settings.read":{params:{section:'runtime'},result:{fields:[{id:'ui.language',section:'runtime',path:['ui','language'],kind:'choice',choices:['en','ar']}],values:[{fieldId:'ui.language',selectors:[],value:'en'}],truncated:false}},
+  "settings.review":{params:{windowId:'w',generation:1,changes:[{fieldId:'ui.language',selectors:[],value:'ar'}]},result:{draftId:'draft',changes:[{fieldId:'ui.language',selectors:[],value:'ar'}],previous:[{fieldId:'ui.language',selectors:[],value:'en'}],expiresInMs:300000}},
+  "settings.cancel":{params:{windowId:'w',generation:1,draftId:'draft'},result:{cancelled:true}},
  "browser.control":{params:{workId:'session:s',command:{action:'acquire',browserId:'b',holder:'window'}},result:{lease:{id:'lease',generation:1},state:'human',frame:null}},
  "browser.snapshot":{params:{workId:'session:s',reference:{sessionId:'s',browserId:'b',eventId:1,target}},result:{state:{reference:{sessionId:'s',browserId:'b',eventId:1,target},url:null,title:null,observedAt:'2026-09-12',readiness:'unknown',state:'blocked',lastAction:'browser.navigate',artifacts:[]},image:null,reason:'Unavailable'}},
  "browser.list":{params:{workId:'session:s'},result:{items:[],truncated:false}},

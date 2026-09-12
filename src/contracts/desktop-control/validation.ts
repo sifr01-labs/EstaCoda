@@ -1,3 +1,4 @@
+import {SETTINGS_SECTIONS} from './settings.js';
 import {EVIDENCE_SUMMARY_CODES,EVIDENCE_LIMITATION_CODES} from './evidence.js';
 import {validateHumanBrowserCommand} from './browser-human.js';
 import {AUXILIARY_SLOTS, candidateRouteBinding, type CandidateRoute} from './model-setup.js';
@@ -21,6 +22,10 @@ const shape = (required: Record<string, Check>, optional: Record<string, Check> 
 const id = isControlId;
 const cursorToken: Check = (v) => typeof v === "string" && /^[A-Za-z0-9_-]{1,512}$/.test(v);
 const capabilities = shape({ methods: unique(choice(CONTROL_METHODS),128), events: unique(choice(CONTROL_EVENTS)) });
+const settingValue:Check=v=>v===null||text(4096)(v)||boolean(v)||typeof v==='number'&&Number.isFinite(v)||array(text(2048),128)(v);
+const settingChange=shape({fieldId:text(240,1),selectors:array(text(128,1),8),value:settingValue});
+const settingField=shape({id:text(240,1),section:choice(SETTINGS_SECTIONS),path:array(text(128,1),12),kind:choice(['text','number','boolean','choice','strings','secret'])},{choices:array(settingValue,128),min:integer(),max:integer()});
+const settingsBinding=shape({draftId:id,windowId:id,generation:integer(1)});
 const targetId:Check=(v)=>typeof v==='string'&&/^target_[a-f0-9-]{36}$/.test(v);
 const target = shape({ targetId: id, targetGeneration: integer(1) });
 const targetDetailsFields={targetId:id,targetGeneration:integer(1),kind:choice(['local','temporary-copy','git-worktree']),label:text(240,1),workingRoot:text(4096,1),sourceRoot:text(4096,1),status:choice(['available','archived']),readiness:choice(['ready','untrusted','unavailable','archived']),managed:boolean};
@@ -152,6 +157,9 @@ const contracts: { [M in keyof MethodContracts]: { params: Check; result: Check 
   "models.reviewFallbackOrder": {params:shape({windowId:id,generation:integer(1),revision:id,order:unique(integer(0,31),32)}),result:modelRouteDraft},
   "models.reviewPrimary": {params:shape({windowId:id,generation:integer(1),route:candidateRoute},{candidateId:id}),result:modelRouteDraft},
   "models.applyDraft": {params:modelDraftBinding,result:modelApplyReceipt},
+  "settings.read":{params:shape({section:choice(SETTINGS_SECTIONS)}),result:shape({fields:array(settingField,100),values:array(settingChange,100),truncated:boolean})},
+  "settings.review":{params:shape({windowId:id,generation:integer(1),changes:array(settingChange,32,1)}),result:shape({draftId:id,changes:array(settingChange,32,1),previous:array(settingChange,32),expiresInMs:integer(1,300000)})},
+  "settings.cancel":{params:settingsBinding,result:shape({cancelled:boolean})},
   "models.cancelDraft": {params:modelDraftBinding,result:shape({cancelled:boolean})},
   "models.inspectApply": {params:shape({},{operationId:id}),result:modelApplyReceipt},
   "models.verifyCandidate": {params:shape({windowId:id,generation:integer(1),spendApproved:v=>v===true,route:candidateRoute},{candidateId:id}),result:candidateVerification},
