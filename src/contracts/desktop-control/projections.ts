@@ -49,7 +49,7 @@ export type ModelProjection = {
   credentialState: "not_required" | "missing" | "present" | "expired";
   role: "primary" | "fallback" | "auxiliary" | "session_override" | null;
 };
-export type ProviderProjection = { metadata?: { configurable: boolean; runnable: boolean; catalogOnly: boolean; apiMode: string; defaultEndpoint: string | null }; id: string; label: string; authMethods: ("api_key" | "oauth" | "none")[];
+export type ProviderProjection = { health?: typeof ROUTE_HEALTH_STATES[number]; metadata?: { configurable: boolean; runnable: boolean; catalogOnly: boolean; apiMode: string; defaultEndpoint: string | null }; id: string; label: string; authMethods: ("api_key" | "oauth" | "none")[];
   state: "ready" | "unconfigured" | "repair_required" | "unknown" };
 export type ConnectionProjection = {
   id: string; profileId: string; channel: "telegram" | "discord" | "email" | "whatsapp";

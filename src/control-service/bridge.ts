@@ -1,3 +1,4 @@
+import {refreshDesktopCatalog} from './catalog-refresh.js';
 import {CodexAuthorization} from './codex-authorization.js';
 import {workModel} from './work-model.js';
 import {notifyPrivateConfigurationChanged} from '../gateway/private-control.js';
@@ -40,6 +41,7 @@ export class DesktopBridge {
     this.server = new StdioControlServer({ ...options, events: ['work.changed', 'activity.appended', 'attention.changed', 'control.ready', 'service.warning', 'service.shutdown'], handlers: {
       ...Object.fromEntries(['sessions.setModel', 'tasks.setModel', 'approvals.resolve', 'tasks.pause', 'tasks.resume', 'tasks.cancel', 'tasks.retry', 'tasks.guide', 'sessions.start', 'sessions.resume', 'sessions.send', 'sessions.cancelTurn', 'operations.inspect'].map((method) =>
         [method, async (request: SessionMutationRequest, signal: AbortSignal) => ({ result: await sessionControl(this.options, request, signal) })])),
+      'models.refreshCatalog':async(_request,signal)=>{const result=await refreshDesktopCatalog(this.options.homeDir,signal);if(result.refreshed)this.#catalog=undefined;return {result};},
       'models.oauthStart': request=>{if(request.method!=='models.oauthStart')throw new ControlProtocolError('-32601');return {result:this.oauth.start(request.params)};},
       'models.oauthStatus': request=>{if(request.method!=='models.oauthStatus')throw new ControlProtocolError('-32601');return {result:this.oauth.status(request.params)};},
       'models.oauthCancel': request=>{if(request.method!=='models.oauthCancel')throw new ControlProtocolError('-32601');return {result:this.oauth.cancel(request.params)};},

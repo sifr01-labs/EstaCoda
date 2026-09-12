@@ -32,9 +32,13 @@ export async function captureModelCatalog(input: {homeDir: string; profileId: st
     });
   const providers: ProviderProjection[] = providerRows.filter(row => isControlId(row.id) && row.id !== 'unconfigured' && !isProviderMediaOnly(row.id)).map(row => {
     const metadata = getProviderMetadata(row.id);
-    return {id: row.id, label: metadata.displayName.slice(0,240), authMethods: [...new Set(metadata.authMethods.map(method => method === 'none' || method === 'api_key' ? method : 'oauth' as const))], state: !row.configured ? 'unconfigured' : models.some(model => model.providerId === row.id && ['credential_required','authorization_expired','unsupported'].includes(model.health ?? '')) ? 'repair_required' : 'unknown',
+    const routeHealth=models.find(model=>model.providerId===row.id && model.role==='primary')?.health ?? models.find(model=>model.providerId===row.id && model.catalog?.configured)?.health;
+    const health:ProviderProjection['health']=row.catalogOnly?'catalog_only':!metadata.runnable?'unsupported':routeHealth ?? (!row.configured?'not_configured':row.credentialReady?'configured':'credential_required');
+    return {health,id: row.id, label: metadata.displayName.slice(0,240), authMethods: [...new Set(metadata.authMethods.map(method => method === 'none' || method === 'api_key' ? method : 'oauth' as const))], state: !row.configured ? 'unconfigured' : models.some(model => model.providerId === row.id && ['credential_required','authorization_expired','unsupported'].includes(model.health ?? '')) ? 'repair_required' : 'unknown',
       metadata: {configurable: metadata.configurable && (metadata.catalogKnown || row.configured), runnable: metadata.runnable,
         catalogOnly: row.catalogOnly, apiMode: metadata.apiMode, defaultEndpoint: metadata.defaultBaseUrl ?? null}};
   });
+  models.sort((a,b)=>Number(b.role==='primary')-Number(a.role==='primary') || Number(b.runnable)-Number(a.runnable) || Number(Boolean(b.catalog?.configured))-Number(Boolean(a.catalog?.configured)));
+  providers.sort((a,b)=>Number(b.state!=='unconfigured')-Number(a.state!=='unconfigured'));
   return {providers, models, pages: new WorkSnapshot({work: [], activity: {}})};
 }

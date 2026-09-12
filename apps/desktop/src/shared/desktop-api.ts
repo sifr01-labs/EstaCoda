@@ -1,3 +1,4 @@
+import type {MethodContracts} from '@estacoda/control-protocol';
 import type {AppearancePreferences} from './appearance.js';
 import type { ActivityProjection, Page, WorkProjection, InboxProjection } from '@estacoda/control-protocol';
 export type DesktopSnapshot = { status: 'connecting' | 'ready' | 'disconnected' | 'incompatible' | 'unavailable';
@@ -5,7 +6,13 @@ export type DesktopSnapshot = { status: 'connecting' | 'ready' | 'disconnected' 
   runtime: 'stopped'|'starting'|'ready'|'disconnected'|'incompatible'|'unavailable';
   work:Page<WorkProjection>;inbox:Page<InboxProjection> };
 export type ProfileChoice = {id:string;label:string};
+export type DesktopModelsApi={
+ models(cursor?:string):Promise<MethodContracts['models.list']['result']>;
+ providers(cursor?:string):Promise<MethodContracts['providers.list']['result']>;
+ refreshCatalog():Promise<{refreshed:boolean}>;
+};
 export type DesktopApi = {
+  readonly models?:DesktopModelsApi;
   readonly platform:string;
   appearance():Promise<AppearancePreferences>;
   setAppearance(value:AppearancePreferences):Promise<void>;

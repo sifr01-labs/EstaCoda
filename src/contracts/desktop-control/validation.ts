@@ -52,7 +52,7 @@ const modelShape = shape({ id: text(200, 1), providerId: id, label: text(240, 1)
 const model: Check = (v) => modelShape(v) && isRecord(v) && (!v.runnable ||
   ((v.credentialState === "present" || v.credentialState === "not_required") &&
     (!isRecord(v.catalog) || (!v.catalog.catalogOnly && v.catalog.lifecycle !== 'retired'))));
-const provider = shape({ id, label: text(240, 1), authMethods: unique(choice(["api_key", "oauth", "none"]), 3, 1), state: choice(["ready", "unconfigured", "repair_required", "unknown"]) }, {metadata:shape({configurable:boolean,runnable:boolean,catalogOnly:boolean,apiMode:text(80,1),defaultEndpoint:nullable(text(2048,1))})});
+const provider = shape({ id, label: text(240, 1), authMethods: unique(choice(["api_key", "oauth", "none"]), 3, 1), state: choice(["ready", "unconfigured", "repair_required", "unknown"]) }, {health:choice(ROUTE_HEALTH_STATES),metadata:shape({configurable:boolean,runnable:boolean,catalogOnly:boolean,apiMode:text(80,1),defaultEndpoint:nullable(text(2048,1))})});
 const connection = shape({ id, profileId: id, channel: choice(["telegram", "discord", "email", "whatsapp"]),
   configurationState: choice(["configured", "unconfigured", "repair_required"]), runtimeState: choice(["running", "stopped", "disconnected", "unknown"]),
   authorizationState: choice(["denied", "configured", "pairing_required", "unknown"]), summary: text(2_048) });
@@ -84,6 +84,7 @@ const oauthBinding=shape({authorizationId:id,windowId:id,generation:integer(1)})
 const oauthStatusShape=shape({authorizationId:id,state:choice(['starting','pending','authorized','failed','cancelled','expired']),verificationUrl:nullable(choice(['https://auth.openai.com/codex/device'])),userCode:nullable((v)=>typeof v==='string' && /^[-A-Z0-9]{1,32}$/i.test(v)),candidateId:nullable(id)});
 const oauthStatus:Check=v=>oauthStatusShape(v)&&isRecord(v)&&(v.state==='pending'?v.verificationUrl!==null&&v.userCode!==null:v.verificationUrl===null&&v.userCode===null)&&(v.state==='authorized'?v.candidateId!==null:v.candidateId===null);
 const contracts: { [M in keyof MethodContracts]: { params: Check; result: Check } } = {
+  "models.refreshCatalog": {params:shape({networkApproved:v=>v===true}),result:shape({refreshed:boolean})},
   "models.oauthStart": {params:shape({windowId:id,generation:integer(1)}),result:oauthStatus},
   "models.oauthStatus": {params:oauthBinding,result:oauthStatus},
   "models.oauthCancel": {params:oauthBinding,result:shape({cancelled:boolean})},

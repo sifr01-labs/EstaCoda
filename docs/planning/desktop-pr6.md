@@ -63,3 +63,9 @@ Validation: 110 focused protocol, ownership, Session database and Task executor 
 Authorization uses the existing Codex device/PKCE flow with fixed OpenAI endpoints, pinned URL-checked requests, 15-second request deadlines, bounded responses, no redirects and a 15-minute operation lifetime. Ordinary RPC returns only the verification URL, user code, state and candidate handle. Tokens remain in the service candidate store until reviewed Apply. Window generation changes, cancellation and disposal abort the flow and discard late token exchanges. Verification extracts only the access token from the validated staged record.
 
 Validation: 93 OAuth, candidate, private-pipe and protocol tests passed; root typecheck and desktop foundation checks passed. Cancellation tests cover late exchange completion after explicit cancel, window closure and service shutdown. These are synthetic endpoint tests; no live account authorization or paid provider call was performed. Risk: OAuth is a credential boundary; browser opening remains a separate explicit Main action in the desktop setup slice.
+
+## 9. Live provider and model dashboard
+
+The approved Models component now has a live data path through narrow Main/preload methods. It shows provider route health, the primary route, and paged offline model metadata: context/output limits, tool/vision support, lifecycle, source and available pricing. Configured routes sort ahead of catalog-only entries. An explicit confirmation fetches public models.dev metadata with a deadline, response-size limit and redirect rejection; credentials and prompts are excluded.
+
+Validation: 63 catalog/health/protocol tests and 24 desktop unit tests passed, plus root typecheck and desktop foundation checks. Refresh tests cover the fixed public destination, credential omission and oversized responses. The frozen fixture layout remains unchanged; integrated visual/native validation follows after setup and route editors are connected.

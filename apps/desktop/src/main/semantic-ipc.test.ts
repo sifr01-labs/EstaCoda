@@ -11,3 +11,9 @@ it('accepts only an ID for independent Work inspection',()=>{
  expect(()=>validateSemanticPayload('getWork',{workId:'session:old'})).not.toThrow();
  for(const payload of [{workId:'../escape'},{workId:'a',profileId:'other'},{workId:'a',cursor:'x'},{}])expect(()=>validateSemanticPayload('getWork',payload)).toThrow();
 });
+
+it('bounds catalog paging and forbids network or profile authority in ordinary payloads',()=>{
+ expect(()=>validateSemanticPayload('modelPage',{cursor:'page_1'})).not.toThrow();
+ for(const payload of [{cursor:'../bad'},{profileId:'other'},{limit:999},{credential:'secret'}])expect(()=>validateSemanticPayload('modelPage',payload)).toThrow();
+ expect(()=>validateSemanticPayload('refreshCatalog',{})).not.toThrow();expect(()=>validateSemanticPayload('refreshCatalog',{url:'https://other'})).toThrow();
+});

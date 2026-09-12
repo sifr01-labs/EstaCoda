@@ -14,6 +14,7 @@ const ready=ipcRenderer.invoke('desktop:bind').then((binding:{generation:number;
 void ready.catch(()=>{});
 const invoke=async(method:string,payload:Record<string,unknown>={})=>{await ready;return ipcRenderer.invoke('desktop:'+method,{generation,payload});};
 const api:DesktopApi={
+  models:Object.freeze({models:(cursor?:string)=>invoke('modelPage',cursor?{cursor}:{}),providers:(cursor?:string)=>invoke('providerPage',cursor?{cursor}:{}),refreshCatalog:()=>invoke('refreshCatalog')}),
   platform:process.platform,
   reconnect:()=>invoke('reconnect'),moreWork:()=>invoke('moreWork'),moreInbox:()=>invoke('moreInbox'),
   appearance:()=>invoke('appearance'),setAppearance:value=>invoke('setAppearance',value),
