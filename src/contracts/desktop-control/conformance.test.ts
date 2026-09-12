@@ -30,6 +30,8 @@ const activities: ActivityProjection[] = [
   { ...activityBase, kind: "status", status: "needs_attention", reason: "Waiting for approval" },
 ];
 const cases = {
+ "diff.list":{params:{target},result:{items:[],truncated:false}},
+ "diff.patch":{params:{target,path:'file.txt',stage:'staged'},result:{path:'file.txt',stage:'staged',binary:false,text:'',truncated:false}},
  "files.list":{params:{target,path:'.'},result:{items:[],truncated:false}},
  "files.preview":{params:{target,path:'file.txt'},result:{path:'file.txt',size:0,binary:false,text:'',truncated:false}},
  "telegram.handoff":{params:{operationId:'op',sessionId:'s',action:'create',confirmed:true},result:{operationId:'op',action:'handoff.create',state:'completed'}},

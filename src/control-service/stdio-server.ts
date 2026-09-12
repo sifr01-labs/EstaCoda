@@ -95,7 +95,7 @@ export class StdioControlServer {
     const timer = setTimeout(() => {
       controller.abort();
       this.write(failureEnvelope(request.id, mutation ? '-32008' : '-32010'));
-    }, this.options.requestTimeoutMs ?? (['targets.create','targets.execute'].includes(request.method)?110_000:['targets.list','targets.inspect','targets.reviewCreate','work.targets'].includes(request.method)?10_000:30_000));
+    }, this.options.requestTimeoutMs ?? (['targets.create','targets.execute'].includes(request.method)?110_000:['files.list','files.preview','diff.list','diff.patch','targets.list','targets.inspect','targets.reviewCreate','work.targets'].includes(request.method)?10_000:30_000));
     this.#pending.set(request.id, { controller, timer, mutation });
     if (request.method === 'control.initialize') this.#initializing = true;
     void this.dispatch(request, controller.signal).then((reply) => {
