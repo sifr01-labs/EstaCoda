@@ -39,7 +39,7 @@ export type MethodContracts = {
   "models.reviewPrimary": {params: Omit<VerifyCandidateParams,'spendApproved'>;result:ModelRouteDraft};
   "models.applyDraft": {params:ModelDraftBinding;result:ModelApplyReceipt};
   "models.cancelDraft": {params:ModelDraftBinding;result:{cancelled:boolean}};
-  "models.inspectApply": {params:{operationId:string};result:ModelApplyReceipt};
+  "models.inspectApply": {params:{operationId?:string};result:ModelApplyReceipt};
   "models.verifyCandidate": {params: VerifyCandidateParams; result: CandidateVerification};
   "control.initialize": { params: InitializeParams; result: InitializeResult };
   "control.bootstrap": { params: Record<string, never>; result: BootstrapResult };

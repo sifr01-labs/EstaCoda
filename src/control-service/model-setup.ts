@@ -15,7 +15,7 @@ import {candidateRouteBinding, ControlProtocolError, type MethodContracts, type 
 import {getProviderMetadata} from '../providers/provider-metadata.js';
 import {loadRuntimeConfig} from '../config/runtime-config.js';
 import {primaryRoutePlan} from '../setup/review/model-route-plan.js';
-import {captureProfileApplySnapshot,applyProfilePlan,inspectProfileApply,type ProfileApplySnapshot} from '../setup/review/profile-apply.js';
+import {captureProfileApplySnapshot,applyProfilePlan,inspectProfileApply,latestProfileApplyOperation,type ProfileApplySnapshot} from '../setup/review/profile-apply.js';
 import {CredentialCandidates,type CandidateScope} from './credential-candidates.js';
 import {validateCandidateRequest} from './candidate-verification.js';
 type Draft={expires:number;params:{windowId:string;generation:number;candidateId?:string;route?:CandidateRoute};plan:SetupApplyPlan;projection:ModelRouteDraft;snapshot:ProfileApplySnapshot;credentialEnv?:string;scope?:CandidateScope;abort:AbortController;timer:ReturnType<typeof setTimeout>;applying:boolean;consumed:boolean};
@@ -38,6 +38,7 @@ export class ModelSetup {
     const snapshot=await captureProfileApplySnapshot(this.input);
     if(existing && JSON.stringify(snapshot.files)!==JSON.stringify(existing.snapshot.files))throw new ControlProtocolError('-32007');
     const loaded=await loadRuntimeConfig({...this.input,workspaceRoot:this.input.homeDir,configurationInspection:true});
+    if(role==='primary' && loaded.modelFallbackRoutes.some(route=>route.provider===params.route.providerId&&route.id===params.route.modelId&&new URL(route.baseUrl??getProviderMetadata(route.provider).defaultBaseUrl??'http://invalid').href.replace(/\/$/,'')===new URL(params.route.endpoint).href.replace(/\/$/,'')))throw new ControlProtocolError('-32602');
     if(role==='fallback'||role==='auxiliary'){
       const identity=(provider:string,id:string,endpoint?:string)=>JSON.stringify([provider,id,new URL(endpoint ?? getProviderMetadata(provider).defaultBaseUrl ?? 'http://invalid').href.replace(/\/$/,'')]);
       const key=identity(params.route.providerId,params.route.modelId,params.route.endpoint);
@@ -169,7 +170,7 @@ export class ModelSetup {
     if(!draft.applying){this.#drafts.delete(binding.draftId);if(draft.params.candidateId){try{this.candidates.discard(draft.params.candidateId,draft.scope!);}catch{}}}
     return {cancelled:!draft.consumed&&!draft.applying};
   }
-  async inspect(operationId:string):Promise<ModelApplyReceipt>{const receipt=await inspectProfileApply(this.input,operationId);return {...receipt,state:receipt.state,verification:receipt.state==='applied'?await this.verifySaved():'not_tested'};}
+  async inspect(operationId?:string):Promise<ModelApplyReceipt>{operationId??=await latestProfileApplyOperation(this.input)??'none';const receipt=await inspectProfileApply(this.input,operationId);return {...receipt,state:receipt.state,verification:receipt.state==='applied'?await this.verifySaved():'not_tested'};}
   private async verifySaved():Promise<ModelApplyReceipt['verification']>{try {const catalog=await captureModelCatalog(this.input);const routes=catalog.models.filter(model=>model.role==='primary'||model.role==='fallback');if(!routes.some(model=>model.role==='primary')||routes.some(model=>!['configured','network_disabled'].includes(model.health??'')))return 'repair_required';const auxiliary=await this.auxiliary();const loaded=await loadRuntimeConfig({...this.input,workspaceRoot:this.input.homeDir,configurationInspection:true});return auxiliary.items.every(item=>item.mode==='disabled'||item.mode==='auto'&&item.providerId===null||item.runnable||item.providerId!==null&&loaded.config.providers?.[item.providerId]?.enableNetwork===false&&['present','not_required'].includes(item.credentialState))?'configured':'repair_required';}catch{return 'repair_required';}}
   dispose(){for(const draft of this.#drafts.values()){draft.abort.abort();clearTimeout(draft.timer);}this.#drafts.clear();this.#fallbackListing=undefined;this.#closed=true;}
   private require(binding:ModelDraftBinding):Draft{const draft=this.#drafts.get(binding.draftId);if(this.#closed||!draft||(!draft.consumed && performance.now()>=draft.expires)||draft.params.windowId!==binding.windowId||draft.params.generation!==binding.generation)throw new ControlProtocolError('-32003');return draft;}

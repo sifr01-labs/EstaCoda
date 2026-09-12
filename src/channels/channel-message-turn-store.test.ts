@@ -1,4 +1,4 @@
-import { CONTROL_RECEIPT_SCHEMA_VERSION } from "../gateway/control-receipts.js";
+import { TASK_MODEL_OVERRIDE_SCHEMA_VERSION } from "../tasks/task-schema.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -168,7 +168,7 @@ describe("SQLiteChannelMessageTurnStore", () => {
     const fixture = await createFixture();
     expect(fixture.db.db.query<{ version: number }>(
       "select max(version) as version from schema_version"
-    ).get()).toEqual({ version: CONTROL_RECEIPT_SCHEMA_VERSION });
+    ).get()).toEqual({ version: TASK_MODEL_OVERRIDE_SCHEMA_VERSION });
     expect(fixture.db.db.query<{ name: string }>(`
       select name from sqlite_master where type = 'index' and name = 'idx_channel_message_turn_bindings_retention'
     `).get()).toEqual({ name: "idx_channel_message_turn_bindings_retention" });

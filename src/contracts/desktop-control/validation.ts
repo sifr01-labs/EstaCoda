@@ -112,7 +112,7 @@ const contracts: { [M in keyof MethodContracts]: { params: Check; result: Check 
   "models.reviewPrimary": {params:shape({windowId:id,generation:integer(1),route:candidateRoute},{candidateId:id}),result:modelRouteDraft},
   "models.applyDraft": {params:modelDraftBinding,result:modelApplyReceipt},
   "models.cancelDraft": {params:modelDraftBinding,result:shape({cancelled:boolean})},
-  "models.inspectApply": {params:shape({operationId:id}),result:modelApplyReceipt},
+  "models.inspectApply": {params:shape({},{operationId:id}),result:modelApplyReceipt},
   "models.verifyCandidate": {params:shape({windowId:id,generation:integer(1),spendApproved:v=>v===true,route:candidateRoute},{candidateId:id}),result:candidateVerification},
   "models.verifyDraft": {params:shape({draftId:id,windowId:id,generation:integer(1),spendApproved:v=>v===true,allowPrivateEndpoint:boolean}),result:candidateVerification},
   "models.list": { params: shape(pageParams, optionalPage), result: page(model) },
@@ -200,7 +200,7 @@ export function validateControlResponse<M extends keyof MethodContracts>(value: 
     const requiredRole=expectedRole[request.method];
     if(requiredRole && result.role!==requiredRole)throw new ControlProtocolError('-32003');
     if ((request.method==='models.reviewAuxiliary'||request.method==='models.reviewAuxiliaryMode') && result.slot!==request.params.slot)throw new ControlProtocolError('-32003');
-    if (request.method === 'models.inspectApply' && result.operationId !== request.params.operationId) throw new ControlProtocolError('-32003');
+    if (request.method === 'models.inspectApply' && request.params.operationId!==undefined && result.operationId !== request.params.operationId) throw new ControlProtocolError('-32003');
     if (request.method === 'models.applyDraft' && result.operationId !== request.params.draftId) throw new ControlProtocolError('-32003');
     if ((request.method === 'models.reviewPrimary' || request.method === 'models.reviewFallback' || request.method === 'models.reviewAuxiliary') && candidateRouteBinding(result.route as CandidateRoute) !== candidateRouteBinding(request.params.route)) throw new ControlProtocolError('-32003');
     if ("operationId" in request.params && 'sessionId' in request.params && 'target' in request.params) {

@@ -49,6 +49,9 @@ it('adds, reorders and removes fallbacks without redirecting the primary or acce
     let config=JSON.parse(await readFile(paths.configPath,'utf8'));
     expect(config.providers.kimi.baseUrl).toBe('https://api.moonshot.ai/v1');expect(config.providers.kimi.apiKeyEnv).toBe('ORIGINAL_KEY');expect(config.model.id).toBe('primary');
     expect(config.model.fallbacks.every((route:{apiKeyEnv:string})=>route.apiKeyEnv!=='ORIGINAL_KEY')).toBe(true);
+    const duplicateRoute:CandidateRoute={providerId:'kimi',modelId:'fallback-one',endpoint:'https://alternative.example/v1/',authMethod:'api_key',apiMode:'openai_chat_completions',allowPrivateEndpoint:false};
+    const duplicateCandidate=candidates.stage({windowId:'w',generation:1,purpose:'provider',providerId:'kimi',authMethod:'api_key',endpoint:duplicateRoute.endpoint},'synthetic-duplicate-primary');
+    await expect(setup.review({windowId:'w',generation:1,candidateId:duplicateCandidate,route:duplicateRoute},'primary')).rejects.toThrow();
     const list=await setup.fallbacks();
     await expect(setup.reviewFallbackOrder({windowId:'w',generation:1,revision:list.revision,order:[0,0]})).rejects.toThrow();
     const ordered=await setup.reviewFallbackOrder({windowId:'w',generation:1,revision:list.revision,order:[1,0]});await apply(ordered.draftId);
@@ -119,4 +122,8 @@ it('rejects another profile or bridge candidate and never changes the other prof
 it('preserves current primary limits when selecting its configured route again',async()=>{
  const homeDir=await mkdtemp('/tmp/ec-primary-limits-'),input={homeDir,profileId:'p'},paths=resolveProfileStateHome(input),candidates=new CredentialCandidates('p','b'),setup=new ModelSetup(input,candidates,()=>{});
  try{await mkdir(paths.profileRoot,{recursive:true});await writeFile(paths.configPath,JSON.stringify({model:{provider:'local',id:'m',contextWindowTokens:32000,maxTokens:512},providers:{local:{baseUrl:'http://localhost:11434/v1',authMethod:'none',apiMode:'custom_openai_compatible',enableNetwork:true,models:['m']}}}));const draft=await setup.reviewConfigured({windowId:'w',generation:1,providerId:'local',modelId:'m',role:'primary'});expect(draft.route).toMatchObject({contextWindowTokens:32000,maxTokens:512});expect(await setup.apply({windowId:'w',generation:1,draftId:draft.draftId},new AbortController().signal)).toMatchObject({state:'applied',verification:'configured'});}finally{setup.dispose();candidates.dispose();await rm(homeDir,{recursive:true,force:true});}
+});
+it('reconciles the latest saved Apply after service restart without crossing profiles',async()=>{
+ const homeDir=await mkdtemp('/tmp/ec-restart-receipt-'),input={homeDir,profileId:'p'},candidates=new CredentialCandidates('p','b');let setup=new ModelSetup(input,candidates,()=>{});
+ try{const draft=await setup.review({windowId:'w',generation:1,route:{providerId:'local',modelId:'test-chat',endpoint:'http://localhost:11434/v1',authMethod:'none',apiMode:'custom_openai_compatible',allowPrivateEndpoint:true}});await setup.apply({windowId:'w',generation:1,draftId:draft.draftId},new AbortController().signal);setup.dispose();setup=new ModelSetup(input,candidates,()=>{});expect(await setup.inspect()).toMatchObject({operationId:draft.draftId,state:'applied'});const otherCandidates=new CredentialCandidates('other','c'),other=new ModelSetup({homeDir,profileId:'other'},otherCandidates,()=>{});try{expect(await other.inspect()).toMatchObject({state:'unknown',operationId:'none'});}finally{other.dispose();otherCandidates.dispose();}}finally{setup.dispose();candidates.dispose();await rm(homeDir,{recursive:true,force:true});}
 });

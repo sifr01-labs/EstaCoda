@@ -55,6 +55,12 @@ export async function recoverProfileApply(input:Identity):Promise<ProfileApplyRe
     await finish(root,journal.operationId,journal.files);return {operationId:journal.operationId,state:'applied'};
   });
 }
+/** Safe restart reconciliation: expose only the latest operation identity, never staged files. */
+export async function latestProfileApplyOperation(input:Identity):Promise<string|undefined>{
+  const root=resolveProfileStateHome(input).profileRoot;
+  for(const name of [journalName,'.profile-apply-receipt.json']){const raw=await readBounded(join(root,name),name===journalName?4_194_304:4096);if(raw===null)continue;const value=JSON.parse(raw);if(typeof value.operationId!=='string'||!/^[a-f0-9-]{36}$/.test(value.operationId))throw new Error('Profile receipt needs repair');return value.operationId;}
+  return undefined;
+}
 export async function inspectProfileApply(input:Identity,operationId:string):Promise<ProfileApplyReceipt> {
   const root=resolveProfileStateHome(input).profileRoot;
   const pending=await readBounded(join(root,journalName),4_194_304);

@@ -16,7 +16,7 @@ it('binds private entry and reviewed Apply to Main-owned identity and retains a 
 it('cancels staged keys and refuses stale setup IDs after profile invalidation',async()=>{
  const f=fixture();const {setupId}=await f.setup.begin(route);await f.setup.stage(setupId);expect(await f.setup.cancel(setupId)).toEqual({cancelled:true});expect(f.pipe.closeWindow).toHaveBeenCalledOnce();
  const next=await f.setup.begin(route);f.connection.state={profileId:'other',generation:2};f.connection.emit('invalidate');await expect(f.setup.review(next.setupId)).rejects.toThrow('Setup changed');
- expect(await f.setup.inspect()).toBeNull();expect(f.calls.some(c=>c.method==='models.applyDraft')).toBe(false);
+ f.connection.modelRequest.mockResolvedValueOnce({operationId:'none',state:'unknown',verification:'not_tested'} as any);expect(await f.setup.inspect()).toBeNull();expect(f.calls.some(c=>c.method==='models.applyDraft')).toBe(false);
 });
 it('does not blindly resend an Apply after transport failure',async()=>{
  const f=fixture();const {setupId}=await f.setup.begin(route);await f.setup.stage(setupId);await f.setup.review(setupId);
