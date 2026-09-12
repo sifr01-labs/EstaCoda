@@ -248,6 +248,7 @@ export type ChannelAdapter = {
 };
 
 export type TelegramAuthPolicy = {
+  enabled?: boolean;
   allowedUserIds?: string[];
   allowedChatIds?: string[];
   deniedMessage?: string;

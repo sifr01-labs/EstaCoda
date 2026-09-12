@@ -35,7 +35,7 @@ const cases = {
  "telegram.sessions":{params:{},result:{items:[],truncated:false}},
  "telegram.pairing":{params:{},result:{code:null,expiresAt:null}},
  "telegram.execute":{params:{operationId:'op',action:'sync',confirmed:true},result:{operationId:'op',action:'telegram.sync',state:'completed'}},
- "gateway.diagnostics":{params:{},result:{service:'absent',manager:'none',runtime:'stopped',polling:'unknown',observedAt:null}},
+ "gateway.diagnostics":{params:{},result:{queuedTurns:null,uncertainTurns:null,recentDeliveryFailures:null,service:'absent',manager:'none',runtime:'stopped',polling:'unknown',observedAt:null}},
  "gateway.execute":{params:{operationId:'op',action:'stop',acknowledgeSharedWork:true},result:{operationId:'op',action:'gateway.stop',state:'completed'}},
  "connections.inspectOperation":{params:{operationId:'op'},result:{operationId:'op',action:'unknown',state:'unknown'}},
  "telegram.verify":{params:{windowId:'w',generation:1,candidateId:'candidate'},result:{state:'passed',reason:'none',verifiedAt:1,botUsername:'bot',latencyMs:1}},

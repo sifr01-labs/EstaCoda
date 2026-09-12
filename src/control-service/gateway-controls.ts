@@ -1,3 +1,4 @@
+import {connectionDiagnostics} from './connection-diagnostics.js';
 import {fileURLToPath} from 'node:url';
 import {homedir} from 'node:os';
 import {installService,probeServiceState,detectServiceManager} from '../gateway/service-manager.js';
@@ -20,6 +21,6 @@ export class GatewayControls {
  async diagnostics(signal:AbortSignal):Promise<GatewayDiagnostics>{
   const connection=await telegramConnection(this.input,signal);let service:GatewayDiagnostics['service']='unknown';
   try{service=(await probeServiceState({serviceUserHomeDir:homedir(),profileId:this.input.profileId,system:false})).installed?'installed':'absent';}catch{}
-  return{service,manager:detectServiceManager(),runtime:connection.runtimeState==='running'?'running':connection.runtimeState==='stopped'?'stopped':'disconnected',polling:connection.telegram?.polling??'unknown',observedAt:connection.telegram?.observedAt??null};
+  return{...await connectionDiagnostics(this.input),service,manager:detectServiceManager(),runtime:connection.runtimeState==='running'?'running':connection.runtimeState==='stopped'?'stopped':'disconnected',polling:connection.telegram?.polling??'unknown',observedAt:connection.telegram?.observedAt??null};
  }
 }

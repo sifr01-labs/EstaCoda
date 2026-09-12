@@ -16,7 +16,7 @@ export type TelegramVerify={windowId:string;generation:number;candidateId?:strin
 export type TelegramVerification={state:'passed'|'failed';reason:'none'|'credential_missing'|'invalid_credential'|'invalid_response'|'unavailable'|'cancelled';verifiedAt:number|null;botUsername:string|null;latencyMs:number};
 export type ConnectionOperation={operationId:string;action:string;state:'completed'|'failed'|'uncertain'|'unknown'};
 export type GatewayAction='install'|'start'|'stop'|'restart';
-export type GatewayDiagnostics={service:'installed'|'absent'|'unknown';manager:'launchd'|'systemd-user'|'systemd-system'|'none';runtime:'running'|'stopped'|'disconnected';polling:'unknown'|'starting'|'healthy'|'degraded'|'stopped';observedAt:number|null};
+export type GatewayDiagnostics={queuedTurns:number|null;uncertainTurns:number|null;recentDeliveryFailures:number|null;service:'installed'|'absent'|'unknown';manager:'launchd'|'systemd-user'|'systemd-system'|'none';runtime:'running'|'stopped'|'disconnected';polling:'unknown'|'starting'|'healthy'|'degraded'|'stopped';observedAt:number|null};
 
 export type TelegramOperationAction='pairingCreate'|'pairingCancel'|'sync'|'test';
 export type TelegramPairing={code:string|null;expiresAt:number|null};

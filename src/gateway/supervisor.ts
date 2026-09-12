@@ -1545,6 +1545,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
     const pairChannelMessage = async (message: ChannelMessage): Promise<string | undefined> => {
       if (message.channel === "telegram") {
         const result = await consumeTelegramPairingCode({
+          profileId,
           workspaceRoot: options.workspaceRoot,
           homeDir,
           code: message.text,
@@ -1625,6 +1626,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           isWorkspaceTrusted: (path) => trustStore.isTrusted(path),
           approvalStore,
           authPolicy: authPolicies,
+          telegramPolicy:async()=>{const latest=(await loadConfig()).channels.telegram;return{auth:{enabled:latest.enabled===true,allowedUserIds:latest.allowedUserIds??[],allowedChatIds:latest.allowedChatIds??[]},secureInputMode:latest.secureInputMode??'protected-handoff'};},
           trustedWorkspace: async (message) => trustStore.isTrusted(await channelWorkspaceRoot(await channelSessionStore.getOrCreateSessionId(message.sessionKey))),
           sessionPolicy,
           handoffStore,
@@ -1721,6 +1723,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
           isWorkspaceTrusted: (path) => trustStore.isTrusted(path),
           approvalStore,
           authPolicy: authPolicies,
+          telegramPolicy:async()=>{const latest=(await loadConfig()).channels.telegram;return{auth:{enabled:latest.enabled===true,allowedUserIds:latest.allowedUserIds??[],allowedChatIds:latest.allowedChatIds??[]},secureInputMode:latest.secureInputMode??'protected-handoff'};},
           trustedWorkspace: async (message) => trustStore.isTrusted(await channelWorkspaceRoot(await channelSessionStore.getOrCreateSessionId(message.sessionKey))),
           sessionPolicy,
           handoffStore,

@@ -140,3 +140,17 @@ file identity; credential changes invalidate the displayed verification.
 Validation: focused credential/profile tests, Desktop unit suite, core/Desktop type checks.
 Risk review: no token enters ordinary IPC/events or operation receipts; no service starts
 or messages send during setup Apply. Deletion does not revoke the token at Telegram.
+
+## Step 13 — Authorization, pairing, approvals and restart coverage
+
+Regression tests found and fixed core pairing gaps: redemption now explicitly uses the
+gateway profile, fails closed at/after expiry, and removes the code after the merged config
+is built. Concurrent/restarted redemption succeeds once. Telegram authorization and secure
+input policy are read for each newly received message; disabling denies prior identities
+and pairing immediately. Adapter transport changes still require an explicit restart.
+The UI now gives the actual pairing instruction: send the code itself, without a command.
+
+Added read-only profile-scoped queued/uncertain turn counts and bounded recent delivery
+failure counts. Diagnostics return counts only, never message bodies or raw errors.
+Validation includes the existing ChannelGateway, canonical Desktop approval, configuration,
+attachment and new pairing/restart tests, plus protocol and core/Desktop type checks.

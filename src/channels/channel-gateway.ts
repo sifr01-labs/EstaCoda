@@ -235,6 +235,7 @@ export type ChannelGatewayOptions = {
   runtimeForSession: ChannelRuntimeFactory;
   sessionStore?: ChannelSessionStore;
   authPolicy?: ChannelAuthPolicies;
+  telegramPolicy?:()=>Promise<{auth:NonNullable<ChannelAuthPolicies['telegram']>;secureInputMode:TelegramSecureInputMode}>;
   trustedWorkspace?: boolean | ((message: ChannelMessage) => boolean | Promise<boolean>);
   onStopRequested?: (message: ChannelMessage) => void | Promise<void>;
   pair?: (message: ChannelMessage) => Promise<string | undefined>;
@@ -475,6 +476,7 @@ export class ChannelGateway {
   readonly #isWorkspaceTrusted?: (path: string) => Promise<boolean>;
   readonly #selectionLocks = new Set<string>();
   readonly #admitting = new Map<string, number>();
+  readonly #telegramPolicy:ChannelGatewayOptions['telegramPolicy'];
   readonly #authPolicy: ChannelAuthPolicies;
   readonly #trustedWorkspace: ChannelGatewayOptions["trustedWorkspace"];
   readonly #onStopRequested: ChannelGatewayOptions["onStopRequested"];
@@ -543,7 +545,7 @@ export class ChannelGateway {
   readonly #textDebounceBuffers = new Map<string, ChannelTextDebounceBuffer>();
   readonly #textDebounceFlushes = new Set<Promise<void>>();
   readonly #telegramStreaming: (ChannelStreamingTextOptions & { enabled?: boolean }) | undefined;
-  readonly #telegramSecureInputMode: TelegramSecureInputMode;
+  #telegramSecureInputMode: TelegramSecureInputMode;
   readonly #pendingTelegramSecureInputByAction = new Map<string, PendingTelegramSecureInput>();
   readonly #pendingTelegramSecureInputByCapture = new Map<string, PendingTelegramSecureInput>();
   readonly #armedTelegramSecrets = new Map<string, ArmedTelegramSecret>();
@@ -618,6 +620,7 @@ export class ChannelGateway {
         : (channelKind) => channelKind === "whatsapp" ? legacyWhatsAppTextDebounce : undefined
     );
     this.#telegramStreaming = options.telegramStreaming;
+    this.#telegramPolicy=options.telegramPolicy;
     this.#telegramSecureInputMode = options.telegramSecureInputMode ?? "protected-handoff";
     this.#telegramSecureInputReplayStore = options.telegramSecureInputReplayStore ?? (
       options.homeDir === undefined
@@ -1400,7 +1403,8 @@ export class ChannelGateway {
 
   async receive(message: ChannelMessage): Promise<ChannelGatewayResult> {
     const adapter = this.#adapterFor(message.channel);
-    const auth = authorizeChannelMessage(message, this.#authPolicy);
+    let policies=this.#authPolicy;if(message.channel==='telegram'&&this.#telegramPolicy){const latest=await this.#telegramPolicy();policies={...policies,telegram:latest.auth};this.#telegramSecureInputMode=latest.secureInputMode;}
+    const auth = authorizeChannelMessage(message, policies);
 
     if (!auth.allowed) {
       if (auth.silentDrop === true) {
@@ -5381,6 +5385,7 @@ export function authorizeChannelMessage(message: ChannelMessage, policies: Chann
 
   if (kind === "telegram") {
     const telegramPolicy = policy as import("../contracts/channel.js").TelegramAuthPolicy;
+    if(telegramPolicy.enabled===false)return{allowed:false,silentDrop:true,pairingAllowed:false,message:'Telegram is disabled.'};
     const allowedUserIds = new Set(telegramPolicy.allowedUserIds ?? []);
     const allowedChatIds = new Set(telegramPolicy.allowedChatIds ?? []);
     const allowed =

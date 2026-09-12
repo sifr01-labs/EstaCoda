@@ -3821,6 +3821,7 @@ export async function createTelegramPairingCode(options: {
 }
 
 export async function consumeTelegramPairingCode(options: {
+  profileId?: string;
   workspaceRoot: string;
   homeDir?: string;
   code: string;
@@ -3840,7 +3841,7 @@ export async function consumeTelegramPairingCode(options: {
   const pairing = existing.config.channels?.telegram?.pairing;
   const now = options.now?.() ?? new Date();
 
-  if (pairing?.code === undefined) {
+  if (existing.config.channels?.telegram?.enabled !== true || pairing?.code === undefined) {
     return {
       paired: false,
       reason: "missing",
@@ -3849,7 +3850,7 @@ export async function consumeTelegramPairingCode(options: {
     };
   }
 
-  if (pairing.expiresAt !== undefined && new Date(pairing.expiresAt).getTime() < now.getTime()) {
+  if (!pairing.expiresAt || !Number.isFinite(Date.parse(pairing.expiresAt)) || Date.parse(pairing.expiresAt) <= now.getTime()) {
     return {
       paired: false,
       reason: "expired",
@@ -3879,6 +3880,7 @@ export async function consumeTelegramPairingCode(options: {
     }
   });
 
+  if(config.channels?.telegram)delete config.channels.telegram.pairing;
   await saveRuntimeConfig(targetPath, config);
 
   return {
