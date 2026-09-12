@@ -1,3 +1,4 @@
+import {listBrowserViews} from './browser-view.js';
 import {listArtifacts,inspectArtifact} from './artifacts.js';
 import {workEvidence} from './evidence.js';
 import {TerminalCapabilities} from './terminal-capabilities.js';
@@ -78,6 +79,7 @@ export class DesktopBridge {
       'telegram.apply':async(request,signal)=>{if(request.method!=='telegram.apply')throw new ControlProtocolError('-32601');return{result:await this.telegramSetup.apply(request.params,signal)};},
       'telegram.cancel':request=>{if(request.method!=='telegram.cancel')throw new ControlProtocolError('-32601');return{result:this.telegramSetup.cancel(request.params)};},
       'telegram.inspectApply':async request=>{if(request.method!=='telegram.inspectApply')throw new ControlProtocolError('-32601');return{result:await this.telegramSetup.inspect(request.params.operationId)};},
+      'browser.list':async(request,signal)=>{if(request.method!=='browser.list')throw new ControlProtocolError('-32601');return{result:await listBrowserViews(this.options,this.workSnapshot().get(request.params.workId),signal)};},
       'connections.list':async(request,signal)=>{if(request.method!=='connections.list')throw new ControlProtocolError('-32601');if(request.params.cursor)throw new ControlProtocolError('-32007');return{result:{items:[await telegramConnection(this.options,signal)],nextCursor:null}};},
       'connections.get':async(request,signal)=>{if(request.method!=='connections.get'||request.params.connectionId!=='telegram')throw new ControlProtocolError('-32003');return{result:await telegramConnection(this.options,signal)};},
       'models.verifyDraft':async(request,signal)=>{if(request.method!=='models.verifyDraft')throw new ControlProtocolError('-32601');return {result:await this.modelSetup.verifyDraft(request.params,signal,this.verifier)};},

@@ -94,8 +94,11 @@ const oauthStatus:Check=v=>oauthStatusShape(v)&&isRecord(v)&&(v.state==='pending
 const candidateVerification=shape({state:choice(['passed','failed','cancelled']),reason:choice(['none','unreachable','invalid_credential','model_unavailable','unsupported','incomplete','cancelled']),streaming:boolean,tools:boolean,latencyMs:integer(),inputTokens:nullable(integer()),outputTokens:nullable(integer()),estimatedCost:nullable(nonnegative)});
 const artifactReference=shape({source:choice(['session','task']),ownerId:id,artifactId:id});
 const artifactProjection=shape({reference:artifactReference,displayName:text(160),mimeType:text(160,1),bytes:integer(),sha256:text(64,64),createdAt:text(64,1),retention:choice(['retained','pruned','expired']),sourceOrigin:nullable(text(512)),workIds:array(id,3),target:nullable(target)},{sourceWorkspaceId:id,applicationTargetId:id,evidenceCallIds:array(text(256,1),64)});
+const browserReference=shape({sessionId:id,browserId:id,eventId:integer(1),target});
+const browserState=shape({reference:browserReference,url:nullable(text(2048)),title:nullable(text(160)),observedAt:text(64,1),readiness:choice(['loading','interactive','complete','unknown']),state:choice(['recorded','blocked']),lastAction:text(160),artifacts:array(artifactReference,16)});
 const artifactPreview=shape({artifact:artifactProjection,integrity:choice(['verified','unavailable']),text:nullable(text(16384)),truncated:boolean,reason:nullable(text(2048))});
 const contracts: { [M in keyof MethodContracts]: { params: Check; result: Check } } = {
+  "browser.list":{params:shape({workId:id}),result:shape({items:array(browserState,8),truncated:boolean})},
   "artifacts.list":{params:shape({},{cursor:text(40,1)}),result:shape({items:array(artifactProjection,32),nextCursor:nullable(text(40,1))})},
   "artifacts.get":{params:shape({reference:artifactReference}),result:artifactPreview},
   "artifacts.open":{params:shape({reference:artifactReference}),result:artifactPreview},
