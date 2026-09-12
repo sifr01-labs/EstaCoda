@@ -22,3 +22,12 @@ it('rejects cancelled consent and late observations after profile invalidation',
 it('returns control only on explicit release and prevents concurrent input',async()=>{
  const{connection,request}=fixture(),controls=new DesktopBrowserControls(connection,async()=>true);try{const opened=await controls.open('session:s',reference);let finish!:(value:any)=>void;request.mockImplementationOnce(()=>new Promise(resolve=>finish=resolve));const pending=controls.frame(opened.id);await expect(controls.frame(opened.id)).rejects.toThrow('settling');await expect(controls.release(opened.id)).rejects.toThrow('settling');finish({frame:{frameId:'f'}});await pending;await controls.release(opened.id);expect(request.mock.calls.at(-1)![0].command.action).toBe('release');}finally{controls.dispose();}
 });
+it('opens an empty supported workspace with consent and tracks runtime generated session IDs',async()=>{
+ const{connection,request}=fixture();
+ request.mockImplementation(async({command}:any)=>({lease:{id:'private-lease',generation:1},state:'human',frame:null,workspace:{supported:true,reason:null,truncated:false,sessions:[],...(command.action==='workspace'?{selectedSessionId:'runtime-created'}:{})}}) as any);
+ const controls=new DesktopBrowserControls(connection,async()=>true);
+ try{const opened=await controls.open('session:s');await controls.workspace(opened.id,{kind:'create',url:'https://example.com'});await controls.workspace(opened.id,{kind:'list'});
+ expect(request.mock.calls.map(([v])=>v.command.action)).toEqual(['inventory','acquire','workspace','workspace']);expect(request.mock.calls.at(-1)![0].command.browserId).toBe('runtime-created');
+ await controls.release(opened.id);expect(request.mock.calls.at(-1)![0].command.browserId).toBe('runtime-created');
+ }finally{controls.dispose();}
+});

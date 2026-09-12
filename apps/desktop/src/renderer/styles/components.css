@@ -339,3 +339,9 @@
 .ec-browserdialog>header{flex-wrap:wrap}.ec-browserdialog>header h2{flex:1;margin:0}.ec-browserdialog figure{margin:16px 0}.ec-browserdialog img{display:block;max-width:100%;height:auto;border:1px solid var(--ec-line);border-radius:8px}.ec-browserdialog .ec-browserurl{overflow-wrap:anywhere}.ec-browserdialog .ec-footnote{overflow-wrap:anywhere}.ec-browserdialog .ec-filelayout section{min-width:0}.ec-browserdialog .ec-filelayout section>.ec-btn{margin:4px 8px 4px 0}
 
 .ec-browsercontrol{margin-block:16px;padding:16px;border:1px solid var(--ec-line);border-radius:8px}.ec-browsercontrol img{cursor:crosshair}.ec-browsercontrol [tabindex]:focus-visible{outline:2px solid var(--ec-accent);outline-offset:3px}
+
+.ec-browserworkspace { margin-block: 12px; border-block: 1px solid var(--ec-line); padding-block: 12px; }
+.ec-browserbar { display:flex; flex-wrap:wrap; align-items:center; gap:8px; margin-block:8px; }
+.ec-browserbar input { flex:1; min-width:160px; }
+.ec-browserbar input,.ec-browserbar select { color:var(--ec-text); background:var(--ec-panel); border:1px solid var(--ec-line); border-radius:8px; padding:8px; max-width:100%; }
+.ec-browserbar button[aria-pressed="true"] { color:var(--ec-accent); }

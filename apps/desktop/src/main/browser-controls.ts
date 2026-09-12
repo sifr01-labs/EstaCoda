@@ -1,5 +1,5 @@
 import {randomUUID} from 'node:crypto';
-import type {BrowserViewReference,HumanBrowserLease,HumanBrowserInput,HumanBrowserFrame,HumanBrowserCommand} from '@estacoda/control-protocol';
+import type {BrowserViewReference,HumanBrowserLease,HumanBrowserInput,HumanBrowserFrame,HumanBrowserCommand,BrowserWorkspaceAction,BrowserWorkspaceState} from '@estacoda/control-protocol';
 import type {DesktopConnection} from './connection.js';
 type Entry={id:string;holder:string;workId:string;browserId:string;lease:HumanBrowserLease;sequence:number;generation:number;busy:boolean;renewing:boolean;timer:ReturnType<typeof setInterval>};
 /** Main holds the lease and sequence; the renderer gets only an ephemeral local handle. */
@@ -8,17 +8,38 @@ export class DesktopBrowserControls{
  readonly #invalidate=()=>{this.#epoch++;if(this.#entry)clearInterval(this.#entry.timer);this.#entry=undefined;};
  constructor(readonly connection:DesktopConnection,readonly confirm:(url:string)=>Promise<boolean>){connection.on('invalidate',this.#invalidate);}
  #assert(epoch:number){if(this.#closed||epoch!==this.#epoch||this.connection.state.status!=='ready')throw new Error('Browser connection changed.');}
- async open(workId:string,reference:BrowserViewReference):Promise<{id:string}>{
+ async open(workId:string,reference?:BrowserViewReference):Promise<{id:string}>{
   if(this.#opening||this.#entry)throw new Error('Browser control is already open.');this.#opening=true;const epoch=this.#epoch,generation=this.connection.state.generation;
   try{this.#assert(epoch);
    // Verify the selected observation through inspection before presenting native consent.
-   const views=await this.connection.inspectionRequest('browser.list',{workId});this.#assert(epoch);
-   const view=views.items.find(item=>item.reference.browserId===reference.browserId&&item.reference.sessionId===reference.sessionId&&item.reference.target.targetId===reference.target.targetId&&item.reference.target.targetGeneration===reference.target.targetGeneration);
-   if(view?.state!=='recorded'||!await this.confirm(view.url??'Browser'))throw new Error('Browser takeover cancelled or unavailable.');this.#assert(epoch);
-   const holder=randomUUID(),result=await this.connection.browserRequest({workId,command:{action:'acquire',holder,browserId:reference.browserId}});this.#assert(epoch);
+   let browserId=reference?.browserId??randomUUID(),url='New local browser session';
+   if(reference){
+    const views=await this.connection.inspectionRequest('browser.list',{workId});this.#assert(epoch);
+    const view=views.items.find(item=>item.reference.browserId===reference.browserId&&item.reference.sessionId===reference.sessionId&&item.reference.target.targetId===reference.target.targetId&&item.reference.target.targetGeneration===reference.target.targetGeneration);
+    if(view?.state!=='recorded')throw new Error('Browser unavailable.');url=view.url??'Browser';
+   }else{
+    const state=await this.inventory(workId);this.#assert(epoch);if(!state.supported)throw new Error('Browser workspace unavailable.');
+    browserId=state.sessions[0]?.id??browserId;url=state.sessions[0]?.tabs[0]?.url??url;
+   }
+   if(!await this.confirm(url))throw new Error('Browser takeover cancelled.');this.#assert(epoch);
+   const holder=randomUUID(),result=await this.connection.browserRequest({workId,command:{action:'acquire',holder,browserId}});this.#assert(epoch);
    if(!result.lease)throw new Error('Browser control unavailable.');
-   const entry:Entry={id:randomUUID(),holder,workId,browserId:reference.browserId,lease:result.lease,sequence:0,generation,busy:false,renewing:false,timer:setInterval(()=>void this.#renew(),2000)};this.#entry=entry;return{id:entry.id};
+   const entry:Entry={id:randomUUID(),holder,workId,browserId,lease:result.lease,sequence:0,generation,busy:false,renewing:false,timer:setInterval(()=>void this.#renew(),2000)};this.#entry=entry;return{id:entry.id};
   }finally{this.#opening=false;}
+ }
+ async inventory(workId:string):Promise<BrowserWorkspaceState>{
+  const epoch=this.#epoch;this.#assert(epoch);
+  const result=await this.connection.browserRequest({workId,command:{action:'inventory',holder:randomUUID(),browserId:'inventory'}});
+  this.#assert(epoch);if(!result.workspace)throw new Error('Browser inventory unavailable.');return result.workspace;
+ }
+ async workspace(id:string,operation:BrowserWorkspaceAction):Promise<BrowserWorkspaceState>{
+  const entry=this.#active(id);if(entry.busy)throw new Error('Browser input is settling.');entry.busy=true;
+  try{
+   const result=await this.connection.browserRequest({workId:entry.workId,command:{action:'workspace',holder:entry.holder,browserId:entry.browserId,lease:entry.lease,sequence:++entry.sequence,operation}});
+   this.#active(id);if(this.#entry!==entry||!result.workspace)throw new Error('Browser workspace unavailable.');
+   if(result.workspace.selectedSessionId)entry.browserId=result.workspace.selectedSessionId;
+   return result.workspace;
+  }catch(error){if(this.#entry===entry)this.#invalidate();throw error;}finally{entry.busy=false;}
  }
  #active(id:string){const entry=this.#entry;if(!entry||entry.id!==id||entry.generation!==this.connection.state.generation||this.connection.state.status!=='ready')throw new Error('Browser handle expired. Reacquire control; the agent remains paused.');return entry;}
  async #renew(){const entry=this.#entry;if(!entry||entry.renewing)return;entry.renewing=true;try{await this.connection.browserRequest({workId:entry.workId,command:{action:'renew',holder:entry.holder,browserId:entry.browserId,lease:entry.lease}});}catch{if(this.#entry===entry)this.#invalidate();}finally{entry.renewing=false;}}
