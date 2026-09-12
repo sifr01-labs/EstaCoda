@@ -87,7 +87,7 @@ export type DesktopDiffApi={
 };
 export type DesktopTerminalApi={
  open(target:import('@estacoda/control-protocol').TargetReference):Promise<{id:string;backend:'host'|'docker'}>;
- read(id:string):Promise<{data:string;truncated:boolean;state:'running'|'closed'}>;
+ read(id:string):Promise<{data:string;truncated:boolean;more:boolean;state:'running'|'stopping'|'closed'}>;
  write(id:string,data:string):Promise<void>;
  resize(id:string,cols:number,rows:number):Promise<void>;
  close(id:string):Promise<void>;

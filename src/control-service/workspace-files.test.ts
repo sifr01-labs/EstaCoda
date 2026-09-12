@@ -25,7 +25,7 @@ it('rejects traversal, protected areas, symlink leaves/parents, foreign profiles
   await writeFile(join(homeDir,'outside.txt'),'outside canary');await writeFile(join(root,'inside.txt'),'inside');await mkdir(join(root,'folder'));await writeFile(join(root,'folder','child.txt'),'inside');
   await writeFile(join(root,'.env'),'protected canary');await symlink(join(homeDir,'outside.txt'),join(root,'escape'));await symlink(join(root,'inside.txt'),join(root,'internal-link'));await symlink(join(root,'folder'),join(root,'linked-folder'));
   const record=await store.acquireLocal(root),target={targetId:record.id,targetGeneration:1};await new WorkspaceTrustStore(input).grant(root);
-  for(const path of ['../outside.txt','/etc/passwd','folder/../../outside.txt','.git/config','.env','escape','internal-link','linked-folder/child.txt','folder\\child.txt'])await expect(inspectFiles(input,'files.preview',{target,path},signal)).rejects.toThrow();
+  for(const path of ['../outside.txt','/etc/passwd','folder/../../outside.txt','.git/config','.estacoda-worktrees/other/work/file','.env','escape','internal-link','linked-folder/child.txt','folder\\child.txt'])await expect(inspectFiles(input,'files.preview',{target,path},signal)).rejects.toThrow();
   await expect(inspectFiles({...input,profileId:'other'},'files.preview',{target,path:'inside.txt'},signal)).rejects.toThrow();
   await expect(inspectFiles(input,'files.preview',{target:{...target,targetGeneration:2},path:'inside.txt'},signal)).rejects.toThrow();
   const aborted=new AbortController();aborted.abort();await expect(inspectFiles(input,'files.list',{target,path:'.'},aborted.signal)).rejects.toThrow();
@@ -58,4 +58,14 @@ it('uses the Docker file worker descriptor checks for bounded previews and symli
   const result=request('large.txt');expect(result.ok).toBe(true);expect(result.value.size).toBe(30000);expect(Buffer.from(result.value.bytes,'base64')).toHaveLength(16384);
   for(const path of ['linked.txt','../outside','/etc/passwd'])expect(request(path).ok).toBe(false);
  }finally{await rm(homeDir,{recursive:true,force:true});}
+});
+it('does not expose profile state through a broadly trusted home workspace or a state-root target',async()=>{
+ const homeDir=await realpath(await mkdtemp('/tmp/ec-files-state-')),input={homeDir,profileId:'p'},store=new ExecutionTargetStore(input),signal=new AbortController().signal;
+ try{
+  const foreign=join(homeDir,'.estacoda','profiles','other');await mkdir(foreign,{recursive:true});await writeFile(join(foreign,'auth.json'),'private state canary');await new WorkspaceTrustStore(input).grant(homeDir);
+  const record=await store.acquireLocal(homeDir),target={targetId:record.id,targetGeneration:1};
+  expect((await inspectFiles(input,'files.list',{target,path:'.'},signal)).items.some(item=>item.name==='.estacoda')).toBe(false);
+  await expect(inspectFiles(input,'files.preview',{target,path:'.estacoda/profiles/other/auth.json'},signal)).rejects.toThrow();
+  const state=await store.acquireLocal(foreign);await expect(inspectFiles(input,'files.preview',{target:{targetId:state.id,targetGeneration:1},path:'auth.json'},signal)).rejects.toThrow('Runtime state');
+ }finally{store.close();await rm(homeDir,{recursive:true,force:true});}
 });

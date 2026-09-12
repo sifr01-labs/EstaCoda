@@ -3,7 +3,7 @@ import {explainPathBlock,isLikelyBinary} from '../context/context-security.js';
 import type {MethodContracts} from '../contracts/desktop-control/index.js';
 import {withInspection} from './inspection-lease.js';
 export function inspectionPath(path:string):void{
- if(path!=='.'&&(!path||path.length>1024||path.startsWith('/')||path.includes('\\')||/[\x00-\x1f\x7f]/u.test(path)||path.split('/').some(part=>!part||part==='.'||part==='..'||part==='.git')))throw new Error('Invalid workspace-relative path.');
+ if(path!=='.'&&(!path||path.length>1024||path.startsWith('/')||path.includes('\\')||/[\x00-\x1f\x7f]/u.test(path)||path.split('/').some(part=>!part||part==='.'||part==='..'||part==='.git'||part==='.estacoda'||part==='.estacoda-worktrees')))throw new Error('Invalid workspace-relative path.');
 }
 export async function inspectFiles<M extends 'files.list'|'files.preview'>(input:{homeDir:string;profileId:string},method:M,params:MethodContracts[M]['params'],signal:AbortSignal):Promise<MethodContracts[M]['result']>{
  inspectionPath(params.path);

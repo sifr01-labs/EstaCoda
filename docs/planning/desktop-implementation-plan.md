@@ -1120,6 +1120,8 @@ Implemented on the desktop branch; see the [PR9 implementation and validation re
 - `test(files): block traversal symlink and stale-target access`
 - `test(desktop-terminal): cover shutdown and target fencing`
 
+PR10 implementation and its verified bounds are recorded in [desktop-pr10-validation.md](desktop-pr10-validation.md). Files and Changes remain read-only; native terminal resources have separate core-verified ownership and never grant agent approvals.
+
 ### PR 11 — Artifacts and Evidence
 
 - `feat(artifacts): extend shared profile-owned artifact metadata`

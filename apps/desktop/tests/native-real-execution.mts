@@ -53,6 +53,22 @@ try{
  expect(selected.items).toHaveLength(1);expect(selected.items[0]).toMatchObject(target);
  expect((await page.evaluate(()=>window.desktop.work!.targets())).items.some(item=>item.targetId===target.targetId)).toBe(true);
  expect(inspection.kind).toBe('git-worktree');expect(inspection.readiness).toBe('ready');expect(inspection.workingRoot).not.toBe(inspection.sourceRoot);
+ // PR10 uses the same target through real Main/preload/bridge and native PTY.
+ writeFileSync(join(inspection.workingRoot,'native-inspection.txt'),'Native workspace preview');
+ expect((await page.evaluate(target=>window.desktop.files!.list({target,path:'.'}),target)).items.some(item=>item.name==='native-inspection.txt')).toBe(true);
+ expect((await page.evaluate(target=>window.desktop.files!.preview({target,path:'native-inspection.txt'}),target)).text).toBe('Native workspace preview');
+ expect((await page.evaluate(target=>window.desktop.diff!.list({target}),target)).items.some(item=>item.path==='native-inspection.txt'&&item.stage==='untracked')).toBe(true);
+ await expect(page.evaluate(target=>window.desktop.files!.preview({target,path:'../escape'}),target)).rejects.toThrow();
+ await app.evaluate(({dialog})=>{const original=dialog.showMessageBox;(globalThis as any).restoreTerminalDialog=()=>{dialog.showMessageBox=original;};dialog.showMessageBox=(async(...args:any[])=>{const options=args.at(-1);if(options.title==='Open workspace terminal'){if(options.defaultId!==0||options.cancelId!==0)throw new Error('Unsafe terminal confirmation');return{response:1,checkboxChecked:false};}throw new Error('Unexpected native dialog');}) as typeof original;});
+ const terminal=await page.evaluate(target=>window.desktop.terminal!.open(target),target);expect(terminal.backend).toBe('host');
+ expect((await page.evaluate(target=>window.desktop.targets!.inspect(target),target)).borrowers).toBe(1);
+ await page.evaluate(id=>window.desktop.terminal!.write(id,"printf 'NATIVE_TERMINAL_%s\\n' READY\r"),terminal.id);
+ let terminalOutput='';await expect.poll(async()=>{terminalOutput+=(await page.evaluate(id=>window.desktop.terminal!.read(id),terminal.id)).data;return terminalOutput;},{timeout:5000}).toContain('NATIVE_TERMINAL_READY');
+ await page.evaluate(id=>window.desktop.terminal!.close(id),terminal.id);
+ expect((await page.evaluate(target=>window.desktop.targets!.inspect(target),target)).borrowers).toBe(0);
+ await app.evaluate(()=>(globalThis as any).restoreTerminalDialog());
+ console.log('Native file/diff/PTY target alignment and borrower settlement passed.');
+
  const submit=async(input:any)=>{
   let result:any;
   await expect.poll(async()=>{try{result=await page.evaluate(input=>window.desktop.work!.submit(input),input);return ['sessions.send','tasks.create'].includes(result.receipt.method);}catch{return false;}},{timeout:30000}).toBe(true);return result;

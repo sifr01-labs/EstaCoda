@@ -1,4 +1,6 @@
-import {lstat} from 'node:fs/promises';
+import {resolveGlobalStateHome} from '../config/profile-home.js';
+import {relative,isAbsolute} from 'node:path';
+import {realpath,lstat} from 'node:fs/promises';
 import {randomUUID} from 'node:crypto';
 import {ExecutionTargetStore,targetBinding} from '../workspaces/execution-target.js';
 import {WorkspaceTrustStore} from '../security/workspace-trust-store.js';
@@ -8,12 +10,17 @@ import {DockerContainer} from '../execution/docker-container.js';
 import {DockerWorkspaceFiles} from '../execution/docker-workspace-files.js';
 import {DockerProcessScope} from '../execution/docker-processes.js';
 import type {TargetReference} from '../contracts/desktop-control/index.js';
+export async function assertInspectionRoot(input:{homeDir:string},root:string):Promise<void>{
+ const state=await realpath(resolveGlobalStateHome(input).stateRoot),suffix=relative(state,root);
+ if(suffix===''||suffix!=='..'&&!suffix.startsWith('../')&&!isAbsolute(suffix))throw new Error('Runtime state is not a workspace inspection target.');
+}
 /** Independent inspection owner; shares target identity and execution policy, never a Session owner. */
 export async function withInspection<T>(input:{homeDir:string;profileId:string},reference:TargetReference,signal:AbortSignal,read:(lease:ExecutionLease,root:string)=>Promise<T>):Promise<T>{
  const store=new ExecutionTargetStore(input);let stamp:{dev:number;ino:number}|undefined;let release:(()=>void)|undefined,environment:HostEnvironment|undefined,lease:ExecutionLease|undefined;
  const verify=async()=>{
   signal.throwIfAborted();const target=store.getTarget(reference.targetId);
   if(!target||target.generation!==reference.targetGeneration)throw new Error('Target unavailable.');
+  await assertInspectionRoot(input,target.workspace.canonicalPath);
   await store.validate(targetBinding(target),target.workspace.canonicalPath,signal);
   if(!await new WorkspaceTrustStore(input).isTrusted(target.workspace.canonicalPath))throw new Error('Workspace trust required.');
   const info=await lstat(target.workspace.canonicalPath);
