@@ -24,7 +24,7 @@ export class ProtocolClient extends EventEmitter {
     const request = { jsonrpc: '2.0', id: randomUUID(), method, params } as MethodRequest<M>;
     validateControlRequest(request, this.context);
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => this.failed(), this.timeoutMs); timer.unref();
+      const timer = setTimeout(() => this.failed(), ['targets.create','targets.execute'].includes(method)?Math.max(this.timeoutMs,120_000):this.timeoutMs); timer.unref();
       this.#pending.set(request.id, { request, context: this.context, resolve: value => resolve(value as MethodContracts[M]['result']), reject, timer });
       this.input.write(serializeControlFrame(request as RpcEnvelope));
     });

@@ -25,3 +25,21 @@ test('creation review fits narrow widths and contains keyboard focus',async({pag
 test('clears ready target details on disconnect',async({page})=>{
  await mount(page);await expect(page.getByRole('button',{name:'Create worktree…'})).toBeEnabled();await page.evaluate(()=>(window as any).targetTest.disconnect());await expect(page.getByText('Connection changed. Refresh targets before continuing.')).toBeVisible();await expect(page.getByRole('button',{name:'Create worktree…'})).toHaveCount(0);await expect(page.getByRole('button',{name:/payments-api.*Ready/})).toHaveCount(0);
 });
+
+test('pages targets and inspects a newly created target outside the visible page',async({page})=>{
+ await page.goto('/fixture.html');await page.evaluate(async()=>{
+  const reactPath='/node_modules/.vite/deps/react.js',domPath='/node_modules/.vite/deps/react-dom_client.js',componentPath='/src/renderer/components/target-manager.tsx';
+  const React=(await import(reactPath)).default,{createRoot}=(await import(domPath)).default,{TargetManager}=await import(componentPath);
+  const host=document.querySelector('#ec-branded-workspace .ec-window')!;(host as HTMLElement).style.minHeight='740px';host.innerHTML='<div id="target-test"></div>';
+  const source={targetId:'source',targetGeneration:1,kind:'local',label:'First repository',workingRoot:'/first',sourceRoot:'/first',status:'available',readiness:'ready',managed:false};
+  const second={...source,targetId:'second',label:'Later repository',workingRoot:'/later',sourceRoot:'/later'};
+  const created={...source,targetId:'created',kind:'git-worktree',label:'New worktree',workingRoot:'/new',managed:true};
+  const api={list:async(cursor?:string)=>({items:cursor?[second]:[source],truncated:!cursor,...(!cursor?{nextCursor:'next'}:{})}),inspect:async(ref:any)=>({...([source,second,created].find(row=>row.targetId===ref.targetId)!),dirty:false,borrowers:0,branch:null,cleanup:'retained'}),operation:async()=>null,review:async(ref:any)=>({reviewId:'review',source:ref,sourceRoot:'/first',destination:'/new',branch:'estacoda/new',baseCommit:'a'.repeat(40),expiresAt:Date.now()+300000}),create:async()=>({operationId:'op',action:'create',state:'completed',target:{targetId:'created',targetGeneration:1}}),cancel:async()=>({cancelled:true})};
+  const root=createRoot(document.querySelector('#target-test')!);root.render(React.createElement(TargetManager,{api,onSelect:(ref:any)=>{(window as any).pickedTarget=ref;},close:()=>root.render(null)}));
+ });
+ await page.getByRole('button',{name:'Next targets'}).click();await expect(page.getByRole('button',{name:/Later repository/})).toBeVisible();
+ await page.getByRole('button',{name:'First page'}).click();await page.getByRole('button',{name:/First repository/}).click();
+ await page.getByRole('button',{name:'Create worktree…'}).click();await page.getByRole('checkbox').check();await page.getByRole('button',{name:'Create trusted worktree'}).click();
+ await expect(page.getByText('/new',{exact:true})).toBeVisible();await page.getByRole('button',{name:'Use for new Work'}).click();
+ expect(await page.evaluate(()=>(window as any).pickedTarget)).toEqual({targetId:'created',targetGeneration:1});
+});

@@ -1,6 +1,6 @@
 import { PassThrough } from 'node:stream';
 import { describe, expect, it, vi } from 'vitest';
-import { negotiateControl, type InitializeParams } from '@estacoda/control-protocol';
+import { negotiateControl, failureEnvelope, type InitializeParams } from '@estacoda/control-protocol';
 import { ProtocolClient } from './protocol-client.js';
 function pair() {
   const input = new PassThrough(), output = new PassThrough();
@@ -36,4 +36,30 @@ describe('strict Main protocol client', () => {
     client.dispose(); await result;
     await expect(client.request('control.initialize',params)).rejects.toThrow(); expect(requests).toHaveLength(1);
   });
+});
+
+it('keeps long target mutations connected while serving ordinary control requests',async()=>{
+ vi.useFakeTimers();const input=new PassThrough(),output=new PassThrough(),client=new ProtocolClient(input,output);
+ const frames:any[]=[];input.on('data',chunk=>frames.push(JSON.parse(chunk.toString())));
+ client.context={profileId:'p',instanceId:'s',capabilities:{methods:['targets.create','targets.inspectOperation'],events:[]}};
+ try{
+  const pending=client.request('targets.create',{reviewId:'review',source:{targetId:'target',targetGeneration:1},trustNewPath:true});
+  const rejected=expect(pending).rejects.toThrow();
+  await vi.advanceTimersByTimeAsync(16_000);expect(client.context).not.toBeNull();
+  const inspection=client.request('targets.inspectOperation',{operationId:'op'});
+  output.write(JSON.stringify({jsonrpc:'2.0',id:frames[1].id,result:{operationId:'op',action:'create',state:'uncertain',target:null}})+'\n');
+  expect((await inspection).state).toBe('uncertain');
+  await vi.advanceTimersByTimeAsync(105_000);await rejected;expect(client.context).toBeNull();
+ }finally{client.dispose();vi.useRealTimers();}
+});
+
+it('keeps the connection usable after a bounded target read timeout',async()=>{
+ const {client,output,requests}=pair();
+ client.context={profileId:'p',instanceId:'s',capabilities:{methods:['targets.list'],events:[]}};
+ const pending=client.request('targets.list',{}),rejected=expect(pending).rejects.toThrow();
+ output.write(JSON.stringify(failureEnvelope(requests[0]!.id as string,'-32010'))+'\n');
+ await rejected;expect(client.context).not.toBeNull();
+ const next=client.request('targets.list',{});
+ output.write(JSON.stringify({jsonrpc:'2.0',id:requests[1]!.id,result:{items:[],truncated:false}})+'\n');
+ expect((await next).items).toEqual([]);client.dispose();
 });

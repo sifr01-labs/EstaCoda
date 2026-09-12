@@ -19,6 +19,7 @@ const shape = (required: Record<string, Check>, optional: Record<string, Check> 
 const id = isControlId;
 const cursorToken: Check = (v) => typeof v === "string" && /^[A-Za-z0-9_-]{1,512}$/.test(v);
 const capabilities = shape({ methods: unique(choice(CONTROL_METHODS),128), events: unique(choice(CONTROL_EVENTS)) });
+const targetId:Check=(v)=>typeof v==='string'&&/^target_[a-f0-9-]{36}$/.test(v);
 const target = shape({ targetId: id, targetGeneration: integer(1) });
 const targetDetailsFields={targetId:id,targetGeneration:integer(1),kind:choice(['local','temporary-copy','git-worktree']),label:text(240,1),workingRoot:text(4096,1),sourceRoot:text(4096,1),status:choice(['available','archived']),readiness:choice(['ready','untrusted','unavailable','archived']),managed:boolean};
 const targetDetails=shape(targetDetailsFields);
@@ -109,14 +110,14 @@ const contracts: { [M in keyof MethodContracts]: { params: Check; result: Check 
   "work.counts":{params:shape({}),result:shape({runningSessions:integer(),runningTasks:integer(),queuedTasks:integer(),approvals:integer(),attention:integer(),scheduled:nullable(integer()),asOf:integer()})},
   "work.usage":{params:shape({workId:id}),result:shape({scope:choice(['session','task','attempt']),reportedTokens:nullable(integer()),providerCalls:integer(),cost:nullable(shape({amount:v=>typeof v==='number'&&Number.isFinite(v)&&v>=0,currency:choice(['USD'])})),usageComplete:boolean,pricingComplete:boolean,context:nullable(shape({usedTokens:integer(),totalTokens:integer(1),provider:text(240,1),model:text(240,1)})),truncated:boolean,provisional:boolean})},
   "work.live": {params:shape({workId:id}),result:shape({active:boolean,turnId:nullable(id),text:text(16384),truncated:boolean})},
-  "targets.list":{params:shape({}),result:shape({items:array(targetDetails),truncated:boolean})},
+  "targets.list":{params:shape({},{cursor:targetId}),result:shape({items:array(targetDetails),truncated:boolean},{nextCursor:targetId})},
   "targets.inspect":{params:shape({target}),result:targetInspection},
   "targets.reviewCreate":{params:shape({source:target}),result:targetCreation},
   "targets.create":{params:shape({reviewId:id,source:target,trustNewPath:v=>v===true}),result:targetOperation},
   "targets.cancelReview":{params:shape({reviewId:id}),result:shape({cancelled:boolean})},
   "targets.execute":{params:shape({operationId:id,action:choice(['archive','cleanup']),target,confirmed:v=>v===true}),result:targetOperation},
   "targets.inspectOperation":{params:shape({operationId:id}),result:targetOperation},
-  "work.targets": {params:shape({}),result:shape({items:array(targetProjection),truncated:boolean})},
+  "work.targets": {params:shape({},{cursor:targetId,target}),result:shape({items:array(targetProjection),truncated:boolean},{nextCursor:targetId})},
   "work.list": { params: shape(pageParams, {...optionalPage, query:text(200),parentWorkId:id}), result: page(work) },
   "work.get": { params: shape({ workId: id }), result: work },
   "work.activity": { params: shape({ ...pageParams, workId: id }, optionalPage), result: page(activity) },

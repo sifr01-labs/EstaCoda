@@ -17,6 +17,7 @@ export function rendererSnapshot(state:ConnectionState):DesktopSnapshot {
   return {counts:state.status==='ready'?state.counts??null:null,status:state.status,profile:state.bootstrap?.profile??{id:state.profileId,label:state.profileId,configuration:'unconfigured'},runtime:state.bootstrap?.runtime.state??'disconnected',work:state.work,inbox:state.inbox};
 }
 export function validateSemanticPayload(method:string,payload:unknown):void {
+  if(method==='workTargets'){validateControlRequest({jsonrpc:'2.0',id:'validation',method:'work.targets',params:payload},{profileId:'validation',instanceId:'validation',capabilities:{methods:[...CONTROL_METHODS],events:[...CONTROL_EVENTS]}});return;}
   if(method.startsWith('target')){
     const mapping:Record<string,string>={targetList:'targets.list',targetInspect:'targets.inspect',targetReview:'targets.reviewCreate',targetCancel:'targets.cancelReview',targetExecute:'targets.execute',targetOperation:'targets.list'};
     if(method==='targetCreate'){if(!isRecord(payload)||!exactKeys(payload,['reviewId','trustNewPath'])||!isControlId(payload.reviewId)||payload.trustNewPath!==true)throw new Error('Invalid target creation');return;}
@@ -69,7 +70,7 @@ export function installSemanticIpc(window:BrowserWindow,documentUrl:string,conne
       try {
         if(method.startsWith('target')){
           if(!targets)throw new Error('Targets unavailable');
-          const result=method==='targetList'?await connection.targetRequest('targets.list',{}):method==='targetInspect'?await connection.targetRequest('targets.inspect',{target:payload.target as import('@estacoda/control-protocol').TargetReference}):method==='targetReview'?await targets.review(payload.source as import('@estacoda/control-protocol').TargetReference):method==='targetCreate'?await targets.create(payload.reviewId as string,true):method==='targetCancel'?await targets.cancel(payload.reviewId as string):method==='targetOperation'?await targets.operation():await targets.execute(payload.action as 'archive'|'cleanup',payload.target as import('@estacoda/control-protocol').TargetReference,true);
+          const result=method==='targetList'?await connection.targetRequest('targets.list',payload):method==='targetInspect'?await connection.targetRequest('targets.inspect',{target:payload.target as import('@estacoda/control-protocol').TargetReference}):method==='targetReview'?await targets.review(payload.source as import('@estacoda/control-protocol').TargetReference):method==='targetCreate'?await targets.create(payload.reviewId as string,true):method==='targetCancel'?await targets.cancel(payload.reviewId as string):method==='targetOperation'?await targets.operation():await targets.execute(payload.action as 'archive'|'cleanup',payload.target as import('@estacoda/control-protocol').TargetReference,true);
           authority.assertSender(event,generation);return result;
         }
         if(method==='workDecide' ||method==='workInspectDecision'){if(!workControls)throw new Error('Work unavailable');const result=method==='workDecide'?await workControls.decide(payload.itemId as string,payload.decision as 'approved'|'denied'):await workControls.inspectDecision(payload.itemId as string);authority.assertSender(event,generation);return result;}
@@ -78,7 +79,7 @@ export function installSemanticIpc(window:BrowserWindow,documentUrl:string,conne
         if(method==='workLive'||method==='workUsage'){const result=await connection.workRequest(method==='workLive'?'work.live':'work.usage',{workId:payload.workId as string});authority.assertSender(event,generation);return result;}
         if(['workTargets','workAttach','workSubmit','workInspect'].includes(method)){
           if(!workControls)throw new Error('Work unavailable');
-          const result=method==='workTargets'?await connection.workRequest('work.targets',{}):method==='workAttach'?await workControls.attach(payload as Parameters<DesktopWorkControls['attach']>[0]):method==='workSubmit'?await workControls.submit(payload as Parameters<DesktopWorkControls['submit']>[0]):await workControls.inspect(payload.workId as string);
+          const result=method==='workTargets'?await connection.workRequest('work.targets',payload):method==='workAttach'?await workControls.attach(payload as Parameters<DesktopWorkControls['attach']>[0]):method==='workSubmit'?await workControls.submit(payload as Parameters<DesktopWorkControls['submit']>[0]):await workControls.inspect(payload.workId as string);
           authority.assertSender(event,generation);return result;
         }
         if(method==='workSearch'||method==='workPins'||method==='workPin'){

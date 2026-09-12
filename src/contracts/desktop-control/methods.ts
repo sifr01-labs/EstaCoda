@@ -33,7 +33,7 @@ export type MethodContracts = {
   "targets.create":{params:{reviewId:string;source:TargetReference;trustNewPath:true};result:TargetOperation};
   "targets.reviewCreate":{params:{source:TargetReference};result:TargetCreationReview};
   "targets.inspect":{params:{target:TargetReference};result:TargetInspection};
-  "targets.list":{params:Record<string,never>;result:{items:TargetDetails[];truncated:boolean}};
+  "targets.list":{params:{cursor?:string};result:{items:TargetDetails[];truncated:boolean;nextCursor?:string}};
   "telegram.handoff":{params:{operationId:string;sessionId:string;action:'create'|'revoke'|'detach';attachmentId?:string;confirmed:true};result:ConnectionOperation};
   "telegram.sessionDetails":{params:{sessionId:string};result:TelegramSessionDetails};
   "telegram.sessions":{params:Record<string,never>;result:{items:TelegramSession[];truncated:boolean}};
@@ -52,7 +52,7 @@ export type MethodContracts = {
   "work.counts":{params:Record<string,never>;result:RuntimeCounts};
   "tasks.create":{params:SessionControl&{taskId:string;objective:string;limits:{maxProviderCalls:number;maxTotalTokens:number;maxWallClockMs:number};selection:{providerId:string;modelId:string}|null};result:OperationReceipt};
   "work.live": {params:{workId:string};result:{active:boolean;turnId:string|null;text:string;truncated:boolean}};
-  "work.targets": {params:Record<string,never>;result:{items:TargetProjection[];truncated:boolean}};
+  "work.targets": {params:{cursor?:string;target?:TargetReference};result:{items:TargetProjection[];truncated:boolean;nextCursor?:string}};
   "models.verifyDraft": {params:ModelDraftBinding&{spendApproved:true;allowPrivateEndpoint:boolean};result:CandidateVerification};
   "models.reviewConfigured": {params:ConfiguredRouteReview;result:ModelRouteDraft};
   "models.validateRoute": {params:{route:VerifyCandidateParams["route"]};result:{valid:true}};

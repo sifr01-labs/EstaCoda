@@ -36,3 +36,10 @@ it('requires narrow target references and keeps paths, commands and operation ID
  expect(()=>validateSemanticPayload('targetExecute',{action:'cleanup',target,confirmed:false})).toThrow();
  expect(()=>validateSemanticPayload('targetInspect',{target:{...target,targetGeneration:0}})).toThrow();
 });
+
+it('accepts bounded target paging and direct lookup without accepting paths or caller scope',()=>{
+ const cursor='target_00000000-0000-0000-0000-000000000001',target={targetId:cursor,targetGeneration:1};
+ expect(()=>validateSemanticPayload('targetList',{cursor})).not.toThrow();
+ expect(()=>validateSemanticPayload('workTargets',{target})).not.toThrow();
+ for(const payload of [{cursor:'../escape'},{target,profileId:'other'},{path:'/tmp/source'},{target:{...target,targetGeneration:0}}])expect(()=>validateSemanticPayload('workTargets',payload)).toThrow();
+});

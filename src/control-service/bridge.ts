@@ -113,14 +113,14 @@ export class DesktopBridge {
       'work.usage':async(request,signal)=>{if(request.method!=='work.usage')throw new ControlProtocolError('-32601');return{result:await workUsage(this.options,this.workSnapshot().get(request.params.workId),signal)};},
       'work.counts':()=>({result:workCounts(this.workSnapshot().state)}),
       'work.live':async(request,signal)=>{if(request.method!=='work.live')throw new ControlProtocolError('-32601');return{result:await liveWork(this.options,this.workSnapshot().get(request.params.workId),signal)};},
-      'targets.list':async(_request,signal)=>({result:await this.targets.list(signal)}),
-      'targets.inspect':async request=>{if(request.method!=='targets.inspect')throw new ControlProtocolError('-32601');return{result:await this.targets.inspect(request.params.target)};},
-      'targets.reviewCreate':async request=>{if(request.method!=='targets.reviewCreate')throw new ControlProtocolError('-32601');return{result:await this.targets.review(request.params.source)};},
+      'targets.list':async(request,signal)=>{if(request.method!=='targets.list')throw new ControlProtocolError('-32601');return{result:await this.targets.list(signal,request.params.cursor)};},
+      'targets.inspect':async(request,signal)=>{if(request.method!=='targets.inspect')throw new ControlProtocolError('-32601');return{result:await this.targets.inspect(request.params.target,signal)};},
+      'targets.reviewCreate':async(request,signal)=>{if(request.method!=='targets.reviewCreate')throw new ControlProtocolError('-32601');return{result:await this.targets.review(request.params.source,signal)};},
       'targets.create':async(request,signal)=>{if(request.method!=='targets.create')throw new ControlProtocolError('-32601');return{result:await this.targets.create(request.params,signal)};},
       'targets.cancelReview':request=>{if(request.method!=='targets.cancelReview')throw new ControlProtocolError('-32601');return{result:this.targets.cancel(request.params.reviewId)};},
       'targets.execute':async(request,signal)=>{if(request.method!=='targets.execute')throw new ControlProtocolError('-32601');return{result:await this.targets.execute(request.params,signal)};},
       'targets.inspectOperation':async request=>{if(request.method!=='targets.inspectOperation')throw new ControlProtocolError('-32601');return{result:await this.targets.operation(request.params.operationId)};},
-      'work.targets':async(_request,signal)=>({result:await availableWorkTargets(this.options,signal)}),
+      'work.targets':async(request,signal)=>{if(request.method!=='work.targets')throw new ControlProtocolError('-32601');return{result:await availableWorkTargets(this.options,signal,request.params)};},
       'work.list': (request) => {
         if (request.method !== 'work.list') throw new ControlProtocolError('-32601');
         const snapshot = this.workSnapshot();

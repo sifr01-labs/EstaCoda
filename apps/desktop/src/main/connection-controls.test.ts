@@ -3,3 +3,14 @@ import type {DesktopConnection} from './connection.js';
 it('recovers an uncertain operator action after restart without sending again',async()=>{const directory=mkdtempSync(join(tmpdir(),'ec-desktop-connection-'));try{const request=vi.fn(async(method:string,params:any)=>{if(method==='connections.inspectOperation')return{operationId:params.operationId,action:'gateway.restart',state:'uncertain'};throw new Error('lost response');}),connection={state:{profileId:'one',generation:1},connectionRequest:request} as unknown as DesktopConnection;
  const first=new DesktopConnectionControls(connection,directory);expect((await first.gateway('restart')).state).toBe('uncertain');const restarted=new DesktopConnectionControls(connection,directory);expect((await restarted.inspect())?.state).toBe('uncertain');await expect(restarted.gateway('restart')).rejects.toThrow();expect(request.mock.calls.filter(row=>row[0]==='gateway.execute')).toHaveLength(1);connection.state.profileId='two';expect(await restarted.inspect()).toBeNull();
  }finally{rmSync(directory,{recursive:true,force:true});}});
+
+it('permits a fresh corrected request after a confirmed preflight failure',async()=>{
+ const directory=mkdtempSync(join(tmpdir(),'ec-desktop-rejected-'));
+ try{
+  const request=vi.fn(async(method:string,params:any)=>({operationId:params.operationId,action:'telegram.test',state:method==='connections.inspectOperation'||params.destination==='999'?'failed':'completed'}));
+  const connection={state:{profileId:'one',generation:1},connectionRequest:request} as unknown as DesktopConnection;
+  expect((await new DesktopConnectionControls(connection,directory).telegram('test','999')).state).toBe('failed');
+  expect((await new DesktopConnectionControls(connection,directory).telegram('test','123')).state).toBe('completed');
+  expect(request.mock.calls.filter(row=>row[0]==='telegram.execute')).toHaveLength(2);
+ }finally{rmSync(directory,{recursive:true,force:true});}
+});

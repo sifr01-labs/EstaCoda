@@ -50,9 +50,10 @@ export class ExecutionTargetStore extends WorkspaceRegistry {
     ); create table if not exists target_borrowers (id text primary key, target_id text not null, pid integer not null); create table if not exists copy_manifests (target_id text primary key, record_json text not null)`); } catch (error) { this.close(); throw error; }
   }
 
-  listTargets(limit=100): ExecutionTarget[] {
+  listTargets(limit=100,after?:string,availableOnly=false): ExecutionTarget[] {
     if(!Number.isSafeInteger(limit)||limit<1||limit>101)throw new Error('Invalid target limit.');
-    return this.db.query<{id:string}>("select id from execution_targets order by id limit ?").all(limit).map(row=>this.getTarget(row.id)!);
+    if(after!==undefined&&!/^target_[a-f0-9-]{36}$/u.test(after))throw new Error('Invalid target cursor.');
+    return this.db.query<{id:string}>("select id from execution_targets where id > ? and (? = 0 or json_extract(record_json, '$.status') = 'available') order by id limit ?").all(after??'',availableOnly?1:0,limit).map(row=>this.getTarget(row.id)!);
   }
 
   getTarget(id: string): ExecutionTarget | undefined {
@@ -142,14 +143,15 @@ export class ExecutionTargetStore extends WorkspaceRegistry {
     return () => { this.db.query("delete from target_borrowers where id=?").run(id); };
   }
 
-  async validate(value: ExecutionTargetBinding, path: string): Promise<ExecutionTarget> {
+  async validate(value: ExecutionTargetBinding, path: string, signal?:AbortSignal): Promise<ExecutionTarget> {
+    signal?.throwIfAborted();
     const binding = parseExecutionTargetBinding(value);
     const target = this.getTarget(binding.targetId);
     if (!target || target.status !== "available" || target.generation !== binding.targetGeneration ||
       target.workspace.identityHash !== binding.workspace.identityHash) throw new Error("Execution target is missing, stale or belongs to another profile.");
     const actual = await resolveWorkspaceDirectory(path);
     if (actual.identityHash !== target.workspace.identityHash) throw new Error("Session execution target belongs to a different workspace.");
-    if (target.kind === "git-worktree") verifyWorktreeIdentity(target);
+    if (target.kind === "git-worktree") await verifyWorktreeIdentity(target,signal);
     if (target.kind === "temporary-copy") { checkStamp(actual.canonicalPath, target.directoryStamp); this.copyManifest(target.id); }
     const current=this.getTarget(binding.targetId);
     if(!current||current.status!=="available"||current.generation!==binding.targetGeneration)throw new Error("Execution target changed during validation.");

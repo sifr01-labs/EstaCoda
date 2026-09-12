@@ -42,7 +42,7 @@ export type DesktopWorkApi = {
  act(input:WorkAction):Promise<import('@estacoda/control-protocol').OperationReceipt>;
  children(workId:string,cursor?:string):Promise<Page<WorkProjection>>;
  live(workId:string):Promise<MethodContracts['work.live']['result']>;
- targets():Promise<MethodContracts['work.targets']['result']>;
+ targets(options?:MethodContracts['work.targets']['params']):Promise<MethodContracts['work.targets']['result']>;
  attach(input:Pick<WorkSubmission,'draftId'|'target'>):Promise<{id:string;name:string;size:number;type:string}[]>;
  submit(input:WorkSubmission):Promise<{workId:string;receipt:import('@estacoda/control-protocol').OperationReceipt}>;
  inspect(workId:string):Promise<import('@estacoda/control-protocol').OperationReceipt|null>;
@@ -69,7 +69,7 @@ export type DesktopConnectionsApi={
  cancel(setupId:string):Promise<{cancelled:boolean}>;
  list():Promise<MethodContracts['connections.list']['result']>};
 export type DesktopTargetsApi={
- list():Promise<MethodContracts['targets.list']['result']>;
+ list(cursor?:string):Promise<MethodContracts['targets.list']['result']>;
  inspect(target:import('@estacoda/control-protocol').TargetReference):Promise<MethodContracts['targets.inspect']['result']>;
  review(source:import('@estacoda/control-protocol').TargetReference):Promise<MethodContracts['targets.reviewCreate']['result']>;
  create(reviewId:string,trustNewPath:true):Promise<MethodContracts['targets.create']['result']>;

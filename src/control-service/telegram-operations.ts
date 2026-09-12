@@ -1,11 +1,11 @@
-import {createTelegramPairingCode,setupTelegramConfig} from '../config/runtime-config.js';
+import {createTelegramPairingCode,cancelTelegramPairingCode} from '../config/runtime-config.js';
 import {captureProfileApplySnapshot} from '../setup/review/profile-apply.js';
 import {readEnvSecretValue} from '../config/env-secret-store.js';
 import {resolveProfileStateHome} from '../config/profile-home.js';
 import {notifyPrivateConfigurationChanged} from '../gateway/private-control.js';
 import {telegramRequest} from './telegram-verification.js';
 import {ConnectionOperations} from './connection-operations.js';
-import {ControlProtocolError,type TelegramOperationAction,type TelegramPairing} from '../contracts/desktop-control/index.js';
+import {type TelegramOperationAction,type TelegramPairing} from '../contracts/desktop-control/index.js';
 import {telegramGatewayCommands} from '../channels/channel-gateway.js';
 export class TelegramOperations {
  readonly operations:ConnectionOperations;
@@ -13,13 +13,16 @@ export class TelegramOperations {
  private async saved(){const snapshot=await captureProfileApplySnapshot(this.input),config=JSON.parse(snapshot.files['config.json']??'{}').channels?.telegram;return{config,token:typeof config?.botTokenEnv==='string'?readEnvSecretValue(snapshot.files['.env']??'',config.botTokenEnv):undefined};}
  async pairing():Promise<TelegramPairing>{const{config}=await this.saved(),pairing=config?.pairing,expiresAt=Date.parse(pairing?.expiresAt);return typeof pairing?.code==='string'&&/^[A-Za-z0-9-]{4,64}$/.test(pairing.code)&&expiresAt>Date.now()?{code:pairing.code,expiresAt}:{code:null,expiresAt:null};}
  async execute(params:{operationId:string;action:TelegramOperationAction;destination?:string},signal:AbortSignal){
-  const{config,token}=await this.saved();signal.throwIfAborted();
-  if(params.action!=='pairingCancel'&&(!config?.enabled||!token))throw new ControlProtocolError('-32602');
-  if(params.action==='test'&&(!params.destination||!/^\-?\d{1,20}$/.test(params.destination)||![...(config.allowedChatIds??[]),...(config.allowedUserIds??[])].includes(params.destination)))throw new ControlProtocolError('-32003');
+  signal.throwIfAborted();
   return this.operations.execute(params.operationId,'telegram.'+params.action,async()=>{
+   // Persist known preflight rejection as failed. Transport failures after dispatch remain uncertain.
+   const{config,token}=await this.saved();
+   if(signal.aborted)return false;
+   if(params.action!=='pairingCancel'&&(!config?.enabled||!token))return false;
+   if(params.action==='test'&&(!params.destination||!/^\-?\d{1,20}$/.test(params.destination)||![...(config.allowedChatIds??[]),...(config.allowedUserIds??[])].includes(params.destination)))return false;
    if(params.action==='pairingCreate'||params.action==='pairingCancel'){
     if(params.action==='pairingCreate')await createTelegramPairingCode({...this.input,workspaceRoot:this.input.homeDir,input:{ttlMinutes:10}});
-    else await setupTelegramConfig({...this.input,workspaceRoot:this.input.homeDir,input:{clearPairing:true,enabled:config?.enabled===true}});
+    else await cancelTelegramPairingCode({...this.input,workspaceRoot:this.input.homeDir});
     try{await notifyPrivateConfigurationChanged({directory:resolveProfileStateHome(this.input).gatewayStatePath,profileId:this.input.profileId,version:this.input.version,signal:AbortSignal.timeout(2000)});}catch{}
     return true;
    }

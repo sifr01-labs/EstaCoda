@@ -49,6 +49,9 @@ try{
  const created=await page.evaluate(id=>window.desktop.targets!.create(id,true),review.reviewId);
  expect(created.state).toBe('completed');expect(created.target).not.toBeNull();const target=created.target!;
  const inspection=await page.evaluate(target=>window.desktop.targets!.inspect(target),target);
+ const selected=await page.evaluate(target=>window.desktop.work!.targets({target}),target);
+ expect(selected.items).toHaveLength(1);expect(selected.items[0]).toMatchObject(target);
+ expect((await page.evaluate(()=>window.desktop.work!.targets())).items.some(item=>item.targetId===target.targetId)).toBe(true);
  expect(inspection.kind).toBe('git-worktree');expect(inspection.readiness).toBe('ready');expect(inspection.workingRoot).not.toBe(inspection.sourceRoot);
  const submit=async(input:any)=>{
   let result:any;

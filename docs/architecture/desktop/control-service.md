@@ -155,3 +155,9 @@ All handlers use the selected profile's shared core target store. The renderer s
 | `targets.inspectOperation` | Selected-profile operation lookup; unknown/uncertain results do not authorize replay |
 
 `work.targets` remains the trusted-target picker for new Work. Existing Work's target binding is immutable. Target creation is classified as a mutation for timeout/cancellation reporting even though its operation ID comes from a review token. Readiness and displayed paths never replace core execution/ownership checks. See [worktree operations and recovery](worktrees.md).
+
+
+Target discovery uses bounded keyset pages: `targets.list` accepts an optional target-ID
+`cursor` and returns `nextCursor` when truncated. `work.targets` accepts either a cursor
+or an exact `{targetId, targetGeneration}` lookup; the latter rechecks current profile,
+identity, availability and trust. A cursor is a position, never target authority.

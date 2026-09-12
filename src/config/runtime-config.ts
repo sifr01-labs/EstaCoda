@@ -3774,6 +3774,18 @@ export async function addWhatsAppAllowedUser(options: {
   });
 }
 
+/** Cancelling pairing only removes the code; concurrent enable/disable and access edits survive. */
+export async function cancelTelegramPairingCode(options: {workspaceRoot:string;homeDir?:string;profileId?:string}):Promise<void> {
+  const targetPath=resolveConfigMutationPath(options);
+  await withProfileWriteLock(dirname(targetPath),async()=>{
+    await assertProfileApplySettled(dirname(targetPath));
+    const existing=await readConfig(targetPath);
+    if(!existing.config.channels?.telegram?.pairing)return;
+    delete existing.config.channels.telegram.pairing;
+    await saveRuntimeConfig(targetPath,existing.config);
+  });
+}
+
 export async function createTelegramPairingCode(options: {
   profileId?: string;
   workspaceRoot: string;

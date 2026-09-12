@@ -62,3 +62,14 @@ it('preserves explicit trust for two independently created worktrees',async()=>{
  const drafts=await Promise.all([review(),review()]),other=new ManagedWorktrees({homeDir,profileId:'p'});
  try{const targets=await Promise.all([store.create(drafts[0]!,true),other.create(drafts[1]!,true)]);for(const target of targets)expect(await new WorkspaceTrustStore({homeDir}).isTrusted(target.workspace.canonicalPath)).toBe(true);}finally{other.close();}
 });
+
+it('serializes asynchronous cleanup across independent stores without accepting new borrowers',async()=>{
+ const target=await store.create(await review(),true),archived=store.archive({targetId:target.id,targetGeneration:1}),reference={targetId:archived.id,targetGeneration:archived.generation};
+ const other=new ManagedWorktrees({homeDir,profileId:'p'});
+ try{
+  const outcomes=await Promise.allSettled([store.cleanup(reference),other.cleanup(reference),other.borrow(targetBinding(archived))]);
+  expect(outcomes[0]!.status==='fulfilled'||outcomes[1]!.status==='fulfilled').toBe(true);
+  expect(outcomes.filter(row=>row.status==='fulfilled')).toHaveLength(1);
+  expect(outcomes[2]!.status).toBe('rejected');expect(store.getTarget(target.id)).toMatchObject({generation:3,cleanup:'removed'});
+ }finally{other.close();}
+});

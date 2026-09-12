@@ -43,3 +43,29 @@ Git operations, trust writes, profile isolation and cleanup are security-sensiti
 Alpha intentionally retains uncertain operations and partial directories for inspection. There is no automatic orphan adoption/rollback, dead-borrower repair, unarchive, custom branch/destination picker or journal compaction UI. Lists inspect the first 100 target records and report truncation. Git hooks/content filters are disabled during creation; LFS and submodules are not hydrated. Docker does not mount the source/shared Git metadata, so Git commands requiring it are unavailable inside that environment. Live files/diff/PTY remain PR10.
 
 See [the operator guide](../architecture/desktop/worktrees.md) for exact trust, cleanup and recovery behavior. Production soak monitoring and the later packaging/accessibility milestones remain distinct from these checks.
+
+## PR8/PR9 review follow-up
+
+The focused follow-up fixes four review findings: pairing cancellation preserves concurrent
+channel disable/access edits; Telegram preflight rejection produces a durable failed receipt
+so a corrected request can proceed; Git execution is asynchronous and cancellable; and target
+discovery has bounded pagination with direct selection/attachment/submission validation.
+
+Security review: pairing cancellation changes only the current pairing field under the
+profile lock. Unknown transport outcomes remain uncertain and are never automatically
+replayed. Git retains fixed argument arrays, disabled hooks/filters, output/time bounds,
+identity checks and explicit path trust. Cleanup waits for Git exit, serializes through the
+shared profile lock and refuses dirty files or borrowers; no force-removal path was added.
+Target cursors carry no authority and exact lookups still enforce profile, generation and trust.
+
+Regression coverage includes the disable/cancel interleaving, rejected/corrected delivery
+across restart, slow-Git cancellation, concurrent cleanup, 101-target paging, direct Main
+validation, a newly created off-page target, and native preload/IPC target lookup.
+
+Follow-up validation: all 10,933 core tests passed with four file workers; all 54 Desktop
+unit tests and 143 browser/visual tests passed. Core/Desktop typechecks, frozen install,
+packaging, native credential/approval/profile/recovery checks and real worktree Session/Task
+execution with a scripted local provider passed. The existing five-second Bun/SQLite
+compatibility test intermittently timed out at default nine-worker parallelism; it passed
+in isolation and in the full four-worker suite, with no assertion or timeout changes.
+No real Telegram account was contacted.

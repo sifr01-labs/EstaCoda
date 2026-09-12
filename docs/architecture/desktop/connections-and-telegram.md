@@ -108,6 +108,10 @@ profile-local receipts before external effects. Reusing an ID inspects the outco
 than repeating the action, including after process restart. Interrupted effects remain
 uncertain; Desktop never guesses success or silently resends a message.
 
+Pairing cancellation removes only the pairing code under the profile write lock; it preserves concurrent enable/disable and allowlist changes.
+
+Known Telegram preflight rejection (disabled/missing credentials or a non-allowlisted test destination) receives a durable failed receipt before any external effect. A corrected request can proceed after inspection or restart. Transport failures remain uncertain.
+
 Same-action retries remain blocked while the latest referenced receipt is uncertain or
 unknown. Inspect the real state first. For unresolved lifecycle recovery, existing CLI
 controls remain available with the same explicit profile, for example:

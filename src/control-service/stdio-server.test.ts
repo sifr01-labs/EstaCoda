@@ -1,11 +1,11 @@
 import { PassThrough, Writable } from 'node:stream';
 import { setImmediate } from 'node:timers/promises';
-import { expect, it } from 'vitest';
+import { expect, it, vi } from 'vitest';
 import { CONTROL_METHODS, CONTROL_LIMITS } from '../contracts/desktop-control/index.js';
 import { StdioControlServer, type ControlHandlers } from './stdio-server.js';
 import { BoundedLines } from './framing.js';
 
-function fixture(handlers: ControlHandlers = {}, requestTimeoutMs = 30_000) {
+function fixture(handlers: ControlHandlers = {}, requestTimeoutMs:number|undefined = undefined) {
   const input = new PassThrough(), output = new PassThrough();
   const messages: any[] = [];
   output.on('data', (chunk) => { for (const line of String(chunk).trim().split('\n')) messages.push(JSON.parse(line)); });
@@ -116,4 +116,18 @@ it('treats cancelled target creation as uncertain even though its operation iden
  f.send('cancel','control.cancelRequest',{requestId:'create'});await setImmediate();
  expect(f.messages.find(message=>message.id==='create').error.code).toBe(-32008);
  f.server.close();await f.server.done;
+});
+
+it('times out slow target reads before Main disconnects and continues serving requests',async()=>{
+ vi.useFakeTimers();let cancelled=false;
+ const f=fixture({'targets.list':async(_request,signal)=>{
+  await new Promise<void>(resolve=>signal.addEventListener('abort',()=>{cancelled=true;resolve();},{once:true}));
+  return{result:{items:[],truncated:false}};
+ },'targets.inspectOperation':async()=>({result:{operationId:'op',action:'unknown',state:'unknown',target:null}})});
+ try{
+  await f.init();f.send('slow','targets.list',{});await vi.advanceTimersByTimeAsync(10_001);
+  expect(cancelled).toBe(true);expect(f.messages.filter(row=>row.id==='slow')).toHaveLength(1);expect(f.messages.find(row=>row.id==='slow').error.code).toBe(-32010);
+  f.send('receipt','targets.inspectOperation',{operationId:'op'});await vi.advanceTimersByTimeAsync(0);
+  expect(f.messages.find(row=>row.id==='receipt').result.state).toBe('unknown');
+ }finally{f.server.close();await f.server.done;vi.useRealTimers();}
 });
