@@ -91,4 +91,7 @@ export const settingsArabic={
 "Profiles workspaces and packs":"الملفات الشخصية ومساحات العمل والحزم",
 "Pack files and registration are shared. Skill materialization uses the selected profile. Other profiles may retain previously copied skills. Enter a local pack directory for installation, or a pack ID for other actions.":"ملفات الحزم وتسجيلها مشتركة. تُنسخ المهارات إلى الملف الشخصي المحدد. قد تحتفظ الملفات الأخرى بالمهارات المنسوخة سابقاً. أدخل مجلد حزمة محلية للتثبيت أو معرّف الحزمة للإجراءات الأخرى.",
  'Text':'نص',
+"The gateway runs independently of Desktop and does not require Telegram. Install and start registers a user service. Stop or restart affects shared Work and channel delivery in the selected profile.":"تعمل البوابة بشكل مستقل عن تطبيق سطح المكتب ولا تتطلب Telegram. يسجل التثبيت والتشغيل خدمة للمستخدم. يؤثر الإيقاف أو إعادة التشغيل على العمل المشترك وتسليم القنوات في الملف الشخصي المحدد.",
+"An effect may have occurred. Check the gateway state before another action.":"قد يكون الإجراء قد حدث. افحص حالة البوابة قبل تنفيذ إجراء آخر.",
+"Background runtime and shared Work lifecycle":"بيئة التشغيل الخلفية ودورة حياة العمل المشترك",
 } as const;
