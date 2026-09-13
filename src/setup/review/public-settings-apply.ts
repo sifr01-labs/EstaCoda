@@ -1,6 +1,6 @@
 import {normalizeAuxiliarySlotInput,setupAuxiliaryModelConfig,readConfig,saveRuntimeConfig,loadRuntimeConfig,setupUiConfig,setupProfileConfig,type UiSetupInput,type ProfileSetupInput} from '../../config/runtime-config.js';
 import {resolveProfileStateHome} from '../../config/profile-home.js';
-import {settingField,settingPath} from '../public-settings.js';
+import {settingField,settingPath,settingValue} from '../public-settings.js';
 import type {SettingChange} from '../../contracts/desktop-control/index.js';
 /** Runs inside the existing isolated profile transaction. Field metadata is the write allowlist. */
 export async function applyPublicSettings(changes:SettingChange[],input:{homeDir:string;profileId:string}){
@@ -23,5 +23,11 @@ export async function applyPublicSettings(changes:SettingChange[],input:{homeDir
 
  if(changes.some(c=>c.fieldId.startsWith('ui.')))await setupUiConfig({...options,input:config.ui as UiSetupInput});
  if(changes.some(c=>c.fieldId.startsWith('profile.')))await setupProfileConfig({...options,input:config.profile as ProfileSetupInput});
- await loadRuntimeConfig({...options,configurationInspection:true});
+ const loaded=await loadRuntimeConfig({...options,configurationInspection:true});
+ // Coercing a reviewed value to a different effective value would misrepresent the apply.
+ for(const change of changes){if(change.value===null||!['memory','compression','delegation','externalMemory','budgets'].includes(change.fieldId.split('.')[0]!))continue;
+  const expected=change.value,actual=settingValue(loaded,settingPath(settingField(change,true),change.selectors));
+  if(JSON.stringify(actual)!==JSON.stringify(expected))throw new Error('Reviewed setting is outside the supported runtime bounds');
+ }
+
 }

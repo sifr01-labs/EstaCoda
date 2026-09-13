@@ -78,4 +78,5 @@ export const settingsArabic={
  "Inspect last action":"فحص آخر إجراء",
  'Trusted':'موثوق',
  'Action':'الإجراء',
+ 'Open mode retains the hardline safety floor. Budgets govern new execution. Agent Evolution modes do not bypass review or promotion gates. Memory curation has its own policy.':'يحتفظ الوضع المفتوح بحدود الأمان الصارمة. تضبط الميزانيات عمليات التنفيذ الجديدة. لا تتجاوز أوضاع تطور الوكيل بوابات المراجعة والترقية. لتنظيم الذاكرة سياسة مستقلة.',
 } as const;
