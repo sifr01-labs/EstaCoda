@@ -1,4 +1,11 @@
 export const onboardingArabic={
+ 'Channels':'القنوات',
+ 'Optional capabilities can be configured now or later. Skipping them does not block your first Work.':'يمكن إعداد القدرات الاختيارية الآن أو لاحقًا. تخطيها لا يمنع عملك الأول.',
+ 'Choose one editor to collect Channels, Voice and Browser changes together before final confirmation.':'اختر محررًا لجمع تغييرات القنوات والصوت والمتصفح معًا قبل التأكيد النهائي.',
+ 'Optional changes kept in the setup draft.':'أُبقيت التغييرات الاختيارية في مسودة الإعداد.',
+ 'Downloads require a separate explicit action. Cancelling setup does not undo an accepted download.':'تتطلب التنزيلات إجراءً صريحًا منفصلًا. إلغاء الإعداد لا يتراجع عن تنزيل مقبول.',
+ 'Skip optional capabilities':'تخطي القدرات الاختيارية',
+
  'Choose how actions are approved. Every mode keeps the hardline safety floor.':'اختر كيفية الموافقة على الإجراءات. تحتفظ جميع الأوضاع بحد الأمان الصارم.',
  'Strict — review most actions':'صارم — مراجعة معظم الإجراءات',
  'Adaptive — assess actions by risk':'تكيفي — تقييم الإجراءات حسب المخاطر',
