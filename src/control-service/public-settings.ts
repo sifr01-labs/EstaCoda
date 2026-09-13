@@ -16,9 +16,10 @@ export class PublicSettings {
  constructor(readonly input:{homeDir:string;profileId:string},readonly candidates:CredentialCandidates,readonly changed:()=>void|Promise<void>=()=>{}){}
  async read(section:SettingsSection,offset=0):Promise<SettingsPage>{
   const snapshot=await captureProfileApplySnapshot(this.input),config=JSON.parse(snapshot.files['config.json']??'{}');
-  const all=PUBLIC_SETTINGS.filter(field=>field.section===section),fields=all.slice(offset,offset+100);
+  const all=PUBLIC_SETTINGS.filter(field=>field.section===section),fields=all.slice(offset,offset+20);
   const values=fields.filter(f=>!f.path.includes('*')&&!f.path.includes('#')&&f.kind!=='secret').map(field=>({fieldId:field.id,selectors:[],value:settingValue(config,field.path)}));
-  return {fields:structuredClone(fields),values,truncated:all.length>offset+100,...(all.length>offset+100?{nextOffset:offset+100}:{})};
+  while(Buffer.byteLength(JSON.stringify({fields,values}))>44000&&fields.length>1){const removed=fields.pop()!;const i=values.findIndex(v=>v.fieldId===removed.id);if(i>=0)values.splice(i,1);}
+  const next=offset+fields.length;return {fields:structuredClone(fields),values,truncated:all.length>next,...(all.length>next?{nextOffset:next}:{})};
  }
  async value(params:{fieldId:string;selectors:string[]}){const change={...params,value:null},field=settingField(change);const snapshot=await captureProfileApplySnapshot(this.input);const value=field.envName?(envContentHasSecret(snapshot.files['.env']??'',field.envName)?'configured':null):settingValue(JSON.parse(snapshot.files['config.json']??'{}'),settingPath(field,params.selectors));return {...params,value:field.kind==='secret'?(value===null?null:'configured'):value};}
  async review(params:{windowId:string;generation:number;changes:SettingChange[]}):Promise<SettingsReview>{
@@ -29,6 +30,7 @@ export class PublicSettings {
   const snapshot=await captureProfileApplySnapshot(this.input),config=JSON.parse(snapshot.files['config.json']??'{}');signal.throwIfAborted();if(this.#closed||this.drafts.size>=32)throw new ControlProtocolError('-32009');
   const changes=structuredClone(params.changes),draftId=randomUUID();
   const review={draftId,changes:changes.map(c=>settingField(c).kind==='secret'?{...c,value:c.value===null?null:'staged'}:c),previous:changes.map(c=>({...c,value:settingField(c).envName?(envContentHasSecret(snapshot.files['.env']??'',settingField(c).envName!)?'configured':null):settingField(c).kind==='secret'?(settingValue(config,settingPath(settingField(c),c.selectors))===null?null:'configured'):settingValue(config,settingPath(settingField(c),c.selectors))})),expiresInMs:300000};
+  if(Buffer.byteLength(JSON.stringify(review))>48000)throw new ControlProtocolError('-32009');
   const abort=new AbortController();const cleanup=()=>{abort.abort();clearTimeout(timer);signal.removeEventListener('abort',cleanup);if(!this.drafts.get(draftId)?.applying){this.drafts.delete(draftId);for(const change of changes)if(settingField(change).kind==='secret'&&change.value!==null){try{this.candidates.discard(String(change.value),this.scope(params,change.fieldId));}catch{}}}};
   const timer=setTimeout(cleanup,300000);timer.unref();
   this.drafts.set(draftId,{snapshot,review,windowId:params.windowId,generation:params.generation,timer,signal,expires:performance.now()+300000,cleanup,changes,applying:false,abort});
