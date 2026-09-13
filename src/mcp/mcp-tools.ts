@@ -1,3 +1,4 @@
+import {resolveHeaderReferences} from '../config/header-secret-references.js';
 import { parsePollingCoordinates } from "../contracts/execution-checkpoint.js";
 import { isMcpArtifactTypeMapping } from "../config/runtime-config.js";
 import { inspectBrowserDownload } from "../artifacts/browser-download-validation.js";
@@ -82,6 +83,8 @@ export async function loadMcpServers(input: {
       continue;
     }
 
+    const headerState=resolveHeaderReferences(config.headers,config.headerRefs,input.environment??process.env);
+    if(!headerState.configured){loaded.push(unavailableServer(name,config,'MCP credential reference is unavailable.',{failureStage:'configuration'}));continue;}
     const client = new MCPClient({
       name,
       transport,
@@ -90,7 +93,7 @@ export async function loadMcpServers(input: {
       cwd: config.cwd,
       env: resolvedEnvironment.env,
       url: config.url,
-      headers: config.headers,
+      headers: headerState.headers,
       timeoutMs: config.timeoutMs,
       connectTimeoutMs: config.connectTimeoutMs,
       fetch: input.fetch
@@ -146,7 +149,7 @@ export async function loadMcpServers(input: {
         name,
         config,
         sanitizeMcpDiagnostic(error instanceof Error ? error.message : String(error), [
-          ...Object.values(resolvedEnvironment.env ?? {}), ...Object.values(config.headers ?? {})
+          ...Object.values(resolvedEnvironment.env ?? {}), ...Object.values(headerState.headers)
         ]),
         {
           connected,

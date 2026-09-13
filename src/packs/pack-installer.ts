@@ -13,6 +13,7 @@ import type { Prompt } from "../cli/prompt-contract.js";
 
 export type InstallPackOptions = {
   homeDir: string;
+  profileId?: string;
   sourcePath: string;
   actor: string;
   force?: boolean;
@@ -21,6 +22,7 @@ export type InstallPackOptions = {
 
 export type EnablePackOptions = {
   homeDir: string;
+  profileId?: string;
   id: string;
   actor: string;
   force?: boolean;
@@ -29,11 +31,13 @@ export type EnablePackOptions = {
 
 export type DisablePackOptions = {
   homeDir: string;
+  profileId?: string;
   id: string;
 };
 
 export type UninstallPackOptions = {
   homeDir: string;
+  profileId?: string;
   id: string;
   actor: string;
   keepFiles?: boolean;
@@ -104,8 +108,8 @@ async function materializePackSkills(packPath: string, destRoot: string): Promis
   }
 }
 
-function resolvePackSkillsDest(homeDir: string, packId: string): string {
-  const profileId = readActiveProfile({ homeDir }).profileId ?? defaultProfileId();
+function resolvePackSkillsDest(homeDir: string, packId: string, selectedProfileId?: string): string {
+  const profileId = selectedProfileId ?? readActiveProfile({ homeDir }).profileId ?? defaultProfileId();
   const profilePaths = resolveProfileStateHome({ homeDir, profileId });
   return join(profilePaths.skillsPath, "packs", packId);
 }
@@ -230,7 +234,7 @@ export async function installPack(
   }
 
   const status = installResult.entry.status;
-  const skillsDest = resolvePackSkillsDest(homeDir, manifest.id);
+  const skillsDest = resolvePackSkillsDest(homeDir, manifest.id, options.profileId);
   if (status === "enabled" && !existsSync(skillsDest)) {
     await materializePackSkills(destPath, skillsDest);
   }
@@ -293,7 +297,7 @@ export async function enablePack(
     }
   }
 
-  const skillsDest = resolvePackSkillsDest(homeDir, id);
+  const skillsDest = resolvePackSkillsDest(homeDir, id, options.profileId);
   if (existsSync(skillsDest)) {
     const backupsDir = join(homeDir, ".estacoda", "packs", "backups");
     await createBackup(skillsDest, backupsDir, id);
@@ -324,7 +328,7 @@ export async function disablePack(
     return { ok: false, exitCode: 1, output: `pack not found: ${id}` };
   }
 
-  const skillsDest = resolvePackSkillsDest(homeDir, id);
+  const skillsDest = resolvePackSkillsDest(homeDir, id, options.profileId);
   if (existsSync(skillsDest)) {
     await rm(skillsDest, { recursive: true, force: true });
   }
@@ -350,7 +354,7 @@ export async function uninstallPack(
   }
 
   const packPath = join(homeDir, ".estacoda", "packs", id);
-  const skillsDest = resolvePackSkillsDest(homeDir, id);
+  const skillsDest = resolvePackSkillsDest(homeDir, id, options.profileId);
 
   if (existsSync(packPath)) {
     const backupsDir = join(homeDir, ".estacoda", "packs", "backups");

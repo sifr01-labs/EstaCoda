@@ -1,3 +1,4 @@
+import {reviewSettingsPack,executeSettingsPack} from './settings-packs.js';
 import {randomUUID} from 'node:crypto';
 import {normalizeProfileId,readActiveProfile,writeActiveProfile} from '../config/profile-home.js';
 import {ensureProfileSkeleton,profileExists} from '../cli/profile-state.js';
@@ -15,6 +16,7 @@ export class SettingsActions {
   try{const all=registry.list(),items:SettingsWorkspace[]=[];for(const w of all.slice(0,100))items.push({id:w.id,alias:w.alias,path:w.identity.canonicalPath,revision:w.locationRevision,trusted:await trust.isTrusted(w.identity.canonicalPath).catch(()=>false)});return {items,truncated:all.length>100};}finally{registry.close();}
  }
  private async state(action:SettingsAction):Promise<{baseline:string;facts:string[]}>{
+  if(action.action.startsWith('pack.'))return reviewSettingsPack(this.input,action);
   if(action.action.startsWith('profile.')){
    const id=normalizeProfileId(action.subject);if(id!==action.subject)throw new ControlProtocolError('-32602');
    const exists=await profileExists({...this.input,profileId:id});
@@ -47,6 +49,7 @@ export class SettingsActions {
   this.reviews.delete(input.reviewId);
   return this.operations.execute(input.operationId,a.action,async()=>{
    if((await this.state(a)).baseline!==record.baseline)return false;
+   if(a.action.startsWith('pack.'))return executeSettingsPack(this.input,a,record.baseline);
    if(a.action==='profile.default'){writeActiveProfile(a.subject,this.input);return true;}
    if(a.action==='profile.create'||a.action==='profile.copy'){await ensureProfileSkeleton({...this.input,profileId:a.subject,sourceProfileId:this.input.profileId,blank:a.action==='profile.create',copyFiles:a.action==='profile.copy'?a.value.split(',') as ('user'|'memory'|'soul')[]:[],failIfExists:true});return true;}
    const registry=new WorkspaceRegistry(this.input);

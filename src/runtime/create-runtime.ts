@@ -1,3 +1,4 @@
+import {profileHeaderEnvironment} from '../config/header-secret-references.js';
 import {HumanBrowserControl} from '../browser/human-control.js';
 import {BrowserControlOwner} from '../browser/control-lease.js';
 import {gateBrowserBackend} from '../browser/control-gate.js';
@@ -601,6 +602,7 @@ async function buildRuntime(options: RuntimeOptions, rollback: ResourceCleanup):
   const effectiveMcpServers = await trustStore.isTrusted(workspaceRoot) ? (options.mcpServers ?? {}) : {};
   const loadedMcpServers = await loadMcpServers({
     servers: effectiveMcpServers,
+    environment: await profileHeaderEnvironment({homeDir:globalPaths.homeDir,profileId}),
     artifactStore
   });
   for (const server of loadedMcpServers) resources.defer(() => server.stop());

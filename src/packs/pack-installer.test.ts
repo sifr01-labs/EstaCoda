@@ -513,3 +513,6 @@ describe("pack-installer", () => {
     expect(result.output).toContain("Eval hooks are not executed in EstaCoda v0.1.0");
   });
 });
+it('materializes in the explicitly selected profile without changing the active profile',async()=>{
+ const home=mkdtempSync(join(tmpdir(),'pack-profile-'));try{const source=join(home,'source');writePack(source,makeManifest());writeActiveProfile('default',{homeDir:home});const result=await installPack({homeDir:home,profileId:'selected',sourcePath:source,actor:'desktop'});expect(result.ok).toBe(true);expect(existsSync(join(resolveProfileStateHome({homeDir:home,profileId:'selected'}).skillsPath,'packs','test-sp','SKILL.md'))).toBe(true);expect(existsSync(packSkillsPath(home,'test-sp'))).toBe(false);expect(JSON.parse(readFileSync(join(home,'.estacoda','active-profile.json'),'utf8')).profileId).toBe('default');}finally{rmSync(home,{recursive:true,force:true});}
+});

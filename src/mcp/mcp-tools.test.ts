@@ -1225,3 +1225,6 @@ function postmanTools(options: { omitEnvironmentValue?: boolean; omitSpecContent
     inputSchema,
   }));
 }
+it('fails closed before connection when a selected-profile header reference is absent',async()=>{
+ let requests=0;const servers=await loadMcpServers({servers:{private:{transport:'http',url:'https://example.com/mcp',headerRefs:{Authorization:'PROFILE_HEADER'}}},environment:{},fetch:async()=>{requests++;throw new Error('must not connect');}});expect(requests).toBe(0);expect(servers[0]?.snapshot.available).toBe(false);expect(JSON.stringify(servers[0]?.snapshot)).not.toContain('PROFILE_HEADER');
+});

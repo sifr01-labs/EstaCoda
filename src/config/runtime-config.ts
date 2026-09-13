@@ -381,6 +381,7 @@ export type MCPServerConfig = {
   envRefs?: Record<string, string>;
   url?: string;
   headers?: Record<string, string>;
+  headerRefs?: Record<string, string>;
   tools?: MCPServerToolsConfig;
   includeTools?: string[];
   excludeTools?: string[];
@@ -836,6 +837,7 @@ export type MCPSetupInput = {
   envRefs?: Record<string, string>;
   url?: string;
   headers?: Record<string, string>;
+  headerRefs?: Record<string, string>;
   tools?: MCPServerToolsConfig;
   includeTools?: string[];
   excludeTools?: string[];
@@ -2388,6 +2390,7 @@ function normalizeMcpServers(
         ? Object.fromEntries(Object.entries(record.envRefs).filter(([, envName]) => typeof envName === "string") as Array<[string, string]>)
         : undefined,
       url: typeof record.url === "string" ? record.url : undefined,
+      headerRefs: typeof record.headerRefs === "object" && record.headerRefs !== null && !Array.isArray(record.headerRefs) ? Object.fromEntries(Object.entries(record.headerRefs).filter(([,v])=>typeof v === "string")) as Record<string,string> : undefined,
       headers: typeof record.headers === "object" && record.headers !== null && !Array.isArray(record.headers)
         ? Object.fromEntries(Object.entries(record.headers).filter(([, headerValue]) => typeof headerValue === "string") as Array<[string, string]>)
         : undefined,
@@ -3283,6 +3286,7 @@ export async function setupMcpConfig(options: {
     envRefs: options.input.envRefs ?? previous.envRefs,
     url: options.input.url ?? previous.url,
     headers: options.input.headers ?? previous.headers,
+    headerRefs: options.input.headerRefs ?? previous.headerRefs,
     tools: {
       include: options.input.includeTools ?? options.input.tools?.include ?? previous.tools?.include,
       exclude: options.input.excludeTools ?? options.input.tools?.exclude ?? previous.tools?.exclude,
@@ -4067,7 +4071,7 @@ function validateImageGenerationSetupInput(input: ImageGenerationSetupInput): vo
   validateOptionalUrl(input.baseUrl, "baseUrl");
 }
 
-function validateMcpSetupInput(input: MCPSetupInput): void {
+export function validateMcpSetupInput(input: MCPSetupInput): void {
   requireNonEmpty(input.name, "name");
   if (input.transport !== undefined && input.transport !== "stdio" && input.transport !== "http") {
     throw new Error("Expected MCP transport stdio or http");
@@ -4147,6 +4151,7 @@ function validateMcpSetupInput(input: MCPSetupInput): void {
   }
   validateRiskClass(input.resourceReadRiskClass, "resourceReadRiskClass");
   validateRiskClass(input.promptGetRiskClass, "promptGetRiskClass");
+  for(const [name,ref] of Object.entries(input.headerRefs??{}))if(!/^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,128}$/.test(name)||! /^[A-Z][A-Z0-9_]{1,127}$/.test(ref))throw new Error('Invalid MCP header reference');
   for (const [targetName, sourceName] of Object.entries(input.envRefs ?? {})) {
     validateOptionalEnvName(targetName, "MCP environment target");
     validateOptionalEnvName(sourceName, `MCP environment reference for ${targetName}`);

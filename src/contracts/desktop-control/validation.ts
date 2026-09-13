@@ -24,7 +24,7 @@ const cursorToken: Check = (v) => typeof v === "string" && /^[A-Za-z0-9_-]{1,512
 const capabilities = shape({ methods: unique(choice(CONTROL_METHODS),128), events: unique(choice(CONTROL_EVENTS)) });
 const settingValue:Check=v=>v===null||text(4096)(v)||boolean(v)||typeof v==='number'&&Number.isFinite(v)||array(text(2048),128)(v);
 const settingChange=shape({fieldId:text(240,1),selectors:array(text(128,1),8),value:settingValue});
-const settingField=shape({id:text(240,1),section:choice(SETTINGS_SECTIONS),path:array(text(128,1),12),kind:choice(['text','number','boolean','choice','strings','secret'])},{choices:array(settingValue,128),min:(v)=>typeof v==='number'&&Number.isFinite(v),max:(v)=>typeof v==='number'&&Number.isFinite(v),envName:text(128,1)});
+const settingField=shape({id:text(240,1),section:choice(SETTINGS_SECTIONS),path:array(text(128,1),12),kind:choice(['scalar','text','number','boolean','choice','strings','secret'])},{choices:array(settingValue,128),min:(v)=>typeof v==='number'&&Number.isFinite(v),max:(v)=>typeof v==='number'&&Number.isFinite(v),envName:text(128,1)});
 const settingsAction=shape({action:choice(SETTINGS_ACTIONS),subject:text(4096,1),value:text(4096)});
 const settingsBinding=shape({draftId:id,windowId:id,generation:integer(1)});
 const targetId:Check=(v)=>typeof v==='string'&&/^target_[a-f0-9-]{36}$/.test(v);
