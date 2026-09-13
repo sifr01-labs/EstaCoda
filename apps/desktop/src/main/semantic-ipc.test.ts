@@ -101,3 +101,8 @@ it('allows only native workspace selection and reviewed trust input',()=>{
  expect(()=>validateSemanticPayload('onboardingReviewWorkspace',{alias:'work',trust:false})).not.toThrow();
  for(const payload of [{alias:'work',trust:true,path:'/escape'},{alias:'work',trust:'true'},{alias:'work',trust:true,profileId:'other'}])expect(()=>validateSemanticPayload('onboardingReviewWorkspace',payload)).toThrow();
 });
+it('requires explicit onboarding confirmation and rejects renderer credential or profile scopes',()=>{
+ for(const method of ['onboardingApply','onboardingApplyWorkspace']){expect(()=>validateSemanticPayload(method,{reviewId:'r',confirmed:true})).not.toThrow();for(const payload of [{reviewId:'r',confirmed:false},{reviewId:'r'},{reviewId:'r',confirmed:true,profileId:'other'}])expect(()=>validateSemanticPayload(method,payload)).toThrow();}
+ expect(()=>validateSemanticPayload('onboardingReview',{modelSetupId:'m',preferences:[],workspaceReviewId:'w',windowId:'other'})).toThrow();
+ expect(()=>validateSemanticPayload('onboardingReview',{modelSetupId:'m',preferences:[],workspaceReviewId:'w'})).not.toThrow();
+});
