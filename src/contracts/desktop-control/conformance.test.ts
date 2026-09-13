@@ -32,6 +32,10 @@ const activities: ActivityProjection[] = [
 const artifactReference={source:'session' as const,ownerId:'s',artifactId:'a'};
 const artifactPreview={artifact:{reference:artifactReference,displayName:'report.txt',mimeType:'text/plain',bytes:0,sha256:'a'.repeat(64),createdAt:'2026-09-12',retention:'retained' as const,sourceOrigin:null,workIds:['session:s'],target:null},integrity:'verified' as const,text:'',truncated:false,reason:null};
 const cases = {
+ 'artifacts.mediaBegin':{params:{reference:artifactReference},result:{transferId:'t',bytes:10,mimeType:'image/png',sha256:'a'.repeat(64),name:'image.png'}},
+ 'artifacts.mediaChunk':{params:{transferId:'t',offset:0},result:{data:'YWJj'}},
+ 'artifacts.mediaClose':{params:{transferId:'t'},result:{closed:true}},
+ 'media.stage':{params:{path:'/selected.png',target},result:{id:'image',name:'selected.png',size:10,type:'image/png'}},
  'settings.workspaces':{params:{},result:{items:[],truncated:false}},
  'settings.reviewAction':{params:{action:'profile.create',subject:'new',value:''},result:{reviewId:'r',action:{action:'profile.create',subject:'new',value:''},facts:['new'],expiresAt:1}},
  'settings.executeAction':{params:{reviewId:'r',operationId:'o',confirmed:true},result:{operationId:'o',action:'profile.create',state:'completed'}},

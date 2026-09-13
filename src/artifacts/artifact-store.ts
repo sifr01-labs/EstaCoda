@@ -212,6 +212,10 @@ export class ArtifactStore {
     if(!parsed || parsed.bytes>8*1024*1024 || !["image/png","image/jpeg"].includes(parsed.mimeType))throw new Error("Image preview unavailable.");
     return (await this.#verifiedContent(value,scope)).content;
   }
+  async verifiedMedia(value:unknown,scope:SessionArtifactScope):Promise<Buffer>{
+    const parsed=parseRegistration(value);if(!parsed||parsed.bytes>8*1024*1024||!['image/png','image/jpeg','image/gif','image/webp'].includes(parsed.mimeType))throw new Error('Media preview unavailable');
+    return (await this.#verifiedContent(value,scope)).content;
+  }
   async #verifiedContent(value:unknown,scope:SessionArtifactScope){
     const registration = parseRegistration(value);
     if (!registration || registration.sessionId !== scope.sessionId || registration.profileId !== scope.profileId) throw new Error("Artifact unavailable.");
@@ -276,7 +280,7 @@ function artifactFromRegistration(
       sourceOrigin: registration.source.origin,
       source: registration.source.kind,
       ...(registration.apiDescription === undefined ? {} : { apiDescription: registration.apiDescription }),
-      outcome: registration.source.kind === "workspace.changes" ? "changes-exported" : registration.source.kind === "browser.screenshot" ? "screenshot-captured" : "download-completed"
+      outcome: registration.source.kind === "image.generated" ? "image-generated" : registration.source.kind === "workspace.changes" ? "changes-exported" : registration.source.kind === "browser.screenshot" ? "screenshot-captured" : "download-completed"
     }
   };
 }
@@ -323,7 +327,7 @@ export function parseRegistration(value: unknown): SessionArtifactRegistration |
 
 function validateSource(value: unknown): SessionArtifactSource {
   if (!isRecord(value) || Object.keys(value).some((key) => !["kind", "description", "filename", "origin"].includes(key)) ||
-    !["browser.download", "browser.screenshot", "workspace.changes"].includes(String(value.kind)) ||
+    !["browser.download", "browser.screenshot", "workspace.changes", "image.generated"].includes(String(value.kind)) ||
     typeof value.description !== "string" || value.description.length === 0 || value.description.length > 320 ||
     redactSensitiveText(value.description) !== value.description ||
     typeof value.filename !== "string" || value.filename.length === 0 || value.filename.length > 160 ||
@@ -331,6 +335,7 @@ function validateSource(value: unknown): SessionArtifactSource {
     typeof value.origin !== "string" || value.origin.length > 512) {
     throw new Error("Artifact source metadata is invalid.");
   }
+  if(value.kind==='image.generated'){if(value.origin!=='media:image.generate'||!['image.png','image.jpg','image.webp','image.gif'].includes(value.filename))throw new Error('Invalid generated image source');return {kind:'image.generated',description:value.description,filename:value.filename,origin:value.origin};}
   if (value.kind === "workspace.changes") {
     if (!/^workspace:target_[a-f0-9-]{36}$/u.test(value.origin) || value.filename !== "workspace-changes.json") throw new Error("Invalid workspace artifact origin.");
     return { kind: "workspace.changes", description: value.description, filename: value.filename, origin: value.origin };
@@ -428,6 +433,7 @@ async function readArtifactBytes(path: string, expected: number): Promise<Buffer
 }
 
 function inspectRetainedContent(source:SessionArtifactSource,content:Buffer): ReturnType<typeof inspectBrowserDownload>|{allowed:true;kind:"image";mimeType:string;apiDescription?:never} {
+  if(source.kind==='image.generated'){const mime=source.filename.endsWith('.png')&&content.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10]))?'image/png':source.filename.endsWith('.jpg')&&content[0]===255&&content[1]===216&&content[2]===255?'image/jpeg':source.filename.endsWith('.webp')&&content.subarray(0,4).toString()==='RIFF'&&content.subarray(8,12).toString()==='WEBP'?'image/webp':source.filename.endsWith('.gif')&&/^GIF8[79]a$/.test(content.subarray(0,6).toString())?'image/gif':undefined;return mime?{allowed:true,kind:'image',mimeType:mime}:{allowed:false,reason:'invalid-generated-image'};}
   if(source.kind!=="browser.screenshot")return inspectBrowserDownload(source.filename,content);
   if(source.filename==="browser.png"&&content.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])))return{allowed:true,kind:"image",mimeType:"image/png"};
   if(source.filename==="browser.jpg"&&content[0]===255&&content[1]===216&&content[2]===255)return{allowed:true,kind:"image",mimeType:"image/jpeg"};

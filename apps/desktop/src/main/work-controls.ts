@@ -44,7 +44,7 @@ export class DesktopWorkControls {
  async inspect(workId:string){const check=this.fence();await this.connection.getWork(workId);check();const record=this.references.records()[workId];return record?this.connection.workRequest('operations.inspect',record):null;}
  private async available(target:TargetReference){const page=await this.connection.workRequest('work.targets',{target});if(!page.items.some(item=>item.targetId===target.targetId&&item.targetGeneration===target.targetGeneration))throw new Error('Select an available trusted target.');}
  private scope(input:Pick<WorkSubmission,'draftId'|'target'>):AttachmentScope{return{profileId:this.connection.state.profileId,generation:this.connection.state.generation,target:input.target,draftId:input.draftId};}
- async attach(input:Pick<WorkSubmission,'draftId'|'target'>){const check=this.fence();await this.available(input.target);check();const scope=this.scope(input);const paths=await this.chooseFiles();check();return this.attachments.stage(paths,scope,check);}
+ async attach(input:Pick<WorkSubmission,'draftId'|'target'>){const check=this.fence();await this.available(input.target);check();const scope=this.scope(input);const paths=await this.chooseFiles();check();return this.attachments.stage(paths,scope,check,path=>this.connection.inspectionRequest('media.stage',{path,target:scope.target}));}
  async submit(input:WorkSubmission):Promise<{workId:string;receipt:OperationReceipt}>{
   const check=this.fence(),key=this.connection.state.profileId+':'+(input.workId??input.draftId);
   if(this.#busy.has(key))throw new Error('Work is already submitting.');this.#busy.add(key);
@@ -63,6 +63,8 @@ export class DesktopWorkControls {
      prepared=previous;sessionId=previous.sessionId;
     }else sessionId=randomUUID();
    }
+   const mediaIds=this.attachments.mediaIds(this.scope(input),input.attachmentIds);
+   if(input.kind==='task'&&mediaIds.length)throw new Error('Use a Conversation for media attachments');
    const text=this.attachments.compose(this.scope(input),input.attachmentIds,input.text);
    if(input.kind==='task'&&(input.workId||text.length>4000||!input.limits))throw new Error('New Task objectives and attachments must fit 4,000 characters with reviewed limits.');
    const workId='session:'+sessionId,binding={sessionId,target:input.target};
@@ -78,7 +80,7 @@ export class DesktopWorkControls {
     const receipt=await this.connection.workRequest('tasks.create',{...binding,operationId,taskId,objective:text,limits:input.limits!,selection:input.selection??null});check();this.attachments.remove(input.attachmentIds);return{workId:taskWorkId,receipt};
    }
    check();const operationId=Date.now()+':'+randomUUID();this.references.save(workId,{...binding,operationId,method:'sessions.send'});if(!input.workId)this.references.save(input.draftId,{...binding,operationId,method:'sessions.send'});
-   const receipt=await this.connection.workRequest('sessions.send',{...binding,operationId,text});check();this.attachments.remove(input.attachmentIds);return{workId,receipt};
+   const receipt=await this.connection.workRequest('sessions.send',{...binding,operationId,text,...(mediaIds.length?{mediaIds}:{})});check();this.attachments.remove(input.attachmentIds);return{workId,receipt};
   }finally{this.#busy.delete(key);}
  }
 }

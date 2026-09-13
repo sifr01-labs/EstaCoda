@@ -1,3 +1,4 @@
+import {DesktopMediaInput} from '../artifacts/desktop-media-input.js';
 import { resolveGlobalStateHome, resolveProfileStateHome } from '../config/profile-home.js';
 import { ControlProtocolError, type MethodRequest, type OperationReceipt } from '../contracts/desktop-control/index.js';
 import { callPrivateControl, type PrivateControlRequest } from '../gateway/private-control.js';
@@ -44,6 +45,7 @@ export async function sessionControl(input: { homeDir: string; profileId: string
     ...(request.method === 'tasks.retry' ? { stepId: request.params.stepId } : {}),
     ...(request.method === 'tasks.guide' ? { guidance: request.params.guidance } : {}),
     operationId: request.params.operationId, ...(request.method === 'sessions.send' ? { text: request.params.text } : {}) };
+  if(request.method==='sessions.send'&&request.params.mediaIds?.length){control.mediaIds=request.params.mediaIds;await new DesktopMediaInput(input).claim(control.mediaIds,{sessionId:control.sessionId,operationId:control.operationId,targetId:control.targetId,targetGeneration:control.targetGeneration});}
   const response = await callPrivateControl({ ...input, directory: resolveProfileStateHome(input).gatewayStatePath, request: control,
     requireTargetGeneration: true, signal, ...(request.method === 'operations.inspect' ? {} : { startIfNeeded: { homeDir: input.homeDir } }) });
   const receipt = request.method === 'operations.inspect'

@@ -14,7 +14,7 @@ export async function artifactDatabase(input:Input):Promise<SQLiteSessionDB>{
  if(!info.isFile()||info.isSymbolicLink())throw new Error('Artifact database unavailable.');
  return new SQLiteSessionDB({path,readonly:true});
 }
-async function resolveArtifact(input:Input,db:SQLiteSessionDB,reference:ArtifactReference):Promise<{artifact:ArtifactProjection;preview:()=>Promise<{text:string|null;truncated:boolean}>}>{
+async function resolveArtifact(input:Input,db:SQLiteSessionDB,reference:ArtifactReference):Promise<{artifact:ArtifactProjection;media?:()=>Promise<Buffer>;preview:()=>Promise<{text:string|null;truncated:boolean}>}>{
  const tasks=new SQLiteTaskStore({db:db.db,profileId:input.profileId}),paths=resolveProfileStateHome(input);
  if(reference.source==='session'){
   const session=await db.getSessionForProfile(reference.ownerId,input.profileId);if(!session)throw new Error('Artifact unavailable.');
@@ -29,6 +29,7 @@ async function resolveArtifact(input:Input,db:SQLiteSessionDB,reference:Artifact
    ...(provenance?.applicationTargetId?{applicationTargetId:provenance.applicationTargetId}:{}),
    ...(provenance?.evidenceCallIds?{evidenceCallIds:[...provenance.evidenceCallIds]}:{})};
   return {artifact:{...provenanceFields,reference,displayName:metadata.displayName,mimeType:metadata.mimeType,bytes:metadata.bytes,sha256:metadata.sha256,createdAt:metadata.createdAt,retention:'retained',sourceOrigin:metadata.sourceOrigin,workIds:links.workIds,target:provenance?.target??(session.executionTarget?{targetId:session.executionTarget.targetId,targetGeneration:session.executionTarget.targetGeneration}:null)},
+   media:async()=>{await assertProfileContentRoot(input,join(paths.profileRoot,'artifacts'));return new ArtifactStore({storageRoot:join(paths.profileRoot,'artifacts')}).verifiedMedia(registration,{sessionId:session.id,profileId:input.profileId});},
    preview:async()=>{await assertProfileContentRoot(input,join(paths.profileRoot,'artifacts'));return new ArtifactStore({storageRoot:join(paths.profileRoot,'artifacts')}).previewRegistration(registration,{sessionId:session.id,profileId:input.profileId});}};
  }
  const task=tasks.getTask(reference.ownerId),result=tasks.getResult(reference.artifactId);
@@ -89,3 +90,5 @@ export async function workArtifactReferences(input:Input,work:import('../contrac
   return{references:selected,truncated:references.length>16};
  }finally{db.close();}
 }
+
+export async function captureArtifactMedia(input:Input,reference:ArtifactReference){const db=await artifactDatabase(input);try{const resolved=await resolveArtifact(input,db,reference);if(!resolved.media)throw new Error('Media content unavailable');return {artifact:resolved.artifact,content:await resolved.media()};}finally{db.close();}}

@@ -1,3 +1,5 @@
+import {DesktopMediaOutput} from './desktop-media-output.js';
+import {DesktopMediaInput} from '../artifacts/desktop-media-input.js';
 import {SettingsActions} from './settings-actions.js';
 import {SettingsDependencies} from './settings-dependencies.js';
 import {PublicSettings} from './public-settings.js';
@@ -51,6 +53,7 @@ export class DesktopBridge {
   readonly candidates: CredentialCandidates;
   readonly modelSetup: ModelSetup;
   readonly publicSettings:PublicSettings;
+  readonly mediaOutput:DesktopMediaOutput;
   readonly settingsActions:SettingsActions;
   readonly settingsDependencies:SettingsDependencies;
   readonly channelSessions:ChannelSessions;
@@ -119,6 +122,10 @@ export class DesktopBridge {
       'settings.reviewAction':async request=>{if(request.method!=='settings.reviewAction')throw new ControlProtocolError('-32601');return {result:await this.settingsActions.review(request.params)};},
       'settings.executeAction':async request=>{if(request.method!=='settings.executeAction')throw new ControlProtocolError('-32601');return {result:await this.settingsActions.execute(request.params)};},
       'settings.cancelAction':request=>{if(request.method!=='settings.cancelAction')throw new ControlProtocolError('-32601');return {result:this.settingsActions.cancel(request.params.reviewId)};},
+      'media.stage':async(request,signal)=>{if(request.method!=='media.stage')throw new ControlProtocolError('-32601');const page=await availableWorkTargets(this.options,signal,{target:request.params.target});if(!page.items.length)throw new ControlProtocolError('-32003');return {result:await new DesktopMediaInput(this.options).stage(request.params.path,request.params.target)};},
+      'artifacts.mediaBegin':async request=>{if(request.method!=='artifacts.mediaBegin')throw new ControlProtocolError('-32601');return {result:await this.mediaOutput.begin(request.params.reference)};},
+      'artifacts.mediaChunk':request=>{if(request.method!=='artifacts.mediaChunk')throw new ControlProtocolError('-32601');return {result:this.mediaOutput.chunk(request.params.transferId,request.params.offset)};},
+      'artifacts.mediaClose':request=>{if(request.method!=='artifacts.mediaClose')throw new ControlProtocolError('-32601');return {result:this.mediaOutput.close(request.params.transferId)};},
       'settings.apply':async(request,signal)=>{if(request.method!=='settings.apply')throw new ControlProtocolError('-32601');return {result:await this.publicSettings.apply(request.params,signal)};},
       'settings.inspect':async request=>{if(request.method!=='settings.inspect')throw new ControlProtocolError('-32601');return {result:await this.publicSettings.inspect(request.params.operationId)};},
       'settings.verify':async()=>({result:await this.publicSettings.verify()}),
@@ -199,6 +206,7 @@ export class DesktopBridge {
     this.terminals=new TerminalCapabilities(options);
     this.targets=new TargetControls(options);
     this.candidates = new CredentialCandidates(this.server.profileId,this.server.instanceId);
+    this.mediaOutput=new DesktopMediaOutput(options);
     this.settingsActions=new SettingsActions(options);
     this.settingsDependencies=new SettingsDependencies(this.options);
     this.publicSettings=new PublicSettings(this.options,this.candidates,async()=>{this.#catalog=undefined;this.subscriptions.publish({type:'service.warning',payload:{reason:'configuration_changed'}});try{await notifyPrivateConfigurationChanged({directory:resolveProfileStateHome(this.options).gatewayStatePath,profileId:this.options.profileId,version:this.options.version,signal:AbortSignal.timeout(2000)});}catch{}});
@@ -253,6 +261,7 @@ export class DesktopBridge {
     return this.#work;
   }
   close(): void {
+    this.mediaOutput.dispose();
     this.subscriptions.publish({ type: 'service.shutdown', payload: { reason: 'client_closed' } });
     this.server.close();
   }

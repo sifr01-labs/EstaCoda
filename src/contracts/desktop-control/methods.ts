@@ -27,6 +27,12 @@ export type SubscribeResult =
 export type WorkUsageProjection={scope:'session'|'task'|'attempt';reportedTokens:number|null;providerCalls:number;cost:{amount:number;currency:'USD'}|null;usageComplete:boolean;pricingComplete:boolean;context:{usedTokens:number;totalTokens:number;provider:string;model:string}|null;truncated:boolean;provisional:boolean};
 export type RuntimeCounts={runningSessions:number;runningTasks:number;queuedTasks:number;approvals:number;attention:number;scheduled:number|null;asOf:number};
 export type MethodContracts = {
+ 'artifacts.mediaBegin':{params:{reference:import('./artifacts.js').ArtifactReference};result:{transferId:string;bytes:number;mimeType:string;sha256:string;name:string}};
+ 'artifacts.mediaChunk':{params:{transferId:string;offset:number};result:{data:string}};
+ 'artifacts.mediaClose':{params:{transferId:string};result:{closed:boolean}};
+
+ 'media.stage':{params:{path:string;target:TargetReference};result:{id:string;name:string;size:number;type:string}};
+
  'settings.workspaces':{params:{};result:{items:import('./settings.js').SettingsWorkspace[];truncated:boolean}};
  'settings.reviewAction':{params:import('./settings.js').SettingsAction;result:import('./settings.js').SettingsActionReview};
  'settings.executeAction':{params:{reviewId:string;operationId:string;confirmed:true};result:ConnectionOperation};
@@ -125,7 +131,7 @@ export type MethodContracts = {
   "tasks.guide": { params: SessionControl & { taskId: string; guidance: string }; result: OperationReceipt };
   "sessions.start": { params: SessionControl; result: OperationReceipt };
   "sessions.resume": { params: SessionControl; result: OperationReceipt };
-  "sessions.send": { params: SessionControl & { text: string }; result: OperationReceipt };
+  "sessions.send": { params: SessionControl & { text: string; mediaIds?:string[] }; result: OperationReceipt };
   "sessions.cancelTurn": { params: SessionControl; result: OperationReceipt };
   "approvals.resolve": { params: SessionControl & { approvalId: string; decision: "approved" | "denied" }; result: OperationReceipt };
   "operations.inspect": { params: SessionControl & { taskId?: string; method: OperationReceipt["method"] }; result: OperationReceipt };

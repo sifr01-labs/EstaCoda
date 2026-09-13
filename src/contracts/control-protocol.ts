@@ -9,12 +9,14 @@ export type PrivateControlRequest = {
   selection?: {providerId:string;modelId:string}|null;
   taskId?: string; stepId?: string; guidance?: string;
   targetGeneration?: number;
+  mediaIds?:string[];
   text?: string; approvalId?: string; decision?: "approved" | "denied";
 };
 
 export function validatePrivateControlRequest(value: unknown): asserts value is PrivateControlRequest {
   if (!value || typeof value !== "object") throw new Error("Invalid control request.");
   const request = value as PrivateControlRequest;
+  if(request.mediaIds!==undefined&&(request.method!=='send'||!Array.isArray(request.mediaIds)||request.mediaIds.length>4||new Set(request.mediaIds).size!==request.mediaIds.length||request.mediaIds.some(id=>typeof id!=='string'||!/^[a-f0-9-]{36}$/.test(id))))throw new Error('Invalid media references');
   if(request.method==='browser.control'){
     validateHumanBrowserCommand(request.browserControl);
     if(request.targetGeneration===undefined||Object.keys(request).sort().join(',')!=='browserControl,method,operationId,sessionId,targetGeneration,targetId')throw new Error('Invalid browser owner binding.');

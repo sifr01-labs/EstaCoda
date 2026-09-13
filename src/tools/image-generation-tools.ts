@@ -1,6 +1,7 @@
+import {resolveProfileStateHome} from '../config/profile-home.js';
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { extname, isAbsolute, join, relative, resolve } from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash,randomUUID } from "node:crypto";
 import type { ArtifactStore } from "../artifacts/artifact-store.js";
 import {
   isAlwaysBlockedUrl,
@@ -30,7 +31,9 @@ export type ImageGenerationFetchLike = (url: string, init?: {
 }>;
 
 export type ImageGenerationToolOptions = {
+  profileId?:string;currentSessionId?:()=>string;persistSessionArtifact?:(sessionId:string,artifact:import('../contracts/artifact.js').SessionArtifactRegistration)=>Promise<void>;
   imageCacheRoot: string;
+  retainedImageRoot?:string;
   artifactStore: ArtifactStore;
   imageGen?: LoadedRuntimeConfig["imageGen"];
   fetch?: ImageGenerationFetchLike;
@@ -158,7 +161,7 @@ export function createImageGenerationTools(options: ImageGenerationToolOptions):
 
       const sourceImages = resolveSourceImages(input, options.artifactStore, {
         provider: imageGen.provider,
-        imageCacheRoot: options.imageCacheRoot
+        imageCacheRoot: options.imageCacheRoot,retainedImageRoot:options.retainedImageRoot
       });
       if (!sourceImages.ok) {
         return sourceImages;
@@ -215,6 +218,8 @@ export const imageGenerationToolProvider: SessionToolProvider = {
       imageCacheRoot: requireProviderDependency("imageGeneration", "imageCacheRoot", ctx.imageCacheRoot),
       artifactStore: requireProviderDependency("imageGeneration", "artifactStore", ctx.artifactStore),
       imageGen: ctx.imageGen,
+      retainedImageRoot:join(resolveProfileStateHome({homeDir:ctx.homeDir,profileId:ctx.profileId}).profileRoot,'artifacts'),
+      profileId:ctx.profileId,currentSessionId:()=>ctx.currentSessionId(),persistSessionArtifact:ctx.sessionDb?async(sessionId,artifact)=>{await ctx.sessionDb!.appendEvent(sessionId,{kind:'session-artifact-registered',artifact});}:undefined,
       fetch: ctx.imageGenerationFetch
     });
   }
@@ -1014,6 +1019,8 @@ async function storeImageArtifact(
   const filePath = join(options.imageCacheRoot, fileName);
   await writeFile(filePath, image.bytes);
   const fileStat = await stat(filePath);
+  const sessionId=options.currentSessionId?.();
+  if(sessionId&&options.profileId&&options.persistSessionArtifact&&fileStat.size<=8*1024*1024){const retained=await options.artifactStore.retainSessionArtifact({sessionId,profileId:options.profileId,capturePath:filePath,kind:'image',bytes:fileStat.size,mimeType:image.mimeType,sha256:createHash('sha256').update(image.bytes).digest('hex'),source:{kind:'image.generated',description:'Generated image',filename:'image.'+extensionForMime(image.mimeType),origin:'media:image.generate'},persist:artifact=>options.persistSessionArtifact!(sessionId,artifact)});return {...retained,metadata:{...retained.metadata,...details.metadata}};}
   return options.artifactStore.record({
     path: filePath,
     kind: "image",
@@ -1030,6 +1037,7 @@ function resolveSourceImages(
   options: {
     provider: LoadedRuntimeConfig["imageGen"]["provider"];
     imageCacheRoot: string;
+  retainedImageRoot?:string;
   }
 ): { ok: true; sources: ResolvedSourceImage[] } | { ok: false; content: string; metadata?: Record<string, unknown> } {
   const requested = [
@@ -1060,6 +1068,7 @@ function resolveSourceImage(
   options: {
     provider: LoadedRuntimeConfig["imageGen"]["provider"];
     imageCacheRoot: string;
+  retainedImageRoot?:string;
   }
 ): { ok: true; source: ResolvedSourceImage } | { ok: false; content: string; metadata?: Record<string, unknown> } {
   if (isSafeRemoteImageUrl(source)) {
@@ -1075,13 +1084,13 @@ function resolveSourceImage(
       source: {
         reference: source.startsWith("artifact://") ? source : `artifact://${artifact?.id ?? artifactId}`,
         url: sourceUrl,
-        localPath: localImageArtifactPath(artifact, options.imageCacheRoot),
+        localPath: localImageArtifactPath(artifact, options.imageCacheRoot,options.retainedImageRoot),
         mimeType: artifact?.mimeType
       }
     };
   }
 
-  const localPath = options.provider === "openai" ? localImageArtifactPath(artifact, options.imageCacheRoot) : undefined;
+  const localPath = options.provider === "openai" ? localImageArtifactPath(artifact, options.imageCacheRoot,options.retainedImageRoot) : undefined;
   if (localPath !== undefined) {
     return {
       ok: true,
@@ -1116,15 +1125,11 @@ function resolveSourceImage(
 
 function localImageArtifactPath(
   artifact: ReturnType<ArtifactStore["list"]>[number] | undefined,
-  imageCacheRoot: string
+  imageCacheRoot: string,retainedImageRoot?:string
 ): string | undefined {
   if (artifact?.kind !== "image" || artifact.localPath === undefined) return undefined;
   const candidate = resolve(artifact.localPath);
-  const root = resolve(imageCacheRoot);
-  const rel = relative(root, candidate);
-  if (rel === "" || (!rel.startsWith("..") && !isAbsolute(rel))) {
-    return candidate;
-  }
+  for(const root of [imageCacheRoot,...(retainedImageRoot?[retainedImageRoot]:[])]){const rel=relative(resolve(root),candidate);if(rel===""||(!rel.startsWith("..")&&!isAbsolute(rel)))return candidate;}
   return undefined;
 }
 

@@ -1,3 +1,4 @@
+import {DesktopMediaInput} from '../artifacts/desktop-media-input.js';
 import {desktopModelControl} from './desktop-model-controls.js';
 import { ExecutionTargetStore } from '../workspaces/execution-target.js';
 import { desktopTaskControl } from './desktop-task-controls.js';
@@ -1849,6 +1850,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
       sessionDb.db.query("update pending_approvals set status='expired', resolved_at=?, resolved_by='owner-restart', command_payload=null, request_payload=null where profile_id=? and channel='desktop' and status='pending'")
         .run(new Date().toISOString(), profileId);
       const sharedHost = new SharedSessionHost({
+        resolveMedia:request=>new DesktopMediaInput({homeDir,profileId}).resolve(request.mediaIds??[],{sessionId:request.sessionId,operationId:request.operationId,targetId:request.targetId,targetGeneration:request.targetGeneration}),
         profileId, sessionDb, receipts, approvalQueue: gatewayApprovalQueue,
         browserControl:request=>runtimeCache.browserControl(request.sessionId,request.browserControl!),
         modelControl: async (request) => {const current=await loadConfig();return desktopModelControl({request,profileId,sessionDb,tasks:taskStore,context:{config:current.config,providerRegistry:current.providerRegistry,homeDir,profileId},invalidate:id=>runtimeCache.invalidate(id)});},
@@ -1901,7 +1903,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
       });
       state.sharedSessionHost = sharedHost;
       state.privateControl = await startPrivateControl({ directory: profilePaths.gatewayStatePath,
-        instanceId: state.gatewayInstanceId!, profileId, version, targetGeneration: true, handle: (request) => sharedHost.handle(request),
+        instanceId: state.gatewayInstanceId!, profileId, version, targetGeneration: true, mediaAttachments:true, handle: (request) => sharedHost.handle(request),
         configurationChanged: async () => {await loadConfig();await runtimeCache.configurationChanged();} });
      } else {
       logWarning("Shared control unavailable: use a shorter profile home on Unix; Windows requires protected named-pipe support. Foreground and background services remain available.");

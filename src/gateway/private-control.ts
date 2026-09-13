@@ -19,6 +19,7 @@ async function assertPrivate(path: string, directory = false): Promise<void> {
 export async function startPrivateControl(input: {
   directory: string; instanceId: string; profileId: string; version: string;
   targetGeneration?: boolean;
+  mediaAttachments?:boolean;
   handle(request: PrivateControlRequest): Promise<unknown>;
   configurationChanged?: () => Promise<void>;
 }): Promise<{ close(): Promise<void> }> {
@@ -53,7 +54,7 @@ export async function startPrivateControl(input: {
           if (message.probe === true) {
             if (Object.keys(message).some((key) => !["protocol", "version", "instanceId", "profileId", "socket", "token", "probe"].includes(key))) throw new Error("Invalid probe.");
             socket.end(JSON.stringify({ ok: true, result: { profileId: input.profileId, instanceId: input.instanceId,
-              version: input.version, capabilities: { readiness: true, targetGeneration: input.targetGeneration === true } } }) + "\n");
+              version: input.version, capabilities: { readiness: true, targetGeneration: input.targetGeneration === true,...(input.mediaAttachments?{mediaAttachments:true}:{}) } } }) + "\n");
             return;
           }
           if (message.configurationChanged === true) {
@@ -61,6 +62,7 @@ export async function startPrivateControl(input: {
             await input.configurationChanged();socket.end(JSON.stringify({ok:true,result:{acknowledged:true}})+'\n');return;
           }
           validatePrivateControlRequest(message.request);
+          if(message.request.mediaIds?.length&&!input.mediaAttachments)throw new Error('Media attachments unsupported');
           // Profile and principal are bound by this instance; caller labels are ignored.
           const result = await input.handle(message.request);
           const response = JSON.stringify({ ok: true, result });
@@ -110,7 +112,7 @@ export async function callPrivateControl(input: { directory: string; profileId: 
     if (!ready) throw new Error("Shared supervisor is unavailable or incompatible. Inspect its existing service; do not start a duplicate host.");
   }
 
-  if (input.requireTargetGeneration && !(await probePrivateControl(input)).targetGeneration) throw new PrivateControlCompatibilityError("Supervisor cannot enforce target generations.");
+  if(input.requireTargetGeneration||input.request.mediaIds?.length){const caps=await probePrivateControl(input);if(input.requireTargetGeneration&&!caps.targetGeneration||input.request.mediaIds?.length&&!caps.mediaAttachments)throw new PrivateControlCompatibilityError('Supervisor cannot enforce requested target/media binding');}
   return exchangePrivateControl(input, { request: input.request });
 }
 
@@ -153,13 +155,13 @@ async function exchangePrivateControl(input: { directory: string; profileId: str
 }
 
 /** Authenticated read-only handshake. Older hosts reject it; never infer readiness from discovery alone. */
-export async function probePrivateControl(input: { directory: string; profileId: string; version: string; signal?: AbortSignal }): Promise<{ instanceId: string; targetGeneration: boolean }> {
+export async function probePrivateControl(input: { directory: string; profileId: string; version: string; signal?: AbortSignal }): Promise<{ instanceId: string; targetGeneration: boolean;mediaAttachments?:boolean }> {
   const result = await exchangePrivateControl(input, { probe: true }) as Record<string, unknown> | null;
   if (!result || Object.keys(result).sort().join(",") !== "capabilities,instanceId,profileId,version" || result.profileId !== input.profileId || result.version !== input.version ||
     typeof result.instanceId !== "string" || !/^[A-Za-z0-9_.:-]{1,160}$/.test(result.instanceId)) throw new PrivateControlCompatibilityError("Incompatible supervisor readiness contract.");
   const caps = result.capabilities as Record<string, unknown> | null;
-  if (!caps || Object.keys(caps).sort().join(",") !== "readiness,targetGeneration" || caps.readiness !== true || typeof caps.targetGeneration !== "boolean") throw new PrivateControlCompatibilityError("Incompatible supervisor capabilities.");
-  return { instanceId: result.instanceId, targetGeneration: caps.targetGeneration as boolean };
+  if (!caps || !["readiness,targetGeneration","mediaAttachments,readiness,targetGeneration"].includes(Object.keys(caps).sort().join(",")) || caps.mediaAttachments!==undefined&&typeof caps.mediaAttachments!=="boolean" || caps.readiness !== true || typeof caps.targetGeneration !== "boolean") throw new PrivateControlCompatibilityError("Incompatible supervisor capabilities.");
+  return { instanceId: result.instanceId, targetGeneration: caps.targetGeneration as boolean,...(caps.mediaAttachments?{mediaAttachments:true}:{}) };
 }
 
 /** Notify an existing authenticated owner; never starts or replaces a supervisor. */

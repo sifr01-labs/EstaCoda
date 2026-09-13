@@ -19,6 +19,7 @@ export class SharedSessionHost {
   readonly #serial = new SessionCompressionLock();
   #closed = false;
   constructor(readonly options: {
+    resolveMedia?(request:PrivateControlRequest):Promise<import('../contracts/channel.js').ChannelAttachment[]>;
     profileId: string; sessionDb: SessionDB; receipts?: ControlReceipts;
     approvalQueue?: GatewayApprovalQueue;
     browserControl?(request:PrivateControlRequest):Promise<unknown>;
@@ -126,7 +127,8 @@ export class SharedSessionHost {
       this.#active.set(request.sessionId, state);
       try {
         state.runtime = await this.options.acquire(request.sessionId);
-        const response = await state.runtime.handle({ text: request.text!, channel: "cli", signal: state.controller.signal,
+        const attachments=request.mediaIds?.length?await this.options.resolveMedia?.(request):undefined;if(request.mediaIds?.length&&!attachments)throw new Error('Media resolver unavailable');
+        const response = await state.runtime.handle({attachments, text: request.text!, channel: "cli", signal: state.controller.signal,
           onDelta: text=>{if(!state.preview)return;const combined=state.preview.text+text;state.preview.truncated ||= combined.length>16384;state.preview.text=combined.slice(0,16384);},
           onEvent: event=>{if(event.kind==='provider-tool-call'&&state.preview){state.preview.text='';state.preview.truncated=false;}},
           onApprovalRequest: async (approval) => {
