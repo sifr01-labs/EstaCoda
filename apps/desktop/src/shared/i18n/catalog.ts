@@ -1,9 +1,11 @@
+import {onboardingArabic} from './onboarding.js';
 import {settingsArabic} from './settings.js';
 import {evidenceArabic} from './evidence.js';
 import {setupArabic} from './setup.js';
 import {workArabic} from './work.js';
 /** Product-owned message keys. Never pass provider output or backend error text here. */
 export const arabic = {
+ ...onboardingArabic,
  ...settingsArabic,
  ...evidenceArabic,...workArabic,
  ...setupArabic,

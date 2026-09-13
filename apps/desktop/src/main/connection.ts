@@ -7,8 +7,8 @@ export type ConnectionState = { status: 'connecting' | 'ready' | 'disconnected' 
 export const INSPECTION_METHODS=CONTROL_METHODS.filter(method=>method==='browser.control'||method==='browser.list'||method==='browser.snapshot'||method.startsWith('media.')||method.startsWith('artifacts.')||method==='evidence.get'||method.startsWith('files.')||method.startsWith('diff.')||method.startsWith('terminal.'));
 export const TARGET_METHODS=CONTROL_METHODS.filter(method=>method.startsWith('targets.'));
 export const CONNECTION_METHODS=CONTROL_METHODS.filter(method=>method.startsWith('connections.')||method.startsWith('telegram.')||method.startsWith('gateway.'));
-export const SETTINGS_METHODS=CONTROL_METHODS.filter(method=>method.startsWith('settings.'));
-export const MODEL_METHODS=CONTROL_METHODS.filter(method=>method.startsWith('models.') || ['providers.list','sessions.setModel','tasks.setModel','operations.inspect'].includes(method));
+export const SETTINGS_METHODS=CONTROL_METHODS.filter(method=>method.startsWith('settings.')||method.startsWith('setup.'));
+export const MODEL_METHODS=CONTROL_METHODS.filter(method=>method.startsWith('models.') || ['setup.detect','setup.bootstrap','setup.reviewWorkspace','setup.applyWorkspace','setup.cancelWorkspace','providers.list','sessions.setModel','tasks.setModel','operations.inspect'].includes(method));
 export const WORK_METHODS=CONTROL_METHODS.filter(method=>method==='work.usage'||method==='work.counts'||method==='inbox.get'||method==='work.targets'||method==='work.live'||method.startsWith('sessions.')||method.startsWith('tasks.')||method==='approvals.resolve'||method==='operations.inspect');
 export class DesktopConnection extends EventEmitter {
   #client: ProtocolClient | null = null;

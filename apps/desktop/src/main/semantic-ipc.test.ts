@@ -94,3 +94,5 @@ it('keeps settings identity and credentials out of ordinary semantic requests',(
  expect(()=>validateSemanticPayload('settingsRead',{section:'runtime',path:'/tmp/config.json'})).toThrow();expect(()=>validateSemanticPayload('settingsRead',{section:'runtime'})).not.toThrow();
  expect(()=>validateSemanticPayload('settingsReview',{setupId:'s',changes:[{fieldId:'ui.language',selectors:[],value:'ar'}]})).not.toThrow();
 });
+
+it('keeps onboarding detection and bootstrap bound to Main selected profile',()=>{for(const method of ['onboardingDetect','onboardingBootstrap']){expect(()=>validateSemanticPayload(method,{})).not.toThrow();for(const value of [{profileId:'other'},{path:'/tmp'},{confirmed:true}])expect(()=>validateSemanticPayload(method,value)).toThrow();}});
