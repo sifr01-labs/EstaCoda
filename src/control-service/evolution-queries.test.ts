@@ -1,0 +1,5 @@
+import {it,expect} from 'vitest';import {mkdtemp,rm} from 'node:fs/promises';import {join} from 'node:path';import {tmpdir} from 'node:os';
+import {EvolutionQueries} from './evolution-queries.js';
+it('projects proposal evidence without paths and distinguishes absent metadata evals from real tests',async()=>{
+ const homeDir=await mkdtemp(join(tmpdir(),'evolution-query-'));try{const q=new EvolutionQueries({homeDir,profileId:'one'},join(homeDir,'absent')),other=new EvolutionQueries({homeDir,profileId:'two'},join(homeDir,'absent'));const {store}=await q.open();const p=await store.proposePatch({skillName:'Example',reason:'Reviewed improvement',sourceTrust:'user_direct',patch:{type:'text_patch',oldString:'before',newString:'after'}});expect((await q.list()).items).toHaveLength(1);const d=await q.details(p.id);expect(d.gate.status).toBe('not-run');expect(d.evidence).toEqual([]);expect(JSON.stringify(d)).not.toContain(homeDir);expect((await other.list()).items).toEqual([]);await expect(other.details(p.id)).rejects.toThrow();}finally{await rm(homeDir,{recursive:true,force:true});}
+});

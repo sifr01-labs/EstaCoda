@@ -73,6 +73,8 @@ const connection = shape({ id, profileId: id, channel: choice(["telegram", "disc
   configurationState: choice(["configured", "unconfigured", "repair_required"]), runtimeState: choice(["running", "stopped", "disconnected", "unknown"]),
   authorizationState: choice(["denied", "configured", "pairing_required", "unknown"]), summary: text(2_048) }, {
  telegram:shape({status:choice(["disabled","credential_missing","authorization_missing","pairing_pending","ready"]),allowedUsers:integer(0,1000),allowedChats:integer(0,1000),pairingExpiresAt:nullable(integer()),polling:choice(["unknown","starting","healthy","degraded","stopped"]),observedAt:nullable(integer()),lastVerifiedAt:nullable(integer())}) });
+const libraryProposal=shape({id,skillName:text(240,1),status:choice(['proposed','promoted','rejected']),approval:text(80),reason:text(2048),risk:text(80),changeKind:text(80)});
+const libraryGate=shape({status:choice(['passed','failed','not-run']),score:nullable((v)=>typeof v==='number'&&Number.isFinite(v)),threshold:nullable((v)=>typeof v==='number'&&Number.isFinite(v)),failures:array(text(512),20)});
 const librarySkill=shape({id,name:text(240,1),description:text(2048),source:choice(['local','bundled','external']),version:nullable(text(80)),requiredToolsets:array(text(80),64),optionalToolsets:array(text(80),64)});
 const page = (check: Check): Check => shape({ items: array(check), nextCursor: nullable(cursorToken) });
 const pageParams = { limit: integer(1, 100) };
@@ -173,6 +175,8 @@ const contracts: { [M in keyof MethodContracts]: { params: Check; result: Check 
   "settings.inspect":{params:shape({},{operationId:id}),result:shape({operationId:id,state:choice(['applied','uncertain','unknown'])})},
   "settings.verify":{params:shape({}),result:shape({state:choice(['configured','repair_required'])})},
   "settings.value":{params:shape({fieldId:text(240,1),selectors:array(text(128,1),8)}),result:settingChange},
+  'library.proposals':{params:shape({},{offset:integer(0,1000)}),result:shape({items:array(libraryProposal,50),nextOffset:nullable(integer(0,1000))})},
+  'library.proposal':{params:shape({id}),result:shape({proposal:libraryProposal,diff:text(8192),gate:libraryGate,evidence:array(shape({id,summary:text(2048),sourceWorkId:nullable(id)}),50),evalRuns:array(shape({id,label:text(240),passed:boolean}),20),manifest:nullable(shape({id,status:text(80),target:text(80),commands:array(text(240),16)})),promotions:array(shape({id,appliedAt:text(80),snapshotAvailable:boolean}),20),truncated:boolean})},
   'library.skills':{params:shape({},{offset:integer(0,1000)}),result:shape({items:array(librarySkill,50),nextOffset:nullable(integer(0,1000))})},
   'library.skill':{params:shape({id}),result:shape({skill:librarySkill,instructions:text(16384),truncated:boolean})},
   'library.memory':{params:shape({}),result:shape({items:array(shape({kind:choice(['USER.md','SOUL.md','MEMORY.md']),scope:choice(['profile']),content:text(16384),truncated:boolean}),3)})},

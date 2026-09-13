@@ -1,3 +1,4 @@
+import {EvolutionQueries} from './evolution-queries.js';
 import {LibraryQueries} from './library-queries.js';
 import {verifyOnboarding} from './onboarding-verification.js';
 import {OnboardingSetup} from './onboarding-setup.js';
@@ -141,6 +142,8 @@ export class DesktopBridge {
       'setup.reviewWorkspace':async request=>{if(request.method!=='setup.reviewWorkspace')throw new ControlProtocolError('-32601');return {result:await this.onboardingWorkspace.review(request.params)};},
       'setup.applyWorkspace':async request=>{if(request.method!=='setup.applyWorkspace')throw new ControlProtocolError('-32601');return {result:await this.onboardingWorkspace.apply(request.params)};},
       'setup.cancelWorkspace':async request=>{if(request.method!=='setup.cancelWorkspace')throw new ControlProtocolError('-32601');return {result:this.onboardingWorkspace.cancel(request.params.reviewId)};},
+      'library.proposals':async r=>{if(r.method!=='library.proposals')throw new ControlProtocolError('-32601');return{result:await new EvolutionQueries(this.options).list(r.params.offset)};},
+      'library.proposal':async r=>{if(r.method!=='library.proposal')throw new ControlProtocolError('-32601');return{result:await new EvolutionQueries(this.options).details(r.params.id)};},
       'library.skills':async r=>{if(r.method!=='library.skills')throw new ControlProtocolError('-32601');return{result:await new LibraryQueries(this.options).skills(r.params.offset)};},
       'library.skill':async r=>{if(r.method!=='library.skill')throw new ControlProtocolError('-32601');return{result:await new LibraryQueries(this.options).skill(r.params.id)};},
       'library.memory':async()=>({result:await new LibraryQueries(this.options).memory()}),

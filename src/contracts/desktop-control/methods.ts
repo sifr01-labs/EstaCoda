@@ -27,6 +27,8 @@ export type SubscribeResult =
 export type WorkUsageProjection={scope:'session'|'task'|'attempt';reportedTokens:number|null;providerCalls:number;cost:{amount:number;currency:'USD'}|null;usageComplete:boolean;pricingComplete:boolean;context:{usedTokens:number;totalTokens:number;provider:string;model:string}|null;truncated:boolean;provisional:boolean};
 export type RuntimeCounts={runningSessions:number;runningTasks:number;queuedTasks:number;approvals:number;attention:number;scheduled:number|null;asOf:number};
 export type MethodContracts = {
+ 'library.proposals':{params:{offset?:number};result:{items:import('./library.js').LibraryProposal[];nextOffset:number|null}};
+ 'library.proposal':{params:{id:string};result:import('./library.js').LibraryProposalDetail};
  'library.skills':{params:{offset?:number};result:{items:import('./library.js').LibrarySkill[];nextOffset:number|null}};
  'library.skill':{params:{id:string};result:import('./library.js').LibrarySkillDetail};
  'library.memory':{params:Record<string,never>;result:{items:import('./library.js').LibraryMemory[]}};

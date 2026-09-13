@@ -40,6 +40,8 @@ const cases = {
  'settings.reviewAction':{params:{action:'profile.create',subject:'new',value:''},result:{reviewId:'r',action:{action:'profile.create',subject:'new',value:''},facts:['new'],expiresAt:1}},
  'settings.executeAction':{params:{reviewId:'r',operationId:'o',confirmed:true},result:{operationId:'o',action:'profile.create',state:'completed'}},
  'settings.cancelAction':{params:{reviewId:'r'},result:{cancelled:true}},
+ 'library.proposals':{params:{},result:{items:[],nextOffset:null}},
+ 'library.proposal':{params:{id:'p'},result:{proposal:{id:'p',skillName:'Example',status:'proposed',approval:'pending',reason:'Improve',risk:'low',changeKind:'skill_patch'},diff:'Update',gate:{status:'not-run',score:null,threshold:null,failures:[]},evidence:[],evalRuns:[],manifest:null,promotions:[],truncated:false}},
  'library.skills':{params:{},result:{items:[],nextOffset:null}},
  'library.skill':{params:{id:'skill'},result:{skill:{id:'skill',name:'Example',description:'Example',source:'local',version:null,requiredToolsets:[],optionalToolsets:[]},instructions:'Example',truncated:false}},
  'library.memory':{params:{},result:{items:[]}},
