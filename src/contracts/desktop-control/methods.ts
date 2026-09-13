@@ -27,6 +27,7 @@ export type SubscribeResult =
 export type WorkUsageProjection={scope:'session'|'task'|'attempt';reportedTokens:number|null;providerCalls:number;cost:{amount:number;currency:'USD'}|null;usageComplete:boolean;pricingComplete:boolean;context:{usedTokens:number;totalTokens:number;provider:string;model:string}|null;truncated:boolean;provisional:boolean};
 export type RuntimeCounts={runningSessions:number;runningTasks:number;queuedTasks:number;approvals:number;attention:number;scheduled:number|null;asOf:number};
 export type MethodContracts = {
+ 'setup.verify':{params:{alias?:string};result:import('./onboarding.js').OnboardingVerification};
  'setup.review':{params:{model:ModelDraftBinding;optional?:import('./settings.js').SettingsBinding;preferences:import('./settings.js').SettingChange[];workspaceReviewId:string};result:import('./onboarding.js').OnboardingReview};
  'setup.apply':{params:{reviewId:string;confirmed:true};result:{operationId:string;state:'applied'|'uncertain'|'unknown'}};
  'setup.recover':{params:Record<string,never>;result:{operationId:string;state:'applied'|'uncertain'|'unknown'}};

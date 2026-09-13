@@ -1,4 +1,13 @@
 export const onboardingArabic={
+ 'Verify saved setup':'التحقق من الإعداد المحفوظ',
+ 'Recover approved save':'استعادة الحفظ المعتمد',
+ 'Ready for your first Work':'جاهز لعملك الأول',
+ 'Setup needs attention before Work can start.':'يحتاج الإعداد إلى عناية قبل بدء العمل.',
+ 'Confirm workspace and trust':'تأكيد مساحة العمل والثقة',
+ 'Review workspace and trust':'مراجعة مساحة العمل والثقة',
+ 'Start first Work':'بدء العمل الأول',
+ 'Work starts an on-demand runtime. Install-and-start in Gateway is optional for login and reboot availability.':'يبدأ العمل تشغيلًا عند الطلب. التثبيت والتشغيل من البوابة اختياريان للتوافر عند تسجيل الدخول وإعادة التشغيل.',
+
  'Review the complete setup before saving. No login service will be installed.':'راجع الإعداد الكامل قبل الحفظ. لن تُثبّت خدمة لتسجيل الدخول.',
  'Review complete setup':'مراجعة الإعداد الكامل',
  'Workspace trust deferred':'تأجيل الثقة بمساحة العمل',

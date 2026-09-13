@@ -1,3 +1,4 @@
+import {ExecutionTargetStore} from '../workspaces/execution-target.js';
 import {stat} from 'node:fs/promises';
 import {randomUUID} from 'node:crypto';
 import {WorkspaceRegistry,resolveWorkspaceDirectory,normalizeWorkspaceAlias} from '../workspaces/workspace-registry.js';
@@ -24,13 +25,14 @@ export class OnboardingWorkspace {
   if((await resolveWorkspaceDirectory(r.projection.path)).identityHash!==r.identity||await directoryIdentity(r.projection.path)!==r.directory)throw new ControlProtocolError('-32003');
   return this.operations.execute(params.operationId,'onboarding.workspace',async()=>{
    if((await resolveWorkspaceDirectory(r.projection.path)).identityHash!==r.identity||await directoryIdentity(r.projection.path)!==r.directory)return false;
-   const registry=new WorkspaceRegistry(this.input);
+   const registry=new ExecutionTargetStore(this.input);
    try{
     const existing=registry.get(r.projection.alias);
     if(existing&&existing.identity.identityHash!==r.identity)return false;
     const workspace=existing??await registry.add(r.projection.alias,r.projection.path);
     if((await registry.resolve(workspace.id)).identity.identityHash!==r.identity)return false;
     if(r.projection.trust)await new WorkspaceTrustStore(this.input).grant(r.projection.path);
+    await registry.acquireLocal(workspace.identity.canonicalPath,{identity:workspace.identity,registeredWorkspaceId:workspace.id,registeredWorkspaceRevision:workspace.locationRevision});
     this.reviews.delete(params.reviewId);return true;
    }finally{registry.close();}
   });

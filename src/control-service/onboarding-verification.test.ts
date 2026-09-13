@@ -1,0 +1,10 @@
+import {it,expect} from 'vitest';import {mkdtemp,mkdir,rm,writeFile,readFile} from 'node:fs/promises';import {join} from 'node:path';import {tmpdir} from 'node:os';
+import {OnboardingWorkspace} from './onboarding-workspace.js';import {verifyOnboarding} from './onboarding-verification.js';import {resolveProfileStateHome} from '../config/profile-home.js';import {WorkspaceTrustStore} from '../security/workspace-trust-store.js';
+it('requires explicit trust and a canonical target, rechecks revocation and survives owner restart',async()=>{
+ const homeDir=await mkdtemp(join(tmpdir(),'ec-onboard-verify-')),input={homeDir,profileId:'default'},paths=resolveProfileStateHome(input),owner=new OnboardingWorkspace(input);await mkdir(paths.profileRoot,{recursive:true});await mkdir(join(homeDir,'work'));
+ try{await writeFile(paths.configPath,JSON.stringify({model:{provider:'local',id:'test'},providers:{local:{kind:'openai-compatible',baseUrl:'http://127.0.0.1:8080/v1',apiMode:'custom_openai_compatible',authMethod:'none',enableNetwork:true}}}));const before=await readFile(paths.configPath,'utf8');
+ let r=await owner.review({path:join(homeDir,'work'),alias:'work',trust:false});expect((await owner.apply({reviewId:r.reviewId,operationId:'register',confirmed:true})).state).toBe('completed');expect((await verifyOnboarding(input,'work')).target).toBeNull();
+ r=await owner.review({path:join(homeDir,'work'),alias:'work',trust:true});await owner.apply({reviewId:r.reviewId,operationId:'trust',confirmed:true});owner.dispose();const ready=await verifyOnboarding(input,'work');expect(ready.detection.launchReady,JSON.stringify(ready)).toBe(true);expect(ready.target?.targetId).toMatch(/^target_/);expect((await verifyOnboarding(input)).target).toEqual(ready.target);
+ await new WorkspaceTrustStore(input).revoke(join(homeDir,'work'));expect((await verifyOnboarding(input,'work')).target).toBeNull();expect(await readFile(paths.configPath,'utf8')).toBe(before);
+ }finally{owner.dispose();await rm(homeDir,{recursive:true,force:true});}
+});

@@ -172,6 +172,7 @@ const contracts: { [M in keyof MethodContracts]: { params: Check; result: Check 
   "settings.inspect":{params:shape({},{operationId:id}),result:shape({operationId:id,state:choice(['applied','uncertain','unknown'])})},
   "settings.verify":{params:shape({}),result:shape({state:choice(['configured','repair_required'])})},
   "settings.value":{params:shape({fieldId:text(240,1),selectors:array(text(128,1),8)}),result:settingChange},
+  'setup.verify':{params:shape({},{alias:text(64,1)}),result:shape({detection:shape({state:choice(SETUP_STATES),mode:choice(['first-run','repair','ready']),writable:boolean,launchReady:boolean,pendingApply:boolean}),workspace:nullable(text(64,1)),target:nullable(target)})},
   'setup.review':{params:shape({model:modelDraftBinding,preferences:array(settingChange,4),workspaceReviewId:id},{optional:settingsBinding}),result:shape({reviewId:id,route:modelRouteDraft,changes:array(settingChange,36),workspace:shape({reviewId:id,path:text(4096,1),alias:text(64,1),trust:boolean})})},
   'setup.apply':{params:shape({reviewId:id,confirmed:v=>v===true}),result:shape({operationId:id,state:choice(['applied','uncertain','unknown'])})},
   'setup.recover':{params:shape({}),result:shape({operationId:id,state:choice(['applied','uncertain','unknown'])})},

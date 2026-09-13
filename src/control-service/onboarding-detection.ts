@@ -10,7 +10,7 @@ export async function detectOnboarding(input:Identity,workspaceRoot=input.homeDi
   const id=await latestProfileApplyOperation(input);
   if(id&&(await inspectProfileApply(input,id)).state==='uncertain')return {state:'broken-config',mode:'repair',writable:false,launchReady:false,pendingApply:true};
   const state=await collectSetupEntryState({...input,workspaceRoot,readOnly:true});
-  return {state:state.kind,mode:state.kind==='new-user'?'first-run':state.kind==='configured-ready'?'ready':'repair',writable:state.stateDirectoryWritable,launchReady:state.kind==='configured-ready',pendingApply:false};
+  return {state:state.kind,mode:state.kind==='new-user'?'first-run':state.kind==='configured-ready'?'ready':'repair',writable:state.stateDirectoryWritable,launchReady:['configured-ready','configured-degraded'].includes(state.kind),pendingApply:false};
  }catch{return {state:'broken-config',mode:'repair',writable:false,launchReady:false,pendingApply:false};}
 }
 /** Directory bootstrap is not saved setup and never changes the global active-profile pointer. */

@@ -119,6 +119,7 @@ export type DesktopApi = {onboarding?:{
  applyWorkspace(reviewId:string,confirmed:true):Promise<MethodContracts['setup.applyWorkspace']['result']>;
  inspect():Promise<MethodContracts['settings.inspect']['result']>;
  recover():Promise<MethodContracts['setup.recover']['result']>;
+ verify(alias?:string):Promise<import('@estacoda/control-protocol').OnboardingVerification>;
  chooseWorkspace():Promise<{path:string;alias:string}|null>;
  reviewWorkspace(alias:string,trust:boolean):Promise<import('@estacoda/control-protocol').OnboardingWorkspaceReview>;
  cancelWorkspace(reviewId:string):Promise<{cancelled:boolean}>;
