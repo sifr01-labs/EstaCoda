@@ -1,5 +1,6 @@
-import { cp, mkdir, readFile, readdir, rm, writeFile } from "node:fs/promises";
-import { dirname, join } from "node:path";
+import {constants} from 'node:fs';
+import { cp, mkdir, readFile, readdir, rm, writeFile, lstat, open } from "node:fs/promises";
+import { dirname, join, relative, isAbsolute } from "node:path";
 import type { LoadedSkill, SkillDefinition, SkillEvaluation } from "../contracts/skill.js";
 import type { EvolutionChangeManifest, EvolutionExperiment } from "../contracts/evolution.js";
 import type { AgentEvolutionPolicy } from "../contracts/agent-evolution.js";
@@ -281,6 +282,41 @@ export class SkillProposalService {
       snapshotPath,
       skill: loaded
     };
+  }
+
+  /** Read-only eligibility for restoring only SKILL.md, the file promotion changes. */
+  async reviewProposalRollback(proposalId:string) {
+    const p=await this.#options.skillEvolutionStore.findProposal(proposalId);
+    if(!p||p.status!=='promoted'||!p.patch||p.changeKind&&p.changeKind!=='skill_patch')return null;
+    const promotions=await this.#options.skillEvolutionStore.listPromotions({skillName:p.skillName});
+    const promotion=promotions.at(-1),skill=this.#options.registry.get(p.skillName);
+    if(!promotion||promotion.proposalId!==p.id||!promotion.snapshotPath||!skill||!isLoadedSkill(skill)||skill.sourceKind!=='local')return null;
+    if(!(await assertSkillMutable({skill,action:'edit',store:this.#options.skillEvolutionStore})).ok)return null;
+    if(p.changeManifestId){const manifest=await this.#options.changeManifestStore?.find(p.changeManifestId);if(manifest?.status!=='promoted')return null;}
+    try {
+      const snapshotRoot=join(this.#options.localSkillsRoot,'.snapshots');
+      const before=await readBoundedSkillFile(snapshotRoot,join(promotion.snapshotPath,'SKILL.md'));
+      const current=await readBoundedSkillFile(this.#options.localSkillsRoot,skill.sourcePath);
+      if(current===before||current!==applySkillPatch(before,p.patch))return null;
+      const restored=parseSkillFile(skill.sourcePath,before,{sourceKind:'local',sourceRoot:this.#options.localSkillsRoot});
+      if(restored.name!==p.skillName||!(await assertSkillContentMutationAllowed({current:skill,next:restored,action:'edit',store:this.#options.skillEvolutionStore})).ok)return null;
+      const gate=await runSkillEvalGate(restored);if(gate.status==='failed')return null;
+      return {proposal:p,skill,before,current,promotionId:promotion.id};
+    }catch{return null;}
+  }
+
+  async rollbackProposal(proposalId:string):Promise<boolean> {
+    const review=await this.reviewProposalRollback(proposalId);if(!review)return false;
+    // Preserve the promoted version before restoration. No directory deletion or asset copying.
+    await this.#snapshotLocalSkill({skillDir:dirname(review.skill.sourcePath),skillPath:review.skill.sourcePath,skill:review.skill},review.skill.name);
+    const fresh=await this.reviewProposalRollback(proposalId);
+    if(!fresh||fresh.before!==review.before||fresh.current!==review.current||fresh.promotionId!==review.promotionId)return false;
+    const file=await open(review.skill.sourcePath,constants.O_RDWR|constants.O_NOFOLLOW);
+    try {const info=await file.stat();if(!info.isFile()||info.size>1048576||await file.readFile('utf8')!==review.current)return false;await file.write(review.before,0,'utf8');await file.truncate(Buffer.byteLength(review.before));await file.sync();}finally{await file.close();}
+    await this.#reloadLocalSkill(review.skill.sourcePath);
+    await this.#options.skillEvolutionStore.recordMutation({skillName:review.skill.name,source:'local',kind:'rolled-back'});
+    if(review.proposal.changeManifestId)await this.#options.changeManifestStore?.updateStatus(review.proposal.changeManifestId,'reverted');
+    return true;
   }
 
   async createManifestFromObservation(options: {
@@ -1211,4 +1247,10 @@ function stringArrayOrEmpty(value: unknown): string[] {
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
+}
+
+async function readBoundedSkillFile(root:string,path:string):Promise<string>{
+ const rel=relative(root,path);if(!rel||rel.startsWith('..')||isAbsolute(rel))throw new Error('Invalid skill path');
+ for(let dir=dirname(path);;dir=dirname(dir)){const info=await lstat(dir);if(!info.isDirectory()||info.isSymbolicLink())throw new Error('Invalid skill directory');if(dir===root)break;}
+ const file=await open(path,constants.O_RDONLY|constants.O_NOFOLLOW);try{const info=await file.stat();if(!info.isFile()||info.size>1048576)throw new Error('Skill exceeds bound');const buffer=Buffer.alloc(1048577);let size=0;while(size<buffer.length){const part=await file.read(buffer,size,buffer.length-size,size);if(!part.bytesRead)break;size+=part.bytesRead;}if(size>1048576)throw new Error('Skill exceeds bound');return new TextDecoder('utf-8',{fatal:true}).decode(buffer.subarray(0,size));}finally{await file.close();}
 }

@@ -6,7 +6,7 @@ for(const language of ['en','ar'] as const)test('Evolution requires review and c
   const React=(await import(react)).default,{createRoot}=(await import(dom)).default,{EvolutionControls}=await import(component),{LanguageContext}=await import(context);
   const host=document.querySelector('#ec-branded-workspace .ec-window')!;host.innerHTML='<div id="evolution-test"></div>';
   const state={executions:0,cancellations:0};const detail={proposal:{id:'p',status:'proposed'},manifest:null};
-  const api={evolution:{review:async({action}:any)=>({reviewId:'r',proposalId:'p',action,diff:'Reviewed patch',commands:[],workspace:null,allowed:true,reason:'ready'}),cancel:async()=>{state.cancellations++;return{cancelled:true};},execute:async()=>{state.executions++;return{operationId:'op',action:'evolution',state:'completed'};}}};
+  const api={evolution:{inspect:async()=>null,review:async({action}:any)=>({reviewId:'r',proposalId:'p',action,diff:'Reviewed patch',commands:[],workspace:null,allowed:true,reason:'ready'}),cancel:async()=>{state.cancellations++;return{cancelled:true};},execute:async()=>{state.executions++;return{operationId:'op',action:'evolution',state:'completed'};}}};
   createRoot(document.querySelector('#evolution-test')!).render(React.createElement(LanguageContext.Provider,{value:language},React.createElement(EvolutionControls,{api,detail,changed:()=>{}})));(window as any).evolutionTest=state;
  },language);const t=(key:Parameters<typeof translate>[1])=>translate(language,key);
  await page.getByRole('button',{name:t('Approve proposal'),exact:true}).click();await expect(page.getByText('Reviewed patch')).toBeVisible();expect(await page.evaluate(()=>(window as any).evolutionTest.executions)).toBe(0);

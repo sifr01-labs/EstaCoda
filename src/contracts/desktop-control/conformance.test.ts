@@ -45,7 +45,7 @@ const cases = {
  'evolution.execute':{params:{reviewId:'r',operationId:'o',confirmed:true},result:{operationId:'o',action:'approve',state:'completed'}},
  'evolution.inspect':{params:{operationId:'o'},result:{operationId:'o',action:'approve',state:'completed'}},
  'library.proposals':{params:{},result:{items:[],nextOffset:null}},
- 'library.proposal':{params:{id:'p'},result:{proposal:{id:'p',skillName:'Example',status:'proposed',approval:'pending',reason:'Improve',risk:'low',changeKind:'skill_patch'},diff:'Update',gate:{status:'not-run',score:null,threshold:null,failures:[]},evidence:[],evalRuns:[],manifest:null,promotions:[],truncated:false}},
+ 'library.proposal':{params:{id:'p'},result:{proposal:{id:'p',skillName:'Example',status:'proposed',approval:'pending',reason:'Improve',risk:'low',changeKind:'skill_patch'},diff:'Update',gate:{status:'not-run',score:null,threshold:null,failures:[]},evidence:[],evalRuns:[],manifest:null,promotions:[],rollbackAvailable:false,truncated:false}},
  'library.skills':{params:{},result:{items:[],nextOffset:null}},
  'library.skill':{params:{id:'skill'},result:{skill:{id:'skill',name:'Example',description:'Example',source:'local',version:null,requiredToolsets:[],optionalToolsets:[]},instructions:'Example',truncated:false}},
  'library.memory':{params:{},result:{items:[]}},
