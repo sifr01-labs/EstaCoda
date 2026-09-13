@@ -14,3 +14,5 @@ export * from './browser.js';
 export * from './browser-human.js';
 export * from './settings.js';
 export * from './onboarding.js';
+
+export * from './library.js';

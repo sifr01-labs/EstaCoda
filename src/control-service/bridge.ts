@@ -1,3 +1,4 @@
+import {LibraryQueries} from './library-queries.js';
 import {verifyOnboarding} from './onboarding-verification.js';
 import {OnboardingSetup} from './onboarding-setup.js';
 import {OnboardingWorkspace} from './onboarding-workspace.js';
@@ -140,6 +141,9 @@ export class DesktopBridge {
       'setup.reviewWorkspace':async request=>{if(request.method!=='setup.reviewWorkspace')throw new ControlProtocolError('-32601');return {result:await this.onboardingWorkspace.review(request.params)};},
       'setup.applyWorkspace':async request=>{if(request.method!=='setup.applyWorkspace')throw new ControlProtocolError('-32601');return {result:await this.onboardingWorkspace.apply(request.params)};},
       'setup.cancelWorkspace':async request=>{if(request.method!=='setup.cancelWorkspace')throw new ControlProtocolError('-32601');return {result:this.onboardingWorkspace.cancel(request.params.reviewId)};},
+      'library.skills':async r=>{if(r.method!=='library.skills')throw new ControlProtocolError('-32601');return{result:await new LibraryQueries(this.options).skills(r.params.offset)};},
+      'library.skill':async r=>{if(r.method!=='library.skill')throw new ControlProtocolError('-32601');return{result:await new LibraryQueries(this.options).skill(r.params.id)};},
+      'library.memory':async()=>({result:await new LibraryQueries(this.options).memory()}),
       'setup.verify':async request=>{if(request.method!=='setup.verify')throw new ControlProtocolError('-32601');return {result:await verifyOnboarding(this.options,request.params.alias)};},
       'setup.review':async request=>{if(request.method!=='setup.review')throw new ControlProtocolError('-32601');return {result:await this.onboardingSetup.review(request.params)};},
       'setup.apply':async(request,signal)=>{if(request.method!=='setup.apply')throw new ControlProtocolError('-32601');return {result:await this.onboardingSetup.apply(request.params.reviewId,signal)};},
