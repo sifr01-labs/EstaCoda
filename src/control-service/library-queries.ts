@@ -9,6 +9,8 @@ import type {LoadedSkill} from '../contracts/skill.js';
 import {ControlProtocolError,type LibrarySkill,type LibrarySkillDetail,type LibraryMemory} from '../contracts/desktop-control/index.js';
 import {readProfileFile} from './profile-attention.js';
 import {safeText} from './work-projections.js';
+export function boundedLibraryText(raw:string,max=16384){let value=safeText(raw,max);while(Buffer.byteLength(JSON.stringify(value))>40000)value=value.slice(0,Math.floor(value.length*.9));return value;}
+export function boundedLibraryPage<T>(rows:T[],offset=0,maxItems=50,budget=80000){const items:T[]=[];let bytes=2;for(const row of rows.slice(offset,offset+maxItems)){const size=Buffer.byteLength(JSON.stringify(row))+1;if(bytes+size>budget)break;items.push(row);bytes+=size;}if(offset<rows.length&&!items.length)throw new ControlProtocolError('-32009');return{items,nextOffset:offset+items.length<rows.length?offset+items.length:null};}
 export const libraryId=(name:string)=>createHash('sha256').update(name).digest('hex');
 /** Profile state is data. Reading Library never hydrates scripts or starts a runtime. */
 export class LibraryQueries{
@@ -25,8 +27,8 @@ export class LibraryQueries{
   };
   await scan(this.paths.profileRoot,join(this.paths.skillsPath,'packs'),'external');await scan(this.bundledRoot,this.bundledRoot,'bundled');await scan(this.paths.profileRoot,this.paths.skillsPath,'local');return registry;
  }
- project(skill:LoadedSkill):LibrarySkill{return{id:libraryId(skill.name),name:safeText(skill.name,240),description:safeText(skill.description),source:skill.sourceKind==='local'?'local':skill.sourceKind==='external'?'external':'bundled',version:skill.version?safeText(skill.version,80):null,requiredToolsets:skill.requiredToolsets.slice(0,64),optionalToolsets:(skill.optionalToolsets??[]).slice(0,64)};}
- async skills(offset=0){const skills=(await this.registry()).listLoaded().sort((a,b)=>a.name.localeCompare(b.name));return{items:skills.slice(offset,offset+50).map(s=>this.project(s)),nextOffset:offset+50<skills.length?offset+50:null};}
+ project(skill:LoadedSkill):LibrarySkill{return{id:libraryId(skill.name),name:safeText(skill.name,240),description:safeText(skill.description),source:skill.sourceKind==='local'?'local':skill.sourceKind==='external'?'external':'bundled',version:skill.version?safeText(skill.version,80):null,requiredToolsets:skill.requiredToolsets.slice(0,64).map(s=>safeText(s,80)),optionalToolsets:(skill.optionalToolsets??[]).slice(0,64).map(s=>safeText(s,80))};}
+ async skills(offset=0){const skills=(await this.registry()).listLoaded().sort((a,b)=>a.name.localeCompare(b.name));return boundedLibraryPage(skills.map(s=>this.project(s)),offset,40);}
  async skill(id:string):Promise<LibrarySkillDetail>{const skill=(await this.registry()).listLoaded().find(s=>libraryId(s.name)===id);if(!skill)throw new ControlProtocolError('-32004');return{skill:this.project(skill),instructions:safeText(skill.instructions,16384),truncated:skill.instructions.length>16384};}
- async memory(){const items:LibraryMemory[]=[];for(const kind of ['USER.md','SOUL.md','MEMORY.md'] as const){const raw=await readProfileFile(this.paths.profileRoot,join(this.paths.profileRoot,kind));if(raw!==undefined)items.push({kind,scope:'profile',content:safeText(raw,16384),truncated:raw.length>16384});}return{items};}
+ async memory(){const items:LibraryMemory[]=[];for(const kind of ['USER.md','SOUL.md','MEMORY.md'] as const){const raw=await readProfileFile(this.paths.profileRoot,join(this.paths.profileRoot,kind));if(raw!==undefined){const content=boundedLibraryText(raw);items.push({kind,scope:'profile',content,truncated:raw.length>content.length});}}return{items};}
 }

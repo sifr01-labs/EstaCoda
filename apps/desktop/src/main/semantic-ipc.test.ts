@@ -106,3 +106,9 @@ it('requires explicit onboarding confirmation and rejects renderer credential or
  expect(()=>validateSemanticPayload('onboardingReview',{modelSetupId:'m',preferences:[],workspaceReviewId:'w',windowId:'other'})).toThrow();
  expect(()=>validateSemanticPayload('onboardingReview',{modelSetupId:'m',preferences:[],workspaceReviewId:'w'})).not.toThrow();
 });
+it('keeps Library scope and Evolution confirmations owned by Main',()=>{
+ for(const method of ['librarySkills','libraryMemory','libraryProposals'])expect(()=>validateSemanticPayload(method,{profileId:'other'})).toThrow();
+ expect(()=>validateSemanticPayload('evolutionReview',{proposalId:'p',action:'rollback'})).not.toThrow();
+ for(const extra of [{operationId:'forged'},{profileId:'other'},{commands:['pnpm run test']},{target:{targetId:'t',targetGeneration:1}}])expect(()=>validateSemanticPayload('evolutionExecute',{reviewId:'r',confirmed:true,...extra})).toThrow();
+ expect(()=>validateSemanticPayload('evolutionExecute',{reviewId:'r',confirmed:false})).toThrow();expect(()=>validateSemanticPayload('evolutionInspect',{operationId:'forged'})).toThrow();
+});
