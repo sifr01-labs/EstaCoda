@@ -105,4 +105,12 @@ export const settingsArabic={
 "Save media\u2026":"حفظ الوسائط…",
 "Load media preview":"تحميل معاينة الوسائط",
 "Media unavailable or changed.":"الوسائط غير متاحة أو تغيّرت.",
+"Record up to 60 seconds. The recording stays in your draft until Send. Transcription uses configured STT and may send audio to a hosted provider. The transcript appears in Work.":"سجّل حتى 60 ثانية. يبقى التسجيل في المسودة حتى الإرسال. يستخدم التفريغ إعدادات تحويل الكلام إلى نص وقد يرسل الصوت إلى مزوّد مستضاف. يظهر النص في العمل.",
+"Record audio":"تسجيل صوت",
+"Recording\u2026":"جارٍ التسجيل…",
+"Preparing audio attachment\u2026":"جارٍ إعداد المرفق الصوتي…",
+"Waiting for microphone permission\u2026":"بانتظار إذن الميكروفون…",
+"Stop recording":"إيقاف التسجيل",
+"Recording unavailable, denied, or too large. No audio was sent. Try again after checking microphone permission.":"التسجيل غير متاح أو مرفوض أو كبير جداً. لم يُرسل أي صوت. تحقّق من إذن الميكروفون ثم أعد المحاولة.",
+"Transcribe the attached audio with the configured speech-to-text tool. ":"فرّغ الصوت المرفق باستخدام أداة تحويل الكلام إلى نص المُعدّة. ",
 } as const;

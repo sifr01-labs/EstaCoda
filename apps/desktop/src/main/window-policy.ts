@@ -6,8 +6,8 @@ export function securePreferences(preload: string, packaged: boolean): WebPrefer
     webviewTag: false, devTools: !packaged, spellcheck: false };
 }
 export function denySessionPermissions(session: Session): void {
-  session.setPermissionRequestHandler((_contents, _permission, callback) => callback(false));
-  session.setPermissionCheckHandler(() => false);
+  session.setPermissionRequestHandler((contents,permission,callback,details)=>{const media=(details as Electron.MediaAccessPermissionRequest).mediaTypes;callback(permission==='media'&&audioAllowed(contents,details)&&Array.isArray(media)&&media.length===1&&media[0]==='audio');});
+  session.setPermissionCheckHandler((contents,permission,_origin,details)=>permission==='media'&&details.mediaType==='audio'&&audioAllowed(contents,details));
   session.setDevicePermissionHandler(() => false);
   session.on('will-download', event => event.preventDefault());
 }
@@ -29,3 +29,7 @@ export class WindowAuthority {
       event.senderFrame?.url !== this.documentUrl) throw new Error('Desktop request rejected.');
   }
 }
+
+const microphoneWindows=new Map<number,{window:BrowserWindow;url:string}>();
+export function setMicrophonePermission(window:BrowserWindow,url:string,enabled:boolean){if(enabled)microphoneWindows.set(window.webContents.id,{window,url});else microphoneWindows.delete(window.webContents.id);}
+function audioAllowed(contents:Electron.WebContents|null,details:{requestingUrl?:string;isMainFrame?:boolean}){const grant=contents?microphoneWindows.get(contents.id):undefined;return !!grant&&!grant.window.isDestroyed()&&contents?.getURL()===grant.url&&details.requestingUrl===grant.url&&details.isMainFrame===true;}

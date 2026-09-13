@@ -45,6 +45,7 @@ export class DesktopWorkControls {
  private async available(target:TargetReference){const page=await this.connection.workRequest('work.targets',{target});if(!page.items.some(item=>item.targetId===target.targetId&&item.targetGeneration===target.targetGeneration))throw new Error('Select an available trusted target.');}
  private scope(input:Pick<WorkSubmission,'draftId'|'target'>):AttachmentScope{return{profileId:this.connection.state.profileId,generation:this.connection.state.generation,target:input.target,draftId:input.draftId};}
  async attach(input:Pick<WorkSubmission,'draftId'|'target'>){const check=this.fence();await this.available(input.target);check();const scope=this.scope(input);const paths=await this.chooseFiles();check();return this.attachments.stage(paths,scope,check,path=>this.connection.inspectionRequest('media.stage',{path,target:scope.target}));}
+ async stageRecording(input:Pick<WorkSubmission,'draftId'|'target'>,path:string){const check=this.fence();await this.available(input.target);check();const scope=this.scope(input);const items=await this.attachments.stage([path],scope,check,path=>this.connection.inspectionRequest('media.stage',{path,target:scope.target}));return items[0]!;}
  async submit(input:WorkSubmission):Promise<{workId:string;receipt:OperationReceipt}>{
   const check=this.fence(),key=this.connection.state.profileId+':'+(input.workId??input.draftId);
   if(this.#busy.has(key))throw new Error('Work is already submitting.');this.#busy.add(key);

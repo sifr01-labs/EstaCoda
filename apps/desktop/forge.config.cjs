@@ -2,7 +2,7 @@ const { VitePlugin } = require('@electron-forge/plugin-vite');
 const { FusesPlugin } = require('@electron-forge/plugin-fuses');
 const { FuseVersion, FuseV1Options } = require('@electron/fuses');
 module.exports = {
-  packagerConfig: { asar: { unpackDir: 'node_modules/node-pty' }, name: 'EstaCoda', executableName: 'EstaCoda', appBundleId: 'com.estacoda.desktop', icon: 'assets/icons/pr5-app.icns', prune: false, extraResource: ['.runtime'] },
+  packagerConfig: { extendInfo: { NSMicrophoneUsageDescription: 'Record audio you choose to send for transcription with your configured speech provider.' }, asar: { unpackDir: 'node_modules/node-pty' }, name: 'EstaCoda', executableName: 'EstaCoda', appBundleId: 'com.estacoda.desktop', icon: 'assets/icons/pr5-app.icns', prune: false, extraResource: ['.runtime'] },
   hooks: { packageAfterCopy: async (_config, buildPath) => { await import('./scripts/stage-pty.mjs').then(module => module.stagePty(buildPath)); }, generateAssets: async () => { require('node:child_process').execFileSync(process.execPath, ['scripts/stage-runtime.mjs'], { cwd: __dirname, stdio: 'inherit' }); }, postPackage: async (config, result) => { if (result.platform === 'darwin' && result.arch === 'arm64' && !config.packagerConfig.osxSign) require('node:child_process').execFileSync(process.execPath, ['scripts/finalize-local-macos.mjs', ...result.outputPaths], {cwd: __dirname, stdio:'inherit'}); } },
   rebuildConfig: { onlyModules: [] },
   makers: [],

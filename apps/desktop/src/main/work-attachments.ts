@@ -17,7 +17,7 @@ export class WorkAttachments {
   if(paths.length>4||this.#items.size+paths.length>64)throw new WorkAttachmentError('Choose up to four text files.');
   const staged=[];
   for(const path of paths){
-   if(stageMedia&&['.png','.jpg','.jpeg','.gif','.webp'].includes(extname(path).toLowerCase())){const preview=await stageMedia(path);check();staged.push({scope:this.scope(scope),created:now,preview,text:'',media:true});continue;}
+   if(stageMedia&&['.png','.jpg','.jpeg','.gif','.webp','.wav'].includes(extname(path).toLowerCase())){const preview=await stageMedia(path);check();staged.push({scope:this.scope(scope),created:now,preview,text:'',media:true});continue;}
    if(!extensions.has(extname(path).toLowerCase()))throw new WorkAttachmentError('Unsupported attachment. Choose UTF-8 text or source files.');
    const file=await open(path,constants.O_RDONLY|constants.O_NOFOLLOW|constants.O_NONBLOCK);
    try{
