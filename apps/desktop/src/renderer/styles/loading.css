@@ -1,0 +1,40 @@
+/* Exact refined prototype motion/geometry. Existing product tokens own color. */
+#ec-branded-workspace { --ec-loading-cycle:1.5s; --ec-loading-bone:color-mix(in srgb,var(--ec-bg) 87%,var(--ec-text)); }
+#ec-branded-workspace[data-theme="kemet"] { --ec-loading-bone:light-dark(#e0e4e1,#303430); }
+#ec-branded-workspace .ec-activity-indicator { width:24px;height:24px;display:inline-grid;place-items:center;flex:none;color:var(--ec-accent);vertical-align:middle; }
+#ec-branded-workspace .ec-loading-dots { display:flex;align-items:center;gap:4px;height:24px; }
+#ec-branded-workspace .ec-loading-dots i { width:4px;height:4px;display:block;border-radius:50%;background:currentColor;animation:ec-loading-dot var(--ec-loading-cycle) cubic-bezier(.45,0,.35,1) infinite;animation-delay:calc(var(--ec-loading-cycle) * -.18);opacity:.45; }
+#ec-branded-workspace .ec-loading-dots i:nth-child(2) { animation-delay:calc(var(--ec-loading-cycle) * -.06); }
+#ec-branded-workspace .ec-loading-dots i:nth-child(3) { animation-delay:calc(var(--ec-loading-cycle) * .06); }
+#ec-branded-workspace .ec-loading-orbit { width:22px;height:22px;position:relative;display:block; }
+#ec-branded-workspace .ec-loading-orbit:before { content:"";position:absolute;inset:3px;border:1px solid color-mix(in srgb,var(--ec-accent) 17%,transparent);border-radius:50%; }
+#ec-branded-workspace .ec-loading-orbit:after { content:"";position:absolute;inset:9px;border-radius:50%;background:currentColor;opacity:.65; }
+#ec-branded-workspace .ec-loading-satellites { position:absolute;inset:0;animation:ec-loading-turn calc(var(--ec-loading-cycle) * 1.1) linear infinite; }
+#ec-branded-workspace .ec-loading-satellites i { position:absolute;inset:0;transform:rotate(-38deg); }
+#ec-branded-workspace .ec-loading-satellites i:after { content:"";position:absolute;top:1px;left:9px;width:4px;height:4px;border-radius:50%;background:currentColor; }
+#ec-branded-workspace .ec-loading-satellites i:nth-child(2) { transform:rotate(-68deg);opacity:.42; }
+#ec-branded-workspace .ec-loading-satellites i:nth-child(2):after { width:3px;height:3px;left:9.5px;top:1.5px; }
+#ec-branded-workspace .ec-loading-satellites i:nth-child(3) { transform:rotate(-97deg);opacity:.18; }
+#ec-branded-workspace .ec-loading-satellites i:nth-child(3):after { width:2px;height:2px;left:10px;top:2px; }
+#ec-branded-workspace .ec-loading-status { display:flex;align-items:center;gap:12px;color:var(--ec-muted);min-height:28px; }
+#ec-branded-workspace .ec-live-working { display:inline-flex;align-items:center;gap:12px; }
+#ec-branded-workspace .ec-loading-row { box-sizing:border-box;display:flex;align-items:center;gap:12px;padding:14px;border-block-start:1px solid var(--ec-line);min-height:68px; }
+#ec-branded-workspace .ec-loading-file-icon { width:24px;height:28px;display:grid;place-items:center;flex:none; }
+#ec-branded-workspace .ec-loading-lines { flex:1;min-width:0; }
+#ec-branded-workspace .ec-loading-bone-icon { display:block;background:var(--ec-loading-bone);border-radius:5px;width:20px;height:24px; }
+#ec-branded-workspace .ec-loading-bone { display:block;background:var(--ec-loading-bone);border-radius:3px;height:8px;max-width:100%; }
+#ec-branded-workspace .ec-loading-bone + .ec-loading-bone { height:6px;margin-top:10px; }
+#ec-branded-workspace .ec-loading-bone,#ec-branded-workspace .ec-loading-bone-icon { animation:ec-loading-breathe calc(var(--ec-loading-cycle) * 1.65) cubic-bezier(.45,0,.55,1) infinite; }
+#ec-branded-workspace .ec-loading-delayed { animation:ec-loading-reveal 0s 180ms backwards; }
+#ec-branded-workspace .ec-loading-settled { animation:ec-loading-arrive 180ms ease; }
+@keyframes ec-loading-dot { 0%,55%,100%{opacity:.4;transform:translateY(0) scale(.85)}25%{opacity:1;transform:translateY(-.6px) scale(1)} }
+@keyframes ec-loading-turn { to{transform:rotate(360deg)} }
+@keyframes ec-loading-breathe { 0%,100%{opacity:.62}50%{opacity:.96} }
+@keyframes ec-loading-reveal { from{visibility:hidden}to{visibility:visible} }
+@keyframes ec-loading-arrive { from{opacity:0}to{opacity:1} }
+@media(prefers-reduced-motion:reduce) {
+  #ec-branded-workspace .ec-activity-indicator *,#ec-branded-workspace .ec-loading-rows * { animation:none!important;transition:none!important; }
+  #ec-branded-workspace .ec-loading-dots i { opacity:.65; }
+  #ec-branded-workspace .ec-loading-bone,#ec-branded-workspace .ec-loading-bone-icon { opacity:.8; }
+  #ec-branded-workspace .ec-loading-settled { animation:none!important; }
+}

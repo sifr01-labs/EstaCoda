@@ -1,3 +1,4 @@
+import {LoadingStatus} from './loading.js';
 import {useI18n} from '../i18n.js';
 import {useEffect,useRef,useState} from 'react';
 import {createPortal} from 'react-dom';
@@ -43,6 +44,6 @@ export function TargetManager({api,initial,onSelect,close,profile}:{profile?:str
    {detail&&<section className="ec-targetdetail" aria-label={t("Target details")}><dl className="ec-targetfacts"><dt>{t("Working directory")}</dt><dd><bdi dir="ltr">{detail.workingRoot}</bdi></dd><dt>{t("Source")}</dt><dd><bdi dir="ltr">{detail.sourceRoot}</bdi></dd>{detail.branch&&<><dt>{t("Branch")}</dt><dd><bdi dir="ltr">{detail.branch}</bdi></dd></>}<dt>{t("Readiness")}</dt><dd>{status(detail.readiness)}</dd>{detail.managed&&<><dt>{t("Files")}</dt><dd>{detail.cleanup==='removed'?t("Removed"):detail.dirty===null?t("Not verified"):detail.dirty?t("Changes present — cleanup blocked"):t("Clean")}</dd><dt>{t("Active borrowers")}</dt><dd>{detail.borrowers}{detail.borrowers>0?" "+t("— settle execution or recover interrupted borrowers before cleanup"):''}</dd></>}</dl><div className="ec-targetactions">{onSelect&&<Button disabled={busy||detail.readiness!=='ready'} onClick={()=>{onSelect(reference(detail));close();}}>{t("Use for new Work")}</Button>}{detail.kind==='local'&&<Button disabled={busy||detail.readiness!=='ready'} onClick={begin}>{t("Create worktree…")}</Button>}{detail.managed&&detail.status==='available'&&<Button disabled={busy} onClick={()=>setConfirm('archive')}>{t("Archive…")}</Button>}{detail.managed&&detail.status==='archived'&&detail.cleanup==='retained'&&<Button disabled={busy||detail.dirty!==false||detail.borrowers>0} onClick={()=>setConfirm('cleanup')}>{t("Remove worktree files…")}</Button>}</div></section>}
    {receipt&&<p role="status">{t("Last")+" "}{status(receipt.action)}: {receipt.state==='completed'?t("Completed"):receipt.state==='uncertain'?t("outcome uncertain. Inspect target state before taking another action."):t("not confirmed. Inspect target state before taking another action.")}</p>}
    <div className="ec-targetactions"><Button disabled={busy} onClick={()=>void run(()=>refresh())}>{t("Refresh targets")}</Button><Button disabled={busy} onClick={()=>void run(async()=>{setReceipt(await api.operation());await refresh();})}>{t("Inspect last operation")}</Button></div>
-  </>}{busy&&<p role="status">{t("Checking target state…")}</p>}
+  </>}{busy&&<LoadingStatus>{t("Checking target state…")}</LoadingStatus>}
  </section></div>,document.querySelector('#ec-branded-workspace .ec-window')??document.body);
 }

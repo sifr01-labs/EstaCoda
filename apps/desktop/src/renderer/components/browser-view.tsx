@@ -1,3 +1,4 @@
+import {LoadingStatus,SkeletonRows} from './loading.js';
 import {useI18n} from '../i18n.js';
 import {BrowserWatch} from './browser-watch.js';
 import {BrowserTakeover} from './browser-takeover.js';
@@ -24,7 +25,7 @@ export function BrowserView({api,work,close}:{api:DesktopApi;work:WorkProjection
   <Button disabled={!ready||controlling} icon="refresh-cw" onClick={()=>setRefresh(value=>value+1)}>{t("Refresh browser view")}</Button>
   {error&&<p role="alert">{owned(error)}</p>}
   <div className="ec-filelayout"><nav aria-label={t("Browser sessions")}>
-   {!items&&!error&&<p role="status">{t("Loading browser sessions…")}</p>}
+   {!items&&!error&&<SkeletonRows label={t("Loading browser sessions…")}/>}
    {items?.length===0&&<p className="ec-footnote">{t("No recorded browser sessions for this Work.")}</p>}
    {items?.map(item=><button key={item.reference.browserId} disabled={!ready||controlling} aria-current={selected?.reference.browserId===item.reference.browserId?'true':undefined} onClick={()=>void open(item)}><Icon name="globe"/><span dir="auto">{item.title??(item.state==='blocked'?t("Observation withheld"):item.reference.browserId)}</span></button>)}
    {truncated&&<p className="ec-footnote">{t("Showing up to 8 browser sessions from the latest 64 browser events.")}</p>}
@@ -36,7 +37,7 @@ export function BrowserView({api,work,close}:{api:DesktopApi;work:WorkProjection
     {selected.url&&<p className="ec-browserurl"><bdi dir="ltr">{selected.url}</bdi></p>}
     <p className="ec-footnote">{t("Observed:")+" "}<bdi dir="ltr">{selected.observedAt}</bdi> · {status(selected.readiness)} · <bdi>{selected.lastAction}</bdi></p>
     {api.browserControl&&!api.browserControl.workspace&&selected.state==='recorded'&&<BrowserTakeover key={selected.reference.browserId} api={api.browserControl} workId={work.id} reference={selected.reference} active={setControlling}/>}
-    {!controlling&&(snapshot?.image?<figure><img src={'data:image/jpeg;base64,'+snapshot.image.base64} alt={t("Sanitized recorded browser viewport")}/><figcaption className="ec-footnote">{t("Capture:")+" "}<bdi dir="ltr">{snapshot.image.observedAt}</bdi> {" "+t("· Bounded preview")}</figcaption></figure>:<p className="ec-footnote">{snapshot?.reason||error?t("Preview unavailable. Refresh to inspect the current state."):t("Checking retained capture…")}</p>)}
+    {!controlling&&(snapshot?.image?<figure><img src={'data:image/jpeg;base64,'+snapshot.image.base64} alt={t("Sanitized recorded browser viewport")}/><figcaption className="ec-footnote">{t("Capture:")+" "}<bdi dir="ltr">{snapshot.image.observedAt}</bdi> {" "+t("· Bounded preview")}</figcaption></figure>:snapshot||error?<p className="ec-footnote">{t("Preview unavailable. Refresh to inspect the current state.")}</p>:<LoadingStatus>{t("Checking retained capture…")}</LoadingStatus>)}
     {selected.artifacts.map((reference,index)=><Button key={JSON.stringify(reference)} disabled={!ready||!snapshot||!api.artifacts} icon="file-text" onClick={()=>void artifact(reference)}>{t("Inspect Work artifact")+" "}{index+1}</Button>)}
     {output&&<article className="ec-docpreview"><h3 dir="auto">{output.artifact.displayName}</h3><p>{t("Integrity:")+" "}{status(output.integrity)}</p><pre dir="auto">{output.text??t("Binary artifact. Text preview unavailable.")}</pre>{output.truncated&&<p>{t("Preview truncated.")}</p>}</article>}
    </>}
