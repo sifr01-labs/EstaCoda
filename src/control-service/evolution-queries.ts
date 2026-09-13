@@ -1,4 +1,4 @@
-import {join} from 'node:path';import {lstat} from 'node:fs/promises';
+import {join,dirname} from 'node:path';import {createHash} from 'node:crypto';import {lstat,readdir} from 'node:fs/promises';
 import {resolveGlobalStateHome} from '../config/profile-home.js';
 import {SkillEvolutionStore,type SkillPatchProposal} from '../skills/skill-evolution.js';
 import {SkillProposalService} from '../skills/skill-proposal-service.js';
@@ -13,7 +13,13 @@ export class EvolutionQueries extends LibraryQueries{
    const raw=await readProfileFile(this.paths.profileRoot,join(root,name));const rows=raw?.split('\n').filter(s=>s.trim())??[];if(rows.length>1000)throw new ControlProtocolError('-32009');for(const row of rows){const value=JSON.parse(row);if(!value||typeof value!=='object'||!isControlId(value.id))throw new ControlProtocolError('-32003');}
   }
   const registry=await this.registry(),store=new SkillEvolutionStore({usagePath:join(this.paths.skillsPath,'.usage.json'),evolutionRoot:root}),manifests=new ChangeManifestStore({root:join(root,'manifests')});
-  return{registry,store,manifests,service:new SkillProposalService({registry,localSkillsRoot:this.paths.skillsPath,skillEvolutionStore:store,changeManifestStore:manifests})};
+  const evalHash=createHash('sha256');
+  for(const skill of registry.listLoaded()){
+   const dir=join(dirname(skill.sourcePath),'evals');let stat;try{stat=await lstat(dir);}catch(e){if((e as NodeJS.ErrnoException).code==='ENOENT')continue;throw e;}if(stat.isSymbolicLink()||!stat.isDirectory())throw new ControlProtocolError('-32003');
+   const files=await readdir(dir,{withFileTypes:true});if(files.length>100)throw new ControlProtocolError('-32009');let size=0;
+   for(const file of files){if(file.isSymbolicLink())throw new ControlProtocolError('-32003');if(file.isFile()&&/\.jsonl?$/.test(file.name)){const raw=await readProfileFile(skill.sourceKind==='bundled'?this.bundledRoot:this.paths.profileRoot,join(dir,file.name));size+=raw?.length??0;if(size>1048576)throw new ControlProtocolError('-32009');evalHash.update(skill.name+file.name+(raw??''));}}
+  }
+  return{registry,store,manifests,evalFingerprint:evalHash.digest('hex'),service:new SkillProposalService({registry,localSkillsRoot:this.paths.skillsPath,skillEvolutionStore:store,changeManifestStore:manifests})};
  }
  proposal(p:SkillPatchProposal):LibraryProposal{return{id:p.id,skillName:safeText(p.skillName,240),status:p.status,approval:safeText(p.approvalState??'pending',80),reason:safeText(p.reason),risk:safeText(p.riskClass??'unknown',80),changeKind:safeText(p.changeKind??'skill_patch',80)};}
  async list(offset=0){const {store}=await this.open(),rows=await store.listProposals();return{items:rows.slice(offset,offset+50).map(p=>this.proposal(p)),nextOffset:offset+50<rows.length?offset+50:null};}

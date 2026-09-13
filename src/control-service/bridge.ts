@@ -1,3 +1,4 @@
+import {EvolutionDecisions} from './evolution-decisions.js';
 import {EvolutionQueries} from './evolution-queries.js';
 import {LibraryQueries} from './library-queries.js';
 import {verifyOnboarding} from './onboarding-verification.js';
@@ -54,6 +55,7 @@ import { StdioControlServer } from './stdio-server.js';
 export type BootstrapState = Pick<BootstrapResult, 'profile' | 'runtime'>;
 /** One bridge per trusted Main client context; Work and execution remain core-owned. */
 export class DesktopBridge {
+  readonly evolution:EvolutionDecisions;
   readonly terminals:TerminalCapabilities;
   readonly targets:TargetControls;
   readonly server: StdioControlServer;
@@ -142,6 +144,10 @@ export class DesktopBridge {
       'setup.reviewWorkspace':async request=>{if(request.method!=='setup.reviewWorkspace')throw new ControlProtocolError('-32601');return {result:await this.onboardingWorkspace.review(request.params)};},
       'setup.applyWorkspace':async request=>{if(request.method!=='setup.applyWorkspace')throw new ControlProtocolError('-32601');return {result:await this.onboardingWorkspace.apply(request.params)};},
       'setup.cancelWorkspace':async request=>{if(request.method!=='setup.cancelWorkspace')throw new ControlProtocolError('-32601');return {result:this.onboardingWorkspace.cancel(request.params.reviewId)};},
+      'evolution.review':async r=>{if(r.method!=='evolution.review')throw new ControlProtocolError('-32601');return{result:await this.evolution.review(r.params)};},
+      'evolution.cancel':r=>{if(r.method!=='evolution.cancel')throw new ControlProtocolError('-32601');return{result:this.evolution.cancel(r.params.reviewId)};},
+      'evolution.execute':async(r,signal)=>{if(r.method!=='evolution.execute')throw new ControlProtocolError('-32601');return{result:await this.evolution.execute(r.params,signal)};},
+      'evolution.inspect':async r=>{if(r.method!=='evolution.inspect')throw new ControlProtocolError('-32601');return{result:await this.evolution.operations.inspect(r.params.operationId)};},
       'library.proposals':async r=>{if(r.method!=='library.proposals')throw new ControlProtocolError('-32601');return{result:await new EvolutionQueries(this.options).list(r.params.offset)};},
       'library.proposal':async r=>{if(r.method!=='library.proposal')throw new ControlProtocolError('-32601');return{result:await new EvolutionQueries(this.options).details(r.params.id)};},
       'library.skills':async r=>{if(r.method!=='library.skills')throw new ControlProtocolError('-32601');return{result:await new LibraryQueries(this.options).skills(r.params.offset)};},
@@ -240,6 +246,7 @@ export class DesktopBridge {
     this.modelSetup = new ModelSetup(this.options,this.candidates,async()=>{this.#catalog=undefined;this.subscriptions.publish({type:'service.warning',payload:{reason:'configuration_changed'}});
       try {await notifyPrivateConfigurationChanged({directory:resolveProfileStateHome(this.options).gatewayStatePath,profileId:this.options.profileId,version:this.options.version,signal:AbortSignal.timeout(2000)});}catch{/* An absent owner will load the committed configuration on its next startup. */}
     });
+    this.evolution=new EvolutionDecisions(options);this.server.onDispose(()=>this.evolution.dispose());
     this.onboardingSetup=new OnboardingSetup(options,this.modelSetup,this.publicSettings,this.onboardingWorkspace);
     this.server.onDispose(()=>this.onboardingSetup.dispose());
     this.channelSessions=new ChannelSessions(this.options);
