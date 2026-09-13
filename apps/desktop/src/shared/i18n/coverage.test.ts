@@ -18,7 +18,7 @@ it('requires translated JSX text, accessible attributes and local error messages
    if(ts.isJsxAttribute(node)&&['aria-label','title','alt','placeholder','label'].includes(node.name.getText(source))&&node.initializer&&ts.isStringLiteral(node.initializer)){
     const text=node.initializer.text;if(/[A-Za-z]/.test(text)&&!['ESTACODA','https://','local'].includes(text))fail(node,text);
    }
-   if(ts.isCallExpression(node)&&['setError','setOperationError','owned','t'].includes(node.expression.getText(source))){
+   if(ts.isCallExpression(node)&&['setError','setOperationError','setMessage','label','owned','t'].includes(node.expression.getText(source))){
     const arg=node.arguments[0];if(arg&&ts.isStringLiteral(arg)&&arg.text&&!Object.hasOwn(english,arg.text))fail(node,arg.text);
    }
    ts.forEachChild(node,visit);

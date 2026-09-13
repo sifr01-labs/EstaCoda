@@ -6,7 +6,7 @@ test('shows canonical schedule state and history without a fixture count or fals
  const api={list:async()=>({items:[job],nextOffset:null}),get:async()=>job,history:async()=>({items:[{id:'run',workId:'session:owned',startedAt:'2026-09-13T10:00:00Z',completedAt:null,status:'failed',failure:'runtime_error',delivery:[]}],nextOffset:null,available:true})};
  const host=document.querySelector('.ec-window')!;host.innerHTML='<div id="schedules-test"></div>';createRoot(document.querySelector('#schedules-test')!).render(React.createElement(SchedulesView,{api,ready:true,select:(id:string)=>{(window as any).openedScheduleWork=id;}}));
  });
- await page.getByRole('button',{name:/Daily audit/}).click();await expect(page.getByText('Run requested; execution has not been confirmed.')).toBeVisible();await expect(page.getByText('runtime_error')).toBeVisible();await page.getByRole('button',{name:'Open source Work'}).click();expect(await page.evaluate(()=>(window as any).openedScheduleWork)).toBe('session:owned');expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
+ await page.getByRole('button',{name:/Daily audit/}).click();await expect(page.getByText('Run requested; execution has not been confirmed.')).toBeVisible();await expect(page.getByText('Runtime failed')).toBeVisible();await page.getByRole('button',{name:'Open source Work'}).click();expect(await page.evaluate(()=>(window as any).openedScheduleWork)).toBe('session:owned');expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
 });
 test('requires review and explicit confirmation before saving a schedule',async({page})=>{
  await page.goto('/fixture.html');await page.evaluate(async()=>{
@@ -25,4 +25,10 @@ test('run now remains a reviewed request and can be cancelled without execution'
  const host=document.querySelector('.ec-window')!;host.innerHTML='<div id="schedule-actions-test"></div>';createRoot(document.querySelector('#schedule-actions-test')!).render(React.createElement(ScheduleActions,{api,job:{id:'one',status:'paused',runRequested:false},onChanged:()=>{}}));
  });
  await page.getByRole('button',{name:'Run now',exact:true}).click();await expect(page.getByText(/Queue one run/)).toBeVisible();expect(await page.evaluate(()=>(window as any).scheduleState.writes)).toBe(0);await page.getByRole('button',{name:'Cancel',exact:true}).click();expect(await page.evaluate(()=>(window as any).scheduleState.cancels)).toBe(1);await page.getByRole('button',{name:'Run now',exact:true}).click();await page.getByRole('button',{name:'Confirm schedule change',exact:true}).click();expect(await page.evaluate(()=>(window as any).scheduleState.writes)).toBe(1);
+});
+test('renders Arabic scheduling validation without backend error text',async({page})=>{
+ await page.goto('/fixture.html');await page.evaluate(async()=>{
+ const rp='/node_modules/.vite/deps/react.js',dp='/node_modules/.vite/deps/react-dom_client.js',cp='/src/renderer/components/schedule-actions.tsx',lp='/src/renderer/i18n.tsx';const React=(await import(rp)).default,{createRoot}=(await import(dp)).default,{ScheduleActions}=await import(cp),{LanguageContext}=await import(lp);
+ const host=document.querySelector('.ec-window')!;host.innerHTML='<div dir="rtl" id="arabic-schedule-test"></div>';createRoot(document.querySelector('#arabic-schedule-test')!).render(React.createElement(LanguageContext.Provider,{value:'ar'},React.createElement(ScheduleActions,{api:{review:async()=>{throw new Error('private backend error');}},job:{id:'one',status:'active',runRequested:false},onChanged:()=>{}})));
+ });await page.getByRole('button',{name:'تشغيل الآن',exact:true}).click();await expect(page.getByRole('alert')).toHaveText('إجراء الجدول غير متاح. حدّث العرض وراجعه مجددًا.');await expect(page.getByText('private backend error')).toHaveCount(0);
 });
