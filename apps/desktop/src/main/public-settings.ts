@@ -9,6 +9,10 @@ export class DesktopPublicSettings {
  #setup?:Setup;#counter=0;#busy=false;readonly #windowId=randomUUID();readonly #fields=new Map<string,SettingField>();
  constructor(readonly connection:DesktopConnection,readonly credentials:CredentialWindow,readonly pipe:()=>CredentialPipeClient|undefined,readonly operations?:DesktopConnectionControls){connection.on('invalidate',()=>{this.credentials.close();this.#setup=undefined;this.#fields.clear();});}
  async read(section:SettingsSection,offset?:number){const page=await this.connection.settingsRequest('settings.read',{section,...(offset===undefined?{}:{offset})});for(const f of page.fields)this.#fields.set(f.id,f);return page;}
+ async workspaces(){return this.connection.settingsRequest('settings.workspaces',{});}
+ async reviewAction(action:import('@estacoda/control-protocol').SettingsAction){return this.connection.settingsRequest('settings.reviewAction',action);}
+ async executeAction(reviewId:string){if(!this.operations)throw new Error('Settings operations unavailable.');return this.operations.perform('settings.action',operationId=>this.connection.settingsRequest('settings.executeAction',{reviewId,operationId,confirmed:true}));}
+ async cancelAction(reviewId:string){return this.connection.settingsRequest('settings.cancelAction',{reviewId});}
  async dependencies(){return this.connection.settingsRequest('settings.dependencies',{});}
  async install(capabilityId:string,groups:string[]){if(!this.operations)throw new Error('Dependency operations unavailable.');return this.operations.perform('dependency.install',operationId=>this.connection.settingsRequest('settings.installDependency',{operationId,capabilityId,groups,downloadApproved:true}));}
  async inspectDependency(){return this.operations?this.operations.inspect():null;}

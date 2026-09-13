@@ -27,6 +27,11 @@ export type SubscribeResult =
 export type WorkUsageProjection={scope:'session'|'task'|'attempt';reportedTokens:number|null;providerCalls:number;cost:{amount:number;currency:'USD'}|null;usageComplete:boolean;pricingComplete:boolean;context:{usedTokens:number;totalTokens:number;provider:string;model:string}|null;truncated:boolean;provisional:boolean};
 export type RuntimeCounts={runningSessions:number;runningTasks:number;queuedTasks:number;approvals:number;attention:number;scheduled:number|null;asOf:number};
 export type MethodContracts = {
+ 'settings.workspaces':{params:{};result:{items:import('./settings.js').SettingsWorkspace[];truncated:boolean}};
+ 'settings.reviewAction':{params:import('./settings.js').SettingsAction;result:import('./settings.js').SettingsActionReview};
+ 'settings.executeAction':{params:{reviewId:string;operationId:string;confirmed:true};result:ConnectionOperation};
+ 'settings.cancelAction':{params:{reviewId:string};result:{cancelled:boolean}};
+
  "settings.dependencies":{params:Record<string,never>;result:import('./settings.js').SettingsDependenciesPage};
  "settings.installDependency":{params:{operationId:string;capabilityId:string;groups:string[];downloadApproved:true};result:ConnectionOperation};
  "settings.inspectDependency":{params:{operationId:string};result:ConnectionOperation};

@@ -32,6 +32,10 @@ const activities: ActivityProjection[] = [
 const artifactReference={source:'session' as const,ownerId:'s',artifactId:'a'};
 const artifactPreview={artifact:{reference:artifactReference,displayName:'report.txt',mimeType:'text/plain',bytes:0,sha256:'a'.repeat(64),createdAt:'2026-09-12',retention:'retained' as const,sourceOrigin:null,workIds:['session:s'],target:null},integrity:'verified' as const,text:'',truncated:false,reason:null};
 const cases = {
+ 'settings.workspaces':{params:{},result:{items:[],truncated:false}},
+ 'settings.reviewAction':{params:{action:'profile.create',subject:'new',value:''},result:{reviewId:'r',action:{action:'profile.create',subject:'new',value:''},facts:['new'],expiresAt:1}},
+ 'settings.executeAction':{params:{reviewId:'r',operationId:'o',confirmed:true},result:{operationId:'o',action:'profile.create',state:'completed'}},
+ 'settings.cancelAction':{params:{reviewId:'r'},result:{cancelled:true}},
  'settings.dependencies':{params:{},result:{items:[{id:'edge-tts',version:'1',packages:['edge-tts'],groups:[],estimatedMb:null,state:'install_required'}]}},
  'settings.installDependency':{params:{operationId:'install',capabilityId:'edge-tts',groups:[],downloadApproved:true},result:{operationId:'install',action:'dependency.install',state:'uncertain'}},
  'settings.inspectDependency':{params:{operationId:'install'},result:{operationId:'install',action:'dependency.install',state:'completed'}},

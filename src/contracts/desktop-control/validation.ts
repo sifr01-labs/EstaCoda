@@ -1,4 +1,4 @@
-import {SETTINGS_SECTIONS} from './settings.js';
+import {SETTINGS_ACTIONS,SETTINGS_SECTIONS} from './settings.js';
 import {EVIDENCE_SUMMARY_CODES,EVIDENCE_LIMITATION_CODES} from './evidence.js';
 import {validateHumanBrowserCommand} from './browser-human.js';
 import {AUXILIARY_SLOTS, candidateRouteBinding, type CandidateRoute} from './model-setup.js';
@@ -25,6 +25,7 @@ const capabilities = shape({ methods: unique(choice(CONTROL_METHODS),128), event
 const settingValue:Check=v=>v===null||text(4096)(v)||boolean(v)||typeof v==='number'&&Number.isFinite(v)||array(text(2048),128)(v);
 const settingChange=shape({fieldId:text(240,1),selectors:array(text(128,1),8),value:settingValue});
 const settingField=shape({id:text(240,1),section:choice(SETTINGS_SECTIONS),path:array(text(128,1),12),kind:choice(['text','number','boolean','choice','strings','secret'])},{choices:array(settingValue,128),min:(v)=>typeof v==='number'&&Number.isFinite(v),max:(v)=>typeof v==='number'&&Number.isFinite(v),envName:text(128,1)});
+const settingsAction=shape({action:choice(SETTINGS_ACTIONS),subject:text(4096,1),value:text(4096)});
 const settingsBinding=shape({draftId:id,windowId:id,generation:integer(1)});
 const targetId:Check=(v)=>typeof v==='string'&&/^target_[a-f0-9-]{36}$/.test(v);
 const target = shape({ targetId: id, targetGeneration: integer(1) });
@@ -158,6 +159,10 @@ const contracts: { [M in keyof MethodContracts]: { params: Check; result: Check 
   "models.reviewFallbackOrder": {params:shape({windowId:id,generation:integer(1),revision:id,order:unique(integer(0,31),32)}),result:modelRouteDraft},
   "models.reviewPrimary": {params:shape({windowId:id,generation:integer(1),route:candidateRoute},{candidateId:id}),result:modelRouteDraft},
   "models.applyDraft": {params:modelDraftBinding,result:modelApplyReceipt},
+ 'settings.workspaces':{params:shape({}),result:shape({items:array(shape({id,alias:text(64,1),path:text(4096,1),trusted:boolean,revision:integer(1)}),100),truncated:boolean})},
+ 'settings.reviewAction':{params:settingsAction,result:shape({reviewId:id,action:settingsAction,facts:array(text(4096),8),expiresAt:integer(1)})},
+ 'settings.executeAction':{params:shape({reviewId:id,operationId:id,confirmed:v=>v===true}),result:connectionOperation},
+ 'settings.cancelAction':{params:shape({reviewId:id}),result:shape({cancelled:boolean})},
   "settings.apply":{params:settingsBinding,result:shape({operationId:id,state:choice(['applied','uncertain','unknown'])})},
   "settings.inspect":{params:shape({},{operationId:id}),result:shape({operationId:id,state:choice(['applied','uncertain','unknown'])})},
   "settings.verify":{params:shape({}),result:shape({state:choice(['configured','repair_required'])})},

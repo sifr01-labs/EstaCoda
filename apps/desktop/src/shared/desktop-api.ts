@@ -1,4 +1,9 @@
 export type DesktopSettingsApi={
+ workspaces():Promise<MethodContracts['settings.workspaces']['result']>;
+ reviewAction(action:import('@estacoda/control-protocol').SettingsAction):Promise<MethodContracts['settings.reviewAction']['result']>;
+ executeAction(reviewId:string,confirmed:true):Promise<MethodContracts['settings.executeAction']['result']>;
+ cancelAction(reviewId:string):Promise<{cancelled:boolean}>;
+
  dependencies():Promise<MethodContracts['settings.dependencies']['result']>;
  install(capabilityId:string,groups:string[],downloadApproved:true):Promise<MethodContracts['settings.installDependency']['result']>;
  inspectDependency():Promise<MethodContracts['settings.inspectDependency']['result']|null>;

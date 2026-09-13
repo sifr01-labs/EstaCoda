@@ -1,3 +1,4 @@
+import {SettingsActions} from './settings-actions.js';
 import {SettingsDependencies} from './settings-dependencies.js';
 import {useEffect,useRef,useState} from 'react';
 import {SETTINGS_SECTIONS,type SettingsSection,type SettingsPage,type SettingChange,type SettingValue,type SettingsReview} from '@estacoda/control-protocol';
@@ -25,6 +26,7 @@ export function PublicSettingsView({api,initialSection='runtime'}:{api:DesktopSe
  {setup.current&&<Button disabled={busy} onClick={()=>void perform(async()=>{if((await api.cancel(setup.current!)).cancelled){setup.current=undefined;setReview(undefined);setChanges([]);}else setMessage('Save outcome is uncertain. Inspect the last save before trying again.');})}>{t('Cancel')}</Button>}
  <Button disabled={busy} onClick={()=>void perform(async()=>{setMessage((await api.verify()).state==='configured'?'Saved configuration is valid. No network test was run.':'Saved configuration needs repair.');})}>{t('Verify saved configuration')}</Button><Button disabled={busy} onClick={()=>void perform(async()=>{const receipt=await api.inspect();if(receipt.state==='applied'){setSettling(false);setup.current=undefined;setReview(undefined);setChanges([]);setPage(await api.read(section));}setMessage(receipt.state==='applied'?'Settings saved. New executions use the reviewed configuration.':'Save outcome is uncertain. Inspect the last save before trying again.');})}>{t('Inspect last save')}</Button>
  {message&&<p role="status">{owned(message)}</p>}{page?.nextOffset!==undefined&&<Button disabled={busy} onClick={()=>void perform(async()=>{const next=await api.read(section,page.nextOffset);setPage({...next,fields:[...page.fields,...next.fields],values:[...page.values,...next.values]});})}>{t('Load more settings')}</Button>}
+ {section==='runtime'&&<SettingsActions api={api}/>}
  {['browser','voice'].includes(section)&&<SettingsDependencies api={api}/>}
  </div></div></>;
 }

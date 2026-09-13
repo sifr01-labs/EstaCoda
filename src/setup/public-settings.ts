@@ -1,3 +1,4 @@
+import {runtimeSettings} from './public-settings-runtime.js';
 import {browserSettings} from './public-settings-browser.js';
 import {voiceSettings} from './public-settings-voice.js';
 import {visionSettings} from './public-settings-vision.js';
@@ -5,7 +6,7 @@ import {modelSettings} from './public-settings-models.js';
 import {ControlProtocolError,type SettingField,type SettingChange,type SettingValue} from '../contracts/desktop-control/index.js';
 /** Reviewed allowlist, shared by metadata, projection and apply. Never infer authority from an arbitrary config path. */
 export const PUBLIC_SETTINGS:readonly SettingField[]=[
- ...modelSettings,...visionSettings,...voiceSettings,...browserSettings,
+ ...runtimeSettings,...modelSettings,...visionSettings,...voiceSettings,...browserSettings,
  {id:'web.brave.apiKeyEnv',path:['web','brave','apiKeyEnv'],section:'browser',kind:'secret'},
  {id:'ui.language',path:['ui','language'],section:'runtime',kind:'choice',choices:['en','ar']},
  {id:'ui.flavor',path:['ui','flavor'],section:'runtime',kind:'choice',choices:['standard','arabic-light','kemet-full']},
