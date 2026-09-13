@@ -40,6 +40,7 @@ const cases = {
  'settings.reviewAction':{params:{action:'profile.create',subject:'new',value:''},result:{reviewId:'r',action:{action:'profile.create',subject:'new',value:''},facts:['new'],expiresAt:1}},
  'settings.executeAction':{params:{reviewId:'r',operationId:'o',confirmed:true},result:{operationId:'o',action:'profile.create',state:'completed'}},
  'settings.cancelAction':{params:{reviewId:'r'},result:{cancelled:true}},
+ 'settings.lifecycle':{params:{},result:{version:'0.1.0',owner:'manual-source',update:'owner_required',uninstall:'owner_required'}},
  'settings.dependencies':{params:{},result:{items:[{id:'edge-tts',version:'1',packages:['edge-tts'],groups:[],estimatedMb:null,state:'install_required'}]}},
  'settings.installDependency':{params:{operationId:'install',capabilityId:'edge-tts',groups:[],downloadApproved:true},result:{operationId:'install',action:'dependency.install',state:'uncertain'}},
  'settings.inspectDependency':{params:{operationId:'install'},result:{operationId:'install',action:'dependency.install',state:'completed'}},

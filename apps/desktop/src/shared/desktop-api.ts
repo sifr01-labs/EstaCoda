@@ -4,6 +4,7 @@ export type DesktopSettingsApi={
  executeAction(reviewId:string,confirmed:true):Promise<MethodContracts['settings.executeAction']['result']>;
  cancelAction(reviewId:string):Promise<{cancelled:boolean}>;
 
+ lifecycle?():Promise<MethodContracts['settings.lifecycle']['result']>;
  dependencies():Promise<MethodContracts['settings.dependencies']['result']>;
  install(capabilityId:string,groups:string[],downloadApproved:true):Promise<MethodContracts['settings.installDependency']['result']>;
  inspectDependency():Promise<MethodContracts['settings.inspectDependency']['result']|null>;

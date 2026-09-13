@@ -1,3 +1,4 @@
+import {settingsLifecycle} from './settings-lifecycle.js';
 import {DesktopMediaOutput} from './desktop-media-output.js';
 import {DesktopMediaInput} from '../artifacts/desktop-media-input.js';
 import {SettingsActions} from './settings-actions.js';
@@ -130,6 +131,7 @@ export class DesktopBridge {
       'settings.inspect':async request=>{if(request.method!=='settings.inspect')throw new ControlProtocolError('-32601');return {result:await this.publicSettings.inspect(request.params.operationId)};},
       'settings.verify':async()=>({result:await this.publicSettings.verify()}),
       'settings.value':async request=>{if(request.method!=='settings.value')throw new ControlProtocolError('-32601');return {result:await this.publicSettings.value(request.params)};},
+      'settings.lifecycle':async()=>({result:await settingsLifecycle(this.options.version)}),
       'settings.dependencies':async()=>({result:await this.settingsDependencies.list()}),
       'settings.installDependency':async request=>{if(request.method!=='settings.installDependency')throw new ControlProtocolError('-32601');return {result:await this.settingsDependencies.start(request.params)};},
       'settings.inspectDependency':async request=>{if(request.method!=='settings.inspectDependency')throw new ControlProtocolError('-32601');return {result:await this.settingsDependencies.inspect(request.params.operationId)};},

@@ -595,3 +595,5 @@ describe("voice tool execution boundaries", () => {
     expect(await readFile(artifact.localPath!, "utf8")).toBe("edge-speech");
   });
 });
+
+it('retains scoped speech once without leaving an ephemeral record pointing at the moved capture',async()=>{await withEnv({VOICE_TOOLS_OPENAI_KEY:'sk-test',OPENAI_API_KEY:undefined},async()=>{const root=await createTempDir('ec-speech-retention-'),store=new ArtifactStore({storageRoot:join(root,'artifacts')}),persist=vi.fn(async()=>{}),bytes=Buffer.from('ID3fixture-audio');const speak=createVoiceTools({audioCacheRoot:join(root,'audio'),artifactStore:store,profileId:'p',currentSessionId:()=> 's',persistSessionArtifact:persist,tts:{provider:'openai',enabled:true,speed:1,openai:{apiKeyEnv:'VOICE_TOOLS_OPENAI_KEY',model:'gpt-4o-mini-tts',voice:'alloy'}},fetch:fakeOpenAiSpeechFetch(bytes)}).find(t=>t.name==='voice.speak')!;expect((await speak.run({text:'hello'})).ok).toBe(true);expect(persist).toHaveBeenCalledTimes(1);expect(store.list()).toHaveLength(0);const retained=store.list({sessionId:'s',profileId:'p'});expect(retained).toHaveLength(1);expect(await readFile(retained[0]!.localPath!)).toEqual(bytes);});});

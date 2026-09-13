@@ -171,6 +171,7 @@ const contracts: { [M in keyof MethodContracts]: { params: Check; result: Check 
   "settings.inspect":{params:shape({},{operationId:id}),result:shape({operationId:id,state:choice(['applied','uncertain','unknown'])})},
   "settings.verify":{params:shape({}),result:shape({state:choice(['configured','repair_required'])})},
   "settings.value":{params:shape({fieldId:text(240,1),selectors:array(text(128,1),8)}),result:settingChange},
+  "settings.lifecycle":{params:shape({}),result:shape({version:text(64,1),owner:text(64,1),update:choice(["owner_required"]),uninstall:choice(["owner_required"])})},
   "settings.dependencies":{params:shape({}),result:shape({items:array(shape({id,version:text(64,1),packages:array(text(240,1),64),groups:array(id,8),estimatedMb:nullable(integer()),state:choice(['installed','install_required'])}),32)})},
   "settings.installDependency":{params:shape({operationId:id,capabilityId:id,groups:unique(id,8),downloadApproved:v=>v===true}),result:connectionOperation},
   "settings.inspectDependency":{params:shape({operationId:id}),result:connectionOperation},

@@ -11,6 +11,6 @@ export async function profileHeaderEnvironment(input:{homeDir:string;profileId:s
 export function resolveHeaderReferences(headers:Record<string,string>|undefined,refs:Record<string,string>|undefined,environment:Readonly<Record<string,string|undefined>>):{headers:Record<string,string>;configured:boolean}{
  const result={...headers};for(const [name,ref] of Object.entries(refs??{})){
   if(!/^[!#$%&'*+.^_`|~0-9A-Za-z-]{1,128}$/.test(name)||! /^[A-Z][A-Z0-9_]{1,127}$/.test(ref))return {headers:{},configured:false};
-  const value=Object.hasOwn(environment,ref)?environment[ref]:undefined;if(!value||/[\r\n\0]/u.test(value))return {headers:{},configured:false};result[name]=value;
+  const value=Object.hasOwn(environment,ref)?environment[ref]:undefined;if(!value||/[\r\n\0]/u.test(value))return {headers:{},configured:false};for(const existing of Object.keys(result))if(existing.toLowerCase()===name.toLowerCase())delete result[existing];result[name]=value;
  }return {headers:result,configured:true};
 }

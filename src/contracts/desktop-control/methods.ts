@@ -38,6 +38,7 @@ export type MethodContracts = {
  'settings.executeAction':{params:{reviewId:string;operationId:string;confirmed:true};result:ConnectionOperation};
  'settings.cancelAction':{params:{reviewId:string};result:{cancelled:boolean}};
 
+ "settings.lifecycle":{params:Record<string,never>;result:{version:string;owner:string;update:"owner_required";uninstall:"owner_required"}};
  "settings.dependencies":{params:Record<string,never>;result:import('./settings.js').SettingsDependenciesPage};
  "settings.installDependency":{params:{operationId:string;capabilityId:string;groups:string[];downloadApproved:true};result:ConnectionOperation};
  "settings.inspectDependency":{params:{operationId:string};result:ConnectionOperation};

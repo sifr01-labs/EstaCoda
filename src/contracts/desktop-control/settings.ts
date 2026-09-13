@@ -10,7 +10,7 @@ export type SettingsBinding={draftId:string;windowId:string;generation:number};
 
 export type SettingsDependenciesPage={items:Array<{id:string;version:string;packages:string[];groups:string[];estimatedMb:number|null;state:'installed'|'install_required'}>};
 
-export const SETTINGS_ACTIONS=['pack.install','pack.enable','pack.disable','pack.remove','profile.create','profile.copy','profile.default','workspace.add','workspace.rename','workspace.move','workspace.remove','workspace.trust','workspace.revoke'] as const;
+export const SETTINGS_ACTIONS=['pack.install','pack.enable','pack.disable','pack.remove','profile.create','profile.copy','profile.default','profile.rename','profile.delete','workspace.add','workspace.rename','workspace.move','workspace.remove','workspace.trust','workspace.revoke'] as const;
 export type SettingsAction={action:typeof SETTINGS_ACTIONS[number];subject:string;value:string};
 export type SettingsActionReview={reviewId:string;action:SettingsAction;facts:string[];expiresAt:number};
 export type SettingsWorkspace={id:string;alias:string;path:string;trusted:boolean;revision:number};

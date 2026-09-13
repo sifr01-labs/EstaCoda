@@ -276,9 +276,9 @@ export function createVoiceTools(options: VoiceToolOptions): readonly Registered
         const filePath = join(options.audioCacheRoot, fileName);
         await writeFile(filePath, result.bytes);
         const fileStat = await stat(filePath);
-        let artifact = options.artifactStore.record({
+        const details = {
           path: filePath,
-          kind: "audio",
+          kind: "audio" as const,
           bytes: fileStat.size,
           mimeType: result.mimeType,
           summary: `Speech generated from ${text.length} characters.`,
@@ -288,10 +288,10 @@ export function createVoiceTools(options: VoiceToolOptions): readonly Registered
             voice: result.voice,
             format: result.mimeType
           }
-        });
+        };
 
         const sessionId=options.currentSessionId?.();
-        if(sessionId&&options.profileId&&options.persistSessionArtifact&&fileStat.size<=8*1024*1024&&['audio/mpeg','audio/wav','audio/ogg','audio/aac','audio/flac'].includes(result.mimeType))artifact=await options.artifactStore.retainSessionArtifact({sessionId,profileId:options.profileId,capturePath:filePath,kind:'audio',bytes:fileStat.size,mimeType:result.mimeType,sha256:createHash('sha256').update(result.bytes).digest('hex'),source:{kind:'voice.synthesized',description:'Generated speech',filename:'speech.'+extensionForMime(result.mimeType),origin:'media:speech.synthesize'},persist:artifact=>options.persistSessionArtifact!(sessionId,artifact)});
+        const artifact=sessionId&&options.profileId&&options.persistSessionArtifact&&fileStat.size<=8*1024*1024&&['audio/mpeg','audio/wav','audio/ogg','audio/aac','audio/flac'].includes(result.mimeType)?await options.artifactStore.retainSessionArtifact({sessionId,profileId:options.profileId,capturePath:filePath,kind:'audio',bytes:fileStat.size,mimeType:result.mimeType,sha256:createHash('sha256').update(result.bytes).digest('hex'),source:{kind:'voice.synthesized',description:'Generated speech',filename:'speech.'+extensionForMime(result.mimeType),origin:'media:speech.synthesize'},persist:artifact=>options.persistSessionArtifact!(sessionId,artifact)}):options.artifactStore.record(details);
         return {
           ok: true,
           content: [

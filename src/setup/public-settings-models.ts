@@ -1,6 +1,9 @@
 import type {SettingField} from '../contracts/desktop-control/index.js';
 /** Public model configuration fields, reviewed against runtime-config.ts and AuxiliaryModelSlotConfig. */
 export const modelSettings:readonly SettingField[]=[
+ ...['contextWindowTokens','maxTokens','timeoutMs','staleTimeoutMs'].map((key):SettingField=>({id:'model.fallbacks.#.'+key,path:['model','fallbacks','#',key],section:'models',kind:'number',min:1,max:10000000})),
+ {id:'model.fallbacks.#.baseUrl',path:['model','fallbacks','#','baseUrl'],section:'models',kind:'text'},
+ {id:'model.fallbacks.#.apiKeyEnv',path:['model','fallbacks','#','apiKeyEnv'],section:'models',kind:'secret'},
  {
   "id": "model.contextWindowTokens",
   "path": [

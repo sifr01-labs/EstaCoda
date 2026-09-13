@@ -5,7 +5,7 @@ import {loadRuntimeConfig} from '../config/runtime-config.js';
 import type {CandidateScope} from './credential-candidates.js';
 import {randomUUID} from 'node:crypto';
 import {ControlProtocolError,type SettingsSection,type SettingsPage,type SettingChange,type SettingsReview,type SettingsBinding} from '../contracts/desktop-control/index.js';
-import {PUBLIC_SETTINGS,settingField,settingPath,settingValue} from '../setup/public-settings.js';
+import {PUBLIC_SETTINGS,settingField,settingPath,settingValue,settingSecretState} from '../setup/public-settings.js';
 import {captureProfileApplySnapshot,type ProfileApplySnapshot} from '../setup/review/profile-apply.js';
 import {CredentialCandidates} from './credential-candidates.js';
 type Draft={snapshot:ProfileApplySnapshot;review:SettingsReview;windowId:string;generation:number;timer:ReturnType<typeof setTimeout>;signal:AbortSignal;expires:number;cleanup:()=>void;changes:SettingChange[];applying:boolean;abort:AbortController};
@@ -21,7 +21,7 @@ export class PublicSettings {
   while(Buffer.byteLength(JSON.stringify({fields,values}))>44000&&fields.length>1){const removed=fields.pop()!;const i=values.findIndex(v=>v.fieldId===removed.id);if(i>=0)values.splice(i,1);}
   const next=offset+fields.length;return {fields:structuredClone(fields),values,truncated:all.length>next,...(all.length>next?{nextOffset:next}:{})};
  }
- async value(params:{fieldId:string;selectors:string[]}){const change={...params,value:null},field=settingField(change);const snapshot=await captureProfileApplySnapshot(this.input);const value=field.envName?(envContentHasSecret(snapshot.files['.env']??'',field.envName)?'configured':null):settingValue(JSON.parse(snapshot.files['config.json']??'{}'),settingPath(field,params.selectors));return {...params,value:field.kind==='secret'?(value===null?null:'configured'):value};}
+ async value(params:{fieldId:string;selectors:string[]}){const change={...params,value:null},field=settingField(change);const snapshot=await captureProfileApplySnapshot(this.input);const value=field.envName?(envContentHasSecret(snapshot.files['.env']??'',field.envName)?'configured':null):field.kind==='secret'?settingSecretState(JSON.parse(snapshot.files['config.json']??'{}'),settingPath(field,params.selectors)):settingValue(JSON.parse(snapshot.files['config.json']??'{}'),settingPath(field,params.selectors));return {...params,value:field.kind==='secret'?(value===null?null:'configured'):value};}
  async review(params:{windowId:string;generation:number;changes:SettingChange[]}):Promise<SettingsReview>{
   if(this.#closed)throw new ControlProtocolError('-32003');
   const signal=this.candidates.windowSignal(params.windowId,params.generation);if(this.drafts.size>=32)throw new ControlProtocolError('-32009');
@@ -29,7 +29,7 @@ export class PublicSettings {
   params.changes.forEach(change=>{const field=settingField(change);if(field.kind==='secret'&&change.value!==null){const scope=this.scope(params,field.id);this.candidates.bindRoute(String(change.value),scope,JSON.stringify([field.id,change.selectors]));this.candidates.read(String(change.value),scope);}});
   const snapshot=await captureProfileApplySnapshot(this.input),config=JSON.parse(snapshot.files['config.json']??'{}');signal.throwIfAborted();if(this.#closed||this.drafts.size>=32)throw new ControlProtocolError('-32009');
   const changes=structuredClone(params.changes),draftId=randomUUID();
-  const review={draftId,changes:changes.map(c=>settingField(c).kind==='secret'?{...c,value:c.value===null?null:'staged'}:c),previous:changes.map(c=>({...c,value:settingField(c).envName?(envContentHasSecret(snapshot.files['.env']??'',settingField(c).envName!)?'configured':null):settingField(c).kind==='secret'?(settingValue(config,settingPath(settingField(c),c.selectors))===null?null:'configured'):settingValue(config,settingPath(settingField(c),c.selectors))})),expiresInMs:300000};
+  const review={draftId,changes:changes.map(c=>settingField(c).kind==='secret'?{...c,value:c.value===null?null:'staged'}:c),previous:changes.map(c=>({...c,value:settingField(c).envName?(envContentHasSecret(snapshot.files['.env']??'',settingField(c).envName!)?'configured':null):settingField(c).kind==='secret'?settingSecretState(config,settingPath(settingField(c),c.selectors)):settingValue(config,settingPath(settingField(c),c.selectors))})),expiresInMs:300000};
   if(Buffer.byteLength(JSON.stringify(review))>48000)throw new ControlProtocolError('-32009');
   const abort=new AbortController();const cleanup=()=>{abort.abort();clearTimeout(timer);signal.removeEventListener('abort',cleanup);if(!this.drafts.get(draftId)?.applying){this.drafts.delete(draftId);for(const change of changes)if(settingField(change).kind==='secret'&&change.value!==null){try{this.candidates.discard(String(change.value),this.scope(params,change.fieldId));}catch{}}}};
   const timer=setTimeout(cleanup,300000);timer.unref();

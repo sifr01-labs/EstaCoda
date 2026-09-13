@@ -5,7 +5,7 @@ type Candidate = { routeBinding?: string; abort: AbortController; scope: Candida
 export function validateCandidateScope(value: unknown): asserts value is CandidateScope {
   assertBoundedJson(value);
   if (!isRecord(value) || !exactKeys(value, ['windowId', 'generation', 'purpose', 'providerId', 'authMethod', 'endpoint']) ||
-    !isControlId(value.windowId) || !(value.purpose==='settings'&&typeof value.providerId==='string'?isControlId(value.providerId.replaceAll('*','entry')):isControlId(value.providerId)) || !Number.isSafeInteger(value.generation) || Number(value.generation) < 1 ||
+    !isControlId(value.windowId) || !(value.purpose==='settings'&&typeof value.providerId==='string'?isControlId(value.providerId.replaceAll('*','entry').replaceAll('#','index')):isControlId(value.providerId)) || !Number.isSafeInteger(value.generation) || Number(value.generation) < 1 ||
     !['provider', 'telegram', 'settings'].includes(String(value.purpose)) || !['api_key', 'oauth'].includes(String(value.authMethod)) ||
     typeof value.endpoint !== 'string' || value.endpoint.length > 2_048) throw new ControlProtocolError('-32602');
   let url: URL;
