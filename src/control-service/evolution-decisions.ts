@@ -17,10 +17,11 @@ export class EvolutionDecisions extends EvolutionQueries{
  readonly controller=new AbortController();
  async fingerprint(id:string){const {store,registry,manifests,evalFingerprint,service}=await this.open(),p=await store.findProposal(id);if(!p)throw new ControlProtocolError('-32004');const skill=registry.get(p.skillName),manifest=p.changeManifestId?await manifests.find(p.changeManifestId):null;return createHash('sha256').update(JSON.stringify({p,skill,manifest,evalFingerprint,rollback:await service.reviewProposalRollback(id),usage:await store.getUsage(p.skillName),observations:await store.listObservations({ids:p.evidence.observations}),evals:await store.listEvalRuns({skillName:p.skillName})})).digest('hex');}
  async review(input:Input):Promise<EvolutionReview>{
-  const before=await this.fingerprint(input.proposalId);const detail=await this.details(input.proposalId),{store,service}=await this.open(),p=(await store.findProposal(input.proposalId))!;
-  const commands=detail.manifest?.commands??[],diff=input.action==='rollback'?(await service.reviewProposalRollback(p.id))?.before??'':JSON.stringify(p.patch??detail.diff,null,2);let reason:EvolutionReview['reason']='ready',workspace:string|null=null;
+  const before=await this.fingerprint(input.proposalId);const detail=await this.details(input.proposalId),{store,service,manifests}=await this.open(),p=(await store.findProposal(input.proposalId))!;
+  const manifest=p.changeManifestId?await manifests.find(p.changeManifestId):undefined;
+  const commands=manifest?[manifest.evalCommand,...manifest.constraintGates].filter(Boolean):[],diff=input.action==='rollback'?(await service.reviewProposalRollback(p.id))?.before??'':JSON.stringify(p.patch??detail.diff,null,2);let reason:EvolutionReview['reason']='ready',workspace:string|null=null;
   if(input.action==='rollback'?!detail.rollbackAvailable:p.status!=='proposed')reason='stale';
-  else if(input.action!=='reject'&&(diff.length>8192||commands.length>4))reason='review_too_large';
+  else if(input.action!=='reject'&&(diff.length>8192||commands.length>4||commands.some(c=>c.length>240)))reason='review_too_large';
   else if(input.action==='promote'&&(!p.patch||p.changeKind!=='skill_patch'))reason='unsupported';
   else if(input.action==='promote'&&p.approvalState!=='approved')reason='approval_required';
   else if(!['reject','rollback'].includes(input.action)&&detail.gate.status==='failed')reason='gates_failed';
@@ -31,7 +32,7 @@ export class EvolutionDecisions extends EvolutionQueries{
    else try{const targets=await availableWorkTargets(this.input,this.controller.signal,{target:input.target});if(!targets.items.length)throw new Error();const targetsStore=new ExecutionTargetStore({...this.input,readonly:true});try{workspace=targetsStore.getTarget(input.target.targetId)!.workspace.canonicalPath;}finally{targetsStore.close();}}catch{reason='workspace_required';}
   }
   for(const [id,r]of this.reviews)if(r.expires<Date.now())this.reviews.delete(id);if(this.reviews.size>=16)throw new ControlProtocolError('-32009');
-  const projection={reviewId:randomUUID(),proposalId:p.id,action:input.action,diff:safeText(diff,8192),commands:commands.map(normalizeGateCommand),workspace,allowed:reason==='ready',reason};
+  const projection={reviewId:randomUUID(),proposalId:p.id,action:input.action,diff:safeText(diff,8192),commands:commands.slice(0,16).map(c=>safeText(normalizeGateCommand(c),240)),workspace,allowed:reason==='ready',reason};
   if(before!==await this.fingerprint(p.id))throw new ControlProtocolError('-32004');
   this.reviews.set(projection.reviewId,{input:structuredClone(input),fingerprint:before,projection,expires:Date.now()+300000});return projection;
  }

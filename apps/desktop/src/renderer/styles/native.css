@@ -49,3 +49,7 @@ html,body,#root{margin:0;min-width:0;min-height:100%;}body{background:#131313}bu
 #ec-branded-workspace .ec-onboarding>.ec-actions{margin-block:24px 12px;display:flex;gap:12px;flex-wrap:wrap}
 #ec-branded-workspace .ec-onboarding .ec-page{padding-inline:0}
 @media(max-width:590px){#ec-branded-workspace .ec-onboarding{padding:24px 16px 32px}}
+/* Live Library controls retain the approved primitives at compact widths. */
+#ec-branded-workspace .ec-live-library .ec-btn,
+#ec-branded-workspace .ec-evolution-controls .ec-btn { max-width:100%; white-space:normal; overflow-wrap:anywhere; }
+#ec-branded-workspace .ec-live-library select { min-width:0; max-width:100%; }

@@ -27,7 +27,7 @@ const GATE_COMMAND_ALIASES: Readonly<Record<string, string>> = {
   "eval:fixtures": "pnpm run eval:fixtures",
 };
 
-const DEFAULT_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
+export const DEFAULT_GATE_TIMEOUT_MS = 5 * 60 * 1000; // 5 minutes
 const INHERITED_COREPACK_HOME = resolveInheritedCorepackHome();
 
 export function normalizeCommand(value: string): string {
@@ -81,7 +81,7 @@ function runSingleGate(
 ): Promise<GateResult> {
   return new Promise((resolve) => {
     const start = Date.now();
-    const timeoutMs = options.timeoutMs ?? DEFAULT_TIMEOUT_MS;
+    const timeoutMs = options.timeoutMs ?? DEFAULT_GATE_TIMEOUT_MS;
     let stdout = "";
     let stderr = "";
     let killed = false;

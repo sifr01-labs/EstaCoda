@@ -312,7 +312,7 @@ export class SkillProposalService {
     const fresh=await this.reviewProposalRollback(proposalId);
     if(!fresh||fresh.before!==review.before||fresh.current!==review.current||fresh.promotionId!==review.promotionId)return false;
     const file=await open(review.skill.sourcePath,constants.O_RDWR|constants.O_NOFOLLOW);
-    try {const info=await file.stat();if(!info.isFile()||info.size>1048576||await file.readFile('utf8')!==review.current)return false;await file.write(review.before,0,'utf8');await file.truncate(Buffer.byteLength(review.before));await file.sync();}finally{await file.close();}
+    try {const info=await file.stat();if(!info.isFile()||info.size>1048576||await file.readFile('utf8')!==review.current)return false;const bytes=Buffer.from(review.before);let offset=0;while(offset<bytes.length){const result=await file.write(bytes,offset,bytes.length-offset,offset);if(!result.bytesWritten)throw new Error('Incomplete skill write');offset+=result.bytesWritten;}await file.truncate(Buffer.byteLength(review.before));await file.sync();}finally{await file.close();}
     await this.#reloadLocalSkill(review.skill.sourcePath);
     await this.#options.skillEvolutionStore.recordMutation({skillName:review.skill.name,source:'local',kind:'rolled-back'});
     if(review.proposal.changeManifestId)await this.#options.changeManifestStore?.updateStatus(review.proposal.changeManifestId,'reverted');
@@ -577,7 +577,7 @@ export class SkillProposalService {
     const slug = slugifySkillName(name);
     const snapshotRoot = join(this.#options.localSkillsRoot, ".snapshots", slug);
     const snapshotPath = join(snapshotRoot, new Date().toISOString().replace(/[:.]/gu, "-"));
-    await mkdir(snapshotRoot, { recursive: true });
+    for(const directory of [this.#options.localSkillsRoot,join(this.#options.localSkillsRoot,'.snapshots'),snapshotRoot]){await mkdir(directory,{recursive:true});const info=await lstat(directory);if(!info.isDirectory()||info.isSymbolicLink())throw new Error('Invalid snapshot directory');}
     await cp(target.skillDir, snapshotPath, { recursive: true });
     return snapshotPath;
   }
