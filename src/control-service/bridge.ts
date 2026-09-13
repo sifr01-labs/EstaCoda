@@ -1,3 +1,4 @@
+import {OnboardingWorkspace} from './onboarding-workspace.js';
 import {detectOnboarding,bootstrapOnboarding} from './onboarding-detection.js';
 import {settingsLifecycle} from './settings-lifecycle.js';
 import {DesktopMediaOutput} from './desktop-media-output.js';
@@ -54,6 +55,7 @@ export class DesktopBridge {
   readonly server: StdioControlServer;
   readonly candidates: CredentialCandidates;
   readonly modelSetup: ModelSetup;
+  readonly onboardingWorkspace:OnboardingWorkspace;
   readonly publicSettings:PublicSettings;
   readonly mediaOutput:DesktopMediaOutput;
   readonly settingsActions:SettingsActions;
@@ -132,6 +134,9 @@ export class DesktopBridge {
       'settings.inspect':async request=>{if(request.method!=='settings.inspect')throw new ControlProtocolError('-32601');return {result:await this.publicSettings.inspect(request.params.operationId)};},
       'settings.verify':async()=>({result:await this.publicSettings.verify()}),
       'settings.value':async request=>{if(request.method!=='settings.value')throw new ControlProtocolError('-32601');return {result:await this.publicSettings.value(request.params)};},
+      'setup.reviewWorkspace':async request=>{if(request.method!=='setup.reviewWorkspace')throw new ControlProtocolError('-32601');return {result:await this.onboardingWorkspace.review(request.params)};},
+      'setup.applyWorkspace':async request=>{if(request.method!=='setup.applyWorkspace')throw new ControlProtocolError('-32601');return {result:await this.onboardingWorkspace.apply(request.params)};},
+      'setup.cancelWorkspace':async request=>{if(request.method!=='setup.cancelWorkspace')throw new ControlProtocolError('-32601');return {result:this.onboardingWorkspace.cancel(request.params.reviewId)};},
       'setup.detect':async()=>({result:await detectOnboarding(this.options)}),
       'setup.bootstrap':async()=>({result:await bootstrapOnboarding(this.options)}),
       'settings.lifecycle':async()=>({result:await settingsLifecycle(this.options.version)}),
@@ -213,6 +218,8 @@ export class DesktopBridge {
     this.candidates = new CredentialCandidates(this.server.profileId,this.server.instanceId);
     this.mediaOutput=new DesktopMediaOutput(options);
     this.settingsActions=new SettingsActions(options);
+    this.onboardingWorkspace=new OnboardingWorkspace(options);
+    this.server.onDispose(()=>this.onboardingWorkspace.dispose());
     this.settingsDependencies=new SettingsDependencies(this.options);
     this.publicSettings=new PublicSettings(this.options,this.candidates,async()=>{this.#catalog=undefined;this.subscriptions.publish({type:'service.warning',payload:{reason:'configuration_changed'}});try{await notifyPrivateConfigurationChanged({directory:resolveProfileStateHome(this.options).gatewayStatePath,profileId:this.options.profileId,version:this.options.version,signal:AbortSignal.timeout(2000)});}catch{}});
     this.server.onDispose(()=>this.publicSettings.dispose());
