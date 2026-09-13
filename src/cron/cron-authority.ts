@@ -43,12 +43,22 @@ export function recurringPrincipalAllowed(origin: CronExecutionOrigin, config: L
   return false;
 }
 
+/** Local operator confirmation binds the destination; channel enablement is rechecked at firing and delivery. */
+export function assertLocalCronDelivery(job:CronJob,config:LoadedRuntimeConfig):void {
+  for(const destination of job.delivery.split(',').map(value=>value.trim())){
+    if(destination==='local'||destination==='silent')continue;
+    const match=/^(telegram|discord|whatsapp|email):([^:,\s]+)(?::([^:,\s]+))?$/.exec(destination);
+    const channel=destination==='origin'?job.origin?.channel:match?.[1];
+    if(!channel||!['telegram','discord','whatsapp','email'].includes(channel)||destination==='origin'&&!job.origin?.chatId||!config.config.channels?.[channel as 'telegram']?.enabled)throw new Error('Recurring delivery destination is unavailable.');
+  }
+}
+
 export async function validateCronAuthority(job: CronJob, context: { profileId: string; homeDir?: string }): Promise<LoadedRuntimeConfig | undefined> {
   if(job.localTarget!==undefined){
     if(!job.localTarget||job.executionOrigin||job.localTarget.profileId!==context.profileId||job.workdir!==job.localTarget.binding.workspace.canonicalPath)throw new Error('Recurring profile/target mismatch.');
     const targets=new ExecutionTargetStore(context);try{await targets.validate(job.localTarget.binding,job.workdir);}finally{targets.close();}
     if(!await new WorkspaceTrustStore(context).isTrusted(job.workdir))throw new Error('Recurring workspace trust was revoked.');
-    return loadRuntimeConfig({...context,workspaceRoot:job.workdir});
+    const config=await loadRuntimeConfig({...context,workspaceRoot:job.workdir});assertLocalCronDelivery(job,config);return config;
   }
   if (job.executionOrigin === undefined) return undefined;
   const origin = parseCronExecutionOrigin(job.executionOrigin);

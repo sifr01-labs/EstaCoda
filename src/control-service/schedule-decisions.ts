@@ -10,7 +10,7 @@ import {resolveCronModelRoute,CRON_FORCED_DISABLED_TOOLSETS} from '../cron/cron-
 import {parseCronSchedule,type CronJob} from '../cron/cron-store.js';
 import {assertCronPromptSafe} from '../cron/cron-safety.js';
 import {withProfileWriteLock} from '../config/profile-write-lock.js';
-import {validateCronAuthority} from '../cron/cron-authority.js';
+import {validateCronAuthority,assertLocalCronDelivery} from '../cron/cron-authority.js';
 export class ScheduleDecisions extends ScheduleQueries{
  readonly operations=new ConnectionOperations(this.input);
  readonly reviews=new Map<string,{review:ScheduleReview;fingerprint:string}>();
@@ -19,7 +19,7 @@ export class ScheduleDecisions extends ScheduleQueries{
   const job=await(await this.store()).get(id);if(!job)throw new ControlProtocolError('-32004');
   const binding=job.executionOrigin?.target??job.localTarget?.binding;
   let target=binding?{targetId:binding.targetId,targetGeneration:binding.targetGeneration}:null;
-  if(!target&&job.workdir){try{const store=new ExecutionTargetStore({...this.input,readonly:true});try{const found=store.listTargets(1000).find(t=>t.workspace.canonicalPath===job.workdir&&t.status==='available');if(found)target={targetId:found.id,targetGeneration:found.generation};}finally{store.close();}}catch(error){if((error as NodeJS.ErrnoException).code!=='SQLITE_CANTOPEN'&&(error as NodeJS.ErrnoException).code!=='ENOENT')throw error;}}
+  if(!target&&job.workdir){try{const store=new ExecutionTargetStore({...this.input,readonly:true});try{let after:string|undefined;for(let page=0;page<10;page++){const rows=store.listTargets(100,after,true),found=rows.find(t=>t.workspace.canonicalPath===job.workdir);if(found){target={targetId:found.id,targetGeneration:found.generation};break;}if(rows.length<100)break;after=rows.at(-1)!.id;}}finally{store.close();}}catch(error){if((error as NodeJS.ErrnoException).code!=='SQLITE_CANTOPEN'&&(error as NodeJS.ErrnoException).code!=='ENOENT')throw error;}}
   const result:ScheduleDraft={name:job.name,objective:job.prompt,schedule:job.schedule,target,model:job.modelOverride?{provider:job.modelOverride.provider??'',model:job.modelOverride.model}:null,delivery:job.delivery,skills:job.skills,toolsets:job.enabledToolsets??null,contextFrom:job.contextFrom??[],repeat:job.repeat??null,script:job.script??null,scriptArgs:job.scriptArgs??[],scriptTimeoutMs:job.scriptTimeoutMs??null,noAgent:job.noAgent===true};
   // Do not return truncated editable data that could overwrite a longer CLI definition.
   const {validateControlResponse,CONTROL_METHODS}=await import('../contracts/desktop-control/index.js');
@@ -41,12 +41,8 @@ export class ScheduleDecisions extends ScheduleQueries{
    const binding=targetBinding(target);await targets.validate(binding,target.workspace.canonicalPath,this.controller.signal);await assertInspectionRoot(this.input,target.workspace.canonicalPath);if(!await new WorkspaceTrustStore(this.input).isTrusted(target.workspace.canonicalPath))throw new ControlProtocolError('-32003');
    if(job?.executionOrigin){await validateCronAuthority(job,this.input);if(JSON.stringify(job.executionOrigin.target)!==JSON.stringify(binding)||!['local','origin'].includes(d.delivery))throw new ControlProtocolError('-32003');}
    const config=await loadRuntimeConfig({...this.input,workspaceRoot:target.workspace.canonicalPath,configurationInspection:true});
-   const origin=job?.executionOrigin?.sessionKey??job?.origin;
-   for(const destination of d.delivery.split(',').map(x=>x.trim())){
-    if(destination==='local'||destination==='silent')continue;if(destination==='origin'){if(!origin)throw new ControlProtocolError('-32602');continue;}
-    const match=/^(telegram|discord|whatsapp|email):([^:,\s]+)(?::([^:,\s]+))?$/.exec(destination);if(!match||!config.config.channels?.[match[1] as 'telegram']?.enabled)throw new ControlProtocolError('-32003');
-   }
    const patch={name:d.name,prompt:d.objective,schedule:d.schedule,workdir:target.workspace.canonicalPath,modelOverride:d.model?{...(d.model.provider?{provider:d.model.provider}:{}),model:d.model.model}:undefined,delivery:d.delivery,skills:d.skills,enabledToolsets:d.toolsets??undefined,contextFrom:d.contextFrom,repeat:d.repeat??undefined,script:d.script??undefined,scriptArgs:d.scriptArgs,scriptTimeoutMs:d.scriptTimeoutMs??undefined,noAgent:d.noAgent,localTarget:job?.executionOrigin?undefined:{profileId:this.input.profileId,binding}};
+   if(!job?.executionOrigin)assertLocalCronDelivery({...job,...patch} as CronJob,config);
    const route=d.noAgent?undefined:await resolveCronModelRoute({job:{...job,...patch} as CronJob,latestConfig:config});if(!d.noAgent&&(!route||route.provider==='unconfigured'))throw new ControlProtocolError('-32003');
    return{job,definition:d,patch,fingerprint:createHash('sha256').update(JSON.stringify([job??null,binding,config.config])).digest('hex'),workspace:patch.workdir,nextRunAt:action.action==='run-now'?null:parsed.nextRunAt.toISOString(),authority:config.security.approvalMode,spendUsd:config.budgets.session?.maxEstimatedCostUsd??null,model:route?`${route.provider}/${route.id}`:'none'};
   }finally{targets.close();}
