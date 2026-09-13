@@ -17,3 +17,12 @@ test('requires review and explicit confirmation before saving a schedule',async(
  });
  await page.getByLabel('Schedule name',{exact:true}).fill('Audit');await page.getByLabel('Objective',{exact:true}).fill('Review changes');await page.getByRole('combobox',{name:'Execution target',exact:true}).selectOption('target');await page.getByRole('button',{name:'Review schedule',exact:true}).click();expect(await page.evaluate(()=>(window as any).scheduleState.writes)).toBe(0);await expect(page.getByText('/selected/workspace',{exact:true})).toBeVisible();await page.getByRole('button',{name:'Confirm schedule change',exact:true}).click();expect(await page.evaluate(()=>(window as any).scheduleState.writes)).toBe(1);
 });
+test('run now remains a reviewed request and can be cancelled without execution',async({page})=>{
+ await page.goto('/fixture.html');await page.evaluate(async()=>{
+ const rp='/node_modules/.vite/deps/react.js',dp='/node_modules/.vite/deps/react-dom_client.js',cp='/src/renderer/components/schedule-actions.tsx';const React=(await import(rp)).default,{createRoot}=(await import(dp)).default,{ScheduleActions}=await import(cp);
+ const state={writes:0,cancels:0};(window as any).scheduleState=state;
+ const api={review:async(action:any)=>({reviewId:'review',action,definition:null,profileId:'one',workspace:'/workspace',nextRunAt:null,authority:'strict',spendUsd:1,model:'local/model',expiresAt:Date.now()+300000}),execute:async()=>{state.writes++;return{state:'completed'};},cancel:async()=>{state.cancels++;return{cancelled:true};}};
+ const host=document.querySelector('.ec-window')!;host.innerHTML='<div id="schedule-actions-test"></div>';createRoot(document.querySelector('#schedule-actions-test')!).render(React.createElement(ScheduleActions,{api,job:{id:'one',status:'paused',runRequested:false},onChanged:()=>{}}));
+ });
+ await page.getByRole('button',{name:'Run now',exact:true}).click();await expect(page.getByText(/Queue one run/)).toBeVisible();expect(await page.evaluate(()=>(window as any).scheduleState.writes)).toBe(0);await page.getByRole('button',{name:'Cancel',exact:true}).click();expect(await page.evaluate(()=>(window as any).scheduleState.cancels)).toBe(1);await page.getByRole('button',{name:'Run now',exact:true}).click();await page.getByRole('button',{name:'Confirm schedule change',exact:true}).click();expect(await page.evaluate(()=>(window as any).scheduleState.writes)).toBe(1);
+});

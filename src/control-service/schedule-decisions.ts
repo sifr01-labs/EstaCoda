@@ -28,8 +28,11 @@ export class ScheduleDecisions extends ScheduleQueries{
  }
  private async state(action:ScheduleAction){
   this.controller.signal.throwIfAborted();const store=await this.store(),job=action.id?await store.get(action.id):undefined;if(action.id&&!job)throw new ControlProtocolError('-32004');
-  if(action.action==='delete')return{job,patch:undefined,fingerprint:JSON.stringify(job),workspace:job?.workdir??null,nextRunAt:null,authority:'existing',spendUsd:null,model:''};
-  const d=action.draft;if(!d.target)throw new ControlProtocolError('-32003');assertCronPromptSafe(d.objective);const parsed=parseCronSchedule(d.schedule);if(!parsed.nextRunAt||!Number.isFinite(parsed.nextRunAt.getTime())||parsed.nextRunAt.getTime()<=Date.now()&&(!job||job.schedule!==d.schedule))throw new ControlProtocolError('-32602');
+  if(action.action==='delete'||action.action==='disable')return{job,definition:null,patch:undefined,fingerprint:JSON.stringify(job),workspace:job?.workdir??null,nextRunAt:null,authority:'existing',spendUsd:null,model:''};
+  if(action.action!=='save'){if(!job?.executionOrigin&&!job?.localTarget)throw new ControlProtocolError('-32003');await validateCronAuthority(job!,this.input);}
+  const d=action.action==='save'?action.draft:await this.draft(action.id);
+  if(action.action==='enable'&&job?.repeat!==undefined&&job.runCount>=job.repeat)throw new ControlProtocolError('-32602');
+  if(action.action==='run-now'&&job?.runRequested)throw new ControlProtocolError('-32009');if(!d.target)throw new ControlProtocolError('-32003');assertCronPromptSafe(d.objective);const parsed=parseCronSchedule(d.schedule);if(!parsed.nextRunAt||!Number.isFinite(parsed.nextRunAt.getTime())||parsed.nextRunAt.getTime()<=Date.now()&&(!job||job.schedule!==d.schedule||action.action==='enable'))throw new ControlProtocolError('-32602');
   if(d.noAgent&&!d.script||d.contextFrom.includes(action.id??'')||d.toolsets?.some(t=>CRON_FORCED_DISABLED_TOOLSETS.includes(t as typeof CRON_FORCED_DISABLED_TOOLSETS[number])))throw new ControlProtocolError('-32602');
   for(const id of d.contextFrom)if(!await store.get(id))throw new ControlProtocolError('-32003');
   const targets=new ExecutionTargetStore({...this.input,readonly:true});
@@ -45,10 +48,10 @@ export class ScheduleDecisions extends ScheduleQueries{
    }
    const patch={name:d.name,prompt:d.objective,schedule:d.schedule,workdir:target.workspace.canonicalPath,modelOverride:d.model?{...(d.model.provider?{provider:d.model.provider}:{}),model:d.model.model}:undefined,delivery:d.delivery,skills:d.skills,enabledToolsets:d.toolsets??undefined,contextFrom:d.contextFrom,repeat:d.repeat??undefined,script:d.script??undefined,scriptArgs:d.scriptArgs,scriptTimeoutMs:d.scriptTimeoutMs??undefined,noAgent:d.noAgent,localTarget:job?.executionOrigin?undefined:{profileId:this.input.profileId,binding}};
    const route=d.noAgent?undefined:await resolveCronModelRoute({job:{...job,...patch} as CronJob,latestConfig:config});if(!d.noAgent&&(!route||route.provider==='unconfigured'))throw new ControlProtocolError('-32003');
-   return{job,patch,fingerprint:createHash('sha256').update(JSON.stringify([job??null,binding,config.config])).digest('hex'),workspace:patch.workdir,nextRunAt:parsed.nextRunAt.toISOString(),authority:config.security.approvalMode,spendUsd:config.budgets.session?.maxEstimatedCostUsd??null,model:route?`${route.provider}/${route.id}`:'none'};
+   return{job,definition:d,patch,fingerprint:createHash('sha256').update(JSON.stringify([job??null,binding,config.config])).digest('hex'),workspace:patch.workdir,nextRunAt:action.action==='run-now'?null:parsed.nextRunAt.toISOString(),authority:config.security.approvalMode,spendUsd:config.budgets.session?.maxEstimatedCostUsd??null,model:route?`${route.provider}/${route.id}`:'none'};
   }finally{targets.close();}
  }
- async review(action:ScheduleAction){const state=await this.state(action);for(const[id,r]of this.reviews)if(r.review.expiresAt<=Date.now())this.reviews.delete(id);if(this.reviews.size>=16)throw new ControlProtocolError('-32009');const review:ScheduleReview={reviewId:randomUUID(),action:structuredClone(action),profileId:this.input.profileId,workspace:state.workspace,nextRunAt:state.nextRunAt,authority:state.authority,spendUsd:state.spendUsd,model:state.model,expiresAt:Date.now()+300000};this.reviews.set(review.reviewId,{review,fingerprint:state.fingerprint});return review;}
+ async review(action:ScheduleAction){const state=await this.state(action);for(const[id,r]of this.reviews)if(r.review.expiresAt<=Date.now())this.reviews.delete(id);if(this.reviews.size>=16)throw new ControlProtocolError('-32009');const review:ScheduleReview={reviewId:randomUUID(),action:structuredClone(action),definition:state.definition,profileId:this.input.profileId,workspace:state.workspace,nextRunAt:state.nextRunAt,authority:state.authority,spendUsd:state.spendUsd,model:state.model,expiresAt:Date.now()+300000};this.reviews.set(review.reviewId,{review,fingerprint:state.fingerprint});return review;}
  cancel(id:string){this.reviews.delete(id);return{cancelled:true};}
  async execute(input:{reviewId:string;operationId:string;confirmed:true}){
   return this.operations.execute(input.operationId,'schedule',async()=>{
@@ -56,6 +59,9 @@ export class ScheduleDecisions extends ScheduleQueries{
    return withProfileWriteLock(this.paths.profileRoot,async()=>{
     let state;try{state=await this.state(r.review.action);}catch{return false;}if(state.fingerprint!==r.fingerprint)return false;
     const store=await this.store();if(r.review.action.action==='delete')return store.remove(r.review.action.id);
+    if(r.review.action.action==='disable')return !!await store.pause(r.review.action.id);
+    if(r.review.action.action==='enable')return !!await store.resume(r.review.action.id);
+    if(r.review.action.action==='run-now')return !!await store.requestRun(r.review.action.id);
     if(!state.patch)return false;if(r.review.action.id)return !!await store.update(r.review.action.id,state.patch);await store.create(state.patch);return true;
    });
   });

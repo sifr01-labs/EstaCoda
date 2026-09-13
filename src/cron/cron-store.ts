@@ -263,8 +263,8 @@ export class CronStore {
 
   async due(now = this.#now()): Promise<CronJob[]> {
     return (await this.list()).filter((job) =>
-      job.status === "active" &&
-      (job.runRequested === true || (job.nextRunAt !== undefined && new Date(job.nextRunAt).getTime() <= now.getTime()))
+      job.runRequested === true ||
+      (job.status === "active" && job.nextRunAt !== undefined && new Date(job.nextRunAt).getTime() <= now.getTime())
     );
   }
 
@@ -283,6 +283,7 @@ export class CronStore {
       updated = {
         ...job,
         status,
+        runRequested: status === "paused" ? false : job.runRequested,
         updatedAt: this.#now().toISOString()
       };
       return updated;

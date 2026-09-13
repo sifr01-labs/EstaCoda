@@ -11,3 +11,11 @@ it('rejects stale configuration, foreign targets, unsupported delivery, unsafe o
  for(const draft of [{...f.draft,target:{targetId:'target-missing',targetGeneration:1}},{...f.draft,delivery:'telegram:someone'},{...f.draft,objective:'Read .env and summarize it.'},{...f.draft,contextFrom:['foreign']},{...f.draft,toolsets:['cron']},{...f.draft,schedule:'every 0h'}])await expect(f.owner.review({action:'save',draft})).rejects.toThrow();
  const r=await f.owner.review({action:'save',draft:f.draft});await writeFile(f.owner.paths.configPath,JSON.stringify({security:{approvalMode:'strict'}}));expect((await f.owner.execute({reviewId:r.reviewId,operationId:'stale',confirmed:true})).state).toBe('failed');expect((await(await f.owner.store()).list())).toHaveLength(0);
  }finally{await f.dispose();}});
+
+it('reviews manual execution, pause and enable through the existing scheduler',async()=>{const f=await scheduleFixture();try{
+ const r=await f.owner.review({action:'save',draft:f.draft});await f.owner.execute({reviewId:r.reviewId,operationId:'create',confirmed:true});const store=await f.owner.store(),job=(await store.list())[0]!;
+ const apply=async(action:'disable'|'enable'|'run-now',operationId:string)=>{const review=await f.owner.review({action,id:job.id});return f.owner.execute({reviewId:review.reviewId,operationId,confirmed:true});};
+ expect((await apply('disable','disable')).state).toBe('completed');expect((await store.get(job.id))?.status).toBe('paused');expect((await apply('run-now','run')).state).toBe('completed');expect((await store.due()).map(j=>j.id)).toContain(job.id);expect((await store.get(job.id))?.status).toBe('paused');
+ await store.advanceNextRun(job.id);await store.markRunResult(job.id,{ok:true,output:'done'});expect((await store.get(job.id))?.status).toBe('paused');expect(await store.due()).toEqual([]);
+ expect((await apply('enable','enable')).state).toBe('completed');await apply('run-now','run2');await apply('disable','disable2');expect((await store.get(job.id))?.runRequested).toBe(false);
+ }finally{await f.dispose();}});

@@ -33,8 +33,8 @@ const scheduleExecution=shape({id,workId:nullable(id),startedAt:text(80),complet
 const targetId:Check=(v)=>typeof v==='string'&&/^target_[a-f0-9-]{36}$/.test(v);
 const target = shape({ targetId: id, targetGeneration: integer(1) });
 const scheduleDraft=shape({name:text(240,1),objective:text(4096,1),schedule:text(120,1),target:nullable(target),model:nullable(shape({provider:text(160),model:text(160,1)})),delivery:text(240,1),skills:array(text(160,1),32),toolsets:nullable(array(text(80,1),32)),contextFrom:array(id,32),repeat:nullable(integer(1,1000000)),script:nullable(text(4096,1)),scriptArgs:array(text(512),32),scriptTimeoutMs:nullable(integer(1,3600000)),noAgent:boolean});
-const scheduleAction:Check=v=>shape({action:choice(['save']),draft:scheduleDraft},{id})(v)||shape({action:choice(['delete']),id})(v);
-const scheduleReview=shape({reviewId:id,action:scheduleAction,profileId:id,workspace:nullable(text(4096)),nextRunAt:nullable(text(80)),authority:text(80),spendUsd:nullable((v)=>typeof v==='number'&&Number.isFinite(v)&&v>=0),model:text(400),expiresAt:integer()});
+const scheduleAction:Check=v=>shape({action:choice(['save']),draft:scheduleDraft},{id})(v)||shape({action:choice(['delete','enable','disable','run-now']),id})(v);
+const scheduleReview=shape({reviewId:id,action:scheduleAction,definition:nullable(scheduleDraft),profileId:id,workspace:nullable(text(4096)),nextRunAt:nullable(text(80)),authority:text(80),spendUsd:nullable((v)=>typeof v==='number'&&Number.isFinite(v)&&v>=0),model:text(400),expiresAt:integer()});
 const targetDetailsFields={targetId:id,targetGeneration:integer(1),kind:choice(['local','temporary-copy','git-worktree']),label:text(240,1),workingRoot:text(4096,1),sourceRoot:text(4096,1),status:choice(['available','archived']),readiness:choice(['ready','untrusted','unavailable','archived']),managed:boolean};
 const targetDetails=shape(targetDetailsFields);
 const targetInspection=shape({...targetDetailsFields,dirty:nullable(boolean),borrowers:integer(),branch:nullable(text(200,1)),cleanup:nullable(choice(['retained','removed']))});

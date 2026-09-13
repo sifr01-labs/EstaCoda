@@ -36,7 +36,7 @@ const scheduleDraft={name:'Audit',objective:'Review files',schedule:'every 1h',t
 const scheduleAction={action:'save' as const,draft:scheduleDraft};
 const cases = {
  'schedules.draft':{params:{id:'cron-job'},result:scheduleDraft},
- 'schedules.review':{params:scheduleAction,result:{reviewId:'review',action:scheduleAction,profileId:'p',workspace:null,nextRunAt:null,authority:'strict',spendUsd:null,model:'local/model',expiresAt:1}},
+ 'schedules.review':{params:scheduleAction,result:{reviewId:'review',action:scheduleAction,definition:null,profileId:'p',workspace:null,nextRunAt:null,authority:'strict',spendUsd:null,model:'local/model',expiresAt:1}},
  'schedules.cancel':{params:{reviewId:'review'},result:{cancelled:true}},
  'schedules.execute':{params:{reviewId:'review',operationId:'operation',confirmed:true},result:{operationId:'operation',action:'schedule',state:'completed'}},
  'schedules.inspect':{params:{operationId:'operation'},result:{operationId:'operation',action:'schedule',state:'uncertain'}},
