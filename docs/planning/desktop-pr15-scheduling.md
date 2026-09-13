@@ -40,3 +40,19 @@ Checks ran on macOS with Node 24.14.1 and pnpm 10.33.0. Core checks used a clean
 - Full core suite: 715 files, 11,622 tests passed. The final paused next-run projection correction additionally passed its focused regression tests.
 
 `pnpm install --frozen-lockfile`, `pnpm run typecheck`, `pnpm run smoke`, `pnpm run build`, `pnpm run audit:runtime-imports`, `pnpm run audit:esm`, `pnpm run smoke:dist` and `git diff --check` passed. The final projection fix was synchronized before the successful build and distribution smoke checks. Native packaged distribution, signed/notarized installation, real-provider/channel schedule runs and extended sleep/restart reliability remain separate acceptance work; the browser and unit results are not a substitute for those checks.
+
+
+## Focused review corrections
+
+The follow-up review reproduced four defects: a Cron write could race the final review check, Desktop could publish a store beyond its own read limits, unknown toolset names were accepted, and clearing script arguments produced one empty argument. The focused correction now:
+
+- Compares the expected job inside the existing Cron JSON transaction for save/delete/enable/disable/run-now. A concurrent definition change rejects the operation before publication and records a failed receipt, rather than overwriting or acting on an unreviewed definition.
+- Checks the resulting count and exact formatted UTF-8 byte size inside that transaction. The byte limit shares the profile reader's constant. A rejected write leaves the existing store readable; deletion can recover space. Existing oversized stores written outside Desktop still require CLI recovery.
+- Uses shared Cron validation with the built-in toolset vocabulary, covered against source registrations. Unknown names and forbidden Cron toolsets are rejected; duplicates/whitespace normalize consistently. Optional capability availability remains a runtime check. Reviewing a draft does not start a runtime, connect MCP servers or invoke providers.
+- Treats blank script-argument input as no arguments. Explicit JSON strings represent empty, quoted or multiline arguments without losing existing values. English and Arabic browser tests cover this distinction.
+
+The integration test now launches real stdio bridges, creates/reviews/queues a script-only schedule, exits the first bridge, executes it with an independent real gateway supervisor, and reconnects to its history and durable receipt. Replaying the operation identity does not requeue execution. This exercises the core process boundary without mocking the scheduler or delivery router; it uses a temporary local script and does not claim a live provider, external-channel or packaged-Electron test.
+
+Security review: checks remain in the core persistence/execution owners; no trust grant, approval bypass, credential handling or shared-runtime ownership was broadened. Guard rejection occurs before JSON publication; ambiguous I/O errors retain the existing uncertain-receipt behavior.
+
+Follow-up validation passed: 718 core test files / 11,632 tests, 96 Desktop unit tests, eight English/Arabic scheduling browser journeys, Desktop type/protocol checks, frozen install, root typecheck, source smoke, build, runtime-import and ESM audits, distribution smoke, and diff checks. Core checks used the same clean validation-copy approach described above; unrelated duplicate source files and planning edits were preserved. Final patch review found no remaining defects in the four corrected cases.

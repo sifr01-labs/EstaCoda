@@ -12,6 +12,7 @@ import { envContentHasSecret } from '../config/env-secret-store.js';
 import { isControlId, type InboxProjection } from '../contracts/desktop-control/index.js';
 import { safeText, timestamp } from './work-projections.js';
 import type { CronJob } from '../cron/cron-store.js';
+export const PROFILE_FILE_MAX_BYTES=1_048_576;
 /** Backend-selected profile files only, bounded on the same descriptor used for reading. */
 export async function readProfileFile(root: string, path: string): Promise<string | undefined> {
   if (relative(root, path).startsWith('..')) throw new Error('Invalid profile path');
@@ -22,13 +23,13 @@ export async function readProfileFile(root: string, path: string): Promise<strin
     }
     const file = await open(path, constants.O_RDONLY | constants.O_NOFOLLOW);
     try {
-      const info = await file.stat(); if (!info.isFile() || info.size > 1_048_576) throw new Error('Profile state exceeds bound');
-      const buffer = Buffer.alloc(1_048_577); let bytesRead = 0;
+      const info = await file.stat(); if (!info.isFile() || info.size > PROFILE_FILE_MAX_BYTES) throw new Error('Profile state exceeds bound');
+      const buffer = Buffer.alloc(PROFILE_FILE_MAX_BYTES+1); let bytesRead = 0;
       while (bytesRead < buffer.length) {
         const chunk = await file.read(buffer, bytesRead, buffer.length - bytesRead, bytesRead);
         if (!chunk.bytesRead) break; bytesRead += chunk.bytesRead;
       }
-      if (bytesRead > 1_048_576) throw new Error('Profile state exceeds bound');
+      if (bytesRead > PROFILE_FILE_MAX_BYTES) throw new Error('Profile state exceeds bound');
       return new TextDecoder('utf-8', { fatal: true }).decode(buffer.subarray(0, bytesRead));
     } finally { await file.close(); }
   } catch (error) { if ((error as NodeJS.ErrnoException).code === 'ENOENT') return undefined; throw error; }

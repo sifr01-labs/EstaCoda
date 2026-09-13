@@ -32,3 +32,16 @@ test('renders Arabic scheduling validation without backend error text',async({pa
  const host=document.querySelector('.ec-window')!;host.innerHTML='<div dir="rtl" id="arabic-schedule-test"></div>';createRoot(document.querySelector('#arabic-schedule-test')!).render(React.createElement(LanguageContext.Provider,{value:'ar'},React.createElement(ScheduleActions,{api:{review:async()=>{throw new Error('private backend error');}},job:{id:'one',status:'active',runRequested:false},onChanged:()=>{}})));
  });await page.getByRole('button',{name:'تشغيل الآن',exact:true}).click();await expect(page.getByRole('alert')).toHaveText('إجراء الجدول غير متاح. حدّث العرض وراجعه مجددًا.');await expect(page.getByText('private backend error')).toHaveCount(0);
 });
+for(const language of ['en','ar'] as const)test(`${language}: clearing arguments removes them and explicit empty arguments survive review`,async({page})=>{
+ const {arabic}=await import('../../src/shared/i18n/catalog.js');const t=(key:keyof typeof arabic)=>language==='en'?key:arabic[key];
+ await page.goto('/fixture.html');await page.evaluate(async language=>{
+  const rp='/node_modules/.vite/deps/react.js',dp='/node_modules/.vite/deps/react-dom_client.js',cp='/src/renderer/components/schedule-editor.tsx',lp='/src/renderer/i18n.tsx';const React=(await import(rp)).default,{createRoot}=(await import(dp)).default,{ScheduleEditor}=await import(cp),{LanguageContext}=await import(lp);
+  const draft={name:'Audit',objective:'Report',schedule:'every 1h',target:{targetId:'target',targetGeneration:1},model:null,delivery:'local',skills:[],toolsets:null,contextFrom:[],repeat:null,script:'audit.sh',scriptArgs:['--verbose'],scriptTimeoutMs:null,noAgent:true};
+  const api={draft:async()=>draft,review:async(action:any)=>{(window as any).reviewedArguments=action.draft.scriptArgs;return{reviewId:'r',action,profileId:'one',workspace:'/workspace',nextRunAt:null,authority:'strict',spendUsd:null,model:'none',expiresAt:Date.now()+300000};},cancel:async()=>({cancelled:true}),inspect:async()=>null};
+  const host=document.querySelector('.ec-window')!;host.innerHTML='<div id="argument-test"></div>';const root=createRoot(document.querySelector('#argument-test')!);let generation=0;
+  const render=()=>root.render(React.createElement(LanguageContext.Provider,{value:language},React.createElement(ScheduleEditor,{key:++generation,api,id:'existing',onClose:()=>{},onSaved:()=>{}})));(window as any).resetArguments=render;render();
+ },language);
+ for(const [text,expected] of [['',[]],['""',['']],['"line\\nbreak"\n"\\"literal\\""',['line\nbreak','"literal"']]] as [string,string[]][]){
+  await page.getByText(t('Advanced schedule options'),{exact:true}).click();await page.getByRole('textbox',{name:t('Script arguments (one per line)'),exact:true}).fill(text);await page.getByRole('button',{name:t('Review schedule'),exact:true}).click();expect(await page.evaluate(()=>(window as any).reviewedArguments)).toEqual(expected);await page.evaluate(()=>(window as any).resetArguments());
+ }
+});

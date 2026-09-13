@@ -17,24 +17,13 @@ export type ToolRiskClass =
   | "spend-money"
   | "sandbox-escape";
 
-export type ToolsetName =
-  | "core"
-  | "files"
-  | "shell-readonly"
-  | "shell-write"
-  | "web"
-  | "browser"
-  | "telegram"
-  | "media"
-  | "coding"
-  | "research"
-  | "provider"
-  | "configuration"
-  | "diagnostics"
-  | "memory"
-  | "mcp"
-  | "dangerous"
-  | (string & {});
+/** Built-in registration vocabulary. Optional capability availability is checked by the runtime. */
+export const BUILTIN_TOOLSETS = [
+  "core", "files", "shell-readonly", "shell-write", "web", "browser", "telegram",
+  "media", "coding", "research", "provider", "configuration", "diagnostics",
+  "memory", "mcp", "dangerous", "cron"
+] as const;
+export type ToolsetName = typeof BUILTIN_TOOLSETS[number] | (string & {});
 
 export type ToolDefinition = {
   name: string;

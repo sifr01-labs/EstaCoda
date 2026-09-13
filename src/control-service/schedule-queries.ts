@@ -1,16 +1,18 @@
 import {join,dirname} from 'node:path';
 import {lstat} from 'node:fs/promises';
 import {resolveGlobalStateHome,resolveProfileStateHome} from '../config/profile-home.js';
-import {CronStore,type CronJob} from '../cron/cron-store.js';
+import {CronStore,type CronJob,type CronWriteGuard} from '../cron/cron-store.js';
 import {CronExecutionStore} from '../cron/cron-execution-store.js';
 import {SQLiteSessionDB} from '../session/sqlite-session-db.js';
 import {ControlProtocolError,type ScheduleProjection,type ScheduleExecutionProjection} from '../contracts/desktop-control/index.js';
-import {readProfileFile} from './profile-attention.js';
+import {readProfileFile,PROFILE_FILE_MAX_BYTES} from './profile-attention.js';
 import {boundedLibraryPage} from './library-queries.js';
 import {safeText} from './work-projections.js';
+export const SCHEDULE_STORE_MAX_JOBS=1000;
+export const SCHEDULE_STORE_MAX_BYTES=PROFILE_FILE_MAX_BYTES;
 export class ScheduleQueries{
  readonly paths;constructor(readonly input:{homeDir:string;profileId:string}){this.paths=resolveProfileStateHome(input);}
- async store(){const path=join(this.paths.cronPath,'jobs.json');const raw=await readProfileFile(this.paths.profileRoot,path);if(raw!==undefined){const value=JSON.parse(raw);if(!Array.isArray(value.jobs)||value.jobs.length>1000)throw new ControlProtocolError('-32009');}return new CronStore({path,outputRoot:join(this.paths.cronPath,'output')});}
+ async store(writeGuard?:CronWriteGuard){const path=join(this.paths.cronPath,'jobs.json');const raw=await readProfileFile(this.paths.profileRoot,path);if(raw!==undefined){const value=JSON.parse(raw);if(!Array.isArray(value.jobs)||value.jobs.length>SCHEDULE_STORE_MAX_JOBS)throw new ControlProtocolError('-32009');}return new CronStore({path,writeGuard,outputRoot:join(this.paths.cronPath,'output')});}
  project(job:CronJob):ScheduleProjection{return{id:job.id,name:safeText(job.name,240),objective:safeText(job.prompt,4096),schedule:job.schedule,kind:job.scheduleKind,status:job.status,delivery:safeText(job.delivery,240),workspace:job.workdir?safeText(job.workdir,4096):null,model:job.modelOverride?{provider:job.modelOverride.provider??null,model:job.modelOverride.model}:null,nextRunAt:job.status==='active'?job.nextRunAt??null:null,lastRunAt:job.lastRunAt??null,lastStatus:job.lastStatus??null,runCount:job.runCount,runRequested:job.runRequested===true,script:!!job.script,channelBound:!!job.executionOrigin};}
  async list(offset=0){return boundedLibraryPage((await(await this.store()).list()).map(j=>this.project(j)),offset);}
  async get(id:string){const job=await(await this.store()).get(id);if(!job)throw new ControlProtocolError('-32004');return this.project(job);}

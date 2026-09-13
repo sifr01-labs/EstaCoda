@@ -1,5 +1,7 @@
 /** Scheduling copy is product-owned; objectives, paths and destinations remain user data. */
 export const schedulesArabic={
+'Leave blank for no arguments. Use "" for an empty argument; JSON strings can represent line breaks.':'اترك الحقل فارغًا دون وسائط. استخدم ⁦""⁩ لوسيط فارغ؛ ويمكن لسلاسل ⁦JSON⁩ تمثيل فواصل الأسطر.',
+
 'Schedules':'الجداول',
 'New schedule':'جدول جديد',
 'Edit schedule':'تعديل الجدول',

@@ -54,11 +54,20 @@ export type CronStoreSnapshot = {
   jobs: CronJob[];
 };
 
+/** Reviewed writers compare the definition and enforce publication limits under the JSON mutex. */
+export type CronWriteGuard = {
+  expectedJob?: CronJob;
+  maxJobs: number;
+  maxBytes: number;
+};
+export class CronWriteRejectedError extends Error {}
+
 export class CronStore {
   readonly path: string;
   readonly outputRoot: string;
   readonly #now: () => Date;
   readonly #id: () => string;
+  readonly #writeGuard?: CronWriteGuard;
 
   constructor(options: {
     path?: string;
@@ -66,12 +75,14 @@ export class CronStore {
     homeDir?: string;
     now?: () => Date;
     id?: () => string;
+    writeGuard?: CronWriteGuard;
   } = {}) {
     const home = resolveHomeDir(options.homeDir);
     this.path = options.path ?? join(home, ".estacoda", "cron", "jobs.json");
     this.outputRoot = options.outputRoot ?? join(home, ".estacoda", "cron", "output");
     this.#now = options.now ?? (() => new Date());
     this.#id = options.id ?? (() => randomUUID());
+    this.#writeGuard = options.writeGuard ? structuredClone(options.writeGuard) : undefined;
   }
 
   async list(): Promise<CronJob[]> {
@@ -302,7 +313,14 @@ export class CronStore {
 
   async #mutate(fn: (jobs: CronJob[]) => CronJob[]): Promise<void> {
     updateJsonState(this.path, () => this.#read(), (snapshot) => {
+    const guard = this.#writeGuard;
+    if (guard?.expectedJob && JSON.stringify(snapshot.jobs.find(job => job.id === guard.expectedJob!.id)) !== JSON.stringify(guard.expectedJob)) {
+      throw new CronWriteRejectedError("Schedule changed. Review again.");
+    }
     const next = fn(structuredClone(snapshot.jobs)).map((job) => structuredClone(job));
+    if (guard && (next.length > guard.maxJobs || Buffer.byteLength(`${JSON.stringify({jobs: next}, null, 2)}\n`, "utf8") > guard.maxBytes)) {
+      throw new CronWriteRejectedError("Schedule store limit reached. Remove schedules or shorten the definition in the CLI.");
+    }
     const origin = currentCronExecutionOrigin();
     if (origin) {
       for (const job of snapshot.jobs) {

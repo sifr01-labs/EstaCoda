@@ -1,13 +1,14 @@
+import {BUILTIN_TOOLSETS} from '../contracts/tool.js';
 import {createHash,randomUUID} from 'node:crypto';
 import {ControlProtocolError,type ScheduleAction,type ScheduleDraft,type ScheduleReview} from '../contracts/desktop-control/index.js';
-import {ScheduleQueries} from './schedule-queries.js';
+import {ScheduleQueries,SCHEDULE_STORE_MAX_JOBS,SCHEDULE_STORE_MAX_BYTES} from './schedule-queries.js';
 import {ConnectionOperations} from './connection-operations.js';
 import {ExecutionTargetStore,targetBinding} from '../workspaces/execution-target.js';
 import {WorkspaceTrustStore} from '../security/workspace-trust-store.js';
 import {assertInspectionRoot} from './inspection-lease.js';
 import {loadRuntimeConfig} from '../config/runtime-config.js';
-import {resolveCronModelRoute,CRON_FORCED_DISABLED_TOOLSETS} from '../cron/cron-runtime-validation.js';
-import {parseCronSchedule,type CronJob} from '../cron/cron-store.js';
+import {resolveCronModelRoute,validateCronRuntimeControls,CRON_FORCED_DISABLED_TOOLSETS} from '../cron/cron-runtime-validation.js';
+import {parseCronSchedule,CronWriteRejectedError,type CronJob} from '../cron/cron-store.js';
 import {assertCronPromptSafe} from '../cron/cron-safety.js';
 import {withProfileWriteLock} from '../config/profile-write-lock.js';
 import {validateCronAuthority,assertLocalCronDelivery} from '../cron/cron-authority.js';
@@ -41,7 +42,9 @@ export class ScheduleDecisions extends ScheduleQueries{
    const binding=targetBinding(target);await targets.validate(binding,target.workspace.canonicalPath,this.controller.signal);await assertInspectionRoot(this.input,target.workspace.canonicalPath);if(!await new WorkspaceTrustStore(this.input).isTrusted(target.workspace.canonicalPath))throw new ControlProtocolError('-32003');
    if(job?.executionOrigin){await validateCronAuthority(job,this.input);if(JSON.stringify(job.executionOrigin.target)!==JSON.stringify(binding)||!['local','origin'].includes(d.delivery))throw new ControlProtocolError('-32003');}
    const config=await loadRuntimeConfig({...this.input,workspaceRoot:target.workspace.canonicalPath,configurationInspection:true});
-   const patch={name:d.name,prompt:d.objective,schedule:d.schedule,workdir:target.workspace.canonicalPath,modelOverride:d.model?{...(d.model.provider?{provider:d.model.provider}:{}),model:d.model.model}:undefined,delivery:d.delivery,skills:d.skills,enabledToolsets:d.toolsets??undefined,contextFrom:d.contextFrom,repeat:d.repeat??undefined,script:d.script??undefined,scriptArgs:d.scriptArgs,scriptTimeoutMs:d.scriptTimeoutMs??undefined,noAgent:d.noAgent,localTarget:job?.executionOrigin?undefined:{profileId:this.input.profileId,binding}};
+   const controls=await validateCronRuntimeControls({enabledToolsets:d.toolsets??undefined,config,availableToolsets:BUILTIN_TOOLSETS});
+   if(!controls.ok)throw new ControlProtocolError('-32602');
+   const patch={name:d.name,prompt:d.objective,schedule:d.schedule,workdir:target.workspace.canonicalPath,modelOverride:d.model?{...(d.model.provider?{provider:d.model.provider}:{}),model:d.model.model}:undefined,delivery:d.delivery,skills:d.skills,enabledToolsets:controls.normalized.enabledToolsets,contextFrom:d.contextFrom,repeat:d.repeat??undefined,script:d.script??undefined,scriptArgs:d.scriptArgs,scriptTimeoutMs:d.scriptTimeoutMs??undefined,noAgent:d.noAgent,localTarget:job?.executionOrigin?undefined:{profileId:this.input.profileId,binding}};
    if(!job?.executionOrigin)assertLocalCronDelivery({...job,...patch} as CronJob,config);
    const route=d.noAgent?undefined:await resolveCronModelRoute({job:{...job,...patch} as CronJob,latestConfig:config});if(!d.noAgent&&(!route||route.provider==='unconfigured'))throw new ControlProtocolError('-32003');
    return{job,definition:d,patch,fingerprint:createHash('sha256').update(JSON.stringify([job??null,binding,config.config])).digest('hex'),workspace:patch.workdir,nextRunAt:action.action==='run-now'?null:parsed.nextRunAt.toISOString(),authority:config.security.approvalMode,spendUsd:config.budgets.session?.maxEstimatedCostUsd??null,model:route?`${route.provider}/${route.id}`:'none'};
@@ -54,11 +57,13 @@ export class ScheduleDecisions extends ScheduleQueries{
    const r=this.reviews.get(input.reviewId);this.reviews.delete(input.reviewId);if(!r||r.review.expiresAt<=Date.now()||input.confirmed!==true)return false;
    return withProfileWriteLock(this.paths.profileRoot,async()=>{
     let state;try{state=await this.state(r.review.action);}catch{return false;}if(state.fingerprint!==r.fingerprint)return false;
-    const store=await this.store();if(r.review.action.action==='delete')return store.remove(r.review.action.id);
+    try {
+    const store=await this.store({expectedJob:state.job,maxJobs:SCHEDULE_STORE_MAX_JOBS,maxBytes:SCHEDULE_STORE_MAX_BYTES});if(r.review.action.action==='delete')return await store.remove(r.review.action.id);
     if(r.review.action.action==='disable')return !!await store.pause(r.review.action.id);
     if(r.review.action.action==='enable')return !!await store.resume(r.review.action.id);
     if(r.review.action.action==='run-now')return !!await store.requestRun(r.review.action.id);
     if(!state.patch)return false;if(r.review.action.id)return !!await store.update(r.review.action.id,state.patch);await store.create(state.patch);return true;
+    }catch(error){if(error instanceof CronWriteRejectedError)return false;throw error;}
    });
   });
  }
