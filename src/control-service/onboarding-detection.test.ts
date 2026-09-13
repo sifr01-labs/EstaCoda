@@ -19,3 +19,8 @@ it('reports unwritable state without attempting setup or changing files',async()
  const {chmod}=await import('node:fs/promises');const homeDir=await mkdtemp(join(tmpdir(),'ec-onboard-ro-')),input={homeDir,profileId:'default'},root=resolveGlobalStateHome(input).stateRoot;
  try{await mkdir(root);await chmod(root,0o500);const result=await detectOnboarding(input);expect(result.state).toBe('state-not-writable');expect(result.writable).toBe(false);await expect(bootstrapOnboarding(input)).rejects.toThrow();expect(await readdir(root)).toEqual([]);}finally{await chmod(root,0o700);await rm(homeDir,{recursive:true,force:true});}
 });
+
+it('also detects a read-only selected profile under otherwise writable global state',async()=>{
+ const {chmod}=await import('node:fs/promises');const homeDir=await mkdtemp(join(tmpdir(),'ec-onboard-profile-ro-')),input={homeDir,profileId:'default'},root=resolveProfileStateHome(input).profileRoot;
+ try{await mkdir(root,{recursive:true});await chmod(root,0o500);expect(await detectOnboarding(input)).toMatchObject({state:'state-not-writable',writable:false,launchReady:false});await expect(bootstrapOnboarding(input)).rejects.toThrow();expect(await readdir(root)).toEqual([]);}finally{await chmod(root,0o700);await rm(homeDir,{recursive:true,force:true});}
+});

@@ -17,3 +17,8 @@ it('maps stable diagnostics without exposing arbitrary backend text',async()=>{
  expect(displayStatus('ar','private provider error /secret')).toBe(translate('ar','Unknown'));
  expect(displayStatus('ar','constructor')).toBe(translate('ar','Unknown'));
 });
+
+it('localizes every setup diagnostic instead of displaying protocol identifiers',async()=>{
+ const {displayStatus}=await import('./status.js');
+ for(const state of ['new-user','configured-ready','configured-degraded','partial-provider','missing-secret','broken-config','untrusted-workspace','state-not-writable'])for(const language of ['en','ar'] as const){expect(displayStatus(language,state)).not.toBe(state);expect(displayStatus(language,state)).not.toBe(translate(language,'Unknown'));}
+});

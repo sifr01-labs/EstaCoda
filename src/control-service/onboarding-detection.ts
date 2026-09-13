@@ -1,4 +1,5 @@
-import {mkdir,lstat} from 'node:fs/promises';
+import {constants} from 'node:fs';
+import {mkdir,lstat,access} from 'node:fs/promises';
 import {dirname} from 'node:path';
 import {resolveProfileStateHome} from '../config/profile-home.js';
 import {collectSetupEntryState} from '../setup/setup-entry-state.js';
@@ -9,6 +10,8 @@ export async function detectOnboarding(input:Identity,workspaceRoot=input.homeDi
  try {
   const id=await latestProfileApplyOperation(input);
   if(id&&(await inspectProfileApply(input,id)).state==='uncertain')return {state:'broken-config',mode:'repair',writable:false,launchReady:false,pendingApply:true};
+  let writablePath=resolveProfileStateHome(input).profileRoot;
+  for(;;){try{const info=await lstat(writablePath);if(!info.isDirectory()||info.isSymbolicLink())throw new Error('Invalid state directory');await access(writablePath,constants.W_OK);break;}catch(error){if((error as NodeJS.ErrnoException).code==='ENOENT'&&dirname(writablePath)!==writablePath){writablePath=dirname(writablePath);continue;}return {state:'state-not-writable',mode:'repair',writable:false,launchReady:false,pendingApply:false};}}
   const state=await collectSetupEntryState({...input,workspaceRoot,readOnly:true});
   return {state:state.kind,mode:state.kind==='new-user'?'first-run':state.kind==='configured-ready'?'ready':'repair',writable:state.stateDirectoryWritable,launchReady:['configured-ready','configured-degraded'].includes(state.kind),pendingApply:false};
  }catch{return {state:'broken-config',mode:'repair',writable:false,launchReady:false,pendingApply:false};}

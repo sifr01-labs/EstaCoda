@@ -31,5 +31,9 @@ export class WindowAuthority {
 }
 
 const microphoneWindows=new Map<number,{window:BrowserWindow;url:string}>();
-export function setMicrophonePermission(window:BrowserWindow,url:string,enabled:boolean){if(enabled)microphoneWindows.set(window.webContents.id,{window,url});else microphoneWindows.delete(window.webContents.id);}
+export function setMicrophonePermission(window:BrowserWindow,url:string,enabled:boolean){
+ // Revocation also runs after BrowserWindow's closed event, when webContents is destroyed.
+ for(const [id,grant] of microphoneWindows)if(grant.window===window)microphoneWindows.delete(id);
+ if(enabled&&!window.isDestroyed())microphoneWindows.set(window.webContents.id,{window,url});
+}
 function audioAllowed(contents:Electron.WebContents|null,details:{requestingUrl?:string;isMainFrame?:boolean}){const grant=contents?microphoneWindows.get(contents.id):undefined;return !!grant&&!grant.window.isDestroyed()&&contents?.getURL()===grant.url&&details.requestingUrl===grant.url&&details.isMainFrame===true;}

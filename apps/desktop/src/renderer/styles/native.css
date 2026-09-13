@@ -39,3 +39,13 @@ html,body,#root{margin:0;min-width:0;min-height:100%;}body{background:#131313}bu
 #ec-branded-workspace code,#ec-branded-workspace pre,#ec-branded-workspace kbd,#ec-branded-workspace .ec-branch,#ec-branded-workspace .ec-workid,#ec-branded-workspace .ec-diff,#ec-branded-workspace .xterm{direction:ltr;unicode-bidi:isolate;text-align:left}
 #ec-branded-workspace pre[dir=auto]{unicode-bidi:plaintext}
 #ec-branded-workspace input[type=url],#ec-branded-workspace input[type=password]{direction:ltr;unicode-bidi:isolate}
+/* First-run setup uses the approved neutral surfaces and restrained ocean brand. */
+#ec-branded-workspace .ec-onboarding{width:100%;max-width:800px;margin-inline:auto;padding:36px 32px 48px;box-sizing:border-box;overflow-wrap:anywhere}
+#ec-branded-workspace .ec-onboarding>.ec-official-icon{width:42px;height:28px;color:var(--ec-muted);margin-bottom:8px}
+#ec-branded-workspace .ec-onboarding>.ec-wordmark{width:min(100%,340px);margin-bottom:12px}
+#ec-branded-workspace .ec-onboarding>h1{margin-block:12px 18px}
+#ec-branded-workspace .ec-onboarding>label{display:flex;align-items:center;gap:12px;margin-block:20px;flex-wrap:wrap}
+#ec-branded-workspace .ec-onboarding select,#ec-branded-workspace .ec-onboarding input{max-width:100%;box-sizing:border-box}
+#ec-branded-workspace .ec-onboarding>.ec-actions{margin-block:24px 12px;display:flex;gap:12px;flex-wrap:wrap}
+#ec-branded-workspace .ec-onboarding .ec-page{padding-inline:0}
+@media(max-width:590px){#ec-branded-workspace .ec-onboarding{padding:24px 16px 32px}}

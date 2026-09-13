@@ -1,0 +1,28 @@
+[
+  {
+    "language": "en",
+    "auth": "api_key",
+    "packaged": true,
+    "signature": "ad-hoc verified",
+    "cleanHome": true,
+    "pathWithoutNodeOrCli": true,
+    "realRuntimeWork": true,
+    "provider": "scripted loopback HTTP",
+    "restartPreserved": true,
+    "completed": true,
+    "requests": 1
+  },
+  {
+    "language": "ar",
+    "auth": "none",
+    "packaged": true,
+    "signature": "ad-hoc verified",
+    "cleanHome": true,
+    "pathWithoutNodeOrCli": true,
+    "realRuntimeWork": true,
+    "provider": "scripted loopback HTTP",
+    "restartPreserved": true,
+    "completed": true,
+    "requests": 1
+  }
+]

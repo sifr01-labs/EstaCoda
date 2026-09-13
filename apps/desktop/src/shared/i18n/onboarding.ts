@@ -1,4 +1,5 @@
 export const onboardingArabic={
+ 'State directory is not writable.':'لا يمكن الكتابة في مجلد حالة التطبيق.',
  'Verify saved setup':'التحقق من الإعداد المحفوظ',
  'Recover approved save':'استعادة الحفظ المعتمد',
  'Ready for your first Work':'جاهز لعملك الأول',

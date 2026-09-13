@@ -23,3 +23,13 @@ describe('window authority', () => {
   });
 });
 it('allows microphone only for an explicitly granted main document and never camera',async()=>{const {denySessionPermissions,setMicrophonePermission}=await import('./window-policy.js');let request:any,check:any;denySessionPermissions({setPermissionRequestHandler:(f:any)=>request=f,setPermissionCheckHandler:(f:any)=>check=f,setDevicePermissionHandler:()=>{},on:()=>{}} as any);const url='file:///app/index.html',contents={id:99,getURL:()=>url},window={isDestroyed:()=>false,webContents:contents} as unknown as BrowserWindow;function allowed(details:any){let value=false;request(contents,'media',(v:boolean)=>value=v,details);return value;}const audio={requestingUrl:url,isMainFrame:true,mediaTypes:['audio']};expect(allowed(audio)).toBe(false);setMicrophonePermission(window,url,true);expect(allowed(audio)).toBe(true);expect(allowed({...audio,mediaTypes:['audio','video']})).toBe(false);expect(allowed({...audio,isMainFrame:false})).toBe(false);expect(allowed({...audio,requestingUrl:'https://other.invalid'})).toBe(false);expect(check(contents,'media','file://',{requestingUrl:url,isMainFrame:true,mediaType:'audio'})).toBe(true);setMicrophonePermission(window,url,false);expect(allowed(audio)).toBe(false);});
+
+it('revokes microphone grants after window destruction without accessing destroyed contents',async()=>{
+ const {denySessionPermissions,setMicrophonePermission}=await import('./window-policy.js');let request:any,destroyed=false;
+ const url='estacoda://app/index.html',contents={id:100,getURL:()=>url};
+ const window={isDestroyed:()=>destroyed,get webContents(){if(destroyed)throw new Error('Object has been destroyed');return contents;}} as unknown as BrowserWindow;
+ denySessionPermissions({setPermissionRequestHandler:(f:any)=>request=f,setPermissionCheckHandler:()=>{},setDevicePermissionHandler:()=>{},on:()=>{}} as any);
+ setMicrophonePermission(window,url,true);destroyed=true;
+ expect(()=>setMicrophonePermission(window,url,false)).not.toThrow();expect(()=>setMicrophonePermission(window,url,true)).not.toThrow();
+ let allowed=true;request(contents,'media',(v:boolean)=>allowed=v,{requestingUrl:url,isMainFrame:true,mediaTypes:['audio']});expect(allowed).toBe(false);
+});
