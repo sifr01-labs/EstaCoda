@@ -1,4 +1,4 @@
-import {basename} from 'node:path';
+import {basename,join} from 'node:path';
 import {DesktopMicrophone} from './desktop-microphone.js';
 import {setMicrophonePermission} from './window-policy.js';
 import {readDesktopMedia,saveDesktopMedia} from './desktop-media-output.js';
@@ -7,7 +7,7 @@ import {validateHumanBrowserCommand,validateBrowserWorkspaceAction,validateHuman
 import type {DesktopBrowserControls} from './browser-controls.js';
 import type {DesktopTerminalControls} from './terminal-controls.js';
 import type {DesktopTargetControls} from './target-controls.js';
-import type {DesktopConnectionControls} from './connection-controls.js';
+import {DesktopConnectionControls} from './connection-controls.js';
 import type {DesktopTelegramSetup} from './telegram-setup.js';
 import {WorkAttachmentError} from './work-attachments.js';
 import type {DesktopWorkControls} from './work-controls.js';
@@ -26,6 +26,12 @@ export function rendererSnapshot(state:ConnectionState):DesktopSnapshot {
 }
 const libraryReads={librarySkills:'library.skills',librarySkill:'library.skill',libraryMemory:'library.memory',libraryProposals:'library.proposals',libraryProposal:'library.proposal'} as const;
 export function validateSemanticPayload(method:string,payload:unknown):void {
+ if(method.startsWith('evolution')){if(!isRecord(payload))throw new Error('Invalid Evolution request');
+  if(method==='evolutionInspect'){if(!exactKeys(payload,[]))throw new Error('Invalid inspection');return;}
+  const rpc=method==='evolutionReview'?'evolution.review':method==='evolutionCancel'?'evolution.cancel':method==='evolutionExecute'?'evolution.execute':null;
+  if(!rpc||method==='evolutionExecute'&&!exactKeys(payload,['reviewId','confirmed']))throw new Error('Invalid Evolution request');
+  validateControlRequest({jsonrpc:'2.0',id:'v',method:rpc,params:method==='evolutionExecute'?{...payload,operationId:'main'}:payload},{profileId:'v',instanceId:'v',capabilities:{methods:[...CONTROL_METHODS],events:[...CONTROL_EVENTS]}});return;
+ }
  if(Object.hasOwn(libraryReads,method)){validateControlRequest({jsonrpc:'2.0',id:'validation',method:libraryReads[method as keyof typeof libraryReads],params:payload},{profileId:'v',instanceId:'v',capabilities:{methods:[...CONTROL_METHODS],events:[...CONTROL_EVENTS]}});return;}
  if(method==='onboardingVerify'){if(!isRecord(payload)||!exactKeys(payload,[],['alias'])||payload.alias!==undefined&&(typeof payload.alias!=='string'||payload.alias.length>64||!payload.alias.length))throw new Error('Invalid setup verification.');return;}
  if(method==='onboardingReview'){
@@ -114,10 +120,12 @@ export function installSemanticIpc(window:BrowserWindow,documentUrl:string,conne
   const microphone=workControls?new DesktopMicrophone(connection,app.getPath('temp'),()=>process.platform==='darwin'?systemPreferences.askForMediaAccess('microphone'):Promise.resolve(true),enabled=>setMicrophonePermission(window,documentUrl,enabled),(scope,path)=>workControls.stageRecording(scope,path)):undefined;
   let onboardingReview:{id:string;modelId:string;optionalId?:string}|undefined;
   let onboardingFolder:{path:string;profileId:string;generation:number}|undefined;
-  const methods=[...Object.keys(libraryReads),'onboardingVerify','onboardingReview','onboardingApply','onboardingApplyWorkspace','onboardingInspect','onboardingRecover','onboardingChooseWorkspace','onboardingReviewWorkspace','onboardingCancelWorkspace','onboardingDetect','onboardingBootstrap','recordBegin','recordAppend','recordFinish','recordCancel','artifactsMedia','artifactsSave','settingsLifecycle','settingsWorkspaces','settingsReviewAction','settingsExecuteAction','settingsCancelAction','settingsDependencies','settingsInstall','settingsInspectDependency','settingsValue','settingsRead','settingsBegin','settingsStage','settingsReview','settingsApply','settingsCancel','settingsInspect','settingsVerify','browserControlWatch','browserControlSignIn','browserControlInventory','browserControlWorkspaceOpen','browserControlWorkspace','browserControlOpen','browserControlFrame','browserControlRelease','browserControlAbandon','browserList','browserSnapshot','artifactsList','artifactsGet','artifactsOpen','evidenceGet','terminalOpen','terminalRead','terminalWrite','terminalResize','terminalClose','diffList','diffPatch','filesList','filesPreview','targetList','targetInspect','targetReview','targetCreate','targetCancel','targetExecute','targetOperation','telegramExecute','telegramPairing','telegramSessions','telegramDetails','telegramHandoff','gatewayDiagnostics','gatewayExecute','connectionInspect','telegramReview','telegramApply','telegramInspectApply','telegramBegin','telegramStage','telegramVerify','telegramCancel','connectionsList','workUsage','workDecide','workInspectDecision','workAct','workChildren','workLive','workTargets','workAttach','workSubmit','workInspect','workSearch','workPins','workPin','workOverride','setOverride','inspectOverride','setupVerifyReviewed','modelRoutes','setupConfigured','setupOrder','setupMode','setupOAuthStart','setupOAuthStatus','setupOAuthOpen','setupBegin','setupStage','setupVerify','setupReview','setupApply','setupCancel','setupInspect','modelPage','providerPage','refreshCatalog','reconnect','moreWork','moreInbox','appearance','setAppearance','snapshot','getWork','activity','profiles','switchProfile','minimize','toggleMaximize','close'];
+  const evolutionControls=new DesktopConnectionControls(connection,join(app.getPath('userData'),'evolution'));
+  const evolutionReviews=new Map<string,number>();
+  const methods=['evolutionReview','evolutionCancel','evolutionExecute','evolutionInspect',...Object.keys(libraryReads),'onboardingVerify','onboardingReview','onboardingApply','onboardingApplyWorkspace','onboardingInspect','onboardingRecover','onboardingChooseWorkspace','onboardingReviewWorkspace','onboardingCancelWorkspace','onboardingDetect','onboardingBootstrap','recordBegin','recordAppend','recordFinish','recordCancel','artifactsMedia','artifactsSave','settingsLifecycle','settingsWorkspaces','settingsReviewAction','settingsExecuteAction','settingsCancelAction','settingsDependencies','settingsInstall','settingsInspectDependency','settingsValue','settingsRead','settingsBegin','settingsStage','settingsReview','settingsApply','settingsCancel','settingsInspect','settingsVerify','browserControlWatch','browserControlSignIn','browserControlInventory','browserControlWorkspaceOpen','browserControlWorkspace','browserControlOpen','browserControlFrame','browserControlRelease','browserControlAbandon','browserList','browserSnapshot','artifactsList','artifactsGet','artifactsOpen','evidenceGet','terminalOpen','terminalRead','terminalWrite','terminalResize','terminalClose','diffList','diffPatch','filesList','filesPreview','targetList','targetInspect','targetReview','targetCreate','targetCancel','targetExecute','targetOperation','telegramExecute','telegramPairing','telegramSessions','telegramDetails','telegramHandoff','gatewayDiagnostics','gatewayExecute','connectionInspect','telegramReview','telegramApply','telegramInspectApply','telegramBegin','telegramStage','telegramVerify','telegramCancel','connectionsList','workUsage','workDecide','workInspectDecision','workAct','workChildren','workLive','workTargets','workAttach','workSubmit','workInspect','workSearch','workPins','workPin','workOverride','setOverride','inspectOverride','setupVerifyReviewed','modelRoutes','setupConfigured','setupOrder','setupMode','setupOAuthStart','setupOAuthStatus','setupOAuthOpen','setupBegin','setupStage','setupVerify','setupReview','setupApply','setupCancel','setupInspect','modelPage','providerPage','refreshCatalog','reconnect','moreWork','moreInbox','appearance','setAppearance','snapshot','getWork','activity','profiles','switchProfile','minimize','toggleMaximize','close'];
   const handlers:string[]=[];
   let connectionGeneration=connection.state.generation;
-  const state=(value:ConnectionState)=>{if(value.generation!==connectionGeneration){authority.invalidate();connectionGeneration=value.generation;}if(!window.isDestroyed())contents.send('desktop:state',{generation:authority.generation,snapshot:rendererSnapshot(value)});};
+  const state=(value:ConnectionState)=>{if(value.generation!==connectionGeneration){authority.invalidate();evolutionReviews.clear();connectionGeneration=value.generation;}if(!window.isDestroyed())contents.send('desktop:state',{generation:authority.generation,snapshot:rendererSnapshot(value)});};
   connection.on('state',state);
   for(const method of methods){
     const channel='desktop:'+method;handlers.push(channel);
@@ -127,6 +135,12 @@ export function installSemanticIpc(window:BrowserWindow,documentUrl:string,conne
       const payload=envelope.payload as Record<string,unknown>;
       const generation=authority.generation;
       try {
+        if(method.startsWith('evolution')){
+          if(method==='evolutionReview'){const result=await connection.settingsRequest('evolution.review',payload as import('@estacoda/control-protocol').MethodContracts['evolution.review']['params']);authority.assertSender(event,generation);evolutionReviews.set(result.reviewId,generation);return result;}
+          if(method==='evolutionInspect'){const result=await evolutionControls.inspect();authority.assertSender(event,generation);return result;}
+          const id=payload.reviewId as string;if(evolutionReviews.get(id)!==generation)throw new Error('Review again in this window.');evolutionReviews.delete(id);
+          const result=method==='evolutionCancel'?await connection.settingsRequest('evolution.cancel',{reviewId:id}):await evolutionControls.perform('evolution',operationId=>connection.settingsRequest('evolution.execute',{reviewId:id,operationId,confirmed:true}));authority.assertSender(event,generation);return result;
+        }
         if(Object.hasOwn(libraryReads,method)){const result=await connection.settingsRequest(libraryReads[method as keyof typeof libraryReads],payload as never);authority.assertSender(event,generation);return result;}
         if(method==='onboardingVerify'){const result=await connection.settingsRequest('setup.verify',payload.alias?{alias:payload.alias as string}:{});authority.assertSender(event,generation);return result;}
         if(method==='onboardingReview'){

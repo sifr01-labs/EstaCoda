@@ -114,7 +114,8 @@ export type DesktopTerminalApi={
 };
 export type DesktopMicrophoneApi={begin(scope:{draftId:string;target:import('@estacoda/control-protocol').TargetReference}):Promise<{id:string;maxSeconds:number;sampleRate:number}>;append(id:string,data:string):Promise<{accepted:boolean}>;finish(id:string):Promise<{id:string;name:string;size:number;type:string}>;cancel(id:string):Promise<{cancelled:boolean}>};
 export type DesktopLibraryApi={skills(offset?:number):Promise<MethodContracts['library.skills']['result']>;skill(id:string):Promise<MethodContracts['library.skill']['result']>;memory():Promise<MethodContracts['library.memory']['result']>;proposals(offset?:number):Promise<MethodContracts['library.proposals']['result']>;proposal(id:string):Promise<MethodContracts['library.proposal']['result']>};
-export type DesktopApi = {library?:DesktopLibraryApi;onboarding?:{
+export type DesktopEvolutionApi={review(input:MethodContracts['evolution.review']['params']):Promise<MethodContracts['evolution.review']['result']>;cancel(reviewId:string):Promise<{cancelled:boolean}>;execute(reviewId:string,confirmed:true):Promise<MethodContracts['evolution.execute']['result']>;inspect():Promise<MethodContracts['evolution.inspect']['result']|null>};
+export type DesktopApi = {evolution?:DesktopEvolutionApi;library?:DesktopLibraryApi;onboarding?:{
  review(input:{modelSetupId:string;optionalSetupId?:string;preferences:import('@estacoda/control-protocol').SettingChange[];workspaceReviewId:string}):Promise<import('@estacoda/control-protocol').OnboardingReview>;
  apply(reviewId:string,confirmed:true):Promise<MethodContracts['setup.apply']['result']>;
  applyWorkspace(reviewId:string,confirmed:true):Promise<MethodContracts['setup.applyWorkspace']['result']>;
