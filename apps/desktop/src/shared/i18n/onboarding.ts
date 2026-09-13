@@ -1,4 +1,10 @@
 export const onboardingArabic={
+ 'Keep in setup draft':'إبقاء في مسودة الإعداد',
+ 'Kept in setup draft':'أُبقي في مسودة الإعداد',
+ 'Primary model':'النموذج الأساسي',
+ 'Choose your primary model. Credentials stay private until final confirmation.':'اختر نموذجك الأساسي. تبقى بيانات الاعتماد خاصة حتى التأكيد النهائي.',
+ 'Choose model':'اختيار نموذج',
+
  'Choose an existing folder for your work.':'اختر مجلدًا موجودًا لعملك.',
  'Choose folder':'اختيار مجلد',
  'Workspace name':'اسم مساحة العمل',
