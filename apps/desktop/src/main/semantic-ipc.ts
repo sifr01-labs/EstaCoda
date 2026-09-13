@@ -24,7 +24,7 @@ import type { Profiles } from './profiles.js';
 export function rendererSnapshot(state:ConnectionState):DesktopSnapshot {
   return {counts:state.status==='ready'?state.counts??null:null,status:state.status,profile:state.bootstrap?.profile??{id:state.profileId,label:state.profileId,configuration:'unconfigured'},runtime:state.bootstrap?.runtime.state??'disconnected',work:state.work,inbox:state.inbox};
 }
-const libraryReads={librarySkills:'library.skills',librarySkill:'library.skill',libraryMemory:'library.memory',libraryProposals:'library.proposals',libraryProposal:'library.proposal'} as const;
+const libraryReads={schedulesList:'schedules.list',schedulesGet:'schedules.get',schedulesHistory:'schedules.history',librarySkills:'library.skills',librarySkill:'library.skill',libraryMemory:'library.memory',libraryProposals:'library.proposals',libraryProposal:'library.proposal'} as const;
 export function validateSemanticPayload(method:string,payload:unknown):void {
  if(method.startsWith('evolution')){if(!isRecord(payload))throw new Error('Invalid Evolution request');
   if(method==='evolutionInspect'){if(!exactKeys(payload,[]))throw new Error('Invalid inspection');return;}
