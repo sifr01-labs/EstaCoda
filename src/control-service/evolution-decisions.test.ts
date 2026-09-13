@@ -1,4 +1,5 @@
-import {it,expect} from 'vitest';import {mkdtemp,mkdir,writeFile,readFile,rm} from 'node:fs/promises';import {join} from 'node:path';import {tmpdir} from 'node:os';
+vi.mock('./evolution-toolchain.js',async original=>{const actual=await original<typeof import('./evolution-toolchain.js')>();return{evolutionToolchain:()=>actual.evolutionToolchain(process.env.ESTACODA_TEST_ORIGINAL_HOME)};});
+import {it,expect,vi} from 'vitest';import {mkdtemp,mkdir,writeFile,readFile,rm} from 'node:fs/promises';import {join} from 'node:path';import {tmpdir} from 'node:os';
 import {EvolutionDecisions} from './evolution-decisions.js';
 async function fixture(){const homeDir=await mkdtemp(join(tmpdir(),'evolution-decide-')),owner=new EvolutionDecisions({homeDir,profileId:'one'},join(homeDir,'absent')),dir=join(owner.paths.skillsPath,'example'),path=join(dir,'SKILL.md');await mkdir(dir,{recursive:true});await writeFile(path,'---\n'+JSON.stringify({name:'Example',description:'Example skill',requiredToolsets:['files'],routing:{labels:[],triggerPatterns:[]},playbook:[],evaluations:[]})+'\n---\nbefore');const {store}=await owner.open();const proposal=await store.proposePatch({skillName:'Example',reason:'Improve guidance',source:'local',sourceTrust:'user_direct',patch:{type:'text_patch',oldString:'before',newString:'after'}});return{owner,path,proposal,dispose:async()=>{owner.dispose();await rm(homeDir,{recursive:true,force:true});}};}
 it('requires explicit approval, snapshots a governed promotion and keeps a durable receipt',async()=>{const f=await fixture();try{
@@ -45,3 +46,48 @@ it('runs manifest gates in a trusted canonical workspace and preserves failure b
  await writeFile(join(root,'gate.cjs'),"require('node:fs').writeFileSync('gate-marker','passed')");for(const action of ['test','approve','promote'] as const){const r=await f.owner.review({proposalId:p.id,action,target:reference});expect(r.allowed).toBe(true);expect((await f.owner.execute({reviewId:r.reviewId,operationId:'gate-'+action,confirmed:true},new AbortController().signal)).state).toBe('completed');}expect(await readFile(f.path,'utf8')).toContain('after');expect((await manifests.find(m.id))!.status).toBe('promoted');
  const restore=await f.owner.review({proposalId:p.id,action:'rollback',target:reference});expect(restore.allowed).toBe(true);expect((await f.owner.execute({reviewId:restore.reviewId,operationId:'gate-restore',confirmed:true},new AbortController().signal)).state).toBe('completed');expect((await manifests.find(m.id))!.status).toBe('reverted');
  }finally{targets.close();await f.dispose();}},20000);
+
+it('acknowledges a durable operation while its work is still running, then reconciles completion',async()=>{
+ const f=await fixture();let release!:()=>void;const held=new Promise<void>(resolve=>{release=resolve;});
+ const execute=f.owner.operations.execute.bind(f.owner.operations);
+ f.owner.operations.execute=(id,action,run,accepted)=>execute(id,action,async()=>{await held;return run();},accepted);
+ try{
+  const review=await f.owner.review({proposalId:f.proposal.id,action:'approve'});
+  const receipt=await f.owner.start({reviewId:review.reviewId,operationId:'background',confirmed:true},new AbortController().signal);
+  expect(receipt.state).toBe('uncertain');expect((await f.owner.store().findProposal(f.proposal.id))!.approvalState).toBe('required');
+  expect(await f.owner.start({reviewId:review.reviewId,operationId:'background',confirmed:true},new AbortController().signal)).toEqual(receipt);
+  release();await expect.poll(async()=>(await f.owner.operations.inspect('background')).state).toBe('completed');
+ }finally{release();await f.dispose();}
+});
+it('records a stale review as definitely rejected and allows a fresh reviewed operation',async()=>{
+ const f=await fixture();try{
+  const review=await f.owner.review({proposalId:f.proposal.id,action:'approve'});await writeFile(f.path,(await readFile(f.path,'utf8'))+'\nchanged');
+  const receipt=await f.owner.start({reviewId:review.reviewId,operationId:'rejected-review',confirmed:true},new AbortController().signal);await expect.poll(async()=>(await f.owner.operations.inspect(receipt.operationId)).state).toBe('failed');
+  expect((await f.owner.operations.inspect(receipt.operationId)).state).toBe('failed');expect((await f.owner.store().findProposal(f.proposal.id))!.approvalState).toBe('required');
+  const fresh=await f.owner.review({proposalId:f.proposal.id,action:'approve'});await f.owner.start({reviewId:fresh.reviewId,operationId:'fresh-review',confirmed:true},new AbortController().signal);
+  await expect.poll(async()=>(await f.owner.operations.inspect('fresh-review')).state).toBe('completed');
+ }finally{await f.dispose();}
+});
+it('does not rename or clear malformed usage during read-only review',async()=>{
+ const f=await fixture();try{
+  const {readdir}=await import('node:fs/promises');const path=join(f.owner.paths.skillsPath,'.usage.json');
+  for(const value of ['{invalid',JSON.stringify({version:1,skills:[{skillName:'Example',pinned:'false',state:'active'}]})]){
+   await writeFile(path,value);await expect(f.owner.review({proposalId:f.proposal.id,action:'approve'})).rejects.toThrow();
+   expect(await readFile(path,'utf8')).toBe(value);expect((await readdir(f.owner.paths.skillsPath)).some(n=>n.includes('.corrupt-'))).toBe(false);
+  }
+ }finally{await f.dispose();}
+});
+it('pages and decides proposals beyond lifetime history bounds without truncating the stores',async()=>{
+ const f=await fixture();try{
+  const root=join(f.owner.paths.skillsPath,'.evolution');const rows=Array.from({length:1205},(_,i)=>({...f.proposal,id:'patch_'+i,reason:'History '+i+'x'.repeat(1000)}));
+  await writeFile(join(root,'proposed-patches.jsonl'),rows.map(r=>JSON.stringify(r)).join('\n')+'\n');
+  await writeFile(join(root,'observations.jsonl'),Array.from({length:1205},(_,i)=>JSON.stringify({id:'obs_'+i,skillName:'Other',lesson:'x'.repeat(1000)})).join('\n')+'\n');
+  let offset:number|null=0,count=0;while(offset!==null){const page=await f.owner.list(offset);count+=page.items.length;offset=page.nextOffset;}expect(count).toBe(1205);
+  const r=await f.owner.review({proposalId:'patch_1204',action:'approve'});expect(r.allowed).toBe(true);
+  expect((await f.owner.execute({reviewId:r.reviewId,operationId:'large-history',confirmed:true},new AbortController().signal)).state).toBe('completed');
+  const saved=(await readFile(join(root,'proposed-patches.jsonl'),'utf8')).trim().split('\n').map(line=>JSON.parse(line));expect(saved).toHaveLength(1205);expect(saved[0]).toEqual(rows[0]);expect(saved.at(-1).approvalState).toBe('approved');
+ }finally{await f.dispose();}
+});
+it('settles a removed proposal as failed before running any decision effect',async()=>{
+ const f=await fixture();try{const r=await f.owner.review({proposalId:f.proposal.id,action:'approve'});await writeFile(join(f.owner.paths.skillsPath,'.evolution','proposed-patches.jsonl'),'');await f.owner.start({reviewId:r.reviewId,operationId:'removed',confirmed:true},new AbortController().signal);await expect.poll(async()=>(await f.owner.operations.inspect('removed')).state).toBe('failed');expect(await readFile(f.path,'utf8')).toContain('before');}finally{await f.dispose();}
+});

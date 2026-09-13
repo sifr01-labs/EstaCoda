@@ -1,3 +1,4 @@
+import {ProfileJsonl} from '../storage/profile-jsonl.js';
 import { appendFile, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -305,13 +306,19 @@ export class SkillEvolutionStore {
   readonly #now: () => Date;
   #usage = new Map<string, SkillUsageRecord>();
   #loaded = false;
+  readonly #jsonl?: ProfileJsonl;
+  readonly #readUsage?: () => Promise<string | undefined>;
 
   constructor(options: {
     usagePath: string;
     evolutionRoot: string;
     now?: () => Date;
+    profileRoot?: string;
+    readUsage?: () => Promise<string | undefined>;
   }) {
     this.#usagePath = options.usagePath;
+    this.#jsonl = options.profileRoot ? new ProfileJsonl(options.profileRoot) : undefined;
+    this.#readUsage = options.readUsage;
     this.#evolutionRoot = options.evolutionRoot;
     this.#now = options.now ?? (() => new Date());
   }
@@ -519,8 +526,11 @@ export class SkillEvolutionStore {
     return candidate;
   }
 
-  async listLearningCandidates(): Promise<SkillLearningCandidate[]> {
-    return this.#readJsonl<SkillLearningCandidate>("learning-candidates.jsonl");
+  async listLearningCandidates(evidenceIds?: string[]): Promise<SkillLearningCandidate[]> {
+    if(this.#jsonl){const ids=evidenceIds&&new Set(evidenceIds);return this.#jsonl.query<SkillLearningCandidate>(join(this.#evolutionRoot,"learning-candidates.jsonl"),{where:c=>!ids||ids.has(c.id)||c.evidenceIds.some(id=>ids.has(id))});}
+    const candidates=await this.#readJsonl<SkillLearningCandidate>("learning-candidates.jsonl");
+    const ids=evidenceIds&&new Set(evidenceIds);
+    return candidates.filter(c=>!ids||ids.has(c.id)||c.evidenceIds.some(id=>ids.has(id)));
   }
 
   async appendExperiment(input: EvolutionExperimentInput): Promise<EvolutionExperiment> {
@@ -552,6 +562,7 @@ export class SkillEvolutionStore {
   }
 
   async findExperiment(id: string): Promise<EvolutionExperiment | undefined> {
+    if(this.#jsonl)return (await this.#jsonl.query<EvolutionExperiment>(join(this.#evolutionRoot,"experiments.jsonl"),{where:r=>r.id===id,limit:1}))[0];
     return (await this.listExperiments()).find((experiment) => experiment.id === id);
   }
 
@@ -680,16 +691,18 @@ export class SkillEvolutionStore {
     return proposal;
   }
 
-  async listProposals(filter: { skillName?: string; status?: SkillPatchProposal["status"] } = {}): Promise<SkillPatchProposal[]> {
+  async listProposals(filter: { skillName?: string; status?: SkillPatchProposal["status"]; offset?: number; limit?: number } = {}): Promise<SkillPatchProposal[]> {
+    if(this.#jsonl)return (await this.#jsonl.query<SkillPatchProposal>(join(this.#evolutionRoot,"proposed-patches.jsonl"),{offset:filter.offset,limit:filter.limit,where:p=>(filter.skillName===undefined||p.skillName===filter.skillName)&&(filter.status===undefined||p.status===filter.status)})).map(normalizeProposalRecord);
     const proposals = (await this.#readJsonl<SkillPatchProposal>("proposed-patches.jsonl"))
       .map(normalizeProposalRecord);
     return proposals.filter((proposal) =>
       (filter.skillName === undefined || proposal.skillName === filter.skillName) &&
       (filter.status === undefined || proposal.status === filter.status)
-    );
+    ).slice(filter.offset??0,filter.limit===undefined?undefined:(filter.offset??0)+filter.limit);
   }
 
   async findProposal(id: string): Promise<SkillPatchProposal | undefined> {
+    if(this.#jsonl){const p=(await this.#jsonl.query<SkillPatchProposal>(join(this.#evolutionRoot,"proposed-patches.jsonl"),{where:p=>p.id===id,limit:1}))[0];return p&&normalizeProposalRecord(p);}
     return (await this.listProposals()).find((proposal) => proposal.id === id);
   }
 
@@ -704,6 +717,7 @@ export class SkillEvolutionStore {
   }
 
   async listObservations(filter: { skillName?: string; ids?: string[] } = {}): Promise<SkillObservationRecord[]> {
+    if(this.#jsonl){const ids=filter.ids&&new Set(filter.ids);return this.#jsonl.query<SkillObservationRecord>(join(this.#evolutionRoot,"observations.jsonl"),{where:o=>(filter.skillName===undefined||o.skillName===filter.skillName)&&(!ids||ids.has(o.id))});}
     const observations = await this.#readJsonl<SkillObservationRecord>("observations.jsonl");
     const idFilter = filter.ids === undefined ? undefined : new Set(filter.ids);
     return observations.filter((observation) =>
@@ -784,23 +798,30 @@ export class SkillEvolutionStore {
     return record;
   }
 
-  async listEvalRuns(filter?: { skillName?: string }): Promise<SkillEvalRunRecord[]> {
+  async listEvalRuns(filter?: { skillName?: string; limit?: number }): Promise<SkillEvalRunRecord[]> {
+    if(this.#jsonl)return this.#jsonl.query<SkillEvalRunRecord>(join(this.#evolutionRoot,"eval-runs.jsonl"),{where:r=>filter?.skillName===undefined||r.skillName===filter.skillName,limit:filter?.limit,tail:filter?.limit!==undefined});
     const runs = await this.#readJsonl<SkillEvalRunRecord>("eval-runs.jsonl");
-    if (filter?.skillName === undefined) {
-      return runs;
-    }
-    return runs.filter((r) => r.skillName === filter.skillName);
+    const matching=runs.filter(r=>filter?.skillName===undefined||r.skillName===filter.skillName);
+    return filter?.limit===undefined?matching:matching.slice(-filter.limit);
   }
 
-  async listPromotions(filter?: { skillName?: string; proposalId?: string }): Promise<SkillPromotionRecord[]> {
+  async listPromotions(filter?: { skillName?: string; proposalId?: string; limit?: number }): Promise<SkillPromotionRecord[]> {
+    if(this.#jsonl)return this.#jsonl.query<SkillPromotionRecord>(join(this.#evolutionRoot,"promotions.jsonl"),{where:p=>(filter?.skillName===undefined||p.skillName===filter.skillName)&&(filter?.proposalId===undefined||p.proposalId===filter.proposalId),limit:filter?.limit,tail:filter?.limit!==undefined});
     const promotions = await this.#readJsonl<SkillPromotionRecord>("promotions.jsonl");
-    return promotions.filter((p) =>
+    const matching=promotions.filter((p) =>
       (filter?.skillName === undefined || p.skillName === filter.skillName) &&
       (filter?.proposalId === undefined || p.proposalId === filter.proposalId)
     );
+    return filter?.limit===undefined?matching:matching.slice(-filter.limit);
+  }
+
+  async evaluationHistoryFingerprint(skillName:string):Promise<string>{
+    if(this.#jsonl)return this.#jsonl.digest<SkillEvalRunRecord>(join(this.#evolutionRoot,"eval-runs.jsonl"),r=>r.skillName===skillName);
+    return JSON.stringify(await this.listEvalRuns({skillName}));
   }
 
   async findPromotion(id: string): Promise<SkillPromotionRecord | undefined> {
+    if(this.#jsonl)return (await this.#jsonl.query<SkillPromotionRecord>(join(this.#evolutionRoot,"promotions.jsonl"),{where:p=>p.id===id,limit:1}))[0];
     return (await this.listPromotions()).find((p) => p.id === id);
   }
 
@@ -814,6 +835,7 @@ export class SkillEvolutionStore {
   }
 
   async #rewriteProposal(id: string, update: (proposal: SkillPatchProposal) => SkillPatchProposal): Promise<SkillPatchProposal | undefined> {
+    if(this.#jsonl)return this.#jsonl.rewrite<SkillPatchProposal>(join(this.#evolutionRoot,"proposed-patches.jsonl"),id,p=>update(normalizeProposalRecord(p)));
     const proposals = (await this.#readJsonl<SkillPatchProposal>("proposed-patches.jsonl"))
       .map(normalizeProposalRecord);
     let updated: SkillPatchProposal | undefined;
@@ -832,6 +854,7 @@ export class SkillEvolutionStore {
   }
 
   async #rewriteExperiment(id: string, update: (experiment: EvolutionExperiment) => EvolutionExperiment): Promise<EvolutionExperiment | undefined> {
+    if(this.#jsonl)return this.#jsonl.rewrite<EvolutionExperiment>(join(this.#evolutionRoot,"experiments.jsonl"),id,update);
     const experiments = await this.#readJsonl<EvolutionExperiment>("experiments.jsonl");
     let updated: EvolutionExperiment | undefined;
     const next = experiments.map((experiment) => {
@@ -868,17 +891,21 @@ export class SkillEvolutionStore {
     if (this.#loaded) {
       return;
     }
-    const raw = await readFile(this.#usagePath, "utf8").catch(() => undefined);
+    const raw = this.#readUsage ? await this.#readUsage() : await readFile(this.#usagePath, "utf8").catch(() => undefined);
     if (raw !== undefined) {
       try {
         const parsed = JSON.parse(raw) as UsageFile;
+        if(this.#readUsage){
+          if(parsed.version!==1||!Array.isArray(parsed.skills)||parsed.skills.some(r=>!r||typeof r.skillName!=='string'||!r.skillName||typeof r.pinned!=='boolean'||!['active','stale','archived','inactive'].includes(r.state)))throw new Error('Invalid skill usage state');
+        }
         for (const record of parsed.skills ?? []) {
           this.#usage.set(record.skillName, {
             ...defaultUsageRecord(record.skillName, record.source),
             ...record
           });
         }
-      } catch {
+      } catch(error) {
+        if(this.#readUsage)throw error;
         const corruptPath = `${this.#usagePath}.corrupt-${this.#nowIso().replace(/[:.]/gu, "-")}`;
         await rename(this.#usagePath, corruptPath).catch(() => undefined);
         this.#usage.clear();

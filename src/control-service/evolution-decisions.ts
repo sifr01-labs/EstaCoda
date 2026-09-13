@@ -1,5 +1,5 @@
 import {createHash,randomUUID} from 'node:crypto';
-import {ControlProtocolError,type EvolutionAction,type EvolutionReview,type TargetReference} from '../contracts/desktop-control/index.js';
+import {ControlProtocolError,type ConnectionOperation,type EvolutionAction,type EvolutionReview,type TargetReference} from '../contracts/desktop-control/index.js';
 import {withProfileWriteLock} from '../config/profile-write-lock.js';
 import {canTransition} from '../evolution/candidate-lifecycle.js';
 import {isAllowedGateCommand,normalizeGateCommand} from '../evolution/constraint-gate-runner.js';
@@ -15,9 +15,9 @@ export class EvolutionDecisions extends EvolutionQueries{
  readonly operations=new ConnectionOperations(this.input);
  readonly reviews=new Map<string,{input:Input;fingerprint:string;projection:EvolutionReview;expires:number}>();
  readonly controller=new AbortController();
- async fingerprint(id:string){const {store,registry,manifests,evalFingerprint,service}=await this.open(),p=await store.findProposal(id);if(!p)throw new ControlProtocolError('-32004');const skill=registry.get(p.skillName),manifest=p.changeManifestId?await manifests.find(p.changeManifestId):null;return createHash('sha256').update(JSON.stringify({p,skill,manifest,evalFingerprint,rollback:await service.reviewProposalRollback(id),usage:await store.getUsage(p.skillName),observations:await store.listObservations({ids:p.evidence.observations}),evals:await store.listEvalRuns({skillName:p.skillName})})).digest('hex');}
+ async fingerprint(id:string){const {store,registry,manifests,evalFingerprint,service}=await this.open(id),p=await store.findProposal(id);if(!p)throw new ControlProtocolError('-32004');const skill=registry.get(p.skillName),manifest=p.changeManifestId?await manifests.find(p.changeManifestId):null;return createHash('sha256').update(JSON.stringify({p,skill,manifest,evalFingerprint,rollback:await service.reviewProposalRollback(id),usage:await store.getUsage(p.skillName),observations:await store.listObservations({ids:p.evidence.observations}),evals:await store.evaluationHistoryFingerprint(p.skillName)})).digest('hex');}
  async review(input:Input):Promise<EvolutionReview>{
-  const before=await this.fingerprint(input.proposalId);const detail=await this.details(input.proposalId),{store,service,manifests}=await this.open(),p=(await store.findProposal(input.proposalId))!;
+  const before=await this.fingerprint(input.proposalId);const detail=await this.details(input.proposalId),{store,service,manifests}=await this.open(input.proposalId),p=(await store.findProposal(input.proposalId))!;
   const manifest=p.changeManifestId?await manifests.find(p.changeManifestId):undefined;
   const commands=manifest?[manifest.evalCommand,...manifest.constraintGates].filter(Boolean):[],diff=input.action==='rollback'?(await service.reviewProposalRollback(p.id))?.before??'':JSON.stringify(p.patch??detail.diff,null,2);let reason:EvolutionReview['reason']='ready',workspace:string|null=null;
   if(input.action==='rollback'?!detail.rollbackAvailable:p.status!=='proposed')reason='stale';
@@ -37,16 +37,33 @@ export class EvolutionDecisions extends EvolutionQueries{
   this.reviews.set(projection.reviewId,{input:structuredClone(input),fingerprint:before,projection,expires:Date.now()+300000});return projection;
  }
  cancel(id:string){this.reviews.delete(id);return{cancelled:true};}
- async execute(params:{reviewId:string;operationId:string;confirmed:true},caller:AbortSignal){
+ /** Acknowledge durable acceptance before command gates run; inspect, never replay, after disconnect. */
+ async start(params:{reviewId:string;operationId:string;confirmed:true},caller:AbortSignal):Promise<ConnectionOperation>{
+  const previous=await this.operations.inspect(params.operationId);if(previous.state!=='unknown')return previous;
+  return new Promise((resolve,reject)=>{
+   void this.execute(params,caller,()=>{void this.operations.inspect(params.operationId).then(resolve,reject);}).then(resolve,async error=>{
+    try{
+     const receipt=await this.operations.inspect(params.operationId);
+     // Only absence of a reservation proves that no effect was accepted.
+     if(receipt.state!=='unknown'){resolve(receipt);return;}
+     resolve(await this.operations.execute(params.operationId,'evolution:rejected',async()=>false));
+    }catch{reject(error);}
+   });
+  });
+ }
+ async execute(params:{reviewId:string;operationId:string;confirmed:true},caller:AbortSignal,accepted?:()=>void){
   const r=this.reviews.get(params.reviewId);if(!r||!r.projection.allowed||r.expires<Date.now()||params.confirmed!==true)throw new ControlProtocolError('-32003');
   const signal=AbortSignal.any([caller,this.controller.signal]);signal.throwIfAborted();
-  if(await this.fingerprint(r.input.proposalId)!==r.fingerprint)throw new ControlProtocolError('-32004');
+  if(!accepted&&await this.fingerprint(r.input.proposalId)!==r.fingerprint)throw new ControlProtocolError('-32004');
   return this.operations.execute(params.operationId,`evolution:${r.input.action}:${r.fingerprint.slice(0,48)}`,async()=>{
+   // A failed revalidation here precedes every effect and is a definite rejection.
+   try{signal.throwIfAborted();if(await this.fingerprint(r.input.proposalId)!==r.fingerprint)return false;}catch{return false;}
    const gates=r.projection.commands;
    if(['test','promote','rollback'].includes(r.input.action)&&gates.length){if(!r.input.target)return false;const passed=await withInspection(this.input,r.input.target,signal,(lease)=>evolutionGates(lease,gates,signal));if(!passed)return false;}
    return withProfileWriteLock(this.paths.profileRoot,async()=>{
-    signal.throwIfAborted();if(await this.fingerprint(r.input.proposalId)!==r.fingerprint)return false;
-    const {store,service,manifests}=await this.open(),p=(await store.findProposal(r.input.proposalId))!;
+    // A failed revalidation here precedes every effect and is a definite rejection.
+   try{signal.throwIfAborted();if(await this.fingerprint(r.input.proposalId)!==r.fingerprint)return false;}catch{return false;}
+    const {store,service,manifests}=await this.open(r.input.proposalId),p=(await store.findProposal(r.input.proposalId))!;
     if(r.input.action==='rollback')return service.rollbackProposal(p.id);
     if(r.input.action==='reject')return !!await service.rejectProposal(p.id);
     if(r.input.action==='test'){if(p.changeManifestId)await manifests.updateStatus(p.changeManifestId,'testing');return true;}
@@ -54,7 +71,7 @@ export class EvolutionDecisions extends EvolutionQueries{
     // The existing owner checks trust, mutation policy, proposed content and evals, then snapshots.
     return (await service.promoteProposal(p.id)).ok;
    });
-  },()=>{this.reviews.delete(params.reviewId);});
+  },()=>{this.reviews.delete(params.reviewId);accepted?.();});
  }
  dispose(){this.controller.abort();this.reviews.clear();}
 }

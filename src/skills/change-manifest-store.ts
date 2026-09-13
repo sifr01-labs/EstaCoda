@@ -1,3 +1,4 @@
+import {ProfileJsonl} from '../storage/profile-jsonl.js';
 import { appendFile, mkdir, readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -6,10 +7,12 @@ import { normalizeGateCommand } from "../evolution/constraint-gate-runner.js";
 
 export class ChangeManifestStore {
   readonly #root: string;
+  readonly #jsonl?: ProfileJsonl;
   readonly #now: () => Date;
 
-  constructor(options: { root: string; now?: () => Date }) {
+  constructor(options: { root: string; profileRoot?: string; now?: () => Date }) {
     this.#root = options.root;
+    this.#jsonl = options.profileRoot ? new ProfileJsonl(options.profileRoot) : undefined;
     this.#now = options.now ?? (() => new Date());
   }
 
@@ -42,6 +45,7 @@ export class ChangeManifestStore {
   }
 
   async find(id: string): Promise<EvolutionChangeManifest | undefined> {
+    if(this.#jsonl)return (await this.#jsonl.query<EvolutionChangeManifest>(join(this.#root,"manifests.jsonl"),{where:m=>m.id===id,limit:1}))[0];
     return (await this.list()).find((m) => m.id === id);
   }
 
@@ -121,6 +125,7 @@ export class ChangeManifestStore {
     id: string,
     update: (manifest: EvolutionChangeManifest) => EvolutionChangeManifest
   ): Promise<EvolutionChangeManifest | undefined> {
+    if(this.#jsonl)return this.#jsonl.rewrite<EvolutionChangeManifest>(join(this.#root,"manifests.jsonl"),id,update);
     const manifests = await this.#readJsonl<EvolutionChangeManifest>("manifests.jsonl");
     let updated: EvolutionChangeManifest | undefined;
     const next = manifests.map((m) => {

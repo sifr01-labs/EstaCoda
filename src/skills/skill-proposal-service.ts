@@ -152,17 +152,17 @@ export class SkillProposalService {
     };
   }
 
-  async reviewProposalDetails(proposal: SkillPatchProposal): Promise<ProposalReviewDetails> {
+  async reviewProposalDetails(proposal: SkillPatchProposal, historyLimit?: number): Promise<ProposalReviewDetails> {
     const review = await this.reviewProposal(proposal);
     const evidenceIds = evidenceIdsForProposal(proposal);
     const evidenceIdSet = new Set(evidenceIds);
     const [observations, learningCandidates, linkedExperiment, evalRuns] = await Promise.all([
       this.#options.skillEvolutionStore.listObservations({ ids: evidenceIds }),
-      this.#options.skillEvolutionStore.listLearningCandidates(),
+      this.#options.skillEvolutionStore.listLearningCandidates(evidenceIds),
       proposal.experimentId === undefined
         ? Promise.resolve(undefined)
         : this.#options.skillEvolutionStore.findExperiment(proposal.experimentId),
-      this.#options.skillEvolutionStore.listEvalRuns({ skillName: proposal.skillName })
+      this.#options.skillEvolutionStore.listEvalRuns({ skillName: proposal.skillName, limit: historyLimit })
     ]);
     const linkedLearningCandidates = learningCandidates.filter((candidate) =>
       evidenceIdSet.has(candidate.id) || candidate.evidenceIds.some((id) => evidenceIdSet.has(id))
@@ -288,7 +288,7 @@ export class SkillProposalService {
   async reviewProposalRollback(proposalId:string) {
     const p=await this.#options.skillEvolutionStore.findProposal(proposalId);
     if(!p||p.status!=='promoted'||!p.patch||p.changeKind&&p.changeKind!=='skill_patch')return null;
-    const promotions=await this.#options.skillEvolutionStore.listPromotions({skillName:p.skillName});
+    const promotions=await this.#options.skillEvolutionStore.listPromotions({skillName:p.skillName,limit:1});
     const promotion=promotions.at(-1),skill=this.#options.registry.get(p.skillName);
     if(!promotion||promotion.proposalId!==p.id||!promotion.snapshotPath||!skill||!isLoadedSkill(skill)||skill.sourceKind!=='local')return null;
     if(!(await assertSkillMutable({skill,action:'edit',store:this.#options.skillEvolutionStore})).ok)return null;

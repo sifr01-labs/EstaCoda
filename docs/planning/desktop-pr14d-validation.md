@@ -49,3 +49,7 @@ Risk note: these endpoints expose private profile content and can mutate skills 
 This pass did not repeat packaged-app/native release acceptance, clean-account onboarding, paid-provider tests, or prolonged production usage. The browser interactions use isolated semantic API fixtures; core ownership tests separately exercise actual state stores, filesystem changes, native processes, and canonical workspace leases. No result here changes the existing fact that skill metadata evals are not real task-fixture execution.
 
 Release signing/notarization and production reliability remain their existing release/operational gates. The [behavior document](desktop-pr14d-library.md) records the supported restoration and uncertain-receipt limits rather than implying generic undo or automatic recovery.
+
+## Review follow-up
+
+The subsequent [focused PR14 reliability fix](desktop-pr14-review-fixes.md) records corrections for transport acceptance, stale-review recovery, read-only usage inspection, Settings cancellation, and growing Evolution histories, with fresh validation results.

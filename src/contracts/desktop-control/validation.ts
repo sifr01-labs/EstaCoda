@@ -179,7 +179,7 @@ const contracts: { [M in keyof MethodContracts]: { params: Check; result: Check 
   'evolution.cancel':{params:shape({reviewId:id}),result:shape({cancelled:boolean})},
   'evolution.execute':{params:shape({reviewId:id,operationId:id,confirmed:(v)=>v===true}),result:connectionOperation},
   'evolution.inspect':{params:shape({operationId:id}),result:connectionOperation},
-  'library.proposals':{params:shape({},{offset:integer(0,1000)}),result:shape({items:array(libraryProposal,50),nextOffset:nullable(integer(0,1000))})},
+  'library.proposals':{params:shape({},{offset:integer(0,Number.MAX_SAFE_INTEGER)}),result:shape({items:array(libraryProposal,50),nextOffset:nullable(integer(0,Number.MAX_SAFE_INTEGER))})},
   'library.proposal':{params:shape({id}),result:shape({proposal:libraryProposal,diff:text(8192),gate:libraryGate,evidence:array(shape({id,summary:text(2048),sourceWorkId:nullable(id)}),50),evalRuns:array(shape({id,label:text(240),passed:boolean}),20),manifest:nullable(shape({id,status:text(80),target:text(80),commands:array(text(240),16)})),promotions:array(shape({id,appliedAt:text(80),snapshotAvailable:boolean}),20),rollbackAvailable:boolean,truncated:boolean})},
   'library.skills':{params:shape({},{offset:integer(0,1000)}),result:shape({items:array(librarySkill,50),nextOffset:nullable(integer(0,1000))})},
   'library.skill':{params:shape({id}),result:shape({skill:librarySkill,instructions:text(16384),truncated:boolean})},

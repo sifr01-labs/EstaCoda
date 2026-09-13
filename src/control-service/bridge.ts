@@ -146,7 +146,7 @@ export class DesktopBridge {
       'setup.cancelWorkspace':async request=>{if(request.method!=='setup.cancelWorkspace')throw new ControlProtocolError('-32601');return {result:this.onboardingWorkspace.cancel(request.params.reviewId)};},
       'evolution.review':async r=>{if(r.method!=='evolution.review')throw new ControlProtocolError('-32601');return{result:await this.evolution.review(r.params)};},
       'evolution.cancel':r=>{if(r.method!=='evolution.cancel')throw new ControlProtocolError('-32601');return{result:this.evolution.cancel(r.params.reviewId)};},
-      'evolution.execute':async(r,signal)=>{if(r.method!=='evolution.execute')throw new ControlProtocolError('-32601');return{result:await this.evolution.execute(r.params,signal)};},
+      'evolution.execute':async(r,signal)=>{if(r.method!=='evolution.execute')throw new ControlProtocolError('-32601');return{result:await this.evolution.start(r.params,signal)};},
       'evolution.inspect':async r=>{if(r.method!=='evolution.inspect')throw new ControlProtocolError('-32601');return{result:await this.evolution.operations.inspect(r.params.operationId)};},
       'library.proposals':async r=>{if(r.method!=='library.proposals')throw new ControlProtocolError('-32601');return{result:await new EvolutionQueries(this.options).list(r.params.offset)};},
       'library.proposal':async r=>{if(r.method!=='library.proposal')throw new ControlProtocolError('-32601');return{result:await new EvolutionQueries(this.options).details(r.params.id)};},
