@@ -1,4 +1,14 @@
 export const onboardingArabic={
+ 'Choose how actions are approved. Every mode keeps the hardline safety floor.':'اختر كيفية الموافقة على الإجراءات. تحتفظ جميع الأوضاع بحد الأمان الصارم.',
+ 'Strict — review most actions':'صارم — مراجعة معظم الإجراءات',
+ 'Adaptive — assess actions by risk':'تكيفي — تقييم الإجراءات حسب المخاطر',
+ 'Open — fewer approval prompts':'مفتوح — طلبات موافقة أقل',
+ 'Learning creates reviewable proposals. It does not grant tools permission or silently promote changes.':'ينشئ التعلم مقترحات قابلة للمراجعة. لا يمنح الأدوات صلاحيات ولا يرقّي التغييرات بصمت.',
+ 'Suggest improvements':'اقتراح تحسينات',
+ 'Proactively propose improvements':'اقتراح تحسينات استباقيًا',
+ 'Autonomous shadow evaluation':'تقييم ذاتي في وضع الظل',
+ 'Promotion remains gated and reviewable. Autonomous mode is shadow-only.':'تبقى الترقية خاضعة للبوابات والمراجعة. يقتصر الوضع الذاتي على وضع الظل.',
+
  'Keep in setup draft':'إبقاء في مسودة الإعداد',
  'Kept in setup draft':'أُبقي في مسودة الإعداد',
  'Primary model':'النموذج الأساسي',

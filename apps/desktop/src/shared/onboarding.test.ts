@@ -1,0 +1,2 @@
+import {it,expect} from 'vitest';import {onboardingPreferenceChanges} from './onboarding.js';
+it('maps language and governance choices without granting trust or installing a service',()=>{expect(onboardingPreferenceChanges({language:'ar',style:'arabic-light',safety:'open',evolution:'autonomous'})).toEqual([{fieldId:'ui.language',selectors:[],value:'ar'},{fieldId:'ui.flavor',selectors:[],value:'arabic-light'},{fieldId:'security.approvalMode',selectors:[],value:'open'},{fieldId:'skills.autonomy',selectors:[],value:'autonomous'}]);});
