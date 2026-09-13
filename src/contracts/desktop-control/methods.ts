@@ -27,6 +27,8 @@ export type SubscribeResult =
 export type WorkUsageProjection={scope:'session'|'task'|'attempt';reportedTokens:number|null;providerCalls:number;cost:{amount:number;currency:'USD'}|null;usageComplete:boolean;pricingComplete:boolean;context:{usedTokens:number;totalTokens:number;provider:string;model:string}|null;truncated:boolean;provisional:boolean};
 export type RuntimeCounts={runningSessions:number;runningTasks:number;queuedTasks:number;approvals:number;attention:number;scheduled:number|null;asOf:number};
 export type MethodContracts = {
+ 'setup.detect':{params:Record<string,never>;result:import('./onboarding.js').SetupDetection};
+ 'setup.bootstrap':{params:Record<string,never>;result:import('./onboarding.js').SetupDetection};
  'artifacts.mediaBegin':{params:{reference:import('./artifacts.js').ArtifactReference};result:{transferId:string;bytes:number;mimeType:string;sha256:string;name:string}};
  'artifacts.mediaChunk':{params:{transferId:string;offset:number};result:{data:string}};
  'artifacts.mediaClose':{params:{transferId:string};result:{closed:boolean}};
