@@ -1,3 +1,4 @@
+import {OnboardingSetup} from './onboarding-setup.js';
 import {OnboardingWorkspace} from './onboarding-workspace.js';
 import {detectOnboarding,bootstrapOnboarding} from './onboarding-detection.js';
 import {settingsLifecycle} from './settings-lifecycle.js';
@@ -55,6 +56,7 @@ export class DesktopBridge {
   readonly server: StdioControlServer;
   readonly candidates: CredentialCandidates;
   readonly modelSetup: ModelSetup;
+  readonly onboardingSetup:OnboardingSetup;
   readonly onboardingWorkspace:OnboardingWorkspace;
   readonly publicSettings:PublicSettings;
   readonly mediaOutput:DesktopMediaOutput;
@@ -137,6 +139,9 @@ export class DesktopBridge {
       'setup.reviewWorkspace':async request=>{if(request.method!=='setup.reviewWorkspace')throw new ControlProtocolError('-32601');return {result:await this.onboardingWorkspace.review(request.params)};},
       'setup.applyWorkspace':async request=>{if(request.method!=='setup.applyWorkspace')throw new ControlProtocolError('-32601');return {result:await this.onboardingWorkspace.apply(request.params)};},
       'setup.cancelWorkspace':async request=>{if(request.method!=='setup.cancelWorkspace')throw new ControlProtocolError('-32601');return {result:this.onboardingWorkspace.cancel(request.params.reviewId)};},
+      'setup.review':async request=>{if(request.method!=='setup.review')throw new ControlProtocolError('-32601');return {result:await this.onboardingSetup.review(request.params)};},
+      'setup.apply':async(request,signal)=>{if(request.method!=='setup.apply')throw new ControlProtocolError('-32601');return {result:await this.onboardingSetup.apply(request.params.reviewId,signal)};},
+      'setup.recover':async()=>({result:await this.onboardingSetup.recover()}),
       'setup.detect':async()=>({result:await detectOnboarding(this.options)}),
       'setup.bootstrap':async()=>({result:await bootstrapOnboarding(this.options)}),
       'settings.lifecycle':async()=>({result:await settingsLifecycle(this.options.version)}),
@@ -226,6 +231,8 @@ export class DesktopBridge {
     this.modelSetup = new ModelSetup(this.options,this.candidates,async()=>{this.#catalog=undefined;this.subscriptions.publish({type:'service.warning',payload:{reason:'configuration_changed'}});
       try {await notifyPrivateConfigurationChanged({directory:resolveProfileStateHome(this.options).gatewayStatePath,profileId:this.options.profileId,version:this.options.version,signal:AbortSignal.timeout(2000)});}catch{/* An absent owner will load the committed configuration on its next startup. */}
     });
+    this.onboardingSetup=new OnboardingSetup(options,this.modelSetup,this.publicSettings,this.onboardingWorkspace);
+    this.server.onDispose(()=>this.onboardingSetup.dispose());
     this.channelSessions=new ChannelSessions(this.options);
     this.telegramOperations=new TelegramOperations(this.options);
     this.gatewayControls=new GatewayControls(this.options);

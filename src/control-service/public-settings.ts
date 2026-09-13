@@ -1,3 +1,4 @@
+import type {PreparedProfilePart} from '../setup/review/compose-profile-plans.js';
 import {envContentHasSecret} from '../config/env-secret-store.js';
 import {publicSettingsPlan} from '../setup/review/public-settings-plan.js';
 import {applyProfilePlan,inspectProfileApply,latestProfileApplyOperation} from '../setup/review/profile-apply.js';
@@ -38,15 +39,16 @@ export class PublicSettings {
  }
  require(params:SettingsBinding):Draft {const draft=this.drafts.get(params.draftId);if(this.#closed||!draft||performance.now()>=draft.expires||draft.windowId!==params.windowId||draft.generation!==params.generation||draft.signal.aborted)throw new ControlProtocolError('-32003');return draft;}
  scope(params:{windowId:string;generation:number},fieldId:string):CandidateScope{return {windowId:params.windowId,generation:params.generation,purpose:'settings',providerId:fieldId,authMethod:'api_key',endpoint:'https://settings.estacoda.invalid'};}
- async apply(params:SettingsBinding,signal:AbortSignal){
-  const draft=this.require(params);if(draft.applying)throw new ControlProtocolError('-32007');draft.applying=true;
+ prepareApply(params:SettingsBinding,signal:AbortSignal):PreparedProfilePart{
+  const draft=this.require(params);if(draft.applying)throw new ControlProtocolError('-32007');
   const secrets:Array<{envVarName:string;value:string}>=[],signals=[signal,draft.signal,draft.abort.signal];
-  try{
-   const changes=draft.changes.map(change=>{const field=settingField(change);if(field.envName&&change.value===null){secrets.push({envVarName:field.envName,value:''});return change;}if(field.kind!=='secret'||change.value===null)return change;const scope=this.scope(params,change.fieldId),candidateId=String(change.value),envVarName=field.envName??'ESTACODA_CREDENTIAL_'+randomUUID().replaceAll('-','').toUpperCase();signals.push(this.candidates.signal(candidateId,scope));secrets.push({envVarName,value:this.candidates.read(candidateId,scope)});return {...change,value:envVarName};});
-   const receipt=await applyProfilePlan({...this.input,operationId:params.draftId,snapshot:draft.snapshot,plan:publicSettingsPlan(changes,secrets.map(s=>s.envVarName)),secrets,signal:AbortSignal.any(signals)});
-   if(receipt.state==='applied'||receipt.state==='uncertain'){for(const change of draft.changes)if(settingField(change).kind==='secret'&&change.value!==null)this.candidates.discard(String(change.value),this.scope(params,change.fieldId));draft.applying=false;draft.cleanup();await this.changed();}
-   return receipt;
-  }finally{draft.applying=false;if(draft.abort.signal.aborted)draft.cleanup();}
+  const changes=draft.changes.map(change=>{const field=settingField(change);if(field.envName&&change.value===null){secrets.push({envVarName:field.envName,value:''});return change;}if(field.kind!=='secret'||change.value===null)return change;const scope=this.scope(params,change.fieldId),candidateId=String(change.value),envVarName=field.envName??'ESTACODA_CREDENTIAL_'+randomUUID().replaceAll('-','').toUpperCase();signals.push(this.candidates.signal(candidateId,scope));secrets.push({envVarName,value:this.candidates.read(candidateId,scope)});return {...change,value:envVarName};});
+  const combined=AbortSignal.any(signals);combined.throwIfAborted();const plan=publicSettingsPlan(changes,secrets.map(s=>s.envVarName));draft.applying=true;
+  return {snapshot:draft.snapshot,plan,secrets,oauth:[],signal:combined,finish:async committed=>{draft.applying=false;if(committed||draft.abort.signal.aborted){draft.cleanup();if(committed)await this.changed();}}};
+ }
+ async apply(params:SettingsBinding,signal:AbortSignal){
+  const part=this.prepareApply(params,signal);let committed=false;
+  try{const receipt=await applyProfilePlan({...this.input,operationId:params.draftId,...part});committed=receipt.state==='applied'||receipt.state==='uncertain';return receipt;}finally{await part.finish(committed);}
  }
  async inspect(operationId?:string){const id=operationId??await latestProfileApplyOperation(this.input);return id?inspectProfileApply(this.input,id):{operationId:'none',state:'unknown' as const};}
  async verify(){try{await loadRuntimeConfig({...this.input,workspaceRoot:this.input.homeDir,configurationInspection:true});return {state:'configured' as const};}catch{return {state:'repair_required' as const};}}

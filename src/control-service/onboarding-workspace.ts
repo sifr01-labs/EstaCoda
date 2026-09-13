@@ -18,6 +18,7 @@ export class OnboardingWorkspace {
   this.reviews.set(projection.reviewId,{projection,identity:identity.identityHash,directory:await directoryIdentity(identity.canonicalPath),expires:Date.now()+300000});return projection;
  }
  cancel(reviewId:string){return {cancelled:this.reviews.delete(reviewId)};}
+ async validate(reviewId:string){const r=this.reviews.get(reviewId);if(!r||r.expires<Date.now()||(await resolveWorkspaceDirectory(r.projection.path)).identityHash!==r.identity||await directoryIdentity(r.projection.path)!==r.directory)throw new ControlProtocolError('-32003');return r;}
  async apply(params:{reviewId:string;operationId:string;confirmed:true}){
   const r=this.reviews.get(params.reviewId);if(!r||r.expires<Date.now()||params.confirmed!==true)throw new ControlProtocolError('-32003');
   if((await resolveWorkspaceDirectory(r.projection.path)).identityHash!==r.identity||await directoryIdentity(r.projection.path)!==r.directory)throw new ControlProtocolError('-32003');

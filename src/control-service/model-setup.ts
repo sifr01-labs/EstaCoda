@@ -1,3 +1,4 @@
+import type {PreparedProfilePart} from '../setup/review/compose-profile-plans.js';
 import {readEnvSecretValue}from'../config/env-secret-store.js';
 import {resolveRuntimeCredential}from'../providers/runtime-credential-resolver.js';
 import type {CandidateVerifier}from'./candidate-verification.js';
@@ -146,23 +147,26 @@ export class ModelSetup {
     windowSignal.addEventListener('abort',()=>{try{this.cancel({draftId,windowId:params.windowId,generation:params.generation});}catch{}},{once:true});
     return projection;
   }
-  async apply(binding:ModelDraftBinding,signal:AbortSignal):Promise<ModelApplyReceipt>{
-    const draft=this.require(binding);
-    if(draft.applying || draft.consumed)return this.inspect(binding.draftId);
+  reviewed(binding:ModelDraftBinding){const draft=this.require(binding);if(draft.applying||draft.consumed||draft.projection.role!=='primary')throw new ControlProtocolError('-32003');return {projection:structuredClone(draft.projection),snapshot:draft.snapshot};}
+  prepareApply(binding:ModelDraftBinding,signal:AbortSignal):PreparedProfilePart{
+    const draft=this.require(binding);if(draft.applying||draft.consumed)throw new ControlProtocolError('-32007');
     const {params}=draft,route=params.route;
-    const combined=AbortSignal.any([signal,draft.abort.signal,this.candidates.windowSignal(params.windowId,params.generation),...(params.candidateId?[this.candidates.signal(params.candidateId,draft.scope!)]:[])]);
-    combined.throwIfAborted();
-    const value=params.candidateId?this.candidates.read(params.candidateId,draft.scope!):undefined;
-    const env=draft.credentialEnv;
-    if(route?.authMethod==='api_key' && !env)throw new ControlProtocolError('-32602');
-    const plan=draft.plan;
+    const combined=AbortSignal.any([signal,draft.abort.signal,this.candidates.windowSignal(params.windowId,params.generation),...(params.candidateId?[this.candidates.signal(params.candidateId,draft.scope!)]:[])]);combined.throwIfAborted();
+    const value=params.candidateId?this.candidates.read(params.candidateId,draft.scope!):undefined,env=draft.credentialEnv;
+    if(route?.authMethod==='api_key'&&!env)throw new ControlProtocolError('-32602');
+    const oauth=route?.authMethod==='oauth'&&value?[{providerId:route.providerId,authMethod:'oauth_device_pkce' as const,tokenRecord:oauthCandidate(value,route.providerId)}]:[];
     draft.applying=true;
-    try{
-      const receipt=await applyProfilePlan({...this.input,operationId:binding.draftId,snapshot:draft.snapshot,plan,signal:combined,
-        secrets:value&&env?[{envVarName:env,value}]:[],
-        oauth:route?.authMethod==='oauth'&&value?[{providerId:route.providerId,authMethod:'oauth_device_pkce',tokenRecord:oauthCandidate(value,route.providerId)}]:[]});
-      draft.consumed=true;draft.snapshot={files:{'.env':null,'auth.json':null,'config.json':null}};await this.changed();return {...receipt,state:receipt.state,verification:receipt.state==='applied'?await this.verifySaved():'not_tested'};
-    }finally{draft.applying=false;clearTimeout(draft.timer);if(!draft.consumed)this.#drafts.delete(binding.draftId);if(params.candidateId){try{this.candidates.discard(params.candidateId,draft.scope!);}catch{/* Already invalidated. */}}}
+    return {snapshot:draft.snapshot,plan:draft.plan,signal:combined,secrets:value&&env?[{envVarName:env,value}]:[],oauth,finish:async committed=>{
+      draft.consumed=committed;draft.applying=false;clearTimeout(draft.timer);
+      if(committed){draft.snapshot={files:{'.env':null,'auth.json':null,'config.json':null}};await this.changed();}else this.#drafts.delete(binding.draftId);
+      if(params.candidateId)try{this.candidates.discard(params.candidateId,draft.scope!);}catch{}
+    }};
+  }
+  async apply(binding:ModelDraftBinding,signal:AbortSignal):Promise<ModelApplyReceipt>{
+    const draft=this.require(binding);if(draft.applying||draft.consumed)return this.inspect(binding.draftId);
+    const part=this.prepareApply(binding,signal);let committed=false;
+    try{const receipt=await applyProfilePlan({...this.input,operationId:binding.draftId,...part});committed=receipt.state==='applied'||receipt.state==='uncertain';return {...receipt,verification:receipt.state==='applied'?await this.verifySaved():'not_tested'};}
+    finally{await part.finish(committed);}
   }
   cancel(binding:ModelDraftBinding):{cancelled:boolean}{
     const draft=this.#drafts.get(binding.draftId);if(!draft)return {cancelled:true};this.require(binding);

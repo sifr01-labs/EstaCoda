@@ -1,4 +1,12 @@
 export const onboardingArabic={
+ 'Review the complete setup before saving. No login service will be installed.':'راجع الإعداد الكامل قبل الحفظ. لن تُثبّت خدمة لتسجيل الدخول.',
+ 'Review complete setup':'مراجعة الإعداد الكامل',
+ 'Workspace trust deferred':'تأجيل الثقة بمساحة العمل',
+ 'Confirm and save setup':'تأكيد الإعداد وحفظه',
+ 'Saving may have started. Inspect the outcome before trying again.':'قد يكون الحفظ بدأ. افحص النتيجة قبل المحاولة مجددًا.',
+ 'Inspect setup outcome':'فحص نتيجة الإعداد',
+ 'Setup configuration saved. Verify before starting Work.':'حُفظت إعدادات التطبيق. تحقّق قبل بدء العمل.',
+
  'Channels':'القنوات',
  'Optional capabilities can be configured now or later. Skipping them does not block your first Work.':'يمكن إعداد القدرات الاختيارية الآن أو لاحقًا. تخطيها لا يمنع عملك الأول.',
  'Choose one editor to collect Channels, Voice and Browser changes together before final confirmation.':'اختر محررًا لجمع تغييرات القنوات والصوت والمتصفح معًا قبل التأكيد النهائي.',

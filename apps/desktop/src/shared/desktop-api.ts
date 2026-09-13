@@ -114,6 +114,11 @@ export type DesktopTerminalApi={
 };
 export type DesktopMicrophoneApi={begin(scope:{draftId:string;target:import('@estacoda/control-protocol').TargetReference}):Promise<{id:string;maxSeconds:number;sampleRate:number}>;append(id:string,data:string):Promise<{accepted:boolean}>;finish(id:string):Promise<{id:string;name:string;size:number;type:string}>;cancel(id:string):Promise<{cancelled:boolean}>};
 export type DesktopApi = {onboarding?:{
+ review(input:{modelSetupId:string;optionalSetupId?:string;preferences:import('@estacoda/control-protocol').SettingChange[];workspaceReviewId:string}):Promise<import('@estacoda/control-protocol').OnboardingReview>;
+ apply(reviewId:string,confirmed:true):Promise<MethodContracts['setup.apply']['result']>;
+ applyWorkspace(reviewId:string,confirmed:true):Promise<MethodContracts['setup.applyWorkspace']['result']>;
+ inspect():Promise<MethodContracts['settings.inspect']['result']>;
+ recover():Promise<MethodContracts['setup.recover']['result']>;
  chooseWorkspace():Promise<{path:string;alias:string}|null>;
  reviewWorkspace(alias:string,trust:boolean):Promise<import('@estacoda/control-protocol').OnboardingWorkspaceReview>;
  cancelWorkspace(reviewId:string):Promise<{cancelled:boolean}>;

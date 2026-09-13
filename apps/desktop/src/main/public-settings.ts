@@ -29,6 +29,8 @@ export class DesktopPublicSettings {
  }finally{this.#busy=false;}}
  async apply(id:string){const s=this.require(id);if(!s.draft||s.applying||this.#busy)throw new Error('Review required.');s.applying=true;try{const receipt=await this.connection.settingsRequest('settings.apply',{draftId:s.draft.draftId,windowId:s.windowId,generation:s.generation});this.require(id);if(receipt.state==='applied'){await this.pipe()?.closeWindow(s.windowId,s.generation);this.#setup=undefined;}return receipt;}finally{s.applying=false;}}
  async cancel(id:string){const s=this.require(id);this.credentials.close();if(s.draft){const result=await this.connection.settingsRequest('settings.cancel',{draftId:s.draft.draftId,windowId:s.windowId,generation:s.generation});if(!result.cancelled)return result;}await this.pipe()?.closeWindow(s.windowId,s.generation);if(this.#setup===s)this.#setup=undefined;return {cancelled:true};}
+ async finishOnboarding(id:string){const s=this.require(id);await this.pipe()?.closeWindow(s.windowId,s.generation);if(this.#setup===s)this.#setup=undefined;}
+ onboardingBinding(id:string){const s=this.require(id);if(!s.draft||s.applying)throw new Error('Review required.');return {draftId:s.draft.draftId,windowId:s.windowId,generation:s.generation};}
  async inspect(){const s=this.#setup;const receipt=await this.connection.settingsRequest('settings.inspect',s?.draft?{operationId:s.draft.draftId}:{});if(s?.draft?.draftId===receipt.operationId&&receipt.state==='applied'){await this.pipe()?.closeWindow(s.windowId,s.generation);if(this.#setup===s)this.#setup=undefined;}return receipt;}
  async verify(){return this.connection.settingsRequest('settings.verify',{});}
 }
