@@ -1,3 +1,4 @@
+import {ScheduleQueries} from './schedule-queries.js';
 import {EvolutionDecisions} from './evolution-decisions.js';
 import {EvolutionQueries} from './evolution-queries.js';
 import {LibraryQueries} from './library-queries.js';
@@ -144,6 +145,9 @@ export class DesktopBridge {
       'setup.reviewWorkspace':async request=>{if(request.method!=='setup.reviewWorkspace')throw new ControlProtocolError('-32601');return {result:await this.onboardingWorkspace.review(request.params)};},
       'setup.applyWorkspace':async request=>{if(request.method!=='setup.applyWorkspace')throw new ControlProtocolError('-32601');return {result:await this.onboardingWorkspace.apply(request.params)};},
       'setup.cancelWorkspace':async request=>{if(request.method!=='setup.cancelWorkspace')throw new ControlProtocolError('-32601');return {result:this.onboardingWorkspace.cancel(request.params.reviewId)};},
+      'schedules.list':async r=>{if(r.method!=='schedules.list')throw new ControlProtocolError('-32601');return{result:await new ScheduleQueries(this.options).list(r.params.offset)};},
+      'schedules.get':async r=>{if(r.method!=='schedules.get')throw new ControlProtocolError('-32601');return{result:await new ScheduleQueries(this.options).get(r.params.id)};},
+      'schedules.history':async r=>{if(r.method!=='schedules.history')throw new ControlProtocolError('-32601');return{result:await new ScheduleQueries(this.options).history(r.params.id,r.params.offset)};},
       'evolution.review':async r=>{if(r.method!=='evolution.review')throw new ControlProtocolError('-32601');return{result:await this.evolution.review(r.params)};},
       'evolution.cancel':r=>{if(r.method!=='evolution.cancel')throw new ControlProtocolError('-32601');return{result:this.evolution.cancel(r.params.reviewId)};},
       'evolution.execute':async(r,signal)=>{if(r.method!=='evolution.execute')throw new ControlProtocolError('-32601');return{result:await this.evolution.start(r.params,signal)};},

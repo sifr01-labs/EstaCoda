@@ -16,3 +16,5 @@ export * from './settings.js';
 export * from './onboarding.js';
 
 export * from './library.js';
+
+export * from './schedules.js';

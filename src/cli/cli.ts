@@ -2755,7 +2755,7 @@ async function tryCreateExecutionStore(options: CliOptions): Promise<{ store: Cr
   try {
     if (options.runtime?.sessionDb instanceof SQLiteSessionDB) {
       return {
-        store: new CronExecutionStore({ db: options.runtime.sessionDb.db }),
+        store: new CronExecutionStore({ db: options.runtime.sessionDb.db, profileId:options.profileId??readActiveProfile({homeDir:options.homeDir}).profileId }),
         close: () => undefined
       };
     }
@@ -2763,7 +2763,7 @@ async function tryCreateExecutionStore(options: CliOptions): Promise<{ store: Cr
     const stateHome = resolveStateHome({ homeDir: options.homeDir });
     const db = await createSQLiteSessionDB({ path: stateHome.sessionsSqlitePath });
     return {
-      store: new CronExecutionStore({ db: db.db }),
+      store: new CronExecutionStore({ db: db.db, profileId:options.profileId??readActiveProfile({homeDir:options.homeDir}).profileId }),
       close: () => db.close()
     };
   } catch {

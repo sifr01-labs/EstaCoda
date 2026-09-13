@@ -11,6 +11,7 @@ export type CronDeliveryResult = {
 export type CronExecutionRecord = {
   id: string;
   jobId: string;
+  profileId?: string;
   sessionId?: string;
   trajectoryId?: string;
   scheduledAt?: string;
@@ -25,6 +26,8 @@ export type CronExecutionRecord = {
 
 export type CronExecutionStoreOptions = {
   db: SQLiteDatabase;
+  profileId?: string;
+  readonly?: boolean;
   now?: () => Date;
   id?: () => string;
 };
@@ -32,6 +35,7 @@ export type CronExecutionStoreOptions = {
 type ExecutionRow = {
   id: string;
   job_id: string;
+  profile_id?: string | null;
   session_id: string | null;
   trajectory_id: string | null;
   scheduled_at: string | null;
@@ -47,14 +51,16 @@ type ExecutionRow = {
 
 export class CronExecutionStore {
   readonly #db: SQLiteDatabase;
+  readonly #profileId?: string;
   readonly #now: () => Date;
   readonly #id: () => string;
 
   constructor(options: CronExecutionStoreOptions) {
     this.#db = options.db;
+    this.#profileId = options.profileId;
     this.#now = options.now ?? (() => new Date());
     this.#id = options.id ?? (() => randomUUID());
-    this.#ensureSchema();
+    if(!options.readonly)this.#ensureSchema();
   }
 
   #ensureSchema(): void {
@@ -78,6 +84,17 @@ export class CronExecutionStore {
       create index if not exists idx_cron_executions_status on cron_executions(status, started_at desc);
       create index if not exists idx_cron_executions_session on cron_executions(session_id);
     `);
+    const hasProfile=()=>this.#db.query<{name:string}>("pragma table_info(cron_executions)").all().some(c=>c.name==='profile_id');
+    if(!hasProfile())try{this.#db.exec("alter table cron_executions add column profile_id text");}catch(error){if(!hasProfile())throw error;}
+    this.#db.exec("create index if not exists idx_cron_executions_profile_job on cron_executions(profile_id,job_id,started_at desc)");
+  }
+
+  /** Read-only profile attribution; legacy rows require an owned Session. */
+  async listForProfile(profileId:string,jobId:string,offset=0,limit=51):Promise<CronExecutionRecord[]>{
+    const hasProfile=this.#db.query<{name:string}>("pragma table_info(cron_executions)").all().some(c=>c.name==='profile_id');
+    const scope=hasProfile?"(e.profile_id = ? or (e.profile_id is null and s.profile_id = ?))":"s.profile_id = ?";
+    const rows=this.#db.query<ExecutionRow>(`select e.* from cron_executions e left join sessions s on s.id=e.session_id where e.job_id = ? and ${scope} order by e.started_at desc,e.id desc limit ? offset ?`).all(jobId,...(hasProfile?[profileId,profileId]:[profileId]),limit,offset);
+    return rows.map(rowToRecord);
   }
 
   async create(input: {
@@ -89,6 +106,7 @@ export class CronExecutionStore {
     const record: CronExecutionRecord = {
       id,
       jobId: input.jobId,
+      profileId:this.#profileId,
       scheduledAt: input.scheduledAt?.toISOString(),
       startedAt: now.toISOString(),
       status: "running",
@@ -98,14 +116,15 @@ export class CronExecutionStore {
     this.#db
       .query(
         `insert into cron_executions (
-          id, job_id, session_id, trajectory_id, scheduled_at,
+          id, job_id, profile_id, session_id, trajectory_id, scheduled_at,
           started_at, completed_at, status, output_summary,
           delivery_results_json, failure_class, failure_message, created_at
-        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
+        ) values (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`
       )
       .run(
         record.id,
         record.jobId,
+        record.profileId??null,
         null,
         null,
         record.scheduledAt ?? null,
@@ -256,6 +275,7 @@ function rowToRecord(row: ExecutionRow): CronExecutionRecord {
   return {
     id: row.id,
     jobId: row.job_id,
+    profileId:row.profile_id??undefined,
     sessionId: row.session_id ?? undefined,
     trajectoryId: row.trajectory_id ?? undefined,
     scheduledAt: row.scheduled_at ?? undefined,

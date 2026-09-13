@@ -31,7 +31,11 @@ const activities: ActivityProjection[] = [
 ];
 const artifactReference={source:'session' as const,ownerId:'s',artifactId:'a'};
 const artifactPreview={artifact:{reference:artifactReference,displayName:'report.txt',mimeType:'text/plain',bytes:0,sha256:'a'.repeat(64),createdAt:'2026-09-12',retention:'retained' as const,sourceOrigin:null,workIds:['session:s'],target:null},integrity:'verified' as const,text:'',truncated:false,reason:null};
+const schedule={id:'cron-job',name:'Summary',objective:'Summarize',schedule:'every 1h',kind:'interval' as const,status:'active' as const,delivery:'local',workspace:null,model:null,nextRunAt:null,lastRunAt:null,lastStatus:null,runCount:0,runRequested:false,script:false,channelBound:false};
 const cases = {
+ 'schedules.list':{params:{},result:{items:[schedule],nextOffset:null}},
+ 'schedules.get':{params:{id:'cron-job'},result:schedule},
+ 'schedules.history':{params:{id:'cron-job'},result:{items:[],nextOffset:null,available:true}},
  'artifacts.mediaBegin':{params:{reference:artifactReference},result:{transferId:'t',bytes:10,mimeType:'image/png',sha256:'a'.repeat(64),name:'image.png'}},
  'artifacts.mediaChunk':{params:{transferId:'t',offset:0},result:{data:'YWJj'}},
  'artifacts.mediaClose':{params:{transferId:'t'},result:{closed:true}},

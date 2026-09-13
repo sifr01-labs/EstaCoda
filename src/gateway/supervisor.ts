@@ -1139,7 +1139,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
       path: join(profilePaths.cronPath, "jobs.json"),
       outputRoot: join(profilePaths.cronPath, "output"),
     });
-    const cronExecutionStore = new CronExecutionStore({ db: sessionDb.db });
+    const cronExecutionStore = new CronExecutionStore({ db: sessionDb.db, profileId });
     const cronJobLock = createFileCronJobLock({
       lockDir: join(profilePaths.cronPath, "locks"),
       staleTimeoutMs: 600_000,
