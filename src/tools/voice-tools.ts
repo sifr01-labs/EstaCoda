@@ -1,6 +1,6 @@
 import { mkdir, realpath, stat, writeFile } from "node:fs/promises";
 import { basename, join, relative, resolve } from "node:path";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import type { ArtifactStore } from "../artifacts/artifact-store.js";
 import type { ArtifactRecord } from "../contracts/artifact.js";
 import type { LoadedRuntimeConfig, SttProvider, TtsProvider } from "../config/runtime-config.js";
@@ -30,6 +30,7 @@ export type VoiceFetchLike = (url: string, init?: {
 }>;
 
 export type VoiceToolOptions = {
+  profileId?:string;currentSessionId?:()=>string;persistSessionArtifact?:(sessionId:string,artifact:import('../contracts/artifact.js').SessionArtifactRegistration)=>Promise<void>;
   audioCacheRoot: string;
   artifactStore: ArtifactStore;
   workspaceRoot?: string;
@@ -275,7 +276,7 @@ export function createVoiceTools(options: VoiceToolOptions): readonly Registered
         const filePath = join(options.audioCacheRoot, fileName);
         await writeFile(filePath, result.bytes);
         const fileStat = await stat(filePath);
-        const artifact = options.artifactStore.record({
+        let artifact = options.artifactStore.record({
           path: filePath,
           kind: "audio",
           bytes: fileStat.size,
@@ -289,6 +290,8 @@ export function createVoiceTools(options: VoiceToolOptions): readonly Registered
           }
         });
 
+        const sessionId=options.currentSessionId?.();
+        if(sessionId&&options.profileId&&options.persistSessionArtifact&&fileStat.size<=8*1024*1024&&['audio/mpeg','audio/wav','audio/ogg','audio/aac','audio/flac'].includes(result.mimeType))artifact=await options.artifactStore.retainSessionArtifact({sessionId,profileId:options.profileId,capturePath:filePath,kind:'audio',bytes:fileStat.size,mimeType:result.mimeType,sha256:createHash('sha256').update(result.bytes).digest('hex'),source:{kind:'voice.synthesized',description:'Generated speech',filename:'speech.'+extensionForMime(result.mimeType),origin:'media:speech.synthesize'},persist:artifact=>options.persistSessionArtifact!(sessionId,artifact)});
         return {
           ok: true,
           content: [
@@ -393,6 +396,7 @@ export const voiceToolProvider: SessionToolProvider = {
   kind: "session",
   createTools(ctx) {
     return createVoiceTools({
+      profileId:ctx.profileId,currentSessionId:()=>ctx.currentSessionId(),persistSessionArtifact:ctx.sessionDb?async(sessionId,artifact)=>{await ctx.sessionDb!.appendEvent(sessionId,{kind:'session-artifact-registered',artifact});}:undefined,
       audioCacheRoot: requireProviderDependency("voice", "audioCacheRoot", ctx.audioCacheRoot),
       artifactStore: requireProviderDependency("voice", "artifactStore", ctx.artifactStore),
       workspaceRoot: ctx.workspaceRoot,

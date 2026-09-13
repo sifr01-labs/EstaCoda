@@ -1,4 +1,8 @@
 export const settingsArabic={
+ 'Generate speech':'توليد الكلام',
+ 'Generate speech using the configured text-to-speech provider: ':'أنشئ كلامًا باستخدام مزوّد تحويل النص إلى كلام المضبوط: ',
+ 'Play speech':'تشغيل الكلام',
+ 'Stop playback':'إيقاف التشغيل',
  'Clear credential':'مسح بيانات الاعتماد',
  'Backends, network policy and dependencies':'الخدمات الخلفية وسياسة الشبكة والاعتماديات',
  'Local dependencies':'الاعتماديات المحلية',

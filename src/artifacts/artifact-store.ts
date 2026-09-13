@@ -213,7 +213,7 @@ export class ArtifactStore {
     return (await this.#verifiedContent(value,scope)).content;
   }
   async verifiedMedia(value:unknown,scope:SessionArtifactScope):Promise<Buffer>{
-    const parsed=parseRegistration(value);if(!parsed||parsed.bytes>8*1024*1024||!['image/png','image/jpeg','image/gif','image/webp'].includes(parsed.mimeType))throw new Error('Media preview unavailable');
+    const parsed=parseRegistration(value);if(!parsed||parsed.bytes>8*1024*1024||!['image/png','image/jpeg','image/gif','image/webp','audio/mpeg','audio/wav','audio/ogg','audio/aac','audio/flac'].includes(parsed.mimeType))throw new Error('Media preview unavailable');
     return (await this.#verifiedContent(value,scope)).content;
   }
   async #verifiedContent(value:unknown,scope:SessionArtifactScope){
@@ -280,7 +280,7 @@ function artifactFromRegistration(
       sourceOrigin: registration.source.origin,
       source: registration.source.kind,
       ...(registration.apiDescription === undefined ? {} : { apiDescription: registration.apiDescription }),
-      outcome: registration.source.kind === "image.generated" ? "image-generated" : registration.source.kind === "workspace.changes" ? "changes-exported" : registration.source.kind === "browser.screenshot" ? "screenshot-captured" : "download-completed"
+      outcome: registration.source.kind === "voice.synthesized" ? "speech-generated" : registration.source.kind === "image.generated" ? "image-generated" : registration.source.kind === "workspace.changes" ? "changes-exported" : registration.source.kind === "browser.screenshot" ? "screenshot-captured" : "download-completed"
     }
   };
 }
@@ -327,7 +327,7 @@ export function parseRegistration(value: unknown): SessionArtifactRegistration |
 
 function validateSource(value: unknown): SessionArtifactSource {
   if (!isRecord(value) || Object.keys(value).some((key) => !["kind", "description", "filename", "origin"].includes(key)) ||
-    !["browser.download", "browser.screenshot", "workspace.changes", "image.generated"].includes(String(value.kind)) ||
+    !["browser.download", "browser.screenshot", "workspace.changes", "image.generated", "voice.synthesized"].includes(String(value.kind)) ||
     typeof value.description !== "string" || value.description.length === 0 || value.description.length > 320 ||
     redactSensitiveText(value.description) !== value.description ||
     typeof value.filename !== "string" || value.filename.length === 0 || value.filename.length > 160 ||
@@ -335,6 +335,7 @@ function validateSource(value: unknown): SessionArtifactSource {
     typeof value.origin !== "string" || value.origin.length > 512) {
     throw new Error("Artifact source metadata is invalid.");
   }
+  if(value.kind==='voice.synthesized'){if(value.origin!=='media:speech.synthesize'||!['speech.mp3','speech.wav','speech.ogg','speech.aac','speech.flac'].includes(value.filename))throw new Error('Invalid speech source');return {kind:'voice.synthesized',description:value.description,filename:value.filename,origin:value.origin};}
   if(value.kind==='image.generated'){if(value.origin!=='media:image.generate'||!['image.png','image.jpg','image.webp','image.gif'].includes(value.filename))throw new Error('Invalid generated image source');return {kind:'image.generated',description:value.description,filename:value.filename,origin:value.origin};}
   if (value.kind === "workspace.changes") {
     if (!/^workspace:target_[a-f0-9-]{36}$/u.test(value.origin) || value.filename !== "workspace-changes.json") throw new Error("Invalid workspace artifact origin.");
@@ -432,7 +433,8 @@ async function readArtifactBytes(path: string, expected: number): Promise<Buffer
   } finally { await file.close(); }
 }
 
-function inspectRetainedContent(source:SessionArtifactSource,content:Buffer): ReturnType<typeof inspectBrowserDownload>|{allowed:true;kind:"image";mimeType:string;apiDescription?:never} {
+function inspectRetainedContent(source:SessionArtifactSource,content:Buffer): ReturnType<typeof inspectBrowserDownload>|{allowed:true;kind:"image"|"audio";mimeType:string;apiDescription?:never} {
+  if(source.kind==='voice.synthesized'){const ext=source.filename.split('.').pop();const mime=ext==='mp3'&&(content.subarray(0,3).toString()==='ID3'||content[0]===255&&(content[1]!&224)===224)?'audio/mpeg':ext==='wav'&&content.subarray(0,4).toString()==='RIFF'&&content.subarray(8,12).toString()==='WAVE'?'audio/wav':ext==='ogg'&&content.subarray(0,4).toString()==='OggS'?'audio/ogg':ext==='flac'&&content.subarray(0,4).toString()==='fLaC'?'audio/flac':ext==='aac'&&content[0]===255&&(content[1]!&246)===240?'audio/aac':undefined;return mime?{allowed:true,kind:'audio',mimeType:mime}:{allowed:false,reason:'invalid-generated-audio'};}
   if(source.kind==='image.generated'){const mime=source.filename.endsWith('.png')&&content.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10]))?'image/png':source.filename.endsWith('.jpg')&&content[0]===255&&content[1]===216&&content[2]===255?'image/jpeg':source.filename.endsWith('.webp')&&content.subarray(0,4).toString()==='RIFF'&&content.subarray(8,12).toString()==='WEBP'?'image/webp':source.filename.endsWith('.gif')&&/^GIF8[79]a$/.test(content.subarray(0,6).toString())?'image/gif':undefined;return mime?{allowed:true,kind:'image',mimeType:mime}:{allowed:false,reason:'invalid-generated-image'};}
   if(source.kind!=="browser.screenshot")return inspectBrowserDownload(source.filename,content);
   if(source.filename==="browser.png"&&content.subarray(0,8).equals(Buffer.from([137,80,78,71,13,10,26,10])))return{allowed:true,kind:"image",mimeType:"image/png"};
