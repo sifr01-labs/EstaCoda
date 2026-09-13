@@ -1,4 +1,11 @@
 export const onboardingArabic={
+ 'Choose an existing folder for your work.':'اختر مجلدًا موجودًا لعملك.',
+ 'Choose folder':'اختيار مجلد',
+ 'Workspace name':'اسم مساحة العمل',
+ 'Trust this folder and its children':'الثقة بهذا المجلد والمجلدات الفرعية',
+ 'Trust permits governed file and command actions here. Project files do not become profile configuration.':'تسمح الثقة بإجراءات الملفات والأوامر الخاضعة للسياسات هنا. لا تصبح ملفات المشروع إعدادات للملف الشخصي.',
+ 'You can save setup with trust deferred, but Work cannot start until this folder is trusted.':'يمكنك حفظ الإعداد وتأجيل الثقة، لكن لن يبدأ العمل حتى تثق بهذا المجلد.',
+
  'Continue':'متابعة',
  'Set up EstaCoda':'إعداد EstaCoda',
  'Welcome to EstaCoda':'مرحبًا بك في EstaCoda',

@@ -96,3 +96,8 @@ it('keeps settings identity and credentials out of ordinary semantic requests',(
 });
 
 it('keeps onboarding detection and bootstrap bound to Main selected profile',()=>{for(const method of ['onboardingDetect','onboardingBootstrap']){expect(()=>validateSemanticPayload(method,{})).not.toThrow();for(const value of [{profileId:'other'},{path:'/tmp'},{confirmed:true}])expect(()=>validateSemanticPayload(method,value)).toThrow();}});
+it('allows only native workspace selection and reviewed trust input',()=>{
+ expect(()=>validateSemanticPayload('onboardingChooseWorkspace',{})).not.toThrow();
+ expect(()=>validateSemanticPayload('onboardingReviewWorkspace',{alias:'work',trust:false})).not.toThrow();
+ for(const payload of [{alias:'work',trust:true,path:'/escape'},{alias:'work',trust:'true'},{alias:'work',trust:true,profileId:'other'}])expect(()=>validateSemanticPayload('onboardingReviewWorkspace',payload)).toThrow();
+});
