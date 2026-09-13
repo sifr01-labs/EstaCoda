@@ -1,3 +1,4 @@
+import {ScheduleDecisions} from './schedule-decisions.js';
 import {ScheduleQueries} from './schedule-queries.js';
 import {EvolutionDecisions} from './evolution-decisions.js';
 import {EvolutionQueries} from './evolution-queries.js';
@@ -56,7 +57,8 @@ import { StdioControlServer } from './stdio-server.js';
 export type BootstrapState = Pick<BootstrapResult, 'profile' | 'runtime'>;
 /** One bridge per trusted Main client context; Work and execution remain core-owned. */
 export class DesktopBridge {
-  readonly evolution:EvolutionDecisions;
+  readonly schedules:ScheduleDecisions;
+ readonly evolution:EvolutionDecisions;
   readonly terminals:TerminalCapabilities;
   readonly targets:TargetControls;
   readonly server: StdioControlServer;
@@ -145,6 +147,11 @@ export class DesktopBridge {
       'setup.reviewWorkspace':async request=>{if(request.method!=='setup.reviewWorkspace')throw new ControlProtocolError('-32601');return {result:await this.onboardingWorkspace.review(request.params)};},
       'setup.applyWorkspace':async request=>{if(request.method!=='setup.applyWorkspace')throw new ControlProtocolError('-32601');return {result:await this.onboardingWorkspace.apply(request.params)};},
       'setup.cancelWorkspace':async request=>{if(request.method!=='setup.cancelWorkspace')throw new ControlProtocolError('-32601');return {result:this.onboardingWorkspace.cancel(request.params.reviewId)};},
+      'schedules.draft':async r=>{if(r.method!=='schedules.draft')throw new ControlProtocolError('-32601');return{result:await this.schedules.draft(r.params.id)};},
+      'schedules.review':async r=>{if(r.method!=='schedules.review')throw new ControlProtocolError('-32601');return{result:await this.schedules.review(r.params)};},
+      'schedules.cancel':r=>{if(r.method!=='schedules.cancel')throw new ControlProtocolError('-32601');return{result:this.schedules.cancel(r.params.reviewId)};},
+      'schedules.execute':async r=>{if(r.method!=='schedules.execute')throw new ControlProtocolError('-32601');return{result:await this.schedules.execute(r.params)};},
+      'schedules.inspect':async r=>{if(r.method!=='schedules.inspect')throw new ControlProtocolError('-32601');return{result:await this.schedules.operations.inspect(r.params.operationId)};},
       'schedules.list':async r=>{if(r.method!=='schedules.list')throw new ControlProtocolError('-32601');return{result:await new ScheduleQueries(this.options).list(r.params.offset)};},
       'schedules.get':async r=>{if(r.method!=='schedules.get')throw new ControlProtocolError('-32601');return{result:await new ScheduleQueries(this.options).get(r.params.id)};},
       'schedules.history':async r=>{if(r.method!=='schedules.history')throw new ControlProtocolError('-32601');return{result:await new ScheduleQueries(this.options).history(r.params.id,r.params.offset)};},
@@ -250,6 +257,7 @@ export class DesktopBridge {
     this.modelSetup = new ModelSetup(this.options,this.candidates,async()=>{this.#catalog=undefined;this.subscriptions.publish({type:'service.warning',payload:{reason:'configuration_changed'}});
       try {await notifyPrivateConfigurationChanged({directory:resolveProfileStateHome(this.options).gatewayStatePath,profileId:this.options.profileId,version:this.options.version,signal:AbortSignal.timeout(2000)});}catch{/* An absent owner will load the committed configuration on its next startup. */}
     });
+    this.schedules=new ScheduleDecisions(options);this.server.onDispose(()=>this.schedules.dispose());
     this.evolution=new EvolutionDecisions(options);this.server.onDispose(()=>this.evolution.dispose());
     this.onboardingSetup=new OnboardingSetup(options,this.modelSetup,this.publicSettings,this.onboardingWorkspace);
     this.server.onDispose(()=>this.onboardingSetup.dispose());

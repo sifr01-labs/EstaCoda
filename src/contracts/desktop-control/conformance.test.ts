@@ -32,7 +32,14 @@ const activities: ActivityProjection[] = [
 const artifactReference={source:'session' as const,ownerId:'s',artifactId:'a'};
 const artifactPreview={artifact:{reference:artifactReference,displayName:'report.txt',mimeType:'text/plain',bytes:0,sha256:'a'.repeat(64),createdAt:'2026-09-12',retention:'retained' as const,sourceOrigin:null,workIds:['session:s'],target:null},integrity:'verified' as const,text:'',truncated:false,reason:null};
 const schedule={id:'cron-job',name:'Summary',objective:'Summarize',schedule:'every 1h',kind:'interval' as const,status:'active' as const,delivery:'local',workspace:null,model:null,nextRunAt:null,lastRunAt:null,lastStatus:null,runCount:0,runRequested:false,script:false,channelBound:false};
+const scheduleDraft={name:'Audit',objective:'Review files',schedule:'every 1h',target:null,model:null,delivery:'local',skills:[],toolsets:null,contextFrom:[],repeat:null,script:null,scriptArgs:[],scriptTimeoutMs:null,noAgent:false};
+const scheduleAction={action:'save' as const,draft:scheduleDraft};
 const cases = {
+ 'schedules.draft':{params:{id:'cron-job'},result:scheduleDraft},
+ 'schedules.review':{params:scheduleAction,result:{reviewId:'review',action:scheduleAction,profileId:'p',workspace:null,nextRunAt:null,authority:'strict',spendUsd:null,model:'local/model',expiresAt:1}},
+ 'schedules.cancel':{params:{reviewId:'review'},result:{cancelled:true}},
+ 'schedules.execute':{params:{reviewId:'review',operationId:'operation',confirmed:true},result:{operationId:'operation',action:'schedule',state:'completed'}},
+ 'schedules.inspect':{params:{operationId:'operation'},result:{operationId:'operation',action:'schedule',state:'uncertain'}},
  'schedules.list':{params:{},result:{items:[schedule],nextOffset:null}},
  'schedules.get':{params:{id:'cron-job'},result:schedule},
  'schedules.history':{params:{id:'cron-job'},result:{items:[],nextOffset:null,available:true}},

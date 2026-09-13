@@ -1,3 +1,5 @@
+import {parseExecutionTargetBinding} from '../workspaces/execution-target.js';
+import type {ExecutionTargetBinding} from '../contracts/workspace.js';
 import { currentCronExecutionOrigin, parseCronExecutionOrigin, sameCronExecutionOrigin, type CronExecutionOrigin } from "./cron-origin.js";
 import { randomUUID } from "node:crypto";
 import { readJsonState, updateJsonState } from "../storage/json-state.js";
@@ -12,6 +14,7 @@ export type CronScheduleKind = "once" | "interval" | "cron";
 
 export type CronJob = {
   executionOrigin?: CronExecutionOrigin;
+  localTarget?:{profileId:string;binding:ExecutionTargetBinding};
   id: string;
   name: string;
   prompt: string;
@@ -96,8 +99,10 @@ export class CronStore {
     delivery?: CronDelivery;
     repeat?: number;
     origin?: CronJob["origin"];
+    localTarget?:CronJob["localTarget"];
   }): Promise<CronJob> {
     const executionOrigin = currentCronExecutionOrigin();
+    if(executionOrigin&&input.localTarget)throw new Error("Channel jobs cannot substitute local authority.");
     if (executionOrigin && input.delivery !== undefined && !["local", "origin"].includes(input.delivery)) throw new Error("Channel recurring work can deliver only locally or to its authorized origin. Configure other recipients through the local operator flow.");
     if (executionOrigin && input.workdir !== undefined && input.workdir !== executionOrigin.target.workspace.canonicalPath) throw new Error("Recurring work must keep its authorized workspace.");
     if (executionOrigin) input = { ...input, workdir: executionOrigin.target.workspace.canonicalPath,
@@ -105,11 +110,13 @@ export class CronStore {
         userId: executionOrigin.principalId, threadId: executionOrigin.sessionKey.threadId } };
     assertCronPromptSafe(input.prompt);
     validateCronJobShape(input);
+    validateLocalCronTarget(input);
     const now = this.#now().toISOString();
     const parsed = parseCronSchedule(input.schedule, this.#now());
     const job: CronJob = {
       id: `cron-${this.#id()}`,
       ...(executionOrigin ? { executionOrigin } : {}),
+      ...(input.localTarget?{localTarget:structuredClone(input.localTarget)}:{}),
       name: input.name ?? summarizePrompt(input.prompt),
       prompt: input.prompt,
       ...(input.noAgent === true ? { noAgent: true } : {}),
@@ -136,7 +143,7 @@ export class CronStore {
     return structuredClone(job);
   }
 
-  async update(id: string, patch: Partial<Pick<CronJob, "name" | "prompt" | "noAgent" | "contextFrom" | "modelOverride" | "enabledToolsets" | "workdir" | "script" | "scriptArgs" | "scriptTimeoutMs" | "schedule" | "skills" | "delivery" | "repeat">>): Promise<CronJob | undefined> {
+  async update(id: string, patch: Partial<Pick<CronJob, "name" | "prompt" | "noAgent" | "contextFrom" | "modelOverride" | "enabledToolsets" | "workdir" | "script" | "scriptArgs" | "scriptTimeoutMs" | "schedule" | "skills" | "delivery" | "repeat" | "localTarget">>): Promise<CronJob | undefined> {
     if (patch.prompt !== undefined) {
       assertCronPromptSafe(patch.prompt);
     }
@@ -147,6 +154,7 @@ export class CronStore {
       const parsed = patch.schedule === undefined ? undefined : parseCronSchedule(schedule, this.#now());
       const candidate = { ...job, ...patch, schedule };
       validateCronJobShape(candidate);
+      validateLocalCronTarget(candidate);
       updated = {
         ...candidate,
         schedule,
@@ -392,6 +400,7 @@ function cronFieldMatches(field: string, value: number, min: number, max: number
 }
 
 function normalizeJob(job: CronJob): CronJob {
+  validateLocalCronTarget(job);
   if (job.executionOrigin !== undefined) parseCronExecutionOrigin(job.executionOrigin);
   const normalized = {
     ...job,
@@ -484,4 +493,11 @@ function normalizeStringList(values: string[]): string[] {
 function summarizePrompt(prompt: string): string {
   const single = prompt.trim().replace(/\s+/gu, " ");
   return single.length <= 48 ? single : `${single.slice(0, 45)}...`;
+}
+
+function validateLocalCronTarget(job:{localTarget?:CronJob['localTarget'];executionOrigin?:CronExecutionOrigin;workdir?:string}){
+ if(job.localTarget===undefined)return;
+ if(!job.localTarget||job.executionOrigin||typeof job.localTarget.profileId!=='string'||!job.localTarget.profileId)throw new Error('Invalid local recurring authority.');
+ const binding=parseExecutionTargetBinding(job.localTarget.binding);
+ if(job.workdir!==binding.workspace.canonicalPath)throw new Error('A bound schedule must retain its reviewed target.');
 }

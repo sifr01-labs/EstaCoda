@@ -22,7 +22,7 @@ const shape = (required: Record<string, Check>, optional: Record<string, Check> 
   Object.entries(optional).every(([key, check]) => !Object.hasOwn(v, key) || check(v[key]));
 const id = isControlId;
 const cursorToken: Check = (v) => typeof v === "string" && /^[A-Za-z0-9_-]{1,512}$/.test(v);
-const capabilities = shape({ methods: unique(choice(CONTROL_METHODS),128), events: unique(choice(CONTROL_EVENTS)) });
+const capabilities = shape({ methods: unique(choice(CONTROL_METHODS),256), events: unique(choice(CONTROL_EVENTS)) });
 const settingValue:Check=v=>v===null||text(4096)(v)||boolean(v)||typeof v==='number'&&Number.isFinite(v)||array(text(2048),128)(v);
 const settingChange=shape({fieldId:text(240,1),selectors:array(text(128,1),8),value:settingValue});
 const settingField=shape({id:text(240,1),section:choice(SETTINGS_SECTIONS),path:array(text(128,1),12),kind:choice(['scalar','text','number','boolean','choice','strings','secret'])},{choices:array(settingValue,128),min:(v)=>typeof v==='number'&&Number.isFinite(v),max:(v)=>typeof v==='number'&&Number.isFinite(v),envName:text(128,1)});
@@ -32,6 +32,9 @@ const scheduleProjection=shape({id,name:text(240),objective:text(4096),schedule:
 const scheduleExecution=shape({id,workId:nullable(id),startedAt:text(80),completedAt:nullable(text(80)),status:choice(['success','failed','cancelled','skipped','running']),failure:nullable(text(120)),delivery:array(shape({destination:text(240),success:boolean}),16)});
 const targetId:Check=(v)=>typeof v==='string'&&/^target_[a-f0-9-]{36}$/.test(v);
 const target = shape({ targetId: id, targetGeneration: integer(1) });
+const scheduleDraft=shape({name:text(240,1),objective:text(4096,1),schedule:text(120,1),target:nullable(target),model:nullable(shape({provider:text(160),model:text(160,1)})),delivery:text(240,1),skills:array(text(160,1),32),toolsets:nullable(array(text(80,1),32)),contextFrom:array(id,32),repeat:nullable(integer(1,1000000)),script:nullable(text(4096,1)),scriptArgs:array(text(512),32),scriptTimeoutMs:nullable(integer(1,3600000)),noAgent:boolean});
+const scheduleAction:Check=v=>shape({action:choice(['save']),draft:scheduleDraft},{id})(v)||shape({action:choice(['delete']),id})(v);
+const scheduleReview=shape({reviewId:id,action:scheduleAction,profileId:id,workspace:nullable(text(4096)),nextRunAt:nullable(text(80)),authority:text(80),spendUsd:nullable((v)=>typeof v==='number'&&Number.isFinite(v)&&v>=0),model:text(400),expiresAt:integer()});
 const targetDetailsFields={targetId:id,targetGeneration:integer(1),kind:choice(['local','temporary-copy','git-worktree']),label:text(240,1),workingRoot:text(4096,1),sourceRoot:text(4096,1),status:choice(['available','archived']),readiness:choice(['ready','untrusted','unavailable','archived']),managed:boolean};
 const targetDetails=shape(targetDetailsFields);
 const targetInspection=shape({...targetDetailsFields,dirty:nullable(boolean),borrowers:integer(),branch:nullable(text(200,1)),cleanup:nullable(choice(['retained','removed']))});
@@ -177,7 +180,12 @@ const contracts: { [M in keyof MethodContracts]: { params: Check; result: Check 
   "settings.inspect":{params:shape({},{operationId:id}),result:shape({operationId:id,state:choice(['applied','uncertain','unknown'])})},
   "settings.verify":{params:shape({}),result:shape({state:choice(['configured','repair_required'])})},
   "settings.value":{params:shape({fieldId:text(240,1),selectors:array(text(128,1),8)}),result:settingChange},
-  'schedules.list':{params:shape({},{offset:integer(0,1000)}),result:shape({items:array(scheduleProjection,50),nextOffset:nullable(integer(0,1000))})},
+  'schedules.draft':{params:shape({id}),result:scheduleDraft},
+ 'schedules.review':{params:scheduleAction,result:scheduleReview},
+ 'schedules.cancel':{params:shape({reviewId:id}),result:shape({cancelled:boolean})},
+ 'schedules.execute':{params:shape({reviewId:id,operationId:id,confirmed:(v)=>v===true}),result:connectionOperation},
+ 'schedules.inspect':{params:shape({operationId:id}),result:connectionOperation},
+ 'schedules.list':{params:shape({},{offset:integer(0,1000)}),result:shape({items:array(scheduleProjection,50),nextOffset:nullable(integer(0,1000))})},
  'schedules.get':{params:shape({id}),result:scheduleProjection},
  'schedules.history':{params:shape({id},{offset:integer(0,Number.MAX_SAFE_INTEGER)}),result:shape({items:array(scheduleExecution,50),nextOffset:nullable(integer(0,Number.MAX_SAFE_INTEGER)),available:boolean})},
  'evolution.review':{params:shape({proposalId:id,action:choice(['test','approve','reject','promote','rollback'])},{target}),result:shape({reviewId:id,proposalId:id,action:choice(['test','approve','reject','promote','rollback']),diff:text(8192),commands:array(text(240),16),workspace:nullable(text(2048)),allowed:boolean,reason:choice(['ready','stale','gates_failed','workspace_required','unsupported','review_too_large','approval_required'])})},

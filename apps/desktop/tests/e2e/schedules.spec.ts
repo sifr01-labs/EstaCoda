@@ -8,3 +8,12 @@ test('shows canonical schedule state and history without a fixture count or fals
  });
  await page.getByRole('button',{name:/Daily audit/}).click();await expect(page.getByText('Run requested; execution has not been confirmed.')).toBeVisible();await expect(page.getByText('runtime_error')).toBeVisible();await page.getByRole('button',{name:'Open source Work'}).click();expect(await page.evaluate(()=>(window as any).openedScheduleWork)).toBe('session:owned');expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
 });
+test('requires review and explicit confirmation before saving a schedule',async({page})=>{
+ await page.goto('/fixture.html');await page.evaluate(async()=>{
+ const rp='/node_modules/.vite/deps/react.js',dp='/node_modules/.vite/deps/react-dom_client.js',cp='/src/renderer/components/schedule-editor.tsx';const React=(await import(rp)).default,{createRoot}=(await import(dp)).default,{ScheduleEditor}=await import(cp);
+ const state={writes:0,cancels:0,closed:false};(window as any).scheduleState=state;
+ const api={review:async(action:any)=>({reviewId:'review',action,profileId:'one',workspace:'/selected/workspace',nextRunAt:'2026-09-14T09:00:00Z',authority:'strict',spendUsd:1,model:'local/model',expiresAt:Date.now()+300000}),execute:async()=>{state.writes++;return{operationId:'op',action:'schedule',state:'completed'};},cancel:async()=>{state.cancels++;return{cancelled:true};},inspect:async()=>null};
+ const host=document.querySelector('.ec-window')!;host.innerHTML='<div id="schedule-editor-test"></div>';createRoot(document.querySelector('#schedule-editor-test')!).render(React.createElement(ScheduleEditor,{api,work:{targets:async()=>({items:[{targetId:'target',targetGeneration:1,label:'Workspace',isolation:'host'}],truncated:false})},onClose:()=>{state.closed=true;},onSaved:()=>{state.closed=true;}}));
+ });
+ await page.getByLabel('Schedule name',{exact:true}).fill('Audit');await page.getByLabel('Objective',{exact:true}).fill('Review changes');await page.getByRole('combobox',{name:'Execution target',exact:true}).selectOption('target');await page.getByRole('button',{name:'Review schedule',exact:true}).click();expect(await page.evaluate(()=>(window as any).scheduleState.writes)).toBe(0);await expect(page.getByText('/selected/workspace',{exact:true})).toBeVisible();await page.getByRole('button',{name:'Confirm schedule change',exact:true}).click();expect(await page.evaluate(()=>(window as any).scheduleState.writes)).toBe(1);
+});

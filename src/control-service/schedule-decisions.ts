@@ -1,0 +1,64 @@
+import {createHash,randomUUID} from 'node:crypto';
+import {ControlProtocolError,type ScheduleAction,type ScheduleDraft,type ScheduleReview} from '../contracts/desktop-control/index.js';
+import {ScheduleQueries} from './schedule-queries.js';
+import {ConnectionOperations} from './connection-operations.js';
+import {ExecutionTargetStore,targetBinding} from '../workspaces/execution-target.js';
+import {WorkspaceTrustStore} from '../security/workspace-trust-store.js';
+import {assertInspectionRoot} from './inspection-lease.js';
+import {loadRuntimeConfig} from '../config/runtime-config.js';
+import {resolveCronModelRoute,CRON_FORCED_DISABLED_TOOLSETS} from '../cron/cron-runtime-validation.js';
+import {parseCronSchedule,type CronJob} from '../cron/cron-store.js';
+import {assertCronPromptSafe} from '../cron/cron-safety.js';
+import {withProfileWriteLock} from '../config/profile-write-lock.js';
+import {validateCronAuthority} from '../cron/cron-authority.js';
+export class ScheduleDecisions extends ScheduleQueries{
+ readonly operations=new ConnectionOperations(this.input);
+ readonly reviews=new Map<string,{review:ScheduleReview;fingerprint:string}>();
+ readonly controller=new AbortController();
+ async draft(id:string):Promise<ScheduleDraft>{
+  const job=await(await this.store()).get(id);if(!job)throw new ControlProtocolError('-32004');
+  const binding=job.executionOrigin?.target??job.localTarget?.binding;
+  let target=binding?{targetId:binding.targetId,targetGeneration:binding.targetGeneration}:null;
+  if(!target&&job.workdir){try{const store=new ExecutionTargetStore({...this.input,readonly:true});try{const found=store.listTargets(1000).find(t=>t.workspace.canonicalPath===job.workdir&&t.status==='available');if(found)target={targetId:found.id,targetGeneration:found.generation};}finally{store.close();}}catch(error){if((error as NodeJS.ErrnoException).code!=='SQLITE_CANTOPEN'&&(error as NodeJS.ErrnoException).code!=='ENOENT')throw error;}}
+  const result:ScheduleDraft={name:job.name,objective:job.prompt,schedule:job.schedule,target,model:job.modelOverride?{provider:job.modelOverride.provider??'',model:job.modelOverride.model}:null,delivery:job.delivery,skills:job.skills,toolsets:job.enabledToolsets??null,contextFrom:job.contextFrom??[],repeat:job.repeat??null,script:job.script??null,scriptArgs:job.scriptArgs??[],scriptTimeoutMs:job.scriptTimeoutMs??null,noAgent:job.noAgent===true};
+  // Do not return truncated editable data that could overwrite a longer CLI definition.
+  const {validateControlResponse,CONTROL_METHODS}=await import('../contracts/desktop-control/index.js');
+  validateControlResponse({jsonrpc:'2.0',id:'draft',result},{jsonrpc:'2.0',id:'draft',method:'schedules.draft',params:{id}},{profileId:this.input.profileId,instanceId:'draft',capabilities:{methods:[...CONTROL_METHODS],events:[]}});
+  return result;
+ }
+ private async state(action:ScheduleAction){
+  this.controller.signal.throwIfAborted();const store=await this.store(),job=action.id?await store.get(action.id):undefined;if(action.id&&!job)throw new ControlProtocolError('-32004');
+  if(action.action==='delete')return{job,patch:undefined,fingerprint:JSON.stringify(job),workspace:job?.workdir??null,nextRunAt:null,authority:'existing',spendUsd:null,model:''};
+  const d=action.draft;if(!d.target)throw new ControlProtocolError('-32003');assertCronPromptSafe(d.objective);const parsed=parseCronSchedule(d.schedule);if(!parsed.nextRunAt||!Number.isFinite(parsed.nextRunAt.getTime())||parsed.nextRunAt.getTime()<=Date.now()&&(!job||job.schedule!==d.schedule))throw new ControlProtocolError('-32602');
+  if(d.noAgent&&!d.script||d.contextFrom.includes(action.id??'')||d.toolsets?.some(t=>CRON_FORCED_DISABLED_TOOLSETS.includes(t as typeof CRON_FORCED_DISABLED_TOOLSETS[number])))throw new ControlProtocolError('-32602');
+  for(const id of d.contextFrom)if(!await store.get(id))throw new ControlProtocolError('-32003');
+  const targets=new ExecutionTargetStore({...this.input,readonly:true});
+  try{
+   const target=targets.getTarget(d.target.targetId);if(!target||target.generation!==d.target.targetGeneration)throw new ControlProtocolError('-32004');
+   const binding=targetBinding(target);await targets.validate(binding,target.workspace.canonicalPath,this.controller.signal);await assertInspectionRoot(this.input,target.workspace.canonicalPath);if(!await new WorkspaceTrustStore(this.input).isTrusted(target.workspace.canonicalPath))throw new ControlProtocolError('-32003');
+   if(job?.executionOrigin){await validateCronAuthority(job,this.input);if(JSON.stringify(job.executionOrigin.target)!==JSON.stringify(binding)||!['local','origin'].includes(d.delivery))throw new ControlProtocolError('-32003');}
+   const config=await loadRuntimeConfig({...this.input,workspaceRoot:target.workspace.canonicalPath,configurationInspection:true});
+   const origin=job?.executionOrigin?.sessionKey??job?.origin;
+   for(const destination of d.delivery.split(',').map(x=>x.trim())){
+    if(destination==='local'||destination==='silent')continue;if(destination==='origin'){if(!origin)throw new ControlProtocolError('-32602');continue;}
+    const match=/^(telegram|discord|whatsapp|email):([^:,\s]+)(?::([^:,\s]+))?$/.exec(destination);if(!match||!config.config.channels?.[match[1] as 'telegram']?.enabled)throw new ControlProtocolError('-32003');
+   }
+   const patch={name:d.name,prompt:d.objective,schedule:d.schedule,workdir:target.workspace.canonicalPath,modelOverride:d.model?{...(d.model.provider?{provider:d.model.provider}:{}),model:d.model.model}:undefined,delivery:d.delivery,skills:d.skills,enabledToolsets:d.toolsets??undefined,contextFrom:d.contextFrom,repeat:d.repeat??undefined,script:d.script??undefined,scriptArgs:d.scriptArgs,scriptTimeoutMs:d.scriptTimeoutMs??undefined,noAgent:d.noAgent,localTarget:job?.executionOrigin?undefined:{profileId:this.input.profileId,binding}};
+   const route=d.noAgent?undefined:await resolveCronModelRoute({job:{...job,...patch} as CronJob,latestConfig:config});if(!d.noAgent&&(!route||route.provider==='unconfigured'))throw new ControlProtocolError('-32003');
+   return{job,patch,fingerprint:createHash('sha256').update(JSON.stringify([job??null,binding,config.config])).digest('hex'),workspace:patch.workdir,nextRunAt:parsed.nextRunAt.toISOString(),authority:config.security.approvalMode,spendUsd:config.budgets.session?.maxEstimatedCostUsd??null,model:route?`${route.provider}/${route.id}`:'none'};
+  }finally{targets.close();}
+ }
+ async review(action:ScheduleAction){const state=await this.state(action);for(const[id,r]of this.reviews)if(r.review.expiresAt<=Date.now())this.reviews.delete(id);if(this.reviews.size>=16)throw new ControlProtocolError('-32009');const review:ScheduleReview={reviewId:randomUUID(),action:structuredClone(action),profileId:this.input.profileId,workspace:state.workspace,nextRunAt:state.nextRunAt,authority:state.authority,spendUsd:state.spendUsd,model:state.model,expiresAt:Date.now()+300000};this.reviews.set(review.reviewId,{review,fingerprint:state.fingerprint});return review;}
+ cancel(id:string){this.reviews.delete(id);return{cancelled:true};}
+ async execute(input:{reviewId:string;operationId:string;confirmed:true}){
+  return this.operations.execute(input.operationId,'schedule',async()=>{
+   const r=this.reviews.get(input.reviewId);this.reviews.delete(input.reviewId);if(!r||r.review.expiresAt<=Date.now()||input.confirmed!==true)return false;
+   return withProfileWriteLock(this.paths.profileRoot,async()=>{
+    let state;try{state=await this.state(r.review.action);}catch{return false;}if(state.fingerprint!==r.fingerprint)return false;
+    const store=await this.store();if(r.review.action.action==='delete')return store.remove(r.review.action.id);
+    if(!state.patch)return false;if(r.review.action.id)return !!await store.update(r.review.action.id,state.patch);await store.create(state.patch);return true;
+   });
+  });
+ }
+ dispose(){this.controller.abort();this.reviews.clear();}
+}

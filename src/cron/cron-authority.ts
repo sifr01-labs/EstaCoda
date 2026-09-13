@@ -44,6 +44,12 @@ export function recurringPrincipalAllowed(origin: CronExecutionOrigin, config: L
 }
 
 export async function validateCronAuthority(job: CronJob, context: { profileId: string; homeDir?: string }): Promise<LoadedRuntimeConfig | undefined> {
+  if(job.localTarget!==undefined){
+    if(!job.localTarget||job.executionOrigin||job.localTarget.profileId!==context.profileId||job.workdir!==job.localTarget.binding.workspace.canonicalPath)throw new Error('Recurring profile/target mismatch.');
+    const targets=new ExecutionTargetStore(context);try{await targets.validate(job.localTarget.binding,job.workdir);}finally{targets.close();}
+    if(!await new WorkspaceTrustStore(context).isTrusted(job.workdir))throw new Error('Recurring workspace trust was revoked.');
+    return loadRuntimeConfig({...context,workspaceRoot:job.workdir});
+  }
   if (job.executionOrigin === undefined) return undefined;
   const origin = parseCronExecutionOrigin(job.executionOrigin);
   if (!["local", "origin"].includes(job.delivery)) throw new Error("Recurring delivery exceeds its authorized origin.");
@@ -100,10 +106,11 @@ export async function recurringCronSecurityPolicy(job: CronJob, context: { profi
 
 export async function recurringCronRuntimeOptions(job: CronJob, context: { profileId: string; homeDir?: string; sessionId: string }) {
   const securityPolicy = await recurringCronSecurityPolicy(job, context);
-  if (!job.executionOrigin) return {};
+  if (!job.executionOrigin&&!job.localTarget) return {};
+  await validateCronAuthority(job,context);
   const targets = new ExecutionTargetStore(context);
   try {
-    const sourceWorkspace = targets.getTarget(job.executionOrigin.target.targetId)!.source;
+    const sourceWorkspace = targets.getTarget((job.executionOrigin?.target??job.localTarget!.binding).targetId)!.source;
     return { securityPolicy, sourceWorkspace, validateExecutionAuthority: async () => { await validateCronAuthority(job, context); } };
   } finally { targets.close(); }
 }

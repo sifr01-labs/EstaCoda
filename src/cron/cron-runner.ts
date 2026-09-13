@@ -257,7 +257,7 @@ export function createRuntimeCronRunner(input: {
   return {
     async runJob(job, runInput) {
       const executionId = runInput?.executionId;
-      if (job.executionOrigin !== undefined) {
+      if (job.executionOrigin !== undefined||job.localTarget!==undefined) {
         try {
           if (!input.scriptExecution) throw new Error("Recurring execution requires a selected profile context.");
           await validateCronAuthority(job, input.scriptExecution);
@@ -265,7 +265,7 @@ export function createRuntimeCronRunner(input: {
       }
       return withCronExecutionOrigin(job.executionOrigin, async (): Promise<CronRunResult> => {
       const deliver = async (content: string) => {
-        if (job.executionOrigin) {
+        if (job.executionOrigin||job.localTarget) {
           try { await validateCronAuthority(job, input.scriptExecution!); } catch { return false; }
         }
         return input.deliver?.(job, content);
@@ -281,7 +281,7 @@ export function createRuntimeCronRunner(input: {
       const workdir = await resolveCronWorkdir({
         requestedWorkdir: job.workdir,
         defaultWorkspaceRoot: input.workspaceRoot ?? process.cwd(),
-        allowedRoots: job.executionOrigin ? [job.executionOrigin.target.workspace.canonicalPath] : input.allowedWorkdirRoots ?? (input.workspaceRoot === undefined ? [process.cwd()] : [input.workspaceRoot]),
+        allowedRoots: job.executionOrigin ? [job.executionOrigin.target.workspace.canonicalPath] : job.localTarget?[job.localTarget.binding.workspace.canonicalPath]:input.allowedWorkdirRoots ?? (input.workspaceRoot === undefined ? [process.cwd()] : [input.workspaceRoot]),
         isWorkspaceTrusted: input.isWorkspaceTrusted ?? (async () => false)
       });
       if (!workdir.ok) {

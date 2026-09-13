@@ -27,6 +27,11 @@ export type SubscribeResult =
 export type WorkUsageProjection={scope:'session'|'task'|'attempt';reportedTokens:number|null;providerCalls:number;cost:{amount:number;currency:'USD'}|null;usageComplete:boolean;pricingComplete:boolean;context:{usedTokens:number;totalTokens:number;provider:string;model:string}|null;truncated:boolean;provisional:boolean};
 export type RuntimeCounts={runningSessions:number;runningTasks:number;queuedTasks:number;approvals:number;attention:number;scheduled:number|null;asOf:number};
 export type MethodContracts = {
+ 'schedules.draft':{params:{id:string};result:import('./schedules.js').ScheduleDraft};
+ 'schedules.review':{params:import('./schedules.js').ScheduleAction;result:import('./schedules.js').ScheduleReview};
+ 'schedules.cancel':{params:{reviewId:string};result:{cancelled:boolean}};
+ 'schedules.execute':{params:{reviewId:string;operationId:string;confirmed:true};result:ConnectionOperation};
+ 'schedules.inspect':{params:{operationId:string};result:ConnectionOperation};
  'schedules.list':{params:{offset?:number};result:{items:import('./schedules.js').ScheduleProjection[];nextOffset:number|null}};
  'schedules.get':{params:{id:string};result:import('./schedules.js').ScheduleProjection};
  'schedules.history':{params:{id:string;offset?:number};result:{items:import('./schedules.js').ScheduleExecutionProjection[];nextOffset:number|null;available:boolean}};
