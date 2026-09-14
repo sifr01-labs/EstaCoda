@@ -7,13 +7,13 @@ async function mount(page:Page,language:'en'|'ar'='en'){
   document.getElementById('root')!.remove();const host=document.createElement('div');document.body.append(host);
   const target={targetId:'target',targetGeneration:1,label:'Project',isolation:'host',approvalMode:'strict'};
   const work={id:'session:one',canonicalId:'private-work-uuid',profileId:'default',kind:'session',title:'Review the project',status:'completed',target,modelBinding:{sessionId:'one'},updatedAt:1,actions:[{id:'sessions.send',enabled:true},{id:'sessions.resume',enabled:true},{id:'sessions.cancelTurn',enabled:false}]};
-  const listeners=new Set<any>();const state={calls:[] as any[],copied:'',selection:null as any,primary:'First model',delay:false,release:()=>{},items:[] as any[],refresh:()=>listeners.forEach(fn=>fn(snapshot()))};
+  const listeners=new Set<any>();const state={work,inspectError:false,receipt:{state:'completed',cancellation:'not_requested'} as any,calls:[] as any[],copied:'',selection:null as any,primary:'First model',delay:false,release:()=>{},items:[] as any[],refresh:()=>listeners.forEach(fn=>fn(snapshot()))};
   const row=(id:string,kind:string,extra:any)=>({id,kind,workId:work.id,profileId:'default',timestamp:1,sequence:0,...extra});
   state.items=[row('user','message',{role:'user',text:'Review this code'}),row('start','tool',{name:'files.read',state:'running',summary:'Tool started'}),row('end','tool',{name:'files.read',state:'completed',summary:'Tool completed'}),row('result','result',{status:'completed',evidence:{state:'unverified',summary:'Canonical execution outcome. Inspect evidence before relying on external effects.',artifactIds:[]},usage:{reportedTokens:null,cost:null}}),row('answer','message',{role:'assistant',text:'## Review\n\nReadable **response** with `inline code`.\n\n- First finding\n- Second finding\n\n| File | Result |\n| --- | --- |\n| app.ts | Good |\n\n```ts\nconst result = 1;\n```\n\n[Reference](https://example.com/docs)\n\n![tracking](https://tracking.invalid/pixel.png)\n\n<script>window.injected=true</script>\n\n[unsafe](javascript:alert(1))'})];
   const snapshot=()=>({status:'ready',profile:{id:'default',label:'default',configuration:'ready'},runtime:'ready',work:{items:[{...work}],nextCursor:null},inbox:{items:[],nextCursor:null}});
   let route:any;
   const models={models:async()=>({items:[{id:'first',providerId:'local',label:state.primary,role:'primary',runnable:true,catalog:{configured:true}},{id:'second',providerId:'local',label:'Second model',role:'fallback',runnable:true,catalog:{configured:true}},{id:'catalog',providerId:'other',label:'Catalog only',role:null,runnable:true,catalog:{configured:false}}],nextCursor:null}),workOverride:async()=>({selection:state.selection,effective:'next_turn'}),inspectOverride:async()=>null,setOverride:async(id:string,value:any)=>{state.calls.push(['override',id,value]);state.selection=value;return{state:'completed'};},providers:async()=>({items:[{id:'local',label:'Local',state:'ready',authMethods:['none'],metadata:{configurable:true,defaultEndpoint:'http://localhost:11434/v1'}}],nextCursor:null}),begin:async(value:any)=>{route=value;state.calls.push(['begin']);return{setupId:'setup'};},cancel:async()=>{state.calls.push(['cancel']);return{cancelled:true};},review:async()=>({draftId:'setup',role:'primary',route,expiresInMs:300000,credentialState:'not_required'}),apply:async()=>{state.calls.push(['apply']);state.primary='New model';return{state:'applied',verification:'configured'};}};
-  const api={platform:'darwin',models,onSnapshot:(fn:any)=>{listeners.add(fn);fn(snapshot());return()=>listeners.delete(fn);},getWork:async()=>({...work}),activity:async()=>({items:[...state.items],nextCursor:null}),microphone:{begin:async()=>{state.calls.push(['microphone']);return{id:'capture'};},cancel:async()=>({cancelled:true})},work:{pins:async()=>[],targets:async()=>({items:[target],truncated:false}),children:async()=>({items:[],nextCursor:null}),live:async()=>({active:false}),inspect:async()=>({state:'completed',cancellation:'not_requested'}),usage:async()=>({scope:'session',reportedTokens:null,providerCalls:0,usageComplete:false,pricingComplete:false,cost:null,context:null}),submit:async(value:any)=>{state.calls.push(['submit',value]);if(state.delay)await new Promise<void>(resolve=>state.release=resolve);throw Error('Response lost');}}};
+  const api={platform:'darwin',models,onSnapshot:(fn:any)=>{listeners.add(fn);fn(snapshot());return()=>listeners.delete(fn);},getWork:async()=>({...work}),activity:async()=>({items:[...state.items],nextCursor:null}),microphone:{begin:async()=>{state.calls.push(['microphone']);return{id:'capture'};},cancel:async()=>({cancelled:true})},work:{pins:async()=>[],targets:async()=>({items:[target],truncated:false}),children:async()=>({items:[],nextCursor:null}),live:async()=>({active:false}),inspect:async()=>{if(state.inspectError)throw Error('Unavailable');return state.receipt;},act:async(value:any)=>{state.calls.push(['act',value]);return state.receipt;},usage:async()=>({scope:'session',reportedTokens:null,providerCalls:0,usageComplete:false,pricingComplete:false,cost:null,context:null}),submit:async(value:any)=>{state.calls.push(['submit',value]);if(state.delay)await new Promise<void>(resolve=>state.release=resolve);throw Error('Response lost');}}};
   (window as any).presentation=state;(window as any).desktop=api;Object.defineProperty(navigator,'clipboard',{value:{writeText:async(value:string)=>{state.copied=value;}}});
   const appearance={read:async()=>({theme:'kemet',appearance:'light',language,density:'comfortable'}),write:async()=>{}};
   createRoot(host).render(React.createElement(AppearanceProvider,{store:appearance},React.createElement(App,{adapter:{kind:'live',api,appearance}})));
@@ -50,4 +50,61 @@ for(const language of ['en','ar'] as const)test(`${language} composer menus floa
   await page.getByRole('button',{name:t('Work model'),exact:true}).click();const menu=page.getByRole('group',{name:t('Model for this Work'),exact:true});await expect(menu).toBeInViewport();expect((await composer.boundingBox())!.height).toBe(before);expect(await menu.evaluate(e=>e.scrollWidth<=e.clientWidth+1)).toBe(true);await page.screenshot({path:testInfo.outputPath(`models-${language}-${width}.png`)});await page.keyboard.press('Escape');
   await page.getByRole('button',{name:t('Voice input'),exact:true}).click();const voice=page.getByRole('group',{name:t('Voice input'),exact:true});await expect(voice).toBeInViewport();expect((await composer.boundingBox())!.height).toBe(before);await expect(page.getByRole('button',{name:t('Record audio'),exact:true})).toBeVisible();expect(await page.evaluate(()=>(window as any).presentation.calls.some((c:any)=>c[0]==='microphone'))).toBe(false);await voice.getByRole('button',{name:t('Close'),exact:true}).click();
  }
+});
+
+
+test('compact header and composer reserve the window for the conversation',async({page},testInfo)=>{
+ await mount(page);await page.setViewportSize({width:1280,height:900});
+ const header=page.locator('.ec-conversation-header');const composer=page.locator('.ec-composer');
+ await expect(header.getByRole('heading',{name:'Review the project'})).toBeVisible();
+ await expect(header.locator('.ec-crumb')).toHaveCount(0);
+ await expect(page.getByRole('tab',{name:'Conversation',exact:true})).toBeVisible();
+ await expect(page.getByText('Enter to send · Shift+Enter for a new line',{exact:true})).toHaveCount(0);
+ expect((await header.boundingBox())!.height).toBeLessThanOrEqual(56);
+ expect((await composer.boundingBox())!.height).toBeLessThanOrEqual(106);
+ expect((await page.locator('#ec-work-panel').boundingBox())!.height).toBeGreaterThan(570);
+ await expect(page.getByRole('button',{name:'Resume',exact:true})).not.toBeVisible();
+ await page.locator('summary[aria-label="More actions"]').click();await expect(page.getByRole('button',{name:'Resume',exact:true})).toBeVisible();
+ await page.keyboard.press('Escape');await expect(page.locator('summary[aria-label="More actions"]')).toBeFocused();await expect(page.getByRole('button',{name:'Resume',exact:true})).not.toBeVisible();
+ await page.getByLabel('Draft guidance').fill(Array.from({length:12},()=> 'Draft line').join('\n'));expect((await page.getByLabel('Draft guidance').boundingBox())!.height).toBeLessThanOrEqual(140);
+ await page.getByLabel('Draft guidance').fill('');
+ await page.screenshot({path:testInfo.outputPath('compact-conversation.png')});
+});
+
+test('operation problems remain discoverable without expanding the header; active stop stays visible',async({page})=>{
+ await mount(page);const height=(await page.locator('.ec-conversation-header').boundingBox())!.height;
+ await page.evaluate(()=>{(window as any).presentation.inspectError=true;});
+ await page.locator('summary[aria-label="More actions"]').click();await page.getByRole('button',{name:'Check operation',exact:true}).click();await page.keyboard.press('Escape');
+ await expect(page.locator('summary[aria-label="Check connection"]')).toBeVisible();
+ await expect(page.getByText('Operation status unavailable. Check again after reconnecting.',{exact:true})).not.toBeVisible();
+ expect((await page.locator('.ec-conversation-header').boundingBox())!.height).toBe(height);
+ await page.locator('summary[aria-label="Check connection"]').click();await expect(page.getByRole('alert')).toContainText('Operation status unavailable');
+ await page.evaluate(()=>{const s=(window as any).presentation;s.inspectError=false;s.receipt={state:'uncertain',cancellation:'not_requested'};});
+ await page.locator('.ec-operation-warning').getByRole('button',{name:'Check operation',exact:true}).click();await expect(page.locator('summary[aria-label="Needs attention"]')).toBeVisible();
+ await page.evaluate(()=>{const s=(window as any).presentation;s.work.status='running';s.work.actions=[{id:'sessions.cancelTurn',enabled:true}];s.refresh();});
+ await expect(page.getByRole('button',{name:'Stop',exact:true})).toBeVisible();await page.getByRole('button',{name:'Stop',exact:true}).click();
+ expect(await page.evaluate(()=>(window as any).presentation.calls.filter((c:any)=>c[0]==='act'))).toHaveLength(1);
+});
+
+for(const language of ['en','ar'] as const)test(`${language} compact layout keeps composer and recovery visible in a short narrow window`,async({page},testInfo)=>{
+ await mount(page,language);const t=(key:Parameters<typeof translate>[1])=>translate(language,key);
+ for(const width of [360,1024]){
+  await page.setViewportSize({width,height:740});
+  await expect(page.getByLabel(t('Draft guidance'))).toBeInViewport();
+  const composer=(await page.locator('.ec-composer').boundingBox())!;const footer=(await page.locator('.ec-runtimebar').boundingBox())!;
+  expect(composer.y+composer.height).toBeLessThanOrEqual(footer.y);expect(footer.y-composer.y-composer.height).toBeLessThanOrEqual(15);
+  expect(await page.locator('.ec-window').evaluate(e=>e.scrollWidth<=e.clientWidth+1)).toBe(true);
+  await page.locator('summary[aria-label="'+t('More actions')+'"]').click();await expect(page.getByRole('button',{name:t('Resume'),exact:true})).toBeInViewport();await page.keyboard.press('Escape');
+  await page.getByRole('button',{name:t('Show inspector'),exact:true}).click();await expect(page.getByRole('complementary',{name:t('Work details')})).toBeInViewport();await page.getByRole('button',{name:t('Hide inspector'),exact:true}).click();
+  await page.screenshot({path:testInfo.outputPath(`compact-${language}-${width}.png`)});
+ }
+});
+
+
+test('narrow running Tasks keep both pause and cancel accessible',async({page})=>{
+ await mount(page);await page.setViewportSize({width:360,height:740});
+ await page.evaluate(()=>{const s=(window as any).presentation;s.work.kind='task';s.work.status='running';s.work.title='A long task title that should truncate without hiding execution controls';s.work.actions=[{id:'tasks.pause',enabled:true},{id:'tasks.cancel',enabled:true}];s.refresh();});
+ await expect(page.getByRole('button',{name:'Pause Task',exact:true})).toBeInViewport();
+ await expect(page.getByRole('button',{name:'Cancel Task',exact:true})).toBeInViewport();
+ expect(await page.locator('.ec-window').evaluate(e=>e.scrollWidth<=e.clientWidth+1)).toBe(true);
 });

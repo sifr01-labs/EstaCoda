@@ -31,3 +31,16 @@ Adjacent tool events appear in an expandable activity group. The current protoco
 New activity follows the bottom of the conversation only while the reader is already near it. Scrolling back preserves the reading position. The sidebar uses **Recent work** above workspace/history groups.
 
 `work-presentation.spec.ts` exercises Markdown safety, copy actions, routine diagnostic placement, Enter/composition/repeat handling, resolved-model and provider-return behavior, scroll preservation, and English/Arabic menu layouts. Voice capture and model-operation reconciliation retain their existing focused journeys.
+
+
+## Compact conversation layout
+
+The desktop target is a 52px toolbar with a 15px title, a 36px tab row, a reading/composer width capped at 760px, and a 10px lower gutter. Narrow windows may wrap controls instead of hiding execution actions.
+
+Existing Work uses one toolbar for its title, canonical outcome, workspace, and tool panels; the duplicate profile/workspace breadcrumb is removed. Conversation, Changes, and Results share a compact row. Pin, resume, retry, and operation inspection are available under **More actions**. Enabled stop, pause, and cancel controls remain directly visible.
+
+Operation errors, uncertain outcomes, and pending requests retain a visible disclosure beside the tabs. Opening it shows the original explanation and **Check operation**; the same information is available in Details. A connection warning does not change the saved Work outcome or imply recovery. Model loading errors remain explicit in the model picker.
+
+The composer sits just above the runtime bar without the permanent keyboard shortcut hint. The Send tooltip retains the shortcut; Enter, Shift+Enter, and input-method composition behavior are unchanged. Input grows with the draft up to 140 pixels, then scrolls internally. Missing workspace and Task guidance constraints still appear when applicable. The conversation scrolls independently, and Details overlays it in narrow windows so the composer remains in the window.
+
+This applies the approved compact layout to the live app while retaining the official artwork and theme tokens. Historical concept fixtures remain unchanged. No execution authority, trust, model routing, or receipt semantics change. Presentation and continuity journeys cover the compact layout, warning recovery, direct stop, overflow actions, and English/Arabic narrow windows.

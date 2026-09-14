@@ -1,5 +1,9 @@
 /** Shipped Work and shell copy; keys are stable English product messages. */
 export const workArabic = {
+ "Check connection": "تحقق من الاتصال",
+ "Request pending": "الطلب قيد الانتظار",
+ "More actions": "المزيد من الإجراءات",
+
  "Tool activity": "نشاط الأدوات",
  "{count} updates": "{count} تحديثات",
  "View results": "عرض النتائج",

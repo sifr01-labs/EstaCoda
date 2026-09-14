@@ -74,7 +74,7 @@ test('loaded history and Results survive canonical updates using fresh cursors',
   await page.evaluate(()=>{(window as any).continuity.refresh();});
   await expect.poll(()=>page.evaluate(()=>(window as any).continuity.reads.includes('2:100'))).toBe(true);
   await expect(page.getByRole('tab',{name:'Results'})).toHaveAttribute('aria-selected','true');
-  await page.getByRole('tab',{name:'Activity',exact:true}).click();
+  await page.getByRole('tab',{name:'Conversation',exact:true}).click();
   await expect(page.getByText('History 199',{exact:true})).toBeVisible();
   await expect(page.locator('section.ec-agent')).toHaveCount(200);
   await page.getByRole('button',{name:'Settings',exact:true}).click();
@@ -100,7 +100,7 @@ test('late lookup cannot replace a new selection or cross a profile switch',asyn
   await page.evaluate(()=>{(window as any).continuity.flush();});
   await expect(page.getByRole('heading',{name:'Older Work'})).toHaveCount(0);
   await page.locator('.ec-taskbutton').filter({hasText:'Listed Work'}).click();
-  await expect(page.getByRole('tab',{name:'Activity'})).toHaveAttribute('aria-selected','true');
+  await expect(page.getByRole('tab',{name:'Conversation'})).toHaveAttribute('aria-selected','true');
   await expect(page.getByRole('button',{name:'Show inspector'})).toBeVisible();
 });
 
@@ -151,7 +151,7 @@ test('live search finds off-page Work and a pin navigates to the canonical detai
  await page.getByRole('searchbox',{name:'Search chats'}).fill('Older');
  await page.locator('.ec-searchresult').filter({hasText:'Older Work'}).click();
  await expect(page.getByRole('heading',{name:'Older Work'})).toBeVisible();
- await page.getByRole('button',{name:'Pin Work',exact:true}).click();
+ await page.locator('summary[aria-label="More actions"]').click();await page.getByRole('button',{name:'Pin Work',exact:true}).click();await page.keyboard.press('Escape');
  await expect(page.getByRole('region',{name:'Pinned Work'}).getByText('Older Work')).toBeVisible();
  await page.getByRole('button',{name:'Settings',exact:true}).click();
  await page.getByRole('region',{name:'Pinned Work'}).getByText('Older Work').click();
@@ -216,7 +216,7 @@ test('reviews bounded Task creation and routes pause and guidance through capabi
  await page.getByRole('button',{name:'Send prompt',exact:true}).click();
  await expect(page.getByRole('button',{name:'Pause Task',exact:true})).toBeVisible();
  expect(await page.evaluate(()=>(window as any).continuity.submissions[0])).toMatchObject({kind:'task',limits:{maxProviderCalls:3}});
- await expect(page.getByRole('button',{name:'Resume Task',exact:true})).toBeDisabled();
+ await page.locator('summary[aria-label="More actions"]').click();await expect(page.getByRole('button',{name:'Resume Task',exact:true})).toBeDisabled();await page.keyboard.press('Escape');
  await page.getByRole('button',{name:'Pause Task',exact:true}).click();
  await expect.poll(()=>page.evaluate(()=>(window as any).continuity.actions[0]?.action)).toBe('tasks.pause');
  await page.getByLabel('Draft guidance').fill('Focus on error paths');
@@ -227,8 +227,8 @@ test('reviews bounded Task creation and routes pause and guidance through capabi
 test('Stop acknowledges requested cancellation without labelling execution cancelled',async({page})=>{
  await live(page);await page.locator('.ec-taskbutton').filter({hasText:'Listed Work'}).click();
  await page.getByRole('button',{name:'Stop',exact:true}).click();
- await expect(page.getByLabel('Work controls')).toContainText('Cancellation requested. Waiting for canonical termination.');
- await expect(page.locator('.ec-workmeta')).toContainText('Running');
+ await page.locator('#ec-work-attention summary').click();await expect(page.locator('#ec-work-attention')).toContainText('Cancellation requested. Waiting for canonical termination.');
+ await expect(page.locator('.ec-workheading')).toContainText('Running');
 });
 
 
@@ -243,7 +243,7 @@ for(const decision of ['approved','denied'] as const)test('records '+decision+' 
  await expect(card).toContainText('Decision recorded.');
  await expect(card.getByRole('button',{name:'Approve once',exact:true})).toBeDisabled();
  expect(await page.evaluate(()=>(window as any).continuity.decisions)).toEqual([{itemId:'attention',decision}]);
- await expect(page.locator('.ec-workmeta')).toContainText('Running');
+ await expect(page.locator('.ec-workheading')).toContainText('Running');
 });
 
 
