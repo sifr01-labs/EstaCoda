@@ -1,13 +1,13 @@
 import {test,expect,type Page} from '@playwright/test';
 import {translate} from '../../src/shared/i18n/index.js';
-async function mount(page:Page,language:'en'|'ar'='en'){
- await page.goto('/fixture.html');await page.evaluate(async language=>{
+async function mount(page:Page,language:'en'|'ar'='en',inspectError=false){
+ await page.goto('/fixture.html');await page.evaluate(async ({language,inspectError})=>{
   const rp='/node_modules/.vite/deps/react.js',dp='/node_modules/.vite/deps/react-dom_client.js',ap='/src/renderer/app.tsx',pp='/src/renderer/appearance.tsx';
   const React=(await import(rp)).default,{createRoot}=(await import(dp)).default,{App}=await import(ap),{AppearanceProvider}=await import(pp);
   document.getElementById('root')!.remove();const host=document.createElement('div');document.body.append(host);
   const target={targetId:'target',targetGeneration:1,label:'Project',isolation:'host',approvalMode:'strict'};
   const work={id:'session:one',canonicalId:'private-work-uuid',profileId:'default',kind:'session',title:'Review the project',status:'completed',target,modelBinding:{sessionId:'one'},updatedAt:1,actions:[{id:'sessions.send',enabled:true},{id:'sessions.resume',enabled:true},{id:'sessions.cancelTurn',enabled:false}]};
-  const listeners=new Set<any>();const state={work,inspectError:false,receipt:{state:'completed',cancellation:'not_requested'} as any,calls:[] as any[],copied:'',selection:null as any,primary:'First model',delay:false,release:()=>{},items:[] as any[],refresh:()=>listeners.forEach(fn=>fn(snapshot()))};
+  const listeners=new Set<any>();const state={work,inspectError,receipt:{state:'completed',cancellation:'not_requested'} as any,calls:[] as any[],copied:'',selection:null as any,primary:'First model',delay:false,release:()=>{},items:[] as any[],refresh:()=>listeners.forEach(fn=>fn(snapshot()))};
   const row=(id:string,kind:string,extra:any)=>({id,kind,workId:work.id,profileId:'default',timestamp:1,sequence:0,...extra});
   state.items=[row('user','message',{role:'user',text:'Review this code'}),row('start','tool',{name:'files.read',state:'running',summary:'Tool started'}),row('end','tool',{name:'files.read',state:'completed',summary:'Tool completed'}),row('result','result',{status:'completed',evidence:{state:'unverified',summary:'Canonical execution outcome. Inspect evidence before relying on external effects.',artifactIds:[]},usage:{reportedTokens:null,cost:null}}),row('answer','message',{role:'assistant',text:'## Review\n\nReadable **response** with `inline code`.\n\n- First finding\n- Second finding\n\n| File | Result |\n| --- | --- |\n| app.ts | Good |\n\n```ts\nconst result = 1;\n```\n\n[Reference](https://example.com/docs)\n\n![tracking](https://tracking.invalid/pixel.png)\n\n<script>window.injected=true</script>\n\n[unsafe](javascript:alert(1))'})];
   const snapshot=()=>({status:'ready',profile:{id:'default',label:'default',configuration:'ready'},runtime:'ready',work:{items:[{...work}],nextCursor:null},inbox:{items:[],nextCursor:null}});
@@ -17,14 +17,14 @@ async function mount(page:Page,language:'en'|'ar'='en'){
   (window as any).presentation=state;(window as any).desktop=api;Object.defineProperty(navigator,'clipboard',{value:{writeText:async(value:string)=>{state.copied=value;}}});
   const appearance={read:async()=>({theme:'kemet',appearance:'light',language,density:'comfortable'}),write:async()=>{}};
   createRoot(host).render(React.createElement(AppearanceProvider,{store:appearance},React.createElement(App,{adapter:{kind:'live',api,appearance}})));
- },language);await page.locator('.ec-taskbutton').filter({hasText:'Review the project'}).click();await expect(page.locator('.ec-workheading')).toContainText('Review the project');
+ },{language,inspectError});await page.locator('.ec-taskbutton').filter({hasText:'Review the project'}).click();await expect(page.locator('.ec-workheading')).toContainText('Review the project');
 }
 test('conversation renders Markdown, groups tools, and moves routine diagnostics to Details',async({page},testInfo)=>{
  const external:string[]=[];page.on('request',r=>{if(r.url().includes('tracking.invalid'))external.push(r.url());});await mount(page);
  await expect(page.getByRole('heading',{name:'Review',exact:true})).toBeVisible();await expect(page.locator('.ec-markdown strong')).toHaveText('response');await expect(page.locator('.ec-markdown table')).toBeVisible();await expect(page.locator('.ec-toolactivity')).toHaveCount(1);await expect(page.getByText('Tool started',{exact:true})).not.toBeVisible();
  await page.getByText('Tool activity',{exact:true}).click();await expect(page.getByText('Tool completed',{exact:true})).toBeVisible();await expect(page.getByText('Canonical execution outcome.',{exact:false})).toHaveCount(0);await expect(page.getByText('Reported tokens:',{exact:false})).toHaveCount(0);await expect(page.getByText('private-work-uuid',{exact:true})).toHaveCount(0);await expect(page.getByRole('button',{name:'Stop',exact:true})).toHaveCount(0);
  await page.getByRole('button',{name:'Copy code',exact:true}).click();expect(await page.evaluate(()=>(window as any).presentation.copied)).toBe('const result = 1;\n');expect(await page.evaluate(()=>(window as any).injected)).toBeUndefined();expect(external).toEqual([]);await expect(page.locator('.ec-markdown img,.ec-markdown script,.ec-markdown a[href^="javascript:"]')).toHaveCount(0);
- await page.getByRole('button',{name:'Show inspector',exact:true}).click();const inspector=page.getByRole('complementary',{name:'Work details'});await inspector.getByText('Work ID',{exact:true}).click();await expect(inspector).toContainText('private-work-uuid');await expect(inspector.getByRole('button',{name:'Check operation',exact:true})).toBeVisible();await inspector.getByRole('button',{name:'Copy ID',exact:true}).click();expect(await page.evaluate(()=>(window as any).presentation.copied)).toBe('private-work-uuid');
+ await page.getByRole('button',{name:'Show inspector',exact:true}).click();const inspector=page.getByRole('complementary',{name:'Work details'});await inspector.getByText('Work ID',{exact:true}).click();await expect(inspector).toContainText('private-work-uuid');await expect(inspector.getByRole('button',{name:'Check operation',exact:true})).toHaveCount(0);await expect(inspector.getByText('Local Mac',{exact:true})).toBeVisible();await expect(inspector.getByText('Connected',{exact:true})).toBeVisible();await inspector.getByRole('button',{name:'Copy ID',exact:true}).click();expect(await page.evaluate(()=>(window as any).presentation.copied)).toBe('private-work-uuid');
  await page.getByRole('button',{name:'Hide inspector',exact:true}).click();await page.setViewportSize({width:1440,height:960});await page.screenshot({path:testInfo.outputPath('work.png')});
 });
 test('Enter sends once; Shift+Enter and composing text do not send',async({page})=>{
@@ -72,9 +72,7 @@ test('compact header and composer reserve the window for the conversation',async
 });
 
 test('operation problems remain discoverable without expanding the header; active stop stays visible',async({page})=>{
- await mount(page);const height=(await page.locator('.ec-conversation-header').boundingBox())!.height;
- await page.evaluate(()=>{(window as any).presentation.inspectError=true;});
- await page.locator('summary[aria-label="More actions"]').click();await page.getByRole('button',{name:'Check operation',exact:true}).click();await page.keyboard.press('Escape');
+ await mount(page,'en',true);const height=(await page.locator('.ec-conversation-header').boundingBox())!.height;
  await expect(page.locator('summary[aria-label="Check connection"]')).toBeVisible();
  await expect(page.getByText('Operation status unavailable. Check again after reconnecting.',{exact:true})).not.toBeVisible();
  expect((await page.locator('.ec-conversation-header').boundingBox())!.height).toBe(height);
@@ -107,4 +105,36 @@ test('narrow running Tasks keep both pause and cancel accessible',async({page})=
  await expect(page.getByRole('button',{name:'Pause Task',exact:true})).toBeInViewport();
  await expect(page.getByRole('button',{name:'Cancel Task',exact:true})).toBeInViewport();
  expect(await page.locator('.ec-window').evaluate(e=>e.scrollWidth<=e.clientWidth+1)).toBe(true);
+});
+
+for(const language of ['en','ar'] as const)test(`${language} conversation navigator previews and jumps without crowding an expanded draft`,async({page},testInfo)=>{
+ await mount(page,language);await page.setViewportSize({width:1280,height:900});const t=(key:Parameters<typeof translate>[1])=>translate(language,key);
+ await page.evaluate(()=>{const s=(window as any).presentation;s.items=Array.from({length:80},(_,i)=>({id:'turn'+i,kind:'message',role:i%2===0?'user':'assistant',text:i%2===0?'Question '+i:'Response '+i+'\n\nA longer answer to keep the conversation scrollable.',timestamp:i,sequence:i}));s.refresh();});
+ const panel=page.locator('#ec-work-panel'),rail=page.getByRole('navigation',{name:t('Loaded conversation turns')});await expect(rail).toBeVisible();
+ await expect.poll(()=>rail.getByRole('button').count()).toBeLessThan(40);await expect.poll(()=>panel.evaluate(e=>e.scrollHeight-e.scrollTop-e.clientHeight)).toBeLessThan(48);
+ const first=rail.getByRole('button').first();await page.keyboard.press('Tab');await first.focus();await expect(first.locator('.ec-turn-preview')).toBeVisible();await page.keyboard.press('Enter');await expect.poll(()=>panel.evaluate(e=>Math.abs(e.querySelector('[data-conversation-turn]')!.getBoundingClientRect().top-e.getBoundingClientRect().top-12))).toBeLessThan(2);
+ await expect(page.getByRole('button',{name:t('Back to latest')})).toBeVisible();await first.press('ArrowDown');await expect(rail.getByRole('button').nth(1)).toBeFocused();
+ await page.getByLabel(t('Draft guidance')).fill(Array.from({length:12},()=> 'Draft line').join('\n'));
+ const back=page.getByRole('button',{name:t('Back to latest')});await expect.poll(async()=>{const b=(await back.boundingBox())!,c=(await page.locator('.ec-composer').boundingBox())!;return b.y+b.height<=c.y;}).toBe(true);
+ const bubble=page.locator('.ec-usernote').first();expect((await bubble.boundingBox())!.width).toBeLessThan((await panel.boundingBox())!.width/2);
+ await back.click();await expect.poll(()=>panel.evaluate(e=>e.scrollHeight-e.scrollTop-e.clientHeight)).toBeLessThan(48);await expect(back).toHaveCount(0);
+ await page.getByLabel(t('Draft guidance')).fill('');await page.getByRole('button',{name:t('Show inspector'),exact:true}).click();
+ await page.screenshot({path:testInfo.outputPath(`refined-${language}.png`)});
+ await page.setViewportSize({width:360,height:740});expect(await page.locator('.ec-window').evaluate(e=>e.scrollWidth<=e.clientWidth+1)).toBe(true);
+});
+
+test('settled workspace chats live in History and empty session titles read New chat',async({page})=>{
+ await mount(page);const history=page.locator('.ec-history');await expect(history.locator('.ec-taskbutton')).toContainText('Review the project');
+ await page.evaluate(()=>{const s=(window as any).presentation;s.work.status='running';s.refresh();});await expect(history).toHaveCount(0);await expect(page.locator('.ec-taskbutton')).toContainText('Review the project');
+ await page.evaluate(()=>{const s=(window as any).presentation;s.work.title='Untitled session';s.work.status='draft';s.refresh();});await expect(page.locator('.ec-taskbutton')).toContainText('New chat');await expect(page.locator('.ec-workheading')).toContainText('New chat');
+});
+
+test('Details formats usage concisely while keeping exact estimates and context accessible',async({page},testInfo)=>{
+ await mount(page);await page.evaluate(()=>{(window as any).desktop.work.usage=async()=>({scope:'session',reportedTokens:16645,providerCalls:2,usageComplete:true,pricingComplete:false,cost:{amount:0.0542,currency:'USD'},context:{usedTokens:8202,totalTokens:1048576,provider:'kimi',model:'kimi-k3'}});});
+ await page.getByRole('button',{name:'Show inspector',exact:true}).click();const usage=page.getByRole('region',{name:'Canonical Work usage'});
+ await expect(usage.getByText('16,645',{exact:true})).toBeVisible();await expect(usage.getByText('8.2K / 1.05M',{exact:true})).toBeVisible();await expect(usage.getByText(/<1%.* used/)).toBeVisible();
+ await expect(usage.locator('.ec-cost-exact summary')).toContainText('$0.054');await expect(usage.locator('.ec-cost-exact summary')).toContainText('Partial');
+ await usage.locator('.ec-cost-exact summary').click();await expect(usage.getByText('0.0542 USD',{exact:true})).toBeVisible();
+ await usage.getByText('Measurement details',{exact:true}).click();await expect(usage.getByText('8,202 / 1,048,576',{exact:true})).toBeVisible();await expect(usage.getByText('kimi / kimi-k3',{exact:true})).toBeVisible();
+ await page.screenshot({path:testInfo.outputPath('usage-details.png')});
 });

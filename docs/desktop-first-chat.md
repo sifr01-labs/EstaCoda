@@ -8,7 +8,7 @@ A lost save response exposes **Check workspace**, which reads saved state withou
 
 New Work defaults to a conversation. **Chat options → Run in background** requests a supervised Task and exposes its existing limits and authority review. No automatic conversion into a Task or expansion of execution authority occurs.
 
-Unattached local drafts appear under **Drafts**. Historical Work with no target appears under **Previous conversations**. Existing history remains readable; the app explains that a new chat with a selected workspace is required for further execution. It does not silently attach old history to a folder.
+Unattached local drafts appear under **Drafts**. Settled Work appears under **History**, grouped by workspace, with **Other chats** for records with no target. Existing history remains readable; the app explains that a new chat with a selected workspace is required for further execution. It does not silently attach old history to a folder.
 
 The live welcome screen uses the official icon and wordmark with a bounded wordmark width and tighter spacing. CSS trims the wordmark's transparent display padding; the source artwork is unchanged. New controls and messages support English and Arabic.
 
@@ -26,7 +26,7 @@ The **+** menu contains attachments and media prompt actions. The microphone rev
 
 Assistant messages support Markdown paragraphs, lists, tables, and copyable code blocks through pinned `react-markdown` and `remark-gfm` dependencies. Raw HTML and remote images are disabled. HTTP(S) references offer **Copy link**; this pass does not grant provider-written links permission to navigate the privileged desktop window or launch the host browser. Retained media remains available through the existing artifact surfaces.
 
-Adjacent tool events appear in an expandable activity group. The current protocol supplies redacted event summaries, not complete arguments/output or call identities; the UI counts updates and does not infer file counts, timings, or verified effects. Failures remain expanded and partial/failed/cancelled outcomes retain visible notices. Ordinary completion receipts, unavailable token fields, and generic evidence warnings no longer interrupt conversation text. Detailed evidence remains in Results; usage, copyable Work ID, and operation inspection are in Details. Urgent operation recovery remains visible beside Work controls.
+Adjacent tool events appear in an expandable activity group. The current protocol supplies redacted event summaries, not complete arguments/output or call identities; the UI counts updates and does not infer file counts, timings, or verified effects. Failures remain expanded and partial/failed/cancelled outcomes retain visible notices. Ordinary completion receipts, unavailable token fields, and generic evidence warnings no longer interrupt conversation text. Detailed evidence remains in Results; usage, copyable Work ID, and recovery details are in Details. Urgent operation recovery remains visible beside Work controls.
 
 New activity follows the bottom of the conversation only while the reader is already near it. Scrolling back preserves the reading position. The sidebar uses **Recent work** above workspace/history groups.
 
@@ -35,12 +35,24 @@ New activity follows the bottom of the conversation only while the reader is alr
 
 ## Compact conversation layout
 
-The desktop target is a 52px toolbar with a 15px title, a 36px tab row, a reading/composer width capped at 760px, and a 10px lower gutter. Narrow windows may wrap controls instead of hiding execution actions.
+The desktop target is a 52px toolbar with a 15px title, a 36px tab row, a reading/composer width capped at 850px, and a 10px lower gutter. Narrow windows may wrap controls instead of hiding execution actions.
 
-Existing Work uses one toolbar for its title, canonical outcome, workspace, and tool panels; the duplicate profile/workspace breadcrumb is removed. Conversation, Changes, and Results share a compact row. Pin, resume, retry, and operation inspection are available under **More actions**. Enabled stop, pause, and cancel controls remain directly visible.
+Existing Work uses one toolbar for its title, canonical outcome, workspace, and tool panels; the duplicate profile/workspace breadcrumb is removed. Conversation, Changes, and Results share a compact row. Pin, resume, and retry are available under **More actions**. Operation inspection appears when receipt recovery is needed. Enabled stop, pause, and cancel controls remain directly visible.
 
 Operation errors, uncertain outcomes, and pending requests retain a visible disclosure beside the tabs. Opening it shows the original explanation and **Check operation**; the same information is available in Details. A connection warning does not change the saved Work outcome or imply recovery. Model loading errors remain explicit in the model picker.
 
 The composer sits just above the runtime bar without the permanent keyboard shortcut hint. The Send tooltip retains the shortcut; Enter, Shift+Enter, and input-method composition behavior are unchanged. Input grows with the draft up to 140 pixels, then scrolls internally. Missing workspace and Task guidance constraints still appear when applicable. The conversation scrolls independently, and Details overlays it in narrow windows so the composer remains in the window.
 
 This applies the approved compact layout to the live app while retaining the official artwork and theme tokens. Historical concept fixtures remain unchanged. No execution authority, trust, model routing, or receipt semantics change. Presentation and continuity journeys cover the compact layout, warning recovery, direct stop, overflow actions, and English/Arabic narrow windows.
+
+## Reading, History, and Results
+
+User messages fit their content and align to the trailing edge, capped at 75% of the reading column (88% on small screens). Their accessible label remains available. The loaded-turn navigator shows a quiet marker rail with hover and keyboard previews, click/Enter jumps, arrow/Home/End focus navigation, and **Back to latest**. Longer lists sample markers to fit the available height; ordinary scrolling and bounded history loading remain available. Jumping back does not re-enable automatic following until the reader returns to the bottom. Expanded drafts move the latest button above the composer.
+
+**Work** remains the umbrella navigation area, **New chat** starts a conversation, and **Task** denotes background execution. Untitled session placeholders display as **New chat** without changing saved titles. **History** groups loaded settled records across workspaces; active work, drafts, and pinned items remain easy to reach. Existing pagination limits still apply. The runtime bar uses **N running**.
+
+Details shows **Runtime** from the local desktop bridge and its connection state, independently of target isolation. Unknown isolation is omitted; the UI never substitutes Local for unknown isolation. The current transport supports local execution only; named remote runtimes need an authoritative remote identity contract. **Model** uses the configured display label, with next-message semantics in its tooltip. **Tokens**, **Provider calls**, compact **Cost**, and compact **Context** retain provider-reported and partial/lower-bound qualifications. Exact cost and context measurements remain expandable. Nonzero sub-mill costs display as less than $0.001 rather than zero.
+
+Results groups the canonical outcome, evidence summary, named retained artifacts, recorded mutations, verification counts, and scoped usage. **Open** previews retained bytes; **Save a copy** uses the existing native save flow. Refresh re-reads saved evidence and clears the previous preview. Disconnects clear evidence and reject late metadata/preview results. Conversation-only evidence omits irrelevant external-action sections. Results evidence for a chat covers the recorded turn, while usage is explicitly labeled as covering the entire chat or Task.
+
+The current evidence contract names tool records and validation relationships, not business-level external changes. Results therefore says **Recorded changes**, not inferred claims such as “API product created.” It does not offer an external **Verify** action, host-file **Reveal**, or duration without authoritative supporting contracts. No new verification run, execution policy, workspace authority, or artifact access path is introduced by this presentation change.
