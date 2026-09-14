@@ -11,10 +11,17 @@ export function denySessionPermissions(session: Session): void {
   session.setDevicePermissionHandler(() => false);
   session.on('will-download', event => event.preventDefault());
 }
-export function lockWindow(window: BrowserWindow): void {
+export function lockWindow(window: BrowserWindow, developmentUrl?: string): void {
+  // Vite reloads its own document after dependency optimization. Blocking that
+  // navigation aborts the initial module graph, leaving an empty renderer.
+  // Only the exact, already-loaded Main-owned development document may reload.
+  const navigation = (event: Electron.Event & { url: string; isMainFrame: boolean }) => {
+    if (!developmentUrl || !event.isMainFrame || event.url !== developmentUrl ||
+      window.webContents.getURL() !== developmentUrl) event.preventDefault();
+  };
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
-  window.webContents.on('will-navigate', event => event.preventDefault());
-  window.webContents.on('will-frame-navigate', event => event.preventDefault());
+  window.webContents.on('will-navigate', navigation);
+  window.webContents.on('will-frame-navigate', navigation);
   window.webContents.on('will-redirect', event => event.preventDefault());
   window.webContents.on('will-attach-webview', event => event.preventDefault());
 }

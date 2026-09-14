@@ -33,3 +33,20 @@ it('revokes microphone grants after window destruction without accessing destroy
  expect(()=>setMicrophonePermission(window,url,false)).not.toThrow();expect(()=>setMicrophonePermission(window,url,true)).not.toThrow();
  let allowed=true;request(contents,'media',(v:boolean)=>allowed=v,{requestingUrl:url,isMainFrame:true,mediaTypes:['audio']});expect(allowed).toBe(false);
 });
+
+it('allows only a reload of the exact loaded development main document',async()=>{
+ const {lockWindow}=await import('./window-policy.js');
+ const listeners=new Map<string,(event:any)=>void>();let current='http://localhost:5173/';let open:any;
+ const window={webContents:{getURL:()=>current,on:(name:string,handler:any)=>listeners.set(name,handler),setWindowOpenHandler:(handler:any)=>{open=handler;}}} as unknown as BrowserWindow;
+ const prevented=(name:string,url=current,isMainFrame=true)=>{let denied=false;listeners.get(name)!({url,isMainFrame,preventDefault:()=>{denied=true;}});return denied;};
+ lockWindow(window,current);
+ for(const event of ['will-navigate','will-frame-navigate']){
+  expect(prevented(event)).toBe(false);
+  for(const url of ['https://attacker.invalid/','http://localhost:5174/','http://localhost:5173/credential.html','http://localhost:5173/?other','http://localhost:5173/#other'])expect(prevented(event,url)).toBe(true);
+  expect(prevented(event,current,false)).toBe(true);
+  current='about:blank';expect(prevented(event,'http://localhost:5173/')).toBe(true);current='http://localhost:5173/';
+ }
+ expect(prevented('will-redirect')).toBe(true);expect(prevented('will-attach-webview')).toBe(true);expect(open()).toEqual({action:'deny'});
+ lockWindow(window);
+ expect(prevented('will-navigate')).toBe(true);expect(prevented('will-frame-navigate')).toBe(true);
+});

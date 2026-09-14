@@ -14,6 +14,7 @@ export const CONTROL_ERRORS = Object.freeze({
   "-32004": "Control binding is stale.", "-32005": "Operation identity conflict.",
   "-32006": "Control service unavailable.", "-32007": "Canonical snapshot required.",
   "-32008": "Operation outcome uncertain; reconcile before retrying.",
+  "-32011": "Session database upgrade required.", "-32012": "Session database requires a newer runtime.",
   "-32009": "Control limit exceeded.", "-32010": "Control request cancelled.",
 });
 export type ControlErrorCode = keyof typeof CONTROL_ERRORS;

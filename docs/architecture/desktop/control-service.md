@@ -161,3 +161,18 @@ Target discovery uses bounded keyset pages: `targets.list` accepts an optional t
 `cursor` and returns `nextCursor` when truncated. `work.targets` accepts either a cursor
 or an exact `{targetId, targetGeneration}` lookup; the latter rechecks current profile,
 identity, availability and trust. A cursor is a position, never target authority.
+
+### Database compatibility recovery
+
+Before capturing Work, the read-only observer checks the session database schema
+against the schema supported by this core (currently 36). An older or unversioned
+database returns fixed protocol error `-32011` (database upgrade required); a newer
+database returns `-32012` (newer runtime required). No SQLite error details or
+private paths cross the protocol, and inspection never migrates the database.
+
+Desktop shows English/Arabic recovery guidance and waits for an explicit reconnect
+for these compatibility failures. Connections stays on that recovery screen instead
+of repeatedly requesting unavailable connection data. Migration is an operator
+operation through the owning core: stop older writers, make a consistent SQLite
+backup, run the core migrations, verify integrity, then reconnect. Existing unbound
+Work remains legacy; migration does not grant workspace trust or execution authority.

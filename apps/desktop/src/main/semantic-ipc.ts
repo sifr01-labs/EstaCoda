@@ -22,7 +22,7 @@ import type { DesktopConnection, ConnectionState } from './connection.js';
 import { WindowAuthority } from './window-policy.js';
 import type { Profiles } from './profiles.js';
 export function rendererSnapshot(state:ConnectionState):DesktopSnapshot {
-  return {counts:state.status==='ready'?state.counts??null:null,status:state.status,profile:state.bootstrap?.profile??{id:state.profileId,label:state.profileId,configuration:'unconfigured'},runtime:state.bootstrap?.runtime.state??'disconnected',work:state.work,inbox:state.inbox};
+  return {...(state.databaseIssue?{databaseIssue:state.databaseIssue}:{}),counts:state.status==='ready'?state.counts??null:null,status:state.status,profile:state.bootstrap?.profile??{id:state.profileId,label:state.profileId,configuration:'unconfigured'},runtime:state.bootstrap?.runtime.state??'disconnected',work:state.work,inbox:state.inbox};
 }
 const libraryReads={schedulesDraft:'schedules.draft',schedulesList:'schedules.list',schedulesGet:'schedules.get',schedulesHistory:'schedules.history',librarySkills:'library.skills',librarySkill:'library.skill',libraryMemory:'library.memory',libraryProposals:'library.proposals',libraryProposal:'library.proposal'} as const;
 export function validateSemanticPayload(method:string,payload:unknown):void {

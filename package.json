@@ -82,6 +82,7 @@
     "provider:hardening": "node --import tsx scripts/provider-hardening.ts",
     "provider:hardening:bun": "bun scripts/provider-hardening.ts",
     "desktop:dev": "pnpm --filter @estacoda/desktop dev",
+    "desktop:dev:smoke": "node --import tsx apps/desktop/tests/native-development.mts",
     "desktop:typecheck": "pnpm --filter @estacoda/desktop typecheck",
     "desktop:test": "pnpm --filter @estacoda/desktop test",
     "desktop:package": "pnpm --filter @estacoda/desktop package",

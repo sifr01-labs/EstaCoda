@@ -1,3 +1,4 @@
+import { TASK_MODEL_OVERRIDE_SCHEMA_VERSION } from '../tasks/task-schema.js';
 import { setImmediate } from 'node:timers/promises';
 import { sessionActions, inboxActions } from './action-projections.js';
 import { historyBoundary, historyPage, type HistoryBoundary } from './session-history.js';
@@ -24,6 +25,10 @@ export async function captureWork(input: { homeDir: string; profileId: string; v
   const sessions = new SQLiteSessionDB({ path, readonly: true });
   try {
     sessions.db.exec('begin');
+    const versionTable = sessions.db.query<{name:string}>("select name from sqlite_master where type='table' and name='schema_version'").get();
+    const version = versionTable ? sessions.db.query<{version:number|null}>('select max(version) as version from schema_version').get()?.version ?? 0 : 0;
+    if (version < TASK_MODEL_OVERRIDE_SCHEMA_VERSION) throw new ControlProtocolError('-32011');
+    if (version > TASK_MODEL_OVERRIDE_SCHEMA_VERSION) throw new ControlProtocolError('-32012');
     const state: WorkState = { capturedAt:Date.now(), work: [], activity: {}, inbox: attention.inbox, activeSchedules:attention.inbox.some(item=>item.id==='setup:schedules')?null:attention.jobs.filter(job=>job.status==='active').length, history: {} };
     // Capture navigation metadata; transcript bodies are paged separately.
     const ids = sessions.db.query<{ id: string }>('select id from sessions where profile_id = ? order by updated_at desc, id').all(input.profileId);

@@ -29,3 +29,6 @@ it("bounds frames and nesting and refuses serialization side effects", () => {
   expect(() => assertEnvelope({ jsonrpc: "2.0", id: "r", result: { get secret() { read = true; return "secret"; } } })).toThrow();
   expect(read).toBe(false);
 });
+it('round trips database compatibility failures with fixed safe messages',()=>{
+ for(const code of ['-32011','-32012'] as const){const envelope=failureEnvelope('bootstrap',code);expect(parseControlFrame(serializeControlFrame(envelope))).toEqual(envelope);}
+});

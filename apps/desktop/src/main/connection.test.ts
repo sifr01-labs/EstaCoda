@@ -1,11 +1,12 @@
 import{EventEmitter}from'node:events';
 import{afterEach,expect,it,vi}from'vitest';
-const controls=vi.hoisted(()=>({fail:false,clients:[] as any[],lookup:null as null|((work:unknown)=>void)}));
+const controls=vi.hoisted(()=>({fail:false,code:undefined as string|undefined,clients:[] as any[],lookup:null as null|((work:unknown)=>void)}));
 vi.mock('./protocol-client.js',()=>({ProtocolClient:class extends EventEmitter{
  context={capabilities:{events:[],methods:['work.counts']}};profile='default';closed=false;
  constructor(){super();controls.clients.push(this);}
  async request(method:string,params:any){
   if(method==='control.initialize'){this.profile=params.profileId;return{};}
+  if(controls.code)throw Object.assign(Error('Database incompatible'),{code:controls.code});
   if(controls.fail)throw Error('Unavailable');
   if(method==='work.counts')return{runningSessions:this.profile==='default'?2:0,runningTasks:1,queuedTasks:0,approvals:3,attention:3,scheduled:null,asOf:1};
   if(method==='work.get')return new Promise(resolve=>{controls.lookup=resolve;});
@@ -18,7 +19,7 @@ vi.mock('./protocol-client.js',()=>({ProtocolClient:class extends EventEmitter{
 }}));
 import{DesktopConnection}from'./connection.js';import type{ServiceProcess}from'./service-process.js';
 const create=()=>{const service=Object.assign(new EventEmitter(),{start:vi.fn(()=>({input:{},output:{},credentials:{}})),stop:vi.fn()});return{service,connection:new DesktopConnection(service as unknown as ServiceProcess)};};
-afterEach(()=>{controls.fail=false;controls.lookup=null;controls.clients.length=0;vi.useRealTimers();});
+afterEach(()=>{controls.fail=false;controls.code=undefined;controls.lookup=null;controls.clients.length=0;vi.useRealTimers();});
 it('keeps inspected pages across refresh and clears them on profile changes',async()=>{
  const{connection}=create();try{connection.switchProfile('default');await vi.waitFor(()=>expect(connection.state.status).toBe('ready'));await connection.more('work');expect(connection.state.work.items).toHaveLength(200);const before=connection.state;controls.clients[0].emit('event',{type:'work.changed'});await vi.waitFor(()=>expect(connection.state).not.toBe(before));expect(connection.state.work.items).toHaveLength(200);connection.switchProfile('other');expect(connection.state.work.items).toEqual([]);await vi.waitFor(()=>expect(connection.state.status).toBe('ready'));expect(connection.state.work.items.every(item=>item.profileId==='other')).toBe(true);expect(controls.clients[0].closed).toBe(true);}finally{connection.close();}
 });
@@ -38,4 +39,15 @@ it('reads off-page Work and rejects a late reply after a profile switch',async()
 
 it('clears canonical counts on disconnect and refreshes them within the selected profile',async()=>{
  const{connection}=create();try{connection.switchProfile('default');await vi.waitFor(()=>expect(connection.state.status).toBe('ready'));expect(connection.state.counts).toMatchObject({runningSessions:2,approvals:3,scheduled:null});controls.clients[0].emit('disconnected');expect(connection.state.status).toBe('disconnected');expect(connection.state.counts).toBeNull();connection.switchProfile('other');expect(connection.state.counts).toBeUndefined();await vi.waitFor(()=>expect(connection.state.status).toBe('ready'));expect(connection.state.counts?.runningSessions).toBe(0);}finally{connection.close();}
+});
+
+it.each([['-32011','upgrade_required'],['-32012','newer_schema']])('holds schema failure %s until explicit reconnect',async(code,issue)=>{
+ vi.useFakeTimers();controls.code=code;const{connection,service}=create();try{
+  connection.switchProfile('default');await vi.advanceTimersByTimeAsync(0);
+  expect(connection.state).toMatchObject({status:'unavailable',databaseIssue:issue,bootstrap:null});
+  await vi.advanceTimersByTimeAsync(60000);expect(service.start).toHaveBeenCalledTimes(1);
+  await expect(connection.connectionRequest('connections.list',{limit:100})).rejects.toThrow('Connections unavailable');
+  controls.code=undefined;connection.switchProfile('default');await vi.advanceTimersByTimeAsync(0);
+  expect(connection.state.status).toBe('ready');expect(connection.state.databaseIssue).toBeUndefined();
+ }finally{connection.close();}
 });

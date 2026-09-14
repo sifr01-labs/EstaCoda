@@ -3,7 +3,7 @@ import { CONTROL_METHODS,type MethodContracts,CONTROL_EVENTS, DESKTOP_PROTOCOL_V
 import { ProtocolClient } from './protocol-client.js';
 import { ServiceProcess, validateProfileId } from './service-process.js';
 export type ConnectionState = { status: 'connecting' | 'ready' | 'disconnected' | 'incompatible' | 'unavailable'; generation: number;
-  profileId: string; counts?:MethodContracts['work.counts']['result']|null;bootstrap: BootstrapResult | null; work: Page<WorkProjection>; inbox: Page<InboxProjection> };
+  databaseIssue?: 'upgrade_required' | 'newer_schema'; profileId: string; counts?:MethodContracts['work.counts']['result']|null;bootstrap: BootstrapResult | null; work: Page<WorkProjection>; inbox: Page<InboxProjection> };
 export const INSPECTION_METHODS=CONTROL_METHODS.filter(method=>method==='browser.control'||method==='browser.list'||method==='browser.snapshot'||method.startsWith('media.')||method.startsWith('artifacts.')||method==='evidence.get'||method.startsWith('files.')||method.startsWith('diff.')||method.startsWith('terminal.'));
 export const TARGET_METHODS=CONTROL_METHODS.filter(method=>method.startsWith('targets.'));
 export const CONNECTION_METHODS=CONTROL_METHODS.filter(method=>method.startsWith('connections.')||method.startsWith('telegram.')||method.startsWith('gateway.'));
@@ -42,7 +42,7 @@ export class DesktopConnection extends EventEmitter {
     } catch (error) {
       if (generation !== this.state.generation) return;
       if (error && typeof error === 'object' && 'code' in error && error.code === '-32001') this.lost('incompatible');
-      else this.lost('unavailable');
+      else this.inspectionFailed(error);
     }
   }
   private async refresh(): Promise<void> {
@@ -64,7 +64,7 @@ export class DesktopConnection extends EventEmitter {
         if (sub.state !== 'subscribed') throw new Error();
         this.state = {...this.state, status:'ready', bootstrap, work, inbox,counts}; this.publish();
       } while (this.#refreshAgain && client === this.#client);
-    } catch { if (client === this.#client) this.lost('unavailable'); }
+    } catch (error) { if (client === this.#client) this.inspectionFailed(error); }
     finally { this.#refreshing = false; if (this.#refreshAgain && !this.#stopped) { this.#refreshAgain = false; void this.refresh(); } }
   }
   private async readWork(client: ProtocolClient, count: number): Promise<Page<WorkProjection>> {
@@ -161,11 +161,15 @@ export class DesktopConnection extends EventEmitter {
     if (client !== this.#client || generation !== this.state.generation) throw new Error('Desktop context changed.');
     return page;
   }
-  private lost(status: ConnectionState['status'] = 'disconnected'): void {
+  private inspectionFailed(error: unknown): void {
+    const code = error && typeof error === 'object' && 'code' in error ? error.code : undefined;
+    this.lost('unavailable', code === '-32011' ? 'upgrade_required' : code === '-32012' ? 'newer_schema' : undefined);
+  }
+  private lost(status: ConnectionState['status'] = 'disconnected', databaseIssue?: ConnectionState['databaseIssue']): void {
     if (this.#stopped || this.#timer) return;
     this.#client?.dispose(); this.#client = null; this.service.stop(); this.emit('invalidate');
-    this.state = {...this.state, generation:this.state.generation+1, status, counts:null,bootstrap:null, work:{items:[],nextCursor:null}, inbox:{items:[],nextCursor:null}}; this.publish();
-    if (status === 'incompatible') return;
+    this.state = {...this.state, generation:this.state.generation+1, status, databaseIssue, counts:null,bootstrap:null, work:{items:[],nextCursor:null}, inbox:{items:[],nextCursor:null}}; this.publish();
+    if (status === 'incompatible' || databaseIssue) return;
     this.#timer = setTimeout(() => { this.#timer = undefined; void this.connect(); }, Math.min(30_000, 500 * 2 ** this.#attempt++));
   }
   close(): void {

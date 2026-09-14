@@ -21,7 +21,7 @@ export type DesktopSettingsApi={
 import type {MethodContracts} from '@estacoda/control-protocol';
 import type {AppearancePreferences} from './appearance.js';
 import type { ActivityProjection, Page, WorkProjection, InboxProjection } from '@estacoda/control-protocol';
-export type DesktopSnapshot = {counts?:import('@estacoda/control-protocol').RuntimeCounts|null; status: 'connecting' | 'ready' | 'disconnected' | 'incompatible' | 'unavailable';
+export type DesktopSnapshot = {databaseIssue?: 'upgrade_required' | 'newer_schema';counts?:import('@estacoda/control-protocol').RuntimeCounts|null; status: 'connecting' | 'ready' | 'disconnected' | 'incompatible' | 'unavailable';
   profile: {id:string;label:string;configuration:'unconfigured'|'ready'|'repair_required'};
   runtime: 'stopped'|'starting'|'ready'|'disconnected'|'incompatible'|'unavailable';
   work:Page<WorkProjection>;inbox:Page<InboxProjection> };

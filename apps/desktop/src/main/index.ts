@@ -30,7 +30,7 @@ async function openWindow(): Promise<void> {
   const window = new BrowserWindow({ width: 1280, height: 860, frame: process.platform === 'darwin', ...(process.platform === 'darwin' ? {titleBarStyle:'hiddenInset' as const,trafficLightPosition:{x:14,y:14}} : {}), backgroundColor: '#131313', minWidth: 320, minHeight: 480, show: false,
     webPreferences: securePreferences(path.join(__dirname, 'preload.cjs'), app.isPackaged) });
   denySessionPermissions(window.webContents.session);
-  lockWindow(window);
+  lockWindow(window, !app.isPackaged && MAIN_WINDOW_VITE_DEV_SERVER_URL ? new URL(MAIN_WINDOW_VITE_DEV_SERVER_URL).href : undefined);
   const runtimeRoot = app.isPackaged ? path.join(process.resourcesPath, '.runtime') : path.join(app.getAppPath(), '.runtime');
   const connection = new DesktopConnection(new ServiceProcess(runtimeRoot, app.getPath('home')));
   const credentialRoot=path.join(__dirname,`../renderer/${CREDENTIAL_WINDOW_VITE_NAME}`);
