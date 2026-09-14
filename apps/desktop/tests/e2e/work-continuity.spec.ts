@@ -164,7 +164,7 @@ test('new Work preserves a draft through navigation and submits target-bound att
  await page.getByRole('button',{name:'New chat',exact:true}).click();
  await page.getByRole('button',{name:'Work target',exact:true}).click();await page.getByRole('dialog').getByRole('button',{name:/Trusted repo/}).click();
  await page.getByLabel('Draft guidance').fill('Review these notes');
- await page.getByRole('button',{name:'Add attachments',exact:true}).click();
+ await page.getByRole('button',{name:'Add attachments',exact:true}).click();await page.getByRole('button',{name:'Choose files…',exact:true}).click();
  await expect(page.getByLabel('Attachments').getByText('notes.md')).toBeVisible();
  await page.getByRole('button',{name:'Settings',exact:true}).click();
  // Drafts remain selectable from the sidebar while Work is not yet canonical.
@@ -300,7 +300,7 @@ test('draft inspection follows the selected target and shows canonical route and
  await live(page,true);
  await page.getByRole('button',{name:'New chat',exact:true}).click();
  await page.getByRole('button',{name:'Work target',exact:true}).click();await page.getByRole('dialog').getByRole('button',{name:/Trusted repo/}).click();
- await page.getByRole('button',{name:'Execution details',exact:true}).click();
+ await page.getByText('Chat options',{exact:true}).click();await page.getByRole('button',{name:'Execution details',exact:true}).click();
  const inspector=page.getByRole('complementary',{name:'Draft details'});
  await expect(inspector).toContainText('Trusted repo');
  await expect(inspector).toContainText('Profile approval mode: Strict');

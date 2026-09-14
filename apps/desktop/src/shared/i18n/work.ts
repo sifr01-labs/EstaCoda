@@ -1,5 +1,23 @@
 /** Shipped Work and shell copy; keys are stable English product messages. */
 export const workArabic = {
+ "Tool activity": "نشاط الأدوات",
+ "{count} updates": "{count} تحديثات",
+ "View results": "عرض النتائج",
+ "Voice input": "الإدخال الصوتي",
+ "Audio stays in your draft until Send. Your configured transcription provider may process it remotely. Limit: 60 seconds.": "يبقى الصوت في مسودتك حتى الإرسال. قد يعالجه مزوّد التفريغ النصي المُعدّ عن بُعد. الحد: 60 ثانية.",
+ "Work ID": "معرّف العمل",
+ "Copy ID": "نسخ المعرّف",
+ "Copy unavailable": "النسخ غير متاح",
+ "Copy link": "نسخ الرابط",
+ "Copy code": "نسخ الشفرة",
+ "Enter to send · Shift+Enter for a new line": "Enter للإرسال · Shift+Enter لسطر جديد",
+ "Model for the next message": "نموذج الرسالة التالية",
+ "Find a model": "البحث عن نموذج",
+ "Add a new provider…": "إضافة مزوّد جديد…",
+ "Providers could not be loaded.": "تعذّر تحميل المزوّدين.",
+ "Recent work": "العمل الأخير",
+ "Resume": "متابعة",
+
  "Choose a workspace": "اختر مساحة عمل",
  "Close workspace picker": "إغلاق اختيار مساحة العمل",
  "Add a workspace": "إضافة مساحة عمل",
