@@ -38,7 +38,7 @@ async function openWindow(): Promise<void> {
   const credentialUrl = CREDENTIAL_WINDOW_VITE_DEV_SERVER_URL ? new URL('credential.html', CREDENTIAL_WINDOW_VITE_DEV_SERVER_URL).href : 'estacoda://credential/credential.html';
   const presentation=new AppearanceSettings(app.getPath('userData'));
   const t=(key:MessageKey)=>translate(presentation.read().language??'en',key);
-  const credentials = new CredentialWindow(window, path.join(__dirname, 'credential-preload.cjs'), credentialUrl, app.isPackaged, credentialRoot,()=>presentation.read().language??'en');
+  const credentials = new CredentialWindow(window, path.join(__dirname, 'credential-preload.cjs'), credentialUrl, app.isPackaged, credentialRoot,()=>presentation.read().language??'en',()=>presentation.read());
   let credentialPipe: CredentialPipeClient | undefined;
   connection.on('credentials', (pipe: Duplex) => { credentialPipe?.dispose(); credentialPipe = new CredentialPipeClient(pipe); });
   connection.on('invalidate', () => { credentials.close(); credentialPipe?.dispose(); credentialPipe = undefined; });
@@ -56,7 +56,7 @@ async function openWindow(): Promise<void> {
     const result=await dialog.showMessageBox(window,{type:'warning',title:t('Open workspace terminal'),message:t('Open a terminal for this workspace?'),detail:'\u2066'+root+'\u2069'+'\n\n'+t('Commands run with your selected execution policy. A Local host terminal can access files beyond this directory. Terminal input does not approve agent actions.'),buttons:[t('Cancel'),t('Open terminal')],defaultId:0,cancelId:0,noLink:true});return result.response===1;
   },app.getPath('home'));
   const workInput=new DesktopWorkInput(connection,()=>credentialPipe,(entry,deliver)=>new Promise<boolean>(resolve=>{
-    credentials.open({stage:async(_scope,value)=>{await deliver(value);return 'delivered';},closeWindow:async()=>{}},{windowId:'work-signin',generation:connection.state.generation,purpose:'provider',providerId:t(entry.kind==='password'?'Password':entry.kind==='one-time-code'?'One-time code':entry.kind==='account-identifier'?'Account identifier':'Secure value')+' · '+entry.origin+' · '+entry.position+'/'+entry.total,authMethod:'api_key',endpoint:entry.origin},()=>resolve(true),()=>resolve(false),'work');
+    credentials.open({stage:async(_scope,value)=>{await deliver(value);return 'delivered';},closeWindow:async()=>{}},{windowId:'work-signin',generation:connection.state.generation,purpose:'provider',providerId:t(entry.kind==='password'?'Password':entry.kind==='one-time-code'?'One-time code':entry.kind==='account-identifier'?'Account identifier':'Secure value')+' · '+entry.origin+' · '+entry.position+'/'+entry.total,authMethod:'api_key',endpoint:entry.origin},()=>resolve(true),()=>resolve(false),'work',{label:t(entry.kind==='password'?'Password':entry.kind==='one-time-code'?'One-time code':entry.kind==='account-identifier'?'Account identifier':'Secure value'),origin:entry.origin,position:entry.position,total:entry.total});
   }),()=>credentials.close());
   window.on('closed',()=>workInput.dispose());
   window.on('unresponsive',()=>workInput.invalidate());

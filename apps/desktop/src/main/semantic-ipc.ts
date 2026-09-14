@@ -1,3 +1,5 @@
+import {ChatPresentationStore} from './chat-presentation.js';
+import {validChatPresentation} from '../shared/chat-presentation.js';
 import type {DesktopWorkInput} from './work-secure-input.js';
 import {basename,join} from 'node:path';
 import {DesktopMicrophone} from './desktop-microphone.js';
@@ -16,7 +18,7 @@ import type {WorkPins} from './work-pins.js';
 import type{DesktopModelSetup}from'./model-setup.js';
 import{validAppearance}from'../shared/appearance.js';
 import type{AppearanceSettings}from'./appearance-store.js';
-import { app,systemPreferences,dialog,ipcMain, type BrowserWindow } from 'electron';
+import { app,shell,systemPreferences,dialog,ipcMain, type BrowserWindow } from 'electron';
 import { CONTROL_METHODS,CONTROL_EVENTS,validateControlRequest,exactKeys, isControlId, isRecord } from '@estacoda/control-protocol';
 import type { DesktopSnapshot } from '../shared/desktop-api.js';
 import type { DesktopConnection, ConnectionState } from './connection.js';
@@ -27,6 +29,8 @@ export function rendererSnapshot(state:ConnectionState):DesktopSnapshot {
 }
 const libraryReads={schedulesDraft:'schedules.draft',schedulesList:'schedules.list',schedulesGet:'schedules.get',schedulesHistory:'schedules.history',librarySkills:'library.skills',librarySkill:'library.skill',libraryMemory:'library.memory',libraryProposals:'library.proposals',libraryProposal:'library.proposal'} as const;
 export function validateSemanticPayload(method:string,payload:unknown):void {
+ if(method==='chatRead'||method==='chatWrite'){if(!isRecord(payload)||!exactKeys(payload,method==='chatRead'?['profile']:['profile','value'])||!isControlId(payload.profile)||method==='chatWrite'&&!validChatPresentation(payload.value))throw new Error('Invalid chat presentation');return;}
+ if(method==='chatOpenFolder'){if(!isRecord(payload)||!exactKeys(payload,['workId'])||!isControlId(payload.workId))throw new Error('Invalid chat reference');return;}
  if(['scheduleReview','scheduleCancel','scheduleExecute','scheduleInspect'].includes(method)){
   if(!isRecord(payload))throw new Error('Invalid schedule request');if(method==='scheduleInspect'){if(!exactKeys(payload,[]))throw new Error('Invalid inspection');return;}
   if(method==='scheduleExecute'&&!exactKeys(payload,['reviewId','confirmed']))throw new Error('Invalid schedule confirmation');
@@ -123,6 +127,7 @@ export function validateSemanticPayload(method:string,payload:unknown):void {
   if(!valid)throw new Error('Desktop request rejected.');
 }
 export function installSemanticIpc(window:BrowserWindow,documentUrl:string,connection:DesktopConnection,profiles:Profiles,appearance:AppearanceSettings,models?:DesktopModelSetup,pins?:WorkPins,workControls?:DesktopWorkControls,telegram?:DesktopTelegramSetup,connectionControls?:DesktopConnectionControls,targets?:DesktopTargetControls,terminals?:DesktopTerminalControls,browsers?:DesktopBrowserControls,settings?:DesktopPublicSettings,workInput?:DesktopWorkInput):()=>void {
+  const chats=new ChatPresentationStore(app.getPath('userData'),()=>connection.state.profileId);
   const authority=new WindowAuthority(window,documentUrl);
   const contents=window.webContents;
   const microphone=workControls?new DesktopMicrophone(connection,app.getPath('temp'),()=>process.platform==='darwin'?systemPreferences.askForMediaAccess('microphone'):Promise.resolve(true),enabled=>setMicrophonePermission(window,documentUrl,enabled),(scope,path)=>workControls.stageRecording(scope,path)):undefined;
@@ -131,7 +136,7 @@ export function installSemanticIpc(window:BrowserWindow,documentUrl:string,conne
   const scheduleControls=new DesktopConnectionControls(connection,join(app.getPath('userData'),'schedules')),scheduleReviews=new Map<string,number>();
   const evolutionControls=new DesktopConnectionControls(connection,join(app.getPath('userData'),'evolution'));
   const evolutionReviews=new Map<string,number>();
-  const methods=['workInputPending','workInputOpen','scheduleReview','scheduleCancel','scheduleExecute','scheduleInspect','evolutionReview','evolutionCancel','evolutionExecute','evolutionInspect',...Object.keys(libraryReads),'onboardingVerify','onboardingReview','onboardingApply','onboardingApplyWorkspace','onboardingInspect','onboardingRecover','onboardingChooseWorkspace','onboardingReviewWorkspace','onboardingCancelWorkspace','onboardingDetect','onboardingBootstrap','recordBegin','recordAppend','recordFinish','recordCancel','artifactsMedia','artifactsSave','settingsLifecycle','settingsWorkspaces','settingsReviewAction','settingsExecuteAction','settingsCancelAction','settingsDependencies','settingsInstall','settingsInspectDependency','settingsValue','settingsRead','settingsBegin','settingsStage','settingsReview','settingsApply','settingsCancel','settingsInspect','settingsVerify','browserControlWatch','browserControlSignIn','browserControlInventory','browserControlWorkspaceOpen','browserControlWorkspace','browserControlOpen','browserControlFrame','browserControlRelease','browserControlAbandon','browserList','browserSnapshot','artifactsList','artifactsGet','artifactsOpen','evidenceGet','terminalOpen','terminalRead','terminalWrite','terminalResize','terminalClose','diffList','diffPatch','filesList','filesPreview','targetList','targetInspect','targetReview','targetCreate','targetCancel','targetExecute','targetOperation','telegramExecute','telegramPairing','telegramSessions','telegramDetails','telegramHandoff','gatewayDiagnostics','gatewayExecute','connectionInspect','telegramReview','telegramApply','telegramInspectApply','telegramBegin','telegramStage','telegramVerify','telegramCancel','connectionsList','workUsage','workDecide','workInspectDecision','workAct','workChildren','workLive','workTargets','workAttach','workSubmit','workInspect','workSearch','workPins','workPin','workOverride','setOverride','inspectOverride','setupVerifyReviewed','modelRoutes','setupConfigured','setupOrder','setupMode','setupOAuthStart','setupOAuthStatus','setupOAuthOpen','setupBegin','setupStage','setupVerify','setupReview','setupApply','setupCancel','setupInspect','modelPage','providerPage','refreshCatalog','reconnect','moreWork','moreInbox','appearance','setAppearance','snapshot','getWork','activity','profiles','switchProfile','minimize','toggleMaximize','close'];
+  const methods=['chatRead','chatWrite','chatOpenFolder','workInputPending','workInputOpen','scheduleReview','scheduleCancel','scheduleExecute','scheduleInspect','evolutionReview','evolutionCancel','evolutionExecute','evolutionInspect',...Object.keys(libraryReads),'onboardingVerify','onboardingReview','onboardingApply','onboardingApplyWorkspace','onboardingInspect','onboardingRecover','onboardingChooseWorkspace','onboardingReviewWorkspace','onboardingCancelWorkspace','onboardingDetect','onboardingBootstrap','recordBegin','recordAppend','recordFinish','recordCancel','artifactsMedia','artifactsSave','settingsLifecycle','settingsWorkspaces','settingsReviewAction','settingsExecuteAction','settingsCancelAction','settingsDependencies','settingsInstall','settingsInspectDependency','settingsValue','settingsRead','settingsBegin','settingsStage','settingsReview','settingsApply','settingsCancel','settingsInspect','settingsVerify','browserControlWatch','browserControlSignIn','browserControlInventory','browserControlWorkspaceOpen','browserControlWorkspace','browserControlOpen','browserControlFrame','browserControlRelease','browserControlAbandon','browserList','browserSnapshot','artifactsList','artifactsGet','artifactsOpen','evidenceGet','terminalOpen','terminalRead','terminalWrite','terminalResize','terminalClose','diffList','diffPatch','filesList','filesPreview','targetList','targetInspect','targetReview','targetCreate','targetCancel','targetExecute','targetOperation','telegramExecute','telegramPairing','telegramSessions','telegramDetails','telegramHandoff','gatewayDiagnostics','gatewayExecute','connectionInspect','telegramReview','telegramApply','telegramInspectApply','telegramBegin','telegramStage','telegramVerify','telegramCancel','connectionsList','workUsage','workDecide','workInspectDecision','workAct','workChildren','workLive','workTargets','workAttach','workSubmit','workInspect','workSearch','workPins','workPin','workOverride','setOverride','inspectOverride','setupVerifyReviewed','modelRoutes','setupConfigured','setupOrder','setupMode','setupOAuthStart','setupOAuthStatus','setupOAuthOpen','setupBegin','setupStage','setupVerify','setupReview','setupApply','setupCancel','setupInspect','modelPage','providerPage','refreshCatalog','reconnect','moreWork','moreInbox','appearance','setAppearance','snapshot','getWork','activity','profiles','switchProfile','minimize','toggleMaximize','close'];
   const handlers:string[]=[];
   let connectionGeneration=connection.state.generation;
   const state=(value:ConnectionState)=>{if(value.generation!==connectionGeneration){authority.invalidate();evolutionReviews.clear();scheduleReviews.clear();connectionGeneration=value.generation;}if(!window.isDestroyed())contents.send('desktop:state',{generation:authority.generation,snapshot:rendererSnapshot(value)});};
@@ -248,6 +253,16 @@ export function installSemanticIpc(window:BrowserWindow,documentUrl:string,conne
         if(method==='modelPage'||method==='providerPage'||method==='refreshCatalog'){const result=method==='refreshCatalog'?await connection.modelRequest('models.refreshCatalog',{networkApproved:true}):await connection.modelRequest(method==='modelPage'?'models.list':'providers.list',{limit:100,...(payload.cursor?{cursor:payload.cursor as string}:{})});authority.assertSender(event,generation);return result;}
         if(method==='reconnect'){connection.switchProfile(connection.state.profileId);return;}
         if(method==='moreWork'||method==='moreInbox'){await connection.more(method==='moreWork'?'work':'inbox');authority.assertSender(event,generation);return;}
+        if(method==='chatRead')return chats.read(payload.profile as string);
+        if(method==='chatWrite'){chats.write(payload.profile as string,payload.value);return;}
+        if(method==='chatOpenFolder'){
+          const context=connection.state;const work=await connection.getWork(payload.workId as string);
+          if(!work.target||work.profileId!==context.profileId)throw new Error('Workspace unavailable');
+          const target=await connection.targetRequest('targets.inspect',{target:{targetId:work.target.targetId,targetGeneration:work.target.targetGeneration}});
+          authority.assertSender(event,generation);
+          if(connection.state.generation!==context.generation||connection.state.profileId!==context.profileId||target.readiness!=='ready')throw new Error('Workspace changed');
+          const error=await shell.openPath(target.workingRoot);if(error)throw new Error('Workspace could not be opened');return;
+        }
         if(method==='appearance')return appearance.read();
         if(method==='setAppearance'){appearance.write(payload);return;}
         if(method==='snapshot')return rendererSnapshot(connection.state);

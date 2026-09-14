@@ -75,6 +75,15 @@ export async function captureWork(input: { homeDir: string; profileId: string; v
 /** Authenticated opaque continuations bind to this instance, epoch, query and page size without an ever-growing token map. */
 export class WorkSnapshot {
   readonly #cursorKey = randomBytes(32);
+  readonly #newWork = new Map<string,WorkSnapshot>();
+  /** Resolve a just-created chat without changing existing list/history cursor epochs. */
+  includeNew(id:string,state:WorkState):WorkProjection{
+    if(this.#newWork.has(id))return this.#newWork.get(id)!.get(id);
+    const snapshot=new WorkSnapshot({work:state.work.filter(item=>item.id===id),activity:{[id]:state.activity[id]??[]},history:state.history?.[id]?{[id]:state.history[id]!}:{}},this.input),work=snapshot.get(id);
+    if(this.input&&work.profileId!==this.input.profileId)throw new ControlProtocolError('-32003');
+    if(this.#newWork.size>=100)throw new ControlProtocolError('-32009');
+    this.#newWork.set(id,snapshot);return work;
+  }
   constructor(readonly state: WorkState, readonly input?: { homeDir: string; profileId: string }) {}
   search(params: PageParams & {query?:string;parentWorkId?:string}): Page<WorkProjection> {
     const query=(params.query??'').trim().toLocaleLowerCase('en-US');
@@ -83,11 +92,13 @@ export class WorkSnapshot {
     return this.page('work:'+JSON.stringify([query,params.parentWorkId??null]),items,params);
   }
   get(id: string): WorkProjection {
+    if(this.#newWork.has(id))return this.#newWork.get(id)!.get(id);
     const work = this.state.work.find((work) => work.id === id);
     if (!work) throw new ControlProtocolError('-32003');
     return structuredClone(work);
   }
   async activity(workId: string, params: { limit: number; cursor?: string }): Promise<Page<ActivityProjection>> {
+    if(this.#newWork.has(workId))return this.#newWork.get(workId)!.activity(workId,params);
     const work = this.get(workId), boundary = this.state.history?.[workId];
     if (!boundary || !this.input) return this.page(workId, this.state.activity[workId] ?? [], params);
     const offset = this.offset(workId, params);

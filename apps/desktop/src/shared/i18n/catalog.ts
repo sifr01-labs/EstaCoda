@@ -7,6 +7,28 @@ import {setupArabic} from './setup.js';
 import {workArabic} from './work.js';
 /** Product-owned message keys. Never pass provider output or backend error text here. */
 export const arabic = {
+ 'Some archived chats could not be loaded. Try opening Archived again.':'تعذّر تحميل بعض المحادثات المؤرشفة. أعد فتح المؤرشفة للمحاولة مجددًا.',
+ 'Pin':'تثبيت',
+ 'Rename chat':'إعادة تسمية المحادثة',
+ 'Chat name':'اسم المحادثة',
+ 'Save name':'حفظ الاسم',
+ 'Mark as unread':'وضع علامة غير مقروءة',
+ 'Archive chat':'أرشفة المحادثة',
+ 'Restore chat':'استعادة المحادثة',
+ 'Open workspace folder':'فتح مجلد مساحة العمل',
+ 'Copy conversation':'نسخ المحادثة',
+ 'Copy chat ID':'نسخ معرّف المحادثة',
+ 'Chat actions':'إجراءات المحادثة',
+ 'Unassigned':'غير مرتبطة',
+ 'Opening chat…':'جارٍ فتح المحادثة…',
+ 'Chat could not be opened':'تعذّر فتح المحادثة',
+ 'Your conversation is loading.':'جارٍ تحميل محادثتك.',
+ 'Try again to load this conversation. Your saved messages have not been changed.':'أعد المحاولة لتحميل هذه المحادثة. لم تتغير رسائلك المحفوظة.',
+ 'Try again':'أعد المحاولة',
+ 'Chat preferences could not be saved. Keep this window open and try again.':'تعذّر حفظ تفضيلات المحادثة. أبقِ هذه النافذة مفتوحة وأعد المحاولة.',
+ 'Chat action could not complete.':'تعذّر إتمام إجراء المحادثة.',
+ 'Conversation is too long to copy at once.':'المحادثة أطول من أن تُنسخ دفعة واحدة.',
+
  ...schedulesArabic,
  ...libraryArabic,
  ...onboardingArabic,

@@ -117,3 +117,10 @@ it('allows only a Work and opaque request ID from the ordinary renderer for secu
  expect(()=>validateSemanticPayload('workInputOpen',{workId:'session:s',requestId:'r'})).not.toThrow();
  for(const extra of [{value:'canary'},{holder:'forged'},{origin:'https://evil.example'},{targetGeneration:2},{profileId:'other'},{command:{action:'deliver'}}])expect(()=>validateSemanticPayload('workInputOpen',{workId:'session:s',requestId:'r',...extra})).toThrow();
 });
+it('accepts only presentation state and canonical chat references for chat actions',()=>{
+ expect(()=>validateSemanticPayload('chatRead',{profile:'default'})).not.toThrow();
+ expect(()=>validateSemanticPayload('chatWrite',{profile:'default',value:{selected:'welcome',drafts:{},chats:{}}})).not.toThrow();
+ expect(()=>validateSemanticPayload('chatOpenFolder',{workId:'session:one'})).not.toThrow();
+ for(const payload of [{workId:'session:one',path:'/private'},{target:{targetId:'one',targetGeneration:1}},{workId:'../foreign'}])expect(()=>validateSemanticPayload('chatOpenFolder',payload)).toThrow();
+ expect(()=>validateSemanticPayload('chatWrite',{profile:'default',value:{selected:'welcome',drafts:{x:{id:'x',text:'draft',model:'m',limitsReviewed:true}},chats:{}}})).toThrow();
+});

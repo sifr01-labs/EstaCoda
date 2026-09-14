@@ -232,9 +232,16 @@ export class DesktopBridge {
         const snapshot = this.workSnapshot();
         return { result: snapshot.search(request.params) };
       },
-      'work.get': (request) => {
+      'work.get': async (request,signal) => {
         if (request.method !== 'work.get') throw new ControlProtocolError('-32601');
-        return { result: this.workSnapshot().get(request.params.workId) };
+        try{return {result:this.workSnapshot().get(request.params.workId)};}
+        catch(error){
+          if(!(error instanceof ControlProtocolError)||error.code!=='-32003')throw error;
+          const generation=this.#generation;
+          const fresh=await(this.options.readWork?this.options.readWork(signal):captureWork(this.options,signal));
+          signal.throwIfAborted();if(generation!==this.#generation||this.server.closed)throw new ControlProtocolError('-32007');
+          return {result:this.workSnapshot().includeNew(request.params.workId,fresh)};
+        }
       },
       'work.activity': async (request) => {
         if (request.method !== 'work.activity') throw new ControlProtocolError('-32601');

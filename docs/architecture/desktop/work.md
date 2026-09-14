@@ -70,3 +70,38 @@ explicit action with native consent and explicit return to the agent. This is a
 view of the existing automation backend; it does not embed a second Chromium
 engine or prevent a configured headed Chrome backend from opening its own window.
 The browser no-progress guard and canonical completion semantics remain unchanged.
+
+### Chat continuity and organization
+
+Desktop saves the selected chat, unsent text, model choice, draft workspace reference,
+and sidebar labels/read/archive preferences in an atomic, profile-scoped file under
+Electron's user data directory. Draft IDs survive restarts for submission recovery.
+Attachment handles and reviewed execution limits do not survive restart; reattach
+files and review background-task limits before sending. Saved target references are
+revalidated against current core trust and target generation. Existing Session
+workspace bindings remain immutable and continue to come from core.
+
+Right-click a chat, use its ellipsis button, or press Shift+F10 for rename, pin,
+mark unread, archive, copy, and (for bound chats) open workspace folder. Rename and
+archive affect desktop organization only; they do not rewrite transcripts, delete
+sessions, or stop execution. Archived chats remain available in Archived and can
+be restored. All other chats stay grouped by workspace when their status changes;
+unassigned chats and drafts share one group. Routine completion subtitles are omitted.
+Conversation copy reads canonical message pages, with a 2,000-item / one-million-
+character limit; it fails rather than silently copying a partial transcript.
+
+A new chat can be opened before the navigation snapshot refreshes. On a missing
+reference, the bridge captures current profile state and retains a bounded supplemental
+snapshot for that chat's metadata and history. Existing pagination cursors remain
+valid. Transient renderer lookups retry briefly before offering a plain-language
+retry screen; this never resubmits a prompt.
+
+Selected-chat live previews use one outstanding read, at most four reads per second
+while active and one per second while idle. Preview text remains readable during the
+handoff to canonical history and is removed when the corresponding saved response
+arrives. This is bounded preview polling, not a new token-stream transport.
+
+The credential sheet loads an external stylesheet in development and packaged builds
+under `style-src 'self'`. It follows the desktop theme and language and labels browser
+fields with their origin and position. Credentials remain in the isolated native
+window and private pipe; ordinary chat state never contains protected field values.

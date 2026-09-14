@@ -123,9 +123,9 @@ for(const language of ['en','ar'] as const)test(`${language} conversation naviga
  await page.setViewportSize({width:360,height:740});expect(await page.locator('.ec-window').evaluate(e=>e.scrollWidth<=e.clientWidth+1)).toBe(true);
 });
 
-test('settled workspace chats live in History and empty session titles read New chat',async({page})=>{
- await mount(page);const history=page.locator('.ec-history');await expect(history.locator('.ec-taskbutton')).toContainText('Review the project');
- await page.evaluate(()=>{const s=(window as any).presentation;s.work.status='running';s.refresh();});await expect(history).toHaveCount(0);await expect(page.locator('.ec-taskbutton')).toContainText('Review the project');
+test('workspace grouping stays stable when chats settle and empty titles read New chat',async({page})=>{
+ await mount(page);const group=page.locator('.ec-recents > .ec-workspacegroup');await expect(group).toHaveCount(1);await expect(group.locator('summary')).toContainText('Project');await expect(group.locator('.ec-taskbutton')).toContainText('Review the project');await expect(group.locator('.ec-taskbutton small')).toHaveCount(0);
+ await page.evaluate(()=>{const s=(window as any).presentation;s.work.status='running';s.refresh();});await expect(group).toHaveCount(1);await expect(page.locator('.ec-taskbutton')).toContainText('Review the project');
  await page.evaluate(()=>{const s=(window as any).presentation;s.work.title='Untitled session';s.work.status='draft';s.refresh();});await expect(page.locator('.ec-taskbutton')).toContainText('New chat');await expect(page.locator('.ec-workheading')).toContainText('New chat');
 });
 

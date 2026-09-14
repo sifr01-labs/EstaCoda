@@ -1,3 +1,4 @@
+import {DEFAULT_APPEARANCE,type AppearancePreferences} from '../shared/appearance.js';
 import type {DisplayLanguage} from '../shared/i18n/index.js';
 import{installAssetProtocol}from'./asset-protocol.js';
 import { BrowserWindow, ipcMain } from 'electron';
@@ -9,17 +10,17 @@ import { CredentialPipeClient, type CredentialScope } from './credential-pipe-cl
 export class CredentialWindow {
   #window: BrowserWindow | null = null;
   #cleanup: (() => void) | null = null;
-  constructor(readonly owner: BrowserWindow, readonly preload: string, readonly url: string, readonly packaged: boolean, readonly assetRoot: string,readonly language:()=>DisplayLanguage=()=> 'en') {}
-  open(pipe: Pick<CredentialPipeClient,'stage'|'closeWindow'>, binding: CredentialScope, accepted: (candidateId: string) => void, cancelled:()=>void=()=>{},mode:'setup'|'browser'|'work'='setup'): void {
+  constructor(readonly owner: BrowserWindow, readonly preload: string, readonly url: string, readonly packaged: boolean, readonly assetRoot: string,readonly language:()=>DisplayLanguage=()=> 'en',readonly appearance:()=>AppearancePreferences=()=>DEFAULT_APPEARANCE) {}
+  open(pipe: Pick<CredentialPipeClient,'stage'|'closeWindow'>, binding: CredentialScope, accepted: (candidateId: string) => void, cancelled:()=>void=()=>{},mode:'setup'|'browser'|'work'='setup',field?:{label:string;origin:string;position:number;total:number}): void {
     this.close();
-    const window = new BrowserWindow({parent:this.owner,modal:true,width:460,height:350,resizable:false,show:false,
+    const window = new BrowserWindow({parent:this.owner,modal:true,width:520,height:410,resizable:false,show:false,
       webPreferences:{...securePreferences(this.preload,this.packaged),devTools:false,partition:'credential-'+randomUUID()}});
     this.#window=window;lockWindow(window);denySessionPermissions(window.webContents.session);
     const authority=new WindowAuthority(window,this.url); const scope={...binding};
     let busy=false,active=true,transferred=false;
     const authorize=(event: Parameters<WindowAuthority['assertSender']>[0])=>{authority.assertSender(event,0);if(!active)throw new Error('Credential window closed.');};
     // One modal per application. Every call is checked against its exact top frame.
-    ipcMain.handle('credential:describe', event=>{authorize(event);return{provider:binding.providerId,purpose:binding.purpose,mode,language:this.language()};});
+    ipcMain.handle('credential:describe', event=>{authorize(event);return{provider:binding.providerId,purpose:binding.purpose,mode,language:this.language(),appearance:this.appearance(),...(field?{field}:{})};});
     ipcMain.handle('credential:submit',async(event,value:unknown)=>{
       authorize(event);if(busy||typeof value!=='string'||Buffer.byteLength(value)>49_152)throw new Error('Credential rejected.');
       busy=true;
