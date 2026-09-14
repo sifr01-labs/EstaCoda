@@ -6,7 +6,7 @@ import {Button} from './primitives.js';
 /** Current, bounded observations through the existing runtime; never acquires input authority. */
 export function BrowserWatch({api,workId,controlling}:{api:NonNullable<DesktopApi['browserControl']>;workId:string;controlling:boolean}){
  const {t,owned,status:displayState}=useI18n();
- const[watching,setWatching]=useState(false),[selected,setSelected]=useState(''),[workspace,setWorkspace]=useState<BrowserWorkspaceState>(),[frame,setFrame]=useState<HumanBrowserFrame>(),[status,setStatus]=useState('');
+ const[watching,setWatching]=useState(true),[selected,setSelected]=useState(''),[workspace,setWorkspace]=useState<BrowserWorkspaceState>(),[frame,setFrame]=useState<HumanBrowserFrame>(),[status,setStatus]=useState('');
  useEffect(()=>{
   let live=true,timer:ReturnType<typeof setTimeout>|undefined;
   setFrame(undefined);

@@ -83,3 +83,19 @@ it('drains accepted human browser input before closing the supervisor host',asyn
  const host=new SharedSessionHost({profileId:'p',sessionDb:{getSessionForProfile:async()=>({executionTarget:{targetId:'t',targetGeneration:1}})} as unknown as SessionDB,acquire:vi.fn(),channelApproval:vi.fn(),validateTarget:async()=>{},browserControl});
  const pending=host.handle({method:'browser.control',sessionId:'s',targetId:'t',targetGeneration:1,operationId:'o',browserControl:{action:'acquire',browserId:'b',holder:'w'}});await vi.waitFor(()=>expect(browserControl).toHaveBeenCalled());let closed=false;const shutdown=host.close().then(()=>{closed=true;});await Promise.resolve();expect(closed).toBe(false);finish({state:'human'});await pending;await shutdown;expect(closed).toBe(true);
 });
+
+it('connects hosted secure input to the coordinator without queuing or persisting credential controls',async()=>{
+ const {SecureInputCoordinator}=await import('../runtime/secure-input-coordinator.js');const {EphemeralSecretBroker}=await import('../security/ephemeral-secret-broker.js');const {SecureInputTransportRegistry}=await import('../security/secure-input-transport-registry.js');
+ const broker=new EphemeralSecretBroker(),transports=new SecureInputTransportRegistry(),consume=vi.fn(async(value:Uint8Array)=>{expect(Buffer.from(value).toString()).toBe('private-canary');});
+ transports.register({id:'browser',destinationTypes:['browser-field'],priority:1,verificationStrength:'field-bound',persistence:'none',disclosureBoundary:'destination',requiresApproval:false,isAvailable:()=>true,verify:({request})=>({status:'verified',destination:request.destination}),deliver:async({value,context,consume})=>consume(value,context)});
+ const factory=vi.fn((options:any)=>new SecureInputCoordinator({broker,transports,collect:options.collect}).createRequestHandler({profileId:'p',sessionId:'s',userId:'operator'},options.signal));
+ const runtime={sessionId:'s',createSecureInputRequestHandler:factory,dispose:async()=>{},handle:async(input:any)=>{const receipt=await input.onSecureInputRequest({kind:'password',purpose:'Sign in',retention:'use-once',destination:{type:'browser-field',sessionId:'b',tabRef:'tab',frameId:'main',ref:'password',expectedOrigin:'https://example.com',label:'Password'}},consume);return{text:JSON.stringify(receipt)};}} as unknown as Runtime;
+ const host=new SharedSessionHost({profileId:'p',sessionDb:{getSessionForProfile:async()=>({executionTarget:{targetId:'t',targetGeneration:1}})} as unknown as SessionDB,validateTarget:async()=>{},acquire:async()=>runtime,channelApproval:vi.fn()});
+ const base={sessionId:'s',targetId:'t',targetGeneration:1,operationId:'op'};
+ try{const turn=host.handle({...base,method:'send',text:'Sign in'});let request:any;await vi.waitFor(async()=>{request=(await host.handle({...base,method:'secure.input',workInput:{action:'pending',holder:'w'}}) as any).request;expect(request).not.toBeNull();});
+ const accept=vi.fn(()=>{throw new Error('Must not persist secure input');}),inspect=vi.fn(()=>[]);host.options.receipts={accept,inspect} as any;
+ await host.handle({...base,method:'secure.input',workInput:{action:'claim',holder:'w',requestId:request.id}});
+ const delivered=await host.handle({...base,method:'secure.input',workInput:{action:'deliver',holder:'w',requestId:request.id,value:'private-canary'}});
+ const response=await turn;expect(factory).toHaveBeenCalledOnce();expect(consume).toHaveBeenCalledOnce();expect(accept).not.toHaveBeenCalled();expect(JSON.stringify([response,delivered,request])).not.toContain('private-canary');
+ }finally{await host.close();broker.dispose();}
+});

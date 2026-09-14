@@ -10,7 +10,7 @@ export class CredentialWindow {
   #window: BrowserWindow | null = null;
   #cleanup: (() => void) | null = null;
   constructor(readonly owner: BrowserWindow, readonly preload: string, readonly url: string, readonly packaged: boolean, readonly assetRoot: string,readonly language:()=>DisplayLanguage=()=> 'en') {}
-  open(pipe: Pick<CredentialPipeClient,'stage'|'closeWindow'>, binding: CredentialScope, accepted: (candidateId: string) => void, cancelled:()=>void=()=>{},mode:'setup'|'browser'='setup'): void {
+  open(pipe: Pick<CredentialPipeClient,'stage'|'closeWindow'>, binding: CredentialScope, accepted: (candidateId: string) => void, cancelled:()=>void=()=>{},mode:'setup'|'browser'|'work'='setup'): void {
     this.close();
     const window = new BrowserWindow({parent:this.owner,modal:true,width:460,height:350,resizable:false,show:false,
       webPreferences:{...securePreferences(this.preload,this.packaged),devTools:false,partition:'credential-'+randomUUID()}});

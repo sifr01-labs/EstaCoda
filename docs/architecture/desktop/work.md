@@ -55,3 +55,18 @@ On macOS, run `pnpm run desktop:package` followed by
 `pnpm run desktop:native:execution` to exercise the real supervisor/runtime/Task
 worker through Desktop with a controlled loopback provider, app restart, persisted
 completion and duplicate-request checks. No paid provider or account is used.
+
+### Browser conversation presentation
+
+Assistant identity appears once per user turn, across intervening tool updates.
+Browser tools have readable labels with raw tool names and event summaries behind
+Technical details. The history labels a tool-start event **Started**, so a completed
+call's earlier event does not imply it is still running. Counts remain **updates**;
+the projection does not yet carry reliable call identities for collapsing records.
+Failures remain visible, and partial browser results offer **Open browser**.
+
+Opening Browser starts its read-only live observation view. Takeover remains an
+explicit action with native consent and explicit return to the agent. This is a
+view of the existing automation backend; it does not embed a second Chromium
+engine or prevent a configured headed Chrome backend from opening its own window.
+The browser no-progress guard and canonical completion semantics remain unchanged.

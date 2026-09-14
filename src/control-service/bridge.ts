@@ -1,3 +1,5 @@
+import {WorkInputClaims} from './work-input.js';
+import {validateWorkInputCommand} from '../contracts/desktop-control/work-input.js';
 import {ScheduleDecisions} from './schedule-decisions.js';
 import {ScheduleQueries} from './schedule-queries.js';
 import {EvolutionDecisions} from './evolution-decisions.js';
@@ -57,6 +59,7 @@ import { StdioControlServer } from './stdio-server.js';
 export type BootstrapState = Pick<BootstrapResult, 'profile' | 'runtime'>;
 /** One bridge per trusted Main client context; Work and execution remain core-owned. */
 export class DesktopBridge {
+  readonly #workInputClaims=new WorkInputClaims();
   readonly schedules:ScheduleDecisions;
  readonly evolution:EvolutionDecisions;
   readonly terminals:TerminalCapabilities;
@@ -85,6 +88,10 @@ export class DesktopBridge {
   #capture: AbortController | undefined;
   #snapshot: BootstrapResult | undefined;
   readonly oauth:CodexAuthorization;
+  async workInput(params:unknown,signal:AbortSignal){
+    if(!isRecord(params)||!exactKeys(params,['workId','command'])||!isControlId(params.workId))throw new ControlProtocolError('-32602');
+    validateWorkInputCommand(params.command);return this.#workInputClaims.run(this.options,this.workSnapshot().get(params.workId),params.command,signal);
+  }
   async deliverBrowserInput(params:unknown,signal:AbortSignal):Promise<void>{
     if(!isRecord(params)||!exactKeys(params,['workId','command'])||!isControlId(params.workId))throw new ControlProtocolError('-32602');
     validateHumanBrowserCommand(params.command);

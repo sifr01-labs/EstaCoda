@@ -50,3 +50,30 @@ PRs 3/5 test dedicated sender/pipe isolation, bounds/TTL, disposal, stale callba
 Do not print token fragments or secret-derived hashes. JavaScript cannot guarantee zeroization; drop references promptly and do not claim stronger guarantees. A compromised credential renderer can observe input while typed, and a compromised OS account is outside this isolation model. OS credential vault integration is not implied by `.env`/`auth.json` storage.
 
 PR6 provides latest-Apply inspection after a full application restart. Only the selected profile operation ID/state is returned; journal contents remain private. See [current operating behavior](models-and-providers.md) and [implementation evidence](../../planning/desktop-pr6.md).
+
+## Agent-requested browser input
+
+Desktop-hosted Session turns supply the runtime's existing secure-input coordinator
+with a native collector. A pending request exposes only its opaque ID, verified
+origin, input kind, group position, and expiry. The conversation offers **Enter
+securely**; Main claims the request and opens the protected credential window.
+Ordinary renderer IPC accepts only Work/request IDs, never values or destinations.
+
+Values use the inherited credential descriptor and the authenticated profile-scoped
+private owner socket (`secure.input`). These commands bypass control receipts and
+Session input persistence. Profile, Session, target generation, current workspace
+trust, expiry, and exclusive window claims are checked. The existing coordinator
+re-verifies browser destinations before delivery; grouped inputs are collected
+before any field is delivered. Its existing broker clears byte buffers after use
+or cancellation. JavaScript strings cannot promise deterministic memory erasure.
+
+Closing a claimed input or its credential channel cancels it. Profile changes fence
+late callbacks. Unanswered requests expire within two minutes (or the coordinator's
+earlier expiry); the native window closes at expiry. Requests are ephemeral and
+are never replayed after a restart. These controls currently serve shared-host
+Session turns, not durable Task-worker secure-input continuation. A stopped turn
+remains stopped; the UI does not relabel it as a resumable input request.
+
+After updating this code, restart both the desktop bridge and its shared local
+runtime once active work has settled. An already-running supervisor retains its
+old code. Existing browser URL, approval, takeover, and cloud-spend policies apply.

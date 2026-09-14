@@ -13,5 +13,5 @@ export function LiveActivity({api,work,waiting=false}:{api:DesktopWorkApi;work:W
  void poll();return()=>{active=false;clearTimeout(timer);};},[api,work.id,work.target?.targetGeneration]);
  if(!preview?.active)return null;
  const running=work.status==='running'&&!waiting;
- return <section className="ec-agent" aria-label={t("Live assistant activity")}><div className="ec-msghead"><b>EstaCoda</b>{running&&<span className="ec-live-working" role="status"><ActivityIndicator variant="dots"/>{t("Working…")}</span>}</div>{preview.text&&<ResponseMarkdown text={preview.text}/>}{preview.truncated&&<p className="ec-footnote">{t("Live preview limit reached. The settled response will appear in activity.")}</p>}</section>;
+ return <section className="ec-agent" aria-label={t("Live assistant activity")}><div className="ec-msghead">{running&&<span className="ec-live-working" role="status"><ActivityIndicator variant="dots"/>{t("Working…")}</span>}</div>{preview.text&&<ResponseMarkdown text={preview.text}/>}{preview.truncated&&<p className="ec-footnote">{t("Live preview limit reached. The settled response will appear in activity.")}</p>}</section>;
 }

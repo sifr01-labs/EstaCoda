@@ -14,6 +14,7 @@ const ready=ipcRenderer.invoke('desktop:bind').then((binding:{generation:number;
 void ready.catch(()=>{});
 const invoke=async(method:string,payload:Record<string,unknown>={})=>{await ready;return ipcRenderer.invoke('desktop:'+method,{generation,payload});};
 const api:DesktopApi={
+  workInput:Object.freeze({pending:workId=>invoke('workInputPending',{workId}),open:(workId,requestId)=>invoke('workInputOpen',{workId,requestId})}),
   browserControl:Object.freeze({watch:(workId,browserId)=>invoke('browserControlWatch',{workId,browserId}),signIn:(id,frameId,submitRef,kind)=>invoke('browserControlSignIn',{id,frameId,submitRef,kind}),inventory:workId=>invoke('browserControlInventory',{workId}),openWorkspace:workId=>invoke('browserControlWorkspaceOpen',{workId}),workspace:(id,operation)=>invoke('browserControlWorkspace',{id,operation}),open:(workId,reference)=>invoke('browserControlOpen',{workId,reference}),frame:(id,input)=>invoke('browserControlFrame',{id,...(input?{input}:{})}),release:id=>invoke('browserControlRelease',{id}),abandon:id=>invoke('browserControlAbandon',{id})}),
   browser:Object.freeze({list:workId=>invoke('browserList',{workId}),snapshot:(workId,reference)=>invoke('browserSnapshot',{workId,reference})}),
   artifacts:Object.freeze({media:reference=>invoke('artifactsMedia',{reference}),save:reference=>invoke('artifactsSave',{reference}),list:cursor=>invoke('artifactsList',cursor?{cursor}:{}),get:reference=>invoke('artifactsGet',{reference}),open:reference=>invoke('artifactsOpen',{reference})}),

@@ -3946,7 +3946,7 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     expect((requests[1]!.tools as OpenAICompatibleToolSchema[]).map((tool) => tool.function.name))
       .toEqual(providerTools.map((tool) => tool.function.name));
     expect(result.terminationCause).toBe("browser_no_progress");
-    expect(result.providerExecution?.response?.content).toContain("ineffective target was repeated");
+    expect(result.providerExecution?.response?.content).toContain("browser was no longer making progress");
   });
 
   it("continues independent connector work after two stale undispatched downloads", async () => {

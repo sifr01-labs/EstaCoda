@@ -1,3 +1,4 @@
+import {validateWorkInputResult,type WorkInputCommand,type WorkInputResult} from '@estacoda/control-protocol';
 import { randomUUID } from 'node:crypto';
 import type { Duplex } from 'node:stream';
 import { exactKeys, isControlId, isRecord, parseControlFrame, serializeControlFrame, type JsonValue } from '@estacoda/control-protocol';
@@ -9,6 +10,7 @@ export class CredentialPipeClient {
   constructor(readonly pipe: Duplex) {
     pipe.on('data', this.receive); pipe.once('error', this.dispose); pipe.once('close', this.dispose); pipe.once('end', this.dispose);
   }
+  async workInput(workId:string,command:WorkInputCommand):Promise<WorkInputResult>{try{const result=await this.request('credentials.workInput',{workId,command});validateWorkInputResult(result);return result;}finally{if(command.action==='deliver')command.value='';}}
   async deliverBrowser(params:{workId:string;command:Extract<import('@estacoda/control-protocol').HumanBrowserCommand,{action:'signin-deliver'}>}):Promise<void>{
     try{await this.request('credentials.browserDeliver',params);}finally{params.command.value='';}
   }
@@ -42,6 +44,7 @@ export class CredentialPipeClient {
         const pending=this.#pending.get(response.id);if(!pending)throw new Error();
         if('error' in response) { this.#pending.delete(response.id);clearTimeout(pending.timer);pending.reject(new Error('Credential rejected.'));continue; }
         const result=response.result;
+        if(pending.method==='credentials.workInput'){validateWorkInputResult(result);this.#pending.delete(response.id);clearTimeout(pending.timer);pending.resolve(result as unknown as Record<string,JsonValue>);continue;}
         if(!isRecord(result) || (pending.method==='credentials.browserDeliver' ? !exactKeys(result,['delivered'])||result.delivered!==true : pending.method==='credentials.stage' ? !exactKeys(result,['candidateId'])||!isControlId(result.candidateId) : !exactKeys(result,['closed'])||result.closed!==true))throw new Error();
         this.#pending.delete(response.id);clearTimeout(pending.timer);pending.resolve(result as Record<string,JsonValue>);
       }

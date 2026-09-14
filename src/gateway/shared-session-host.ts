@@ -1,3 +1,4 @@
+import {DesktopSecureInput} from './desktop-secure-input.js';
 import type { GatewayApprovalQueue } from './approval-queue.js';
 import { validPendingAction } from '../security/pending-action-approval.js';
 import { redactSensitiveText } from '../utils/redaction.js';
@@ -13,6 +14,7 @@ type Active = { preview?:{turnId:string;text:string;truncated:boolean}; controll
 /** Transport detach never aborts hosted execution. Normal inputs serialize by
  * Session; operator controls do not join that queue. */
 export class SharedSessionHost {
+  readonly #secureInput:DesktopSecureInput;
   readonly #cancelGeneration = new Map<string, number>();
   readonly #active = new Map<string, Active>();
   readonly #turns = new Set<Promise<unknown>>();
@@ -29,7 +31,7 @@ export class SharedSessionHost {
     acquire(sessionId: string): Promise<Runtime>;
     channelCancel?(sessionId: string): boolean | Promise<boolean>;
     channelApproval(request: PrivateControlRequest): Promise<unknown>;
-  }) {}
+  }) {this.#secureInput=new DesktopSecureInput(options.profileId);}
   async validate(request: PrivateControlRequest, allowEnded = false): Promise<void> {
     if (this.#closed) throw new Error("Shared host is draining.");
     const session = await this.options.sessionDb.getSessionForProfile(request.sessionId, this.options.profileId);
@@ -47,7 +49,7 @@ export class SharedSessionHost {
   async handle(request: PrivateControlRequest): Promise<unknown> {
     const receipts = this.options.receipts;
     await this.validate(request, request.method === "inspect" || (receipts?.inspect(request).length ?? 0) > 0);
-    if(request.method==='browser.control'){
+    if(request.method==='browser.control'||request.method==='secure.input'){
       const execution=this.execute(request);this.#controls.add(execution);
       try{return await execution;}finally{this.#controls.delete(execution);}
     }
@@ -69,6 +71,7 @@ export class SharedSessionHost {
   private async execute(request: PrivateControlRequest): Promise<unknown> {
     const generation = this.#cancelGeneration.get(request.sessionId) ?? 0;
     await this.validate(request, request.method === "inspect");
+    if(request.method==='secure.input')return this.#secureInput.handle({sessionId:request.sessionId,targetId:request.targetId,targetGeneration:request.targetGeneration!},request.workInput!);
     if(request.method==='browser.control'){if(!this.options.browserControl)throw new Error('Browser controls unavailable.');return this.options.browserControl(request);}
     const active = this.#active.get(request.sessionId);
     if (request.method === "inspect") return { active: Boolean(active), preview:active?.preview?{...active.preview,text:redactSensitiveText(active.preview.text)}:undefined, approval: active?.pending ? {
@@ -128,7 +131,8 @@ export class SharedSessionHost {
       try {
         state.runtime = await this.options.acquire(request.sessionId);
         const attachments=request.mediaIds?.length?await this.options.resolveMedia?.(request):undefined;if(request.mediaIds?.length&&!attachments)throw new Error('Media resolver unavailable');
-        const response = await state.runtime.handle({attachments, text: request.text!, channel: "cli", signal: state.controller.signal,
+        const onSecureInputRequest=request.targetGeneration===undefined?undefined:state.runtime.createSecureInputRequestHandler?.({collect:this.#secureInput.collector({sessionId:request.sessionId,targetId:request.targetId,targetGeneration:request.targetGeneration}),signal:state.controller.signal});
+        const response = await state.runtime.handle({onSecureInputRequest,attachments, text: request.text!, channel: "cli", signal: state.controller.signal,
           onDelta: text=>{if(!state.preview)return;const combined=state.preview.text+text;state.preview.truncated ||= combined.length>16384;state.preview.text=combined.slice(0,16384);},
           onEvent: event=>{if(event.kind==='provider-tool-call'&&state.preview){state.preview.text='';state.preview.truncated=false;}},
           onApprovalRequest: async (approval) => {
@@ -183,7 +187,7 @@ export class SharedSessionHost {
   }
   hasPendingWork(): boolean { return this.#turns.size > 0 || this.#controls.size > 0; }
   async close(): Promise<void> {
-    this.#closed = true;
+    this.#closed = true;this.#secureInput.close();
     for (const active of this.#active.values()) { active.controller.abort(); active.pending?.resolve("denied"); }
     await Promise.allSettled([...this.#turns, ...this.#controls]);
   }

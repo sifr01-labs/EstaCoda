@@ -112,3 +112,8 @@ it('keeps Library scope and Evolution confirmations owned by Main',()=>{
  for(const extra of [{operationId:'forged'},{profileId:'other'},{commands:['pnpm run test']},{target:{targetId:'t',targetGeneration:1}}])expect(()=>validateSemanticPayload('evolutionExecute',{reviewId:'r',confirmed:true,...extra})).toThrow();
  expect(()=>validateSemanticPayload('evolutionExecute',{reviewId:'r',confirmed:false})).toThrow();expect(()=>validateSemanticPayload('evolutionInspect',{operationId:'forged'})).toThrow();
 });
+it('allows only a Work and opaque request ID from the ordinary renderer for secure input',()=>{
+ expect(()=>validateSemanticPayload('workInputPending',{workId:'session:s'})).not.toThrow();
+ expect(()=>validateSemanticPayload('workInputOpen',{workId:'session:s',requestId:'r'})).not.toThrow();
+ for(const extra of [{value:'canary'},{holder:'forged'},{origin:'https://evil.example'},{targetGeneration:2},{profileId:'other'},{command:{action:'deliver'}}])expect(()=>validateSemanticPayload('workInputOpen',{workId:'session:s',requestId:'r',...extra})).toThrow();
+});

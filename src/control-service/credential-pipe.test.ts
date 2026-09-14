@@ -52,3 +52,9 @@ it('bounds protected browser delivery concurrency and returns no value or raw fa
  finish();await setImmediate();expect(replies).not.toContain('secret-canary');expect(replies.trim().split('\n')).toHaveLength(2);
  dispose();expect(signal?.aborted).toBe(true);parent.destroy();
 });
+it('bounds private Work input requests and aborts their collectors on pipe disposal',async()=>{
+ const[parent,service]=duplexPair(),store=new CredentialCandidates('p','b');let replies='';parent.on('data',chunk=>{replies+=chunk;});const pending:Array<{signal:AbortSignal;resolve:(value:any)=>void}>=[];
+ const dispose=attachCredentialPipe(service,store,()=>{},undefined,(_params,signal)=>new Promise(resolve=>pending.push({signal,resolve})));
+ for(let i=0;i<9;i++)parent.write(JSON.stringify({jsonrpc:'2.0',id:String(i),method:'credentials.workInput',params:{workId:'session:s',command:{action:'pending',holder:'w'}}})+'\n');
+ await setImmediate();expect(pending).toHaveLength(8);expect(replies).toContain('-32009');pending[0]!.resolve({request:null});await setImmediate();expect(replies).toContain('"request":null');dispose();expect(pending.every(p=>p.signal.aborted)).toBe(true);for(const p of pending)p.resolve({request:null});parent.destroy();
+});

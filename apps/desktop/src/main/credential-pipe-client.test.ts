@@ -27,3 +27,10 @@ it('uses the dedicated pipe for browser sign-in and clears the caller value afte
  const delivery=client.deliverBrowser(params),request=JSON.parse(frames[0]!);expect(request.method).toBe('credentials.browserDeliver');
  pipe.push(JSON.stringify({jsonrpc:'2.0',id:request.id,result:{delivered:true}})+'\n');await delivery;expect(params.command.value).toBe('');client.dispose();
 });
+it('returns only protected request metadata and clears delivered values',async()=>{
+ const{client,pipe,frames}=fixture(),command={action:'deliver' as const,holder:'w',requestId:'r',value:'work-secret-canary'};
+ try{const delivery=client.workInput('session:s',command),request=JSON.parse(frames[0]!);expect(request.method).toBe('credentials.workInput');pipe.push(JSON.stringify({jsonrpc:'2.0',id:request.id,result:{request:null}})+'\n');expect(await delivery).toEqual({request:null});expect(command.value).toBe('');}finally{client.dispose();}
+});
+it('rejects a protected response that carries extra secret fields',async()=>{
+ const{client,pipe,frames}=fixture();const rejected=expect(client.workInput('session:s',{action:'pending',holder:'w'})).rejects.toThrow();pipe.push(JSON.stringify({jsonrpc:'2.0',id:JSON.parse(frames[0]!).id,result:{request:null,value:'forbidden'}})+'\n');await rejected;client.dispose();
+});

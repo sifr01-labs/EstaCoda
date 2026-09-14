@@ -277,7 +277,9 @@ export class ExecutionSupervisionController {
       ...execution,
       response: {
         ok: true,
-        content: "I stopped this browser turn because the available evidence or ineffective target was repeated without a new grounded strategy. Completed effects were preserved, but the remaining browser work is incomplete.",
+        content: this.#locale === "ar"
+          ? "تعذر إكمال العمل في المتصفح. توقفت المحاولات لعدم إحراز تقدم. حُفظت الإجراءات السابقة، لكن العمل المتبقي لم يكتمل."
+          : "Browser work could not be completed. I stopped retrying because the browser was no longer making progress. Earlier actions were preserved; the remaining work is unfinished.",
         model: response?.model ?? execution.route?.id ?? "unknown",
         provider: (response?.provider ?? execution.route?.provider ?? "unknown") as ProviderResponse["provider"],
         finishReason: "stop",

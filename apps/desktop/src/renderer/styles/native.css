@@ -215,3 +215,10 @@ html,body,#root{margin:0;min-width:0;min-height:100%;}body{background:#131313}bu
 #ec-branded-workspace .ec-turn-mark:is(:hover,:focus-visible) .ec-turn-preview{display:block}
 #ec-branded-workspace .ec-back-latest{position:absolute;inset-inline-end:30px;bottom:135px;z-index:9;background:var(--ec-panel);border:1px solid var(--ec-line);border-radius:18px;box-shadow:0 4px 16px #0001;font-size:11px}
 @media(max-width:590px){#ec-branded-workspace .ec-window[data-native=true] .ec-conversation-body .ec-usernote{max-width:88%}#ec-branded-workspace .ec-results .ec-usage dl{grid-template-columns:1fr}#ec-branded-workspace .ec-result-artifact{flex-wrap:wrap}}
+
+#ec-branded-workspace .ec-inputrequest{display:flex;align-items:flex-start;gap:12px;border:1px solid var(--ec-line);border-inline-start:3px solid var(--ec-accent);border-radius:12px;padding:16px;margin:12px 0 24px;background:var(--ec-panel)}
+#ec-branded-workspace .ec-inputrequest>div{min-width:0}
+#ec-branded-workspace .ec-inputrequest p{font-size:13px;line-height:1.6;color:var(--ec-muted);overflow-wrap:anywhere;margin:6px 0 12px}
+#ec-branded-workspace .ec-toolrow details{font-size:11px;color:var(--ec-muted);margin-top:5px}
+#ec-branded-workspace .ec-toolrow details summary{cursor:pointer}
+#ec-branded-workspace .ec-agent>.ec-msghead.ec-sr-only{margin:0;padding:0}

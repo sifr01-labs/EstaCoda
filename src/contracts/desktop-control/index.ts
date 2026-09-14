@@ -18,3 +18,4 @@ export * from './onboarding.js';
 export * from './library.js';
 
 export * from './schedules.js';
+export * from './work-input.js';

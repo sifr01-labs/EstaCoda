@@ -1,3 +1,4 @@
+import {DesktopWorkInput} from './work-secure-input.js';
 import {DesktopPublicSettings} from './public-settings.js';
 import {translate,type MessageKey} from '../shared/i18n/index.js';
 import {DesktopBrowserControls} from './browser-controls.js';
@@ -54,9 +55,15 @@ async function openWindow(): Promise<void> {
   const terminals=new DesktopTerminalControls(connection,async root=>{
     const result=await dialog.showMessageBox(window,{type:'warning',title:t('Open workspace terminal'),message:t('Open a terminal for this workspace?'),detail:'\u2066'+root+'\u2069'+'\n\n'+t('Commands run with your selected execution policy. A Local host terminal can access files beyond this directory. Terminal input does not approve agent actions.'),buttons:[t('Cancel'),t('Open terminal')],defaultId:0,cancelId:0,noLink:true});return result.response===1;
   },app.getPath('home'));
+  const workInput=new DesktopWorkInput(connection,()=>credentialPipe,(entry,deliver)=>new Promise<boolean>(resolve=>{
+    credentials.open({stage:async(_scope,value)=>{await deliver(value);return 'delivered';},closeWindow:async()=>{}},{windowId:'work-signin',generation:connection.state.generation,purpose:'provider',providerId:t(entry.kind==='password'?'Password':entry.kind==='one-time-code'?'One-time code':entry.kind==='account-identifier'?'Account identifier':'Secure value')+' · '+entry.origin+' · '+entry.position+'/'+entry.total,authMethod:'api_key',endpoint:entry.origin},()=>resolve(true),()=>resolve(false),'work');
+  }),()=>credentials.close());
+  window.on('closed',()=>workInput.dispose());
+  window.on('unresponsive',()=>workInput.invalidate());
+  window.webContents.on('render-process-gone',()=>workInput.invalidate());
   let closing=false;
   window.on('close',event=>{if(closing)return;event.preventDefault();void terminals.dispose().then(()=>{closing=true;window.close();}).catch(()=>{void dialog.showMessageBox(window,{type:'error',message:t('Terminal shutdown could not be confirmed.'),detail:t('The target remains protected from cleanup. Retry closing after checking the terminal process.')});});});
-  const disposeIpc = installSemanticIpc(window, documentUrl, connection, profiles, presentation,new DesktopModelSetup(connection,credentials,()=>credentialPipe,new WorkOperationReferences(connection,app.getPath('userData')),url=>shell.openExternal(url)),new WorkPins(app.getPath('userData'),connection),new DesktopWorkControls(connection,app.getPath('userData'),async()=>{const result=await dialog.showOpenDialog(window,{title:t('Attach images (up to 8 MB) or text (up to 8 KB)'),properties:['openFile','multiSelections']});return result.canceled?[]:result.filePaths;}),new DesktopTelegramSetup(connection,credentials,()=>credentialPipe),new DesktopConnectionControls(connection,app.getPath('userData')),new DesktopTargetControls(connection,app.getPath('userData')),terminals,browsers,new DesktopPublicSettings(connection,credentials,()=>credentialPipe,new DesktopConnectionControls(connection,path.join(app.getPath('userData'),'dependencies'))));
+  const disposeIpc = installSemanticIpc(window, documentUrl, connection, profiles, presentation,new DesktopModelSetup(connection,credentials,()=>credentialPipe,new WorkOperationReferences(connection,app.getPath('userData')),url=>shell.openExternal(url)),new WorkPins(app.getPath('userData'),connection),new DesktopWorkControls(connection,app.getPath('userData'),async()=>{const result=await dialog.showOpenDialog(window,{title:t('Attach images (up to 8 MB) or text (up to 8 KB)'),properties:['openFile','multiSelections']});return result.canceled?[]:result.filePaths;}),new DesktopTelegramSetup(connection,credentials,()=>credentialPipe),new DesktopConnectionControls(connection,app.getPath('userData')),new DesktopTargetControls(connection,app.getPath('userData')),terminals,browsers,new DesktopPublicSettings(connection,credentials,()=>credentialPipe,new DesktopConnectionControls(connection,path.join(app.getPath('userData'),'dependencies'))),workInput);
   window.once('closed', () => { disposeIpc(); connection.close(); });
   connection.switchProfile(profiles.initial());
   window.once('ready-to-show', () => window.show());

@@ -120,7 +120,7 @@ describe("ExecutionSupervisionController", () => {
     expect(assessment.browserObservation).toMatchObject({ count: 2, shouldStop: true });
     expect(assessment.terminationCause).toBe("browser_no_progress");
     expect(supervision.browserNoProgressStopReceipt(providerExecution()).response?.content).toContain(
-      "repeated without a new grounded strategy"
+      "browser was no longer making progress"
     );
   });
 

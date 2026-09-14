@@ -793,6 +793,7 @@ function renderBrowserStateProjection(state: BrowserStateProjection): string {
   const tabs = state.tabs ?? [];
   return [
     "Authoritative current browser state (harness-derived protected mutable state):",
+    "Keep browser progress concise: communicate meaningful results, required input or approval, blockers, and completion. Avoid narrating routine readiness checks, loading, and inspections already represented by tool activity. Do not omit failures or consequential changes.",
     `Session status: ${state.sessionStatus}`,
     state.sessionId === undefined ? undefined : `Session: ${state.sessionId}`,
     `Freshness: ${state.freshness}`,

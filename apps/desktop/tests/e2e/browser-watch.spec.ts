@@ -11,7 +11,7 @@ test('watches without takeover, clears busy frames, and drops late observations 
   const api={inventory:async()=>({supported:true,reason:null,truncated:false,sessions:[{id:'b',tabs:[]}]}),watch:async()=>{state.calls.push('watch');if(state.fail)throw new Error('Busy');if(state.defer)return new Promise(resolve=>{state.resolve=()=>resolve(frame);});return frame;},open:async()=>{throw new Error('Must not acquire');},frame:async()=>{throw new Error('Must not control');}};
   const root=createRoot(document.getElementById('watch-test')!);state.unmount=()=>root.render(null);root.render(React.createElement(BrowserWatch,{api,workId:'session:s',controlling:false}));(window as any).watchTest=state;
  });
- await page.getByRole('button',{name:'Watch live',exact:true}).click();await expect(page.getByRole('img',{name:'Current sanitized browser observation'})).toBeVisible();
+ await expect(page.getByRole('img',{name:'Current sanitized browser observation'})).toBeVisible();
  await page.screenshot({path:test.info().outputPath('live-browser-watch.png')});
  await page.evaluate(()=>(window as any).watchTest.fail=true);await expect(page.getByText(/Current observation unavailable/)).toBeVisible();await expect(page.getByRole('img')).toHaveCount(0);
  await page.evaluate(()=>{const s=(window as any).watchTest;s.fail=false;s.defer=true;});await expect.poll(()=>page.evaluate(()=>(window as any).watchTest.calls.length)).toBeGreaterThanOrEqual(3);

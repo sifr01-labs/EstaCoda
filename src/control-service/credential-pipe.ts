@@ -3,8 +3,8 @@ import { ControlProtocolError, exactKeys, failureEnvelope, isControlId, parseCon
 import { CredentialCandidates, validateCandidateScope } from './credential-candidates.js';
 import { BoundedLines } from './framing.js';
 /** Dedicated inherited descriptor, never stdout or an ordinary preload/RPC route. */
-export function attachCredentialPipe(pipe: Duplex, candidates: CredentialCandidates, onClosed: () => void, browserDeliver?:(params:unknown,signal:AbortSignal)=>Promise<void>): () => void {
-  let closed = false,browserBusy=false;const abort=new AbortController();
+export function attachCredentialPipe(pipe: Duplex, candidates: CredentialCandidates, onClosed: () => void, browserDeliver?:(params:unknown,signal:AbortSignal)=>Promise<void>, workInput?:(params:unknown,signal:AbortSignal)=>Promise<import('../contracts/desktop-control/work-input.js').WorkInputResult>): () => void {
+  let closed = false,browserBusy=false,workBusy=0;const abort=new AbortController();
   const close = () => {
     if (closed) return; closed = true; abort.abort(); lines.dispose(); candidates.dispose(); pipe.destroy(); onClosed();
   };
@@ -19,7 +19,11 @@ export function attachCredentialPipe(pipe: Duplex, candidates: CredentialCandida
       if (!('method' in message) || !('id' in message)) throw new ControlProtocolError('-32600');
       id = message.id;
       const params = message.params;
-      if(message.method==='credentials.browserDeliver'){
+      if(message.method==='credentials.workInput'){
+        if(!workInput)throw new ControlProtocolError('-32601');
+        if(workBusy>=8)throw new ControlProtocolError('-32009');workBusy++;
+        void workInput(params,abort.signal).then(result=>{if(!closed)send(id!,result);},()=>{if(!closed)pipe.write(serializeControlFrame(failureEnvelope(id,'-32003')));}).finally(()=>{workBusy--;});
+      } else if(message.method==='credentials.browserDeliver'){
         if(!browserDeliver||browserBusy)throw new ControlProtocolError('-32009');
         browserBusy=true;
         void browserDeliver(params,abort.signal).then(()=>{if(!closed)send(id!,{delivered:true});},()=>{if(!closed)pipe.write(serializeControlFrame(failureEnvelope(id,'-32003')));}).finally(()=>{browserBusy=false;});
