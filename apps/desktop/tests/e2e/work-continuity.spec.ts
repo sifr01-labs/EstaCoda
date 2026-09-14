@@ -162,7 +162,7 @@ test('live search finds off-page Work and a pin navigates to the canonical detai
 test('new Work preserves a draft through navigation and submits target-bound attachment handles',async({page})=>{
  await live(page);
  await page.getByRole('button',{name:'New chat',exact:true}).click();
- await page.getByLabel('Work target').selectOption('target');
+ await page.getByRole('button',{name:'Work target',exact:true}).click();await page.getByRole('dialog').getByRole('button',{name:/Trusted repo/}).click();
  await page.getByLabel('Draft guidance').fill('Review these notes');
  await page.getByRole('button',{name:'Add attachments',exact:true}).click();
  await expect(page.getByLabel('Attachments').getByText('notes.md')).toBeVisible();
@@ -206,9 +206,9 @@ test('navigates canonical child Tasks outside the sidebar page',async({page})=>{
 test('reviews bounded Task creation and routes pause and guidance through capability controls',async({page})=>{
  await live(page);
  await page.getByRole('button',{name:'New chat',exact:true}).click();
- await page.getByLabel('Work target').selectOption('target');
+ await page.getByRole('button',{name:'Work target',exact:true}).click();await page.getByRole('dialog').getByRole('button',{name:/Trusted repo/}).click();
  await page.getByLabel('Draft guidance').fill('Inspect repository');
- await page.getByLabel('Work type').selectOption('task');
+ await page.getByText('Chat options',{exact:true}).click();await page.getByLabel('Run in background',{exact:true}).check();
  await expect(page.getByRole('button',{name:'Send prompt',exact:true})).toBeDisabled();
  await page.getByText('Review Task limits and authority',{exact:true}).click();
  await page.getByLabel('Provider calls',{exact:true}).fill('3');
@@ -290,7 +290,7 @@ test('new Work controls stay below the welcome text in a short native viewport',
  const welcome=page.locator('.ec-newwelcome p'),workspace=page.getByLabel('Work target');
  await expect(welcome).toBeVisible();await expect(workspace).toBeVisible();
  expect((await workspace.boundingBox())!.y).toBeGreaterThanOrEqual((await welcome.boundingBox())!.y+(await welcome.boundingBox())!.height);
- await page.getByLabel('Work type').selectOption('task');await page.getByText('Review Task limits and authority',{exact:true}).click();
+ await page.getByText('Chat options',{exact:true}).click();await page.getByLabel('Run in background',{exact:true}).check();await page.getByText('Review Task limits and authority',{exact:true}).click();
  expect((await workspace.boundingBox())!.y).toBeGreaterThanOrEqual((await welcome.boundingBox())!.y+(await welcome.boundingBox())!.height);
  await page.getByRole('textbox',{name:'Draft guidance',exact:true}).scrollIntoViewIfNeeded();await expect(page.getByRole('textbox',{name:'Draft guidance',exact:true})).toBeInViewport();
 });
@@ -299,7 +299,7 @@ test('new Work controls stay below the welcome text in a short native viewport',
 test('draft inspection follows the selected target and shows canonical route and profile policy',async({page})=>{
  await live(page,true);
  await page.getByRole('button',{name:'New chat',exact:true}).click();
- await page.getByLabel('Work target').selectOption('target');
+ await page.getByRole('button',{name:'Work target',exact:true}).click();await page.getByRole('dialog').getByRole('button',{name:/Trusted repo/}).click();
  await page.getByRole('button',{name:'Execution details',exact:true}).click();
  const inspector=page.getByRole('complementary',{name:'Draft details'});
  await expect(inspector).toContainText('Trusted repo');
