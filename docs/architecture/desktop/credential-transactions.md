@@ -77,3 +77,17 @@ remains stopped; the UI does not relabel it as a resumable input request.
 After updating this code, restart both the desktop bridge and its shared local
 runtime once active work has settled. An already-running supervisor retains its
 old code. Existing browser URL, approval, takeover, and cloud-spend policies apply.
+
+
+The secure-entry action stays beside the composer across Conversation, Changes and
+Results, rather than scrolling away with history. Unbound historical Sessions do
+not poll for target-bound credential requests.
+
+The tool executor binds the coordinator to the tool's cancellation signal. The
+first actual human collection adds one fixed 120-second allowance to that tool's
+execution deadline; every field and subsequent request shares it. Automatic
+transfers and browser checks receive no allowance. The collector/broker's own
+expiry still applies, and Stop or tool timeout cancels the pending request. Hosted
+turn settlement also aborts any remaining input before releasing its runtime.
+Destination re-verification, byte clearing and conservative mutation uncertainty
+remain in force; this does not authorize retrying a possibly submitted form.

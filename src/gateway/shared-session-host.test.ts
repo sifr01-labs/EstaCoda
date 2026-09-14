@@ -99,3 +99,10 @@ it('connects hosted secure input to the coordinator without queuing or persistin
  const response=await turn;expect(factory).toHaveBeenCalledOnce();expect(consume).toHaveBeenCalledOnce();expect(accept).not.toHaveBeenCalled();expect(JSON.stringify([response,delivered,request])).not.toContain('private-canary');
  }finally{await host.close();broker.dispose();}
 });
+
+it('aborts the hosted input lifetime before releasing a normally settled turn',async()=>{
+ let signal!:AbortSignal;
+ const runtime={sessionId:'s',handle:async(input:any)=>{signal=input.signal;return{text:'done'};},dispose:vi.fn(async()=>{expect(signal.aborted).toBe(true);})} as unknown as Runtime;
+ const host=new SharedSessionHost({profileId:'p',sessionDb:{getSessionForProfile:async()=>({executionTarget:{targetId:'t'}})} as unknown as SessionDB,acquire:async()=>runtime,channelApproval:vi.fn()});
+ try{await expect(host.handle({method:'send',sessionId:'s',targetId:'t',operationId:'o',text:'hello'})).resolves.toMatchObject({text:'done'});expect(runtime.dispose).toHaveBeenCalledOnce();}finally{await host.close();}
+});

@@ -24,3 +24,22 @@ it('allows only one native flow and rejects delivery after profile invalidation'
 it('collects the next grouped field only for matching verified metadata',async()=>{
  const f=fixture(async(_entry,deliver)=>{await deliver('canary');return true;});try{const first={...entry,total:2},second={...first,id:'two',position:2};let delivered=0;f.call.mockImplementation(async(_id,c)=>{if(c.action==='deliver'){delivered++;return{request:null};}return{request:delivered?second:first};});await f.input.open('session:s','one');expect(f.call.mock.calls.map(([,c])=>c.action)).toEqual(['claim','deliver','pending','claim','deliver']);}finally{f.input.dispose();}
 });
+
+it('closes an open credential window when its owner cancels, without waiting for expiry',async()=>{
+ vi.useFakeTimers();let finish!:(accepted:boolean)=>void,deliver!:(value:string)=>Promise<void>;
+ const f=fixture(async(_r,d)=>{deliver=d;return new Promise(resolve=>finish=resolve);});
+ try{const opening=f.input.open('session:s','one');await vi.waitFor(()=>expect(deliver).toBeDefined());
+  f.close.mockImplementation(()=>finish(false));f.call.mockImplementation(async()=>({request:null}));
+  await vi.advanceTimersByTimeAsync(1000);await opening;expect(f.close).toHaveBeenCalledOnce();
+  await expect(deliver('late-canary')).rejects.toThrow('expired');expect(f.call.mock.calls.some(([,c])=>c.action==='deliver')).toBe(false);
+ }finally{f.input.dispose();vi.useRealTimers();}
+});
+it('ignores an old pending poll after delivery while the next grouped window is open',async()=>{
+ let answerPoll!:(value:any)=>void,firstDeliver!:(value:string)=>Promise<void>,finishFirst!:(value:boolean)=>void,finishSecond!:(value:boolean)=>void;
+ let count=0;const f=fixture(async(_r,d)=>{count++;if(count===1){firstDeliver=d;return new Promise(resolve=>finishFirst=resolve);}return new Promise(resolve=>finishSecond=resolve);});
+ vi.useFakeTimers();try{const first={...entry,total:2},second={...first,id:'two',position:2};let delivered=false;
+  f.call.mockImplementation(async(_id,c)=>{if(c.action==='deliver'){delivered=true;return{request:null};}if(c.action==='pending'&&!delivered)return new Promise(resolve=>answerPoll=resolve);return{request:delivered?second:first};});
+  const opening=f.input.open('session:s','one');await vi.waitFor(()=>expect(firstDeliver).toBeDefined());await vi.advanceTimersByTimeAsync(1000);await firstDeliver('canary');finishFirst(true);
+  await vi.waitFor(()=>expect(finishSecond).toBeDefined());answerPoll({request:null});await vi.advanceTimersByTimeAsync(0);expect(f.close).not.toHaveBeenCalled();finishSecond(false);await opening;
+ }finally{f.input.dispose();vi.useRealTimers();}
+});

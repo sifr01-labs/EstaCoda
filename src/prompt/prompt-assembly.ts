@@ -794,6 +794,7 @@ function renderBrowserStateProjection(state: BrowserStateProjection): string {
   return [
     "Authoritative current browser state (harness-derived protected mutable state):",
     "Keep browser progress concise: communicate meaningful results, required input or approval, blockers, and completion. Avoid narrating routine readiness checks, loading, and inspections already represented by tool activity. Do not omit failures or consequential changes.",
+    "A blocked browser check does not establish recovery. Report recovery only after a successful current receipt; never claim an unsettled resource has cleared based on a blocked read. When continuing a previous website task, use its established exact destination rather than guessing a related portal from the brand name.",
     `Session status: ${state.sessionStatus}`,
     state.sessionId === undefined ? undefined : `Session: ${state.sessionId}`,
     `Freshness: ${state.freshness}`,

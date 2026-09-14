@@ -135,6 +135,8 @@ describe("assembleProviderPrompt", () => {
     const rendered = renderMessages(prompt.messages);
 
     expect(rendered).toContain("Authoritative current browser state");
+    expect(rendered).toContain("A blocked browser check does not establish recovery.");
+    expect(rendered).toContain("use its established exact destination");
     expect(rendered).toContain("Controlled tab: @t2 (controlled)");
     expect(rendered).toContain("supersedes browser state found in conversation history");
     expect(rendered).toContain("Do not call browser.tabs or browser.snapshot merely to rediscover this state.");

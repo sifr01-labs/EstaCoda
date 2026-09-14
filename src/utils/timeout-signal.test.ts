@@ -91,3 +91,14 @@ describe("createTimeoutSignal", () => {
     timeout.cleanup();
   });
 });
+
+
+it("extends the total deadline without resetting elapsed time or bypassing cancellation", async () => {
+  vi.useFakeTimers();const parent=new AbortController();
+  const timeout=createTimeoutSignal({timeoutMs:60_000,parentSignal:parent.signal});
+  try{await vi.advanceTimersByTimeAsync(40_000);timeout.extendTotal(120_000);
+    await vi.advanceTimersByTimeAsync(139_999);expect(timeout.signal.aborted).toBe(false);
+    await vi.advanceTimersByTimeAsync(1);expect(timeout.timedOut()).toBe(true);
+    timeout.extendTotal(120_000);expect(timeout.signal.aborted).toBe(true);
+  }finally{timeout.cleanup();vi.useRealTimers();}
+});

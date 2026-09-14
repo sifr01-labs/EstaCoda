@@ -19,8 +19,16 @@ export class DesktopWorkInput {
    while(request){check();const entry=request;current=entry.id;
     const remaining=Date.parse(entry.expiresAt)-Date.now();if(remaining<=0)throw new Error('Secure request expired.');
     const timer=setTimeout(this.closeWindow,remaining);timer.unref();
+    let watching=true,finished=false;let watchTimer:ReturnType<typeof setTimeout>|undefined;
+    const watch=async()=>{
+     try{check();const pending=(await pipe.workInput(workId,{action:'pending',holder})).request;
+      if(watching&&!finished&&pending?.id!==entry.id){watching=false;this.closeWindow();}
+     }catch{if(watching&&!finished){watching=false;this.closeWindow();}}
+     finally{if(watching&&!finished){watchTimer=setTimeout(()=>void watch(),1000);watchTimer.unref();}}
+    };
+    watchTimer=setTimeout(()=>void watch(),1000);watchTimer.unref();
     let accepted:boolean;
-    try{accepted=await this.collect(entry,async value=>{try{check();await pipe.workInput(workId,{action:'deliver',holder,requestId:entry.id,value});check();}finally{value='';}});}finally{clearTimeout(timer);}
+    try{accepted=await this.collect(entry,async value=>{try{check();if(!watching)throw new Error('Secure request expired.');watching=false;await pipe.workInput(workId,{action:'deliver',holder,requestId:entry.id,value});check();}finally{value='';}});}finally{finished=true;clearTimeout(timer);clearTimeout(watchTimer);}
     if(!accepted){await pipe.workInput(workId,{action:'cancel',holder,requestId:entry.id}).catch(()=>{});return;}
     current=undefined;check();if(entry.position>=entry.total)return;
     let next:WorkInputRequest|null=null;const until=Date.now()+5000;

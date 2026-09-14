@@ -572,13 +572,23 @@ export class ToolExecutor {
         sideEffectState: "none"
       };
     } else {
-      const timeoutMs = positiveExecutionTimeout(tool.executionTimeoutMs, this.#defaultExecutionTimeoutMs);
+      let timeoutMs = positiveExecutionTimeout(tool.executionTimeoutMs, this.#defaultExecutionTimeoutMs);
       const timeout = createTimeoutSignal({
         timeoutMs,
         parentSignal: request.signal,
         timeoutMessage: `Tool execution timed out after ${timeoutMs}ms.`
       });
       let dispatchState: ToolExecutionSettlement["dispatchState"] = "not_started";
+      const inputLifetime = new AbortController();
+      let inputAllowanceUsed = false;
+      const onSecureInputRequest = (request.onSecureInputRequest as Partial<SecureInputTransferRequestHandler> | undefined)?.withExecutionScope?.(AbortSignal.any([timeout.signal, inputLifetime.signal]), () => {
+        // One bounded human-input allowance per tool, shared by all grouped fields.
+        // Browser execution, automatic transfers and repeated requests cannot renew it.
+        if (inputAllowanceUsed || inputLifetime.signal.aborted || timeout.signal.aborted) return;
+        inputAllowanceUsed = true;
+        timeoutMs += 120_000;
+        timeout.extendTotal(120_000);
+      }) ?? request.onSecureInputRequest;
       const executionContext = {
         sessionId: request.sessionId,
         profileId: this.#profileId,
@@ -592,7 +602,7 @@ export class ToolExecutor {
         environmentType,
         onEvent: request.onEvent,
         onApprovalRequest: tool.name === "execute_code" ? request.onApprovalRequest : undefined,
-        onSecureInputRequest: request.onSecureInputRequest
+        onSecureInputRequest
       };
       const running = withExecutionOperation(() => runToolWithProtectedArguments(tool, request.input, executionContext, {
         beforeDispatch: async () => {
@@ -667,6 +677,7 @@ export class ToolExecutor {
           };
         }
       } finally {
+        inputLifetime.abort();
         timeout.cleanup();
       }
     }

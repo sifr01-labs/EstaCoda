@@ -175,6 +175,7 @@ export class SharedSessionHost {
           } });
         return { text: response.text, sessionId: state.runtime.sessionId };
       } finally {
+        state.controller.abort();
         if (state.pending?.durable) await this.options.approvalQueue!.resolveApproval(state.pending.id, 'denied', 'owner-settled', {
           profileId: this.options.profileId, sessionId: request.sessionId }).catch(() => undefined);
         state.pending?.resolve("denied");

@@ -4,6 +4,7 @@ export type TimeoutSignalController = {
   signal: AbortSignal;
   markProgress(): void;
   disableStale(): void;
+  extendTotal(ms: number): void;
   timedOut(): boolean;
   timeoutKind(): TimeoutKind | undefined;
   classify(error: unknown): "timeout" | undefined;
@@ -22,6 +23,7 @@ export function createTimeoutSignal(options: {
   let totalTimer: ReturnType<typeof setTimeout> | undefined;
   let staleTimer: ReturnType<typeof setTimeout> | undefined;
   let staleDisabled = false;
+  let totalDeadline = Date.now() + options.timeoutMs;
 
   const abortForTimeout = (kind: TimeoutKind, message: string) => {
     if (controller.signal.aborted) {
@@ -72,6 +74,15 @@ export function createTimeoutSignal(options: {
 
   return {
     signal: controller.signal,
+    extendTotal(ms) {
+      if (options.timeoutMs <= 0 || controller.signal.aborted || !Number.isFinite(ms) || ms <= 0) return;
+      totalDeadline += ms;
+      clearTimeout(totalTimer);
+      totalTimer = setTimeout(
+        () => abortForTimeout("total", options.timeoutMessage ?? `Timed out after ${options.timeoutMs}ms`),
+        Math.max(0, totalDeadline - Date.now())
+      );
+    },
     markProgress() {
       resetStaleTimer();
     },

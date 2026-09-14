@@ -105,6 +105,18 @@ export class SecureInputCoordinator {
       consume,
       signal
     })) as SecureInputTransferRequestHandler;
+    handler.withExecutionScope = (executionSignal, onCollection) => new SecureInputCoordinator({
+      broker: this.#broker,
+      transports: this.#transports,
+      browserSource: this.#browserSource,
+      authorize: this.#authorize,
+      onWaitStateChange: this.#onWaitStateChange,
+      collect: async (...args) => {
+        onCollection();
+        return this.#collect(...args);
+      }
+    }).createRequestHandler(boundScope, signal === undefined
+      ? executionSignal : AbortSignal.any([signal, executionSignal]));
     handler.requestGroup = async (request) => await this.requestGroup({
       scope: boundScope,
       group: request,

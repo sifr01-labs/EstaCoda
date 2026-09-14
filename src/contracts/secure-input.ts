@@ -207,7 +207,12 @@ export type SecureInputRequestHandler = (
   consume: SecureInputConsumer
 ) => Promise<SecureInputReceipt>;
 
-export type GroupedSecureInputRequestHandler = SecureInputRequestHandler & {
+export type ScopedSecureInputRequestHandler = SecureInputRequestHandler & {
+  /** Bind trusted collection to the calling tool's lifetime, without changing its owner. */
+  withExecutionScope?: (signal: AbortSignal, onCollection: () => void) => SecureInputRequestHandler;
+};
+
+export type GroupedSecureInputRequestHandler = ScopedSecureInputRequestHandler & {
   requestGroup: (request: SecureInputGroupRequest) => Promise<SecureInputGroupReceipt>;
 };
 

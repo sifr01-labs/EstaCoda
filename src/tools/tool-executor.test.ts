@@ -2917,3 +2917,74 @@ it("does not dispatch after a matching grant is revoked and recreated during ass
     spy.mockRestore();
   } finally { await rm(directory, { recursive: true, force: true }); }
 });
+
+
+describe("protected input tool lifetime", () => {
+  async function protectedExecutor(repeat = false) {
+    const { DesktopSecureInput } = await import("../gateway/desktop-secure-input.js");
+    const { SecureInputCoordinator } = await import("../runtime/secure-input-coordinator.js");
+    const { EphemeralSecretBroker } = await import("../security/ephemeral-secret-broker.js");
+    const { SecureInputTransportRegistry } = await import("../security/secure-input-transport-registry.js");
+    const input = new DesktopSecureInput("test"), broker = new EphemeralSecretBroker();
+    const transports = new SecureInputTransportRegistry(), consumed: Uint8Array[] = [];
+    transports.register({id:"browser",destinationTypes:["browser-field"],priority:1,verificationStrength:"field-bound",persistence:"none",disclosureBoundary:"destination",requiresApproval:false,isAvailable:()=>true,
+      verify:({request})=>({status:"verified",destination:request.destination}),
+      deliver:async({value,context,consume})=>{consumed.push(value);await consume(value,context);}});
+    const binding = { sessionId:"test-session", targetId:"target", targetGeneration:1 };
+    const parent = new AbortController();
+    const handler = new SecureInputCoordinator({broker,transports,collect:input.collector(binding)})
+      .createRequestHandler({profileId:"test",sessionId:binding.sessionId},parent.signal);
+    const receiptStates: string[] = [];
+    const tool: RegisteredTool = { ...createEchoTool("browser.fill_protected_form"), toolsets:["browser"],
+      executionTimeoutMs:60_000,executionAbortSettlementGraceMs:2_000,
+      executionConcurrency:{mode:"exclusive",resourceKey:()=>"browser:test-session"},
+      run:async(_args,context)=>{
+        const scoped = context!.onSecureInputRequest as SecureInputTransferRequestHandler;
+        for(let round=0;round<(repeat?2:1);round++) {
+          const receipt=await scoped.requestGroup({purpose:"Sign in",items:["account-identifier","password"].map((kind,i)=>({id:String(i),request:{kind:kind as "password"|"account-identifier",purpose:"Sign in",retention:"use-once",destination:{type:"browser-field",sessionId:"browser",tabRef:"tab",frameId:"main",ref:String(i),expectedOrigin:"https://example.com"}},consume:async()=>{}}))});
+          receiptStates.push(receipt.status);
+          if(receipt.status!=="delivered")return{ok:false,content:"Input cancelled"};
+        }
+        return{ok:true,content:"Delivered"};
+      }};
+    const {executor,sessionDb,trajectoryRecorder}=await setupExecutor({tools:[tool]});
+    const pending=()=>input.handle(binding,{action:"pending",holder:"window"}).request;
+    const deliver=async()=>{
+      await vi.waitFor(()=>expect(pending()).not.toBeNull());const entry=pending()!;
+      input.handle(binding,{action:"claim",holder:"window",requestId:entry.id});
+      input.handle(binding,{action:"deliver",holder:"window",requestId:entry.id,value:"credential-canary"});
+      await vi.advanceTimersByTimeAsync(0);
+    };
+    const start=()=>executor.executeTool({tool:tool.name,input:{},sessionId:binding.sessionId,trustedWorkspace:true,onSecureInputRequest:handler,signal:parent.signal});
+    return{start,pending,deliver,parent,consumed,receiptStates,sessionDb,trajectoryRecorder,close:()=>{input.close();broker.dispose();}};
+  }
+  it("keeps grouped input pending beyond 60 seconds, then settles without exposing values",async()=>{
+    const f=await protectedExecutor();vi.useFakeTimers();
+    try{let finished=false;const execution=f.start().then(r=>{finished=true;return r;});await vi.waitFor(()=>expect(f.pending()).not.toBeNull());
+      await vi.advanceTimersByTimeAsync(70_000);expect(finished).toBe(false);expect(f.consumed).toHaveLength(0);
+      await f.deliver();expect(f.consumed).toHaveLength(0);await vi.advanceTimersByTimeAsync(10_000);await f.deliver();
+      expect((await execution)?.settlement).toMatchObject({terminalStatus:"completed",dispatchState:"finished"});
+      expect(f.receiptStates).toEqual(["delivered"]);expect(f.pending()).toBeNull();expect(f.consumed).toHaveLength(2);
+      expect(f.consumed.every(v=>v.every(b=>b===0))).toBe(true);
+      expect(await persistedExecutionState(f.sessionDb,f.trajectoryRecorder)).not.toContain("credential-canary");
+    }finally{f.close();vi.useRealTimers();}
+  });
+  it.each(["cancel","expire"])("settles the collector and releases its wait on %s",async(mode)=>{
+    const f=await protectedExecutor();vi.useFakeTimers();
+    try{const execution=f.start();await vi.waitFor(()=>expect(f.pending()).not.toBeNull());
+      if(mode==="cancel"){f.parent.abort();await vi.advanceTimersByTimeAsync(2_001);}else await vi.advanceTimersByTimeAsync(120_001);
+      const record=await execution;expect(record?.settlement?.dispatchState).toBe("finished");expect(record?.result?.ok).toBe(false);
+      expect(f.pending()).toBeNull();expect(f.consumed).toHaveLength(0);
+    }finally{f.close();vi.useRealTimers();}
+  });
+  it("cannot renew the input allowance with a second request, and tool timeout cancels pending input",async()=>{
+    const f=await protectedExecutor(true);vi.useFakeTimers();
+    try{const execution=f.start();await vi.waitFor(()=>expect(f.pending()).not.toBeNull());await vi.advanceTimersByTimeAsync(100_000);
+      await f.deliver();await f.deliver();await vi.waitFor(()=>expect(f.pending()).not.toBeNull());
+      await vi.advanceTimersByTimeAsync(82_001);const record=await execution;
+      expect(record?.settlement).toMatchObject({terminalStatus:"timed_out",dispatchState:"finished",timeoutMs:180_000});
+      expect(f.pending()).toBeNull();expect(f.receiptStates).toEqual(["delivered","cancelled"]);
+      expect(f.consumed).toHaveLength(2);
+    }finally{f.close();vi.useRealTimers();}
+  });
+});

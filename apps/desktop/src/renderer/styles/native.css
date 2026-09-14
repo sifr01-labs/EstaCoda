@@ -222,3 +222,19 @@ html,body,#root{margin:0;min-width:0;min-height:100%;}body{background:#131313}bu
 #ec-branded-workspace .ec-toolrow details{font-size:11px;color:var(--ec-muted);margin-top:5px}
 #ec-branded-workspace .ec-toolrow details summary{cursor:pointer}
 #ec-branded-workspace .ec-agent>.ec-msghead.ec-sr-only{margin:0;padding:0}
+
+/* Native windows own the viewport; conversation, sidebar and inspectors scroll independently. */
+html:has(.ec-window[data-native=true]),body:has(.ec-window[data-native=true]){height:100%;overflow:hidden}
+#ec-branded-workspace .ec-window[data-native=true]{flex-shrink:0;position:relative}
+#ec-branded-workspace .ec-window[data-native=true] .ec-conversation-body #ec-work-panel{scrollbar-width:auto;scrollbar-color:auto}
+#ec-branded-workspace .ec-window[data-native=true] .ec-conversation-body #ec-work-panel::-webkit-scrollbar{width:8px;height:8px;background:transparent}
+#ec-branded-workspace .ec-window[data-native=true] .ec-conversation-body #ec-work-panel::-webkit-scrollbar-track,
+#ec-branded-workspace .ec-window[data-native=true] .ec-conversation-body #ec-work-panel::-webkit-scrollbar-corner{background:transparent;border:0;box-shadow:none}
+#ec-branded-workspace .ec-window[data-native=true] .ec-conversation-body #ec-work-panel::-webkit-scrollbar-thumb{background:var(--ec-muted);border:2px solid transparent;background-clip:padding-box;border-radius:8px}
+#ec-branded-workspace .ec-window[data-native=true] .ec-conversation-body #ec-work-panel::-webkit-scrollbar-button{display:none}
+/* Keep the metadata-only secure-entry action in view even when reading older turns or Results. */
+#ec-branded-workspace .ec-workcenter>.ec-inputrequest{width:100%;max-width:860px;flex-shrink:0;align-self:center;margin:6px auto 0;padding:10px 12px;gap:8px}
+#ec-branded-workspace .ec-workcenter>.ec-inputrequest>div{flex:1;display:flex;align-items:center;flex-wrap:wrap;gap:4px 12px}
+#ec-branded-workspace .ec-workcenter>.ec-inputrequest b{font-size:12px}
+#ec-branded-workspace .ec-workcenter>.ec-inputrequest p{flex:1 1 200px;font-size:12px;margin:0;line-height:1.4}
+#ec-branded-workspace .ec-workcenter>.ec-inputrequest .ec-actions{margin:0;gap:6px;flex-wrap:wrap}
