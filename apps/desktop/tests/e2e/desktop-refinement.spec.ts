@@ -88,6 +88,11 @@ for(const language of ['en','ar'])test(`native drag areas stay clear of the side
     });
    })).toBe(true);
    await toggle.click();await expect(page.locator('#ec-sidebar')).toBeVisible();await expect(toggle).toHaveAttribute('aria-expanded','true');
+   // Visible controls must also clear the opaque native title bar (not merely exist in the DOM).
+   const titlebar=await page.locator('.ec-titlebar').boundingBox();
+   for(const control of await page.locator('.ec-brand-name,.ec-brand-controls button').all()){
+    const box=await control.boundingBox();expect(box!.y).toBeGreaterThanOrEqual(titlebar!.y+titlebar!.height+8);
+   }
   }
  }
 });
@@ -111,6 +116,7 @@ for(const language of ['en','ar'])test(`sidebar rhythm and context menu affordan
  const sidebar=page.locator('#ec-sidebar');await expect(sidebar.locator('.ec-brand .ec-sidebar-toggle')).toBeVisible();await expect(page.locator('.ec-titlebar .ec-sidebar-toggle')).toHaveCount(0);
  const row=sidebar.locator('.ec-taskbutton').first();expect((await row.boundingBox())!.height).toBeLessThanOrEqual(44);
  await expect(sidebar.locator('.ec-profile')).toContainText(language==='ar'?'جهاز Mac هذا':'Local · This Mac');
+ await sidebar.locator('.ec-tasklist').first().evaluate(el=>{for(const title of ['Review workspace settings','Check connector status','Improve conversation layout','Verify desktop navigation']){const row=el.firstElementChild!.cloneNode(true) as HTMLElement;row.querySelector('bdi')!.textContent=title;el.append(row);}});
  await row.click({button:'right'});const menu=page.getByRole('menu');await expect(menu).toBeVisible();
  const first=menu.getByRole('menuitem').first();await page.keyboard.press('Home');await expect(first).toHaveCSS('background-color','rgb(0, 127, 174)');
  expect(await menu.evaluate(el=>getComputedStyle(el).backdropFilter)).toContain('blur');
@@ -127,4 +133,22 @@ test('Activity distinguishes a completed stop request from the work outcome',asy
  await page.evaluate(()=>{(window as any).refinement.cancellation='confirmed';});await activity.getByRole('button',{name:'Check execution status',exact:true}).click();await expect(activity).toContainText('Stop confirmed');
  await page.evaluate(()=>{const s=(window as any).refinement;s.receipt='uncertain';s.cancellation='requested';});await activity.getByRole('button',{name:'Check execution status',exact:true}).click();await expect(activity).toContainText('Result not confirmed');await expect(activity).not.toContainText('awaiting confirmation');
  expect(await page.evaluate(()=>(window as any).refinement.calls.filter((x:any)=>x[0]==='act'||x[0]==='send'))).toEqual([]);
+});
+
+test('context menu material transmits the backdrop and respects reduced transparency',async({page})=>{
+ await page.setViewportSize({width:1280,height:800});await mount(page);
+ await page.locator('.ec-taskbutton').first().click({button:'right'});const menu=page.getByRole('menu');await expect(menu).toBeVisible();
+ // A rendered-pixel check catches opaque ancestor/compositor regressions that a
+ // computed backdrop-filter assertion alone would miss. Keep the probe inside
+ // the menu, clear of its border, shadow, label, and focused first item.
+ const box=(await menu.boundingBox())!;const clip={x:Math.floor(box.x+box.width-20),y:Math.floor(box.y+100),width:4,height:4};
+ await menu.evaluate(el=>{const b=el.getBoundingClientRect(),backdrop=document.createElement('div');backdrop.id='menu-test-backdrop';backdrop.style.cssText=`position:fixed;z-index:999;left:${b.left-50}px;top:${b.top-50}px;width:${b.width+100}px;height:${b.height+100}px;pointer-events:none`;el.before(backdrop);});
+ const sample=async(color:string)=>{await page.locator('#menu-test-backdrop').evaluate((el,color)=>{el.style.background=color;},color);return page.screenshot({clip});};
+ for(const appearance of ['light','dark']){
+  await page.locator('#ec-branded-workspace').evaluate((el,value)=>el.setAttribute('data-appearance',value),appearance);
+  const fill=await menu.evaluate(el=>getComputedStyle(el).backgroundColor);const alpha=Number(fill.match(/\/\s*([\d.]+)/)?.[1]??1);expect(alpha).toBeLessThanOrEqual(.7);
+  const dark=await sample('#111');const light=await sample('#eee');expect(dark.equals(light)).toBe(false);
+ }
+ const cdp=await page.context().newCDPSession(page);await cdp.send('Emulation.setEmulatedMedia',{features:[{name:'prefers-reduced-transparency',value:'reduce'}]});
+ await expect(menu).toHaveCSS('backdrop-filter','none');const dark=await sample('#111');const light=await sample('#eee');expect(dark.equals(light)).toBe(true);
 });

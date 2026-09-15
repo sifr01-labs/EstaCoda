@@ -19,7 +19,8 @@
 #ec-branded-workspace .ec-sidebar-resize:hover{background:color-mix(in srgb,var(--ec-accent) 25%,transparent)}
 #ec-branded-workspace[data-theme=kemet] .ec-titlebar,#ec-branded-workspace[data-theme=kemet] #ec-sidebar{background:light-dark(#f8f8f8,#212121)}
 #ec-branded-workspace[data-theme=kemet] .ec-sidebar{--ec-line:light-dark(#e8e8e8,#383838);--ec-inset:light-dark(#eeeeee,#292929);--ec-panel:var(--ec-inset);--ec-tint:light-dark(#e8e8e8,#343434)}
-#ec-branded-workspace .ec-sidebarcap{padding:10px 10px 8px;gap:12px}
+/* The legacy cap pulls up by 20px; keep it below the native title-bar reserve. */
+#ec-branded-workspace .ec-sidebarcap{margin-top:0;padding:10px 10px 8px;gap:12px}
 #ec-branded-workspace .ec-sideactions{gap:4px;margin-top:0}
 #ec-branded-workspace .ec-sideactions .ec-btn{border:0;background:transparent;justify-content:flex-start;padding:8px 6px;min-height:34px;white-space:nowrap}
 #ec-branded-workspace .ec-sideactions .ec-btn:hover{background:var(--ec-inset)}
@@ -181,7 +182,7 @@
 #ec-branded-workspace .ec-taskbutton small{margin-top:2px;line-height:16px}
 #ec-branded-workspace .ec-profile bdi{font-weight:500}
 #ec-branded-workspace .ec-recents>.ec-sectionlabel{margin-top:14px;margin-bottom:8px}
-#ec-branded-workspace .ec-chatmenu{background:color-mix(in srgb,var(--ec-panel) 86%,transparent);backdrop-filter:blur(24px) saturate(140%);-webkit-backdrop-filter:blur(24px) saturate(140%);border-color:color-mix(in srgb,var(--ec-muted) 25%,transparent);box-shadow:0 12px 36px #0003,inset 0 1px 0 #ffffff18}
+#ec-branded-workspace .ec-chatmenu{background:color-mix(in srgb,var(--ec-panel) 55%,transparent);backdrop-filter:blur(6px) saturate(140%);-webkit-backdrop-filter:blur(6px) saturate(140%);border-color:color-mix(in srgb,var(--ec-muted) 25%,transparent);box-shadow:0 12px 36px #0003,inset 0 1px 0 #ffffff18}
 #ec-branded-workspace .ec-chatmenu>button:is(:hover,:focus-visible):not(:disabled){background:var(--ec-accent);color:var(--ec-on-accent);outline:none}
 #ec-branded-workspace .ec-current-state{font-size:15px;font-weight:500;margin-top:8px}
 #ec-branded-workspace .ec-request-detail{margin-top:24px}
