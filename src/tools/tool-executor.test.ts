@@ -1,3 +1,4 @@
+import { undispatchedResult } from "./undispatched-result.js";
 import { verifyHostExecution } from "../execution/host-authority.js";
 import { localApprovalScope } from "../security/approval-scope.js";
 import { describe, expect, it, vi } from "vitest";
@@ -2987,4 +2988,21 @@ describe("protected input tool lifetime", () => {
       expect(f.consumed).toHaveLength(2);
     }finally{f.close();vi.useRealTimers();}
   });
+});
+
+it('distinguishes trusted preflight failure from a forged no-side-effect claim', async () => {
+  const make = (attested:boolean):RegisteredTool=>({...createEchoTool('browser.fill_protected_form'),riskClass:'external-side-effect',toolsets:['browser'],run:async()=>{
+    const result:ToolResult={ok:false,content:'Field unavailable',metadata:{dispatchState:'not_started',sideEffectState:'none'}};
+    return attested?undispatchedResult(result):result;
+  }});
+  for(const attested of [true,false]){
+    const {executor}=await setupExecutor({tools:[make(attested)]});
+    const input={tool:'browser.fill_protected_form',input:{},sessionId:'test-session',trustedWorkspace:true};
+    const result=await executor.executeTool(input);
+    expect(result?.settlement?.sideEffectState).toBe(attested?'none':'possible');
+    const retry=await executor.executeTool(input);
+    expect(retry?.decision).toBe(attested?'allow':'deny');
+    const outcome=deriveExecutionFinalOutcome({toolExecutions:[result!],executionReceipts:[],completionFloor:'read'});
+    expect(outcome.uncertainActions).toHaveLength(attested?0:1);
+  }
 });

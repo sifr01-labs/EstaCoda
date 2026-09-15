@@ -312,6 +312,7 @@ export type Runtime = {
     signal?: AbortSignal;
   }): Promise<import("../memory/memory-curation-service.js").MemoryCurationCheckpointResult | undefined>;
   inspectMcpServers(): MCPServerSnapshot[];
+  reconnectMcpServers?(): Promise<MCPServerSnapshot[]>;
   hasActiveSubagents?(parentSessionId: string): boolean;
   activeSubagents?(parentSessionId?: string): OperatorSubagentStatus;
   handle(input: AgentLoopInput): Promise<AgentLoopResponse>;
@@ -605,8 +606,9 @@ async function buildRuntime(options: RuntimeOptions, rollback: ResourceCleanup):
     environment: await profileHeaderEnvironment({homeDir:globalPaths.homeDir,profileId}),
     artifactStore
   });
-  for (const server of loadedMcpServers) resources.defer(() => server.stop());
+  resources.defer(async () => { await Promise.all(loadedMcpServers.map(server => server.stop())); });
   const mcpTools = loadedMcpServers.flatMap((server) => server.tools);
+  const mcpServerSnapshots = loadedMcpServers.map(server => server.snapshot);
   // Load skills from explicit profile-local and package sources:
   // 1. packs/ under the selected profile (external, lowest priority)
   // 2. package bundled skills (middle priority)
@@ -971,7 +973,7 @@ async function buildRuntime(options: RuntimeOptions, rollback: ResourceCleanup):
       providerExecutor,
       routes: agentLoopRoutes,
       mcpTools,
-      mcpServerSnapshots: loadedMcpServers.map((server) => server.snapshot),
+      mcpServerSnapshots,
       skillRegistry,
       localSkillsRoot,
       bundledSkillsRoot: bundledSkillsDir,
@@ -1114,7 +1116,7 @@ async function buildRuntime(options: RuntimeOptions, rollback: ResourceCleanup):
     taskHostAdmission: options.taskHostAdmission,
     onTaskCreated: options.onTaskCreated
   });
-  const builtSession = await builder.buildSession({
+  const buildSession = () => builder.buildSession({
     sessionId,
     sessionRuntimeContext,
     sessionDb,
@@ -1165,7 +1167,9 @@ async function buildRuntime(options: RuntimeOptions, rollback: ResourceCleanup):
           };
         }
   });
-  const {
+  let builtSession = await buildSession();
+  let connectorRefreshFailed = false;
+  let {
     agentLoop,
     toolRegistry,
     toolExecutor,
@@ -1353,8 +1357,41 @@ async function buildRuntime(options: RuntimeOptions, rollback: ResourceCleanup):
     async auditMemoryCuration(input) {
       return await memoryCurationService?.checkpoint(input);
     },
+    async reconnectMcpServers() {
+      return executionOwner.run(async () => {
+        executionLease.assertActive();
+        if (!await trustStore.isTrusted(workspaceRoot) || subagentRegistry.hasActiveSubagents(sessionRuntimeContext.currentSessionId())) {
+          throw new Error("Connectors can reconnect only in a trusted, idle session.");
+        }
+        connectorRefreshFailed = true;
+        await Promise.all(loadedMcpServers.map(server => server.stop()));
+        loadedMcpServers.splice(0, loadedMcpServers.length);
+        const next = await loadMcpServers({
+          servers: options.mcpServers ?? {},
+          environment: await profileHeaderEnvironment({ homeDir: globalPaths.homeDir, profileId }),
+          artifactStore
+        });
+        loadedMcpServers.push(...next);
+        mcpTools.splice(0, mcpTools.length, ...next.flatMap(server => server.tools));
+        mcpServerSnapshots.splice(0, mcpServerSnapshots.length, ...next.map(server => server.snapshot));
+        const refreshed = await buildSession();
+        await builder.cleanupSession(builtSession);
+        builtSession = refreshed;
+        ({ agentLoop, toolRegistry, toolExecutor, sessionSkillRegistry, sessionSkillCatalog,
+          sessionRecallService, memoryCurationService } = refreshed);
+        await sessionDb.appendEvent(sessionRuntimeContext.currentSessionId(), {
+          kind: 'mcp-connection-status', connectors: next.map(({snapshot}) => ({
+            name: sanitizeMcpDiagnostic(snapshot.name), connected: snapshot.connected,
+            available: snapshot.available, schemasRegistered: snapshot.schemasRegistered,
+            ...(snapshot.failureStage ? {failureStage:snapshot.failureStage} : {})
+          }))
+        });
+        connectorRefreshFailed = false;
+        return next.map(server => structuredClone(server.snapshot));
+      });
+    },
     inspectMcpServers() {
-      return loadedMcpServers.map((server) => structuredClone(server.snapshot));
+      return loadedMcpServers.map(server => ({ ...structuredClone(server.snapshot), connected: server.snapshot.connected && server.client.connected, available: server.snapshot.available && server.client.connected }));
     },
     hasActiveSubagents(parentSessionId) {
       return subagentRegistry.hasActiveSubagents(parentSessionId);
@@ -1363,6 +1400,7 @@ async function buildRuntime(options: RuntimeOptions, rollback: ResourceCleanup):
       return subagentRegistry.operatorStatus({ parentSessionId });
     },
     async handle(input) {
+      if (connectorRefreshFailed) throw new Error("Reconnect connectors before continuing this session.");
       executionLease.assertActive();
       const current = await sessionDb.getSession(sessionRuntimeContext.currentSessionId());
       if (current === undefined) throw new Error("Session is no longer available.");

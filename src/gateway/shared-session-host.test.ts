@@ -106,3 +106,43 @@ it('aborts the hosted input lifetime before releasing a normally settled turn',a
  const host=new SharedSessionHost({profileId:'p',sessionDb:{getSessionForProfile:async()=>({executionTarget:{targetId:'t'}})} as unknown as SessionDB,acquire:async()=>runtime,channelApproval:vi.fn()});
  try{await expect(host.handle({method:'send',sessionId:'s',targetId:'t',operationId:'o',text:'hello'})).resolves.toMatchObject({text:'done'});expect(runtime.dispose).toHaveBeenCalledOnce();}finally{await host.close();}
 });
+
+it('reconnects shared connectors without dispatching a prompt and reports progress', async () => {
+  let finish!: () => void;
+  const reload = vi.fn(() => new Promise<never[]>(resolve => { finish=()=>resolve([]); }));
+  const runtime = { reconnectMcpServers: reload, handle: vi.fn(), dispose: vi.fn(async()=>{}) } as unknown as Runtime;
+  const acquire = vi.fn(async()=>runtime);
+  const host = new SharedSessionHost({profileId:'p',acquire,channelApproval:vi.fn(),inspectConnectors:()=>[],validateTarget:async()=>{},
+    sessionDb:{getSessionForProfile:async()=>({executionTarget:{targetId:'t',targetGeneration:1}})} as unknown as SessionDB});
+  const base={sessionId:'s',targetId:'t',targetGeneration:1,operationId:'o'};
+  await expect(host.handle({...base,method:'mcp.control',connectorAction:'inspect'})).resolves.toMatchObject({state:'ready'});
+  expect(acquire).not.toHaveBeenCalled();
+  await expect(host.handle({...base,method:'send',text:'/reload-mcp'})).resolves.toMatchObject({state:'reconnecting'});
+  await vi.waitFor(()=>expect(reload).toHaveBeenCalledOnce());
+  await expect(host.handle({...base,method:'mcp.control',connectorAction:'reconnect'})).resolves.toMatchObject({state:'reconnecting'});
+  expect(reload).toHaveBeenCalledOnce(); expect(runtime.handle).not.toHaveBeenCalled();
+  finish(); await vi.waitFor(()=>expect(host.hasPendingWork()).toBe(false));
+  await expect(host.handle({...base,method:'mcp.control',connectorAction:'inspect'})).resolves.toMatchObject({state:'ready'});
+  expect(runtime.dispose).toHaveBeenCalledOnce();
+  await expect(host.handle({...base,targetGeneration:2,method:'mcp.control',connectorAction:'reconnect'})).rejects.toThrow('generation');
+  expect(reload).toHaveBeenCalledOnce(); await host.close();
+});
+it('refuses connector restart during an active turn and keeps cancellation available', async () => {
+  let started!:()=>void;const ready=new Promise<void>(resolve=>started=resolve);
+  const reload=vi.fn();
+  const runtime={reconnectMcpServers:reload,dispose:async()=>{},handle:async(input:any)=>{started();await new Promise(resolve=>input.signal.addEventListener('abort',resolve,{once:true}));return {text:'stopped'};}} as unknown as Runtime;
+  const host=new SharedSessionHost({profileId:'p',acquire:async()=>runtime,channelApproval:vi.fn(),inspectConnectors:()=>[],sessionDb:{getSessionForProfile:async()=>({executionTarget:{targetId:'t'}})} as unknown as SessionDB});
+  const base={sessionId:'s',targetId:'t',operationId:'o'};const turn=host.handle({...base,method:'send',text:'work'});await ready;
+  await expect(host.handle({...base,method:'mcp.control',connectorAction:'reconnect'})).resolves.toMatchObject({state:'busy'});
+  expect(reload).not.toHaveBeenCalled();await host.handle({...base,method:'cancel'});await turn;await host.close();
+});
+
+it('uses initial discovery once for a cold session and reports a failed refresh without model replay',async()=>{
+ let loaded=false,fail=false;
+ const runtime={reconnectMcpServers:vi.fn(async()=>{if(fail)throw new Error('private diagnostic');return[];}),handle:vi.fn(),dispose:async()=>{}} as unknown as Runtime;
+ const host=new SharedSessionHost({profileId:'p',acquire:async()=>{loaded=true;return runtime;},inspectConnectors:()=>loaded?[]:undefined,channelApproval:vi.fn(),sessionDb:{getSessionForProfile:async()=>({executionTarget:{targetId:'t'}})} as unknown as SessionDB});
+ const request={method:'mcp.control' as const,connectorAction:'reconnect' as const,sessionId:'s',targetId:'t',operationId:'o'};
+ await host.handle(request);await vi.waitFor(()=>expect(host.hasPendingWork()).toBe(false));expect(runtime.reconnectMcpServers).not.toHaveBeenCalled();
+ fail=true;await host.handle(request);await vi.waitFor(()=>expect(host.hasPendingWork()).toBe(false));
+ const status=await host.handle({...request,connectorAction:'inspect'});expect(status).toMatchObject({state:'failed'});expect(JSON.stringify(status)).not.toContain('private diagnostic');expect(runtime.handle).not.toHaveBeenCalled();await host.close();
+});

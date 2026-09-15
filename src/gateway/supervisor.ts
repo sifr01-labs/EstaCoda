@@ -1852,6 +1852,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
       const sharedHost = new SharedSessionHost({
         resolveMedia:request=>new DesktopMediaInput({homeDir,profileId}).resolve(request.mediaIds??[],{sessionId:request.sessionId,operationId:request.operationId,targetId:request.targetId,targetGeneration:request.targetGeneration}),
         profileId, sessionDb, receipts, approvalQueue: gatewayApprovalQueue,
+        inspectConnectors: sessionId => runtimeCache.inspectMcpServers(sessionId),
         browserControl:request=>runtimeCache.browserControl(request.sessionId,request.browserControl!),
         modelControl: async (request) => {const current=await loadConfig();return desktopModelControl({request,profileId,sessionDb,tasks:taskStore,context:{config:current.config,providerRegistry:current.providerRegistry,homeDir,profileId},invalidate:id=>runtimeCache.invalidate(id)});},
         taskControl: async(request) => {

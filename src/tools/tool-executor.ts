@@ -1,3 +1,4 @@
+import { isUndispatchedResult } from "./undispatched-result.js";
 import { validateCurrentExecutionAuthority, withExecutionOperation } from "../runtime/live-execution-authority.js";
 import { assertCurrentExecutionFence } from "../session/execution-fence-context.js";
 import { validateDispatchAuthorization } from "../security/dispatch-authorization.js";
@@ -637,7 +638,7 @@ export class ToolExecutor {
         settlement = {
           terminalStatus: result.ok ? "completed" : "failed",
           dispatchState,
-          sideEffectState: executionEffect?.kind !== "mutation"
+          sideEffectState: executionEffect?.kind !== "mutation" || isUndispatchedResult(result)
             ? "none"
             : result.ok ? "confirmed" : dispatchState === "not_started" ? "none" : "possible"
         };

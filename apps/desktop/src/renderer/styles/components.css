@@ -356,3 +356,14 @@
 .ec-chat-restoring{position:absolute;inset:48px 0 40px;display:flex;gap:12px;align-items:center;justify-content:center;background:var(--ec-bg);z-index:100}
 
 #ec-branded-workspace .ec-composererror { width:min(100%,850px);box-sizing:border-box;margin:0 auto 8px;padding:9px 12px;border-inline-start:2px solid var(--ec-warning);border-radius:8px;background:var(--ec-panel);color:var(--ec-muted);font-size:12px;line-height:1.5; }
+
+.ec-connectorpanel { border:1px solid var(--ec-line); border-radius:12px; padding:12px 16px; margin-block:8px 16px; background:var(--ec-panel); }
+.ec-connectorhead,.ec-connectorrow { display:flex; align-items:center; justify-content:space-between; gap:12px; }
+.ec-connectorhead>div { display:flex; align-items:center; }
+.ec-connectorrow { padding-block:8px; }
+.ec-connectorrow>span:first-child { min-width:0; overflow-wrap:anywhere; }
+.ec-connectorpanel p { font-size:13px; color:var(--ec-muted); }
+.ec-chatconnectors { width:100%; max-width:var(--ec-document-width,1100px); margin-inline:auto; }
+.ec-chatconnectors>.ec-btn { display:flex; margin-inline-start:auto; font-size:12px; }
+.ec-connectorchat { display:flex; align-items:center; gap:12px; }
+.ec-connectorchat select { max-width:360px; }

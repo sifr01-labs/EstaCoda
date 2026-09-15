@@ -163,3 +163,11 @@ describe("npx cache lookup", () => {
     }
   });
 });
+
+it('settles an owned connector that ignores SIGTERM before allowing replacement',async()=>{
+ const script=String.raw`process.on('SIGTERM',()=>{});require('node:readline').createInterface({input:process.stdin}).on('line',line=>{const q=JSON.parse(line);if(q.id===undefined)return;process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:q.id,result:q.method==='initialize'?{capabilities:{tools:{}}}:{pid:process.pid}})+'\n');});`;
+ const client=new MCPClient({name:'termination-fixture',command:process.execPath,args:['-e',script],connectTimeoutMs:1000});
+ try {await client.start();expect(client.connected).toBe(true);const result=await client.callTool('pid',{}) as {pid:number};
+  await client.stop();expect(client.connected).toBe(false);expect(()=>process.kill(result.pid,0)).toThrow();
+ }finally{await client.stop();}
+});

@@ -19,11 +19,14 @@ export class SharedSessionHost {
   readonly #active = new Map<string, Active>();
   readonly #turns = new Set<Promise<unknown>>();
   readonly #serial = new SessionCompressionLock();
+  readonly #connectorReloads = new Set<string>();
+  readonly #connectorFailures = new Set<string>();
   #closed = false;
   constructor(readonly options: {
     resolveMedia?(request:PrivateControlRequest):Promise<import('../contracts/channel.js').ChannelAttachment[]>;
     profileId: string; sessionDb: SessionDB; receipts?: ControlReceipts;
     approvalQueue?: GatewayApprovalQueue;
+    inspectConnectors?(sessionId: string): import("../mcp/mcp-tools.js").MCPServerSnapshot[] | undefined;
     browserControl?(request:PrivateControlRequest):Promise<unknown>;
     modelControl?(request: PrivateControlRequest): Promise<unknown>;
     taskControl?(request: PrivateControlRequest): unknown;
@@ -49,7 +52,7 @@ export class SharedSessionHost {
   async handle(request: PrivateControlRequest): Promise<unknown> {
     const receipts = this.options.receipts;
     await this.validate(request, request.method === "inspect" || (receipts?.inspect(request).length ?? 0) > 0);
-    if(request.method==='browser.control'||request.method==='secure.input'){
+    if(request.method==='mcp.control'||request.method==='browser.control'||request.method==='secure.input'){
       const execution=this.execute(request);this.#controls.add(execution);
       try{return await execution;}finally{this.#controls.delete(execution);}
     }
@@ -71,6 +74,11 @@ export class SharedSessionHost {
   private async execute(request: PrivateControlRequest): Promise<unknown> {
     const generation = this.#cancelGeneration.get(request.sessionId) ?? 0;
     await this.validate(request, request.method === "inspect");
+    if(request.method==='mcp.control')return this.connectorControl(request);
+    if(request.method==='send'&&request.text?.trim()==='/reload-mcp'){
+      if(request.mediaIds?.length)throw new Error('Reconnect does not accept attachments.');
+      return this.connectorControl({...request,connectorAction:'reconnect'});
+    }
     if(request.method==='secure.input')return this.#secureInput.handle({sessionId:request.sessionId,targetId:request.targetId,targetGeneration:request.targetGeneration!},request.workInput!);
     if(request.method==='browser.control'){if(!this.options.browserControl)throw new Error('Browser controls unavailable.');return this.options.browserControl(request);}
     const active = this.#active.get(request.sessionId);
@@ -185,6 +193,33 @@ export class SharedSessionHost {
     });
     this.#turns.add(turn);
     try { return await turn; } finally { this.#turns.delete(turn); }
+  }
+  private connectorControl(request: PrivateControlRequest) {
+    const sessionId = request.sessionId;
+    const snapshot = () => ({
+      state: this.#connectorReloads.has(sessionId) ? 'reconnecting' : this.#active.has(sessionId) ? 'busy' : this.#connectorFailures.has(sessionId) ? 'failed' : 'ready',
+      servers: this.options.inspectConnectors?.(sessionId) ?? null
+    });
+    if (request.connectorAction === 'inspect' || this.#connectorReloads.has(sessionId)) return snapshot();
+    if (this.#active.has(sessionId)) return { ...snapshot(), state: 'busy' };
+    if (this.#turns.size >= 128 || this.#connectorReloads.size >= 128) throw new Error('Connector control is busy.');
+    this.#connectorReloads.add(sessionId);
+    this.#connectorFailures.delete(sessionId);
+    const reconnect = this.#serial.runExclusive(sessionId, async () => {
+      await this.validate(request);
+      const alreadyLoaded = this.options.inspectConnectors?.(sessionId) !== undefined;
+      const runtime = await this.options.acquire(sessionId);
+      try {
+        if (!runtime.reconnectMcpServers) throw new Error('Connector reconnect unavailable.');
+        if (alreadyLoaded) await runtime.reconnectMcpServers();
+      } finally { await runtime.dispose(); }
+    }).catch(() => {
+      // Bounded, content-free diagnostic. Connection errors stay out of the renderer.
+      if (this.#connectorFailures.size >= 128) this.#connectorFailures.delete(this.#connectorFailures.values().next().value!);
+      this.#connectorFailures.add(sessionId);
+    }).finally(() => { this.#connectorReloads.delete(sessionId); this.#controls.delete(reconnect); });
+    this.#controls.add(reconnect);
+    return snapshot();
   }
   hasPendingWork(): boolean { return this.#turns.size > 0 || this.#controls.size > 0; }
   async close(): Promise<void> {

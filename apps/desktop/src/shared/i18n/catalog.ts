@@ -7,6 +7,22 @@ import {setupArabic} from './setup.js';
 import {workArabic} from './work.js';
 /** Product-owned message keys. Never pass provider output or backend error text here. */
 export const arabic = {
+ 'Chat':'محادثة',
+ "Could not reconnect connectors. Try again.":"تعذّرت إعادة توصيل الموصلات. حاول مجددًا.",
+ "Open a chat without attachments to reconnect its connectors.":"افتح محادثة دون مرفقات لإعادة توصيل موصلاتها.",
+ "Choose a chat":"اختر محادثة",
+ "Chat for connectors":"محادثة الموصلات",
+ "No connectors configured.":"لم تُضبط أي موصلات.",
+ "Not connected yet":"لم يُتصل بعد",
+ "Ready · {count} tools":"جاهز · {count} أدوات",
+ "Connection status is unavailable. Reconnect to check again.":"حالة الاتصال غير متاحة. أعد التوصيل للفحص مجددًا.",
+ "Reconnect did not finish. Try again before sending.":"لم تكتمل إعادة التوصيل. حاول مجددًا قبل الإرسال.",
+ "Wait for this chat to finish before reconnecting.":"انتظر انتهاء هذه المحادثة قبل إعادة التوصيل.",
+ "Could not check connectors. Try again.":"تعذّر فحص الموصلات. حاول مجددًا.",
+ "Choose a chat to inspect or reconnect its connectors.":"اختر محادثة لفحص موصلاتها أو إعادة توصيلها.",
+ "Reconnecting connectors…":"جارٍ إعادة توصيل الموصلات…",
+ "Reconnect connectors":"إعادة توصيل الموصلات",
+ "Connectors":"الموصلات",
  'Some archived chats could not be loaded. Try opening Archived again.':'تعذّر تحميل بعض المحادثات المؤرشفة. أعد فتح المؤرشفة للمحاولة مجددًا.',
  'Pin':'تثبيت',
  'Rename chat':'إعادة تسمية المحادثة',

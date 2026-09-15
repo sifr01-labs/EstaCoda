@@ -68,6 +68,7 @@ type AcceptanceScenario = {
   changeSubmitDuringCollection?: boolean;
   closeBrowserDuringCollection?: boolean;
   preexistingSignOut?: boolean;
+  recoverPreflight?: boolean;
   authenticated: boolean;
   expectedCredentialSubmits: number;
   expectedOtpPrompts: number;
@@ -75,6 +76,7 @@ type AcceptanceScenario = {
 };
 
 const scenarios: AcceptanceScenario[] = [
+  {name:'credential preflight fails before a verified password and OTP recovery',recoverPreflight:true,authenticated:true,expectedCredentialSubmits:1,expectedOtpPrompts:1,expectedOtpSubmits:1},
   {
     name: "password-only authentication reaches the authenticated page",
     credentialOutcome: "authenticated",
@@ -239,7 +241,7 @@ describe("protected authentication journey acceptance", () => {
       )).toHaveLength(expectedLocalClicks);
 
       const toolNames = response!.toolExecutions.map((execution) => execution.tool.name);
-      expect(toolNames.filter((name) => name === "browser.fill_protected_form")).toHaveLength(1);
+      expect(toolNames.filter((name) => name === "browser.fill_protected_form")).toHaveLength(scenario.recoverPreflight ? 2 : 1);
       expect(toolNames.filter((name) => name === "browser.type")).toHaveLength(scenario.expectedOtpPrompts);
       expect(JSON.stringify(response!.toolExecutions)).not.toContain("stale-browser-ref");
       expect(harness.providerRequests.length).toBeGreaterThanOrEqual(2);
@@ -260,6 +262,11 @@ describe("protected authentication journey acceptance", () => {
       const authenticationAssessments = events.filter((event) => event.kind === "authentication-evidence-assessed");
 
       if (scenario.authenticated) {
+        if(scenario.recoverPreflight){
+          expect(response!.finalOutcome?.status, JSON.stringify(response!.finalOutcome)).toBe('completed_with_recovered_errors');
+          expect(response!.finalOutcome?.uncertainActions).toEqual([]);
+          expect(response!.toolExecutions.find(execution=>execution.result?.ok===false)?.settlement?.sideEffectState).toBe('none');
+        }
         expect(response!.text).toContain("Authentication confirmed from the authenticated account page.");
         expect(response!.text).not.toContain("The Mission is incomplete.");
         const verificationTool = scenario.expectedOtpPrompts === 0
@@ -629,7 +636,8 @@ async function createAcceptanceHarness(scenario: AcceptanceScenario) {
     settling: { pollIntervalMs: 5, stableWindowMs: 10, minimumObservationMs: 10 },
   });
   const providerRegistry = new ProviderRegistry();
-  const providerScript = createProviderScript({ socket, timeline, providerRequests });
+  if(scenario.recoverPreflight)vi.spyOn(browserBackend,'prepareProtectedField').mockRejectedValueOnce(new Error('Field changed before collection'));
+  const providerScript = createProviderScript({ socket, timeline, providerRequests, recoverPreflight:scenario.recoverPreflight });
   const provider: ProviderAdapter = {
     id: model.provider,
     name: "Protected authentication acceptance provider",
@@ -656,7 +664,7 @@ async function createAcceptanceHarness(scenario: AcceptanceScenario) {
     executionControls: {
       providerBudgets: {
         maxProviderIterations: 8,
-        maxProviderToolCalls: 6,
+        maxProviderToolCalls: scenario.recoverPreflight ? 8 : 6,
         maxRepeatedBrowserObservations: 3,
         maxProviderWallClockMs: 10_000,
         finalizationReserveMs: 0,
@@ -737,10 +745,12 @@ async function createAcceptanceHarness(scenario: AcceptanceScenario) {
 }
 
 function createProviderScript(input: {
+  recoverPreflight?: boolean;
   socket: FakeCdpAuthPortalSocket;
   timeline: string[];
   providerRequests: ProviderRequest[];
 }) {
+  let preflightRecovered = false;
   let planRequested = false;
   let navigateRequested = false;
   let credentialsRequested = false;
@@ -763,6 +773,9 @@ function createProviderScript(input: {
       args,
     );
 
+    if(input.recoverPreflight && credentialsRequested && !preflightRecovered){
+      preflightRecovered=true;credentialsRequested=false;return call('browser.snapshot',{});
+    }
     if (!planRequested && providerToolNames(request).length === 1 && providerToolNames(request)[0] === "plan") {
       planRequested = true;
       return call("plan", {

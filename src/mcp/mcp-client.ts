@@ -128,6 +128,9 @@ export class MCPClient {
     this.#fetch = options.fetch ?? defaultFetch;
   }
 
+  /** Local transport state; HTTP readiness is the last successful handshake. */
+  get connected(): boolean { return this.#started && (this.#transport !== 'stdio' || !!this.#child && !this.#stdioClosedError && this.#child.exitCode === null && this.#child.signalCode === null); }
+
   async start(): Promise<void> {
     if (this.#started) {
       return;
@@ -194,17 +197,24 @@ export class MCPClient {
 
   async stop(): Promise<void> {
     const child = this.#child;
-    this.#child = undefined;
     this.#started = false;
     this.#markStdioClosed(new Error(`MCP server ${this.#name} stopped`));
-    if (child === undefined || child.killed) {
-      return;
-    }
-    child.kill();
-    await new Promise<void>((resolve) => {
-      child.once("exit", () => resolve());
-      setTimeout(() => resolve(), 500);
-    });
+    if (child === undefined) return;
+    const exited = () => child.exitCode !== null || child.signalCode !== null;
+    const wait = async () => {
+      if (exited()) return;
+      await new Promise<void>(resolve => {
+        const finish = () => { clearTimeout(timer); child.off('exit', finish); resolve(); };
+        const timer = setTimeout(finish, 500);
+        child.once('exit', finish);
+        if (exited()) finish();
+      });
+    };
+    if (!exited()) child.kill('SIGTERM');
+    await wait();
+    if (!exited()) { child.kill('SIGKILL'); await wait(); }
+    if (!exited()) throw new Error(`MCP server ${this.#name} termination is unconfirmed.`);
+    this.#child = undefined;
   }
 
   get transport(): MCPServerTransport {

@@ -1,3 +1,4 @@
+import {connectorControl} from './connector-control.js';
 import {WorkInputClaims} from './work-input.js';
 import {validateWorkInputCommand} from '../contracts/desktop-control/work-input.js';
 import {ScheduleDecisions} from './schedule-decisions.js';
@@ -122,6 +123,7 @@ export class DesktopBridge {
       'browser.snapshot':async(request,signal)=>{if(request.method!=='browser.snapshot')throw new ControlProtocolError('-32601');return{result:await browserViewSnapshot(this.options,this.workSnapshot().get(request.params.workId),request.params.reference,signal)};},
       'browser.control':async(request,signal)=>{if(request.method!=='browser.control')throw new ControlProtocolError('-32601');return{result:await browserControl(this.options,this.workSnapshot().get(request.params.workId),request.params.command,signal)};},
       'browser.list':async(request,signal)=>{if(request.method!=='browser.list')throw new ControlProtocolError('-32601');return{result:await listBrowserViews(this.options,this.workSnapshot().get(request.params.workId),signal)};},
+      'connections.connectors':async(request,signal)=>{if(request.method!=='connections.connectors')throw new ControlProtocolError('-32601');return{result:await connectorControl(this.options,request.params.workId?this.workSnapshot().get(request.params.workId):undefined,request.params.action,signal)};},
       'connections.list':async(request,signal)=>{if(request.method!=='connections.list')throw new ControlProtocolError('-32601');if(request.params.cursor)throw new ControlProtocolError('-32007');return{result:{items:[await telegramConnection(this.options,signal)],nextCursor:null}};},
       'connections.get':async(request,signal)=>{if(request.method!=='connections.get'||request.params.connectionId!=='telegram')throw new ControlProtocolError('-32003');return{result:await telegramConnection(this.options,signal)};},
       'models.verifyDraft':async(request,signal)=>{if(request.method!=='models.verifyDraft')throw new ControlProtocolError('-32601');return {result:await this.modelSetup.verifyDraft(request.params,signal,this.verifier)};},

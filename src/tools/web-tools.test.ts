@@ -1,3 +1,4 @@
+import { isUndispatchedResult } from "./undispatched-result.js";
 import { EventEmitter } from "node:events";
 import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -2541,6 +2542,16 @@ describe("web and browser tools baselines", () => {
     expect(result.ok).toBe(false);
     expect(result.content).toContain("limited to one-time-code");
     expect(prepareProtectedField).not.toHaveBeenCalled();
+  });
+
+  it("attests a failed protected-field preflight without collecting credentials", async () => {
+    const requestGroup=vi.fn();
+    const handler=Object.assign(vi.fn(),{requestGroup});
+    const browserTool=tool('browser.fill_protected_form',createTestWebTools({browserBackend:{
+      ...createSessionRecordingBrowserBackend(),kind:'local-cdp',prepareProtectedField:async()=>{throw new Error('Field changed before collection');}
+    }}));
+    const result=await browserTool.run({fields:[{id:'email',ref:'@e1',kind:'account-identifier'}],purpose:'Sign in'}, {onSecureInputRequest:handler});
+    expect(result.ok).toBe(false);expect(isUndispatchedResult(result)).toBe(true);expect(requestGroup).not.toHaveBeenCalled();
   });
 
   it("requests every related browser credential in one grouped protected form flow", async () => {

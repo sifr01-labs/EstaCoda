@@ -1,3 +1,4 @@
+import { undispatchedResult } from "./undispatched-result.js";
 import { createHash, randomUUID } from "node:crypto";
 import { browserContinuityUrl } from "../browser/continuity-url.js";
 import { chmod, mkdir, mkdtemp, readFile, rename, rm, stat, writeFile } from "node:fs/promises";
@@ -1752,7 +1753,7 @@ function createBrowserTypeTool(
       const browserInput = deriveBrowserInput(toolInput);
       if (toolInput.protectedInput === undefined) {
         if (toolInput.submitRef !== undefined) {
-          return protectedBrowserFailure("submitRef is available only with one-time-code protected browser input.");
+          return undispatchedResult(protectedBrowserFailure("submitRef is available only with one-time-code protected browser input."));
         }
         if (typeof toolInput.text !== "string" || browserBackend.type === undefined) {
           return unsupportedBrowserTool(browserBackend, "browser.type");
@@ -1774,17 +1775,17 @@ function createBrowserTypeTool(
 
       const descriptor = parseBrowserProtectedInput(toolInput.protectedInput);
       if (descriptor === undefined) {
-        return protectedBrowserFailure("Protected browser input requires a supported kind, purpose, and use-once retention.");
+        return undispatchedResult(protectedBrowserFailure("Protected browser input requires a supported kind, purpose, and use-once retention."));
       }
       if (toolInput.submitRef !== undefined && descriptor.kind !== "one-time-code") {
-        return protectedBrowserFailure("Atomic protected submission is limited to one-time-code challenges.");
+        return undispatchedResult(protectedBrowserFailure("Atomic protected submission is limited to one-time-code challenges."));
       }
       if (context?.onSecureInputRequest === undefined || browserBackend.prepareProtectedField === undefined) {
-        return protectedBrowserFailure("Protected browser input is unavailable on this runtime.");
+        return undispatchedResult(protectedBrowserFailure("Protected browser input is unavailable on this runtime."));
       }
       const destination = await browserBackend.prepareProtectedField(browserInput).catch(() => undefined);
       if (destination === undefined) {
-        return protectedBrowserFailure("The protected browser field could not be resolved to a current verified destination.");
+        return undispatchedResult(protectedBrowserFailure("The protected browser field could not be resolved to a current verified destination."));
       }
       const receipt = await context.onSecureInputRequest({
         kind: descriptor.kind,
@@ -1926,11 +1927,11 @@ function createBrowserProtectedFormTool(
     run: async (input: BrowserProtectedFormInput, context) => {
       const parsed = parseBrowserProtectedForm(input);
       if (parsed === undefined) {
-        return protectedBrowserFailure("Protected form input requires one to eight unique current refs with supported kinds and a bounded purpose.");
+        return undispatchedResult(protectedBrowserFailure("Protected form input requires one to eight unique current refs with supported kinds and a bounded purpose."));
       }
       const requestGroup = (context?.onSecureInputRequest as Partial<GroupedSecureInputRequestHandler> | undefined)?.requestGroup;
       if (requestGroup === undefined || browserBackend.prepareProtectedField === undefined) {
-        return protectedBrowserFailure("Grouped protected browser input is unavailable on this runtime.");
+        return undispatchedResult(protectedBrowserFailure("Grouped protected browser input is unavailable on this runtime."));
       }
 
       const destinations: BrowserFieldSecureInputDestination[] = [];
@@ -1943,7 +1944,7 @@ function createBrowserProtectedFormTool(
           ...(parsed.submitRef === undefined ? {} : { submitRef: parsed.submitRef }),
         })).catch(() => undefined);
         if (destination === undefined) {
-          return protectedBrowserFailure("A protected browser field could not be resolved to a current verified destination.");
+          return undispatchedResult(protectedBrowserFailure("A protected browser field could not be resolved to a current verified destination."));
         }
         destinations.push(destination);
       }
@@ -1954,7 +1955,7 @@ function createBrowserProtectedFormTool(
         destination.frameId !== first.frameId ||
         destination.expectedOrigin !== first.expectedOrigin
       )) {
-        return protectedBrowserFailure("Every protected form field must belong to the same current origin, tab, and frame.");
+        return undispatchedResult(protectedBrowserFailure("Every protected form field must belong to the same current origin, tab, and frame."));
       }
 
       const receipt = await requestGroup({

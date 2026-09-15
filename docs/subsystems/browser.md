@@ -316,3 +316,6 @@ When enabled, debug data is attached to individual tool results only. It is reda
 - Socket-level DNS rebinding and TOCTOU protection is not implemented.
 - `Runtime.evaluate` and `Runtime.callFunctionOn` guards detect obvious literal URL usage but do not perform full JavaScript static analysis.
 - Debug telemetry is per-tool-run metadata only; there is no video, session recording, or visual dashboard.
+
+
+Protected-input preflight failures retain a trusted in-process indication when no values could have been delivered. They do not create uncertain external-action receipts. A later verified authentication recovery may therefore finish with recovered errors. Failures during or after delivery, timeouts, and ordinary connector metadata cannot claim this indication; their existing uncertainty and replay protections remain in force.

@@ -157,6 +157,12 @@ export class RuntimeCache {
     finally{await this.releaseLease(sessionId,entry.entryId);}
   }
 
+  inspectMcpServers(sessionId: string) {
+    const entry = this.#activeEntries.get(sessionId);
+    if (this.#closed || !entry || entry.suspended || entry.disposePending) return undefined;
+    return entry.runtime.inspectMcpServers();
+  }
+
   async currentExecutionFacts(sessionId: string) {
     const entry = this.#activeEntries.get(sessionId);
     if (!entry || entry.suspended || entry.disposePending) return undefined;

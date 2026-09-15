@@ -1,7 +1,7 @@
 import { spawn, type ChildProcess } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { readFileSync, realpathSync } from 'node:fs';
-import { join } from 'node:path';
+import { delimiter, dirname, join } from 'node:path';
 import { EventEmitter } from 'node:events';
 import type { Duplex, Readable, Writable } from 'node:stream';
 export type ServiceTransport = { input: Writable; output: Readable; credentials: Duplex };
@@ -28,7 +28,7 @@ export class ServiceProcess extends EventEmitter {
     const { executable, entry } = ownedRuntime(this.runtimeRoot);
     const child = spawn(executable, [entry, 'desktop-service', '--stdio', '--profile', profileId, '--credential-fd=3'], {
       cwd: this.runtimeRoot, shell: false, windowsHide: true, stdio: ['pipe', 'pipe', 'ignore', 'pipe'],
-      env: { HOME: this.home, USERPROFILE: this.home, PATH: '/usr/bin:/bin:/usr/sbin:/sbin', LANG: 'en_US.UTF-8' },
+      env: { HOME: this.home, USERPROFILE: this.home, PATH: [dirname(executable), '/usr/bin', '/bin', '/usr/sbin', '/sbin'].join(delimiter), LANG: 'en_US.UTF-8' },
     });
     this.#child = child;
     const ended = () => { if (this.#generation === generation) { this.#child = null; this.emit('disconnected'); } };

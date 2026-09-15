@@ -3602,6 +3602,39 @@ describe("createRuntime MCP trust gating", () => {
     expect(servers).toEqual([]);
   });
 
+  it("reconnects a failed connector, refreshes tools, and preserves the browser substrate", async () => {
+    const options=await minimalRuntimeOptions();
+    const homeDir=options.workspaceRoot;
+    const trustStore=new WorkspaceTrustStore({homeDir});await trustStore.grant(options.workspaceRoot);
+    const script=join(homeDir,'connector.cjs'), ready=join(homeDir,'ready');
+    await writeFile(script,`const fs=require('node:fs'),readline=require('node:readline');
+if(!fs.existsSync(process.argv[2]))process.exit(1);
+const tool=fs.readFileSync(process.argv[2],'utf8');
+readline.createInterface({input:process.stdin}).on('line',line=>{const q=JSON.parse(line);if(q.id===undefined)return;
+const result=q.method==='initialize'?{capabilities:{tools:{}}}:q.method==='tools/list'?{tools:[{name:tool,description:'Read a fixture',inputSchema:{type:'object',properties:{}}}]}:q.method==='tools/call'?{content:[{type:'text',text:tool}]}:{};
+process.stdout.write(JSON.stringify({jsonrpc:'2.0',id:q.id,result})+'\\n');});`);
+    const close=vi.fn(),closeSession=vi.fn();
+    const browserBackend={kind:'local-cdp',close,closeSession,isAvailable:()=>true,capabilities:browserCapabilities()} as unknown as BrowserBackend;
+    const runtime=await createRuntime({...options,homeDir,trustStore,browserBackend,securityMode:'open',mcpServers:{fixture:{command:process.execPath,args:[script,ready]}},disabledToolsets:['shell-write']});
+    try {
+      expect(runtime.inspectMcpServers()[0]?.available).toBe(false);
+      await writeFile(ready,'readFirst');await runtime.reconnectMcpServers!();
+      expect(runtime.inspectMcpServers()[0]).toMatchObject({available:true,toolCount:1});
+      expect(runtime.tools().map(tool=>tool.name)).toContain('mcp.fixture.readFirst');
+      const session=runtime.sessionId;
+      await writeFile(ready,'readSecond');await runtime.reconnectMcpServers!();
+      expect(runtime.sessionId).toBe(session);
+      expect(runtime.tools().map(tool=>tool.name)).toContain('mcp.fixture.readSecond');
+      expect(runtime.tools().map(tool=>tool.name)).not.toContain('mcp.fixture.readFirst');
+      expect(runtime.tools().map(tool=>tool.name)).not.toContain('terminal.run');
+      expect(close).not.toHaveBeenCalled();expect(closeSession).not.toHaveBeenCalled();
+      const result=await runtime.executeTool!({tool:'mcp.fixture.readSecond',toolInput:{}});
+      expect(result?.result?.ok).toBe(true);
+      await trustStore.revoke(options.workspaceRoot);
+      await expect(runtime.reconnectMcpServers!()).rejects.toThrow();
+    } finally { await runtime.dispose();await rm(homeDir,{recursive:true,force:true}); }
+  });
+
   it("starts MCP only with current persisted trust", async () => {
     const options = await minimalRuntimeOptions({
       mcpServers: { echo: { command: "echo", args: ["hello"] } },

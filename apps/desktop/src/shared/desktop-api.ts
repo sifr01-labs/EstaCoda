@@ -87,6 +87,7 @@ export type DesktopConnectionsApi={
  stage(setupId:string):Promise<{staged:boolean}>;
  verify(setupId:string):Promise<MethodContracts['telegram.verify']['result']>;
  cancel(setupId:string):Promise<{cancelled:boolean}>;
+ connectors(input:MethodContracts['connections.connectors']['params']):Promise<MethodContracts['connections.connectors']['result']>;
  list():Promise<MethodContracts['connections.list']['result']>};
 export type DesktopTargetsApi={
  list(cursor?:string):Promise<MethodContracts['targets.list']['result']>;

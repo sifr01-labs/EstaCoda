@@ -129,3 +129,9 @@ it('permits bounded clipboard writes without granting reads or renderer authorit
  expect(()=>validateSemanticPayload('clipboardWrite',{text:'chat-id'})).not.toThrow();
  for(const payload of [{text:'x'.repeat(1_000_001)},{text:7},{text:'id',read:true},{text:'id',profileId:'other'}])expect(()=>validateSemanticPayload('clipboardWrite',payload)).toThrow();
 });
+
+it('accepts bounded connector controls without renderer authority or executable input',()=>{
+ expect(()=>validateSemanticPayload('connectorsControl',{action:'inspect'})).not.toThrow();
+ expect(()=>validateSemanticPayload('connectorsControl',{action:'reconnect',workId:'session:s'})).not.toThrow();
+ for(const payload of [{action:'reconnect'},{action:'execute',workId:'session:s'},{action:'inspect',profileId:'other'},{action:'reconnect',workId:'session:s',command:'node'},{action:'inspect',targetId:'other'},{action:'inspect',credential:'secret'}])expect(()=>validateSemanticPayload('connectorsControl',payload)).toThrow();
+});

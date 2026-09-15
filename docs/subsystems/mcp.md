@@ -42,6 +42,11 @@ For `npx` connectors, an already-cached exact package version can be launched di
 
 In an interactive CLI session, `/reload-mcp status` shows the current snapshot without starting a process. `/reload-mcp` makes one explicit refresh attempt through the existing session-preserving runtime refresh path. It reports failures rather than treating a configuration reload as a successful connection. It never replays destination writes; after successful discovery, ask to continue so the saved checkpoint is revalidated against the fresh registry.
 
+Desktop uses the verified bundled Node directory in its controlled child-process PATH, including connector scripts with `#!/usr/bin/env node`. Shell initialization files and unrelated environment secrets are not inherited.
+
+In desktop, **Connections → Connectors** shows configuration and session discovery state. Select a chat to inspect its connectors, or use **Connectors** above that chat's composer. **Reconnect connectors** refreshes discovery and the agent's registered tools while retaining the existing browser, authentication state, execution target, and process manager. Disabled toolsets and workspace trust are rechecked. A running chat must finish before reconnecting; active subagents also prevent refresh. `/reload-mcp` in an existing chat opens the same flow without a provider turn. Reconnecting does not replay work or destination writes; send a follow-up when ready. Cold sessions acquire their normal owner once. Status inspection does not start a host. HTTP readiness reflects the last successful handshake, not a continuous health probe.
+
+
 A connector-blocked checkpoint can answer follow-up questions in a tool-free recovery turn instead of repeating only a preflight refusal. The saved task remains blocked; diagnostic model output cannot execute tools, reconnect, change credentials, or mark the task complete. The first blocker and recovery replies offer the explicit reload action. Missing credentials/configuration still require secure profile setup, not secrets pasted into chat. There is no automatic retry loop or implicit authorization change. Recovery questions remain conversational even after reconnection; an explicit continuation resumes execution.
 
 ## Credentials
