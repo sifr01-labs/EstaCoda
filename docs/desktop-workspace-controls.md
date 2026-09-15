@@ -47,3 +47,11 @@ scrolls independently. Its width defaults to 340 px and can be resized from 320
 to 440 px with the divider or arrow/Home/End keys. Width is a device presentation
 preference. Narrow windows use an overlay. Close or Escape dismisses the panel
 and restores focus to Details. Each newly opened panel starts on Overview.
+
+### Navigation and activity polish
+
+The sidebar collapse button sits beside Settings on the brand row. When closed, a persistent Show sidebar button remains beside the window controls, outside the toolbar drag region. Two-line entries use compact padding and a quiet selection background. The default profile is displayed as **Default**; its stored identifier and permission policy do not change. The footer identifies this local desktop host, with platform-specific wording.
+
+Activity separates **Current status** (the canonical Work projection) from **Latest request** (the recorded control operation). A completed request does not imply completed Work. Stop acknowledgments remain distinct from confirmed cancellation; when Work has ended, its final outcome remains authoritative. Technical identifiers are disclosed below these summaries. Status refresh is read-only; this change adds no execution authority or automatic retries.
+
+Context menus use a translucent, blurred surface and theme-accent highlights for hover and keyboard focus, with an opaque reduced-transparency fallback. Scrollbars use lighter neutral thumbs, and working text uses a restrained theme-accent shimmer with a static reduced-motion fallback.

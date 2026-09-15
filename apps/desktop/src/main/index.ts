@@ -70,5 +70,9 @@ async function openWindow(): Promise<void> {
   if (MAIN_WINDOW_VITE_DEV_SERVER_URL) await window.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
   else {await installAssetProtocol(window.webContents.session,'app',path.join(__dirname,`../renderer/${MAIN_WINDOW_VITE_NAME}`));await window.loadURL(documentUrl);}
 }
-void app.whenReady().then(openWindow);
+void app.whenReady().then(()=>{
+  // Development should use the same full-size artwork as the packaged Dock icon.
+  if(process.platform==='darwin'&&!app.isPackaged)app.dock?.setIcon(path.join(app.getAppPath(),'assets/icons/pr5-app-icon.png'));
+  return openWindow();
+});
 app.on('window-all-closed', () => app.quit());

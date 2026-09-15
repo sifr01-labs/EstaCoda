@@ -5,7 +5,7 @@
 #ec-branded-workspace .ec-sidebar-toggle{margin-left:8px}
 #ec-branded-workspace .ec-layout{position:relative;grid-template-columns:var(--ec-sidebar) minmax(0,1fr)}
 #ec-branded-workspace #ec-sidebar{min-height:0;overflow:hidden;background:var(--ec-nav)}
-#ec-branded-workspace #ec-sidebar .ec-sidebar{height:100%;box-sizing:border-box;padding-top:48px;display:flex;flex-direction:column}
+#ec-branded-workspace #ec-sidebar .ec-sidebar{height:100%;box-sizing:border-box;padding-top:48px;display:flex;flex-direction:column;gap:8px}
 #ec-branded-workspace .ec-window[data-sidebar=closed] .ec-layout{grid-template-columns:minmax(0,1fr)}
 #ec-branded-workspace .ec-window[data-sidebar=closed] .ec-titlebar{width:136px;background:var(--ec-bg)}
 /* Keep native drag rectangles outside the sidebar toggle, including collapsed and RTL layouts. */
@@ -19,15 +19,15 @@
 #ec-branded-workspace .ec-sidebar-resize:hover{background:color-mix(in srgb,var(--ec-accent) 25%,transparent)}
 #ec-branded-workspace[data-theme=kemet] .ec-titlebar,#ec-branded-workspace[data-theme=kemet] #ec-sidebar{background:light-dark(#f8f8f8,#212121)}
 #ec-branded-workspace[data-theme=kemet] .ec-sidebar{--ec-line:light-dark(#e8e8e8,#383838);--ec-inset:light-dark(#eeeeee,#292929);--ec-panel:var(--ec-inset);--ec-tint:light-dark(#e8e8e8,#343434)}
-#ec-branded-workspace .ec-sidebarcap{padding:12px 14px 8px}
-#ec-branded-workspace .ec-sideactions{gap:4px;margin-top:14px}
-#ec-branded-workspace .ec-sideactions .ec-btn{border:0;background:transparent;justify-content:flex-start;padding:8px 10px;min-height:34px}
+#ec-branded-workspace .ec-sidebarcap{padding:10px 10px 8px;gap:12px}
+#ec-branded-workspace .ec-sideactions{gap:4px;margin-top:0}
+#ec-branded-workspace .ec-sideactions .ec-btn{border:0;background:transparent;justify-content:flex-start;padding:8px 6px;min-height:34px;white-space:nowrap}
 #ec-branded-workspace .ec-sideactions .ec-btn:hover{background:var(--ec-inset)}
 #ec-branded-workspace .ec-navgroup{margin-top:8px}
 #ec-branded-workspace .ec-sectionlabel{margin-top:18px}
 #ec-branded-workspace .ec-recents{flex:1;min-height:0;overflow:auto}
 #ec-branded-workspace .ec-bottom{margin-top:auto;padding:12px 16px;flex-shrink:0}
-#ec-branded-workspace .ec-taskbutton{min-height:32px;padding-block:7px}
+#ec-branded-workspace .ec-taskbutton{min-height:32px;padding-block:4px;border-radius:6px}
 #ec-branded-workspace .ec-runtimebar{min-height:28px;height:28px;box-sizing:border-box;padding:0 12px;gap:14px;flex-shrink:0;background:var(--ec-bg);border-top:1px solid var(--ec-line);overflow:auto;white-space:nowrap}
 #ec-branded-workspace .ec-runtimebar .ec-btn{font-size:11px;min-height:26px;padding:2px 4px;gap:6px;flex-shrink:0}
 #ec-branded-workspace .ec-runtimebar svg{width:13px;height:13px}
@@ -48,7 +48,7 @@
 #ec-branded-workspace .ec-diagnostics[open]>summary{margin-bottom:16px}
 #ec-branded-workspace .ec-diagnostics .ec-btn{background:transparent}
 #ec-branded-workspace .ec-live-working{font-size:13px;font-weight:500;color:var(--ec-muted);padding:12px 0}
-#ec-branded-workspace .ec-working-word{background:linear-gradient(100deg,var(--ec-muted) 30%,var(--ec-text) 48%,var(--ec-muted) 65%);background-size:240% 100%;background-clip:text;-webkit-background-clip:text;color:transparent;animation:ec-working-shimmer 2.2s linear infinite}
+#ec-branded-workspace .ec-working-word{background:linear-gradient(100deg,var(--ec-muted) 30%,color-mix(in srgb,var(--ec-accent) 75%,var(--ec-text)) 48%,var(--ec-muted) 65%);background-size:240% 100%;background-clip:text;-webkit-background-clip:text;color:transparent;animation:ec-working-shimmer 2.2s linear infinite}
 @keyframes ec-working-shimmer{from{background-position:150% 0}to{background-position:-100% 0}}
 #ec-branded-workspace .ec-message-actions{display:flex;align-items:center;gap:8px;min-height:30px;margin-top:8px;font-size:11px;color:var(--ec-muted);opacity:0;transition:opacity .12s ease}
 #ec-branded-workspace .ec-agent:hover>.ec-message-actions,#ec-branded-workspace .ec-usernote:hover>.ec-message-actions,#ec-branded-workspace section:focus-within>.ec-message-actions{opacity:1}
@@ -173,3 +173,26 @@
  #ec-branded-workspace .ec-details-resize{display:none}
 }
 #ec-branded-workspace .ec-window[data-native=true] .ec-conversation-body>.ec-details{max-height:100%;overflow:visible}
+
+/* Compact navigation and translucent menus retain clear keyboard affordances. */
+#ec-branded-workspace .ec-brand{padding-inline:4px;gap:4px}
+#ec-branded-workspace .ec-brand-controls{display:flex;align-items:center;margin-inline-start:auto;gap:0}
+#ec-branded-workspace .ec-brand-controls .ec-btn{min-width:26px;width:26px;min-height:28px;padding:4px;margin:0}
+#ec-branded-workspace .ec-taskbutton small{margin-top:2px;line-height:16px}
+#ec-branded-workspace .ec-profile bdi{font-weight:500}
+#ec-branded-workspace .ec-recents>.ec-sectionlabel{margin-top:14px;margin-bottom:8px}
+#ec-branded-workspace .ec-chatmenu{background:color-mix(in srgb,var(--ec-panel) 86%,transparent);backdrop-filter:blur(24px) saturate(140%);-webkit-backdrop-filter:blur(24px) saturate(140%);border-color:color-mix(in srgb,var(--ec-muted) 25%,transparent);box-shadow:0 12px 36px #0003,inset 0 1px 0 #ffffff18}
+#ec-branded-workspace .ec-chatmenu>button:is(:hover,:focus-visible):not(:disabled){background:var(--ec-accent);color:var(--ec-on-accent);outline:none}
+#ec-branded-workspace .ec-current-state{font-size:15px;font-weight:500;margin-top:8px}
+#ec-branded-workspace .ec-request-detail{margin-top:24px}
+#ec-branded-workspace .ec-request-detail h3{font-size:12px;color:var(--ec-muted);margin-bottom:10px}
+#ec-branded-workspace .ec-request-detail p{font-size:13px;margin-block:6px}
+#ec-branded-workspace .ec-request-detail small{display:block;font-size:12px;color:var(--ec-muted);line-height:1.6}
+#ec-branded-workspace .ec-technical-details summary{cursor:pointer;color:var(--ec-muted);font-size:12px;padding-block:4px}
+#ec-branded-workspace .ec-technical-details>details{margin-top:12px}
+#ec-branded-workspace{--ec-scroll-thumb:light-dark(#cecece,#505050)}
+#ec-branded-workspace *{scrollbar-color:var(--ec-scroll-thumb) transparent}
+#ec-branded-workspace :is(.ec-recents,.ec-details-scroll){scrollbar-width:thin}
+#ec-branded-workspace .ec-window[data-native=true] .ec-conversation-body #ec-work-panel::-webkit-scrollbar-thumb{background-color:var(--ec-scroll-thumb)}
+#ec-branded-workspace .ec-window[data-native=true] .ec-conversation-body #ec-work-panel::-webkit-scrollbar-thumb:hover{background-color:var(--ec-muted)}
+@media(prefers-reduced-transparency:reduce){#ec-branded-workspace .ec-chatmenu{background:var(--ec-panel);backdrop-filter:none;-webkit-backdrop-filter:none}}
