@@ -23,3 +23,27 @@ The host applies the requested mode at the next turn boundary and restores the p
 ## Review risk
 
 The sensitive changes are optional, validated send parameters for interruption and per-turn security mode, and recovery references keyed by submission identity. Neither parameter authorizes a different profile, target generation, Session owner, or background Task. Interruption requests cancellation; it never claims to reverse completed tool effects or to have killed an external process. UI polish does not change configuration apply, protected credential entry, remote authorization, or download/install gates.
+
+## Details panel
+
+Details opens Overview, with workspace, runtime, model, profile approval mode,
+any conversation override for the next message, reported usage, and chat-scoped
+connector status. Manage connections reveals the existing reconnect action;
+connector problems expose it directly. The composer no longer has a floating
+Connectors button. `/reload-mcp` still invokes the same scoped reconnect action
+and opens Overview without sending the command to a model.
+
+Plan shows the latest loaded recorded plan, its completed-step count, and
+expandable step titles. A recorded running step is labelled “Last recorded: in
+progress” unless the Work itself is running. This is presentation only; it does
+not rewrite the stored plan or infer completion from an ended turn.
+
+Activity contains execution receipt inspection and recovery controls plus the
+copyable Work ID. Full tool history remains in Conversation. Unknown or
+unavailable receipt state remains explicit; switching tabs never retries work.
+
+The panel keeps its header and keyboard-navigable tabs visible while its content
+scrolls independently. Its width defaults to 340 px and can be resized from 320
+to 440 px with the divider or arrow/Home/End keys. Width is a device presentation
+preference. Narrow windows use an overlay. Close or Escape dismisses the panel
+and restores focus to Details. Each newly opened panel starts on Overview.

@@ -4,9 +4,10 @@ import type {DesktopConnectionsApi} from '../../shared/desktop-api.js';
 import {useI18n} from '../i18n.js';
 import {Badge, Button} from './primitives.js';
 
-export function ConnectorPanel({api, workId, close}: {api: Pick<DesktopConnectionsApi, 'connectors'>; workId?: string; close?: () => void}) {
+export function ConnectorPanel({api, workId, close, compact=false}: {compact?:boolean;api: Pick<DesktopConnectionsApi, 'connectors'>; workId?: string; close?: () => void}) {
   const {t} = useI18n();
   const [status, setStatus] = useState<ConnectorStatus>();
+  const [manage,setManage]=useState(false);
   const [busy, setBusy] = useState(false), [error, setError] = useState(false);
   const generation = useRef(0), sequence = useRef(0);
   useEffect(() => {
@@ -31,10 +32,11 @@ export function ConnectorPanel({api, workId, close}: {api: Pick<DesktopConnectio
     finally { if(current===generation.current)setBusy(false); }
   };
   const pending = busy || status?.state==='reconnecting';
-  return <section className="ec-connectorpanel" aria-label={t('Connectors')}>
-    <div className="ec-connectorhead"><strong>{t('Connectors')}</strong><div>
-      <Button className="ec-ghost" disabled={!workId||pending||status?.state==='busy'||!status?.items.some(item=>item.state!=='disabled')} onClick={()=>void reconnect()}>{pending?t('Reconnecting connectors…'):t('Reconnect connectors')}</Button>
+  return <section className={compact?"ec-connectorpanel ec-connector-summary":"ec-connectorpanel"} aria-label={t('Connectors')}>
+    <div className="ec-connectorhead"><strong>{t(compact?'Connections':'Connectors')}</strong><div>
+      <>{compact&&!!status?.items.length&&<Button className="ec-ghost" aria-expanded={manage} onClick={()=>setManage(value=>!value)}>{t('Manage connections')}</Button>}{(!compact||manage||error||status?.state==='failed'||status?.state==='unavailable'||status?.items.some(item=>item.state==='needs_attention')||pending)&&<Button className="ec-ghost" disabled={!workId||pending||status?.state==='busy'||!status?.items.some(item=>item.state!=='disabled')} onClick={()=>void reconnect()}>{pending?t('Reconnecting connectors…'):t('Reconnect connectors')}</Button>}</>
       {close&&<Button className="ec-ghost ec-iconbutton" icon="x" aria-label={t('Close')} onClick={close}/>}</div></div>
+    {compact&&!status&&!error&&<p role="status">{t('Loading connectors…')}</p>}
     {!workId&&<p>{t('Choose a chat to inspect or reconnect its connectors.')}</p>}
     {error&&<p role="alert">{t('Could not check connectors. Try again.')}</p>}
     {status?.state==='busy'&&<p role="status">{t('Wait for this chat to finish before reconnecting.')}</p>}

@@ -4,14 +4,14 @@ test('chat connector controls show reconnect progress and intercept reload witho
  await page.goto('/fixture.html');
  await page.evaluate(async()=>{
   const rp='/node_modules/.vite/deps/react.js',dp='/node_modules/.vite/deps/react-dom_client.js',cp='/src/renderer/components/live-composer.tsx';
-  const React=(await import(rp)).default,{createRoot}=(await import(dp)).default,{LiveComposer}=await import(cp);
+  const React=(await import(rp)).default,{createRoot}=(await import(dp)).default,{LiveComposer}=await import(cp),{Inspector}=await import('/src/renderer/components/inspector.tsx');
   const host=document.querySelector('#ec-branded-workspace .ec-window')!;host.innerHTML='<main id="test"></main>';
   const state={calls:[] as unknown[],submits:0,status:'ready',connected:false};(window as any).connectorTest=state;
   const target={targetId:'t',targetGeneration:1,label:'Project'};
   const connections={connectors:async(input:any)=>{state.calls.push(input);if(input.action==='reconnect')state.status='reconnecting';return{state:state.status,items:[{id:'example',state:state.connected?'ready':'needs_attention',toolCount:state.connected?3:0}]};}};
   (window as any).desktop={connections};
   const api={targets:async()=>({items:[target],truncated:false}),submit:async()=>{state.submits++;throw new Error('Must not send a prompt');}};
-  function Harness(){const[draft,change]=React.useState({id:'d',text:'/reload-mcp',attachments:[],kind:'session',target});return React.createElement(LiveComposer,{api,work:{id:'session:s',kind:'session',target,actions:[{id:'sessions.send',enabled:true}]},draft,change,inspect:()=>{},models:()=>{},select:()=>{}});}
+  function Harness(){const[draft,change]=React.useState({id:'d',text:'/reload-mcp',attachments:[],kind:'session',target});const[open,setOpen]=React.useState(false);const work={id:'session:s',canonicalId:'s',profileId:'p',kind:'session',status:'completed',target,actions:[{id:'sessions.send',enabled:true}]};return React.createElement('div',{className:'ec-workbody'},React.createElement(LiveComposer,{api,work,draft,change,inspect:()=>setOpen(true),inspectConnectors:()=>setOpen(true),models:()=>{},select:()=>{}}),open&&React.createElement(Inspector,{work,api,runtimeApi:{connections,onSnapshot:()=>()=>{}},fixture:false,close:()=>setOpen(false)}));}
   createRoot(document.getElementById('test')!).render(React.createElement(Harness));
  });
  await page.getByRole('textbox',{name:'Draft guidance'}).press('Enter');
@@ -20,9 +20,9 @@ test('chat connector controls show reconnect progress and intercept reload witho
  expect(await page.evaluate(()=>(window as any).connectorTest.submits)).toBe(0);
  await page.evaluate(()=>{(window as any).connectorTest.status='ready';(window as any).connectorTest.connected=true;});
  await expect(page.getByText(/Ready · .*3.* tools/)).toBeVisible();
- await expect(page.getByRole('button',{name:'Reconnect connectors',exact:true})).toBeEnabled();
+ await page.getByRole('button',{name:'Manage connections',exact:true}).click();await expect(page.getByRole('button',{name:'Reconnect connectors',exact:true})).toBeEnabled();
  await page.screenshot({path:test.info().outputPath('chat-connectors.png')});
- await page.getByRole('button',{name:'Close',exact:true}).click();
+ await page.getByRole('button',{name:'Close details',exact:true}).click();
  await expect(page.getByRole('region',{name:'Connectors'})).toHaveCount(0);
 });
 

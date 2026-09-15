@@ -363,7 +363,5 @@
 .ec-connectorrow { padding-block:8px; }
 .ec-connectorrow>span:first-child { min-width:0; overflow-wrap:anywhere; }
 .ec-connectorpanel p { font-size:13px; color:var(--ec-muted); }
-.ec-chatconnectors { width:100%; max-width:var(--ec-document-width,1100px); margin-inline:auto; }
-.ec-chatconnectors>.ec-btn { display:flex; margin-inline-start:auto; font-size:12px; }
 .ec-connectorchat { display:flex; align-items:center; gap:12px; }
 .ec-connectorchat select { max-width:360px; }

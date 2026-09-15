@@ -1,5 +1,18 @@
 /** Desktop presentation and interaction copy; execution errors never become translation keys. */
 export const desktopRefinementArabic={
+ 'Loading connectors…':'جارٍ تحميل الاتصالات…',
+ 'Status':'الحالة',
+ 'Overview':'نظرة عامة',
+ 'Details width':'عرض التفاصيل',
+ 'Close details':'إغلاق التفاصيل',
+ 'Details sections':'أقسام التفاصيل',
+ 'Next message permissions':'أذونات الرسالة التالية',
+ '{completed} of {total} completed':'اكتمل {completed} من {total}',
+ 'Last recorded: in progress':'آخر حالة مسجلة: قيد التنفيذ',
+ 'No plan has been recorded for this chat.':'لم تُسجّل خطة لهذه المحادثة.',
+ 'Recorded execution details and recovery controls. Full tool history stays in Conversation.':'تفاصيل التنفيذ المسجلة وأدوات الاستعادة. يبقى سجل الأدوات الكامل في المحادثة.',
+ 'Manage connections':'إدارة الاتصالات',
+
  'Discard unsaved settings and leave this page?':'هل تريد تجاهل الإعدادات غير المحفوظة ومغادرة هذه الصفحة؟',
  'Page navigation':'التنقل بين الصفحات',
  'Hide sidebar':'إخفاء الشريط الجانبي',

@@ -306,7 +306,7 @@ test('draft inspection follows the selected target and shows canonical route and
  await page.getByText('Chat options',{exact:true}).click();await page.getByRole('button',{name:'Execution details',exact:true}).click();
  const inspector=page.getByRole('complementary',{name:'Draft details'});
  await expect(inspector).toContainText('Trusted repo');
- await expect(inspector).toContainText('Profile approval mode: Strict');
+ await expect(inspector.locator('.ec-kv').filter({hasText:'Profile approval mode'}).locator('dd')).toHaveText('Strict');
  await expect(inspector).toContainText('Local model');
  await expect(inspector).not.toContainText('No execution target is selected');
 });
