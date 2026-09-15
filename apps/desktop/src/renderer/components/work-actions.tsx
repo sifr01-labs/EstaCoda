@@ -16,7 +16,7 @@ export function WorkActions({api,work,inspectDetails=false,compact=false,extra}:
  useEffect(()=>{alive.current=true;void inspect();return()=>{alive.current=false;};},[api,work.id]);
  useEffect(()=>{if(!receipt||!['accepted','dispatched'].includes(receipt.state))return;const timer=setTimeout(()=>void inspect(),1500);return()=>clearTimeout(timer);},[receipt]);
  const act=async(action:WorkAction['action'],stepId?:string)=>{setBusy(true);setError('');try{const next=await api.act({workId:work.id,action,...(stepId?{stepId}:{})});if(alive.current)setReceipt(next);}catch{if(alive.current)setError('The action is not confirmed. Check its result before another request.');}finally{if(alive.current)setBusy(false);}};
- const actions=work.actions?.filter(action=>action.id in labels&&(action.enabled||!['completed','partial','failed','cancelled'].includes(work.status)))??[];
+ const actions=work.actions?.filter(action=>action.id in labels&&(!compact||action.id!=='sessions.cancelTurn')&&(action.enabled||!['completed','partial','failed','cancelled'].includes(work.status)))??[];
  const actionButton=(action:typeof actions[number])=><Button key={action.id+':'+action.stepId} disabled={busy||!action.enabled} title={action.reason?t("Action unavailable. Refresh and inspect the current Work state."):undefined} onClick={()=>void act(action.id as WorkAction['action'],action.stepId)}>{owned(labels[action.id as WorkAction['action']]!)}{action.stepId?' · '+action.stepId:''}</Button>;
  const notice=receipt&&(receipt.state!=='completed'||receipt.cancellation==='requested'&&!['completed','partial','failed','cancelled'].includes(work.status))?(receipt.cancellation==='requested'?owned(cancellationNotice(work.status)):['accepted','dispatched'].includes(receipt.state)?t("Request accepted; waiting for the execution owner."):t("Operation")+" "+status(receipt.state)+t(". Inspect Work before deciding on a new request.")):'';
  const recovery=!!error||!!receipt&&['uncertain','unknown','expired'].includes(receipt.state);
@@ -31,5 +31,5 @@ export function WorkActions({api,work,inspectDetails=false,compact=false,extra}:
 export function cancellationNotice(status:WorkProjection['status']):string {
  if(status==='cancelled')return 'Execution cancelled.';
  if(['completed','partial','failed'].includes(status))return 'Execution ended. Its final outcome is shown separately.';
- return 'Cancellation requested. Waiting for canonical termination.';
+ return 'Stopping…';
 }

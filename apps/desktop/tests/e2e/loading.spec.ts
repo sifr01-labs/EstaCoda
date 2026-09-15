@@ -101,18 +101,18 @@ test('artifact refresh keeps rows; profile change discards rows and late reads',
   await expect(page.locator('.ec-loading-rows')).toHaveCount(0);
 });
 
-test('dots follow owner activity, suppress attention, localize, and clear on settlement',async({page})=>{
+test('working indicator follows owner activity, suppress attention, localize, and clear on settlement',async({page})=>{
   await mount(page,'live');
-  await expect(page.locator('.ec-loading-dots')).toBeVisible();
+  await expect(page.locator('.ec-working-word')).toBeVisible();
   await page.evaluate(()=>{const s=(window as any).loaderTest;s.waiting=true;s.render();});
-  await expect(page.locator('.ec-loading-dots')).toHaveCount(0);
+  await expect(page.locator('.ec-working-word')).toHaveCount(0);
   await expect(page.getByText('Received response')).toBeVisible();
   await page.evaluate(()=>{const s=(window as any).loaderTest;s.waiting=false;s.status='paused';s.render();});
-  await expect(page.locator('.ec-loading-dots')).toHaveCount(0);
+  await expect(page.locator('.ec-working-word')).toHaveCount(0);
   await page.evaluate(()=>{const s=(window as any).loaderTest;s.status='running';s.language='ar';s.render();});
-  await expect(page.locator('.ec-loading-dots')).toBeVisible();
-  await expect(page.locator('#loading-test').getByRole('status')).toHaveText('جارٍ العمل…');
+  await expect(page.locator('.ec-working-word')).toBeVisible();
+  await expect(page.locator('#loading-test').getByRole('status')).toHaveText('جارٍ العمل');
   await page.evaluate(()=>{const s=(window as any).loaderTest;s.preview={active:false,turnId:null,text:'',truncated:false};s.generation++;s.render();});
-  await expect(page.locator('.ec-loading-dots')).toHaveCount(0);
+  await expect(page.locator('.ec-working-word')).toHaveCount(0);
   await expect(page.getByText('Received response')).toHaveCount(0);
 });

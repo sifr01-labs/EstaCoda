@@ -53,3 +53,17 @@ it.skipIf(process.platform === "win32")("rejects a wrong instance secret before 
     expect(JSON.parse(response).ok).toBe(false); expect(handle).not.toHaveBeenCalled();
   } finally { await server.close(); await rm(directory, { recursive: true, force: true }); }
 });
+
+
+it.skipIf(process.platform === 'win32')('requires an enforcing host for conversation permissions and interruption',async()=>{
+ const directory=await mkdtemp(join(tmpdir(),'ipc-conversation-'));await chmod(directory,0o700);
+ const handle=vi.fn(async(_request:unknown)=>({accepted:true}));
+ const input={directory,profileId:'p',version:'test',requireTargetGeneration:true,request:{method:'send' as const,sessionId:'s',targetId:'t',targetGeneration:1,operationId:'op',text:'Continue',securityMode:'open' as const,interrupt:true}};
+ let server=await startPrivateControl({directory,instanceId:'old',profileId:'p',version:'test',targetGeneration:true,handle});
+ try{
+  await expect(callPrivateControl(input)).rejects.toThrow('Restart the execution host');expect(handle).not.toHaveBeenCalled();
+  await server.close();server=await startPrivateControl({directory,instanceId:'new',profileId:'p',version:'test',targetGeneration:true,conversationControls:true,handle});
+  await expect(callPrivateControl(input)).resolves.toEqual({accepted:true});expect(handle).toHaveBeenCalledTimes(1);expect(handle.mock.calls[0]?.[0]).toMatchObject({securityMode:'open',interrupt:true,targetGeneration:1});
+  for(const override of [{securityMode:'off'},{interrupt:'yes'},{targetGeneration:undefined},{method:'inspect'}])expect(()=>validatePrivateControlRequest({...input.request,...override})).toThrow('Invalid');
+ }finally{await server.close();await rm(directory,{recursive:true,force:true});}
+});

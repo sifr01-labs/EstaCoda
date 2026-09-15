@@ -13,12 +13,14 @@ export type PrivateControlRequest = {
   taskId?: string; stepId?: string; guidance?: string;
   targetGeneration?: number;
   mediaIds?:string[];
+  securityMode?: 'strict'|'adaptive'|'open'; interrupt?:boolean;
   text?: string; approvalId?: string; decision?: "approved" | "denied";
 };
 
 export function validatePrivateControlRequest(value: unknown): asserts value is PrivateControlRequest {
   if (!value || typeof value !== "object") throw new Error("Invalid control request.");
   const request = value as PrivateControlRequest;
+  if((request.securityMode!==undefined||request.interrupt!==undefined)&&(request.method!=='send'||request.targetGeneration===undefined||request.securityMode!==undefined&&!['strict','adaptive','open'].includes(request.securityMode)||request.interrupt!==undefined&&typeof request.interrupt!=='boolean'))throw new Error('Invalid conversation control.');
   if(request.connectorAction!==undefined&&request.method!=='mcp.control')throw new Error('Invalid connector control.');
   if(request.method==='mcp.control'&&(!['inspect','reconnect'].includes(request.connectorAction??'')||request.targetGeneration===undefined||Object.keys(request).sort().join(',')!=='connectorAction,method,operationId,sessionId,targetGeneration,targetId'))throw new Error('Invalid connector owner binding.');
   if(request.workInput!==undefined&&request.method!=='secure.input')throw new Error('Protected input requires its private channel.');

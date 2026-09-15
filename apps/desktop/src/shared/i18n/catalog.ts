@@ -1,3 +1,4 @@
+import {desktopRefinementArabic} from './desktop-refinement.js';
 import {schedulesArabic} from './schedules.js';
 import {libraryArabic} from './library.js';
 import {onboardingArabic} from './onboarding.js';
@@ -7,6 +8,7 @@ import {setupArabic} from './setup.js';
 import {workArabic} from './work.js';
 /** Product-owned message keys. Never pass provider output or backend error text here. */
 export const arabic = {
+ ...desktopRefinementArabic,
  'Chat':'محادثة',
  "Could not reconnect connectors. Try again.":"تعذّرت إعادة توصيل الموصلات. حاول مجددًا.",
  "Open a chat without attachments to reconnect its connectors.":"افتح محادثة دون مرفقات لإعادة توصيل موصلاتها.",

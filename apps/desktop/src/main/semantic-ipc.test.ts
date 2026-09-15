@@ -135,3 +135,9 @@ it('accepts bounded connector controls without renderer authority or executable 
  expect(()=>validateSemanticPayload('connectorsControl',{action:'reconnect',workId:'session:s'})).not.toThrow();
  for(const payload of [{action:'reconnect'},{action:'execute',workId:'session:s'},{action:'inspect',profileId:'other'},{action:'reconnect',workId:'session:s',command:'node'},{action:'inspect',targetId:'other'},{action:'inspect',credential:'secret'}])expect(()=>validateSemanticPayload('connectorsControl',payload)).toThrow();
 });
+
+it('bounds conversation permission and interruption controls without accepting forged authority',()=>{
+ const input={draftId:'d',workId:'session:s',target:{targetId:'t',targetGeneration:1},text:'Continue',attachmentIds:[]};
+ for(const securityMode of ['strict','adaptive','open'])expect(()=>validateSemanticPayload('workSubmit',{...input,securityMode,interrupt:true})).not.toThrow();
+ for(const extra of [{securityMode:'yolo'},{interrupt:'true'},{inspectOnly:1},{securityMode:'open',kind:'task'},{profileId:'other',securityMode:'open'},{operationId:'forged'}])expect(()=>validateSemanticPayload('workSubmit',{...input,...extra})).toThrow();
+});

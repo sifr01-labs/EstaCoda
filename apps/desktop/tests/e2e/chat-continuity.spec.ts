@@ -55,7 +55,7 @@ test('uncertain delivery keeps the draft and shows a compact warning without ret
  await mount(page);await page.locator('.ec-taskbutton').filter({hasText:'Existing chat'}).click();
  await page.evaluate(()=>{const s=(window as any).continuity;(window as any).desktop.work.submit=async(v:any)=>{s.submitted.push(v);throw Error('Response lost');};});
  const box=page.locator('textarea');await box.fill('Keep this draft');await box.press('Enter');
- await expect(page.getByRole('alert')).toHaveText('Couldn’t confirm delivery. Your draft is saved. Check the conversation before sending again.');
+ await expect(page.getByRole('alert')).toContainText('We couldn’t check whether your message was sent. Your draft is saved.');
  await expect(box).toHaveValue('Keep this draft');expect(await page.evaluate(()=>(window as any).continuity.submitted.length)).toBe(1);
  await page.screenshot({path:info.outputPath('delivery-warning.png')});
 });

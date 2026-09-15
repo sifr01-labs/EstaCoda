@@ -360,6 +360,7 @@ export type Runtime = {
   }>;
   revokeApproval?(id: string): Promise<boolean>;
   securityMode?(): SecurityApprovalMode;
+  setSecurityMode?(mode:SecurityApprovalMode):void;
   toggleYoloMode?(): { enabled: boolean; mode: SecurityApprovalMode };
   trustWorkspace(): Promise<void>;
   isWorkspaceTrusted(): Promise<boolean>;
@@ -1552,6 +1553,10 @@ async function buildRuntime(options: RuntimeOptions, rollback: ResourceCleanup):
     },
     securityMode() {
       return activeSecurityMode;
+    },
+    setSecurityMode(mode) {
+      if (!['strict','adaptive','open'].includes(mode)) throw new Error('Invalid security mode.');
+      activeSecurityMode = mode;
     },
     toggleYoloMode() {
       const enabled = activeSecurityMode !== "open";

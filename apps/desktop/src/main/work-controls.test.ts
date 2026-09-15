@@ -49,9 +49,27 @@ it('continues delayed Task preparation after Main restart without recreating the
   const restarted=new DesktopWorkControls(connection as any,directory,async()=>[]);
   await expect(restarted.submit(input)).rejects.toThrow('Preparation');
   await expect(restarted.submit({...input,target:{...target,targetGeneration:2}})).rejects.toThrow('target changed');
-  settled=true;const result=await restarted.submit(input);expect(result.workId).toMatch(/^task:/);expect(result.receipt.method).toBe('tasks.create');
+  settled=true;await expect(restarted.submit({...input,inspectOnly:true})).rejects.toThrow('wasn’t sent');expect(connection.workRequest.mock.calls.filter(call=>call[0]==='tasks.create')).toHaveLength(0);const result=await restarted.submit(input);expect(result.workId).toMatch(/^task:/);expect(result.receipt.method).toBe('tasks.create');
   expect(await restarted.submit(input)).toMatchObject({workId:result.workId});
   expect(connection.workRequest.mock.calls.filter(call=>call[0]==='sessions.start')).toHaveLength(1);
   expect(connection.workRequest.mock.calls.filter(call=>call[0]==='tasks.create')).toHaveLength(1);
  }finally{rmSync(directory,{recursive:true,force:true});}
+});
+
+it('reconciles a lost send acknowledgment by submission identity without repeating execution',async()=>{
+ const directory=mkdtempSync('/tmp/ec-send-recovery-');
+ const connection=Object.assign(new EventEmitter(),{state:{profileId:'p',generation:1,status:'ready'},getWork:async(id:string)=>({id,profileId:'p',canonicalId:'s',kind:'session',target,actions:[{id:'sessions.send',enabled:true}]}),workRequest:vi.fn(async(method:string,params:any)=>{
+  if(method==='work.targets')return{items:[target],truncated:false};if(method==='sessions.send')throw new Error('Connection lost');
+  return{...params,profileId:'p',method:params.method,state:'dispatched',cancellation:'not_requested'};
+ })});
+ const input={draftId:'d',workId:'session:s',target,text:'Continue',attachmentIds:[],securityMode:'open' as const};
+ try{const controls=new DesktopWorkControls(connection as any,directory,async()=>[]);expect(await controls.submit(input)).toMatchObject({receipt:{state:'dispatched'}});expect(await controls.submit({...input,inspectOnly:true})).toMatchObject({receipt:{state:'dispatched'}});expect(await controls.submit(input)).toMatchObject({receipt:{state:'dispatched'}});expect(connection.workRequest.mock.calls.filter(call=>call[0]==='sessions.send')).toHaveLength(1);
+ await expect(controls.submit({...input,draftId:'missing',inspectOnly:true})).rejects.toThrow('wasn’t sent');expect(connection.workRequest.mock.calls.filter(call=>call[0]==='sessions.send')).toHaveLength(1);
+ }finally{rmSync(directory,{recursive:true,force:true});}
+});
+it('permits explicit interruption of an acknowledged send but refuses uncertain prior execution',async()=>{
+ const directory=mkdtempSync('/tmp/ec-send-interrupt-');let state='dispatched';
+ const connection=Object.assign(new EventEmitter(),{state:{profileId:'p',generation:1,status:'ready'},getWork:async(id:string)=>({id,profileId:'p',canonicalId:'s',kind:'session',target,actions:[{id:'sessions.send',enabled:true}]}),workRequest:vi.fn(async(method:string,params:any)=>method==='work.targets'?{items:[target],truncated:false}:{...params,profileId:'p',method:method==='operations.inspect'?params.method:method,state,cancellation:'not_requested'})});
+ const input={draftId:'first',workId:'session:s',target,text:'First',attachmentIds:[]};
+ try{const controls=new DesktopWorkControls(connection as any,directory,async()=>[]);await controls.submit(input);await expect(controls.submit({...input,draftId:'next'})).rejects.toThrow('Reconcile');await controls.submit({...input,draftId:'steer',interrupt:true});expect(connection.workRequest.mock.calls.filter(c=>c[0]==='sessions.send')).toHaveLength(2);state='uncertain';await expect(controls.submit({...input,draftId:'unsafe',interrupt:true})).rejects.toThrow('Reconcile');}finally{rmSync(directory,{recursive:true,force:true});}
 });

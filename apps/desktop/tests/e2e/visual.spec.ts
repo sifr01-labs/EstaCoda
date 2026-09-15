@@ -4,9 +4,9 @@ const frozen=readFileSync(resolve('../../docs/planning/desktop-design/approved-p
 const hash=createHash('sha256').update(frozen).digest('hex');
 const lucide=readFileSync('tests/reference/lucide-1.17.0.js','utf8');
 const evidence=resolve('tests/visual-evidence');
-const click=(p:Page,name:string)=>p.getByRole('button',{name,exact:true}).click();
+const click=async(p:Page,name:string)=>{const button=p.getByRole('button',{name,exact:true});if(['Settings','Search chats'].includes(name)&&!await button.isVisible())await p.locator('.ec-sidebar-toggle').click();await button.click();};
 const retry=async(p:Page)=>{if((p.viewportSize()?.width??1024)<590){await nav(p,'Inbox');await p.getByRole('button',{name:'Review request',exact:true}).click();}else await p.locator('.ec-taskbutton').filter({hasText:'Make billing retries resilient'}).first().click();};
-const nav=(p:Page,name:string)=>p.locator('.ec-navgroup').getByRole('button',{name:new RegExp('^'+name)}).click();
+const nav=async(p:Page,name:string)=>{if(!await p.locator('#ec-sidebar').isVisible())await p.locator('.ec-sidebar-toggle').click();await p.locator('.ec-navgroup').getByRole('button',{name:new RegExp('^'+name)}).click();};
 const settings=async(p:Page,name:string)=>{await click(p,'Settings');await p.locator('.ec-settingslink').filter({hasText:name}).click();};
 type Scenario={id:string;ref:Record<string,unknown>;act:(p:Page)=>Promise<unknown>;modal?:boolean};
 const scenarios:Scenario[]=[

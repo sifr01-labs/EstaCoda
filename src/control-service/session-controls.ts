@@ -44,7 +44,7 @@ export async function sessionControl(input: { homeDir: string; profileId: string
     ...('selection' in request.params ? {selection:request.params.selection} : {}),
     ...(request.method === 'tasks.retry' ? { stepId: request.params.stepId } : {}),
     ...(request.method === 'tasks.guide' ? { guidance: request.params.guidance } : {}),
-    operationId: request.params.operationId, ...(request.method === 'sessions.send' ? { text: request.params.text } : {}) };
+    operationId: request.params.operationId, ...(request.method === 'sessions.send' ? { text: request.params.text,...(request.params.securityMode?{securityMode:request.params.securityMode}:{}),...(request.params.interrupt!==undefined?{interrupt:request.params.interrupt}:{}) } : {}) };
   if(request.method==='sessions.send'&&request.params.mediaIds?.length){control.mediaIds=request.params.mediaIds;await new DesktopMediaInput(input).claim(control.mediaIds,{sessionId:control.sessionId,operationId:control.operationId,targetId:control.targetId,targetGeneration:control.targetGeneration});}
   // Receipts are durable; inspecting them must not depend on (or start) a host.
   // Apply the same profile and exact Session/target binding as the host's inspect path.

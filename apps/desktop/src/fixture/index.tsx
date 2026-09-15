@@ -3,7 +3,7 @@ import{fixtureAdapter}from'./adapter.js';
 import React from 'react';import{createRoot}from'react-dom/client';
 import{AppearanceProvider}from'../renderer/appearance.js';import{App}from'../renderer/app.js';
 import{DEFAULT_APPEARANCE,validAppearance}from'../shared/appearance.js';
-import '../renderer/styles/tokens.css';import '../renderer/styles/components.css';import '../renderer/styles/native.css';import '../renderer/styles/theme-previews.css';
+import '../renderer/styles/tokens.css';import '../renderer/styles/components.css';import '../renderer/styles/native.css';import '../renderer/styles/theme-previews.css';import '../renderer/styles/refinement.css';
 const adapter=fixtureAdapter();
 // Test-build-only initial appearance; this entry is absent from Forge output.
 const query=new URLSearchParams(location.search);

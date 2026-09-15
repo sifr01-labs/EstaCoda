@@ -54,7 +54,7 @@ export type DesktopModelsApi={
  refreshCatalog():Promise<{refreshed:boolean}>;
 };
 export type WorkAction={workId:string;action:'sessions.resume'|'sessions.cancelTurn'|'tasks.pause'|'tasks.resume'|'tasks.cancel'|'tasks.retry'|'tasks.guide';stepId?:string;guidance?:string};
-export type WorkSubmission={kind?:'session'|'task';limits?:{maxProviderCalls:number;maxTotalTokens:number;maxWallClockMs:number};draftId:string;workId?:string;target:import('@estacoda/control-protocol').TargetReference;text:string;attachmentIds:string[];selection?:{providerId:string;modelId:string}|null};
+export type WorkSubmission={inspectOnly?:boolean;securityMode?: 'strict'|'adaptive'|'open'; interrupt?:boolean;kind?:'session'|'task';limits?:{maxProviderCalls:number;maxTotalTokens:number;maxWallClockMs:number};draftId:string;workId?:string;target:import('@estacoda/control-protocol').TargetReference;text:string;attachmentIds:string[];selection?:{providerId:string;modelId:string}|null};
 export type DesktopWorkApi = {
  usage(workId:string):Promise<import('@estacoda/control-protocol').WorkUsageProjection>;
  decide(itemId:string,decision:'approved'|'denied'):Promise<import('@estacoda/control-protocol').OperationReceipt>;

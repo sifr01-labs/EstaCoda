@@ -146,3 +146,22 @@ it('uses initial discovery once for a cold session and reports a failed refresh 
  fail=true;await host.handle(request);await vi.waitFor(()=>expect(host.hasPendingWork()).toBe(false));
  const status=await host.handle({...request,connectorAction:'inspect'});expect(status).toMatchObject({state:'failed'});expect(JSON.stringify(status)).not.toContain('private diagnostic');expect(runtime.handle).not.toHaveBeenCalled();await host.close();
 });
+
+it('interrupts a turn, waits for disposal, and applies permissions only to the replacement',async()=>{
+ let started!:()=>void,release!:()=>void;const ready=new Promise<void>(resolve=>started=resolve),settled=new Promise<void>(resolve=>release=resolve),order:string[]=[];let mode='strict';
+ const runtime={sessionId:'s',securityMode:()=>mode,setSecurityMode:(next:string)=>{mode=next;order.push('mode:'+next);},dispose:async()=>{order.push('disposed');},handle:async(input:any)=>{
+  order.push('start:'+input.text+':'+mode);if(input.text==='first'){started();await new Promise<void>(resolve=>input.signal.addEventListener('abort',()=>{order.push('abort');resolve();},{once:true}));await settled;}return{text:'done'};
+ }} as unknown as Runtime;
+ const host=new SharedSessionHost({profileId:'p',sessionDb:{getSessionForProfile:async()=>({executionTarget:{targetId:'t',targetGeneration:1}})} as unknown as SessionDB,validateTarget:async()=>{},acquire:async()=>runtime,channelApproval:vi.fn()});
+ const base={sessionId:'s',targetId:'t',targetGeneration:1,operationId:'first'};
+ const first=host.handle({...base,method:'send',text:'first'});await ready;
+ const second=host.handle({...base,operationId:'second',method:'send',text:'second',interrupt:true,securityMode:'open'});
+ await vi.waitFor(()=>expect(order).toContain('abort'));expect(order).not.toContain('mode:open');release();await first;await second;
+ expect(order).toEqual(['start:first:strict','abort','disposed','mode:open','start:second:open','mode:strict','disposed']);expect(mode).toBe('strict');await host.close();
+});
+it('rejects a stale steering target before interrupting and fails closed without permission support',async()=>{
+ const cancel=vi.fn(),handle=vi.fn();const host=new SharedSessionHost({profileId:'p',sessionDb:{getSessionForProfile:async()=>({executionTarget:{targetId:'t',targetGeneration:1}})} as unknown as SessionDB,validateTarget:async()=>{},acquire:async()=>({sessionId:'s',handle,dispose:async()=>{}} as unknown as Runtime),channelCancel:cancel,channelApproval:vi.fn()});
+ const base={sessionId:'s',targetId:'t',targetGeneration:2,operationId:'op',method:'send' as const,text:'steer',interrupt:true,securityMode:'open' as const};
+ await expect(host.handle(base)).rejects.toThrow('generation');expect(cancel).not.toHaveBeenCalled();
+ await expect(host.handle({...base,targetGeneration:1,interrupt:false})).rejects.toThrow('permissions unavailable');expect(handle).not.toHaveBeenCalled();await host.close();
+});

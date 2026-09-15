@@ -1904,7 +1904,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
       });
       state.sharedSessionHost = sharedHost;
       state.privateControl = await startPrivateControl({ directory: profilePaths.gatewayStatePath,
-        instanceId: state.gatewayInstanceId!, profileId, version, targetGeneration: true, mediaAttachments:true, handle: (request) => sharedHost.handle(request),
+        instanceId: state.gatewayInstanceId!, profileId, version, targetGeneration: true, mediaAttachments:true, conversationControls:true, handle: (request) => sharedHost.handle(request),
         configurationChanged: async () => {await loadConfig();await runtimeCache.configurationChanged();} });
      } else {
       logWarning("Shared control unavailable: use a shorter profile home on Unix; Windows requires protected named-pipe support. Foreground and background services remain available.");

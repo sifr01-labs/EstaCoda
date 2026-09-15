@@ -1,6 +1,7 @@
 import {test,expect,type Page} from '@playwright/test';
 import {translate,type DisplayLanguage} from '../../src/shared/i18n/index.js';
 const openWork=async(page:Page,language:DisplayLanguage)=>{
+ if(!await page.locator('#ec-sidebar').isVisible())await page.locator('.ec-sidebar-toggle').click();
  if(page.viewportSize()!.width<590){await page.locator('.ec-navgroup').getByRole('button',{name:new RegExp(translate(language,'Inbox'))}).click();await page.getByRole('button',{name:translate(language,'Review request'),exact:true}).click();}
  else await page.locator('[data-task="retry"]').click();
 };
@@ -8,7 +9,7 @@ for(const language of ['en','ar'] as const)for(const mode of ['light','dark'] as
  test(`bilingual ${language} ${mode} ${width} ${view}`,async({page})=>{
   await page.setViewportSize({width,height:900});await page.goto(`/fixture.html?language=${language}&mode=${mode}`);await expect(page.locator('html')).toHaveAttribute('lang',language);
   if(view==='approval')await openWork(page,language);
-  else{await page.getByRole('button',{name:translate(language,'Settings'),exact:true}).click();if(view==='models')await page.locator('.ec-settingslink').filter({hasText:translate(language,'Models & providers')}).click();}
+  else{if(!await page.locator('#ec-sidebar').isVisible())await page.locator('.ec-sidebar-toggle').click();await page.getByRole('button',{name:translate(language,'Settings'),exact:true}).click();if(view==='models')await page.locator('.ec-settingslink').filter({hasText:translate(language,'Models & providers')}).click();}
   await page.evaluate(()=>document.fonts.ready);await page.mouse.move(0,0);await page.evaluate(()=>(document.activeElement as HTMLElement)?.blur());
   expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
   await expect(page.locator('.ec-window')).toHaveScreenshot(`pr14a-${language}-${mode}-${width}-${view}.png`,{animations:'disabled'});

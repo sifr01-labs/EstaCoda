@@ -50,10 +50,24 @@ export class DesktopWorkControls {
   const check=this.fence(),key=this.connection.state.profileId+':'+(input.workId??input.draftId);
   if(this.#busy.has(key))throw new Error('Work is already submitting.');this.#busy.add(key);
   try{
+   if(input.inspectOnly){
+    const previous=this.references.records()[input.draftId];
+    if(!previous)throw new Error('Message wasn’t sent. Your draft is saved.');
+    if(previous.target.targetId!==input.target.targetId||previous.target.targetGeneration!==input.target.targetGeneration||input.workId&&input.workId!==(previous.taskId?'task:'+previous.taskId:'session:'+previous.sessionId))throw new Error('Submission target changed.');
+    const receipt=await this.connection.workRequest('operations.inspect',previous);check();
+    if(['sessions.start','sessions.setModel'].includes(previous.method)&&receipt.state==='completed')throw new Error('Message wasn’t sent. Your draft is saved.');
+    return{workId:previous.taskId?'task:'+previous.taskId:'session:'+previous.sessionId,receipt};
+   }
    await this.references.makeRoom(check);check();
    await this.available(input.target);check();
-   let sessionId:string,prepared:Inspection|undefined;
-   if(input.workId){const work=await this.connection.getWork(input.workId);check();if(work.kind!=='session'||work.profileId!==this.connection.state.profileId||work.target?.targetId!==input.target.targetId||work.target.targetGeneration!==input.target.targetGeneration||!work.actions?.some(action=>action.id==='sessions.send'&&action.enabled))throw new Error('This Work cannot accept a prompt.');sessionId=work.canonicalId;const prior=this.references.records()[input.workId];if(prior&&(await this.connection.workRequest('operations.inspect',prior)).state!=='completed')throw new Error('Reconcile the previous operation before sending.');check();}
+    const submitted=this.references.records()[input.draftId];
+    if(submitted&&submitted.method==='sessions.send'){
+      if(submitted.target.targetId!==input.target.targetId||submitted.target.targetGeneration!==input.target.targetGeneration||input.workId&&input.workId!=='session:'+submitted.sessionId)throw new Error('Submission target changed.');
+      const receipt=await this.connection.workRequest('operations.inspect',submitted);check();
+      return{workId:'session:'+submitted.sessionId,receipt};
+    }
+    let sessionId:string,prepared:Inspection|undefined;
+   if(input.workId){const work=await this.connection.getWork(input.workId);check();if(work.kind!=='session'||work.profileId!==this.connection.state.profileId||work.target?.targetId!==input.target.targetId||work.target.targetGeneration!==input.target.targetGeneration||!work.actions?.some(action=>action.id==='sessions.send'&&action.enabled))throw new Error('This Work cannot accept a prompt.');sessionId=work.canonicalId;const prior=this.references.records()[input.workId];if(prior){const receipt=await this.connection.workRequest('operations.inspect',prior);if(receipt.state!=='completed'&&!(input.interrupt===true&&prior.method==='sessions.send'&&['accepted','dispatched'].includes(receipt.state)))throw new Error('Reconcile the previous operation before sending.');}check();}
    else {
     const previous=this.references.records()[input.draftId];
     if(previous){
@@ -80,8 +94,8 @@ export class DesktopWorkControls {
     this.references.save(taskWorkId,record);this.references.save(input.draftId,record);
     const receipt=await this.connection.workRequest('tasks.create',{...binding,operationId,taskId,objective:text,limits:input.limits!,selection:input.selection??null});check();this.attachments.remove(input.attachmentIds);return{workId:taskWorkId,receipt};
    }
-   check();const operationId=Date.now()+':'+randomUUID();this.references.save(workId,{...binding,operationId,method:'sessions.send'});if(!input.workId)this.references.save(input.draftId,{...binding,operationId,method:'sessions.send'});
-   const receipt=await this.connection.workRequest('sessions.send',{...binding,operationId,text,...(mediaIds.length?{mediaIds}:{})});check();this.attachments.remove(input.attachmentIds);return{workId,receipt};
+   check();const operationId=Date.now()+':'+randomUUID();this.references.save(workId,{...binding,operationId,method:'sessions.send'});this.references.save(input.draftId,{...binding,operationId,method:'sessions.send'});
+   let receipt:OperationReceipt;try{receipt=await this.connection.workRequest('sessions.send',{...binding,operationId,text,...(mediaIds.length?{mediaIds}:{}),...(input.securityMode?{securityMode:input.securityMode}:{}),...(input.interrupt!==undefined?{interrupt:input.interrupt}:{})});}catch{receipt=await this.connection.workRequest('operations.inspect',{...binding,operationId,method:'sessions.send'});}check();this.attachments.remove(input.attachmentIds);return{workId,receipt};
   }finally{this.#busy.delete(key);}
  }
 }

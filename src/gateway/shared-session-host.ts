@@ -72,7 +72,7 @@ export class SharedSessionHost {
   }
   readonly #controls = new Set<Promise<unknown>>();
   private async execute(request: PrivateControlRequest): Promise<unknown> {
-    const generation = this.#cancelGeneration.get(request.sessionId) ?? 0;
+    let generation = this.#cancelGeneration.get(request.sessionId) ?? 0;
     await this.validate(request, request.method === "inspect");
     if(request.method==='mcp.control')return this.connectorControl(request);
     if(request.method==='send'&&request.text?.trim()==='/reload-mcp'){
@@ -131,13 +131,27 @@ export class SharedSessionHost {
       return this.options.channelApproval(request);
     }
     if (this.#turns.size >= 128) throw new Error("Shared input queue is full.");
+    if(request.interrupt){
+      // Validate before cancellation. The replacement joins the same serial queue,
+      // so no new tools start until the interrupted turn has actually settled.
+      generation=(this.#cancelGeneration.get(request.sessionId)??0)+1;
+      this.#cancelGeneration.set(request.sessionId,generation);
+      active?.controller.abort();active?.pending?.resolve('denied');
+      await this.options.channelCancel?.(request.sessionId);
+    }
     const turn = this.#serial.runExclusive(request.sessionId, async () => {
       await this.validate(request);
       if (generation !== (this.#cancelGeneration.get(request.sessionId) ?? 0)) throw new Error("Queued input was cancelled.");
       const state: Active = { controller: new AbortController(),preview:{turnId:request.operationId,text:'',truncated:false} };
       this.#active.set(request.sessionId, state);
+      let previousSecurityMode:ReturnType<NonNullable<Runtime['securityMode']>>|undefined;
       try {
         state.runtime = await this.options.acquire(request.sessionId);
+        if(request.securityMode){
+          previousSecurityMode=state.runtime.securityMode?.();
+          if(!previousSecurityMode||!state.runtime.setSecurityMode)throw new Error('Conversation permissions unavailable.');
+          state.runtime.setSecurityMode(request.securityMode);
+        }
         const attachments=request.mediaIds?.length?await this.options.resolveMedia?.(request):undefined;if(request.mediaIds?.length&&!attachments)throw new Error('Media resolver unavailable');
         const onSecureInputRequest=request.targetGeneration===undefined?undefined:state.runtime.createSecureInputRequestHandler?.({collect:this.#secureInput.collector({sessionId:request.sessionId,targetId:request.targetId,targetGeneration:request.targetGeneration}),signal:state.controller.signal});
         const response = await state.runtime.handle({onSecureInputRequest,attachments, text: request.text!, channel: "cli", signal: state.controller.signal,
@@ -188,6 +202,7 @@ export class SharedSessionHost {
           profileId: this.options.profileId, sessionId: request.sessionId }).catch(() => undefined);
         state.pending?.resolve("denied");
         this.#active.delete(request.sessionId);
+        if(previousSecurityMode)state.runtime?.setSecurityMode?.(previousSecurityMode);
         await state.runtime?.dispose();
       }
     });

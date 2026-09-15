@@ -244,7 +244,7 @@ const contracts: { [M in keyof MethodContracts]: { params: Check; result: Check 
   "tasks.guide": { params: shape({ ...sessionParams, taskId: id, guidance: text(4000, 1) }), result: receipt },
   "sessions.start": { params: shape(sessionParams), result: receipt },
   "sessions.resume": { params: shape(sessionParams), result: receipt },
-  "sessions.send": { params: shape({ ...sessionParams, text: text(32_768, 1) },{mediaIds:unique(id,4)}), result: receipt },
+  "sessions.send": { params: shape({ ...sessionParams, text: text(32_768, 1) },{mediaIds:unique(id,4),securityMode:choice(["strict","adaptive","open"]),interrupt:boolean}), result: receipt },
   "sessions.cancelTurn": { params: shape(sessionParams), result: receipt },
   "approvals.resolve": { params: shape({ ...sessionParams, approvalId: id, decision: choice(["approved", "denied"]) }), result: receipt },
   "operations.inspect": { params: shape({ ...sessionParams, method: choice(mutationMethods) }, { taskId: id }), result: receipt },

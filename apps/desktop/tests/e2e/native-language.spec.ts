@@ -13,6 +13,7 @@ for(const language of ['en','ar'] as const)for(const mode of ['light','dark'] as
  try{
   app=await electron.launch({executablePath,args:[main]});const page=await app.firstWindow();await expect(page.locator('html')).toHaveAttribute('lang',language);
   await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows()[0]!.webContents.setZoomFactor(2));
+  await expect(page.locator('#ec-sidebar')).toBeHidden();await page.locator('.ec-sidebar-toggle').click();
   await page.getByRole('button',{name:translate(language,'Settings'),exact:true}).click();const select=page.getByRole('combobox',{name:translate(language,'Display language')});await select.focus();await expect(select).toBeFocused();await expect(select).toBeInViewport();expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
   await page.evaluate(()=>document.fonts.ready);const ax=await app.evaluate(async({BrowserWindow})=>{const debug=BrowserWindow.getAllWindows()[0]!.webContents.debugger;debug.attach('1.3');try{return await debug.sendCommand('Accessibility.getFullAXTree');}finally{debug.detach();}});
   const controls=ax.nodes.filter((node:any)=>!node.ignored&&['combobox','button'].includes(node.role?.value)).map((node:any)=>({role:node.role.value,name:node.name?.value}));expect(controls).toContainEqual({role:'combobox',name:translate(language,'Display language')});

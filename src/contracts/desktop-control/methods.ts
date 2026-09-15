@@ -159,7 +159,7 @@ export type MethodContracts = {
   "tasks.guide": { params: SessionControl & { taskId: string; guidance: string }; result: OperationReceipt };
   "sessions.start": { params: SessionControl; result: OperationReceipt };
   "sessions.resume": { params: SessionControl; result: OperationReceipt };
-  "sessions.send": { params: SessionControl & { text: string; mediaIds?:string[] }; result: OperationReceipt };
+  "sessions.send": { params: SessionControl & { text: string; mediaIds?:string[]; securityMode?: 'strict'|'adaptive'|'open'; interrupt?:boolean; }; result: OperationReceipt };
   "sessions.cancelTurn": { params: SessionControl; result: OperationReceipt };
   "approvals.resolve": { params: SessionControl & { approvalId: string; decision: "approved" | "denied" }; result: OperationReceipt };
   "operations.inspect": { params: SessionControl & { taskId?: string; method: OperationReceipt["method"] }; result: OperationReceipt };

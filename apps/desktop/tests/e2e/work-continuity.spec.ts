@@ -54,14 +54,16 @@ test('Inbox resolves off-page Work and gives unavailable Work an explicit retry'
   await page.evaluate(()=>{(window as any).continuity.delay=true;});
   await page.locator('.ec-navgroup').getByRole('button',{name:/Inbox/}).click();
   await page.getByRole('button',{name:'Review request'}).click();
-  await expect(page.getByRole('heading',{name:'Loading Work'})).toBeVisible();
+  await expect(page.getByRole('heading',{name:'Opening chat…'})).toBeVisible();
   await page.evaluate(()=>{(window as any).continuity.flush();});
   await expect(page.getByRole('heading',{name:'Older Work'})).toBeVisible();
+  await page.locator('.ec-taskbutton').filter({hasText:'Listed Work'}).click();
   await page.evaluate(()=>{const c=(window as any).continuity;c.delay=false;c.fail=true;c.refresh();});
-  await expect(page.getByRole('heading',{name:'Work unavailable'})).toBeVisible();
+  await page.locator('.ec-navgroup').getByRole('button',{name:/Inbox/}).click();await page.getByRole('button',{name:'Review request'}).click();
+  await expect(page.getByRole('heading',{name:'Chat could not be opened'})).toBeVisible();
   await expect(page.locator('.ec-newwelcome')).toHaveCount(0);
   await page.evaluate(()=>{(window as any).continuity.fail=false;});
-  await page.getByRole('button',{name:'Retry Work'}).click();
+  await page.getByRole('button',{name:'Try again'}).click();
   await expect(page.getByRole('heading',{name:'Older Work'})).toBeVisible();
 });
 
@@ -185,13 +187,14 @@ test('activity refreshes when canonical events change without a Work timestamp c
 });
 
 
-test('shows owner preview while active and removes it when the turn settles',async({page})=>{
+test('preserves owner preview after settlement until canonical history arrives',async({page})=>{
  await live(page);
  await page.evaluate(()=>{(window as any).continuity.preview={active:true,turnId:'turn',text:'Working on the live answer',truncated:false};});
  await page.locator('.ec-taskbutton').filter({hasText:'Listed Work'}).click();
  await expect(page.getByLabel('Live assistant activity')).toContainText('Working on the live answer');
  await page.evaluate(()=>{(window as any).continuity.preview={active:false,turnId:null,text:'',truncated:false};});
- await expect(page.getByLabel('Live assistant activity')).toHaveCount(0);
+ await expect(page.getByLabel('Live assistant activity')).toContainText('Working on the live answer');
+ await expect(page.locator('.ec-working-word')).toHaveCount(0);
 });
 
 
@@ -227,7 +230,7 @@ test('reviews bounded Task creation and routes pause and guidance through capabi
 test('Stop acknowledges requested cancellation without labelling execution cancelled',async({page})=>{
  await live(page);await page.locator('.ec-taskbutton').filter({hasText:'Listed Work'}).click();
  await page.getByRole('button',{name:'Stop',exact:true}).click();
- await page.locator('#ec-work-attention summary').click();await expect(page.locator('#ec-work-attention')).toContainText('Cancellation requested. Waiting for canonical termination.');
+ await expect(page.getByRole('button',{name:'Stopping…',exact:true})).toBeDisabled();
  await expect(page.locator('.ec-workheading')).toContainText('Running');
 });
 

@@ -1,3 +1,4 @@
+import {createContext,useContext} from 'react';
 import {useI18n} from '../i18n.js';
 import type {ButtonHTMLAttributes,ReactNode,CSSProperties} from 'react';
 import {Archive,Copy,Eye,Hash,Pencil,ArrowDown,Ellipsis,Mic,RefreshCw,KeyRound,Laptop,FileCheck,ClipboardList,CircleX,Cpu,Palette,Activity,ArrowLeft,ArrowRight,ArrowUp,ArrowUpRight,Blocks,Check,ChevronDown,ChevronRight,CircleAlert,CircleCheck,CircleDashed,CirclePause,Clock3,FileText,Files,Folder,FolderOpen,GitBranch,GitCompareArrows,Image,Inbox,Layers2,Library,LoaderCircle,MessageSquare,Monitor,Moon,PanelRight,Pin,PinOff,Plug,Plus,Search,Send,Settings2,ShieldCheck,Sparkles,Square,SquarePen,Sun,Terminal,X,Globe,Mail, type LucideIcon} from 'lucide-react';
@@ -7,4 +8,10 @@ export function Button({icon,children,className='',...props}:ButtonHTMLAttribute
 export function BrandEye(){return <span className="ec-official-icon" aria-hidden="true"/>;}
 export function Wordmark(){return <span className="ec-wordmark" role="img" aria-label="ESTACODA"/>;}
 export function Badge({kind='',icon,children}:{kind?:string;icon?:string;children:ReactNode}){return <span className={'ec-badge '+(kind?'ec-'+kind:'')}>{icon&&<Icon name={icon}/ >}{children}</span>;}
-export function Topline({label,profile,children,leading,className=''}:{label:string;profile?:string;children?:ReactNode;leading?:ReactNode;className?:string}){const {t}=useI18n();return <div className={'ec-topline '+className}>{leading??<div className="ec-crumb"><Icon name="folder"/><span>{profile??t("Personal")}</span><span>/</span><span>{label}</span></div>}{children}</div>;}
+export const NavigationContext=createContext<{settings?:()=>void}>({});
+export function Topline({label,profile,children,leading,className=''}:{label:string;profile?:string;children?:ReactNode;leading?:ReactNode;className?:string}){
+ const {t}=useI18n(),navigation=useContext(NavigationContext);
+ return <div className={'ec-topline '+className}>{leading??<nav className="ec-crumb" aria-label={t('Page navigation')}>
+ {navigation.settings&&<><button type="button" onClick={navigation.settings}>{t('Settings')}</button><Icon name="chevron-right"/></>}
+ <span aria-current="page">{label.replace(/^Settings\s*\/\s*/, '')}</span></nav>}{children}</div>;
+}

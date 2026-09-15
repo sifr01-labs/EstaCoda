@@ -25,7 +25,7 @@ function canonical(request: PrivateControlRequest): string {
     ...(request.taskId === undefined ? {} : { taskId: request.taskId }),
     ...(request.stepId === undefined ? {} : { stepId: request.stepId }),
     ...(request.guidance === undefined ? {} : { guidance: request.guidance }),
-    operationId: request.operationId, ...(request.method === "send" ? { text: request.text,...(request.mediaIds?{mediaIds:request.mediaIds}:{}) } : {}),
+    operationId: request.operationId, ...(request.method === "send" ? { text: request.text,...(request.securityMode?{securityMode:request.securityMode}:{}),...(request.interrupt!==undefined?{interrupt:request.interrupt}:{}),...(request.mediaIds?{mediaIds:request.mediaIds}:{}) } : {}),
     ...(request.method === "approval" ? { approvalId: request.approvalId, decision: request.decision } : {}) });
 }
 function projection(row: ReceiptRow, db: SQLiteDatabase): ControlReceipt {

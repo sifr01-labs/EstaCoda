@@ -32,8 +32,8 @@ async function review(page:Page){
 test('drafts are editable without a target, while submission and attachments remain gated',async({page})=>{
  await mount(page);await page.getByLabel('Draft guidance').fill('Keep my idea');await page.getByLabel('Draft guidance').press('Control+Enter');
  await expect(page.getByRole('button',{name:'Send prompt',exact:true})).toBeDisabled();await expect(page.getByRole('button',{name:'Add attachments',exact:true})).toBeDisabled();
- await page.getByRole('button',{name:'New chat',exact:true}).click();await expect(page.locator('.ec-workspacegroup summary').filter({hasText:'Drafts'})).toBeVisible();await expect(page.locator('.ec-workspacegroup summary').filter({hasText:'History'})).toBeVisible();
- await page.getByRole('button',{name:'Earlier conversation Completed'}).click();await expect(page.getByText('This conversation has no workspace attached. Start a new chat and choose a folder to continue working.')).toBeVisible();
+ await page.getByRole('button',{name:'New chat',exact:true}).click();await expect(page.locator('.ec-workspacegroup summary').filter({hasText:'Unassigned'})).toBeVisible();
+ await page.getByRole('button',{name:'Earlier conversation',exact:true}).click();await expect(page.getByText('This conversation has no workspace attached. Start a new chat and choose a folder to continue working.')).toBeVisible();
  expect((await calls(page)).some((c:any)=>c[0]==='submit'||c[0]==='apply'||c[0]==='attach')).toBe(false);
 });
 test('folder review is explicit, cancellation is inert, successful registration preserves the draft',async({page})=>{
