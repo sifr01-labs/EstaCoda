@@ -69,3 +69,24 @@ test('conversation permissions do not become background Task authority',async({p
  await page.getByLabel('Draft guidance').fill('Review this workspace');await page.getByLabel('Draft guidance').press('Enter');await expect.poll(()=>page.evaluate(()=>(window as any).refinement.calls.filter((c:any)=>c[0]==='send').length)).toBe(1);
  const input=await page.evaluate(()=>(window as any).refinement.calls.find((c:any)=>c[0]==='send')[1]);expect(input.kind).toBe('task');expect(input).not.toHaveProperty('securityMode');expect(input).not.toHaveProperty('interrupt');
 });
+
+for(const language of ['en','ar'])test(`native drag areas stay clear of the sidebar toggle in ${language}`,async({page})=>{
+ for(const width of [1280,390]){
+  await page.setViewportSize({width,height:844});await mount(page,language);await page.locator('.ec-taskbutton').filter({hasText:'Refine the workspace'}).click();
+  const toggle=page.locator('.ec-sidebar-toggle');
+  for(let cycle=0;cycle<2;cycle++){
+   if(await toggle.getAttribute('aria-expanded')==='true')await toggle.click();
+   await expect(toggle).toHaveAttribute('aria-expanded','false');
+   // Browser clicks ignore Electron's native drag hit testing. Assert its
+   // draggable header rectangle cannot cover the collapsed toggle as well.
+   expect(await page.evaluate(()=>{
+    const toggle=document.querySelector('.ec-sidebar-toggle')!.getBoundingClientRect();
+    return [...document.querySelectorAll('.ec-topline')].every(header=>{
+     const box=header.getBoundingClientRect();
+     return getComputedStyle(header).getPropertyValue('-webkit-app-region')!=='drag'||box.left>=toggle.right||box.right<=toggle.left||box.top>=toggle.bottom||box.bottom<=toggle.top;
+    });
+   })).toBe(true);
+   await toggle.click();await expect(page.locator('#ec-sidebar')).toBeVisible();await expect(toggle).toHaveAttribute('aria-expanded','true');
+  }
+ }
+});
