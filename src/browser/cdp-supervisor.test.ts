@@ -1,3 +1,4 @@
+import { BROWSER_SNAPSHOT_NODE_IDS } from "./browser-click-recovery.js";
 import { Script } from "node:vm";
 import { describe, expect, it } from "vitest";
 import { CDPSupervisor, parseCdpSnapshot, snapshotExpression } from "./cdp-supervisor.js";
@@ -339,7 +340,10 @@ describe("CDPSupervisor", () => {
     });
 
     await supervisor.start();
-    await expect(supervisor.getSnapshot("session-1")).resolves.toMatchObject({
+    const snapshot = await supervisor.getSnapshot("session-1");
+    expect(snapshot[BROWSER_SNAPSHOT_NODE_IDS]).toEqual({ "@e1": 102, "@e2": 103 });
+    expect(JSON.stringify(snapshot)).not.toContain("backendDOMNodeId");
+    expect(snapshot).toMatchObject({
       sessionId: "session-1",
       url: "https://example.com/page",
       title: "Example",

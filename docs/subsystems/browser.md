@@ -28,6 +28,14 @@ Successful reloads no longer automatically reset no-progress tracking when the s
 
 Security note: this adds no tool, permission, native-dialog access, provider-specific branch or connector-specific execution authority. URLs are still checked against current navigation policy before use. Source labels remain untrusted data. Artifact ownership, protected transfer, approvals, profile isolation and read-back verification remain enforced by their existing paths. Backend support for source-page download provenance is currently implemented on the supervised CDP path; other backends without that evidence do not invent the association.
 
+## Unrelated page changes during clicks
+
+The supervised local CDP backend retains up to eight observations per active session for click recovery. When an unrelated carousel or region changes the global action revision, click preflight can rebind a numbered element reference only if CDP identifies exactly the same DOM node and its observed target metadata is unchanged. The session, tab, document and page URL must still match. Missing provenance, replaced nodes, changed target metadata, pending dialogs and expired observation history retain the existing rejection behavior. Region and visual references are not recovered this way.
+
+The recovered target passes through normal security preflight. If the page changes again before dispatch, recovery additionally requires the retained preflight and matching current target semantics, including destination, control kind and form submission behavior. Native interactability and human-control checks still run. This does not replay a dispatched click, increase retry budgets, or grant new execution authority. Node provenance is internal, omitted from serialized snapshots, and cleared with session state. CLI and Desktop use this shared backend.
+
+Run the deterministic unit/backend tests with `pnpm exec vitest run src/browser/browser-click-recovery.test.ts src/browser/supervised-local-cdp-backend.test.ts src/browser/cdp-supervisor.test.ts`. The opt-in native Chrome check is `pnpm exec tsx scripts/validate-browser-click-recovery.ts`; it launches temporary Chrome against a loopback fixture, verifies three clicks across unrelated mutations, and rejects changed destinations and replaced nodes. Private URL access is enabled only inside that test fixture.
+
 ## Backends
 
 | Backend | Status | Evidence |

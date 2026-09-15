@@ -28,6 +28,7 @@ import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
 import { connectCdp, type CdpFetchLike, type CdpWebSocketFactory } from "./cdp-client.js";
 import { isSafeUrl, redactUrlForMetadata, scanUrlForSecrets, type ResolveHostnameFn } from "./url-safety.js";
 import { checkWebsiteAccess, loadWebsiteBlocklist } from "./website-policy.js";
+import { BrowserClickRecovery, BROWSER_SNAPSHOT_NODE_IDS, type BrowserSnapshotNodeIds } from "./browser-click-recovery.js";
 import { CDPSupervisor, type BrowserPopupAttempt } from "./cdp-supervisor.js";
 import type { BrowserSessionLifecycle } from "./session-lifecycle.js";
 import { BrowserSessionStateError, browserSessionStateReason } from "./session-state.js";
@@ -138,7 +139,7 @@ type PageSupervisor = Pick<CDPSupervisor,
   | "close"
 > & Partial<Pick<CDPSupervisor, "popupAttempts" | "prepareDownload" | "waitForDownload">>;
 
-type BackendRawSnapshot = BrowserSnapshotInput & {
+type BackendRawSnapshot = BrowserSnapshotInput & BrowserSnapshotNodeIds & {
   documentSignal?: BrowserDocumentSignal;
 };
 
@@ -152,6 +153,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
   const sessionStacks = new Map<string, BrowserSessionStack>();
   const lostSessions = new Map<string, "session_missing" | "browser_process_missing">();
   const latestSnapshots = new Map<string, BrowserSnapshot>();
+  const clickRecovery = new BrowserClickRecovery();
   const latestSnapshotScopes = new Map<string, boolean>();
   const latestObservedUrls = new Map<string, string>();
   const visualLeases = new Map<string, BrowserVisualLeaseState>();
@@ -176,6 +178,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
     if (stack === undefined || !stack.sessionManager.has(sessionId)) {
       sessionStacks.delete(sessionId);
       latestSnapshots.delete(sessionId);
+      clickRecovery.clear(sessionId);
       latestSnapshotScopes.delete(sessionId);
       latestObservedUrls.delete(sessionId);
       clearVisualLeasesForSession(sessionId);
@@ -255,7 +258,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
       throw new BrowserSessionStateError("session_missing", `Browser session not found: ${session.key}`);
     }
     const previousUrl = latestObservedUrls.get(session.key);
-    const { documentSignal, ...rawSnapshot } = snapshot;
+    const { documentSignal, [BROWSER_SNAPSHOT_NODE_IDS]: nodeIds, ...rawSnapshot } = snapshot;
     const observed = manager.observeSnapshot(session.key, rawSnapshot, documentSignal).snapshot;
     latestObservedUrls.set(session.key, observed.url);
     if (previousUrl !== undefined && previousUrl !== observed.url && protectedFields.isSensitive(session.key) &&
@@ -266,6 +269,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
     }
     const protectedSnapshot = protectedFields.protectSnapshot(session.key, observed);
     latestSnapshots.set(session.key, protectedSnapshot);
+    clickRecovery.observe(protectedSnapshot, nodeIds);
     return protectedSnapshot;
   };
 
@@ -470,6 +474,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
     if (stack === undefined || !stack.sessionManager.has(sessionId)) {
       sessionStacks.delete(sessionId);
       latestSnapshots.delete(sessionId);
+      clickRecovery.clear(sessionId);
       latestSnapshotScopes.delete(sessionId);
       latestObservedUrls.delete(sessionId);
       clearVisualLeasesForSession(sessionId);
@@ -488,6 +493,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
     } finally {
       sessionStacks.delete(sessionId);
       latestSnapshots.delete(sessionId);
+      clickRecovery.clear(sessionId);
       latestSnapshotScopes.delete(sessionId);
       latestObservedUrls.delete(sessionId);
       clearVisualLeasesForSession(sessionId);
@@ -530,6 +536,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
       if (owner === stack) {
         sessionStacks.delete(sessionId);
         latestSnapshots.delete(sessionId);
+        clickRecovery.clear(sessionId);
         latestSnapshotScopes.delete(sessionId);
         latestObservedUrls.delete(sessionId);
         clearVisualLeasesForSession(sessionId);
@@ -722,6 +729,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
     sessionStacks.clear();
     lostSessions.clear();
     latestSnapshots.clear();
+    clickRecovery.clearAll();
     latestSnapshotScopes.clear();
     visualLeases.clear();
     configuredStack = undefined;
@@ -986,17 +994,21 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
       const resolvedInput = input.visualTarget === undefined
         ? input
         : await resolveVisualTargetInput(session, snapshot, input, visualLeases);
-      const target = resolveBrowserTarget(snapshot, resolvedInput);
-      const inspected = await inspectBrowserActionTarget(session, target.ref);
+      const target = action === "click"
+        ? clickRecovery.resolve(snapshot, resolvedInput, "preflight")
+        : resolveBrowserTarget(snapshot, resolvedInput);
+      const inspected = await inspectBrowserActionTarget(session, target.ref, action === "click"
+        ? (raw) => clickRecovery.review(snapshot, target.ref, raw) : undefined);
       if (inspected === undefined) {
         throw new Error("Browser action target structure could not be inspected safely.");
       }
-      return browserActionPreflight(snapshot, action, {
+      const preflight = browserActionPreflight(snapshot, action, {
         ...inspected,
         ref: target.ref,
         role: inspected?.role ?? target.role,
         label: inspected?.label ?? boundedRedactedActionLabel(target.name ?? target.label ?? target.text)
       });
+      return preflight;
     },
     click: async (input) => {
       input = normalizeBrowserRegionTarget(input);
@@ -1005,7 +1017,13 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
       const targetState = await captureSafeTargetSnapshot(session, input);
       const before = targetState.snapshot;
       const beforeObservedUrl = latestObservedUrls.get(session.key);
-      const target = resolveBrowserTarget(before, input);
+      const target = clickRecovery.resolve(before, input, "dispatch");
+      await clickRecovery.verifyRecoveredDispatch(before, input,
+        async () => {
+          let raw: Record<string, unknown> | undefined;
+          await inspectBrowserActionTarget(session, target.ref, (value) => { raw = value; });
+          return raw;
+        });
       const beforeTabs = supportsTabManagement(session.key) ? await listManagedTabs(session.key) : undefined;
       const actionSupervisor = session.supervisor;
       actionSupervisor.popupAttempts?.({ clear: true });
@@ -1545,6 +1563,7 @@ export function createSupervisedLocalCdpBrowserBackend(options: SupervisedLocalC
           if(!manager.closeTab)throw new Error('Tab closing is unavailable.');
           await manager.closeTab(sessionId,action.tabRef,assertHumanControl);
           clearVisualLeasesForSession(sessionId);latestSnapshots.delete(sessionId);
+          clickRecovery.clear(sessionId);
         }
       }
       const sessions=[];let remaining=16,truncated=sessionStacks.size>8;
@@ -1676,14 +1695,18 @@ async function safePopupEvidence(
 
 async function inspectBrowserActionTarget(
   session: ManagedBackendSession,
-  ref: string | undefined
+  ref: string | undefined,
+  onInspected?: (raw: Record<string, unknown>) => void
 ): Promise<BrowserActionTargetSemantics | undefined> {
   const target = ref === undefined ? undefined : targetRef(ref);
   const result = await session.supervisor.send("Runtime.evaluate", {
     expression: browserActionPreflightExpression(target),
     returnByValue: true
   }) as { result?: { value?: unknown } };
-  return parseBrowserActionTargetSemantics(result.result?.value);
+  const raw = result.result?.value;
+  const semantics = parseBrowserActionTargetSemantics(raw);
+  if (semantics !== undefined && isRecord(raw)) onInspected?.(raw);
+  return semantics;
 }
 
 function browserActionPreflightExpression(targetRef: { kind: "element" | "region"; index: number } | undefined): string {

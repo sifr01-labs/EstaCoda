@@ -886,6 +886,40 @@ describe("supervised local CDP backend", () => {
     }));
   });
 
+  it("recovers an unchanged AX target through preflight and native dispatch after banner changes", async () => {
+    const socket = new FakeCdpSocket();
+    const setBanner = (name: string) => { socket.axTree = { nodes: [
+      { nodeId: "login", backendDOMNodeId: 101, role: { value: "button" }, name: { value: "Login" } },
+      { nodeId: "banner", backendDOMNodeId: 102, role: { value: "button" }, name: { value: name } },
+    ] }; };
+    setBanner("Register");
+    socket.browserActionPreflight = { kind: "button", tag: "button", role: "button", label: "Login", formAssociated: false, submit: false };
+    const backend = createSupervisedLocalCdpBrowserBackend({
+      cdpUrl: "http://127.0.0.1:9222", fetch: createFetch(), webSocketFactory: () => socket,
+      resolveHostname: () => ["93.184.216.34"], settling: { minimumObservationMs: 0, stableWindowMs: 0 }
+    });
+    try {
+      const { snapshot } = await backend.navigate({ url: "https://example.com/start", sessionId: "session-1" });
+      expect(Object.getOwnPropertySymbols(snapshot)).toHaveLength(0);
+      const input = { sessionId: "session-1", ref: "@e1", identity: snapshot.identity, tabRef: snapshot.tab!.ref };
+      setBanner("Create");
+      const preflight = await backend.preflightAction!("click", input);
+      expect(preflight.identity.actionRevision).toBeGreaterThan(snapshot.identity.actionRevision);
+      setBanner("Add");
+      await backend.click!({ ...input, ref: preflight.target!.ref, identity: preflight.identity });
+      expect(socket.sent.filter((message) => message.method === "Input.dispatchMouseEvent" && message.params?.type === "mouseReleased")).toHaveLength(1);
+
+      const observed = await backend.snapshot!({ sessionId: "session-1" });
+      socket.browserActionPreflight = { ...socket.browserActionPreflight, href: "https://example.com/?token=fixture-before" };
+      const reviewed = await backend.preflightAction!("click", { ...input, identity: observed.identity });
+      setBanner("Publish");
+      // Both destinations redact alike: dispatch must compare their exact internal values.
+      socket.browserActionPreflight = { ...socket.browserActionPreflight, href: "https://example.com/?token=fixture-after" };
+      await expect(backend.click!({ ...input, identity: reviewed.identity })).rejects.toMatchObject({ reason: "stale-browser-ref" });
+      expect(socket.sent.filter((message) => message.method === "Input.dispatchMouseEvent" && message.params?.type === "mouseReleased")).toHaveLength(1);
+    } finally { await backend.close?.(); }
+  });
+
   it("rejects stale and cross-tab refs before dispatching an action", async () => {
     const socket = new FakeCdpSocket();
     const backend = createSupervisedLocalCdpBrowserBackend({

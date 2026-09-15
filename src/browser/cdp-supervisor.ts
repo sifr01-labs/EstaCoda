@@ -1,3 +1,4 @@
+import { BROWSER_SNAPSHOT_NODE_IDS, type BrowserSnapshotNodeIds } from "./browser-click-recovery.js";
 import type { BrowserSnapshot } from "../contracts/browser.js";
 import {
   isActionableBrowserRole,
@@ -35,7 +36,7 @@ import {
   type WebsitePolicyConfig
 } from "./website-policy.js";
 
-export type SupervisorSnapshot = BrowserSnapshotInput & {
+export type SupervisorSnapshot = BrowserSnapshotInput & BrowserSnapshotNodeIds & {
   pendingDialogs: NonNullable<BrowserSnapshot["pendingDialogs"]>;
   frameTree: NonNullable<BrowserSnapshot["frameTree"]>;
   consoleHistory: NonNullable<BrowserSnapshot["consoleHistory"]>;
@@ -618,7 +619,7 @@ function downloadAbortError(): Error {
   return error;
 }
 
-export async function evaluateCdpSnapshot(client: CdpClient, sessionId: string, options: BrowserSnapshotOptions = {}): Promise<BrowserSnapshotInput> {
+export async function evaluateCdpSnapshot(client: CdpClient, sessionId: string, options: BrowserSnapshotOptions = {}): Promise<BrowserSnapshotInput & BrowserSnapshotNodeIds> {
   const axSnapshot = await evaluateAxSnapshot(client, sessionId, options).catch(() => undefined);
   if (axSnapshot !== undefined) {
     return axSnapshot;
@@ -631,10 +632,11 @@ export async function evaluateCdpSnapshot(client: CdpClient, sessionId: string, 
   return parseCdpSnapshot(evaluated.result?.value, sessionId);
 }
 
-async function evaluateAxSnapshot(client: CdpClient, sessionId: string, options: BrowserSnapshotOptions): Promise<BrowserSnapshotInput | undefined> {
+async function evaluateAxSnapshot(client: CdpClient, sessionId: string, options: BrowserSnapshotOptions): Promise<(BrowserSnapshotInput & BrowserSnapshotNodeIds) | undefined> {
   const axTree = await client.send("Accessibility.getFullAXTree") as unknown;
   const candidates = parseAxElements(axTree, options);
-  const boundElements = await bindAxElements(client, candidates, options);
+  const nodeIds: Record<string, number> = {};
+  const boundElements = await bindAxElements(client, candidates, options, nodeIds);
   if (boundElements.length === 0) {
     return undefined;
   }
@@ -650,6 +652,7 @@ async function evaluateAxSnapshot(client: CdpClient, sessionId: string, options:
   return {
     sessionId,
     ...metadata,
+    [BROWSER_SNAPSHOT_NODE_IDS]: nodeIds,
     elements,
     ...(regions.length === 0 ? {} : { regions })
   };
@@ -994,7 +997,8 @@ function parseAxElement(value: unknown, index: number, options: BrowserSnapshotO
 async function bindAxElements(
   client: CdpClient,
   candidates: AxSnapshotElementCandidate[],
-  options: BrowserSnapshotOptions
+  options: BrowserSnapshotOptions,
+  nodeIds: Record<string, number>
 ): Promise<BrowserSnapshotElement[]> {
   if (candidates.length === 0) {
     return [];
@@ -1031,6 +1035,9 @@ async function bindAxElements(
     });
     if (candidate.actionable && !interactable) {
       continue;
+    }
+    if (binding !== undefined && candidate.backendDOMNodeId !== undefined) {
+      nodeIds[`@e${elements.length + 1}`] = candidate.backendDOMNodeId;
     }
     elements.push({
       ...elementWithoutValue,
