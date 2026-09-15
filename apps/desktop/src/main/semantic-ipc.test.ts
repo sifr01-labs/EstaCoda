@@ -124,3 +124,8 @@ it('accepts only presentation state and canonical chat references for chat actio
  for(const payload of [{workId:'session:one',path:'/private'},{target:{targetId:'one',targetGeneration:1}},{workId:'../foreign'}])expect(()=>validateSemanticPayload('chatOpenFolder',payload)).toThrow();
  expect(()=>validateSemanticPayload('chatWrite',{profile:'default',value:{selected:'welcome',drafts:{x:{id:'x',text:'draft',model:'m',limitsReviewed:true}},chats:{}}})).toThrow();
 });
+
+it('permits bounded clipboard writes without granting reads or renderer authority',()=>{
+ expect(()=>validateSemanticPayload('clipboardWrite',{text:'chat-id'})).not.toThrow();
+ for(const payload of [{text:'x'.repeat(1_000_001)},{text:7},{text:'id',read:true},{text:'id',profileId:'other'}])expect(()=>validateSemanticPayload('clipboardWrite',payload)).toThrow();
+});

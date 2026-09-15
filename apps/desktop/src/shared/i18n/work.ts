@@ -307,7 +307,7 @@ export const workArabic = {
  "Attachment expired": "انتهت صلاحية المرفق",
  "An attachment expired or its target changed. Remove it and attach it again.": "انتهت صلاحية مرفق أو تغيّر هدفه. أزله ثم أرفقه مجددًا.",
  "The prompt and attachments exceed the input limit. Remove an attachment or shorten the prompt.": "يتجاوز الطلب والمرفقات حد الإدخال. أزل مرفقًا أو اختصر الطلب.",
- "Submission is not confirmed. Your draft is preserved. Check Work before trying again; a previous request may have been accepted.": "لم يتأكد الإرسال. حُفظت مسودتك. افحص العمل قبل إعادة المحاولة؛ ربما قُبل طلب سابق.",
+ "Couldn’t confirm delivery. Your draft is saved. Check the conversation before sending again.": "لم يتأكد الإرسال. حُفظت مسودتك. افحص العمل قبل إعادة المحاولة؛ ربما قُبل طلب سابق.",
  "Inspect target": "فحص الهدف",
  "Manage workspaces": "إدارة مساحات العمل",
  "Workspace": "مساحة العمل",

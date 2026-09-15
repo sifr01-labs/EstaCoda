@@ -34,6 +34,7 @@ const api:DesktopApi={
   onboarding:Object.freeze({verify:alias=>invoke('onboardingVerify',alias?{alias}:{}),review:input=>invoke('onboardingReview',input),apply:(reviewId,confirmed)=>invoke('onboardingApply',{reviewId,confirmed}),applyWorkspace:(reviewId,confirmed)=>invoke('onboardingApplyWorkspace',{reviewId,confirmed}),inspect:()=>invoke('onboardingInspect'),recover:()=>invoke('onboardingRecover'),chooseWorkspace:()=>invoke('onboardingChooseWorkspace'),reviewWorkspace:(alias,trust)=>invoke('onboardingReviewWorkspace',{alias,trust}),cancelWorkspace:reviewId=>invoke('onboardingCancelWorkspace',{reviewId}),detect:()=>invoke('onboardingDetect'),bootstrap:()=>invoke('onboardingBootstrap')}),
   platform:process.platform,
   reconnect:()=>invoke('reconnect'),moreWork:()=>invoke('moreWork'),moreInbox:()=>invoke('moreInbox'),
+  clipboard:Object.freeze({writeText:text=>invoke('clipboardWrite',{text})}),
   chats:Object.freeze({read:profile=>invoke('chatRead',{profile}),write:(profile,value)=>invoke('chatWrite',{profile,value}),openFolder:workId=>invoke('chatOpenFolder',{workId})}),
   appearance:()=>invoke('appearance'),setAppearance:value=>invoke('setAppearance',value),
   snapshot:async()=>{await ready;return snapshot;},

@@ -2,7 +2,7 @@ import {DesktopMediaInput} from '../artifacts/desktop-media-input.js';
 import { resolveGlobalStateHome, resolveProfileStateHome } from '../config/profile-home.js';
 import { ControlProtocolError, type MethodRequest, type OperationReceipt } from '../contracts/desktop-control/index.js';
 import { callPrivateControl, type PrivateControlRequest } from '../gateway/private-control.js';
-import type { ControlReceipt } from '../gateway/control-receipts.js';
+import { ControlReceipts, type ControlReceipt } from '../gateway/control-receipts.js';
 import { SQLiteSessionDB } from '../session/sqlite-session-db.js';
 import { ExecutionTargetStore, targetBinding } from '../workspaces/execution-target.js';
 import { WorkspaceTrustStore } from '../security/workspace-trust-store.js';
@@ -46,8 +46,13 @@ export async function sessionControl(input: { homeDir: string; profileId: string
     ...(request.method === 'tasks.guide' ? { guidance: request.params.guidance } : {}),
     operationId: request.params.operationId, ...(request.method === 'sessions.send' ? { text: request.params.text } : {}) };
   if(request.method==='sessions.send'&&request.params.mediaIds?.length){control.mediaIds=request.params.mediaIds;await new DesktopMediaInput(input).claim(control.mediaIds,{sessionId:control.sessionId,operationId:control.operationId,targetId:control.targetId,targetGeneration:control.targetGeneration});}
-  const response = await callPrivateControl({ ...input, directory: resolveProfileStateHome(input).gatewayStatePath, request: control,
-    requireTargetGeneration: true, signal, ...(request.method === 'operations.inspect' ? {} : { startIfNeeded: { homeDir: input.homeDir } }) });
+  // Receipts are durable; inspecting them must not depend on (or start) a host.
+  // Apply the same profile and exact Session/target binding as the host's inspect path.
+  const response = request.method === 'operations.inspect'
+    ? await inspectStoredReceipts(input, control)
+    : await callPrivateControl({ ...input, directory: resolveProfileStateHome(input).gatewayStatePath, request: control,
+      requireTargetGeneration: true, signal, startIfNeeded: { homeDir: input.homeDir } });
+  signal.throwIfAborted();
   const receipt = request.method === 'operations.inspect'
     ? (response as { receipts: ControlReceipt[] }).receipts.find((receipt) => receipt.method === methods[method]) : response as ControlReceipt;
   if (receipt && (receipt.taskId !== control.taskId || receipt.operationId !== control.operationId || receipt.sessionId !== control.sessionId || receipt.method !== methods[method] ||
@@ -57,4 +62,14 @@ export async function sessionControl(input: { homeDir: string; profileId: string
   return { ...(control.taskId === undefined ? {} : { taskId: control.taskId }), profileId: input.profileId, operationId: control.operationId, sessionId: control.sessionId,
     target: { targetId: receipt?.targetId ?? control.targetId, targetGeneration: receipt?.targetGeneration ?? control.targetGeneration! },
     method, state: state as OperationReceipt['state'], cancellation: method === 'sessions.cancelTurn' && receipt ? 'requested' : 'not_requested' };
+}
+
+async function inspectStoredReceipts(input: { homeDir: string; profileId: string }, request: PrivateControlRequest): Promise<{ receipts: ControlReceipt[] }> {
+  const db = new SQLiteSessionDB({ path: resolveGlobalStateHome(input).sessionsSqlitePath, readonly: true });
+  try {
+    const session = await db.getSessionForProfile(request.sessionId, input.profileId);
+    if (!session || session.executionTarget?.targetId !== request.targetId ||
+        session.executionTarget.targetGeneration !== request.targetGeneration) throw new ControlProtocolError('-32003');
+    return { receipts: new ControlReceipts(db.db, input.profileId, 'desktop-read-only').inspect(request) };
+  } finally { db.close(); }
 }

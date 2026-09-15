@@ -139,6 +139,7 @@ export type DesktopApi = {schedules?:DesktopSchedulesApi;evolution?:DesktopEvolu
   readonly connections?:DesktopConnectionsApi;
   readonly work?:DesktopWorkApi;
   readonly models?:DesktopModelsApi;
+  readonly clipboard?:{writeText(text:string):Promise<void>};
   readonly chats?:{read(profile:string):Promise<import('./chat-presentation.js').ChatPresentation>;write(profile:string,value:import('./chat-presentation.js').ChatPresentation):Promise<void>;openFolder(workId:string):Promise<void>};
   readonly platform:string;
   appearance():Promise<AppearancePreferences>;

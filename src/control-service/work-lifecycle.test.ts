@@ -99,6 +99,8 @@ it.skipIf(process.platform === 'win32')('starts and controls Work through a real
     expect((await next.rpc('tasks.pause',{...binding,taskId,operationId:createControlOperationId()})).result?.state).toBe('accepted');
     while(host.hasPendingWork())await new Promise(resolve=>setTimeout(resolve,1));
     expect(new SQLiteTaskStore({db:db.db,profileId:'p'}).getTask(taskId)?.status).toBe('paused');
+    await host.close();await transport.close();transport=undefined;
+    expect((await next.rpc('operations.inspect',{...binding,operationId:sendId,method:'sessions.send'})).result?.state).toBe('completed');
     expect(clients.map((c) => c.diagnostics()).join('')).toBe('');
   } finally { for (const c of clients) await c.close(); await host?.close(); await transport?.close(); await releaseGatewayLock(paths, lock.instanceId); db.close(); await rm(homeDir, { recursive: true, force: true }); }
 }, 20_000);

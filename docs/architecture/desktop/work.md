@@ -105,3 +105,7 @@ The credential sheet loads an external stylesheet in development and packaged bu
 under `style-src 'self'`. It follows the desktop theme and language and labels browser
 fields with their origin and position. Credentials remain in the isolated native
 window and private pipe; ordinary chat state never contains protected field values.
+
+Chat copy actions use a bounded, write-only Main clipboard method. Renderer clipboard and other browser permissions remain denied; the IPC sender, frame and window generation are checked before writing.
+
+Previous-request inspection reads the selected profile's durable receipts without requiring a running execution host. It checks the exact Session and target generation and never starts execution or replays input. This lets the first message in an existing chat start the host through the normal send path. Unsettled or uncertain receipts still block a fresh send. If delivery cannot be confirmed, the composer keeps the draft and shows a compact warning to check the conversation before sending again.
