@@ -1,0 +1,34 @@
+/* Browser and connections extend the model/media card system. */
+.ec-web-page .ec-capability-card,.ec-connections-page .ec-capability-card{background:color-mix(in srgb,var(--ec-panel) 52%,var(--ec-bg))}
+.ec-capability-card>.ec-model-mark svg{width:22px;height:22px;stroke-width:1.5}
+.ec-web-warn{color:var(--ec-warn)}
+.ec-web-address small{font-size:11px;color:var(--ec-muted);line-height:1.6}
+.ec-web-address [role=alert]{font-size:12px;color:var(--ec-warn)}
+.ec-web-chat{display:flex;align-items:center;gap:10px;font-size:12px;color:var(--ec-muted);margin:15px 0 12px}
+.ec-web-chat select{max-width:280px;min-width:100px;font-size:12px}
+#ec-branded-workspace .ec-connections-page .ec-channel-card{border:0;padding:0;margin:0;border-radius:0;background:transparent}
+.ec-service-cards>div+div{margin-top:10px}
+.ec-connection-detail{padding:18px 20px;margin-top:10px;border:1px solid var(--ec-line);border-radius:11px;background:var(--ec-bg);font-size:12px}
+.ec-connection-detail p{color:var(--ec-muted);line-height:1.6;margin:10px 0}
+.ec-connection-detail .ec-model-footeractions{flex-wrap:wrap}
+.ec-connections-page .ec-capability-card .ec-model-mark:has(svg[data-lucide=send]){color:var(--ec-accent)}
+.ec-connections-page [hidden]{display:none!important}
+#ec-branded-workspace .ec-connections-page.ec-media-page>div[hidden]+section{margin-top:0}
+.ec-web-page .ec-model-kicker{margin:24px 0 7px;color:var(--ec-muted);font-size:11px;text-transform:uppercase;letter-spacing:.6px}
+.ec-web-page .ec-media-connection{margin-top:25px}
+/* Preserve the Telegram setup's private credential window and review gates. */
+#ec-branded-workspace .ec-telegram-modal{width:min(520px,100%);font-size:13px;background:var(--ec-bg);border-radius:16px}
+#ec-branded-workspace .ec-telegram-modal>.ec-modalhead{margin-bottom:12px}
+#ec-branded-workspace .ec-telegram-modal>.ec-modalhead h2{font-size:20px;letter-spacing:-.45px}
+#ec-branded-workspace .ec-telegram-modal>p{font-size:12px;color:var(--ec-muted);line-height:1.65;margin:10px 0 20px}
+#ec-branded-workspace .ec-telegram-modal fieldset{border:0;padding:0;margin:24px 0}
+#ec-branded-workspace .ec-telegram-modal legend{font-size:14px;font-weight:500;padding:0;margin-bottom:8px}
+#ec-branded-workspace .ec-telegram-modal fieldset>label,#ec-branded-workspace .ec-telegram-modal details>label{display:grid;gap:8px;margin:16px 0;font-size:12px}
+#ec-branded-workspace .ec-telegram-modal fieldset p{font-size:11px;color:var(--ec-muted);line-height:1.65}
+#ec-branded-workspace .ec-telegram-modal select,#ec-branded-workspace .ec-telegram-modal input:not([type=checkbox]){width:100%;max-width:100%}
+#ec-branded-workspace .ec-telegram-modal fieldset details{border-top:1px solid var(--ec-line);padding-top:16px;margin-top:24px}
+#ec-branded-workspace .ec-telegram-modal .ec-kv{gap:16px;align-items:start;font-size:12px;padding:12px 0}
+#ec-branded-workspace .ec-telegram-modal .ec-kv dd{min-width:0;overflow-wrap:anywhere}
+@media(max-width:600px){.ec-web-chat select{min-width:0;max-width:calc(100% - 60px)}.ec-connection-detail{padding:16px}.ec-connections-page .ec-capability-card{display:grid;grid-template-columns:40px minmax(0,1fr)}.ec-connections-page .ec-capability-card>.ec-btn{grid-column:2;justify-self:start}.ec-connection-detail .ec-media-row{flex-wrap:wrap}}
+
+#ec-branded-workspace .ec-connections-page.ec-media-page>div:not([hidden])+section{margin-top:28px}

@@ -12,3 +12,4 @@ createRoot(document.getElementById('root')!).render(<React.StrictMode><Appearanc
 
 import './styles/models.css';
 import './styles/media-settings.css';
+import './styles/web-settings.css';

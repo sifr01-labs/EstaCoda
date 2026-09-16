@@ -53,7 +53,7 @@ export type ModelProjection = {
 export type ProviderProjection = { health?: typeof ROUTE_HEALTH_STATES[number]; metadata?: { configurable: boolean; runnable: boolean; catalogOnly: boolean; apiMode: string; defaultEndpoint: string | null }; id: string; label: string; authMethods: ("api_key" | "oauth" | "none")[];
   state: "ready" | "unconfigured" | "repair_required" | "unknown" };
 export type ConnectionProjection = {
-  telegram?: {status:"disabled"|"credential_missing"|"authorization_missing"|"pairing_pending"|"ready";
+  telegram?: {configured?:boolean;status:"disabled"|"credential_missing"|"authorization_missing"|"pairing_pending"|"ready";
     allowedUsers:number;allowedChats:number;pairingExpiresAt:number|null;
     polling:"unknown"|"starting"|"healthy"|"degraded"|"stopped";observedAt:number|null;lastVerifiedAt:number|null};
   id: string; profileId: string; channel: "telegram" | "discord" | "email" | "whatsapp";

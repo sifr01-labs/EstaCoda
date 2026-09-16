@@ -5,12 +5,12 @@ import {useI18n} from '../i18n.js';
 import {Button,Icon} from './primitives.js';
 
 type Spec=SettingsDependenciesPage['items'][number];
-const names:Record<string,string>={'faster-whisper':'Faster Whisper','edge-tts':'Edge speech'};
+const names:Record<string,string>={'faster-whisper':'Faster Whisper','edge-tts':'Edge speech',ddgs:'DDGS'};
 const unresolved=(receipt:ConnectionOperation|null)=>receipt?.state==='uncertain'||receipt?.state==='unknown';
 const belongs=(receipt:ConnectionOperation|null,id:string)=>receipt?.action.startsWith('dependency.install:'+id+':');
 
 /** Reads automatically; only an explicit reviewed click may start a registered download. */
-export function useVoiceDependencies(api:DesktopSettingsApi,enabled:boolean){
+export function useCapabilityDependencies(api:DesktopSettingsApi,enabled:boolean,scope:'voice'|'search'='voice'){
  const [items,setItems]=useState<Spec[]>([]),[checking,setChecking]=useState(enabled),[failed,setFailed]=useState(false);
  const [receipt,setReceipt]=useState<ConnectionOperation|null>(null),[lost,setLost]=useState(false),[installing,setInstalling]=useState<string>();
  const [selected,setSelected]=useState<string>();
@@ -20,16 +20,16 @@ export function useVoiceDependencies(api:DesktopSettingsApi,enabled:boolean){
   const operation=await api.inspectDependency();
   const page=await api.dependencies();
   if(epoch.current!==generation)return;
-  setItems(page.items.filter(i=>Object.hasOwn(names,i.id)));setReceipt(operation);setLost(false);setFailed(false);
+  setItems(page.items.filter(i=>scope==='search'?i.id==='ddgs':['faster-whisper','edge-tts'].includes(i.id)));setReceipt(operation);setLost(false);setFailed(false);
   return {page,operation};
- },[api]);
+ },[api,scope]);
  const refresh=useCallback(async()=>{
   if(lock.current)return;lock.current=true;const generation=epoch.current;setChecking(true);
   try{await read(generation);}catch{if(epoch.current===generation)setFailed(true);}
   finally{if(epoch.current===generation){lock.current=false;setChecking(false);}}
  },[read]);
  useEffect(()=>{
-  const generation=++epoch.current;lock.current=false;setItems([]);setReceipt(null);setLost(false);setFailed(false);setSelected(undefined);setInstalling(undefined);
+  const generation=++epoch.current;lock.current=false;if(enabled)setItems([]);setReceipt(null);setLost(false);setFailed(false);setSelected(undefined);setInstalling(undefined);
   if(enabled)void refresh();else setChecking(false);
   return()=>{if(epoch.current===generation)epoch.current++;clearTimeout(timer.current);};
  },[enabled,refresh]);
@@ -41,7 +41,7 @@ export function useVoiceDependencies(api:DesktopSettingsApi,enabled:boolean){
   timer.current=setTimeout(poll,2000);return()=>{cancelled=true;clearTimeout(timer.current);};
  },[enabled,pending,refresh]);
  const install=async()=>{
-  if(lock.current||pending||!selected||!Object.hasOwn(names,selected))return;
+  if(lock.current||pending||!selected||!items.some(i=>i.id===selected))return;
   const id=selected,generation=epoch.current;lock.current=true;setInstalling(id);setFailed(false);
   try{
    // Reconcile again immediately before a write; another window may have installed it.
@@ -57,7 +57,7 @@ export function useVoiceDependencies(api:DesktopSettingsApi,enabled:boolean){
  const close=()=>{setSelected(undefined);requestAnimationFrame(()=>restore.current?.isConnected&&restore.current.focus());};
  return {items,checking,failed,receipt,pending,installing,selected,refresh,install,open,close};
 }
-export type VoiceDependencies=ReturnType<typeof useVoiceDependencies>;
+export type VoiceDependencies=ReturnType<typeof useCapabilityDependencies>;
 export function VoiceInstallStatus({state,id}:{state:VoiceDependencies;id:string}){
  const {t}=useI18n(),spec=state.items.find(i=>i.id===id),pending=belongs(state.receipt,id)&&state.pending||state.installing===id;
  const label=pending?'Confirming installation…':state.checking&&!spec?'Checking installation…':state.failed||!spec?"Couldn’t check installation":spec.state==='installed'?'Installed':'Setup required';
@@ -76,9 +76,9 @@ export function VoiceInstallReview({state}:{state:VoiceDependencies}){
  useEffect(()=>{heading.current?.focus();},[state.selected]);
  const spec=state.items.find(i=>i.id===state.selected);if(!state.selected||!spec)return null;
  const installed=spec.state==='installed',pending=state.pending||!!state.installing,failed=belongs(state.receipt,spec.id)&&state.receipt?.state==='failed';
- return <section className="ec-voice-install" aria-label={t('Voice setup')}>
+ return <section className="ec-voice-install" aria-label={t(spec.id==='ddgs'?'Search setup':'Voice setup')}>
   <div className="ec-voice-install-heading"><Icon name={installed?'circle-check':'arrow-down'}/><h3 ref={heading} tabIndex={-1}>{t(installed?'{engine} is installed':'Set up {engine}',{engine:names[spec.id]!})}</h3></div>
-  <p>{t('Download the software this engine needs. Your model and voice settings stay in their separate review.')}</p>
+  <p>{t(spec.id==='ddgs'?'Download search software. Your search settings stay in their separate review.':'Download the software this engine needs. Your model and voice settings stay in their separate review.')}</p>
   <div className="ec-voice-install-facts"><span>{t('Estimated disk space')}</span><bdi>{spec.estimatedMb===null?t('Size varies'):new Intl.NumberFormat(language).format(spec.estimatedMb)+' MB'}</bdi></div>
   <details><summary>{t('Included software')}</summary><ul>{spec.packages.map(p=><li key={p}><bdi>{p}</bdi></li>)}</ul></details>
   {spec.id==='faster-whisper'&&<p className="ec-footnote">{t('Transcription model files are separate. Installing this software does not confirm they are downloaded.')}</p>}

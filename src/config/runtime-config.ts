@@ -1644,7 +1644,7 @@ function normalizeTelegramStreamingTransport(value: unknown): Required<TelegramS
   return value === "auto" || value === "edit" || value === "draft" ? value : "auto";
 }
 
-function normalizeBrowserConfig(value: EstaCodaConfig["browser"]): LoadedRuntimeConfig["browser"] {
+export function normalizeBrowserConfig(value: EstaCodaConfig["browser"]): LoadedRuntimeConfig["browser"] {
   const backend = normalizeBrowserBackend(value?.backend);
   const cloudProvider = normalizeOptionalBrowserCloudProvider(value?.cloudProvider);
   const launchExecutable = normalizeOptionalNonEmptyString(value?.launchExecutable, "browser.launchExecutable");

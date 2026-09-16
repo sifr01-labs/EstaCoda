@@ -85,3 +85,9 @@ estacoda setup
 ```
 
 For Brave, confirm that the selected profile config names the expected env reference and that the selected profile `.env` or process environment contains that variable. For DDGS, confirm the managed capability status is installed or verified.
+
+## Desktop selection and setup
+
+Browser & Search settings show the selected search service and the currently resolved service for Automatic. Brave Search and DDGS are selectable implemented search services; registered providers without a search implementation remain browse-only. Availability is setup evidence, not a successful network test. Brave credentials are staged privately. DDGS uses the registered dependency installer with explicit download review and durable receipt reconciliation; downloading software is separate from saving search settings.
+
+Choosing Automatic clears the explicit search selection and the legacy shared backend. When extraction or crawling inherited that shared backend, the reviewed change preserves their existing selection explicitly. Advanced controls retain extraction/crawling and legacy provider settings.

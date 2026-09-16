@@ -36,7 +36,7 @@ const scenarios:Scenario[]=[
  {id:'V16-artifacts',ref:{page:'library'},act:p=>nav(p,'Library')},
  {id:'V16-preview',ref:{page:'library',artifact:'review'},act:async p=>{await nav(p,'Library');await p.locator('.ec-libraryrow').filter({hasText:'webhook-review.md'}).click();}},
  {id:'V17-capability',ref:{page:'library',library:'skills',capability:'browser'},act:async p=>{await nav(p,'Library');await click(p,'Skills & tools');await p.locator('.ec-libraryrow').filter({hasText:'Browser automation'}).click();}},
- {id:'V18-connections',ref:{page:'connections',connection:'telegram'},act:async p=>{await nav(p,'Connections');await p.locator('.ec-libraryrow').filter({hasText:'Telegram'}).click();}},
+ {id:'V18-connections',ref:{page:'connections',connection:'telegram'},act:async p=>{await nav(p,'Connections');await p.locator('.ec-capability-card').filter({hasText:'Telegram'}).getByRole('button',{name:'Manage'}).click();}},
  {id:'V19-background',ref:{page:'background',scheduleOpen:true},act:async p=>{await click(p,'1 scheduled');await p.locator('.ec-libraryrow').filter({hasText:'Daily workspace summary'}).click();}},
 ];
 const cases=[...scenarios.flatMap(s=>['light','dark'].map(mode=>({s,width:1024,mode,theme:'kemet'}))),...scenarios.filter(s=>['V01-new-chat','V06-approval','V03-attachment','V11-inspector','V15-configure'].includes(s.id)).flatMap(s=>[736,360].flatMap(width=>['light','dark'].map(mode=>({s,width,mode,theme:'kemet'})))),...scenarios.filter(s=>['V01-new-chat','V06-approval'].includes(s.id)).flatMap(s=>['graphite','sand'].flatMap(theme=>['light','dark'].map(mode=>({s,width:1024,mode,theme}))))];

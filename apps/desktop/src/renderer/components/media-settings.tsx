@@ -8,7 +8,7 @@ import {Button,Icon} from './primitives.js';
 import {ProviderMark} from './provider-mark.js';
 import {ModelMetadata,canSetUp,catalogPages,modelKey} from './model-metadata.js';
 import {LiveProviderDialog} from './live-provider-dialog.js';
-import {useVoiceDependencies,VoiceInstallStatus,VoiceInstallAction,VoiceInstallReview} from './voice-dependencies.js';
+import {useCapabilityDependencies,VoiceInstallStatus,VoiceInstallAction,VoiceInstallReview} from './voice-dependencies.js';
 import {mediaValue,mediaProviderSupported,mediaProvider,mediaModelField,mediaVoiceField,mediaAdvancedFields,mediaPrefix,type MediaKind} from './media-settings-state.js';
 
 const headings:Record<MediaKind,MessageKey>={analysis:'Image analysis',generation:'Image generation',transcription:'Transcription',speech:'Speech generation'};
@@ -24,7 +24,7 @@ type Props={page:SettingsPage;section:'vision'|'voice';changes:SettingChange[];b
 
 export function MediaSettings({page,section,changes,busy,settling,api,modelsApi,change,control,diagnostics,onEditing}:Props){
  const {t}=useI18n();
- const installation=useVoiceDependencies(api,section==='voice');
+ const installation=useCapabilityDependencies(api,section==='voice');
  const [kind,setKind]=useState<MediaKind>(),[provider,setProvider]=useState<string>(),[query,setQuery]=useState(''),[modelDraft,setModelDraft]=useState(''),[voiceEdit,setVoiceEdit]=useState(false),[voiceDraft,setVoiceDraft]=useState('');
  const [catalog,setCatalog]=useState<ModelProjection[]>([]),[providers,setProviders]=useState<ProviderProjection[]>([]),[loading,setLoading]=useState(false),[failed,setFailed]=useState(false);
  const [setup,setSetup]=useState<{providerId:string;modelId:string}>(),[reload,setReload]=useState(0);

@@ -319,3 +319,11 @@ When enabled, debug data is attached to individual tool results only. It is reda
 
 
 Protected-input preflight failures retain a trusted in-process indication when no values could have been delivered. They do not create uncertain external-action receipts. A later verified authentication recovery may therefore finish with recovered errors. Failures during or after delivery, timeouts, and ordinary connector metadata cannot claim this indication; their existing uncertainty and replay protections remain in force.
+
+## Desktop Browser & Search settings
+
+Desktop presents Browser, Web search, and Web access using the same capability cards as Images and Voice. Browser selection offers managed local Chrome, an existing local Chrome endpoint, Browserbase, or leaving browsing unconfigured. Existing-browser setup accepts loopback HTTP(S) endpoints without embedded credentials. Selecting local browsing clears cloud routing in the reviewed changes; selecting Browserbase does not grant cloud spending. Credentials use the existing private staging window and are saved only through settings review/apply.
+
+The visibility switch is the positive form of `browser.headless`. Managed sessions retain their separate behavior. Private-site access edits `security.allowPrivateUrls`, the effective profile policy, rather than the lower-precedence legacy browser alias. The interface explains this profile-wide scope. Launch details, session limits, routing, spending, and content processing remain in grouped advanced controls.
+
+Setup inspection reads normalized configuration and credential presence without opening a browser, running a search, refreshing OAuth, or creating a paid session. Browser connection status remains unchecked until a runtime connection establishes it; software/configuration presence is not presented as live readiness.
