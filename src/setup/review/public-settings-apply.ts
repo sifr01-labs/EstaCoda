@@ -1,3 +1,4 @@
+import {parseExecutionPolicy} from '../../execution/docker-policy.js';
 import {validateMcpSetupInput,normalizeAuxiliarySlotInput,setupAuxiliaryModelConfig,readConfig,saveRuntimeConfig,loadRuntimeConfig,setupUiConfig,setupProfileConfig,type UiSetupInput,type ProfileSetupInput} from '../../config/runtime-config.js';
 import {resolveProfileStateHome} from '../../config/profile-home.js';
 import {settingField,settingPath,settingValue} from '../public-settings.js';
@@ -15,6 +16,16 @@ export async function applyPublicSettings(changes:SettingChange[],input:{homeDir
   if(path.includes('envRefs')){const owner=path.slice(0,-2).reduce((o,k)=>(o as Record<string,unknown>)[k],config as unknown) as Record<string,unknown>;if(owner.env&&typeof owner.env==='object')delete (owner.env as Record<string,unknown>)[path.at(-1)!];}
   if(path.includes('headerRefs')){const owner=path.slice(0,-2).reduce((o,k)=>(o as Record<string,unknown>)[k],config as unknown) as Record<string,unknown>;const headers=owner.headers;for(const values of [headers,owner.headerRefs])if(values&&typeof values==='object')for(const name of Object.keys(values))if(name.toLowerCase()===path.at(-1)!.toLowerCase())delete (values as Record<string,unknown>)[name];}
   const key=path.at(-1)!;if(change.value===null)delete node[key];else node[key]=structuredClone(change.value);
+ }
+ // Remove only execution controls explicitly reset in this reviewed change set.
+ if(changes.some(c=>c.fieldId.startsWith('execution.'))){
+  const execution=config.execution as unknown as Record<string,unknown>;
+  for(const key of ['workspaceAccess','commandNetwork','credentialCapabilities','lifetime','limits']){
+   const control=execution?.[key] as Record<string,unknown>|undefined;
+   if(key==='limits'&&control?.value&&typeof control.value==='object'&&!Object.keys(control.value).length)delete control.value;
+   if(control&&!Object.keys(control).length)delete execution[key];
+  }
+  parseExecutionPolicy(execution);
  }
  for(const name of new Set(changes.filter(c=>c.fieldId.startsWith('mcpServers.')).map(c=>c.selectors[0]!))){const server=config.mcpServers?.[name];if(server)validateMcpSetupInput({name,...server});}
  await saveRuntimeConfig(configPath,config);

@@ -14,3 +14,4 @@ createRoot(document.getElementById('root')!).render(<React.StrictMode><Appearanc
 import '../renderer/styles/models.css';
 import '../renderer/styles/media-settings.css';
 import '../renderer/styles/web-settings.css';
+import '../renderer/styles/runtime-settings.css';

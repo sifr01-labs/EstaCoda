@@ -1,0 +1,20 @@
+/* Runtime pages share the model/capability cards, spacing, and native control tokens. */
+.ec-runtime-tabs{margin:25px 0 28px;gap:24px;flex-wrap:wrap}
+.ec-runtime-tabs .ec-tab{font-size:12px;padding-inline:0}
+.ec-runtime-page .ec-media-row{padding-block:19px}
+.ec-runtime-value{display:inline-flex;align-items:center;gap:6px;color:var(--ec-muted);font-size:12px;flex-shrink:0}
+.ec-runtime-note{display:flex;align-items:flex-start;gap:7px;color:var(--ec-muted);font-size:11px;line-height:1.6;margin-top:14px}
+.ec-runtime-note svg{flex-shrink:0;margin-top:2px;width:14px;height:14px}
+.ec-runtime-limits{display:grid;grid-template-columns:1fr 1fr;gap:0 20px;margin-top:24px}
+.ec-runtime-limits input{width:100%}
+.ec-runtime-image,.ec-runtime-path{overflow-wrap:anywhere;word-break:break-word}
+.ec-runtime-segment{display:flex;gap:3px;padding:3px;background:var(--ec-panel);border:1px solid var(--ec-line);border-radius:8px;margin-bottom:24px}
+.ec-runtime-segment button{flex:1;border:0;border-radius:6px;background:transparent;color:var(--ec-muted);padding:7px 10px;font:inherit;font-size:12px;cursor:pointer}
+.ec-runtime-segment button[aria-pressed=true]{background:var(--ec-bg);color:var(--ec-text)}
+.ec-runtime-page .ec-capability-card+.ec-capability-card{margin-top:12px}
+.ec-runtime-page .ec-media-row select{max-width:210px}
+.ec-runtime-page .ec-media-row small{max-width:360px}
+@media(max-width:600px){.ec-runtime-tabs{gap:16px}.ec-runtime-tabs .ec-tab{font-size:11px}.ec-runtime-limits{grid-template-columns:1fr}.ec-runtime-page .ec-media-row select{max-width:100%}.ec-runtime-value{white-space:normal}}
+
+#ec-branded-workspace .ec-runtime-tabs .ec-tab[aria-selected=true]{border-color:var(--ec-accent)}
+#ec-branded-workspace .ec-runtime-page .ec-runtime-note{display:flex;gap:7px;margin-top:14px;font-size:11px;color:var(--ec-muted)}

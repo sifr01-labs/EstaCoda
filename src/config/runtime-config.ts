@@ -1592,7 +1592,7 @@ function normalizeSkillConfig(value: unknown): Record<string, Record<string, unk
   return normalized;
 }
 
-function normalizeUiConfig(value: EstaCodaConfig["ui"]): LoadedRuntimeConfig["ui"] {
+export function normalizeUiConfig(value: EstaCodaConfig["ui"]): LoadedRuntimeConfig["ui"] {
   const language = value?.language === "ar" ? "ar" : "en";
   const flavor = value?.flavor === "standard" || value?.flavor === "arabic-light" || value?.flavor === "kemet-full"
     ? value.flavor
@@ -1610,7 +1610,7 @@ function normalizeUiConfig(value: EstaCodaConfig["ui"]): LoadedRuntimeConfig["ui
   };
 }
 
-function normalizeProfileConfig(value: EstaCodaConfig["profile"]): LoadedRuntimeConfig["profile"] {
+export function normalizeProfileConfig(value: EstaCodaConfig["profile"]): LoadedRuntimeConfig["profile"] {
   return {
     mode: value?.mode === "focused" || value?.mode === "operator" || value?.mode === "builder" || value?.mode === "research"
       ? value.mode

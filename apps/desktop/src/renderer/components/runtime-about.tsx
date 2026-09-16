@@ -1,0 +1,10 @@
+import {useEffect,useState,type ReactNode} from 'react';
+import type {DesktopSettingsApi} from '../../shared/desktop-api.js';
+import {useI18n} from '../i18n.js';
+import {Button,Icon} from './primitives.js';
+import {CapabilityCard} from './capability-card.js';
+export function RuntimeAbout({api,diagnostics,onAdvanced,blocked}:{api:DesktopSettingsApi;diagnostics:ReactNode;onAdvanced:()=>void;blocked:boolean}){
+ const {t}=useI18n(),[state,setState]=useState<{version:string;owner:string}>(),[failed,setFailed]=useState(false),[attempt,setAttempt]=useState(0);
+ useEffect(()=>{let active=true;setFailed(false);if(api.lifecycle)void api.lifecycle().then(s=>{if(active)setState(s);}).catch(()=>{if(active)setFailed(true);});else setFailed(true);return()=>{active=false;};},[api,attempt]);
+ return <><CapabilityCard icon={<Icon name="eye"/>} title={'EstaCoda'} description={state?<>{t('Version')} <bdi>{state.version}</bdi></>:t(failed?'Installation status unavailable.':'Loading…')}/><section className="ec-media-section"><h2>{t('Installation')}</h2><div className="ec-media-row"><div>{t('Desktop runtime')}<small>{t('Included with this installation of EstaCoda.')}</small></div><span className="ec-runtime-value">{state?<bdi>{state.owner==='desktop-bundle'?t('Bundled'):state.owner}</bdi>:t('Unavailable')}</span></div><div className="ec-media-row"><div>{t('Updates')}<small>{t('Updates are managed by the owner of this installation.')}</small></div><Button onClick={()=>setAttempt(a=>a+1)}>{t('Refresh')}</Button></div></section><section className="ec-media-section"><h2>{t('Troubleshooting')}</h2><p className="ec-media-description">{t('Inspect your setup when something is not working as expected.')}</p>{diagnostics}</section><details className="ec-model-advanced"><summary>{t('Technical details')}</summary><p className="ec-footnote">{t('Diagnostics do not change saved settings.')}</p><Button disabled={blocked} onClick={onAdvanced}>{t('Advanced configuration')}</Button>{state&&<div className="ec-media-row"><span>{t('Installation type')}</span><bdi>{state.owner}</bdi></div>}</details>{failed&&<p role="alert">{t('Installation status unavailable.')}</p>}</>;
+}

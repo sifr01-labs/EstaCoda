@@ -7,10 +7,10 @@ import {Button,Icon} from './primitives.js';
 type Spec=SettingsDependenciesPage['items'][number];
 const names:Record<string,string>={'faster-whisper':'Faster Whisper','edge-tts':'Edge speech',ddgs:'DDGS'};
 const unresolved=(receipt:ConnectionOperation|null)=>receipt?.state==='uncertain'||receipt?.state==='unknown';
-const belongs=(receipt:ConnectionOperation|null,id:string)=>receipt?.action.startsWith('dependency.install:'+id+':');
+const belongs=(receipt:ConnectionOperation|null,id:string)=>(receipt?.action==='dependency.install:'+id||receipt?.action.startsWith('dependency.install:'+id+':'));
 
 /** Reads automatically; only an explicit reviewed click may start a registered download. */
-export function useCapabilityDependencies(api:DesktopSettingsApi,enabled:boolean,scope:'voice'|'search'='voice'){
+export function useCapabilityDependencies(api:DesktopSettingsApi,enabled:boolean,scope:'voice'|'search'|'execution'='voice'){
  const [items,setItems]=useState<Spec[]>([]),[checking,setChecking]=useState(enabled),[failed,setFailed]=useState(false);
  const [receipt,setReceipt]=useState<ConnectionOperation|null>(null),[lost,setLost]=useState(false),[installing,setInstalling]=useState<string>();
  const [selected,setSelected]=useState<string>();
@@ -20,7 +20,7 @@ export function useCapabilityDependencies(api:DesktopSettingsApi,enabled:boolean
   const operation=await api.inspectDependency();
   const page=await api.dependencies();
   if(epoch.current!==generation)return;
-  setItems(page.items.filter(i=>scope==='search'?i.id==='ddgs':['faster-whisper','edge-tts'].includes(i.id)));setReceipt(operation);setLost(false);setFailed(false);
+  setItems(page.items.filter(i=>scope==='execution'?i.id==='docker-execution':scope==='search'?i.id==='ddgs':['faster-whisper','edge-tts'].includes(i.id)));setReceipt(operation);setLost(false);setFailed(false);
   return {page,operation};
  },[api,scope]);
  const refresh=useCallback(async()=>{

@@ -19,6 +19,9 @@ try{
  await expect.poll(()=>page.evaluate(async()=>(await window.desktop.snapshot()).status),{timeout:30000}).toBe('ready');
  const metadata=await page.evaluate(async()=>{const pages=[];let offset:number|undefined=0;do{const page=await window.desktop.settings!.read('browser',offset);pages.push({fields:page.fields.length,metadata:Boolean(page.web)});offset=page.nextOffset;}while(offset!==undefined);return pages;});
  expect(metadata.length).toBeGreaterThan(1);expect(metadata.every(p=>p.metadata&&p.fields>0)).toBe(true);
+ const runtime=await page.evaluate(async()=>{const pages=[];let offset:number|undefined=0;do{const result=await window.desktop.settings!.read('runtime',offset);pages.push(result);offset=result.nextOffset;}while(offset!==undefined);return pages;});
+ expect(runtime.every(p=>p.runtime)).toBe(true);expect(runtime.flatMap(p=>p.runtime!.effective).find(v=>v.fieldId==='execution.backend')?.value).toBe('host');
+ const dependencies=await page.evaluate(()=>window.desktop.settings!.dependencies());expect(typeof dependencies.items.find(i=>i.id==='docker-execution')?.available).toBe('boolean');
  const connections=await page.evaluate(()=>window.desktop.connections!.list());expect(connections.items[0]?.telegram?.configured).toBe(false);
  await page.getByRole('button',{name:'Settings',exact:true}).click();
  await page.locator('.ec-settingslink').filter({hasText:'Browser & Search'}).click();
@@ -27,5 +30,17 @@ try{
  await page.locator('.ec-navgroup').getByRole('button',{name:'Connections',exact:true}).click();
  await expect(page.getByRole('heading',{name:'Connected services',exact:true})).toBeVisible();
  await expect(page.getByRole('heading',{name:'Connections unavailable',exact:true})).toHaveCount(0);
+ await page.getByRole('button',{name:'Settings',exact:true}).click();
+ await page.locator('.ec-settingslink').filter({hasText:'Execution & preferences'}).click();
+ await expect(page.getByRole('heading',{name:'Run commands',exact:true})).toBeVisible();
+ await page.getByRole('tab',{name:'Language & behavior',exact:true}).click();
+ await expect(page.getByRole('combobox',{name:'Interface language',exact:true})).toHaveValue('en');
+ await page.getByRole('combobox',{name:'Interface language',exact:true}).selectOption('ar');
+ await expect(page.locator('html')).toHaveAttribute('lang','ar');
+ const {translate}=await import('../src/shared/i18n/index.ts');
+ await page.getByRole('combobox',{name:translate('ar','Interface language'),exact:true}).selectOption('en');
+ await expect(page.locator('html')).toHaveAttribute('lang','en');
+ await page.getByRole('tab',{name:'Workspaces',exact:true}).click();
+ await expect(page.getByRole('heading',{name:'Your project folders',exact:true})).toBeVisible();
  console.log('Native settings pages loaded through renderer, preload, IPC, strict protocol, and owned runtime.');
 }finally{await application?.close();rmSync(home,{recursive:true,force:true});}
