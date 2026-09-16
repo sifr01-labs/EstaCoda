@@ -16,3 +16,11 @@ for(const language of ['en','ar'] as const)test(`reviewed settings ${language} p
  await page.getByRole('combobox',{name:t('Settings section'),exact:true}).selectOption('vision');await page.getByRole('combobox',{name:t('Image analysis mode'),exact:true}).selectOption('auto');await page.getByRole('button',{name:t('Review changes'),exact:true}).click();expect(await page.evaluate(()=>(window as any).settingsState.reviewed)).toContainEqual({fieldId:'auxiliaryModels.vision.provider',selectors:[],value:'auto'});await page.getByRole('button',{name:t('Discard changes'),exact:true}).click();
  expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);
 });
+for(const language of ['en','ar'] as const)test(`failed settings read ${language} ends loading and retries without a write`,async({page})=>{
+ await page.goto('/fixture.html?language='+language);await page.evaluate(async language=>{
+  const rp='/node_modules/.vite/deps/react.js',dp='/node_modules/.vite/deps/react-dom_client.js',cp='/src/renderer/components/public-settings.tsx',lp='/src/renderer/i18n.tsx';const React=(await import(rp)).default,{createRoot}=(await import(dp)).default,{PublicSettingsView}=await import(cp),{LanguageContext}=await import(lp);let reads=0;
+  const api={read:async()=>{if(++reads===1)throw new Error('Invalid control parameters.');return{fields:[],values:[],truncated:false,web:{effective:[],defaults:[],searchProviders:[]}};}};
+  const host=document.querySelector('.ec-window')!;host.innerHTML='<div id="settings-error"></div>';createRoot(document.getElementById('settings-error')!).render(React.createElement(LanguageContext.Provider,{value:language},React.createElement(PublicSettingsView,{api,initialSection:'browser'})));
+ },language);
+ const t=(key:Parameters<typeof translate>[1])=>translate(language,key);await expect(page.getByRole('heading',{name:t('Could not load settings')})).toBeVisible();await expect(page.getByText(t('Loading…'),{exact:true})).toHaveCount(0);await page.getByRole('button',{name:t('Try again'),exact:true}).click();await expect(page.locator('.ec-capability-card').first()).toBeVisible();await expect(page.getByRole('alert')).toHaveCount(0);
+});

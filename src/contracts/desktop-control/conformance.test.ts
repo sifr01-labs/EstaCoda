@@ -277,3 +277,11 @@ it('validates backend action hints and requires explanations for disabled action
 it('rejects raw sign-in values on ordinary RPC; protected delivery requires the separate pipe',()=>{
  expect(()=>validateControlRequest({jsonrpc:'2.0',id:'r',method:'browser.control',params:{workId:'session:s',command:{action:'signin-deliver',browserId:'b',holder:'main',lease:{id:'l',generation:1},sequence:1,entryId:'entry',value:'sign-in-canary'}}},context)).toThrow();
 });
+
+it('validates web metadata without accepting unregistered nested fields',()=>{
+ const request=validateControlRequest({jsonrpc:'2.0',id:'web',method:'settings.read',params:{section:'browser'}},context);
+ const web={effective:[],defaults:[],searchProviders:[{id:'brave',label:'Brave Search',implemented:true,available:false}],resolvedSearch:null};
+ const response=(data:unknown)=>({jsonrpc:'2.0',id:'web',result:{fields:[],values:[],truncated:false,web:data}});
+ expect(()=>validateControlResponse(response(web),request,context)).not.toThrow();
+ for(const invalid of [{...web,token:'unexpected'},{...web,searchProviders:[{...web.searchProviders[0],apiKey:'unexpected'}]},{...web,searchProviders:[{...web.searchProviders[0],available:'yes'}]}])expect(()=>validateControlResponse(response(invalid),request,context)).toThrow();
+});

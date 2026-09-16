@@ -1,4 +1,6 @@
 export const webSettingsArabic={
+ 'Could not load settings':'تعذّر تحميل الإعدادات',
+ 'Your saved settings have not changed. Try loading them again.':'لم تتغير إعداداتك المحفوظة. حاول تحميلها مجددًا.',
  'Cloud browsing':'التصفح السحابي',
  'Search setup':'إعداد البحث',
  'Download search software. Your search settings stay in their separate review.':'نزّل برنامج البحث. تبقى إعدادات البحث في مراجعتها المنفصلة.',

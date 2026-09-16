@@ -1,3 +1,4 @@
+import {validateControlRequest,validateControlResponse,parseControlFrame,serializeControlFrame} from '../contracts/desktop-control/index.js';
 import {mkdtemp,mkdir,writeFile,rm} from 'node:fs/promises';
 import {it,expect} from 'vitest';
 import {resolveProfileStateHome} from '../config/profile-home.js';
@@ -9,7 +10,7 @@ it('separates selected-profile authorization and token presence from gateway liv
   await mkdir(paths.profileRoot,{recursive:true});await writeFile(paths.configPath,JSON.stringify({channels:{telegram:{enabled:true,botTokenEnv:'TELEGRAM_BOT_TOKEN',allowedUserIds:['123']}}}));
   expect(await telegramConnection(input,signal)).toMatchObject({authorizationState:'configured',telegram:{status:'credential_missing',allowedUsers:1}});
   await writeFile(paths.envPath,'TELEGRAM_BOT_TOKEN=synthetic-private-token\n');
-  const ready=await telegramConnection(input,signal);expect(ready).toMatchObject({configurationState:'configured',runtimeState:'stopped',telegram:{status:'ready',configured:true,polling:'unknown',lastVerifiedAt:null}});expect(JSON.stringify(ready)).not.toContain('synthetic-private-token');
+  const ready=await telegramConnection(input,signal);const context={profileId:'p',instanceId:'test',capabilities:{methods:['connections.list'] as Array<'connections.list'>,events:[]}};const request=validateControlRequest({jsonrpc:'2.0',id:'list',method:'connections.list',params:{limit:100}},context);expect(()=>validateControlResponse(parseControlFrame(serializeControlFrame({jsonrpc:'2.0',id:'list',result:{items:[ready],nextCursor:null}})),request,context)).not.toThrow();expect(ready).toMatchObject({configurationState:'configured',runtimeState:'stopped',telegram:{status:'ready',configured:true,polling:'unknown',lastVerifiedAt:null}});expect(JSON.stringify(ready)).not.toContain('synthetic-private-token');
   expect(await telegramConnection({...input,profileId:'q'},signal)).toMatchObject({authorizationState:'denied',telegram:{status:'disabled',allowedUsers:0}});
   await writeFile(paths.configPath,JSON.stringify({channels:{telegram:{enabled:true,botTokenEnv:'TELEGRAM_BOT_TOKEN',pairing:{code:'PRIVATE-CODE',expiresAt:new Date(Date.now()-1000).toISOString()}}}}));
   expect(await telegramConnection(input,signal)).toMatchObject({authorizationState:'denied',telegram:{status:'authorization_missing',pairingExpiresAt:null}});
