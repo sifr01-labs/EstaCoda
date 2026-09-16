@@ -51,7 +51,14 @@ export class DesktopModelSetup {
  onboardingBinding(id:string){const s=this.require(id);if(!s.draft||s.applying)throw new Error('Review required.');return {draftId:s.draft.draftId,windowId:s.scope.windowId,generation:s.scope.generation};}
  async routes(){const[fallbacks,auxiliary]=await Promise.all([this.connection.modelRequest('models.fallbacks',{}),this.connection.modelRequest('models.auxiliary',{})]);return {fallbacks,auxiliary};}
  async apply(setupId:string):Promise<ModelApplyReceipt>{const setup=this.require(setupId);if(!setup.draft || setup.applying)throw new Error('Review required.');setup.applying=true;this.#lastApply.set(setup.profileId,setup.draft.draftId);try{const result=await this.connection.modelRequest('models.applyDraft',{draftId:setup.draft.draftId,windowId:setup.scope.windowId,generation:setup.scope.generation});if(result.state==='applied'){await this.pipe()?.closeWindow(setup.scope.windowId,setup.scope.generation);if(this.#setup===setup)this.#setup=undefined;}return result;}finally{setup.applying=false;}}
- async inspect(){const operationId=this.#lastApply.get(this.connection.state.profileId);const receipt=await this.connection.modelRequest('models.inspectApply',operationId?{operationId}:{});return receipt.state==='unknown'&&receipt.operationId==='none'?null:receipt;}
+ async inspect(){
+  const {profileId,generation}=this.connection.state,operationId=this.#lastApply.get(profileId);
+  const receipt=await this.connection.modelRequest('models.inspectApply',operationId?{operationId}:{});
+  if(profileId!==this.connection.state.profileId||generation!==this.connection.state.generation)throw new Error('Setup changed.');
+  const setup=this.#setup;
+  if(receipt.state==='applied'&&setup?.draft?.draftId===receipt.operationId&&setup.profileId===profileId){await this.pipe()?.closeWindow(setup.scope.windowId,setup.scope.generation);if(this.#setup===setup)this.#setup=undefined;}
+  return receipt.state==='unknown'&&receipt.operationId==='none'?null:receipt;
+ }
  async cancel(setupId?:string,preservePreparation=false):Promise<{cancelled:boolean}>{if(!preservePreparation)this.#epoch++;const setup=this.#setup;if(!setup)return {cancelled:true};if(setupId && setup.id!==setupId)throw new Error('Setup changed.');
   this.credentials.close();let cancelled=true;
   if(setup.draft){const result=await this.connection.modelRequest('models.cancelDraft',{draftId:setup.draft.draftId,windowId:setup.scope.windowId,generation:setup.scope.generation});cancelled=result.cancelled;if(!cancelled)return {cancelled:false};}

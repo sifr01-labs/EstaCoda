@@ -86,3 +86,10 @@ it('uses provider registration instead of primary assignment when setup has no r
  expect(f.calls.some(c=>c.method==='models.reviewProvider')).toBe(true);
  expect(f.calls.some(c=>c.method==='models.reviewPrimary')).toBe(false);
 });
+
+it('releases a reconciled saved setup so the next provider can be configured without replaying Apply',async()=>{
+ const f=fixture();const {setupId}=await f.setup.begin(route);await f.setup.review(setupId);
+ f.connection.modelRequest.mockImplementation(async(method:string)=>{if(method==='models.applyDraft')throw Error('Reply lost');if(method==='models.inspectApply')return {operationId:'draft',state:'applied',verification:'configured'} as any;return {valid:true,cancelled:false} as any;});
+ await expect(f.setup.apply(setupId)).rejects.toThrow();expect(await f.setup.inspect()).toMatchObject({state:'applied'});
+ await expect(f.setup.begin(route)).resolves.toHaveProperty('setupId');expect(f.connection.modelRequest.mock.calls.filter(c=>c[0]==='models.applyDraft')).toHaveLength(1);
+});

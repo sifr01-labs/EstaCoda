@@ -504,3 +504,26 @@ for supported catalog models after review; catalog visibility alone does not mak
 runnable. Provider-only registration cannot overwrite an existing provider's credentials.
 Cancellation, stale-profile protection, optional paid verification, and apply reconciliation
 continue through the shared setup transaction.
+
+Provider setup uses Connect, Review, and Done in one dialog. A selected catalog model
+keeps its capabilities and pricing visible; transport details live under Advanced details.
+Custom endpoints retain editable connection fields. OAuth device codes have an explicit
+Copy code action and disappear when authorization finishes or expires. API keys still
+use the private credential window. Authorization does not persist credentials until the
+reviewed Save changes action.
+
+Save confirmation, configuration readiness, and connection testing are separate states.
+The read-only readiness check covers the model saved by that operation, so unrelated
+profile routes do not make a successful addition appear broken. Missing or expired
+authorization and unavailable models have separate attention messages. After a service
+restart, the durable receipt still confirms persistence; readiness is reported as not
+tested when the operation's in-memory route is no longer available. An interrupted save
+response is inspected automatically without replaying Apply. If it remains uncertain,
+Check save status retries inspection only.
+
+Test connection is optional and makes one small provider request, which may incur charges.
+It remains available after saving through a temporary reviewed draft that is cancelled
+after testing. These drafts match the saved endpoint, retain the ordinary spend and private
+endpoint gates, and reject Apply, including when the model is already a fallback. A configured badge indicates saved
+configuration, not a successful live request. Supported providers use bundled brand marks;
+unsupported catalog entries are labelled Browse only without promising a release date.

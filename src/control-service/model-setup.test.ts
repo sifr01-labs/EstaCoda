@@ -175,3 +175,36 @@ it('provider registration preserves primary limits and never adopts a fallback c
   const beforeRejected=await readFile(paths.configPath,'utf8');await expect(setup.reviewConfigured({windowId:'w',generation:1,providerId:'kimi',modelId:'backup',role:'provider'})).rejects.toThrow();expect(await readFile(paths.configPath,'utf8')).toBe(beforeRejected);expect(await readFile(paths.envPath,'utf8')).toBe(env);
  }finally{setup.dispose();candidates.dispose();await rm(homeDir,{recursive:true,force:true});}
 });
+
+it('checks only the saved model and reports scoped credential issues separately from persistence',async()=>{
+ const homeDir=await mkdtemp('/tmp/ec-scoped-model-check-'),input={homeDir,profileId:'p'},paths=resolveProfileStateHome(input),candidates=new CredentialCandidates('p','b'),setup=new ModelSetup(input,candidates,()=>{});
+ try{
+  await mkdir(paths.profileRoot,{recursive:true});await writeFile(paths.configPath,JSON.stringify({model:{provider:'kimi',id:'broken'},providers:{kimi:{baseUrl:'https://api.moonshot.ai/v1',authMethod:'api_key',apiKeyEnv:'MISSING_KEY',enableNetwork:true,models:['broken']}}}));
+  const draft=await setup.review({windowId:'w',generation:1,route:{providerId:'local',modelId:'test-chat',endpoint:'http://localhost:11434/v1',authMethod:'none',apiMode:'custom_openai_compatible',allowPrivateEndpoint:true}},'provider');
+  const receipt=await setup.apply({windowId:'w',generation:1,draftId:draft.draftId},new AbortController().signal);
+  expect(receipt).toMatchObject({state:'applied',verification:'configured'});expect(receipt.issue).toBeUndefined();
+  const keyedRoute:CandidateRoute={providerId:'deepseek',modelId:'deepseek-chat',endpoint:'https://api.deepseek.com/v1',authMethod:'api_key',apiMode:'openai_chat_completions',allowPrivateEndpoint:false};
+  const candidateId=candidates.stage({windowId:'w',generation:1,purpose:'provider',providerId:'deepseek',endpoint:keyedRoute.endpoint,authMethod:'api_key'},'synthetic-scoped-test');
+  const keyed=await setup.review({windowId:'w',generation:1,route:keyedRoute,candidateId},'provider');await setup.apply({windowId:'w',generation:1,draftId:keyed.draftId},new AbortController().signal);
+  await writeFile(paths.envPath,'');
+  expect(await setup.inspect(keyed.draftId)).toMatchObject({state:'applied',verification:'repair_required',issue:{providerId:'deepseek',modelId:'deepseek-chat',reason:'credential_required'}});
+  setup.dispose();const restarted=new ModelSetup(input,candidates,()=>{});try{expect(await restarted.inspect(keyed.draftId)).toMatchObject({state:'applied',verification:'not_tested'});}finally{restarted.dispose();}
+ }finally{setup.dispose();candidates.dispose();await rm(homeDir,{recursive:true,force:true});}
+});
+it('tests an existing fallback with its saved endpoint but cannot apply a verification-only draft',async()=>{
+ const homeDir=await mkdtemp('/tmp/ec-saved-fallback-'),input={homeDir,profileId:'p'},paths=resolveProfileStateHome(input),candidates=new CredentialCandidates('p','b'),setup=new ModelSetup(input,candidates,()=>{});
+ const {CandidateVerifier}=await import('./candidate-verification.js');let calls=0;
+ const verifier=new CandidateVerifier(candidates,()=>async url=>{calls++;expect(String(url)).toContain('https://fallback.example/v1/');return {ok:false,status:401,statusText:'',json:async()=>({}),text:async()=>''};});
+ try{
+  await mkdir(paths.profileRoot,{recursive:true});const config=JSON.stringify({model:{provider:'local',id:'main',fallbacks:[{provider:'local',id:'backup',baseUrl:'https://fallback.example/v1'}]},providers:{local:{baseUrl:'https://primary.example/v1',apiMode:'custom_openai_compatible',authMethod:'none',enableNetwork:true,models:['main','backup']}}});await writeFile(paths.configPath,config);
+  const selection={windowId:'w',generation:1,providerId:'local',modelId:'backup',role:'fallback' as const};
+  await expect(setup.reviewConfigured(selection)).rejects.toThrow();
+  await expect(setup.reviewConfigured({...selection,verification:{endpoint:'https://unconfigured.example/v1'}})).rejects.toThrow();
+  const draft=await setup.reviewConfigured({...selection,verification:{endpoint:'https://fallback.example/v1'}});expect(draft.route?.endpoint).toBe('https://fallback.example/v1');
+  const binding={windowId:'w',generation:1,draftId:draft.draftId};
+  // @ts-expect-error Exercise the runtime spend gate against an untrusted request.
+  await expect(setup.verifyDraft({...binding,spendApproved:false,allowPrivateEndpoint:false},new AbortController().signal,verifier)).rejects.toThrow();expect(calls).toBe(0);
+  await setup.verifyDraft({...binding,spendApproved:true,allowPrivateEndpoint:false},new AbortController().signal,verifier);expect(calls).toBe(1);
+  await expect(setup.apply(binding,new AbortController().signal)).rejects.toThrow();expect(()=>setup.reviewed(binding)).toThrow();expect(await readFile(paths.configPath,'utf8')).toBe(config);expect(setup.cancel(binding).cancelled).toBe(true);
+ }finally{verifier.dispose();setup.dispose();candidates.dispose();await rm(homeDir,{recursive:true,force:true});}
+});

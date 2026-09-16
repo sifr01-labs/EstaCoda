@@ -19,7 +19,7 @@ import {primaryRoutePlan} from '../setup/review/model-route-plan.js';
 import {captureProfileApplySnapshot,applyProfilePlan,inspectProfileApply,latestProfileApplyOperation,type ProfileApplySnapshot} from '../setup/review/profile-apply.js';
 import {CredentialCandidates,type CandidateScope} from './credential-candidates.js';
 import {validateCandidateRequest} from './candidate-verification.js';
-type Draft={expires:number;params:{windowId:string;generation:number;candidateId?:string;route?:CandidateRoute};plan:SetupApplyPlan;projection:ModelRouteDraft;snapshot:ProfileApplySnapshot;credentialEnv?:string;scope?:CandidateScope;abort:AbortController;timer:ReturnType<typeof setTimeout>;applying:boolean;consumed:boolean};
+type Draft={verificationOnly?:boolean;expires:number;params:{windowId:string;generation:number;candidateId?:string;route?:CandidateRoute};plan:SetupApplyPlan;projection:ModelRouteDraft;snapshot:ProfileApplySnapshot;credentialEnv?:string;scope?:CandidateScope;abort:AbortController;timer:ReturnType<typeof setTimeout>;applying:boolean;consumed:boolean};
 
 /** One selected-profile setup owner. Renderer input cannot select storage paths or arbitrary plan operations. */
 export class ModelSetup {
@@ -27,7 +27,7 @@ export class ModelSetup {
   #closed=false;
   #fallbackListing:{projection:FallbackList;snapshot:ProfileApplySnapshot}|undefined;
   constructor(readonly input:{homeDir:string;profileId:string},readonly candidates:CredentialCandidates,readonly changed:()=>void|Promise<void>){}
-  async review(params:MethodContracts['models.reviewPrimary']['params'],role:'provider'|'primary'|'fallback'|'auxiliary'='primary',auxiliary?:{slot:AuxiliarySlot;fallbackToMain:boolean},existing?:{snapshot:ProfileApplySnapshot;credentialEnv?:string}):Promise<ModelRouteDraft>{
+  async review(params:MethodContracts['models.reviewPrimary']['params'],role:'provider'|'primary'|'fallback'|'auxiliary'='primary',auxiliary?:{slot:AuxiliarySlot;fallbackToMain:boolean},existing?:{snapshot:ProfileApplySnapshot;credentialEnv?:string;verificationOnly?:boolean}):Promise<ModelRouteDraft>{
     const windowSignal=this.candidates.windowSignal(params.windowId,params.generation);
     for(const [id,draft] of this.#drafts){if(this.#drafts.size<32)break;if(draft.consumed)this.#drafts.delete(id);}
     if(this.#closed || this.#drafts.size>=32)throw new ControlProtocolError('-32009');
@@ -41,11 +41,11 @@ export class ModelSetup {
     if(existing && JSON.stringify(snapshot.files)!==JSON.stringify(existing.snapshot.files))throw new ControlProtocolError('-32007');
     const loaded=await loadRuntimeConfig({...this.input,workspaceRoot:this.input.homeDir,configurationInspection:true});
     if(role==='provider' && loaded.config.providers?.[params.route.providerId] && !existing)throw new ControlProtocolError('-32602');
-    if(role==='primary' && loaded.modelFallbackRoutes.some(route=>route.provider===params.route.providerId&&route.id===params.route.modelId&&new URL(route.baseUrl??getProviderMetadata(route.provider).defaultBaseUrl??'http://invalid').href.replace(/\/$/,'')===new URL(params.route.endpoint).href.replace(/\/$/,'')))throw new ControlProtocolError('-32602');
+    if(!existing?.verificationOnly && role==='primary' && loaded.modelFallbackRoutes.some(route=>route.provider===params.route.providerId&&route.id===params.route.modelId&&new URL(route.baseUrl??getProviderMetadata(route.provider).defaultBaseUrl??'http://invalid').href.replace(/\/$/,'')===new URL(params.route.endpoint).href.replace(/\/$/,'')))throw new ControlProtocolError('-32602');
     if(role==='fallback'||role==='auxiliary'){
       const identity=(provider:string,id:string,endpoint?:string)=>JSON.stringify([provider,id,new URL(endpoint ?? getProviderMetadata(provider).defaultBaseUrl ?? 'http://invalid').href.replace(/\/$/,'')]);
       const key=identity(params.route.providerId,params.route.modelId,params.route.endpoint);
-      if(role==='fallback' && ([loaded.primaryModelRoute,...loaded.modelFallbackRoutes].some(route=>identity(route.provider,route.id,route.baseUrl)===key) || loaded.modelFallbackRoutes.length>=32))throw new ControlProtocolError('-32602');
+      if(!existing?.verificationOnly && role==='fallback' && ([loaded.primaryModelRoute,...loaded.modelFallbackRoutes].some(route=>identity(route.provider,route.id,route.baseUrl)===key) || loaded.modelFallbackRoutes.length>=32))throw new ControlProtocolError('-32602');
       const provider=loaded.config.providers?.[params.route.providerId];
       const metadata=getProviderMetadata(params.route.providerId);
       if(provider && Boolean(provider.enableNetwork)!==(params.route.enableNetwork??true))throw new ControlProtocolError('-32602');
@@ -60,7 +60,7 @@ export class ModelSetup {
     const plan=primaryRoutePlan({provider:route.providerId,model:route.modelId,baseUrl:route.endpoint,apiMode:route.apiMode,authMethod:route.authMethod==='oauth'?'oauth_device_pkce':route.authMethod,enableNetwork:route.enableNetwork??true,...(route.contextWindowTokens!==undefined?{contextWindowTokens:route.contextWindowTokens}:{}),...(route.maxTokens!==undefined?{maxTokens:route.maxTokens}:{}),...(auxiliary?{auxiliaryTask:auxiliary.slot,fallbackToMain:auxiliary.fallbackToMain}:{})},credentialEnv,role);
     const timer=setTimeout(()=>this.cancel({draftId,windowId:params.windowId,generation:params.generation}),300000);timer.unref();
     windowSignal.throwIfAborted();
-    this.#drafts.set(draftId,{expires:performance.now()+300000,params:structuredClone(params),projection,snapshot,credentialEnv,scope,plan,abort:new AbortController(),timer,applying:false,consumed:false});
+    this.#drafts.set(draftId,{verificationOnly:existing?.verificationOnly===true,expires:performance.now()+300000,params:structuredClone(params),projection,snapshot,credentialEnv,scope,plan,abort:new AbortController(),timer,applying:false,consumed:false});
     windowSignal.addEventListener('abort',()=>{try{this.cancel({draftId,windowId:params.windowId,generation:params.generation});}catch{}},{once:true});
     return projection;
   }
@@ -87,7 +87,12 @@ export class ModelSetup {
     const loaded=await loadRuntimeConfig({...this.input,workspaceRoot:this.input.homeDir,configurationInspection:true});
     const presence=await captureCredentialPresence(loaded);
     const catalog=await createModelSelectionCatalog({...this.input,config:loaded.config,providerRegistry:loaded.providerRegistry,allowNetwork:false,credentialReady:async(provider,apiKeyEnv)=>['present','not_required'].includes(presence(provider,{apiKeyEnv}))});
-    const rows=(await catalog.listModels({executableOnly:true,provider:params.providerId})).filter(row=>row.id===params.modelId&&!row.catalogOnly&&row.lifecycle!=='retired'&&(row.usageClass==='primary-chat'||row.configured||row.source==='manual'));
+    let rows=(await catalog.listModels({executableOnly:true,provider:params.providerId})).filter(row=>row.id===params.modelId&&!row.catalogOnly&&row.lifecycle!=='retired'&&(row.usageClass==='primary-chat'||row.configured||row.source==='manual'));
+    // Test an existing endpoint without granting this draft permission to change configuration.
+    if(params.verification){
+      const endpoint=new URL(params.verification.endpoint).href.replace(/\/$/,'');
+      rows=rows.filter(row=>new URL(row.baseUrl??getProviderMetadata(params.providerId).defaultBaseUrl??'http://invalid').href.replace(/\/$/,'')===endpoint);
+    }
     if(rows.length!==1)throw new ControlProtocolError('-32602');
     const row=rows[0]!,provider=loaded.config.providers?.[params.providerId],metadata=getProviderMetadata(params.providerId);
     if(!provider?.enableNetwork)throw new ControlProtocolError('-32602');
@@ -97,7 +102,7 @@ export class ModelSetup {
     const authMethod=provider.authMethod??metadata.defaultAuthMethod,credentialEnv=(params.role==='provider'?undefined:fallback?.apiKeyEnv)??provider.apiKeyEnv??metadata.defaultApiKeyEnv;
     if(!['present','not_required'].includes(presence(params.providerId,{apiKeyEnv:credentialEnv,authMethod})))throw new ControlProtocolError('-32602');
     const route:CandidateRoute={providerId:params.providerId,modelId:params.modelId,endpoint,authMethod:authMethod==='none'?'none':authMethod==='api_key'?'api_key':'oauth',apiMode:(provider.apiMode??metadata.apiMode) as CandidateRoute['apiMode'],allowPrivateEndpoint:true,enableNetwork:true,...(limits?.contextWindowTokens?{contextWindowTokens:limits.contextWindowTokens}:{}),...(params.role!=='auxiliary'&&limits?.maxTokens?{maxTokens:limits.maxTokens}:{})};
-    return this.review({windowId:params.windowId,generation:params.generation,route},params.role,params.role==='auxiliary'?{slot:params.slot!,fallbackToMain:params.fallbackToMain===true}:undefined,{snapshot,credentialEnv:route.authMethod==='api_key'?credentialEnv:undefined});
+    return this.review({windowId:params.windowId,generation:params.generation,route},params.role,params.role==='auxiliary'?{slot:params.slot!,fallbackToMain:params.fallbackToMain===true}:undefined,{snapshot,credentialEnv:route.authMethod==='api_key'?credentialEnv:undefined,verificationOnly:params.verification!==undefined});
   }
   async auxiliary():Promise<AuxiliaryList>{
     const loaded=await loadRuntimeConfig({...this.input,workspaceRoot:this.input.homeDir,configurationInspection:true});
@@ -149,9 +154,9 @@ export class ModelSetup {
     windowSignal.addEventListener('abort',()=>{try{this.cancel({draftId,windowId:params.windowId,generation:params.generation});}catch{}},{once:true});
     return projection;
   }
-  reviewed(binding:ModelDraftBinding){const draft=this.require(binding);if(draft.applying||draft.consumed||draft.projection.role!=='primary')throw new ControlProtocolError('-32003');return {projection:structuredClone(draft.projection),snapshot:draft.snapshot};}
+  reviewed(binding:ModelDraftBinding){const draft=this.require(binding);if(draft.verificationOnly||draft.applying||draft.consumed||draft.projection.role!=='primary')throw new ControlProtocolError('-32003');return {projection:structuredClone(draft.projection),snapshot:draft.snapshot};}
   prepareApply(binding:ModelDraftBinding,signal:AbortSignal):PreparedProfilePart{
-    const draft=this.require(binding);if(draft.applying||draft.consumed)throw new ControlProtocolError('-32007');
+    const draft=this.require(binding);if(draft.verificationOnly||draft.applying||draft.consumed)throw new ControlProtocolError('-32007');
     const {params}=draft,route=params.route;
     const combined=AbortSignal.any([signal,draft.abort.signal,this.candidates.windowSignal(params.windowId,params.generation),...(params.candidateId?[this.candidates.signal(params.candidateId,draft.scope!)]:[])]);combined.throwIfAborted();
     const value=params.candidateId?this.candidates.read(params.candidateId,draft.scope!):undefined,env=draft.credentialEnv;
@@ -167,7 +172,7 @@ export class ModelSetup {
   async apply(binding:ModelDraftBinding,signal:AbortSignal):Promise<ModelApplyReceipt>{
     const draft=this.require(binding);if(draft.applying||draft.consumed)return this.inspect(binding.draftId);
     const part=this.prepareApply(binding,signal);let committed=false;
-    try{const receipt=await applyProfilePlan({...this.input,operationId:binding.draftId,...part});committed=receipt.state==='applied'||receipt.state==='uncertain';return {...receipt,verification:receipt.state==='applied'?await this.verifySaved():'not_tested'};}
+    try{const receipt=await applyProfilePlan({...this.input,operationId:binding.draftId,...part});committed=receipt.state==='applied'||receipt.state==='uncertain';return {...receipt,...(receipt.state==='applied'?await this.verifySaved(draft):{verification:'not_tested' as const})};}
     finally{await part.finish(committed);}
   }
   cancel(binding:ModelDraftBinding):{cancelled:boolean}{
@@ -176,8 +181,29 @@ export class ModelSetup {
     if(!draft.applying){this.#drafts.delete(binding.draftId);if(draft.params.candidateId){try{this.candidates.discard(draft.params.candidateId,draft.scope!);}catch{}}}
     return {cancelled:!draft.consumed&&!draft.applying};
   }
-  async inspect(operationId?:string):Promise<ModelApplyReceipt>{operationId??=await latestProfileApplyOperation(this.input)??'none';const receipt=await inspectProfileApply(this.input,operationId);return {...receipt,state:receipt.state,verification:receipt.state==='applied'?await this.verifySaved():'not_tested'};}
-  private async verifySaved():Promise<ModelApplyReceipt['verification']>{try {const catalog=await captureModelCatalog(this.input);const routes=catalog.models.filter(model=>model.role==='primary'||model.role==='fallback');if(!routes.some(model=>model.role==='primary')||routes.some(model=>!['configured','network_disabled'].includes(model.health??'')))return 'repair_required';const auxiliary=await this.auxiliary();const loaded=await loadRuntimeConfig({...this.input,workspaceRoot:this.input.homeDir,configurationInspection:true});return auxiliary.items.every(item=>item.mode==='disabled'||item.mode==='auto'&&item.providerId===null||item.runnable||item.providerId!==null&&loaded.config.providers?.[item.providerId]?.enableNetwork===false&&['present','not_required'].includes(item.credentialState))?'configured':'repair_required';}catch{return 'repair_required';}}
+  async inspect(operationId?:string):Promise<ModelApplyReceipt>{
+    operationId??=await latestProfileApplyOperation(this.input)??'none';
+    const receipt=await inspectProfileApply(this.input,operationId);
+    return {...receipt,...(receipt.state==='applied'?await this.verifySaved(this.#drafts.get(operationId)):{verification:'not_tested' as const})};
+  }
+  /** Saved configuration readiness is scoped to this operation; it is not a live model request. */
+  private async verifySaved(draft?:Draft):Promise<Pick<ModelApplyReceipt,'verification'|'issue'>>{
+    const route=draft?.params.route;
+    // After a service restart the durable save receipt remains authoritative, but its route is not retained here.
+    if(!route)return {verification:'not_tested'};
+    const problem=(reason:NonNullable<ModelApplyReceipt['issue']>['reason'])=>({verification:'repair_required' as const,issue:{providerId:route.providerId,modelId:route.modelId,reason}});
+    try{
+      const loaded=await loadRuntimeConfig({...this.input,workspaceRoot:this.input.homeDir,configurationInspection:true});
+      const presence=await captureCredentialPresence(loaded);
+      const credential=presence(route.providerId,{apiKeyEnv:draft.credentialEnv,authMethod:route.authMethod==='oauth'?'oauth_device_pkce':route.authMethod});
+      if(credential==='missing')return problem('credential_required');
+      if(credential==='expired')return problem('authorization_expired');
+      const catalog=await captureModelCatalog(this.input);
+      const rows=catalog.models.filter(m=>m.providerId===route.providerId&&m.id===route.modelId&&m.catalog?.configured);
+      if(!rows.length||rows.every(m=>m.catalog?.lifecycle==='retired'||m.health==='unsupported'))return problem('model_unavailable');
+      return {verification:'configured'};
+    }catch{return problem('configuration_unavailable');}
+  }
   dispose(){for(const draft of this.#drafts.values()){draft.abort.abort();clearTimeout(draft.timer);}this.#drafts.clear();this.#fallbackListing=undefined;this.#closed=true;}
   private require(binding:ModelDraftBinding):Draft{const draft=this.#drafts.get(binding.draftId);if(this.#closed||!draft||(!draft.consumed && performance.now()>=draft.expires)||draft.params.windowId!==binding.windowId||draft.params.generation!==binding.generation)throw new ControlProtocolError('-32003');return draft;}
 }

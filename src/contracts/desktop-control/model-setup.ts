@@ -18,7 +18,7 @@ export type CandidateVerification = {
 };
 export type ModelRouteDraft = {draftId:string;route?:CandidateRoute;expiresInMs:number;credentialState:'staged'|'existing'|'not_required';role:'provider'|'primary'|'fallback'|'fallback_order'|'auxiliary'|'auxiliary_mode';slot?:AuxiliarySlot};
 export type ModelDraftBinding = {draftId:string;windowId:string;generation:number};
-export type ModelApplyReceipt = {operationId:string;state:'applied'|'uncertain'|'unknown';verification:'configured'|'repair_required'|'not_tested'};
+export type ModelApplyReceipt = {operationId:string;state:'applied'|'uncertain'|'unknown';verification:'configured'|'repair_required'|'not_tested';issue?:{providerId:string;modelId:string;reason:'credential_required'|'authorization_expired'|'model_unavailable'|'configuration_unavailable'}};
 
 export function candidateRouteBinding(route:CandidateRoute):string {
   return JSON.stringify([route.providerId,route.modelId,route.endpoint,route.authMethod,route.apiMode,route.allowPrivateEndpoint,route.enableNetwork??true,route.contextWindowTokens??null,route.maxTokens??null]);
@@ -36,4 +36,4 @@ export type OAuthBinding={authorizationId:string;windowId:string;generation:numb
 export type OAuthStatus={authorizationId:string;state:'starting'|'pending'|'authorized'|'failed'|'cancelled'|'expired';verificationUrl:string|null;userCode:string|null;candidateId:string|null};
 
 export type RouteRole={role:'provider'|'primary'|'fallback'|'auxiliary';slot?:AuxiliarySlot;fallbackToMain?:boolean};
-export type ConfiguredRouteReview=RouteRole & {windowId:string;generation:number;providerId:string;modelId:string};
+export type ConfiguredRouteReview=RouteRole & {windowId:string;generation:number;providerId:string;modelId:string;verification?:{endpoint:string}};
