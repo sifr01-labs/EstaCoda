@@ -2104,7 +2104,7 @@ function normalizeModelAliases(
   return normalized;
 }
 
-function normalizeTtsConfig(value: EstaCodaConfig["tts"]): LoadedRuntimeConfig["tts"] {
+export function normalizeTtsConfig(value: EstaCodaConfig["tts"]): LoadedRuntimeConfig["tts"] {
   const provider = isTtsProvider(value?.provider) ? value.provider : "openai";
   return {
     ...value,
@@ -2169,7 +2169,7 @@ function normalizeTtsConfig(value: EstaCodaConfig["tts"]): LoadedRuntimeConfig["
   };
 }
 
-function normalizeImageGenerationConfig(value: EstaCodaConfig["imageGen"]): LoadedRuntimeConfig["imageGen"] {
+export function normalizeImageGenerationConfig(value: EstaCodaConfig["imageGen"]): LoadedRuntimeConfig["imageGen"] {
   const provider = isImageGenerationProvider(value?.provider) ? value.provider : "fal";
   const configuredModel = value?.model ?? value?.[provider]?.model;
   const model = resolveImageModel(provider, configuredModel) ?? defaultImageModel(provider);
@@ -2240,7 +2240,7 @@ function normalizeGatewayConfig(value: EstaCodaConfig["gateway"]): LoadedRuntime
   };
 }
 
-function normalizeSttConfig(value: EstaCodaConfig["stt"]): LoadedRuntimeConfig["stt"] {
+export function normalizeSttConfig(value: EstaCodaConfig["stt"]): LoadedRuntimeConfig["stt"] {
   const provider = isSttProvider(value?.provider) ? value.provider : "local";
   const fasterWhisper = value?.local?.fasterWhisper ?? value?.local?.faster_whisper;
   const engine = value?.local?.engine ?? "faster-whisper";

@@ -5,6 +5,16 @@ description: "Vision routing, image normalization, egress governance, setup veri
 
 # Vision Analysis
 
+## Desktop Images settings
+
+The **Images** page presents **Image analysis** and **Image generation** as selected-model cards, consistent with Models & providers. Analysis offers Automatic, compatible catalog models, and Off. Automatic displays the currently resolved model. Off disables the dedicated analysis capability; a compatible main chat model can still process image attachments through native dispatch.
+
+A compatible provider can be connected through the existing provider setup dialog. Provider setup is saved separately before the analysis selection is reviewed. Choosing a dedicated model clears prior credential, endpoint and context overrides so another model's overrides are not carried forward; it uses that provider's configuration. Existing hosted-processing policy remains unchanged.
+
+Image generation uses the registered image-model options and its own private credential setup. Selection and credentials are staged until Review changes and Save changes. Changing the generation model explicitly clears the legacy top-level model override in the review so the chosen provider's model takes effect. Switching providers also clears legacy endpoint and credential-reference overrides in the review. Size and quality remain per-generation inputs, rather than nonfunctional settings controls.
+
+The page uses bounded, read-only runtime metadata for defaults and credential presence; presence does not claim that a provider was network-tested. Advanced options and diagnostics remain accessible without exposing unrelated providers' settings.
+
 ## Architecture and dispatch
 
 Vision is a governed provider capability, not a second image-generation stack. Initial attachments, `vision.analyze`, `browser.vision`, browser screenshots, and generated-image artifacts converge on the same route policy, source resolver, normalization limits, provider executor, spending lineage, cancellation, and fallback metadata.

@@ -12,3 +12,4 @@ if(validAppearance(initial))void adapter.api.setAppearance(initial);
 createRoot(document.getElementById('root')!).render(<React.StrictMode><AppearanceProvider store={adapter.appearance}><App adapter={adapter}/></AppearanceProvider></React.StrictMode>);
 
 import '../renderer/styles/models.css';
+import '../renderer/styles/media-settings.css';

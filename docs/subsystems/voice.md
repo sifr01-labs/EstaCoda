@@ -7,6 +7,16 @@ description: "Voice tools, provider dispatch, gateway voice policy, auto-TTS, CL
 
 Voice is an optional media capability. It is separate from the primary LLM provider route and uses direct environment-variable credentials only.
 
+## Desktop settings
+
+Voice settings use separate **Transcription** and **Speech generation** cards. Each shows the effective engine, hosted or on-device processing, and credential or installation state. Runtime defaults are displayed explicitly; there is no automatic selection among speech providers. Configuration-only, unimplemented providers are browse-only.
+
+Change opens provider selection and private credential entry. Selecting an engine only adds changes to the existing review; saving applies the selected-profile transaction. Voice and speaking speed are shown where the engine supports them. OpenAI's shared built-in voices have named choices; custom voice IDs remain available. Preview is disabled with an explanation because settings does not currently expose an approved audio-generation operation. It does not make a paid request or substitute system speech.
+
+Only the selected provider's advanced options appear. xAI's `diarize`/`diarization` aliases have one **Identify speakers** control. Other transcription engines show automatic language detection because their language input is per invocation, not a saved global preference. **Send voice replies** changes the default for supported connected channels; per-chat voice preferences still take precedence.
+
+Local installation checks are read-only. Registered downloads still require a separate review and confirmation. Package installation does not establish that transcription model files are cached. Configuration diagnostics do not make network requests. Credentials are staged in the private credential window and never enter the renderer. Returning from review to editing cancels the prior review; any staged credentials must be entered again.
+
 ## Provider Matrix
 
 | Capability | Provider | Status | Notes |

@@ -1,3 +1,4 @@
+import {mediaSettingsMetadata} from './media-settings-metadata.js';
 import type {PreparedProfilePart} from '../setup/review/compose-profile-plans.js';
 import {envContentHasSecret} from '../config/env-secret-store.js';
 import {publicSettingsPlan} from '../setup/review/public-settings-plan.js';
@@ -20,7 +21,9 @@ export class PublicSettings {
   const all=PUBLIC_SETTINGS.filter(field=>field.section===section),fields=all.slice(offset,offset+20);
   const values=fields.filter(f=>!f.path.includes('*')&&!f.path.includes('#')&&f.kind!=='secret').map(field=>({fieldId:field.id,selectors:[],value:settingValue(config,field.path)}));
   while(Buffer.byteLength(JSON.stringify({fields,values}))>44000&&fields.length>1){const removed=fields.pop()!;const i=values.findIndex(v=>v.fieldId===removed.id);if(i>=0)values.splice(i,1);}
-  const next=offset+fields.length;return {fields:structuredClone(fields),values,truncated:all.length>next,...(all.length>next?{nextOffset:next}:{})};
+  const media=section==='vision'||section==='voice'?await mediaSettingsMetadata(this.input,fields,snapshot.files['.env']??'',offset===0).catch(()=>undefined):undefined;
+  while(Buffer.byteLength(JSON.stringify({fields,values,media}))>44000&&fields.length>1){const removed=fields.pop()!;const i=values.findIndex(v=>v.fieldId===removed.id);if(i>=0)values.splice(i,1);if(media){media.effective=media.effective.filter(v=>v.fieldId!==removed.id);media.defaults=media.defaults.filter(v=>v.fieldId!==removed.id);}}
+  const next=offset+fields.length;return {...(media?{media}:{}),fields:structuredClone(fields),values,truncated:all.length>next,...(all.length>next?{nextOffset:next}:{})};
  }
  async value(params:{fieldId:string;selectors:string[]}){const change={...params,value:null},field=settingField(change);const snapshot=await captureProfileApplySnapshot(this.input);const value=field.envName?(envContentHasSecret(snapshot.files['.env']??'',field.envName)?'configured':null):field.kind==='secret'?settingSecretState(JSON.parse(snapshot.files['config.json']??'{}'),settingPath(field,params.selectors)):settingValue(JSON.parse(snapshot.files['config.json']??'{}'),settingPath(field,params.selectors));return {...params,value:field.kind==='secret'?(value===null?null:'configured'):value};}
  async review(params:{windowId:string;generation:number;changes:SettingChange[]}):Promise<SettingsReview>{

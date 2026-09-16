@@ -1,3 +1,4 @@
+import {mediaSettingsArabic} from './media-settings.js';
 import {modelsArabic} from './models.js';
 import {desktopRefinementArabic} from './desktop-refinement.js';
 import {schedulesArabic} from './schedules.js';
@@ -9,6 +10,7 @@ import {setupArabic} from './setup.js';
 import {workArabic} from './work.js';
 /** Product-owned message keys. Never pass provider output or backend error text here. */
 export const arabic = {
+ ...mediaSettingsArabic,
  ...modelsArabic,
  ...desktopRefinementArabic,
  'Chat':'محادثة',

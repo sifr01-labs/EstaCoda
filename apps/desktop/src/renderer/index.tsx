@@ -11,3 +11,4 @@ const adapter=liveAdapter();
 createRoot(document.getElementById('root')!).render(<React.StrictMode><AppearanceProvider store={adapter.appearance}><App adapter={adapter}/></AppearanceProvider></React.StrictMode>);
 
 import './styles/models.css';
+import './styles/media-settings.css';
