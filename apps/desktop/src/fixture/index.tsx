@@ -10,3 +10,5 @@ const query=new URLSearchParams(location.search);
 const initial={...DEFAULT_APPEARANCE,theme:query.get('theme')??'kemet',appearance:query.get('mode')??'system',language:query.get('language')??'en'};
 if(validAppearance(initial))void adapter.api.setAppearance(initial);
 createRoot(document.getElementById('root')!).render(<React.StrictMode><AppearanceProvider store={adapter.appearance}><App adapter={adapter}/></AppearanceProvider></React.StrictMode>);
+
+import '../renderer/styles/models.css';

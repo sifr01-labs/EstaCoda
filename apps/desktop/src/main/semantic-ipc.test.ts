@@ -141,3 +141,8 @@ it('bounds conversation permission and interruption controls without accepting f
  for(const securityMode of ['strict','adaptive','open'])expect(()=>validateSemanticPayload('workSubmit',{...input,securityMode,interrupt:true})).not.toThrow();
  for(const extra of [{securityMode:'yolo'},{interrupt:'true'},{inspectOnly:1},{securityMode:'open',kind:'task'},{profileId:'other',securityMode:'open'},{operationId:'forged'}])expect(()=>validateSemanticPayload('workSubmit',{...input,...extra})).toThrow();
 });
+
+it('accepts explicit provider-only review without allowing auxiliary or authority fields',()=>{
+ expect(()=>validateSemanticPayload('setupReview',{setupId:'setup',role:{role:'provider'}})).not.toThrow();
+ for(const role of [{role:'provider',slot:'assessor'},{role:'provider',fallbackToMain:true},{role:'provider',profileId:'other'}])expect(()=>validateSemanticPayload('setupReview',{setupId:'setup',role})).toThrow();
+});

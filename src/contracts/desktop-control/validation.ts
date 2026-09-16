@@ -101,7 +101,7 @@ const subscribeResult: Check = (v) => shape({ state: choice(["subscribed"]), sub
   shape({ state: choice(["snapshot_required"]), reason: choice(["instance_changed", "stream_changed", "cursor_expired", "overflow"]) })(v);
 const initialize: Check = (v) => { try { assertInitializeParams(v); return true; } catch { return false; } };
 const candidateRoute=shape({providerId:id,modelId:text(200,1),endpoint:text(2048,1),authMethod:choice(['api_key','oauth','none']),apiMode:choice(['openai_chat_completions','openai_responses','custom_openai_compatible']),allowPrivateEndpoint:boolean},{enableNetwork:boolean,contextWindowTokens:integer(1,1000000000),maxTokens:integer(1,1000000000)});
-const modelRouteDraftShape=shape({draftId:id,expiresInMs:integer(1,900000),credentialState:choice(['staged','existing','not_required']),role:choice(['primary','fallback','fallback_order','auxiliary','auxiliary_mode'])},{route:candidateRoute,slot:choice(AUXILIARY_SLOTS)});
+const modelRouteDraftShape=shape({draftId:id,expiresInMs:integer(1,900000),credentialState:choice(['staged','existing','not_required']),role:choice(['provider','primary','fallback','fallback_order','auxiliary','auxiliary_mode'])},{route:candidateRoute,slot:choice(AUXILIARY_SLOTS)});
 const modelRouteDraft:Check=v=>modelRouteDraftShape(v)&&isRecord(v)&&(['fallback_order','auxiliary_mode'].includes(String(v.role))?v.route===undefined:candidateRoute(v.route))&&(['auxiliary','auxiliary_mode'].includes(String(v.role))?choice(AUXILIARY_SLOTS)(v.slot):v.slot===undefined);
 const modelDraftBinding=shape({draftId:id,windowId:id,generation:integer(1)});
 const connectionOperation=shape({operationId:id,action:text(80,1),state:choice(['completed','failed','uncertain','unknown'])});
@@ -131,7 +131,7 @@ const contracts: { [M in keyof MethodContracts]: { params: Check; result: Check 
   "diff.patch":{params:shape({target,path:text(1024,1),stage:choice(['staged','unstaged','untracked'])}),result:shape({path:text(1024,1),stage:choice(['staged','unstaged','untracked']),binary:boolean,text:nullable(text(16384)),truncated:boolean})},
   "files.list":{params:shape({target,path:text(1024,1)},{cursor:text(1024,1)}),result:shape({items:array(shape({path:text(1024,1),name:text(255,1),kind:choice(['file','directory','symlink','special'])})),truncated:boolean},{nextCursor:text(1024,1)})},
   "files.preview":{params:shape({target,path:text(1024,1)}),result:shape({path:text(1024,1),size:integer(),binary:boolean,text:nullable(text(16384)),truncated:boolean})},
-  "models.reviewConfigured": {params:shape({windowId:id,generation:integer(1),providerId:id,modelId:text(200,1),role:choice(["primary","fallback","auxiliary"])},{slot:choice(AUXILIARY_SLOTS),fallbackToMain:boolean}),result:modelRouteDraft},
+  "models.reviewConfigured": {params:shape({windowId:id,generation:integer(1),providerId:id,modelId:text(200,1),role:choice(["provider","primary","fallback","auxiliary"])},{slot:choice(AUXILIARY_SLOTS),fallbackToMain:boolean}),result:modelRouteDraft},
   "models.validateRoute": {params:shape({route:candidateRoute}),result:shape({valid:v=>v===true})},
   "models.refreshCatalog": {params:shape({networkApproved:v=>v===true}),result:shape({refreshed:boolean})},
   "models.oauthStart": {params:shape({windowId:id,generation:integer(1)}),result:oauthStatus},
@@ -167,6 +167,7 @@ const contracts: { [M in keyof MethodContracts]: { params: Check; result: Check 
   "models.fallbacks": {params:shape({}),result:shape({revision:id,items:array(shape({index:integer(0,31),providerId:id,modelId:text(200,1)}),32)})},
   "models.reviewFallback": {params:shape({windowId:id,generation:integer(1),route:candidateRoute},{candidateId:id}),result:modelRouteDraft},
   "models.reviewFallbackOrder": {params:shape({windowId:id,generation:integer(1),revision:id,order:unique(integer(0,31),32)}),result:modelRouteDraft},
+  "models.reviewProvider": {params:shape({windowId:id,generation:integer(1),route:candidateRoute},{candidateId:id}),result:modelRouteDraft},
   "models.reviewPrimary": {params:shape({windowId:id,generation:integer(1),route:candidateRoute},{candidateId:id}),result:modelRouteDraft},
   "models.applyDraft": {params:modelDraftBinding,result:modelApplyReceipt},
  'settings.workspaces':{params:shape({}),result:shape({items:array(shape({id,alias:text(64,1),path:text(4096,1),trusted:boolean,revision:integer(1)}),100),truncated:boolean})},
@@ -315,13 +316,13 @@ export function validateControlResponse<M extends keyof MethodContracts>(value: 
         cursor.instanceId !== context!.instanceId || cursor.streamId !== request.params.after.streamId || cursor.sequence !== request.params.after.sequence) throw new ControlProtocolError("-32007");
     }
     if(request.method==='models.reviewConfigured' && (result.role!==request.params.role || result.slot!==request.params.slot || (result.route as CandidateRoute).providerId!==request.params.providerId || (result.route as CandidateRoute).modelId!==request.params.modelId))throw new ControlProtocolError('-32003');
-    const expectedRole:Record<string,string>={'models.reviewPrimary':'primary','models.reviewFallback':'fallback','models.reviewFallbackOrder':'fallback_order','models.reviewAuxiliary':'auxiliary','models.reviewAuxiliaryMode':'auxiliary_mode'};
+    const expectedRole:Record<string,string>={'models.reviewProvider':'provider','models.reviewPrimary':'primary','models.reviewFallback':'fallback','models.reviewFallbackOrder':'fallback_order','models.reviewAuxiliary':'auxiliary','models.reviewAuxiliaryMode':'auxiliary_mode'};
     const requiredRole=expectedRole[request.method];
     if(requiredRole && result.role!==requiredRole)throw new ControlProtocolError('-32003');
     if ((request.method==='models.reviewAuxiliary'||request.method==='models.reviewAuxiliaryMode') && result.slot!==request.params.slot)throw new ControlProtocolError('-32003');
     if (request.method === 'models.inspectApply' && request.params.operationId!==undefined && result.operationId !== request.params.operationId) throw new ControlProtocolError('-32003');
     if (request.method === 'models.applyDraft' && result.operationId !== request.params.draftId) throw new ControlProtocolError('-32003');
-    if ((request.method === 'models.reviewPrimary' || request.method === 'models.reviewFallback' || request.method === 'models.reviewAuxiliary') && candidateRouteBinding(result.route as CandidateRoute) !== candidateRouteBinding(request.params.route)) throw new ControlProtocolError('-32003');
+    if ((request.method === 'models.reviewProvider' || request.method === 'models.reviewPrimary' || request.method === 'models.reviewFallback' || request.method === 'models.reviewAuxiliary') && candidateRouteBinding(result.route as CandidateRoute) !== candidateRouteBinding(request.params.route)) throw new ControlProtocolError('-32003');
     if ("operationId" in request.params && 'sessionId' in request.params && 'target' in request.params) {
       const receipt = value.result as unknown as OperationReceipt;
       const method = request.method === "operations.inspect" ? request.params.method : request.method;

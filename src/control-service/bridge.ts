@@ -140,6 +140,7 @@ export class DesktopBridge {
       'models.fallbacks': async()=>({result:await this.modelSetup.fallbacks()}),
       'models.reviewFallback': async(request)=>{if(request.method!=='models.reviewFallback')throw new ControlProtocolError('-32601');return {result:await this.modelSetup.review(request.params,'fallback')};},
       'models.reviewFallbackOrder': async(request)=>{if(request.method!=='models.reviewFallbackOrder')throw new ControlProtocolError('-32601');return {result:await this.modelSetup.reviewFallbackOrder(request.params)};},
+      'models.reviewProvider': async(request)=>{if(request.method!=='models.reviewProvider')throw new ControlProtocolError('-32601');return {result:await this.modelSetup.review(request.params,'provider')};},
       'models.reviewPrimary': async(request) => {if(request.method!=='models.reviewPrimary')throw new ControlProtocolError('-32601');return {result:await this.modelSetup.review(request.params)};},
       'settings.workspaces':async()=>({result:await this.settingsActions.workspaces()}),
       'settings.reviewAction':async request=>{if(request.method!=='settings.reviewAction')throw new ControlProtocolError('-32601');return {result:await this.settingsActions.review(request.params)};},

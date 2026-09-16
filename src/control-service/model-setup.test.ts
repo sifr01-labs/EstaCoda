@@ -127,3 +127,51 @@ it('reconciles the latest saved Apply after service restart without crossing pro
  const homeDir=await mkdtemp('/tmp/ec-restart-receipt-'),input={homeDir,profileId:'p'},candidates=new CredentialCandidates('p','b');let setup=new ModelSetup(input,candidates,()=>{});
  try{const draft=await setup.review({windowId:'w',generation:1,route:{providerId:'local',modelId:'test-chat',endpoint:'http://localhost:11434/v1',authMethod:'none',apiMode:'custom_openai_compatible',allowPrivateEndpoint:true}});await setup.apply({windowId:'w',generation:1,draftId:draft.draftId},new AbortController().signal);setup.dispose();setup=new ModelSetup(input,candidates,()=>{});expect(await setup.inspect()).toMatchObject({operationId:draft.draftId,state:'applied'});const otherCandidates=new CredentialCandidates('other','c'),other=new ModelSetup({homeDir,profileId:'other'},otherCandidates,()=>{});try{expect(await other.inspect()).toMatchObject({state:'unknown',operationId:'none'});}finally{other.dispose();otherCandidates.dispose();}}finally{setup.dispose();candidates.dispose();await rm(homeDir,{recursive:true,force:true});}
 });
+
+it('adds a provider through reviewed apply without replacing any model selections or credentials',async()=>{
+ const homeDir=await mkdtemp('/tmp/ec-provider-only-'),input={homeDir,profileId:'p'},paths=resolveProfileStateHome(input);
+ const candidates=new CredentialCandidates('p','b'),setup=new ModelSetup(input,candidates,()=>{});
+ const original={model:{provider:'local',id:'primary',fallbacks:[{provider:'local',id:'backup'}]},providers:{local:{baseUrl:'http://127.0.0.1:8080/v1',authMethod:'none',enableNetwork:true,models:['primary','backup']}},auxiliaryModels:{assessor:{provider:'main',enabled:true},vision:{provider:'main',enabled:true}}};
+ try{
+  await mkdir(paths.profileRoot,{recursive:true});await writeFile(paths.configPath,JSON.stringify(original));
+  const route:CandidateRoute={providerId:'kimi',modelId:'kimi-k2',endpoint:'https://api.moonshot.ai/v1',apiMode:'openai_chat_completions',authMethod:'api_key',allowPrivateEndpoint:false};
+  const scope:CandidateScope={windowId:'w',generation:1,purpose:'provider',providerId:'kimi',authMethod:'api_key',endpoint:route.endpoint};
+  await expect(setup.review({windowId:'w',generation:1,route:{...route,maxTokens:512},candidateId:candidates.stage(scope,'synthetic-unused-limits')},'provider')).rejects.toThrow();
+  const cancelled=await setup.review({windowId:'w',generation:1,route,candidateId:candidates.stage(scope,'synthetic-cancelled-key')},'provider');
+  expect(cancelled.role).toBe('provider');expect(setup.cancel({draftId:cancelled.draftId,windowId:'w',generation:1})).toEqual({cancelled:true});
+  expect(JSON.parse(await readFile(paths.configPath,'utf8'))).toEqual(original);await expect(readFile(paths.envPath)).rejects.toThrow();
+  const draft=await setup.review({windowId:'w',generation:1,route,candidateId:candidates.stage(scope,'synthetic-provider-key')},'provider');
+  await setup.apply({draftId:draft.draftId,windowId:'w',generation:1},new AbortController().signal);
+  const saved=JSON.parse(await readFile(paths.configPath,'utf8'));expect(saved.model).toEqual(original.model);expect(saved.auxiliaryModels).toEqual(original.auxiliaryModels);expect(saved.providers.local).toEqual(original.providers.local);expect(saved.providers.kimi.models).toContain('kimi-k2');
+  expect(await readFile(paths.envPath,'utf8')).toContain('synthetic-provider-key');expect(JSON.stringify(draft)).not.toContain('synthetic-provider-key');
+  await expect(setup.review({windowId:'w',generation:1,route,candidateId:candidates.stage(scope,'synthetic-overwrite-key')},'provider')).rejects.toThrow();
+  expect(JSON.parse(await readFile(paths.configPath,'utf8'))).toEqual(saved);
+ }finally{setup.dispose();candidates.dispose();await rm(homeDir,{recursive:true,force:true});}
+});
+
+it('reviews another catalog model with the configured provider credential without making it runnable before Apply',async()=>{
+ const homeDir=await mkdtemp('/tmp/ec-catalog-selection-'),input={homeDir,profileId:'p'},paths=resolveProfileStateHome(input);
+ const candidates=new CredentialCandidates('p','b'),setup=new ModelSetup(input,candidates,()=>{});
+ try{
+  await mkdir(paths.profileRoot,{recursive:true});await writeFile(paths.configPath,JSON.stringify({model:{provider:'kimi',id:'kimi-k2'},providers:{kimi:{baseUrl:'https://api.moonshot.ai/v1',authMethod:'api_key',apiKeyEnv:'ORIGINAL_KEY',enableNetwork:true,models:['kimi-k2']}}}));await writeFile(paths.envPath,'ORIGINAL_KEY=synthetic-catalog-key\n');
+  const {captureModelCatalog}=await import('./model-catalog.js');
+  const before=await captureModelCatalog(input),other=before.models.find(m=>m.providerId==='kimi'&&!m.catalog?.configured&&m.catalog?.lifecycle!=='retired');expect(other).toBeDefined();expect(other!.runnable).toBe(false);
+  const draft=await setup.reviewConfigured({windowId:'w',generation:1,providerId:'kimi',modelId:other!.id,role:'auxiliary',slot:'compression',fallbackToMain:true});
+  expect(draft.credentialState).toBe('existing');expect(JSON.parse(await readFile(paths.configPath,'utf8')).model.id).toBe('kimi-k2');
+  expect(await setup.apply({draftId:draft.draftId,windowId:'w',generation:1},new AbortController().signal)).toMatchObject({state:'applied'});
+  const saved=JSON.parse(await readFile(paths.configPath,'utf8'));expect(saved.model.id).toBe('kimi-k2');expect(saved.providers.kimi.apiKeyEnv).toBe('ORIGINAL_KEY');expect(saved.auxiliaryModels.compression).toMatchObject({provider:'kimi',id:other!.id});expect((await captureModelCatalog(input)).models.find(m=>m.providerId==='kimi'&&m.id===other!.id)?.runnable).toBe(true);expect(await readFile(paths.envPath,'utf8')).toBe('ORIGINAL_KEY=synthetic-catalog-key\n');
+ }finally{setup.dispose();candidates.dispose();await rm(homeDir,{recursive:true,force:true});}
+});
+
+it('provider registration preserves primary limits and never adopts a fallback credential',async()=>{
+ const homeDir=await mkdtemp('/tmp/ec-provider-registration-'),input={homeDir,profileId:'p'},paths=resolveProfileStateHome(input),candidates=new CredentialCandidates('p','b'),setup=new ModelSetup(input,candidates,()=>{});
+ const original={model:{provider:'kimi',id:'primary',contextWindowTokens:32000,maxTokens:512,fallbacks:[{provider:'kimi',id:'backup',baseUrl:'https://api.moonshot.ai/v1',apiKeyEnv:'BACKUP_KEY',contextWindowTokens:16000,maxTokens:256}]},providers:{kimi:{baseUrl:'https://api.moonshot.ai/v1',authMethod:'api_key',apiKeyEnv:'PRIMARY_KEY',enableNetwork:true,models:['primary','backup']}}};
+ try{
+  await mkdir(paths.profileRoot,{recursive:true});await writeFile(paths.configPath,JSON.stringify(original));const env='PRIMARY_KEY=synthetic-primary\nBACKUP_KEY=synthetic-backup\n';await writeFile(paths.envPath,env);
+  const draft=await setup.reviewConfigured({windowId:'w',generation:1,providerId:'kimi',modelId:'primary',role:'provider'});expect(draft.route?.contextWindowTokens).toBeUndefined();expect(draft.route?.maxTokens).toBeUndefined();
+   expect(await setup.apply({windowId:'w',generation:1,draftId:draft.draftId},new AbortController().signal)).toMatchObject({state:'applied'});
+   const saved=JSON.parse(await readFile(paths.configPath,'utf8'));expect(saved.model).toEqual(original.model);expect(saved.providers.kimi.apiKeyEnv).toBe('PRIMARY_KEY');expect(await readFile(paths.envPath,'utf8')).toBe(env);
+  // Two credential identities for the same model remain ambiguous; do not choose one implicitly.
+  const beforeRejected=await readFile(paths.configPath,'utf8');await expect(setup.reviewConfigured({windowId:'w',generation:1,providerId:'kimi',modelId:'backup',role:'provider'})).rejects.toThrow();expect(await readFile(paths.configPath,'utf8')).toBe(beforeRejected);expect(await readFile(paths.envPath,'utf8')).toBe(env);
+ }finally{setup.dispose();candidates.dispose();await rm(homeDir,{recursive:true,force:true});}
+});

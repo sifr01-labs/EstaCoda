@@ -79,3 +79,10 @@ it('recovers pending model overrides across Main restart and keeps profile journ
  f.connection.state.profileId='p';state='completed';expect(await restarted.inspectOverride('session:s')).toMatchObject({state:'completed'});
  expect(f.calls.filter(call=>call.method==='sessions.setModel')).toHaveLength(1);
 });
+
+it('uses provider registration instead of primary assignment when setup has no route role',async()=>{
+ const f=fixture();const {setupId}=await f.setup.begin(route);await f.setup.stage(setupId);
+ await f.setup.review(setupId,{role:'provider'});
+ expect(f.calls.some(c=>c.method==='models.reviewProvider')).toBe(true);
+ expect(f.calls.some(c=>c.method==='models.reviewPrimary')).toBe(false);
+});

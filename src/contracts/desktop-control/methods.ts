@@ -133,6 +133,7 @@ export type MethodContracts = {
   "models.fallbacks": {params:Record<string,never>;result:FallbackList};
   "models.reviewFallback": {params:Omit<VerifyCandidateParams,'spendApproved'>;result:ModelRouteDraft};
   "models.reviewFallbackOrder": {params:FallbackOrderParams;result:ModelRouteDraft};
+  "models.reviewProvider": {params: Omit<VerifyCandidateParams,'spendApproved'>;result:ModelRouteDraft};
   "models.reviewPrimary": {params: Omit<VerifyCandidateParams,'spendApproved'>;result:ModelRouteDraft};
   "models.applyDraft": {params:ModelDraftBinding;result:ModelApplyReceipt};
   "models.cancelDraft": {params:ModelDraftBinding;result:{cancelled:boolean}};

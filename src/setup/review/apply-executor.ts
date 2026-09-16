@@ -434,6 +434,7 @@ async function applyProviderRoute(
       models: [model],
     },
   });
+  if (operation.review.values.providerOnly === true) return;
   await setPreferredModelRoute({
     ...target,
     input: {

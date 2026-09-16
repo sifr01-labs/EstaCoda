@@ -27,10 +27,11 @@ export class ModelSetup {
   #closed=false;
   #fallbackListing:{projection:FallbackList;snapshot:ProfileApplySnapshot}|undefined;
   constructor(readonly input:{homeDir:string;profileId:string},readonly candidates:CredentialCandidates,readonly changed:()=>void|Promise<void>){}
-  async review(params:MethodContracts['models.reviewPrimary']['params'],role:'primary'|'fallback'|'auxiliary'='primary',auxiliary?:{slot:AuxiliarySlot;fallbackToMain:boolean},existing?:{snapshot:ProfileApplySnapshot;credentialEnv?:string}):Promise<ModelRouteDraft>{
+  async review(params:MethodContracts['models.reviewPrimary']['params'],role:'provider'|'primary'|'fallback'|'auxiliary'='primary',auxiliary?:{slot:AuxiliarySlot;fallbackToMain:boolean},existing?:{snapshot:ProfileApplySnapshot;credentialEnv?:string}):Promise<ModelRouteDraft>{
     const windowSignal=this.candidates.windowSignal(params.windowId,params.generation);
     for(const [id,draft] of this.#drafts){if(this.#drafts.size<32)break;if(draft.consumed)this.#drafts.delete(id);}
     if(this.#closed || this.#drafts.size>=32)throw new ControlProtocolError('-32009');
+    if(role==='provider' && (params.route.contextWindowTokens!==undefined || params.route.maxTokens!==undefined))throw new ControlProtocolError('-32602');
     if(role==='auxiliary' && params.route.maxTokens!==undefined)throw new ControlProtocolError('-32602');
     if(role==='auxiliary' && (!auxiliary || !AUXILIARY_SLOTS.includes(auxiliary.slot)))throw new ControlProtocolError('-32602');
     validateCandidateRequest({...params,...(existing&&params.route.authMethod!=='none'?{candidateId:'configured'}:{}),spendApproved:true});
@@ -39,6 +40,7 @@ export class ModelSetup {
     const snapshot=await captureProfileApplySnapshot(this.input);
     if(existing && JSON.stringify(snapshot.files)!==JSON.stringify(existing.snapshot.files))throw new ControlProtocolError('-32007');
     const loaded=await loadRuntimeConfig({...this.input,workspaceRoot:this.input.homeDir,configurationInspection:true});
+    if(role==='provider' && loaded.config.providers?.[params.route.providerId] && !existing)throw new ControlProtocolError('-32602');
     if(role==='primary' && loaded.modelFallbackRoutes.some(route=>route.provider===params.route.providerId&&route.id===params.route.modelId&&new URL(route.baseUrl??getProviderMetadata(route.provider).defaultBaseUrl??'http://invalid').href.replace(/\/$/,'')===new URL(params.route.endpoint).href.replace(/\/$/,'')))throw new ControlProtocolError('-32602');
     if(role==='fallback'||role==='auxiliary'){
       const identity=(provider:string,id:string,endpoint?:string)=>JSON.stringify([provider,id,new URL(endpoint ?? getProviderMetadata(provider).defaultBaseUrl ?? 'http://invalid').href.replace(/\/$/,'')]);
@@ -85,14 +87,14 @@ export class ModelSetup {
     const loaded=await loadRuntimeConfig({...this.input,workspaceRoot:this.input.homeDir,configurationInspection:true});
     const presence=await captureCredentialPresence(loaded);
     const catalog=await createModelSelectionCatalog({...this.input,config:loaded.config,providerRegistry:loaded.providerRegistry,allowNetwork:false,credentialReady:async(provider,apiKeyEnv)=>['present','not_required'].includes(presence(provider,{apiKeyEnv}))});
-    const rows=(await catalog.listModels({configuredOnly:true,executableOnly:true,provider:params.providerId})).filter(row=>row.id===params.modelId&&!row.catalogOnly&&row.lifecycle!=='retired');
+    const rows=(await catalog.listModels({executableOnly:true,provider:params.providerId})).filter(row=>row.id===params.modelId&&!row.catalogOnly&&row.lifecycle!=='retired'&&(row.usageClass==='primary-chat'||row.configured||row.source==='manual'));
     if(rows.length!==1)throw new ControlProtocolError('-32602');
     const row=rows[0]!,provider=loaded.config.providers?.[params.providerId],metadata=getProviderMetadata(params.providerId);
     if(!provider?.enableNetwork)throw new ControlProtocolError('-32602');
-    const endpoint=row.baseUrl??provider.baseUrl??metadata.defaultBaseUrl;if(!endpoint)throw new ControlProtocolError('-32602');
+    const endpoint=params.role==='provider'?(provider.baseUrl??metadata.defaultBaseUrl):(row.baseUrl??provider.baseUrl??metadata.defaultBaseUrl);if(!endpoint)throw new ControlProtocolError('-32602');
     const fallback=loaded.modelFallbackRoutes.find(route=>route.provider===params.providerId&&route.id===params.modelId&&(route.baseUrl??metadata.defaultBaseUrl)===endpoint);
-    const limits=fallback??(loaded.primaryModelRoute.provider===params.providerId&&loaded.primaryModelRoute.id===params.modelId?loaded.config.model:undefined);
-    const authMethod=provider.authMethod??metadata.defaultAuthMethod,credentialEnv=fallback?.apiKeyEnv??provider.apiKeyEnv??metadata.defaultApiKeyEnv;
+    const limits=params.role==='provider'?undefined:fallback??(loaded.primaryModelRoute.provider===params.providerId&&loaded.primaryModelRoute.id===params.modelId?loaded.config.model:undefined);
+    const authMethod=provider.authMethod??metadata.defaultAuthMethod,credentialEnv=(params.role==='provider'?undefined:fallback?.apiKeyEnv)??provider.apiKeyEnv??metadata.defaultApiKeyEnv;
     if(!['present','not_required'].includes(presence(params.providerId,{apiKeyEnv:credentialEnv,authMethod})))throw new ControlProtocolError('-32602');
     const route:CandidateRoute={providerId:params.providerId,modelId:params.modelId,endpoint,authMethod:authMethod==='none'?'none':authMethod==='api_key'?'api_key':'oauth',apiMode:(provider.apiMode??metadata.apiMode) as CandidateRoute['apiMode'],allowPrivateEndpoint:true,enableNetwork:true,...(limits?.contextWindowTokens?{contextWindowTokens:limits.contextWindowTokens}:{}),...(params.role!=='auxiliary'&&limits?.maxTokens?{maxTokens:limits.maxTokens}:{})};
     return this.review({windowId:params.windowId,generation:params.generation,route},params.role,params.role==='auxiliary'?{slot:params.slot!,fallbackToMain:params.fallbackToMain===true}:undefined,{snapshot,credentialEnv:route.authMethod==='api_key'?credentialEnv:undefined});

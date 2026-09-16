@@ -9,3 +9,5 @@ import './styles/native.css';
 import './styles/theme-previews.css';import './styles/refinement.css';
 const adapter=liveAdapter();
 createRoot(document.getElementById('root')!).render(<React.StrictMode><AppearanceProvider store={adapter.appearance}><App adapter={adapter}/></AppearanceProvider></React.StrictMode>);
+
+import './styles/models.css';

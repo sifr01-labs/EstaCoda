@@ -482,3 +482,25 @@ pnpm run provider:hardening
 ```
 
 This rotates the selected profile provider route across the acceptance set, runs live diagnostics, captures results, and restores the original config.
+
+### Desktop model settings
+
+Models & providers presents the primary model, ordered fallbacks, specialist selections,
+and configured providers together. The provider browser prioritizes configured providers
+and providers supported by Desktop setup; catalog-only entries remain discoverable without
+implying that they can execute. Each specialist offers primary, automatic, a dedicated model,
+or disabled mode. Automatic resolution is distinct from following the primary model.
+
+Model cards and provider model lists display catalog context, capabilities, and separate
+input/output prices in USD per million tokens. Missing prices remain unavailable; zero is
+shown as zero. These are catalog rates, not an account-specific quote or a live connection
+test. Refresh fetches public metadata only. Additions are compared against the complete
+previous catalog snapshot and do not change model selections.
+
+Choosing a model retains the originating primary, fallback, or specialist role through
+private credential setup and reviewed apply. Adding a provider uses a separate reviewed
+registration that preserves model selections. Existing provider credentials can be reused
+for supported catalog models after review; catalog visibility alone does not make a model
+runnable. Provider-only registration cannot overwrite an existing provider's credentials.
+Cancellation, stale-profile protection, optional paid verification, and apply reconciliation
+continue through the shared setup transaction.
