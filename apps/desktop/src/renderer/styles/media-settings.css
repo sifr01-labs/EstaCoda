@@ -37,3 +37,14 @@
 .ec-media-page .ec-settings-save{margin-top:25px}
 @media(max-width:600px){.ec-media-row{gap:12px;flex-wrap:wrap}.ec-media-inline bdi{max-width:160px}.ec-media-page .ec-primary-model{display:grid;grid-template-columns:40px minmax(0,1fr);gap:12px}.ec-media-page .ec-primary-model>.ec-btn{grid-column:2;justify-self:start;margin:0}.ec-media-page .ec-model-choice{gap:10px}.ec-media-page .ec-model-choice>.ec-model-grow{flex-basis:auto}.ec-media-page .ec-setting-control .ec-setting-value{max-width:100%}}
 @media(prefers-reduced-motion:reduce){.ec-media-switch:before{transition:none}}
+
+.ec-media-card-actions{display:flex;align-items:center;gap:8px;flex-shrink:0}
+.ec-voice-install{margin-top:10px;padding:20px;border:1px solid var(--ec-line);border-radius:var(--ec-radius);background:var(--ec-bg);font-size:12px}
+.ec-voice-install-heading{display:flex;align-items:center;gap:9px}.ec-voice-install-heading>svg{color:var(--ec-accent)}
+.ec-voice-install p{color:var(--ec-muted);line-height:1.6;margin:10px 0 16px}.ec-voice-install h3{margin:0}
+.ec-voice-install-facts{display:flex;justify-content:space-between;gap:16px;border-block:1px solid var(--ec-line);padding:12px 0;margin-bottom:12px}
+.ec-voice-install details{color:var(--ec-muted)}.ec-voice-install summary{cursor:pointer}.ec-voice-install li{overflow-wrap:anywhere}
+.ec-voice-install .ec-model-footeractions{margin-top:20px}
+@media(max-width:600px){.ec-media-card-actions{grid-column:2;flex-wrap:wrap}.ec-voice-install{padding:16px}}
+#ec-branded-workspace .ec-voice-install h3{font-size:14px;font-weight:600;margin:0}
+#ec-branded-workspace .ec-voice-install p{margin:10px 0 16px;line-height:1.6}
