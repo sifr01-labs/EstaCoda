@@ -15,6 +15,13 @@ import {setupArabic} from './setup.js';
 import {workArabic} from './work.js';
 /** Product-owned message keys. Never pass provider output or backend error text here. */
 export const arabic = {
+ 'Dismiss':'إغلاق',
+ 'Your bot':'روبوتك',
+ 'Telegram settings saved':'حُفظت إعدادات تيليغرام',
+ 'Sending message…':'جارٍ إرسال الرسالة…',
+ 'Message sent':'أُرسلت الرسالة',
+ 'Delivery unconfirmed':'لم يتأكد التسليم',
+
  ...composerArabic,
  ...conversationActivityArabic,
  ...workspaceExperienceArabic,

@@ -67,3 +67,9 @@
 
 #ec-branded-workspace .ec-run-files>button:last-child:nth-child(odd){grid-column:1/-1;border-inline-end:0}
 #ec-branded-workspace .ec-run-answer:hover>.ec-message-actions{opacity:1}
+
+#ec-branded-workspace .ec-pending-message{display:flex;flex-direction:column;align-items:flex-end;gap:8px;padding:20px 0;max-width:850px;width:100%;margin-inline:auto}
+#ec-branded-workspace .ec-pending-message .ec-usernote{margin:0;white-space:pre-wrap;overflow-wrap:anywhere}
+#ec-branded-workspace .ec-pending-message>.ec-footnote{padding-inline:12px;font-size:11px}
+#ec-branded-workspace .ec-pending-attachments{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px}
+#ec-branded-workspace .ec-pending-attachments>span{display:flex;align-items:center;gap:6px;border:1px solid var(--ec-line);padding:6px 9px;border-radius:8px;font-size:12px;min-width:0}

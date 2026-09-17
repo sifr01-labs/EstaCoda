@@ -600,11 +600,14 @@ async function probeLaunchd(options: {
   const label = launchdLabelForProfile(options.profileId);
   const result = await runCommand("launchctl", ["list", label]);
   if (!result.ok) {
+    // bootout stops the job but leaves its installed plist available to bootstrap.
+    // An unloaded service must remain startable without reinstalling it.
+    const installed = await stat(launchdPlistPath(options)).then(file => file.isFile()).catch(() => false);
     return {
       kind: "launchd",
-      installed: false,
+      installed,
       scope: "user",
-      activeState: "unknown",
+      activeState: installed ? "inactive" : "unknown",
       unitName: plistNameForProfile(options.profileId),
       profileId: options.profileId,
     };

@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import { chmod, mkdir, mkdtemp, rm, stat, writeFile, readFile, symlink, realpath } from "node:fs/promises";
-import { join } from "node:path";
+import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import { acquireGatewayLock } from "./gateway-lock.js";
 import { resolveProfileStateHome } from "../config/profile-home.js";
@@ -1181,6 +1181,21 @@ describe("service manager", () => {
     expect(calls.map((call) => [call.command, ...call.args])).toEqual([
       ["launchctl", "list", launchdLabelForProfile("default")],
     ]);
+  });
+
+  it("keeps an unloaded launchd service installed so it can start without reinstalling", async () => {
+    const binDir = join(tmpDir, "bin");
+    await addExecutable(binDir, "launchctl");
+    process.env.PATH = binDir;
+    setPlatform("darwin");
+    const plist = launchdPlistPath({ serviceUserHomeDir: tmpDir, profileId: "default" });
+    await mkdir(dirname(plist), { recursive: true });
+    await writeFile(plist, "<plist/>");
+    mockSpawn(() => ({ code: 1 }));
+    await expect(probeServiceState({ serviceUserHomeDir: tmpDir, profileId: "default" })).resolves.toMatchObject({
+      installed: true, activeState: "inactive", profileId: "default",
+    });
+    await expect(probeServiceState({ serviceUserHomeDir: tmpDir, profileId: "other" })).resolves.toMatchObject({ installed: false });
   });
 
   it("probeServiceState never throws and keeps system fallback kind/scope consistent", async () => {

@@ -4,7 +4,11 @@ The composer accepts native file selection and file drops into the same draft. T
 
 Typing `/` opens a keyboard-navigable list of applicable desktop actions. Image and speech choices become removable draft chips; their instructions are added on submission through the existing provider/tool execution path. Model, permissions, and connections commands open existing controls and do not change settings themselves. `/reload-mcp` retains its existing reconnect behavior. These suggestions are desktop actions, not a claim that all CLI commands are supported.
 
-During an active conversation, follow-ups use Queue. Stop is labeled beside the current work state and is available only when the canonical work projection allows cancellation. Stopping pauses queued delivery; the saved follow-up remains editable. New queued drafts have separate staging IDs, so their attachment references remain bound to the correct submission. Restart restores unsent text and creation intent, never attachment handles, image previews, or permission grants.
+During an active conversation, follow-ups use Queue. Stop occupies the trailing action slot inside the composer and is available only when the canonical work projection allows cancellation. Stopping pauses queued delivery; the saved follow-up remains editable. New queued drafts have separate staging IDs, so their attachment references remain bound to the correct submission. Restart restores unsent text and creation intent, never attachment handles, image previews, or permission grants.
+
+## Message feedback
+
+Submitting a conversation immediately displays a local message bubble with a Sending status. The composer clears visually while the request is pending; the original draft is retained until the backend acknowledges it. A confirmed submission transitions to the recorded conversation without a duplicate bubble. A lost response shows Delivery unconfirmed, restores the visible draft, and offers the existing read-only status check. It never automatically resends. These previews are scoped to the selected conversation and profile, and are not stored as canonical history.
 
 ## Attachment boundary
 

@@ -32,3 +32,27 @@
 @media(max-width:600px){.ec-web-chat select{min-width:0;max-width:calc(100% - 60px)}.ec-connection-detail{padding:16px}.ec-connections-page .ec-capability-card{display:grid;grid-template-columns:40px minmax(0,1fr)}.ec-connections-page .ec-capability-card>.ec-btn{grid-column:2;justify-self:start}.ec-connection-detail .ec-media-row{flex-wrap:wrap}}
 
 #ec-branded-workspace .ec-connections-page.ec-media-page>div:not([hidden])+section{margin-top:28px}
+
+/* Telegram follows the same quiet sections and aligned controls as capability settings. */
+#ec-branded-workspace .ec-telegram-modal{width:min(620px,100%);padding:0;overflow:auto;max-height:calc(100dvh - 48px)}
+#ec-branded-workspace .ec-telegram-modal>.ec-modalhead{padding:24px 28px;margin:0;border-bottom:1px solid var(--ec-line);position:sticky;top:0;background:var(--ec-bg);z-index:1}
+#ec-branded-workspace .ec-telegram-heading{display:flex;align-items:center;gap:14px}
+#ec-branded-workspace .ec-telegram-heading h2{margin:0 0 5px;font-size:20px;letter-spacing:-.5px}
+#ec-branded-workspace .ec-telegram-mark{display:grid;place-items:center;width:42px;height:42px;border:1px solid var(--ec-line);border-radius:12px;color:var(--ec-accent);background:var(--ec-panel)}
+#ec-branded-workspace .ec-telegram-body{padding:24px 28px}
+#ec-branded-workspace .ec-telegram-sectionhead{display:flex;align-items:center;gap:10px;margin-bottom:12px}
+#ec-branded-workspace .ec-telegram-sectionhead h3{margin:0;font-size:14px;font-weight:600}
+#ec-branded-workspace .ec-telegram-sectionhead>span,#ec-branded-workspace .ec-telegram-step{font-size:11px;font-variant-numeric:tabular-nums;color:var(--ec-muted);font-weight:400;margin-inline-end:10px}
+#ec-branded-workspace .ec-telegram-sectionhead>span{margin:0}
+#ec-branded-workspace .ec-telegram-modal fieldset.ec-telegram-section{border-top:1px solid var(--ec-line);margin:24px 0 0;padding-top:20px}
+#ec-branded-workspace .ec-telegram-modal fieldset.ec-telegram-section legend{padding-inline-end:12px;margin:0}
+#ec-branded-workspace .ec-telegram-ids{display:grid;grid-template-columns:1fr 1fr;gap:16px}
+#ec-branded-workspace .ec-telegram-ids label{display:grid;gap:8px}
+#ec-branded-workspace .ec-telegram-footer{display:flex;align-items:center;justify-content:space-between;gap:12px;border-top:1px solid var(--ec-line);padding-top:20px;margin-top:24px}
+#ec-branded-workspace .ec-telegram-saved{display:flex;align-items:center;gap:10px;padding:12px 16px;background:var(--ec-panel);border:1px solid var(--ec-line);border-radius:12px;margin:0 0 24px;font-size:13px}
+#ec-branded-workspace .ec-telegram-saved>svg{color:var(--ec-ok)}
+#ec-branded-workspace .ec-telegram-saved>.ec-btn{margin-inline-start:auto}
+@media(max-width:540px){#ec-branded-workspace .ec-telegram-modal>.ec-modalhead{padding:18px}#ec-branded-workspace .ec-telegram-body{padding:18px}#ec-branded-workspace .ec-telegram-ids{grid-template-columns:1fr;gap:0}}
+
+#ec-branded-workspace .ec-telegram-backdrop{position:fixed;padding:24px;align-items:center}
+@media(max-width:540px){#ec-branded-workspace .ec-telegram-backdrop{padding:12px}#ec-branded-workspace .ec-telegram-modal{max-height:calc(100dvh - 24px)}}
