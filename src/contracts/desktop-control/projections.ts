@@ -1,3 +1,4 @@
+import type {ArtifactReference} from './artifacts.js';
 export const ACTION_IDS = ['sessions.resume', 'sessions.send', 'sessions.cancelTurn', 'tasks.pause', 'tasks.resume', 'tasks.cancel', 'tasks.retry', 'tasks.guide',
   'approve_once', 'reject', 'open_work', 'inspect_result', 'review_setup', 'review_trust', 'review_evolution', 'review_delivery'] as const;
 export type ActionId = typeof ACTION_IDS[number];
@@ -21,11 +22,12 @@ export type UsageProjection = { reportedTokens: number | null; cost: { amount: n
 export type EvidenceProjection = { state: "verified" | "unverified" | "partial" | "failed"; summary: string; artifactIds: string[] };
 type ActivityBase = { id: string; workId: string; profileId: string; sequence: number; timestamp: number };
 export type ActivityProjection = ActivityBase & (
-  | { kind: "message"; role: "user" | "assistant"; text: string }
+  | { kind: "message"; role: "user" | "assistant"; text: string; phase?: "progress" | "response" }
   | { kind: "assistant_delta"; text: string }
-  | { kind: "tool"; name: string; state: "running" | "completed" | "failed" | "cancelled"; summary: string }
+  | { kind: "tool"; name: string; state: "running" | "completed" | "failed" | "cancelled"; summary: string; callId?: string }
+  | { kind: "artifact"; reference: ArtifactReference; label: string; bytes: number; mimeType: string }
   | { kind: "plan"; steps: { id: string; title: string; status: "pending" | "running" | "completed" | "failed" }[] }
-  | { kind: "result"; status: WorkDisplayStatus; evidence: EvidenceProjection; usage: UsageProjection }
+  | { kind: "result"; status: WorkDisplayStatus; evidence: EvidenceProjection; usage: UsageProjection; recoveredErrors?: boolean }
   | { kind: "status"; status: WorkDisplayStatus; reason?: string }
 );
 export type InboxProjection = {

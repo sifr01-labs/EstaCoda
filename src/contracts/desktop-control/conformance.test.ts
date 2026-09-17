@@ -22,9 +22,10 @@ const initialize: InitializeParams = { protocolVersion: { major: 1, minor: 0 }, 
 const initialized = negotiateControl(initialize, { profileId: "p", instanceId: "b", serviceVersion: "test", implemented: context.capabilities });
 const activityBase = { id: "event", workId: "w", profileId: "p", sequence: 1, timestamp: 1 };
 const activities: ActivityProjection[] = [
-  { ...activityBase, kind: "message", role: "user", text: "مرحبا 🌊" },
+  { ...activityBase, kind: "message", role: "user", text: "مرحبا 🌊",phase:"response" },
   { ...activityBase, kind: "assistant_delta", text: "Working" },
-  { ...activityBase, kind: "tool", name: "files.read", state: "completed", summary: "Read source" },
+  { ...activityBase, kind: "tool", name: "files.read", state: "completed", summary: "Read source",callId:"call" },
+  { ...activityBase, kind: "artifact", reference:{source:"session",ownerId:"s",artifactId:"f"},label:"report.yaml",bytes:24,mimeType:"text/yaml" },
   { ...activityBase, kind: "plan", steps: [{ id: "step", title: "Inspect", status: "completed" }] },
   { ...activityBase, kind: "result", status: "partial", evidence: { state: "unverified", summary: "Not verified", artifactIds: [] }, usage: { reportedTokens: null, cost: null } },
   { ...activityBase, kind: "status", status: "needs_attention", reason: "Waiting for approval" },

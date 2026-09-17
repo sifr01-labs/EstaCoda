@@ -22,9 +22,11 @@ export function historyPage(db: SQLiteDatabase, session: SessionRecord, boundary
     ) order by created_at, source, row limit ? offset ?`).all(session.id, boundary.messages, session.id, boundary.events, limit, offset);
   return rows.flatMap(({ source, row }, index) => {
     if (source === 'message') {
-      const message = db.query<{ id: string; role: 'user' | 'agent'; content: string; createdAt: string }>(
-        'select id, role, substr(content,1,16384) as content, created_at as createdAt from messages where session_id=? and rowid=?').get(session.id, row)!;
-      return sessionActivity(session, [{ ...message, sessionId: session.id }]).map(item => ({ ...item, sequence: offset + index }));
+      const message = db.query<{ id: string; role: 'user' | 'agent'; content: string; createdAt: string; progress:number }>(
+        `select id, role, substr(content,1,16384) as content, created_at as createdAt,
+        case when json_valid(metadata_json) then json_extract(metadata_json,'$.kind')='provider-tool-call-turn' else 0 end as progress
+        from messages where session_id=? and rowid=?`).get(session.id, row)!;
+      return sessionActivity(session, [{ ...message, sessionId: session.id,metadata:message.progress?{kind:'provider-tool-call-turn'}:{} }]).map(item => ({ ...item, sequence: offset + index }));
     }
     return appendSessionEvents(session, [], sessionDisplayEvents(db, session.id, { row, limit: 1 })).map(item => ({ ...item, sequence: offset + index }));
   });

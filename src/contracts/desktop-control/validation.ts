@@ -51,11 +51,12 @@ const usage = shape({ reportedTokens: nullable(integer()), cost: nullable(shape(
 const evidence = shape({ state: choice(["verified", "unverified", "partial", "failed"]), summary: text(2_048), artifactIds: unique(id, 100) });
 const activityBase = { id, workId: id, profileId: id, sequence: integer(), timestamp: integer() };
 const activityVariants: Record<string, Check> = {
-  message: shape({ ...activityBase, kind: choice(["message"]), role: choice(["user", "assistant"]), text: text(16_384) }),
+  message: shape({ ...activityBase, kind: choice(["message"]), role: choice(["user", "assistant"]), text: text(16_384) }, {phase:choice(["progress","response"])}),
   assistant_delta: shape({ ...activityBase, kind: choice(["assistant_delta"]), text: text(4_096, 1) }),
-  tool: shape({ ...activityBase, kind: choice(["tool"]), name: text(160, 1), state: choice(["running", "completed", "failed", "cancelled"]), summary: text(2_048) }),
+  tool: shape({ ...activityBase, kind: choice(["tool"]), name: text(160, 1), state: choice(["running", "completed", "failed", "cancelled"]), summary: text(2_048) }, {callId:text(256,1)}),
+  artifact: shape({...activityBase,kind:choice(["artifact"]),reference:shape({source:choice(["session","task"]),ownerId:id,artifactId:id}),label:text(160),bytes:integer(),mimeType:text(160,1)}),
   plan: shape({ ...activityBase, kind: choice(["plan"]), steps: array(shape({ id, title: text(240, 1), status: choice(["pending", "running", "completed", "failed"]) }), 64) }),
-  result: shape({ ...activityBase, kind: choice(["result"]), status: choice(WORK_STATUSES), evidence, usage }),
+  result: shape({ ...activityBase, kind: choice(["result"]), status: choice(WORK_STATUSES), evidence, usage }, {recoveredErrors:boolean}),
   status: shape({ ...activityBase, kind: choice(["status"]), status: choice(WORK_STATUSES) }, { reason: text(2_048) }),
 };
 const activity: Check = (v) => isRecord(v) && typeof v.kind === "string" && Object.hasOwn(activityVariants, v.kind) && activityVariants[v.kind]!(v);

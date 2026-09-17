@@ -1,3 +1,4 @@
+import {createHash} from 'node:crypto';
 import {basename} from 'node:path';
 import type { SessionEvent, SessionMessage, SessionRecord } from '../contracts/session.js';
 import type { ActivityProjection, WorkDisplayStatus, WorkProjection } from '../contracts/desktop-control/index.js';
@@ -24,7 +25,8 @@ export function sessionWork(session: SessionRecord, events: readonly SessionEven
 export function sessionActivity(session: SessionRecord, messages: readonly SessionMessage[]): ActivityProjection[] {
   return messages.filter((message) => message.role === 'user' || message.role === 'agent').map((message, sequence) => ({
     id: `message:${message.id}`, workId: `session:${session.id}`, profileId: session.profileId, sequence,
-    timestamp: timestamp(message.createdAt), kind: 'message', role: message.role === 'user' ? 'user' : 'assistant', text: safeText(message.content, 16_384),
+    timestamp: timestamp(message.createdAt), kind: 'message',
+    ...(message.role === 'agent' ? {phase: message.metadata?.kind === 'provider-tool-call-turn' ? 'progress' as const : 'response' as const} : {}), role: message.role === 'user' ? 'user' : 'assistant', text: safeText(message.content, 16_384),
   }));
 }
 export type DisplayEvent = { id: string; createdAt: string; event: SessionEvent };
@@ -33,14 +35,18 @@ export function appendSessionEvents(session: SessionRecord, activity: ActivityPr
   for (const { id, createdAt, event } of events) {
     const base = { id: `event:${id}`, workId: `session:${session.id}`, profileId: session.profileId, sequence: 0, timestamp: timestamp(createdAt) };
     if (event.kind === 'tool-called' || event.kind === 'tool-result') activity.push({ ...base, kind: 'tool', name: safeText(event.tool, 160),
+      ...(event.toolCallId ? {callId: createHash('sha256').update(event.toolCallId).digest('hex')} : {}),
       state: event.kind === 'tool-called' ? 'running' : event.result.ok ? 'completed' : 'failed',
       summary: event.kind === 'tool-called' ? 'Tool started' : event.result.ok ? 'Tool completed' : 'Tool failed' });
+    else if (event.kind === 'session-artifact-registered' && event.artifact.sessionId === session.id && event.artifact.profileId === session.profileId) activity.push({...base, kind: 'artifact',
+      reference: {source:'session',ownerId:session.id,artifactId:event.artifact.id}, label:safeText(basename(event.artifact.source.filename ?? 'Output'),160),
+      bytes:event.artifact.bytes,mimeType:safeText(event.artifact.mimeType,160)});
     else if ('plan' in event && event.kind.startsWith('execution-plan-') && 'items' in event.plan) activity.push({ ...base, kind: 'plan',
       steps: event.plan.items.slice(0, 64).map((step) => ({ id: step.id, title: safeText(step.content, 240),
         status: step.status === 'completed' ? 'completed' : step.status === 'in_progress' ? 'running' : 'pending' })) });
     else if (event.kind === 'execution-final-outcome-recorded') {
       const status = sessionWork(session, [event], false).status;
-      activity.push({ ...base, kind: 'result', status,
+      activity.push({ ...base, kind: 'result', status, recoveredErrors:event.status === 'completed_with_recovered_errors',
         evidence: { state: status === 'failed' ? 'failed' : status === 'partial' ? 'partial' : 'unverified',
           summary: 'Canonical execution outcome. Inspect evidence before relying on external effects.', artifactIds: [] },
         usage: { reportedTokens: null, cost: null } });

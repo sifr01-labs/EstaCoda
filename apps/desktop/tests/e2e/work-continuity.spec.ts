@@ -78,11 +78,11 @@ test('loaded history and Results survive canonical updates using fresh cursors',
   await expect(page.getByRole('tab',{name:'Results'})).toHaveAttribute('aria-selected','true');
   await page.getByRole('tab',{name:'Conversation',exact:true}).click();
   await expect(page.getByText('History 199',{exact:true})).toBeVisible();
-  await expect(page.locator('section.ec-agent')).toHaveCount(200);
+  await expect(page.locator('section.ec-run-answer')).toHaveCount(200);
   await page.getByRole('button',{name:'Settings',exact:true}).click();
   await page.locator('.ec-navgroup').getByRole('button',{name:'Work',exact:true}).click();
   await page.locator('.ec-collection-row').filter({hasText:'Listed Work'}).click();
-  await expect(page.locator('section.ec-agent')).toHaveCount(200);
+  await expect(page.locator('section.ec-run-answer')).toHaveCount(200);
 });
 
 test('late lookup cannot replace a new selection or cross a profile switch',async({page})=>{
@@ -110,16 +110,16 @@ test('late lookup cannot replace a new selection or cross a profile switch',asyn
 test('late history pages cannot overwrite a refreshed snapshot',async({page})=>{
   await live(page);
   await page.locator('.ec-taskbutton').filter({hasText:'Listed Work'}).click();
-  await expect(page.locator('section.ec-agent')).toHaveCount(100);
+  await expect(page.locator('section.ec-run-answer')).toHaveCount(100);
   await page.evaluate(()=>{(window as any).continuity.delayHistory=true;});
   await page.getByRole('button',{name:'Load more activity'}).click();
   await expect.poll(()=>page.evaluate(()=>(window as any).continuity.reads.includes('1:100'))).toBe(true);
   await page.evaluate(()=>{const c=(window as any).continuity;c.delayHistory=false;c.refresh();});
   await expect(page.getByRole('button',{name:'Load more activity'})).toBeEnabled();
   await page.evaluate(()=>{(window as any).continuity.releaseHistory();});
-  await expect(page.locator('section.ec-agent')).toHaveCount(100);
+  await expect(page.locator('section.ec-run-answer')).toHaveCount(100);
   await page.getByRole('button',{name:'Load more activity'}).click();
-  await expect(page.locator('section.ec-agent')).toHaveCount(200);
+  await expect(page.locator('section.ec-run-answer')).toHaveCount(200);
   await expect(page.getByRole('alert')).toHaveCount(0);
 });
 
@@ -129,7 +129,7 @@ test('activity inspection has an explicit bounded extent',async({page})=>{
   await page.locator('.ec-taskbutton').filter({hasText:'Listed Work'}).click();
   for(let count=200;count<=2000;count+=100){
     await page.getByRole('button',{name:'Load more activity'}).click();
-    await expect(page.locator('section.ec-agent')).toHaveCount(count);
+    await expect(page.locator('section.ec-run-answer')).toHaveCount(count);
   }
   await expect(page.getByRole('button',{name:'First 2,000 activity items shown'})).toBeDisabled();
   expect(await page.evaluate(()=>(window as any).continuity.reads.includes('1:2000'))).toBe(false);

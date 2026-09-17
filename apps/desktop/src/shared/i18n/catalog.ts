@@ -1,3 +1,4 @@
+import {conversationActivityArabic} from './conversation-activity.js';
 import {workspaceExperienceArabic} from './workspace-experience.js';
 import {runtimeSettingsArabic} from './runtime-settings.js';
 import {webSettingsArabic} from './web-settings.js';
@@ -13,6 +14,7 @@ import {setupArabic} from './setup.js';
 import {workArabic} from './work.js';
 /** Product-owned message keys. Never pass provider output or backend error text here. */
 export const arabic = {
+ ...conversationActivityArabic,
  ...workspaceExperienceArabic,
  ...runtimeSettingsArabic,
  ...webSettingsArabic,

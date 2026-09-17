@@ -1,0 +1,70 @@
+/* One durable activity disclosure per run. Reuse the workspace's appearance tokens. */
+#ec-branded-workspace .ec-conversation-run{min-width:0}
+#ec-branded-workspace .ec-conversation-run>.ec-agent>.ec-msghead{margin-bottom:13px}
+#ec-branded-workspace .ec-run-history{border:1px solid var(--ec-line);border-radius:10px;margin:0 0 25px;background:var(--ec-bg);font-size:12px}
+#ec-branded-workspace .ec-run-history summary{cursor:pointer;list-style:none}
+#ec-branded-workspace .ec-run-history summary::-webkit-details-marker{display:none}
+#ec-branded-workspace .ec-run-summary{display:flex;align-items:center;gap:11px;padding:14px 16px}
+#ec-branded-workspace .ec-run-summary>span{flex:1;min-width:0}
+#ec-branded-workspace .ec-run-summary strong{font-size:13px;font-weight:500;color:var(--ec-text)}
+#ec-branded-workspace .ec-run-summary small{display:block;margin-top:2px;font-size:11px;line-height:1.6;color:var(--ec-muted)}
+#ec-branded-workspace .ec-run-summary>svg:first-child{color:var(--ec-ok)}
+#ec-branded-workspace .ec-run-needs-attention>.ec-run-summary>svg:first-child{color:var(--ec-warning)}
+#ec-branded-workspace .ec-run-summary>time{white-space:nowrap}
+#ec-branded-workspace .ec-run-history time{font-size:11px;color:var(--ec-muted);font-variant-numeric:tabular-nums}
+#ec-branded-workspace .ec-run-summary>svg:last-child,#ec-branded-workspace .ec-run-historybody summary>svg:last-child{width:14px;height:14px;color:var(--ec-muted)}
+#ec-branded-workspace .ec-run-history details[open]>summary>svg:last-child,#ec-branded-workspace .ec-run-history[open]>.ec-run-summary>svg:last-child{transform:rotate(90deg)}
+#ec-branded-workspace .ec-run-historybody{border-top:1px solid var(--ec-line);padding:0 16px 14px}
+#ec-branded-workspace .ec-run-historylabel{font-size:11px;color:var(--ec-muted);padding:15px 0 10px}
+#ec-branded-workspace .ec-run-historylabel>span{display:block;margin-top:6px}
+#ec-branded-workspace .ec-run-historybody summary{display:flex;align-items:center;gap:9px;min-width:0;padding:11px 0}
+#ec-branded-workspace .ec-run-historybody summary>svg{flex:none;color:var(--ec-muted)}
+#ec-branded-workspace .ec-run-historybody summary>span{flex:1;min-width:0;overflow-wrap:anywhere}
+#ec-branded-workspace .ec-run-historybody summary small{font-size:11px;color:var(--ec-muted)}
+#ec-branded-workspace .ec-run-plan{border-bottom:1px solid var(--ec-line);padding-bottom:8px;margin-bottom:8px}
+#ec-branded-workspace .ec-run-plan ol{list-style:none;padding:0;margin:5px 0 8px;padding-inline-start:24px;display:grid;gap:10px}
+#ec-branded-workspace .ec-run-plan li{display:flex;align-items:baseline;gap:8px;min-width:0}
+#ec-branded-workspace .ec-run-plan li span{flex:1;overflow-wrap:anywhere}
+#ec-branded-workspace .ec-run-plan li svg{width:13px;height:13px;flex:none}
+#ec-branded-workspace .ec-run-plan li small{color:var(--ec-muted);font-size:11px}
+#ec-branded-workspace .ec-run-earlierplans{color:var(--ec-muted);font-size:11px}
+#ec-branded-workspace .ec-run-action+.ec-run-action,#ec-branded-workspace .ec-run-progress,#ec-branded-workspace .ec-run-saved{border-top:1px solid var(--ec-line)}
+#ec-branded-workspace .ec-run-actiontitle small{display:block;margin-top:2px}
+#ec-branded-workspace .ec-run-failure>summary>svg:first-child{color:var(--ec-warning)}
+#ec-branded-workspace .ec-run-actiondetail{padding:1px 0 14px;padding-inline-start:25px;color:var(--ec-muted);font-size:11px}
+#ec-branded-workspace .ec-run-toolname{font-family:var(--ec-mono,monospace);background:var(--ec-panel);padding:3px 6px;border-radius:4px;color:var(--ec-text);overflow-wrap:anywhere}
+#ec-branded-workspace .ec-run-actiondetail>small{margin-inline-start:10px}
+#ec-branded-workspace .ec-run-attempts{padding:10px 12px;margin-top:12px;background:var(--ec-panel);border-radius:6px;display:grid;gap:12px}
+#ec-branded-workspace .ec-run-attempts>div{display:grid;grid-template-columns:minmax(80px,auto) minmax(0,1fr);gap:12px}
+#ec-branded-workspace .ec-run-attempts strong{font-weight:500;color:var(--ec-text)}
+#ec-branded-workspace .ec-run-attempts p{margin:3px 0 0;overflow-wrap:anywhere}
+#ec-branded-workspace .ec-run-progress>.ec-markdown{padding:4px 0 14px;padding-inline-start:25px;font-size:12px}
+#ec-branded-workspace .ec-run-saved{display:flex;align-items:center;gap:9px;padding:11px 0}
+#ec-branded-workspace .ec-run-saved>span{flex:1;overflow-wrap:anywhere;min-width:0}
+#ec-branded-workspace .ec-run-saved small{display:block;color:var(--ec-muted);font-size:11px}
+#ec-branded-workspace .ec-run-footnote{font-size:11px;color:var(--ec-muted);margin:14px 0 0}
+#ec-branded-workspace .ec-run-answer{margin:0 0 24px}
+#ec-branded-workspace .ec-run-answer>.ec-markdown h2:first-child{font-size:20px;letter-spacing:-.4px;line-height:1.45;margin-top:0}
+#ec-branded-workspace .ec-run-currentprose{color:var(--ec-muted);font-size:13px}
+#ec-branded-workspace .ec-run-outputs{margin:20px 0 8px;font-size:12px}
+#ec-branded-workspace .ec-run-outputs>h3{font-size:11px;font-weight:500;color:var(--ec-muted);display:flex;align-items:center;gap:8px;margin:0 0 10px}
+#ec-branded-workspace .ec-run-files{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));border:1px solid var(--ec-line);border-radius:9px;overflow:hidden}
+#ec-branded-workspace .ec-run-files>button{font:inherit;background:var(--ec-bg);color:var(--ec-text);display:flex;gap:10px;align-items:center;text-align:start;padding:13px;border:0;border-bottom:1px solid var(--ec-line);cursor:pointer;min-width:0}
+#ec-branded-workspace .ec-run-files>button:nth-child(odd){border-inline-end:1px solid var(--ec-line)}
+#ec-branded-workspace .ec-run-files>button:last-child,#ec-branded-workspace .ec-run-files>button:nth-last-child(2):nth-child(odd){border-bottom:0}
+#ec-branded-workspace .ec-run-files>button:hover{background:var(--ec-panel)}
+#ec-branded-workspace .ec-run-files>button:disabled{opacity:.55;cursor:default}
+#ec-branded-workspace .ec-run-files>button>span{min-width:0;flex:1;overflow-wrap:anywhere}
+#ec-branded-workspace .ec-run-files small{display:block;color:var(--ec-muted);font-size:11px;margin-top:2px}
+#ec-branded-workspace .ec-run-files svg{color:var(--ec-muted);flex:none}
+#ec-branded-workspace .ec-run-files svg:last-child{width:13px;height:13px}
+#ec-branded-workspace .ec-run-results{color:var(--ec-accent);font-size:11px;margin-top:12px}
+#ec-branded-workspace .ec-run-preview{margin-top:14px;padding:16px;background:var(--ec-panel);border:1px solid var(--ec-line);border-radius:9px}
+#ec-branded-workspace .ec-run-preview h3{font-size:13px;overflow-wrap:anywhere}
+#ec-branded-workspace .ec-run-preview pre{white-space:pre-wrap;overflow-wrap:anywhere;font-size:12px}
+#ec-branded-workspace .ec-conversation-runs .ec-activitynotice{flex-wrap:wrap;padding:13px 15px;background:var(--ec-panel);border:1px solid var(--ec-line);border-inline-start:2px solid var(--ec-warning);border-radius:9px}
+@media(max-width:600px){#ec-branded-workspace .ec-run-files{grid-template-columns:minmax(0,1fr)}#ec-branded-workspace .ec-run-files>button:nth-child(odd){border-inline-end:0}#ec-branded-workspace .ec-run-files>button:nth-last-child(2):nth-child(odd){border-bottom:1px solid var(--ec-line)}#ec-branded-workspace .ec-run-summary{padding:12px;gap:8px}#ec-branded-workspace .ec-run-historybody{padding-inline:12px}#ec-branded-workspace .ec-run-historybody summary>time{display:none}#ec-branded-workspace .ec-run-plan summary{flex-wrap:wrap}#ec-branded-workspace .ec-run-plan summary small{flex-basis:100%;order:2}#ec-branded-workspace .ec-run-attempts>div{grid-template-columns:minmax(0,1fr);gap:3px}}
+@media(pointer:coarse){#ec-branded-workspace .ec-run-history summary,#ec-branded-workspace .ec-run-files>button{min-height:44px}}
+
+#ec-branded-workspace .ec-run-files>button:last-child:nth-child(odd){grid-column:1/-1;border-inline-end:0}
+#ec-branded-workspace .ec-conversation-run>.ec-agent>.ec-message-actions,#ec-branded-workspace .ec-run-answer>.ec-message-actions{opacity:1}

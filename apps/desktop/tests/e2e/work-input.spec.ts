@@ -8,7 +8,7 @@ test('one assistant identity per user turn, readable browser history and actiona
  (window as any).browserOpened=0;createRoot(document.getElementById('test')!).render(React.createElement(CanonicalActivity,{items,results:()=>{},browser:()=>{(window as any).browserOpened++;}}));
  });
  await expect(page.locator('.ec-agent .ec-msghead:not(.ec-sr-only)')).toHaveCount(2);await expect(page.getByText('The portal is ready.')).toBeVisible();
- await page.getByText('Browser activity',{exact:true}).click();await expect(page.getByText('Open page',{exact:true})).toHaveCount(2);await expect(page.getByText('Started',{exact:true})).toBeVisible();await expect(page.getByText('Running',{exact:true})).toHaveCount(0);await expect(page.getByText('browser.navigate',{exact:true}).first()).not.toBeVisible();
+ await page.locator('.ec-run-summary').click();await expect(page.locator('.ec-run-actiontitle').filter({hasText:'Open page'})).toHaveCount(2);await expect(page.getByText('Result not recorded',{exact:true})).toBeVisible();await expect(page.getByText('Running',{exact:true})).toHaveCount(0);await expect(page.getByText('browser.navigate',{exact:true}).first()).not.toBeVisible();
  await page.getByRole('button',{name:'Open browser',exact:true}).click();expect(await page.evaluate(()=>(window as any).browserOpened)).toBe(1);await page.screenshot({path:test.info().outputPath('browser-conversation.png')});
 });
 test('pending input exposes only a native-window action and drops stale requests after disconnect',async({page})=>{
