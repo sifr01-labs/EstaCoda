@@ -1,0 +1,51 @@
+/* Shared composer: quiet surfaces, compact controls, and deliberate working states. */
+#ec-branded-workspace .ec-window .ec-refined-composer .ec-composer{position:relative;border-radius:18px;padding:12px 13px 10px;background:var(--ec-panel);box-shadow:0 3px 16px #00000005;transition:border-color .16s,box-shadow .16s}
+#ec-branded-workspace .ec-window .ec-refined-composer .ec-composer:focus-within,#ec-branded-workspace .ec-window .ec-refined-composer .ec-composer:has(textarea:focus-visible){border-color:color-mix(in srgb,var(--ec-accent) 45%,var(--ec-line));box-shadow:0 0 0 1px color-mix(in srgb,var(--ec-accent) 12%,transparent)}
+#ec-branded-workspace .ec-window .ec-refined-composer .ec-composer textarea{display:block;resize:none;min-height:44px;max-height:260px;padding:5px 2px 8px;line-height:1.55;font-size:14px;transition:height .12s ease-out;box-sizing:border-box;scrollbar-width:thin}
+#ec-branded-workspace .ec-window .ec-refined-composer .ec-composerfoot{margin-top:9px;gap:6px;flex-wrap:nowrap}
+#ec-branded-workspace .ec-window .ec-refined-composer .ec-composerright{min-width:0;gap:5px}
+#ec-branded-workspace .ec-window .ec-refined-composer .ec-modelcontrol{min-width:0;max-width:220px}
+#ec-branded-workspace .ec-window .ec-refined-composer .ec-modelcontrol bdi{overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#ec-branded-workspace .ec-window .ec-refined-composer .ec-send{width:32px;height:32px;min-width:32px;padding:7px;background:var(--ec-accent);color:var(--ec-on-accent);border-color:transparent;flex-shrink:0}
+#ec-branded-workspace .ec-window .ec-refined-composer .ec-send:disabled{background:var(--ec-inset);color:var(--ec-muted);border-color:var(--ec-line);opacity:.6}
+#ec-branded-workspace .ec-window .ec-refined-composer .ec-send-queue{width:auto;border-radius:16px;padding-inline:11px;gap:6px;font-size:11px}
+#ec-branded-workspace .ec-window .ec-refined-composer .ec-attachmentlist{gap:8px;margin-bottom:10px;max-height:170px;overflow:auto;scrollbar-width:thin}
+#ec-branded-workspace .ec-window .ec-refined-composer .ec-attachment{position:relative;background:var(--ec-bg);border-radius:11px;padding:7px 27px 7px 7px;gap:9px;max-width:255px;min-height:58px}
+#ec-branded-workspace .ec-window .ec-refined-composer .ec-attachment>span{min-width:0}
+#ec-branded-workspace .ec-window .ec-refined-composer .ec-attachment b{display:block;font-size:11px;font-weight:500;overflow:hidden;text-overflow:ellipsis;white-space:nowrap}
+#ec-branded-workspace .ec-window .ec-refined-composer .ec-attachment small{font-size:10px;margin-top:2px}
+#ec-branded-workspace .ec-window .ec-refined-composer .ec-attachment-thumb{width:43px;height:43px;flex-shrink:0;border:1px solid var(--ec-line);border-radius:7px;background:var(--ec-panel);display:grid;place-items:center;overflow:hidden;color:var(--ec-muted)}
+#ec-branded-workspace .ec-window .ec-refined-composer .ec-attachment-thumb img{width:100%;height:100%;object-fit:cover}
+#ec-branded-workspace .ec-window .ec-refined-composer .ec-remove-attachment{position:absolute;inset-inline-end:2px;top:2px;width:22px;min-height:22px;padding:5px;color:var(--ec-muted)}
+#ec-branded-workspace .ec-window .ec-refined-composer .ec-remove-attachment svg{width:12px;height:12px}
+#ec-branded-workspace .ec-composer-popover{position:absolute;inset-inline-start:0;bottom:calc(100% + 9px);z-index:30;width:min(318px,100%);max-height:min(420px,48dvh);overflow:auto;scrollbar-width:thin;padding:7px;background:var(--ec-bg);border:1px solid var(--ec-line);border-radius:16px;box-shadow:0 12px 40px #00000018;animation:ec-composer-menu-in .12s ease-out}
+#ec-branded-workspace .ec-composer-menuheading{display:flex;align-items:center;justify-content:space-between;gap:10px;padding:3px 9px 8px;font-size:11px;color:var(--ec-muted)}
+#ec-branded-workspace .ec-composer-menuheading .ec-btn{padding:5px;width:26px;min-height:26px}
+#ec-branded-workspace .ec-composer-menurow,#ec-branded-workspace .ec-composer-command{display:flex;align-items:center;gap:12px;width:100%;text-align:start;padding:10px 11px;border:0;border-radius:9px;background:transparent;color:var(--ec-text);font:inherit;cursor:pointer}
+#ec-branded-workspace .ec-composer-menurow:hover,#ec-branded-workspace .ec-composer-command:hover,#ec-branded-workspace .ec-composer-command[aria-selected=true]{background:var(--ec-inset)}
+#ec-branded-workspace .ec-composer-menurow>span,#ec-branded-workspace .ec-composer-command>span{flex:1;min-width:0}
+#ec-branded-workspace .ec-composer-menurow b,#ec-branded-workspace .ec-composer-command b{display:block;font-size:12px;font-weight:500}
+#ec-branded-workspace .ec-composer-menurow small,#ec-branded-workspace .ec-composer-command small{display:block;font-size:11px;color:var(--ec-muted);margin-top:2px;line-height:1.5}
+#ec-branded-workspace .ec-composer-menurow>svg,#ec-branded-workspace .ec-composer-command>svg{color:var(--ec-muted);flex-shrink:0}
+#ec-branded-workspace .ec-composer-menusection{border-top:1px solid var(--ec-line);margin:6px 0 2px;padding:9px 10px 1px;color:var(--ec-muted);font-size:11px}
+#ec-branded-workspace .ec-composer-commands{width:100%}
+#ec-branded-workspace .ec-composer-command code{font-family:inherit;font-size:11px;line-height:1.4;background:transparent;color:var(--ec-muted);padding:0;flex-shrink:0}
+#ec-branded-workspace .ec-composer-palettefoot{border-top:1px solid var(--ec-line);margin-top:6px;padding:8px 10px 2px;font-size:11px;color:var(--ec-muted)}
+#ec-branded-workspace .ec-composer-intent{display:inline-flex;align-items:center;gap:7px;margin:2px 0 9px;padding-inline-start:9px;background:var(--ec-tint);color:var(--ec-accent);border-radius:7px;font-size:11px}
+#ec-branded-workspace .ec-composer-intent .ec-btn{padding:5px;min-height:26px;color:inherit}
+#ec-branded-workspace .ec-composer-intent .ec-btn svg{width:12px;height:12px}
+#ec-branded-workspace .ec-composer-drop{position:absolute;inset:0;z-index:40;border:1px solid var(--ec-accent);border-radius:17px;background:var(--ec-bg);display:flex;align-items:center;justify-content:center;gap:13px;pointer-events:none;box-shadow:inset 0 0 0 5px var(--ec-tint);color:var(--ec-accent)}
+#ec-branded-workspace .ec-composer-drop>svg{width:24px;height:24px}
+#ec-branded-workspace .ec-composer-drop b{font-size:14px;font-weight:500;display:block;color:var(--ec-text)}
+#ec-branded-workspace .ec-composer-drop small{display:block;color:var(--ec-muted);font-size:11px;margin-top:3px}
+#ec-branded-workspace .ec-composer-runline{display:flex;align-items:center;justify-content:space-between;margin:0 4px 8px;font-size:11px;color:var(--ec-muted)}
+#ec-branded-workspace .ec-composer-runline>span{display:flex;align-items:center;gap:8px}
+#ec-branded-workspace .ec-composer-runline i{width:6px;height:6px;border-radius:50%;background:var(--ec-accent)}
+#ec-branded-workspace .ec-composer-stop{font-size:11px;gap:6px;padding:4px 7px}
+#ec-branded-workspace .ec-composer-stop svg{width:12px;height:12px}
+#ec-branded-workspace .ec-composer-hints{display:flex;justify-content:space-between;gap:16px;margin:7px 4px 0;font-size:10px;line-height:1.5;color:var(--ec-muted)}
+#ec-branded-workspace .ec-composer-hints>span:last-child{white-space:nowrap}
+#ec-branded-workspace .ec-composer-inlineerror{font-size:12px;color:var(--ec-warning);margin:0 0 9px}
+@keyframes ec-composer-menu-in{from{opacity:0;transform:translateY(4px)}to{opacity:1;transform:translateY(0)}}
+@media(max-width:590px){#ec-branded-workspace .ec-window .ec-refined-composer .ec-modelcontrol{max-width:110px}#ec-branded-workspace .ec-composer-hints>span:last-child{display:none}#ec-branded-workspace .ec-composer-command{gap:8px;padding-inline:7px}#ec-branded-workspace .ec-composer-command small{max-width:165px}#ec-branded-workspace .ec-window .ec-refined-composer .ec-composercontrols .ec-btn{padding-inline:5px}#ec-branded-workspace .ec-window .ec-refined-composer .ec-send-queue{padding-inline:8px}}
+@media(pointer:coarse){#ec-branded-workspace .ec-window .ec-refined-composer .ec-remove-attachment{width:28px;min-height:32px}#ec-branded-workspace .ec-window .ec-refined-composer .ec-attachment{padding-inline-end:32px}}

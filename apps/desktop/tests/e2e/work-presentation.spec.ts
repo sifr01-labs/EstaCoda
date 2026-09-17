@@ -62,12 +62,12 @@ test('compact header and composer reserve the window for the conversation',async
  await expect(page.getByRole('tab',{name:'Conversation',exact:true})).toBeVisible();
  await expect(page.getByText('Enter to send · Shift+Enter for a new line',{exact:true})).toHaveCount(0);
  expect((await header.boundingBox())!.height).toBeLessThanOrEqual(56);
- expect((await composer.boundingBox())!.height).toBeLessThanOrEqual(106);
+ expect((await composer.boundingBox())!.height).toBeLessThanOrEqual(112);
  expect((await page.locator('#ec-work-panel').boundingBox())!.height).toBeGreaterThan(570);
  await expect(page.getByRole('button',{name:'Resume',exact:true})).not.toBeVisible();
  await page.locator('summary[aria-label="More actions"]').click();await expect(page.getByRole('button',{name:'Resume',exact:true})).toBeVisible();
  await page.keyboard.press('Escape');await expect(page.locator('summary[aria-label="More actions"]')).toBeFocused();await expect(page.getByRole('button',{name:'Resume',exact:true})).not.toBeVisible();
- await page.getByLabel('Draft guidance').fill(Array.from({length:12},()=> 'Draft line').join('\n'));expect((await page.getByLabel('Draft guidance').boundingBox())!.height).toBeLessThanOrEqual(140);
+ await page.getByLabel('Draft guidance').fill(Array.from({length:12},()=> 'Draft line').join('\n'));expect((await page.getByLabel('Draft guidance').boundingBox())!.height).toBeLessThanOrEqual(260);
  await page.getByLabel('Draft guidance').fill('');
  await page.screenshot({path:testInfo.outputPath('compact-conversation.png')});
 });
@@ -90,7 +90,7 @@ for(const language of ['en','ar'] as const)test(`${language} compact layout keep
  for(const width of [360,1024]){
   await page.setViewportSize({width,height:740});
   await expect(page.getByLabel(t('Draft guidance'))).toBeInViewport();
-  const composer=(await page.locator('.ec-composer').boundingBox())!;const footer=(await page.locator('.ec-runtimebar').boundingBox())!;
+  const composer=(await page.locator('.ec-composerdock').boundingBox())!;const footer=(await page.locator('.ec-runtimebar').boundingBox())!;
   expect(composer.y+composer.height).toBeLessThanOrEqual(footer.y);expect(footer.y-composer.y-composer.height).toBeLessThanOrEqual(15);
   expect(await page.locator('.ec-window').evaluate(e=>e.scrollWidth<=e.clientWidth+1)).toBe(true);
   await page.locator('summary[aria-label="'+t('More actions')+'"]').click();await expect(page.getByRole('button',{name:t('Resume'),exact:true})).toBeInViewport();await page.keyboard.press('Escape');

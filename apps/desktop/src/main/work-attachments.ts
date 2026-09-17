@@ -4,7 +4,7 @@ import {basename,extname} from 'node:path';
 import {randomUUID} from 'node:crypto';
 import type {TargetReference} from '@estacoda/control-protocol';
 export type AttachmentScope={profileId:string;generation:number;target:TargetReference;draftId:string};
-export type AttachmentPreview={id:string;name:string;size:number;type:string};
+export type AttachmentPreview={id:string;name:string;size:number;type:string;thumbnail?:string};
 const extensions=new Set(['.txt','.md','.csv','.json','.yaml','.yml','.log','.ts','.tsx','.js','.jsx','.py','.rs','.go','.html','.css','.xml','.toml','.sql','.sh']);
 /** Content snapshots, never renderer file paths. Lost connections invalidate all handles. */
 export class WorkAttachmentError extends Error {}
@@ -39,4 +39,15 @@ export class WorkAttachments {
  }
  mediaIds(scope:AttachmentScope,ids:string[]){return ids.filter(id=>{const item=this.#items.get(id);if(!item||item.scope!==this.scope(scope)||Date.now()-item.created>15*60_000)throw new WorkAttachmentError('Attachment expired');return item.media;});}
  remove(ids:string[]){for(const id of ids)this.#items.delete(id);}
+}
+
+/** Read optional preview bytes with the same file and size boundaries as image staging. */
+export async function attachmentPreviewBytes(path:string):Promise<Buffer>{
+ const limit=8*1024*1024,file=await open(path,constants.O_RDONLY|constants.O_NOFOLLOW|constants.O_NONBLOCK);
+ try{
+  const stat=await file.stat();if(!stat.isFile()||stat.size>limit)throw new WorkAttachmentError('Preview unavailable.');
+  const bytes=Buffer.alloc(limit+1);let size=0;
+  while(size<bytes.length){const{bytesRead}=await file.read(bytes,size,bytes.length-size,size);if(!bytesRead)break;size+=bytesRead;}
+  if(size>limit)throw new WorkAttachmentError('Preview unavailable.');return bytes.subarray(0,size);
+ }finally{await file.close();}
 }

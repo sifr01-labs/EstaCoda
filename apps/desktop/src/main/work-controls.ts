@@ -8,7 +8,7 @@ type Inspection=MethodContracts['operations.inspect']['params'];
 /** Main owns operation IDs and reference-only recovery; execution belongs to the supervisor. */
 export class DesktopWorkControls {
  readonly references:WorkOperationReferences;readonly attachments=new WorkAttachments();#busy=new Set<string>();
- constructor(readonly connection:DesktopConnection,readonly directory:string,readonly chooseFiles:()=>Promise<string[]>){this.references=new WorkOperationReferences(connection,directory);connection.on('invalidate',()=>this.attachments.clear());}
+ constructor(readonly connection:DesktopConnection,readonly directory:string,readonly chooseFiles:(defaultPath?:string)=>Promise<string[]>,readonly thumbnail?:(path:string)=>Promise<string>){this.references=new WorkOperationReferences(connection,directory);connection.on('invalidate',()=>this.attachments.clear());}
  private fence(){const{profileId,generation}=this.connection.state;return()=>{if(this.connection.state.status!=='ready'||profileId!==this.connection.state.profileId||generation!==this.connection.state.generation)throw new Error('Desktop context changed.');};}
 
  async inspectDecision(itemId:string){const record=this.references.records()['approval:'+itemId];return record?this.connection.workRequest('operations.inspect',record):null;}
@@ -44,7 +44,22 @@ export class DesktopWorkControls {
  async inspect(workId:string){const check=this.fence();await this.connection.getWork(workId);check();const record=this.references.records()[workId];return record?this.connection.workRequest('operations.inspect',record):null;}
  private async available(target:TargetReference){const page=await this.connection.workRequest('work.targets',{target});if(!page.items.some(item=>item.targetId===target.targetId&&item.targetGeneration===target.targetGeneration))throw new Error('Select an available trusted target.');}
  private scope(input:Pick<WorkSubmission,'draftId'|'target'>):AttachmentScope{return{profileId:this.connection.state.profileId,generation:this.connection.state.generation,target:input.target,draftId:input.draftId};}
- async attach(input:Pick<WorkSubmission,'draftId'|'target'>){const check=this.fence();await this.available(input.target);check();const scope=this.scope(input);const paths=await this.chooseFiles();check();return this.attachments.stage(paths,scope,check,path=>this.connection.inspectionRequest('media.stage',{path,target:scope.target}));}
+ async attach(input:Pick<WorkSubmission,'draftId'|'target'>&{workspace?:boolean}){
+  const check=this.fence();await this.available(input.target);check();
+  const root=input.workspace?await this.connection.targetRequest('targets.inspect',{target:input.target}):undefined;check();
+  const paths=await this.chooseFiles(root?.workingRoot);check();return this.attachFiles(input,paths);
+ }
+ /** Paths arrive only from the native picker or preload's File-to-path conversion. */
+ async attachFiles(input:Pick<WorkSubmission,'draftId'|'target'>,paths:string[]){
+  const check=this.fence();await this.available(input.target);check();const scope=this.scope(input);
+  return this.attachments.stage(paths,scope,check,async path=>{
+   const preview=await this.connection.inspectionRequest('media.stage',{path,target:scope.target});check();
+   if(preview.type.startsWith('image/')&&this.thumbnail){
+    // Preview failure must not discard a successfully staged attachment.
+    try{const thumbnail=await this.thumbnail(path);check();if(thumbnail.startsWith('data:image/png;base64,')&&thumbnail.length<=100_000)return{...preview,thumbnail};}catch{check();}
+   }return preview;
+  });
+ }
  async stageRecording(input:Pick<WorkSubmission,'draftId'|'target'>,path:string){const check=this.fence();await this.available(input.target);check();const scope=this.scope(input);const items=await this.attachments.stage([path],scope,check,path=>this.connection.inspectionRequest('media.stage',{path,target:scope.target}));return items[0]!;}
  async submit(input:WorkSubmission):Promise<{workId:string;receipt:OperationReceipt}>{
   const check=this.fence(),key=this.connection.state.profileId+':'+(input.workId??input.draftId);

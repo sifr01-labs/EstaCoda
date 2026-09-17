@@ -55,6 +55,7 @@ export type DesktopModelsApi={
 };
 export type WorkAction={workId:string;action:'sessions.resume'|'sessions.cancelTurn'|'tasks.pause'|'tasks.resume'|'tasks.cancel'|'tasks.retry'|'tasks.guide';stepId?:string;guidance?:string};
 export type WorkSubmission={inspectOnly?:boolean;securityMode?: 'strict'|'adaptive'|'open'; interrupt?:boolean;kind?:'session'|'task';limits?:{maxProviderCalls:number;maxTotalTokens:number;maxWallClockMs:number};draftId:string;workId?:string;target:import('@estacoda/control-protocol').TargetReference;text:string;attachmentIds:string[];selection?:{providerId:string;modelId:string}|null};
+export type ComposerAttachment={id:string;name:string;size:number;type:string;thumbnail?:string};
 export type DesktopWorkApi = {
  usage(workId:string):Promise<import('@estacoda/control-protocol').WorkUsageProjection>;
  decide(itemId:string,decision:'approved'|'denied'):Promise<import('@estacoda/control-protocol').OperationReceipt>;
@@ -63,7 +64,8 @@ export type DesktopWorkApi = {
  children(workId:string,cursor?:string):Promise<Page<WorkProjection>>;
  live(workId:string):Promise<MethodContracts['work.live']['result']>;
  targets(options?:MethodContracts['work.targets']['params']):Promise<MethodContracts['work.targets']['result']>;
- attach(input:Pick<WorkSubmission,'draftId'|'target'>):Promise<{id:string;name:string;size:number;type:string}[]>;
+ attach(input:Pick<WorkSubmission,'draftId'|'target'>&{workspace?:boolean}):Promise<ComposerAttachment[]>;
+ attachFiles?(input:Pick<WorkSubmission,'draftId'|'target'>,files:File[]):Promise<ComposerAttachment[]>;
  submit(input:WorkSubmission):Promise<{workId:string;receipt:import('@estacoda/control-protocol').OperationReceipt}>;
  inspect(workId:string):Promise<import('@estacoda/control-protocol').OperationReceipt|null>;
  search(query:string,cursor?:string):Promise<Page<WorkProjection>>;

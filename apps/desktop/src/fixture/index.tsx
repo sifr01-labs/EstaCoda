@@ -16,3 +16,5 @@ import '../renderer/styles/media-settings.css';
 import '../renderer/styles/web-settings.css';
 import '../renderer/styles/runtime-settings.css';
 import '../renderer/styles/workspace-experience.css';
+
+import '../renderer/styles/composer.css';

@@ -16,3 +16,5 @@ import './styles/web-settings.css';
 import './styles/runtime-settings.css';
 
 import './styles/workspace-experience.css';
+
+import './styles/composer.css';

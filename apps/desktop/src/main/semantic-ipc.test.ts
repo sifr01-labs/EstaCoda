@@ -146,3 +146,13 @@ it('accepts explicit provider-only review without allowing auxiliary or authorit
  expect(()=>validateSemanticPayload('setupReview',{setupId:'setup',role:{role:'provider'}})).not.toThrow();
  for(const role of [{role:'provider',slot:'assessor'},{role:'provider',fallbackToMain:true},{role:'provider',profileId:'other'}])expect(()=>validateSemanticPayload('setupReview',{setupId:'setup',role})).toThrow();
 });
+
+it('bounds dropped-file input and never accepts renderer-owned profile or raw picker paths',()=>{
+ const scope={draftId:'draft',target:{targetId:'target',targetGeneration:1}};
+ expect(()=>validateSemanticPayload('workAttachFiles',{...scope,paths:['/tmp/notes.md']})).not.toThrow();
+ for(const paths of [[],Array(5).fill('/tmp/n'),['relative.md'],['/tmp/\0n'],['/'.repeat(4097)],[42]])expect(()=>validateSemanticPayload('workAttachFiles',{...scope,paths})).toThrow();
+ for(const extra of [{profileId:'other'},{generation:4},{text:'injected'}])expect(()=>validateSemanticPayload('workAttachFiles',{...scope,paths:['/tmp/n'],...extra})).toThrow();
+ expect(()=>validateSemanticPayload('workAttach',{...scope,paths:['/tmp/n']})).toThrow();
+ expect(()=>validateSemanticPayload('workAttach',{...scope,workspace:true})).not.toThrow();
+ expect(()=>validateSemanticPayload('workAttach',{...scope,workspace:'/tmp'})).toThrow();
+});

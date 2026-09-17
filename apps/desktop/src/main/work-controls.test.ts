@@ -2,7 +2,7 @@ import {EventEmitter} from 'node:events';
 import {mkdtempSync,writeFileSync,rmSync,symlinkSync} from 'node:fs';
 import {join} from 'node:path';
 import {it,expect,vi} from 'vitest';
-import {WorkAttachments} from './work-attachments.js';
+import {WorkAttachments,attachmentPreviewBytes} from './work-attachments.js';
 import {DesktopWorkControls} from './work-controls.js';
 const target={targetId:'target',targetGeneration:1};
 it('reads actual bounded UTF-8 contents and refuses symlinks, binary, stale scopes, and invalidated handles',async()=>{
@@ -72,4 +72,36 @@ it('permits explicit interruption of an acknowledged send but refuses uncertain 
  const connection=Object.assign(new EventEmitter(),{state:{profileId:'p',generation:1,status:'ready'},getWork:async(id:string)=>({id,profileId:'p',canonicalId:'s',kind:'session',target,actions:[{id:'sessions.send',enabled:true}]}),workRequest:vi.fn(async(method:string,params:any)=>method==='work.targets'?{items:[target],truncated:false}:{...params,profileId:'p',method:method==='operations.inspect'?params.method:method,state,cancellation:'not_requested'})});
  const input={draftId:'first',workId:'session:s',target,text:'First',attachmentIds:[]};
  try{const controls=new DesktopWorkControls(connection as any,directory,async()=>[]);await controls.submit(input);await expect(controls.submit({...input,draftId:'next'})).rejects.toThrow('Reconcile');await controls.submit({...input,draftId:'steer',interrupt:true});expect(connection.workRequest.mock.calls.filter(c=>c[0]==='sessions.send')).toHaveLength(2);state='uncertain';await expect(controls.submit({...input,draftId:'unsafe',interrupt:true})).rejects.toThrow('Reconcile');}finally{rmSync(directory,{recursive:true,force:true});}
+});
+
+it('stages drops through the same bounded store and fences late profile changes',async()=>{
+ const directory=mkdtempSync('/tmp/ec-drop-'),path=join(directory,'notes.md');writeFileSync(path,'user-selected content');
+ let trusted=true,switchProfile=false;
+ const connection=Object.assign(new EventEmitter(),{state:{profileId:'p',generation:1,status:'ready'},workRequest:vi.fn(async()=>{if(switchProfile)connection.state.profileId='other';return{items:trusted?[target]:[]};})});
+ const main=new DesktopWorkControls(connection as any,directory,async()=>[]);
+ try{
+  const [file]=await main.attachFiles({draftId:'d',target},[path]);
+  expect(main.attachments.compose({profileId:'p',generation:1,target,draftId:'d'},[file!.id],'Review')).toContain('user-selected content');
+  expect(()=>main.attachments.compose({profileId:'p',generation:1,target:{...target,targetGeneration:2},draftId:'d'},[file!.id],'Review')).toThrow();
+  trusted=false;await expect(main.attachFiles({draftId:'d',target},[path])).rejects.toThrow('trusted');
+  trusted=true;switchProfile=true;await expect(main.attachFiles({draftId:'d',target},[path])).rejects.toThrow('context changed');
+  connection.emit('invalidate');expect(()=>main.attachments.compose({profileId:'p',generation:1,target,draftId:'d'},[file!.id],'Review')).toThrow();
+ }finally{rmSync(directory,{recursive:true,force:true});}
+});
+it('workspace picker uses the canonical root and image previews remain optional and bounded',async()=>{
+ const directory=mkdtempSync('/tmp/ec-image-preview-');
+ const connection=Object.assign(new EventEmitter(),{state:{profileId:'p',generation:1,status:'ready'},workRequest:async()=>({items:[target]}),targetRequest:vi.fn(async()=>({workingRoot:directory})),inspectionRequest:vi.fn(async()=>({id:'media',name:'image.png',size:100,type:'image/png'}))});
+ const choose=vi.fn(async()=>['/selected/image.png']),thumbnail=vi.fn(async()=> 'data:image/png;base64,AAAA');
+ const main=new DesktopWorkControls(connection as any,directory,choose,thumbnail);
+ try{
+  expect(await main.attach({draftId:'d',target,workspace:true})).toMatchObject([{thumbnail:'data:image/png;base64,AAAA'}]);
+  expect(choose).toHaveBeenCalledWith(directory);expect(connection.inspectionRequest).toHaveBeenCalledWith('media.stage',{path:'/selected/image.png',target});
+  thumbnail.mockRejectedValueOnce(new Error('No preview'));expect(await main.attachFiles({draftId:'d',target},['/selected/image.png'])).toEqual([{id:'media',name:'image.png',size:100,type:'image/png'}]);
+  thumbnail.mockResolvedValueOnce('data:image/png;base64,'+'A'.repeat(100001));expect((await main.attachFiles({draftId:'d',target},['/selected/image.png']))[0]).not.toHaveProperty('thumbnail');
+ }finally{rmSync(directory,{recursive:true,force:true});}
+});
+
+it('optional thumbnail reads reject symlinks, directories and oversized images',async()=>{
+ const directory=mkdtempSync('/tmp/ec-preview-');
+ try{const path=join(directory,'image.png');writeFileSync(path,'preview');expect((await attachmentPreviewBytes(path)).toString()).toBe('preview');symlinkSync(path,join(directory,'link.png'));await expect(attachmentPreviewBytes(join(directory,'link.png'))).rejects.toThrow();await expect(attachmentPreviewBytes(directory)).rejects.toThrow();writeFileSync(path,Buffer.alloc(8*1024*1024+1));await expect(attachmentPreviewBytes(path)).rejects.toThrow('Preview unavailable');}finally{rmSync(directory,{recursive:true,force:true});}
 });
