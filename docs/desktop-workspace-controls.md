@@ -96,3 +96,18 @@ return control explicitly when finished. Disconnection clears observations.
 
 These changes are renderer presentation and navigation only. No new permission,
 execution, browser navigation, memory mutation, or approval API is introduced.
+
+## Changes review
+
+Changes shows the current workspace state in a read-only review surface. Staged,
+unstaged, and untracked files are grouped beside a selectable patch preview.
+Renames retain the previous path; unavailable previews, binary files, and
+truncated lists or patches are explicit. Narrow windows stack the file list and
+preview. Technical patch text stays left-to-right in Arabic layouts.
+
+Loading, clean, unavailable, missing-workspace, and disconnected states have
+distinct summaries. Refresh retries only the read-only listing. A failed preview
+keeps the file list available, and switching files discards late preview replies.
+Disconnection clears previews. Existing trust, target-generation, path, and size
+checks remain unchanged. Workspace edits may come from other tools; recorded
+agent execution remains in Activity.

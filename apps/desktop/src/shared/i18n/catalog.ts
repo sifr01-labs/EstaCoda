@@ -15,6 +15,26 @@ import {setupArabic} from './setup.js';
 import {workArabic} from './work.js';
 /** Product-owned message keys. Never pass provider output or backend error text here. */
 export const arabic = {
+ 'Review the current edits in this workspace.':'راجع التعديلات الحالية في مساحة العمل.',
+ 'Files changed: {count}':'عدد الملفات المتغيّرة: {count}',
+ 'Preview unavailable':'المعاينة غير متاحة',
+ 'Changes disconnected':'انقطع اتصال التغييرات',
+ 'Reconnect, then reopen this tab to review workspace changes.':'أعد الاتصال ثم افتح هذا التبويب مجددًا لمراجعة تغييرات مساحة العمل.',
+ 'A Git workspace is needed':'تلزم مساحة عمل Git',
+ 'Changes are available for chats in a trusted Git workspace.':'تتوفر التغييرات للمحادثات في مساحة عمل Git موثوقة.',
+ 'Changes aren’t available':'التغييرات غير متاحة',
+ 'This workspace must be a trusted Git repository accessible to this chat. Check the workspace, then refresh.':'يجب أن تكون مساحة العمل مستودع Git موثوقًا تستطيع هذه المحادثة الوصول إليه. تحقّق من مساحة العمل ثم حدّث العرض.',
+ 'Checking the workspace for edits.':'جارٍ التحقق من التعديلات في مساحة العمل.',
+ 'Your workspace has no visible staged, unstaged, or new files.':'لا توجد ملفات جديدة أو تغييرات ظاهرة، سواء أكانت مجهّزة للإيداع أم غير مجهّزة.',
+ 'Changed files':'الملفات المتغيّرة',
+ 'Choose a changed file to inspect its patch.':'اختر ملفًا متغيّرًا لفحص تعديلاته.',
+ 'Refresh changes to inspect the latest version of this file.':'حدّث التغييرات لفحص أحدث نسخة من هذا الملف.',
+ 'Binary file changed':'تغيّر ملف ثنائي',
+ 'This file can’t be displayed as a text patch.':'لا يمكن عرض هذا الملف كتعديلات نصية.',
+ 'File patch':'تعديلات الملف',
+ 'This patch is truncated. Some changes are not displayed.':'هذا العرض مقتطع. بعض التغييرات غير معروضة.',
+ 'Includes workspace edits made outside this chat. Activity records what the agent did.':'يتضمن تعديلات مساحة العمل من خارج هذه المحادثة. يسجّل النشاط ما نفّذه الوكيل.',
+
  'Dismiss':'إغلاق',
  'Your bot':'روبوتك',
  'Telegram settings saved':'حُفظت إعدادات تيليغرام',
