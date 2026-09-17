@@ -1,3 +1,5 @@
+import {WorkspacePanel} from './workspace-panel.js';
+import {Icon} from './primitives.js';
 import {useI18n} from '../i18n.js';
 import {useEffect,useRef,useState} from 'react';
 import {Terminal} from '@xterm/xterm';
@@ -6,12 +8,11 @@ import '@xterm/xterm/css/xterm.css';
 import type {TargetReference} from '@estacoda/control-protocol';
 import type {DesktopApi} from '../../shared/desktop-api.js';
 import {Button} from './primitives.js';
-export function TerminalView({api,target,close}:{api:DesktopApi;target:TargetReference;close:()=>void}){
+export function TerminalView({api,target,close,hidden=false}:{hidden?:boolean;api:DesktopApi;target:TargetReference;close:()=>void}){
  const {t,owned}=useI18n();
  const alive=useRef(true);
  useEffect(()=>{alive.current=true;return()=>{alive.current=false;};},[]);
- const dialog=useRef<HTMLDialogElement>(null),host=useRef<HTMLDivElement>(null),id=useRef<string|null>(null),[error,setError]=useState(''),[busy,setBusy]=useState(false),[backend,setBackend]=useState(''),[opened,setOpened]=useState(false);
- useEffect(()=>{const previous=document.activeElement as HTMLElement|null;dialog.current?.showModal();return()=>{dialog.current?.close();previous?.focus();};},[]);
+ const host=useRef<HTMLDivElement>(null),id=useRef<string|null>(null),[error,setError]=useState(''),[busy,setBusy]=useState(false),[backend,setBackend]=useState(''),[opened,setOpened]=useState(false);
  const stop=async()=>{setBusy(true);try{if(id.current)await api.terminal!.close(id.current);id.current=null;close();}catch{setError('Terminal shutdown could not be confirmed. Retry closing.');setBusy(false);}};
  useEffect(()=>{
   if(!opened||!host.current||!id.current)return;
@@ -31,5 +32,7 @@ export function TerminalView({api,target,close}:{api:DesktopApi;target:TargetRef
   return()=>{current=false;clearTimeout(timer);unsubscribe();observer.disconnect();data.dispose();clipboard.dispose();hyperlinks.dispose();term.dispose();void api.terminal!.close(terminalId).catch(()=>{});};
  },[api,opened,target.targetId,target.targetGeneration]);
  const open=async()=>{setBusy(true);setError('');try{const result=await api.terminal!.open(target);if(!alive.current){await api.terminal!.close(result.id);return;}id.current=result.id;setBackend(result.backend==='host'?t("Local host · Not sandboxed"):t("Docker · Selected workspace"));setOpened(true);}catch{setError('Terminal was cancelled or its target is unavailable.');}finally{setBusy(false);}};
- return <dialog ref={dialog} className="ec-filedialog ec-terminaldialog" aria-labelledby="ec-terminal-title" onCancel={event=>{event.preventDefault();void stop();}}><header><h2 id="ec-terminal-title">{t("Terminal")}</h2><Button icon="x" className="ec-ghost ec-iconbutton" aria-label={t("Close terminal")} disabled={busy} onClick={()=>void stop()}/></header><p className="ec-footnote">{backend||t("Open a shell in this workspace. The app will ask you to confirm.")}</p>{!opened&&<Button disabled={busy} onClick={()=>void open()}>{t("Open terminal")}</Button>}{error&&<p role="status">{owned(error)}</p>}<div className="ec-terminal" ref={host} dir="ltr"/><p className="ec-footnote">{t("Ephemeral terminal · Output is not saved to Work · Input does not approve agent actions")}</p></dialog>;
+ return <WorkspacePanel title={t('Terminal')} closeLabel={t('Close terminal')} close={()=>void stop()} busy={busy} hidden={hidden} className="ec-terminal-panel">
+ {!opened?<div className="ec-terminal-welcome"><span className="ec-collection-tile"><Icon name="terminal"/></span><h2>{t('A shell in your workspace')}</h2><p>{t('Open a shell in this workspace. The app will ask you to confirm.')}</p><Button className="ec-primary" icon="terminal" disabled={busy} onClick={()=>void open()}>{busy?t('Opening terminal…'):t('Open terminal')}</Button></div>:<><p className="ec-footnote">{backend}</p><div className="ec-terminal" ref={host} dir="ltr"/></>}
+ {error&&<p role="status">{owned(error)}</p>}<p className="ec-footnote">{t('Switch panels to keep this terminal open. Closing it ends the session.')}</p><p className="ec-footnote">{t('Ephemeral terminal · Output is not saved to Work · Input does not approve agent actions')}</p></WorkspacePanel>;
 }

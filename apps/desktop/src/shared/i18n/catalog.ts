@@ -1,3 +1,4 @@
+import {workspaceExperienceArabic} from './workspace-experience.js';
 import {runtimeSettingsArabic} from './runtime-settings.js';
 import {webSettingsArabic} from './web-settings.js';
 import {mediaSettingsArabic} from './media-settings.js';
@@ -12,6 +13,7 @@ import {setupArabic} from './setup.js';
 import {workArabic} from './work.js';
 /** Product-owned message keys. Never pass provider output or backend error text here. */
 export const arabic = {
+ ...workspaceExperienceArabic,
  ...runtimeSettingsArabic,
  ...webSettingsArabic,
  ...mediaSettingsArabic,

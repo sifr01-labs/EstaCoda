@@ -19,11 +19,11 @@ test('abandoning drops late frames and does not resume the agent',async({page})=
  await mount(page);await page.getByRole('button',{name:'Take control',exact:true}).click();await page.evaluate(()=>(window as any).takeover.defer=true);await page.getByRole('button',{name:'Refresh live view'}).click();await page.evaluate(()=>{(window as any).takeover.unmount();});await page.evaluate(()=>(window as any).takeover.resolve());await expect(page.getByRole('img',{name:'Live sanitized browser viewport'})).toHaveCount(0);await expect.poll(()=>page.evaluate(()=>(window as any).takeover.calls)).toEqual(['open','observe','abandon']);
 });
 
-test('keeps workspace navigation disabled until takeover and creates a session semantically',async({page})=>{
- await mount(page,true);const address=page.getByRole('textbox',{name:'Browser address'});await expect(address).toBeDisabled();
+test('shows workspace navigation only during takeover and creates a session semantically',async({page})=>{
+ await mount(page,true);const address=page.getByRole('textbox',{name:'Browser address'});await expect(address).toHaveCount(0);
  await page.getByRole('button',{name:'Take control',exact:true}).click();await expect(address).toBeEnabled();await address.fill('https://example.com');await page.getByRole('button',{name:'Open session',exact:true}).click();
  await expect(page.getByRole('button',{name:'Go',exact:true})).toBeEnabled();expect(await page.evaluate(()=>(window as any).takeover.calls)).toEqual(['open',{kind:'list'},{kind:'create',url:'https://example.com'}]);
- await page.getByRole('button',{name:'Return to agent'}).click();await expect(address).toBeDisabled();
+ await page.getByRole('button',{name:'Return to agent'}).click();await expect(address).toHaveCount(0);
 });
 
 test('requests protected sign-in with field references and never collects a password in the ordinary UI',async({page})=>{
@@ -39,7 +39,7 @@ test('keeps unsupported backends view only without acquiring a lease',async({pag
 });
 test('never retries an uncertain navigation or returns control implicitly',async({page})=>{
  await mount(page,true);await page.getByRole('button',{name:'Take control',exact:true}).click();await page.getByRole('textbox',{name:'Browser address'}).fill('https://example.com');await page.evaluate(()=>(window as any).takeover.fail=true);await page.getByRole('button',{name:'Open session',exact:true}).click();
- await expect(page.getByText(/Control unavailable or uncertain/)).toBeVisible();await expect(page.getByRole('textbox',{name:'Browser address'})).toBeDisabled();expect(await page.evaluate(()=>(window as any).takeover.calls)).toEqual(['open',{kind:'list'},{kind:'create',url:'https://example.com'},'abandon']);
+ await expect(page.getByText(/Control unavailable or uncertain/)).toBeVisible();await expect(page.getByRole('textbox',{name:'Browser address'})).toHaveCount(0);expect(await page.evaluate(()=>(window as any).takeover.calls)).toEqual(['open',{kind:'list'},{kind:'create',url:'https://example.com'},'abandon']);
 });
 test('fits narrow windows and preserves theme styling around workspace controls',async({page})=>{
  await page.setViewportSize({width:420,height:900});await mount(page,true);await page.getByRole('button',{name:'Take control',exact:true}).click();await page.getByRole('textbox',{name:'Browser address'}).fill('https://example.com');await page.getByRole('button',{name:'Open session',exact:true}).click();

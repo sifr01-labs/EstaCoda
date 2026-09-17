@@ -14,3 +14,5 @@ import './styles/models.css';
 import './styles/media-settings.css';
 import './styles/web-settings.css';
 import './styles/runtime-settings.css';
+
+import './styles/workspace-experience.css';

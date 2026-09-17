@@ -15,3 +15,4 @@ import '../renderer/styles/models.css';
 import '../renderer/styles/media-settings.css';
 import '../renderer/styles/web-settings.css';
 import '../renderer/styles/runtime-settings.css';
+import '../renderer/styles/workspace-experience.css';

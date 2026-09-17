@@ -2,7 +2,7 @@ import {useI18n} from '../i18n.js';
 import {useEffect,useState} from 'react';
 import type {HumanBrowserFrame,BrowserWorkspaceState} from '@estacoda/control-protocol';
 import type {DesktopApi} from '../../shared/desktop-api.js';
-import {Button} from './primitives.js';
+import {Button,Badge} from './primitives.js';
 /** Current, bounded observations through the existing runtime; never acquires input authority. */
 export function BrowserWatch({api,workId,controlling}:{api:NonNullable<DesktopApi['browserControl']>;workId:string;controlling:boolean}){
  const {t,owned,status:displayState}=useI18n();
@@ -25,7 +25,7 @@ export function BrowserWatch({api,workId,controlling}:{api:NonNullable<DesktopAp
  },[api,workId,watching,selected,controlling]);
  if(!api.watch||!api.inventory)return null;
  return <section className="ec-browserwatch" aria-label={t("Live browser observation")}>
-  <Button disabled={controlling} onClick={()=>setWatching(value=>!value)}>{watching?t("Stop watching"):t("Watch live")}</Button>
+  <div className="ec-watch-heading"><Badge kind={frame&&watching&&!controlling?'blue':''} icon={frame&&watching?'eye':'clock-3'}>{controlling?t('You control the browser'):!watching?t('Watching paused'):frame?t('Watching'):workspace?.supported===false?t('Recorded view'):t('Waiting for browser…')}</Badge><Button className="ec-ghost" disabled={controlling} onClick={()=>setWatching(value=>!value)}>{watching?t("Stop watching"):t("Watch live")}</Button></div>
   {controlling?<p className="ec-footnote">{t("Live watching resumes after Return to agent.")}</p>:watching&&<>
    {!!workspace?.sessions.length&&<label>{t("Watch session")+" "}<select aria-label={t("Watch browser session")} value={workspace.sessions.some(s=>s.id===selected)?selected:workspace.sessions[0]?.id} onChange={event=>{setFrame(undefined);setSelected(event.target.value);}}>{workspace.sessions.map(session=><option key={session.id} value={session.id}>{session.tabs.find(tab=>tab.controlled)?.title??session.id}</option>)}</select></label>}
    {status&&<p role="status">{owned(status)}</p>}

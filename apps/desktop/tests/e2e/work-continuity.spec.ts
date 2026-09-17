@@ -53,13 +53,13 @@ test('Inbox resolves off-page Work and gives unavailable Work an explicit retry'
   await live(page);
   await page.evaluate(()=>{(window as any).continuity.delay=true;});
   await page.locator('.ec-navgroup').getByRole('button',{name:/Inbox/}).click();
-  await page.getByRole('button',{name:'Review request'}).click();
+  await page.getByRole('button',{name:'Review approval'}).click();
   await expect(page.getByRole('heading',{name:'Opening chat…'})).toBeVisible();
   await page.evaluate(()=>{(window as any).continuity.flush();});
   await expect(page.getByRole('heading',{name:'Older Work'})).toBeVisible();
   await page.locator('.ec-taskbutton').filter({hasText:'Listed Work'}).click();
   await page.evaluate(()=>{const c=(window as any).continuity;c.delay=false;c.fail=true;c.refresh();});
-  await page.locator('.ec-navgroup').getByRole('button',{name:/Inbox/}).click();await page.getByRole('button',{name:'Review request'}).click();
+  await page.locator('.ec-navgroup').getByRole('button',{name:/Inbox/}).click();await page.getByRole('button',{name:'Review approval'}).click();
   await expect(page.getByRole('heading',{name:'Chat could not be opened'})).toBeVisible();
   await expect(page.locator('.ec-newwelcome')).toHaveCount(0);
   await page.evaluate(()=>{(window as any).continuity.fail=false;});
@@ -81,7 +81,7 @@ test('loaded history and Results survive canonical updates using fresh cursors',
   await expect(page.locator('section.ec-agent')).toHaveCount(200);
   await page.getByRole('button',{name:'Settings',exact:true}).click();
   await page.locator('.ec-navgroup').getByRole('button',{name:'Work',exact:true}).click();
-  await page.locator('.ec-searchresult').filter({hasText:'Listed Work'}).click();
+  await page.locator('.ec-collection-row').filter({hasText:'Listed Work'}).click();
   await expect(page.locator('section.ec-agent')).toHaveCount(200);
 });
 
@@ -89,14 +89,14 @@ test('late lookup cannot replace a new selection or cross a profile switch',asyn
   await live(page);
   await page.evaluate(()=>{(window as any).continuity.delay=true;});
   await page.locator('.ec-navgroup').getByRole('button',{name:/Inbox/}).click();
-  await page.getByRole('button',{name:'Review request'}).click();
+  await page.getByRole('button',{name:'Review approval'}).click();
   await page.locator('.ec-taskbutton').filter({hasText:'Listed Work'}).click();
   await page.evaluate(()=>{(window as any).continuity.flush();});
   await expect(page.getByRole('heading',{name:'Listed Work'})).toBeVisible();
   await page.getByRole('button',{name:'Show inspector'}).click();
   await page.getByRole('tab',{name:'Results',exact:true}).click();
   await page.locator('.ec-navgroup').getByRole('button',{name:/Inbox/}).click();
-  await page.getByRole('button',{name:'Review request'}).click();
+  await page.getByRole('button',{name:'Review approval'}).click();
   await page.getByRole('button',{name:'Settings',exact:true}).click();
   await page.getByLabel('Selected profile').selectOption('other');
   await page.evaluate(()=>{(window as any).continuity.flush();});
@@ -138,11 +138,11 @@ test('activity inspection has an explicit bounded extent',async({page})=>{
 test('live Work navigation lists canonical items and routes back to detail',async({page})=>{
  await live(page);
  await page.locator('.ec-navgroup').getByRole('button',{name:'Work',exact:true}).click();
- await expect(page.getByRole('heading',{name:'Your work.'})).toBeVisible();
- await page.getByLabel('Filter Work').selectOption('task');
- await expect(page.getByText('No matching Work in the loaded results.')).toBeVisible();
- await page.getByLabel('Filter Work').selectOption('session');
- await page.locator('.ec-searchresult').filter({hasText:'Listed Work'}).click();
+ await expect(page.getByRole('heading',{name:'Work',exact:true})).toBeVisible();
+ await page.getByLabel('Work type').selectOption('task');
+ await expect(page.getByText('No matching work',{exact:true})).toBeVisible();
+ await page.getByLabel('Work type').selectOption('session');
+ await page.locator('.ec-collection-row').filter({hasText:'Listed Work'}).click();
  await expect(page.getByRole('heading',{name:'Listed Work'})).toBeVisible();
 });
 
@@ -239,7 +239,7 @@ for(const decision of ['approved','denied'] as const)test('records '+decision+' 
  await live(page);
  await page.evaluate(()=>{const c=(window as any).continuity;c.approval={id:'approval',sessionId:'old',target:{targetId:'target',targetGeneration:1},actionSummary:'Read one file',scope:'once',decisions:['approved','denied']};c.refresh();});
  await page.locator('.ec-navgroup').getByRole('button',{name:/Inbox/}).click();
- await page.getByRole('button',{name:'Review request'}).click();
+ await page.getByRole('button',{name:'Review approval'}).click();
  const card=page.getByLabel('Approval request');
  await expect(card).toContainText('default profile');await expect(card).toContainText('Not sandboxed');
  await card.getByRole('button',{name:decision==='approved'?'Approve once':'Reject',exact:true}).click();
@@ -254,17 +254,17 @@ test('Inbox filters attention and routes unbound provider setup without a fake W
  await live(page);
  await page.evaluate(()=>{const c=(window as any).continuity;c.extraInbox=[{id:'setup:model',profileId:'default',workId:null,kind:'setup',title:'Choose a model',summary:'Configure a model',createdAt:0,approval:null},{id:'evolution:proposal',profileId:'default',workId:null,kind:'evolution',title:'Review proposal',summary:'A bounded proposal awaits review',createdAt:0,approval:null}];c.refresh();});
  await page.locator('.ec-navgroup').getByRole('button',{name:/Inbox/}).click();
- await page.getByLabel('Filter attention').selectOption('evolution');
+ await page.getByRole('button',{name:/^Issues/}).click();
  await page.getByRole('button',{name:'View details',exact:true}).click();
  await expect(page.getByLabel('Attention details')).toContainText('Agent Evolution in the CLI');
- await page.getByLabel('Filter attention').selectOption('setup');
+ await page.getByRole('button',{name:/^Issues/}).click();
  await page.getByRole('button',{name:'Review setup',exact:true}).click();
  await expect(page.getByRole('heading',{name:'Models & providers'})).toBeVisible();
 });
 
 test('attention review returns to Inbox while preserving the selected Work',async({page})=>{
  await live(page);await page.locator('.ec-navgroup').getByRole('button',{name:/Inbox/}).click();
- await page.getByRole('button',{name:'Review request',exact:true}).click();
+ await page.getByRole('button',{name:'Review approval',exact:true}).click();
  await expect(page.getByRole('heading',{name:'Older Work'})).toBeVisible();
  await page.getByRole('button',{name:'Back to Inbox',exact:true}).click();
  await expect(page.getByRole('heading',{name:'Inbox',exact:true})).toBeVisible();

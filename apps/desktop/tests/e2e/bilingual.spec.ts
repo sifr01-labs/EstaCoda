@@ -2,7 +2,7 @@ import {test,expect,type Page} from '@playwright/test';
 import {translate,type DisplayLanguage} from '../../src/shared/i18n/index.js';
 const openWork=async(page:Page,language:DisplayLanguage)=>{
  if(!await page.locator('#ec-sidebar').isVisible())await page.locator('.ec-sidebar-toggle').click();
- if(page.viewportSize()!.width<590){await page.locator('.ec-navgroup').getByRole('button',{name:new RegExp(translate(language,'Inbox'))}).click();await page.getByRole('button',{name:translate(language,'Review request'),exact:true}).click();}
+ if(page.viewportSize()!.width<590){await page.locator('.ec-navgroup').getByRole('button',{name:new RegExp(translate(language,'Inbox'))}).click();await page.getByRole('button',{name:translate(language,'Review approval'),exact:true}).click();}
  else await page.locator('[data-task="retry"]').click();
 };
 for(const language of ['en','ar'] as const)for(const mode of ['light','dark'] as const)for(const width of [360,1280])for(const view of ['approval','settings','models'] as const){

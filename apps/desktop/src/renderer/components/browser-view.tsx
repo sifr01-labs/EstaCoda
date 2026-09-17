@@ -1,3 +1,4 @@
+import {WorkspacePanel} from './workspace-panel.js';
 import {LoadingStatus,SkeletonRows} from './loading.js';
 import {useI18n} from '../i18n.js';
 import {BrowserWatch} from './browser-watch.js';
@@ -9,9 +10,8 @@ import {Button,Badge,Icon} from './primitives.js';
 export function BrowserView({api,work,close}:{api:DesktopApi;work:WorkProjection;close:()=>void}){
  const {t,owned,status}=useI18n();
  const[controlling,setControlling]=useState(false);
- const dialog=useRef<HTMLDialogElement>(null),epoch=useRef(0),[ready,setReady]=useState(true),[refresh,setRefresh]=useState(0);
+ const epoch=useRef(0),[ready,setReady]=useState(true),[refresh,setRefresh]=useState(0);
  const[items,setItems]=useState<BrowserViewState[]|null>(null),[selected,setSelected]=useState<BrowserViewState|null>(null),[snapshot,setSnapshot]=useState<BrowserViewSnapshot|null>(null),[output,setOutput]=useState<ArtifactPreview|null>(null),[error,setError]=useState(''),[truncated,setTruncated]=useState(false);
- useEffect(()=>{const previous=document.activeElement as HTMLElement|null;dialog.current?.showModal();return()=>{epoch.current++;dialog.current?.close();previous?.focus();};},[]);
  useEffect(()=>api.onSnapshot(value=>{if(value.status!=='ready'||value.profile.id!==work.profileId){epoch.current++;setReady(false);setItems(null);setSelected(null);setSnapshot(null);setOutput(null);setError('Browser view disconnected. Close and reopen after reconnecting.');}}),[api,work.profileId]);
  useEffect(()=>{const revision=++epoch.current;setItems(null);setSelected(null);setSnapshot(null);setOutput(null);if(!ready)return;setError('');
   void api.browser?.list(work.id).then(value=>{if(revision===epoch.current){setItems(value.items);setTruncated(value.truncated);}}).catch(()=>{if(revision===epoch.current)setError('Browser observations are unavailable. Select a current, trusted workspace.');});
@@ -19,19 +19,19 @@ export function BrowserView({api,work,close}:{api:DesktopApi;work:WorkProjection
  },[api,work.id,work.target?.targetId,work.target?.targetGeneration,ready,refresh]);
  const open=async(item:BrowserViewState)=>{const revision=++epoch.current;setSelected(item);setSnapshot(null);setOutput(null);setError('');try{const value=await api.browser!.snapshot(work.id,item.reference);if(revision===epoch.current){setSnapshot(value);setSelected(value.state);}}catch{if(revision===epoch.current)setError('Browser observation changed. Refresh the list.');}};
  const artifact=async(reference:ArtifactReference)=>{const revision=++epoch.current;setOutput(null);try{const value=await api.artifacts?.open(reference);if(revision===epoch.current&&value)setOutput(value);}catch{if(revision===epoch.current)setError('Retained browser output unavailable.');}};
- return <dialog ref={dialog} className="ec-filedialog ec-browserdialog" aria-labelledby="ec-browser-title" onCancel={close}>
-  <header><h2 id="ec-browser-title">{t("Browser")}</h2><Badge>{controlling?t("You control the browser"):api.browserControl?.watch?t("Browser views"):t("Recorded view")}</Badge><Button className="ec-ghost ec-iconbutton" icon="x" aria-label={t("Close browser view")} onClick={close}/></header>
+ return <WorkspacePanel title={t('Browser')} closeLabel={t('Close browser view')} close={close} className="ec-browserdialog ec-browser-panel" status={<Badge kind={controlling?'warn':''}>{controlling?t('You control the browser'):t('Browser views')}</Badge>}>
+   {api.browserControl?.watch&&ready&&<BrowserWatch api={api.browserControl} workId={work.id} controlling={controlling}/>}
+   {api.browserControl?.workspace&&ready&&<BrowserTakeover api={api.browserControl} workId={work.id} active={setControlling}/>}
+{error&&<p role="alert">{owned(error)}</p>}
+<details className="ec-recorded-views" open={!api.browserControl?.watch||!ready}><summary>{t("Recorded views")}</summary>
   <p className="ec-footnote">{t("Latest recorded observations from this Work. Refresh checks for new observations; it does not navigate, capture a page, or take control.")}</p>
   <Button disabled={!ready||controlling} icon="refresh-cw" onClick={()=>setRefresh(value=>value+1)}>{t("Refresh browser view")}</Button>
-  {error&&<p role="alert">{owned(error)}</p>}
   <div className="ec-filelayout"><nav aria-label={t("Browser sessions")}>
    {!items&&!error&&<SkeletonRows label={t("Loading browser sessions…")}/>}
    {items?.length===0&&<p className="ec-footnote">{t("No recorded browser sessions for this Work.")}</p>}
    {items?.map(item=><button key={item.reference.browserId} disabled={!ready||controlling} aria-current={selected?.reference.browserId===item.reference.browserId?'true':undefined} onClick={()=>void open(item)}><Icon name="globe"/><span dir="auto">{item.title??(item.state==='blocked'?t("Observation withheld"):item.reference.browserId)}</span></button>)}
    {truncated&&<p className="ec-footnote">{t("Showing up to 8 browser sessions from the latest 64 browser events.")}</p>}
   </nav><section aria-label={t("Browser observation")}>
-   {api.browserControl?.watch&&ready&&<BrowserWatch api={api.browserControl} workId={work.id} controlling={controlling}/>}
-   {api.browserControl?.workspace&&ready&&<BrowserTakeover api={api.browserControl} workId={work.id} active={setControlling}/>}
    {!selected?<p className="ec-footnote">{t("Select a browser session to inspect its recorded state.")}</p>:<>
     <h3 dir="auto">{selected.title??t("Browser observation")}</h3>
     {selected.url&&<p className="ec-browserurl"><bdi dir="ltr">{selected.url}</bdi></p>}
@@ -42,5 +42,5 @@ export function BrowserView({api,work,close}:{api:DesktopApi;work:WorkProjection
     {output&&<article className="ec-docpreview"><h3 dir="auto">{output.artifact.displayName}</h3><p>{t("Integrity:")+" "}{status(output.integrity)}</p><pre dir="auto">{output.text??t("Binary artifact. Text preview unavailable.")}</pre>{output.truncated&&<p>{t("Preview truncated.")}</p>}</article>}
    </>}
   </section></div>
- </dialog>;
+ </details></WorkspacePanel>;
 }

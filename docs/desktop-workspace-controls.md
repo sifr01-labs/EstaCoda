@@ -55,3 +55,44 @@ The sidebar collapse button sits beside Settings on the brand row. When closed, 
 Activity separates **Current status** (the canonical Work projection) from **Latest request** (the recorded control operation). A completed request does not imply completed Work. Stop acknowledgments remain distinct from confirmed cancellation; when Work has ended, its final outcome remains authoritative. Technical identifiers are disclosed below these summaries. Status refresh is read-only; this change adds no execution authority or automatic retries.
 
 Context menus use a translucent, blurred surface and theme-accent highlights for hover and keyboard focus, with an opaque reduced-transparency fallback. Scrollbars use lighter neutral thumbs, and working text uses a restrained theme-accent shimmer with a static reduced-motion fallback.
+
+## Work, Inbox, and Library
+
+Work groups loaded conversations and Tasks by date. Status filters, text search,
+and workspace selection apply to loaded results; Load more remains available
+when further pages exist. Counts beside filters describe that same loaded set.
+Inbox uses the source Work title when available and keeps the actual question,
+approval summary, or issue underneath. Respond, Review approval, and View issue
+open the existing scoped review flow; they do not approve or retry anything.
+
+Library artifacts display their source, format, size, and date. Identically named
+outputs remain separate records. Preview and source navigation retain profile
+and integrity checks. Skills use the shared collection layout with searchable
+loaded entries and expandable instructions. Memory presents USER.md, SOUL.md,
+and MEMORY.md as read-only Preferences, Personality, and Project knowledge.
+Rendered Markdown blocks HTML, remote images, and automatic link navigation;
+View source preserves access to the original text. Evidence and Agent Evolution
+continue to show the existing proposal records and review controls.
+
+## Files, Terminal, and Browser panels
+
+Workspace tools open beside the conversation. Their shared header supports
+expansion and closing; the divider supports pointer and keyboard resizing.
+Narrow windows show the selected panel across the work area. Escape closes the
+focused panel. Files show workspace-relative breadcrumbs and read-only previews;
+protected paths, symlinks, and disconnected state retain their existing gates.
+
+Terminal starts only through Open terminal and the existing native confirmation.
+Switching to another tool panel keeps that terminal mounted; its toolbar action
+indicates that it remains open. Closing Terminal, leaving Work, or changing its
+target releases the terminal through the existing scoped shutdown path. Output
+is ephemeral and does not become saved conversation content.
+
+Browser separates current sanitized observations from recorded views. Watching
+never grants control. Take control and Return to agent keep the existing runtime
+lease, protected-entry, profile, target, and URL checks. Closing or switching away
+from browser control abandons its lease without resuming agent browser actions;
+return control explicitly when finished. Disconnection clears observations.
+
+These changes are renderer presentation and navigation only. No new permission,
+execution, browser navigation, memory mutation, or approval API is introduced.
