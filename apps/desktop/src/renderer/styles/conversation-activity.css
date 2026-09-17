@@ -6,7 +6,7 @@
 #ec-branded-workspace .ec-run-history summary::-webkit-details-marker{display:none}
 #ec-branded-workspace .ec-run-summary{display:flex;align-items:center;gap:11px;padding:14px 16px}
 #ec-branded-workspace .ec-run-summary>span{flex:1;min-width:0}
-#ec-branded-workspace .ec-run-summary strong{font-size:13px;font-weight:500;color:var(--ec-text)}
+#ec-branded-workspace .ec-run-summary strong{font-size:13px;font-weight:500;color:var(--ec-text);overflow-wrap:anywhere}
 #ec-branded-workspace .ec-run-summary small{display:block;margin-top:2px;font-size:11px;line-height:1.6;color:var(--ec-muted)}
 #ec-branded-workspace .ec-run-summary>svg:first-child{color:var(--ec-ok)}
 #ec-branded-workspace .ec-run-needs-attention>.ec-run-summary>svg:first-child{color:var(--ec-warning)}
@@ -42,7 +42,6 @@
 #ec-branded-workspace .ec-run-saved{display:flex;align-items:center;gap:9px;padding:11px 0}
 #ec-branded-workspace .ec-run-saved>span{flex:1;overflow-wrap:anywhere;min-width:0}
 #ec-branded-workspace .ec-run-saved small{display:block;color:var(--ec-muted);font-size:11px}
-#ec-branded-workspace .ec-run-footnote{font-size:11px;color:var(--ec-muted);margin:14px 0 0}
 #ec-branded-workspace .ec-run-answer{margin:0 0 24px}
 #ec-branded-workspace .ec-run-answer>.ec-markdown h2:first-child{font-size:20px;letter-spacing:-.4px;line-height:1.45;margin-top:0}
 #ec-branded-workspace .ec-run-currentprose{color:var(--ec-muted);font-size:13px}

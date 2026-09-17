@@ -172,3 +172,24 @@ for(const language of ['en','ar'] as const)test('workspace tools dock, resize, a
  await page.getByRole('button',{name:t('Terminal'),exact:true}).click();await expect(page.locator('.xterm')).toBeVisible();expect(await page.evaluate(()=>(window as any).presentation.calls.filter((c:any)=>c[0]==='terminal-open'))).toHaveLength(1);await page.getByRole('button',{name:t('Close terminal'),exact:true}).click();await expect(page.locator('.xterm')).toHaveCount(0);
  await page.getByRole('button',{name:t('Files'),exact:true}).click();await page.setViewportSize({width:360,height:740});await expect(panel).toBeInViewport();expect(await panel.evaluate(e=>e.scrollWidth<=e.clientWidth+1)).toBe(true);await page.screenshot({path:testInfo.outputPath('files-narrow-'+language+'.png')});await page.getByRole('button',{name:t('Close files'),exact:true}).click();await expect(page.getByLabel(t('Draft guidance'))).toBeInViewport();
 });
+
+for(const language of ['en','ar'] as const)test(`${language} activity heading follows running calls and clears settled calls`,async({page},info)=>{
+ await mount(page,language);const t=(key:Parameters<typeof translate>[1])=>translate(language,key);
+ await page.evaluate(()=>{const s=(window as any).presentation;s.work.status='running';s.items=s.items.slice(0,2);s.refresh();});
+ const heading=page.locator('.ec-run-summary strong');await expect(heading).toHaveText(t('Read file'));
+ await page.evaluate(()=>{const s=(window as any).presentation;s.items.push({...s.items[1],id:'parallel',callId:'parallel',name:'web.search'});s.refresh();});
+ await expect(heading).toHaveText(t('Search the web'));
+ await page.evaluate(()=>{const s=(window as any).presentation;s.items.push({...s.items.at(-1),id:'parallel-end',state:'completed'});s.refresh();});
+ await expect(heading).toHaveText(t('Read file'));
+ await page.evaluate(()=>{const s=(window as any).presentation;s.items.push({...s.items[1],id:'read-end',state:'completed'});s.refresh();});
+ await expect(heading).toHaveText(t('Activity'));
+ await page.evaluate(()=>{const s=(window as any).presentation;s.items.push({...s.items[1],id:'connector',callId:'connector',name:'mcp.research.search_sources'});s.refresh();});
+ await expect(heading).toHaveText('mcp.research.search_sources');
+ await page.locator('.ec-run-summary').click();await expect(page.locator('.ec-run-history')).not.toContainText(t('Activity remains available with this conversation.'));
+ await page.setViewportSize({width:360,height:900});expect(await page.locator('.ec-run-history').evaluate(el=>el.scrollWidth<=el.clientWidth+1)).toBe(true);
+ await page.screenshot({path:info.outputPath('activity-heading-'+language+'.png')});
+ await page.evaluate(()=>{const s=(window as any).presentation;s.items.push({...s.items.at(-1),id:'connector-end',state:'failed'});s.refresh();});
+ await expect(heading).toHaveText(t('Activity'));
+ await page.evaluate(()=>{const s=(window as any).presentation;s.work.status='needs_attention';s.refresh();});
+ await expect(heading).not.toHaveText('mcp.research.search_sources');
+});

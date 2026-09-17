@@ -44,3 +44,11 @@ for(const language of ['en','ar'] as const)for(const theme of ['light','dark'])t
  await mount(page,language,'completed',theme);const input=page.getByLabel(translate(language,'Draft guidance'));
  for(const width of [360,1280]){await page.setViewportSize({width,height:900});await input.fill('');await input.fill('/');const palette=page.locator('.ec-composer-commands');await expect(palette).toBeInViewport();expect(await palette.evaluate(el=>el.scrollWidth<=el.clientWidth)).toBe(true);await page.screenshot({path:info.outputPath(`commands-${width}.png`)});await input.press('Escape');await page.getByRole('button',{name:translate(language,'Add attachments'),exact:true}).click();await expect(page.locator('.ec-composer-add')).toBeInViewport();await page.screenshot({path:info.outputPath(`add-${width}.png`)});await page.keyboard.press('Escape');}
 });
+
+for(const language of ['en','ar'] as const)test(`${language} composer omits routine tips but keeps workspace guidance on narrow screens`,async({page})=>{
+ await mount(page,language);await expect(page.locator('.ec-composer-hints')).toHaveCount(0);
+ await page.evaluate(()=>{const s=(window as any).composerTest;s.setWork({...s.work,target:undefined});s.setDraft({...s.draft,target:undefined});});
+ await page.setViewportSize({width:360,height:740});
+ await expect(page.locator('.ec-composer-hints')).toBeVisible();
+ await expect(page.locator('.ec-composer-hints')).toHaveText(translate(language,'This conversation has no workspace attached. Start a new chat and choose a folder to continue working.'));
+});
