@@ -53,10 +53,10 @@ export function CanonicalActivity({items,results,browser,api,workStatus,more=fal
  return <div className="ec-conversation-runs">{runs.map((run,index)=>{const content=runContent(run),latest=index===runs.length-1;const active=latest&&!more&&workStatus==='running'&&!content.outcome;return <div className="ec-conversation-run" key={run.id}>
  {run.user&&<section className="ec-usernote" data-conversation-turn={run.user.id} aria-label={t('Your message')}><div dir="auto" style={{whiteSpace:'pre-wrap'}}>{run.user.text}</div><MessageActions text={run.user.text} timestamp={run.user.timestamp}/></section>}
  {!!run.items.length&&<section className="ec-agent"><div className="ec-msghead"><BrandEye/><b>EstaCoda</b></div>{content.operational&&<History run={run} active={active} more={latest&&more}/>}
- {content.responses.map(item=><section className="ec-run-answer" key={item.id}><ResponseMarkdown text={item.text}/>{item!==content.responses.at(-1)&&<MessageActions text={item.text} timestamp={item.timestamp}/>}</section>)}
+ {content.responses.map(item=><section className="ec-run-answer" key={item.id}><ResponseMarkdown text={item.text}/><MessageActions text={item.text} timestamp={item.timestamp}/></section>)}
  {active&&!content.responses.length&&content.latestProgress&&<div className="ec-run-currentprose"><ResponseMarkdown text={content.latestProgress.text}/></div>}
  {!content.operational&&run.items.filter(item=>item.kind==='assistant_delta').map(item=><ResponseMarkdown key={item.id} text={item.text}/>)}
  <Notices items={run.items} results={results} browser={hasBrowser?browser:undefined}/>
- {!!content.outputs.length&&<RunOutputs items={content.outputs} api={api} results={results}/ >}{content.responses.at(-1)&&<MessageActions text={content.responses.at(-1)!.text} timestamp={content.responses.at(-1)!.timestamp}/>}</section>}
+ {!!content.outputs.length&&<RunOutputs items={content.outputs} api={api} results={results}/ >}</section>}
  </div>;})}</div>;
 }

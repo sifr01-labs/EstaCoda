@@ -193,3 +193,12 @@ for(const language of ['en','ar'] as const)test(`${language} activity heading fo
  await page.evaluate(()=>{const s=(window as any).presentation;s.work.status='needs_attention';s.refresh();});
  await expect(heading).not.toHaveText('mcp.research.search_sources');
 });
+
+for(const language of ['en','ar'] as const)test(`${language} composer keeps voice, model, queue and stop separate in a narrow running chat`,async({page},info)=>{
+ await mount(page,language);const t=(key:Parameters<typeof translate>[1])=>translate(language,key);
+ await page.evaluate(()=>{const s=(window as any).presentation;s.work.status='running';s.work.actions=[{id:'sessions.send',enabled:true},{id:'sessions.cancelTurn',enabled:true}];s.refresh();});
+ await page.setViewportSize({width:360,height:740});await page.getByLabel(t('Draft guidance')).fill('A follow-up to queue');
+ const controls=[page.getByRole('button',{name:t('Work model'),exact:true}),page.getByRole('button',{name:t('Voice input'),exact:true}),page.getByRole('button',{name:t('Queue message'),exact:true}),page.getByRole('button',{name:t('Stop'),exact:true})];
+ const bounds=[];for(const control of controls){await expect(control).toBeInViewport();bounds.push((await control.boundingBox())!);}bounds.sort((a,b)=>a.x-b.x);for(let i=1;i<bounds.length;i++)expect(bounds[i]!.x).toBeGreaterThanOrEqual(bounds[i-1]!.x+bounds[i-1]!.width-1);
+ expect(await page.locator('.ec-composer').evaluate(el=>el.scrollWidth<=el.clientWidth)).toBe(true);await page.screenshot({path:info.outputPath('running-composer-'+language+'.png')});
+});

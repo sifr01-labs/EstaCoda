@@ -116,3 +116,9 @@ test('working indicator follows owner activity, suppress attention, localize, an
   await expect(page.locator('.ec-working-word')).toHaveCount(0);
   await expect(page.getByText('Received response')).toHaveCount(0);
 });
+
+test('working presence animates the brand mark, keeps text steady, and respects reduced motion',async({page},info)=>{
+ await mount(page,'live');const mark=page.locator('.ec-working-presence .ec-official-icon');await expect(mark).toBeVisible();
+ await page.emulateMedia({reducedMotion:'no-preference'});await expect(mark).toHaveCSS('animation-name','ec-presence-breathe');await expect(page.locator('.ec-working-word')).toHaveCSS('animation-name','none');await expect(page.locator('.ec-working-word')).toHaveCSS('background-image','none');
+ await page.screenshot({path:info.outputPath('working-presence.png')});await page.emulateMedia({reducedMotion:'reduce'});await expect(mark).toHaveCSS('animation-name','none');await expect(mark).toBeVisible();
+});

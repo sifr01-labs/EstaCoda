@@ -48,16 +48,18 @@
 #ec-branded-workspace .ec-diagnostics>summary{cursor:pointer;color:var(--ec-muted);font-weight:500;padding:4px 0}
 #ec-branded-workspace .ec-diagnostics[open]>summary{margin-bottom:16px}
 #ec-branded-workspace .ec-diagnostics .ec-btn{background:transparent}
-#ec-branded-workspace .ec-live-working{font-size:13px;font-weight:500;color:var(--ec-muted);padding:12px 0}
-#ec-branded-workspace .ec-working-word{background:linear-gradient(100deg,var(--ec-muted) 30%,color-mix(in srgb,var(--ec-accent) 75%,var(--ec-text)) 48%,var(--ec-muted) 65%);background-size:240% 100%;background-clip:text;-webkit-background-clip:text;color:transparent;animation:ec-working-shimmer 2.2s linear infinite}
-@keyframes ec-working-shimmer{from{background-position:150% 0}to{background-position:-100% 0}}
+#ec-branded-workspace .ec-live-working{display:flex;align-items:center;gap:10px;min-height:40px;padding:10px 0;font-size:12px;font-weight:500;color:var(--ec-muted)}
+#ec-branded-workspace .ec-working-presence{display:grid;place-items:center;width:30px;height:26px;flex:none;color:var(--ec-accent)}
+#ec-branded-workspace .ec-working-presence .ec-official-icon{width:28px;height:22px;animation:ec-presence-breathe 2.8s ease-in-out infinite}
+#ec-branded-workspace .ec-working-word{color:var(--ec-muted)}
+@keyframes ec-presence-breathe{0%,100%{opacity:.45;transform:scale(.94)}50%{opacity:1;transform:scale(1)}}
 #ec-branded-workspace .ec-message-actions{display:flex;align-items:center;gap:8px;min-height:30px;margin-top:8px;font-size:11px;color:var(--ec-muted);opacity:0;transition:opacity .12s ease}
 #ec-branded-workspace .ec-agent:hover>.ec-message-actions,#ec-branded-workspace .ec-usernote:hover>.ec-message-actions,#ec-branded-workspace section:focus-within>.ec-message-actions{opacity:1}
 #ec-branded-workspace .ec-message-actions .ec-btn{min-height:26px;padding:4px}
 #ec-branded-workspace .ec-usernote .ec-message-actions{justify-content:flex-end}
 #ec-branded-workspace .ec-message-actions time{font-variant-numeric:tabular-nums}
 @media(hover:none){#ec-branded-workspace .ec-message-actions{opacity:1}}
-@media(prefers-reduced-motion:reduce){#ec-branded-workspace .ec-working-word{animation:none;background:none;color:var(--ec-muted)}}
+@media(prefers-reduced-motion:reduce){#ec-branded-workspace .ec-working-presence .ec-official-icon{animation:none}}
 @media(max-width:650px){#ec-branded-workspace .ec-page{padding:24px 20px 40px}#ec-branded-workspace .ec-window[data-sidebar=open] #ec-sidebar{position:absolute;inset:0 auto 0 0;width:min(var(--ec-sidebar),85vw);z-index:4;box-shadow:8px 0 32px #0002}#ec-branded-workspace .ec-layout{grid-template-columns:minmax(0,1fr);grid-template-rows:minmax(0,1fr)}#ec-branded-workspace .ec-topline{margin-left:136px;padding-left:10px}#ec-branded-workspace .ec-sidebar-resize{display:none}#ec-branded-workspace .ec-settingsrow{gap:12px}}
 #ec-branded-workspace:dir(rtl) .ec-window .ec-topline{margin-left:136px;padding-left:10px}
 #ec-branded-workspace .ec-capability-section{margin:32px 0}

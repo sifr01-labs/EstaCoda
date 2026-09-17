@@ -1,3 +1,4 @@
+import {BrandEye} from './primitives.js';
 import {ResponseMarkdown} from './response-markdown.js';
 import {CanonicalActivity} from './canonical-activity.js';
 import {useI18n} from '../i18n.js';
@@ -28,5 +29,5 @@ export function LiveActivity({api,work,items=[],waiting=false,results=()=>{},bro
  const committed=items.filter((item):item is Extract<ActivityProjection,{kind:'message'}>=>item.kind==='message'&&item.role==='assistant'&&!baseline.current.has(item.id));
  const pending=segments.filter(segment=>!committed.some(item=>item.text.trim().startsWith(segment.text.trim())));
  const running=preview?.active&&work.status==='running'&&!waiting;
- return <><CanonicalActivity items={items} results={results} browser={browser} api={desktopApi} workStatus={waiting?'needs_attention':work.status} more={more}/>{pending.map(segment=><section className="ec-agent ec-live-response" aria-label={t('Live assistant activity')} key={segment.key}><ResponseMarkdown text={segment.text}/>{segment.truncated&&<p className="ec-footnote">{t('Live preview limit reached. The settled response will appear in activity.')}</p>}</section>)}{running&&<div className="ec-live-working" role="status"><span className="ec-working-word">{t('Working')}</span></div>}</>;
+ return <><CanonicalActivity items={items} results={results} browser={browser} api={desktopApi} workStatus={waiting?'needs_attention':work.status} more={more}/>{pending.map(segment=><section className="ec-agent ec-live-response" aria-label={t('Live assistant activity')} key={segment.key}><ResponseMarkdown text={segment.text}/>{segment.truncated&&<p className="ec-footnote">{t('Live preview limit reached. The settled response will appear in activity.')}</p>}</section>)}{running&&<div className="ec-live-working" role="status"><span className="ec-working-presence" aria-hidden="true"><BrandEye/></span><span className="ec-working-word">{t('Working')}</span></div>}</>;
 }

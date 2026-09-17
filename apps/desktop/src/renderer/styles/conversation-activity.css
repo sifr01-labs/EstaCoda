@@ -66,4 +66,4 @@
 @media(pointer:coarse){#ec-branded-workspace .ec-run-history summary,#ec-branded-workspace .ec-run-files>button{min-height:44px}}
 
 #ec-branded-workspace .ec-run-files>button:last-child:nth-child(odd){grid-column:1/-1;border-inline-end:0}
-#ec-branded-workspace .ec-conversation-run>.ec-agent>.ec-message-actions,#ec-branded-workspace .ec-run-answer>.ec-message-actions{opacity:1}
+#ec-branded-workspace .ec-run-answer:hover>.ec-message-actions{opacity:1}

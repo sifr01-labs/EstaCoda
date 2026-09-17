@@ -32,3 +32,19 @@ for(const language of ['en','ar'] as const)for(const appearance of ['light','dar
  await mount(page,language,appearance);for(const width of [360,1024]){await page.setViewportSize({width,height:1100});await expect(page.locator('.ec-run-summary')).toBeVisible();expect(await page.locator('#conversation-test').evaluate(el=>el.scrollWidth<=el.clientWidth)).toBe(true);await page.screenshot({path:info.outputPath(`${language}-${appearance}-${width}.png`)});}
  await page.locator('.ec-run-summary').click();await page.locator('.ec-run-action>summary').first().click();await page.setViewportSize({width:360,height:1100});expect(await page.locator('#conversation-test').evaluate(el=>el.scrollWidth<=el.clientWidth)).toBe(true);await page.screenshot({path:info.outputPath(`${language}-${appearance}-expanded.png`)});
 });
+
+test('response actions reveal only for their own response or keyboard focus without moving content',async({page})=>{
+ await mount(page);await page.evaluate(()=>{const s=(window as any).activityDesign;s.items.push({...s.items.at(-1),id:'second-response',text:'A separate response.'});s.rerender();});
+ const answers=page.locator('.ec-run-answer'),first=answers.first().locator('.ec-message-actions'),second=answers.last().locator('.ec-message-actions');
+ await page.mouse.move(0,0);await expect(first).toHaveCSS('opacity','0');await expect(second).toHaveCSS('opacity','0');const before=await answers.last().boundingBox();
+ await answers.first().hover();await expect(first).toHaveCSS('opacity','1');await expect(second).toHaveCSS('opacity','0');
+ await page.mouse.move(0,0);await expect(first).toHaveCSS('opacity','0');await second.getByRole('button',{name:'Copy message'}).focus();await expect(second).toHaveCSS('opacity','1');await expect(first).toHaveCSS('opacity','0');
+ expect(await answers.last().boundingBox()).toEqual(before);
+});
+
+test.describe('touch response actions',()=>{
+ test.use({hasTouch:true});
+ test('remain available without hover',async({page})=>{
+  await mount(page);await expect(page.locator('.ec-run-answer .ec-message-actions')).toHaveCSS('opacity','1');
+ });
+});

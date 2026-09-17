@@ -34,7 +34,7 @@ test('long text grows and shrinks, slash navigation does not send, and IME Enter
  await input.fill('مرحبا');await input.dispatchEvent('keydown',{key:'Enter',isComposing:true,keyCode:229});expect((await calls(page)).filter((c:any)=>c[0]==='submit')).toHaveLength(0);
 });
 test('working controls queue without dispatch, preserve creation mode, and Stop pauses the follow-up',async({page})=>{
- await mount(page,'en','running');await expect(page.locator('.ec-composer-runline')).toContainText('Working on your request');await page.getByLabel('Draft guidance').fill('/image');await page.getByLabel('Draft guidance').press('Enter');await page.getByLabel('Draft guidance').fill('A reference image');await page.getByRole('button',{name:'Queue message',exact:true}).click();expect((await calls(page)).filter((c:any)=>c[0]==='submit')).toHaveLength(0);
+ await mount(page,'en','running');await expect(page.locator('.ec-composer-runline')).toHaveCount(0);await expect(page.locator('.ec-composer').getByRole('button',{name:'Stop',exact:true})).toBeVisible();await expect(page.getByRole('button',{name:'Queue message',exact:true})).toHaveCount(0);await page.getByLabel('Draft guidance').fill('/image');await page.getByLabel('Draft guidance').press('Enter');await page.getByLabel('Draft guidance').fill('A reference image');await page.getByRole('button',{name:'Queue message',exact:true}).click();expect((await calls(page)).filter((c:any)=>c[0]==='submit')).toHaveLength(0);
  await page.getByRole('button',{name:'Stop',exact:true}).click();await expect(page.getByRole('region',{name:'Queued message'})).toContainText('Saved follow-up');expect(await calls(page)).toContainEqual(['act',{workId:'session:s',action:'sessions.cancelTurn'}]);await page.getByRole('button',{name:'Edit queued message'}).click();await expect(page.getByLabel('Draft guidance')).toHaveValue('A reference image');await expect(page.locator('.ec-composer-intent')).toContainText('Create image');
 });
 test('late attachment results cannot replace a different draft',async({page})=>{
@@ -51,4 +51,15 @@ for(const language of ['en','ar'] as const)test(`${language} composer omits rout
  await page.setViewportSize({width:360,height:740});
  await expect(page.locator('.ec-composer-hints')).toBeVisible();
  await expect(page.locator('.ec-composer-hints')).toHaveText(translate(language,'This conversation has no workspace attached. Start a new chat and choose a folder to continue working.'));
+});
+
+for(const language of ['en','ar'] as const)for(const theme of ['light','dark'])test(`${language} ${theme} stop has a stable composer slot beside a drafted follow-up`,async({page},info)=>{
+ await mount(page,language,'running',theme);const t=(key:Parameters<typeof translate>[1])=>translate(language,key);
+ for(const width of [360,1280]){
+  await page.setViewportSize({width,height:740});const input=page.getByLabel(t('Draft guidance'));await input.fill('');
+  const stop=page.locator('.ec-composer').getByRole('button',{name:t('Stop'),exact:true});await expect(stop).toBeInViewport();const before=(await stop.boundingBox())!;
+  await input.fill('Continue with the next step');await expect(page.getByRole('button',{name:t('Queue message'),exact:true})).toBeInViewport();const after=(await stop.boundingBox())!;expect(after.x).toBeCloseTo(before.x,0);
+  expect(await page.locator('.ec-composer').evaluate(e=>e.scrollWidth<=e.clientWidth)).toBe(true);await page.screenshot({path:info.outputPath(`stop-${width}.png`)});
+ }
+ await page.locator('.ec-composer-stop').focus();await page.keyboard.press('Enter');expect(await calls(page)).toContainEqual(['act',{workId:'session:s',action:'sessions.cancelTurn'}]);
 });
