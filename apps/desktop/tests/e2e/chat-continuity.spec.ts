@@ -59,3 +59,20 @@ test('uncertain delivery keeps the draft and shows a compact warning without ret
  await expect(box).toHaveValue('Keep this draft');expect(await page.evaluate(()=>(window as any).continuity.submitted.length)).toBe(1);
  await page.screenshot({path:info.outputPath('delivery-warning.png')});
 });
+
+test('sidebar running indicator stays compact and respects reduced motion',async({page})=>{
+ await mount(page);await page.evaluate(()=>{const s=(window as any).continuity;s.reference.status='running';s.refresh();});
+ const row=page.locator('.ec-taskbutton').first();await expect(row.getByRole('img',{name:'Running',exact:true})).toBeVisible();await expect(row.locator('small')).toHaveCount(0);
+ await expect(row.locator('.ec-sidebar-running-arc')).toHaveCSS('animation-name','none');
+ await page.emulateMedia({reducedMotion:'no-preference'});await expect(row.locator('.ec-sidebar-running-arc')).toHaveCSS('animation-name','ec-sidebar-orbit');
+ await page.evaluate(()=>{const s=(window as any).continuity;s.reference.reason='cancellation_requested';s.refresh();});await expect(row).toContainText('Cancellation requested');await expect(row.locator('.ec-sidebar-running')).toHaveCount(0);
+});
+
+test('conversation scrollbar reveals for scroll, edge and keyboard access without changing width',async({page})=>{
+ await mount(page);await page.locator('.ec-taskbutton').first().click();const panel=page.locator('#ec-work-panel');
+ await panel.evaluate(el=>{const content=document.createElement('div');content.style.height='3000px';el.append(content);});await page.mouse.move(0,0);
+ await expect(panel).toHaveCSS('scrollbar-color','rgba(0, 0, 0, 0) rgba(0, 0, 0, 0)');const width=await panel.evaluate(el=>el.clientWidth);
+ await panel.evaluate(el=>{el.scrollTop=100;});await expect(panel).toHaveAttribute('data-scrolling','true');await expect(panel).not.toHaveCSS('scrollbar-color','rgba(0, 0, 0, 0) rgba(0, 0, 0, 0)');await expect(panel).not.toHaveAttribute('data-scrolling','true');await expect(panel).toHaveCSS('scrollbar-color','rgba(0, 0, 0, 0) rgba(0, 0, 0, 0)');
+ const rect=(await panel.boundingBox())!;await page.mouse.move(rect.x+rect.width-4,rect.y+40);await expect(panel).toHaveAttribute('data-scroll-edge','true');await page.mouse.move(0,0);await expect(panel).not.toHaveAttribute('data-scroll-edge','true');
+ await page.keyboard.press('Tab');await panel.focus();await expect(panel).not.toHaveCSS('scrollbar-color','rgba(0, 0, 0, 0) rgba(0, 0, 0, 0)');expect(await panel.evaluate(el=>el.clientWidth)).toBe(width);
+});

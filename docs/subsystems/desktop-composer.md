@@ -18,4 +18,6 @@ Submitting a conversation immediately displays a local message bubble with a Sen
 - Optional local image thumbnails are bounded PNG previews, generated after media staging. Thumbnail failure does not discard a staged file; previews are not persisted in chat presentation state.
 - Profile/connection changes invalidate staging. Late picker/drop responses cannot overwrite a different draft or workspace.
 
-The sidebar contains recent work and Archived. Older work remains available through the Work page's pagination and Search; pagination was removed only from the sidebar.
+The sidebar contains recent work and Archived. Running conversations use a compact animated ring with an accessible status label; reduced-motion preferences keep the ring still. Cancellation and attention states retain their text labels. Older work remains available through the Work page's pagination and Search; pagination was removed only from the sidebar.
+
+The conversation scrollbar is quiet while idle. Scrolling briefly reveals it; moving to its edge or keyboard-focusing the conversation keeps it available without changing the content width. Forced-colors mode uses the system scrollbar colors.

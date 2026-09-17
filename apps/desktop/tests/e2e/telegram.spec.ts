@@ -38,3 +38,9 @@ test('lost Apply blocks replay and ignores a receipt for an older save',async({p
  await page.evaluate(()=>(window as any).telegramTest.inspectId='draft');await page.getByRole('button',{name:'Inspect last Telegram save'}).click();await expect(page.getByRole('dialog')).toHaveCount(0);
  expect((await calls(page)).filter((row:any)=>row[0]==='apply')).toHaveLength(1);
 });
+
+for(const language of ['en','ar'] as const)test(`Telegram conversation controls ${language} have room at narrow and desktop widths`,async({page},info)=>{
+ await mount(page,language,'dark');const t=(key:Parameters<typeof translate>[1])=>translate(language,key);await page.locator('.ec-channel-card').getByText(t('Advanced & diagnostics'),{exact:true}).click();
+ const group=page.getByRole('region',{name:t('Conversations and Work'),exact:true});await group.getByRole('button',{name:t('Load conversations')}).click();await expect(group.getByRole('button',{name:t('Open Work'),exact:true})).toBeVisible();await expect(group.getByRole('button',{name:t('Refresh'),exact:true})).toBeVisible();
+ for(const width of [360,1280]){await page.setViewportSize({width,height:960});await group.scrollIntoViewIfNeeded();expect(await group.evaluate(el=>el.scrollWidth<=el.clientWidth)).toBe(true);const head=(await group.locator('.ec-telegram-conversations-head').boundingBox())!,list=(await group.locator('.ec-telegram-conversation-list').boundingBox())!;expect(list.y-head.y-head.height).toBeGreaterThanOrEqual(16);await page.screenshot({path:info.outputPath(`telegram-controls-${width}.png`)});}
+});

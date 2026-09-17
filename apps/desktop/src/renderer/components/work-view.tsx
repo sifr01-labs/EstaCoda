@@ -62,6 +62,17 @@ export function WorkView({adapter,work,draft,change,pinned,togglePin,models,prof
   panel.addEventListener('click',inspect);panel.addEventListener('scroll',scroll,{passive:true});observer.observe(panel,{subtree:true,childList:true,characterData:true});
   return()=>{cancelAnimationFrame(frame);panel.removeEventListener('click',inspect);panel.removeEventListener('scroll',scroll);observer.disconnect();};
  },[work?.id,tab,adapter.fixture]);
+ // Keep the scroll affordance available during interaction, quiet while reading.
+ useEffect(()=>{
+  if(!work||adapter.fixture)return;
+  const panel=document.getElementById('ec-work-panel');if(!panel)return;
+  let idle:ReturnType<typeof setTimeout>;
+  const scrolling=()=>{panel.dataset.scrolling='true';clearTimeout(idle);idle=setTimeout(()=>{delete panel.dataset.scrolling;},900);};
+  const edge=(event:PointerEvent)=>{const rect=panel.getBoundingClientRect();const distance=getComputedStyle(panel).direction==='rtl'?event.clientX-rect.left:rect.right-event.clientX;if(distance>=0&&distance<18)panel.dataset.scrollEdge='true';else delete panel.dataset.scrollEdge;};
+  const leave=()=>{delete panel.dataset.scrollEdge;};
+  panel.addEventListener('scroll',scrolling,{passive:true});panel.addEventListener('pointermove',edge,{passive:true});panel.addEventListener('pointerleave',leave);
+  return()=>{clearTimeout(idle);delete panel.dataset.scrolling;leave();panel.removeEventListener('scroll',scrolling);panel.removeEventListener('pointermove',edge);panel.removeEventListener('pointerleave',leave);};
+ },[work?.id,tab,adapter.fixture]);
  const compact=!!work&&!adapter.fixture;
  const fixture=adapter.fixture,detail=work&&fixture?.work[work.id],phase=fixture?.phase??'waiting';
  const {activity,error,loading,loadMore}=useWorkActivity(adapter,work,view.activityExtent,count=>changeView({activityExtent:count}));

@@ -56,3 +56,16 @@
 
 #ec-branded-workspace .ec-telegram-backdrop{position:fixed;padding:24px;align-items:center}
 @media(max-width:540px){#ec-branded-workspace .ec-telegram-backdrop{padding:12px}#ec-branded-workspace .ec-telegram-modal{max-height:calc(100dvh - 24px)}}
+
+/* Give Telegram's operational groups the same rhythm as the settings forms. */
+#ec-branded-workspace .ec-telegram-operation-group+.ec-telegram-operation-group{margin-top:28px;padding-top:24px;border-top:1px solid var(--ec-line)}
+#ec-branded-workspace .ec-telegram-conversations-head{display:flex;align-items:center;justify-content:space-between;flex-wrap:wrap;gap:12px;margin-bottom:20px}
+#ec-branded-workspace .ec-telegram-conversations-head h3{margin:0;font-size:14px;font-weight:600}
+#ec-branded-workspace .ec-telegram-conversation-list:empty{display:none}
+#ec-branded-workspace .ec-telegram-conversation-list:not(:empty){border:1px solid var(--ec-line);border-radius:12px;padding:4px 16px;margin-bottom:24px;background:var(--ec-panel)}
+#ec-branded-workspace .ec-telegram-conversation-list .ec-kv{display:flex;align-items:center;justify-content:space-between;gap:12px;padding:12px 0;margin:0}
+#ec-branded-workspace .ec-telegram-conversation-list .ec-kv+.ec-kv{border-top:1px solid var(--ec-line)}
+#ec-branded-workspace .ec-telegram-conversation-list .ec-kv>span{min-width:0;flex:1;overflow-wrap:anywhere}
+#ec-branded-workspace .ec-telegram-conversation-list p,#ec-branded-workspace .ec-telegram-handoff>p{color:var(--ec-muted);font-size:12px;line-height:1.7}
+#ec-branded-workspace .ec-telegram-handoff>label{display:grid;gap:10px;margin:0 0 14px}
+#ec-branded-workspace .ec-telegram-handoff>.ec-actions{margin:18px 0 0;gap:8px}
