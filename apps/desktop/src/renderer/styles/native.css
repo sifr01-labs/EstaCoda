@@ -95,7 +95,7 @@ html,body,#root{margin:0;min-width:0;min-height:100%;}body{background:#131313}bu
 #ec-branded-workspace .ec-markdown blockquote{border-inline-start:3px solid var(--ec-line);margin:12px 0;padding-inline:14px;color:var(--ec-muted)}
 #ec-branded-workspace .ec-markdown :not(pre)>code{padding:2px 5px;border-radius:4px;background:var(--ec-inset);font-size:.9em}
 #ec-branded-workspace .ec-codeblock{margin:16px 0;border:1px solid var(--ec-line);border-radius:10px;overflow:hidden;background:var(--ec-inset)}
-#ec-branded-workspace .ec-codebar{display:flex;justify-content:flex-end;border-bottom:1px solid var(--ec-line);padding:3px 8px}
+#ec-branded-workspace .ec-codebar{display:flex;align-items:center;gap:8px;justify-content:flex-end;border-bottom:1px solid var(--ec-line);padding:3px 8px}
 #ec-branded-workspace .ec-codeblock pre{margin:0;padding:14px;overflow:auto;font-size:12px;line-height:1.65}
 #ec-branded-workspace .ec-markdown p .ec-copy{display:inline;padding:0;color:var(--ec-accent);font:inherit;text-align:start;text-decoration:underline;white-space:normal}
 #ec-branded-workspace .ec-tablewrap{overflow:auto;margin:16px 0}
@@ -238,3 +238,5 @@ html:has(.ec-window[data-native=true]),body:has(.ec-window[data-native=true]){he
 #ec-branded-workspace .ec-workcenter>.ec-inputrequest b{font-size:12px}
 #ec-branded-workspace .ec-workcenter>.ec-inputrequest p{flex:1 1 200px;font-size:12px;margin:0;line-height:1.4}
 #ec-branded-workspace .ec-workcenter>.ec-inputrequest .ec-actions{margin:0;gap:6px;flex-wrap:wrap}
+
+#ec-branded-workspace .ec-copy-error{color:var(--ec-muted);font-size:11px;margin-inline-start:6px}

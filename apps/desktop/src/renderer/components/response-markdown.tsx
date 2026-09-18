@@ -1,6 +1,6 @@
 import Markdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import {useState,type ReactNode} from 'react';
+import {useEffect,useRef,useState,type ReactNode} from 'react';
 import {useI18n} from '../i18n.js';
 import {Button} from './primitives.js';
 function textOf(value:ReactNode):string{
@@ -10,8 +10,16 @@ function textOf(value:ReactNode):string{
  return '';
 }
 function Copy({value,children}:{value:string;children?:ReactNode}){
- const {t}=useI18n();const[state,setState]=useState<'idle'|'copied'|'failed'>('idle');
- return <Button className="ec-ghost ec-copy" title={value.length<2048&&children?value:undefined} aria-label={children?t('Copy link'):t('Copy code')} onClick={()=>{void navigator.clipboard.writeText(value).then(()=>setState('copied'),()=>setState('failed'));}}>{state==='copied'?t('Copied'):state==='failed'?t('Copy unavailable'):children??t('Copy code')}</Button>;
+ const {t}=useI18n(),[state,setState]=useState<'idle'|'copied'|'failed'>('idle'),timer=useRef<ReturnType<typeof setTimeout>|undefined>(undefined);
+ useEffect(()=>()=>clearTimeout(timer.current),[]);
+ async function copy(){
+  clearTimeout(timer.current);
+  try{if(window.desktop?.clipboard)await window.desktop.clipboard.writeText(value);else await navigator.clipboard.writeText(value);setState('copied');}
+  catch{setState('failed');}
+  timer.current=setTimeout(()=>setState('idle'),2000);
+ }
+ const label=children?t('Copy link'):t('Copy code'),feedback=state==='copied'?t('Copied'):state==='failed'?t('Copy unavailable'):'';
+ return <><Button className={'ec-ghost ec-copy'+(children?'':' ec-iconbutton')} icon={children?undefined:state==='copied'?'check':'copy'} title={feedback||(children&&value.length<2048?value:label)} aria-label={label} onClick={()=>void copy()}>{children}</Button><span className={state==='failed'?'ec-copy-error':'ec-sr-only'} role="status">{feedback}</span></>;
 }
 /** No HTML, remote images, embedded media, or automatic navigation from provider content. */
 export function ResponseMarkdown({text}:{text:string}){

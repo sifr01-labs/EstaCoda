@@ -14,6 +14,8 @@ A queued follow-up sends after the previous send receipt confirms completion whi
 
 Each submission has a distinct draft identity. Main stores operation references for both new and existing conversations. If an acknowledgment is lost, Main inspects that same operation. Check status is read-only and does not create a new send. Uncertain or unknown receipts preserve the draft and block a second send. This does not assert that an accepted operation has completed successfully.
 
+Code blocks use an icon-only Copy control with a temporary checkmark and accessible status feedback. Code and link copying use the desktop’s existing bounded, write-only clipboard bridge; browser permissions remain denied. Link labels remain readable after copying, and failures allow retry.
+
 ## Conversation permissions
 
 The composer offers Profile default, Strict, Adaptive, and Open. Open requires an explicit selection and review in the permissions popover. The choice is kept in this window's conversation draft and applied to subsequent messages here; it is not persisted as a profile configuration or restored after restarting the app. Running work keeps its current mode. Background Task authority is unchanged.
