@@ -68,6 +68,7 @@ const cases = {
  'setup.reviewWorkspace':{params:{path:'/work',alias:'work',trust:false},result:{reviewId:'review',path:'/work',alias:'work',trust:false}},
  'setup.applyWorkspace':{params:{reviewId:'review',operationId:'operation',confirmed:true},result:{operationId:'operation',action:'onboarding.workspace',state:'completed'}},
  'setup.cancelWorkspace':{params:{reviewId:'review'},result:{cancelled:true}},
+ 'setup.local':{params:{},result:{profileId:'p',configuration:{state:'new-user',mode:'first-run',writable:true,launchReady:false,pendingApply:false},runtime:'stopped',compatibility:'compatible',canConnect:false}},
  'setup.detect':{params:{},result:{state:'new-user',mode:'first-run',writable:true,launchReady:false,pendingApply:false}},
  'setup.bootstrap':{params:{},result:{state:'new-user',mode:'first-run',writable:true,launchReady:false,pendingApply:false}},
  'settings.lifecycle':{params:{},result:{version:'0.1.0',owner:'manual-source',update:'owner_required',uninstall:'owner_required'}},

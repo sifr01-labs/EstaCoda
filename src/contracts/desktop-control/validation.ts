@@ -207,6 +207,7 @@ const contracts: { [M in keyof MethodContracts]: { params: Check; result: Check 
   'setup.reviewWorkspace':{params:shape({path:text(4096,1),alias:text(64,1),trust:boolean}),result:shape({reviewId:id,path:text(4096,1),alias:text(64,1),trust:boolean})},
   'setup.applyWorkspace':{params:shape({reviewId:id,operationId:id,confirmed:v=>v===true}),result:connectionOperation},
   'setup.cancelWorkspace':{params:shape({reviewId:id}),result:shape({cancelled:boolean})},
+  "setup.local":{params:shape({}),result:shape({profileId:id,configuration:shape({state:choice(SETUP_STATES),mode:choice(["first-run","repair","ready"]),writable:boolean,launchReady:boolean,pendingApply:boolean}),runtime:choice(["stopped","starting","ready","disconnected","incompatible","unavailable"]),compatibility:choice(["compatible","incompatible","unavailable"]),canConnect:boolean})},
   "setup.detect":{params:shape({}),result:shape({state:choice(SETUP_STATES),mode:choice(["first-run","repair","ready"]),writable:boolean,launchReady:boolean,pendingApply:boolean})},
   "setup.bootstrap":{params:shape({}),result:shape({state:choice(SETUP_STATES),mode:choice(["first-run","repair","ready"]),writable:boolean,launchReady:boolean,pendingApply:boolean})},
   "settings.lifecycle":{params:shape({}),result:shape({version:text(64,1),owner:text(64,1),update:choice(["owner_required"]),uninstall:choice(["owner_required"])})},

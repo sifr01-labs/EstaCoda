@@ -27,6 +27,7 @@ export type SubscribeResult =
 export type WorkUsageProjection={scope:'session'|'task'|'attempt';reportedTokens:number|null;providerCalls:number;cost:{amount:number;currency:'USD'}|null;usageComplete:boolean;pricingComplete:boolean;context:{usedTokens:number;totalTokens:number;provider:string;model:string}|null;truncated:boolean;provisional:boolean};
 export type RuntimeCounts={runningSessions:number;runningTasks:number;queuedTasks:number;approvals:number;attention:number;scheduled:number|null;asOf:number};
 export type MethodContracts = {
+  'setup.local':{params:Record<string,never>;result:import('./onboarding.js').LocalSetupInspection};
   'connections.connectors': { params: { action: 'inspect' | 'reconnect'; workId?: string }; result: import('./connectors.js').ConnectorStatus };
  'schedules.draft':{params:{id:string};result:import('./schedules.js').ScheduleDraft};
  'schedules.review':{params:import('./schedules.js').ScheduleAction;result:import('./schedules.js').ScheduleReview};

@@ -1,3 +1,4 @@
+import {inspectLocalSetup} from './local-setup.js';
 import {connectorControl} from './connector-control.js';
 import {WorkInputClaims} from './work-input.js';
 import {validateWorkInputCommand} from '../contracts/desktop-control/work-input.js';
@@ -179,6 +180,7 @@ export class DesktopBridge {
       'setup.apply':async(request,signal)=>{if(request.method!=='setup.apply')throw new ControlProtocolError('-32601');return {result:await this.onboardingSetup.apply(request.params.reviewId,signal)};},
       'setup.recover':async()=>({result:await this.onboardingSetup.recover()}),
       'setup.detect':async()=>({result:await detectOnboarding(this.options)}),
+      'setup.local':async(_request,signal)=>({result:await inspectLocalSetup(this.options,signal)}),
       'setup.bootstrap':async()=>({result:await bootstrapOnboarding(this.options)}),
       'settings.lifecycle':async()=>({result:await settingsLifecycle(this.options.version)}),
       'settings.dependencies':async()=>({result:await this.settingsDependencies.list()}),
