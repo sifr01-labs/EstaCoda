@@ -6,7 +6,7 @@ for(const existing of [false,true])test(`welcome offers both choices with ${exis
   const React=(await import('/node_modules/.vite/deps/react.js')).default,{createRoot}=(await import('/node_modules/.vite/deps/react-dom_client.js')).default,{InstallWelcome}=await import('/src/renderer/components/install-welcome.tsx');
   const host=document.querySelector('#ec-branded-workspace .ec-window')!;host.innerHTML='<main id="welcome-test"></main>';
   const state={acknowledged:0,complete:'',connect:existing};(window as any).welcomeTest=state;
-  const api={installation:{inspect:async()=>({profileId:'default',configuration:{state:existing?'configured-ready':'new-user',mode:existing?'ready':'first-run'},runtime:'stopped',compatibility:'compatible',canConnect:state.connect}),acknowledge:async()=>{state.acknowledged++;}}};
+  const api={profiles:async()=>[{id:'default',label:'default'}],installation:{inspect:async()=>({profileId:'default',configuration:{state:existing?'configured-ready':'new-user',mode:existing?'ready':'first-run'},runtime:'stopped',compatibility:'compatible',canConnect:state.connect}),acknowledge:async()=>{state.acknowledged++;}}};
   createRoot(document.getElementById('welcome-test')!).render(React.createElement(InstallWelcome,{api,snapshot:{status:'ready',profile:{id:'default',label:'default'}},complete:(mode:string)=>{state.complete=mode;},repair:()=>{}}));
  },existing);
  await expect(page.getByRole('button',{name:'Set up EstaCoda',exact:true})).toBeVisible();

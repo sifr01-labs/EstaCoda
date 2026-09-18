@@ -19,8 +19,14 @@ export async function detectOnboarding(input:Identity,workspaceRoot=input.homeDi
 /** Directory bootstrap is not saved setup and never changes the global active-profile pointer. */
 export async function bootstrapOnboarding(input:Identity):Promise<SetupDetection>{
  const before=await detectOnboarding(input);
- if(input.profileId!=='default'||before.mode!=='first-run'||!before.writable)throw new ControlProtocolError('-32003');
+ if(before.mode!=='first-run'||!before.writable)throw new ControlProtocolError('-32003');
  const root=resolveProfileStateHome(input).profileRoot;
+ // Non-default setup must have been created through the reviewed profile path.
+ // This endpoint cannot create arbitrary profile identities.
+ if(input.profileId!=='default'){
+  const existing=await lstat(root).catch(()=>undefined);
+  if(!existing?.isDirectory()||existing.isSymbolicLink())throw new ControlProtocolError('-32003');
+ }
  for(const path of [dirname(dirname(root)),dirname(root),root]){
   try{const info=await lstat(path);if(!info.isDirectory()||info.isSymbolicLink())throw new ControlProtocolError('-32003');}
   catch(error){if((error as NodeJS.ErrnoException).code!=='ENOENT')throw error;await mkdir(path,{mode:0o700});}

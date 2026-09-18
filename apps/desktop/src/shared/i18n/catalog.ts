@@ -15,6 +15,12 @@ import {setupArabic} from './setup.js';
 import {workArabic} from './work.js';
 /** Product-owned message keys. Never pass provider output or backend error text here. */
 export const arabic = {
+ 'Local setup':'الإعداد المحلي',
+ 'Separate setup name':'اسم الإعداد المنفصل',
+ 'Creates an empty local setup. Your existing settings, credentials, and CLI default stay unchanged.':'ينشئ إعدادًا محليًا فارغًا. تبقى إعداداتك وبيانات اعتمادك والإعداد الافتراضي لسطر الأوامر دون تغيير.',
+ 'No credentials or history will be copied.':'لن تُنسخ بيانات اعتماد أو سجلات.',
+ 'Confirm separate setup':'تأكيد الإعداد المنفصل',
+ 'Review separate setup':'مراجعة الإعداد المنفصل',
  'Choose how to get started on this Mac.':'اختر كيفية البدء على جهاز Mac هذا.',
  'Use existing EstaCoda':'استخدام إعداد EstaCoda الحالي',
  'Start with a workspace, a model, and your preferences.':'ابدأ بمساحة عمل ونموذج وتفضيلاتك.',
