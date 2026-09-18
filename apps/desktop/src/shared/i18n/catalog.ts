@@ -15,6 +15,18 @@ import {setupArabic} from './setup.js';
 import {workArabic} from './work.js';
 /** Product-owned message keys. Never pass provider output or backend error text here. */
 export const arabic = {
+ 'Choose how to get started on this Mac.':'اختر كيفية البدء على جهاز Mac هذا.',
+ 'Use existing EstaCoda':'استخدام إعداد EstaCoda الحالي',
+ 'Start with a workspace, a model, and your preferences.':'ابدأ بمساحة عمل ونموذج وتفضيلاتك.',
+ 'Reuse your local settings and history. Credentials stay where they are.':'أعد استخدام إعداداتك وسجلك المحليين. تبقى بيانات الاعتماد في مكانها.',
+ 'Compatibility':'التوافق',
+ 'Compatible':'متوافق',
+ 'Starts when needed':'يبدأ عند الحاجة',
+ 'An existing setup was found. Use it or create a separate setup without changing it.':'عُثر على إعداد حالي. استخدمه أو أنشئ إعدادًا منفصلًا دون تغييره.',
+ 'Continue with existing setup':'متابعة بالإعداد الحالي',
+ 'Checking local setup…':'جارٍ فحص الإعداد المحلي…',
+ 'Local setup could not be checked. Reconnect or open repair.':'تعذّر فحص الإعداد المحلي. أعد الاتصال أو افتح الإصلاح.',
+ 'Choose local setup':'اختيار الإعداد المحلي',
  'Review the current edits in this workspace.':'راجع التعديلات الحالية في مساحة العمل.',
  'Files changed: {count}':'عدد الملفات المتغيّرة: {count}',
  'Preview unavailable':'المعاينة غير متاحة',

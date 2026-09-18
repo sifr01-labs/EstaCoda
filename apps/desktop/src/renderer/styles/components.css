@@ -365,3 +365,11 @@
 .ec-connectorpanel p { font-size:13px; color:var(--ec-muted); }
 .ec-connectorchat { display:flex; align-items:center; gap:12px; }
 .ec-connectorchat select { max-width:360px; }
+
+.ec-installwelcome { max-width: 640px; margin: auto; padding-block: 40px; }
+.ec-installwelcome > svg { width: 56px; height: 38px; }
+.ec-installchoices { display: flex; flex-wrap: wrap; gap: 12px; margin-block: 24px; }
+.ec-installchoices button { padding: 16px 20px; }
+.ec-installchoices button[aria-pressed="true"] { outline: 2px solid var(--ec-accent); outline-offset: 2px; }
+.ec-installwelcome dl { display: grid; grid-template-columns: minmax(100px, 1fr) 2fr; gap: 12px; margin-block: 24px; }
+.ec-installwelcome dd { margin: 0; }
