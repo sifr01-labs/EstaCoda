@@ -15,6 +15,9 @@ import {setupArabic} from './setup.js';
 import {workArabic} from './work.js';
 /** Product-owned message keys. Never pass provider output or backend error text here. */
 export const arabic = {
+ "Could not save update diagnostics.":"تعذر حفظ تشخيص التحديثات.",
+ "The update action could not be completed. Try again.":"تعذر إكمال إجراء التحديث. حاول مرة أخرى.",
+ "Export update diagnostics":"تصدير تشخيص التحديثات",
  "App updates":"تحديثات التطبيق",
  "Updates are not enabled for this build.":"التحديثات غير مفعّلة لهذا الإصدار.",
  "Check for a newer version of EstaCoda.":"ابحث عن إصدار أحدث من EstaCoda.",

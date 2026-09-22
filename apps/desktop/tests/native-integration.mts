@@ -42,7 +42,7 @@ try{
  await page.evaluate(()=>window.desktop.installation!.acknowledge());await page.reload();await expect.poll(()=>page.evaluate(async()=>(await window.desktop.snapshot()).status),{timeout:20000}).toBe('ready');
  const exposed=await page.evaluate(()=>({keys:Object.keys(window.desktop).sort(),node:typeof (window as any).require,process:typeof(window as any).process,credential:typeof(window as any).credential}));
  expect(await page.evaluate(()=>Object.keys(window.desktop.targets!).sort())).toEqual(['list','inspect','review','create','cancel','execute','operation'].sort());
- expect(await page.evaluate(()=>Object.keys(window.desktop.updates!).sort())).toEqual(['status','check','download','cancel','install','preferences','notes'].sort());
+ expect(await page.evaluate(()=>Object.keys(window.desktop.updates!).sort())).toEqual(['status','check','download','cancel','install','preferences','notes','diagnostics'].sort());
  expect(await page.evaluate(()=>window.desktop.updates!.check())).toMatchObject({phase:'disabled',problem:'release_setup'});
  expect(exposed.node).toBe('undefined');expect(exposed.process).toBe('undefined');expect(exposed.credential).toBe('undefined');expect(exposed.keys).toEqual(['browser','browserControl','chats','clipboard','evolution','installation','library','microphone','onboarding','schedules','settings','updates','workInput','artifacts','evidence','files','diff','terminal','targets','connections','work','models','activity','getWork','appearance','close','minimize','moreInbox','moreWork','onSnapshot','platform','profiles','reconnect','setAppearance','snapshot','switchProfile','toggleMaximize'].sort());
  const artifactReference={source:'session' as const,ownerId:'desktop-existing',artifactId:nativeArtifact.id};
