@@ -17,6 +17,7 @@ if (!readFileSync(join(root, 'dist/index.js'), 'utf8').includes('desktop-service
 rmSync(output, { recursive: true, force: true }); mkdirSync(output, { recursive: true });
 const executable = join(output, process.platform === 'win32' ? 'node.exe' : 'node');
 cpSync(process.execPath, executable); chmodSync(executable, 0o755);
+cpSync(resolve(process.execPath, '../../LICENSE'), join(output, 'node-LICENSE'));
 for (const entry of packageJson.files) {
   if (entry === 'package.json') continue;
   cpSync(join(root, entry), join(output, 'core', entry), { recursive: true, dereference: true });

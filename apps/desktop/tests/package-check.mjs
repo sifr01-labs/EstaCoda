@@ -2,9 +2,11 @@ import{createRequire}from'node:module';import{readFileSync,writeFileSync,mkdirSy
 const desktop=resolve('apps/desktop');let require=createRequire(join(desktop,'package.json'));require=createRequire(require.resolve('@electron-forge/core'));require=createRequire(require.resolve('@electron/packager'));const asar=require('@electron/asar');
 const app=join(desktop,'out/EstaCoda-darwin-arm64/EstaCoda.app'),resources=join(app,'Contents/Resources');const archive=join(resources,'app.asar');const files=asar.listPackage(archive);
 const assert=(value,message)=>{if(!value)throw Error(message);};
-assert(!files.some(p=>/fixture|\/tests\/|\/src\/|reference|\.map$|\.test\./.test(p)),'Release includes development assets.');
+assert(!files.filter(p=>!p.startsWith('/notices/')).some(p=>/fixture|\/tests\/|\/src\/|reference|\.map$|\.test\./.test(p)),'Release includes development assets.');
 assert(files.filter(p=>p.includes('/node_modules/')).every(p=>p==='/node_modules/node-pty'||p.startsWith('/node_modules/node-pty/')), 'Unexpected packaged native dependency.');
 assert(files.some(p=>p.endsWith('/pty.node'))&&files.some(p=>p.endsWith('/spawn-helper')),'Missing native PTY assets.');
+for(const notice of ['LICENSE','NOTICE','node-LICENSE','electron-LICENSE','electron-LICENSES.chromium.html','inventory.json'])assert(asar.extractFile(archive,'notices/'+notice).length>0,'Missing packaged notice: '+notice);
+const noticeInventory=JSON.parse(asar.extractFile(archive,'notices/inventory.json').toString());for(const item of noticeInventory.packages)for(const file of item.files)assert(asar.extractFile(archive,'notices/'+file).length>0,'Empty renderer dependency notice');
 const index=asar.extractFile(archive,'.vite/renderer/main_window/index.html').toString();assert(index.includes("script-src 'self'")&&!index.includes('unsafe-eval')&&!index.includes('nonce-'),'Invalid release CSP.');
 const main=asar.extractFile(archive,'.vite/build/main.cjs').toString();assert(!main.includes('desktopTest')&&!main.includes('connectionForTest'),'Test hook in release.');
 const preload=asar.extractFile(archive,'.vite/build/preload.cjs').toString();assert(preload.includes('browserControlWorkspace')&&preload.includes('browserControlSignIn'),'Missing semantic browser workspace preload.');assert(main.includes('credentials.browserDeliver'),'Missing dedicated protected browser delivery pipe.');
