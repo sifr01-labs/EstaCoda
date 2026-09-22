@@ -1,3 +1,4 @@
+import {retainRuntime} from './updates/runtime-retention.js';
 import {DesktopWorkInput} from './work-secure-input.js';
 import {DesktopPublicSettings} from './public-settings.js';
 import {translate,type MessageKey} from '../shared/i18n/index.js';
@@ -33,7 +34,7 @@ async function openWindow(): Promise<void> {
     webPreferences: securePreferences(path.join(__dirname, 'preload.cjs'), app.isPackaged) });
   denySessionPermissions(window.webContents.session);
   lockWindow(window, !app.isPackaged && MAIN_WINDOW_VITE_DEV_SERVER_URL ? new URL(MAIN_WINDOW_VITE_DEV_SERVER_URL).href : undefined);
-  const runtimeRoot = app.isPackaged ? path.join(process.resourcesPath, '.runtime') : path.join(app.getAppPath(), '.runtime');
+  const runtimeRoot = app.isPackaged ? retainRuntime(path.join(process.resourcesPath, '.runtime'),path.join(app.getPath('userData'),'runtime-versions')) : path.join(app.getAppPath(), '.runtime');
   const connection = new DesktopConnection(new ServiceProcess(runtimeRoot, app.getPath('home')));
   const credentialRoot=path.join(__dirname,`../renderer/${CREDENTIAL_WINDOW_VITE_NAME}`);
   const credentialUrl = CREDENTIAL_WINDOW_VITE_DEV_SERVER_URL ? new URL('credential.html', CREDENTIAL_WINDOW_VITE_DEV_SERVER_URL).href : 'estacoda://credential/credential.html';

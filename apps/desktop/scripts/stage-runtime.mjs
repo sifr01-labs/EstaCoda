@@ -21,7 +21,7 @@ for (const entry of packageJson.files) {
   if (entry === 'package.json') continue;
   cpSync(join(root, entry), join(output, 'core', entry), { recursive: true, dereference: true });
 }
-writeFileSync(join(output, 'core/package.json'), JSON.stringify({ ...packageJson, scripts: {}, devDependencies: {} }, null, 2));
+writeFileSync(join(output, 'core/package.json'), JSON.stringify({ ...packageJson, estacodaDistribution:'desktop-bundle', scripts: {}, devDependencies: {} }, null, 2));
 const copied = new Set();
 function dependency(name, from, destination, optional = false) {
   const require = createRequire(join(from, 'package.json'));
