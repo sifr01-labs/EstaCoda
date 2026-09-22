@@ -1,0 +1,29 @@
+name: Desktop release preflight
+
+# Read-only validation. No signing credentials, publication token, or release
+# uploads until signed N-to-N+1 acceptance selects the native updater.
+on:
+  pull_request:
+    paths: ['apps/desktop/**', 'packages/control-protocol/**', 'pnpm-lock.yaml', '.github/workflows/desktop-release-preflight.yml']
+  workflow_dispatch:
+
+permissions:
+  contents: read
+concurrency:
+  group: desktop-release-preflight-${{ github.ref }}
+  cancel-in-progress: true
+jobs:
+  verify:
+    runs-on: macos-15
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020
+        with:
+          node-version: '24.14.1'
+      - run: corepack enable
+      - run: pnpm install --frozen-lockfile
+      - run: pnpm run desktop:foundation:check
+      - run: pnpm run desktop:test
+      - run: pnpm run desktop:package
+      - run: node apps/desktop/tests/package-check.mjs
