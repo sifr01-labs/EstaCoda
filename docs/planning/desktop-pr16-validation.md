@@ -63,3 +63,42 @@ Step 8 validation: desktop type/protocol checks and 157 tests passed, plus targe
 22. Added Settings/update-panel diagnostic export through an exact empty IPC action and native save dialog. The explicit field allowlist includes only bounded versions, platform/architecture, install classification, update phase/problem and release-gate booleans. Unknown fields/values cannot introduce paths, receipts, profile identifiers, URLs, credentials or chat content. Native cancellation writes nothing; explicit save produced only the reviewed fields. Desktop type/protocol checks, 172 tests and all eight PR16 UI journeys passed.
 
 23. Added operator documentation for development builds, fresh/existing setup, current release-disabled update behavior, polling, diagnostic export, installation ownership, state-preserving removal and recovery. Updated the Replit handoff to name the implemented notice inventory. Reviewed commands and claims against current scripts; public signed distribution remains explicitly unavailable.
+
+## Final continuation review (2026-09-22)
+
+24. Evidence/handoff record updated. This records local implementation and test evidence; it does **not** record signed-release acceptance as complete.
+
+| Planned steps | Current result |
+| --- | --- |
+| 1–6 | Setup, onboarding and relocatable development packaging implemented and locally validated |
+| 7 | Deferred: Developer ID signing, notarization and accepted updater artifacts |
+| 8–15 | Main-owned policy, discovery, staging/recovery contracts, UI and tests implemented; platform verification/installation and real reader lifecycle adapter deliberately unavailable |
+| 16 | Read-only CI preflight and offline immutable metadata preparation implemented; protected signing/publication remains deferred |
+| 17 | Replit contract and source/notices handoff prepared; no website deployment or live download URL claimed |
+| 18–20 | Deferred: published signatures/URLs, clean-machine bilingual installation, signed N → N+1 and interrupted replacement recovery |
+| 21 | Local package, native settings/browser/credential/attachment/ownership regressions passed; signed clean-machine and uninstall acceptance remain open |
+| 22–23 | Redacted diagnostic export and operator documentation implemented and validated |
+| 24 | Local evidence and outstanding release/website gates recorded here |
+
+Final checks performed in the clean validation copy:
+
+- Node 24.14.1, pnpm 10.33.0, frozen-lockfile install and core typecheck passed.
+- Core suite: **11,710 tests / 732 files** passed.
+- Desktop typecheck/protocol boundary and **172 tests / 46 files** passed.
+- Eight PR16 first-launch/update UI journeys passed. Four update journeys were repeated after the final diagnostic-error copy adjustment and passed; diagnostic failures use localized copy without exposing the underlying error.
+- Core build, source smoke, distribution smoke, runtime import audit and ESM audit passed.
+- Local native package, full runtime inventory, retained Node/dependencies, required notices, strict ad-hoc signature, relocated SQLite/Sharp/PTY, CSP/fuses and hardened launch passed.
+- Native settings and loopback Chromium workspace/control/sign-in regression passed. Final native integration passed against rebuilt Main/preload: credential isolation, private input cancellation, retained artifact preview, attachments, approvals, task controls, profile/CLI pointer preservation, bridge reconnect, app relaunch and incompatible-supervisor rejection.
+- Native diagnostic save/cancel passed with an exact bounded export-field list and no private paths.
+- Workflow YAML parsed and changed JavaScript configuration/scripts passed syntax checks. The new workflow has **not** been run by GitHub Actions.
+- `git diff --check` passed. No live provider calls, paid requests, real account sign-ins, release publication or Replit edits were performed.
+
+Security review: no renderer update URL/path/identity inputs; release discovery pins remain absent; no platform installer/verifier is enabled; checks do not download; download does not install; staged bytes and publisher verification are required at restart; older offers/restored candidates are rejected; uncertain readers/resources block replacement; retained runtime generations are not automatically deleted; user/CLI/shared state is not restored or removed. Expired metadata cannot authorize staging/install, while an authenticated old receipt can confirm an already-installed matching version only through native running-app verification.
+
+Remaining release risks are explicit: the native verifier/installer and reader coordination need real signed acceptance; supported platform/minimum OS, metadata key and Apple identity are not selected; no protected publishing environment or actual release feed exists; native updater cancellation/Later/quit/relaunch behavior is unproven; signed uninstall/recovery and the final website journey remain open. No claim of public-alpha readiness or approval to begin PR17's release-dependent work is made.
+
+The running development copy and real user state were not restarted or migrated. Pre-existing planning edits, duplicate files and other untracked content remain untouched. Implementation commits stay on `ame/desktop-foundation`; no push or publication was performed.
+
+The final local development archive is `/tmp/ec-pr16-validation/apps/desktop/out/EstaCoda-darwin-arm64/EstaCoda.app.zip`. It is an ad-hoc development artifact, not an official installer. The final rebuild includes the localized diagnostic-error copy; artifact checks were repeated and passed. Temporary validation logs/artifacts are local and are not committed or published.
+
+The preflight runner label was checked against [GitHub’s runner reference](https://docs.github.com/en/actions/reference/runners/github-hosted-runners); `macos-15` is the arm64 standard runner. This documentation check does not substitute for an actual CI run.
