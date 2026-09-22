@@ -1,10 +1,7 @@
 import {it,expect,vi} from 'vitest';
-import {generateKeyPairSync,sign} from 'node:crypto';
-import {verifiedRelease,type DesktopRelease} from './release-feed.js';
+import {verifiedRelease} from './release-feed.js';
 import {UpdateDiscovery} from './discovery.js';
-export const signing=generateKeyPairSync('ed25519'),publicKey=signing.publicKey.export({type:'spki',format:'pem'}).toString(),now=1800000000000;
-export function fixture(version='1.2.0'):DesktopRelease {const asset=(extension:string)=>({url:`https://github.com/sifr01-labs/EstaCoda/releases/download/desktop-v${version}/EstaCoda-${version}-darwin-arm64.${extension}`,bytes:100,sha256:'a'.repeat(64)});return{format:1,version,coreVersion:'1.0.0',channel:'stable',sourceRevision:'a'.repeat(40),platform:'darwin',arch:'arm64',minimumOs:'14.0.0',protocol:{min:1,max:1},schema:{min:36,max:36},issuedAt:now-1000,expiresAt:now+60000,teamId:'ABCDEFGHIJ',notesUrl:`https://github.com/sifr01-labs/EstaCoda/releases/tag/desktop-v${version}`,installer:asset('dmg'),updater:asset('zip')};}
-export function envelope(record:unknown):Uint8Array {const bytes=Buffer.from(JSON.stringify(record));return Buffer.from(JSON.stringify({payload:bytes.toString('base64'),signature:sign(null,bytes,signing.privateKey).toString('base64')}));}
+import {publicKey,now,fixture,envelope} from './release-fixtures.js';
 it('requires authenticated fresh metadata and exact immutable asset destinations',()=>{
  const input={publicKey,teamId:'ABCDEFGHIJ',now};expect(verifiedRelease(envelope(fixture()),input).version).toBe('1.2.0');
  for(const change of [{expiresAt:now},{teamId:'OTHERTEAM0'},{channel:'preview'},{updater:{...fixture().updater,url:'https://evil.test/app.zip'}},{schema:{min:37,max:36}}])expect(()=>verifiedRelease(envelope({...fixture(),...change}),input)).toThrow();

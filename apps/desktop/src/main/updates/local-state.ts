@@ -5,7 +5,7 @@ import {randomUUID} from 'node:crypto';
 export class UpdateLocalState {
  constructor(readonly directory:string){}
  read(name:'preferences.json'|'receipt.json'):unknown {
-  try{const file=join(this.directory,name),stat=lstatSync(file);if(!stat.isFile()||stat.isSymbolicLink()||stat.size>16384)return null;return JSON.parse(readFileSync(file,'utf8'));}catch{return null;}
+  try{const file=join(this.directory,name),stat=lstatSync(file);if(!stat.isFile()||stat.isSymbolicLink()||stat.size>16384)return {invalid:true};return JSON.parse(readFileSync(file,'utf8'));}catch(error){return (error as NodeJS.ErrnoException).code==='ENOENT'?null:{invalid:true};}
  }
  write(name:'preferences.json'|'receipt.json',value:unknown):void {
   const text=JSON.stringify(value);if(text.length>16384)throw Error('Update state exceeds limit');
