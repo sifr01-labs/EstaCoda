@@ -37,7 +37,7 @@ Publication remains deferred: choose the native updater after signed replacement
 
 ## Public source and notices
 
-Source build instructions are in `docs/desktop-installation.md`. EstaCoda's `LICENSE` is Apache-2.0 and `NOTICE` identifies SIFR01 Labs. Retain those files and every bundled dependency's required license/notices, including Electron/Chromium, the separately bundled Node runtime, React, Lucide, xterm, node-pty, SQLite and Sharp and their dependency closures. The core staging process copies runtime dependency package files; bundled renderer dependencies require a separate notice inventory. A signed release must include and review that inventory against its final artifact rather than assuming source notices are sufficient.
+Source build instructions are in `docs/desktop-installation.md`. EstaCoda's `LICENSE` is Apache-2.0 and `NOTICE` identifies SIFR01 Labs. Retain those files and every bundled dependency's required license/notices, including Electron/Chromium, the separately bundled Node runtime, React, Lucide, xterm, node-pty, SQLite and Sharp and their dependency closures. The core staging process copies runtime dependency package files; packaging now generates a separate renderer dependency notice inventory in app.asar/notices, alongside Electron/Chromium and Node notices. Missing renderer license files fail packaging. A signed release must include and review that inventory against its final artifact rather than assuming source notices are sufficient.
 
 ## Handoff acceptance still required
 
