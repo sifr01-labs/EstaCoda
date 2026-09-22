@@ -2,7 +2,7 @@ import { expect,it,vi } from 'vitest';
 vi.mock('electron',()=>({ipcMain:{}}));
 import {validateSemanticPayload} from './semantic-ipc.js';
 it('keeps installation inspection and presentation acknowledgement free of renderer launch authority',()=>{
- for(const method of ['updatesCheck','updatesStatus','installationRead','installationInspect','installationAcknowledge']){
+ for(const method of ['updatesCheck','updatesStatus','updatesDownload','updatesCancel','updatesInstall','updatesNotes','installationRead','installationInspect','installationAcknowledge']){
   expect(()=>validateSemanticPayload(method,{})).not.toThrow();
   for(const extra of [{profileId:'other'},{runtime:'/tmp/node'},{path:'/tmp'},{url:'https://example.test'},{compatible:true}])expect(()=>validateSemanticPayload(method,extra)).toThrow();
  }
