@@ -29,3 +29,9 @@ Public signed releases, downloaded clean-machine setup, staging N → N+1 update
 The next ordered commit is 7: production signing, notarization and updater-compatible artifacts. The user confirmed that no Apple Developer setup exists. Developer ID signing/notarization and staging release credentials must be configured before real signed replacement/relaunch can establish the updater choice. The repository is `sifr01-labs/EstaCoda`; no release assets were published. Commits 7–24 and public-release acceptance remain unfinished.
 
 When production signing is added, finalize the runtime inventory **after** signing nested runtime binaries and **before** sealing the outer application bundle. Developer ID signing can change native binary bytes; the local ad-hoc evidence does not waive this ordering requirement. Never disable the inventory check to accommodate signing.
+
+## Signing deferred by user (2026-09-22)
+
+The user authorized continuing the rest of PR16 while revisiting Apple signing/notarization later. Step 7 and real release acceptance in steps 18–20 remain deferred. Later implementation can proceed with explicit release gates; it must not claim a selected updater or signed acceptance from mocks.
+
+8. Installation ownership and coordination: Main classifies development, unsupported, mounted, translocated, external, read-only and unverified installations. Only a verified, writable application in a supported Applications location can be replaceable. A shared coordinator uses exclusive filesystem locking across windows/processes; interrupted locks require recovery rather than automatic takeover. The read-only status is exposed over exact, authenticated semantic IPC. Release setup remains disabled.
