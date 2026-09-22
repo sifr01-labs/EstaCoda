@@ -12,14 +12,19 @@ const fuse=await getCurrentFuseWire(join(app,'Contents/MacOS/EstaCoda'));
 for(const key of [FuseV1Options.RunAsNode,FuseV1Options.GrantFileProtocolExtraPrivileges,FuseV1Options.EnableNodeOptionsEnvironmentVariable,FuseV1Options.EnableNodeCliInspectArguments])assert(fuse[key]===48,'Unsafe Electron fuse.');
 for(const key of [FuseV1Options.EnableEmbeddedAsarIntegrityValidation,FuseV1Options.OnlyLoadAppFromAsar,FuseV1Options.EnableCookieEncryption])assert(fuse[key]===49,'Required Electron fuse missing.');
 const icon=execFileSync('plutil',['-extract','CFBundleIconFile','raw','-o','-',join(app,'Contents/Info.plist')],{encoding:'utf8'}).trim();const sha=p=>createHash('sha256').update(readFileSync(p)).digest('hex');assert(sha(join(resources,icon))===sha(join(desktop,'assets/icons/pr5-app.icns')),'Wrong packaged app icon.');
+const {verifyRuntimeInventory}=await import('../src/main/runtime-integrity.ts');
+const runtime=join(resources,'.runtime');
+verifyRuntimeInventory(runtime,JSON.parse(readFileSync(join(runtime,'manifest.json'),'utf8')));
 // A relocated hardened application is launched unchanged; no fuses are relaxed.
 const temporary=mkdtempSync('/tmp/ec-package-');let child;
 try{
  const moved=join(temporary,'Ocean blue مرحبا','EstaCoda.app');cpSync(app,moved,{recursive:true,verbatimSymlinks:true});
  execFileSync('codesign',['--verify','--deep','--strict',moved]);
+ const movedRuntime=join(moved,'Contents/Resources/.runtime');
+ execFileSync(join(movedRuntime,'node'),['--input-type=module','-e',"import Database from 'better-sqlite3';import sharp from 'sharp';const db=new Database(':memory:');db.close();const png=await sharp({create:{width:1,height:1,channels:4,background:'#fff'}}).png().toBuffer();if(!png.length)throw Error('Image ABI unavailable');"],{cwd:join(movedRuntime,'core'),env:{HOME:temporary,PATH:'/usr/bin:/bin'},timeout:15000});
  const ptyProbe=join(temporary,'pty-probe.cjs');
  writeFileSync(ptyProbe,`const {app}=require('electron');app.whenReady().then(()=>{const pty=require(${JSON.stringify(join(moved,'Contents/Resources/app.asar/node_modules/node-pty'))});const p=pty.spawn('/bin/sh',['-c','printf PACKAGED_PTY_READY'],{cwd:'/tmp',env:{PATH:'/usr/bin:/bin',HOME:'/tmp'}});let output='';p.onData(data=>output+=data);p.onExit(({exitCode})=>app.exit(exitCode===0&&output.includes('PACKAGED_PTY_READY')?0:1));}).catch(()=>app.exit(1));setTimeout(()=>app.exit(2),10000);`);
- execFileSync(join(desktop,'node_modules/electron/dist/Electron.app/Contents/MacOS/Electron'),[ptyProbe],{timeout:15000,env:{HOME:temporary,PATH:'/usr/bin:/bin'},stdio:'pipe'});
+ execFileSync(createRequire(join(desktop,'package.json'))('electron'),[ptyProbe],{timeout:15000,env:{HOME:temporary,PATH:'/usr/bin:/bin'},stdio:'pipe'});
 
  child=spawn(join(moved,'Contents/MacOS/EstaCoda'),['--user-data-dir='+join(temporary,'ui')],{env:{...process.env,HOME:temporary,CFFIXED_USER_HOME:temporary},stdio:['ignore','ignore','pipe']});let diagnostics='';child.stderr.on('data',b=>{diagnostics+=b;});await new Promise(r=>setTimeout(r,3500));assert(child.exitCode===null&&child.signalCode===null,'Relocated application exited during startup: '+child.exitCode+' / '+child.signalCode+' / '+diagnostics.slice(0,1800));
  let bridge=false;
@@ -28,6 +33,6 @@ try{
   if(!bridge)await new Promise(r=>setTimeout(r,250));
  }
  assert(bridge,'Relocated application did not start its owned Node bridge. '+diagnostics.slice(0,2400));
- const evidence=join(desktop,'tests/native-evidence');mkdirSync(evidence,{recursive:true});writeFileSync(join(evidence,'package.json'),JSON.stringify({platform:process.platform,arch:process.arch,archiveEntries:files.length,fixtureExcluded:true,csp:true,signature:'Strict deep verification of the relocated data-and-symlink copy; excludes File Provider FinderInfo metadata',fuses:fuse,packagedIconSha256:sha(join(resources,icon)),relocatedLaunch:'unchanged hardened app; space and Arabic path; owned Node bridge observed',inspection:'Canonical UI/IPC tests run the same bundles with the development Electron binary so Playwright can attach; production fuses remain enforced.'},null,2));
- console.log('Package contents, native PTY spawn from relocated asar, CSP, fuses, requested icon and relocated hardened launch passed.');
+ const evidence=join(desktop,'tests/native-evidence');mkdirSync(evidence,{recursive:true});writeFileSync(join(evidence,'package.json'),JSON.stringify({platform:process.platform,arch:process.arch,archiveEntries:files.length,fixtureExcluded:true,runtimeInventory:true,relocatedNativeModules:['better-sqlite3','sharp','node-pty'],csp:true,signature:'Strict deep verification of the relocated data-and-symlink copy; excludes File Provider FinderInfo metadata',fuses:fuse,packagedIconSha256:sha(join(resources,icon)),relocatedLaunch:'unchanged hardened app; space and Arabic path; owned Node bridge observed',inspection:'Canonical UI/IPC tests run the same bundles with the development Electron binary so Playwright can attach; production fuses remain enforced.'},null,2));
+ console.log('Complete runtime inventory, relocated SQLite/image processing, package contents, native PTY spawn from relocated asar, CSP, fuses, requested icon and relocated hardened launch passed.');
 }finally{if(child&&child.exitCode===null&&child.signalCode===null){const ended=once(child,'exit');child.kill('SIGTERM');await ended;}await new Promise(r=>setTimeout(r,1700));rmSync(temporary,{recursive:true,force:true});}

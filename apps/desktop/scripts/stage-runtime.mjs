@@ -5,9 +5,12 @@ import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
+import {inventoryRuntime,runtimeDigest} from '../src/main/runtime-integrity.ts';
 const root = resolve(import.meta.dirname, '../../..');
 const output = resolve(import.meta.dirname, '../.runtime');
 const packageJson = JSON.parse(readFileSync(join(root, 'package.json'), 'utf8'));
+const [platform=process.platform,arch=process.arch]=process.argv.slice(2);
+if(platform!==process.platform||arch!==process.arch)throw new Error('Package on a native runner matching the requested OS and architecture.');
 // Packaging must never silently reuse a distribution from an older checkout.
 execFileSync(process.platform === 'win32' ? 'pnpm.cmd' : 'pnpm', ['run', 'build'], {cwd:root,stdio:'inherit'});
 if (!readFileSync(join(root, 'dist/index.js'), 'utf8').includes('desktop-service')) throw new Error('Build the core distribution first.');
@@ -45,5 +48,8 @@ for (const name of Object.keys(packageJson.dependencies)) dependency(name, root,
 const digest = path => createHash('sha256').update(readFileSync(path)).digest('hex');
 // Verify standalone Node ABI now; Electron never rebuilds this native module.
 execFileSync(executable, ['--input-type=module', '-e', "import Database from 'better-sqlite3'; const db=new Database(':memory:'); db.close();"], { cwd: join(output, 'core'), env: { PATH: dirname(executable) } });
-writeFileSync(join(output, 'manifest.json'), JSON.stringify({ version: 1, platform: process.platform, arch: process.arch, nodeVersion: process.version, coreVersion: packageJson.version, nodeSha256: digest(executable), entrySha256: digest(join(output, 'core/dist/index.js')) }, null, 2));
-console.log('Staged owned Node runtime and verified standalone SQLite ABI.');
+// Exercise both native Node dependencies with the staged executable and closure.
+execFileSync(executable, ['--input-type=module', '-e', "import sharp from 'sharp'; const image=await sharp({create:{width:1,height:1,channels:4,background:'#fff'}}).png().toBuffer(); if(!image.length)throw new Error('Image ABI unavailable');"], {cwd:join(output,'core'),env:{PATH:dirname(executable)}});
+const files=inventoryRuntime(output);
+writeFileSync(join(output, 'manifest.json'), JSON.stringify({ version: 2, platform: process.platform, arch: process.arch, nodeVersion: process.version, coreVersion: packageJson.version, nodeSha256: digest(executable), entrySha256: digest(join(output, 'core/dist/index.js')), runtimeSha256:runtimeDigest(files), files }, null, 2));
+console.log('Staged owned Node runtime and verified standalone SQLite and image-processing ABIs.');

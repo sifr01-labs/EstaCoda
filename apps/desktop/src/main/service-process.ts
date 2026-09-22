@@ -3,6 +3,7 @@ import { createHash } from 'node:crypto';
 import { readFileSync, realpathSync } from 'node:fs';
 import { delimiter, dirname, join } from 'node:path';
 import { EventEmitter } from 'node:events';
+import {verifyRuntimeInventory} from './runtime-integrity.js';
 import type { Duplex, Readable, Writable } from 'node:stream';
 export type ServiceTransport = { input: Writable; output: Readable; credentials: Duplex };
 export function validateProfileId(value: unknown): asserts value is string {
@@ -13,8 +14,9 @@ export function ownedRuntime(root: string): { executable: string; entry: string 
   const executable = realpathSync(join(root, process.platform === 'win32' ? 'node.exe' : 'node'));
   const entry = realpathSync(join(root, 'core/dist/index.js'));
   const hash = (path: string) => createHash('sha256').update(readFileSync(path)).digest('hex');
-  if (manifest.version !== 1 || manifest.platform !== process.platform || manifest.arch !== process.arch ||
+  if (manifest.version !== 2 || manifest.platform !== process.platform || manifest.arch !== process.arch ||
       manifest.nodeSha256 !== hash(executable) || manifest.entrySha256 !== hash(entry)) throw new Error('Desktop runtime requires repair.');
+  verifyRuntimeInventory(root,manifest);
   return { executable, entry };
 }
 /** Owns only a disposable bridge. No process-group kills or supervisor stop. */
