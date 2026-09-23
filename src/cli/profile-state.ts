@@ -11,6 +11,7 @@ import {
   type ProfileStatePaths
 } from "../config/profile-home.js";
 import type { EstaCodaConfig } from "../config/runtime-config.js";
+import { CURRENT_OAUTH_STORE_VERSION } from "../providers/oauth/oauth-types.js";
 
 export type ProfileMemoryFile = "user" | "memory" | "soul";
 
@@ -96,7 +97,7 @@ export async function ensureProfileSkeleton(options: CreateProfileSkeletonOption
   await createProfileDirectories(profilePaths);
   await writeFileIfAbsent(profilePaths.configPath, `${JSON.stringify(DEFAULT_PROFILE_CONFIG, null, 2)}\n`);
   await writePrivateFileIfAbsent(profilePaths.envPath, "");
-  await writePrivateFileIfAbsent(profilePaths.authJsonPath, "{}\n");
+  await writePrivateFileIfAbsent(profilePaths.authJsonPath, `${JSON.stringify({ version: CURRENT_OAUTH_STORE_VERSION, providers: {} })}\n`);
   await writeFileIfAbsent(profilePaths.promotionsPath, `${JSON.stringify({ version: 1, records: [] }, null, 2)}\n`);
 
   const sourceMemory = {

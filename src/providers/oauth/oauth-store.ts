@@ -69,6 +69,12 @@ export function validateOAuthStore(data: unknown): OAuthStoreLoadResult {
 
   const obj = data as Record<string, unknown>;
 
+  // Older profile bootstrap created exactly {} before any provider was connected.
+  // Accept that empty sentinel without accepting unversioned credential records.
+  if (Object.keys(obj).length === 0) {
+    return { store: { version: CURRENT_OAUTH_STORE_VERSION, providers: {} }, diagnostics: [] };
+  }
+
   if (typeof obj.version !== "number") {
     return {
       store: { version: CURRENT_OAUTH_STORE_VERSION, providers: {} },

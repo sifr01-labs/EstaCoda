@@ -255,6 +255,14 @@ describe("writeOAuthStore", () => {
 });
 
 describe("validateOAuthStore direct", () => {
+  it('accepts only the empty legacy bootstrap object without a version', () => {
+    expect(validateOAuthStore({})).toEqual({store: {version: CURRENT_OAUTH_STORE_VERSION, providers: {}}, diagnostics: []});
+    for (const value of [{providers: {}}, {codex: {accessToken: 'synthetic-token'}}, {version: 99, providers: {}}, [], null]) {
+      const result = validateOAuthStore(value);
+      expect(result.diagnostics.length).toBeGreaterThan(0);
+      expect(result.store.providers).toEqual({});
+    }
+  });
   it("accepts a fully valid store", () => {
     const data = {
       version: 1,

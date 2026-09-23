@@ -928,7 +928,7 @@ describe("cli setup command", () => {
     await expect(stat(join(globalPaths.stateRoot, "python-env"))).rejects.toThrow();
     await expect(stat(join(globalPaths.stateRoot, "python-envs"))).rejects.toThrow();
     expect(await readFile(profilePaths.envPath, "utf8")).toBe("");
-    expect(await readFile(profilePaths.authJsonPath, "utf8")).toBe("{}\n");
+    expect(JSON.parse(await readFile(profilePaths.authJsonPath, "utf8"))).toEqual({ version: 1, providers: {} });
   });
 
   it("doctor --fix repairs private auth file modes without creating credentials", async () => {

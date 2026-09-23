@@ -1,7 +1,25 @@
-import {mkdtemp, readdir, rm} from 'node:fs/promises';
+import {mkdtemp, readdir, readFile, writeFile, rm} from 'node:fs/promises';
+import {ensureProfileSkeleton} from '../cli/profile-state.js';
+import {detectOnboarding} from './onboarding-detection.js';
 import {expect, it, vi} from 'vitest';
 import {captureModelCatalog} from './model-catalog.js';
 import {CONTROL_METHODS, CONTROL_EVENTS, validateControlResponse, type MethodRequest, type ModelProjection, type ProviderProjection} from '../contracts/desktop-control/index.js';
+
+it.each(['new', 'legacy'] as const)('opens the model catalog for a %s blank profile created by setup', async format => {
+  const homeDir = await mkdtemp('/tmp/ec-created-profile-catalog-');
+  const input = {homeDir, profileId: 'personal'};
+  try {
+    const paths = await ensureProfileSkeleton({...input, blank: true});
+    expect(JSON.parse(await readFile(paths.authJsonPath, 'utf8'))).toEqual({version: 1, providers: {}});
+    if (format === 'legacy') await writeFile(paths.authJsonPath, '{}\n');
+    const before = await readFile(paths.authJsonPath, 'utf8');
+    expect((await detectOnboarding(input)).mode).toBe('first-run');
+    const catalog = await captureModelCatalog(input);
+    expect(catalog.providers.find(p => p.id === 'kimi')?.metadata?.configurable).toBe(true);
+    expect(catalog.models.every(m => !m.runnable)).toBe(true);
+    expect(await readFile(paths.authJsonPath, 'utf8')).toBe(before);
+  } finally {await rm(homeDir, {recursive: true, force: true});}
+});
 
 it('projects the offline catalog without network calls, profile writes, or usable-route claims', async () => {
   const homeDir = await mkdtemp('/tmp/ec-desktop-catalog-');
