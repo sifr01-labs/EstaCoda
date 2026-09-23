@@ -1,0 +1,39 @@
+import {test,expect,type Page} from '@playwright/test';
+import {translate,type MessageKey} from '../../src/shared/i18n/index.js';
+async function mount(page:Page,language:'en'|'ar'='en'){
+ await page.goto('/fixture.html');await page.evaluate(async(language)=>{
+ const React=(await import('/node_modules/.vite/deps/react.js')).default,{createRoot}=(await import('/node_modules/.vite/deps/react-dom_client.js')).default,{OnboardingWizard}=await import('/src/renderer/components/onboarding-wizard.tsx'),{AppearanceProvider}=await import('/src/renderer/appearance.tsx'),{fixtureModels}=await import('/src/fixture/models.ts');
+ const host=document.querySelector('#ec-branded-workspace .ec-window')!;host.innerHTML='<main id="wizard-test"></main>';host.setAttribute('dir',language==='ar'?'rtl':'ltr');
+ const state={applies:0,reviews:0,imports:0,cancelled:0,folderSaves:0,failProviders:false,uncertain:false,verified:false,completed:false,source:'',preferences:[] as any[]};(window as any).setupTest=state;
+ const draft={draftId:'draft',role:'primary',credentialState:'staged',expiresInMs:300000,route:{providerId:'kimi',modelId:'kimi-k3'}},models=fixtureModels(),target={targetId:'folder',targetGeneration:1},detection={mode:'first-run',state:'new-user',launchReady:false};
+ const api={snapshot:async()=>({profile:{id:'desktop'}}),profiles:async()=>[{id:'desktop',label:'Desktop'},{id:'existing',label:'Personal'}],models:{...models,providers:async()=>{if(state.failProviders){state.failProviders=false;throw Error('unavailable');}return models.providers();},importOptions:async(source:string)=>{state.source=source;return{items:[{id:'primary',providerId:'kimi',modelId:'kimi-k3',endpoint:'https://api.moonshot.ai/v1',available:true,requiresSignIn:false}]};},reviewImport:async()=>{state.imports++;return{setupId:'imported',draft};},cancel:async()=>{state.cancelled++;return{cancelled:true};}},onboarding:{detect:async()=>detection,bootstrap:async()=>detection,chooseWorkspace:async()=>({alias:'project',path:'/Users/example/Projects/An example folder'}),reviewWorkspace:async(alias:string,trust:boolean)=>({reviewId:'workspace',alias,path:'/Users/example/Projects/An example folder',trust}),cancelWorkspace:async()=>({cancelled:true}),review:async(p:any)=>{state.reviews++;state.preferences=p.preferences;return{reviewId:'review',route:draft,workspace:{reviewId:'workspace',trust:true}};},apply:async()=>{state.applies++;if(state.uncertain)throw Error('response lost');return{state:'applied'};},applyWorkspace:async()=>{state.folderSaves++;state.verified=true;return{state:'completed'};},verify:async()=>({detection:{...detection,launchReady:state.verified},target:state.verified?target:null}),inspect:async()=>({state:'applied'})}};
+ createRoot(document.getElementById('wizard-test')!).render(React.createElement(AppearanceProvider,{store:{read:async()=>({theme:'kemet',appearance:'light',density:'comfortable',language}),write:async()=>{}}},React.createElement(OnboardingWizard,{api,repair:()=>{},complete:()=>{state.completed=true;}})));
+ },language);
+}
+for(const language of ['en','ar'] as const)test(`explicit import, back navigation, folder trust and one Finish (${language})`,async({page})=>{
+ await mount(page,language);const t=(key:MessageKey)=>translate(language,key),button=(key:MessageKey)=>page.getByRole('button',{name:t(key),exact:true});
+ await page.getByRole('button',{name:new RegExp(t('Copy an existing connection'))}).click();
+ await page.getByRole('combobox',{name:t('Copy from')}).selectOption('existing');
+ await page.getByRole('combobox',{name:t('Model'),exact:true}).selectOption('primary');
+ await expect(button('Use this model')).toBeDisabled();expect(await page.evaluate(()=>(window as any).setupTest.imports)).toBe(0);
+ await page.getByRole('checkbox',{name:new RegExp(t('Copy this model connection'))}).check();await button('Use this model').click();await button('Continue').click();
+ await button('Choose folder').click();await expect(page.getByRole('checkbox',{name:new RegExp(t('Allow work in this folder'))})).not.toBeChecked();
+ await page.getByRole('checkbox',{name:new RegExp(t('Allow work in this folder'))}).check();await button('Continue').click();
+ expect(await page.evaluate(()=>(window as any).setupTest.applies)).toBe(0);
+ await button('Edit workspace').click();await expect(page.getByRole('textbox',{name:t('Workspace name')})).toHaveValue('project');await button('Continue').click();
+ await page.screenshot({path:test.info().outputPath('summary-'+language+'.png')});
+ await button('Finish setup').click();await expect(button('Open EstaCoda')).toBeEnabled();
+ await expect(page.getByRole('img',{name:'ESTACODA'})).toBeVisible();await expect(button('Open Settings')).toHaveCount(0);await button('Open EstaCoda').click();
+ expect(await page.evaluate(()=>(window as any).setupTest)).toMatchObject({applies:1,imports:1,folderSaves:1,completed:true});
+});
+test('provider loading can be retried and a new model is retained without a separate review screen',async({page})=>{
+ await mount(page);await page.evaluate(()=>{(window as any).setupTest.failProviders=true;});await page.getByRole('button',{name:'Choose model',exact:true}).click();await expect(page.getByRole('alert')).toContainText('We couldn’t load this connection');await page.getByRole('button',{name:'Try again',exact:true}).click();
+ const dialog=page.getByRole('dialog');await dialog.getByRole('combobox',{name:'Provider',exact:true}).selectOption('local');await dialog.getByRole('textbox',{name:'Model ID',exact:true}).fill('local-model');await dialog.getByRole('button',{name:'Continue without a credential'}).click();await dialog.getByRole('button',{name:'Use this model',exact:true}).click();await expect(dialog).toHaveCount(0);await expect(page.getByText('Selected for this setup',{exact:false})).toBeVisible();expect(await page.evaluate(()=>(window as any).setupTest.applies)).toBe(0);
+});
+test('uncertain saves cannot be submitted twice',async({page})=>{
+ await mount(page);await page.getByRole('button',{name:/Copy an existing connection/}).click();await page.getByRole('combobox',{name:'Copy from'}).selectOption('existing');await page.getByRole('combobox',{name:'Model',exact:true}).selectOption('primary');await page.getByRole('checkbox',{name:/Copy this model connection/}).check();await page.getByRole('button',{name:'Use this model',exact:true}).click();await page.getByRole('button',{name:'Continue',exact:true}).click();await page.getByRole('button',{name:'Choose folder',exact:true}).click();await page.getByRole('button',{name:'Continue',exact:true}).click();await page.evaluate(()=>{(window as any).setupTest.uncertain=true;});await page.getByRole('button',{name:'Finish setup',exact:true}).click();await expect(page.getByRole('button',{name:'Finish setup',exact:true})).toBeDisabled();await expect(page.getByRole('button',{name:'Back',exact:true})).toBeDisabled();await page.getByRole('button',{name:'Check saved setup',exact:true}).click();expect(await page.evaluate(()=>(window as any).setupTest.applies)).toBe(1);
+});
+
+test('revoking import consent discards the selected connection',async({page})=>{
+ await mount(page);await page.getByRole('button',{name:/Copy an existing connection/}).click();await page.getByRole('combobox',{name:'Copy from'}).selectOption('existing');await page.getByRole('combobox',{name:'Model',exact:true}).selectOption('primary');const consent=page.getByRole('checkbox',{name:/Copy this model connection/});await consent.check();await page.getByRole('button',{name:'Use this model',exact:true}).click();await expect(page.getByRole('button',{name:'Continue',exact:true})).toBeEnabled();await consent.uncheck();await expect(page.getByRole('button',{name:'Continue',exact:true})).toBeDisabled();expect(await page.evaluate(()=>(window as any).setupTest.cancelled)).toBe(1);expect(await page.evaluate(()=>(window as any).setupTest.applies)).toBe(0);
+});

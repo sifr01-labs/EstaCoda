@@ -12,6 +12,7 @@ export function fixtureModels():DesktopModelsApi{
  const receipt=()=>({operationId:'sample',state:'applied' as const,verification:'configured' as const});
  const verify=async()=>({state:'passed' as const,reason:'none' as const,streaming:true,tools:true,latencyMs:40,inputTokens:1,outputTokens:1,estimatedCost:0});
  return{
+  importOptions:async()=>({items:[]}),reviewImport:async()=>{throw new Error('Import requires an existing local setup');},
   models:async()=>({items:[...models],nextCursor:null}),providers:async()=>({items:[{id:'kimi',label:'Kimi',state:'ready',health:'configured',authMethods:['api_key'],metadata:{configurable:true,runnable:true,catalogOnly:false,apiMode:'openai_chat_completions',defaultEndpoint:'https://api.moonshot.ai/v1'}},{id:'local',label:'Local',state:'unconfigured',health:'not_configured',authMethods:['none'],metadata:{configurable:true,runnable:true,catalogOnly:false,apiMode:'custom_openai_compatible',defaultEndpoint:'http://localhost:11434/v1'}}],nextCursor:null}),
   routes:async()=>({fallbacks:{revision:'sample',items:[...fallbacks]},auxiliary:{items:[...auxiliary]}}),refreshCatalog:async()=>({refreshed:true}),
   begin:async value=>{route=value;return{setupId:'sample'};},stage:async()=>({staged:true}),cancel:async()=>{pending=()=>{};return{cancelled:true};},review:async(_id,role)=>{selectedRole=role??{role:'primary'};return draft();},verify,verifyReviewed:verify,

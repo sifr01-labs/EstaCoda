@@ -132,6 +132,8 @@ const contracts: { [M in keyof MethodContracts]: { params: Check; result: Check 
   "diff.patch":{params:shape({target,path:text(1024,1),stage:choice(['staged','unstaged','untracked'])}),result:shape({path:text(1024,1),stage:choice(['staged','unstaged','untracked']),binary:boolean,text:nullable(text(16384)),truncated:boolean})},
   "files.list":{params:shape({target,path:text(1024,1)},{cursor:text(1024,1)}),result:shape({items:array(shape({path:text(1024,1),name:text(255,1),kind:choice(['file','directory','symlink','special'])})),truncated:boolean},{nextCursor:text(1024,1)})},
   "files.preview":{params:shape({target,path:text(1024,1)}),result:shape({path:text(1024,1),size:integer(),binary:boolean,text:nullable(text(16384)),truncated:boolean})},
+  "models.importOptions": {params:shape({sourceProfileId:id}),result:shape({items:array(shape({id,providerId:id,modelId:text(200,1),endpoint:text(2048,1),available:boolean,requiresSignIn:boolean}),33)})},
+  "models.reviewImport": {params:shape({sourceProfileId:id,routeId:id,providerId:id,modelId:text(200,1),endpoint:text(2048,1),confirmed:(v)=>v===true,windowId:id,generation:integer(1)}),result:modelRouteDraft},
   "models.reviewConfigured": {params:shape({windowId:id,generation:integer(1),providerId:id,modelId:text(200,1),role:choice(["provider","primary","fallback","auxiliary"])},{slot:choice(AUXILIARY_SLOTS),fallbackToMain:boolean,verification:shape({endpoint:text(2048,1)})}),result:modelRouteDraft},
   "models.validateRoute": {params:shape({route:candidateRoute}),result:shape({valid:v=>v===true})},
   "models.refreshCatalog": {params:shape({networkApproved:v=>v===true}),result:shape({refreshed:boolean})},

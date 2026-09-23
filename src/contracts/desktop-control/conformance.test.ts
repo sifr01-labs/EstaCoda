@@ -112,6 +112,8 @@ const cases = {
  "telegram.cancel":{params:{draftId:'draft',windowId:'w',generation:1},result:{cancelled:true}},
  "telegram.inspectApply":{params:{},result:{operationId:'none',state:'unknown',verification:'not_tested'}},
  "models.verifyDraft":{params:{draftId:'draft',windowId:'w',generation:1,spendApproved:true,allowPrivateEndpoint:false},result:{state:'passed',reason:'none',streaming:true,tools:true,latencyMs:1,inputTokens:1,outputTokens:1,estimatedCost:null}},
+ "models.importOptions": {params:{sourceProfileId:'source'},result:{items:[{id:'primary',providerId:'local',modelId:'m',endpoint:'http://localhost:11434/v1',available:true,requiresSignIn:false}]}},
+ "models.reviewImport": {params:{sourceProfileId:'source',routeId:'primary',providerId:'local',modelId:'m',endpoint:'http://localhost:11434/v1',confirmed:true,windowId:'w',generation:1},result:{draftId:'draft',role:'primary',credentialState:'not_required',expiresInMs:300000,route:{providerId:'local',modelId:'m',endpoint:'http://localhost:11434/v1',authMethod:'none',apiMode:'custom_openai_compatible',allowPrivateEndpoint:true}}},
  "models.reviewConfigured": {params:{windowId:'w',generation:1,providerId:'local',modelId:'m',role:'primary'},result:{draftId:'draft',role:'primary',credentialState:'not_required',expiresInMs:300000,route:{providerId:'local',modelId:'m',endpoint:'http://localhost:11434/v1',authMethod:'none',apiMode:'custom_openai_compatible',allowPrivateEndpoint:true}}},
   "models.validateRoute": {params:{route:{providerId:"local",modelId:"m",endpoint:"http://localhost:11434/v1",authMethod:"none",apiMode:"openai_chat_completions",allowPrivateEndpoint:true}},result:{valid:true}},
   "models.refreshCatalog": {params:{networkApproved:true},result:{refreshed:true}},

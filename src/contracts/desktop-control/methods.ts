@@ -119,6 +119,8 @@ export type MethodContracts = {
   "work.live": {params:{workId:string};result:{active:boolean;turnId:string|null;text:string;truncated:boolean}};
   "work.targets": {params:{cursor?:string;target?:TargetReference};result:{items:TargetProjection[];truncated:boolean;nextCursor?:string}};
   "models.verifyDraft": {params:ModelDraftBinding&{spendApproved:true;allowPrivateEndpoint:boolean};result:CandidateVerification};
+  "models.importOptions": {params:{sourceProfileId:string};result:{items:{id:string;providerId:string;modelId:string;endpoint:string;available:boolean;requiresSignIn:boolean}[]}};
+  "models.reviewImport": {params:{sourceProfileId:string;routeId:string;providerId:string;modelId:string;endpoint:string;confirmed:true;windowId:string;generation:number};result:ModelRouteDraft};
   "models.reviewConfigured": {params:ConfiguredRouteReview;result:ModelRouteDraft};
   "models.validateRoute": {params:{route:VerifyCandidateParams["route"]};result:{valid:true}};
   "models.refreshCatalog": {params:{networkApproved:true};result:{refreshed:boolean}};

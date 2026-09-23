@@ -39,7 +39,7 @@ export class DesktopModelSetup {
  }
  async verify(setupId:string){const setup=this.require(setupId);try{return await this.connection.modelRequest('models.verifyCandidate',{...this.params(setup),spendApproved:true});}catch(error){throw error;}finally{this.require(setupId);}}
  async review(setupId:string,role:RouteRole={role:'primary'}){const setup=this.require(setupId);setup.draft=role.role==='auxiliary'?await this.connection.modelRequest('models.reviewAuxiliary',{...this.params(setup),slot:role.slot!,fallbackToMain:role.fallbackToMain===true}):await this.connection.modelRequest(role.role==='provider'?'models.reviewProvider':role.role==='fallback'?'models.reviewFallback':'models.reviewPrimary',this.params(setup));this.require(setupId);return setup.draft;}
- async reviewed<M extends 'models.reviewConfigured'|'models.reviewFallbackOrder'|'models.reviewAuxiliaryMode'>(method:M,params:Omit<MethodContracts[M]['params'],'windowId'|'generation'>){
+ async reviewed<M extends 'models.reviewImport'|'models.reviewConfigured'|'models.reviewFallbackOrder'|'models.reviewAuxiliaryMode'>(method:M,params:Omit<MethodContracts[M]['params'],'windowId'|'generation'>){
   return this.prepare(async check=>{
   const scope={windowId:this.#windowId,generation:++this.#generation},generation=this.connection.state.generation,profileId=this.connection.state.profileId;
   const draft=await this.connection.modelRequest(method,{...params,...scope} as MethodContracts[M]['params']);

@@ -162,3 +162,10 @@ it('bounds dropped-file input and never accepts renderer-owned profile or raw pi
  expect(()=>validateSemanticPayload('workAttach',{...scope,workspace:true})).not.toThrow();
  expect(()=>validateSemanticPayload('workAttach',{...scope,workspace:'/tmp'})).toThrow();
 });
+
+it('allows explicit import selection but never renderer credentials, storage paths or credential scope',()=>{
+ const selection={sourceProfileId:'source',routeId:'primary',providerId:'kimi',modelId:'kimi-k2',endpoint:'https://api.moonshot.ai/v1',confirmed:true};
+ expect(()=>validateSemanticPayload('modelImportOptions',{sourceProfileId:'source'})).not.toThrow();
+ expect(()=>validateSemanticPayload('modelImportReview',selection)).not.toThrow();
+ for(const extra of [{confirmed:false},{sourceProfileId:'../escape'},{credential:'canary'},{windowId:'other'},{generation:3},{path:'/tmp/source'},{profileId:'destination'}])expect(()=>validateSemanticPayload('modelImportReview',{...selection,...extra})).toThrow();
+});

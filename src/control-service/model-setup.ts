@@ -1,3 +1,4 @@
+import {readImportSource} from './model-import.js';
 import type {PreparedProfilePart} from '../setup/review/compose-profile-plans.js';
 import {readEnvSecretValue}from'../config/env-secret-store.js';
 import {resolveRuntimeCredential}from'../providers/runtime-credential-resolver.js';
@@ -103,6 +104,19 @@ export class ModelSetup {
     if(!['present','not_required'].includes(presence(params.providerId,{apiKeyEnv:credentialEnv,authMethod})))throw new ControlProtocolError('-32602');
     const route:CandidateRoute={providerId:params.providerId,modelId:params.modelId,endpoint,authMethod:authMethod==='none'?'none':authMethod==='api_key'?'api_key':'oauth',apiMode:(provider.apiMode??metadata.apiMode) as CandidateRoute['apiMode'],allowPrivateEndpoint:true,enableNetwork:true,...(limits?.contextWindowTokens?{contextWindowTokens:limits.contextWindowTokens}:{}),...(params.role!=='auxiliary'&&limits?.maxTokens?{maxTokens:limits.maxTokens}:{})};
     return this.review({windowId:params.windowId,generation:params.generation,route},params.role,params.role==='auxiliary'?{slot:params.slot!,fallbackToMain:params.fallbackToMain===true}:undefined,{snapshot,credentialEnv:route.authMethod==='api_key'?credentialEnv:undefined,verificationOnly:params.verification!==undefined});
+  }
+  async importOptions(sourceProfileId:string):Promise<MethodContracts['models.importOptions']['result']>{
+    const source=await readImportSource(this.input,sourceProfileId);
+    return {items:source.map(({id,route,value})=>({id,providerId:route.providerId,modelId:route.modelId,endpoint:route.endpoint,available:route.authMethod==='none'||route.authMethod==='api_key'&&!!value,requiresSignIn:route.authMethod==='oauth'}))};
+  }
+  async reviewImport(params:MethodContracts['models.reviewImport']['params']):Promise<ModelRouteDraft>{
+    if(params.confirmed!==true)throw new ControlProtocolError('-32602');
+    const source=(await readImportSource(this.input,params.sourceProfileId)).find(row=>row.id===params.routeId);
+    if(!source||source.route.providerId!==params.providerId||source.route.modelId!==params.modelId||source.route.endpoint!==params.endpoint||source.route.authMethod==='oauth'||source.route.authMethod==='api_key'&&!source.value)throw new ControlProtocolError('-32003');
+    const scope:CandidateScope={windowId:params.windowId,generation:params.generation,purpose:'provider',providerId:source.route.providerId,authMethod:'api_key',endpoint:source.route.endpoint};
+    const candidateId=source.value?this.candidates.stage(scope,source.value):undefined;
+    try{const draft=await this.review({windowId:params.windowId,generation:params.generation,route:source.route,...(candidateId?{candidateId}:{})});if(this.#drafts.get(draft.draftId)!.snapshot.files['config.json']!==null){this.cancel({draftId:draft.draftId,windowId:params.windowId,generation:params.generation});throw new ControlProtocolError('-32007');}return draft;}
+    catch(error){if(candidateId)try{this.candidates.discard(candidateId,scope);}catch{}throw error;}
   }
   async auxiliary():Promise<AuxiliaryList>{
     const loaded=await loadRuntimeConfig({...this.input,workspaceRoot:this.input.homeDir,configurationInspection:true});

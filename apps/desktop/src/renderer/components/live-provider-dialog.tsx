@@ -116,7 +116,7 @@ export function LiveProviderDialog({api,providers,close,saved,returnFocus,onRevi
   if(e.key==='Tab'){const controls=Array.from(dialog.current!.querySelectorAll<HTMLElement>('button:not(:disabled),input:not(:disabled),select:not(:disabled),summary,[tabindex="0"]')).filter(e=>e.getClientRects().length>0),first=controls[0],last=controls.at(-1);if(e.shiftKey&&document.activeElement===first){e.preventDefault();last?.focus();}else if(!e.shiftKey&&document.activeElement===last){e.preventDefault();first?.focus();}}
  }}>
  <header className="ec-modalhead"><h2 id="ec-live-setup-title">{step==='done'?(savedOK?t('Changes saved'):t('Check save status')):step==='review'?t('Review changes'):t('Connect {provider}',{provider:providerName})}</h2><Button className="ec-ghost ec-iconbutton" icon="x" aria-label={t('Close provider setup')} onClick={()=>void cancel()}/></header>
- <ol className="ec-setup-steps" aria-label={t('Setup progress')}>{(['connect','review','done'] as const).map((s,i)=><li key={s} aria-current={step===s?'step':undefined}><span>{i+1}</span>{t(s==='connect'?'Connect':s==='review'?'Review':'Done')}</li>)}</ol>
+ {!onReviewed&&<ol className="ec-setup-steps" aria-label={t('Setup progress')}>{(['connect','review','done'] as const).map((s,i)=><li key={s} aria-current={step===s?'step':undefined}><span>{i+1}</span>{t(s==='connect'?'Connect':s==='review'?'Review':'Done')}</li>)}</ol>}
  <div className="ec-setup-body">
  {error&&<p role="alert" className="ec-setup-warning">{error}</p>}
  {summary}
@@ -154,7 +154,7 @@ export function LiveProviderDialog({api,providers,close,saved,returnFocus,onRevi
  </div>
  <footer ref={next} className="ec-setup-footer">
  {!savedOK&&<Button className="ec-ghost" disabled={busy&&step==='done'} onClick={()=>step==='review'?setStep('connect'):void cancel()}>{step==='review'?t('Back'):step==='done'?t('Close'):t('Cancel')}</Button>}
- {step==='connect'?<Button className="ec-primary" disabled={!ready} onClick={()=>void action(async()=>{const result=draft??await api.review(setupId!,routeRole);if(active.current){setDraft(result);setStep('review');}})}>{t('Continue')}</Button>:step==='review'?<Button className="ec-primary" disabled={busy} onClick={()=>void save()}>{onReviewed?t('Keep in setup draft'):t('Save changes')}</Button>:savedOK?<Button className="ec-primary" onClick={()=>{saved();close();}}>{t('Done')}</Button>:<Button className="ec-primary" disabled={busy} onClick={()=>void action(reconcile)}>{t('Check save status')}</Button>}
+ {step==='connect'?<Button className="ec-primary" disabled={!ready} onClick={()=>void action(async()=>{const result=draft??await api.review(setupId!,routeRole);if(active.current){if(onReviewed){setup.current=undefined;onReviewed(setupId!,result);close();}else{setDraft(result);setStep('review');}}})}>{t(onReviewed?'Use this model':'Continue')}</Button>:step==='review'?<Button className="ec-primary" disabled={busy} onClick={()=>void save()}>{onReviewed?t('Keep in setup draft'):t('Save changes')}</Button>:savedOK?<Button className="ec-primary" onClick={()=>{saved();close();}}>{t('Done')}</Button>:<Button className="ec-primary" disabled={busy} onClick={()=>void action(reconcile)}>{t('Check save status')}</Button>}
  </footer>
  </section></div>,document.querySelector('.ec-window')!);
 }

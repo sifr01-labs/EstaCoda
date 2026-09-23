@@ -33,6 +33,8 @@ export type DesktopModelsApi={
 
  verifyReviewed(setupId:string,allowPrivateEndpoint:boolean):Promise<MethodContracts['models.verifyDraft']['result']>;
  routes():Promise<{fallbacks:MethodContracts['models.fallbacks']['result'];auxiliary:MethodContracts['models.auxiliary']['result']}>;
+ importOptions(sourceProfileId:string):Promise<MethodContracts['models.importOptions']['result']>;
+ reviewImport(selection:Omit<MethodContracts['models.reviewImport']['params'],'windowId'|'generation'>):Promise<{setupId:string;draft:MethodContracts['models.reviewPrimary']['result']}>;
  reviewConfigured(selection:Omit<MethodContracts['models.reviewConfigured']['params'],'windowId'|'generation'>):Promise<{setupId:string;draft:MethodContracts['models.reviewPrimary']['result']}>;
  reviewOrder(order:Omit<MethodContracts['models.reviewFallbackOrder']['params'],'windowId'|'generation'>):Promise<{setupId:string;draft:MethodContracts['models.reviewPrimary']['result']}>;
  reviewMode(mode:Omit<MethodContracts['models.reviewAuxiliaryMode']['params'],'windowId'|'generation'>):Promise<{setupId:string;draft:MethodContracts['models.reviewPrimary']['result']}>;
