@@ -31,13 +31,17 @@ Private/loopback verification requires the explicit checkbox. Public endpoints r
 
 The dashboard uses offline metadata by default. Configured providers are shown first; Browse providers opens the wider catalog. Catalog visibility does not grant execution authority. Unsupported/catalog-only providers cannot be configured through this flow, and non-runnable models cannot be selected for Work. Unknown custom-model metadata remains explicitly unknown.
 
-Model rows show provider/model identity, configuration status, context/output limits, tools/vision, lifecycle, source and available pricing. **Refresh catalog** requires a separate click and confirmation to fetch public metadata from models.dev; it does not verify a provider or submit a prompt. Lists load in bounded pages, with a 2,000-row desktop browsing limit.
+Model rows show provider/model identity, configuration status, context/output limits, tools/vision, lifecycle, source and available pricing. **Refresh** fetches public model metadata from models.dev in one click, with inline progress, completion, and retry feedback. It does not send credentials, verify a provider, submit a prompt, or change saved model selections. The button is disabled while the refresh is in progress; a failed refresh leaves the existing catalog available. Lists load in bounded pages, with a 2,000-row desktop browsing limit.
 
 Use **Use a configured model** to propose a primary, fallback or specialist route with its existing credential reference. A fresh review is required if the profile changed. The same provider/model at ambiguous configured endpoints is rejected rather than choosing an endpoint silently.
 
 Fallbacks are ordered. Add, remove and reorder them through review and Apply. Duplicate fallback routes and a fallback identical to primary are rejected. Remove an identical fallback before promoting that route to primary. To test a saved route, review its configured model and run the optional verification before Apply; cancelling this review leaves its saved credential intact.
 
 The five specialist slots are assessor, compression, session search, memory compaction and profile context. Each supports primary, automatic, dedicated or disabled routing through the reviewed controls, with fallback-to-primary where applicable. Vision remains in capability settings. An automatic slot with no eligible route is optional; it does not make otherwise valid primary configuration broken.
+
+## First-run model selection
+
+Onboarding uses the same provider search, model list, pricing, model details, and connection dialog as Settings. **Connect a provider** opens that browser directly; neither starting choice is preselected. **Copy an existing connection** opens the explicitly selected source setup and retains the separate consent to copy its saved API key. Choosing a model stages the connection; only **Finish setup** saves it. Returning or cancelling does not apply a model configuration.
 
 ## Model selection for one Work
 

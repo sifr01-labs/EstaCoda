@@ -133,7 +133,7 @@ export function LiveProviderDialog({api,providers,close,saved,returnFocus,onRevi
  <section className="ec-setup-auth"><h3>{t('Authorization')}</h3>
  {staged?<p className="ec-setup-success" role="status"><Icon name="circle-check"/>{route.authMethod==='none'?t('No authorization required.'):t('Authorized. Save to finish setup.')}</p>:pendingOAuth?<div className="ec-setup-oauth"><p>{t('Enter this code on the sign-in page.')}</p>{oauth?.userCode&&<div className="ec-setup-code"><bdi dir="ltr">{oauth.userCode}</bdi><Button className="ec-ghost" icon={copy==='copied'?'check':'copy'} onClick={()=>void copyCode()}>{copy==='copied'?t('Copied'):t('Copy code')}</Button></div>}<span className="ec-sr-only" role="status">{copy==='copied'?t('Copied'):copy==='failed'?t('Could not copy. Select the code and copy it manually.'):''}</span><Button icon="arrow-up-right" onClick={()=>void action(()=>api.oauthOpen(setupId!))}>{t('Open sign-in page')}</Button></div>:oauth?<p role="status">{t('Authorization expired or was interrupted. Get a new code to continue.')}</p>:<Button className="ec-setup-authorize" icon="key-round" disabled={busy||Boolean(setupId)||!model.trim()||!route.endpoint} onClick={()=>void stage()}>{route.authMethod==='none'?t('Continue without a credential'):route.authMethod==='oauth'?t('Authorize Codex'):t('Enter API key privately')}</Button>}
  {setupId&&!pendingOAuth&&<Button className="ec-ghost ec-setup-reset" disabled={busy} onClick={()=>void restart()}>{oauth&&!staged?t('Get a new code'):t('Reset setup')}</Button>}
- {!staged&&!oauth&&<p className="ec-footnote">{t('Credentials are saved only when you finish setup.')}</p>}
+
  </section>
  {advanced}
  {staged&&testBlock}

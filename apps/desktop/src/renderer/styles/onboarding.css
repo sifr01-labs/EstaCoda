@@ -21,7 +21,7 @@
 #ec-branded-workspace .ec-onboarding-flow button:disabled{opacity:.45;cursor:default}
 #ec-branded-workspace .ec-onboarding-choices{display:flex;flex-direction:column;gap:12px}
 #ec-branded-workspace .ec-onboarding-choice{display:flex;align-items:center;gap:16px;width:100%;text-align:start;padding:18px;border:1px solid var(--ec-line);border-radius:14px;background:var(--ec-bg);color:var(--ec-text);font:inherit;cursor:pointer}
-#ec-branded-workspace .ec-onboarding-choice:hover,#ec-branded-workspace .ec-onboarding-choice[aria-pressed=true]{background:var(--ec-tint);border-color:color-mix(in srgb,var(--ec-accent) 40%,var(--ec-line))}
+#ec-branded-workspace .ec-onboarding-choice:hover,#ec-branded-workspace .ec-onboarding-choice[aria-expanded=true]{background:var(--ec-tint);border-color:color-mix(in srgb,var(--ec-accent) 40%,var(--ec-line))}
 #ec-branded-workspace .ec-onboarding-choice>svg{width:21px;height:21px;color:var(--ec-accent);flex-shrink:0}
 #ec-branded-workspace .ec-onboarding-choice>span{flex:1}
 #ec-branded-workspace .ec-onboarding-choice strong{font-size:15px;font-weight:550;display:block}
@@ -64,3 +64,5 @@
 @media(max-width:600px){#ec-branded-workspace .ec-onboarding-flow{padding:20px;gap:24px}#ec-branded-workspace .ec-onboarding-heading h1{font-size:25px}#ec-branded-workspace .ec-onboarding-summary>div{flex-wrap:wrap}#ec-branded-workspace .ec-onboarding-folder{flex-wrap:wrap}#ec-branded-workspace .ec-onboarding-progress{gap:12px}}
 
 #ec-branded-workspace .ec-window[data-onboarding=true] .ec-titlebar{width:136px;background:var(--ec-bg)}
+
+#ec-branded-workspace .ec-onboarding-catalog{padding-block:24px;min-height:100%;box-sizing:border-box}

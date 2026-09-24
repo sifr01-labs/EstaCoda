@@ -1,4 +1,12 @@
 export const onboardingArabic={
+ "Choose the model you’ll work with.":"اختر النموذج الذي ستعمل معه.",
+ "Explore providers and find your model.":"تصفّح المزوّدين واختر نموذجك.",
+ "Bring a model from another EstaCoda setup.":"استخدم نموذجًا من إعداد آخر في EstaCoda.",
+ "Find the right model for your work.":"اختر النموذج المناسب لعملك.",
+ "Refreshing…":"جارٍ التحديث…",
+ "Updating models and prices…":"جارٍ تحديث النماذج والأسعار…",
+ "Couldn’t update the catalog. Your current models are still available.":"تعذّر تحديث القائمة. لا تزال نماذجك الحالية متاحة.",
+ "Models and prices are up to date.":"النماذج والأسعار محدّثة.",
  "Make it yours":"اجعله مناسبًا لك",
  "Pick up where you left off":"تابع من حيث توقفت",
  "A model, a workspace, and you. Let’s get started.":"نموذج ومساحة عمل وأنت. لنبدأ.",
