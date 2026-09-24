@@ -12,6 +12,7 @@ export type RuntimeToolContext = {
 };
 
 export type SessionToolContext = {
+  capabilityRecovery?: import("../tools/capability-tools.js").SessionCapabilityRecovery;
   executionLease?: import("../execution/host-environment.js").HostExecutionLease;
   workspaceRoot: string;
   profileId: string;

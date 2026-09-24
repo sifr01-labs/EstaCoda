@@ -1,4 +1,5 @@
 import type { ToolProvider } from "../contracts/tool.js";
+import { capabilityToolProvider } from "./capability-tools.js";
 import { builtinToolProvider } from "./builtin-tools.js";
 import { configToolProvider } from "./config-tools.js";
 import { cronToolProvider } from "./cron-tools.js";
@@ -29,6 +30,7 @@ import { workspaceTrustToolProvider } from "./workspace-trust-tools.js";
 import { workspaceToolProvider } from "./workspace-tools.js";
 
 export {
+  capabilityToolProvider,
   builtinToolProvider,
   configToolProvider,
   cronToolProvider,
@@ -96,6 +98,7 @@ export const toolRegistrationPlan: readonly ToolRegistrationEntry[] = [
   { provider: taskResultToolProvider, phase: "pre-skill-visibility" },
   { provider: taskToolProvider, phase: "pre-skill-visibility" },
   { provider: skillToolProvider, phase: "post-skill-visibility" },
+  { provider: capabilityToolProvider, phase: "post-skill-visibility" },
   { provider: knowledgeMemoryToolProvider, phase: "post-memory-provider" },
   {
     provider: knowledgeCodeToolProvider,

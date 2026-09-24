@@ -1,3 +1,4 @@
+import { SessionCapabilityRecovery } from "../tools/capability-tools.js";
 import { dockerToolAdmissionGuard } from "../execution/docker-tool-boundary.js";
 import { executionAuthorityFingerprint } from "../execution/execution-authority.js";
 import { createHash } from "node:crypto";
@@ -523,6 +524,7 @@ export class AgentLoopBuilder {
       stateRoot: substrate.stateRoot
     });
     const sessionSkillCatalog = sessionSkillRegistry.catalog();
+    const capabilityRecovery = new SessionCapabilityRecovery({ registry: toolRegistry, skills: sessionSkillRegistry });
 
     registerToolRegistrationPhase({
       registry: toolRegistry,
@@ -535,6 +537,7 @@ export class AgentLoopBuilder {
         currentSessionId: () => sessionRuntimeContext.currentSessionId(),
         skillRegistry: substrate.skillRegistry,
         sessionSkillRegistry,
+        capabilityRecovery,
         skillConfig: input.skillConfig,
         localSkillsRoot: substrate.localSkillsRoot,
         bundledSkillsRoot: substrate.bundledSkillsRoot,
@@ -630,6 +633,7 @@ export class AgentLoopBuilder {
       tools: providerToolAvailability.available,
       unavailableTools: providerToolAvailability.unavailable
     });
+    capabilityRecovery.bindCatalog(providerToolSchemaCatalog);
     const executionCompletionCapabilities = providerToolAvailability.available.flatMap((definition) => {
       const registered = toolRegistry.get(definition.name);
       if (registered === undefined) return [];
@@ -972,6 +976,8 @@ function buildPostSkillVisibilityToolContext(input: SessionToolContext): Session
     currentSessionId: input.currentSessionId,
     skillRegistry: input.skillRegistry,
     sessionSkillRegistry: input.sessionSkillRegistry,
+    capabilityRecovery: input.capabilityRecovery,
+    skillConfig: input.skillConfig,
     localSkillsRoot: input.localSkillsRoot,
     bundledSkillsRoot: input.bundledSkillsRoot,
     skillEvolutionStore: input.skillEvolutionStore,
