@@ -4,7 +4,9 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it } from "vitest";
 import type { IntentRoute, SkillRouteCandidate } from "../contracts/intent.js";
 import type { SkillOutcome } from "../contracts/memory.js";
-import type { RuntimeEvent } from "../contracts/runtime-event.js";
+import { describeCapabilitySelection } from "./provider-tool-narrowing.js";
+import { buildProviderToolSchemaCatalog } from "../tools/tool-schema.js";
+import type { RuntimeEvent, ProviderToolInventoryEvent } from "../contracts/runtime-event.js";
 import type { SkillDefinition } from "../contracts/skill.js";
 import type { ToolDefinition } from "../contracts/tool.js";
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
@@ -28,6 +30,27 @@ function makeTempDir(): string {
 }
 
 describe("RunRecorder", () => {
+  it("persists bounded capability diagnostics to session, trajectory and event sink", async () => {
+    const db = new SQLiteSessionDB({ path: join(makeTempDir(), "sessions.sqlite") });
+    try {
+      const session = await db.createSession({ id: "session-inventory", profileId: "default" });
+      const trajectoryRecorder = new TrajectoryRecorder({ profileId: "default", sessionId: session.id, modelId: "test-model" });
+      const recorder = new RunRecorder({ sessionDb: db, sessionId: session.id, trajectoryRecorder, profileId: "default" });
+      const event: ProviderToolInventoryEvent = {
+        kind: "provider-tool-inventory", phase: "initial", tools: [], addedTools: [], nativeSchemaTokens: 0, connectors: [],
+        selection: describeCapabilitySelection({ catalog: buildProviderToolSchemaCatalog({ tools: [] }), exposedTools: [], selection: { policy: "research", expansionCandidates: [] }, requirements: { skillReferences: [], delegation: { count: 3 }, issues: [] } })
+      };
+      const emitted: RuntimeEvent[] = [];
+      await recorder.recordProviderToolInventory(event, (value) => { emitted.push(value); });
+      expect(await db.listEvents(session.id)).toContainEqual(event);
+      expect(trajectoryRecorder.snapshot().events).toContainEqual(expect.objectContaining({ kind: "provider-tool-inventory", data: event }));
+      expect(emitted).toEqual([event]);
+      expect(event.selection?.requestedOmissions).toContainEqual({ tool: "delegate_task", reason: "not_in_session" });
+    } finally {
+      await db.close();
+    }
+  });
+
   it("records execution-plan lifecycle state without raw tool results", async () => {
     const db = new SQLiteSessionDB({ path: join(makeTempDir(), "sessions.sqlite") });
     try {

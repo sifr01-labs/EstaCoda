@@ -1,3 +1,4 @@
+import { selectProviderToolsForTurn } from "./provider-tool-narrowing.js";
 import { describe, expect, it, vi } from "vitest";
 import { Buffer } from "node:buffer";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -370,6 +371,7 @@ async function runBasicProviderTurn(
     visibleTurnId?: string;
     userText?: string;
     providerTools?: OpenAICompatibleToolSchema[];
+    requestedCapabilityOmissions?: Parameters<ProviderTurnLoop["run"]>[0]["requestedCapabilityOmissions"];
     toolExpansionCandidates?: Parameters<ProviderTurnLoop["run"]>[0]["toolExpansionCandidates"];
     providerToolSchemaCatalog?: ProviderToolSchemaCatalog;
     signal?: AbortSignal;
@@ -394,6 +396,7 @@ async function runBasicProviderTurn(
     attachments: callbacks.attachments,
     memoryPromptContext: undefined,
     providerTools: callbacks.providerTools ?? [],
+    requestedCapabilityOmissions: callbacks.requestedCapabilityOmissions,
     toolExpansionCandidates: callbacks.toolExpansionCandidates,
     fallbackText: "",
     toolPlans: callbacks.toolPlans ?? [],
@@ -819,6 +822,7 @@ async function createPostToolNudgeHarness(input: {
 }
 
 async function createRealToolPlanningHarness(input: {
+  catalog?: ProviderToolSchemaCatalog;
   response: ProviderExecutionResult;
   taskExecution?: ProviderTurnLoopOptions["taskExecution"];
 }) {
@@ -862,7 +866,7 @@ async function createRealToolPlanningHarness(input: {
   });
   const executeTool = vi.fn();
   const toolPlanRunner = new ToolPlanRunner({
-    toolCallPlanner: new ToolCallPlanner({ registry: toolRegistry, aliases: buildProviderToolSchemaCatalog({ tools: toolRegistry.list() }).aliases }),
+    toolCallPlanner: new ToolCallPlanner({ registry: toolRegistry, aliases: input.catalog?.aliases ?? buildProviderToolSchemaCatalog({ tools: toolRegistry.list() }).aliases }),
     toolExecutor: {
       getToolDefinition: (name: string) => name === testTool.name ? testTool : undefined,
       executeTool
@@ -6762,4 +6766,31 @@ describe("native exposure admission", () => {
     expect((harness.completeSpy.mock.calls[0]?.[0].tools as unknown[])).toHaveLength(100);
     expect(toolPlans[0]?.status).toBe("unavailable");
   });
+});
+
+
+it("puts bounded requested-capability blockers into the provider prompt", async () => {
+  const harness = await createRealToolPlanningHarness({ response: providerExecution("The report was not saved.") });
+  await runBasicProviderTurn(harness.loop, { requestedCapabilityOmissions: [{ tool: "file.write", reason: "schema_budget" }] });
+  const messages = harness.completeSpy.mock.calls[0]?.[0].messages;
+  expect(JSON.stringify(messages)).toContain('Runtime capability selection:');
+  expect(JSON.stringify(messages)).toContain('schema_budget');
+  expect(harness.executeTool).not.toHaveBeenCalled();
+});
+
+
+it("selects and admits a relevant late tool from the same bounded catalog", async () => {
+  const catalog = buildProviderToolSchemaCatalog({ tools: [
+    ...Array.from({ length: 105 }, (_, i) => ({ ...testTool, name: `unrelated.${i}`, toolsets: ["unrelated"] })), testTool
+  ] });
+  const selection = selectProviderToolsForTurn({ catalog, intent: {
+    labels: [], confidence: 1, nativeIntent: "general", evidence: [], suggestedToolsets: ["test"], suggestedSkills: [], confirmationRequired: false, rationale: "test"
+  } });
+  const harness = await createRealToolPlanningHarness({ catalog, response: providerExecution("", [providerToolCall("late", "{}", "test_tool")]) });
+  harness.executeTool.mockResolvedValue(toolExecutionForTool("late", testTool.name, "read successfully"));
+  const toolPlans: ToolCallPlan[] = [];
+  await runBasicProviderTurn(harness.loop, { providerTools: selection.initialTools, toolPlans });
+  expect(selection.initialTools.map((schema) => schema.function.name)).toEqual(["test_tool"]);
+  expect(harness.executeTool).toHaveBeenCalledOnce();
+  expect(toolPlans[0]?.status).toBe("executed");
 });

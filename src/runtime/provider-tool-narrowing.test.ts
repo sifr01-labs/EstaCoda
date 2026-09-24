@@ -4,7 +4,7 @@ import type { IntentRoute } from "../contracts/intent.js";
 import type { SkillDefinition } from "../contracts/skill.js";
 import type { ToolDefinition, ToolsetName } from "../contracts/tool.js";
 import { buildProviderToolSchemaCatalog } from "../tools/tool-schema.js";
-import { narrowProviderToolsForTurn, selectProviderToolsForTurn } from "./provider-tool-narrowing.js";
+import { describeCapabilitySelection, narrowProviderToolsForTurn, selectProviderToolsForTurn } from "./provider-tool-narrowing.js";
 
 function tool(
   name: string,
@@ -594,4 +594,45 @@ describe("narrowProviderToolsForTurn", () => {
     }))).not.toContain("mcp_postman_updateCollection");
   });
 
+});
+
+
+describe("bounded session capability diagnostics", () => {
+  it("reports availability, eligibility, budget and selection separately without content", () => {
+    const catalog = buildProviderToolSchemaCatalog({ tools: [
+      ...Array.from({ length: 105 }, (_, i) => tool(`file.read${i}`, ["files"])),
+      { ...tool("file.write", ["files"], undefined, "workspace-write"), description: "private-description".repeat(10_000) },
+      tool("restricted", ["files"], undefined, "credential-access"),
+      tool("unrelated", ["test"])
+    ], unavailableTools: [tool("web.search", ["web"])] });
+    const route = { ...intent(1, ["files"], "research"), requestRequirements: { skillReferences: [], fileOutput: { format: "markdown" as const }, issues: [] } };
+    const selection = selectProviderToolsForTurn({ catalog, intent: route, userText: "Save report.md" });
+    const diagnostic = describeCapabilitySelection({ catalog, exposedTools: selection.initialTools, selection, requirements: route.requestRequirements });
+    expect(diagnostic).toMatchObject({ catalogCount: 109, availableCount: 108, schemaEligibleCount: 107, selectedCount: 100,
+      omissionCounts: { schema_budget: 6, temporarily_unavailable: 1, provider_schema_restricted: 1, not_selected: 1 },
+      requestedOmissions: expect.arrayContaining([{ tool: "file.write", reason: "schema_budget" }, { tool: "file.read", reason: "not_in_session" }]) });
+    expect(JSON.stringify(diagnostic)).not.toContain("private-description");
+    expect(JSON.stringify(diagnostic)).not.toContain("inputSchema");
+  });
+
+  it("bounds samples, prioritizes requested omissions and redacts non-ID strings", () => {
+    const catalog = buildProviderToolSchemaCatalog({ tools: [
+      tool("/private/path?token=value", ["test"]),
+      ...Array.from({ length: 100 }, (_, i) => tool(`unused.${i}`, ["test"])), tool("file.write", ["files"])
+    ] });
+    const diagnostic = describeCapabilitySelection({ catalog, exposedTools: [], selection: { policy: "conversation", expansionCandidates: [] }, requirements: { skillReferences: [], fileOutput: { format: "markdown" }, issues: [] } });
+    expect(diagnostic.omissions).toHaveLength(32);
+    expect(diagnostic.omittedDetailsCount).toBe(70);
+    expect(diagnostic.omissions[0]).toEqual({ tool: "file.write", reason: "not_selected" });
+    expect(JSON.stringify(diagnostic)).not.toContain("private/path");
+    expect(diagnostic.omissionCounts.not_selected).toBe(102);
+  });
+
+  it("prioritizes exact requested tools over other relevant schemas before budgeting", () => {
+    const catalog = buildProviderToolSchemaCatalog({ tools: [...Array.from({ length: 100 }, (_, i) => tool(`file.read${i}`, ["files"])), tool("file.write", ["files"], undefined, "workspace-write")] });
+    const selection = selectProviderToolsForTurn({ catalog, intent: { ...intent(1, ["files"]), requestRequirements: { skillReferences: [], fileOutput: { format: "markdown" }, issues: [] } }, userText: "Save report.md" });
+    expect(selection.initialTools).toHaveLength(100);
+    expect(selection.initialTools[0]?.function.name).toBe("file_write");
+    expect(selection.budgetOmittedTools).toHaveLength(1);
+  });
 });

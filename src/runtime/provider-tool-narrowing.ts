@@ -1,3 +1,4 @@
+import type { CapabilitySelectionDiagnostics, CapabilityOmissionReason } from "../contracts/runtime-event.js";
 import type { ChannelAttachment } from "../contracts/channel.js";
 import type { IntentRoute } from "../contracts/intent.js";
 import type { LoadedSkill, SkillDefinition } from "../contracts/skill.js";
@@ -54,6 +55,8 @@ export type ProviderToolSelection = {
   initialTools: OpenAICompatibleToolSchema[];
   expansionCandidates: ProviderToolExpansionCandidate[];
   namedConnectorIds: string[];
+  policy?: string;
+  budgetOmittedTools?: string[];
 };
 
 export type ProviderToolContinuityContext = {
@@ -190,11 +193,14 @@ export function selectProviderToolsForTurn(input: {
     initialTools.push(entry.schema);
   }
 
+  const budget = budgetProviderTools({
+    tools: initialTools,
+    priorityNames: new Set(input.catalog.entries.filter((entry) => exactRequestTools.has(entry.tool.name)).map((entry) => entry.schema.function.name))
+  });
   return {
-    initialTools: budgetProviderTools({
-      tools: initialTools,
-      priorityNames: new Set(input.catalog.entries.filter((entry) => exactRequestTools.has(entry.tool.name)).map((entry) => entry.schema.function.name))
-    }).tools,
+    initialTools: budget.tools,
+    policy: policy.name,
+    budgetOmittedTools: budget.omitted,
     expansionCandidates,
     namedConnectorIds: [...namedConnectors]
       .map((key) => input.configuredConnectors?.find((connector) => connectorKey({ kind: "mcp", id: connector.name }) === key)?.name ??
@@ -349,4 +355,51 @@ function attachmentToolsets(attachments: readonly ChannelAttachment[] | undefine
     }
   }
   return [...toolsets];
+}
+
+
+/** Metadata-only diagnostics. No descriptions, schemas, paths or routing text. */
+export function describeCapabilitySelection(input: {
+  catalog: ProviderToolSchemaCatalog;
+  exposedTools: readonly OpenAICompatibleToolSchema[];
+  selection: Pick<ProviderToolSelection, "policy" | "budgetOmittedTools" | "expansionCandidates">;
+  requirements?: IntentRoute["requestRequirements"];
+  providerSupportsTools?: boolean;
+}): CapabilitySelectionDiagnostics {
+  const exposed = new Set(input.exposedTools.map((schema) => input.catalog.aliases.get(schema.function.name) ?? schema.function.name));
+  const budgetOmitted = new Set((input.selection.budgetOmittedTools ?? []).map((name) => input.catalog.aliases.get(name) ?? name));
+  const evidenceRequired = new Set(input.selection.expansionCandidates.map((candidate) => candidate.toolName));
+  const reasons = new Map<string, CapabilityOmissionReason>();
+  const omissionCounts: Record<CapabilityOmissionReason, number> = {
+    not_selected: 0, schema_budget: 0, temporarily_unavailable: 0,
+    provider_schema_restricted: 0, evidence_required: 0, not_in_session: 0
+  };
+  for (const tool of input.catalog.inventory) {
+    if (exposed.has(tool.name)) continue;
+    const reason: CapabilityOmissionReason = tool.availability === "temporarily_unavailable" ? "temporarily_unavailable"
+      : !tool.schemaEligible || input.providerSupportsTools === false ? "provider_schema_restricted"
+      : budgetOmitted.has(tool.name) ? "schema_budget"
+      : evidenceRequired.has(tool.name) ? "evidence_required" : "not_selected";
+    reasons.set(tool.name, reason);
+    omissionCounts[reason]++;
+  }
+  // Requirements are finite runtime-owned IDs. Missing/forbidden IDs have the
+  // same reason; never consult an unrestricted registry to distinguish them.
+  const requestedOmissions = requiredRequestTools(input.requirements).filter((name) => !exposed.has(name))
+    .map((tool) => ({ tool, reason: reasons.get(tool) ?? "not_in_session" as const }));
+  const requested = new Set(requestedOmissions.map((entry) => entry.tool));
+  const omissions = [...reasons].sort(([a], [b]) => Number(requested.has(b)) - Number(requested.has(a)))
+    .slice(0, 32).map(([tool, reason]) => ({ tool: diagnosticToolId(tool), reason }));
+  return {
+    policy: input.selection.policy ?? "session-default",
+    catalogCount: input.catalog.inventory.length,
+    availableCount: input.catalog.inventory.filter((tool) => tool.availability === "available").length,
+    schemaEligibleCount: input.catalog.entries.length,
+    selectedCount: input.exposedTools.length,
+    omissionCounts, omissions, omittedDetailsCount: Math.max(0, reasons.size - omissions.length), requestedOmissions
+  };
+}
+
+function diagnosticToolId(name: string): string {
+  return /^[a-zA-Z0-9_.:-]{1,128}$/u.test(name) ? name : "[redacted-tool-id]";
 }

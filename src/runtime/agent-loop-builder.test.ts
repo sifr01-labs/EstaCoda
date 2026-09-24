@@ -135,10 +135,12 @@ describe("AgentLoopBuilder", () => {
 
   it("enables routed provider narrowing only for the root foreground loop", async () => {
     const catalogs: unknown[] = [];
+    const preserveExposure: boolean[] = [];
     const harness = await createBuilderHarness({
       factories: {
         agentLoop(options) {
           catalogs.push(options.providerToolSchemaCatalog);
+          preserveExposure.push(options.preserveSessionToolExposure ?? false);
           return { handle: vi.fn() } as never;
         }
       }
@@ -162,7 +164,8 @@ describe("AgentLoopBuilder", () => {
       entries: expect.any(Array),
       aliases: expect.any(Map)
     }));
-    expect(catalogs.slice(1)).toEqual([undefined, undefined]);
+    expect(catalogs.every((catalog) => catalog !== undefined)).toBe(true);
+    expect(preserveExposure).toEqual([false, true, true]);
   });
 
   it("passes only trusted available execution capability facts into completion classification", async () => {

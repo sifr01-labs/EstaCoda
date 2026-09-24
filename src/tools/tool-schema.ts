@@ -121,7 +121,7 @@ function toProviderToolName(name: string, aliases: Map<string, string>): string 
   let index = 2;
 
   while (aliases.has(alias)) {
-    alias = `${base}_${index++}`;
+    alias = `${base.slice(0, 63 - String(index).length)}_${index++}`;
   }
 
   return alias;

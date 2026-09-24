@@ -24,6 +24,23 @@ export type ContextEstimateStage =
   | "provider-tool-feedback"
   | "assembled-prompt";
 
+export type CapabilityOmissionReason =
+  | "not_selected" | "schema_budget" | "temporarily_unavailable"
+  | "provider_schema_restricted" | "evidence_required" | "not_in_session";
+
+export type CapabilitySelectionDiagnostics = {
+  policy: string;
+  catalogCount: number;
+  availableCount: number;
+  schemaEligibleCount: number;
+  selectedCount: number;
+  omissionCounts: Record<CapabilityOmissionReason, number>;
+  /** Bounded sample; counts describe the complete filtered session inventory. */
+  omissions: Array<{ tool: string; reason: CapabilityOmissionReason }>;
+  omittedDetailsCount: number;
+  requestedOmissions: Array<{ tool: string; reason: CapabilityOmissionReason }>;
+};
+
 export type ProviderToolInventoryEvent = {
   kind: "provider-tool-inventory";
   phase: "initial" | "expanded";
@@ -31,6 +48,7 @@ export type ProviderToolInventoryEvent = {
   addedTools: string[];
   expansionReason?: string;
   nativeSchemaTokens: number;
+  selection?: CapabilitySelectionDiagnostics;
   connectors: Array<{
     kind: "mcp";
     id: string;

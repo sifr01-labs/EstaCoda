@@ -35,7 +35,7 @@ import type { ProviderExecutionResult, ProviderRuntimeEvent } from "../providers
 import type { ProviderUsageTaskAttribution } from "../providers/provider-usage-ledger.js";
 import { providerSpendDenialMessage } from "../providers/provider-spend-policy.js";
 import type { ToolCallPlanner } from "../tools/tool-call-planner.js";
-import type { OpenAICompatibleToolSchema, ProviderToolSchemaCatalog } from "../tools/tool-schema.js";
+import { budgetProviderTools, type OpenAICompatibleToolSchema, type ProviderToolSchemaCatalog } from "../tools/tool-schema.js";
 import type { MCPServerSnapshot } from "../mcp/mcp-tools.js";
 import { mcpFailureDiagnostics, mcpRecoveryGuidance } from "../mcp/mcp-diagnostics.js";
 import type { ToolExecutor, ToolExecutionRecord } from "../tools/tool-executor.js";
@@ -87,6 +87,7 @@ import {
 } from "./execution-outcome.js";
 import {
   namedConnectorIdsForRequest,
+  describeCapabilitySelection,
   selectProviderToolsForTurn,
   type ProviderToolSelection
 } from "./provider-tool-narrowing.js";
@@ -177,6 +178,7 @@ export type AgentLoopOptions = {
   projectContext?: ProjectContextSnapshot;
   providerTools?: OpenAICompatibleToolSchema[];
   providerToolSchemaCatalog?: ProviderToolSchemaCatalog;
+  preserveSessionToolExposure?: boolean;
   mcpServerSnapshots?: readonly MCPServerSnapshot[];
   executionCompletionCapabilities?: readonly ExecutionCompletionCapability[];
   soul?: string;
@@ -271,6 +273,7 @@ export class AgentLoop {
   readonly #projectContext: ProjectContextSnapshot | undefined;
   readonly #providerTools: OpenAICompatibleToolSchema[];
   readonly #providerToolSchemaCatalog: ProviderToolSchemaCatalog | undefined;
+  readonly #preserveSessionToolExposure: boolean;
   readonly #mcpServerSnapshots: readonly MCPServerSnapshot[];
   readonly #executionCompletionCapabilities: readonly ExecutionCompletionCapability[];
   readonly #providerTurnLoop: ProviderTurnLoop;
@@ -325,6 +328,7 @@ export class AgentLoop {
     this.#projectContext = options.projectContext;
     this.#providerTools = options.providerTools ?? [];
     this.#providerToolSchemaCatalog = options.providerToolSchemaCatalog;
+    this.#preserveSessionToolExposure = options.preserveSessionToolExposure ?? false;
     this.#mcpServerSnapshots = options.mcpServerSnapshots ?? [];
     this.#executionCompletionCapabilities = options.executionCompletionCapabilities ?? [];
     this.#maxDelegationBatchTasks = options.maxDelegationBatchTasks;
@@ -1015,14 +1019,19 @@ export class AgentLoop {
           conversationContinuationState: continuedConversationState,
           executionCheckpoint: resumedCheckpoint
         })
-      : { initialTools: [], expansionCandidates: [], namedConnectorIds: [] };
+      : { initialTools: [], expansionCandidates: [], namedConnectorIds: [], policy: "provider-tools-unsupported" };
     const narrowedProviderTools = providerToolSelection.initialTools;
     const providerTools = deterministicImageGenerationRan
       ? suppressImageGenerationTools(narrowedProviderTools)
       : narrowedProviderTools;
+    const capabilitySelection = this.#providerToolSchemaCatalog === undefined ? undefined : describeCapabilitySelection({
+      catalog: this.#providerToolSchemaCatalog, exposedTools: providerTools, selection: providerToolSelection,
+      requirements: intent.requestRequirements, providerSupportsTools: this.#model?.supportsTools === true
+    });
     await this.#runRecorder.recordProviderToolInventory({
       kind: "provider-tool-inventory",
       phase: "initial",
+      selection: capabilitySelection,
       tools: providerTools.map((tool) => tool.function.name),
       addedTools: providerTools.map((tool) => tool.function.name),
       nativeSchemaTokens: estimateTextTokensRough(JSON.stringify(providerTools)),
@@ -1063,6 +1072,10 @@ export class AgentLoop {
       memoryPromptContext: turnMemoryPromptContext,
       providerTools,
       toolExpansionCandidates: providerToolSelection.expansionCandidates,
+      providerToolSchemaCatalog: this.#providerToolSchemaCatalog,
+      toolSelectionPolicy: providerToolSelection.policy,
+      budgetOmittedTools: providerToolSelection.budgetOmittedTools,
+      requestedCapabilityOmissions: capabilitySelection?.requestedOmissions,
       connectorInventory: this.#connectorInventory(providerTools),
       preflightCompression,
       fallbackText: fallbackResponse.text,
@@ -1457,9 +1470,12 @@ export class AgentLoop {
     conversationContinuationState?: ConversationContinuationState;
     executionCheckpoint?: ForegroundExecutionCheckpoint;
   }): ProviderToolSelection {
-    if (this.#providerToolSchemaCatalog === undefined || this.#taskExecution !== undefined) {
+    if (this.#providerToolSchemaCatalog === undefined || this.#preserveSessionToolExposure || this.#taskExecution !== undefined) {
+      const budget = budgetProviderTools({ tools: this.#providerToolSchemaCatalog?.entries.map((entry) => entry.schema) ?? this.#providerTools });
       return {
-        initialTools: this.#providerTools,
+        initialTools: budget.tools,
+        policy: "session-default",
+        budgetOmittedTools: budget.omitted,
         expansionCandidates: [],
         namedConnectorIds: []
       };

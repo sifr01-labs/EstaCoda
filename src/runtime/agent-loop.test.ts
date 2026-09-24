@@ -1250,6 +1250,7 @@ describe("AgentLoop provider availability gating", () => {
     expect(await sessionDb.listEvents(sessionId)).toContainEqual(expect.objectContaining({
       kind: "provider-tool-inventory",
       phase: "initial",
+      selection: expect.objectContaining({ policy: "named-connector-operation", selectedCount: 1 }),
       tools: ["collections_get"],
       addedTools: ["collections_get"],
       nativeSchemaTokens: expect.any(Number)

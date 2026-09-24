@@ -1,3 +1,5 @@
+import type { CapabilitySelectionDiagnostics } from "../contracts/runtime-event.js";
+import { describeCapabilitySelection } from "./provider-tool-narrowing.js";
 import type { ChannelAttachment } from "../contracts/channel.js";
 import type { ContextExpansionResult, ProjectContextSnapshot } from "../contracts/context.js";
 import type { IntentRoute } from "../contracts/intent.js";
@@ -54,7 +56,7 @@ import {
   type ProviderRuntimeEvent
 } from "../providers/provider-executor.js";
 import type { ProviderUsageTaskAttribution } from "../providers/provider-usage-ledger.js";
-import { budgetProviderTools, type OpenAICompatibleToolSchema } from "../tools/tool-schema.js";
+import { budgetProviderTools, type OpenAICompatibleToolSchema, type ProviderToolSchemaCatalog } from "../tools/tool-schema.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import type { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import type { RunRecorder } from "./run-recorder.js";
@@ -265,7 +267,11 @@ export class ProviderTurnLoop {
     attachments: ChannelAttachment[] | undefined;
     memoryPromptContext: MemoryPromptContext | undefined;
     providerTools: OpenAICompatibleToolSchema[];
+    requestedCapabilityOmissions?: CapabilitySelectionDiagnostics["requestedOmissions"];
     toolExpansionCandidates?: readonly ProviderToolExpansionCandidate[];
+    providerToolSchemaCatalog?: ProviderToolSchemaCatalog;
+    toolSelectionPolicy?: string;
+    budgetOmittedTools?: string[];
     connectorInventory?: ProviderToolInventoryEvent["connectors"];
     preflightCompression?: PromptSemanticCompressionReport;
     conversationContinuationState?: ConversationContinuationState;
@@ -760,14 +766,19 @@ export class ProviderTurnLoop {
           .filter((candidate) => candidate.source === "active-browser")
           .filter((candidate) => !activeProviderTools.some((tool) => tool.function.name === candidate.schema.function.name));
         if (additions.length > 0) {
-          activeProviderTools = budgetProviderTools({
+          const expandedBudget = budgetProviderTools({
             tools: [...activeProviderTools, ...additions.map((candidate) => candidate.schema)],
             priorityNames: new Set(activeProviderTools.map((tool) => tool.function.name))
-          }).tools;
+          });
+          activeProviderTools = expandedBudget.tools;
           toolExpansionUsed = true;
           await this.#runRecorder.recordProviderToolInventory({
             kind: "provider-tool-inventory",
             phase: "expanded",
+            selection: input.providerToolSchemaCatalog === undefined ? undefined : describeCapabilitySelection({
+              catalog: input.providerToolSchemaCatalog, exposedTools: activeProviderTools, requirements: input.intent.requestRequirements,
+              selection: { policy: input.toolSelectionPolicy, budgetOmittedTools: [...(input.budgetOmittedTools ?? []), ...expandedBudget.omitted], expansionCandidates: [...(input.toolExpansionCandidates ?? [])] }
+            }),
             tools: activeProviderTools.map((tool) => tool.function.name),
             addedTools: additions.filter((candidate) => activeProviderTools.includes(candidate.schema)).map((candidate) => candidate.schema.function.name),
             expansionReason: `browser:${browserObservation.visualEscalationReason}`,
@@ -1121,6 +1132,7 @@ export class ProviderTurnLoop {
     attachments: ChannelAttachment[] | undefined;
     memoryPromptContext: MemoryPromptContext | undefined;
     providerTools: OpenAICompatibleToolSchema[];
+    requestedCapabilityOmissions?: CapabilitySelectionDiagnostics["requestedOmissions"];
     preflightCompression?: PromptSemanticCompressionReport;
     conversationContinuationState?: ConversationContinuationState;
     fallbackText: string;
@@ -1170,6 +1182,9 @@ export class ProviderTurnLoop {
       ),
       browserState
     });
+    if ((input.requestedCapabilityOmissions?.length ?? 0) > 0) {
+      prompt.messages.push({ role: "user", content: `Runtime capability selection: these requested capabilities are not exposed: ${JSON.stringify(input.requestedCapabilityOmissions)}. Use exposed alternatives when they satisfy the request; report requirements you cannot fulfill and do not claim unexposed tools executed. Exposure never grants approval.` });
+    }
     if (input.reasoningOnlyPrefill === true) {
       prompt.messages.push(reasoningOnlyPrefillMessage());
     }
@@ -1261,6 +1276,7 @@ export class ProviderTurnLoop {
     attachments: ChannelAttachment[] | undefined;
     memoryPromptContext: MemoryPromptContext | undefined;
     providerTools: OpenAICompatibleToolSchema[];
+    requestedCapabilityOmissions?: CapabilitySelectionDiagnostics["requestedOmissions"];
     providerExecution: ProviderExecutionResult | undefined;
     toolPlans: ToolCallPlan[];
     toolFeedbackLedger: TurnToolFeedbackLedger;
@@ -1368,6 +1384,9 @@ export class ProviderTurnLoop {
     }
     if (input.toolLoopProgressNudge === true) {
       prompt.messages.push({ role: "user", content: EXECUTION_SUPERVISION_PROMPTS.toolLoopProgress });
+    }
+    if ((input.requestedCapabilityOmissions?.length ?? 0) > 0) {
+      prompt.messages.push({ role: "user", content: `Runtime capability selection: these requested capabilities are not exposed: ${JSON.stringify(input.requestedCapabilityOmissions)}. Use exposed alternatives when they satisfy the request; report requirements you cannot fulfill and do not claim unexposed tools executed. Exposure never grants approval.` });
     }
     if (input.reasoningOnlyPrefill === true) {
       prompt.messages.push(reasoningOnlyPrefillMessage());
