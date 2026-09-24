@@ -93,7 +93,10 @@ describe("delegation MVP security audit checklist", () => {
         run: async () => ({ ok: true, content: definition.name })
       });
     }
+    registry.register({ ...tool("hidden.unavailable", "read-only-local", ["files"]),
+      isAvailable: () => false, run: async () => ({ ok: true, content: "hidden" }) });
     applyChildToolAccessResult(registry, result);
+    expect(registry.get("hidden.unavailable")).toBeUndefined();
     expect(registry.get("terminal.run")).toBeUndefined();
     expect(registry.get("session_search")).toBeUndefined();
     expect(registry.get("file.grep")).toBeUndefined();

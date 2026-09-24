@@ -1,7 +1,11 @@
+import { CHARS_PER_TOKEN, estimateTextTokensRough } from "../prompt/token-estimator.js";
 import type { ToolDefinition, ToolRiskClass } from "../contracts/tool.js";
 
 export type ProviderToolSchemaCatalog = {
+  /** Bounded default exposure for callers without turn-specific selection. */
   tools: OpenAICompatibleToolSchema[];
+  /** Complete metadata after session policy filtering; never contains schemas. */
+  inventory: SessionToolMetadata[];
   aliases: Map<string, string>;
   entries: ProviderToolSchemaCatalogEntry[];
 };
@@ -20,7 +24,42 @@ export type OpenAICompatibleToolSchema = {
   };
 };
 
-const DEFAULT_MAX_PROVIDER_TOOLS = 100;
+export type SessionToolMetadata = Pick<ToolDefinition, "name" | "description" | "toolsets"> & {
+  availability: "available" | "temporarily_unavailable";
+  schemaEligible: boolean;
+};
+
+export const MAX_PROVIDER_TOOLS = 100;
+// Rough serialized-schema tokens, using the same estimator as prompt accounting.
+export const MAX_PROVIDER_SCHEMA_TOKENS = 24_000;
+
+export function budgetProviderTools(input: {
+  tools: readonly OpenAICompatibleToolSchema[];
+  priorityNames?: ReadonlySet<string>;
+  maxTools?: number;
+  maxSchemaTokens?: number;
+}): { tools: OpenAICompatibleToolSchema[]; omitted: string[]; schemaTokens: number } {
+  const maxTools = Math.max(0, Math.min(MAX_PROVIDER_TOOLS, input.maxTools ?? MAX_PROVIDER_TOOLS));
+  const maxTokens = Math.max(0, Math.min(MAX_PROVIDER_SCHEMA_TOKENS, input.maxSchemaTokens ?? MAX_PROVIDER_SCHEMA_TOKENS));
+  const candidates = [...input.tools].sort((a, b) =>
+    Number(input.priorityNames?.has(b.function.name) ?? false) - Number(input.priorityNames?.has(a.function.name) ?? false));
+  const tools: OpenAICompatibleToolSchema[] = [];
+  const omitted: string[] = [];
+  const seen = new Set<string>();
+  let chars = 2; // JSON array framing, including comma separators below.
+  for (const schema of candidates) {
+    if (seen.has(schema.function.name)) continue;
+    seen.add(schema.function.name);
+    const nextChars = chars + JSON.stringify(schema).length + (tools.length > 0 ? 1 : 0);
+    if (tools.length >= maxTools || Math.ceil(nextChars / CHARS_PER_TOKEN) > maxTokens) {
+      omitted.push(schema.function.name);
+      continue;
+    }
+    tools.push(schema);
+    chars = nextChars;
+  }
+  return { tools, omitted, schemaTokens: estimateTextTokensRough(JSON.stringify(tools)) };
+}
 const BLOCKED_PROVIDER_RISKS = new Set<ToolRiskClass>([
   "credential-access",
   "destructive-local",
@@ -30,12 +69,11 @@ const BLOCKED_PROVIDER_RISKS = new Set<ToolRiskClass>([
 
 export function buildProviderToolSchemaCatalog(input: {
   tools: ToolDefinition[];
+  unavailableTools?: ToolDefinition[];
   maxTools?: number;
 }): ProviderToolSchemaCatalog {
   const aliases = new Map<string, string>();
-  const selected = input.tools
-    .filter((tool) => !BLOCKED_PROVIDER_RISKS.has(tool.riskClass))
-    .slice(0, input.maxTools ?? DEFAULT_MAX_PROVIDER_TOOLS);
+  const selected = input.tools.filter((tool) => !BLOCKED_PROVIDER_RISKS.has(tool.riskClass));
   const entries = selected.map((tool) => {
     const alias = toProviderToolName(tool.name, aliases);
 
@@ -57,7 +95,11 @@ export function buildProviderToolSchemaCatalog(input: {
   return {
     aliases,
     entries,
-    tools: entries.map((entry) => entry.schema)
+    inventory: [
+      ...input.tools.map((tool) => metadata(tool, "available")),
+      ...(input.unavailableTools ?? []).map((tool) => metadata(tool, "temporarily_unavailable"))
+    ],
+    tools: budgetProviderTools({ tools: entries.map((entry) => entry.schema), maxTools: input.maxTools }).tools
   };
 }
 
@@ -86,4 +128,9 @@ function normalizeSchema(schema: unknown): unknown {
   }
 
   return schema;
+}
+
+function metadata(tool: ToolDefinition, availability: SessionToolMetadata["availability"]): SessionToolMetadata {
+  return { name: tool.name, description: tool.description, toolsets: [...tool.toolsets],
+    availability, schemaEligible: !BLOCKED_PROVIDER_RISKS.has(tool.riskClass) };
 }

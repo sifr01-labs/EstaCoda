@@ -4,9 +4,10 @@ import type { LoadedSkill, SkillDefinition } from "../contracts/skill.js";
 import type { ToolDefinition, ToolsetName } from "../contracts/tool.js";
 import type { MCPServerSnapshot } from "../mcp/mcp-tools.js";
 import { requiredRequestTools } from "./request-requirements.js";
-import type {
-  OpenAICompatibleToolSchema,
-  ProviderToolSchemaCatalog
+import {
+  budgetProviderTools,
+  type OpenAICompatibleToolSchema,
+  type ProviderToolSchemaCatalog
 } from "../tools/tool-schema.js";
 import {
   isActionableToolRequest,
@@ -190,7 +191,10 @@ export function selectProviderToolsForTurn(input: {
   }
 
   return {
-    initialTools,
+    initialTools: budgetProviderTools({
+      tools: initialTools,
+      priorityNames: new Set(input.catalog.entries.filter((entry) => exactRequestTools.has(entry.tool.name)).map((entry) => entry.schema.function.name))
+    }).tools,
     expansionCandidates,
     namedConnectorIds: [...namedConnectors]
       .map((key) => input.configuredConnectors?.find((connector) => connectorKey({ kind: "mcp", id: connector.name }) === key)?.name ??

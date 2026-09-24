@@ -163,8 +163,9 @@ export function resolveChildToolAccess(input: ResolveChildToolAccessInput): Chil
 }
 
 export function applyChildToolAccessResult(registry: ToolRegistry, result: ChildToolAccessResult): void {
-  for (const tool of result.strippedTools) {
-    registry.unregister(tool.name);
+  const allowed = new Set(result.effectiveAllowedTools);
+  for (const tool of registry.list()) {
+    if (!allowed.has(tool.name)) registry.unregister(tool.name);
   }
 }
 

@@ -602,7 +602,7 @@ export class AgentLoopBuilder {
       providerToolAvailability = await toolRegistry.snapshot();
       substrate.setAvailableToolsets?.(availableToolsetsFromTools(providerToolAvailability.available));
     }
-    applyDisabledToolsets(toolRegistry, providerToolAvailability.available, input.disabledToolsets);
+    applyDisabledToolsets(toolRegistry, toolRegistry.list(), input.disabledToolsets);
     if (input.disabledToolsets !== undefined && input.disabledToolsets.length > 0) {
       providerToolAvailability = await toolRegistry.snapshot();
       substrate.setAvailableToolsets?.(availableToolsetsFromTools(providerToolAvailability.available));
@@ -627,7 +627,8 @@ export class AgentLoopBuilder {
     }
     delegationVisibleTools = providerToolAvailability.available;
     const providerToolSchemaCatalog = buildProviderToolSchemaCatalog({
-      tools: providerToolAvailability.available
+      tools: providerToolAvailability.available,
+      unavailableTools: providerToolAvailability.unavailable
     });
     const executionCompletionCapabilities = providerToolAvailability.available.flatMap((definition) => {
       const registered = toolRegistry.get(definition.name);

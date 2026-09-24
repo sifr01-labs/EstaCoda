@@ -1152,7 +1152,7 @@ async function buildRuntime(options: RuntimeOptions, rollback: ResourceCleanup):
           const allowed = new Set(options.enabledToolsets);
           const strippedTools: Array<{ name: string; reasons: string[] }> = [];
           const effectiveAllowedTools: string[] = [];
-          for (const tool of availableTools) {
+          for (const tool of registry.list()) {
             if (tool.toolsets.some((toolset) => allowed.has(toolset))) {
               effectiveAllowedTools.push(tool.name);
             } else {

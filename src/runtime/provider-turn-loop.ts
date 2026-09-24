@@ -54,7 +54,7 @@ import {
   type ProviderRuntimeEvent
 } from "../providers/provider-executor.js";
 import type { ProviderUsageTaskAttribution } from "../providers/provider-usage-ledger.js";
-import type { OpenAICompatibleToolSchema } from "../tools/tool-schema.js";
+import { budgetProviderTools, type OpenAICompatibleToolSchema } from "../tools/tool-schema.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import type { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import type { RunRecorder } from "./run-recorder.js";
@@ -333,7 +333,7 @@ export class ProviderTurnLoop {
     let toolFeedbackLedger = createTurnToolFeedbackLedger();
     let providerCallsThisTurn = 0;
     let providerTokensThisTurn = 0;
-    let activeProviderTools = [...input.providerTools];
+    let activeProviderTools = budgetProviderTools({ tools: input.providerTools }).tools;
     let toolExpansionUsed = false;
     const workingSessionId = this.#sessionRuntimeContext?.currentSessionId() ?? this.#sessionId;
     const foregroundTurnId = runtimeForegroundTurnId(
@@ -759,13 +759,16 @@ export class ProviderTurnLoop {
           .filter((candidate) => candidate.source === "active-browser")
           .filter((candidate) => !activeProviderTools.some((tool) => tool.function.name === candidate.schema.function.name));
         if (additions.length > 0) {
-          activeProviderTools = [...activeProviderTools, ...additions.map((candidate) => candidate.schema)];
+          activeProviderTools = budgetProviderTools({
+            tools: [...activeProviderTools, ...additions.map((candidate) => candidate.schema)],
+            priorityNames: new Set(activeProviderTools.map((tool) => tool.function.name))
+          }).tools;
           toolExpansionUsed = true;
           await this.#runRecorder.recordProviderToolInventory({
             kind: "provider-tool-inventory",
             phase: "expanded",
             tools: activeProviderTools.map((tool) => tool.function.name),
-            addedTools: additions.map((candidate) => candidate.schema.function.name),
+            addedTools: additions.filter((candidate) => activeProviderTools.includes(candidate.schema)).map((candidate) => candidate.schema.function.name),
             expansionReason: `browser:${browserObservation.visualEscalationReason}`,
             nativeSchemaTokens: estimateTextTokensRough(JSON.stringify(activeProviderTools)),
             connectors: input.connectorInventory ?? []

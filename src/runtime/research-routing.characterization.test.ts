@@ -9,8 +9,7 @@ import { IntentRouter } from "./intent-router.js";
 import { deriveExecutionCompletionFloor, deriveExecutionFinalOutcome } from "./execution-outcome.js";
 import { selectProviderToolsForTurn } from "./provider-tool-narrowing.js";
 
-// PR 0 cases migrated to PR 1 desired behavior. The catalog-cap case remains
-// an explicit characterization owned by PR 2.
+// PR 0 cases migrated to PR 1 and PR 2 desired behavior.
 // Synthetic requests preserve the failure shape without embedding a private chat.
 const registry = new SkillRegistry();
 for (const name of ["researcher", "research-discovery"]) {
@@ -44,7 +43,7 @@ function inspect(prompt: string) {
   return { intent, selection, names: selection.initialTools.map((schema) => catalog.aliases.get(schema.function.name)) };
 }
 
-describe("research routing regression (PR 1, remaining PR 2 catalog gap)", () => {
+describe("research routing regression (PR 1 and PR 2)", () => {
   it("selects report discovery and exposes explicit research delegation (PR 1)", () => {
     const { intent, names, selection } = inspect("Do deep research on the latest battery recycling methods and prepare a report. Use 3 subagents");
     expect(intent.taskClass).toBe("research");
@@ -88,15 +87,15 @@ describe("research routing regression (PR 1, remaining PR 2 catalog gap)", () =>
     expect(inspect("ابحث بعمق عن أحدث تقنيات البطاريات واستخدم ثلاثة وكلاء فرعيين").intent.taskClass).toBe("research");
   });
 
-  it("drops a relevant tool after 100 catalog entries before routing can select it (PR 2)", () => {
-    const tools = [...Array.from({ length: 100 }, (_, index) => tool(`read.${index}`, ["files"])), definitions[3]!];
+  it("selects a relevant tool after 100 catalog entries (PR 2)", () => {
+    const tools = [...Array.from({ length: 100 }, (_, index) => tool(`read.${index}`, ["test"])), definitions[3]!];
     const capped = buildProviderToolSchemaCatalog({ tools });
     const intent = router.route("/researcher research battery recycling");
     const selection = selectProviderToolsForTurn({ catalog: capped, intent, selectedSkill: intent.primarySkill });
     expect(tools).toHaveLength(101);
-    expect(capped.entries).toHaveLength(100);
-    expect(capped.entries.some(({ tool }) => tool.name === "delegate_task")).toBe(false);
-    expect(selection.initialTools.some((schema) => schema.function.name === "delegate_task")).toBe(false);
+    expect(capped.entries).toHaveLength(101);
+    expect(capped.entries.some(({ tool }) => tool.name === "delegate_task")).toBe(true);
+    expect(selection.initialTools.some((schema) => schema.function.name === "delegate_task")).toBe(true);
   });
 });
 

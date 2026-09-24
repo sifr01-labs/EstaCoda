@@ -882,7 +882,7 @@ describe("AgentLoopBuilder", () => {
       ...registeredTool("mcp.unavailable", ["research"]),
       isAvailable: async () => false
     };
-    const harness = await createBuilderHarness({ mcpTools: [writeTool, readTool, unavailableTool] });
+    const harness = await createBuilderHarness({ mcpTools: [writeTool, readTool, unavailableTool, { ...registeredTool("mcp.disabled-unavailable", ["shell-write"]), isAvailable: async () => false }] });
     let delegationVisibleTools: (() => readonly ToolDefinition[]) | undefined;
 
     const built = await harness.build("session-a", {
@@ -894,6 +894,7 @@ describe("AgentLoopBuilder", () => {
     });
 
     expect(built.toolRegistry.get("mcp.write")).toBeUndefined();
+    expect(built.toolRegistry.get("mcp.disabled-unavailable")).toBeUndefined();
     expect(built.toolRegistry.get("mcp.read")).toBe(readTool);
     expect(built.providerTools.map((tool) => tool.function.name)).not.toContain("mcp.write");
     expect(delegationVisibleTools?.().map((tool) => tool.name)).not.toContain("mcp.write");
