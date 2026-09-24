@@ -49,6 +49,11 @@ export type SkillToolsOptions = {
 };
 
 export function createSkillTools(options: SkillToolsOptions): readonly RegisteredTool[] {
+  // Operator management keeps the profile registry; model inspection uses the
+  // session registry, including its readiness-adjusted skill definitions.
+  const inspectionRegistry = options.visibleRegistry ?? options.registry;
+  const visibleRecord = (record: { skillName: string }) => options.visibleRegistry === undefined ||
+    inspectionRegistry.get(record.skillName) !== undefined;
   const proposalService = options.skillEvolutionStore !== undefined
     ? new SkillProposalService({
         registry: options.registry,
@@ -58,7 +63,7 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
       })
     : undefined;
   const runSkillRead = async (input: SkillReadInput): Promise<ToolResult> => {
-    const skill = getSkill(options.registry, input.name);
+    const skill = getSkill(inspectionRegistry, input.name);
     if (!skill.ok) {
       return skill;
     }
@@ -66,7 +71,7 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
     return readSkillContent(foundSkill, input, options.skillConfig?.[foundSkill.name]);
   };
   const runSkillView = async (input: SkillReadInput): Promise<ToolResult> => {
-    const skill = getSkill(options.registry, input.name);
+    const skill = getSkill(inspectionRegistry, input.name);
     if (!skill.ok) {
       return skill;
     }
@@ -93,7 +98,7 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
       };
     }
 
-    const skill = getSkill(options.registry, input.name);
+    const skill = getSkill(inspectionRegistry, input.name);
     if (!skill.ok) {
       return skill;
     }
@@ -127,7 +132,7 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
       maxResultSizeChars: 12_000,
       isAvailable: () => true,
       run: async (input: { category?: string }) => {
-        const catalog = (options.visibleRegistry ?? options.registry).catalog()
+        const catalog = inspectionRegistry.catalog()
           .filter((skill) => input.category === undefined || skill.category === input.category);
 
         return {
@@ -217,7 +222,7 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
       maxResultSizeChars: 16_000,
       isAvailable: () => true,
       run: async (input: { name?: string }) => {
-        const skill = getSkill(options.registry, input.name);
+        const skill = getSkill(inspectionRegistry, input.name);
         if (!skill.ok) {
           return skill;
         }
@@ -251,7 +256,7 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
       maxResultSizeChars: 12_000,
       isAvailable: () => true,
       run: async (input: { name?: string }) => {
-        const skill = getSkill(options.registry, input.name);
+        const skill = getSkill(inspectionRegistry, input.name);
         if (!skill.ok) {
           return skill;
         }
@@ -284,9 +289,13 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
         if (options.skillEvolutionStore === undefined) {
           return errorResult("Skill usage store is not configured.");
         }
+        if (options.visibleRegistry !== undefined && isNonEmptyString(input.name)) {
+          const skill = getSkill(inspectionRegistry, input.name);
+          if (!skill.ok) return skill;
+        }
         const usage = isNonEmptyString(input.name)
           ? await options.skillEvolutionStore.getUsage(input.name)
-          : await options.skillEvolutionStore.usage();
+          : (await options.skillEvolutionStore.usage()).filter(visibleRecord);
         return {
           ok: true,
           content: JSON.stringify(usage ?? null, null, 2),
@@ -462,10 +471,14 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
         if (proposalService === undefined) {
           return errorResult("Skill evolution store is not configured.");
         }
-        const proposals = await proposalService.listProposals({
+        if (options.visibleRegistry !== undefined && isNonEmptyString(input.name)) {
+          const skill = getSkill(inspectionRegistry, input.name);
+          if (!skill.ok) return skill;
+        }
+        const proposals = (await proposalService.listProposals({
           skillName: input.name,
           status: input.status
-        });
+        })).filter(visibleRecord);
         return {
           ok: true,
           content: proposals.length === 0 ? "No skill patch proposals found." : JSON.stringify(proposals, null, 2),
@@ -494,10 +507,14 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
         if (proposalService === undefined) {
           return errorResult("Skill evolution store is not configured.");
         }
-        const proposals = await proposalService.listProposals({
+        if (options.visibleRegistry !== undefined && isNonEmptyString(input.name)) {
+          const skill = getSkill(inspectionRegistry, input.name);
+          if (!skill.ok) return skill;
+        }
+        const proposals = (await proposalService.listProposals({
           skillName: input.name,
           status: input.status ?? "proposed"
-        });
+        })).filter(visibleRecord);
         const reviews = [];
         for (const proposal of proposals) {
           reviews.push(await proposalService.reviewProposal(proposal));
@@ -535,7 +552,7 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
           return errorResult("skill.review_proposal requires proposal_id");
         }
         const proposal = await proposalService.findProposal(proposalId);
-        if (proposal === undefined) {
+        if (proposal === undefined || !visibleRecord(proposal)) {
           return errorResult(`Skill patch proposal not found: ${proposalId}`);
         }
         const review = await proposalService.reviewProposal(proposal);
@@ -1232,7 +1249,7 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
       maxResultSizeChars: 4000,
       isAvailable: () => true,
       run: async (input: { name?: string; destination?: string }) => {
-        const skill = getSkill(options.registry, input.name);
+        const skill = getSkill(inspectionRegistry, input.name);
         if (!skill.ok) {
           return skill;
         }

@@ -12,7 +12,7 @@ import {
   SKILL_SEARCH_MAX_RESULTS
 } from "../skills/skill-limits.js";
 import { SkillRegistry } from "../skills/skill-registry.js";
-import type { SkillEvolutionStore } from "../skills/skill-evolution.js";
+import { SkillEvolutionStore } from "../skills/skill-evolution.js";
 import { RuntimeRouter } from "../runtime/runtime-router.js";
 import type { IntentRouter } from "../runtime/intent-router.js";
 import { createSkillTools } from "./skill-tools.js";
@@ -508,8 +508,9 @@ async function skillToolHarness(
     files?: Record<string, string | Buffer>;
     skillConfig?: Record<string, Record<string, unknown>>;
     skillEvolutionStore?: SkillEvolutionStore;
+    visibleNames?: string[];
   } = {}
-): Promise<{ run(toolName: "skill.read" | "skill.search" | "skill.view", input: Record<string, unknown>): Promise<ToolResult> }> {
+): Promise<{ run(toolName: string, input: Record<string, unknown>): Promise<ToolResult> }> {
   const root = await mkdtemp(join(tmpdir(), "skill-tools-test-"));
   const registry = new SkillRegistry();
   for (const skill of skills) {
@@ -535,8 +536,14 @@ async function skillToolHarness(
       registry.register(skill);
     }
   }
+  const visibleRegistry = options.visibleNames === undefined ? undefined : new SkillRegistry();
+  for (const name of options.visibleNames ?? []) {
+    const skill = registry.get(name);
+    if (skill !== undefined) visibleRegistry!.register(skill);
+  }
   const tools = createSkillTools({
     registry,
+    visibleRegistry,
     localSkillsRoot: root,
     skillConfig: options.skillConfig,
     skillEvolutionStore: options.skillEvolutionStore
@@ -638,3 +645,44 @@ function routerForSkill(
 function isLoadedSkill(skill: LoadedSkill | SkillDefinition): skill is LoadedSkill {
   return "instructions" in skill && "sourcePath" in skill;
 }
+
+
+describe("session skill inspection visibility", () => {
+  it.each(["skill.read", "skill.view", "skill.inspect", "skill.search", "skill.eval", "skill.export", "skill.usage", "skill.list_proposals", "skill.review_proposals"])("%s cannot distinguish a hidden skill from an unknown skill", async (toolName) => {
+    const root = await mkdtemp(join(tmpdir(), "skill-visibility-"));
+    const store = new SkillEvolutionStore({ usagePath: join(root, "usage.json"), evolutionRoot: join(root, "evolution") });
+    const viewed = vi.spyOn(store, "recordSkillViewed");
+    const usage = vi.spyOn(store, "getUsage");
+    const input = { name: "hidden", query: "secret", resource: "references/secret.md" };
+    const hidden = await skillToolHarness([loadedSkill({ name: "hidden", instructions: "private instructions" })], { visibleNames: [], skillEvolutionStore: store, files: { "references/secret.md": "private file" } });
+    const absent = await skillToolHarness([], { visibleNames: [], skillEvolutionStore: store });
+    const result = await hidden.run(toolName, input);
+    expect(result).toEqual(await absent.run(toolName, input));
+    expect(result.ok).toBe(false);
+    expect(JSON.stringify(result)).not.toContain("private");
+    expect(viewed).not.toHaveBeenCalled();
+    expect(usage).not.toHaveBeenCalled();
+  });
+
+  it("filters bulk usage and proposal reviews while preserving operator inspection", async () => {
+    const root = await mkdtemp(join(tmpdir(), "skill-visibility-"));
+    const store = new SkillEvolutionStore({ usagePath: join(root, "usage.json"), evolutionRoot: join(root, "evolution") });
+    for (const name of ["visible", "hidden"]) await store.recordSkillViewed({ skillName: name });
+    const skills = [loadedSkill({ name: "visible" }), loadedSkill({ name: "hidden" })];
+    const scoped = await skillToolHarness(skills, { visibleNames: ["visible"], skillEvolutionStore: store });
+    const proposal = await store.proposePatch({ skillName: "hidden", reason: "private proposal", patch: { type: "text_patch", oldString: "old", newString: "new" } });
+    for (const name of ["skill.list_proposals", "skill.review_proposals"]) {
+      const result = await scoped.run(name, {});
+      expect(JSON.stringify(result)).not.toContain("hidden");
+      expect(JSON.stringify(result)).not.toContain("private proposal");
+    }
+    expect(await scoped.run("skill.review_proposal", { proposal_id: proposal.id })).toMatchObject({ ok: false, content: `Skill patch proposal not found: ${proposal.id}` });
+    const usage = await scoped.run("skill.usage", {});
+    expect(usage.metadata?.usage).toEqual([expect.objectContaining({ skillName: "visible" })]);
+    const list = await scoped.run("skill.list", {});
+    expect(JSON.stringify(list)).not.toContain("hidden");
+    expect((await scoped.run("skill.read", { name: "visible" })).ok).toBe(true);
+    const operator = await skillToolHarness(skills, { skillEvolutionStore: store });
+    expect((await operator.run("skill.read", { name: "hidden" })).ok).toBe(true);
+  });
+});

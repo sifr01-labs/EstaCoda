@@ -444,6 +444,10 @@ describe("AgentLoopBuilder", () => {
     expect(strategyInput).toBeDefined();
     expect(strategyInput?.skillRegistry).toBe(sourceSkills);
     expect(built.sessionSkillCatalog.map((entry) => entry.name)).toEqual(["visible-skill"]);
+    for (const name of ["skill.read", "skill.search", "skill.view", "skill.inspect", "skill.eval"]) {
+      const inspection = built.toolRegistry.get(name)!;
+      expect(await inspection.run({ name: "hidden-skill", query: "instructions" })).toMatchObject({ ok: false, content: "Skill not found: hidden-skill" });
+    }
   });
 
   it("default skill visibility can be re-evaluated against available tools", async () => {
