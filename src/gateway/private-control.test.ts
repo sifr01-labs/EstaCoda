@@ -67,3 +67,15 @@ it.skipIf(process.platform === 'win32')('requires an enforcing host for conversa
   for(const override of [{securityMode:'off'},{interrupt:'yes'},{targetGeneration:undefined},{method:'inspect'}])expect(()=>validatePrivateControlRequest({...input.request,...override})).toThrow('Invalid');
  }finally{await server.close();await rm(directory,{recursive:true,force:true});}
 });
+
+it.skipIf(process.platform==='win32')('reports authenticated build identity only on an opt-in probe',async()=>{
+ const {probePrivateControl,probePrivateRuntimeBuild}=await import('./private-control.js');
+ const directory=await mkdtemp(join(tmpdir(),'ipc-build-'));await chmod(directory,0o700);
+ const input={directory,profileId:'p',version:'test'},digest='a'.repeat(64);
+ const server=await startPrivateControl({...input,instanceId:'build-test',runtimeBuild:digest,handle:async()=>({})});
+ try{
+  expect(await probePrivateControl(input)).toEqual({instanceId:'build-test',targetGeneration:false});
+  expect(await probePrivateRuntimeBuild(input)).toBe(digest);
+  await expect(probePrivateRuntimeBuild({...input,profileId:'other'})).rejects.toThrow();
+ }finally{await server.close();await rm(directory,{recursive:true,force:true});}
+});

@@ -170,6 +170,14 @@ estacoda python-env status <id> --group <name>
 
 `reset` deletes the generic capability environment path. It is destructive and requires confirmation.
 
+### DDGS and Desktop installation
+
+DDGS 9.14.4 requires Python 3.10 or newer. Its registered minimum version is checked before environment creation or package downloads. On macOS, the resolver also checks explicit Homebrew interpreter locations, including versioned Python 3.10–3.14 executables, without expanding Desktop’s PATH for other commands. An incompatible system Python is skipped. Installing Python itself remains an operator action.
+
+Repair or upgrade creates a fresh managed environment rather than changing a virtualenv’s base interpreter in place. The previous directory is retained beside it as `<capability>.previous-<id>` for inspection; these backups are not automatically removed and consume disk space. Runtime and skill execution still never repair or install implicitly.
+
+Desktop distinguishes initial setup from repair, records fixed failure categories in its profile-local operation receipts, and shows preparing/installing/verifying progress. Installer output, private paths and credentials are not copied into receipts. Failed receipts remain inspectable after a bridge restart; uncertain receipts only allow status checks. Opening the download review hides the redundant Install button. A compatible-Python failure explains the requirement instead of asking the user to retry blindly. Software installation remains separate from reviewing search settings and testing network search.
+
 ### Edge TTS capability
 
 Edge TTS is registered as the `edge-tts` capability. It installs the pinned Python package `edge-tts` and verifies `import edge_tts`.

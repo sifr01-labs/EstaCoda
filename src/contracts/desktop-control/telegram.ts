@@ -14,9 +14,11 @@ export function validateTelegramSettings(settings:TelegramSettings):void{
 
 export type TelegramVerify={windowId:string;generation:number;candidateId?:string};
 export type TelegramVerification={state:'passed'|'failed';reason:'none'|'credential_missing'|'invalid_credential'|'invalid_response'|'unavailable'|'cancelled';verifiedAt:number|null;botUsername:string|null;latencyMs:number};
-export type ConnectionOperation={operationId:string;action:string;state:'completed'|'failed'|'uncertain'|'unknown'};
-export type GatewayAction='install'|'start'|'stop'|'restart';
-export type GatewayDiagnostics={queuedTurns:number|null;uncertainTurns:number|null;recentDeliveryFailures:number|null;service:'installed'|'absent'|'unknown';manager:'launchd'|'systemd-user'|'systemd-system'|'none';runtime:'running'|'stopped'|'disconnected';polling:'unknown'|'starting'|'healthy'|'degraded'|'stopped';observedAt:number|null};
+export const CONNECTION_OPERATION_ISSUES = ['python_required','venv_failed','packages_failed','verification_failed','permission_denied','disk_insufficient','installation_failed','gateway_not_stopped','runtime_unavailable','activation_failed'] as const;
+export type ConnectionOperationIssue=typeof CONNECTION_OPERATION_ISSUES[number];
+export type ConnectionOperation={phase?:'preparing'|'installing'|'verifying';issue?:ConnectionOperationIssue;operationId:string;action:string;state:'completed'|'failed'|'uncertain'|'unknown'};
+export type GatewayAction='install'|'start'|'stop'|'restart'|'update';
+export type GatewayDiagnostics={build?:'current'|'different'|'unknown';updateAvailable?:boolean;queuedTurns:number|null;uncertainTurns:number|null;recentDeliveryFailures:number|null;service:'installed'|'absent'|'unknown';manager:'launchd'|'systemd-user'|'systemd-system'|'none';runtime:'running'|'stopped'|'disconnected';polling:'unknown'|'starting'|'healthy'|'degraded'|'stopped';observedAt:number|null};
 
 export type TelegramOperationAction='pairingCreate'|'pairingCancel'|'sync'|'test';
 export type TelegramPairing={code:string|null;expiresAt:number|null};

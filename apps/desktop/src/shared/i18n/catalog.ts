@@ -15,6 +15,28 @@ import {setupArabic} from './setup.js';
 import {workArabic} from './work.js';
 /** Product-owned message keys. Never pass provider output or backend error text here. */
 export const arabic = {
+ "Install a compatible Python interpreter, then retry.":"ثبّت إصدارًا متوافقًا من ⁨Python⁩ ثم أعد المحاولة.",
+ "Preparing Python environment…":"جارٍ تجهيز بيئة ⁨Python⁩…",
+ "Downloading and installing…":"جارٍ التنزيل والتثبيت…",
+ "Verifying installation…":"جارٍ التحقق من التثبيت…",
+ "Install a compatible Python interpreter, then retry. DDGS requires Python 3.10 or newer.":"ثبّت إصدارًا متوافقًا من Python ثم أعد المحاولة. يتطلب DDGS الإصدار Python 3.10 أو أحدث.",
+ "Could not create the Python environment. Check your Python installation and retry.":"تعذر إنشاء بيئة Python. تحقق من تثبيت Python ثم أعد المحاولة.",
+ "Package download or installation failed. Check your network connection and retry.":"فشل تنزيل الحزم أو تثبيتها. تحقق من اتصال الشبكة ثم أعد المحاولة.",
+ "Installed software could not be verified. Retry installation to repair it.":"تعذر التحقق من البرنامج المثبّت. أعد التثبيت لإصلاحه.",
+ "Installation was denied by filesystem permissions. Check access to EstaCoda’s managed software directory.":"منعت أذونات الملفات التثبيت. تحقق من إمكانية الوصول إلى مجلد البرامج المُدارة في EstaCoda.",
+ "There is not enough free disk space to install this software.":"لا توجد مساحة كافية على القرص لتثبيت هذا البرنامج.",
+ "Installation failed. Check your Python installation and retry.":"فشل التثبيت. تحقق من تثبيت Python ثم أعد المحاولة.",
+ "Stop the gateway before updating its build. Shared work must finish or be stopped first.":"أوقف البوابة قبل تحديث إصدارها. يجب إكمال العمل المشترك أو إيقافه أولًا.",
+ "This build cannot update the gateway. Use a packaged Desktop build with a retained runtime.":"لا يمكن لهذا الإصدار تحديث البوابة. استخدم حزمة تطبيق سطح المكتب مع بيئة تشغيل محفوظة.",
+ "The gateway update could not be verified. Check gateway status; recovery may require repair.":"تعذر التحقق من تحديث البوابة. تحقق من حالتها؛ قد تتطلب الاستعادة إصلاحًا.",
+ "Update gateway to this build":"تحديث البوابة إلى هذا الإصدار",
+ "Gateway is running this build":"تعمل البوابة بهذا الإصدار",
+ "Gateway is running a different build":"تعمل البوابة بإصدار مختلف",
+ "Gateway build has not been verified":"لم يتم التحقق من إصدار البوابة",
+ "Gateway action failed. Check status and retry.":"فشل إجراء البوابة. تحقق من الحالة ثم أعد المحاولة.",
+ "Start the selected profile’s gateway using this Desktop build. Startup and build identity will be verified.":"شغّل بوابة الملف الشخصي المحدد باستخدام هذا الإصدار من تطبيق سطح المكتب. سيتم التحقق من بدء التشغيل وهوية الإصدار.",
+ "Installation failed":"فشل التثبيت",
+
  "Could not save update diagnostics.":"تعذر حفظ تشخيص التحديثات.",
  "The update action could not be completed. Try again.":"تعذر إكمال إجراء التحديث. حاول مرة أخرى.",
  "Export update diagnostics":"تصدير تشخيص التحديثات",

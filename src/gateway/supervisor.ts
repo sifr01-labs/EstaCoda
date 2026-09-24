@@ -1,3 +1,4 @@
+import {inspectDesktopRuntimeBuild} from './desktop-runtime-build.js';
 import {DesktopMediaInput} from '../artifacts/desktop-media-input.js';
 import {desktopModelControl} from './desktop-model-controls.js';
 import { ExecutionTargetStore } from '../workspaces/execution-target.js';
@@ -1904,6 +1905,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
       });
       state.sharedSessionHost = sharedHost;
       state.privateControl = await startPrivateControl({ directory: profilePaths.gatewayStatePath,
+        runtimeBuild: inspectDesktopRuntimeBuild(undefined,undefined,true)?.digest,
         instanceId: state.gatewayInstanceId!, profileId, version, targetGeneration: true, mediaAttachments:true, conversationControls:true, handle: (request) => sharedHost.handle(request),
         configurationChanged: async () => {await loadConfig();await runtimeCache.configurationChanged();} });
      } else {

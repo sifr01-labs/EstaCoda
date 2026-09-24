@@ -1,3 +1,4 @@
+import {operationIssueMessages} from './operation-issue.js';
 import {useState} from 'react';import type {DesktopSettingsApi} from '../../shared/desktop-api.js';import type {SettingsDependenciesPage,ConnectionOperation} from '@estacoda/control-protocol';import {Button} from './primitives.js';import {useI18n} from '../i18n.js';
 export function SettingsDependencies({api,capabilityIds}:{api:DesktopSettingsApi;capabilityIds?:string[]}){
  const {t,status}=useI18n();const[page,setPage]=useState<SettingsDependenciesPage>(),[selected,setSelected]=useState(''),[groups,setGroups]=useState<string[]>([]),[review,setReview]=useState(false),[busy,setBusy]=useState(false),[failed,setFailed]=useState(false),[receipt,setReceipt]=useState<ConnectionOperation|null>(null);const spec=page?.items.find(i=>i.id===selected);
@@ -7,6 +8,7 @@ export function SettingsDependencies({api,capabilityIds}:{api:DesktopSettingsApi
  {spec&&<>{spec.id==='docker-execution'&&<p>{t('Build the bundled execution image with the local Docker engine. This downloads dependencies. Inspect again for its image ID, then review the execution policy separately.')}</p>}<p><code>{spec.packages.join(', ')}</code></p>{spec.groups.map(group=><label key={group}><input type="checkbox" disabled={busy||review} checked={groups.includes(group)} onChange={e=>setGroups(old=>e.target.checked?[...old,group]:old.filter(g=>g!==group))}/><bdi>{group}</bdi></label>)}
  {!review?<Button disabled={busy||receipt?.state==='uncertain'} onClick={()=>setReview(true)}>{t('Review download')}</Button>:<><p>{t('Download and install these registered dependencies? This is separate from saving configuration.')}</p><Button disabled={busy} onClick={()=>void perform(async()=>{setReceipt(await api.install(spec.id,groups,true));setReview(false);})}>{t('Download and install')}</Button><Button disabled={busy} onClick={()=>setReview(false)}>{t('Cancel')}</Button></>}
  </>}{receipt&&<p role="status">{t('Dependency operation')}{': '}{status(receipt.state)}{receipt.state==='uncertain'?' · '+t('Installation may still be running. Inspect its receipt; do not start it again.'):''}</p>}
+ {receipt?.issue&&<p role="alert">{t(operationIssueMessages[receipt.issue])}</p>}
  <Button disabled={busy} onClick={()=>void perform(async()=>{setReceipt(await api.inspectDependency());})}>{t('Inspect installation')}</Button>{failed&&<p role="alert">{t('Dependency request failed. Inspect the existing operation before trying again.')}</p>}
  </section>;
 }

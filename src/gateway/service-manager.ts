@@ -1,7 +1,7 @@
 import { spawn } from "node:child_process";
-import { createHash } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { accessSync, constants } from "node:fs";
-import { chmod, mkdir, readFile, realpath, rm, stat, writeFile } from "node:fs/promises";
+import { chmod, mkdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { userInfo } from "node:os";
 import { dirname, delimiter, isAbsolute, join, resolve } from "node:path";
 import { resolveProfileStateHome } from "../config/profile-home.js";
@@ -60,6 +60,8 @@ export async function installService(options: {
   system?: boolean;
   runAsUser?: string;
   force?: boolean;
+  requireStopped?: boolean;
+  verifyActivation?: () => Promise<boolean>;
 }): Promise<InstallResult> {
   const stateHomeDir = resolve(options.stateHomeDir);
   let serviceUserHomeDir = resolve(options.serviceUserHomeDir);
@@ -106,6 +108,10 @@ export async function installService(options: {
     if (!(await stat(workspaceRoot)).isDirectory()) throw new Error("Not a directory");
   } catch {
     return { ok: false, error: "Service workspace is unavailable. Select an existing directory and reinstall explicitly." };
+  }
+  if (options.requireStopped) {
+    const evidence = await assertNoLiveGatewayEvidence(stateHomeDir, options.profileId);
+    if (!evidence.ok) return evidence;
   }
   const resolved = resolveGatewayExec({ workspaceRoot });
   if (!resolved.ok) {
@@ -277,6 +283,8 @@ async function installSystemd(options: {
   system?: boolean;
   runAsUser?: string;
   force?: boolean;
+  requireStopped?: boolean;
+  verifyActivation?: () => Promise<boolean>;
   kind: "systemd-user" | "systemd-system";
   resolved: ResolvedExec;
 }): Promise<InstallResult> {
@@ -300,7 +308,7 @@ async function installSystemd(options: {
     return { ok: false, error: `Could not read existing service file before replacement: ${path}` };
   }
 
-  if (exists && options.force === true) {
+  if (exists && options.force === true && !options.requireStopped) {
     const stop = await systemctl(options.kind, ["stop", unitName]);
     if (!stop.ok) return { ok: false, error: commandError("systemctl stop", stop) };
   }
@@ -310,21 +318,30 @@ async function installSystemd(options: {
   if (!liveEvidence.ok) return liveEvidence;
 
   await mkdir(dirname(path), { recursive: true });
-  await writeFile(path, renderSystemdUnit({
+  await writeServiceConfiguration(path, renderSystemdUnit({
     stateHomeDir: options.stateHomeDir,
     serviceUserHomeDir: options.serviceUserHomeDir,
     profileId: options.profileId,
     runAsUser: options.kind === "systemd-system" ? options.runAsUser : undefined,
     resolved: options.resolved,
-  }), { encoding: "utf8", mode: options.kind === "systemd-system" ? 0o644 : 0o600 });
-  await chmod(path, options.kind === "systemd-system" ? 0o644 : 0o600);
+  }), options.kind === "systemd-system" ? 0o644 : 0o600, options.verifyActivation !== undefined);
 
   for (const args of [["daemon-reload"], ["enable", unitName], ["start", unitName]]) {
     const result = await systemctl(options.kind, args);
     if (!result.ok) {
       await rollbackSystemdServiceFile(path, previous, options.kind, args[0] !== "daemon-reload");
+      if (options.verifyActivation && previous) { await systemctl(options.kind, ["daemon-reload"]); await systemctl(options.kind, ["start", unitName]); }
       return { ok: false, error: commandError(`systemctl ${args.join(" ")}`, result) };
     }
+  }
+  if (options.verifyActivation && !(await options.verifyActivation().catch(() => false))) {
+    const stopped = await systemctl(options.kind, ["stop", unitName]);
+    if (!stopped.ok || !(await waitForNoLiveGatewayEvidence(options.stateHomeDir, options.profileId)).ok) {
+      return {ok:false,error:"Gateway verification failed; stop the service and repair its installation."};
+    }
+    await rollbackSystemdServiceFile(path, previous, options.kind, true);
+    if (previous) await systemctl(options.kind, ["start", unitName]);
+    return {ok:false,error:"Gateway build verification failed; previous service configuration restored."};
   }
   const lingerStatus = options.kind === "systemd-user"
     ? await ensureSystemdUserLinger()
@@ -365,6 +382,8 @@ async function installLaunchd(options: {
   workspaceRoot: string;
   profileId: string;
   force?: boolean;
+  requireStopped?: boolean;
+  verifyActivation?: () => Promise<boolean>;
   resolved: ResolvedExec;
 }): Promise<InstallResult> {
   const path = launchdPlistPath({ serviceUserHomeDir: options.serviceUserHomeDir, profileId: options.profileId });
@@ -385,7 +404,7 @@ async function installLaunchd(options: {
     return { ok: false, error: `Could not read existing service file before replacement: ${path}` };
   }
 
-  if (exists && options.force === true) {
+  if (exists && options.force === true && !options.requireStopped) {
     const unload = await runCommand("launchctl", ["unload", "-w", path]);
     if (!unload.ok) return { ok: false, error: commandError("launchctl unload", unload) };
   }
@@ -397,18 +416,27 @@ async function installLaunchd(options: {
   const profilePaths = resolveProfileStateHome({ homeDir: options.stateHomeDir, profileId: options.profileId });
   await mkdir(dirname(path), { recursive: true });
   await mkdir(profilePaths.logsPath, { recursive: true });
-  await writeFile(path, renderLaunchdPlist({
+  await writeServiceConfiguration(path, renderLaunchdPlist({
     stateHomeDir: options.stateHomeDir,
     serviceUserHomeDir: options.serviceUserHomeDir,
     profileId: options.profileId,
     resolved: options.resolved,
-  }), { encoding: "utf8", mode: 0o600 });
-  await chmod(path, 0o600);
+  }), 0o600, options.verifyActivation !== undefined);
 
   const load = await runCommand("launchctl", ["load", "-w", path]);
   if (!load.ok) {
     await restoreServiceFile(path, previous);
+    if (options.verifyActivation && previous) await runCommand("launchctl", ["load", "-w", path]);
     return { ok: false, error: commandError("launchctl load", load) };
+  }
+  if (options.verifyActivation && !(await options.verifyActivation().catch(() => false))) {
+    const unloaded = await runCommand("launchctl", ["unload", "-w", path]);
+    if (!unloaded.ok || !(await waitForNoLiveGatewayEvidence(options.stateHomeDir, options.profileId)).ok) {
+      return {ok:false,error:"Gateway verification failed; stop the service and repair its installation."};
+    }
+    await restoreServiceFile(path, previous);
+    if (previous) await runCommand("launchctl", ["load", "-w", path]);
+    return {ok:false,error:"Gateway build verification failed; previous service configuration restored."};
   }
   return { ok: true, mode: options.resolved.mode };
 }
@@ -742,6 +770,14 @@ async function readExistingServiceFile(path: string): Promise<ExistingServiceFil
   } catch {
     return undefined;
   }
+}
+
+/** Build updates publish a complete binding atomically; a failed write leaves the old service intact. */
+async function writeServiceConfiguration(path:string,content:string,mode:number,atomic:boolean):Promise<void>{
+  if (!atomic) { await writeFile(path,content,{encoding:"utf8",mode});await chmod(path,mode);return; }
+  const temporary=`${path}.${randomUUID()}.tmp`;
+  try { await writeFile(temporary,content,{encoding:"utf8",mode,flag:"wx"});await chmod(temporary,mode);await rename(temporary,path); }
+  finally { await rm(temporary,{force:true}); }
 }
 
 async function restoreServiceFile(path: string, previous: ExistingServiceFile | undefined): Promise<void> {

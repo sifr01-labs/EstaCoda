@@ -91,6 +91,7 @@ describe("managed Python capability substrate", () => {
       },
       {
         id: "ddgs",
+        pythonVersion: "3.10",
         version: "9.14.4",
         packages: ["ddgs==9.14.4"],
         verifyImports: ["ddgs"],
@@ -139,6 +140,7 @@ describe("managed Python capability substrate", () => {
     expect(DDGS_CAPABILITY_ID).toBe("ddgs");
     expect(getRegisteredPythonCapabilitySpec(DDGS_CAPABILITY_ID)).toEqual({
       id: "ddgs",
+        pythonVersion: "3.10",
       version: "9.14.4",
       packages: ["ddgs==9.14.4"],
       verifyImports: ["ddgs"],

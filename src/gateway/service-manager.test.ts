@@ -18,6 +18,7 @@ const resolverMock = vi.hoisted(() => ({
 
 const fsPromisesMock = vi.hoisted(() => ({
   interceptedSystemWrites: [] as Array<{ path: string; data: string; options: unknown }>,
+  failPublication: false,
   interceptedSystemChmods: [] as Array<{ path: string; mode: number }>,
 }));
 
@@ -55,6 +56,7 @@ vi.mock("node:fs/promises", async (importOriginal) => {
       return actual.stat(path, ...(args as []));
     },
     writeFile: async (path: Parameters<typeof actual.writeFile>[0], data: Parameters<typeof actual.writeFile>[1], options?: Parameters<typeof actual.writeFile>[2]) => {
+      if (fsPromisesMock.failPublication && String(path).endsWith(".tmp")) throw Object.assign(new Error("publication failed"), {code:"EIO"});
       if (isSystemdSystemPath(String(path))) {
         fsPromisesMock.interceptedSystemWrites.push({ path: String(path), data: String(data), options });
         return undefined;
@@ -165,6 +167,7 @@ describe("service manager", () => {
     process.env.LOGNAME = "estacoda-test";
     childProcessMock.spawn.mockReset();
     resolverMock.resolveGatewayExec.mockReset();
+    fsPromisesMock.failPublication = false;
     fsPromisesMock.interceptedSystemWrites = [];
     fsPromisesMock.interceptedSystemChmods = [];
     resolverMock.resolveGatewayExec.mockReturnValue({
@@ -207,6 +210,36 @@ describe("service manager", () => {
     await rm(alias);
     await symlink(join(tmpDir, "workspace quote"), alias);
     expect(await readFile(systemdUnitPath({ serviceUserHomeDir: tmpDir, profileId: "default" }), "utf8")).toBe(unit);
+  });
+
+  it("keeps the prior service file intact if publishing a build update fails", async()=>{
+    setPlatform("darwin");const binDir=join(tmpDir,"bin");await addExecutable(binDir,"launchctl");process.env.PATH=binDir;
+    const path=launchdPlistPath({serviceUserHomeDir:tmpDir,profileId:"default"});await mkdir(dirname(path),{recursive:true});await writeFile(path,"previous-build");
+    const calls=mockSpawn(),verifyActivation=vi.fn(async()=>true);fsPromisesMock.failPublication=true;
+    await expect(installService({stateHomeDir:tmpDir,serviceUserHomeDir:tmpDir,workspaceRoot:tmpDir,profileId:"default",force:true,requireStopped:true,verifyActivation})).rejects.toThrow("publication failed");
+    expect(await readFile(path,"utf8")).toBe("previous-build");expect(calls).toEqual([]);expect(verifyActivation).not.toHaveBeenCalled();
+  });
+
+  it.each(["darwin", "linux"] as const)("restores the stopped service after failed build verification on %s", async platform => {
+    setPlatform(platform);
+    const binDir = join(tmpDir,"bin");await addExecutable(binDir,platform === "darwin" ? "launchctl" : "systemctl");process.env.PATH=binDir;
+    const path=platform === "darwin" ? launchdPlistPath({serviceUserHomeDir:tmpDir,profileId:"default"}) : systemdUnitPath({serviceUserHomeDir:tmpDir,profileId:"default"});
+    await mkdir(dirname(path),{recursive:true});await writeFile(path,"previous-build",{mode:0o600});
+    const calls=mockSpawn(),verifyActivation=vi.fn(async()=>false);
+    const result=await installService({stateHomeDir:tmpDir,serviceUserHomeDir:tmpDir,workspaceRoot:tmpDir,profileId:"default",force:true,requireStopped:true,verifyActivation});
+    expect(result.ok).toBe(false);expect(verifyActivation).toHaveBeenCalledTimes(1);
+    expect(await readFile(path,"utf8")).toBe("previous-build");expect((await stat(path)).mode&0o777).toBe(0o600);
+    const activation=platform === "darwin" ? "load" : "start";
+    expect(calls.filter(call=>call.args.includes(activation))).toHaveLength(2);
+  });
+
+  it("refuses a stopped-only update before any service mutation if a live host appears", async()=>{
+    setPlatform("darwin");const binDir=join(tmpDir,"bin");await addExecutable(binDir,"launchctl");process.env.PATH=binDir;
+    const calls=mockSpawn(),paths=resolveProfileStateHome({homeDir:tmpDir,profileId:"default"});
+    await writeGatewayPid(paths,{pid:process.pid,startedAt:new Date().toISOString(),version:"test",profileId:"default"});
+    const verifyActivation=vi.fn(async()=>true);
+    const result=await installService({stateHomeDir:tmpDir,serviceUserHomeDir:tmpDir,workspaceRoot:tmpDir,profileId:"default",force:true,requireStopped:true,verifyActivation});
+    expect(result.ok).toBe(false);expect(calls).toEqual([]);expect(verifyActivation).not.toHaveBeenCalled();
   });
 
   it("detects systemd user, launchd, or none", async () => {

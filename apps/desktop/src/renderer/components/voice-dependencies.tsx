@@ -1,3 +1,4 @@
+import {operationIssueMessages} from './operation-issue.js';
 import {useCallback,useEffect,useRef,useState} from 'react';
 import type {ConnectionOperation,SettingsDependenciesPage} from '@estacoda/control-protocol';
 import type {DesktopSettingsApi} from '../../shared/desktop-api.js';
@@ -46,7 +47,7 @@ export function useCapabilityDependencies(api:DesktopSettingsApi,enabled:boolean
   try{
    // Reconcile again immediately before a write; another window may have installed it.
    const current=await read(generation);if(!current||epoch.current!==generation||unresolved(current.operation))return;
-   if(current.page.items.find(i=>i.id===id)?.state!=='install_required')return;
+   if(!['install_required','repair_required'].includes(current.page.items.find(i=>i.id===id)?.state??''))return;
    const operation=await api.install(id,[],true);
    if(epoch.current!==generation)return;setReceipt(operation);
    await read(generation);
@@ -54,22 +55,23 @@ export function useCapabilityDependencies(api:DesktopSettingsApi,enabled:boolean
   finally{if(epoch.current===generation){lock.current=false;setInstalling(undefined);}}
  };
  const open=(id:string)=>{restore.current=document.activeElement as HTMLElement;setSelected(id);};
- const close=()=>{setSelected(undefined);requestAnimationFrame(()=>restore.current?.isConnected&&restore.current.focus());};
+ const close=()=>{const id=selected;setSelected(undefined);requestAnimationFrame(()=>{const target=restore.current?.isConnected?restore.current:[...document.querySelectorAll<HTMLElement>('[data-capability-install], [data-capability-status]')].filter(el=>el.dataset.capabilityInstall===id||el.dataset.capabilityStatus===id).sort((a,b)=>Number(!!b.dataset.capabilityInstall)-Number(!!a.dataset.capabilityInstall))[0];target?.focus();});};
  return {items,checking,failed,receipt,pending,installing,selected,refresh,install,open,close};
 }
 export type VoiceDependencies=ReturnType<typeof useCapabilityDependencies>;
 export function VoiceInstallStatus({state,id}:{state:VoiceDependencies;id:string}){
  const {t}=useI18n(),spec=state.items.find(i=>i.id===id),pending=belongs(state.receipt,id)&&state.pending||state.installing===id;
- const label=pending?'Confirming installation…':state.checking&&!spec?'Checking installation…':state.failed||!spec?"Couldn’t check installation":spec.state==='installed'?'Installed':'Setup required';
- return <span className={label==='Installed'?'ec-media-good':''}><Icon name={label==='Installed'?'circle-check':pending||state.checking?'loader-circle':label==='Setup required'?'circle-dashed':'circle-alert'}/>{t(label)}</span>;
+ const phase=belongs(state.receipt,id)?state.receipt?.phase:undefined;
+ const label=pending?(phase==='preparing'?'Preparing Python environment…':phase==='installing'?'Downloading and installing…':phase==='verifying'?'Verifying installation…':'Confirming installation…'):state.checking&&!spec?'Checking installation…':state.failed||!spec?"Couldn’t check installation":spec.state==='installed'?'Installed':belongs(state.receipt,id)&&state.receipt?.state==='failed'?'Installation failed':spec.state==='repair_required'?'Repair required':'Setup required';
+ return <span data-capability-status={id} tabIndex={-1} className={label==='Installed'?'ec-media-good':''}><Icon name={label==='Installed'?'circle-check':pending||state.checking?'loader-circle':label==='Setup required'?'circle-dashed':'circle-alert'}/>{t(label)}</span>;
 }
 export function VoiceInstallAction({state,id,disabled}:{state:VoiceDependencies;id:string;disabled:boolean}){
  const {t}=useI18n(),spec=state.items.find(i=>i.id===id);
  if(state.checking&&!spec)return null;
  if(state.pending||state.installing)return <Button className="ec-ghost" disabled={disabled||state.checking||!!state.installing} onClick={()=>void state.refresh()}>{t('Check status')}</Button>;
  if(state.failed||!spec)return <Button className="ec-ghost" disabled={disabled||state.checking} onClick={()=>void state.refresh()}>{t('Check again')}</Button>;
- if(spec.state==='installed')return null;
- return <Button className="ec-primary" disabled={disabled||state.checking} onClick={()=>state.open(id)}>{t('Install…')}</Button>;
+ if(spec.state==='installed'||state.selected===id)return null;
+ return <Button data-capability-install={id} className="ec-primary" disabled={disabled||state.checking} onClick={()=>state.open(id)}>{t('Install…')}</Button>;
 }
 export function VoiceInstallReview({state}:{state:VoiceDependencies}){
  const {t,language}=useI18n(),heading=useRef<HTMLHeadingElement>(null);
@@ -83,7 +85,7 @@ export function VoiceInstallReview({state}:{state:VoiceDependencies}){
   <details><summary>{t('Included software')}</summary><ul>{spec.packages.map(p=><li key={p}><bdi>{p}</bdi></li>)}</ul></details>
   {spec.id==='faster-whisper'&&<p className="ec-footnote">{t('Transcription model files are separate. Installing this software does not confirm they are downloaded.')}</p>}
   {pending&&<p role="status">{t('Installation may still be running. Checking its status will not start another download.')}</p>}
-  {failed&&<p role="alert">{t('Installation did not complete. Review the software and try again.')}</p>}
+  {failed&&<p role="alert">{t(state.receipt?.issue==='python_required'&&spec.id==='ddgs'?'Install a compatible Python interpreter, then retry. DDGS requires Python 3.10 or newer.':state.receipt?.issue?operationIssueMessages[state.receipt.issue]:'Installation did not complete. Review the software and try again.')}</p>}
   {state.failed&&<p role="alert">{t('Could not confirm installation. Check status before trying again.')}</p>}
   <div className="ec-model-footeractions"><Button onClick={state.close}>{t(installed?'Done':pending?'Close':'Cancel')}</Button>{!installed&&(pending?<Button disabled={state.checking||!!state.installing} onClick={()=>void state.refresh()}>{t('Check status')}</Button>:<Button className="ec-primary" disabled={state.checking||state.failed} onClick={()=>void state.install()}>{t('Download and install')}</Button>)}</div>
  </section>;

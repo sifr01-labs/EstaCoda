@@ -169,3 +169,8 @@ it('allows explicit import selection but never renderer credentials, storage pat
  expect(()=>validateSemanticPayload('modelImportReview',selection)).not.toThrow();
  for(const extra of [{confirmed:false},{sourceProfileId:'../escape'},{credential:'canary'},{windowId:'other'},{generation:3},{path:'/tmp/source'},{profileId:'destination'}])expect(()=>validateSemanticPayload('modelImportReview',{...selection,...extra})).toThrow();
 });
+
+it('accepts only a reviewed backend-selected gateway build update',()=>{
+ expect(()=>validateSemanticPayload('gatewayExecute',{action:'update',acknowledgeSharedWork:true})).not.toThrow();
+ for(const payload of [{action:'update',acknowledgeSharedWork:false},{action:'update',acknowledgeSharedWork:true,workspaceRoot:'/arbitrary/runtime'},{action:'update',acknowledgeSharedWork:true,command:'sh'}])expect(()=>validateSemanticPayload('gatewayExecute',payload)).toThrow();
+});

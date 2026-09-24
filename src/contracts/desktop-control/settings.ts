@@ -8,7 +8,7 @@ export type SettingsPage={fields:SettingField[];values:SettingChange[];truncated
 export type SettingsReview={draftId:string;changes:SettingChange[];previous:SettingChange[];expiresInMs:number};
 export type SettingsBinding={draftId:string;windowId:string;generation:number};
 
-export type SettingsDependenciesPage={items:Array<{id:string;version:string;packages:string[];groups:string[];estimatedMb:number|null;state:'installed'|'install_required';available?:boolean}>};
+export type SettingsDependenciesPage={items:Array<{id:string;version:string;packages:string[];groups:string[];estimatedMb:number|null;state:'installed'|'install_required'|'repair_required';available?:boolean}>};
 
 export const SETTINGS_ACTIONS=['pack.install','pack.enable','pack.disable','pack.remove','profile.create','profile.copy','profile.default','profile.rename','profile.delete','workspace.add','workspace.rename','workspace.move','workspace.remove','workspace.trust','workspace.revoke'] as const;
 export type SettingsAction={action:typeof SETTINGS_ACTIONS[number];subject:string;value:string};

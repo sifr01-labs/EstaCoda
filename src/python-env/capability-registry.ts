@@ -9,6 +9,7 @@ export type ManagedPythonCapabilityEnvSpec = {
   version: string;
   packages: string[];
   verifyImports: string[];
+  /** Minimum supported major.minor version; enforced before creating the environment. */
   pythonVersion?: string;
   estimatedInstallSizeMb?: number;
   optionalGroups?: Record<string, ManagedPythonCapabilityOptionalGroup>;
@@ -67,6 +68,7 @@ const DEFAULT_REGISTERED_CAPABILITY_SPECS: ManagedPythonCapabilityEnvSpec[] = [
   },
   {
     id: DDGS_CAPABILITY_ID,
+    pythonVersion: "3.10",
     version: "9.14.4",
     packages: ["ddgs==9.14.4"],
     verifyImports: ["ddgs"],

@@ -1,6 +1,7 @@
 import { spawn } from "node:child_process";
 import { existsSync } from "node:fs";
-import { mkdir, statfs } from "node:fs/promises";
+import { lstat, mkdir, rename, statfs } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 import { setTimeout as delay } from "node:timers/promises";
 import { createFileCronJobLock } from "../cron/cron-lock.js";
@@ -80,7 +81,7 @@ export type ManagedPythonCapabilityInstallOptions = {
   now?: () => Date;
   runner?: PythonEnvCommandRunner;
   diskInfo?: PythonEnvDiskInfoProvider;
-  onProgress?: (message: string) => void;
+  onProgress?: (message: string, stage?: "preparing"|"installing"|"verifying") => void;
 };
 
 export type PythonEnvCommandResult =
@@ -333,13 +334,13 @@ async function installWithAcquiredLock(
     const runner = options.runner ?? runCommand;
     const now = options.now ?? (() => new Date());
 
-    const systemPython = await findSystemPython(runner);
+    const systemPython = await findSystemPython(runner, effective.spec.pythonVersion);
     if (systemPython === undefined) {
       return {
         ok: false,
         capabilityId: options.capabilityId,
         reason: "python_missing",
-        message: "Python 3 is required for managed Python capability setup but was not found."
+        message: `Python ${effective.spec.pythonVersion ?? "3"} or newer is required. Install a compatible Python interpreter, then retry setup.`
       };
     }
 
@@ -351,7 +352,15 @@ async function installWithAcquiredLock(
     const existingManifest = existing.ok ? existing.manifest : existing.manifest;
     const createdAt = existingManifest?.createdAt ?? now().toISOString();
 
-    options.onProgress?.(`Creating managed Python environment for ${options.capabilityId}...`);
+    // A venv cannot safely change its base interpreter in place. Preserve the
+    // previous managed environment for inspection and create a clean replacement.
+    // Never follow a linked environment or a path supplied by its manifest.
+    if (existsSync(paths.envPath)) {
+      const info = await lstat(paths.envPath);
+      if (!info.isDirectory() || info.isSymbolicLink()) throw new Error("Invalid managed environment directory");
+      await rename(paths.envPath, `${paths.envPath}.previous-${randomUUID()}`);
+    }
+    options.onProgress?.(`Creating managed Python environment for ${options.capabilityId}...`, "preparing");
     const venv = await runner(systemPython, ["-m", "venv", paths.envPath], {
       timeoutMs: COMMAND_TIMEOUT_MS
     });
@@ -368,7 +377,7 @@ async function installWithAcquiredLock(
     });
 
     if (effective.packages.length > 0) {
-      options.onProgress?.(`Installing managed Python packages for ${options.capabilityId}...`);
+      options.onProgress?.(`Installing managed Python packages for ${options.capabilityId}...`, "installing");
       await mkdir(paths.pipCacheDir, { recursive: true }).catch((error) => {
         throw permissionAwareError(error, "Could not create pip cache for managed Python capability.");
       });
@@ -393,6 +402,7 @@ async function installWithAcquiredLock(
       status: "installed"
     });
 
+    options.onProgress?.(`Verifying managed Python capability ${options.capabilityId}...`, "verifying");
     const verified = await verifyImports(paths.pythonPath, effective.verifyImports, runner);
     if (!verified.ok) {
       const failure = commandFailure("import_verify_failed", "Managed Python capability import verification failed.", verified);
@@ -467,9 +477,16 @@ async function waitForConcurrentCapabilityInstall(
   };
 }
 
-async function findSystemPython(runner: PythonEnvCommandRunner): Promise<string | undefined> {
-  for (const candidate of ["python3", "python"]) {
-    const result = await runner(candidate, ["-c", "import sys; raise SystemExit(0 if sys.version_info[0] == 3 else 1)"], {
+export async function findSystemPython(runner: PythonEnvCommandRunner, minimum?: string): Promise<string | undefined> {
+  if (minimum !== undefined && !/^3\.\d{1,2}$/.test(minimum)) throw new Error("Invalid registered Python version requirement");
+  const script = minimum === undefined
+    ? "import sys; raise SystemExit(0 if sys.version_info[0] == 3 else 1)"
+    : `import sys; raise SystemExit(0 if sys.version_info[0] == 3 and sys.version_info[:2] >= (3, ${Number(minimum.split(".")[1])}) else 1)`;
+  // Explicit operator installation locations, without broadening the bridge's
+  // PATH for other tools or accepting model-supplied executable paths.
+  const candidates = ["python3", "python", ...(process.platform === "darwin" ? ["/opt/homebrew/bin/python3", "/usr/local/bin/python3", ...[14,13,12,11,10].flatMap(minor => [`/opt/homebrew/bin/python3.${minor}`, `/usr/local/bin/python3.${minor}`])] : [])];
+  for (const candidate of candidates) {
+    const result = await runner(candidate, ["-c", script], {
       timeoutMs: VERIFY_TIMEOUT_MS
     });
     if (result.ok) {

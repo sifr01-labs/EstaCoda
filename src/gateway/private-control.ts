@@ -18,6 +18,7 @@ async function assertPrivate(path: string, directory = false): Promise<void> {
 
 export async function startPrivateControl(input: {
   directory: string; instanceId: string; profileId: string; version: string;
+  runtimeBuild?: string;
   targetGeneration?: boolean;
   mediaAttachments?:boolean;
   conversationControls?:boolean;
@@ -53,9 +54,9 @@ export async function startPrivateControl(input: {
           if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected) ||
             message.instanceId !== discovery.instanceId || message.protocol !== 1 || message.version !== discovery.version) throw new Error("Authentication or version mismatch.");
           if (message.probe === true) {
-            if (Object.keys(message).some((key) => !["protocol", "version", "instanceId", "profileId", "socket", "token", "probe"].includes(key))) throw new Error("Invalid probe.");
+            if (message.runtimeBuild!==undefined&&message.runtimeBuild!==true||Object.keys(message).some((key) => !["protocol", "version", "instanceId", "profileId", "socket", "token", "probe", "runtimeBuild"].includes(key))) throw new Error("Invalid probe.");
             socket.end(JSON.stringify({ ok: true, result: { profileId: input.profileId, instanceId: input.instanceId,
-              version: input.version, capabilities: { readiness: true, targetGeneration: input.targetGeneration === true,...(input.mediaAttachments?{mediaAttachments:true}:{}),...(input.conversationControls?{conversationControls:true}:{}) } } }) + "\n");
+              version: input.version, ...(message.runtimeBuild===true?{runtimeBuild:input.runtimeBuild??null}:{}), capabilities: { readiness: true, targetGeneration: input.targetGeneration === true,...(input.mediaAttachments?{mediaAttachments:true}:{}),...(input.conversationControls?{conversationControls:true}:{}) } } }) + "\n");
             return;
           }
           if (message.configurationChanged === true) {
@@ -118,7 +119,7 @@ export async function callPrivateControl(input: { directory: string; profileId: 
   return exchangePrivateControl(input, { request: input.request });
 }
 
-async function exchangePrivateControl(input: { directory: string; profileId: string; version: string; signal?: AbortSignal }, payload: { request: PrivateControlRequest } | { probe: true } | {configurationChanged:true}): Promise<unknown> {
+async function exchangePrivateControl(input: { directory: string; profileId: string; version: string; signal?: AbortSignal }, payload: { request: PrivateControlRequest } | { probe: true; runtimeBuild?:true } | {configurationChanged:true}): Promise<unknown> {
   input.signal?.throwIfAborted();
   await assertPrivate(input.directory, true);
   const path = join(input.directory, "control.json");
@@ -170,4 +171,13 @@ export async function probePrivateControl(input: { directory: string; profileId:
 export async function notifyPrivateConfigurationChanged(input:{directory:string;profileId:string;version:string;signal?:AbortSignal}):Promise<void>{
   const result=await exchangePrivateControl(input,{configurationChanged:true}) as {acknowledged?:boolean};
   if(result?.acknowledged!==true)throw new Error('Configuration notification was not acknowledged');
+}
+
+/** Opt-in build identity: ordinary probes retain their previous wire shape. */
+export async function probePrivateRuntimeBuild(input:{directory:string;profileId:string;version:string;signal?:AbortSignal}):Promise<string|null>{
+ const result=await exchangePrivateControl(input,{probe:true,runtimeBuild:true}) as Record<string,unknown>|null;
+ if(!result||result.profileId!==input.profileId||result.version!==input.version||typeof result.instanceId!=='string')throw new PrivateControlCompatibilityError('Invalid runtime build response');
+ if(result.runtimeBuild===null)return null;
+ if(typeof result.runtimeBuild!=='string'||!/^[a-f0-9]{64}$/.test(result.runtimeBuild))throw new PrivateControlCompatibilityError('Runtime build identity unavailable');
+ return result.runtimeBuild;
 }

@@ -9,6 +9,7 @@ import {
   resetPythonCapabilityRegistryForTest
 } from "./capability-registry.js";
 import {
+  findSystemPython,
   checkManagedPythonCapabilityStatus,
   installManagedPythonCapabilityEnvironment,
   verifyManagedPythonCapabilityEnvironment
@@ -77,6 +78,38 @@ describe("managed Python capability manager", () => {
   afterEach(() => {
     resetPythonCapabilityRegistryForTest();
     rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it("skips incompatible Apple Python and finds an explicit operator-installed interpreter", async () => {
+    const runner = vi.fn<PythonEnvCommandRunner>(async (command, args) => {
+      expect(args[1]).toContain("sys.version_info[:2] >= (3, 10)");
+      return command === "/opt/homebrew/bin/python3" ? ok() : fail("old or absent");
+    });
+    const platform = process.platform;
+    Object.defineProperty(process, "platform", {value:"darwin",configurable:true});
+    try { expect(await findSystemPython(runner,"3.10")).toBe("/opt/homebrew/bin/python3"); }
+    finally { Object.defineProperty(process, "platform", {value:platform,configurable:true}); }
+    await expect(findSystemPython(runner,"3.10; injected")).rejects.toThrow();
+  });
+
+  it("does not create an environment or download packages without compatible Python", async () => {
+    const runner = vi.fn<PythonEnvCommandRunner>(async () => fail("incompatible"));
+    expect(await installManagedPythonCapabilityEnvironment({stateRoot:tempDir,capabilityId:"ddgs",runner})).toMatchObject({ok:false,reason:"python_missing",message:expect.stringContaining("3.10")});
+    expect(runner.mock.calls.every(([,args]) => args[0] === "-c")).toBe(true);
+  });
+
+  it("replaces a broken environment instead of reusing its old interpreter", async () => {
+    const paths = resolveManagedPythonCapabilityPaths({stateRoot:tempDir,capabilityId:"ddgs"});
+    await mkdir(paths.envPath,{recursive:true});
+    await writeFile(join(paths.envPath,"old-python-marker"),"3.9.6");
+    const runner = createRunner(tempDir);
+    const result = await installManagedPythonCapabilityEnvironment({stateRoot:tempDir,capabilityId:"ddgs",runner});
+    expect(result.ok).toBe(true);
+    const {readdir,readFile} = await import("node:fs/promises");
+    const previous = (await readdir(dirname(paths.envPath))).find(name=>name.startsWith("ddgs.previous-"));
+    expect(previous).toBeDefined();
+    expect(await readFile(join(dirname(paths.envPath),previous!,"old-python-marker"),"utf8")).toBe("3.9.6");
+    await expect(readFile(join(paths.envPath,"old-python-marker"))).rejects.toThrow();
   });
 
   it("installs a registered capability with no external packages and verifies a stdlib import", async () => {
@@ -718,7 +751,7 @@ function createRunner(tempDir: string, options: RunnerOptions = {}): PythonEnvCo
   const calls: RunnerCall[] = [];
   const runner = (async (command, args, callOptions) => {
     calls.push({ command, args, options: callOptions });
-    if ((command === "python3" || command === "python") && args.join(" ") === "-c import sys; raise SystemExit(0 if sys.version_info[0] == 3 else 1)") {
+    if (args[0] === "-c" && args[1]?.includes("sys.version_info")) {
       return options.pythonMissing === true
         ? fail("exit code 1")
         : ok();
