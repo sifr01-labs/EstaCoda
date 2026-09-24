@@ -1,7 +1,7 @@
 ---
 {
   "name": "research-discovery",
-  "description": "Discover academic literature, compare source evidence, and synthesize cited research reports; save output when requested.",
+  "description": "Discover research sources and academic literature, compare evidence, and synthesize cited reports; save output when requested.",
   "version": "1.0.0",
   "category": "research",
   "platforms": [
@@ -42,6 +42,18 @@
       {
         "type": "regex",
         "value": "(?:ابحث|راجع).{0,100}(?:أوراق|أبحاث|أدبيات)"
+      },
+      {
+        "type": "contains",
+        "value": "deep research"
+      },
+      {
+        "type": "regex",
+        "value": "\\b(?:research|investigate)\\b.{0,160}\\b(?:report|sub[- ]?agents?)\\b"
+      },
+      {
+        "type": "regex",
+        "value": "ابحث.{0,160}(?:بعمق|وكلاء|sub[- ]?agents?)"
       }
     ],
     "requiredToolsets": [
@@ -105,6 +117,8 @@
 # Research Discovery
 
 Search and retrieve academic papers from arXiv via their free REST API. No API key is required. Prefer EstaCoda web tools and `scripts/search_research_discovery.py`; use raw shell examples only when the user approves command execution or when no web tool is available.
+
+For an explicit research report or delegated research request, use sources appropriate to the topic through available web tools. Use the academic APIs below only when literature is relevant; do not force commercial or general research into an academic paper or experiment workflow.
 
 ## Literature synthesis and report delivery
 

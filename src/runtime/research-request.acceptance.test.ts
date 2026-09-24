@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { resolveProfileStateHome } from "../config/profile-home.js";
@@ -55,12 +55,13 @@ describe.sequential("research workflow acceptance harness — PR 0 characterizat
     h.enqueue(answer("The research workflow has been followed."));
     const rerun = await h.turn("Rerun this task but this time use the research skill.");
     expect(rerun.toolExecutions).toEqual([]); // PR 3/4: actually load the skill and rerun.
-    expect(h.events.filter((event) => event.kind === "skill")).toEqual([]);
+    expect(h.events.filter((event) => event.kind === "skill")).toEqual([{ kind: "skill", name: "research-discovery" }]);
 
     h.enqueue(answer(REPORT));
     const save = await h.turn("Please prepare a markdown file");
     expect(save.toolExecutions).toEqual([]);
-    expect(save.finalOutcome?.status).toBe("completed"); // PR 1: no false completion.
+    expect(save.finalOutcome?.status).toBe("blocked");
+    expect(save.text).toContain("File output is incomplete");
     expect(save.finalOutcome?.confirmedActions).toEqual([]);
     await expect(readFile(join(h.workspaceRoot, "report.md"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
     expect(h.store.listTasks()).toEqual([]);
@@ -71,13 +72,14 @@ describe.sequential("research workflow acceptance harness — PR 0 characterizat
   it("proves native file writes and readback are observable through real execution (positive control)", async () => {
     const h = await harness();
     h.enqueue(nativeCall("file_write", { path: "report.md", content: REPORT }), nativeCall("file_read", { path: "report.md" }), answer("Saved report.md."));
-    const result = await h.turn("Write documentation in report.md for the project");
+    const result = await h.turn("Please prepare a markdown file at report.md");
     expect(result.toolExecutions.map((execution) => execution.tool.name)).toEqual(["file.write", "file.read"]);
     expect(result.toolExecutions.every((execution) => execution.result?.ok)).toBe(true);
     expect(new Set(result.toolExecutions.map((execution) => execution.toolCallId)).size).toBe(2);
     expect(result.toolExecutions[1]?.result?.content).toContain("Synthetic research fixture");
     await expect(readFile(join(h.workspaceRoot, "report.md"), "utf8")).resolves.toBe(REPORT);
-    expect(result.finalOutcome?.confirmedActions).toContainEqual(expect.objectContaining({ tool: "file.write" }));
+    expect(result.finalOutcome?.status).toBe("completed");
+    expect(result.finalOutcome?.confirmedActions).toContainEqual(expect.objectContaining({ tool: "file.write", verification: "verified" }));
     scriptConsumed(h);
   });
 
@@ -194,5 +196,63 @@ describe("explicit delegation limit admission", () => {
     expect(result.text).toContain("1–2");
     expect(h.requests).toHaveLength(0);
     expect(h.store.listTasks()).toHaveLength(0);
+  });
+});
+
+describe.sequential("file output completion requirements", () => {
+  it("replaces a false saved claim when the file was written without readback", async () => {
+    const h = await harness();
+    h.enqueue(nativeCall("file_write", { path: "report.md", content: REPORT }), answer("Saved and verified report.md."));
+    const result = await h.turn("Save report.md");
+    expect(result.finalOutcome?.status).toBe("partially_completed");
+    expect(result.text).toContain("matching readback");
+    expect(result.text).not.toContain("Saved and verified");
+    expect(result.providerExecution?.response?.content ?? "").not.toContain("Saved and verified");
+    scriptConsumed(h);
+  });
+  it("accepts an unchanged file only after matching readback", async () => {
+    const h = await harness();
+    await writeFile(join(h.workspaceRoot, "report.md"), REPORT);
+    h.enqueue(nativeCall("file_write", { path: "report.md", content: REPORT }), nativeCall("file_read", { path: "report.md" }), answer("Verified report.md."));
+    const result = await h.turn("Export the report to report.md");
+    expect(result.toolExecutions[0]?.result?.metadata?.changed).toBe(false);
+    expect(result.finalOutcome?.status).toBe("completed");
+    scriptConsumed(h);
+  });
+  it("accepts a patch-created report and matching readback", async () => {
+    const h = await harness();
+    h.enqueue(nativeCall("file_patch", { mode: "patch", patch: "*** Begin Patch\n*** Add File: report.md\n+# Report\n+Evidence fixture\n*** End Patch" }), nativeCall("file_read", { path: "report.md" }), answer("Saved report.md."));
+    const result = await h.turn("Prepare a markdown file at report.md");
+    expect(result.finalOutcome?.status).toBe("completed");
+    expect(result.finalOutcome?.confirmedActions).toContainEqual(expect.objectContaining({ tool: "file.patch", verification: "verified" }));
+    scriptConsumed(h);
+  });
+  it("does not count a partial read as complete readback", async () => {
+    const h = await harness();
+    h.enqueue(nativeCall("file_write", { path: "report.md", content: REPORT }), nativeCall("file_read", { path: "report.md", lineStart: 1, lineEnd: 1 }), answer("Saved and verified."));
+    const result = await h.turn("Save report.md");
+    expect(result.finalOutcome?.status).toBe("partially_completed");
+    expect(result.text).toContain("matching readback");
+    scriptConsumed(h);
+  });
+  it("reports a missing file tool rather than accepting pasted markdown", async () => {
+    const h = await harness({ fileToolsAvailable: false });
+    h.enqueue(answer("Saved report.md.\n" + REPORT));
+    const result = await h.turn("Prepare a markdown file");
+    expect(result.finalOutcome?.status).toBe("blocked");
+    expect(result.text).toContain("file-writing tool is unavailable");
+    expect(result.toolExecutions).toEqual([]);
+    scriptConsumed(h);
+  });
+  it("keeps a durable handoff complete while the file objective remains with the Task", async () => {
+    const h = await harness();
+    h.enqueue(nativeCall("delegate_task", { tasks: ["collection", "processing", "reuse"].map((scope) => ({ task: `Research batteries: ${scope}`, allowedTools: ["web.search"], research: { scope, requireLiveSources: true, requireRepositoryEvidence: false } })) }));
+    const result = await h.turn("Use 3 subagents to research batteries and save report.md");
+    expect(result.toolExecutions[0]?.result?.ok, result.toolExecutions[0]?.result?.content).toBe(true);
+    expect(result.finalOutcome?.status).toBe("completed");
+    expect(h.store.listTasks()).toHaveLength(1);
+    await expect(readFile(join(h.workspaceRoot, "report.md"))).rejects.toMatchObject({ code: "ENOENT" });
+    expect(result.text).not.toContain("File output is incomplete");
+    scriptConsumed(h);
   });
 });

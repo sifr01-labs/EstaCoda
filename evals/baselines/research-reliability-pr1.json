@@ -1,0 +1,680 @@
+{
+  "routing": {
+    "version": 1,
+    "scope": "Development probes: two real bundled skills, seven synthetic available tool definitions; no live model, no held-out claims.",
+    "omissions": "missingTools means available in this controlled catalog but not exposed; production omission reasons and cross-turn requirement continuity remain outside this probe.",
+    "availableTools": [
+      "web.search",
+      "web.extract",
+      "file.read",
+      "file.write",
+      "delegate_task",
+      "skill.list",
+      "skill.read"
+    ],
+    "metrics": {
+      "caseCount": 18,
+      "primarySkillPrecision": {
+        "numerator": 8,
+        "denominator": 8,
+        "value": 1
+      },
+      "primarySkillRecall": {
+        "numerator": 8,
+        "denominator": 8,
+        "value": 1
+      },
+      "requestedCapabilityRecall": {
+        "numerator": 22,
+        "denominator": 22,
+        "value": 1
+      },
+      "taskClassAccuracy": {
+        "numerator": 15,
+        "denominator": 18,
+        "value": 0.8333333333333334
+      },
+      "forbiddenExposureCount": 0,
+      "falseCompleteWithoutExecution": {
+        "numerator": 4,
+        "denominator": 9,
+        "value": 0.4444444444444444
+      }
+    },
+    "perLanguage": {
+      "en": {
+        "caseCount": 13,
+        "primarySkillPrecision": {
+          "numerator": 6,
+          "denominator": 6,
+          "value": 1
+        },
+        "primarySkillRecall": {
+          "numerator": 6,
+          "denominator": 6,
+          "value": 1
+        },
+        "requestedCapabilityRecall": {
+          "numerator": 14,
+          "denominator": 14,
+          "value": 1
+        },
+        "taskClassAccuracy": {
+          "numerator": 11,
+          "denominator": 13,
+          "value": 0.8461538461538461
+        },
+        "forbiddenExposureCount": 0,
+        "falseCompleteWithoutExecution": {
+          "numerator": 2,
+          "denominator": 5,
+          "value": 0.4
+        }
+      },
+      "ar": {
+        "caseCount": 3,
+        "primarySkillPrecision": {
+          "numerator": 1,
+          "denominator": 1,
+          "value": 1
+        },
+        "primarySkillRecall": {
+          "numerator": 1,
+          "denominator": 1,
+          "value": 1
+        },
+        "requestedCapabilityRecall": {
+          "numerator": 4,
+          "denominator": 4,
+          "value": 1
+        },
+        "taskClassAccuracy": {
+          "numerator": 2,
+          "denominator": 3,
+          "value": 0.6666666666666666
+        },
+        "forbiddenExposureCount": 0,
+        "falseCompleteWithoutExecution": {
+          "numerator": 1,
+          "denominator": 2,
+          "value": 0.5
+        }
+      },
+      "mixed": {
+        "caseCount": 2,
+        "primarySkillPrecision": {
+          "numerator": 1,
+          "denominator": 1,
+          "value": 1
+        },
+        "primarySkillRecall": {
+          "numerator": 1,
+          "denominator": 1,
+          "value": 1
+        },
+        "requestedCapabilityRecall": {
+          "numerator": 4,
+          "denominator": 4,
+          "value": 1
+        },
+        "taskClassAccuracy": {
+          "numerator": 2,
+          "denominator": 2,
+          "value": 1
+        },
+        "forbiddenExposureCount": 0,
+        "falseCompleteWithoutExecution": {
+          "numerator": 1,
+          "denominator": 2,
+          "value": 0.5
+        }
+      }
+    },
+    "schemaTokensRough": {
+      "median": 112,
+      "p95": 196
+    },
+    "cases": [
+      {
+        "id": "compound-research",
+        "language": "en",
+        "expectedSkill": "research-discovery",
+        "selectedSkill": "research-discovery",
+        "expectedTaskClass": "research",
+        "taskClass": "research",
+        "requiredTools": [
+          "web.search",
+          "delegate_task"
+        ],
+        "exposedTools": [
+          "web.search",
+          "web.extract",
+          "file.read",
+          "delegate_task"
+        ],
+        "missingTools": [],
+        "forbiddenExposures": [],
+        "schemaTokensRough": 113,
+        "expansionCandidates": 0,
+        "completionFloor": "none",
+        "requiresExecution": true,
+        "falseCompleteWithoutExecution": true
+      },
+      {
+        "id": "research-skill-rerun",
+        "language": "en",
+        "expectedSkill": "research-discovery",
+        "selectedSkill": "research-discovery",
+        "expectedTaskClass": "research",
+        "taskClass": "research",
+        "requiredTools": [
+          "skill.read",
+          "web.search"
+        ],
+        "exposedTools": [
+          "web.search",
+          "web.extract",
+          "file.read",
+          "skill.list",
+          "skill.read"
+        ],
+        "missingTools": [],
+        "forbiddenExposures": [],
+        "schemaTokensRough": 139,
+        "expansionCandidates": 0,
+        "completionFloor": "none",
+        "requiresExecution": true,
+        "falseCompleteWithoutExecution": true
+      },
+      {
+        "id": "prepare-markdown",
+        "language": "en",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "expectedTaskClass": "docs-writing",
+        "taskClass": "docs-writing",
+        "requiredTools": [
+          "file.write",
+          "file.read"
+        ],
+        "exposedTools": [
+          "web.search",
+          "web.extract",
+          "file.read",
+          "file.write"
+        ],
+        "missingTools": [],
+        "forbiddenExposures": [],
+        "schemaTokensRough": 112,
+        "expansionCandidates": 0,
+        "completionFloor": "mutation_with_verification",
+        "requiresExecution": true,
+        "falseCompleteWithoutExecution": false
+      },
+      {
+        "id": "save-named-file",
+        "language": "en",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "expectedTaskClass": "docs-writing",
+        "taskClass": "docs-writing",
+        "requiredTools": [
+          "file.write",
+          "file.read"
+        ],
+        "exposedTools": [
+          "web.search",
+          "web.extract",
+          "file.read",
+          "file.write"
+        ],
+        "missingTools": [],
+        "forbiddenExposures": [],
+        "schemaTokensRough": 112,
+        "expansionCandidates": 0,
+        "completionFloor": "mutation_with_verification",
+        "requiresExecution": true,
+        "falseCompleteWithoutExecution": false
+      },
+      {
+        "id": "discovery-paraphrase",
+        "language": "en",
+        "expectedSkill": "research-discovery",
+        "selectedSkill": "research-discovery",
+        "expectedTaskClass": "research",
+        "taskClass": "research",
+        "requiredTools": [
+          "web.search"
+        ],
+        "exposedTools": [
+          "web.search",
+          "web.extract",
+          "file.read"
+        ],
+        "missingTools": [],
+        "forbiddenExposures": [],
+        "schemaTokensRough": 84,
+        "expansionCandidates": 0,
+        "completionFloor": "none",
+        "requiresExecution": false,
+        "falseCompleteWithoutExecution": false
+      },
+      {
+        "id": "researcher-name",
+        "language": "en",
+        "expectedSkill": "researcher",
+        "selectedSkill": "researcher",
+        "expectedTaskClass": "research",
+        "taskClass": "research",
+        "requiredTools": [
+          "skill.read"
+        ],
+        "exposedTools": [
+          "web.search",
+          "web.extract",
+          "file.read",
+          "file.write",
+          "delegate_task",
+          "skill.list",
+          "skill.read"
+        ],
+        "missingTools": [],
+        "forbiddenExposures": [],
+        "schemaTokensRough": 196,
+        "expansionCandidates": 0,
+        "completionFloor": "none",
+        "requiresExecution": false,
+        "falseCompleteWithoutExecution": false
+      },
+      {
+        "id": "researcher-slash",
+        "language": "en",
+        "expectedSkill": "researcher",
+        "selectedSkill": "researcher",
+        "expectedTaskClass": "research",
+        "taskClass": "research",
+        "requiredTools": [
+          "web.search"
+        ],
+        "exposedTools": [
+          "web.search",
+          "web.extract",
+          "file.read",
+          "file.write",
+          "delegate_task",
+          "skill.list",
+          "skill.read"
+        ],
+        "missingTools": [],
+        "forbiddenExposures": [],
+        "schemaTokensRough": 196,
+        "expansionCandidates": 0,
+        "completionFloor": "none",
+        "requiresExecution": false,
+        "falseCompleteWithoutExecution": false
+      },
+      {
+        "id": "discovery-slash",
+        "language": "en",
+        "expectedSkill": "research-discovery",
+        "selectedSkill": "research-discovery",
+        "expectedTaskClass": "research",
+        "taskClass": "research",
+        "requiredTools": [
+          "web.search"
+        ],
+        "exposedTools": [
+          "web.search",
+          "web.extract",
+          "file.read",
+          "skill.list",
+          "skill.read"
+        ],
+        "missingTools": [],
+        "forbiddenExposures": [],
+        "schemaTokensRough": 139,
+        "expansionCandidates": 0,
+        "completionFloor": "none",
+        "requiresExecution": false,
+        "falseCompleteWithoutExecution": false
+      },
+      {
+        "id": "arabic-research",
+        "language": "ar",
+        "expectedSkill": "research-discovery",
+        "selectedSkill": "research-discovery",
+        "expectedTaskClass": "research",
+        "taskClass": "research",
+        "requiredTools": [
+          "web.search",
+          "delegate_task"
+        ],
+        "exposedTools": [
+          "web.search",
+          "web.extract",
+          "file.read",
+          "delegate_task"
+        ],
+        "missingTools": [],
+        "forbiddenExposures": [],
+        "schemaTokensRough": 113,
+        "expansionCandidates": 0,
+        "completionFloor": "none",
+        "requiresExecution": true,
+        "falseCompleteWithoutExecution": true
+      },
+      {
+        "id": "arabic-save",
+        "language": "ar",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "expectedTaskClass": "docs-writing",
+        "taskClass": "docs-writing",
+        "requiredTools": [
+          "file.write",
+          "file.read"
+        ],
+        "exposedTools": [
+          "web.search",
+          "web.extract",
+          "file.read",
+          "file.write"
+        ],
+        "missingTools": [],
+        "forbiddenExposures": [],
+        "schemaTokensRough": 112,
+        "expansionCandidates": 0,
+        "completionFloor": "mutation_with_verification",
+        "requiresExecution": true,
+        "falseCompleteWithoutExecution": false
+      },
+      {
+        "id": "mixed-save",
+        "language": "mixed",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "expectedTaskClass": "docs-writing",
+        "taskClass": "docs-writing",
+        "requiredTools": [
+          "file.write",
+          "file.read"
+        ],
+        "exposedTools": [
+          "web.search",
+          "web.extract",
+          "file.read",
+          "file.write"
+        ],
+        "missingTools": [],
+        "forbiddenExposures": [],
+        "schemaTokensRough": 112,
+        "expansionCandidates": 0,
+        "completionFloor": "mutation_with_verification",
+        "requiresExecution": true,
+        "falseCompleteWithoutExecution": false
+      },
+      {
+        "id": "mixed-delegation",
+        "language": "mixed",
+        "expectedSkill": "research-discovery",
+        "selectedSkill": "research-discovery",
+        "expectedTaskClass": "research",
+        "taskClass": "research",
+        "requiredTools": [
+          "delegate_task",
+          "web.search"
+        ],
+        "exposedTools": [
+          "web.search",
+          "web.extract",
+          "file.read",
+          "delegate_task"
+        ],
+        "missingTools": [],
+        "forbiddenExposures": [],
+        "schemaTokensRough": 113,
+        "expansionCandidates": 0,
+        "completionFloor": "none",
+        "requiresExecution": true,
+        "falseCompleteWithoutExecution": true
+      },
+      {
+        "id": "docs-control",
+        "language": "en",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "expectedTaskClass": "docs-writing",
+        "taskClass": "docs-writing",
+        "requiredTools": [
+          "file.write",
+          "file.read"
+        ],
+        "exposedTools": [
+          "file.read",
+          "file.write"
+        ],
+        "missingTools": [],
+        "forbiddenExposures": [],
+        "schemaTokensRough": 56,
+        "expansionCandidates": 0,
+        "completionFloor": "mutation",
+        "requiresExecution": true,
+        "falseCompleteWithoutExecution": false
+      },
+      {
+        "id": "greeting-control",
+        "language": "en",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "expectedTaskClass": "conversation",
+        "taskClass": "conversation",
+        "requiredTools": [],
+        "exposedTools": [],
+        "missingTools": [],
+        "forbiddenExposures": [],
+        "schemaTokensRough": 0,
+        "expansionCandidates": 0,
+        "completionFloor": "none",
+        "requiresExecution": false,
+        "falseCompleteWithoutExecution": false
+      },
+      {
+        "id": "negated-save-control",
+        "language": "en",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "expectedTaskClass": "general",
+        "taskClass": "repo-inspection",
+        "requiredTools": [],
+        "exposedTools": [
+          "file.read"
+        ],
+        "missingTools": [],
+        "forbiddenExposures": [],
+        "schemaTokensRough": 28,
+        "expansionCandidates": 0,
+        "completionFloor": "none",
+        "requiresExecution": false,
+        "falseCompleteWithoutExecution": false
+      },
+      {
+        "id": "informational-delegation",
+        "language": "en",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "expectedTaskClass": "general",
+        "taskClass": "general",
+        "requiredTools": [],
+        "exposedTools": [
+          "web.search",
+          "web.extract",
+          "file.read"
+        ],
+        "missingTools": [],
+        "forbiddenExposures": [],
+        "schemaTokensRough": 84,
+        "expansionCandidates": 0,
+        "completionFloor": "none",
+        "requiresExecution": false,
+        "falseCompleteWithoutExecution": false
+      },
+      {
+        "id": "quoted-save",
+        "language": "en",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "expectedTaskClass": "general",
+        "taskClass": "repo-inspection",
+        "requiredTools": [],
+        "exposedTools": [
+          "file.read"
+        ],
+        "missingTools": [],
+        "forbiddenExposures": [],
+        "schemaTokensRough": 28,
+        "expansionCandidates": 0,
+        "completionFloor": "none",
+        "requiresExecution": false,
+        "falseCompleteWithoutExecution": false
+      },
+      {
+        "id": "negated-arabic-save",
+        "language": "ar",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "expectedTaskClass": "general",
+        "taskClass": "repo-inspection",
+        "requiredTools": [],
+        "exposedTools": [
+          "file.read"
+        ],
+        "missingTools": [],
+        "forbiddenExposures": [],
+        "schemaTokensRough": 28,
+        "expansionCandidates": 0,
+        "completionFloor": "none",
+        "requiresExecution": false,
+        "falseCompleteWithoutExecution": false
+      }
+    ]
+  },
+  "workflow": {
+    "scope": "Scripted three-turn failure chain through createRuntime with real tool schemas, bundled skills and disposable SQLite/profile/workspace; not live-model performance.",
+    "providerCalls": 5,
+    "toolCalls": [
+      2,
+      0,
+      0
+    ],
+    "tasksCreated": 0,
+    "outcomes": [
+      "completed",
+      "completed",
+      "blocked"
+    ],
+    "reportFileExists": false,
+    "schemaTokensRough": {
+      "median": 1391,
+      "p95": 2952
+    },
+    "inventory": [
+      {
+        "phase": "initial",
+        "tools": [
+          "plan",
+          "document_probe",
+          "web_search",
+          "web_extract",
+          "browser_status",
+          "file_read",
+          "file_search",
+          "file_glob",
+          "file_grep",
+          "media_inspect",
+          "workspace_trust_status",
+          "config_provider_status",
+          "config_provider_execution_status",
+          "config_web_setup",
+          "config_mcp_status",
+          "task_result_read",
+          "task_status",
+          "delegate_task"
+        ],
+        "nativeSchemaTokens": 2952
+      },
+      {
+        "phase": "initial",
+        "tools": [
+          "document_probe",
+          "web_search",
+          "web_extract",
+          "browser_status",
+          "file_read",
+          "file_search",
+          "file_glob",
+          "file_grep",
+          "media_inspect",
+          "workspace_trust_status",
+          "config_provider_status",
+          "config_provider_execution_status",
+          "config_mcp_status",
+          "skill_list",
+          "skill_read"
+        ],
+        "nativeSchemaTokens": 1139
+      },
+      {
+        "phase": "initial",
+        "tools": [
+          "document_probe",
+          "web_search",
+          "web_extract",
+          "file_read",
+          "file_write",
+          "file_patch",
+          "file_search",
+          "file_glob",
+          "file_grep",
+          "media_inspect",
+          "workspace_trust_status"
+        ],
+        "nativeSchemaTokens": 1391
+      }
+    ],
+    "requestRequirements": [
+      {
+        "skillReferences": [],
+        "issues": [],
+        "research": {
+          "domain": "general",
+          "fresh": true
+        },
+        "delegation": {
+          "count": 3
+        },
+        "hasOriginTurnId": true
+      },
+      {
+        "skillReferences": [
+          "research"
+        ],
+        "issues": [],
+        "research": {
+          "domain": "general",
+          "fresh": false
+        },
+        "hasOriginTurnId": true
+      },
+      {
+        "skillReferences": [],
+        "issues": [],
+        "fileOutput": {
+          "format": "markdown"
+        },
+        "hasOriginTurnId": true
+      }
+    ],
+    "requestRequirementTelemetry": "turn-local intent-routed requirements; persisted continuity remains PR 4",
+    "detailedOmissionTelemetry": "not yet implemented"
+  }
+}

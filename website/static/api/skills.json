@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-09-24T09:22:13.663Z",
+  "generatedAt": "2026-09-24T09:42:58.487Z",
   "skills": [
     {
       "id": "official.api-integration",
@@ -569,7 +569,7 @@
       "id": "official.research-discovery",
       "slug": "research-discovery",
       "name": "Research Discovery",
-      "description": "Discover academic literature, compare source evidence, and synthesize cited research reports; save output when requested.",
+      "description": "Discover research sources and academic literature, compare evidence, and synthesize cited reports; save output when requested.",
       "overview": "Search and retrieve academic papers from arXiv via their free REST API. No API key is required. Prefer EstaCoda web tools and `scripts/search_research_discovery.py`; use raw shell examples only when the user approves command execution or when no web tool is available.",
       "labels": [
         "research.discovery",
@@ -582,7 +582,10 @@
         "paper search",
         "\\b(?:find|search|review|survey)\\b.{0,100}\\b(?:papers?|arxiv|literature)\\b",
         "\\bliterature\\s+(?:review|report|survey)\\b",
-        "(?:ابحث|راجع).{0,100}(?:أوراق|أبحاث|أدبيات)"
+        "(?:ابحث|راجع).{0,100}(?:أوراق|أبحاث|أدبيات)",
+        "deep research",
+        "\\b(?:research|investigate)\\b.{0,160}\\b(?:report|sub[- ]?agents?)\\b",
+        "ابحث.{0,160}(?:بعمق|وكلاء|sub[- ]?agents?)"
       ],
       "requiredToolsets": [
         "web"

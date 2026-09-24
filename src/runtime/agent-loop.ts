@@ -2,6 +2,7 @@ import type { ArtifactRecord } from "../contracts/artifact.js";
 import type { ChannelAttachment, ChannelKind } from "../contracts/channel.js";
 import type { ContextExpansionResult, ProjectContextSnapshot } from "../contracts/context.js";
 import type { IntentRoute } from "../contracts/intent.js";
+import { fileOutputEvidence } from "./file-output-evidence.js";
 import type { ExecutionFinalOutcome, ExecutionPlan, ExecutionPlanReader } from "../contracts/execution-plan.js";
 import type { ForegroundExecutionCheckpoint } from "../contracts/execution-checkpoint.js";
 import type { ExecutionPlanController } from "./execution-plan-controller.js";
@@ -616,7 +617,7 @@ export class AgentLoop {
     const selectedSkillResources = route.selectedSkillResources;
     const selectedSkillSetup = route.selectedSkillSetup;
     const turnCompletionFloor = resumedCheckpoint?.completionFloor ?? deriveExecutionCompletionFloor({
-      userText: effectiveText,
+      userText: turnText,
       capabilities: this.#executionCompletionCapabilities
     });
 
@@ -1198,6 +1199,7 @@ export class AgentLoop {
     });
     const completionFloor = turnCompletionFloor;
     const finalOutcome = deriveExecutionFinalOutcome({
+      requestRequirements: intent.requestRequirements,
       providerExecution: providerLoop.delegatedAnswerOwnership === undefined ? effectiveProviderExecution : undefined,
       toolExecutions,
       executionReceipts: this.#executionEvidenceIndex.recordsForTurn(visibleTurn.id),
@@ -1332,6 +1334,22 @@ export class AgentLoop {
         finalOutcome,
         this.#ui?.language === "ar" ? "ar" : "en"
       ), artifacts);
+    }
+    if (delegatedAnswerAcknowledgement === undefined) {
+      const fileEvidence = fileOutputEvidence({ requirements: intent.requestRequirements, toolExecutions, executionReceipts: this.#executionEvidenceIndex.recordsForTurn(visibleTurn.id) });
+      if (!fileEvidence.satisfied) {
+        const available = new Set(this.#providerToolSchemaCatalog?.entries.map((entry) => entry.tool.name) ?? []);
+        const unavailable = !available.has("file.write") && !available.has("file.patch")
+          ? " A workspace file-writing tool is unavailable in this session."
+          : !available.has("file.read") ? " The workspace file-readback tool is unavailable in this session." : "";
+        const reason = fileEvidence.reason === "unresolved-target"
+          ? "The requested file target is ambiguous or outside the supported workspace-relative targets."
+          : fileEvidence.reason === "missing-write"
+            ? "There is no successful write or patch for the requested output."
+            : "The requested output has not been confirmed by a complete, matching readback from disk.";
+        response.text = `File output is incomplete. ${reason}${unavailable}`;
+        if (response.providerExecution !== undefined) response.providerExecution = suppressProviderGeneratedText(response.providerExecution);
+      }
     }
     if (finalizationNote) response.text += `\n\n${finalizationNote}`;
     await this.#skillLearningManager?.observeTurn({

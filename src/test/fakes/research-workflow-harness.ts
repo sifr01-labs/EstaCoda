@@ -39,7 +39,7 @@ export function answer(content: string): ScriptStep {
   return () => ({ content });
 }
 
-export async function createResearchWorkflowHarness(options: { searchAvailable?: boolean; denyWrites?: boolean; maxBatchTasks?: number } = {}) {
+export async function createResearchWorkflowHarness(options: { searchAvailable?: boolean; denyWrites?: boolean; maxBatchTasks?: number; fileToolsAvailable?: boolean } = {}) {
   const root = await mkdtemp(join(tmpdir(), "estacoda-research-baseline-"));
   const homeDir = join(root, "home");
   const workspaceRoot = join(root, "workspace");
@@ -105,7 +105,7 @@ export async function createResearchWorkflowHarness(options: { searchAvailable?:
       webFetch: async () => { throw new Error("Fixture must never perform network fetches"); },
       // Constrain unrelated capabilities using the real session filter.
       // Catalog truncation is independently characterized at the function seam.
-      enabledToolsets: ["core", "files", "web", "research"],
+      enabledToolsets: options.fileToolsAvailable === false ? ["web"] : ["core", "files", "web", "research"],
       securityPolicy: { decide: (request) => options.denyWrites && request.riskClass === "workspace-write" ? "deny" : "allow" },
       executionControls: { providerBudgets: { maxProviderIterations: 8, maxProviderToolCalls: 8, maxProviderWallClockMs: 15_000, finalizationReserveMs: 0 } }
     });

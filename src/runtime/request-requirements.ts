@@ -2,7 +2,7 @@ import type { RequestRequirements } from "../contracts/intent.js";
 import { affirmativeRequestSegments } from "./request-action-segments.js";
 
 const MAX_REQUEST_CHARS = 32_768;
-const FILE_NAME = /(?:[\p{L}\p{N}_./\\:-]+\.(?:md|markdown|txt))\b/giu;
+const FILE_NAME = /`([^`\n]{1,240}\.(?:md|markdown|txt))`|(?:[\p{L}\p{N}_./\\:-]+\.(?:md|markdown|txt))\b/giu;
 const INFORMATIONAL = /\b(?:explain|describe|hypothetically|imagine|what\s+if|how\s+(?:would|could|to)|if\s+(?:we|you|I)|example|said|says|quoted?)\b|(?:اشرح|افترض|ماذا لو|مثال|قال)/iu;
 
 /** Only affirmative user clauses may supply new requirements. Quoted filenames
@@ -14,7 +14,7 @@ export function explicitRequestSegments(text: string): string[] {
     .replace(/^\s*>.*$/gmu, " ")
     .replace(/`([^`\n]*)`|"([^"\n]*)"|“([^”\n]*)”|'([^'\n]*)'|‘([^’\n]*)’/gu, (match, ...groups: unknown[]) => {
       const value = groups.slice(0, 5).find((group) => typeof group === "string") as string | undefined;
-      if (value !== undefined && /^[\p{L}\p{N}_./\\:-]+\.(?:md|markdown|txt)$/iu.test(value)) {
+      if (value !== undefined && /^[\p{L}\p{N}_ ./\\:-]{1,240}\.(?:md|markdown|txt)$/iu.test(value)) {
         operands.push(value);
         return ` FILEOPERAND${operands.length - 1} `;
       }
@@ -22,7 +22,7 @@ export function explicitRequestSegments(text: string): string[] {
     });
   return affirmativeRequestSegments(sanitized)
     .filter((segment) => !INFORMATIONAL.test(segment))
-    .map((segment) => segment.replace(/FILEOPERAND(\d+)/gu, (_, index: string) => operands[Number(index)] ?? " "));
+    .map((segment) => segment.replace(/FILEOPERAND(\d+)/gu, (_, index: string) => operands[Number(index)] === undefined ? " " : `\`${operands[Number(index)]}\``));
 }
 
 export function deriveRequestRequirements(userText: string, originTurnId?: string): RequestRequirements {
@@ -32,24 +32,25 @@ export function deriveRequestRequirements(userText: string, originTurnId?: strin
     return result;
   }
   for (const segment of explicitRequestSegments(userText)) {
-    const skill = segment.match(/(?:\b(?:use|invoke|load|apply)\s+(?:the\s+)?([\p{L}\p{N}_-]{1,80})\s+skill\b|(?:استخدم|حمّل|فعّل)\s+مهارة\s+([\p{L}\p{N}_-]{1,80})|^\s*\/([\p{L}\p{N}_-]{1,80})(?:\s|$))/iu);
+    const actionSegment = segment.replace(/`[^`]*`/gu, " ");
+    const skill = actionSegment.match(/(?:\b(?:use|invoke|load|apply)\s+(?:the\s+)?([\p{L}\p{N}_-]{1,80})\s+skill\b|(?:استخدم|حمّل|فعّل)\s+مهارة\s+([\p{L}\p{N}_-]{1,80})|^\s*\/([\p{L}\p{N}_-]{1,80})(?:\s|$))/iu);
     const reference = skill?.[1] ?? skill?.[2] ?? skill?.[3];
     if (reference !== undefined && result.skillReferences.length < 4) result.skillReferences.push(reference.toLocaleLowerCase("en-US"));
-    const delegation = segment.match(/\b(?:use|launch|spawn|delegate\s+to|assign\s+to)\s+(?:(\d{1,9}|one|two|three|four|five|six|seven|eight|nine|ten)\s+)?(?:sub[- ]?agents?|workers?|agents?)\b|(?:استخدم|شغّل|شغل|كلّف)\s+(?:(\d{1,9}|[٠-٩]{1,9}|ثلاثة|ثلاث|اثنين|اثنان)\s+)?(?:وكلاء|عمال|وكيل|sub[- ]?agents?|workers?)(?:\s+فرعيين)?/iu);
+    const delegation = actionSegment.match(/\b(?:use|launch|spawn|delegate\s+to|assign\s+to)\s+(?:(\d{1,9}|one|two|three|four|five|six|seven|eight|nine|ten)\s+)?(?:sub[- ]?agents?|workers?|agents?)\b|(?:استخدم|شغّل|شغل|كلّف)\s+(?:(\d{1,9}|[٠-٩]{1,9}|ثلاثة|ثلاث|اثنين|اثنان)\s+)?(?:وكلاء|عمال|وكيل|sub[- ]?agents?|workers?)(?:\s+فرعيين)?/iu);
     if (delegation !== null) {
       const countText = delegation[1] ?? delegation[2];
       const words: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, ثلاثة: 3, ثلاث: 3, اثنين: 2, اثنان: 2 };
       result.delegation = countText === undefined ? {} : { count: words[countText.toLowerCase()] ?? Number(countText.replace(/[٠-٩]/gu, (digit) => String("٠١٢٣٤٥٦٧٨٩".indexOf(digit)))) };
     }
-    if (/\b(?:research|investigate|find|search|survey)\b|(?:ابحث|بحث)/iu.test(segment)) {
-      const domain = /\b(?:write|draft|author)\s+(?:a\s+)?(?:paper|manuscript)\b|\bexperiment\b/iu.test(segment) ? "paper"
-        : /\b(?:papers?|arxiv|literature|academic|publications?)\b|(?:أوراق|أبحاث|أدبيات)/iu.test(segment) ? "literature" : "general";
-      result.research = { domain: domain === "general" ? result.research?.domain ?? domain : domain, fresh: result.research?.fresh === true || /\b(?:latest|recent|current|fresh|newest)\b|(?:أحدث|حديث|الحالية)/iu.test(segment) };
+    if (/\b(?:research|investigate|find|search|survey)\b|(?:ابحث|بحث)/iu.test(actionSegment)) {
+      const domain = /\b(?:write|draft|author)\s+(?:a\s+)?(?:paper|manuscript)\b|\bexperiment\b/iu.test(actionSegment) ? "paper"
+        : /\b(?:papers?|arxiv|literature|academic|publications?)\b|(?:أوراق|أبحاث|أدبيات)/iu.test(actionSegment) ? "literature" : "general";
+      result.research = { domain: domain === "general" ? result.research?.domain ?? domain : domain, fresh: result.research?.fresh === true || /\b(?:latest|recent|current|fresh|newest)\b|(?:أحدث|حديث|الحالية)/iu.test(actionSegment) };
     }
-    if (!/\b(?:prepare|save|export|write|create|generate)\b|(?:احفظ|صدّر|صدر|أنشئ|اكتب|جهّز|جهز|أعد)/iu.test(segment)) continue;
-    const paths = [...segment.matchAll(FILE_NAME)].map((match) => match[0]);
-    const markdown = /\bmarkdown\b|\bmd\s+file\b/iu.test(segment) || paths.some((path) => /\.(?:md|markdown)$/iu.test(path));
-    if (paths.length === 0 && !(markdown && /\bfile\b|ملف/iu.test(segment)) && !/\btext\s+file\b|ملف\s+نصي/iu.test(segment)) continue;
+    if (!/\b(?:prepare|save|export|write|create|generate)\s+|(?:احفظ|صدّر|صدر|أنشئ|اكتب|جهّز|جهز|أعد)\s+/iu.test(actionSegment)) continue;
+    const paths = [...segment.matchAll(FILE_NAME)].map((match) => match[1] ?? match[0]);
+    const markdown = /\bmarkdown\b|\bmd\s+file\b/iu.test(actionSegment) || paths.some((path) => /\.(?:md|markdown)$/iu.test(path));
+    if (paths.length === 0 && !(markdown && /\bfile\b|ملف/iu.test(actionSegment)) && !/\btext\s+file\b|ملف\s+نصي/iu.test(actionSegment)) continue;
     const path = paths[0];
     if (new Set([...paths, ...(result.fileOutput?.path === undefined ? [] : [result.fileOutput.path])]).size > 1) result.issues.push("ambiguous-file-target");
     const safePath = path !== undefined && path.length <= 240 && !/^(?:[/\\]|[a-z]:)/iu.test(path) && !path.split(/[/\\]/u).includes("..");

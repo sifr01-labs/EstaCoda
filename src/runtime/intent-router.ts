@@ -108,17 +108,17 @@ export class IntentRouter {
     if (requirements.research !== undefined && route.taskClass === "general") route.taskClass = "research";
     if (requirements.skillReferences.length === 0 || route.invocation !== undefined) return route;
 
-    const text = explicitRequestSegments(requestText).join(" ");
+    const text = requestText;
     const matchInput = { prompt: text, normalized: normalize(text), nativeIntent: route.nativeIntent, labels: route.labels, attachments: options.attachments, model: options.model ?? this.#model };
     const selected: Array<LoadedSkill | SkillDefinition> = [];
     route.skillRequests = requirements.skillReferences.map((reference) => {
       const candidates = this.#skillRegistry.resolveReference(reference);
       const contextual = candidates.length <= 1 ? candidates : candidates.filter((skill) => {
-        const match = matchSkill(skill, matchInput);
+        const match = matchActionableSkill(skill, matchInput);
         return match !== undefined && !match.deferred && match.score >= PRIMARY_SKILL_MIN_SCORE;
       });
       const resolved = contextual.length === 1 ? contextual[0] : undefined;
-      const deferred = resolved !== undefined && matchSkill(resolved, matchInput)?.deferred === true;
+      const deferred = resolved !== undefined && matchActionableSkill(resolved, matchInput)?.deferred === true;
       if (resolved !== undefined && !deferred) selected.push(resolved);
       return { reference, status: candidates.length === 0 ? "unavailable" : deferred ? "deferred" : resolved === undefined ? "ambiguous" : "resolved", candidates: candidates.slice(0, 8).map((skill) => skill.name) };
     });
@@ -227,9 +227,9 @@ export class IntentRouter {
     ].filter((label) => label !== "general"));
     const skillMatches = this.#skillRegistry
       .list()
-      .map((skill) => matchSkill(skill, {
-        prompt: explicitRequestSegments(options.requestText ?? prompt).join(" "),
-        normalized: normalize(explicitRequestSegments(options.requestText ?? prompt).join(" ")),
+      .map((skill) => matchActionableSkill(skill, {
+        prompt: options.requestText ?? prompt,
+        normalized: normalize(options.requestText ?? prompt),
         nativeIntent: native.nativeIntent,
         labels,
         attachments: options.attachments,
@@ -451,6 +451,14 @@ function taskClassFromPrompt(normalized: string): IntentTaskClass {
   }
 
   return "general";
+}
+
+function matchActionableSkill(skill: LoadedSkill | SkillDefinition, input: Parameters<typeof matchSkill>[1]): SkillMatch | undefined {
+  const original = matchSkill(skill, input);
+  // Preserve negative/defer policy evidence even for informational requests.
+  if (original?.deferred) return original;
+  const prompt = explicitRequestSegments(input.prompt).join(" ");
+  return matchSkill(skill, { ...input, prompt, normalized: normalize(prompt) });
 }
 
 function matchSkill(skill: LoadedSkill | SkillDefinition, input: {

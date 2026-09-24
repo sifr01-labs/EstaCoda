@@ -7,23 +7,23 @@ describe("executed research capability baseline", () => {
     const report = buildResearchCapabilityBaseline();
     expect(report).toEqual(buildResearchCapabilityBaseline());
     expect(new Set(report.cases.map((row) => row.id)).size).toBe(researchRoutingCases.length);
-    expect(report.cases.find((row) => row.id === "compound-research")).toMatchObject({ taskClass: "research", selectedSkill: null, missingTools: [] });
-    expect(report.cases.find((row) => row.id === "prepare-markdown")).toMatchObject({ missingTools: [], falseCompleteWithoutExecution: true });
+    expect(report.cases.find((row) => row.id === "compound-research")).toMatchObject({ taskClass: "research", selectedSkill: "research-discovery", missingTools: [] });
+    expect(report.cases.find((row) => row.id === "prepare-markdown")).toMatchObject({ missingTools: [], falseCompleteWithoutExecution: false });
     expect(report.cases.find((row) => row.id === "discovery-slash")).toMatchObject({ selectedSkill: "research-discovery", missingTools: [] });
   });
 
   it("keeps misses in denominators rather than scoring known failures as successes", () => {
     const { metrics } = buildResearchCapabilityBaseline();
-    expect(metrics.primarySkillPrecision).toEqual({ numerator: 5, denominator: 5, value: 1 });
-    expect(metrics.primarySkillRecall).toEqual({ numerator: 5, denominator: 8, value: 5 / 8 });
+    expect(metrics.primarySkillPrecision).toEqual({ numerator: 8, denominator: 8, value: 1 });
+    expect(metrics.primarySkillRecall).toEqual({ numerator: 8, denominator: 8, value: 1 });
     expect(metrics.requestedCapabilityRecall).toEqual({ numerator: 22, denominator: 22, value: 1 });
-    expect(metrics.falseCompleteWithoutExecution).toEqual({ numerator: 6, denominator: 9, value: 6 / 9 });
+    expect(metrics.falseCompleteWithoutExecution).toEqual({ numerator: 4, denominator: 9, value: 4 / 9 });
     expect(metrics.forbiddenExposureCount).toBe(0);
   });
 
-  it("reports Arabic and mixed-language misses separately and undefined precision honestly", () => {
+  it("reports Arabic and mixed-language measurements separately", () => {
     const { perLanguage } = buildResearchCapabilityBaseline();
-    expect(perLanguage.ar).toMatchObject({ caseCount: 3, primarySkillPrecision: { numerator: 0, denominator: 0, value: null }, requestedCapabilityRecall: { numerator: 4, denominator: 4 } });
+    expect(perLanguage.ar).toMatchObject({ caseCount: 3, primarySkillPrecision: { numerator: 1, denominator: 1, value: 1 }, requestedCapabilityRecall: { numerator: 4, denominator: 4 } });
     expect(perLanguage.mixed).toMatchObject({ caseCount: 2, requestedCapabilityRecall: { numerator: 4, denominator: 4 } });
   });
 

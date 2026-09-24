@@ -107,7 +107,7 @@ export function buildResearchCapabilityBaseline() {
   return {
     version: 1,
     scope: "Development probes: two real bundled skills, seven synthetic available tool definitions; no live model, no held-out claims.",
-    omissions: "missingTools means available in this controlled catalog but not exposed; production omission reasons and persisted request requirements are not yet instrumented.",
+    omissions: "missingTools means available in this controlled catalog but not exposed; production omission reasons and cross-turn requirement continuity remain outside this probe.",
     availableTools: tools.map((tool) => tool.name),
     metrics: summarize(cases),
     perLanguage: Object.fromEntries((["en", "ar", "mixed"] as const).map((language) => [language, summarize(cases.filter((row) => row.language === language))])),

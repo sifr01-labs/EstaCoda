@@ -1,4 +1,5 @@
-// Offline PR 0 measurements. Writes JSON to stdout; no live accounts or models.
+// Offline measurements of the PR 0 corpus on current code. Writes JSON to stdout;
+// no live accounts or models. Keep historical measurement artifacts unchanged.
 // Run: node --import tsx scripts/measure-research-reliability-baseline.ts
 import assert from "node:assert/strict";
 import { rm, stat } from "node:fs/promises";
@@ -39,7 +40,11 @@ try {
       reportFileExists,
       schemaTokensRough: { median: schemaTokens[Math.floor(schemaTokens.length / 2)], p95: schemaTokens[Math.ceil(schemaTokens.length * 0.95) - 1] },
       inventory: inventory.map((event) => ({ phase: event.phase, tools: event.tools, nativeSchemaTokens: event.nativeSchemaTokens })),
-      requestRequirementTelemetry: "not yet implemented",
+      requestRequirements: [research, rerun, save].map((response) => {
+        const { originTurnId, ...requirements } = response.intent.requestRequirements ?? {};
+        return { ...requirements, hasOriginTurnId: originTurnId !== undefined };
+      }),
+      requestRequirementTelemetry: "turn-local intent-routed requirements; persisted continuity remains PR 4",
       detailedOmissionTelemetry: "not yet implemented"
     }
   }, null, 2));

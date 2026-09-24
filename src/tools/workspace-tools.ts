@@ -2,7 +2,7 @@ import { EditorContentView } from "../execution/editor-content-view.js";
 import { HostProcessScope, type HostProcesses } from "../execution/host-processes.js";
 import { HostWorkspaceFiles, type WorkspaceFiles, type WorkspacePathOptions } from "../execution/host-workspace-files.js";
 import type { HostExecutionLease } from "../execution/host-environment.js";
-import { randomUUID } from "node:crypto";
+import { createHash, randomUUID } from "node:crypto";
 import { basename, dirname, isAbsolute, join, relative, resolve } from "node:path";
 import { platform } from "node:os";
 import type { EnvironmentType } from "../contracts/security.js";
@@ -346,6 +346,7 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
             : `No changes to ${relativePath}; content is already up to date (${bytes} bytes).`,
           metadata: {
             path: relativePath,
+            contentSha256: createHash("sha256").update(input.content).digest("hex"),
             bytes,
             oldBytes,
             newBytes: bytes,
@@ -1523,6 +1524,8 @@ function renderWorkspaceFile(
     metadata: {
       path: relative(root, path),
       bytes: byteLength,
+      ...(!truncated && options.lineStart === undefined && options.lineEnd === undefined && options.alreadyRanged !== true
+        ? { contentSha256: createHash("sha256").update(content).digest("hex") } : {}),
       truncated
     }
   };
@@ -1911,6 +1914,9 @@ function createWorkspaceIO(files: WorkspaceFiles) {
       content: `Applied patch to ${fileCount} file(s), ${hunkCount} hunk(s).`,
       metadata: {
         paths: prepared.files.map((file) => file.path),
+        fileOutputs: prepared.files.filter((file) => file.operation !== "delete").map((file) => ({
+          path: file.path, contentSha256: createHash("sha256").update(file.after).digest("hex")
+        })),
         fileCount,
         hunkCount,
         oldBytes,
@@ -2152,6 +2158,7 @@ function createWorkspaceIO(files: WorkspaceFiles) {
     });
     const metadata: Record<string, unknown> = {
       path: relativePath,
+      contentSha256: createHash("sha256").update(after).digest("hex"),
       operation: input.mode,
       oldBytes,
       newBytes,
@@ -2399,14 +2406,10 @@ function createWorkspaceIO(files: WorkspaceFiles) {
       return errorResult("file appears to be binary");
     }
 
-    const truncated = bytes.length > options.maxReadBytes;
     const content = bytes.subarray(0, options.maxReadBytes).toString("utf8");
-    const ranged = applyLineRange(content, options.lineStart, options.lineEnd);
-
-    return renderWorkspaceFile(root, path, ranged, {
-      maxReadBytes: options.maxReadBytes,
-      originalBytes: bytes.length,
-      alreadyRanged: true
+    return renderWorkspaceFile(root, path, content, {
+      ...options,
+      originalBytes: bytes.length
     });
   }
 

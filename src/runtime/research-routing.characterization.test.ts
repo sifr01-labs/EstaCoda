@@ -9,8 +9,8 @@ import { IntentRouter } from "./intent-router.js";
 import { deriveExecutionCompletionFloor, deriveExecutionFinalOutcome } from "./execution-outcome.js";
 import { selectProviderToolsForTurn } from "./provider-tool-narrowing.js";
 
-// PR 0 characterization, not desired acceptance behavior. Replace each known-gap
-// assertion with the desired contract in its owning fix (PR 1 or PR 2).
+// PR 0 cases migrated to PR 1 desired behavior. The catalog-cap case remains
+// an explicit characterization owned by PR 2.
 // Synthetic requests preserve the failure shape without embedding a private chat.
 const registry = new SkillRegistry();
 for (const name of ["researcher", "research-discovery"]) {
@@ -44,11 +44,11 @@ function inspect(prompt: string) {
   return { intent, selection, names: selection.initialTools.map((schema) => catalog.aliases.get(schema.function.name)) };
 }
 
-describe("research routing baseline (known gaps, PR 0)", () => {
-  it("exposes explicit research delegation without choosing an academic skill by default (PR 1)", () => {
+describe("research routing regression (PR 1, remaining PR 2 catalog gap)", () => {
+  it("selects report discovery and exposes explicit research delegation (PR 1)", () => {
     const { intent, names, selection } = inspect("Do deep research on the latest battery recycling methods and prepare a report. Use 3 subagents");
     expect(intent.taskClass).toBe("research");
-    expect(intent.primarySkill).toBeUndefined();
+    expect(intent.primarySkill?.name).toBe("research-discovery");
     expect(catalog.entries.some(({ tool }) => tool.name === "delegate_task")).toBe(true);
     expect(names).toContain("web.extract");
     expect(names).toContain("delegate_task");
@@ -65,22 +65,22 @@ describe("research routing baseline (known gaps, PR 0)", () => {
     expect(inspect("Find recent arXiv papers on battery recycling.").intent.primarySkill?.name).toBe("research-discovery");
   });
 
-  it("reports a prepare-file request complete without a write or receipt (PR 1/4)", () => {
+  it("blocks a prepare-file request without a write or receipt (PR 1)", () => {
     const prompt = "Please prepare a markdown file";
     const completionFloor = deriveExecutionCompletionFloor({ userText: prompt });
     expect(inspect(prompt).names).toContain("file.write");
-    expect(completionFloor).toBe("none");
+    expect(completionFloor).toBe("mutation_with_verification");
     const outcome = deriveExecutionFinalOutcome({
       providerExecution: { ok: true, attempts: [], fallbackUsed: false, toolCalls: [], response: { ok: true, provider: "baseline", model: "fake", content: "Copy this Markdown into a file." } },
       toolExecutions: [], executionReceipts: [], completionFloor
     });
-    expect(outcome.status).toBe("completed");
+    expect(outcome.status).toBe("blocked");
     expect(outcome.confirmedActions).toEqual([]);
   });
 
   it("exposes file.write for an Arabic save requirement (PR 1)", () => {
     const prompt = "احفظ التقرير في ملف Markdown";
-    expect(deriveExecutionCompletionFloor({ userText: prompt })).toBe("mutation");
+    expect(deriveExecutionCompletionFloor({ userText: prompt })).toBe("mutation_with_verification");
     expect(inspect(prompt).names).toContain("file.write");
   });
 
@@ -119,7 +119,7 @@ describe("research routing baseline healthy controls", () => {
   });
 });
 
- describe("explicit research skill resolution", () => {
+describe("explicit research skill resolution", () => {
   it("returns candidates for the ambiguous generic research skill", () => {
     expect(inspect("Use the research skill").intent.skillRequests).toEqual([{ reference: "research", status: "ambiguous", candidates: ["researcher", "research-discovery"] }]);
   });
@@ -136,7 +136,7 @@ describe("research routing baseline healthy controls", () => {
   });
 });
 
- describe("exact requested tools stay within the session catalog", () => {
+describe("exact requested tools stay within the session catalog", () => {
   it("adds delegation companions without unrelated core tools", () => {
     const { names } = inspect("Use 3 subagents to investigate battery recycling");
     expect(names).toEqual(expect.arrayContaining(["delegate_task", "task.status", "task.result.read"]));

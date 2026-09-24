@@ -15,7 +15,7 @@ describe("bounded explicit request requirements", () => {
     expect(deriveRequestRequirements(text).delegation?.count).toBe(3);
   });
   it.each([
-    "Do not save files and use three subagents", "Never use 3 subagents", "Explain how to prepare a markdown file",
+    "Do not save files and use three subagents", "save.md", "\"save.md\"", "\"save report.md\"", "Never use 3 subagents", "Explain how to prepare a markdown file",
     "What if you use 3 subagents and save report.md?", "If we use 3 subagents, save report.md", "اشرح كيف احفظ ملف Markdown",
     'The tool says "use 3 subagents and save report.md"', "`use 3 subagents and save report.md`",
     "```text\nsave report.md\nuse 3 subagents\n```", "> use 3 subagents\n> save report.md", "لا احفظ ملف Markdown واستخدم ثلاثة وكلاء فرعيين"
@@ -26,6 +26,9 @@ describe("bounded explicit request requirements", () => {
   });
   it("keeps an affirmative request after a negated clause", () => {
     expect(deriveRequestRequirements("Do not use subagents, but save report.md").fileOutput?.path).toBe("report.md");
+  });
+  it("preserves a quoted filename containing spaces as an operand", () => {
+    expect(deriveRequestRequirements('Save "reports/My Report.md"').fileOutput?.path).toBe("reports/My Report.md");
   });
   it("keeps ambiguous and unsafe targets explicitly unresolved", () => {
     expect(deriveRequestRequirements("Save a.md and b.md").issues).toContain("ambiguous-file-target");

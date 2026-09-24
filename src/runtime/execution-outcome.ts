@@ -14,6 +14,9 @@ import type { ProviderExecutionResult } from "../providers/provider-executor.js"
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { isolateLtr } from "../ui/bidi.js";
 import { affirmativeRequestSegments } from "./request-action-segments.js";
+import type { RequestRequirements } from "../contracts/intent.js";
+import { deriveRequestRequirements } from "./request-requirements.js";
+import { fileOutputEvidence } from "./file-output-evidence.js";
 
 const RECEIPT_RISK_CLASSES = new Set<ToolRiskClass>([
   "workspace-write",
@@ -36,6 +39,7 @@ export function deriveExecutionCompletionFloor(input: {
   userText: string;
   capabilities?: readonly ExecutionCompletionCapability[];
 }): ExecutionCompletionFloor {
+  if (deriveRequestRequirements(input.userText).fileOutput !== undefined) return "mutation_with_verification";
   // Scope negation before punctuation/contractions are flattened: "and add"
   // inside "do not modify ... and add" is not a requested mutation.
   const text = normalizeExpectationText(input.userText);
@@ -70,6 +74,7 @@ export function deriveExecutionCompletionFloor(input: {
 }
 
 export function deriveExecutionFinalOutcome(input: {
+  requestRequirements?: RequestRequirements;
   providerExecution?: ProviderExecutionResult;
   toolExecutions: readonly ToolExecutionRecord[];
   executionReceipts: readonly ExecutionEvidenceRecord[];
@@ -81,7 +86,10 @@ export function deriveExecutionFinalOutcome(input: {
   completionFloor?: ExecutionCompletionFloor;
   openContinuation?: boolean;
 }): ExecutionFinalOutcome {
-  const confirmedActions = confirmedActionReceipts(input.executionReceipts);
+  const fileEvidence = fileOutputEvidence({ requirements: input.requestRequirements, ...input });
+  const confirmedActions = confirmedActionReceipts(input.executionReceipts).map((receipt) =>
+    fileEvidence.satisfied && fileEvidence.writeCallId !== undefined && fileEvidence.writeCallId === receipt.toolCallId
+      ? { ...receipt, verification: "verified" as const } : receipt);
   const uncertainActions = uncertainActionReceipts(input.toolExecutions, input.toolPlans ?? []);
   const terminationCause = input.cancelled === true
     ? "cancelled"
@@ -94,7 +102,9 @@ export function deriveExecutionFinalOutcome(input: {
     terminationCause,
     completionFloor,
     confirmedActions,
-    uncertainActions
+    uncertainActions,
+    fileOutputSatisfied: input.delegatedAnswerOwned === true || fileEvidence.satisfied,
+    delegatedFileOutput: input.delegatedAnswerOwned === true && input.requestRequirements?.fileOutput !== undefined
   });
   return { status, terminationCause, completionFloor, confirmedActions, uncertainActions };
 }
@@ -293,6 +303,8 @@ function recoveredReplayCallIds(receipts: readonly ExecutionEvidenceRecord[]): R
 }
 
 function classifyFinalStatus(input: {
+  fileOutputSatisfied: boolean;
+  delegatedFileOutput: boolean;
   providerExecution?: ProviderExecutionResult;
   executionReceipts: readonly ExecutionEvidenceRecord[];
   toolPlans?: readonly ToolCallPlan[];
@@ -323,11 +335,11 @@ function classifyFinalStatus(input: {
   const hasConfirmedWork = input.confirmedActions.length > 0 || succeeded > 0;
   const hasUsefulEvidence = hasConfirmedWork || input.uncertainActions.length > 0;
   const unresolvedToolPlans = (input.toolPlans ?? []).some(isUnresolvedPlan);
-  const completionFloorSatisfied = settlesCompletionFloor(
+  const completionFloorSatisfied = input.fileOutputSatisfied && (input.delegatedFileOutput || settlesCompletionFloor(
     input.completionFloor,
     authoritativeReceipts,
     input.confirmedActions
-  );
+  ));
 
   if (
     input.delegatedAnswerOwned === true &&
