@@ -91,6 +91,14 @@ Trust is orthogonal to profiles: a profile selects configuration, credentials, m
 
 Session model overrides are runtime inputs layered over the selected profile config. CLI and gateway `/model <provider>/<model>` commands are scoped to the active session/conversation by default, persist with that session, and are revalidated during runtime construction. Invalid or stale overrides are ignored non-fatally and the configured profile primary route is used. The explicit `/model --global <provider>/<model>` form mutates only the selected profile's primary route after the relevant trust and authorization checks pass. It preserves fallback routes and auxiliary routes.
 
+### Capability selection and recovery
+
+The session catalog contains capabilities permitted by the current session scope. Provider exposure selects a bounded subset from that catalog, with explicit request requirements participating in selection. Registered, discoverable, exposed and successfully executed are distinct states. Exposure never grants workspace trust, approval, credentials or child-runtime authority.
+
+`capability.discover` inspects bounded metadata; `capability.request` requests a permitted expansion. Only receipts owned by the registered recovery handler can change exposure, between provider iterations. A request cannot authorize another tool in the same batch. Aliases remain stable, limits still apply, and recovered skills require real instruction-read evidence. Child and background runtimes retain their narrower explicit envelopes.
+
+Current capability claims use bounded runtime evidence. Transient availability failures are excluded from automatic durable user-fact promotion, while explicit user restrictions remain binding. Semantic routing fallback remains shadow-only. Deterministic corpus scores and execution checks are recorded in the [capability reliability release record](../planning/reliability-release-validation.md).
+
 ### Security And Approval Wiring
 
 `createRuntime` composes the active `SecurityPolicy` and optional `WorkspaceApprovalController`. The security policy produces deterministic `allow` / `ask` / `deny` assessments; the controller layers one-time, session, and persistent approval grants around that policy without overriding the hardline command floor.

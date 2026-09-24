@@ -7,6 +7,18 @@ description: "Search, extraction, crawl provider selection, credential handling,
 
 Web research providers are separate from browser automation and separate from LLM providers. The web research registry backs `web.search`, `web.extract`, and `web.crawl`; browser tools still use the browser backend and CDP/Browserbase policy.
 
+## Research completion and continuity
+
+Explicit research, skill, worker-count and file requests produce bounded runtime requirements. Research workers that require live sources cannot be admitted without an available `web.search`. Successful delegation creates a durable Task; it does not prove that research or report delivery has finished.
+
+Research synthesis reads accepted worker results and preserves source URLs, supported claims, limitations, observed publication dates and retrieval dates. A snippet is identified as a snippet; an unknown publication date does not establish recency. Missing or failed worker scopes remain explicit. These execution checks establish provenance and coverage, not scientific correctness.
+
+A save-only follow-up can reuse the authorized accepted synthesis, including after restart. Completion requires a matching file write and complete readback in the active workspace. Pasting Markdown, writing unrelated content or claiming a save without tool evidence cannot satisfy that requirement. The foreground save is a separate verified action; it does not rewrite the Task's historical settlement-time notice that the file was pending. Saving a workspace file does not grant permission to send arbitrary local files to a messaging channel.
+
+Identical successful public extraction reads can be reused within one turn when the provider explicitly supports stateless reuse. Reuse retains the original observation time and provenance and revalidates current URL/security policy. Explicit refresh, authorization changes, credentialed/private reads and unsuccessful results do not reuse the observation.
+
+Deterministic release checks run with `pnpm run validate:research-reliability -- <report.json>`. After `pnpm run desktop:package`, `pnpm run desktop:research-release` exercises the actual packaged app with synthetic model and web responses. See the [release validation record](../planning/reliability-release-validation.md) for measured scope and the separately pending live-provider assessment.
+
 ## Live provider state
 
 | Provider | Capabilities | Status | Setup |

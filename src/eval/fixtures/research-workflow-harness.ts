@@ -1,3 +1,4 @@
+import type { SecurityPolicy } from "../../contracts/security.js";
 import { resolveProfileStateHome } from "../../config/profile-home.js";
 import { createMockBrowserBackend } from "../../browser/browser-backend.js";
 import { executionActionIdentity } from "../../security/execution-action-identity.js";
@@ -44,7 +45,7 @@ export function answer(content: string): ScriptStep {
   return () => ({ content });
 }
 
-export async function createResearchWorkflowHarness(options: { maxToolCalls?: number; toolDecision?: () => "allow" | "deny"; memoryText?: string; browserAvailable?: boolean; searchAvailable?: boolean; denyWrites?: boolean; maxBatchTasks?: number; fileToolsAvailable?: boolean; fallbackOnRequest?: number; approvalDecision?: ToolApprovalHandler } = {}) {
+export async function createResearchWorkflowHarness(options: { securityPolicy?: SecurityPolicy; maxToolCalls?: number; toolDecision?: () => "allow" | "deny"; memoryText?: string; browserAvailable?: boolean; searchAvailable?: boolean; denyWrites?: boolean; maxBatchTasks?: number; fileToolsAvailable?: boolean; fallbackOnRequest?: number; approvalDecision?: ToolApprovalHandler } = {}) {
   const root = await mkdtemp(join(tmpdir(), "estacoda-research-baseline-"));
   const homeDir = join(root, "home");
   const workspaceRoot = join(root, "workspace");
@@ -120,7 +121,7 @@ export async function createResearchWorkflowHarness(options: { maxToolCalls?: nu
       // Constrain unrelated capabilities using the real session filter.
       // Catalog truncation is independently characterized at the function seam.
       enabledToolsets: options.fileToolsAvailable === false ? ["web"] : ["core", "files", "web", "research"],
-      securityPolicy: { decide: (request) => options.toolDecision?.() ?? (options.approvalDecision ? approvedActions.has(request.actionKey ?? "") ? "allow" : "ask" : options.denyWrites && request.riskClass === "workspace-write" ? "deny" : "allow") },
+      securityPolicy: options.securityPolicy ?? { decide: (request) => options.toolDecision?.() ?? (options.approvalDecision ? approvedActions.has(request.actionKey ?? "") ? "allow" : "ask" : options.denyWrites && request.riskClass === "workspace-write" ? "deny" : "allow") },
       executionControls: { providerBudgets: { maxProviderIterations: 8, maxProviderToolCalls: options.maxToolCalls ?? 8, maxProviderWallClockMs: 15_000, finalizationReserveMs: 0 } }
     });
   };

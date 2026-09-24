@@ -1,0 +1,76 @@
+{
+  "version": 1,
+  "passed": true,
+  "measuredAt": "2026-09-24T14:12:41.722Z",
+  "sourceBaseCommit": "12e60f3b1a09061c502c6c39fc55558da3e59227",
+  "sourceOverlay": [
+    {
+      "path": "package.json",
+      "sha256": "8427aa6992264ee7c5031c694c9d0a152be35125b78afd8cd47e4743c70beba8"
+    },
+    {
+      "path": "src/eval/fixtures/research-workflow-harness.ts",
+      "sha256": "21050231dec2afbd52d2d3d4928993a2883522762a105c5ff41c4fefb78c6073"
+    },
+    {
+      "path": "src/eval/fixtures/research-workflow-release.ts",
+      "sha256": "748e99dbcb939b7a10a3e30b37e0c274aa88390719b77351316b1616ba93c754"
+    },
+    {
+      "path": "src/runtime/research-surfaces.acceptance.test.ts",
+      "sha256": "091e05b2667797e4876aa3051f6361d9dc2aa7d03c58a7ef77db8649f4b59193"
+    },
+    {
+      "path": "scripts/validate-research-reliability.ts",
+      "sha256": "45ea2e55bdbc4156b983daeb3691f409803fe0e085b2d5120ba97d9856edf024"
+    },
+    {
+      "path": "apps/desktop/tests/research-packaged.mts",
+      "sha256": "ce63e3ff6c8a4f9e79aa2cb9627b86359170c7554e2fe70f1058603a45e93cb4"
+    }
+  ],
+  "platform": "darwin",
+  "arch": "arm64",
+  "runtime": {
+    "sha256": "4136f9f681aa539bebca880b0803c2d3d2fad2f77c116071c02938839e622177",
+    "nodeVersion": "v24.14.1",
+    "coreVersion": "0.1.0",
+    "entrySha256": "8b7b5e8816ffe62d9baa2133dd5cc54a1a8ea36997b0bda6fc631039c700f6ec",
+    "signature": "ad-hoc verified",
+    "ownedBridgeVerified": true,
+    "inventoryVerified": true,
+    "matchesCurrentDist": true
+  },
+  "fixtures": {
+    "model": "scripted loopback HTTP",
+    "web": "in-process registered synthetic provider in packaged supervisor",
+    "liveModelCalls": 0,
+    "transport": "actual signed app + preload/Main + owned bridge + private control"
+  },
+  "workflow": {
+    "workers": 3,
+    "acceptedResults": 4,
+    "distinctChildSessions": 4,
+    "tasks": 1,
+    "searches": 3,
+    "providerCalls": 13,
+    "appRestartNoReplay": true,
+    "fileBytes": 655,
+    "fileSha256": "7965576a2d9c38dfea13465934c442243231fcfd7bd123858c419a90cb31a511",
+    "readbackVerified": true,
+    "historicalTaskStatus": "partial"
+  },
+  "allScenarios": {
+    "providerCalls": 20,
+    "actualToolResults": 14,
+    "failedToolResults": 1
+  },
+  "scenarios": {
+    "research": true,
+    "saveOnlyAfterRestart": true,
+    "skillRecovery": true,
+    "missingSearch": true,
+    "falseSaveBlocked": true
+  },
+  "liveAssessment": "pending approved model, sources and spend ceiling"
+}

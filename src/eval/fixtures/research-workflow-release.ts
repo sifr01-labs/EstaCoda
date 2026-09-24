@@ -1,3 +1,4 @@
+import type { AgentLoopResponse } from "../../runtime/agent-loop.js";
 import assert from "node:assert/strict";
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
@@ -8,14 +9,20 @@ import { TaskScheduler } from "../../tasks/task-scheduler.js";
 import { assertTrue, buildResult } from "../eval-runner.js";
 import { answer, createResearchWorkflowHarness, nativeCall, CLAIM_TABLE, REPORT, SOURCE_URL } from "./research-workflow-harness.js";
 
-export async function measureResearchWorkflow() {
-  const h = await createResearchWorkflowHarness();
+export async function measureResearchWorkflow(options: {
+  harnessOptions?: Parameters<typeof createResearchWorkflowHarness>[0];
+  surface?: (h: Awaited<ReturnType<typeof createResearchWorkflowHarness>>) => Promise<{ turn(text: string): Promise<AgentLoopResponse>; close(): Promise<void> }>;
+} = {}) {
+  const h = await createResearchWorkflowHarness(options.harnessOptions);
+  let surface: Awaited<ReturnType<NonNullable<typeof options.surface>>> | undefined;
   try {
+    surface = await options.surface?.(h);
+    const turn = (text: string) => surface?.turn(text) ?? h.turn(text);
     h.enqueue(nativeCall("delegate_task", { tasks: ["collection", "processing", "reuse"].map((scope) => ({
       task: `Research battery recycling: ${scope}.`, allowedTools: ["web.search"],
       research: { scope, requireLiveSources: true, requireRepositoryEvidence: false }
     })) }));
-    await h.turn("Use the researcher skill and use 3 subagents to research current battery recycling. Save report.md");
+    await turn("Use the researcher skill and use 3 subagents to research current battery recycling. Save report.md");
     const task = h.store.listTasks()[0]; assert(task);
     const steps = h.store.listSteps(task.id, task.activePlanRevisionId!);
     const workers = steps.filter((step) => step.executor.role === "worker");
@@ -36,7 +43,7 @@ export async function measureResearchWorkflow() {
     const content = (await resultService.readText({ taskId: task.id, resultId: final.id, sessionId: h.runtime.sessionId })).content;
     await h.restart();
     h.enqueue(nativeCall("task_result_read", { task_id: task.id, result_id: final.id }), nativeCall("file_write", { path: "report.md", content }), nativeCall("file_read", { path: "report.md" }), answer("Saved report.md."));
-    const saved = await h.turn("Save this report to report.md");
+    const saved = await turn("Save this report to report.md");
     assert.equal(saved.finalOutcome?.status, "completed");
     assert.equal(await readFile(join(h.workspaceRoot, "report.md"), "utf8"), content);
     assert.equal(h.store.listTasks().length, 1); assert.equal(h.searches.length, 3);
@@ -47,7 +54,7 @@ export async function measureResearchWorkflow() {
       providerCalls: h.requests.length, searches: h.searches.length, tasks: h.store.listTasks().length, restarted: true,
       outputBytes: Buffer.byteLength(content), finalOutcome: saved.finalOutcome.status, sourceTable: content.includes("| Retrieved |"),
       actualToolCalls: persistedEvents.filter((event) => event.kind === "tool-result").length, liveModelCalls: 0 };
-  } finally { await h.dispose(); }
+  } finally { await surface?.close(); await h.dispose(); }
 }
 export const researchWorkflowReleaseCase: EvalCase = {
   id: "research-workflow-release", name: "Research worker, synthesis and restart delivery acceptance", description: "Real runtime and durable Task executor with scripted provider/network fixtures.", tags: ["research", "workflow", "release"],

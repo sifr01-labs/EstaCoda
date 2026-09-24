@@ -1,6 +1,6 @@
 # Capability reliability — PR 6 implementation record
 
-Status: deterministic routing/workflow gates implemented; packaged and live-provider release acceptance are separate required gates. Work continues on `ame/reliability-baseline`.
+Status: deterministic, three-surface and rebuilt-package gates passed. Live-provider assessment remains pending approved model, sources and spend ceiling; overall release acceptance is not yet complete. Implemented on the existing `ame/reliability-baseline` branch.
 
 ## Frozen routing corpus and measured scope
 
@@ -41,6 +41,40 @@ The release runner covers the A1–A16 execution matrix through the existing own
 | A17 | CLI/gateway owning regression suites run here; equivalent real-runtime entry-point and rebuilt Desktop scenarios are recorded separately below |
 
 The first commit's release runner passed 834 tests, with zero failures. Tracked-source typechecking and diff checks passed. Full standard and rebuilt-package checks are recorded with the second commit. Detailed measurements are in `evals/results/research-reliability-source-v1.json`.
+
+## Three-surface and packaged acceptance
+
+`src/runtime/research-surfaces.acceptance.test.ts` runs the production CLI session loop and authenticated Telegram gateway over the same real runtime, durable Task workers, result store and file tools. Its seven tests cover three-worker research, synthesis, restart/save-only continuation, skill recovery, unavailable search, false save claims and an unauthorized Telegram sender/chat. The fixture owns runtime disposal across turns; the real entry points still process each request. Model responses and Telegram transport are synthetic. The same `open` security mode is used for the successful workflows; existing strict/adaptive/open, hardline, approval/denial, stop-interruption, session ownership, Task delivery and media-adapter suites remain separate executable gates. No real bot or chat was contacted.
+
+`pnpm run desktop:research-release -- <app-path> <report-path>` launches the actual ad-hoc signed macOS arm64 app with an isolated HOME/profile and a PATH without Node or EstaCoda. It verifies the complete packaged runtime inventory, compares compiled core files against the current distribution, and checks that the app launches its retained owned Node/core bridge. The supervisor and Task scheduler also run from that package. The only provider substitutions are a local scripted model HTTP server and a registered synthetic web provider in the packaged supervisor. No renderer, bridge, executor, approval decision, Task result or file receipt is mocked.
+
+The five packaged scenarios passed: three-worker research, save-only after app restart, skill recovery with successful instruction-read evidence, unavailable-search admission rejection and a blocked false-save claim. Assertions wait for the exact submitted user message's persisted outcome, not an admission receipt or a cached UI status. The report retains base-commit and source-overlay hashes because this measurement precedes the second commit.
+
+Measured package: Node `v24.14.1`, core `0.1.0`, runtime SHA-256 `4136f9f681aa539bebca880b0803c2d3d2fad2f77c116071c02938839e622177`. Research plus save used 13 scripted provider calls, 3 workers, 4 distinct child sessions including synthesis, 4 accepted results, 1 Task, 3 searches and a 655-byte report verified by readback. All five scenarios used 20 provider calls and produced 14 actual persisted tool results; the one failed tool result is the expected unavailable-search rejection. The source fixture uses 15 calls because it reads three synthesis dependencies separately; the packaged fixture reads them in one batch. This is a fixture sequencing difference, not a measured model-efficiency gain.
+
+The Task's historical settlement remains `partial` because its original file was pending at settlement. The later foreground save has its own verified completed outcome, consistent with PR 4; it does not rewrite historical Task settlement. App restart creates no new workers or repeated searches. Detailed package evidence is in `evals/results/research-reliability-packaged-v1.json`.
+
+## Validation and review
+
+The original workspace contains unrelated duplicate source/dependency files, including a duplicate `bidi-js` declaration. They were preserved. Standard validation and packaging ran in a clean detached checkout of `12e60f3b` with the second commit's source changes copied explicitly. A fresh frozen install with an isolated pnpm store avoided a cloud-placeholder duplicate that stalled the first dependency-copy attempt. The pinned Electron install hook was run explicitly because its binary was absent after installation. No lockfile or packaging-policy change was needed.
+
+| Check | Result |
+| --- | --- |
+| Node / pnpm | `v24.14.1` / `10.33.0` |
+| `pnpm install --frozen-lockfile` (isolated store) | Passed |
+| `pnpm run typecheck` | Passed |
+| `pnpm run test` | 11,970 tests, 746 files passed |
+| `pnpm run validate:research-reliability -- <report.json>` | 1,225 tests across 31 owning suites; deterministic gates passed |
+| `pnpm run smoke` / `pnpm run smoke:dist` | All cases passed in each |
+| `pnpm run build` (invoked by packaging) | Passed |
+| `pnpm run audit:runtime-imports` / `pnpm run audit:esm` | Passed |
+| `pnpm run desktop:package` | Passed; actual signed package launched |
+| `pnpm run desktop:research-release` | Five packaged scenarios passed |
+| `pnpm run desktop:typecheck` / packaged test typecheck | Passed |
+| `pnpm run desktop:test` | 173 tests, 46 files passed |
+| `git diff --check` | Passed |
+
+Review covered session/profile isolation, deterministic corpus separation, successful instruction and file receipts, missing capability rejection, provider/schema bounds, narrower child envelopes, restart replay and package provenance. Public runtime and web-research docs now describe implemented behavior. Security risk remains concentrated in capability exposure, durable context and network/file execution; no approval, trust, profile, URL or hardline boundary is relaxed. These checks establish deterministic execution behavior, not live citation quality or universal task success.
 
 ## Outstanding release assessments
 
