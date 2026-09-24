@@ -170,6 +170,7 @@ export function createDelegationTools(options: DelegationToolOptions): Registere
         let handle: DurableDelegationHandle;
         try {
           handle = await options.service.createAndActivate({
+            ...(context.requestContract === undefined ? {} : { requestContract: context.requestContract }),
             toolCallId: context.toolCallId,
             ...(context.visibleTurnId === undefined ? {} : { originTurnId: context.visibleTurnId }),
             tasks,

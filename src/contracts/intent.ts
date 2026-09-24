@@ -32,6 +32,8 @@ export type IntentLabel = string;
 
 /** Turn-local routing/completion hints, never execution authority. */
 export type RequestRequirements = {
+  /** Runtime-owned locator for a prior admitted Task; never completion evidence. */
+  sourceTaskId?: string;
   originTurnId?: string;
   skillReferences: string[];
   delegation?: { count?: number };

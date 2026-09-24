@@ -66,7 +66,7 @@ export function deriveRequestRequirements(userText: string, originTurnId?: strin
 export function requiredRequestTools(requirements: RequestRequirements | undefined): string[] {
   if (requirements === undefined) return [];
   return [
-    ...(requirements.delegation === undefined ? [] : ["delegate_task", "task.status", "task.result.read"]),
+    ...(requirements.sourceTaskId !== undefined ? ["task.status", "task.result.read"] : requirements.delegation === undefined ? [] : ["delegate_task", "task.status", "task.result.read"]),
     ...(requirements.fileOutput === undefined ? [] : ["file.write", "file.patch", "file.read"]),
     ...(requirements.skillReferences.length === 0 ? [] : ["skill.list", "skill.read"])
   ];

@@ -33,7 +33,7 @@ import type { IntentTaskClass } from "../contracts/intent.js";
 import type { SessionEvent } from "../contracts/session.js";
 import { redactString, redactValue } from "../utils/redaction.js";
 import { browserContinuityUrl } from "../browser/continuity-url.js";
-import { validateRequestRequirements } from "./request-requirement-state.js";
+import { validateRequestRequirements } from "../contracts/request-requirements.js";
 
 const SAFE_TOKEN = /^[A-Za-z0-9][A-Za-z0-9_.:-]*$/u;
 const STATUSES = new Set<ExecutionCheckpointStatus>([

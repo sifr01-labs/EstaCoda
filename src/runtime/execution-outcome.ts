@@ -17,6 +17,7 @@ import { affirmativeRequestSegments } from "./request-action-segments.js";
 import type { RequestRequirements } from "../contracts/intent.js";
 import { deriveRequestRequirements } from "./request-requirements.js";
 import { fileOutputEvidence } from "./file-output-evidence.js";
+import { researchRequestEvidence } from "./research-request-evidence.js";
 
 const RECEIPT_RISK_CLASSES = new Set<ToolRiskClass>([
   "workspace-write",
@@ -74,6 +75,7 @@ export function deriveExecutionCompletionFloor(input: {
 }
 
 export function deriveExecutionFinalOutcome(input: {
+  skillRequirementsSatisfied?: boolean;
   requestRequirements?: RequestRequirements;
   providerExecution?: ProviderExecutionResult;
   toolExecutions: readonly ToolExecutionRecord[];
@@ -103,7 +105,7 @@ export function deriveExecutionFinalOutcome(input: {
     completionFloor,
     confirmedActions,
     uncertainActions,
-    fileOutputSatisfied: input.delegatedAnswerOwned === true || fileEvidence.satisfied,
+    fileOutputSatisfied: (input.delegatedAnswerOwned === true || fileEvidence.satisfied) && researchRequestEvidence(input).satisfied,
     delegatedFileOutput: input.delegatedAnswerOwned === true && input.requestRequirements?.fileOutput !== undefined
   });
   return { status, terminationCause, completionFloor, confirmedActions, uncertainActions };

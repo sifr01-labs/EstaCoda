@@ -1,4 +1,6 @@
 import { MAX_CAPABILITY_ADDITIONS, type SessionCapabilityRecovery } from "../tools/capability-tools.js";
+import { buildSkillReadinessMetadata } from "../skills/skill-readiness.js";
+import { sanitizeCheckpointText } from "../session/execution-checkpoint-state.js";
 import type { RecoveredSkillReceipt, CapabilitySelectionDiagnostics } from "../contracts/runtime-event.js";
 import { describeCapabilitySelection } from "./provider-tool-narrowing.js";
 import type { ChannelAttachment } from "../contracts/channel.js";
@@ -124,6 +126,7 @@ export type ProviderTurnLoopRequestDefaults = {
 };
 
 export type ProviderTurnLoopResult = {
+  deliveredSkillNames?: string[];
   providerExecution: ProviderExecutionResult | undefined;
   toolExecutions: ToolExecutionRecord[];
   iterations: number;
@@ -317,6 +320,7 @@ export class ProviderTurnLoop {
       };
     }
     const providerToolExecutions: ToolExecutionRecord[] = [];
+    const deliveredSkillNames = new Set<string>();
     let effectiveProviderExecution: ProviderExecutionResult | undefined;
     let previousProviderExecution: ProviderExecutionResult | undefined;
     let iterations = 0;
@@ -506,9 +510,15 @@ export class ProviderTurnLoop {
         break;
       }
 
+      if (execution.ok && execution.attempts.some((attempt) => attempt.state === "dispatched") && input.selectedSkill !== undefined &&
+        (input.selectedSkillPromptContent !== undefined || input.selectedSkillInstructions !== undefined) &&
+        (input.selectedSkillSetup === undefined || !buildSkillReadinessMetadata(input.selectedSkill, input.selectedSkillSetup).setup_needed)) {
+        deliveredSkillNames.add(input.selectedSkill.name);
+      }
       if (execution.ok && execution.attempts.some((attempt) => attempt.state === "dispatched") && pendingSkillLoads.length > 0) {
         const loadedSkills = pendingSkillLoads.map(({ receipt }) => ({ ...receipt, appliedIteration: iteration }));
         for (const receipt of loadedSkills) this.#capabilityRecovery?.markSkillDelivered(receipt.name);
+        for (const receipt of loadedSkills) if (receipt.readiness === "available") deliveredSkillNames.add(receipt.name);
         const event: RuntimeEvent = { kind: "capability-skills-loaded", loadedSkills };
         await this.#sessionDb.appendEvent(workingSessionId, event);
         this.#trajectoryRecorder.record(event.kind, event);
@@ -681,6 +691,14 @@ export class ProviderTurnLoop {
       const beforeExecutions = providerToolExecutions.length;
       const beforePlans = input.toolPlans.length;
       const loopToolExecutionResult = await this.#toolPlanRunner.executePlans({
+        requestContract: input.intent.requestRequirements === undefined ||
+          (input.intent.requestRequirements.research === undefined && input.intent.requestRequirements.delegation === undefined && input.intent.requestRequirements.fileOutput === undefined && input.intent.requestRequirements.skillReferences.length === 0)
+          ? undefined : {
+            version: 1,
+            objective: sanitizeCheckpointText(this.#executionCheckpointController?.current()?.originalObjective ?? input.userText, 2000),
+            requirements: structuredClone(input.intent.requestRequirements),
+            ...(input.selectedSkill === undefined || !deliveredSkillNames.has(input.selectedSkill.name) ? {} : { skillName: input.selectedSkill.name })
+          },
         providerExecution: execution,
         activeProviderTools: new Set(this.#model?.supportsTools === true ? providerToolsForIteration.map((tool) => tool.function.name) : []),
         toolPlans: input.toolPlans,
@@ -1080,6 +1098,7 @@ export class ProviderTurnLoop {
 
     return {
       providerExecution: effectiveProviderExecution,
+      deliveredSkillNames: [...deliveredSkillNames],
       toolExecutions: providerToolExecutions,
       iterations,
       terminationCause,

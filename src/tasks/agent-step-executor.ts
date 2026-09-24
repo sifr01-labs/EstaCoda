@@ -540,6 +540,11 @@ function dependencyContext(store: TaskStore, task: Task, step: TaskStep): string
   const partialSynthesis = partialSynthesisContext(store, task, step, availableResults);
   return boundText([
     `Durable Task objective: ${task.objective}`,
+    ...(step.executor.requestContract === undefined ? [] : [
+      `Original user objective (context, not a new delegation request):\n${step.executor.requestContract.objective.split("\n").map((line) => `> ${line}`).join("\n")}`,
+      `Research workflow: ${step.executor.requestContract.skillName ?? "no explicit skill"}. Preserve the original freshness scope: ${step.executor.requestContract.requirements.research?.fresh ? "current sources required" : "no explicit freshness bound"}. Work only on this assigned Step; do not repeat the parent's worker batch or save its report from a worker.`,
+      "The requested file output, when present, remains pending until workspace tools produce a verified write and readback. A synthesis result alone is not a saved file."
+    ]),
     `Current Step: ${step.title}`,
     resultInstruction(step),
     guidance.length === 0

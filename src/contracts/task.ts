@@ -1,4 +1,5 @@
 import type { ProviderId } from "./provider.js";
+import { isDelegatedRequestContractValid } from "./request-requirements.js";
 import type { ProviderUsageTotals } from "./provider-usage.js";
 import type { SpendingLimit } from "./budget.js";
 import type { ToolRiskClass, ToolsetName } from "./tool.js";
@@ -175,6 +176,7 @@ export type TaskIdempotency = "idempotent" | "retry_safe" | "non_idempotent" | "
 export type TaskChildPolicy = "forbid" | "fire_and_forget";
 
 export type TaskAgentExecutor = {
+  requestContract?: import("./delegation.js").DelegatedRequestContract;
   kind: "agent";
   role: "worker" | "orchestrator" | "synthesis";
   model?: {
@@ -799,7 +801,8 @@ export function validateTaskPlan(
         step.executor.model.id.length > limits.maxModelIdChars
       )) ||
       !isDelegationAccessAuditValid(step.executor.delegationAccess, limits) ||
-      !isDelegationResearchContractValid(step.executor.research)
+      !isDelegationResearchContractValid(step.executor.research) ||
+      !isDelegatedRequestContractValid(step.executor.requestContract)
     ) {
       issues.push(issue("step-executor-invalid", "Step executor is unsupported or contains an invalid model selection.", step.id));
     }

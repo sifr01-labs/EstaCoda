@@ -71,6 +71,7 @@ export class ToolPlanRunner {
     trustedWorkspace: boolean;
     remainingToolCalls: number;
     riskBaseline: ToolRiskClass;
+    requestContract?: import("../contracts/delegation.js").DelegatedRequestContract;
     visibleTurnId?: string;
     providerUsageLineage?: ProviderUsageLineage;
     visionInputProvenance?: VisionInputProvenanceContext;
@@ -159,6 +160,7 @@ export class ToolPlanRunner {
             plan: entry.plan,
             trustedWorkspace: input.trustedWorkspace,
             visibleTurnId: input.visibleTurnId,
+            requestContract: input.requestContract,
             providerUsageLineage: input.providerUsageLineage,
             visionInputProvenance: input.visionInputProvenance,
             signal: input.signal,
@@ -213,6 +215,7 @@ export class ToolPlanRunner {
             plan,
             trustedWorkspace: input.trustedWorkspace,
             visibleTurnId: input.visibleTurnId,
+            requestContract: input.requestContract,
             providerUsageLineage: input.providerUsageLineage,
             visionInputProvenance: input.visionInputProvenance,
             signal: input.signal,
@@ -259,6 +262,7 @@ export class ToolPlanRunner {
     toolPlans: ToolCallPlan[];
     trustedWorkspace: boolean;
     riskBaseline: ToolRiskClass;
+    requestContract?: import("../contracts/delegation.js").DelegatedRequestContract;
     visibleTurnId?: string;
     providerUsageLineage?: ProviderUsageLineage;
     signal?: AbortSignal;
@@ -295,6 +299,7 @@ export class ToolPlanRunner {
         plan,
         trustedWorkspace: input.trustedWorkspace,
         visibleTurnId: input.visibleTurnId,
+        requestContract: input.requestContract,
         providerUsageLineage: input.providerUsageLineage,
         signal: input.signal,
         onEvent: input.onEvent,
@@ -325,6 +330,7 @@ export class ToolPlanRunner {
   async #executeProviderToolPlan(input: {
     plan: ToolCallPlan;
     trustedWorkspace: boolean;
+    requestContract?: import("../contracts/delegation.js").DelegatedRequestContract;
     visibleTurnId?: string;
     providerUsageLineage?: ProviderUsageLineage;
     visionInputProvenance?: VisionInputProvenanceContext;
@@ -353,6 +359,7 @@ export class ToolPlanRunner {
       sessionId: this.#currentSessionId(),
       toolCallId: plan.id,
       visibleTurnId: input.visibleTurnId,
+      requestContract: input.requestContract,
       providerUsageLineage: input.providerUsageLineage,
       visionInputProvenance: input.visionInputProvenance,
       toolCallName: plan.tool,

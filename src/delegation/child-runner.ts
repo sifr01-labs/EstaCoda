@@ -147,6 +147,7 @@ export async function runDelegatedChild(input: ChildRunnerInput): Promise<ChildR
 
   const childPromise = input.child.handle({
     text: prompt,
+    requirementText: input.task,
     channel: input.channel ?? "cli",
     trustedWorkspace: input.trustedWorkspace,
     signal: input.childAbortController.signal,

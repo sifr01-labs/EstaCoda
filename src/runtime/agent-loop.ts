@@ -4,6 +4,7 @@ import type { ContextExpansionResult, ProjectContextSnapshot } from "../contract
 import type { IntentRoute } from "../contracts/intent.js";
 import { fileOutputEvidence } from "./file-output-evidence.js";
 import { continueRequestRequirements } from "./request-requirements.js";
+import { researchRequestEvidence } from "./research-request-evidence.js";
 import type { ExecutionFinalOutcome, ExecutionPlan, ExecutionPlanReader } from "../contracts/execution-plan.js";
 import type { ForegroundExecutionCheckpoint } from "../contracts/execution-checkpoint.js";
 import type { ExecutionPlanController } from "./execution-plan-controller.js";
@@ -102,6 +103,8 @@ import { interceptPlaintextCredentialInput } from "../security/plaintext-credent
 
 export type AgentLoopInput = {
   text: string;
+  /** Internal child-runner boundary: Step objective without dependency context. */
+  requirementText?: string;
   channel: ChannelKind;
   attachments?: ChannelAttachment[];
   trustedWorkspace?: boolean;
@@ -440,7 +443,7 @@ export class AgentLoop {
     const trustedWorkspace = input.trustedWorkspace ?? false;
     const route = this.#runtimeRouter.route({
       text: checkpointPreparation?.requirementMode === "save" ? turnText : routingText,
-      requestText: turnText,
+      requestText: input.requirementText === undefined ? turnText : interceptPlaintextCredentialInput(input.requirementText)?.projectedText ?? input.requirementText,
       attachments: input.attachments,
       channel: input.channel,
       model: this.#model,
@@ -472,6 +475,9 @@ export class AgentLoop {
     if (route.intent.requestRequirements !== undefined) {
       if (resumedCheckpoint?.requestRequirements !== undefined) route.intent.requestRequirements = continueRequestRequirements(
         resumedCheckpoint.requestRequirements, route.intent.requestRequirements, checkpointPreparation?.requirementMode);
+      const sourceTaskId = resumedCheckpoint?.safeFacts.filter((fact) => fact.kind === "task_id" && fact.sourceTool === "delegate_task").at(-1)?.value ?? resumedCheckpoint?.requestRequirements?.sourceTaskId;
+      if (sourceTaskId !== undefined && checkpointPreparation?.requirementMode !== "rerun") route.intent.requestRequirements.sourceTaskId = sourceTaskId;
+      if (checkpointPreparation?.requirementMode === "rerun") delete route.intent.requestRequirements.sourceTaskId;
       route.intent.requestRequirements.originTurnId = visibleTurn.id;
     }
     const userInputEvent = this.#trajectoryRecorder.record("user-input", {
@@ -1184,6 +1190,16 @@ export class AgentLoop {
       }, visibleTurn.id);
     }
     if (providerLoop.delegatedAnswerOwnership !== undefined) {
+      const checkpoint = this.#executionCheckpointController?.current();
+      if (checkpoint !== undefined) {
+        await this.#executionCheckpointController?.retainFacts(checkpoint.revision, providerLoop.delegatedAnswerOwnership.tasks.map((task) => ({
+          kind: "task_id", value: task.taskId, sourceTool: "delegate_task", observedAt: new Date().toISOString()
+        })));
+        const retained = this.#executionCheckpointController?.current();
+        if (retained !== undefined) await this.#executionCheckpointController?.block(retained.revision, {
+          kind: "external_state", summary: "The admitted Task owns the research objective; foreground dispatch is complete but its result is pending."
+        });
+      }
       await this.#executionPlanController?.transfer(
         providerLoop.delegatedAnswerOwnership.tasks.map((task) => task.taskId),
         input.onEvent
@@ -1218,7 +1234,10 @@ export class AgentLoop {
       providerExecution: providerSummary
     });
     const completionFloor = turnCompletionFloor;
+    const skillRequirementsSatisfied = (intent.requestRequirements?.skillReferences.length ?? 0) === 0 ||
+      (selectedSkill !== undefined && providerLoop.deliveredSkillNames?.includes(selectedSkill.name) === true);
     const finalOutcome = deriveExecutionFinalOutcome({
+      skillRequirementsSatisfied,
       requestRequirements: intent.requestRequirements,
       providerExecution: providerLoop.delegatedAnswerOwnership === undefined ? effectiveProviderExecution : undefined,
       toolExecutions,
@@ -1356,6 +1375,15 @@ export class AgentLoop {
       ), artifacts);
     }
     if (delegatedAnswerAcknowledgement === undefined) {
+      const researchEvidence = researchRequestEvidence({ requestRequirements: intent.requestRequirements, toolExecutions,
+        executionReceipts: this.#executionEvidenceIndex.recordsForTurn(visibleTurn.id), skillRequirementsSatisfied });
+      if (!researchEvidence.satisfied) {
+        response.text = `Research requirements remain incomplete: ${researchEvidence.missing.join(", ")}. No completed research objective is verified.`;
+        if (researchEvidence.missing.includes("live-source-evidence") && !this.#providerToolSchemaCatalog?.entries.some((entry) => entry.tool.name === "web.search")) {
+          response.text += " web.search is unavailable. Review and verify the registered research provider through config.web.setup; direct extraction does not satisfy the live-search contract.";
+        }
+        if (response.providerExecution !== undefined) response.providerExecution = suppressProviderGeneratedText(response.providerExecution);
+      }
       const fileEvidence = fileOutputEvidence({ requirements: intent.requestRequirements, toolExecutions, executionReceipts: this.#executionEvidenceIndex.recordsForTurn(visibleTurn.id) });
       if (!fileEvidence.satisfied) {
         const available = new Set(this.#providerToolSchemaCatalog?.entries.map((entry) => entry.tool.name) ?? []);
@@ -1465,7 +1493,8 @@ export class AgentLoop {
     return await this.#completeAndReturn(
       response,
       trajectoryOutcome(finalOutcome),
-      visibleTurn.id
+      visibleTurn.id,
+      { preserveCheckpoint: providerLoop.delegatedAnswerOwnership !== undefined }
     );
   }
 

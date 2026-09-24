@@ -1,3 +1,4 @@
+import { taskRequestCompletion } from "./task-primary-result.js";
 import { createHash, randomUUID } from "node:crypto";
 import type {
   Task,
@@ -1495,12 +1496,15 @@ export class TaskScheduler {
         const steps = store.listSteps(context.task.id, currentStep.planRevisionId);
         const allSettled = steps.length > 0 && steps.every((candidate) => isTerminalTaskStepStatus(candidate.status));
         if (allSettled) {
-          const status: Task["status"] = steps.every((candidate) => candidate.status === "completed")
+          const completion = taskRequestCompletion(store, context.task);
+          const status: Task["status"] = steps.every((candidate) => candidate.status === "completed") &&
+            completion.researchComplete && !completion.fileOutputPending
             ? "completed"
             : "partial";
           store.updateTask({ ...context.task, status, updatedAt: now, completedAt: now });
           store.appendEvent(this.#event(context.task, "task-state-changed", now, {
-            data: { from: context.task.status, to: status, reasonCode: "all-steps-settled" }
+            data: { from: context.task.status, to: status, reasonCode: completion.fileOutputPending
+              ? "requested-file-output-pending" : "all-steps-settled" }
           }));
         } else {
           store.updateTask({ ...context.task, updatedAt: now });
@@ -2174,11 +2178,12 @@ export class TaskScheduler {
       if (task === null || task.status !== "running" || task.activePlanRevisionId === undefined) return;
       const steps = store.listSteps(task.id, task.activePlanRevisionId);
       if (steps.length === 0 || steps.some((step) => !isTerminalTaskStepStatus(step.status))) return;
-      const status: Task["status"] = steps.every((step) => step.status === "completed") ? "completed" : "partial";
+      const requirements = taskRequestCompletion(store, task);
+      const status: Task["status"] = steps.every((step) => step.status === "completed") && requirements.researchComplete && !requirements.fileOutputPending ? "completed" : "partial";
       const completed: Task = { ...task, status, updatedAt: now, completedAt: now };
       store.updateTask(completed);
       store.appendEvent(this.#event(task, "task-state-changed", now, {
-        data: { from: "running", to: status, reasonCode: "all-steps-settled" }
+        data: { from: "running", to: status, reasonCode: requirements.fileOutputPending ? "requested-file-output-pending" : "all-steps-settled" }
       }));
     });
   }

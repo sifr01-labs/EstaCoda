@@ -62,6 +62,8 @@ export type ToolResult = {
 };
 
 export type ToolExecutionContext = {
+  /** Runtime-owned user intent; provider arguments cannot supply or override it. */
+  requestContract?: import("./delegation.js").DelegatedRequestContract;
   /** Runtime-owned artifact scope. Provider input cannot set these values. */
   sessionId?: string;
   profileId?: string;

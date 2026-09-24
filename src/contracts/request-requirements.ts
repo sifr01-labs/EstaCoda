@@ -1,9 +1,24 @@
-import type { RequestRequirements } from "../contracts/intent.js";
+import type { RequestRequirements } from "./intent.js";
 import { redactString } from "../utils/redaction.js";
+import type { DelegatedRequestContract } from "./delegation.js";
+
+export function validateDelegatedRequestContract(value: unknown): DelegatedRequestContract {
+  const record = object(value, ["version", "objective", "requirements", "skillName"]);
+  if (record.version !== 1 || typeof record.objective !== "string" || record.objective.length === 0 || record.objective.length > 2000 ||
+    (record.skillName !== undefined && (typeof record.skillName !== "string" || !/^[\p{L}\p{N}_-]{1,80}$/u.test(record.skillName)))) throw new Error("Invalid delegated request contract.");
+  return { version: 1, objective: record.objective, requirements: validateRequestRequirements(record.requirements),
+    ...(record.skillName === undefined ? {} : { skillName: record.skillName as string }) };
+}
+
+export function isDelegatedRequestContractValid(value: unknown): boolean {
+  if (value === undefined) return true;
+  try { validateDelegatedRequestContract(value); return true; } catch { return false; }
+}
 
 /** Persisted requirements are bounded user intent, never evidence or authority. */
 export function validateRequestRequirements(value: unknown): RequestRequirements {
-  const record = object(value, ["originTurnId", "skillReferences", "delegation", "fileOutput", "research", "issues"]);
+  const record = object(value, ["sourceTaskId", "originTurnId", "skillReferences", "delegation", "fileOutput", "research", "issues"]);
+  if (record.sourceTaskId !== undefined && (typeof record.sourceTaskId !== "string" || !/^[A-Za-z0-9_.:-]{1,256}$/u.test(record.sourceTaskId))) throw new Error("Invalid source Task reference.");
   if (JSON.stringify(record).length > 4096) throw new Error("Request requirements exceed their budget.");
   if (!Array.isArray(record.skillReferences) || record.skillReferences.length > 4 || !record.skillReferences.every((name) =>
     typeof name === "string" && /^[\p{L}\p{N}_-]{1,80}$/u.test(name))) throw new Error("Invalid skill requirements.");

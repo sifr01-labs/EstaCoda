@@ -49,6 +49,15 @@ export type DelegationConfig = {
   };
 };
 
+/** Runtime-owned intent carried into a fixed graph; never supplied in tool arguments. */
+export type DelegatedRequestContract = {
+  version: 1;
+  objective: string;
+  requirements: import("./intent.js").RequestRequirements;
+  /** Workflow whose ready instructions reached the parent provider. */
+  skillName?: string;
+};
+
 export type DelegateTaskItem = {
   task: string;
   context?: string;

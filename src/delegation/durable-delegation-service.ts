@@ -5,9 +5,11 @@ import type {
   DelegationAccessAudit,
   DelegationConfig,
   DelegationResearchContract,
+  DelegatedRequestContract,
   DelegationToolDiagnostic
 } from "../contracts/delegation.js";
 import { MAX_DELEGATE_RESEARCH_SCOPE_LENGTH } from "../contracts/delegation.js";
+import { validateDelegatedRequestContract } from "../contracts/request-requirements.js";
 import type {
   TaskAuthorityDisposition,
   TaskAuthorityPolicy,
@@ -59,6 +61,7 @@ export type ActiveTaskExecution = {
 };
 
 export type DurableDelegationRequest = {
+  requestContract?: DelegatedRequestContract;
   toolCallId: string;
   originTurnId?: string;
   tasks: readonly DelegateTaskItem[];
@@ -72,6 +75,7 @@ export type DurableDelegationRequest = {
 };
 
 export type DurableDelegationHandle = {
+  requestContractAccepted?: true;
   taskId: string;
   status: import("../contracts/task.js").TaskStatus;
   executionPreference: TaskExecutionPreference;
@@ -117,7 +121,8 @@ export class DelegationAccessError extends Error {
 
 export type DelegationResearchContractErrorCode =
   | "invalid-research-contract"
-  | "duplicate-research-scope";
+  | "duplicate-research-scope"
+  | "request-requirements-unsatisfied";
 
 /** Deterministic structural research-contract admission failure. */
 export class DelegationResearchContractError extends Error {
@@ -207,7 +212,20 @@ export class DurableDelegationService {
     if (request.tasks.length === 0 || request.tasks.length > this.#config.maxBatchTasks) {
       throw new Error(`Durable delegation requires 1-${this.#config.maxBatchTasks} task items.`);
     }
+    const requestContract = request.requestContract === undefined ? undefined : validateDelegatedRequestContract(request.requestContract);
     const tasks = normalizedResearchItems(request.tasks);
+    if (requestContract !== undefined) {
+      const requirements = requestContract.requirements;
+      if (requirements.sourceTaskId !== undefined) throw new DelegationResearchContractError({ code: "request-requirements-unsatisfied", message: "An admitted Task already owns this request. Inspect its status and accepted result; only an explicit rerun starts new research." });
+      if (requirements.originTurnId !== undefined && requirements.originTurnId !== request.originTurnId) throw new DelegationResearchContractError({ code: "request-requirements-unsatisfied", message: "Request requirements belong to another turn." });
+      const count = requirements.delegation?.count;
+      const reason = count !== undefined && tasks.length !== count ? `The user requested ${count} distinct workers; this batch contains ${tasks.length}.`
+        : requirements.skillReferences.length > 0 && requestContract.skillName === undefined ? "The requested skill instructions have not been delivered with setup ready."
+        : requirements.research !== undefined && tasks.some((item) => item.research === undefined || item.role === "orchestrator") ? "Research delegation requires a distinct research contract for every leaf worker."
+        : requirements.research?.fresh && tasks.some((item) => item.research?.requireLiveSources !== true) ? "Fresh research requires live-source evidence for every worker."
+        : requirements.research !== undefined && request.synthesis === false ? "The requested research answer requires a terminal synthesis Step." : undefined;
+      if (reason !== undefined) throw new DelegationResearchContractError({ code: "request-requirements-unsatisfied", message: reason });
+    }
     const toolCallId = boundedToken(request.toolCallId, "provider tool call ID");
     const originTurnId = request.originTurnId === undefined
       ? undefined
@@ -273,6 +291,7 @@ export class DurableDelegationService {
         executor: {
           kind: "agent",
           role: item.role === "orchestrator" ? "orchestrator" : "worker",
+          ...(requestContract === undefined ? {} : { requestContract }),
           delegationAccess: access,
           ...(item.research === undefined ? {} : { research: item.research }),
           ...(item.modelOverride === undefined ? {} : {
@@ -309,6 +328,7 @@ export class DurableDelegationService {
         executor: {
           kind: "agent",
           role: "synthesis",
+          ...(requestContract === undefined ? {} : { requestContract }),
           delegationAccess: resolvedSynthesisAuthority!.access,
           ...(synthesis.modelOverride === undefined ? {} : {
             model: {
@@ -568,7 +588,7 @@ function assertDelegationAccess(
     throw new DelegationAccessError({
       code: "requested-tool-unavailable",
       taskIndex,
-      message: `Research scope '${research.scope}' requires unavailable tool web.search.`,
+      message: `Research scope '${research.scope}' requires unavailable tool web.search. Review the registered research-provider configuration through config.web.setup and its existing verification flow. Direct extraction does not satisfy this live-search contract. No workers were admitted.`,
       access: audit
     });
   }
@@ -833,7 +853,7 @@ function synthesisObjective(synthesis: DelegateSynthesis): string {
 function resolveDelegationSynthesis(request: DurableDelegationRequest): DelegateSynthesis | undefined {
   if (request.synthesis === false) return undefined;
   if (request.synthesis !== undefined) return request.synthesis;
-  if (request.tasks.length < 2) return undefined;
+  if (request.tasks.length < 2 && request.requestContract?.requirements.research === undefined) return undefined;
   return { objective: DEFAULT_BATCH_SYNTHESIS_OBJECTIVE };
 }
 
@@ -845,6 +865,7 @@ function handle(
 ): DurableDelegationHandle {
   const synthesisStep = graph.steps.find((step) => step.executor.role === "synthesis");
   return {
+    ...(graph.steps.some((step) => step.executor.requestContract !== undefined) ? { requestContractAccepted: true as const } : {}),
     taskId: graph.task.id,
     status: graph.task.status,
     executionPreference: graph.task.executionPreference,

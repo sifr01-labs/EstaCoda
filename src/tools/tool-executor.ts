@@ -81,6 +81,7 @@ export type ToolExecutionRequest = {
 };
 
 export type NamedToolExecutionRequest = {
+  requestContract?: ToolExecutionContext["requestContract"];
   tool: string;
   input: Record<string, unknown>;
   trustedWorkspace: boolean;
@@ -591,6 +592,7 @@ export class ToolExecutor {
         timeout.extendTotal(120_000);
       }) ?? request.onSecureInputRequest;
       const executionContext = {
+        requestContract: request.requestContract,
         sessionId: request.sessionId,
         profileId: this.#profileId,
         toolCallId: request.toolCallId,

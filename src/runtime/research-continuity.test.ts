@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { validateRequestRequirements } from "../session/request-requirement-state.js";
+import { validateRequestRequirements } from "../contracts/request-requirements.js";
 import { hydratableExecutionCheckpoint } from "../session/execution-checkpoint-state.js";
 import { ExecutionCheckpointController } from "./execution-checkpoint-controller.js";
 import { continueRequestRequirements, deriveRequestRequirements, requirementFollowUp } from "./request-requirements.js";

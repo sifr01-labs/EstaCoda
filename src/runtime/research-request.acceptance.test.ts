@@ -29,8 +29,19 @@ function scriptConsumed(value: Harness) {
   expect(value.remainingSteps()).toBe(0);
 }
 
-describe.sequential("research workflow acceptance harness — PR 0 characterization", () => {
-  it("observes real reads but no workers or file despite a completed research claim (A1–A3 gap)", async () => {
+function schedulerFor(h: Harness, taskId: string) {
+  const task = h.store.getTask(taskId)!;
+  const ownerId = "baseline-scheduler";
+  expect(h.store.acquireTaskHostLease({ taskId, workspaceIdentityHash: task.workspace.identityHash, ownerId, kind: "foreground",
+    acquiredAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 60_000).toISOString() })).toBeTruthy();
+  const resultService = new TaskResultService({ store: h.store, profileId: "baseline", sessionDb: h.sessionDb,
+    contentRoot: resolveProfileStateHome({ homeDir: h.homeDir, profileId: "baseline" }).taskResultsPath });
+  return { resultService, scheduler: new TaskScheduler({ store: h.store, resultService, ownerId, limits: { maxProfileConcurrentAttempts: 1 },
+    resolveExecutor: (candidate, step) => h.runtime.taskAgentExecutor?.canExecute(candidate, step) ? h.runtime.taskAgentExecutor : undefined }) };
+}
+
+describe.sequential("research workflow acceptance harness", () => {
+  it("rejects a completed research claim without the requested workers and retains requirements on rerun", async () => {
     const h = await harness();
     h.enqueue(nativeCall("web_search", { query: "battery recycling" }), nativeCall("web_extract", { url: SOURCE_URL }), answer(REPORT));
     const research = await h.turn(RESEARCH_PROMPT);
@@ -38,7 +49,8 @@ describe.sequential("research workflow acceptance harness — PR 0 characterizat
     expect(research.intent.taskClass).toBe("research");
     expect(research.toolExecutions.map((execution) => execution.tool.name)).toEqual(["web.search", "web.extract"]);
     expect(research.toolExecutions.every((execution) => execution.result?.ok)).toBe(true);
-    expect(research.finalOutcome?.status).toBe("completed"); // PR 4: require worker evidence.
+    expect(research.finalOutcome?.status).toBe("partially_completed");
+    expect(research.text).toContain("requested-worker-evidence");
     expect(h.store.listTasks()).toEqual([]);
     expect(h.searches).toEqual(["battery recycling"]);
     expect(h.extracts).toEqual([SOURCE_URL]);
@@ -54,7 +66,9 @@ describe.sequential("research workflow acceptance harness — PR 0 characterizat
 
     h.enqueue(answer("The research workflow has been followed."));
     const rerun = await h.turn("Rerun this task but this time use the research skill.");
-    expect(rerun.toolExecutions).toEqual([]); // PR 3/4: actually load the skill and rerun.
+    expect(rerun.toolExecutions).toEqual([]);
+    expect(rerun.finalOutcome?.status).toBe("blocked");
+    expect(rerun.intent.requestRequirements).toMatchObject({ delegation: { count: 3 }, research: { fresh: true } });
     expect(h.events.filter((event) => event.kind === "skill")).toEqual([{ kind: "skill", name: "research-discovery" }]);
 
     h.enqueue(answer(REPORT));
@@ -93,7 +107,7 @@ describe.sequential("research workflow acceptance harness — PR 0 characterizat
     scriptConsumed(h);
   });
 
-  it("creates three durable workers and settles their real child runs before synthesis (positive control)", async () => {
+  it.each([false, true])("accounts for three workers and distinguishes a pending file from settled research (file=%s)", async (fileRequested) => {
     const h = await harness();
     h.enqueue(nativeCall("delegate_task", {
       tasks: ["collection", "processing", "reuse"].map((scope) => ({
@@ -101,7 +115,8 @@ describe.sequential("research workflow acceptance harness — PR 0 characterizat
         research: { scope, requireLiveSources: true, requireRepositoryEvidence: false }
       }))
     }));
-    const dispatch = await h.turn("Use the researcher skill and use 3 subagents to research battery recycling.");
+    const dispatch = await h.turn(`Use the researcher skill and use 3 subagents to research battery recycling.${fileRequested ? " Save report.md" : ""}`);
+    expect(dispatch.finalOutcome?.status).toBe("completed"); // Successful dispatch; Task still owns the objective.
     expect(dispatch.toolExecutions.find((execution) => execution.tool.name === "delegate_task")?.result?.ok).toBe(true);
     const task = h.store.listTasks()[0]!;
     expect(task).toBeDefined();
@@ -109,6 +124,8 @@ describe.sequential("research workflow acceptance harness — PR 0 characterizat
     const workers = steps.filter((step) => step.executor.role === "worker");
     const synthesis = steps.find((step) => step.executor.role === "synthesis")!;
     expect(workers).toHaveLength(3);
+    expect(workers.every((worker) => worker.executor.requestContract?.requirements.delegation?.count === 3)).toBe(true);
+    expect(synthesis.executor.requestContract?.skillName).toBe("researcher");
     expect(new Set(synthesis.dependsOn)).toEqual(new Set(workers.map((step) => step.id)));
     expect(h.store.listResults(task.id)).toEqual([]); // Dispatch is not completed research.
     expect(h.events).toContainEqual({ kind: "skill", name: "researcher" });
@@ -118,20 +135,7 @@ describe.sequential("research workflow acceptance harness — PR 0 characterizat
     expect(h.requests[0]?.messages.some((message) => typeof message.content === "string" && message.content.includes(selectedContent.content))).toBe(true);
     scriptConsumed(h);
 
-    const ownerId = "baseline-scheduler";
-    expect(h.store.acquireTaskHostLease({
-      taskId: task.id, workspaceIdentityHash: task.workspace.identityHash, ownerId, kind: "foreground",
-      acquiredAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 60_000).toISOString()
-    })).toBeTruthy();
-    const resultService = new TaskResultService({
-      store: h.store, profileId: "baseline", sessionDb: h.sessionDb,
-      contentRoot: resolveProfileStateHome({ homeDir: h.homeDir, profileId: "baseline" }).taskResultsPath
-    });
-    const scheduler = new TaskScheduler({
-      store: h.store, resultService, ownerId,
-      limits: { maxProfileConcurrentAttempts: 1 },
-      resolveExecutor: (task, step) => h.runtime.taskAgentExecutor?.canExecute(task, step) ? h.runtime.taskAgentExecutor : undefined
-    });
+    const { scheduler, resultService } = schedulerFor(h, task.id);
     for (let index = 0; index < 3; index++) {
       h.enqueue(nativeCall("web_search", { query: `battery recycling scope ${index}` }), answer(`Scope ${index}: observed synthetic evidence [source](${SOURCE_URL}).`));
       expect(await scheduler.runOnce()).toMatchObject({ completed: 1, failed: 0 });
@@ -144,7 +148,7 @@ describe.sequential("research workflow acceptance harness — PR 0 characterizat
     h.enqueue(answer(REPORT));
     const settled = await scheduler.runOnce();
     expect(settled, JSON.stringify({ errors: h.scriptErrors, failures: h.store.listAttempts(task.id).flatMap((attempt) => attempt.failure ? [attempt.failure] : []) })).toMatchObject({ completed: 1, failed: 0 });
-    expect(h.store.getTask(task.id)?.status).toBe("completed");
+    expect(h.store.getTask(task.id)?.status).toBe(fileRequested ? "partial" : "completed");
     expect(h.store.listResults(task.id).some((result) => result.stepId === synthesis.id && result.kind === "text" && result.disposition === "accepted")).toBe(true);
     expect(new Set(h.store.listAttempts(task.id).map((attempt) => attempt.workerSessionId)).size).toBe(4);
     expect(h.searches).toHaveLength(3);
@@ -173,6 +177,61 @@ describe.sequential("research workflow acceptance harness — PR 0 characterizat
     expect(h.store.listTasks()).toEqual([]);
     expect(h.searches).toEqual([]);
     expect(h.requests[0]?.tools).not.toContainEqual(expect.objectContaining({ function: expect.objectContaining({ name: "web_search" }) }));
+    scriptConsumed(h);
+  });
+
+  it("settles failed research coverage as partial and synthesizes only accepted worker results", async () => {
+    const h = await harness();
+    h.enqueue(nativeCall("delegate_task", { tasks: ["collection", "processing", "reuse"].map((scope) => ({
+      task: `Research ${scope}.`, allowedTools: ["web.search"], research: { scope, requireLiveSources: true, requireRepositoryEvidence: false }
+    })) }));
+    const dispatch = await h.turn(RESEARCH_PROMPT);
+    expect(dispatch.finalOutcome?.status).toBe("completed");
+    const task = h.store.listTasks()[0]!;
+    const { scheduler } = schedulerFor(h, task.id);
+    for (let index = 0; index < 3; index++) {
+      if (index === 1) h.enqueue(answer("I have no source evidence."));
+      else h.enqueue(nativeCall("web_search", { query: `battery recycling ${index}` }), answer(`Observed source: ${SOURCE_URL}`));
+      expect(await scheduler.runOnce()).toMatchObject(index === 1 ? { failed: 1 } : { completed: 1 });
+    }
+    const accepted = h.store.listResults(task.id).filter((result) => result.disposition === "accepted");
+    expect(accepted).toHaveLength(2);
+    for (const result of accepted) h.enqueue(nativeCall("task_result_read", { task_id: task.id, result_id: result.id }));
+    h.enqueue((request) => {
+      expect(JSON.stringify(request.messages)).toContain("Partial synthesis boundary");
+      expect(JSON.stringify(request.messages)).toContain("current sources required");
+      return { content: `${REPORT}\nMissing coverage: processing failed; conclusions are partial.` };
+    });
+    expect(await scheduler.runOnce()).toMatchObject({ completed: 1 });
+    expect(h.store.getTask(task.id)?.status).toBe("partial");
+    expect(h.store.listSteps(task.id, task.activePlanRevisionId!).filter((step) => step.executor.role === "worker" && step.status === "completed")).toHaveLength(2);
+    scriptConsumed(h);
+  });
+
+  it.each(["too-few", "missing-contracts", "no-live-search", "no-synthesis"])("rejects delegation that weakens user requirements: %s", async (kind) => {
+    const h = await harness();
+    const tasks = ["collection", "processing", "reuse"].slice(0, kind === "too-few" ? 2 : 3).map((scope) => ({
+      task: `Research ${scope}.`, allowedTools: ["web.search"],
+      ...(kind === "missing-contracts" ? {} : { research: { scope, requireLiveSources: kind !== "no-live-search", requireRepositoryEvidence: false } })
+    }));
+    h.enqueue(nativeCall("delegate_task", { tasks, ...(kind === "no-synthesis" ? { synthesis: false } : {}) }), answer("All three workers completed."));
+    const result = await h.turn(RESEARCH_PROMPT);
+    expect(h.store.listTasks()).toEqual([]);
+    expect(result.toolExecutions[0]?.result).toMatchObject({ ok: false, metadata: { code: "request-requirements-unsatisfied" } });
+    expect(result.finalOutcome?.status).not.toBe("completed");
+    expect(result.text).toContain("requested-worker-evidence");
+    scriptConsumed(h);
+  });
+
+  it("preflights unavailable search and ignores a provider-supplied replacement contract", async () => {
+    const h = await harness({ searchAvailable: false });
+    h.enqueue(nativeCall("delegate_task", { tasks: ["one", "two", "three"].map((scope) => ({
+      task: `Research ${scope}.`, research: { scope, requireLiveSources: true, requireRepositoryEvidence: false }
+    })), requestContract: { requirements: {} } }), answer("The workers are running."));
+    const result = await h.turn(RESEARCH_PROMPT);
+    expect(h.store.listTasks()).toEqual([]);
+    expect(result.text).toContain("config.web.setup");
+    expect(result.finalOutcome?.status).not.toBe("completed");
     scriptConsumed(h);
   });
 
