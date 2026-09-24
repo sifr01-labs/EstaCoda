@@ -78,17 +78,21 @@ export class SessionCapabilityRecovery {
       (input.ids !== undefined && !validIds(input.ids))) return failure("invalid_request");
     const ids = Array.isArray(input.ids) ? new Set(input.ids) : undefined;
     const query = typeof input.query === "string" ? input.query.toLocaleLowerCase().trim() : "";
+    const terms = [...new Set(query.match(/[\p{L}\p{N}_-]+/gu) ?? [])].filter((term) => term.length > 2 && !["the", "and", "for", "with", "from", "this", "that", "about", "using", "use"].includes(term));
     const entries = [
       ...(input.kind === "skill" ? [] : (this.#catalog?.inventory ?? []).map((tool) => ({
-        id: `tool:${tool.name}`, kind: "tool", name: tool.name, search: `${tool.name} ${tool.description} ${tool.toolsets.join(" ")}`,
+        boost: 0, id: `tool:${tool.name}`, kind: "tool", name: tool.name, description: tool.description.slice(0, 300), toolsets: tool.toolsets, search: `${tool.name} ${tool.description} ${tool.toolsets.join(" ")}`,
         state: tool.availability !== "available" ? tool.availability : !tool.schemaEligible ? "provider_schema_restricted" : this.#active.has(tool.name) ? "exposed" : "not_selected"
       }))),
       ...(input.kind === "tool" ? [] : this.#skills.list().map((skill) => ({
-        id: `skill:${skill.name}`, kind: "skill", name: skill.name, search: `${skill.name} ${skill.description}`, state: this.#loadedSkills.has(skill.name) ? "loaded" : buildSkillReadinessMetadata(skill, resolveSkillSetupContext(skill, this.#skillConfig[skill.name])).readiness_status
+        boost: (skill.routing?.triggerPatterns ?? []).some((pattern) => pattern.type === "contains" && query.includes(pattern.value.toLocaleLowerCase())) ? 8 : 0, id: `skill:${skill.name}`, kind: "skill", name: skill.name, description: skill.description.slice(0, 300), toolsets: skill.requiredToolsets ?? [], search: `${skill.name} ${skill.description} ${JSON.stringify(skill.routing?.triggerPatterns ?? [])}`, state: this.#loadedSkills.has(skill.name) ? "loaded" : buildSkillReadinessMetadata(skill, resolveSkillSetupContext(skill, this.#skillConfig[skill.name])).readiness_status
       })))
-    ].filter((entry) => safeId(entry.id) && (ids === undefined || ids.has(entry.id)) &&
-      (query.length === 0 || entry.search.toLocaleLowerCase().includes(query)));
-    const matches = entries.slice(0, MAX_CAPABILITY_RESULTS).map(({ search: _search, ...entry }) => entry);
+    ].map((entry) => ({ ...entry, score: query.length === 0 ? 1 :
+      entry.boost + (entry.name.toLocaleLowerCase() === query ? 100 : 0) + terms.reduce((score, term) => score +
+        (entry.name.toLocaleLowerCase().includes(term) ? 3 : entry.search.toLocaleLowerCase().includes(term) ? 1 : 0), 0) }))
+      .filter((entry) => safeId(entry.id) && (ids === undefined || ids.has(entry.id)) && (query.length === 0 || entry.score > 0))
+      .sort((left, right) => right.score - left.score || left.id.localeCompare(right.id));
+    const matches = entries.slice(0, MAX_CAPABILITY_RESULTS).map(({ search: _search, score: _score, boost: _boost, ...entry }) => entry);
     return { ok: true, content: JSON.stringify({ matches, truncated: entries.length > matches.length }), metadata: { matches, truncated: entries.length > matches.length } };
   }
 

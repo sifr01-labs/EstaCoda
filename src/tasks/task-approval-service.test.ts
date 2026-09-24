@@ -47,6 +47,19 @@ describe("TaskApprovalService security policy", () => {
     expect(service.takeRequest(attempt.id)).toBeUndefined();
   });
 
+  it("bounds report delivery to its target and preserves inherited approval and denial", async () => {
+    const { task, step, attempt } = context("runtime_policy");
+    task.workspace = { canonicalPath: "/workspace", identityHash: "fixture" } as Task["workspace"];
+    step.executor = { kind: "agent", role: "report-delivery", requestContract: { version: 1, objective: "Save report.md", requirements: { skillReferences: [], issues: [], fileOutput: { format: "markdown", path: "report.md" } } } };
+    const service = new TaskApprovalService({ store: emptyStore() });
+    const request = { riskClass: "workspace-write" as const, toolName: "file.write", targetKey: "file.write:path:/workspace/report.md", description: "Save report", context: { trustedWorkspace: true } };
+    for (const decision of ["allow", "ask", "deny"] as const) {
+      const policy = service.securityPolicyFor(task, step, attempt, { decide: () => decision });
+      expect(policy.decide(request)).toBe(decision);
+      expect(policy.decide({ ...request, targetKey: "file.write:path:/workspace/other.md" })).toBe("deny");
+      expect(policy.decide({ ...request, toolName: "terminal.run" })).toBe("deny");
+    }
+  });
   it("scopes pending approval reads in the store before the page limit", () => {
     const link = {
       id: "link-alpha",
@@ -126,6 +139,7 @@ function context(disposition: "runtime_policy" | "require_approval"): {
     authorityPolicy: authority
   } as unknown as Task;
   const step = {
+    executor: { kind: "agent", role: "worker" },
     id: "step-alpha",
     profileId: "alpha",
     taskId: task.id,

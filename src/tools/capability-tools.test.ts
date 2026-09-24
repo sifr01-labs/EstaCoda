@@ -163,7 +163,7 @@ describe("recovered skill instruction receipts", () => {
   it("reports missing setup while loading instructions, without activating toolsets", async () => {
     const h = skillHarness({ configFields: [{ key: "endpoint", required: true }] });
     expect(h.recovery.discover({ kind: "skill" }, scope).metadata?.matches).toEqual([
-      { id: "skill:research", kind: "skill", name: "research", state: "missing-setup" }
+      { id: "skill:research", kind: "skill", name: "research", description: "Research workflow", toolsets: ["files"], state: "missing-setup" }
     ]);
     const expansion = await h.request();
     expect(expansion.tools.map((entry) => entry.function.name)).toEqual(["skill_read"]);

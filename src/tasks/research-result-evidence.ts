@@ -46,28 +46,7 @@ export function groundResearchResult(input: { task: Task; step: TaskStep; store:
       }
     }
   } else {
-    for (const execution of input.executions) {
-      if (execution.decision !== "allow" || execution.result?.ok !== true) continue;
-      const m = execution.result.metadata;
-      const observed = execution.tool.name === "web.search" && Array.isArray(m?.results) ? m.results
-        : execution.tool.name === "web.extract" && m?.url !== undefined ? [m] : [];
-      for (const item of observed.slice(0, 24)) {
-        if (item === null || typeof item !== "object") continue;
-        const source = item as Record<string, unknown>;
-        const url = httpUrl(source.url);
-        if (url === undefined) continue;
-        const extracted = execution.tool.name === "web.extract";
-        const content = String(source.content ?? source.snippet ?? "").slice(0, 24_000);
-        const date = /\b(?:published|revised|updated)(?:\s+on)?\s*:?\s*(\d{4}-\d{2}-\d{2})\b/iu.exec(content)?.[1];
-        const previous = sources.get(url);
-        // Reuse retains the original observation's retrieval date, including a
-        // turn that crosses midnight. Missing provenance cannot become "now".
-        const retrievedAt = extracted && typeof source.retrievedAt === "string" && /^\d{4}-\d{2}-\d{2}T/.test(source.retrievedAt)
-          ? source.retrievedAt.slice(0, 10) : execution.readReuseOf !== undefined ? previous?.retrieved ?? "unknown" : input.now.toISOString().slice(0, 10);
-        sources.set(url, { url, published: date ?? previous?.published ?? "unknown", retrieved: retrievedAt,
-          access: extracted ? "extracted; full text unverified" : previous?.access ?? "snippet; full text unavailable" });
-      }
-    }
+    for (const [url, source] of observedSources(input.executions, input.now)) sources.set(url, source);
   }
   if (table.rows.some((row) => !sources.has(row.url)) || urls(input.text).some((url) => !sources.has(url))) return { failure: "unobserved-source" };
   const rows = table.rows.map((row) => ({ ...sources.get(row.url)!, claim: row.claim, limitation: row.limitation }));
@@ -109,4 +88,44 @@ function urls(text: string): string[] {
   return [...text.matchAll(/https?:\/\/[^\s<>"'\[\]{}()|]+/giu)].flatMap((match) => {
     const url = httpUrl(match[0].replace(/[.,;:!?]+$/u, "")); return url === undefined ? [] : [url];
   });
+}
+
+function observedSources(executions: readonly ToolExecutionRecord[], now: Date): Map<string, Omit<SourceRow, "claim" | "limitation">> {
+  const sources = new Map<string, Omit<SourceRow, "claim" | "limitation">>();
+    for (const execution of executions) {
+      if (execution.decision !== "allow" || execution.result?.ok !== true) continue;
+      const m = execution.result.metadata;
+      const observed = execution.tool.name === "web.search" && Array.isArray(m?.results) ? m.results
+        : execution.tool.name === "web.extract" && m?.url !== undefined ? [m] : [];
+      for (const item of observed.slice(0, 24)) {
+        if (item === null || typeof item !== "object") continue;
+        const source = item as Record<string, unknown>;
+        const url = httpUrl(source.url);
+        if (url === undefined) continue;
+        const extracted = execution.tool.name === "web.extract";
+        const content = String(source.content ?? source.snippet ?? "").slice(0, 24_000);
+        const date = /\b(?:published|revised|updated)(?:\s+on)?\s*:?\s*(\d{4}-\d{2}-\d{2})\b/iu.exec(content)?.[1];
+        const previous = sources.get(url);
+        // Reuse retains the original observation's retrieval date, including a
+        // turn that crosses midnight. Missing provenance cannot become "now".
+        const retrievedAt = extracted && typeof source.retrievedAt === "string" && /^\d{4}-\d{2}-\d{2}T/.test(source.retrievedAt)
+          ? source.retrievedAt.slice(0, 10) : execution.readReuseOf !== undefined ? previous?.retrieved ?? "unknown" : now.toISOString().slice(0, 10);
+        sources.set(url, { url, published: date ?? previous?.published ?? "unknown", retrieved: retrievedAt,
+          access: extracted ? "extracted; full text unverified" : previous?.access ?? "snippet; full text unavailable" });
+      }
+    }
+  return sources;
+}
+
+/** Foreground research uses the same observed-URL and bounded claim-table contract. */
+export function groundForegroundResearch(text: string, executions: readonly ToolExecutionRecord[], now: Date): { text?: string; failure?: string } {
+  const table = parseTable(text);
+  if (table === undefined) return { failure: "source-claim-table-missing" };
+  const sources = observedSources(executions, now);
+  if (table.rows.some((row) => !sources.has(row.url)) || urls(text).some((url) => !sources.has(url))) return { failure: "unobserved-source" };
+  const rendered = [SOURCE_HEADER, "| --- | --- | --- | --- | --- | --- |", ...table.rows.map((row) => {
+    const source = sources.get(row.url)!;
+    return `| ${row.url} | ${source.published} | ${source.retrieved} | ${source.access} | ${row.claim} | ${row.limitation} |`;
+  })].join("\n");
+  return { text: text.slice(0, table.start) + rendered + text.slice(table.end) };
 }

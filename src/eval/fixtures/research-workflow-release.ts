@@ -30,7 +30,7 @@ export async function measureResearchWorkflow(options: {
     assert.equal(workers.length, 3); assert.deepEqual(new Set(synthesis.dependsOn), new Set(workers.map((step) => step.id)));
     assert(h.store.acquireTaskHostLease({ taskId: task.id, workspaceIdentityHash: task.workspace.identityHash, ownerId: "release-fixture", kind: "foreground", acquiredAt: new Date().toISOString(), expiresAt: new Date(Date.now() + 60000).toISOString() }));
     const resultService = new TaskResultService({ store: h.store, profileId: "baseline", sessionDb: h.sessionDb, contentRoot: resolveProfileStateHome({ homeDir: h.homeDir, profileId: "baseline" }).taskResultsPath });
-    const scheduler = new TaskScheduler({ store: h.store, resultService, ownerId: "release-fixture", limits: { maxProfileConcurrentAttempts: 1 }, resolveExecutor: () => h.runtime.taskAgentExecutor });
+    let scheduler = new TaskScheduler({ store: h.store, resultService, ownerId: "release-fixture", limits: { maxProfileConcurrentAttempts: 1 }, resolveExecutor: () => h.runtime.taskAgentExecutor });
     for (let index = 0; index < 3; index++) {
       h.enqueue(nativeCall("web_search", { query: `battery recycling ${index}` }), answer(`Scope ${index}: ${SOURCE_URL}\n${CLAIM_TABLE}`));
       assert.equal((await scheduler.runOnce()).completed, 1);
@@ -38,13 +38,14 @@ export async function measureResearchWorkflow(options: {
     for (const result of h.store.listResults(task.id).filter((result) => result.disposition === "accepted")) h.enqueue(nativeCall("task_result_read", { task_id: task.id, result_id: result.id }));
     h.enqueue(answer(`${REPORT}\n${CLAIM_TABLE}`));
     assert.equal((await scheduler.runOnce()).completed, 1);
-    assert.equal(h.store.getTask(task.id)?.status, "partial"); // Still owes the file.
+    assert.equal(h.store.getTask(task.id)?.status, "running"); // Delivery remains owned by this Task.
     const final = h.store.listResults(task.id).find((result) => result.stepId === synthesis.id && result.disposition === "accepted")!;
     const content = (await resultService.readText({ taskId: task.id, resultId: final.id, sessionId: h.runtime.sessionId })).content;
     await h.restart();
     h.enqueue(nativeCall("task_result_read", { task_id: task.id, result_id: final.id }), nativeCall("file_write", { path: "report.md", content }), nativeCall("file_read", { path: "report.md" }), answer("Saved report.md."));
-    const saved = await turn("Save this report to report.md");
-    assert.equal(saved.finalOutcome?.status, "completed");
+    scheduler = new TaskScheduler({ store: h.store, resultService: new TaskResultService({ store: h.store, profileId: "baseline", sessionDb: h.sessionDb, contentRoot: resolveProfileStateHome({ homeDir: h.homeDir, profileId: "baseline" }).taskResultsPath }), ownerId: "release-fixture", limits: { maxProfileConcurrentAttempts: 1 }, resolveExecutor: () => h.runtime.taskAgentExecutor });
+    assert.equal((await scheduler.runOnce()).completed, 1, JSON.stringify(h.scriptErrors));
+    assert.equal(h.store.getTask(task.id)?.status, "completed");
     assert.equal(await readFile(join(h.workspaceRoot, "report.md"), "utf8"), content);
     assert.equal(h.store.listTasks().length, 1); assert.equal(h.searches.length, 3);
     assert.equal(h.remainingSteps(), 0); assert.deepEqual(h.scriptErrors, []);
@@ -52,7 +53,7 @@ export async function measureResearchWorkflow(options: {
     const persistedEvents = (await Promise.all([...sessionIds].map((id) => h.sessionDb.listEvents(id)))).flat();
     return { workers: workers.length, acceptedResults: h.store.listResults(task.id).filter((result) => result.disposition === "accepted").length,
       providerCalls: h.requests.length, searches: h.searches.length, tasks: h.store.listTasks().length, restarted: true,
-      outputBytes: Buffer.byteLength(content), finalOutcome: saved.finalOutcome.status, sourceTable: content.includes("| Retrieved |"),
+      outputBytes: Buffer.byteLength(content), finalOutcome: h.store.getTask(task.id)!.status, sourceTable: content.includes("| Retrieved |"),
       actualToolCalls: persistedEvents.filter((event) => event.kind === "tool-result").length, liveModelCalls: 0 };
   } finally { await surface?.close(); await h.dispose(); }
 }

@@ -8,7 +8,7 @@ import type {
 import type { DeliveryTarget } from "../channels/delivery-router.js";
 import { TASK_RESULT_PAGE_MAX_CHARS, type TaskResultService } from "./task-result-service.js";
 import type { TaskStore } from "./task-store.js";
-import { taskPrimaryResult, taskPrimaryResultStepId, taskRequestCompletion } from "./task-primary-result.js";
+import { deliveredReportPath, taskPrimaryResult, taskPrimaryResultStepId, taskRequestCompletion } from "./task-primary-result.js";
 import { listStepTreeAttempts, listTaskTreeUsageEntries } from "./task-tree-accounting.js";
 import { taskUsageFromEntries } from "./task-agent-usage.js";
 import { formatUsageCost, formatUsageCostNotice, formatUsdAmount } from "../ui/usage-cost-format.js";
@@ -277,6 +277,8 @@ export class TaskCompletionDeliveryService {
     if (taskRequestCompletion(this.#store, task).fileOutputPending) lines.push(copy(this.#locale,
       "At Task settlement, the requested file had not been saved. File delivery requires a verified workspace save.",
       "عند انتهاء المهمة، لم يكن الملف المطلوب قد حُفظ. يلزم التحقق من حفظ الملف في مساحة العمل قبل اعتبار تسليمه مكتملًا."));
+    const reportPath = deliveredReportPath(this.#store, task);
+    if (reportPath !== undefined) lines.push(`${copy(this.#locale, "Saved and verified:", "تم حفظ الملف والتحقق منه:")} ${this.#locale === "ar" ? isolateLtr(reportPath) : reportPath}.`);
     if (task.failure !== undefined) lines.push(`Failure: ${boundText(task.failure.class, 80)}`);
     const usageEntries = listTaskTreeUsageEntries(this.#store, task.id);
     const taskUsage = taskUsageFromEntries(usageEntries);

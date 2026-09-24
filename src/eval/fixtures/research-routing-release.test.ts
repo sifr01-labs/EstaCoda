@@ -32,6 +32,6 @@ describe("frozen PR6 release gates", () => {
     expect((await researchRoutingReleaseCase.run()).passed).toBe(true);
   });
   it("runs workers, synthesis and verified save after restart without redelegation", async () => {
-    expect(await measureResearchWorkflow()).toMatchObject({ workers: 3, acceptedResults: 4, searches: 3, tasks: 1, restarted: true, finalOutcome: "completed", sourceTable: true, liveModelCalls: 0 });
+    expect(await measureResearchWorkflow()).toMatchObject({ workers: 3, acceptedResults: 5, searches: 3, tasks: 1, restarted: true, finalOutcome: "completed", sourceTable: true, liveModelCalls: 0 });
   });
 });

@@ -73,23 +73,29 @@ export async function measureReleaseRouting(split?: ReleaseRoutingCase["split"])
     recovery.bindCatalog(buildProviderToolSchemaCatalog({ tools: registry.list() }));
     const recoveryCases = [];
     for (const row of cases) {
-      const ids = [...row.missingTools.map((name) => `tool:${name}`), ...(row.expectedSkill && row.selectedSkill !== row.expectedSkill ? [`skill:${row.expectedSkill}`] : [])];
-      if (!ids.length) continue;
+      const expectedIds = [...row.missingTools.map((name) => `tool:${name}`), ...(row.expectedSkill && row.selectedSkill !== row.expectedSkill ? [`skill:${row.expectedSkill}`] : [])];
+      if (!expectedIds.length) continue;
       const context = { profileId: "baseline", sessionId: h.runtime.sessionId, visibleTurnId: row.id, toolCallId: `${row.id}-request` };
       const active = catalog.entries.filter((entry) => row.exposedTools.includes(entry.tool.name)).map((entry) => entry.schema);
       recovery.beginTurn({ ...context, tools: active });
-      const discovered = recovery.discover({ ids }, context);
+      const query = corpus.cases.find((candidate) => candidate.id === row.id)!.prompt.slice(0, 200);
+      const discovered = recovery.discover({ query, kind: "skill" }, context);
+      const matches = discovered.metadata?.matches as Array<{ id: string }> | undefined;
+      // A deterministic metadata consumer chooses the highest-ranked suggestion.
+      // Expected labels are used only below to score the result, never as inputs.
+      const ids = matches?.slice(0, 1).map((match) => match.id) ?? [];
       const requested = recovery.request({ ids, reason: "Frozen expected capability was missed by first-pass selection" }, context);
       const proposals = recovery.takeRequests([{ tool: registry.get("capability.request")!, decision: "allow", riskClass: "read-only-local", result: requested, toolCallId: context.toolCallId }]);
       const applied = await recovery.applyRequests(proposals, active);
       let loaded = !ids.some((id) => id.startsWith("skill:"));
-      if (row.expectedSkill && ids.includes(`skill:${row.expectedSkill}`)) {
+      const discoveredSkill = ids.find((id) => id.startsWith("skill:"))?.slice(6);
+      if (discoveredSkill !== undefined) {
         const skillContext = { ...context, toolCallId: `${row.id}-read` };
-        const result = await read.run({ name: row.expectedSkill }, skillContext);
-        loaded = recovery.takeSkillLoads([{ tool: read, decision: "allow", riskClass: "read-only-local", result, toolCallId: skillContext.toolCallId }]).some((load) => load.receipt.name === row.expectedSkill && load.content.length > 0);
+        const result = await read.run({ name: discoveredSkill }, skillContext);
+        loaded = recovery.takeSkillLoads([{ tool: read, decision: "allow", riskClass: "read-only-local", result, toolCallId: skillContext.toolCallId }]).some((load) => load.receipt.name === discoveredSkill && load.content.length > 0);
       }
-      recoveryCases.push({ id: row.id, requested: ids, applied: applied.applied, rounds: MAX_CAPABILITY_ROUNDS - recovery.roundsRemaining,
-        passed: discovered.ok && ids.every((id) => applied.applied.includes(id)) && loaded });
+      recoveryCases.push({ id: row.id, query, requested: ids, applied: applied.applied, rounds: MAX_CAPABILITY_ROUNDS - recovery.roundsRemaining,
+        passed: discovered.ok && expectedIds.every((id) => applied.applied.includes(id)) && loaded });
       recovery.endTurn();
     }
     const summarize = (rows: typeof cases) => {

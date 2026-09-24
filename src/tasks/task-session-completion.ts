@@ -5,7 +5,7 @@ import type { TaskCompletionTraceSnapshot } from "../contracts/task-completion-t
 import { verifiedCompressionLineage } from "../session/session-lineage.js";
 import { TASK_RESULT_PAGE_MAX_CHARS, type TaskResultService } from "./task-result-service.js";
 import type { TaskStore } from "./task-store.js";
-import { taskPrimaryResult, taskPrimaryResultStepId, taskRequestCompletion } from "./task-primary-result.js";
+import { deliveredReportPath, taskPrimaryResult, taskPrimaryResultStepId, taskRequestCompletion } from "./task-primary-result.js";
 import { isolateLtr } from "../ui/bidi.js";
 import { TaskOperatorService } from "./task-operator-service.js";
 import {
@@ -121,7 +121,9 @@ export class TaskSessionCompletionService {
           ? terminalAnswerUnavailableReceipt(task, this.#locale)
           : await this.#readResult(task.id, result, sessionId);
         const pendingFile = taskRequestCompletion(this.#store, task).fileOutputPending;
-        const text = pendingFile ? `${this.#locale === "ar" ? "عند انتهاء المهمة، لم يكن الملف المطلوب قد حُفظ. يلزم التحقق من حفظ الملف في مساحة العمل قبل اعتبار تسليمه مكتملًا." : "At Task settlement, the requested file had not been saved. File delivery requires a verified workspace save."}\n\n${resultText}` : resultText;
+        const reportPath = deliveredReportPath(this.#store, task);
+        const saved = reportPath === undefined ? "" : `${this.#locale === "ar" ? "تم حفظ الملف والتحقق منه:" : "Saved and verified:"} ${this.#locale === "ar" ? isolateLtr(reportPath) : reportPath}.\n\n`;
+        const text = pendingFile ? `${this.#locale === "ar" ? "عند انتهاء المهمة، لم يكن الملف المطلوب قد حُفظ. يلزم التحقق من حفظ الملف في مساحة العمل قبل اعتبار تسليمه مكتملًا." : "At Task settlement, the requested file had not been saved. File delivery requires a verified workspace save."}\n\n${resultText}` : saved + resultText;
         const message = await this.#appendMessage({
           id: messageId,
           sessionId,

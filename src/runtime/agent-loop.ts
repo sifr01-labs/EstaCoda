@@ -4,7 +4,7 @@ import type { ChannelAttachment, ChannelKind } from "../contracts/channel.js";
 import type { ContextExpansionResult, ProjectContextSnapshot } from "../contracts/context.js";
 import type { IntentRoute } from "../contracts/intent.js";
 import { fileOutputEvidence } from "./file-output-evidence.js";
-import { continueRequestRequirements } from "./request-requirements.js";
+import { continueRequestRequirements, requiredSkillsDelivered } from "./request-requirements.js";
 import { researchRequestEvidence } from "./research-request-evidence.js";
 import type { ExecutionFinalOutcome, ExecutionPlan, ExecutionPlanReader } from "../contracts/execution-plan.js";
 import type { ForegroundExecutionCheckpoint } from "../contracts/execution-checkpoint.js";
@@ -1235,9 +1235,9 @@ export class AgentLoop {
       providerExecution: providerSummary
     });
     const completionFloor = turnCompletionFloor;
-    const skillRequirementsSatisfied = (intent.requestRequirements?.skillReferences.length ?? 0) === 0 ||
-      (selectedSkill !== undefined && providerLoop.deliveredSkillNames?.includes(selectedSkill.name) === true);
+    const skillRequirementsSatisfied = requiredSkillsDelivered(intent, providerLoop.deliveredSkillNames ?? []);
     const finalOutcome = deriveExecutionFinalOutcome({
+      finalText: prospectiveAgentText,
       skillRequirementsSatisfied,
       requestRequirements: intent.requestRequirements,
       providerExecution: providerLoop.delegatedAnswerOwnership === undefined ? effectiveProviderExecution : undefined,
@@ -1381,8 +1381,9 @@ export class AgentLoop {
         response.text = correctedCapability;
         if (response.providerExecution !== undefined) response.providerExecution = suppressProviderGeneratedText(response.providerExecution);
       }
-      const researchEvidence = researchRequestEvidence({ requestRequirements: intent.requestRequirements, toolExecutions,
+      const researchEvidence = researchRequestEvidence({ finalText: prospectiveAgentText, requestRequirements: intent.requestRequirements, toolExecutions,
         executionReceipts: this.#executionEvidenceIndex.recordsForTurn(visibleTurn.id), skillRequirementsSatisfied });
+      if (researchEvidence.satisfied && researchEvidence.groundedText !== undefined) response.text = researchEvidence.groundedText;
       if (!researchEvidence.satisfied) {
         response.text = `Research requirements remain incomplete: ${researchEvidence.missing.join(", ")}. No completed research objective is verified.`;
         if (researchEvidence.missing.includes("live-source-evidence") && !this.#providerToolSchemaCatalog?.entries.some((entry) => entry.tool.name === "web.search")) {

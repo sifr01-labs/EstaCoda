@@ -128,7 +128,7 @@ export type TaskCardStepState = {
   readonly position: number;
   readonly title: string;
   readonly objective: string;
-  readonly executorRole: "worker" | "orchestrator" | "synthesis";
+  readonly executorRole: "worker" | "orchestrator" | "synthesis" | "report-delivery";
   readonly status: "pending" | "ready" | "running" | "waiting_for_input" | "waiting_for_approval" | "completed" | "failed" | "skipped" | "cancelled";
   readonly dependsOn: readonly string[];
   readonly childTaskPolicy: "forbid" | "fire_and_forget";

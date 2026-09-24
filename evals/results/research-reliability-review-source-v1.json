@@ -1,0 +1,874 @@
+{
+  "version": 1,
+  "pairedDevelopmentBaseline": {
+    "before": {
+      "caseCount": 18,
+      "primarySkillPrecision": {
+        "numerator": 3,
+        "denominator": 3,
+        "value": 1
+      },
+      "primarySkillRecall": {
+        "numerator": 3,
+        "denominator": 8,
+        "value": 0.375
+      },
+      "requestedCapabilityRecall": {
+        "numerator": 14,
+        "denominator": 22,
+        "value": 0.6363636363636364
+      },
+      "taskClassAccuracy": {
+        "numerator": 8,
+        "denominator": 18,
+        "value": 0.4444444444444444
+      },
+      "forbiddenExposureCount": 0,
+      "falseCompleteWithoutExecution": {
+        "numerator": 6,
+        "denominator": 9,
+        "value": 0.6666666666666666
+      }
+    },
+    "after": {
+      "caseCount": 18,
+      "primarySkillPrecision": {
+        "numerator": 8,
+        "denominator": 8,
+        "value": 1
+      },
+      "primarySkillRecall": {
+        "numerator": 8,
+        "denominator": 8,
+        "value": 1
+      },
+      "requestedCapabilityRecall": {
+        "numerator": 22,
+        "denominator": 22,
+        "value": 1
+      },
+      "taskClassAccuracy": {
+        "numerator": 15,
+        "denominator": 18,
+        "value": 0.8333333333333334
+      },
+      "forbiddenExposureCount": 0,
+      "falseCompleteWithoutExecution": {
+        "numerator": 4,
+        "denominator": 9,
+        "value": 0.4444444444444444
+      }
+    },
+    "beforeSchemaTokens": {
+      "median": 84,
+      "p95": 196
+    },
+    "afterSchemaTokens": {
+      "median": 112,
+      "p95": 196
+    },
+    "scope": "Same 18 development prompts and seven-tool catalog. Counterfactual no-execution floor probe is not the real runtime completion guard. Token estimates are not comparable to the 109-definition release corpus."
+  },
+  "deterministicPassed": true,
+  "routing": {
+    "version": 1,
+    "corpusSha256": "0e46fe4054651739ec55222b4c948414370212e94ec8c08db5791d25c7613900",
+    "skillsLoaded": 22,
+    "definitions": 109,
+    "scope": "Real bundled skill loader, IntentRouter and provider narrowing; registered runtime definitions offered as available for this classification probe; actual readiness is checked by the separate execution fixtures; no live model calls.",
+    "recovery": [
+      {
+        "id": "dev-original-2",
+        "query": "Research current battery recycling techniques. Use three workers to prepare the findings.",
+        "requested": [
+          "skill:research-discovery"
+        ],
+        "applied": [
+          "skill:research-discovery"
+        ],
+        "rounds": 1,
+        "passed": true
+      },
+      {
+        "id": "dev-original-3",
+        "query": "Investigate recent battery recycling processes and use 3 agents.",
+        "requested": [
+          "skill:research-discovery"
+        ],
+        "applied": [
+          "skill:research-discovery"
+        ],
+        "rounds": 1,
+        "passed": true
+      },
+      {
+        "id": "dev-literature-3",
+        "query": "Research academic publications about carbon capture.",
+        "requested": [
+          "skill:research-discovery"
+        ],
+        "applied": [
+          "skill:research-discovery"
+        ],
+        "rounds": 1,
+        "passed": true
+      },
+      {
+        "id": "dev-generic-skill-3",
+        "query": "Apply the research skill to research recent desalination papers.",
+        "requested": [
+          "skill:research-discovery"
+        ],
+        "applied": [
+          "skill:research-discovery"
+        ],
+        "rounds": 1,
+        "passed": true
+      },
+      {
+        "id": "dev-generic-skill-4",
+        "query": "\u0627\u0633\u062a\u062e\u062f\u0645 \u0645\u0647\u0627\u0631\u0629 research \u0644\u0644\u0628\u062d\u062b \u0639\u0646 \u0623\u062d\u062f\u062b \u0623\u0648\u0631\u0627\u0642 \u062a\u062d\u0644\u064a\u0629 \u0627\u0644\u0645\u064a\u0627\u0647",
+        "requested": [
+          "skill:research-discovery"
+        ],
+        "applied": [
+          "skill:research-discovery"
+        ],
+        "rounds": 1,
+        "passed": true
+      },
+      {
+        "id": "dev-two-workers-1",
+        "query": "Use 2 subagents to research concrete recycling.",
+        "requested": [
+          "skill:research-discovery"
+        ],
+        "applied": [
+          "skill:research-discovery"
+        ],
+        "rounds": 1,
+        "passed": true
+      },
+      {
+        "id": "dev-two-workers-2",
+        "query": "Delegate to two workers to research recycled concrete.",
+        "requested": [
+          "skill:research-discovery"
+        ],
+        "applied": [
+          "skill:research-discovery"
+        ],
+        "rounds": 1,
+        "passed": true
+      },
+      {
+        "id": "dev-two-workers-3",
+        "query": "Assign to 2 agents to research reuse of concrete.",
+        "requested": [
+          "skill:research-discovery"
+        ],
+        "applied": [
+          "skill:research-discovery"
+        ],
+        "rounds": 1,
+        "passed": true
+      },
+      {
+        "id": "dev-research-and-file-2",
+        "query": "Research geothermal heating and prepare a markdown file.",
+        "requested": [
+          "skill:research-discovery"
+        ],
+        "applied": [
+          "skill:research-discovery"
+        ],
+        "rounds": 1,
+        "passed": true
+      },
+      {
+        "id": "dev-research-and-file-5",
+        "query": "\u0627\u0628\u062d\u062b \u0639\u0646 \u0627\u0644\u0637\u0627\u0642\u0629 \u0627\u0644\u062c\u0648\u0641\u064a\u0629 \u0648\u0627\u0643\u062a\u0628 \u0645\u0644\u0641 \u0646\u0635\u064a",
+        "requested": [
+          "skill:research-discovery"
+        ],
+        "applied": [
+          "skill:research-discovery"
+        ],
+        "rounds": 1,
+        "passed": true
+      },
+      {
+        "id": "dev-research-and-file-6",
+        "query": "Research geothermal energy \u0648\u0627\u062d\u0641\u0638 heat.md",
+        "requested": [
+          "skill:research-discovery"
+        ],
+        "applied": [
+          "skill:research-discovery"
+        ],
+        "rounds": 1,
+        "passed": true
+      },
+      {
+        "id": "dev-general-research-1",
+        "query": "Research indoor air quality.",
+        "requested": [
+          "skill:research-discovery"
+        ],
+        "applied": [
+          "skill:research-discovery"
+        ],
+        "rounds": 1,
+        "passed": true
+      },
+      {
+        "id": "dev-general-research-2",
+        "query": "Investigate ventilation methods.",
+        "requested": [
+          "skill:research-discovery"
+        ],
+        "applied": [
+          "skill:research-discovery"
+        ],
+        "rounds": 1,
+        "passed": true
+      },
+      {
+        "id": "dev-general-research-3",
+        "query": "Find recent evidence on room ventilation.",
+        "requested": [
+          "skill:research-discovery"
+        ],
+        "applied": [
+          "skill:research-discovery"
+        ],
+        "rounds": 1,
+        "passed": true
+      },
+      {
+        "id": "dev-general-research-4",
+        "query": "\u0627\u0628\u062d\u062b \u0639\u0646 \u062c\u0648\u062f\u0629 \u0627\u0644\u0647\u0648\u0627\u0621 \u0627\u0644\u062f\u0627\u062e\u0644\u064a",
+        "requested": [
+          "skill:research-discovery"
+        ],
+        "applied": [
+          "skill:research-discovery"
+        ],
+        "rounds": 1,
+        "passed": true
+      },
+      {
+        "id": "dev-general-research-5",
+        "query": "\u0627\u0628\u062d\u062b \u0639\u0646 \u0637\u0631\u0642 \u0627\u0644\u062a\u0647\u0648\u064a\u0629 \u0627\u0644\u062d\u062f\u064a\u062b\u0629",
+        "requested": [
+          "skill:research-discovery"
+        ],
+        "applied": [
+          "skill:research-discovery"
+        ],
+        "rounds": 1,
+        "passed": true
+      },
+      {
+        "id": "dev-general-research-6",
+        "query": "Research indoor air quality \u0628\u0627\u0644\u0644\u063a\u0629 \u0627\u0644\u0639\u0631\u0628\u064a\u0629",
+        "requested": [
+          "skill:research-discovery"
+        ],
+        "applied": [
+          "skill:research-discovery"
+        ],
+        "rounds": 1,
+        "passed": true
+      },
+      {
+        "id": "heldout-materials-2",
+        "query": "Use 3 workers and research compostable packaging.",
+        "requested": [
+          "skill:research-discovery"
+        ],
+        "applied": [
+          "skill:research-discovery"
+        ],
+        "rounds": 1,
+        "passed": true
+      },
+      {
+        "id": "heldout-materials-3",
+        "query": "Research current packaging alternatives; launch three agents.",
+        "requested": [
+          "skill:research-discovery"
+        ],
+        "applied": [
+          "skill:research-discovery"
+        ],
+        "rounds": 1,
+        "passed": true
+      },
+      {
+        "id": "heldout-review-1",
+        "query": "Survey recent publications about urban heat islands.",
+        "requested": [
+          "skill:research-discovery"
+        ],
+        "applied": [
+          "skill:research-discovery"
+        ],
+        "rounds": 1,
+        "passed": true
+      },
+      {
+        "id": "heldout-review-3",
+        "query": "Research the literature on city heat mitigation.",
+        "requested": [
+          "skill:research-discovery"
+        ],
+        "applied": [
+          "skill:research-discovery"
+        ],
+        "rounds": 1,
+        "passed": true
+      },
+      {
+        "id": "heldout-combined-1",
+        "query": "Investigate wind turbine blade recycling and export the findings to blades.md.",
+        "requested": [
+          "skill:research-discovery"
+        ],
+        "applied": [
+          "skill:research-discovery"
+        ],
+        "rounds": 1,
+        "passed": true
+      },
+      {
+        "id": "heldout-combined-3",
+        "query": "Research blade reuse and save a text file.",
+        "requested": [
+          "skill:research-discovery"
+        ],
+        "applied": [
+          "skill:research-discovery"
+        ],
+        "rounds": 1,
+        "passed": true
+      },
+      {
+        "id": "heldout-combined-4",
+        "query": "\u0627\u0628\u062d\u062b \u0639\u0646 \u062a\u062f\u0648\u064a\u0631 \u0634\u0641\u0631\u0627\u062a \u0627\u0644\u0631\u064a\u0627\u062d \u0648\u0627\u062d\u0641\u0638 \u0627\u0644\u0646\u062a\u064a\u062c\u0629 \u0641\u064a blades.md",
+        "requested": [
+          "skill:research-discovery"
+        ],
+        "applied": [
+          "skill:research-discovery"
+        ],
+        "rounds": 1,
+        "passed": true
+      },
+      {
+        "id": "heldout-combined-5",
+        "query": "\u0627\u0628\u062d\u062b \u0639\u0646 \u0634\u0641\u0631\u0627\u062a \u0627\u0644\u062a\u0648\u0631\u0628\u064a\u0646\u0627\u062a \u0648\u0627\u0643\u062a\u0628 \u0645\u0644\u0641 \u0646\u0635\u064a",
+        "requested": [
+          "skill:research-discovery"
+        ],
+        "applied": [
+          "skill:research-discovery"
+        ],
+        "rounds": 1,
+        "passed": true
+      },
+      {
+        "id": "heldout-combined-6",
+        "query": "Research turbine blades \u0648\u0627\u0643\u062a\u0628 blades.md",
+        "requested": [
+          "skill:research-discovery"
+        ],
+        "applied": [
+          "skill:research-discovery"
+        ],
+        "rounds": 1,
+        "passed": true
+      }
+    ],
+    "metrics": {
+      "cases": 180,
+      "requestedCapabilityRecall": {
+        "numerator": 264,
+        "denominator": 264,
+        "value": 1
+      },
+      "primarySkillPrecision": {
+        "numerator": 52,
+        "denominator": 52,
+        "value": 1
+      },
+      "primarySkillRecall": {
+        "numerator": 52,
+        "denominator": 78,
+        "value": 0.6666666666666666
+      },
+      "safetyViolations": 0,
+      "schemaTokensRough": {
+        "median": 7828,
+        "p95": 15402
+      }
+    },
+    "splits": {
+      "development": {
+        "cases": 120,
+        "requestedCapabilityRecall": {
+          "numerator": 174,
+          "denominator": 174,
+          "value": 1
+        },
+        "primarySkillPrecision": {
+          "numerator": 37,
+          "denominator": 37,
+          "value": 1
+        },
+        "primarySkillRecall": {
+          "numerator": 37,
+          "denominator": 54,
+          "value": 0.6851851851851852
+        },
+        "safetyViolations": 0,
+        "schemaTokensRough": {
+          "median": 7828,
+          "p95": 9743
+        }
+      },
+      "heldout": {
+        "cases": 60,
+        "requestedCapabilityRecall": {
+          "numerator": 90,
+          "denominator": 90,
+          "value": 1
+        },
+        "primarySkillPrecision": {
+          "numerator": 15,
+          "denominator": 15,
+          "value": 1
+        },
+        "primarySkillRecall": {
+          "numerator": 15,
+          "denominator": 24,
+          "value": 0.625
+        },
+        "safetyViolations": 0,
+        "schemaTokensRough": {
+          "median": 7828,
+          "p95": 15429
+        }
+      }
+    },
+    "perSplitLanguage": {
+      "development": {
+        "en": {
+          "cases": 60,
+          "requestedCapabilityRecall": {
+            "numerator": 87,
+            "denominator": 87,
+            "value": 1
+          },
+          "primarySkillPrecision": {
+            "numerator": 16,
+            "denominator": 16,
+            "value": 1
+          },
+          "primarySkillRecall": {
+            "numerator": 16,
+            "denominator": 27,
+            "value": 0.5925925925925926
+          },
+          "safetyViolations": 0,
+          "schemaTokensRough": {
+            "median": 7828,
+            "p95": 9743
+          }
+        },
+        "ar": {
+          "cases": 40,
+          "requestedCapabilityRecall": {
+            "numerator": 58,
+            "denominator": 58,
+            "value": 1
+          },
+          "primarySkillPrecision": {
+            "numerator": 14,
+            "denominator": 14,
+            "value": 1
+          },
+          "primarySkillRecall": {
+            "numerator": 14,
+            "denominator": 18,
+            "value": 0.7777777777777778
+          },
+          "safetyViolations": 0,
+          "schemaTokensRough": {
+            "median": 7828,
+            "p95": 9743
+          }
+        },
+        "mixed": {
+          "cases": 20,
+          "requestedCapabilityRecall": {
+            "numerator": 29,
+            "denominator": 29,
+            "value": 1
+          },
+          "primarySkillPrecision": {
+            "numerator": 7,
+            "denominator": 7,
+            "value": 1
+          },
+          "primarySkillRecall": {
+            "numerator": 7,
+            "denominator": 9,
+            "value": 0.7777777777777778
+          },
+          "safetyViolations": 0,
+          "schemaTokensRough": {
+            "median": 7828,
+            "p95": 9743
+          }
+        }
+      },
+      "heldout": {
+        "en": {
+          "cases": 30,
+          "requestedCapabilityRecall": {
+            "numerator": 45,
+            "denominator": 45,
+            "value": 1
+          },
+          "primarySkillPrecision": {
+            "numerator": 6,
+            "denominator": 6,
+            "value": 1
+          },
+          "primarySkillRecall": {
+            "numerator": 6,
+            "denominator": 12,
+            "value": 0.5
+          },
+          "safetyViolations": 0,
+          "schemaTokensRough": {
+            "median": 7828,
+            "p95": 15429
+          }
+        },
+        "ar": {
+          "cases": 20,
+          "requestedCapabilityRecall": {
+            "numerator": 30,
+            "denominator": 30,
+            "value": 1
+          },
+          "primarySkillPrecision": {
+            "numerator": 6,
+            "denominator": 6,
+            "value": 1
+          },
+          "primarySkillRecall": {
+            "numerator": 6,
+            "denominator": 8,
+            "value": 0.75
+          },
+          "safetyViolations": 0,
+          "schemaTokensRough": {
+            "median": 7828,
+            "p95": 15402
+          }
+        },
+        "mixed": {
+          "cases": 10,
+          "requestedCapabilityRecall": {
+            "numerator": 15,
+            "denominator": 15,
+            "value": 1
+          },
+          "primarySkillPrecision": {
+            "numerator": 3,
+            "denominator": 3,
+            "value": 1
+          },
+          "primarySkillRecall": {
+            "numerator": 3,
+            "denominator": 4,
+            "value": 0.75
+          },
+          "safetyViolations": 0,
+          "schemaTokensRough": {
+            "median": 7828,
+            "p95": 15429
+          }
+        }
+      }
+    },
+    "perLanguage": {
+      "en": {
+        "cases": 90,
+        "requestedCapabilityRecall": {
+          "numerator": 132,
+          "denominator": 132,
+          "value": 1
+        },
+        "primarySkillPrecision": {
+          "numerator": 22,
+          "denominator": 22,
+          "value": 1
+        },
+        "primarySkillRecall": {
+          "numerator": 22,
+          "denominator": 39,
+          "value": 0.5641025641025641
+        },
+        "safetyViolations": 0,
+        "schemaTokensRough": {
+          "median": 7828,
+          "p95": 15402
+        }
+      },
+      "ar": {
+        "cases": 60,
+        "requestedCapabilityRecall": {
+          "numerator": 88,
+          "denominator": 88,
+          "value": 1
+        },
+        "primarySkillPrecision": {
+          "numerator": 20,
+          "denominator": 20,
+          "value": 1
+        },
+        "primarySkillRecall": {
+          "numerator": 20,
+          "denominator": 26,
+          "value": 0.7692307692307693
+        },
+        "safetyViolations": 0,
+        "schemaTokensRough": {
+          "median": 7828,
+          "p95": 15402
+        }
+      },
+      "mixed": {
+        "cases": 30,
+        "requestedCapabilityRecall": {
+          "numerator": 44,
+          "denominator": 44,
+          "value": 1
+        },
+        "primarySkillPrecision": {
+          "numerator": 10,
+          "denominator": 10,
+          "value": 1
+        },
+        "primarySkillRecall": {
+          "numerator": 10,
+          "denominator": 13,
+          "value": 0.7692307692307693
+        },
+        "safetyViolations": 0,
+        "schemaTokensRough": {
+          "median": 7828,
+          "p95": 15402
+        }
+      }
+    }
+  },
+  "workflow": {
+    "workers": 3,
+    "acceptedResults": 5,
+    "providerCalls": 15,
+    "searches": 3,
+    "tasks": 1,
+    "restarted": true,
+    "outputBytes": 658,
+    "finalOutcome": "completed",
+    "sourceTable": true,
+    "actualToolCalls": 10,
+    "liveModelCalls": 0
+  },
+  "suites": [
+    "src/eval/fixtures/research-routing-release.test.ts",
+    "src/runtime/research-request.acceptance.test.ts",
+    "src/runtime/research-surfaces.acceptance.test.ts",
+    "src/acp/server.test.ts",
+    "src/acp/approval-ownership.test.ts",
+    "src/acp/session-ownership.test.ts",
+    "src/cron/cron-runner.test.ts",
+    "src/gateway/desktop-approvals.test.ts",
+    "src/gateway/supervisor.test.ts",
+    "src/tasks/task-completion-delivery.test.ts",
+    "src/tasks/task-approval-service.test.ts",
+    "src/delegation/durable-delegation-service.test.ts",
+    "src/runtime/request-requirements.test.ts",
+    "src/channels/delivery-router.test.ts",
+    "src/channels/telegram-adapter.test.ts",
+    "src/channels/channel-session-store.test.ts",
+    "src/security/security-policy-factory.test.ts",
+    "src/runtime/capability-recovery.test.ts",
+    "src/runtime/provider-tool-narrowing.test.ts",
+    "src/tools/tool-schema.test.ts",
+    "src/tools/capability-tools.test.ts",
+    "src/tools/skill-tools.test.ts",
+    "src/tools/tool-executor.test.ts",
+    "src/runtime/capability-state.test.ts",
+    "src/tools/web-read-reuse.test.ts",
+    "src/memory/memory-fact-extractor.test.ts",
+    "src/memory/memory-reviewer.test.ts",
+    "src/memory/memory-curation-service.test.ts",
+    "src/tasks/research-result-evidence.test.ts",
+    "src/tasks/agent-step-executor.test.ts",
+    "src/runtime/execution-outcome.test.ts",
+    "src/cli/session-loop.test.ts",
+    "src/channels/channel-gateway.test.ts",
+    "src/channels/surface-adapters/surface-adapters.test.ts"
+  ],
+  "tests": {
+    "passed": 1311,
+    "failed": 0,
+    "total": 1311
+  },
+  "liveAssessment": {
+    "status": "not-run",
+    "reason": "Requires approved provider, sources and predeclared spend limit; deterministic fixtures do not measure live factual quality."
+  },
+  "packagedDesktop": {
+    "status": "separate-gate",
+    "command": "pnpm run desktop:research-release"
+  },
+  "measurementScope": "Post-review deterministic run; per-case labels remain in the unchanged frozen research-routing-v1 corpus. This compact record retains all aggregate metrics and recovery traces.",
+  "sourceBaseCommit": "b76720024482154838cf62dac3b9ad9bf76f0ce1",
+  "sourceOverlay": [
+    {
+      "path": "apps/desktop/tests/research-packaged.mts",
+      "sha256": "75308a218c4d509b94378ddaa4276293b440932706a20365f2e5bb4f35650f58"
+    },
+    {
+      "path": "scripts/validate-research-reliability.ts",
+      "sha256": "eb7b3141c83e53111328201054d76e9784f0d83ca5bc0e34fec2080ebb7a1e23"
+    },
+    {
+      "path": "src/contracts/task.ts",
+      "sha256": "ab7c5e2957b89a4ce0787c5f794ff07f72b669546a51f46616c0c293de0f0e6e"
+    },
+    {
+      "path": "src/delegation/durable-delegation-service.ts",
+      "sha256": "4a3527c8260c63268f2eeecf10e6d14c2eac11ccec815e807398dbd1def17c58"
+    },
+    {
+      "path": "src/eval/fixtures/research-routing-release.test.ts",
+      "sha256": "f115981ada90ca44b801dcc638963732266a8b742960ea2a270f4c79edc1e42d"
+    },
+    {
+      "path": "src/eval/fixtures/research-routing-release.ts",
+      "sha256": "8a5b8bde7d8a45b7a501e96f95e7d45f06cc8cf8ce3d242a8c6b42e94de0012b"
+    },
+    {
+      "path": "src/eval/fixtures/research-workflow-release.ts",
+      "sha256": "8b2e582fed53c3a1b6c9feb907ef2a39bf84b19c74ba4d839fd0ee30f765ef3e"
+    },
+    {
+      "path": "src/memory/memory-reviewer.test.ts",
+      "sha256": "66a9f774cb4c74221a94f81c28e9ca7f1f011b61aa8ae73aa2c229e41c3fa3ac"
+    },
+    {
+      "path": "src/memory/memory-reviewer.ts",
+      "sha256": "824195bee127d06d7f6fcef9c0083798b0bec4033c982dad673bca56eac3dc4d"
+    },
+    {
+      "path": "src/memory/transient-capability-state.ts",
+      "sha256": "2d2b2cfb4c072505f58ea893ca381c6cbd885c28a82439875b61f0d8b131e397"
+    },
+    {
+      "path": "src/runtime/agent-loop.ts",
+      "sha256": "d395d6dba215802dea8c0b4b3f58430343eec98cdfb789bb3f43bf91804a074b"
+    },
+    {
+      "path": "src/runtime/capability-recovery.test.ts",
+      "sha256": "22084bdc697f43276f6dc67a8a825ac2f9673bf144953f9601914afdf8ac71cf"
+    },
+    {
+      "path": "src/runtime/execution-outcome.ts",
+      "sha256": "365d95247417f8e1ae8db7d4a28f26c939b1ac630061e2833152907df0b48468"
+    },
+    {
+      "path": "src/runtime/intent-router.ts",
+      "sha256": "540871684ef9eee9be404786a7970c06f8d88bb05d16101f2b189ba6f293940c"
+    },
+    {
+      "path": "src/runtime/provider-turn-loop.ts",
+      "sha256": "d8bfe6a5ec1ffb45901a7ac9180ab6dd67ef2c7419c98bd4113e96e9a1c714f7"
+    },
+    {
+      "path": "src/runtime/request-requirements.test.ts",
+      "sha256": "8d93eedaf9334b8a85ffd85f41274d259d2956531b69f6bf6aaf8855a4eafcbd"
+    },
+    {
+      "path": "src/runtime/request-requirements.ts",
+      "sha256": "bad58d28f324a134b37870e738ab9bb5e1e9b4b34b55e7a83a3883ef3cf95914"
+    },
+    {
+      "path": "src/runtime/research-request-evidence.ts",
+      "sha256": "200416e7e16c35e6376a09bd045cd80b3c45b7415b332df85915a3a311815408"
+    },
+    {
+      "path": "src/runtime/research-request.acceptance.test.ts",
+      "sha256": "4554b77433dbfb2e25cd8190a7aa05b245af578d29664f187c92aab4524f7a40"
+    },
+    {
+      "path": "src/runtime/research-surfaces.acceptance.test.ts",
+      "sha256": "dd9272f8a2695421d57e7dcf31dda669f4f1745fdb653881eecfa542fbe706ec"
+    },
+    {
+      "path": "src/tasks/agent-step-executor.ts",
+      "sha256": "b66457f36ee0df061221f650ae003798986b83a95e22f210d26d2a31c1b3f711"
+    },
+    {
+      "path": "src/tasks/research-result-evidence.ts",
+      "sha256": "00f4c95bb6df373422c05ec7957776c0ea6476a88ed3703d1afe268f1517131d"
+    },
+    {
+      "path": "src/tasks/task-activity-spans.ts",
+      "sha256": "9d20bcd61601f32f79f554c3702c8bfd27abbb90bba1787fdf0d14b48a76a1a6"
+    },
+    {
+      "path": "src/tasks/task-approval-service.test.ts",
+      "sha256": "79564f3af8f27a1d576df1225c864b4e6f07e56ba7f78eed5cf34f26ef5e34f9"
+    },
+    {
+      "path": "src/tasks/task-approval-service.ts",
+      "sha256": "33983028d1e46cde628c63e2cc9dc02e50bd2b5f5f5f3832c334ec8a5b8a5791"
+    },
+    {
+      "path": "src/tasks/task-completion-delivery.ts",
+      "sha256": "5622916982f7c57dc677c4ce9d3a355ffcccf117fc9551970cc0a581417c6abc"
+    },
+    {
+      "path": "src/tasks/task-operator-service.ts",
+      "sha256": "035dd74f8ba51944a8b0634dfebb165dc8fec6c08d2316a00b5ba7f7f6e2149c"
+    },
+    {
+      "path": "src/tasks/task-primary-result.ts",
+      "sha256": "fe54f73cfad48a36c2344681fc77db135f911c6e5bb7214bbde3b432d0c7c4cc"
+    },
+    {
+      "path": "src/tasks/task-session-completion.ts",
+      "sha256": "b5d1c49c721ea7d0a477f3a47835410d80a92ac67ada24b0b4d2e2ab2a8adb33"
+    },
+    {
+      "path": "src/tools/capability-tools.test.ts",
+      "sha256": "7e528172df069b15f3ea6867f72daa11afe8ad15120e7cb0f5a45f994469baee"
+    },
+    {
+      "path": "src/tools/capability-tools.ts",
+      "sha256": "9ebe9cf66ae63a84ff3856fd0c86032ce288631ab5554411a48964105d4fe3cb"
+    },
+    {
+      "path": "src/ui/papyrus/operator-console/operatorConsoleState.ts",
+      "sha256": "42b44b2ba377557d547b96e1afa5e66346a7207e75edd06908192f76af3f17e3"
+    }
+  ]
+}

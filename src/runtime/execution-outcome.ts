@@ -75,6 +75,7 @@ export function deriveExecutionCompletionFloor(input: {
 }
 
 export function deriveExecutionFinalOutcome(input: {
+  finalText?: string;
   skillRequirementsSatisfied?: boolean;
   requestRequirements?: RequestRequirements;
   providerExecution?: ProviderExecutionResult;

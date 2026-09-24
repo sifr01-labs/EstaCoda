@@ -1,3 +1,4 @@
+import { resolve } from "node:path";
 import { releaseExecutionActionRetention, retainExecutionActionIdentity } from "../security/execution-action-identity.js";
 import { withDispatchAuthorization, validateDispatchAuthorization } from "../security/dispatch-authorization.js";
 import { assessHardlineFloor } from "../security/command-safety.js";
@@ -267,6 +268,15 @@ export class TaskApprovalService {
     baseDecision: "allow" | "ask" | "deny"
   ): "allow" | "ask" | "deny" {
     if (baseDecision === "deny") return "deny";
+    if (step.executor.role === "report-delivery") {
+      if (!["task.result.read", "file.write", "file.read"].includes(request.toolName ?? "")) return "deny";
+      if (request.toolName !== "task.result.read") {
+        const path = step.executor.requestContract?.requirements.fileOutput?.path;
+        const resolvedTarget = path === undefined ? undefined : resolve(task.workspace.canonicalPath, path).replaceAll("\\", "/");
+        const target = process.platform === "win32" ? resolvedTarget?.toLowerCase() : resolvedTarget;
+        if (target === undefined || request.targetKey !== `${request.toolName}:path:${target}`) return "deny";
+      }
+    }
     const taskDisposition = task.authorityPolicy.riskClassPolicy[request.riskClass];
     const stepDisposition = step.authorityPolicy.riskClassPolicy[request.riskClass];
     if (taskDisposition === "forbid" || stepDisposition === "forbid") return "deny";

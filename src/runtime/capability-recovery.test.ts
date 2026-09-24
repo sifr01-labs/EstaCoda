@@ -8,6 +8,24 @@ function names(request: { tools?: unknown }): string[] {
 }
 
 describe("capability recovery through the real runtime", () => {
+  it("discovers a workflow by query and consumes returned metadata through provider iterations", async () => {
+    const h = await createResearchWorkflowHarness();
+    let discovered = "";
+    try {
+      h.enqueue(nativeCall("capability_discover", { query: "write a paper and design experiments", kind: "skill" }),
+        (request) => {
+          const feedback = request.messages.map((message) => typeof message.content === "string" ? message.content : "").reverse().find((text) => text.includes('"matches"')) ?? "";
+          discovered = /"id"\s*:\s*"(skill:[^"\s]+)"/u.exec(feedback)?.[1] ?? "";
+          expect(discovered).not.toBe("");
+          return nativeCall("capability_request", { ids: [discovered], reason: "The discovered workflow fits the requested work" })(request);
+        },
+        (request) => nativeCall("skill_read", { name: discovered.slice(6) })(request), answer("Instructions loaded."));
+      await h.turn("Help investigate this topic.");
+      expect(discovered).toBe("skill:researcher"); // Oracle used only after execution.
+      expect(h.scriptErrors).toEqual([]);
+      expect(h.events).toContainEqual(expect.objectContaining({ kind: "capability-skills-loaded", loadedSkills: [expect.objectContaining({ name: "researcher", readiness: "available" })] }));
+    } finally { await h.dispose(); }
+  });
   it.each([false, true])("expands on the next iteration, including provider fallback (%s)", async (fallback) => {
     const harness = await createResearchWorkflowHarness({ fallbackOnRequest: fallback ? 3 : undefined });
     try {

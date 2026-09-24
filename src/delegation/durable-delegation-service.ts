@@ -255,7 +255,7 @@ export class DurableDelegationService {
     const existingSteps = existing?.activePlanRevisionId === undefined
       ? []
       : this.#store.listSteps(existing.id, existing.activePlanRevisionId);
-    const existingWorkerSteps = existingSteps.filter((step) => step.executor.role !== "synthesis");
+    const existingWorkerSteps = existingSteps.filter((step) => step.executor.role === "worker" || step.executor.role === "orchestrator");
     const existingSynthesisStep = existingSteps.find((step) => step.executor.role === "synthesis");
     const resolvedStepAuthorities = tasks.map((item, index) => existing === null
       ? this.#authorityFor(item, parent?.authority, index)
@@ -266,15 +266,22 @@ export class DurableDelegationService {
       : existing === null
         ? this.#synthesisAuthority(synthesis, parent?.authority)
         : replayedSynthesisAuthority(existingSynthesisStep);
+    // The root user's file request gets its own governed Task Step. It is not
+    // authority granted to a research worker or inherited by a child Task.
+    const deliveryRequired = parent === undefined && synthesis !== undefined && requestContract?.requirements.fileOutput !== undefined && requestContract.requirements.issues.length === 0;
+    const deliveryAuthority = !deliveryRequired ? undefined : existing !== null
+      ? existingSteps.find((step) => step.executor.role === "report-delivery")?.authorityPolicy
+      : this.#reportDeliveryAuthority();
     const allAuthorities = resolvedSynthesisAuthority === undefined
       ? stepAuthorities
       : [...stepAuthorities, resolvedSynthesisAuthority.authority];
+    if (deliveryAuthority !== undefined) allAuthorities.push(deliveryAuthority);
     const taskAuthority = mergeAuthorities(allAuthorities);
     const workerCount = tasks.length;
     const hasSynthesis = synthesis !== undefined;
     const executionLimits = delegationExecutionLimits(
       workerCount,
-      hasSynthesis,
+      Number(hasSynthesis) + Number(deliveryAuthority !== undefined),
       this.#config.maxConcurrentChildren,
       this.#config.childTimeoutSeconds,
       parent?.executionLimits
@@ -348,6 +355,19 @@ export class DurableDelegationService {
         resultPolicy: { kind: "text", required: true, maxBytes: STEP_RESULT_BYTES }
       }
     ];
+    if (deliveryAuthority !== undefined && requestContract !== undefined) {
+      const deliveryContract = structuredClone(requestContract);
+      deliveryContract.requirements.fileOutput!.path ??= deliveryContract.requirements.fileOutput!.format === "markdown" ? "report.md" : "report.txt";
+      const idempotency = delegatedStepIdempotency(deliveryAuthority);
+      steps.push({
+        key: "report-delivery", title: "Save and verify research report",
+        objective: `Read the accepted synthesis with task.result.read, save its exact complete content to ${deliveryContract.requirements.fileOutput!.path}, then read the entire file back. Do not repeat research or alter the accepted report.`,
+        dependsOn: ["synthesis"], executor: { kind: "agent", role: "report-delivery", requestContract: deliveryContract },
+        childTaskPolicy: "forbid", authorityPolicy: deliveryAuthority, executionLimits: executionLimits.step,
+        retryPolicy: delegatedRetryPolicy(idempotency), failurePolicy: { onAttemptsExhausted: "mark_partial", optional: false },
+        idempotency, resultPolicy: { kind: "text", required: true, maxBytes: STEP_RESULT_BYTES }
+      });
+    }
     const graph = this.#fixedTasks.create({
       creatorSessionId: sessionId,
       source: "delegation",
@@ -492,6 +512,18 @@ export class DurableDelegationService {
         mayCreateChildTasks,
         maxChildDepth: mayCreateChildTasks ? remainingDepth : 0
       }
+    };
+  }
+
+  #reportDeliveryAuthority(): TaskAuthorityPolicy | undefined {
+    const names = ["task.result.read", "file.write", "file.read"];
+    const tools = this.#visibleTools().filter((tool) => names.includes(tool.name));
+    if (tools.length !== names.length) return undefined; // Missing configured capability remains an explicit pending output.
+    return {
+      allowedToolsets: unique(tools.flatMap((tool) => tool.toolsets)), allowedTools: names,
+      blockedTools: [], mayCreateChildTasks: false, maxChildDepth: 0,
+      riskClassPolicy: Object.fromEntries(TASK_TOOL_RISK_CLASSES.map((risk) => [risk,
+        tools.some((tool) => tool.riskClass === risk) ? "runtime_policy" : "forbid"])) as TaskAuthorityPolicy["riskClassPolicy"]
     };
   }
 
@@ -716,7 +748,7 @@ function delegatedRetryPolicy(idempotency: TaskIdempotency): TaskRetryPolicy {
 
 function delegationExecutionLimits(
   workerCount: number,
-  hasSynthesis: boolean,
+  terminalPhases: number,
   maxConcurrentChildren: number,
   timeoutSeconds: number,
   ceiling?: TaskExecutionLimits
@@ -724,7 +756,7 @@ function delegationExecutionLimits(
   task: TaskExecutionLimits;
   step: TaskStepExecutionLimits;
 } {
-  const stepCount = workerCount + (hasSynthesis ? 1 : 0);
+  const stepCount = workerCount + terminalPhases;
   const maxConcurrentAttempts = Math.min(
     stepCount,
     maxConcurrentChildren,
@@ -733,7 +765,7 @@ function delegationExecutionLimits(
   );
   const workerCapacity = Math.min(workerCount, maxConcurrentAttempts);
   const workerWaveCount = Math.ceil(workerCount / workerCapacity);
-  const scheduledPhaseCount = workerWaveCount + (hasSynthesis ? 1 : 0);
+  const scheduledPhaseCount = workerWaveCount + terminalPhases;
   const wall = Math.max(1, Math.floor(timeoutSeconds * 1_000));
   const phaseWall = ceiling === undefined
     ? wall
@@ -741,7 +773,7 @@ function delegationExecutionLimits(
   let rootTaskWall = ceiling?.maxWallClockMs;
   if (rootTaskWall === undefined) {
     const workerWall = wall * workerWaveCount;
-    const synthesisWall = hasSynthesis ? wall : 0;
+    const synthesisWall = terminalPhases * wall;
     const scheduledWall = workerWall + synthesisWall;
     if (!Number.isSafeInteger(scheduledWall)) {
       throw new Error("Delegation wall-clock limit exceeds the safe integer range.");
@@ -872,7 +904,7 @@ function handle(
     execution: "waiting",
     backgroundContinuation: "unknown",
     stepCount: graph.steps.length,
-    workerStepIds: graph.steps.filter((step) => step.executor.role !== "synthesis").map((step) => step.id),
+    workerStepIds: graph.steps.filter((step) => step.executor.role === "worker" || step.executor.role === "orchestrator").map((step) => step.id),
     ...(synthesisStep === undefined
       ? {}
       : { synthesisStepId: synthesisStep.id, primaryResultStepId: synthesisStep.id }),

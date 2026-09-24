@@ -1,0 +1,189 @@
+{
+  "version": 1,
+  "passed": true,
+  "measuredAt": "2026-09-24T15:27:54.332Z",
+  "sourceBaseCommit": "12e60f3b1a09061c502c6c39fc55558da3e59227",
+  "sourceOverlay": [
+    {
+      "path": "apps/desktop/tests/research-packaged.mts",
+      "sha256": "75308a218c4d509b94378ddaa4276293b440932706a20365f2e5bb4f35650f58"
+    },
+    {
+      "path": "package.json",
+      "sha256": "8427aa6992264ee7c5031c694c9d0a152be35125b78afd8cd47e4743c70beba8"
+    },
+    {
+      "path": "scripts/validate-research-reliability.ts",
+      "sha256": "eb7b3141c83e53111328201054d76e9784f0d83ca5bc0e34fec2080ebb7a1e23"
+    },
+    {
+      "path": "src/contracts/task.ts",
+      "sha256": "ab7c5e2957b89a4ce0787c5f794ff07f72b669546a51f46616c0c293de0f0e6e"
+    },
+    {
+      "path": "src/delegation/durable-delegation-service.ts",
+      "sha256": "4a3527c8260c63268f2eeecf10e6d14c2eac11ccec815e807398dbd1def17c58"
+    },
+    {
+      "path": "src/eval/fixtures/research-routing-release.test.ts",
+      "sha256": "f115981ada90ca44b801dcc638963732266a8b742960ea2a270f4c79edc1e42d"
+    },
+    {
+      "path": "src/eval/fixtures/research-routing-release.ts",
+      "sha256": "8a5b8bde7d8a45b7a501e96f95e7d45f06cc8cf8ce3d242a8c6b42e94de0012b"
+    },
+    {
+      "path": "src/eval/fixtures/research-workflow-harness.ts",
+      "sha256": "21050231dec2afbd52d2d3d4928993a2883522762a105c5ff41c4fefb78c6073"
+    },
+    {
+      "path": "src/eval/fixtures/research-workflow-release.ts",
+      "sha256": "8b2e582fed53c3a1b6c9feb907ef2a39bf84b19c74ba4d839fd0ee30f765ef3e"
+    },
+    {
+      "path": "src/memory/memory-reviewer.test.ts",
+      "sha256": "66a9f774cb4c74221a94f81c28e9ca7f1f011b61aa8ae73aa2c229e41c3fa3ac"
+    },
+    {
+      "path": "src/memory/memory-reviewer.ts",
+      "sha256": "824195bee127d06d7f6fcef9c0083798b0bec4033c982dad673bca56eac3dc4d"
+    },
+    {
+      "path": "src/memory/transient-capability-state.ts",
+      "sha256": "2d2b2cfb4c072505f58ea893ca381c6cbd885c28a82439875b61f0d8b131e397"
+    },
+    {
+      "path": "src/runtime/agent-loop.ts",
+      "sha256": "d395d6dba215802dea8c0b4b3f58430343eec98cdfb789bb3f43bf91804a074b"
+    },
+    {
+      "path": "src/runtime/capability-recovery.test.ts",
+      "sha256": "22084bdc697f43276f6dc67a8a825ac2f9673bf144953f9601914afdf8ac71cf"
+    },
+    {
+      "path": "src/runtime/execution-outcome.ts",
+      "sha256": "365d95247417f8e1ae8db7d4a28f26c939b1ac630061e2833152907df0b48468"
+    },
+    {
+      "path": "src/runtime/intent-router.ts",
+      "sha256": "540871684ef9eee9be404786a7970c06f8d88bb05d16101f2b189ba6f293940c"
+    },
+    {
+      "path": "src/runtime/provider-turn-loop.ts",
+      "sha256": "d8bfe6a5ec1ffb45901a7ac9180ab6dd67ef2c7419c98bd4113e96e9a1c714f7"
+    },
+    {
+      "path": "src/runtime/request-requirements.test.ts",
+      "sha256": "8d93eedaf9334b8a85ffd85f41274d259d2956531b69f6bf6aaf8855a4eafcbd"
+    },
+    {
+      "path": "src/runtime/request-requirements.ts",
+      "sha256": "bad58d28f324a134b37870e738ab9bb5e1e9b4b34b55e7a83a3883ef3cf95914"
+    },
+    {
+      "path": "src/runtime/research-request-evidence.ts",
+      "sha256": "200416e7e16c35e6376a09bd045cd80b3c45b7415b332df85915a3a311815408"
+    },
+    {
+      "path": "src/runtime/research-request.acceptance.test.ts",
+      "sha256": "4554b77433dbfb2e25cd8190a7aa05b245af578d29664f187c92aab4524f7a40"
+    },
+    {
+      "path": "src/runtime/research-surfaces.acceptance.test.ts",
+      "sha256": "dd9272f8a2695421d57e7dcf31dda669f4f1745fdb653881eecfa542fbe706ec"
+    },
+    {
+      "path": "src/tasks/agent-step-executor.ts",
+      "sha256": "b66457f36ee0df061221f650ae003798986b83a95e22f210d26d2a31c1b3f711"
+    },
+    {
+      "path": "src/tasks/research-result-evidence.ts",
+      "sha256": "00f4c95bb6df373422c05ec7957776c0ea6476a88ed3703d1afe268f1517131d"
+    },
+    {
+      "path": "src/tasks/task-activity-spans.ts",
+      "sha256": "9d20bcd61601f32f79f554c3702c8bfd27abbb90bba1787fdf0d14b48a76a1a6"
+    },
+    {
+      "path": "src/tasks/task-approval-service.test.ts",
+      "sha256": "79564f3af8f27a1d576df1225c864b4e6f07e56ba7f78eed5cf34f26ef5e34f9"
+    },
+    {
+      "path": "src/tasks/task-approval-service.ts",
+      "sha256": "33983028d1e46cde628c63e2cc9dc02e50bd2b5f5f5f3832c334ec8a5b8a5791"
+    },
+    {
+      "path": "src/tasks/task-completion-delivery.ts",
+      "sha256": "5622916982f7c57dc677c4ce9d3a355ffcccf117fc9551970cc0a581417c6abc"
+    },
+    {
+      "path": "src/tasks/task-operator-service.ts",
+      "sha256": "035dd74f8ba51944a8b0634dfebb165dc8fec6c08d2316a00b5ba7f7f6e2149c"
+    },
+    {
+      "path": "src/tasks/task-primary-result.ts",
+      "sha256": "fe54f73cfad48a36c2344681fc77db135f911c6e5bb7214bbde3b432d0c7c4cc"
+    },
+    {
+      "path": "src/tasks/task-session-completion.ts",
+      "sha256": "b5d1c49c721ea7d0a477f3a47835410d80a92ac67ada24b0b4d2e2ab2a8adb33"
+    },
+    {
+      "path": "src/tools/capability-tools.test.ts",
+      "sha256": "7e528172df069b15f3ea6867f72daa11afe8ad15120e7cb0f5a45f994469baee"
+    },
+    {
+      "path": "src/tools/capability-tools.ts",
+      "sha256": "9ebe9cf66ae63a84ff3856fd0c86032ce288631ab5554411a48964105d4fe3cb"
+    },
+    {
+      "path": "src/ui/papyrus/operator-console/operatorConsoleState.ts",
+      "sha256": "42b44b2ba377557d547b96e1afa5e66346a7207e75edd06908192f76af3f17e3"
+    }
+  ],
+  "platform": "darwin",
+  "arch": "arm64",
+  "runtime": {
+    "sha256": "f6a6edea622e6b0be4add66b81d91e63f674759ec76284cf41a685275dd04c3d",
+    "nodeVersion": "v24.14.1",
+    "coreVersion": "0.1.0",
+    "entrySha256": "8b7b5e8816ffe62d9baa2133dd5cc54a1a8ea36997b0bda6fc631039c700f6ec",
+    "signature": "ad-hoc verified",
+    "ownedBridgeVerified": true,
+    "inventoryVerified": true,
+    "matchesCurrentDist": true
+  },
+  "fixtures": {
+    "model": "scripted loopback HTTP",
+    "web": "in-process registered synthetic provider in packaged supervisor",
+    "liveModelCalls": 0,
+    "transport": "actual signed app + preload/Main + owned bridge + private control"
+  },
+  "workflow": {
+    "workers": 3,
+    "acceptedResults": 5,
+    "distinctChildSessions": 5,
+    "tasks": 1,
+    "searches": 3,
+    "providerCalls": 17,
+    "appRestartNoReplay": true,
+    "fileBytes": 655,
+    "fileSha256": "7965576a2d9c38dfea13465934c442243231fcfd7bd123858c419a90cb31a511",
+    "readbackVerified": true,
+    "historicalTaskStatus": "completed"
+  },
+  "allScenarios": {
+    "providerCalls": 24,
+    "actualToolResults": 17,
+    "failedToolResults": 1
+  },
+  "scenarios": {
+    "research": true,
+    "automaticReportDelivery": true,
+    "saveOnlyAfterRestart": true,
+    "skillRecovery": true,
+    "missingSearch": true,
+    "falseSaveBlocked": true
+  },
+  "liveAssessment": "pending approved model, sources and spend ceiling"
+}

@@ -178,7 +178,7 @@ export type TaskChildPolicy = "forbid" | "fire_and_forget";
 export type TaskAgentExecutor = {
   requestContract?: import("./delegation.js").DelegatedRequestContract;
   kind: "agent";
-  role: "worker" | "orchestrator" | "synthesis";
+  role: "worker" | "orchestrator" | "synthesis" | "report-delivery";
   model?: {
     provider?: ProviderId;
     id: string;
@@ -795,7 +795,7 @@ export function validateTaskPlan(
 
     if (
       step.executor.kind !== "agent" ||
-      (step.executor.role !== "worker" && step.executor.role !== "orchestrator" && step.executor.role !== "synthesis") ||
+      (step.executor.role !== "worker" && step.executor.role !== "orchestrator" && step.executor.role !== "synthesis" && step.executor.role !== "report-delivery") ||
       (step.executor.model !== undefined && (
         step.executor.model.id.trim().length === 0 ||
         step.executor.model.id.length > limits.maxModelIdChars

@@ -50,11 +50,11 @@ const provider=createServer(async(req,res)=>{
   // Custom-compatible routes may serialize tool feedback as text instead of native history.
   const hasFeedback=priorCalls.length>0||input.messages.some((m:any)=>m.role==='tool'||typeof m.content==='string'&&m.content.startsWith('EstaCoda executed the requested tools.'));
   let content='',next:ReturnType<typeof tool>[]=[];
-  if(phase==='save'){
+  if(phase==='save'||text.includes('Current Step: Save and verify research report')){
    const task=store.listTasks()[0],synthesis=store.listSteps(task.id,task.activePlanRevisionId).find((s:any)=>s.executor.role==='synthesis');
    const result=store.listResults(task.id).find((r:any)=>r.stepId===synthesis.id&&r.disposition==='accepted');assert(result);
    if(saveIndex===0)next=[tool('task_result_read',{task_id:task.id,result_id:result.id})];
-   else if(saveIndex===1){reportContent=(await resultService.readText({taskId:task.id,resultId:result.id,sessionId})).content;next=[tool('file_write',{path:'report.md',content:reportContent})];}
+   else if(saveIndex===1){reportContent=(await resultService.readText({taskId:task.id,resultId:result.id,sessionId})).content;next=[tool('file_write',{path:'report.md',content:reportContent,overwrite:true})];}
    else if(saveIndex===2)next=[tool('file_read',{path:'report.md'})];
    else content='Saved report.md.';
    saveIndex++;
@@ -140,12 +140,12 @@ try{
  await launch();console.log('Verified packaged app and owned bridge.');
  const initial=await submit('Use the researcher skill and use 3 subagents to research current battery recycling. Save report.md');sessionId=initial.workId.replace(/^session:/,'');
  await expect.poll(()=>{assert.deepEqual(providerErrors,[]);return store.listTasks().length;},{timeout:60000}).toBe(1);
- await expect.poll(()=>store.listTasks()[0]?.status,{timeout:120000}).toBe('partial');
+ await expect.poll(()=>store.listTasks()[0]?.status,{timeout:120000}).toBe('completed');
  const task=store.listTasks()[0],steps=store.listSteps(task.id,task.activePlanRevisionId),workers=steps.filter((s:any)=>s.executor.role==='worker'),synthesis=steps.find((s:any)=>s.executor.role==='synthesis');
- assert.equal(workers.length,3);assert.deepEqual(new Set(synthesis.dependsOn),new Set(workers.map((s:any)=>s.id)));assert.equal(store.listResults(task.id).filter((r:any)=>r.disposition==='accepted').length,4);assert.equal(searches(),3);assert(!existsSync(join(workspace,'report.md')));
- const workerSessions=new Set(store.listAttempts(task.id).map((a:any)=>a.workerSessionId));assert.equal(workerSessions.size,4);assert(!workerSessions.has(sessionId));
+ assert.equal(workers.length,3);assert.deepEqual(new Set(synthesis.dependsOn),new Set(workers.map((s:any)=>s.id)));assert.equal(store.listResults(task.id).filter((r:any)=>r.disposition==='accepted').length,5);assert.equal(searches(),3);assert(existsSync(join(workspace,'report.md')));
+ const workerSessions=new Set(store.listAttempts(task.id).map((a:any)=>a.workerSessionId));assert.equal(workerSessions.size,5);assert(!workerSessions.has(sessionId));
  await idle(initial.workId);const beforeRestart=requests;await stopApp();await launch();assert.equal(requests,beforeRestart);
- phase='save';await submit('Save this report to report.md',initial.workId);await idle(initial.workId);
+ phase='save';saveIndex=0;await submit('Save this report to report.md',initial.workId);await idle(initial.workId);
  await expect.poll(()=>existsSync(join(workspace,'report.md')),{timeout:60000}).toBe(true);
  await expect.poll(()=>page!.evaluate(id=>window.desktop.getWork(id).then(x=>x.status).catch(()=>'unavailable'),initial.workId),{timeout:60000}).toBe('completed');
  assert.equal(readFileSync(join(workspace,'report.md'),'utf8'),reportContent);assert(reportContent.includes('| Retrieved |'));assert.equal(store.listTasks().length,1);assert.equal(searches(),3);
@@ -162,7 +162,7 @@ try{
  const allEvents=(await Promise.all([...allSessionIds].map(id=>db.listEvents(id)))).flat();
  const toolResults=allEvents.filter((e:any)=>e.kind==='tool-result');
  assert.equal(toolResults.length,calls.reduce((n,x)=>n+x.tools.length,0));
- const sourceOverlay=['package.json','src/eval/fixtures/research-workflow-harness.ts','src/eval/fixtures/research-workflow-release.ts','src/runtime/research-surfaces.acceptance.test.ts','scripts/validate-research-reliability.ts','apps/desktop/tests/research-packaged.mts'].map(path=>({path,sha256:createHash('sha256').update(readFileSync(path)).digest('hex')}));
+ const sourceOverlay=[...new Set([...execFileSync('git',['diff','--name-only','--','src','apps/desktop','scripts','package.json'],{encoding:'utf8'}).trim().split('\n').filter(Boolean),'package.json','src/eval/fixtures/research-workflow-harness.ts','src/eval/fixtures/research-workflow-release.ts','src/runtime/research-surfaces.acceptance.test.ts','scripts/validate-research-reliability.ts','apps/desktop/tests/research-packaged.mts'])].sort().map(path=>({path,sha256:createHash('sha256').update(readFileSync(path)).digest('hex')}));
  const measurements={
   version:1,passed:true,measuredAt:new Date().toISOString(),sourceBaseCommit:execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),sourceOverlay,
   platform:process.platform,arch:process.arch,
@@ -170,7 +170,7 @@ try{
   fixtures:{model:'scripted loopback HTTP',web:'in-process registered synthetic provider in packaged supervisor',liveModelCalls:0,transport:'actual signed app + preload/Main + owned bridge + private control'},
   workflow:{workers:workers.length,acceptedResults:store.listResults(task.id).filter((r:any)=>r.disposition==='accepted').length,distinctChildSessions:workerSessions.size,tasks:store.listTasks().length,searches:searches(),providerCalls:calls.filter(c=>['research','save'].includes(c.phase)).length,appRestartNoReplay:true,fileBytes:Buffer.byteLength(reportContent),fileSha256:createHash('sha256').update(reportContent).digest('hex'),readbackVerified:true,historicalTaskStatus:store.getTask(task.id).status},
   allScenarios:{providerCalls:requests,actualToolResults:toolResults.length,failedToolResults:toolResults.filter((e:any)=>!e.result.ok).length},
-  scenarios:{research:true,saveOnlyAfterRestart:true,skillRecovery:true,missingSearch:true,falseSaveBlocked:true},
+  scenarios:{research:true,automaticReportDelivery:true,saveOnlyAfterRestart:true,skillRecovery:true,missingSearch:true,falseSaveBlocked:true},
   liveAssessment:'pending approved model, sources and spend ceiling'
  };
  mkdirSync(dirname(output),{recursive:true});writeFileSync(output,JSON.stringify(measurements,null,2)+'\n');

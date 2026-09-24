@@ -52,7 +52,7 @@ async function surface(h: Harness, kind: Surface) {
 describe.sequential("research through real CLI and Telegram entry points", () => {
   it.each<Surface>(["cli", "telegram"])("%s runs three workers, synthesis and restart save without a second batch", async (kind) => {
     const result = await measureResearchWorkflow({ harnessOptions: { securityPolicy: createSecurityPolicyForMode("open") }, surface: (h) => surface(h, kind) });
-    expect(result).toMatchObject({ workers: 3, acceptedResults: 4, tasks: 1, searches: 3, finalOutcome: "completed", restarted: true });
+    expect(result).toMatchObject({ workers: 3, acceptedResults: 5, tasks: 1, searches: 3, finalOutcome: "completed", restarted: true });
   });
   it.each<Surface>(["cli", "telegram"])("%s recovers a skill with real instruction evidence", async (kind) => {
     const h = await createResearchWorkflowHarness({ securityPolicy: createSecurityPolicyForMode("open") });

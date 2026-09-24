@@ -21,7 +21,12 @@ export function explicitRequestSegments(text: string): string[] {
       return " ";
     });
   return affirmativeRequestSegments(sanitized)
-    .filter((segment) => !INFORMATIONAL.test(segment))
+    .filter((segment) => {
+      const informational = INFORMATIONAL.exec(segment);
+      // A topic such as "how to recycle" does not cancel an earlier action.
+      const action = /\b(?:research|investigate|find|search|survey|save|export|write|create|generate|prepare|use|using|invoke|load|apply|launch|spawn)\b|(?:ابحث|احفظ|استخدم|اكتب|أنشئ)/iu.exec(segment);
+      return informational === null || (/^how\s+(?:to|could|would)$/iu.test(informational[0]) && action !== null && action.index < informational.index);
+    })
     .map((segment) => segment.replace(/FILEOPERAND(\d+)/gu, (_, index: string) => operands[Number(index)] === undefined ? " " : `\`${operands[Number(index)]}\``));
 }
 
@@ -33,10 +38,13 @@ export function deriveRequestRequirements(userText: string, originTurnId?: strin
   }
   for (const segment of explicitRequestSegments(userText)) {
     const actionSegment = segment.replace(/`[^`]*`/gu, " ");
-    const skill = actionSegment.match(/(?:\b(?:use|using|invoke|load|apply)\s+(?:the\s+)?([\p{L}\p{N}_-]{1,80})\s+skill\b|(?:استخدم|حمّل|فعّل)\s+مهارة\s+([\p{L}\p{N}_-]{1,80})|^\s*\/([\p{L}\p{N}_-]{1,80})(?:\s|$))/iu);
-    const reference = skill?.[1] ?? skill?.[2] ?? skill?.[3];
-    if (reference !== undefined && result.skillReferences.length < 4) result.skillReferences.push(reference.toLocaleLowerCase("en-US"));
-    const delegation = actionSegment.match(/\b(?:use|launch|spawn|delegate\s+to|assign\s+to)\s+(?:(\d{1,9}|one|two|three|four|five|six|seven|eight|nine|ten)\s+)?(?:sub[- ]?agents?|workers?|agents?)\b|(?:استخدم|شغّل|شغل|كلّف)\s+(?:(\d{1,9}|[٠-٩]{1,9}|ثلاثة|ثلاث|اثنين|اثنان)\s+)?(?:وكلاء|عمال|وكيل|sub[- ]?agents?|workers?)(?:\s+فرعيين)?/iu);
+    for (const skill of actionSegment.matchAll(/(?:\b(?:use|using|invoke|load|apply)\s+(?:the\s+)?([\p{L}\p{N}_-]{1,80})\s+skill\b|(?:استخدم|حمّل|فعّل)\s+مهارة\s+([\p{L}\p{N}_-]{1,80})|^\s*\/([\p{L}\p{N}_-]{1,80})(?:\s|$))/giu)) {
+      const reference = skill[1] ?? skill[2] ?? skill[3];
+      if (reference === undefined || result.skillReferences.includes(reference.toLocaleLowerCase("en-US"))) continue;
+      if (result.skillReferences.length >= 4) { result.issues.push("request-too-long"); break; }
+      result.skillReferences.push(reference.toLocaleLowerCase("en-US"));
+    }
+    const delegation = actionSegment.match(/\b(?:use|using|launch|spawn|delegate\s+to|assign\s+to)\s+(?:(\d{1,9}|one|two|three|four|five|six|seven|eight|nine|ten)\s+)?(?:sub[- ]?agents?|workers?|agents?)\b|(?:استخدم|شغّل|شغل|كلّف)\s+(?:(\d{1,9}|[٠-٩]{1,9}|ثلاثة|ثلاث|اثنين|اثنان)\s+)?(?:وكلاء|عمال|وكيل|sub[- ]?agents?|workers?)(?:\s+فرعيين)?/iu);
     if (delegation !== null) {
       const countText = delegation[1] ?? delegation[2];
       const words: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, ثلاثة: 3, ثلاث: 3, اثنين: 2, اثنان: 2 };
@@ -96,4 +104,12 @@ export function continueRequestRequirements(previous: RequestRequirements, next:
     skillReferences: next.skillReferences.length > 0 ? [...next.skillReferences] : [...previous.skillReferences],
     issues: [...new Set([...previous.issues, ...next.issues])]
   };
+}
+
+export function requiredSkillsDelivered(intent: import("../contracts/intent.js").IntentRoute, delivered: readonly string[]): boolean {
+  return (intent.requestRequirements?.skillReferences ?? []).every((reference) => {
+    const request = intent.skillRequests?.find((item) => item.reference === reference);
+    if (request !== undefined) return request.status === "resolved" && request.candidates.length === 1 && delivered.includes(request.candidates[0]!);
+    return intent.primarySkill !== undefined && reference === intent.primarySkill.name && delivered.includes(reference);
+  });
 }

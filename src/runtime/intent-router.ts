@@ -120,7 +120,7 @@ export class IntentRouter {
       const resolved = contextual.length === 1 ? contextual[0] : undefined;
       const deferred = resolved !== undefined && matchActionableSkill(resolved, matchInput)?.deferred === true;
       if (resolved !== undefined && !deferred) selected.push(resolved);
-      return { reference, status: candidates.length === 0 ? "unavailable" : deferred ? "deferred" : resolved === undefined ? "ambiguous" : "resolved", candidates: candidates.slice(0, 8).map((skill) => skill.name) };
+      return { reference, status: candidates.length === 0 ? "unavailable" : deferred ? "deferred" : resolved === undefined ? "ambiguous" : "resolved", candidates: (resolved === undefined ? candidates : [resolved]).slice(0, 8).map((skill) => skill.name) };
     });
     // An unresolved explicit request must not silently select a different skill.
     const primary = route.skillRequests.every((request) => request.status === "resolved") ? selected[0] : undefined;

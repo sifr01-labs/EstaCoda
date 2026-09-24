@@ -1,5 +1,6 @@
+import { RESEARCH_EVIDENCE_INSTRUCTION } from "../tasks/research-result-evidence.js";
 import { projectCapabilityState, type RuntimeCapabilityState } from "./capability-state.js";
-import { requiredRequestTools } from "./request-requirements.js";
+import { requiredRequestTools, requiredSkillsDelivered } from "./request-requirements.js";
 import { MAX_CAPABILITY_ADDITIONS, type SessionCapabilityRecovery } from "../tools/capability-tools.js";
 import { buildSkillReadinessMetadata } from "../skills/skill-readiness.js";
 import { sanitizeCheckpointText } from "../session/execution-checkpoint-state.js";
@@ -704,7 +705,7 @@ export class ProviderTurnLoop {
             version: 1,
             objective: sanitizeCheckpointText(this.#executionCheckpointController?.current()?.originalObjective ?? input.userText, 2000),
             requirements: structuredClone(input.intent.requestRequirements),
-            ...(input.selectedSkill === undefined || !deliveredSkillNames.has(input.selectedSkill.name) ? {} : { skillName: input.selectedSkill.name })
+            ...(input.selectedSkill === undefined || !requiredSkillsDelivered(input.intent, [...deliveredSkillNames]) ? {} : { skillName: input.selectedSkill.name })
           },
         providerExecution: execution,
         activeProviderTools: new Set(this.#model?.supportsTools === true ? providerToolsForIteration.map((tool) => tool.function.name) : []),
@@ -1285,6 +1286,8 @@ export class ProviderTurnLoop {
       ),
       browserState
     });
+    if (input.intent.requestRequirements?.research?.fresh) prompt.messages.push({ role: "user", content: RESEARCH_EVIDENCE_INSTRUCTION });
+    if ((input.intent.requestRequirements?.skillReferences.length ?? 0) > 1) prompt.messages.push({ role: "user", content: `Request each additional skill ID through capability.request, then use skill.read in the next iteration to load ready instructions for every explicitly requested skill before completion or delegation: ${JSON.stringify(input.intent.skillRequests)}. Listing or selecting one skill does not satisfy the others.` });
     for (const feedback of input.capabilityRecoveryFeedback ?? []) {
       prompt.messages.push({ role: "user", content: `Runtime capability recovery (no authorization granted): ${feedback}` });
     }
@@ -1493,6 +1496,8 @@ export class ProviderTurnLoop {
     if (input.toolLoopProgressNudge === true) {
       prompt.messages.push({ role: "user", content: EXECUTION_SUPERVISION_PROMPTS.toolLoopProgress });
     }
+    if (input.intent.requestRequirements?.research?.fresh) prompt.messages.push({ role: "user", content: RESEARCH_EVIDENCE_INSTRUCTION });
+    if ((input.intent.requestRequirements?.skillReferences.length ?? 0) > 1) prompt.messages.push({ role: "user", content: `Request each additional skill ID through capability.request, then use skill.read in the next iteration to load ready instructions for every explicitly requested skill before completion or delegation: ${JSON.stringify(input.intent.skillRequests)}. Listing or selecting one skill does not satisfy the others.` });
     for (const feedback of input.capabilityRecoveryFeedback ?? []) {
       prompt.messages.push({ role: "user", content: `Runtime capability recovery (no authorization granted): ${feedback}` });
     }

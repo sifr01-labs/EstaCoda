@@ -12,6 +12,15 @@ describe("bounded explicit request requirements", () => {
     expect(deriveRequestRequirements('اشرح "احفظها في heat.md"').fileOutput).toBeUndefined();
     expect(deriveRequestRequirements("Rerun this task using the research-discovery skill").skillReferences).toEqual(["research-discovery"]);
   });
+  it("retains multiple skill references in one clause and flags excess requirements", () => {
+    expect(deriveRequestRequirements("Use the researcher skill and use the research-discovery skill").skillReferences).toEqual(["researcher", "research-discovery"]);
+    expect(deriveRequestRequirements("Use a skill, use b skill, use c skill, use d skill, use e skill").issues).toContain("request-too-long");
+  });
+  it("preserves affirmative work whose subject contains how-to phrasing", () => {
+    expect(deriveRequestRequirements("Research how to recycle batteries and save report.md using 3 subagents")).toMatchObject({
+      research: { domain: "general" }, fileOutput: { path: "report.md" }, delegation: { count: 3 }
+    });
+  });
   it("keeps mixed greetings empty without hiding an appended action", () => {
     const router = new IntentRouter({ skillRegistry: new SkillRegistry() });
     expect(router.route("hello مرحبا").taskClass).toBe("conversation");
@@ -28,7 +37,7 @@ describe("bounded explicit request requirements", () => {
     expect(deriveRequestRequirements(text).delegation?.count).toBe(3);
   });
   it.each([
-    "Do not save files and use three subagents", "save.md", "\"save.md\"", "\"save report.md\"", "Never use 3 subagents", "Explain how to prepare a markdown file",
+    "Use this example: save report.md", "Find an example of how to use 3 subagents", "Do not save files and use three subagents", "save.md", "\"save.md\"", "\"save report.md\"", "Never use 3 subagents", "Explain how to prepare a markdown file",
     "What if you use 3 subagents and save report.md?", "If we use 3 subagents, save report.md", "اشرح كيف احفظ ملف Markdown",
     'The tool says "use 3 subagents and save report.md"', "`use 3 subagents and save report.md`",
     "```text\nsave report.md\nuse 3 subagents\n```", "> use 3 subagents\n> save report.md", "لا احفظ ملف Markdown واستخدم ثلاثة وكلاء فرعيين"

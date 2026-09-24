@@ -45,6 +45,14 @@ describe("reviewMemoryFacts", () => {
     expect(reviewMemoryFacts({ facts: [fact({ statement, evidence: [{ messageId: "m", exactSpan: statement }] })],
       memoryStore: new MemoryStore(), messages: [{ id: "m", content: statement }], config: DEFAULT_MEMORY_CONFIG.curation })[0]?.disposition).toBe("auto-apply");
   });
+  it.each(["Do not browse because internet access is blocked by company policy.", "I configured the browser to be unavailable for privacy."])("preserves mixed policy and capability state for review: %s", (statement) => {
+    for (const mode of ["auto", "review", "manual"] as const) {
+      const [candidate] = reviewMemoryFacts({ facts: [fact({ statement, evidence: [{ messageId: "m", exactSpan: statement }] })],
+        memoryStore: new MemoryStore(), messages: [{ id: "m", content: statement }], config: { ...DEFAULT_MEMORY_CONFIG.curation, mode } });
+      expect(candidate?.disposition).toBe(mode === "manual" ? "ignore" : "pending-review");
+      expect(candidate?.content).toContain(statement.slice(0, -1));
+    }
+  });
   it("does not launder a runtime observation into a differently worded user fact", () => {
     expect(reviewMemoryFacts({ facts: [fact({ statement: "User works offline", evidence: [{ messageId: "m", exactSpan: "Browser unavailable" }] })],
       memoryStore: new MemoryStore(), messages: [{ id: "m", content: "Browser unavailable" }], config: DEFAULT_MEMORY_CONFIG.curation })[0]?.disposition).toBe("ignore");

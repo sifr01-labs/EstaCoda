@@ -45,7 +45,7 @@ export type TaskActivitySpanEvent = {
 
 export type TaskActivitySpanStep = {
   readonly stepId: string;
-  readonly kind: "subagent" | "synthesis";
+  readonly kind: "subagent" | "synthesis" | "delivery";
   readonly label: string;
 };
 

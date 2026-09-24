@@ -1,3 +1,5 @@
+import { fileOutputEvidence } from "../runtime/file-output-evidence.js";
+import type { ExecutionEvidenceRecord } from "../contracts/execution-plan.js";
 import { groundResearchResult, requiresSourceTable, RESEARCH_EVIDENCE_INSTRUCTION } from "./research-result-evidence.js";
 import {taskModelOverride} from './task-model-override.js';
 import type { ArtifactRecord } from "../contracts/artifact.js";
@@ -385,6 +387,17 @@ export class AgentStepExecutor implements TaskStepExecutor {
         };
       }
 
+      if (input.step.executor.role === "report-delivery") {
+        const requirements = input.step.executor.requestContract?.requirements;
+        const evidence = fileOutputEvidence({
+          requirements: requirements === undefined ? undefined : { ...requirements, originTurnId: undefined, sourceTaskId: input.task.id },
+          toolExecutions: response.toolExecutions,
+          executionReceipts: events.filter((event): event is typeof event & ExecutionEvidenceRecord => event.kind === "execution-evidence-recorded")
+        });
+        if (requirements?.fileOutput === undefined || !evidence.satisfied) return {
+          outcome: "failed", failure: taskFailure("evidence-contract-unsatisfied", false), ...metering, ...common
+        };
+      }
       const evidenceFailure = researchEvidenceFailure(input.step, response.text, response.toolExecutions);
       if (evidenceFailure !== undefined) {
         return {

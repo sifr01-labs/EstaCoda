@@ -41,6 +41,64 @@ function schedulerFor(h: Harness, taskId: string) {
 }
 
 describe.sequential("research workflow acceptance harness", () => {
+  it("does not erase affirmative how-to requirements or accept a no-tool completion", async () => {
+    const h = await harness();
+    h.enqueue(answer("Done. All requested work is complete."));
+    const result = await h.turn("Research how to recycle batteries and save report.md using 3 subagents");
+    expect(result.intent.requestRequirements).toMatchObject({ research: { domain: "general" }, fileOutput: { path: "report.md" }, delegation: { count: 3 } });
+    expect(result.finalOutcome?.status).toBe("blocked");
+    scriptConsumed(h);
+  });
+
+  it("requires observed source claims for foreground fresh research", async () => {
+    const h = await harness();
+    h.enqueue(nativeCall("web_search", { query: "unrelated weather" }), answer("Research complete with no citations."));
+    const result = await h.turn("Research the latest battery recycling methods.");
+    expect(result.finalOutcome?.status).toBe("partially_completed");
+    expect(result.text).toContain("source-claim-table-missing");
+    h.enqueue(nativeCall("web_search", { query: "battery recycling" }), answer(`${REPORT}\n${CLAIM_TABLE}`));
+    const valid = await h.turn("Research the latest battery recycling methods.");
+    expect(valid.finalOutcome?.status).toBe("completed");
+    expect(valid.text).toContain("snippet; full text unavailable");
+    scriptConsumed(h);
+  });
+
+  it.each(["Use the researcher skill. Use the research-discovery skill.", "Use the researcher skill and use the research-discovery skill."])("requires every explicit skill and accepts owned recovery reads: %s", async (prompt) => {
+    const h = await harness();
+    h.enqueue(answer("Done."));
+    expect((await h.turn(prompt)).finalOutcome?.status).toBe("blocked");
+    h.enqueue(nativeCall("capability_request", { ids: ["skill:research-discovery"], reason: "Second explicitly requested skill" }),
+      nativeCall("skill_read", { name: "research-discovery" }), answer("Both skill instructions loaded."));
+    expect((await h.turn(prompt)).finalOutcome?.status).toBe("completed");
+    scriptConsumed(h);
+  });
+
+  it.each(["denied", "wrong-target", "wrong-content", "no-readback", "claim-only"])("keeps report delivery incomplete for %s", async (mode) => {
+    const h = await harness({ denyWrites: mode === "denied" });
+    h.enqueue(nativeCall("delegate_task", { tasks: [{ task: "Research recycling.", allowedTools: ["web.search"], research: { scope: "methods", requireLiveSources: false, requireRepositoryEvidence: false } }] }));
+    await h.turn("Use 1 worker to research recycling. Save report.md");
+    const task = h.store.listTasks()[0]!;
+    const { scheduler } = schedulerFor(h, task.id);
+    h.enqueue(answer(REPORT));
+    expect((await scheduler.runOnce()).completed).toBe(1);
+    const worker = h.store.listResults(task.id)[0]!;
+    h.enqueue(nativeCall("task_result_read", { task_id: task.id, result_id: worker.id }), answer(REPORT));
+    expect((await scheduler.runOnce()).completed).toBe(1);
+    const synthesis = h.store.listSteps(task.id, task.activePlanRevisionId!).find((step) => step.executor.role === "synthesis")!;
+    const result = h.store.listResults(task.id).find((item) => item.stepId === synthesis.id)!;
+    if (mode !== "claim-only") {
+      h.enqueue(nativeCall("task_result_read", { task_id: task.id, result_id: result.id }),
+        nativeCall("file_write", { path: mode === "wrong-target" ? "other.md" : "report.md", content: mode === "wrong-content" ? "unrelated bytes" : REPORT }));
+      if (mode === "wrong-content") h.enqueue(nativeCall("file_read", { path: "report.md" }));
+    }
+    h.enqueue(answer("Saved report.md."));
+    expect((await scheduler.runOnce()).failed).toBe(1);
+    expect(h.store.getTask(task.id)?.status).not.toBe("completed");
+    if (["denied", "wrong-target", "claim-only"].includes(mode)) await expect(readFile(join(h.workspaceRoot, "report.md"))).rejects.toThrow();
+    if (mode === "wrong-target") await expect(readFile(join(h.workspaceRoot, "other.md"))).rejects.toThrow();
+    scriptConsumed(h);
+  });
+
   it("rejects a completed research claim without the requested workers and retains requirements on rerun", async () => {
     const h = await harness();
     h.enqueue(nativeCall("web_search", { query: "battery recycling" }), nativeCall("web_extract", { url: SOURCE_URL }), answer(REPORT));
@@ -148,7 +206,7 @@ describe.sequential("research workflow acceptance harness", () => {
     h.enqueue(answer(`${REPORT}\n${CLAIM_TABLE}`));
     const settled = await scheduler.runOnce();
     expect(settled, JSON.stringify({ errors: h.scriptErrors, failures: h.store.listAttempts(task.id).flatMap((attempt) => attempt.failure ? [attempt.failure] : []) })).toMatchObject({ completed: 1, failed: 0 });
-    expect(h.store.getTask(task.id)?.status).toBe(fileRequested ? "partial" : "completed");
+    expect(h.store.getTask(task.id)?.status).toBe(fileRequested ? "running" : "completed");
     expect(h.store.listResults(task.id).some((result) => result.stepId === synthesis.id && result.kind === "text" && result.disposition === "accepted")).toBe(true);
     expect(new Set(h.store.listAttempts(task.id).map((attempt) => attempt.workerSessionId)).size).toBe(4);
     expect(h.searches).toHaveLength(3);
@@ -158,7 +216,15 @@ describe.sequential("research workflow acceptance harness", () => {
     const final = h.store.listResults(task.id).find((result) => result.stepId === synthesis.id)!;
     const savedResult = await resultService.readText({ taskId: task.id, resultId: final.id, sessionId: h.runtime.sessionId });
     expect(savedResult.content).toContain("Synthetic research fixture");
-    if (fileRequested) await h.restart();
+    if (fileRequested) {
+      await h.restart();
+      const deliveryScheduler = schedulerFor(h, task.id).scheduler;
+      h.enqueue(nativeCall("task_result_read", { task_id: task.id, result_id: final.id }),
+        nativeCall("file_write", { path: "report.md", content: savedResult.content }), nativeCall("file_read", { path: "report.md" }), answer("Saved report.md."));
+      expect(await deliveryScheduler.runOnce(), JSON.stringify(h.scriptErrors)).toMatchObject({ completed: 1, failed: 0 });
+      expect(h.store.getTask(task.id)?.status).toBe("completed");
+      await expect(readFile(join(h.workspaceRoot, "report.md"), "utf8")).resolves.toBe(savedResult.content);
+    }
     h.enqueue(nativeCall("task_status", { task_id: task.id }), nativeCall("task_result_read", { task_id: task.id, result_id: final.id }),
       nativeCall("file_write", { path: "report.md", content: savedResult.content, overwrite: true }), nativeCall("file_read", { path: "report.md" }), answer("Saved report.md."));
     const saved = await h.turn("Save this report to report.md");
@@ -166,6 +232,13 @@ describe.sequential("research workflow acceptance harness", () => {
     expect(saved.finalOutcome?.status, JSON.stringify({ text: saved.text, errors: h.scriptErrors })).toBe("completed");
     await expect(readFile(join(h.workspaceRoot, "report.md"), "utf8")).resolves.toBe(savedResult.content);
     expect(h.store.listTasks()).toHaveLength(1);
+    scriptConsumed(h);
+    // An accepted research result satisfies prior research, not a newly requested skill.
+    h.enqueue(nativeCall("task_result_read", { task_id: task.id, result_id: final.id }),
+      nativeCall("file_write", { path: "report.md", content: savedResult.content, overwrite: true }), nativeCall("file_read", { path: "report.md" }), answer("All done."));
+    const newSkill = await h.turn("Save this report to report.md. Use the researcher skill. Use the research-discovery skill.");
+    expect(newSkill.finalOutcome?.status).not.toBe("completed");
+    expect(newSkill.text).toContain("requested-skill-instructions");
     scriptConsumed(h);
     if (fileRequested) {
       // A restarted runtime must observe the current file, not trust the old path or digest.

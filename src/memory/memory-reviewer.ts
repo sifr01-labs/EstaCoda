@@ -1,4 +1,4 @@
-import { factContainsTransientCapabilityState } from "./transient-capability-state.js";
+import { containsMixedCapabilityPolicy, factContainsTransientCapabilityState } from "./transient-capability-state.js";
 import type { MemoryCurationConfig } from "../config/memory-config.js";
 import type { MemoryFileKind, MemoryOperation } from "../contracts/memory.js";
 import { scanMemoryContent } from "./memory-scanner.js";
@@ -89,6 +89,9 @@ function autoApplyRejection(input: {
   config: MemoryCurationConfig;
   risk: MemoryCandidateRisk;
 }): { disposition: Exclude<MemoryCandidateDisposition, "auto-apply">; reason: string } | undefined {
+  if (input.config.mode !== "manual" && (containsMixedCapabilityPolicy(input.fact.statement) || input.fact.evidence.some((item) => containsMixedCapabilityPolicy(item.exactSpan)))) {
+    return { disposition: "pending-review", reason: "preserve the explicit user policy; separate transient capability observations during review" };
+  }
   if (factContainsTransientCapabilityState(input.fact)) {
     return { disposition: "ignore", reason: "transient capability state belongs to runtime evidence, not durable user memory" };
   }

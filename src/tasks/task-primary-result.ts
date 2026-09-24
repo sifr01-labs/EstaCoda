@@ -7,16 +7,16 @@ export function taskRequestCompletion(store: TaskStore, task: Task): { researchC
   const steps = store.listSteps(task.id, task.activePlanRevisionId);
   const contract = steps.find((step) => step.executor.requestContract !== undefined)?.executor.requestContract;
   if (contract === undefined) return { researchComplete: true, fileOutputPending: false };
-  const workers = steps.filter((step) => step.executor.role !== "synthesis");
+  const workers = steps.filter((step) => step.executor.role === "worker" || step.executor.role === "orchestrator");
   const accepted = new Set(store.listResults(task.id).filter((result) => result.disposition === "accepted" && result.status === "available").map((result) => result.stepId));
   const expected = contract.requirements.delegation?.count;
   return {
     researchComplete: (expected === undefined || workers.length === expected) && workers.every((worker) => worker.status === "completed" && accepted.has(worker.id)) &&
       (contract.requirements.research === undefined || (workers.every((worker) => worker.executor.research !== undefined) &&
         new Set(workers.map((worker) => worker.executor.research?.scope)).size === workers.length)),
-    // Synthesis authority is intentionally read-only. Saving is a separately
-    // verified workspace action, never inferred from an accepted text result.
-    fileOutputPending: contract.requirements.fileOutput !== undefined
+    // Only the delivery executor can settle after verifying the accepted report bytes.
+    fileOutputPending: contract.requirements.fileOutput !== undefined && !steps.some((step) =>
+      step.executor.role === "report-delivery" && step.status === "completed" && accepted.has(step.id))
   };
 }
 
@@ -43,4 +43,12 @@ export function orderTaskResults(
 ): readonly TaskResult[] {
   if (primary === undefined) return results;
   return [primary, ...results.filter((result) => result.id !== primary.id)];
+}
+
+/** Settlement-time delivery receipt; a later save never rewrites this history. */
+export function deliveredReportPath(store: TaskStore, task: Task): string | undefined {
+  if (task.activePlanRevisionId === undefined) return undefined;
+  const accepted = new Set(store.listResults(task.id).filter((result) => result.disposition === "accepted" && result.status === "available").map((result) => result.stepId));
+  return store.listSteps(task.id, task.activePlanRevisionId).find((step) =>
+    step.executor.role === "report-delivery" && step.status === "completed" && accepted.has(step.id))?.executor.requestContract?.requirements.fileOutput?.path;
 }

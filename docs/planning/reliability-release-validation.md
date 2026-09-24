@@ -2,6 +2,8 @@
 
 Status: deterministic, three-surface and rebuilt-package gates passed. Live-provider assessment remains pending approved model, sources and spend ceiling; overall release acceptance is not yet complete. Implemented on the existing `ame/reliability-baseline` branch.
 
+The subsequent gap-review fixes and their new measurements are recorded in [reliability-review-fixes.md](reliability-review-fixes.md). The measurements below describe the original PR6 build.
+
 ## Frozen routing corpus and measured scope
 
 `assets/evals/research-routing-v1.json` contains 180 labeled cases in 30 seed families: 120 development and 60 held-out, with 60 Arabic, 30 mixed-language, and 60 negative/informational/ambiguous cases. Translations and paraphrases of each seed share a split. The fixture pins the corpus SHA-256 and enforces seed isolation and exact prompt-plus-prior-context separation. A pre-release audit found one repeated save-only context across splits; the corpus records the original hash and correction to the held-out urban-heat context. Labels were unchanged, no miss was reclassified, and no runtime tuning followed held-out scoring.

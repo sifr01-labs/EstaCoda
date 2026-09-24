@@ -615,8 +615,8 @@ export class TaskOperatorService {
       spans: deriveTaskActivitySpans(projectedEvents, {
         steps: steps.map((step) => ({
           stepId: step.id,
-          kind: step.executor.role === "synthesis" ? "synthesis" : "subagent",
-          label: step.executor.role === "synthesis"
+          kind: step.executor.role === "report-delivery" ? "delivery" : step.executor.role === "synthesis" ? "synthesis" : "subagent",
+          label: step.executor.role === "report-delivery" ? "Report delivery" : step.executor.role === "synthesis"
             ? "Synthesis"
             : `Subagent ${subagentIndices.get(step.id) ?? step.position + 1}`,
         })),
@@ -1092,8 +1092,8 @@ function projectSubagent(
   taskResults: readonly TaskResult[],
   results: readonly TaskResultProjection[]
 ): TaskSubagentProjection {
-  if (step.executorRole === "synthesis") {
-    throw new Error("A synthesis Step cannot be projected as a Subagent.");
+  if (step.executorRole === "synthesis" || step.executorRole === "report-delivery") {
+    throw new Error("A terminal Step cannot be projected as a Subagent.");
   }
   const attempts = step.attempts.filter((attempt) =>
     attempt.taskId === taskId && attempt.stepId === step.stepId
