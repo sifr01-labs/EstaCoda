@@ -1,3 +1,4 @@
+import { factContainsTransientCapabilityState } from "./transient-capability-state.js";
 import type { MemoryCurationConfig } from "../config/memory-config.js";
 import type { MemoryFileKind, MemoryOperation } from "../contracts/memory.js";
 import { scanMemoryContent } from "./memory-scanner.js";
@@ -88,6 +89,9 @@ function autoApplyRejection(input: {
   config: MemoryCurationConfig;
   risk: MemoryCandidateRisk;
 }): { disposition: Exclude<MemoryCandidateDisposition, "auto-apply">; reason: string } | undefined {
+  if (factContainsTransientCapabilityState(input.fact)) {
+    return { disposition: "ignore", reason: "transient capability state belongs to runtime evidence, not durable user memory" };
+  }
   if (input.config.mode !== "auto") {
     return {
       disposition: input.config.mode === "review" ? "pending-review" : "ignore",

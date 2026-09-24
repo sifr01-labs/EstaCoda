@@ -1,3 +1,4 @@
+import { factContainsTransientCapabilityState } from "./transient-capability-state.js";
 import type { ResolvedAuxiliaryRoute, ResolvedModelRoute } from "../contracts/provider.js";
 import type { SessionMessage } from "../contracts/session.js";
 import { executeAuxiliaryTask, type AuxiliaryExecutionResult } from "../providers/auxiliary-executor.js";
@@ -76,7 +77,7 @@ export async function extractMemoryFacts(input: {
     const fact = normalizeExtractedFact(entry, input.options.id);
     return fact === undefined ? [] : [fact];
   });
-  const facts = normalized.filter((fact) => evidenceSpanExists({
+  const facts = normalized.filter((fact) => !factContainsTransientCapabilityState(fact) && evidenceSpanExists({
     fact,
     messages: input.messages.map((message) => ({ id: message.id, content: message.content }))
   }));
@@ -101,6 +102,7 @@ const FACT_EXTRACTION_SYSTEM_PROMPT = [
   "Each fact must include statement, category, evidence, explicitness, sensitivity, and confidence.",
   "Do not decide whether to save facts.",
   "Do not include transient facts, secrets, sensitive attributes, or unsupported inferences.",
+  "Tool/provider/browser availability, setup failures, timeouts and action denials are transient runtime observations, not user facts. Preserve explicit user preferences (for example, do not browse) and deliberate configuration choices separately.",
   "Evidence exactSpan must quote text that appears verbatim in the source message."
 ].join("\n");
 

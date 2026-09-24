@@ -117,6 +117,30 @@ describe("MemoryCurationService", () => {
     ]);
   });
 
+  it("proposes bounded cleanup without changing memory or repeatedly proposing a reviewed line", async () => {
+    const root = await makeTempDir();
+    const db = new InMemorySessionDB();
+    await db.createSession({ id: "session-1", profileId: "default" });
+    await db.appendMessage({ id: "m1", sessionId: "session-1", role: "agent", content: "Browser tools are unavailable" });
+    const memoryStore = new MemoryStore();
+    const original = "- Browser tools are unavailable.\n- Do not browse without asking me.\n- I disabled browser tools in my profile.\n- Browser unavailable; user prefers offline work.";
+    memoryStore.write("USER.md", original);
+    const curationStore = new MemoryCurationStore({ path: memoryCurationStorePath(root) });
+    const service = new MemoryCurationService({ config: DEFAULT_MEMORY_CONFIG.curation, profileId: "default", sessionId: "session-1",
+      sessionDb: db, memoryStore, curationStore, extractorOptions: {}, extractFacts: async () => ({
+        facts: [fact({ statement: "Browser tools are unavailable", evidence: [{ messageId: "m1", exactSpan: "Browser tools are unavailable" }] })], diagnostics: diagnostics(1)
+      }) });
+    const review = await service.checkpoint({ trigger: "manual" });
+    expect(review).toMatchObject({ pendingReviewCount: 1, ignoredCount: 1, autoAppliedCount: 0 });
+    const recorded = await curationStore.latestForSession("session-1");
+    expect(recorded?.candidates).toContainEqual(expect.objectContaining({ disposition: "pending-review", reviewStatus: "pending",
+      operation: { kind: "remove", file: "USER.md", match: "- Browser tools are unavailable." } }));
+    expect(memoryStore.read("USER.md")).toBe(original);
+    await db.appendMessage({ id: "m2", sessionId: "session-1", role: "user", content: "Thanks" });
+    expect((await service.checkpoint({ trigger: "manual" })).pendingReviewCount).toBe(0);
+    expect(memoryStore.read("USER.md")).toBe(original);
+  });
+
   it("waits for the configured turn-count checkpoint", async () => {
     const root = await makeTempDir();
     const db = new InMemorySessionDB();

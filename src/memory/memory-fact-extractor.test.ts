@@ -78,6 +78,18 @@ describe("extractMemoryFacts", () => {
     });
   });
 
+  it("filters observed availability while preserving explicit user browsing preferences", async () => {
+    const statements = ["Browser tools are unavailable", "Do not browse without asking me", "I disabled web tools in my profile"];
+    const result = await extractMemoryFacts({ messages: statements.map((text, i) => ({ ...message(`m${i}`, text), role: i === 0 ? "agent" : "user" })),
+      profileId: "default", sessionId: "session-1", options: { route: auxiliaryRoute(), mainRoute: modelRoute("main-model"),
+        providerExecutor: { complete: async () => ({ ok: true, fallbackUsed: false, attempts: [], toolCalls: [], response: providerResponse(JSON.stringify({
+          facts: statements.map((statement, i) => ({ statement, category: "preference", explicitness: "explicit", sensitivity: "none", confidence: 0.9,
+            evidence: [{ messageId: `m${i}`, exactSpan: statement }] }))
+        })) }) } } });
+    expect(result.facts.map((fact) => fact.statement)).toEqual(statements.slice(1));
+    expect(result.diagnostics.rejectedFactCount).toBe(1);
+  });
+
   it("returns structured diagnostics when extraction dependencies are unavailable", async () => {
     const result = await extractMemoryFacts({
       messages: [message("m1", "Please remember I use pnpm.")],

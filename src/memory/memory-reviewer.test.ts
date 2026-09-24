@@ -35,6 +35,21 @@ describe("reviewMemoryFacts", () => {
     });
   });
 
+  it.each(["Browser tools are unavailable", "web.search is not configured", "I cannot browse", "The browser action was denied", "المتصفح غير متاح", "لا أستطيع التصفح"])("ignores transient capability claims even with exact evidence: %s", (statement) => {
+    const candidate = reviewMemoryFacts({ facts: [fact({ statement, evidence: [{ messageId: "m", exactSpan: statement }] })],
+      memoryStore: new MemoryStore(), messages: [{ id: "m", content: statement }], config: DEFAULT_MEMORY_CONFIG.curation })[0];
+    expect(candidate?.disposition).toBe("ignore");
+    expect(candidate?.reason).toContain("transient capability state");
+  });
+  it.each(["Do not browse without asking me", "User prefers local browser execution", "I configured the provider for offline use", "I disabled browser tools in my profile", "لا تتصفح دون إذني", "اخترت مزود البحث المحلي"])("preserves a durable user choice: %s", (statement) => {
+    expect(reviewMemoryFacts({ facts: [fact({ statement, evidence: [{ messageId: "m", exactSpan: statement }] })],
+      memoryStore: new MemoryStore(), messages: [{ id: "m", content: statement }], config: DEFAULT_MEMORY_CONFIG.curation })[0]?.disposition).toBe("auto-apply");
+  });
+  it("does not launder a runtime observation into a differently worded user fact", () => {
+    expect(reviewMemoryFacts({ facts: [fact({ statement: "User works offline", evidence: [{ messageId: "m", exactSpan: "Browser unavailable" }] })],
+      memoryStore: new MemoryStore(), messages: [{ id: "m", content: "Browser unavailable" }], config: DEFAULT_MEMORY_CONFIG.curation })[0]?.disposition).toBe("ignore");
+  });
+
   it("routes project and technical defaults to MEMORY.md", () => {
     const [candidate] = reviewMemoryFacts({
       facts: [fact({

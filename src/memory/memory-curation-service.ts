@@ -1,3 +1,6 @@
+import { createHash } from "node:crypto";
+import { isTransientCapabilityState, containsDurableChoice } from "./transient-capability-state.js";
+import { scanMemoryContent } from "./memory-scanner.js";
 import type { MemoryCurationConfig } from "../config/memory-config.js";
 import type { MemoryOperation } from "../contracts/memory.js";
 import type { RuntimeEventSink } from "../contracts/runtime-event.js";
@@ -200,6 +203,7 @@ export class MemoryCurationService {
       messages,
       config: this.#config
     });
+    candidates.push(...await this.#capabilityCleanupCandidates());
     const applyResult = await this.#applyAutoCandidates(candidates);
     const pendingReviewCount = candidates.filter((candidate) => candidate.disposition === "pending-review").length;
     const ignoredCount = candidates.filter((candidate) => candidate.disposition === "ignore").length;
@@ -266,6 +270,25 @@ export class MemoryCurationService {
           : "memory-fact-extraction-failed" as const
       } : {})
     };
+  }
+
+  async #capabilityCleanupCandidates(): Promise<CuratedMemoryCandidate[]> {
+    const reviewed = new Set((await this.#curationStore.list({ limit: 500 }))
+      .filter((record) => record.profileId === this.#profileId)
+      .flatMap((record) => record.candidates?.map((candidate) => candidate.id) ?? []));
+    const candidates: CuratedMemoryCandidate[] = [];
+    for (const target of ["USER.md", "MEMORY.md"] as const) {
+      for (const line of this.#memoryStore.read(target).split("\n")) {
+        if (candidates.length >= 8) return candidates;
+        if (line.length > 600 || !/^\s*[-*]\s/u.test(line) || !isTransientCapabilityState(line) || containsDurableChoice(line) || !scanMemoryContent(line).ok) continue;
+        const id = `capability-cleanup-${createHash("sha256").update(`${target}\n${line}`).digest("hex").slice(0, 24)}`;
+        if (reviewed.has(id)) continue;
+        reviewed.add(id);
+        candidates.push({ id, factId: id, target, operation: "remove", match: line, disposition: "pending-review", risk: "low",
+          reason: "Review removal of a historical runtime availability claim; current capability evidence is authoritative. No memory was changed." });
+      }
+    }
+    return candidates;
   }
 
   async #applyAutoCandidates(candidates: readonly CuratedMemoryCandidate[]): Promise<{
