@@ -29,6 +29,16 @@ export type IntentRouteEvidence = {
 
 export type IntentLabel = string;
 
+/** Turn-local routing/completion hints, never execution authority. */
+export type RequestRequirements = {
+  originTurnId?: string;
+  skillReferences: string[];
+  delegation?: { count?: number };
+  fileOutput?: { format: "markdown" | "text"; path?: string };
+  research?: { domain: "general" | "literature" | "paper"; fresh: boolean };
+  issues: Array<"request-too-long" | "ambiguous-file-target" | "unsafe-file-target">;
+};
+
 export type SkillInvocation = {
   name: string;
   args: string;
@@ -82,6 +92,7 @@ export type IntentShadowRoute = {
 };
 
 export type IntentRoute = {
+  requestRequirements?: RequestRequirements;
   nativeIntent: NativeIntent;
   taskClass?: IntentTaskClass;
   labels: IntentLabel[];

@@ -13,6 +13,7 @@ import type { LoadedSkill, SkillDefinition, SkillDeferRule, SkillPattern } from 
 import type { ToolsetName } from "../contracts/tool.js";
 import type { SkillRegistry } from "../skills/skill-registry.js";
 import { affirmativeRequestSegments } from "./request-action-segments.js";
+import { deriveRequestRequirements } from "./request-requirements.js";
 
 export type IntentRouterOptions = {
   skillRegistry: SkillRegistry;
@@ -20,6 +21,8 @@ export type IntentRouterOptions = {
 };
 
 export type IntentRouteOptions = {
+  /** Original user-authored text, before context expansion or continuation. */
+  requestText?: string;
   attachments?: ChannelAttachment[];
   channel?: ChannelKind;
   surface?: ChannelKind;
@@ -97,6 +100,13 @@ export class IntentRouter {
   }
 
   route(prompt: string, options: IntentRouteOptions = {}): IntentRoute {
+    return {
+      ...this.routeIntent(prompt, options),
+      requestRequirements: deriveRequestRequirements(options.requestText ?? prompt)
+    };
+  }
+
+  private routeIntent(prompt: string, options: IntentRouteOptions): IntentRoute {
     const model = options.model ?? this.#model;
     const normalized = normalize(prompt);
     const slashInvocation = parseSlashInvocation(prompt, this.#skillRegistry);

@@ -39,6 +39,7 @@ export class RuntimeRouter {
 
   route(input: {
     text: string;
+    requestText?: string;
     attachments?: ChannelAttachment[];
     channel: ChannelKind;
     model?: ModelProfile;
@@ -63,6 +64,7 @@ export class RuntimeRouter {
     }
 
     const intent = this.#intentRouter.route(input.text, {
+      requestText: input.requestText ?? input.text,
       attachments,
       channel: input.channel,
       surface: input.channel,

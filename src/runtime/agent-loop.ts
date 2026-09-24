@@ -428,6 +428,7 @@ export class AgentLoop {
     const trustedWorkspace = input.trustedWorkspace ?? false;
     const route = this.#runtimeRouter.route({
       text: routingText,
+      requestText: turnText,
       attachments: input.attachments,
       channel: input.channel,
       model: this.#model,
@@ -456,6 +457,9 @@ export class AgentLoop {
         projectContextFiles: this.#projectContext?.files.map((file) => file.source) ?? []
       }
     });
+    if (route.intent.requestRequirements !== undefined) {
+      route.intent.requestRequirements.originTurnId = visibleTurn.id;
+    }
     const userInputEvent = this.#trajectoryRecorder.record("user-input", {
       text: effectiveText,
       channel: input.channel,
