@@ -1,0 +1,2356 @@
+{
+  "version": 1,
+  "splitPolicy": "Seed families, including translations and paraphrases, assigned before the first evaluation; do not reclassify misses or move seeds after scoring.",
+  "cases": [
+    {
+      "id": "dev-original-1",
+      "seed": "dev-original",
+      "split": "development",
+      "language": "en",
+      "prompt": "Do deep research on the latest battery recycling methods and prepare a report. Use 3 subagents",
+      "category": "research-workers",
+      "requiredTools": [
+        "web.search",
+        "delegate_task",
+        "task.status",
+        "task.result.read"
+      ],
+      "expectedSkill": "research-discovery",
+      "delegationCount": 3
+    },
+    {
+      "id": "dev-original-2",
+      "seed": "dev-original",
+      "split": "development",
+      "language": "en",
+      "prompt": "Research current battery recycling techniques. Use three workers to prepare the findings.",
+      "category": "research-workers",
+      "requiredTools": [
+        "web.search",
+        "delegate_task",
+        "task.status",
+        "task.result.read"
+      ],
+      "expectedSkill": "research-discovery",
+      "delegationCount": 3
+    },
+    {
+      "id": "dev-original-3",
+      "seed": "dev-original",
+      "split": "development",
+      "language": "en",
+      "prompt": "Investigate recent battery recycling processes and use 3 agents.",
+      "category": "research-workers",
+      "requiredTools": [
+        "web.search",
+        "delegate_task",
+        "task.status",
+        "task.result.read"
+      ],
+      "expectedSkill": "research-discovery",
+      "delegationCount": 3
+    },
+    {
+      "id": "dev-original-4",
+      "seed": "dev-original",
+      "split": "development",
+      "language": "ar",
+      "prompt": "ابحث بعمق عن أحدث تقنيات تدوير البطاريات واستخدم ثلاثة وكلاء فرعيين",
+      "category": "research-workers",
+      "requiredTools": [
+        "web.search",
+        "delegate_task",
+        "task.status",
+        "task.result.read"
+      ],
+      "expectedSkill": "research-discovery",
+      "delegationCount": 3
+    },
+    {
+      "id": "dev-original-5",
+      "seed": "dev-original",
+      "split": "development",
+      "language": "ar",
+      "prompt": "ابحث عن تدوير البطاريات واستخدم ٣ وكلاء فرعيين",
+      "category": "research-workers",
+      "requiredTools": [
+        "web.search",
+        "delegate_task",
+        "task.status",
+        "task.result.read"
+      ],
+      "expectedSkill": "research-discovery",
+      "delegationCount": 3
+    },
+    {
+      "id": "dev-original-6",
+      "seed": "dev-original",
+      "split": "development",
+      "language": "mixed",
+      "prompt": "ابحث عن battery recycling واستخدم 3 subagents",
+      "category": "research-workers",
+      "requiredTools": [
+        "web.search",
+        "delegate_task",
+        "task.status",
+        "task.result.read"
+      ],
+      "expectedSkill": "research-discovery",
+      "delegationCount": 3
+    },
+    {
+      "id": "dev-literature-1",
+      "seed": "dev-literature",
+      "split": "development",
+      "language": "en",
+      "prompt": "Find recent arXiv papers on carbon capture.",
+      "category": "discovery",
+      "requiredTools": [
+        "web.search"
+      ],
+      "expectedSkill": "research-discovery"
+    },
+    {
+      "id": "dev-literature-2",
+      "seed": "dev-literature",
+      "split": "development",
+      "language": "en",
+      "prompt": "Search the literature for carbon capture methods.",
+      "category": "discovery",
+      "requiredTools": [
+        "web.search"
+      ],
+      "expectedSkill": "research-discovery"
+    },
+    {
+      "id": "dev-literature-3",
+      "seed": "dev-literature",
+      "split": "development",
+      "language": "en",
+      "prompt": "Research academic publications about carbon capture.",
+      "category": "discovery",
+      "requiredTools": [
+        "web.search"
+      ],
+      "expectedSkill": "research-discovery"
+    },
+    {
+      "id": "dev-literature-4",
+      "seed": "dev-literature",
+      "split": "development",
+      "language": "ar",
+      "prompt": "ابحث عن أوراق بحثية حول احتجاز الكربون",
+      "category": "discovery",
+      "requiredTools": [
+        "web.search"
+      ],
+      "expectedSkill": "research-discovery"
+    },
+    {
+      "id": "dev-literature-5",
+      "seed": "dev-literature",
+      "split": "development",
+      "language": "ar",
+      "prompt": "ابحث عن أحدث أبحاث احتجاز الكربون",
+      "category": "discovery",
+      "requiredTools": [
+        "web.search"
+      ],
+      "expectedSkill": "research-discovery"
+    },
+    {
+      "id": "dev-literature-6",
+      "seed": "dev-literature",
+      "split": "development",
+      "language": "mixed",
+      "prompt": "Find papers عن احتجاز الكربون",
+      "category": "discovery",
+      "requiredTools": [
+        "web.search"
+      ],
+      "expectedSkill": "research-discovery"
+    },
+    {
+      "id": "dev-explicit-discovery-1",
+      "seed": "dev-explicit-discovery",
+      "split": "development",
+      "language": "en",
+      "prompt": "Use the research-discovery skill to find papers on tidal energy.",
+      "category": "discovery-explicit",
+      "requiredTools": [
+        "web.search",
+        "skill.read"
+      ],
+      "expectedSkill": "research-discovery"
+    },
+    {
+      "id": "dev-explicit-discovery-2",
+      "seed": "dev-explicit-discovery",
+      "split": "development",
+      "language": "en",
+      "prompt": "Load the research-discovery skill and research tidal energy.",
+      "category": "discovery-explicit",
+      "requiredTools": [
+        "web.search",
+        "skill.read"
+      ],
+      "expectedSkill": "research-discovery"
+    },
+    {
+      "id": "dev-explicit-discovery-3",
+      "seed": "dev-explicit-discovery",
+      "split": "development",
+      "language": "en",
+      "prompt": "/research-discovery find recent tidal energy papers",
+      "category": "discovery-explicit",
+      "requiredTools": [
+        "web.search",
+        "skill.read"
+      ],
+      "expectedSkill": "research-discovery"
+    },
+    {
+      "id": "dev-explicit-discovery-4",
+      "seed": "dev-explicit-discovery",
+      "split": "development",
+      "language": "ar",
+      "prompt": "استخدم مهارة research-discovery للبحث عن طاقة المد والجزر",
+      "category": "discovery-explicit",
+      "requiredTools": [
+        "web.search",
+        "skill.read"
+      ],
+      "expectedSkill": "research-discovery"
+    },
+    {
+      "id": "dev-explicit-discovery-5",
+      "seed": "dev-explicit-discovery",
+      "split": "development",
+      "language": "ar",
+      "prompt": "حمّل مهارة research-discovery",
+      "category": "discovery-explicit",
+      "requiredTools": [
+        "web.search",
+        "skill.read"
+      ],
+      "expectedSkill": "research-discovery"
+    },
+    {
+      "id": "dev-explicit-discovery-6",
+      "seed": "dev-explicit-discovery",
+      "split": "development",
+      "language": "mixed",
+      "prompt": "Use the research-discovery skill للبحث عن tidal energy",
+      "category": "discovery-explicit",
+      "requiredTools": [
+        "web.search",
+        "skill.read"
+      ],
+      "expectedSkill": "research-discovery"
+    },
+    {
+      "id": "dev-researcher-1",
+      "seed": "dev-researcher",
+      "split": "development",
+      "language": "en",
+      "prompt": "Use the researcher skill to research sensor design.",
+      "category": "researcher",
+      "requiredTools": [
+        "skill.read"
+      ],
+      "expectedSkill": "researcher"
+    },
+    {
+      "id": "dev-researcher-2",
+      "seed": "dev-researcher",
+      "split": "development",
+      "language": "en",
+      "prompt": "Load the researcher skill.",
+      "category": "researcher",
+      "requiredTools": [
+        "skill.read"
+      ],
+      "expectedSkill": "researcher"
+    },
+    {
+      "id": "dev-researcher-3",
+      "seed": "dev-researcher",
+      "split": "development",
+      "language": "en",
+      "prompt": "/researcher research sensor experiments",
+      "category": "researcher",
+      "requiredTools": [
+        "skill.read"
+      ],
+      "expectedSkill": "researcher"
+    },
+    {
+      "id": "dev-researcher-4",
+      "seed": "dev-researcher",
+      "split": "development",
+      "language": "ar",
+      "prompt": "استخدم مهارة researcher لدراسة المستشعرات",
+      "category": "researcher",
+      "requiredTools": [
+        "skill.read"
+      ],
+      "expectedSkill": "researcher"
+    },
+    {
+      "id": "dev-researcher-5",
+      "seed": "dev-researcher",
+      "split": "development",
+      "language": "ar",
+      "prompt": "حمّل مهارة researcher",
+      "category": "researcher",
+      "requiredTools": [
+        "skill.read"
+      ],
+      "expectedSkill": "researcher"
+    },
+    {
+      "id": "dev-researcher-6",
+      "seed": "dev-researcher",
+      "split": "development",
+      "language": "mixed",
+      "prompt": "Use the researcher skill لدراسة sensors",
+      "category": "researcher",
+      "requiredTools": [
+        "skill.read"
+      ],
+      "expectedSkill": "researcher"
+    },
+    {
+      "id": "dev-generic-skill-1",
+      "seed": "dev-generic-skill",
+      "split": "development",
+      "language": "en",
+      "prompt": "Use the research skill to find literature on desalination.",
+      "category": "discovery-explicit",
+      "requiredTools": [
+        "web.search",
+        "skill.read"
+      ],
+      "expectedSkill": "research-discovery"
+    },
+    {
+      "id": "dev-generic-skill-2",
+      "seed": "dev-generic-skill",
+      "split": "development",
+      "language": "en",
+      "prompt": "Rerun this literature review but this time use the research skill.",
+      "category": "discovery-explicit",
+      "requiredTools": [
+        "web.search",
+        "skill.read"
+      ],
+      "expectedSkill": "research-discovery"
+    },
+    {
+      "id": "dev-generic-skill-3",
+      "seed": "dev-generic-skill",
+      "split": "development",
+      "language": "en",
+      "prompt": "Apply the research skill to research recent desalination papers.",
+      "category": "discovery-explicit",
+      "requiredTools": [
+        "web.search",
+        "skill.read"
+      ],
+      "expectedSkill": "research-discovery"
+    },
+    {
+      "id": "dev-generic-skill-4",
+      "seed": "dev-generic-skill",
+      "split": "development",
+      "language": "ar",
+      "prompt": "استخدم مهارة research للبحث عن أحدث أوراق تحلية المياه",
+      "category": "discovery-explicit",
+      "requiredTools": [
+        "web.search",
+        "skill.read"
+      ],
+      "expectedSkill": "research-discovery"
+    },
+    {
+      "id": "dev-generic-skill-5",
+      "seed": "dev-generic-skill",
+      "split": "development",
+      "language": "ar",
+      "prompt": "استخدم مهارة research-discovery للبحث عن التحلية",
+      "category": "discovery-explicit",
+      "requiredTools": [
+        "web.search",
+        "skill.read"
+      ],
+      "expectedSkill": "research-discovery"
+    },
+    {
+      "id": "dev-generic-skill-6",
+      "seed": "dev-generic-skill",
+      "split": "development",
+      "language": "mixed",
+      "prompt": "Use the research skill to find papers عن تحلية المياه",
+      "category": "discovery-explicit",
+      "requiredTools": [
+        "web.search",
+        "skill.read"
+      ],
+      "expectedSkill": "research-discovery"
+    },
+    {
+      "id": "dev-markdown-1",
+      "seed": "dev-markdown",
+      "split": "development",
+      "language": "en",
+      "prompt": "Please prepare a markdown file.",
+      "category": "file",
+      "requiredTools": [
+        "file.write",
+        "file.read"
+      ],
+      "expectedSkill": null,
+      "fileOutput": true
+    },
+    {
+      "id": "dev-markdown-2",
+      "seed": "dev-markdown",
+      "split": "development",
+      "language": "en",
+      "prompt": "Create a Markdown file for the meeting notes.",
+      "category": "file",
+      "requiredTools": [
+        "file.write",
+        "file.read"
+      ],
+      "expectedSkill": null,
+      "fileOutput": true
+    },
+    {
+      "id": "dev-markdown-3",
+      "seed": "dev-markdown",
+      "split": "development",
+      "language": "en",
+      "prompt": "Write a markdown file with the meeting summary.",
+      "category": "file",
+      "requiredTools": [
+        "file.write",
+        "file.read"
+      ],
+      "expectedSkill": null,
+      "fileOutput": true
+    },
+    {
+      "id": "dev-markdown-4",
+      "seed": "dev-markdown",
+      "split": "development",
+      "language": "ar",
+      "prompt": "احفظ الملخص في ملف نصي",
+      "category": "file",
+      "requiredTools": [
+        "file.write",
+        "file.read"
+      ],
+      "expectedSkill": null,
+      "fileOutput": true
+    },
+    {
+      "id": "dev-markdown-5",
+      "seed": "dev-markdown",
+      "split": "development",
+      "language": "ar",
+      "prompt": "اكتب الملخص في ملف نصي",
+      "category": "file",
+      "requiredTools": [
+        "file.write",
+        "file.read"
+      ],
+      "expectedSkill": null,
+      "fileOutput": true
+    },
+    {
+      "id": "dev-markdown-6",
+      "seed": "dev-markdown",
+      "split": "development",
+      "language": "mixed",
+      "prompt": "احفظ meeting notes في ملف Markdown",
+      "category": "file",
+      "requiredTools": [
+        "file.write",
+        "file.read"
+      ],
+      "expectedSkill": null,
+      "fileOutput": true
+    },
+    {
+      "id": "dev-save-path-1",
+      "seed": "dev-save-path",
+      "split": "development",
+      "language": "en",
+      "prompt": "Save this report as report.md",
+      "category": "file",
+      "requiredTools": [
+        "file.write",
+        "file.read"
+      ],
+      "expectedSkill": null,
+      "fileOutput": true
+    },
+    {
+      "id": "dev-save-path-2",
+      "seed": "dev-save-path",
+      "split": "development",
+      "language": "en",
+      "prompt": "Export this summary to summary.md",
+      "category": "file",
+      "requiredTools": [
+        "file.write",
+        "file.read"
+      ],
+      "expectedSkill": null,
+      "fileOutput": true
+    },
+    {
+      "id": "dev-save-path-3",
+      "seed": "dev-save-path",
+      "split": "development",
+      "language": "en",
+      "prompt": "Please save the findings to findings.txt",
+      "category": "file",
+      "requiredTools": [
+        "file.write",
+        "file.read"
+      ],
+      "expectedSkill": null,
+      "fileOutput": true
+    },
+    {
+      "id": "dev-save-path-4",
+      "seed": "dev-save-path",
+      "split": "development",
+      "language": "ar",
+      "prompt": "احفظ التقرير في report.md",
+      "category": "file",
+      "requiredTools": [
+        "file.write",
+        "file.read"
+      ],
+      "expectedSkill": null,
+      "fileOutput": true
+    },
+    {
+      "id": "dev-save-path-5",
+      "seed": "dev-save-path",
+      "split": "development",
+      "language": "ar",
+      "prompt": "صدر الملخص في summary.txt",
+      "category": "file",
+      "requiredTools": [
+        "file.write",
+        "file.read"
+      ],
+      "expectedSkill": null,
+      "fileOutput": true
+    },
+    {
+      "id": "dev-save-path-6",
+      "seed": "dev-save-path",
+      "split": "development",
+      "language": "mixed",
+      "prompt": "Save التقرير to result.md",
+      "category": "file",
+      "requiredTools": [
+        "file.write",
+        "file.read"
+      ],
+      "expectedSkill": null,
+      "fileOutput": true
+    },
+    {
+      "id": "dev-quoted-path-1",
+      "seed": "dev-quoted-path",
+      "split": "development",
+      "language": "en",
+      "prompt": "Save this summary as `notes.md`.",
+      "category": "file",
+      "requiredTools": [
+        "file.write",
+        "file.read"
+      ],
+      "expectedSkill": null,
+      "fileOutput": true
+    },
+    {
+      "id": "dev-quoted-path-2",
+      "seed": "dev-quoted-path",
+      "split": "development",
+      "language": "en",
+      "prompt": "Write the notes to \"notes.md\".",
+      "category": "file",
+      "requiredTools": [
+        "file.write",
+        "file.read"
+      ],
+      "expectedSkill": null,
+      "fileOutput": true
+    },
+    {
+      "id": "dev-quoted-path-3",
+      "seed": "dev-quoted-path",
+      "split": "development",
+      "language": "en",
+      "prompt": "Create a file named `summary.txt`.",
+      "category": "file",
+      "requiredTools": [
+        "file.write",
+        "file.read"
+      ],
+      "expectedSkill": null,
+      "fileOutput": true
+    },
+    {
+      "id": "dev-quoted-path-4",
+      "seed": "dev-quoted-path",
+      "split": "development",
+      "language": "ar",
+      "prompt": "احفظ الملخص في `notes.md`",
+      "category": "file",
+      "requiredTools": [
+        "file.write",
+        "file.read"
+      ],
+      "expectedSkill": null,
+      "fileOutput": true
+    },
+    {
+      "id": "dev-quoted-path-5",
+      "seed": "dev-quoted-path",
+      "split": "development",
+      "language": "ar",
+      "prompt": "اكتب النتيجة في \"result.txt\"",
+      "category": "file",
+      "requiredTools": [
+        "file.write",
+        "file.read"
+      ],
+      "expectedSkill": null,
+      "fileOutput": true
+    },
+    {
+      "id": "dev-quoted-path-6",
+      "seed": "dev-quoted-path",
+      "split": "development",
+      "language": "mixed",
+      "prompt": "Save الملخص as `notes.md`",
+      "category": "file",
+      "requiredTools": [
+        "file.write",
+        "file.read"
+      ],
+      "expectedSkill": null,
+      "fileOutput": true
+    },
+    {
+      "id": "dev-followup-save-1",
+      "seed": "dev-followup-save",
+      "split": "development",
+      "language": "en",
+      "prompt": "Please prepare a markdown file",
+      "category": "save-followup",
+      "requiredTools": [
+        "file.write",
+        "file.read"
+      ],
+      "expectedSkill": null,
+      "fileOutput": true,
+      "previousPrompt": "Research current battery recycling methods. Use 3 subagents."
+    },
+    {
+      "id": "dev-followup-save-2",
+      "seed": "dev-followup-save",
+      "split": "development",
+      "language": "en",
+      "prompt": "Save this report as report.md",
+      "category": "save-followup",
+      "requiredTools": [
+        "file.write",
+        "file.read"
+      ],
+      "expectedSkill": null,
+      "fileOutput": true,
+      "previousPrompt": "Research current battery recycling methods. Use 3 subagents."
+    },
+    {
+      "id": "dev-followup-save-3",
+      "seed": "dev-followup-save",
+      "split": "development",
+      "language": "en",
+      "prompt": "Export the existing result to report.txt",
+      "category": "save-followup",
+      "requiredTools": [
+        "file.write",
+        "file.read"
+      ],
+      "expectedSkill": null,
+      "fileOutput": true,
+      "previousPrompt": "Research current battery recycling methods. Use 3 subagents."
+    },
+    {
+      "id": "dev-followup-save-4",
+      "seed": "dev-followup-save",
+      "split": "development",
+      "language": "ar",
+      "prompt": "احفظ التقرير في ملف نصي",
+      "category": "save-followup",
+      "requiredTools": [
+        "file.write",
+        "file.read"
+      ],
+      "expectedSkill": null,
+      "fileOutput": true,
+      "previousPrompt": "Research current battery recycling methods. Use 3 subagents."
+    },
+    {
+      "id": "dev-followup-save-5",
+      "seed": "dev-followup-save",
+      "split": "development",
+      "language": "ar",
+      "prompt": "احفظ النتيجة في report.md",
+      "category": "save-followup",
+      "requiredTools": [
+        "file.write",
+        "file.read"
+      ],
+      "expectedSkill": null,
+      "fileOutput": true,
+      "previousPrompt": "Research current battery recycling methods. Use 3 subagents."
+    },
+    {
+      "id": "dev-followup-save-6",
+      "seed": "dev-followup-save",
+      "split": "development",
+      "language": "mixed",
+      "prompt": "احفظ التقرير في ملف Markdown",
+      "category": "save-followup",
+      "requiredTools": [
+        "file.write",
+        "file.read"
+      ],
+      "expectedSkill": null,
+      "fileOutput": true,
+      "previousPrompt": "Research current battery recycling methods. Use 3 subagents."
+    },
+    {
+      "id": "dev-followup-rerun-1",
+      "seed": "dev-followup-rerun",
+      "split": "development",
+      "language": "en",
+      "prompt": "Rerun this task using the research-discovery skill.",
+      "category": "rerun-followup",
+      "requiredTools": [
+        "skill.read"
+      ],
+      "expectedSkill": "research-discovery",
+      "previousPrompt": "Research current battery recycling methods. Use 3 subagents."
+    },
+    {
+      "id": "dev-followup-rerun-2",
+      "seed": "dev-followup-rerun",
+      "split": "development",
+      "language": "en",
+      "prompt": "Redo this research and use the research-discovery skill.",
+      "category": "rerun-followup",
+      "requiredTools": [
+        "skill.read"
+      ],
+      "expectedSkill": "research-discovery",
+      "previousPrompt": "Research current battery recycling methods. Use 3 subagents."
+    },
+    {
+      "id": "dev-followup-rerun-3",
+      "seed": "dev-followup-rerun",
+      "split": "development",
+      "language": "en",
+      "prompt": "Repeat the research and use the research-discovery skill.",
+      "category": "rerun-followup",
+      "requiredTools": [
+        "skill.read"
+      ],
+      "expectedSkill": "research-discovery",
+      "previousPrompt": "Research current battery recycling methods. Use 3 subagents."
+    },
+    {
+      "id": "dev-followup-rerun-4",
+      "seed": "dev-followup-rerun",
+      "split": "development",
+      "language": "ar",
+      "prompt": "أعد البحث واستخدم مهارة research-discovery",
+      "category": "rerun-followup",
+      "requiredTools": [
+        "skill.read"
+      ],
+      "expectedSkill": "research-discovery",
+      "previousPrompt": "Research current battery recycling methods. Use 3 subagents."
+    },
+    {
+      "id": "dev-followup-rerun-5",
+      "seed": "dev-followup-rerun",
+      "split": "development",
+      "language": "ar",
+      "prompt": "اعد المهمة واستخدم مهارة research-discovery",
+      "category": "rerun-followup",
+      "requiredTools": [
+        "skill.read"
+      ],
+      "expectedSkill": "research-discovery",
+      "previousPrompt": "Research current battery recycling methods. Use 3 subagents."
+    },
+    {
+      "id": "dev-followup-rerun-6",
+      "seed": "dev-followup-rerun",
+      "split": "development",
+      "language": "mixed",
+      "prompt": "Rerun this task واستخدم مهارة research-discovery",
+      "category": "rerun-followup",
+      "requiredTools": [
+        "skill.read"
+      ],
+      "expectedSkill": "research-discovery",
+      "previousPrompt": "Research current battery recycling methods. Use 3 subagents."
+    },
+    {
+      "id": "dev-two-workers-1",
+      "seed": "dev-two-workers",
+      "split": "development",
+      "language": "en",
+      "prompt": "Use 2 subagents to research concrete recycling.",
+      "category": "workers-2",
+      "requiredTools": [
+        "web.search",
+        "delegate_task",
+        "task.status",
+        "task.result.read"
+      ],
+      "expectedSkill": "research-discovery",
+      "delegationCount": 2
+    },
+    {
+      "id": "dev-two-workers-2",
+      "seed": "dev-two-workers",
+      "split": "development",
+      "language": "en",
+      "prompt": "Delegate to two workers to research recycled concrete.",
+      "category": "workers-2",
+      "requiredTools": [
+        "web.search",
+        "delegate_task",
+        "task.status",
+        "task.result.read"
+      ],
+      "expectedSkill": "research-discovery",
+      "delegationCount": 2
+    },
+    {
+      "id": "dev-two-workers-3",
+      "seed": "dev-two-workers",
+      "split": "development",
+      "language": "en",
+      "prompt": "Assign to 2 agents to research reuse of concrete.",
+      "category": "workers-2",
+      "requiredTools": [
+        "web.search",
+        "delegate_task",
+        "task.status",
+        "task.result.read"
+      ],
+      "expectedSkill": "research-discovery",
+      "delegationCount": 2
+    },
+    {
+      "id": "dev-two-workers-4",
+      "seed": "dev-two-workers",
+      "split": "development",
+      "language": "ar",
+      "prompt": "ابحث عن تدوير الخرسانة واستخدم اثنين وكلاء",
+      "category": "workers-2",
+      "requiredTools": [
+        "web.search",
+        "delegate_task",
+        "task.status",
+        "task.result.read"
+      ],
+      "expectedSkill": "research-discovery",
+      "delegationCount": 2
+    },
+    {
+      "id": "dev-two-workers-5",
+      "seed": "dev-two-workers",
+      "split": "development",
+      "language": "ar",
+      "prompt": "ابحث عن الخرسانة واستخدم ٢ وكلاء",
+      "category": "workers-2",
+      "requiredTools": [
+        "web.search",
+        "delegate_task",
+        "task.status",
+        "task.result.read"
+      ],
+      "expectedSkill": "research-discovery",
+      "delegationCount": 2
+    },
+    {
+      "id": "dev-two-workers-6",
+      "seed": "dev-two-workers",
+      "split": "development",
+      "language": "mixed",
+      "prompt": "Research concrete واستخدم 2 subagents",
+      "category": "workers-2",
+      "requiredTools": [
+        "web.search",
+        "delegate_task",
+        "task.status",
+        "task.result.read"
+      ],
+      "expectedSkill": "research-discovery",
+      "delegationCount": 2
+    },
+    {
+      "id": "dev-research-and-file-1",
+      "seed": "dev-research-and-file",
+      "split": "development",
+      "language": "en",
+      "prompt": "Find recent papers on geothermal heating and save results to heat.md.",
+      "category": "research-file",
+      "requiredTools": [
+        "web.search",
+        "file.write",
+        "file.read"
+      ],
+      "expectedSkill": "research-discovery",
+      "fileOutput": true
+    },
+    {
+      "id": "dev-research-and-file-2",
+      "seed": "dev-research-and-file",
+      "split": "development",
+      "language": "en",
+      "prompt": "Research geothermal heating and prepare a markdown file.",
+      "category": "research-file",
+      "requiredTools": [
+        "web.search",
+        "file.write",
+        "file.read"
+      ],
+      "expectedSkill": "research-discovery",
+      "fileOutput": true
+    },
+    {
+      "id": "dev-research-and-file-3",
+      "seed": "dev-research-and-file",
+      "split": "development",
+      "language": "en",
+      "prompt": "Search the literature on geothermal energy and write report.md.",
+      "category": "research-file",
+      "requiredTools": [
+        "web.search",
+        "file.write",
+        "file.read"
+      ],
+      "expectedSkill": "research-discovery",
+      "fileOutput": true
+    },
+    {
+      "id": "dev-research-and-file-4",
+      "seed": "dev-research-and-file",
+      "split": "development",
+      "language": "ar",
+      "prompt": "ابحث عن أحدث أبحاث الحرارة الجوفية واحفظها في heat.md",
+      "category": "research-file",
+      "requiredTools": [
+        "web.search",
+        "file.write",
+        "file.read"
+      ],
+      "expectedSkill": "research-discovery",
+      "fileOutput": true
+    },
+    {
+      "id": "dev-research-and-file-5",
+      "seed": "dev-research-and-file",
+      "split": "development",
+      "language": "ar",
+      "prompt": "ابحث عن الطاقة الجوفية واكتب ملف نصي",
+      "category": "research-file",
+      "requiredTools": [
+        "web.search",
+        "file.write",
+        "file.read"
+      ],
+      "expectedSkill": "research-discovery",
+      "fileOutput": true
+    },
+    {
+      "id": "dev-research-and-file-6",
+      "seed": "dev-research-and-file",
+      "split": "development",
+      "language": "mixed",
+      "prompt": "Research geothermal energy واحفظ heat.md",
+      "category": "research-file",
+      "requiredTools": [
+        "web.search",
+        "file.write",
+        "file.read"
+      ],
+      "expectedSkill": "research-discovery",
+      "fileOutput": true
+    },
+    {
+      "id": "dev-general-research-1",
+      "seed": "dev-general-research",
+      "split": "development",
+      "language": "en",
+      "prompt": "Research indoor air quality.",
+      "category": "discovery",
+      "requiredTools": [
+        "web.search"
+      ],
+      "expectedSkill": "research-discovery"
+    },
+    {
+      "id": "dev-general-research-2",
+      "seed": "dev-general-research",
+      "split": "development",
+      "language": "en",
+      "prompt": "Investigate ventilation methods.",
+      "category": "discovery",
+      "requiredTools": [
+        "web.search"
+      ],
+      "expectedSkill": "research-discovery"
+    },
+    {
+      "id": "dev-general-research-3",
+      "seed": "dev-general-research",
+      "split": "development",
+      "language": "en",
+      "prompt": "Find recent evidence on room ventilation.",
+      "category": "discovery",
+      "requiredTools": [
+        "web.search"
+      ],
+      "expectedSkill": "research-discovery"
+    },
+    {
+      "id": "dev-general-research-4",
+      "seed": "dev-general-research",
+      "split": "development",
+      "language": "ar",
+      "prompt": "ابحث عن جودة الهواء الداخلي",
+      "category": "discovery",
+      "requiredTools": [
+        "web.search"
+      ],
+      "expectedSkill": "research-discovery"
+    },
+    {
+      "id": "dev-general-research-5",
+      "seed": "dev-general-research",
+      "split": "development",
+      "language": "ar",
+      "prompt": "ابحث عن طرق التهوية الحديثة",
+      "category": "discovery",
+      "requiredTools": [
+        "web.search"
+      ],
+      "expectedSkill": "research-discovery"
+    },
+    {
+      "id": "dev-general-research-6",
+      "seed": "dev-general-research",
+      "split": "development",
+      "language": "mixed",
+      "prompt": "Research indoor air quality باللغة العربية",
+      "category": "discovery",
+      "requiredTools": [
+        "web.search"
+      ],
+      "expectedSkill": "research-discovery"
+    },
+    {
+      "id": "dev-text-file-1",
+      "seed": "dev-text-file",
+      "split": "development",
+      "language": "en",
+      "prompt": "Create a text file with the agenda.",
+      "category": "file",
+      "requiredTools": [
+        "file.write",
+        "file.read"
+      ],
+      "expectedSkill": null,
+      "fileOutput": true
+    },
+    {
+      "id": "dev-text-file-2",
+      "seed": "dev-text-file",
+      "split": "development",
+      "language": "en",
+      "prompt": "Generate a text file for the schedule.",
+      "category": "file",
+      "requiredTools": [
+        "file.write",
+        "file.read"
+      ],
+      "expectedSkill": null,
+      "fileOutput": true
+    },
+    {
+      "id": "dev-text-file-3",
+      "seed": "dev-text-file",
+      "split": "development",
+      "language": "en",
+      "prompt": "Prepare a text file containing the checklist.",
+      "category": "file",
+      "requiredTools": [
+        "file.write",
+        "file.read"
+      ],
+      "expectedSkill": null,
+      "fileOutput": true
+    },
+    {
+      "id": "dev-text-file-4",
+      "seed": "dev-text-file",
+      "split": "development",
+      "language": "ar",
+      "prompt": "أنشئ ملف نصي للجدول",
+      "category": "file",
+      "requiredTools": [
+        "file.write",
+        "file.read"
+      ],
+      "expectedSkill": null,
+      "fileOutput": true
+    },
+    {
+      "id": "dev-text-file-5",
+      "seed": "dev-text-file",
+      "split": "development",
+      "language": "ar",
+      "prompt": "جهز ملف نصي للقائمة",
+      "category": "file",
+      "requiredTools": [
+        "file.write",
+        "file.read"
+      ],
+      "expectedSkill": null,
+      "fileOutput": true
+    },
+    {
+      "id": "dev-text-file-6",
+      "seed": "dev-text-file",
+      "split": "development",
+      "language": "mixed",
+      "prompt": "Write ملف نصي in agenda.txt",
+      "category": "file",
+      "requiredTools": [
+        "file.write",
+        "file.read"
+      ],
+      "expectedSkill": null,
+      "fileOutput": true
+    },
+    {
+      "id": "dev-greetings-1",
+      "seed": "dev-greetings",
+      "split": "development",
+      "language": "en",
+      "prompt": "hello",
+      "category": "greeting",
+      "requiredTools": [],
+      "expectedSkill": null,
+      "noActions": true
+    },
+    {
+      "id": "dev-greetings-2",
+      "seed": "dev-greetings",
+      "split": "development",
+      "language": "en",
+      "prompt": "hi",
+      "category": "greeting",
+      "requiredTools": [],
+      "expectedSkill": null,
+      "noActions": true
+    },
+    {
+      "id": "dev-greetings-3",
+      "seed": "dev-greetings",
+      "split": "development",
+      "language": "en",
+      "prompt": "good morning",
+      "category": "greeting",
+      "requiredTools": [],
+      "expectedSkill": null,
+      "noActions": true
+    },
+    {
+      "id": "dev-greetings-4",
+      "seed": "dev-greetings",
+      "split": "development",
+      "language": "ar",
+      "prompt": "مرحبا",
+      "category": "greeting",
+      "requiredTools": [],
+      "expectedSkill": null,
+      "noActions": true
+    },
+    {
+      "id": "dev-greetings-5",
+      "seed": "dev-greetings",
+      "split": "development",
+      "language": "ar",
+      "prompt": "أهلا",
+      "category": "greeting",
+      "requiredTools": [],
+      "expectedSkill": null,
+      "noActions": true
+    },
+    {
+      "id": "dev-greetings-6",
+      "seed": "dev-greetings",
+      "split": "development",
+      "language": "mixed",
+      "prompt": "hello مرحبا",
+      "category": "greeting",
+      "requiredTools": [],
+      "expectedSkill": null,
+      "noActions": true
+    },
+    {
+      "id": "dev-negated-save-1",
+      "seed": "dev-negated-save",
+      "split": "development",
+      "language": "en",
+      "prompt": "Do not save any files; explain the topic.",
+      "category": "negative",
+      "requiredTools": [],
+      "expectedSkill": null,
+      "noActions": true
+    },
+    {
+      "id": "dev-negated-save-2",
+      "seed": "dev-negated-save",
+      "split": "development",
+      "language": "en",
+      "prompt": "Never write report.md; describe the proposal.",
+      "category": "negative",
+      "requiredTools": [],
+      "expectedSkill": null,
+      "noActions": true
+    },
+    {
+      "id": "dev-negated-save-3",
+      "seed": "dev-negated-save",
+      "split": "development",
+      "language": "en",
+      "prompt": "Do not create a Markdown file.",
+      "category": "negative",
+      "requiredTools": [],
+      "expectedSkill": null,
+      "noActions": true
+    },
+    {
+      "id": "dev-negated-save-4",
+      "seed": "dev-negated-save",
+      "split": "development",
+      "language": "ar",
+      "prompt": "لا تحفظ أي ملفات، اشرح الفكرة فقط",
+      "category": "negative",
+      "requiredTools": [],
+      "expectedSkill": null,
+      "noActions": true
+    },
+    {
+      "id": "dev-negated-save-5",
+      "seed": "dev-negated-save",
+      "split": "development",
+      "language": "ar",
+      "prompt": "لا تكتب التقرير في ملف نصي",
+      "category": "negative",
+      "requiredTools": [],
+      "expectedSkill": null,
+      "noActions": true
+    },
+    {
+      "id": "dev-negated-save-6",
+      "seed": "dev-negated-save",
+      "split": "development",
+      "language": "mixed",
+      "prompt": "Do not save التقرير in report.md",
+      "category": "negative",
+      "requiredTools": [],
+      "expectedSkill": null,
+      "noActions": true
+    },
+    {
+      "id": "dev-delegation-info-1",
+      "seed": "dev-delegation-info",
+      "split": "development",
+      "language": "en",
+      "prompt": "What are subagents?",
+      "category": "negative",
+      "requiredTools": [],
+      "expectedSkill": null,
+      "noActions": true
+    },
+    {
+      "id": "dev-delegation-info-2",
+      "seed": "dev-delegation-info",
+      "split": "development",
+      "language": "en",
+      "prompt": "Explain how workers are different from agents.",
+      "category": "negative",
+      "requiredTools": [],
+      "expectedSkill": null,
+      "noActions": true
+    },
+    {
+      "id": "dev-delegation-info-3",
+      "seed": "dev-delegation-info",
+      "split": "development",
+      "language": "en",
+      "prompt": "Describe delegation without taking action.",
+      "category": "negative",
+      "requiredTools": [],
+      "expectedSkill": null,
+      "noActions": true
+    },
+    {
+      "id": "dev-delegation-info-4",
+      "seed": "dev-delegation-info",
+      "split": "development",
+      "language": "ar",
+      "prompt": "اشرح معنى الوكلاء الفرعيين",
+      "category": "negative",
+      "requiredTools": [],
+      "expectedSkill": null,
+      "noActions": true
+    },
+    {
+      "id": "dev-delegation-info-5",
+      "seed": "dev-delegation-info",
+      "split": "development",
+      "language": "ar",
+      "prompt": "اشرح آلية تفويض العمل فقط",
+      "category": "negative",
+      "requiredTools": [],
+      "expectedSkill": null,
+      "noActions": true
+    },
+    {
+      "id": "dev-delegation-info-6",
+      "seed": "dev-delegation-info",
+      "split": "development",
+      "language": "mixed",
+      "prompt": "Explain subagents باللغة العربية",
+      "category": "negative",
+      "requiredTools": [],
+      "expectedSkill": null,
+      "noActions": true
+    },
+    {
+      "id": "dev-quoted-request-1",
+      "seed": "dev-quoted-request",
+      "split": "development",
+      "language": "en",
+      "prompt": "Explain the phrase “save a markdown file” without taking action.",
+      "category": "negative",
+      "requiredTools": [],
+      "expectedSkill": null,
+      "noActions": true
+    },
+    {
+      "id": "dev-quoted-request-2",
+      "seed": "dev-quoted-request",
+      "split": "development",
+      "language": "en",
+      "prompt": "The example says \"use 3 subagents\". Explain it.",
+      "category": "negative",
+      "requiredTools": [],
+      "expectedSkill": null,
+      "noActions": true
+    },
+    {
+      "id": "dev-quoted-request-3",
+      "seed": "dev-quoted-request",
+      "split": "development",
+      "language": "en",
+      "prompt": "Explain `use the researcher skill`.",
+      "category": "negative",
+      "requiredTools": [],
+      "expectedSkill": null,
+      "noActions": true
+    },
+    {
+      "id": "dev-quoted-request-4",
+      "seed": "dev-quoted-request",
+      "split": "development",
+      "language": "ar",
+      "prompt": "اشرح عبارة \"احفظ التقرير في ملف نصي\"",
+      "category": "negative",
+      "requiredTools": [],
+      "expectedSkill": null,
+      "noActions": true
+    },
+    {
+      "id": "dev-quoted-request-5",
+      "seed": "dev-quoted-request",
+      "split": "development",
+      "language": "ar",
+      "prompt": "اشرح المثال \"استخدم ثلاثة وكلاء\"",
+      "category": "negative",
+      "requiredTools": [],
+      "expectedSkill": null,
+      "noActions": true
+    },
+    {
+      "id": "dev-quoted-request-6",
+      "seed": "dev-quoted-request",
+      "split": "development",
+      "language": "mixed",
+      "prompt": "Explain \"استخدم مهارة researcher\"",
+      "category": "negative",
+      "requiredTools": [],
+      "expectedSkill": null,
+      "noActions": true
+    },
+    {
+      "id": "dev-negated-skill-1",
+      "seed": "dev-negated-skill",
+      "split": "development",
+      "language": "en",
+      "prompt": "Do not use the researcher skill.",
+      "category": "negative",
+      "requiredTools": [],
+      "expectedSkill": null,
+      "noActions": true
+    },
+    {
+      "id": "dev-negated-skill-2",
+      "seed": "dev-negated-skill",
+      "split": "development",
+      "language": "en",
+      "prompt": "Never load the research-discovery skill.",
+      "category": "negative",
+      "requiredTools": [],
+      "expectedSkill": null,
+      "noActions": true
+    },
+    {
+      "id": "dev-negated-skill-3",
+      "seed": "dev-negated-skill",
+      "split": "development",
+      "language": "en",
+      "prompt": "Do not invoke the research skill.",
+      "category": "negative",
+      "requiredTools": [],
+      "expectedSkill": null,
+      "noActions": true
+    },
+    {
+      "id": "dev-negated-skill-4",
+      "seed": "dev-negated-skill",
+      "split": "development",
+      "language": "ar",
+      "prompt": "لا تستخدم مهارة researcher",
+      "category": "negative",
+      "requiredTools": [],
+      "expectedSkill": null,
+      "noActions": true
+    },
+    {
+      "id": "dev-negated-skill-5",
+      "seed": "dev-negated-skill",
+      "split": "development",
+      "language": "ar",
+      "prompt": "لا تستخدم مهارة research-discovery",
+      "category": "negative",
+      "requiredTools": [],
+      "expectedSkill": null,
+      "noActions": true
+    },
+    {
+      "id": "dev-negated-skill-6",
+      "seed": "dev-negated-skill",
+      "split": "development",
+      "language": "mixed",
+      "prompt": "Do not use مهارة researcher",
+      "category": "negative",
+      "requiredTools": [],
+      "expectedSkill": null,
+      "noActions": true
+    },
+    {
+      "id": "dev-information-1",
+      "seed": "dev-information",
+      "split": "development",
+      "language": "en",
+      "prompt": "Explain why water expands when freezing.",
+      "category": "negative",
+      "requiredTools": [],
+      "expectedSkill": null,
+      "noActions": true
+    },
+    {
+      "id": "dev-information-2",
+      "seed": "dev-information",
+      "split": "development",
+      "language": "en",
+      "prompt": "What does the word literature mean?",
+      "category": "negative",
+      "requiredTools": [],
+      "expectedSkill": null,
+      "noActions": true
+    },
+    {
+      "id": "dev-information-3",
+      "seed": "dev-information",
+      "split": "development",
+      "language": "en",
+      "prompt": "Describe the difference between an abstract and a paper.",
+      "category": "negative",
+      "requiredTools": [],
+      "expectedSkill": null,
+      "noActions": true
+    },
+    {
+      "id": "dev-information-4",
+      "seed": "dev-information",
+      "split": "development",
+      "language": "ar",
+      "prompt": "اشرح مفهوم التبخر",
+      "category": "negative",
+      "requiredTools": [],
+      "expectedSkill": null,
+      "noActions": true
+    },
+    {
+      "id": "dev-information-5",
+      "seed": "dev-information",
+      "split": "development",
+      "language": "ar",
+      "prompt": "اشرح الفرق بين الملخص والورقة",
+      "category": "negative",
+      "requiredTools": [],
+      "expectedSkill": null,
+      "noActions": true
+    },
+    {
+      "id": "dev-information-6",
+      "seed": "dev-information",
+      "split": "development",
+      "language": "mixed",
+      "prompt": "Explain evaporation بالعربية",
+      "category": "negative",
+      "requiredTools": [],
+      "expectedSkill": null,
+      "noActions": true
+    },
+    {
+      "id": "heldout-materials-1",
+      "seed": "heldout-materials",
+      "split": "heldout",
+      "language": "en",
+      "prompt": "Investigate the latest biodegradable packaging methods. Use three subagents.",
+      "category": "research-workers",
+      "requiredTools": [
+        "web.search",
+        "delegate_task",
+        "task.status",
+        "task.result.read"
+      ],
+      "expectedSkill": "research-discovery",
+      "delegationCount": 3
+    },
+    {
+      "id": "heldout-materials-2",
+      "seed": "heldout-materials",
+      "split": "heldout",
+      "language": "en",
+      "prompt": "Use 3 workers and research compostable packaging.",
+      "category": "research-workers",
+      "requiredTools": [
+        "web.search",
+        "delegate_task",
+        "task.status",
+        "task.result.read"
+      ],
+      "expectedSkill": "research-discovery",
+      "delegationCount": 3
+    },
+    {
+      "id": "heldout-materials-3",
+      "seed": "heldout-materials",
+      "split": "heldout",
+      "language": "en",
+      "prompt": "Research current packaging alternatives; launch three agents.",
+      "category": "research-workers",
+      "requiredTools": [
+        "web.search",
+        "delegate_task",
+        "task.status",
+        "task.result.read"
+      ],
+      "expectedSkill": "research-discovery",
+      "delegationCount": 3
+    },
+    {
+      "id": "heldout-materials-4",
+      "seed": "heldout-materials",
+      "split": "heldout",
+      "language": "ar",
+      "prompt": "ابحث عن أحدث مواد التغليف واستخدم ثلاثة وكلاء فرعيين",
+      "category": "research-workers",
+      "requiredTools": [
+        "web.search",
+        "delegate_task",
+        "task.status",
+        "task.result.read"
+      ],
+      "expectedSkill": "research-discovery",
+      "delegationCount": 3
+    },
+    {
+      "id": "heldout-materials-5",
+      "seed": "heldout-materials",
+      "split": "heldout",
+      "language": "ar",
+      "prompt": "ابحث عن التغليف واستخدم ٣ وكلاء",
+      "category": "research-workers",
+      "requiredTools": [
+        "web.search",
+        "delegate_task",
+        "task.status",
+        "task.result.read"
+      ],
+      "expectedSkill": "research-discovery",
+      "delegationCount": 3
+    },
+    {
+      "id": "heldout-materials-6",
+      "seed": "heldout-materials",
+      "split": "heldout",
+      "language": "mixed",
+      "prompt": "Research compostable packaging واستخدم 3 subagents",
+      "category": "research-workers",
+      "requiredTools": [
+        "web.search",
+        "delegate_task",
+        "task.status",
+        "task.result.read"
+      ],
+      "expectedSkill": "research-discovery",
+      "delegationCount": 3
+    },
+    {
+      "id": "heldout-review-1",
+      "seed": "heldout-review",
+      "split": "heldout",
+      "language": "en",
+      "prompt": "Survey recent publications about urban heat islands.",
+      "category": "discovery",
+      "requiredTools": [
+        "web.search"
+      ],
+      "expectedSkill": "research-discovery"
+    },
+    {
+      "id": "heldout-review-2",
+      "seed": "heldout-review",
+      "split": "heldout",
+      "language": "en",
+      "prompt": "Find academic papers on urban cooling.",
+      "category": "discovery",
+      "requiredTools": [
+        "web.search"
+      ],
+      "expectedSkill": "research-discovery"
+    },
+    {
+      "id": "heldout-review-3",
+      "seed": "heldout-review",
+      "split": "heldout",
+      "language": "en",
+      "prompt": "Research the literature on city heat mitigation.",
+      "category": "discovery",
+      "requiredTools": [
+        "web.search"
+      ],
+      "expectedSkill": "research-discovery"
+    },
+    {
+      "id": "heldout-review-4",
+      "seed": "heldout-review",
+      "split": "heldout",
+      "language": "ar",
+      "prompt": "ابحث عن أحدث أوراق تبريد المدن",
+      "category": "discovery",
+      "requiredTools": [
+        "web.search"
+      ],
+      "expectedSkill": "research-discovery"
+    },
+    {
+      "id": "heldout-review-5",
+      "seed": "heldout-review",
+      "split": "heldout",
+      "language": "ar",
+      "prompt": "ابحث عن أبحاث الجزر الحرارية",
+      "category": "discovery",
+      "requiredTools": [
+        "web.search"
+      ],
+      "expectedSkill": "research-discovery"
+    },
+    {
+      "id": "heldout-review-6",
+      "seed": "heldout-review",
+      "split": "heldout",
+      "language": "mixed",
+      "prompt": "Find recent papers عن urban heat",
+      "category": "discovery",
+      "requiredTools": [
+        "web.search"
+      ],
+      "expectedSkill": "research-discovery"
+    },
+    {
+      "id": "heldout-skill-recovery-1",
+      "seed": "heldout-skill-recovery",
+      "split": "heldout",
+      "language": "en",
+      "prompt": "Invoke the researcher skill for water filtration experiments.",
+      "category": "researcher",
+      "requiredTools": [
+        "skill.read"
+      ],
+      "expectedSkill": "researcher"
+    },
+    {
+      "id": "heldout-skill-recovery-2",
+      "seed": "heldout-skill-recovery",
+      "split": "heldout",
+      "language": "en",
+      "prompt": "Apply the researcher skill.",
+      "category": "researcher",
+      "requiredTools": [
+        "skill.read"
+      ],
+      "expectedSkill": "researcher"
+    },
+    {
+      "id": "heldout-skill-recovery-3",
+      "seed": "heldout-skill-recovery",
+      "split": "heldout",
+      "language": "en",
+      "prompt": "/researcher investigate filter membranes",
+      "category": "researcher",
+      "requiredTools": [
+        "skill.read"
+      ],
+      "expectedSkill": "researcher"
+    },
+    {
+      "id": "heldout-skill-recovery-4",
+      "seed": "heldout-skill-recovery",
+      "split": "heldout",
+      "language": "ar",
+      "prompt": "فعّل مهارة researcher",
+      "category": "researcher",
+      "requiredTools": [
+        "skill.read"
+      ],
+      "expectedSkill": "researcher"
+    },
+    {
+      "id": "heldout-skill-recovery-5",
+      "seed": "heldout-skill-recovery",
+      "split": "heldout",
+      "language": "ar",
+      "prompt": "استخدم مهارة researcher لأبحاث ترشيح المياه",
+      "category": "researcher",
+      "requiredTools": [
+        "skill.read"
+      ],
+      "expectedSkill": "researcher"
+    },
+    {
+      "id": "heldout-skill-recovery-6",
+      "seed": "heldout-skill-recovery",
+      "split": "heldout",
+      "language": "mixed",
+      "prompt": "Invoke the researcher skill لدراسة filters",
+      "category": "researcher",
+      "requiredTools": [
+        "skill.read"
+      ],
+      "expectedSkill": "researcher"
+    },
+    {
+      "id": "heldout-export-1",
+      "seed": "heldout-export",
+      "split": "heldout",
+      "language": "en",
+      "prompt": "Export the conclusions as conclusions.md.",
+      "category": "file",
+      "requiredTools": [
+        "file.write",
+        "file.read"
+      ],
+      "expectedSkill": null,
+      "fileOutput": true
+    },
+    {
+      "id": "heldout-export-2",
+      "seed": "heldout-export",
+      "split": "heldout",
+      "language": "en",
+      "prompt": "Please generate a Markdown file for the decision record.",
+      "category": "file",
+      "requiredTools": [
+        "file.write",
+        "file.read"
+      ],
+      "expectedSkill": null,
+      "fileOutput": true
+    },
+    {
+      "id": "heldout-export-3",
+      "seed": "heldout-export",
+      "split": "heldout",
+      "language": "en",
+      "prompt": "Prepare a text file with the conclusions.",
+      "category": "file",
+      "requiredTools": [
+        "file.write",
+        "file.read"
+      ],
+      "expectedSkill": null,
+      "fileOutput": true
+    },
+    {
+      "id": "heldout-export-4",
+      "seed": "heldout-export",
+      "split": "heldout",
+      "language": "ar",
+      "prompt": "صدر النتائج في conclusions.md",
+      "category": "file",
+      "requiredTools": [
+        "file.write",
+        "file.read"
+      ],
+      "expectedSkill": null,
+      "fileOutput": true
+    },
+    {
+      "id": "heldout-export-5",
+      "seed": "heldout-export",
+      "split": "heldout",
+      "language": "ar",
+      "prompt": "أعد ملف نصي للنتائج",
+      "category": "file",
+      "requiredTools": [
+        "file.write",
+        "file.read"
+      ],
+      "expectedSkill": null,
+      "fileOutput": true
+    },
+    {
+      "id": "heldout-export-6",
+      "seed": "heldout-export",
+      "split": "heldout",
+      "language": "mixed",
+      "prompt": "Export النتائج to conclusions.md",
+      "category": "file",
+      "requiredTools": [
+        "file.write",
+        "file.read"
+      ],
+      "expectedSkill": null,
+      "fileOutput": true
+    },
+    {
+      "id": "heldout-combined-1",
+      "seed": "heldout-combined",
+      "split": "heldout",
+      "language": "en",
+      "prompt": "Investigate wind turbine blade recycling and export the findings to blades.md.",
+      "category": "research-file",
+      "requiredTools": [
+        "web.search",
+        "file.write",
+        "file.read"
+      ],
+      "expectedSkill": "research-discovery",
+      "fileOutput": true
+    },
+    {
+      "id": "heldout-combined-2",
+      "seed": "heldout-combined",
+      "split": "heldout",
+      "language": "en",
+      "prompt": "Find literature on retired turbine blades and prepare a markdown file.",
+      "category": "research-file",
+      "requiredTools": [
+        "web.search",
+        "file.write",
+        "file.read"
+      ],
+      "expectedSkill": "research-discovery",
+      "fileOutput": true
+    },
+    {
+      "id": "heldout-combined-3",
+      "seed": "heldout-combined",
+      "split": "heldout",
+      "language": "en",
+      "prompt": "Research blade reuse and save a text file.",
+      "category": "research-file",
+      "requiredTools": [
+        "web.search",
+        "file.write",
+        "file.read"
+      ],
+      "expectedSkill": "research-discovery",
+      "fileOutput": true
+    },
+    {
+      "id": "heldout-combined-4",
+      "seed": "heldout-combined",
+      "split": "heldout",
+      "language": "ar",
+      "prompt": "ابحث عن تدوير شفرات الرياح واحفظ النتيجة في blades.md",
+      "category": "research-file",
+      "requiredTools": [
+        "web.search",
+        "file.write",
+        "file.read"
+      ],
+      "expectedSkill": "research-discovery",
+      "fileOutput": true
+    },
+    {
+      "id": "heldout-combined-5",
+      "seed": "heldout-combined",
+      "split": "heldout",
+      "language": "ar",
+      "prompt": "ابحث عن شفرات التوربينات واكتب ملف نصي",
+      "category": "research-file",
+      "requiredTools": [
+        "web.search",
+        "file.write",
+        "file.read"
+      ],
+      "expectedSkill": "research-discovery",
+      "fileOutput": true
+    },
+    {
+      "id": "heldout-combined-6",
+      "seed": "heldout-combined",
+      "split": "heldout",
+      "language": "mixed",
+      "prompt": "Research turbine blades واكتب blades.md",
+      "category": "research-file",
+      "requiredTools": [
+        "web.search",
+        "file.write",
+        "file.read"
+      ],
+      "expectedSkill": "research-discovery",
+      "fileOutput": true
+    },
+    {
+      "id": "heldout-save-continuity-1",
+      "seed": "heldout-save-continuity",
+      "split": "heldout",
+      "language": "en",
+      "prompt": "Save the existing report to final.md.",
+      "category": "save-followup",
+      "requiredTools": [
+        "file.write",
+        "file.read"
+      ],
+      "expectedSkill": null,
+      "fileOutput": true,
+      "previousPrompt": "Research current urban heat mitigation. Use 3 subagents."
+    },
+    {
+      "id": "heldout-save-continuity-2",
+      "seed": "heldout-save-continuity",
+      "split": "heldout",
+      "language": "en",
+      "prompt": "Export this result to final.txt.",
+      "category": "save-followup",
+      "requiredTools": [
+        "file.write",
+        "file.read"
+      ],
+      "expectedSkill": null,
+      "fileOutput": true,
+      "previousPrompt": "Research current urban heat mitigation. Use 3 subagents."
+    },
+    {
+      "id": "heldout-save-continuity-3",
+      "seed": "heldout-save-continuity",
+      "split": "heldout",
+      "language": "en",
+      "prompt": "Prepare a markdown file with the above findings.",
+      "category": "save-followup",
+      "requiredTools": [
+        "file.write",
+        "file.read"
+      ],
+      "expectedSkill": null,
+      "fileOutput": true,
+      "previousPrompt": "Research current urban heat mitigation. Use 3 subagents."
+    },
+    {
+      "id": "heldout-save-continuity-4",
+      "seed": "heldout-save-continuity",
+      "split": "heldout",
+      "language": "ar",
+      "prompt": "احفظ النتيجة في final.md",
+      "category": "save-followup",
+      "requiredTools": [
+        "file.write",
+        "file.read"
+      ],
+      "expectedSkill": null,
+      "fileOutput": true,
+      "previousPrompt": "Research current urban heat mitigation. Use 3 subagents."
+    },
+    {
+      "id": "heldout-save-continuity-5",
+      "seed": "heldout-save-continuity",
+      "split": "heldout",
+      "language": "ar",
+      "prompt": "احفظ التقرير في ملف نصي",
+      "category": "save-followup",
+      "requiredTools": [
+        "file.write",
+        "file.read"
+      ],
+      "expectedSkill": null,
+      "fileOutput": true,
+      "previousPrompt": "Research current urban heat mitigation. Use 3 subagents."
+    },
+    {
+      "id": "heldout-save-continuity-6",
+      "seed": "heldout-save-continuity",
+      "split": "heldout",
+      "language": "mixed",
+      "prompt": "Save التقرير in final.md",
+      "category": "save-followup",
+      "requiredTools": [
+        "file.write",
+        "file.read"
+      ],
+      "expectedSkill": null,
+      "fileOutput": true,
+      "previousPrompt": "Research current urban heat mitigation. Use 3 subagents."
+    },
+    {
+      "id": "heldout-inert-code-1",
+      "seed": "heldout-inert-code",
+      "split": "heldout",
+      "language": "en",
+      "prompt": "Explain this example:\n```\nuse 3 subagents\nsave report.md\n```",
+      "category": "negative",
+      "requiredTools": [],
+      "expectedSkill": null,
+      "noActions": true
+    },
+    {
+      "id": "heldout-inert-code-2",
+      "seed": "heldout-inert-code",
+      "split": "heldout",
+      "language": "en",
+      "prompt": "Describe this code sample:\n```\nuse the researcher skill\n```",
+      "category": "negative",
+      "requiredTools": [],
+      "expectedSkill": null,
+      "noActions": true
+    },
+    {
+      "id": "heldout-inert-code-3",
+      "seed": "heldout-inert-code",
+      "split": "heldout",
+      "language": "en",
+      "prompt": "Explain this quotation:\n> Save a markdown file",
+      "category": "negative",
+      "requiredTools": [],
+      "expectedSkill": null,
+      "noActions": true
+    },
+    {
+      "id": "heldout-inert-code-4",
+      "seed": "heldout-inert-code",
+      "split": "heldout",
+      "language": "ar",
+      "prompt": "اشرح المثال:\n```\nاستخدم ثلاثة وكلاء\n```",
+      "category": "negative",
+      "requiredTools": [],
+      "expectedSkill": null,
+      "noActions": true
+    },
+    {
+      "id": "heldout-inert-code-5",
+      "seed": "heldout-inert-code",
+      "split": "heldout",
+      "language": "ar",
+      "prompt": "اشرح هذا الاقتباس:\n> احفظ التقرير في ملف نصي",
+      "category": "negative",
+      "requiredTools": [],
+      "expectedSkill": null,
+      "noActions": true
+    },
+    {
+      "id": "heldout-inert-code-6",
+      "seed": "heldout-inert-code",
+      "split": "heldout",
+      "language": "mixed",
+      "prompt": "Explain المثال:\n```\nsave report.md\n```",
+      "category": "negative",
+      "requiredTools": [],
+      "expectedSkill": null,
+      "noActions": true
+    },
+    {
+      "id": "heldout-negation-1",
+      "seed": "heldout-negation",
+      "split": "heldout",
+      "language": "en",
+      "prompt": "Do not delegate to workers; explain the concept.",
+      "category": "negative",
+      "requiredTools": [],
+      "expectedSkill": null,
+      "noActions": true
+    },
+    {
+      "id": "heldout-negation-2",
+      "seed": "heldout-negation",
+      "split": "heldout",
+      "language": "en",
+      "prompt": "Do not launch any subagents.",
+      "category": "negative",
+      "requiredTools": [],
+      "expectedSkill": null,
+      "noActions": true
+    },
+    {
+      "id": "heldout-negation-3",
+      "seed": "heldout-negation",
+      "split": "heldout",
+      "language": "en",
+      "prompt": "Never spawn 3 agents.",
+      "category": "negative",
+      "requiredTools": [],
+      "expectedSkill": null,
+      "noActions": true
+    },
+    {
+      "id": "heldout-negation-4",
+      "seed": "heldout-negation",
+      "split": "heldout",
+      "language": "ar",
+      "prompt": "لا تستخدم ثلاثة وكلاء فرعيين",
+      "category": "negative",
+      "requiredTools": [],
+      "expectedSkill": null,
+      "noActions": true
+    },
+    {
+      "id": "heldout-negation-5",
+      "seed": "heldout-negation",
+      "split": "heldout",
+      "language": "ar",
+      "prompt": "لا تستخدم ٣ وكلاء",
+      "category": "negative",
+      "requiredTools": [],
+      "expectedSkill": null,
+      "noActions": true
+    },
+    {
+      "id": "heldout-negation-6",
+      "seed": "heldout-negation",
+      "split": "heldout",
+      "language": "mixed",
+      "prompt": "Do not launch 3 subagents لهذا السؤال",
+      "category": "negative",
+      "requiredTools": [],
+      "expectedSkill": null,
+      "noActions": true
+    },
+    {
+      "id": "heldout-hypothetical-1",
+      "seed": "heldout-hypothetical",
+      "split": "heldout",
+      "language": "en",
+      "prompt": "How would you save a markdown file?",
+      "category": "negative",
+      "requiredTools": [],
+      "expectedSkill": null,
+      "noActions": true
+    },
+    {
+      "id": "heldout-hypothetical-2",
+      "seed": "heldout-hypothetical",
+      "split": "heldout",
+      "language": "en",
+      "prompt": "Hypothetically, use 3 subagents: what would that mean?",
+      "category": "negative",
+      "requiredTools": [],
+      "expectedSkill": null,
+      "noActions": true
+    },
+    {
+      "id": "heldout-hypothetical-3",
+      "seed": "heldout-hypothetical",
+      "split": "heldout",
+      "language": "en",
+      "prompt": "Imagine using the research skill; describe its purpose.",
+      "category": "negative",
+      "requiredTools": [],
+      "expectedSkill": null,
+      "noActions": true
+    },
+    {
+      "id": "heldout-hypothetical-4",
+      "seed": "heldout-hypothetical",
+      "split": "heldout",
+      "language": "ar",
+      "prompt": "افترض إنشاء ملف نصي، اشرح الخطوات",
+      "category": "negative",
+      "requiredTools": [],
+      "expectedSkill": null,
+      "noActions": true
+    },
+    {
+      "id": "heldout-hypothetical-5",
+      "seed": "heldout-hypothetical",
+      "split": "heldout",
+      "language": "ar",
+      "prompt": "ماذا لو استخدمنا وكلاء فرعيين؟",
+      "category": "negative",
+      "requiredTools": [],
+      "expectedSkill": null,
+      "noActions": true
+    },
+    {
+      "id": "heldout-hypothetical-6",
+      "seed": "heldout-hypothetical",
+      "split": "heldout",
+      "language": "mixed",
+      "prompt": "Explain how to save ملف Markdown",
+      "category": "negative",
+      "requiredTools": [],
+      "expectedSkill": null,
+      "noActions": true
+    },
+    {
+      "id": "heldout-ambiguous-skill-1",
+      "seed": "heldout-ambiguous-skill",
+      "split": "heldout",
+      "language": "en",
+      "prompt": "Use the unavailable-research-helper skill.",
+      "category": "unresolved",
+      "requiredTools": [
+        "skill.list",
+        "skill.read"
+      ],
+      "expectedSkill": null,
+      "noActions": true,
+      "unresolvedSkill": true
+    },
+    {
+      "id": "heldout-ambiguous-skill-2",
+      "seed": "heldout-ambiguous-skill",
+      "split": "heldout",
+      "language": "en",
+      "prompt": "Load the research-helper-unknown skill.",
+      "category": "unresolved",
+      "requiredTools": [
+        "skill.list",
+        "skill.read"
+      ],
+      "expectedSkill": null,
+      "noActions": true,
+      "unresolvedSkill": true
+    },
+    {
+      "id": "heldout-ambiguous-skill-3",
+      "seed": "heldout-ambiguous-skill",
+      "split": "heldout",
+      "language": "en",
+      "prompt": "Invoke the missing-literature-helper skill.",
+      "category": "unresolved",
+      "requiredTools": [
+        "skill.list",
+        "skill.read"
+      ],
+      "expectedSkill": null,
+      "noActions": true,
+      "unresolvedSkill": true
+    },
+    {
+      "id": "heldout-ambiguous-skill-4",
+      "seed": "heldout-ambiguous-skill",
+      "split": "heldout",
+      "language": "ar",
+      "prompt": "استخدم مهارة missing-research-helper",
+      "category": "unresolved",
+      "requiredTools": [
+        "skill.list",
+        "skill.read"
+      ],
+      "expectedSkill": null,
+      "noActions": true,
+      "unresolvedSkill": true
+    },
+    {
+      "id": "heldout-ambiguous-skill-5",
+      "seed": "heldout-ambiguous-skill",
+      "split": "heldout",
+      "language": "ar",
+      "prompt": "حمّل مهارة unknown-research-helper",
+      "category": "unresolved",
+      "requiredTools": [
+        "skill.list",
+        "skill.read"
+      ],
+      "expectedSkill": null,
+      "noActions": true,
+      "unresolvedSkill": true
+    },
+    {
+      "id": "heldout-ambiguous-skill-6",
+      "seed": "heldout-ambiguous-skill",
+      "split": "heldout",
+      "language": "mixed",
+      "prompt": "Use the unknown-research-helper skill للبحث",
+      "category": "unresolved",
+      "requiredTools": [
+        "skill.list",
+        "skill.read"
+      ],
+      "expectedSkill": null,
+      "noActions": true,
+      "unresolvedSkill": true
+    }
+  ],
+  "preReleaseCorrection": {
+    "previousSha256": "32fa76010f2741383d3186ec35dfcd49d0eb2648fdb81a45bbebbf5bdb9954a7",
+    "reason": "Corrected a repeated save-only prompt/context across splits by giving the held-out urban-heat follow-up its own prior research topic. Labels and runtime code are unchanged; no held-out miss was relabeled."
+  }
+}

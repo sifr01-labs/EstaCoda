@@ -1,3 +1,5 @@
+import { researchRoutingReleaseCase } from "./research-routing-release.js";
+import { researchWorkflowReleaseCase } from "./research-workflow-release.js";
 import { providerTextResponseCase } from "./provider-text-response.js";
 import { toolSecurityBlockCase } from "./tool-security-block.js";
 import { missingToolFailureCase } from "./missing-tool-failure.js";
@@ -20,6 +22,8 @@ import { evolutionExportShapeCase } from "./evolution-export-shape.js";
 import { visionImageSecurityCase } from "./vision-image-security.js";
 
 export const defaultEvalFixtures = [
+  researchRoutingReleaseCase,
+  researchWorkflowReleaseCase,
   providerTextResponseCase,
   toolSecurityBlockCase,
   missingToolFailureCase,

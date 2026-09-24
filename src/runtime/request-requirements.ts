@@ -33,7 +33,7 @@ export function deriveRequestRequirements(userText: string, originTurnId?: strin
   }
   for (const segment of explicitRequestSegments(userText)) {
     const actionSegment = segment.replace(/`[^`]*`/gu, " ");
-    const skill = actionSegment.match(/(?:\b(?:use|invoke|load|apply)\s+(?:the\s+)?([\p{L}\p{N}_-]{1,80})\s+skill\b|(?:استخدم|حمّل|فعّل)\s+مهارة\s+([\p{L}\p{N}_-]{1,80})|^\s*\/([\p{L}\p{N}_-]{1,80})(?:\s|$))/iu);
+    const skill = actionSegment.match(/(?:\b(?:use|using|invoke|load|apply)\s+(?:the\s+)?([\p{L}\p{N}_-]{1,80})\s+skill\b|(?:استخدم|حمّل|فعّل)\s+مهارة\s+([\p{L}\p{N}_-]{1,80})|^\s*\/([\p{L}\p{N}_-]{1,80})(?:\s|$))/iu);
     const reference = skill?.[1] ?? skill?.[2] ?? skill?.[3];
     if (reference !== undefined && result.skillReferences.length < 4) result.skillReferences.push(reference.toLocaleLowerCase("en-US"));
     const delegation = actionSegment.match(/\b(?:use|launch|spawn|delegate\s+to|assign\s+to)\s+(?:(\d{1,9}|one|two|three|four|five|six|seven|eight|nine|ten)\s+)?(?:sub[- ]?agents?|workers?|agents?)\b|(?:استخدم|شغّل|شغل|كلّف)\s+(?:(\d{1,9}|[٠-٩]{1,9}|ثلاثة|ثلاث|اثنين|اثنان)\s+)?(?:وكلاء|عمال|وكيل|sub[- ]?agents?|workers?)(?:\s+فرعيين)?/iu);
@@ -47,7 +47,7 @@ export function deriveRequestRequirements(userText: string, originTurnId?: strin
         : /\b(?:papers?|arxiv|literature|academic|publications?)\b|(?:أوراق|أبحاث|أدبيات)/iu.test(actionSegment) ? "literature" : "general";
       result.research = { domain: domain === "general" ? result.research?.domain ?? domain : domain, fresh: result.research?.fresh === true || /\b(?:latest|recent|current|fresh|newest)\b|(?:أحدث|حديث|الحالية)/iu.test(actionSegment) };
     }
-    if (!/\b(?:prepare|save|export|write|create|generate)\s+|(?:احفظ|صدّر|صدر|أنشئ|اكتب|جهّز|جهز|أعد)\s+/iu.test(actionSegment)) continue;
+    if (!/\b(?:prepare|save|export|write|create|generate)\s+|(?:احفظ(?:ها|ه)?|صدّر(?:ها|ه)?|صدر(?:ها|ه)?|أنشئ|اكتب(?:ها|ه)?|جهّز|جهز|أعد)\s+/iu.test(actionSegment)) continue;
     const paths = [...segment.matchAll(FILE_NAME)].map((match) => match[1] ?? match[0]);
     const markdown = /\bmarkdown\b|\bmd\s+file\b/iu.test(actionSegment) || paths.some((path) => /\.(?:md|markdown)$/iu.test(path));
     if (paths.length === 0 && !(markdown && /\bfile\b|ملف/iu.test(actionSegment)) && !/\btext\s+file\b|ملف\s+نصي/iu.test(actionSegment)) continue;
@@ -66,6 +66,7 @@ export function deriveRequestRequirements(userText: string, originTurnId?: strin
 export function requiredRequestTools(requirements: RequestRequirements | undefined): string[] {
   if (requirements === undefined) return [];
   return [
+    ...(requirements.research === undefined ? [] : ["web.search", "web.extract"]),
     ...(requirements.sourceTaskId !== undefined ? ["task.status", "task.result.read"] : requirements.delegation === undefined ? [] : ["delegate_task", "task.status", "task.result.read"]),
     ...(requirements.fileOutput === undefined ? [] : ["file.write", "file.patch", "file.read"]),
     ...(requirements.skillReferences.length === 0 ? [] : ["skill.list", "skill.read"])

@@ -1,9 +1,22 @@
 import { describe, expect, it } from "vitest";
 import { SkillRegistry } from "../skills/skill-registry.js";
 import { IntentRouter } from "./intent-router.js";
-import { deriveRequestRequirements } from "./request-requirements.js";
+import { deriveRequestRequirements, requiredRequestTools } from "./request-requirements.js";
 
 describe("bounded explicit request requirements", () => {
+  it("keeps explicit research tools in a compound file request and accepts bounded Arabic pronouns", () => {
+    const requirements = deriveRequestRequirements("ابحث عن أبحاث الحرارة الجوفية واحفظها في heat.md");
+    expect(requirements.fileOutput?.path).toBe("heat.md");
+    expect(requiredRequestTools(requirements)).toEqual(expect.arrayContaining(["web.search", "web.extract", "file.write", "file.read"]));
+    expect(deriveRequestRequirements("لا تحفظها في heat.md").fileOutput).toBeUndefined();
+    expect(deriveRequestRequirements('اشرح "احفظها في heat.md"').fileOutput).toBeUndefined();
+    expect(deriveRequestRequirements("Rerun this task using the research-discovery skill").skillReferences).toEqual(["research-discovery"]);
+  });
+  it("keeps mixed greetings empty without hiding an appended action", () => {
+    const router = new IntentRouter({ skillRegistry: new SkillRegistry() });
+    expect(router.route("hello مرحبا").taskClass).toBe("conversation");
+    expect(router.route("hello مرحبا save report.md").taskClass).not.toBe("conversation");
+  });
   it("extracts independent requirements and a user-turn reference", () => {
     expect(deriveRequestRequirements("Find recent arXiv papers. Use three subagents. Use the research skill. Save a markdown file at reports/Survey.md", "turn-1"))
       .toEqual({ originTurnId: "turn-1", skillReferences: ["research"], delegation: { count: 3 }, research: { domain: "literature", fresh: true }, fileOutput: { format: "markdown", path: "reports/Survey.md" }, issues: [] });

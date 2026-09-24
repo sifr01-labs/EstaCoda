@@ -753,7 +753,7 @@ function matchesProviderDiagnostics(normalized: string): boolean {
 }
 
 function matchesConversation(normalized: string): boolean {
-  if (/^(?:(?:hi|hello|hey)(?:\s+there)?|thanks(?:\s+(?:a lot|so much|for your help))?|thank you(?:\s+(?:very much|for your help))?|good (?:morning|afternoon|evening)|bye|goodbye|مرحبا|مرحباً|أهلا|اهلا|شكرا|شكراً|مع السلامة)[\s!?.،؟]*$/iu.test(normalized)) {
+  if (/^(?:(?:(?:hi|hello|hey)(?:\s+there)?|thanks(?:\s+(?:a lot|so much|for your help))?|thank you(?:\s+(?:very much|for your help))?|good (?:morning|afternoon|evening)|bye|goodbye|مرحبا|مرحباً|أهلا|اهلا|شكرا|شكراً|مع السلامة)(?:[\s!?.،؟]+|$))+$/iu.test(normalized)) {
     return true;
   }
   return /^(?:how are you|what(?:'s| is) your name|who are you|tell me a joke|let'?s chat)[\s!?.]*$/iu.test(normalized) ||

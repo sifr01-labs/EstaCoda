@@ -1,0 +1,3613 @@
+{
+  "version": 1,
+  "pairedDevelopmentBaseline": {
+    "before": {
+      "caseCount": 18,
+      "primarySkillPrecision": {
+        "numerator": 3,
+        "denominator": 3,
+        "value": 1
+      },
+      "primarySkillRecall": {
+        "numerator": 3,
+        "denominator": 8,
+        "value": 0.375
+      },
+      "requestedCapabilityRecall": {
+        "numerator": 14,
+        "denominator": 22,
+        "value": 0.6363636363636364
+      },
+      "taskClassAccuracy": {
+        "numerator": 8,
+        "denominator": 18,
+        "value": 0.4444444444444444
+      },
+      "forbiddenExposureCount": 0,
+      "falseCompleteWithoutExecution": {
+        "numerator": 6,
+        "denominator": 9,
+        "value": 0.6666666666666666
+      }
+    },
+    "after": {
+      "caseCount": 18,
+      "primarySkillPrecision": {
+        "numerator": 8,
+        "denominator": 8,
+        "value": 1
+      },
+      "primarySkillRecall": {
+        "numerator": 8,
+        "denominator": 8,
+        "value": 1
+      },
+      "requestedCapabilityRecall": {
+        "numerator": 22,
+        "denominator": 22,
+        "value": 1
+      },
+      "taskClassAccuracy": {
+        "numerator": 15,
+        "denominator": 18,
+        "value": 0.8333333333333334
+      },
+      "forbiddenExposureCount": 0,
+      "falseCompleteWithoutExecution": {
+        "numerator": 4,
+        "denominator": 9,
+        "value": 0.4444444444444444
+      }
+    },
+    "beforeSchemaTokens": {
+      "median": 84,
+      "p95": 196
+    },
+    "afterSchemaTokens": {
+      "median": 112,
+      "p95": 196
+    },
+    "scope": "Same 18 development prompts and seven-tool catalog. Counterfactual no-execution floor probe is not the real runtime completion guard. Token estimates are not comparable to the 109-definition release corpus."
+  },
+  "deterministicPassed": true,
+  "routing": {
+    "version": 1,
+    "corpusSha256": "0e46fe4054651739ec55222b4c948414370212e94ec8c08db5791d25c7613900",
+    "skillsLoaded": 22,
+    "definitions": 109,
+    "scope": "Real bundled skill loader, IntentRouter and provider narrowing; registered runtime definitions offered as available for this classification probe; actual readiness is checked by the separate execution fixtures; no live model calls.",
+    "recovery": [
+      {
+        "id": "dev-original-2",
+        "requested": [
+          "skill:research-discovery"
+        ],
+        "applied": [
+          "skill:research-discovery"
+        ],
+        "rounds": 1,
+        "passed": true
+      },
+      {
+        "id": "dev-original-3",
+        "requested": [
+          "skill:research-discovery"
+        ],
+        "applied": [
+          "skill:research-discovery"
+        ],
+        "rounds": 1,
+        "passed": true
+      },
+      {
+        "id": "dev-literature-3",
+        "requested": [
+          "skill:research-discovery"
+        ],
+        "applied": [
+          "skill:research-discovery"
+        ],
+        "rounds": 1,
+        "passed": true
+      },
+      {
+        "id": "dev-generic-skill-3",
+        "requested": [
+          "skill:research-discovery"
+        ],
+        "applied": [
+          "skill:research-discovery"
+        ],
+        "rounds": 1,
+        "passed": true
+      },
+      {
+        "id": "dev-generic-skill-4",
+        "requested": [
+          "skill:research-discovery"
+        ],
+        "applied": [
+          "skill:research-discovery"
+        ],
+        "rounds": 1,
+        "passed": true
+      },
+      {
+        "id": "dev-two-workers-1",
+        "requested": [
+          "skill:research-discovery"
+        ],
+        "applied": [
+          "skill:research-discovery"
+        ],
+        "rounds": 1,
+        "passed": true
+      },
+      {
+        "id": "dev-two-workers-2",
+        "requested": [
+          "skill:research-discovery"
+        ],
+        "applied": [
+          "skill:research-discovery"
+        ],
+        "rounds": 1,
+        "passed": true
+      },
+      {
+        "id": "dev-two-workers-3",
+        "requested": [
+          "skill:research-discovery"
+        ],
+        "applied": [
+          "skill:research-discovery"
+        ],
+        "rounds": 1,
+        "passed": true
+      },
+      {
+        "id": "dev-research-and-file-2",
+        "requested": [
+          "skill:research-discovery"
+        ],
+        "applied": [
+          "skill:research-discovery"
+        ],
+        "rounds": 1,
+        "passed": true
+      },
+      {
+        "id": "dev-research-and-file-5",
+        "requested": [
+          "skill:research-discovery"
+        ],
+        "applied": [
+          "skill:research-discovery"
+        ],
+        "rounds": 1,
+        "passed": true
+      },
+      {
+        "id": "dev-research-and-file-6",
+        "requested": [
+          "skill:research-discovery"
+        ],
+        "applied": [
+          "skill:research-discovery"
+        ],
+        "rounds": 1,
+        "passed": true
+      },
+      {
+        "id": "dev-general-research-1",
+        "requested": [
+          "skill:research-discovery"
+        ],
+        "applied": [
+          "skill:research-discovery"
+        ],
+        "rounds": 1,
+        "passed": true
+      },
+      {
+        "id": "dev-general-research-2",
+        "requested": [
+          "skill:research-discovery"
+        ],
+        "applied": [
+          "skill:research-discovery"
+        ],
+        "rounds": 1,
+        "passed": true
+      },
+      {
+        "id": "dev-general-research-3",
+        "requested": [
+          "skill:research-discovery"
+        ],
+        "applied": [
+          "skill:research-discovery"
+        ],
+        "rounds": 1,
+        "passed": true
+      },
+      {
+        "id": "dev-general-research-4",
+        "requested": [
+          "skill:research-discovery"
+        ],
+        "applied": [
+          "skill:research-discovery"
+        ],
+        "rounds": 1,
+        "passed": true
+      },
+      {
+        "id": "dev-general-research-5",
+        "requested": [
+          "skill:research-discovery"
+        ],
+        "applied": [
+          "skill:research-discovery"
+        ],
+        "rounds": 1,
+        "passed": true
+      },
+      {
+        "id": "dev-general-research-6",
+        "requested": [
+          "skill:research-discovery"
+        ],
+        "applied": [
+          "skill:research-discovery"
+        ],
+        "rounds": 1,
+        "passed": true
+      },
+      {
+        "id": "heldout-materials-2",
+        "requested": [
+          "skill:research-discovery"
+        ],
+        "applied": [
+          "skill:research-discovery"
+        ],
+        "rounds": 1,
+        "passed": true
+      },
+      {
+        "id": "heldout-materials-3",
+        "requested": [
+          "skill:research-discovery"
+        ],
+        "applied": [
+          "skill:research-discovery"
+        ],
+        "rounds": 1,
+        "passed": true
+      },
+      {
+        "id": "heldout-review-1",
+        "requested": [
+          "skill:research-discovery"
+        ],
+        "applied": [
+          "skill:research-discovery"
+        ],
+        "rounds": 1,
+        "passed": true
+      },
+      {
+        "id": "heldout-review-3",
+        "requested": [
+          "skill:research-discovery"
+        ],
+        "applied": [
+          "skill:research-discovery"
+        ],
+        "rounds": 1,
+        "passed": true
+      },
+      {
+        "id": "heldout-combined-1",
+        "requested": [
+          "skill:research-discovery"
+        ],
+        "applied": [
+          "skill:research-discovery"
+        ],
+        "rounds": 1,
+        "passed": true
+      },
+      {
+        "id": "heldout-combined-3",
+        "requested": [
+          "skill:research-discovery"
+        ],
+        "applied": [
+          "skill:research-discovery"
+        ],
+        "rounds": 1,
+        "passed": true
+      },
+      {
+        "id": "heldout-combined-4",
+        "requested": [
+          "skill:research-discovery"
+        ],
+        "applied": [
+          "skill:research-discovery"
+        ],
+        "rounds": 1,
+        "passed": true
+      },
+      {
+        "id": "heldout-combined-5",
+        "requested": [
+          "skill:research-discovery"
+        ],
+        "applied": [
+          "skill:research-discovery"
+        ],
+        "rounds": 1,
+        "passed": true
+      },
+      {
+        "id": "heldout-combined-6",
+        "requested": [
+          "skill:research-discovery"
+        ],
+        "applied": [
+          "skill:research-discovery"
+        ],
+        "rounds": 1,
+        "passed": true
+      }
+    ],
+    "metrics": {
+      "cases": 180,
+      "requestedCapabilityRecall": {
+        "numerator": 264,
+        "denominator": 264,
+        "value": 1
+      },
+      "primarySkillPrecision": {
+        "numerator": 52,
+        "denominator": 52,
+        "value": 1
+      },
+      "primarySkillRecall": {
+        "numerator": 52,
+        "denominator": 78,
+        "value": 0.6666666666666666
+      },
+      "safetyViolations": 0,
+      "schemaTokensRough": {
+        "median": 7828,
+        "p95": 15402
+      }
+    },
+    "splits": {
+      "development": {
+        "cases": 120,
+        "requestedCapabilityRecall": {
+          "numerator": 174,
+          "denominator": 174,
+          "value": 1
+        },
+        "primarySkillPrecision": {
+          "numerator": 37,
+          "denominator": 37,
+          "value": 1
+        },
+        "primarySkillRecall": {
+          "numerator": 37,
+          "denominator": 54,
+          "value": 0.6851851851851852
+        },
+        "safetyViolations": 0,
+        "schemaTokensRough": {
+          "median": 7828,
+          "p95": 9743
+        }
+      },
+      "heldout": {
+        "cases": 60,
+        "requestedCapabilityRecall": {
+          "numerator": 90,
+          "denominator": 90,
+          "value": 1
+        },
+        "primarySkillPrecision": {
+          "numerator": 15,
+          "denominator": 15,
+          "value": 1
+        },
+        "primarySkillRecall": {
+          "numerator": 15,
+          "denominator": 24,
+          "value": 0.625
+        },
+        "safetyViolations": 0,
+        "schemaTokensRough": {
+          "median": 7828,
+          "p95": 15429
+        }
+      }
+    },
+    "perSplitLanguage": {
+      "development": {
+        "en": {
+          "cases": 60,
+          "requestedCapabilityRecall": {
+            "numerator": 87,
+            "denominator": 87,
+            "value": 1
+          },
+          "primarySkillPrecision": {
+            "numerator": 16,
+            "denominator": 16,
+            "value": 1
+          },
+          "primarySkillRecall": {
+            "numerator": 16,
+            "denominator": 27,
+            "value": 0.5925925925925926
+          },
+          "safetyViolations": 0,
+          "schemaTokensRough": {
+            "median": 7828,
+            "p95": 9743
+          }
+        },
+        "ar": {
+          "cases": 40,
+          "requestedCapabilityRecall": {
+            "numerator": 58,
+            "denominator": 58,
+            "value": 1
+          },
+          "primarySkillPrecision": {
+            "numerator": 14,
+            "denominator": 14,
+            "value": 1
+          },
+          "primarySkillRecall": {
+            "numerator": 14,
+            "denominator": 18,
+            "value": 0.7777777777777778
+          },
+          "safetyViolations": 0,
+          "schemaTokensRough": {
+            "median": 7828,
+            "p95": 9743
+          }
+        },
+        "mixed": {
+          "cases": 20,
+          "requestedCapabilityRecall": {
+            "numerator": 29,
+            "denominator": 29,
+            "value": 1
+          },
+          "primarySkillPrecision": {
+            "numerator": 7,
+            "denominator": 7,
+            "value": 1
+          },
+          "primarySkillRecall": {
+            "numerator": 7,
+            "denominator": 9,
+            "value": 0.7777777777777778
+          },
+          "safetyViolations": 0,
+          "schemaTokensRough": {
+            "median": 7828,
+            "p95": 9743
+          }
+        }
+      },
+      "heldout": {
+        "en": {
+          "cases": 30,
+          "requestedCapabilityRecall": {
+            "numerator": 45,
+            "denominator": 45,
+            "value": 1
+          },
+          "primarySkillPrecision": {
+            "numerator": 6,
+            "denominator": 6,
+            "value": 1
+          },
+          "primarySkillRecall": {
+            "numerator": 6,
+            "denominator": 12,
+            "value": 0.5
+          },
+          "safetyViolations": 0,
+          "schemaTokensRough": {
+            "median": 7828,
+            "p95": 15429
+          }
+        },
+        "ar": {
+          "cases": 20,
+          "requestedCapabilityRecall": {
+            "numerator": 30,
+            "denominator": 30,
+            "value": 1
+          },
+          "primarySkillPrecision": {
+            "numerator": 6,
+            "denominator": 6,
+            "value": 1
+          },
+          "primarySkillRecall": {
+            "numerator": 6,
+            "denominator": 8,
+            "value": 0.75
+          },
+          "safetyViolations": 0,
+          "schemaTokensRough": {
+            "median": 7828,
+            "p95": 15402
+          }
+        },
+        "mixed": {
+          "cases": 10,
+          "requestedCapabilityRecall": {
+            "numerator": 15,
+            "denominator": 15,
+            "value": 1
+          },
+          "primarySkillPrecision": {
+            "numerator": 3,
+            "denominator": 3,
+            "value": 1
+          },
+          "primarySkillRecall": {
+            "numerator": 3,
+            "denominator": 4,
+            "value": 0.75
+          },
+          "safetyViolations": 0,
+          "schemaTokensRough": {
+            "median": 7828,
+            "p95": 15429
+          }
+        }
+      }
+    },
+    "perLanguage": {
+      "en": {
+        "cases": 90,
+        "requestedCapabilityRecall": {
+          "numerator": 132,
+          "denominator": 132,
+          "value": 1
+        },
+        "primarySkillPrecision": {
+          "numerator": 22,
+          "denominator": 22,
+          "value": 1
+        },
+        "primarySkillRecall": {
+          "numerator": 22,
+          "denominator": 39,
+          "value": 0.5641025641025641
+        },
+        "safetyViolations": 0,
+        "schemaTokensRough": {
+          "median": 7828,
+          "p95": 15402
+        }
+      },
+      "ar": {
+        "cases": 60,
+        "requestedCapabilityRecall": {
+          "numerator": 88,
+          "denominator": 88,
+          "value": 1
+        },
+        "primarySkillPrecision": {
+          "numerator": 20,
+          "denominator": 20,
+          "value": 1
+        },
+        "primarySkillRecall": {
+          "numerator": 20,
+          "denominator": 26,
+          "value": 0.7692307692307693
+        },
+        "safetyViolations": 0,
+        "schemaTokensRough": {
+          "median": 7828,
+          "p95": 15402
+        }
+      },
+      "mixed": {
+        "cases": 30,
+        "requestedCapabilityRecall": {
+          "numerator": 44,
+          "denominator": 44,
+          "value": 1
+        },
+        "primarySkillPrecision": {
+          "numerator": 10,
+          "denominator": 10,
+          "value": 1
+        },
+        "primarySkillRecall": {
+          "numerator": 10,
+          "denominator": 13,
+          "value": 0.7692307692307693
+        },
+        "safetyViolations": 0,
+        "schemaTokensRough": {
+          "median": 7828,
+          "p95": 15402
+        }
+      }
+    },
+    "cases": [
+      {
+        "id": "dev-original-1",
+        "seed": "dev-original",
+        "split": "development",
+        "language": "en",
+        "category": "research-workers",
+        "expectedSkill": "research-discovery",
+        "selectedSkill": "research-discovery",
+        "requiredTools": [
+          "web.search",
+          "delegate_task",
+          "task.status",
+          "task.result.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 9606,
+        "schemaCount": 40
+      },
+      {
+        "id": "dev-original-2",
+        "seed": "dev-original",
+        "split": "development",
+        "language": "en",
+        "category": "research-workers",
+        "expectedSkill": "research-discovery",
+        "selectedSkill": null,
+        "requiredTools": [
+          "web.search",
+          "delegate_task",
+          "task.status",
+          "task.result.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 9187,
+        "schemaCount": 38
+      },
+      {
+        "id": "dev-original-3",
+        "seed": "dev-original",
+        "split": "development",
+        "language": "en",
+        "category": "research-workers",
+        "expectedSkill": "research-discovery",
+        "selectedSkill": null,
+        "requiredTools": [
+          "web.search",
+          "delegate_task",
+          "task.status",
+          "task.result.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 9187,
+        "schemaCount": 38
+      },
+      {
+        "id": "dev-original-4",
+        "seed": "dev-original",
+        "split": "development",
+        "language": "ar",
+        "category": "research-workers",
+        "expectedSkill": "research-discovery",
+        "selectedSkill": "research-discovery",
+        "requiredTools": [
+          "web.search",
+          "delegate_task",
+          "task.status",
+          "task.result.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 9606,
+        "schemaCount": 40
+      },
+      {
+        "id": "dev-original-5",
+        "seed": "dev-original",
+        "split": "development",
+        "language": "ar",
+        "category": "research-workers",
+        "expectedSkill": "research-discovery",
+        "selectedSkill": "research-discovery",
+        "requiredTools": [
+          "web.search",
+          "delegate_task",
+          "task.status",
+          "task.result.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 9606,
+        "schemaCount": 40
+      },
+      {
+        "id": "dev-original-6",
+        "seed": "dev-original",
+        "split": "development",
+        "language": "mixed",
+        "category": "research-workers",
+        "expectedSkill": "research-discovery",
+        "selectedSkill": "research-discovery",
+        "requiredTools": [
+          "web.search",
+          "delegate_task",
+          "task.status",
+          "task.result.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 9606,
+        "schemaCount": 40
+      },
+      {
+        "id": "dev-literature-1",
+        "seed": "dev-literature",
+        "split": "development",
+        "language": "en",
+        "category": "discovery",
+        "expectedSkill": "research-discovery",
+        "selectedSkill": "research-discovery",
+        "requiredTools": [
+          "web.search"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 8075,
+        "schemaCount": 37
+      },
+      {
+        "id": "dev-literature-2",
+        "seed": "dev-literature",
+        "split": "development",
+        "language": "en",
+        "category": "discovery",
+        "expectedSkill": "research-discovery",
+        "selectedSkill": "research-discovery",
+        "requiredTools": [
+          "web.search"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 8075,
+        "schemaCount": 37
+      },
+      {
+        "id": "dev-literature-3",
+        "seed": "dev-literature",
+        "split": "development",
+        "language": "en",
+        "category": "discovery",
+        "expectedSkill": "research-discovery",
+        "selectedSkill": null,
+        "requiredTools": [
+          "web.search"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7444,
+        "schemaCount": 31
+      },
+      {
+        "id": "dev-literature-4",
+        "seed": "dev-literature",
+        "split": "development",
+        "language": "ar",
+        "category": "discovery",
+        "expectedSkill": "research-discovery",
+        "selectedSkill": "research-discovery",
+        "requiredTools": [
+          "web.search"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 8075,
+        "schemaCount": 37
+      },
+      {
+        "id": "dev-literature-5",
+        "seed": "dev-literature",
+        "split": "development",
+        "language": "ar",
+        "category": "discovery",
+        "expectedSkill": "research-discovery",
+        "selectedSkill": "research-discovery",
+        "requiredTools": [
+          "web.search"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 8075,
+        "schemaCount": 37
+      },
+      {
+        "id": "dev-literature-6",
+        "seed": "dev-literature",
+        "split": "development",
+        "language": "mixed",
+        "category": "discovery",
+        "expectedSkill": "research-discovery",
+        "selectedSkill": "research-discovery",
+        "requiredTools": [
+          "web.search"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 8075,
+        "schemaCount": 37
+      },
+      {
+        "id": "dev-explicit-discovery-1",
+        "seed": "dev-explicit-discovery",
+        "split": "development",
+        "language": "en",
+        "category": "discovery-explicit",
+        "expectedSkill": "research-discovery",
+        "selectedSkill": "research-discovery",
+        "requiredTools": [
+          "web.search",
+          "skill.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 8213,
+        "schemaCount": 39
+      },
+      {
+        "id": "dev-explicit-discovery-2",
+        "seed": "dev-explicit-discovery",
+        "split": "development",
+        "language": "en",
+        "category": "discovery-explicit",
+        "expectedSkill": "research-discovery",
+        "selectedSkill": "research-discovery",
+        "requiredTools": [
+          "web.search",
+          "skill.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 8000,
+        "schemaCount": 35
+      },
+      {
+        "id": "dev-explicit-discovery-3",
+        "seed": "dev-explicit-discovery",
+        "split": "development",
+        "language": "en",
+        "category": "discovery-explicit",
+        "expectedSkill": "research-discovery",
+        "selectedSkill": "research-discovery",
+        "requiredTools": [
+          "web.search",
+          "skill.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 8213,
+        "schemaCount": 39
+      },
+      {
+        "id": "dev-explicit-discovery-4",
+        "seed": "dev-explicit-discovery",
+        "split": "development",
+        "language": "ar",
+        "category": "discovery-explicit",
+        "expectedSkill": "research-discovery",
+        "selectedSkill": "research-discovery",
+        "requiredTools": [
+          "web.search",
+          "skill.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 8213,
+        "schemaCount": 39
+      },
+      {
+        "id": "dev-explicit-discovery-5",
+        "seed": "dev-explicit-discovery",
+        "split": "development",
+        "language": "ar",
+        "category": "discovery-explicit",
+        "expectedSkill": "research-discovery",
+        "selectedSkill": "research-discovery",
+        "requiredTools": [
+          "web.search",
+          "skill.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 8000,
+        "schemaCount": 35
+      },
+      {
+        "id": "dev-explicit-discovery-6",
+        "seed": "dev-explicit-discovery",
+        "split": "development",
+        "language": "mixed",
+        "category": "discovery-explicit",
+        "expectedSkill": "research-discovery",
+        "selectedSkill": "research-discovery",
+        "requiredTools": [
+          "web.search",
+          "skill.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 8213,
+        "schemaCount": 39
+      },
+      {
+        "id": "dev-researcher-1",
+        "seed": "dev-researcher",
+        "split": "development",
+        "language": "en",
+        "category": "researcher",
+        "expectedSkill": "researcher",
+        "selectedSkill": "researcher",
+        "requiredTools": [
+          "skill.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 15402,
+        "schemaCount": 100
+      },
+      {
+        "id": "dev-researcher-2",
+        "seed": "dev-researcher",
+        "split": "development",
+        "language": "en",
+        "category": "researcher",
+        "expectedSkill": "researcher",
+        "selectedSkill": "researcher",
+        "requiredTools": [
+          "skill.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 15429,
+        "schemaCount": 100
+      },
+      {
+        "id": "dev-researcher-3",
+        "seed": "dev-researcher",
+        "split": "development",
+        "language": "en",
+        "category": "researcher",
+        "expectedSkill": "researcher",
+        "selectedSkill": "researcher",
+        "requiredTools": [
+          "skill.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 15402,
+        "schemaCount": 100
+      },
+      {
+        "id": "dev-researcher-4",
+        "seed": "dev-researcher",
+        "split": "development",
+        "language": "ar",
+        "category": "researcher",
+        "expectedSkill": "researcher",
+        "selectedSkill": "researcher",
+        "requiredTools": [
+          "skill.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 15402,
+        "schemaCount": 100
+      },
+      {
+        "id": "dev-researcher-5",
+        "seed": "dev-researcher",
+        "split": "development",
+        "language": "ar",
+        "category": "researcher",
+        "expectedSkill": "researcher",
+        "selectedSkill": "researcher",
+        "requiredTools": [
+          "skill.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 15429,
+        "schemaCount": 100
+      },
+      {
+        "id": "dev-researcher-6",
+        "seed": "dev-researcher",
+        "split": "development",
+        "language": "mixed",
+        "category": "researcher",
+        "expectedSkill": "researcher",
+        "selectedSkill": "researcher",
+        "requiredTools": [
+          "skill.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 15402,
+        "schemaCount": 100
+      },
+      {
+        "id": "dev-generic-skill-1",
+        "seed": "dev-generic-skill",
+        "split": "development",
+        "language": "en",
+        "category": "discovery-explicit",
+        "expectedSkill": "research-discovery",
+        "selectedSkill": "research-discovery",
+        "requiredTools": [
+          "web.search",
+          "skill.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 8213,
+        "schemaCount": 39
+      },
+      {
+        "id": "dev-generic-skill-2",
+        "seed": "dev-generic-skill",
+        "split": "development",
+        "language": "en",
+        "category": "discovery-explicit",
+        "expectedSkill": "research-discovery",
+        "selectedSkill": "research-discovery",
+        "requiredTools": [
+          "web.search",
+          "skill.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 8213,
+        "schemaCount": 39
+      },
+      {
+        "id": "dev-generic-skill-3",
+        "seed": "dev-generic-skill",
+        "split": "development",
+        "language": "en",
+        "category": "discovery-explicit",
+        "expectedSkill": "research-discovery",
+        "selectedSkill": null,
+        "requiredTools": [
+          "web.search",
+          "skill.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7582,
+        "schemaCount": 33
+      },
+      {
+        "id": "dev-generic-skill-4",
+        "seed": "dev-generic-skill",
+        "split": "development",
+        "language": "ar",
+        "category": "discovery-explicit",
+        "expectedSkill": "research-discovery",
+        "selectedSkill": null,
+        "requiredTools": [
+          "web.search",
+          "skill.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7794,
+        "schemaCount": 37
+      },
+      {
+        "id": "dev-generic-skill-5",
+        "seed": "dev-generic-skill",
+        "split": "development",
+        "language": "ar",
+        "category": "discovery-explicit",
+        "expectedSkill": "research-discovery",
+        "selectedSkill": "research-discovery",
+        "requiredTools": [
+          "web.search",
+          "skill.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 8213,
+        "schemaCount": 39
+      },
+      {
+        "id": "dev-generic-skill-6",
+        "seed": "dev-generic-skill",
+        "split": "development",
+        "language": "mixed",
+        "category": "discovery-explicit",
+        "expectedSkill": "research-discovery",
+        "selectedSkill": "research-discovery",
+        "requiredTools": [
+          "web.search",
+          "skill.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 8213,
+        "schemaCount": 39
+      },
+      {
+        "id": "dev-markdown-1",
+        "seed": "dev-markdown",
+        "split": "development",
+        "language": "en",
+        "category": "file",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [
+          "file.write",
+          "file.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 8046,
+        "schemaCount": 33
+      },
+      {
+        "id": "dev-markdown-2",
+        "seed": "dev-markdown",
+        "split": "development",
+        "language": "en",
+        "category": "file",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [
+          "file.write",
+          "file.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 8258,
+        "schemaCount": 37
+      },
+      {
+        "id": "dev-markdown-3",
+        "seed": "dev-markdown",
+        "split": "development",
+        "language": "en",
+        "category": "file",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [
+          "file.write",
+          "file.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7828,
+        "schemaCount": 31
+      },
+      {
+        "id": "dev-markdown-4",
+        "seed": "dev-markdown",
+        "split": "development",
+        "language": "ar",
+        "category": "file",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [
+          "file.write",
+          "file.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7828,
+        "schemaCount": 31
+      },
+      {
+        "id": "dev-markdown-5",
+        "seed": "dev-markdown",
+        "split": "development",
+        "language": "ar",
+        "category": "file",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [
+          "file.write",
+          "file.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7828,
+        "schemaCount": 31
+      },
+      {
+        "id": "dev-markdown-6",
+        "seed": "dev-markdown",
+        "split": "development",
+        "language": "mixed",
+        "category": "file",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [
+          "file.write",
+          "file.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7828,
+        "schemaCount": 31
+      },
+      {
+        "id": "dev-save-path-1",
+        "seed": "dev-save-path",
+        "split": "development",
+        "language": "en",
+        "category": "file",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [
+          "file.write",
+          "file.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7828,
+        "schemaCount": 31
+      },
+      {
+        "id": "dev-save-path-2",
+        "seed": "dev-save-path",
+        "split": "development",
+        "language": "en",
+        "category": "file",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [
+          "file.write",
+          "file.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7828,
+        "schemaCount": 31
+      },
+      {
+        "id": "dev-save-path-3",
+        "seed": "dev-save-path",
+        "split": "development",
+        "language": "en",
+        "category": "file",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [
+          "file.write",
+          "file.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7828,
+        "schemaCount": 31
+      },
+      {
+        "id": "dev-save-path-4",
+        "seed": "dev-save-path",
+        "split": "development",
+        "language": "ar",
+        "category": "file",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [
+          "file.write",
+          "file.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7828,
+        "schemaCount": 31
+      },
+      {
+        "id": "dev-save-path-5",
+        "seed": "dev-save-path",
+        "split": "development",
+        "language": "ar",
+        "category": "file",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [
+          "file.write",
+          "file.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7828,
+        "schemaCount": 31
+      },
+      {
+        "id": "dev-save-path-6",
+        "seed": "dev-save-path",
+        "split": "development",
+        "language": "mixed",
+        "category": "file",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [
+          "file.write",
+          "file.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7828,
+        "schemaCount": 31
+      },
+      {
+        "id": "dev-quoted-path-1",
+        "seed": "dev-quoted-path",
+        "split": "development",
+        "language": "en",
+        "category": "file",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [
+          "file.write",
+          "file.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7828,
+        "schemaCount": 31
+      },
+      {
+        "id": "dev-quoted-path-2",
+        "seed": "dev-quoted-path",
+        "split": "development",
+        "language": "en",
+        "category": "file",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [
+          "file.write",
+          "file.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7828,
+        "schemaCount": 31
+      },
+      {
+        "id": "dev-quoted-path-3",
+        "seed": "dev-quoted-path",
+        "split": "development",
+        "language": "en",
+        "category": "file",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [
+          "file.write",
+          "file.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 8258,
+        "schemaCount": 37
+      },
+      {
+        "id": "dev-quoted-path-4",
+        "seed": "dev-quoted-path",
+        "split": "development",
+        "language": "ar",
+        "category": "file",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [
+          "file.write",
+          "file.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7828,
+        "schemaCount": 31
+      },
+      {
+        "id": "dev-quoted-path-5",
+        "seed": "dev-quoted-path",
+        "split": "development",
+        "language": "ar",
+        "category": "file",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [
+          "file.write",
+          "file.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7828,
+        "schemaCount": 31
+      },
+      {
+        "id": "dev-quoted-path-6",
+        "seed": "dev-quoted-path",
+        "split": "development",
+        "language": "mixed",
+        "category": "file",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [
+          "file.write",
+          "file.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7828,
+        "schemaCount": 31
+      },
+      {
+        "id": "dev-followup-save-1",
+        "seed": "dev-followup-save",
+        "split": "development",
+        "language": "en",
+        "category": "save-followup",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [
+          "file.write",
+          "file.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 8046,
+        "schemaCount": 33
+      },
+      {
+        "id": "dev-followup-save-2",
+        "seed": "dev-followup-save",
+        "split": "development",
+        "language": "en",
+        "category": "save-followup",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [
+          "file.write",
+          "file.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7828,
+        "schemaCount": 31
+      },
+      {
+        "id": "dev-followup-save-3",
+        "seed": "dev-followup-save",
+        "split": "development",
+        "language": "en",
+        "category": "save-followup",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [
+          "file.write",
+          "file.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7828,
+        "schemaCount": 31
+      },
+      {
+        "id": "dev-followup-save-4",
+        "seed": "dev-followup-save",
+        "split": "development",
+        "language": "ar",
+        "category": "save-followup",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [
+          "file.write",
+          "file.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7828,
+        "schemaCount": 31
+      },
+      {
+        "id": "dev-followup-save-5",
+        "seed": "dev-followup-save",
+        "split": "development",
+        "language": "ar",
+        "category": "save-followup",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [
+          "file.write",
+          "file.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7828,
+        "schemaCount": 31
+      },
+      {
+        "id": "dev-followup-save-6",
+        "seed": "dev-followup-save",
+        "split": "development",
+        "language": "mixed",
+        "category": "save-followup",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [
+          "file.write",
+          "file.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7828,
+        "schemaCount": 31
+      },
+      {
+        "id": "dev-followup-rerun-1",
+        "seed": "dev-followup-rerun",
+        "split": "development",
+        "language": "en",
+        "category": "rerun-followup",
+        "expectedSkill": "research-discovery",
+        "selectedSkill": "research-discovery",
+        "requiredTools": [
+          "skill.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 9531,
+        "schemaCount": 38
+      },
+      {
+        "id": "dev-followup-rerun-2",
+        "seed": "dev-followup-rerun",
+        "split": "development",
+        "language": "en",
+        "category": "rerun-followup",
+        "expectedSkill": "research-discovery",
+        "selectedSkill": "research-discovery",
+        "requiredTools": [
+          "skill.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 9743,
+        "schemaCount": 42
+      },
+      {
+        "id": "dev-followup-rerun-3",
+        "seed": "dev-followup-rerun",
+        "split": "development",
+        "language": "en",
+        "category": "rerun-followup",
+        "expectedSkill": "research-discovery",
+        "selectedSkill": "research-discovery",
+        "requiredTools": [
+          "skill.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 9743,
+        "schemaCount": 42
+      },
+      {
+        "id": "dev-followup-rerun-4",
+        "seed": "dev-followup-rerun",
+        "split": "development",
+        "language": "ar",
+        "category": "rerun-followup",
+        "expectedSkill": "research-discovery",
+        "selectedSkill": "research-discovery",
+        "requiredTools": [
+          "skill.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 9743,
+        "schemaCount": 42
+      },
+      {
+        "id": "dev-followup-rerun-5",
+        "seed": "dev-followup-rerun",
+        "split": "development",
+        "language": "ar",
+        "category": "rerun-followup",
+        "expectedSkill": "research-discovery",
+        "selectedSkill": "research-discovery",
+        "requiredTools": [
+          "skill.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 9743,
+        "schemaCount": 42
+      },
+      {
+        "id": "dev-followup-rerun-6",
+        "seed": "dev-followup-rerun",
+        "split": "development",
+        "language": "mixed",
+        "category": "rerun-followup",
+        "expectedSkill": "research-discovery",
+        "selectedSkill": "research-discovery",
+        "requiredTools": [
+          "skill.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 9743,
+        "schemaCount": 42
+      },
+      {
+        "id": "dev-two-workers-1",
+        "seed": "dev-two-workers",
+        "split": "development",
+        "language": "en",
+        "category": "workers-2",
+        "expectedSkill": "research-discovery",
+        "selectedSkill": null,
+        "requiredTools": [
+          "web.search",
+          "delegate_task",
+          "task.status",
+          "task.result.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 9187,
+        "schemaCount": 38
+      },
+      {
+        "id": "dev-two-workers-2",
+        "seed": "dev-two-workers",
+        "split": "development",
+        "language": "en",
+        "category": "workers-2",
+        "expectedSkill": "research-discovery",
+        "selectedSkill": null,
+        "requiredTools": [
+          "web.search",
+          "delegate_task",
+          "task.status",
+          "task.result.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 8975,
+        "schemaCount": 34
+      },
+      {
+        "id": "dev-two-workers-3",
+        "seed": "dev-two-workers",
+        "split": "development",
+        "language": "en",
+        "category": "workers-2",
+        "expectedSkill": "research-discovery",
+        "selectedSkill": null,
+        "requiredTools": [
+          "web.search",
+          "delegate_task",
+          "task.status",
+          "task.result.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 8975,
+        "schemaCount": 34
+      },
+      {
+        "id": "dev-two-workers-4",
+        "seed": "dev-two-workers",
+        "split": "development",
+        "language": "ar",
+        "category": "workers-2",
+        "expectedSkill": "research-discovery",
+        "selectedSkill": "research-discovery",
+        "requiredTools": [
+          "web.search",
+          "delegate_task",
+          "task.status",
+          "task.result.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 9606,
+        "schemaCount": 40
+      },
+      {
+        "id": "dev-two-workers-5",
+        "seed": "dev-two-workers",
+        "split": "development",
+        "language": "ar",
+        "category": "workers-2",
+        "expectedSkill": "research-discovery",
+        "selectedSkill": "research-discovery",
+        "requiredTools": [
+          "web.search",
+          "delegate_task",
+          "task.status",
+          "task.result.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 9606,
+        "schemaCount": 40
+      },
+      {
+        "id": "dev-two-workers-6",
+        "seed": "dev-two-workers",
+        "split": "development",
+        "language": "mixed",
+        "category": "workers-2",
+        "expectedSkill": "research-discovery",
+        "selectedSkill": "research-discovery",
+        "requiredTools": [
+          "web.search",
+          "delegate_task",
+          "task.status",
+          "task.result.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 9606,
+        "schemaCount": 40
+      },
+      {
+        "id": "dev-research-and-file-1",
+        "seed": "dev-research-and-file",
+        "split": "development",
+        "language": "en",
+        "category": "research-file",
+        "expectedSkill": "research-discovery",
+        "selectedSkill": "research-discovery",
+        "requiredTools": [
+          "web.search",
+          "file.write",
+          "file.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 8677,
+        "schemaCount": 39
+      },
+      {
+        "id": "dev-research-and-file-2",
+        "seed": "dev-research-and-file",
+        "split": "development",
+        "language": "en",
+        "category": "research-file",
+        "expectedSkill": "research-discovery",
+        "selectedSkill": null,
+        "requiredTools": [
+          "web.search",
+          "file.write",
+          "file.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 8046,
+        "schemaCount": 33
+      },
+      {
+        "id": "dev-research-and-file-3",
+        "seed": "dev-research-and-file",
+        "split": "development",
+        "language": "en",
+        "category": "research-file",
+        "expectedSkill": "research-discovery",
+        "selectedSkill": "research-discovery",
+        "requiredTools": [
+          "web.search",
+          "file.write",
+          "file.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 8677,
+        "schemaCount": 39
+      },
+      {
+        "id": "dev-research-and-file-4",
+        "seed": "dev-research-and-file",
+        "split": "development",
+        "language": "ar",
+        "category": "research-file",
+        "expectedSkill": "research-discovery",
+        "selectedSkill": "research-discovery",
+        "requiredTools": [
+          "web.search",
+          "file.write",
+          "file.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 8677,
+        "schemaCount": 39
+      },
+      {
+        "id": "dev-research-and-file-5",
+        "seed": "dev-research-and-file",
+        "split": "development",
+        "language": "ar",
+        "category": "research-file",
+        "expectedSkill": "research-discovery",
+        "selectedSkill": null,
+        "requiredTools": [
+          "web.search",
+          "file.write",
+          "file.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 2084,
+        "schemaCount": 20
+      },
+      {
+        "id": "dev-research-and-file-6",
+        "seed": "dev-research-and-file",
+        "split": "development",
+        "language": "mixed",
+        "category": "research-file",
+        "expectedSkill": "research-discovery",
+        "selectedSkill": null,
+        "requiredTools": [
+          "web.search",
+          "file.write",
+          "file.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 8046,
+        "schemaCount": 33
+      },
+      {
+        "id": "dev-general-research-1",
+        "seed": "dev-general-research",
+        "split": "development",
+        "language": "en",
+        "category": "discovery",
+        "expectedSkill": "research-discovery",
+        "selectedSkill": null,
+        "requiredTools": [
+          "web.search"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7444,
+        "schemaCount": 31
+      },
+      {
+        "id": "dev-general-research-2",
+        "seed": "dev-general-research",
+        "split": "development",
+        "language": "en",
+        "category": "discovery",
+        "expectedSkill": "research-discovery",
+        "selectedSkill": null,
+        "requiredTools": [
+          "web.search"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7444,
+        "schemaCount": 31
+      },
+      {
+        "id": "dev-general-research-3",
+        "seed": "dev-general-research",
+        "split": "development",
+        "language": "en",
+        "category": "discovery",
+        "expectedSkill": "research-discovery",
+        "selectedSkill": null,
+        "requiredTools": [
+          "web.search"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7657,
+        "schemaCount": 35
+      },
+      {
+        "id": "dev-general-research-4",
+        "seed": "dev-general-research",
+        "split": "development",
+        "language": "ar",
+        "category": "discovery",
+        "expectedSkill": "research-discovery",
+        "selectedSkill": null,
+        "requiredTools": [
+          "web.search"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7657,
+        "schemaCount": 35
+      },
+      {
+        "id": "dev-general-research-5",
+        "seed": "dev-general-research",
+        "split": "development",
+        "language": "ar",
+        "category": "discovery",
+        "expectedSkill": "research-discovery",
+        "selectedSkill": null,
+        "requiredTools": [
+          "web.search"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7657,
+        "schemaCount": 35
+      },
+      {
+        "id": "dev-general-research-6",
+        "seed": "dev-general-research",
+        "split": "development",
+        "language": "mixed",
+        "category": "discovery",
+        "expectedSkill": "research-discovery",
+        "selectedSkill": null,
+        "requiredTools": [
+          "web.search"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7444,
+        "schemaCount": 31
+      },
+      {
+        "id": "dev-text-file-1",
+        "seed": "dev-text-file",
+        "split": "development",
+        "language": "en",
+        "category": "file",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [
+          "file.write",
+          "file.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 8258,
+        "schemaCount": 37
+      },
+      {
+        "id": "dev-text-file-2",
+        "seed": "dev-text-file",
+        "split": "development",
+        "language": "en",
+        "category": "file",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [
+          "file.write",
+          "file.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 8258,
+        "schemaCount": 37
+      },
+      {
+        "id": "dev-text-file-3",
+        "seed": "dev-text-file",
+        "split": "development",
+        "language": "en",
+        "category": "file",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [
+          "file.write",
+          "file.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 8046,
+        "schemaCount": 33
+      },
+      {
+        "id": "dev-text-file-4",
+        "seed": "dev-text-file",
+        "split": "development",
+        "language": "ar",
+        "category": "file",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [
+          "file.write",
+          "file.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 8258,
+        "schemaCount": 37
+      },
+      {
+        "id": "dev-text-file-5",
+        "seed": "dev-text-file",
+        "split": "development",
+        "language": "ar",
+        "category": "file",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [
+          "file.write",
+          "file.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7828,
+        "schemaCount": 31
+      },
+      {
+        "id": "dev-text-file-6",
+        "seed": "dev-text-file",
+        "split": "development",
+        "language": "mixed",
+        "category": "file",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [
+          "file.write",
+          "file.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7828,
+        "schemaCount": 31
+      },
+      {
+        "id": "dev-greetings-1",
+        "seed": "dev-greetings",
+        "split": "development",
+        "language": "en",
+        "category": "greeting",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 0,
+        "schemaCount": 0
+      },
+      {
+        "id": "dev-greetings-2",
+        "seed": "dev-greetings",
+        "split": "development",
+        "language": "en",
+        "category": "greeting",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 0,
+        "schemaCount": 0
+      },
+      {
+        "id": "dev-greetings-3",
+        "seed": "dev-greetings",
+        "split": "development",
+        "language": "en",
+        "category": "greeting",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 0,
+        "schemaCount": 0
+      },
+      {
+        "id": "dev-greetings-4",
+        "seed": "dev-greetings",
+        "split": "development",
+        "language": "ar",
+        "category": "greeting",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 0,
+        "schemaCount": 0
+      },
+      {
+        "id": "dev-greetings-5",
+        "seed": "dev-greetings",
+        "split": "development",
+        "language": "ar",
+        "category": "greeting",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 0,
+        "schemaCount": 0
+      },
+      {
+        "id": "dev-greetings-6",
+        "seed": "dev-greetings",
+        "split": "development",
+        "language": "mixed",
+        "category": "greeting",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 0,
+        "schemaCount": 0
+      },
+      {
+        "id": "dev-negated-save-1",
+        "seed": "dev-negated-save",
+        "split": "development",
+        "language": "en",
+        "category": "negative",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 897,
+        "schemaCount": 10
+      },
+      {
+        "id": "dev-negated-save-2",
+        "seed": "dev-negated-save",
+        "split": "development",
+        "language": "en",
+        "category": "negative",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7226,
+        "schemaCount": 29
+      },
+      {
+        "id": "dev-negated-save-3",
+        "seed": "dev-negated-save",
+        "split": "development",
+        "language": "en",
+        "category": "negative",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7439,
+        "schemaCount": 33
+      },
+      {
+        "id": "dev-negated-save-4",
+        "seed": "dev-negated-save",
+        "split": "development",
+        "language": "ar",
+        "category": "negative",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 897,
+        "schemaCount": 10
+      },
+      {
+        "id": "dev-negated-save-5",
+        "seed": "dev-negated-save",
+        "split": "development",
+        "language": "ar",
+        "category": "negative",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7226,
+        "schemaCount": 29
+      },
+      {
+        "id": "dev-negated-save-6",
+        "seed": "dev-negated-save",
+        "split": "development",
+        "language": "mixed",
+        "category": "negative",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7226,
+        "schemaCount": 29
+      },
+      {
+        "id": "dev-delegation-info-1",
+        "seed": "dev-delegation-info",
+        "split": "development",
+        "language": "en",
+        "category": "negative",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7226,
+        "schemaCount": 29
+      },
+      {
+        "id": "dev-delegation-info-2",
+        "seed": "dev-delegation-info",
+        "split": "development",
+        "language": "en",
+        "category": "negative",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7226,
+        "schemaCount": 29
+      },
+      {
+        "id": "dev-delegation-info-3",
+        "seed": "dev-delegation-info",
+        "split": "development",
+        "language": "en",
+        "category": "negative",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7226,
+        "schemaCount": 29
+      },
+      {
+        "id": "dev-delegation-info-4",
+        "seed": "dev-delegation-info",
+        "split": "development",
+        "language": "ar",
+        "category": "negative",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7226,
+        "schemaCount": 29
+      },
+      {
+        "id": "dev-delegation-info-5",
+        "seed": "dev-delegation-info",
+        "split": "development",
+        "language": "ar",
+        "category": "negative",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7226,
+        "schemaCount": 29
+      },
+      {
+        "id": "dev-delegation-info-6",
+        "seed": "dev-delegation-info",
+        "split": "development",
+        "language": "mixed",
+        "category": "negative",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7226,
+        "schemaCount": 29
+      },
+      {
+        "id": "dev-quoted-request-1",
+        "seed": "dev-quoted-request",
+        "split": "development",
+        "language": "en",
+        "category": "negative",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 897,
+        "schemaCount": 10
+      },
+      {
+        "id": "dev-quoted-request-2",
+        "seed": "dev-quoted-request",
+        "split": "development",
+        "language": "en",
+        "category": "negative",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7439,
+        "schemaCount": 33
+      },
+      {
+        "id": "dev-quoted-request-3",
+        "seed": "dev-quoted-request",
+        "split": "development",
+        "language": "en",
+        "category": "negative",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7439,
+        "schemaCount": 33
+      },
+      {
+        "id": "dev-quoted-request-4",
+        "seed": "dev-quoted-request",
+        "split": "development",
+        "language": "ar",
+        "category": "negative",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 897,
+        "schemaCount": 10
+      },
+      {
+        "id": "dev-quoted-request-5",
+        "seed": "dev-quoted-request",
+        "split": "development",
+        "language": "ar",
+        "category": "negative",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7439,
+        "schemaCount": 33
+      },
+      {
+        "id": "dev-quoted-request-6",
+        "seed": "dev-quoted-request",
+        "split": "development",
+        "language": "mixed",
+        "category": "negative",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7439,
+        "schemaCount": 33
+      },
+      {
+        "id": "dev-negated-skill-1",
+        "seed": "dev-negated-skill",
+        "split": "development",
+        "language": "en",
+        "category": "negative",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7439,
+        "schemaCount": 33
+      },
+      {
+        "id": "dev-negated-skill-2",
+        "seed": "dev-negated-skill",
+        "split": "development",
+        "language": "en",
+        "category": "negative",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7226,
+        "schemaCount": 29
+      },
+      {
+        "id": "dev-negated-skill-3",
+        "seed": "dev-negated-skill",
+        "split": "development",
+        "language": "en",
+        "category": "negative",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7226,
+        "schemaCount": 29
+      },
+      {
+        "id": "dev-negated-skill-4",
+        "seed": "dev-negated-skill",
+        "split": "development",
+        "language": "ar",
+        "category": "negative",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7226,
+        "schemaCount": 29
+      },
+      {
+        "id": "dev-negated-skill-5",
+        "seed": "dev-negated-skill",
+        "split": "development",
+        "language": "ar",
+        "category": "negative",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7226,
+        "schemaCount": 29
+      },
+      {
+        "id": "dev-negated-skill-6",
+        "seed": "dev-negated-skill",
+        "split": "development",
+        "language": "mixed",
+        "category": "negative",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7439,
+        "schemaCount": 33
+      },
+      {
+        "id": "dev-information-1",
+        "seed": "dev-information",
+        "split": "development",
+        "language": "en",
+        "category": "negative",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7226,
+        "schemaCount": 29
+      },
+      {
+        "id": "dev-information-2",
+        "seed": "dev-information",
+        "split": "development",
+        "language": "en",
+        "category": "negative",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7226,
+        "schemaCount": 29
+      },
+      {
+        "id": "dev-information-3",
+        "seed": "dev-information",
+        "split": "development",
+        "language": "en",
+        "category": "negative",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7226,
+        "schemaCount": 29
+      },
+      {
+        "id": "dev-information-4",
+        "seed": "dev-information",
+        "split": "development",
+        "language": "ar",
+        "category": "negative",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7226,
+        "schemaCount": 29
+      },
+      {
+        "id": "dev-information-5",
+        "seed": "dev-information",
+        "split": "development",
+        "language": "ar",
+        "category": "negative",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7226,
+        "schemaCount": 29
+      },
+      {
+        "id": "dev-information-6",
+        "seed": "dev-information",
+        "split": "development",
+        "language": "mixed",
+        "category": "negative",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7226,
+        "schemaCount": 29
+      },
+      {
+        "id": "heldout-materials-1",
+        "seed": "heldout-materials",
+        "split": "heldout",
+        "language": "en",
+        "category": "research-workers",
+        "expectedSkill": "research-discovery",
+        "selectedSkill": "research-discovery",
+        "requiredTools": [
+          "web.search",
+          "delegate_task",
+          "task.status",
+          "task.result.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 9606,
+        "schemaCount": 40
+      },
+      {
+        "id": "heldout-materials-2",
+        "seed": "heldout-materials",
+        "split": "heldout",
+        "language": "en",
+        "category": "research-workers",
+        "expectedSkill": "research-discovery",
+        "selectedSkill": null,
+        "requiredTools": [
+          "web.search",
+          "delegate_task",
+          "task.status",
+          "task.result.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 9187,
+        "schemaCount": 38
+      },
+      {
+        "id": "heldout-materials-3",
+        "seed": "heldout-materials",
+        "split": "heldout",
+        "language": "en",
+        "category": "research-workers",
+        "expectedSkill": "research-discovery",
+        "selectedSkill": null,
+        "requiredTools": [
+          "web.search",
+          "delegate_task",
+          "task.status",
+          "task.result.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 8975,
+        "schemaCount": 34
+      },
+      {
+        "id": "heldout-materials-4",
+        "seed": "heldout-materials",
+        "split": "heldout",
+        "language": "ar",
+        "category": "research-workers",
+        "expectedSkill": "research-discovery",
+        "selectedSkill": "research-discovery",
+        "requiredTools": [
+          "web.search",
+          "delegate_task",
+          "task.status",
+          "task.result.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 9606,
+        "schemaCount": 40
+      },
+      {
+        "id": "heldout-materials-5",
+        "seed": "heldout-materials",
+        "split": "heldout",
+        "language": "ar",
+        "category": "research-workers",
+        "expectedSkill": "research-discovery",
+        "selectedSkill": "research-discovery",
+        "requiredTools": [
+          "web.search",
+          "delegate_task",
+          "task.status",
+          "task.result.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 9606,
+        "schemaCount": 40
+      },
+      {
+        "id": "heldout-materials-6",
+        "seed": "heldout-materials",
+        "split": "heldout",
+        "language": "mixed",
+        "category": "research-workers",
+        "expectedSkill": "research-discovery",
+        "selectedSkill": "research-discovery",
+        "requiredTools": [
+          "web.search",
+          "delegate_task",
+          "task.status",
+          "task.result.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 9606,
+        "schemaCount": 40
+      },
+      {
+        "id": "heldout-review-1",
+        "seed": "heldout-review",
+        "split": "heldout",
+        "language": "en",
+        "category": "discovery",
+        "expectedSkill": "research-discovery",
+        "selectedSkill": null,
+        "requiredTools": [
+          "web.search"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7226,
+        "schemaCount": 29
+      },
+      {
+        "id": "heldout-review-2",
+        "seed": "heldout-review",
+        "split": "heldout",
+        "language": "en",
+        "category": "discovery",
+        "expectedSkill": "research-discovery",
+        "selectedSkill": "research-discovery",
+        "requiredTools": [
+          "web.search"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 8075,
+        "schemaCount": 37
+      },
+      {
+        "id": "heldout-review-3",
+        "seed": "heldout-review",
+        "split": "heldout",
+        "language": "en",
+        "category": "discovery",
+        "expectedSkill": "research-discovery",
+        "selectedSkill": null,
+        "requiredTools": [
+          "web.search"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7444,
+        "schemaCount": 31
+      },
+      {
+        "id": "heldout-review-4",
+        "seed": "heldout-review",
+        "split": "heldout",
+        "language": "ar",
+        "category": "discovery",
+        "expectedSkill": "research-discovery",
+        "selectedSkill": "research-discovery",
+        "requiredTools": [
+          "web.search"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 8075,
+        "schemaCount": 37
+      },
+      {
+        "id": "heldout-review-5",
+        "seed": "heldout-review",
+        "split": "heldout",
+        "language": "ar",
+        "category": "discovery",
+        "expectedSkill": "research-discovery",
+        "selectedSkill": "research-discovery",
+        "requiredTools": [
+          "web.search"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 8075,
+        "schemaCount": 37
+      },
+      {
+        "id": "heldout-review-6",
+        "seed": "heldout-review",
+        "split": "heldout",
+        "language": "mixed",
+        "category": "discovery",
+        "expectedSkill": "research-discovery",
+        "selectedSkill": "research-discovery",
+        "requiredTools": [
+          "web.search"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 8075,
+        "schemaCount": 37
+      },
+      {
+        "id": "heldout-skill-recovery-1",
+        "seed": "heldout-skill-recovery",
+        "split": "heldout",
+        "language": "en",
+        "category": "researcher",
+        "expectedSkill": "researcher",
+        "selectedSkill": "researcher",
+        "requiredTools": [
+          "skill.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 15429,
+        "schemaCount": 100
+      },
+      {
+        "id": "heldout-skill-recovery-2",
+        "seed": "heldout-skill-recovery",
+        "split": "heldout",
+        "language": "en",
+        "category": "researcher",
+        "expectedSkill": "researcher",
+        "selectedSkill": "researcher",
+        "requiredTools": [
+          "skill.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 15429,
+        "schemaCount": 100
+      },
+      {
+        "id": "heldout-skill-recovery-3",
+        "seed": "heldout-skill-recovery",
+        "split": "heldout",
+        "language": "en",
+        "category": "researcher",
+        "expectedSkill": "researcher",
+        "selectedSkill": "researcher",
+        "requiredTools": [
+          "skill.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 15402,
+        "schemaCount": 100
+      },
+      {
+        "id": "heldout-skill-recovery-4",
+        "seed": "heldout-skill-recovery",
+        "split": "heldout",
+        "language": "ar",
+        "category": "researcher",
+        "expectedSkill": "researcher",
+        "selectedSkill": "researcher",
+        "requiredTools": [
+          "skill.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 15429,
+        "schemaCount": 100
+      },
+      {
+        "id": "heldout-skill-recovery-5",
+        "seed": "heldout-skill-recovery",
+        "split": "heldout",
+        "language": "ar",
+        "category": "researcher",
+        "expectedSkill": "researcher",
+        "selectedSkill": "researcher",
+        "requiredTools": [
+          "skill.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 15402,
+        "schemaCount": 100
+      },
+      {
+        "id": "heldout-skill-recovery-6",
+        "seed": "heldout-skill-recovery",
+        "split": "heldout",
+        "language": "mixed",
+        "category": "researcher",
+        "expectedSkill": "researcher",
+        "selectedSkill": "researcher",
+        "requiredTools": [
+          "skill.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 15429,
+        "schemaCount": 100
+      },
+      {
+        "id": "heldout-export-1",
+        "seed": "heldout-export",
+        "split": "heldout",
+        "language": "en",
+        "category": "file",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [
+          "file.write",
+          "file.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7828,
+        "schemaCount": 31
+      },
+      {
+        "id": "heldout-export-2",
+        "seed": "heldout-export",
+        "split": "heldout",
+        "language": "en",
+        "category": "file",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [
+          "file.write",
+          "file.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 8258,
+        "schemaCount": 37
+      },
+      {
+        "id": "heldout-export-3",
+        "seed": "heldout-export",
+        "split": "heldout",
+        "language": "en",
+        "category": "file",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [
+          "file.write",
+          "file.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 8046,
+        "schemaCount": 33
+      },
+      {
+        "id": "heldout-export-4",
+        "seed": "heldout-export",
+        "split": "heldout",
+        "language": "ar",
+        "category": "file",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [
+          "file.write",
+          "file.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7828,
+        "schemaCount": 31
+      },
+      {
+        "id": "heldout-export-5",
+        "seed": "heldout-export",
+        "split": "heldout",
+        "language": "ar",
+        "category": "file",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [
+          "file.write",
+          "file.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7828,
+        "schemaCount": 31
+      },
+      {
+        "id": "heldout-export-6",
+        "seed": "heldout-export",
+        "split": "heldout",
+        "language": "mixed",
+        "category": "file",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [
+          "file.write",
+          "file.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7828,
+        "schemaCount": 31
+      },
+      {
+        "id": "heldout-combined-1",
+        "seed": "heldout-combined",
+        "split": "heldout",
+        "language": "en",
+        "category": "research-file",
+        "expectedSkill": "research-discovery",
+        "selectedSkill": null,
+        "requiredTools": [
+          "web.search",
+          "file.write",
+          "file.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 8046,
+        "schemaCount": 33
+      },
+      {
+        "id": "heldout-combined-2",
+        "seed": "heldout-combined",
+        "split": "heldout",
+        "language": "en",
+        "category": "research-file",
+        "expectedSkill": "research-discovery",
+        "selectedSkill": "research-discovery",
+        "requiredTools": [
+          "web.search",
+          "file.write",
+          "file.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 8912,
+        "schemaCount": 42
+      },
+      {
+        "id": "heldout-combined-3",
+        "seed": "heldout-combined",
+        "split": "heldout",
+        "language": "en",
+        "category": "research-file",
+        "expectedSkill": "research-discovery",
+        "selectedSkill": null,
+        "requiredTools": [
+          "web.search",
+          "file.write",
+          "file.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 8046,
+        "schemaCount": 33
+      },
+      {
+        "id": "heldout-combined-4",
+        "seed": "heldout-combined",
+        "split": "heldout",
+        "language": "ar",
+        "category": "research-file",
+        "expectedSkill": "research-discovery",
+        "selectedSkill": null,
+        "requiredTools": [
+          "web.search",
+          "file.write",
+          "file.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 8258,
+        "schemaCount": 37
+      },
+      {
+        "id": "heldout-combined-5",
+        "seed": "heldout-combined",
+        "split": "heldout",
+        "language": "ar",
+        "category": "research-file",
+        "expectedSkill": "research-discovery",
+        "selectedSkill": null,
+        "requiredTools": [
+          "web.search",
+          "file.write",
+          "file.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 2084,
+        "schemaCount": 20
+      },
+      {
+        "id": "heldout-combined-6",
+        "seed": "heldout-combined",
+        "split": "heldout",
+        "language": "mixed",
+        "category": "research-file",
+        "expectedSkill": "research-discovery",
+        "selectedSkill": null,
+        "requiredTools": [
+          "web.search",
+          "file.write",
+          "file.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 8046,
+        "schemaCount": 33
+      },
+      {
+        "id": "heldout-save-continuity-1",
+        "seed": "heldout-save-continuity",
+        "split": "heldout",
+        "language": "en",
+        "category": "save-followup",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [
+          "file.write",
+          "file.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7828,
+        "schemaCount": 31
+      },
+      {
+        "id": "heldout-save-continuity-2",
+        "seed": "heldout-save-continuity",
+        "split": "heldout",
+        "language": "en",
+        "category": "save-followup",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [
+          "file.write",
+          "file.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7828,
+        "schemaCount": 31
+      },
+      {
+        "id": "heldout-save-continuity-3",
+        "seed": "heldout-save-continuity",
+        "split": "heldout",
+        "language": "en",
+        "category": "save-followup",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [
+          "file.write",
+          "file.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 8046,
+        "schemaCount": 33
+      },
+      {
+        "id": "heldout-save-continuity-4",
+        "seed": "heldout-save-continuity",
+        "split": "heldout",
+        "language": "ar",
+        "category": "save-followup",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [
+          "file.write",
+          "file.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7828,
+        "schemaCount": 31
+      },
+      {
+        "id": "heldout-save-continuity-5",
+        "seed": "heldout-save-continuity",
+        "split": "heldout",
+        "language": "ar",
+        "category": "save-followup",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [
+          "file.write",
+          "file.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7828,
+        "schemaCount": 31
+      },
+      {
+        "id": "heldout-save-continuity-6",
+        "seed": "heldout-save-continuity",
+        "split": "heldout",
+        "language": "mixed",
+        "category": "save-followup",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [
+          "file.write",
+          "file.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7828,
+        "schemaCount": 31
+      },
+      {
+        "id": "heldout-inert-code-1",
+        "seed": "heldout-inert-code",
+        "split": "heldout",
+        "language": "en",
+        "category": "negative",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7439,
+        "schemaCount": 33
+      },
+      {
+        "id": "heldout-inert-code-2",
+        "seed": "heldout-inert-code",
+        "split": "heldout",
+        "language": "en",
+        "category": "negative",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7439,
+        "schemaCount": 33
+      },
+      {
+        "id": "heldout-inert-code-3",
+        "seed": "heldout-inert-code",
+        "split": "heldout",
+        "language": "en",
+        "category": "negative",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 897,
+        "schemaCount": 10
+      },
+      {
+        "id": "heldout-inert-code-4",
+        "seed": "heldout-inert-code",
+        "split": "heldout",
+        "language": "ar",
+        "category": "negative",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7439,
+        "schemaCount": 33
+      },
+      {
+        "id": "heldout-inert-code-5",
+        "seed": "heldout-inert-code",
+        "split": "heldout",
+        "language": "ar",
+        "category": "negative",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 897,
+        "schemaCount": 10
+      },
+      {
+        "id": "heldout-inert-code-6",
+        "seed": "heldout-inert-code",
+        "split": "heldout",
+        "language": "mixed",
+        "category": "negative",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7226,
+        "schemaCount": 29
+      },
+      {
+        "id": "heldout-negation-1",
+        "seed": "heldout-negation",
+        "split": "heldout",
+        "language": "en",
+        "category": "negative",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7226,
+        "schemaCount": 29
+      },
+      {
+        "id": "heldout-negation-2",
+        "seed": "heldout-negation",
+        "split": "heldout",
+        "language": "en",
+        "category": "negative",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7226,
+        "schemaCount": 29
+      },
+      {
+        "id": "heldout-negation-3",
+        "seed": "heldout-negation",
+        "split": "heldout",
+        "language": "en",
+        "category": "negative",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7226,
+        "schemaCount": 29
+      },
+      {
+        "id": "heldout-negation-4",
+        "seed": "heldout-negation",
+        "split": "heldout",
+        "language": "ar",
+        "category": "negative",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7226,
+        "schemaCount": 29
+      },
+      {
+        "id": "heldout-negation-5",
+        "seed": "heldout-negation",
+        "split": "heldout",
+        "language": "ar",
+        "category": "negative",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7226,
+        "schemaCount": 29
+      },
+      {
+        "id": "heldout-negation-6",
+        "seed": "heldout-negation",
+        "split": "heldout",
+        "language": "mixed",
+        "category": "negative",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7226,
+        "schemaCount": 29
+      },
+      {
+        "id": "heldout-hypothetical-1",
+        "seed": "heldout-hypothetical",
+        "split": "heldout",
+        "language": "en",
+        "category": "negative",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7226,
+        "schemaCount": 29
+      },
+      {
+        "id": "heldout-hypothetical-2",
+        "seed": "heldout-hypothetical",
+        "split": "heldout",
+        "language": "en",
+        "category": "negative",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7439,
+        "schemaCount": 33
+      },
+      {
+        "id": "heldout-hypothetical-3",
+        "seed": "heldout-hypothetical",
+        "split": "heldout",
+        "language": "en",
+        "category": "negative",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7226,
+        "schemaCount": 29
+      },
+      {
+        "id": "heldout-hypothetical-4",
+        "seed": "heldout-hypothetical",
+        "split": "heldout",
+        "language": "ar",
+        "category": "negative",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 897,
+        "schemaCount": 10
+      },
+      {
+        "id": "heldout-hypothetical-5",
+        "seed": "heldout-hypothetical",
+        "split": "heldout",
+        "language": "ar",
+        "category": "negative",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7439,
+        "schemaCount": 33
+      },
+      {
+        "id": "heldout-hypothetical-6",
+        "seed": "heldout-hypothetical",
+        "split": "heldout",
+        "language": "mixed",
+        "category": "negative",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7226,
+        "schemaCount": 29
+      },
+      {
+        "id": "heldout-ambiguous-skill-1",
+        "seed": "heldout-ambiguous-skill",
+        "split": "heldout",
+        "language": "en",
+        "category": "unresolved",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [
+          "skill.list",
+          "skill.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7794,
+        "schemaCount": 37
+      },
+      {
+        "id": "heldout-ambiguous-skill-2",
+        "seed": "heldout-ambiguous-skill",
+        "split": "heldout",
+        "language": "en",
+        "category": "unresolved",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [
+          "skill.list",
+          "skill.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7582,
+        "schemaCount": 33
+      },
+      {
+        "id": "heldout-ambiguous-skill-3",
+        "seed": "heldout-ambiguous-skill",
+        "split": "heldout",
+        "language": "en",
+        "category": "unresolved",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [
+          "skill.list",
+          "skill.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7364,
+        "schemaCount": 31
+      },
+      {
+        "id": "heldout-ambiguous-skill-4",
+        "seed": "heldout-ambiguous-skill",
+        "split": "heldout",
+        "language": "ar",
+        "category": "unresolved",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [
+          "skill.list",
+          "skill.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7794,
+        "schemaCount": 37
+      },
+      {
+        "id": "heldout-ambiguous-skill-5",
+        "seed": "heldout-ambiguous-skill",
+        "split": "heldout",
+        "language": "ar",
+        "category": "unresolved",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [
+          "skill.list",
+          "skill.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7582,
+        "schemaCount": 33
+      },
+      {
+        "id": "heldout-ambiguous-skill-6",
+        "seed": "heldout-ambiguous-skill",
+        "split": "heldout",
+        "language": "mixed",
+        "category": "unresolved",
+        "expectedSkill": null,
+        "selectedSkill": null,
+        "requiredTools": [
+          "skill.list",
+          "skill.read"
+        ],
+        "missingTools": [],
+        "violations": [],
+        "schemaTokensRough": 7794,
+        "schemaCount": 37
+      }
+    ]
+  },
+  "workflow": {
+    "workers": 3,
+    "acceptedResults": 4,
+    "providerCalls": 15,
+    "searches": 3,
+    "tasks": 1,
+    "restarted": true,
+    "outputBytes": 658,
+    "finalOutcome": "completed",
+    "sourceTable": true,
+    "actualToolCalls": 10,
+    "liveModelCalls": 0
+  },
+  "suites": [
+    "src/eval/fixtures/research-routing-release.test.ts",
+    "src/runtime/research-request.acceptance.test.ts",
+    "src/runtime/capability-recovery.test.ts",
+    "src/runtime/provider-tool-narrowing.test.ts",
+    "src/tools/tool-schema.test.ts",
+    "src/tools/capability-tools.test.ts",
+    "src/tools/skill-tools.test.ts",
+    "src/tools/tool-executor.test.ts",
+    "src/runtime/capability-state.test.ts",
+    "src/tools/web-read-reuse.test.ts",
+    "src/memory/memory-fact-extractor.test.ts",
+    "src/memory/memory-reviewer.test.ts",
+    "src/memory/memory-curation-service.test.ts",
+    "src/tasks/research-result-evidence.test.ts",
+    "src/tasks/agent-step-executor.test.ts",
+    "src/runtime/execution-outcome.test.ts",
+    "src/cli/session-loop.test.ts",
+    "src/channels/channel-gateway.test.ts",
+    "src/channels/surface-adapters/surface-adapters.test.ts"
+  ],
+  "tests": {
+    "passed": 834,
+    "failed": 0,
+    "total": 834
+  },
+  "liveAssessment": {
+    "status": "not-run",
+    "reason": "Requires approved provider, sources and predeclared spend limit; deterministic fixtures do not measure live factual quality."
+  },
+  "packagedDesktop": {
+    "status": "separate-gate",
+    "command": "pnpm run desktop:research-release"
+  }
+}

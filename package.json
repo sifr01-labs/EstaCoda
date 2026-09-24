@@ -76,6 +76,7 @@
     "alpha:harness:bun": "bun scripts/internal-alpha.ts",
     "eval:substrate": "node --import tsx scripts/eval-substrate.ts",
     "eval:substrate:bun": "bun scripts/eval-substrate.ts",
+    "validate:research-reliability": "node --import tsx scripts/validate-research-reliability.ts",
     "eval:fixtures": "node --import tsx scripts/run-eval-fixtures.ts",
     "eval:vision:fixtures": "node --import tsx scripts/generate-vision-evaluation-fixtures.ts",
     "eval:vision:live": "node --import tsx scripts/run-vision-live-evaluation.ts",
