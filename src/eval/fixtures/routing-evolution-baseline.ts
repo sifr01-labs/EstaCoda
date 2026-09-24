@@ -4,6 +4,7 @@ import type { SkillDefinition, SkillRouting } from "../../contracts/skill.js";
 import { SkillRegistry } from "../../skills/skill-registry.js";
 import { IntentRouter } from "../../runtime/intent-router.js";
 import { assertEqual, assertTrue, buildResult } from "../eval-runner.js";
+import { buildResearchCapabilityBaseline } from "./research-capability-baseline.js";
 
 export type RateMetric = {
   value: number | null;
@@ -577,7 +578,17 @@ export const routingEvolutionBaselineCase: EvalCase = {
   run: async (): Promise<EvalResult> => {
     const startedAt = Date.now();
     const report = buildRoutingEvolutionBaselineReport();
+    const research = buildResearchCapabilityBaseline();
     const assertions = [
+      // Characterization gates, deliberately separate from the legacy fixture's
+      // synthetic precision thresholds. PR 1–4 replace these gap expectations.
+      assertEqual("research development probes execute", research.metrics.caseCount, 18),
+      assertEqual("research capability baseline: 14 of 22 required tools exposed", research.metrics.requestedCapabilityRecall.numerator, 14),
+      assertEqual("research capability denominator", research.metrics.requestedCapabilityRecall.denominator, 22),
+      assertEqual("research skill baseline: 3 of 8 intended skills selected", research.metrics.primarySkillRecall.numerator, 3),
+      assertEqual("research skill denominator", research.metrics.primarySkillRecall.denominator, 8),
+      assertEqual("research negative controls expose no forbidden tools", research.metrics.forbiddenExposureCount, 0),
+      assertEqual("known completion gap: six no-execution probes falsely complete", research.metrics.falseCompleteWithoutExecution.numerator, 6),
       assertEqual("routing case count", report.routing.caseCount, buildDefaultRoutingEvolutionBaselineCases().length),
       assertTrue("live router cases are included", report.routing.caseCount > routingEvolutionSeedCases.length),
       assertTrue("seed includes no-skill cases", routingEvolutionSeedCases.some((testCase) => testCase.expectedNoSkill === true)),
