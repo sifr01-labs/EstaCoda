@@ -17,6 +17,7 @@ import { validateSessionWorkspaceOwnership } from "../session/session-workspace-
 import { AsyncLocalStorage } from "node:async_hooks";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { AuxiliaryModelConfig, ModelProfile, ResolvedModelRoute } from "../contracts/provider.js";
 import { deriveAgentEvolutionPolicy, type AgentEvolutionPolicy } from "../contracts/agent-evolution.js";
 import type { BrowserBackend } from "../contracts/browser.js";
@@ -599,7 +600,7 @@ async function buildRuntime(options: RuntimeOptions, rollback: ResourceCleanup):
     modelId: options.model.id
   });
 
-  const bundledSkillsDir = new URL("../../skills/official", import.meta.url).pathname;
+  const bundledSkillsDir = fileURLToPath(new URL("../../skills/official", import.meta.url));
   const skillLoadWarnings: string[] = [];
   const effectiveMcpServers = await trustStore.isTrusted(workspaceRoot) ? (options.mcpServers ?? {}) : {};
   const loadedMcpServers = await loadMcpServers({

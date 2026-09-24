@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import {createHash,randomBytes} from 'node:crypto';
 import {spawn,execFileSync,type ChildProcess} from 'node:child_process';
 import {createServer} from 'node:http';
-import {mkdtempSync,mkdirSync,readFileSync,writeFileSync,existsSync,rmSync} from 'node:fs';
+import {mkdtempSync,mkdirSync,readFileSync,writeFileSync,existsSync,realpathSync,rmSync} from 'node:fs';
 import {join,resolve,dirname} from 'node:path';
 import {pathToFileURL} from 'node:url';
 import {chromium,expect,type Browser,type Page} from '@playwright/test';
@@ -28,6 +28,8 @@ const {WorkspaceTrustStore}=await coreImport('security/workspace-trust-store.js'
 const {resolveGlobalStateHome,resolveProfileStateHome}=await coreImport('config/profile-home.js');
 const {probePrivateControl}=await coreImport('gateway/private-control.js');
 const home=mkdtempSync('/tmp/ec-research-release-'),workspace=join(home,'workspace');
+const desktopData=join(home,'Application Support/EstaCoda');
+const retainedRoot=join(desktopData,'runtime-versions',manifest.runtimeSha256),retainedCore=join(retainedRoot,'core/dist');
 const profileId='pr6-'+randomBytes(5).toString('hex'),paths=resolveProfileStateHome({homeDir:home,profileId});
 mkdirSync(workspace);mkdirSync(paths.profileRoot,{recursive:true});
 const source='https://93.184.216.34/fixture/battery-recycling';
@@ -96,18 +98,21 @@ const target={targetId:binding.targetId,targetGeneration:binding.targetGeneratio
 await new WorkspaceTrustStore({homeDir:home}).grant(workspace);
 const bootstrap=join(home,'supervisor.mjs'),searchLog=join(home,'searches.jsonl'),missingFlag=join(home,'missing-search');
 writeFileSync(bootstrap,`import {appendFileSync,existsSync} from 'node:fs';
-import {registerWebResearchProvider} from ${JSON.stringify(pathToFileURL(join(core,'tools/web-research-registry.js')).href)};
-import {runGatewaySupervisor} from ${JSON.stringify(pathToFileURL(join(core,'gateway/supervisor.js')).href)};
+import {registerWebResearchProvider} from ${JSON.stringify(pathToFileURL(join(retainedCore,'tools/web-research-registry.js')).href)};
+import {runGatewaySupervisor} from ${JSON.stringify(pathToFileURL(join(retainedCore,'gateway/supervisor.js')).href)};
 registerWebResearchProvider({name:'pr6-fixture',displayName:'Synthetic release evidence',capabilities:{search:true,extract:true},getAvailability:()=>({available:!existsSync(${JSON.stringify(missingFlag)}),reason:'Fixture search disabled'}),search:async query=>{appendFileSync(${JSON.stringify(searchLog)},JSON.stringify({query})+'\\n');return [{title:'Synthetic study',url:${JSON.stringify(source)},snippet:'Illustrative fixture; not scientific evidence.'}];},extract:async url=>({url,content:'Illustrative research fixture',status:200})});
 await runGatewaySupervisor(${JSON.stringify({homeDir:home,workspaceRoot:workspace,profileId})});`);
-const supervisor=spawn(join(runtimeRoot,'node'),[bootstrap],{cwd:runtimeRoot,env:{HOME:home,PATH:'/usr/bin:/bin:/usr/sbin:/sbin'},stdio:['ignore','pipe','pipe']});
-for(const stream of [supervisor.stdout,supervisor.stderr])stream!.on('data',data=>{diagnostics=(diagnostics+data).slice(-16000);});
+let supervisor:ChildProcess|undefined;
+function startSupervisor(){
+ supervisor=spawn(join(retainedRoot,'node'),[bootstrap],{cwd:retainedRoot,env:{HOME:home,PATH:'/usr/bin:/bin:/usr/sbin:/sbin'},stdio:['ignore','pipe','pipe']});
+ for(const stream of [supervisor.stdout,supervisor.stderr])stream!.on('data',data=>{diagnostics=(diagnostics+data).slice(-16000);});
+}
 let app:ChildProcess|undefined,browser:Browser|undefined,page:Page|undefined;
 async function stop(child:ChildProcess|undefined){if(!child||child.exitCode!==null||child.signalCode!==null)return;const ended=new Promise<void>(r=>child.once('exit',()=>r()));child.kill('SIGTERM');const kill=setTimeout(()=>child.kill('SIGKILL'),10000);await ended;clearTimeout(kill);}
 async function stopApp(){await browser?.close();browser=undefined;await stop(app);app=undefined;}
 async function launch(){
  const socket=createServer();await new Promise<void>(r=>socket.listen(0,'127.0.0.1',r));const port=(socket.address() as {port:number}).port;await new Promise<void>(r=>socket.close(()=>r()));
- app=spawn(join(appRoot,'Contents/MacOS/EstaCoda'),[`--remote-debugging-port=${port}`,`--user-data-dir=${join(home,'desktop-data')}`],{env:{HOME:home,CFFIXED_USER_HOME:home,USERPROFILE:home,PATH:'/usr/bin:/bin:/usr/sbin:/sbin',LANG:'en_US.UTF-8'},stdio:['ignore','ignore','pipe']});
+ app=spawn(join(appRoot,'Contents/MacOS/EstaCoda'),[`--remote-debugging-port=${port}`,`--user-data-dir=${desktopData}`],{env:{HOME:home,CFFIXED_USER_HOME:home,USERPROFILE:home,PATH:'/usr/bin:/bin:/usr/sbin:/sbin',LANG:'en_US.UTF-8'},stdio:['ignore','ignore','pipe']});
  app.stderr!.on('data',data=>{diagnostics=(diagnostics+data).slice(-16000);});
  await expect.poll(async()=>{try{return(await fetch(`http://127.0.0.1:${port}/json/version`)).ok;}catch{return false;}},{timeout:30000}).toBe(true);
  browser=await chromium.connectOverCDP(`http://127.0.0.1:${port}`);
@@ -117,7 +122,7 @@ async function launch(){
  const pids=execFileSync('pgrep',['-P',String(app.pid)],{encoding:'utf8'}).trim().split(/\s+/);
  const commands=pids.map(pid=>execFileSync('ps',['-p',pid,'-o','command='],{encoding:'utf8'}));
  assert(commands.some(command=>command.includes(`/runtime-versions/${manifest.runtimeSha256}/node`)&&command.includes('desktop-service')),'App did not launch its verified owned bridge');
- const retained=join(home,'desktop-data/runtime-versions',manifest.runtimeSha256);verifyRuntimeInventory(retained,manifest);bridgeVerified=true;
+ verifyRuntimeInventory(retainedRoot,manifest);bridgeVerified=true;
 }
 const submittedText=new Map<string,string>();
 async function submit(text:string,workId?:string){
@@ -136,8 +141,9 @@ async function idle(workId:string){
 }
 const searches=()=>existsSync(searchLog)?readFileSync(searchLog,'utf8').trim().split('\n').length:0;
 try{
+ await launch();startSupervisor();
  await expect.poll(async()=>{try{return(await probePrivateControl({directory:paths.gatewayStatePath,profileId,version:manifest.coreVersion})).instanceId;}catch{return null;}},{timeout:30000}).not.toBeNull();
- await launch();console.log('Verified packaged app and owned bridge.');
+ console.log('Verified packaged app, owned bridge and retained supervisor under a path with spaces.');
  const initial=await submit('Use the researcher skill and use 3 subagents to research current battery recycling. Save report.md');sessionId=initial.workId.replace(/^session:/,'');
  await expect.poll(()=>{assert.deepEqual(providerErrors,[]);return store.listTasks().length;},{timeout:60000}).toBe(1);
  await expect.poll(()=>store.listTasks()[0]?.status,{timeout:120000}).toBe('completed');
@@ -149,14 +155,14 @@ try{
  await expect.poll(()=>existsSync(join(workspace,'report.md')),{timeout:60000}).toBe(true);
  await expect.poll(()=>page!.evaluate(id=>window.desktop.getWork(id).then(x=>x.status).catch(()=>'unavailable'),initial.workId),{timeout:60000}).toBe('completed');
  assert.equal(readFileSync(join(workspace,'report.md'),'utf8'),reportContent);assert(reportContent.includes('| Retrieved |'));assert.equal(store.listTasks().length,1);assert.equal(searches(),3);
- const events=await db.listEvents(sessionId);assert(events.some((e:any)=>e.kind==='tool-result'&&e.tool==='file.read'&&e.result.ok));
+ const events=await db.listEvents(sessionId);assert(events.some((e:any)=>e.kind==='intent-routed'&&e.route.primarySkill?.name==='researcher'&&realpathSync(e.route.primarySkill.sourcePath).startsWith(realpathSync(retainedRoot)+'/')));assert(events.some((e:any)=>e.kind==='tool-result'&&e.tool==='file.read'&&e.result.ok));
  console.log('Three workers, synthesis, app restart and verified save passed.');
  phase='recovery';const recovered=await submit('Find recent battery research.');await expect.poll(()=>recoveryIndex,{timeout:60000}).toBe(4);await idle(recovered.workId);
  const recoveryEvents=await db.listEvents(recovered.workId.replace(/^session:/,''));assert(recoveryEvents.some((e:any)=>e.kind==='tool-result'&&e.tool==='skill.read'&&e.result.ok));
  phase='false-save';const falseSave=await submit('Save this report as nonexistent.md');await idle(falseSave.workId);await expect.poll(()=>page!.evaluate(id=>window.desktop.getWork(id).then(x=>x.status).catch(()=>'unavailable'),falseSave.workId),{timeout:60000}).toBe('needs_attention');assert(!existsSync(join(workspace,'nonexistent.md')));
  const falseSaveEvents=await db.listEvents(falseSave.workId.replace(/^session:/,''));assert(falseSaveEvents.some((e:any)=>e.kind==='execution-final-outcome-recorded'&&e.status==='blocked'));
- phase='missing-search';writeFileSync(missingFlag,'disabled');const missing=await submit('Use the researcher skill to research battery recycling.');await expect.poll(()=>calls.some(x=>x.phase==='missing-search'&&x.tools.length===0),{timeout:60000}).toBe(true);await idle(missing.workId);assert.equal(store.listTasks().length,1);
- const missingEvents=await db.listEvents(missing.workId.replace(/^session:/,''));assert(missingEvents.some((e:any)=>e.kind==='tool-result'&&e.tool==='delegate_task'&&e.result.ok===false));
+ phase='missing-search';writeFileSync(missingFlag,'disabled');const beforeMissing=requests;const missing=await submit('Use the researcher skill to research current battery recycling and save missing-search.md.');await idle(missing.workId);assert.equal(requests,beforeMissing);assert.equal(store.listTasks().length,1);assert(!existsSync(join(workspace,'missing-search.md')));
+ const missingEvents=await db.listEvents(missing.workId.replace(/^session:/,''));assert(missingEvents.some((e:any)=>e.kind==='execution-final-outcome-recorded'&&e.status==='blocked'));assert(!missingEvents.some((e:any)=>e.kind==='tool-called'));
  assert.deepEqual(providerErrors,[]);
  const allSessionIds=new Set([sessionId,...workerSessions,recovered.workId.replace(/^session:/,''),falseSave.workId.replace(/^session:/,''),missing.workId.replace(/^session:/,'')]);
  const allEvents=(await Promise.all([...allSessionIds].map(id=>db.listEvents(id)))).flat();
@@ -166,7 +172,7 @@ try{
  const measurements={
   version:1,passed:true,measuredAt:new Date().toISOString(),sourceBaseCommit:execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),sourceOverlay,
   platform:process.platform,arch:process.arch,
-  runtime:{sha256:manifest.runtimeSha256,nodeVersion:manifest.nodeVersion,coreVersion:manifest.coreVersion,entrySha256:manifest.entrySha256,signature:'ad-hoc verified',ownedBridgeVerified:bridgeVerified,inventoryVerified:true,matchesCurrentDist:true},
+  runtime:{sha256:manifest.runtimeSha256,nodeVersion:manifest.nodeVersion,coreVersion:manifest.coreVersion,entrySha256:manifest.entrySha256,signature:'ad-hoc verified',ownedBridgeVerified:bridgeVerified,inventoryVerified:true,matchesCurrentDist:true,supervisorRetainedPathWithSpaces:true},
   fixtures:{model:'scripted loopback HTTP',web:'in-process registered synthetic provider in packaged supervisor',liveModelCalls:0,transport:'actual signed app + preload/Main + owned bridge + private control'},
   workflow:{workers:workers.length,acceptedResults:store.listResults(task.id).filter((r:any)=>r.disposition==='accepted').length,distinctChildSessions:workerSessions.size,tasks:store.listTasks().length,searches:searches(),providerCalls:calls.filter(c=>['research','save'].includes(c.phase)).length,appRestartNoReplay:true,fileBytes:Buffer.byteLength(reportContent),fileSha256:createHash('sha256').update(reportContent).digest('hex'),readbackVerified:true,historicalTaskStatus:store.getTask(task.id).status},
   allScenarios:{providerCalls:requests,actualToolResults:toolResults.length,failedToolResults:toolResults.filter((e:any)=>!e.result.ok).length},

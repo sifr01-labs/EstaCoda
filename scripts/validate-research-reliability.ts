@@ -10,6 +10,7 @@ import { measureResearchWorkflow } from "../src/eval/fixtures/research-workflow-
 export const acceptanceSuites = [
   "src/eval/fixtures/research-routing-release.test.ts",
   "src/runtime/research-request.acceptance.test.ts",
+  "src/runtime/research-prerequisites.test.ts",
   "src/runtime/research-surfaces.acceptance.test.ts",
   "src/acp/server.test.ts",
   "src/acp/approval-ownership.test.ts",

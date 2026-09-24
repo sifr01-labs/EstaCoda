@@ -41,6 +41,31 @@ function schedulerFor(h: Harness, taskId: string) {
 }
 
 describe.sequential("research workflow acceptance harness", () => {
+  it("blocks missing fresh-search prerequisites before spending a provider iteration", async () => {
+    const h = await harness({ searchAvailable: false });
+    const result = await h.turn("Use the researcher skill and use 3 subagents to research current battery recycling. Save report.md.");
+    expect(result.finalOutcome).toMatchObject({ status: "blocked", terminationCause: "user_input_required" });
+    expect(result.text).toContain("web.search is unavailable");
+    expect(result.text).toContain("config.web.setup");
+    expect(result.text).toContain("not been written or verified");
+    expect(h.requests).toHaveLength(0);
+    expect(result.toolExecutions).toHaveLength(0);
+    expect(h.store.listTasks()).toHaveLength(0);
+    await expect(readFile(join(h.workspaceRoot, "report.md"))).rejects.toThrow();
+    scriptConsumed(h);
+  });
+
+  it("reports all missing research prerequisites without delegation retries", async () => {
+    const h = await harness({ searchAvailable: false });
+    const result = await h.turn("Use the nonexistent-skill skill and use 3 subagents to research current batteries. Save report.md.");
+    expect(result.text).toContain("skill instructions are unavailable");
+    expect(result.text).toContain("web.search is unavailable");
+    expect(result.finalOutcome?.status).toBe("blocked");
+    expect(h.requests).toHaveLength(0);
+    expect(result.toolExecutions).toHaveLength(0);
+    scriptConsumed(h);
+  });
+
   it("does not erase affirmative how-to requirements or accept a no-tool completion", async () => {
     const h = await harness();
     h.enqueue(answer("Done. All requested work is complete."));
@@ -325,14 +350,14 @@ describe.sequential("research workflow acceptance harness", () => {
     scriptConsumed(h);
   });
 
-  it("preflights unavailable search and ignores a provider-supplied replacement contract", async () => {
-    const h = await harness({ searchAvailable: false });
+  it("ignores a provider-supplied replacement contract at the delegation boundary", async () => {
+    const h = await harness();
     h.enqueue(nativeCall("delegate_task", { tasks: ["one", "two", "three"].map((scope) => ({
-      task: `Research ${scope}.`, research: { scope, requireLiveSources: true, requireRepositoryEvidence: false }
+      task: `Research ${scope}.`, research: { scope, requireLiveSources: false, requireRepositoryEvidence: false }
     })), requestContract: { requirements: {} } }), answer("The workers are running."));
     const result = await h.turn(RESEARCH_PROMPT);
     expect(h.store.listTasks()).toEqual([]);
-    expect(result.text).toContain("config.web.setup");
+    expect(result.toolExecutions[0]?.result).toMatchObject({ ok: false, metadata: { code: "request-requirements-unsatisfied" } });
     expect(result.finalOutcome?.status).not.toBe("completed");
     scriptConsumed(h);
   });

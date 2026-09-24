@@ -1,0 +1,174 @@
+{
+  "version": 1,
+  "baseCommit": "c606414d",
+  "measuredAt": "2026-09-24T18:22:56.207Z",
+  "passed": true,
+  "changedSourceFiles": [
+    {
+      "path": "src/runtime/agent-loop.ts",
+      "sha256": "17499a41448d4d61bc2f80b61c2fd0a2b05cb4228108067ee966530cba3301af"
+    },
+    {
+      "path": "src/runtime/create-runtime.ts",
+      "sha256": "6d3ebd2b685ee4b236060d75b3d03cb3189ca476c33308f1638f6e8a8f6badbb"
+    },
+    {
+      "path": "src/runtime/research-request-evidence.ts",
+      "sha256": "f51fe2e43e452fa4ac87027d328daa9f29730da28d42c76880ae906892e307bd"
+    },
+    {
+      "path": "src/runtime/research-prerequisites.test.ts",
+      "sha256": "10d9037487410f2b33dd8e1d945ff74f70fc3ce0242e8c278134419063e6e6be"
+    },
+    {
+      "path": "src/runtime/research-request.acceptance.test.ts",
+      "sha256": "dd937f7617293000cb470b8fbe59a2ec87a101a4b8bbb6c4d8d8a0fd3051111a"
+    },
+    {
+      "path": "apps/desktop/tests/research-packaged.mts",
+      "sha256": "b936638130d30908ed892de0ea46f7c25756f6cd6bb99dff791361e4240020f1"
+    },
+    {
+      "path": "scripts/validate-research-reliability.ts",
+      "sha256": "68a7cb802eb608cacc380efcd267b00c2e73e060c1a46210d3bbd609372d6d98"
+    }
+  ],
+  "source": {
+    "tests": {
+      "passed": 1318,
+      "failed": 0,
+      "total": 1318
+    },
+    "suites": [
+      "src/eval/fixtures/research-routing-release.test.ts",
+      "src/runtime/research-request.acceptance.test.ts",
+      "src/runtime/research-prerequisites.test.ts",
+      "src/runtime/research-surfaces.acceptance.test.ts",
+      "src/acp/server.test.ts",
+      "src/acp/approval-ownership.test.ts",
+      "src/acp/session-ownership.test.ts",
+      "src/cron/cron-runner.test.ts",
+      "src/gateway/desktop-approvals.test.ts",
+      "src/gateway/supervisor.test.ts",
+      "src/tasks/task-completion-delivery.test.ts",
+      "src/tasks/task-approval-service.test.ts",
+      "src/delegation/durable-delegation-service.test.ts",
+      "src/runtime/request-requirements.test.ts",
+      "src/channels/delivery-router.test.ts",
+      "src/channels/telegram-adapter.test.ts",
+      "src/channels/channel-session-store.test.ts",
+      "src/security/security-policy-factory.test.ts",
+      "src/runtime/capability-recovery.test.ts",
+      "src/runtime/provider-tool-narrowing.test.ts",
+      "src/tools/tool-schema.test.ts",
+      "src/tools/capability-tools.test.ts",
+      "src/tools/skill-tools.test.ts",
+      "src/tools/tool-executor.test.ts",
+      "src/runtime/capability-state.test.ts",
+      "src/tools/web-read-reuse.test.ts",
+      "src/memory/memory-fact-extractor.test.ts",
+      "src/memory/memory-reviewer.test.ts",
+      "src/memory/memory-curation-service.test.ts",
+      "src/tasks/research-result-evidence.test.ts",
+      "src/tasks/agent-step-executor.test.ts",
+      "src/runtime/execution-outcome.test.ts",
+      "src/cli/session-loop.test.ts",
+      "src/channels/channel-gateway.test.ts",
+      "src/channels/surface-adapters/surface-adapters.test.ts"
+    ],
+    "heldout": {
+      "cases": 60,
+      "requestedCapabilityRecall": {
+        "numerator": 90,
+        "denominator": 90,
+        "value": 1
+      },
+      "primarySkillPrecision": {
+        "numerator": 15,
+        "denominator": 15,
+        "value": 1
+      },
+      "primarySkillRecall": {
+        "numerator": 15,
+        "denominator": 24,
+        "value": 0.625
+      },
+      "safetyViolations": 0,
+      "schemaTokensRough": {
+        "median": 7828,
+        "p95": 15429
+      }
+    }
+  },
+  "package": {
+    "runtime": {
+      "sha256": "fb87555524e92c5bfb3f4364492028a7ed3b96197abe515e4409ea5431bf8b51",
+      "nodeVersion": "v24.14.1",
+      "coreVersion": "0.1.0",
+      "entrySha256": "8b7b5e8816ffe62d9baa2133dd5cc54a1a8ea36997b0bda6fc631039c700f6ec",
+      "signature": "ad-hoc verified",
+      "ownedBridgeVerified": true,
+      "inventoryVerified": true,
+      "matchesCurrentDist": true,
+      "supervisorRetainedPathWithSpaces": true
+    },
+    "fixtures": {
+      "model": "scripted loopback HTTP",
+      "web": "in-process registered synthetic provider in packaged supervisor",
+      "liveModelCalls": 0,
+      "transport": "actual signed app + preload/Main + owned bridge + private control"
+    },
+    "workflow": {
+      "workers": 3,
+      "acceptedResults": 5,
+      "distinctChildSessions": 5,
+      "tasks": 1,
+      "searches": 3,
+      "providerCalls": 17,
+      "appRestartNoReplay": true,
+      "fileBytes": 655,
+      "fileSha256": "7965576a2d9c38dfea13465934c442243231fcfd7bd123858c419a90cb31a511",
+      "readbackVerified": true,
+      "historicalTaskStatus": "completed"
+    },
+    "allScenarios": {
+      "providerCalls": 22,
+      "actualToolResults": 16,
+      "failedToolResults": 0
+    },
+    "scenarios": {
+      "research": true,
+      "automaticReportDelivery": true,
+      "saveOnlyAfterRestart": true,
+      "skillRecovery": true,
+      "missingSearch": true,
+      "falseSaveBlocked": true
+    },
+    "liveAssessment": "pending approved model, sources and spend ceiling"
+  },
+  "standardChecks": {
+    "node": "v24.14.1",
+    "pnpm": "10.33.0",
+    "frozenOfflineInstall": true,
+    "coreTypecheck": true,
+    "coreTests": {
+      "tests": 11994,
+      "files": 747,
+      "passed": true,
+      "maxWorkers": 4
+    },
+    "desktopTypecheck": true,
+    "packagedFixtureTypecheck": true,
+    "desktopTests": {
+      "tests": 173,
+      "files": 46,
+      "passed": true
+    },
+    "buildAndSignedPackage": true,
+    "sourceSmoke": true,
+    "distSmoke": true,
+    "runtimeImportAudit": true,
+    "esmAudit": true
+  },
+  "scope": "Isolated validation checkout with byte-matched changed sources. Scripted model and web fixtures; no live provider assessment or live profile changes."
+}

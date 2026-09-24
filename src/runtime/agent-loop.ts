@@ -5,7 +5,7 @@ import type { ContextExpansionResult, ProjectContextSnapshot } from "../contract
 import type { IntentRoute } from "../contracts/intent.js";
 import { fileOutputEvidence } from "./file-output-evidence.js";
 import { continueRequestRequirements, requiredSkillsDelivered } from "./request-requirements.js";
-import { researchRequestEvidence } from "./research-request-evidence.js";
+import { researchPrerequisiteBlockers, researchRequestEvidence } from "./research-request-evidence.js";
 import type { ExecutionFinalOutcome, ExecutionPlan, ExecutionPlanReader } from "../contracts/execution-plan.js";
 import type { ForegroundExecutionCheckpoint } from "../contracts/execution-checkpoint.js";
 import type { ExecutionPlanController } from "./execution-plan-controller.js";
@@ -51,7 +51,7 @@ import type { SkillLearningManager } from "../skills/skill-learning.js";
 import type { SkillEvolutionStore } from "../skills/skill-evolution.js";
 import { compileSkillPlaybook } from "../skills/skill-playbook-planner.js";
 import { createSkillRouteTelemetry, hashSkillRoutePrompt } from "../skills/skill-usage-telemetry.js";
-import { compressionReportFromResult, ProviderTurnLoop } from "./provider-turn-loop.js";
+import { compressionReportFromResult, ProviderTurnLoop, type ProviderTurnLoopResult } from "./provider-turn-loop.js";
 import type { IntentRouter } from "./intent-router.js";
 import { RunRecorder } from "./run-recorder.js";
 import { boundedRerankCandidates, type SkillRouteShadowReranker } from "./skill-route-reranker.js";
@@ -1051,7 +1051,9 @@ export class AgentLoop {
       nativeSchemaTokens: estimateTextTokensRough(JSON.stringify(providerTools)),
       connectors: this.#connectorInventory(providerTools)
     }, input.onEvent);
-    const preflightCompression = await this.#compactBeforeProviderTurn(input.signal, input.onEvent);
+    const researchBlockers = researchPrerequisiteBlockers(intent, this.#providerToolSchemaCatalog);
+    const preflightCompression = researchBlockers.length > 0 ? undefined
+      : await this.#compactBeforeProviderTurn(input.signal, input.onEvent);
     await this.#emitLiveContextUsageEstimate({
       onEvent: input.onEvent,
       routedText: executionText,
@@ -1068,7 +1070,9 @@ export class AgentLoop {
       preflightCompression,
       stage: "preflight"
     });
-    const providerLoop = await this.#providerTurnLoop.run({
+    const providerLoop: ProviderTurnLoopResult = researchBlockers.length > 0
+      ? { providerExecution: undefined, toolExecutions: [], iterations: 0, terminationCause: "user_input_required" }
+      : await this.#providerTurnLoop.run({
       visibleTurnId: visibleTurn.id,
       userText: effectiveText,
       routedText: executionText,
@@ -1410,8 +1414,12 @@ export class AgentLoop {
           : fileEvidence.reason === "missing-write"
             ? "There is no successful write or patch for the requested output."
             : "The requested output has not been confirmed by a complete, matching readback from disk.";
-        response.text = `File output is incomplete. ${reason}${unavailable}`;
+        response.text = `${researchEvidence.satisfied ? "" : response.text + "\n\n"}File output is incomplete. ${reason}${unavailable}`;
         if (response.providerExecution !== undefined) response.providerExecution = suppressProviderGeneratedText(response.providerExecution);
+      }
+      if (researchBlockers.length > 0) {
+        response.text = `Research is blocked. ${researchBlockers.join(" ")}` +
+          (intent.requestRequirements?.fileOutput === undefined ? "" : " The requested report has not been written or verified in this turn.");
       }
     }
     if (finalizationNote) response.text += `\n\n${finalizationNote}`;

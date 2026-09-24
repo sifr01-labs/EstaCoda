@@ -1,8 +1,25 @@
 import { groundForegroundResearch } from "../tasks/research-result-evidence.js";
 import { readTaskResultEvidence } from "../tasks/task-result-read-evidence.js";
-import type { RequestRequirements } from "../contracts/intent.js";
+import type { IntentRoute, RequestRequirements } from "../contracts/intent.js";
+import type { ProviderToolSchemaCatalog } from "../tools/tool-schema.js";
 import type { ExecutionEvidenceRecord } from "../contracts/execution-plan.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
+
+/** Only proven session prerequisites block admission. Unexposed capabilities
+ * remain recoverable, and saved Task results do not require fresh search. */
+export function researchPrerequisiteBlockers(intent: Pick<IntentRoute, "requestRequirements" | "skillRequests">, catalog?: ProviderToolSchemaCatalog): string[] {
+  const requirements = intent.requestRequirements;
+  if (requirements?.research === undefined) return [];
+  const blockers: string[] = [];
+  if (intent.skillRequests?.some((request) => request.status === "unavailable")) {
+    blockers.push("Requested research skill instructions are unavailable in this session. Check the selected profile's skill visibility and the installed bundled skills before retrying.");
+  }
+  if (requirements.research.fresh && requirements.sourceTaskId === undefined && catalog !== undefined &&
+    !catalog.entries.some((entry) => entry.tool.name === "web.search")) {
+    blockers.push("web.search is unavailable in this session. Review and verify a search provider through Web Research setup (config.web.setup), then retry. Direct URL extraction cannot satisfy the requested fresh-search evidence.");
+  }
+  return blockers;
+}
 
 export function researchRequestEvidence(input: {
   finalText?: string;
