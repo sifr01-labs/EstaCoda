@@ -631,6 +631,9 @@ function buildBaseLayers(
         `Intent confidence: ${Math.round(input.intent.confidence * 100)}%`,
         `Suggested toolsets: ${input.intent.suggestedToolsets.join(", ") || "none"}`,
         `Selected skill: ${input.selectedSkill?.name ?? "none"}`,
+        ...(input.intent.skillRequests === undefined ? [] : [
+          `Explicit skill resolution: ${JSON.stringify(input.intent.skillRequests)}. Ask for clarification for ambiguous references; report unavailable/deferred references rather than claiming the skill was used.`
+        ]),
         `Security decision: ${input.securityDecision}`
       ].join("\n")
     }),

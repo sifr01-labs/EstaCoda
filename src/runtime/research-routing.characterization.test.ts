@@ -56,8 +56,8 @@ describe("research routing baseline (known gaps, PR 0)", () => {
     expect(names).not.toContain("skill.read");
   });
 
-  it("misses literature discovery for a noncontiguous find-papers phrase (PR 1)", () => {
-    expect(inspect("Find recent arXiv papers on battery recycling.").intent.primarySkill).toBeUndefined();
+  it("selects literature discovery for a noncontiguous find-papers phrase (PR 1)", () => {
+    expect(inspect("Find recent arXiv papers on battery recycling.").intent.primarySkill?.name).toBe("research-discovery");
   });
 
   it("reports a prepare-file request complete without a write or receipt (PR 1/4)", () => {
@@ -79,8 +79,8 @@ describe("research routing baseline (known gaps, PR 0)", () => {
     expect(inspect(prompt).names).not.toContain("file.write");
   });
 
-  it("misses the Arabic research classification (PR 1)", () => {
-    expect(inspect("ابحث بعمق عن أحدث تقنيات البطاريات واستخدم ثلاثة وكلاء فرعيين").intent.taskClass).toBe("general");
+  it("classifies Arabic research (PR 1)", () => {
+    expect(inspect("ابحث بعمق عن أحدث تقنيات البطاريات واستخدم ثلاثة وكلاء فرعيين").intent.taskClass).toBe("research");
   });
 
   it("drops a relevant tool after 100 catalog entries before routing can select it (PR 2)", () => {
@@ -111,5 +111,22 @@ describe("research routing baseline healthy controls", () => {
 
   it("does not expose writes for a negated save request", () => {
     expect(inspect("Do not save any files; explain the topic").names).not.toContain("file.write");
+  });
+});
+
+ describe("explicit research skill resolution", () => {
+  it("returns candidates for the ambiguous generic research skill", () => {
+    expect(inspect("Use the research skill").intent.skillRequests).toEqual([{ reference: "research", status: "ambiguous", candidates: ["researcher", "research-discovery"] }]);
+  });
+  it.each([
+    ["Use the research skill for this literature review", "research-discovery"],
+    ["Use the research skill to draft a paper", "researcher"],
+    ["Use the RESEARCHER skill to find recent papers", "researcher"],
+    ["ابحث عن أحدث أوراق البطاريات", "research-discovery"]
+  ])("resolves %s", (prompt, name) => {
+    expect(inspect(prompt).intent.primarySkill?.name).toBe(name);
+  });
+  it.each(["Do not use the researcher skill", "Explain the researcher skill", "What if we use the researcher skill?", "Research the market for new shoes"])("avoids unintended academic workflow: %s", (prompt) => {
+    expect(inspect(prompt).intent.primarySkill).toBeUndefined();
   });
 });

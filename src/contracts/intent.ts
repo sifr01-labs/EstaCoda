@@ -12,6 +12,7 @@ export type NativeIntent =
 export type IntentRouteEvidence = {
   kind:
     | "slash-invocation"
+    | "explicit-skill-reference"
     | "native-intent"
     | "task-class"
     | "attachment"
@@ -93,6 +94,7 @@ export type IntentShadowRoute = {
 
 export type IntentRoute = {
   requestRequirements?: RequestRequirements;
+  skillRequests?: Array<{ reference: string; status: "resolved" | "ambiguous" | "unavailable" | "deferred"; candidates: string[] }>;
   nativeIntent: NativeIntent;
   taskClass?: IntentTaskClass;
   labels: IntentLabel[];

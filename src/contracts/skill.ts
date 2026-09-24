@@ -85,6 +85,7 @@ export type SkillDeferRule = {
 };
 
 export type SkillRouting = {
+  aliases?: string[];
   labels?: string[];
   triggerPatterns?: SkillPattern[];
   negativePatterns?: SkillPattern[];

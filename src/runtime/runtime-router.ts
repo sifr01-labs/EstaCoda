@@ -72,7 +72,7 @@ export class RuntimeRouter {
       trustedWorkspace: input.trustedWorkspace ?? false
     });
 
-    const resumedSkill = input.checkpointSkillName === undefined
+    const resumedSkill = input.checkpointSkillName === undefined || (intent.requestRequirements?.skillReferences.length ?? 0) > 0
       ? undefined
       : this.#intentRouter.resolveSkill(input.checkpointSkillName);
     const selectedSkill = resumedSkill ?? intent.primarySkill ?? intent.suggestedSkills[0];

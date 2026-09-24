@@ -1,7 +1,7 @@
 ---
 {
   "name": "research-discovery",
-  "description": "Search arXiv and related research sources by keyword, author, category, or ID and retrieve abstracts, metadata, PDFs, and BibTeX links.",
+  "description": "Discover academic literature, compare source evidence, and synthesize cited research reports; save output when requested.",
   "version": "1.0.0",
   "category": "research",
   "platforms": [
@@ -30,12 +30,27 @@
       {
         "type": "contains",
         "value": "paper search"
+      },
+      {
+        "type": "regex",
+        "value": "\\b(?:find|search|review|survey)\\b.{0,100}\\b(?:papers?|arxiv|literature)\\b"
+      },
+      {
+        "type": "regex",
+        "value": "\\bliterature\\s+(?:review|report|survey)\\b"
+      },
+      {
+        "type": "regex",
+        "value": "(?:ابحث|راجع).{0,100}(?:أوراق|أبحاث|أدبيات)"
       }
     ],
     "requiredToolsets": [
       "web"
     ],
-    "confirmation": "policy"
+    "confirmation": "policy",
+    "aliases": [
+      "research"
+    ]
   },
   "requiredToolsets": [
     "web"
@@ -69,7 +84,7 @@
     },
     {
       "id": "summarize-results",
-      "description": "Return titles, IDs, authors, dates, links, and caveats; save files only when requested.",
+      "description": "Compare observed sources, cite supported claims and limitations using templates/research-report.md; save and read back a report only when requested.",
       "toolsets": [
         "core",
         "files"
@@ -91,14 +106,20 @@
 
 Search and retrieve academic papers from arXiv via their free REST API. No API key is required. Prefer EstaCoda web tools and `scripts/search_research_discovery.py`; use raw shell examples only when the user approves command execution or when no web tool is available.
 
+## Literature synthesis and report delivery
+
+Use `templates/research-report.md` for literature reviews and reports. Distinguish abstract-only observations from full-text evidence. Record source dates when observed, supported claims and limitations; do not invent missing metadata or citations. Compare sources before drawing conclusions and identify incomplete coverage. This workflow does not author experiments or substitute for the paper-writing researcher skill.
+
+When the user requests a file, use the available workspace file tools, then read back the same target before reporting it saved. If tools, sources or approvals are missing, state the unmet requirement. A proposed filename or pasted report is not saved-file evidence. Optional scripts require the existing execution policy; web research alone does not require shell tools.
+
 ## Quick Reference
 
 | Action | Command |
 |--------|---------|
 | Search papers | Prefer `web.search` or `python scripts/search_research_discovery.py "QUERY"`; shell examples below are fallbacks. |
 | Get specific paper | `curl "https://export.arxiv.org/api/query?id_list=2402.03300"` |
-| Read abstract (web) | `web.extract(urls=["https://arxiv.org/abs/2402.03300"])` |
-| Read full paper (PDF) | `web.extract(urls=["https://arxiv.org/pdf/2402.03300"])` |
+| Read abstract (web) | `web.extract(url="https://arxiv.org/abs/2402.03300")` |
+| Read full paper (PDF) | `web.extract(url="https://arxiv.org/pdf/2402.03300")` |
 
 ## Searching Papers
 
@@ -229,10 +250,10 @@ After finding a paper, read it:
 
 ```
 # Abstract page (fast, metadata + abstract)
-web.extract(urls=["https://arxiv.org/abs/2402.03300"])
+web.extract(url="https://arxiv.org/abs/2402.03300")
 
 # Full paper URL; extraction quality depends on the available web/document tooling
-web.extract(urls=["https://arxiv.org/pdf/2402.03300"])
+web.extract(url="https://arxiv.org/pdf/2402.03300")
 ```
 
 For local PDF processing, see the `pdf-extraction` skill.

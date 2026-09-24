@@ -14,9 +14,9 @@ describe("executed research capability baseline", () => {
 
   it("keeps misses in denominators rather than scoring known failures as successes", () => {
     const { metrics } = buildResearchCapabilityBaseline();
-    expect(metrics.primarySkillPrecision).toEqual({ numerator: 3, denominator: 3, value: 1 });
-    expect(metrics.primarySkillRecall).toEqual({ numerator: 3, denominator: 8, value: 3 / 8 });
-    expect(metrics.requestedCapabilityRecall).toEqual({ numerator: 14, denominator: 22, value: 14 / 22 });
+    expect(metrics.primarySkillPrecision).toEqual({ numerator: 5, denominator: 5, value: 1 });
+    expect(metrics.primarySkillRecall).toEqual({ numerator: 5, denominator: 8, value: 5 / 8 });
+    expect(metrics.requestedCapabilityRecall).toEqual({ numerator: 15, denominator: 22, value: 15 / 22 });
     expect(metrics.falseCompleteWithoutExecution).toEqual({ numerator: 6, denominator: 9, value: 6 / 9 });
     expect(metrics.forbiddenExposureCount).toBe(0);
   });

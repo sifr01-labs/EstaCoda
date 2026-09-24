@@ -70,6 +70,14 @@ export class SkillRegistry {
     return this.get(name);
   }
 
+  /** Exact names take precedence over aliases; collisions remain visible. */
+  resolveReference(reference: string): Array<LoadedSkill | SkillDefinition> {
+    const normalized = reference.toLocaleLowerCase("en-US");
+    const exact = this.list().filter((skill) => skill.name.toLocaleLowerCase("en-US") === normalized);
+    return exact.length > 0 ? exact : this.list().filter((skill) =>
+      skill.routing?.aliases?.some((alias) => alias.toLocaleLowerCase("en-US") === normalized));
+  }
+
   listConflicts(): SkillRegistryConflict[] {
     return [...this.#conflicts];
   }

@@ -297,6 +297,11 @@ function validateSkillDefinition(value: unknown): SkillDefinition {
 
 function normalizeSkillRouting(value: unknown, legacy: Required<Pick<SkillRouting, "labels" | "triggerPatterns" | "negativePatterns" | "requiredToolsets">>): SkillRouting {
   const explicit = isRecord(value) ? value : {};
+  if (explicit.aliases !== undefined && (!Array.isArray(explicit.aliases) || explicit.aliases.length > 8 ||
+    explicit.aliases.some((alias) => typeof alias !== "string" || !/^[\p{L}\p{N}][\p{L}\p{N}_-]{0,79}$/u.test(alias)))) {
+    throw new Error("routing.aliases must contain at most eight bounded skill identifiers");
+  }
+  const aliases = dedupeStrings(normalizeStringList(explicit.aliases).map((alias) => alias.toLocaleLowerCase("en-US")));
   const labels = dedupeStrings([
     ...normalizeStringList(explicit.labels),
     ...legacy.labels
@@ -320,6 +325,7 @@ function normalizeSkillRouting(value: unknown, legacy: Required<Pick<SkillRoutin
     : undefined;
 
   return {
+    ...(aliases.length === 0 ? {} : { aliases }),
     labels,
     triggerPatterns,
     negativePatterns,

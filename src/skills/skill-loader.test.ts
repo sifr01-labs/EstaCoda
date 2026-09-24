@@ -2,7 +2,7 @@ import { describe, it, expect, afterEach } from "vitest";
 import { mkdtemp, rm, writeFile, mkdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { loadSkillsFromDirectory } from "./skill-loader.js";
+import { loadSkillsFromDirectory, parseSkillFile } from "./skill-loader.js";
 import {
   registerPythonCapabilitySpecForTest,
   resetPythonCapabilityRegistryForTest
@@ -412,3 +412,13 @@ async function loadSkillWithPythonCapabilityYaml(extraCapabilityLines: string[])
     sourceRoot: root
   });
 }
+
+describe("skill routing aliases", () => {
+  const parse = (aliases: unknown) => parseSkillFile("/fixture/SKILL.md", `---\n${JSON.stringify({name: "demo", description: "Demo", routing: { aliases }})}\n---\nInstructions`);
+  it("normalizes and deduplicates valid aliases", () => {
+    expect(parse(["Research", "research"]).routing?.aliases).toEqual(["research"]);
+  });
+  it.each([null, "research", ["bad alias"], ["x".repeat(81)], Array(9).fill("research")])("rejects malformed or unbounded aliases: %j", (aliases) => {
+    expect(() => parse(aliases)).toThrow("routing.aliases");
+  });
+});

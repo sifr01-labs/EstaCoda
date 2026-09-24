@@ -182,6 +182,9 @@ describe("RuntimeRouter", () => {
       resolveSkill: (name: string) => name === resumed.name ? resumed : undefined
     } as unknown as IntentRouter;
     const current = new RuntimeRouter({ intentRouter: currentIntentRouter, skillConfig: {} });
+    emptyRoute.requestRequirements = { skillReferences: ["research"], issues: [] };
+    expect(current.route({ text: "Use the research skill", channel: "cli", checkpointSkillName: resumed.name }).selectedSkill).toBeUndefined();
+    delete emptyRoute.requestRequirements;
 
     expect(current.route({
       text: "try again",

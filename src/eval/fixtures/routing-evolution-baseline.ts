@@ -583,9 +583,9 @@ export const routingEvolutionBaselineCase: EvalCase = {
       // Characterization gates, deliberately separate from the legacy fixture's
       // synthetic precision thresholds. PR 1–4 replace these gap expectations.
       assertEqual("research development probes execute", research.metrics.caseCount, 18),
-      assertEqual("research capability baseline: 14 of 22 required tools exposed", research.metrics.requestedCapabilityRecall.numerator, 14),
+      assertEqual("research capability baseline: 15 of 22 required tools exposed", research.metrics.requestedCapabilityRecall.numerator, 15),
       assertEqual("research capability denominator", research.metrics.requestedCapabilityRecall.denominator, 22),
-      assertEqual("research skill baseline: 3 of 8 intended skills selected", research.metrics.primarySkillRecall.numerator, 3),
+      assertEqual("research skill baseline: 5 of 8 intended skills selected", research.metrics.primarySkillRecall.numerator, 5),
       assertEqual("research skill denominator", research.metrics.primarySkillRecall.denominator, 8),
       assertEqual("research negative controls expose no forbidden tools", research.metrics.forbiddenExposureCount, 0),
       assertEqual("known completion gap: six no-execution probes falsely complete", research.metrics.falseCompleteWithoutExecution.numerator, 6),

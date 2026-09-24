@@ -22,10 +22,6 @@
       },
       {
         "type": "contains",
-        "value": "research paper"
-      },
-      {
-        "type": "contains",
         "value": "write a paper"
       },
       {
@@ -35,6 +31,14 @@
       {
         "type": "contains",
         "value": "paper submission"
+      },
+      {
+        "type": "regex",
+        "value": "\\b(?:write|draft|author)\\b.{0,50}\\b(?:paper|manuscript)\\b"
+      },
+      {
+        "type": "regex",
+        "value": "\\b(?:design|run|plan)\\b.{0,50}\\bexperiment\\b"
       }
     ],
     "requiredToolsets": [
@@ -42,7 +46,10 @@
       "files",
       "research"
     ],
-    "confirmation": "policy"
+    "confirmation": "policy",
+    "aliases": [
+      "research"
+    ]
   },
   "requiredToolsets": [
     "core",

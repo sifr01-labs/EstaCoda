@@ -13,7 +13,7 @@ import type { LoadedSkill, SkillDefinition, SkillDeferRule, SkillPattern } from 
 import type { ToolsetName } from "../contracts/tool.js";
 import type { SkillRegistry } from "../skills/skill-registry.js";
 import { affirmativeRequestSegments } from "./request-action-segments.js";
-import { deriveRequestRequirements } from "./request-requirements.js";
+import { deriveRequestRequirements, explicitRequestSegments } from "./request-requirements.js";
 
 export type IntentRouterOptions = {
   skillRegistry: SkillRegistry;
@@ -100,10 +100,40 @@ export class IntentRouter {
   }
 
   route(prompt: string, options: IntentRouteOptions = {}): IntentRoute {
-    return {
-      ...this.routeIntent(prompt, options),
-      requestRequirements: deriveRequestRequirements(options.requestText ?? prompt)
-    };
+    const requestText = options.requestText ?? prompt;
+    const requirements = deriveRequestRequirements(requestText);
+    const route = this.routeIntent(prompt, options);
+    route.requestRequirements = requirements;
+    if (requirements.research !== undefined && route.taskClass === "general") route.taskClass = "research";
+    if (requirements.skillReferences.length === 0 || route.invocation !== undefined) return route;
+
+    const text = explicitRequestSegments(requestText).join(" ");
+    const matchInput = { prompt: text, normalized: normalize(text), nativeIntent: route.nativeIntent, labels: route.labels, attachments: options.attachments, model: options.model ?? this.#model };
+    const selected: Array<LoadedSkill | SkillDefinition> = [];
+    route.skillRequests = requirements.skillReferences.map((reference) => {
+      const candidates = this.#skillRegistry.resolveReference(reference);
+      const contextual = candidates.length <= 1 ? candidates : candidates.filter((skill) => {
+        const match = matchSkill(skill, matchInput);
+        return match !== undefined && !match.deferred && match.score >= PRIMARY_SKILL_MIN_SCORE;
+      });
+      const resolved = contextual.length === 1 ? contextual[0] : undefined;
+      const deferred = resolved !== undefined && matchSkill(resolved, matchInput)?.deferred === true;
+      if (resolved !== undefined && !deferred) selected.push(resolved);
+      return { reference, status: candidates.length === 0 ? "unavailable" : deferred ? "deferred" : resolved === undefined ? "ambiguous" : "resolved", candidates: candidates.slice(0, 8).map((skill) => skill.name) };
+    });
+    // An unresolved explicit request must not silently select a different skill.
+    const primary = route.skillRequests.every((request) => request.status === "resolved") ? selected[0] : undefined;
+    route.primarySkill = primary;
+    route.supportingSkills = [];
+    route.suggestedSkills = primary === undefined ? [] : [primary];
+    route.suggestedToolsets = dedupe([...NATIVE_INTENT_TOOLSETS[route.nativeIntent], ...(primary === undefined ? [] : routingToolsets(primary))]);
+    route.evidence.push(...route.skillRequests.map((request): IntentRouteEvidence => ({ kind: "explicit-skill-reference", source: request.reference, detail: `Explicit skill reference ${request.status}.`, weight: request.status === "resolved" ? 1 : 0 })));
+    route.candidates = route.skillRequests.flatMap((request) => request.candidates.map((name): SkillRouteCandidate => ({ skill: this.#skillRegistry.resolve(name)!, role: name === primary?.name ? "primary" : request.status === "deferred" ? "deferred" : "candidate", score: name === primary?.name ? 1 : 0, confidence: name === primary?.name ? 1 : 0, evidence: route.evidence.filter((item) => item.kind === "explicit-skill-reference") })));
+    route.rejectedCandidates = route.candidates.filter((candidate) => candidate.role === "deferred");
+    route.confidence = primary === undefined ? 0 : 1;
+    route.confirmationRequired = confirmationForSkills(route.suggestedSkills, route.evidence);
+    route.rationale = primary === undefined ? "Explicit skill reference needs resolution." : `Explicit skill reference resolved to ${primary.name}.`;
+    return route;
   }
 
   private routeIntent(prompt: string, options: IntentRouteOptions): IntentRoute {
@@ -197,8 +227,8 @@ export class IntentRouter {
     const skillMatches = this.#skillRegistry
       .list()
       .map((skill) => matchSkill(skill, {
-        prompt,
-        normalized,
+        prompt: explicitRequestSegments(options.requestText ?? prompt).join(" "),
+        normalized: normalize(explicitRequestSegments(options.requestText ?? prompt).join(" ")),
         nativeIntent: native.nativeIntent,
         labels,
         attachments: options.attachments,

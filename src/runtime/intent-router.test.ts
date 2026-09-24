@@ -475,3 +475,31 @@ function prioritizedSkill(name: string, priority: number): SkillDefinition {
     }
   });
 }
+
+describe("explicit skill references respect session routing policy", () => {
+  it("resolves an exact name without needing a trigger", () => {
+    const named = skill({ name: "exact", routing: { aliases: ["alias"] } });
+    expect(routerWith(named).route("Use the exact skill").primarySkill).toBe(named);
+    expect(routerWith(named).route("Use the alias skill").primarySkill).toBe(named);
+    expect(routerWith().route("Use the alias skill").skillRequests?.[0]?.status).toBe("unavailable");
+  });
+  it("does not let aliases override an exact name", () => {
+    const exact = skill({ name: "exact", routing: {} });
+    const other = skill({ name: "other", routing: { aliases: ["exact"] } });
+    expect(routerWith(other, exact).route("Use the exact skill").primarySkill).toBe(exact);
+  });
+  it("preserves negative rules for explicit names", () => {
+    const guarded = skill({ name: "guarded", routing: { negativePatterns: [{ type: "contains", value: "blocked topic" }] } });
+    const route = routerWith(guarded).route("Use the guarded skill for blocked topic");
+    expect(route.primarySkill).toBeUndefined();
+    expect(route.skillRequests?.[0]?.status).toBe("deferred");
+  });
+});
+
+describe("explicit skill deferral", () => {
+  it("preserves defer rules and confirmation for exact names", () => {
+    const guarded = skill({ name: "guarded", routing: { confirmation: "ask", deferWhen: [{ when: { promptMatches: [{ type: "contains", value: "review" }] }, reason: "Review is deferred" }] } });
+    expect(routerWith(guarded).route("Use the guarded skill to review").skillRequests?.[0]?.status).toBe("deferred");
+    expect(routerWith(guarded).route("Use the guarded skill to draft").confirmationRequired).toBe(true);
+  });
+});

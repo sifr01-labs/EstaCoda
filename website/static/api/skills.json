@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-09-04T09:35:59.979Z",
+  "generatedAt": "2026-09-24T09:22:13.663Z",
   "skills": [
     {
       "id": "official.api-integration",
@@ -569,7 +569,7 @@
       "id": "official.research-discovery",
       "slug": "research-discovery",
       "name": "Research Discovery",
-      "description": "Search arXiv and related research sources by keyword, author, category, or ID and retrieve abstracts, metadata, PDFs, and BibTeX links.",
+      "description": "Discover academic literature, compare source evidence, and synthesize cited research reports; save output when requested.",
       "overview": "Search and retrieve academic papers from arXiv via their free REST API. No API key is required. Prefer EstaCoda web tools and `scripts/search_research_discovery.py`; use raw shell examples only when the user approves command execution or when no web tool is available.",
       "labels": [
         "research.discovery",
@@ -579,7 +579,10 @@
         "research discovery",
         "research-discovery",
         "find papers",
-        "paper search"
+        "paper search",
+        "\\b(?:find|search|review|survey)\\b.{0,100}\\b(?:papers?|arxiv|literature)\\b",
+        "\\bliterature\\s+(?:review|report|survey)\\b",
+        "(?:ابحث|راجع).{0,100}(?:أوراق|أبحاث|أدبيات)"
       ],
       "requiredToolsets": [
         "web"
@@ -619,10 +622,11 @@
       ],
       "triggerPatterns": [
         "researcher",
-        "research paper",
         "write a paper",
         "latex paper",
-        "paper submission"
+        "paper submission",
+        "\\b(?:write|draft|author)\\b.{0,50}\\b(?:paper|manuscript)\\b",
+        "\\b(?:design|run|plan)\\b.{0,50}\\bexperiment\\b"
       ],
       "requiredToolsets": [
         "core",
