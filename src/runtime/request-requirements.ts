@@ -35,7 +35,7 @@ export function deriveRequestRequirements(userText: string, originTurnId?: strin
     const skill = segment.match(/(?:\b(?:use|invoke|load|apply)\s+(?:the\s+)?([\p{L}\p{N}_-]{1,80})\s+skill\b|(?:استخدم|حمّل|فعّل)\s+مهارة\s+([\p{L}\p{N}_-]{1,80})|^\s*\/([\p{L}\p{N}_-]{1,80})(?:\s|$))/iu);
     const reference = skill?.[1] ?? skill?.[2] ?? skill?.[3];
     if (reference !== undefined && result.skillReferences.length < 4) result.skillReferences.push(reference.toLocaleLowerCase("en-US"));
-    const delegation = segment.match(/\b(?:use|launch|spawn|delegate\s+to|assign\s+to)\s+(?:(\d{1,9}|one|two|three|four|five|six|seven|eight|nine|ten)\s+)?(?:sub[- ]?agents?|workers?|agents?)\b|(?:استخدم|شغّل|شغل|كلّف)\s+(?:(\d{1,9}|[٠-٩]{1,9}|ثلاثة|ثلاث|اثنين|اثنان)\s+)?(?:وكلاء|عمال|وكيل)(?:\s+فرعيين)?/iu);
+    const delegation = segment.match(/\b(?:use|launch|spawn|delegate\s+to|assign\s+to)\s+(?:(\d{1,9}|one|two|three|four|five|six|seven|eight|nine|ten)\s+)?(?:sub[- ]?agents?|workers?|agents?)\b|(?:استخدم|شغّل|شغل|كلّف)\s+(?:(\d{1,9}|[٠-٩]{1,9}|ثلاثة|ثلاث|اثنين|اثنان)\s+)?(?:وكلاء|عمال|وكيل|sub[- ]?agents?|workers?)(?:\s+فرعيين)?/iu);
     if (delegation !== null) {
       const countText = delegation[1] ?? delegation[2];
       const words: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, ثلاثة: 3, ثلاث: 3, اثنين: 2, اثنان: 2 };
@@ -59,4 +59,14 @@ export function deriveRequestRequirements(userText: string, originTurnId?: strin
   result.skillReferences = [...new Set(result.skillReferences)];
   result.issues = [...new Set(result.issues)];
   return result;
+}
+
+/** Adds only exact capabilities to an already session-filtered catalog. */
+export function requiredRequestTools(requirements: RequestRequirements | undefined): string[] {
+  if (requirements === undefined) return [];
+  return [
+    ...(requirements.delegation === undefined ? [] : ["delegate_task", "task.status", "task.result.read"]),
+    ...(requirements.fileOutput === undefined ? [] : ["file.write", "file.patch", "file.read"]),
+    ...(requirements.skillReferences.length === 0 ? [] : ["skill.list", "skill.read"])
+  ];
 }

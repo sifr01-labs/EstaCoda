@@ -104,6 +104,7 @@ export class IntentRouter {
     const requirements = deriveRequestRequirements(requestText);
     const route = this.routeIntent(prompt, options);
     route.requestRequirements = requirements;
+    if (requirements.fileOutput !== undefined && route.taskClass === "general") route.taskClass = "docs-writing";
     if (requirements.research !== undefined && route.taskClass === "general") route.taskClass = "research";
     if (requirements.skillReferences.length === 0 || route.invocation !== undefined) return route;
 

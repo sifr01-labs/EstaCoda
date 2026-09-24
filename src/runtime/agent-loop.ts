@@ -147,6 +147,7 @@ export type AgentLoopPythonCapabilitySetupApprovalRequest = {
 };
 
 export type AgentLoopOptions = {
+  maxDelegationBatchTasks?: number;
   runRecorder: RunRecorder;
   runtimeRouter: RuntimeRouter;
   toolPlanRunner: ToolPlanRunner;
@@ -243,6 +244,7 @@ export type SkillSetupContext = {
 };
 
 export class AgentLoop {
+  readonly #maxDelegationBatchTasks: number | undefined;
   readonly #responseLabel: string;
   readonly #runRecorder: RunRecorder;
   readonly #runtimeRouter: RuntimeRouter;
@@ -324,6 +326,7 @@ export class AgentLoop {
     this.#providerToolSchemaCatalog = options.providerToolSchemaCatalog;
     this.#mcpServerSnapshots = options.mcpServerSnapshots ?? [];
     this.#executionCompletionCapabilities = options.executionCompletionCapabilities ?? [];
+    this.#maxDelegationBatchTasks = options.maxDelegationBatchTasks;
     this.#providerTurnLoop = options.providerTurnLoop;
     this.#skillPlaybookRunner = options.skillPlaybookRunner;
     this.#nativeToolExecutor = options.nativeToolExecutor;
@@ -621,6 +624,19 @@ export class AgentLoop {
       kind: "intent-routed",
       route: intent
     });
+
+    const requestedCount = intent.requestRequirements?.delegation?.count;
+    if (requestedCount !== undefined && (requestedCount < 1 || (this.#maxDelegationBatchTasks !== undefined && requestedCount > this.#maxDelegationBatchTasks))) {
+      const text = `The requested ${requestedCount} workers exceed the supported range (1–${this.#maxDelegationBatchTasks ?? 1}). No workers were started. Please choose a supported count.`;
+      await this.#sessionDb.appendMessage({ sessionId: this.#currentSessionId(), role: "agent", content: text, channel: input.channel, metadata: { respondingToTurnId: visibleTurn.id } });
+      await emit(input.onEvent, { kind: "agent-final", text });
+      return await this.#completeAndReturn({
+        label: this.#responseLabel, text, matchedSkills: [], intent, securityDecision: "deny",
+        toolExecutions: [], toolPlans: [], skillOutcomes: [], artifacts: [], context,
+        projectContext: this.#projectContext, progress: ["requested delegation count outside configured limits"],
+        finalOutcome: { status: "blocked", terminationCause: "user_input_required", completionFloor: turnCompletionFloor, confirmedActions: [], uncertainActions: [] }
+      }, { success: false, status: "blocked", summary: text }, visibleTurn.id);
+    }
 
     this.#trajectoryRecorder.record("progress", {
       message: "intent routed",

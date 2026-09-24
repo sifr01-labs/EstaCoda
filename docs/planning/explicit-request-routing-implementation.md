@@ -39,3 +39,23 @@ Review: alias collisions, exact-name precedence, unavailable session skills,
 negative/defer/confirmation behavior and source template delivery were checked.
 147 focused tests passed before the final prompt/deferral checks. Tracked-source
 typecheck passed. No execution authority or policy gates changed.
+
+## Commit 3 — Exact tool exposure and delegation limits
+
+Explicit delegation selects `delegate_task`, `task.status` and `task.result.read`;
+file output selects `file.write`, `file.patch` and `file.read`. Selection only
+intersects the existing session catalog. File-only output does not select shell
+execution. Literature discovery uses required web tools without automatically
+opening optional shell/research toolsets. Explicit skill requests expose the
+existing skill inspection tools. Provider prompts carry the bounded requirements.
+
+Requested worker counts outside the effective configured batch limit stop before
+provider/worker execution and return an explicit blocker. Mixed Arabic/English
+worker requests are covered. The durable three-worker acceptance control now uses
+a natural-language skill/delegation request rather than slash-only routing.
+
+Review and validation: 278 tests passed across analyzer, narrowing/policies,
+runtime/builder, prompt, eval and real workflow acceptance suites. All 22 requested
+capabilities in the development corpus are exposed; negative controls remain at
+zero unwanted exposures. The catalog cap remains a separately characterized PR 2
+gap. Admission/approval rules and child/session tool ceilings are unchanged.

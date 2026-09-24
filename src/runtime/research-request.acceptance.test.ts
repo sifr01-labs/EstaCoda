@@ -45,7 +45,7 @@ describe.sequential("research workflow acceptance harness — PR 0 characterizat
     const inventory = h.events.find((event) => event.kind === "provider-tool-inventory");
     expect(inventory).toMatchObject({ phase: "initial", nativeSchemaTokens: expect.any(Number) });
     if (inventory?.kind !== "provider-tool-inventory") throw new Error("Missing tool inventory");
-    expect(inventory.tools).not.toContain("delegate_task");
+    expect(inventory.tools).toEqual(expect.arrayContaining(["delegate_task", "task_status", "task_result_read"]));
     expect(inventory.nativeSchemaTokens).toBeGreaterThan(0);
     const receipts = (await h.sessionDb.listEvents(h.runtime.sessionId)).filter((event) => event.kind === "execution-evidence-recorded");
     for (const execution of research.toolExecutions) {
@@ -99,7 +99,7 @@ describe.sequential("research workflow acceptance harness — PR 0 characterizat
         research: { scope, requireLiveSources: true, requireRepositoryEvidence: false }
       }))
     }));
-    const dispatch = await h.turn("/researcher Use 3 subagents to research battery recycling.");
+    const dispatch = await h.turn("Use the researcher skill and use 3 subagents to research battery recycling.");
     expect(dispatch.toolExecutions.find((execution) => execution.tool.name === "delegate_task")?.result?.ok).toBe(true);
     const task = h.store.listTasks()[0]!;
     expect(task).toBeDefined();
@@ -183,5 +183,16 @@ describe.sequential("research workflow acceptance harness — PR 0 characterizat
     expect(new Set(response.toolExecutions.map((execution) => execution.toolCallId)).size).toBe(2);
     expect(response.toolExecutions.every((execution) => execution.result?.ok)).toBe(true);
     scriptConsumed(h);
+  });
+});
+
+describe("explicit delegation limit admission", () => {
+  it("blocks an oversized user count before any provider or worker execution", async () => {
+    const h = await harness({ maxBatchTasks: 2 });
+    const result = await h.turn("Use 3 subagents to research battery recycling");
+    expect(result.finalOutcome?.status).toBe("blocked");
+    expect(result.text).toContain("1–2");
+    expect(h.requests).toHaveLength(0);
+    expect(h.store.listTasks()).toHaveLength(0);
   });
 });

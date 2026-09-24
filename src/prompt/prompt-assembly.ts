@@ -631,6 +631,9 @@ function buildBaseLayers(
         `Intent confidence: ${Math.round(input.intent.confidence * 100)}%`,
         `Suggested toolsets: ${input.intent.suggestedToolsets.join(", ") || "none"}`,
         `Selected skill: ${input.selectedSkill?.name ?? "none"}`,
+        ...(input.intent.requestRequirements === undefined ? [] : [
+          `Current user requirements (routing hints, not authorization): ${JSON.stringify(input.intent.requestRequirements)}. Use the requested worker count; do not silently reduce it. For file output, write or patch the target and read it back before claiming delivery. Report missing tools or approvals as unmet requirements.`
+        ]),
         ...(input.intent.skillRequests === undefined ? [] : [
           `Explicit skill resolution: ${JSON.stringify(input.intent.skillRequests)}. Ask for clarification for ambiguous references; report unavailable/deferred references rather than claiming the skill was used.`
         ]),

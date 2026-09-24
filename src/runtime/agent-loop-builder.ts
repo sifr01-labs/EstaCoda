@@ -21,7 +21,7 @@ import type { UsageInspector } from "../session/usage-inspector.js";
 import { ContextReferenceExpander } from "../context/context-reference-expander.js";
 import type { CronStore } from "../cron/cron-store.js";
 import { availableToolsetsFromTools } from "../cron/cron-runtime-validation.js";
-import type { DelegationConfig } from "../contracts/delegation.js";
+import { MAX_DELEGATION_BATCH_TASKS, type DelegationConfig } from "../contracts/delegation.js";
 import { DEFAULT_DELEGATION_CONFIG } from "../config/delegation-defaults.js";
 import type { DurableDelegationService } from "../delegation/durable-delegation-service.js";
 import type { FileStateTracker } from "../delegation/file-state-tracker.js";
@@ -722,6 +722,7 @@ export class AgentLoopBuilder {
       skillConfig: input.skillConfig ?? {}
     });
     const agentLoop = (this.#factories.agentLoop ?? ((options) => new AgentLoop(options)))({
+      maxDelegationBatchTasks: Math.max(1, Math.min((substrate.delegationConfig ?? DEFAULT_DELEGATION_CONFIG).maxBatchTasks, MAX_DELEGATION_BATCH_TASKS)),
       runRecorder,
       runtimeRouter,
       toolPlanRunner,

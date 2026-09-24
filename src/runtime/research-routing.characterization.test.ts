@@ -29,7 +29,12 @@ const definitions = [
   tool("file.write", ["files"], "workspace-write"),
   tool("delegate_task", ["core", "research", "coding"], "shared-state-mutation"),
   tool("skill.list", ["core", "research"]),
-  tool("skill.read", ["core", "research"])
+  tool("skill.read", ["core", "research"]),
+  tool("task.status", ["core"]),
+  tool("task.result.read", ["core"]),
+  tool("file.patch", ["files"], "workspace-write"),
+  tool("terminal.run", ["shell-write"], "workspace-write"),
+  tool("unrelated.mutate", ["core"], "shared-state-mutation")
 ];
 const catalog = buildProviderToolSchemaCatalog({ tools: definitions });
 
@@ -40,20 +45,20 @@ function inspect(prompt: string) {
 }
 
 describe("research routing baseline (known gaps, PR 0)", () => {
-  it("recognizes research but misses the skill and explicitly requested delegation (PR 1)", () => {
+  it("exposes explicit research delegation without choosing an academic skill by default (PR 1)", () => {
     const { intent, names, selection } = inspect("Do deep research on the latest battery recycling methods and prepare a report. Use 3 subagents");
     expect(intent.taskClass).toBe("research");
     expect(intent.primarySkill).toBeUndefined();
     expect(catalog.entries.some(({ tool }) => tool.name === "delegate_task")).toBe(true);
     expect(names).toContain("web.extract");
-    expect(names).not.toContain("delegate_task");
+    expect(names).toContain("delegate_task");
     expect(selection.expansionCandidates).toEqual([]);
   });
 
-  it("cannot load an explicitly requested generic research skill on a rerun (PR 1/3)", () => {
+  it("exposes skill inspection for an unresolved generic research request (PR 1)", () => {
     const { intent, names } = inspect("Rerun this task but this time use the research skill.");
     expect(intent.primarySkill).toBeUndefined();
-    expect(names).not.toContain("skill.read");
+    expect(names).toContain("skill.read");
   });
 
   it("selects literature discovery for a noncontiguous find-papers phrase (PR 1)", () => {
@@ -63,7 +68,7 @@ describe("research routing baseline (known gaps, PR 0)", () => {
   it("reports a prepare-file request complete without a write or receipt (PR 1/4)", () => {
     const prompt = "Please prepare a markdown file";
     const completionFloor = deriveExecutionCompletionFloor({ userText: prompt });
-    expect(inspect(prompt).names).not.toContain("file.write");
+    expect(inspect(prompt).names).toContain("file.write");
     expect(completionFloor).toBe("none");
     const outcome = deriveExecutionFinalOutcome({
       providerExecution: { ok: true, attempts: [], fallbackUsed: false, toolCalls: [], response: { ok: true, provider: "baseline", model: "fake", content: "Copy this Markdown into a file." } },
@@ -73,10 +78,10 @@ describe("research routing baseline (known gaps, PR 0)", () => {
     expect(outcome.confirmedActions).toEqual([]);
   });
 
-  it("detects an Arabic save requirement while still hiding file.write (PR 1)", () => {
+  it("exposes file.write for an Arabic save requirement (PR 1)", () => {
     const prompt = "احفظ التقرير في ملف Markdown";
     expect(deriveExecutionCompletionFloor({ userText: prompt })).toBe("mutation");
-    expect(inspect(prompt).names).not.toContain("file.write");
+    expect(inspect(prompt).names).toContain("file.write");
   });
 
   it("classifies Arabic research (PR 1)", () => {
@@ -128,5 +133,29 @@ describe("research routing baseline healthy controls", () => {
   });
   it.each(["Do not use the researcher skill", "Explain the researcher skill", "What if we use the researcher skill?", "Research the market for new shoes"])("avoids unintended academic workflow: %s", (prompt) => {
     expect(inspect(prompt).intent.primarySkill).toBeUndefined();
+  });
+});
+
+ describe("exact requested tools stay within the session catalog", () => {
+  it("adds delegation companions without unrelated core tools", () => {
+    const { names } = inspect("Use 3 subagents to investigate battery recycling");
+    expect(names).toEqual(expect.arrayContaining(["delegate_task", "task.status", "task.result.read"]));
+    expect(names).not.toContain("unrelated.mutate");
+    expect(names).not.toContain("terminal.run");
+  });
+  it.each(["Prepare report.md", "Find papers and save report.md", "احفظ التقرير في ملف Markdown"])("exposes file tools without shell tools: %s", (prompt) => {
+    const { names } = inspect(prompt);
+    expect(names).toEqual(expect.arrayContaining(["file.write", "file.patch", "file.read"]));
+    expect(names).not.toContain("terminal.run");
+  });
+  it("cannot add a delegation capability excluded from a child/session catalog", () => {
+    const filtered = buildProviderToolSchemaCatalog({ tools: definitions.filter((entry) => entry.name !== "delegate_task") });
+    const intent = router.route("Use three subagents");
+    expect(selectProviderToolsForTurn({ catalog: filtered, intent }).initialTools.some((tool) => tool.function.name === "delegate_task")).toBe(false);
+  });
+  it.each(["Do not use 3 subagents", "Explain how to use 3 subagents", "What if we save report.md and use 3 subagents?", "لا تستخدم ثلاثة وكلاء فرعيين"])("keeps negatives and hypothetical requests bounded: %s", (prompt) => {
+    const { names } = inspect(prompt);
+    expect(names).not.toContain("delegate_task");
+    expect(names).not.toContain("file.write");
   });
 });

@@ -84,6 +84,9 @@ export function selectToolSelectionPolicy(input: {
   selectedSkill: boolean;
   readyAttachments: boolean;
 }): ToolSelectionPolicy {
+  if (input.intent.requestRequirements?.fileOutput !== undefined && input.intent.taskClass === "docs-writing" && !input.namedConnectorOperation) {
+    return TOOL_SELECTION_POLICIES["bounded-general"];
+  }
   const baseName = (
     (input.selectedSkill || input.readyAttachments) &&
     (input.intent.taskClass === undefined || input.intent.taskClass === "general")

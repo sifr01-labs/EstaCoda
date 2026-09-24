@@ -1,3 +1,4 @@
+import { DEFAULT_DELEGATION_CONFIG } from "../../config/delegation-defaults.js";
 import { mkdtemp, mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -38,7 +39,7 @@ export function answer(content: string): ScriptStep {
   return () => ({ content });
 }
 
-export async function createResearchWorkflowHarness(options: { searchAvailable?: boolean; denyWrites?: boolean } = {}) {
+export async function createResearchWorkflowHarness(options: { searchAvailable?: boolean; denyWrites?: boolean; maxBatchTasks?: number } = {}) {
   const root = await mkdtemp(join(tmpdir(), "estacoda-research-baseline-"));
   const homeDir = join(root, "home");
   const workspaceRoot = join(root, "workspace");
@@ -99,6 +100,7 @@ export async function createResearchWorkflowHarness(options: { searchAvailable?:
       providerRegistry: providers, trustStore, workspaceTrusted: true,
       localSkillsRoot: join(homeDir, "local-skills"), browser: { backend: "unconfigured", autoLaunch: false },
       enableWebNetwork: true,
+      ...(options.maxBatchTasks === undefined ? {} : { delegationConfig: { ...DEFAULT_DELEGATION_CONFIG, maxBatchTasks: options.maxBatchTasks } }),
       webConfig: { searchBackend: options.searchAvailable === false ? "unconfigured-baseline-web" : "research-baseline-web", extractBackend: "research-baseline-web" },
       webFetch: async () => { throw new Error("Fixture must never perform network fetches"); },
       // Constrain unrelated capabilities using the real session filter.

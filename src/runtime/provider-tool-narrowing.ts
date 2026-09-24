@@ -3,6 +3,7 @@ import type { IntentRoute } from "../contracts/intent.js";
 import type { LoadedSkill, SkillDefinition } from "../contracts/skill.js";
 import type { ToolDefinition, ToolsetName } from "../contracts/tool.js";
 import type { MCPServerSnapshot } from "../mcp/mcp-tools.js";
+import { requiredRequestTools } from "./request-requirements.js";
 import type {
   OpenAICompatibleToolSchema,
   ProviderToolSchemaCatalog
@@ -128,12 +129,15 @@ export function selectProviderToolsForTurn(input: {
     readyAttachments: (input.attachments ?? []).some((attachment) => (attachment.status ?? "ready") === "ready")
   });
   const policyToolsets = new Set(policy.toolsets);
+  const exactRequestTools = new Set(requiredRequestTools(input.intent.requestRequirements));
   const policyRiskClasses = new Set(policy.allowedRiskClasses);
   const routedToolsets = new Set<ToolsetName>([
     ...input.intent.suggestedToolsets,
     ...continuityToolsets,
     ...(input.selectedSkill?.requiredToolsets ?? []),
-    ...(input.selectedSkill?.optionalToolsets ?? [])
+    // Literature discovery is web-first. Scripts and other optional execution
+    // toolsets are not needed merely to read papers or deliver a report.
+    ...(input.selectedSkill?.routing?.labels?.includes("research.discovery") ? [] : input.selectedSkill?.optionalToolsets ?? [])
   ]);
   const attachedToolsets = new Set(attachmentToolsets(input.attachments));
   const apiIntegrationProfile = input.selectedSkill?.name === API_INTEGRATION_SKILL_NAME;
@@ -156,6 +160,7 @@ export function selectProviderToolsForTurn(input: {
       if (entry.tool.connector !== undefined) {
         return namedConnectors.has(connectorKey(entry.tool.connector));
       }
+      if (exactRequestTools.has(entry.tool.name)) return true;
       if (actionable && RECOVERY_TOOL_NAMES.has(entry.tool.name)) return true;
       if (
         entry.tool.toolsets.some((toolset) => attachedToolsets.has(toolset)) &&
