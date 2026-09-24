@@ -46,8 +46,8 @@ export async function createResearchWorkflowHarness(options: { searchAvailable?:
   const homeDir = join(root, "home");
   const workspaceRoot = join(root, "workspace");
   await mkdir(workspaceRoot);
-  const sessionDb = await createSQLiteSessionDB({ path: join(homeDir, "sessions.sqlite") });
-  const store = new SQLiteTaskStore({ db: sessionDb.db, profileId: "baseline" });
+  let sessionDb = await createSQLiteSessionDB({ path: join(homeDir, "sessions.sqlite") });
+  let store = new SQLiteTaskStore({ db: sessionDb.db, profileId: "baseline" });
   const requests: ProviderRequest[] = [];
   const events: RuntimeEvent[] = [];
   const searches: string[] = [];
@@ -94,10 +94,10 @@ export async function createResearchWorkflowHarness(options: { searchAvailable?:
     }
   });
   let runtime: Runtime;
-  try {
+  const buildRuntime = async () => {
     const trustStore = new WorkspaceTrustStore({ homeDir });
     await trustStore.grant(workspaceRoot);
-    runtime = await createRuntime({
+    return await createRuntime({
       homeDir, workspaceRoot, profileId: "baseline", sessionId: "research-baseline-session", sessionDb,
       tokens: resolveTokens("standard", "dark", "kemetBlue"), model,
       primaryModelRoute: { provider: model.provider, id: model.id, profile: model, authMethod: "none" },
@@ -114,14 +114,22 @@ export async function createResearchWorkflowHarness(options: { searchAvailable?:
       securityPolicy: { decide: (request) => options.approvalDecision ? approvedActions.has(request.actionKey ?? "") ? "allow" : "ask" : options.denyWrites && request.riskClass === "workspace-write" ? "deny" : "allow" },
       executionControls: { providerBudgets: { maxProviderIterations: 8, maxProviderToolCalls: 8, maxProviderWallClockMs: 15_000, finalizationReserveMs: 0 } }
     });
-  } catch (error) {
+  };
+  try { runtime = await buildRuntime(); } catch (error) {
     await sessionDb.close();
     resetWebResearchProvidersForTest();
     await rm(root, { recursive: true, force: true });
     throw error;
   }
   return {
-    runtime, root, homeDir, workspaceRoot, sessionDb, store, requests, events, searches, extracts, scriptErrors,
+    get runtime() { return runtime; }, root, homeDir, workspaceRoot, get sessionDb() { return sessionDb; }, get store() { return store; }, requests, events, searches, extracts, scriptErrors,
+    async restart() {
+      await runtime.dispose();
+      await sessionDb.close();
+      sessionDb = await createSQLiteSessionDB({ path: join(homeDir, "sessions.sqlite") });
+      store = new SQLiteTaskStore({ db: sessionDb.db, profileId: "baseline" });
+      runtime = await buildRuntime();
+    },
     enqueue(...steps: ScriptStep[]) { script.push(...steps); },
     remainingSteps: () => script.length,
     turn: (text: string) => runtime.handle({ text, channel: "cli", onApprovalRequest: options.approvalDecision === undefined ? undefined : async (request) => {

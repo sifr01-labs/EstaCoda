@@ -31,6 +31,7 @@ import {
   validateExecutionCheckpoint
 } from "../session/execution-checkpoint-state.js";
 import { isAcknowledgementContinuation, isExplicitNewRequest } from "./conversation-continuation-state.js";
+import { explicitRequestSegments, requirementFollowUp } from "./request-requirements.js";
 
 export class ExecutionCheckpointConflictError extends Error {
   constructor(message: string) {
@@ -51,7 +52,8 @@ export type ExecutionCheckpointControllerOptions = {
 };
 
 export type ExecutionCheckpointTurnPreparation = {
-  disposition: "none" | "continuation" | "recovery" | "correction" | "cancelled" | "superseded";
+  disposition: "none" | "continuation" | "recovery" | "correction" | "cancelled" | "superseded" | "requirement_followup";
+  requirementMode?: "save" | "rerun";
   checkpoint?: ForegroundExecutionCheckpoint;
 };
 
@@ -103,6 +105,7 @@ export class ExecutionCheckpointController implements ExecutionCheckpointReader 
       const now = this.#now();
       const checkpoint = validateExecutionCheckpoint({
         version: EXECUTION_CHECKPOINT_VERSION,
+        ...(input.requestRequirements === undefined ? {} : { requestRequirements: input.requestRequirements }),
         ...(this.#executionBinding?.() === undefined ? {} : { executionBinding: this.#executionBinding!() }),
         id: this.#createId(),
         sessionId: this.#sessionId(),
@@ -325,6 +328,12 @@ export class ExecutionCheckpointController implements ExecutionCheckpointReader 
         current = this.current();
       }
     }
+    const requirementMode = current === undefined || current.status === "cancelled" || current.status === "superseded"
+      ? undefined : requirementFollowUp(userText, current.requestRequirements);
+    if (current !== undefined && requirementMode !== undefined) {
+      if (!isTerminalCheckpointStatus(current.status)) await this.#close(current.revision, "superseded", "superseded");
+      return { disposition: "requirement_followup", checkpoint: current, requirementMode };
+    }
     if (current === undefined || isTerminalCheckpointStatus(current.status)) {
       return { disposition: "none" };
     }
@@ -350,7 +359,10 @@ export class ExecutionCheckpointController implements ExecutionCheckpointReader 
     if (isCheckpointBlockerResponse(userText, current)) {
       return { disposition: "continuation", checkpoint: current };
     }
-    if (!isAcknowledgementContinuation(userText) && isExplicitCheckpointSupersession(userText)) {
+    const newResearchObjective = current.requestRequirements?.research !== undefined &&
+      /^(?:(?:please|can you)\s+)?(?:research|find|investigate|survey)\b|^(?:من فضلك\s+)?ابحث(?:\s|$)/iu.test(explicitRequestSegments(userText).join(" ")) &&
+      !/\b(?:this|that|same|again|continue)\b|نفس|هذا/iu.test(userText);
+    if (newResearchObjective || (!isAcknowledgementContinuation(userText) && isExplicitCheckpointSupersession(userText))) {
       const checkpoint = await this.#close(current.revision, "superseded", "superseded");
       return { disposition: "superseded", ...(checkpoint === undefined ? {} : { checkpoint }) };
     }

@@ -33,13 +33,14 @@ import type { IntentTaskClass } from "../contracts/intent.js";
 import type { SessionEvent } from "../contracts/session.js";
 import { redactString, redactValue } from "../utils/redaction.js";
 import { browserContinuityUrl } from "../browser/continuity-url.js";
+import { validateRequestRequirements } from "./request-requirement-state.js";
 
 const SAFE_TOKEN = /^[A-Za-z0-9][A-Za-z0-9_.:-]*$/u;
 const STATUSES = new Set<ExecutionCheckpointStatus>([
   "active", "awaiting_user", "retryable", "blocked", "completed", "cancelled", "superseded"
 ]);
 const QUALIFICATION_REASONS = new Set<ExecutionCheckpointQualificationReason>([
-  "cross_system", "verified_mutation", "external_multi_step", "user_input_interruption", "multi_item"
+  "cross_system", "verified_mutation", "external_multi_step", "user_input_interruption", "multi_item", "research_request"
 ]);
 const OPERATION_REQUIREMENTS = new Set<ExecutionCheckpointOperationRequirement>([
   "read", "mutation", "verification", "artifact_relay", "protected_transfer"
@@ -57,6 +58,7 @@ const TASK_CLASSES = new Set<IntentTaskClass>([
   "research", "media-generation", "attachment-analysis", "general"
 ]);
 const CHECKPOINT_KEYS = new Set([
+  "requestRequirements",
   "executionBinding", "version", "id", "sessionId", "profileId", "originTurnId", "revision", "progressRevision",
   "originalObjective", "latestUserCorrection", "status", "qualificationReasons", "selectedSkillName", "taskClass",
   "intentLabels", "requiredOperations", "connectorIds", "completionFloor", "blocker",
@@ -94,6 +96,7 @@ export function cloneExecutionCheckpoint(
 ): ForegroundExecutionCheckpoint {
   return {
     ...checkpoint,
+    ...(checkpoint.requestRequirements === undefined ? {} : { requestRequirements: structuredClone(checkpoint.requestRequirements) }),
     qualificationReasons: [...checkpoint.qualificationReasons],
     intentLabels: [...checkpoint.intentLabels],
     requiredOperations: [...checkpoint.requiredOperations],
@@ -348,6 +351,7 @@ function sameImmutableCheckpointState(
     current.selectedSkillName === candidate.selectedSkillName &&
     current.taskClass === candidate.taskClass &&
     current.completionFloor === candidate.completionFloor &&
+    JSON.stringify(current.requestRequirements) === JSON.stringify(candidate.requestRequirements) &&
     sameStringArray(current.qualificationReasons, candidate.qualificationReasons) &&
     sameStringArray(current.intentLabels, candidate.intentLabels) &&
     sameStringArray(current.requiredOperations, candidate.requiredOperations) &&
@@ -398,6 +402,7 @@ export function validateExecutionCheckpoint(input: unknown): ForegroundExecution
   }
   const status = enumValue(input.status, STATUSES, "status");
   const checkpoint: ForegroundExecutionCheckpoint = {
+    ...(input.requestRequirements === undefined ? {} : { requestRequirements: validateRequestRequirements(input.requestRequirements) }),
     version: EXECUTION_CHECKPOINT_VERSION,
     ...(input.executionBinding === undefined ? {} : { executionBinding: validateCheckpointExecutionBinding(input.executionBinding) }),
     id: token(input.id, "id", 128),
@@ -415,7 +420,7 @@ export function validateExecutionCheckpoint(input: unknown): ForegroundExecution
       input.qualificationReasons,
       QUALIFICATION_REASONS,
       "qualificationReasons",
-      5,
+      6,
       true
     ),
     ...(input.selectedSkillName === undefined
@@ -457,6 +462,9 @@ export function validateExecutionCheckpoint(input: unknown): ForegroundExecution
   };
   if (checkpoint.progressRevision > checkpoint.revision) {
     throw new ExecutionCheckpointValidationError("Checkpoint progress revision exceeds its state revision.");
+  }
+  if (checkpoint.requestRequirements?.originTurnId !== undefined && checkpoint.requestRequirements.originTurnId !== checkpoint.originTurnId) {
+    throw new ExecutionCheckpointValidationError("Request requirements belong to another turn.");
   }
   if (Date.parse(checkpoint.updatedAt) < Date.parse(checkpoint.createdAt)) {
     throw new ExecutionCheckpointValidationError("Checkpoint update precedes its creation.");

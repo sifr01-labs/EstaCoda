@@ -71,3 +71,28 @@ export function requiredRequestTools(requirements: RequestRequirements | undefin
     ...(requirements.skillReferences.length === 0 ? [] : ["skill.list", "skill.read"])
   ];
 }
+
+export function requirementFollowUp(text: string, previous: RequestRequirements | undefined): "save" | "rerun" | undefined {
+  if (previous === undefined || text.length > MAX_REQUEST_CHARS) return undefined;
+  const segments = explicitRequestSegments(text).join(" ");
+  if (previous.research !== undefined && /\b(?:rerun|re-run|redo|repeat)\s+(?:this|that|the|it|research|task)\b|(?:أعد|اعد)\s+(?:البحث|المهمة)/iu.test(segments)) return "rerun";
+  const next = deriveRequestRequirements(text);
+  if (next.fileOutput !== undefined && next.research === undefined && next.delegation === undefined &&
+    (previous.research !== undefined || previous.fileOutput !== undefined) &&
+    /\b(?:save|export|prepare|this|that|existing|above)\b|(?:احفظ|صدر|صدّر|جهز|جهّز)/iu.test(segments) &&
+    !/\b(?:new topic|instead|forget|unrelated|another|about)\b|موضوع جديد/iu.test(segments)) return "save";
+  return undefined;
+}
+
+export function continueRequestRequirements(previous: RequestRequirements, next: RequestRequirements, mode?: "save" | "rerun"): RequestRequirements {
+  if (mode === "save") return structuredClone(next);
+  return {
+    ...structuredClone(previous), ...structuredClone(next),
+    ...(previous.research === undefined ? {} : { research: {
+      domain: next.research?.domain !== undefined && next.research.domain !== "general" ? next.research.domain : previous.research.domain,
+      fresh: previous.research.fresh || next.research?.fresh === true
+    } }),
+    skillReferences: next.skillReferences.length > 0 ? [...next.skillReferences] : [...previous.skillReferences],
+    issues: [...new Set([...previous.issues, ...next.issues])]
+  };
+}

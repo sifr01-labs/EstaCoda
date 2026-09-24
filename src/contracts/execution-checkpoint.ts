@@ -1,5 +1,5 @@
 import type { ExecutionCompletionFloor, ExecutionFinalOutcome, ExecutionTerminationCause } from "./execution-plan.js";
-import type { IntentTaskClass } from "./intent.js";
+import type { IntentTaskClass, RequestRequirements } from "./intent.js";
 import type { ProviderErrorClass } from "./provider.js";
 
 export const EXECUTION_CHECKPOINT_VERSION = 1 as const;
@@ -29,7 +29,8 @@ export type ExecutionCheckpointQualificationReason =
   | "verified_mutation"
   | "external_multi_step"
   | "user_input_interruption"
-  | "multi_item";
+  | "multi_item"
+  | "research_request";
 
 /** Coarse task needs. Concrete tools are always resolved from the current registry. */
 export type ExecutionCheckpointOperationRequirement =
@@ -127,6 +128,8 @@ export type CheckpointExecutionBinding = {
 };
 
 export type ForegroundExecutionCheckpoint = {
+  /** User intent only. Relative file targets require fresh execution evidence. */
+  requestRequirements?: RequestRequirements;
   executionBinding?: CheckpointExecutionBinding;
   version: typeof EXECUTION_CHECKPOINT_VERSION;
   id: string;
@@ -189,6 +192,7 @@ export type ExecutionCheckpointLifecycleEvent = {
 };
 
 export type ExecutionCheckpointCreationInput = {
+  requestRequirements?: RequestRequirements;
   originTurnId: string;
   originalObjective: string;
   qualificationReasons: ExecutionCheckpointQualificationReason[];

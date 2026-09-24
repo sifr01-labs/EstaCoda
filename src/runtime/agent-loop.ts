@@ -3,6 +3,7 @@ import type { ChannelAttachment, ChannelKind } from "../contracts/channel.js";
 import type { ContextExpansionResult, ProjectContextSnapshot } from "../contracts/context.js";
 import type { IntentRoute } from "../contracts/intent.js";
 import { fileOutputEvidence } from "./file-output-evidence.js";
+import { continueRequestRequirements } from "./request-requirements.js";
 import type { ExecutionFinalOutcome, ExecutionPlan, ExecutionPlanReader } from "../contracts/execution-plan.js";
 import type { ForegroundExecutionCheckpoint } from "../contracts/execution-checkpoint.js";
 import type { ExecutionPlanController } from "./execution-plan-controller.js";
@@ -375,7 +376,8 @@ export class AgentLoop {
       .catch(() => undefined);
     const resumedCheckpoint = checkpointPreparation?.disposition === "continuation" ||
       checkpointPreparation?.disposition === "recovery" ||
-      checkpointPreparation?.disposition === "correction"
+      checkpointPreparation?.disposition === "correction" ||
+      checkpointPreparation?.disposition === "requirement_followup"
       ? checkpointPreparation.checkpoint
       : undefined;
     await this.#executionPlanController?.prepareForTurn(turnText, input.onEvent);
@@ -432,16 +434,18 @@ export class AgentLoop {
       : continuedConversationState === undefined
         ? routedText
         : `${continuedConversationState.userRequest}\nFollow-up: ${routedText}`;
-    const executionText = resumedCheckpoint === undefined ? routedText : routingText;
+    const executionText = checkpointPreparation?.requirementMode === "save"
+      ? `${routedText}\nSave-only follow-up: reuse the existing research result; do not repeat research or start new workers. Previous objective for reference: ${resumedCheckpoint?.originalObjective ?? ""}`
+      : resumedCheckpoint === undefined ? routedText : routingText;
     const trustedWorkspace = input.trustedWorkspace ?? false;
     const route = this.#runtimeRouter.route({
-      text: routingText,
+      text: checkpointPreparation?.requirementMode === "save" ? turnText : routingText,
       requestText: turnText,
       attachments: input.attachments,
       channel: input.channel,
       model: this.#model,
       trustedWorkspace,
-      ...(resumedCheckpoint?.selectedSkillName === undefined
+      ...(resumedCheckpoint?.selectedSkillName === undefined || checkpointPreparation?.requirementMode === "save"
         ? {}
         : { checkpointSkillName: resumedCheckpoint.selectedSkillName })
     });
@@ -466,6 +470,8 @@ export class AgentLoop {
       }
     });
     if (route.intent.requestRequirements !== undefined) {
+      if (resumedCheckpoint?.requestRequirements !== undefined) route.intent.requestRequirements = continueRequestRequirements(
+        resumedCheckpoint.requestRequirements, route.intent.requestRequirements, checkpointPreparation?.requirementMode);
       route.intent.requestRequirements.originTurnId = visibleTurn.id;
     }
     const userInputEvent = this.#trajectoryRecorder.record("user-input", {
@@ -620,7 +626,8 @@ export class AgentLoop {
     const selectedSkillInstructions = route.selectedSkillInstructions;
     const selectedSkillResources = route.selectedSkillResources;
     const selectedSkillSetup = route.selectedSkillSetup;
-    const turnCompletionFloor = resumedCheckpoint?.completionFloor ?? deriveExecutionCompletionFloor({
+    const turnCompletionFloor = intent.requestRequirements?.fileOutput !== undefined ? "mutation_with_verification" :
+      (checkpointPreparation?.requirementMode === "save" ? undefined : resumedCheckpoint?.completionFloor) ?? deriveExecutionCompletionFloor({
       userText: turnText,
       capabilities: this.#executionCompletionCapabilities
     });
@@ -717,7 +724,7 @@ export class AgentLoop {
 
     const checkpointInput = qualifyForegroundExecution({
       originTurnId: visibleTurn.id,
-      userText: effectiveText,
+      userText: checkpointPreparation?.requirementMode === "rerun" ? executionText : effectiveText,
       intent,
       selectedSkill,
       completionFloor: turnCompletionFloor,
@@ -733,7 +740,7 @@ export class AgentLoop {
       await this.#executionCheckpointController?.ensure(checkpointInput).catch(() => undefined);
     }
 
-    const checkpointResumePreflight = resumedCheckpoint === undefined
+    const checkpointResumePreflight = resumedCheckpoint === undefined || checkpointPreparation?.requirementMode !== undefined
       ? undefined
       : await this.#executionCapabilityPreflight?.assessCheckpointResume?.({
           checkpoint: resumedCheckpoint,

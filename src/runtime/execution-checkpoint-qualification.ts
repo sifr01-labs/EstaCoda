@@ -23,6 +23,8 @@ export function qualifyForegroundExecution(input: {
   const external = input.intent.taskClass === "browser-operation" || toolsets.has("browser") || toolsets.has("mcp");
 
   const reasons = new Set<ExecutionCheckpointQualificationReason>();
+  const requirements = input.intent.requestRequirements;
+  if (requirements?.research !== undefined && (requirements.delegation !== undefined || requirements.skillReferences.length > 0 || requirements.fileOutput !== undefined)) reasons.add("research_request");
   const hasBrowser = input.intent.taskClass === "browser-operation" || toolsets.has("browser");
   const hasConnector = toolsets.has("mcp") || (input.connectorIds?.length ?? 0) > 0;
   if (hasBrowser && hasConnector) reasons.add("cross_system");
@@ -33,6 +35,7 @@ export function qualifyForegroundExecution(input: {
   if (reasons.size === 0) return undefined;
 
   return {
+    ...(requirements === undefined ? {} : { requestRequirements: requirements }),
     originTurnId: input.originTurnId,
     originalObjective: input.userText,
     qualificationReasons: [...reasons],
