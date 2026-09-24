@@ -2,7 +2,7 @@ import type { RegisteredTool, SessionToolProvider, ToolExecutionContext, ToolRes
 import type { SkillRegistry } from "../skills/skill-registry.js";
 import type { ToolExecutionRecord } from "./tool-executor.js";
 import type { ToolRegistry } from "./tool-registry.js";
-import type { OpenAICompatibleToolSchema, ProviderToolSchemaCatalog } from "./tool-schema.js";
+import { budgetProviderTools, type OpenAICompatibleToolSchema, type ProviderToolSchemaCatalog } from "./tool-schema.js";
 
 export const CAPABILITY_RECOVERY_TOOLS = ["capability.discover", "capability.request"] as const;
 export const MAX_CAPABILITY_RESULTS = 8;
@@ -116,6 +116,28 @@ export class SessionCapabilityRecovery {
     if (!saved || live !== saved.instance || definitionSignature(live) !== saved.signature) return undefined;
     try { if (!await live.isAvailable()) return undefined; } catch { return undefined; }
     return this.#catalog?.entries.find((entry) => entry.tool.name === name)?.schema;
+  }
+
+  async applyRequests(proposals: readonly CapabilityProposal[], active: readonly OpenAICompatibleToolSchema[]): Promise<{
+    tools: OpenAICompatibleToolSchema[]; applied: string[]; rejected: Array<{ id: string; reason: string }>;
+  }> {
+    const tools = [...active];
+    const applied: string[] = [];
+    const rejected: Array<{ id: string; reason: string }> = [];
+    const token = this.#turn?.token;
+    for (const { id } of proposals.slice(0, MAX_CAPABILITY_ADDITIONS)) {
+      if (!token || this.#turn?.token !== token || this.roundsRemaining === 0) { rejected.push({ id, reason: "inactive_or_exhausted" }); continue; }
+      const schema = await this.toolSchema(id);
+      if (this.#turn?.token !== token) return { tools: [...active], applied: [], rejected: [{ id, reason: "inactive_scope" }] };
+      if (!schema) { rejected.push({ id, reason: "unavailable_or_changed" }); continue; }
+      if (tools.some((tool) => tool.function.name === schema.function.name)) continue;
+      const budget = budgetProviderTools({ tools: [...tools, schema], priorityNames: new Set(tools.map((tool) => tool.function.name)) });
+      if (!budget.tools.includes(schema)) { rejected.push({ id, reason: "schema_budget" }); continue; }
+      tools.push(schema); applied.push(id);
+    }
+    this.completeRound(applied.length > 0);
+    this.setExposure(tools);
+    return { tools, applied, rejected };
   }
 
   completeRound(applied: boolean): void { if (applied) this.#rounds++; }

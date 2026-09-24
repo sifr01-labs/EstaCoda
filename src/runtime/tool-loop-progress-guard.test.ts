@@ -435,3 +435,11 @@ describe("ToolLoopProgressGuard", () => {
     });
   });
 });
+
+
+it("does not count duplicate capability requests as material progress", () => {
+  const guard = new ToolLoopProgressGuard({ noProgressNudgeIteration: 2, maxNoProgressIterations: 3 });
+  const request = execution({ tool: { ...execution().tool, name: "capability.request" }, result: { ok: true, content: "already exposed", metadata: { requests: [{ status: "already_exposed" }] } } });
+  expect(guard.observe([request]).materialProgress).toBe(false);
+  expect(guard.observe([{ ...request, input: { reason: "different text" } }]).materialProgress).toBe(false);
+});

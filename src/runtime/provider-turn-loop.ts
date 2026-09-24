@@ -1,3 +1,4 @@
+import type { SessionCapabilityRecovery } from "../tools/capability-tools.js";
 import type { CapabilitySelectionDiagnostics } from "../contracts/runtime-event.js";
 import { describeCapabilitySelection } from "./provider-tool-narrowing.js";
 import type { ChannelAttachment } from "../contracts/channel.js";
@@ -132,6 +133,7 @@ export type ProviderTurnLoopResult = {
 };
 
 export type ProviderTurnLoopOptions = {
+  capabilityRecovery?: SessionCapabilityRecovery;
   providerExecutor: ProviderExecutor | undefined;
   model: ModelProfile | undefined;
   primaryModelRoute?: ResolvedModelRoute;
@@ -168,6 +170,7 @@ export type ProviderTurnLoopOptions = {
 };
 
 export class ProviderTurnLoop {
+  readonly #capabilityRecovery: SessionCapabilityRecovery | undefined;
   readonly #providerExecutor: ProviderExecutor | undefined;
   readonly #model: ModelProfile | undefined;
   readonly #primaryModelRoute: ResolvedModelRoute | undefined;
@@ -200,6 +203,7 @@ export class ProviderTurnLoop {
   #lastActualPromptTokens: number | undefined;
 
   constructor(options: ProviderTurnLoopOptions) {
+    this.#capabilityRecovery = options.capabilityRecovery;
     this.#providerExecutor = options.providerExecutor;
     this.#model = options.model;
     this.#primaryModelRoute = options.primaryModelRoute;
@@ -268,6 +272,7 @@ export class ProviderTurnLoop {
     memoryPromptContext: MemoryPromptContext | undefined;
     providerTools: OpenAICompatibleToolSchema[];
     requestedCapabilityOmissions?: CapabilitySelectionDiagnostics["requestedOmissions"];
+    capabilityRecoveryFeedback?: readonly string[];
     toolExpansionCandidates?: readonly ProviderToolExpansionCandidate[];
     providerToolSchemaCatalog?: ProviderToolSchemaCatalog;
     toolSelectionPolicy?: string;
@@ -341,6 +346,9 @@ export class ProviderTurnLoop {
     let providerTokensThisTurn = 0;
     let activeProviderTools = budgetProviderTools({ tools: input.providerTools }).tools;
     let toolExpansionUsed = false;
+    let capabilityRecoveryFeedback: string[] = [];
+    this.#capabilityRecovery?.beginTurn({ sessionId: this.#sessionRuntimeContext?.currentSessionId() ?? this.#sessionId,
+      profileId: this.#profileId, visibleTurnId: input.visibleTurnId, tools: activeProviderTools });
     const workingSessionId = this.#sessionRuntimeContext?.currentSessionId() ?? this.#sessionId;
     const foregroundTurnId = runtimeForegroundTurnId(
       input.visibleTurnId,
@@ -435,6 +443,7 @@ export class ProviderTurnLoop {
         ? await this.#completeWithProvider({
             ...input,
             foregroundTurnId,
+            capabilityRecoveryFeedback,
             providerToolCallNamespace,
             providerTools: providerToolsForIteration,
             iteration,
@@ -445,6 +454,7 @@ export class ProviderTurnLoop {
         : await this.#continueProviderAfterTools({
           ...input,
           foregroundTurnId,
+          capabilityRecoveryFeedback,
           providerToolCallNamespace,
           providerTools: providerToolsForIteration,
           toolExecutions: [
@@ -757,6 +767,24 @@ export class ProviderTurnLoop {
         !toolLoopProgress.shouldStop &&
         iteration + consumedProviderIterations < this.#budgets.maxProviderIterations &&
         providerToolExecutions.length < this.#budgets.maxProviderToolCalls;
+      const recoveryProposals = this.#capabilityRecovery?.takeRequests(loopToolExecutions) ?? [];
+      if (recoveryProposals.length > 0 && canContinueWithExpandedInventory && !input.signal?.aborted) {
+        const previousNames = new Set(activeProviderTools.map((tool) => tool.function.name));
+        const recovery = await this.#capabilityRecovery!.applyRequests(recoveryProposals, activeProviderTools);
+        if (!input.signal?.aborted) {
+          activeProviderTools = recovery.tools;
+          capabilityRecoveryFeedback = [JSON.stringify({ applied: recovery.applied, rejected: recovery.rejected })];
+          const event: RuntimeEvent = { kind: "capability-recovery", appliedIteration: iteration + 1, applied: recovery.applied, rejected: recovery.rejected };
+          await this.#sessionDb.appendEvent(workingSessionId, event);
+          this.#trajectoryRecorder.record(event.kind, event);
+          await emit(input.onEvent, event);
+          if (recovery.applied.length > 0) await this.#runRecorder.recordProviderToolInventory({
+            kind: "provider-tool-inventory", phase: "expanded", expansionReason: "capability-request",
+            tools: activeProviderTools.map((tool) => tool.function.name), addedTools: activeProviderTools.filter((tool) => !previousNames.has(tool.function.name)).map((tool) => tool.function.name),
+            nativeSchemaTokens: estimateTextTokensRough(JSON.stringify(activeProviderTools)), connectors: input.connectorInventory ?? []
+          }, input.onEvent);
+        }
+      }
       if (
         !toolExpansionUsed &&
         canContinueWithExpandedInventory &&
@@ -771,6 +799,7 @@ export class ProviderTurnLoop {
             priorityNames: new Set(activeProviderTools.map((tool) => tool.function.name))
           });
           activeProviderTools = expandedBudget.tools;
+          this.#capabilityRecovery?.setExposure(activeProviderTools);
           toolExpansionUsed = true;
           await this.#runRecorder.recordProviderToolInventory({
             kind: "provider-tool-inventory",
@@ -1013,6 +1042,7 @@ export class ProviderTurnLoop {
       ...(emergencyDeadlineReached ? { emergencyDeadlineReached: true } : {})
     };
     } finally {
+      this.#capabilityRecovery?.endTurn();
       input.signal?.removeEventListener("abort", releaseBrowserLeaseOnAbort);
       this.#releaseBrowserSessionLease();
     }
@@ -1133,6 +1163,7 @@ export class ProviderTurnLoop {
     memoryPromptContext: MemoryPromptContext | undefined;
     providerTools: OpenAICompatibleToolSchema[];
     requestedCapabilityOmissions?: CapabilitySelectionDiagnostics["requestedOmissions"];
+    capabilityRecoveryFeedback?: readonly string[];
     preflightCompression?: PromptSemanticCompressionReport;
     conversationContinuationState?: ConversationContinuationState;
     fallbackText: string;
@@ -1182,6 +1213,9 @@ export class ProviderTurnLoop {
       ),
       browserState
     });
+    for (const feedback of input.capabilityRecoveryFeedback ?? []) {
+      prompt.messages.push({ role: "user", content: `Runtime capability recovery (no authorization granted): ${feedback}` });
+    }
     if ((input.requestedCapabilityOmissions?.length ?? 0) > 0) {
       prompt.messages.push({ role: "user", content: `Runtime capability selection: these requested capabilities are not exposed: ${JSON.stringify(input.requestedCapabilityOmissions)}. Use exposed alternatives when they satisfy the request; report requirements you cannot fulfill and do not claim unexposed tools executed. Exposure never grants approval.` });
     }
@@ -1277,6 +1311,7 @@ export class ProviderTurnLoop {
     memoryPromptContext: MemoryPromptContext | undefined;
     providerTools: OpenAICompatibleToolSchema[];
     requestedCapabilityOmissions?: CapabilitySelectionDiagnostics["requestedOmissions"];
+    capabilityRecoveryFeedback?: readonly string[];
     providerExecution: ProviderExecutionResult | undefined;
     toolPlans: ToolCallPlan[];
     toolFeedbackLedger: TurnToolFeedbackLedger;
@@ -1384,6 +1419,9 @@ export class ProviderTurnLoop {
     }
     if (input.toolLoopProgressNudge === true) {
       prompt.messages.push({ role: "user", content: EXECUTION_SUPERVISION_PROMPTS.toolLoopProgress });
+    }
+    for (const feedback of input.capabilityRecoveryFeedback ?? []) {
+      prompt.messages.push({ role: "user", content: `Runtime capability recovery (no authorization granted): ${feedback}` });
     }
     if ((input.requestedCapabilityOmissions?.length ?? 0) > 0) {
       prompt.messages.push({ role: "user", content: `Runtime capability selection: these requested capabilities are not exposed: ${JSON.stringify(input.requestedCapabilityOmissions)}. Use exposed alternatives when they satisfy the request; report requirements you cannot fulfill and do not claim unexposed tools executed. Exposure never grants approval.` });

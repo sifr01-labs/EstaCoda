@@ -29,6 +29,7 @@ export type TrajectoryEventKind =
   | "provider-continuation"
   | "provider-iteration"
   | "provider-tool-inventory"
+  | "capability-recovery"
   | "provider-budget-exhausted"
   | "execution-plan-started"
   | "execution-plan-updated"

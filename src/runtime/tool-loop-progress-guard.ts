@@ -89,6 +89,8 @@ export class ToolLoopProgressGuard {
     for (const execution of eligible) {
       const status = executionEvidenceStatus(execution);
       if (status !== "success" || execution.result?.metadata?.mcpReadReuse === true) continue;
+      if (execution.tool.name === "capability.request" && Array.isArray(execution.result?.metadata?.requests) &&
+        !execution.result.metadata.requests.some((request: unknown) => request !== null && typeof request === "object" && "status" in request && request.status === "queued")) continue;
 
       const callFingerprint = fingerprint({
         tool: execution.tool.name,

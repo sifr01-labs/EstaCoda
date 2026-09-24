@@ -886,7 +886,7 @@ function renderResponseGuidance(input: ProviderPromptInput): string {
       "No specialized playbook was selected for this turn.",
       "Answer the user directly using the available context.",
       mutableStateReminder,
-      "Do not mention internal routing, discovery, or fallback handling."
+      "If a needed capability is missing and capability.discover/request are exposed, try bounded recovery before asserting inability. Report concrete blockers when relevant to the request. Never imply that discovery or exposure grants execution approval."
     ].join("\n");
   }
 

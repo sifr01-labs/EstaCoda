@@ -60,9 +60,12 @@ export type ProviderToolInventoryEvent = {
   }>;
 };
 
+export type CapabilityRecoveryEvent = { kind: "capability-recovery"; appliedIteration: number; applied: string[]; rejected: Array<{ id: string; reason: string }> };
+
 export type RuntimeEvent =
   | ExecutionPlanLifecycleEvent
   | ProviderToolInventoryEvent
+  | CapabilityRecoveryEvent
   | {
       kind: "authentication-lifecycle";
       stage:

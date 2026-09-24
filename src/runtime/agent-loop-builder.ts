@@ -688,6 +688,7 @@ export class AgentLoopBuilder {
       trajectoryRecorder: input.trajectoryRecorder,
       runRecorder,
       toolPlanRunner,
+      capabilityRecovery,
       soul: undefined,
       memoryPromptContext: substrate.memoryPromptContext,
       skillsIndex: sessionSkillCatalog,

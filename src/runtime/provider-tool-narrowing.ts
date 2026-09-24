@@ -4,7 +4,8 @@ import type { IntentRoute } from "../contracts/intent.js";
 import type { LoadedSkill, SkillDefinition } from "../contracts/skill.js";
 import type { ToolDefinition, ToolsetName } from "../contracts/tool.js";
 import type { MCPServerSnapshot } from "../mcp/mcp-tools.js";
-import { requiredRequestTools } from "./request-requirements.js";
+import { CAPABILITY_RECOVERY_TOOLS } from "../tools/capability-tools.js";
+import { explicitRequestSegments, requiredRequestTools } from "./request-requirements.js";
 import {
   budgetProviderTools,
   type OpenAICompatibleToolSchema,
@@ -155,11 +156,15 @@ export function selectProviderToolsForTurn(input: {
     input.selectedSkill !== undefined ||
     (input.attachments ?? []).some((attachment) => (attachment.status ?? "ready") === "ready")
   );
+  const requestText = explicitRequestSegments(input.userText ?? "").join(" ");
+  const recoveryRelevant = isActionableToolRequest(requestText) || /\b(?:research|analyze|analyse|summarize|prepare|investigate)\b/iu.test(requestText) || /(?:\b(?:what|which)\b.{0,50}\b(?:tools|skills|capabilities)\b|\bcan you\s+(?:browse|search|delegate|save)\b|ما.{0,30}(?:أدوات|مهارات|قدرات))/iu.test(requestText);
+  const recoveryNames = new Set<string>(CAPABILITY_RECOVERY_TOOLS);
   const initialTools: OpenAICompatibleToolSchema[] = [];
   const expansionCandidates: ProviderToolExpansionCandidate[] = [];
 
   for (const entry of input.catalog.entries) {
     const selected = (() => {
+      if (recoveryNames.has(entry.tool.name)) return recoveryRelevant;
       if (entry.tool.name === "plan") return includePlan;
       if (entry.tool.connector !== undefined) {
         return namedConnectors.has(connectorKey(entry.tool.connector));
@@ -195,7 +200,7 @@ export function selectProviderToolsForTurn(input: {
 
   const budget = budgetProviderTools({
     tools: initialTools,
-    priorityNames: new Set(input.catalog.entries.filter((entry) => exactRequestTools.has(entry.tool.name)).map((entry) => entry.schema.function.name))
+    priorityNames: new Set(input.catalog.entries.filter((entry) => exactRequestTools.has(entry.tool.name) || recoveryNames.has(entry.tool.name)).map((entry) => entry.schema.function.name))
   });
   return {
     initialTools: budget.tools,

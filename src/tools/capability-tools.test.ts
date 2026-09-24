@@ -80,3 +80,28 @@ describe("session capability recovery requests", () => {
     expect(recovery.request({ ids: ["tool:test.0"], reason: "needed" }, scope).metadata?.requests).toEqual([{ id: "tool:test.0", status: "round_limit" }]);
   });
 });
+
+
+it("applies at most eight additions per round, preserving active tools and budget", async () => {
+  const { recovery, catalog } = harness();
+  const active = catalog.entries.filter((entry) => entry.tool.name.startsWith("capability.")).map((entry) => entry.schema);
+  const result = recovery.request({ ids: Array.from({ length: 8 }, (_, i) => `tool:test.${i}`), reason: "needed" }, scope);
+  const first = await recovery.applyRequests(recovery.takeRequests([execution(result)]), active);
+  expect(first.applied).toHaveLength(8);
+  expect(first.tools).toHaveLength(10);
+  const second = recovery.request({ ids: ["tool:test.8"], reason: "needed" }, scope);
+  const expanded = await recovery.applyRequests(recovery.takeRequests([execution(second)]), first.tools);
+  expect(expanded.applied).toEqual(["tool:test.8"]);
+  expect(recovery.roundsRemaining).toBe(0);
+  expect(recovery.request({ ids: ["tool:test.0"], reason: "repeat" }, scope).metadata?.requests).toEqual([{ id: "tool:test.0", status: "already_exposed" }]);
+});
+
+it("reports schema budget rejection without evicting active schemas or consuming a round", async () => {
+  const { recovery, catalog } = harness();
+  const active = Array.from({ length: 100 }, (_, i) => ({ ...catalog.tools[0]!, function: { ...catalog.tools[0]!.function, name: `active_${i}` } }));
+  const result = recovery.request({ ids: ["tool:test.0"], reason: "needed" }, scope);
+  const expansion = await recovery.applyRequests(recovery.takeRequests([execution(result)]), active);
+  expect(expansion.tools).toEqual(active);
+  expect(expansion.rejected).toEqual([{ id: "tool:test.0", reason: "schema_budget" }]);
+  expect(recovery.roundsRemaining).toBe(2);
+});

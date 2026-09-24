@@ -636,3 +636,10 @@ describe("bounded session capability diagnostics", () => {
     expect(selection.budgetOmittedTools).toHaveLength(1);
   });
 });
+
+
+it.each([["hello", false], ["What tools and skills are available?", true], ["Find a way to inspect this", true], ["Do not use tools", false], ['Explain "use tools"', false], ["ما هي الأدوات المتاحة؟", true]])("selects bounded recovery for %s", (userText, expected) => {
+  const catalog = buildProviderToolSchemaCatalog({ tools: [tool("capability.discover", ["core"]), tool("capability.request", ["core"])] });
+  const selection = selectProviderToolsForTurn({ catalog, intent: intent(0.1), userText: userText as string });
+  expect(selection.initialTools.length).toBe(expected ? 2 : 0);
+});

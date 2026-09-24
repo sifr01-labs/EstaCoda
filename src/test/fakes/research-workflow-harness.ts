@@ -1,3 +1,5 @@
+import { executionActionIdentity } from "../../security/execution-action-identity.js";
+import type { ToolApprovalHandler } from "../../contracts/tool.js";
 import { DEFAULT_DELEGATION_CONFIG } from "../../config/delegation-defaults.js";
 import { mkdtemp, mkdir, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
@@ -39,7 +41,7 @@ export function answer(content: string): ScriptStep {
   return () => ({ content });
 }
 
-export async function createResearchWorkflowHarness(options: { searchAvailable?: boolean; denyWrites?: boolean; maxBatchTasks?: number; fileToolsAvailable?: boolean } = {}) {
+export async function createResearchWorkflowHarness(options: { searchAvailable?: boolean; denyWrites?: boolean; maxBatchTasks?: number; fileToolsAvailable?: boolean; fallbackOnRequest?: number; approvalDecision?: ToolApprovalHandler } = {}) {
   const root = await mkdtemp(join(tmpdir(), "estacoda-research-baseline-"));
   const homeDir = join(root, "home");
   const workspaceRoot = join(root, "workspace");
@@ -52,12 +54,14 @@ export async function createResearchWorkflowHarness(options: { searchAvailable?:
   const extracts: string[] = [];
   const script: ScriptStep[] = [];
   const scriptErrors: string[] = [];
+  const approvedActions = new Set<string>();
   const providers = new ProviderRegistry();
   providers.register({
     id: model.provider, name: "Scripted research baseline", executable: true,
-    health: () => ({ available: true }), listModels: () => [model],
+    health: () => ({ available: true }), listModels: () => options.fallbackOnRequest === undefined ? [model] : [model, { ...model, id: "research-fallback" }],
     complete: async (request) => {
       requests.push(structuredClone(request));
+      if (options.fallbackOnRequest !== undefined && requests.length >= options.fallbackOnRequest && request.model === model.id) return { ok: false, provider: model.provider, model: model.id, content: "fixture transient failure", errorClass: "rate-limit" };
       const step = script.shift();
       try {
         if (step === undefined) throw new Error("Unexpected provider call after script exhausted");
@@ -66,7 +70,7 @@ export async function createResearchWorkflowHarness(options: { searchAvailable?:
           ...call, id: `fixture-call-${requests.length}-${index}`
         }));
         return {
-          ok: true, provider: model.provider, model: model.id, content: result.content,
+          ok: true, provider: model.provider, model: request.model, content: result.content,
           finishReason: toolCalls?.length ? "tool_calls" : "stop",
           raw: { choices: [{ message: { tool_calls: toolCalls?.map((call) => ({ id: call.id, function: { name: call.name, arguments: call.argumentsText } })) } }] }
         };
@@ -97,6 +101,7 @@ export async function createResearchWorkflowHarness(options: { searchAvailable?:
       homeDir, workspaceRoot, profileId: "baseline", sessionId: "research-baseline-session", sessionDb,
       tokens: resolveTokens("standard", "dark", "kemetBlue"), model,
       primaryModelRoute: { provider: model.provider, id: model.id, profile: model, authMethod: "none" },
+      ...(options.fallbackOnRequest === undefined ? {} : { modelFallbackRoutes: [{ provider: model.provider, id: "research-fallback", profile: { ...model, id: "research-fallback" }, authMethod: "none" as const }] }),
       providerRegistry: providers, trustStore, workspaceTrusted: true,
       localSkillsRoot: join(homeDir, "local-skills"), browser: { backend: "unconfigured", autoLaunch: false },
       enableWebNetwork: true,
@@ -106,7 +111,7 @@ export async function createResearchWorkflowHarness(options: { searchAvailable?:
       // Constrain unrelated capabilities using the real session filter.
       // Catalog truncation is independently characterized at the function seam.
       enabledToolsets: options.fileToolsAvailable === false ? ["web"] : ["core", "files", "web", "research"],
-      securityPolicy: { decide: (request) => options.denyWrites && request.riskClass === "workspace-write" ? "deny" : "allow" },
+      securityPolicy: { decide: (request) => options.approvalDecision ? approvedActions.has(request.actionKey ?? "") ? "allow" : "ask" : options.denyWrites && request.riskClass === "workspace-write" ? "deny" : "allow" },
       executionControls: { providerBudgets: { maxProviderIterations: 8, maxProviderToolCalls: 8, maxProviderWallClockMs: 15_000, finalizationReserveMs: 0 } }
     });
   } catch (error) {
@@ -119,7 +124,11 @@ export async function createResearchWorkflowHarness(options: { searchAvailable?:
     runtime, root, homeDir, workspaceRoot, sessionDb, store, requests, events, searches, extracts, scriptErrors,
     enqueue(...steps: ScriptStep[]) { script.push(...steps); },
     remainingSteps: () => script.length,
-    turn: (text: string) => runtime.handle({ text, channel: "cli", onEvent: (event) => { events.push(event); } }),
+    turn: (text: string) => runtime.handle({ text, channel: "cli", onApprovalRequest: options.approvalDecision === undefined ? undefined : async (request) => {
+      const decision = await options.approvalDecision!(request);
+      if (decision === "approved") approvedActions.add(executionActionIdentity("baseline", "research-baseline-session", request.tool.name, request.riskClass, request.input));
+      return decision;
+    }, onEvent: (event) => { events.push(event); } }),
     async dispose() {
       try { await runtime.dispose(); }
       finally {
