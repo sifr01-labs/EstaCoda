@@ -5,7 +5,7 @@ import type { TaskCompletionTraceSnapshot } from "../contracts/task-completion-t
 import { verifiedCompressionLineage } from "../session/session-lineage.js";
 import { TASK_RESULT_PAGE_MAX_CHARS, type TaskResultService } from "./task-result-service.js";
 import type { TaskStore } from "./task-store.js";
-import { taskPrimaryResult, taskPrimaryResultStepId } from "./task-primary-result.js";
+import { taskPrimaryResult, taskPrimaryResultStepId, taskRequestCompletion } from "./task-primary-result.js";
 import { isolateLtr } from "../ui/bidi.js";
 import { TaskOperatorService } from "./task-operator-service.js";
 import {
@@ -117,9 +117,11 @@ export class TaskSessionCompletionService {
         if (task === null) throw new Error("Task is unavailable.");
         const result = sessionCompletionResult(this.#store, task);
         const trace = createTaskCompletionTraceSnapshot(this.#taskOperator.status(task.id), result !== undefined);
-        const text = result === undefined
+        const resultText = result === undefined
           ? terminalAnswerUnavailableReceipt(task, this.#locale)
           : await this.#readResult(task.id, result, sessionId);
+        const pendingFile = taskRequestCompletion(this.#store, task).fileOutputPending;
+        const text = pendingFile ? `${this.#locale === "ar" ? "عند انتهاء المهمة، لم يكن الملف المطلوب قد حُفظ. يلزم التحقق من حفظ الملف في مساحة العمل قبل اعتبار تسليمه مكتملًا." : "At Task settlement, the requested file had not been saved. File delivery requires a verified workspace save."}\n\n${resultText}` : resultText;
         const message = await this.#appendMessage({
           id: messageId,
           sessionId,

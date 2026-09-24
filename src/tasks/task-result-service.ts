@@ -1,3 +1,4 @@
+import { taskPrimaryResult, taskRequestCompletion } from "./task-primary-result.js";
 import { createHash, randomUUID } from "node:crypto";
 import {
   chmodSync,
@@ -54,6 +55,8 @@ export type ReadTaskResultPageInput = {
 };
 
 export type TaskResultPage = {
+  primary?: boolean;
+  researchComplete?: boolean;
   result: TaskResult;
   content: string;
   offset: number;
@@ -508,7 +511,11 @@ export class TaskResultService {
     }
     const end = Math.min(characters.length, offset + maxChars);
     const hasMore = end < characters.length;
+    const task = this.#store.getTask(result.taskId)!;
+    const primary = taskPrimaryResult(this.#store, task)?.id === result.id;
     return {
+      primary,
+      ...(primary ? { researchComplete: taskRequestCompletion(this.#store, task).researchComplete } : {}),
       result,
       content: characters.slice(offset, end).join(""),
       offset,

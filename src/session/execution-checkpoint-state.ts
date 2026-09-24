@@ -169,7 +169,8 @@ export function hydratableExecutionCheckpoint(input: {
       continue;
     }
     if (candidate.id === current.id) {
-      if (isTerminalCheckpointStatus(current.status)) continue;
+      if (isTerminalCheckpointStatus(current.status) && !(current.status === "completed" && current.requestRequirements !== undefined &&
+        (event.transition === "cancelled" || event.transition === "superseded"))) continue;
       if (candidate.revision !== current.revision + 1) continue;
       if (!sameImmutableCheckpointState(current, candidate)) continue;
       if (!isCoherentTransition(event.transition, current, candidate)) continue;

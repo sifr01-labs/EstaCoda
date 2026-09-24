@@ -130,6 +130,24 @@ describe("TaskSessionCompletionService", () => {
     expect(store.getDeliveryBinding("delivery-cli")?.status).toBe("delivered");
   });
 
+  it("discloses a pending workspace file without changing the accepted result or duplicating delivery", async () => {
+    const graph = makeSingleWorkerGraph();
+    graph.steps[0]!.executor.requestContract = { version: 1, objective: "Save report.md", requirements: {
+      skillReferences: [], issues: [], fileOutput: { format: "markdown", path: "report.md" }
+    } };
+    store.createTaskGraph(graph);
+    createCliBinding({ id: "delivery-file", taskId: graph.task.id });
+    const result = results.record({ taskId: graph.task.id, stepId: graph.steps[0]!.id, kind: "text", content: "Accepted report." });
+    completeTask(graph.task.id);
+    const delivered = await service.deliverPending("creator-alpha");
+    const message = delivered.find((entry) => entry.taskId === graph.task.id)!;
+    expect(message.text).toContain("At Task settlement, the requested file had not been saved");
+    expect(message.text).toContain("Accepted report.");
+    expect((await results.readText({ taskId: graph.task.id, resultId: result.id, sessionId: "creator-alpha" })).content).toBe("Accepted report.");
+    await acknowledge(message);
+    expect((await service.deliverPending("creator-alpha")).some((entry) => entry.taskId === graph.task.id)).toBe(false);
+  });
+
   it("appends a single accepted worker answer through the same transcript outbox", async () => {
     const graph = makeSingleWorkerGraph();
     store.createTaskGraph(graph);

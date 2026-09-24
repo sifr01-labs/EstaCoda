@@ -334,6 +334,13 @@ export class ExecutionCheckpointController implements ExecutionCheckpointReader 
       if (!isTerminalCheckpointStatus(current.status)) await this.#close(current.revision, "superseded", "superseded");
       return { disposition: "requirement_followup", checkpoint: current, requirementMode };
     }
+    if (current?.status === "completed" && current.requestRequirements !== undefined) {
+      if (isExplicitCheckpointCancellation(userText) || isExplicitCheckpointSupersession(userText)) {
+        const disposition = isExplicitCheckpointCancellation(userText) ? "cancelled" : "superseded";
+        const checkpoint = await this.#close(current.revision, disposition, disposition);
+        return { disposition, ...(checkpoint === undefined ? {} : { checkpoint }) };
+      }
+    }
     if (current === undefined || isTerminalCheckpointStatus(current.status)) {
       return { disposition: "none" };
     }
@@ -427,7 +434,8 @@ export class ExecutionCheckpointController implements ExecutionCheckpointReader 
           `Checkpoint revision changed from ${expectedRevision} to ${current.revision}.`
         );
       }
-      if (isTerminalCheckpointStatus(current.status)) return cloneExecutionCheckpoint(current);
+      if (isTerminalCheckpointStatus(current.status) && !(current.status === "completed" && current.requestRequirements !== undefined &&
+        (transition === "cancelled" || transition === "superseded"))) return cloneExecutionCheckpoint(current);
       const next = validateExecutionCheckpoint({ ...update(current), sessionId: this.#sessionId() });
       if (next.revision === current.revision) return cloneExecutionCheckpoint(current);
       await this.#persist(transition, next);

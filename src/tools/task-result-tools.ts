@@ -73,6 +73,8 @@ export function createTaskResultTools(options: {
           ok: true,
           content: page.content,
           metadata: {
+            primary: page.primary,
+            researchComplete: page.researchComplete,
             taskId: page.result.taskId,
             resultId: page.result.id,
             resultHandle: page.result.handle,

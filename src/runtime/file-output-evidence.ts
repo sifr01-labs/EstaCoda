@@ -1,11 +1,12 @@
+import { readTaskResultEvidence } from "../tasks/task-result-read-evidence.js";
 import { posix } from "node:path";
 import type { ExecutionEvidenceRecord } from "../contracts/execution-plan.js";
 import type { RequestRequirements } from "../contracts/intent.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 
 export type FileOutputEvidence =
-  | { satisfied: true; writeCallId?: string }
-  | { satisfied: false; reason: "unresolved-target" | "missing-write" | "missing-readback" };
+  | { satisfied: true; writeCallId?: string; path?: string }
+  | { satisfied: false; reason: "unresolved-target" | "missing-write" | "missing-readback" | "missing-research-result" | "report-content-mismatch" };
 
 /** Reconciles executor-owned call identities with workspace-tool results from
  * this turn. Provider prose, artifact handles and unrelated tools cannot qualify. */
@@ -22,6 +23,13 @@ export function fileOutputEvidence(input: {
   const receipts = new Map(input.executionReceipts.filter((receipt) =>
     input.requirements?.originTurnId === undefined || receipt.visibleTurnId === input.requirements.originTurnId
   ).map((receipt, index) => [receipt.toolCallId, { receipt, index }]));
+  const result = input.requirements?.sourceTaskId === undefined ? undefined : readTaskResultEvidence(
+    input.toolExecutions.filter((execution) => {
+      const receipt = execution.toolCallId === undefined ? undefined : receipts.get(execution.toolCallId)?.receipt;
+      return receipt?.status === "success" && receipt.tool === execution.tool.name;
+    }), input.requirements.sourceTaskId).find((page) => page.primary);
+  if (input.requirements?.sourceTaskId !== undefined && result === undefined) return { satisfied: false, reason: "missing-research-result" };
+  let contentMismatch = false;
   const writes = new Map<string, { digest: string; callId: string; index: number }>();
   const verified = new Map<string, string>();
   for (const execution of input.toolExecutions) {
@@ -48,6 +56,8 @@ export function fileOutputEvidence(input: {
         const { path, contentSha256 } = output as Record<string, unknown>;
         const target = safePath(path);
         if (target === undefined || !matchesTarget(target, requirement) || !validDigest(contentSha256)) continue;
+        if (result !== undefined && result.contentHash !== `sha256:${contentSha256}`) { contentMismatch = true; continue; }
+        contentMismatch = false;
         writes.set(target, { digest: contentSha256, callId, index: recorded.index });
         verified.delete(target); // A later write invalidates an earlier readback.
       }
@@ -57,10 +67,10 @@ export function fileOutputEvidence(input: {
     const write = target === undefined ? undefined : writes.get(target);
     if (target !== undefined && write !== undefined && recorded.index > write.index && metadata.contentSha256 === write.digest) verified.set(target, write.callId);
   }
-  const writeCallId = verified.values().next().value as string | undefined;
-  return writeCallId === undefined
-    ? { satisfied: false, reason: writes.size === 0 ? "missing-write" : "missing-readback" }
-    : { satisfied: true, writeCallId };
+  const verifiedFile = verified.entries().next().value as [string, string] | undefined;
+  return verifiedFile === undefined
+    ? { satisfied: false, reason: contentMismatch ? "report-content-mismatch" : writes.size === 0 ? "missing-write" : "missing-readback" }
+    : { satisfied: true, path: verifiedFile[0], writeCallId: verifiedFile[1] };
 }
 
 function safePath(value: unknown): string | undefined {

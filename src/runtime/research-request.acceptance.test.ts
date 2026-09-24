@@ -6,7 +6,7 @@ import { TaskResultService } from "../tasks/task-result-service.js";
 import { TaskScheduler } from "../tasks/task-scheduler.js";
 import { selectSkillPromptContent } from "../skills/skill-contract.js";
 import { isLoadedSkill } from "./runtime-router.js";
-import { answer, createResearchWorkflowHarness, nativeCall, REPORT, RESEARCH_PROMPT, SOURCE_URL } from "../test/fakes/research-workflow-harness.js";
+import { answer, createResearchWorkflowHarness, nativeCall, CLAIM_TABLE, REPORT, RESEARCH_PROMPT, SOURCE_URL } from "../test/fakes/research-workflow-harness.js";
 
 type Harness = Awaited<ReturnType<typeof createResearchWorkflowHarness>>;
 const harnesses: Harness[] = [];
@@ -137,7 +137,7 @@ describe.sequential("research workflow acceptance harness", () => {
 
     const { scheduler, resultService } = schedulerFor(h, task.id);
     for (let index = 0; index < 3; index++) {
-      h.enqueue(nativeCall("web_search", { query: `battery recycling scope ${index}` }), answer(`Scope ${index}: observed synthetic evidence [source](${SOURCE_URL}).`));
+      h.enqueue(nativeCall("web_search", { query: `battery recycling scope ${index}` }), answer(`Scope ${index}: observed synthetic evidence [source](${SOURCE_URL}).\n\n${CLAIM_TABLE}`));
       expect(await scheduler.runOnce()).toMatchObject({ completed: 1, failed: 0 });
       scriptConsumed(h);
     }
@@ -145,7 +145,7 @@ describe.sequential("research workflow acceptance harness", () => {
     expect(results).toHaveLength(3);
     expect(new Set(results.map((result) => result.stepId))).toEqual(new Set(workers.map((step) => step.id)));
     for (const result of results) h.enqueue(nativeCall("task_result_read", { task_id: task.id, result_id: result.id }));
-    h.enqueue(answer(REPORT));
+    h.enqueue(answer(`${REPORT}\n${CLAIM_TABLE}`));
     const settled = await scheduler.runOnce();
     expect(settled, JSON.stringify({ errors: h.scriptErrors, failures: h.store.listAttempts(task.id).flatMap((attempt) => attempt.failure ? [attempt.failure] : []) })).toMatchObject({ completed: 1, failed: 0 });
     expect(h.store.getTask(task.id)?.status).toBe(fileRequested ? "partial" : "completed");
@@ -158,11 +158,31 @@ describe.sequential("research workflow acceptance harness", () => {
     const final = h.store.listResults(task.id).find((result) => result.stepId === synthesis.id)!;
     const savedResult = await resultService.readText({ taskId: task.id, resultId: final.id, sessionId: h.runtime.sessionId });
     expect(savedResult.content).toContain("Synthetic research fixture");
-    h.enqueue(nativeCall("file_write", { path: "report.md", content: savedResult.content }), nativeCall("file_read", { path: "report.md" }), answer("Saved report.md."));
-    await h.turn("Write documentation in report.md for the project");
+    if (fileRequested) await h.restart();
+    h.enqueue(nativeCall("task_status", { task_id: task.id }), nativeCall("task_result_read", { task_id: task.id, result_id: final.id }),
+      nativeCall("file_write", { path: "report.md", content: savedResult.content, overwrite: true }), nativeCall("file_read", { path: "report.md" }), answer("Saved report.md."));
+    const saved = await h.turn("Save this report to report.md");
+    expect(saved.intent.requestRequirements?.sourceTaskId).toBe(task.id);
+    expect(saved.finalOutcome?.status, JSON.stringify({ text: saved.text, errors: h.scriptErrors })).toBe("completed");
     await expect(readFile(join(h.workspaceRoot, "report.md"), "utf8")).resolves.toBe(savedResult.content);
     expect(h.store.listTasks()).toHaveLength(1);
     scriptConsumed(h);
+    if (fileRequested) {
+      // A restarted runtime must observe the current file, not trust the old path or digest.
+      await h.restart();
+      await writeFile(join(h.workspaceRoot, "report.md"), "Unrelated replacement");
+      h.enqueue(nativeCall("task_result_read", { task_id: task.id, result_id: final.id }), nativeCall("file_read", { path: "report.md" }), answer("The report is saved."));
+      const stale = await h.turn("Save this report to report.md");
+      expect(stale.finalOutcome?.status).not.toBe("completed");
+      expect(stale.text).toContain("File output is incomplete");
+      h.enqueue(nativeCall("task_result_read", { task_id: task.id, result_id: final.id }),
+        nativeCall("file_write", { path: "report.md", content: savedResult.content, overwrite: true }), nativeCall("file_read", { path: "report.md" }), answer("Saved report.md."));
+      const repaired = await h.turn("Save this report to report.md");
+      expect(repaired.finalOutcome?.status, JSON.stringify({ text: repaired.text, errors: h.scriptErrors })).toBe("completed");
+      expect(h.store.listTasks()).toHaveLength(1);
+      expect(h.searches).toHaveLength(3);
+      scriptConsumed(h);
+    }
   });
 
   it("rejects live-source delegation when web.search is unavailable (A9 control)", async () => {
@@ -188,10 +208,10 @@ describe.sequential("research workflow acceptance harness", () => {
     const dispatch = await h.turn(RESEARCH_PROMPT);
     expect(dispatch.finalOutcome?.status).toBe("completed");
     const task = h.store.listTasks()[0]!;
-    const { scheduler } = schedulerFor(h, task.id);
+    const { scheduler, resultService } = schedulerFor(h, task.id);
     for (let index = 0; index < 3; index++) {
       if (index === 1) h.enqueue(answer("I have no source evidence."));
-      else h.enqueue(nativeCall("web_search", { query: `battery recycling ${index}` }), answer(`Observed source: ${SOURCE_URL}`));
+      else h.enqueue(nativeCall("web_search", { query: `battery recycling ${index}` }), answer(`Observed source: ${SOURCE_URL}\n\n${CLAIM_TABLE}`));
       expect(await scheduler.runOnce()).toMatchObject(index === 1 ? { failed: 1 } : { completed: 1 });
     }
     const accepted = h.store.listResults(task.id).filter((result) => result.disposition === "accepted");
@@ -200,10 +220,19 @@ describe.sequential("research workflow acceptance harness", () => {
     h.enqueue((request) => {
       expect(JSON.stringify(request.messages)).toContain("Partial synthesis boundary");
       expect(JSON.stringify(request.messages)).toContain("current sources required");
-      return { content: `${REPORT}\nMissing coverage: processing failed; conclusions are partial.` };
+      return { content: `${REPORT}\n${CLAIM_TABLE}\n\nMissing coverage: processing failed; conclusions are partial.` };
     });
     expect(await scheduler.runOnce()).toMatchObject({ completed: 1 });
     expect(h.store.getTask(task.id)?.status).toBe("partial");
+    const primary = h.store.listResults(task.id).find((result) => h.store.getStep(result.stepId!)?.executor.role === "synthesis" && result.disposition === "accepted")!;
+    const report = await resultService.readText({ taskId: task.id, resultId: primary.id, sessionId: h.runtime.sessionId });
+    expect(report.content).toContain("Research coverage is partial");
+    h.enqueue(nativeCall("task_result_read", { task_id: task.id, result_id: primary.id }),
+      nativeCall("file_write", { path: "report.md", content: report.content }), nativeCall("file_read", { path: "report.md" }), answer("Saved."));
+    const saved = await h.turn("Save this report to report.md");
+    expect(saved.finalOutcome?.status).toBe("completed");
+    expect(saved.text).toContain("Research coverage remains partial");
+    expect(h.store.listTasks()).toHaveLength(1);
     expect(h.store.listSteps(task.id, task.activePlanRevisionId!).filter((step) => step.executor.role === "worker" && step.status === "completed")).toHaveLength(2);
     scriptConsumed(h);
   });

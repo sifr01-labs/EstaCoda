@@ -1,3 +1,4 @@
+import { groundResearchResult, requiresSourceTable, RESEARCH_EVIDENCE_INSTRUCTION } from "./research-result-evidence.js";
 import {taskModelOverride} from './task-model-override.js';
 import type { ArtifactRecord } from "../contracts/artifact.js";
 import type { DelegateModelOverride, DelegateRole, DelegationConfig } from "../contracts/delegation.js";
@@ -395,7 +396,13 @@ export class AgentStepExecutor implements TaskStepExecutor {
         };
       }
 
-      const captured = await captureResults(response.text, response.artifacts, input, this.#resolveArtifactContent);
+      const grounded = groundResearchResult({ task: input.task, step: input.step, store: this.#taskStore,
+        text: response.text, executions: response.toolExecutions, now: this.#now() });
+      if (grounded.failure !== undefined) return {
+        outcome: "failed", failure: taskFailure("evidence-contract-unsatisfied", false),
+        ...safeDiagnosticOutput(response.text, response.toolExecutions), ...metering, ...common
+      };
+      const captured = await captureResults(grounded.text ?? response.text, response.artifacts, input, this.#resolveArtifactContent);
       if (captured.failure !== undefined) {
         return {
           outcome: "failed",
@@ -547,6 +554,7 @@ function dependencyContext(store: TaskStore, task: Task, step: TaskStep): string
     ]),
     `Current Step: ${step.title}`,
     resultInstruction(step),
+    ...(!requiresSourceTable(step, store) ? [] : [RESEARCH_EVIDENCE_INSTRUCTION]),
     guidance.length === 0
       ? "Operator guidance: none."
       : `Authorized operator guidance (later entries take precedence without overriding policy):\n${JSON.stringify(guidance)}`,

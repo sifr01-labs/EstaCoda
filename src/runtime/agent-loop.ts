@@ -475,7 +475,7 @@ export class AgentLoop {
     if (route.intent.requestRequirements !== undefined) {
       if (resumedCheckpoint?.requestRequirements !== undefined) route.intent.requestRequirements = continueRequestRequirements(
         resumedCheckpoint.requestRequirements, route.intent.requestRequirements, checkpointPreparation?.requirementMode);
-      const sourceTaskId = resumedCheckpoint?.safeFacts.filter((fact) => fact.kind === "task_id" && fact.sourceTool === "delegate_task").at(-1)?.value ?? resumedCheckpoint?.requestRequirements?.sourceTaskId;
+      const sourceTaskId = resumedCheckpoint?.requestRequirements?.sourceTaskId ?? (resumedCheckpoint?.requestRequirements?.research === undefined ? undefined : resumedCheckpoint.safeFacts.filter((fact) => fact.kind === "task_id" && fact.sourceTool === "delegate_task").at(-1)?.value);
       if (sourceTaskId !== undefined && checkpointPreparation?.requirementMode !== "rerun") route.intent.requestRequirements.sourceTaskId = sourceTaskId;
       if (checkpointPreparation?.requirementMode === "rerun") delete route.intent.requestRequirements.sourceTaskId;
       route.intent.requestRequirements.originTurnId = visibleTurn.id;
@@ -1385,6 +1385,10 @@ export class AgentLoop {
         if (response.providerExecution !== undefined) response.providerExecution = suppressProviderGeneratedText(response.providerExecution);
       }
       const fileEvidence = fileOutputEvidence({ requirements: intent.requestRequirements, toolExecutions, executionReceipts: this.#executionEvidenceIndex.recordsForTurn(visibleTurn.id) });
+      if (fileEvidence.satisfied && fileEvidence.path !== undefined && intent.requestRequirements?.sourceTaskId !== undefined && researchEvidence.satisfied) {
+        response.text = `Saved and verified ${fileEvidence.path}.` + (researchEvidence.partialResearch ? " Research coverage remains partial; see the report's missing scopes and evidence limitations." : "");
+        if (response.providerExecution !== undefined) response.providerExecution = suppressProviderGeneratedText(response.providerExecution);
+      }
       if (!fileEvidence.satisfied) {
         const available = new Set(this.#providerToolSchemaCatalog?.entries.map((entry) => entry.tool.name) ?? []);
         const unavailable = !available.has("file.write") && !available.has("file.patch")
@@ -1392,6 +1396,10 @@ export class AgentLoop {
           : !available.has("file.read") ? " The workspace file-readback tool is unavailable in this session." : "";
         const reason = fileEvidence.reason === "unresolved-target"
           ? "The requested file target is ambiguous or outside the supported workspace-relative targets."
+          : fileEvidence.reason === "missing-research-result"
+            ? "Read the complete accepted primary research result from its authorized Task before saving."
+          : fileEvidence.reason === "report-content-mismatch"
+            ? "The written file does not match the accepted research report."
           : fileEvidence.reason === "missing-write"
             ? "There is no successful write or patch for the requested output."
             : "The requested output has not been confirmed by a complete, matching readback from disk.";

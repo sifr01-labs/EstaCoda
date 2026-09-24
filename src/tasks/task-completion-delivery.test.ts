@@ -90,6 +90,24 @@ describe("TaskCompletionDeliveryService", () => {
     expect(deliverText).toHaveBeenCalledTimes(1);
   });
 
+  it("tells a remote recipient that a requested workspace file is pending", async () => {
+    const graph = makeSynthesisGraph();
+    for (const step of graph.steps) step.executor.requestContract = { version: 1, objective: "Save report.md", requirements: {
+      skillReferences: [], issues: [], fileOutput: { format: "markdown", path: "report.md" }
+    } };
+    store.createTaskGraph(graph);
+    resultService.record({ taskId: "task-synthesis", stepId: "step-synthesis-primary", kind: "text", content: "Accepted report." });
+    completeTask("task-synthesis");
+    const deliverText = vi.fn(async (_targets: DeliveryTarget[], _text: string) => new Map([["telegram:chat-1", { success: true }]]));
+    const service = createService(deliverText);
+    service.bind({ taskId: "task-synthesis", authorizedSessionId: "creator-alpha", deliveryKey: "file-pending",
+      destination: { platform: "telegram", chatId: "chat-1" } });
+    await service.runOnce();
+    expect(deliverText.mock.calls[0]![1]).toContain("At Task settlement, the requested file had not been saved");
+    await service.runOnce();
+    expect(deliverText).toHaveBeenCalledTimes(1);
+  });
+
   it("delivers the synthesis Result as primary without expanding intermediate worker bodies", async () => {
     store.createTaskGraph(makeSynthesisGraph());
     resultService.record({

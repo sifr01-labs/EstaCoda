@@ -75,4 +75,22 @@ describe("bounded research requirement continuity", () => {
     expect((await controller.prepareForTurn(text)).disposition).toBe(text === "cancel" ? "cancelled" : "superseded");
     expect((await controller.prepareForTurn("continue")).disposition).toBe("none");
   });
+  it.each(["cancel", "New topic: write a poem"])("retires completed requirements durably on %s", async (text) => {
+    const events: import("../contracts/session.js").SessionEvent[] = [];
+    const controller = new ExecutionCheckpointController({ sessionId: "session", profileId: "profile", record: async (event) => { events.push(event); } });
+    const created = await controller.ensure({ originTurnId: "original-turn", originalObjective: objective, qualificationReasons: ["research_request"],
+      requestRequirements: requirements, intentLabels: [], requiredOperations: ["read"], connectorIds: [], completionFloor: "none" });
+    const outcome = { status: "completed" as const, terminationCause: "normal" as const, completionFloor: "none" as const, confirmedActions: [], uncertainActions: [] };
+    events.push({ kind: "execution-evidence-recorded", toolCallId: "read-result", tool: "task.result.read",
+      status: "success", riskClass: "read-only-local", executionEffect: { kind: "read" } });
+    events.push({ kind: "execution-final-outcome-recorded", ...outcome });
+    await controller.settleAttempt(created.revision, { outcome });
+    expect(controller.current()?.status).toBe("completed");
+    await controller.prepareForTurn(text);
+    const restored = hydratableExecutionCheckpoint({ events, sessionId: "session", profileId: "profile" })!;
+    expect(restored.status).toBe(text === "cancel" ? "cancelled" : "superseded");
+    controller.hydrate(restored);
+    expect((await controller.prepareForTurn("Save this report to report.md")).disposition).toBe("none");
+  });
+
 });

@@ -18,6 +18,7 @@ export const RESEARCH_PROMPT = "Do deep research on the latest battery recycling
 // A literal public IP avoids DNS even when the real URL guard executes. No
 // request reaches it: both web backends are in-memory fixtures.
 export const SOURCE_URL = "https://93.184.216.34/baseline/battery-recycling";
+export const CLAIM_TABLE = `| Source URL | Supported claim | Limitation |\n| --- | --- | --- |\n| ${SOURCE_URL} | Synthetic research fixture | Illustrative snippet; not scientific evidence |`;
 export const REPORT = `# Battery recycling\n\nSynthetic research fixture. [Source](${SOURCE_URL})\n`;
 
 const model: ModelProfile = {

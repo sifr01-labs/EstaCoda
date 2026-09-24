@@ -27,7 +27,7 @@ function observe(executions: ToolExecutionRecord[], prompt = "Save report.md", t
 describe("file output evidence", () => {
   it.each(["file.write", "file.patch"])("accepts %s plus matching readback", (name) => {
     const input = observe([call(name), call("file.read")]);
-    expect(fileOutputEvidence(input)).toEqual({ satisfied: true, writeCallId: "call-0" });
+    expect(fileOutputEvidence(input)).toEqual({ satisfied: true, writeCallId: "call-0", path: "report.md" });
     expect(deriveExecutionFinalOutcome({ ...input, requestRequirements: input.requirements, completionFloor: "mutation_with_verification" })).toMatchObject({ status: "completed", confirmedActions: [{ verification: "verified" }] });
   });
   it("accepts an unchanged matching write and a chosen Markdown filename", () => {
@@ -67,4 +67,16 @@ describe("file output evidence", () => {
     const input = observe([]);
     expect(deriveExecutionFinalOutcome({ ...input, requestRequirements: input.requirements, completionFloor: "mutation_with_verification", delegatedAnswerOwned: true }).status).toBe("completed");
   });
+  it.each(["primary", "worker", "partial-page", "foreign", "different-report", "unowned"])("binds a save-only request to the exact accepted report: %s", (kind) => {
+    const resultRead = { ...call("file.read"), tool: { ...call("file.read").tool, name: "task.result.read" },
+      result: { ok: true, content: kind === "partial-page" ? "rep" : "report", metadata: { taskId: kind === "foreign" ? "foreign" : "task",
+        resultId: "result", disposition: "accepted", primary: kind !== "worker", totalChars: 6, offset: 0,
+        contentHash: `sha256:${digest}`, hasMore: kind === "partial-page" } } };
+    const fileDigest = kind === "different-report" ? "b".repeat(64) : digest;
+    const input = observe([resultRead, call("file.write", "report.md", { contentSha256: fileDigest }), call("file.read", "report.md", { contentSha256: fileDigest })]);
+    input.requirements.sourceTaskId = "task";
+    if (kind === "unowned") input.executionReceipts = input.executionReceipts.filter((receipt) => receipt.tool !== "task.result.read");
+    expect(fileOutputEvidence(input).satisfied).toBe(kind === "primary");
+  });
+
 });
