@@ -88,7 +88,7 @@ export class ToolLoopProgressGuard {
 
     for (const execution of eligible) {
       const status = executionEvidenceStatus(execution);
-      if (status !== "success" || execution.result?.metadata?.mcpReadReuse === true) continue;
+      if (status !== "success" || (execution.readReuseOf !== undefined || execution.result?.metadata?.mcpReadReuse === true)) continue;
       if (execution.tool.name === "capability.request" && Array.isArray(execution.result?.metadata?.requests) &&
         !execution.result.metadata.requests.some((request: unknown) => request !== null && typeof request === "object" && "status" in request && request.status === "queued")) continue;
 
@@ -187,7 +187,7 @@ export class ToolLoopProgressGuard {
       if (
         INELIGIBLE_TOOLS.has(execution.tool.name) ||
         executionEvidenceStatus(execution) !== "success" ||
-        execution.result?.metadata?.mcpReadReuse === true
+        (execution.readReuseOf !== undefined || execution.result?.metadata?.mcpReadReuse === true)
       ) continue;
       this.#active = true;
       const discovery = browserDiscoveryFingerprint(execution) ?? connectorDiscoveryFingerprint(execution);
@@ -219,7 +219,7 @@ export class ToolLoopProgressGuard {
 function connectorDiscoveryFingerprint(execution: ToolExecutionRecord): string | undefined {
   const effect = execution.executionEffect;
   if ((effect?.kind !== "read" && effect?.kind !== "verification") || effect.connector?.kind !== "mcp" ||
-      execution.riskClass !== "read-only-network" || execution.result?.metadata?.mcpReadReuse === true) return undefined;
+      execution.riskClass !== "read-only-network" || (execution.readReuseOf !== undefined || execution.result?.metadata?.mcpReadReuse === true)) return undefined;
   let evidence: unknown = execution.result?.metadata?.structuredContent;
   if (evidence === undefined) {
     const content = execution.result?.content.trim();

@@ -724,6 +724,11 @@ describe("web and browser tools baselines", () => {
     expect(result.content).toContain("Hello world.");
     expect(result.metadata).toEqual({
       url: "https://example.com/article",
+      originUrl: "https://example.com/article",
+      retrievedAt: expect.any(String),
+      redirectCount: 0,
+      truncated: false,
+      publicReadReusable: true,
       title: "Example Title",
       content: "Example Title Hello world.",
       contentType: "text/html",

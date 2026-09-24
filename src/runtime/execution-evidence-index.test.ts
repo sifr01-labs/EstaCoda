@@ -62,6 +62,8 @@ describe("ExecutionEvidenceIndex", () => {
 
   it("shares one deterministic evidence disposition with Mission progress", () => {
     expect(executionEvidenceStatus(execution())).toBe("success");
+    expect(executionEvidenceStatus(execution({ readReuseOf: "original-call" }))).toBe("ineligible");
+    expect(executionEvidenceStatus(execution({ result: { ok: true, content: "read", metadata: { readReuseOf: "forged" } } }))).toBe("success");
     expect(executionEvidenceStatus(execution({ result: { ok: false, content: "failed" } }))).toBe("failed");
     expect(executionEvidenceStatus(execution({ decision: "ask", result: undefined }))).toBe("blocked");
     expect(executionEvidenceStatus(execution({ tool: { ...execution().tool, name: "plan" } }))).toBe("ineligible");

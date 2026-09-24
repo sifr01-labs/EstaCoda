@@ -23,6 +23,7 @@ export type ToolFeedbackSummary = {
   riskClass?: ToolRiskClass;
   targetSummary?: string;
   resultChars: number;
+  priorObservationCallId?: string;
 };
 
 export type TurnToolFeedbackLedger = {
@@ -248,6 +249,7 @@ function summarizeFeedbackEntry(entry: ToolFeedbackEntry): ToolFeedbackSummary {
     status: entry.plan.status,
     ...(entry.plan.result === undefined ? {} : { ok: entry.plan.result.ok }),
     ...(entry.execution === undefined ? {} : { riskClass: entry.execution.riskClass }),
+    ...(entry.execution?.readReuseOf === undefined ? {} : { priorObservationCallId: entry.execution.readReuseOf }),
     ...(targetSummary === undefined || targetSummary.length === 0 ? {} : { targetSummary }),
     resultChars: entry.plan.result?.content.length ?? 0
   };
@@ -255,7 +257,7 @@ function summarizeFeedbackEntry(entry: ToolFeedbackEntry): ToolFeedbackSummary {
 
 function estimatedSummaryChars(summaries: readonly ToolFeedbackSummary[]): number {
   return summaries.reduce((sum, summary) => (
-    sum + 96 + summary.callId.length + summary.tool.length + (summary.targetSummary?.length ?? 0)
+    sum + 96 + summary.callId.length + summary.tool.length + (summary.priorObservationCallId?.length ?? 0) + (summary.targetSummary?.length ?? 0)
   ), 0);
 }
 

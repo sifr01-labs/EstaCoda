@@ -35,7 +35,7 @@ type IndexedExecutionEvidence =
 export type ExecutionEvidenceStatus = IndexedExecutionEvidence["status"];
 
 export function executionEvidenceStatus(execution: ToolExecutionRecord): ExecutionEvidenceStatus {
-  return INELIGIBLE_EVIDENCE_TOOLS.has(execution.tool.name)
+  return execution.readReuseOf !== undefined || INELIGIBLE_EVIDENCE_TOOLS.has(execution.tool.name)
     ? "ineligible"
     : execution.decision !== "allow"
       ? "blocked"

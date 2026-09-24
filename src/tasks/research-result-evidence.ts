@@ -60,7 +60,11 @@ export function groundResearchResult(input: { task: Task; step: TaskStep; store:
         const content = String(source.content ?? source.snippet ?? "").slice(0, 24_000);
         const date = /\b(?:published|revised|updated)(?:\s+on)?\s*:?\s*(\d{4}-\d{2}-\d{2})\b/iu.exec(content)?.[1];
         const previous = sources.get(url);
-        sources.set(url, { url, published: date ?? previous?.published ?? "unknown", retrieved: input.now.toISOString().slice(0, 10),
+        // Reuse retains the original observation's retrieval date, including a
+        // turn that crosses midnight. Missing provenance cannot become "now".
+        const retrievedAt = extracted && typeof source.retrievedAt === "string" && /^\d{4}-\d{2}-\d{2}T/.test(source.retrievedAt)
+          ? source.retrievedAt.slice(0, 10) : execution.readReuseOf !== undefined ? previous?.retrieved ?? "unknown" : input.now.toISOString().slice(0, 10);
+        sources.set(url, { url, published: date ?? previous?.published ?? "unknown", retrieved: retrievedAt,
           access: extracted ? "extracted; full text unverified" : previous?.access ?? "snippet; full text unavailable" });
       }
     }

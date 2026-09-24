@@ -25,7 +25,7 @@ const policyCache = new Map<string, {
   policy: WebsiteBlocklistPolicy;
 }>();
 
-export function loadWebsiteBlocklist(config: WebsitePolicyConfig): WebsiteBlocklistPolicy {
+export function loadWebsiteBlocklist(config: WebsitePolicyConfig, options: { refresh?: boolean } = {}): WebsiteBlocklistPolicy {
   const domains = Array.isArray(config?.domains) ? config.domains : [];
   const sharedFiles = Array.isArray(config?.sharedFiles) ? config.sharedFiles : [];
   const cacheKey = JSON.stringify({
@@ -33,7 +33,7 @@ export function loadWebsiteBlocklist(config: WebsitePolicyConfig): WebsiteBlockl
     sharedFiles
   });
   const cached = policyCache.get(cacheKey);
-  if (cached !== undefined && Date.now() - cached.loadedAt < WEBSITE_BLOCKLIST_CACHE_TTL_MS) {
+  if (!options.refresh && cached !== undefined && Date.now() - cached.loadedAt < WEBSITE_BLOCKLIST_CACHE_TTL_MS) {
     return cached.policy;
   }
 

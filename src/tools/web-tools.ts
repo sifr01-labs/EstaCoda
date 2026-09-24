@@ -1,3 +1,4 @@
+import { webReadFingerprint } from "./turn-web-read-cache.js";
 import { undispatchedResult } from "./undispatched-result.js";
 import { createHash, randomUUID } from "node:crypto";
 import { browserContinuityUrl } from "../browser/continuity-url.js";
@@ -50,6 +51,7 @@ import { buildBrowserActionSecuritySummary } from "./tool-target-summary.js";
 import { enabledBrowserCapabilities } from "../browser/browser-capabilities.js";
 import { machineReadableApiDescriptionHint } from "../browser/api-description-hint.js";
 import {
+  getWebResearchProvider,
   registerDefaultWebResearchProviders,
   selectWebResearchProvider,
   type WebResearchProviderSelectionOptions
@@ -135,9 +137,17 @@ const CDP_URL_LITERAL_PATTERN = /https?:\/\/[^\s"'<>\\)]+/giu;
 
 export function createWebTools(options: WebToolOptions = {}): readonly RegisteredTool[] {
   registerDefaultWebResearchProviders();
+  const identities = new WeakMap<object, number>();
+  let nextIdentity = 0;
+  const identity = (value: object | undefined) => {
+    if (value === undefined) return undefined;
+    if (!identities.has(value)) identities.set(value, ++nextIdentity);
+    return identities.get(value);
+  };
   const maxContentChars = options.maxContentChars ?? DEFAULT_MAX_CONTENT_CHARS;
   const browserBackend = options.browserBackend ?? createUnconfiguredBrowserBackend();
   const urlGuard = createUrlGuard(options);
+  const extractUrlGuard = createUrlGuard(options, true);
   const deriveBrowserInput = <TInput extends { sessionId?: string }>(input: TInput): TInput & { sessionId: string } =>
     withDerivedBrowserSessionId(input, options.currentSessionId);
 
@@ -145,13 +155,14 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
     createWebSearchTool(options.webConfig, options),
     {
       name: "web.extract",
-      description: "Fetch and extract readable text from a URL for research workflows.",
+      description: "Fetch and extract readable text from a URL. Identical public reads may reuse a prior observation within this turn; set refresh to retrieve again.",
       inputSchema: {
         type: "object",
         properties: {
           url: { type: "string" },
           text: { type: "string" },
-          maxContentChars: { type: "number" }
+          maxContentChars: { type: "number" },
+          refresh: { type: "boolean" }
         }
       },
       riskClass: "read-only-network",
@@ -159,7 +170,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
       progressLabel: "extracting web content",
       maxResultSizeChars: maxContentChars,
       isAvailable: () => true,
-      run: async (input: { url?: string; text?: string; maxContentChars?: number }, context) => {
+      run: async (input: { url?: string; text?: string; maxContentChars?: number; refresh?: boolean }, context) => {
         const debug = createBrowserDebugSession();
         const url = normalizeUrl(input.url ?? extractFirstUrl(input.text ?? ""));
 
@@ -193,7 +204,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
           }, debug);
         }
 
-        const guardFailure = await urlGuard(url, {
+        const guardFailure = await extractUrlGuard(url, {
           unsafeReason: "unsafe-url",
           policyReason: "website-policy"
         });
@@ -212,6 +223,34 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
         if (!providerSelection.availability.available) {
           return withDebug(unavailableWebResearchResult("web.extract", "extract", providerSelection), debug);
         }
+
+        const registeredProvider = getWebResearchProvider(providerSelection.providerName ?? "");
+        // Only reviewed stateless providers can opt in. Provider configuration/identity
+        // changes invalidate observations, even if the URL and alias stay the same.
+        const reuse = context?.webReadReuse?.configure(webReadFingerprint({
+          web: options.webConfig, security: options.securityConfig,
+          provider: identity(registeredProvider), extract: identity(registeredProvider?.extract),
+          configure: identity(registeredProvider?.configure), fetch: identity(options.fetch ?? globalThis.fetch)
+        }));
+        const limit = Math.min(input.maxContentChars ?? maxContentChars, maxContentChars);
+        const key = webReadFingerprint({ url, maxContentChars: limit });
+        const reusable = registeredProvider?.publicExtractReuse === true
+          && providerSelection.provider?.publicExtractReuse === true
+          && Object.keys(input).every((name) => ["url", "text", "maxContentChars", "refresh"].includes(name))
+          && await isSafeUrl(url, { resolveHostname: options.resolveHostname });
+        if (input.refresh === true || !reusable) reuse?.forget(key);
+        if (reusable && input.refresh !== true) {
+          const prior = reuse?.get(key);
+          if (prior !== undefined) return prior;
+        }
+        const remember = (result: ToolResult): ToolResult => {
+          // Retrieval time belongs to this observation, never to a later cache hit.
+          if (!result.ok) { reuse?.forget(key); return result; }
+          result.metadata = { ...result.metadata, originUrl: url, retrievedAt: new Date().toISOString() };
+          if (reusable && result.ok && result.metadata.url === url && result.metadata.publicReadReusable !== false) reuse?.put(key, result);
+          else reuse?.forget(key);
+          return result;
+        };
 
         if (!providerSelection.fallback && providerSelection.providerName !== "fetch") {
           if (providerSelection.provider?.extract === undefined) {
@@ -247,17 +286,17 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
             status: providerResult.status,
             contentLength: providerResult.content.length
           });
-          return withDebug(formatWebExtractProviderResult(providerSelection.provider, providerResult), debug);
+          return remember(withDebug(formatWebExtractProviderResult(providerSelection.provider, providerResult), debug));
         }
 
-        return extractWithFetch({
+        return remember(await extractWithFetch({
           url,
           fetch: options.fetch ?? globalThis.fetch,
           maxContentChars: Math.min(input.maxContentChars ?? maxContentChars, maxContentChars),
-          guardUrl: urlGuard,
+          guardUrl: extractUrlGuard,
           debug,
           signal: context?.signal
-        });
+        }));
       }
     },
     createWebCrawlTool(options.webConfig, urlGuard, options),
@@ -3022,12 +3061,12 @@ type UrlGuard = (
   }
 ) => Promise<UrlGuardFailure | undefined>;
 
-function createUrlGuard(options: WebToolOptions): UrlGuard {
+function createUrlGuard(options: WebToolOptions, revalidate = false): UrlGuard {
   const websitePolicy = loadWebsiteBlocklist(options.securityConfig?.websiteBlocklist ?? {});
   const allowPrivateUrls = options.securityConfig?.allowPrivateUrls === true;
   return async (url, reasons) => {
     if (!await isSafeUrl(url, {
-      allowPrivateUrls,
+      allowPrivateUrls: revalidate ? options.securityConfig?.allowPrivateUrls === true : allowPrivateUrls,
       resolveHostname: options.resolveHostname
     })) {
       return {
@@ -3041,7 +3080,7 @@ function createUrlGuard(options: WebToolOptions): UrlGuard {
       };
     }
 
-    const websiteAccess = checkWebsiteAccess(url, websitePolicy);
+    const websiteAccess = checkWebsiteAccess(url, revalidate ? loadWebsiteBlocklist(options.securityConfig?.websiteBlocklist ?? {}, { refresh: true }) : websitePolicy);
     if (websiteAccess?.allowed === false) {
       return {
         ok: false,
@@ -3252,6 +3291,13 @@ async function extractWithFetch(input: {
       ].filter((line) => line !== undefined).join("\n"),
       metadata: {
         ...result,
+        redirectCount,
+        truncated: extracted.length > input.maxContentChars,
+        publicReadReusable: redirectCount === 0
+          && !response.headers.get("set-cookie") && !response.headers.get("vary")
+          && !/private|no-store|no-cache|must-revalidate/i.test(response.headers.get("cache-control") ?? "")
+          && !response.headers.get("expires") && !response.headers.get("age") && !response.headers.get("pragma")
+          && Number(/(?:s-maxage|max-age)=(\d+)/i.exec(response.headers.get("cache-control") ?? "")?.[1] ?? 60) >= 60,
         _estacoda_context_summary: webExtractContextSummary({
           url: result.url,
           title: result.title,

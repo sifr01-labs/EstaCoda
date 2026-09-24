@@ -44,7 +44,7 @@ export function answer(content: string): ScriptStep {
   return () => ({ content });
 }
 
-export async function createResearchWorkflowHarness(options: { memoryText?: string; browserAvailable?: boolean; searchAvailable?: boolean; denyWrites?: boolean; maxBatchTasks?: number; fileToolsAvailable?: boolean; fallbackOnRequest?: number; approvalDecision?: ToolApprovalHandler } = {}) {
+export async function createResearchWorkflowHarness(options: { maxToolCalls?: number; toolDecision?: () => "allow" | "deny"; memoryText?: string; browserAvailable?: boolean; searchAvailable?: boolean; denyWrites?: boolean; maxBatchTasks?: number; fileToolsAvailable?: boolean; fallbackOnRequest?: number; approvalDecision?: ToolApprovalHandler } = {}) {
   const root = await mkdtemp(join(tmpdir(), "estacoda-research-baseline-"));
   const homeDir = join(root, "home");
   const workspaceRoot = join(root, "workspace");
@@ -89,14 +89,14 @@ export async function createResearchWorkflowHarness(options: { memoryText?: stri
     }
   });
   registerWebResearchProvider({
-    name: "research-baseline-web", displayName: "In-memory research fixtures",
+    name: "research-baseline-web", publicExtractReuse: true, displayName: "In-memory research fixtures",
     capabilities: { search: true, extract: true }, getAvailability: () => ({ available: true }),
     search: async (query) => {
       searches.push(query);
       return [{ title: "Synthetic battery study", url: SOURCE_URL, snippet: "A fixture, not a real scientific claim." }];
     },
     extract: async (url) => {
-      if (url !== SOURCE_URL) throw new Error("Unexpected fixture URL");
+      if (url !== SOURCE_URL && !/^\?source=[1-5]$/.test(url.slice(SOURCE_URL.length))) throw new Error("Unexpected fixture URL");
       extracts.push(url);
       return { url, title: "Synthetic battery study", content: "Fixture abstract: compare recycling methods; evidence is illustrative.", status: 200 };
     }
@@ -120,8 +120,8 @@ export async function createResearchWorkflowHarness(options: { memoryText?: stri
       // Constrain unrelated capabilities using the real session filter.
       // Catalog truncation is independently characterized at the function seam.
       enabledToolsets: options.fileToolsAvailable === false ? ["web"] : ["core", "files", "web", "research"],
-      securityPolicy: { decide: (request) => options.approvalDecision ? approvedActions.has(request.actionKey ?? "") ? "allow" : "ask" : options.denyWrites && request.riskClass === "workspace-write" ? "deny" : "allow" },
-      executionControls: { providerBudgets: { maxProviderIterations: 8, maxProviderToolCalls: 8, maxProviderWallClockMs: 15_000, finalizationReserveMs: 0 } }
+      securityPolicy: { decide: (request) => options.toolDecision?.() ?? (options.approvalDecision ? approvedActions.has(request.actionKey ?? "") ? "allow" : "ask" : options.denyWrites && request.riskClass === "workspace-write" ? "deny" : "allow") },
+      executionControls: { providerBudgets: { maxProviderIterations: 8, maxProviderToolCalls: options.maxToolCalls ?? 8, maxProviderWallClockMs: 15_000, finalizationReserveMs: 0 } }
     });
   };
   try { runtime = await buildRuntime(); } catch (error) {

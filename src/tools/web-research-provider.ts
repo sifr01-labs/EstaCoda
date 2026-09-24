@@ -19,6 +19,9 @@ export type WebSearchResult = {
 };
 
 export type WebExtractResult = {
+  /** An opted-in stateless provider can decline reuse for individual responses. */
+  publicReadReusable?: boolean;
+  truncated?: boolean;
   url: string;
   title?: string;
   content: string;
@@ -88,6 +91,8 @@ export type WebResearchPythonCapabilityPathResolver = (
 ) => ManagedPythonCapabilityEnvPaths;
 
 export type WebResearchProvider = {
+  /** Explicit contract: extraction uses public, stateless reads without target authentication. */
+  publicExtractReuse?: true;
   name: string;
   displayName: string;
   capabilities: {

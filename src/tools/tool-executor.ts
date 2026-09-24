@@ -1,3 +1,4 @@
+import { TurnWebReadCache, webReadFingerprint } from "./turn-web-read-cache.js";
 import { isUndispatchedResult } from "./undispatched-result.js";
 import { validateCurrentExecutionAuthority, withExecutionOperation } from "../runtime/live-execution-authority.js";
 import { assertCurrentExecutionFence } from "../session/execution-fence-context.js";
@@ -130,6 +131,8 @@ export type ToolReadLedger = {
 };
 
 export type ToolExecutionRecord = {
+  /** Executor-owned provenance; metadata cannot manufacture a reused observation. */
+  readReuseOf?: string;
   pendingApproval?: PendingActionApproval;
   /** Executor-owned link to a successful equivalent call; never tool-result metadata. */
   completedReplayOf?: string;
@@ -150,6 +153,7 @@ export type ToolExecutionRecord = {
 };
 
 export type ToolExecutorOptions = {
+  readReuseGeneration?: () => unknown;
   executionAdmissionGuard?: RuntimeToolAdmissionGuard;
   registry: ToolRegistry;
   securityPolicy: SecurityPolicy;
@@ -162,6 +166,8 @@ export type ToolExecutorOptions = {
 };
 
 export class ToolExecutor {
+  readonly #webReadCache = new TurnWebReadCache();
+  readonly #readReuseGeneration: ToolExecutorOptions["readReuseGeneration"];
   readonly #executionAdmissionGuard: RuntimeToolAdmissionGuard | undefined;
   readonly #registry: ToolRegistry;
   readonly #securityPolicy: SecurityPolicy;
@@ -175,6 +181,7 @@ export class ToolExecutor {
   readonly #operationLedger = new ExecutionOperationLedger();
 
   constructor(options: ToolExecutorOptions) {
+    this.#readReuseGeneration = options.readReuseGeneration;
     this.#executionAdmissionGuard = options.executionAdmissionGuard;
     this.#registry = options.registry;
     this.#securityPolicy = options.securityPolicy;
@@ -190,6 +197,7 @@ export class ToolExecutor {
   }
 
   resetPerTurnBudgets(): void {
+    this.#webReadCache.clear();
     this.#uncertainMutationKeys.clear();
     this.#operationLedger.reset();
   }
@@ -223,6 +231,7 @@ export class ToolExecutor {
   }
 
   async executeTool(request: NamedToolExecutionRequest): Promise<ToolExecutionRecord | undefined> {
+    if (request.tool !== "web.extract") this.#webReadCache.clear();
     const tool = this.#registry.get(request.tool);
 
     if (tool === undefined || !(await tool.isAvailable())) {
@@ -404,6 +413,7 @@ export class ToolExecutor {
       }
     };
     let assessment = await assessSecurityPolicy(this.#securityPolicy, securityRequest);
+    if (assessment.decision !== "allow") this.#webReadCache.clear();
     await this.#recordSecurityAssessment(request.sessionId, tool.name, riskClass, persistedTargetKey, persistedTargetSummary, assessment);
 
     if (assessment.decision === "ask" && !isAbortSignalAborted(request.signal)) {
@@ -591,7 +601,12 @@ export class ToolExecutor {
         timeoutMs += 120_000;
         timeout.extendTotal(120_000);
       }) ?? request.onSecureInputRequest;
+      const webReadReuse = tool.name === "web.extract" && request.visibleTurnId !== undefined && request.toolCallId !== undefined
+        ? this.#webReadCache.bind(webReadFingerprint({ profile: this.#profileId, session: request.sessionId, turn: request.visibleTurnId,
+          workspace: this.#workspaceRoot, environmentType, target: (await this.#sessionDb.getSession(request.sessionId))?.executionTarget,
+          generation: this.#readReuseGeneration?.() }), request.toolCallId) : undefined;
       const executionContext = {
+        webReadReuse,
         requestContract: request.requestContract,
         sessionId: request.sessionId,
         profileId: this.#profileId,
@@ -773,7 +788,9 @@ export class ToolExecutor {
       result: storedResult
     });
 
+    if (!result.ok) this.#webReadCache.clear();
     const execution: ToolExecutionRecord = {
+      ...(this.#webReadCache.provenance(result) === undefined ? {} : { readReuseOf: this.#webReadCache.provenance(result) }),
       tool: definition,
       ...(executionEffect === undefined ? {} : { executionEffect }),
       settlement,

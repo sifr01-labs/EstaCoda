@@ -280,16 +280,57 @@ describe.sequential("research workflow acceptance harness", () => {
     scriptConsumed(h);
   });
 
-  it("currently fetches a successful identical extract twice (A12 gap, PR 5)", async () => {
+  it("reuses a successful identical extract with the original receipt (A12)", async () => {
     const h = await harness();
     h.enqueue(nativeCall("web_extract", { url: SOURCE_URL }), nativeCall("web_extract", { url: SOURCE_URL }), answer(REPORT));
     const response = await h.turn("Research battery recycling.");
-    expect(h.extracts).toEqual([SOURCE_URL, SOURCE_URL]);
+    expect(h.extracts).toEqual([SOURCE_URL]);
+    expect(response.toolExecutions[1]?.readReuseOf).toBe(response.toolExecutions[0]?.toolCallId);
     expect(response.toolExecutions).toHaveLength(2);
     expect(new Set(response.toolExecutions.map((execution) => execution.toolCallId)).size).toBe(2);
     expect(response.toolExecutions.every((execution) => execution.result?.ok)).toBe(true);
     scriptConsumed(h);
   });
+  it("delivers the latest duplicate five-source batch with full prior observations", async () => {
+    const h = await harness({ maxToolCalls: 20 });
+    const urls = [1, 2, 3, 4, 5].map((n) => `${SOURCE_URL}?source=${n}`);
+    const batch = (request: Parameters<ReturnType<typeof nativeCall>>[0]) => ({ content: "", toolCalls: urls.flatMap((url) => nativeCall("web_extract", { url })(request).toolCalls!) });
+    h.enqueue(batch, batch, (request) => {
+      const prompt = JSON.stringify(request);
+      expect(prompt).toContain("Prior observation reused from");
+      for (const url of urls) expect(prompt).toContain(url);
+      expect(prompt).toContain("Fixture abstract: compare recycling methods");
+      return { content: REPORT };
+    });
+    const response = await h.turn("Research battery recycling.");
+    expect([...h.extracts].sort()).toEqual(urls);
+    expect(response.toolExecutions).toHaveLength(10);
+    for (let i = 0; i < 5; i++) {
+      const original = response.toolExecutions[i]!;
+      const reuse = response.toolExecutions[i + 5]!;
+      expect(reuse.readReuseOf).toBe(original.toolCallId);
+      expect(reuse.result?.metadata?.retrievedAt).toBe(original.result?.metadata?.retrievedAt);
+    }
+    scriptConsumed(h);
+  });
+
+  it("refreshes explicitly, clears between turns and rechecks denial before a hit", async () => {
+    let deny = false;
+    const h = await harness({ toolDecision: () => deny ? "deny" : "allow" });
+    h.enqueue(nativeCall("web_extract", { url: SOURCE_URL }), nativeCall("web_extract", { url: SOURCE_URL, refresh: true }), answer(REPORT));
+    await h.turn("Research battery recycling.");
+    expect(h.extracts).toHaveLength(2);
+    h.enqueue(nativeCall("web_extract", { url: SOURCE_URL }), (request) => {
+      deny = true;
+      return nativeCall("web_extract", { url: SOURCE_URL })(request);
+    }, answer("The read was denied."));
+    const response = await h.turn("Research battery recycling again.");
+    expect(h.extracts).toHaveLength(3);
+    expect(response.toolExecutions[1]?.decision).toBe("deny");
+    expect(response.toolExecutions[1]?.readReuseOf).toBeUndefined();
+    scriptConsumed(h);
+  });
+
 });
 
 describe("explicit delegation limit admission", () => {

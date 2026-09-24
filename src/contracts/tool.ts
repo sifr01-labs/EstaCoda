@@ -61,7 +61,18 @@ export type ToolResult = {
   metadata?: ToolResultMetadata;
 };
 
+/** Narrow executor-owned access to current-turn public observations. */
+export type WebReadReuse = {
+  configure(generation: string): {
+    get(key: string): ToolResult | undefined;
+    put(key: string, result: ToolResult): void;
+    forget(key: string): void;
+  };
+};
+
 export type ToolExecutionContext = {
+  /** Present only for executor-authorized public web reads in the current turn. */
+  webReadReuse?: WebReadReuse;
   /** Runtime-owned user intent; provider arguments cannot supply or override it. */
   requestContract?: import("./delegation.js").DelegatedRequestContract;
   /** Runtime-owned artifact scope. Provider input cannot set these values. */

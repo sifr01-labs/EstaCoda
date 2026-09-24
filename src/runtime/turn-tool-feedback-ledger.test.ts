@@ -37,6 +37,15 @@ describe("turn tool feedback ledger", () => {
     expect(JSON.stringify(afterSecond.consumed)).not.toContain(firstResult);
   });
 
+  it("retains original observation provenance after a reused result is consumed", () => {
+    const result = "Prior observation body";
+    const first = recordTurnToolFeedbackBatch(createTurnToolFeedbackLedger(), [toolPlan("reuse", result)],
+      [{ ...toolExecution("reuse", result), readReuseOf: "original" }]);
+    const next = recordTurnToolFeedbackBatch(first, [toolPlan("next", "fresh")], [toolExecution("next", "fresh")]);
+    expect(next.consumed[0]?.priorObservationCallId).toBe("original");
+    expect(JSON.stringify(next.consumed)).not.toContain(result);
+  });
+
   it("bounds accumulated receipts and records how many were omitted", () => {
     let ledger = createTurnToolFeedbackLedger();
     for (let index = 0; index < 100; index += 1) {

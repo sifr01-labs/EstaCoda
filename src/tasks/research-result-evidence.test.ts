@@ -25,6 +25,12 @@ function ground(text = claim, executions = [execution("web.search", { results: [
 }
 
 describe("research result evidence", () => {
+  it("preserves original retrieval dates for reused extracts across midnight", () => {
+    const reused = { ...execution("web.extract", { url, content: "Observation", retrievedAt: "2026-09-23T23:59:59.000Z" }), readReuseOf: "original" };
+    expect(ground(claim, [reused]).text).toContain("2026-09-23 | extracted");
+    delete reused.result!.metadata!.retrievedAt;
+    expect(ground(claim, [reused]).text).toContain("unknown | extracted");
+  });
   it("adds retrieval facts, observed dates and conservative access status without trusting provider columns", () => {
     const result = ground();
     expect(result.text).toContain("2025-06-10 | 2026-09-24 | snippet; full text unavailable");

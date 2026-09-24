@@ -51,6 +51,12 @@ function browserDiscovery(text: string, observationId = 1): ToolExecutionRecord 
 }
 
 describe("ToolLoopProgressGuard", () => {
+  it("does not credit reused web observations even when feedback labels change", async () => {
+    const guard = new ToolLoopProgressGuard({ noProgressNudgeIteration: 3, maxNoProgressIterations: 6 });
+    const read = execution({ tool: { ...execution().tool, name: "web.extract" }, executionEffect: { kind: "read" } });
+    expect(guard.observe([read]).materialProgress).toBe(true);
+    expect(guard.observe([{ ...read, readReuseOf: "call-1", result: { ok: true, content: "Prior observation with new receipt label" } }]).materialProgress).toBe(false);
+  });
   it("credits the discovery sequence before counting repeated failed extractions and cached reads", async () => {
     const guard = await discoveryGuard();
     const snapshot = browserDiscovery("Application products");
