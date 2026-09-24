@@ -1,7 +1,8 @@
 import { cp, lstat, mkdir, readdir, readFile, realpath, rename, rm, stat, writeFile } from "node:fs/promises";
 import { basename, dirname, join, relative, resolve } from "node:path";
 import type { LoadedSkill, SkillDefinition, SkillEvaluation } from "../contracts/skill.js";
-import type { RegisteredTool, SessionToolProvider, ToolResult } from "../contracts/tool.js";
+import type { SessionCapabilityRecovery } from "./capability-tools.js";
+import type { ToolExecutionContext, RegisteredTool, SessionToolProvider, ToolResult } from "../contracts/tool.js";
 import { SkillEvolutionStore, type SkillEvalRunRecord, type SkillObservationRecord, type SkillPatchOperation, type SkillPatchProposal, type SkillPatchRiskLevel, type SkillSourceTrust } from "../skills/skill-evolution.js";
 import { resetBundledSkill } from "../skills/skill-bundled-sync.js";
 import {
@@ -39,6 +40,7 @@ import {
 export { slugifySkillName } from "../skills/skill-proposal-service.js";
 
 export type SkillToolsOptions = {
+  capabilityRecovery?: SessionCapabilityRecovery;
   registry: SkillRegistry;
   visibleRegistry?: SkillRegistry;
   localSkillsRoot: string;
@@ -62,13 +64,15 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
         changeManifestStore: options.changeManifestStore
       })
     : undefined;
-  const runSkillRead = async (input: SkillReadInput): Promise<ToolResult> => {
+  const runSkillRead = async (input: SkillReadInput, context?: ToolExecutionContext): Promise<ToolResult> => {
     const skill = getSkill(inspectionRegistry, input.name);
     if (!skill.ok) {
       return skill;
     }
     const foundSkill = skill.skill;
-    return readSkillContent(foundSkill, input, options.skillConfig?.[foundSkill.name]);
+    const result = await readSkillContent(foundSkill, input, options.skillConfig?.[foundSkill.name]);
+    options.capabilityRecovery?.observeSkillRead(foundSkill, result, input, context);
+    return result;
   };
   const runSkillView = async (input: SkillReadInput): Promise<ToolResult> => {
     const skill = getSkill(inspectionRegistry, input.name);
@@ -1288,6 +1292,7 @@ export const skillToolProvider: SessionToolProvider = {
     return createSkillTools({
       registry: requireProviderDependency("skill", "skillRegistry", ctx.skillRegistry),
       visibleRegistry: ctx.sessionSkillRegistry,
+      capabilityRecovery: ctx.capabilityRecovery,
       localSkillsRoot: requireProviderDependency("skill", "localSkillsRoot", ctx.localSkillsRoot),
       bundledSkillsRoot: ctx.bundledSkillsRoot,
       skillConfig: ctx.skillConfig,

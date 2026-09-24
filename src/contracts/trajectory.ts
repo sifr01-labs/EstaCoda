@@ -30,6 +30,7 @@ export type TrajectoryEventKind =
   | "provider-iteration"
   | "provider-tool-inventory"
   | "capability-recovery"
+  | "capability-skills-loaded"
   | "provider-budget-exhausted"
   | "execution-plan-started"
   | "execution-plan-updated"

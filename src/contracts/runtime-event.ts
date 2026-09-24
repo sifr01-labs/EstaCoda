@@ -60,12 +60,24 @@ export type ProviderToolInventoryEvent = {
   }>;
 };
 
+export type RecoveredSkillReceipt = {
+  name: string;
+  origin: "capability-recovery";
+  toolCallId: string;
+  appliedIteration: number;
+  contentMode: "complete" | "contract" | "full";
+  readiness: "available" | "missing-setup";
+  confirmationRequired: boolean;
+};
+export type RecoveredSkillsEvent = { kind: "capability-skills-loaded"; loadedSkills: RecoveredSkillReceipt[] };
+
 export type CapabilityRecoveryEvent = { kind: "capability-recovery"; appliedIteration: number; applied: string[]; rejected: Array<{ id: string; reason: string }> };
 
 export type RuntimeEvent =
   | ExecutionPlanLifecycleEvent
   | ProviderToolInventoryEvent
   | CapabilityRecoveryEvent
+  | RecoveredSkillsEvent
   | {
       kind: "authentication-lifecycle";
       stage:

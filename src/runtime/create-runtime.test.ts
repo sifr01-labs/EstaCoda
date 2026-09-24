@@ -484,6 +484,7 @@ const providerToolNameGroups = [
       "skill.export"
     ]
   },
+  { providerName: "capability", toolNames: ["capability.discover", "capability.request"] },
   { providerName: "knowledgeMemory", toolNames: ["knowledge.memory.inspect", "knowledge.memory.deactivate"] },
   { providerName: "knowledgeCode", toolNames: ["knowledge.code.query"] },
   { providerName: "delegation", toolNames: ["delegate_task"] },
@@ -2882,9 +2883,42 @@ describe("createRuntime MCP trust gating", () => {
             ],
           },
           {
+            "maxResultSizeChars": 6000,
+            "name": "capability.discover",
+            "orderIndex": 102,
+            "providerKind": "session",
+            "providerPhase": "post-skill-visibility",
+            "requiredConfig": undefined,
+            "riskClass": "read-only-local",
+            "schemaAliasOrder": [
+              "ids",
+              "kind",
+              "query",
+            ],
+            "toolsets": [
+              "core",
+            ],
+          },
+          {
+            "maxResultSizeChars": 6000,
+            "name": "capability.request",
+            "orderIndex": 103,
+            "providerKind": "session",
+            "providerPhase": "post-skill-visibility",
+            "requiredConfig": undefined,
+            "riskClass": "read-only-local",
+            "schemaAliasOrder": [
+              "ids",
+              "reason",
+            ],
+            "toolsets": [
+              "core",
+            ],
+          },
+          {
             "maxResultSizeChars": 4000,
             "name": "knowledge.memory.inspect",
-            "orderIndex": 102,
+            "orderIndex": 104,
             "providerKind": "session",
             "providerPhase": "post-memory-provider",
             "requiredConfig": undefined,
@@ -2904,7 +2938,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 2000,
             "name": "knowledge.memory.deactivate",
-            "orderIndex": 103,
+            "orderIndex": 105,
             "providerKind": "session",
             "providerPhase": "post-memory-provider",
             "requiredConfig": undefined,
@@ -2920,7 +2954,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 8000,
             "name": "knowledge.code.query",
-            "orderIndex": 104,
+            "orderIndex": 106,
             "providerKind": "session",
             "providerPhase": "post-memory-provider",
             "requiredConfig": undefined,
@@ -2937,7 +2971,7 @@ describe("createRuntime MCP trust gating", () => {
           {
             "maxResultSizeChars": 48000,
             "name": "execute_code",
-            "orderIndex": 105,
+            "orderIndex": 107,
             "providerKind": "session",
             "providerPhase": "post-tool-executor",
             "requiredConfig": undefined,
@@ -3059,6 +3093,8 @@ describe("createRuntime MCP trust gating", () => {
           "skill.remove_file",
           "skill.import",
           "skill.export",
+          "capability.discover",
+          "capability.request",
           "knowledge.memory.inspect",
           "knowledge.memory.deactivate",
           "knowledge.code.query",

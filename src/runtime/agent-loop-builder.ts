@@ -524,7 +524,7 @@ export class AgentLoopBuilder {
       stateRoot: substrate.stateRoot
     });
     const sessionSkillCatalog = sessionSkillRegistry.catalog();
-    const capabilityRecovery = new SessionCapabilityRecovery({ registry: toolRegistry, skills: sessionSkillRegistry });
+    const capabilityRecovery = new SessionCapabilityRecovery({ registry: toolRegistry, skills: sessionSkillRegistry, skillConfig: input.skillConfig });
 
     registerToolRegistrationPhase({
       registry: toolRegistry,

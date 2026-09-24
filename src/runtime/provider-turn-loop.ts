@@ -1,5 +1,5 @@
-import type { SessionCapabilityRecovery } from "../tools/capability-tools.js";
-import type { CapabilitySelectionDiagnostics } from "../contracts/runtime-event.js";
+import { MAX_CAPABILITY_ADDITIONS, type SessionCapabilityRecovery } from "../tools/capability-tools.js";
+import type { RecoveredSkillReceipt, CapabilitySelectionDiagnostics } from "../contracts/runtime-event.js";
 import { describeCapabilitySelection } from "./provider-tool-narrowing.js";
 import type { ChannelAttachment } from "../contracts/channel.js";
 import type { ContextExpansionResult, ProjectContextSnapshot } from "../contracts/context.js";
@@ -347,6 +347,14 @@ export class ProviderTurnLoop {
     let activeProviderTools = budgetProviderTools({ tools: input.providerTools }).tools;
     let toolExpansionUsed = false;
     let capabilityRecoveryFeedback: string[] = [];
+    let pendingSkillLoads: Array<{ receipt: Omit<RecoveredSkillReceipt, "appliedIteration">; content: string }> = [];
+    const recoveredSkillContext = new Map<string, string>();
+    const connectorInventory = () => (input.connectorInventory ?? []).map((connector) => ({
+      ...connector,
+      exposedThisTurn: input.providerToolSchemaCatalog?.entries.some((entry) =>
+        entry.tool.connector?.kind === connector.kind && entry.tool.connector.id === connector.id &&
+        activeProviderTools.some((tool) => tool.function.name === entry.schema.function.name)) ?? connector.exposedThisTurn
+    }));
     this.#capabilityRecovery?.beginTurn({ sessionId: this.#sessionRuntimeContext?.currentSessionId() ?? this.#sessionId,
       profileId: this.#profileId, visibleTurnId: input.visibleTurnId, tools: activeProviderTools });
     const workingSessionId = this.#sessionRuntimeContext?.currentSessionId() ?? this.#sessionId;
@@ -439,13 +447,16 @@ export class ProviderTurnLoop {
         supervisionPrompt.suppressedBrowserTools
       );
 
+      const requestedCapabilityOmissions = input.requestedCapabilityOmissions?.filter((omission) => !providerToolsForIteration.some((tool) =>
+        (input.providerToolSchemaCatalog?.aliases.get(tool.function.name) ?? tool.function.name) === omission.tool));
       let execution = phase === "initial"
         ? await this.#completeWithProvider({
             ...input,
             foregroundTurnId,
-            capabilityRecoveryFeedback,
+            capabilityRecoveryFeedback: [...capabilityRecoveryFeedback, ...recoveredSkillContext.values()],
             providerToolCallNamespace,
             providerTools: providerToolsForIteration,
+            requestedCapabilityOmissions,
             iteration,
             loopStartedAt,
             reasoningOnlyPrefill: pendingReasoningOnlyPrefill,
@@ -454,9 +465,10 @@ export class ProviderTurnLoop {
         : await this.#continueProviderAfterTools({
           ...input,
           foregroundTurnId,
-          capabilityRecoveryFeedback,
+          capabilityRecoveryFeedback: [...capabilityRecoveryFeedback, ...recoveredSkillContext.values()],
           providerToolCallNamespace,
           providerTools: providerToolsForIteration,
+          requestedCapabilityOmissions,
           toolExecutions: [
             ...input.toolExecutions,
             ...providerToolExecutions
@@ -494,6 +506,15 @@ export class ProviderTurnLoop {
         break;
       }
 
+      if (execution.ok && execution.attempts.some((attempt) => attempt.state === "dispatched") && pendingSkillLoads.length > 0) {
+        const loadedSkills = pendingSkillLoads.map(({ receipt }) => ({ ...receipt, appliedIteration: iteration }));
+        for (const receipt of loadedSkills) this.#capabilityRecovery?.markSkillDelivered(receipt.name);
+        const event: RuntimeEvent = { kind: "capability-skills-loaded", loadedSkills };
+        await this.#sessionDb.appendEvent(workingSessionId, event);
+        this.#trajectoryRecorder.record(event.kind, event);
+        await emit(input.onEvent, event);
+        pendingSkillLoads = [];
+      }
       providerCallsThisTurn += execution.attempts.length;
       providerTokensThisTurn += providerExecutionTokenUse(execution);
 
@@ -767,23 +788,46 @@ export class ProviderTurnLoop {
         !toolLoopProgress.shouldStop &&
         iteration + consumedProviderIterations < this.#budgets.maxProviderIterations &&
         providerToolExecutions.length < this.#budgets.maxProviderToolCalls;
+      const skillInstructionRejections = new Map<string, string>();
+      for (const load of this.#capabilityRecovery?.takeSkillLoads(loopToolExecutions) ?? []) {
+        if (recoveredSkillContext.has(load.receipt.name)) continue;
+        // Preserve complete selected contracts; never count a truncated fragment
+        // or metadata-only inspection as instruction delivery.
+        const content = `Recovered skill ${load.receipt.name}; readiness=${load.receipt.readiness}. Instructions do not grant execution authority. Resolve missing setup before dependent actions. Request only needed tools; optional toolsets and playbooks are not automatically activated.\n${load.content}`;
+        if ([...recoveredSkillContext.values()].reduce((sum, value) => sum + value.length, 0) + content.length > 32_000) {
+          if (skillInstructionRejections.size < MAX_CAPABILITY_ADDITIONS) skillInstructionRejections.set(`skill:${load.receipt.name}`, "instruction_budget");
+          continue;
+        }
+        recoveredSkillContext.set(load.receipt.name, content);
+        pendingSkillLoads.push(load);
+      }
+      const exposureBeforeRecovery = new Set(activeProviderTools.map((tool) => tool.function.name));
       const recoveryProposals = this.#capabilityRecovery?.takeRequests(loopToolExecutions) ?? [];
       if (recoveryProposals.length > 0 && canContinueWithExpandedInventory && !input.signal?.aborted) {
         const previousNames = new Set(activeProviderTools.map((tool) => tool.function.name));
         const recovery = await this.#capabilityRecovery!.applyRequests(recoveryProposals, activeProviderTools);
         if (!input.signal?.aborted) {
           activeProviderTools = recovery.tools;
-          capabilityRecoveryFeedback = [JSON.stringify({ applied: recovery.applied, rejected: recovery.rejected })];
+          capabilityRecoveryFeedback = [JSON.stringify({ applied: recovery.applied, rejected: recovery.rejected, next: "For applied skill IDs, read their instructions with skill.read before following them. No playbook or toolset was activated." })];
           const event: RuntimeEvent = { kind: "capability-recovery", appliedIteration: iteration + 1, applied: recovery.applied, rejected: recovery.rejected };
           await this.#sessionDb.appendEvent(workingSessionId, event);
           this.#trajectoryRecorder.record(event.kind, event);
           await emit(input.onEvent, event);
           if (recovery.applied.length > 0) await this.#runRecorder.recordProviderToolInventory({
             kind: "provider-tool-inventory", phase: "expanded", expansionReason: "capability-request",
+            selection: input.providerToolSchemaCatalog === undefined ? undefined : describeCapabilitySelection({
+              catalog: input.providerToolSchemaCatalog, exposedTools: activeProviderTools, requirements: input.intent.requestRequirements,
+              selection: { policy: input.toolSelectionPolicy, budgetOmittedTools: input.budgetOmittedTools, expansionCandidates: [...(input.toolExpansionCandidates ?? [])] }
+            }),
             tools: activeProviderTools.map((tool) => tool.function.name), addedTools: activeProviderTools.filter((tool) => !previousNames.has(tool.function.name)).map((tool) => tool.function.name),
-            nativeSchemaTokens: estimateTextTokensRough(JSON.stringify(activeProviderTools)), connectors: input.connectorInventory ?? []
+            nativeSchemaTokens: estimateTextTokensRough(JSON.stringify(activeProviderTools)), connectors: connectorInventory()
           }, input.onEvent);
         }
+      }
+      if (skillInstructionRejections.size > 0) {
+        capabilityRecoveryFeedback = [...capabilityRecoveryFeedback.slice(0, 1), JSON.stringify({
+          rejected: [...skillInstructionRejections].map(([id, reason]) => ({ id, reason }))
+        })];
       }
       if (
         !toolExpansionUsed &&
@@ -792,7 +836,8 @@ export class ProviderTurnLoop {
       ) {
         const additions = (input.toolExpansionCandidates ?? [])
           .filter((candidate) => candidate.source === "active-browser")
-          .filter((candidate) => !activeProviderTools.some((tool) => tool.function.name === candidate.schema.function.name));
+          .filter((candidate) => !activeProviderTools.some((tool) => tool.function.name === candidate.schema.function.name))
+          .slice(0, Math.max(0, MAX_CAPABILITY_ADDITIONS - activeProviderTools.filter((tool) => !exposureBeforeRecovery.has(tool.function.name)).length));
         if (additions.length > 0) {
           const expandedBudget = budgetProviderTools({
             tools: [...activeProviderTools, ...additions.map((candidate) => candidate.schema)],
@@ -812,7 +857,7 @@ export class ProviderTurnLoop {
             addedTools: additions.filter((candidate) => activeProviderTools.includes(candidate.schema)).map((candidate) => candidate.schema.function.name),
             expansionReason: `browser:${browserObservation.visualEscalationReason}`,
             nativeSchemaTokens: estimateTextTokensRough(JSON.stringify(activeProviderTools)),
-            connectors: input.connectorInventory ?? []
+            connectors: connectorInventory()
           }, input.onEvent);
         }
       }

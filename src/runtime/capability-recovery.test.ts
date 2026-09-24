@@ -74,3 +74,50 @@ it("asks again for the recovered action under strict policy", async () => {
     await expect(readFile(join(h.workspaceRoot, "strict.md"))).rejects.toThrow();
   } finally { await h.dispose(); }
 });
+
+
+it.each([false, true])("loads a recovered skill through skill.read and records delivery separately from routing (fallback=%s)", async (fallback) => {
+  const h = await createResearchWorkflowHarness({ fallbackOnRequest: fallback ? 3 : undefined });
+  try {
+    h.enqueue(nativeCall("capability_request", { ids: ["skill:research-discovery"], reason: "Use a literature workflow" }),
+      nativeCall("skill_read", { name: "research-discovery", mode: "contract" }),
+      (request) => {
+        expect(request.messages.some((message) => typeof message.content === "string" && message.content.includes("Recovered skill research-discovery; readiness="))).toBe(true);
+        expect(names(request)).not.toContain("terminal_run");
+        return { content: "The research workflow instructions are loaded." };
+      });
+    const result = await h.turn("Find battery studies.");
+    expect(h.scriptErrors).toEqual([]);
+    expect(h.events).toContainEqual({ kind: "capability-skills-loaded", loadedSkills: [expect.objectContaining({
+      name: "research-discovery", origin: "capability-recovery", contentMode: "contract", appliedIteration: 2, readiness: "available", confirmationRequired: false
+    })] });
+    expect(h.events.some((event) => event.kind === "skill" && event.name === "research-discovery")).toBe(false);
+    expect(result.toolExecutions.map((execution) => execution.tool.name)).toEqual(["capability.request", "skill.read"]);
+  } finally { await h.dispose(); }
+});
+
+it("does not record a skill as loaded merely because it was requested", async () => {
+  const h = await createResearchWorkflowHarness();
+  try {
+    h.enqueue(nativeCall("capability_request", { ids: ["skill:research-discovery"], reason: "Use the workflow" }), answer("I did not load instructions."));
+    await h.turn("Find battery studies.");
+    expect(h.scriptErrors).toEqual([]);
+    expect(h.events.some((event) => event.kind === "capability-skills-loaded")).toBe(false);
+  } finally { await h.dispose(); }
+});
+
+it("does not record skill delivery when cancelled after the instruction read", async () => {
+  const h = await createResearchWorkflowHarness();
+  const controller = new AbortController();
+  try {
+    h.enqueue(nativeCall("capability_request", { ids: ["skill:research-discovery"], reason: "Use the workflow" }),
+      nativeCall("skill_read", { name: "research-discovery" }));
+    await h.runtime.handle({ text: "Find battery studies.", channel: "cli", signal: controller.signal, onEvent: (event) => {
+      h.events.push(event);
+      if (event.kind === "tool-result" && event.tool === "skill.read") controller.abort();
+    } });
+    expect(h.scriptErrors).toEqual([]);
+    expect(h.requests).toHaveLength(2);
+    expect(h.events.some((event) => event.kind === "capability-skills-loaded")).toBe(false);
+  } finally { await h.dispose(); }
+});

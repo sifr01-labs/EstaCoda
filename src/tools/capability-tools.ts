@@ -1,4 +1,8 @@
+import { createHash } from "node:crypto";
+import type { LoadedSkill, SkillDefinition } from "../contracts/skill.js";
+import type { RecoveredSkillReceipt } from "../contracts/runtime-event.js";
 import type { RegisteredTool, SessionToolProvider, ToolExecutionContext, ToolResult } from "../contracts/tool.js";
+import { buildSkillReadinessMetadata, resolveSkillSetupContext } from "../skills/skill-readiness.js";
 import type { SkillRegistry } from "../skills/skill-registry.js";
 import type { ToolExecutionRecord } from "./tool-executor.js";
 import type { ToolRegistry } from "./tool-registry.js";
@@ -16,25 +20,32 @@ export type CapabilityProposal = { id: string; callId: string };
 export class SessionCapabilityRecovery {
   readonly #registry: ToolRegistry;
   readonly #skills: SkillRegistry;
+  readonly #skillConfig: Record<string, Record<string, unknown>>;
   #catalog?: ProviderToolSchemaCatalog;
-  #definitions = new Map<string, { instance: RegisteredTool; signature: string }>();
+  #definitions = new Map<string, { instance: RegisteredTool; run: RegisteredTool["run"]; signature: string }>();
   #turn?: { token: object; sessionId: string; profileId: string; visibleTurnId?: string };
   #active = new Set<string>();
   #receipts = new WeakMap<ToolResult, RequestReceipt>();
   #pending = new Set<string>();
   #rounds = 0;
+  #skillDefinitions = new Map<string, { instance: LoadedSkill | SkillDefinition; signature: string }>();
+  #requestedSkills = new Map<string, { instance: LoadedSkill | SkillDefinition; signature: string }>();
+  #skillReceipts = new WeakMap<ToolResult, { receipt: Omit<RecoveredSkillReceipt, "appliedIteration">; content: string; turn: object }>();
+  #loadedSkills = new Set<string>();
 
-  constructor(options: { registry: ToolRegistry; skills: SkillRegistry }) {
+  constructor(options: { registry: ToolRegistry; skills: SkillRegistry; skillConfig?: Record<string, Record<string, unknown>> }) {
     this.#registry = options.registry;
     this.#skills = options.skills;
+    this.#skillConfig = options.skillConfig ?? {};
   }
 
   bindCatalog(catalog: ProviderToolSchemaCatalog): void {
     this.#catalog = catalog;
     this.#definitions.clear();
+    this.#skillDefinitions = new Map(this.#skills.list().map((skill) => [skill.name, { instance: skill, signature: skillSignature(skill) }]));
     for (const entry of catalog.entries) {
       const instance = this.#registry.get(entry.tool.name);
-      if (instance) this.#definitions.set(entry.tool.name, { instance, signature: definitionSignature(instance) });
+      if (instance) this.#definitions.set(entry.tool.name, { instance, run: instance.run, signature: definitionSignature(instance) });
     }
   }
 
@@ -50,6 +61,9 @@ export class SessionCapabilityRecovery {
     this.#receipts = new WeakMap();
     this.#pending.clear();
     this.#rounds = 0;
+    this.#requestedSkills.clear();
+    this.#skillReceipts = new WeakMap();
+    this.#loadedSkills.clear();
   }
 
   setExposure(tools: readonly OpenAICompatibleToolSchema[]): void {
@@ -70,7 +84,7 @@ export class SessionCapabilityRecovery {
         state: tool.availability !== "available" ? tool.availability : !tool.schemaEligible ? "provider_schema_restricted" : this.#active.has(tool.name) ? "exposed" : "not_selected"
       }))),
       ...(input.kind === "tool" ? [] : this.#skills.list().map((skill) => ({
-        id: `skill:${skill.name}`, kind: "skill", name: skill.name, search: `${skill.name} ${skill.description}`, state: "visible"
+        id: `skill:${skill.name}`, kind: "skill", name: skill.name, search: `${skill.name} ${skill.description}`, state: this.#loadedSkills.has(skill.name) ? "loaded" : buildSkillReadinessMetadata(skill, resolveSkillSetupContext(skill, this.#skillConfig[skill.name])).readiness_status
       })))
     ].filter((entry) => safeId(entry.id) && (ids === undefined || ids.has(entry.id)) &&
       (query.length === 0 || entry.search.toLocaleLowerCase().includes(query)));
@@ -113,8 +127,9 @@ export class SessionCapabilityRecovery {
     const name = id.slice(5);
     const saved = this.#definitions.get(name);
     const live = this.#registry.get(name);
-    if (!saved || live !== saved.instance || definitionSignature(live) !== saved.signature) return undefined;
+    if (!saved || live !== saved.instance || live.run !== saved.run || definitionSignature(live) !== saved.signature) return undefined;
     try { if (!await live.isAvailable()) return undefined; } catch { return undefined; }
+    if (this.#registry.get(name) !== live || live.run !== saved.run || definitionSignature(live) !== saved.signature) return undefined;
     return this.#catalog?.entries.find((entry) => entry.tool.name === name)?.schema;
   }
 
@@ -127,18 +142,57 @@ export class SessionCapabilityRecovery {
     const token = this.#turn?.token;
     for (const { id } of proposals.slice(0, MAX_CAPABILITY_ADDITIONS)) {
       if (!token || this.#turn?.token !== token || this.roundsRemaining === 0) { rejected.push({ id, reason: "inactive_or_exhausted" }); continue; }
-      const schema = await this.toolSchema(id);
+      const skill = id.startsWith("skill:") ? this.#skills.get(id.slice(6)) : undefined;
+      const skillDefinition = skill === undefined ? undefined : this.#skillDefinitions.get(skill.name);
+      if (skill && (!skillDefinition || skillDefinition.instance !== skill || skillSignature(skill) !== skillDefinition.signature)) { rejected.push({ id, reason: "unavailable_or_changed" }); continue; }
+      if (id.startsWith("skill:") && (!skill || !("instructions" in skill))) { rejected.push({ id, reason: "instructions_unavailable" }); continue; }
+      if (skill?.routing?.confirmation === "ask") { rejected.push({ id, reason: "confirmation_required" }); continue; }
+      const schema = await this.toolSchema(skill ? "tool:skill.read" : id);
       if (this.#turn?.token !== token) return { tools: [...active], applied: [], rejected: [{ id, reason: "inactive_scope" }] };
       if (!schema) { rejected.push({ id, reason: "unavailable_or_changed" }); continue; }
-      if (tools.some((tool) => tool.function.name === schema.function.name)) continue;
-      const budget = budgetProviderTools({ tools: [...tools, schema], priorityNames: new Set(tools.map((tool) => tool.function.name)) });
-      if (!budget.tools.includes(schema)) { rejected.push({ id, reason: "schema_budget" }); continue; }
-      tools.push(schema); applied.push(id);
+      const alreadyExposed = tools.some((tool) => tool.function.name === schema.function.name);
+      if (alreadyExposed && !skill) continue;
+      const budget = budgetProviderTools({ tools: alreadyExposed ? tools : [...tools, schema], priorityNames: new Set(tools.map((tool) => tool.function.name)) });
+      if (!budget.tools.some((tool) => tool.function.name === schema.function.name)) { rejected.push({ id, reason: "schema_budget" }); continue; }
+      if (!alreadyExposed) tools.push(schema);
+      if (skill) this.#requestedSkills.set(skill.name, { instance: skill, signature: skillSignature(skill) });
+      applied.push(id);
     }
     this.completeRound(applied.length > 0);
     this.setExposure(tools);
     return { tools, applied, rejected };
   }
+
+  observeSkillRead(skill: LoadedSkill | SkillDefinition, result: ToolResult, input: { path?: string }, context?: ToolExecutionContext): void {
+    const requested = this.#requestedSkills.get(skill.name);
+    const mode = result.metadata?.mode;
+    if (!this.#inScope(context) || !context?.toolCallId || input.path !== undefined || !result.ok || !requested ||
+      this.#skills.get(skill.name) !== skill || requested.instance !== skill || requested.signature !== skillSignature(skill) ||
+      !["complete", "contract", "full"].includes(String(mode)) || (mode === "full" && result.metadata?.truncated === true)) return;
+    this.#skillReceipts.set(result, { content: result.content, turn: this.#turn!.token, receipt: {
+      name: skill.name, origin: "capability-recovery", toolCallId: context.toolCallId,
+      contentMode: mode as "complete" | "contract" | "full",
+      readiness: result.metadata?.setup_needed === true ? "missing-setup" : "available",
+      confirmationRequired: skill.routing?.confirmation === "ask"
+    } });
+  }
+
+  takeSkillLoads(executions: readonly ToolExecutionRecord[]): Array<{ receipt: Omit<RecoveredSkillReceipt, "appliedIteration">; content: string }> {
+    const loads: Array<{ receipt: Omit<RecoveredSkillReceipt, "appliedIteration">; content: string }> = [];
+    for (const execution of executions) {
+      if (execution.tool.name !== "skill.read" || execution.decision !== "allow" || !execution.result?.ok) continue;
+      const saved = this.#skillReceipts.get(execution.result);
+      if (!saved || saved.turn !== this.#turn?.token || saved.receipt.toolCallId !== execution.toolCallId || this.#loadedSkills.has(saved.receipt.name)) continue;
+      const requested = this.#requestedSkills.get(saved.receipt.name);
+      const current = this.#skills.get(saved.receipt.name);
+      if (!requested || current !== requested.instance || skillSignature(current) !== requested.signature) continue;
+      this.#skillReceipts.delete(execution.result);
+      loads.push({ receipt: saved.receipt, content: saved.content });
+    }
+    return loads;
+  }
+
+  markSkillDelivered(name: string): void { this.#loadedSkills.add(name); }
 
   completeRound(applied: boolean): void { if (applied) this.#rounds++; }
   get roundsRemaining(): number { return Math.max(0, MAX_CAPABILITY_ROUNDS - this.#rounds); }
@@ -152,7 +206,10 @@ export class SessionCapabilityRecovery {
       if (!tool.schemaEligible) return "provider_schema_restricted";
       if (this.#active.has(name)) return "already_exposed";
     } else if (id.startsWith("skill:")) {
-      if (!this.#skills.get(id.slice(6))) return "not_in_session";
+      const name = id.slice(6);
+      if (!this.#skills.get(name)) return "not_in_session";
+      if (this.#loadedSkills.has(name)) return "already_loaded";
+      if (this.#requestedSkills.has(name)) return "already_requested";
     } else return "not_in_session";
     if (this.#pending.has(id)) return "already_pending";
     if (this.roundsRemaining === 0) return "round_limit";
@@ -187,3 +244,5 @@ function safeId(id: string): boolean { return /^(?:tool|skill):[\p{L}\p{N}_.:-]{
 function validIds(ids: unknown): ids is string[] { return Array.isArray(ids) && ids.length > 0 && ids.length <= 8 && ids.every((id) => typeof id === "string" && safeId(id)); }
 function failure(code: string): ToolResult { return { ok: false, content: `Capability recovery: ${code}`, metadata: { code } }; }
 function definitionSignature(tool: RegisteredTool): string { return JSON.stringify([tool.name, tool.description, tool.inputSchema, tool.riskClass, tool.toolsets, tool.connector]); }
+
+function skillSignature(skill: LoadedSkill | SkillDefinition): string { return createHash("sha256").update(JSON.stringify(skill)).digest("hex"); }

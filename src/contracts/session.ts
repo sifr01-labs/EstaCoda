@@ -21,7 +21,7 @@ import type { ProviderUsageEntry, ProviderUsageQuery } from "./provider-usage.js
 import type { DelegateRole } from "./delegation.js";
 import type { ExecutionEvidenceRecord, ExecutionPlanLifecycleEvent } from "./execution-plan.js";
 import type { ExecutionCheckpointLifecycleEvent } from "./execution-checkpoint.js";
-import type { CapabilityRecoveryEvent, ProviderToolInventoryEvent } from "./runtime-event.js";
+import type { RecoveredSkillsEvent, CapabilityRecoveryEvent, ProviderToolInventoryEvent } from "./runtime-event.js";
 import type {
   ModelProfile,
   ProviderApiMode,
@@ -281,6 +281,7 @@ export type SessionEvent =
   | ExecutionCheckpointLifecycleEvent
   | ProviderToolInventoryEvent
   | CapabilityRecoveryEvent
+  | RecoveredSkillsEvent
   | ExecutionEvidenceRecord
   | AuthenticationEvidenceAssessmentEvent
   | {
