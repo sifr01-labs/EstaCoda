@@ -33,3 +33,36 @@ defect, not proof that the original conversation hit that cap.
 
 Security risk: test-only changes. Real execution and policy boundaries remain
 unchanged. End-to-end provider/Task evidence belongs to the next harness slice.
+
+## Commit 2 — Deterministic workflow harness
+
+`src/runtime/research-request.acceptance.test.ts` uses
+`src/test/fakes/research-workflow-harness.ts` to exercise `createRuntime`, real
+bundled skills, native provider call parsing/planning, tool execution, event
+receipts, workspace file tools, SQLite Task storage, the scheduler, child agent
+loops, and Task result reading. Provider answers and web content are scripted;
+successful work is established separately from receipts, stored results and
+file contents. Each harness has a disposable workspace and profile home. Any
+unexpected global fetch or unscripted provider request fails the test.
+
+Six scenarios cover the three-turn failure chain (A1–A3), native write/readback,
+denied write, three admitted research workers plus synthesis and subsequent file
+delivery, missing search at delegation admission (A9), and duplicate successful
+extraction (A12). The positive delegation control uses an explicit `/researcher`
+route and recognized write wording: it demonstrates functioning execution seams,
+not that the failing natural-language workflow has been fixed. Child runs are
+serialized for deterministic scripting; this is not a concurrency benchmark.
+
+The harness inspects the delivered selected skill content (full body or existing
+bounded contract), tool inventory/schema estimates, stable call IDs, successful
+execution receipts, distinct worker sessions/results, synthesis dependencies,
+and output bytes. It does not invent requirement state or detailed omission
+reasons that current production telemetry does not yet provide. Those remain
+PR 1/2/4 work. Policy denial uses a deterministic injected policy; it does not
+replace the later strict/adaptive/open conformance matrix.
+
+Validation: 79 tests passed across both new suites and durable delegation,
+agent-step execution and Task-result tools. Typecheck reports only the existing
+untracked duplicate bidi declarations. Review found and corrected a fixture
+argument-name mismatch; Task result reads now use the real `task_id`/`result_id`
+schema. No runtime policy or production execution behavior changed.
