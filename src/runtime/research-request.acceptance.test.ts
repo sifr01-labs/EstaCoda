@@ -264,6 +264,22 @@ describe.sequential("research workflow acceptance harness", () => {
     scriptConsumed(h);
   });
 
+  it.each([true, false])("grounds browser claims in the current status despite stale memory (available=%s)", async (available) => {
+    const h = await harness({ browserAvailable: available, memoryText: "- Browser tools are unavailable.\n- Do not browse without asking me." });
+    h.enqueue(nativeCall("browser_status", {}), (request) => {
+      const prompt = JSON.stringify(request.messages);
+      expect(prompt).toContain("Browser tools are unavailable");
+      expect(prompt).toContain("Do not browse without asking me");
+      expect(prompt).toContain(available ? "reported_available" : "reported_unavailable");
+      expect(prompt).toContain("Current tool observations supersede");
+      return { content: "I cannot browse." };
+    });
+    const result = await h.turn("Check the browser status");
+    expect(result.text).toContain(available ? "current browser status reports an available backend" : "I cannot browse");
+    expect(result.toolExecutions.map((execution) => execution.tool.name)).toEqual(["browser.status"]);
+    scriptConsumed(h);
+  });
+
   it("currently fetches a successful identical extract twice (A12 gap, PR 5)", async () => {
     const h = await harness();
     h.enqueue(nativeCall("web_extract", { url: SOURCE_URL }), nativeCall("web_extract", { url: SOURCE_URL }), answer(REPORT));

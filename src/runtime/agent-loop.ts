@@ -1,3 +1,4 @@
+import { correctContradictedCapabilityClaim } from "./capability-state.js";
 import type { ArtifactRecord } from "../contracts/artifact.js";
 import type { ChannelAttachment, ChannelKind } from "../contracts/channel.js";
 import type { ContextExpansionResult, ProjectContextSnapshot } from "../contracts/context.js";
@@ -1375,6 +1376,11 @@ export class AgentLoop {
       ), artifacts);
     }
     if (delegatedAnswerAcknowledgement === undefined) {
+      const correctedCapability = correctContradictedCapabilityClaim(response.text, toolExecutions, this.#providerToolSchemaCatalog);
+      if (correctedCapability !== undefined) {
+        response.text = correctedCapability;
+        if (response.providerExecution !== undefined) response.providerExecution = suppressProviderGeneratedText(response.providerExecution);
+      }
       const researchEvidence = researchRequestEvidence({ requestRequirements: intent.requestRequirements, toolExecutions,
         executionReceipts: this.#executionEvidenceIndex.recordsForTurn(visibleTurn.id), skillRequirementsSatisfied });
       if (!researchEvidence.satisfied) {

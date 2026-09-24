@@ -11,6 +11,7 @@ export type PromptLayerName =
   | "execution-plan"
   | "execution-working-set"
   | "browser-state"
+  | "runtime-capability-state"
   | "compaction-notice"
   | "user-message"
   | "channel-attachments"

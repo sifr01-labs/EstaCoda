@@ -1,3 +1,4 @@
+import { renderCapabilityState, type RuntimeCapabilityState } from "../runtime/capability-state.js";
 import { reviewedApiDescription } from "../contracts/artifact.js";
 import type { ArtifactRecord } from "../contracts/artifact.js";
 import type { BrowserStateProjection, BrowserTab } from "../contracts/browser.js";
@@ -74,6 +75,7 @@ export type ProviderPromptAssembly = {
 };
 
 export type ProviderPromptInput = {
+  capabilityState?: readonly RuntimeCapabilityState[];
   model?: ModelProfile;
   cache?: PromptCache;
   sessionHistory?: PromptSessionHistoryMessage[];
@@ -459,6 +461,7 @@ function buildBaseLayers(
     : renderSkillPlaybookPlan(compileSkillPlaybook(input.selectedSkill));
   const selectedSkillBlock = renderSelectedSkillBlock(input, skillPlaybookPlan);
   const nativeToolGuidance = renderNativeToolGuidance(input);
+  const capabilityState = renderCapabilityState(input.capabilityState ?? []);
   const authenticationState = renderCurrentAuthenticationState(input.toolExecutions);
   const attachmentManifest = renderChannelAttachments(
     input.attachments,
@@ -559,6 +562,9 @@ function buildBaseLayers(
             content: renderExecutionWorkingSet(input.executionWorkingSet)
           })
         ]),
+    ...(capabilityState === undefined ? [] : [layer({
+      name: "runtime-capability-state", cacheable: false, protectedLayer: true, priority: 1, content: capabilityState
+    })]),
     ...(authenticationState === undefined ? [] : [layer({
       name: "authentication-state", cacheable: false, protectedLayer: true, priority: 1,
       content: authenticationState

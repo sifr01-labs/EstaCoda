@@ -1,3 +1,5 @@
+import { projectCapabilityState, type RuntimeCapabilityState } from "./capability-state.js";
+import { requiredRequestTools } from "./request-requirements.js";
 import { MAX_CAPABILITY_ADDITIONS, type SessionCapabilityRecovery } from "../tools/capability-tools.js";
 import { buildSkillReadinessMetadata } from "../skills/skill-readiness.js";
 import { sanitizeCheckpointText } from "../session/execution-checkpoint-state.js";
@@ -276,6 +278,7 @@ export class ProviderTurnLoop {
     providerTools: OpenAICompatibleToolSchema[];
     requestedCapabilityOmissions?: CapabilitySelectionDiagnostics["requestedOmissions"];
     capabilityRecoveryFeedback?: readonly string[];
+    capabilityState?: readonly RuntimeCapabilityState[];
     toolExpansionCandidates?: readonly ProviderToolExpansionCandidate[];
     providerToolSchemaCatalog?: ProviderToolSchemaCatalog;
     toolSelectionPolicy?: string;
@@ -453,10 +456,13 @@ export class ProviderTurnLoop {
 
       const requestedCapabilityOmissions = input.requestedCapabilityOmissions?.filter((omission) => !providerToolsForIteration.some((tool) =>
         (input.providerToolSchemaCatalog?.aliases.get(tool.function.name) ?? tool.function.name) === omission.tool));
+      const capabilityState = projectCapabilityState({ catalog: input.providerToolSchemaCatalog, exposed: providerToolsForIteration,
+        executions: [...input.toolExecutions, ...providerToolExecutions], required: requiredRequestTools(input.intent.requestRequirements) });
       let execution = phase === "initial"
         ? await this.#completeWithProvider({
             ...input,
             foregroundTurnId,
+            capabilityState,
             capabilityRecoveryFeedback: [...capabilityRecoveryFeedback, ...recoveredSkillContext.values()],
             providerToolCallNamespace,
             providerTools: providerToolsForIteration,
@@ -469,6 +475,7 @@ export class ProviderTurnLoop {
         : await this.#continueProviderAfterTools({
           ...input,
           foregroundTurnId,
+          capabilityState,
           capabilityRecoveryFeedback: [...capabilityRecoveryFeedback, ...recoveredSkillContext.values()],
           providerToolCallNamespace,
           providerTools: providerToolsForIteration,
@@ -1228,6 +1235,7 @@ export class ProviderTurnLoop {
     providerTools: OpenAICompatibleToolSchema[];
     requestedCapabilityOmissions?: CapabilitySelectionDiagnostics["requestedOmissions"];
     capabilityRecoveryFeedback?: readonly string[];
+    capabilityState?: readonly RuntimeCapabilityState[];
     preflightCompression?: PromptSemanticCompressionReport;
     conversationContinuationState?: ConversationContinuationState;
     fallbackText: string;
@@ -1376,6 +1384,7 @@ export class ProviderTurnLoop {
     providerTools: OpenAICompatibleToolSchema[];
     requestedCapabilityOmissions?: CapabilitySelectionDiagnostics["requestedOmissions"];
     capabilityRecoveryFeedback?: readonly string[];
+    capabilityState?: readonly RuntimeCapabilityState[];
     providerExecution: ProviderExecutionResult | undefined;
     toolPlans: ToolCallPlan[];
     toolFeedbackLedger: TurnToolFeedbackLedger;

@@ -1,9 +1,11 @@
+import { resolveProfileStateHome } from "../../config/profile-home.js";
+import { createMockBrowserBackend } from "../../browser/browser-backend.js";
 import { executionActionIdentity } from "../../security/execution-action-identity.js";
 import type { ToolApprovalHandler } from "../../contracts/tool.js";
 import { DEFAULT_DELEGATION_CONFIG } from "../../config/delegation-defaults.js";
-import { mkdtemp, mkdir, rm } from "node:fs/promises";
+import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
-import { join } from "node:path";
+import { join, dirname } from "node:path";
 import type { ModelProfile, ProviderRequest, ProviderStructuredToolCall } from "../../contracts/provider.js";
 import type { RuntimeEvent } from "../../contracts/runtime-event.js";
 import { ProviderRegistry } from "../../providers/provider-registry.js";
@@ -42,11 +44,16 @@ export function answer(content: string): ScriptStep {
   return () => ({ content });
 }
 
-export async function createResearchWorkflowHarness(options: { searchAvailable?: boolean; denyWrites?: boolean; maxBatchTasks?: number; fileToolsAvailable?: boolean; fallbackOnRequest?: number; approvalDecision?: ToolApprovalHandler } = {}) {
+export async function createResearchWorkflowHarness(options: { memoryText?: string; browserAvailable?: boolean; searchAvailable?: boolean; denyWrites?: boolean; maxBatchTasks?: number; fileToolsAvailable?: boolean; fallbackOnRequest?: number; approvalDecision?: ToolApprovalHandler } = {}) {
   const root = await mkdtemp(join(tmpdir(), "estacoda-research-baseline-"));
   const homeDir = join(root, "home");
   const workspaceRoot = join(root, "workspace");
   await mkdir(workspaceRoot);
+  if (options.memoryText !== undefined) {
+    const path = resolveProfileStateHome({ homeDir, profileId: "baseline" }).userMdPath;
+    await mkdir(dirname(path), { recursive: true });
+    await writeFile(path, options.memoryText);
+  }
   let sessionDb = await createSQLiteSessionDB({ path: join(homeDir, "sessions.sqlite") });
   let store = new SQLiteTaskStore({ db: sessionDb.db, profileId: "baseline" });
   const requests: ProviderRequest[] = [];
@@ -105,6 +112,7 @@ export async function createResearchWorkflowHarness(options: { searchAvailable?:
       ...(options.fallbackOnRequest === undefined ? {} : { modelFallbackRoutes: [{ provider: model.provider, id: "research-fallback", profile: { ...model, id: "research-fallback" }, authMethod: "none" as const }] }),
       providerRegistry: providers, trustStore, workspaceTrusted: true,
       localSkillsRoot: join(homeDir, "local-skills"), browser: { backend: "unconfigured", autoLaunch: false },
+      ...(options.browserAvailable ? { browserBackend: createMockBrowserBackend() } : {}),
       enableWebNetwork: true,
       ...(options.maxBatchTasks === undefined ? {} : { delegationConfig: { ...DEFAULT_DELEGATION_CONFIG, maxBatchTasks: options.maxBatchTasks } }),
       webConfig: { searchBackend: options.searchAvailable === false ? "unconfigured-baseline-web" : "research-baseline-web", extractBackend: "research-baseline-web" },
