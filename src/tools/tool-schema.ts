@@ -74,10 +74,18 @@ export function buildProviderToolSchemaCatalog(input: {
 }): ProviderToolSchemaCatalog {
   const aliases = new Map<string, string>();
   const selected = input.tools.filter((tool) => !BLOCKED_PROVIDER_RISKS.has(tool.riskClass));
+  // Reserve canonical provider-safe names first so an alias cannot shadow one.
+  // Allocate collisions deterministically once for the complete session catalog.
+  const canonicalNames = new Set(selected.map((tool) => tool.name));
+  for (const name of [...canonicalNames].sort()) {
+    if (/^[a-zA-Z0-9_-]{1,64}$/u.test(name)) aliases.set(name, name);
+  }
+  for (const name of [...canonicalNames].sort()) {
+    if (!aliases.has(name)) aliases.set(toProviderToolName(name, aliases), name);
+  }
+  const aliasesByTool = new Map([...aliases].map(([alias, name]) => [name, alias]));
   const entries = selected.map((tool) => {
-    const alias = toProviderToolName(tool.name, aliases);
-
-    aliases.set(alias, tool.name);
+    const alias = aliasesByTool.get(tool.name)!;
 
     return {
       tool,

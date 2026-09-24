@@ -66,6 +66,7 @@ export class ToolPlanRunner {
 
   async executePlans(input: {
     providerExecution: ProviderExecutionResult | undefined;
+    activeProviderTools: ReadonlySet<string>;
     toolPlans: ToolCallPlan[];
     trustedWorkspace: boolean;
     remainingToolCalls: number;
@@ -100,7 +101,7 @@ export class ToolPlanRunner {
     }> = [];
 
     for (const toolCall of input.providerExecution.toolCalls.slice(0, input.remainingToolCalls)) {
-      const plan = this.#toolCallPlanner.planFromProviderDelta(toolCall);
+      const plan = this.#toolCallPlanner.planFromProviderDelta(toolCall, input.activeProviderTools);
 
       input.toolPlans.push(plan);
       await this.#runRecorder.recordToolPlan(plan);

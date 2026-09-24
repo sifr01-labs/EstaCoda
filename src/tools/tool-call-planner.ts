@@ -11,10 +11,10 @@ export class ToolCallPlanner {
     aliases?: Map<string, string>;
   }) {
     this.#registry = options.registry;
-    this.#aliases = options.aliases ?? new Map();
+    this.#aliases = new Map(options.aliases);
   }
 
-  planFromProviderDelta(delta: ProviderToolCallDelta): ToolCallPlan {
+  planFromProviderDelta(delta: ProviderToolCallDelta, activeExposure: ReadonlySet<string> = new Set()): ToolCallPlan {
     const id = delta.id ?? stableToolCallId(delta);
     const tool = this.#resolveToolName(normalizeToolName(delta.name));
 
@@ -27,6 +27,17 @@ export class ToolCallPlanner {
         status: "invalid",
         raw: delta.raw,
         error: "Provider tool call did not include a tool name."
+      };
+    }
+
+    // Aliases identify tools; only schemas sent for this iteration admit calls.
+    // Check before registry lookup so hidden and unknown probes are equivalent.
+    const exposed = [...activeExposure].some((name) => this.#resolveToolName(name) === tool);
+    if (!exposed) {
+      return {
+        id, tool: normalizeToolName(delta.name) ?? "", input: {}, source: "provider-tool-call",
+        status: "unavailable", raw: delta.raw,
+        error: "Tool is not exposed for this provider iteration."
       };
     }
 
@@ -103,6 +114,17 @@ function canonicalizeNestedToolNames(
 
   if (tool !== "delegate_task") return { ok: true, input };
 
+  let tasks = input.tasks;
+  if (typeof tasks === "string") {
+    try { tasks = JSON.parse(tasks); } catch { /* Input validation handles malformed task JSON. */ }
+  }
+  const lists = [input.allowedTools, ...(Array.isArray(tasks) ? tasks.map((task) =>
+    task !== null && typeof task === "object" ? task.allowedTools : undefined) : [])];
+  const canonicalNames = new Set(aliases.values());
+  if (lists.some((list) => Array.isArray(list) && list.some((name) => typeof name === "string" &&
+    aliases.has(name.trim()) && canonicalNames.has(name.trim()) && aliases.get(name.trim()) !== name.trim()))) {
+    return { ok: false, error: "Delegation allowlist uses an ambiguous tool name." };
+  }
   return {
     ok: true,
     input: {

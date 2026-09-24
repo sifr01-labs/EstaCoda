@@ -862,7 +862,7 @@ async function createRealToolPlanningHarness(input: {
   });
   const executeTool = vi.fn();
   const toolPlanRunner = new ToolPlanRunner({
-    toolCallPlanner: new ToolCallPlanner({ registry: toolRegistry }),
+    toolCallPlanner: new ToolCallPlanner({ registry: toolRegistry, aliases: buildProviderToolSchemaCatalog({ tools: toolRegistry.list() }).aliases }),
     toolExecutor: {
       getToolDefinition: (name: string) => name === testTool.name ? testTool : undefined,
       executeTool
@@ -1232,7 +1232,7 @@ describe("ProviderTurnLoop streaming callbacks", () => {
       }
     });
 
-    await runBasicProviderTurn(harness.loop, { visibleTurnId: "worker-visible-turn" });
+    await runBasicProviderTurn(harness.loop, { visibleTurnId: "worker-visible-turn", providerTools: [toolProviderSchema(testTool.name)] });
 
     expect(harness.executeTool).toHaveBeenCalledWith(expect.objectContaining({
       providerUsageLineage: {
@@ -1253,6 +1253,7 @@ describe("ProviderTurnLoop streaming callbacks", () => {
     });
 
     await runBasicProviderTurn(harness.loop, {
+      providerTools: [toolProviderSchema(testTool.name)],
       attachments: [{
         id: "image-current-turn",
         kind: "image",
@@ -6286,7 +6287,7 @@ describe("ProviderTurnLoop truncated tool-call safety", () => {
       projectContext: undefined,
       attachments: undefined,
       memoryPromptContext: undefined,
-      providerTools: [],
+      providerTools: [toolProviderSchema(testTool.name)],
       fallbackText: "",
       toolPlans,
       trustedWorkspace: false,
@@ -6738,5 +6739,27 @@ describe("ProviderTurnLoop explicit route propagation", () => {
         error: "Provider turn ended before the planned tool call produced a result."
       })
     ]);
+  });
+});
+
+
+describe("native exposure admission", () => {
+  it.each([false, true])("rejects a registered but unexposed call before execution (fallback=%s)", async (fallbackUsed) => {
+    const harness = await createRealToolPlanningHarness({ response: providerExecution("", [providerToolCall("hidden", "{}", "test_tool")], { fallbackUsed }) });
+    const toolPlans: ToolCallPlan[] = [];
+    await runBasicProviderTurn(harness.loop, { toolPlans, providerTools: [] });
+    expect(harness.executeTool).not.toHaveBeenCalled();
+    expect(toolPlans).toEqual([expect.objectContaining({ status: "unavailable", error: "Tool is not exposed for this provider iteration." })]);
+  });
+
+  it("does not admit a schema discarded by the final count budget", async () => {
+    const harness = await createRealToolPlanningHarness({ response: providerExecution("", [providerToolCall("over-budget")]) });
+    const toolPlans: ToolCallPlan[] = [];
+    await runBasicProviderTurn(harness.loop, { toolPlans, providerTools: [
+      ...Array.from({ length: 100 }, (_, i) => toolProviderSchema(`other_${i}`)), toolProviderSchema(testTool.name)
+    ] });
+    expect(harness.executeTool).not.toHaveBeenCalled();
+    expect((harness.completeSpy.mock.calls[0]?.[0].tools as unknown[])).toHaveLength(100);
+    expect(toolPlans[0]?.status).toBe("unavailable");
   });
 });

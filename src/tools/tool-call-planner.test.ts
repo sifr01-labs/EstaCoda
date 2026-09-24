@@ -40,7 +40,7 @@ describe("stableToolCallId", () => {
       argumentsText: "{\"query\":\"docs\"}"
     };
 
-    expect(planner.planFromProviderDelta(delta).id).toBe(stableToolCallId(delta));
+    expect(planner.planFromProviderDelta(delta, new Set(["test.tool"])).id).toBe(stableToolCallId(delta));
   });
 
   it("canonicalizes provider aliases nested in delegate_task tool allowlists", () => {
@@ -93,7 +93,7 @@ describe("stableToolCallId", () => {
           ]
         }]
       })
-    });
+    }, new Set(["delegate_task", "plan"]));
 
     expect(plan).toMatchObject({
       status: "planned",
@@ -137,7 +137,7 @@ describe("stableToolCallId", () => {
           allowedTools: ["file_read", "invented_tool"]
         }])
       })
-    });
+    }, new Set(["delegate_task", "plan"]));
 
     expect(plan.status).toBe("planned");
     const serializedTasks = plan.input.tasks;
@@ -178,7 +178,7 @@ describe("stableToolCallId", () => {
           { id: "verify", itemId: "update", tool: "mcp.target.read", capability: "verify" }
         ]
       })
-    });
+    }, new Set(["delegate_task", "plan"]));
 
     expect(planned).toMatchObject({
       status: "planned",
@@ -214,21 +214,48 @@ describe("stableToolCallId", () => {
         operation: "write",
         requirements: [{ id: "read", itemId: "read", tool, capability: "read" }]
       })
-    });
+    }, new Set(["delegate_task", "plan"]));
 
     expect(call("invented_tool")).toMatchObject({
       status: "invalid",
       error: expect.stringContaining("unavailable tool")
     });
-    expect(call("file_read")).toMatchObject({
-      status: "invalid",
-      error: expect.stringContaining("ambiguous tool name")
-    });
+    expect(call("file_read")).toMatchObject({ status: "planned", input: { requirements: [{ tool: "file_read" }] } });
     expect(call("mcp.unavailable.mutate")).toMatchObject({
       status: "planned",
       input: {
         requirements: [{ tool: "mcp.unavailable.mutate" }]
       }
     });
+  });
+});
+
+
+describe("active native exposure", () => {
+  it("rejects hidden aliases, canonical bypasses and unknown probes identically", () => {
+    const registry = new ToolRegistry();
+    for (const name of ["file.read", "file.write"]) registry.register({ ...testTool, name,
+      isAvailable: () => true, run: async () => ({ ok: true, content: "ok" }) });
+    const catalog = buildProviderToolSchemaCatalog({ tools: registry.list() });
+    const planner = new ToolCallPlanner({ registry, aliases: catalog.aliases });
+    const exposed = new Set(["file_read"]);
+    for (const name of ["file_write", "file.write", "unknown.tool"]) {
+      expect(planner.planFromProviderDelta({ name, argumentsText: "{}" }, exposed)).toMatchObject({
+        status: "unavailable", error: "Tool is not exposed for this provider iteration."
+      });
+    }
+    expect(planner.planFromProviderDelta({ name: "file_read", argumentsText: "{}" })).toMatchObject({ status: "unavailable" });
+    expect(planner.planFromProviderDelta({ name: "file.read", argumentsText: "{}" }, exposed)).toMatchObject({ status: "planned" });
+    expect(planner.planFromProviderDelta({ name: "file_write", argumentsText: "{}" }, new Set(["file_write"]))).toMatchObject({ status: "planned", tool: "file.write" });
+    // A later exposure does not authorize a call against the old batch snapshot.
+    expect(planner.planFromProviderDelta({ name: "file_write", argumentsText: "{}" }, exposed).status).toBe("unavailable");
+  });
+
+  it.each([false, true])("rejects ambiguous delegated aliases (serialized=%s)", (serialized) => {
+    const registry = new ToolRegistry();
+    registry.register({ ...testTool, name: "delegate_task", isAvailable: () => true, run: async () => ({ ok: true, content: "ok" }) });
+    const planner = new ToolCallPlanner({ registry, aliases: new Map([["file_read", "file.read"], ["file_read_2", "file_read"]]) });
+    const tasks = [{ task: "read", allowedTools: ["file_read"] }];
+    expect(planner.planFromProviderDelta({ name: "delegate_task", argumentsText: JSON.stringify({ tasks: serialized ? JSON.stringify(tasks) : tasks }) }, new Set(["delegate_task"]))).toMatchObject({ status: "invalid", error: expect.stringContaining("ambiguous") });
   });
 });

@@ -645,6 +645,7 @@ export class ProviderTurnLoop {
       const beforePlans = input.toolPlans.length;
       const loopToolExecutionResult = await this.#toolPlanRunner.executePlans({
         providerExecution: execution,
+        activeProviderTools: new Set(this.#model?.supportsTools === true ? providerToolsForIteration.map((tool) => tool.function.name) : []),
         toolPlans: input.toolPlans,
         trustedWorkspace: input.trustedWorkspace,
         visibleTurnId: input.visibleTurnId,

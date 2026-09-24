@@ -91,3 +91,15 @@ describe("provider schema budgets", () => {
     expect(catalog.entries).toHaveLength(107);
   });
 });
+
+
+it("reserves canonical names and keeps collision aliases stable across catalog ordering and selection", () => {
+  const definitions = [tool("file.read"), tool("file_read"), tool("file/read"), tool("x".repeat(80)), tool("x".repeat(81))];
+  const first = buildProviderToolSchemaCatalog({ tools: definitions });
+  const second = buildProviderToolSchemaCatalog({ tools: [...definitions].reverse(), maxTools: 1 });
+  expect(second.aliases).toEqual(first.aliases);
+  expect(first.aliases.get("file_read")).toBe("file_read");
+  expect(first.aliases.get("file_read_2")).toBe("file.read");
+  expect(new Set(first.aliases.values()).size).toBe(5);
+  for (const alias of first.aliases.keys()) expect(alias).toMatch(/^[a-zA-Z0-9_-]{1,64}$/u);
+});

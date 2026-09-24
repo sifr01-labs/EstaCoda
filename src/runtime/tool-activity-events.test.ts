@@ -265,6 +265,7 @@ describe("runtime tool activity events", () => {
       });
 
       await runner.executePlans({
+      activeProviderTools: new Set(),
         providerExecution: { ...providerExecution(), toolCalls: [{}, {}] },
         toolPlans: [],
         trustedWorkspace: true,
@@ -318,6 +319,7 @@ describe("runtime tool activity events", () => {
     });
 
     const result = await runner.executePlans({
+      activeProviderTools: new Set(),
       providerExecution: { ...providerExecution(), toolCalls: [{}, {}] },
       toolPlans: plans,
       trustedWorkspace: true,
@@ -334,6 +336,7 @@ describe("runtime tool activity events", () => {
 
     runner.resetPerTurnBudgets();
     await runner.executePlans({
+      activeProviderTools: new Set(),
       providerExecution: providerExecution(),
       toolPlans: [],
       trustedWorkspace: true,
@@ -391,6 +394,7 @@ describe("runtime tool activity events", () => {
     });
 
     const result = await runner.executePlans({
+      activeProviderTools: new Set(),
       providerExecution: { ...providerExecution(), toolCalls: [{}, {}] },
       toolPlans: [],
       trustedWorkspace: true,
@@ -436,6 +440,7 @@ describe("runtime tool activity events", () => {
     });
 
     const result = await runner.executePlans({
+      activeProviderTools: new Set(),
       providerExecution: { ...providerExecution(), toolCalls: [{}, {}] },
       toolPlans: plans,
       trustedWorkspace: true,
@@ -503,6 +508,7 @@ describe("runtime tool activity events", () => {
     });
 
     const result = await runner.executePlans({
+      activeProviderTools: new Set(),
       providerExecution: { ...providerExecution(), toolCalls: [{}, {}] },
       toolPlans: plans,
       trustedWorkspace: true,
@@ -542,6 +548,7 @@ describe("runtime tool activity events", () => {
     });
 
     await runner.executePlans({
+      activeProviderTools: new Set(),
       providerExecution: providerExecution(),
       toolPlans: [],
       trustedWorkspace: true,
@@ -613,6 +620,7 @@ describe("runtime tool activity events", () => {
     });
 
     await runner.executePlans({
+      activeProviderTools: new Set(),
       providerExecution: providerExecution(),
       toolPlans: [],
       trustedWorkspace: true,
@@ -659,6 +667,7 @@ describe("runtime tool activity events", () => {
     });
 
     await runner.executePlans({
+      activeProviderTools: new Set(),
       providerExecution: providerExecution(),
       toolPlans: [],
       trustedWorkspace: true,
@@ -701,6 +710,7 @@ describe("runtime tool activity events", () => {
     });
 
     await runner.executePlans({
+      activeProviderTools: new Set(),
       providerExecution: providerExecution(),
       toolPlans: [],
       trustedWorkspace: true,
@@ -741,6 +751,7 @@ describe("runtime tool activity events", () => {
     });
 
     await runner.executePlans({
+      activeProviderTools: new Set(),
       providerExecution: providerExecution(),
       toolPlans: [],
       trustedWorkspace: true,
@@ -814,6 +825,7 @@ describe("runtime tool activity events", () => {
     });
 
     const firstTurn = await runner.executePlans({
+      activeProviderTools: new Set(),
       providerExecution: {
         ...providerExecution(),
         toolCalls: [{}, {}],
@@ -825,6 +837,7 @@ describe("runtime tool activity events", () => {
     });
     runner.resetPerTurnBudgets();
     const secondTurn = await runner.executePlans({
+      activeProviderTools: new Set(),
       providerExecution: providerExecution(),
       toolPlans: [],
       trustedWorkspace: true,
