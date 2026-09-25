@@ -67,6 +67,19 @@ export class TaskSessionCompletionService {
     this.#taskOperator = new TaskOperatorService({ store: options.store, now: this.#now });
   }
 
+  /** The gateway appends Desktop outcomes even while its window is closed.
+   * Transcript persistence is the delivery acknowledgment for this surface. */
+  async deliverDesktopPending(): Promise<void> {
+    const sessions = new Set(this.#store.listDeliveryBindings({ statuses: ["pending", "delivering"], limit: MAX_SESSION_COMPLETION_BINDINGS })
+      .filter(binding => binding.destination.platform === "cli").map(binding => binding.authorizedSessionId));
+    for (const sessionId of sessions) {
+      const session = await this.#sessionDb.getSession(sessionId);
+      if (session?.profileId !== this.#profileId || session.metadata?.originSurface !== "desktop") continue;
+      const delivered = await this.deliverPending(sessionId);
+      for (const message of delivered) await this.acknowledge({ sessionId, bindingId: message.bindingId, messageId: message.messageId });
+    }
+  }
+
   deliverPending(sessionId: string): Promise<readonly TaskSessionCompletionMessage[]> {
     const normalizedSessionId = boundedSessionId(sessionId);
     const current = this.#runs.get(normalizedSessionId);
@@ -86,7 +99,7 @@ export class TaskSessionCompletionService {
     if (binding === null || binding.destination.platform !== "cli" ||
         !lineage.some((session) => session.id === binding.authorizedSessionId) ||
         input.messageId !== taskSessionCompletionMessageId(this.#profileId, binding.id) ||
-        !(await this.#completionMessageExists(binding))) {
+        !(await this.#destinationCurrent(binding)) || !(await this.#completionMessageExists(binding))) {
       throw new Error("Task session completion acknowledgement is invalid or unauthorized.");
     }
     if (binding.status === "delivered") return;
@@ -104,6 +117,7 @@ export class TaskSessionCompletionService {
     const candidates = this.#store.listDeliveryBindings({ statuses: ["pending"], limit: MAX_SESSION_COMPLETION_BINDINGS })
       .filter((binding) => binding.destination.platform === "cli" && authorizedSessionIds.has(binding.authorizedSessionId));
     for (const candidate of candidates) {
+      if (!(await this.#destinationCurrent(candidate))) continue;
       const claimed = this.#store.claimDeliveryBinding(candidate.id, this.#now().toISOString());
       if (claimed === null) continue;
       const messageId = taskSessionCompletionMessageId(this.#profileId, claimed.id);
@@ -153,6 +167,16 @@ export class TaskSessionCompletionService {
     return delivered;
   }
 
+  async #destinationCurrent(binding: TaskDeliveryBinding): Promise<boolean> {
+    const owner = await this.#sessionDb.getSession(binding.authorizedSessionId);
+    if (owner?.profileId !== this.#profileId) return false;
+    if (owner.metadata?.originSurface !== "desktop") return true;
+    const task = this.#store.getTask(binding.taskId);
+    return !!task?.executionTarget && !!owner.executionTarget && task.originSessionId === owner.id &&
+      task.executionTarget.targetId === owner.executionTarget.targetId &&
+      task.executionTarget.targetGeneration === owner.executionTarget.targetGeneration;
+  }
+
   async #recoverInterrupted(
     authorizedSessionIds: ReadonlySet<string>
   ): Promise<TaskSessionCompletionMessage[]> {
@@ -160,6 +184,7 @@ export class TaskSessionCompletionService {
     const interrupted = this.#store.listDeliveryBindings({ statuses: ["delivering"], limit: MAX_SESSION_COMPLETION_BINDINGS })
       .filter((binding) => binding.destination.platform === "cli" && authorizedSessionIds.has(binding.authorizedSessionId));
     for (const binding of interrupted) {
+      if (!(await this.#destinationCurrent(binding))) continue;
       const startedAt = binding.startedAt === undefined ? Number.NEGATIVE_INFINITY : Date.parse(binding.startedAt);
       if (Number.isFinite(startedAt) && this.#now().getTime() - startedAt < INTERRUPTED_LOCAL_DELIVERY_MS) continue;
       const message = await this.#completionMessage(binding);

@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -36,7 +37,10 @@ describe("TaskSessionCompletionService", () => {
     await sessionDb.createSession({ id: "creator-alpha", profileId: "alpha" });
     await sessionDb.createSession({ id: "unlinked-alpha", profileId: "alpha" });
     store = new SQLiteTaskStore({ db: sessionDb.db, profileId: "alpha" });
-    store.createTaskGraph(makeSynthesisGraph());
+    const graph=makeSynthesisGraph();
+    graph.task.workspace.identityHash=createHash("sha256").update(graph.task.workspace.canonicalPath).digest("hex");
+    graph.task.executionTarget={schemaVersion:1,targetId:"target_00000000-0000-0000-0000-000000000001",targetGeneration:1,workspace:graph.task.workspace};
+    store.createTaskGraph(graph);
     createCliBinding();
     currentNowMs = Date.parse(NOW);
     let sequence = 0;
@@ -62,6 +66,34 @@ describe("TaskSessionCompletionService", () => {
   afterEach(() => {
     sessionDb.close();
     rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it.each([false,true])("delivers Desktop completion once across restart (interrupted=%s)", async interrupted => {
+    const task=store.getTask("task-synthesis")!;
+    const binding={schemaVersion:1 as const,targetId:"target_00000000-0000-0000-0000-000000000001",targetGeneration:1,workspace:task.workspace};
+    // Emulate the persisted Desktop owner without changing CLI fixture behavior.
+    const desktopDb = {getSession:async(id:string)=>{const session=await sessionDb.getSession(id);return session?{...session,metadata:{...session.metadata,originSurface:"desktop"},executionTarget:binding}:undefined;},
+      appendMessage:sessionDb.appendMessage.bind(sessionDb),getMessage:sessionDb.getMessage.bind(sessionDb)};
+    results.record({taskId:task.id,stepId:"step-synthesis",kind:"text",content:"Delivered answer"});completeTask();
+    const create=()=>new TaskSessionCompletionService({store,resultService:results,sessionDb:desktopDb,profileId:"alpha",now:()=>new Date(currentNowMs)});
+    if(interrupted){await create().deliverPending("creator-alpha");currentNowMs+=30_001;}
+    await create().deliverDesktopPending();await create().deliverDesktopPending();
+    expect(await sessionDb.listMessages("creator-alpha")).toHaveLength(1);
+    expect(store.getDeliveryBinding("delivery-cli")?.status).toBe("delivered");
+  });
+
+  it("rejects a stale Desktop target during pending delivery and interrupted recovery", async () => {
+    const task=store.getTask("task-synthesis")!;
+    const binding={schemaVersion:1 as const,targetId:"target_00000000-0000-0000-0000-000000000001",targetGeneration:1,workspace:task.workspace};
+    results.record({taskId:task.id,stepId:"step-synthesis",kind:"text",content:"Answer"});completeTask();
+    const staleDb={getSession:async(id:string)=>{const session=await sessionDb.getSession(id);return session?{...session,metadata:{originSurface:"desktop"},executionTarget:{...binding,targetGeneration:2}}:undefined;},
+      appendMessage:sessionDb.appendMessage.bind(sessionDb),getMessage:sessionDb.getMessage.bind(sessionDb)};
+    const stale=new TaskSessionCompletionService({store,resultService:results,sessionDb:staleDb,profileId:"alpha",now:()=>new Date(currentNowMs)});
+    await stale.deliverDesktopPending();expect(await sessionDb.listMessages("creator-alpha")).toHaveLength(0);
+    const [message]=await service.deliverPending("creator-alpha");currentNowMs+=30_001;
+    await stale.deliverDesktopPending();
+    expect(store.getDeliveryBinding("delivery-cli")?.status).toBe("delivering");
+    await expect(stale.acknowledge({sessionId:"creator-alpha",bindingId:message!.bindingId,messageId:message!.messageId})).rejects.toThrow("unauthorized");
   });
 
   it("appends only the accepted synthesis answer to the creator transcript exactly once", async () => {

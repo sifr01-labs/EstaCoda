@@ -3,6 +3,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { resolveProfileStateHome } from "../config/profile-home.js";
 import { TaskResultService } from "../tasks/task-result-service.js";
+import { TaskOperatorService } from "../tasks/task-operator-service.js";
 import { TaskScheduler } from "../tasks/task-scheduler.js";
 import { selectSkillPromptContent } from "../skills/skill-contract.js";
 import { isLoadedSkill } from "./runtime-router.js";
@@ -311,6 +312,17 @@ describe.sequential("research workflow acceptance harness", () => {
       if (index === 1) h.enqueue(answer("I have no source evidence."));
       else h.enqueue(nativeCall("web_search", { query: `battery recycling ${index}` }), answer(`Observed source: ${SOURCE_URL}\n\n${CLAIM_TABLE}`));
       expect(await scheduler.runOnce()).toMatchObject(index === 1 ? { failed: 1 } : { completed: 1 });
+      if(index===1){
+        const failed=h.store.listSteps(task.id,task.activePlanRevisionId!).find(step=>step.status==='waiting_for_input')!;
+        expect(failed).toBeDefined();
+        expect(h.store.getTask(task.id)?.status).toBe('waiting_for_input');
+        const operator=new TaskOperatorService({store:h.store});
+        for(let retry=1;retry<failed.retryPolicy.maxAttempts;retry++){
+          operator.retry(task.id,failed.id,h.runtime.sessionId);
+          h.enqueue(answer("I still have no source evidence."));
+          expect(await scheduler.runOnce()).toMatchObject({failed:1});
+        }
+      }
     }
     const accepted = h.store.listResults(task.id).filter((result) => result.disposition === "accepted");
     expect(accepted).toHaveLength(2);

@@ -41,13 +41,14 @@ it('reconstructs Tasks under user Sessions and keeps operator-only origins out o
   try {
     await db.createSession({ profileId: 'p', id: 'interactive' });
     await db.createSession({ profileId: 'p', id: 'operator', metadata: { kind: 'task-operator-origin' } });
+    await db.createSession({profileId:'p',id:'background',metadata:{kind:'task-background-host'}});
     const service = new TaskOperatorService({ store: new SQLiteTaskStore({ db: db.db, profileId: 'p' }) });
     const a = service.begin({ objective: 'Interactive Task', workspace: { canonicalPath: '/tmp', identityHash: 'x' }, creatorSessionId: 'interactive' });
     const b = service.begin({ objective: 'Independent Task', workspace: { canonicalPath: '/tmp', identityHash: 'x' }, creatorSessionId: 'operator' });
     const state = await captureWork({ homeDir, profileId: 'p' }, new AbortController().signal);
     expect(state.work.find((w) => w.canonicalId === a.taskId)?.parentWorkId).toBe('session:interactive');
     expect(state.work.find((w) => w.canonicalId === b.taskId)?.parentWorkId).toBeUndefined();
-    expect(state.work.some((w) => w.canonicalId === 'operator')).toBe(false);
+    expect(state.work.some((w) => ['operator','background'].includes(w.canonicalId))).toBe(false);
     expect(state.activity[`task:${a.taskId}`]?.[0]?.kind).toBe('plan');
   } finally { db.close(); await rm(homeDir, { recursive: true, force: true }); }
 });

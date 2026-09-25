@@ -47,7 +47,9 @@ describe("SupervisorTaskBackgroundHost Task ownership", () => {
     } as unknown as AgentStepExecutor;
     const dispose = vi.fn(async () => undefined);
     const createExecutorRuntime = vi.fn(async () => ({ taskAgentExecutor: executor, dispose }));
+    const deliverSessionCompletions=vi.fn(async()=>undefined);
     const host = new SupervisorTaskBackgroundHost({
+      deliverSessionCompletions,
       store,
       resultService: new TaskResultService({
         store,
@@ -66,6 +68,7 @@ describe("SupervisorTaskBackgroundHost Task ownership", () => {
       skipped: false,
       scheduler: { dispatched: 0 }
     });
+    expect(deliverSessionCompletions).toHaveBeenCalledOnce();
     expect(createExecutorRuntime).not.toHaveBeenCalled();
     expect(execute).not.toHaveBeenCalled();
     expect(store.listAttempts(task.taskId)).toHaveLength(0);

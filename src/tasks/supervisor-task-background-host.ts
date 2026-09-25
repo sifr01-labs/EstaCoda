@@ -75,6 +75,7 @@ export class SupervisorTaskBackgroundHost {
     now?: () => Date;
     logWarning?: (message: string) => void;
     locale?: "en" | "ar";
+    deliverSessionCompletions?: () => Promise<void>;
   }) {
     this.#store = options.store;
     this.#createExecutorRuntime = options.createExecutorRuntime;
@@ -134,7 +135,10 @@ export class SupervisorTaskBackgroundHost {
           return result;
         }
       },
-      delivery,
+      delivery: {
+        recoverInterrupted: () => delivery.recoverInterrupted(),
+        runOnce: async () => { const result = await delivery.runOnce(); await options.deliverSessionCompletions?.(); return result; }
+      },
       logWarning: this.#logWarning
     });
     this.#heartbeatTimer = setInterval(() => {

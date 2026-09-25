@@ -1,3 +1,4 @@
+import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { fileOutputEvidence } from "../runtime/file-output-evidence.js";
 import type { ExecutionEvidenceRecord } from "../contracts/execution-plan.js";
 import { groundResearchResult, requiresSourceTable, RESEARCH_EVIDENCE_INSTRUCTION } from "./research-result-evidence.js";
@@ -376,7 +377,7 @@ export class AgentStepExecutor implements TaskStepExecutor {
         };
       }
       if (response.toolExecutions.some((execution, index, executions) =>
-        execution.result?.ok === false && !isRecoveredRead(execution, index, executions)
+        execution.result?.ok === false && !isRecoveredRead(execution, index, executions) && !isAlternativeResearchRead(input.step, response.text, execution)
       )) {
         return {
           outcome: "failed",
@@ -415,7 +416,11 @@ export class AgentStepExecutor implements TaskStepExecutor {
         outcome: "failed", failure: taskFailure("evidence-contract-unsatisfied", false),
         ...safeDiagnosticOutput(response.text, response.toolExecutions), ...metering, ...common
       };
-      const captured = await captureResults(grounded.text ?? response.text, response.artifacts, input, this.#resolveArtifactContent);
+      const unavailableSources = response.toolExecutions.filter(execution => execution.result?.ok === false &&
+        isAlternativeResearchRead(input.step, response.text, execution)).length;
+      const researchText = (grounded.text ?? response.text) + (unavailableSources
+        ? `\n\nSource access limitation: ${unavailableSources} page retrieval(s) failed. Findings use other observed sources; failed retrievals remain in the attempt history.` : "");
+      const captured = await captureResults(researchText, response.artifacts, input, this.#resolveArtifactContent);
       if (captured.failure !== undefined) {
         return {
           outcome: "failed",
@@ -824,6 +829,18 @@ function safeDiagnosticOutput(
       summary: "Recovered output from a failed Attempt; incomplete and not accepted as the Step result."
     }]
   };
+}
+
+/** Only source-level HTTP failures can be replaced by other observed evidence.
+ * The research and grounding gates below still validate the returned report. */
+function isAlternativeResearchRead(step: TaskStep, text: string, execution: ToolExecutionRecord): boolean {
+  if (step.executor.role !== "worker" || !step.executor.requestContract?.requirements.research ||
+      !step.executor.research?.requireLiveSources || execution.decision !== "allow" ||
+      execution.tool.name !== "web.extract" || execution.riskClass !== "read-only-network") return false;
+  const status = execution.result?.metadata?.status;
+  const url = execution.input?.url;
+  return typeof status === "number" && [403, 404, 406, 410, 429, 500, 502, 503, 504].includes(status) &&
+    typeof url === "string" && !collectHttpUrls([text, step.objective, step.executor.research.scope]).includes(normalizedHttpUrl(url) ?? url);
 }
 
 function isRecoveredRead(

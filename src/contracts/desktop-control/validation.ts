@@ -45,8 +45,10 @@ const targetProjection = shape({ targetId: id, targetGeneration: integer(1), lab
 const actionShape = shape({ id: choice(ACTION_IDS), enabled: boolean }, { reason: text(2_048, 1), stepId: id, sessionId: id });
 const actions: Check = (v) => array((a) => actionShape(a) && isRecord(a) && (a.enabled === true || typeof a.reason === "string"), 128)(v) &&
   new Set((v as { id: string; stepId?: string }[]).map(a => `${a.id}:${a.stepId ?? ''}`)).size === (v as unknown[]).length;
+const taskProgress = shape({ fileOutput: nullable(text(240)), fileVerified: boolean, truncated: boolean,
+  steps: array(shape({id,title:text(240,1),role:text(80,1),status:choice(['pending','ready','running','waiting_for_input','waiting_for_approval','completed','failed','skipped','cancelled']),accepted:boolean,diagnostic:boolean,attempts:integer()}, {reason:text(2048),attemptWorkId:id}),64) });
 const work = shape({ id, canonicalId: id, profileId: id, kind: choice(["session", "task", "task_attempt", "schedule", "scheduled_execution", "evolution_review"]),
-  title: text(240, 1), status: choice(WORK_STATUSES), updatedAt: integer(), target: nullable(targetProjection) }, { reason: text(2_048), parentWorkId: id, actions, modelBinding:shape({sessionId:id},{taskId:id}) });
+  title: text(240, 1), status: choice(WORK_STATUSES), updatedAt: integer(), target: nullable(targetProjection) }, { taskProgress, reason: text(2_048), parentWorkId: id, actions, modelBinding:shape({sessionId:id},{taskId:id}) });
 const usage = shape({ reportedTokens: nullable(integer()), cost: nullable(shape({ amount: (v) => typeof v === "number" && Number.isFinite(v) && v >= 0,
   currency: (v) => typeof v === "string" && /^[A-Z]{3}$/.test(v) })) });
 const evidence = shape({ state: choice(["verified", "unverified", "partial", "failed"]), summary: text(2_048), artifactIds: unique(id, 100) });

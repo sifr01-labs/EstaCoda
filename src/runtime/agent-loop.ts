@@ -635,7 +635,7 @@ export class AgentLoop {
     const selectedSkillSetup = route.selectedSkillSetup;
     const turnCompletionFloor = intent.requestRequirements?.fileOutput !== undefined ? "mutation_with_verification" :
       (checkpointPreparation?.requirementMode === "save" ? undefined : resumedCheckpoint?.completionFloor) ?? deriveExecutionCompletionFloor({
-      userText: turnText,
+      userText: input.requirementText ?? turnText,
       capabilities: this.#executionCompletionCapabilities
     });
 
@@ -1154,10 +1154,7 @@ export class AgentLoop {
         toolPlans,
         cancelled: true,
         terminationCause: "cancelled",
-        completionFloor: deriveExecutionCompletionFloor({
-          userText: effectiveText,
-          capabilities: this.#executionCompletionCapabilities
-        })
+        completionFloor: turnCompletionFloor
       });
       await this.#runRecorder.recordExecutionFinalOutcome(cancellationOutcome);
       response.finalOutcome = cancellationOutcome;

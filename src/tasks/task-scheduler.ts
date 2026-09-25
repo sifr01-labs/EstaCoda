@@ -1162,7 +1162,7 @@ export class TaskScheduler {
             outcome: "failed",
             failure: {
               class: "executor-error",
-              message: "Executor failed before returning a settlement.",
+              message: executorFailureDiagnostic(error, attempt.id),
               retryable: true,
               uncertainSideEffects: true
             }
@@ -1845,6 +1845,16 @@ export class TaskScheduler {
         "uncertain-side-effects",
         "A Task Step may have produced side effects; review it before retrying."
       );
+      return false;
+    }
+
+    // Keep recoverable research inside its existing Task and remaining budget.
+    // Settled tasks/steps remain immutable; never resurrect historical terminal work.
+    if (step.executor.role === "worker" && step.executor.requestContract?.requirements.research &&
+        isAutomaticRestartSafe(step) && attempt.attemptNumber < step.retryPolicy.maxAttempts &&
+        ["executor-error", "tool-error", "evidence-contract-unsatisfied"].includes(attempt.failure?.class ?? "")) {
+      this.#pauseForOperatorReview(store, task, step, now, "research-recovery-required",
+        "Research needs review. Sources and drafts are preserved; retry the affected Step within its remaining limits.");
       return false;
     }
 
@@ -2802,4 +2812,17 @@ function validateLimitMap(value: Readonly<Record<string, number>> | undefined): 
     positiveInteger(limit, "concurrency limit");
   }
   return { ...value };
+}
+
+/** Keep source locations and a correlation key, never exception messages or
+ * absolute paths (either can contain credentials or user content). */
+export function executorFailureDiagnostic(error: unknown, attemptId: string): string {
+  const name = error instanceof TypeError ? "TypeError" : error instanceof RangeError ? "RangeError" :
+    error instanceof SyntaxError ? "SyntaxError" : "Error";
+  const stack = error instanceof Error ? (error.stack ?? "").slice(0, 16_384).split("\n").slice(1).join("\n") : "";
+  const locations = [...stack.matchAll(/(?:src|dist)\/([a-zA-Z0-9_/-]{1,180}\.[cm]?[jt]s):([0-9]+):([0-9]+)/g)]
+    .slice(0, 3).map(match => `${match[1]}:${match[2]}:${match[3]}`);
+  const reference = createHash("sha256").update(attemptId).digest("hex").slice(0, 12);
+  return `Executor failed before returning a settlement. ${name}; reference ${reference}` +
+    (locations.length ? `; at ${locations.join(", ")}` : "; no source location available");
 }

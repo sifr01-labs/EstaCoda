@@ -15,7 +15,7 @@ import { SQLiteSessionDB } from '../session/sqlite-session-db.js';
 import { ControlProtocolError, type InboxProjection, type ActivityProjection, type Page, type PageParams, type WorkProjection } from '../contracts/desktop-control/index.js';
 import { sessionWork } from './work-projections.js';
 
-export type WorkState = { inbox?: InboxProjection[]; work: WorkProjection[]; activity: Record<string, ActivityProjection[]>; history?: Record<string, HistoryBoundary>; activeSchedules?:number|null;capturedAt?:number };
+export type WorkState = { requestTurns?: Record<string,string>; inbox?: InboxProjection[]; work: WorkProjection[]; activity: Record<string, ActivityProjection[]>; history?: Record<string, HistoryBoundary>; activeSchedules?:number|null;capturedAt?:number };
 /** Metadata epoch with bounded history previews. No open SQLite transaction or live executor survives capture. */
 export async function captureWork(input: { homeDir: string; profileId: string; version?: string }, signal: AbortSignal): Promise<WorkState> {
   const attention = await profileAttention(input);
@@ -29,7 +29,7 @@ export async function captureWork(input: { homeDir: string; profileId: string; v
     const version = versionTable ? sessions.db.query<{version:number|null}>('select max(version) as version from schema_version').get()?.version ?? 0 : 0;
     if (version < TASK_MODEL_OVERRIDE_SCHEMA_VERSION) throw new ControlProtocolError('-32011');
     if (version > TASK_MODEL_OVERRIDE_SCHEMA_VERSION) throw new ControlProtocolError('-32012');
-    const state: WorkState = { capturedAt:Date.now(), work: [], activity: {}, inbox: attention.inbox, activeSchedules:attention.inbox.some(item=>item.id==='setup:schedules')?null:attention.jobs.filter(job=>job.status==='active').length, history: {} };
+    const state: WorkState = { capturedAt:Date.now(), requestTurns: {}, work: [], activity: {}, inbox: attention.inbox, activeSchedules:attention.inbox.some(item=>item.id==='setup:schedules')?null:attention.jobs.filter(job=>job.status==='active').length, history: {} };
     // Capture navigation metadata; transcript bodies are paged separately.
     const ids = sessions.db.query<{ id: string }>('select id from sessions where profile_id = ? order by updated_at desc, id').all(input.profileId);
     let capturedBytes = 0;
@@ -49,6 +49,7 @@ export async function captureWork(input: { homeDir: string; profileId: string; v
         ? { id: savedTurn.id, created_at: savedTurn.createdAt } : latestUserMessage;
       const currentEvents = events.filter(({ event, createdAt }) => !latestUser || (event.kind === 'execution-final-outcome-recorded' && event.turnMessageId ? event.turnMessageId === latestUser.id : createdAt > latestUser.created_at)).map((event) => event.event);
       const active = sessions.db.query<{ active: number }>('select count(*) as active from session_execution_owners where session_id = ? and profile_id = ? and owner_id is not null and expires_at > ?').get(id, input.profileId, Date.now());
+      if (latestUser) state.requestTurns![id] = latestUser.id;
       const work = sessionWork(session, currentEvents, Boolean(active?.active));
       const queued = sessions.db.query<{ count: number }>("select count(*) as count from session_control_receipts where session_id=? and profile_id=? and method='send' and status in ('accepted','dispatched')").get(id, input.profileId);
       if (!active?.active && queued?.count) work.status = 'queued';

@@ -128,6 +128,12 @@ function classifyToolExecutionFailure(execution: ToolExecutionRecord): Classifie
 
   if (result.ok === false) {
     const errorMessage = typeof result.content === "string" ? result.content : "Unknown tool error";
+    const httpStatus = result.metadata?.status;
+    if (execution.tool.name === "web.extract" && execution.decision === "allow" &&
+        typeof httpStatus === "number" && Number.isInteger(httpStatus) && httpStatus >= 400 && httpStatus <= 599) {
+      return {class:"tool-execution-error",recoverable:true,message:`Source retrieval failed with HTTP ${httpStatus}.`,
+        context:{tool:execution.tool.name,status:httpStatus}};
+    }
     if (result.metadata?.reason === "delegation-access-error") {
       return {
         class: "tool-invalid-args",

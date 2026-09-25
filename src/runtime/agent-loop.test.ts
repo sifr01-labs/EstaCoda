@@ -575,6 +575,13 @@ async function createAgentLoop(input: {
   };
 }
 
+it("uses the worker assignment instead of quoted parent file instructions for completion", async () => {
+  const {loop} = await createAgentLoop({canRunProvider:true, runSkillPlaybook:vi.fn(async()=>[]), selectedSkill:null});
+  const response = await loop.handle({text:"Summarize the evidence. Parent request: Save a cited report to report.md and verify the file.",
+    requirementText:"Summarize the evidence.",channel:"cli",trustedWorkspace:true});
+  expect(response.finalOutcome?.completionFloor).toBe("none");
+});
+
 describe("AgentLoop execution checkpoints", () => {
   it("does not create a checkpoint for ordinary conversation", async () => {
     const conversationalIntent: IntentRoute = {

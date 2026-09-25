@@ -41,6 +41,11 @@ describe("classifyFailure", () => {
     });
   });
 
+  it("does not confuse a missing webpage with an unavailable tool", () => {
+    const execution={tool:{name:"web.extract",description:"Read a page",inputSchema:{},riskClass:"read-only-network",toolsets:["web"],progressLabel:"reading",maxResultSizeChars:1000},decision:"allow",riskClass:"read-only-network",result:{ok:false,content:"404 Not found",metadata:{status:404}}} as ToolExecutionRecord;
+    expect(classifyFailure({kind:"tool-execution",execution})).toMatchObject({class:"tool-execution-error",recoverable:true,context:{status:404}});
+  });
+
   it("retains tool-not-found classification for genuinely unavailable tools", () => {
     const execution: ToolExecutionRecord = {
       tool: {

@@ -24,6 +24,7 @@ import { TaskApprovalService } from "./task-approval-service.js";
 import { TaskOperatorService } from "./task-operator-service.js";
 import {
   TaskScheduler,
+  executorFailureDiagnostic,
   classifyTaskRetry,
   taskHostDispatchGrant,
   taskDispatchKey,
@@ -66,6 +67,34 @@ describe("TaskScheduler", () => {
   afterEach(() => {
     sessionDb.close();
     rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it("keeps safe failed research recoverable without accepting a draft or skipping synthesis", async () => {
+    const research = makeStep("research",0);
+    research.executor = {...research.executor,role:"worker",requestContract:{version:1,objective:"Research",requirements:{skillReferences:[],issues:[],research:{fresh:true,domain:"general"}}}};
+    research.idempotency="retry_safe";
+    research.retryPolicy={...research.retryPolicy,maxAttempts:2,retryableFailureClasses:["lease-expired"]};
+    store.createTaskGraph(makeGraph([research,makeStep("synthesis",1,{dependsOn:[research.id]})]));
+    const executor = new FakeTaskStepExecutor(() => {throw new TypeError("secret=do-not-record");});
+    await makeScheduler(executor).runOnce();
+    expect(store.getTask("task-alpha")?.status).toBe("waiting_for_input");
+    expect(store.getStep(research.id)?.status).toBe("waiting_for_input");
+    expect(store.getStep("step-synthesis")?.status).toBe("pending");
+    expect(store.listAttempts("task-alpha")[0]?.failure?.message).toContain("TypeError; reference");
+    expect(store.listAttempts("task-alpha")[0]?.failure?.message).not.toContain("do-not-record");
+    new TaskOperatorService({store,now}).retry("task-alpha",research.id,"creator-alpha");
+    expect(store.getStep(research.id)?.status).toBe("ready");
+    await makeScheduler(executor).runOnce();
+    expect(store.getTask("task-alpha")?.status).not.toBe("waiting_for_input");
+  });
+
+  it("bounds exception diagnostics and excludes messages and absolute paths", () => {
+    const error = new TypeError("secret src/private.ts:1:2");
+    error.stack = "TypeError: secret src/private.ts:1:2\n    at execute (/Users/private/project/src/tasks/agent-step-executor.ts:3:4)";
+    const diagnostic=executorFailureDiagnostic(error,"attempt-private");
+    expect(diagnostic).toContain("tasks/agent-step-executor.ts:3:4");
+    expect(diagnostic).not.toMatch(/secret|Users|attempt-private|private.ts/);
+    expect(executorFailureDiagnostic({message:"secret"},"id")).not.toContain("secret");
   });
 
   it("runs dependencies in order and settles the Task only after durable result acceptance", async () => {

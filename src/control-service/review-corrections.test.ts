@@ -7,7 +7,7 @@ import { captureWork, WorkSnapshot } from './work-snapshot.js';
 import { taskActions, constrainActions } from './action-projections.js';
 import { SQLiteTaskStore } from '../tasks/sqlite-task-store.js';
 import { TaskOperatorService } from '../tasks/task-operator-service.js';
-import { taskWork } from './task-projections.js';
+import { appendTaskWork, taskWork } from './task-projections.js';
 
 async function fixture() {
   const homeDir = await mkdtemp('/tmp/ec-review-fix-'), input = { homeDir, profileId: 'p' };
@@ -171,4 +171,25 @@ it('derives live action hints from read-only target validation and current trust
     await f.db.createSession({ id: 'stale', profileId: 'p', executionTarget: stale });
     expect((await f.capture()).work.find(work => work.canonicalId === 'stale')?.actions?.find(a => a.id === 'sessions.send')?.enabled).toBe(false);
   } finally { await f.close(); }
+});
+
+it('projects the latest delegated request consistently and keeps standalone Tasks separate', async () => {
+ const f=await fixture();try{
+  await f.db.createSession({id:'origin',profileId:'p'});
+  const store=new SQLiteTaskStore({db:f.db.db,profileId:'p'}), service=new TaskOperatorService({store});
+  const created=service.begin({objective:'Research and deliver',creatorSessionId:'origin',workspace:{canonicalPath:'/tmp',identityHash:'x'}});
+  const task={...store.getTask(created.taskId)!,source:'delegation' as const,originTurnId:'turn'};
+  const projectedStore=new Proxy(store,{get(target,key){if(key==='listTasks')return()=>[task];const value=Reflect.get(target,key);return typeof value==='function'?value.bind(target):value;}});
+  const origin={id:'session:origin',canonicalId:'origin',profileId:'p',kind:'session' as const,title:'Chat',status:'completed' as const,updatedAt:0,target:null,actions:[{id:'sessions.cancelTurn' as const,enabled:true}]};
+  const state={requestTurns:{origin:'turn'},work:[origin] as import('../contracts/desktop-control/index.js').WorkProjection[],activity:{}};
+  await appendTaskWork(state,projectedStore);
+  const child=state.work.find(work=>work.kind==='task')!;
+  expect(child.parentWorkId).toBe(origin.id);expect(origin.status).toBe(child.status);
+  expect(origin.actions[0]?.enabled).toBe(true); // A foreground owner may still be settling its handoff.
+  expect(child.taskProgress?.steps.length).toBeGreaterThan(0);expect(child.taskProgress?.fileVerified).toBe(false);
+  expect(taskWork({...task,source:'cli'},new Set()).parentWorkId).toBeUndefined();
+  const next={...origin,status:'completed' as const};
+  await appendTaskWork({requestTurns:{origin:'new-turn'},work:[next],activity:{}},projectedStore);
+  expect(next.status).toBe('completed');
+ }finally{await f.close();}
 });

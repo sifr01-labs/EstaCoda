@@ -25,7 +25,7 @@ import{AppearanceView}from'./components/appearance-view.js';
 import{Sidebar,type PageName}from'./components/sidebar.js';
 import{WorkView}from'./components/work-view.js';import{InboxView}from'./components/inbox-view.js';
 export type Draft={pending?:{id:string;text:string;matchText:string;attachments:Draft['attachments'];startedAt:number;knownIds:string[];state:'sending'|'sent'|'uncertain'};intent?:'image'|'speech';securityMode?:import('./components/conversation-permissions.js').ConversationMode;queued?:{intent?:'image'|'speech';id:string;text:string;attachments:Draft['attachments'];paused?:boolean};targetLabel?:string;limitsReviewed?:boolean;kind?:'session'|'task';limits?:{maxProviderCalls:number;maxTotalTokens:number;maxWallClockMs:number};id?:string;target?:import('@estacoda/control-protocol').TargetReference;modelSelection?:{providerId:string;modelId:string}|null;text:string;attachments:{id?:string;name:string;type:string;size:number;thumbnail?:string}[];model:string;note:string};
-export type WorkViewState={tab:'activity'|'changes'|'results';inspector:boolean;activityExtent:number};
+export type WorkViewState={tab:'activity'|'tasks'|'changes'|'results';inspector:boolean;activityExtent:number};
 export const emptyWorkView=():WorkViewState=>({tab:'activity',inspector:false,activityExtent:100});
 export const emptyDraft=():Draft=>({id:crypto.randomUUID(),text:'',attachments:[],model:'Kimi K3',note:''});
 export function App({adapter}:{adapter:DesktopAdapter}){

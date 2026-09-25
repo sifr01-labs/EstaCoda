@@ -1,0 +1,247 @@
+{
+  "version": 1,
+  "passed": true,
+  "measuredAt": "2026-09-25T14:28:12.478Z",
+  "sourceBaseCommit": "9f4204808638df52700ffd702e83c46559f38636",
+  "sourceOverlay": [
+    {
+      "path": "apps/desktop/src/renderer/app.tsx",
+      "sha256": "f947bddecbe5c8d204fb5d74bac3205f20342c3b27854d33de5ddfe066856fc9"
+    },
+    {
+      "path": "apps/desktop/src/renderer/components/chat-tasks.tsx",
+      "sha256": "6c67804c5ddf04d1cebc030f62f52ccb0b63b316d48a7b91f20fd821542927f1"
+    },
+    {
+      "path": "apps/desktop/src/renderer/components/sidebar.tsx",
+      "sha256": "e3dd0f3077f80d3b8069e06ed28aa81f6b3b06267db49d67238006fcabfdff52"
+    },
+    {
+      "path": "apps/desktop/src/renderer/components/work-list.tsx",
+      "sha256": "b91b132b892cec6edd90c2bd22fee8387d125ac3d3bc6527ab90e6254eee7205"
+    },
+    {
+      "path": "apps/desktop/src/renderer/components/work-view.tsx",
+      "sha256": "450e14cc778474c608f68e7e819a7d0d11b3891d16af16e1b4ea750d4061fed4"
+    },
+    {
+      "path": "apps/desktop/src/renderer/styles/components.css",
+      "sha256": "0823e7fef20bd631e25f63ede5c76a6496cecd32bda50babad2c30a23256d719"
+    },
+    {
+      "path": "apps/desktop/src/shared/i18n/catalog.ts",
+      "sha256": "774c00445e7a97de5008026d0d5b4ea35ff6b4dcf904a2cfd4e1800e262a24e1"
+    },
+    {
+      "path": "apps/desktop/src/shared/i18n/chat-tasks.ts",
+      "sha256": "c08493214f0f0b36f4b5369aa7e61fefbe5e35dd44970f01cb4fe74fb77688c6"
+    },
+    {
+      "path": "apps/desktop/tests/e2e/work-continuity.spec.ts",
+      "sha256": "9febd320e9180102f2b23fb51cc073ebe2dcc19a88bbbbd17f51934389b24612"
+    },
+    {
+      "path": "apps/desktop/tests/research-packaged.mts",
+      "sha256": "58ae037df31479eff673f7e0677c7886da00b4c50885671fba263a78aa55748c"
+    },
+    {
+      "path": "package.json",
+      "sha256": "8427aa6992264ee7c5031c694c9d0a152be35125b78afd8cd47e4743c70beba8"
+    },
+    {
+      "path": "scripts/validate-research-reliability.ts",
+      "sha256": "68a7cb802eb608cacc380efcd267b00c2e73e060c1a46210d3bbd609372d6d98"
+    },
+    {
+      "path": "src/contracts/desktop-control/projections.ts",
+      "sha256": "9162e0d57566a76391f952b2fe149420b3934a9d9eea19097dc9f218019b2d60"
+    },
+    {
+      "path": "src/contracts/desktop-control/validation.test.ts",
+      "sha256": "f07fad1dda7fb3689ca625efa42a1e62f4049737c93b48adb561a348407da9fd"
+    },
+    {
+      "path": "src/contracts/desktop-control/validation.ts",
+      "sha256": "c7de9866656e4623997be4bc9a633f580d416dc96d6d2d15fe2568de33663bbd"
+    },
+    {
+      "path": "src/control-service/review-corrections.test.ts",
+      "sha256": "07f2bc9d6c2d5d7deb46c3b2fba0577cfcfc159ec62444c6d2fa21dd41e7d23d"
+    },
+    {
+      "path": "src/control-service/task-projections.ts",
+      "sha256": "8bdb9c2ef62904dc458688dfb8cde15c74cde3c31b8b2eae5b1b33e99b8bdb52"
+    },
+    {
+      "path": "src/control-service/work-snapshot.test.ts",
+      "sha256": "6927f0237cf890cd9de87a350cb9bfe89f2cb0247f1046f7d0791438eb0c550b"
+    },
+    {
+      "path": "src/control-service/work-snapshot.ts",
+      "sha256": "386a1684ce97d657bc7f22774eaa74b553fa720f860ae8f47be3d36564664507"
+    },
+    {
+      "path": "src/eval/fixtures/research-workflow-harness.ts",
+      "sha256": "21050231dec2afbd52d2d3d4928993a2883522762a105c5ff41c4fefb78c6073"
+    },
+    {
+      "path": "src/eval/fixtures/research-workflow-release.ts",
+      "sha256": "8b2e582fed53c3a1b6c9feb907ef2a39bf84b19c74ba4d839fd0ee30f765ef3e"
+    },
+    {
+      "path": "src/gateway/supervisor.ts",
+      "sha256": "6c95ab419e69b5fc6ebefa31fd03d5f12b187a732e9c3df3f65961347e550434"
+    },
+    {
+      "path": "src/runtime/agent-loop.test.ts",
+      "sha256": "3d77944066d52c1a4bc7b269af0b6eb3afd2638174a0415c65bf4d5987f3091e"
+    },
+    {
+      "path": "src/runtime/agent-loop.ts",
+      "sha256": "0d29579d6e601e215fcde04c319e71641ea7c5b7be3b4355d2964d7309573b11"
+    },
+    {
+      "path": "src/runtime/research-request.acceptance.test.ts",
+      "sha256": "2bec39b1a59c835cf900b3fa13d4b471b7ad7242d6a3f233a0f08d38d6195e0a"
+    },
+    {
+      "path": "src/runtime/research-surfaces.acceptance.test.ts",
+      "sha256": "dd9272f8a2695421d57e7dcf31dda669f4f1745fdb653881eecfa542fbe706ec"
+    },
+    {
+      "path": "src/session/session-presentation.ts",
+      "sha256": "3230dda1a3d232737b5764d7621dd4bb257dd25fa370907130d10a834e667811"
+    },
+    {
+      "path": "src/tasks/agent-step-executor.test.ts",
+      "sha256": "91a20f79de8297f4e413805fe7d327bcb1408926683c613dda82cf8802553c4f"
+    },
+    {
+      "path": "src/tasks/agent-step-executor.ts",
+      "sha256": "908c673750dea552e32e2cb90b0b0f4382e835f511a30acaa28b7d47d9aab661"
+    },
+    {
+      "path": "src/tasks/supervisor-task-background-host.test.ts",
+      "sha256": "bb6cd1498cc8fe5b9f7dfd6b007b8a30ed9642ec677ea498ba4d8c7355778bc6"
+    },
+    {
+      "path": "src/tasks/supervisor-task-background-host.ts",
+      "sha256": "66124dd31f76eed4751cf6f6ed0a66faecb045d8684cd83247eab9d54847420e"
+    },
+    {
+      "path": "src/tasks/task-scheduler.test.ts",
+      "sha256": "5959faf2efaab646195f3b3f83de1427aaadf9a82eee0baa963a2123238cd5bf"
+    },
+    {
+      "path": "src/tasks/task-scheduler.ts",
+      "sha256": "fdd1b49c4a895d5bbb497153a5bf0ccff85ba2fcaf23474780a25faf758aafcb"
+    },
+    {
+      "path": "src/tasks/task-session-completion.test.ts",
+      "sha256": "8f61785b204b4f33eb6d0d4f7c545f466714557b27c3fa19e2e1491b09ee2a50"
+    },
+    {
+      "path": "src/tasks/task-session-completion.ts",
+      "sha256": "ccb9ef0ad6adb86d34fcd31da3368023bf9aa3b9056a5a812327dae10fbad628"
+    },
+    {
+      "path": "src/trajectory/failure-classifier.test.ts",
+      "sha256": "ec551f63a7a66b18b0ea4ad4ae566fa01584ab22f6de1f121339934ac77e9278"
+    },
+    {
+      "path": "src/trajectory/failure-classifier.ts",
+      "sha256": "48787b87b498b4ee5322edc6d2b94f70aff5cd1c83b23ed9098866674925f1e5"
+    }
+  ],
+  "platform": "darwin",
+  "arch": "arm64",
+  "runtime": {
+    "sha256": "6ad47fe390fac8f66dcb6a106bb132b924113a6bbcfa2f0d33049e403a2e887c",
+    "nodeVersion": "v24.14.1",
+    "coreVersion": "0.1.0",
+    "entrySha256": "8b7b5e8816ffe62d9baa2133dd5cc54a1a8ea36997b0bda6fc631039c700f6ec",
+    "signature": "ad-hoc verified",
+    "ownedBridgeVerified": true,
+    "inventoryVerified": true,
+    "matchesCurrentDist": true,
+    "supervisorRetainedPathWithSpaces": true
+  },
+  "fixtures": {
+    "model": "scripted loopback HTTP",
+    "web": "in-process registered synthetic provider in packaged supervisor",
+    "liveModelCalls": 0,
+    "transport": "actual signed app + preload/Main + owned bridge + private control"
+  },
+  "workflow": {
+    "workers": 3,
+    "acceptedResults": 5,
+    "distinctChildSessions": 6,
+    "tasks": 1,
+    "searches": 4,
+    "providerCalls": 19,
+    "appRestartNoReplay": true,
+    "fileBytes": 655,
+    "fileSha256": "023d8333919f162a3e6012d6e6e568b51faa9188b37e33575d7351fb255ff0c2",
+    "readbackVerified": true,
+    "historicalTaskStatus": "completed"
+  },
+  "allScenarios": {
+    "providerCalls": 24,
+    "actualToolResults": 21,
+    "failedToolResults": 4
+  },
+  "scenarios": {
+    "research": true,
+    "automaticReportDelivery": true,
+    "alternativeSourceRecovery": true,
+    "desktopTranscriptExactlyOnce": true,
+    "chatOwnedTasksUi": true,
+    "oneSidebarEntry": true,
+    "handoffRemainsRunning": true,
+    "gatewayRestartNoReplay": true,
+    "failedWorkerDraftPreserved": true,
+    "targetedRetryAfterGatewayRestart": true,
+    "saveOnlyAfterRestart": true,
+    "skillRecovery": true,
+    "missingSearch": true,
+    "falseSaveBlocked": true
+  },
+  "liveAssessment": "pending approved model, sources and spend ceiling",
+  "validation": {
+    "environment": {
+      "node": "v24.14.1",
+      "pnpm": "10.33.0",
+      "source": "clean archive plus implementation patch; unrelated duplicate sources excluded"
+    },
+    "checks": {
+      "frozenLockfileInstall": "passed",
+      "runtimeTypecheck": "passed",
+      "desktopTypecheck": "passed",
+      "runtimeFullSuite": {
+        "passed": 12025,
+        "failed": 0,
+        "note": "Full suite followed by targeted validation of the final visibility and foreground-stop review corrections."
+      },
+      "desktopUnitSuite": {
+        "passed": 177,
+        "failed": 0
+      },
+      "desktopBrowserSuite": {
+        "passed": 26,
+        "failed": 0
+      },
+      "postReviewTargetedSuites": {
+        "protocolAndBackgroundHost": 19,
+        "sessionVisibilityAndGateway": 105,
+        "workProjectionAndStop": 7
+      },
+      "smoke": "passed",
+      "build": "passed",
+      "runtimeImportAudit": "passed",
+      "esmAudit": "passed",
+      "distSmoke": "passed",
+      "packageInventoryAndRelocatedLaunch": "passed",
+      "diffCheck": "passed"
+    }
+  }
+}

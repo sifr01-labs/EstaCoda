@@ -1,3 +1,4 @@
+import { TaskSessionCompletionService } from "../tasks/task-session-completion.js";
 import {inspectDesktopRuntimeBuild} from './desktop-runtime-build.js';
 import {DesktopMediaInput} from '../artifacts/desktop-media-input.js';
 import {desktopModelControl} from './desktop-model-controls.js';
@@ -909,6 +910,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
       sessionDb: db,
       closeSessionDbOnDispose: false,
       sessionMetadata: input.metadata,
+      enableTaskSessionCompletion: input.metadata?.originSurface === "shared",
       externalSkillRoots: latestConfig.skills.externalDirs,
       skillAutonomy: latestConfig.skills.autonomy,
       skillConfig: latestConfig.skills.config,
@@ -1411,11 +1413,13 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
       store: taskStore,
       queue: gatewayApprovalQueue
     });
+    const desktopTaskCompletion = new TaskSessionCompletionService({ store: taskStore, resultService: taskResultService, sessionDb, profileId, locale: config.ui?.language === "ar" ? "ar" : "en" });
     const taskBackgroundHostOptions: ConstructorParameters<typeof SupervisorTaskBackgroundHost>[0] = {
       store: taskStore,
       resultService: taskResultService,
       router,
       ownerId: `gateway-task-host-${process.pid}-${startedAt}`,
+      deliverSessionCompletions: () => desktopTaskCompletion.deliverDesktopPending(),
       resolveWorkspace: resolveTaskWorkspaceBinding,
       isWorkspaceTrusted: (canonicalPath) => trustStore.isTrusted(canonicalPath),
       approvalService: taskApprovalService,
@@ -1435,6 +1439,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
             sessionId: createSessionId(),
             workspaceTrusted
           }),
+          sessionMetadata: { kind: "task-background-host" },
           closeSessionDbOnDispose: false
         });
       }

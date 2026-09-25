@@ -74,3 +74,12 @@ it('accepts bounded evidence explanation codes and rejects arbitrary diagnostic 
  expect(()=>validateControlResponse({jsonrpc:'2.0',id:'r',result},get,context)).not.toThrow();
  for(const invalid of [{...result,summaryCode:'arbitrary private error'},{...result,limitationCodes:['unexpected']},{...result,limitationCodes:Array(17).fill('receipts_missing')}])expect(()=>validateControlResponse({jsonrpc:'2.0',id:'r',result:invalid},get,context)).toThrow();
 });
+it('bounds task progress and rejects extra data and invented execution states',()=>{
+ const get:MethodRequest<'work.get'>={jsonrpc:'2.0',id:'r',method:'work.get',params:{workId:'w'}};
+ const step={id:'step',title:'Research',role:'worker',status:'waiting_for_input',accepted:false,diagnostic:true,attempts:1};
+ const progress={fileOutput:'report.md',fileVerified:false,truncated:false,steps:[step]};
+ const check=(taskProgress:unknown)=>validateControlResponse({jsonrpc:'2.0',id:'r',result:{...work,taskProgress}},get,context);
+ expect(()=>check(progress)).not.toThrow();
+ for(const invalid of [{...progress,steps:Array(65).fill(step)},{...progress,steps:[{...step,status:'success-ish'}]},
+  {...progress,steps:[{...step,rawOutput:'private source contents'}]},{...progress,fileOutput:'x'.repeat(241)}])expect(()=>check(invalid)).toThrow();
+});

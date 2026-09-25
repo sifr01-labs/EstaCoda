@@ -13,6 +13,7 @@ export const SESSION_DESCRIPTION_MAX_GRAPHEMES = 96;
 export const INTERNAL_SESSION_KINDS = [
   "delegated-child",
   "task-foreground-host",
+  "task-background-host",
   "task-operator-origin",
   "task-step-worker",
 ] as const;

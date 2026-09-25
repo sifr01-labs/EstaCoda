@@ -831,6 +831,25 @@ describe("AgentStepExecutor", () => {
     });
   });
 
+  it.each(["alternative", "missing-table", "unobserved", "required-source", "denied", "unavailable-tool"])("handles inaccessible research sources: %s", async mode => {
+    const graph=makeGraph(), base=graph.steps[0]!;
+    const url="https://observed.example/report", unavailable="https://unavailable.example/report";
+    const step:TaskStep={...base,objective:mode==="required-source"?`Read ${unavailable}`:"Research methods",executor:{...base.executor,role:"worker",
+      research:{scope:"methods",requireLiveSources:true,requireRepositoryEvidence:false},requestContract:{version:1,objective:"Research",requirements:{skillReferences:[],issues:[],research:{fresh:true,domain:"general"}}}}};
+    const calls=[successfulEvidenceExecution("web.search","read-only-network",["web","research"],{query:"methods"},"Observed",{results:[{url,snippet:"A method"}]}),{
+      tool:tool("web.extract","read-only-network",["web"]),input:{url:unavailable},decision:mode==="denied"?"deny" as const:"allow" as const,riskClass:"read-only-network" as const,
+      result:{ok:false,content:"Unavailable",metadata:mode==="unavailable-tool"?{reason:"unavailable"}:{status:403}}}];
+    const text=mode==="missing-table"?`Found ${url}`:`| Source URL | Supported claim | Limitation |\n| --- | --- | --- |\n| ${mode==="unobserved"?"https://invented.example/report":url} | A method | Snippet only |`;
+    const childFactory:ChildAgentLoopFactory={createChild:vi.fn(async input=>{
+      await sessionDb.createSession({id:"alternative-worker",profileId:input.profileId,parentSessionId:input.parentSessionId});
+      return childRuntime(async()=>response({text,toolExecutions:calls}),async()=>undefined,{sessionId:"alternative-worker",trajectoryId:"alternative-trajectory"}, {tools:calls.map(call=>call.tool.name),toolsets:["web","research"]});
+    })};
+    const executor=new AgentStepExecutor({childFactory,sessionDb,taskStore:store,hostWorkspace:graph.task.workspace,isWorkspaceTrusted:()=>true,parentVisibleTools:()=>tools(),approvalService:new TaskApprovalService({store}),securityPolicy:capabilityFirstDefaults});
+    const result=await executor.execute({task:graph.task,step,attempt:attempt({...graph,steps:[step]}),signal:new AbortController().signal,heartbeat:vi.fn(),checkpoint:vi.fn()});
+    expect(result.outcome).toBe(mode==="alternative"?"succeeded":"failed");
+    if(result.outcome==="succeeded")expect(result.results?.[0]?.content).toContain("Source access limitation: 1");
+  });
+
   it("accepts an exact read retry that succeeds later in the same Attempt", async () => {
     const graph = makeGraph();
     const fileRead = tool("file.read", "read-only-local", ["files"]);

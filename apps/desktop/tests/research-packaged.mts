@@ -12,6 +12,7 @@ import type {} from '../src/shared/desktop-api.ts';
 
 const appRoot=resolve(process.argv[2]??'apps/desktop/out/EstaCoda-darwin-arm64/EstaCoda.app');
 const output=resolve(process.argv[3]??'evals/results/research-reliability-packaged-v1.json');
+const sourceRoot=resolve(process.argv[4]??'.');
 const runtimeRoot=join(appRoot,'Contents/Resources/.runtime'), core=join(runtimeRoot,'core/dist');
 const manifest=JSON.parse(readFileSync(join(runtimeRoot,'manifest.json'),'utf8'));
 verifyRuntimeInventory(runtimeRoot,manifest);
@@ -25,6 +26,7 @@ const {SQLiteTaskStore}=await coreImport('tasks/sqlite-task-store.js');
 const {TaskResultService}=await coreImport('tasks/task-result-service.js');
 const {ensureRuntimeSession}=await coreImport('session/session-workspace-ownership.js');
 const {WorkspaceTrustStore}=await coreImport('security/workspace-trust-store.js');
+const {OnboardingWorkspace}=await coreImport('control-service/onboarding-workspace.js');
 const {resolveGlobalStateHome,resolveProfileStateHome}=await coreImport('config/profile-home.js');
 const {probePrivateControl}=await coreImport('gateway/private-control.js');
 const home=mkdtempSync('/tmp/ec-research-release-'),workspace=join(home,'workspace');
@@ -33,10 +35,13 @@ const retainedRoot=join(desktopData,'runtime-versions',manifest.runtimeSha256),r
 const profileId='pr6-'+randomBytes(5).toString('hex'),paths=resolveProfileStateHome({homeDir:home,profileId});
 mkdirSync(workspace);mkdirSync(paths.profileRoot,{recursive:true});
 const source='https://93.184.216.34/fixture/battery-recycling';
+const inaccessible='https://93.184.216.34/fixture/unavailable';
 const table=`| Source URL | Supported claim | Limitation |\n| --- | --- | --- |\n| ${source} | Synthetic research fixture | Illustrative snippet; not scientific evidence |`;
 const report=`# Battery recycling\n\nSynthetic research fixture. [Source](${source})\n${table}`;
 let requests=0,phase='research',saveIndex=0,recoveryIndex=0,diagnostics='',providerErrors:string[]=[];
 let sessionId='',reportContent='',bridgeVerified=false;
+let failedWorkerOnce=false;
+let releaseWorkers!:()=>void;const workerGate=new Promise<void>(resolve=>{releaseWorkers=resolve;});
 const db=new SQLiteSessionDB({path:resolveGlobalStateHome({homeDir:home}).sessionsSqlitePath});
 const store=new SQLiteTaskStore({db:db.db,profileId});
 const resultService=new TaskResultService({store,profileId,sessionDb:db,contentRoot:paths.taskResultsPath});
@@ -68,16 +73,18 @@ const provider=createServer(async(req,res)=>{
    recoveryIndex++;
   }else if(phase==='false-save')content='Saved the report to nonexistent.md.';
   else if(phase==='missing-search'){
-   if(!hasFeedback)next=[tool('delegate_task',{task:'Research battery recycling',allowedTools:['web.search'],research:{scope:'methods',requireLiveSources:true,requireRepositoryEvidence:false}})];
+   if(!hasFeedback)next=[tool('delegate_task',{task:'Research battery recycling',allowedTools:['web.search','web.extract'],research:{scope:'methods',requireLiveSources:true,requireRepositoryEvidence:false}})];
    else content='Research is blocked because search is unavailable.';
   }else if(text.includes('Assigned research scopes:')){
    const task=store.listTasks()[0];const accepted=store.listResults(task.id).filter((r:any)=>r.disposition==='accepted');
    if(!hasFeedback)next=accepted.map((r:any)=>tool('task_result_read',{task_id:task.id,result_id:r.id}));
    else content=report;
   }else if(text.includes('Work only on this assigned Step')){
-   if(!hasFeedback)next=[tool('web_search',{query:'battery recycling '+requests})];
+   await workerGate;
+   if(!hasFeedback)next=[tool('web_search',{query:'battery recycling '+requests}),tool('web_extract',{url:inaccessible})];
+   else if(!failedWorkerOnce&&text.includes('Research battery recycling: processing.')){failedWorkerOnce=true;content='Draft findings without the required source table.';}
    else content=`Synthetic evidence: ${source}\n${table}`;
-  }else if(!hasFeedback)next=[tool('delegate_task',{tasks:['collection','processing','reuse'].map(scope=>({task:`Research battery recycling: ${scope}.`,allowedTools:['web.search'],research:{scope,requireLiveSources:true,requireRepositoryEvidence:false}}))})];
+  }else if(!hasFeedback)next=[tool('delegate_task',{tasks:['collection','processing','reuse'].map(scope=>({task:`Research battery recycling: ${scope}.`,allowedTools:['web.search','web.extract'],research:{scope,requireLiveSources:true,requireRepositoryEvidence:false}}))})];
   else content='Research workers are running; report delivery remains pending.';
   for(const call of next)assert(tools.includes(call.name),'Fixture attempted unexposed tool: '+call.name);
   calls.push({phase,tools:next.map(x=>x.name)});
@@ -92,15 +99,18 @@ await new Promise<void>(r=>provider.listen(0,'127.0.0.1',r));
 const endpoint=`http://127.0.0.1:${(provider.address() as {port:number}).port}/v1`;
 writeFileSync(paths.configPath,JSON.stringify({model:{provider:'local',id:'research-release-tools',contextWindowTokens:131072,maxTokens:2048},providers:{local:{enabled:true,enableNetwork:true,authMethod:'none',baseUrl:endpoint,apiMode:'custom_openai_compatible',models:['research-release-tools']}},security:{approvalMode:'open'},skills:{autonomy:'none'},web:{enableNetwork:true,searchBackend:'pr6-fixture',extractBackend:'pr6-fixture'}}));
 writeFileSync(join(home,'.estacoda/active-profile.json'),JSON.stringify({profileId}));
-await ensureRuntimeSession({sessionDb:db,sessionId:'target-registration',profileId,workspaceRoot:workspace,homeDir:home,durable:true});
+await ensureRuntimeSession({sessionDb:db,sessionId:'target-registration',profileId,workspaceRoot:workspace,homeDir:home,durable:true,metadata:{kind:'task-operator-origin'}});
 const binding=(await db.getSession('target-registration')).executionTarget;
 const target={targetId:binding.targetId,targetGeneration:binding.targetGeneration};
 await new WorkspaceTrustStore({homeDir:home}).grant(workspace);
+const setupWorkspace=new OnboardingWorkspace({homeDir:home,profileId});
+const setupReview=await setupWorkspace.review({path:workspace,alias:'research-workspace',trust:true});
+await setupWorkspace.apply({reviewId:setupReview.reviewId,operationId:'fixture-register',confirmed:true});setupWorkspace.dispose();
 const bootstrap=join(home,'supervisor.mjs'),searchLog=join(home,'searches.jsonl'),missingFlag=join(home,'missing-search');
 writeFileSync(bootstrap,`import {appendFileSync,existsSync} from 'node:fs';
 import {registerWebResearchProvider} from ${JSON.stringify(pathToFileURL(join(retainedCore,'tools/web-research-registry.js')).href)};
 import {runGatewaySupervisor} from ${JSON.stringify(pathToFileURL(join(retainedCore,'gateway/supervisor.js')).href)};
-registerWebResearchProvider({name:'pr6-fixture',displayName:'Synthetic release evidence',capabilities:{search:true,extract:true},getAvailability:()=>({available:!existsSync(${JSON.stringify(missingFlag)}),reason:'Fixture search disabled'}),search:async query=>{appendFileSync(${JSON.stringify(searchLog)},JSON.stringify({query})+'\\n');return [{title:'Synthetic study',url:${JSON.stringify(source)},snippet:'Illustrative fixture; not scientific evidence.'}];},extract:async url=>({url,content:'Illustrative research fixture',status:200})});
+registerWebResearchProvider({name:'pr6-fixture',displayName:'Synthetic release evidence',capabilities:{search:true,extract:true},getAvailability:()=>({available:!existsSync(${JSON.stringify(missingFlag)}),reason:'Fixture search disabled'}),search:async query=>{appendFileSync(${JSON.stringify(searchLog)},JSON.stringify({query})+'\\n');return [{title:'Synthetic study',url:${JSON.stringify(source)},snippet:'Illustrative fixture; not scientific evidence.'}];},extract:async url=>({url,content:'Illustrative research fixture',status:url.endsWith('/unavailable')?403:200})});
 await runGatewaySupervisor(${JSON.stringify({homeDir:home,workspaceRoot:workspace,profileId})});`);
 let supervisor:ChildProcess|undefined;
 function startSupervisor(){
@@ -143,18 +153,51 @@ const searches=()=>existsSync(searchLog)?readFileSync(searchLog,'utf8').trim().s
 try{
  await launch();startSupervisor();
  await expect.poll(async()=>{try{return(await probePrivateControl({directory:paths.gatewayStatePath,profileId,version:manifest.coreVersion})).instanceId;}catch{return null;}},{timeout:30000}).not.toBeNull();
+ const existingSetup=page!.getByRole('button',{name:/Use an existing setup/});
+ if(await existingSetup.isVisible()){await existingSetup.click();await page!.getByRole('button',{name:'Open EstaCoda',exact:true}).click();}
+ const showSidebar=page!.getByRole('button',{name:'Show sidebar',exact:true});if(await showSidebar.isVisible())await showSidebar.click();
  console.log('Verified packaged app, owned bridge and retained supervisor under a path with spaces.');
  const initial=await submit('Use the researcher skill and use 3 subagents to research current battery recycling. Save report.md');sessionId=initial.workId.replace(/^session:/,'');
  await expect.poll(()=>{assert.deepEqual(providerErrors,[]);return store.listTasks().length;},{timeout:60000}).toBe(1);
+ await expect.poll(()=>page!.evaluate(id=>window.desktop.getWork(id).then(work=>work.status).catch(()=>'unavailable'),initial.workId),{timeout:30000}).toMatch(/^(queued|running)$/);
+ await page!.locator(`[data-task="${initial.workId}"]`).click();
+ await page!.getByRole('tab',{name:'Tasks',exact:true}).click();
+ await expect(page!.locator('.ec-task-worker')).toHaveCount(5,{timeout:30000});
+ await expect(page!.locator('.ec-sidebar [data-task]')).toHaveCount(1);
+ await expect(page!.locator('.ec-sidebar [data-task^="task:"]')).toHaveCount(0);
+ await page!.screenshot({path:output.replace(/\.json$/, '-tasks.png')});
+ releaseWorkers();
+ await expect.poll(()=>store.listTasks()[0]?.status,{timeout:120000}).toBe('waiting_for_input');
+ const waitingTask=store.listTasks()[0],waitingStep=store.listSteps(waitingTask.id,waitingTask.activePlanRevisionId).find((step:any)=>step.status==='waiting_for_input');assert(waitingStep);
+ assert(!existsSync(join(workspace,'report.md')));
+ await expect.poll(()=>page!.evaluate(id=>window.desktop.getWork(id).then(work=>work.status).catch(()=>'unavailable'),initial.workId),{timeout:30000}).toBe('needs_attention');
+ await stop(supervisor);supervisor=undefined;startSupervisor();
+ await expect.poll(async()=>{try{return(await probePrivateControl({directory:paths.gatewayStatePath,profileId,version:manifest.coreVersion})).instanceId;}catch{return null;}},{timeout:30000}).not.toBeNull();
+ assert.equal(store.getStep(waitingStep.id).status,'waiting_for_input');
+ await page!.locator('.ec-task-worker summary').filter({hasText:'processing'}).click();
+ await page!.getByRole('button',{name:'Review retry',exact:true}).click();
+ await page!.getByRole('button',{name:'Retry this step',exact:true}).click();
  await expect.poll(()=>store.listTasks()[0]?.status,{timeout:120000}).toBe('completed');
  const task=store.listTasks()[0],steps=store.listSteps(task.id,task.activePlanRevisionId),workers=steps.filter((s:any)=>s.executor.role==='worker'),synthesis=steps.find((s:any)=>s.executor.role==='synthesis');
- assert.equal(workers.length,3);assert.deepEqual(new Set(synthesis.dependsOn),new Set(workers.map((s:any)=>s.id)));assert.equal(store.listResults(task.id).filter((r:any)=>r.disposition==='accepted').length,5);assert.equal(searches(),3);assert(existsSync(join(workspace,'report.md')));
- const workerSessions=new Set(store.listAttempts(task.id).map((a:any)=>a.workerSessionId));assert.equal(workerSessions.size,5);assert(!workerSessions.has(sessionId));
- await idle(initial.workId);const beforeRestart=requests;await stopApp();await launch();assert.equal(requests,beforeRestart);
+ assert.equal(workers.length,3);assert.deepEqual(new Set(synthesis.dependsOn),new Set(workers.map((s:any)=>s.id)));assert.equal(store.listResults(task.id).filter((r:any)=>r.disposition==='accepted').length,5);assert.equal(searches(),4);assert(existsSync(join(workspace,'report.md')));
+ const workerSessions=new Set(store.listAttempts(task.id).map((a:any)=>a.workerSessionId));assert.equal(workerSessions.size,6);assert(!workerSessions.has(sessionId));
+ await idle(initial.workId);
+ await expect.poll(()=>store.listDeliveryBindings({statuses:['delivered'],limit:100}).length,{timeout:30000}).toBe(1);
+ const completions=()=>db.listMessages(sessionId).then((messages:any[])=>messages.filter(message=>message.metadata?.taskCompletion?.taskId===task.id));
+ assert.equal((await completions()).length,1);
+ await expect.poll(()=>page!.evaluate(id=>window.desktop.getWork(id).then(work=>work.status).catch(()=>'unavailable'),initial.workId),{timeout:30000}).toBe('completed');
+ await expect.poll(()=>page!.evaluate(id=>window.desktop.work!.children(id).then(page=>page.items.filter(work=>work.kind==='task').length).catch(()=>-1),initial.workId),{timeout:30000}).toBe(1);
+ const childPage=await page!.evaluate(id=>window.desktop.work!.children(id),initial.workId);
+ assert.equal(childPage.items.filter(work=>work.kind==='task').length,1);
+ assert.equal(childPage.items.find(work=>work.kind==='task')?.taskProgress?.fileVerified,true);
+ const beforeRestart=requests;await stopApp();await stop(supervisor);supervisor=undefined;
+ await launch();startSupervisor();
+ await expect.poll(async()=>{try{return(await probePrivateControl({directory:paths.gatewayStatePath,profileId,version:manifest.coreVersion})).instanceId;}catch{return null;}},{timeout:30000}).not.toBeNull();
+ assert.equal(requests,beforeRestart);assert.equal((await completions()).length,1);
  phase='save';saveIndex=0;await submit('Save this report to report.md',initial.workId);await idle(initial.workId);
  await expect.poll(()=>existsSync(join(workspace,'report.md')),{timeout:60000}).toBe(true);
  await expect.poll(()=>page!.evaluate(id=>window.desktop.getWork(id).then(x=>x.status).catch(()=>'unavailable'),initial.workId),{timeout:60000}).toBe('completed');
- assert.equal(readFileSync(join(workspace,'report.md'),'utf8'),reportContent);assert(reportContent.includes('| Retrieved |'));assert.equal(store.listTasks().length,1);assert.equal(searches(),3);
+ assert.equal(readFileSync(join(workspace,'report.md'),'utf8'),reportContent);assert(reportContent.includes('| Retrieved |'));assert.equal(store.listTasks().length,1);assert.equal(searches(),4);
  const events=await db.listEvents(sessionId);assert(events.some((e:any)=>e.kind==='intent-routed'&&e.route.primarySkill?.name==='researcher'&&realpathSync(e.route.primarySkill.sourcePath).startsWith(realpathSync(retainedRoot)+'/')));assert(events.some((e:any)=>e.kind==='tool-result'&&e.tool==='file.read'&&e.result.ok));
  console.log('Three workers, synthesis, app restart and verified save passed.');
  phase='recovery';const recovered=await submit('Find recent battery research.');await expect.poll(()=>recoveryIndex,{timeout:60000}).toBe(4);await idle(recovered.workId);
@@ -168,15 +211,15 @@ try{
  const allEvents=(await Promise.all([...allSessionIds].map(id=>db.listEvents(id)))).flat();
  const toolResults=allEvents.filter((e:any)=>e.kind==='tool-result');
  assert.equal(toolResults.length,calls.reduce((n,x)=>n+x.tools.length,0));
- const sourceOverlay=[...new Set([...execFileSync('git',['diff','--name-only','--','src','apps/desktop','scripts','package.json'],{encoding:'utf8'}).trim().split('\n').filter(Boolean),'package.json','src/eval/fixtures/research-workflow-harness.ts','src/eval/fixtures/research-workflow-release.ts','src/runtime/research-surfaces.acceptance.test.ts','scripts/validate-research-reliability.ts','apps/desktop/tests/research-packaged.mts'])].sort().map(path=>({path,sha256:createHash('sha256').update(readFileSync(path)).digest('hex')}));
+ const sourceOverlay=[...new Set([...execFileSync('git',['-C',sourceRoot,'diff','--name-only','--','src','apps/desktop','scripts','package.json'],{encoding:'utf8'}).trim().split('\n').filter(Boolean),'package.json','src/eval/fixtures/research-workflow-harness.ts','src/eval/fixtures/research-workflow-release.ts','src/runtime/research-surfaces.acceptance.test.ts','scripts/validate-research-reliability.ts','apps/desktop/tests/research-packaged.mts','apps/desktop/src/renderer/components/chat-tasks.tsx','apps/desktop/src/shared/i18n/chat-tasks.ts'])].sort().map(path=>({path,sha256:createHash('sha256').update(readFileSync(join(sourceRoot,path))).digest('hex')}));
  const measurements={
-  version:1,passed:true,measuredAt:new Date().toISOString(),sourceBaseCommit:execFileSync('git',['rev-parse','HEAD'],{encoding:'utf8'}).trim(),sourceOverlay,
+  version:1,passed:true,measuredAt:new Date().toISOString(),sourceBaseCommit:execFileSync('git',['-C',sourceRoot,'rev-parse','HEAD'],{encoding:'utf8'}).trim(),sourceOverlay,
   platform:process.platform,arch:process.arch,
   runtime:{sha256:manifest.runtimeSha256,nodeVersion:manifest.nodeVersion,coreVersion:manifest.coreVersion,entrySha256:manifest.entrySha256,signature:'ad-hoc verified',ownedBridgeVerified:bridgeVerified,inventoryVerified:true,matchesCurrentDist:true,supervisorRetainedPathWithSpaces:true},
   fixtures:{model:'scripted loopback HTTP',web:'in-process registered synthetic provider in packaged supervisor',liveModelCalls:0,transport:'actual signed app + preload/Main + owned bridge + private control'},
   workflow:{workers:workers.length,acceptedResults:store.listResults(task.id).filter((r:any)=>r.disposition==='accepted').length,distinctChildSessions:workerSessions.size,tasks:store.listTasks().length,searches:searches(),providerCalls:calls.filter(c=>['research','save'].includes(c.phase)).length,appRestartNoReplay:true,fileBytes:Buffer.byteLength(reportContent),fileSha256:createHash('sha256').update(reportContent).digest('hex'),readbackVerified:true,historicalTaskStatus:store.getTask(task.id).status},
   allScenarios:{providerCalls:requests,actualToolResults:toolResults.length,failedToolResults:toolResults.filter((e:any)=>!e.result.ok).length},
-  scenarios:{research:true,automaticReportDelivery:true,saveOnlyAfterRestart:true,skillRecovery:true,missingSearch:true,falseSaveBlocked:true},
+  scenarios:{research:true,automaticReportDelivery:true,alternativeSourceRecovery:true,desktopTranscriptExactlyOnce:true,chatOwnedTasksUi:true,oneSidebarEntry:true,handoffRemainsRunning:true,gatewayRestartNoReplay:true,failedWorkerDraftPreserved:true,targetedRetryAfterGatewayRestart:true,saveOnlyAfterRestart:true,skillRecovery:true,missingSearch:true,falseSaveBlocked:true},
   liveAssessment:'pending approved model, sources and spend ceiling'
  };
  mkdirSync(dirname(output),{recursive:true});writeFileSync(output,JSON.stringify(measurements,null,2)+'\n');

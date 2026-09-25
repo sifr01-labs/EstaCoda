@@ -9,7 +9,13 @@ export type TargetReference = { targetId: string; targetGeneration: number };
 export type TargetProjection = TargetReference & { label: string; isolation: "host" | "sandboxed" | "unknown"; approvalMode?: "strict" | "adaptive" | "open" };
 export const WORK_STATUSES = ["draft", "queued", "running", "needs_attention", "paused", "completed", "partial", "failed", "cancelled"] as const;
 export type WorkDisplayStatus = typeof WORK_STATUSES[number];
+export type TaskProgressProjection = {
+  fileOutput: string | null; fileVerified: boolean; truncated: boolean;
+  steps: { id: string; title: string; role: string; status: string; accepted: boolean; diagnostic: boolean;
+    attempts: number; reason?: string; attemptWorkId?: string }[];
+};
 export type WorkProjection = {
+  taskProgress?: TaskProgressProjection;
   modelBinding?: {sessionId:string;taskId?:string};
   actions?: ActionProjection[];
   id: string; canonicalId: string; profileId: string;
