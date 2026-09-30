@@ -1436,14 +1436,21 @@ export class ProviderTurnLoop {
       ),
       signal: input.signal
     });
+    // Stay on the successful route for this turn. Earlier unavailable routes
+    // are retried on the next user turn, not before every tool result.
+    const originalRouteChain = resolvedRouteChain(this.#primaryModelRoute, this.#modelFallbackRoutes);
+    const continuationChain = buildRetryRouteChainFromSuccessfulAttempt(input.providerExecution, originalRouteChain);
+    const activeRoute = continuationChain[0] ?? this.#primaryModelRoute;
+    const activeModel = activeRoute?.profile ?? this.#model;
+    const activeRouteRole = activeRoute && this.#primaryModelRoute && !routesMatch(activeRoute, this.#primaryModelRoute) ? "fallback" : "primary";
     const prompt = assembleProviderContinuationPrompt({
       ...input,
-      model: this.#model,
+      model: activeModel,
       cache: this.#promptCache,
       sessionHistory: sessionHistory.messages,
       rawSessionHistory: sessionHistory.rawMessages,
-      nativeHistoryRoute: this.#primaryModelRoute,
-      nativeHistoryRouteRole: "primary",
+      nativeHistoryRoute: activeRoute,
+      nativeHistoryRouteRole: activeRouteRole,
       compactionNotice: sessionHistory.compactionNotice,
       compression: sessionHistory.compression,
       conversationContinuationState: input.conversationContinuationState,
@@ -1509,18 +1516,18 @@ export class ProviderTurnLoop {
       prompt.messages.push(reasoningOnlyPrefillMessage());
     }
     const providerRequest = normalizeProviderRequest({
-      provider: this.#model.provider,
-      model: this.#model.id,
+      provider: activeModel.provider,
+      model: activeModel.id,
       messages: prompt.messages,
       ...this.#providerRequestOptions(),
-      tools: this.#model.supportsTools && input.providerTools.length > 0
+      tools: activeModel.supportsTools && input.providerTools.length > 0
         ? input.providerTools
         : undefined
     });
     const promptBudget = this.#accountProviderRequest(prompt.budget, providerRequest);
     this.#lastPromptTokens = promptBudget.requestAccounting?.estimatedInputTokens ?? promptBudget.estimatedTokens;
     await this.#runRecorder.recordPromptAssembly(promptBudget);
-    await this.#recordNativeHistoryDiagnostics(prompt, "primary");
+    await this.#recordNativeHistoryDiagnostics(prompt, activeRouteRole);
     await emitAssembledPromptEstimate(input.onEvent, promptBudget);
     const providerPreferences = {
       requireTools: input.providerTools.length > 0,
@@ -1532,6 +1539,8 @@ export class ProviderTurnLoop {
     };
     const execution = await this.#completeProviderRequestWithFinalizationRetries({
       request: providerRequest,
+      primaryRoute: activeRoute,
+      fallbackChain: continuationChain.slice(1),
       preferences: providerPreferences,
       imageInputs: prompt.imageInputs,
       sessionId: this.#currentSessionId(),
@@ -1617,6 +1626,8 @@ export class ProviderTurnLoop {
   async #completeProviderRequestWithFinalizationRetries(input: {
     request: Omit<ProviderRequest, "model"> & { model?: string };
     preferences: ProviderRoutePreferences;
+    primaryRoute?: ResolvedModelRoute;
+    fallbackChain?: ResolvedModelRoute[];
     imageInputs: readonly ProviderImageInput[];
     sessionId: string;
     iteration: number;
@@ -1628,7 +1639,10 @@ export class ProviderTurnLoop {
     visibleTurnId?: string;
     providerToolCallNamespace: string;
   }): Promise<ProviderExecutionResult> {
-    const initial = await this.#completeProviderRequestWithTruncatedToolRetry(input);
+    const raw = await this.#completeProviderRequestWithTruncatedToolRetry(input);
+    const initial = rebaseRetryRouteIdentity(raw,
+      resolvedRouteChain(input.primaryRoute ?? this.#primaryModelRoute, input.fallbackChain ?? this.#modelFallbackRoutes),
+      resolvedRouteChain(this.#primaryModelRoute, this.#modelFallbackRoutes));
     return await this.#continueLengthTruncatedTextResponse({
       ...input,
       initial
@@ -1653,8 +1667,8 @@ export class ProviderTurnLoop {
   }): Promise<ProviderExecutionResult> {
     const primaryRoute = input.primaryRoute ?? this.#primaryModelRoute;
     const fallbackChain = input.fallbackChain ?? this.#modelFallbackRoutes;
-    const recordRoute = async (event: ProviderRuntimeEvent) => {
-      if (event.kind !== "provider-attempt-start" && event.kind !== "provider-attempt-end") return;
+    const recordRoute = async (event: ProviderRuntimeEvent): Promise<ProviderRuntimeEvent> => {
+      if (event.kind !== "provider-attempt-start" && event.kind !== "provider-attempt-end") return event;
       const fallback = event.fallback || (this.#primaryModelRoute !== undefined &&
         (event.provider !== this.#primaryModelRoute.provider || event.model !== this.#primaryModelRoute.id));
       await this.#sessionDb.appendEvent(input.sessionId, {
@@ -1662,6 +1676,7 @@ export class ProviderTurnLoop {
         provider: event.provider, model: event.model, fallback,
         state: event.kind === "provider-attempt-start" ? "attempting" : event.ok ? "responded" : "failed"
       });
+      return { ...event, fallback };
     };
     const initialEvents = createProviderToolCallEventBuffer({
       sink: input.onEvent,
@@ -1677,7 +1692,7 @@ export class ProviderTurnLoop {
       retryRateLimits: true,
       deadlineAtMs: providerWorkDeadlineAt(input.loopStartedAt, this.#budgets),
       usage: await this.#nextProviderUsageContext(input.visibleTurnId, input.imageInputs),
-      onEvent: async (event) => { await recordRoute(event); await initialEvents.onEvent(event); }
+      onEvent: async (event) => { await initialEvents.onEvent(await recordRoute(event)); }
     });
 
     if (!isLengthTruncatedToolCallExecution(execution)) {
@@ -1746,7 +1761,7 @@ export class ProviderTurnLoop {
       retryRateLimits: true,
       deadlineAtMs: providerWorkDeadlineAt(input.loopStartedAt, this.#budgets),
       usage: await this.#nextProviderUsageContext(input.visibleTurnId, input.imageInputs),
-      onEvent: async (event) => { await recordRoute(event); await retryEvents.onEvent(event); }
+      onEvent: async (event) => { await retryEvents.onEvent(await recordRoute(event)); }
     });
     const retryExecution = rebaseRetryRouteIdentity(retryExecutionRaw, retryChain, originalRouteChain);
 

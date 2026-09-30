@@ -40,7 +40,7 @@ const table=`| Source URL | Supported claim | Limitation |\n| --- | --- | --- |\
 const report=`# Battery recycling\n\nSynthetic research fixture. [Source](${source})\n${table}`;
 let requests=0,phase='research',saveIndex=0,recoveryIndex=0,diagnostics='',providerErrors:string[]=[];
 let sessionId='',reportContent='',bridgeVerified=false;
-let failedWorkerOnce=false;
+let failedWorkerOnce=false,researchRead=false;
 let releaseFallback!:()=>void;const fallbackGate=new Promise<void>(resolve=>{releaseFallback=resolve;});
 let releaseWorkers!:()=>void;const workerGate=new Promise<void>(resolve=>{releaseWorkers=resolve;});
 const db=new SQLiteSessionDB({path:resolveGlobalStateHome({homeDir:home}).sessionsSqlitePath});
@@ -53,7 +53,7 @@ const provider=createServer(async(req,res)=>{
   assert.equal(req.headers.authorization,undefined);
   let raw='';for await(const chunk of req){raw+=chunk;if(raw.length>4_194_304)throw new Error('Oversized model fixture request');}
   const input=JSON.parse(raw);assert(++requests<=60,'Provider fixture call limit exceeded');
-  if(phase==='fallback'&&input.model==='research-release-tools'){res.writeHead(429,{'content-type':'application/json','retry-after':'0'}).end(JSON.stringify({error:{message:'Fixture rate limit'}}));return;}
+  if((phase==='fallback'||phase==='research')&&input.model==='research-release-tools'){res.writeHead(429,{'content-type':'application/json','retry-after':'0'}).end(JSON.stringify({error:{message:'Fixture rate limit'}}));return;}
   const text=JSON.stringify(input.messages), tools=input.tools?.map((x:any)=>x.function.name)??[];
   const priorCalls=input.messages.flatMap((m:any)=>m.tool_calls??[]).map((c:any)=>c.function.name);
   // Custom-compatible routes may serialize tool feedback as text instead of native history.
@@ -87,7 +87,8 @@ const provider=createServer(async(req,res)=>{
    if(!hasFeedback)next=[tool('web_search',{query:'battery recycling '+requests}),tool('web_extract',{url:inaccessible})];
    else if(!failedWorkerOnce&&text.includes('Research battery recycling: processing.')){failedWorkerOnce=true;content='Draft findings without the required source table.';}
    else content=`Synthetic evidence: ${source}\n${table}`;
-  }else if(!hasFeedback)next=[tool('delegate_task',{tasks:['collection','processing','reuse'].map(scope=>({task:`Research battery recycling: ${scope}.`,allowedTools:['web.search','web.extract'],research:{scope,requireLiveSources:true,requireRepositoryEvidence:false}}))})];
+  }else if(!researchRead){researchRead=true;next=[tool('skill_read',{name:'researcher',path:'references/sources.md',mode:'contract'})];}
+  else if(store.listTasks().length===0)next=[tool('delegate_task',{tasks:['collection','processing','reuse'].map(scope=>({task:`Research battery recycling: ${scope}.`,allowedTools:['web.search','web.extract'],research:{scope,requireLiveSources:true,requireRepositoryEvidence:false}}))})];
   else content='Research workers are running; report delivery remains pending.';
   for(const call of next)assert(tools.includes(call.name),'Fixture attempted unexposed tool: '+call.name);
   calls.push({phase,tools:next.map(x=>x.name)});
@@ -215,7 +216,7 @@ try{
  await expect.poll(()=>existsSync(join(workspace,'report.md')),{timeout:60000}).toBe(true);
  await expect.poll(()=>page!.evaluate(id=>window.desktop.getWork(id).then(x=>x.status).catch(()=>'unavailable'),initial.workId),{timeout:60000}).toBe('completed');
  assert.equal(readFileSync(join(workspace,'report.md'),'utf8'),reportContent);assert(reportContent.includes('| Retrieved |'));assert.equal(store.listTasks().length,1);assert.equal(searches(),4);
- const events=await db.listEvents(sessionId);assert(events.some((e:any)=>e.kind==='intent-routed'&&e.route.primarySkill?.name==='researcher'&&realpathSync(e.route.primarySkill.sourcePath).startsWith(realpathSync(retainedRoot)+'/')));assert(events.some((e:any)=>e.kind==='tool-result'&&e.tool==='file.read'&&e.result.ok));
+ const events=await db.listEvents(sessionId);assert(events.some((e:any)=>e.kind==='intent-routed'&&e.route.primarySkill?.name==='researcher'&&realpathSync(e.route.primarySkill.sourcePath).startsWith(realpathSync(retainedRoot)+'/')));assert(events.some((e:any)=>e.kind==='tool-result'&&e.tool==='file.read'&&e.result.ok));assert(events.some((e:any)=>e.kind==='tool-result'&&e.tool==='skill.read'&&e.result.ok&&e.result.metadata?.mode==='reference'));
  console.log('Three workers, synthesis, app restart and verified save passed.');
  phase='recovery';const recovered=await submit('Find recent battery research.');await expect.poll(()=>recoveryIndex,{timeout:60000}).toBe(4);await idle(recovered.workId);
  const recoveryEvents=await db.listEvents(recovered.workId.replace(/^session:/,''));assert(recoveryEvents.some((e:any)=>e.kind==='tool-result'&&e.tool==='skill.read'&&e.result.ok));
@@ -236,7 +237,7 @@ try{
   fixtures:{model:'scripted loopback HTTP',web:'in-process registered synthetic provider in packaged supervisor',liveModelCalls:0,transport:'actual signed app + preload/Main + owned bridge + private control'},
   workflow:{workers:workers.length,acceptedResults:store.listResults(task.id).filter((r:any)=>r.disposition==='accepted').length,distinctChildSessions:workerSessions.size,tasks:store.listTasks().length,searches:searches(),providerCalls:calls.filter(c=>['research','save'].includes(c.phase)).length,appRestartNoReplay:true,fileBytes:Buffer.byteLength(reportContent),fileSha256:createHash('sha256').update(reportContent).digest('hex'),readbackVerified:true,historicalTaskStatus:store.getTask(task.id).status},
   allScenarios:{providerCalls:requests,actualToolResults:toolResults.length,failedToolResults:toolResults.filter((e:any)=>!e.result.ok).length},
-  scenarios:{fallbackComposer:true,fallbackNotice:true,fallbackRestart:true,preferredModelPreserved:true,research:true,automaticReportDelivery:true,alternativeSourceRecovery:true,desktopTranscriptExactlyOnce:true,chatOwnedTasksUi:true,oneSidebarEntry:true,handoffRemainsRunning:true,gatewayRestartNoReplay:true,failedWorkerDraftPreserved:true,targetedRetryAfterGatewayRestart:true,saveOnlyAfterRestart:true,skillRecovery:true,missingSearch:true,falseSaveBlocked:true},
+  scenarios:{redundantResourceMode:true,researchThroughFallback:true,fallbackComposer:true,fallbackNotice:true,fallbackRestart:true,preferredModelPreserved:true,research:true,automaticReportDelivery:true,alternativeSourceRecovery:true,desktopTranscriptExactlyOnce:true,chatOwnedTasksUi:true,oneSidebarEntry:true,handoffRemainsRunning:true,gatewayRestartNoReplay:true,failedWorkerDraftPreserved:true,targetedRetryAfterGatewayRestart:true,saveOnlyAfterRestart:true,skillRecovery:true,missingSearch:true,falseSaveBlocked:true},
   liveAssessment:'pending approved model, sources and spend ceiling'
  };
  mkdirSync(dirname(output),{recursive:true});writeFileSync(output,JSON.stringify(measurements,null,2)+'\n');

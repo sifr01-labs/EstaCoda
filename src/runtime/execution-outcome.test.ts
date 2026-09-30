@@ -373,6 +373,13 @@ describe("execution outcome receipts", () => {
     }).status).toBe("blocked");
   });
 
+  it.each(["budget_exhausted", "deadline_reached"] as const)("does not claim partial completion on %s without useful evidence", terminationCause => {
+    const base = {providerExecution:{ok:true,fallbackUsed:false,attempts:[],toolCalls:[]},toolExecutions:[],terminationCause};
+    expect(deriveExecutionFinalOutcome({...base,executionReceipts:[]}).status).toBe("blocked");
+    expect(deriveExecutionFinalOutcome({...base,executionReceipts:[unsuccessfulReceipt("failed", {tool:"skill.read",executionEffect:{kind:"read"}})]}).status).toBe("blocked");
+    expect(deriveExecutionFinalOutcome({...base,executionReceipts:[successfulReceipt({tool:"web.search",executionEffect:{kind:"read"}})]}).status).toBe("partially_completed");
+  });
+
   it("creates redacted confirmed receipts only for successful consequential executions", () => {
     const outcome = deriveExecutionFinalOutcome({
       providerExecution: { ok: false, fallbackUsed: false, attempts: [], toolCalls: [] },
@@ -636,7 +643,7 @@ describe("execution outcome receipts", () => {
     expect(learningOutcomeStatus(outcome.status)).toBe("partial");
   });
 
-  it("classifies an emergency deadline receipt as partial without fabricating failure", () => {
+  it("classifies an emergency deadline receipt as blocked when no work was completed", () => {
     const outcome = deriveExecutionFinalOutcome({
       providerExecution: {
         ok: true,
@@ -650,8 +657,8 @@ describe("execution outcome receipts", () => {
       emergencyDeadlineReached: true
     });
 
-    expect(outcome.status).toBe("partially_completed");
-    expect(learningOutcomeStatus(outcome.status)).toBe("partial");
+    expect(outcome.status).toBe("blocked");
+    expect(learningOutcomeStatus(outcome.status)).toBe("blocked");
   });
 
   it("does not claim recovery when the final execution still failed", () => {

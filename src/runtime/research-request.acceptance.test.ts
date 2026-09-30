@@ -1,3 +1,7 @@
+import { ProviderRegistry } from "../providers/provider-registry.js";
+import { createOpenAICompatibleProvider } from "../providers/openai-compatible-provider.js";
+import { createOpenAIResponsesProvider } from "../providers/openai-responses-provider.js";
+import { buildResolvedModelRoute } from "../providers/provider-metadata.js";
 import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -22,7 +26,7 @@ afterEach(async () => {
     for (const value of harnesses.splice(0)) await value.dispose();
     expect(globalThis.fetch).not.toHaveBeenCalled();
   }
-  finally { vi.unstubAllGlobals(); }
+  finally { vi.unstubAllGlobals(); vi.unstubAllEnvs(); }
 });
 
 function scriptConsumed(value: Harness) {
@@ -46,13 +50,17 @@ describe.sequential("research workflow acceptance harness", () => {
     const h=await harness({fallbackOnRequest:1});
     const tasks=["collection","processing","reuse"].map(scope=>({task:`Research ${scope}.`,allowedTools:["web.search"],
       allowedToolsets:["research","core"],research:{scope,requireLiveSources:true,requireRepositoryEvidence:false}}));
-    // The root skill is already autoloaded; its redundant-read compatibility has a tool-boundary regression test.
+    h.enqueue(nativeCall("skill_read",{name:"researcher",path:"references/sources.md",mode:"contract"}));
     // Three pre-admission errors must leave capacity for the corrected batch.
     for(let i=0;i<3;i++) h.enqueue(nativeCall("delegate_task",{tasks:tasks.slice(0,2),synthesis:false}));
     h.enqueue(nativeCall("delegate_task",{tasks,synthesis:false}));
     const result=await h.turn("Use the researcher skill and use 3 subagents to research current battery recycling. Save report.md.");
     expect(result.toolExecutions.filter(call=>call.result?.metadata?.code==="request-requirements-unsatisfied")).toHaveLength(3);
     expect(result.toolExecutions.at(-1)?.result).toMatchObject({ok:true});
+    expect(result.toolExecutions.find(call=>call.tool.name==="skill.read")?.result).toMatchObject({ok:true,metadata:{mode:"reference"}});
+    const primaryCalls=h.requests.filter(request=>request.model==="research-baseline-model").length;
+    expect(primaryCalls).toBe(2); // One primary attempt and its rate-limit retry, then stay on fallback.
+    expect(h.requests.slice(2).every(request=>request.model==="research-fallback")).toBe(true);
     expect(h.store.listTasks()).toHaveLength(1);
     const task=h.store.listTasks()[0]!;
     const steps=h.store.listSteps(task.id,task.activePlanRevisionId!);
@@ -84,6 +92,75 @@ describe.sequential("research workflow acceptance harness", () => {
     expect(await readFile(join(h.workspaceRoot,"report.md"),"utf8")).toBe(report.content);
     scriptConsumed(h);
   }, 30_000);
+
+  it("recovers skill arguments through actual Kimi and Codex adapters without losing tool feedback", async () => {
+    vi.stubEnv("ESTACODA_TEST_PROVIDER_KEY", "synthetic-test-credential");
+    const registry = new ProviderRegistry();
+    const primaryModel = {id:"kimi-k3",provider:"kimi",contextWindowTokens:128_000,supportsTools:true,supportsVision:false,supportsStructuredOutput:true};
+    const fallbackModel = {...primaryModel,id:"gpt-5.5",provider:"codex"};
+    const primaryEndpoint = {baseUrl:"https://kimi.fixture.invalid/v1",apiKey:{kind:"none" as const}};
+    const fallbackEndpoint = {baseUrl:"https://chatgpt.com/backend-api/codex",apiKey:{kind:"none" as const}};
+    let primaryCalls=0;
+    const bodies: Array<Record<string, any>> = [];
+    const tasks=["collection","processing","reuse"].map(scope=>({task:`Research ${scope}.`,allowedTools:["web.search"],research:{scope,requireLiveSources:true,requireRepositoryEvidence:false}}));
+    const steps = [
+      {name:"skill_read",args:{name:"researcher",path:"references/sources.md",mode:"invalid"}},
+      {name:"skill_read",args:{name:"researcher",path:"references/sources.md",mode:"contract"}},
+      {name:"delegate_task",args:{tasks,synthesis:false}}
+    ];
+    registry.register(createOpenAICompatibleProvider({id:"kimi",models:[primaryModel],endpoint:primaryEndpoint,enableNetwork:true,
+      fetch:async()=>{primaryCalls++;return new Response(JSON.stringify({error:{message:"Fixture rate limit"}}),{status:429});}}));
+    registry.register(createOpenAIResponsesProvider({id:"codex",models:[fallbackModel],endpoint:fallbackEndpoint,enableNetwork:true,
+      fetch:async(_url,init)=>{
+        const body=JSON.parse(init.body);bodies.push(body);
+        const step=steps[bodies.length-1];
+        const output=step?[{type:"function_call",call_id:`cross-call-${bodies.length}`,name:step.name,arguments:JSON.stringify(step.args)}]
+          :[{type:"message",role:"assistant",content:[{type:"output_text",text:"Ready."}]}];
+        const events=output.map((item,output_index)=>({type:"response.output_item.done",output_index,item}));
+        const payload=events.map(event=>`data: ${JSON.stringify(event)}\n\n`).join("")+`data: ${JSON.stringify({type:"response.completed",response:{status:"completed",output}})}\n\n`;
+        return new Response(payload,{headers:{"content-type":"text/event-stream"}});
+      }}));
+    const route=(profile:typeof primaryModel,baseUrl:string)=>buildResolvedModelRoute({provider:profile.provider,model:profile.id,profile,baseUrl,authMethod:"api_key",apiKeyEnv:"ESTACODA_TEST_PROVIDER_KEY"});
+    const h=await harness({providerHarness:{model:primaryModel,primary:route(primaryModel,primaryEndpoint.baseUrl),fallbacks:[route(fallbackModel,fallbackEndpoint.baseUrl)],registry}});
+    const result=await h.turn("Use the researcher skill and use 3 subagents to research current battery recycling. Save report.md.");
+    expect(primaryCalls).toBe(2);
+    expect(bodies).toHaveLength(3);
+    const attempts=h.events.filter(event=>event.kind==="provider-attempt"&&event.provider==="codex");
+    expect(attempts).toHaveLength(3);
+    expect(attempts.every(event=>event.kind==="provider-attempt"&&event.fallback)).toBe(true);
+    expect(result.toolExecutions.map(call=>call.result?.ok)).toEqual([false,true,true]);
+    // Codex uses the supported textual continuation path. Assert against its
+    // actual wire payload, not just stored receipts or a scripted adapter call.
+    for (const [index,marker] of [[1,"mode must be full or contract"],[2,"# researcher / references/sources.md"]] as const) {
+      const input=bodies[index]!.input as Array<Record<string,unknown>>;
+      const feedback=input.filter(item=>item.role==="user"&&String(item.content).startsWith("EstaCoda executed the requested tools."));
+      expect(feedback).toHaveLength(1);
+      expect(String(feedback[0]!.content)).toContain(marker);
+      expect(String(feedback[0]!.content)).toContain(index===1?"Result: error":"Result: ok");
+    }
+    const task=h.store.listTasks()[0]!;
+    expect(task.status).toBe("queued");
+    expect(h.store.listSteps(task.id,task.activePlanRevisionId!).filter(step=>step.executor.role==="worker")).toHaveLength(3);
+    expect((await h.sessionDb.listEvents(h.runtime.sessionId)).filter(event=>event.kind==="provider-route"&&event.state==="responded").every(event=>event.kind==="provider-route"&&event.fallback)).toBe(true);
+    // Selection is turn-local; the next user request still starts with the preferred route.
+    await h.turn("Say hello.");
+    expect(primaryCalls).toBe(4);
+  }, 30_000);
+
+  it("marks repeated rejected skill reads blocked with no research or report completed", async () => {
+    const h=await harness();
+    for(let i=0;i<5;i++)h.enqueue(nativeCall("skill_read",{name:"researcher",path:"references/sources.md",mode:"invalid"}));
+    const result=await h.turn("Use the researcher skill and use 3 subagents to research current battery recycling. Save report.md.");
+    expect(result.toolExecutions).toHaveLength(5);
+    expect(result.toolExecutions.every(call=>call.result?.ok===false)).toBe(true);
+    expect(h.store.listTasks()).toHaveLength(0);
+    expect(h.searches).toHaveLength(0);
+    expect(await h.sessionDb.listEvents(h.runtime.sessionId)).toEqual(expect.arrayContaining([
+      expect.objectContaining({kind:"execution-final-outcome-recorded",status:"blocked",terminationCause:"budget_exhausted"})
+    ]));
+    await expect(readFile(join(h.workspaceRoot,"report.md"))).rejects.toThrow();
+    scriptConsumed(h);
+  });
 
   it("does not stop the sixth iteration when fresh research follows five pre-admission failures", async () => {
     const h=await harness();

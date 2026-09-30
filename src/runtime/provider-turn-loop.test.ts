@@ -5693,6 +5693,22 @@ describe("ProviderTurnLoop length-truncated text continuation", () => {
     });
   });
 
+  it("continues tool work on the successful fallback and preserves later failover identity", async () => {
+    const reply = (route: ResolvedModelRoute, attemptedRouteIndex: number, call?: string) => providerExecution(call ? "" : "Done", call ? [providerToolCall(call)] : [], {
+      route, attemptedRouteIndex, routeRole: attemptedRouteIndex ? "fallback" : "primary",
+      response: {ok:true,content:call ? "" : "Done",provider:route.provider,model:route.id,finishReason:call ? "tool_calls" : "stop"}
+    });
+    const harness=await createPostToolNudgeHarness({
+      responses:[reply(fallbackRoute,1,"read-one"),reply(secondFallbackRoute,1,"read-two"),reply(secondFallbackRoute,0)],
+      toolSteps:[{executions:[toolExecution("read-one")]},{executions:[toolExecution("read-two")]},{}],
+      modelFallbackRoutes:[fallbackRoute,secondFallbackRoute]
+    });
+    const result=await runBasicProviderTurn(harness.loop);
+    expect(harness.completeSpy.mock.calls[1]?.[2]).toMatchObject({primaryRoute:fallbackRoute,fallbackChain:[secondFallbackRoute]});
+    expect(harness.completeSpy.mock.calls[2]?.[2]).toMatchObject({primaryRoute:secondFallbackRoute,fallbackChain:[]});
+    expect(result.providerExecution).toMatchObject({route:secondFallbackRoute,attemptedRouteIndex:2,routeRole:"fallback",fallbackUsed:true});
+  });
+
   it("continues fallback length-truncated text from the successful fallback route", async () => {
     const fallbackFirst = lengthTruncatedTextExecution({
       content: "Fallback par",

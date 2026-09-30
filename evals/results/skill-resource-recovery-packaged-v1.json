@@ -1,0 +1,128 @@
+{
+  "version": 1,
+  "passed": true,
+  "measuredAt": "2026-09-30T18:31:24.112Z",
+  "sourceBaseCommit": "9ce8be87b874b2fcd02d6fae2daf473f70af6241",
+  "sourceOverlay": [
+    {
+      "path": "apps/desktop/src/renderer/components/chat-tasks.tsx",
+      "sha256": "6c67804c5ddf04d1cebc030f62f52ccb0b63b316d48a7b91f20fd821542927f1"
+    },
+    {
+      "path": "apps/desktop/src/shared/i18n/chat-tasks.ts",
+      "sha256": "c08493214f0f0b36f4b5369aa7e61fefbe5e35dd44970f01cb4fe74fb77688c6"
+    },
+    {
+      "path": "apps/desktop/tests/research-packaged.mts",
+      "sha256": "5de0e91532de70b4a6589ee94d92c7cf64b433e3d0cf2dc2c115d605262fed50"
+    },
+    {
+      "path": "package.json",
+      "sha256": "8427aa6992264ee7c5031c694c9d0a152be35125b78afd8cd47e4743c70beba8"
+    },
+    {
+      "path": "scripts/validate-research-reliability.ts",
+      "sha256": "68a7cb802eb608cacc380efcd267b00c2e73e060c1a46210d3bbd609372d6d98"
+    },
+    {
+      "path": "src/eval/fixtures/research-workflow-harness.ts",
+      "sha256": "e800960c7ae594b6769c6315dcffcc986df6e7f38a1f517e7dff6d8cf23a2bb5"
+    },
+    {
+      "path": "src/eval/fixtures/research-workflow-release.ts",
+      "sha256": "8b2e582fed53c3a1b6c9feb907ef2a39bf84b19c74ba4d839fd0ee30f765ef3e"
+    },
+    {
+      "path": "src/runtime/execution-outcome.test.ts",
+      "sha256": "37f3ba564dcb1027f62b16bf0d4de21feab23358e9ff44ce315cc64c15db5c1c"
+    },
+    {
+      "path": "src/runtime/execution-outcome.ts",
+      "sha256": "f3db882d8121426867e05710e30f03c9a2b921adf940a58e6164bfbeced04476"
+    },
+    {
+      "path": "src/runtime/provider-turn-loop.test.ts",
+      "sha256": "8da263ddfd044b9af76b964b683f491d74cfad1844c7c2bd21fcac9dc01dcbdb"
+    },
+    {
+      "path": "src/runtime/provider-turn-loop.ts",
+      "sha256": "528c662db31cea81168dbbff7d8f19f0bc62c35c85222cf6d9a0bf442c3fae54"
+    },
+    {
+      "path": "src/runtime/research-request.acceptance.test.ts",
+      "sha256": "075add20ddb9d23cd23e9933bd6eef3cbb5a22210b6e29cb5599016df9673e27"
+    },
+    {
+      "path": "src/runtime/research-surfaces.acceptance.test.ts",
+      "sha256": "dd9272f8a2695421d57e7dcf31dda669f4f1745fdb653881eecfa542fbe706ec"
+    },
+    {
+      "path": "src/tools/skill-tools.test.ts",
+      "sha256": "979d3c77bb1e67f09ab6647ee600a44f2005ceb0248ba6552fb1773508778fb4"
+    },
+    {
+      "path": "src/tools/skill-tools.ts",
+      "sha256": "3f7b32c445151c6f9e01482a4caf2957064a9c44370d27b703a18dfd4f80992a"
+    }
+  ],
+  "platform": "darwin",
+  "arch": "arm64",
+  "runtime": {
+    "sha256": "d6f39a01453d860f4d93a1304f954dc1a23e6d060a2ea9dfdc576c8869e191d9",
+    "nodeVersion": "v24.14.1",
+    "coreVersion": "0.1.0",
+    "entrySha256": "8b7b5e8816ffe62d9baa2133dd5cc54a1a8ea36997b0bda6fc631039c700f6ec",
+    "signature": "ad-hoc verified",
+    "ownedBridgeVerified": true,
+    "inventoryVerified": true,
+    "matchesCurrentDist": true,
+    "supervisorRetainedPathWithSpaces": true
+  },
+  "fixtures": {
+    "model": "scripted loopback HTTP",
+    "web": "in-process registered synthetic provider in packaged supervisor",
+    "liveModelCalls": 0,
+    "transport": "actual signed app + preload/Main + owned bridge + private control"
+  },
+  "workflow": {
+    "workers": 3,
+    "acceptedResults": 5,
+    "distinctChildSessions": 6,
+    "tasks": 1,
+    "searches": 4,
+    "providerCalls": 20,
+    "appRestartNoReplay": true,
+    "fileBytes": 655,
+    "fileSha256": "6fc617955999fd1d540fc77c6df81a5ae1500295c39e27ab226efa4869f6fe0b",
+    "readbackVerified": true,
+    "historicalTaskStatus": "completed"
+  },
+  "allScenarios": {
+    "providerCalls": 42,
+    "actualToolResults": 22,
+    "failedToolResults": 4
+  },
+  "scenarios": {
+    "redundantResourceMode": true,
+    "researchThroughFallback": true,
+    "fallbackComposer": true,
+    "fallbackNotice": true,
+    "fallbackRestart": true,
+    "preferredModelPreserved": true,
+    "research": true,
+    "automaticReportDelivery": true,
+    "alternativeSourceRecovery": true,
+    "desktopTranscriptExactlyOnce": true,
+    "chatOwnedTasksUi": true,
+    "oneSidebarEntry": true,
+    "handoffRemainsRunning": true,
+    "gatewayRestartNoReplay": true,
+    "failedWorkerDraftPreserved": true,
+    "targetedRetryAfterGatewayRestart": true,
+    "saveOnlyAfterRestart": true,
+    "skillRecovery": true,
+    "missingSearch": true,
+    "falseSaveBlocked": true
+  },
+  "liveAssessment": "pending approved model, sources and spend ceiling"
+}

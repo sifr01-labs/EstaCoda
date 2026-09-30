@@ -367,7 +367,7 @@ function classifyFinalStatus(input: {
   if (
     input.terminationCause === "budget_exhausted" ||
     input.terminationCause === "deadline_reached"
-  ) return "partially_completed";
+  ) return hasUsefulEvidence ? "partially_completed" : "blocked";
   if (
     input.uncertainActions.length > 0 ||
     unresolvedToolPlans

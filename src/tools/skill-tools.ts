@@ -160,8 +160,8 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
         type: "object",
         properties: {
           name: { type: "string" },
-          path: { type: "string", description: "Optional skill resource path. Omit for root instructions; only SKILL.md can be combined with mode: full." },
-          mode: { type: "string", enum: ["contract", "full"], description: "Root instruction format. Omit when reading a resource path." }
+          path: { type: "string", description: "Optional skill-local resource path. A resource path takes precedence over mode; omit for root instructions." },
+          mode: { type: "string", enum: ["contract", "full"], description: "Root instruction format. Ignored for resource paths, which always return resource content." }
         },
         required: ["name"]
       },
@@ -198,8 +198,8 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
         type: "object",
         properties: {
           name: { type: "string" },
-          path: { type: "string", description: "Optional skill resource path. Omit for root instructions; only SKILL.md can be combined with mode: full." },
-          mode: { type: "string", enum: ["contract", "full"], description: "Root instruction format. Omit when reading a resource path." }
+          path: { type: "string", description: "Optional skill-local resource path. A resource path takes precedence over mode; omit for root instructions." },
+          mode: { type: "string", enum: ["contract", "full"], description: "Root instruction format. Ignored for resource paths, which always return resource content." }
         },
         required: ["name"]
       },
@@ -1550,23 +1550,15 @@ async function readSkillContent(
   input: SkillReadInput,
   configuredValues: Record<string, unknown> | undefined
 ): Promise<ToolResult> {
-  // A full read of the root document is the same operation as the root read.
-  // Resource paths still pass the existing visibility and traversal checks.
-  if (input.path === "SKILL.md" && input.mode === "full") input = { ...input, path: undefined };
+  // Root modes format instructions only. A resource path always uses the
+  // same contained, visible resource reader, even with a redundant root mode.
+  if (input.mode !== undefined && input.mode !== "full" && input.mode !== "contract") {
+    const correctedInput = { name: skill.name, ...(input.path ? {path: input.path} : {}) };
+    return { ok: false, content: `skill.read mode must be full or contract. Retry skill.read(${JSON.stringify(correctedInput)}).`,
+      metadata: { code: "skill-read-invalid-mode", correctedInput } };
+  }
+  if (input.path === "SKILL.md" && input.mode !== undefined) input = { ...input, path: undefined };
   if (isNonEmptyString(input.path)) {
-    if (input.mode !== undefined) {
-      return {
-        ok: false,
-        content: "skill.read path reads cannot be combined with root mode.",
-        metadata: {
-          code: "skill-read-incompatible-path-mode",
-          name: skill.name,
-          path: input.path,
-          mode: input.mode
-        }
-      };
-    }
-
     if (!isLoadedSkill(skill)) {
       return {
         ok: false,

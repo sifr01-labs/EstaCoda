@@ -153,21 +153,22 @@ describe("skill.read", () => {
     expect((await harness.run("skill.read", {name:"root-read",path:"../SKILL.md",mode:"full"})).ok).toBe(false);
   });
 
-  it("rejects path reads combined with root-only modes using a structured error", async () => {
-    const harness = await skillToolHarness([loadedSkill({ name: "bad-combo" })]);
-
-    const result = await harness.run("skill.read", {
-      name: "bad-combo",
-      path: "references/guide.md",
-      mode: "full"
+  it.each(["contract", "full"])("reads resource content with redundant %s mode and retains path checks", async mode => {
+    const harness = await skillToolHarness([loadedSkill({ name: "resource-mode" })], {
+      files: { "references/sources.md": "Source index marker." }
     });
+    const result = await harness.run("skill.read", {name:"resource-mode",path:"references/sources.md",mode});
+    expect(result).toMatchObject({ok:true,metadata:{mode:"reference",path:"references/sources.md"}});
+    expect(result.content).toContain("Source index marker.");
+    expect(result).toEqual(await harness.run("skill.read", {name:"resource-mode",path:"references/sources.md"}));
+    expect((await harness.run("skill.read", {name:"resource-mode",path:"../outside.md",mode})).ok).toBe(false);
+    expect((await harness.run("skill.read", {name:"resource-mode",path:"references/missing.md",mode})).ok).toBe(false);
+  });
 
-    expect(result.ok).toBe(false);
-    expect(result.metadata).toMatchObject({
-      code: "skill-read-incompatible-path-mode",
-      name: "bad-combo",
-      path: "references/guide.md",
-      mode: "full"
+  it("provides an exact correction for an unknown root mode", async () => {
+    const harness = await skillToolHarness([loadedSkill({name:"bad-mode"})]);
+    expect(await harness.run("skill.read", {name:"bad-mode",path:"references/sources.md",mode:"invalid"})).toMatchObject({
+      ok:false,metadata:{code:"skill-read-invalid-mode",correctedInput:{name:"bad-mode",path:"references/sources.md"}}
     });
   });
 

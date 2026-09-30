@@ -7,7 +7,7 @@ import { DEFAULT_DELEGATION_CONFIG } from "../../config/delegation-defaults.js";
 import { mkdtemp, mkdir, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join, dirname } from "node:path";
-import type { ModelProfile, ProviderRequest, ProviderStructuredToolCall } from "../../contracts/provider.js";
+import type { ModelProfile, ResolvedModelRoute, ProviderRequest, ProviderStructuredToolCall } from "../../contracts/provider.js";
 import type { RuntimeEvent } from "../../contracts/runtime-event.js";
 import { ProviderRegistry } from "../../providers/provider-registry.js";
 import { createRuntime, type Runtime } from "../../runtime/create-runtime.js";
@@ -24,7 +24,7 @@ export const SOURCE_URL = "https://93.184.216.34/baseline/battery-recycling";
 export const CLAIM_TABLE = `| Source URL | Supported claim | Limitation |\n| --- | --- | --- |\n| ${SOURCE_URL} | Synthetic research fixture | Illustrative snippet; not scientific evidence |`;
 export const REPORT = `# Battery recycling\n\nSynthetic research fixture. [Source](${SOURCE_URL})\n`;
 
-const model: ModelProfile = {
+const baselineModel: ModelProfile = {
   id: "research-baseline-model", provider: "research-baseline", contextWindowTokens: 128_000,
   supportsTools: true, supportsVision: false, supportsStructuredOutput: true
 };
@@ -45,7 +45,8 @@ export function answer(content: string): ScriptStep {
   return () => ({ content });
 }
 
-export async function createResearchWorkflowHarness(options: { securityPolicy?: SecurityPolicy; maxToolCalls?: number; toolDecision?: () => "allow" | "deny"; memoryText?: string; browserAvailable?: boolean; searchAvailable?: boolean; denyWrites?: boolean; maxBatchTasks?: number; fileToolsAvailable?: boolean; fallbackOnRequest?: number; approvalDecision?: ToolApprovalHandler } = {}) {
+export async function createResearchWorkflowHarness(options: { providerHarness?: {model: ModelProfile; primary: ResolvedModelRoute; fallbacks: ResolvedModelRoute[]; registry: ProviderRegistry}; securityPolicy?: SecurityPolicy; maxToolCalls?: number; toolDecision?: () => "allow" | "deny"; memoryText?: string; browserAvailable?: boolean; searchAvailable?: boolean; denyWrites?: boolean; maxBatchTasks?: number; fileToolsAvailable?: boolean; fallbackOnRequest?: number; approvalDecision?: ToolApprovalHandler } = {}) {
+  const model = options.providerHarness?.model ?? baselineModel;
   const root = await mkdtemp(join(tmpdir(), "estacoda-research-baseline-"));
   const homeDir = join(root, "home");
   const workspaceRoot = join(root, "workspace");
@@ -109,9 +110,10 @@ export async function createResearchWorkflowHarness(options: { securityPolicy?: 
     return await createRuntime({
       homeDir, workspaceRoot, profileId: "baseline", sessionId: "research-baseline-session", sessionDb,
       tokens: resolveTokens("standard", "dark", "kemetBlue"), model,
-      primaryModelRoute: { provider: model.provider, id: model.id, profile: model, authMethod: "none" },
+      primaryModelRoute: options.providerHarness?.primary ?? { provider: model.provider, id: model.id, profile: model, authMethod: "none" },
       ...(options.fallbackOnRequest === undefined ? {} : { modelFallbackRoutes: [{ provider: model.provider, id: "research-fallback", profile: { ...model, id: "research-fallback" }, authMethod: "none" as const }] }),
-      providerRegistry: providers, trustStore, workspaceTrusted: true,
+      ...(options.providerHarness ? {modelFallbackRoutes: options.providerHarness.fallbacks} : {}),
+      providerRegistry: options.providerHarness?.registry ?? providers, trustStore, workspaceTrusted: true,
       localSkillsRoot: join(homeDir, "local-skills"), browser: { backend: "unconfigured", autoLaunch: false },
       ...(options.browserAvailable ? { browserBackend: createMockBrowserBackend() } : {}),
       enableWebNetwork: true,
