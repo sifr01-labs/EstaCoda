@@ -13,6 +13,7 @@ describe("createDelegationTools", () => {
   it("advertises immediate durable Task creation with the established input shape", () => {
     const [tool] = tools(vi.fn());
 
+    expect(tool?.inputSchema).not.toHaveProperty("properties.spendingLimit");
     expect(tool?.description).toContain("Returns a Task handle immediately");
     expect(JSON.stringify(tool?.inputSchema)).toContain("Use provider-visible tool names");
     expect(tool?.inputSchema).toMatchObject({
@@ -31,8 +32,7 @@ describe("createDelegationTools", () => {
             { type: "boolean", const: false }
           ]
         },
-        executionPreference: { enum: ["auto", "background"] },
-        spendingLimit: { required: ["maxEstimatedCostUsd"] }
+        executionPreference: { enum: ["auto", "background"] }
       }
     });
   });
@@ -54,23 +54,24 @@ describe("createDelegationTools", () => {
     expect(result.content).not.toContain("will continue independently");
   });
 
-  it("validates and forwards an optional monetary Task ceiling", async () => {
-    const create = vi.fn(() => handle("task-budget", 1));
-    const [tool] = tools(create);
-    await tool!.run({
-      task: "Bounded work",
-      spendingLimit: { maxEstimatedCostUsd: 2 }
-    }, { toolCallId: "budget-call" });
-    expect(create).toHaveBeenCalledWith(expect.objectContaining({
-      spendingLimit: { maxEstimatedCostUsd: 2 }
-    }));
+  it.each([{ task: "Bounded work" }, { tasks: [{ task: "A" }, { task: "B" }] }])(
+    "rejects invented ceilings before creating work, then accepts a corrected call: %j", async (request) => {
+      const create = vi.fn((_request: unknown) => handle("task-budget", 1));
+      const [tool] = tools(create);
+      const rejected = await tool!.run({
+        ...request,
+        spendingLimit: { maxEstimatedCostUsd: 0.5 }
+      }, { toolCallId: "budget-call" });
+      expect(rejected).toMatchObject({ ok: false, metadata: { code: "unsupported-spending-limit" } });
+      expect(rejected.content).toContain("Retry without that field");
+      expect(create).not.toHaveBeenCalled();
 
-    const invalid = await tool!.run({
-      task: "Invalid bounded work",
-      spendingLimit: { maxEstimatedCostUsd: Number.POSITIVE_INFINITY }
-    }, { toolCallId: "invalid-budget-call" });
-    expect(invalid).toMatchObject({ ok: false, metadata: { code: "invalid-spending-limit" } });
-  });
+      const corrected = await tool!.run(request, { toolCallId: "corrected-call" });
+      expect(corrected.ok).toBe(true);
+      expect(create).toHaveBeenCalledTimes(1);
+      expect(create.mock.calls[0]?.[0]).not.toHaveProperty("spendingLimit");
+    }
+  );
 
   it("forwards an explicit synthesis objective as a fixed terminal Step request", async () => {
     const create = vi.fn(() => ({

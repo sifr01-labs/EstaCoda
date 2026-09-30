@@ -41,6 +41,7 @@ const report=`# Battery recycling\n\nSynthetic research fixture. [Source](${sour
 let requests=0,phase='research',saveIndex=0,recoveryIndex=0,diagnostics='',providerErrors:string[]=[];
 let sessionId='',reportContent='',bridgeVerified=false;
 let failedWorkerOnce=false;
+let releaseFallback!:()=>void;const fallbackGate=new Promise<void>(resolve=>{releaseFallback=resolve;});
 let releaseWorkers!:()=>void;const workerGate=new Promise<void>(resolve=>{releaseWorkers=resolve;});
 const db=new SQLiteSessionDB({path:resolveGlobalStateHome({homeDir:home}).sessionsSqlitePath});
 const store=new SQLiteTaskStore({db:db.db,profileId});
@@ -52,12 +53,14 @@ const provider=createServer(async(req,res)=>{
   assert.equal(req.headers.authorization,undefined);
   let raw='';for await(const chunk of req){raw+=chunk;if(raw.length>4_194_304)throw new Error('Oversized model fixture request');}
   const input=JSON.parse(raw);assert(++requests<=60,'Provider fixture call limit exceeded');
+  if(phase==='fallback'&&input.model==='research-release-tools'){res.writeHead(429,{'content-type':'application/json','retry-after':'0'}).end(JSON.stringify({error:{message:'Fixture rate limit'}}));return;}
   const text=JSON.stringify(input.messages), tools=input.tools?.map((x:any)=>x.function.name)??[];
   const priorCalls=input.messages.flatMap((m:any)=>m.tool_calls??[]).map((c:any)=>c.function.name);
   // Custom-compatible routes may serialize tool feedback as text instead of native history.
   const hasFeedback=priorCalls.length>0||input.messages.some((m:any)=>m.role==='tool'||typeof m.content==='string'&&m.content.startsWith('EstaCoda executed the requested tools.'));
   let content='',next:ReturnType<typeof tool>[]=[];
-  if(phase==='save'||text.includes('Current Step: Save and verify research report')){
+  if(phase==='fallback'){await fallbackGate;content='Hello from the fallback model.';}
+  else if(phase==='save'||text.includes('Current Step: Save and verify research report')){
    const task=store.listTasks()[0],synthesis=store.listSteps(task.id,task.activePlanRevisionId).find((s:any)=>s.executor.role==='synthesis');
    const result=store.listResults(task.id).find((r:any)=>r.stepId===synthesis.id&&r.disposition==='accepted');assert(result);
    if(saveIndex===0)next=[tool('task_result_read',{task_id:task.id,result_id:result.id})];
@@ -97,7 +100,7 @@ const provider=createServer(async(req,res)=>{
 });
 await new Promise<void>(r=>provider.listen(0,'127.0.0.1',r));
 const endpoint=`http://127.0.0.1:${(provider.address() as {port:number}).port}/v1`;
-writeFileSync(paths.configPath,JSON.stringify({model:{provider:'local',id:'research-release-tools',contextWindowTokens:131072,maxTokens:2048},providers:{local:{enabled:true,enableNetwork:true,authMethod:'none',baseUrl:endpoint,apiMode:'custom_openai_compatible',models:['research-release-tools']}},security:{approvalMode:'open'},skills:{autonomy:'none'},web:{enableNetwork:true,searchBackend:'pr6-fixture',extractBackend:'pr6-fixture'}}));
+writeFileSync(paths.configPath,JSON.stringify({model:{provider:'local',id:'research-release-tools',contextWindowTokens:131072,maxTokens:2048,fallbacks:[{provider:'local',id:'research-release-fallback-tools',maxTokens:2048}]},providers:{local:{enabled:true,enableNetwork:true,authMethod:'none',baseUrl:endpoint,apiMode:'custom_openai_compatible',models:['research-release-tools','research-release-fallback-tools']}},security:{approvalMode:'open'},skills:{autonomy:'none'},web:{enableNetwork:true,searchBackend:'pr6-fixture',extractBackend:'pr6-fixture'}}));
 writeFileSync(join(home,'.estacoda/active-profile.json'),JSON.stringify({profileId}));
 await ensureRuntimeSession({sessionDb:db,sessionId:'target-registration',profileId,workspaceRoot:workspace,homeDir:home,durable:true,metadata:{kind:'task-operator-origin'}});
 const binding=(await db.getSession('target-registration')).executionTarget;
@@ -157,7 +160,21 @@ try{
  if(await existingSetup.isVisible()){await existingSetup.click();await page!.getByRole('button',{name:'Open EstaCoda',exact:true}).click();}
  const showSidebar=page!.getByRole('button',{name:'Show sidebar',exact:true});if(await showSidebar.isVisible())await showSidebar.click();
  console.log('Verified packaged app, owned bridge and retained supervisor under a path with spaces.');
- const initial=await submit('Use the researcher skill and use 3 subagents to research current battery recycling. Save report.md');sessionId=initial.workId.replace(/^session:/,'');
+ phase='fallback';
+ const fallback=await submit('Say hello.');
+ await expect.poll(()=>page!.evaluate(id=>window.desktop.getWork(id).then(work=>work.executionModel?.modelId).catch(()=>null),fallback.workId),{timeout:60000}).toBe('research-release-fallback-tools');
+ await page!.locator(`[data-task="${fallback.workId}"]`).click();
+ console.log('Fallback route projection:',await page!.evaluate(id=>window.desktop.getWork(id).then(work=>({status:work.status,active:work.executionModelActive,model:work.executionModel})),fallback.workId));
+ await expect(page!.getByRole('button',{name:'Work model',exact:true})).toContainText('research-release-fallback-tools',{timeout:30000});
+ await expect(page!.getByRole('status').filter({hasText:'Trying'})).toContainText('research-release-fallback-tools');
+ releaseFallback();await idle(fallback.workId);
+ await expect(page!.getByRole('status').filter({hasText:'Continuing with'})).toContainText('research-release-fallback-tools',{timeout:30000});
+ await expect(page!.getByRole('button',{name:'Work model',exact:true})).toContainText('research-release-tools',{timeout:30000});
+ await stopApp();await launch();
+ await page!.locator(`[data-task="${fallback.workId}"]`).click();
+ await expect(page!.getByRole('status').filter({hasText:'Continuing with'})).toContainText('research-release-fallback-tools',{timeout:30000});
+ phase='research';
+ const initial=await submit('Use the researcher skill and use 3 subagents to research current battery recycling. Save report.md',fallback.workId);sessionId=initial.workId.replace(/^session:/,'');
  await expect.poll(()=>{assert.deepEqual(providerErrors,[]);return store.listTasks().length;},{timeout:60000}).toBe(1);
  await expect.poll(()=>page!.evaluate(id=>window.desktop.getWork(id).then(work=>work.status).catch(()=>'unavailable'),initial.workId),{timeout:30000}).toMatch(/^(queued|running)$/);
  await page!.locator(`[data-task="${initial.workId}"]`).click();
@@ -219,7 +236,7 @@ try{
   fixtures:{model:'scripted loopback HTTP',web:'in-process registered synthetic provider in packaged supervisor',liveModelCalls:0,transport:'actual signed app + preload/Main + owned bridge + private control'},
   workflow:{workers:workers.length,acceptedResults:store.listResults(task.id).filter((r:any)=>r.disposition==='accepted').length,distinctChildSessions:workerSessions.size,tasks:store.listTasks().length,searches:searches(),providerCalls:calls.filter(c=>['research','save'].includes(c.phase)).length,appRestartNoReplay:true,fileBytes:Buffer.byteLength(reportContent),fileSha256:createHash('sha256').update(reportContent).digest('hex'),readbackVerified:true,historicalTaskStatus:store.getTask(task.id).status},
   allScenarios:{providerCalls:requests,actualToolResults:toolResults.length,failedToolResults:toolResults.filter((e:any)=>!e.result.ok).length},
-  scenarios:{research:true,automaticReportDelivery:true,alternativeSourceRecovery:true,desktopTranscriptExactlyOnce:true,chatOwnedTasksUi:true,oneSidebarEntry:true,handoffRemainsRunning:true,gatewayRestartNoReplay:true,failedWorkerDraftPreserved:true,targetedRetryAfterGatewayRestart:true,saveOnlyAfterRestart:true,skillRecovery:true,missingSearch:true,falseSaveBlocked:true},
+  scenarios:{fallbackComposer:true,fallbackNotice:true,fallbackRestart:true,preferredModelPreserved:true,research:true,automaticReportDelivery:true,alternativeSourceRecovery:true,desktopTranscriptExactlyOnce:true,chatOwnedTasksUi:true,oneSidebarEntry:true,handoffRemainsRunning:true,gatewayRestartNoReplay:true,failedWorkerDraftPreserved:true,targetedRetryAfterGatewayRestart:true,saveOnlyAfterRestart:true,skillRecovery:true,missingSearch:true,falseSaveBlocked:true},
   liveAssessment:'pending approved model, sources and spend ceiling'
  };
  mkdirSync(dirname(output),{recursive:true});writeFileSync(output,JSON.stringify(measurements,null,2)+'\n');

@@ -1,0 +1,218 @@
+{
+  "version": 1,
+  "passed": true,
+  "measuredAt": "2026-09-30T17:29:10.899Z",
+  "sourceBaseCommit": "088b0d696039edade56a7386c1be30dfc36f554f",
+  "sourceOverlay": [
+    {
+      "path": "apps/desktop/src/renderer/components/canonical-activity.tsx",
+      "sha256": "5b0c380248c6d6210aa043265cac86b6cc15a250ca08dda17d9eb19c95397027"
+    },
+    {
+      "path": "apps/desktop/src/renderer/components/chat-tasks.tsx",
+      "sha256": "6c67804c5ddf04d1cebc030f62f52ccb0b63b316d48a7b91f20fd821542927f1"
+    },
+    {
+      "path": "apps/desktop/src/renderer/components/inspector.tsx",
+      "sha256": "3a883df0e10d673677ca08bcda5c15c552522096ab6c7f038586feb66118fc32"
+    },
+    {
+      "path": "apps/desktop/src/renderer/components/work-model-picker.tsx",
+      "sha256": "01222de7fe74e83a67bc0c9867e73ed9c68c0e5fcf215d815f1d8193e4078bc9"
+    },
+    {
+      "path": "apps/desktop/src/renderer/conversation-activity.test.ts",
+      "sha256": "274cfd25ebd0e2960835e58ed6dcf4f2dbe419dadd0da0f7196eb9a0f849a475"
+    },
+    {
+      "path": "apps/desktop/src/renderer/conversation-activity.ts",
+      "sha256": "1157f7f6cee6dce45afbdc8e0f9719f557e80d8717de9af547f20b2c5e42f43f"
+    },
+    {
+      "path": "apps/desktop/src/shared/i18n/chat-tasks.ts",
+      "sha256": "c08493214f0f0b36f4b5369aa7e61fefbe5e35dd44970f01cb4fe74fb77688c6"
+    },
+    {
+      "path": "apps/desktop/src/shared/i18n/conversation-activity.ts",
+      "sha256": "f7e5b17780d6fbbd21447e405e5130f935c5034a2473f915e03d7328f21b8562"
+    },
+    {
+      "path": "apps/desktop/tests/research-packaged.mts",
+      "sha256": "447e03265e91f2b000460aacecf79f872f2ac43865d90b531eafa9f771d27798"
+    },
+    {
+      "path": "package.json",
+      "sha256": "8427aa6992264ee7c5031c694c9d0a152be35125b78afd8cd47e4743c70beba8"
+    },
+    {
+      "path": "scripts/validate-research-reliability.ts",
+      "sha256": "68a7cb802eb608cacc380efcd267b00c2e73e060c1a46210d3bbd609372d6d98"
+    },
+    {
+      "path": "src/contracts/desktop-control/projections.ts",
+      "sha256": "a2eb4b04ade392e1384da020e7bcc8011cdf51c3a7d9a4c371e4d4f5ad3486fd"
+    },
+    {
+      "path": "src/contracts/desktop-control/validation.ts",
+      "sha256": "2465fe65c1a6a6b0eaf99a1bb64cc3a79e0ae390c23a203677c546210ba21116"
+    },
+    {
+      "path": "src/contracts/session.ts",
+      "sha256": "a54419fd09856e9a40f8c8230e5cb38027f78fb0e0fd01d9635572f7b6628254"
+    },
+    {
+      "path": "src/control-service/session-display-events.ts",
+      "sha256": "7fcde82002238f4e4ea9b6b4f78229da946f2397a74f1f40ff1964df33baa0bb"
+    },
+    {
+      "path": "src/control-service/task-projections.ts",
+      "sha256": "b56a3f7fe15897705e2bab774df25e8efc7c8d90f2c28a999f7b29d61d06a4c7"
+    },
+    {
+      "path": "src/control-service/work-projections.ts",
+      "sha256": "30db049d36ec470d97326428470e133ca19d46ad707d29ec12aa41be4612e4e7"
+    },
+    {
+      "path": "src/control-service/work-snapshot.test.ts",
+      "sha256": "7bf1a65eebc2fdec79d5475322c201ce9b42e41d6d1ab8fa9b92ad7917ca0ffa"
+    },
+    {
+      "path": "src/control-service/work-snapshot.ts",
+      "sha256": "7f3f2a3adcecb71d068ef260de4e45c9a20eff5a677169fbd5316fcde87a2c6a"
+    },
+    {
+      "path": "src/delegation/delegate-call-budget.test.ts",
+      "sha256": "b40e833aae711e706c9267016b9bc5292188fd55549f91f4e9b6fec0141b5fdb"
+    },
+    {
+      "path": "src/delegation/delegate-call-budget.ts",
+      "sha256": "555fff873f44bb74cefa5b19e3055fad93f069b58132e1258b80e7deebed12f4"
+    },
+    {
+      "path": "src/delegation/durable-delegation-service.test.ts",
+      "sha256": "9f93b76476a6777fb173c16f99aa0e3baca342ad8e52bd09c49d88feeb33aa9a"
+    },
+    {
+      "path": "src/delegation/durable-delegation-service.ts",
+      "sha256": "2293c2ff45e1b801cc1c4268646eae40fdf987900873712daf0f53a7eef43970"
+    },
+    {
+      "path": "src/eval/fixtures/research-workflow-harness.ts",
+      "sha256": "21050231dec2afbd52d2d3d4928993a2883522762a105c5ff41c4fefb78c6073"
+    },
+    {
+      "path": "src/eval/fixtures/research-workflow-release.ts",
+      "sha256": "8b2e582fed53c3a1b6c9feb907ef2a39bf84b19c74ba4d839fd0ee30f765ef3e"
+    },
+    {
+      "path": "src/runtime/execution-supervision-controller.ts",
+      "sha256": "0c263a20aba8ed6d10a815e4d055c1eff1f1988662addf640e5b681ca637d823"
+    },
+    {
+      "path": "src/runtime/provider-turn-loop.test.ts",
+      "sha256": "05df0d946725ba6bc40439455a85c902a02f01c7db9f122464bc77d53a9f4bcb"
+    },
+    {
+      "path": "src/runtime/provider-turn-loop.ts",
+      "sha256": "47792dbdb3077629323e8881d896c95a2ca3a570cb4ccffa6adc366a2df46df6"
+    },
+    {
+      "path": "src/runtime/research-request.acceptance.test.ts",
+      "sha256": "7bf06d46ed11c03bd20c6ebaa546101fdff0c1d7a722d3f0565f28247eaa4b28"
+    },
+    {
+      "path": "src/runtime/research-surfaces.acceptance.test.ts",
+      "sha256": "dd9272f8a2695421d57e7dcf31dda669f4f1745fdb653881eecfa542fbe706ec"
+    },
+    {
+      "path": "src/runtime/tool-loop-progress-guard.test.ts",
+      "sha256": "201ac222f149017bf381426b1da56e6110915fc884f14f151ad6b40c7ed25979"
+    },
+    {
+      "path": "src/runtime/tool-loop-progress-guard.ts",
+      "sha256": "a73a2364a749dcec9fb61eae1497b562ca25ad601d3dad223aa154e67865cfc5"
+    },
+    {
+      "path": "src/tools/delegation-tools.test.ts",
+      "sha256": "6cc3f542c1edbcc142adee9377d433b45f0d7911282aa423eb762300095a75b0"
+    },
+    {
+      "path": "src/tools/delegation-tools.ts",
+      "sha256": "e3a444c927c28fb9afae36142388886f19c284f082e346231d8dac2e8deebca7"
+    },
+    {
+      "path": "src/tools/skill-tools.test.ts",
+      "sha256": "800f036411ccdc84f52bddc613ab8cc621a20561ba70898808e39cac18dd39e9"
+    },
+    {
+      "path": "src/tools/skill-tools.ts",
+      "sha256": "755a404649a6169328c07cc1840019b65ea0bb73afbe99db905ee8eda5140e61"
+    },
+    {
+      "path": "src/tools/tool-executor.test.ts",
+      "sha256": "97502201f28876a8b59b9a6fcba161ac60f7ebd50e83be1cc832efbb4c2398d3"
+    },
+    {
+      "path": "src/tools/tool-executor.ts",
+      "sha256": "0aaed2d6ec5c284cc4dda8fe8fa6fb7392d996c2255972db300fa8eed264021b"
+    }
+  ],
+  "platform": "darwin",
+  "arch": "arm64",
+  "runtime": {
+    "sha256": "0977876777d4f59207a4d37fe7b647dc2fc246c8994092c07fb2e6dfe2806e46",
+    "nodeVersion": "v24.14.1",
+    "coreVersion": "0.1.0",
+    "entrySha256": "8b7b5e8816ffe62d9baa2133dd5cc54a1a8ea36997b0bda6fc631039c700f6ec",
+    "signature": "ad-hoc verified",
+    "ownedBridgeVerified": true,
+    "inventoryVerified": true,
+    "matchesCurrentDist": true,
+    "supervisorRetainedPathWithSpaces": true
+  },
+  "fixtures": {
+    "model": "scripted loopback HTTP",
+    "web": "in-process registered synthetic provider in packaged supervisor",
+    "liveModelCalls": 0,
+    "transport": "actual signed app + preload/Main + owned bridge + private control"
+  },
+  "workflow": {
+    "workers": 3,
+    "acceptedResults": 5,
+    "distinctChildSessions": 6,
+    "tasks": 1,
+    "searches": 4,
+    "providerCalls": 19,
+    "appRestartNoReplay": true,
+    "fileBytes": 655,
+    "fileSha256": "6fc617955999fd1d540fc77c6df81a5ae1500295c39e27ab226efa4869f6fe0b",
+    "readbackVerified": true,
+    "historicalTaskStatus": "completed"
+  },
+  "allScenarios": {
+    "providerCalls": 27,
+    "actualToolResults": 21,
+    "failedToolResults": 4
+  },
+  "scenarios": {
+    "fallbackComposer": true,
+    "fallbackNotice": true,
+    "fallbackRestart": true,
+    "preferredModelPreserved": true,
+    "research": true,
+    "automaticReportDelivery": true,
+    "alternativeSourceRecovery": true,
+    "desktopTranscriptExactlyOnce": true,
+    "chatOwnedTasksUi": true,
+    "oneSidebarEntry": true,
+    "handoffRemainsRunning": true,
+    "gatewayRestartNoReplay": true,
+    "failedWorkerDraftPreserved": true,
+    "targetedRetryAfterGatewayRestart": true,
+    "saveOnlyAfterRestart": true,
+    "skillRecovery": true,
+    "missingSearch": true,
+    "falseSaveBlocked": true
+  },
+  "liveAssessment": "pending approved model, sources and spend ceiling"
+}

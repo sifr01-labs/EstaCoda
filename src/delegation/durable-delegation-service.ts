@@ -28,6 +28,7 @@ import {
   TASK_ORIGIN_COMPLETION_DELIVERY_KEY,
   TASK_TOOL_RISK_CLASSES
 } from "../contracts/task.js";
+import { BUILTIN_TOOLSETS } from "../contracts/tool.js";
 import type { ToolDefinition, ToolRiskClass } from "../contracts/tool.js";
 import { resolveChildToolAccess, type ChildToolAccessResult } from "./toolset-security.js";
 import {
@@ -213,6 +214,11 @@ export class DurableDelegationService {
       throw new Error(`Durable delegation requires 1-${this.#config.maxBatchTasks} task items.`);
     }
     const requestContract = request.requestContract === undefined ? undefined : validateDelegatedRequestContract(request.requestContract);
+    // An explicit report contract owns its required synthesis step. A model
+    // flag cannot disable it; inspection-only delegation retains its semantics.
+    if (requestContract?.requirements.research !== undefined && request.synthesis === false) {
+      request = { ...request, synthesis: undefined };
+    }
     const tasks = normalizedResearchItems(request.tasks);
     if (requestContract !== undefined) {
       const requirements = requestContract.requirements;
@@ -599,7 +605,11 @@ function assertDelegationAccess(
   }
   const effectiveToolsets = new Set(access.effectiveAllowedToolsets);
   const unavailableToolsets = normalizedStrings(item.allowedToolsets).filter((name) => !effectiveToolsets.has(name));
-  if (unavailableToolsets.length > 0) {
+  // Exact tools already passed the effective-access check above. Recognized
+  // redundant groups may be empty after intersection; they grant no authority.
+  const redundantGroups = item.allowedTools !== undefined && item.allowedTools.length > 0 &&
+    unavailableToolsets.every((name) => BUILTIN_TOOLSETS.includes(name as typeof BUILTIN_TOOLSETS[number]));
+  if (unavailableToolsets.length > 0 && !redundantGroups) {
     throw new DelegationAccessError({
       code: "requested-toolset-unavailable",
       taskIndex,

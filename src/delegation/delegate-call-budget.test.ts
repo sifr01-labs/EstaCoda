@@ -2,6 +2,17 @@ import { describe, expect, it } from "vitest";
 import { DelegateCallBudget } from "./delegate-call-budget.js";
 
 describe("DelegateCallBudget", () => {
+  it("reserves atomically, releases once, and ignores old-turn releases", () => {
+    const budget=new DelegateCallBudget(1);
+    const first=budget.reserve();expect(first.allowed).toBe(true);
+    const blocked=budget.reserve();expect(blocked.allowed).toBe(false);blocked.release();
+    expect(budget.reserve().allowed).toBe(false);
+    first.release();const next=budget.reserve();expect(next.allowed).toBe(true);
+    first.release();expect(budget.reserve().allowed).toBe(false);
+    budget.reset();expect(budget.reserve().allowed).toBe(true);
+    next.release();expect(budget.reserve().allowed).toBe(false);
+  });
+
   it("allows up to the configured limit and reports skipped calls", () => {
     const budget = new DelegateCallBudget(2);
 

@@ -14,7 +14,10 @@ export type TaskProgressProjection = {
   steps: { id: string; title: string; role: string; status: string; accepted: boolean; diagnostic: boolean;
     attempts: number; reason?: string; attemptWorkId?: string }[];
 };
+export type ExecutionModelProjection = { providerId: string; modelId: string; fallback: boolean; state: "attempting" | "responded" | "failed" };
 export type WorkProjection = {
+  executionModel?: ExecutionModelProjection;
+  executionModelActive?: boolean;
   taskProgress?: TaskProgressProjection;
   modelBinding?: {sessionId:string;taskId?:string};
   actions?: ActionProjection[];
@@ -34,6 +37,7 @@ export type ActivityProjection = ActivityBase & (
   | { kind: "artifact"; reference: ArtifactReference; label: string; bytes: number; mimeType: string }
   | { kind: "plan"; steps: { id: string; title: string; status: "pending" | "running" | "completed" | "failed" }[] }
   | { kind: "result"; status: WorkDisplayStatus; evidence: EvidenceProjection; usage: UsageProjection; recoveredErrors?: boolean }
+  | { kind: "model"; executionModel: ExecutionModelProjection }
   | { kind: "status"; status: WorkDisplayStatus; reason?: string }
 );
 export type InboxProjection = {

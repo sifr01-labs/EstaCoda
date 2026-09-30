@@ -42,6 +42,64 @@ function schedulerFor(h: Harness, taskId: string) {
 }
 
 describe.sequential("research workflow acceptance harness", () => {
+  it("recovers the incident under provider fallback and retains required synthesis", async () => {
+    const h=await harness({fallbackOnRequest:1});
+    const tasks=["collection","processing","reuse"].map(scope=>({task:`Research ${scope}.`,allowedTools:["web.search"],
+      allowedToolsets:["research","core"],research:{scope,requireLiveSources:true,requireRepositoryEvidence:false}}));
+    // The root skill is already autoloaded; its redundant-read compatibility has a tool-boundary regression test.
+    // Three pre-admission errors must leave capacity for the corrected batch.
+    for(let i=0;i<3;i++) h.enqueue(nativeCall("delegate_task",{tasks:tasks.slice(0,2),synthesis:false}));
+    h.enqueue(nativeCall("delegate_task",{tasks,synthesis:false}));
+    const result=await h.turn("Use the researcher skill and use 3 subagents to research current battery recycling. Save report.md.");
+    expect(result.toolExecutions.filter(call=>call.result?.metadata?.code==="request-requirements-unsatisfied")).toHaveLength(3);
+    expect(result.toolExecutions.at(-1)?.result).toMatchObject({ok:true});
+    expect(h.store.listTasks()).toHaveLength(1);
+    const task=h.store.listTasks()[0]!;
+    const steps=h.store.listSteps(task.id,task.activePlanRevisionId!);
+    expect(steps.filter(step=>step.executor.role==="worker")).toHaveLength(3);
+    expect(steps.some(step=>step.executor.role==="synthesis")).toBe(true);
+    expect(steps.some(step=>step.executor.role==="report-delivery")).toBe(true);
+    const routes=(await h.sessionDb.listEvents(h.runtime.sessionId)).filter(event=>event.kind==="provider-route");
+    expect(routes).toEqual(expect.arrayContaining([expect.objectContaining({model:"research-fallback",fallback:true,state:"responded"})]));
+    expect(task.status).toBe("queued");
+    await expect(readFile(join(h.workspaceRoot,"report.md"))).rejects.toThrow();
+    scriptConsumed(h);
+    const {scheduler,resultService}=schedulerFor(h,task.id);
+    for(let index=0;index<3;index++) {
+      h.enqueue(nativeCall("web_search",{query:`battery recycling ${index}`}),answer(`Scope ${index}: [source](${SOURCE_URL}).\n\n${CLAIM_TABLE}`));
+      expect(await scheduler.runOnce()).toMatchObject({completed:1,failed:0});
+    }
+    const accepted=h.store.listResults(task.id).filter(item=>item.kind==="text"&&item.disposition==="accepted");
+    expect(accepted).toHaveLength(3);
+    for(const item of accepted)h.enqueue(nativeCall("task_result_read",{task_id:task.id,result_id:item.id}));
+    h.enqueue(answer(`${REPORT}\n${CLAIM_TABLE}`));
+    expect(await scheduler.runOnce()).toMatchObject({completed:1,failed:0});
+    const synthesis=steps.find(step=>step.executor.role==="synthesis")!;
+    const final=h.store.listResults(task.id).find(item=>item.stepId===synthesis.id&&item.disposition==="accepted")!;
+    const report=await resultService.readText({taskId:task.id,resultId:final.id,sessionId:h.runtime.sessionId});
+    await h.restart();
+    h.enqueue(nativeCall("task_result_read",{task_id:task.id,result_id:final.id}),nativeCall("file_write",{path:"report.md",content:report.content}),nativeCall("file_read",{path:"report.md"}),answer("Saved report.md."));
+    expect(await schedulerFor(h,task.id).scheduler.runOnce()).toMatchObject({completed:1,failed:0});
+    expect(h.store.getTask(task.id)?.status).toBe("completed");
+    expect(await readFile(join(h.workspaceRoot,"report.md"),"utf8")).toBe(report.content);
+    scriptConsumed(h);
+  }, 30_000);
+
+  it("does not stop the sixth iteration when fresh research follows five pre-admission failures", async () => {
+    const h=await harness();
+    const tasks=["collection","processing","reuse"].map(scope=>({task:`Research ${scope}.`,allowedTools:["web.search"],research:{scope,requireLiveSources:true,requireRepositoryEvidence:false}}));
+    const rejected=[tasks.slice(0,1),tasks.slice(0,2),tasks.map(({research,...task})=>task),
+      tasks.map(task=>({...task,research:{...task.research,requireLiveSources:false}})),tasks.map(task=>({...task,allowedTools:["unavailable.tool"]}))];
+    for(const items of rejected)h.enqueue(nativeCall("delegate_task",{tasks:items}));
+    h.enqueue(nativeCall("web_search",{query:"current battery recycling"}),answer("I found a source, but have not completed the requested workers or saved the report."));
+    const result=await h.turn("Use 3 subagents to research current battery recycling. Save report.md.");
+    expect(result.toolExecutions.filter(item=>item.tool.name==="delegate_task")).toHaveLength(5);
+    expect(result.toolExecutions.find(item=>item.tool.name==="web.search")?.result?.ok).toBe(true);
+    expect(result.finalOutcome?.terminationCause).not.toBe("tool_loop_no_progress");
+    expect(result.finalOutcome?.status).not.toBe("completed");
+    expect(h.store.listTasks()).toHaveLength(0);scriptConsumed(h);
+  });
+
   it("blocks missing fresh-search prerequisites before spending a provider iteration", async () => {
     const h = await harness({ searchAvailable: false });
     const result = await h.turn("Use the researcher skill and use 3 subagents to research current battery recycling. Save report.md.");
@@ -347,13 +405,13 @@ describe.sequential("research workflow acceptance harness", () => {
     scriptConsumed(h);
   });
 
-  it.each(["too-few", "missing-contracts", "no-live-search", "no-synthesis"])("rejects delegation that weakens user requirements: %s", async (kind) => {
+  it.each(["too-few", "missing-contracts", "no-live-search"])("rejects delegation that weakens user requirements: %s", async (kind) => {
     const h = await harness();
     const tasks = ["collection", "processing", "reuse"].slice(0, kind === "too-few" ? 2 : 3).map((scope) => ({
       task: `Research ${scope}.`, allowedTools: ["web.search"],
       ...(kind === "missing-contracts" ? {} : { research: { scope, requireLiveSources: kind !== "no-live-search", requireRepositoryEvidence: false } })
     }));
-    h.enqueue(nativeCall("delegate_task", { tasks, ...(kind === "no-synthesis" ? { synthesis: false } : {}) }), answer("All three workers completed."));
+    h.enqueue(nativeCall("delegate_task", { tasks, synthesis: false }), answer("All three workers completed."));
     const result = await h.turn(RESEARCH_PROMPT);
     expect(h.store.listTasks()).toEqual([]);
     expect(result.toolExecutions[0]?.result).toMatchObject({ ok: false, metadata: { code: "request-requirements-unsatisfied" } });

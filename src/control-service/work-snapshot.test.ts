@@ -106,3 +106,19 @@ it('projects child-agent history under its parent without granting independent e
  const homeDir=await mkdtemp('/tmp/ec-child-work-'),path=resolveGlobalStateHome({homeDir}).sessionsSqlitePath;await mkdir(join(path,'..'),{recursive:true});const db=new SQLiteSessionDB({path});
  try{await db.createSession({id:'parent',profileId:'p'});await db.createSession({id:'child',profileId:'p',parentSessionId:'parent',metadata:{kind:'delegated-child'}});await db.appendMessage({sessionId:'child',role:'agent',content:'Child evidence'});const state=await captureWork({homeDir,profileId:'p'},new AbortController().signal);expect(state.work.find(work=>work.canonicalId==='child')).toMatchObject({parentWorkId:'session:parent',actions:[{id:'inspect_result',enabled:true}]});const snapshot=new WorkSnapshot(state,{homeDir,profileId:'p'});expect(snapshot.search({limit:10,parentWorkId:'session:parent'}).items.map(item=>item.id)).toEqual(['session:child']);expect((await snapshot.activity('session:child',{limit:10})).items[0]).toMatchObject({text:'Child evidence'});}finally{db.close();await rm(homeDir,{recursive:true,force:true});}
 });
+
+it('restores actual fallback identity from persisted route events and clears it for a new request',async()=>{
+ const homeDir=await mkdtemp('/tmp/ec-route-');const path=resolveGlobalStateHome({homeDir}).sessionsSqlitePath;
+ await mkdir(join(path,'..'),{recursive:true});const db=new SQLiteSessionDB({path});
+ try{
+  await db.createSession({id:'s',profileId:'p'});
+  await db.appendMessage({id:'turn',sessionId:'s',role:'user',content:'Research'});
+  await db.appendEvent('s',{kind:'provider-route',turnMessageId:'turn',provider:'fallback-provider',model:'actual-model',fallback:true,state:'responded'});
+  const state=await captureWork({homeDir,profileId:'p'},new AbortController().signal);
+  expect(state.work[0]?.executionModel).toEqual({providerId:'fallback-provider',modelId:'actual-model',fallback:true,state:'responded'});
+  expect(state.activity['session:s']).toEqual(expect.arrayContaining([expect.objectContaining({kind:'model',executionModel:state.work[0]?.executionModel})]));
+  await db.appendMessage({id:'next',sessionId:'s',role:'user',content:'Another request'});
+  const next=await captureWork({homeDir,profileId:'p'},new AbortController().signal);
+  expect(next.work[0]?.executionModel).toBeUndefined();
+ }finally{db.close();await rm(homeDir,{recursive:true,force:true});}
+});

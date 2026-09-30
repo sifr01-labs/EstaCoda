@@ -382,6 +382,14 @@ export type SessionEvent =
   | SessionContextWindowUsageEvent
   | SessionContextWindowUsageInvalidatedEvent
   | {
+      kind: "provider-route";
+      turnMessageId?: string;
+      provider: string;
+      model: string;
+      fallback: boolean;
+      state: "attempting" | "responded" | "failed";
+    }
+  | {
       kind: "provider-completion";
       iteration?: number;
       ok: boolean;

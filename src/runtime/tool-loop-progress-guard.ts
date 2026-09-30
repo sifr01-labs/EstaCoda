@@ -5,7 +5,7 @@ import { isTerminalCheckpointStatus } from "../session/execution-checkpoint-stat
 import { executionEvidenceStatus } from "./execution-evidence-index.js";
 import { browserDiscoveryFingerprint } from "./browser-observation-guard.js";
 
-const INELIGIBLE_TOOLS = new Set(["plan", "delegate_task"]);
+const INELIGIBLE_TOOLS = new Set(["plan"]);
 
 export type ToolLoopProgressKind =
   | "new-tool-result"
@@ -33,6 +33,8 @@ export type ToolLoopProgressAssessment = {
 export class ToolLoopProgressGuard {
   readonly #nudgeIteration: number;
   readonly #stopIteration: number;
+  readonly #research: boolean;
+  readonly #seenResearchSources = new Set<string>();
   readonly #seenCallFingerprints = new Set<string>();
   readonly #seenResultFingerprints = new Set<string>();
   readonly #seenDiscoveryFingerprints = new Set<string>();
@@ -45,11 +47,13 @@ export class ToolLoopProgressGuard {
   #checkpointProgressRevision: number | undefined;
 
   constructor(input: {
+    research?: boolean;
     existingExecutions?: readonly ToolExecutionRecord[];
     noProgressNudgeIteration: number;
     maxNoProgressIterations: number;
     checkpointReader?: ExecutionCheckpointReader;
   }) {
+    this.#research = input.research === true;
     this.#stopIteration = normalizeStopIteration(input.maxNoProgressIterations);
     this.#nudgeIteration = normalizeNudgeIteration(
       input.noProgressNudgeIteration,
@@ -92,6 +96,25 @@ export class ToolLoopProgressGuard {
       if (execution.tool.name === "capability.request" && Array.isArray(execution.result?.metadata?.requests) &&
         !execution.result.metadata.requests.some((request: unknown) => request !== null && typeof request === "object" && "status" in request && request.status === "queued")) continue;
 
+      if (this.#research) {
+        const sources = researchEvidence(execution);
+        const newEvidence = sources.some((source) => !this.#seenResearchSources.has(source));
+        sources.forEach((source) => this.#seenResearchSources.add(source));
+        if (newEvidence) {
+          materialProgress = true;
+          progressKinds.add("new-tool-result");
+          continue;
+        }
+        // Source order, query wording and retrieval timestamps are not evidence.
+        if (execution.tool.name === "web.search" || execution.tool.name === "web.extract") continue;
+      }
+      if (execution.tool.name === "delegate_task") {
+        if (typeof execution.result?.metadata?.taskId === "string" && execution.result.metadata.idempotentReplay === false) {
+          materialProgress = true;
+          progressKinds.add("target-mutation");
+        }
+        continue;
+      }
       const callFingerprint = fingerprint({
         tool: execution.tool.name,
         input: execution.input,
@@ -190,6 +213,7 @@ export class ToolLoopProgressGuard {
         (execution.readReuseOf !== undefined || execution.result?.metadata?.mcpReadReuse === true)
       ) continue;
       this.#active = true;
+      if (this.#research) researchEvidence(execution).forEach((source) => this.#seenResearchSources.add(source));
       const discovery = browserDiscoveryFingerprint(execution) ?? connectorDiscoveryFingerprint(execution);
       if (discovery !== undefined) this.#seenDiscoveryFingerprints.add(discovery);
       this.#seenCallFingerprints.add(fingerprint({
@@ -325,4 +349,26 @@ function stableStringify(value: unknown, ignoreClocks = false): string {
       .join(",")}}`;
   };
   return visit(value, 0);
+}
+
+/** Observations may advance research without satisfying the completion checkpoint. */
+function researchEvidence(execution: ToolExecutionRecord): string[] {
+  const metadata = execution.result?.metadata;
+  const canonicalUrl = (value: unknown): string | undefined => {
+    if (typeof value !== "string") return undefined;
+    try { const url = new URL(value); if (!["http:", "https:"].includes(url.protocol)) return undefined; url.hash = ""; return url.href; } catch { return undefined; }
+  };
+  if (execution.tool.name === "web.search" && Array.isArray(metadata?.results)) {
+    return metadata.results.slice(0, 20).flatMap((entry: unknown) => {
+      if (!entry || typeof entry !== "object" || !("url" in entry)) return [];
+      const url = canonicalUrl(entry.url);
+      return url ? ["search:" + url] : [];
+    });
+  }
+  if (execution.tool.name === "web.extract") {
+    const url = canonicalUrl(metadata?.url);
+    const content = metadata?.content ?? execution.result?.content;
+    if (url && typeof content === "string" && content.trim()) return ["extract:" + fingerprint({url, content}, true)];
+  }
+  return [];
 }

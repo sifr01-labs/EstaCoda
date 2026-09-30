@@ -1,4 +1,13 @@
 export const conversationActivityArabic={
+ 'Current execution model':'النموذج المستخدم حاليًا',
+ 'Fallback':'نموذج بديل',
+ 'Connecting':'جارٍ الاتصال',
+ 'Model attempt failed':'فشلت محاولة النموذج',
+ 'Preferred model: {model}':'النموذج المفضّل: ⁨{model}⁩',
+ 'Preferred model unavailable. Trying {model}.':'النموذج المفضّل غير متاح. جارٍ تجربة ⁨{model}⁩.',
+ 'Continuing with {model} as the fallback model.':'تتم المتابعة باستخدام ⁨{model}⁩ كنموذج بديل.',
+ 'The fallback model {model} could not complete this request.':'تعذّر على النموذج البديل ⁨{model}⁩ إكمال هذا الطلب.',
+
  '1 tool call':'استدعاء أداة واحد',
  '1 tool event':'حدث أداة واحد',
  '1 saved output':'مخرج محفوظ واحد',

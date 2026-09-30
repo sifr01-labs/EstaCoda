@@ -378,6 +378,7 @@ export class ProviderTurnLoop {
     });
     this.#acquireOrRenewBrowserSessionLease(foregroundTurnId);
     const executionSupervision = new ExecutionSupervisionController({
+      research: input.intent.requestRequirements?.research !== undefined,
       foregroundTurnId,
       existingExecutions: input.toolExecutions,
       currentSessionId: () => this.#sessionRuntimeContext?.currentSessionId() ?? this.#sessionId,
@@ -1652,6 +1653,16 @@ export class ProviderTurnLoop {
   }): Promise<ProviderExecutionResult> {
     const primaryRoute = input.primaryRoute ?? this.#primaryModelRoute;
     const fallbackChain = input.fallbackChain ?? this.#modelFallbackRoutes;
+    const recordRoute = async (event: ProviderRuntimeEvent) => {
+      if (event.kind !== "provider-attempt-start" && event.kind !== "provider-attempt-end") return;
+      const fallback = event.fallback || (this.#primaryModelRoute !== undefined &&
+        (event.provider !== this.#primaryModelRoute.provider || event.model !== this.#primaryModelRoute.id));
+      await this.#sessionDb.appendEvent(input.sessionId, {
+        kind: "provider-route", ...(input.visibleTurnId ? { turnMessageId: input.visibleTurnId } : {}),
+        provider: event.provider, model: event.model, fallback,
+        state: event.kind === "provider-attempt-start" ? "attempting" : event.ok ? "responded" : "failed"
+      });
+    };
     const initialEvents = createProviderToolCallEventBuffer({
       sink: input.onEvent,
       onDelta: input.onDelta,
@@ -1666,7 +1677,7 @@ export class ProviderTurnLoop {
       retryRateLimits: true,
       deadlineAtMs: providerWorkDeadlineAt(input.loopStartedAt, this.#budgets),
       usage: await this.#nextProviderUsageContext(input.visibleTurnId, input.imageInputs),
-      onEvent: initialEvents.onEvent
+      onEvent: async (event) => { await recordRoute(event); await initialEvents.onEvent(event); }
     });
 
     if (!isLengthTruncatedToolCallExecution(execution)) {
@@ -1735,7 +1746,7 @@ export class ProviderTurnLoop {
       retryRateLimits: true,
       deadlineAtMs: providerWorkDeadlineAt(input.loopStartedAt, this.#budgets),
       usage: await this.#nextProviderUsageContext(input.visibleTurnId, input.imageInputs),
-      onEvent: retryEvents.onEvent
+      onEvent: async (event) => { await recordRoute(event); await retryEvents.onEvent(event); }
     });
     const retryExecution = rebaseRetryRouteIdentity(retryExecutionRaw, retryChain, originalRouteChain);
 

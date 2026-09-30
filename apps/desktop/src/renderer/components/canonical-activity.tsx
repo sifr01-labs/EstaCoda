@@ -1,7 +1,7 @@
 import type {ActivityProjection,WorkDisplayStatus} from '@estacoda/control-protocol';
 import type {DesktopApi} from '../../shared/desktop-api.js';
 import type {MessageKey} from '../../shared/i18n/index.js';
-import {activityRuns,runContent,type ActivityRun,type ToolAction} from '../conversation-activity.js';
+import {fallbackNotices,activityRuns,runContent,type ActivityRun,type ToolAction} from '../conversation-activity.js';
 import {useI18n} from '../i18n.js';
 import {MessageActions} from './message-actions.js';
 import {BrandEye,Button,Icon} from './primitives.js';
@@ -56,6 +56,7 @@ export function CanonicalActivity({items,results,browser,api,workStatus,more=fal
  {content.responses.map(item=><section className="ec-run-answer" key={item.id}><ResponseMarkdown text={item.text}/><MessageActions text={item.text} timestamp={item.timestamp}/></section>)}
  {active&&!content.responses.length&&content.latestProgress&&<div className="ec-run-currentprose"><ResponseMarkdown text={content.latestProgress.text}/></div>}
  {!content.operational&&run.items.filter(item=>item.kind==='assistant_delta').map(item=><ResponseMarkdown key={item.id} text={item.text}/>)}
+ {fallbackNotices(run.items).map(item=><div className="ec-activitynotice" role="status" key={item.id}><Icon name="cpu"/><span dir="auto">{t(item.executionModel.state==='attempting'?'Preferred model unavailable. Trying {model}.':item.executionModel.state==='responded'?'Continuing with {model} as the fallback model.':'The fallback model {model} could not complete this request.',{model:item.executionModel.modelId})}</span></div>)}
  <Notices items={run.items} results={results} browser={hasBrowser?browser:undefined}/>
  {!!content.outputs.length&&<RunOutputs items={content.outputs} api={api} results={results}/ >}</section>}
  </div>;})}</div>;

@@ -151,6 +151,20 @@ describe("DurableDelegationService", () => {
     expect(store.listTasks()).toHaveLength(3);
   });
 
+  it("allows redundant known toolsets with an exact permitted tool list without broadening child access", () => {
+    const service = new DurableDelegationService({store,creatorSessionId:()=>"parent",workspace:workspace(),config:DEFAULT_DELEGATION_CONFIG,
+      visibleTools:()=>[...visibleTools(),tool("web.search","read-only-network",["research","web"])]});
+    const handle = service.create({toolCallId:"redundant",trustedWorkspace:true,
+      tasks:[{task:"Research sources",allowedTools:["web.search"],allowedToolsets:["research","core"]}]});
+    const task=store.getTask(handle.taskId)!;
+    const worker=store.listSteps(task.id,task.activePlanRevisionId!).find(step=>step.executor.role==="worker")!;
+    expect(worker.authorityPolicy.allowedTools).toEqual(["web.search"]);
+    expect(()=>service.create({toolCallId:"unknown-group",trustedWorkspace:true,
+      tasks:[{task:"Research sources",allowedTools:["web.search"],allowedToolsets:["research","typo"]}]})).toThrow(/toolsets/);
+    expect(()=>service.create({toolCallId:"still-denied",trustedWorkspace:true,
+      tasks:[{task:"Research sources",allowedTools:["terminal.run"],allowedToolsets:["research","core"]}]})).toThrow(/tools/);
+  });
+
   it("fails closed before persistence when requested or effective child access is unavailable", () => {
     const unavailableRequest = new DurableDelegationService({
       store,

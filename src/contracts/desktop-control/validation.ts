@@ -47,8 +47,9 @@ const actions: Check = (v) => array((a) => actionShape(a) && isRecord(a) && (a.e
   new Set((v as { id: string; stepId?: string }[]).map(a => `${a.id}:${a.stepId ?? ''}`)).size === (v as unknown[]).length;
 const taskProgress = shape({ fileOutput: nullable(text(240)), fileVerified: boolean, truncated: boolean,
   steps: array(shape({id,title:text(240,1),role:text(80,1),status:choice(['pending','ready','running','waiting_for_input','waiting_for_approval','completed','failed','skipped','cancelled']),accepted:boolean,diagnostic:boolean,attempts:integer()}, {reason:text(2048),attemptWorkId:id}),64) });
+const executionModel = shape({providerId:text(200,1),modelId:text(200,1),fallback:boolean,state:choice(["attempting","responded","failed"])});
 const work = shape({ id, canonicalId: id, profileId: id, kind: choice(["session", "task", "task_attempt", "schedule", "scheduled_execution", "evolution_review"]),
-  title: text(240, 1), status: choice(WORK_STATUSES), updatedAt: integer(), target: nullable(targetProjection) }, { taskProgress, reason: text(2_048), parentWorkId: id, actions, modelBinding:shape({sessionId:id},{taskId:id}) });
+  title: text(240, 1), status: choice(WORK_STATUSES), updatedAt: integer(), target: nullable(targetProjection) }, { executionModel, executionModelActive:boolean, taskProgress, reason: text(2_048), parentWorkId: id, actions, modelBinding:shape({sessionId:id},{taskId:id}) });
 const usage = shape({ reportedTokens: nullable(integer()), cost: nullable(shape({ amount: (v) => typeof v === "number" && Number.isFinite(v) && v >= 0,
   currency: (v) => typeof v === "string" && /^[A-Z]{3}$/.test(v) })) });
 const evidence = shape({ state: choice(["verified", "unverified", "partial", "failed"]), summary: text(2_048), artifactIds: unique(id, 100) });
@@ -60,6 +61,7 @@ const activityVariants: Record<string, Check> = {
   artifact: shape({...activityBase,kind:choice(["artifact"]),reference:shape({source:choice(["session","task"]),ownerId:id,artifactId:id}),label:text(160),bytes:integer(),mimeType:text(160,1)}),
   plan: shape({ ...activityBase, kind: choice(["plan"]), steps: array(shape({ id, title: text(240, 1), status: choice(["pending", "running", "completed", "failed"]) }), 64) }),
   result: shape({ ...activityBase, kind: choice(["result"]), status: choice(WORK_STATUSES), evidence, usage }, {recoveredErrors:boolean}),
+  model: shape({...activityBase,kind:choice(["model"]),executionModel}),
   status: shape({ ...activityBase, kind: choice(["status"]), status: choice(WORK_STATUSES) }, { reason: text(2_048) }),
 };
 const activity: Check = (v) => isRecord(v) && typeof v.kind === "string" && Object.hasOwn(activityVariants, v.kind) && activityVariants[v.kind]!(v);

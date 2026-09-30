@@ -294,6 +294,8 @@ Research evidence requirements are admitted against that effective access. Live-
 
 Roles, depth, and the Step's immutable child policy are enforced at Task creation and again before worker schemas are built. A worker Step is `forbid` and cannot see `delegate_task`. An orchestrator Step may use `fire_and_forget` only with persisted child-creation authority and remaining depth. A nested call creates a detached linked child Task whose authority, budget, workspace, parent/root Task, parent Attempt, and origin attribution are validated atomically. The same transaction reserves the child's provider-call, token, and cost ceilings against the parent Step; repeated calls share that one ceiling. Tree-wide wall-clock and live-concurrency checks remain hard ceilings, and sequential child phases divide the inherited wall-clock limit. The child cannot silently add a required dependency to the parent PlanRevision.
 
+Model-driven delegation inherits operator-configured spending limits automatically. `delegate_task` does not expose or accept a `spendingLimit` argument: agents cannot invent a monetary cap for a request. Stale calls containing that field receive a validation error instructing the model to retry without it, before any Task is created. Existing persisted Task ceilings remain unchanged; an already paused Task is not silently given a larger budget.
+
 Worker runtimes use the Task approval policy. Hardline denies run first; an authorized ask is persisted against the Task, Step, and Attempt and releases the lease while waiting.
 
 Batch delegation is bounded by `maxBatchTasks` and `maxConcurrentChildren`. The configured batch size is hard-capped at 10 worker task items; default synthesis adds one terminal Step. Step order is stable, while the Task scheduler runs eligible Steps concurrently and derives `completed`, `partial`, `failed`, or `cancelled` terminal state. A per-turn `maxDelegateCallsPerTurn` cap bounds separate creation calls.
@@ -389,3 +391,19 @@ When inspecting tool replay issues, check these fields:
 ## Tool Plan Dependency Model
 
 `tool-call-planner.ts` currently resolves tool calls linearly. There is no explicit DAG dependency model; add one only with tests that prove ordering, failure propagation, and replay behavior.
+
+## Recovery and actual model visibility
+
+Delegation capacity is reserved after authorization and admission checks. Reviewed pre-creation validation failures release that reservation; successful admission retains it. A replay of an existing Task creates no new work. Reservations are atomic and cannot be released twice or from an earlier turn. Unknown failures and possible side effects remain conservative: result metadata alone cannot release capacity or authorize replay.
+
+For an authoritative research request, `synthesis: false` is normalized to the required synthesis step, and the tool result explains the correction. Inspection-only delegation without that requirement still supports disabling synthesis. Exact permitted tool lists can contain redundant built-in toolset filters; effective child access remains the intersection of parent visibility and child policy. Missing tools, unknown groups, zero effective access, and missing live-search prerequisites still fail closed.
+
+`skill.read` accepts `path: "SKILL.md", mode: "full"` as a root instruction read. Other resource-path/mode combinations and all visibility and path checks retain their existing behavior.
+
+During a research request, fresh search-source URLs and new extraction content count as progress even when a completion checkpoint is active. Reordered sources, changed query wording with the same sources, empty results, failed reads, and cached read reuse do not. This progress does not satisfy worker acceptance, synthesis, or file verification. Failed delegation attempts participate in repeated-failure supervision. Existing execution ceilings and operator controls remain in force.
+
+The runtime persists provider route attempts and responses with the actual provider/model and fallback status, scoped to the user turn. Desktop projects a bounded model identity into the chat and shows one fallback notice per route per request, distinguishing attempts, responses, and failures. While foreground execution is active the composer displays the actual model; its menu retains the preferred model, and after execution the composer again identifies the next-message selection. Attempt details expose the worker's actual model. Route state survives reconnect/restart; a new request does not inherit the previous request's execution identity. No provider credentials, response bodies, or raw provider errors are included in these projections.
+
+Regression coverage includes provider fallback, three rejected delegation attempts followed by admission, three worker results, synthesis, restart before delivery, file save/read-back, durable Desktop projection, repeated failures, and untrusted result metadata. These deterministic tests establish execution behavior, not live source quality or installed application identity.
+
+The signed macOS packaged check and its verified runtime identity are recorded in [`recovery-fallback-packaged-v1.json`](../../evals/results/recovery-fallback-packaged-v1.json). It exercises live fallback display, persisted notices, preferred-model preservation, the three-worker workflow, targeted retry, restart, and verified delivery using synthetic model and web responses.

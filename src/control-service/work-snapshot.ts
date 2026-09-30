@@ -13,7 +13,7 @@ import { lstat } from 'node:fs/promises';
 import { resolveGlobalStateHome } from '../config/profile-home.js';
 import { SQLiteSessionDB } from '../session/sqlite-session-db.js';
 import { ControlProtocolError, type InboxProjection, type ActivityProjection, type Page, type PageParams, type WorkProjection } from '../contracts/desktop-control/index.js';
-import { sessionWork } from './work-projections.js';
+import { safeText, sessionWork } from './work-projections.js';
 
 export type WorkState = { requestTurns?: Record<string,string>; inbox?: InboxProjection[]; work: WorkProjection[]; activity: Record<string, ActivityProjection[]>; history?: Record<string, HistoryBoundary>; activeSchedules?:number|null;capturedAt?:number };
 /** Metadata epoch with bounded history previews. No open SQLite transaction or live executor survives capture. */
@@ -51,6 +51,14 @@ export async function captureWork(input: { homeDir: string; profileId: string; v
       const active = sessions.db.query<{ active: number }>('select count(*) as active from session_execution_owners where session_id = ? and profile_id = ? and owner_id is not null and expires_at > ?').get(id, input.profileId, Date.now());
       if (latestUser) state.requestTurns![id] = latestUser.id;
       const work = sessionWork(session, currentEvents, Boolean(active?.active));
+      const route = sessions.db.query<{provider:string;model:string;fallback:number;state:'attempting'|'responded'|'failed'}>(
+        `select substr(json_extract(event_json,'$.provider'),1,200) as provider,
+          substr(json_extract(event_json,'$.model'),1,200) as model, json_extract(event_json,'$.fallback') as fallback,
+          json_extract(event_json,'$.state') as state from session_events where session_id=? and json_valid(event_json)
+          and json_extract(event_json,'$.kind')='provider-route' and json_extract(event_json,'$.turnMessageId')=? order by rowid desc limit 1`
+      ).get(id, latestUser?.id ?? '');
+      if (route) work.executionModel = {providerId:safeText(route.provider,200),modelId:safeText(route.model,200),fallback:route.fallback===1,state:route.state};
+      work.executionModelActive = Boolean(active?.active) && !currentEvents.some(event=>event.kind==='execution-final-outcome-recorded');
       const queued = sessions.db.query<{ count: number }>("select count(*) as count from session_control_receipts where session_id=? and profile_id=? and method='send' and status in ('accepted','dispatched')").get(id, input.profileId);
       if (!active?.active && queued?.count) work.status = 'queued';
       else if (latestUser && work.status === 'draft') { work.status = 'needs_attention'; work.reason = 'No confirmed outcome is available for the latest turn.'; }

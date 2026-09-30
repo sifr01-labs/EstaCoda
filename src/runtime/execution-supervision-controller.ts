@@ -53,6 +53,7 @@ export type ProtectedAuthenticationChallenge = {
 };
 
 export type ExecutionSupervisionControllerOptions = {
+  research?: boolean;
   foregroundTurnId: string;
   existingExecutions: readonly ToolExecutionRecord[];
   currentSessionId: () => string;
@@ -74,6 +75,7 @@ export type ExecutionSupervisionControllerOptions = {
  * the turn. Execution plans are outside this supervision path.
  */
 export class ExecutionSupervisionController {
+  readonly #research: boolean;
   readonly #foregroundTurnId: string;
   readonly #currentSessionId: () => string;
   readonly #locale: "en" | "ar";
@@ -96,8 +98,10 @@ export class ExecutionSupervisionController {
   #authenticationGateState: "challenge-required" | "revalidation-required" | "blocked" | undefined;
   #pendingProtectedChallenge: ProtectedAuthenticationChallenge | undefined;
   #initialized = false;
+  #lastToolFailure: {tool: string; code?: string} | undefined;
 
   constructor(options: ExecutionSupervisionControllerOptions) {
+    this.#research = options.research === true;
     this.#foregroundTurnId = options.foregroundTurnId;
     this.#currentSessionId = options.currentSessionId;
     this.#locale = options.locale;
@@ -110,6 +114,7 @@ export class ExecutionSupervisionController {
     this.#existingExecutions = options.existingExecutions;
     this.#browserObservationGuard = new BrowserObservationGuard(options.maxRepeatedBrowserObservations);
     this.#toolLoopProgressGuard = new ToolLoopProgressGuard({
+      research: this.#research,
       existingExecutions: options.existingExecutions,
       noProgressNudgeIteration: options.noProgressNudgeIteration,
       maxNoProgressIterations: options.maxNoProgressIterations,
@@ -124,6 +129,7 @@ export class ExecutionSupervisionController {
     if (this.#initialized) return;
     this.#initialized = true;
     this.#toolLoopProgressGuard = new ToolLoopProgressGuard({
+      research: this.#research,
       existingExecutions: this.#existingExecutions,
       noProgressNudgeIteration: this.#noProgressNudgeIteration,
       maxNoProgressIterations: this.#maxNoProgressIterations,
@@ -231,6 +237,12 @@ export class ExecutionSupervisionController {
       // still bounds repeated failures even if observation identities churn.
       browserObservation = { ...browserObservation, shouldStop: false, shouldNudge: true, shouldRetarget: true };
     }
+    const failed = [...executions].reverse().find(execution => execution.result?.ok === false);
+    if (failed) {
+      const code = failed.result?.metadata?.code;
+      this.#lastToolFailure = {tool: failed.tool.name,
+        ...(typeof code === "string" && /^[a-z0-9_-]{1,80}$/iu.test(code) ? {code} : {})};
+    } else if (executions.some(execution => execution.result?.ok)) this.#lastToolFailure = undefined;
     const toolLoopProgress = this.#toolLoopProgressGuard.observe(executions);
     this.#executionWorkingSet?.observe(
       executions,
@@ -289,9 +301,11 @@ export class ExecutionSupervisionController {
   }
 
   toolLoopNoProgressStopReceipt(execution: ProviderExecutionResult): ProviderExecutionResult {
+    const failure = this.#lastToolFailure;
+    const detail = failure ? ` ${failure.tool}${failure.code ? ` (${failure.code})` : ""}.` : "";
     return receiptExecution(execution, this.#locale === "ar"
-      ? `توقفت حلقة الأدوات بعد ${this.#maxNoProgressIterations} تكرارات متتالية بلا تقدم مادي. لم تعد الخطة أو حالتها شرطًا لهذا القرار.`
-      : `The foreground tool loop stopped after ${this.#maxNoProgressIterations} consecutive iterations without material progress. This decision is independent of any plan or plan status.`);
+      ? `توقفت المحاولات بعد ${this.#maxNoProgressIterations} تكرارات متتالية بلا تقدم جديد.${detail ? ` \u2068${detail.trim()}\u2069` : ""} حُفظ العمل السابق. يمكنك طلب المتابعة لتصحيح الطلب ومواصلة العمل المتبقي.`
+      : `Stopped retrying after ${this.#maxNoProgressIterations} consecutive iterations without new execution evidence.${failure ? " Last unsuccessful tool:" + detail : ""} Earlier work is preserved. Ask to continue so the remaining work can resume with corrected arguments or a different approach.`);
   }
 
   emergencyDeadlineReceipt(execution: ProviderExecutionResult): ProviderExecutionResult {

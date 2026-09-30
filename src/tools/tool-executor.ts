@@ -297,12 +297,6 @@ export class ToolExecutor {
     }
     const riskClass = moreRestrictiveRiskClass(baseRiskClass, securityResolution?.riskClass);
     const executionEffect = resolveToolExecutionEffect(tool, riskClass);
-    if (tool.name === "delegate_task" && request.delegateCallBudget !== undefined) {
-      const budget = request.delegateCallBudget.tryConsume();
-      if (budget.allowed === false) {
-        return await this.#blockedDelegateCallLimit(request, tool, riskClass, budget);
-      }
-    }
 
     const targetKey = securityResolution?.targetKey ?? await this.#buildSecurityTargetKey(tool.name, request.input);
     const targetSummary = securityResolution?.targetSummary ?? summarizeSecurityTarget(tool.name, request.input);
@@ -544,6 +538,14 @@ export class ToolExecutor {
       }
     }
 
+    const delegationReservation = tool.name === "delegate_task" ? request.delegateCallBudget?.reserve() : undefined;
+    if (delegationReservation !== undefined) {
+      const budget = delegationReservation;
+      if (budget.allowed === false) {
+        return await this.#blockedDelegateCallLimit(request, tool, riskClass, budget);
+      }
+    }
+
     await this.#sessionDb.appendEvent(request.sessionId, {
       kind: "tool-called",
       tool: tool.name,
@@ -698,6 +700,11 @@ export class ToolExecutor {
         inputLifetime.abort();
         timeout.cleanup();
       }
+    }
+
+    if (tool.name === "delegate_task" &&
+        (settlement.dispatchState === "not_started" || isUndispatchedResult(result))) {
+      delegationReservation?.release();
     }
 
     if (mutationReplayKey !== undefined && settlement.sideEffectState === "possible") {
@@ -954,6 +961,7 @@ export class ToolExecutor {
       }
     };
     const persistedCall = redactToolCallForPersistence(tool.name, request.input, request.providerNativeToolCall);
+    this.#trajectoryRecorder.record("tool-result", {tool:tool.name,result});
     await this.#sessionDb.appendEvent(request.sessionId, {
       kind: "tool-result",
       tool: tool.name,

@@ -73,9 +73,11 @@ export async function appendTaskWork(state: WorkState, store: TaskStore, signal?
     for (const attempt of store.listAttempts(task.id)) {
       const run = attemptWork(work, attempt); delete run.taskProgress; state.work.push(run);
       const worker=attempt.workerSessionId?state.work.find(item=>item.id==='session:'+attempt.workerSessionId):undefined;
+      if(worker?.executionModel)run.executionModel=worker.executionModel;
       if(worker){worker.parentWorkId=run.id;worker.actions=[{id:'inspect_result',enabled:true}];delete worker.modelBinding;}
       state.activity[run.id] = [{ id: `status:${attempt.id}`, profileId: task.profileId, workId: run.id,
         sequence: 0, timestamp: timestamp(attempt.updatedAt), kind: 'status', status: run.status }];
+      if(run.executionModel) state.activity[run.id]!.push({id:`model:${attempt.id}`,profileId:task.profileId,workId:run.id,sequence:1,timestamp:timestamp(attempt.updatedAt),kind:'model',executionModel:run.executionModel});
     }
   }
   state.work.sort((a, b) => b.updatedAt - a.updatedAt || a.id.localeCompare(b.id));

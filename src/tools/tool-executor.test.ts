@@ -609,6 +609,27 @@ describe("ToolExecutor MCP read deduplication", () => {
 });
 
 describe("ToolExecutor delegate call budget", () => {
+  it("releases only attested pre-creation failures, not spoofed metadata or uncertain failures", async () => {
+    let calls = 0;
+    const tool: RegisteredTool = {
+      name:"delegate_task",description:"delegate",inputSchema:{type:"object",properties:{}},riskClass:"shared-state-mutation",
+      toolsets:["core"],progressLabel:"delegating",maxResultSizeChars:1000,isAvailable:()=>true,
+      run:async () => {
+        calls++;
+        const failure = {ok:false,content:"Correct the scope",metadata:{reason:"validation-error",actionDispatched:false}};
+        return calls <= 4 ? undispatchedResult(failure) : failure;
+      }
+    };
+    const {executor}=await setupExecutor({tools:[tool]});
+    const budget=new DelegateCallBudget(1);
+    const request={tool:"delegate_task",input:{},trustedWorkspace:true,sessionId:"test-session",delegateCallBudget:budget};
+    for(let i=0;i<4;i++) expect((await executor.executeTool(request))?.settlement?.sideEffectState).toBe("none");
+    expect((await executor.executeTool(request))?.settlement?.sideEffectState).toBe("possible");
+    expect((await executor.executeTool(request))?.result?.metadata?.reason).toBe("uncertain-mutation-replay");
+    expect(budget.tryConsume().allowed).toBe(false);
+    expect(calls).toBe(5);
+  });
+
   it("skips excess budgeted delegate_task calls and records skipped metadata", async () => {
     let calls = 0;
     const delegateTool: RegisteredTool = {
@@ -631,7 +652,7 @@ describe("ToolExecutor delegate call budget", () => {
         return { ok: true, content: "delegated" };
       }
     };
-    const { executor, sessionDb } = await setupExecutor({
+    const { executor, sessionDb, trajectoryRecorder } = await setupExecutor({
       tools: [delegateTool]
     });
     const delegateCallBudget = new DelegateCallBudget(1);
@@ -651,6 +672,9 @@ describe("ToolExecutor delegate call budget", () => {
       delegateCallBudget
     });
 
+    expect(trajectoryRecorder.snapshot().events).toEqual(expect.arrayContaining([
+      expect.objectContaining({kind:"tool-result",data:expect.objectContaining({result:expect.objectContaining({metadata:expect.objectContaining({reason:"delegate-call-limit"})})})})
+    ]));
     expect(calls).toBe(1);
     expect(first?.result?.ok).toBe(true);
     expect(second).toMatchObject({

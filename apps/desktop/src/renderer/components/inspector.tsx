@@ -27,17 +27,17 @@ export function Inspector({work,fixture,phase,plan,api,models,draft,runtimeApi,c
   if(fixture||!api||!models)return;let cancelled=false;
   const refresh=async()=>{
    try{
-    const [targets,catalog,override]=await Promise.all([api.targets(),models.models(),work?.modelBinding?models.workOverride(work.id):Promise.resolve(null)]);
+    const [targets,catalog,override]=await Promise.all([api.targets(),models.models(),work?.modelBinding&&['session','task'].includes(work.kind)?models.workOverride(work.id):Promise.resolve(null)]);
     const binding=work?.target??draft?.target;
     const target=targets.items.find(target=>target.targetId===binding?.targetId&&target.targetGeneration===binding.targetGeneration);
     const selected=work?override?.selection:draft?.modelSelection;
     const primary=catalog.items.find(row=>row.role==='primary');
-    if(!cancelled)setExecution({target,model:work&&!work.modelBinding?t("Unavailable"):selected?catalog.items.find(row=>row.providerId===selected.providerId&&row.id===selected.modelId)?.label??selected.modelId:primary?primary.label:t("Unavailable")});
+    if(!cancelled)setExecution({target,model:work?.executionModel?work.executionModel.modelId:work&&!work.modelBinding?t("Unavailable"):selected?catalog.items.find(row=>row.providerId===selected.providerId&&row.id===selected.modelId)?.label??selected.modelId:primary?primary.label:t("Unavailable")});
    }catch{if(!cancelled)setExecution(null);}
   };
   setExecution(null);void refresh();const timer=setInterval(()=>void refresh(),3000);
   return()=>{cancelled=true;clearInterval(timer);};
- },[api,models,fixture,work?.id,work?.profileId,work?.target?.targetId,work?.target?.targetGeneration,draft?.target?.targetId,draft?.target?.targetGeneration,draft?.modelSelection?.providerId,draft?.modelSelection?.modelId]);
+ },[api,models,fixture,work?.id,work?.profileId,work?.executionModel?.modelId,work?.target?.targetId,work?.target?.targetGeneration,draft?.target?.targetId,draft?.target?.targetGeneration,draft?.modelSelection?.providerId,draft?.modelSelection?.modelId]);
 
  const final=work?.id!=='retry'||phase==='done';
  const steps=fixture&&work?[t('Inspect the current behavior'),work.id==='retry'?t('Implement bounded retries'):t('Review the available evidence'),work.id==='retry'?t('Verify with focused tests'):t('Summarize findings and limits')].map((title,index)=>({id:String(index),title,status:index===2&&!final?'pending':'completed'})):plan?.steps??[];

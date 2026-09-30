@@ -51,6 +51,23 @@ function browserDiscovery(text: string, observationId = 1): ToolExecutionRecord 
 }
 
 describe("ToolLoopProgressGuard", () => {
+  it("credits new research sources under a checkpoint but ignores reordered sources, clocks, cache reuse and empty searches", async () => {
+    const checkpoint=new ExecutionCheckpointController({sessionId:"s",profileId:"p"});
+    await checkpoint.ensure({originTurnId:"t",originalObjective:"Research and save report",qualificationReasons:["external_multi_step"],intentLabels:["research"],requiredOperations:["mutation","verification"],connectorIds:[],completionFloor:"mutation_with_verification"});
+    const guard=new ToolLoopProgressGuard({research:true,checkpointReader:checkpoint,noProgressNudgeIteration:3,maxNoProgressIterations:6});
+    const search=(urls:string[],query="battery")=>execution({tool:{...execution().tool,name:"web.search"},input:{query},executionEffect:{kind:"read"},result:{ok:true,content:"results",metadata:{results:urls.map(url=>({url}))}}});
+    const a="https://example.org/a", b="https://example.org/b";
+    const failed=execution({tool:{...execution().tool,name:"delegate_task"},result:{ok:false,content:"Invalid scope"}});
+    for(let i=0;i<5;i++) expect(guard.observe([failed]).shouldStop).toBe(false);
+    expect(guard.observe([search([a,b])])).toMatchObject({materialProgress:true,noProgressIterations:0,shouldStop:false});
+    expect(guard.observe([search([b,a],"rephrased")]).materialProgress).toBe(false);
+    expect(guard.observe([search([])]).materialProgress).toBe(false);
+    expect(guard.observe([{...search(["https://example.org/c"]),readReuseOf:"old"}]).materialProgress).toBe(false);
+    expect(guard.observe([search(["https://example.org/c"])])).toMatchObject({materialProgress:true,noProgressIterations:0});
+    for(let i=0;i<6;i++) expect(guard.observe([failed]).shouldStop).toBe(i===5);
+    expect(checkpoint.current()?.progressRevision).toBe(0);
+  });
+
   it("does not credit reused web observations even when feedback labels change", async () => {
     const guard = new ToolLoopProgressGuard({ noProgressNudgeIteration: 3, maxNoProgressIterations: 6 });
     const read = execution({ tool: { ...execution().tool, name: "web.extract" }, executionEffect: { kind: "read" } });

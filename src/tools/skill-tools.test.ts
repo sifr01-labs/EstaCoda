@@ -144,6 +144,15 @@ describe("skill.read", () => {
     });
   });
 
+  it("accepts a full root-document read without weakening resource-path validation", async () => {
+    const harness = await skillToolHarness([loadedSkill({ name: "root-read" })]);
+    const root = await harness.run("skill.read", {name:"root-read",mode:"full"});
+    const redundant = await harness.run("skill.read", {name:"root-read",path:"SKILL.md",mode:"full"});
+    expect(redundant).toEqual(root);
+    expect(redundant.ok).toBe(true);
+    expect((await harness.run("skill.read", {name:"root-read",path:"../SKILL.md",mode:"full"})).ok).toBe(false);
+  });
+
   it("rejects path reads combined with root-only modes using a structured error", async () => {
     const harness = await skillToolHarness([loadedSkill({ name: "bad-combo" })]);
 

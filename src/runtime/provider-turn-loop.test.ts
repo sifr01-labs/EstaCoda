@@ -1941,8 +1941,8 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     expect(harness.completeSpy).toHaveBeenCalledTimes(7);
     expect(harness.executePlans).toHaveBeenCalledTimes(7);
     expect(requests.filter((request) => JSON.stringify(request.messages).includes(nudgeText))).toHaveLength(1);
-    expect(result.providerExecution?.response?.content).toContain("foreground tool loop stopped");
-    expect(result.providerExecution?.response?.content).toContain("independent of any plan");
+    expect(result.providerExecution?.response?.content).toContain("Stopped retrying after");
+    expect(result.providerExecution?.response?.content).toContain("Earlier work is preserved");
     expect(events).toEqual(expect.arrayContaining([
       expect.objectContaining({
         kind: "provider-budget-exhausted",
@@ -1993,7 +1993,7 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     expect(harness.completeSpy).toHaveBeenCalledTimes(3);
     expect(checkpoint.current()?.progressRevision).toBe(0);
     expect(result.terminationCause).toBe("tool_loop_no_progress");
-    expect(result.providerExecution?.response?.content).toContain("foreground tool loop stopped");
+    expect(result.providerExecution?.response?.content).toContain("Stopped retrying after");
   });
 
   it("does not stop checkpointed work while new connector mutations and declared verification advance it", async () => {
@@ -3330,7 +3330,7 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     const result = await runBasicProviderTurn(harness.loop);
 
     expect(harness.completeSpy).toHaveBeenCalledTimes(7);
-    expect(result.providerExecution?.response?.content).toContain("foreground tool loop stopped");
+    expect(result.providerExecution?.response?.content).toContain("Stopped retrying after");
     const nudgeText = "The foreground tool loop has repeated the same calls or results without material progress.";
     const requests = harness.completeSpy.mock.calls.map(([request]) => request as ProviderRequest);
     expect(requests.filter((request) => JSON.stringify(request.messages).includes(nudgeText))).toHaveLength(1);

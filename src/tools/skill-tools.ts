@@ -160,8 +160,8 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
         type: "object",
         properties: {
           name: { type: "string" },
-          path: { type: "string" },
-          mode: { type: "string", enum: ["contract", "full"] }
+          path: { type: "string", description: "Optional skill resource path. Omit for root instructions; only SKILL.md can be combined with mode: full." },
+          mode: { type: "string", enum: ["contract", "full"], description: "Root instruction format. Omit when reading a resource path." }
         },
         required: ["name"]
       },
@@ -198,8 +198,8 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
         type: "object",
         properties: {
           name: { type: "string" },
-          path: { type: "string" },
-          mode: { type: "string", enum: ["contract", "full"] }
+          path: { type: "string", description: "Optional skill resource path. Omit for root instructions; only SKILL.md can be combined with mode: full." },
+          mode: { type: "string", enum: ["contract", "full"], description: "Root instruction format. Omit when reading a resource path." }
         },
         required: ["name"]
       },
@@ -1550,6 +1550,9 @@ async function readSkillContent(
   input: SkillReadInput,
   configuredValues: Record<string, unknown> | undefined
 ): Promise<ToolResult> {
+  // A full read of the root document is the same operation as the root read.
+  // Resource paths still pass the existing visibility and traversal checks.
+  if (input.path === "SKILL.md" && input.mode === "full") input = { ...input, path: undefined };
   if (isNonEmptyString(input.path)) {
     if (input.mode !== undefined) {
       return {

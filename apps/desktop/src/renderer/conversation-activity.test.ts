@@ -1,3 +1,4 @@
+import {fallbackNotices} from './conversation-activity.js';
 import {describe,it,expect} from 'vitest';
 import type {ActivityProjection} from '@estacoda/control-protocol';
 import {activityRuns,runContent,toolActions} from './conversation-activity.js';
@@ -30,4 +31,13 @@ describe('conversation activity',()=>{
   const artifact:ActivityProjection={...base,id:'f',kind:'artifact',label:'a.yaml',bytes:1,mimeType:'text/yaml',reference:{source:'session',ownerId:'s',artifactId:'f'}};
   const content=runContent(activityRuns([artifact,{...artifact,id:'f2'},{...artifact,id:'f3',reference:{...artifact.reference,ownerId:'other'}}])[0]!);expect(content.outputs).toHaveLength(2);
  });
+});
+
+it('keeps one fallback notice per route and distinguishes trying, success and failure on replay',()=>{
+ const route=(id:string,state:'attempting'|'responded'|'failed',fallback=true):ActivityProjection=>({...base,id,kind:'model',executionModel:{providerId:'p',modelId:'actual',fallback,state}});
+ const items=[route('start','attempting'),route('success','responded'),route('retry','attempting')];
+ expect(fallbackNotices(items)).toEqual([expect.objectContaining({id:'start',executionModel:expect.objectContaining({state:'responded'})})]);
+ expect(fallbackNotices([...items,route('failure','failed')])[0]?.executionModel.state).toBe('failed');
+ expect(fallbackNotices([route('primary','responded',false)])).toEqual([]);
+ expect(fallbackNotices([route('start','attempting')])[0]?.executionModel.state).toBe('attempting');
 });
