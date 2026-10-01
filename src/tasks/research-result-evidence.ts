@@ -7,7 +7,9 @@ const CLAIM_HEADER = "| Source URL | Supported claim | Limitation |";
 const SOURCE_HEADER = "| Source URL | Published/revised | Retrieved | Access | Supported claim | Limitation |";
 const MAX_ROWS = 24;
 const MAX_TABLE_CHARS = 16_000;
-export const RESEARCH_EVIDENCE_INSTRUCTION = `Include a bounded Markdown source/claim table (1-${MAX_ROWS} rows, no pipes inside cells):\n${CLAIM_HEADER}\n| --- | --- | --- |\nUse plain observed URLs, concise supported claims, and a concrete limitation for each claim. Never invent publication dates or claim full-text access from snippets. The runtime attaches observed publication/revision dates, retrieval dates and access status. Synthesis must read every accepted dependency result completely, preserve its evidence limitations and freshness scope, and cite only their observed sources. For synthesis, copy supported-claim and limitation cells from the accepted worker tables unchanged; synthesize the narrative separately. A URL establishes provenance, not scientific truth.`;
+export const RESEARCH_EVIDENCE_INSTRUCTION = `Include a bounded Markdown source/claim table (1-${MAX_ROWS} rows, no pipes inside cells):\n${CLAIM_HEADER}\n| --- | --- | --- |\nUse plain observed URLs, concise supported claims, and a concrete limitation for each claim. Never invent publication dates or claim full-text access from snippets. The runtime attaches observed publication/revision dates, retrieval dates and access status. A URL establishes provenance, not scientific truth.`;
+
+export const SYNTHESIS_EVIDENCE_INSTRUCTION = "Synthesis must read every accepted dependency result completely, preserve its evidence limitations and freshness scope, and cite only their observed sources. For synthesis, copy supported-claim and limitation cells from the accepted worker tables unchanged; synthesize the narrative separately.";
 
 type SourceRow = { url: string; published: string; retrieved: string; access: string; claim: string; limitation: string };
 

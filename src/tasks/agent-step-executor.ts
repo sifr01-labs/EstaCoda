@@ -1,7 +1,7 @@
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { fileOutputEvidence } from "../runtime/file-output-evidence.js";
 import type { ExecutionEvidenceRecord } from "../contracts/execution-plan.js";
-import { groundResearchResult, requiresSourceTable, RESEARCH_EVIDENCE_INSTRUCTION } from "./research-result-evidence.js";
+import { groundResearchResult, requiresSourceTable, RESEARCH_EVIDENCE_INSTRUCTION, SYNTHESIS_EVIDENCE_INSTRUCTION } from "./research-result-evidence.js";
 import {taskModelOverride} from './task-model-override.js';
 import type { ArtifactRecord } from "../contracts/artifact.js";
 import type { DelegateModelOverride, DelegateRole, DelegationConfig } from "../contracts/delegation.js";
@@ -569,7 +569,7 @@ function dependencyContext(store: TaskStore, task: Task, step: TaskStep): string
   const synthesisResearchBoundary = synthesisResearchScopeContext(store, task, step);
   const partialSynthesis = partialSynthesisContext(store, task, step, availableResults);
   return boundText([
-    `Durable Task objective: ${task.objective}`,
+    step.executor.role === "worker" && (step.executor.research !== undefined || step.executor.requestContract?.requirements.research !== undefined) ? `Assigned research objective: ${step.objective}. You are a research worker, not the synthesizer. Gather evidence for this scope; no worker dependency reports are required.` : `Durable Task objective: ${task.objective}`,
     ...(step.executor.requestContract === undefined ? [] : [
       `Original user objective (context, not a new delegation request):\n${step.executor.requestContract.objective.split("\n").map((line) => `> ${line}`).join("\n")}`,
       `Research workflow: ${step.executor.requestContract.skillName ?? "no explicit skill"}. Preserve the original freshness scope: ${step.executor.requestContract.requirements.research?.fresh ? "current sources required" : "no explicit freshness bound"}. Work only on this assigned Step; do not repeat the parent's worker batch or save its report from a worker.`,
@@ -577,7 +577,7 @@ function dependencyContext(store: TaskStore, task: Task, step: TaskStep): string
     ]),
     `Current Step: ${step.title}`,
     resultInstruction(step),
-    ...(!requiresSourceTable(step, store) ? [] : [RESEARCH_EVIDENCE_INSTRUCTION]),
+    ...(!requiresSourceTable(step, store) ? [] : [RESEARCH_EVIDENCE_INSTRUCTION, ...(step.executor.role === "synthesis" ? [SYNTHESIS_EVIDENCE_INSTRUCTION] : [])]),
     guidance.length === 0
       ? "Operator guidance: none."
       : `Authorized operator guidance (later entries take precedence without overriding policy):\n${JSON.stringify(guidance)}`,

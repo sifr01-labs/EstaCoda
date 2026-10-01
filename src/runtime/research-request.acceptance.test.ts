@@ -74,14 +74,25 @@ describe.sequential("research workflow acceptance harness", () => {
     scriptConsumed(h);
     const {scheduler,resultService}=schedulerFor(h,task.id);
     for(let index=0;index<3;index++) {
-      h.enqueue(nativeCall("web_search",{query:`battery recycling ${index}`}),answer(`Scope ${index}: [source](${SOURCE_URL}).\n\n${CLAIM_TABLE}`));
+      h.enqueue(nativeCall("web_search",{query:`battery recycling ${index}`}),answer(`Scope ${index}: [source](${SOURCE_URL}).\n\n${"Observed research detail. ".repeat(450)}\nTAIL-SCOPE-${index}\n${CLAIM_TABLE}`));
       expect(await scheduler.runOnce()).toMatchObject({completed:1,failed:0});
     }
     const accepted=h.store.listResults(task.id).filter(item=>item.kind==="text"&&item.disposition==="accepted");
     expect(accepted).toHaveLength(3);
-    for(const item of accepted)h.enqueue(nativeCall("task_result_read",{task_id:task.id,result_id:item.id}));
+    for(const item of accepted) {
+      const text = (await resultService.readText({ taskId: task.id, resultId: item.id, sessionId: h.runtime.sessionId })).content;
+      const pageSize = item.id === accepted[0]!.id ? 8000 : 20000;
+      for (let offset = 0; offset < Array.from(text).length; offset += pageSize)
+        h.enqueue(nativeCall("task_result_read",{task_id:task.id,result_id:item.id,offset,max_chars:pageSize}));
+    }
     h.enqueue(answer(`${REPORT}\n${CLAIM_TABLE}`));
     expect(await scheduler.runOnce()).toMatchObject({completed:1,failed:0});
+    const delivered = h.requests.at(-1)!.messages.map(message => typeof message.content === "string" ? message.content : JSON.stringify(message.content)).join("\n");
+    for (let index = 0; index < 3; index++) expect(delivered).toContain(`TAIL-SCOPE-${index}`);
+    expect(delivered).toContain("Task result pages delivered in this prompt");
+    const workerPrompt = h.requests.find(request => request.messages.some(message => typeof message.content === "string" && message.content.includes("Assigned research objective:")));
+    expect(workerPrompt).toBeDefined();
+    expect(JSON.stringify(workerPrompt!.messages)).not.toContain("Synthesis must read every accepted dependency");
     const synthesis=steps.find(step=>step.executor.role==="synthesis")!;
     const final=h.store.listResults(task.id).find(item=>item.stepId===synthesis.id&&item.disposition==="accepted")!;
     const report=await resultService.readText({taskId:task.id,resultId:final.id,sessionId:h.runtime.sessionId});

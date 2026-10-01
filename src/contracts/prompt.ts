@@ -25,6 +25,7 @@ export type PromptLayerName =
   | "external-recall"
   | "authentication-state"
   | "native-tools"
+  | "task-result-context"
   | "tool-results"
   | "artifacts"
   | "fallback"

@@ -37,7 +37,8 @@ mkdirSync(workspace);mkdirSync(paths.profileRoot,{recursive:true});
 const source='https://93.184.216.34/fixture/battery-recycling';
 const inaccessible='https://93.184.216.34/fixture/unavailable';
 const table=`| Source URL | Supported claim | Limitation |\n| --- | --- | --- |\n| ${source} | Synthetic research fixture | Illustrative snippet; not scientific evidence |`;
-const report=`# Battery recycling\n\nSynthetic research fixture. [Source](${source})\n${table}`;
+const largeEvidence="Synthetic evidence detail. ".repeat(480)+"\nREPORT-BODY-END\n";
+const report=`# Battery recycling\n\nSynthetic research fixture. [Source](${source})\n${largeEvidence}${table}`;
 let requests=0,phase='research',saveIndex=0,recoveryIndex=0,diagnostics='',providerErrors:string[]=[];
 let sessionId='',reportContent='',bridgeVerified=false;
 let failedWorkerCandidates=0,repairedWorkerOnce=false,researchRead=false;
@@ -63,8 +64,8 @@ const provider=createServer(async(req,res)=>{
   else if(phase==='save'||text.includes('Current Step: Save and verify research report')){
    const task=store.listTasks()[0],synthesis=store.listSteps(task.id,task.activePlanRevisionId).find((s:any)=>s.executor.role==='synthesis');
    const result=store.listResults(task.id).find((r:any)=>r.stepId===synthesis.id&&r.disposition==='accepted');assert(result);
-   if(saveIndex===0)next=[tool('task_result_read',{task_id:task.id,result_id:result.id})];
-   else if(saveIndex===1){reportContent=(await resultService.readText({taskId:task.id,resultId:result.id,sessionId})).content;next=[tool('file_write',{path:'report.md',content:reportContent,overwrite:true})];}
+   if(saveIndex===0)next=[tool('task_result_read',{task_id:task.id,result_id:result.id,max_chars:20000})];
+   else if(saveIndex===1){reportContent=(await resultService.readText({taskId:task.id,resultId:result.id,sessionId})).content;assert(text.includes(JSON.stringify(reportContent).slice(1,-1)),'Delivery did not receive the complete synthesis');next=[tool('file_write',{path:'report.md',content:reportContent,overwrite:true})];}
    else if(saveIndex===2)next=[tool('file_read',{path:'report.md'})];
    else content='Saved report.md.';
    saveIndex++;
@@ -80,14 +81,14 @@ const provider=createServer(async(req,res)=>{
    else content='Research is blocked because search is unavailable.';
   }else if(text.includes('Assigned research scopes:')){
    const task=store.listTasks()[0];const accepted=store.listResults(task.id).filter((r:any)=>r.disposition==='accepted');
-   if(!hasFeedback)next=accepted.map((r:any)=>tool('task_result_read',{task_id:task.id,result_id:r.id}));
-   else content=report;
+   if(!hasFeedback)next=accepted.map((r:any)=>tool('task_result_read',{task_id:task.id,result_id:r.id,max_chars:20000}));
+   else {for(const result of accepted){const body=(await resultService.readText({taskId:task.id,resultId:result.id,sessionId})).content;assert(text.includes(JSON.stringify(body).slice(1,-1)),'Synthesis did not receive a complete worker result');}content=report;}
   }else if(text.includes('Work only on this assigned Step')){
    await workerGate;
    if(!hasFeedback)next=[tool('web_search',{query:'battery recycling '+requests}),tool('web_extract',{url:inaccessible})];
    else if(failedWorkerCandidates<3&&text.includes('Research battery recycling: processing.')){failedWorkerCandidates++;content='Draft findings without the required source table.';}
    else if(!repairedWorkerOnce&&text.includes('Research battery recycling: collection.')){repairedWorkerOnce=true;content=table.replace(source,'https://unobserved.example/claim');}
-   else content=`Synthetic evidence: ${source}\n${table}`;
+   else content=`Synthetic evidence: ${source}\n${largeEvidence}${table}`;
   }else if(!researchRead){researchRead=true;next=[tool('skill_read',{name:'researcher',path:'references/sources.md',mode:'contract'})];}
   else if(store.listTasks().length===0)next=[tool('delegate_task',{tasks:['collection','processing','reuse'].map(scope=>({task:`Research battery recycling: ${scope}.`,context:"User requested current research using 3 subagents. Save report.md. This is background context only.",allowedTools:['web.search','web.extract'],research:{scope,requireLiveSources:true,requireRepositoryEvidence:false}}))})];
   else content='Research workers are running; report delivery remains pending.';
@@ -235,7 +236,7 @@ try{
  assert((await resultService.readText({taskId:task.id,resultId:drafts[0].id,sessionId})).content.includes('Draft findings without the required source table.'));
  const toolResults=allEvents.filter((e:any)=>e.kind==='tool-result');
  assert.equal(toolResults.length,calls.reduce((n,x)=>n+x.tools.length,0));
- const sourceOverlay=[...new Set([...execFileSync('git',['-C',sourceRoot,'diff','--name-only','--','src','apps/desktop','scripts','package.json'],{encoding:'utf8'}).trim().split('\n').filter(Boolean),'package.json','src/eval/fixtures/research-workflow-harness.ts','src/eval/fixtures/research-workflow-release.ts','src/runtime/research-surfaces.acceptance.test.ts','scripts/validate-research-reliability.ts','apps/desktop/tests/research-packaged.mts','apps/desktop/src/renderer/components/chat-tasks.tsx','apps/desktop/src/shared/i18n/chat-tasks.ts'])].sort().map(path=>({path,sha256:createHash('sha256').update(readFileSync(join(sourceRoot,path))).digest('hex')}));
+ const sourceOverlay=[...new Set([...execFileSync('git',['-C',sourceRoot,'diff','--name-only','--','src','apps/desktop','scripts','package.json'],{encoding:'utf8'}).trim().split('\n').filter(Boolean),'package.json','src/prompt/task-result-context.ts','src/prompt/task-result-context.test.ts','src/eval/fixtures/research-workflow-harness.ts','src/eval/fixtures/research-workflow-release.ts','src/runtime/research-surfaces.acceptance.test.ts','scripts/validate-research-reliability.ts','apps/desktop/tests/research-packaged.mts','apps/desktop/src/renderer/components/chat-tasks.tsx','apps/desktop/src/shared/i18n/chat-tasks.ts'])].sort().map(path=>({path,sha256:createHash('sha256').update(readFileSync(join(sourceRoot,path))).digest('hex')}));
  const measurements={
   version:1,passed:true,measuredAt:new Date().toISOString(),sourceBaseCommit:execFileSync('git',['-C',sourceRoot,'rev-parse','HEAD'],{encoding:'utf8'}).trim(),sourceOverlay,
   platform:process.platform,arch:process.arch,
@@ -243,7 +244,7 @@ try{
   fixtures:{model:'scripted loopback HTTP',web:'in-process registered synthetic provider in packaged supervisor',liveModelCalls:0,transport:'actual signed app + preload/Main + owned bridge + private control'},
   workflow:{workers:workers.length,acceptedResults:store.listResults(task.id).filter((r:any)=>r.disposition==='accepted').length,distinctChildSessions:workerSessions.size,tasks:store.listTasks().length,searches:searches(),providerCalls:calls.filter(c=>['research','save'].includes(c.phase)).length,appRestartNoReplay:true,fileBytes:Buffer.byteLength(reportContent),fileSha256:createHash('sha256').update(reportContent).digest('hex'),readbackVerified:true,historicalTaskStatus:store.getTask(task.id).status},
   allScenarios:{providerCalls:requests,actualToolResults:toolResults.length,failedToolResults:toolResults.filter((e:any)=>!e.result.ok).length},
-  scenarios:{stepScopedRequirements:true,evidenceCorrection:true,exhaustedRepairDraftPreserved:true,redundantResourceMode:true,researchThroughFallback:true,fallbackComposer:true,fallbackNotice:true,fallbackRestart:true,preferredModelPreserved:true,research:true,automaticReportDelivery:true,alternativeSourceRecovery:true,desktopTranscriptExactlyOnce:true,chatOwnedTasksUi:true,oneSidebarEntry:true,handoffRemainsRunning:true,gatewayRestartNoReplay:true,failedWorkerDraftPreserved:true,targetedRetryAfterGatewayRestart:true,saveOnlyAfterRestart:true,skillRecovery:true,missingSearch:true,falseSaveBlocked:true},
+  scenarios:{largeReportContext:true,stepScopedRequirements:true,evidenceCorrection:true,exhaustedRepairDraftPreserved:true,redundantResourceMode:true,researchThroughFallback:true,fallbackComposer:true,fallbackNotice:true,fallbackRestart:true,preferredModelPreserved:true,research:true,automaticReportDelivery:true,alternativeSourceRecovery:true,desktopTranscriptExactlyOnce:true,chatOwnedTasksUi:true,oneSidebarEntry:true,handoffRemainsRunning:true,gatewayRestartNoReplay:true,failedWorkerDraftPreserved:true,targetedRetryAfterGatewayRestart:true,saveOnlyAfterRestart:true,skillRecovery:true,missingSearch:true,falseSaveBlocked:true},
   liveAssessment:'pending approved model, sources and spend ceiling'
  };
  mkdirSync(dirname(output),{recursive:true});writeFileSync(output,JSON.stringify(measurements,null,2)+'\n');

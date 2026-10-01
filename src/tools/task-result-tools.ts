@@ -35,7 +35,7 @@ export function createTaskResultTools(options: {
   const tools: RegisteredTool[] = [{
     name: "task.result.read",
     description:
-      "Read one authorized durable Task result as a bounded page. Requires the Task and Result IDs. Continue with next_offset when has_more is true. Binary artifacts are not returned as text.",
+      "Read one authorized durable Task result as a bounded page. Requires the Task and Result IDs. Continue with offset=nextOffset when hasMore is true. Binary artifacts are not returned as text.",
     inputSchema: {
       type: "object",
       additionalProperties: false,

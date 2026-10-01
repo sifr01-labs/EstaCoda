@@ -1,3 +1,4 @@
+import { taskResultContext } from "./task-result-context.js";
 import { renderCapabilityState, type RuntimeCapabilityState } from "../runtime/capability-state.js";
 import { reviewedApiDescription } from "../contracts/artifact.js";
 import type { ArtifactRecord } from "../contracts/artifact.js";
@@ -468,6 +469,7 @@ function buildBaseLayers(
     handledAttachmentIdsFromExecutions(input.toolExecutions)
   );
   const sessionHistory = renderSessionHistory(input.sessionHistory);
+  const taskPages = taskResultContext(input.toolExecutions, input.model?.contextWindowTokens ?? 128_000);
   const conversationContinuationPrompt = isAcknowledgementContinuation(input.userText)
     ? renderConversationContinuationPrompt(input.conversationContinuationState)
     : undefined;
@@ -580,6 +582,10 @@ function buildBaseLayers(
             content: renderBrowserStateProjection(input.browserState)
           })
         ]),
+    ...(taskPages === undefined ? [] : [layer({
+      name: "task-result-context", cacheable: false, protectedLayer: true, priority: 0,
+      content: taskPages.content, truncated: taskPages.truncated
+    })]),
     layer({
       name: "session-history",
       cacheable: false,
