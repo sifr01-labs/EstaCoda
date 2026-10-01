@@ -48,7 +48,7 @@ function schedulerFor(h: Harness, taskId: string) {
 describe.sequential("research workflow acceptance harness", () => {
   it("recovers the incident under provider fallback and retains required synthesis", async () => {
     const h=await harness({fallbackOnRequest:1});
-    const tasks=["collection","processing","reuse"].map(scope=>({task:`Research ${scope}.`,allowedTools:["web.search"],
+    const tasks=["collection","processing","reuse"].map(scope=>({task:`Research ${scope}.`,context:"User requested current research using 3 subagents. Save report.md. This is background context, not this worker's assignment.",allowedTools:["web.search"],
       allowedToolsets:["research","core"],research:{scope,requireLiveSources:true,requireRepositoryEvidence:false}}));
     h.enqueue(nativeCall("skill_read",{name:"researcher",path:"references/sources.md",mode:"contract"}));
     // Three pre-admission errors must leave capacity for the corrected batch.
@@ -92,6 +92,75 @@ describe.sequential("research workflow acceptance harness", () => {
     expect(await readFile(join(h.workspaceRoot,"report.md"),"utf8")).toBe(report.content);
     scriptConsumed(h);
   }, 30_000);
+
+  it.each([false, true])("repairs Step evidence without losing drafts or repeating research (exhausted=%s)", async (exhausted) => {
+    const h = await harness({ fallbackOnRequest: 1 });
+    h.enqueue(nativeCall("delegate_task", { tasks: [{
+      task: "Research battery recycling.",
+      context: "User requested research using 1 worker. Save report.md. Use the nonexistent-skill skill in the parent only.",
+      allowedTools: ["web.search"], research: { scope: "methods", requireLiveSources: true }
+    }] }));
+    await h.turn("Use 1 worker to research current battery recycling. Save report.md.");
+    const task = h.store.listTasks()[0]!;
+    const { scheduler, resultService } = schedulerFor(h, task.id);
+    const invalid = `Preserved candidate research findings.\n${CLAIM_TABLE.replaceAll(SOURCE_URL, "https://unobserved.example/claim")}`;
+    const valid = `Corrected cited research findings.\n${CLAIM_TABLE}`;
+    h.enqueue(nativeCall("web_search", { query: "battery recycling" }), answer(invalid),
+      answer(exhausted ? invalid : valid));
+    if (exhausted) h.enqueue(answer(invalid));
+    expect(await scheduler.runOnce()).toMatchObject({ completed: exhausted ? 0 : 1, failed: exhausted ? 1 : 0 });
+    const worker = h.store.listSteps(task.id, task.activePlanRevisionId!).find(step => step.executor.role === "worker")!;
+    const attempt = h.store.listAttempts(task.id).find(attempt => attempt.stepId === worker.id)!;
+    const events = await h.sessionDb.listEvents(attempt.workerSessionId!);
+    expect(events.filter(event => event.kind === "step-completion-validation")).toHaveLength(exhausted ? 3 : 2);
+    const route = events.find(event => event.kind === "intent-routed") as any;
+    expect(route.route.requestRequirements).toMatchObject({ skillReferences: [], issues: [] });
+    expect(route.route.requestRequirements.delegation).toBeUndefined();
+    expect(route.route.requestRequirements.fileOutput).toBeUndefined();
+    const messages = await h.sessionDb.listMessages(attempt.workerSessionId!);
+    expect(messages.some(message => message.content === invalid && message.metadata?.completionCandidate === true)).toBe(true);
+    expect(h.requests.some(request => request.messages.some(message => typeof message.content === "string" &&
+      message.content.includes("https://unobserved.example/claim") && message.content.includes("Correct the assigned Step")))).toBe(true);
+    expect(h.searches).toEqual(["battery recycling"]);
+    const result = h.store.listResults(task.id).find(result => result.stepId === worker.id)!;
+    expect(result.disposition).toBe(exhausted ? "diagnostic" : "accepted");
+    if (exhausted) {
+      expect(attempt.failure?.message).toContain("unobserved-source");
+      // The retained diagnostic must be the draft, never the generic rejection sentence.
+      const retained = await resultService.readText({ taskId: task.id, resultId: result.id, sessionId: h.runtime.sessionId });
+      expect(retained.content).toContain("Preserved candidate research findings.");
+      expect(retained.content).not.toContain("Research requirements remain incomplete");
+    }
+    await expect(readFile(join(h.workspaceRoot, "report.md"))).rejects.toThrow();
+    scriptConsumed(h);
+  }, 30_000);
+
+  it("accepts a corrected citation verified by extraction while retaining live-search requirements", async () => {
+    const h = await harness();
+    h.enqueue(nativeCall("delegate_task", { tasks: [{ task: "Research recycling.", allowedTools: ["web.search", "web.extract"],
+      research: { scope: "methods", requireLiveSources: true } }] }));
+    await h.turn("Use 1 worker to research current battery recycling.");
+    const task = h.store.listTasks()[0]!;
+    const cited = SOURCE_URL + "?source=1";
+    const draft = CLAIM_TABLE.replaceAll(SOURCE_URL, cited);
+    h.enqueue(nativeCall("web_search", { query: "battery recycling" }), answer(draft),
+      nativeCall("web_extract", { url: cited }), answer(draft));
+    expect(await schedulerFor(h, task.id).scheduler.runOnce()).toMatchObject({ completed: 1, failed: 0 });
+    expect(h.searches).toHaveLength(1);
+    expect(h.extracts).toEqual([cited]);
+    scriptConsumed(h);
+  });
+
+  it("does not accept a Step completion override supplied through message metadata", async () => {
+    const h = await harness();
+    h.enqueue(answer("Done without research."));
+    const result = await h.runtime.handle({ text: "Use 3 workers to research current recycling.", channel: "cli", trustedWorkspace: true,
+      inputMetadata: { stepCompletion: { requirements: { skillReferences: [], issues: [] } } } });
+    expect(result.intent.requestRequirements?.delegation?.count).toBe(3);
+    expect(result.text).toContain("requested-worker-evidence");
+    expect(result.finalOutcome?.status).not.toBe("completed");
+    scriptConsumed(h);
+  });
 
   it("recovers skill arguments through actual Kimi and Codex adapters without losing tool feedback", async () => {
     vi.stubEnv("ESTACODA_TEST_PROVIDER_KEY", "synthetic-test-credential");
@@ -444,7 +513,7 @@ describe.sequential("research workflow acceptance harness", () => {
     const task = h.store.listTasks()[0]!;
     const { scheduler, resultService } = schedulerFor(h, task.id);
     for (let index = 0; index < 3; index++) {
-      if (index === 1) h.enqueue(answer("I have no source evidence."));
+      if (index === 1) for (let repair = 0; repair < 3; repair++) h.enqueue(answer("I have no source evidence."));
       else h.enqueue(nativeCall("web_search", { query: `battery recycling ${index}` }), answer(`Observed source: ${SOURCE_URL}\n\n${CLAIM_TABLE}`));
       expect(await scheduler.runOnce()).toMatchObject(index === 1 ? { failed: 1 } : { completed: 1 });
       if(index===1){
@@ -454,7 +523,7 @@ describe.sequential("research workflow acceptance harness", () => {
         const operator=new TaskOperatorService({store:h.store});
         for(let retry=1;retry<failed.retryPolicy.maxAttempts;retry++){
           operator.retry(task.id,failed.id,h.runtime.sessionId);
-          h.enqueue(answer("I still have no source evidence."));
+          for (let repair = 0; repair < 3; repair++) h.enqueue(answer("I still have no source evidence."));
           expect(await scheduler.runOnce()).toMatchObject({failed:1});
         }
       }

@@ -2,7 +2,7 @@ import { correctContradictedCapabilityClaim } from "./capability-state.js";
 import type { ArtifactRecord } from "../contracts/artifact.js";
 import type { ChannelAttachment, ChannelKind } from "../contracts/channel.js";
 import type { ContextExpansionResult, ProjectContextSnapshot } from "../contracts/context.js";
-import type { IntentRoute } from "../contracts/intent.js";
+import type { IntentRoute, RequestRequirements } from "../contracts/intent.js";
 import { fileOutputEvidence } from "./file-output-evidence.js";
 import { continueRequestRequirements, requiredSkillsDelivered } from "./request-requirements.js";
 import { researchPrerequisiteBlockers, researchRequestEvidence } from "./research-request-evidence.js";
@@ -106,6 +106,11 @@ export type AgentLoopInput = {
   text: string;
   /** Internal child-runner boundary: Step objective without dependency context. */
   requirementText?: string;
+  /** Host-only durable Step contract. Never populated from model output or inputMetadata. */
+  stepCompletion?: {
+    requirements: RequestRequirements;
+    validate?: (text: string, executions: readonly ToolExecutionRecord[]) => string | undefined;
+  };
   channel: ChannelKind;
   attachments?: ChannelAttachment[];
   trustedWorkspace?: boolean;
@@ -444,7 +449,7 @@ export class AgentLoop {
     const trustedWorkspace = input.trustedWorkspace ?? false;
     const route = this.#runtimeRouter.route({
       text: checkpointPreparation?.requirementMode === "save" ? turnText : routingText,
-      requestText: input.requirementText === undefined ? turnText : interceptPlaintextCredentialInput(input.requirementText)?.projectedText ?? input.requirementText,
+      requestText: input.stepCompletion !== undefined ? "" : input.requirementText === undefined ? turnText : interceptPlaintextCredentialInput(input.requirementText)?.projectedText ?? input.requirementText,
       attachments: input.attachments,
       channel: input.channel,
       model: this.#model,
@@ -473,7 +478,10 @@ export class AgentLoop {
         projectContextFiles: this.#projectContext?.files.map((file) => file.source) ?? []
       }
     });
-    if (route.intent.requestRequirements !== undefined) {
+    if (input.stepCompletion !== undefined) {
+      // A child owns its assigned Step, not obligations mentioned in parent/context prose.
+      route.intent.requestRequirements = { ...structuredClone(input.stepCompletion.requirements), originTurnId: visibleTurn.id };
+    } else if (route.intent.requestRequirements !== undefined) {
       if (resumedCheckpoint?.requestRequirements !== undefined) route.intent.requestRequirements = continueRequestRequirements(
         resumedCheckpoint.requestRequirements, route.intent.requestRequirements, checkpointPreparation?.requirementMode);
       const sourceTaskId = resumedCheckpoint?.requestRequirements?.sourceTaskId ?? (resumedCheckpoint?.requestRequirements?.research === undefined ? undefined : resumedCheckpoint.safeFacts.filter((fact) => fact.kind === "task_id" && fact.sourceTool === "delegate_task").at(-1)?.value);
@@ -1073,6 +1081,7 @@ export class AgentLoop {
     const providerLoop: ProviderTurnLoopResult = researchBlockers.length > 0
       ? { providerExecution: undefined, toolExecutions: [], iterations: 0, terminationCause: "user_input_required" }
       : await this.#providerTurnLoop.run({
+      validateCompletion: input.stepCompletion?.validate,
       visibleTurnId: visibleTurn.id,
       userText: effectiveText,
       routedText: executionText,
@@ -1251,6 +1260,10 @@ export class AgentLoop {
       completionFloor,
       openContinuation: conversationContinuationState?.status === "open"
     });
+    if (providerLoop.completionValidationFailure !== undefined &&
+      (finalOutcome.status === "completed" || finalOutcome.status === "completed_with_recovered_errors")) {
+      finalOutcome.status = toolExecutions.some(execution => execution.result?.ok === true) ? "partially_completed" : "blocked";
+    }
     // Finish owned workspace application before publishing canonical completion.
     const finalizationNote = await finalizeExecution?.(finalOutcome, artifacts);
     await this.#runRecorder.recordExecutionFinalOutcome(finalOutcome);

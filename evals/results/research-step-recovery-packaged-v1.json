@@ -1,0 +1,139 @@
+{
+  "version": 1,
+  "passed": true,
+  "measuredAt": "2026-10-01T10:57:41.704Z",
+  "sourceBaseCommit": "0954db97c6b117b54161afa0770cdbaed7b63fc0",
+  "sourceOverlay": [
+    {
+      "path": "apps/desktop/src/renderer/components/chat-tasks.tsx",
+      "sha256": "6c67804c5ddf04d1cebc030f62f52ccb0b63b316d48a7b91f20fd821542927f1"
+    },
+    {
+      "path": "apps/desktop/src/shared/i18n/chat-tasks.ts",
+      "sha256": "c08493214f0f0b36f4b5369aa7e61fefbe5e35dd44970f01cb4fe74fb77688c6"
+    },
+    {
+      "path": "apps/desktop/tests/research-packaged.mts",
+      "sha256": "4d5388fb0b83c8df0bd7b0cd27730bf13a2c8840e70985a55669347071c2d710"
+    },
+    {
+      "path": "package.json",
+      "sha256": "8427aa6992264ee7c5031c694c9d0a152be35125b78afd8cd47e4743c70beba8"
+    },
+    {
+      "path": "scripts/validate-research-reliability.ts",
+      "sha256": "68a7cb802eb608cacc380efcd267b00c2e73e060c1a46210d3bbd609372d6d98"
+    },
+    {
+      "path": "src/contracts/session.ts",
+      "sha256": "a243e78938c2fd2b499afc6d49ebe590dcb7304b217e087f69fe9ba7f0ac21b8"
+    },
+    {
+      "path": "src/delegation/child-runner.ts",
+      "sha256": "5310a1f87fe927a9114d537422587552e9ef23c99e90bcca279b269afff556aa"
+    },
+    {
+      "path": "src/eval/fixtures/research-workflow-harness.ts",
+      "sha256": "e800960c7ae594b6769c6315dcffcc986df6e7f38a1f517e7dff6d8cf23a2bb5"
+    },
+    {
+      "path": "src/eval/fixtures/research-workflow-release.ts",
+      "sha256": "8b2e582fed53c3a1b6c9feb907ef2a39bf84b19c74ba4d839fd0ee30f765ef3e"
+    },
+    {
+      "path": "src/runtime/agent-loop.ts",
+      "sha256": "51e00d35a4238c8cc35b78139c7977cd9e4e84832f46ec64c25e3e2d09d54974"
+    },
+    {
+      "path": "src/runtime/provider-turn-loop.test.ts",
+      "sha256": "d83c48503069c5dd95a4d3d52d7d9a00edb0730dcc1ba517e6aba5fd7d829b9c"
+    },
+    {
+      "path": "src/runtime/provider-turn-loop.ts",
+      "sha256": "2b57b1d15aa226bed7a952e1dda057193e6f5c4c09ef5d6004951aec50320104"
+    },
+    {
+      "path": "src/runtime/research-request.acceptance.test.ts",
+      "sha256": "abb846859799cb522a8a3074673a07716d657f083810d41bf3fbcec8f8bcff8a"
+    },
+    {
+      "path": "src/runtime/research-surfaces.acceptance.test.ts",
+      "sha256": "dd9272f8a2695421d57e7dcf31dda669f4f1745fdb653881eecfa542fbe706ec"
+    },
+    {
+      "path": "src/tasks/agent-step-executor.test.ts",
+      "sha256": "6432a0b31e1d7f1d5b9b030b255931387822f68b21f660a070cc2209b04ec86f"
+    },
+    {
+      "path": "src/tasks/agent-step-executor.ts",
+      "sha256": "14a1fcb7add2c3b35982d0bf1603996fa14c376dde614849954265179edf760d"
+    },
+    {
+      "path": "src/tasks/research-result-evidence.ts",
+      "sha256": "6644259b29956af5b67fc85f54c9c2f6f8a1b3402f7ce4461799e4d91c9f7ebf"
+    }
+  ],
+  "platform": "darwin",
+  "arch": "arm64",
+  "runtime": {
+    "sha256": "437d5208645afb20f85a2a64cb00463d1577c8f917e8d6a63cc207b499bb114a",
+    "nodeVersion": "v24.14.1",
+    "coreVersion": "0.1.0",
+    "entrySha256": "8b7b5e8816ffe62d9baa2133dd5cc54a1a8ea36997b0bda6fc631039c700f6ec",
+    "signature": "ad-hoc verified",
+    "ownedBridgeVerified": true,
+    "inventoryVerified": true,
+    "matchesCurrentDist": true,
+    "supervisorRetainedPathWithSpaces": true
+  },
+  "fixtures": {
+    "model": "scripted loopback HTTP",
+    "web": "in-process registered synthetic provider in packaged supervisor",
+    "liveModelCalls": 0,
+    "transport": "actual signed app + preload/Main + owned bridge + private control"
+  },
+  "workflow": {
+    "workers": 3,
+    "acceptedResults": 5,
+    "distinctChildSessions": 6,
+    "tasks": 1,
+    "searches": 4,
+    "providerCalls": 23,
+    "appRestartNoReplay": true,
+    "fileBytes": 655,
+    "fileSha256": "c741cc2deaa0bfcc4055cee83b24ffc2cdf11e8471b8479ac6b76ee9b3b4faaa",
+    "readbackVerified": true,
+    "historicalTaskStatus": "completed"
+  },
+  "allScenarios": {
+    "providerCalls": 45,
+    "actualToolResults": 22,
+    "failedToolResults": 4
+  },
+  "scenarios": {
+    "stepScopedRequirements": true,
+    "evidenceCorrection": true,
+    "exhaustedRepairDraftPreserved": true,
+    "redundantResourceMode": true,
+    "researchThroughFallback": true,
+    "fallbackComposer": true,
+    "fallbackNotice": true,
+    "fallbackRestart": true,
+    "preferredModelPreserved": true,
+    "research": true,
+    "automaticReportDelivery": true,
+    "alternativeSourceRecovery": true,
+    "desktopTranscriptExactlyOnce": true,
+    "chatOwnedTasksUi": true,
+    "oneSidebarEntry": true,
+    "handoffRemainsRunning": true,
+    "gatewayRestartNoReplay": true,
+    "failedWorkerDraftPreserved": true,
+    "targetedRetryAfterGatewayRestart": true,
+    "saveOnlyAfterRestart": true,
+    "skillRecovery": true,
+    "missingSearch": true,
+    "falseSaveBlocked": true
+  },
+  "liveAssessment": "pending approved model, sources and spend ceiling"
+}

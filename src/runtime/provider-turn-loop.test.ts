@@ -360,6 +360,7 @@ async function appendProviderToolHistory(db: InMemorySessionDB, sessionId: strin
 async function runBasicProviderTurn(
   loop: ProviderTurnLoop,
   callbacks: {
+    validateCompletion?: Parameters<ProviderTurnLoop["run"]>[0]["validateCompletion"];
     diagnosticOnly?: boolean;
     onEvent?: (event: RuntimeEvent) => void;
     onDelta?: (text: string) => void;
@@ -380,6 +381,7 @@ async function runBasicProviderTurn(
   } = {}
 ): Promise<Awaited<ReturnType<ProviderTurnLoop["run"]>>> {
   return await loop.run({
+    validateCompletion: callbacks.validateCompletion,
     diagnosticOnly: callbacks.diagnosticOnly,
     visibleTurnId: callbacks.visibleTurnId,
     userText: callbacks.userText ?? "current user request",
@@ -5148,6 +5150,45 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     expect(result.providerExecution?.response?.content).toBe("");
     const events = await harness.sessionDb.listEvents(harness.sessionId);
     expect(events.filter((event) => event.kind === "provider-completion")).toHaveLength(4);
+  });
+
+  it.each([1, 2, 8])("bounds completion repairs by both the existing budget and two corrections (limit=%s)", async (limit) => {
+    const harness = await createPostToolNudgeHarness({
+      responses: [providerExecution("Original unsupported draft")], toolSteps: [], maxProviderIterations: limit
+    });
+    const result = await runBasicProviderTurn(harness.loop, { validateCompletion: () => "unobserved-source: correct the citation" });
+    expect(harness.completeSpy).toHaveBeenCalledTimes(Math.min(limit, 3));
+    expect(result.completionValidationFailure).toContain("unobserved-source");
+    expect(result.providerExecution?.response?.content).toBe("Original unsupported draft");
+    const drafts = (await harness.sessionDb.listMessages(harness.sessionId)).filter(message => message.metadata?.completionCandidate);
+    expect(drafts).toHaveLength(Math.min(limit, 3) - 1);
+  });
+
+  it("redacts retained correction drafts and feedback and stops on cancellation", async () => {
+    const controller = new AbortController();
+    const harness = await createPostToolNudgeHarness({ responses: [providerExecution("Draft password: hunter2")], toolSteps: [], maxProviderIterations: 8 });
+    let validations = 0;
+    await runBasicProviderTurn(harness.loop, { signal: controller.signal, validateCompletion: () => {
+      if (++validations === 2) controller.abort();
+      return "password: hunter2";
+    } });
+    expect(harness.completeSpy).toHaveBeenCalledTimes(2);
+    const drafts = (await harness.sessionDb.listMessages(harness.sessionId)).filter(message => message.metadata?.completionCandidate);
+    expect(drafts).toHaveLength(1);
+    expect(drafts[0]?.content).toBe("Draft password: [REDACTED]");
+    expect(JSON.stringify(await harness.sessionDb.listEvents(harness.sessionId))).not.toContain("hunter2");
+  });
+
+  it.each(["deny", "ask"] as const)("does not use completion repair to retry a %s boundary", async (decision) => {
+    const harness = await createPostToolNudgeHarness({ responses: [providerExecution("Unverified draft")], toolSteps: [], maxProviderIterations: 8 });
+    const blocked = { ...toolExecution("blocked"), decision, result: { ok: false, content: "Blocked" } };
+    const result = await runBasicProviderTurn(harness.loop, {
+      toolExecutions: [blocked], validateCompletion: () => "missing evidence"
+    });
+    expect(harness.completeSpy).toHaveBeenCalledOnce();
+    expect(result.completionValidationFailure).toBe("missing evidence");
+    expect((await harness.sessionDb.listEvents(harness.sessionId)).filter(event => event.kind === "step-completion-validation"))
+      .toEqual([expect.objectContaining({ accepted: false, repair: false })]);
   });
 
   it("does not exceed the provider iteration budget for empty initial retries", async () => {

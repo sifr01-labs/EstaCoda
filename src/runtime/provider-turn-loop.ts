@@ -1,3 +1,4 @@
+import { redactSensitiveText } from "../utils/redaction.js";
 import { RESEARCH_EVIDENCE_INSTRUCTION } from "../tasks/research-result-evidence.js";
 import { projectCapabilityState, type RuntimeCapabilityState } from "./capability-state.js";
 import { requiredRequestTools, requiredSkillsDelivered } from "./request-requirements.js";
@@ -129,6 +130,7 @@ export type ProviderTurnLoopRequestDefaults = {
 };
 
 export type ProviderTurnLoopResult = {
+  completionValidationFailure?: string;
   deliveredSkillNames?: string[];
   providerExecution: ProviderExecutionResult | undefined;
   toolExecutions: ToolExecutionRecord[];
@@ -259,6 +261,8 @@ export class ProviderTurnLoop {
   }
 
   async run(input: {
+    /** Trusted host validator; feedback cannot change the tool/authority boundary. */
+    validateCompletion?: (text: string, executions: readonly ToolExecutionRecord[]) => string | undefined;
     /** Explain a blocked task without executing tools or supervising its checkpoint. */
     diagnosticOnly?: boolean;
     visibleTurnId?: string;
@@ -336,6 +340,9 @@ export class ProviderTurnLoop {
     });
     const repeatedFailures = new Map<string, number>();
     let maxObservedRisk = input.initialRiskClass;
+    let pendingCompletionFeedback: string | undefined;
+    let completionValidationFailure: string | undefined;
+    let completionRepairs = 0;
     let pendingEmptyResponseNudge = false;
     let postToolEmptyRetried = false;
     let capturedContentWithHousekeepingTools: string | undefined;
@@ -490,6 +497,7 @@ export class ProviderTurnLoop {
           providerExecution: previousProviderExecution,
           iteration,
           loopStartedAt,
+          completionFeedback: pendingCompletionFeedback,
           emptyResponseNudge: pendingEmptyResponseNudge,
           protectedOtpNudge: pendingProtectedOtpNudge,
           browserEvidenceNudge: supervisionPrompt.browserEvidenceNudge,
@@ -510,6 +518,7 @@ export class ProviderTurnLoop {
             )
           })
         });
+      pendingCompletionFeedback = undefined;
       pendingEmptyResponseNudge = false;
       pendingProtectedOtpNudge = false;
       pendingReasoningOnlyPrefill = false;
@@ -1067,6 +1076,31 @@ export class ProviderTurnLoop {
         continue;
       }
 
+      if (input.validateCompletion !== undefined && execution.ok === true && execution.toolCalls.length === 0 &&
+        execution.response?.content.trim() && !exhausted && terminationCause === "normal" && !input.signal?.aborted &&
+        !toolLoopProgress.shouldStop && browserObservation?.shouldStop !== true) {
+        const validationFailure = input.validateCompletion(execution.response.content, [...input.toolExecutions, ...providerToolExecutions]);
+        completionValidationFailure = validationFailure === undefined ? undefined : redactSensitiveText(validationFailure).slice(0, 6_000);
+        const repair = completionValidationFailure !== undefined && completionRepairs < 2 &&
+          iteration + consumedProviderIterations < this.#budgets.maxProviderIterations && !input.signal?.aborted &&
+          ![...input.toolExecutions, ...providerToolExecutions].some(call => call.decision !== "allow");
+        await this.#sessionDb.appendEvent(this.#currentSessionId(), {
+          kind: "step-completion-validation", accepted: completionValidationFailure === undefined,
+          ...(completionValidationFailure === undefined ? {} : { feedback: completionValidationFailure }),
+          repair, repairAttempt: completionRepairs
+        });
+        if (repair) {
+          // Keep the candidate in normal session history so correction and inspection retain it.
+          await this.#sessionDb.appendMessage({ sessionId: this.#currentSessionId(), role: "agent",
+            content: redactSensitiveText(execution.response.content), metadata: { completionCandidate: true, accepted: false } });
+          pendingCompletionFeedback = completionValidationFailure;
+          completionRepairs += 1;
+          effectiveProviderExecution = mergeProviderExecutions(effectiveProviderExecution, execution);
+          previousProviderExecution = execution;
+          iteration += consumedProviderIterations - 1;
+          continue;
+        }
+      }
       effectiveProviderExecution = mergeProviderExecutions(effectiveProviderExecution, execution);
       previousProviderExecution = execution;
 
@@ -1106,6 +1140,7 @@ export class ProviderTurnLoop {
     );
 
     return {
+      completionValidationFailure,
       providerExecution: effectiveProviderExecution,
       deliveredSkillNames: [...deliveredSkillNames],
       toolExecutions: providerToolExecutions,
@@ -1400,6 +1435,7 @@ export class ProviderTurnLoop {
     iteration: number;
     loopStartedAt: number;
     emptyResponseNudge?: boolean;
+    completionFeedback?: string;
     protectedOtpNudge?: boolean;
     browserEvidenceNudge?: boolean;
     browserRetargetNudge?: boolean;
@@ -1416,11 +1452,13 @@ export class ProviderTurnLoop {
       input.providerExecution?.ok !== true ||
       (
         input.providerExecution.toolCalls.length === 0 &&
+        input.completionFeedback === undefined &&
         input.emptyResponseNudge !== true &&
         input.protectedOtpNudge !== true &&
         input.toolLoopProgressNudge !== true
       ) ||
       (
+        input.completionFeedback === undefined &&
         input.toolLoopProgressNudge !== true &&
         !input.toolPlans.some((plan) => plan.status === "executed" || isRecoverableToolPlanStatus(plan.status))
       )
@@ -1474,6 +1512,9 @@ export class ProviderTurnLoop {
         role: "user",
         content: "You just executed tool calls but returned an empty response. Please process the tool results above and continue with the task."
       });
+    }
+    if (input.completionFeedback !== undefined) {
+      prompt.messages.push({ role: "user", content: `The previous candidate is preserved but has not been accepted. ${input.completionFeedback} Correct the assigned Step result using the existing evidence and authorized tools. Do not restart completed research or claim completion while evidence is missing.` });
     }
     if (input.protectedOtpNudge === true) {
       prompt.messages.push({

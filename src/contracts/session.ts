@@ -267,6 +267,13 @@ export type AuthenticationEvidenceAssessmentEvent = {
 };
 
 export type SessionEvent =
+  | {
+      kind: "step-completion-validation";
+      accepted: boolean;
+      feedback?: string;
+      repair: boolean;
+      repairAttempt: number;
+    }
   | { kind: "mcp-connection-status"; connectors: Array<{
       name: string; connected: boolean; available: boolean; schemasRegistered: boolean;
       failureStage?: "configuration" | "connection" | "schema-registration" | "availability";

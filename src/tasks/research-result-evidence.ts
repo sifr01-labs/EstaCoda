@@ -17,7 +17,7 @@ export function requiresSourceTable(step: TaskStep, store: TaskStore): boolean {
 }
 
 /** No model statement is promoted into a retrieval/date/access receipt. */
-export function groundResearchResult(input: { task: Task; step: TaskStep; store: TaskStore; text: string; executions: readonly ToolExecutionRecord[]; now: Date }): { text?: string; failure?: string } {
+export function groundResearchResult(input: { task: Task; step: TaskStep; store: TaskStore; text: string; executions: readonly ToolExecutionRecord[]; now: Date }): { text?: string; failure?: string; feedback?: string } {
   if (!requiresSourceTable(input.step, input.store)) return { text: input.text };
   const table = parseTable(input.text);
   if (table === undefined) return { failure: "source-claim-table-missing" };
@@ -48,7 +48,9 @@ export function groundResearchResult(input: { task: Task; step: TaskStep; store:
   } else {
     for (const [url, source] of observedSources(input.executions, input.now)) sources.set(url, source);
   }
-  if (table.rows.some((row) => !sources.has(row.url)) || urls(input.text).some((url) => !sources.has(url))) return { failure: "unobserved-source" };
+  const unobserved = [...new Set([...table.rows.map(row => row.url), ...urls(input.text)].filter(url => !sources.has(url)))];
+  if (unobserved.length > 0) return { failure: "unobserved-source",
+    feedback: `These cited URLs have no successful source observation: ${unobserved.slice(0, 8).join(", ")}. Verify them with allowed tools, replace them with observed supporting sources, or remove unsupported claims. A failed retrieval is a limitation, not evidence.` };
   const rows = table.rows.map((row) => ({ ...sources.get(row.url)!, claim: row.claim, limitation: row.limitation }));
   const rendered = [SOURCE_HEADER, "| --- | --- | --- | --- | --- | --- |", ...rows.map((row) => `| ${row.url} | ${row.published} | ${row.retrieved} | ${row.access} | ${row.claim} | ${row.limitation} |`)].join("\n");
   const prefix = input.step.executor.role !== "synthesis" ? "" : missing.length > 0

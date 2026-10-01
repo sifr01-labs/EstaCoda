@@ -386,6 +386,19 @@ describe("AgentStepExecutor", () => {
         outcome: "failed",
         diagnostic: true
       },
+      ...["verified-extract", "extract-body-link", "extract-without-search"].map((name) => ({
+        name,
+        research: { scope: "live", requireLiveSources: true, requireRepositoryEvidence: false },
+        text: name === "extract-body-link" ? "Claim cites https://fabricated.example/report" : "Claim cites https://verified.example/report",
+        executions: [
+          ...(name === "extract-without-search" ? [] : [successfulEvidenceExecution("web.search", "read-only-network", ["web", "research"],
+            { query: "current report" }, "Search results", { results: [{ url: "https://observed.example/report" }] })]),
+          successfulEvidenceExecution("web.extract", "read-only-network", ["web", "research"],
+            { url: "https://verified.example/report" }, "A page containing a link to https://fabricated.example/report", { url: "https://verified.example/report" })
+        ],
+        outcome: name === "verified-extract" ? "succeeded" : "failed",
+        diagnostic: name !== "verified-extract"
+      })),
       {
         name: "fabricated-live-url",
         research: { scope: "live", requireLiveSources: true, requireRepositoryEvidence: false },

@@ -302,6 +302,20 @@ export class AgentStepExecutor implements TaskStepExecutor {
         stepId: input.step.id,
         attemptId: input.attempt.id,
         parentOnEvent: this.#taskProgressSink(input),
+        ...(input.step.executor.research === undefined && input.step.executor.requestContract?.requirements.research === undefined &&
+          input.step.executor.role !== "report-delivery" ? {} : { stepCompletion: {
+          // Parent orchestration and research acceptance are enforced by this executor.
+          // Only the delivery Step owns the foreground write/read-back requirement.
+          requirements: {
+            skillReferences: [], issues: [],
+            ...(input.step.executor.role !== "report-delivery" ? {} : {
+              fileOutput: input.step.executor.requestContract?.requirements.fileOutput
+            })
+          },
+          ...(input.step.executor.role === "report-delivery" ? {} : {
+            validate: (text, executions) => researchCompletionFailure(input, this.#taskStore, text, executions, this.#now())
+          })
+        } }),
         inputMetadata: {
           durableTask: true,
           taskId: input.task.id,
@@ -399,23 +413,14 @@ export class AgentStepExecutor implements TaskStepExecutor {
           outcome: "failed", failure: taskFailure("evidence-contract-unsatisfied", false), ...metering, ...common
         };
       }
-      const evidenceFailure = researchEvidenceFailure(input.step, response.text, response.toolExecutions);
-      if (evidenceFailure !== undefined) {
-        return {
-          outcome: "failed",
-          failure: taskFailure("evidence-contract-unsatisfied", false),
-          ...safeDiagnosticOutput(response.text, response.toolExecutions),
-          ...metering,
-          ...common
-        };
-      }
-
-      const grounded = groundResearchResult({ task: input.task, step: input.step, store: this.#taskStore,
-        text: response.text, executions: response.toolExecutions, now: this.#now() });
-      if (grounded.failure !== undefined) return {
-        outcome: "failed", failure: taskFailure("evidence-contract-unsatisfied", false),
+      const evidenceFailure = researchCompletionFailure(input, this.#taskStore, response.text, response.toolExecutions, this.#now());
+      if (evidenceFailure !== undefined) return {
+        outcome: "failed",
+        failure: { ...taskFailure("evidence-contract-unsatisfied", false), message: evidenceFailure.split(". ")[0] + ". Inspect the preserved draft and validation feedback." },
         ...safeDiagnosticOutput(response.text, response.toolExecutions), ...metering, ...common
       };
+      const grounded = groundResearchResult({ task: input.task, step: input.step, store: this.#taskStore,
+        text: response.text, executions: response.toolExecutions, now: this.#now() });
       const unavailableSources = response.toolExecutions.filter(execution => execution.result?.ok === false &&
         isAlternativeResearchRead(input.step, response.text, execution)).length;
       const researchText = (grounded.text ?? response.text) + (unavailableSources
@@ -632,6 +637,16 @@ function partialSynthesisContext(
   ].join("\n");
 }
 
+function researchCompletionFailure(
+  input: TaskStepExecutionInput, store: TaskStore, text: string,
+  executions: readonly import("../tools/tool-executor.js").ToolExecutionRecord[], now: Date
+): string | undefined {
+  const grounded = groundResearchResult({ task: input.task, step: input.step, store, text, executions, now });
+  if (grounded.failure !== undefined) return `Research evidence needs correction: ${grounded.failure}. ${grounded.feedback ?? "Return the required source/claim/limitation table using observed evidence; preserve limitations."}`;
+  const missing = researchEvidenceFailure(input.step, text, [...executions]);
+  return missing === undefined ? undefined : `Research evidence needs correction: ${missing}. Cite evidence observed with the assigned tools; obtain missing evidence or explicitly report the unresolved gap.`;
+}
+
 function researchEvidenceFailure(
   step: TaskStep,
   text: string,
@@ -645,10 +660,12 @@ function researchEvidenceFailure(
 
   if (research.requireLiveSources) {
     const observedUrls = new Set(successful
-      .filter((execution) => execution.tool.name === "web.search")
-      .flatMap((execution) => collectHttpUrls([execution.result?.content, execution.result?.metadata])));
+      .filter((execution) => execution.tool.name === "web.search" || execution.tool.name === "web.extract")
+      .flatMap((execution) => execution.tool.name === "web.extract"
+        ? collectHttpUrls([execution.result?.metadata?.url])
+        : collectHttpUrls([execution.result?.content, execution.result?.metadata])));
     const citedUrls = collectHttpUrls([text]);
-    if (observedUrls.size === 0 || citedUrls.length === 0 || citedUrls.some((url) => !observedUrls.has(url))) {
+    if (!successful.some(execution => execution.tool.name === "web.search") || observedUrls.size === 0 || citedUrls.length === 0 || citedUrls.some((url) => !observedUrls.has(url))) {
       return "live-sources";
     }
   }

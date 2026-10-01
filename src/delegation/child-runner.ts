@@ -2,7 +2,7 @@ import type { ChannelKind } from "../contracts/channel.js";
 import type { DelegateRole, DelegationConfig } from "../contracts/delegation.js";
 import type { RuntimeEvent, RuntimeEventSink } from "../contracts/runtime-event.js";
 import type { SessionDB } from "../contracts/session.js";
-import type { AgentLoopResponse } from "../runtime/agent-loop.js";
+import type { AgentLoopInput, AgentLoopResponse } from "../runtime/agent-loop.js";
 import type { ChildAgentLoopRuntime } from "../runtime/agent-loop-factory.js";
 import type { SubagentRegistry } from "./subagent-registry.js";
 import {
@@ -29,6 +29,7 @@ export type ChildRunnerInput = {
   role: DelegateRole;
   depth: number;
   task: string;
+  stepCompletion?: AgentLoopInput["stepCompletion"];
   context?: string;
   channel?: ChannelKind;
   trustedWorkspace: boolean;
@@ -148,6 +149,7 @@ export async function runDelegatedChild(input: ChildRunnerInput): Promise<ChildR
   const childPromise = input.child.handle({
     text: prompt,
     requirementText: input.task,
+    stepCompletion: input.stepCompletion,
     channel: input.channel ?? "cli",
     trustedWorkspace: input.trustedWorkspace,
     signal: input.childAbortController.signal,
