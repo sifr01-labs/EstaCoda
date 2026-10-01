@@ -85,10 +85,10 @@ const provider=createServer(async(req,res)=>{
    else {for(const result of accepted){const body=(await resultService.readText({taskId:task.id,resultId:result.id,sessionId})).content;assert(text.includes(JSON.stringify(body).slice(1,-1)),'Synthesis did not receive a complete worker result');}content=report;}
   }else if(text.includes('Work only on this assigned Step')){
    await workerGate;
-   if(!hasFeedback)next=[tool('web_search',{query:'battery recycling '+requests}),tool('web_extract',{url:inaccessible})];
+   if(!hasFeedback)next=[tool('web_search',{query:'empty fixture query'}),tool('web_search',{query:'battery recycling '+requests}),tool('web_extract',{url:inaccessible})];
    else if(failedWorkerCandidates<3&&text.includes('Research battery recycling: processing.')){failedWorkerCandidates++;content='Draft findings without the required source table.';}
    else if(!repairedWorkerOnce&&text.includes('Research battery recycling: collection.')){repairedWorkerOnce=true;content=table.replace(source,'https://unobserved.example/claim');}
-   else content=`Synthetic evidence: ${source}\n${largeEvidence}${table}`;
+   else content=`Synthetic evidence: \`${source}\`\nAccess limitation: ${inaccessible} returned HTTP 403; only its search snippet was observed.\n${largeEvidence}${table}`;
   }else if(!researchRead){researchRead=true;next=[tool('skill_read',{name:'researcher',path:'references/sources.md',mode:'contract'})];}
   else if(store.listTasks().length===0)next=[tool('delegate_task',{tasks:['collection','processing','reuse'].map(scope=>({task:`Research battery recycling: ${scope}.`,context:"User requested current research using 3 subagents. Save report.md. This is background context only.",allowedTools:['web.search','web.extract'],research:{scope,requireLiveSources:true,requireRepositoryEvidence:false}}))})];
   else content='Research workers are running; report delivery remains pending.';
@@ -116,7 +116,7 @@ const bootstrap=join(home,'supervisor.mjs'),searchLog=join(home,'searches.jsonl'
 writeFileSync(bootstrap,`import {appendFileSync,existsSync} from 'node:fs';
 import {registerWebResearchProvider} from ${JSON.stringify(pathToFileURL(join(retainedCore,'tools/web-research-registry.js')).href)};
 import {runGatewaySupervisor} from ${JSON.stringify(pathToFileURL(join(retainedCore,'gateway/supervisor.js')).href)};
-registerWebResearchProvider({name:'pr6-fixture',displayName:'Synthetic release evidence',capabilities:{search:true,extract:true},getAvailability:()=>({available:!existsSync(${JSON.stringify(missingFlag)}),reason:'Fixture search disabled'}),search:async query=>{appendFileSync(${JSON.stringify(searchLog)},JSON.stringify({query})+'\\n');return [{title:'Synthetic study',url:${JSON.stringify(source)},snippet:'Illustrative fixture; not scientific evidence.'}];},extract:async url=>({url,content:'Illustrative research fixture',status:url.endsWith('/unavailable')?403:200})});
+registerWebResearchProvider({name:'pr6-fixture',displayName:'Synthetic release evidence',capabilities:{search:true,extract:true},getAvailability:()=>({available:!existsSync(${JSON.stringify(missingFlag)}),reason:'Fixture search disabled'}),search:async query=>{appendFileSync(${JSON.stringify(searchLog)},JSON.stringify({query})+'\\n');return query==='empty fixture query'?[]:[{title:'Synthetic study',url:${JSON.stringify(source)},snippet:'Illustrative fixture; not scientific evidence.'},{title:'Unavailable study',url:${JSON.stringify(inaccessible)},snippet:'Snippet only; page unavailable.'}];},extract:async url=>({url,content:'Illustrative research fixture',status:url.endsWith('/unavailable')?403:200})});
 await runGatewaySupervisor(${JSON.stringify({homeDir:home,workspaceRoot:workspace,profileId})});`);
 let supervisor:ChildProcess|undefined;
 function startSupervisor(){
@@ -199,7 +199,7 @@ try{
  await page!.getByRole('button',{name:'Retry this step',exact:true}).click();
  await expect.poll(()=>store.listTasks()[0]?.status,{timeout:120000}).toBe('completed');
  const task=store.listTasks()[0],steps=store.listSteps(task.id,task.activePlanRevisionId),workers=steps.filter((s:any)=>s.executor.role==='worker'),synthesis=steps.find((s:any)=>s.executor.role==='synthesis');
- assert.equal(workers.length,3);assert.deepEqual(new Set(synthesis.dependsOn),new Set(workers.map((s:any)=>s.id)));assert.equal(store.listResults(task.id).filter((r:any)=>r.disposition==='accepted').length,5);assert.equal(searches(),4);assert(existsSync(join(workspace,'report.md')));
+ assert.equal(workers.length,3);assert.deepEqual(new Set(synthesis.dependsOn),new Set(workers.map((s:any)=>s.id)));assert.equal(store.listResults(task.id).filter((r:any)=>r.disposition==='accepted').length,5);assert.equal(searches(),8);assert(existsSync(join(workspace,'report.md')));
  const workerSessions=new Set(store.listAttempts(task.id).map((a:any)=>a.workerSessionId));assert.equal(workerSessions.size,6);assert(!workerSessions.has(sessionId));
  await idle(initial.workId);
  await expect.poll(()=>store.listDeliveryBindings({statuses:['delivered'],limit:100}).length,{timeout:30000}).toBe(1);
@@ -217,7 +217,7 @@ try{
  phase='save';saveIndex=0;await submit('Save this report to report.md',initial.workId);await idle(initial.workId);
  await expect.poll(()=>existsSync(join(workspace,'report.md')),{timeout:60000}).toBe(true);
  await expect.poll(()=>page!.evaluate(id=>window.desktop.getWork(id).then(x=>x.status).catch(()=>'unavailable'),initial.workId),{timeout:60000}).toBe('completed');
- assert.equal(readFileSync(join(workspace,'report.md'),'utf8'),reportContent);assert(reportContent.includes('| Retrieved |'));assert.equal(store.listTasks().length,1);assert.equal(searches(),4);
+ assert.equal(readFileSync(join(workspace,'report.md'),'utf8'),reportContent);assert(reportContent.includes('| Retrieved |'));assert.equal(store.listTasks().length,1);assert.equal(searches(),8);
  const events=await db.listEvents(sessionId);assert(events.some((e:any)=>e.kind==='intent-routed'&&e.route.primarySkill?.name==='researcher'&&realpathSync(e.route.primarySkill.sourcePath).startsWith(realpathSync(retainedRoot)+'/')));assert(events.some((e:any)=>e.kind==='tool-result'&&e.tool==='file.read'&&e.result.ok));assert(events.some((e:any)=>e.kind==='tool-result'&&e.tool==='skill.read'&&e.result.ok&&e.result.metadata?.mode==='reference'));
  console.log('Three workers, synthesis, app restart and verified save passed.');
  phase='recovery';const recovered=await submit('Find recent battery research.');await expect.poll(()=>recoveryIndex,{timeout:60000}).toBe(4);await idle(recovered.workId);
@@ -244,7 +244,7 @@ try{
   fixtures:{model:'scripted loopback HTTP',web:'in-process registered synthetic provider in packaged supervisor',liveModelCalls:0,transport:'actual signed app + preload/Main + owned bridge + private control'},
   workflow:{workers:workers.length,acceptedResults:store.listResults(task.id).filter((r:any)=>r.disposition==='accepted').length,distinctChildSessions:workerSessions.size,tasks:store.listTasks().length,searches:searches(),providerCalls:calls.filter(c=>['research','save'].includes(c.phase)).length,appRestartNoReplay:true,fileBytes:Buffer.byteLength(reportContent),fileSha256:createHash('sha256').update(reportContent).digest('hex'),readbackVerified:true,historicalTaskStatus:store.getTask(task.id).status},
   allScenarios:{providerCalls:requests,actualToolResults:toolResults.length,failedToolResults:toolResults.filter((e:any)=>!e.result.ok).length},
-  scenarios:{largeReportContext:true,stepScopedRequirements:true,evidenceCorrection:true,exhaustedRepairDraftPreserved:true,redundantResourceMode:true,researchThroughFallback:true,fallbackComposer:true,fallbackNotice:true,fallbackRestart:true,preferredModelPreserved:true,research:true,automaticReportDelivery:true,alternativeSourceRecovery:true,desktopTranscriptExactlyOnce:true,chatOwnedTasksUi:true,oneSidebarEntry:true,handoffRemainsRunning:true,gatewayRestartNoReplay:true,failedWorkerDraftPreserved:true,targetedRetryAfterGatewayRestart:true,saveOnlyAfterRestart:true,skillRecovery:true,missingSearch:true,falseSaveBlocked:true},
+  scenarios:{emptySearchRecovery:true,disclosedBlockedSource:true,markdownSourceUrls:true,largeReportContext:true,stepScopedRequirements:true,evidenceCorrection:true,exhaustedRepairDraftPreserved:true,redundantResourceMode:true,researchThroughFallback:true,fallbackComposer:true,fallbackNotice:true,fallbackRestart:true,preferredModelPreserved:true,research:true,automaticReportDelivery:true,alternativeSourceRecovery:true,desktopTranscriptExactlyOnce:true,chatOwnedTasksUi:true,oneSidebarEntry:true,handoffRemainsRunning:true,gatewayRestartNoReplay:true,failedWorkerDraftPreserved:true,targetedRetryAfterGatewayRestart:true,saveOnlyAfterRestart:true,skillRecovery:true,missingSearch:true,falseSaveBlocked:true},
   liveAssessment:'pending approved model, sources and spend ceiling'
  };
  mkdirSync(dirname(output),{recursive:true});writeFileSync(output,JSON.stringify(measurements,null,2)+'\n');

@@ -45,7 +45,7 @@ export function answer(content: string): ScriptStep {
   return () => ({ content });
 }
 
-export async function createResearchWorkflowHarness(options: { providerHarness?: {model: ModelProfile; primary: ResolvedModelRoute; fallbacks: ResolvedModelRoute[]; registry: ProviderRegistry}; securityPolicy?: SecurityPolicy; maxToolCalls?: number; toolDecision?: () => "allow" | "deny"; memoryText?: string; browserAvailable?: boolean; searchAvailable?: boolean; denyWrites?: boolean; maxBatchTasks?: number; fileToolsAvailable?: boolean; fallbackOnRequest?: number; approvalDecision?: ToolApprovalHandler } = {}) {
+export async function createResearchWorkflowHarness(options: { sourceAccessFailures?: boolean; providerHarness?: {model: ModelProfile; primary: ResolvedModelRoute; fallbacks: ResolvedModelRoute[]; registry: ProviderRegistry}; securityPolicy?: SecurityPolicy; maxToolCalls?: number; toolDecision?: () => "allow" | "deny"; memoryText?: string; browserAvailable?: boolean; searchAvailable?: boolean; denyWrites?: boolean; maxBatchTasks?: number; fileToolsAvailable?: boolean; fallbackOnRequest?: number; approvalDecision?: ToolApprovalHandler } = {}) {
   const model = options.providerHarness?.model ?? baselineModel;
   const root = await mkdtemp(join(tmpdir(), "estacoda-research-baseline-"));
   const homeDir = join(root, "home");
@@ -95,12 +95,13 @@ export async function createResearchWorkflowHarness(options: { providerHarness?:
     capabilities: { search: true, extract: true }, getAvailability: () => ({ available: true }),
     search: async (query) => {
       searches.push(query);
+      if (options.sourceAccessFailures && query === "empty fixture query") return [];
       return [{ title: "Synthetic battery study", url: SOURCE_URL, snippet: "A fixture, not a real scientific claim." }];
     },
     extract: async (url) => {
       if (url !== SOURCE_URL && !/^\?source=[1-5]$/.test(url.slice(SOURCE_URL.length))) throw new Error("Unexpected fixture URL");
       extracts.push(url);
-      return { url, title: "Synthetic battery study", content: "Fixture abstract: compare recycling methods; evidence is illustrative.", status: 200 };
+      return { url, title: "Synthetic battery study", content: "Fixture abstract: compare recycling methods; evidence is illustrative.", status: options.sourceAccessFailures ? 403 : 200 };
     }
   });
   let runtime: Runtime;

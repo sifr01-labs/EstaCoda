@@ -23,22 +23,29 @@ const DDGS_SEARCH_SCRIPT = String.raw`
 import json
 import sys
 from ddgs import DDGS
+from ddgs.exceptions import DDGSException
 
 payload = json.load(sys.stdin)
 query = str(payload.get("query", ""))
 limit = int(payload.get("limit", 10))
 results = []
-for result in DDGS().text(query, max_results=limit):
-    if isinstance(result, dict):
-        results.append({
-            "title": result.get("title"),
-            "href": result.get("href"),
-            "url": result.get("url"),
-            "body": result.get("body"),
-            "description": result.get("description"),
-        })
-    if len(results) >= limit:
-        break
+try:
+    for result in DDGS().text(query, max_results=limit):
+        if isinstance(result, dict):
+            results.append({
+                "title": result.get("title"),
+                "href": result.get("href"),
+                "url": result.get("url"),
+                "body": result.get("body"),
+                "description": result.get("description"),
+            })
+        if len(results) >= limit:
+            break
+except DDGSException as error:
+    # An empty search is a valid observation, not a broken dependency. Do not
+    # hide rate limits, timeouts, authentication or other provider errors.
+    if type(error) is not DDGSException or str(error) != "No results found.":
+        raise
 json.dump({"results": results}, sys.stdout, ensure_ascii=False)
 `;
 

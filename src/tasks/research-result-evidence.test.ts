@@ -44,6 +44,18 @@ describe("research result evidence", () => {
     const calls = kind === "denied" ? [execution("web.search", { results: [{ url }] }, "", "deny")] : undefined;
     expect(ground(text, calls).failure).toBeDefined();
   });
+  it.each(["`", "``", "", "<"])("parses observed URLs inside Markdown (%s)", delimiter => {
+    const end = delimiter === "<" ? ">" : delimiter;
+    expect(ground(`${claim}\nObserved source: ${delimiter}${url}${end}.`).failure).toBeUndefined();
+    const rejected = ground(`${claim}\nRemoved unsupported citation: ${delimiter}https://invented.example/${end}.`);
+    expect(rejected.failure).toBe("unobserved-source");
+    expect(rejected.feedback).not.toContain("%60");
+    expect(rejected.feedback).toContain("do not repeat rejected URLs");
+  });
+  it("does not turn a failed retrieval into a source observation", () => {
+    const failed = { ...execution("web.extract", { url: "https://failed.example/", status: 403 }), result: { ok: false, content: "Blocked", metadata: { url: "https://failed.example/", status: 403 } } };
+    expect(ground(`${claim}\nClaim from https://failed.example/`, [execution("web.search", { results: [{ url }] }), failed]).failure).toBe("unobserved-source");
+  });
   it("requires complete accepted dependency reads and preserves missing scope accounting", () => {
     const content = ground().text!;
     const read = page(content);

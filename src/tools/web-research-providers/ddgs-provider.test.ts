@@ -1,3 +1,4 @@
+import { spawnSync } from "node:child_process";
 import { EventEmitter } from "node:events";
 import { PassThrough } from "node:stream";
 import { describe, expect, it, vi, afterEach } from "vitest";
@@ -144,6 +145,38 @@ describe("DDGS web research provider", () => {
         snippet: "body wins"
       }
     ]);
+  });
+
+  // Python is an optional runtime dependency; exercise the bridge wherever it is installed.
+  const python = process.platform === "win32" ? "python" : "python3";
+  const pythonAvailable = spawnSync(python, ["--version"], { timeout: 2000 }).status === 0;
+  it.skipIf(!pythonAvailable).each(["empty", "timeout", "rate-limit", "subclass", "unknown"])("classifies DDGS %s without hiding genuine errors", async mode => {
+    const harness = createSpawnHarness({ stdout: { results: [] } });
+    const provider = configureDdgs({ pythonStateRoot: "/state", status: installedStatus("verified"), spawnProcess: harness.spawnProcess });
+    await provider.search?.("fixture");
+    const script = harness.spawnProcess.mock.calls[0]![1][1];
+    // Exercise the actual Python bridge with in-memory modules; no DDGS install or network.
+    const bootstrap = `import sys, types
+class DDGSException(Exception): pass
+class TimeoutException(DDGSException): pass
+module = types.ModuleType("ddgs")
+exceptions = types.ModuleType("ddgs.exceptions")
+exceptions.DDGSException = DDGSException
+class DDGS:
+    def text(self, *args, **kwargs):
+        raise ${mode === "subclass" ? "TimeoutException" : "DDGSException"}(${JSON.stringify(mode === "empty" || mode === "subclass" ? "No results found." : mode === "timeout" ? "Request timed out" : mode === "rate-limit" ? "Ratelimit" : "Unknown provider failure")})
+module.DDGS = DDGS
+sys.modules["ddgs"] = module
+sys.modules["ddgs.exceptions"] = exceptions
+`;
+    const result = spawnSync(python, ["-c", bootstrap + script], { timeout: 2000, input: JSON.stringify({ query: "fixture", limit: 3 }), encoding: "utf8" });
+    if (mode === "empty") {
+      expect(result.status, result.stderr).toBe(0);
+      expect(JSON.parse(result.stdout)).toEqual({ results: [] });
+    } else {
+      expect(result.status).not.toBe(0);
+      expect(result.stderr).toContain("Exception");
+    }
   });
 
   it("returns bounded diagnostics for subprocess failures", async () => {

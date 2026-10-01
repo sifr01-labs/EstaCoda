@@ -52,7 +52,7 @@ export function groundResearchResult(input: { task: Task; step: TaskStep; store:
   }
   const unobserved = [...new Set([...table.rows.map(row => row.url), ...urls(input.text)].filter(url => !sources.has(url)))];
   if (unobserved.length > 0) return { failure: "unobserved-source",
-    feedback: `These cited URLs have no successful source observation: ${unobserved.slice(0, 8).join(", ")}. Verify them with allowed tools, replace them with observed supporting sources, or remove unsupported claims. A failed retrieval is a limitation, not evidence.` };
+    feedback: `These cited URLs have no successful source observation: ${unobserved.slice(0, 8).join(", ")}. Verify them with allowed tools, replace them with observed supporting sources, or remove unsupported claims. A failed retrieval is a limitation, not evidence. Return only the corrected report; do not repeat rejected URLs in explanations of removed citations.` };
   const rows = table.rows.map((row) => ({ ...sources.get(row.url)!, claim: row.claim, limitation: row.limitation }));
   const rendered = [SOURCE_HEADER, "| --- | --- | --- | --- | --- | --- |", ...rows.map((row) => `| ${row.url} | ${row.published} | ${row.retrieved} | ${row.access} | ${row.claim} | ${row.limitation} |`)].join("\n");
   const prefix = input.step.executor.role !== "synthesis" ? "" : missing.length > 0
@@ -89,7 +89,7 @@ function httpUrl(value: unknown): string | undefined {
   try { const url = new URL(value); if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) return undefined; url.hash = ""; return url.href; } catch { return undefined; }
 }
 function urls(text: string): string[] {
-  return [...text.matchAll(/https?:\/\/[^\s<>"'\[\]{}()|]+/giu)].flatMap((match) => {
+  return [...text.matchAll(/https?:\/\/[^\s<>"'`\[\]{}()|]+/giu)].flatMap((match) => {
     const url = httpUrl(match[0].replace(/[.,;:!?]+$/u, "")); return url === undefined ? [] : [url];
   });
 }

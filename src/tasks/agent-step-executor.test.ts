@@ -844,22 +844,26 @@ describe("AgentStepExecutor", () => {
     });
   });
 
-  it.each(["alternative", "missing-table", "unobserved", "required-source", "denied", "unavailable-tool"])("handles inaccessible research sources: %s", async mode => {
+  it.each(["alternative", "disclosed", "required-source", "required-code-source", "missing-table", "unobserved", "denied", "unavailable-tool"])("handles inaccessible research sources: %s", async mode => {
     const graph=makeGraph(), base=graph.steps[0]!;
     const url="https://observed.example/report", unavailable="https://unavailable.example/report";
-    const step:TaskStep={...base,objective:mode==="required-source"?`Read ${unavailable}`:"Research methods",executor:{...base.executor,role:"worker",
+    const step:TaskStep={...base,objective:mode==="required-source"?`Read ${unavailable}`:mode==="required-code-source"?`Read \`${unavailable}\``:"Research methods",executor:{...base.executor,role:"worker",
       research:{scope:"methods",requireLiveSources:true,requireRepositoryEvidence:false},requestContract:{version:1,objective:"Research",requirements:{skillReferences:[],issues:[],research:{fresh:true,domain:"general"}}}}};
-    const calls=[successfulEvidenceExecution("web.search","read-only-network",["web","research"],{query:"methods"},"Observed",{results:[{url,snippet:"A method"}]}),{
+    const calls=[successfulEvidenceExecution("web.search","read-only-network",["web","research"],{query:"methods"},"Observed",{results:[{url,snippet:"A method"},...(mode==="disclosed"?[{url:unavailable,snippet:"Study abstract"}]:[])]}),{
       tool:tool("web.extract","read-only-network",["web"]),input:{url:unavailable},decision:mode==="denied"?"deny" as const:"allow" as const,riskClass:"read-only-network" as const,
       result:{ok:false,content:"Unavailable",metadata:mode==="unavailable-tool"?{reason:"unavailable"}:{status:403}}}];
-    const text=mode==="missing-table"?`Found ${url}`:`| Source URL | Supported claim | Limitation |\n| --- | --- | --- |\n| ${mode==="unobserved"?"https://invented.example/report":url} | A method | Snippet only |`;
+    const text=(mode==="missing-table"?`Found ${url}`:`| Source URL | Supported claim | Limitation |\n| --- | --- | --- |\n| ${mode==="unobserved"?"https://invented.example/report":url} | A method | Snippet only |`)+(mode==="disclosed"?`\nAccess limitation: ${unavailable} returned HTTP 403; only its search snippet was observed.`:"");
     const childFactory:ChildAgentLoopFactory={createChild:vi.fn(async input=>{
       await sessionDb.createSession({id:"alternative-worker",profileId:input.profileId,parentSessionId:input.parentSessionId});
-      return childRuntime(async()=>response({text,toolExecutions:calls}),async()=>undefined,{sessionId:"alternative-worker",trajectoryId:"alternative-trajectory"}, {tools:calls.map(call=>call.tool.name),toolsets:["web","research"]});
+      return childRuntime(async request=>{
+        const failure = request.stepCompletion?.validate?.(text, calls);
+        expect(failure === undefined).toBe(["alternative", "disclosed"].includes(mode));
+        return response({text,toolExecutions:calls});
+      },async()=>undefined,{sessionId:"alternative-worker",trajectoryId:"alternative-trajectory"}, {tools:calls.map(call=>call.tool.name),toolsets:["web","research"]});
     })};
     const executor=new AgentStepExecutor({childFactory,sessionDb,taskStore:store,hostWorkspace:graph.task.workspace,isWorkspaceTrusted:()=>true,parentVisibleTools:()=>tools(),approvalService:new TaskApprovalService({store}),securityPolicy:capabilityFirstDefaults});
     const result=await executor.execute({task:graph.task,step,attempt:attempt({...graph,steps:[step]}),signal:new AbortController().signal,heartbeat:vi.fn(),checkpoint:vi.fn()});
-    expect(result.outcome).toBe(mode==="alternative"?"succeeded":"failed");
+    expect(result.outcome).toBe(["alternative", "disclosed"].includes(mode)?"succeeded":"failed");
     if(result.outcome==="succeeded")expect(result.results?.[0]?.content).toContain("Source access limitation: 1");
   });
 

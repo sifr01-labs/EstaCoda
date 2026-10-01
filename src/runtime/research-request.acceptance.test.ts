@@ -47,8 +47,8 @@ function schedulerFor(h: Harness, taskId: string) {
 
 describe.sequential("research workflow acceptance harness", () => {
   it("recovers the incident under provider fallback and retains required synthesis", async () => {
-    const h=await harness({fallbackOnRequest:1});
-    const tasks=["collection","processing","reuse"].map(scope=>({task:`Research ${scope}.`,context:"User requested current research using 3 subagents. Save report.md. This is background context, not this worker's assignment.",allowedTools:["web.search"],
+    const h=await harness({fallbackOnRequest:1,sourceAccessFailures:true});
+    const tasks=["collection","processing","reuse"].map(scope=>({task:`Research ${scope}.`,context:"User requested current research using 3 subagents. Save report.md. This is background context, not this worker's assignment.",allowedTools:["web.search","web.extract"],
       allowedToolsets:["research","core"],research:{scope,requireLiveSources:true,requireRepositoryEvidence:false}}));
     h.enqueue(nativeCall("skill_read",{name:"researcher",path:"references/sources.md",mode:"contract"}));
     // Three pre-admission errors must leave capacity for the corrected batch.
@@ -74,7 +74,10 @@ describe.sequential("research workflow acceptance harness", () => {
     scriptConsumed(h);
     const {scheduler,resultService}=schedulerFor(h,task.id);
     for(let index=0;index<3;index++) {
-      h.enqueue(nativeCall("web_search",{query:`battery recycling ${index}`}),answer(`Scope ${index}: [source](${SOURCE_URL}).\n\n${"Observed research detail. ".repeat(450)}\nTAIL-SCOPE-${index}\n${CLAIM_TABLE}`));
+      h.enqueue(nativeCall("web_search",{query:"empty fixture query"}),
+        nativeCall("web_search",{query:`battery recycling ${index}`}),
+        nativeCall("web_extract",{url:SOURCE_URL}),
+        answer(`Scope ${index}: [source](${SOURCE_URL}).\nAccess limitation: \`${SOURCE_URL}\` returned HTTP 403; claims rely on the observed search snippet only.\n\n${"Observed research detail. ".repeat(450)}\nTAIL-SCOPE-${index}\n${CLAIM_TABLE}`));
       expect(await scheduler.runOnce()).toMatchObject({completed:1,failed:0});
     }
     const accepted=h.store.listResults(task.id).filter(item=>item.kind==="text"&&item.disposition==="accepted");
@@ -116,8 +119,10 @@ describe.sequential("research workflow acceptance harness", () => {
     const { scheduler, resultService } = schedulerFor(h, task.id);
     const invalid = `Preserved candidate research findings.\n${CLAIM_TABLE.replaceAll(SOURCE_URL, "https://unobserved.example/claim")}`;
     const valid = `Corrected cited research findings.\n${CLAIM_TABLE}`;
-    h.enqueue(nativeCall("web_search", { query: "battery recycling" }), answer(invalid),
-      answer(exhausted ? invalid : valid));
+    h.enqueue(nativeCall("web_search", { query: "battery recycling" }), answer(invalid), request => {
+      expect(JSON.stringify(request.messages)).toContain("do not repeat rejected URLs in explanations");
+      return { content: exhausted ? invalid : valid };
+    });
     if (exhausted) h.enqueue(answer(invalid));
     expect(await scheduler.runOnce()).toMatchObject({ completed: exhausted ? 0 : 1, failed: exhausted ? 1 : 0 });
     const worker = h.store.listSteps(task.id, task.activePlanRevisionId!).find(step => step.executor.role === "worker")!;

@@ -390,9 +390,7 @@ export class AgentStepExecutor implements TaskStepExecutor {
           ...common
         };
       }
-      if (response.toolExecutions.some((execution, index, executions) =>
-        execution.result?.ok === false && !isRecoveredRead(execution, index, executions) && !isAlternativeResearchRead(input.step, response.text, execution)
-      )) {
+      if (hasUnrecoveredToolFailure(input.step, response.toolExecutions)) {
         return {
           outcome: "failed",
           failure: taskFailure("tool-error", true),
@@ -422,7 +420,7 @@ export class AgentStepExecutor implements TaskStepExecutor {
       const grounded = groundResearchResult({ task: input.task, step: input.step, store: this.#taskStore,
         text: response.text, executions: response.toolExecutions, now: this.#now() });
       const unavailableSources = response.toolExecutions.filter(execution => execution.result?.ok === false &&
-        isAlternativeResearchRead(input.step, response.text, execution)).length;
+        isAlternativeResearchRead(input.step, execution)).length;
       const researchText = (grounded.text ?? response.text) + (unavailableSources
         ? `\n\nSource access limitation: ${unavailableSources} page retrieval(s) failed. Findings use other observed sources; failed retrievals remain in the attempt history.` : "");
       const captured = await captureResults(researchText, response.artifacts, input, this.#resolveArtifactContent);
@@ -643,6 +641,9 @@ function researchCompletionFailure(
 ): string | undefined {
   const grounded = groundResearchResult({ task: input.task, step: input.step, store, text, executions, now });
   if (grounded.failure !== undefined) return `Research evidence needs correction: ${grounded.failure}. ${grounded.feedback ?? "Return the required source/claim/limitation table using observed evidence; preserve limitations."}`;
+  // Use the same failure recovery decision before completion and at settlement.
+  // A provider must be able to repair required reads before its Attempt ends.
+  if (hasUnrecoveredToolFailure(input.step, executions)) return "Research evidence needs correction: unresolved-tool-error. Retry the failed required read with the same arguments, or report that the assigned evidence could not be obtained. Failed optional HTTP reads may use other observed evidence; authorization failures are never recoverable here.";
   const missing = researchEvidenceFailure(input.step, text, [...executions]);
   return missing === undefined ? undefined : `Research evidence needs correction: ${missing}. Cite evidence observed with the assigned tools; obtain missing evidence or explicitly report the unresolved gap.`;
 }
@@ -693,7 +694,7 @@ function collectHttpUrls(values: readonly unknown[]): string[] {
   const visit = (value: unknown, depth: number): void => {
     if (urls.size >= 128 || depth > 4 || value === undefined || value === null) return;
     if (typeof value === "string") {
-      for (const match of value.slice(0, 24_000).matchAll(/https?:\/\/[^\s<>"'\[\]{}()]+/giu)) {
+      for (const match of value.slice(0, 24_000).matchAll(/https?:\/\/[^\s<>"'`\[\]{}()|]+/giu)) {
         const normalized = normalizedHttpUrl(match[0]);
         if (normalized !== undefined) urls.add(normalized);
         if (urls.size >= 128) break;
@@ -848,22 +849,27 @@ function safeDiagnosticOutput(
   };
 }
 
+function hasUnrecoveredToolFailure(step: TaskStep, executions: readonly ToolExecutionRecord[]): boolean {
+  return executions.some((execution, index) => execution.result?.ok === false &&
+    !isRecoveredRead(execution, index, executions) && !isAlternativeResearchRead(step, execution));
+}
+
 /** Only source-level HTTP failures can be replaced by other observed evidence.
  * The research and grounding gates below still validate the returned report. */
-function isAlternativeResearchRead(step: TaskStep, text: string, execution: ToolExecutionRecord): boolean {
+function isAlternativeResearchRead(step: TaskStep, execution: ToolExecutionRecord): boolean {
   if (step.executor.role !== "worker" || !step.executor.requestContract?.requirements.research ||
       !step.executor.research?.requireLiveSources || execution.decision !== "allow" ||
       execution.tool.name !== "web.extract" || execution.riskClass !== "read-only-network") return false;
   const status = execution.result?.metadata?.status;
   const url = execution.input?.url;
   return typeof status === "number" && [403, 404, 406, 410, 429, 500, 502, 503, 504].includes(status) &&
-    typeof url === "string" && !collectHttpUrls([text, step.objective, step.executor.research.scope]).includes(normalizedHttpUrl(url) ?? url);
+    typeof url === "string" && !collectHttpUrls([step.objective, step.executor.research.scope]).includes(normalizedHttpUrl(url) ?? url);
 }
 
 function isRecoveredRead(
   failedExecution: Awaited<ReturnType<ChildAgentLoopRuntime["handle"]>>["toolExecutions"][number],
   failedIndex: number,
-  executions: Awaited<ReturnType<ChildAgentLoopRuntime["handle"]>>["toolExecutions"]
+  executions: readonly ToolExecutionRecord[]
 ): boolean {
   if (failedExecution.riskClass !== "read-only-local" && failedExecution.riskClass !== "read-only-network") return false;
   const failedInput = stableToolInput(failedExecution.input);
