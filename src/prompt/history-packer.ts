@@ -1,3 +1,4 @@
+import { historyContentLimit, truncateHistoryContent } from "./history-content.js";
 import type { SessionMessage } from "../contracts/session.js";
 import { stripInlineReasoning } from "../providers/provider-reasoning.js";
 import { estimateMessageTokensRough, estimateMessagesTokensRough } from "./token-estimator.js";
@@ -65,7 +66,7 @@ export function packSessionHistory(
 ): PackedHistory {
   const maxProtectedMessages = options.maxProtectedMessages ?? 6;
   const maxSummaryChars = options.maxSummaryChars ?? 1_400;
-  const maxMessageChars = options.maxMessageChars ?? 900;
+  const maxMessageChars = options.maxMessageChars;
   const maxEstimatedTokens = options.maxEstimatedTokens ?? deriveSessionHistoryBudget(undefined);
   const sanitizedMessages = sanitizeSessionHistoryCredentials(messages);
   const conversational = sanitizedMessages.filter((message) =>
@@ -76,6 +77,8 @@ export function packSessionHistory(
   const pinnedIndexes = pinnedConversationalIndexes(conversational, protectedStart);
   const older = conversational.slice(0, protectedStart);
   const recent = conversational.slice(protectedStart);
+  const latestCandidate = recent.reduce((latest, message, index) =>
+    message.role === "agent" && message.metadata?.completionCandidate === true && message.metadata.accepted === false ? index : latest, -1);
   const summary = summarizeOlderTurns(older, maxSummaryChars);
   let packedMessages: InternalPackedHistoryMessage[] = [
     ...(semanticSummary === undefined
@@ -94,7 +97,10 @@ export function packSessionHistory(
         }]),
     ...recent.map((message, index) => ({
       role: message.role === "agent" ? "assistant" as const : message.role,
-      content: sanitizeHistoryContent(message.content, maxMessageChars),
+      content: sanitizeHistoryContent(message.content, maxMessageChars ?? Math.min(
+        historyContentLimit(message.role, index === latestCandidate ? message.metadata : undefined),
+        Math.max(900, maxEstimatedTokens * 3)
+      )),
       metadata: message.role === "agent" ? sanitizeProviderExecutionMetadata(message.metadata) : message.metadata,
       pinned: pinnedIndexes.has(protectedStart + index)
     }))
@@ -252,7 +258,7 @@ function messageImportance(message: PackedHistoryMessage, summaryCount: number):
 }
 
 function truncate(value: string, maxChars: number): string {
-  return value.length <= maxChars ? value : `${value.slice(0, maxChars)}\n[truncated ${value.length - maxChars} chars]`;
+  return truncateHistoryContent(value, maxChars);
 }
 
 function sanitizeHistoryContent(value: string, maxChars: number): string {

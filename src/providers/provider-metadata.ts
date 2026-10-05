@@ -217,6 +217,7 @@ const BUILT_IN_METADATA: Record<string, ProviderMetadata> = {
   },
   codex: {
     id: "codex",
+    supportsNativeToolHistory: true,
     displayName: "OpenAI Codex",
     catalogKnown: true,
     configurable: true,

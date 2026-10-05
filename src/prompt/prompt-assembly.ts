@@ -1,3 +1,4 @@
+import { historyContentLimit, truncateHistoryContent } from "./history-content.js";
 import { taskResultContext } from "./task-result-context.js";
 import { renderCapabilityState, type RuntimeCapabilityState } from "../runtime/capability-state.js";
 import { reviewedApiDescription } from "../contracts/artifact.js";
@@ -1558,17 +1559,22 @@ function nativeHistorySkipReason(input: ProviderPromptInput): StructuredToolHist
   if (input.model?.supportsTools !== true) {
     return "model_tools_unsupported";
   }
-  if (route.apiMode !== "openai_chat_completions") {
+  if (!supportsNativeHistorySerialization(route)) {
     return "serialization_unsupported";
   }
   return undefined;
+}
+
+function supportsNativeHistorySerialization(route: NonNullable<ProviderPromptInput["nativeHistoryRoute"]>): boolean {
+  return route.apiMode === "openai_chat_completions" ||
+    (route.provider === "codex" && route.apiMode === "openai_responses");
 }
 
 function canUseNativeHistory(input: ProviderPromptInput): boolean {
   const route = input.nativeHistoryRoute;
   return route?.supportsNativeToolHistory === true &&
     input.model?.supportsTools === true &&
-    route.apiMode === "openai_chat_completions";
+    supportsNativeHistorySerialization(route);
 }
 
 function flattenNativeHistoryUnits(units: NativeHistoryUnit[]): SessionMessage[] {
@@ -1988,7 +1994,7 @@ function renderHistoryRole(message: PromptSessionHistoryMessage): string {
 }
 
 function renderHistoryContent(message: PromptSessionHistoryMessage): string {
-  return truncate(stripInlineReasoning(stringifyProviderMessageContent(message.content)), 900);
+  return truncateHistoryContent(stripInlineReasoning(stringifyProviderMessageContent(message.content)), historyContentLimit(message.role, message.metadata));
 }
 
 function renderNativeHistoryContent(message: PromptSessionHistoryMessage): string {
@@ -2022,7 +2028,7 @@ function stringifyProviderMessageContent(content: ProviderMessage["content"]): s
 }
 
 function truncate(value: string, maxChars: number): string {
-  return value.length <= maxChars ? value : `${value.slice(0, maxChars)}\n[truncated ${value.length - maxChars} chars]`;
+  return truncateHistoryContent(value, maxChars);
 }
 
 function renderProfileGuidance(input: ProviderPromptInput): string {

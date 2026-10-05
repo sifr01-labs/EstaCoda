@@ -1,3 +1,6 @@
+import { ProviderAccountingError } from "../providers/provider-executor.js";
+import { inspectPlaintextCredentials } from "../security/plaintext-credential-guard.js";
+import { truncateHistoryContent } from "../prompt/history-content.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { fileOutputEvidence } from "../runtime/file-output-evidence.js";
 import type { ExecutionEvidenceRecord } from "../contracts/execution-plan.js";
@@ -159,6 +162,8 @@ export class AgentStepExecutor implements TaskStepExecutor {
       input.task,
       input.step
     );
+    const recoveryContext = await this.#accountingRecoveryContext(input);
+    const context = dependencyContext(this.#taskStore, input.task, input.step) + recoveryContext;
     const attemptFencingToken = input.attempt.lease?.fencingToken;
     if (attemptFencingToken === undefined) return failed("lease-missing", true);
     const modelOverride = taskModelOverride(this.#taskStore,input.task.id) ?? toModelOverride(input.step);
@@ -179,7 +184,7 @@ export class AgentStepExecutor implements TaskStepExecutor {
         parentSessionId,
         profileId: input.task.profileId,
         task: input.step.objective,
-        context: dependencyContext(this.#taskStore, input.task, input.step),
+        context,
         allowedToolsets: [...input.step.authorityPolicy.allowedToolsets],
         allowedTools: input.step.authorityPolicy.allowedTools === undefined
           ? undefined
@@ -288,7 +293,7 @@ export class AgentStepExecutor implements TaskStepExecutor {
         role: toDelegateRole(input.step),
         depth: delegationDepth,
         task: input.step.objective,
-        context: dependencyContext(this.#taskStore, input.task, input.step),
+        context,
         ...(input.attempt.workerSessionId === undefined ? {} : {
           prompt: "Continue this durable Task from the saved worker session. Use the existing transcript and do not repeat completed actions."
         }),
@@ -436,6 +441,31 @@ export class AgentStepExecutor implements TaskStepExecutor {
       input.checkpoint({ milestone: "result-captured" });
       endReason = "task-step-completed";
       return { outcome: "succeeded", results: captured.results, ...metering, ...common };
+    } catch (error) {
+      if (!(error instanceof ProviderAccountingError)) throw error;
+      if (input.signal.aborted) return { outcome: "cancelled", usage: unavailableUsage("agent-cancelled"), workerSessionId: child.childSessionId };
+      // A known bookkeeping failure is not evidence of a failed research read.
+      // Recovery is safe only where the Step cannot perform mutations/delegate.
+      const readOnly = !input.step.authorityPolicy.mayCreateChildTasks &&
+        Object.entries(input.step.authorityPolicy.riskClassPolicy).every(([risk, policy]) =>
+          policy === "forbid" || risk === "read-only-local" || risk === "read-only-network");
+      const events = await this.#sessionDb.listEvents(child.childSessionId);
+      const blocked = events.some(event => event.kind === "tool-gated" && event.decision !== "allow" ||
+        event.kind === "security-assessed" && event.assessment.decision !== "allow");
+      const recoverable = readOnly && !blocked && await this.#isWorkspaceTrusted(input.task.workspace);
+      const text = inspectPlaintextCredentials(error.diagnosticText).redactedText;
+      if (recoverable) input.checkpoint({ milestone: "provider-completed" });
+      if (recoverable && text.trim()) await this.#sessionDb.appendMessage({
+        sessionId: child.childSessionId, role: "agent", content: text,
+        metadata: { accountingDiagnostic: true, accepted: false }
+      });
+      return {
+        outcome: "failed", workerSessionId: child.childSessionId,
+        failure: { class: "provider-accounting", message: "The provider returned a response, but runtime accounting could not settle it. The response was not accepted or executed.",
+          retryable: recoverable, uncertainSideEffects: !readOnly },
+        usage: unavailableUsage("provider-accounting"),
+        ...(recoverable ? safeDiagnosticOutput(text, []) : {})
+      };
     } finally {
       this.#approvalService.clearAttempt(input.attempt.id);
       input.signal.removeEventListener("abort", abortChild);
@@ -445,6 +475,21 @@ export class AgentStepExecutor implements TaskStepExecutor {
       }
       await child.cleanup().catch(() => undefined);
     }
+  }
+
+  async #accountingRecoveryContext(input: TaskStepExecutionInput): Promise<string> {
+    const previous = this.#taskStore.listAttempts(input.task.id, input.step.id)
+      .filter(attempt => attempt.attemptNumber < input.attempt.attemptNumber && attempt.failure?.class === "provider-accounting")
+      .sort((a, b) => b.attemptNumber - a.attemptNumber)[0];
+    if (!previous?.workerSessionId) return "";
+    const session = await this.#sessionDb.getSession(previous.workerSessionId);
+    if (session?.profileId !== input.task.profileId || session.parentSessionId !== input.task.creatorSessionId) return "";
+    const messages = await this.#sessionDb.listMessages(previous.workerSessionId);
+    const draft = [...messages].reverse().find(message => message.role === "agent" &&
+      message.metadata?.accountingDiagnostic === true && message.metadata.accepted === false);
+    if (!draft) return "";
+    return "\n\nRecovery draft from this Step's previous attempt (not accepted evidence). Repair this draft; verify its relevant sources with your allowed tools. Do not repeat the entire investigation or assume previous citations are verified in this attempt.\n" +
+      truncateHistoryContent(inspectPlaintextCredentials(draft.content).redactedText, 32_000);
   }
 
   #taskProgressSink(input: TaskStepExecutionInput): RuntimeEventSink {

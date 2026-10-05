@@ -85,12 +85,12 @@ describe("DurableDelegationService", () => {
     expect(steps.map((step) => step.retryPolicy)).toEqual([
       expect.objectContaining({
         maxAttempts: TASK_GRAPH_LIMITS.maxAttemptsPerStep,
-        retryableFailureClasses: ["lease-expired", "lease-missing"],
+        retryableFailureClasses: ["lease-expired", "lease-missing", "provider-accounting"],
         requireIdempotent: true
       }),
       expect.objectContaining({
         maxAttempts: TASK_GRAPH_LIMITS.maxAttemptsPerStep,
-        retryableFailureClasses: ["lease-expired", "lease-missing"],
+        retryableFailureClasses: ["lease-expired", "lease-missing", "provider-accounting"],
         requireIdempotent: false
       })
     ]);
@@ -559,7 +559,7 @@ describe("DurableDelegationService", () => {
     expect(synthesis.idempotency).toBe("retry_safe");
     expect(synthesis.retryPolicy).toMatchObject({
       maxAttempts: TASK_GRAPH_LIMITS.maxAttemptsPerStep,
-      retryableFailureClasses: ["lease-expired", "lease-missing"],
+      retryableFailureClasses: ["lease-expired", "lease-missing", "provider-accounting"],
       requireIdempotent: true
     });
     expect(workers.every((step) => step.idempotency === "retry_safe")).toBe(true);

@@ -1,3 +1,4 @@
+import { withExecutionFence } from "../session/execution-fence-context.js";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -11,7 +12,7 @@ import type {
 } from "../contracts/provider.js";
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
 import { SQLiteProviderSpendController } from "../tasks/sqlite-provider-spend.js";
-import { ProviderExecutor } from "./provider-executor.js";
+import { ProviderAccountingError, ProviderExecutor } from "./provider-executor.js";
 import { ProviderRegistry } from "./provider-registry.js";
 
 const PROFILE_ID = "spend-enforcement";
@@ -30,6 +31,32 @@ describe("ProviderExecutor spending enforcement", () => {
   afterEach(() => {
     sessionDb.close();
     rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it.each([false, true])("preserves only diagnostic text after settlement failure and rejects revoked execution (revoked=%s)", async revoked => {
+    await createUsageSession("accounting", 1);
+    const controller = new SQLiteProviderSpendController({ db: sessionDb.db, profileId: PROFILE_ID });
+    const claim = { sessionId: "accounting", profileId: PROFILE_ID, targetId: "target", ownerId: "owner", fence: 1 };
+    sessionDb.db.query(`insert into session_execution_owners(session_id,profile_id,target_id,owner_id,fence,heartbeat_at,expires_at) values(?,?,?,?,?,?,?)`)
+      .run(claim.sessionId, claim.profileId, claim.targetId, claim.ownerId, claim.fence, Date.now(), Date.now() + 60_000);
+    let closed = false;
+    registry.register(adapter(async request => {
+      closed = revoked;
+      return { ...response(request), content: "Preserved research draft", toolCalls: [{ id: "unexecuted", name: "file.write", argumentsText: "{}" }] };
+    }));
+    vi.spyOn(controller, "settle").mockImplementation(() => { throw new Error("database failure with private details"); });
+    const outcome = withExecutionFence(sessionDb.db, claim, () => executor(controller).complete({ messages: [], maxTokens: 10 }, {}, {
+      primaryRoute: pricedRoute(), usage: usage("accounting", "failed-settlement")
+    }), () => { if (closed) throw new Error("Execution revoked"); });
+    if (revoked) await expect(outcome).rejects.toThrow("Execution revoked");
+    else {
+      const error = await outcome.catch(error => error);
+      expect(error).toBeInstanceOf(ProviderAccountingError);
+      expect(error.diagnosticText).toBe("Preserved research draft");
+      expect(error.toolCalls).toBeUndefined();
+      expect(error.message).not.toContain("private details");
+    }
+    controller.dispose();
   });
 
   it("marks a durable reservation dispatching before adapter entry and settles actual usage", async () => {
@@ -291,7 +318,7 @@ describe("ProviderExecutor spending enforcement", () => {
     });
 
     finish(response({ model: "priced-model" }, { inputTokens: 1, outputTokens: 1 }));
-    await expect(pending).rejects.toThrow(/controller is disposed/i);
+    await expect(pending).rejects.toMatchObject({ name: "ProviderAccountingError", cause: expect.objectContaining({ message: expect.stringMatching(/controller is disposed/i) }) });
   });
 
   it("fails closed when attributed execution has no spend controller", async () => {

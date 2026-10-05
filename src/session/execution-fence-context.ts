@@ -13,6 +13,7 @@ export function rotateExecutionFence(db: SQLiteDatabase, claim: ExecutionClaim):
 export function assertCurrentExecutionFence(): void {
   const current = context.getStore();
   if (!current) return;
+  current.assertLive?.();
   const { db, claim } = current;
   const row = db.query<{ fence: number }>(`select fence from session_execution_owners
     where session_id=? and profile_id=? and target_id=? and owner_id=? and fence=?`)

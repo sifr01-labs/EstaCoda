@@ -33,6 +33,8 @@ describe("research result evidence", () => {
   });
   it("adds retrieval facts, observed dates and conservative access status without trusting provider columns", () => {
     const result = ground();
+    expect(result.text).toContain("Source access: search summaries only");
+    expect(result.text).toContain("not scientific accuracy");
     expect(result.text).toContain("2025-06-10 | 2026-09-24 | snippet; full text unavailable");
     const forged = result.text!.replace("2025-06-10", "2099-01-01").replace("snippet; full text unavailable", "full-text");
     expect(ground(forged).text).toBe(result.text);

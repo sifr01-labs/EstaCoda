@@ -1852,7 +1852,7 @@ export class TaskScheduler {
     // Settled tasks/steps remain immutable; never resurrect historical terminal work.
     if (step.executor.role === "worker" && step.executor.requestContract?.requirements.research &&
         isAutomaticRestartSafe(step) && attempt.attemptNumber < step.retryPolicy.maxAttempts &&
-        ["executor-error", "tool-error", "evidence-contract-unsatisfied"].includes(attempt.failure?.class ?? "")) {
+        ["executor-error", "tool-error", "evidence-contract-unsatisfied", "provider-accounting"].includes(attempt.failure?.class ?? "")) {
       this.#pauseForOperatorReview(store, task, step, now, "research-recovery-required",
         "Research needs review. Sources and drafts are preserved; retry the affected Step within its remaining limits.");
       return false;
@@ -2293,6 +2293,9 @@ export function classifyTaskRetry(step: TaskStep, attempt: TaskAttempt): TaskRet
   if (failureRecord === undefined) return { retry: false, delayMs: 0, reason: "attempt-has-no-failure" };
   if (attempt.attemptNumber >= step.retryPolicy.maxAttempts) {
     return { retry: false, delayMs: 0, reason: "attempt-limit-exhausted" };
+  }
+  if (failureRecord.class === "provider-accounting" && (attempt.attemptNumber >= 2 || !isAutomaticRestartSafe(step))) {
+    return { retry: false, delayMs: 0, reason: "accounting-recovery-limit" };
   }
   if (step.retryPolicy.nonRetryableFailureClasses.includes(failureRecord.class)) {
     return { retry: false, delayMs: 0, reason: "failure-class-non-retryable" };

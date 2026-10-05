@@ -1,0 +1,261 @@
+{
+  "version": 1,
+  "issue": "Sibling completion invalidated the shared provider heartbeat execution context; long calls then failed accounting and lost their final response.",
+  "validationWorkspace": "Isolated tracked source plus the recorded overlay; unrelated working-tree files excluded.",
+  "checks": {
+    "node": "v24.14.1",
+    "pnpm": "10.33.0",
+    "frozenOfflineInstall": "passed",
+    "coreTypecheck": "passed",
+    "desktopTypecheck": "passed",
+    "fullSuite": {
+      "files": 750,
+      "tests": 12082,
+      "passed": true
+    },
+    "finalCompatibilityChecks": {
+      "files": 2,
+      "tests": 55,
+      "passed": true
+    },
+    "sourceSmoke": {
+      "cases": 13,
+      "passed": true
+    },
+    "distributionSmoke": {
+      "cases": 13,
+      "passed": true
+    },
+    "runtimeImportAudit": "passed",
+    "esmAudit": "passed",
+    "build": "passed",
+    "desktopPackage": "passed",
+    "diffCheck": "passed",
+    "researchEvaluation": {
+      "deterministicPassed": true,
+      "corpusSha256": "0e46fe4054651739ec55222b4c948414370212e94ec8c08db5791d25c7613900"
+    }
+  },
+  "securityReview": [
+    "Heartbeat writes retain each dispatch execution context and still require the current owner, fencing token and unexpired lease. Revoked authority is not bypassed.",
+    "Unsettled responses never execute tool calls or become accepted results. Only read-only steps with current trust and no recorded authorization block may retain a redacted draft and receive one policy-permitted retry.",
+    "Recovery draft context is profile/parent/step scoped, bounded and unaccepted; source observations must be verified again. Existing accepted sibling results remain intact.",
+    "Attention receipts use existing authorized delivery bindings and current Desktop targets; deduplication survives restart without consuming final completion delivery.",
+    "Source provenance checks do not establish scientific truth. Snippet-only reports state their access limitation; file delivery still requires matching write and readback."
+  ],
+  "packaged": {
+    "version": 1,
+    "passed": true,
+    "measuredAt": "2026-10-05T12:22:17.311Z",
+    "sourceBaseCommit": "f7b08e79db171f76d1bb8d8ebf7ef66786a0c490",
+    "sourceOverlay": [
+      {
+        "path": "apps/desktop/src/renderer/components/chat-tasks.tsx",
+        "sha256": "6c67804c5ddf04d1cebc030f62f52ccb0b63b316d48a7b91f20fd821542927f1"
+      },
+      {
+        "path": "apps/desktop/src/shared/i18n/chat-tasks.ts",
+        "sha256": "c08493214f0f0b36f4b5369aa7e61fefbe5e35dd44970f01cb4fe74fb77688c6"
+      },
+      {
+        "path": "apps/desktop/tests/research-packaged.mts",
+        "sha256": "e8819043e43b324f5c368d84aff09bcf6b04b7f17dfd0f474dbe2681911de9c3"
+      },
+      {
+        "path": "package.json",
+        "sha256": "8427aa6992264ee7c5031c694c9d0a152be35125b78afd8cd47e4743c70beba8"
+      },
+      {
+        "path": "scripts/validate-research-reliability.ts",
+        "sha256": "68a7cb802eb608cacc380efcd267b00c2e73e060c1a46210d3bbd609372d6d98"
+      },
+      {
+        "path": "src/delegation/durable-delegation-service.test.ts",
+        "sha256": "ccc1b4ab4d203185e136b28be4a481446452af7aad117a08afe38ac3584116c7"
+      },
+      {
+        "path": "src/delegation/durable-delegation-service.ts",
+        "sha256": "e50004cdb0c9d8d87dd652fe06b0c875f9ef002e7294734d796d50682c591271"
+      },
+      {
+        "path": "src/eval/fixtures/research-workflow-harness.ts",
+        "sha256": "17b562f99c75c413238835f053e0e43b9f1f52a7257a8554fae4a3bbf4984630"
+      },
+      {
+        "path": "src/eval/fixtures/research-workflow-release.ts",
+        "sha256": "8b2e582fed53c3a1b6c9feb907ef2a39bf84b19c74ba4d839fd0ee30f765ef3e"
+      },
+      {
+        "path": "src/prompt/history-content.ts",
+        "sha256": "0ae11e0af37752cb51607fb9f5574bfe4a88631d27748f325d4554b3e07eda97"
+      },
+      {
+        "path": "src/prompt/history-packer.test.ts",
+        "sha256": "774c8612dca2e048b8308d78cbc9bd1770c4641e367b0c8d9e18c97be7119160"
+      },
+      {
+        "path": "src/prompt/history-packer.ts",
+        "sha256": "344e12f6e17ead3a2d1219e48ac14ed0e15ba1317d47f94db8b623c31f52cf78"
+      },
+      {
+        "path": "src/prompt/prompt-assembly.test.ts",
+        "sha256": "71d0d299aae9f8d77f94a1027c8473e0dfc09e15f000d9f5db1c9dbcbdab6e3c"
+      },
+      {
+        "path": "src/prompt/prompt-assembly.ts",
+        "sha256": "996f56480c26d857a799864921b92b1f2afb1aa2f496cc759355ce13daf432f5"
+      },
+      {
+        "path": "src/prompt/provider-execution-history.ts",
+        "sha256": "22be06b426cbedaad65a30b52ce78e1b97ffd567121e12f0d5accd15319bd2c3"
+      },
+      {
+        "path": "src/prompt/task-result-context.test.ts",
+        "sha256": "22715d4d69c566b8a921d1d55b4c418b78e1c69f99fd11327e20446239838a50"
+      },
+      {
+        "path": "src/prompt/task-result-context.ts",
+        "sha256": "a2ed6397670145034c28a0e2a63931a9b71aa4ae7842c88ff98e145a12e3bb81"
+      },
+      {
+        "path": "src/providers/provider-executor.ts",
+        "sha256": "e893d679a54ef5992ec0f34cc90dabf21700aacf693ec170c1f3c0e34862adcb"
+      },
+      {
+        "path": "src/providers/provider-metadata.test.ts",
+        "sha256": "c6395fb9d86bd1631cf0643a03c731ad6f49c0e92ac24e7a6557ca552c3f0eda"
+      },
+      {
+        "path": "src/providers/provider-metadata.ts",
+        "sha256": "1e3fb307408b2770eed2d1f5f253b1d6b87980674159cf5a51b01a36bbe3fb81"
+      },
+      {
+        "path": "src/providers/provider-spend-enforcement.test.ts",
+        "sha256": "2a08a92d5e0871cb97eb04b69b6476ddccfac29ba647ec6a8cfa832fbb7f1621"
+      },
+      {
+        "path": "src/runtime/research-request.acceptance.test.ts",
+        "sha256": "5db9645cd33fb6329b40eacb6054b962e427b5717d67d3a953682ee7fc4e98b1"
+      },
+      {
+        "path": "src/runtime/research-surfaces.acceptance.test.ts",
+        "sha256": "dd9272f8a2695421d57e7dcf31dda669f4f1745fdb653881eecfa542fbe706ec"
+      },
+      {
+        "path": "src/session/execution-fence-context.ts",
+        "sha256": "048af19c03430dd4fc6c9f7dc6c1501ea499d23e634f41c5cf050dcd84926d21"
+      },
+      {
+        "path": "src/tasks/agent-step-executor.test.ts",
+        "sha256": "629151dafc89e6e74a457fd2f44f04f5e5c49d2b543c5fc598eb5d206c9b582b"
+      },
+      {
+        "path": "src/tasks/agent-step-executor.ts",
+        "sha256": "035a7e383a525e651cbcc6af2687d75dd698bc42290f89dc126e0780310f8dfd"
+      },
+      {
+        "path": "src/tasks/research-result-evidence.test.ts",
+        "sha256": "9b150d25e0bb84baea10387660de8123a5d5843fe8fa2e8d746a3fccab0fb303"
+      },
+      {
+        "path": "src/tasks/research-result-evidence.ts",
+        "sha256": "4a98b98e49835a3b6528a2c9728e67a8257b763d9913b7281db774c7c487a0be"
+      },
+      {
+        "path": "src/tasks/sqlite-provider-spend.test.ts",
+        "sha256": "84391319920263a63caac24702890e9b6f0dde2ef34178dcd07a2bf9dd7d7961"
+      },
+      {
+        "path": "src/tasks/sqlite-provider-spend.ts",
+        "sha256": "d3e54eebcc534866bef6eedb9ea6c1942442440d5d43aa1c5d585f3182123f36"
+      },
+      {
+        "path": "src/tasks/task-scheduler.test.ts",
+        "sha256": "f2e0f4bea1879ef40c04e6f069896c5eebe7ba336eece45f6e36a15a49ff3332"
+      },
+      {
+        "path": "src/tasks/task-scheduler.ts",
+        "sha256": "421ad65f9a20b6ecc40627383011a200f71cae149193db46e326ebd3732c8fc6"
+      },
+      {
+        "path": "src/tasks/task-session-completion.test.ts",
+        "sha256": "d35cb36e0a0308ec92b1ba27bba614b0e10cbd03a3202f29034d145096b899c1"
+      },
+      {
+        "path": "src/tasks/task-session-completion.ts",
+        "sha256": "44f3d062b6afb5bdf9fbca0ff2b9e47c26179ec1c01a65ad7153705e2562c6b7"
+      }
+    ],
+    "platform": "darwin",
+    "arch": "arm64",
+    "runtime": {
+      "sha256": "aa27d3affa32d6298fe9de2c978bf1edb0955eed9fa0a623e7a10962c8b69f70",
+      "nodeVersion": "v24.14.1",
+      "coreVersion": "0.1.0",
+      "entrySha256": "8b7b5e8816ffe62d9baa2133dd5cc54a1a8ea36997b0bda6fc631039c700f6ec",
+      "signature": "ad-hoc verified",
+      "ownedBridgeVerified": true,
+      "inventoryVerified": true,
+      "matchesCurrentDist": true,
+      "supervisorRetainedPathWithSpaces": true
+    },
+    "fixtures": {
+      "model": "scripted loopback HTTP",
+      "web": "in-process registered synthetic provider in packaged supervisor",
+      "liveModelCalls": 0,
+      "transport": "actual signed app + preload/Main + owned bridge + private control"
+    },
+    "workflow": {
+      "longCallMs": 65000,
+      "siblingCompletedDuringLongCall": true,
+      "workers": 3,
+      "acceptedResults": 5,
+      "distinctChildSessions": 6,
+      "tasks": 1,
+      "searches": 8,
+      "providerCalls": 23,
+      "appRestartNoReplay": true,
+      "fileBytes": 13762,
+      "fileSha256": "37b0e219264c936b13f3696ed5551647170ed56596247360d9d0231311254886",
+      "readbackVerified": true,
+      "historicalTaskStatus": "completed"
+    },
+    "allScenarios": {
+      "providerCalls": 45,
+      "actualToolResults": 26,
+      "failedToolResults": 4
+    },
+    "scenarios": {
+      "longProviderLeaseRenewal": true,
+      "attentionReceiptAcrossRestart": true,
+      "emptySearchRecovery": true,
+      "disclosedBlockedSource": true,
+      "markdownSourceUrls": true,
+      "largeReportContext": true,
+      "stepScopedRequirements": true,
+      "evidenceCorrection": true,
+      "exhaustedRepairDraftPreserved": true,
+      "redundantResourceMode": true,
+      "researchThroughFallback": true,
+      "fallbackComposer": true,
+      "fallbackNotice": true,
+      "fallbackRestart": true,
+      "preferredModelPreserved": true,
+      "research": true,
+      "automaticReportDelivery": true,
+      "alternativeSourceRecovery": true,
+      "desktopTranscriptExactlyOnce": true,
+      "chatOwnedTasksUi": true,
+      "oneSidebarEntry": true,
+      "handoffRemainsRunning": true,
+      "gatewayRestartNoReplay": true,
+      "failedWorkerDraftPreserved": true,
+      "targetedRetryAfterGatewayRestart": true,
+      "saveOnlyAfterRestart": true,
+      "skillRecovery": true,
+      "missingSearch": true,
+      "falseSaveBlocked": true
+    },
+    "liveAssessment": "not exercised; synthetic responses do not assess live research quality"
+  }
+}

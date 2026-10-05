@@ -750,7 +750,7 @@ function delegatedRetryPolicy(idempotency: TaskIdempotency): TaskRetryPolicy {
     initialBackoffMs: 0,
     backoffMultiplier: 1,
     maxBackoffMs: 0,
-    retryableFailureClasses: ["lease-expired", "lease-missing"],
+    retryableFailureClasses: ["lease-expired", "lease-missing", "provider-accounting"],
     nonRetryableFailureClasses: [],
     requireIdempotent: idempotency === "idempotent" || idempotency === "retry_safe"
   };

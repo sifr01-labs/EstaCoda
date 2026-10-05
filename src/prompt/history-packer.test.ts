@@ -12,6 +12,35 @@ describe("deriveSessionHistoryBudget", () => {
 });
 
 describe("packSessionHistory", () => {
+  it("reserves expanded repair context for the latest rejected candidate only", () => {
+    const draft = "Research paragraph. ".repeat(1500);
+    const packed = packSessionHistory([
+      { role: "user", content: "Research this" },
+      ...Array.from({ length: 3 }, () => ({ role: "agent" as const, content: draft, metadata: { completionCandidate: true, accepted: false } }))
+    ], { maxEstimatedTokens: 6_000 });
+    expect(packed.messages[1]!.content.length).toBeLessThan(1_000);
+    expect(packed.messages[2]!.content.length).toBeLessThan(1_000);
+    expect(packed.messages[3]!.content.length).toBeLessThan(18_100);
+    expect(packed.estimatedTokens).toBeLessThanOrEqual(6_000);
+  });
+
+  it("preserves source URLs and rejected drafts beyond the old 900-character cutoff", () => {
+    const url = "https://www.iea.org/data-and-statistics/charts/impact-of-tripling-battery-mineral-prices";
+    const source = "Evidence ".repeat(109) + url + " full observed snippet";
+    const draft = "Research finding. ".repeat(700) + "End of report.";
+    const packed = packSessionHistory([
+      { role: "user", content: "Research this" },
+      { role: "tool", content: source },
+      { role: "agent", content: draft, metadata: { completionCandidate: true, accepted: false, privateField: "omit" } }
+    ]);
+    expect(packed.messages[1]?.content).toBe(source);
+    expect(packed.messages[2]?.content).toBe(draft);
+    expect(packed.messages[2]?.metadata).toEqual({ completionCandidate: true, accepted: false });
+    const short = packSessionHistory([{ role: "tool", content: source }], { maxMessageChars: 900 });
+    expect(short.messages[0]?.content).not.toContain("https://");
+    expect(short.messages[0]?.content).toContain("truncated");
+  });
+
   it("withholds plaintext credential submissions and redacts prior assistant echoes", () => {
     const apiKey = "fake-consumer-key-123456789";
     const clientSecret = "fake-consumer-secret-987654321";

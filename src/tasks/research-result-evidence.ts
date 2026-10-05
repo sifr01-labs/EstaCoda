@@ -60,7 +60,10 @@ export function groundResearchResult(input: { task: Task; step: TaskStep; store:
     : "Research coverage: all requested worker scopes returned accepted evidence.\n\n";
   const freshness = input.step.executor.role === "synthesis" && input.step.executor.requestContract?.requirements.research?.fresh
     ? "Freshness: live searches were required; observed publication/revision dates and retrieval dates appear below. Unknown publication dates do not establish recency.\n\n" : "";
-  return { text: prefix + freshness + input.text.slice(0, table.start) + rendered + input.text.slice(table.end) };
+  const access = rows.every(row => row.access.startsWith("snippet"))
+    ? "Source access: search summaries only. Full text was not retrieved; acceptance checks source provenance, not scientific accuracy.\n\n" : "";
+  const body = input.text.slice(0, table.start) + rendered + input.text.slice(table.end);
+  return { text: prefix + freshness + (access && !body.startsWith(access) ? access : "") + body };
 }
 
 function parseTable(text: string): { rows: SourceRow[]; start: number; end: number } | undefined {

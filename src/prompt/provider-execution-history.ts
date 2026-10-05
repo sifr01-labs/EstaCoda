@@ -9,12 +9,14 @@ export function sanitizeProviderExecutionMetadata(metadata: Record<string, unkno
   }
 
   const sanitized = sanitizeProviderExecutionSummary(metadata.providerExecution);
-  if (sanitized === undefined) {
+  const candidate = metadata.completionCandidate === true && metadata.accepted === false;
+  if (sanitized === undefined && !candidate) {
     return undefined;
   }
 
   return {
-    providerExecution: sanitized
+    ...(sanitized === undefined ? {} : { providerExecution: sanitized }),
+    ...(candidate ? { completionCandidate: true, accepted: false } : {})
   };
 }
 

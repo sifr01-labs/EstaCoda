@@ -1515,6 +1515,32 @@ describe("assembleProviderContinuationPrompt", () => {
     expect(rendered).not.toContain("sk-secret-value");
   });
 
+  it("uses Codex native history after fallback with complete source results", () => {
+    const result = "Observed source ".repeat(100) + "https://example.org/complete-source";
+    const prompt = assembleProviderContinuationPrompt(baseContinuationInput({
+      model: toolModel,
+      rawSessionHistory: [providerToolTurn("tool-turn"), sessionMessage("tool-result", "tool", result, { tool_call_id: "call-1" })],
+      sessionHistory: [{ role: "tool", content: "flat fallback" }],
+      nativeHistoryRoute: { ...supportedNativeRoute, provider: "codex", apiMode: "openai_responses" },
+      nativeHistoryRouteRole: "fallback"
+    }));
+    expect(prompt.messages).toEqual(expect.arrayContaining([
+      expect.objectContaining({ role: "tool", content: expect.stringContaining(result), toolCallId: "call-1" })
+    ]));
+    expect(renderMessages(prompt.messages)).not.toContain("flat fallback");
+  });
+
+  it("keeps a long completion candidate and source URLs intact through flat prompt rendering", () => {
+    const draft = "A report paragraph. ".repeat(600) + "LAST REPORT LINE";
+    const source = "Source details. ".repeat(100) + "https://example.org/full-path";
+    const prompt = assembleProviderPrompt(basePromptInput({ sessionHistory: [
+      { role: "tool", content: source },
+      { role: "assistant", content: draft, metadata: { completionCandidate: true, accepted: false } }
+    ] }));
+    expect(renderMessages(prompt.messages)).toContain(draft);
+    expect(renderMessages(prompt.messages)).toContain(source);
+  });
+
   it("uses structured native history for supported continuation prompts", () => {
     const prompt = assembleProviderContinuationPrompt(baseContinuationInput({
       model: toolModel,

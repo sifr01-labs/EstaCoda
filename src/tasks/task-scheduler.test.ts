@@ -611,6 +611,22 @@ describe("TaskScheduler", () => {
     });
   });
 
+  it("bounds automatic accounting recovery to one safe retry", async () => {
+    const step = makeStep("accounting", 0, { idempotency: "retry_safe", retryPolicy: {
+      maxAttempts: 4, initialBackoffMs: 0, backoffMultiplier: 1, maxBackoffMs: 0,
+      retryableFailureClasses: ["provider-accounting"], nonRetryableFailureClasses: [], requireIdempotent: true
+    } });
+    store.createTaskGraph(makeGraph([step]));
+    const executor = new FakeTaskStepExecutor(() => ({ outcome: "failed", failure: {
+      class: "provider-accounting", message: "Accounting failed", retryable: true, uncertainSideEffects: false
+    } }));
+    await makeScheduler(executor).runOnce();
+    const first = store.listAttempts("task-alpha")[0]!;
+    expect(classifyTaskRetry(step, { ...first, attemptNumber: 1 }).retry).toBe(true);
+    expect(classifyTaskRetry(step, { ...first, attemptNumber: 2 })).toMatchObject({ retry: false, reason: "accounting-recovery-limit" });
+    expect(classifyTaskRetry({ ...step, idempotency: "unknown" }, { ...first, attemptNumber: 1 }).retry).toBe(false);
+  });
+
   it("fails acceptance when a required result is absent", async () => {
     store.createTaskGraph(makeGraph([makeStep("required", 0)]));
     const scheduler = makeScheduler(new FakeTaskStepExecutor(() => ({ outcome: "succeeded" })));

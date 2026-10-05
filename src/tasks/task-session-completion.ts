@@ -118,6 +118,11 @@ export class TaskSessionCompletionService {
       .filter((binding) => binding.destination.platform === "cli" && authorizedSessionIds.has(binding.authorizedSessionId));
     for (const candidate of candidates) {
       if (!(await this.#destinationCurrent(candidate))) continue;
+      const waiting = this.#store.getTask(candidate.taskId);
+      if (waiting?.status === "waiting_for_input") {
+        await this.#appendAttention(candidate, waiting, sessionId);
+        continue;
+      }
       const claimed = this.#store.claimDeliveryBinding(candidate.id, this.#now().toISOString());
       if (claimed === null) continue;
       const messageId = taskSessionCompletionMessageId(this.#profileId, claimed.id);
@@ -165,6 +170,28 @@ export class TaskSessionCompletionService {
       }
     }
     return delivered;
+  }
+
+  async #appendAttention(binding: TaskDeliveryBinding, task: Task, sessionId: string): Promise<void> {
+    // One receipt per transition, durable across gateway restart. Keep the final
+    // completion outbox pending so a later verified result can still arrive.
+    const id = "task-attention-" + createHash("sha256").update(JSON.stringify([
+      this.#profileId, binding.id, task.waitReason?.requestedAt ?? task.updatedAt
+    ])).digest("hex");
+    if (await this.#sessionDb.getMessage(id)) return;
+    const steps = task.activePlanRevisionId === undefined ? [] : this.#store.listSteps(task.id, task.activePlanRevisionId);
+    const workers = steps.filter(step => step.executor.role === "worker");
+    const completed = workers.filter(step => step.status === "completed").length;
+    const pendingFile = taskRequestCompletion(this.#store, task).fileOutputPending;
+    const text = this.#locale === "ar"
+      ? `تحتاج المهمة إلى مراجعة. تم الاحتفاظ بالنتائج والمسودات. اكتمل ${completed} من ${workers.length} من خطوات البحث. افتح تبويب المهام لمراجعة الخطوة المتأثرة وإعادة المحاولة.${pendingFile ? " لم يتم حفظ التقرير المطلوب والتحقق منه بعد." : ""}`
+      : `This task needs attention. Results and drafts are preserved. ${completed} of ${workers.length} research steps completed. Open Tasks to review and retry the affected step.${pendingFile ? " The requested report has not been saved and verified yet." : ""}`;
+    try {
+      await this.#sessionDb.appendMessage({ id, sessionId, role: "agent", channel: "cli", content: text,
+        metadata: { taskAttention: { version: 1, taskId: task.id, bindingId: binding.id } } });
+    } catch (error) {
+      if (!(await this.#sessionDb.getMessage(id))) throw error;
+    }
   }
 
   async #destinationCurrent(binding: TaskDeliveryBinding): Promise<boolean> {

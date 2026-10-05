@@ -1,3 +1,4 @@
+import { assertCurrentExecutionFence } from "../session/execution-fence-context.js";
 import type {
   ProviderCompletionOptions,
   ProviderRequest,
@@ -52,6 +53,15 @@ export type ProviderAttempt = ProviderAttemptState & {
   reasoningMetadata?: ProviderReasoningMetadata;
   streamDiagnostics?: ProviderStreamDiagnostics;
 };
+
+/** A response exists, but its usage could not be settled. Never execute its
+ * tool calls or accept its answer; the Task owner may retain a diagnostic draft. */
+export class ProviderAccountingError extends Error {
+  constructor(readonly diagnosticText: string, options?: ErrorOptions) {
+    super("Provider response could not be settled by the accounting owner.", options);
+    this.name = "ProviderAccountingError";
+  }
+}
 
 /** Runtime guard for injected executors and persisted/untyped boundaries. */
 export function assertProviderAttemptState(attempt: ProviderAttempt): void {
@@ -603,7 +613,8 @@ export class ProviderExecutor {
               authorization.reservation,
               "provider-settlement-failed-after-dispatch"
             );
-            throw error;
+            assertCurrentExecutionFence();
+            throw new ProviderAccountingError(callResponse.content.slice(0, 100_000), { cause: error });
           }
         }
 

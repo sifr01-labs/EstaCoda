@@ -1,3 +1,4 @@
+import { withExecutionFence } from "../session/execution-fence-context.js";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -62,6 +63,38 @@ describe("SQLiteProviderSpendController", () => {
     vi.useRealTimers();
     sessionDb.close();
     rmSync(tempDir, { recursive: true, force: true });
+  });
+
+  it.each([false, true])("renews siblings under their own real async fence when the timer owner closes (active=%s)", async active => {
+    controller = new SQLiteProviderSpendController({ db: sessionDb.db, profileId: PROFILE_ID, leaseMs: 300, heartbeatIntervalMs: 30 });
+    const claim = { sessionId: "worker", profileId: PROFILE_ID, targetId: "target", ownerId: "owner", fence: 1 };
+    sessionDb.db.query(`insert into session_execution_owners(session_id,profile_id,target_id,owner_id,fence,heartbeat_at,expires_at) values(?,?,?,?,?,?,?)`)
+      .run(claim.sessionId, claim.profileId, claim.targetId, claim.ownerId, claim.fence, Date.now(), Date.now() + 10_000);
+    let closed = false;
+    const warning = vi.spyOn(process, "emitWarning").mockImplementation(() => undefined);
+    const stamp = () => new Date().toISOString();
+    try {
+      withExecutionFence(sessionDb.db, claim, () => {
+        controller.reserve(spendRequest({ requestKey: "timer-owner", maximumEstimatedCostUsd: 0 }), stamp());
+        controller.markDispatching("timer-owner", stamp());
+      }, () => { if (closed) throw new Error("Session execution owner is closed."); });
+      controller.reserve(spendRequest({ requestKey: "sibling", maximumEstimatedCostUsd: 0 }), stamp());
+      controller.markDispatching("sibling", stamp());
+      await new Promise(resolve => setTimeout(resolve, 90));
+      if (!active) controller.settle("timer-owner", { ...usageEntry(0), id: "owner-usage", requestKey: "timer-owner",
+        dispatchedAt: controller.getAttempt("timer-owner")!.dispatchingAt! }, stamp());
+      const ownerHeartbeat = controller.getAttempt("timer-owner")!.executionHeartbeatAt;
+      closed = true;
+      await new Promise(resolve => setTimeout(resolve, 400));
+      const sibling = controller.getAttempt("sibling")!;
+      expect(Date.parse(sibling.executionExpiresAt)).toBeGreaterThan(Date.now());
+      expect(() => controller.settle("sibling", { ...usageEntry(0), id: "sibling-usage", requestKey: "sibling", dispatchedAt: sibling.dispatchingAt! }, stamp())).not.toThrow();
+      if (active) {
+        expect(controller.getAttempt("timer-owner")!.executionHeartbeatAt).toBe(ownerHeartbeat);
+        expect(warning).toHaveBeenCalledTimes(1);
+        expect(warning.mock.calls[0]![0]).not.toContain("Session execution");
+      } else expect(warning).not.toHaveBeenCalled();
+    } finally { warning.mockRestore(); }
   });
 
   it("atomically reserves every enabled scope and returns a typed capacity denial", () => {

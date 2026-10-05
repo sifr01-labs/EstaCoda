@@ -68,6 +68,32 @@ describe("TaskSessionCompletionService", () => {
     rmSync(tempDir, { recursive: true, force: true });
   });
 
+  it.each(["en", "ar"] as const)("persists one %s attention receipt across restart without consuming final delivery", async locale => {
+    service = new TaskSessionCompletionService({ store, resultService: results, sessionDb, profileId: "alpha", locale });
+    const task = store.getTask("task-synthesis")!;
+    store.atomicWrite(store => {
+      store.updateTask({ ...task, status: "running", updatedAt: NOW });
+      store.updateTask({ ...task, status: "waiting_for_input", updatedAt: NOW, waitReason: { kind: "operator", summary: "Review research", requestedAt: NOW } });
+    });
+    expect(await service.deliverPending("unlinked-alpha")).toEqual([]);
+    expect(await sessionDb.listMessages("unlinked-alpha")).toHaveLength(0);
+    await service.deliverPending("creator-alpha");
+    store.updateTask({ ...store.getTask(task.id)!, updatedAt: new Date(Date.parse(NOW) + 1000).toISOString() });
+    const restarted = new TaskSessionCompletionService({ store, resultService: results, sessionDb, profileId: "alpha", locale });
+    await restarted.deliverPending("creator-alpha");
+    const messages = await sessionDb.listMessages("creator-alpha");
+    expect(messages).toHaveLength(1);
+    expect(messages[0]?.content).toContain(locale === "ar" ? "تحتاج المهمة إلى مراجعة" : "needs attention");
+    expect(messages[0]?.metadata?.taskAttention).toMatchObject({ taskId: task.id });
+    expect(store.getDeliveryBinding("delivery-cli")?.status).toBe("pending");
+    results.record({ taskId: task.id, stepId: "step-synthesis", kind: "text", content: "Recovered answer" });
+    store.updateTask({ ...store.getTask(task.id)!, status: "queued" });
+    completeTask();
+    const delivered = await restarted.deliverPending("creator-alpha");
+    expect(delivered).toHaveLength(1);
+    expect(await sessionDb.listMessages("creator-alpha")).toHaveLength(2);
+  });
+
   it.each([false,true])("delivers Desktop completion once across restart (interrupted=%s)", async interrupted => {
     const task=store.getTask("task-synthesis")!;
     const binding={schemaVersion:1 as const,targetId:"target_00000000-0000-0000-0000-000000000001",targetGeneration:1,workspace:task.workspace};

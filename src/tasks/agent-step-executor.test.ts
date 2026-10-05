@@ -1,3 +1,4 @@
+import { ProviderAccountingError } from "../providers/provider-executor.js";
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -792,6 +793,50 @@ describe("AgentStepExecutor", () => {
     expect(context).not.toContain("diagnostic-partial-result");
     expect(context).not.toContain("Untrusted incomplete output");
     expect(context.length).toBeLessThanOrEqual(16_000);
+  });
+
+  it.each([false, true])("carries a bounded prior accounting draft into targeted recovery only within its profile (foreign=%s)", async foreign => {
+    const graph = makeGraph();
+    store.createTaskGraph(graph);
+    await sessionDb.createSession({ id: "prior-worker", profileId: foreign ? "other" : "alpha", parentSessionId: "creator-alpha" });
+    await sessionDb.appendMessage({ sessionId: "prior-worker", role: "agent", content: "Retained research with https://example.org/study", metadata: { accountingDiagnostic: true, accepted: false } });
+    vi.spyOn(store, "listAttempts").mockReturnValue([{ ...attempt(graph), attemptNumber: 1, workerSessionId: "prior-worker",
+      failure: { class: "provider-accounting", message: "Accounting failed", retryable: true, uncertainSideEffects: false } }]);
+    const createChild = vi.fn(async (input: CreateChildAgentLoopInput) => {
+      await sessionDb.createSession({ id: "next-worker", profileId: input.profileId, parentSessionId: input.parentSessionId });
+      return childRuntime(async () => response(), async () => undefined, { sessionId: "next-worker", trajectoryId: "recovery-trajectory" });
+    });
+    const executor = new AgentStepExecutor({ childFactory: { createChild }, sessionDb, taskStore: store, hostWorkspace: graph.task.workspace,
+      isWorkspaceTrusted: () => true, parentVisibleTools: tools, approvalService: new TaskApprovalService({ store }), securityPolicy: capabilityFirstDefaults });
+    await executor.execute({ task: graph.task, step: graph.steps[0]!, attempt: { ...attempt(graph), attemptNumber: 2 },
+      signal: new AbortController().signal, heartbeat: vi.fn(), checkpoint: vi.fn() });
+    const context = createChild.mock.calls[0]![0].context;
+    if (foreign) expect(context).not.toContain("Retained research");
+    else {
+      expect(context).toContain("Retained research with https://example.org/study");
+      expect(context).toContain("not accepted evidence");
+      expect(context).toContain("verify its relevant sources");
+    }
+  });
+
+  it.each([false, true])("retains accounting drafts only for read-only steps (mutating=%s)", async mutating => {
+    const graph = makeGraph();
+    if (mutating) graph.steps[0]!.authorityPolicy = { ...graph.steps[0]!.authorityPolicy,
+      riskClassPolicy: riskPolicy({ "read-only-local": "runtime_policy", "destructive-local": "runtime_policy" }) };
+    const childFactory: ChildAgentLoopFactory = { createChild: vi.fn(async input => {
+      await sessionDb.createSession({ id: "worker-accounting", profileId: input.profileId, parentSessionId: input.parentSessionId });
+      return childRuntime(async () => { throw new ProviderAccountingError("Useful draft.\npassword: secret-value-for-test"); }, async () => undefined,
+        { sessionId: "worker-accounting", trajectoryId: "accounting-trajectory" });
+    }) };
+    const executor = new AgentStepExecutor({ childFactory, sessionDb, taskStore: store, hostWorkspace: graph.task.workspace,
+      isWorkspaceTrusted: () => true, parentVisibleTools: tools, approvalService: new TaskApprovalService({ store }), securityPolicy: capabilityFirstDefaults });
+    const settlement = await executor.execute({ task: graph.task, step: graph.steps[0]!, attempt: attempt(graph),
+      signal: new AbortController().signal, heartbeat: vi.fn(), checkpoint: vi.fn() });
+    expect(settlement).toMatchObject({ outcome: "failed", failure: { class: "provider-accounting", retryable: !mutating, uncertainSideEffects: mutating } });
+    expect(JSON.stringify(settlement)).not.toContain("secret-value-for-test");
+    if (mutating) expect(settlement).not.toHaveProperty("diagnosticResults");
+    else expect(settlement).toMatchObject({ diagnosticResults: [{ content: expect.stringContaining("Useful draft.") }] });
+    expect((await sessionDb.listMessages("worker-accounting")).some(message => message.metadata?.accountingDiagnostic)).toBe(!mutating);
   });
 
   it("returns safe read-only failure output as diagnostic content", async () => {

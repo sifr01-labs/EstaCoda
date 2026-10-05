@@ -42,6 +42,8 @@ const report=`# Battery recycling\n\nSynthetic research fixture. [Source](${sour
 let requests=0,phase='research',saveIndex=0,recoveryIndex=0,diagnostics='',providerErrors:string[]=[];
 let sessionId='',reportContent='',bridgeVerified=false;
 let failedWorkerCandidates=0,repairedWorkerOnce=false,researchRead=false;
+let longCallMs=0,siblingCompletedDuringLongCall=false;
+let releaseLongWorker!:()=>void;const longWorkerGate=new Promise<void>(resolve=>{releaseLongWorker=resolve;});
 let releaseFallback!:()=>void;const fallbackGate=new Promise<void>(resolve=>{releaseFallback=resolve;});
 let releaseWorkers!:()=>void;const workerGate=new Promise<void>(resolve=>{releaseWorkers=resolve;});
 const db=new SQLiteSessionDB({path:resolveGlobalStateHome({homeDir:home}).sessionsSqlitePath});
@@ -86,9 +88,20 @@ const provider=createServer(async(req,res)=>{
   }else if(text.includes('Work only on this assigned Step')){
    await workerGate;
    if(!hasFeedback)next=[tool('web_search',{query:'empty fixture query'}),tool('web_search',{query:'battery recycling '+requests}),tool('web_extract',{url:inaccessible})];
-   else if(failedWorkerCandidates<3&&text.includes('Research battery recycling: processing.')){failedWorkerCandidates++;content='Draft findings without the required source table.';}
+   else if(failedWorkerCandidates<3&&text.includes('Research battery recycling: processing.')){await longWorkerGate;failedWorkerCandidates++;content='Draft findings without the required source table.';}
    else if(!repairedWorkerOnce&&text.includes('Research battery recycling: collection.')){repairedWorkerOnce=true;content=table.replace(source,'https://unobserved.example/claim');}
-   else content=`Synthetic evidence: \`${source}\`\nAccess limitation: ${inaccessible} returned HTTP 403; only its search snippet was observed.\n${largeEvidence}${table}`;
+   else {
+    if(text.includes('Research battery recycling: reuse.')&&longCallMs===0){
+     const started=Date.now();res.writeHead(200,{'content-type':'text/event-stream'});
+     const tick=()=>res.write('data: '+JSON.stringify({choices:[{index:0,delta:{content:' '}}]})+'\n\n');tick();
+     const pulse=setInterval(tick,1000);
+     try{await new Promise(resolve=>setTimeout(resolve,65_000));}finally{clearInterval(pulse);}
+     longCallMs=Date.now()-started;
+     const task=store.listTasks()[0];siblingCompletedDuringLongCall=store.listSteps(task.id,task.activePlanRevisionId).some((step:any)=>step.executor.role==='worker'&&step.status==='completed');
+     releaseLongWorker();
+    }
+    content=`Synthetic evidence: \`${source}\`\nAccess limitation: ${inaccessible} returned HTTP 403; only its search snippet was observed.\n${largeEvidence}${table}`;
+   }
   }else if(!researchRead){researchRead=true;next=[tool('skill_read',{name:'researcher',path:'references/sources.md',mode:'contract'})];}
   else if(store.listTasks().length===0)next=[tool('delegate_task',{tasks:['collection','processing','reuse'].map(scope=>({task:`Research battery recycling: ${scope}.`,context:"User requested current research using 3 subagents. Save report.md. This is background context only.",allowedTools:['web.search','web.extract'],research:{scope,requireLiveSources:true,requireRepositoryEvidence:false}}))})];
   else content='Research workers are running; report delivery remains pending.';
@@ -97,7 +110,7 @@ const provider=createServer(async(req,res)=>{
   const tool_calls=next.map((call,index)=>({index,id:`fixture-${requests}-${index}`,type:'function',function:{name:call.name,arguments:JSON.stringify(call.args)}}));
   const payload={...(content?{content}:{}),...(next.length?{tool_calls}:{})};
   const result={id:'fixture-'+requests,object:'chat.completion',choices:[{index:0,...(input.stream?{delta:payload}:{message:{role:'assistant',...payload}}),finish_reason:next.length?'tool_calls':'stop'}],usage:{prompt_tokens:30,completion_tokens:12,total_tokens:42}};
-  res.writeHead(200,{'content-type':input.stream?'text/event-stream':'application/json'});
+  if(!res.headersSent)res.writeHead(200,{'content-type':input.stream?'text/event-stream':'application/json'});
   res.end(input.stream?'data: '+JSON.stringify(result)+'\n\ndata: [DONE]\n\n':JSON.stringify(result));
  }catch(error){providerErrors.push(String(error));res.writeHead(500).end('Fixture failure');}
 });
@@ -188,12 +201,15 @@ try{
  await page!.screenshot({path:output.replace(/\.json$/, '-tasks.png')});
  releaseWorkers();
  await expect.poll(()=>store.listTasks()[0]?.status,{timeout:120000}).toBe('waiting_for_input');
+ assert(longCallMs>=65_000&&siblingCompletedDuringLongCall,'Long provider call was not renewed across sibling completion');
+ const attention=()=>db.listMessages(sessionId).then((messages:any[])=>messages.filter(message=>message.metadata?.taskAttention));
+ await expect.poll(async()=>(await attention()).length,{timeout:30000}).toBe(1);
  const waitingTask=store.listTasks()[0],waitingStep=store.listSteps(waitingTask.id,waitingTask.activePlanRevisionId).find((step:any)=>step.status==='waiting_for_input');assert(waitingStep);
  assert(!existsSync(join(workspace,'report.md')));
  await expect.poll(()=>page!.evaluate(id=>window.desktop.getWork(id).then(work=>work.status).catch(()=>'unavailable'),initial.workId),{timeout:30000}).toBe('needs_attention');
  await stop(supervisor);supervisor=undefined;startSupervisor();
  await expect.poll(async()=>{try{return(await probePrivateControl({directory:paths.gatewayStatePath,profileId,version:manifest.coreVersion})).instanceId;}catch{return null;}},{timeout:30000}).not.toBeNull();
- assert.equal(store.getStep(waitingStep.id).status,'waiting_for_input');
+ assert.equal(store.getStep(waitingStep.id).status,'waiting_for_input');assert.equal((await attention()).length,1);
  await page!.locator('.ec-task-worker summary').filter({hasText:'processing'}).click();
  await page!.getByRole('button',{name:'Review retry',exact:true}).click();
  await page!.getByRole('button',{name:'Retry this step',exact:true}).click();
@@ -236,16 +252,16 @@ try{
  assert((await resultService.readText({taskId:task.id,resultId:drafts[0].id,sessionId})).content.includes('Draft findings without the required source table.'));
  const toolResults=allEvents.filter((e:any)=>e.kind==='tool-result');
  assert.equal(toolResults.length,calls.reduce((n,x)=>n+x.tools.length,0));
- const sourceOverlay=[...new Set([...execFileSync('git',['-C',sourceRoot,'diff','--name-only','--','src','apps/desktop','scripts','package.json'],{encoding:'utf8'}).trim().split('\n').filter(Boolean),'package.json','src/prompt/task-result-context.ts','src/prompt/task-result-context.test.ts','src/eval/fixtures/research-workflow-harness.ts','src/eval/fixtures/research-workflow-release.ts','src/runtime/research-surfaces.acceptance.test.ts','scripts/validate-research-reliability.ts','apps/desktop/tests/research-packaged.mts','apps/desktop/src/renderer/components/chat-tasks.tsx','apps/desktop/src/shared/i18n/chat-tasks.ts'])].sort().map(path=>({path,sha256:createHash('sha256').update(readFileSync(join(sourceRoot,path))).digest('hex')}));
+ const sourceOverlay=[...new Set([...execFileSync('git',['-C',sourceRoot,'diff','--name-only','--','src','apps/desktop','scripts','package.json'],{encoding:'utf8'}).trim().split('\n').filter(Boolean),'package.json','src/prompt/history-content.ts','src/prompt/task-result-context.ts','src/prompt/task-result-context.test.ts','src/eval/fixtures/research-workflow-harness.ts','src/eval/fixtures/research-workflow-release.ts','src/runtime/research-surfaces.acceptance.test.ts','scripts/validate-research-reliability.ts','apps/desktop/tests/research-packaged.mts','apps/desktop/src/renderer/components/chat-tasks.tsx','apps/desktop/src/shared/i18n/chat-tasks.ts'])].sort().map(path=>({path,sha256:createHash('sha256').update(readFileSync(join(sourceRoot,path))).digest('hex')}));
  const measurements={
   version:1,passed:true,measuredAt:new Date().toISOString(),sourceBaseCommit:execFileSync('git',['-C',sourceRoot,'rev-parse','HEAD'],{encoding:'utf8'}).trim(),sourceOverlay,
   platform:process.platform,arch:process.arch,
   runtime:{sha256:manifest.runtimeSha256,nodeVersion:manifest.nodeVersion,coreVersion:manifest.coreVersion,entrySha256:manifest.entrySha256,signature:'ad-hoc verified',ownedBridgeVerified:bridgeVerified,inventoryVerified:true,matchesCurrentDist:true,supervisorRetainedPathWithSpaces:true},
   fixtures:{model:'scripted loopback HTTP',web:'in-process registered synthetic provider in packaged supervisor',liveModelCalls:0,transport:'actual signed app + preload/Main + owned bridge + private control'},
-  workflow:{workers:workers.length,acceptedResults:store.listResults(task.id).filter((r:any)=>r.disposition==='accepted').length,distinctChildSessions:workerSessions.size,tasks:store.listTasks().length,searches:searches(),providerCalls:calls.filter(c=>['research','save'].includes(c.phase)).length,appRestartNoReplay:true,fileBytes:Buffer.byteLength(reportContent),fileSha256:createHash('sha256').update(reportContent).digest('hex'),readbackVerified:true,historicalTaskStatus:store.getTask(task.id).status},
+  workflow:{longCallMs,siblingCompletedDuringLongCall,workers:workers.length,acceptedResults:store.listResults(task.id).filter((r:any)=>r.disposition==='accepted').length,distinctChildSessions:workerSessions.size,tasks:store.listTasks().length,searches:searches(),providerCalls:calls.filter(c=>['research','save'].includes(c.phase)).length,appRestartNoReplay:true,fileBytes:Buffer.byteLength(reportContent),fileSha256:createHash('sha256').update(reportContent).digest('hex'),readbackVerified:true,historicalTaskStatus:store.getTask(task.id).status},
   allScenarios:{providerCalls:requests,actualToolResults:toolResults.length,failedToolResults:toolResults.filter((e:any)=>!e.result.ok).length},
-  scenarios:{emptySearchRecovery:true,disclosedBlockedSource:true,markdownSourceUrls:true,largeReportContext:true,stepScopedRequirements:true,evidenceCorrection:true,exhaustedRepairDraftPreserved:true,redundantResourceMode:true,researchThroughFallback:true,fallbackComposer:true,fallbackNotice:true,fallbackRestart:true,preferredModelPreserved:true,research:true,automaticReportDelivery:true,alternativeSourceRecovery:true,desktopTranscriptExactlyOnce:true,chatOwnedTasksUi:true,oneSidebarEntry:true,handoffRemainsRunning:true,gatewayRestartNoReplay:true,failedWorkerDraftPreserved:true,targetedRetryAfterGatewayRestart:true,saveOnlyAfterRestart:true,skillRecovery:true,missingSearch:true,falseSaveBlocked:true},
-  liveAssessment:'pending approved model, sources and spend ceiling'
+  scenarios:{longProviderLeaseRenewal:true,attentionReceiptAcrossRestart:true,emptySearchRecovery:true,disclosedBlockedSource:true,markdownSourceUrls:true,largeReportContext:true,stepScopedRequirements:true,evidenceCorrection:true,exhaustedRepairDraftPreserved:true,redundantResourceMode:true,researchThroughFallback:true,fallbackComposer:true,fallbackNotice:true,fallbackRestart:true,preferredModelPreserved:true,research:true,automaticReportDelivery:true,alternativeSourceRecovery:true,desktopTranscriptExactlyOnce:true,chatOwnedTasksUi:true,oneSidebarEntry:true,handoffRemainsRunning:true,gatewayRestartNoReplay:true,failedWorkerDraftPreserved:true,targetedRetryAfterGatewayRestart:true,saveOnlyAfterRestart:true,skillRecovery:true,missingSearch:true,falseSaveBlocked:true},
+  liveAssessment:'not exercised; synthetic responses do not assess live research quality'
  };
  mkdirSync(dirname(output),{recursive:true});writeFileSync(output,JSON.stringify(measurements,null,2)+'\n');
  console.log('Packaged research release checks passed: '+output);

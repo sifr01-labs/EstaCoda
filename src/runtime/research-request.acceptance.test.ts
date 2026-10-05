@@ -214,14 +214,16 @@ describe.sequential("research workflow acceptance harness", () => {
     expect(attempts).toHaveLength(3);
     expect(attempts.every(event=>event.kind==="provider-attempt"&&event.fallback)).toBe(true);
     expect(result.toolExecutions.map(call=>call.result?.ok)).toEqual([false,true,true]);
-    // Codex uses the supported textual continuation path. Assert against its
-    // actual wire payload, not just stored receipts or a scripted adapter call.
+    // Assert canonical tool-call/result pairs on the actual Codex wire payload.
     for (const [index,marker] of [[1,"mode must be full or contract"],[2,"# researcher / references/sources.md"]] as const) {
       const input=bodies[index]!.input as Array<Record<string,unknown>>;
       const feedback=input.filter(item=>item.role==="user"&&String(item.content).startsWith("EstaCoda executed the requested tools."));
       expect(feedback).toHaveLength(1);
-      expect(String(feedback[0]!.content)).toContain(marker);
-      expect(String(feedback[0]!.content)).toContain(index===1?"Result: error":"Result: ok");
+      const outputs = input.filter(item => item.type === "function_call_output" && String(item.output).includes(marker));
+      expect(outputs).toHaveLength(1);
+      expect(String(outputs[0]!.output)).toContain(marker);
+      expect(input.some(item => item.type === "function_call" && item.call_id === outputs[0]!.call_id)).toBe(true);
+      expect(String(feedback[0]!.content)).not.toContain(marker);
     }
     const task=h.store.listTasks()[0]!;
     expect(task.status).toBe("queued");

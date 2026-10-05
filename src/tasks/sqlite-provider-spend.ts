@@ -1,4 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
+import { AsyncResource } from "node:async_hooks";
 import type { SpendingLimit } from "../contracts/budget.js";
 import { assertSpendingLimit } from "../contracts/budget.js";
 import type { ProviderUsageEntry } from "../contracts/provider-usage.js";
@@ -69,7 +70,8 @@ export class SQLiteProviderSpendController {
   readonly #leaseMs: number;
   readonly #heartbeatIntervalMs: number;
   readonly #now: () => Date;
-  readonly #activeDispatches = new Map<string, number>();
+  readonly #activeDispatches = new Map<string, (at: string) => boolean>();
+  readonly #heartbeatFailures = new Set<string>();
   #heartbeatTimer: ReturnType<typeof setInterval> | undefined;
   #disposed = false;
 
@@ -245,7 +247,10 @@ export class SQLiteProviderSpendController {
       }
       return this.#requireAttempt(requestKey);
     });
-    this.#activeDispatches.set(requestKey, dispatched.executionFencingToken);
+    // Each dispatch retains its own execution authority. A shared timer must not
+    // borrow the first worker's fence when renewing unrelated active workers.
+    this.#activeDispatches.set(requestKey, AsyncResource.bind((at: string) =>
+      this.#renewDispatch(requestKey, dispatched.executionFencingToken, at)));
     this.#ensureHeartbeatTimer();
     return dispatched;
   }
@@ -959,16 +964,37 @@ export class SQLiteProviderSpendController {
 
   #deactivate(requestKey: string): void {
     this.#activeDispatches.delete(requestKey);
+    this.#heartbeatFailures.delete(requestKey);
     if (this.#activeDispatches.size === 0) this.#stopHeartbeatTimer();
   }
 
   #heartbeatActive(heartbeatAt: string): void {
     assertTimestamp(heartbeatAt, "Provider spend heartbeat");
-    const expiresAt = addMilliseconds(heartbeatAt, this.#leaseMs);
-    const lost: string[] = [];
-    this.#write(() => {
-      for (const [requestKey, fencingToken] of this.#activeDispatches) {
-        const renewed = this.#db.query(
+    for (const [requestKey, renew] of this.#activeDispatches) {
+      try {
+        if (!renew(heartbeatAt)) {
+          this.#reportHeartbeatFailure(requestKey);
+          this.#deactivate(requestKey);
+        } else this.#heartbeatFailures.delete(requestKey);
+      } catch {
+        // A failed worker renewal must not roll back healthy sibling renewals.
+        this.#reportHeartbeatFailure(requestKey);
+      }
+    }
+    if (this.#activeDispatches.size === 0) this.#stopHeartbeatTimer();
+  }
+
+  #reportHeartbeatFailure(requestKey: string): void {
+    if (this.#heartbeatFailures.has(requestKey)) return;
+    this.#heartbeatFailures.add(requestKey);
+    process.emitWarning(`Provider accounting heartbeat could not renew dispatch ${createHash("sha256").update(requestKey).digest("hex").slice(0, 12)}.`, {
+      code: "ESTACODA_PROVIDER_HEARTBEAT_FAILED"
+    });
+  }
+
+  #renewDispatch(requestKey: string, fencingToken: number, heartbeatAt: string): boolean {
+    return this.#write(() => {
+      const renewed = this.#db.query(
           `update provider_spend_attempts
            set execution_heartbeat_at = ?, execution_expires_at = ?
            where profile_id = ? and request_key = ? and state = 'dispatching'
@@ -976,19 +1002,15 @@ export class SQLiteProviderSpendController {
              and julianday(execution_expires_at) > julianday(?)`
         ).run(
           heartbeatAt,
-          expiresAt,
+          addMilliseconds(heartbeatAt, this.#leaseMs),
           this.#profileId,
           requestKey,
           this.#ownerId,
           fencingToken,
           heartbeatAt
         );
-        if (renewed.changes !== 1) lost.push(requestKey);
-      }
-      this.#recoverExpired(heartbeatAt);
+      return renewed.changes === 1;
     });
-    for (const requestKey of lost) this.#activeDispatches.delete(requestKey);
-    if (this.#activeDispatches.size === 0) this.#stopHeartbeatTimer();
   }
 
   #recoverExpired(recoveredAt: string): ProviderSpendRecoveryResult {
