@@ -29,6 +29,7 @@ import {
 import { redactSensitiveText } from "../utils/redaction.js";
 import { taskUsageFromEntries } from "./task-agent-usage.js";
 import {
+  taskExecutionLimitBlockReason, taskRetryBlockReason, executionLimitRecoveryMessage,
   listStepTreeAttempts,
   listTaskTreeUsageEntries
 } from "./task-tree-accounting.js";
@@ -365,6 +366,11 @@ export class TaskOperatorService {
     const task = this.#store.atomicWrite((store) => {
       const current = this.#authorizedTask(taskId, authorizedSessionId, true, store);
       if (current.status !== "paused") throw new Error(`Task ${current.id} is not paused.`);
+      if (current.waitReason?.kind === "execution_limit" && current.activePlanRevisionId !== undefined) {
+        const steps = store.listSteps(current.id, current.activePlanRevisionId).filter(step => step.status === "ready" || step.status === "waiting_for_input");
+        const reasons = steps.map(step => taskExecutionLimitBlockReason(store, current, step, this.#now().getTime()));
+        if (reasons.length > 0 && reasons.every(reason => reason !== undefined)) throw new Error(executionLimitRecoveryMessage(reasons[0]!));
+      }
       const next = { ...current, status: "queued" as const, waitReason: undefined, updatedAt: now };
       store.updateTask(next);
       store.appendEvent(this.#event(current, "task-state-changed", now, {
@@ -406,10 +412,8 @@ export class TaskOperatorService {
         throw new Error(`Task ${current.id} has multiple retryable Steps; pass a Step ID.`);
       }
       const step = candidates[0]!;
-      const attempts = store.listAttempts(current.id, step.id);
-      if (attempts.length >= step.retryPolicy.maxAttempts) {
-        throw new Error(`Step ${step.id} has exhausted its ${step.retryPolicy.maxAttempts} Attempt limit.`);
-      }
+      const blocked = taskRetryBlockReason(store, current, step, this.#now().getTime());
+      if (blocked !== undefined) throw new Error(executionLimitRecoveryMessage(blocked));
       store.updateStep({ ...step, status: "ready", updatedAt: now });
       store.appendEvent(this.#event(current, "step-state-changed", now, {
         from: "waiting_for_input",

@@ -645,6 +645,31 @@ describe("TaskOperatorService", () => {
     });
   });
 
+  it.each(["calls", "tokens", "time", "attempts"])("rejects an exhausted %s retry before changing durable state", mode => {
+    const created = service.begin({ objective: "Inspect status", workspace: workspace(), creatorSessionId: "owner" });
+    const task = store.getTask(created.taskId)!;
+    const step = store.listSteps(task.id, task.activePlanRevisionId!)[0]!;
+    const failed = failedAttempt(task.id, step.id, step.planRevisionId);
+    if (mode === "calls") failed.usage.providerCalls = step.executionLimits.maxProviderCalls;
+    if (mode === "tokens") failed.usage.totalTokens = step.executionLimits.maxTotalTokens;
+    if (mode === "time") failed.startedAt = new Date(Date.parse(now()) - step.executionLimits.maxWallClockMs - 1).toISOString();
+    store.atomicWrite(tx => {
+      tx.updateTask({ ...task, status: "running", startedAt: now() });
+      tx.updateStep({ ...step, status: "ready" });
+      tx.updateStep({ ...step, status: "running" });
+      tx.createAttempt(failed);
+      if (mode === "attempts") for (let i = 1; i < step.retryPolicy.maxAttempts; i++) tx.createAttempt({ ...failed, id: `failed-${i}`, dispatchKey: `retry-dispatch-${i}`, attemptNumber: i + 1 });
+      tx.updateStep({ ...step, status: "waiting_for_input" });
+      tx.updateTask({ ...task, status: "waiting_for_input" });
+    });
+    expect(() => service.retry(task.id, step.id, "owner")).toThrow("limit is exhausted");
+    expect(store.getStep(step.id)?.status).toBe("waiting_for_input");
+    expect(store.getTask(task.id)?.status).toBe("waiting_for_input");
+    expect(store.listAttempts(task.id, step.id)).toHaveLength(mode === "attempts" ? step.retryPolicy.maxAttempts : 1);
+    store.updateTask({ ...store.getTask(task.id)!, status: "paused", waitReason: { kind: "execution_limit", summary: "Exhausted", requestedAt: now() } });
+    if (mode !== "attempts") expect(() => service.resume(task.id, "owner")).toThrow("limit is exhausted");
+  });
+
   it("cancels queued work durably and keeps status output bounded", () => {
     const created = service.begin({
       objective: `Inspect ${"x".repeat(500)}`,

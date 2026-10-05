@@ -224,7 +224,7 @@ export class ExecutionSupervisionController {
     };
   }
 
-  assessProgress(executions: ToolExecutionRecord[]): ExecutionSupervisionAssessment {
+  assessProgress(executions: ToolExecutionRecord[], unchangedCompletionRepair = false): ExecutionSupervisionAssessment {
     let browserObservation = this.#browserObservationGuard.observe(executions);
     const browserExecutions = executions.filter((execution) => execution.tool.name.startsWith("browser."));
     const onlyStaleUndispatchedTargets = browserExecutions.length > 0 && browserExecutions.every((execution) =>
@@ -243,7 +243,7 @@ export class ExecutionSupervisionController {
       this.#lastToolFailure = {tool: failed.tool.name,
         ...(typeof code === "string" && /^[a-z0-9_-]{1,80}$/iu.test(code) ? {code} : {})};
     } else if (executions.some(execution => execution.result?.ok)) this.#lastToolFailure = undefined;
-    const toolLoopProgress = this.#toolLoopProgressGuard.observe(executions);
+    const toolLoopProgress = this.#toolLoopProgressGuard.observe(executions, unchangedCompletionRepair);
     this.#executionWorkingSet?.observe(
       executions,
       this.#foregroundTurnId,

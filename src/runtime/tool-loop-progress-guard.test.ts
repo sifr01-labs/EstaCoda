@@ -68,6 +68,14 @@ describe("ToolLoopProgressGuard", () => {
     expect(checkpoint.current()?.progressRevision).toBe(0);
   });
 
+  it("does not let unrelated new URLs reset a pending completion repair", () => {
+    const guard = new ToolLoopProgressGuard({ research: true, noProgressNudgeIteration: 2, maxNoProgressIterations: 3 });
+    for (let i = 0; i < 3; i++) {
+      const search = execution({ tool: { ...execution().tool, name: "web.search" }, result: { ok: true, content: "New URL", metadata: { results: [{ url: `https://example.org/unrelated-${i}` }] } } });
+      expect(guard.observe([search], true)).toMatchObject({ materialProgress: false, shouldStop: i === 2 });
+    }
+  });
+
   it("does not credit reused web observations even when feedback labels change", async () => {
     const guard = new ToolLoopProgressGuard({ noProgressNudgeIteration: 3, maxNoProgressIterations: 6 });
     const read = execution({ tool: { ...execution().tool, name: "web.extract" }, executionEffect: { kind: "read" } });

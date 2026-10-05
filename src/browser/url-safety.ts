@@ -47,33 +47,38 @@ export function isAlwaysBlockedNetwork(ip: string): boolean {
 }
 
 export async function isSafeUrl(url: string, options: UrlSafetyOptions = {}): Promise<boolean> {
+  return await assessUrlSafety(url, options) === "safe";
+}
+
+/** Unresolved hosts remain unfetchable, but are not proven private addresses. */
+export async function assessUrlSafety(url: string, options: UrlSafetyOptions = {}): Promise<"safe" | "unsafe" | "unresolved"> {
   const parsed = parseHttpUrl(url);
   if (parsed === undefined) {
-    return false;
+    return "unsafe";
   }
 
   const hostname = normalizeHostname(parsed.hostname);
   if (isAlwaysBlockedHostname(hostname)) {
-    return false;
+    return "unsafe";
   }
 
   const literalIp = normalizeIpForChecks(hostname);
   if (literalIp !== undefined) {
     if (isAlwaysBlockedNetwork(literalIp)) {
-      return false;
+      return "unsafe";
     }
-    return options.allowPrivateUrls === true || !isPrivateOrInternalIp(literalIp);
+    return options.allowPrivateUrls === true || !isPrivateOrInternalIp(literalIp) ? "safe" : "unsafe";
   }
 
   let addresses: string[];
   try {
     addresses = await resolveHostname(hostname, options.resolveHostname);
   } catch {
-    return false;
+    return "unresolved";
   }
 
   if (addresses.length === 0) {
-    return false;
+    return "unresolved";
   }
 
   return addresses.every((address) => {
@@ -85,7 +90,7 @@ export async function isSafeUrl(url: string, options: UrlSafetyOptions = {}): Pr
       return false;
     }
     return options.allowPrivateUrls === true || !isPrivateOrInternalIp(normalizedIp);
-  });
+  }) ? "safe" : "unsafe";
 }
 
 export function isAlwaysBlockedUrl(url: string): boolean {

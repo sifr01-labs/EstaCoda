@@ -367,7 +367,7 @@ export class DurableDelegationService {
       const idempotency = delegatedStepIdempotency(deliveryAuthority);
       steps.push({
         key: "report-delivery", title: "Save and verify research report",
-        objective: `Read the accepted synthesis with task.result.read, save its exact complete content to ${deliveryContract.requirements.fileOutput!.path}, then read the entire file back. Do not repeat research or alter the accepted report.`,
+        objective: `Read the accepted synthesis with task.result.read. Save its exact complete content to ${deliveryContract.requirements.fileOutput!.path} using file.write with sourceResult: {taskId, resultId} from the accepted synthesis reference; omit content rather than retyping the report. Then call file.read with only path to verify the entire file. Do not repeat research or alter the accepted report.`,
         dependsOn: ["synthesis"], executor: { kind: "agent", role: "report-delivery", requestContract: deliveryContract },
         childTaskPolicy: "forbid", authorityPolicy: deliveryAuthority, executionLimits: executionLimits.step,
         retryPolicy: delegatedRetryPolicy(idempotency), failurePolicy: { onAttemptsExhausted: "mark_partial", optional: false },

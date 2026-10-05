@@ -8,6 +8,13 @@ import { measureResearchWorkflow } from "../src/eval/fixtures/research-workflow-
 
 // Existing owning suites remain executable gates, not checklist assertions.
 export const acceptanceSuites = [
+  "src/prompt/prompt-assembly.test.ts",
+  "src/runtime/provider-turn-loop.test.ts",
+  "src/runtime/tool-loop-progress-guard.test.ts",
+  "src/tasks/task-operator-service.test.ts",
+  "src/tasks/task-scheduler.test.ts",
+  "src/tasks/task-session-completion.test.ts",
+  "src/control-service/review-corrections.test.ts",
   "src/eval/fixtures/research-routing-release.test.ts",
   "src/runtime/research-request.acceptance.test.ts",
   "src/runtime/research-prerequisites.test.ts",
@@ -38,6 +45,10 @@ export const acceptanceSuites = [
   "src/memory/memory-reviewer.test.ts",
   "src/memory/memory-curation-service.test.ts",
   "src/tasks/research-result-evidence.test.ts",
+  "src/runtime/file-output-evidence.test.ts",
+  "src/tools/workspace-tools.test.ts",
+  "src/browser/url-safety.test.ts", "src/tools/web-tools.test.ts",
+  "src/tasks/task-result-service.test.ts",
   "src/tasks/agent-step-executor.test.ts",
   "src/runtime/execution-outcome.test.ts",
   "src/cli/session-loop.test.ts",

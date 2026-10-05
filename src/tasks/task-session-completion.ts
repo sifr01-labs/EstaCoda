@@ -1,3 +1,4 @@
+import { taskRetryBlockReason } from "./task-tree-accounting.js";
 import { createHash } from "node:crypto";
 import type { SessionDB, SessionMessage } from "../contracts/session.js";
 import type { Task, TaskDeliveryBinding, TaskResult } from "../contracts/task.js";
@@ -183,9 +184,13 @@ export class TaskSessionCompletionService {
     const workers = steps.filter(step => step.executor.role === "worker");
     const completed = workers.filter(step => step.status === "completed").length;
     const pendingFile = taskRequestCompletion(this.#store, task).fileOutputPending;
+    const retryable = steps.some(step => step.status === "waiting_for_input" && taskRetryBlockReason(this.#store, task, step, this.#now().getTime()) === undefined);
+    const recovery = this.#locale === "ar"
+      ? retryable ? "افتح تبويب المهام لمراجعة المسودة وإعادة محاولة الخطوة المتأثرة." : "افتح تبويب المهام لفحص النتائج وسبب توقف التنفيذ؛ لا يمكن لإعادة الاستئناف تجاوز الحد."
+      : retryable ? "Open Tasks to review the retained draft and retry the affected step." : "Open Tasks to inspect the retained results and execution limit; resuming cannot reset an exhausted limit.";
     const text = this.#locale === "ar"
-      ? `تحتاج المهمة إلى مراجعة. تم الاحتفاظ بالنتائج والمسودات. اكتمل ${completed} من ${workers.length} من خطوات البحث. افتح تبويب المهام لمراجعة الخطوة المتأثرة وإعادة المحاولة.${pendingFile ? " لم يتم حفظ التقرير المطلوب والتحقق منه بعد." : ""}`
-      : `This task needs attention. Results and drafts are preserved. ${completed} of ${workers.length} research steps completed. Open Tasks to review and retry the affected step.${pendingFile ? " The requested report has not been saved and verified yet." : ""}`;
+      ? `تحتاج المهمة إلى مراجعة. تم الاحتفاظ بالنتائج والمسودات. اكتمل ${completed} من ${workers.length} من خطوات البحث. ${recovery}${pendingFile ? " لم يتم حفظ التقرير المطلوب والتحقق منه بعد." : ""}`
+      : `This task needs attention. Results and drafts are preserved. ${completed} of ${workers.length} research steps completed. ${recovery}${pendingFile ? " The requested report has not been saved and verified yet." : ""}`;
     try {
       await this.#sessionDb.appendMessage({ id, sessionId, role: "agent", channel: "cli", content: text,
         metadata: { taskAttention: { version: 1, taskId: task.id, bindingId: binding.id } } });

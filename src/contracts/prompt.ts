@@ -8,6 +8,7 @@ export type PromptLayerName =
   | "session-history"
   | "native-history"
   | "conversation-continuation"
+  | "completion-repair"
   | "execution-plan"
   | "execution-working-set"
   | "browser-state"

@@ -1,3 +1,4 @@
+import { undispatchedResult } from "./undispatched-result.js";
 import { EditorContentView } from "../execution/editor-content-view.js";
 import { HostProcessScope, type HostProcesses } from "../execution/host-processes.js";
 import { HostWorkspaceFiles, type WorkspaceFiles, type WorkspacePathOptions } from "../execution/host-workspace-files.js";
@@ -16,6 +17,8 @@ import { createTerminalInspectTool } from "./terminal-inspect-tool.js";
 import { errorResult } from "./workspace-paths.js";
 
 export type WorkspaceToolOptions = {
+  canReadTaskResults?: () => boolean;
+  taskResultService?: Pick<import("../tasks/task-result-service.js").TaskResultService, "readText">;
   executionLease?: HostExecutionLease;
   workspaceRoot: string;
   maxReadBytes?: number;
@@ -189,8 +192,8 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
         type: "object",
         properties: {
           path: { type: "string" },
-          lineStart: { type: "number" },
-          lineEnd: { type: "number" }
+          lineStart: { type: ["number", "null"] },
+          lineEnd: { type: ["number", "null"] }
         },
         required: ["path"]
       },
@@ -199,7 +202,7 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
       progressLabel: "reading file",
       maxResultSizeChars: maxReadBytes,
       isAvailable: () => true,
-      run: async (input: { path?: string; lineStart?: number; lineEnd?: number }) => {
+      run: async (input: { path?: string; lineStart?: number | null; lineEnd?: number | null }) => {
         const canonicalRoot = await realpath(root);
         const path = await resolveWorkspacePath(canonicalRoot, input.path);
         if (!path.ok) {
@@ -210,19 +213,19 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
         if (fsAdapter !== undefined) {
           const content = await fsAdapter.readTextFile({
             path: path.path,
-            lineStart: input.lineStart,
-            lineEnd: input.lineEnd
+            lineStart: input.lineStart ?? undefined,
+            lineEnd: input.lineEnd ?? undefined
           });
           result = renderWorkspaceFile(canonicalRoot, path.path, content, {
             maxReadBytes,
-            lineStart: input.lineStart,
-            lineEnd: input.lineEnd
+            lineStart: input.lineStart ?? undefined,
+            lineEnd: input.lineEnd ?? undefined
           });
         } else {
           result = await readWorkspaceFile(canonicalRoot, path.path, {
             maxReadBytes,
-            lineStart: input.lineStart,
-            lineEnd: input.lineEnd
+            lineStart: input.lineStart ?? undefined,
+            lineEnd: input.lineEnd ?? undefined
           });
         }
 
@@ -242,12 +245,15 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
     },
     {
       name: "file.write",
-      description: "Write a text file inside the active workspace, creating parent directories as needed. Existing files require overwrite=true when content changes; suspicious shrink overwrites also require allowShrink=true.",
+      description: "Write a text file inside the active workspace, creating parent directories as needed. Supply content, or sourceResult to copy an authorized accepted Task result exactly without retyping it. Existing files require overwrite=true when content changes; suspicious shrink overwrites also require allowShrink=true.",
       inputSchema: {
         type: "object",
         properties: {
           path: { type: "string" },
-          content: { type: "string" },
+          content: { type: ["string", "null"] },
+          sourceResult: { type: ["object", "null"], additionalProperties: false,
+            properties: { taskId: { type: "string" }, resultId: { type: "string" } },
+            required: ["taskId", "resultId"], description: "Copy this session-authorized accepted Task result exactly. Omit content or supply an empty string if the provider requires the field." },
           overwrite: {
             type: "boolean",
             description: "Required as true when replacing changed content in an existing file. Creates and same-content writes do not require it.",
@@ -259,22 +265,34 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
             default: false
           }
         },
-        required: ["path", "content"]
+        required: ["path"]
       },
       riskClass: "workspace-write",
       toolsets: ["files", "coding"],
       progressLabel: "writing file",
       maxResultSizeChars: 2000,
       isAvailable: () => true,
-      run: async (input: { path?: string; content?: string; overwrite?: boolean; allowShrink?: boolean }) => {
+      run: async (input: { path?: string; content?: string | null; sourceResult?: { taskId?: string; resultId?: string } | null; overwrite?: boolean; allowShrink?: boolean }) => {
+        if (input.sourceResult != null) {
+          const source = input.sourceResult;
+          const sessionId = resolveString(options.sessionId);
+          if ((input.content != null && input.content !== "") || !source || typeof source.taskId !== "string" || typeof source.resultId !== "string" ||
+              Object.keys(source).some(key => key !== "taskId" && key !== "resultId")) return undispatchedResult(errorResult("Use either content or sourceResult with taskId and resultId."));
+          if (!options.taskResultService || !sessionId || options.canReadTaskResults?.() !== true) return undispatchedResult(errorResult("Task result content is unavailable in this session."));
+          try {
+            const resolved = await options.taskResultService.readText({ taskId: source.taskId, resultId: source.resultId, sessionId });
+            if (resolved.result.disposition !== "accepted") return undispatchedResult(errorResult("Only accepted Task results can be copied with sourceResult."));
+            input = { ...input, content: resolved.content };
+          } catch { return undispatchedResult(errorResult("Task result content is unavailable or failed integrity verification for this session.")); }
+        }
         if (typeof input.content !== "string") {
-          return errorResult("content must be a string");
+          return undispatchedResult(errorResult("content must be a string"));
         }
 
         const canonicalRoot = await realpath(root);
         const path = await resolveWorkspacePath(canonicalRoot, input.path, { allowMissingLeaf: true, forbidSymlinks: true });
         if (!path.ok) {
-          return path;
+          return undispatchedResult(path);
         }
 
         const relativePath = relative(canonicalRoot, path.path);
@@ -292,7 +310,7 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
         });
 
         if (overwritesExisting && input.overwrite !== true) {
-          return errorResult(`file.write would overwrite existing ${relativePath}. Re-read the file if needed, then set overwrite=true only when replacing the entire file is intended.`, {
+          return undispatchedResult(errorResult(`file.write would overwrite existing ${relativePath}. Re-read the file if needed, then set overwrite=true only when replacing the entire file is intended.`, {
             path: relativePath,
             oldBytes,
             newBytes: bytes,
@@ -303,11 +321,11 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
             suspiciousShrink: shrinkAssessment.suspicious,
             reason: "overwrite_intent_required",
             fileChangePreview: preview
-          });
+          }));
         }
 
         if (overwritesExisting && shrinkAssessment.suspicious && input.allowShrink !== true) {
-          return errorResult(`Suspicious file.write overwrite blocked for ${relativePath}: new content is much smaller than the existing file. Use file.patch for targeted edits, or set allowShrink=true only when this shrink is intentional.`, {
+          return undispatchedResult(errorResult(`Suspicious file.write overwrite blocked for ${relativePath}: new content is much smaller than the existing file. Use file.patch for targeted edits, or set allowShrink=true only when this shrink is intentional.`, {
             path: relativePath,
             oldBytes,
             newBytes: bytes,
@@ -321,7 +339,7 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
             suspiciousShrink: true,
             reason: "suspicious_shrink_overwrite",
             fileChangePreview: preview
-          });
+          }));
         }
 
         if (changed) {
@@ -653,6 +671,8 @@ export const workspaceToolProvider: SessionToolProvider = {
   kind: "session",
   createTools(ctx) {
     return createWorkspaceTools({
+      canReadTaskResults: ctx.canReadTaskResults,
+      taskResultService: ctx.taskResultService,
       workspaceRoot: ctx.workspaceRoot,
       executionLease: ctx.executionLease,
       fsAdapter: ctx.workspaceFsAdapter,
@@ -2407,10 +2427,20 @@ function createWorkspaceIO(files: WorkspaceFiles) {
     }
 
     const content = bytes.subarray(0, options.maxReadBytes).toString("utf8");
-    return renderWorkspaceFile(root, path, content, {
+    const result = renderWorkspaceFile(root, path, content, {
       ...options,
       originalBytes: bytes.length
     });
+    // The host read materialized all bytes even when the model receives only a
+    // bounded preview. Verification hashes the file, never a truncated preview.
+    let totalLines = 1;
+    for (const byte of bytes) if (byte === 10) totalLines++;
+    const complete = options.lineStart === undefined ||
+      (Number.isInteger(options.lineStart) && options.lineStart <= 1 &&
+        Number.isInteger(options.lineEnd ?? 1) && (options.lineEnd ?? 1) >= totalLines);
+    if (complete) result.metadata = { ...result.metadata, completeFileRead: true,
+      contentSha256: createHash("sha256").update(bytes).digest("hex") };
+    return result;
   }
 
   async function searchDirectory(

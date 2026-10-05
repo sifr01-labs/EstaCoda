@@ -66,6 +66,7 @@ export type SessionToolContext = {
   skillConfig?: Record<string, Record<string, unknown>>;
   processManager?: import("../process/process-manager.js").ProcessManager;
   artifactStore?: import("../artifacts/artifact-store.js").ArtifactStore;
+  canReadTaskResults?: () => boolean;
   taskResultService?: import("../tasks/task-result-service.js").TaskResultService;
   taskOperatorService?: import("../tasks/task-operator-service.js").TaskOperatorService;
   usageInspector?: import("../session/usage-inspector.js").UsageInspector;

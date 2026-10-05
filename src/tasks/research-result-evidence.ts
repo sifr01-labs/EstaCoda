@@ -3,13 +3,11 @@ import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import type { TaskStore } from "./task-store.js";
 import { readTaskResultEvidence } from "./task-result-read-evidence.js";
 
-const CLAIM_HEADER = "| Source URL | Supported claim | Limitation |";
 const SOURCE_HEADER = "| Source URL | Published/revised | Retrieved | Access | Supported claim | Limitation |";
-const MAX_ROWS = 24;
-const MAX_TABLE_CHARS = 16_000;
-export const RESEARCH_EVIDENCE_INSTRUCTION = `Include a bounded Markdown source/claim table (1-${MAX_ROWS} rows, no pipes inside cells):\n${CLAIM_HEADER}\n| --- | --- | --- |\nUse plain observed URLs, concise supported claims, and a concrete limitation for each claim. Never invent publication dates or claim full-text access from snippets. The runtime attaches observed publication/revision dates, retrieval dates and access status. A URL establishes provenance, not scientific truth.`;
+const MAX_TABLE_CHARS = 128_000;
+export const RESEARCH_EVIDENCE_INSTRUCTION = `Cite observed URLs next to the claims they support. Explain source limitations and distinguish search snippets from retrieved text. A source/claim table is optional; the runtime attaches observed publication/revision dates, retrieval dates and access status. Never invent source observations or publication dates. A URL establishes provenance, not scientific truth.`;
 
-export const SYNTHESIS_EVIDENCE_INSTRUCTION = "Synthesis must read every accepted dependency result completely, preserve its evidence limitations and freshness scope, and cite only their observed sources. For synthesis, copy supported-claim and limitation cells from the accepted worker tables unchanged; synthesize the narrative separately.";
+export const SYNTHESIS_EVIDENCE_INSTRUCTION = "Read every accepted dependency result completely. Synthesize their findings in your own words, cite their observed sources, and preserve evidence limitations and freshness scope. The runtime retains the original worker source notes; do not copy table cells merely to satisfy formatting. Return only the report for its reader. File saving and completion status are handled by the delivery step; omit internal workflow or file-output commentary from the report.";
 
 type SourceRow = { url: string; published: string; retrieved: string; access: string; claim: string; limitation: string };
 
@@ -22,10 +20,11 @@ export function requiresSourceTable(step: TaskStep, store: TaskStore): boolean {
 export function groundResearchResult(input: { task: Task; step: TaskStep; store: TaskStore; text: string; executions: readonly ToolExecutionRecord[]; now: Date }): { text?: string; failure?: string; feedback?: string } {
   if (!requiresSourceTable(input.step, input.store)) return { text: input.text };
   const table = parseTable(input.text);
-  if (table === undefined) return { failure: "source-claim-table-missing" };
+  const cited = [...new Set(researchCitationUrls(input.text))];
+  if (cited.length === 0) return { failure: "source-citations-missing", feedback: "Cite observed sources beside the claims they support; a Markdown table is optional." };
   const sources = new Map<string, Omit<SourceRow, "claim" | "limitation">>();
   const missing: string[] = [];
-  const acceptedClaims = new Set<string>();
+  const acceptedRows: SourceRow[] = [];
   if (input.step.executor.role === "synthesis") {
     const dependencies = input.step.dependsOn.map((id) => input.store.getStep(id));
     const ids = new Set(input.step.dependsOn);
@@ -36,12 +35,11 @@ export function groundResearchResult(input: { task: Task; step: TaskStep; store:
       const worker = parseTable(read.find((page) => page.id === result.id)!.content);
       if (worker === undefined || worker.rows.some((row) => row.retrieved === "unknown")) return { failure: "worker-source-table-missing" };
       for (const row of worker.rows) {
-        acceptedClaims.add(JSON.stringify([row.url, row.claim, row.limitation]));
+        acceptedRows.push(row);
         if (!sources.has(row.url)) sources.set(row.url, row);
       }
-      if (!worker.rows.some((row) => table.rows.some((candidate) => candidate.url === row.url))) return { failure: "worker-source-coverage-missing" };
+      if (!worker.rows.some((row) => cited.includes(row.url))) return { failure: "worker-source-coverage-missing" };
     }
-    if (table.rows.some((row) => !acceptedClaims.has(JSON.stringify([row.url, row.claim, row.limitation])))) return { failure: "changed-source-claim" };
     for (const step of dependencies) {
       if (step === null || step.status !== "completed" || !accepted.some((result) => result.stepId === step.id)) {
         missing.push(step?.executor.research?.scope ?? step?.title ?? "unavailable scope");
@@ -50,11 +48,24 @@ export function groundResearchResult(input: { task: Task; step: TaskStep; store:
   } else {
     for (const [url, source] of observedSources(input.executions, input.now)) sources.set(url, source);
   }
-  const unobserved = [...new Set([...table.rows.map(row => row.url), ...urls(input.text)].filter(url => !sources.has(url)))];
+  const unobserved = [...new Set(cited.filter(url => !sources.has(url)))];
   if (unobserved.length > 0) return { failure: "unobserved-source",
     feedback: `These cited URLs have no successful source observation: ${unobserved.slice(0, 8).join(", ")}. Verify them with allowed tools, replace them with observed supporting sources, or remove unsupported claims. A failed retrieval is a limitation, not evidence. Return only the corrected report; do not repeat rejected URLs in explanations of removed citations.` };
-  const rows = table.rows.map((row) => ({ ...sources.get(row.url)!, claim: row.claim, limitation: row.limitation }));
-  const rendered = [SOURCE_HEADER, "| --- | --- | --- | --- | --- | --- |", ...rows.map((row) => `| ${row.url} | ${row.published} | ${row.retrieved} | ${row.access} | ${row.claim} | ${row.limitation} |`)].join("\n");
+  // Observations are runtime-owned; prose and claim notes remain model-authored.
+  // Synthesis retains the original worker limitations independently of paraphrasing.
+  const rows = input.step.executor.role === "synthesis"
+    ? cited.map(url => {
+      const notes = acceptedRows.filter(row => row.url === url);
+      return { ...sources.get(url)!, claim: [...new Set(notes.map(row => row.claim))].join(" / "),
+        limitation: [...new Set(notes.map(row => row.limitation))].join(" / ") };
+    })
+    : cited.map(url => {
+      const row = table?.rows.find(row => row.url === url);
+      return { ...sources.get(url)!, claim: row?.claim ?? "See cited narrative; claim support requires review",
+        limitation: row?.limitation || "Source provenance verified; factual support requires review" };
+    });
+  const rendered = [SOURCE_HEADER, "| --- | --- | --- | --- | --- | --- |", ...rows.map((row) => `| ${row.url} | ${row.published} | ${row.retrieved} | ${row.access} | ${row.claim.replace(/\|/gu, "\\|")} | ${row.limitation.replace(/\|/gu, "\\|")} |`)].join("\n");
+  if (rendered.length > MAX_TABLE_CHARS) return { failure: "source-notes-limit", feedback: "The retained source notes exceed the result size limit. Use fewer distinct sources while preserving worker scope coverage." };
   const prefix = input.step.executor.role !== "synthesis" ? "" : missing.length > 0
     ? `Research coverage is partial. Missing or failed scopes: ${missing.join(", ")}. Conclusions are limited to the accepted evidence.\n\n`
     : "Research coverage: all requested worker scopes returned accepted evidence.\n\n";
@@ -62,38 +73,54 @@ export function groundResearchResult(input: { task: Task; step: TaskStep; store:
     ? "Freshness: live searches were required; observed publication/revision dates and retrieval dates appear below. Unknown publication dates do not establish recency.\n\n" : "";
   const access = rows.every(row => row.access.startsWith("snippet"))
     ? "Source access: search summaries only. Full text was not retrieved; acceptance checks source provenance, not scientific accuracy.\n\n" : "";
-  const body = input.text.slice(0, table.start) + rendered + input.text.slice(table.end);
+  const body = table === undefined ? `${input.text}\n\n${rendered}` : input.text.slice(0, table.start) + rendered + input.text.slice(table.end);
   return { text: prefix + freshness + (access && !body.startsWith(access) ? access : "") + body };
 }
 
 function parseTable(text: string): { rows: SourceRow[]; start: number; end: number } | undefined {
-  const header = text.includes(SOURCE_HEADER) ? SOURCE_HEADER : CLAIM_HEADER;
-  const start = text.indexOf(header);
-  if (start < 0 || text.indexOf(header, start + header.length) >= 0) return undefined;
-  const block = text.slice(start).split("\n");
-  if (!/^\|(?:\s*:?-+:?\s*\|){3,6}\s*$/u.test(block[1] ?? "")) return undefined;
-  const rows: SourceRow[] = [];
-  let end = start + block[0]!.length + 1 + block[1]!.length;
-  for (const line of block.slice(2)) {
-    if (!line.startsWith("|")) break;
-    end += line.length + 1;
-    const cells = line.split("|").slice(1, -1).map((cell) => cell.trim());
-    if (!line.endsWith("|") || cells.length !== (header === SOURCE_HEADER ? 6 : 3) || cells.some((cell) => cell.length === 0 || cell.length > 600)) return undefined;
-    const url = httpUrl(cells[0]);
-    if (url === undefined) return undefined;
-    rows.push({ url, published: header === SOURCE_HEADER ? cells[1]! : "unknown", retrieved: header === SOURCE_HEADER ? cells[2]! : "unknown",
-      access: header === SOURCE_HEADER ? cells[3]! : "unknown", claim: cells.at(-2)!, limitation: cells.at(-1)! });
-    if (rows.length > MAX_ROWS || end - start > MAX_TABLE_CHARS) return undefined;
+  const lines = text.split("\n");
+  let offset = 0;
+  for (let i = 0; i < lines.length - 1; i++) {
+    const cells = (line: string) => line.trim().replace(/^\|/, "").replace(/\|$/, "").split(/(?<!\\)\|/u).map(cell => cell.trim().replace(/\\\|/gu, "|"));
+    const header = cells(lines[i]!).map(cell => cell.replace(/[*_]/gu, "").toLowerCase());
+    const urlIndex = header.findIndex(cell => /^(source url|source|url)$/u.test(cell));
+    const claimIndex = header.findIndex(cell => /^(supported claim|claim|finding)$/u.test(cell));
+    const limitationIndex = header.findIndex(cell => /^(limitation|limitations)$/u.test(cell));
+    if (urlIndex < 0 || claimIndex < 0 || limitationIndex < 0 || !/^\s*\|?[\s:|+-]+\|?\s*$/u.test(lines[i + 1]!)) {
+      offset += lines[i]!.length + 1; continue;
+    }
+    const start = offset;
+    let end = start + lines[i]!.length + 1 + lines[i + 1]!.length;
+    const rows: SourceRow[] = [];
+    let invalid = false;
+    for (let j = i + 2; j < lines.length && lines[j]!.trim().startsWith("|"); j++) {
+      const values = cells(lines[j]!);
+      const url = httpUrl(values[urlIndex]);
+      if (url === undefined || values.length !== header.length) { invalid = true; break; }
+      const value = (name: string) => values[header.indexOf(name)] || "unknown";
+      rows.push({ url, claim: values[claimIndex]!, limitation: values[limitationIndex]!,
+        published: value("published/revised"), retrieved: value("retrieved"), access: value("access") });
+      end += lines[j]!.length + 1;
+      if (end - start > MAX_TABLE_CHARS) { invalid = true; break; }
+    }
+    if (!invalid && rows.length) return { rows, start, end };
+    offset += lines[i]!.length + 1;
   }
-  return rows.length === 0 ? undefined : { rows, start, end };
+  return undefined;
 }
+
 function httpUrl(value: unknown): string | undefined {
   if (typeof value !== "string" || value.length > 600) return undefined;
   try { const url = new URL(value); if (!["http:", "https:"].includes(url.protocol) || url.username || url.password) return undefined; url.hash = ""; return url.href; } catch { return undefined; }
 }
-function urls(text: string): string[] {
-  return [...text.matchAll(/https?:\/\/[^\s<>"'`\[\]{}()|]+/giu)].flatMap((match) => {
-    const url = httpUrl(match[0].replace(/[.,;:!?]+$/u, "")); return url === undefined ? [] : [url];
+export function researchCitationUrls(text: string): string[] {
+  return [...text.matchAll(/https?:\/\/[^\s<>"'`\[\]{}|]+/giu)].flatMap((match) => {
+    let value = match[0].replace(/[.,;:!?]+$/u, "");
+    // Remove Markdown's closing delimiter, preserving balanced parentheses in
+    // actual URLs (for example EU publication filenames).
+    let excess = (value.match(/\)/gu)?.length ?? 0) - (value.match(/\(/gu)?.length ?? 0);
+    while (excess > 0 && value.endsWith(")")) { value = value.slice(0, -1); excess--; }
+    const url = httpUrl(value); return url === undefined ? [] : [url];
   });
 }
 
@@ -127,12 +154,15 @@ function observedSources(executions: readonly ToolExecutionRecord[], now: Date):
 /** Foreground research uses the same observed-URL and bounded claim-table contract. */
 export function groundForegroundResearch(text: string, executions: readonly ToolExecutionRecord[], now: Date): { text?: string; failure?: string } {
   const table = parseTable(text);
-  if (table === undefined) return { failure: "source-claim-table-missing" };
+  const cited = [...new Set(researchCitationUrls(text))];
+  if (cited.length === 0) return { failure: "source-citations-missing" };
   const sources = observedSources(executions, now);
-  if (table.rows.some((row) => !sources.has(row.url)) || urls(text).some((url) => !sources.has(url))) return { failure: "unobserved-source" };
-  const rendered = [SOURCE_HEADER, "| --- | --- | --- | --- | --- | --- |", ...table.rows.map((row) => {
+  if (cited.some(url => !sources.has(url))) return { failure: "unobserved-source" };
+  const rows = cited.map(url => table?.rows.find(row => row.url === url) ?? { url, claim: "See cited narrative; claim support requires review", limitation: "Source provenance verified; factual support requires review" });
+  const rendered = [SOURCE_HEADER, "| --- | --- | --- | --- | --- | --- |", ...rows.map((row) => {
     const source = sources.get(row.url)!;
-    return `| ${row.url} | ${source.published} | ${source.retrieved} | ${source.access} | ${row.claim} | ${row.limitation} |`;
+    return `| ${row.url} | ${source.published} | ${source.retrieved} | ${source.access} | ${row.claim.replace(/\|/gu, "\\|")} | ${row.limitation.replace(/\|/gu, "\\|")} |`;
   })].join("\n");
-  return { text: text.slice(0, table.start) + rendered + text.slice(table.end) };
+  if (rendered.length > MAX_TABLE_CHARS) return { failure: "source-notes-limit" };
+  return { text: table === undefined ? `${text}\n\n${rendered}` : text.slice(0, table.start) + rendered + text.slice(table.end) };
 }

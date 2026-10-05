@@ -38,10 +38,10 @@ const source='https://93.184.216.34/fixture/battery-recycling';
 const inaccessible='https://93.184.216.34/fixture/unavailable';
 const table=`| Source URL | Supported claim | Limitation |\n| --- | --- | --- |\n| ${source} | Synthetic research fixture | Illustrative snippet; not scientific evidence |`;
 const largeEvidence="Synthetic evidence detail. ".repeat(480)+"\nREPORT-BODY-END\n";
-const report=`# Battery recycling\n\nSynthetic research fixture. [Source](${source})\n${largeEvidence}${table}`;
-let requests=0,phase='research',saveIndex=0,recoveryIndex=0,diagnostics='',providerErrors:string[]=[];
+const report=`# Battery recycling\n\nSynthetic research fixture. [Source](${source})\n${largeEvidence.repeat(4)}${table}`;
+let requests=0,phase='research',saveIndex=0,saveOffset=0,recoveryIndex=0,diagnostics='',providerErrors:string[]=[];
 let sessionId='',reportContent='',bridgeVerified=false;
-let failedWorkerCandidates=0,repairedWorkerOnce=false,researchRead=false;
+let failedWorkerCandidates=0,repairedWorkerOnce=false,repairSearches=0,researchRead=false;
 let longCallMs=0,siblingCompletedDuringLongCall=false;
 let releaseLongWorker!:()=>void;const longWorkerGate=new Promise<void>(resolve=>{releaseLongWorker=resolve;});
 let releaseFallback!:()=>void;const fallbackGate=new Promise<void>(resolve=>{releaseFallback=resolve;});
@@ -66,11 +66,11 @@ const provider=createServer(async(req,res)=>{
   else if(phase==='save'||text.includes('Current Step: Save and verify research report')){
    const task=store.listTasks()[0],synthesis=store.listSteps(task.id,task.activePlanRevisionId).find((s:any)=>s.executor.role==='synthesis');
    const result=store.listResults(task.id).find((r:any)=>r.stepId===synthesis.id&&r.disposition==='accepted');assert(result);
-   if(saveIndex===0)next=[tool('task_result_read',{task_id:task.id,result_id:result.id,max_chars:20000})];
-   else if(saveIndex===1){reportContent=(await resultService.readText({taskId:task.id,resultId:result.id,sessionId})).content;assert(text.includes(JSON.stringify(reportContent).slice(1,-1)),'Delivery did not receive the complete synthesis');next=[tool('file_write',{path:'report.md',content:reportContent,overwrite:true})];}
-   else if(saveIndex===2)next=[tool('file_read',{path:'report.md'})];
+   reportContent=(await resultService.readText({taskId:task.id,resultId:result.id,sessionId})).content;
+   if(saveOffset<reportContent.length){next=[tool('task_result_read',{task_id:task.id,result_id:result.id,offset:saveOffset,max_chars:20000})];saveOffset+=20000;}
+   else if(saveIndex===0){assert(Buffer.byteLength(reportContent)>48000,'Delivery fixture must exceed the file preview limit');next=[tool('file_write',{path:'report.md',sourceResult:{taskId:task.id,resultId:result.id},content:'',overwrite:true})];saveIndex++;}
+   else if(saveIndex===1){next=[tool('file_read',{path:'report.md',lineStart:1,lineEnd:100000})];saveIndex++;}
    else content='Saved report.md.';
-   saveIndex++;
   }else if(phase==='recovery'){
    if(recoveryIndex===0)next=[tool('capability_discover',{ids:['skill:researcher']})];
    else if(recoveryIndex===1)next=[tool('capability_request',{ids:['skill:researcher'],reason:'Use the research workflow'})];
@@ -87,9 +87,15 @@ const provider=createServer(async(req,res)=>{
    else {for(const result of accepted){const body=(await resultService.readText({taskId:task.id,resultId:result.id,sessionId})).content;assert(text.includes(JSON.stringify(body).slice(1,-1)),'Synthesis did not receive a complete worker result');}content=report;}
   }else if(text.includes('Work only on this assigned Step')){
    await workerGate;
-   if(!hasFeedback)next=[tool('web_search',{query:'empty fixture query'}),tool('web_search',{query:'battery recycling '+requests}),tool('web_extract',{url:inaccessible})];
-   else if(failedWorkerCandidates<3&&text.includes('Research battery recycling: processing.')){await longWorkerGate;failedWorkerCandidates++;content='Draft findings without the required source table.';}
+   if(!hasFeedback)next=[tool('web_search',{query:'failed fixture query'}),tool('web_search',{query:'empty fixture query'}),tool('web_search',{query:'battery recycling '+requests}),tool('web_extract',{url:inaccessible}),tool('web_extract',{url:'https://unresolved.invalid/source'}),tool('web_extract',{url:source+'/provider-failure'})];
+   else if(failedWorkerCandidates<3&&text.includes('Research battery recycling: processing.')){await longWorkerGate;failedWorkerCandidates++;content='Draft findings without observed citations.';}
    else if(!repairedWorkerOnce&&text.includes('Research battery recycling: collection.')){repairedWorkerOnce=true;content=table.replace(source,'https://unobserved.example/claim');}
+   else if(repairedWorkerOnce&&text.includes('Research battery recycling: collection.')&&repairSearches<2){
+    assert(text.includes('unobserved.example/claim'),'Repair lost the rejected citation');
+    assert(text.includes('These cited URLs have no successful source observation'),'Repair lost validation feedback');
+    assert(text.includes(source),'Repair lost prior observed evidence');
+    repairSearches++;next=[tool('web_search',{query:'targeted replacement '+repairSearches})];
+   }
    else {
     if(text.includes('Research battery recycling: reuse.')&&longCallMs===0){
      const started=Date.now();res.writeHead(200,{'content-type':'text/event-stream'});
@@ -129,7 +135,7 @@ const bootstrap=join(home,'supervisor.mjs'),searchLog=join(home,'searches.jsonl'
 writeFileSync(bootstrap,`import {appendFileSync,existsSync} from 'node:fs';
 import {registerWebResearchProvider} from ${JSON.stringify(pathToFileURL(join(retainedCore,'tools/web-research-registry.js')).href)};
 import {runGatewaySupervisor} from ${JSON.stringify(pathToFileURL(join(retainedCore,'gateway/supervisor.js')).href)};
-registerWebResearchProvider({name:'pr6-fixture',displayName:'Synthetic release evidence',capabilities:{search:true,extract:true},getAvailability:()=>({available:!existsSync(${JSON.stringify(missingFlag)}),reason:'Fixture search disabled'}),search:async query=>{appendFileSync(${JSON.stringify(searchLog)},JSON.stringify({query})+'\\n');return query==='empty fixture query'?[]:[{title:'Synthetic study',url:${JSON.stringify(source)},snippet:'Illustrative fixture; not scientific evidence.'},{title:'Unavailable study',url:${JSON.stringify(inaccessible)},snippet:'Snippet only; page unavailable.'}];},extract:async url=>({url,content:'Illustrative research fixture',status:url.endsWith('/unavailable')?403:200})});
+registerWebResearchProvider({name:'pr6-fixture',displayName:'Synthetic release evidence',capabilities:{search:true,extract:true},getAvailability:()=>({available:!existsSync(${JSON.stringify(missingFlag)}),reason:'Fixture search disabled'}),search:async query=>{appendFileSync(${JSON.stringify(searchLog)},JSON.stringify({query})+'\\n');if(query==='failed fixture query')throw new Error('Synthetic search timeout');return query==='empty fixture query'?[]:[{title:'Synthetic study',url:${JSON.stringify(source)},snippet:'Illustrative fixture; not scientific evidence.'},{title:'Unavailable study',url:${JSON.stringify(inaccessible)},snippet:'Snippet only; page unavailable.'}];},extract:async url=>{if(url.endsWith('/provider-failure'))throw new Error('Synthetic extraction timeout');return {url,content:'Illustrative research fixture',status:url.endsWith('/unavailable')?403:200};}});
 await runGatewaySupervisor(${JSON.stringify({homeDir:home,workspaceRoot:workspace,profileId})});`);
 let supervisor:ChildProcess|undefined;
 function startSupervisor(){
@@ -215,7 +221,7 @@ try{
  await page!.getByRole('button',{name:'Retry this step',exact:true}).click();
  await expect.poll(()=>store.listTasks()[0]?.status,{timeout:120000}).toBe('completed');
  const task=store.listTasks()[0],steps=store.listSteps(task.id,task.activePlanRevisionId),workers=steps.filter((s:any)=>s.executor.role==='worker'),synthesis=steps.find((s:any)=>s.executor.role==='synthesis');
- assert.equal(workers.length,3);assert.deepEqual(new Set(synthesis.dependsOn),new Set(workers.map((s:any)=>s.id)));assert.equal(store.listResults(task.id).filter((r:any)=>r.disposition==='accepted').length,5);assert.equal(searches(),8);assert(existsSync(join(workspace,'report.md')));
+ assert.equal(workers.length,3);assert.deepEqual(new Set(synthesis.dependsOn),new Set(workers.map((s:any)=>s.id)));assert.equal(store.listResults(task.id).filter((r:any)=>r.disposition==='accepted').length,5);assert.equal(searches(),14);assert(existsSync(join(workspace,'report.md')));
  const workerSessions=new Set(store.listAttempts(task.id).map((a:any)=>a.workerSessionId));assert.equal(workerSessions.size,6);assert(!workerSessions.has(sessionId));
  await idle(initial.workId);
  await expect.poll(()=>store.listDeliveryBindings({statuses:['delivered'],limit:100}).length,{timeout:30000}).toBe(1);
@@ -230,10 +236,10 @@ try{
  await launch();startSupervisor();
  await expect.poll(async()=>{try{return(await probePrivateControl({directory:paths.gatewayStatePath,profileId,version:manifest.coreVersion})).instanceId;}catch{return null;}},{timeout:30000}).not.toBeNull();
  assert.equal(requests,beforeRestart);assert.equal((await completions()).length,1);
- phase='save';saveIndex=0;await submit('Save this report to report.md',initial.workId);await idle(initial.workId);
+ phase='save';saveIndex=0;saveOffset=0;await submit('Save this report to report.md',initial.workId);await idle(initial.workId);
  await expect.poll(()=>existsSync(join(workspace,'report.md')),{timeout:60000}).toBe(true);
  await expect.poll(()=>page!.evaluate(id=>window.desktop.getWork(id).then(x=>x.status).catch(()=>'unavailable'),initial.workId),{timeout:60000}).toBe('completed');
- assert.equal(readFileSync(join(workspace,'report.md'),'utf8'),reportContent);assert(reportContent.includes('| Retrieved |'));assert.equal(store.listTasks().length,1);assert.equal(searches(),8);
+ assert.equal(readFileSync(join(workspace,'report.md'),'utf8'),reportContent);assert(reportContent.includes('| Retrieved |'));assert.equal(store.listTasks().length,1);assert.equal(searches(),14);
  const events=await db.listEvents(sessionId);assert(events.some((e:any)=>e.kind==='intent-routed'&&e.route.primarySkill?.name==='researcher'&&realpathSync(e.route.primarySkill.sourcePath).startsWith(realpathSync(retainedRoot)+'/')));assert(events.some((e:any)=>e.kind==='tool-result'&&e.tool==='file.read'&&e.result.ok));assert(events.some((e:any)=>e.kind==='tool-result'&&e.tool==='skill.read'&&e.result.ok&&e.result.metadata?.mode==='reference'));
  console.log('Three workers, synthesis, app restart and verified save passed.');
  phase='recovery';const recovered=await submit('Find recent battery research.');await expect.poll(()=>recoveryIndex,{timeout:60000}).toBe(4);await idle(recovered.workId);
@@ -248,9 +254,11 @@ try{
  const validations=allEvents.filter((e:any)=>e.kind==='step-completion-validation');
  assert(validations.filter((e:any)=>e.repair).length>=3);
  assert(validations.some((e:any)=>e.feedback?.includes('unobserved-source')));
+ assert.equal(repairSearches,2);
  const drafts=store.listResults(task.id).filter((r:any)=>r.disposition==='diagnostic');assert(drafts.length>0);
- assert((await resultService.readText({taskId:task.id,resultId:drafts[0].id,sessionId})).content.includes('Draft findings without the required source table.'));
+ assert((await resultService.readText({taskId:task.id,resultId:drafts[0].id,sessionId})).content.includes('Draft findings without observed citations.'));
  const toolResults=allEvents.filter((e:any)=>e.kind==='tool-result');
+ assert(toolResults.some((e:any)=>e.tool==='web.extract'&&e.result.metadata?.reason==='url-resolution-failed'));
  assert.equal(toolResults.length,calls.reduce((n,x)=>n+x.tools.length,0));
  const sourceOverlay=[...new Set([...execFileSync('git',['-C',sourceRoot,'diff','--name-only','--','src','apps/desktop','scripts','package.json'],{encoding:'utf8'}).trim().split('\n').filter(Boolean),'package.json','src/prompt/history-content.ts','src/prompt/task-result-context.ts','src/prompt/task-result-context.test.ts','src/eval/fixtures/research-workflow-harness.ts','src/eval/fixtures/research-workflow-release.ts','src/runtime/research-surfaces.acceptance.test.ts','scripts/validate-research-reliability.ts','apps/desktop/tests/research-packaged.mts','apps/desktop/src/renderer/components/chat-tasks.tsx','apps/desktop/src/shared/i18n/chat-tasks.ts'])].sort().map(path=>({path,sha256:createHash('sha256').update(readFileSync(join(sourceRoot,path))).digest('hex')}));
  const measurements={
@@ -260,7 +268,7 @@ try{
   fixtures:{model:'scripted loopback HTTP',web:'in-process registered synthetic provider in packaged supervisor',liveModelCalls:0,transport:'actual signed app + preload/Main + owned bridge + private control'},
   workflow:{longCallMs,siblingCompletedDuringLongCall,workers:workers.length,acceptedResults:store.listResults(task.id).filter((r:any)=>r.disposition==='accepted').length,distinctChildSessions:workerSessions.size,tasks:store.listTasks().length,searches:searches(),providerCalls:calls.filter(c=>['research','save'].includes(c.phase)).length,appRestartNoReplay:true,fileBytes:Buffer.byteLength(reportContent),fileSha256:createHash('sha256').update(reportContent).digest('hex'),readbackVerified:true,historicalTaskStatus:store.getTask(task.id).status},
   allScenarios:{providerCalls:requests,actualToolResults:toolResults.length,failedToolResults:toolResults.filter((e:any)=>!e.result.ok).length},
-  scenarios:{longProviderLeaseRenewal:true,attentionReceiptAcrossRestart:true,emptySearchRecovery:true,disclosedBlockedSource:true,markdownSourceUrls:true,largeReportContext:true,stepScopedRequirements:true,evidenceCorrection:true,exhaustedRepairDraftPreserved:true,redundantResourceMode:true,researchThroughFallback:true,fallbackComposer:true,fallbackNotice:true,fallbackRestart:true,preferredModelPreserved:true,research:true,automaticReportDelivery:true,alternativeSourceRecovery:true,desktopTranscriptExactlyOnce:true,chatOwnedTasksUi:true,oneSidebarEntry:true,handoffRemainsRunning:true,gatewayRestartNoReplay:true,failedWorkerDraftPreserved:true,targetedRetryAfterGatewayRestart:true,saveOnlyAfterRestart:true,skillRecovery:true,missingSearch:true,falseSaveBlocked:true},
+  scenarios:{extractionProviderFailureRecovery:true,dnsFailureRecovery:true,searchProviderFailureRecovery:true,largeFileRangeReadback:true,longProviderLeaseRenewal:true,attentionReceiptAcrossRestart:true,emptySearchRecovery:true,disclosedBlockedSource:true,markdownSourceUrls:true,largeReportContext:true,stepScopedRequirements:true,evidenceCorrection:true,exhaustedRepairDraftPreserved:true,redundantResourceMode:true,researchThroughFallback:true,fallbackComposer:true,fallbackNotice:true,fallbackRestart:true,preferredModelPreserved:true,research:true,automaticReportDelivery:true,alternativeSourceRecovery:true,desktopTranscriptExactlyOnce:true,chatOwnedTasksUi:true,oneSidebarEntry:true,handoffRemainsRunning:true,gatewayRestartNoReplay:true,failedWorkerDraftPreserved:true,targetedRetryAfterGatewayRestart:true,saveOnlyAfterRestart:true,skillRecovery:true,missingSearch:true,falseSaveBlocked:true},
   liveAssessment:'not exercised; synthetic responses do not assess live research quality'
  };
  mkdirSync(dirname(output),{recursive:true});writeFileSync(output,JSON.stringify(measurements,null,2)+'\n');

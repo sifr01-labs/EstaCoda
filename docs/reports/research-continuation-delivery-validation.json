@@ -1,0 +1,573 @@
+{
+  "version": 1,
+  "status": "validated",
+  "sourceBaseCommit": "01b05098d8b284aaba4b72d8060949b8f3faf9a1",
+  "scope": "Preserve correction context and source provenance through research, synthesis and exact verified file delivery.",
+  "sourceFiles": [
+    {
+      "path": "apps/desktop/src/renderer/components/chat-tasks.tsx",
+      "sha256": "7435f84d8181ff2a362b176081445913858d8ee9f14aec78999851f014253da5"
+    },
+    {
+      "path": "apps/desktop/src/shared/i18n/chat-tasks.ts",
+      "sha256": "783756f929006ccacfc13285841b6bf75f849aef8c22234c79f3d3ff29ba0254"
+    },
+    {
+      "path": "apps/desktop/tests/research-packaged.mts",
+      "sha256": "78099955d093cbcb7def14bd401b63cc1484b2cd1ce0ad667b557bc727b5ad4c"
+    },
+    {
+      "path": "scripts/validate-research-reliability.ts",
+      "sha256": "f3d6588b2aec58436ea33ef50ae52238f2bc07116f30a7ca01f9fba7fcd2fae1"
+    },
+    {
+      "path": "src/browser/url-safety.test.ts",
+      "sha256": "c0778f7aaced74370f6fb9422b304bb71e4037fee15d09d8c62e682e51acbda2"
+    },
+    {
+      "path": "src/browser/url-safety.ts",
+      "sha256": "67f97971be4272295eb5edbac216e8786395e7317c1e704047d726829293172a"
+    },
+    {
+      "path": "src/contracts/prompt.ts",
+      "sha256": "ab267f41692fe075163913f63e17ba7f34822c845223c075086f45ea838046d1"
+    },
+    {
+      "path": "src/contracts/tool-context.ts",
+      "sha256": "0a6a08b0fd0db52fd1ddaf69787652fa4c89994d3c790d1e8d79deaef8be650e"
+    },
+    {
+      "path": "src/control-service/action-projections.ts",
+      "sha256": "fab7293bd9c623b91ccc0ef66259753afacdf0a53f3e4dd65ed75ba1270b60ab"
+    },
+    {
+      "path": "src/delegation/durable-delegation-service.ts",
+      "sha256": "c45296a16d99566b071ad78c3003782a251d4a6016d4a03d40cbcbe811b3972e"
+    },
+    {
+      "path": "src/prompt/prompt-assembly.test.ts",
+      "sha256": "7418631950c624afa9eaa64937c55dfd0e8baa7f9d47bfb77fb2716c75d4f6eb"
+    },
+    {
+      "path": "src/prompt/prompt-assembly.ts",
+      "sha256": "67011db43642210b8e9b7dbca01afddbc2bfac6078a0890286efe0cf57b9be82"
+    },
+    {
+      "path": "src/runtime/agent-loop-builder.ts",
+      "sha256": "854c47bf22cafaee679cc9cf5c2d5dc62eb17c5eaf57775385c9dce28bc3a7ba"
+    },
+    {
+      "path": "src/runtime/agent-loop.test.ts",
+      "sha256": "1a5276a6cc86ecc0d85e2d2d8d5fb312715a6132848bcdb04e73af2794ae7385"
+    },
+    {
+      "path": "src/runtime/agent-loop.ts",
+      "sha256": "7000729dc3d934502045e233cb0dcce951c5f2744cff298bf4562b7ac0ade561"
+    },
+    {
+      "path": "src/runtime/create-runtime.test.ts",
+      "sha256": "36f3cf62e14bff83c01b14c8c121914e46f659e20b0f2b3cf3a2b70e960b5f23"
+    },
+    {
+      "path": "src/runtime/execution-supervision-controller.ts",
+      "sha256": "71a79825e7ceadc9613556bebcbb39607e2f3e9a87627097a21a78170abad1ff"
+    },
+    {
+      "path": "src/runtime/file-output-evidence.test.ts",
+      "sha256": "e8e8f7359fff36b0b19346a015869079f75fc8ca9d3d080d7e601dec7cfeb9fa"
+    },
+    {
+      "path": "src/runtime/file-output-evidence.ts",
+      "sha256": "ecca41fe69f9353e26c16c27b1d198ee182b18ab84ba8d77107c37928f68c4d7"
+    },
+    {
+      "path": "src/runtime/provider-turn-loop.test.ts",
+      "sha256": "f2bf294a41c136b67dd9ba6afa5d7da02fd43626e1917b19c7c7e275555e6791"
+    },
+    {
+      "path": "src/runtime/provider-turn-loop.ts",
+      "sha256": "176c96439e9fec4a1c99957ecc2101b2ee074b29d4058e251b677311d74d6cd1"
+    },
+    {
+      "path": "src/runtime/research-request.acceptance.test.ts",
+      "sha256": "72267c8125667cbaceab453efb820518e4832b6c3713688aeba7ef3b4545c188"
+    },
+    {
+      "path": "src/runtime/tool-loop-progress-guard.test.ts",
+      "sha256": "8e67fdf7dac73daa0aeba67dd44c91b86f2e4a2656b2457e73f01aaa04fa1d5c"
+    },
+    {
+      "path": "src/runtime/tool-loop-progress-guard.ts",
+      "sha256": "1fbaded3c9c63e3bc1a192dd946e4d18cecf645dd25a7fb6887e4d82c7ba9168"
+    },
+    {
+      "path": "src/tasks/agent-step-executor.test.ts",
+      "sha256": "2791df798c9c177a90f7baccb21e4f8ae4e8c37a1c0fbca2c2f4f31a969cc29e"
+    },
+    {
+      "path": "src/tasks/agent-step-executor.ts",
+      "sha256": "0bbb505225cd9787c2de934c40b5f736dd9581cfd8eba07af6d270a729a626eb"
+    },
+    {
+      "path": "src/tasks/research-result-evidence.test.ts",
+      "sha256": "eea3bef8c77a9be0423ddf854108b80f8b0923a9800c63dbfc89025f8e76e2cb"
+    },
+    {
+      "path": "src/tasks/research-result-evidence.ts",
+      "sha256": "7e9ab55fd9335ee15aec2e211779309a03323349672249e2baf56ce6556de177"
+    },
+    {
+      "path": "src/tasks/task-operator-service.test.ts",
+      "sha256": "c63b13afd7314368eba5671ae0ff845674f698aa6414a85875dd5b95d279f0af"
+    },
+    {
+      "path": "src/tasks/task-operator-service.ts",
+      "sha256": "4500f0d1b323d3c069c054c86c82f3ff4cf0a31d7cbfc3bcde0aedd4f5ef9881"
+    },
+    {
+      "path": "src/tasks/task-scheduler.test.ts",
+      "sha256": "807c5864df3265dd880c246d7807624f72c208f80b4390a4ded7af04645641fa"
+    },
+    {
+      "path": "src/tasks/task-scheduler.ts",
+      "sha256": "03d5423fce0a1142ba1475e5eb94cdca72ec63f1b44b994c9484fc052a9b7dd5"
+    },
+    {
+      "path": "src/tasks/task-session-completion.ts",
+      "sha256": "5a03a97c8776b0b208569e335353086263c795df979212a70e34b9d747ce53b0"
+    },
+    {
+      "path": "src/tasks/task-tree-accounting.ts",
+      "sha256": "aa6dbe6a494d092a3e49d210d1cec6a2cc16d0506798388a0bfa96f77754d98f"
+    },
+    {
+      "path": "src/tools/web-tools.test.ts",
+      "sha256": "db23177c43c35b3ea85220fca0f9a8af017ed2e76d9d056599a9ce105d5c11e8"
+    },
+    {
+      "path": "src/tools/web-tools.ts",
+      "sha256": "6abd7b0c4b8049011ff6b7c4e6522ae560e9d3e15d4cc23e698ce980428fda41"
+    },
+    {
+      "path": "src/tools/workspace-tools.test.ts",
+      "sha256": "df076b206cb713971ccfaa465a18feed66ef8710961436034fe65ec052773d4b"
+    },
+    {
+      "path": "src/tools/workspace-tools.ts",
+      "sha256": "0076fa96a558c480b7c459dbcedcc32466eb8e003ef56e51f9aa063643e2e4cf"
+    }
+  ],
+  "checks": {
+    "deterministicGates": {
+      "passed": true,
+      "tests": {
+        "passed": 1931,
+        "failed": 0,
+        "total": 1931
+      },
+      "suites": 47
+    },
+    "desktopTests": {
+      "files": 48,
+      "passed": 180
+    },
+    "fullSuite": {
+      "passed": 12110,
+      "failed": 0,
+      "files": 750,
+      "concurrency": 4,
+      "note": "An earlier concurrent run hit one CLI startup timeout; its 41-test suite and the subsequent complete suite passed."
+    },
+    "standardValidation": {
+      "lockedOfflineInstall": true,
+      "typecheck": true,
+      "build": true,
+      "smoke": 13,
+      "runtimeImportAudit": true,
+      "esmAudit": true,
+      "distSmoke": 13,
+      "desktopTypecheck": true,
+      "diffCheck": true,
+      "environment": "Clean copy of tracked files plus this patch; unrelated duplicate untracked declarations in the working checkout were excluded."
+    },
+    "dnsAndRecoveryTargetedTests": {
+      "files": 3,
+      "passed": 184
+    }
+  },
+  "preliminaryLiveFindings": [
+    {
+      "issue": "Model retyped an accepted report, changing its bytes.",
+      "fix": "Session-authorized exact copying through existing file.write sourceResult."
+    },
+    {
+      "issue": "Empty optional content alongside sourceResult was rejected and classified as an uncertain mutation.",
+      "fix": "Normalize empty/null placeholders; mark only proven pre-write validation failures as undispatched."
+    },
+    {
+      "issue": "A literal 24-citation cap rejected observed sources; shared notes could duplicate sources.",
+      "fix": "Retain size bounds and provenance checks, remove fixed citation count, merge shared source notes."
+    },
+    {
+      "issue": "Balanced parentheses in publication URLs were stripped and valid citations appeared unobserved.",
+      "fix": "Preserve balanced URL parentheses while removing Markdown closing delimiters."
+    },
+    {
+      "issue": "All five preliminary runs completed three workers and synthesis but failed report delivery; large full-file ranges had no verification checksum.",
+      "fix": "Hash all materialized bytes for a full file range, independently of bounded model preview."
+    },
+    {
+      "issue": "Three subsequent live runs reached review because failed DDGS reads remained fatal despite other successful evidence.",
+      "fix": "Permit same-provider observed evidence to recover provider read failures; add positive, no-evidence, unavailable-capability and denied-read tests."
+    },
+    {
+      "issue": "A held-out run hit ENOTFOUND for a cited source; URL safety collapsed DNS failure into unsafe-url, so alternative observed evidence could not recover it.",
+      "fix": "Distinguish unresolved from unsafe while keeping both unfetchable. Website-policy denial takes precedence over unresolved status. Optional unresolved sources can use other evidence; unobserved citations still fail."
+    },
+    {
+      "issue": "The adjacent page-fetch error paths also classified ordinary transport failures as fatal to otherwise grounded research.",
+      "fix": "Allow optional fetch/provider read failures to use other evidence; explicit source requirements, denied reads and unobserved citations remain blocking. Covered by targeted source tests and a final packaged extraction-failure scenario."
+    }
+  ],
+  "governanceReview": [
+    "Result copying reuses TaskResultService session/profile and content-integrity checks and requires task.result.read within current child authority.",
+    "Normal workspace trust, approval, overwrite, shrink and materialization rules still apply.",
+    "Only executor-owned no-effect file.write validation failures may be recovered by a later authorized same-path write.",
+    "Denials, uncertain effects, partial file reads, unmatched hashes and unobserved citations remain blocking.",
+    "Retry, scheduler and UI share cumulative limits; resume never resets them.",
+    "DNS failure still prevents network dispatch. Invalid/private/metadata destinations and explicit website-policy denials retain their original refusal behavior; no safety failure is recategorized as a successful observation."
+  ],
+  "limitations": [
+    "Provenance acceptance establishes observed citations and worker coverage, not scientific correctness.",
+    "Live harnesses use isolated CLI-originated sessions with actual configured model/search services; packaged tests separately exercise app/gateway and once-only conversation delivery with synthetic providers.",
+    "Installed user app and gateway have not been updated by this change."
+  ],
+  "live": {
+    "search": "DDGS",
+    "initialBatchRuntimeSha256": "a44ae16dbe1e554b2735674464374ee00dda7d3d3626d116b41e0a440cbdb978",
+    "initialBatch": [
+      {
+        "index": 1,
+        "topic": "current battery recycling methods",
+        "startedAt": "2026-10-05T17:25:34.091Z",
+        "status": "waiting_for_input",
+        "workers": [
+          "waiting_for_input",
+          "completed",
+          "completed"
+        ],
+        "providerCalls": 53,
+        "reportedTokens": 541829,
+        "failures": [
+          {
+            "class": "tool-error",
+            "message": "Agent Step execution failed (tool-error)."
+          }
+        ],
+        "deliveries": 0,
+        "verifiedReport": false,
+        "finishedAt": "2026-10-05T17:31:09.046Z"
+      },
+      {
+        "index": 1,
+        "topic": "current battery recycling methods",
+        "startedAt": "2026-10-05T17:25:34.091Z",
+        "status": "waiting_for_input",
+        "workers": [
+          "waiting_for_input",
+          "completed",
+          "completed"
+        ],
+        "providerCalls": 48,
+        "reportedTokens": 409369,
+        "failures": [
+          {
+            "class": "tool-error",
+            "message": "Agent Step execution failed (tool-error)."
+          }
+        ],
+        "deliveries": 0,
+        "verifiedReport": false,
+        "finishedAt": "2026-10-05T17:29:13.174Z"
+      },
+      {
+        "index": 1,
+        "topic": "current battery recycling methods",
+        "startedAt": "2026-10-05T17:25:34.086Z",
+        "status": "completed",
+        "workers": [
+          "completed",
+          "completed",
+          "completed"
+        ],
+        "providerCalls": 59,
+        "reportedTokens": 543150,
+        "failures": [],
+        "deliveries": 0,
+        "verifiedReport": true,
+        "reportBytes": 39715,
+        "reportHash": "e0b4ad4a05d2276da69a64f01fbb0a3a0a67d984194f795e6239841dadeea88d",
+        "finishedAt": "2026-10-05T17:32:26.269Z"
+      },
+      {
+        "index": 1,
+        "topic": "current methods for recycling photovoltaic solar panels",
+        "startedAt": "2026-10-05T17:25:34.088Z",
+        "status": "completed",
+        "workers": [
+          "completed",
+          "completed",
+          "completed"
+        ],
+        "providerCalls": 66,
+        "reportedTokens": 620792,
+        "failures": [],
+        "deliveries": 0,
+        "verifiedReport": true,
+        "reportBytes": 40574,
+        "reportHash": "ba4e4e3488ab344b8267a757d5d758620440a2a20bd18cf0d080bcb386a8072d",
+        "finishedAt": "2026-10-05T17:33:02.551Z"
+      },
+      {
+        "index": 1,
+        "topic": "current grid-scale long-duration energy storage methods",
+        "startedAt": "2026-10-05T17:25:34.035Z",
+        "status": "waiting_for_input",
+        "workers": [
+          "waiting_for_input",
+          "completed",
+          "completed"
+        ],
+        "providerCalls": 50,
+        "reportedTokens": 491099,
+        "failures": [
+          {
+            "class": "tool-error",
+            "message": "Agent Step execution failed (tool-error)."
+          }
+        ],
+        "deliveries": 0,
+        "verifiedReport": false,
+        "finishedAt": "2026-10-05T17:31:59.823Z"
+      }
+    ],
+    "targetedRecoveryOnFinalSource": [
+      {
+        "index": 1,
+        "topic": "current battery recycling methods",
+        "startedAt": "2026-10-05T17:32:42.899Z",
+        "status": "completed",
+        "workers": [
+          "completed",
+          "completed",
+          "completed"
+        ],
+        "providerCalls": 85,
+        "reportedTokens": 872264,
+        "failures": [
+          {
+            "class": "tool-error",
+            "message": "Agent Step execution failed (tool-error)."
+          }
+        ],
+        "deliveries": 0,
+        "verifiedReport": true,
+        "reportBytes": 29254,
+        "reportHash": "115c6ccaaf969c1ae7b338631fe8ca43f7a791fc7b8489e174e3d4b4bb6d836a",
+        "finishedAt": "2026-10-05T17:37:55.024Z"
+      },
+      {
+        "index": 1,
+        "topic": "current battery recycling methods",
+        "startedAt": "2026-10-05T17:32:47.205Z",
+        "status": "completed",
+        "workers": [
+          "completed",
+          "completed",
+          "completed"
+        ],
+        "providerCalls": 71,
+        "reportedTokens": 625606,
+        "failures": [
+          {
+            "class": "tool-error",
+            "message": "Agent Step execution failed (tool-error)."
+          }
+        ],
+        "deliveries": 0,
+        "verifiedReport": true,
+        "reportBytes": 42239,
+        "reportHash": "7979f254f422a8d11082505ee33c474803e38afb0a07d48bc0a02a55253ba116",
+        "finishedAt": "2026-10-05T17:36:59.478Z"
+      },
+      {
+        "index": 1,
+        "topic": "current grid-scale long-duration energy storage methods",
+        "startedAt": "2026-10-05T17:33:25.382Z",
+        "status": "partial",
+        "workers": [
+          "failed",
+          "completed",
+          "completed"
+        ],
+        "providerCalls": 84,
+        "reportedTokens": 841194,
+        "failures": [
+          {
+            "class": "tool-error",
+            "message": "Agent Step execution failed (tool-error)."
+          },
+          {
+            "class": "execution-limit-exceeded",
+            "message": "Attempt exceeded its step-wall-clock-limit-exhausted."
+          }
+        ],
+        "deliveries": 0,
+        "verifiedReport": true,
+        "reportBytes": 44420,
+        "reportHash": "6e0cd55a9018ab249b395f5b73ab8d7fdfb225b7ac25f2fb01ddd5c889492d85",
+        "finishedAt": "2026-10-05T17:37:49.440Z"
+      }
+    ],
+    "note": "Five live workflows reached completed with verified files, including two targeted recoveries. One deadline-limited retry delivered an explicitly partial report. A held-out DNS failure exposed a misclassification subsequently fixed. Failed and partial runs are retained here, not counted as direct success. Recovery usage totals include earlier attempts.",
+    "configuredPrimaryRoute": "kimi/kimi-k3",
+    "configuredFallbackRoute": "codex/gpt-5.5",
+    "heldOutBeforeDnsClassificationFix": {
+      "index": 1,
+      "topic": "current grid-scale long-duration energy storage methods",
+      "startedAt": "2026-10-05T17:37:50.787Z",
+      "status": "waiting_for_input",
+      "workers": [
+        "completed",
+        "waiting_for_input",
+        "completed"
+      ],
+      "providerCalls": 59,
+      "reportedTokens": 629061,
+      "failures": [
+        {
+          "class": "tool-error",
+          "message": "Agent Step execution failed (tool-error)."
+        }
+      ],
+      "deliveries": 0,
+      "verifiedReport": false,
+      "finishedAt": "2026-10-05T17:44:36.551Z"
+    },
+    "validationScope": "Live runs exercised real model/search routes during development. The final signed package is independently tested through the actual Desktop/gateway transport with synthetic model and source responses. Recorded live failures are retained rather than counted as successes.",
+    "freshOriginalRequest": {
+      "index": 1,
+      "topic": "current battery recycling methods",
+      "startedAt": "2026-10-05T17:50:09.422Z",
+      "status": "completed",
+      "workers": [
+        "completed",
+        "completed",
+        "completed"
+      ],
+      "providerCalls": 54,
+      "reportedTokens": 469243,
+      "failures": [],
+      "deliveries": 0,
+      "verifiedReport": true,
+      "reportBytes": 39476,
+      "reportHash": "f8f8f69796eaf639fe0929cfb83a7aad62d991e299c18918a1e4753460a19673",
+      "finishedAt": "2026-10-05T17:56:47.616Z",
+      "scope": "Fresh original request after DNS recovery fix; final subsequent change additionally accepts optional fetch/provider extraction failures. The exact final package exercises those added cases separately."
+    },
+    "initialBatchAndRecoveryUsageEntriesByRoute": {
+      "codex/gpt-5.5": 318,
+      "kimi/kimi-k3": 66
+    }
+  },
+  "packaged": {
+    "passed": true,
+    "measuredAt": "2026-10-05T18:02:06.799Z",
+    "runtime": {
+      "sha256": "ddd22077dc802bce7971c275acdd0ce300c54d6869e67d9f4686de591e4cf11d",
+      "nodeVersion": "v24.14.1",
+      "coreVersion": "0.1.0",
+      "entrySha256": "8b7b5e8816ffe62d9baa2133dd5cc54a1a8ea36997b0bda6fc631039c700f6ec",
+      "signature": "ad-hoc verified",
+      "ownedBridgeVerified": true,
+      "inventoryVerified": true,
+      "matchesCurrentDist": true,
+      "supervisorRetainedPathWithSpaces": true
+    },
+    "fixtures": {
+      "model": "scripted loopback HTTP",
+      "web": "in-process registered synthetic provider in packaged supervisor",
+      "liveModelCalls": 0,
+      "transport": "actual signed app + preload/Main + owned bridge + private control"
+    },
+    "workflow": {
+      "longCallMs": 65003,
+      "siblingCompletedDuringLongCall": true,
+      "workers": 3,
+      "acceptedResults": 5,
+      "distinctChildSessions": 6,
+      "tasks": 1,
+      "searches": 14,
+      "providerCalls": 29,
+      "appRestartNoReplay": true,
+      "fileBytes": 52693,
+      "fileSha256": "322e3f0350e1930fa279c5393b3cf89e85dfd391212e375db776db6223ed0651",
+      "readbackVerified": true,
+      "historicalTaskStatus": "completed"
+    },
+    "allScenarios": {
+      "providerCalls": 51,
+      "actualToolResults": 44,
+      "failedToolResults": 16
+    },
+    "scenarios": {
+      "extractionProviderFailureRecovery": true,
+      "dnsFailureRecovery": true,
+      "searchProviderFailureRecovery": true,
+      "largeFileRangeReadback": true,
+      "longProviderLeaseRenewal": true,
+      "attentionReceiptAcrossRestart": true,
+      "emptySearchRecovery": true,
+      "disclosedBlockedSource": true,
+      "markdownSourceUrls": true,
+      "largeReportContext": true,
+      "stepScopedRequirements": true,
+      "evidenceCorrection": true,
+      "exhaustedRepairDraftPreserved": true,
+      "redundantResourceMode": true,
+      "researchThroughFallback": true,
+      "fallbackComposer": true,
+      "fallbackNotice": true,
+      "fallbackRestart": true,
+      "preferredModelPreserved": true,
+      "research": true,
+      "automaticReportDelivery": true,
+      "alternativeSourceRecovery": true,
+      "desktopTranscriptExactlyOnce": true,
+      "chatOwnedTasksUi": true,
+      "oneSidebarEntry": true,
+      "handoffRemainsRunning": true,
+      "gatewayRestartNoReplay": true,
+      "failedWorkerDraftPreserved": true,
+      "targetedRetryAfterGatewayRestart": true,
+      "saveOnlyAfterRestart": true,
+      "skillRecovery": true,
+      "missingSearch": true,
+      "falseSaveBlocked": true
+    }
+  },
+  "review": {
+    "completed": true,
+    "focus": [
+      "preserved policy and session boundaries",
+      "failed-read recovery requires grounded remaining evidence",
+      "exact accepted-result byte transfer and materialized read-back",
+      "honest stopped and partial outcomes",
+      "bounded correction history and cumulative retry eligibility"
+    ],
+    "unresolvedImplementationFindings": [],
+    "caveat": "No claim that arbitrary research will always complete or that provenance validation establishes factual accuracy."
+  },
+  "measuredAt": "2026-10-05T18:03:29.766252+00:00",
+  "temporaryLiveCredentialCopiesRemoved": true
+}

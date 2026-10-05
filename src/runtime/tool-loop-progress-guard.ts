@@ -64,8 +64,14 @@ export class ToolLoopProgressGuard {
     this.#seed(input.existingExecutions ?? []);
   }
 
-  observe(executions: readonly ToolExecutionRecord[]): ToolLoopProgressAssessment {
+  observe(executions: readonly ToolExecutionRecord[], unchangedCompletionRepair = false): ToolLoopProgressAssessment {
     const eligible = executions.filter((execution) => !INELIGIBLE_TOOLS.has(execution.tool.name));
+    // A submitted correction is judged by the completion validator, whose own
+    // repair bound applies. Do not stop a valid final answer on an empty tool batch.
+    if (eligible.length === 0 && unchangedCompletionRepair) return assessment({
+      active: this.#active, progressKinds: [], noProgressIterations: this.#noProgressIterations,
+      shouldNudge: false, shouldStop: false
+    });
     if (eligible.length === 0 && !this.#active) {
       return assessment({
         active: false,
@@ -96,6 +102,7 @@ export class ToolLoopProgressGuard {
       if (execution.tool.name === "capability.request" && Array.isArray(execution.result?.metadata?.requests) &&
         !execution.result.metadata.requests.some((request: unknown) => request !== null && typeof request === "object" && "status" in request && request.status === "queued")) continue;
 
+      if (unchangedCompletionRepair && (execution.tool.name === "web.search" || execution.tool.name === "web.extract")) continue;
       if (this.#research) {
         const sources = researchEvidence(execution);
         const newEvidence = sources.some((source) => !this.#seenResearchSources.has(source));

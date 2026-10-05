@@ -86,3 +86,33 @@ export function listTaskExecutionScopes(
 export function taskDelegationDepth(store: TaskStore, task: Task, step: TaskStep): number {
   return listTaskExecutionScopes(store, task, step).length;
 }
+
+/** The same cumulative admission check is used by scheduling and operator actions. */
+export function taskExecutionLimitBlockReason(store: TaskStore, task: Task, step: TaskStep, now: number, ignoredAttemptId?: string): string | undefined {
+  for (const [index, scope] of listTaskExecutionScopes(store, task, step).entries()) {
+    const prefix = index === 0 ? "" : "ancestor-";
+    const taskAttempts = listTaskTreeAttempts(store, scope.task.id).filter(attempt => attempt.id !== ignoredAttemptId);
+    const stepAttempts = listStepTreeAttempts(store, scope.task.id, scope.step.id).filter(attempt => attempt.id !== ignoredAttemptId);
+    for (const [kind, attempts, limits, startedAt] of [
+      ["task", taskAttempts, scope.task.executionLimits, scope.task.startedAt],
+      ["step", stepAttempts, scope.step.executionLimits, stepAttempts.map(attempt => attempt.startedAt).filter((value): value is string => value !== undefined).sort()[0]]
+    ] as const) {
+      const calls = attempts.reduce((total, attempt) => total + Math.max(1, attempt.usage.providerCalls), 0);
+      const tokens = attempts.reduce((total, attempt) => total + attempt.usage.totalTokens, 0);
+      if (calls >= limits.maxProviderCalls) return `${prefix}${kind}-provider-call-limit-exhausted`;
+      if (tokens >= limits.maxTotalTokens) return `${prefix}${kind}-token-limit-exhausted`;
+      if (startedAt !== undefined && now - Date.parse(startedAt) >= limits.maxWallClockMs) return `${prefix}${kind}-wall-clock-limit-exhausted`;
+    }
+  }
+  return undefined;
+}
+
+export function taskRetryBlockReason(store: TaskStore, task: Task, step: TaskStep, now: number): string | undefined {
+  if (store.listAttempts(task.id, step.id).length >= step.retryPolicy.maxAttempts) return "step-attempt-limit-exhausted";
+  return taskExecutionLimitBlockReason(store, task, step, now);
+}
+
+export function executionLimitRecoveryMessage(reason: string): string {
+  const limit = reason.includes("provider-call") ? "provider call" : reason.includes("token") ? "token" : reason.includes("attempt") ? "attempt" : "time";
+  return `The ${reason.includes("task-") ? "task" : "step"} ${limit} limit is exhausted. Resume cannot reset this limit. Retained results remain available; start a new task with the relevant results and an appropriate execution limit.`;
+}

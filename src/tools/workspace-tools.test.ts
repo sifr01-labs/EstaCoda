@@ -1,7 +1,10 @@
+import { isUndispatchedResult } from "./undispatched-result.js";
+import { createHash } from "node:crypto";
+import type { TaskResult } from "../contracts/task.js";
 import { access, mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
-import { afterEach, describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it, vi } from "vitest";
 import { FileStateTracker } from "../delegation/file-state-tracker.js";
 import { createWorkspaceTools, type WorkspaceFsAdapter } from "./workspace-tools.js";
 
@@ -20,6 +23,45 @@ afterEach(async () => {
 });
 
 describe("workspace file change preview metadata", () => {
+  it("copies authorized accepted results exactly and verifies a large file without echoing all bytes", async () => {
+    const root = await makeTempDir();
+    const content = "العربية 😀 Evidence\n".repeat(4000);
+    const readText = vi.fn(async () => ({ result: { disposition: "accepted" } as TaskResult, content }));
+    let readAllowed = true;
+    const tools = createWorkspaceTools({ workspaceRoot: root, sessionId: () => "current-session", taskResultService: { readText }, canReadTaskResults: () => readAllowed });
+    const write = tools.find(tool => tool.name === "file.write")!;
+    const read = tools.find(tool => tool.name === "file.read")!;
+    const input = { path: "report.md", sourceResult: { taskId: "task", resultId: "result" } };
+    expect((await write.run({ ...input, content: "" })).ok).toBe(true);
+    expect(readText).toHaveBeenCalledWith({ taskId: "task", resultId: "result", sessionId: "current-session" });
+    expect(input).not.toHaveProperty("content");
+    readAllowed = false;
+    expect((await write.run(input)).ok).toBe(false);
+    expect(readText).toHaveBeenCalledTimes(1);
+    readAllowed = true;
+    expect(await readFile(join(root, "report.md"), "utf8")).toBe(content);
+    const result = await read.run({ path: "report.md" });
+    expect(result.metadata).toMatchObject({ truncated: true, completeFileRead: true, materialized: true,
+      contentSha256: createHash("sha256").update(content).digest("hex") });
+    expect((await read.run({ path: "report.md", lineStart: 2, lineEnd: 3 })).metadata?.completeFileRead).toBeUndefined();
+    expect((await read.run({ path: "report.md", lineStart: 1, lineEnd: 100000 })).metadata).toMatchObject({ truncated: true, completeFileRead: true, contentSha256: result.metadata!.contentSha256 });
+    expect((await read.run({ path: "report.md", lineStart: null, lineEnd: null })).metadata?.completeFileRead).toBe(true);
+    await writeFile(join(root, "small.md"), "one\ntwo\n");
+    expect((await read.run({ path: "small.md", lineStart: 1, lineEnd: 10000 })).metadata?.completeFileRead).toBe(true);
+    expect((await read.run({ path: "small.md", lineStart: 2, lineEnd: 2 })).metadata?.contentSha256).toBeUndefined();
+    const ambiguous = await write.run({ ...input, content: "ambiguous" });
+    expect(ambiguous.ok).toBe(false);
+    expect(isUndispatchedResult(ambiguous)).toBe(true);
+    expect((await write.run({ path: "normal.md", content: "ordinary content", sourceResult: null })).ok).toBe(true);
+    readText.mockResolvedValue({ result: { disposition: "diagnostic" } as TaskResult, content: "Not accepted" });
+    expect((await write.run(input)).ok).toBe(false);
+    readText.mockRejectedValue(new Error("private storage path or unauthorized result"));
+    const denied = await write.run(input);
+    expect(denied.ok).toBe(false);
+    expect(denied.content).not.toContain("private storage path");
+    expect(await readFile(join(root, "report.md"), "utf8")).toBe(content);
+  });
+
   it("attaches bounded preview metadata for file.write", async () => {
     const root = await makeTempDir();
     const tools = createWorkspaceTools({ workspaceRoot: root });

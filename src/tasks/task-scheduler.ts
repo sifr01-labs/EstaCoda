@@ -30,6 +30,7 @@ import { taskListCursor, type ListTasksOptions, type TaskStore } from "./task-st
 import type { TaskApprovalService } from "./task-approval-service.js";
 import { cancelTaskInStore } from "./task-operator-service.js";
 import {
+  taskExecutionLimitBlockReason,
   listStepTreeAttempts,
   listTaskExecutionScopes,
   listTaskTreeAttempts
@@ -1850,11 +1851,11 @@ export class TaskScheduler {
 
     // Keep recoverable research inside its existing Task and remaining budget.
     // Settled tasks/steps remain immutable; never resurrect historical terminal work.
-    if (step.executor.role === "worker" && step.executor.requestContract?.requirements.research &&
+    if (["worker", "synthesis"].includes(step.executor.role ?? "") && step.executor.requestContract?.requirements.research &&
         isAutomaticRestartSafe(step) && attempt.attemptNumber < step.retryPolicy.maxAttempts &&
-        ["executor-error", "tool-error", "evidence-contract-unsatisfied", "provider-accounting"].includes(attempt.failure?.class ?? "")) {
+        ["executor-error", "tool-error", "evidence-contract-unsatisfied", "provider-accounting", "execution-stopped"].includes(attempt.failure?.class ?? "")) {
       this.#pauseForOperatorReview(store, task, step, now, "research-recovery-required",
-        "Research needs review. Sources and drafts are preserved; retry the affected Step within its remaining limits.");
+        "Research needs review. Accepted results and drafts are preserved. Open the affected step to inspect the issue and available recovery actions.");
       return false;
     }
 
@@ -2033,43 +2034,7 @@ export class TaskScheduler {
     store: TaskStore = this.#store,
     ignoredAttemptId?: string
   ): string | undefined {
-    const scopes = listTaskExecutionScopes(store, task, step);
-    for (let index = 0; index < scopes.length; index++) {
-      const scope = scopes[index]!;
-      const taskAttempts = listTaskTreeAttempts(store, scope.task.id)
-        .filter((attempt) => attempt.id !== ignoredAttemptId);
-      const stepAttempts = listStepTreeAttempts(store, scope.task.id, scope.step.id)
-        .filter((attempt) => attempt.id !== ignoredAttemptId);
-      const taskUsage = sumUsage(taskAttempts.map(attemptExecutionUsage));
-      const stepUsage = sumUsage(stepAttempts.map(attemptExecutionUsage));
-      const prefix = index === 0 ? "" : "ancestor-";
-      if (taskUsage.providerCalls >= scope.task.executionLimits.maxProviderCalls) {
-        return `${prefix}task-provider-call-limit-exhausted`;
-      }
-      if (taskUsage.totalTokens >= scope.task.executionLimits.maxTotalTokens) {
-        return `${prefix}task-token-limit-exhausted`;
-      }
-      if (stepUsage.providerCalls >= scope.step.executionLimits.maxProviderCalls) {
-        return `${prefix}step-provider-call-limit-exhausted`;
-      }
-      if (stepUsage.totalTokens >= scope.step.executionLimits.maxTotalTokens) {
-        return `${prefix}step-token-limit-exhausted`;
-      }
-      const startedAt = scope.task.startedAt === undefined ? undefined : Date.parse(scope.task.startedAt);
-      if (startedAt !== undefined && this.#now().getTime() - startedAt >= scope.task.executionLimits.maxWallClockMs) {
-        return `${prefix}task-wall-clock-limit-exhausted`;
-      }
-      const stepStartedAt = stepAttempts
-        .filter((attempt) => attempt.startedAt !== undefined)
-        .reduce<number | undefined>((earliest, attempt) => {
-          const started = Date.parse(attempt.startedAt!);
-          return earliest === undefined || started < earliest ? started : earliest;
-        }, undefined);
-      if (stepStartedAt !== undefined && this.#now().getTime() - stepStartedAt >= scope.step.executionLimits.maxWallClockMs) {
-        return `${prefix}step-wall-clock-limit-exhausted`;
-      }
-    }
-    return undefined;
+    return taskExecutionLimitBlockReason(store, task, step, this.#now().getTime(), ignoredAttemptId);
   }
 
   #settlementExecutionLimitReason(

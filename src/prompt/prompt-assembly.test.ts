@@ -1684,7 +1684,7 @@ describe("assembleProviderContinuationPrompt", () => {
     expect(countOccurrences(JSON.stringify(prompt.messages), "selected native result")).toBe(1);
   });
 
-  it("keeps only the newest native tool group active when the runtime ledger is present", () => {
+  it("retains earlier bounded evidence when the runtime ledger has a newer active group", () => {
     const latestPlan = {
       id: "call-new",
       tool: "files.read",
@@ -1736,12 +1736,27 @@ describe("assembleProviderContinuationPrompt", () => {
     const rendered = JSON.stringify(prompt.messages);
 
     expect(prompt.messages.filter((message) => message.role === "tool")).toEqual([
+      expect.objectContaining({ toolCallId: "call-old" }),
       expect.objectContaining({ toolCallId: "call-new" })
     ]);
     expect(rendered).toContain("new native result");
-    expect(rendered).not.toContain("old native raw result");
-    expect(rendered).toContain("Earlier native tool group repacked");
+    expect(rendered).toContain("old native raw result");
     expect(rendered).toContain("call-old");
+  });
+
+  it("pins repair data and source excerpts when ordinary history has been compacted", () => {
+    const prompt = assembleProviderContinuationPrompt(baseContinuationInput({ model: toolModel,
+      sessionHistory: [{ role: "assistant", content: "Compacted history without the original research" }], rawSessionHistory: [],
+      compactionNotice: "Earlier messages compacted", completionFeedback: "unobserved-source: replace invented citation",
+      completionCandidate: "Retained findings with https://example.org/observed", toolExecutions: [toolExecution({
+        content: "Original observation", metadata: { results: [{ url: "https://example.org/observed", snippet: "Observed source text survives compaction" }] }
+      })].map(execution => ({ ...execution, tool: { ...execution.tool, name: "web.search" } }))
+    }));
+    const text = renderMessages(prompt.messages);
+    expect(text).toContain("Retained findings with https://example.org/observed");
+    expect(text).toContain("Observed source text survives compaction");
+    expect(text).toContain("unobserved-source: replace invented citation");
+    expect(prompt.budget.layers.find(layer => layer.name === "completion-repair")?.estimatedTokens).toBeGreaterThan(0);
   });
 
   it("keeps flat continuation behavior for unsupported native history routes", () => {

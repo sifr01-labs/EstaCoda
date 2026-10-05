@@ -1519,6 +1519,7 @@ describe("createRuntime MCP trust gating", () => {
               "content",
               "overwrite",
               "path",
+              "sourceResult",
             ],
             "toolsets": [
               "files",

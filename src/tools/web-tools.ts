@@ -37,7 +37,7 @@ import { isActionableBrowserRole } from "../browser/snapshot-state.js";
 import { deriveBrowserSessionKey } from "../browser/session-key.js";
 import { compactBrowserSnapshot } from "../browser/snapshot-compactor.js";
 import { maybeSummarizeSnapshot, truncateSnapshotText } from "../browser/snapshot-summarizer.js";
-import { isAlwaysBlockedUrl, isSafeUrl, redactUrlForMetadata, scanUrlForSecrets, type ResolveHostnameFn } from "../browser/url-safety.js";
+import { assessUrlSafety, isAlwaysBlockedUrl, isSafeUrl, redactUrlForMetadata, scanUrlForSecrets, type ResolveHostnameFn } from "../browser/url-safety.js";
 import { checkWebsiteAccess, loadWebsiteBlocklist } from "../browser/website-policy.js";
 import type { ProviderExecutor } from "../providers/provider-executor.js";
 import {
@@ -3065,10 +3065,11 @@ function createUrlGuard(options: WebToolOptions, revalidate = false): UrlGuard {
   const websitePolicy = loadWebsiteBlocklist(options.securityConfig?.websiteBlocklist ?? {});
   const allowPrivateUrls = options.securityConfig?.allowPrivateUrls === true;
   return async (url, reasons) => {
-    if (!await isSafeUrl(url, {
+    const safety = await assessUrlSafety(url, {
       allowPrivateUrls: revalidate ? options.securityConfig?.allowPrivateUrls === true : allowPrivateUrls,
       resolveHostname: options.resolveHostname
-    })) {
+    });
+    if (safety === "unsafe") {
       return {
         ok: false,
         content: "Blocked unsafe URL.",
@@ -3095,6 +3096,10 @@ function createUrlGuard(options: WebToolOptions, revalidate = false): UrlGuard {
       };
     }
 
+    if (safety === "unresolved") return {
+      ok: false, content: "Source hostname could not be resolved. No request was sent.",
+      metadata: { url: redactUrlForMetadata(url), ...(reasons.metadata ?? {}), reason: "url-resolution-failed" }
+    };
     return undefined;
   };
 }

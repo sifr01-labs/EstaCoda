@@ -940,6 +940,19 @@ describe("web and browser tools baselines", () => {
     });
   });
 
+  it("reports DNS failure without fetching and preserves explicit website-policy denial", async () => {
+    const fetch = vi.fn(async () => createFetchResponse({ body: "must not fetch" }));
+    const resolveHostname = async () => { throw new Error("ENOTFOUND private diagnostic"); };
+    const extract = tool("web.extract", createWebTools({ fetch, enableNetwork: true, resolveHostname,
+      securityConfig: { allowPrivateUrls: false, websiteBlocklist: { domains: ["blocked.test"] } } }));
+    const unavailable = await extract.run({ url: "https://missing.example/source" });
+    expect(unavailable).toMatchObject({ ok: false, metadata: { reason: "url-resolution-failed" } });
+    expect(JSON.stringify(unavailable)).not.toContain("private diagnostic");
+    expect(await extract.run({ url: "https://blocked.test/source" })).toMatchObject({ ok: false, metadata: { reason: "website-policy" } });
+    expect(await extract.run({ url: "http://169.254.169.254" })).toMatchObject({ ok: false, metadata: { reason: "unsafe-url" } });
+    expect(fetch).not.toHaveBeenCalled();
+  });
+
   it("blocks unsafe web.extract URLs before fetch", async () => {
     const fetch = vi.fn(async () => createFetchResponse({ body: "should not fetch" }));
     const extract = tool("web.extract", createWebTools({ fetch, enableNetwork: true }));

@@ -1969,7 +1969,7 @@ describe("AgentLoop provider availability gating", () => {
       trustedWorkspace: true
     });
 
-    expect(response.text).toBe("I completed the requested actions but did not produce any visible output.");
+    expect(response.text).toBe("Execution stopped before an accepted answer was produced. Any retained draft is available for review.");
     expect(trajectoryRecorder.snapshot().outcome).toEqual({
       success: false,
       status: "failed",
@@ -1981,7 +1981,7 @@ describe("AgentLoop provider availability gating", () => {
     });
   });
 
-  it("does not append a duplicate final agent message for an empty provider tool-call turn", async () => {
+  it("persists a truthful stop receipt after an empty provider tool-call turn", async () => {
     const { loop, sessionDb, sessionId } = await createAgentLoop({
       canRunProvider: true,
       runSkillPlaybook: vi.fn(async () => []),
@@ -2011,8 +2011,9 @@ describe("AgentLoop provider availability gating", () => {
     });
 
     const agentMessages = (await sessionDb.listMessages(sessionId)).filter((message) => message.role === "agent");
-    expect(agentMessages).toHaveLength(1);
+    expect(agentMessages).toHaveLength(2);
     expect(agentMessages[0]?.metadata?.kind).toBe("provider-tool-call-turn");
+    expect(agentMessages[1]?.content).toContain("Execution stopped before an accepted answer");
   });
 
   it("persists final artifact summary text after an empty provider tool-call turn", async () => {
@@ -2078,7 +2079,7 @@ describe("AgentLoop provider availability gating", () => {
 
     const agentMessages = (await sessionDb.listMessages(sessionId)).filter((message) => message.role === "agent");
     expect(agentMessages).toHaveLength(1);
-    expect(agentMessages[0]?.content).toBe("I completed the requested actions but did not produce any visible output.");
+    expect(agentMessages[0]?.content).toBe("Execution stopped before an accepted answer was produced. Any retained draft is available for review.");
   });
 
   it("renders a dedicated message when a successful provider response is whitespace-only", async () => {
@@ -2094,7 +2095,7 @@ describe("AgentLoop provider availability gating", () => {
       trustedWorkspace: true
     });
 
-    expect(response.text).toBe("I completed the requested actions but did not produce any visible output.");
+    expect(response.text).toBe("Execution stopped before an accepted answer was produced. Any retained draft is available for review.");
   });
 
   it("passes through non-empty successful provider content unchanged", async () => {
@@ -2308,7 +2309,7 @@ describe("AgentLoop provider availability gating", () => {
 
     expect(response.text).toContain("I matched the test-skill skill");
     expect(response.text).toContain("Provider note:");
-    expect(response.text).not.toBe("I completed the requested actions but did not produce any visible output.");
+    expect(response.text).not.toBe("Execution stopped before an accepted answer was produced. Any retained draft is available for review.");
     const agentMessages = (await sessionDb.listMessages(sessionId)).filter((message) => message.role === "agent");
     expect(agentMessages[0]?.metadata?.provider).toBeUndefined();
     expect(agentMessages[0]?.metadata?.providerExecution).toMatchObject({

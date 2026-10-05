@@ -136,7 +136,7 @@ describe.sequential("research workflow acceptance harness", () => {
     const messages = await h.sessionDb.listMessages(attempt.workerSessionId!);
     expect(messages.some(message => message.content === invalid && message.metadata?.completionCandidate === true)).toBe(true);
     expect(h.requests.some(request => request.messages.some(message => typeof message.content === "string" &&
-      message.content.includes("https://unobserved.example/claim") && message.content.includes("Correct the assigned Step")))).toBe(true);
+      message.content.includes("https://unobserved.example/claim") && message.content.includes("Correct the existing draft")))).toBe(true);
     expect(h.searches).toEqual(["battery recycling"]);
     const result = h.store.listResults(task.id).find(result => result.stepId === worker.id)!;
     expect(result.disposition).toBe(exhausted ? "diagnostic" : "accepted");
@@ -303,7 +303,7 @@ describe.sequential("research workflow acceptance harness", () => {
     h.enqueue(nativeCall("web_search", { query: "unrelated weather" }), answer("Research complete with no citations."));
     const result = await h.turn("Research the latest battery recycling methods.");
     expect(result.finalOutcome?.status).toBe("partially_completed");
-    expect(result.text).toContain("source-claim-table-missing");
+    expect(result.text).toContain("source-citations-missing");
     h.enqueue(nativeCall("web_search", { query: "battery recycling" }), answer(`${REPORT}\n${CLAIM_TABLE}`));
     const valid = await h.turn("Research the latest battery recycling methods.");
     expect(valid.finalOutcome?.status).toBe("completed");
@@ -321,7 +321,7 @@ describe.sequential("research workflow acceptance harness", () => {
     scriptConsumed(h);
   });
 
-  it.each(["denied", "wrong-target", "wrong-content", "no-readback", "claim-only"])("keeps report delivery incomplete for %s", async (mode) => {
+  it.each(["denied", "wrong-target", "wrong-content", "no-readback", "claim-only", "repaired", "validation-repaired"])("validates report delivery for %s", async (mode) => {
     const h = await harness({ denyWrites: mode === "denied" });
     h.enqueue(nativeCall("delegate_task", { tasks: [{ task: "Research recycling.", allowedTools: ["web.search"], research: { scope: "methods", requireLiveSources: false, requireRepositoryEvidence: false } }] }));
     await h.turn("Use 1 worker to research recycling. Save report.md");
@@ -336,12 +336,23 @@ describe.sequential("research workflow acceptance harness", () => {
     const result = h.store.listResults(task.id).find((item) => item.stepId === synthesis.id)!;
     if (mode !== "claim-only") {
       h.enqueue(nativeCall("task_result_read", { task_id: task.id, result_id: result.id }),
-        nativeCall("file_write", { path: mode === "wrong-target" ? "other.md" : "report.md", content: mode === "wrong-content" ? "unrelated bytes" : REPORT }));
+        nativeCall("file_write", { path: mode === "wrong-target" ? "other.md" : "report.md", content: ["wrong-content", "repaired", "validation-repaired"].includes(mode) ? "unrelated bytes" : REPORT, ...(mode === "validation-repaired" ? { sourceResult: { taskId: task.id, resultId: result.id } } : {}) }));
       if (mode === "wrong-content") h.enqueue(nativeCall("file_read", { path: "report.md" }));
     }
     h.enqueue(answer("Saved report.md."));
-    expect((await scheduler.runOnce()).failed).toBe(1);
-    expect(h.store.getTask(task.id)?.status).not.toBe("completed");
+    if (["repaired", "validation-repaired"].includes(mode)) h.enqueue(
+      nativeCall("file_write", { path: "report.md", sourceResult: { taskId: task.id, resultId: result.id }, content: "", overwrite: true }),
+      nativeCall("file_read", { path: "report.md" }), answer("Saved and verified report.md."));
+    else if (!["denied", "wrong-target"].includes(mode)) h.enqueue(answer("Saved report.md."), answer("Saved report.md."));
+    const settled = await scheduler.runOnce();
+    if (["repaired", "validation-repaired"].includes(mode)) {
+      expect(settled.completed).toBe(1);
+      expect(h.store.getTask(task.id)?.status).toBe("completed");
+      expect(await readFile(join(h.workspaceRoot, "report.md"), "utf8")).toBe(REPORT);
+    } else {
+      expect(settled.failed).toBe(1);
+      expect(h.store.getTask(task.id)?.status).not.toBe("completed");
+    }
     if (["denied", "wrong-target", "claim-only"].includes(mode)) await expect(readFile(join(h.workspaceRoot, "report.md"))).rejects.toThrow();
     if (mode === "wrong-target") await expect(readFile(join(h.workspaceRoot, "other.md"))).rejects.toThrow();
     scriptConsumed(h);

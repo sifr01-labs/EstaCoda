@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import {
+  assessUrlSafety,
   isAlwaysBlockedNetwork,
   isSafeUrl,
   redactUrlForMetadata,
@@ -10,6 +11,14 @@ import {
 const publicResolver: ResolveHostnameFn = async () => ["93.184.216.34"];
 
 describe("url safety", () => {
+  it("distinguishes failed DNS from unsafe destinations without allowing either", async () => {
+    const options = { resolveHostname: async () => { throw new Error("DNS unavailable"); } };
+    expect(await assessUrlSafety("https://missing.example/", options)).toBe("unresolved");
+    expect(await isSafeUrl("https://missing.example/", options)).toBe(false);
+    expect(await assessUrlSafety("https://missing.example/", { resolveHostname: async () => [] })).toBe("unresolved");
+    expect(await assessUrlSafety("http://127.0.0.1", options)).toBe("unsafe");
+    expect(await assessUrlSafety("https://metadata.google.internal", options)).toBe("unsafe");
+  });
   it("accepts public HTTP and HTTPS URLs", async () => {
     await expect(isSafeUrl("http://example.com", { resolveHostname: publicResolver })).resolves.toBe(true);
     await expect(isSafeUrl("https://example.com", { resolveHostname: publicResolver })).resolves.toBe(true);

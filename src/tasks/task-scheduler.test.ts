@@ -69,9 +69,9 @@ describe("TaskScheduler", () => {
     rmSync(tempDir, { recursive: true, force: true });
   });
 
-  it("keeps safe failed research recoverable without accepting a draft or skipping synthesis", async () => {
+  it.each(["worker", "synthesis"] as const)("keeps a safe failed %s recoverable without accepting a draft or skipping delivery", async role => {
     const research = makeStep("research",0);
-    research.executor = {...research.executor,role:"worker",requestContract:{version:1,objective:"Research",requirements:{skillReferences:[],issues:[],research:{fresh:true,domain:"general"}}}};
+    research.executor = {...research.executor,role,requestContract:{version:1,objective:"Research",requirements:{skillReferences:[],issues:[],research:{fresh:true,domain:"general"}}}};
     research.idempotency="retry_safe";
     research.retryPolicy={...research.retryPolicy,maxAttempts:2,retryableFailureClasses:["lease-expired"]};
     store.createTaskGraph(makeGraph([research,makeStep("synthesis",1,{dependsOn:[research.id]})]));

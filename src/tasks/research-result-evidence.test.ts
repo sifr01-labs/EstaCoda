@@ -40,11 +40,28 @@ describe("research result evidence", () => {
     expect(ground(forged).text).toBe(result.text);
     expect(ground(claim, [execution("web.extract", { url, content: "An abstract with no publication date" })]).text).toContain("unknown | 2026-09-24 | extracted; full text unverified");
   });
-  it.each(["missing", "unobserved", "denied", "oversized", "empty-limitation"])("rejects %s evidence", (kind) => {
-    const text = kind === "missing" ? `Source ${url}` : kind === "unobserved" ? claim.replace(url, "https://example.org/invented")
-      : kind === "oversized" ? claim.replace("Reported result", "x".repeat(601)) : kind === "empty-limitation" ? claim.replace("Small synthetic sample", "") : claim;
+  it("accepts cited prose and equivalent table headers while attaching runtime observations", () => {
+    for (const text of [`A limited finding from [a study](${url}). Only its abstract was available.`,
+      claim.replace("Source URL", "**Source**").replace("Supported claim", "Finding").replace("Limitation", "Limitations")]) {
+      const result = ground(text);
+      expect(result.failure).toBeUndefined();
+      expect(result.text).toContain("2025-06-10 | 2026-09-24 | snippet; full text unavailable");
+    }
+  });
+
+  it.each(["missing", "unobserved", "denied"])("rejects %s evidence", (kind) => {
+    const text = kind === "missing" ? "Findings without any citations" : kind === "unobserved" ? claim.replace(url, "https://example.org/invented")
+      : claim;
     const calls = kind === "denied" ? [execution("web.search", { results: [{ url }] }, "", "deny")] : undefined;
     expect(ground(text, calls).failure).toBeDefined();
+  });
+  it("preserves parentheses in observed citation URLs while stripping Markdown delimiters", () => {
+    const source = "https://example.org/EPRS_BRI(2021)689337_EN.pdf";
+    const calls = [execution("web.search", { results: [{ url: source }] })];
+    for (const text of [`A finding ([source](${source})).`, `A finding at ${source}.`]) {
+      expect(ground(text, calls).failure).toBeUndefined();
+      expect(ground(text, calls).text).toContain(source);
+    }
   });
   it.each(["`", "``", "", "<"])("parses observed URLs inside Markdown (%s)", delimiter => {
     const end = delimiter === "<" ? ">" : delimiter;
@@ -58,6 +75,33 @@ describe("research result evidence", () => {
     const failed = { ...execution("web.extract", { url: "https://failed.example/", status: 403 }), result: { ok: false, content: "Blocked", metadata: { url: "https://failed.example/", status: 403 } } };
     expect(ground(`${claim}\nClaim from https://failed.example/`, [execution("web.search", { results: [{ url }] }), failed]).failure).toBe("unobserved-source");
   });
+  it("accepts more than 24 observed citations while still rejecting an invented one", () => {
+    const citations = Array.from({ length: 30 }, (_, index) => `https://example.org/source-${index}`);
+    const calls = [citations.slice(0, 15), citations.slice(15)].map(batch => execution("web.search", { results: batch.map(url => ({ url })) }));
+    expect(ground(citations.join("\n"), calls).failure).toBeUndefined();
+    expect(ground([...citations, "https://example.org/invented"].join("\n"), calls).failure).toBe("unobserved-source");
+  });
+
+  it("merges shared-source notes without counting them as extra citations", () => {
+    const citations = Array.from({ length: 24 }, (_, index) => `https://example.org/study-${index}`);
+    const results: TaskResult[] = [];
+    const reads: ToolExecutionRecord[] = [];
+    for (const id of ["worker-a", "worker-b"]) {
+      const text = `| Source URL | Supported claim | Limitation |\n| --- | --- | --- |\n` +
+        citations.map(source => `| ${source} | Finding from ${id} | Limitation from ${id} |`).join("\n");
+      const content = ground(text, [execution("web.search", { results: citations.map(url => ({ url })) })]).text!;
+      const read = page(content, { resultId: id });
+      reads.push(read);
+      results.push({ id, stepId: id, status: "available", disposition: "accepted", contentHash: read.result!.metadata!.contentHash } as TaskResult);
+    }
+    const sourceStore = { listResults: () => results, getStep: (id: string) => ({ ...worker, id }) } as unknown as TaskStore;
+    const synthesis = { ...worker, id: "synthesis", dependsOn: ["worker-a", "worker-b"], executor: { ...worker.executor, role: "synthesis" } } as TaskStep;
+    const result = groundResearchResult({ task, step: synthesis, store: sourceStore, text: citations.join("\n"), executions: reads, now });
+    expect(result.failure).toBeUndefined();
+    expect(result.text).toContain("Finding from worker-a / Finding from worker-b");
+    expect(result.text).toContain("Limitation from worker-a / Limitation from worker-b");
+  });
+
   it("requires complete accepted dependency reads and preserves missing scope accounting", () => {
     const content = ground().text!;
     const read = page(content);
@@ -70,7 +114,12 @@ describe("research result evidence", () => {
     expect(settled.text).toContain("Research coverage is partial. Missing or failed scopes: missing materials");
     expect(settled.text).toContain("Unknown publication dates do not establish recency");
     expect(groundResearchResult({ ...input, executions: [] }).failure).toBe("unread-worker-results");
-    expect(groundResearchResult({ ...input, text: claim.replace("Small synthetic sample", "No limitations") }).failure).toBe("changed-source-claim");
+    const paraphrase = groundResearchResult({ ...input, text: `A differently worded synthesis cites [the study](${url}).` });
+    expect(paraphrase.failure).toBeUndefined();
+    expect(paraphrase.text).toContain("Small synthetic sample");
+    const changed = groundResearchResult({ ...input, text: claim.replace("Small synthetic sample", "No limitations") });
+    expect(changed.text).toContain("Small synthetic sample");
+    expect(changed.text).not.toContain("No limitations");
     expect(groundResearchResult({ ...input, executions: [page(content, { disposition: "diagnostic" })] }).failure).toBeDefined();
   });
 });

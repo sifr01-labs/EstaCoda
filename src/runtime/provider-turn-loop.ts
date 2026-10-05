@@ -131,6 +131,7 @@ export type ProviderTurnLoopRequestDefaults = {
 
 export type ProviderTurnLoopResult = {
   completionValidationFailure?: string;
+  completionCandidate?: string;
   deliveredSkillNames?: string[];
   providerExecution: ProviderExecutionResult | undefined;
   toolExecutions: ToolExecutionRecord[];
@@ -342,6 +343,7 @@ export class ProviderTurnLoop {
     let maxObservedRisk = input.initialRiskClass;
     let pendingCompletionFeedback: string | undefined;
     let completionValidationFailure: string | undefined;
+    let completionCandidate: string | undefined;
     let completionRepairs = 0;
     let pendingEmptyResponseNudge = false;
     let postToolEmptyRetried = false;
@@ -498,6 +500,7 @@ export class ProviderTurnLoop {
           iteration,
           loopStartedAt,
           completionFeedback: pendingCompletionFeedback,
+          completionCandidate,
           emptyResponseNudge: pendingEmptyResponseNudge,
           protectedOtpNudge: pendingProtectedOtpNudge,
           browserEvidenceNudge: supervisionPrompt.browserEvidenceNudge,
@@ -518,7 +521,6 @@ export class ProviderTurnLoop {
             )
           })
         });
-      pendingCompletionFeedback = undefined;
       pendingEmptyResponseNudge = false;
       pendingProtectedOtpNudge = false;
       pendingReasoningOnlyPrefill = false;
@@ -814,7 +816,11 @@ export class ProviderTurnLoop {
       );
       const hasRecoverableToolFeedback = currentPlans.some((plan) => isRecoverableToolPlanStatus(plan.status));
       const repeatedFailureBudgetExceeded = this.#recordRepeatedToolFailures(loopToolExecutions, repeatedFailures);
-      const supervisionAssessment = executionSupervision.assessProgress(loopToolExecutions);
+      // New search URLs alone do not resolve a rejected candidate. Re-evaluate
+      // the outstanding defect against accumulated evidence before rewarding discovery.
+      const unchangedRepair = completionCandidate !== undefined && completionValidationFailure !== undefined &&
+        redactSensitiveText(input.validateCompletion?.(completionCandidate, [...input.toolExecutions, ...providerToolExecutions]) ?? "").slice(0, 6_000) === completionValidationFailure;
+      const supervisionAssessment = executionSupervision.assessProgress(loopToolExecutions, unchangedRepair);
       const { browserObservation, toolLoopProgress, runtimeUserInputBlocker } = supervisionAssessment;
       const canContinueWithExpandedInventory =
         runtimeUserInputBlocker === undefined &&
@@ -1089,11 +1095,14 @@ export class ProviderTurnLoop {
           ...(completionValidationFailure === undefined ? {} : { feedback: completionValidationFailure }),
           repair, repairAttempt: completionRepairs
         });
-        if (repair) {
+        pendingCompletionFeedback = completionValidationFailure;
+        completionCandidate = completionValidationFailure === undefined ? undefined : redactSensitiveText(execution.response.content);
+        if (completionCandidate !== undefined) {
           // Keep the candidate in normal session history so correction and inspection retain it.
           await this.#sessionDb.appendMessage({ sessionId: this.#currentSessionId(), role: "agent",
-            content: redactSensitiveText(execution.response.content), metadata: { completionCandidate: true, accepted: false } });
-          pendingCompletionFeedback = completionValidationFailure;
+            content: completionCandidate, metadata: { completionCandidate: true, accepted: false } });
+        }
+        if (repair) {
           completionRepairs += 1;
           effectiveProviderExecution = mergeProviderExecutions(effectiveProviderExecution, execution);
           previousProviderExecution = execution;
@@ -1141,6 +1150,7 @@ export class ProviderTurnLoop {
 
     return {
       completionValidationFailure,
+      completionCandidate,
       providerExecution: effectiveProviderExecution,
       deliveredSkillNames: [...deliveredSkillNames],
       toolExecutions: providerToolExecutions,
@@ -1436,6 +1446,7 @@ export class ProviderTurnLoop {
     loopStartedAt: number;
     emptyResponseNudge?: boolean;
     completionFeedback?: string;
+    completionCandidate?: string;
     protectedOtpNudge?: boolean;
     browserEvidenceNudge?: boolean;
     browserRetargetNudge?: boolean;
@@ -1512,9 +1523,6 @@ export class ProviderTurnLoop {
         role: "user",
         content: "You just executed tool calls but returned an empty response. Please process the tool results above and continue with the task."
       });
-    }
-    if (input.completionFeedback !== undefined) {
-      prompt.messages.push({ role: "user", content: `The previous candidate is preserved but has not been accepted. ${input.completionFeedback} Correct the assigned Step result using the existing evidence and authorized tools. Do not restart completed research or claim completion while evidence is missing.` });
     }
     if (input.protectedOtpNudge === true) {
       prompt.messages.push({

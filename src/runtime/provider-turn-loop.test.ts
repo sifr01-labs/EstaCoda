@@ -5161,7 +5161,37 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     expect(result.completionValidationFailure).toContain("unobserved-source");
     expect(result.providerExecution?.response?.content).toBe("Original unsupported draft");
     const drafts = (await harness.sessionDb.listMessages(harness.sessionId)).filter(message => message.metadata?.completionCandidate);
-    expect(drafts).toHaveLength(Math.min(limit, 3) - 1);
+    expect(drafts).toHaveLength(Math.min(limit, 3));
+  });
+
+  it("keeps the rejected draft and defect through intervening tool calls, then clears them on acceptance", async () => {
+    const draft = "Substantial findings with a citation to correct. " + "Retained evidence. ".repeat(80);
+    const searches = [1, 2].map(i => toolExecutionForTool(`search-${i}`, "web.search", `Observed source ${i}`));
+    const harness = await createPostToolNudgeHarness({
+      responses: [providerExecution(draft), providerExecution("", [providerToolCall("search-1", "{}", "web.search")]),
+        providerExecution("", [providerToolCall("search-2", "{}", "web.search")]), providerExecution("Corrected findings")],
+      toolSteps: [{}, { executions: [searches[0]!] }, { executions: [searches[1]!] }, {}], maxProviderIterations: 8
+    });
+    const result = await runBasicProviderTurn(harness.loop, { validateCompletion: text => text === "Corrected findings" ? undefined : "unobserved-source: replace the unsupported citation" });
+    expect(harness.completeSpy).toHaveBeenCalledTimes(4);
+    for (const [request] of harness.completeSpy.mock.calls.slice(1)) {
+      const context = JSON.stringify(request.messages);
+      expect(context).toContain(draft);
+      expect(context).toContain("unobserved-source: replace the unsupported citation");
+    }
+    expect(result.completionValidationFailure).toBeUndefined();
+    expect(result.completionCandidate).toBeUndefined();
+    expect(result.providerExecution?.response?.content).toBe("Corrected findings");
+  });
+
+  it("retains the substantive rejected candidate and original defect when the repair exhausts its iterations", async () => {
+    const harness = await createPostToolNudgeHarness({ responses: [providerExecution("Useful but unaccepted draft"),
+      providerExecution("", [providerToolCall("search", "{}", "web.search")])],
+      toolSteps: [{}, { executions: [toolExecutionForTool("search", "web.search", "Another result")] }], maxProviderIterations: 2 });
+    const result = await runBasicProviderTurn(harness.loop, { validateCompletion: () => "unobserved-source" });
+    expect(result.terminationCause).toBe("budget_exhausted");
+    expect(result.completionCandidate).toBe("Useful but unaccepted draft");
+    expect(result.completionValidationFailure).toBe("unobserved-source");
   });
 
   it("redacts retained correction drafts and feedback and stops on cancellation", async () => {

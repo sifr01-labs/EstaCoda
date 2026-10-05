@@ -1,3 +1,4 @@
+import { taskExecutionLimitBlockReason, taskRetryBlockReason, executionLimitRecoveryMessage } from "../tasks/task-tree-accounting.js";
 import type { ActionId, ActionProjection, WorkProjection, InboxProjection } from '../contracts/desktop-control/index.js';
 import type { SessionRecord } from '../contracts/session.js';
 import type { Task } from '../contracts/task.js';
@@ -22,8 +23,16 @@ export function taskActions(task: Task, store: TaskStore): ActionProjection[] {
   const steps = task.activePlanRevisionId ? store.listSteps(task.id, task.activePlanRevisionId).filter(step => step.status === 'waiting_for_input') : [];
   const retryState = bound && ['paused', 'waiting_for_input'].includes(task.status);
   if (!steps.length) actions.push(action('tasks.retry', false, 'No Step is waiting for retry.'));
-  for (const step of steps) actions.push(action('tasks.retry', retryState && store.listAttempts(task.id, step.id).length < step.retryPolicy.maxAttempts,
-    'Retry requires a waiting Task and remaining Attempt budget.', step.id));
+  for (const step of steps) {
+    const blocked = retryState ? taskRetryBlockReason(store, task, step, Date.now()) : undefined;
+    actions.push(action('tasks.retry', retryState && blocked === undefined,
+      blocked ? executionLimitRecoveryMessage(blocked) : 'Retry requires a waiting Task and remaining Attempt budget.', step.id));
+  }
+  if (task.status === 'paused' && task.waitReason?.kind === 'execution_limit' && task.activePlanRevisionId) {
+    const candidates = store.listSteps(task.id, task.activePlanRevisionId).filter(step => step.status === 'ready' || step.status === 'waiting_for_input');
+    const reasons = candidates.map(step => taskExecutionLimitBlockReason(store, task, step, Date.now()));
+    if (reasons.length && reasons.every(Boolean)) Object.assign(actions.find(item => item.id === 'tasks.resume')!, action('tasks.resume', false, executionLimitRecoveryMessage(reasons[0]!)));
+  }
   return actions.map(item => item.id.startsWith('tasks.') ? { ...item, sessionId: task.originSessionId } : item);
 }
 /** Snapshot hints only. Core revalidates target, policy and lifecycle at dispatch. */

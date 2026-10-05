@@ -30,6 +30,10 @@ describe("file output evidence", () => {
     expect(fileOutputEvidence(input)).toEqual({ satisfied: true, writeCallId: "call-0", path: "report.md" });
     expect(deriveExecutionFinalOutcome({ ...input, requestRequirements: input.requirements, completionFloor: "mutation_with_verification" })).toMatchObject({ status: "completed", confirmedActions: [{ verification: "verified" }] });
   });
+  it("accepts a bounded preview only when a complete materialized file read verifies the digest", () => {
+    expect(fileOutputEvidence(observe([call("file.write"), call("file.read", "report.md", { truncated: true, completeFileRead: true })])).satisfied).toBe(true);
+    expect(fileOutputEvidence(observe([call("file.write"), call("file.read", "report.md", { truncated: true, completeFileRead: true, contentSha256: "a".repeat(64) })])).satisfied).toBe(false);
+  });
   it("accepts an unchanged matching write and a chosen Markdown filename", () => {
     expect(fileOutputEvidence(observe([call("file.write", "chosen.md", { changed: false }), call("file.read", "chosen.md")], "Prepare a markdown file")).satisfied).toBe(true);
   });

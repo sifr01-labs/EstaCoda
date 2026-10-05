@@ -142,6 +142,8 @@ export type AgentLoopResponse = {
   setupApprovals?: AgentLoopSetupApprovalRequest[];
   executionPlan?: ExecutionPlan;
   finalOutcome?: ExecutionFinalOutcome;
+  completionValidationFailure?: string;
+  completionCandidate?: string;
 };
 
 export type AgentLoopSetupApprovalRequest =
@@ -1282,7 +1284,9 @@ export class AgentLoop {
       finalOutcome.confirmedActions.length > 0 &&
       finalOutcome.confirmedActions.every((receipt) => receipt.verification === "verified");
     const displayText = delegatedAnswerAcknowledgement ?? (providerReturnedEmptyContent
-      ? "I completed the requested actions but did not produce any visible output."
+      ? providerLoop.terminationCause === "normal" && (finalOutcome.status === "completed" || finalOutcome.status === "completed_with_recovered_errors")
+        ? "I completed the requested actions but did not produce any visible output."
+        : "Execution stopped before an accepted answer was produced. Any retained draft is available for review."
       : completedReceiptSupersedesStalePlanCopy
         ? this.#ui?.language === "ar"
           ? "اكتملت الإجراءات المطلوبة وفق إيصالات التنفيذ الموثوقة."
@@ -1368,6 +1372,8 @@ export class AgentLoop {
           ]
         });
     response.finalOutcome = finalOutcome;
+    response.completionValidationFailure = providerLoop.completionValidationFailure;
+    response.completionCandidate = providerLoop.completionCandidate;
     const needsDeterministicReceipt = delegatedAnswerAcknowledgement === undefined &&
       (finalOutcome.confirmedActions.length > 0 || finalOutcome.uncertainActions.length > 0) &&
       (

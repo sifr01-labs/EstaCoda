@@ -795,13 +795,13 @@ describe("AgentStepExecutor", () => {
     expect(context.length).toBeLessThanOrEqual(16_000);
   });
 
-  it.each([false, true])("carries a bounded prior accounting draft into targeted recovery only within its profile (foreign=%s)", async foreign => {
+  it.each([[false,"provider-accounting"], [true,"provider-accounting"], [false,"evidence-contract-unsatisfied"], [true,"evidence-contract-unsatisfied"]] as const)("carries a prior draft into targeted recovery within its profile (foreign=%s, failure=%s)", async (foreign, failureClass) => {
     const graph = makeGraph();
     store.createTaskGraph(graph);
     await sessionDb.createSession({ id: "prior-worker", profileId: foreign ? "other" : "alpha", parentSessionId: "creator-alpha" });
-    await sessionDb.appendMessage({ sessionId: "prior-worker", role: "agent", content: "Retained research with https://example.org/study", metadata: { accountingDiagnostic: true, accepted: false } });
+    await sessionDb.appendMessage({ sessionId: "prior-worker", role: "agent", content: "Retained research with https://example.org/study", metadata: { [failureClass === "provider-accounting" ? "accountingDiagnostic" : "completionCandidate"]: true, accepted: false } });
     vi.spyOn(store, "listAttempts").mockReturnValue([{ ...attempt(graph), attemptNumber: 1, workerSessionId: "prior-worker",
-      failure: { class: "provider-accounting", message: "Accounting failed", retryable: true, uncertainSideEffects: false } }]);
+      failure: { class: failureClass, message: "Unresolved defect", retryable: true, uncertainSideEffects: false } }]);
     const createChild = vi.fn(async (input: CreateChildAgentLoopInput) => {
       await sessionDb.createSession({ id: "next-worker", profileId: input.profileId, parentSessionId: input.parentSessionId });
       return childRuntime(async () => response(), async () => undefined, { sessionId: "next-worker", trajectoryId: "recovery-trajectory" });
@@ -837,6 +837,23 @@ describe("AgentStepExecutor", () => {
     if (mutating) expect(settlement).not.toHaveProperty("diagnosticResults");
     else expect(settlement).toMatchObject({ diagnosticResults: [{ content: expect.stringContaining("Useful draft.") }] });
     expect((await sessionDb.listMessages("worker-accounting")).some(message => message.metadata?.accountingDiagnostic)).toBe(!mutating);
+  });
+
+  it("settles exhaustion with the original defect and substantive draft rather than validating the stop message", async () => {
+    const graph = makeGraph();
+    const childFactory: ChildAgentLoopFactory = { createChild: vi.fn(async input => {
+      await sessionDb.createSession({ id: "stopped-worker", profileId: input.profileId, parentSessionId: input.parentSessionId });
+      return childRuntime(async () => response({ text: "Execution stopped before an accepted answer was produced.",
+        completionCandidate: "Substantive rejected findings", completionValidationFailure: "unobserved-source: repair citation",
+        finalOutcome: { status: "partially_completed", terminationCause: "budget_exhausted", completionFloor: "read", confirmedActions: [], uncertainActions: [] } }),
+        async () => undefined, { sessionId: "stopped-worker", trajectoryId: "stopped" });
+    }) };
+    const executor = new AgentStepExecutor({ childFactory, sessionDb, taskStore: store, hostWorkspace: graph.task.workspace,
+      isWorkspaceTrusted: () => true, parentVisibleTools: tools, approvalService: new TaskApprovalService({ store }), securityPolicy: capabilityFirstDefaults });
+    const settled = await executor.execute({ task: graph.task, step: graph.steps[0]!, attempt: attempt(graph), signal: new AbortController().signal, heartbeat: vi.fn(), checkpoint: vi.fn() });
+    expect(settled).toMatchObject({ outcome: "failed", failure: { class: "execution-stopped", message: expect.stringContaining("budget_exhausted") }, diagnosticResults: [{ content: "Substantive rejected findings" }] });
+    expect(JSON.stringify(settled)).toContain("unobserved-source");
+    expect(JSON.stringify(settled)).not.toContain("source-citations-missing");
   });
 
   it("returns safe read-only failure output as diagnostic content", async () => {
@@ -889,26 +906,31 @@ describe("AgentStepExecutor", () => {
     });
   });
 
-  it.each(["alternative", "disclosed", "required-source", "required-code-source", "missing-table", "unobserved", "denied", "unavailable-tool"])("handles inaccessible research sources: %s", async mode => {
+  it.each(["alternative", "disclosed", "required-source", "required-code-source", "missing-table", "unobserved", "denied", "unavailable-tool", "search-recovered", "search-no-evidence", "search-denied", "search-unavailable", "dns-unavailable", "fetch-failed", "provider-failed", "unsafe-url"])("handles inaccessible research sources: %s", async mode => {
     const graph=makeGraph(), base=graph.steps[0]!;
-    const url="https://observed.example/report", unavailable="https://unavailable.example/report";
+    const url="https://observed.example/report", unavailable="https://unavailable.example/report(2026).pdf";
     const step:TaskStep={...base,objective:mode==="required-source"?`Read ${unavailable}`:mode==="required-code-source"?`Read \`${unavailable}\``:"Research methods",executor:{...base.executor,role:"worker",
       research:{scope:"methods",requireLiveSources:true,requireRepositoryEvidence:false},requestContract:{version:1,objective:"Research",requirements:{skillReferences:[],issues:[],research:{fresh:true,domain:"general"}}}}};
-    const calls=[successfulEvidenceExecution("web.search","read-only-network",["web","research"],{query:"methods"},"Observed",{results:[{url,snippet:"A method"},...(mode==="disclosed"?[{url:unavailable,snippet:"Study abstract"}]:[])]}),{
+    const calls: import("../tools/tool-executor.js").ToolExecutionRecord[]=[successfulEvidenceExecution("web.search","read-only-network",["web","research"],{query:"methods"},"Observed",{provider:"ddgs",results:[{url,snippet:"A method"},...(mode==="disclosed"?[{url:unavailable,snippet:"Study abstract"}]:[])]}),{
       tool:tool("web.extract","read-only-network",["web"]),input:{url:unavailable},decision:mode==="denied"?"deny" as const:"allow" as const,riskClass:"read-only-network" as const,
-      result:{ok:false,content:"Unavailable",metadata:mode==="unavailable-tool"?{reason:"unavailable"}:{status:403}}}];
+      result:{ok:false,content:"Unavailable",metadata:mode==="unavailable-tool"?{reason:"unavailable"}:mode==="dns-unavailable"?{reason:"url-resolution-failed"}:["unsafe-url", "fetch-failed", "provider-failed"].includes(mode)?{reason:mode}:{status:403}}}];
+    if(mode.startsWith("search-")) {
+      calls[1]={tool:tool("web.search","read-only-network",["web"]),input:{query:"additional sources"},decision:mode==="search-denied"?"deny":"allow",riskClass:"read-only-network",
+        result:{ok:false,content:"Search unavailable",metadata:{provider:"ddgs",reason:mode==="search-unavailable"?"unavailable":"provider-failed"}}};
+      if(mode==="search-no-evidence") calls.shift();
+    }
     const text=(mode==="missing-table"?`Found ${url}`:`| Source URL | Supported claim | Limitation |\n| --- | --- | --- |\n| ${mode==="unobserved"?"https://invented.example/report":url} | A method | Snippet only |`)+(mode==="disclosed"?`\nAccess limitation: ${unavailable} returned HTTP 403; only its search snippet was observed.`:"");
     const childFactory:ChildAgentLoopFactory={createChild:vi.fn(async input=>{
       await sessionDb.createSession({id:"alternative-worker",profileId:input.profileId,parentSessionId:input.parentSessionId});
       return childRuntime(async request=>{
         const failure = request.stepCompletion?.validate?.(text, calls);
-        expect(failure === undefined).toBe(["alternative", "disclosed"].includes(mode));
+        expect(failure === undefined).toBe(["alternative", "disclosed", "missing-table", "search-recovered", "dns-unavailable", "fetch-failed", "provider-failed"].includes(mode));
         return response({text,toolExecutions:calls});
       },async()=>undefined,{sessionId:"alternative-worker",trajectoryId:"alternative-trajectory"}, {tools:calls.map(call=>call.tool.name),toolsets:["web","research"]});
     })};
     const executor=new AgentStepExecutor({childFactory,sessionDb,taskStore:store,hostWorkspace:graph.task.workspace,isWorkspaceTrusted:()=>true,parentVisibleTools:()=>tools(),approvalService:new TaskApprovalService({store}),securityPolicy:capabilityFirstDefaults});
     const result=await executor.execute({task:graph.task,step,attempt:attempt({...graph,steps:[step]}),signal:new AbortController().signal,heartbeat:vi.fn(),checkpoint:vi.fn()});
-    expect(result.outcome).toBe(["alternative", "disclosed"].includes(mode)?"succeeded":"failed");
+    expect(result.outcome).toBe(["alternative", "disclosed", "missing-table", "search-recovered", "dns-unavailable", "fetch-failed", "provider-failed"].includes(mode)?"succeeded":"failed");
     if(result.outcome==="succeeded")expect(result.results?.[0]?.content).toContain("Source access limitation: 1");
   });
 
