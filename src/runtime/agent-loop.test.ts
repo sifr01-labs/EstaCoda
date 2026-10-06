@@ -1,3 +1,9 @@
+import { RuntimeRouter as LiveRuntimeRouter } from "./runtime-router.js";
+import { IntentRouter } from "./intent-router.js";
+import { SkillRegistry } from "../skills/skill-registry.js";
+import { normalizeRoutingConfig } from "../config/routing-config.js";
+import { providerUsageTotals } from "../providers/provider-usage-ledger.js";
+import type { JevDecisionClient } from "./jev/decision-client.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -352,6 +358,7 @@ const securityPolicy: SecurityPolicy = {
 
 async function createAgentLoop(input: {
   canRunProvider: boolean;
+  runtimeRouterFactory?: (db: InMemorySessionDB, sessionId: string) => RuntimeRouter;
   runSkillPlaybook: ReturnType<typeof vi.fn>;
   sessionRecallService?: Pick<SessionRecallService, "recall">;
   failSessionRecallDecisionEvent?: boolean;
@@ -436,7 +443,7 @@ async function createAgentLoop(input: {
     recorder: runRecorder
   });
 
-  const runtimeRouter = {
+  const runtimeRouter = input.runtimeRouterFactory?.(sessionDb, sessionId) ?? {
     route: vi.fn(() => ({
       intent: input.routeIntent ?? intent,
       selectedSkill: input.selectedSkill === null ? undefined : input.selectedSkill ?? selectedSkill,
@@ -446,6 +453,8 @@ async function createAgentLoop(input: {
       attachments: input.routeAttachments
     }))
   } as unknown as RuntimeRouter;
+
+  if (!input.runtimeRouterFactory) runtimeRouter.routeAsync = vi.fn(async input => runtimeRouter.route(input));
 
   const providerToolSchemaCatalog = buildProviderToolSchemaCatalog({
     tools: input.providerToolDefinitions ?? []
@@ -580,6 +589,33 @@ it("uses the worker assignment instead of quoted parent file instructions for co
   const response = await loop.handle({text:"Summarize the evidence. Parent request: Save a cited report to report.md and verify the file.",
     requirementText:"Summarize the evidence.",channel:"cli",trustedWorkspace:true});
   expect(response.finalOutcome?.completionFloor).toBe("none");
+});
+
+it("awaits live Jev before provider assembly, preserves worker scope and skips the shadow reranker", async () => {
+  const registry = new SkillRegistry();
+  for (const name of ["complement-a", "complement-b"]) registry.register({ ...selectedSkill, name, routing: {}, requiredToolsets: [],
+    sourcePath: `/fixture/${name}`, sourceRoot: "/fixture", sourceKind: "local", instructions: `${name} content` });
+  const rerank = vi.fn(); let routed = false;
+  const evaluate: JevDecisionClient['evaluate'] = async input => {
+    expect(input.context.userRequest).toBe("Summarize the evidence.");
+    expect(JSON.stringify(input.context)).not.toContain("stolen.md");
+    await Promise.resolve(); routed = true;
+    return { schemaVersion: 1, status: "ok", configurationRevision: "config", catalogRevision: "catalog", models: ["jev-1.13.0"],
+      answers: input.questions.map(q => ({ id: q.id, type: "noul", probability: q.id.startsWith("skill.") ? 0.95 : 0.05, status: q.id.startsWith("skill.") ? "accepted" : "rejected" })),
+      usage: providerUsageTotals([], { emptyUsageIsComplete: true }), usageEntries: [] };
+  };
+  const harness = await createAgentLoop({ canRunProvider: true, runSkillPlaybook: vi.fn(async () => []),
+    onProviderTurnRun: () => expect(routed).toBe(true), skillRouteShadowReranker: { rerank },
+    runtimeRouterFactory: () => new LiveRuntimeRouter({ intentRouter: new IntentRouter({ skillRegistry: registry }), skillConfig: {},
+      jev: { client: { evaluate }, snapshot: () => ({ config: normalizeRoutingConfig({ mode: "jev-assisted" }), configurationRevision: "config", catalogRevision: "catalog" }) } }) });
+  await harness.loop.handle({ text: "Summarize evidence. Parent request: use 3 workers and save stolen.md", requirementText: "Summarize the evidence.",
+    stepCompletion: { requirements: { skillReferences: [], issues: [] } }, channel: "cli", trustedWorkspace: true });
+  const call = vi.mocked(harness.providerTurnLoop.run).mock.calls[0]?.[0];
+  expect(call?.selectedSkillInstructions).toBe("complement-a content");
+  expect(call?.supportingSkillPromptContents?.[0].content).toBe("complement-b content");
+  expect(call?.intent.requestRequirements?.delegation).toBeUndefined(); expect(call?.intent.requestRequirements?.fileOutput).toBeUndefined();
+  expect(rerank).not.toHaveBeenCalled();
+  expect(call?.intent.routingDecision?.actualEngine).toBe("jev");
 });
 
 describe("AgentLoop execution checkpoints", () => {

@@ -1,3 +1,4 @@
+import { resolveProfileStateHome } from "../config/profile-home.js";
 import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
@@ -451,6 +452,30 @@ describe("AgentLoopBuilder", () => {
       const inspection = built.toolRegistry.get(name)!;
       expect(await inspection.run({ name: "hidden-skill", query: "instructions" })).toMatchObject({ ok: false, content: "Skill not found: hidden-skill" });
     }
+  });
+
+  it("wires live Jev to the session-visible registry and ledger, and observes mode changes", async () => {
+    const source = new SkillRegistry(); source.register(skill("visible")); source.register(skill("hidden"));
+    const visible = new SkillRegistry(); visible.register(source.resolve("visible")!);
+    const harness = await createBuilderHarness({ skillRegistry: source });
+    const paths = resolveProfileStateHome({ homeDir: harness.workspaceRoot, profileId: "default" });
+    await mkdir(paths.profileRoot, { recursive: true });
+    await writeFile(paths.configPath, JSON.stringify({ routing: { mode: "jev-assisted" } }));
+    await writeFile(paths.envPath, "TYPESAFE_API_KEY=fixture-only\n");
+    await harness.sessionDb.createSession({ id: "jev-session", profileId: "default" });
+    await harness.sessionDb.appendMessage({ id: "jev-turn", sessionId: "jev-session", role: "user", content: "help" });
+    const fetch = vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+      const payload = JSON.parse(String(init?.body));
+      expect(JSON.stringify(payload)).not.toContain("hidden");
+      return new Response(JSON.stringify({ model: "jev-1.13.0", usage: { input_tokens: 10, output_tokens: 0 }, answers: Object.fromEntries(Object.keys(payload.questions).map(id => [id, { type: "noul", noul: id.startsWith("skill.") ? 0.95 : 0.05 }])) }));
+    });
+    const built = await harness.build("jev-session", { skillVisibilityStrategy: () => visible });
+    const input = { text: "Help with this", channel: "cli" as const, evaluation: { context: { userRequest: "Help with this" }, usage: { requestKey: "jev-test", executionSessionId: "jev-session", visibleTurnId: "jev-turn" } } };
+    expect((await built.runtimeRouter.routeAsync(input)).selectedSkill?.name).toBe("visible");
+    expect(await harness.sessionDb.listProviderUsageEntries("default")).toHaveLength(1);
+    await writeFile(paths.configPath, JSON.stringify({ routing: { mode: "standard" } }));
+    expect((await built.runtimeRouter.routeAsync(input)).intent.routingDecision?.actualEngine).toBe("standard");
+    expect(fetch).toHaveBeenCalledOnce();
   });
 
   it("default skill visibility can be re-evaluated against available tools", async () => {

@@ -332,6 +332,7 @@ export class RunRecorder {
     }));
     const candidateDetails = routeCandidateDetails(input.intent);
     const telemetryDetails: SkillRouteTelemetryDetails = {
+      routingDecision: input.intent.routingDecision,
       ...input.routeDetails,
       taskClass: input.routeDetails?.taskClass ?? input.intent.taskClass,
       primarySkill: input.routeDetails?.primarySkill ?? input.intent.primarySkill?.name,

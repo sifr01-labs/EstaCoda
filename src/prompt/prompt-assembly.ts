@@ -96,6 +96,7 @@ export type ProviderPromptInput = {
   routedText: string;
   selectedSkill: LoadedSkill | SkillDefinition | undefined;
   selectedSkillPromptContent?: SelectedSkillPromptContent;
+  supportingSkillPromptContents?: SelectedSkillPromptContent[];
   selectedSkillInstructions: string | undefined;
   attachments?: ChannelAttachment[];
   selectedSkillSetup?: {
@@ -1076,7 +1077,17 @@ function renderSkillResources(resources: SkillResourceEntry[] | undefined): stri
   ].join("\n");
 }
 
-function renderSelectedSkillBlock(
+function renderSelectedSkillBlock(input: ProviderPromptInput, skillPlaybookPlan: string): { content: string; loaded: boolean; truncated: boolean } {
+  const primary = renderSingleSkillBlock(input, skillPlaybookPlan);
+  const supporting = (input.supportingSkillPromptContents ?? []).map(content => {
+    const block = renderSingleSkillBlock({ ...input, selectedSkillPromptContent: content }, "Follow this skill within the current request and execution permissions.");
+    return { ...block, content: `${block.content}\nSkill readiness: ${JSON.stringify(content.readiness ?? { readiness_status: "unknown" })}` };
+  });
+  return { content: [primary, ...supporting].map(block => block.content).join("\n\n"),
+    loaded: primary.loaded || supporting.some(block => block.loaded), truncated: primary.truncated || supporting.some(block => block.truncated) };
+}
+
+function renderSingleSkillBlock(
   input: ProviderPromptInput,
   skillPlaybookPlan: string
 ): { content: string; loaded: boolean; truncated: boolean } {

@@ -8,7 +8,7 @@ import { promptSetupChoice } from './setup-prompts.js';
 export async function promptRoutingModelSetup(prompt: Prompt, locale: SetupCopyLocale, current: ResolvedRoutingConfig): Promise<{ values: Record<string, string>; pendingCredentialWrites?: Array<{envVarName: string; value: string}> } | undefined> {
   const ar = locale === 'ar';
   const mode = await promptSetupChoice(prompt, { title: ar ? 'توجيه النوايا والقدرات' : 'Intent & capability routing',
-    message: ar ? 'اختر وضع التوجيه. إعداد Jev متاح؛ التنفيذ الفعلي سيضاف لاحقًا.' : 'Choose a routing mode. Jev model setup is available; this build still uses Standard routing.',
+    message: ar ? 'يختار Jev النوايا والمهارات. لا يزال اختيار القدرات يستخدم التوجيه القياسي.' : 'Jev-assisted mode selects intents and skills. Capability selection still uses Standard routing.',
     defaultValue: current.mode as string, choices: [
       { id: 'standard', value: 'standard', label: ar ? 'قياسي' : 'Standard' },
       { id: 'jev-assisted', value: 'jev-assisted', label: ar ? 'بمساعدة Jev' : 'Jev-assisted' },

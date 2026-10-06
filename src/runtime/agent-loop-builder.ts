@@ -1,3 +1,6 @@
+import { JevDecisionClient } from "./jev/decision-client.js";
+import { routingSnapshotReader } from "./jev/routing-snapshot.js";
+import { resolveHomeDir } from "../config/home-dir.js";
 import { SessionCapabilityRecovery } from "../tools/capability-tools.js";
 import { dockerToolAdmissionGuard } from "../execution/docker-tool-boundary.js";
 import { executionAuthorityFingerprint } from "../execution/execution-authority.js";
@@ -725,8 +728,12 @@ export class AgentLoopBuilder {
       skillRegistry: sessionSkillRegistry,
       model: routes.model
     });
+    const routingSnapshot = routingSnapshotReader({ homeDir: substrate.homeDir, profileId: substrate.profileId, router: intentRouter, initial: substrate.loadedConfig?.routing });
+    const jevClient = new JevDecisionClient({ homeDir: resolveHomeDir(substrate.homeDir), profileId: substrate.profileId,
+      snapshot: routingSnapshot, recordUsage: entries => input.sessionDb.recordProviderUsageEntries([...entries]) });
     const runtimeRouter = (this.#factories.runtimeRouter ?? ((options) => new RuntimeRouter(options)))({
       intentRouter,
+      jev: { client: jevClient, snapshot: routingSnapshot },
       skillConfig: input.skillConfig ?? {}
     });
     const agentLoop = (this.#factories.agentLoop ?? ((options) => new AgentLoop(options)))({

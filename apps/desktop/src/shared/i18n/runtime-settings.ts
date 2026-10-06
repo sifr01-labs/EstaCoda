@@ -8,7 +8,7 @@ export const runtimeSettingsArabic={
 "TypeSafe":"تايب سيف (TypeSafe)",
 "Intent, skill, and capability selection":"اختيار النوايا والمهارات والقدرات",
 "Jev receives relevant request context and capability descriptions. Your conversation model stays the same.":"يتلقى Jev سياق الطلب ذي الصلة وأوصاف القدرات. يبقى نموذج المحادثة كما هو.",
-"Model setup is available. This build still uses Standard routing; live Jev routing is not installed yet.":"إعداد النموذج متاح. لا يزال هذا الإصدار يستخدم التوجيه القياسي؛ لم يتم تثبيت التوجيه الفعلي باستخدام Jev بعد.",
+"Jev-assisted mode selects intents and skills. Capability selection still uses Standard routing.":"يختار وضع المساعدة باستخدام Jev النوايا والمهارات. لا يزال اختيار القدرات يستخدم التوجيه القياسي.",
 
  'Unsaved changes':'تغييرات غير محفوظة',
  'Command-line language':'لغة سطر الأوامر',

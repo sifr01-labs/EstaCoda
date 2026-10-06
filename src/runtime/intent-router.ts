@@ -28,6 +28,7 @@ export type IntentRouteOptions = {
   surface?: ChannelKind;
   model?: ModelProfile;
   trustedWorkspace?: boolean;
+  skipShadow?: boolean;
 };
 
 type SlashInvocationMatch =
@@ -97,6 +98,26 @@ export class IntentRouter {
   /** Resolves only from the current session-filtered skill registry. */
   resolveSkill(name: string): LoadedSkill | SkillDefinition | undefined {
     return this.#skillRegistry.resolve(name);
+  }
+
+  listSkills(): Array<LoadedSkill | SkillDefinition> { return this.#skillRegistry.list(); }
+
+  /** Semantic selection never overrides declared negative/defer policies. */
+  skillIsDeferred(skill: LoadedSkill | SkillDefinition, prompt: string, route: IntentRoute, options: IntentRouteOptions): boolean {
+    return matchActionableSkill(skill, { prompt, normalized: normalize(prompt), nativeIntent: route.nativeIntent,
+      labels: route.labels, attachments: options.attachments, model: options.model ?? this.#model })?.deferred === true;
+  }
+
+  applySelection(base: IntentRoute, selection: { nativeIntent: NativeIntent; taskClass: IntentTaskClass; labels: string[]; skills: Array<LoadedSkill | SkillDefinition> }): IntentRoute {
+    const skills = selection.skills;
+    const evidence: IntentRouteEvidence[] = [...base.evidence.filter(item => item.kind === "explicit-skill-reference" || item.kind === "slash-invocation" || item.kind === "attachment"),
+      { kind: "jev-decision", detail: "Validated independent Jev intent and skill decisions; deterministic constraints retained." }];
+    return { ...base, nativeIntent: selection.nativeIntent, taskClass: selection.taskClass, labels: selection.labels, primarySkill: skills[0], supportingSkills: skills.slice(1), suggestedSkills: skills,
+      suggestedToolsets: dedupe([...selection.labels.flatMap(label => NATIVE_INTENT_TOOLSETS[label as NativeIntent] ?? []),
+        ...skills.flatMap(skill => [...routingToolsets(skill), ...skill.requiredToolsets])]),
+      confirmationRequired: confirmationForSkills(skills, evidence), evidence, shadowSemanticRoute: undefined,
+      candidates: skills.map((skill, i) => ({ skill, role: i === 0 ? "primary" : "supporting", score: 1, confidence: 1, evidence })),
+      rejectedCandidates: [], rationale: "Live Jev intent and skill selection with deterministic requirements and policy constraints." };
   }
 
   route(prompt: string, options: IntentRouteOptions = {}): IntentRoute {
@@ -252,7 +273,7 @@ export class IntentRouter {
     const rejectedCandidates = candidates.filter((candidate) =>
       candidate.role === "rejected" || candidate.role === "deferred"
     );
-    const shadowSemanticRoute = computeShadowSemanticRoute({
+    const shadowSemanticRoute = options.skipShadow ? undefined : computeShadowSemanticRoute({
       prompt,
       skills: this.#skillRegistry.list(),
       deterministicPrimarySkill: primarySkill,

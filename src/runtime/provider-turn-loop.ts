@@ -271,6 +271,7 @@ export class ProviderTurnLoop {
     routedText: string;
     selectedSkill: LoadedSkill | SkillDefinition | undefined;
     selectedSkillPromptContent?: SelectedSkillPromptContent;
+    supportingSkillPromptContents?: SelectedSkillPromptContent[];
     selectedSkillInstructions: string | undefined;
     selectedSkillResources: LoadedSkill["resources"] | undefined;
     selectedSkillSetup: SkillSetupContext | undefined;
@@ -534,6 +535,11 @@ export class ProviderTurnLoop {
         (input.selectedSkillPromptContent !== undefined || input.selectedSkillInstructions !== undefined) &&
         (input.selectedSkillSetup === undefined || !buildSkillReadinessMetadata(input.selectedSkill, input.selectedSkillSetup).setup_needed)) {
         deliveredSkillNames.add(input.selectedSkill.name);
+      }
+      if (execution.ok && execution.attempts.some(attempt => attempt.state === "dispatched")) {
+        for (const content of input.supportingSkillPromptContents ?? []) {
+          if (content.readiness?.readiness_status === "available") deliveredSkillNames.add(content.name);
+        }
       }
       if (execution.ok && execution.attempts.some((attempt) => attempt.state === "dispatched") && pendingSkillLoads.length > 0) {
         const loadedSkills = pendingSkillLoads.map(({ receipt }) => ({ ...receipt, appliedIteration: iteration }));
@@ -1269,6 +1275,7 @@ export class ProviderTurnLoop {
     routedText: string;
     selectedSkill: LoadedSkill | SkillDefinition | undefined;
     selectedSkillPromptContent?: SelectedSkillPromptContent;
+    supportingSkillPromptContents?: SelectedSkillPromptContent[];
     selectedSkillInstructions: string | undefined;
     selectedSkillResources: LoadedSkill["resources"] | undefined;
     selectedSkillSetup: SkillSetupContext | undefined;
@@ -1420,6 +1427,7 @@ export class ProviderTurnLoop {
     routedText: string;
     selectedSkill: LoadedSkill | SkillDefinition | undefined;
     selectedSkillPromptContent?: SelectedSkillPromptContent;
+    supportingSkillPromptContents?: SelectedSkillPromptContent[];
     selectedSkillInstructions: string | undefined;
     selectedSkillResources: LoadedSkill["resources"] | undefined;
     selectedSkillSetup: SkillSetupContext | undefined;

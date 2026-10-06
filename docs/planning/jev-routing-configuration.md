@@ -1,6 +1,6 @@
-# Jev routing configuration and decision client — commits 1–2
+# Jev routing configuration and decision client — commits 1–3
 
-Status: configuration and validated decision client implemented. Live routing integration is not implemented yet. Both saved modes currently execute Standard routing. Desktop and Setup Editor explicitly disclose this limitation; these foundations must not be advertised as a working Jev routing release.
+Status: configuration, validated decision client, and live intent/skill routing implemented. Jev-assisted now controls intent labels and skill selection before prompt assembly. Capability selection/recovery still use the existing runtime path; full Jev capability routing and packaged live acceptance remain pending. Desktop and Setup Editor disclose this scope.
 
 ## Configuration and setup
 
@@ -21,7 +21,7 @@ TypeSafe's decision API is separate from chat/completions. Jev is therefore a sp
 
 ## Runtime boundary and decision contract
 
-Routing configuration contributes to the existing runtime definition fingerprint. Cached executions retain their lease; changed definitions are used after the active execution releases it. An attempted concurrent replacement remains busy. The decision client now checks configuration/catalog revisions before dispatch and acceptance, discarding stale answers. Later live integration must supply current revisions and connect cancellation at routing boundaries; in-flight tool execution remains unchanged.
+Routing configuration contributes to the existing runtime definition fingerprint. Cached executions retain their lease; changed definitions are used after the active execution releases it. An attempted concurrent replacement remains busy. The decision client now checks configuration/catalog revisions before dispatch and acceptance, discarding stale answers. The session builder now supplies current profile configuration/catalog revisions and the turn cancellation signal; in-flight tool execution remains unchanged.
 
 The versioned routing decision contract includes configured mode, actual engine, model, configuration/catalog revisions, independent intent/skill/capability selections, optional primary skill, and fallback reason. Probability is optional because Standard routing must not fabricate Jev probabilities. Selected labels are multi-label, not a single mutually exclusive choice. This contract is a foundation for later routing consumers, not execution authority.
 
@@ -62,3 +62,25 @@ The 66-test fixture suite covers transport and ledger integration, bounded multi
 Security review: this adds a fixed-endpoint network adapter and a read-only selected-profile credential lookup. Its answers are relevance evidence only; the client grants no execution authority and changes no tool, approval, workspace, task-completion or file-verification behavior. Runtime consumers, fallback presentation and packaged verification are deliberately still pending in the subsequent commits.
 
 Commit 2 checks passed on Node 24.14.1 / pnpm 10.33.0 using the isolated tracked-source validation copy: frozen dependency install, core typecheck, build, 753 test files / 12,219 tests, runtime import audit, ESM audit, source smoke (13/13), compiled smoke (13/13), and final diff checks. The new client adds no dependency or lockfile change. Existing unrelated working-tree changes are outside this commit.
+
+## Live intent and skill selection (commit 3)
+
+The shared `AgentLoopBuilder` wires the client for Desktop, CLI, gateway channels and task workers. `AgentLoop` persists the user turn before awaiting routing so auxiliary usage has a valid turn owner. It supplies the original user request or worker assignment, bounded continuity, and separately marked quoted/retrieved material. Expanded project text and dependency prose cannot become a worker's assignment. Existing request requirements, checkpoint continuation and Step completion contracts remain deterministic.
+
+The asynchronous router reads only the selected profile configuration at routing/acceptance boundaries, including while a runtime is leased. Switching to Standard prevents subsequent Jev requests; changed configuration or skill catalogs invalidate outstanding decisions. Both local semantic shadow selection and the optional LLM shadow reranker are skipped for Jev-assisted decisions, including fallback.
+
+Jev evaluates independent Noul questions for the built-in intent taxonomy and every session-visible skill, using skill names and descriptions rather than a keyword shortlist. The initial conservative thresholds accept at 0.8 and reject at 0.2; intermediate, missing or invalid answers fall back to Standard for the entire routing decision. These thresholds are provisional, not a claim of calibration; held-out measurement remains commit 6. Fallback re-resolves the current registry and records configured/actual engine, model, revisions, probabilities and the fallback reason in route events and skill telemetry. Rich cross-surface engine/fallback presentation remains commit 5.
+
+Explicit named skills, aliases, unresolved references, declared negative/defer rules, ready-attachment constraints, save-only continuity and confirmation policies stay authoritative. Several skills or no skill may be selected. For compatibility with existing execution metadata, explicit/checkpoint skills sort first, then applicability probability and stable name order; the first is the primary. No extra exclusive Choice call is needed in this implementation. All selected complementary instruction bodies or existing large-skill contracts travel through the normal protected skill prompt layer, with setup state. Combinations over 32,000 instruction characters fall back instead of silently dropping a selected skill. Only delivered, ready supporting skills count toward instruction receipts. Execution approval and completion evidence remain unchanged.
+
+Security review covers the fixed TypeSafe transport, profile-local credentials/config, current session visibility, declared negative/defer constraints, quoted/retrieved context, worker scope, cancellation and stale selections. Semantic selection changes relevance and instruction loading, never execution authority. No dependency or lockfile changes; no live API or installed-app success is claimed from fixture verification.
+
+Commit 3 validation on Node 24.14.1 / pnpm 10.33.0:
+
+- Final core suite: 754 files / 12,249 tests passed, including 27 routing regressions and shared builder, agent-loop and prompt-assembly integration coverage.
+- Frozen dependency check, core typecheck/build, runtime import and ESM audits passed.
+- Source and compiled smoke suites: 13/13 each.
+- Desktop protocol/type checks, 180 unit tests and 12 English/Arabic runtime-settings browser tests passed. The initial sandboxed Desktop PTY tests were blocked by process permissions; the normal process-enabled run passed.
+- Final diff checks passed. Validation used an isolated copy of tracked sources plus these changes because unrelated duplicate source files remain in the working checkout. Unrelated documentation changes were not included.
+
+No installed application/gateway update or live TypeSafe quality measurement was performed in this commit. Capability selection and recovery remain commit 4; live API calibration and packaged acceptance remain commits 6–7.

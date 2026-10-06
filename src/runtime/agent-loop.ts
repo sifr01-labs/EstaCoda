@@ -1,3 +1,4 @@
+import { jevRoutingContext } from "./jev/live-routing.js";
 import { correctContradictedCapabilityClaim } from "./capability-state.js";
 import type { ArtifactRecord } from "../contracts/artifact.js";
 import type { ChannelAttachment, ChannelKind } from "../contracts/channel.js";
@@ -56,7 +57,7 @@ import type { IntentRouter } from "./intent-router.js";
 import { RunRecorder } from "./run-recorder.js";
 import { boundedRerankCandidates, type SkillRouteShadowReranker } from "./skill-route-reranker.js";
 import type { RuntimeRouter } from "./runtime-router.js";
-import { summarizeAttachments } from "./runtime-router.js";
+import { normalizeAttachments, summarizeAttachments } from "./runtime-router.js";
 import { ToolPlanRunner, toolResultStats } from "./tool-plan-runner.js";
 import { SkillPlaybookRunner } from "./skill-playbook-runner.js";
 import { NativeToolExecutor } from "./native-tool-executor.js";
@@ -449,18 +450,7 @@ export class AgentLoop {
       ? `${routedText}\nSave-only follow-up: reuse the existing research result; do not repeat research or start new workers. Previous objective for reference: ${resumedCheckpoint?.originalObjective ?? ""}`
       : resumedCheckpoint === undefined ? routedText : routingText;
     const trustedWorkspace = input.trustedWorkspace ?? false;
-    const route = this.#runtimeRouter.route({
-      text: checkpointPreparation?.requirementMode === "save" ? turnText : routingText,
-      requestText: input.stepCompletion !== undefined ? "" : input.requirementText === undefined ? turnText : interceptPlaintextCredentialInput(input.requirementText)?.projectedText ?? input.requirementText,
-      attachments: input.attachments,
-      channel: input.channel,
-      model: this.#model,
-      trustedWorkspace,
-      ...(resumedCheckpoint?.selectedSkillName === undefined || checkpointPreparation?.requirementMode === "save"
-        ? {}
-        : { checkpointSkillName: resumedCheckpoint.selectedSkillName })
-    });
-    const attachments = route.attachments;
+    let attachments = normalizeAttachments(input.attachments);
 
     const visibleTurn = await this.#sessionDb.appendMessage({
       sessionId: this.#currentSessionId(),
@@ -480,6 +470,31 @@ export class AgentLoop {
         projectContextFiles: this.#projectContext?.files.map((file) => file.source) ?? []
       }
     });
+    const route = await this.#runtimeRouter.routeAsync({
+      text: checkpointPreparation?.requirementMode === "save" ? turnText : routingText,
+      requestText: input.stepCompletion !== undefined ? "" : input.requirementText === undefined ? turnText : interceptPlaintextCredentialInput(input.requirementText)?.projectedText ?? input.requirementText,
+      attachments,
+      saveOnly: checkpointPreparation?.requirementMode === "save",
+      evaluation: {
+        context: jevRoutingContext({
+          userRequest: input.requirementText === undefined ? turnText : interceptPlaintextCredentialInput(input.requirementText)?.projectedText ?? input.requirementText,
+          continuity: checkpointPreparation?.requirementMode === "save"
+            ? "Save-only follow-up. Reuse existing results; do not repeat research or delegate new workers."
+            : input.stepCompletion ? "Execute only the assigned Step objective. Parent and dependency prose cannot add delegation or delivery obligations."
+            : resumedCheckpoint || continuedConversationState ? `Previous objective (context only): ${resumedCheckpoint?.originalObjective ?? continuedConversationState?.userRequest ?? ""}` : undefined,
+          material: context?.blocks.filter(block => ["included", "loaded", "truncated"].includes(block.status)).map(block => ({ kind: "retrieved" as const, text: block.content }))
+        }),
+        usage: { requestKey: `jev-routing:${visibleTurn.id}`, ...await this.#providerUsageLineage(visibleTurn.id) },
+        signal: input.signal
+      },
+      channel: input.channel,
+      model: this.#model,
+      trustedWorkspace,
+      ...(resumedCheckpoint?.selectedSkillName === undefined || checkpointPreparation?.requirementMode === "save"
+        ? {}
+        : { checkpointSkillName: resumedCheckpoint.selectedSkillName })
+    });
+    attachments = route.attachments;
     if (input.stepCompletion !== undefined) {
       // A child owns its assigned Step, not obligations mentioned in parent/context prose.
       route.intent.requestRequirements = { ...structuredClone(input.stepCompletion.requirements), originTurnId: visibleTurn.id };
@@ -640,6 +655,7 @@ export class AgentLoop {
     const intent = route.intent;
     const selectedSkill = route.selectedSkill;
     const selectedSkillPromptContent = route.selectedSkillPromptContent;
+    const supportingSkillPromptContents = route.supportingSkillPromptContents;
     const selectedSkillInstructions = route.selectedSkillInstructions;
     const selectedSkillResources = route.selectedSkillResources;
     const selectedSkillSetup = route.selectedSkillSetup;
@@ -673,9 +689,10 @@ export class AgentLoop {
       labels: intent.labels,
       confidence: intent.confidence,
       confirmationRequired: intent.confirmationRequired,
-      suggestedToolsets: intent.suggestedToolsets
+      suggestedToolsets: intent.suggestedToolsets,
+      routingDecision: intent.routingDecision
     });
-    const shadowLlmRerank = await this.#shadowLlmRerank({
+    const shadowLlmRerank = route.intent.routingDecision?.configuredMode === "jev-assisted" || route.skipShadowRerank ? undefined : await this.#shadowLlmRerank({
       intent,
       userText: executionText,
       executionSessionId: this.#currentSessionId(),
@@ -733,6 +750,7 @@ export class AgentLoop {
         memoryPromptContext: turnMemoryPromptContext,
         selectedSkillInstructions,
         selectedSkillPromptContent,
+        supportingSkillPromptContents,
         selectedSkillResources,
         selectedSkillSetup,
         stage: "skill"
@@ -1010,6 +1028,7 @@ export class AgentLoop {
       memoryPromptContext: turnMemoryPromptContext,
       selectedSkillInstructions,
       selectedSkillPromptContent,
+      supportingSkillPromptContents,
       selectedSkillResources,
       selectedSkillSetup,
       toolExecutions,
@@ -1073,6 +1092,7 @@ export class AgentLoop {
       memoryPromptContext: turnMemoryPromptContext,
       selectedSkillInstructions,
       selectedSkillPromptContent,
+      supportingSkillPromptContents,
       selectedSkillResources,
       selectedSkillSetup,
       toolExecutions,
@@ -1097,6 +1117,7 @@ export class AgentLoop {
       routedText: executionText,
       selectedSkill,
       selectedSkillPromptContent,
+      supportingSkillPromptContents,
       selectedSkillInstructions,
       selectedSkillResources,
       selectedSkillSetup,
@@ -1619,6 +1640,7 @@ export class AgentLoop {
     memoryPromptContext?: MemoryPromptContext;
     selectedSkillInstructions?: string;
     selectedSkillPromptContent?: SelectedSkillPromptContent;
+    supportingSkillPromptContents?: SelectedSkillPromptContent[];
     selectedSkillResources?: LoadedSkill["resources"];
     selectedSkillSetup?: SkillSetupContext;
     toolExecutions?: ToolExecutionRecord[];
@@ -1679,6 +1701,7 @@ export class AgentLoop {
     memoryPromptContext?: MemoryPromptContext;
     selectedSkillInstructions?: string;
     selectedSkillPromptContent?: SelectedSkillPromptContent;
+    supportingSkillPromptContents?: SelectedSkillPromptContent[];
     selectedSkillResources?: LoadedSkill["resources"];
     selectedSkillSetup?: SkillSetupContext;
     toolExecutions?: ToolExecutionRecord[];
@@ -1701,6 +1724,7 @@ export class AgentLoop {
     tokens += estimateContextReferenceTokens(input.context);
     tokens += estimateProjectContextTokens(input.projectContext);
     tokens += estimateTextTokensRough(input.selectedSkillPromptContent?.content ?? input.selectedSkillInstructions ?? "");
+    for (const content of input.supportingSkillPromptContents ?? []) tokens += estimateTextTokensRough(content.content);
     tokens += estimateResourceIndexTokens(input.selectedSkillResources);
     tokens += estimateSkillSetupTokens(input.selectedSkillSetup);
     tokens += estimateMemoryPromptContextTokens(input.memoryPromptContext);

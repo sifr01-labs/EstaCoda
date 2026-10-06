@@ -1,3 +1,6 @@
+import { normalizeRoutingConfig } from "../config/routing-config.js";
+import { selectJevRoute, routingDecision, type LiveJevRouting } from "./jev/live-routing.js";
+import type { JevEvaluation } from "./jev/types.js";
 import { existsSync } from "node:fs";
 import { isAbsolute } from "node:path";
 import type { ChannelAttachment, ChannelKind } from "../contracts/channel.js";
@@ -7,6 +10,7 @@ import type { LoadedSkill, SelectedSkillPromptContent, SkillDefinition } from ".
 import { selectSkillPromptContent } from "../skills/skill-contract.js";
 import {
   resolveSkillSetupContext,
+  buildSkillReadinessMetadata,
   type SkillSetupContext
 } from "../skills/skill-readiness.js";
 import type { IntentRouter } from "./intent-router.js";
@@ -17,23 +21,28 @@ export type RuntimeRouteResult = {
   selectedSkill: LoadedSkill | SkillDefinition | undefined;
   selectedSkillPromptContent: SelectedSkillPromptContent | undefined;
   selectedSkillInstructions: string | undefined;
+  supportingSkillPromptContents?: SelectedSkillPromptContent[];
   selectedSkillResources: LoadedSkill["resources"] | undefined;
   selectedSkillSetup: SkillSetupContext | undefined;
   attachments: ChannelAttachment[] | undefined;
   attachmentFailureResponse?: string;
+  skipShadowRerank?: boolean;
 };
 
 export type RuntimeRouterOptions = {
   intentRouter: IntentRouter;
+  jev?: LiveJevRouting;
   skillConfig: Record<string, Record<string, unknown>>;
 };
 
 export class RuntimeRouter {
+  readonly #jev: LiveJevRouting | undefined;
   readonly #intentRouter: IntentRouter;
   readonly #skillConfig: Record<string, Record<string, unknown>>;
 
   constructor(options: RuntimeRouterOptions) {
     this.#intentRouter = options.intentRouter;
+    this.#jev = options.jev;
     this.#skillConfig = options.skillConfig;
   }
 
@@ -46,6 +55,7 @@ export class RuntimeRouter {
     trustedWorkspace?: boolean;
     /** Continuity hint only; resolution still uses the current session registry. */
     checkpointSkillName?: string;
+    skipShadow?: boolean;
   }): RuntimeRouteResult {
     const attachments = normalizeAttachments(input.attachments);
     const attachmentFailureResponse = buildAttachmentFailureResponse(attachments);
@@ -64,6 +74,7 @@ export class RuntimeRouter {
     }
 
     const intent = this.#intentRouter.route(input.text, {
+      skipShadow: input.skipShadow,
       requestText: input.requestText ?? input.text,
       attachments,
       channel: input.channel,
@@ -72,6 +83,52 @@ export class RuntimeRouter {
       trustedWorkspace: input.trustedWorkspace ?? false
     });
 
+    return this.#result(intent, input, attachments);
+  }
+
+  async routeAsync(input: Parameters<RuntimeRouter['route']>[0] & {
+    evaluation: Omit<JevEvaluation, 'questions' | 'thresholds'>;
+    saveOnly?: boolean;
+  }): Promise<RuntimeRouteResult> {
+    if (!this.#jev) return this.route(input);
+    let snapshot;
+    try { snapshot = this.#jev.snapshot(); } catch {
+      const result = this.route({ ...input, skipShadow: true });
+      result.skipShadowRerank = true;
+      result.intent.routingDecision = routingDecision(result.intent, { config: normalizeRoutingConfig(undefined), configurationRevision: "unavailable", catalogRevision: "unavailable" }, 'engine-unavailable');
+      result.intent.rationale += " Routing configuration unavailable; Standard routing used.";
+      return result;
+    }
+    const base = this.route({ ...input, skipShadow: snapshot.config.mode === 'jev-assisted' });
+    if (snapshot.config.mode === 'standard' || base.attachmentFailureResponse) {
+      base.intent.routingDecision = routingDecision(base.intent, snapshot);
+      return base;
+    }
+    try {
+      const intent = await selectJevRoute({ routing: this.#jev, snapshot, router: this.#intentRouter, base: base.intent,
+        options: { ...input, attachments: base.attachments }, evaluation: input.evaluation,
+        saveOnly: input.saveOnly, checkpointSkillName: input.checkpointSkillName });
+      if (intent.routingDecision?.actualEngine === 'standard') {
+        const fresh = this.route({ ...input, skipShadow: true });
+        fresh.intent.routingDecision = { ...routingDecision(fresh.intent, snapshot, intent.routingDecision.fallbackReason) };
+        return fresh;
+      }
+      const result = this.#result(intent, { ...input, checkpointSkillName: intent.routingDecision?.actualEngine === 'jev' ? undefined : input.checkpointSkillName }, base.attachments);
+      if (intent.routingDecision?.actualEngine === 'jev') {
+        result.supportingSkillPromptContents = intent.suggestedSkills.filter(skill => skill.name !== result.selectedSkill?.name).filter(isLoadedSkill).map(skill => ({ ...selectSkillPromptContent(skill),
+          readiness: buildSkillReadinessMetadata(skill, resolveSkillSetupContext(skill, this.#skillConfig[skill.name])) }));
+        // Never silently discard a selected skill when the combined instruction payload is too large.
+        if ([result.selectedSkillPromptContent, ...result.supportingSkillPromptContents].reduce((n, content) => n + (content?.content.length ?? 0), 0) > 32_000) throw new Error('Skill context overflow');
+      }
+      return result;
+    } catch {
+      const fresh = this.route({ ...input, skipShadow: true });
+      fresh.intent.routingDecision = routingDecision(fresh.intent, snapshot, 'invalid-response');
+      return fresh;
+    }
+  }
+
+  #result(intent: IntentRoute, input: Parameters<RuntimeRouter['route']>[0], attachments: ChannelAttachment[] | undefined): RuntimeRouteResult {
     const resumedSkill = input.checkpointSkillName === undefined || (intent.requestRequirements?.skillReferences.length ?? 0) > 0
       ? undefined
       : this.#intentRouter.resolveSkill(input.checkpointSkillName);

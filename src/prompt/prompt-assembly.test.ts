@@ -453,6 +453,17 @@ describe("assembleProviderPrompt", () => {
     expect(rendered).not.toContain("legacy selected instructions should not render");
   });
 
+  it("packs complementary Jev skills with their contract loaders and readiness", () => {
+    const prompt = assembleProviderPrompt(basePromptInput({
+      selectedSkill: selectedTestSkill(), selectedSkillPromptContent: selectedPromptContent({ content: "Primary instructions" }),
+      supportingSkillPromptContents: [selectedPromptContent({ name: "writer", content: "Supporting writing contract", contentMode: "contract", loadInstruction: "skill.read writer full", readiness: { readiness_status: "missing-setup", setup_needed: true } })]
+    }));
+    const rendered = renderMessages(prompt.messages);
+    expect(rendered).toContain("Primary instructions"); expect(rendered).toContain("Supporting writing contract");
+    expect(rendered).toContain("skill.read writer full"); expect(rendered).toContain("missing-setup");
+    expect(prompt.budget.layers.find(layer => layer.name === "skill")?.protected).toBe(true);
+  });
+
   it("injects full selected skill content between 4K and the inline cap", () => {
     const tailMarker = "FULL_MODE_TAIL_MARKER";
     const fullContent = `${"A".repeat(5_000)}${tailMarker}`;

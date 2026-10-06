@@ -129,6 +129,7 @@ export type SkillReferenceIndexEntry = {
 };
 
 export type SelectedSkillPromptContent = {
+  readiness?: { readiness_status: "available" | "missing-setup"; setup_needed: boolean; setup_note?: string };
   name: string;
   description: string;
   content: string;
@@ -291,6 +292,7 @@ export type SkillRouteFinalOutcomeStatus =
   | "unknown";
 
 export type SkillRouteTelemetryDetails = {
+  routingDecision?: import("./routing.js").RoutingDecision;
   taskClass?: string;
   primarySkill?: string;
   supportingSkills?: string[];

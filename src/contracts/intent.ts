@@ -11,6 +11,7 @@ export type NativeIntent =
 
 export type IntentRouteEvidence = {
   kind:
+    | "jev-decision"
     | "slash-invocation"
     | "explicit-skill-reference"
     | "native-intent"
@@ -95,6 +96,7 @@ export type IntentShadowRoute = {
 };
 
 export type IntentRoute = {
+  routingDecision?: import("./routing.js").RoutingDecision;
   requestRequirements?: RequestRequirements;
   skillRequests?: Array<{ reference: string; status: "resolved" | "ambiguous" | "unavailable" | "deferred"; candidates: string[] }>;
   nativeIntent: NativeIntent;
