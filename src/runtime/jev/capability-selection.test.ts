@@ -160,3 +160,9 @@ it('respects the schema token budget before the count limit and prioritizes expl
  h.intent.suggestedSkills = [{ name: 'bulk', requiredToolsets: ['test'] }] as typeof h.intent.suggestedSkills;
  const result = await h.select(); expect(names(result).length).toBeLessThan(15); expect(names(result)).toEqual(expect.arrayContaining(['file_write', 'file_read', 'capability_request'])); expect(JSON.stringify(result.initialTools).length / 4).toBeLessThanOrEqual(MAX_PROVIDER_SCHEMA_TOKENS);
 });
+
+it.each([[401,'authentication'],[429,'rate-limited']] as const)('retains actionable initial and discovery fallback for HTTP %i',async(status,reason)=>{
+ registry.register(tool('file.read',{toolsets:['files']}));const h=await harness('Read the file');fetcher.mockResolvedValue(new Response('private provider diagnostic',{status}));
+ expect((await h.select()).capabilityRouting).toMatchObject({configuredMode:'jev-assisted',actualEngine:'standard',fallbackReason:reason});
+ expect((await recovery.discoverAsync({query:'file'},scope)).metadata?.routing).toMatchObject({configuredMode:'jev-assisted',actualEngine:'standard',fallbackReason:reason});
+});

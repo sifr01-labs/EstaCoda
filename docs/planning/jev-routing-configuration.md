@@ -1,6 +1,6 @@
-# Jev routing configuration and decision client — commits 1–4
+# Jev routing configuration and decision client — commits 1–5
 
-Status: configuration, validated decision client, live intent/skill routing, and capability selection/discovery implemented. Jev-assisted controls relevance decisions in the shared runtime. Existing execution permissions and completion checks remain authoritative. Calibration, richer fallback presentation and packaged live acceptance remain pending.
+Status: configuration, validated decision client, live intent/skill routing, and capability selection/discovery implemented. Jev-assisted controls relevance decisions in the shared runtime. Existing execution permissions and completion checks remain authoritative. The settings connection check and actual-engine/fallback presentation are implemented. Calibration and packaged live acceptance remain pending.
 
 ## Configuration and setup
 
@@ -17,7 +17,7 @@ Desktop: Settings → Runtime → Execution → Intent & capability routing. Sel
 
 CLI: Setup Editor → Intent & capability routing uses the existing centralized selector, secret prompt and reviewed apply executor. Cancelling review writes neither configuration nor credentials. Switching Standard/Jev-assisted is shared profile configuration, so clients using that profile load the same setting. Telegram does not gain an independent settings mutation path.
 
-TypeSafe's decision API is separate from chat/completions. Jev is therefore a specialized model route, similar to specialized media configuration; it is not registered as a conversation provider. The initial picker catalog is pinned from https://docs.typesafe.ai/models, inspected 2026-10-06. Configuration/diagnostics make no Jev request and do not claim successful provider authentication.
+TypeSafe's decision API is separate from chat/completions. Jev is therefore a specialized model route, similar to specialized media configuration; it is not registered as a conversation provider. The initial picker catalog is pinned from https://docs.typesafe.ai/models, inspected 2026-10-06. Ordinary configuration review and offline verification make no Jev request. The explicit saved-connection check described below is the only settings action that contacts TypeSafe.
 
 ## Runtime boundary and decision contract
 
@@ -69,7 +69,7 @@ The shared `AgentLoopBuilder` wires the client for Desktop, CLI, gateway channel
 
 The asynchronous router reads only the selected profile configuration at routing/acceptance boundaries, including while a runtime is leased. Switching to Standard prevents subsequent Jev requests; changed configuration or skill catalogs invalidate outstanding decisions. Both local semantic shadow selection and the optional LLM shadow reranker are skipped for Jev-assisted decisions, including fallback.
 
-Jev evaluates independent Noul questions for the built-in intent taxonomy and every session-visible skill, using skill names and descriptions rather than a keyword shortlist. The initial conservative thresholds accept at 0.8 and reject at 0.2; intermediate, missing or invalid answers fall back to Standard for the entire routing decision. These thresholds are provisional, not a claim of calibration; held-out measurement remains commit 6. Fallback re-resolves the current registry and records configured/actual engine, model, revisions, probabilities and the fallback reason in route events and skill telemetry. Rich cross-surface engine/fallback presentation remains commit 5.
+Jev evaluates independent Noul questions for the built-in intent taxonomy and every session-visible skill, using skill names and descriptions rather than a keyword shortlist. The initial conservative thresholds accept at 0.8 and reject at 0.2; intermediate, missing or invalid answers fall back to Standard for the entire routing decision. These thresholds are provisional, not a claim of calibration; held-out measurement remains commit 6. Fallback re-resolves the current registry and records configured/actual engine, model, revisions, probabilities and the fallback reason in route events and skill telemetry. Commit 5 adds the cross-surface engine/fallback presentation described below.
 
 Explicit named skills, aliases, unresolved references, declared negative/defer rules, ready-attachment constraints, save-only continuity and confirmation policies stay authoritative. Several skills or no skill may be selected. For compatibility with existing execution metadata, explicit/checkpoint skills sort first, then applicability probability and stable name order; the first is the primary. No extra exclusive Choice call is needed in this implementation. All selected complementary instruction bodies or existing large-skill contracts travel through the normal protected skill prompt layer, with setup state. Combinations over 32,000 instruction characters fall back instead of silently dropping a selected skill. Only delivered, ready supporting skills count toward instruction receipts. Execution approval and completion evidence remain unchanged.
 
@@ -98,7 +98,7 @@ Exposure retains the existing 100-tool and 24,000 estimated schema-token limits.
 
 Catalog fingerprints now include session-filtered metadata, schemas, aliases, registered handler identities and execution binding. Initial selection, discovery and recovery application reject stale asynchronous decisions. Availability is checked again before initial exposure or expansion; recovery applies its state changes together after validation. Existing executor policy, workspace trust, approvals, session/profile scope, skill confirmation and completion evidence are unchanged. Semantic selection and exposure do not authorize actions.
 
-Initial inventory events record the versioned capability decision, model, configured/actual engine, revisions, probabilities and conflicts. Discovery returns bounded engine/fallback metadata alongside its matches. The provider receives bounded conflict/readiness context; user-facing engine status and connection checks remain commit 5. Desktop and CLI setup copy now accurately states that Jev selects intents, skills and capabilities.
+Initial inventory events record the versioned capability decision, model, configured/actual engine, revisions, probabilities and conflicts. Discovery returns bounded engine/fallback metadata alongside its matches. The provider receives bounded conflict/readiness context; commit 5 adds user-facing engine status and connection checks. Desktop and CLI setup copy now accurately states that Jev selects intents, skills and capabilities.
 
 Security review covers fixed-endpoint routing egress, selected-profile credential resolution, quoted/context boundaries, catalog and execution-scope changes, receipt authenticity, schema limits, next-iteration exposure and preserved approval denials. No dependencies or lockfiles changed. These fixture checks do not establish live model quality or a rebuilt application release; those remain commits 6–7.
 
@@ -110,3 +110,27 @@ Commit 4 validation on Node 24.14.1 / pnpm 10.33.0:
 - Diff checks passed. Checks used the isolated tracked-source copy; the working checkout's unrelated duplicate `bidi-js` declaration still prevents direct typechecking there. Unrelated documents and duplicate files were left untouched.
 
 No live TypeSafe request or installed Desktop/gateway update was performed. The checks establish deterministic integration and governance behavior, not model calibration or packaged acceptance.
+
+
+## Routing status and saved connection checks (commit 5)
+
+Desktop runtime routing settings disclose routing context egress and when saved changes take effect. After saving, **Check saved connection** sends one fixed synthetic greeting question to TypeSafe using the saved model and selected-profile credential. The control names the potential charge before the operator clicks it. It is disabled while changes are unsaved; it never saves configuration or changes routing mode. Setup Editor offers the same saved check with explicit confirmation. Offline verification remains offline. Standard mode sends no check request, and remains selectable after missing credentials or a service failure.
+
+A check uses the existing fixed-endpoint Jev client, deadline, profile credential resolver and canonical auxiliary usage ledger. It rejects cancellation and configuration/credential changes during the check, rejects parallel checks on the same settings owner, and aborts when that owner is disposed. Results contain only bounded status/reason/model fields. Authentication, missing credentials, throttling, timeout, malformed response and stale settings have actionable English/Arabic copy; no provider error body is returned. A successful check establishes connectivity, not calibrated routing quality.
+
+The shared runtime persists and emits `routing-status` facts for intent/skill decisions, initial capability decisions and query-based recovery. Each records the configured mode, actual engine, stage, safe model identifier and fallback reason. Desktop projects only these allowlisted fields through bounded SQL, separately from conversation-model events. Activity history retains each decision; fallback explanations remain visible outside the collapsed history. Details → Activity shows the latest recorded decision per stage in the loaded activity window. CLI displays the same diagnostic copy. Telegram shows routing progress and keeps a fallback explanation in its own message so later progress cannot overwrite it. Model pickers and provider fallback controls remain independent.
+
+Settings use the existing reviewed profile apply and gateway configuration-change notification. Runtime cache definitions refresh after active leases settle, while subsequent routing decisions re-read saved mode/configuration and reject stale Jev answers. Already executing actions retain their permissions; turning routing off does not cancel them.
+
+Security review: no change to execution authority, workspace trust, approvals, catalog visibility or credential boundaries. Connection checks require explicit request/consent fields, use synthetic context only, and do not accept caller-supplied endpoints or prompts. Credentials and raw provider diagnostics never enter activity projections. Recovery scope is revalidated after asynchronous status recording. No dependency changes. Live TypeSafe calibration and rebuilt Desktop/gateway acceptance remain commits 6–7.
+
+Commit 5 validation on Node 24.14.1 / pnpm 10.33.0:
+
+- Core suite: 758 files / 12,297 tests passed, including connection-check consent, accounting, redaction, profile isolation, saved credential repair, cancellation, stale results, actionable fallback reasons and historic status projection.
+- Desktop unit suite: 48 files / 183 tests passed, including IPC consent checks, routing/conversation-model separation and the full configured Jev timeout without premature disconnection.
+- Browser suite: 26 tests passed for English/Arabic settings, enable/disable, failed/successful checks, fallback history, narrow layouts and Details. English and Arabic connection-check screens were visually inspected.
+- Reviewed routing apply notification coverage passed, together with existing cache-lease refresh and live mode-switch regressions.
+- Frozen dependency verification, core and Desktop type checks, build, protocol boundary, runtime import and ESM audits passed. Source and compiled smoke: 13/13 each. Final diff checks passed.
+- Validation used an isolated copy of tracked sources plus this change because unrelated duplicate source files in the working checkout prevent direct typechecking. Unrelated documentation and duplicate files are excluded from this commit.
+
+No live TypeSafe request or installed Desktop/gateway update was performed. This commit completes the settings and diagnostic surfaces; release acceptance remains the work of commits 6–7.

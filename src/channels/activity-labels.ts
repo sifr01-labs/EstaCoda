@@ -1,3 +1,4 @@
+import {formatRoutingStatus} from '../contracts/desktop-control/routing.js';
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
 import { redactToolDisplayPreview } from "../tools/tool-target-summary.js";
 import { formatSpendingThresholdWarning } from "../ui/spending-warning-format.js";
@@ -90,6 +91,8 @@ export function renderChannelProgressLabel(
       return "";
     case "provider-serving-transition":
       return `${providerServingTransitionLabel(locale, event.transition)} · ${event.model}`;
+    case "routing-status":
+      return formatRoutingStatus(event, locale);
     case "provider-spending-warning":
       return formatSpendingThresholdWarning(event, locale);
     case "delegation-progress":

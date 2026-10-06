@@ -72,7 +72,7 @@ export type MethodContracts = {
  "settings.inspectDependency":{params:{operationId:string};result:ConnectionOperation};
   "settings.apply":{params:import('./settings.js').SettingsBinding;result:{operationId:string;state:'applied'|'uncertain'|'unknown'}};
   "settings.inspect":{params:{operationId?:string};result:{operationId:string;state:'applied'|'uncertain'|'unknown'}};
-  "settings.verify":{params:Record<string,never>;result:{state:'configured'|'repair_required'}};
+  "settings.verify":{params:{routing?:true;spendApproved?:true};result:{state:'configured'|'repair_required';routing?:import('./routing.js').RoutingCheckResult}};
 
   "settings.value":{params:{fieldId:string;selectors:string[]};result:import('./settings.js').SettingChange};
   "settings.read":{params:{offset?:number;section:import('./settings.js').SettingsSection};result:import('./settings.js').SettingsPage};

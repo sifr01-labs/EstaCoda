@@ -1,3 +1,4 @@
+import { recordRoutingStatus } from "./jev/routing-status.js";
 import { JevDecisionClient } from "./jev/decision-client.js";
 import { routingSnapshotReader } from "./jev/routing-snapshot.js";
 import { resolveHomeDir } from "../config/home-dir.js";
@@ -731,7 +732,7 @@ export class AgentLoopBuilder {
     const routingSnapshot = routingSnapshotReader({ homeDir: substrate.homeDir, profileId: substrate.profileId, router: intentRouter, initial: substrate.loadedConfig?.routing, capabilityRevision: () => ({ sessionId: sessionRuntimeContext.currentSessionId(), catalog: capabilityRecovery.catalogRevision(), execution: executionBinding() }) });
     const jevClient = new JevDecisionClient({ homeDir: resolveHomeDir(substrate.homeDir), profileId: substrate.profileId,
       snapshot: routingSnapshot, recordUsage: entries => input.sessionDb.recordProviderUsageEntries([...entries]) });
-    capabilityRecovery.bindRouting({ client: jevClient, snapshot: routingSnapshot });
+    capabilityRecovery.bindRouting({ client: jevClient, snapshot: routingSnapshot }, (status, context) => recordRoutingStatus({ db: input.sessionDb, sessionId: context?.sessionId ?? input.sessionId, turnMessageId: context?.visibleTurnId, status, onEvent: context?.onEvent }));
     const runtimeRouter = (this.#factories.runtimeRouter ?? ((options) => new RuntimeRouter(options)))({
       intentRouter,
       jev: { client: jevClient, snapshot: routingSnapshot },

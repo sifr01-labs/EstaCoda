@@ -155,7 +155,7 @@ export class DesktopBridge {
       'artifacts.mediaClose':request=>{if(request.method!=='artifacts.mediaClose')throw new ControlProtocolError('-32601');return {result:this.mediaOutput.close(request.params.transferId)};},
       'settings.apply':async(request,signal)=>{if(request.method!=='settings.apply')throw new ControlProtocolError('-32601');return {result:await this.publicSettings.apply(request.params,signal)};},
       'settings.inspect':async request=>{if(request.method!=='settings.inspect')throw new ControlProtocolError('-32601');return {result:await this.publicSettings.inspect(request.params.operationId)};},
-      'settings.verify':async()=>({result:await this.publicSettings.verify()}),
+      'settings.verify':async(request,signal)=>{if(request.method!=='settings.verify')throw new ControlProtocolError('-32601');return {result:JSON.parse(JSON.stringify(await this.publicSettings.verify(request.params,signal)))};},
       'settings.value':async request=>{if(request.method!=='settings.value')throw new ControlProtocolError('-32601');return {result:await this.publicSettings.value(request.params)};},
       'setup.reviewWorkspace':async request=>{if(request.method!=='setup.reviewWorkspace')throw new ControlProtocolError('-32601');return {result:await this.onboardingWorkspace.review(request.params)};},
       'setup.applyWorkspace':async request=>{if(request.method!=='setup.applyWorkspace')throw new ControlProtocolError('-32601');return {result:await this.onboardingWorkspace.apply(request.params)};},

@@ -66,7 +66,7 @@ export async function selectJevRoute(input: {
   const fallback = (reason: RoutingDecision['fallbackReason']): IntentRoute => ({ ...base, shadowSemanticRoute: undefined, routingDecision: routingDecision(base, input.snapshot, reason) });
   if (result.status !== 'ok') {
     const code = result.failure?.code;
-    return fallback(code === 'credentials-unavailable' ? code : code === 'timeout' ? code : result.status === 'partial' ? 'uncertain' : code === 'invalid-response' ? code : 'service-error');
+    return fallback(code === 'credentials-unavailable' || code === 'authentication' || code === 'rate-limited' ? code : code === 'timeout' ? code : result.status === 'partial' ? 'uncertain' : code === 'invalid-response' ? code : 'service-error');
   }
   // Protect callers and test adapters as well as the HTTP client against a changed live catalog.
   const now = input.routing.snapshot();

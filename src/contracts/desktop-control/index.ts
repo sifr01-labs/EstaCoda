@@ -21,3 +21,5 @@ export * from './schedules.js';
 export * from './work-input.js';
 
 export * from "./connectors.js";
+
+export {formatRoutingStatus,formatRoutingCheck} from './routing.js';

@@ -1,3 +1,4 @@
+import {formatRoutingStatus} from '../contracts/desktop-control/routing.js';
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
 import type { Runtime } from "../runtime/create-runtime.js";
 import { ToolActivityViewModelBuilder } from "./tool-activity-view-models.js";
@@ -129,6 +130,8 @@ function renderOneShotEvent(
         : `provider issue: ${event.provider}/${event.model}${event.willFallback ? " (trying fallback)" : ""}`);
     case "provider-budget-exhausted":
       return safeLine(`provider budget: ${event.reason}`);
+    case "routing-status":
+      return safeLine(formatRoutingStatus(event));
     case "provider-spending-warning":
       return safeLine(formatSpendingThresholdWarning(event));
     case "context-estimate":

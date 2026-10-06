@@ -1,3 +1,4 @@
+import { routingStatus } from "../runtime/jev/routing-status.js";
 import { evaluateCapabilities } from "../runtime/jev/capability-decisions.js";
 import { jevRoutingContext, type LiveJevRouting } from "../runtime/jev/live-routing.js";
 import { createHash } from "node:crypto";
@@ -25,6 +26,7 @@ export class SessionCapabilityRecovery {
   readonly #skillConfig: Record<string, Record<string, unknown>>;
   #catalog?: ProviderToolSchemaCatalog;
   #routing?: LiveJevRouting;
+  #reportRouting?: (status: import("../contracts/routing.js").RoutingStatus, context?: ToolExecutionContext) => Promise<void>;
   #stagedTools = new Set<string>();
   #identity = new WeakMap<object, number>();
   #nextIdentity = 0;
@@ -46,7 +48,7 @@ export class SessionCapabilityRecovery {
     this.#skillConfig = options.skillConfig ?? {};
   }
 
-  bindRouting(routing: LiveJevRouting): void { this.#routing = routing; }
+  bindRouting(routing: LiveJevRouting, report?: (status: import("../contracts/routing.js").RoutingStatus, context?: ToolExecutionContext) => Promise<void>): void { this.#routing = routing; this.#reportRouting = report; }
 
   /** Handler identity, definitions, visibility and aliases participate in async decision invalidation. */
   catalogRevision(): string {
@@ -145,6 +147,8 @@ export class SessionCapabilityRecovery {
       context: jevRoutingContext({ userRequest: this.#turn?.objective ?? input.query, continuity: this.#turn?.continuity, material: this.#turn?.objective ? [{ kind: "retrieved", text: `Agent discovery query (relevance hint only): ${input.query}` }] : [] }), signal: context?.signal,
       usage: { ...context?.providerUsageLineage, executionSessionId: context?.sessionId, visibleTurnId: context?.visibleTurnId, requestKey: `jev-discovery:${context?.toolCallId ?? "query"}` }
     }, "discovery");
+    if (token !== this.#turn?.token || !this.#inScope(context) || revision !== this.catalogRevision()) return failure("inactive_or_changed_scope");
+    await this.#reportRouting?.(routingStatus("discovery", decision), context);
     if (token !== this.#turn?.token || !this.#inScope(context) || revision !== this.catalogRevision()) return failure("inactive_or_changed_scope");
     if (decision.actualEngine !== "jev") {
       const fallback = this.discover(input, context);

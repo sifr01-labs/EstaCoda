@@ -1,3 +1,4 @@
+import { recordRoutingStatus, routingStatus } from "./jev/routing-status.js";
 import { selectJevCapabilities, type CapabilityEvaluation } from "./jev/capability-selection.js";
 import { jevRoutingContext } from "./jev/live-routing.js";
 import { correctContradictedCapabilityClaim } from "./capability-state.js";
@@ -673,6 +674,7 @@ export class AgentLoop {
       route: intent
     });
 
+    if (intent.routingDecision) await recordRoutingStatus({ db: this.#sessionDb, sessionId: this.#currentSessionId(), turnMessageId: visibleTurn.id, status: routingStatus("intent-skills", intent.routingDecision), onEvent: input.onEvent });
     const requestedCount = intent.requestRequirements?.delegation?.count;
     if (requestedCount !== undefined && (requestedCount < 1 || (this.#maxDelegationBatchTasks !== undefined && requestedCount > this.#maxDelegationBatchTasks))) {
       const text = `The requested ${requestedCount} workers exceed the supported range (1–${this.#maxDelegationBatchTasks ?? 1}). No workers were started. Please choose a supported count.`;
@@ -1072,6 +1074,7 @@ export class AgentLoop {
         evaluation: { ...routingEvaluation, usage: { ...routingEvaluation.usage, requestKey: `jev-capabilities:${visibleTurn.id}` } }
       });
     }
+    if (providerToolSelection.capabilityRouting) await recordRoutingStatus({ db: this.#sessionDb, sessionId: this.#currentSessionId(), turnMessageId: visibleTurn.id, status: routingStatus("capabilities", providerToolSelection.capabilityRouting), onEvent: input.onEvent });
     const narrowedProviderTools = providerToolSelection.initialTools;
     const providerTools = deterministicImageGenerationRan
       ? suppressImageGenerationTools(narrowedProviderTools)

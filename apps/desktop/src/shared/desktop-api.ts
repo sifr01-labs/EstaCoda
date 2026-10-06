@@ -16,7 +16,7 @@ export type DesktopSettingsApi={
  apply(setupId:string):Promise<MethodContracts['settings.apply']['result']>;
  cancel(setupId:string):Promise<{cancelled:boolean}>;
  inspect():Promise<MethodContracts['settings.inspect']['result']>;
- verify():Promise<MethodContracts['settings.verify']['result']>;
+ verify(params?:MethodContracts['settings.verify']['params']):Promise<MethodContracts['settings.verify']['result']>;
 };
 import type {MethodContracts} from '@estacoda/control-protocol';
 import type {AppearancePreferences} from './appearance.js';

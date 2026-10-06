@@ -3570,3 +3570,11 @@ describe("TelegramAdapter", () => {
     }
   });
 });
+
+
+it('keeps a routing fallback notice separate from transient progress and model selection',async()=>{
+ const {adapter,bodies}=createTelegramTextHarness();const target={platform:'telegram' as const,chatId:'123',threadId:'42'};
+ await adapter.delivery.sendProgress!(target,{kind:'routing-status',stage:'capabilities',configuredMode:'jev-assisted',actualEngine:'standard',fallbackReason:'authentication'});
+ await adapter.delivery.sendProgress!(target,{kind:'tool-start',tool:'file.read'});
+ expect(bodies[0]).toMatchObject({chat_id:'123',message_thread_id:42});expect(bodies[0].text).toContain('Update the key');expect(bodies[0].text).not.toContain('fallback model');expect(bodies).toHaveLength(2);
+});

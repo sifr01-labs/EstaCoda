@@ -168,3 +168,8 @@ it('retains an explicitly requested skill during save-only work without enabling
  expect(result.selectedSkill?.name).toBe('researcher'); expect(result.intent.labels).not.toContain('research');
  expect(result.intent.requestRequirements?.delegation).toBeUndefined();
 });
+
+it.each([[401,'authentication'],[429,'rate-limited']] as const)('retains actionable fallback reason for HTTP %i',async(status,reason)=>{
+ fetcher.mockResolvedValue(new Response('private provider diagnostic',{status}));
+ expect((await route('Research batteries')).intent.routingDecision).toMatchObject({configuredMode:'jev-assisted',actualEngine:'standard',fallbackReason:reason});
+});

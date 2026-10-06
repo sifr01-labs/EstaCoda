@@ -1,3 +1,4 @@
+import {checkJevConnection} from '../jev-connection-check.js';
 import { promptRoutingModelSetup } from "../routing-model-setup.js";
 import { normalizeRoutingConfig } from "../../config/routing-config.js";
 import { readConfig } from "../../config/runtime-config.js";
@@ -575,7 +576,7 @@ async function handleAction(
       return handleWorkspaceTrustAction(options, initialDecision, session, action);
     case "edit-routing-model": {
       const current = normalizeRoutingConfig((await readConfig(activeProfileConfigPath(options))).config.routing);
-      const collected = await promptRoutingModelSetup(options.prompt, options.locale, current);
+      const collected = await promptRoutingModelSetup(options.prompt, options.locale, current,()=>{const homeDir=resolveStateHome({homeDir:options.homeDir}).homeDir;return checkJevConnection({homeDir,profileId:options.profileId??readActiveProfile({homeDir}).profileId??defaultProfileId(),spendApproved:true});});
       if (!collected) return menuBackResult(initialDecision, action.id);
       return reviewAndApplyAction(options, initialDecision, session, { ...requireEditorAction(action), reviewValues: collected.values }, { pendingCredentialWrites: collected.pendingCredentialWrites });
     }

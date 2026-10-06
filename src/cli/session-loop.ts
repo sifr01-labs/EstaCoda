@@ -1,3 +1,4 @@
+import {formatRoutingStatus} from '../contracts/desktop-control/routing.js';
 import {withProfileWriteLock} from '../config/profile-write-lock.js';
 import { validApprovalScope } from "../security/approval-scope.js";
 import { stdin as defaultInput, stdout as defaultOutput } from "node:process";
@@ -3193,6 +3194,8 @@ export function renderRuntimeEvent(
       clearActiveSpinnerLine();
       safeWrite(`\nprovider budget: ${event.reason}\n`);
       return undefined;
+    case "routing-status":
+      clearActiveSpinnerLine(); safeWrite(`\n${formatRoutingStatus(event, locale)}\n`); return undefined;
     case "provider-spending-warning":
       clearActiveSpinnerLine();
       safeWrite(`\n${formatSpendingThresholdWarning(event, locale)}\n`);

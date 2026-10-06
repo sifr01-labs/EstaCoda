@@ -1,14 +1,21 @@
 import {useEffect,useRef,useState,type ReactNode} from 'react';
+import {formatRoutingCheck} from '@estacoda/control-protocol';
+import type {DesktopSettingsApi} from '../../shared/desktop-api.js';
 import type {SettingsPage,SettingValue} from '@estacoda/control-protocol';
 import {useI18n} from '../i18n.js';
 import {Button,Icon} from './primitives.js';
 import {CapabilityCard} from './capability-card.js';
 import {ProviderMark} from './provider-mark.js';
 
-type Props={page:SettingsPage;disabled:boolean;value:(id:string)=>SettingValue;change:(id:string,value:SettingValue)=>void;control:(id:string,label?:string)=>ReactNode;onEditing:(editing:boolean)=>void};
+type Props={api:DesktopSettingsApi;dirty:boolean;page:SettingsPage;disabled:boolean;value:(id:string)=>SettingValue;change:(id:string,value:SettingValue)=>void;control:(id:string,label?:string)=>ReactNode;onEditing:(editing:boolean)=>void};
 /** Uses the existing model cards, protected credential control and parent review/apply. */
-export function RoutingSettings({page,disabled,value,change,control,onEditing}:Props){
- const {t}=useI18n();
+export function RoutingSettings({api,dirty,page,disabled,value,change,control,onEditing}:Props){
+ const {t,language}=useI18n();
+ const [checking,setChecking]=useState(false),[check,setCheck]=useState<Awaited<ReturnType<DesktopSettingsApi['verify']>>['routing']>();
+ const checkEpoch=useRef(0);
+ useEffect(()=>{checkEpoch.current++;setCheck(undefined);return()=>{checkEpoch.current++;};},[page,dirty]);
+ async function checkConnection(){const epoch=++checkEpoch.current;setChecking(true);setCheck(undefined);try{const result=await api.verify({routing:true,spendApproved:true});if(epoch===checkEpoch.current)setCheck(result.routing??{state:'failed',reason:'service-error'});}catch{if(epoch===checkEpoch.current)setCheck({state:'failed',reason:'service-error'});}finally{setChecking(false);}}
+
  const [view,setView]=useState<'providers'|'models'|'model'>(),[query,setQuery]=useState('');
  const [selected,setSelected]=useState('');
  const heading=useRef<HTMLHeadingElement>(null),opener=useRef<HTMLButtonElement>(null);
@@ -32,6 +39,9 @@ export function RoutingSettings({page,disabled,value,change,control,onEditing}:P
   <h2>{t('Intent & capability routing')}</h2>
   <div className="ec-media-row"><div>{t('Routing mode')}</div><select aria-label={t('Routing mode')} value={String(value('routing.mode')??'standard')} disabled={disabled} onChange={e=>change('routing.mode',e.target.value)}><option value="standard">{t('Standard')}</option><option value="jev-assisted">{t('Jev-assisted')}</option></select></div>
   {jev&&<><CapabilityCard icon={<ProviderMark id="typesafe" label={t('TypeSafe')}/>} title={<bdi>{modelLabel}</bdi>} description={t('TypeSafe')} action={<Button disabled={disabled} onClick={()=>{opener.current=document.activeElement as HTMLButtonElement;setView('providers');}}>{t('Change')}</Button>}/><details className="ec-diagnostics"><summary>{t('Advanced')}</summary>{control('routing.jev.timeoutMs',t('Routing timeout (milliseconds)'))}</details></>}
+  <p className="ec-footnote">{t('Jev receives relevant request context and capability descriptions. Your conversation model stays the same.')}</p>
+  <p className="ec-footnote">{t('Saved routing changes apply at the next routing decision. Work already executing keeps its permissions.')}</p>
+  {jev&&<div><p className="ec-footnote">{t('Check saved settings with a small test sent to TypeSafe. Charges may apply. Save changes before checking.')}</p><Button disabled={disabled||dirty||checking} onClick={()=>void checkConnection()}>{t(checking?'Checking connection…':'Check saved connection')}</Button>{check&&<p role="status" className="ec-footnote">{formatRoutingCheck(check,language)}</p>}</div>}
   <p className="ec-footnote" role="status">{t('Jev-assisted mode selects intents, skills, and capabilities. Execution permissions stay the same.')}</p>
  </section>;
 }

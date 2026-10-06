@@ -61,6 +61,7 @@ const activityVariants: Record<string, Check> = {
   artifact: shape({...activityBase,kind:choice(["artifact"]),reference:shape({source:choice(["session","task"]),ownerId:id,artifactId:id}),label:text(160),bytes:integer(),mimeType:text(160,1)}),
   plan: shape({ ...activityBase, kind: choice(["plan"]), steps: array(shape({ id, title: text(240, 1), status: choice(["pending", "running", "completed", "failed"]) }), 64) }),
   result: shape({ ...activityBase, kind: choice(["result"]), status: choice(WORK_STATUSES), evidence, usage }, {recoveredErrors:boolean}),
+  routing: shape({...activityBase,kind:choice(['routing']),routing:shape({stage:choice(['intent-skills','capabilities','discovery']),configuredMode:choice(['standard','jev-assisted']),actualEngine:choice(['standard','jev'])},{model:text(104,1),fallbackReason:choice(['engine-unavailable','credentials-unavailable','authentication','rate-limited','timeout','service-error','invalid-response','uncertain'])})}),
   model: shape({...activityBase,kind:choice(["model"]),executionModel}),
   status: shape({ ...activityBase, kind: choice(["status"]), status: choice(WORK_STATUSES) }, { reason: text(2_048) }),
 };
@@ -188,7 +189,7 @@ const contracts: { [M in keyof MethodContracts]: { params: Check; result: Check 
  'artifacts.mediaClose':{params:shape({transferId:id}),result:shape({closed:boolean})},
   "settings.apply": {params:settingsBinding,result:shape({operationId:id,state:choice(['applied','uncertain','unknown'])})},
   "settings.inspect":{params:shape({},{operationId:id}),result:shape({operationId:id,state:choice(['applied','uncertain','unknown'])})},
-  "settings.verify":{params:shape({}),result:shape({state:choice(['configured','repair_required'])})},
+  "settings.verify":{params:(v)=>shape({}, {routing:(v)=>v===true,spendApproved:(v)=>v===true})(v)&&isRecord(v)&&(v.routing===v.spendApproved),result:shape({state:choice(['configured','repair_required'])},{routing:shape({state:choice(['ready','failed','disabled'])},{reason:choice(['credentials-unavailable','authentication','timeout','cancelled','stale','rate-limited','invalid-response','service-error','configuration-unavailable']),model:text(104,1)})})},
   "settings.value":{params:shape({fieldId:text(240,1),selectors:array(text(128,1),8)}),result:settingChange},
   'schedules.draft':{params:shape({id}),result:scheduleDraft},
  'schedules.review':{params:scheduleAction,result:scheduleReview},

@@ -63,3 +63,11 @@ it('keeps the connection usable after a bounded target read timeout',async()=>{
  output.write(JSON.stringify({jsonrpc:'2.0',id:requests[1]!.id,result:{items:[],truncated:false}})+'\n');
  expect((await next).items).toEqual([]);client.dispose();
 });
+
+it('allows the configured Jev check deadline without disconnecting ordinary settings',async()=>{
+ vi.useFakeTimers();const {client,output,requests}=pair();client.context={profileId:'p',instanceId:'s',capabilities:{methods:['settings.verify'],events:[]}};
+ try{const pending=client.request('settings.verify',{routing:true,spendApproved:true});await vi.advanceTimersByTimeAsync(60_000);expect(client.context).not.toBeNull();
+ output.write(JSON.stringify({jsonrpc:'2.0',id:requests[0]!.id,result:{state:'configured',routing:{state:'failed',reason:'timeout'}}})+'\n');expect((await pending).routing).toEqual({state:'failed',reason:'timeout'});
+ const offline=client.request('settings.verify',{});output.write(JSON.stringify({jsonrpc:'2.0',id:requests[1]!.id,result:{state:'configured'}})+'\n');expect(await offline).toEqual({state:'configured'});
+ }finally{client.dispose();vi.useRealTimers();}
+});

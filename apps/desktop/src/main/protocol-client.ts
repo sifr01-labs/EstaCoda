@@ -24,7 +24,9 @@ export class ProtocolClient extends EventEmitter {
     const request = { jsonrpc: '2.0', id: randomUUID(), method, params } as MethodRequest<M>;
     validateControlRequest(request, this.context);
     return new Promise((resolve, reject) => {
-      const timer = setTimeout(() => this.failed(), ['targets.create','targets.execute'].includes(method)?Math.max(this.timeoutMs,120_000):this.timeoutMs); timer.unref();
+      // The saved Jev check can use a configured 60-second provider deadline.
+      const timeout = request.method==='settings.verify'&&request.params.routing===true ? Math.max(this.timeoutMs,65_000) : ['targets.create','targets.execute'].includes(method)?Math.max(this.timeoutMs,120_000):this.timeoutMs;
+      const timer = setTimeout(() => this.failed(), timeout); timer.unref();
       this.#pending.set(request.id, { request, context: this.context, resolve: value => resolve(value as MethodContracts[M]['result']), reject, timer });
       this.input.write(serializeControlFrame(request as RpcEnvelope));
     });

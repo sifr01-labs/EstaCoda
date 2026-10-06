@@ -1,4 +1,9 @@
 export const runtimeSettingsArabic={
+"Saved routing changes apply at the next routing decision. Work already executing keeps its permissions.":"تسري تغييرات التوجيه المحفوظة عند قرار التوجيه التالي. يحتفظ العمل الجاري بأذوناته.",
+"Check saved settings with a small test sent to TypeSafe. Charges may apply. Save changes before checking.":"افحص الإعدادات المحفوظة باختبار صغير يُرسل إلى TypeSafe. قد تُفرض رسوم. احفظ التغييرات قبل الفحص.",
+"Checking connection\u2026":"جارٍ فحص الاتصال…",
+"Check saved connection":"فحص الاتصال المحفوظ",
+
 "Intent & capability routing":"توجيه النوايا والقدرات",
 "Routing mode":"وضع التوجيه",
 "Jev-assisted":"بمساعدة Jev",

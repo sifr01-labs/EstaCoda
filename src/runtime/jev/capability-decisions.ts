@@ -21,7 +21,7 @@ export async function evaluateCapabilities(routing: LiveJevRouting, candidates: 
     if (evaluation.signal?.aborted || now.config.mode !== 'jev-assisted' || now.configurationRevision !== snapshot.configurationRevision || now.catalogRevision !== snapshot.catalogRevision) return { ...base, fallbackReason: 'engine-unavailable' };
     if (result.status !== 'ok') {
       const code = result.failure?.code;
-      return { ...base, fallbackReason: code === 'credentials-unavailable' || code === 'timeout' || code === 'invalid-response' ? code : result.status === 'partial' ? 'uncertain' : 'service-error' };
+      return { ...base, fallbackReason: code === 'authentication' || code === 'rate-limited' || code === 'credentials-unavailable' || code === 'timeout' || code === 'invalid-response' ? code : result.status === 'partial' ? 'uncertain' : 'service-error' };
     }
     // Defense in depth for adapters: only a complete, one-to-one set of finite Noul answers is usable.
     const answers = new Map(result.answers.map(answer => [answer.id, answer]));

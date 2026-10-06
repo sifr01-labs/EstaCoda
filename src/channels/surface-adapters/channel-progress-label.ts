@@ -1,3 +1,4 @@
+import {formatRoutingStatus} from '../../contracts/desktop-control/routing.js';
 // v0.95 Channel-Safe Progress Labels
 // No-emoji, ANSI-free activity labels for CI/log-safe and email channels.
 
@@ -85,6 +86,8 @@ export function renderPlainProgressLabel(
       return "";
     case "provider-serving-transition":
       return `${plainProviderServingTransitionLabel(locale, event.transition)} · ${event.model}`;
+    case "routing-status":
+      return formatRoutingStatus(event, locale);
     case "provider-spending-warning":
       return formatSpendingThresholdWarning(event, locale);
     case "delegation-progress":

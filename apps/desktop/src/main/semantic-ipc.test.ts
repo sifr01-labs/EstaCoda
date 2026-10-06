@@ -174,3 +174,8 @@ it('accepts only a reviewed backend-selected gateway build update',()=>{
  expect(()=>validateSemanticPayload('gatewayExecute',{action:'update',acknowledgeSharedWork:true})).not.toThrow();
  for(const payload of [{action:'update',acknowledgeSharedWork:false},{action:'update',acknowledgeSharedWork:true,workspaceRoot:'/arbitrary/runtime'},{action:'update',acknowledgeSharedWork:true,command:'sh'}])expect(()=>validateSemanticPayload('gatewayExecute',payload)).toThrow();
 });
+
+it('requires explicit consent for a saved routing check and forbids caller-owned scope or egress',()=>{
+ expect(()=>validateSemanticPayload('settingsVerify',{})).not.toThrow();expect(()=>validateSemanticPayload('settingsVerify',{routing:true,spendApproved:true})).not.toThrow();
+ for(const payload of [{routing:true},{spendApproved:true},{routing:true,spendApproved:false},{routing:false,spendApproved:false},{routing:true,spendApproved:true,profileId:'other'},{routing:true,spendApproved:true,prompt:'private'},{routing:true,spendApproved:true,url:'https://evil.invalid'}])expect(()=>validateSemanticPayload('settingsVerify',payload)).toThrow();
+});

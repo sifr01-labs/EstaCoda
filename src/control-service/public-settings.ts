@@ -1,3 +1,4 @@
+import {checkJevConnection} from '../setup/jev-connection-check.js';
 import {runtimeSettingsMetadata} from './runtime-settings-metadata.js';
 import {mediaSettingsMetadata} from './media-settings-metadata.js';
 import {webSettingsMetadata} from './web-settings-metadata.js';
@@ -17,6 +18,8 @@ type Draft={snapshot:ProfileApplySnapshot;review:SettingsReview;windowId:string;
 export class PublicSettings {
  readonly drafts=new Map<string,Draft>();
  #closed=false;
+ #checkAbort=new AbortController();
+ #checking=false;
  constructor(readonly input:{homeDir:string;profileId:string},readonly candidates:CredentialCandidates,readonly changed:()=>void|Promise<void>=()=>{}){}
  async read(section:SettingsSection,offset=0):Promise<SettingsPage>{
   const snapshot=await captureProfileApplySnapshot(this.input),config=JSON.parse(snapshot.files['config.json']??'{}');
@@ -59,7 +62,17 @@ export class PublicSettings {
   try{const receipt=await applyProfilePlan({...this.input,operationId:params.draftId,...part});committed=receipt.state==='applied'||receipt.state==='uncertain';return receipt;}finally{await part.finish(committed);}
  }
  async inspect(operationId?:string){const id=operationId??await latestProfileApplyOperation(this.input);return id?inspectProfileApply(this.input,id):{operationId:'none',state:'unknown' as const};}
- async verify(){try{await loadRuntimeConfig({...this.input,workspaceRoot:this.input.homeDir,configurationInspection:true});return {state:'configured' as const};}catch{return {state:'repair_required' as const};}}
+ async verify(params:{routing?:true;spendApproved?:true}={},signal?:AbortSignal){
+  if(this.#closed)throw new ControlProtocolError('-32003');
+  if(params.routing!==params.spendApproved)throw new ControlProtocolError('-32602');
+  let state:'configured'|'repair_required'='configured';
+  try{await loadRuntimeConfig({...this.input,workspaceRoot:this.input.homeDir,configurationInspection:true});}catch{state='repair_required';}
+  if(!params.routing)return {state};
+  if(this.#checking)throw new ControlProtocolError('-32007');
+  this.#checking=true;
+  try{return {state,routing:await checkJevConnection({...this.input,spendApproved:true,signal:AbortSignal.any([this.#checkAbort.signal,...(signal?[signal]:[])])})};}
+  finally{this.#checking=false;}
+ }
  cancel(params:SettingsBinding){const draft=this.require(params);draft.abort.abort();if(draft.applying)return {cancelled:false};draft.cleanup();return {cancelled:true};}
- dispose(){this.#closed=true;for(const draft of this.drafts.values())draft.cleanup();}
+ dispose(){this.#closed=true;this.#checkAbort.abort();for(const draft of this.drafts.values())draft.cleanup();}
 }

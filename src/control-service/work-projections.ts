@@ -34,6 +34,9 @@ export type DisplayEvent = { id: string; createdAt: string; event: SessionEvent 
 export function appendSessionEvents(session: SessionRecord, activity: ActivityProjection[], events: DisplayEvent[]): ActivityProjection[] {
   for (const { id, createdAt, event } of events) {
     const base = { id: `event:${id}`, workId: `session:${session.id}`, profileId: session.profileId, sequence: 0, timestamp: timestamp(createdAt) };
+    if (event.kind === 'routing-status' && ['intent-skills','capabilities','discovery'].includes(event.stage) && ['standard','jev-assisted'].includes(event.configuredMode) && ['standard','jev'].includes(event.actualEngine)) activity.push({...base,kind:'routing',routing:{stage:event.stage,configuredMode:event.configuredMode,actualEngine:event.actualEngine,
+      ...(event.model && /^jev-[A-Za-z0-9._-]{1,100}$/.test(event.model)?{model:event.model}:{}),
+      ...(event.fallbackReason && ['engine-unavailable','credentials-unavailable','authentication','rate-limited','timeout','service-error','invalid-response','uncertain'].includes(event.fallbackReason)?{fallbackReason:event.fallbackReason}:{})}});
     if (event.kind === 'provider-route') activity.push({...base,kind:'model',executionModel:{
       providerId:safeText(event.provider,200),modelId:safeText(event.model,200),fallback:event.fallback,state:event.state}});
     else if (event.kind === 'tool-called' || event.kind === 'tool-result') activity.push({ ...base, kind: 'tool', name: safeText(event.tool, 160),

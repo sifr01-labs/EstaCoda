@@ -30,10 +30,12 @@ export type RoutingDecision = {
   skills: RoutingSelection[];
   primarySkillId?: string;
   capabilities: RoutingSelection[];
-  fallbackReason?: 'engine-unavailable' | 'credentials-unavailable' | 'timeout' | 'service-error' | 'invalid-response' | 'uncertain';
+  fallbackReason?: import('./desktop-control/routing.js').RoutingFallbackReason;
 };
 
 export type CapabilityRoutingDecision = Pick<RoutingDecision, 'schemaVersion' | 'configuredMode' | 'actualEngine' | 'model' | 'configurationRevision' | 'catalogRevision' | 'fallbackReason'> & {
   selections: RoutingSelection[];
   requiredConflicts?: string[];
 };
+
+export type {RoutingStatus,RoutingCheckResult,RoutingFallbackReason} from './desktop-control/routing.js';

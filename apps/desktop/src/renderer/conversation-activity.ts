@@ -7,7 +7,7 @@ export function activityRuns(items:readonly ActivityProjection[]):ActivityRun[]{
  const runs:ActivityRun[]=[];let current:ActivityRun|undefined,settled=false;
  for(const item of items){
   const user=item.kind==='message'&&item.role==='user';
-  if(!current||user||(settled&&['tool','plan','assistant_delta','model'].includes(item.kind))){current={id:item.id,items:[],...(user?{user:item}: {})};runs.push(current);settled=false;}
+  if(!current||user||(settled&&['tool','plan','assistant_delta','model','routing'].includes(item.kind))){current={id:item.id,items:[],...(user?{user:item}: {})};runs.push(current);settled=false;}
   if(!user)current.items.push(item);
   if(item.kind==='result')settled=true;
  }
@@ -25,7 +25,7 @@ export function toolActions(items:readonly ActivityProjection[]):ToolAction[]{
  return actions;
 }
 export function runContent(run:ActivityRun){
- const operational=run.items.some(item=>['tool','plan','artifact'].includes(item.kind));
+ const operational=run.items.some(item=>['tool','plan','artifact','routing'].includes(item.kind));
  const messages=run.items.filter((item):item is Extract<ActivityProjection,{kind:'message'}>=>item.kind==='message');
  // Old peers have no phase marker. Keep their latest prose visible and all earlier prose inspectable.
  const responses=operational?messages.filter(item=>item.phase==='response'||item.phase===undefined&&item===messages.at(-1)):messages;

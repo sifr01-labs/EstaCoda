@@ -48,3 +48,20 @@ test.describe('touch response actions',()=>{
   await mount(page);await expect(page.locator('.ec-run-answer .ec-message-actions')).toHaveCSS('opacity','1');
  });
 });
+
+for(const language of ['en','ar'] as const)test(`routing ${language} fallback remains visible and separate from the conversation model`,async({page})=>{
+ await mount(page,language);await page.evaluate(()=>{const s=(window as any).activityDesign;const base=s.items[1];s.items.splice(1,0,{...base,id:'jev-fallback',kind:'routing',routing:{stage:'intent-skills',configuredMode:'jev-assisted',actualEngine:'standard',fallbackReason:'timeout'}},{...base,id:'jev-capabilities',kind:'routing',routing:{stage:'capabilities',configuredMode:'jev-assisted',actualEngine:'jev',model:'jev-1.13.0'}});s.rerender();});
+ const notice=page.locator('.ec-agent>.ec-activitynotice');await expect(notice).toContainText(language==='ar'?'انتهت مهلة TypeSafe':'TypeSafe timed out');await expect(notice).not.toContainText('fallback model');
+ await page.locator('.ec-run-summary').click();await expect(page.locator('.ec-run-historybody')).toContainText('jev-1.13.0');await expect(page.locator('.ec-run-historybody')).toContainText(language==='ar'?'النوايا والمهارات':'intents and skills');
+ await page.setViewportSize({width:360,height:1050});expect(await page.locator('#conversation-test').evaluate(el=>el.scrollWidth<=el.clientWidth)).toBe(true);
+});
+
+test('Details keeps actual routing decisions separate from model settings',async({page})=>{
+ await page.goto('/fixture.html');await page.evaluate(async()=>{
+ const React=(await import('/node_modules/.vite/deps/react.js')).default,{createRoot}=(await import('/node_modules/.vite/deps/react-dom_client.js')).default;
+ const {Inspector}=await import('/src/renderer/components/inspector.tsx');
+ const host=document.querySelector('.ec-window')!;host.innerHTML='<div id="routing-details"></div>';
+ createRoot(document.getElementById('routing-details')!).render(React.createElement(Inspector,{fixture:false,routing:[{id:'r',kind:'routing',workId:'session:s',profileId:'p',sequence:1,timestamp:1,routing:{stage:'discovery',configuredMode:'jev-assisted',actualEngine:'standard',fallbackReason:'timeout'}}]}));
+ });
+ await page.getByRole('tab',{name:'Activity',exact:true}).click();await expect(page.getByRole('region',{name:'Intent & capability routing'})).toContainText('Routing · capability discovery: Standard');await expect(page.getByRole('region',{name:'Intent & capability routing'})).toContainText('TypeSafe timed out.');
+});

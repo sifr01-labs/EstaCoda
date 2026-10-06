@@ -32,5 +32,5 @@ export class DesktopPublicSettings {
  async finishOnboarding(id:string){const s=this.require(id);await this.pipe()?.closeWindow(s.windowId,s.generation);if(this.#setup===s)this.#setup=undefined;}
  onboardingBinding(id:string){const s=this.require(id);if(!s.draft||s.applying)throw new Error('Review required.');return {draftId:s.draft.draftId,windowId:s.windowId,generation:s.generation};}
  async inspect(){const s=this.#setup;const receipt=await this.connection.settingsRequest('settings.inspect',s?.draft?{operationId:s.draft.draftId}:{});if(s?.draft?.draftId===receipt.operationId&&receipt.state==='applied'){await this.pipe()?.closeWindow(s.windowId,s.generation);if(this.#setup===s)this.#setup=undefined;}return receipt;}
- async verify(){return this.connection.settingsRequest('settings.verify',{});}
+ async verify(params:import('@estacoda/control-protocol').MethodContracts['settings.verify']['params']={}){return this.connection.settingsRequest('settings.verify',params);}
 }

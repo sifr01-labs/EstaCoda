@@ -1,3 +1,4 @@
+import {formatRoutingStatus} from '@estacoda/control-protocol';
 import {RuntimeDetails} from './runtime-details.js';
 import type {DesktopApi} from '../../shared/desktop-api.js';
 import {useI18n} from '../i18n.js';
@@ -10,7 +11,7 @@ import type{DesktopWorkApi}from'../../shared/desktop-api.js';
 import{WorkUsage}from'./work-usage.js';
 import type{ActivityProjection,WorkProjection}from'@estacoda/control-protocol';
 import type{FixturePhase}from'../adapter.js';import{Button,Icon}from'./primitives.js';
-export function Inspector({work,fixture,phase,plan,api,models,draft,runtimeApi,close,overviewRequest=0}:{close?:()=>void;overviewRequest?:number;runtimeApi?:DesktopApi;models?:DesktopModelsApi;draft?:Draft;api?:DesktopWorkApi;plan?:Extract<ActivityProjection,{kind:'plan'}>;work?:WorkProjection;fixture:boolean;phase?:FixturePhase}){
+export function Inspector({work,routing=[],fixture,phase,plan,api,models,draft,runtimeApi,close,overviewRequest=0}:{routing?:Extract<ActivityProjection,{kind:'routing'}>[];close?:()=>void;overviewRequest?:number;runtimeApi?:DesktopApi;models?:DesktopModelsApi;draft?:Draft;api?:DesktopWorkApi;plan?:Extract<ActivityProjection,{kind:'plan'}>;work?:WorkProjection;fixture:boolean;phase?:FixturePhase}){
  const {t,status,language}=useI18n();
  const [tab,setTab]=useState<'overview'|'plan'|'activity'>('overview');
  const [copied,setCopied]=useState(false),[copyError,setCopyError]=useState(false);
@@ -69,6 +70,7 @@ export function Inspector({work,fixture,phase,plan,api,models,draft,runtimeApi,c
     {steps.length?<><div className="ec-plan-progress">{t('{completed} of {total} completed',{completed,total:steps.length})}<progress value={completed} max={steps.length}/></div>{steps.map(step=><details key={step.id} className={'ec-plan-step ec-plan-'+step.status} open={step.status==='running'?true:undefined}><summary><Icon name={step.status==='completed'?'circle-check':step.status==='running'&&running?'loader-circle':step.status==='failed'?'circle-alert':'circle-dashed'}/><span><span className="ec-plan-title" dir="auto">{step.title}</span><small>{step.status==='running'&&!running?t('Last recorded: in progress'):status(step.status)}</small></span><Icon name="chevron-down"/></summary></details>)}</>:<p className="ec-footnote">{t('No plan has been recorded for this chat.')}</p>}
    </section>
    <section id="ec-details-activity" role="tabpanel" aria-labelledby="ec-details-tab-activity" tabIndex={0} hidden={tab!=='activity'}>
+    {!!routing.length&&<section className="ec-inspectsection" aria-label={t('Intent & capability routing')}><div className="ec-inspecttitle">{t('Intent & capability routing')}</div>{routing.map(item=><p className="ec-footnote" dir="auto" key={item.id}>{formatRoutingStatus(item.routing,language)}</p>)}</section>}
     {!fixture&&<section id="ec-operation-details" className="ec-inspectsection"/>}
     <section className="ec-inspectsection"><details className="ec-technical-details"><summary>{t('Technical details')}</summary>{work&&<details><summary>{t('Work ID')}</summary><code className="ec-identity" dir="ltr">{work.canonicalId}</code><Button className="ec-ghost" icon="copy" onClick={()=>void copyId()}>{t('Copy ID')}</Button><span role="status">{copied?t('Copied'):copyError?t('Copy unavailable'):''}</span></details>}</details></section>
    </section>

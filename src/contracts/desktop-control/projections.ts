@@ -31,6 +31,7 @@ export type UsageProjection = { reportedTokens: number | null; cost: { amount: n
 export type EvidenceProjection = { state: "verified" | "unverified" | "partial" | "failed"; summary: string; artifactIds: string[] };
 type ActivityBase = { id: string; workId: string; profileId: string; sequence: number; timestamp: number };
 export type ActivityProjection = ActivityBase & (
+  | {kind:'routing';routing:import('./routing.js').RoutingStatus}
   | { kind: "message"; role: "user" | "assistant"; text: string; phase?: "progress" | "response" }
   | { kind: "assistant_delta"; text: string }
   | { kind: "tool"; name: string; state: "running" | "completed" | "failed" | "cancelled"; summary: string; callId?: string }

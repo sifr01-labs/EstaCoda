@@ -75,6 +75,7 @@ export type RecoveredSkillsEvent = { kind: "capability-skills-loaded"; loadedSki
 export type CapabilityRecoveryEvent = { deferred?: string[]; kind: "capability-recovery"; appliedIteration: number; applied: string[]; rejected: Array<{ id: string; reason: string }> };
 
 export type RuntimeEvent =
+  | ({ kind: "routing-status"; turnMessageId?: string } & import("./routing.js").RoutingStatus)
   | ExecutionPlanLifecycleEvent
   | ProviderToolInventoryEvent
   | CapabilityRecoveryEvent

@@ -267,6 +267,7 @@ export type AuthenticationEvidenceAssessmentEvent = {
 };
 
 export type SessionEvent =
+  | ({ kind: "routing-status"; turnMessageId?: string } & import("./routing.js").RoutingStatus)
   | {
       kind: "step-completion-validation";
       accepted: boolean;
