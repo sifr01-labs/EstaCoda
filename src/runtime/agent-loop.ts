@@ -1,4 +1,4 @@
-import { recordRoutingStatus, routingStatus } from "./jev/routing-status.js";
+import { recordRoutingStatus, routingStatus, routingNotice } from "./jev/routing-status.js";
 import { selectJevCapabilities, type CapabilityEvaluation } from "./jev/capability-selection.js";
 import { jevRoutingContext } from "./jev/live-routing.js";
 import { correctContradictedCapabilityClaim } from "./capability-state.js";
@@ -1148,6 +1148,7 @@ export class AgentLoop {
       stagedTools: providerToolSelection.stagedTools,
       capabilityContext: routingEvaluation.context,
       selectedCapabilityIds: providerToolSelection.capabilityRouting?.selections.filter(item => item.selected).map(item => item.id.slice(5)),
+      routingNotice: routingNotice(visibleTurn.id, intent.routingDecision, providerToolSelection.capabilityRouting),
       capabilityRecoveryFeedback: providerToolSelection.capabilityRouting?.requiredConflicts?.length ? [JSON.stringify({ requiredCapabilityConflicts: providerToolSelection.capabilityRouting.requiredConflicts.slice(0, 32), conflictCount: providerToolSelection.capabilityRouting.requiredConflicts.length, stagedTools: providerToolSelection.stagedTools?.slice(0, 32), next: "Use capability.discover for readiness. Request staged tool IDs through capability.request for the next iteration; the runtime may replace current exposure within its limits. Do not call unexposed tools." })] : [],
       requestedCapabilityOmissions: capabilitySelection?.requestedOmissions,
       connectorInventory: this.#connectorInventory(providerTools),

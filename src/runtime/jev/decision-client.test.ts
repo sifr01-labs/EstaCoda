@@ -256,3 +256,12 @@ describe('Jev boundary regressions', () => {
   expect((await client().evaluate(evaluation())).answers).toEqual([{ id: 'research', status: 'invalid' }]);
  });
 });
+
+it.each([[402,'billing-rejected'],[503,'service-error'],[429,'rate-limited']] as const)('retains precise later batch HTTP %i failures and undispatched batches', async(status,code)=>{
+ fetcher.mockImplementationOnce(successful).mockResolvedValueOnce(new Response(`private ${key}`,{status}));
+ const result=await client().evaluate(evaluation(Array.from({length:140},(_,i)=>question(`q${i}`))));
+ expect(result.status).toBe('partial');expect(result.failure).toMatchObject({code,httpStatus:status});
+ expect(result.batches?.map(b=>b.state)).toEqual(['responded','failed','not-dispatched']);
+ expect(result.batches?.[1].failure).toMatchObject({code,httpStatus:status});
+ expect(JSON.stringify(result)).not.toContain(key);
+});

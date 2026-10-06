@@ -370,7 +370,7 @@ export class TelegramAdapter implements ChannelAdapter {
 
       const rendered = renderChannelProgressLabel(event, this.#activityLabelsLocale);
 
-      if (event.kind === "routing-status" && event.configuredMode === "jev-assisted" && event.actualEngine === "standard") {
+      if (event.kind === "routing-status" && event.configuredMode === "jev-assisted" && (event.actualEngine === "standard" || event.partialFallback === true)) {
         // Keep the fallback explanation after subsequent progress edits or final delivery.
         await this.#sendMessage(address, rendered);
         return;

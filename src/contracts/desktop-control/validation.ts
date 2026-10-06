@@ -61,7 +61,7 @@ const activityVariants: Record<string, Check> = {
   artifact: shape({...activityBase,kind:choice(["artifact"]),reference:shape({source:choice(["session","task"]),ownerId:id,artifactId:id}),label:text(160),bytes:integer(),mimeType:text(160,1)}),
   plan: shape({ ...activityBase, kind: choice(["plan"]), steps: array(shape({ id, title: text(240, 1), status: choice(["pending", "running", "completed", "failed"]) }), 64) }),
   result: shape({ ...activityBase, kind: choice(["result"]), status: choice(WORK_STATUSES), evidence, usage }, {recoveredErrors:boolean}),
-  routing: shape({...activityBase,kind:choice(['routing']),routing:shape({stage:choice(['intent-skills','capabilities','discovery']),configuredMode:choice(['standard','jev-assisted']),actualEngine:choice(['standard','jev'])},{model:text(104,1),fallbackReason:choice(['engine-unavailable','credentials-unavailable','authentication','rate-limited','timeout','service-error','invalid-response','uncertain'])})}),
+  routing: shape({...activityBase,kind:choice(['routing']),routing:shape({stage:choice(['intent-skills','capabilities','discovery']),configuredMode:choice(['standard','jev-assisted']),actualEngine:choice(['standard','jev'])},{partialFallback:boolean,model:text(104,1),fallbackReason:choice(['engine-unavailable','credentials-unavailable','authentication','billing-rejected','rate-limited','timeout','service-error','invalid-response','uncertain'])})}),
   model: shape({...activityBase,kind:choice(["model"]),executionModel}),
   status: shape({ ...activityBase, kind: choice(["status"]), status: choice(WORK_STATUSES) }, { reason: text(2_048) }),
 };

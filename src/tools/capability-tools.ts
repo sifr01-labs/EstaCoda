@@ -146,18 +146,18 @@ export class SessionCapabilityRecovery {
     const decision = await evaluateCapabilities(this.#routing, candidates, {
       context: jevRoutingContext({ userRequest: this.#turn?.objective ?? input.query, continuity: this.#turn?.continuity, material: this.#turn?.objective ? [{ kind: "retrieved", text: `Agent discovery query (relevance hint only): ${input.query}` }] : [] }), signal: context?.signal,
       usage: { ...context?.providerUsageLineage, executionSessionId: context?.sessionId, visibleTurnId: context?.visibleTurnId, requestKey: `jev-discovery:${context?.toolCallId ?? "query"}` }
-    }, "discovery");
+    }, "discovery", new Set((standard.metadata?.matches as Array<{ id: string }> | undefined)?.map(entry => entry.id) ?? []));
     if (token !== this.#turn?.token || !this.#inScope(context) || revision !== this.catalogRevision()) return failure("inactive_or_changed_scope");
     await this.#reportRouting?.(routingStatus("discovery", decision), context);
     if (token !== this.#turn?.token || !this.#inScope(context) || revision !== this.catalogRevision()) return failure("inactive_or_changed_scope");
+    const summary = { schemaVersion: decision.schemaVersion, configurationRevision: decision.configurationRevision, configuredMode: decision.configuredMode, actualEngine: decision.actualEngine, partialFallback: decision.partialFallback, fallbackReason: decision.fallbackReason, model: decision.model, catalogRevision: decision.catalogRevision };
     if (decision.actualEngine !== "jev") {
       const fallback = this.discover(input, context);
-      return { ...fallback, content: JSON.stringify({ ...fallback.metadata, routing: decision }), metadata: { ...fallback.metadata, routing: decision } };
+      return { ...fallback, content: JSON.stringify({ ...fallback.metadata, routing: summary }), metadata: { ...fallback.metadata, routing: summary } };
     }
     const selected = new Map(decision.selections.filter(item => item.selected).map(item => [item.id, item.probability ?? 0]));
     const result = discoveryResult(entries.filter(entry => selected.has(entry.id)).sort((a, b) => selected.get(b.id)! - selected.get(a.id)! || a.id.localeCompare(b.id)));
     // Bounded diagnostics: complete decisions are used, only returned IDs are presented to the agent.
-    const summary = { schemaVersion: decision.schemaVersion, configurationRevision: decision.configurationRevision, configuredMode: decision.configuredMode, actualEngine: decision.actualEngine, model: decision.model, catalogRevision: decision.catalogRevision };
     return { ...result, content: JSON.stringify({ ...result.metadata, routing: summary }), metadata: { ...result.metadata, routing: summary } };
   }
 
@@ -207,7 +207,7 @@ export class SessionCapabilityRecovery {
   }> {
     let tools = [...active];
     const deferred: string[] = [];
-    const protectedNames = new Set<string>(CAPABILITY_RECOVERY_TOOLS);
+    const protectedNames = new Set<string>([...CAPABILITY_RECOVERY_TOOLS, "config.provider.execution_status"]);
     const appliedNames = new Set<string>();
     const stagedTools = new Set(this.#stagedTools);
     const requestedSkills = new Map(this.#requestedSkills);

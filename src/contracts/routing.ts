@@ -15,13 +15,15 @@ export type ResolvedRoutingConfig = {
   jev: { provider: 'typesafe'; id: string; apiKeyEnv: string; timeoutMs: number };
 };
 /** Independent applicability judgments; probabilities do not sum across items. */
-export type RoutingSelection = { id: string; probability?: number; selected: boolean };
+export type RoutingSelection = { id: string; probability?: number; selected: boolean; source?: 'jev' | 'standard' };
 /** Advisory selection only. Never carries authorization or completion evidence. */
 export type RoutingDecision = {
   schemaVersion: typeof ROUTING_DECISION_VERSION;
   configuredMode: RoutingMode;
   actualEngine: 'standard' | 'jev';
   model?: string;
+  partialFallback?: boolean;
+  diagnostics?: import('./desktop-control/routing.js').RoutingEvidence;
   catalogRevision: string;
   configurationRevision: string;
   nativeIntent: NativeIntent;
@@ -33,7 +35,7 @@ export type RoutingDecision = {
   fallbackReason?: import('./desktop-control/routing.js').RoutingFallbackReason;
 };
 
-export type CapabilityRoutingDecision = Pick<RoutingDecision, 'schemaVersion' | 'configuredMode' | 'actualEngine' | 'model' | 'configurationRevision' | 'catalogRevision' | 'fallbackReason'> & {
+export type CapabilityRoutingDecision = Pick<RoutingDecision, 'schemaVersion' | 'configuredMode' | 'actualEngine' | 'model' | 'configurationRevision' | 'catalogRevision' | 'fallbackReason' | 'partialFallback' | 'diagnostics'> & {
   selections: RoutingSelection[];
   requiredConflicts?: string[];
 };

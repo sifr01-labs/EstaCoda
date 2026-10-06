@@ -2000,14 +2000,18 @@ describe("createRuntime MCP trust gating", () => {
             ],
           },
           {
-            "maxResultSizeChars": 4000,
+            "maxResultSizeChars": 20000,
             "name": "config.provider.execution_status",
             "orderIndex": 56,
             "providerKind": "session",
             "providerPhase": "pre-skill-visibility",
             "requiredConfig": undefined,
             "riskClass": "read-only-local",
-            "schemaAliasOrder": [],
+            "schemaAliasOrder": [
+              "routingDetails",
+              "routingOffset",
+              "routingTurnId",
+            ],
             "toolsets": [
               "core",
               "provider",

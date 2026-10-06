@@ -166,6 +166,7 @@ export function selectProviderToolsForTurn(input: {
 
   for (const entry of input.catalog.entries) {
     const selected = (() => {
+      if (entry.tool.name === "config.provider.execution_status") return true;
       if (recoveryNames.has(entry.tool.name)) return recoveryRelevant;
       if (entry.tool.name === "plan") return includePlan;
       if (entry.tool.connector !== undefined) {
@@ -202,7 +203,7 @@ export function selectProviderToolsForTurn(input: {
 
   const budget = budgetProviderTools({
     tools: initialTools,
-    priorityNames: new Set(input.catalog.entries.filter((entry) => exactRequestTools.has(entry.tool.name) || recoveryNames.has(entry.tool.name)).map((entry) => entry.schema.function.name))
+    priorityNames: new Set(input.catalog.entries.filter((entry) => entry.tool.name === "config.provider.execution_status" || exactRequestTools.has(entry.tool.name) || recoveryNames.has(entry.tool.name)).map((entry) => entry.schema.function.name))
   });
   return {
     initialTools: budget.tools,

@@ -28,7 +28,7 @@ export type JevAnswer = { id: string } & (
 );
 export type JevFailure = {
   code: 'invalid-request' | 'credentials-unavailable' | 'authentication' | 'rate-limited' | 'overloaded'
-    | 'service-error' | 'network-error' | 'timeout' | 'cancelled' | 'stale' | 'invalid-response' | 'accounting-failed';
+    | 'billing-rejected' | 'service-error' | 'network-error' | 'timeout' | 'cancelled' | 'stale' | 'invalid-response' | 'accounting-failed';
   httpStatus?: number;
   retryAfterMs?: number;
 };
@@ -39,6 +39,7 @@ export type JevDecisionResult = {
   catalogRevision: string;
   models: string[];
   answers: JevAnswer[];
+  batches?: import('../../contracts/desktop-control/routing.js').RoutingEvidence['batches'];
   failure?: JevFailure;
   usage: ProviderUsageTotals;
   /** Canonical facts, also retained if the local recorder fails; never re-dispatch to retry accounting. */

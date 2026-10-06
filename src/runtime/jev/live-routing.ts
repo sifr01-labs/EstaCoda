@@ -1,3 +1,4 @@
+import { resolveJevSelection } from './selection-evidence.js';
 import type { IntentRoute, IntentTaskClass, NativeIntent } from '../../contracts/intent.js';
 import type { RoutingDecision } from '../../contracts/routing.js';
 import type { IntentRouter, IntentRouteOptions } from '../intent-router.js';
@@ -63,17 +64,19 @@ export async function selectJevRoute(input: {
       ...skills.map((skill, i) => ({ id: `skill.${i}`, type: 'noul' as const, description: `${skill.name}: ${skill.description}`,
         instructions: 'Is this skill applicable to the current request? Select complementary skills independently. Exclude merely mentioned, quoted, prohibited or unrelated skills. Respect save-only and assigned-step scope.' }))
     ] });
-  const fallback = (reason: RoutingDecision['fallbackReason']): IntentRoute => ({ ...base, shadowSemanticRoute: undefined, routingDecision: routingDecision(base, input.snapshot, reason) });
-  if (result.status !== 'ok') {
-    const code = result.failure?.code;
-    return fallback(code === 'credentials-unavailable' || code === 'authentication' || code === 'rate-limited' ? code : code === 'timeout' ? code : result.status === 'partial' ? 'uncertain' : code === 'invalid-response' ? code : 'service-error');
-  }
-  // Protect callers and test adapters as well as the HTTP client against a changed live catalog.
-  const now = input.routing.snapshot();
-  if (input.evaluation.signal?.aborted || now.config.mode !== 'jev-assisted' || now.configurationRevision !== input.snapshot.configurationRevision || now.catalogRevision !== input.snapshot.catalogRevision) return fallback('engine-unavailable');
-  const answers = new Map(result.answers.map(answer => [answer.id, answer]));
-  const selected = (id: string) => answers.get(id)?.status === 'accepted';
-  const probability = (id: string) => { const answer = answers.get(id); return answer && 'probability' in answer ? answer.probability : undefined; };
+  const selection = resolveJevSelection(result, [
+    ...Object.keys(JEV_INTENTS).map(id => ({ id, questionId: `intent.${id}`, standard: base.labels.includes(id as keyof typeof JEV_INTENTS) })),
+    ...skills.map((skill, i) => ({ id: `skill:${skill.name}`, questionId: `skill.${i}`, standard: base.suggestedSkills.some(s => s.name === skill.name) }))
+  ]);
+  const fallback = (reason: RoutingDecision['fallbackReason']): IntentRoute => ({ ...base, shadowSemanticRoute: undefined, routingDecision: { ...routingDecision(base, input.snapshot, reason), diagnostics: reason === 'engine-unavailable' ? { ...selection.diagnostics, failure: selection.diagnostics.failure ?? { code: 'stale' }, candidates: selection.diagnostics.candidates.map(candidate => ({ ...candidate, source: 'standard' as const, outcome: 'discarded' as const })) } : selection.diagnostics } });
+  let current = false;
+  try { const now = input.routing.snapshot(); current = !input.evaluation.signal?.aborted && now.config.mode === 'jev-assisted' && now.configurationRevision === input.snapshot.configurationRevision && now.catalogRevision === input.snapshot.catalogRevision; } catch { /* Retain evidence even when configuration becomes unreadable. */ }
+  if (!current) return fallback('engine-unavailable');
+  if (selection.actualEngine === 'standard') return fallback(selection.fallbackReason);
+  const answers = new Map(selection.selections.map(answer => [answer.id, answer]));
+  const key = (id: string) => id.startsWith('intent.') ? id.slice(7) : `skill:${skills[Number(id.slice(6))]?.name}`;
+  const selected = (id: string) => answers.get(key(id))?.selected === true;
+  const probability = (id: string) => answers.get(key(id))?.probability;
   let labels = Object.keys(JEV_INTENTS).filter(id => selected(`intent.${id}`) && !explicitlyProhibited(request, id));
   if (!input.options.attachments?.some(a => (a.status ?? 'ready') === 'ready')) labels = labels.filter(id => id !== 'attachment-analysis');
   if (!actionable) labels = labels.filter(id => ['conversation', 'architecture-advice'].includes(id));
@@ -102,7 +105,7 @@ export async function selectJevRoute(input: {
   // The first applicable skill is only the compatibility primary; all selected skills are loaded.
   for (const candidate of route.candidates ?? []) candidate.score = candidate.confidence = forced.has(candidate.skill.name) ? 1 : probability(`skill.${skills.indexOf(candidate.skill)}`) ?? 0;
   route.confidence = Math.min(1, Math.max(0, ...result.answers.flatMap(answer => answer.status === "accepted" && "probability" in answer ? [answer.probability] : [])));
-  route.routingDecision = { ...routingDecision(route, input.snapshot), actualEngine: 'jev', model: result.models[0],
+  route.routingDecision = { ...routingDecision(route, input.snapshot), actualEngine: 'jev', model: result.models[0], diagnostics: selection.diagnostics, partialFallback: selection.partialFallback, fallbackReason: selection.fallbackReason,
     intents: Object.keys(JEV_INTENTS).map(id => ({ id, probability: probability(`intent.${id}`), selected: labels.includes(id) })),
     skills: skills.map((skill, i) => ({ id: skill.name, probability: probability(`skill.${i}`), selected: applicable.includes(skill) })) };
   return route;

@@ -83,7 +83,7 @@ describe('live Jev capability selection and recovery', () => {
   expect((await h.select()).initialTools).toEqual(h.standard.initialTools);
   expect((await recovery.discoverAsync({ query: 'file' }, scope)).metadata?.routing).toMatchObject({ actualEngine: 'standard' }); expect(fetcher).not.toHaveBeenCalled();
  });
- it.each(['unknown', 'uncertain', 'missing', 'failure'])('falls back to Standard for %s responses', async kind => {
+ it.each(['unknown', 'uncertain', 'failure'])('falls back to Standard for %s responses', async kind => {
   registry.register(tool('file.read', { toolsets: ['files'] })); const h = await harness('Read the file');
   fetcher.mockImplementation(async (_url, init) => {
    if (kind === 'failure') return new Response('', { status: 503 });
@@ -165,4 +165,19 @@ it.each([[401,'authentication'],[429,'rate-limited']] as const)('retains actiona
  registry.register(tool('file.read',{toolsets:['files']}));const h=await harness('Read the file');fetcher.mockResolvedValue(new Response('private provider diagnostic',{status}));
  expect((await h.select()).capabilityRouting).toMatchObject({configuredMode:'jev-assisted',actualEngine:'standard',fallbackReason:reason});
  expect((await recovery.discoverAsync({query:'file'},scope)).metadata?.routing).toMatchObject({configuredMode:'jev-assisted',actualEngine:'standard',fallbackReason:reason});
+});
+
+it('merges missing candidates with Standard without discarding confident selections or rejections',async()=>{
+ registry.register(tool('file.read',{toolsets:['files']}));registry.register(tool('special'));registry.register(tool('file.grep',{toolsets:['files']}));
+ const h=await harness('Read the file');
+ fetcher.mockImplementation(async(_url,init)=>{
+  const body=JSON.parse(String(init?.body));
+  return new Response(JSON.stringify({model:'jev-1.13.0',usage:{input_tokens:10,output_tokens:1},answers:Object.fromEntries(Object.entries(body.questions).flatMap(([id,q])=>{
+   const name=(q as any).instructions.subjectDescription.split(':')[0];
+   return name==='file.read'?[]:[[id,{type:'noul',noul:name==='special'?.95:.05}]];
+  }))}));
+ });
+ const result=await h.select();expect(names(result)).toEqual(expect.arrayContaining(['special','file_read']));expect(names(result)).not.toContain('file_grep');
+ expect(result.capabilityRouting).toMatchObject({actualEngine:'jev',partialFallback:true,fallbackReason:'invalid-response'});
+ expect(result.capabilityRouting?.diagnostics?.candidates).toContainEqual(expect.objectContaining({id:'tool:file.read',outcome:'missing',source:'standard'}));
 });

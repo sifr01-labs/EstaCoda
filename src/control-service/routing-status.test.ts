@@ -28,3 +28,14 @@ it('requires an explicit matched connection-check consent pair at the RPC bounda
  expect(()=>validateControlRequest(request({}),scope)).not.toThrow();expect(()=>validateControlRequest(request({routing:true,spendApproved:true}),scope)).not.toThrow();
  for(const params of [{routing:true},{spendApproved:true},{routing:true,spendApproved:false},{routing:false,spendApproved:false},{routing:true,spendApproved:true,endpoint:'https://evil.invalid'}])expect(()=>validateControlRequest(request(params),scope)).toThrow();
 });
+
+it('projects partial fallback consistently without shipping candidate diagnostics to Desktop',async()=>{
+ const db=new SQLiteSessionDB({path:':memory:'});try{
+ const session=await db.createSession({id:'partial',profileId:'p'});
+ await recordRoutingStatus({db,sessionId:'partial',status:{stage:'capabilities',configuredMode:'jev-assisted',actualEngine:'jev',partialFallback:true,fallbackReason:'billing-rejected',diagnostics:{contacted:true,batches:[],candidates:[{id:'internal-only',questionId:'c0',outcome:'missing',source:'standard'}]}}});
+ const activity=appendSessionEvents(session,[],sessionDisplayEvents(db.db,'partial'));
+ expect(activity[0]).toMatchObject({kind:'routing',routing:{partialFallback:true,fallbackReason:'billing-rejected'}});
+ expect(JSON.stringify(activity)).not.toContain('internal-only');
+ if(activity[0].kind==='routing')expect(formatRoutingStatus(activity[0].routing)).toContain('partial Standard fallback');
+ }finally{db.close();}
+});

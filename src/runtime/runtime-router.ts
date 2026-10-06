@@ -104,13 +104,15 @@ export class RuntimeRouter {
       base.intent.routingDecision = routingDecision(base.intent, snapshot);
       return base;
     }
+    let decision: import("../contracts/routing.js").RoutingDecision | undefined;
     try {
       const intent = await selectJevRoute({ routing: this.#jev, snapshot, router: this.#intentRouter, base: base.intent,
         options: { ...input, attachments: base.attachments }, evaluation: input.evaluation,
         saveOnly: input.saveOnly, checkpointSkillName: input.checkpointSkillName });
+      decision = intent.routingDecision;
       if (intent.routingDecision?.actualEngine === 'standard') {
         const fresh = this.route({ ...input, skipShadow: true });
-        fresh.intent.routingDecision = { ...routingDecision(fresh.intent, snapshot, intent.routingDecision.fallbackReason) };
+        fresh.intent.routingDecision = { ...routingDecision(fresh.intent, snapshot, intent.routingDecision.fallbackReason), diagnostics: intent.routingDecision.diagnostics };
         return fresh;
       }
       const result = this.#result(intent, { ...input, checkpointSkillName: intent.routingDecision?.actualEngine === 'jev' ? undefined : input.checkpointSkillName }, base.attachments);
@@ -123,7 +125,7 @@ export class RuntimeRouter {
       return result;
     } catch {
       const fresh = this.route({ ...input, skipShadow: true });
-      fresh.intent.routingDecision = routingDecision(fresh.intent, snapshot, 'invalid-response');
+      fresh.intent.routingDecision = { ...routingDecision(fresh.intent, snapshot, 'engine-unavailable'), ...(decision?.diagnostics ? { diagnostics: { ...decision.diagnostics, failure: { code: 'local-selection-failed' }, candidates: decision.diagnostics.candidates.map(candidate => ({ ...candidate, source: 'standard' as const, outcome: 'discarded' as const })) } } : {}) };
       return fresh;
     }
   }

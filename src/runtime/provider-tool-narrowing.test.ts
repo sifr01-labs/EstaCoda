@@ -566,8 +566,8 @@ describe("narrowProviderToolsForTurn", () => {
       intent: intent(0.35, [], "provider-diagnostics"),
       userText: "Diagnose why Kimi keeps failing."
     }))).toEqual([
-      "config_provider_status",
       "config_provider_execution_status",
+      "config_provider_status",
       "config_provider_setup"
     ]);
   });

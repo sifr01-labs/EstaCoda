@@ -1,10 +1,21 @@
-export type RoutingFallbackReason = 'authentication' | 'rate-limited' | 'engine-unavailable' | 'credentials-unavailable' | 'timeout' | 'service-error' | 'invalid-response' | 'uncertain';
+export type RoutingEvidence = {
+  contacted: boolean;
+  candidateCount?: number;
+  truncatedCandidates?: boolean;
+  failure?: { code: string; httpStatus?: number; retryAfterMs?: number };
+  batches: Array<{ index: number; questionIds: string[]; state: 'not-dispatched' | 'responded' | 'failed'; failure?: { code: string; httpStatus?: number } }>;
+  candidates: Array<{ id: string; questionId: string; outcome: 'accepted' | 'rejected' | 'uncertain' | 'missing' | 'invalid' | 'discarded'; probability?: number; source: 'jev' | 'standard' }>;
+};
+export type RoutingFallbackReason = 'authentication' | 'billing-rejected' | 'rate-limited' | 'engine-unavailable' | 'credentials-unavailable' | 'timeout' | 'service-error' | 'invalid-response' | 'uncertain';
 /** Bounded presentation fact; never carries user text, credentials or authorization. */
 export type RoutingStatus = {
   stage: 'intent-skills' | 'capabilities' | 'discovery';
   configuredMode: 'standard' | 'jev-assisted';
   actualEngine: 'standard' | 'jev';
   model?: string;
+  partialFallback?: boolean;
+  /** Retained internally; Desktop projects only the bounded summary fields. */
+  diagnostics?: RoutingEvidence;
   fallbackReason?: RoutingFallbackReason;
 };
 export type RoutingCheckResult = {
@@ -20,6 +31,7 @@ export function formatRoutingStatus(status: RoutingStatus, locale: 'en' | 'ar' =
   const reasons: Record<NonNullable<RoutingStatus['fallbackReason']>, string> = {
     'engine-unavailable': ar ? 'تغيرت الإعدادات أو لم يعد التوجيه متاحاً.' : 'Routing settings changed or became unavailable.',
     'credentials-unavailable': ar ? 'أضف مفتاح TypeSafe في الإعدادات.' : 'Add a TypeSafe key in settings.',
+    'billing-rejected': ar ? 'رفض TypeSafe الطلب بسبب حالة الدفع؛ راجع الحساب.' : 'TypeSafe rejected the request for billing reasons; check the account.',
     authentication: ar ? 'رفض TypeSafe بيانات الاتصال. حدّث المفتاح في الإعدادات.' : 'TypeSafe rejected the credentials. Update the key in settings.',
     'rate-limited': ar ? 'بلغ TypeSafe حد الطلبات.' : 'TypeSafe limited the request rate.',
     timeout: ar ? 'انتهت مهلة TypeSafe.' : 'TypeSafe timed out.',
@@ -27,6 +39,7 @@ export function formatRoutingStatus(status: RoutingStatus, locale: 'en' | 'ar' =
     'invalid-response': ar ? 'لم يُرجع TypeSafe قراراً صالحاً.' : 'TypeSafe returned an unusable decision.',
     uncertain: ar ? 'كان قرار Jev غير مؤكد أو غير مكتمل.' : 'Jev’s decision was uncertain or incomplete.'
   };
+  if (status.partialFallback) return `${ar ? 'التوجيه' : 'Routing'} · ${stage}: ${ar ? 'بمساعدة Jev، مع رجوع جزئي إلى التوجيه القياسي.' : 'Jev-assisted, with partial Standard fallback.'} ${reasons[status.fallbackReason ?? 'uncertain']}`;
   const fallback = status.configuredMode === 'jev-assisted' && status.actualEngine === 'standard';
   return `${ar ? 'التوجيه' : 'Routing'} · ${stage}: ${engine}${fallback ? ` — ${ar ? 'تم استخدام التوجيه القياسي لهذه الخطوة.' : 'Standard fallback for this step.'} ${reasons[status.fallbackReason ?? 'engine-unavailable']}` : ''}`;
 }

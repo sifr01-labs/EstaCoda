@@ -42,7 +42,7 @@ function retryAfter(response: Response): number | undefined {
   return Number.isFinite(ms) && ms >= 0 ? Math.min(60_000, Math.ceil(ms)) : undefined;
 }
 function httpFailure(response: Response): JevFailure {
-  const code = response.status === 401 || response.status === 403 ? 'authentication' : response.status === 429 ? 'rate-limited' : response.status === 529 ? 'overloaded' : 'service-error';
+  const code = response.status === 401 || response.status === 403 ? 'authentication' : response.status === 402 ? 'billing-rejected' : response.status === 429 ? 'rate-limited' : response.status === 529 ? 'overloaded' : 'service-error';
   const retryAfterMs = ['rate-limited', 'overloaded'].includes(code) ? retryAfter(response) : undefined;
   return { code, httpStatus: response.status, ...(retryAfterMs === undefined ? {} : { retryAfterMs }) };
 }
@@ -83,6 +83,7 @@ export class JevDecisionClient {
     let current: JevSnapshot;
     try { current = snapshot(this.options.snapshot()); }
     catch { return this.result(undefined, [], [], [], { code: 'invalid-request' }); }
+    const batchEvidence: NonNullable<JevDecisionResult['batches']> = [];
     const entries: ProviderUsageEntry[] = [], answers: JevAnswer[] = [], models: string[] = [];
     if (current.config.mode === 'standard') return this.result(current, answers, models, entries, undefined, 'disabled');
     const signal = input.signal;
@@ -120,8 +121,10 @@ export class JevDecisionClient {
       const key = resolved.credential?.kind === 'bearer' ? resolved.credential.value : undefined;
       if (!key?.trim() || key.length > 8192 || /[\r\n\0]/.test(key)) throw new Failure({ code: 'credentials-unavailable' });
       batches = redactJevBatches(batches, Object.values(environment));
+      batchEvidence.push(...batches.map((batch, index) => ({ index, questionIds: Object.keys(batch.questions), state: 'not-dispatched' as const })));
       for (const [index, batch] of batches.entries()) {
         check();
+        const evidence = batchEvidence[index];
         let usage: ProviderUsage | undefined, model = current.config.jev.id, dispatched = false;
         const dispatchedAt = new Date().toISOString();
         try {
@@ -145,7 +148,11 @@ export class JevDecisionClient {
           check();
           if (!models.includes(model)) models.push(model);
           answers.push(...decoded);
+          evidence.state = 'responded';
         } catch (error) {
+          evidence.state = dispatched ? 'failed' : 'not-dispatched';
+          const interrupted = controller.signal.aborted ? controller.signal.reason : error;
+          evidence.failure = interrupted instanceof Failure ? interrupted.failure : { code: 'network-error' };
           if (error instanceof Failure) throw error;
           throw new Failure({ code: 'network-error' });
         } finally {
@@ -159,12 +166,12 @@ export class JevDecisionClient {
         }
       }
       check();
-      return this.result(current, answers, models, entries);
+      return { ...this.result(current, answers, models, entries), batches: batchEvidence };
     } catch (error) {
       let failure = error instanceof Failure ? error.failure : { code: 'invalid-request' as const };
       if (failure.code !== 'accounting-failed') { try { check(); } catch (interrupted) { failure = interrupted instanceof Failure ? interrupted.failure : { code: 'stale' }; } }
       const discard = ['stale', 'cancelled', 'timeout', 'accounting-failed'].includes(failure.code);
-      return this.result(current, discard ? [] : answers, models, entries, failure);
+      return { ...this.result(current, discard ? [] : answers, models, entries, failure), batches: batchEvidence };
     } finally {
       clearTimeout(timer);
       signal?.removeEventListener('abort', cancel);

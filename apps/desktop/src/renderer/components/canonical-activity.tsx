@@ -60,7 +60,7 @@ export function CanonicalActivity({items,results,browser,api,workStatus,more=fal
  {active&&!content.responses.length&&content.latestProgress&&<div className="ec-run-currentprose"><ResponseMarkdown text={content.latestProgress.text}/></div>}
  {!content.operational&&run.items.filter(item=>item.kind==='assistant_delta').map(item=><ResponseMarkdown key={item.id} text={item.text}/>)}
  {fallbackNotices(run.items).map(item=><div className="ec-activitynotice" role="status" key={item.id}><Icon name="cpu"/><span dir="auto">{t(item.executionModel.state==='attempting'?'Preferred model unavailable. Trying {model}.':item.executionModel.state==='responded'?'Continuing with {model} as the fallback model.':'The fallback model {model} could not complete this request.',{model:item.executionModel.modelId})}</span></div>)}
- {run.items.filter((item):item is Extract<ActivityProjection,{kind:'routing'}>=>item.kind==='routing'&&item.routing.configuredMode==='jev-assisted'&&item.routing.actualEngine==='standard').map(item=><RoutingNotice key={item.id} item={item}/>)}
+ {run.items.filter((item):item is Extract<ActivityProjection,{kind:'routing'}>=>item.kind==='routing'&&item.routing.configuredMode==='jev-assisted'&&(item.routing.actualEngine==='standard'||item.routing.partialFallback===true)).map(item=><RoutingNotice key={item.id} item={item}/>)}
  <Notices items={run.items} results={results} browser={hasBrowser?browser:undefined}/>
  {!!content.outputs.length&&<RunOutputs items={content.outputs} api={api} results={results}/ >}</section>}
  </div>;})}</div>;

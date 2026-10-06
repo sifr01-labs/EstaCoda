@@ -340,3 +340,14 @@ async function readArgs(path: string): Promise<string[]> {
 function globArgumentIndex(args: string[], pattern: string): number {
   return args.findIndex((arg, index) => arg === pattern && args[index - 1] === "--glob");
 }
+
+it.each(['','   '])('omits blank optional file type %j',async(type)=>{
+ const {root,argsPath}=await makeFakeRg("console.log('src/app.ts:1:jev');");
+ const result=await createFakeGrep(root,argsPath).run({pattern:'jev',type,glob:'*.{ts,tsx,js,json,md}'});
+ expect(result.ok).toBe(true);expect(await readArgs(argsPath)).not.toContain('--type');
+});
+it('explains how to recover from an unsupported file type',async()=>{
+ const {root,argsPath}=await makeFakeRg("console.error('rg: unrecognized file type: not-a-type'); process.exitCode=2;");
+ const result=await createFakeGrep(root,argsPath).run({pattern:'jev',type:'not-a-type'});
+ expect(result.ok).toBe(false);expect(result.content).toContain('Omit type');
+});

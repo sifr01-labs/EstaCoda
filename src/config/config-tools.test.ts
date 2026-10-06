@@ -1069,3 +1069,14 @@ function maliciousProviderExecutionMetadata(): Record<string, unknown> {
     status: "fallback-success"
   };
 }
+
+it('validates routing inspection arguments and cannot address another session',async()=>{
+ const homeDir=await configHome(localModelConfig({primaryModel:'qwen2.5:3b',models:['qwen2.5:3b']}));
+ try{
+  const db=new InMemorySessionDB();await db.createSession({id:'owned',profileId:'default'});await db.createSession({id:'other',profileId:'default'});
+  await db.appendEvent('other',{kind:'routing-status',turnMessageId:'foreign',stage:'capabilities',configuredMode:'jev-assisted',actualEngine:'jev'});
+  const tool=createConfigTools({workspaceRoot:homeDir,homeDir,profileId:'default',sessionId:'owned',sessionDb:db}).find(t=>t.name==='config.provider.execution_status')!;
+  for(const input of [{sessionId:'other'},{routingOffset:-1},{routingOffset:1.5},{routingDetails:'yes'}])expect((await tool.run(input)).ok).toBe(false);
+  const result=await tool.run({routingTurnId:'foreign',routingDetails:true});expect(result.ok).toBe(true);expect(result.metadata?.routing).toMatchObject({state:'unknown',stages:[]});
+ }finally{await rm(homeDir,{recursive:true,force:true});}
+});

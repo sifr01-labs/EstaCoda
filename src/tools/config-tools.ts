@@ -1,3 +1,4 @@
+import { inspectRouting } from "./routing-inspection.js";
 import type { RegisteredTool, SessionToolProvider } from "../contracts/tool.js";
 import type { SessionDB, SessionMessage } from "../contracts/session.js";
 import type {
@@ -149,17 +150,22 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
     },
     {
       name: "config.provider.execution_status",
-      description: "Show the latest provider execution truth recorded for the current session without making a network call.",
+      description: "Inspect EstaCoda itself: saved routing mode, actual intent/skill/capability engines and fallback causes for this turn, plus separately labelled last provider execution. Read-only; no network. Use routingDetails and routingOffset to page candidate evidence, routingTurnId to inspect an earlier turn in this session.",
       inputSchema: {
         type: "object",
-        properties: {}
+        properties: { routingDetails: { type: "boolean" }, routingOffset: { type: "integer", minimum: 0, maximum: 6144 }, routingTurnId: { type: "string", minLength: 1, maxLength: 512 } },
+        additionalProperties: false
       },
       riskClass: "read-only-local",
       toolsets: ["core", "provider", "diagnostics"],
       progressLabel: "checking provider execution status",
-      maxResultSizeChars: 4000,
+      maxResultSizeChars: 20000,
       isAvailable: () => true,
-      run: async () => {
+      run: async (input: { routingDetails?: boolean; routingOffset?: number; routingTurnId?: string }, context) => {
+        if (!input || typeof input !== 'object' || Object.keys(input).some(key => !['routingDetails','routingOffset','routingTurnId'].includes(key)) ||
+          (input.routingDetails !== undefined && typeof input.routingDetails !== 'boolean') ||
+          (input.routingOffset !== undefined && (!Number.isSafeInteger(input.routingOffset) || input.routingOffset < 0 || input.routingOffset > 6144)) ||
+          (input.routingTurnId !== undefined && (typeof input.routingTurnId !== 'string' || !input.routingTurnId.length || input.routingTurnId.length > 512))) return { ok: false, content: 'Invalid routing inspection arguments.' };
         const loaded = await loadRuntimeConfig(options);
         const sessionId = typeof options.sessionId === "function"
           ? options.sessionId()
@@ -184,13 +190,17 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
           sessionId
         });
 
+        const routing = inspectRouting(sessionId && options.sessionDb ? await options.sessionDb.listEvents(sessionId) : [], {
+          turnId: input.routingTurnId ?? context?.visibleTurnId, details: input.routingDetails, offset: input.routingOffset
+        });
         return {
           ok: true,
-          content: formatProviderTruthStatus({
+          content: `Saved routing mode: ${loaded.routing.mode}; configured Jev model: ${loaded.routing.jev.id}\nRouting execution: ${JSON.stringify(routing)}\nLast recorded conversation-provider execution (separate from routing):\n` + formatProviderTruthStatus({
             config: diagnostic,
             lastExecution
           }),
           metadata: {
+            routing, configuredRoutingMode: loaded.routing.mode, configuredRoutingModel: loaded.routing.jev.id,
             providerDiagnostic: diagnostic,
             providerExecution: lastExecution,
             sessionModelOverrideStatus: effectiveOverride === undefined

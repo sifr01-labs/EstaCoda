@@ -191,6 +191,8 @@ function validateInput(input: FileGrepInput): GrepValidation {
     return validationError("pattern must be a non-empty string");
   }
 
+  if (input.type !== undefined && typeof input.type !== "string") return validationError("type must be a string; omit it to search all file types");
+
   if (input.output_mode !== undefined && input.output_mode !== "content" && input.output_mode !== "files" && input.output_mode !== "count") {
     return validationError("output_mode must be \"content\", \"files\", or \"count\"");
   }
@@ -406,6 +408,7 @@ function runRipgrep(input: {
 
       if (code !== 0 && code !== 1) {
         stderr = stderr.trim();
+        if (stderr.startsWith("rg: unrecognized file type")) stderr = "Unsupported file type filter. Omit type to search all types, or use glob (for example *.ts) to filter filenames.";
         finish(errorResult(stderr.length === 0 ? `rg failed with ${signal ?? `exit code ${code}`}` : stderr, {
           code,
           signal
@@ -489,8 +492,8 @@ function buildRipgrepArgs(input: {
     args.push("--glob", input.input.glob);
   }
   args.push(...exclusionArgs());
-  if (input.input.type !== undefined) {
-    args.push("--type", input.input.type);
+  if (input.input.type?.trim()) {
+    args.push("--type", input.input.type.trim());
   }
   if (input.input.ignore_case === true) {
     args.push("-i");

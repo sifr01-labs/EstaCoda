@@ -284,6 +284,7 @@ export class ProviderTurnLoop {
     memoryPromptContext: MemoryPromptContext | undefined;
     providerTools: OpenAICompatibleToolSchema[];
     requestedCapabilityOmissions?: CapabilitySelectionDiagnostics["requestedOmissions"];
+    routingNotice?: string;
     capabilityRecoveryFeedback?: readonly string[];
     capabilityState?: readonly RuntimeCapabilityState[];
     toolExpansionCandidates?: readonly ProviderToolExpansionCandidate[];
@@ -1291,6 +1292,7 @@ export class ProviderTurnLoop {
     memoryPromptContext: MemoryPromptContext | undefined;
     providerTools: OpenAICompatibleToolSchema[];
     requestedCapabilityOmissions?: CapabilitySelectionDiagnostics["requestedOmissions"];
+    routingNotice?: string;
     capabilityRecoveryFeedback?: readonly string[];
     capabilityState?: readonly RuntimeCapabilityState[];
     preflightCompression?: PromptSemanticCompressionReport;
@@ -1344,6 +1346,7 @@ export class ProviderTurnLoop {
     });
     if (input.intent.requestRequirements?.research?.fresh) prompt.messages.push({ role: "user", content: RESEARCH_EVIDENCE_INSTRUCTION });
     if ((input.intent.requestRequirements?.skillReferences.length ?? 0) > 1) prompt.messages.push({ role: "user", content: `Request each additional skill ID through capability.request, then use skill.read in the next iteration to load ready instructions for every explicitly requested skill before completion or delegation: ${JSON.stringify(input.intent.skillRequests)}. Listing or selecting one skill does not satisfy the others.` });
+    if (input.routingNotice) prompt.messages.push({ role: "user", content: input.routingNotice });
     for (const feedback of input.capabilityRecoveryFeedback ?? []) {
       prompt.messages.push({ role: "user", content: `Runtime capability recovery (no authorization granted): ${feedback}` });
     }
@@ -1443,6 +1446,7 @@ export class ProviderTurnLoop {
     memoryPromptContext: MemoryPromptContext | undefined;
     providerTools: OpenAICompatibleToolSchema[];
     requestedCapabilityOmissions?: CapabilitySelectionDiagnostics["requestedOmissions"];
+    routingNotice?: string;
     capabilityRecoveryFeedback?: readonly string[];
     capabilityState?: readonly RuntimeCapabilityState[];
     providerExecution: ProviderExecutionResult | undefined;
@@ -1566,6 +1570,7 @@ export class ProviderTurnLoop {
     }
     if (input.intent.requestRequirements?.research?.fresh) prompt.messages.push({ role: "user", content: RESEARCH_EVIDENCE_INSTRUCTION });
     if ((input.intent.requestRequirements?.skillReferences.length ?? 0) > 1) prompt.messages.push({ role: "user", content: `Request each additional skill ID through capability.request, then use skill.read in the next iteration to load ready instructions for every explicitly requested skill before completion or delegation: ${JSON.stringify(input.intent.skillRequests)}. Listing or selecting one skill does not satisfy the others.` });
+    if (input.routingNotice) prompt.messages.push({ role: "user", content: input.routingNotice });
     for (const feedback of input.capabilityRecoveryFeedback ?? []) {
       prompt.messages.push({ role: "user", content: `Runtime capability recovery (no authorization granted): ${feedback}` });
     }

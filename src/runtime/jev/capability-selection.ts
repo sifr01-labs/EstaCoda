@@ -12,7 +12,7 @@ export async function selectJevCapabilities(input: {
   standard: ProviderToolSelection; evaluation: CapabilityEvaluation;
   validateTool(id: string): Promise<unknown>;
 }): Promise<ProviderToolSelection> {
-  const decision = await evaluateCapabilities(input.routing, input.catalog.inventory.map(tool => ({ id: `tool:${tool.name}`, description: `${tool.name}: ${tool.description}` })), input.evaluation);
+  const decision = await evaluateCapabilities(input.routing, input.catalog.inventory.map(tool => ({ id: `tool:${tool.name}`, description: `${tool.name}: ${tool.description}` })), input.evaluation, 'initial', new Set(input.standard.initialTools.map(schema => `tool:${input.catalog.aliases.get(schema.function.name) ?? schema.function.name}`)));
   const fallback = async (): Promise<ProviderToolSelection> => {
     if (decision.configuredMode === 'standard') return { ...input.standard, capabilityRouting: decision };
     // A failed or stale semantic request cannot resurrect schemas removed while it was pending.
@@ -21,11 +21,13 @@ export async function selectJevCapabilities(input: {
       try { if (await input.validateTool(`tool:${input.catalog.aliases.get(schema.function.name) ?? schema.function.name}`)) initialTools.push(schema); } catch { /* unavailable */ }
     }
     const exposed = new Set(initialTools.map(schema => input.catalog.aliases.get(schema.function.name) ?? schema.function.name));
-    return { ...input.standard, initialTools, capabilityRouting: { ...decision, selections: input.catalog.inventory.map(tool => ({ id: `tool:${tool.name}`, selected: exposed.has(tool.name) })) } };
+    return { ...input.standard, initialTools, capabilityRouting: { ...decision, partialFallback: undefined,
+      ...(decision.fallbackReason === 'engine-unavailable' && decision.diagnostics ? { diagnostics: { ...decision.diagnostics, failure: decision.diagnostics.failure ?? { code: 'stale' }, candidates: decision.diagnostics.candidates.map(candidate => ({ ...candidate, source: 'standard' as const, outcome: 'discarded' as const })) } } : {}), selections: input.catalog.inventory.map(tool => ({ id: `tool:${tool.name}`, selected: exposed.has(tool.name) })) } };
   };
   if (decision.actualEngine !== 'jev') return fallback();
   const explicit = new Set(requiredRequestTools(input.intent.requestRequirements));
   const required = new Set(explicit);
+  if (input.catalog.entries.some(entry => entry.tool.name === "config.provider.execution_status")) required.add("config.provider.execution_status");
   // Registered skill dependencies, including every complementary skill. Optional toolsets are not obligations.
   const requiredToolsets = new Set(input.intent.suggestedSkills.flatMap(skill => skill.requiredToolsets));
   for (const tool of input.catalog.inventory) if (tool.toolsets.some(set => requiredToolsets.has(set))) required.add(tool.name);
@@ -49,7 +51,7 @@ export async function selectJevCapabilities(input: {
     decision.actualEngine = 'standard'; decision.fallbackReason = 'engine-unavailable';
     return fallback();
   }
-  const recovery = new Set<string>(CAPABILITY_RECOVERY_TOOLS);
+  const recovery = new Set<string>([...CAPABILITY_RECOVERY_TOOLS, "config.provider.execution_status"]);
   // Keep recovery reachable even when required dependencies exceed the schema budget.
   valid.sort((a, b) => Number(recovery.has(b.tool.name)) - Number(recovery.has(a.tool.name)) || Number(explicit.has(b.tool.name)) - Number(explicit.has(a.tool.name)) || Number(required.has(b.tool.name)) - Number(required.has(a.tool.name)) ||
     (decision.selections.find(s => s.id === `tool:${b.tool.name}`)?.probability ?? 0) - (decision.selections.find(s => s.id === `tool:${a.tool.name}`)?.probability ?? 0));

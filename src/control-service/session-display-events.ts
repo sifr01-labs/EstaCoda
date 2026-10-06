@@ -15,7 +15,7 @@ export function sessionDisplayEvents(db: SQLiteDatabase, sessionId: string, opti
         'fallback',json_extract(event_json,'$.fallback'), 'state',json_extract(event_json,'$.state')) else null end as route,
       case when json_extract(event_json,'$.kind')='routing-status' then json_object(
         'stage',substr(json_extract(event_json,'$.stage'),1,32),'configuredMode',substr(json_extract(event_json,'$.configuredMode'),1,32),
-        'actualEngine',substr(json_extract(event_json,'$.actualEngine'),1,32),'model',substr(json_extract(event_json,'$.model'),1,104),
+        'partialFallback',json_extract(event_json,'$.partialFallback'),'actualEngine',substr(json_extract(event_json,'$.actualEngine'),1,32),'model',substr(json_extract(event_json,'$.model'),1,104),
         'fallbackReason',substr(json_extract(event_json,'$.fallbackReason'),1,64)) else null end as routing,
       substr(json_extract(event_json,'$.tool'),1,160) as tool,
       case when json_type(event_json,'$.toolCallId')='text' and length(json_extract(event_json,'$.toolCallId'))<=256 then json_extract(event_json,'$.toolCallId') else null end as call_id,
@@ -33,7 +33,7 @@ export function sessionDisplayEvents(db: SQLiteDatabase, sessionId: string, opti
       order by rowid desc limit ?`).all(sessionId, ...(options.row === undefined ? [] : [options.row]), options.limit ?? 32);
   return rows.map((row) => ({ id: row.id, createdAt: row.created_at, event: {
     kind: row.kind, toolCallId: row.call_id ?? undefined, ...(row.artifact ? {artifact:JSON.parse(row.artifact)} : {}), turnMessageId: row.turn ?? undefined, tool: row.tool, result: { ok: row.ok === 1 }, status: row.status, terminationCause: row.cause, completionFloor: row.floor,
-    ...(row.routing ? JSON.parse(row.routing) : {}),
+    ...(row.routing ? { ...JSON.parse(row.routing), partialFallback: JSON.parse(row.routing).partialFallback === 1 } : {}),
     ...(row.route ? { ...JSON.parse(row.route), fallback: JSON.parse(row.route).fallback === 1 } : {}),
     ...(row.plan ? { plan: JSON.parse(row.plan) } : {}),
   } as SessionEvent }));

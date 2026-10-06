@@ -107,7 +107,7 @@ describe('live Jev intent and skill routing', () => {
   expect((await route('Read it', { attachments: [{ id: 'missing', kind: 'image', status: 'missing-file' }] })).attachmentFailureResponse).toBeDefined(); expect(fetcher).not.toHaveBeenCalled();
   expect((await route('Hello')).intent.nativeIntent).toBe('general');
  });
- it.each(['uncertain', 'missing', 'service'])('uses Standard for an unusable %s decision without changing the saved preference', async kind => {
+ it.each(['missing', 'service'])('uses Standard for an unusable %s decision without changing the saved preference', async kind => {
   registry.register(skill('standard', { routing: { triggerPatterns: [{ type: 'contains', value: 'research' }] } }));
   if (kind === 'uncertain') probabilities['intent.research'] = 0.5;
   if (kind === 'missing') fetcher.mockResolvedValue(new Response(JSON.stringify({ model: 'jev-1.13.0', answers: {} })));
@@ -169,7 +169,24 @@ it('retains an explicitly requested skill during save-only work without enabling
  expect(result.intent.requestRequirements?.delegation).toBeUndefined();
 });
 
-it.each([[401,'authentication'],[429,'rate-limited']] as const)('retains actionable fallback reason for HTTP %i',async(status,reason)=>{
+it.each([[401,'authentication'],[402,'billing-rejected'],[429,'rate-limited']] as const)('retains actionable fallback reason for HTTP %i',async(status,reason)=>{
  fetcher.mockResolvedValue(new Response('private provider diagnostic',{status}));
- expect((await route('Research batteries')).intent.routingDecision).toMatchObject({configuredMode:'jev-assisted',actualEngine:'standard',fallbackReason:reason});
+ expect((await route('Research batteries')).intent.routingDecision).toMatchObject({configuredMode:'jev-assisted',actualEngine:'standard',fallbackReason:reason,diagnostics:{contacted:true,failure:{httpStatus:status},batches:[expect.objectContaining({state:'failed',failure:{code:reason,httpStatus:status}})]}});
+});
+
+it('retains confident skills and falls back only for an uncertain intent', async () => {
+ registry.register(skill('evidence')); registry.register(skill('excluded', { routing: { triggerPatterns: [{ type: 'contains', value: 'research' }] } }));
+ chosen = ['evidence']; probabilities['intent.research'] = .5;
+ const result = await route('Research batteries');
+ expect(result.intent.labels).toContain('research');
+ expect(result.intent.suggestedSkills.map(s => s.name)).toEqual(['evidence']);
+ expect(result.intent.routingDecision).toMatchObject({actualEngine:'jev',partialFallback:true,fallbackReason:'uncertain'});
+ expect(result.intent.routingDecision?.diagnostics?.candidates).toContainEqual(expect.objectContaining({id:'research',probability:.5,source:'standard',outcome:'uncertain'}));
+});
+
+it('retains response evidence when configuration becomes unreadable during dispatch',async()=>{
+ const fetch=fetcher.getMockImplementation()!;
+ fetcher.mockImplementation(async(...args)=>{const response=await fetch(...args);await writeFile(resolveProfileStateHome({homeDir:home,profileId:'p'}).configPath,'{broken');return response;});
+ const decision=(await route('Hello')).intent.routingDecision;
+ expect(decision).toMatchObject({actualEngine:'standard',fallbackReason:'engine-unavailable',diagnostics:{contacted:true,failure:{code:'stale'}}});
 });

@@ -432,6 +432,7 @@ type InternalPromptLayer = PromptLayerReport & {
 };
 
 const MUTABLE_STATE_GROUNDING_GUIDANCE = [
+  "For questions about EstaCoda itself, inspect config.provider.execution_status for current routing and provider facts. Runtime records establish what ran; arbitrary workspace source and old memory do not. Missing evidence means unknown, not disabled. Inspection grants no new authority.",
   "Mutable-state grounding:",
   "- Treat session history, compaction summaries, skill-learning records, and native replayed tool results as historical reference unless they were produced in the current turn.",
   "- Do not assert that files, directories, skills, config, processes, credentials, branches, packages, services, or network state currently exist based only on historical context.",

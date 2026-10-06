@@ -183,3 +183,32 @@ it.each([false, true])("uses live Jev selection and discovery without same-batch
     if (fallback) expect(h.requests.some(request => request.model === "research-fallback")).toBe(true);
   } finally { fetch.mockRestore(); await h.dispose(); }
 });
+
+it('answers runtime questions using current-turn status even when Jev rejects the inspection tool', async () => {
+  const { mkdir, writeFile } = await import('node:fs/promises');
+  const { resolveProfileStateHome } = await import('../config/profile-home.js');
+  const { vi } = await import('vitest');
+  const h = await createResearchWorkflowHarness();
+  const paths = resolveProfileStateHome({homeDir:h.homeDir,profileId:'baseline'});
+  await mkdir(paths.profileRoot,{recursive:true});
+  await writeFile(paths.configPath,JSON.stringify({routing:{mode:'jev-assisted'}}));
+  await writeFile(paths.envPath,'TYPESAFE_API_KEY=fixture-only\n');
+  const fetch = vi.spyOn(globalThis,'fetch').mockImplementation(async(_url,init)=>{
+    const payload=JSON.parse(String(init?.body));
+    return new Response(JSON.stringify({model:'jev-1.13.0',usage:{input_tokens:10,output_tokens:1},answers:Object.fromEntries(Object.keys(payload.questions).map(id=>[id,{type:'noul',noul:id==='intent.conversation'?.5:.05}]))}));
+  });
+  try {
+    h.enqueue(request=>{
+      expect(names(request)).toContain('config_provider_execution_status');
+      expect(request.messages.some(m=>typeof m.content==='string'&&m.content.includes('runtime routing facts'))).toBe(true);
+      return nativeCall('config_provider_execution_status',{})(request);
+    },request=>{
+      expect(request.messages.some(m=>typeof m.content==='string'&&m.content.includes('Saved routing mode: jev-assisted'))).toBe(true);
+      return answer('Jev-assisted routing is enabled; this turn used partial Standard fallback for intents.')(request);
+    });
+    await h.turn('Is our intent router now using Jev?');
+    expect(h.scriptErrors).toEqual([]);
+    expect(h.requests).toHaveLength(2);
+    expect(h.events.filter(e=>e.kind==='tool-result').map(e=>e.tool)).toEqual(['config.provider.execution_status']);
+  } finally {fetch.mockRestore();await h.dispose();}
+});
