@@ -1,3 +1,5 @@
+import { normalizeRoutingConfig } from "./routing-config.js";
+import type { RoutingConfig, ResolvedRoutingConfig } from "../contracts/routing.js";
 import {profileHeaderEnvironment,resolveHeaderReferences} from './header-secret-references.js';
 import {withProfileWriteLock, assertProfileApplySettled} from './profile-write-lock.js';
 import { parseExecutionPolicy } from "../execution/docker-policy.js";
@@ -426,6 +428,7 @@ export type ModelAliasDefinition = {
 };
 
 export type EstaCodaConfig = {
+  routing?: RoutingConfig;
   execution?: RequestedExecutionPolicy;
   model?: {
     provider?: ProviderId;
@@ -640,6 +643,7 @@ export type ChannelBusyTextCoalescingConfig = {
 };
 
 export type LoadedRuntimeConfig = {
+  routing: ResolvedRoutingConfig;
   config: EstaCodaConfig;
   sources: string[];
   homeDir: string;
@@ -1099,6 +1103,7 @@ export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Prom
     modelFallbackRoutes,
     providerRegistry,
     auxiliaryModels: normalizeAuxiliaryModels(config.auxiliaryModels),
+    routing: normalizeRoutingConfig(config.routing),
     web: {
       enableNetwork: config.web?.enableNetwork ?? false,
       maxContentChars: config.web?.maxContentChars,
@@ -1202,6 +1207,7 @@ export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Prom
 
 function patchConfig(...configs: EstaCodaConfig[]): EstaCodaConfig {
   return compactConfig(configs.reduce<EstaCodaConfig>((merged, config) => ({
+    routing: config.routing ?? merged.routing,
     execution: config.execution ?? merged.execution,
     model: {
       ...(merged.model ?? {}),

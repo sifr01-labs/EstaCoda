@@ -1,3 +1,4 @@
+import { normalizeRoutingConfig } from "../../config/routing-config.js";
 import { afterEach, describe, expect, it } from "vitest";
 import type { LoadedRuntimeConfig } from "../../config/runtime-config.js";
 import type { ModelProfile, ProviderAdapter, ProviderId, ResolvedModelRoute } from "../../contracts/provider.js";
@@ -76,6 +77,7 @@ function loadedConfig(overrides: {
       },
       auxiliaryModels: overrides.auxiliaryModels
     },
+    routing: normalizeRoutingConfig(undefined),
     sources: [],
     homeDir: "/tmp/estacoda-test-home",
     profileId: "default",

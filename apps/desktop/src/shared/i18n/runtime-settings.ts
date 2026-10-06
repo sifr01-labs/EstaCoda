@@ -1,4 +1,15 @@
 export const runtimeSettingsArabic={
+"Intent & capability routing":"توجيه النوايا والقدرات",
+"Routing mode":"وضع التوجيه",
+"Jev-assisted":"بمساعدة Jev",
+"Routing provider":"مزود التوجيه",
+"Routing model":"نموذج التوجيه",
+"Routing timeout (milliseconds)":"مهلة التوجيه (مللي ثانية)",
+"TypeSafe":"تايب سيف (TypeSafe)",
+"Intent, skill, and capability selection":"اختيار النوايا والمهارات والقدرات",
+"Jev receives relevant request context and capability descriptions. Your conversation model stays the same.":"يتلقى Jev سياق الطلب ذي الصلة وأوصاف القدرات. يبقى نموذج المحادثة كما هو.",
+"Model setup is available. This build still uses Standard routing; live Jev routing is not installed yet.":"إعداد النموذج متاح. لا يزال هذا الإصدار يستخدم التوجيه القياسي؛ لم يتم تثبيت التوجيه الفعلي باستخدام Jev بعد.",
+
  'Unsaved changes':'تغييرات غير محفوظة',
  'Command-line language':'لغة سطر الأوامر',
  'Language used by the command-line interface for this profile.':'اللغة التي تستخدمها واجهة سطر الأوامر لهذا الملف الشخصي.',

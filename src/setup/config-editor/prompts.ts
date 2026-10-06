@@ -979,6 +979,8 @@ export function setupEditorReviewSelectedAreaLabel(
       return selectedAreaLabel(locale, "Model", "النموذج", locale === "ar" ? "الأساسي" : "Primary");
     case "edit-fallback-model-route":
       return selectedAreaLabel(locale, "Model", "النموذج", locale === "ar" ? "الاحتياطي" : "Fallback");
+    case "edit-routing-model":
+      return locale === "ar" ? "توجيه النوايا والقدرات" : "Intent & capability routing";
     case "edit-auxiliary-model-route":
       return selectedAreaLabel(locale, "Model", "النموذج", locale === "ar" ? "المساند" : "Auxiliary");
     case "edit-security-mode":

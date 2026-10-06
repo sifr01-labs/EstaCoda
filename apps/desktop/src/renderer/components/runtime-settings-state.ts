@@ -18,6 +18,7 @@ export function executionSelectionChanges(page:SettingsPage,backend:'host'|'dock
  return page.fields.filter(f=>f.id.startsWith('execution.')).map(f=>({fieldId:f.id,selectors:[],value:policy[f.id]??null}));
 }
 export const runtimeSettingLabels={
+ 'routing.mode':'Routing mode','routing.jev.provider':'Routing provider','routing.jev.id':'Routing model','routing.jev.apiKeyEnv':'API key','routing.jev.timeoutMs':'Routing timeout (milliseconds)',
  'execution.backend':'Execution environment','execution.imageId':'Prepared image',
  'execution.workspaceAccess.value':'Project files','execution.workspaceAccess.requirement':'File access enforcement',
  'execution.commandNetwork.value':'Command network','execution.commandNetwork.requirement':'Network enforcement',
@@ -27,8 +28,8 @@ export const runtimeSettingLabels={
  'ui.language':'Command-line language','ui.flavor':'Status style','ui.activityLabels':'Activity language','ui.showResponseProgress':'Response progress','profile.mode':'Working style','profile.responseLanguage':'Response language'
 } as const;
 export function runtimeDisplay(change:SettingChange):string|number|boolean|string[]|null {
- if(typeof change.value==='number')return change.fieldId.endsWith('Bytes')?change.value/1024/1024:change.fieldId.endsWith('timeoutMs')?change.value/1000:change.value;
+ if(typeof change.value==='number')return change.fieldId.endsWith('Bytes')?change.value/1024/1024:change.fieldId.endsWith('timeoutMs')&&!change.fieldId.startsWith('routing.')?change.value/1000:change.value;
  return change.value;
 }
 
-export const runtimeChoiceLabels={host:'This computer',docker:'Isolated environment',mandatory:'Required',advisory:'Preferred','read-only':'Read only','read-write':'Read and write',disabled:'Blocked',unrestricted:'Allowed',session:'This session',en:'English',ar:'Arabic','match-user':'Match my message',focused:'Focused',operator:'Operator',builder:'Builder',research:'Research',standard:'Standard','arabic-light':'Arabic light','kemet-full':'Kemet full'} as const;
+export const runtimeChoiceLabels={'jev-assisted':'Jev-assisted',typesafe:'TypeSafe',host:'This computer',docker:'Isolated environment',mandatory:'Required',advisory:'Preferred','read-only':'Read only','read-write':'Read and write',disabled:'Blocked',unrestricted:'Allowed',session:'This session',en:'English',ar:'Arabic','match-user':'Match my message',focused:'Focused',operator:'Operator',builder:'Builder',research:'Research',standard:'Standard','arabic-light':'Arabic light','kemet-full':'Kemet full'} as const;

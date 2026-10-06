@@ -1,3 +1,4 @@
+import {routingSettings} from './public-settings-routing.js';
 import {normalizeAuxiliarySlotInput} from '../config/runtime-config.js';
 import {capabilitySettings} from './public-settings-capabilities.js';
 import {governanceSettings} from './public-settings-governance.js';
@@ -9,7 +10,7 @@ import {modelSettings} from './public-settings-models.js';
 import {ControlProtocolError,type SettingField,type SettingChange,type SettingValue} from '../contracts/desktop-control/index.js';
 /** Reviewed allowlist, shared by metadata, projection and apply. Never infer authority from an arbitrary config path. */
 export const PUBLIC_SETTINGS:readonly SettingField[]=[
- ...capabilitySettings,...governanceSettings,...runtimeSettings,...modelSettings,...visionSettings,...voiceSettings,...browserSettings,
+ ...routingSettings,...capabilitySettings,...governanceSettings,...runtimeSettings,...modelSettings,...visionSettings,...voiceSettings,...browserSettings,
  {id:'web.brave.apiKeyEnv',path:['web','brave','apiKeyEnv'],section:'browser',kind:'secret'},
  {id:'ui.showResponseProgress',path:['ui','showResponseProgress'],section:'runtime',kind:'boolean'},
  {id:'ui.language',path:['ui','language'],section:'runtime',kind:'choice',choices:['en','ar']},

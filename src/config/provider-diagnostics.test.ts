@@ -1,3 +1,4 @@
+import { normalizeRoutingConfig } from "./routing-config.js";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { LoadedRuntimeConfig } from "./runtime-config.js";
 import type { ModelProfile, ProviderAdapter, ProviderId, ResolvedModelRoute } from "../contracts/provider.js";
@@ -67,6 +68,7 @@ function loadedConfig(input: {
     primaryModelRoute: input.primaryRoute ?? route(),
     modelFallbackRoutes: [],
     providerRegistry: input.registry,
+    routing: normalizeRoutingConfig(undefined),
     auxiliaryModels: {},
     web: { enableNetwork: false },
     compression: {

@@ -1,3 +1,5 @@
+import { normalizeRoutingConfig } from "../../config/routing-config.js";
+import { saveRuntimeConfig } from "../../config/runtime-config.js";
 import {applyPublicSettings} from './public-settings-apply.js';
 import {removeTelegramConfig,createTelegramPairingCode} from '../../config/runtime-config.js';
 import { parseExecutionPolicy } from "../../execution/docker-policy.js";
@@ -300,6 +302,20 @@ async function applyConfigPatch(
   options: ReviewedSetupApplyExecutorOptions
 ): Promise<readonly OptionalCapabilityApplyWarning[]> {
   switch (operation.review.summaryKey) {
+    case "setupDrafts.routing.summary": {
+      const target = configApplyTarget(operation, options);
+      const profileId = target.profileId ?? readActiveProfile({ homeDir: target.homeDir }).profileId ?? defaultProfileId();
+      const path = resolveProfileStateHome({ ...target, profileId }).configPath;
+      const { config } = await readConfig(path);
+      const values = operation.review.values;
+      const mode = stringValue(values.routingMode);
+      if (mode !== "standard" && mode !== "jev-assisted") throw new Error("Invalid routing mode");
+      if (mode === "jev-assisted" && (values.provider !== "typesafe" || !stringValue(values.model) || !stringValue(values.apiKeyEnv))) throw new Error("Routing model and credential reference are required");
+      const routing = { ...config.routing, mode: mode as "standard" | "jev-assisted", ...(mode === "jev-assisted" ? { jev: { ...config.routing?.jev, provider: "typesafe" as const, id: stringValue(values.model), apiKeyEnv: stringValue(values.apiKeyEnv) } } : {}) };
+      normalizeRoutingConfig(routing);
+      await saveRuntimeConfig(path, { ...config, routing });
+      return [];
+    }
     case "setupDrafts.publicSettings.summary": {
       if(!options.isolateCredentialEnvironment||!options.homeDir||!options.profileId)throw new Error('Settings require a profile transaction');
       await applyPublicSettings(JSON.parse(String(operation.review.values.changes)),{homeDir:options.homeDir,profileId:options.profileId});return [];

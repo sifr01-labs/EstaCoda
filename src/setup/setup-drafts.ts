@@ -391,6 +391,10 @@ function draftFromEditorAction(
     return verificationDraft(source);
   }
 
+  if (action.id === "edit-routing-model") {
+    return configDraft({ id: editorDraftId(action), kind: "auxiliary-model-route", source, riskSurface: "security-policy", scope: ["routing"], configPath: options.configPath, summaryKey: "setupDrafts.routing.summary", values: action.reviewValues ?? {} });
+  }
+
   if (action.id === "edit-execution-policy") {
     return configDraft({ id: editorDraftId(action), kind: "security-mode", source, riskSurface: "security-policy",
       scope: action.patch?.fields ?? [], configPath: options.configPath, summaryKey: "setupDrafts.executionPolicy.summary", values: action.reviewValues ?? {} });
@@ -777,6 +781,7 @@ function kindForEditorAction(action: SetupEditorActionDraft): SetupDraftKind {
       return "provider-model-route";
     case "edit-fallback-model-route":
       return "fallback-model-route";
+    case "edit-routing-model":
     case "edit-auxiliary-model-route":
       return "auxiliary-model-route";
     case "edit-execution-policy":

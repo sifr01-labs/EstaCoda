@@ -1267,3 +1267,13 @@ describe("computeRuntimeFingerprint", () => {
    expect(classifyRuntimeChange(original, { ...original, securityMode: "strict" })).toBe("authority");
    expect(runtimeRevisions({ ...original, modelId: "new-model" }).authority).toBe(runtimeRevisions(original).authority);
  });
+
+it('invalidates routing definitions without changing execution authority or the conversation model',()=>{
+ const standard=computeRuntimeFingerprint(fakeLoadedRuntimeConfig(),fakeOptions());
+ for(const routing of [{mode:'jev-assisted' as const},{jev:{id:'jev-preview'}},{jev:{timeoutMs:9000}},{jev:{apiKeyEnv:'OTHER_ROUTING_KEY'}}]){
+  const changed=computeRuntimeFingerprint(fakeLoadedRuntimeConfig({config:{routing}}),fakeOptions());
+  expect(classifyRuntimeChange(standard,changed)).toBe('definition');
+  expect(runtimeRevisions(changed).authority).toBe(runtimeRevisions(standard).authority);
+  expect(changed.modelId).toBe(standard.modelId);
+ }
+});

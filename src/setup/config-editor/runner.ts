@@ -1,3 +1,6 @@
+import { promptRoutingModelSetup } from "../routing-model-setup.js";
+import { normalizeRoutingConfig } from "../../config/routing-config.js";
+import { readConfig } from "../../config/runtime-config.js";
 import { promptExecutionSetup } from "../docker-execution-setup.js";
 import { resolveStateHome } from "../../config/state-home.js";
 import { hasSavedEnvSecret } from "../../config/env-secret-store.js";
@@ -570,6 +573,12 @@ async function handleAction(
     }
     case "repair-workspace-trust":
       return handleWorkspaceTrustAction(options, initialDecision, session, action);
+    case "edit-routing-model": {
+      const current = normalizeRoutingConfig((await readConfig(activeProfileConfigPath(options))).config.routing);
+      const collected = await promptRoutingModelSetup(options.prompt, options.locale, current);
+      if (!collected) return menuBackResult(initialDecision, action.id);
+      return reviewAndApplyAction(options, initialDecision, session, { ...requireEditorAction(action), reviewValues: collected.values }, { pendingCredentialWrites: collected.pendingCredentialWrites });
+    }
     case "edit-execution-policy": {
       try {
         const values = await promptExecutionSetup(options.prompt, options.locale);
@@ -1857,6 +1866,7 @@ async function reviewAndApplyAction(
   editorAction: SetupEditorActionDraft,
   overrides: {
     readonly trustStorePath?: string;
+    readonly pendingCredentialWrites?: readonly PendingCredentialWrite[];
   } = {}
 ): Promise<ConfigEditorRunnerResult> {
   const verificationAction = session.plan.actions.find((candidate) => candidate.id === "run-readonly-verification");
@@ -1876,7 +1886,7 @@ async function reviewAndApplyAction(
     initialDecision,
     editorAction.id,
     reviewManifest,
-    {},
+    { pendingCredentialWrites: overrides.pendingCredentialWrites },
     shouldOfferVisionVerification(editorAction)
   );
 }

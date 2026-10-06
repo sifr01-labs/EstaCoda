@@ -87,6 +87,41 @@ describe("runConfigEditor", () => {
     await rm(tempDir, { recursive: true, force: true });
   });
 
+  it.each([true, false])("reviews Jev model configuration before applying credentials (%s)", async approved => {
+    await writeUserConfig(tempDir, {...localReadyConfig(), routing: {jev: {timeoutMs: 9000}}});
+    await trustWorkspace(tempDir, workspaceRoot);
+    const before = await readFile(profileConfigPath(tempDir), "utf8");
+    const result = await runConfigEditor({homeDir: tempDir, workspaceRoot, defaultActionId: "edit-routing-model",
+      applyExecutor: createReviewedSetupApplyExecutor({homeDir: tempDir, workspaceRoot, collectVerification: () => readyVerification(profileConfigPath(tempDir))}),
+      prompt: fakePrompt({values: ["jev-assisted", "typesafe", "jev-1.13.0", approved], secret: "jev-private-fixture"})});
+    expect(result.output).not.toContain("jev-private-fixture");
+    expect(JSON.stringify(result.reviewManifest)).not.toContain("jev-private-fixture");
+    const saved = await readFile(profileConfigPath(tempDir), "utf8");
+    if (approved) {
+      expect(JSON.parse(saved).routing).toEqual({mode: "jev-assisted", jev: {provider: "typesafe", id: "jev-1.13.0", apiKeyEnv: "TYPESAFE_API_KEY", timeoutMs: 9000}});
+      expect(JSON.parse(saved).model).toEqual(JSON.parse(before).model);
+      expect(await readFile(resolveProfileStateHome({homeDir: tempDir, profileId: "default"}).envPath, "utf8")).toContain("jev-private-fixture");
+    } else {
+      expect(saved).toBe(before);
+      await expect(readFile(resolveProfileStateHome({homeDir: tempDir, profileId: "default"}).envPath, "utf8")).rejects.toMatchObject({code: "ENOENT"});
+    }
+    delete process.env.TYPESAFE_API_KEY;
+  });
+
+  it("switches routing off in the active profile while retaining its model and credential reference", async () => {
+    await writeUserConfig(tempDir, localReadyConfig(), "default");
+    const routing = {mode: "jev-assisted", jev: {id: "jev-preview", apiKeyEnv: "WORK_JEV_KEY", timeoutMs: 8000}};
+    await writeUserConfig(tempDir, {...localReadyConfig(), routing}, "work");
+    writeActiveProfile("work", {homeDir: tempDir});
+    await trustWorkspace(tempDir, workspaceRoot);
+    const before = await readFile(profileConfigPath(tempDir, "default"), "utf8");
+    await runConfigEditor({homeDir: tempDir, workspaceRoot, defaultActionId: "edit-routing-model",
+      prompt: fakePrompt({values: ["standard", true]}),
+      applyExecutor: createReviewedSetupApplyExecutor({homeDir: tempDir, workspaceRoot, collectVerification: () => readyVerification(profileConfigPath(tempDir, "work"))})});
+    expect(JSON.parse(await readFile(profileConfigPath(tempDir, "work"), "utf8")).routing).toEqual({...routing, mode: "standard"});
+    expect(await readFile(profileConfigPath(tempDir, "default"), "utf8")).toBe(before);
+  });
+
   it("renders configured setup sections and exits without mutating config", async () => {
     await writeUserConfig(tempDir, localReadyConfig());
     await trustWorkspace(tempDir, workspaceRoot);
@@ -251,6 +286,7 @@ describe("runConfigEditor", () => {
       "edit-fallback-model-route",
       "edit-auxiliary-model-route",
       "edit-security-mode",
+      "edit-routing-model",
       "edit-execution-policy",
       "edit-workflow-learning",
       "edit-budgets",

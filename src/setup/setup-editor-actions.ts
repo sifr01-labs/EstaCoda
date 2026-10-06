@@ -7,6 +7,7 @@ export type SetupEditorActionId =
   | "edit-fallback-model-route"
   | "edit-auxiliary-model-route"
   | "repair-missing-credential"
+  | "edit-routing-model"
   | "edit-execution-policy"
   | "edit-security-mode"
   | "edit-workflow-learning"
@@ -27,6 +28,7 @@ export type SetupEditorActionId =
   | "cancel-setup-editor";
 
 export type SetupEditorPatchField =
+  | "routing"
   | "publicSettings"
   | "model.provider"
   | "model.id"

@@ -1,3 +1,4 @@
+import { normalizeRoutingConfig } from "../config/routing-config.js";
 import { join } from "node:path";
 import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
 import type { ResolvedModelRoute } from "../contracts/provider.js";
@@ -63,6 +64,7 @@ export type RuntimeFingerprint = {
 
   // ── Media / auxiliary ──
   auxiliaryModelsHash?: string;
+  routingConfigHash?: string;
   imageGenHash: string;
   ttsHash: string;
   sttHash: string;
@@ -145,6 +147,7 @@ export function computeRuntimeFingerprint(
     ...(runtimeUiIdentity !== undefined ? { runtimeUiIdentity } : {}),
     agentProfileMode: config.profile.mode,
     agentResponseLanguage: config.profile.responseLanguage,
+    routingConfigHash: stableJsonHash(normalizeRoutingConfig(config.config.routing)),
     auxiliaryModelsHash: config.auxiliaryModels
       ? stableJsonHash(config.auxiliaryModels)
       : undefined,
@@ -236,6 +239,7 @@ export function runtimeRevisions(fingerprint: RuntimeFingerprint): RuntimeRevisi
     explicitSecurityPolicyPresent: fingerprint.explicitSecurityPolicyPresent,
   };
   const definition = {
+    routingConfigHash: fingerprint.routingConfigHash,
     skillConfigHash: fingerprint.skillConfigHash,
     skillAutonomy: fingerprint.skillAutonomy,
     externalSkillRoots: fingerprint.externalSkillRoots,

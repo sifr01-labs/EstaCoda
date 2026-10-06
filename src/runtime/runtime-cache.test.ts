@@ -939,3 +939,14 @@ it('browser control borrows only the existing runtime and keeps it pinned throug
  await cache.invalidate('s');expect(runtime.disposeCalls).toBe(0);await expect(cache.get('s',fakeFingerprint(),fakeSecurityPolicy)).rejects.toThrow('settling');
  finish({lease:{id:'lease',generation:1},state:'human',frame:null});await pending;expect(runtime.disposeCalls).toBe(1);await cache.disposeAll();
 });
+
+it('defers routing config replacement until the active execution releases its lease',async()=>{
+ const cache=createCache(),original=fakeFingerprint({routingConfigHash:'standard'}),updated=fakeFingerprint({routingConfigHash:'jev-config'});
+ const first=await cache.get('routing-session',original,fakeSecurityPolicy);
+ await expect(cache.get('routing-session',updated,fakeSecurityPolicy)).rejects.toThrow('busy');
+ expect(()=>first.tools()).not.toThrow();
+ await first.dispose();
+ const next=await cache.get('routing-session',updated,fakeSecurityPolicy);
+ expect(cache.stats().totalCreated).toBe(2);
+ await next.dispose();await cache.disposeAll();
+});

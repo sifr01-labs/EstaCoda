@@ -22,6 +22,7 @@ const PR6_EDITOR_ACTION_ORDER: readonly SetupEditorActionId[] = [
   "edit-auxiliary-model-route",
   "repair-workspace-trust",
   "edit-security-mode",
+  "edit-routing-model",
   "edit-execution-policy",
   "edit-workflow-learning",
   "edit-budgets",
@@ -317,6 +318,8 @@ function editorActionDescription(action: SetupEditorActionDraft, locale: SetupCo
   switch (action.id) {
     case "repair-workspace-trust":
       return setupCopyText(locale, "setupEditor.actions.repairWorkspaceTrust.description");
+    case "edit-routing-model":
+      return setupCopyText(locale, "setupEditor.actions.editRoutingModel.description");
     case "edit-execution-policy":
       return setupCopyText(locale, "setupEditor.actions.editExecutionPolicy.description");
     case "edit-security-mode":

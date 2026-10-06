@@ -21,4 +21,4 @@ export type MediaSettingsMetadata={effective:SettingChange[];defaults:SettingCha
 export type WebSettingsMetadata={effective:SettingChange[];defaults:SettingChange[];searchProviders?:Array<{id:string;label:string;implemented:boolean;available:boolean}>;resolvedSearch?:string|null};
 
 /** Read-only requested execution policy and normalized communication preferences. Not runtime verification. */
-export type RuntimeSettingsMetadata={effective:SettingChange[];defaults:SettingChange[]};
+export type RuntimeSettingsMetadata={effective:SettingChange[];defaults:SettingChange[];routingModels?:Array<{id:string;label:string}>};

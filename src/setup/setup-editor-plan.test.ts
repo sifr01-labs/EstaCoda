@@ -317,6 +317,7 @@ describe("buildSetupEditorPlan", () => {
       "add-custom-provider-route",
       "edit-fallback-model-route",
       "edit-auxiliary-model-route",
+      "edit-routing-model",
       "edit-execution-policy",
       "edit-security-mode",
       "edit-workflow-learning",
