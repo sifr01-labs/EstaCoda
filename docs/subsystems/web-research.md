@@ -127,3 +127,12 @@ For Brave, confirm that the selected profile config names the expected env refer
 Browser & Search settings show the selected search service and the currently resolved service for Automatic. Brave Search and DDGS are selectable implemented search services; registered providers without a search implementation remain browse-only. Availability is setup evidence, not a successful network test. Brave credentials are staged privately. DDGS uses the registered dependency installer with explicit download review and durable receipt reconciliation; downloading software is separate from saving search settings.
 
 Choosing Automatic clears the explicit search selection and the legacy shared backend. When extraction or crawling inherited that shared backend, the reviewed change preserves their existing selection explicitly. Advanced controls retain extraction/crawling and legacy provider settings.
+
+
+### Foreground report completion
+
+Explicit coordinated requests such as “Use the researcher skill and 3 subagents” retain the worker count. Required delegation, research, and file tools are prioritized within the existing provider schema budget; visibility never bypasses execution authorization.
+
+For a foreground research request that saves a report, citation provenance is checked against the delivered report bytes, not the short chat acknowledgement. The report must have a successful write and a subsequent complete, matching file readback in the current turn. A ranged preview alone is insufficient. Exact write input or a complete read body must match the executor's file digest before being treated as report content. Existing files and unrelated writes cannot satisfy this contract.
+
+Foreground research uses the existing completion repair loop (at most two corrective replies, within the turn's limits). Missing readback or unsupported citations produce feedback before final settlement. Denied actions do not trigger automatic completion retries. New report digests and matching complete readbacks count as progress; repeating unchanged file calls does not. These checks establish delivery and source provenance, not scientific accuracy or source freshness by themselves.

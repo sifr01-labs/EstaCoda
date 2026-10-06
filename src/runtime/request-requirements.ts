@@ -44,7 +44,13 @@ export function deriveRequestRequirements(userText: string, originTurnId?: strin
       if (result.skillReferences.length >= 4) { result.issues.push("request-too-long"); break; }
       result.skillReferences.push(reference.toLocaleLowerCase("en-US"));
     }
-    const delegation = actionSegment.match(/\b(?:use|using|launch|spawn|delegate\s+to|assign\s+to)\s+(?:(\d{1,9}|one|two|three|four|five|six|seven|eight|nine|ten)\s+)?(?:sub[- ]?agents?|workers?|agents?)\b|(?:استخدم|شغّل|شغل|كلّف)\s+(?:(\d{1,9}|[٠-٩]{1,9}|ثلاثة|ثلاث|اثنين|اثنان)\s+)?(?:وكلاء|عمال|وكيل|sub[- ]?agents?|workers?)(?:\s+فرعيين)?/iu);
+    // A coordinated object inherits the explicit use verb ("use the X skill
+    // and three workers"). Keep the antecedent bounded to a skill request;
+    // arbitrary mentions, quoted text and negated clauses remain inert.
+    const delegationSegment = actionSegment
+      .replace(/\b(use|using)\s+(?:the\s+)?[\p{L}\p{N}_-]{1,80}\s+skill\s*(?:,\s*)?(?:and|&)\s+/giu, "$1 ")
+      .replace(/استخدم\s+مهارة\s+[\p{L}\p{N}_-]{1,80}\s+و\s*/gu, "استخدم ");
+    const delegation = delegationSegment.match(/\b(?:use|using|launch|spawn|delegate\s+to|assign\s+to)\s+(?:(\d{1,9}|one|two|three|four|five|six|seven|eight|nine|ten)\s+)?(?:sub[- ]?agents?|workers?|agents?)\b|(?:استخدم|شغّل|شغل|كلّف)\s+(?:(\d{1,9}|[٠-٩]{1,9}|ثلاثة|ثلاث|اثنين|اثنان)\s+)?(?:وكلاء|عمال|وكيل|sub[- ]?agents?|workers?)(?:\s+فرعيين)?/iu);
     if (delegation !== null) {
       const countText = delegation[1] ?? delegation[2];
       const words: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, ثلاثة: 3, ثلاث: 3, اثنين: 2, اثنان: 2 };

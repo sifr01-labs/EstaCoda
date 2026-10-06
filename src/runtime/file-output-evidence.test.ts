@@ -2,7 +2,7 @@ import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { ExecutionEvidenceIndex } from "./execution-evidence-index.js";
-import { fileOutputEvidence } from "./file-output-evidence.js";
+import { fileOutputEvidence, verifiedFileOutputContent } from "./file-output-evidence.js";
 import { deriveRequestRequirements } from "./request-requirements.js";
 import { deriveExecutionFinalOutcome } from "./execution-outcome.js";
 
@@ -83,4 +83,23 @@ describe("file output evidence", () => {
     expect(fileOutputEvidence(input).satisfied).toBe(kind === "primary");
   });
 
+});
+
+
+describe("verified report content", () => {
+  it("uses the exact written bytes only after complete matching readback", () => {
+    const write = { ...call("file.write"), input: { path: "report.md", content: "report" } };
+    expect(verifiedFileOutputContent(observe([write, call("file.read")]))).toBe("report");
+    expect(verifiedFileOutputContent(observe([write]))).toBeUndefined();
+    expect(verifiedFileOutputContent(observe([write, call("file.read", "report.md", { contentSha256: undefined })]))).toBeUndefined();
+    expect(verifiedFileOutputContent(observe([write, call("file.read"), call("file.write")]))).toBeUndefined();
+    expect(verifiedFileOutputContent({ ...observe([write, call("file.read")]), executionReceipts: [] })).toBeUndefined();
+  });
+  it("recovers patched content from a matching complete body, never an arbitrary tool summary", () => {
+    const read = { ...call("file.read"), result: { ...call("file.read").result!, content: "# report.md\nreport" } };
+    expect(verifiedFileOutputContent(observe([call("file.patch"), read]))).toBe("report");
+    expect(verifiedFileOutputContent(observe([call("file.patch"), { ...read, result: { ...read.result, content: "# report.md\nfake report" } }]))).toBeUndefined();
+    const write = { ...call("file.write"), input: { path: "report.md", content: "wrong content" } };
+    expect(verifiedFileOutputContent(observe([write, call("file.read")]))).toBeUndefined();
+  });
 });

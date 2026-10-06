@@ -21,6 +21,27 @@ describe("bounded explicit request requirements", () => {
       research: { domain: "general" }, fileOutput: { path: "report.md" }, delegation: { count: 3 }
     });
   });
+  it.each([
+    "Use the researcher skill and 3 subagents to research current battery recycling methods. Save a cited report to battery-recycling-test.md.",
+    "Use the researcher skill and three workers to research batteries",
+    "Using the researcher skill, and 3 sub-agents, research batteries",
+    "Use the researcher skill & 3 agents to research batteries",
+    "استخدم مهارة researcher وثلاثة وكلاء فرعيين"
+  ])("inherits an explicit use verb for coordinated workers: %s", text => {
+    expect(deriveRequestRequirements(text).delegation).toEqual({ count: 3 });
+  });
+  it.each([
+    "Do not use the researcher skill and 3 subagents",
+    "Explain how to use the researcher skill and 3 subagents",
+    "Use the researcher skill without 3 subagents",
+    "Use the researcher skill and do not use 3 subagents",
+    'Use the researcher skill and "3 subagents"',
+    "The researcher skill and 3 subagents are available",
+    "Use the researcher skill and describe 3 subagents",
+    "لا تستخدم مهارة researcher وثلاثة وكلاء فرعيين"
+  ])("keeps coordinated mentions and prohibitions inert: %s", text => {
+    expect(deriveRequestRequirements(text).delegation).toBeUndefined();
+  });
   it("keeps mixed greetings empty without hiding an appended action", () => {
     const router = new IntentRouter({ skillRegistry: new SkillRegistry() });
     expect(router.route("hello مرحبا").taskClass).toBe("conversation");

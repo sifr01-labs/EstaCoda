@@ -158,3 +158,19 @@ describe("exact requested tools stay within the session catalog", () => {
     expect(names).not.toContain("file.write");
   });
 });
+
+// Required capabilities must survive a saturated catalog under natural phrasing.
+it("reserves delegation and delivery tools for coordinated explicit requests", () => {
+  const prompt = "Use the researcher skill and 3 subagents to research current battery recycling methods. Save a cited report to report.md.";
+  const crowded = buildProviderToolSchemaCatalog({ tools: [
+    ...Array.from({ length: 120 }, (_, index) => tool(`optional.${index}`, ["core"])), ...definitions,
+    tool("web.search", ["web"], "read-only-network")
+  ] });
+  const intent = router.route(prompt);
+  const selected = selectProviderToolsForTurn({ catalog: crowded, intent, userText: prompt, selectedSkill: intent.primarySkill });
+  expect(intent.requestRequirements?.delegation?.count).toBe(3);
+  expect(selected.initialTools).toHaveLength(100);
+  expect(selected.initialTools.map(schema => crowded.aliases.get(schema.function.name))).toEqual(expect.arrayContaining([
+    "delegate_task", "task.status", "task.result.read", "file.write", "file.read", "web.search", "skill.read"
+  ]));
+});

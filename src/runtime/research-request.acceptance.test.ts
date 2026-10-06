@@ -46,6 +46,51 @@ function schedulerFor(h: Harness, taskId: string) {
 }
 
 describe.sequential("research workflow acceptance harness", () => {
+  it("repairs an incomplete foreground readback and validates citations in the saved report", async () => {
+    const h = await harness();
+    const report = REPORT + "\n" + "A retained report paragraph.\n".repeat(1800);
+    h.enqueue(nativeCall("web_search", { query: "current battery recycling" }),
+      nativeCall("file_write", { path: "report.md", content: report }),
+      nativeCall("file_read", { path: "report.md", lineStart: 1, lineEnd: 40 }),
+      answer("Saved report.md."), request => {
+        expect(JSON.stringify(request.messages)).toContain("without lineStart or lineEnd");
+        return nativeCall("file_read", { path: "report.md" })(request);
+      }, answer("Saved and verified report.md."));
+    const result = await h.turn("Research current battery recycling and save a cited report to report.md.");
+    expect(result.finalOutcome?.status).toBe("completed");
+    expect(result.text).toBe("Saved and verified report.md.");
+    expect(await readFile(join(h.workspaceRoot, "report.md"), "utf8")).toBe(report);
+    expect(h.searches).toHaveLength(1);
+    expect(result.toolExecutions.at(-1)?.result?.metadata).toMatchObject({ truncated: true, completeFileRead: true });
+    expect(result.toolExecutions.filter(call => call.tool.name === "file.write")).toHaveLength(1);
+    scriptConsumed(h);
+  });
+
+  it("repairs unsupported citations in the deliverable even when the chat reply is grounded", async () => {
+    const h = await harness();
+    h.enqueue(nativeCall("web_search", { query: "current recycling" }),
+      nativeCall("file_write", { path: "report.md", content: REPORT.replace(SOURCE_URL, "https://unobserved.example/paper") }),
+      nativeCall("file_read", { path: "report.md" }), answer(REPORT), request => {
+        expect(JSON.stringify(request.messages)).toContain("unobserved-source");
+        return nativeCall("file_write", { path: "report.md", content: REPORT, overwrite: true })(request);
+      }, nativeCall("file_read", { path: "report.md" }), answer("Saved and verified report.md."));
+    const result = await h.turn("Research current recycling and save report.md");
+    expect(result.finalOutcome?.status).toMatch(/^completed/u);
+    expect(await readFile(join(h.workspaceRoot, "report.md"), "utf8")).toBe(REPORT);
+    scriptConsumed(h);
+  });
+
+  it("does not use completion repair to retry a denied report write", async () => {
+    const h = await harness({ denyWrites: true });
+    h.enqueue(nativeCall("web_search", { query: "current recycling" }),
+      nativeCall("file_write", { path: "report.md", content: REPORT }), answer("The write was denied."));
+    const result = await h.turn("Research current recycling and save report.md");
+    expect(result.finalOutcome?.status).not.toMatch(/^completed/u);
+    expect(result.toolExecutions.filter(call => call.tool.name === "file.write")).toHaveLength(1);
+    await expect(readFile(join(h.workspaceRoot, "report.md"))).rejects.toThrow();
+    scriptConsumed(h);
+  });
+
   it("recovers the incident under provider fallback and retains required synthesis", async () => {
     const h=await harness({fallbackOnRequest:1,sourceAccessFailures:true});
     const tasks=["collection","processing","reuse"].map(scope=>({task:`Research ${scope}.`,context:"User requested current research using 3 subagents. Save report.md. This is background context, not this worker's assignment.",allowedTools:["web.search","web.extract"],
@@ -54,7 +99,7 @@ describe.sequential("research workflow acceptance harness", () => {
     // Three pre-admission errors must leave capacity for the corrected batch.
     for(let i=0;i<3;i++) h.enqueue(nativeCall("delegate_task",{tasks:tasks.slice(0,2),synthesis:false}));
     h.enqueue(nativeCall("delegate_task",{tasks,synthesis:false}));
-    const result=await h.turn("Use the researcher skill and use 3 subagents to research current battery recycling. Save report.md.");
+    const result=await h.turn("Use the researcher skill and 3 subagents to research current battery recycling. Save report.md.");
     expect(result.toolExecutions.filter(call=>call.result?.metadata?.code==="request-requirements-unsatisfied")).toHaveLength(3);
     expect(result.toolExecutions.at(-1)?.result).toMatchObject({ok:true});
     expect(result.toolExecutions.find(call=>call.tool.name==="skill.read")?.result).toMatchObject({ok:true,metadata:{mode:"reference"}});
@@ -169,7 +214,7 @@ describe.sequential("research workflow acceptance harness", () => {
 
   it("does not accept a Step completion override supplied through message metadata", async () => {
     const h = await harness();
-    h.enqueue(answer("Done without research."));
+    h.enqueue(answer("Done without research."), answer("Done without research."), answer("Done without research."));
     const result = await h.runtime.handle({ text: "Use 3 workers to research current recycling.", channel: "cli", trustedWorkspace: true,
       inputMetadata: { stepCompletion: { requirements: { skillReferences: [], issues: [] } } } });
     expect(result.intent.requestRequirements?.delegation?.count).toBe(3);
@@ -255,7 +300,7 @@ describe.sequential("research workflow acceptance harness", () => {
     const rejected=[tasks.slice(0,1),tasks.slice(0,2),tasks.map(({research,...task})=>task),
       tasks.map(task=>({...task,research:{...task.research,requireLiveSources:false}})),tasks.map(task=>({...task,allowedTools:["unavailable.tool"]}))];
     for(const items of rejected)h.enqueue(nativeCall("delegate_task",{tasks:items}));
-    h.enqueue(nativeCall("web_search",{query:"current battery recycling"}),answer("I found a source, but have not completed the requested workers or saved the report."));
+    h.enqueue(nativeCall("web_search",{query:"current battery recycling"}),answer("I found a source, but have not completed the requested workers or saved the report."), answer("I found a source, but have not completed the requested workers or saved the report."));
     const result=await h.turn("Use 3 subagents to research current battery recycling. Save report.md.");
     expect(result.toolExecutions.filter(item=>item.tool.name==="delegate_task")).toHaveLength(5);
     expect(result.toolExecutions.find(item=>item.tool.name==="web.search")?.result?.ok).toBe(true);
@@ -291,7 +336,7 @@ describe.sequential("research workflow acceptance harness", () => {
 
   it("does not erase affirmative how-to requirements or accept a no-tool completion", async () => {
     const h = await harness();
-    h.enqueue(answer("Done. All requested work is complete."));
+    h.enqueue(answer("Done. All requested work is complete."), answer("Done. All requested work is complete."), answer("Done. All requested work is complete."));
     const result = await h.turn("Research how to recycle batteries and save report.md using 3 subagents");
     expect(result.intent.requestRequirements).toMatchObject({ research: { domain: "general" }, fileOutput: { path: "report.md" }, delegation: { count: 3 } });
     expect(result.finalOutcome?.status).toBe("blocked");
@@ -300,7 +345,7 @@ describe.sequential("research workflow acceptance harness", () => {
 
   it("requires observed source claims for foreground fresh research", async () => {
     const h = await harness();
-    h.enqueue(nativeCall("web_search", { query: "unrelated weather" }), answer("Research complete with no citations."));
+    h.enqueue(nativeCall("web_search", { query: "unrelated weather" }), answer("Research complete with no citations."), answer("Research complete with no citations."), answer("Research complete with no citations."));
     const result = await h.turn("Research the latest battery recycling methods.");
     expect(result.finalOutcome?.status).toBe("partially_completed");
     expect(result.text).toContain("source-citations-missing");
@@ -360,7 +405,7 @@ describe.sequential("research workflow acceptance harness", () => {
 
   it("rejects a completed research claim without the requested workers and retains requirements on rerun", async () => {
     const h = await harness();
-    h.enqueue(nativeCall("web_search", { query: "battery recycling" }), nativeCall("web_extract", { url: SOURCE_URL }), answer(REPORT));
+    h.enqueue(nativeCall("web_search", { query: "battery recycling" }), nativeCall("web_extract", { url: SOURCE_URL }), answer(REPORT), answer(REPORT), answer(REPORT));
     const research = await h.turn(RESEARCH_PROMPT);
     expect(h.runtime.tools().map((tool) => tool.name)).toContain("delegate_task");
     expect(research.intent.taskClass).toBe("research");
@@ -381,7 +426,7 @@ describe.sequential("research workflow acceptance harness", () => {
       expect(receipts).toContainEqual(expect.objectContaining({ tool: execution.tool.name, toolCallId: execution.toolCallId, status: "success" }));
     }
 
-    h.enqueue(answer("The research workflow has been followed."));
+    h.enqueue(answer("The research workflow has been followed."), answer("The research workflow has been followed."), answer("The research workflow has been followed."));
     const rerun = await h.turn("Rerun this task but this time use the research skill.");
     expect(rerun.toolExecutions).toEqual([]);
     expect(rerun.finalOutcome?.status).toBe("blocked");
@@ -396,7 +441,7 @@ describe.sequential("research workflow acceptance harness", () => {
     expect(save.finalOutcome?.confirmedActions).toEqual([]);
     await expect(readFile(join(h.workspaceRoot, "report.md"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
     expect(h.store.listTasks()).toEqual([]);
-    expect(h.requests).toHaveLength(5);
+    expect(h.requests).toHaveLength(9);
     scriptConsumed(h);
   });
 
@@ -586,7 +631,7 @@ describe.sequential("research workflow acceptance harness", () => {
       task: `Research ${scope}.`, allowedTools: ["web.search"],
       ...(kind === "missing-contracts" ? {} : { research: { scope, requireLiveSources: kind !== "no-live-search", requireRepositoryEvidence: false } })
     }));
-    h.enqueue(nativeCall("delegate_task", { tasks, synthesis: false }), answer("All three workers completed."));
+    h.enqueue(nativeCall("delegate_task", { tasks, synthesis: false }), answer("All three workers completed."), answer("All three workers completed."), answer("All three workers completed."));
     const result = await h.turn(RESEARCH_PROMPT);
     expect(h.store.listTasks()).toEqual([]);
     expect(result.toolExecutions[0]?.result).toMatchObject({ ok: false, metadata: { code: "request-requirements-unsatisfied" } });
@@ -599,7 +644,7 @@ describe.sequential("research workflow acceptance harness", () => {
     const h = await harness();
     h.enqueue(nativeCall("delegate_task", { tasks: ["one", "two", "three"].map((scope) => ({
       task: `Research ${scope}.`, research: { scope, requireLiveSources: false, requireRepositoryEvidence: false }
-    })), requestContract: { requirements: {} } }), answer("The workers are running."));
+    })), requestContract: { requirements: {} } }), answer("The workers are running."), answer("The workers are running."), answer("The workers are running."));
     const result = await h.turn(RESEARCH_PROMPT);
     expect(h.store.listTasks()).toEqual([]);
     expect(result.toolExecutions[0]?.result).toMatchObject({ ok: false, metadata: { code: "request-requirements-unsatisfied" } });

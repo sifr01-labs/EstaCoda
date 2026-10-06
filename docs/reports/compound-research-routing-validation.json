@@ -1,0 +1,183 @@
+{
+  "version": 1,
+  "status": "validated",
+  "measuredAt": "2026-10-06T09:15:28.150Z",
+  "sourceBaseCommit": "98f3f66f4ba0620bfb8079d570659bcfa2553c6b",
+  "scope": "Coordinated explicit delegation, required tool exposure, and repair of foreground report provenance and full-file readback.",
+  "sourceFiles": [
+    {
+      "path": "apps/desktop/tests/research-packaged.mts",
+      "sha256": "a125a33418fc6d91ce4c409ce0d1aa21e81dac89478607bfb0240da1b3a0db62"
+    },
+    {
+      "path": "docs/subsystems/web-research.md",
+      "sha256": "4316c3011c0dba13b56cc6779c9a2f87f9af9aca62469cbf515fb5cf5fec7c5a"
+    },
+    {
+      "path": "src/runtime/agent-loop.ts",
+      "sha256": "523247a15311b2fa8548ac4597bad0c70e9ce006a4886335a14b3d21f692ea9c"
+    },
+    {
+      "path": "src/runtime/capability-recovery.test.ts",
+      "sha256": "58e92b800184f8918d9adc44a73156144a78982c0a71f63d2839897a80660bdb"
+    },
+    {
+      "path": "src/runtime/file-output-evidence.test.ts",
+      "sha256": "a32f3bebb7dd496c162d94254e7cd27ab3b8d6a2eaaf6f081d62ce5ff0e2e018"
+    },
+    {
+      "path": "src/runtime/file-output-evidence.ts",
+      "sha256": "6f79fe5ee07e03920c400f69c589fb2cbd13eee7f0d7f86799234698467197c4"
+    },
+    {
+      "path": "src/runtime/request-requirements.test.ts",
+      "sha256": "f0aa9ae3b9cc93bf540682c95fef79f694c23b04ccae51f64832dcc379dbedef"
+    },
+    {
+      "path": "src/runtime/request-requirements.ts",
+      "sha256": "d75771a4aaaba3e17316aa18e9de9f630b563c922dd744ad22e5180f56e22cbc"
+    },
+    {
+      "path": "src/runtime/research-continuity.test.ts",
+      "sha256": "0ce31fdd8625dd28fb7ccd97513ac01977cbcde7ff59a82d17b13010634ad8b1"
+    },
+    {
+      "path": "src/runtime/research-request-evidence.ts",
+      "sha256": "c4b564de4688b0a8bee4599a1873e11ed20e68df08f99c6da159b2e8a319acbc"
+    },
+    {
+      "path": "src/runtime/research-request.acceptance.test.ts",
+      "sha256": "59b08e858541fec391b5903e4cb01146d9f988ddf82dc4971810dc4343a3c2a2"
+    },
+    {
+      "path": "src/runtime/research-routing.characterization.test.ts",
+      "sha256": "1be2949e35c31a2f2de979d2560bfd56618e3913ea006646acf64e769fc79212"
+    },
+    {
+      "path": "src/runtime/research-surfaces.acceptance.test.ts",
+      "sha256": "66ca8b7571c8cbb4f103a848cb17f32f9bf4199f3b1a4972a3dc286ca0d21b24"
+    },
+    {
+      "path": "src/runtime/tool-loop-progress-guard.test.ts",
+      "sha256": "87ae21df87a0bf1a61785c8f6173303ebb95b158f356ddb20c3db8dba0ce2dc0"
+    },
+    {
+      "path": "src/runtime/tool-loop-progress-guard.ts",
+      "sha256": "e5a31f2457766280ad79b8cfd92077dcd118b59e06e0d4a98cc0f7598db45826"
+    }
+  ],
+  "checks": {
+    "frozenDependencies": true,
+    "typecheck": true,
+    "coreTests": {
+      "files": 750,
+      "passed": 12130,
+      "failed": 0
+    },
+    "researchReleaseTests": {
+      "passed": 1952,
+      "failed": 0,
+      "total": 1952
+    },
+    "sourceSmoke": {
+      "passed": 13,
+      "failed": 0
+    },
+    "build": true,
+    "runtimeImportAudit": true,
+    "esmAudit": true,
+    "distributionSmoke": {
+      "passed": 13,
+      "failed": 0
+    },
+    "diffWhitespace": true
+  },
+  "packagedDesktop": {
+    "passed": true,
+    "runtime": {
+      "sha256": "578b42dfb3791dee3ae4a2701622c550df78f81852d559288ef0bcb1604ef848",
+      "nodeVersion": "v24.14.1",
+      "coreVersion": "0.1.0",
+      "entrySha256": "8b7b5e8816ffe62d9baa2133dd5cc54a1a8ea36997b0bda6fc631039c700f6ec",
+      "signature": "ad-hoc verified",
+      "ownedBridgeVerified": true,
+      "inventoryVerified": true,
+      "matchesCurrentDist": true,
+      "supervisorRetainedPathWithSpaces": true
+    },
+    "fixtures": {
+      "model": "scripted loopback HTTP",
+      "web": "in-process registered synthetic provider in packaged supervisor",
+      "liveModelCalls": 0,
+      "transport": "actual signed app + preload/Main + owned bridge + private control"
+    },
+    "workflow": {
+      "longCallMs": 65001,
+      "siblingCompletedDuringLongCall": true,
+      "workers": 3,
+      "acceptedResults": 5,
+      "distinctChildSessions": 6,
+      "tasks": 1,
+      "searches": 16,
+      "providerCalls": 29,
+      "appRestartNoReplay": true,
+      "fileBytes": 52693,
+      "fileSha256": "5130648548004f1fa440e625bee3d12b43f9a8b19c538cbdbac4543bbef90915",
+      "readbackVerified": true,
+      "historicalTaskStatus": "completed"
+    },
+    "allScenarios": {
+      "providerCalls": 58,
+      "actualToolResults": 49,
+      "failedToolResults": 16
+    },
+    "scenarios": {
+      "compoundDelegation": true,
+      "foregroundReportReadbackRepair": true,
+      "foregroundReportCitationValidation": true,
+      "extractionProviderFailureRecovery": true,
+      "dnsFailureRecovery": true,
+      "searchProviderFailureRecovery": true,
+      "largeFileRangeReadback": true,
+      "longProviderLeaseRenewal": true,
+      "attentionReceiptAcrossRestart": true,
+      "emptySearchRecovery": true,
+      "disclosedBlockedSource": true,
+      "markdownSourceUrls": true,
+      "largeReportContext": true,
+      "stepScopedRequirements": true,
+      "evidenceCorrection": true,
+      "exhaustedRepairDraftPreserved": true,
+      "redundantResourceMode": true,
+      "researchThroughFallback": true,
+      "fallbackComposer": true,
+      "fallbackNotice": true,
+      "fallbackRestart": true,
+      "preferredModelPreserved": true,
+      "research": true,
+      "automaticReportDelivery": true,
+      "alternativeSourceRecovery": true,
+      "desktopTranscriptExactlyOnce": true,
+      "chatOwnedTasksUi": true,
+      "oneSidebarEntry": true,
+      "handoffRemainsRunning": true,
+      "gatewayRestartNoReplay": true,
+      "failedWorkerDraftPreserved": true,
+      "targetedRetryAfterGatewayRestart": true,
+      "saveOnlyAfterRestart": true,
+      "skillRecovery": true,
+      "missingSearch": true,
+      "falseSaveBlocked": true
+    },
+    "liveAssessment": "not exercised; synthetic responses do not assess live research quality"
+  },
+  "review": {
+    "authorization": "Existing trust, approval, session receipts and capability exposure enforcement remain in force. Denied writes are not retried by completion repair.",
+    "completion": "Report content must match the successful write and a later complete readback. Citations in chat alone cannot validate a saved report.",
+    "progress": "Research-file progress is scoped to the requested output; identical versions and repeated readbacks do not reset the guard."
+  },
+  "limits": [
+    "Packaged providers and web results were deterministic fixtures; this does not establish live scientific accuracy or freshness.",
+    "The installed user app and gateway were not updated by this implementation turn."
+  ]
+}

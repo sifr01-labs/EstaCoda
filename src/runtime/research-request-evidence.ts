@@ -1,3 +1,4 @@
+import { verifiedFileOutputContent } from "./file-output-evidence.js";
 import { groundForegroundResearch } from "../tasks/research-result-evidence.js";
 import { readTaskResultEvidence } from "../tasks/task-result-read-evidence.js";
 import type { IntentRoute, RequestRequirements } from "../contracts/intent.js";
@@ -50,9 +51,12 @@ export function researchRequestEvidence(input: {
   if (requirements.sourceTaskId !== undefined && sourceResult === undefined) missing.push("accepted-research-result");
   if (requirements.delegation !== undefined && !handoff && !settledResearch) missing.push("requested-worker-evidence");
   if (requirements.research?.fresh && !handoff && !settledResearch && !observed.some((execution) => execution.tool.name === "web.search")) missing.push("live-source-evidence");
+  const report = requirements.fileOutput === undefined ? input.finalText : verifiedFileOutputContent({
+    requirements, toolExecutions: input.toolExecutions, executionReceipts: input.executionReceipts
+  });
   const grounded = requirements.research?.fresh && !handoff && !settledResearch
-    ? groundForegroundResearch(input.finalText ?? "", observed, new Date()) : undefined;
-  if (grounded?.failure !== undefined) missing.push(grounded.failure);
+    ? groundForegroundResearch(report ?? "", observed, new Date()) : undefined;
+  if (grounded?.failure !== undefined) missing.push(requirements.fileOutput !== undefined && report === undefined ? "verified-report-content-missing" : grounded.failure);
   if (requirements.skillReferences.length > 0 && input.skillRequirementsSatisfied !== true) missing.push("requested-skill-instructions");
-  return { satisfied: missing.length === 0, missing, ...(grounded?.text === undefined ? {} : { groundedText: grounded.text }), ...(sourceResult?.researchComplete === false ? { partialResearch: true } : {}) };
+  return { satisfied: missing.length === 0, missing, ...(grounded?.text === undefined || requirements.fileOutput !== undefined ? {} : { groundedText: grounded.text }), ...(sourceResult?.researchComplete === false ? { partialResearch: true } : {}) };
 }

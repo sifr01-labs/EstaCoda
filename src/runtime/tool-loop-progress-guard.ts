@@ -35,6 +35,8 @@ export class ToolLoopProgressGuard {
   readonly #stopIteration: number;
   readonly #research: boolean;
   readonly #seenResearchSources = new Set<string>();
+  readonly #seenReportWrites = new Set<string>();
+  readonly #pendingReportReadbacks = new Set<string>();
   readonly #seenCallFingerprints = new Set<string>();
   readonly #seenResultFingerprints = new Set<string>();
   readonly #seenDiscoveryFingerprints = new Set<string>();
@@ -121,6 +123,34 @@ export class ToolLoopProgressGuard {
           progressKinds.add("target-mutation");
         }
         continue;
+      }
+      // Foreground research delivery can progress before checkpoint projection
+      // catches up. Count exact file versions, not changing model prose.
+      if (this.#research && this.#checkpointReader?.current()?.requestRequirements?.fileOutput !== undefined) {
+        const metadata = execution.result?.metadata;
+        const outputs = execution.tool.name === "file.patch" && Array.isArray(metadata?.fileOutputs) ? metadata.fileOutputs : [metadata];
+        let reportProgress = false;
+        for (const output of outputs) {
+          if (output === null || typeof output !== "object") continue;
+          const { path, contentSha256 } = output as Record<string, unknown>;
+          const requestedPath = this.#checkpointReader?.current()?.requestRequirements?.fileOutput?.path;
+          if (typeof path !== "string" || (requestedPath !== undefined && path !== requestedPath) ||
+            typeof contentSha256 !== "string" || !/^[a-f0-9]{64}$/u.test(contentSha256)) continue;
+          const key = fingerprint({ path, contentSha256 });
+          if ((execution.tool.name === "file.write" || execution.tool.name === "file.patch") &&
+            metadata?.changed !== false && !this.#seenReportWrites.has(key)) {
+            this.#seenReportWrites.add(key);
+            this.#pendingReportReadbacks.add(key);
+            progressKinds.add("target-mutation");
+            reportProgress = true;
+          } else if (execution.tool.name === "file.read" && metadata?.materialized === true &&
+            metadata.completeFileRead === true && this.#pendingReportReadbacks.delete(key)) {
+            progressKinds.add("verification");
+            reportProgress = true;
+          }
+        }
+        if (reportProgress) { materialProgress = true; continue; }
+        if (["file.write", "file.patch", "file.read"].includes(execution.tool.name)) continue;
       }
       const callFingerprint = fingerprint({
         tool: execution.tool.name,

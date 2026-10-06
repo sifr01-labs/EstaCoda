@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { readTaskResultEvidence } from "../tasks/task-result-read-evidence.js";
 import { posix } from "node:path";
 import type { ExecutionEvidenceRecord } from "../contracts/execution-plan.js";
@@ -87,4 +88,33 @@ function matchesTarget(path: string, requirement: NonNullable<RequestRequirement
 
 function validDigest(value: unknown): value is string {
   return typeof value === "string" && /^[a-f0-9]{64}$/u.test(value);
+}
+
+/** Returns only bytes bound to a successful write and subsequent complete
+ * readback. A file tool's prose or an unrelated earlier report is not evidence. */
+export function verifiedFileOutputContent(input: Parameters<typeof fileOutputEvidence>[0]): string | undefined {
+  const evidence = fileOutputEvidence(input);
+  if (!evidence.satisfied || evidence.writeCallId === undefined) return undefined;
+  const write = input.toolExecutions.find(execution => execution.toolCallId === evidence.writeCallId);
+  if (write === undefined) return undefined;
+  const metadata = write.result?.metadata;
+  const outputs = Array.isArray(metadata?.fileOutputs) ? metadata.fileOutputs : [metadata];
+  const output = outputs.find(value => value !== null && typeof value === "object" &&
+    safePath((value as Record<string, unknown>).path) === evidence.path) as Record<string, unknown> | undefined;
+  const digest = output?.contentSha256;
+  const matches = (text: unknown): text is string => typeof text === "string" &&
+    createHash("sha256").update(text).digest("hex") === digest;
+  if (write.tool.name === "file.write" && matches(write.input?.content)) return write.input.content;
+  // Patches and result exports may have no full content input. Only accept a
+  // complete read body whose exact bytes match, stripping the tool's heading.
+  for (const read of input.toolExecutions.slice(input.toolExecutions.indexOf(write) + 1)) {
+    if (read.tool.name !== "file.read" || read.decision !== "allow" || read.result?.ok !== true ||
+      read.result.metadata?.contentSha256 !== digest || read.result.metadata?.materialized !== true ||
+      !input.executionReceipts.some(receipt => receipt.toolCallId === read.toolCallId && receipt.tool === "file.read" &&
+        receipt.status === "success" && (input.requirements?.originTurnId === undefined || receipt.visibleTurnId === input.requirements.originTurnId))) continue;
+    const content = read.result.content;
+    const prefix = `# ${read.result.metadata.path}\n`;
+    if (content.startsWith(prefix) && matches(content.slice(prefix.length))) return content.slice(prefix.length);
+  }
+  return undefined;
 }

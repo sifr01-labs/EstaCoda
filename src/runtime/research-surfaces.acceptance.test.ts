@@ -59,7 +59,7 @@ describe.sequential("research through real CLI and Telegram entry points", () =>
     const entry = await surface(h, kind);
     try {
       h.enqueue(nativeCall("capability_discover", { ids: ["skill:researcher"] }), nativeCall("capability_request", { ids: ["skill:researcher"], reason: "Use the research workflow" }),
-        nativeCall("skill_read", { name: "researcher" }), answer("Research instructions loaded."));
+        nativeCall("skill_read", { name: "researcher" }), nativeCall("web_search", { query: "current recycling" }), answer(REPORT));
       const result = await entry.turn("Find recent battery research.");
       expect(result.toolExecutions.some((call) => call.tool.name === "skill.read" && call.result?.ok)).toBe(true);
       expect(h.scriptErrors).toEqual([]); expect(h.remainingSteps()).toBe(0);

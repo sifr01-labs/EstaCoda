@@ -52,10 +52,10 @@ describe("bounded research requirement continuity", () => {
   it("retains requirements across a runtime restart and clears research on a save-only follow-up", async () => {
     const h = await createResearchWorkflowHarness();
     try {
-      h.enqueue(answer("No file was written."));
+      h.enqueue(answer("No file was written."), answer("No file was written."), answer("No file was written."));
       await h.turn(objective);
       await h.restart();
-      h.enqueue(answer("No new evidence was collected."));
+      h.enqueue(answer("No new evidence was collected."), answer("No new evidence was collected."), answer("No new evidence was collected."));
       const rerun = await h.turn("Rerun this task but use the research skill.");
       expect(rerun.intent.requestRequirements).toMatchObject({ delegation: { count: 3 }, research: { fresh: true }, skillReferences: ["research"] });
       expect(h.requests.at(-1)?.messages.some((message) => typeof message.content === "string" && message.content.includes("battery"))).toBe(true);

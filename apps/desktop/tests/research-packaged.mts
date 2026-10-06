@@ -39,6 +39,8 @@ const inaccessible='https://93.184.216.34/fixture/unavailable';
 const table=`| Source URL | Supported claim | Limitation |\n| --- | --- | --- |\n| ${source} | Synthetic research fixture | Illustrative snippet; not scientific evidence |`;
 const largeEvidence="Synthetic evidence detail. ".repeat(480)+"\nREPORT-BODY-END\n";
 const report=`# Battery recycling\n\nSynthetic research fixture. [Source](${source})\n${largeEvidence.repeat(4)}${table}`;
+const foregroundReport=`# Cited foreground report\n[source](${source})\n`+'Preserved report detail.\n'.repeat(180);
+let foregroundIndex=0;
 let requests=0,phase='research',saveIndex=0,saveOffset=0,recoveryIndex=0,diagnostics='',providerErrors:string[]=[];
 let sessionId='',reportContent='',bridgeVerified=false;
 let failedWorkerCandidates=0,repairedWorkerOnce=false,repairSearches=0,researchRead=false;
@@ -55,7 +57,7 @@ const provider=createServer(async(req,res)=>{
  try{
   assert.equal(req.headers.authorization,undefined);
   let raw='';for await(const chunk of req){raw+=chunk;if(raw.length>4_194_304)throw new Error('Oversized model fixture request');}
-  const input=JSON.parse(raw);assert(++requests<=60,'Provider fixture call limit exceeded');
+  const input=JSON.parse(raw);assert(++requests<=70,'Provider fixture call limit exceeded');
   if((phase==='fallback'||phase==='research')&&input.model==='research-release-tools'){res.writeHead(429,{'content-type':'application/json','retry-after':'0'}).end(JSON.stringify({error:{message:'Fixture rate limit'}}));return;}
   const text=JSON.stringify(input.messages), tools=input.tools?.map((x:any)=>x.function.name)??[];
   const priorCalls=input.messages.flatMap((m:any)=>m.tool_calls??[]).map((c:any)=>c.function.name);
@@ -71,11 +73,20 @@ const provider=createServer(async(req,res)=>{
    else if(saveIndex===0){assert(Buffer.byteLength(reportContent)>48000,'Delivery fixture must exceed the file preview limit');next=[tool('file_write',{path:'report.md',sourceResult:{taskId:task.id,resultId:result.id},content:'',overwrite:true})];saveIndex++;}
    else if(saveIndex===1){next=[tool('file_read',{path:'report.md',lineStart:1,lineEnd:100000})];saveIndex++;}
    else content='Saved report.md.';
+   }else if(phase==='foreground'){
+   if(foregroundIndex===0)next=[tool('web_search',{query:'foreground battery recycling'})];
+   else if(foregroundIndex===1)next=[tool('file_write',{path:'foreground.md',content:foregroundReport})];
+   else if(foregroundIndex===2)next=[tool('file_read',{path:'foreground.md',lineStart:1,lineEnd:40})];
+   else if(foregroundIndex===3)content='Saved foreground.md.';
+   else if(foregroundIndex===4){assert(text.includes('without lineStart or lineEnd'));next=[tool('file_read',{path:'foreground.md'})];}
+   else content='Saved and verified foreground.md.';
+   foregroundIndex++;
   }else if(phase==='recovery'){
    if(recoveryIndex===0)next=[tool('capability_discover',{ids:['skill:researcher']})];
    else if(recoveryIndex===1)next=[tool('capability_request',{ids:['skill:researcher'],reason:'Use the research workflow'})];
    else if(recoveryIndex===2)next=[tool('skill_read',{name:'researcher'})];
-   else content='Research instructions loaded.';
+   else if(recoveryIndex===3)next=[tool('web_search',{query:'capability recovery research'})];
+   else content=`Research instructions loaded. Observed synthetic finding [source](${source}).`;
    recoveryIndex++;
   }else if(phase==='false-save')content='Saved the report to nonexistent.md.';
   else if(phase==='missing-search'){
@@ -196,7 +207,7 @@ try{
  await page!.locator(`[data-task="${fallback.workId}"]`).click();
  await expect(page!.getByRole('status').filter({hasText:'Continuing with'})).toContainText('research-release-fallback-tools',{timeout:30000});
  phase='research';
- const initial=await submit('Use the researcher skill and use 3 subagents to research current battery recycling. Save report.md',fallback.workId);sessionId=initial.workId.replace(/^session:/,'');
+ const initial=await submit('Use the researcher skill and 3 subagents to research current battery recycling methods. Save a cited report to report.md.',fallback.workId);sessionId=initial.workId.replace(/^session:/,'');
  await expect.poll(()=>{assert.deepEqual(providerErrors,[]);return store.listTasks().length;},{timeout:60000}).toBe(1);
  await expect.poll(()=>page!.evaluate(id=>window.desktop.getWork(id).then(work=>work.status).catch(()=>'unavailable'),initial.workId),{timeout:30000}).toMatch(/^(queued|running)$/);
  await page!.locator(`[data-task="${initial.workId}"]`).click();
@@ -242,14 +253,18 @@ try{
  assert.equal(readFileSync(join(workspace,'report.md'),'utf8'),reportContent);assert(reportContent.includes('| Retrieved |'));assert.equal(store.listTasks().length,1);assert.equal(searches(),14);
  const events=await db.listEvents(sessionId);assert(events.some((e:any)=>e.kind==='intent-routed'&&e.route.primarySkill?.name==='researcher'&&realpathSync(e.route.primarySkill.sourcePath).startsWith(realpathSync(retainedRoot)+'/')));assert(events.some((e:any)=>e.kind==='tool-result'&&e.tool==='file.read'&&e.result.ok));assert(events.some((e:any)=>e.kind==='tool-result'&&e.tool==='skill.read'&&e.result.ok&&e.result.metadata?.mode==='reference'));
  console.log('Three workers, synthesis, app restart and verified save passed.');
- phase='recovery';const recovered=await submit('Find recent battery research.');await expect.poll(()=>recoveryIndex,{timeout:60000}).toBe(4);await idle(recovered.workId);
+ phase='foreground';const foreground=await submit('Research current battery recycling and save a cited report to foreground.md.');await idle(foreground.workId);
+ assert.equal(foregroundIndex,6);assert.equal(readFileSync(join(workspace,'foreground.md'),'utf8'),foregroundReport);
+ await expect.poll(()=>page!.evaluate(id=>window.desktop.getWork(id).then(x=>x.status).catch(()=>'unavailable'),foreground.workId),{timeout:30000}).toBe('completed');
+ const foregroundEvents=await db.listEvents(foreground.workId.replace(/^session:/,''));assert(foregroundEvents.some((e:any)=>e.kind==='step-completion-validation'&&e.repair&&e.feedback.includes('missing-readback')));
+ phase='recovery';const recovered=await submit('Find recent battery research.');await expect.poll(()=>recoveryIndex,{timeout:60000}).toBe(5);await idle(recovered.workId);
  const recoveryEvents=await db.listEvents(recovered.workId.replace(/^session:/,''));assert(recoveryEvents.some((e:any)=>e.kind==='tool-result'&&e.tool==='skill.read'&&e.result.ok));
  phase='false-save';const falseSave=await submit('Save this report as nonexistent.md');await idle(falseSave.workId);await expect.poll(()=>page!.evaluate(id=>window.desktop.getWork(id).then(x=>x.status).catch(()=>'unavailable'),falseSave.workId),{timeout:60000}).toBe('needs_attention');assert(!existsSync(join(workspace,'nonexistent.md')));
  const falseSaveEvents=await db.listEvents(falseSave.workId.replace(/^session:/,''));assert(falseSaveEvents.some((e:any)=>e.kind==='execution-final-outcome-recorded'&&e.status==='blocked'));
  phase='missing-search';writeFileSync(missingFlag,'disabled');const beforeMissing=requests;const missing=await submit('Use the researcher skill to research current battery recycling and save missing-search.md.');await idle(missing.workId);assert.equal(requests,beforeMissing);assert.equal(store.listTasks().length,1);assert(!existsSync(join(workspace,'missing-search.md')));
  const missingEvents=await db.listEvents(missing.workId.replace(/^session:/,''));assert(missingEvents.some((e:any)=>e.kind==='execution-final-outcome-recorded'&&e.status==='blocked'));assert(!missingEvents.some((e:any)=>e.kind==='tool-called'));
  assert.deepEqual(providerErrors,[]);
- const allSessionIds=new Set([sessionId,...workerSessions,recovered.workId.replace(/^session:/,''),falseSave.workId.replace(/^session:/,''),missing.workId.replace(/^session:/,'')]);
+ const allSessionIds=new Set([sessionId,...workerSessions,foreground.workId.replace(/^session:/,''),recovered.workId.replace(/^session:/,''),falseSave.workId.replace(/^session:/,''),missing.workId.replace(/^session:/,'')]);
  const allEvents=(await Promise.all([...allSessionIds].map(id=>db.listEvents(id)))).flat();
  const validations=allEvents.filter((e:any)=>e.kind==='step-completion-validation');
  assert(validations.filter((e:any)=>e.repair).length>=3);
@@ -268,7 +283,7 @@ try{
   fixtures:{model:'scripted loopback HTTP',web:'in-process registered synthetic provider in packaged supervisor',liveModelCalls:0,transport:'actual signed app + preload/Main + owned bridge + private control'},
   workflow:{longCallMs,siblingCompletedDuringLongCall,workers:workers.length,acceptedResults:store.listResults(task.id).filter((r:any)=>r.disposition==='accepted').length,distinctChildSessions:workerSessions.size,tasks:store.listTasks().length,searches:searches(),providerCalls:calls.filter(c=>['research','save'].includes(c.phase)).length,appRestartNoReplay:true,fileBytes:Buffer.byteLength(reportContent),fileSha256:createHash('sha256').update(reportContent).digest('hex'),readbackVerified:true,historicalTaskStatus:store.getTask(task.id).status},
   allScenarios:{providerCalls:requests,actualToolResults:toolResults.length,failedToolResults:toolResults.filter((e:any)=>!e.result.ok).length},
-  scenarios:{extractionProviderFailureRecovery:true,dnsFailureRecovery:true,searchProviderFailureRecovery:true,largeFileRangeReadback:true,longProviderLeaseRenewal:true,attentionReceiptAcrossRestart:true,emptySearchRecovery:true,disclosedBlockedSource:true,markdownSourceUrls:true,largeReportContext:true,stepScopedRequirements:true,evidenceCorrection:true,exhaustedRepairDraftPreserved:true,redundantResourceMode:true,researchThroughFallback:true,fallbackComposer:true,fallbackNotice:true,fallbackRestart:true,preferredModelPreserved:true,research:true,automaticReportDelivery:true,alternativeSourceRecovery:true,desktopTranscriptExactlyOnce:true,chatOwnedTasksUi:true,oneSidebarEntry:true,handoffRemainsRunning:true,gatewayRestartNoReplay:true,failedWorkerDraftPreserved:true,targetedRetryAfterGatewayRestart:true,saveOnlyAfterRestart:true,skillRecovery:true,missingSearch:true,falseSaveBlocked:true},
+  scenarios:{compoundDelegation:true,foregroundReportReadbackRepair:true,foregroundReportCitationValidation:true,extractionProviderFailureRecovery:true,dnsFailureRecovery:true,searchProviderFailureRecovery:true,largeFileRangeReadback:true,longProviderLeaseRenewal:true,attentionReceiptAcrossRestart:true,emptySearchRecovery:true,disclosedBlockedSource:true,markdownSourceUrls:true,largeReportContext:true,stepScopedRequirements:true,evidenceCorrection:true,exhaustedRepairDraftPreserved:true,redundantResourceMode:true,researchThroughFallback:true,fallbackComposer:true,fallbackNotice:true,fallbackRestart:true,preferredModelPreserved:true,research:true,automaticReportDelivery:true,alternativeSourceRecovery:true,desktopTranscriptExactlyOnce:true,chatOwnedTasksUi:true,oneSidebarEntry:true,handoffRemainsRunning:true,gatewayRestartNoReplay:true,failedWorkerDraftPreserved:true,targetedRetryAfterGatewayRestart:true,saveOnlyAfterRestart:true,skillRecovery:true,missingSearch:true,falseSaveBlocked:true},
   liveAssessment:'not exercised; synthetic responses do not assess live research quality'
  };
  mkdirSync(dirname(output),{recursive:true});writeFileSync(output,JSON.stringify(measurements,null,2)+'\n');

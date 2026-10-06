@@ -1,7 +1,7 @@
 import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
-import { answer, createResearchWorkflowHarness, nativeCall } from "../test/fakes/research-workflow-harness.js";
+import { answer, createResearchWorkflowHarness, nativeCall, REPORT } from "../test/fakes/research-workflow-harness.js";
 
 function names(request: { tools?: unknown }): string[] {
   return (request.tools as Array<{ function: { name: string } }> ?? []).map((tool) => tool.function.name);
@@ -36,7 +36,7 @@ describe("capability recovery through the real runtime", () => {
         },
         nativeCall("capability_request", { ids: ["tool:file.write"], reason: "Deliver the research notes" }),
         nativeCall("file_write", { path: "recovered.md", content: "# Recovered notes\n" }),
-        answer("The notes were saved.")
+        nativeCall("web_search", { query: "current recycling" }), answer(REPORT)
       );
       await harness.turn("Find recent battery research.");
       expect(harness.scriptErrors).toEqual([]);
@@ -56,7 +56,7 @@ describe("capability recovery through the real runtime", () => {
       harness.enqueue(() => ({ content: "", toolCalls: [
         { id: "request", name: "capability_request", argumentsText: JSON.stringify({ ids: ["tool:file.write"], reason: "Save research notes" }) },
         { id: "premature", name: "file_write", argumentsText: JSON.stringify({ path: "premature.md", content: "should not exist" }) }
-      ] }), nativeCall("file_write", { path: "later.md", content: "next iteration" }), answer("Saved."));
+      ] }), nativeCall("file_write", { path: "later.md", content: "next iteration" }), nativeCall("web_search", { query: "current recycling" }), answer(REPORT));
       await harness.turn("Find recent battery research.");
       expect(harness.scriptErrors).toEqual([]);
       await expect(readFile(join(harness.workspaceRoot, "premature.md"))).rejects.toThrow();
