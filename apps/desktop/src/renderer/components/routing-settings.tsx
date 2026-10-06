@@ -32,6 +32,6 @@ export function RoutingSettings({page,disabled,value,change,control,onEditing}:P
   <h2>{t('Intent & capability routing')}</h2>
   <div className="ec-media-row"><div>{t('Routing mode')}</div><select aria-label={t('Routing mode')} value={String(value('routing.mode')??'standard')} disabled={disabled} onChange={e=>change('routing.mode',e.target.value)}><option value="standard">{t('Standard')}</option><option value="jev-assisted">{t('Jev-assisted')}</option></select></div>
   {jev&&<><CapabilityCard icon={<ProviderMark id="typesafe" label={t('TypeSafe')}/>} title={<bdi>{modelLabel}</bdi>} description={t('TypeSafe')} action={<Button disabled={disabled} onClick={()=>{opener.current=document.activeElement as HTMLButtonElement;setView('providers');}}>{t('Change')}</Button>}/><details className="ec-diagnostics"><summary>{t('Advanced')}</summary>{control('routing.jev.timeoutMs',t('Routing timeout (milliseconds)'))}</details></>}
-  <p className="ec-footnote" role="status">{t('Jev-assisted mode selects intents and skills. Capability selection still uses Standard routing.')}</p>
+  <p className="ec-footnote" role="status">{t('Jev-assisted mode selects intents, skills, and capabilities. Execution permissions stay the same.')}</p>
  </section>;
 }

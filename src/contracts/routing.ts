@@ -32,3 +32,8 @@ export type RoutingDecision = {
   capabilities: RoutingSelection[];
   fallbackReason?: 'engine-unavailable' | 'credentials-unavailable' | 'timeout' | 'service-error' | 'invalid-response' | 'uncertain';
 };
+
+export type CapabilityRoutingDecision = Pick<RoutingDecision, 'schemaVersion' | 'configuredMode' | 'actualEngine' | 'model' | 'configurationRevision' | 'catalogRevision' | 'fallbackReason'> & {
+  selections: RoutingSelection[];
+  requiredConflicts?: string[];
+};

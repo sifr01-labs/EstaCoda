@@ -29,6 +29,7 @@ export type CapabilityOmissionReason =
   | "provider_schema_restricted" | "evidence_required" | "not_in_session";
 
 export type CapabilitySelectionDiagnostics = {
+  routing?: import("./routing.js").CapabilityRoutingDecision;
   policy: string;
   catalogCount: number;
   availableCount: number;
@@ -71,7 +72,7 @@ export type RecoveredSkillReceipt = {
 };
 export type RecoveredSkillsEvent = { kind: "capability-skills-loaded"; loadedSkills: RecoveredSkillReceipt[] };
 
-export type CapabilityRecoveryEvent = { kind: "capability-recovery"; appliedIteration: number; applied: string[]; rejected: Array<{ id: string; reason: string }> };
+export type CapabilityRecoveryEvent = { deferred?: string[]; kind: "capability-recovery"; appliedIteration: number; applied: string[]; rejected: Array<{ id: string; reason: string }> };
 
 export type RuntimeEvent =
   | ExecutionPlanLifecycleEvent

@@ -74,7 +74,7 @@ export async function selectJevRoute(input: {
   const answers = new Map(result.answers.map(answer => [answer.id, answer]));
   const selected = (id: string) => answers.get(id)?.status === 'accepted';
   const probability = (id: string) => { const answer = answers.get(id); return answer && 'probability' in answer ? answer.probability : undefined; };
-  let labels = Object.keys(JEV_INTENTS).filter(id => selected(`intent.${id}`) && !prohibited(request, id));
+  let labels = Object.keys(JEV_INTENTS).filter(id => selected(`intent.${id}`) && !explicitlyProhibited(request, id));
   if (!input.options.attachments?.some(a => (a.status ?? 'ready') === 'ready')) labels = labels.filter(id => id !== 'attachment-analysis');
   if (!actionable) labels = labels.filter(id => ['conversation', 'architecture-advice'].includes(id));
   if (input.saveOnly) labels = labels.filter(id => !['research', ...native].includes(id));
@@ -95,7 +95,7 @@ export async function selectJevRoute(input: {
   const unresolved = base.invocation !== undefined && base.suggestedSkills.length === 0 || base.skillRequests?.some(r => r.status !== 'resolved');
   const applicable = unresolved || !actionable ? [] : skills.filter((skill, i) =>
     (forced.has(skill.name) || selected(`skill.${i}`)) && !router.skillIsDeferred(skill, policyText, provisional, input.options) &&
-    !prohibited(request, skill.name) && !(skill.routing?.aliases ?? []).some(alias => prohibited(request, alias)) && !(skill.routing?.labels ?? []).some(label => prohibited(request, label)) && !(input.saveOnly && !forced.has(skill.name) && skill.requiredToolsets.includes('web')));
+    !explicitlyProhibited(request, skill.name) && !(skill.routing?.aliases ?? []).some(alias => explicitlyProhibited(request, alias)) && !(skill.routing?.labels ?? []).some(label => explicitlyProhibited(request, label)) && !(input.saveOnly && !forced.has(skill.name) && skill.requiredToolsets.includes('web')));
   applicable.sort((a, b) => Number(forced.has(b.name)) - Number(forced.has(a.name)) ||
     (probability(`skill.${skills.indexOf(b)}`) ?? 0) - (probability(`skill.${skills.indexOf(a)}`) ?? 0) || a.name.localeCompare(b.name));
   const route = router.applySelection(base, { nativeIntent, taskClass, labels: labels.length ? labels : ['general'], skills: applicable });
@@ -109,7 +109,7 @@ export async function selectJevRoute(input: {
 }
 
 /** Explicit negative clauses remain binding even if a semantic decision says yes. */
-function prohibited(request: string, label: string): boolean {
+export function explicitlyProhibited(request: string, label: string): boolean {
   const terms: Record<string, RegExp> = {
     research: /research|search|investigat|بحث|ابحث/iu,
     'docs-writing': /save|write|export|احفظ|اكتب|صدّر/iu,

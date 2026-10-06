@@ -139,3 +139,47 @@ it("does not record skill delivery when cancelled after the instruction read", a
     expect(h.events.some((event) => event.kind === "capability-skills-loaded")).toBe(false);
   } finally { await h.dispose(); }
 });
+
+it.each([false, true])("uses live Jev selection and discovery without same-batch execution or approval bypass (fallback=%s)", async fallback => {
+  const { mkdir, writeFile } = await import("node:fs/promises");
+  const { resolveProfileStateHome } = await import("../config/profile-home.js");
+  const { vi } = await import("vitest");
+  const approvals: string[] = [];
+  const h = await createResearchWorkflowHarness({ fallbackOnRequest: fallback ? 3 : undefined, approvalDecision: async request => {
+    approvals.push(request.tool.name);
+    return request.tool.name === "file.write" ? "denied" : "approved";
+  } });
+  const paths = resolveProfileStateHome({ homeDir: h.homeDir, profileId: "baseline" });
+  await mkdir(paths.profileRoot, { recursive: true });
+  await writeFile(paths.configPath, JSON.stringify({ routing: { mode: "jev-assisted" } }));
+  await writeFile(paths.envPath, "TYPESAFE_API_KEY=fixture-only\n");
+  const fetch = vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
+    const payload = JSON.parse(String(init?.body));
+    const discovery = payload.state.material.some((item: { text: string }) => item.text.includes("Agent discovery query"));
+    return new Response(JSON.stringify({ model: "jev-1.13.0", usage: { input_tokens: 10, output_tokens: 0 }, answers: Object.fromEntries(Object.entries(payload.questions).map(([id, q]) => [id, { type: "noul", noul: id === "intent.research" || (q as { instructions: { subjectDescription: string } }).instructions.subjectDescription.startsWith(discovery ? "file.write:" : "web.search:") ? .95 : .05 }])) }));
+  });
+  try {
+    h.enqueue(request => {
+      expect(names(request)).toContain("web_search"); expect(names(request)).not.toContain("file_write");
+      return nativeCall("capability_discover", { query: "retain the findings on disk", kind: "tool" })(request);
+    }, request => {
+      expect(request.messages.some(message => typeof message.content === "string" && message.content.includes('"id":"tool:file.write"'))).toBe(true);
+      return { content: "", toolCalls: [
+        { id: "request", name: "capability_request", argumentsText: JSON.stringify({ ids: ["tool:file.write"], reason: "Retain the findings" }) },
+        { id: "premature", name: "file_write", argumentsText: JSON.stringify({ path: "premature.md", content: "must not execute" }) }
+      ] };
+    }, request => {
+      expect(names(request)).toContain("file_write");
+      return nativeCall("file_write", { path: "denied.md", content: "requires approval" })(request);
+    }, answer("The write was denied."));
+    await h.turn("Investigate battery methods.");
+    expect(h.scriptErrors).toEqual([]);
+    expect(h.events).toContainEqual(expect.objectContaining({ kind: "provider-tool-inventory", selection: expect.objectContaining({ routing: expect.objectContaining({ actualEngine: "jev" }) }) }));
+    expect(approvals).toContain("file.write");
+    expect(h.events).toContainEqual(expect.objectContaining({ kind: "tool-result", tool: "file.write", decision: "deny" }));
+    await expect(readFile(join(h.workspaceRoot, "premature.md"))).rejects.toThrow();
+    await expect(readFile(join(h.workspaceRoot, "denied.md"))).rejects.toThrow();
+    expect((await h.sessionDb.listProviderUsageEntries("baseline")).some(entry => entry.provider === "typesafe")).toBe(true);
+    if (fallback) expect(h.requests.some(request => request.model === "research-fallback")).toBe(true);
+  } finally { fetch.mockRestore(); await h.dispose(); }
+});

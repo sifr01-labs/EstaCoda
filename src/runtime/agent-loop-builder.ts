@@ -728,9 +728,10 @@ export class AgentLoopBuilder {
       skillRegistry: sessionSkillRegistry,
       model: routes.model
     });
-    const routingSnapshot = routingSnapshotReader({ homeDir: substrate.homeDir, profileId: substrate.profileId, router: intentRouter, initial: substrate.loadedConfig?.routing });
+    const routingSnapshot = routingSnapshotReader({ homeDir: substrate.homeDir, profileId: substrate.profileId, router: intentRouter, initial: substrate.loadedConfig?.routing, capabilityRevision: () => ({ sessionId: sessionRuntimeContext.currentSessionId(), catalog: capabilityRecovery.catalogRevision(), execution: executionBinding() }) });
     const jevClient = new JevDecisionClient({ homeDir: resolveHomeDir(substrate.homeDir), profileId: substrate.profileId,
       snapshot: routingSnapshot, recordUsage: entries => input.sessionDb.recordProviderUsageEntries([...entries]) });
+    capabilityRecovery.bindRouting({ client: jevClient, snapshot: routingSnapshot });
     const runtimeRouter = (this.#factories.runtimeRouter ?? ((options) => new RuntimeRouter(options)))({
       intentRouter,
       jev: { client: jevClient, snapshot: routingSnapshot },
@@ -768,6 +769,7 @@ export class AgentLoopBuilder {
       projectContext: input.projectContext ?? substrate.projectContext,
       providerTools: providerToolSchemaCatalog.tools,
       providerToolSchemaCatalog,
+      capabilityRouting: { routing: { client: jevClient, snapshot: routingSnapshot }, validateTool: id => capabilityRecovery.toolSchema(id) },
       preserveSessionToolExposure: !ownsExecutionPlan,
       mcpServerSnapshots: substrate.mcpServerSnapshots,
       executionCompletionCapabilities,

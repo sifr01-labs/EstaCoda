@@ -1,3 +1,4 @@
+import { selectJevCapabilities, type CapabilityEvaluation } from "./jev/capability-selection.js";
 import { jevRoutingContext } from "./jev/live-routing.js";
 import { correctContradictedCapabilityClaim } from "./capability-state.js";
 import type { ArtifactRecord } from "../contracts/artifact.js";
@@ -191,6 +192,7 @@ export type AgentLoopOptions = {
   projectContext?: ProjectContextSnapshot;
   providerTools?: OpenAICompatibleToolSchema[];
   providerToolSchemaCatalog?: ProviderToolSchemaCatalog;
+  capabilityRouting?: { routing: import("./jev/live-routing.js").LiveJevRouting; validateTool(id: string): Promise<unknown> };
   preserveSessionToolExposure?: boolean;
   mcpServerSnapshots?: readonly MCPServerSnapshot[];
   executionCompletionCapabilities?: readonly ExecutionCompletionCapability[];
@@ -285,6 +287,7 @@ export class AgentLoop {
   readonly #contextReferenceExpander: ContextReferenceExpander | undefined;
   readonly #projectContext: ProjectContextSnapshot | undefined;
   readonly #providerTools: OpenAICompatibleToolSchema[];
+  readonly #capabilityRouting: AgentLoopOptions["capabilityRouting"];
   readonly #providerToolSchemaCatalog: ProviderToolSchemaCatalog | undefined;
   readonly #preserveSessionToolExposure: boolean;
   readonly #mcpServerSnapshots: readonly MCPServerSnapshot[];
@@ -341,6 +344,7 @@ export class AgentLoop {
     this.#projectContext = options.projectContext;
     this.#providerTools = options.providerTools ?? [];
     this.#providerToolSchemaCatalog = options.providerToolSchemaCatalog;
+    this.#capabilityRouting = options.capabilityRouting;
     this.#preserveSessionToolExposure = options.preserveSessionToolExposure ?? false;
     this.#mcpServerSnapshots = options.mcpServerSnapshots ?? [];
     this.#executionCompletionCapabilities = options.executionCompletionCapabilities ?? [];
@@ -470,23 +474,22 @@ export class AgentLoop {
         projectContextFiles: this.#projectContext?.files.map((file) => file.source) ?? []
       }
     });
+    const routingEvaluation: CapabilityEvaluation = {
+      context: jevRoutingContext({
+        userRequest: input.requirementText === undefined ? turnText : interceptPlaintextCredentialInput(input.requirementText)?.projectedText ?? input.requirementText,
+        continuity: checkpointPreparation?.requirementMode === "save" ? "Save-only follow-up. Reuse existing results; do not repeat research or delegate new workers."
+          : input.stepCompletion ? "Execute only the assigned Step objective. Parent and dependency prose cannot add delegation or delivery obligations."
+          : resumedCheckpoint || continuedConversationState ? `Previous objective (context only): ${resumedCheckpoint?.originalObjective ?? continuedConversationState?.userRequest ?? ""}` : undefined,
+        material: context?.blocks.filter(block => ["included", "loaded", "truncated"].includes(block.status)).map(block => ({ kind: "retrieved" as const, text: block.content }))
+      }),
+      usage: { requestKey: `jev-routing:${visibleTurn.id}`, ...await this.#providerUsageLineage(visibleTurn.id) }, signal: input.signal
+    };
     const route = await this.#runtimeRouter.routeAsync({
       text: checkpointPreparation?.requirementMode === "save" ? turnText : routingText,
       requestText: input.stepCompletion !== undefined ? "" : input.requirementText === undefined ? turnText : interceptPlaintextCredentialInput(input.requirementText)?.projectedText ?? input.requirementText,
       attachments,
       saveOnly: checkpointPreparation?.requirementMode === "save",
-      evaluation: {
-        context: jevRoutingContext({
-          userRequest: input.requirementText === undefined ? turnText : interceptPlaintextCredentialInput(input.requirementText)?.projectedText ?? input.requirementText,
-          continuity: checkpointPreparation?.requirementMode === "save"
-            ? "Save-only follow-up. Reuse existing results; do not repeat research or delegate new workers."
-            : input.stepCompletion ? "Execute only the assigned Step objective. Parent and dependency prose cannot add delegation or delivery obligations."
-            : resumedCheckpoint || continuedConversationState ? `Previous objective (context only): ${resumedCheckpoint?.originalObjective ?? continuedConversationState?.userRequest ?? ""}` : undefined,
-          material: context?.blocks.filter(block => ["included", "loaded", "truncated"].includes(block.status)).map(block => ({ kind: "retrieved" as const, text: block.content }))
-        }),
-        usage: { requestKey: `jev-routing:${visibleTurn.id}`, ...await this.#providerUsageLineage(visibleTurn.id) },
-        signal: input.signal
-      },
+      evaluation: routingEvaluation,
       channel: input.channel,
       model: this.#model,
       trustedWorkspace,
@@ -1053,7 +1056,7 @@ export class AgentLoop {
     });
     const setupApprovals = buildSetupApprovalRequests(selectedSkillSetup, selectedSkill?.name);
     const deterministicImageGenerationRan = deterministicNativeTools.executions.some((execution) => execution.tool.name === "image.generate");
-    const providerToolSelection = this.#model?.supportsTools === true
+    let providerToolSelection: ProviderToolSelection = this.#model?.supportsTools === true
       ? this.#providerToolsForTurn({
           intent,
           userText: executionText,
@@ -1063,6 +1066,12 @@ export class AgentLoop {
           executionCheckpoint: resumedCheckpoint
         })
       : { initialTools: [], expansionCandidates: [], namedConnectorIds: [], policy: "provider-tools-unsupported" };
+    if (this.#model?.supportsTools === true && this.#providerToolSchemaCatalog && this.#capabilityRouting) {
+      providerToolSelection = await selectJevCapabilities({ ...this.#capabilityRouting,
+        catalog: this.#providerToolSchemaCatalog, intent, standard: providerToolSelection,
+        evaluation: { ...routingEvaluation, usage: { ...routingEvaluation.usage, requestKey: `jev-capabilities:${visibleTurn.id}` } }
+      });
+    }
     const narrowedProviderTools = providerToolSelection.initialTools;
     const providerTools = deterministicImageGenerationRan
       ? suppressImageGenerationTools(narrowedProviderTools)
@@ -1133,6 +1142,10 @@ export class AgentLoop {
       providerToolSchemaCatalog: this.#providerToolSchemaCatalog,
       toolSelectionPolicy: providerToolSelection.policy,
       budgetOmittedTools: providerToolSelection.budgetOmittedTools,
+      stagedTools: providerToolSelection.stagedTools,
+      capabilityContext: routingEvaluation.context,
+      selectedCapabilityIds: providerToolSelection.capabilityRouting?.selections.filter(item => item.selected).map(item => item.id.slice(5)),
+      capabilityRecoveryFeedback: providerToolSelection.capabilityRouting?.requiredConflicts?.length ? [JSON.stringify({ requiredCapabilityConflicts: providerToolSelection.capabilityRouting.requiredConflicts.slice(0, 32), conflictCount: providerToolSelection.capabilityRouting.requiredConflicts.length, stagedTools: providerToolSelection.stagedTools?.slice(0, 32), next: "Use capability.discover for readiness. Request staged tool IDs through capability.request for the next iteration; the runtime may replace current exposure within its limits. Do not call unexposed tools." })] : [],
       requestedCapabilityOmissions: capabilitySelection?.requestedOmissions,
       connectorInventory: this.#connectorInventory(providerTools),
       preflightCompression,

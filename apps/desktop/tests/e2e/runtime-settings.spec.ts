@@ -57,5 +57,5 @@ for(const language of ['en','ar'] as const)test(`Jev ${language} uses model sele
  expect(await page.evaluate(()=>(window as any).runtimeState.reviewed)).toEqual(expect.arrayContaining([{fieldId:'routing.mode',selectors:[],value:'jev-assisted'},{fieldId:'routing.jev.apiKeyEnv',selectors:[],value:'staged'}]));
  await page.getByRole('button',{name:t('Save changes'),exact:true}).click();
  expect(await page.evaluate(()=>(window as any).runtimeState.writes)).toBe(1);
- await expect(page.getByText(t('Jev-assisted mode selects intents and skills. Capability selection still uses Standard routing.'))).toBeVisible();
+ await expect(page.getByText(t('Jev-assisted mode selects intents, skills, and capabilities. Execution permissions stay the same.'))).toBeVisible();
 });

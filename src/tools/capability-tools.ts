@@ -1,3 +1,5 @@
+import { evaluateCapabilities } from "../runtime/jev/capability-decisions.js";
+import { jevRoutingContext, type LiveJevRouting } from "../runtime/jev/live-routing.js";
 import { createHash } from "node:crypto";
 import type { LoadedSkill, SkillDefinition } from "../contracts/skill.js";
 import type { RecoveredSkillReceipt } from "../contracts/runtime-event.js";
@@ -22,8 +24,13 @@ export class SessionCapabilityRecovery {
   readonly #skills: SkillRegistry;
   readonly #skillConfig: Record<string, Record<string, unknown>>;
   #catalog?: ProviderToolSchemaCatalog;
+  #routing?: LiveJevRouting;
+  #stagedTools = new Set<string>();
+  #identity = new WeakMap<object, number>();
+  #nextIdentity = 0;
+
   #definitions = new Map<string, { instance: RegisteredTool; run: RegisteredTool["run"]; signature: string }>();
-  #turn?: { token: object; sessionId: string; profileId: string; visibleTurnId?: string };
+  #turn?: { token: object; sessionId: string; profileId: string; visibleTurnId?: string; objective?: string; continuity?: string; signal?: AbortSignal };
   #active = new Set<string>();
   #receipts = new WeakMap<ToolResult, RequestReceipt>();
   #pending = new Set<string>();
@@ -39,6 +46,22 @@ export class SessionCapabilityRecovery {
     this.#skillConfig = options.skillConfig ?? {};
   }
 
+  bindRouting(routing: LiveJevRouting): void { this.#routing = routing; }
+
+  /** Handler identity, definitions, visibility and aliases participate in async decision invalidation. */
+  catalogRevision(): string {
+    const identity = (value: object) => {
+      if (!this.#identity.has(value)) this.#identity.set(value, ++this.#nextIdentity);
+      return this.#identity.get(value);
+    };
+    return createHash("sha256").update(JSON.stringify({ catalog: this.#catalog && {
+      inventory: this.#catalog.inventory, entries: this.#catalog.entries, aliases: [...this.#catalog.aliases]
+    }, tools: this.#registry.list().map(definition => {
+      const tool = this.#registry.get(definition.name)!;
+      return [definition, identity(tool), identity(tool.run), identity(tool.isAvailable)];
+    }), skills: this.#skills.list() })).digest("hex");
+  }
+
   bindCatalog(catalog: ProviderToolSchemaCatalog): void {
     this.#catalog = catalog;
     this.#definitions.clear();
@@ -49,15 +72,17 @@ export class SessionCapabilityRecovery {
     }
   }
 
-  beginTurn(input: { sessionId: string; profileId: string; visibleTurnId?: string; tools: readonly OpenAICompatibleToolSchema[] }): void {
+  beginTurn(input: { sessionId: string; profileId: string; visibleTurnId?: string; tools: readonly OpenAICompatibleToolSchema[]; stagedTools?: readonly string[]; objective?: string; continuity?: string; signal?: AbortSignal }): void {
     this.endTurn();
     this.#turn = { ...input, token: {} };
     this.setExposure(input.tools);
+    this.#stagedTools = new Set(input.stagedTools ?? []);
   }
 
   endTurn(): void {
     this.#turn = undefined;
     this.#active.clear();
+    this.#stagedTools.clear();
     this.#receipts = new WeakMap();
     this.#pending.clear();
     this.#rounds = 0;
@@ -77,23 +102,59 @@ export class SessionCapabilityRecovery {
       (input.kind !== undefined && input.kind !== "tool" && input.kind !== "skill") ||
       (input.ids !== undefined && !validIds(input.ids))) return failure("invalid_request");
     const ids = Array.isArray(input.ids) ? new Set(input.ids) : undefined;
-    const query = typeof input.query === "string" ? input.query.toLocaleLowerCase().trim() : "";
-    const terms = [...new Set(query.match(/[\p{L}\p{N}_-]+/gu) ?? [])].filter((term) => term.length > 2 && !["the", "and", "for", "with", "from", "this", "that", "about", "using", "use"].includes(term));
-    const entries = [
-      ...(input.kind === "skill" ? [] : (this.#catalog?.inventory ?? []).map((tool) => ({
-        boost: 0, id: `tool:${tool.name}`, kind: "tool", name: tool.name, description: tool.description.slice(0, 300), toolsets: tool.toolsets, search: `${tool.name} ${tool.description} ${tool.toolsets.join(" ")}`,
+    // Exact IDs are deterministic lookup, even when a query accompanies them.
+    const query = ids ? "" : typeof input.query === "string" ? input.query.toLocaleLowerCase().trim() : "";
+    const terms = [...new Set(query.match(/[\p{L}\p{N}_-]+/gu) ?? [])].filter(term => term.length > 2 && !["the", "and", "for", "with", "from", "this", "that", "about", "using", "use"].includes(term));
+    const entries = this.#discoveryEntries(input.kind).map(entry => {
+      const skill = entry.kind === "skill" ? this.#skills.get(entry.name) : undefined;
+      const description = skill?.description ?? this.#catalog?.inventory.find(tool => tool.name === entry.name)?.description ?? entry.description;
+      const search = `${entry.name} ${description} ${skill ? JSON.stringify(skill.routing?.triggerPatterns ?? []) : entry.toolsets.join(" ")}`.toLocaleLowerCase();
+      const boost = (skill?.routing?.triggerPatterns ?? []).some(pattern => pattern.type === "contains" && query.includes(pattern.value.toLocaleLowerCase())) ? 8 : 0;
+      const score = query.length === 0 ? 1 : boost + (entry.name.toLocaleLowerCase() === query ? 100 : 0) + terms.reduce((sum, term) => sum +
+        (entry.name.toLocaleLowerCase().includes(term) ? 3 : search.includes(term) ? 1 : 0), 0);
+      return { ...entry, score };
+    }).filter(entry => (ids === undefined || ids.has(entry.id)) && (query.length === 0 || entry.score > 0))
+      .sort((a, b) => b.score - a.score || a.id.localeCompare(b.id));
+    return discoveryResult(entries.map(({ score: _score, ...entry }) => entry));
+  }
+
+  #discoveryEntries(kind: unknown) {
+    return [
+      ...(kind === "skill" ? [] : (this.#catalog?.inventory ?? []).map(tool => ({
+        id: `tool:${tool.name}`, kind: "tool", name: tool.name, description: tool.description.slice(0, 300), toolsets: tool.toolsets,
+        ...(tool.availability !== "available" ? { setup_note: "Check capability setup and current availability before requesting exposure." } : {}),
         state: tool.availability !== "available" ? tool.availability : !tool.schemaEligible ? "provider_schema_restricted" : this.#active.has(tool.name) ? "exposed" : "not_selected"
       }))),
-      ...(input.kind === "tool" ? [] : this.#skills.list().map((skill) => ({
-        boost: (skill.routing?.triggerPatterns ?? []).some((pattern) => pattern.type === "contains" && query.includes(pattern.value.toLocaleLowerCase())) ? 8 : 0, id: `skill:${skill.name}`, kind: "skill", name: skill.name, description: skill.description.slice(0, 300), toolsets: skill.requiredToolsets ?? [], search: `${skill.name} ${skill.description} ${JSON.stringify(skill.routing?.triggerPatterns ?? [])}`, state: this.#loadedSkills.has(skill.name) ? "loaded" : buildSkillReadinessMetadata(skill, resolveSkillSetupContext(skill, this.#skillConfig[skill.name])).readiness_status
+      ...(kind === "tool" ? [] : this.#skills.list().map(skill => ({
+        id: `skill:${skill.name}`, kind: "skill", name: skill.name, description: skill.description.slice(0, 300), toolsets: skill.requiredToolsets ?? [],
+        ...readinessSummary(buildSkillReadinessMetadata(skill, resolveSkillSetupContext(skill, this.#skillConfig[skill.name]))),
+        state: this.#loadedSkills.has(skill.name) ? "loaded" : buildSkillReadinessMetadata(skill, resolveSkillSetupContext(skill, this.#skillConfig[skill.name])).readiness_status
       })))
-    ].map((entry) => ({ ...entry, score: query.length === 0 ? 1 :
-      entry.boost + (entry.name.toLocaleLowerCase() === query ? 100 : 0) + terms.reduce((score, term) => score +
-        (entry.name.toLocaleLowerCase().includes(term) ? 3 : entry.search.toLocaleLowerCase().includes(term) ? 1 : 0), 0) }))
-      .filter((entry) => safeId(entry.id) && (ids === undefined || ids.has(entry.id)) && (query.length === 0 || entry.score > 0))
-      .sort((left, right) => right.score - left.score || left.id.localeCompare(right.id));
-    const matches = entries.slice(0, MAX_CAPABILITY_RESULTS).map(({ search: _search, score: _score, boost: _boost, ...entry }) => entry);
-    return { ok: true, content: JSON.stringify({ matches, truncated: entries.length > matches.length }), metadata: { matches, truncated: entries.length > matches.length } };
+    ].filter(entry => safeId(entry.id));
+  }
+
+  async discoverAsync(input: unknown, context?: ToolExecutionContext): Promise<ToolResult> {
+    const standard = this.discover(input, context);
+    if (!standard.ok || !isRecord(input) || input.ids !== undefined || typeof input.query !== "string" || !input.query.trim() || !this.#routing) return standard;
+    const token = this.#turn?.token;
+    const revision = this.catalogRevision();
+    const entries = this.#discoveryEntries(input.kind);
+    // Use full registered descriptions for decisions; display metadata remains bounded.
+    const candidates = entries.map(entry => ({ id: entry.id, description: `${entry.name}: ${entry.kind === "tool" ? this.#catalog?.inventory.find(tool => tool.name === entry.name)?.description : this.#skills.get(entry.name)?.description}` }));
+    const decision = await evaluateCapabilities(this.#routing, candidates, {
+      context: jevRoutingContext({ userRequest: this.#turn?.objective ?? input.query, continuity: this.#turn?.continuity, material: this.#turn?.objective ? [{ kind: "retrieved", text: `Agent discovery query (relevance hint only): ${input.query}` }] : [] }), signal: context?.signal,
+      usage: { ...context?.providerUsageLineage, executionSessionId: context?.sessionId, visibleTurnId: context?.visibleTurnId, requestKey: `jev-discovery:${context?.toolCallId ?? "query"}` }
+    }, "discovery");
+    if (token !== this.#turn?.token || !this.#inScope(context) || revision !== this.catalogRevision()) return failure("inactive_or_changed_scope");
+    if (decision.actualEngine !== "jev") {
+      const fallback = this.discover(input, context);
+      return { ...fallback, content: JSON.stringify({ ...fallback.metadata, routing: decision }), metadata: { ...fallback.metadata, routing: decision } };
+    }
+    const selected = new Map(decision.selections.filter(item => item.selected).map(item => [item.id, item.probability ?? 0]));
+    const result = discoveryResult(entries.filter(entry => selected.has(entry.id)).sort((a, b) => selected.get(b.id)! - selected.get(a.id)! || a.id.localeCompare(b.id)));
+    // Bounded diagnostics: complete decisions are used, only returned IDs are presented to the agent.
+    const summary = { schemaVersion: decision.schemaVersion, configurationRevision: decision.configurationRevision, configuredMode: decision.configuredMode, actualEngine: decision.actualEngine, model: decision.model, catalogRevision: decision.catalogRevision };
+    return { ...result, content: JSON.stringify({ ...result.metadata, routing: summary }), metadata: { ...result.metadata, routing: summary } };
   }
 
   request(input: unknown, context?: ToolExecutionContext): ToolResult {
@@ -138,12 +199,20 @@ export class SessionCapabilityRecovery {
   }
 
   async applyRequests(proposals: readonly CapabilityProposal[], active: readonly OpenAICompatibleToolSchema[]): Promise<{
-    tools: OpenAICompatibleToolSchema[]; applied: string[]; rejected: Array<{ id: string; reason: string }>;
+    tools: OpenAICompatibleToolSchema[]; applied: string[]; rejected: Array<{ id: string; reason: string }>; deferred?: string[];
   }> {
-    const tools = [...active];
+    let tools = [...active];
+    const deferred: string[] = [];
+    const protectedNames = new Set<string>(CAPABILITY_RECOVERY_TOOLS);
+    const appliedNames = new Set<string>();
+    const stagedTools = new Set(this.#stagedTools);
+    const requestedSkills = new Map(this.#requestedSkills);
     const applied: string[] = [];
     const rejected: Array<{ id: string; reason: string }> = [];
     const token = this.#turn?.token;
+    const revision = this.catalogRevision();
+    const routingRevision = () => { try { const snapshot = this.#routing?.snapshot(); return snapshot ? `${snapshot.configurationRevision}:${snapshot.catalogRevision}` : ""; } catch { return "unavailable"; } };
+    const routingAtStart = routingRevision();
     for (const { id } of proposals.slice(0, MAX_CAPABILITY_ADDITIONS)) {
       if (!token || this.#turn?.token !== token || this.roundsRemaining === 0) { rejected.push({ id, reason: "inactive_or_exhausted" }); continue; }
       const skill = id.startsWith("skill:") ? this.#skills.get(id.slice(6)) : undefined;
@@ -152,19 +221,31 @@ export class SessionCapabilityRecovery {
       if (id.startsWith("skill:") && (!skill || !("instructions" in skill))) { rejected.push({ id, reason: "instructions_unavailable" }); continue; }
       if (skill?.routing?.confirmation === "ask") { rejected.push({ id, reason: "confirmation_required" }); continue; }
       const schema = await this.toolSchema(skill ? "tool:skill.read" : id);
-      if (this.#turn?.token !== token) return { tools: [...active], applied: [], rejected: [{ id, reason: "inactive_scope" }] };
+      if (this.#turn?.token !== token || this.#turn?.signal?.aborted || revision !== this.catalogRevision() || routingAtStart !== routingRevision()) return { tools: [...active], applied: [], rejected: [{ id, reason: "inactive_scope" }] };
       if (!schema) { rejected.push({ id, reason: "unavailable_or_changed" }); continue; }
       const alreadyExposed = tools.some((tool) => tool.function.name === schema.function.name);
       if (alreadyExposed && !skill) continue;
-      const budget = budgetProviderTools({ tools: alreadyExposed ? tools : [...tools, schema], priorityNames: new Set(tools.map((tool) => tool.function.name)) });
+      const staged = stagedTools.has(id.slice(5));
+      const budget = budgetProviderTools({ tools: alreadyExposed ? tools : staged ? [...tools.filter(tool => protectedNames.has(this.#catalog?.aliases.get(tool.function.name) ?? tool.function.name) || appliedNames.has(tool.function.name)), schema, ...tools] : [...tools, schema],
+        priorityNames: new Set(staged ? [schema.function.name, ...tools.filter(tool => protectedNames.has(this.#catalog?.aliases.get(tool.function.name) ?? tool.function.name) || appliedNames.has(tool.function.name)).map(tool => tool.function.name)] : tools.map(tool => tool.function.name)) });
       if (!budget.tools.some((tool) => tool.function.name === schema.function.name)) { rejected.push({ id, reason: "schema_budget" }); continue; }
-      if (!alreadyExposed) tools.push(schema);
-      if (skill) this.#requestedSkills.set(skill.name, { instance: skill, signature: skillSignature(skill) });
+      if (!alreadyExposed) {
+        for (const name of budget.omitted) {
+          const canonical = this.#catalog?.aliases.get(name) ?? name;
+          deferred.push(`tool:${canonical}`);
+          stagedTools.add(canonical);
+        }
+        tools = budget.tools;
+        appliedNames.add(schema.function.name);
+      }
+      if (skill) requestedSkills.set(skill.name, { instance: skill, signature: skillSignature(skill) });
       applied.push(id);
     }
+    this.#stagedTools = stagedTools;
+    this.#requestedSkills = requestedSkills;
     this.completeRound(applied.length > 0);
     this.setExposure(tools);
-    return { tools, applied, rejected };
+    return { tools, applied, rejected, ...(deferred.length ? { deferred } : {}) };
   }
 
   observeSkillRead(skill: LoadedSkill | SkillDefinition, result: ToolResult, input: { path?: string }, context?: ToolExecutionContext): void {
@@ -222,7 +303,7 @@ export class SessionCapabilityRecovery {
   }
 
   #inScope(context: ToolExecutionContext | undefined): boolean {
-    return this.#catalog !== undefined && this.#turn !== undefined && context?.signal?.aborted !== true &&
+    return this.#catalog !== undefined && this.#turn !== undefined && context?.signal?.aborted !== true && this.#turn.signal?.aborted !== true &&
       context?.sessionId === this.#turn.sessionId && context?.profileId === this.#turn.profileId && context?.visibleTurnId === this.#turn.visibleTurnId;
   }
 }
@@ -231,7 +312,7 @@ export function createCapabilityTools(recovery: SessionCapabilityRecovery): read
   return [
     { name: "capability.discover", description: "Find up to eight session-visible tools or skills. Metadata discovery does not authorize execution.",
       inputSchema: { type: "object", properties: { query: { type: "string", maxLength: 200 }, ids: { type: "array", maxItems: 8, items: { type: "string" } }, kind: { type: "string", enum: ["tool", "skill"] } }, additionalProperties: false },
-      run: (input: unknown, context?: ToolExecutionContext) => Promise.resolve(recovery.discover(input, context)) },
+      run: (input: unknown, context?: ToolExecutionContext) => recovery.discoverAsync(input, context) },
     { name: "capability.request", description: "Request exact tool: or skill: IDs for the next iteration. No same-batch use, installation, or authorization. Use skill.read for instructions once exposed.",
       inputSchema: { type: "object", properties: { ids: { type: "array", minItems: 1, maxItems: 8, items: { type: "string" } }, reason: { type: "string", minLength: 1, maxLength: 300 } }, required: ["ids", "reason"], additionalProperties: false },
       run: (input: unknown, context?: ToolExecutionContext) => Promise.resolve(recovery.request(input, context)) }
@@ -250,3 +331,13 @@ function failure(code: string): ToolResult { return { ok: false, content: `Capab
 function definitionSignature(tool: RegisteredTool): string { return JSON.stringify([tool.name, tool.description, tool.inputSchema, tool.riskClass, tool.toolsets, tool.connector]); }
 
 function skillSignature(skill: LoadedSkill | SkillDefinition): string { return createHash("sha256").update(JSON.stringify(skill)).digest("hex"); }
+
+function discoveryResult(entries: readonly object[]): ToolResult {
+  const matches = entries.slice(0, MAX_CAPABILITY_RESULTS);
+  const metadata = { matches, truncated: entries.length > matches.length };
+  return { ok: true, content: JSON.stringify(metadata), metadata };
+}
+
+function readinessSummary(readiness: ReturnType<typeof buildSkillReadinessMetadata>) {
+  return { readiness_status: readiness.readiness_status, setup_needed: readiness.setup_needed, setup_note: readiness.setup_note };
+}

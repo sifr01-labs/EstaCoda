@@ -1,6 +1,6 @@
-# Jev routing configuration and decision client — commits 1–3
+# Jev routing configuration and decision client — commits 1–4
 
-Status: configuration, validated decision client, and live intent/skill routing implemented. Jev-assisted now controls intent labels and skill selection before prompt assembly. Capability selection/recovery still use the existing runtime path; full Jev capability routing and packaged live acceptance remain pending. Desktop and Setup Editor disclose this scope.
+Status: configuration, validated decision client, live intent/skill routing, and capability selection/discovery implemented. Jev-assisted controls relevance decisions in the shared runtime. Existing execution permissions and completion checks remain authoritative. Calibration, richer fallback presentation and packaged live acceptance remain pending.
 
 ## Configuration and setup
 
@@ -84,3 +84,29 @@ Commit 3 validation on Node 24.14.1 / pnpm 10.33.0:
 - Final diff checks passed. Validation used an isolated copy of tracked sources plus these changes because unrelated duplicate source files remain in the working checkout. Unrelated documentation changes were not included.
 
 No installed application/gateway update or live TypeSafe quality measurement was performed in this commit. Capability selection and recovery remain commit 4; live API calibration and packaged acceptance remain commits 6–7.
+
+
+## Multi-label capability selection and recovery (commit 4)
+
+The shared builder connects Jev to initial provider-tool selection, including child and Task worker runtimes, and query-based `capability.discover`. Each tool in the complete session-visible inventory gets an independent question with its registered description, including unavailable or provider-restricted entries. Discovery also considers every visible skill when requested. It reuses the client's bounded batching, timeout, cancellation and usage ledger. Oversized catalogs or context fail explicitly into Standard selection; no keyword shortlist permanently removes candidates.
+
+Capability questions use the original user request or assigned worker objective, with bounded continuity and untrusted material kept separate. Recovery treats the agent's search query as a current-need hint within that objective, including save-only restrictions. Exact-ID discovery remains deterministic and makes no Jev call. Standard query matching retains its full-description and skill-trigger behavior. Independent relevance can select complementary capabilities together; configured implementations behind a registered tool (for example the chosen web-search backend) remain runtime configuration, not an exclusive vote over unrelated tools.
+
+The runtime unions relevance with explicit request tools and required toolsets from every selected skill. Optional toolsets do not become obligations. Explicit prohibitions and existing evidence-gated expansion remain binding. Recovery tools remain reachable for actionable requests even when Jev initially misses all tools. Unavailable/restricted matches remain metadata-only, with readiness and bounded setup guidance. Required tools absent from the catalog produce an explicit conflict; selection never creates schemas or installs dependencies.
+
+Exposure retains the existing 100-tool and 24,000 estimated schema-token limits. Recovery controls and explicit request tools precede skill dependencies and optional matches. Required schemas that do not fit are recorded as conflicts and staged by canonical ID. An authenticated `capability.request` can exchange existing exposure for staged requirements only at the next provider iteration, retaining recovery controls, stable catalog aliases and tools already added in that recovery round. Removed exposure is recorded as deferred and can be requested again. Existing limits remain eight additions per round and two successful rounds; schemas too large to fit are reported as budget rejections. No silent overflow or same-batch execution is allowed.
+
+Catalog fingerprints now include session-filtered metadata, schemas, aliases, registered handler identities and execution binding. Initial selection, discovery and recovery application reject stale asynchronous decisions. Availability is checked again before initial exposure or expansion; recovery applies its state changes together after validation. Existing executor policy, workspace trust, approvals, session/profile scope, skill confirmation and completion evidence are unchanged. Semantic selection and exposure do not authorize actions.
+
+Initial inventory events record the versioned capability decision, model, configured/actual engine, revisions, probabilities and conflicts. Discovery returns bounded engine/fallback metadata alongside its matches. The provider receives bounded conflict/readiness context; user-facing engine status and connection checks remain commit 5. Desktop and CLI setup copy now accurately states that Jev selects intents, skills and capabilities.
+
+Security review covers fixed-endpoint routing egress, selected-profile credential resolution, quoted/context boundaries, catalog and execution-scope changes, receipt authenticity, schema limits, next-iteration exposure and preserved approval denials. No dependencies or lockfiles changed. These fixture checks do not establish live model quality or a rebuilt application release; those remain commits 6–7.
+
+Commit 4 validation on Node 24.14.1 / pnpm 10.33.0:
+
+- Core suite: 755 files / 12,276 tests passed. Focused coverage includes 25 capability-selection regressions and real runtime Jev discovery, next-iteration exposure, same-batch rejection, provider fallback and approval denial.
+- Final review strengthened session-rotation invalidation; the 31-test builder suite passed after that change. Final typecheck, build and import/ESM audits passed again.
+- Frozen dependency verification, source smoke (13/13), compiled smoke (13/13), Desktop protocol/type checks, 180 Desktop unit tests and 12 English/Arabic settings browser tests passed.
+- Diff checks passed. Checks used the isolated tracked-source copy; the working checkout's unrelated duplicate `bidi-js` declaration still prevents direct typechecking there. Unrelated documents and duplicate files were left untouched.
+
+No live TypeSafe request or installed Desktop/gateway update was performed. The checks establish deterministic integration and governance behavior, not model calibration or packaged acceptance.

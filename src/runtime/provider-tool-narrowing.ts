@@ -58,6 +58,8 @@ export type ProviderToolSelection = {
   namedConnectorIds: string[];
   policy?: string;
   budgetOmittedTools?: string[];
+  stagedTools?: string[];
+  capabilityRouting?: import("../contracts/routing.js").CapabilityRoutingDecision;
 };
 
 export type ProviderToolContinuityContext = {
@@ -367,7 +369,7 @@ function attachmentToolsets(attachments: readonly ChannelAttachment[] | undefine
 export function describeCapabilitySelection(input: {
   catalog: ProviderToolSchemaCatalog;
   exposedTools: readonly OpenAICompatibleToolSchema[];
-  selection: Pick<ProviderToolSelection, "policy" | "budgetOmittedTools" | "expansionCandidates">;
+  selection: Pick<ProviderToolSelection, "policy" | "budgetOmittedTools" | "expansionCandidates" | "capabilityRouting">;
   requirements?: IntentRoute["requestRequirements"];
   providerSupportsTools?: boolean;
 }): CapabilitySelectionDiagnostics {
@@ -397,6 +399,7 @@ export function describeCapabilitySelection(input: {
     .slice(0, 32).map(([tool, reason]) => ({ tool: diagnosticToolId(tool), reason }));
   return {
     policy: input.selection.policy ?? "session-default",
+    routing: input.selection.capabilityRouting,
     catalogCount: input.catalog.inventory.length,
     availableCount: input.catalog.inventory.filter((tool) => tool.availability === "available").length,
     schemaEligibleCount: input.catalog.entries.length,

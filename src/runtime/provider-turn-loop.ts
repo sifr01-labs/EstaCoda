@@ -290,6 +290,9 @@ export class ProviderTurnLoop {
     providerToolSchemaCatalog?: ProviderToolSchemaCatalog;
     toolSelectionPolicy?: string;
     budgetOmittedTools?: string[];
+    stagedTools?: string[];
+    capabilityContext?: import("./jev/types.js").JevContext;
+    selectedCapabilityIds?: string[];
     connectorInventory?: ProviderToolInventoryEvent["connectors"];
     preflightCompression?: PromptSemanticCompressionReport;
     conversationContinuationState?: ConversationContinuationState;
@@ -364,7 +367,7 @@ export class ProviderTurnLoop {
     let providerTokensThisTurn = 0;
     let activeProviderTools = budgetProviderTools({ tools: input.providerTools }).tools;
     let toolExpansionUsed = false;
-    let capabilityRecoveryFeedback: string[] = [];
+    let capabilityRecoveryFeedback: string[] = [...(input.capabilityRecoveryFeedback ?? [])];
     let pendingSkillLoads: Array<{ receipt: Omit<RecoveredSkillReceipt, "appliedIteration">; content: string }> = [];
     const recoveredSkillContext = new Map<string, string>();
     const connectorInventory = () => (input.connectorInventory ?? []).map((connector) => ({
@@ -374,7 +377,7 @@ export class ProviderTurnLoop {
         activeProviderTools.some((tool) => tool.function.name === entry.schema.function.name)) ?? connector.exposedThisTurn
     }));
     this.#capabilityRecovery?.beginTurn({ sessionId: this.#sessionRuntimeContext?.currentSessionId() ?? this.#sessionId,
-      profileId: this.#profileId, visibleTurnId: input.visibleTurnId, tools: activeProviderTools });
+      profileId: this.#profileId, visibleTurnId: input.visibleTurnId, tools: activeProviderTools, stagedTools: input.stagedTools, objective: input.capabilityContext?.userRequest ?? input.userText, continuity: input.capabilityContext?.continuity, signal: input.signal });
     const workingSessionId = this.#sessionRuntimeContext?.currentSessionId() ?? this.#sessionId;
     const foregroundTurnId = runtimeForegroundTurnId(
       input.visibleTurnId,
@@ -469,7 +472,7 @@ export class ProviderTurnLoop {
       const requestedCapabilityOmissions = input.requestedCapabilityOmissions?.filter((omission) => !providerToolsForIteration.some((tool) =>
         (input.providerToolSchemaCatalog?.aliases.get(tool.function.name) ?? tool.function.name) === omission.tool));
       const capabilityState = projectCapabilityState({ catalog: input.providerToolSchemaCatalog, exposed: providerToolsForIteration,
-        executions: [...input.toolExecutions, ...providerToolExecutions], required: requiredRequestTools(input.intent.requestRequirements) });
+        executions: [...input.toolExecutions, ...providerToolExecutions], required: [...requiredRequestTools(input.intent.requestRequirements), ...(input.selectedCapabilityIds ?? [])] });
       let execution = phase === "initial"
         ? await this.#completeWithProvider({
             ...input,
@@ -856,8 +859,8 @@ export class ProviderTurnLoop {
         const recovery = await this.#capabilityRecovery!.applyRequests(recoveryProposals, activeProviderTools);
         if (!input.signal?.aborted) {
           activeProviderTools = recovery.tools;
-          capabilityRecoveryFeedback = [JSON.stringify({ applied: recovery.applied, rejected: recovery.rejected, next: "For applied skill IDs, read their instructions with skill.read before following them. No playbook or toolset was activated." })];
-          const event: RuntimeEvent = { kind: "capability-recovery", appliedIteration: iteration + 1, applied: recovery.applied, rejected: recovery.rejected };
+          capabilityRecoveryFeedback = [JSON.stringify({ applied: recovery.applied, rejected: recovery.rejected, deferred: recovery.deferred, next: "For applied skill IDs, read their instructions with skill.read before following them. No playbook or toolset was activated." })];
+          const event: RuntimeEvent = { kind: "capability-recovery", appliedIteration: iteration + 1, applied: recovery.applied, rejected: recovery.rejected, ...(recovery.deferred ? { deferred: recovery.deferred } : {}) };
           await this.#sessionDb.appendEvent(workingSessionId, event);
           this.#trajectoryRecorder.record(event.kind, event);
           await emit(input.onEvent, event);

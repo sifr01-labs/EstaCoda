@@ -7,7 +7,7 @@ import type { IntentRouter } from '../intent-router.js';
 import type { JevSnapshot } from './types.js';
 
 /** Selected profile only. Re-read at each async acceptance boundary, including during a leased runtime. */
-export function routingSnapshotReader(input: { homeDir?: string; profileId: string; router: IntentRouter; initial?: RoutingConfig }): () => JevSnapshot {
+export function routingSnapshotReader(input: { homeDir?: string; profileId: string; router: IntentRouter; initial?: RoutingConfig; capabilityRevision?: () => unknown }): () => JevSnapshot {
   const path = resolveProfileStateHome(input).configPath;
   let sawFile = false;
   return () => {
@@ -33,6 +33,6 @@ export function routingSnapshotReader(input: { homeDir?: string; profileId: stri
     } finally { if (fd !== undefined) closeSync(fd); }
     const config = normalizeRoutingConfig(routing);
     const hash = (value: unknown) => createHash('sha256').update(JSON.stringify(value)).digest('hex');
-    return { config, configurationRevision: hash({ config, stamp }), catalogRevision: hash(input.router.listSkills()) };
+    return { config, configurationRevision: hash({ config, stamp }), catalogRevision: hash({ skills: input.router.listSkills(), capabilities: input.capabilityRevision?.() }) };
   };
 }

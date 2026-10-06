@@ -473,9 +473,16 @@ describe("AgentLoopBuilder", () => {
     const input = { text: "Help with this", channel: "cli" as const, evaluation: { context: { userRequest: "Help with this" }, usage: { requestKey: "jev-test", executionSessionId: "jev-session", visibleTurnId: "jev-turn" } } };
     expect((await built.runtimeRouter.routeAsync(input)).selectedSkill?.name).toBe("visible");
     expect(await harness.sessionDb.listProviderUsageEntries("default")).toHaveLength(1);
+    const respond = fetch.getMockImplementation()!;
+    fetch.mockImplementationOnce(async (...args) => {
+      const response = await respond(...args);
+      built.sessionRuntimeContext.rotateSession("rotated-session");
+      return response;
+    });
+    expect((await built.runtimeRouter.routeAsync(input)).intent.routingDecision?.actualEngine).toBe("standard");
     await writeFile(paths.configPath, JSON.stringify({ routing: { mode: "standard" } }));
     expect((await built.runtimeRouter.routeAsync(input)).intent.routingDecision?.actualEngine).toBe("standard");
-    expect(fetch).toHaveBeenCalledOnce();
+    expect(fetch).toHaveBeenCalledTimes(2);
   });
 
   it("default skill visibility can be re-evaluated against available tools", async () => {
