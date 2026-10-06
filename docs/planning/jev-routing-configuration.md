@@ -1,6 +1,6 @@
-# Jev routing configuration — commit 1
+# Jev routing configuration and decision client — commits 1–2
 
-Status: configuration foundation implemented. The Jev client and live routing integration are not implemented in this commit. Both saved modes currently execute Standard routing. Desktop and Setup Editor explicitly disclose this limitation; this commit must not be advertised as a working Jev routing release.
+Status: configuration and validated decision client implemented. Live routing integration is not implemented yet. Both saved modes currently execute Standard routing. Desktop and Setup Editor explicitly disclose this limitation; these foundations must not be advertised as a working Jev routing release.
 
 ## Configuration and setup
 
@@ -21,11 +21,25 @@ TypeSafe's decision API is separate from chat/completions. Jev is therefore a sp
 
 ## Runtime boundary and decision contract
 
-Routing configuration contributes to the existing runtime definition fingerprint. Cached executions retain their lease; changed definitions are used after the active execution releases it. An attempted concurrent replacement remains busy. This does not implement mid-turn Jev response cancellation: the later async client integration must check configuration/catalog revisions and discard stale responses.
+Routing configuration contributes to the existing runtime definition fingerprint. Cached executions retain their lease; changed definitions are used after the active execution releases it. An attempted concurrent replacement remains busy. The decision client now checks configuration/catalog revisions before dispatch and acceptance, discarding stale answers. Later live integration must supply current revisions and connect cancellation at routing boundaries; in-flight tool execution remains unchanged.
 
 The versioned routing decision contract includes configured mode, actual engine, model, configuration/catalog revisions, independent intent/skill/capability selections, optional primary skill, and fallback reason. Probability is optional because Standard routing must not fabricate Jev probabilities. Selected labels are multi-label, not a single mutually exclusive choice. This contract is a foundation for later routing consumers, not execution authority.
 
-## Validation and risk
+## Validated TypeSafe client (commit 2)
+
+`src/runtime/jev/decision-client.ts` provides the transport for later routing consumers. It uses TypeSafe's fixed HTTPS decision endpoint with redirects disabled and no automatic retries. It does not register Jev as a conversation model or expose a new agent tool. Standard mode and empty candidate sets make no provider request.
+
+The adapter supports independent Noul applicability questions, exclusive Choice questions, and Score rubrics. Every question includes its instructions and subject description: TypeSafe does not present the question ID to its model. Responses must match the requested question types and IDs; Choice/Score probabilities must cover exactly the declared options and sum to one. Choice must select a maximum-probability option; Score must match its declared rubric and probability-weighted value. Unknown IDs reject the batch. Missing, malformed, uncertain and explicitly rejected answers remain distinct. Selection thresholds are supplied by the consumer; calibration remains commit 6.
+
+Requests carry only the current user request, optional relevant continuity and explicitly marked untrusted quoted/retrieved material. Full history/config objects and extra properties are excluded. Recognizable credentials and known values from the selected profile's `.env` are redacted from content; credential-bearing IDs are rejected rather than silently remapped. Credentials resolve through the shared runtime resolver using an explicit selected-profile environment snapshot, with no process-global or other-profile fallback. The client emits no raw request, response, exception or credential logs.
+
+Local ceilings are 2,048 questions per evaluation, 64 questions per batch, 16,384 UTF-8 bytes of state, 8,192 bytes per question, 48,000 bytes per serialized request and 524,288 bytes per response. Choice supports 2–255 options; Score supports 2–10 levels. Overlarge context/questions are rejected rather than truncated, preserving user restrictions for Standard fallback. Independent capabilities are not normalized against one another.
+
+The configured timeout covers credential lookup and all sequential batches, including response streaming. Cancellation or changed configuration/catalog revisions discard all decisions; later batches cannot dispatch under an obsolete snapshot. Mandatory local usage settlement is awaited even after cancellation. Every dispatched attempt uses the existing auxiliary/routing usage ledger, including failures with explicitly incomplete usage; unique attempt keys allow idempotent persistence without hiding separate requests. If accounting fails, answers are withheld and canonical usage entries are retained for settlement without another API call. Valid earlier batches may accompany a later service failure, but unanswered capabilities are never converted into rejection. Consumers must handle the structured failure/partial result through centralized Standard fallback in subsequent commits.
+
+Release validation remains pinned to `jev-1.13.0`. Explicit aliases record the actual returned release; unknown releases stay unpriced. The pinned estimate is $0.042 per million input tokens and no output charge. API and model contracts were checked against [TypeSafe API](https://docs.typesafe.ai/api) and [TypeSafe models](https://docs.typesafe.ai/models) on 2026-10-06. Fixtures establish adapter behavior; live authentication and packaged routing verification remain commits 5 and 7.
+
+## Commit 1 validation and risk
 
 Coverage includes config defaults and validation; Desktop protected credential round trips, redaction, cancellation, profile isolation and invalid model rollback; CLI apply/cancel and active-profile selection; runtime fingerprint and lease boundaries; English/Arabic Desktop model selection and review.
 
@@ -40,3 +54,11 @@ Validated on Node 24.14.1 / pnpm 10.33.0:
 - Final strengthened CLI cancellation/redaction assertions passed separately. `git diff --check` passed.
 
 Core validation used an isolated copy of tracked sources plus this change because the working checkout contains unrelated duplicate source files. No packaged application install or live TypeSafe authentication/routing claim is made by these checks.
+
+## Commit 2 validation and security review
+
+The 66-test fixture suite covers transport and ledger integration, bounded multi-label batching, typed answers, malformed distributions, missing/uncertain responses, authentication/rate/service failures, cancellation, stalled bodies, stale configuration/catalogs, redaction, profile isolation and Arabic context. No actual TypeSafe credential or live service call is used.
+
+Security review: this adds a fixed-endpoint network adapter and a read-only selected-profile credential lookup. Its answers are relevance evidence only; the client grants no execution authority and changes no tool, approval, workspace, task-completion or file-verification behavior. Runtime consumers, fallback presentation and packaged verification are deliberately still pending in the subsequent commits.
+
+Commit 2 checks passed on Node 24.14.1 / pnpm 10.33.0 using the isolated tracked-source validation copy: frozen dependency install, core typecheck, build, 753 test files / 12,219 tests, runtime import audit, ESM audit, source smoke (13/13), compiled smoke (13/13), and final diff checks. The new client adds no dependency or lockfile change. Existing unrelated working-tree changes are outside this commit.
