@@ -43,6 +43,18 @@ The [worker recovery validation record](../reports/research-worker-recovery-vali
 
 The [continuation and delivery validation record](../reports/research-continuation-delivery-validation.json) records the focused recovery changes, final packaged checks, and separate live-provider outcomes.
 
+## Research method and report presentation
+
+The research-discovery skill keeps its core method below the inline skill-content limit. Academic API examples live in `references/academic-search.md`; loading them is optional. Restricted workers with only search and extraction tools receive the complete core method without needing `skill.read`. Standard and Jev routing use the assigned worker objective, while the executor still owns Step completion requirements; quoted parent instructions cannot add delegation or file obligations. Skill selection remains subject to session visibility and routing, and tool selection does not grant execution authority.
+
+The method asks for primary-page investigation of central claims in deep research, gap-driven follow-up, date checks, and concise synthesis. It permits a quick snippet-based overview when appropriate and honest partial findings when retrieval fails. There is no new minimum tool count, mandatory extraction gate, or model-based quality evaluator. Existing provenance, dependency coverage, authorization and delivery checks remain enforced.
+
+Source notes appear after the report in a `Source evidence` appendix. A source observed only through search is labelled `snippet; page content not retrieved`; this does not assert that retrieval was attempted or impossible. The attempt transcript records individual failures, and the narrative should name a failure only when one occurred. Extraction is labelled `extracted; full text unverified`, since retrieving content does not prove completeness or accuracy. The runtime omits automatic success/freshness preambles, retains missing-scope warnings, and asks synthesis to state shared limitations once.
+
+The current durable synthesis Step can read accepted worker results but cannot launch another research round. Workers can investigate gaps before returning. If synthesis discovers an unresolved gap, it must disclose it; this change does not add adaptive rescheduling or expand synthesis authority.
+
+Validation includes deterministic worker-provider requests for deep research with successful page access, failed page access, and a quick snippet-only overview. These checks verify loaded instructions, restricted tool exposure, acceptance and report presentation. They do not prove that a live model follows the method or that findings are correct. For a live quality assessment, repeat those three cases in both routing modes and inspect central-claim support, publication dates, coverage, honest limitations and concision. Count searches and page reads as diagnostic evidence, not a quality score. The desktop package and gateway must contain this revision before that assessment.
+
 ## Live provider state
 
 | Provider | Capabilities | Status | Setup |

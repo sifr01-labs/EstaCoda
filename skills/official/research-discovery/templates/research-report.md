@@ -1,19 +1,19 @@
 # Research report
 
-## Scope
+## Findings at a glance
 
-State the question, freshness window, search coverage and exclusions.
+Answer the question and identify the most consequential developments.
 
-## Source notes
+## Evidence and analysis
 
-| Source URL / title | Publication or revision date (if observed) | Retrieval date | Abstract or full text | Supported claim | Limitation |
-| --- | --- | --- | --- | --- | --- |
+Organize by the user's questions. Cite observed sources beside supported claims,
+compare disagreements, and distinguish findings from inference. For current
+claims, give publication or release dates when verified.
 
-## Findings
+## Remaining uncertainties
 
-Connect each substantive claim to the observed source notes. Compare agreement,
-disagreement and uncertainty. Separate source findings from your inference.
+State material access, freshness and coverage limitations once. Preserve useful
+partial findings without presenting them as verified conclusions.
 
-## Coverage limitations
-
-Identify unavailable sources, incomplete scopes and claims requiring verification.
+Keep the report proportional to the evidence. The runtime retains detailed source
+observations in an appendix; do not reproduce its bookkeeping in the narrative.

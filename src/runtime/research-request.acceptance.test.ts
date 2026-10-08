@@ -46,6 +46,44 @@ function schedulerFor(h: Harness, taskId: string) {
 }
 
 describe.sequential("research workflow acceptance harness", () => {
+  it.each([
+    { topic: "latest developments in agentic harnesses", depth: "deep research", extract: true, blocked: false },
+    { topic: "current battery recycling methods", depth: "deep research", extract: true, blocked: true },
+    { topic: "research frameworks", depth: "a quick overview", extract: false, blocked: false }
+  ])("loads the complete research method for a restricted worker: $topic ($depth)", async ({ topic, depth, extract, blocked }) => {
+    const h = await harness({ sourceAccessFailures: blocked });
+    h.enqueue(nativeCall("delegate_task", { tasks: [{ task: `${depth === "deep research" ? "Provide" : "Use the research-discovery skill to provide"} ${depth} on ${topic}.`,
+      allowedTools: ["web.search", "web.extract"], research: { scope: topic, requireLiveSources: true } }] }));
+    await h.turn(`Use the research-discovery skill and 1 worker for ${depth} on ${topic}.`);
+    const task = h.store.listTasks()[0]!;
+    const { scheduler, resultService } = schedulerFor(h, task.id);
+    h.enqueue(request => {
+      const prompt = JSON.stringify(request.messages);
+      expect(prompt).toContain("Skill content mode: full");
+      expect(prompt).toContain("For deep research, use web.extract to read the primary pages");
+      expect(prompt).toContain("Choose the next action from the evidence gaps");
+      expect(prompt).not.toContain("Skill content mode: contract");
+      const names = (request.tools as Array<{function: {name: string}}>).map(tool => tool.function.name);
+      expect(names.sort()).toEqual(["web_extract", "web_search"]);
+      return nativeCall("web_search", { query: topic })(request);
+    });
+    if (extract) h.enqueue(nativeCall("web_extract", { url: SOURCE_URL }));
+    const finding = `[Observed finding](${SOURCE_URL}). ` + (blocked ? "Page retrieval failed; this is a limited overview from a search snippet."
+      : extract ? "Page content was retrieved; this fixture does not establish factual accuracy." : "This quick overview is based on a search snippet.");
+    h.enqueue(answer(finding));
+    const settled = await scheduler.runOnce();
+    expect(h.scriptErrors).toEqual([]);
+    expect(settled).toMatchObject({ completed: 1, failed: 0 });
+    const result = h.store.listResults(task.id).find(item => item.disposition === "accepted")!;
+    const text = (await resultService.readText({ taskId: task.id, resultId: result.id, sessionId: h.runtime.sessionId })).content;
+    expect(text.startsWith(finding)).toBe(true);
+    expect(text).toContain("## Source evidence");
+    expect(text).toContain(extract && !blocked ? "extracted; full text unverified" : "snippet; page content not retrieved");
+    expect(text).not.toContain("full text unavailable");
+    expect(h.extracts).toHaveLength(extract ? 1 : 0);
+    scriptConsumed(h); // No quality gate forces another attempt after an honest partial result.
+  });
+
   it("repairs an incomplete foreground readback and validates citations in the saved report", async () => {
     const h = await harness();
     const report = REPORT + "\n" + "A retained report paragraph.\n".repeat(1800);
@@ -352,7 +390,7 @@ describe.sequential("research workflow acceptance harness", () => {
     h.enqueue(nativeCall("web_search", { query: "battery recycling" }), answer(`${REPORT}\n${CLAIM_TABLE}`));
     const valid = await h.turn("Research the latest battery recycling methods.");
     expect(valid.finalOutcome?.status).toBe("completed");
-    expect(valid.text).toContain("snippet; full text unavailable");
+    expect(valid.text).toContain("snippet; page content not retrieved");
     scriptConsumed(h);
   });
 

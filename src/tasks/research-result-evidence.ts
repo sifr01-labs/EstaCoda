@@ -5,9 +5,9 @@ import { readTaskResultEvidence } from "./task-result-read-evidence.js";
 
 const SOURCE_HEADER = "| Source URL | Published/revised | Retrieved | Access | Supported claim | Limitation |";
 const MAX_TABLE_CHARS = 128_000;
-export const RESEARCH_EVIDENCE_INSTRUCTION = `Cite observed URLs next to the claims they support. Explain source limitations and distinguish search snippets from retrieved text. A source/claim table is optional; the runtime attaches observed publication/revision dates, retrieval dates and access status. Never invent source observations or publication dates. A URL establishes provenance, not scientific truth.`;
+export const RESEARCH_EVIDENCE_INSTRUCTION = `Cite observed URLs next to the claims they support. Explain source limitations and distinguish search snippets from retrieved text. Write for the reader; do not repeat runtime status or generic verification disclaimers. The runtime retains source observations in an appendix, so a source/claim table is optional. Never invent source observations or publication dates. A URL establishes provenance, not scientific truth.`;
 
-export const SYNTHESIS_EVIDENCE_INSTRUCTION = "Read every accepted dependency result completely. Synthesize their findings in your own words, cite their observed sources, and preserve evidence limitations and freshness scope. The runtime retains the original worker source notes; do not copy table cells merely to satisfy formatting. Return only the report for its reader. File saving and completion status are handled by the delivery step; omit internal workflow or file-output commentary from the report.";
+export const SYNTHESIS_EVIDENCE_INSTRUCTION = "Read every accepted dependency result completely. Synthesize their findings in your own words, cite their observed sources, and preserve evidence limitations and freshness scope. The runtime retains the original worker source notes in an appendix; do not copy those tables or expand the report to match their length. State shared limitations once. If further investigation is unavailable in this step, identify material gaps rather than claiming they were resolved. Return only the report for its reader. File saving and completion status are handled by the delivery step; omit internal workflow or file-output commentary from the report.";
 
 type SourceRow = { url: string; published: string; retrieved: string; access: string; claim: string; limitation: string };
 
@@ -66,15 +66,9 @@ export function groundResearchResult(input: { task: Task; step: TaskStep; store:
     });
   const rendered = [SOURCE_HEADER, "| --- | --- | --- | --- | --- | --- |", ...rows.map((row) => `| ${row.url} | ${row.published} | ${row.retrieved} | ${row.access} | ${row.claim.replace(/\|/gu, "\\|")} | ${row.limitation.replace(/\|/gu, "\\|")} |`)].join("\n");
   if (rendered.length > MAX_TABLE_CHARS) return { failure: "source-notes-limit", feedback: "The retained source notes exceed the result size limit. Use fewer distinct sources while preserving worker scope coverage." };
-  const prefix = input.step.executor.role !== "synthesis" ? "" : missing.length > 0
-    ? `Research coverage is partial. Missing or failed scopes: ${missing.join(", ")}. Conclusions are limited to the accepted evidence.\n\n`
-    : "Research coverage: all requested worker scopes returned accepted evidence.\n\n";
-  const freshness = input.step.executor.role === "synthesis" && input.step.executor.requestContract?.requirements.research?.fresh
-    ? "Freshness: live searches were required; observed publication/revision dates and retrieval dates appear below. Unknown publication dates do not establish recency.\n\n" : "";
-  const access = rows.every(row => row.access.startsWith("snippet"))
-    ? "Source access: search summaries only. Full text was not retrieved; acceptance checks source provenance, not scientific accuracy.\n\n" : "";
-  const body = table === undefined ? `${input.text}\n\n${rendered}` : input.text.slice(0, table.start) + rendered + input.text.slice(table.end);
-  return { text: prefix + freshness + (access && !body.startsWith(access) ? access : "") + body };
+  const prefix = input.step.executor.role === "synthesis" && missing.length > 0
+    ? `Research coverage is partial. Missing or failed scopes: ${missing.join(", ")}. Conclusions are limited to the accepted evidence.\n\n` : "";
+  return { text: (prefix && !input.text.startsWith(prefix) ? prefix : "") + appendSourceEvidence(input.text, table, rendered) };
 }
 
 function parseTable(text: string): { rows: SourceRow[]; start: number; end: number } | undefined {
@@ -145,7 +139,7 @@ function observedSources(executions: readonly ToolExecutionRecord[], now: Date):
         const retrievedAt = extracted && typeof source.retrievedAt === "string" && /^\d{4}-\d{2}-\d{2}T/.test(source.retrievedAt)
           ? source.retrievedAt.slice(0, 10) : execution.readReuseOf !== undefined ? previous?.retrieved ?? "unknown" : now.toISOString().slice(0, 10);
         sources.set(url, { url, published: date ?? previous?.published ?? "unknown", retrieved: retrievedAt,
-          access: extracted ? "extracted; full text unverified" : previous?.access ?? "snippet; full text unavailable" });
+          access: extracted ? "extracted; full text unverified" : previous?.access ?? "snippet; page content not retrieved" });
       }
     }
   return sources;
@@ -164,5 +158,15 @@ export function groundForegroundResearch(text: string, executions: readonly Tool
     return `| ${row.url} | ${source.published} | ${source.retrieved} | ${source.access} | ${row.claim.replace(/\|/gu, "\\|")} | ${row.limitation.replace(/\|/gu, "\\|")} |`;
   })].join("\n");
   if (rendered.length > MAX_TABLE_CHARS) return { failure: "source-notes-limit" };
-  return { text: table === undefined ? `${text}\n\n${rendered}` : text.slice(0, table.start) + rendered + text.slice(table.end) };
+  return { text: appendSourceEvidence(text, table, rendered) };
+}
+
+/** Keep machine-observed source notes after the reader's report. Retain the table
+ * format because persisted worker results and dependency readers already use it. */
+function appendSourceEvidence(text: string, table: ReturnType<typeof parseTable>, rendered: string): string {
+  const before = (table === undefined ? text : text.slice(0, table.start)).trimEnd()
+    .replace(/(?:^|\n)## Source evidence$/u, "").trimEnd();
+  const after = table === undefined ? "" : text.slice(table.end).trim();
+  const body = [before, after].filter(Boolean).join("\n\n");
+  return `${body ? `${body}\n\n` : ""}## Source evidence\n\n${rendered}`;
 }

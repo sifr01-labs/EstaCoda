@@ -25,6 +25,23 @@ function ground(text = claim, executions = [execution("web.search", { results: [
 }
 
 describe("research result evidence", () => {
+  it("keeps source records in one appendix after the report without growing on revalidation", () => {
+    const report = `## Findings\n\nA finding from [the study](${url}).\n\n${claim}\n\n## Limitations\n\nSmall synthetic sample.`;
+    const first = ground(report).text!;
+    expect(first.indexOf("## Source evidence")).toBeGreaterThan(first.indexOf("## Limitations"));
+    expect(first.match(/\| Source URL \|/gu)).toHaveLength(1);
+    expect(ground(first).text).toBe(first);
+    expect(first).not.toContain("Source access:");
+  });
+  it("does not call unattempted or failed page access unavailable", () => {
+    const searched = execution("web.search", { results: [{ url }] });
+    const failed = { ...execution("web.extract", { url }), result: { ok: false, content: "HTTP 403" } };
+    for (const calls of [[searched], [searched, failed]]) {
+      expect(ground(claim, calls).text).toContain("snippet; page content not retrieved");
+      expect(ground(claim, calls).text).not.toContain("unavailable");
+    }
+  });
+
   it("preserves original retrieval dates for reused extracts across midnight", () => {
     const reused = { ...execution("web.extract", { url, content: "Observation", retrievedAt: "2026-09-23T23:59:59.000Z" }), readReuseOf: "original" };
     expect(ground(claim, [reused]).text).toContain("2026-09-23 | extracted");
@@ -33,10 +50,10 @@ describe("research result evidence", () => {
   });
   it("adds retrieval facts, observed dates and conservative access status without trusting provider columns", () => {
     const result = ground();
-    expect(result.text).toContain("Source access: search summaries only");
-    expect(result.text).toContain("not scientific accuracy");
-    expect(result.text).toContain("2025-06-10 | 2026-09-24 | snippet; full text unavailable");
-    const forged = result.text!.replace("2025-06-10", "2099-01-01").replace("snippet; full text unavailable", "full-text");
+    expect(result.text).toContain("## Source evidence");
+    expect(result.text).not.toContain("Source access: search summaries only");
+    expect(result.text).toContain("2025-06-10 | 2026-09-24 | snippet; page content not retrieved");
+    const forged = result.text!.replace("2025-06-10", "2099-01-01").replace("snippet; page content not retrieved", "full-text");
     expect(ground(forged).text).toBe(result.text);
     expect(ground(claim, [execution("web.extract", { url, content: "An abstract with no publication date" })]).text).toContain("unknown | 2026-09-24 | extracted; full text unverified");
   });
@@ -45,7 +62,7 @@ describe("research result evidence", () => {
       claim.replace("Source URL", "**Source**").replace("Supported claim", "Finding").replace("Limitation", "Limitations")]) {
       const result = ground(text);
       expect(result.failure).toBeUndefined();
-      expect(result.text).toContain("2025-06-10 | 2026-09-24 | snippet; full text unavailable");
+      expect(result.text).toContain("2025-06-10 | 2026-09-24 | snippet; page content not retrieved");
     }
   });
 
@@ -112,7 +129,8 @@ describe("research result evidence", () => {
     const input = { task, step: synthesis, store: sourceStore, text: claim, executions: [read], now };
     const settled = groundResearchResult(input);
     expect(settled.text).toContain("Research coverage is partial. Missing or failed scopes: missing materials");
-    expect(settled.text).toContain("Unknown publication dates do not establish recency");
+    expect(settled.text).not.toContain("Freshness: live searches were required");
+    expect(groundResearchResult({ ...input, text: settled.text! }).text).toBe(settled.text);
     expect(groundResearchResult({ ...input, executions: [] }).failure).toBe("unread-worker-results");
     const paraphrase = groundResearchResult({ ...input, text: `A differently worded synthesis cites [the study](${url}).` });
     expect(paraphrase.failure).toBeUndefined();

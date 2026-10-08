@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-09-24T09:42:58.487Z",
+  "generatedAt": "2026-10-08T11:20:15.349Z",
   "skills": [
     {
       "id": "official.api-integration",
@@ -570,7 +570,7 @@
       "slug": "research-discovery",
       "name": "Research Discovery",
       "description": "Discover research sources and academic literature, compare evidence, and synthesize cited reports; save output when requested.",
-      "overview": "Search and retrieve academic papers from arXiv via their free REST API. No API key is required. Prefer EstaCoda web tools and `scripts/search_research_discovery.py`; use raw shell examples only when the user approves command execution or when no web tool is available.",
+      "overview": "Investigate the user's question using sources appropriate to the topic. Scale effort to the request: a quick overview needs less investigation than deep research. Academic papers are useful when relevant; general research does not require an academic paper or experiment workflow.",
       "labels": [
         "research.discovery",
         "research.paper-search"

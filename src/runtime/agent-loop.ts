@@ -487,7 +487,10 @@ export class AgentLoop {
     };
     const route = await this.#runtimeRouter.routeAsync({
       text: checkpointPreparation?.requirementMode === "save" ? turnText : routingText,
-      requestText: input.stepCompletion !== undefined ? "" : input.requirementText === undefined ? turnText : interceptPlaintextCredentialInput(input.requirementText)?.projectedText ?? input.requirementText,
+      // Route the assigned objective in both engines. Quoted parent/dependency prose
+      // must not select skills or create completion obligations for a durable Step.
+      requestText: input.requirementText === undefined ? (input.stepCompletion === undefined ? turnText : "")
+        : interceptPlaintextCredentialInput(input.requirementText)?.projectedText ?? input.requirementText,
       attachments,
       saveOnly: checkpointPreparation?.requirementMode === "save",
       evaluation: routingEvaluation,

@@ -591,6 +591,22 @@ it("uses the worker assignment instead of quoted parent file instructions for co
   expect(response.finalOutcome?.completionFloor).toBe("none");
 });
 
+it("routes the assigned skill in Standard without inheriting parent obligations", async () => {
+  const registry = new SkillRegistry();
+  registry.register({ ...selectedSkill, name: "worker-research", routing: {}, requiredToolsets: [],
+    sourcePath: "/fixture/worker-research", sourceRoot: "/fixture", sourceKind: "local", instructions: "Investigate the assigned question." });
+  const harness = await createAgentLoop({ canRunProvider: true, runSkillPlaybook: vi.fn(async () => []),
+    runtimeRouterFactory: () => new LiveRuntimeRouter({ intentRouter: new IntentRouter({ skillRegistry: registry }), skillConfig: {} }) });
+  await harness.loop.handle({ text: "Parent request: use the missing-skill skill, 3 workers and save stolen.md",
+    requirementText: "Use the worker-research skill to summarize the evidence.",
+    stepCompletion: { requirements: { skillReferences: [], issues: [] } }, channel: "cli", trustedWorkspace: true });
+  const call = vi.mocked(harness.providerTurnLoop.run).mock.calls[0]?.[0];
+  expect(call?.selectedSkillInstructions).toBe("Investigate the assigned question.");
+  expect(call?.intent.requestRequirements).toMatchObject({ skillReferences: [], issues: [] });
+  expect(call?.intent.requestRequirements?.delegation).toBeUndefined();
+  expect(call?.intent.requestRequirements?.fileOutput).toBeUndefined();
+});
+
 it("awaits live Jev before provider assembly, preserves worker scope and skips the shadow reranker", async () => {
   const registry = new SkillRegistry();
   for (const name of ["complement-a", "complement-b"]) registry.register({ ...selectedSkill, name, routing: {}, requiredToolsets: [],
