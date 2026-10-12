@@ -685,6 +685,7 @@ function buildBaseLayers(
       priority: 1,
       content: [
         `Intent labels: ${input.intent.labels.join(", ")}`,
+        ...(input.intent.requestInterpretation === undefined ? [] : [`Request interpretation: ${input.intent.requestInterpretation}. Available tools do not require use. Answer capability questions using current runtime facts; inspect when the answer depends on files or live state. Carry out action requests, including polite requests. Never claim inspection or delivery without execution evidence.`]),
         `Intent confidence: ${Math.round(input.intent.confidence * 100)}%`,
         `Suggested toolsets: ${input.intent.suggestedToolsets.join(", ") || "none"}`,
         `Selected skill: ${input.selectedSkill?.name ?? "none"}`,

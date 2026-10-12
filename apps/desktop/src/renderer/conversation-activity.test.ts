@@ -45,6 +45,6 @@ it('keeps one fallback notice per route and distinguishes trying, success and fa
 it('keeps routing diagnostics inspectable without treating them as a conversation model fallback',()=>{
  const routing:ActivityProjection={...base,id:'routing',kind:'routing',routing:{stage:'capabilities',configuredMode:'jev-assisted',actualEngine:'standard',fallbackReason:'timeout'}};
  const runs=activityRuns([message('q','user'),routing,result,message('answer','assistant','response')]);
- expect(runs).toHaveLength(1);expect(runContent(runs[0]!).operational).toBe(true);expect(fallbackNotices(runs[0]!.items)).toEqual([]);
+ expect(runs).toHaveLength(1);expect(runContent(runs[0]!).operational).toBe(false);expect(fallbackNotices(runs[0]!.items)).toEqual([]);
  expect(runContent(runs[0]!).responses.map(item=>item.id)).toEqual(['answer']);
 });

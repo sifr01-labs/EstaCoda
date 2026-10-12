@@ -8,6 +8,7 @@ import { IntentRouter } from '../intent-router.js';
 import { RuntimeRouter } from '../runtime-router.js';
 import { JevDecisionClient } from './decision-client.js';
 import { routingSnapshotReader } from './routing-snapshot.js';
+import { deriveExecutionCompletionFloor } from '../execution-outcome.js';
 import { jevRoutingContext } from './live-routing.js';
 import { resolveProfileStateHome } from '../../config/profile-home.js';
 import { InMemorySessionDB } from '../../session/in-memory-session-db.js';
@@ -189,4 +190,15 @@ it('retains response evidence when configuration becomes unreadable during dispa
  fetcher.mockImplementation(async(...args)=>{const response=await fetch(...args);await writeFile(resolveProfileStateHome({homeDir:home,profileId:'p'}).configPath,'{broken');return response;});
  const decision=(await route('Hello')).intent.routingDecision;
  expect(decision).toMatchObject({actualEngine:'standard',fallbackReason:'engine-unavailable',diagnostics:{contacted:true,failure:{code:'stale'}}});
+});
+
+it('shares capability-question interpretation even when Jev selects a related tool intent', async () => {
+ chosen = ['intent.code-review'];
+ const userText = 'Are you able to review your own source code?';
+ const result = await route(userText);
+ expect(result.intent.requestInterpretation).toBe('information');
+ expect(deriveExecutionCompletionFloor({userText,requestInterpretation:result.intent.requestInterpretation,capabilities:[{tool:'knowledge.code.query',kind:'read'}]})).toBe('none');
+ expect(fetcher).toHaveBeenCalledOnce();
+ const body = JSON.parse(String(fetcher.mock.calls[0][1]?.body));
+ expect(body.questions['intent.code-review'].criteria.true).toContain('capability question');
 });

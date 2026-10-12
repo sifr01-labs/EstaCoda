@@ -669,6 +669,7 @@ export class AgentLoop {
     const turnCompletionFloor = intent.requestRequirements?.fileOutput !== undefined ? "mutation_with_verification" :
       (checkpointPreparation?.requirementMode === "save" ? undefined : resumedCheckpoint?.completionFloor) ?? deriveExecutionCompletionFloor({
       userText: input.requirementText ?? turnText,
+      requestInterpretation: input.requirementText === undefined ? intent.requestInterpretation : undefined,
       capabilities: this.#executionCompletionCapabilities
     });
 

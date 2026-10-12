@@ -14,7 +14,8 @@ import type { ProviderExecutionResult } from "../providers/provider-executor.js"
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { isolateLtr } from "../ui/bidi.js";
 import { affirmativeRequestSegments } from "./request-action-segments.js";
-import type { RequestRequirements } from "../contracts/intent.js";
+import { interpretRequest } from "./request-interpretation.js";
+import type { RequestInterpretation, RequestRequirements } from "../contracts/intent.js";
 import { deriveRequestRequirements } from "./request-requirements.js";
 import { fileOutputEvidence } from "./file-output-evidence.js";
 import { researchRequestEvidence } from "./research-request-evidence.js";
@@ -38,6 +39,7 @@ export type ExecutionCompletionCapability = {
 
 export function deriveExecutionCompletionFloor(input: {
   userText: string;
+  requestInterpretation?: RequestInterpretation;
   capabilities?: readonly ExecutionCompletionCapability[];
 }): ExecutionCompletionFloor {
   if (deriveRequestRequirements(input.userText).fileOutput !== undefined) return "mutation_with_verification";
@@ -48,7 +50,7 @@ export function deriveExecutionCompletionFloor(input: {
   // Flattening them loses the requested edit in "read the file, update it".
   const mutationText = affirmativeRequestSegments(input.userText.normalize("NFKC").replace(/`[^`\n]*`/gu, " "))
     .map((segment) => segment.split(",").map(normalizeExpectationText).join(", ")).join(" ");
-  if (text.length === 0 || requestsInformationOnly(text)) return "none";
+  if (text.length === 0 || (input.requestInterpretation ?? interpretRequest(input.userText)) === "information") return "none";
 
   const capabilities = input.capabilities ?? [];
   const namesExecutionSurface = requestNamesExecutionSurface(text, capabilities);
@@ -459,11 +461,6 @@ function connectorsCompatible(
 
 function containsExpectationPhrase(text: string, phrase: string): boolean {
   return (` ${text} `).includes(` ${phrase} `);
-}
-
-function requestsInformationOnly(text: string): boolean {
-  return /\b(?:how\s+(?:do|can|would|should)|explain|describe|what\s+(?:is|are)|tell\s+me\s+how|should\s+i)\b/iu.test(text) &&
-    !/\b(?:please|now|go ahead|do it|make the change)\b/iu.test(text);
 }
 
 const CAPABILITY_MATCH_STOP_WORDS = new Set([

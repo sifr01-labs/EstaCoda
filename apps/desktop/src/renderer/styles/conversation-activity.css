@@ -73,3 +73,9 @@
 #ec-branded-workspace .ec-pending-message>.ec-footnote{padding-inline:12px;font-size:11px}
 #ec-branded-workspace .ec-pending-attachments{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px}
 #ec-branded-workspace .ec-pending-attachments>span{display:flex;align-items:center;gap:6px;border:1px solid var(--ec-line);padding:6px 9px;border-radius:8px;font-size:12px;min-width:0}
+
+/* Execution metadata stays inspectable without competing with the answer. */
+#ec-branded-workspace .ec-run-details { font-size: 12px; color: var(--ec-muted); margin: 12px 0; }
+.ec-run-details > summary { cursor: pointer; width: fit-content; }
+.ec-run-details > div { padding: 8px 0; }
+.ec-run-routingdetail { margin: 8px 0; }

@@ -1,4 +1,10 @@
 export const conversationActivityArabic={
+ 'Response details':'تفاصيل الرد',
+ 'Standard routing used':'استُخدم التوجيه القياسي',
+ 'Trying {model}':'جارٍ تجربة ⁨{model}⁩',
+ 'Answered with {model}':'تم الرد باستخدام ⁨{model}⁩',
+ 'Model attempt failed: {model}':'فشلت محاولة النموذج: ⁨{model}⁩',
+
  'Current execution model':'النموذج المستخدم حاليًا',
  'Fallback':'نموذج بديل',
  'Connecting':'جارٍ الاتصال',

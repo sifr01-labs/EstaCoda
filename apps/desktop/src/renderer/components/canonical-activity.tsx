@@ -2,7 +2,7 @@ import {formatRoutingStatus} from '@estacoda/control-protocol';
 import type {ActivityProjection,WorkDisplayStatus} from '@estacoda/control-protocol';
 import type {DesktopApi} from '../../shared/desktop-api.js';
 import type {MessageKey} from '../../shared/i18n/index.js';
-import {fallbackNotices,activityRuns,runContent,type ActivityRun,type ToolAction} from '../conversation-activity.js';
+import {activityRuns,runContent,type ActivityRun,type ToolAction} from '../conversation-activity.js';
 import {useI18n} from '../i18n.js';
 import {MessageActions} from './message-actions.js';
 import {BrandEye,Button,Icon} from './primitives.js';
@@ -26,7 +26,7 @@ function Action({action,active}:{action:ToolAction;active:boolean}){
  return <details className={'ec-run-action '+(last.state==='failed'?'ec-run-failure':'')}><summary><Icon name={last.state==='completed'?'check':last.state==='failed'?'circle-alert':last.state==='cancelled'?'square':'clock-3'}/><span className="ec-run-actiontitle">{t(actionLabel(last.name))}<small>{label}{!toolLabels[last.name]&&<> · <bdi>{last.name}</bdi></>}</small></span><RecordedTime value={last.timestamp}/><Icon name="chevron-right"/></summary><div className="ec-run-actiondetail"><bdi className="ec-run-toolname">{last.name}</bdi>{elapsed!==null&&<small>{t('Elapsed: {seconds}s',{seconds:elapsed})}</small>}<div className="ec-run-attempts">{action.records.map(record=><div key={record.id}><RecordedTime value={record.timestamp}/><span><strong>{record.state==='running'?t('Started'):status(record.state)}</strong><p dir="auto">{['Tool started','Tool completed','Tool failed'].includes(record.summary)?t(record.summary as MessageKey):record.summary}</p></span></div>)}</div></div></details>;
 }
 function Plan({item}:{item:Extract<ActivityProjection,{kind:'plan'}>}){const {t,status}=useI18n();return <details className="ec-run-plan"><summary><Icon name="clipboard-list"/><span>{t('Plan')}</span><small>{t('Completed steps: {done} of {total}',{done:item.steps.filter(step=>step.status==='completed').length,total:item.steps.length})}</small><Icon name="chevron-right"/></summary><ol>{item.steps.map(step=><li key={step.id}><Icon name={step.status==='completed'?'check':step.status==='running'?'clock-3':step.status==='failed'?'circle-alert':'circle-dashed'}/><span dir="auto">{step.title}</span><small>{status(step.status)}</small></li>)}</ol></details>;}
-function RoutingNotice({item}:{item:Extract<ActivityProjection,{kind:'routing'}>}){const {language}=useI18n();return <div className="ec-activitynotice" role="status"><Icon name="cpu"/><span dir="auto">{formatRoutingStatus(item.routing,language)}</span></div>;}
+function RoutingNotice({item}:{item:Extract<ActivityProjection,{kind:'routing'}>}){const {language}=useI18n();return <div className="ec-run-routingdetail"><span dir="auto">{formatRoutingStatus(item.routing,language)}</span></div>;}
 function History({run,active,more}:{run:ActivityRun;active:boolean;more:boolean}){
  const {t,status}=useI18n();const content=runContent(run),{actions,plans,outcome,outputs}=content;
  const failed=actions.reduce((count,action)=>count+action.records.filter(record=>record.state==='failed').length,0);
@@ -42,7 +42,6 @@ function History({run,active,more}:{run:ActivityRun;active:boolean;more:boolean}
  const summary=[actions.length?t(hasUnknown?(actions.reduce((n,a)=>n+a.records.length,0)===1?'1 tool event':'{count} tool events'):(actions.length===1?'1 tool call':'{count} tool calls'),{count:hasUnknown?actions.reduce((n,a)=>n+a.records.length,0):actions.length}):null,outputs.length?t(outputs.length===1?'1 saved output':'{count} saved outputs',{count:outputs.length}):null,failed?t(failed===1?'1 failed attempt':'{count} failed attempts',{count:failed}):null].filter(Boolean).join(' · ');
  return <details className={'ec-run-history '+(needsAttention?'ec-run-needs-attention':'')}><summary className="ec-run-summary"><Icon name={active?'loader-circle':needsAttention?'circle-alert':outcome?.status==='completed'?'circle-check':'activity'}/><span><strong><bdi>{title}</bdi></strong><small>{summary||t('Recorded activity')}</small>{outcome?.recoveredErrors&&<small className="ec-run-recovered">{t('Recovered errors recorded')}</small>}</span>{seconds!==null&&<time title={t('Recorded span')}>{t('{minutes}m {seconds}s',{minutes:Math.floor(seconds/60),seconds:seconds%60})}</time>}<Icon name="chevron-right"/></summary><div className="ec-run-historybody"><div className="ec-run-historylabel">{t('Activity history')}{more&&<span>{t('More activity is available. Load it below to see the remaining history.')}</span>}</div>{plans.at(-1)&&<Plan item={plans.at(-1)!}/>}{plans.length>1&&<details className="ec-run-earlierplans"><summary>{t('Earlier plan updates')} · {plans.length-1}</summary>{plans.slice(0,-1).map(plan=><Plan key={plan.id} item={plan}/>)}</details>}
  {run.items.map(item=>{
-  if(item.kind==='routing')return <RoutingNotice key={item.id} item={item}/>;
   if(item.kind==='tool'){const action=actionById.get(item.id);return action?<Action key={item.id} action={action} active={active}/>:null;}
   if(item.kind==='message'&&!content.responses.includes(item))return <details className="ec-run-progress" key={item.id}><summary><Icon name="message-square"/><span>{t('Progress update')}</span><RecordedTime value={item.timestamp}/><Icon name="chevron-right"/></summary><ResponseMarkdown text={item.text}/></details>;
   if(item.kind==='assistant_delta')return <div className="ec-run-progress" key={item.id}><ResponseMarkdown text={item.text}/></div>;
@@ -50,7 +49,26 @@ function History({run,active,more}:{run:ActivityRun;active:boolean;more:boolean}
   return null;
  })}</div></details>;
 }
-function Notices({items,results,browser}:{items:ActivityProjection[];results:()=>void;browser?:()=>void}){const {t,status}=useI18n();return <>{items.map(item=>item.kind==='result'&&['failed','partial','needs_attention','cancelled'].includes(item.status)?<div className="ec-activitynotice" key={item.id}><Icon name="circle-alert"/><span>{status(item.status)}</span><Button className="ec-ghost" onClick={results}>{t('View results')}</Button>{browser&&<Button className="ec-ghost" icon="globe" onClick={browser}>{t('Open browser')}</Button>}</div>:item.kind==='status'&&['failed','partial','needs_attention','paused','cancelled'].includes(item.status)?<div className="ec-activitynotice" key={item.id}><Icon name="circle-alert"/>{status(item.status)}{item.reason&&<span dir="auto">{item.reason}</span>}</div>:null)}</>;}
+/** One quiet disclosure per response. Preference and actual execution stay distinct. */
+function RunDetails({items,active}:{items:ActivityProjection[];active:boolean}){
+ const {t}=useI18n();
+ const models=items.filter((item):item is Extract<ActivityProjection,{kind:'model'}>=>item.kind==='model');
+ const routes=items.filter((item):item is Extract<ActivityProjection,{kind:'routing'}>=>item.kind==='routing');
+ const model=active?models.at(-1):models.filter(item=>item.executionModel.state==='responded').at(-1)??models.at(-1);
+ const fullFallback=routes.some(item=>item.routing.configuredMode==='jev-assisted'&&item.routing.actualEngine==='standard');
+ if(!models.length&&!routes.length)return null;
+ return <details className="ec-run-details"><summary>{model&&<><bdi>{model.executionModel.modelId}</bdi> · </>}{fullFallback&&<>{t('Standard routing used')} · </>}{t('Response details')}</summary><div>
+ {models.map(item=><p key={item.id} dir="auto">{t(item.executionModel.state==='attempting'?'Trying {model}':item.executionModel.state==='responded'?'Answered with {model}':'Model attempt failed: {model}',{model:item.executionModel.modelId})}{item.executionModel.fallback&&<> · {t('Fallback')}</>}</p>)}
+ {routes.map(item=><RoutingNotice key={item.id} item={item}/>)}
+ </div></details>;
+}
+function Notices({items,results,browser}:{items:ActivityProjection[];results:()=>void;browser?:()=>void}){
+ const {t,status}=useI18n();
+ // Only the latest state needs a notice; keep a later pause visible after a result.
+ const item=items.filter((item):item is Extract<ActivityProjection,{kind:'result'|'status'}>=>item.kind==='result'||item.kind==='status').at(-1);
+ if(!item||!['failed','partial','needs_attention','paused','cancelled'].includes(item.status))return null;
+ return <div className="ec-activitynotice"><Icon name="circle-alert"/><span>{status(item.status)}</span>{item.kind==='status'&&item.reason&&<span dir="auto">{item.reason}</span>}<Button className="ec-ghost" onClick={results}>{t('View results')}</Button>{browser&&<Button className="ec-ghost" icon="globe" onClick={browser}>{t('Open browser')}</Button>}</div>;
+}
 export function CanonicalActivity({items,results,browser,api,workStatus,more=false}:{items:ActivityProjection[];results:()=>void;browser?:()=>void;api?:DesktopApi;workStatus?:WorkDisplayStatus;more?:boolean}){
  const {t}=useI18n();const runs=activityRuns(items);const hasBrowser=items.some(item=>item.kind==='tool'&&item.name.startsWith('browser.'));
  return <div className="ec-conversation-runs">{runs.map((run,index)=>{const content=runContent(run),latest=index===runs.length-1;const active=latest&&!more&&workStatus==='running'&&!content.outcome;return <div className="ec-conversation-run" key={run.id}>
@@ -59,8 +77,7 @@ export function CanonicalActivity({items,results,browser,api,workStatus,more=fal
  {content.responses.map(item=><section className="ec-run-answer" key={item.id}><ResponseMarkdown text={item.text}/><MessageActions text={item.text} timestamp={item.timestamp}/></section>)}
  {active&&!content.responses.length&&content.latestProgress&&<div className="ec-run-currentprose"><ResponseMarkdown text={content.latestProgress.text}/></div>}
  {!content.operational&&run.items.filter(item=>item.kind==='assistant_delta').map(item=><ResponseMarkdown key={item.id} text={item.text}/>)}
- {fallbackNotices(run.items).map(item=><div className="ec-activitynotice" role="status" key={item.id}><Icon name="cpu"/><span dir="auto">{t(item.executionModel.state==='attempting'?'Preferred model unavailable. Trying {model}.':item.executionModel.state==='responded'?'Continuing with {model} as the fallback model.':'The fallback model {model} could not complete this request.',{model:item.executionModel.modelId})}</span></div>)}
- {run.items.filter((item):item is Extract<ActivityProjection,{kind:'routing'}>=>item.kind==='routing'&&item.routing.configuredMode==='jev-assisted'&&(item.routing.actualEngine==='standard'||item.routing.partialFallback===true)).map(item=><RoutingNotice key={item.id} item={item}/>)}
+ <RunDetails items={run.items} active={active}/>
  <Notices items={run.items} results={results} browser={hasBrowser?browser:undefined}/>
  {!!content.outputs.length&&<RunOutputs items={content.outputs} api={api} results={results}/ >}</section>}
  </div>;})}</div>;

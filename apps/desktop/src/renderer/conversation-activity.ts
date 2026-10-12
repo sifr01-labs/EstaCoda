@@ -25,7 +25,7 @@ export function toolActions(items:readonly ActivityProjection[]):ToolAction[]{
  return actions;
 }
 export function runContent(run:ActivityRun){
- const operational=run.items.some(item=>['tool','plan','artifact','routing'].includes(item.kind));
+ const operational=run.items.some(item=>['tool','plan','artifact'].includes(item.kind)||item.kind==='message'&&item.phase==='progress');
  const messages=run.items.filter((item):item is Extract<ActivityProjection,{kind:'message'}>=>item.kind==='message');
  // Old peers have no phase marker. Keep their latest prose visible and all earlier prose inspectable.
  const responses=operational?messages.filter(item=>item.phase==='response'||item.phase===undefined&&item===messages.at(-1)):messages;

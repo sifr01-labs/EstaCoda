@@ -13,6 +13,7 @@ import type { LoadedSkill, SkillDefinition, SkillDeferRule, SkillPattern } from 
 import type { ToolsetName } from "../contracts/tool.js";
 import type { SkillRegistry } from "../skills/skill-registry.js";
 import { affirmativeRequestSegments } from "./request-action-segments.js";
+import { interpretRequest } from "./request-interpretation.js";
 import { deriveRequestRequirements, explicitRequestSegments } from "./request-requirements.js";
 
 export type IntentRouterOptions = {
@@ -125,6 +126,7 @@ export class IntentRouter {
     const requirements = deriveRequestRequirements(requestText);
     const route = this.routeIntent(prompt, options);
     route.requestRequirements = requirements;
+    route.requestInterpretation = interpretRequest(requestText);
     if (requirements.fileOutput !== undefined && route.taskClass === "general") route.taskClass = "docs-writing";
     if (requirements.research !== undefined && route.taskClass === "general") route.taskClass = "research";
     if (requirements.skillReferences.length === 0 || route.invocation !== undefined) return route;

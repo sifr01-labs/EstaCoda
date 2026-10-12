@@ -95,7 +95,10 @@ export type IntentShadowRoute = {
   rationale: string;
 };
 
+export type RequestInterpretation = "information" | "action" | "mixed" | "unspecified";
+
 export type IntentRoute = {
+  requestInterpretation?: RequestInterpretation;
   routingDecision?: import("./routing.js").RoutingDecision;
   requestRequirements?: RequestRequirements;
   skillRequests?: Array<{ reference: string; status: "resolved" | "ambiguous" | "unavailable" | "deferred"; candidates: string[] }>;

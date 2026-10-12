@@ -49,10 +49,12 @@ test.describe('touch response actions',()=>{
  });
 });
 
-for(const language of ['en','ar'] as const)test(`routing ${language} fallback remains visible and separate from the conversation model`,async({page})=>{
+for(const language of ['en','ar'] as const)test(`routing ${language} fallback has one quiet disclosure separate from the conversation model`,async({page})=>{
  await mount(page,language);await page.evaluate(()=>{const s=(window as any).activityDesign;const base=s.items[1];s.items.splice(1,0,{...base,id:'jev-fallback',kind:'routing',routing:{stage:'intent-skills',configuredMode:'jev-assisted',actualEngine:'standard',fallbackReason:'timeout'}},{...base,id:'jev-capabilities',kind:'routing',routing:{stage:'capabilities',configuredMode:'jev-assisted',actualEngine:'jev',model:'jev-1.13.0'}});s.rerender();});
- const notice=page.locator('.ec-agent>.ec-activitynotice');await expect(notice).toContainText(language==='ar'?'انتهت مهلة TypeSafe':'TypeSafe timed out');await expect(notice).not.toContainText('fallback model');
- await page.locator('.ec-run-summary').click();await expect(page.locator('.ec-run-historybody')).toContainText('jev-1.13.0');await expect(page.locator('.ec-run-historybody')).toContainText(language==='ar'?'النوايا والمهارات':'intents and skills');
+ await expect(page.locator('.ec-agent>.ec-activitynotice')).toHaveCount(0);
+ const details=page.locator('.ec-run-details');await expect(details.locator('summary')).toContainText(language==='ar'?'استُخدم التوجيه القياسي':'Standard routing used');
+ await expect(details.locator('.ec-run-routingdetail').first()).not.toBeVisible();await details.locator('summary').click();
+ await expect(details).toContainText(language==='ar'?'انتهت مهلة TypeSafe':'TypeSafe timed out');await expect(details).toContainText('jev-1.13.0');
  await page.setViewportSize({width:360,height:1050});expect(await page.locator('#conversation-test').evaluate(el=>el.scrollWidth<=el.clientWidth)).toBe(true);
 });
 
@@ -64,4 +66,21 @@ test('Details keeps actual routing decisions separate from model settings',async
  createRoot(document.getElementById('routing-details')!).render(React.createElement(Inspector,{fixture:false,routing:[{id:'r',kind:'routing',workId:'session:s',profileId:'p',sequence:1,timestamp:1,routing:{stage:'discovery',configuredMode:'jev-assisted',actualEngine:'standard',fallbackReason:'timeout'}}]}));
  });
  await page.getByRole('tab',{name:'Activity',exact:true}).click();await expect(page.getByRole('region',{name:'Intent & capability routing'})).toContainText('Routing · capability discovery: Standard');await expect(page.getByRole('region',{name:'Intent & capability routing'})).toContainText('TypeSafe timed out.');
+});
+
+for(const language of ['en','ar'] as const)test(`capability answer ${language} stays quiet with accessible model and routing details`,async({page},info)=>{
+ await mount(page,language);await page.evaluate(()=>{
+  const s=(window as any).activityDesign,base=s.items[0];
+  s.items=[{...base,id:'question',kind:'message',role:'user',text:'Are you able to review your source code?'},
+   {...base,id:'model',kind:'model',executionModel:{providerId:'openai',modelId:'gpt-5.5',fallback:true,state:'responded'}},
+   {...base,id:'routing',kind:'routing',routing:{stage:'intent-skills',configuredMode:'jev-assisted',actualEngine:'jev',partialFallback:true,fallbackReason:'uncertain'}},
+   {...base,id:'answer',kind:'message',role:'assistant',phase:'response',text:'Yes, if the source is available in this workspace. I can inspect it when you ask.'},
+   {...base,id:'result',kind:'result',status:'completed',evidence:{state:'unverified',summary:'Answer delivered',artifactIds:[]},usage:{reportedTokens:null,cost:null}}];s.rerender();
+ });
+ await expect(page.locator('.ec-run-answer')).toBeVisible();
+ await expect(page.locator('.ec-activitynotice')).toHaveCount(0);
+ await expect(page.locator('.ec-run-history')).toHaveCount(0);
+ const summary=page.locator('.ec-run-details>summary');await expect(summary).toContainText('gpt-5.5');
+ for(const width of [360,1024]){await page.setViewportSize({width,height:900});expect(await page.locator('#conversation-test').evaluate(el=>el.scrollWidth<=el.clientWidth)).toBe(true);await page.screenshot({path:info.outputPath(`quiet-${language}-${width}.png`)});}
+ await summary.focus();await page.keyboard.press('Enter');await expect(page.locator('.ec-run-routingdetail')).toBeVisible();
 });

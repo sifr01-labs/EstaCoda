@@ -1,4 +1,5 @@
 import type { RequestRequirements } from "../contracts/intent.js";
+import { interpretRequest, splitRequestClauses, isCapabilityQuestion } from "./request-interpretation.js";
 import { affirmativeRequestSegments } from "./request-action-segments.js";
 
 const MAX_REQUEST_CHARS = 32_768;
@@ -21,7 +22,9 @@ export function explicitRequestSegments(text: string): string[] {
       return " ";
     });
   return affirmativeRequestSegments(sanitized)
+    .flatMap(segment => interpretRequest(segment) === "mixed" ? splitRequestClauses(segment) : [segment])
     .filter((segment) => {
+      if (isCapabilityQuestion(segment.trim()) && interpretRequest(segment) === "information") return false;
       const informational = INFORMATIONAL.exec(segment);
       // A topic such as "how to recycle" does not cancel an earlier action.
       const action = /\b(?:research|investigate|find|search|survey|save|export|write|create|generate|prepare|use|using|invoke|load|apply|launch|spawn)\b|(?:ابحث|احفظ|استخدم|اكتب|أنشئ)/iu.exec(segment);

@@ -3889,3 +3889,13 @@ describe("AgentLoop provider availability gating", () => {
     }));
   });
 });
+
+it("completes a capability question using the same interpretation passed to the answering model", async () => {
+  const harness = await createAgentLoop({ canRunProvider: true, runSkillPlaybook: vi.fn(async () => []),
+    executionCompletionCapabilities: [{ tool: "knowledge.code.query", kind: "read" }],
+    runtimeRouterFactory: () => new LiveRuntimeRouter({ intentRouter: new IntentRouter({skillRegistry: new SkillRegistry()}), skillConfig: {} }) });
+  const response = await harness.loop.handle({ text: "Are you able tto review your own source code?", channel: "cli", trustedWorkspace: true });
+  expect(response.finalOutcome?.status).toBe("completed");
+  expect(response.finalOutcome?.completionFloor).toBe("none");
+  expect(vi.mocked(harness.providerTurnLoop.run).mock.calls[0]?.[0].intent.requestInterpretation).toBe("information");
+});
