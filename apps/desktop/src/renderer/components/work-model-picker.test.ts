@@ -2,6 +2,7 @@ import {expect,it} from 'vitest';
 import {createElement} from 'react';
 import {renderToStaticMarkup} from 'react-dom/server';
 import {WorkModelPicker} from './work-model-picker.js';
+import {ResponseDetails,responseModelGroups} from './response-details.js';
 import {CanonicalActivity} from './canonical-activity.js';
 import type {WorkProjection,ActivityProjection} from '@estacoda/control-protocol';
 import type {DesktopModelsApi} from '../../shared/desktop-api.js';
@@ -20,12 +21,13 @@ it('shows the actual fallback while running without mutating the preferred selec
 it('retains compact attribution and expandable fallback details without warning banners',()=>{
  const item:ActivityProjection={id:'route',workId:'session:s',profileId:'p',timestamp:1,sequence:0,kind:'model',executionModel:model};
  const render=(items:ActivityProjection[])=>renderToStaticMarkup(createElement(CanonicalActivity,{items,results:()=>{}})).replace(/[\u2068\u2069]/g,'');
- expect(render([item])).toContain('Answered with gpt-5.5');
+ expect(render([item])).toContain('Call completed');
+ expect(render([item])).not.toContain('Answered with');
  expect(render([item])).toContain('Response details');
  expect(render([item])).not.toContain('ec-activitynotice');
  const trying=render([{...item,executionModel:{...model,state:'attempting'}}]);
- expect(trying).toContain('Trying gpt-5.5');expect(trying).not.toContain('Continuing with');
- expect(render([{...item,executionModel:{...model,state:'failed'}}])).toContain('Model attempt failed: gpt-5.5');
+ expect(trying).toContain('Call started');expect(trying).not.toContain('Continuing with');
+ expect(render([{...item,executionModel:{...model,state:'failed'}}])).toContain('Call failed');
 });
 
 it('keeps partial routing recovery behind details and shows full fallback once',()=>{
@@ -49,4 +51,27 @@ it('settled completion suppresses recovered status warnings; unresolved outcomes
  expect(render([status,result])).not.toContain('ec-activitynotice');
  expect(render([result,{...status,status:'paused',reason:'Approval required'}])).toContain('Approval required');
  expect(render([status,{...result,status:'needs_attention'}]).match(/class="ec-activitynotice"/g)).toHaveLength(1);
+});
+
+it('attributes the response once and preserves successful tool calls as calls',()=>{
+ const base={workId:'session:s',profileId:'p',timestamp:1,sequence:0,kind:'model' as const};
+ const items:Extract<ActivityProjection,{kind:'model'}>[]=[
+  {...base,id:'p1',executionModel:{providerId:'primary',modelId:'kimi',fallback:false,state:'attempting'}},
+  {...base,id:'p2',executionModel:{providerId:'primary',modelId:'kimi',fallback:false,state:'failed'}},
+  {...base,id:'f1',executionModel:{...model,state:'attempting'}},
+  {...base,id:'f2',executionModel:model},
+  {...base,id:'f3',executionModel:{...model,state:'attempting'}},
+  {...base,id:'f4',executionModel:model},
+ ];
+ expect(responseModelGroups(items).map(group=>group.records.length)).toEqual([2,4]);
+ const render=(active:boolean,answered:boolean)=>renderToStaticMarkup(createElement(ResponseDetails,{items,active,answered}));
+ const html=render(false,true).replace(/[\u2068\u2069]/g,'');
+ expect(html.match(/Answered by/g)).toHaveLength(1);expect(html.match(/Call completed/g)).toHaveLength(2);
+ expect(html).toContain('Completed calls: 2');expect(html).toContain('Failed calls: 1');
+ expect(html).not.toContain('Answered with');expect(html).not.toContain('rate limit');
+ expect(render(true,true)).not.toContain('Answered by');expect(render(false,false)).not.toContain('Answered by');
+ const failedAfterTools=renderToStaticMarkup(createElement(ResponseDetails,{items:[...items,{...items[5]!,id:'failed-final',executionModel:{...model,state:'failed'}}],active:false,answered:true}));
+ expect(failedAfterTools).not.toContain('Answered by');expect(failedAfterTools).toContain('Last recorded model');
+ // Identical model IDs from distinct providers keep independent histories.
+ expect(responseModelGroups([...items,{...items[5]!,id:'other',executionModel:{...model,providerId:'other'}}])).toHaveLength(3);
 });

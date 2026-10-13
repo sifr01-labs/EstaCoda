@@ -1,4 +1,4 @@
-import {formatRoutingStatus} from '@estacoda/control-protocol';
+import {ResponseDetails} from './response-details.js';
 import type {ActivityProjection,WorkDisplayStatus} from '@estacoda/control-protocol';
 import type {DesktopApi} from '../../shared/desktop-api.js';
 import type {MessageKey} from '../../shared/i18n/index.js';
@@ -26,7 +26,6 @@ function Action({action,active}:{action:ToolAction;active:boolean}){
  return <details className={'ec-run-action '+(last.state==='failed'?'ec-run-failure':'')}><summary><Icon name={last.state==='completed'?'check':last.state==='failed'?'circle-alert':last.state==='cancelled'?'square':'clock-3'}/><span className="ec-run-actiontitle">{t(actionLabel(last.name))}<small>{label}{!toolLabels[last.name]&&<> · <bdi>{last.name}</bdi></>}</small></span><RecordedTime value={last.timestamp}/><Icon name="chevron-right"/></summary><div className="ec-run-actiondetail"><bdi className="ec-run-toolname">{last.name}</bdi>{elapsed!==null&&<small>{t('Elapsed: {seconds}s',{seconds:elapsed})}</small>}<div className="ec-run-attempts">{action.records.map(record=><div key={record.id}><RecordedTime value={record.timestamp}/><span><strong>{record.state==='running'?t('Started'):status(record.state)}</strong><p dir="auto">{['Tool started','Tool completed','Tool failed'].includes(record.summary)?t(record.summary as MessageKey):record.summary}</p></span></div>)}</div></div></details>;
 }
 function Plan({item}:{item:Extract<ActivityProjection,{kind:'plan'}>}){const {t,status}=useI18n();return <details className="ec-run-plan"><summary><Icon name="clipboard-list"/><span>{t('Plan')}</span><small>{t('Completed steps: {done} of {total}',{done:item.steps.filter(step=>step.status==='completed').length,total:item.steps.length})}</small><Icon name="chevron-right"/></summary><ol>{item.steps.map(step=><li key={step.id}><Icon name={step.status==='completed'?'check':step.status==='running'?'clock-3':step.status==='failed'?'circle-alert':'circle-dashed'}/><span dir="auto">{step.title}</span><small>{status(step.status)}</small></li>)}</ol></details>;}
-function RoutingNotice({item}:{item:Extract<ActivityProjection,{kind:'routing'}>}){const {language}=useI18n();return <div className="ec-run-routingdetail"><span dir="auto">{formatRoutingStatus(item.routing,language)}</span></div>;}
 function History({run,active,more}:{run:ActivityRun;active:boolean;more:boolean}){
  const {t,status}=useI18n();const content=runContent(run),{actions,plans,outcome,outputs}=content;
  const failed=actions.reduce((count,action)=>count+action.records.filter(record=>record.state==='failed').length,0);
@@ -49,19 +48,6 @@ function History({run,active,more}:{run:ActivityRun;active:boolean;more:boolean}
   return null;
  })}</div></details>;
 }
-/** One quiet disclosure per response. Preference and actual execution stay distinct. */
-function RunDetails({items,active}:{items:ActivityProjection[];active:boolean}){
- const {t}=useI18n();
- const models=items.filter((item):item is Extract<ActivityProjection,{kind:'model'}>=>item.kind==='model');
- const routes=items.filter((item):item is Extract<ActivityProjection,{kind:'routing'}>=>item.kind==='routing');
- const model=active?models.at(-1):models.filter(item=>item.executionModel.state==='responded').at(-1)??models.at(-1);
- const fullFallback=routes.some(item=>item.routing.configuredMode==='jev-assisted'&&item.routing.actualEngine==='standard');
- if(!models.length&&!routes.length)return null;
- return <details className="ec-run-details"><summary>{model&&<><bdi>{model.executionModel.modelId}</bdi> · </>}{fullFallback&&<>{t('Standard routing used')} · </>}{t('Response details')}</summary><div>
- {models.map(item=><p key={item.id} dir="auto">{t(item.executionModel.state==='attempting'?'Trying {model}':item.executionModel.state==='responded'?'Answered with {model}':'Model attempt failed: {model}',{model:item.executionModel.modelId})}{item.executionModel.fallback&&<> · {t('Fallback')}</>}</p>)}
- {routes.map(item=><RoutingNotice key={item.id} item={item}/>)}
- </div></details>;
-}
 function Notices({items,results,browser}:{items:ActivityProjection[];results:()=>void;browser?:()=>void}){
  const {t,status}=useI18n();
  // Only the latest state needs a notice; keep a later pause visible after a result.
@@ -77,7 +63,7 @@ export function CanonicalActivity({items,results,browser,api,workStatus,more=fal
  {content.responses.map(item=><section className="ec-run-answer" key={item.id}><ResponseMarkdown text={item.text}/><MessageActions text={item.text} timestamp={item.timestamp}/></section>)}
  {active&&!content.responses.length&&content.latestProgress&&<div className="ec-run-currentprose"><ResponseMarkdown text={content.latestProgress.text}/></div>}
  {!content.operational&&run.items.filter(item=>item.kind==='assistant_delta').map(item=><ResponseMarkdown key={item.id} text={item.text}/>)}
- <RunDetails items={run.items} active={active}/>
+ <ResponseDetails items={run.items} active={active} answered={content.responses.length>0}/>
  <Notices items={run.items} results={results} browser={hasBrowser?browser:undefined}/>
  {!!content.outputs.length&&<RunOutputs items={content.outputs} api={api} results={results}/ >}</section>}
  </div>;})}</div>;

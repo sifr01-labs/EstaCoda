@@ -74,8 +74,28 @@
 #ec-branded-workspace .ec-pending-attachments{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px}
 #ec-branded-workspace .ec-pending-attachments>span{display:flex;align-items:center;gap:6px;border:1px solid var(--ec-line);padding:6px 9px;border-radius:8px;font-size:12px;min-width:0}
 
-/* Execution metadata stays inspectable without competing with the answer. */
-#ec-branded-workspace .ec-run-details { font-size: 12px; color: var(--ec-muted); margin: 12px 0; }
-.ec-run-details > summary { cursor: pointer; width: fit-content; }
-.ec-run-details > div { padding: 8px 0; }
-.ec-run-routingdetail { margin: 8px 0; }
+/* Response metadata uses the same disclosure rhythm as Activity, at footer scale. */
+#ec-branded-workspace .ec-run-details{margin:14px 0;font-size:12px;color:var(--ec-muted);border:1px solid var(--ec-line);border-radius:10px;background:var(--ec-bg);overflow:hidden}
+#ec-branded-workspace .ec-run-details summary{display:flex;align-items:center;gap:9px;cursor:pointer;list-style:none;min-width:0}
+#ec-branded-workspace .ec-run-details summary::-webkit-details-marker{display:none}
+#ec-branded-workspace .ec-run-details>summary{padding:11px 14px;flex-wrap:wrap}
+#ec-branded-workspace .ec-run-details>summary>span{color:var(--ec-text);font-weight:500;margin-inline-end:auto}
+#ec-branded-workspace .ec-run-details summary svg{width:14px;height:14px;flex:none;color:var(--ec-muted)}
+#ec-branded-workspace .ec-run-details details[open]>summary>svg:last-child,#ec-branded-workspace .ec-run-details[open]>summary>svg:last-child{transform:rotate(90deg)}
+#ec-branded-workspace .ec-run-details>summary small{font-size:11px;background:var(--ec-panel);border-radius:4px;padding:2px 6px}
+#ec-branded-workspace .ec-response-body{border-top:1px solid var(--ec-line);padding:4px 14px 12px}
+#ec-branded-workspace .ec-response-facts{margin:0}
+#ec-branded-workspace .ec-response-facts>div{display:grid;grid-template-columns:110px minmax(0,1fr);gap:16px;padding:10px 0}
+#ec-branded-workspace .ec-response-facts dd{margin:0;color:var(--ec-text);line-height:1.6;overflow-wrap:anywhere}
+#ec-branded-workspace .ec-response-facts dt{line-height:1.6}
+#ec-branded-workspace .ec-response-technical{border-top:1px solid var(--ec-line);margin-top:5px;padding-top:10px}
+#ec-branded-workspace .ec-response-technical>summary{justify-content:space-between}
+#ec-branded-workspace .ec-response-model{margin-top:10px;border-top:1px solid var(--ec-line);padding-top:10px}
+#ec-branded-workspace .ec-response-model summary>span:first-child{flex:1;color:var(--ec-text)}
+#ec-branded-workspace .ec-response-model small{display:block;color:var(--ec-muted);margin-top:3px}
+#ec-branded-workspace .ec-response-model ol{margin:12px 0;padding-inline-start:20px}
+#ec-branded-workspace .ec-response-model li{padding:4px 0}
+#ec-branded-workspace .ec-response-model time{float:inline-end;font-variant-numeric:tabular-nums}
+#ec-branded-workspace .ec-response-routing{font-size:11px;line-height:1.7}
+#ec-branded-workspace .ec-run-details summary:focus-visible{outline:2px solid var(--ec-accent);outline-offset:-2px;border-radius:5px}
+@media(max-width:600px){#ec-branded-workspace .ec-response-facts>div{grid-template-columns:1fr;gap:3px}#ec-branded-workspace .ec-response-model summary{flex-wrap:wrap}}

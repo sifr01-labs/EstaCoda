@@ -52,8 +52,8 @@ test.describe('touch response actions',()=>{
 for(const language of ['en','ar'] as const)test(`routing ${language} fallback has one quiet disclosure separate from the conversation model`,async({page})=>{
  await mount(page,language);await page.evaluate(()=>{const s=(window as any).activityDesign;const base=s.items[1];s.items.splice(1,0,{...base,id:'jev-fallback',kind:'routing',routing:{stage:'intent-skills',configuredMode:'jev-assisted',actualEngine:'standard',fallbackReason:'timeout'}},{...base,id:'jev-capabilities',kind:'routing',routing:{stage:'capabilities',configuredMode:'jev-assisted',actualEngine:'jev',model:'jev-1.13.0'}});s.rerender();});
  await expect(page.locator('.ec-agent>.ec-activitynotice')).toHaveCount(0);
- const details=page.locator('.ec-run-details');await expect(details.locator('summary')).toContainText(language==='ar'?'استُخدم التوجيه القياسي':'Standard routing used');
- await expect(details.locator('.ec-run-routingdetail').first()).not.toBeVisible();await details.locator('summary').click();
+ const details=page.locator('.ec-run-details');await expect(details.locator(':scope > summary')).toContainText(language==='ar'?'استُخدم التوجيه القياسي':'Standard routing used');
+ await expect(details.locator('.ec-response-routing').first()).not.toBeVisible();await details.locator(':scope > summary').click();await expect(details.locator('.ec-response-routing').first()).not.toBeVisible();await details.locator('.ec-response-technical > summary').click();
  await expect(details).toContainText(language==='ar'?'انتهت مهلة TypeSafe':'TypeSafe timed out');await expect(details).toContainText('jev-1.13.0');
  await page.setViewportSize({width:360,height:1050});expect(await page.locator('#conversation-test').evaluate(el=>el.scrollWidth<=el.clientWidth)).toBe(true);
 });
@@ -82,5 +82,5 @@ for(const language of ['en','ar'] as const)test(`capability answer ${language} s
  await expect(page.locator('.ec-run-history')).toHaveCount(0);
  const summary=page.locator('.ec-run-details>summary');await expect(summary).toContainText('gpt-5.5');
  for(const width of [360,1024]){await page.setViewportSize({width,height:900});expect(await page.locator('#conversation-test').evaluate(el=>el.scrollWidth<=el.clientWidth)).toBe(true);await page.screenshot({path:info.outputPath(`quiet-${language}-${width}.png`)});}
- await summary.focus();await page.keyboard.press('Enter');await expect(page.locator('.ec-run-routingdetail')).toBeVisible();
+ await summary.focus();await page.keyboard.press('Enter');await expect(page.locator('.ec-response-facts')).toBeVisible();await expect(page.locator('.ec-response-routing')).toBeHidden();await page.locator('.ec-response-technical > summary').click();await expect(page.locator('.ec-response-routing')).toBeVisible();
 });
