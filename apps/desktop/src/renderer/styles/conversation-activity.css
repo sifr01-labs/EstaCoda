@@ -74,28 +74,35 @@
 #ec-branded-workspace .ec-pending-attachments{display:flex;flex-wrap:wrap;gap:8px;margin-bottom:10px}
 #ec-branded-workspace .ec-pending-attachments>span{display:flex;align-items:center;gap:6px;border:1px solid var(--ec-line);padding:6px 9px;border-radius:8px;font-size:12px;min-width:0}
 
-/* Response metadata uses the same disclosure rhythm as Activity, at footer scale. */
-#ec-branded-workspace .ec-run-details{margin:14px 0;font-size:12px;color:var(--ec-muted);border:1px solid var(--ec-line);border-radius:10px;background:var(--ec-bg);overflow:hidden}
-#ec-branded-workspace .ec-run-details summary{display:flex;align-items:center;gap:9px;cursor:pointer;list-style:none;min-width:0}
-#ec-branded-workspace .ec-run-details summary::-webkit-details-marker{display:none}
-#ec-branded-workspace .ec-run-details>summary{padding:11px 14px;flex-wrap:wrap}
-#ec-branded-workspace .ec-run-details>summary>span{color:var(--ec-text);font-weight:500;margin-inline-end:auto}
-#ec-branded-workspace .ec-run-details summary svg{width:14px;height:14px;flex:none;color:var(--ec-muted)}
-#ec-branded-workspace .ec-run-details details[open]>summary>svg:last-child,#ec-branded-workspace .ec-run-details[open]>summary>svg:last-child{transform:rotate(90deg)}
-#ec-branded-workspace .ec-run-details>summary small{font-size:11px;background:var(--ec-panel);border-radius:4px;padding:2px 6px}
-#ec-branded-workspace .ec-response-body{border-top:1px solid var(--ec-line);padding:4px 14px 12px}
+/* A quiet response action opens a native top-layer popover, clear of scroll clipping. */
+#ec-branded-workspace .ec-message-actions:has(.ec-response-popover:popover-open){opacity:1}
+#ec-branded-workspace .ec-response-info[aria-expanded=true]{background:var(--ec-inset);color:var(--ec-text)}
+#ec-branded-workspace .ec-response-popover{position:fixed;inset:auto;margin:0;box-sizing:border-box;width:min(360px,calc(100vw - 24px));max-height:480px;overflow:auto;overscroll-behavior:contain;background:var(--ec-bg);color:var(--ec-text);border:1px solid var(--ec-line);border-radius:14px;padding:0;box-shadow:0 8px 30px #0002,0 2px 6px #0001;font-size:12px;line-height:1.5;text-align:start;white-space:normal;overflow-wrap:anywhere}
+#ec-branded-workspace .ec-response-popover>header{position:sticky;top:0;background:var(--ec-bg);z-index:1;display:flex;align-items:center;justify-content:space-between;gap:12px;padding:14px 16px 4px}
+#ec-branded-workspace .ec-response-popover h2{font-size:13px;font-weight:600;line-height:1.5;margin:0}
+#ec-branded-workspace .ec-response-popover>header .ec-btn{color:var(--ec-muted)}
+#ec-branded-workspace .ec-response-body{padding:0 16px 14px}
 #ec-branded-workspace .ec-response-facts{margin:0}
-#ec-branded-workspace .ec-response-facts>div{display:grid;grid-template-columns:110px minmax(0,1fr);gap:16px;padding:10px 0}
-#ec-branded-workspace .ec-response-facts dd{margin:0;color:var(--ec-text);line-height:1.6;overflow-wrap:anywhere}
-#ec-branded-workspace .ec-response-facts dt{line-height:1.6}
-#ec-branded-workspace .ec-response-technical{border-top:1px solid var(--ec-line);margin-top:5px;padding-top:10px}
+#ec-branded-workspace .ec-response-facts>div{display:grid;grid-template-columns:82px minmax(0,1fr);gap:14px;padding:9px 0}
+#ec-branded-workspace .ec-response-facts dd{margin:0;line-height:1.6}
+#ec-branded-workspace .ec-response-facts dt{color:var(--ec-muted);line-height:1.6}
+#ec-branded-workspace .ec-response-modelname{display:flex;align-items:center;gap:6px;flex-wrap:wrap;font-weight:500}
+#ec-branded-workspace .ec-response-modelname small{font-size:10px;font-weight:400;white-space:nowrap;background:var(--ec-panel);color:var(--ec-muted);padding:2px 6px;border-radius:5px}
+#ec-branded-workspace .ec-response-technical{border-top:1px solid var(--ec-line);margin-top:9px;padding-top:12px;color:var(--ec-muted)}
+#ec-branded-workspace .ec-response-popover summary{display:flex;align-items:center;gap:8px;cursor:pointer;list-style:none;min-width:0}
+#ec-branded-workspace .ec-response-popover summary::-webkit-details-marker{display:none}
+#ec-branded-workspace .ec-response-popover summary svg{width:13px;height:13px;flex:none}
+#ec-branded-workspace .ec-response-popover details[open]>summary>svg:last-child{transform:rotate(90deg)}
 #ec-branded-workspace .ec-response-technical>summary{justify-content:space-between}
-#ec-branded-workspace .ec-response-model{margin-top:10px;border-top:1px solid var(--ec-line);padding-top:10px}
+#ec-branded-workspace .ec-response-model{margin-top:12px;border-top:1px solid var(--ec-line);padding-top:10px}
+#ec-branded-workspace .ec-response-model summary{flex-wrap:wrap;font-size:11px}
 #ec-branded-workspace .ec-response-model summary>span:first-child{flex:1;color:var(--ec-text)}
-#ec-branded-workspace .ec-response-model small{display:block;color:var(--ec-muted);margin-top:3px}
-#ec-branded-workspace .ec-response-model ol{margin:12px 0;padding-inline-start:20px}
+#ec-branded-workspace .ec-response-model small{display:block;color:var(--ec-muted);margin-top:2px;font-size:10px}
+#ec-branded-workspace .ec-response-model ol{margin:10px 0;padding-inline-start:18px;font-size:11px}
 #ec-branded-workspace .ec-response-model li{padding:4px 0}
-#ec-branded-workspace .ec-response-model time{float:inline-end;font-variant-numeric:tabular-nums}
-#ec-branded-workspace .ec-response-routing{font-size:11px;line-height:1.7}
-#ec-branded-workspace .ec-run-details summary:focus-visible{outline:2px solid var(--ec-accent);outline-offset:-2px;border-radius:5px}
-@media(max-width:600px){#ec-branded-workspace .ec-response-facts>div{grid-template-columns:1fr;gap:3px}#ec-branded-workspace .ec-response-model summary{flex-wrap:wrap}}
+#ec-branded-workspace .ec-response-model time{float:inline-end;font-size:10px;font-variant-numeric:tabular-nums}
+#ec-branded-workspace .ec-response-routing{font-size:11px;line-height:1.7;margin:10px 0 0}
+#ec-branded-workspace .ec-response-popover summary:focus-visible{outline:2px solid var(--ec-accent);outline-offset:3px;border-radius:3px}
+#ec-branded-workspace .ec-response-pending-details:empty{display:none}
+@media(hover:none){#ec-branded-workspace .ec-message-actions .ec-btn.ec-iconbutton,#ec-branded-workspace .ec-response-popover .ec-btn.ec-iconbutton{min-width:44px;min-height:44px}#ec-branded-workspace .ec-response-popover summary{min-height:36px}}
+@media(max-width:360px){#ec-branded-workspace .ec-response-facts>div{grid-template-columns:1fr;gap:3px}}

@@ -52,8 +52,8 @@ test.describe('touch response actions',()=>{
 for(const language of ['en','ar'] as const)test(`routing ${language} fallback has one quiet disclosure separate from the conversation model`,async({page})=>{
  await mount(page,language);await page.evaluate(()=>{const s=(window as any).activityDesign;const base=s.items[1];s.items.splice(1,0,{...base,id:'jev-fallback',kind:'routing',routing:{stage:'intent-skills',configuredMode:'jev-assisted',actualEngine:'standard',fallbackReason:'timeout'}},{...base,id:'jev-capabilities',kind:'routing',routing:{stage:'capabilities',configuredMode:'jev-assisted',actualEngine:'jev',model:'jev-1.13.0'}});s.rerender();});
  await expect(page.locator('.ec-agent>.ec-activitynotice')).toHaveCount(0);
- const details=page.locator('.ec-run-details');await expect(details.locator(':scope > summary')).toContainText(language==='ar'?'استُخدم التوجيه القياسي':'Standard routing used');
- await expect(details.locator('.ec-response-routing').first()).not.toBeVisible();await details.locator(':scope > summary').click();await expect(details.locator('.ec-response-routing').first()).not.toBeVisible();await details.locator('.ec-response-technical > summary').click();
+ const details=page.locator('.ec-response-popover');await expect(details).toBeHidden();await page.locator('.ec-response-info').focus();await page.keyboard.press('Enter');await expect(details).toBeVisible();await expect(details).toContainText(language==='ar'?'استُخدم التوجيه القياسي':'Standard routing used');
+ await expect(details.locator('.ec-response-routing').first()).not.toBeVisible();await details.locator('.ec-response-technical > summary').click();
  await expect(details).toContainText(language==='ar'?'انتهت مهلة TypeSafe':'TypeSafe timed out');await expect(details).toContainText('jev-1.13.0');
  await page.setViewportSize({width:360,height:1050});expect(await page.locator('#conversation-test').evaluate(el=>el.scrollWidth<=el.clientWidth)).toBe(true);
 });
@@ -80,7 +80,24 @@ for(const language of ['en','ar'] as const)test(`capability answer ${language} s
  await expect(page.locator('.ec-run-answer')).toBeVisible();
  await expect(page.locator('.ec-activitynotice')).toHaveCount(0);
  await expect(page.locator('.ec-run-history')).toHaveCount(0);
- const summary=page.locator('.ec-run-details>summary');await expect(summary).toContainText('gpt-5.5');
+ const summary=page.locator('.ec-run-answer .ec-message-actions .ec-response-info');await expect(summary).toHaveAttribute('aria-expanded','false');await expect(page.locator('.ec-response-popover')).toBeHidden();await expect(page.locator('.ec-usernote .ec-response-info')).toHaveCount(0);await expect(page.locator('.ec-run-details')).toHaveCount(0);
  for(const width of [360,1024]){await page.setViewportSize({width,height:900});expect(await page.locator('#conversation-test').evaluate(el=>el.scrollWidth<=el.clientWidth)).toBe(true);await page.screenshot({path:info.outputPath(`quiet-${language}-${width}.png`)});}
- await summary.focus();await page.keyboard.press('Enter');await expect(page.locator('.ec-response-facts')).toBeVisible();await expect(page.locator('.ec-response-routing')).toBeHidden();await page.locator('.ec-response-technical > summary').click();await expect(page.locator('.ec-response-routing')).toBeVisible();
+ await summary.focus();await page.keyboard.press('Enter');await expect(page.locator('.ec-response-facts')).toBeVisible();await expect(page.locator('.ec-response-routing')).toBeHidden();await page.locator('.ec-response-technical > summary').click();await expect(page.locator('.ec-response-routing')).toBeVisible();await page.keyboard.press('Escape');await expect(page.locator('.ec-response-popover')).toBeHidden();await expect(summary).toBeFocused();
+});
+
+
+test('each response keeps its own model attribution and only one info panel opens',async({page})=>{
+ const errors:string[]=[];page.on('pageerror',error=>errors.push(error.message));
+ await mount(page);await page.evaluate(()=>{
+  const s=(window as any).activityDesign,base=s.items[0];
+  s.items=[{...base,id:'question',kind:'message',role:'user',text:'Review the result.'},
+   {...base,id:'first-model',kind:'model',executionModel:{providerId:'kimi',modelId:'kimi-k3',fallback:false,state:'responded'}},
+   {...base,id:'first-answer',kind:'message',role:'assistant',phase:'response',text:'Initial answer.'},
+   {...base,id:'second-model',kind:'model',executionModel:{providerId:'codex',modelId:'gpt-5.5',fallback:true,state:'responded'}},
+   {...base,id:'second-answer',kind:'message',role:'assistant',phase:'response',text:'Follow-up answer.'}];s.status='running';s.rerender();
+ });
+ const buttons=page.locator('.ec-response-info'),panels=page.locator('.ec-response-popover');
+ await buttons.first().focus();await buttons.first().press('Enter');await expect(panels.first()).toBeVisible();await expect(panels.first().locator('.ec-response-facts')).toContainText('Answered by');await expect(panels.first()).not.toContainText('gpt-5.5');
+ await buttons.last().focus();await buttons.last().press('Enter');await expect(panels.first()).toBeHidden();await expect(buttons.first()).toHaveAttribute('aria-expanded','false');await expect(panels.last().locator('.ec-response-facts')).toContainText('gpt-5.5');
+ await panels.last().locator('.ec-response-technical>summary').click();await panels.last().locator('.ec-response-technical>summary').click();await expect(panels.last()).toBeVisible();await expect(buttons.last()).toHaveAttribute('aria-expanded','true');await page.keyboard.press('Escape');await expect(buttons.last()).toBeFocused();expect(errors).toEqual([]);
 });

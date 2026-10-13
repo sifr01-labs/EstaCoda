@@ -3,8 +3,8 @@ import {test,expect,type Page} from '@playwright/test';
 async function mount(page:Page,options:{language?:string;appearance?:string;failures?:number;ready?:boolean;compact?:boolean}={}){
  await page.goto('/fixture.html');
  await page.evaluate(async options=>{
-  const paths={react:'/node_modules/.vite/deps/react.js',dom:'/node_modules/.vite/deps/react-dom_client.js',appearance:'/src/renderer/appearance.tsx',actions:'/src/renderer/components/work-actions.tsx',response:'/src/renderer/components/response-details.tsx'};
-  const React=(await import(paths.react)).default,{createRoot}=(await import(paths.dom)).default,{AppearanceProvider}=await import(paths.appearance),{WorkActions}=await import(paths.actions),{ResponseDetails}=await import(paths.response);
+  const paths={react:'/node_modules/.vite/deps/react.js',dom:'/node_modules/.vite/deps/react-dom_client.js',appearance:'/src/renderer/appearance.tsx',actions:'/src/renderer/components/work-actions.tsx',response:'/src/renderer/components/response-details.tsx',message:'/src/renderer/components/message-actions.tsx'};
+  const React=(await import(paths.react)).default,{createRoot}=(await import(paths.dom)).default,{AppearanceProvider}=await import(paths.appearance),{WorkActions}=await import(paths.actions),{ResponseDetails}=await import(paths.response),{MessageActions}=await import(paths.message);
   document.getElementById('root')!.remove();const root=document.createElement('div');document.body.append(root);
   const listeners=new Set<any>();
   const state={reads:[] as string[],writes:[] as any[],failures:options.failures??0,ready:options.ready??true,profileId:'p',receipt:'dispatched',hold:false,late:[] as any[],loseAction:false,update:(_value:any)=>{},snapshot:()=>{}};
@@ -16,7 +16,7 @@ async function mount(page:Page,options:{language?:string;appearance?:string;fail
   const routes=['intent-skills','capabilities'].map((stage,index)=>({...base,id:`r${index}`,kind:'routing',routing:{stage,configuredMode:'jev-assisted',actualEngine:'jev',partialFallback:true,fallbackReason:'uncertain'}}));
   function Harness(){
    const [work,setWork]=React.useState({id:'session:a',profileId:'p',kind:'session',title:'Review the workspace',status:'running',actions:[{id:'sessions.cancelTurn',enabled:true}]});state.update=(value:any)=>setWork((old:any)=>({...old,...value}));
-   return React.createElement('main',{style:{width:'min(850px, 100%)',margin:'40px auto',padding:'16px',boxSizing:'border-box',background:'var(--ec-bg)',color:'var(--ec-text)'}},React.createElement('h2',null,'Response details'),React.createElement('p',null,'The response used Jev-assisted routing. Standard resolved uncertain selections.'),React.createElement(ResponseDetails,{items:[...events,...routes],active:false,answered:true}),React.createElement('div',{id:'ec-operation-details'}),React.createElement('div',{id:'ec-work-attention'}),React.createElement(WorkActions,{api,work,observe,inspectDetails:true,compact:options.compact}));
+   return React.createElement('main',{style:{width:'min(850px, 100%)',margin:'40px auto',padding:'16px',boxSizing:'border-box',background:'var(--ec-bg)',color:'var(--ec-text)'}},React.createElement('h2',null,'Response details'),React.createElement('p',null,'The response used Jev-assisted routing. Standard resolved uncertain selections.'),React.createElement('section',{className:'ec-run-answer'},React.createElement('p',null,'The source can be reviewed when it is available in this workspace.'),React.createElement(MessageActions,{text:'Answer',timestamp:base.timestamp},React.createElement(ResponseDetails,{items:[...events,...routes],active:false,answered:true}))),React.createElement('div',{id:'ec-operation-details'}),React.createElement('div',{id:'ec-work-attention'}),React.createElement(WorkActions,{api,work,observe,inspectDetails:true,compact:options.compact}));
   }
   (window as any).responseTest=state;
   createRoot(root).render(React.createElement(AppearanceProvider,{store:{read:async()=>({theme:'kemet',appearance:options.appearance??'light',density:'comfortable',language:options.language??'en'}),write:async()=>{}}},React.createElement(Harness)));
@@ -79,10 +79,33 @@ test('initial disconnect waits for the correct profile before checking',async({p
 });
 
 for(const language of ['en','ar'])for(const appearance of ['light','dark'])test(`response disclosure hierarchy, keyboard and layout ${language} ${appearance}`,async({page})=>{
- await mount(page,{language,appearance});const card=page.locator('.ec-run-details');await expect(card).not.toHaveAttribute('open','');
- await card.locator(':scope > summary').focus();await page.keyboard.press('Enter');await expect(card).toHaveAttribute('open','');await expect(card.locator('.ec-response-facts')).toBeVisible();await expect(card.locator('.ec-response-model').first()).toBeHidden();
+ await mount(page,{language,appearance});const card=page.locator('.ec-response-popover'),trigger=page.locator('.ec-response-info');await expect(card).toBeHidden();
+ await trigger.focus();await page.keyboard.press('Enter');await expect(card).toBeVisible();await expect(trigger).toHaveAttribute('aria-expanded','true');await expect(card.locator('.ec-response-facts')).toBeVisible();await expect(card.locator('.ec-response-model').first()).toBeHidden();
+ await page.screenshot({path:`/tmp/info-summary-${language}-${appearance}.png`,fullPage:true});
  await card.locator('.ec-response-technical > summary').click();await expect(card.locator('.ec-response-model')).toHaveCount(2);await card.locator('.ec-response-model > summary').last().click();await expect(card.locator('.ec-response-model').last().locator('li')).toHaveCount(4);
  if(language==='en'){expect((await card.textContent())!.replace(/[\u2068\u2069]/g,'')).toContain('Completed calls: 2');expect((await card.textContent())!.replace(/[\u2068\u2069]/g,'')).toContain('Failed calls: 2');await expect(card).not.toContainText('Answered with');}
  await page.screenshot({path:`/tmp/response-details-${language}-${appearance}.png`,fullPage:true});
- await page.setViewportSize({width:390,height:844});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);await page.screenshot({path:`/tmp/response-details-${language}-${appearance}-narrow.png`,fullPage:true});
+ await page.setViewportSize({width:390,height:844});expect(await page.evaluate(()=>document.documentElement.scrollWidth<=innerWidth)).toBe(true);await expect(card).toBeInViewport();await page.screenshot({path:`/tmp/info-details-${language}-${appearance}-narrow.png`,fullPage:true});await page.keyboard.press('Escape');await expect(card).toBeHidden();await expect(trigger).toBeFocused();
+});
+
+for(const language of ['en','ar'])test(`anchored panel fits both window edges and remains unclipped ${language}`,async({page})=>{
+ await mount(page,{language});await page.setViewportSize({width:390,height:600});
+ const trigger=page.locator('.ec-response-info'),panel=page.locator('.ec-response-popover');
+ await page.locator('.ec-run-answer>p').evaluate(el=>(el as HTMLElement).style.display='none');
+ for(const top of [8,500]){
+  await page.locator('.ec-run-answer').evaluate((el,top)=>{(el as HTMLElement).style.cssText=`position:fixed;top:${top}px;inset-inline-end:12px;width:240px;height:75px;overflow:hidden`},top);
+  await trigger.focus();const before=await trigger.boundingBox();await trigger.press('Enter');await expect(panel).toBeVisible();await expect.poll(async()=>{const box=(await panel.boundingBox())!;return box.x>=11&&box.y>=11&&box.x+box.width<=379&&box.y+box.height<=589;}).toBe(true);expect(await trigger.boundingBox()).toEqual(before);
+  if(await panel.locator('.ec-response-technical').getAttribute('open')===null)await panel.locator('.ec-response-technical>summary').click();if(await panel.locator('.ec-response-model').last().getAttribute('open')===null)await panel.locator('.ec-response-model>summary').last().click();await expect.poll(async()=>{const box=(await panel.boundingBox())!;return box.y+box.height<=589;}).toBe(true);
+  await panel.getByRole('button',{name:language==='ar'?'إغلاق':'Close',exact:true}).click();await expect(panel).toBeHidden();await expect(trigger).toBeFocused();
+ }
+ await trigger.press('Enter');await expect(panel).toBeVisible();await page.mouse.click(2,2);await expect(panel).toBeHidden();await expect(trigger).toHaveAttribute('aria-expanded','false');
+});
+
+test.describe('touch response information',()=>{
+ test.use({hasTouch:true});
+ test('is visible without hover and closes on another tap',async({page})=>{
+  await mount(page);await expect(page.locator('.ec-run-answer .ec-message-actions')).toHaveCSS('opacity','1');
+  const trigger=page.locator('.ec-response-info');expect((await trigger.boundingBox())!.height).toBeGreaterThanOrEqual(36);
+  await trigger.tap();await expect(page.locator('.ec-response-popover')).toBeVisible();await trigger.tap();await expect(page.locator('.ec-response-popover')).toBeHidden();
+ });
 });
