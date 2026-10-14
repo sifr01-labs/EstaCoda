@@ -47,7 +47,7 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
   return [
     {
       name: "config.provider.status",
-      description: "Show configured EstaCoda provider/model settings and config sources.",
+      description: "Read EstaCoda model, web-search and extraction settings and config sources without changing settings. Use this to inspect whether web search is configured; config.web.setup changes settings and is not a status check.",
       inputSchema: {
         type: "object",
         properties: {}
@@ -106,7 +106,11 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
           ok: true,
           content: [
             ...modelLines,
-            `Web extraction: ${loaded.web.enableNetwork ? "enabled" : "disabled"}`,
+            `Web network access: ${loaded.web.enableNetwork ? "enabled" : "disabled"}`,
+            `Search backend: ${loaded.web.searchBackend ?? loaded.web.backend ?? "automatic selection"}`,
+            `Extraction backend: ${loaded.web.extractBackend ?? loaded.web.backend ?? "automatic selection"}`,
+            "Saved configuration only; connectivity and authentication have not been tested.",
+            "Web setup options: enableNetwork, searchBackend, extractBackend, crawlBackend, maxContentChars. Changes use config.web.setup and the normal approval policy.",
             `Browser backend: ${loaded.browser.backend}`,
             `Config sources: ${loaded.sources.join(", ") || "none"}`,
             "",

@@ -42,7 +42,6 @@
       }
     ],
     "requiredToolsets": [
-      "core",
       "files",
       "research"
     ],
@@ -52,7 +51,6 @@
     ]
   },
   "requiredToolsets": [
-    "core",
     "files",
     "research"
   ],
@@ -74,7 +72,6 @@
       "id": "scope-paper",
       "description": "Clarify paper type, claims, target venue, constraints, and current artifacts.",
       "toolsets": [
-        "core",
         "files",
         "research"
       ]
@@ -244,7 +241,7 @@ Prefer concrete deliverables over vague coaching:
 
 ### Conservative Defaults
 
-- `requiredToolsets`: `["core", "files", "research"]`
+- `requiredToolsets`: `["files", "research"]`
 - `optionalToolsets`: `["web", "shell-readonly", "shell-write", "coding", "memory"]`
 - `permissionExpectations`: `["auto-read", "ask-before-write", "ask-before-external-send", "ask-before-destructive-action"]`
 

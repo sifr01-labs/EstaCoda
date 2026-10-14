@@ -18,9 +18,10 @@ export function interpretRequest(text: string): RequestInterpretation {
 /** Split coordinated instructions without turning "able to read and write" into
  * two commands. Used by both explicit requirement extraction and interpretation. */
 export function splitRequestClauses(clause: string): string[] {
-  if (/^(?:what\s+if|if\s+(?:we|you|I)|hypothetically|imagine|ماذا لو|افترض)/iu.test(clause.trim())) return [clause];
-  if ((isCapabilityQuestion(clause.trim()) || /^(?:how\s|(?:explain|describe)\s+how\s|tell\s+me\s+how\s|كيف\s)/iu.test(clause.trim())) && !/\b(?:then|and\s+please)\b|ثم/iu.test(clause)) return [clause];
-  return clause.split(/(?:,|\b(?:and|then)\b|ثم)\s*(?=(?:please\s+)?(?:review|inspect|read|check|research|save|write|create|update|fix|implement|send|delete|use|احفظ|اكتب|راجع|افحص|ابحث)(?:\s|$))/iu);
+  const head = clause.trim().replace(/^(?:(?:can|could|would) you\s+|please\s+|just\s+)/iu, "");
+  if (/^(?:what\s+if|if\s+(?:we|you|I)|hypothetically|imagine|ماذا لو|افترض)/iu.test(head)) return [clause];
+  if ((isCapabilityQuestion(head) || /^(?:how\s|(?:explain|describe)\s+how\s|tell\s+me\s+how\s|كيف\s)/iu.test(head)) && !/\b(?:then|and\s+please)\b|ثم/iu.test(clause)) return [clause];
+  return clause.split(/(?:,|\b(?:and|then)\b|ثم)\s*(?=(?:please\s+)?(?:review|inspect|read|check|research|save|write|create|update|fix|implement|send|delete|use|explain|describe|احفظ|اكتب|راجع|افحص|ابحث|اشرح|صف)(?:\s|$))/iu);
 }
 
 export function isCapabilityQuestion(text: string): boolean {

@@ -643,3 +643,17 @@ it.each([["hello", false], ["What tools and skills are available?", true], ["Fin
   const selection = selectProviderToolsForTurn({ catalog, intent: intent(0.1), userText: userText as string });
   expect(selection.initialTools.length).toBe(expected ? 2 : 0);
 });
+
+
+it('selects exact inspection tools without exposing configuration mutation or a general shell', () => {
+ const catalog = buildProviderToolSchemaCatalog({tools:[...tools,
+  tool('task.result.read',['core']), tool('config.provider.status',['core']),
+  tool('config.web.setup',['core','web'],undefined,'shared-state-mutation'),
+  tool('terminal.run',['shell-readonly'],undefined,'workspace-write')]});
+ const selected=names(narrowProviderToolsForTurn({catalog,intent:intent(.4,[],'conversation'),
+  userText:'Check task_demo status and show its saved result. Check web search settings. Inspect git diff.'}));
+ expect(selected).toEqual(expect.arrayContaining(['task_status','task_result_read','config_provider_status','terminal_inspect']));
+ expect(selected).not.toContain('config_web_setup');expect(selected).not.toContain('terminal_run');
+ const absent=buildProviderToolSchemaCatalog({tools:[]});
+ expect(narrowProviderToolsForTurn({catalog:absent,intent:intent(.4),userText:'Check task_demo status.'})).toEqual([]);
+});

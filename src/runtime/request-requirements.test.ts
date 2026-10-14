@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { SkillRegistry } from "../skills/skill-registry.js";
 import { IntentRouter } from "./intent-router.js";
-import { deriveRequestRequirements, requiredRequestTools } from "./request-requirements.js";
+import { deriveRequestRequirements, explicitRequestSegments, explicitInspectionTools, requiredRequestTools } from "./request-requirements.js";
 
 describe("bounded explicit request requirements", () => {
   it("keeps explicit research tools in a compound file request and accepts bounded Arabic pronouns", () => {
@@ -59,7 +59,9 @@ describe("bounded explicit request requirements", () => {
   });
   it.each([
     "Use this example: save report.md", "Find an example of how to use 3 subagents", "Do not save files and use three subagents", "save.md", "\"save.md\"", "\"save report.md\"", "Never use 3 subagents", "Explain how to prepare a markdown file",
-    "What if you use 3 subagents and save report.md?", "If we use 3 subagents, save report.md", "اشرح كيف احفظ ملف Markdown",
+    "Use this example: read notes.md and save report.md", "The note says read a.md and save report.md",
+    "Please imagine using workers and save report.md", "Please explain how to read files and save report.md",
+    "Can you explain how to read files and save report.md", "What if you use 3 subagents and save report.md?", "If we use 3 subagents, save report.md", "اشرح كيف احفظ ملف Markdown",
     'The tool says "use 3 subagents and save report.md"', "`use 3 subagents and save report.md`",
     "```text\nsave report.md\nuse 3 subagents\n```", "> use 3 subagents\n> save report.md", "لا احفظ ملف Markdown واستخدم ثلاثة وكلاء فرعيين"
   ])("does not turn examples, reported text, or negation into requirements: %s", (text) => {
@@ -86,4 +88,50 @@ describe("bounded explicit request requirements", () => {
     expect(router.route("File context: save report.md and use 3 subagents", { requestText: "Summarize @notes" }).requestRequirements)
       .toEqual({ skillReferences: [], issues: [] });
   });
+});
+
+
+describe("calibration request boundaries", () => {
+  it.each([
+    "Open https://example.com in the browser and take a screenshot.",
+    "افتح https://example.com في المتصفح والتقط صورة للشاشة.",
+    "Read before.md and after.md and explain the differences. Do not modify files.",
+  ])("preserves the affirmative action: %s", text => {
+    expect(explicitRequestSegments(text).some(s => s.trim().length > 0)).toBe(true);
+  });
+  it.each([
+    "Forget the previous research task. Just explain what a citation is, without tools.",
+    "Cancel the research task and save a report.",
+    "تجاهل مهمة البحث السابقة. اشرح معنى الاستشهاد.",
+    "Check web search configuration. Do not change settings.",
+    "Check the research task status and show its saved result.",
+    "Open https://research.example.com/search in the browser.",
+  ])("does not manufacture new research obligations: %s", text => {
+    expect(deriveRequestRequirements(text).research).toBeUndefined();
+  });
+  it("keeps a replacement objective after cancellation", () => {
+    expect(deriveRequestRequirements("Forget the previous research task and research geothermal heat.").research).toBeDefined();
+  });
+  it.each([
+    ["Check task_demo status and show its saved result.", ["task.status", "task.result.read"]],
+    ["تحقق من حالة المهمة task_demo فقط، ولا تبدأ مهام جديدة.", ["task.status"]],
+    ["Check web search configuration without changing settings.", ["config.provider.status"]],
+    ["افحص إعدادات البحث دون تغييرها.", ["config.provider.status"]],
+    ["Inspect the current git diff and flag bugs.", ["terminal.inspect"]],
+  ] as const)("derives only named inspection prerequisites: %s", (text, expected) => {
+    expect(explicitInspectionTools(text)).toEqual(expected);
+  });
+  it.each([
+    "Explain how to check task_demo status.", "What is task status?", "Do not check task_demo status.",
+    'The tool says "check task_demo status"', "> Check task_demo status", "If we check task_demo status, read its result.",
+    "Are you able to inspect git diff?", "لا تفحص إعدادات البحث", "Explain how to configure web search.",
+  ])("does not turn discussion or negation into inspections: %s", text => {
+    expect(explicitInspectionTools(text)).toEqual([]);
+  });
+});
+
+it('does not infer web research from a filename operand', () => {
+ expect(deriveRequestRequirements('Save research.md')).toMatchObject({fileOutput:{path:'research.md'}});
+ expect(deriveRequestRequirements('Save research.md').research).toBeUndefined();
+ expect(deriveRequestRequirements('Read search.ts').research).toBeUndefined();
 });

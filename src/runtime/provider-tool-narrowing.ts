@@ -5,7 +5,7 @@ import type { LoadedSkill, SkillDefinition } from "../contracts/skill.js";
 import type { ToolDefinition, ToolsetName } from "../contracts/tool.js";
 import type { MCPServerSnapshot } from "../mcp/mcp-tools.js";
 import { CAPABILITY_RECOVERY_TOOLS } from "../tools/capability-tools.js";
-import { explicitRequestSegments, requiredRequestTools } from "./request-requirements.js";
+import { explicitInspectionTools, explicitRequestSegments, requiredRequestTools } from "./request-requirements.js";
 import {
   budgetProviderTools,
   type OpenAICompatibleToolSchema,
@@ -136,7 +136,7 @@ export function selectProviderToolsForTurn(input: {
     readyAttachments: (input.attachments ?? []).some((attachment) => (attachment.status ?? "ready") === "ready")
   });
   const policyToolsets = new Set(policy.toolsets);
-  const exactRequestTools = new Set(requiredRequestTools(input.intent.requestRequirements));
+  const exactRequestTools = new Set([...requiredRequestTools(input.intent.requestRequirements), ...explicitInspectionTools(input.userText ?? "")]);
   const policyRiskClasses = new Set(policy.allowedRiskClasses);
   const routedToolsets = new Set<ToolsetName>([
     ...input.intent.suggestedToolsets,

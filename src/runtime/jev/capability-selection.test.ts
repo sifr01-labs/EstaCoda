@@ -5,6 +5,7 @@ import { tmpdir } from 'node:os';
 import type { RegisteredTool } from '../../contracts/tool.js';
 import { resolveProfileStateHome } from '../../config/profile-home.js';
 import { ToolRegistry } from '../../tools/tool-registry.js';
+import { loadSkillsFromDirectory } from '../../skills/skill-loader.js';
 import { SkillRegistry } from '../../skills/skill-registry.js';
 import { createCapabilityTools, SessionCapabilityRecovery } from '../../tools/capability-tools.js';
 import { buildProviderToolSchemaCatalog, MAX_PROVIDER_TOOLS, MAX_PROVIDER_SCHEMA_TOKENS } from '../../tools/tool-schema.js';
@@ -180,4 +181,33 @@ it('merges missing candidates with Standard without discarding confident selecti
  const result=await h.select();expect(names(result)).toEqual(expect.arrayContaining(['special','file_read']));expect(names(result)).not.toContain('file_grep');
  expect(result.capabilityRouting).toMatchObject({actualEngine:'jev',partialFallback:true,fallbackReason:'invalid-response'});
  expect(result.capabilityRouting?.diagnostics?.candidates).toContainEqual(expect.objectContaining({id:'tool:file.read',outcome:'missing',source:'standard'}));
+});
+
+
+it.each(['rejected', 'uncertain'])("preserves explicit inspection prerequisites when Jev is %s", async kind => {
+ for (const name of ['task.status', 'task.result.read', 'config.provider.status', 'config.web.setup', 'terminal.inspect', 'terminal.run']) registry.register(tool(name, {toolsets: ['core']}));
+ const h = await harness('Check task_demo status and show its saved result. Check web search settings. Inspect git diff. Do not change settings or start workers.');
+ fetcher.mockImplementation(async (_url, init) => {
+  const body = JSON.parse(String(init?.body));
+  return new Response(JSON.stringify({model:'jev-1.13.0',usage:{input_tokens:1,output_tokens:0},answers:Object.fromEntries(Object.keys(body.questions).map(id=>[id,{type:'noul',noul:kind==='uncertain'?.5:.05}]))}));
+ });
+ const result = await h.select();
+ expect(names(result)).toEqual(expect.arrayContaining(['task_status','task_result_read','config_provider_status','terminal_inspect']));
+ expect(names(result)).not.toContain('config_web_setup'); expect(names(result)).not.toContain('terminal_run');
+});
+it('does not expose an unavailable explicit inspection prerequisite', async () => {
+ registry.register(tool('task.status', {isAvailable:()=>false}));
+ const h = await harness('Check task_demo status.');
+ expect(names(await h.select())).not.toContain('task_status');
+});
+
+it.each(['researcher','wiki-builder'])('does not require unrelated core tools for %s', async name => {
+ const loaded=await loadSkillsFromDirectory(new URL(`../../../skills/official/${name}`,import.meta.url).pathname,{sourceKind:'bundled'});
+ expect(loaded.errors).toEqual([]);expect(loaded.skills).toHaveLength(1);
+ skills.register(loaded.skills[0]);
+ registry.register(tool('file.read',{toolsets:['files']}));
+ registry.register(tool('unrelated.mutate',{toolsets:['core'],riskClass:'shared-state-mutation'}));
+ const h=await harness(`Use the ${name} skill.`);
+ expect(h.intent.suggestedSkills.map(s=>s.name)).toContain(name);
+ const result=names(await h.select());expect(result).toContain('file_read');expect(result).not.toContain('unrelated_mutate');
 });

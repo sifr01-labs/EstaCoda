@@ -2,7 +2,7 @@ import type { IntentRoute } from '../../contracts/intent.js';
 import { CAPABILITY_RECOVERY_TOOLS } from '../../tools/capability-tools.js';
 import { budgetProviderTools, type ProviderToolSchemaCatalog } from '../../tools/tool-schema.js';
 import type { ProviderToolSelection } from '../provider-tool-narrowing.js';
-import { requiredRequestTools } from '../request-requirements.js';
+import { explicitInspectionTools, requiredRequestTools } from '../request-requirements.js';
 import { explicitlyProhibited, type LiveJevRouting } from './live-routing.js';
 import { evaluateCapabilities, type CapabilityEvaluation } from './capability-decisions.js';
 export type { CapabilityEvaluation } from './capability-decisions.js';
@@ -25,7 +25,7 @@ export async function selectJevCapabilities(input: {
       ...(decision.fallbackReason === 'engine-unavailable' && decision.diagnostics ? { diagnostics: { ...decision.diagnostics, failure: decision.diagnostics.failure ?? { code: 'stale' }, candidates: decision.diagnostics.candidates.map(candidate => ({ ...candidate, source: 'standard' as const, outcome: 'discarded' as const })) } } : {}), selections: input.catalog.inventory.map(tool => ({ id: `tool:${tool.name}`, selected: exposed.has(tool.name) })) } };
   };
   if (decision.actualEngine !== 'jev') return fallback();
-  const explicit = new Set(requiredRequestTools(input.intent.requestRequirements));
+  const explicit = new Set([...requiredRequestTools(input.intent.requestRequirements), ...explicitInspectionTools(input.evaluation.context.userRequest)]);
   const required = new Set(explicit);
   if (input.catalog.entries.some(entry => entry.tool.name === "config.provider.execution_status")) required.add("config.provider.execution_status");
   // Registered skill dependencies, including every complementary skill. Optional toolsets are not obligations.

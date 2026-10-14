@@ -73,7 +73,7 @@ export function createTerminalInspectTool(options: TerminalInspectToolOptions): 
 
   return {
     name: "terminal.inspect",
-    description: "Run a bounded read-only inspection command in the active workspace using argv only. No shell, pipes, redirection, command substitution, environment assignments, or arbitrary binaries are allowed.",
+    description: "Run a bounded read-only inspection command in the active workspace using argv only, including git diff, git status, and git log to inspect repository changes. No shell, pipes, redirection, command substitution, environment assignments, or arbitrary binaries are allowed.",
     inputSchema: {
       type: "object",
       properties: {

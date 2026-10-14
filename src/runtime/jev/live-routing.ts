@@ -67,7 +67,7 @@ export async function selectJevRoute(input: {
         instructions: 'Is this skill applicable to the current request? Select complementary skills independently. Exclude merely mentioned, quoted, prohibited or unrelated skills. Respect save-only and assigned-step scope.' }))
     ] });
   const selection = resolveJevSelection(result, [
-    ...Object.keys(JEV_INTENTS).map(id => ({ id, questionId: `intent.${id}`, standard: base.labels.includes(id as keyof typeof JEV_INTENTS) })),
+    ...Object.keys(JEV_INTENTS).map(id => ({ id, questionId: `intent.${id}`, standard: base.labels.includes(id as keyof typeof JEV_INTENTS) || base.taskClass === id })),
     ...skills.map((skill, i) => ({ id: `skill:${skill.name}`, questionId: `skill.${i}`, standard: base.suggestedSkills.some(s => s.name === skill.name) }))
   ]);
   const fallback = (reason: RoutingDecision['fallbackReason']): IntentRoute => ({ ...base, shadowSemanticRoute: undefined, routingDecision: { ...routingDecision(base, input.snapshot, reason), diagnostics: reason === 'engine-unavailable' ? { ...selection.diagnostics, failure: selection.diagnostics.failure ?? { code: 'stale' }, candidates: selection.diagnostics.candidates.map(candidate => ({ ...candidate, source: 'standard' as const, outcome: 'discarded' as const })) } : selection.diagnostics } });

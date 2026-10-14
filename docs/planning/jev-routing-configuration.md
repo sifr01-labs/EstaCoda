@@ -2,6 +2,8 @@
 
 Status: configuration, validated decision client, live intent/skill routing, and capability selection/discovery implemented. Jev-assisted controls relevance decisions in the shared runtime. Existing execution permissions and completion checks remain authoritative. The settings connection check and actual-engine/fallback presentation are implemented. Calibration and packaged live acceptance remain pending.
 
+The [14 October runtime repair](jev-routing-reliability-fix.md) preserves explicit browser/file actions, cancelled-objective boundaries, Standard task-class fallback, and specific read-only inspection prerequisites. Researcher/wiki-builder no longer require the entire core toolset; research retains authorized task-status/result reads. A fresh selection-only evaluation passed all required tool choices. Jev's production questions and thresholds remain unchanged, and intent accuracy, excess selections and packaged acceptance remain open work.
+
 ## Configuration and setup
 
 The selected profile owns `routing.mode` (`standard`, the default, or `jev-assisted`) and `routing.jev`:

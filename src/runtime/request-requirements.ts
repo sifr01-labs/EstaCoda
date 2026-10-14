@@ -4,6 +4,8 @@ import { affirmativeRequestSegments } from "./request-action-segments.js";
 
 const MAX_REQUEST_CHARS = 32_768;
 const FILE_NAME = /`([^`\n]{1,240}\.(?:md|markdown|txt))`|(?:[\p{L}\p{N}_./\\:-]+\.(?:md|markdown|txt))\b/giu;
+const FILE_OPERAND = /[\p{L}\p{N}_./\\:-]+\.(?:md|markdown|txt|json|ts|tsx|js|py)\b/giu;
+const INERT_CONTEXT = /\b(?:hypothetically|imagine|what\s+if|if\s+(?:we|you|I)|example|said|says|quoted?)\b|(?:افترض|ماذا لو|مثال|قال)/iu;
 const INFORMATIONAL = /\b(?:explain|describe|hypothetically|imagine|what\s+if|how\s+(?:would|could|to)|if\s+(?:we|you|I)|example|said|says|quoted?)\b|(?:اشرح|افترض|ماذا لو|مثال|قال)/iu;
 
 /** Only affirmative user clauses may supply new requirements. Quoted filenames
@@ -13,6 +15,8 @@ export function explicitRequestSegments(text: string): string[] {
   const sanitized = text.normalize("NFKC")
     .replace(/```[\s\S]*?(?:```|$)|~~~[\s\S]*?(?:~~~|$)/gu, " ")
     .replace(/^\s*>.*$/gmu, " ")
+    // URL words are operands, not informational markers or research verbs.
+    .replace(/https?:\/\/[^\s<>"“”`]+/giu, " [URL] ")
     .replace(/`([^`\n]*)`|"([^"\n]*)"|“([^”\n]*)”|'([^'\n]*)'|‘([^’\n]*)’/gu, (match, ...groups: unknown[]) => {
       const value = groups.slice(0, 5).find((group) => typeof group === "string") as string | undefined;
       if (value !== undefined && /^[\p{L}\p{N}_ ./\\:-]{1,240}\.(?:md|markdown|txt)$/iu.test(value)) {
@@ -22,10 +26,10 @@ export function explicitRequestSegments(text: string): string[] {
       return " ";
     });
   return affirmativeRequestSegments(sanitized)
-    .flatMap(segment => interpretRequest(segment) === "mixed" ? splitRequestClauses(segment) : [segment])
+    .flatMap(segment => INERT_CONTEXT.test(segment.replace(FILE_OPERAND, " [file] ")) ? [segment] : splitRequestClauses(segment))
     .filter((segment) => {
       if (isCapabilityQuestion(segment.trim()) && interpretRequest(segment) === "information") return false;
-      const informational = INFORMATIONAL.exec(segment);
+      const informational = INFORMATIONAL.exec(segment.replace(FILE_OPERAND, " [file] "));
       // A topic such as "how to recycle" does not cancel an earlier action.
       const action = /\b(?:research|investigate|find|search|survey|save|export|write|create|generate|prepare|use|using|invoke|load|apply|launch|spawn)\b|(?:ابحث|احفظ|استخدم|اكتب|أنشئ)/iu.exec(segment);
       return informational === null || (/^how\s+(?:to|could|would)$/iu.test(informational[0]) && action !== null && action.index < informational.index);
@@ -40,7 +44,9 @@ export function deriveRequestRequirements(userText: string, originTurnId?: strin
     return result;
   }
   for (const segment of explicitRequestSegments(userText)) {
-    const actionSegment = segment.replace(/`[^`]*`/gu, " ");
+    const actionSegment = segment.replace(/`[^`]*`/gu, " ").replace(FILE_OPERAND, " [file] ");
+    // Cancelling an old objective does not request its named work again.
+    if (/^\s*(?:(?:please|just)\s+)?(?:forget|cancel|stop|abandon|discard|ignore)\b|^\s*(?:انسَ?|ألغ|الغ|توقف|تجاهل)/iu.test(actionSegment)) continue;
     for (const skill of actionSegment.matchAll(/(?:\b(?:use|using|invoke|load|apply)\s+(?:the\s+)?([\p{L}\p{N}_-]{1,80})\s+skill\b|(?:استخدم|حمّل|فعّل)\s+مهارة\s+([\p{L}\p{N}_-]{1,80})|^\s*\/([\p{L}\p{N}_-]{1,80})(?:\s|$))/giu)) {
       const reference = skill[1] ?? skill[2] ?? skill[3];
       if (reference === undefined || result.skillReferences.includes(reference.toLocaleLowerCase("en-US"))) continue;
@@ -59,7 +65,7 @@ export function deriveRequestRequirements(userText: string, originTurnId?: strin
       const words: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, ثلاثة: 3, ثلاث: 3, اثنين: 2, اثنان: 2 };
       result.delegation = countText === undefined ? {} : { count: words[countText.toLowerCase()] ?? Number(countText.replace(/[٠-٩]/gu, (digit) => String("٠١٢٣٤٥٦٧٨٩".indexOf(digit)))) };
     }
-    if (/\b(?:research|investigate|find|search|survey)\b|(?:ابحث|بحث)/iu.test(actionSegment)) {
+    if (explicitInspectionTools(segment).length === 0 && /\b(?:research|investigate|find|search|survey)\b|(?:ابحث|بحث)/iu.test(actionSegment)) {
       const domain = /\b(?:write|draft|author)\s+(?:a\s+)?(?:paper|manuscript)\b|\bexperiment\b/iu.test(actionSegment) ? "paper"
         : /\b(?:papers?|arxiv|literature|academic|publications?)\b|(?:أوراق|أبحاث|أدبيات)/iu.test(actionSegment) ? "literature" : "general";
       result.research = { domain: domain === "general" ? result.research?.domain ?? domain : domain, fresh: result.research?.fresh === true || /\b(?:latest|recent|current|fresh|newest)\b|(?:أحدث|حديث|الحالية)/iu.test(actionSegment) };
@@ -77,6 +83,29 @@ export function deriveRequestRequirements(userText: string, originTurnId?: strin
   result.skillReferences = [...new Set(result.skillReferences)];
   result.issues = [...new Set(result.issues)];
   return result;
+}
+
+/** Read-only inspection prerequisites from affirmative current requests. These
+ * names are intersected with the session catalog, never execution authority. */
+export function explicitInspectionTools(text: string): string[] {
+  if (text.length > MAX_REQUEST_CHARS) return [];
+  const tools = new Set<string>();
+  for (const segment of explicitRequestSegments(text)) {
+    const action = segment.replace(/`[^`]*`/gu, " ");
+    if (/^\s*(?:forget|cancel|stop|ignore)\b|^\s*(?:انسَ?|ألغ|الغ|توقف|تجاهل)/iu.test(action)) continue;
+    const inspect = /\b(?:check|show|inspect|read|retrieve|fetch|review)\b|(?:تحقق|تحقّق|اعرض|افحص|اقرأ|راجع)/iu.test(action);
+    const specificQuestion = /\b(?:what|how|is|has)\b/iu.test(action) && /\b(?:task_[\w-]+|my|our|this|that|existing|current|previous)\b/iu.test(action);
+    if (!(inspect || specificQuestion)) continue;
+    if (/\b(?:tasks?|task_[\w-]+|workers?)\b|(?:المهمة|مهمة|المهام)/iu.test(action) &&
+      /\b(?:status|progress|results?|outputs?|finished|done|completed)\b|(?:حالة|تقدم|نتيجة|نتائج|مخرجات|انتهت)/iu.test(action)) {
+      tools.add("task.status");
+      if (/\b(?:results?|outputs?)\b|(?:نتيجة|نتائج|مخرجات)/iu.test(action)) tools.add("task.result.read");
+    }
+    if (/\b(?:web|search|browser)\b|(?:البحث|المتصفح)/iu.test(action) &&
+      /\b(?:config(?:ured|uration)?|settings?|setup|backend|options)\b|(?:إعداد|اعداد|مهيأ|خيارات)/iu.test(action)) tools.add("config.provider.status");
+    if (/\bgit\s+(?:diff|status|log)\b/iu.test(action)) tools.add("terminal.inspect");
+  }
+  return [...tools];
 }
 
 /** Adds only exact capabilities to an already session-filtered catalog. */

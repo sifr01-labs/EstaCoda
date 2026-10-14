@@ -35,7 +35,7 @@ export function createTaskResultTools(options: {
   const tools: RegisteredTool[] = [{
     name: "task.result.read",
     description:
-      "Read one authorized durable Task result as a bounded page. Requires the Task and Result IDs. Continue with offset=nextOffset when hasMore is true. Binary artifacts are not returned as text.",
+      "Read one authorized durable Task result as a bounded page. Use this to show or summarize a saved Task or worker result. Requires the Task and Result IDs; obtain result IDs from task.status first. Continue with offset=nextOffset when hasMore is true. Binary artifacts are not returned as text.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -53,7 +53,7 @@ export function createTaskResultTools(options: {
       required: ["task_id", "result_id"]
     },
     riskClass: "read-only-local",
-    toolsets: ["core"],
+    toolsets: ["core", "research"],
     progressLabel: "reading task result",
     maxResultSizeChars: TASK_RESULT_READ_MAX_RESULT_CHARS,
     isAvailable: () => true,

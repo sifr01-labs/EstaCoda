@@ -13,7 +13,7 @@ export function createTaskTools(options: {
   return [{
     name: "task.status",
     description:
-      "Inspect bounded lifecycle status, execution ownership/readiness, Step progress, token usage, estimated provider cost, and result handles for a particular durable Task linked to this session. Use this when the user asks what a specific Task cost. Does not expose workspace paths, host identities, prompts, tool inputs, credentials, or full result bodies.",
+      "Inspect bounded lifecycle status, execution ownership/readiness, Step progress, token usage, estimated provider cost, and result handles for a particular durable Task linked to this session. Use this to check whether an existing Task or worker has finished, follow its progress, inspect costs, or obtain result IDs before task.result.read. Does not expose workspace paths, host identities, prompts, tool inputs, credentials, or full result bodies.",
     inputSchema: {
       type: "object",
       additionalProperties: false,
@@ -23,7 +23,7 @@ export function createTaskTools(options: {
       required: ["task_id"]
     },
     riskClass: "read-only-local",
-    toolsets: ["core"],
+    toolsets: ["core", "research"],
     progressLabel: "checking task status",
     maxResultSizeChars: TASK_STATUS_MAX_RESULT_CHARS,
     isAvailable: () => true,

@@ -169,7 +169,8 @@ it("reserves delegation and delivery tools for coordinated explicit requests", (
   const intent = router.route(prompt);
   const selected = selectProviderToolsForTurn({ catalog: crowded, intent, userText: prompt, selectedSkill: intent.primarySkill });
   expect(intent.requestRequirements?.delegation?.count).toBe(3);
-  expect(selected.initialTools).toHaveLength(100);
+  expect(selected.initialTools.length).toBeLessThanOrEqual(100);
+  expect(selected.initialTools.some(schema => crowded.aliases.get(schema.function.name)?.startsWith("optional."))).toBe(false);
   expect(selected.initialTools.map(schema => crowded.aliases.get(schema.function.name))).toEqual(expect.arrayContaining([
     "delegate_task", "task.status", "task.result.read", "file.write", "file.read", "web.search", "skill.read"
   ]));

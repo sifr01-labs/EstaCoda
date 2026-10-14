@@ -24,7 +24,7 @@
       { "type": "contains", "value": "mediawiki install" },
       { "type": "contains", "value": "wiki page about" }
     ],
-    "requiredToolsets": ["core", "files", "research"],
+    "requiredToolsets": ["files", "research"],
     "confirmation": "policy",
     "priority": 24
   },
@@ -37,7 +37,7 @@
     "The user refers to their wiki or notes in a research, intelligence, learning, or knowledge-management context.",
     "The user wants a compounding alternative to repeated ad hoc retrieval."
   ],
-  "requiredToolsets": ["core", "files", "research"],
+  "requiredToolsets": ["files", "research"],
   "optionalToolsets": ["web", "shell-readonly", "shell-write", "coding", "memory"],
   "playbook": [
     {

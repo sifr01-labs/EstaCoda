@@ -202,3 +202,23 @@ it('shares capability-question interpretation even when Jev selects a related to
  const body = JSON.parse(String(fetcher.mock.calls[0][1]?.body));
  expect(body.questions['intent.code-review'].criteria.true).toContain('capability question');
 });
+
+
+it.each([
+ ['Open https://example.com in the browser and take a screenshot.', ['browser-control', 'browser-operation']],
+ ['افتح https://example.com في المتصفح والتقط صورة للشاشة.', ['browser-control', 'browser-operation']],
+ ['Read before.md and after.md and explain the differences. Do not modify files.', ['repo-inspection']],
+ ['Forget the previous research task. Just explain what a citation is, without tools.', ['conversation']],
+] as const)('retains valid semantic intents across request parsing: %s', async (request, labels) => {
+ chosen = labels.map(label => `intent.${label}`);
+ const result = await route(request);
+ expect(result.intent.labels).toEqual(expect.arrayContaining([...labels]));
+ if (labels.some(label => label === 'conversation')) expect(result.intent.labels).not.toContain('research');
+});
+it('uses the Standard task class when Jev is uncertain about that candidate', async () => {
+ probabilities['intent.repo-inspection'] = .5;
+ const request = 'Read the source files in this repository.';
+ const base = router.route({text: request, requestText: request, channel: 'cli'});
+ expect(base.intent.taskClass).toBe('repo-inspection');
+ expect((await route(request)).intent.labels).toContain('repo-inspection');
+});

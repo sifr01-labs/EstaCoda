@@ -1,5 +1,5 @@
 import { describe, expect, it, vi } from "vitest";
-import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, rm, writeFile, readFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { tmpdir } from "node:os";
 import type { ModelProfile, ProviderExecutionSummary } from "../contracts/provider.js";
@@ -1079,4 +1079,18 @@ it('validates routing inspection arguments and cannot address another session',a
   for(const input of [{sessionId:'other'},{routingOffset:-1},{routingOffset:1.5},{routingDetails:'yes'}])expect((await tool.run(input)).ok).toBe(false);
   const result=await tool.run({routingTurnId:'foreign',routingDetails:true});expect(result.ok).toBe(true);expect(result.metadata?.routing).toMatchObject({state:'unknown',stages:[]});
  }finally{await rm(homeDir,{recursive:true,force:true});}
+});
+
+
+it('inspects saved web search settings without enabling the network or changing profile bytes', async () => {
+ const homeDir = await configHome({...localModelConfig({primaryModel:'qwen2.5:3b',models:['qwen2.5:3b']}),web:{enableNetwork:false,searchBackend:'ddgs',extractBackend:'fetch'}});
+ const path = resolveProfileStateHome({homeDir,profileId:'default'}).configPath;
+ const before = await readFile(path,'utf8');
+ const result = await runProviderStatusTool({homeDir});
+ expect(result.ok).toBe(true);
+ expect(result.content).toContain('Web network access: disabled');
+ expect(result.content).toContain('Search backend: ddgs');
+ expect(result.content).toContain('Extraction backend: fetch');
+ expect(result.content).toContain('have not been tested');
+ expect(await readFile(path,'utf8')).toBe(before);
 });

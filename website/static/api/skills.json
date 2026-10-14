@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-10-08T11:20:15.349Z",
+  "generatedAt": "2026-10-14T15:35:29.581Z",
   "skills": [
     {
       "id": "official.api-integration",
@@ -632,7 +632,6 @@
         "\\b(?:design|run|plan)\\b.{0,50}\\bexperiment\\b"
       ],
       "requiredToolsets": [
-        "core",
         "files",
         "research"
       ],
@@ -898,7 +897,6 @@
         "audit my wiki"
       ],
       "requiredToolsets": [
-        "core",
         "files",
         "research"
       ],
