@@ -14,9 +14,10 @@ const intents:Record<string,string>={
 export function experimentQuestions(questions:readonly JevQuestion[],variant:string):readonly JevQuestion[]{
  return questions.map(original=>{
   if(original.type!=='noul'||variant==='baseline')return original;
-  const q=['scoped-question','scoped-work'].includes(variant)&&original.id.startsWith('intent.')?{...original,description:intents[original.id.slice(7)]??original.description}:original;
+  const q=['scoped-question','scoped-work','workflow-fit'].includes(variant)&&original.id.startsWith('intent.')?{...original,description:intents[original.id.slice(7)]??original.description}:original;
   if(variant==='explicit-subject')return {...q,instructions:`${q.instructions} Evaluate this specific candidate: ${q.description}`,criteria:{true:`The candidate is relevant to fulfilling the current request: ${q.description}`,false:`The candidate is unnecessary, merely topical, outside the current scope, or prohibited: ${q.description}`}};
   const {criteria,...rest}=q;
+  if(variant==='workflow-fit'&&q.id.startsWith('skill.'))return {...rest,instructions:`Does state.userRequest explicitly name this skill, or ask for the specialized workflow described by this skill? Skill: ${q.description} Judge its stated purpose, not merely overlapping words, domain, tools, or incidental steps. A narrow action does not request a larger workflow. Answer no for capability questions, explanations, quoted instructions, and requests only to inspect the skill. Select complementary skills independently when their workflows are requested. Respect prohibitions and assigned-step scope.`};
   if(variant==='scoped-work'&&q.id.startsWith('skill.'))return {...rest,instructions:`Does state.userRequest ask the assistant to carry out work taught by this skill now, or explicitly invoke this skill? Skill: ${q.description} Answer no for hypothetical ability questions, explanations of the skill, and requests only to inspect its instructions. Complementary skills may each be selected. Respect prohibitions and assigned-step scope; quoted text and past objectives do not request new work.`};
   return {...rest,instructions:`${q.instructions} The specific candidate to evaluate is: ${q.description}`};
  });

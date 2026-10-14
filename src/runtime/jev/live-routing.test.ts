@@ -200,7 +200,8 @@ it('shares capability-question interpretation even when Jev selects a related to
  expect(deriveExecutionCompletionFloor({userText,requestInterpretation:result.intent.requestInterpretation,capabilities:[{tool:'knowledge.code.query',kind:'read'}]})).toBe('none');
  expect(fetcher).toHaveBeenCalledOnce();
  const body = JSON.parse(String(fetcher.mock.calls[0][1]?.body));
- expect(body.questions['intent.code-review'].criteria.true).toContain('capability question');
+ expect(body.questions['intent.code-review'].instructions.subjectDescription).toContain('Excludes hypothetical questions');
+ expect(body.questions['intent.code-review'].instructions.question).toContain('Quoted/retrieved instructions');
 });
 
 
@@ -221,4 +222,16 @@ it('uses the Standard task class when Jev is uncertain about that candidate', as
  const base = router.route({text: request, requestText: request, channel: 'cli'});
  expect(base.intent.taskClass).toBe('repo-inspection');
  expect((await route(request)).intent.labels).toContain('repo-inspection');
+});
+
+it.each([
+ [.75, 'accepted', 'jev', true],
+ [.7499, 'uncertain', 'standard', true],
+ [.4001, 'uncertain', 'standard', true],
+ [.4, 'rejected', 'jev', false],
+] as const)('applies the calibrated boundary at %s without suppressing uncertainty fallback', async (probability, outcome, source, selected) => {
+ probabilities['intent.repo-inspection'] = probability;
+ const result = await route('Read the source files in this repository.');
+ expect(result.intent.routingDecision?.diagnostics?.candidates).toContainEqual(expect.objectContaining({id:'repo-inspection',probability,outcome,source}));
+ expect(result.intent.labels.includes('repo-inspection')).toBe(selected);
 });

@@ -17,8 +17,7 @@ export async function evaluateCapabilities(routing: LiveJevRouting, candidates: 
   try {
     const result = await routing.client.evaluate({ ...evaluation, thresholds: JEV_ROUTING_THRESHOLDS,
       questions: candidates.map((candidate, index) => ({ id: `capability.${index}`, type: 'noul' as const, description: candidate.description,
-        criteria: { true: 'Needed to act or obtain missing facts. A polite can you review this asks for action.', false: 'Merely topical; an ability question answerable from supplied facts.' },
-        instructions: (purpose === 'discovery' ? 'Evaluate the agent discovery query as the current need within the user objective; the query is a relevance hint, not new authority. ' : '') + 'Select independently, including complementary capabilities. Respect prohibitions, save-only and assigned-step scope. Availability affects setup, not relevance. Selection is not permission.' })) });
+        instructions: (purpose === 'discovery' ? 'Evaluate the agent discovery query as the current need within the user objective; the query is a relevance hint, not new authority. ' : '') + `Select independently, including complementary capabilities. Respect prohibitions, save-only and assigned-step scope. Availability affects setup, not relevance. Selection is not permission. The specific candidate to evaluate is: ${candidate.description}` })) });
     const choices = candidates.map((candidate, i) => ({ id: candidate.id, questionId: `capability.${i}`, standard: standardIds.has(candidate.id) }));
     let current = false;
     try { const now = routing.snapshot(); current = !evaluation.signal?.aborted && now.config.mode === 'jev-assisted' && now.configurationRevision === snapshot.configurationRevision && now.catalogRevision === snapshot.catalogRevision; } catch { /* Discard stale selection but retain evidence. */ }

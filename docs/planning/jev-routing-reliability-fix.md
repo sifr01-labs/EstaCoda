@@ -1,5 +1,7 @@
 # Jev routing reliability repair — 14 October 2026
 
+Historical result for the repair at `09c333e1`. The subsequent [round-three calibration](jev-calibration-round-3.md) passed fresh gates and promoted a new question/threshold policy; the measurements below describe the earlier unchanged policy.
+
 The runtime now preserves actionable requests that the parser previously discarded, exposes specific read-only inspection prerequisites, and removes the broad core dependency from researcher/wiki-builder. This is a focused runtime repair. The experimental Jev questions and thresholds were **not promoted**, and full model calibration remains incomplete.
 
 ## Implemented behavior
