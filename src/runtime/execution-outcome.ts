@@ -45,7 +45,9 @@ export function deriveExecutionCompletionFloor(input: {
   if (deriveRequestRequirements(input.userText).fileOutput !== undefined) return "mutation_with_verification";
   // Scope negation before punctuation/contractions are flattened: "and add"
   // inside "do not modify ... and add" is not a requested mutation.
-  const text = normalizeExpectationText(input.userText);
+  const affirmative = affirmativeRequestSegments(input.userText.normalize("NFKC")
+    .replace(/```[\s\S]*?(?:```|$)|~~~[\s\S]*?(?:~~~|$)|^\s*>.*$/gmu, " "));
+  const text = affirmative.map(normalizeExpectationText).join(" ").trim();
   // Preserve comma boundaries only after negation and quoted examples are scoped.
   // Flattening them loses the requested edit in "read the file, update it".
   const mutationText = affirmativeRequestSegments(input.userText.normalize("NFKC").replace(/`[^`\n]*`/gu, " "))
@@ -53,7 +55,8 @@ export function deriveExecutionCompletionFloor(input: {
   if (text.length === 0 || (input.requestInterpretation ?? interpretRequest(input.userText)) === "information") return "none";
 
   const capabilities = input.capabilities ?? [];
-  const namesExecutionSurface = requestNamesExecutionSurface(text, capabilities);
+  const namesExecutionSurface = requestNamesExecutionSurface(text, capabilities) || affirmative.some(segment =>
+    /(?:^|[\s`])(?:[\w.-]+\/)*[\w.-]+\.(?:[cm]?[jt]sx?|py|rb|rs|go|java|c|cpp|h|md|txt|csv|json|ya?ml|toml)(?=[\s`,;!?]|$)/iu.test(segment));
   const requestsRead = /\b(?:inspect|review|check|find|list|show|get|read|analy[sz]e|look\s+at|search|open)\b/iu.test(text) ||
     /(?:افحص|راجع|تحقق|ابحث|اعرض|اقرأ|حلل|انظر|افتح)/u.test(text);
   const mutationAction = /\b(?:update|set\s*up|configure|create|add|change|edit|modify|write|save|upload|send|post|delete|remove|install|connect|fill|enter|submit|provision|fix|implement|build|complete|finish|apply|deploy|publish)\b/iu;
@@ -478,7 +481,7 @@ function requestNamesExecutionSurface(
   if (/\b(?:draft|poem|story|summary|explanation|description|copy|prose|outline|response|answer)\b/iu.test(text)) {
     return false;
   }
-  return /\b(?:postman|browser|tabs?|pages?|websites?|urls?|collections?|variables?|environments?|settings?|configurations?|accounts?|workspaces?|repositories|repos?|files?|directories|folders?|databases?|records?|apis?|servers?|deployments?|messages?|emails?|forms?|fields?|apps?|applications?|projects?|codebases?)\b/iu.test(text) ||
+  return /\b(?:postman|browser|tabs?|pages?|websites?|urls?|collections?|variables?|environments?|settings?|configurations?|accounts?|workspaces?|repositor(?:y|ies)|repos?|files?|directories|folders?|databases?|records?|apis?|servers?|deployments?|messages?|emails?|forms?|fields?|apps?|applications?|projects?|codebases?)\b/iu.test(text) ||
     /(?:بوستمان|المتصفح|علامة تبويب|صفحة|موقع|رابط|مجموعة|متغير|بيئة|إعداد|حساب|مساحة عمل|مستودع|ملف|مجلد|قاعدة بيانات|سجل|خادم|رسالة|بريد|نموذج|حقل|تطبيق|مشروع|قاعدة الشفرة)/u.test(text);
 }
 

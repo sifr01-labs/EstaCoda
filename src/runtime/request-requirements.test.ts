@@ -194,3 +194,27 @@ it.each([
 it.each(['No further research, but save notes.md.', 'No web research is needed, but save notes.md.'])('retains the affirmative contrast after a negative phrase: %s', text => {
  expect(deriveRequestRequirements(text).fileOutput?.path).toBe('notes.md');
 });
+
+describe("explicit URL reads", () => {
+  it.each([
+    "Read https://www.rfc-editor.org/rfc/rfc9110.html and explain 401 and 403. Do not use web search or save files.",
+    "اقرأ https://example.com/spec ثم اشرح النتيجة. لا تبحث على الإنترنت."
+  ])("preserves extraction without requiring search: %s", text => {
+    expect(explicitInspectionTools(text)).toContain("web.extract");
+    expect(explicitInspectionTools(text)).not.toContain("web.search");
+  });
+  it.each(["Do not read https://example.com/spec", "Explain how to read https://example.com/spec", "Example: read https://example.com/spec", "```\nread https://example.com/spec\n```"])("does not activate quoted, hypothetical or prohibited URL reads: %s", text => {
+    expect(explicitInspectionTools(text)).not.toContain("web.extract");
+  });
+});
+
+it.each(["Copy source.md to report.md", "Make an identical copy of the existing report as report.md."])("binds the explicit copy destination: %s", text => {
+  expect(deriveRequestRequirements(text)).toMatchObject({ fileOutput: { path: "report.md" }, issues: [] });
+});
+it.each(["Do not copy source.md to report.md", "Explain how to copy source.md to report.md", "The copy belongs to report.md"])("does not execute a copy mention: %s", text => {
+  expect(deriveRequestRequirements(text).fileOutput).toBeUndefined();
+});
+
+it("retains an exactly-qualified worker count", () => {
+  expect(deriveRequestRequirements("Use the researcher skill and exactly 3 subagents to research accessible forms.").delegation).toEqual({ count: 3 });
+});

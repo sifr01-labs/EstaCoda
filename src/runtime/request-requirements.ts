@@ -86,7 +86,7 @@ export function deriveRequestRequirements(userText: string, originTurnId?: strin
     const delegationSegment = actionSegment
       .replace(new RegExp(`${ENGLISH_SKILL_INVOCATION}\\s*(?:,\\s*)?(?:and|&)\\s+`, "giu"), "use ")
       .replace(/استخدم\s+مهارة\s+[\p{L}\p{N}_-]{1,80}\s+و\s*/gu, "استخدم ");
-    const delegation = delegationSegment.match(/\b(?:use|using|launch|spawn|delegate\s+to|assign\s+to)\s+(?:(\d{1,9}|one|two|three|four|five|six|seven|eight|nine|ten)\s+)?(?:sub[- ]?agents?|workers?|agents?)\b|(?:استخدم|شغّل|شغل|كلّف)\s+(?:(\d{1,9}|[٠-٩]{1,9}|ثلاثة|ثلاث|اثنين|اثنان)\s+)?(?:وكلاء|عمال|وكيل|sub[- ]?agents?|workers?)(?:\s+فرعيين)?/iu);
+    const delegation = delegationSegment.match(/\b(?:use|using|launch|spawn|delegate\s+to|assign\s+to)\s+(?:exactly\s+)?(?:(\d{1,9}|one|two|three|four|five|six|seven|eight|nine|ten)\s+)?(?:sub[- ]?agents?|workers?|agents?)\b|(?:استخدم|شغّل|شغل|كلّف)\s+(?:(\d{1,9}|[٠-٩]{1,9}|ثلاثة|ثلاث|اثنين|اثنان)\s+)?(?:وكلاء|عمال|وكيل|sub[- ]?agents?|workers?)(?:\s+فرعيين)?/iu);
     if (delegation !== null) {
       const countText = delegation[1] ?? delegation[2];
       const words: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, ثلاثة: 3, ثلاث: 3, اثنين: 2, اثنان: 2 };
@@ -97,8 +97,12 @@ export function deriveRequestRequirements(userText: string, originTurnId?: strin
         : /\b(?:papers?|arxiv|literature|academic|publications?)\b|(?:أوراق|أبحاث|أدبيات)/iu.test(actionSegment) ? "literature" : "general";
       result.research = { domain: domain === "general" ? result.research?.domain ?? domain : domain, fresh: result.research?.fresh === true || /\b(?:latest|recent|current|fresh|newest)\b|(?:أحدث|حديث|الحالية)/iu.test(actionSegment) };
     }
-    if (!/\b(?:prepare|save|export|write|create|generate)\s+|(?:احفظ(?:ها|ه)?|صدّر(?:ها|ه)?|صدر(?:ها|ه)?|أنشئ|اكتب(?:ها|ه)?|جهّز|جهز|أعد)\s+/iu.test(actionSegment)) continue;
-    const paths = [...segment.matchAll(FILE_NAME)].map((match) => match[1] ?? match[0]);
+    const copy = /^\s*(?:(?:can|could|would)\s+you\s+)?(?:(?:please|just)\s+)?(?:copy\b|(?:make|create)\s+(?:(?:an?|the|identical|exact|unchanged)\s+)*copy\b)/iu.test(actionSegment) && /\b(?:as|to)\s+`?[^`\s]+\.(?:md|markdown|txt)`?\s*[.!]?$/iu.test(segment);
+    if (!copy && !/\b(?:prepare|save|export|write|create|generate)\s+|(?:احفظ(?:ها|ه)?|صدّر(?:ها|ه)?|صدر(?:ها|ه)?|أنشئ|اكتب(?:ها|ه)?|جهّز|جهز|أعد)\s+/iu.test(actionSegment)) continue;
+    const namedPaths = [...segment.matchAll(FILE_NAME)].map((match) => match[1] ?? match[0]);
+    // In an explicit copy, the final as/to operand is the destination; the
+    // preceding source is not a second output. Multiple sources stay ambiguous.
+    const paths = copy && namedPaths.length <= 2 ? namedPaths.slice(-1) : namedPaths;
     const markdown = /\bmarkdown\b|\bmd\s+file\b/iu.test(actionSegment) || paths.some((path) => /\.(?:md|markdown)$/iu.test(path));
     if (paths.length === 0 && !(markdown && /\bfile\b|ملف/iu.test(actionSegment)) && !/\btext\s+file\b|ملف\s+نصي/iu.test(actionSegment)) continue;
     const path = paths[0];
@@ -123,6 +127,7 @@ export function explicitInspectionTools(text: string): string[] {
     const inspect = /\b(?:check|show|inspect|read|retrieve|fetch|review)\b|(?:تحقق|تحقّق|اعرض|افحص|اقرأ|راجع)/iu.test(action);
     const specificQuestion = /\b(?:what|how|is|has)\b/iu.test(action) && /\b(?:task_[\w-]+|my|our|this|that|existing|current|previous)\b/iu.test(action);
     if (!(inspect || specificQuestion)) continue;
+    if (inspect && /\[URL\]/u.test(action)) tools.add("web.extract");
     if (/\b(?:tasks?|task_[\w-]+|workers?)\b|(?:المهمة|مهمة|المهام)/iu.test(action) &&
       /\b(?:status|progress|results?|outputs?|finished|done|completed)\b|(?:حالة|تقدم|نتيجة|نتائج|مخرجات|انتهت)/iu.test(action)) {
       tools.add("task.status");

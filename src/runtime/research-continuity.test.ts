@@ -59,7 +59,7 @@ describe("bounded research requirement continuity", () => {
       const rerun = await h.turn("Rerun this task but use the research skill.");
       expect(rerun.intent.requestRequirements).toMatchObject({ delegation: { count: 3 }, research: { fresh: true }, skillReferences: ["research"] });
       expect(h.requests.at(-1)?.messages.some((message) => typeof message.content === "string" && message.content.includes("battery"))).toBe(true);
-      h.enqueue(answer("The file has not been saved."));
+      h.enqueue(answer("The file has not been saved."), answer("The file has not been saved."), answer("The file has not been saved."));
       const save = await h.turn("Please prepare a markdown file");
       expect(save.intent.requestRequirements?.research).toBeUndefined();
       expect(save.intent.requestRequirements?.delegation).toBeUndefined();

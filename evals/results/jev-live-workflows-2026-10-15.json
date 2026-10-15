@@ -1,0 +1,557 @@
+{
+  "date": "2026-10-15",
+  "sourceCommit": "4b09c0cb18475aceeda2bd5398d250657a79371d",
+  "sourceVerification": {
+    "filesCompared": 1957,
+    "mismatches": 0,
+    "trees": [
+      "src",
+      "skills",
+      "registries"
+    ]
+  },
+  "method": {
+    "surface": "compiled createRuntime and production TaskScheduler; not desktop/gateway UI",
+    "conversationModel": "codex/gpt-6.1-sol",
+    "router": "typesafe/jev-1.13.0",
+    "mode": "jev-assisted",
+    "liveProviders": true,
+    "scriptedModelResponses": false,
+    "mockedWeb": false,
+    "workspaceAndSessionDB": "isolated temporary directories",
+    "credentialAndOptionalDependencySource": "selected existing profile; normal runtime resolver",
+    "profileConfigUnchanged": true,
+    "browser": "unconfigured",
+    "cronDisabled": true,
+    "disabledToolsets": [
+      "telegram",
+      "configuration",
+      "memory",
+      "mcp",
+      "dangerous",
+      "media"
+    ],
+    "providerLimits": {
+      "iterations": 30,
+      "toolCalls": 60,
+      "wallClockMs": 240000,
+      "finalizationReserveMs": 15000
+    },
+    "restart": "runtime disposed and recreated with same persisted SQLite session; not a gateway or OS process restart",
+    "repeatCount": 1
+  },
+  "counts": {
+    "workflows": 15,
+    "pass": 10,
+    "fail": 5
+  },
+  "usage": {
+    "codex/gpt-6.1-sol": {
+      "calls": 79,
+      "tokens": 604790
+    },
+    "typesafe/jev-1.13.0": {
+      "calls": 57,
+      "tokens": 399832
+    }
+  },
+  "routeEventsByFallback": {
+    "none": 13,
+    "uncertain": 28
+  },
+  "jevBatchStates": {
+    "responded": 57
+  },
+  "toolCounts": {
+    "terminal.inspect:true": 4,
+    "terminal.inspect:false": 1,
+    "file.read:true": 8,
+    "file.patch:true": 1,
+    "terminal.run:true": 2,
+    "file.write:true": 3,
+    "capability.discover:true": 1,
+    "capability.request:true": 1,
+    "web.extract:true": 19,
+    "skill.read:true": 3,
+    "web.search:true": 10,
+    "delegate_task:true": 1,
+    "task.result.read:true": 4,
+    "file.read:false": 1,
+    "web.extract:false": 2
+  },
+  "excludedTrial": {
+    "id": "08-two-explicit-skills",
+    "reason": "Test author named nonexistent Technical Writer skill. Corrected to two installed skills in 08b; original trial preserved locally and excluded from counts.",
+    "outcome": "Missing skills disclosed; no external action; runtime completed."
+  },
+  "cases": [
+    {
+      "id": "01-capability-question",
+      "name": "Capability question",
+      "prompt": "Are you able to review source code? Explain briefly what you would need. Do not inspect files or use external tools for this question.",
+      "verdict": "pass",
+      "review": "Answered without tools; completed.",
+      "sessionId": "d8bbc79a-4fcc-4aeb-a007-3792ac6cf43a",
+      "status": "completed",
+      "durationMs": 7429,
+      "skills": [],
+      "tools": [],
+      "answer": "Yes—I can review source code for bugs, security risks, maintainability, performance, and test coverage.\n\nI’d need:\n- **The code:** pasted snippets, an uploaded file, or authorized access to relevant source files.\n- **Context:** what it should do, the language/framework, and any known issues.\n- **Scope:** a general review or a specific focus, such as security or correctness.\n\nRemove secrets and credentials before sharing. I haven’t inspected files or used any tools."
+    },
+    {
+      "id": "02-inline-review",
+      "name": "Review supplied code",
+      "prompt": "Review only this supplied JavaScript for a bug. Do not inspect files, run commands, or browse. function average(xs) { return xs.reduce((a,b)=>a+b,0)/xs.length; } What happens with an empty array, and what should we change?",
+      "verdict": "fail",
+      "review": "Correct NaN diagnosis, but prohibited file inspection caused completion floor read and a blocked status. Removing the prohibition changes the floor to none.",
+      "sessionId": "a404717a-22da-48cb-adcb-04bf091859a2",
+      "status": "blocked",
+      "durationMs": 7433,
+      "skills": [],
+      "tools": [],
+      "answer": "For an empty array, `reduce(..., 0)` returns `0` and `xs.length` is `0`, so the function computes `0 / 0`, which is **`NaN`**.\n\nAdd an explicit empty-array guard. Since an empty set has no defined average, throwing is a clear default:\n\n```js\nfunction average(xs) {\n  if (xs.length === 0) {\n    throw new RangeError(\"Cannot average an empty array\");\n  }\n  return xs.reduce((a, b) => a + b, 0) / xs.length;\n}\n```\n\nIf callers expect a missing-value result instead, return `null` for empty input and document that contract. Avoid returning `0` unless your application explicitly defines that behavior—it can hide missing data."
+    },
+    {
+      "id": "03-local-search",
+      "name": "Find the authoritative local decision",
+      "prompt": "Read the notes in this workspace. Which payment adapter was actually selected, who owns it, and what must never be retried automatically? Cite the file. Do not change files or search the web.",
+      "verdict": "pass",
+      "review": "Correct adapter Cedar, owner Maya and no-charge-retry rule. Recovered from unsupported ls -R.",
+      "sessionId": "25b47990-4e9e-4725-9745-275b1119032e",
+      "status": "completed_with_recovered_errors",
+      "durationMs": 13814,
+      "skills": [],
+      "tools": [
+        {
+          "name": "terminal.inspect",
+          "ok": true
+        },
+        {
+          "name": "terminal.inspect",
+          "ok": false
+        },
+        {
+          "name": "terminal.inspect",
+          "ok": true
+        },
+        {
+          "name": "file.read",
+          "ok": true
+        }
+      ],
+      "answer": "According to [`notes/decision.md`](notes/decision.md):\n\n- **Selected payment adapter:** Cedar.\n- **Owner:** Maya.\n- **Never retry automatically:** A charge. Failed reads may be retried twice."
+    },
+    {
+      "id": "04-code-fix-tests",
+      "name": "Fix a bug and run tests",
+      "prompt": "Fix sumPrices in sum.mjs so numeric strings and numbers add correctly, an empty basket returns zero, and invalid prices throw. Keep the existing tests unchanged. Run node --test sum.test.mjs and report the result.",
+      "verdict": "pass",
+      "review": "Changed implementation only; all three unchanged Node tests passed, independently rerun.",
+      "sessionId": "8ae532dc-77c0-471b-bba8-57d59ddff1bc",
+      "status": "completed",
+      "durationMs": 18429,
+      "skills": [],
+      "tools": [
+        {
+          "name": "terminal.inspect",
+          "ok": true
+        },
+        {
+          "name": "terminal.inspect",
+          "ok": true
+        },
+        {
+          "name": "file.patch",
+          "ok": true
+        },
+        {
+          "name": "file.read",
+          "ok": true
+        },
+        {
+          "name": "terminal.run",
+          "ok": true
+        }
+      ],
+      "answer": "Updated `sum.mjs` so `sumPrices`:\n- Converts numeric strings to numbers before adding.\n- Returns `0` for an empty basket.\n- Throws `TypeError` for invalid prices, including blank strings, unsupported types, `NaN`, and infinities.\n\nExisting tests were left unchanged.\n\nRan `node --test sum.test.mjs`: **3 passed, 0 failed** (exit code 0)."
+    },
+    {
+      "id": "05-csv-report",
+      "name": "Analyse CSV and save a report",
+      "prompt": "Analyse orders.csv. Exclude refunded orders. Save sales-summary.md with paid revenue by region, total paid revenue, and number of paid orders. Read back the saved file to verify it. No web research.",
+      "verdict": "pass",
+      "review": "Correct East 180, West 120, total 300, four paid orders; saved and read back.",
+      "sessionId": "3e178e51-a998-40db-9874-4e68d87913e2",
+      "status": "completed",
+      "durationMs": 14189,
+      "skills": [],
+      "tools": [
+        {
+          "name": "file.read",
+          "ok": true
+        },
+        {
+          "name": "file.write",
+          "ok": true
+        },
+        {
+          "name": "file.read",
+          "ok": true
+        }
+      ],
+      "answer": "Saved and read back **`sales-summary.md`** to verify its contents.\n\n| Region | Paid revenue |\n|---|---:|\n| East | 180 |\n| West | 120 |\n| **Total** | **300** |\n\n**Paid orders:** 4. Refunded orders were excluded. Amounts use the source units; no currency was specified.",
+      "artifacts": [
+        {
+          "filename": "sales-summary.md",
+          "bytes": 358,
+          "words": 67,
+          "sha256": "3729e4b68258a9f4d34958f72d45a7107becee82169ebc3f729a6581f4881134"
+        },
+        {
+          "filename": "sales-summary-copy.md",
+          "bytes": 358,
+          "words": 67,
+          "sha256": "3729e4b68258a9f4d34958f72d45a7107becee82169ebc3f729a6581f4881134"
+        }
+      ]
+    },
+    {
+      "id": "06-arabic-file",
+      "name": "Arabic inventory question",
+      "prompt": "اقرأ ملف inventory.csv وأخبرني بالعربية أي منتج نفد من المخزون وما إجمالي الوحدات المتبقية. لا تعدّل الملفات ولا تبحث على الإنترنت.",
+      "verdict": "pass",
+      "review": "Read CSV; correctly answered notebook out of stock and 19 units in Arabic; no web calls.",
+      "sessionId": "6a2bbfb0-3137-4470-816e-d521c688d7b5",
+      "status": "completed",
+      "durationMs": 7645,
+      "skills": [],
+      "tools": [
+        {
+          "name": "file.read",
+          "ok": true
+        }
+      ],
+      "answer": "بحسب ملف `inventory.csv`:\n- **المنتج النافد من المخزون:** دفتر (0 وحدات).\n- **إجمالي الوحدات المتبقية:** **19 وحدة** (12 قلمًا و7 حقائب).\n\nلم أعدّل أي ملفات ولم أبحث على الإنترنت."
+    },
+    {
+      "id": "07-primary-page",
+      "name": "Read a long primary page without search",
+      "prompt": "Read https://www.rfc-editor.org/rfc/rfc9110.html and explain the difference between HTTP 401 and 403 using that source. Cite the relevant sections. Do not use web search and do not save any files.",
+      "verdict": "fail",
+      "review": "Jev rejected web.extract at 0.29; capability recovery exposed it. Nine extracts returned only the beginning of RFC 9110; repeated attempts stopped at the no-progress limit. No requested comparison delivered.",
+      "sessionId": "ec6c5bec-8174-409f-bb59-6ad6eba1b278",
+      "status": "partially_completed",
+      "durationMs": 44143,
+      "skills": [],
+      "tools": [
+        {
+          "name": "capability.discover",
+          "ok": true
+        },
+        {
+          "name": "capability.request",
+          "ok": true
+        },
+        {
+          "name": "web.extract",
+          "ok": true
+        },
+        {
+          "name": "web.extract",
+          "ok": true
+        },
+        {
+          "name": "web.extract",
+          "ok": true
+        },
+        {
+          "name": "web.extract",
+          "ok": true
+        },
+        {
+          "name": "web.extract",
+          "ok": true
+        },
+        {
+          "name": "web.extract",
+          "ok": true
+        },
+        {
+          "name": "web.extract",
+          "ok": true
+        },
+        {
+          "name": "web.extract",
+          "ok": true
+        },
+        {
+          "name": "web.extract",
+          "ok": true
+        }
+      ],
+      "answer": "Stopped retrying after 6 consecutive iterations without new execution evidence. Earlier work is preserved. Ask to continue so the remaining work can resume with corrected arguments or a different approach."
+    },
+    {
+      "id": "08b-two-installed-skills",
+      "name": "Use two explicit skills with supplied facts",
+      "prompt": "Use the researcher and research-discovery skills to explain these supplied facts in under 100 words: a heat pump moves heat; a resistance heater converts electricity into heat. Use only these facts. Do not browse, search, run commands, or create files.",
+      "verdict": "pass",
+      "review": "Both researcher and research-discovery selected; concise answer, no browsing or file changes.",
+      "sessionId": "20ce1a2b-7202-48a3-b30e-401c60a80ace",
+      "status": "completed",
+      "durationMs": 6776,
+      "skills": [
+        "research-discovery",
+        "researcher"
+      ],
+      "tools": [
+        {
+          "name": "skill.read",
+          "ok": true
+        }
+      ],
+      "answer": "A **heat pump moves heat**, while a **resistance heater converts electricity into heat**. The distinction is the process: moving heat versus converting electricity into heat."
+    },
+    {
+      "id": "09-live-research",
+      "name": "Research and save a cited comparison",
+      "prompt": "Use the researcher skill to compare WebP and AVIF for a small website. Search for current primary documentation and read the primary pages to verify the key claims. Save a concise cited comparison, under 600 words, to image-formats.md and read it back. Cover compression, transparency, animation, and browser support. Do not install software or change any other files.",
+      "verdict": "pass",
+      "review": "Three searches and two successful, untruncated primary-page extracts; concise WebP/AVIF report saved and read back.",
+      "sessionId": "dfae8436-0802-467d-8505-8e1198da81e8",
+      "status": "completed",
+      "durationMs": 53876,
+      "skills": [
+        "researcher",
+        "research-discovery"
+      ],
+      "tools": [
+        {
+          "name": "skill.read",
+          "ok": true
+        },
+        {
+          "name": "web.search",
+          "ok": true
+        },
+        {
+          "name": "web.search",
+          "ok": true
+        },
+        {
+          "name": "web.extract",
+          "ok": true
+        },
+        {
+          "name": "web.search",
+          "ok": true
+        },
+        {
+          "name": "web.extract",
+          "ok": true
+        },
+        {
+          "name": "file.write",
+          "ok": true
+        },
+        {
+          "name": "file.read",
+          "ok": true
+        }
+      ],
+      "answer": "Saved the cited comparison to [image-formats.md](image-formats.md) and read it back. It is under 600 words and covers compression, transparency, animation, and browser support, using the retrieved primary pages from Google and AOMedia.\n\n**Recommendation:** Use WebP for a simple workflow; consider AVIF variants for image-heavy pages when testing shows worthwhile savings. The comparison distinguishes advertised compression savings from guarantees and notes that animation compatibility needs separate testing.\n\nNo software was installed, and no other files were changed.",
+      "artifacts": [
+        {
+          "filename": "image-formats.md",
+          "bytes": 2973,
+          "words": 379,
+          "sha256": "88b4f02544b71ea8806d6d5f96d5ee46c5cb68d40936188d348459d121be0fd9"
+        }
+      ]
+    },
+    {
+      "id": "10-delegated-research",
+      "name": "Three-worker research, synthesis and delivery",
+      "prompt": "Use the researcher skill and exactly 3 subagents to research accessible web forms: one covers labels and instructions, one keyboard navigation and focus, and one errors and validation. Use primary W3C or MDN sources and read the source pages. Combine their findings into a concise cited checklist under 800 words. Save it to forms-checklist.md and verify the saved file. Do not install software or change other files.",
+      "verdict": "fail",
+      "review": "All five steps completed and the 713-word report was saved and verified. However, its accepted synthesis contains a delivery-blocker paragraph saying the file has not been saved, preserved verbatim in the final file.",
+      "sessionId": "ee773b60-01c5-4792-b74e-134f3bdbe661",
+      "status": "completed",
+      "durationMs": 14641,
+      "skills": [
+        "researcher",
+        "research-discovery"
+      ],
+      "tools": [
+        {
+          "name": "skill.read",
+          "ok": true
+        },
+        {
+          "name": "delegate_task",
+          "ok": true
+        }
+      ],
+      "answer": "Task created: task_b2549882-9f8e-4771-9e5c-d5380d8d7250.\nCurrent state: queued (waiting).\nThis Task owns the requested answer. The result will be delivered when the Task settles.",
+      "task": {
+        "status": "completed",
+        "acceptedResults": 5,
+        "steps": [
+          {
+            "role": "worker",
+            "status": "completed"
+          },
+          {
+            "role": "worker",
+            "status": "completed"
+          },
+          {
+            "role": "worker",
+            "status": "completed"
+          },
+          {
+            "role": "synthesis",
+            "status": "completed"
+          },
+          {
+            "role": "report-delivery",
+            "status": "completed"
+          }
+        ],
+        "attempts": [
+          {
+            "status": "completed"
+          },
+          {
+            "status": "completed"
+          },
+          {
+            "status": "completed"
+          },
+          {
+            "status": "completed"
+          },
+          {
+            "status": "completed"
+          }
+        ]
+      },
+      "artifacts": [
+        {
+          "filename": "forms-checklist.md",
+          "bytes": 5960,
+          "words": 713,
+          "sha256": "233a7b635286ed1a1332472bae3614bcc60e55bdccf69a0e68e36c9974151141"
+        }
+      ]
+    },
+    {
+      "id": "11-restart-save-only",
+      "name": "Copy a report after runtime recreation",
+      "prompt": "Make an identical copy of the report you just saved as sales-summary-copy.md. Do not reanalyse the CSV or do any research. Read back the copy to verify it.",
+      "verdict": "fail",
+      "review": "Exact bytes copied using cp plus cmp, followed by file.read. Runtime nevertheless reports missing-write and partially_completed because file evidence only accepts file.write/file.patch receipts.",
+      "status": "partially_completed",
+      "tools": [
+        {
+          "name": "terminal.run",
+          "ok": true
+        },
+        {
+          "name": "file.read",
+          "ok": true
+        }
+      ],
+      "answer": "File output is incomplete. There is no successful write or patch for the requested output.",
+      "artifacts": [
+        {
+          "filename": "sales-summary.md",
+          "bytes": 358,
+          "words": 67,
+          "sha256": "3729e4b68258a9f4d34958f72d45a7107becee82169ebc3f729a6581f4881134"
+        },
+        {
+          "filename": "sales-summary-copy.md",
+          "bytes": 358,
+          "words": 67,
+          "sha256": "3729e4b68258a9f4d34958f72d45a7107becee82169ebc3f729a6581f4881134"
+        }
+      ]
+    },
+    {
+      "id": "12-missing-file",
+      "name": "Handle missing input honestly",
+      "prompt": "Read missing-quarterly-sales.csv and tell me the total revenue. If the file is not present, say so clearly; do not invent any figures or create the file.",
+      "verdict": "pass",
+      "review": "Reported missing file and no revenue invented. Blocked is the correct outcome for unavailable required input.",
+      "sessionId": "93d01006-ed9d-4d25-954d-128b02445534",
+      "status": "blocked",
+      "durationMs": 5881,
+      "skills": [],
+      "tools": [
+        {
+          "name": "file.read",
+          "ok": false
+        }
+      ],
+      "answer": "`missing-quarterly-sales.csv` was not found in the workspace, so I can’t calculate the total revenue. I have not created the file or invented any figures."
+    },
+    {
+      "id": "13-rewrite-only",
+      "name": "Rewrite supplied prose without tools",
+      "prompt": "Rewrite this sentence into clear, concise professional English: Due to the fact that the shipment was delayed, we are in a situation where we must postpone the launch. Return only the rewritten sentence. Do not use tools.",
+      "verdict": "pass",
+      "review": "Concise rewrite, no tools, completed.",
+      "sessionId": "8435ee0a-c7c2-484f-a338-6e901532a5b5",
+      "status": "completed",
+      "durationMs": 3508,
+      "skills": [],
+      "tools": [],
+      "answer": "We must postpone the launch because the shipment was delayed."
+    },
+    {
+      "id": "14-failed-page-recovery",
+      "name": "Recover from 404 into a long source",
+      "prompt": "Read https://www.rfc-editor.org/rfc/rfc999999999.html to explain HTTP 404. If that reference is unavailable, use https://www.rfc-editor.org/rfc/rfc9110.html instead. Cite the source you actually read and disclose the failed reference. Do not search or save files.",
+      "verdict": "fail",
+      "review": "Correctly disclosed failed reference and fetched fallback. Answer cited section 15.5.5, but retrieved content was truncated in section 2.5 and did not contain its definition. Apparent completion did not establish grounding.",
+      "sessionId": "ff9cf616-41df-4032-83fc-2cab0db9fb04",
+      "status": "completed_with_recovered_errors",
+      "durationMs": 16377,
+      "skills": [],
+      "tools": [
+        {
+          "name": "web.extract",
+          "ok": false
+        },
+        {
+          "name": "web.extract",
+          "ok": true
+        }
+      ],
+      "answer": "The original reference, [rfc999999999.html](https://www.rfc-editor.org/rfc/rfc999999999.html), returned **404 Not Found**, so I used the fallback, [RFC 9110: HTTP Semantics](https://www.rfc-editor.org/rfc/rfc9110.html).\n\n### What HTTP 404 means\n\n**404 Not Found** means the origin server did not find a current representation of the requested resource—or is unwilling to disclose that one exists.\n\nKey implications, defined in [RFC 9110, §15.5.5](https://www.rfc-editor.org/rfc/rfc9110.html#section-15.5.5):\n\n- **It does not prove the resource is permanently gone.** The condition might be temporary or permanent. When the server knows it is likely permanent, **410 Gone** is preferred.\n- **It can conceal a resource’s existence.** A server may return 404 rather than reveal that a restricted resource exists.\n- **It can be cached.** A 404 response is heuristically cacheable unless the method definition or explicit cache controls indicate otherwise.\n\nIn everyday terms: the server responded, but it is not providing the resource at that URL. In this case, the first RFC URL itself demonstrated a 404.\n\nNo searches were performed and no files were saved."
+    },
+    {
+      "id": "15-short-page-recovery",
+      "name": "Recover from 404 into a short source",
+      "prompt": "Read https://developers.google.com/speed/webp/nonexistent-evaluation-reference. If unavailable, use https://developers.google.com/speed/webp instead. Explain whether WebP transparency works with lossy compression. Cite the source you actually read and disclose the failed reference. Keep it under 120 words. No search and no file output.",
+      "verdict": "pass",
+      "review": "Disclosed missing reference; fetched short Google WebP page and answered from its transparency/lossy documentation without search.",
+      "sessionId": "0d494fff-2144-428e-b50c-0b1e0ab96df3",
+      "status": "completed_with_recovered_errors",
+      "durationMs": 13264,
+      "skills": [],
+      "tools": [
+        {
+          "name": "web.extract",
+          "ok": false
+        },
+        {
+          "name": "web.extract",
+          "ok": true
+        }
+      ],
+      "answer": "**Yes—WebP supports transparency with lossy compression.** Google’s documentation explicitly states that “lossy WebP also supports transparency” when lossy RGB compression is acceptable, typically producing files about three times smaller than PNG.\n\nThe requested [evaluation reference](https://developers.google.com/speed/webp/nonexistent-evaluation-reference) returned **404 Not Found**, so I read and used the fallback source: Google Developers’ [“An image format for the Web”](https://developers.google.com/speed/webp)."
+    }
+  ]
+}

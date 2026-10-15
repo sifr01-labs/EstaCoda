@@ -97,7 +97,7 @@ export class TaskApprovalService {
         const decision = this.#narrowDecision(task, step, attempt, request, base.decision);
         // Persist one deterministic approval boundary at a time. A later replay can
         // surface the next gated call after the first exact target is approved.
-        if (decision === "ask" && !this.#requests.has(attempt.id)) {
+        if (decision === "ask" && request.toolName !== undefined && !this.#requests.has(attempt.id)) {
           this.#requests.set(attempt.id, approvalRequest(request));
         }
         if (decision === "allow" && this.#matchingApproved(attempt.id, taskApprovalFingerprint(request)) !== undefined) {
@@ -268,7 +268,9 @@ export class TaskApprovalService {
     baseDecision: "allow" | "ask" | "deny"
   ): "allow" | "ask" | "deny" {
     if (baseDecision === "deny") return "deny";
-    if (step.executor.role === "report-delivery") {
+    // A turn-level assessment has no tool/target and grants no execution.
+    // Apply the target ceiling when an actual named operation is assessed.
+    if (step.executor.role === "report-delivery" && request.toolName !== undefined) {
       if (!["task.result.read", "file.write", "file.read"].includes(request.toolName ?? "")) return "deny";
       if (request.toolName !== "task.result.read") {
         const path = step.executor.requestContract?.requirements.fileOutput?.path;

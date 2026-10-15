@@ -1,0 +1,619 @@
+{
+  "date": "2026-10-15",
+  "baseCommit": "4b09c0cb18475aceeda2bd5398d250657a79371d",
+  "reviewedSourceFilesSha256": {
+    "src/prompt/prompt-assembly.ts": "eb6c1302f03f038493991b27e57c32e6b52a52ded5fe616cc44a229004b73b63",
+    "src/runtime/agent-loop.ts": "30ba5073063e1bbae3c7f5678af034a6c7160f7b19ec1c5f6633819eb891182d",
+    "src/runtime/execution-outcome.ts": "0a690f259258652c424be12d7f7040b01bc41a27ac40427dbf416e6c283fa630",
+    "src/runtime/jev/capability-selection.ts": "eac67d9fec4ddccb14799a7252cf9d6c354e14d917dac3c084843398eb967a8a",
+    "src/runtime/provider-tool-narrowing.ts": "091ec6b9d322242f36def2afad97c4c50e671d2008b8fa8148ae4774ed6ab6cc",
+    "src/runtime/request-requirements.ts": "1d409ad5d506ac4fc8e80365ff2f34855167dc883574bc2c7eb088db5346e41d",
+    "src/tasks/agent-step-executor.ts": "0a4a2599b61039dad2664e51b9e1038da073a0a13aa9015e0b776f8f7e260c35",
+    "src/tasks/task-approval-service.ts": "d6d37c9d39f4f2aa4933ac6d07ffadb6c16ccb67161b39ffec31d512512622c7",
+    "src/tools/tool-executor.ts": "4f7b149c961a55cb7c99f001b00d3ab06d8a36bf843eee56b724dd453401b181",
+    "src/tools/web-tools.ts": "e567f4b47175ce9560fc35d6d0ade23bdb13dad382d88eedc6b0e0d862546a5c",
+    "src/tools/web-extract-window.ts": "47f666c5cdaf0736d8753de63ddd796df77ce605a2a25d3f14b85f22f11c7898",
+    "src/tasks/research-result-evidence.ts": "f6e32e463bc3d7794fdd54e278f2c1cbed44b4bbdb72680b6903e400438cc5fc"
+  },
+  "method": {
+    "surface": "compiled createRuntime and production TaskScheduler; not desktop/gateway UI",
+    "conversationModel": "codex/gpt-6.1-sol",
+    "router": "typesafe/jev-1.13.0",
+    "mode": "jev-assisted",
+    "liveProviders": true,
+    "scriptedModelResponses": false,
+    "mockedWeb": false,
+    "workspaceAndSessionDB": "isolated temporary directories",
+    "credentialAndOptionalDependencySource": "selected existing profile; normal runtime resolver",
+    "profileConfigUnchanged": true,
+    "browser": "unconfigured",
+    "cronDisabled": true,
+    "disabledToolsets": [
+      "telegram",
+      "configuration",
+      "memory",
+      "mcp",
+      "dangerous",
+      "media"
+    ],
+    "providerLimits": {
+      "iterations": 30,
+      "toolCalls": 60,
+      "wallClockMs": 240000,
+      "finalizationReserveMs": 15000
+    },
+    "restart": "runtime disposed and recreated with same persisted SQLite session; not a gateway or OS process restart",
+    "review": "Final outcomes across successive fixes; not one simultaneous run of all 19 on the final source. Failed intermediate task runs retained below. Source excerpts and delivered reports manually reviewed."
+  },
+  "counts": {
+    "uniqueWorkflows": 19,
+    "latestPassed": 19,
+    "latestFailed": 0,
+    "attemptedWorkflowsAcrossFixRounds": 23
+  },
+  "usageIncludingIntermediateFailures": {
+    "codex/gpt-6.1-sol": {
+      "calls": 241,
+      "tokens": 1880034
+    },
+    "typesafe/jev-1.13.0": {
+      "calls": 119,
+      "tokens": 731014
+    }
+  },
+  "routingStatusEvents": {
+    "none": 41,
+    "uncertain": 54
+  },
+  "jevBatchStates": {
+    "responded": 119
+  },
+  "intermediateFailures": [
+    {
+      "round": "initial",
+      "id": "10-delegated-research",
+      "sessionId": "16baf702-9e76-4c7f-9396-4e4967956dbd",
+      "status": "waiting_for_input",
+      "failedAttempts": [
+        {
+          "failure": "evidence-contract-unsatisfied",
+          "message": "Execution stopped (normal). Research evidence needs correction: source-citations-missing. Cite observed sources beside the claims they support; a Markdown table is optional. Inspect the preserved draft."
+        }
+      ],
+      "diagnosis": "Jev omitted the synthesis dependency reader."
+    },
+    {
+      "round": "fresh",
+      "id": "10-delegated-research",
+      "sessionId": "f6e93ca3-b168-4b12-ada7-d1d4db9de20e",
+      "status": "partial",
+      "failedAttempts": [
+        {
+          "failure": "security-deny",
+          "message": "Agent Step execution failed (security-deny)."
+        }
+      ],
+      "diagnosis": "Missing output read had relative target identity; delivery ceiling denied it. Unnamed initial turn assessment also reported a misleading denial."
+    },
+    {
+      "round": "delivery",
+      "id": "10-delegated-research",
+      "sessionId": "4063c09a-d762-4526-b174-f56e53b13d65",
+      "status": "completed",
+      "failedAttempts": [],
+      "diagnosis": "All five steps completed and the saved bytes matched readback, but the automatic source appendix made the report 938 words against an under-800 request. The final rerun checks this constraint explicitly."
+    },
+    {
+      "round": "network",
+      "id": "10-delegated-research",
+      "sessionId": "001c393a-43ad-4409-a43b-f055e567d9a6",
+      "status": "partial",
+      "failedAttempts": [
+        {
+          "failure": "network",
+          "message": "Agent Step execution failed (network)."
+        }
+      ],
+      "diagnosis": "One worker failed with class network. Two workers, synthesis and delivery completed; the 599-word partial report correctly identified the missing scope. Repeated on unchanged source."
+    }
+  ],
+  "cases": [
+    {
+      "id": "01-capability-question",
+      "name": "Capability question",
+      "round": "initial",
+      "prompt": "Are you able to review source code? Explain briefly what you would need. Do not inspect files or use external tools for this question.",
+      "sessionId": "2f8af7a6-931f-49fd-93c6-674bd64f9038",
+      "passed": true,
+      "status": "completed",
+      "durationMs": 5509,
+      "tools": []
+    },
+    {
+      "id": "02-inline-review",
+      "name": "Review supplied code",
+      "round": "initial",
+      "prompt": "Review only this supplied JavaScript for a bug. Do not inspect files, run commands, or browse. function average(xs) { return xs.reduce((a,b)=>a+b,0)/xs.length; } What happens with an empty array, and what should we change?",
+      "sessionId": "4cb288be-c8ea-4522-a9f6-ece9db0110c4",
+      "passed": true,
+      "status": "completed",
+      "durationMs": 7391,
+      "tools": []
+    },
+    {
+      "id": "03-local-search",
+      "name": "Find the authoritative local decision",
+      "round": "initial",
+      "prompt": "Read the notes in this workspace. Which payment adapter was actually selected, who owns it, and what must never be retried automatically? Cite the file. Do not change files or search the web.",
+      "sessionId": "8aebcb71-f731-4bb2-bb22-8e488b2a4024",
+      "passed": true,
+      "status": "completed",
+      "durationMs": 21077,
+      "tools": [
+        {
+          "name": "capability.discover",
+          "ok": true
+        },
+        {
+          "name": "capability.request",
+          "ok": true
+        },
+        {
+          "name": "file.search",
+          "ok": true
+        },
+        {
+          "name": "file.read",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "id": "04-code-fix-tests",
+      "name": "Fix a bug and run tests",
+      "round": "initial",
+      "prompt": "Fix sumPrices in sum.mjs so numeric strings and numbers add correctly, an empty basket returns zero, and invalid prices throw. Keep the existing tests unchanged. Run node --test sum.test.mjs and report the result.",
+      "sessionId": "5131b048-656b-49eb-aa20-747bb33e3bce",
+      "passed": true,
+      "status": "completed",
+      "durationMs": 22271,
+      "tools": [
+        {
+          "name": "file.read",
+          "ok": true
+        },
+        {
+          "name": "file.read",
+          "ok": true
+        },
+        {
+          "name": "file.patch",
+          "ok": true
+        },
+        {
+          "name": "file.read",
+          "ok": true
+        },
+        {
+          "name": "terminal.run",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "id": "05-csv-report",
+      "name": "Analyse CSV and save a report",
+      "round": "initial",
+      "prompt": "Analyse orders.csv. Exclude refunded orders. Save sales-summary.md with paid revenue by region, total paid revenue, and number of paid orders. Read back the saved file to verify it. No web research.",
+      "sessionId": "8f6a0f36-d300-4e95-b50d-a9d82a9a1e99",
+      "passed": true,
+      "status": "completed",
+      "durationMs": 14374,
+      "tools": [
+        {
+          "name": "file.read",
+          "ok": true
+        },
+        {
+          "name": "file.write",
+          "ok": true
+        },
+        {
+          "name": "file.read",
+          "ok": true
+        }
+      ],
+      "artifacts": [
+        {
+          "name": "sales-summary.md",
+          "bytes": 340,
+          "words": 66,
+          "sha256": "5d13e18c263efcb4b91a2dc7c917c9b06e9884d97c27e9fb1fbe4c216267458d"
+        },
+        {
+          "name": "sales-summary-copy.md",
+          "bytes": 340,
+          "words": 66,
+          "sha256": "5d13e18c263efcb4b91a2dc7c917c9b06e9884d97c27e9fb1fbe4c216267458d"
+        }
+      ]
+    },
+    {
+      "id": "06-arabic-file",
+      "name": "Arabic inventory question",
+      "round": "initial",
+      "prompt": "اقرأ ملف inventory.csv وأخبرني بالعربية أي منتج نفد من المخزون وما إجمالي الوحدات المتبقية. لا تعدّل الملفات ولا تبحث على الإنترنت.",
+      "sessionId": "ce2930f8-cf9f-48c1-828e-49ba7de9d836",
+      "passed": true,
+      "status": "completed",
+      "durationMs": 7448,
+      "tools": [
+        {
+          "name": "file.read",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "id": "07-primary-page",
+      "name": "Read a long primary page without search",
+      "round": "initial",
+      "prompt": "Read https://www.rfc-editor.org/rfc/rfc9110.html and explain the difference between HTTP 401 and 403 using that source. Cite the relevant sections. Do not use web search and do not save any files.",
+      "sessionId": "a7b53120-9f48-4fdf-9197-307452bf4834",
+      "passed": true,
+      "status": "completed",
+      "durationMs": 16435,
+      "tools": [
+        {
+          "name": "web.extract",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "id": "08b-two-installed-skills",
+      "name": "Use two explicit skills with supplied facts",
+      "round": "initial",
+      "prompt": "Use the researcher and research-discovery skills to explain these supplied facts in under 100 words: a heat pump moves heat; a resistance heater converts electricity into heat. Use only these facts. Do not browse, search, run commands, or create files.",
+      "sessionId": "5e0beb18-84d3-4392-adf1-318d965ed0ea",
+      "passed": true,
+      "status": "completed",
+      "durationMs": 7402,
+      "tools": [
+        {
+          "name": "skill.read",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "id": "09-live-research",
+      "name": "Research and save a cited comparison",
+      "round": "initial",
+      "prompt": "Use the researcher skill to compare WebP and AVIF for a small website. Search for current primary documentation and read the primary pages to verify the key claims. Save a concise cited comparison, under 600 words, to image-formats.md and read it back. Cover compression, transparency, animation, and browser support. Do not install software or change any other files.",
+      "sessionId": "34d4d9b3-21d5-46ec-bcc6-b8fd22c50637",
+      "passed": true,
+      "status": "completed",
+      "durationMs": 53236,
+      "tools": [
+        {
+          "name": "skill.read",
+          "ok": true
+        },
+        {
+          "name": "web.search",
+          "ok": true
+        },
+        {
+          "name": "web.search",
+          "ok": true
+        },
+        {
+          "name": "web.extract",
+          "ok": true
+        },
+        {
+          "name": "web.search",
+          "ok": true
+        },
+        {
+          "name": "web.extract",
+          "ok": true
+        },
+        {
+          "name": "file.write",
+          "ok": true
+        },
+        {
+          "name": "file.read",
+          "ok": true
+        }
+      ],
+      "artifacts": [
+        {
+          "name": "image-formats.md",
+          "bytes": 2801,
+          "words": 382,
+          "sha256": "0eff43924eb890ab979048428235b56a56188a01132a5177700d1b2b2a4497c3"
+        }
+      ]
+    },
+    {
+      "id": "10-delegated-research",
+      "name": "Three-worker research, synthesis and delivery",
+      "round": "final",
+      "prompt": "Use the researcher skill and exactly 3 subagents to research accessible web forms: one covers labels and instructions, one keyboard navigation and focus, and one errors and validation. Use primary W3C or MDN sources and read the source pages. Combine their findings into a concise cited checklist under 800 words. Save it to forms-checklist.md and verify the saved file. Do not install software or change other files.",
+      "sessionId": "3a2b38b0-ecef-420e-bd72-cc88ebcb31fe",
+      "passed": true,
+      "status": "completed",
+      "durationMs": 162013,
+      "tools": [
+        {
+          "name": "skill.read",
+          "ok": true
+        },
+        {
+          "name": "delegate_task",
+          "ok": true
+        }
+      ],
+      "task": {
+        "status": "completed",
+        "acceptedResults": 5,
+        "steps": [
+          {
+            "role": "worker",
+            "status": "completed"
+          },
+          {
+            "role": "worker",
+            "status": "completed"
+          },
+          {
+            "role": "worker",
+            "status": "completed"
+          },
+          {
+            "role": "synthesis",
+            "status": "completed"
+          },
+          {
+            "role": "report-delivery",
+            "status": "completed"
+          }
+        ],
+        "attempts": [
+          {
+            "status": "completed"
+          },
+          {
+            "status": "completed"
+          },
+          {
+            "status": "completed"
+          },
+          {
+            "status": "completed"
+          },
+          {
+            "status": "completed"
+          }
+        ]
+      },
+      "artifacts": [
+        {
+          "name": "forms-checklist.md",
+          "bytes": 5183,
+          "words": 612,
+          "sha256": "2e844eb35a55041e518e1c8ac6b086c2ef99d17c0359223aa37f85874c8ff831"
+        }
+      ],
+      "fileEvidence": [
+        {
+          "tool": "file.write",
+          "path": "forms-checklist.md",
+          "sha256": "2e844eb35a55041e518e1c8ac6b086c2ef99d17c0359223aa37f85874c8ff831",
+          "bytes": 5183
+        },
+        {
+          "tool": "file.read",
+          "path": "forms-checklist.md",
+          "sha256": "2e844eb35a55041e518e1c8ac6b086c2ef99d17c0359223aa37f85874c8ff831",
+          "bytes": 5183,
+          "completeFileRead": true
+        }
+      ],
+      "review": "All three assigned scopes represented; primary-page claims checked against returned passages; no false save blocker. Full output, including source appendix, is under 800 whitespace-delimited words. Saved/read-back hashes match."
+    },
+    {
+      "id": "11-restart-save-only",
+      "name": "Copy a report after runtime recreation",
+      "round": "initial",
+      "prompt": "Make an identical copy of the report you just saved as sales-summary-copy.md. Do not reanalyse the CSV or do any research. Read back the copy to verify it.",
+      "passed": true,
+      "status": "completed",
+      "tools": [
+        {
+          "name": "file.read",
+          "ok": true
+        },
+        {
+          "name": "file.write",
+          "ok": true
+        },
+        {
+          "name": "file.read",
+          "ok": true
+        }
+      ],
+      "artifacts": [
+        {
+          "name": "sales-summary.md",
+          "bytes": 340,
+          "words": 66,
+          "sha256": "5d13e18c263efcb4b91a2dc7c917c9b06e9884d97c27e9fb1fbe4c216267458d"
+        },
+        {
+          "name": "sales-summary-copy.md",
+          "bytes": 340,
+          "words": 66,
+          "sha256": "5d13e18c263efcb4b91a2dc7c917c9b06e9884d97c27e9fb1fbe4c216267458d"
+        }
+      ]
+    },
+    {
+      "id": "12-missing-file",
+      "name": "Handle missing input honestly",
+      "round": "initial",
+      "prompt": "Read missing-quarterly-sales.csv and tell me the total revenue. If the file is not present, say so clearly; do not invent any figures or create the file.",
+      "sessionId": "4918dce1-b509-4244-82fd-1a2c7b7f995f",
+      "passed": true,
+      "status": "blocked",
+      "durationMs": 7377,
+      "tools": [
+        {
+          "name": "file.read",
+          "ok": false
+        }
+      ]
+    },
+    {
+      "id": "13-rewrite-only",
+      "name": "Rewrite supplied prose without tools",
+      "round": "initial",
+      "prompt": "Rewrite this sentence into clear, concise professional English: Due to the fact that the shipment was delayed, we are in a situation where we must postpone the launch. Return only the rewritten sentence. Do not use tools.",
+      "sessionId": "88973d34-d9d6-4058-9c95-88516b36da8d",
+      "passed": true,
+      "status": "completed",
+      "durationMs": 3421,
+      "tools": []
+    },
+    {
+      "id": "14-failed-page-recovery",
+      "name": "Recover from 404 into a long source",
+      "round": "initial",
+      "prompt": "Read https://www.rfc-editor.org/rfc/rfc999999999.html to explain HTTP 404. If that reference is unavailable, use https://www.rfc-editor.org/rfc/rfc9110.html instead. Cite the source you actually read and disclose the failed reference. Do not search or save files.",
+      "sessionId": "06966fa8-9e64-44c4-a090-9c715fff5b88",
+      "passed": true,
+      "status": "completed_with_recovered_errors",
+      "durationMs": 13908,
+      "tools": [
+        {
+          "name": "web.extract",
+          "ok": false
+        },
+        {
+          "name": "web.extract",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "id": "15-short-page-recovery",
+      "name": "Recover from 404 into a short source",
+      "round": "initial",
+      "prompt": "Read https://developers.google.com/speed/webp/nonexistent-evaluation-reference. If unavailable, use https://developers.google.com/speed/webp instead. Explain whether WebP transparency works with lossy compression. Cite the source you actually read and disclose the failed reference. Keep it under 120 words. No search and no file output.",
+      "sessionId": "cd9175e6-bbbe-4a6c-bf41-20b533578532",
+      "passed": true,
+      "status": "completed_with_recovered_errors",
+      "durationMs": 13852,
+      "tools": [
+        {
+          "name": "web.extract",
+          "ok": false
+        },
+        {
+          "name": "web.extract",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "id": "16-fresh-inline",
+      "name": "16-fresh-inline",
+      "round": "fresh",
+      "prompt": "Review only this supplied JavaScript: function first(values) { return values[0]; } What does first([]) return? Keep it under 60 words. Do not inspect files, modify code, run commands, or browse.",
+      "sessionId": "833b686c-4e2f-4080-b029-11d58062883a",
+      "passed": true,
+      "status": "completed",
+      "durationMs": 3682,
+      "tools": []
+    },
+    {
+      "id": "17-fresh-file-read",
+      "name": "17-fresh-file-read",
+      "round": "fresh",
+      "prompt": "Read release.yaml and explain why the release is held. Do not modify files or browse.",
+      "sessionId": "7f365176-b76d-4d46-a438-a12d065f62b2",
+      "passed": true,
+      "status": "completed",
+      "durationMs": 6643,
+      "tools": [
+        {
+          "name": "file.read",
+          "ok": true
+        }
+      ]
+    },
+    {
+      "id": "18-fresh-copy",
+      "name": "18-fresh-copy",
+      "round": "fresh",
+      "prompt": "Could you copy source.md to output.md. Preserve every character, including the Arabic, punctuation, and final newline. Verify the resulting file. Do not browse or change the source.",
+      "sessionId": "74d92e2e-97f2-449a-9977-f702c4cf29d3",
+      "passed": true,
+      "status": "completed",
+      "durationMs": 20577,
+      "tools": [
+        {
+          "name": "file.read",
+          "ok": true
+        },
+        {
+          "name": "file.read",
+          "ok": true
+        },
+        {
+          "name": "terminal.run",
+          "ok": true
+        },
+        {
+          "name": "file.write",
+          "ok": true
+        },
+        {
+          "name": "file.read",
+          "ok": true
+        }
+      ],
+      "artifacts": [
+        {
+          "name": "output.md",
+          "bytes": 71,
+          "words": 11,
+          "sha256": "f614e911bdfadfe8a3f0d598fd158a5d8e13f807e7020d4e63e70857b5e408b5"
+        }
+      ]
+    },
+    {
+      "id": "19-fresh-long-source",
+      "name": "19-fresh-long-source",
+      "round": "fresh",
+      "prompt": "Read https://www.rfc-editor.org/rfc/rfc9111.html. Using the response Cache-Control directives in that document, explain the difference between no-cache and no-store and whether no-store guarantees privacy. Cite the sections you actually read. Keep it under 220 words. Do not search or save files.",
+      "sessionId": "26528a3e-5a71-4e8f-8f0c-7620fc0e65dc",
+      "passed": true,
+      "status": "completed",
+      "durationMs": 16725,
+      "tools": [
+        {
+          "name": "web.extract",
+          "ok": true
+        },
+        {
+          "name": "web.extract",
+          "ok": true
+        }
+      ]
+    }
+  ]
+}

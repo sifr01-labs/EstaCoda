@@ -49,7 +49,7 @@ The research-discovery skill keeps its core method below the inline skill-conten
 
 The method asks for primary-page investigation of central claims in deep research, gap-driven follow-up, date checks, and concise synthesis. It permits a quick snippet-based overview when appropriate and honest partial findings when retrieval fails. There is no new minimum tool count, mandatory extraction gate, or model-based quality evaluator. Existing provenance, dependency coverage, authorization and delivery checks remain enforced.
 
-Source notes appear after the report in a `Source evidence` appendix. A source observed only through search is labelled `snippet; page content not retrieved`; this does not assert that retrieval was attempted or impossible. The attempt transcript records individual failures, and the narrative should name a failure only when one occurred. Extraction is labelled `extracted; full text unverified`, since retrieving content does not prove completeness or accuracy. The runtime omits automatic success/freshness preambles, retains missing-scope warnings, and asks synthesis to state shared limitations once.
+Source notes appear after the report in a `Source evidence` appendix. A source observed only through search is labelled `snippet; page content not retrieved`; this does not assert that retrieval was attempted or impossible. The attempt transcript records individual failures, and the narrative should name a failure only when one occurred. Extraction is labelled `extracted; full text unverified`, since retrieving content does not prove completeness or accuracy. The runtime omits automatic success/freshness preambles, retains missing-scope warnings, and asks synthesis to state shared limitations once. When a word limit is requested, synthesis is instructed to reserve room for the retained source notes within that limit; this is writing guidance, not a deterministic word-count guarantee.
 
 The current durable synthesis Step can read accepted worker results but cannot launch another research round. Workers can investigate gaps before returning. If synthesis discovers an unresolved gap, it must disclose it; this change does not add adaptive rescheduling or expand synthesis authority.
 
@@ -148,3 +148,22 @@ Explicit coordinated requests such as “Use the researcher skill and 3 subagent
 For a foreground research request that saves a report, citation provenance is checked against the delivered report bytes, not the short chat acknowledgement. The report must have a successful write and a subsequent complete, matching file readback in the current turn. A ranged preview alone is insufficient. Exact write input or a complete read body must match the executor's file digest before being treated as report content. Existing files and unrelated writes cannot satisfy this contract.
 
 Foreground research uses the existing completion repair loop (at most two corrective replies, within the turn's limits). Missing readback or unsupported citations produce feedback before final settlement. Denied actions do not trigger automatic completion retries. New report digests and matching complete readbacks count as progress; repeating unchanged file calls does not. These checks establish delivery and source provenance, not scientific accuracy or source freshness by themselves.
+
+## Reading long sources
+
+`web.extract` returns bounded observations, not an implicit read of the entire
+page. `query` finds a literal, case-insensitive phrase in retrieved text (up to
+200 characters). It returns up to six excerpts within the requested output
+limit. `startChar` continues from an extracted-text offset; use `nextStartChar`
+for later passages or later matches. Offsets refer to extracted text, not HTML,
+and can change if the source changes between fetches.
+
+At most 1,000,000 extracted characters are searched. Output remains capped by
+runtime configuration. `truncated`, `sourceTruncated`, `retrievedTextChars`, and
+window offsets describe what was observed; a failed match does not prove absence
+from an unobserved portion. Cite only returned passages. The legacy `text`
+argument finds a URL and is not a section-search instruction.
+
+Passage and query options are part of the turn-local reuse key. Different
+windows cannot reuse a cached prefix as if it contained the requested section.
+URL, redirect, authentication, workspace, and approval policies still apply.

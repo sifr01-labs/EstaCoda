@@ -921,7 +921,9 @@ export class ToolExecutor {
         return undefined;
       }
 
-      const allowMissingLeaf = toolName === "file.write";
+      // A pre-write existence check must identify the same governed target as
+      // the write. The read handler still reports ENOENT; parent/root checks remain.
+      const allowMissingLeaf = toolName === "file.write" || toolName === "file.read";
       const canonicalTarget = await canonicalWorkspaceTarget(this.#workspaceRoot, canonicalRoot, rawPath, { allowMissingLeaf });
       return canonicalTarget === undefined
         ? `${toolName}:path:${normalizePathKey(rawPath)}`

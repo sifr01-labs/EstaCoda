@@ -36,6 +36,19 @@ describe("turn-local public extract reuse", () => {
     expect(h.fetch).toHaveBeenCalledTimes(3);
   });
 
+  it("does not substitute a cached prefix for a different passage or query", async () => {
+    const h = fixture();
+    await h.run({ url, maxContentChars: 10 });
+    const later = await h.run({ url, startChar: 10, maxContentChars: 10 });
+    const match = await h.run({ url, query: "Observation", maxContentChars: 10 });
+    expect(h.fetch).toHaveBeenCalledTimes(3);
+    expect(later.metadata?.webReadReuse).toBeUndefined();
+    expect(match.metadata?.webReadReuse).toBeUndefined();
+    const same = await h.run({ url, startChar: 10, maxContentChars: 10 });
+    expect(same.metadata?.webReadReuse).toBe(true);
+    expect(same.metadata?.windows).toEqual(later.metadata?.windows);
+  });
+
   it("keeps meaningful queries and extraction limits distinct", async () => {
     const h = fixture();
     await h.run(); await h.run({ url: url.replace("one", "two") }); await h.run({ url, maxContentChars: 10 });

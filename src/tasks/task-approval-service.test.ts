@@ -49,17 +49,36 @@ describe("TaskApprovalService security policy", () => {
 
   it("bounds report delivery to its target and preserves inherited approval and denial", async () => {
     const { task, step, attempt } = context("runtime_policy");
+    task.authorityPolicy = { ...task.authorityPolicy, riskClassPolicy: { ...task.authorityPolicy.riskClassPolicy, "read-only-local": "runtime_policy" } };
+    step.authorityPolicy = task.authorityPolicy;
     task.workspace = { canonicalPath: "/workspace", identityHash: "fixture" } as Task["workspace"];
     step.executor = { kind: "agent", role: "report-delivery", requestContract: { version: 1, objective: "Save report.md", requirements: { skillReferences: [], issues: [], fileOutput: { format: "markdown", path: "report.md" } } } };
     const service = new TaskApprovalService({ store: emptyStore() });
     const request = { riskClass: "workspace-write" as const, toolName: "file.write", targetKey: "file.write:path:/workspace/report.md", description: "Save report", context: { trustedWorkspace: true } };
     for (const decision of ["allow", "ask", "deny"] as const) {
       const policy = service.securityPolicyFor(task, step, attempt, { decide: () => decision });
+      expect(policy.decide({ riskClass: "read-only-local", description: "respond to user prompt", context: { trustedWorkspace: true } })).toBe(decision);
+      expect(policy.decide({ riskClass: "destructive-local", description: "unnamed operation", context: { trustedWorkspace: true } })).toBe("deny");
       expect(policy.decide(request)).toBe(decision);
       expect(policy.decide({ ...request, targetKey: "file.write:path:/workspace/other.md" })).toBe("deny");
       expect(policy.decide({ ...request, toolName: "terminal.run" })).toBe("deny");
+      expect(policy.decide({ ...request, riskClass: "read-only-local", toolName: "file.read", targetKey: "file.read:path:/workspace/other.md" })).toBe("deny");
+      expect(policy.decide({ ...request, targetKey: undefined })).toBe("deny");
     }
   });
+  it("does not queue a tool approval for an unnamed turn assessment", async () => {
+    const { task, step, attempt } = context("runtime_policy");
+    task.authorityPolicy = { ...task.authorityPolicy, riskClassPolicy: { ...task.authorityPolicy.riskClassPolicy, "read-only-local": "runtime_policy" } };
+    step.authorityPolicy = task.authorityPolicy;
+    step.executor = { kind: "agent", role: "report-delivery" };
+    const service = new TaskApprovalService({ store: emptyStore() });
+    const policy = service.securityPolicyFor(task, step, attempt, { decide: () => "ask" });
+    expect((await policy.assess!({ riskClass: "read-only-local", description: "respond to user prompt", context: { trustedWorkspace: true } })).decision).toBe("ask");
+    expect(service.takeRequest(attempt.id)).toBeUndefined();
+    await policy.assess!({ toolName: "task.result.read", riskClass: "read-only-local", description: "read accepted result", context: { trustedWorkspace: true } });
+    expect(service.takeRequest(attempt.id)?.toolName).toBe("task.result.read");
+  });
+
   it("scopes pending approval reads in the store before the page limit", () => {
     const link = {
       id: "link-alpha",

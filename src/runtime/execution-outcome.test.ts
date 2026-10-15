@@ -796,3 +796,16 @@ describe("execution outcome receipts", () => {
     expect(rendered).not.toContain("raw-secret");
   });
 });
+
+describe("supplied content and prohibited external reads", () => {
+  it.each([
+    "Review only this supplied JavaScript for a bug. Do not inspect files, run commands, or browse. function average(xs) { return xs.reduce((a,b)=>a+b,0)/xs.length; } What happens with an empty array?",
+    "Review the pasted function. Never inspect files or browse.",
+    "راجع النص التالي. لا تقرأ الملفات ولا تبحث على الإنترنت."
+  ])("does not require prohibited reads: %s", userText => {
+    expect(deriveExecutionCompletionFloor({ userText })).toBe("none");
+  });
+  it.each(["Read src/main.ts. Do not modify files.", "Read counter.cjs and summarize its contents. Do not modify files.", "Inspect the repository without changing anything.", "اقرأ ملف inventory.csv. لا تعدّل الملفات."])("retains real read obligations: %s", userText => {
+    expect(deriveExecutionCompletionFloor({ userText })).toBe("read");
+  });
+});

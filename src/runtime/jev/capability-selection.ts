@@ -9,6 +9,7 @@ export type { CapabilityEvaluation } from './capability-decisions.js';
 
 export async function selectJevCapabilities(input: {
   routing: LiveJevRouting; catalog: ProviderToolSchemaCatalog; intent: IntentRoute;
+  requiredTools?: readonly string[];
   standard: ProviderToolSelection; evaluation: CapabilityEvaluation;
   validateTool(id: string): Promise<unknown>;
 }): Promise<ProviderToolSelection> {
@@ -25,7 +26,7 @@ export async function selectJevCapabilities(input: {
       ...(decision.fallbackReason === 'engine-unavailable' && decision.diagnostics ? { diagnostics: { ...decision.diagnostics, failure: decision.diagnostics.failure ?? { code: 'stale' }, candidates: decision.diagnostics.candidates.map(candidate => ({ ...candidate, source: 'standard' as const, outcome: 'discarded' as const })) } } : {}), selections: input.catalog.inventory.map(tool => ({ id: `tool:${tool.name}`, selected: exposed.has(tool.name) })) } };
   };
   if (decision.actualEngine !== 'jev') return fallback();
-  const explicit = new Set([...requiredRequestTools(input.intent.requestRequirements), ...explicitInspectionTools(input.evaluation.context.userRequest)]);
+  const explicit = new Set([...(input.requiredTools ?? []), ...requiredRequestTools(input.intent.requestRequirements), ...explicitInspectionTools(input.evaluation.context.userRequest)]);
   const required = new Set(explicit);
   if (input.catalog.entries.some(entry => entry.tool.name === "config.provider.execution_status")) required.add("config.provider.execution_status");
   // Skill toolsets describe dependency availability, not a requirement to expose

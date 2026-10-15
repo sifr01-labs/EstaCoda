@@ -108,6 +108,8 @@ export function namedConnectorIdsForRequest(input: {
 export function narrowProviderToolsForTurn(input: {
   catalog: ProviderToolSchemaCatalog;
   intent: IntentRoute;
+  /** Host-owned Step prerequisites, never parsed from message metadata. */
+  requiredTools?: readonly string[];
   userText?: string;
   selectedSkill?: LoadedSkill | SkillDefinition;
   attachments?: readonly ChannelAttachment[];
@@ -120,6 +122,8 @@ export function narrowProviderToolsForTurn(input: {
 export function selectProviderToolsForTurn(input: {
   catalog: ProviderToolSchemaCatalog;
   intent: IntentRoute;
+  /** Host-owned Step prerequisites, never parsed from message metadata. */
+  requiredTools?: readonly string[];
   userText?: string;
   selectedSkill?: LoadedSkill | SkillDefinition;
   attachments?: readonly ChannelAttachment[];
@@ -136,7 +140,7 @@ export function selectProviderToolsForTurn(input: {
     readyAttachments: (input.attachments ?? []).some((attachment) => (attachment.status ?? "ready") === "ready")
   });
   const policyToolsets = new Set(policy.toolsets);
-  const exactRequestTools = new Set([...requiredRequestTools(input.intent.requestRequirements), ...explicitInspectionTools(input.userText ?? "")]);
+  const exactRequestTools = new Set([...(input.requiredTools ?? []), ...requiredRequestTools(input.intent.requestRequirements), ...explicitInspectionTools(input.userText ?? "")]);
   const policyRiskClasses = new Set(policy.allowedRiskClasses);
   const routedToolsets = new Set<ToolsetName>([
     ...input.intent.suggestedToolsets,

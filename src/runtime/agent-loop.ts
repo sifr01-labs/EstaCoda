@@ -112,6 +112,8 @@ export type AgentLoopInput = {
   /** Host-only durable Step contract. Never populated from model output or inputMetadata. */
   stepCompletion?: {
     requirements: RequestRequirements;
+    /** Host-declared prerequisites; intersected with the session catalog, never authority. */
+    requiredTools?: readonly string[];
     validate?: (text: string, executions: readonly ToolExecutionRecord[]) => string | undefined;
   };
   channel: ChannelKind;
@@ -1065,6 +1067,7 @@ export class AgentLoop {
     let providerToolSelection: ProviderToolSelection = this.#model?.supportsTools === true
       ? this.#providerToolsForTurn({
           intent,
+          requiredTools: input.stepCompletion?.requiredTools,
           userText: executionText,
           selectedSkill,
           attachments,
@@ -1075,6 +1078,7 @@ export class AgentLoop {
     if (this.#model?.supportsTools === true && this.#providerToolSchemaCatalog && this.#capabilityRouting) {
       providerToolSelection = await selectJevCapabilities({ ...this.#capabilityRouting,
         catalog: this.#providerToolSchemaCatalog, intent, standard: providerToolSelection,
+        requiredTools: input.stepCompletion?.requiredTools,
         evaluation: { ...routingEvaluation, usage: { ...routingEvaluation.usage, requestKey: `jev-capabilities:${visibleTurn.id}` } }
       });
     }
@@ -1119,13 +1123,13 @@ export class AgentLoop {
     const providerLoop: ProviderTurnLoopResult = researchBlockers.length > 0
       ? { providerExecution: undefined, toolExecutions: [], iterations: 0, terminationCause: "user_input_required" }
       : await this.#providerTurnLoop.run({
-      validateCompletion: input.stepCompletion?.validate ?? (intent.requestRequirements?.research === undefined ? undefined : (text, executions) => {
+      validateCompletion: input.stepCompletion?.validate ?? (intent.requestRequirements?.research === undefined && intent.requestRequirements?.fileOutput === undefined ? undefined : (text, executions) => {
         const receipts = this.#executionEvidenceIndex.recordsForTurn(visibleTurn.id);
         const research = researchRequestEvidence({ finalText: text, requestRequirements: intent.requestRequirements,
           toolExecutions: executions, executionReceipts: receipts, skillRequirementsSatisfied: true });
         if (research.missing.includes("requested-worker-evidence")) return "Requested worker evidence is missing. Use delegate_task to fulfill the user's worker requirement. If it is not exposed, discover and request the delegation capability before continuing.";
         const file = fileOutputEvidence({ requirements: intent.requestRequirements, toolExecutions: executions, executionReceipts: receipts });
-        if (!file.satisfied) return `File output: ${file.reason}. Save the requested report, then call file.read on the target without lineStart or lineEnd to verify the complete file. Do not claim completion before verification.`;
+        if (!file.satisfied) return `File output: ${file.reason}. Use file.write or file.patch for the requested target, then file.read with only path, without lineStart or lineEnd, to verify the entire file. Shell operations alone do not provide file-write evidence. For a copy, first read the source and preserve its exact content; for an accepted task result use file.write sourceResult. Respect overwrite approvals and do not repeat research. Do not claim completion before verification.`;
         return research.satisfied ? undefined : `Research requirements remain incomplete: ${research.missing.join(", ")}. Correct the report using observed sources. After changing a saved report, read the complete file again before completing.`;
       }),
       visibleTurnId: visibleTurn.id,
@@ -1589,6 +1593,7 @@ export class AgentLoop {
 
   #providerToolsForTurn(input: {
     intent: IntentRoute;
+    requiredTools?: readonly string[];
     userText: string;
     selectedSkill?: LoadedSkill | SkillDefinition;
     attachments?: readonly ChannelAttachment[];
@@ -1608,6 +1613,7 @@ export class AgentLoop {
     return selectProviderToolsForTurn({
       catalog: this.#providerToolSchemaCatalog,
       intent: input.intent,
+      requiredTools: input.requiredTools,
       userText: input.userText,
       selectedSkill: input.selectedSkill,
       attachments: input.attachments,

@@ -74,7 +74,7 @@ describe.sequential("research through real CLI and Telegram entry points", () =>
       const research = await entry.turn("Use the researcher skill to research battery recycling.");
       expect(h.store.listTasks()).toHaveLength(0);
       expect(research.toolExecutions.find((call) => call.tool.name === "delegate_task")?.result?.ok).toBe(false);
-      h.enqueue(answer(REPORT));
+      h.enqueue(answer(REPORT), answer(REPORT), answer(REPORT));
       const saved = await entry.turn("Save this report as report.md");
       expect(saved.finalOutcome?.status).not.toBe("completed");
       await expect(readFile(join(h.workspaceRoot, "report.md"))).rejects.toThrow();

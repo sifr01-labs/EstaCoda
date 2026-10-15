@@ -2,7 +2,7 @@ import { ProviderRegistry } from "../providers/provider-registry.js";
 import { createOpenAICompatibleProvider } from "../providers/openai-compatible-provider.js";
 import { createOpenAIResponsesProvider } from "../providers/openai-responses-provider.js";
 import { buildResolvedModelRoute } from "../providers/provider-metadata.js";
-import { readFile, writeFile } from "node:fs/promises";
+import { readFile, symlink, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { resolveProfileStateHome } from "../config/profile-home.js";
@@ -407,7 +407,7 @@ describe.sequential("research workflow acceptance harness", () => {
     scriptConsumed(h);
   });
 
-  it.each(["denied", "wrong-target", "wrong-content", "no-readback", "claim-only", "repaired", "validation-repaired"])("validates report delivery for %s", async (mode) => {
+  it.each(["denied", "wrong-target", "wrong-content", "no-readback", "claim-only", "repaired", "validation-repaired", "missing-preflight", "symlink-target"])("validates report delivery for %s", async (mode) => {
     const h = await harness({ denyWrites: mode === "denied" });
     h.enqueue(nativeCall("delegate_task", { tasks: [{ task: "Research recycling.", allowedTools: ["web.search"], research: { scope: "methods", requireLiveSources: false, requireRepositoryEvidence: false } }] }));
     await h.turn("Use 1 worker to research recycling. Save report.md");
@@ -420,18 +420,23 @@ describe.sequential("research workflow acceptance harness", () => {
     expect((await scheduler.runOnce()).completed).toBe(1);
     const synthesis = h.store.listSteps(task.id, task.activePlanRevisionId!).find((step) => step.executor.role === "synthesis")!;
     const result = h.store.listResults(task.id).find((item) => item.stepId === synthesis.id)!;
+    if (mode === "symlink-target") {
+      await writeFile(join(h.homeDir, "outside.md"), "untouched");
+      await symlink(join(h.homeDir, "outside.md"), join(h.workspaceRoot, "report.md"));
+    }
+    if (mode === "missing-preflight") h.enqueue(nativeCall("file_read", { path: "report.md" }));
     if (mode !== "claim-only") {
       h.enqueue(nativeCall("task_result_read", { task_id: task.id, result_id: result.id }),
         nativeCall("file_write", { path: mode === "wrong-target" ? "other.md" : "report.md", content: ["wrong-content", "repaired", "validation-repaired"].includes(mode) ? "unrelated bytes" : REPORT, ...(mode === "validation-repaired" ? { sourceResult: { taskId: task.id, resultId: result.id } } : {}) }));
-      if (mode === "wrong-content") h.enqueue(nativeCall("file_read", { path: "report.md" }));
+      if (["wrong-content", "missing-preflight"].includes(mode)) h.enqueue(nativeCall("file_read", { path: "report.md" }));
     }
     h.enqueue(answer("Saved report.md."));
     if (["repaired", "validation-repaired"].includes(mode)) h.enqueue(
       nativeCall("file_write", { path: "report.md", sourceResult: { taskId: task.id, resultId: result.id }, content: "", overwrite: true }),
       nativeCall("file_read", { path: "report.md" }), answer("Saved and verified report.md."));
-    else if (!["denied", "wrong-target"].includes(mode)) h.enqueue(answer("Saved report.md."), answer("Saved report.md."));
+    else if (!["denied", "wrong-target", "missing-preflight", "symlink-target"].includes(mode)) h.enqueue(answer("Saved report.md."), answer("Saved report.md."));
     const settled = await scheduler.runOnce();
-    if (["repaired", "validation-repaired"].includes(mode)) {
+    if (["repaired", "validation-repaired", "missing-preflight"].includes(mode)) {
       expect(settled.completed).toBe(1);
       expect(h.store.getTask(task.id)?.status).toBe("completed");
       expect(await readFile(join(h.workspaceRoot, "report.md"), "utf8")).toBe(REPORT);
@@ -439,6 +444,7 @@ describe.sequential("research workflow acceptance harness", () => {
       expect(settled.failed).toBe(1);
       expect(h.store.getTask(task.id)?.status).not.toBe("completed");
     }
+    if (mode === "symlink-target") expect(await readFile(join(h.homeDir, "outside.md"), "utf8")).toBe("untouched");
     if (["denied", "wrong-target", "claim-only"].includes(mode)) await expect(readFile(join(h.workspaceRoot, "report.md"))).rejects.toThrow();
     if (mode === "wrong-target") await expect(readFile(join(h.workspaceRoot, "other.md"))).rejects.toThrow();
     scriptConsumed(h);
@@ -474,7 +480,7 @@ describe.sequential("research workflow acceptance harness", () => {
     expect(rerun.intent.requestRequirements).toMatchObject({ delegation: { count: 3 }, research: { fresh: true } });
     expect(h.events.filter((event) => event.kind === "skill")).toEqual([{ kind: "skill", name: "research-discovery" }]);
 
-    h.enqueue(answer(REPORT));
+    h.enqueue(answer(REPORT), answer(REPORT), answer(REPORT));
     const save = await h.turn("Please prepare a markdown file");
     expect(save.toolExecutions).toEqual([]);
     expect(save.finalOutcome?.status).toBe("blocked");
@@ -482,7 +488,7 @@ describe.sequential("research workflow acceptance harness", () => {
     expect(save.finalOutcome?.confirmedActions).toEqual([]);
     await expect(readFile(join(h.workspaceRoot, "report.md"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
     expect(h.store.listTasks()).toEqual([]);
-    expect(h.requests).toHaveLength(9);
+    expect(h.requests).toHaveLength(11);
     scriptConsumed(h);
   });
 
@@ -516,7 +522,8 @@ describe.sequential("research workflow acceptance harness", () => {
       tasks: ["collection", "processing", "reuse"].map((scope) => ({
         task: `Research battery recycling: ${scope}.`, allowedTools: ["web.search"],
         research: { scope, requireLiveSources: true, requireRepositoryEvidence: false }
-      }))
+      })),
+      ...(fileRequested ? { synthesis: { objective: "Combine the accepted reports, save report.md and verify the file." } } : {})
     }));
     const dispatch = await h.turn(`Use the researcher skill and use 3 subagents to research battery recycling.${fileRequested ? " Save report.md" : ""}`);
     expect(dispatch.finalOutcome?.status).toBe("completed"); // Successful dispatch; Task still owns the objective.
@@ -548,7 +555,14 @@ describe.sequential("research workflow acceptance harness", () => {
     expect(results).toHaveLength(3);
     expect(new Set(results.map((result) => result.stepId))).toEqual(new Set(workers.map((step) => step.id)));
     for (const result of results) h.enqueue(nativeCall("task_result_read", { task_id: task.id, result_id: result.id }));
-    h.enqueue(answer(`${REPORT}\n${CLAIM_TABLE}`));
+    h.enqueue(request => {
+      const prompt = JSON.stringify(request.messages);
+      if (fileRequested) {
+        expect(prompt).toContain("Any save, file-write, read-back, or delivery-confirmation instructions above belong exclusively");
+        expect(prompt).toContain("Return report content with citations and material research limitations");
+      } else expect(prompt).not.toContain("Runtime step boundary");
+      return { content: `${REPORT}\n${CLAIM_TABLE}` };
+    });
     const settled = await scheduler.runOnce();
     expect(settled, JSON.stringify({ errors: h.scriptErrors, failures: h.store.listAttempts(task.id).flatMap((attempt) => attempt.failure ? [attempt.failure] : []) })).toMatchObject({ completed: 1, failed: 0 });
     expect(h.store.getTask(task.id)?.status).toBe(fileRequested ? "running" : "completed");
@@ -593,7 +607,7 @@ describe.sequential("research workflow acceptance harness", () => {
       // A restarted runtime must observe the current file, not trust the old path or digest.
       await h.restart();
       await writeFile(join(h.workspaceRoot, "report.md"), "Unrelated replacement");
-      h.enqueue(nativeCall("task_result_read", { task_id: task.id, result_id: final.id }), nativeCall("file_read", { path: "report.md" }), answer("The report is saved."));
+      h.enqueue(nativeCall("task_result_read", { task_id: task.id, result_id: final.id }), nativeCall("file_read", { path: "report.md" }), answer("The report is saved."), answer("The report is saved."), answer("The report is saved."));
       const stale = await h.turn("Save this report to report.md");
       expect(stale.finalOutcome?.status).not.toBe("completed");
       expect(stale.text).toContain("File output is incomplete");
@@ -780,12 +794,28 @@ describe("explicit delegation limit admission", () => {
 describe.sequential("file output completion requirements", () => {
   it("replaces a false saved claim when the file was written without readback", async () => {
     const h = await harness();
-    h.enqueue(nativeCall("file_write", { path: "report.md", content: REPORT }), answer("Saved and verified report.md."));
+    h.enqueue(nativeCall("file_write", { path: "report.md", content: REPORT }), answer("Saved and verified report.md."), answer("Saved and verified report.md."), answer("Saved and verified report.md."));
     const result = await h.turn("Save report.md");
     expect(result.finalOutcome?.status).toBe("partially_completed");
     expect(result.text).toContain("matching readback");
     expect(result.text).not.toContain("Saved and verified");
     expect(result.providerExecution?.response?.content ?? "").not.toContain("Saved and verified");
+    scriptConsumed(h);
+  });
+  it("repairs a save-only copy after restart using exact source content and verified file tools", async () => {
+    const h = await harness();
+    await writeFile(join(h.workspaceRoot, "source.md"), REPORT);
+    await h.restart();
+    h.enqueue(answer("Copied source.md to report.md."),
+      nativeCall("file_read", { path: "source.md" }),
+      nativeCall("file_write", { path: "report.md", content: REPORT }),
+      nativeCall("file_read", { path: "report.md" }), answer("Saved and verified report.md."));
+    const result = await h.turn("Make an identical copy of source.md as report.md. Do not repeat research. Verify the copy.");
+    expect(result.finalOutcome?.status).toBe("completed");
+    expect(await readFile(join(h.workspaceRoot, "report.md"), "utf8")).toBe(REPORT);
+    expect(result.toolExecutions.map(call => call.tool.name)).toEqual(["file.read", "file.write", "file.read"]);
+    const validations = (await h.sessionDb.listEvents(h.runtime.sessionId)).filter(event => event.kind === "step-completion-validation");
+    expect(validations).toEqual([expect.objectContaining({ accepted: false, repair: true }), expect.objectContaining({ accepted: true })]);
     scriptConsumed(h);
   });
   it("accepts an unchanged file only after matching readback", async () => {
@@ -807,7 +837,7 @@ describe.sequential("file output completion requirements", () => {
   });
   it("does not count a partial read as complete readback", async () => {
     const h = await harness();
-    h.enqueue(nativeCall("file_write", { path: "report.md", content: REPORT }), nativeCall("file_read", { path: "report.md", lineStart: 1, lineEnd: 1 }), answer("Saved and verified."));
+    h.enqueue(nativeCall("file_write", { path: "report.md", content: REPORT }), nativeCall("file_read", { path: "report.md", lineStart: 1, lineEnd: 1 }), answer("Saved and verified."), answer("Saved and verified."), answer("Saved and verified."));
     const result = await h.turn("Save report.md");
     expect(result.finalOutcome?.status).toBe("partially_completed");
     expect(result.text).toContain("matching readback");
@@ -815,7 +845,7 @@ describe.sequential("file output completion requirements", () => {
   });
   it("reports a missing file tool rather than accepting pasted markdown", async () => {
     const h = await harness({ fileToolsAvailable: false });
-    h.enqueue(answer("Saved report.md.\n" + REPORT));
+    h.enqueue(...Array.from({ length: 3 }, () => answer("Saved report.md.\n" + REPORT)));
     const result = await h.turn("Prepare a markdown file");
     expect(result.finalOutcome?.status).toBe("blocked");
     expect(result.text).toContain("file-writing tool is unavailable");

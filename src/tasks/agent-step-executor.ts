@@ -165,6 +165,11 @@ export class AgentStepExecutor implements TaskStepExecutor {
     );
     const recoveryContext = await this.#attemptRecoveryContext(input);
     const context = dependencyContext(this.#taskStore, input.task, input.step) + recoveryContext;
+    const stepObjective = input.step.executor.role === "synthesis" && input.step.executor.requestContract?.requirements.fileOutput !== undefined &&
+      this.#taskStore.listSteps(input.task.id, input.step.planRevisionId).some(step =>
+        step.executor.role === "report-delivery" && step.dependsOn.includes(input.step.id))
+          ? `${input.step.objective}\n\nRuntime step boundary: This is the synthesis step, not file delivery. Any save, file-write, read-back, or delivery-confirmation instructions above belong exclusively to the subsequent report-delivery step. Your only deliverable is the complete report body. Return report content with citations and material research limitations. Do not include execution status, missing-file-tool warnings, save instructions, or a delivery blocker in the report. The next step will save these exact bytes and verify them. Lack of file tools in this step is expected and is not a blocker.`
+          : input.step.objective;
     const attemptFencingToken = input.attempt.lease?.fencingToken;
     if (attemptFencingToken === undefined) return failed("lease-missing", true);
     const modelOverride = taskModelOverride(this.#taskStore,input.task.id) ?? toModelOverride(input.step);
@@ -184,7 +189,7 @@ export class AgentStepExecutor implements TaskStepExecutor {
       child = await this.#childFactory.createChild({
         parentSessionId,
         profileId: input.task.profileId,
-        task: input.step.objective,
+        task: stepObjective,
         context,
         allowedToolsets: [...input.step.authorityPolicy.allowedToolsets],
         allowedTools: input.step.authorityPolicy.allowedTools === undefined
@@ -293,7 +298,7 @@ export class AgentStepExecutor implements TaskStepExecutor {
         childSessionId: child.childSessionId,
         role: toDelegateRole(input.step),
         depth: delegationDepth,
-        task: input.step.objective,
+        task: stepObjective,
         context,
         ...(input.attempt.workerSessionId === undefined ? {} : {
           prompt: "Continue this durable Task from the saved worker session. Use the existing transcript and do not repeat completed actions."
@@ -309,7 +314,9 @@ export class AgentStepExecutor implements TaskStepExecutor {
         attemptId: input.attempt.id,
         parentOnEvent: this.#taskProgressSink(input),
         ...(input.step.executor.research === undefined && input.step.executor.requestContract?.requirements.research === undefined &&
-          input.step.executor.role !== "report-delivery" ? {} : { stepCompletion: {
+          input.step.executor.role !== "report-delivery" && input.step.executor.role !== "synthesis" ? {} : { stepCompletion: {
+          // Dependency reads are assigned by the durable graph, not optional semantic hints.
+          requiredTools: input.step.dependsOn.length > 0 ? ["task.result.read"] : [],
           // Parent orchestration and research acceptance are enforced by this executor.
           // Only the delivery Step owns the foreground write/read-back requirement.
           requirements: {

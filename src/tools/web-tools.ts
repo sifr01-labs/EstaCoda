@@ -1,3 +1,4 @@
+import { webExtractWindow, MAX_EXTRACT_SOURCE_CHARS, type WebExtractWindow } from "./web-extract-window.js";
 import { webReadFingerprint } from "./turn-web-read-cache.js";
 import { undispatchedResult } from "./undispatched-result.js";
 import { createHash, randomUUID } from "node:crypto";
@@ -155,13 +156,15 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
     createWebSearchTool(options.webConfig, options),
     {
       name: "web.extract",
-      description: "Fetch and extract readable text from a URL. Identical public reads may reuse a prior observation within this turn; set refresh to retrieve again.",
+      description: "Fetch readable text from a URL. For long pages use query (literal text search, not instructions) or startChar (character offset) to retrieve bounded passages. Cite only returned text; a page prefix does not verify unseen sections. Identical public reads may be reused within this turn; refresh retrieves again.",
       inputSchema: {
         type: "object",
         properties: {
           url: { type: "string" },
-          text: { type: "string" },
-          maxContentChars: { type: "number" },
+          text: { type: "string", description: "Legacy URL-bearing text; not a section query. Prefer url." },
+          query: { type: "string", description: "Literal phrase to find in retrieved text, at most 200 characters. Returns matching excerpts; use nextStartChar to find later occurrences." },
+          startChar: { type: "integer", minimum: 0, maximum: 1000000, description: "Start offset in extracted text. Use the previous nextStartChar to continue." },
+          maxContentChars: { type: "number", description: "Maximum returned passage characters, capped by the runtime. Increasing it does not remove the cap." },
           refresh: { type: "boolean" }
         }
       },
@@ -170,7 +173,13 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
       progressLabel: "extracting web content",
       maxResultSizeChars: maxContentChars,
       isAvailable: () => true,
-      run: async (input: { url?: string; text?: string; maxContentChars?: number; refresh?: boolean }, context) => {
+      run: async (input: { url?: string; text?: string; maxContentChars?: number; refresh?: boolean } & WebExtractWindow, context) => {
+        if ((input.startChar != null && (!Number.isSafeInteger(input.startChar) || input.startChar < 0 || input.startChar > MAX_EXTRACT_SOURCE_CHARS)) ||
+          (input.query != null && (typeof input.query !== "string" || input.query.length > 200)) ||
+          (input.maxContentChars != null && (!Number.isFinite(input.maxContentChars) || input.maxContentChars < 1))) {
+          return { ok: false, content: "Invalid extraction window: startChar must be an integer from 0 to 1000000, query at most 200 characters, and maxContentChars positive.", metadata: { reason: "invalid-window" } };
+        }
+        const window: WebExtractWindow = { startChar: input.startChar ?? 0, query: input.query?.trim() || undefined };
         const debug = createBrowserDebugSession();
         const url = normalizeUrl(input.url ?? extractFirstUrl(input.text ?? ""));
 
@@ -233,10 +242,10 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
           configure: identity(registeredProvider?.configure), fetch: identity(options.fetch ?? globalThis.fetch)
         }));
         const limit = Math.min(input.maxContentChars ?? maxContentChars, maxContentChars);
-        const key = webReadFingerprint({ url, maxContentChars: limit });
+        const key = webReadFingerprint({ url, maxContentChars: limit, ...window });
         const reusable = registeredProvider?.publicExtractReuse === true
           && providerSelection.provider?.publicExtractReuse === true
-          && Object.keys(input).every((name) => ["url", "text", "maxContentChars", "refresh"].includes(name))
+          && Object.keys(input).every((name) => ["url", "text", "maxContentChars", "refresh", "startChar", "query"].includes(name))
           && await isSafeUrl(url, { resolveHostname: options.resolveHostname });
         if (input.refresh === true || !reusable) reuse?.forget(key);
         if (reusable && input.refresh !== true) {
@@ -264,7 +273,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
           }
 
           const providerResult = await providerSelection.provider.extract(url, {
-            maxContentChars: Math.min(input.maxContentChars ?? maxContentChars, maxContentChars),
+            maxContentChars: window.query || window.startChar ? MAX_EXTRACT_SOURCE_CHARS : limit,
             signal: context?.signal
           }).catch((error: unknown) => ({ error }));
           if ("error" in providerResult) {
@@ -286,13 +295,14 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
             status: providerResult.status,
             contentLength: providerResult.content.length
           });
-          return remember(withDebug(formatWebExtractProviderResult(providerSelection.provider, providerResult), debug));
+          return remember(withDebug(formatWebExtractProviderResult(providerSelection.provider, providerResult, limit, window), debug));
         }
 
         return remember(await extractWithFetch({
           url,
           fetch: options.fetch ?? globalThis.fetch,
-          maxContentChars: Math.min(input.maxContentChars ?? maxContentChars, maxContentChars),
+          maxContentChars: limit,
+          window,
           guardUrl: extractUrlGuard,
           debug,
           signal: context?.signal
@@ -1278,24 +1288,28 @@ function unavailableWebResearchResult(
 
 function formatWebExtractProviderResult(
   provider: WebResearchProvider,
-  result: import("./web-research-provider.js").WebExtractResult
+  result: import("./web-research-provider.js").WebExtractResult,
+  limit: number,
+  window: WebExtractWindow
 ) {
+  const view = webExtractWindow(result.content, limit, window, result.truncated);
   return {
-    ok: result.status === undefined || (result.status >= 200 && result.status < 400),
+    ok: !view.notice && (result.status === undefined || (result.status >= 200 && result.status < 400)),
     content: [
       `URL: ${result.url}`,
       result.title === undefined ? undefined : `Title: ${result.title}`,
       result.status === undefined ? undefined : `Status: ${result.status}`,
+      view.notice, view.guidance,
       "",
-      result.content
+      view.content
     ].filter((line) => line !== undefined).join("\n"),
     metadata: {
-      ...result,
+      ...result, ...view,
       provider: provider.name,
       _estacoda_context_summary: webExtractContextSummary({
         url: result.url,
         title: result.title,
-        contentLength: result.content.length,
+        contentLength: view.content.length,
         status: result.status,
         source: provider.name
       })
@@ -3251,6 +3265,7 @@ async function extractWithFetch(input: {
   url: string;
   fetch: FetchLike;
   maxContentChars: number;
+  window: WebExtractWindow;
   guardUrl: UrlGuard;
   debug: BrowserDebugSession;
   signal?: AbortSignal;
@@ -3285,10 +3300,11 @@ async function extractWithFetch(input: {
         /^(?:checking your browser(?:\s*-\s*recaptcha)?|just a moment\.{0,3})$/iu.test(title ?? "") ||
         /^(?:pubmed\.ncbi\.nlm\.nih\.gov\s+)?cookies must be enabled\s+enable cookies/iu.test(extracted)
       ) ? "access-challenge" : undefined;
+    const view = webExtractWindow(extracted, input.maxContentChars, input.window);
     const result: WebExtractionResult = {
       url,
       title,
-      content: truncate(extracted, input.maxContentChars),
+      content: view.content,
       contentType,
       status: response.status,
       source: "fetch"
@@ -3302,11 +3318,12 @@ async function extractWithFetch(input: {
     });
 
     return withDebug({
-      ok: response.ok && extractionFailure === undefined,
+      ok: response.ok && extractionFailure === undefined && view.notice === undefined,
       content: [
         `URL: ${result.url}`,
         result.title === undefined ? undefined : `Title: ${result.title}`,
         `Status: ${response.status} ${response.statusText}`,
+        view.notice, view.guidance,
         extractionFailure === undefined ? undefined : `Extraction failed: ${extractionFailure}. No usable source text was retrieved.`,
         "",
         result.content
@@ -3315,7 +3332,7 @@ async function extractWithFetch(input: {
         ...result,
         ...(extractionFailure === undefined ? {} : { reason: extractionFailure }),
         redirectCount,
-        truncated: extracted.length > input.maxContentChars,
+        ...view,
         publicReadReusable: extractionFailure === undefined && response.ok && redirectCount === 0
           && !response.headers.get("set-cookie") && !response.headers.get("vary")
           && !/private|no-store|no-cache|must-revalidate/i.test(response.headers.get("cache-control") ?? "")
@@ -3324,7 +3341,7 @@ async function extractWithFetch(input: {
         _estacoda_context_summary: webExtractContextSummary({
           url: result.url,
           title: result.title,
-          contentLength: result.content.length,
+          contentLength: view.content.length,
           status: result.status,
           source: "fetch"
         })

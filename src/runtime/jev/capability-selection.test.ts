@@ -35,20 +35,43 @@ beforeEach(async () => {
  });
 });
 afterEach(async () => { await rm(home, { recursive: true, force: true }); });
-async function harness(request = 'Investigate and prepare a briefing.') {
+async function harness(request = 'Investigate and prepare a briefing.', requiredTools: readonly string[] = []) {
  const available = await registry.snapshot(); const catalog = buildProviderToolSchemaCatalog({ tools: available.available, unavailableTools: available.unavailable }); recovery.bindCatalog(catalog);
  const router = new IntentRouter({ skillRegistry: skills });
  const snapshot = routingSnapshotReader({ homeDir: home, profileId: 'p', router, capabilityRevision: () => recovery.catalogRevision() });
  const client = new JevDecisionClient({ homeDir: home, profileId: 'p', snapshot, fetch: fetcher, recordUsage: entries => db.recordProviderUsageEntries([...entries]) });
  const routing = { client, snapshot }; recovery.bindRouting(routing);
- const intent = router.route(request); const standard = selectProviderToolsForTurn({ catalog, intent, userText: request });
- const select = () => selectJevCapabilities({ routing, catalog, intent, standard, validateTool: id => recovery.toolSchema(id), evaluation: { context: { userRequest: request }, usage: { requestKey: 'initial', executionSessionId: 'session', visibleTurnId: 'turn' } } });
+ const intent = router.route(request); const standard = selectProviderToolsForTurn({ catalog, intent, userText: request, requiredTools });
+ const select = () => selectJevCapabilities({ routing, catalog, intent, standard, requiredTools, validateTool: id => recovery.toolSchema(id), evaluation: { context: { userRequest: request }, usage: { requestKey: 'initial', executionSessionId: 'session', visibleTurnId: 'turn' } } });
  recovery.beginTurn({ ...scope, tools: [], objective: request });
  return { catalog, intent, standard, select };
 }
 const names = (result: Awaited<ReturnType<typeof selectJevCapabilities>>) => result.initialTools.map(t => t.function.name);
 
 describe('live Jev capability selection and recovery', () => {
+ it.each([true, false])('keeps host-required dependency reading only when available (available=%s)', async available => {
+  registry.register(tool('task.result.read', { toolsets: ['core'], isAvailable: () => available }));
+  const h = await harness('Combine the accepted worker findings into a report.', ['task.result.read', 'unregistered.tool']);
+  const selected = names(await h.select());
+  expect(selected.includes('task_result_read')).toBe(available);
+  expect(h.standard.initialTools.some(tool => tool.function.name === 'task_result_read')).toBe(available);
+  expect(selected).not.toContain('unregistered_tool');
+ });
+ it('does not let host prerequisites override an explicit tool prohibition', async () => {
+  registry.register(tool('task.result.read', { toolsets: ['core'] }));
+  const h = await harness('Combine findings. Do not use task.result.read.', ['task.result.read']);
+  expect(names(await h.select())).not.toContain('task_result_read');
+ });
+
+ it('preserves explicit URL extraction despite a negative Jev decision without enabling prohibited search', async () => {
+  registry.register(tool('web.extract', { toolsets: ['web'], riskClass: 'read-only-network' }));
+  registry.register(tool('web.search', { toolsets: ['web'], riskClass: 'read-only-network' }));
+  const h = await harness('Read https://example.com/spec and explain its status definitions. Do not use web search.');
+  const selected = names(await h.select());
+  expect(selected).toContain('web_extract');
+  expect(selected).not.toContain('web_search');
+ });
+
  it('keeps local delivery readers when new research is prohibited, even with negative Jev scores', async () => {
   for (const name of ['file.read', 'task.result.read', 'task.status']) registry.register(tool(name, { toolsets: ['core', 'research'], riskClass: 'read-only-local' }));
   registry.register(tool('file.write', { toolsets: ['files'], riskClass: 'workspace-write' }));
