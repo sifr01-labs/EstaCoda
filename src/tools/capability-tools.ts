@@ -102,8 +102,8 @@ export class SessionCapabilityRecovery {
     if (!isRecord(input) || Object.keys(input).some((key) => !["query", "ids", "kind"].includes(key)) ||
       (input.query !== undefined && (typeof input.query !== "string" || input.query.length > 200)) ||
       (input.kind !== undefined && input.kind !== "tool" && input.kind !== "skill") ||
-      (input.ids !== undefined && !validIds(input.ids))) return failure("invalid_request");
-    const ids = Array.isArray(input.ids) ? new Set(input.ids) : undefined;
+      (input.ids !== undefined && !validIds(input.ids, true))) return failure("invalid_request");
+    const ids = Array.isArray(input.ids) && input.ids.length > 0 ? new Set(input.ids) : undefined;
     // Exact IDs are deterministic lookup, even when a query accompanies them.
     const query = ids ? "" : typeof input.query === "string" ? input.query.toLocaleLowerCase().trim() : "";
     const terms = [...new Set(query.match(/[\p{L}\p{N}_-]+/gu) ?? [])].filter(term => term.length > 2 && !["the", "and", "for", "with", "from", "this", "that", "about", "using", "use"].includes(term));
@@ -137,7 +137,7 @@ export class SessionCapabilityRecovery {
 
   async discoverAsync(input: unknown, context?: ToolExecutionContext): Promise<ToolResult> {
     const standard = this.discover(input, context);
-    if (!standard.ok || !isRecord(input) || input.ids !== undefined || typeof input.query !== "string" || !input.query.trim() || !this.#routing) return standard;
+    if (!standard.ok || !isRecord(input) || (Array.isArray(input.ids) && input.ids.length > 0) || typeof input.query !== "string" || !input.query.trim() || !this.#routing) return standard;
     const token = this.#turn?.token;
     const revision = this.catalogRevision();
     const entries = this.#discoveryEntries(input.kind);
@@ -330,7 +330,7 @@ export const capabilityToolProvider: SessionToolProvider = {
 
 function isRecord(input: unknown): input is Record<string, unknown> { return input !== null && typeof input === "object" && !Array.isArray(input); }
 function safeId(id: string): boolean { return /^(?:tool|skill):[\p{L}\p{N}_.:-]{1,128}$/u.test(id); }
-function validIds(ids: unknown): ids is string[] { return Array.isArray(ids) && ids.length > 0 && ids.length <= 8 && ids.every((id) => typeof id === "string" && safeId(id)); }
+function validIds(ids: unknown, allowEmpty = false): ids is string[] { return Array.isArray(ids) && (allowEmpty || ids.length > 0) && ids.length <= 8 && ids.every((id) => typeof id === "string" && safeId(id)); }
 function failure(code: string): ToolResult { return { ok: false, content: `Capability recovery: ${code}`, metadata: { code } }; }
 function definitionSignature(tool: RegisteredTool): string { return JSON.stringify([tool.name, tool.description, tool.inputSchema, tool.riskClass, tool.toolsets, tool.connector]); }
 

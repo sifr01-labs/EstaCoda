@@ -103,7 +103,7 @@ describe("TaskCompletionDeliveryService", () => {
     service.bind({ taskId: "task-synthesis", authorizedSessionId: "creator-alpha", deliveryKey: "file-pending",
       destination: { platform: "telegram", chatId: "chat-1" } });
     await service.runOnce();
-    expect(deliverText.mock.calls[0]![1]).toContain("At Task settlement, the requested file had not been saved");
+    expect(deliverText.mock.calls[0]![1]).toContain("At Task settlement, the requested file had not been verified");
     await service.runOnce();
     expect(deliverText).toHaveBeenCalledTimes(1);
   });

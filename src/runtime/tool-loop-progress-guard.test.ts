@@ -476,13 +476,13 @@ it("does not count duplicate capability requests as material progress", () => {
 });
 
 
-it("counts report versions and matching readbacks once while checkpoint progress lags", async () => {
+it.each([true, false])("counts report versions and matching readbacks once while checkpoint progress lags (research=%s)", async (research) => {
   const checkpoint = new ExecutionCheckpointController({ sessionId: "session-1", profileId: "profile-1" });
   await checkpoint.ensure({ originTurnId: "turn-1", originalObjective: "Research and save report.md",
     qualificationReasons: ["research_request"], intentLabels: [], requiredOperations: ["mutation", "verification"],
     connectorIds: [], completionFloor: "mutation_with_verification",
     requestRequirements: { skillReferences: [], issues: [], research: { domain: "general", fresh: true }, fileOutput: { path: "report.md", format: "markdown" } } });
-  const guard = new ToolLoopProgressGuard({ research: true, checkpointReader: checkpoint, noProgressNudgeIteration: 2, maxNoProgressIterations: 6 });
+  const guard = new ToolLoopProgressGuard({ research, checkpointReader: checkpoint, noProgressNudgeIteration: 2, maxNoProgressIterations: 6 });
   const file = (name: string, digest: string, path = "report.md") => execution({
     tool: { ...execution().tool, name, toolsets: ["files"] }, input: { path },
     executionEffect: { kind: name === "file.read" ? "read" : "mutation" },
@@ -497,4 +497,48 @@ it("counts report versions and matching readbacks once while checkpoint progress
   expect(guard.observe([file("file.write", "b")]).progressKinds).toContain("target-mutation");
   expect(guard.observe([file("file.read", "b")]).progressKinds).toContain("verification");
   expect(guard.observe([{ ...file("file.write", "c"), decision: "deny" }]).materialProgress).toBe(false);
+});
+
+
+it("credits unique queued recovery receipts, never failures, denial, reuse or changed prose", async () => {
+  const guard = await discoveryGuard();
+  const request = (id: string, status = "queued") => execution({
+    tool: { ...execution().tool, name: "capability.request" },
+    result: { ok: true, content: "Request recorded", metadata: { requests: [{ id, status }] } }
+  });
+  expect(guard.observe([request("tool:file.read")]).materialProgress).toBe(true);
+  expect(guard.observe([{ ...request("tool:file.read"), input: { reason: "new wording" } }]).materialProgress).toBe(false);
+  expect(guard.observe([request("tool:file.write", "already_exposed")]).materialProgress).toBe(false);
+  expect(guard.observe([{ ...request("tool:file.write"), decision: "deny" }]).materialProgress).toBe(false);
+  expect(guard.observe([{ ...request("tool:file.write"), readReuseOf: "old" }]).materialProgress).toBe(false);
+  expect(guard.observe([request("tool:file.write")]).materialProgress).toBe(true);
+  const seeded = await discoveryGuard([request("tool:file.read")]);
+  expect(seeded.observe([request("tool:file.read")]).materialProgress).toBe(false);
+});
+
+it("credits accepted result page coverage once and only for the bound source task", async () => {
+  const checkpoint = new ExecutionCheckpointController({ sessionId: "s", profileId: "p" });
+  await checkpoint.ensure({ originTurnId: "t", originalObjective: "Save the existing report",
+    qualificationReasons: ["research_request"], intentLabels: [], requiredOperations: ["mutation", "verification"],
+    connectorIds: [], completionFloor: "mutation_with_verification",
+    requestRequirements: { skillReferences: [], issues: [], sourceTaskId: "task_source", fileOutput: { path: "report.md", format: "markdown" } } });
+  const page = (offset: number, end: number, overrides = {}) => execution({
+    tool: { ...execution().tool, name: "task.result.read" }, executionEffect: { kind: "read" },
+    result: { ok: true, content: "Accepted report text", metadata: {
+      taskId: "task_source", resultId: "result", contentHash: `sha256:${"a".repeat(64)}`,
+      disposition: "accepted", offset, nextOffset: end, totalChars: 1000, ...overrides
+    } }
+  });
+  const options = { checkpointReader: checkpoint, noProgressNudgeIteration: 2, maxNoProgressIterations: 6 };
+  const guard = new ToolLoopProgressGuard(options);
+  expect(guard.observe([page(0, 100)]).materialProgress).toBe(true);
+  expect(guard.observe([page(0, 50)]).materialProgress).toBe(false);
+  expect(guard.observe([page(50, 100)]).materialProgress).toBe(false);
+  expect(guard.observe([page(100, 200, { disposition: "draft" })]).materialProgress).toBe(false);
+  expect(guard.observe([page(100, 200, { taskId: "other" })]).materialProgress).toBe(false);
+  expect(guard.observe([page(100, 200, { contentHash: "invalid" })]).materialProgress).toBe(false);
+  expect(guard.observe([page(100, 200)]).materialProgress).toBe(true);
+  const seeded = new ToolLoopProgressGuard({ ...options, existingExecutions: [page(0, 200)] });
+  expect(seeded.observe([page(100, 200)]).materialProgress).toBe(false);
+  expect(seeded.observe([page(200, 1000, { nextOffset: undefined })]).materialProgress).toBe(true);
 });

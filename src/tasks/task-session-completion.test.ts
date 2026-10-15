@@ -199,7 +199,7 @@ describe("TaskSessionCompletionService", () => {
     completeTask(graph.task.id);
     const delivered = await service.deliverPending("creator-alpha");
     const message = delivered.find((entry) => entry.taskId === graph.task.id)!;
-    expect(message.text).toContain("At Task settlement, the requested file had not been saved");
+    expect(message.text).toContain("At Task settlement, the requested file had not been verified");
     expect(message.text).toContain("Accepted report.");
     expect((await results.readText({ taskId: graph.task.id, resultId: result.id, sessionId: "creator-alpha" })).content).toBe("Accepted report.");
     await acknowledge(message);

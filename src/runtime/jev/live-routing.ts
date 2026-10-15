@@ -90,15 +90,21 @@ export async function selectJevRoute(input: {
   const nativeIntent = (labels.find(id => native.has(id)) ?? 'general') as NativeIntent;
   const taskClass = (labels.find(id => !native.has(id)) ?? (nativeIntent === 'browser-control' ? 'browser-operation' : nativeIntent === 'attachment-analysis' ? 'attachment-analysis' : nativeIntent === 'general' ? 'general' : 'media-generation')) as IntentTaskClass;
   const provisional = { ...base, nativeIntent, labels };
-  const forced = new Set([
+  const explicitSkills = new Set([
     ...(base.invocation?.explicit ? base.suggestedSkills.map(skill => skill.name) : []),
-    ...(base.skillRequests ?? []).filter(r => r.status === 'resolved').flatMap(r => r.candidates),
+    ...(base.skillRequests ?? []).filter(r => r.status === 'resolved').flatMap(r => r.candidates)
+  ]);
+  const forced = new Set([
+    ...explicitSkills,
     ...(input.checkpointSkillName && !input.saveOnly && !base.invocation && !(base.requestRequirements?.skillReferences.length) ? [input.checkpointSkillName] : [])
   ]);
   const unresolved = base.invocation !== undefined && base.suggestedSkills.length === 0 || base.skillRequests?.some(r => r.status !== 'resolved');
   const applicable = unresolved || !actionable ? [] : skills.filter((skill, i) =>
     (forced.has(skill.name) || selected(`skill.${i}`)) && !router.skillIsDeferred(skill, policyText, provisional, input.options) &&
-    !explicitlyProhibited(request, skill.name) && !(skill.routing?.aliases ?? []).some(alias => explicitlyProhibited(request, alias)) && !(skill.routing?.labels ?? []).some(label => explicitlyProhibited(request, label)) && !(input.saveOnly && !forced.has(skill.name) && skill.requiredToolsets.includes('web')));
+    !explicitlyProhibited(request, skill.name) &&
+    // An explicit skill invocation can use supplied facts without its usual
+    // activity. Tool selection still enforces the prohibited activity.
+    (explicitSkills.has(skill.name) || (!(skill.routing?.aliases ?? []).some(alias => explicitlyProhibited(request, alias)) && !(skill.routing?.labels ?? []).some(label => explicitlyProhibited(request, label)))) && !(input.saveOnly && !forced.has(skill.name) && skill.requiredToolsets.includes('web')));
   applicable.sort((a, b) => Number(forced.has(b.name)) - Number(forced.has(a.name)) ||
     (probability(`skill.${skills.indexOf(b)}`) ?? 0) - (probability(`skill.${skills.indexOf(a)}`) ?? 0) || a.name.localeCompare(b.name));
   const route = router.applySelection(base, { nativeIntent, taskClass, labels: labels.length ? labels : ['general'], skills: applicable });
@@ -114,7 +120,7 @@ export async function selectJevRoute(input: {
 /** Explicit negative clauses remain binding even if a semantic decision says yes. */
 export function explicitlyProhibited(request: string, label: string): boolean {
   const terms: Record<string, RegExp> = {
-    research: /research|search|investigat|بحث|ابحث/iu,
+    research: /\b(?:research|search|investigat\w*)\b|بحث|ابحث/iu,
     'docs-writing': /save|write|export|احفظ|اكتب|صدّر/iu,
     'browser-control': /browser|browse|متصفح|تصفح/iu,
     'browser-operation': /browser|browse|متصفح|تصفح/iu,
@@ -125,5 +131,10 @@ export function explicitlyProhibited(request: string, label: string): boolean {
   const match = (text: string) => terms[label]?.test(text) ?? text.toLocaleLowerCase().includes(label.toLocaleLowerCase());
   if (explicitRequestSegments(request).some(match)) return false;
   const unquoted = request.replace(/```[\s\S]*?(?:```|$)|^\s*>.*$|"[^"\n]*"|“[^”\n]*”|`[^`\n]*`/gmu, ' ');
-  return (unquoted.match(/(?:\b(?:do not|don't|don’t|never|without|avoid)\b|(?:^|\s)(?:لا|بدون|دون)\s)[^.!?;\n]*(?=$|[.!?;\n])/gimu) ?? []).some(match);
+  // Sentence boundaries must not split dotted tool IDs such as file.read.
+  return unquoted.split(/[.!?;؛\n]+(?=\s|$)|\bbut\b|ولكن/iu).some(clause => {
+    const negative = /\b(?:do not|don't|don’t|never|without|avoid)\b|(?:^|\s)(?:لا|بدون|دون)\s/iu.exec(clause);
+    return negative ? match(clause.slice(negative.index))
+      : /^\s*no\s+[^,]*\b(?:needed|required)\s*,?\s*$/iu.test(clause) && match(clause);
+  });
 }

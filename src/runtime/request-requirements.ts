@@ -46,6 +46,15 @@ export function explicitRequestSegments(text: string): string[] {
     });
   return affirmativeRequestSegments(sanitized)
     .flatMap(segment => INERT_CONTEXT.test(segment.replace(FILE_OPERAND, " [file] ")) ? [segment] : splitRequestClauses(segment))
+    .map(segment => {
+      // Invoking a skill to explain something still invokes the skill. Keep the
+      // purpose informational: "explain how to save" must not require a write.
+      const purpose = /\s+to\s+(?:explain|describe)\b/iu.exec(segment);
+      if (purpose && !INERT_CONTEXT.test(segment) && explicitSkillReferences(segment.slice(0, purpose.index)).length > 0) {
+        return segment.slice(0, purpose.index);
+      }
+      return segment;
+    })
     .filter((segment) => {
       if (isCapabilityQuestion(segment.trim()) && interpretRequest(segment) === "information") return false;
       const informational = INFORMATIONAL.exec(segment.replace(FILE_OPERAND, " [file] "));

@@ -37,6 +37,8 @@ export class ToolLoopProgressGuard {
   readonly #seenResearchSources = new Set<string>();
   readonly #seenReportWrites = new Set<string>();
   readonly #pendingReportReadbacks = new Set<string>();
+  readonly #seenRecoveryIds = new Set<string>();
+  readonly #resultReadEnds = new Map<string, number>();
   readonly #seenCallFingerprints = new Set<string>();
   readonly #seenResultFingerprints = new Set<string>();
   readonly #seenDiscoveryFingerprints = new Set<string>();
@@ -104,6 +106,16 @@ export class ToolLoopProgressGuard {
       if (execution.tool.name === "capability.request" && Array.isArray(execution.result?.metadata?.requests) &&
         !execution.result.metadata.requests.some((request: unknown) => request !== null && typeof request === "object" && "status" in request && request.status === "queued")) continue;
 
+      // Trusted tool receipts can advance recovery/delivery before the durable
+      // checkpoint catches up. Changing reasons, clocks or page sizes cannot.
+      if (execution.tool.name === "capability.request" || execution.tool.name === "task.result.read") {
+        if (this.#observeRecoveryOrResult(execution)) {
+          materialProgress = true;
+          progressKinds.add("new-tool-result");
+        }
+        continue;
+      }
+
       if (unchangedCompletionRepair && (execution.tool.name === "web.search" || execution.tool.name === "web.extract")) continue;
       if (this.#research) {
         const sources = researchEvidence(execution);
@@ -124,9 +136,9 @@ export class ToolLoopProgressGuard {
         }
         continue;
       }
-      // Foreground research delivery can progress before checkpoint projection
+      // Foreground file delivery can progress before checkpoint projection
       // catches up. Count exact file versions, not changing model prose.
-      if (this.#research && this.#checkpointReader?.current()?.requestRequirements?.fileOutput !== undefined) {
+      if (this.#checkpointReader?.current()?.requestRequirements?.fileOutput !== undefined) {
         const metadata = execution.result?.metadata;
         const outputs = execution.tool.name === "file.patch" && Array.isArray(metadata?.fileOutputs) ? metadata.fileOutputs : [metadata];
         let reportProgress = false;
@@ -250,6 +262,7 @@ export class ToolLoopProgressGuard {
         (execution.readReuseOf !== undefined || execution.result?.metadata?.mcpReadReuse === true)
       ) continue;
       this.#active = true;
+      this.#observeRecoveryOrResult(execution);
       if (this.#research) researchEvidence(execution).forEach((source) => this.#seenResearchSources.add(source));
       const discovery = browserDiscoveryFingerprint(execution) ?? connectorDiscoveryFingerprint(execution);
       if (discovery !== undefined) this.#seenDiscoveryFingerprints.add(discovery);
@@ -274,6 +287,31 @@ export class ToolLoopProgressGuard {
         );
       }
     }
+  }
+
+  #observeRecoveryOrResult(execution: ToolExecutionRecord): boolean {
+    const metadata = execution.result?.metadata;
+    if (execution.tool.name === "capability.request" && Array.isArray(metadata?.requests)) {
+      let added = false;
+      for (const request of metadata.requests.slice(0, 8)) {
+        if (!request || typeof request !== "object" || request.status !== "queued" || typeof request.id !== "string") continue;
+        if (!this.#seenRecoveryIds.has(request.id)) added = true;
+        this.#seenRecoveryIds.add(request.id);
+      }
+      return added;
+    }
+    if (execution.tool.name !== "task.result.read" || metadata?.disposition !== "accepted") return false;
+    const { taskId, resultId, contentHash, offset, nextOffset, totalChars } = metadata;
+    const sourceTaskId = this.#checkpointReader?.current()?.requestRequirements?.sourceTaskId;
+    const end = nextOffset ?? totalChars;
+    if (typeof taskId !== "string" || (sourceTaskId !== undefined && taskId !== sourceTaskId) ||
+      typeof resultId !== "string" || typeof contentHash !== "string" || !/^sha256:[a-f0-9]{64}$/u.test(contentHash) ||
+      typeof offset !== "number" || !Number.isSafeInteger(offset) || offset < 0 ||
+      typeof end !== "number" || !Number.isSafeInteger(end) || end <= offset || !execution.result?.content.trim()) return false;
+    const key = fingerprint({ taskId, resultId, contentHash });
+    const previousEnd = this.#resultReadEnds.get(key) ?? 0;
+    this.#resultReadEnds.set(key, Math.max(previousEnd, end));
+    return end > previousEnd;
   }
 }
 

@@ -209,5 +209,240 @@
       "live-primary-source-research",
       "live-save-only-follow-up"
     ]
+  },
+  "deliveryRecoveryFollowUp": {
+    "measuredAt": "2026-10-15T16:52:31.299380+00:00",
+    "sourceBaseCommit": "63eecb1c",
+    "scope": "Delivery/recovery and explicit skill/activity corrections; no threshold or authorization relaxation.",
+    "sourceOverlay": [
+      {
+        "path": "src/runtime/jev/capability-selection.ts",
+        "sha256": "8df5677d3a1b898dfdb15f7349ffb775f100d1d6c59c96c733694a0dbec519fb"
+      },
+      {
+        "path": "src/runtime/jev/capability-selection.test.ts",
+        "sha256": "b63f0590bd162caa8467b0374e437810cd40f0decbbfaab3aea59d3771dccf35"
+      },
+      {
+        "path": "src/runtime/jev/live-routing.ts",
+        "sha256": "11b7d82f9403503872c6387c3d6c80ab7cb7550c80da81051fb0b2cc8b9486de"
+      },
+      {
+        "path": "src/runtime/request-action-segments.ts",
+        "sha256": "bfada5a0992f7f0535bd3816e362f94404d3caf0da127dfeea28d14f9ad4398d"
+      },
+      {
+        "path": "src/runtime/request-requirements.ts",
+        "sha256": "7d6d827fa9fdd339198a68bc89e3807341bcc867f26ec13f6ee3e74a86f3250b"
+      },
+      {
+        "path": "src/runtime/request-requirements.test.ts",
+        "sha256": "a1678cf03d6c3971717f43a9f340eefb8c71c9f4f1e309ba2a1d1e5c661a0baf"
+      },
+      {
+        "path": "src/runtime/tool-loop-progress-guard.ts",
+        "sha256": "484e6de42a13e1bb8cca7b1e71b2bba97c5ac0b78a54b1d42dc208c8b7acd146"
+      },
+      {
+        "path": "src/runtime/tool-loop-progress-guard.test.ts",
+        "sha256": "5cf7de7194f8cfcabddc5d6d8a20d048f84f5e4a0b27ca031dc854f95d4cc541"
+      },
+      {
+        "path": "src/tools/capability-tools.ts",
+        "sha256": "0fba95a6f2a1bdd726be0b8a052fa8b013373a8cd465f9c024312b7a5106f1ab"
+      },
+      {
+        "path": "src/tools/capability-tools.test.ts",
+        "sha256": "83ad7c5135683803a7753fcd52d0f2d3d429930653167d378293c4d7f99906ce"
+      },
+      {
+        "path": "src/tools/web-tools.ts",
+        "sha256": "c1ef663ea517f667fb26c06d84e0e2c25eefc6a890d58551829a09a4ecadf39e"
+      },
+      {
+        "path": "src/tools/web-tools.test.ts",
+        "sha256": "84af01350aa5d96007189ee8d40f399d73547c462e44df62647f71099b8d52aa"
+      },
+      {
+        "path": "src/tasks/task-completion-delivery.ts",
+        "sha256": "cf021f442e8e16cd3120b1704ec9b6c8c911d7cb06aae4b528eb600eda585f59"
+      },
+      {
+        "path": "src/tasks/task-completion-delivery.test.ts",
+        "sha256": "77936077dda89c00400a6a8ed5c99df312656c664e16012895bd0fa28d0f7aa5"
+      },
+      {
+        "path": "src/tasks/task-session-completion.ts",
+        "sha256": "b2055e57acf5fcca267c4fdb52e0fc6e1e9c73e9e32021cd59d6dd16e00c3d6f"
+      },
+      {
+        "path": "src/tasks/task-session-completion.test.ts",
+        "sha256": "616313b65f1da9c343649254ab6376fb832066a9f46c0478c84817bcc3aad060"
+      },
+      {
+        "path": "src/runtime/jev/live-routing.test.ts",
+        "sha256": "1a5db0c0f11b6d60ebae5dde5b5c23b703e62f04565c66f48a3d8fb14739a3ea"
+      }
+    ],
+    "preExistingPackageChanges": {
+      "note": "Preserved existing model-setup changes in the installed test package; these are outside the focused commit.",
+      "files": [
+        "apps/desktop/src/renderer/components/live-models.tsx",
+        "apps/desktop/src/shared/i18n/models.ts",
+        "apps/desktop/tests/e2e/live-models.spec.ts",
+        "assets/model-catalog-overrides.json",
+        "src/cli/cli-model.test.ts",
+        "src/cli/cli.ts",
+        "src/cli/model-setup-codex.test.ts",
+        "src/cli/model-setup-codex.ts",
+        "src/cli/session-loop-model.test.ts",
+        "src/control-service/model-catalog.test.ts",
+        "src/control-service/model-setup.test.ts",
+        "src/providers/model-catalog.ts",
+        "src/providers/oauth/codex-setup.ts",
+        "src/setup/config-editor/runner.test.ts",
+        "src/setup/provider-model-route-prompt.test.ts",
+        "src/setup/provider-model-route-prompt.ts",
+        "src/setup/setup-copy.test.ts",
+        "src/setup/setup-copy.ts",
+        "src/smoke/cases/index.ts",
+        "src/smoke/cases/codex-model-selection.ts"
+      ]
+    },
+    "validation": {
+      "coreFiles": 763,
+      "coreTests": 12456,
+      "corePassed": true,
+      "typecheck": true,
+      "frozenLockfileInstall": true,
+      "sourceSmoke": true,
+      "build": true,
+      "runtimeImportAudit": true,
+      "esmAudit": true,
+      "compiledSmoke": true,
+      "diffCheck": true
+    },
+    "packaged": {
+      "runtime": {
+        "sha256": "bcb93f09af99bbd16b4e1a7e2d383a4bb602d932569fca9a45331a73717ef626",
+        "nodeVersion": "v24.14.1",
+        "coreVersion": "0.1.0",
+        "entrySha256": "8b7b5e8816ffe62d9baa2133dd5cc54a1a8ea36997b0bda6fc631039c700f6ec",
+        "signature": "ad-hoc verified",
+        "ownedBridgeVerified": true,
+        "inventoryVerified": true,
+        "matchesCurrentDist": true,
+        "supervisorRetainedPathWithSpaces": true
+      },
+      "fixtures": {
+        "model": "scripted loopback HTTP",
+        "web": "in-process registered synthetic provider in packaged supervisor",
+        "liveModelCalls": 0,
+        "transport": "actual signed app + preload/Main + owned bridge + private control"
+      },
+      "workflow": {
+        "longCallMs": 65002,
+        "siblingCompletedDuringLongCall": true,
+        "workers": 3,
+        "acceptedResults": 5,
+        "distinctChildSessions": 6,
+        "tasks": 1,
+        "searches": 16,
+        "providerCalls": 29,
+        "appRestartNoReplay": true,
+        "fileBytes": 52350,
+        "fileSha256": "f9b7de8ddd48b40826dc841c5e522f98028ab3c51c3995da571b786f851cbf43",
+        "readbackVerified": true,
+        "historicalTaskStatus": "completed"
+      },
+      "allScenarios": {
+        "providerCalls": 58,
+        "actualToolResults": 49,
+        "failedToolResults": 16
+      },
+      "scenarios": {
+        "compoundDelegation": true,
+        "foregroundReportReadbackRepair": true,
+        "foregroundReportCitationValidation": true,
+        "extractionProviderFailureRecovery": true,
+        "dnsFailureRecovery": true,
+        "searchProviderFailureRecovery": true,
+        "largeFileRangeReadback": true,
+        "longProviderLeaseRenewal": true,
+        "attentionReceiptAcrossRestart": true,
+        "emptySearchRecovery": true,
+        "disclosedBlockedSource": true,
+        "markdownSourceUrls": true,
+        "largeReportContext": true,
+        "stepScopedRequirements": true,
+        "evidenceCorrection": true,
+        "exhaustedRepairDraftPreserved": true,
+        "redundantResourceMode": true,
+        "researchThroughFallback": true,
+        "fallbackComposer": true,
+        "fallbackNotice": true,
+        "fallbackRestart": true,
+        "preferredModelPreserved": true,
+        "research": true,
+        "automaticReportDelivery": true,
+        "alternativeSourceRecovery": true,
+        "desktopTranscriptExactlyOnce": true,
+        "chatOwnedTasksUi": true,
+        "oneSidebarEntry": true,
+        "handoffRemainsRunning": true,
+        "gatewayRestartNoReplay": true,
+        "failedWorkerDraftPreserved": true,
+        "targetedRetryAfterGatewayRestart": true,
+        "saveOnlyAfterRestart": true,
+        "skillRecovery": true,
+        "missingSearch": true,
+        "falseSaveBlocked": true
+      }
+    },
+    "live": {
+      "provider": "codex",
+      "model": "gpt-6.1-sol",
+      "routingMode": "jev-assisted",
+      "fullWorkflow": {
+        "sessionId": "8000873f-35b4-4459-8597-7411f3876aa5",
+        "runtimeSha256": "51f0d06434fd95a33b30c9c190d06762bba69a1a3149dd5b05ad2f241c9c01d7",
+        "taskStatus": "completed",
+        "researchWorkersAccepted": 3,
+        "synthesisAccepted": true,
+        "deliveryAccepted": true,
+        "attempts": 5,
+        "reportBytes": 10723,
+        "reportWords": 1166,
+        "reportSha256": "da348454302c583475cdd52e19f0acc58196dfdb485f8ce6c45dbf4b49052982",
+        "saveReadbackVerified": true,
+        "completionMessagesAfterRestarts": 1,
+        "successfulSearches": 33,
+        "successfulExtractions": 23,
+        "failedExtractionsRecovered": 6
+      },
+      "finalRuntimeSha256": "bcb93f09af99bbd16b4e1a7e2d383a4bb602d932569fca9a45331a73717ef626",
+      "saveOnlyAfterRestart": {
+        "status": "completed",
+        "identicalCopy": true,
+        "newWorkers": 0,
+        "newResearchCalls": 0,
+        "writeAndReadback": true
+      },
+      "twoSkills": {
+        "sessionId": "2ff86b5c-e47a-434c-89aa-714a59c8c888",
+        "status": "completed",
+        "skills": [
+          "researcher",
+          "system-diagram"
+        ],
+        "unrequestedWebOrFileCalls": 0
+      },
+      "normalAppLaunchAndAuthenticatedGatewayMatch": true,
+      "limitations": [
+        "The full live three-worker run used the initial delivery-fixed candidate; the final runtime adds the separately tested explicit skill/activity scope corrections.",
+        "The final runtime passed packaged three-worker/restart acceptance and live two-skill plus save-only continuation checks.",
+        "These observations establish the tested workflows, not perfect calibration or independently audited research claims."
+      ]
+    }
   }
 }

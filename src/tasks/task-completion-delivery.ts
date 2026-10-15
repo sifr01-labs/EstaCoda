@@ -275,8 +275,8 @@ export class TaskCompletionDeliveryService {
       `Objective: ${boundText(task.objective, 2_000)}`
     ];
     if (taskRequestCompletion(this.#store, task).fileOutputPending) lines.push(copy(this.#locale,
-      "At Task settlement, the requested file had not been saved. File delivery requires a verified workspace save.",
-      "عند انتهاء المهمة، لم يكن الملف المطلوب قد حُفظ. يلزم التحقق من حفظ الملف في مساحة العمل قبل اعتبار تسليمه مكتملًا."));
+      "At Task settlement, the requested file had not been verified. File delivery requires a verified workspace save.",
+      "عند انتهاء المهمة، لم يكن قد جرى التحقق من حفظ الملف المطلوب. يلزم التحقق من حفظ الملف في مساحة العمل قبل اعتبار تسليمه مكتملًا."));
     const reportPath = deliveredReportPath(this.#store, task);
     if (reportPath !== undefined) lines.push(`${copy(this.#locale, "Saved and verified:", "تم حفظ الملف والتحقق منه:")} ${this.#locale === "ar" ? isolateLtr(reportPath) : reportPath}.`);
     if (task.failure !== undefined) lines.push(`Failure: ${boundText(task.failure.class, 80)}`);

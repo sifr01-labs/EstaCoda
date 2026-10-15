@@ -121,6 +121,25 @@ describe("bounded explicit request requirements", () => {
 
 
 describe("calibration request boundaries", () => {
+  it.each(['explain', 'describe'])("preserves explicit skills used to %s without inventing file work", purpose => {
+    const result = deriveRequestRequirements(`Use both the researcher skill and the system-diagram skill to ${purpose} how to save report.md. No web research or file output is needed.`);
+    expect(result.skillReferences).toEqual(['researcher', 'system-diagram']);
+    expect(result.fileOutput).toBeUndefined();
+    expect(result.research).toBeUndefined();
+  });
+  it.each([
+    'Explain how to use both the researcher skill and the system-diagram skill.',
+    'Do not use the researcher skill to explain how to save report.md.',
+    'Imagine using the researcher skill to explain the flow.',
+    'The example says use the researcher skill to explain the flow.'
+  ])('keeps informational and prohibited skill mentions inert: %s', text => {
+    expect(deriveRequestRequirements(text).skillReferences).toEqual([]);
+  });
+  it('keeps a real action after a negative need statement', () => {
+    const result = deriveRequestRequirements('No web research is needed, but save report.md.');
+    expect(result.research).toBeUndefined();
+    expect(result.fileOutput?.path).toBe('report.md');
+  });
   it.each([
     "Open https://example.com in the browser and take a screenshot.",
     "افتح https://example.com في المتصفح والتقط صورة للشاشة.",

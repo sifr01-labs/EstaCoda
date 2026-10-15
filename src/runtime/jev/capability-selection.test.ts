@@ -49,6 +49,41 @@ async function harness(request = 'Investigate and prepare a briefing.') {
 const names = (result: Awaited<ReturnType<typeof selectJevCapabilities>>) => result.initialTools.map(t => t.function.name);
 
 describe('live Jev capability selection and recovery', () => {
+ it('keeps local delivery readers when new research is prohibited, even with negative Jev scores', async () => {
+  for (const name of ['file.read', 'task.result.read', 'task.status']) registry.register(tool(name, { toolsets: ['core', 'research'], riskClass: 'read-only-local' }));
+  registry.register(tool('file.write', { toolsets: ['files'], riskClass: 'workspace-write' }));
+  registry.register(tool('web.search', { toolsets: ['web', 'research'], riskClass: 'read-only-network' }));
+  registry.register(tool('research.lookup', { toolsets: ['research'], riskClass: 'read-only-network' }));
+  chosen = ['web.search', 'research.lookup'];
+  const h = await harness('Save the existing report to report.md. Do not repeat research.');
+  h.intent.requestRequirements!.sourceTaskId = 'task_existing';
+  const selected = names(await h.select());
+  expect(selected).toEqual(expect.arrayContaining(['file_read', 'task_result_read', 'task_status', 'file_write']));
+  expect(selected).not.toContain('web_search');
+  expect(selected).not.toContain('research_lookup');
+ });
+ it.each(['Save report.md. Do not use file.read. No web research is needed.', 'No web research is needed, but save report.md. Do not use file.read.'])('preserves exact tool prohibitions and negative need scope: %s', async request => {
+  registry.register(tool('file.read', { toolsets: ['files', 'research'], riskClass: 'read-only-local' }));
+  registry.register(tool('web.search', { toolsets: ['web'], riskClass: 'read-only-network' }));
+  chosen = ['file.read', 'web.search'];
+  const h = await harness(request);
+  const selected = names(await h.select());
+  expect(selected).not.toContain('file_read');
+  expect(selected).not.toContain('web_search');
+ });
+ it('does not treat the name researcher as permission to override a no-research clause', async () => {
+  registry.register(tool('web.search', { toolsets: ['web'], riskClass: 'read-only-network' }));
+  chosen = ['web.search'];
+  const h = await harness('Use the researcher skill to explain this supplied text. No web research is needed.');
+  expect(names(await h.select())).not.toContain('web_search');
+ });
+ it('routes discovery with an empty optional ID filter through Jev', async () => {
+  registry.register(tool('wanted')); chosen = ['wanted']; await harness('Inspect available tools');
+  const result = await recovery.discoverAsync({ ids: [], query: 'find a tool' }, scope);
+  expect(result.ok).toBe(true);
+  expect(result.metadata?.matches).toEqual([expect.objectContaining({ id: 'tool:wanted' })]);
+  expect(fetcher).toHaveBeenCalledOnce();
+ });
  it('assesses the complete crowded catalog in bounded batches and selects complementary capabilities', async () => {
   for (let i = 0; i < 140; i++) registry.register(tool(`candidate.${i}`));
   chosen = ['candidate.0', 'candidate.139']; const h = await harness(); const result = await h.select();

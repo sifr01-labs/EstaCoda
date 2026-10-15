@@ -953,6 +953,33 @@ describe("web and browser tools baselines", () => {
     expect(fetch).not.toHaveBeenCalled();
   });
 
+  it.each([
+    ["application/pdf", "%PDF-1.7 binary", "unsupported-content-type"],
+    ["text/html", "%PDF-1.7 mislabeled", "unsupported-content-type"],
+    ["text/html", "<html><script>hidden()</script></html>", "empty-content"],
+    ["text/html", "<title>Checking your browser - reCAPTCHA</title><p>Please wait</p>", "access-challenge"],
+    ["text/html", "<title>Just a moment...</title><p>Please wait</p>", "access-challenge"],
+    ["text/plain", "Cookies must be enabled Enable cookies to continue", "access-challenge"]
+  ])("does not count unusable %s extraction as source evidence", async (contentType, body, reason) => {
+    const onText = vi.fn();
+    const extract = tool("web.extract", createWebTools({ enableNetwork: true, resolveHostname: publicResolver,
+      fetch: async () => createFetchResponse({ contentType, body, onText }) }));
+    const result = await extract.run({ url: "https://example.com/source" });
+    expect(result).toMatchObject({ ok: false, metadata: { reason, publicReadReusable: false } });
+    expect(result.content).not.toContain("%PDF-");
+    if (contentType === "application/pdf") expect(onText).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    ["text/html", "<title>Research about CAPTCHA</title><p>Cookies must be enabled is a common challenge message.</p>"],
+    ["text/plain", "Battery recycling source text"],
+    ["application/json", '{"methods":["hydrometallurgy"]}']
+  ])("retains usable %s source text", async (contentType, body) => {
+    const extract = tool("web.extract", createWebTools({ enableNetwork: true, resolveHostname: publicResolver,
+      fetch: async () => createFetchResponse({ contentType, body }) }));
+    expect(await extract.run({ url: "https://example.com/source" })).toMatchObject({ ok: true, metadata: { publicReadReusable: true } });
+  });
+
   it("blocks unsafe web.extract URLs before fetch", async () => {
     const fetch = vi.fn(async () => createFetchResponse({ body: "should not fetch" }));
     const extract = tool("web.extract", createWebTools({ fetch, enableNetwork: true }));

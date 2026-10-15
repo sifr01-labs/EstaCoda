@@ -4,5 +4,6 @@
 export function affirmativeRequestSegments(text: string): string[] {
   return text.replace(/"[^"\n]*"|“[^”\n]*”|(?<![\p{L}\p{N}])'[^'\n]*'(?![\p{L}\p{N}])/gu, " ")
     .split(/[.!?;؛،\n]+(?=\s|$)|\bbut\b|ولكن/iu)
-    .map((sentence) => sentence.split(/\b(?:do\s+not|don[’']t|never|without|avoid)\b|(?:^|\s)(?:لا|بدون|دون)(?:\s|$)/iu, 1)[0]!);
+    .map((sentence) => /^\s*no\s+[^,]*\b(?:needed|required)\s*,?\s*$/iu.test(sentence) ? ""
+      : sentence.split(/\b(?:do\s+not|don[’']t|never|without|avoid)\b|(?:^|\s)(?:لا|بدون|دون)(?:\s|$)/iu, 1)[0]!);
 }

@@ -143,7 +143,7 @@ export class TaskSessionCompletionService {
         const pendingFile = taskRequestCompletion(this.#store, task).fileOutputPending;
         const reportPath = deliveredReportPath(this.#store, task);
         const saved = reportPath === undefined ? "" : `${this.#locale === "ar" ? "تم حفظ الملف والتحقق منه:" : "Saved and verified:"} ${this.#locale === "ar" ? isolateLtr(reportPath) : reportPath}.\n\n`;
-        const text = pendingFile ? `${this.#locale === "ar" ? "عند انتهاء المهمة، لم يكن الملف المطلوب قد حُفظ. يلزم التحقق من حفظ الملف في مساحة العمل قبل اعتبار تسليمه مكتملًا." : "At Task settlement, the requested file had not been saved. File delivery requires a verified workspace save."}\n\n${resultText}` : saved + resultText;
+        const text = pendingFile ? `${this.#locale === "ar" ? "عند انتهاء المهمة، لم يكن قد جرى التحقق من حفظ الملف المطلوب. يلزم التحقق من حفظ الملف في مساحة العمل قبل اعتبار تسليمه مكتملًا." : "At Task settlement, the requested file had not been verified. File delivery requires a verified workspace save."}\n\n${resultText}` : saved + resultText;
         const message = await this.#appendMessage({
           id: messageId,
           sessionId,

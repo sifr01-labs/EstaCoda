@@ -28,6 +28,14 @@ function execution(result: ToolResult, overrides: Partial<ToolExecutionRecord> =
 }
 
 describe("session capability recovery requests", () => {
+  it("treats empty discovery IDs as no filter without allowing empty exposure requests", () => {
+    const { recovery } = harness();
+    expect(recovery.discover({ ids: [], query: "test" }, scope)).toEqual(recovery.discover({ query: "test" }, scope));
+    expect(recovery.request({ ids: [], reason: "needed" }, scope).ok).toBe(false);
+    for (const ids of [null, "", ["tool:/private/path"], Array(9).fill("tool:test.0")]) {
+      expect(recovery.discover({ ids, query: "test" }, scope).ok).toBe(false);
+    }
+  });
   it("bounds discovery without exposing schemas, paths, or excluded entries", () => {
     const { recovery } = harness();
     const result = recovery.discover({ kind: "tool", query: "test" }, scope);

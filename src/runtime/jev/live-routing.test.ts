@@ -78,6 +78,23 @@ describe('live Jev intent and skill routing', () => {
   expect(result.selectedSkillInstructions).toBe('researcher instructions');
   expect(result.supportingSkillPromptContents?.map(s => s.content)).toContain('system-diagram instructions');
  });
+ it('loads explicitly requested skill guidance while retaining activity prohibitions', async () => {
+  registry.register(skill('researcher', { routing: { aliases: ['research'], labels: ['research'] }, requiredToolsets: ['web'] }));
+  registry.register(skill('system-diagram', { routing: { labels: ['docs-writing'] }, requiredToolsets: ['files'] }));
+  chosen = ['intent.research'];
+  const result = await route('Use both the researcher skill and the system-diagram skill to explain these supplied facts. No web research is needed. Do not write files.');
+  expect(result.intent.suggestedSkills.map(s => s.name)).toEqual(['researcher', 'system-diagram']);
+  expect(result.selectedSkillInstructions).toBe('researcher instructions');
+  expect(result.supportingSkillPromptContents?.map(s => s.content)).toEqual(['system-diagram instructions']);
+  expect(result.intent.labels).not.toContain('research');
+  expect(result.intent.requestRequirements?.research).toBeUndefined();
+  expect(result.intent.requestRequirements?.fileOutput).toBeUndefined();
+ });
+ it('does not let a checkpoint skill bypass a current activity prohibition', async () => {
+  registry.register(skill('researcher', { routing: { labels: ['research'] } }));
+  chosen = ['researcher'];
+  expect((await route('Explain these supplied facts. Do not research.', { checkpointSkillName: 'researcher' })).intent.suggestedSkills).toEqual([]);
+ });
  it.each(['standard', 'service-error'])('preserves both explicit skills and instruction bodies under %s', async mode => {
   registry.register(skill('researcher', {requiredToolsets: ['web']})); registry.register(skill('system-diagram', {requiredToolsets: ['files']}));
   if(mode==='standard')await writeFile(resolveProfileStateHome({homeDir:home,profileId:'p'}).configPath,config('standard'));

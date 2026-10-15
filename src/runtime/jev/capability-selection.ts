@@ -33,8 +33,12 @@ export async function selectJevCapabilities(input: {
   for (const tool of input.catalog.inventory) if (tool.toolsets.some(set => requiredToolsets.has(set))) required.add(tool.name);
   const selected = new Set(decision.selections.filter(item => item.selected).map(item => item.id.slice(5)));
   for (const name of required) selected.add(name);
+  const riskClasses = new Map(input.catalog.entries.map(entry => [entry.tool.name, entry.tool.riskClass]));
   for (const tool of input.catalog.inventory) {
-    const categories = tool.toolsets.flatMap(set => set === 'web' || set === 'research' ? ['research'] : set === 'browser' ? ['browser-operation'] : []);
+    // Research is an activity, not a ban on shared local readers. A save-only
+    // request still needs task results and file readback. Exact tool prohibitions
+    // remain binding, as do the session catalog and execution authorization.
+    const categories = tool.toolsets.flatMap(set => set === 'web' || (set === 'research' && riskClasses.get(tool.name) === 'read-only-network') ? ['research'] : set === 'browser' ? ['browser-operation'] : []);
     if ([tool.name, ...categories].some(category => explicitlyProhibited(input.evaluation.context.userRequest, category))) selected.delete(tool.name);
   }
   const needsRecovery = selected.size > 0 || input.standard.initialTools.some(schema => CAPABILITY_RECOVERY_TOOLS.some(name => name === (input.catalog.aliases.get(schema.function.name) ?? schema.function.name)));

@@ -3266,12 +3266,28 @@ async function extractWithFetch(input: {
       guardUrl: input.guardUrl,
       signal: timeout.signal
     });
-    const raw = await response.text();
     const contentType = response.headers.get("content-type") ?? undefined;
+    // Fetch success is not text extraction. Never feed binary document bytes to
+    // the model as if they were readable source evidence.
+    if (contentType !== undefined && !/^(?:text\/|application\/(?:[\w.+-]*\+)?(?:json|xml)\b)/iu.test(contentType)) {
+      return withDebug({ ok: false, content: "This response is not readable text. Use a supported document extraction path or another source.",
+        metadata: { url, status: response.status, contentType, source: "fetch", reason: "unsupported-content-type", publicReadReusable: false } }, input.debug);
+    }
+    const raw = await response.text();
+    if (/^\s*%PDF-|[\u0000]/u.test(raw)) {
+      return withDebug({ ok: false, content: "The response contains binary data, not extracted document text. Use a supported document extraction path or another source.",
+        metadata: { url, status: response.status, contentType, source: "fetch", reason: "unsupported-content-type", publicReadReusable: false } }, input.debug);
+    }
     const extracted = extractReadableText(raw, contentType);
+    const title = extractTitle(raw);
+    const extractionFailure = !extracted.trim() ? "empty-content"
+      : extracted.length < 1_000 && (
+        /^(?:checking your browser(?:\s*-\s*recaptcha)?|just a moment\.{0,3})$/iu.test(title ?? "") ||
+        /^(?:pubmed\.ncbi\.nlm\.nih\.gov\s+)?cookies must be enabled\s+enable cookies/iu.test(extracted)
+      ) ? "access-challenge" : undefined;
     const result: WebExtractionResult = {
       url,
-      title: extractTitle(raw),
+      title,
       content: truncate(extracted, input.maxContentChars),
       contentType,
       status: response.status,
@@ -3286,19 +3302,21 @@ async function extractWithFetch(input: {
     });
 
     return withDebug({
-      ok: response.ok,
+      ok: response.ok && extractionFailure === undefined,
       content: [
         `URL: ${result.url}`,
         result.title === undefined ? undefined : `Title: ${result.title}`,
         `Status: ${response.status} ${response.statusText}`,
+        extractionFailure === undefined ? undefined : `Extraction failed: ${extractionFailure}. No usable source text was retrieved.`,
         "",
         result.content
       ].filter((line) => line !== undefined).join("\n"),
       metadata: {
         ...result,
+        ...(extractionFailure === undefined ? {} : { reason: extractionFailure }),
         redirectCount,
         truncated: extracted.length > input.maxContentChars,
-        publicReadReusable: redirectCount === 0
+        publicReadReusable: extractionFailure === undefined && response.ok && redirectCount === 0
           && !response.headers.get("set-cookie") && !response.headers.get("vary")
           && !/private|no-store|no-cache|must-revalidate/i.test(response.headers.get("cache-control") ?? "")
           && !response.headers.get("expires") && !response.headers.get("age") && !response.headers.get("pragma")
