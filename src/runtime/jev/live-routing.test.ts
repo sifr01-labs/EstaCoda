@@ -287,3 +287,8 @@ it.each([
  expect(result.intent.routingDecision?.diagnostics?.candidates).toContainEqual(expect.objectContaining({id:'repo-inspection',probability,outcome,source}));
  expect(result.intent.labels.includes('repo-inspection')).toBe(selected);
 });
+
+it('keeps research intent for reading a known page without searching', async () => {
+ chosen = ['intent.research'];
+ expect((await route('Read https://www.python.org/about/. Do not search for other pages.')).intent.labels).toContain('research');
+});

@@ -35,7 +35,7 @@ export function explicitRequestSegments(text: string): string[] {
     .replace(/```[\s\S]*?(?:```|$)|~~~[\s\S]*?(?:~~~|$)/gu, " ")
     .replace(/^\s*>.*$/gmu, " ")
     // URL words are operands, not informational markers or research verbs.
-    .replace(/https?:\/\/[^\s<>"“”`]+/giu, " [URL] ")
+    .replace(/https?:\/\/[^\s<>"“”`]+/giu, url => ` [URL] ${url.match(/[.!?;؛]+$/u)?.[0] ?? ""}`)
     .replace(/`([^`\n]*)`|"([^"\n]*)"|“([^”\n]*)”|'([^'\n]*)'|‘([^’\n]*)’/gu, (match, ...groups: unknown[]) => {
       const value = groups.slice(0, 5).find((group) => typeof group === "string") as string | undefined;
       if (value !== undefined && /^[\p{L}\p{N}_ ./\\:-]{1,240}\.(?:md|markdown|txt)$/iu.test(value)) {

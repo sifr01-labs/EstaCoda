@@ -93,11 +93,18 @@ describe('live Jev capability selection and recovery', () => {
   expect(fetcher.mock.calls.flatMap(([, init]) => Object.keys(JSON.parse(String(init?.body)).questions))).toHaveLength(142);
   expect(await db.listProviderUsageEntries('p')).toHaveLength(3);
  });
- it('adds explicit request tools and every selected skill dependency despite negative relevance answers', async () => {
+ it('adds explicit request tools but only relevant dependencies from complementary skills', async () => {
   for (const name of ['file.write', 'file.read', 'delegate_task', 'a', 'b', 'optional']) registry.register(tool(name, { toolsets: [name] }));
   const h = await harness('Use 3 subagents and save a report to report.md.');
   h.intent.suggestedSkills = [{ name: 'one', requiredToolsets: ['a'], optionalToolsets: ['optional'] }, { name: 'two', requiredToolsets: ['b'] }] as typeof h.intent.suggestedSkills;
-  const result = await h.select(); expect(names(result)).toEqual(expect.arrayContaining(['file_write', 'file_read', 'delegate_task', 'a', 'b'])); expect(names(result)).not.toContain('optional');
+  chosen = ['a'];
+  const result = await h.select(); expect(names(result)).toEqual(expect.arrayContaining(['file_write', 'file_read', 'delegate_task', 'a'])); expect(names(result)).not.toContain('optional'); expect(names(result)).not.toContain('b');
+  expect(result.capabilityRouting?.requiredConflicts).not.toContain('b');
+  recovery.beginTurn({ ...scope, tools: result.initialTools });
+  expect((await recovery.discoverAsync({ ids: ['tool:b'] }, scope)).metadata?.matches).toEqual([expect.objectContaining({ id: 'tool:b', state: 'not_selected' })]);
+  expect(recovery.request({ ids: ['tool:b'], reason: 'needed for the next step' }, scope).ok).toBe(true);
+  const expanded = await recovery.applyRequests([{ id: 'tool:b', callId: 'call' }], result.initialTools);
+  expect(expanded.tools.map(t => t.function.name)).toContain('b');
  });
  it('keeps unavailable and schema-restricted matches discoverable without exposing their tools', async () => {
   registry.register(tool('setup', { isAvailable: () => false })); registry.register(tool('restricted', { riskClass: 'credential-access' })); chosen = ['setup', 'restricted'];
@@ -140,8 +147,9 @@ describe('live Jev capability selection and recovery', () => {
  });
  it('preserves aliases and stages required overflow through authenticated next-iteration requests', async () => {
   for (let i = 0; i < 110; i++) registry.register(tool(`required.${i}`)); registry.register(tool('required_0')); const h = await harness();
+  chosen = Array.from({ length: 110 }, (_, i) => `required.${i}`);
   h.intent.suggestedSkills = [{ name: 'large', requiredToolsets: ['test'] }] as typeof h.intent.suggestedSkills;
-  const result = await h.select(); expect(names(result)).toHaveLength(MAX_PROVIDER_TOOLS); expect(result.capabilityRouting?.requiredConflicts?.length).toBeGreaterThan(0);
+  const result = await h.select(); expect(names(result)).toHaveLength(MAX_PROVIDER_TOOLS); expect(result.stagedTools!.length).toBeGreaterThan(0);
   const staged = result.stagedTools![0]; const alias = h.catalog.entries.find(t => t.tool.name === staged)!.schema.function.name;
   recovery.beginTurn({ ...scope, tools: result.initialTools, stagedTools: result.stagedTools });
   const request = recovery.request({ ids: [`tool:${staged}`], reason: 'Next required stage' }, scope);
@@ -153,11 +161,11 @@ describe('live Jev capability selection and recovery', () => {
   expect(expanded.tools.map(t => t.function.name)).toEqual(expect.arrayContaining(['capability_request', 'capability_discover']));
  });
  it('records unexposable oversized required schemas without exceeding byte limits', async () => {
-  registry.register(tool('huge', { inputSchema: { description: 'x'.repeat(MAX_PROVIDER_SCHEMA_TOKENS * 8) } })); const h = await harness(); h.intent.suggestedSkills = [{ name: 'required', requiredToolsets: ['test'] }] as typeof h.intent.suggestedSkills;
-  const result = await h.select(); expect(result.capabilityRouting?.requiredConflicts).toContain('huge'); expect(result.stagedTools).toContain('huge');
+  registry.register(tool('file.write', { inputSchema: { description: 'x'.repeat(MAX_PROVIDER_SCHEMA_TOKENS * 8) } })); const h = await harness('Save report.md.');
+  const result = await h.select(); expect(result.capabilityRouting?.requiredConflicts).toContain('file.write'); expect(result.stagedTools).toContain('file.write');
   recovery.beginTurn({ ...scope, tools: result.initialTools, stagedTools: result.stagedTools });
-  const expanded = await recovery.applyRequests([{ id: 'tool:huge', callId: 'call' }], result.initialTools);
-  expect(expanded.rejected).toContainEqual({ id: 'tool:huge', reason: 'schema_budget' }); expect(expanded.tools).toEqual(result.initialTools);
+  const expanded = await recovery.applyRequests([{ id: 'tool:file.write', callId: 'call' }], result.initialTools);
+  expect(expanded.rejected).toContainEqual({ id: 'tool:file.write', reason: 'schema_budget' }); expect(expanded.tools).toEqual(result.initialTools);
  });
 });
 
@@ -242,7 +250,34 @@ it.each(['researcher','wiki-builder'])('does not require unrelated core tools fo
  skills.register(loaded.skills[0]);
  registry.register(tool('file.read',{toolsets:['files']}));
  registry.register(tool('unrelated.mutate',{toolsets:['core'],riskClass:'shared-state-mutation'}));
+ chosen = ['file.read'];
  const h=await harness(`Use the ${name} skill.`);
  expect(h.intent.suggestedSkills.map(s=>s.name)).toContain(name);
  const result=names(await h.select());expect(result).toContain('file_read');expect(result).not.toContain('unrelated_mutate');
+});
+
+// Reading a known source and discovering new sources are separate activities.
+it.each([
+ 'Read https://www.python.org/about/. Do not search for other pages.',
+ 'Read https://www.python.org/about/. No additional searches are needed.',
+])('retains source extraction while prohibiting search: %s', async request => {
+ registry.register(tool('web.search', { toolsets: ['web', 'research'], riskClass: 'read-only-network' }));
+ registry.register(tool('web.extract', { toolsets: ['web', 'research'], riskClass: 'read-only-network' }));
+ chosen = ['web.search', 'web.extract'];
+ const h = await harness(request);
+ const selected = names(await h.select());
+ expect(selected).toContain('web_extract');
+ expect(selected).not.toContain('web_search');
+});
+it.each([
+ 'Save the finished text to notes.md. No additional research.',
+ 'Use the researcher skill to explain supplied facts. No web research is needed and do not save any files.',
+ 'Read the supplied notes. Do not research.',
+])('does not expose network research from negative scope: %s', async request => {
+ registry.register(tool('web.search', { toolsets: ['web', 'research'], riskClass: 'read-only-network' }));
+ registry.register(tool('web.extract', { toolsets: ['web', 'research'], riskClass: 'read-only-network' }));
+ chosen = ['web.search', 'web.extract'];
+ const h = await harness(request);
+ const selected = names(await h.select());
+ expect(selected).not.toContain('web_search'); expect(selected).not.toContain('web_extract');
 });

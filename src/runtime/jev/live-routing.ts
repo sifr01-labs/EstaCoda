@@ -3,6 +3,7 @@ import type { IntentRoute, IntentTaskClass, NativeIntent } from '../../contracts
 import type { RoutingDecision } from '../../contracts/routing.js';
 import type { IntentRouter, IntentRouteOptions } from '../intent-router.js';
 import { explicitRequestSegments } from '../request-requirements.js';
+import { requestNegationStart } from '../request-action-segments.js';
 import type { JevDecisionClient } from './decision-client.js';
 import type { JevContext, JevEvaluation, JevSnapshot } from './types.js';
 
@@ -120,7 +121,8 @@ export async function selectJevRoute(input: {
 /** Explicit negative clauses remain binding even if a semantic decision says yes. */
 export function explicitlyProhibited(request: string, label: string): boolean {
   const terms: Record<string, RegExp> = {
-    research: /\b(?:research|search|investigat\w*)\b|بحث|ابحث/iu,
+    research: /\b(?:research|investigat\w*)\b|بحث|ابحث/iu,
+    'web-search': /\bsearch(?:es|ing)?\b|بحث|ابحث/iu,
     'docs-writing': /save|write|export|احفظ|اكتب|صدّر/iu,
     'browser-control': /browser|browse|متصفح|تصفح/iu,
     'browser-operation': /browser|browse|متصفح|تصفح/iu,
@@ -133,8 +135,7 @@ export function explicitlyProhibited(request: string, label: string): boolean {
   const unquoted = request.replace(/```[\s\S]*?(?:```|$)|^\s*>.*$|"[^"\n]*"|“[^”\n]*”|`[^`\n]*`/gmu, ' ');
   // Sentence boundaries must not split dotted tool IDs such as file.read.
   return unquoted.split(/[.!?;؛\n]+(?=\s|$)|\bbut\b|ولكن/iu).some(clause => {
-    const negative = /\b(?:do not|don't|don’t|never|without|avoid)\b|(?:^|\s)(?:لا|بدون|دون)\s/iu.exec(clause);
-    return negative ? match(clause.slice(negative.index))
-      : /^\s*no\s+[^,]*\b(?:needed|required)\s*,?\s*$/iu.test(clause) && match(clause);
+    const negative = requestNegationStart(clause);
+    return negative !== undefined && match(clause.slice(negative));
   });
 }

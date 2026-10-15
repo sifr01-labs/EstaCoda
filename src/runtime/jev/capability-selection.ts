@@ -28,9 +28,11 @@ export async function selectJevCapabilities(input: {
   const explicit = new Set([...requiredRequestTools(input.intent.requestRequirements), ...explicitInspectionTools(input.evaluation.context.userRequest)]);
   const required = new Set(explicit);
   if (input.catalog.entries.some(entry => entry.tool.name === "config.provider.execution_status")) required.add("config.provider.execution_status");
-  // Registered skill dependencies, including every complementary skill. Optional toolsets are not obligations.
+  // Skill toolsets describe dependency availability, not a requirement to expose
+  // every member. Prioritize relevant dependencies without undoing Jev's
+  // candidate-level rejections. Omitted tools remain recoverable from the catalog.
   const requiredToolsets = new Set(input.intent.suggestedSkills.flatMap(skill => skill.requiredToolsets));
-  for (const tool of input.catalog.inventory) if (tool.toolsets.some(set => requiredToolsets.has(set))) required.add(tool.name);
+  const dependencies = new Set(input.catalog.inventory.filter(tool => tool.toolsets.some(set => requiredToolsets.has(set))).map(tool => tool.name));
   const selected = new Set(decision.selections.filter(item => item.selected).map(item => item.id.slice(5)));
   for (const name of required) selected.add(name);
   const riskClasses = new Map(input.catalog.entries.map(entry => [entry.tool.name, entry.tool.riskClass]));
@@ -39,6 +41,8 @@ export async function selectJevCapabilities(input: {
     // request still needs task results and file readback. Exact tool prohibitions
     // remain binding, as do the session catalog and execution authorization.
     const categories = tool.toolsets.flatMap(set => set === 'web' || (set === 'research' && riskClasses.get(tool.name) === 'read-only-network') ? ['research'] : set === 'browser' ? ['browser-operation'] : []);
+    // Reading a supplied page is distinct from searching for more pages.
+    if (tool.name === 'web.search') categories.push('web-search');
     if ([tool.name, ...categories].some(category => explicitlyProhibited(input.evaluation.context.userRequest, category))) selected.delete(tool.name);
   }
   const needsRecovery = selected.size > 0 || input.standard.initialTools.some(schema => CAPABILITY_RECOVERY_TOOLS.some(name => name === (input.catalog.aliases.get(schema.function.name) ?? schema.function.name)));
@@ -57,12 +61,12 @@ export async function selectJevCapabilities(input: {
   }
   const recovery = new Set<string>([...CAPABILITY_RECOVERY_TOOLS, "config.provider.execution_status"]);
   // Keep recovery reachable even when required dependencies exceed the schema budget.
-  valid.sort((a, b) => Number(recovery.has(b.tool.name)) - Number(recovery.has(a.tool.name)) || Number(explicit.has(b.tool.name)) - Number(explicit.has(a.tool.name)) || Number(required.has(b.tool.name)) - Number(required.has(a.tool.name)) ||
+  valid.sort((a, b) => Number(recovery.has(b.tool.name)) - Number(recovery.has(a.tool.name)) || Number(explicit.has(b.tool.name)) - Number(explicit.has(a.tool.name)) || Number(required.has(b.tool.name)) - Number(required.has(a.tool.name)) || Number(dependencies.has(b.tool.name)) - Number(dependencies.has(a.tool.name)) ||
     (decision.selections.find(s => s.id === `tool:${b.tool.name}`)?.probability ?? 0) - (decision.selections.find(s => s.id === `tool:${a.tool.name}`)?.probability ?? 0));
   const budget = budgetProviderTools({ tools: valid.map(entry => entry.schema) });
   const exposed = new Set(budget.tools.map(schema => input.catalog.aliases.get(schema.function.name) ?? schema.function.name));
   const requiredConflicts = [...required].filter(name => !exposed.has(name));
-  const stagedTools = valid.filter(entry => required.has(entry.tool.name) && !exposed.has(entry.tool.name)).map(entry => entry.tool.name);
+  const stagedTools = valid.filter(entry => (required.has(entry.tool.name) || dependencies.has(entry.tool.name)) && !exposed.has(entry.tool.name)).map(entry => entry.tool.name);
   return { initialTools: budget.tools, expansionCandidates: input.standard.expansionCandidates, namedConnectorIds: input.standard.namedConnectorIds,
     policy: 'jev-assisted', budgetOmittedTools: budget.omitted, stagedTools,
     capabilityRouting: { ...decision, requiredConflicts, selections: decision.selections.map(item => ({ ...item, selected: selected.has(item.id.slice(5)) })) } };

@@ -183,3 +183,14 @@ it('does not infer web research from a filename operand', () => {
  expect(deriveRequestRequirements('Save research.md').research).toBeUndefined();
  expect(deriveRequestRequirements('Read search.ts').research).toBeUndefined();
 });
+
+it.each([
+ 'Save the finished text to notes.md. No additional research.',
+ 'Use the researcher skill to explain these facts. No web research is needed and do not save any files.',
+ 'No further research or browsing; save notes.md.',
+])('does not treat a negative research noun phrase as an instruction: %s', text => {
+ expect(deriveRequestRequirements(text).research).toBeUndefined();
+});
+it.each(['No further research, but save notes.md.', 'No web research is needed, but save notes.md.'])('retains the affirmative contrast after a negative phrase: %s', text => {
+ expect(deriveRequestRequirements(text).fileOutput?.path).toBe('notes.md');
+});

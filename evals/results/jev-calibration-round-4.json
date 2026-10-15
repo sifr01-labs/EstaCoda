@@ -1,0 +1,3439 @@
+{
+  "version": 1,
+  "date": "2026-10-15",
+  "baseCommit": "9a901411a79d7b16ce70177f79f5d56ffb689e3a",
+  "decision": "Promote bounded skill dependency exposure and negative-scope corrections; keep Jev model, thresholds and questions unchanged.",
+  "method": "18 frozen development and 18 fresh acceptance requests; acceptance repeated 3 times after freezing candidate. Live candidate responses replayed through pre-change code for a paired comparison, with identical question/context hashes and raw selections. All corpora synthetic and agent-labeled. Older 80 development and 72 acceptance trials are observed regression material.",
+  "frozenCandidate": {
+    "base": "9a901411",
+    "files": {
+      "src/runtime/jev/capability-selection.ts": "be075411cdbb03fcb46bf6114390b8a7a570068b7c9f7c1a6800a5497f1007f2",
+      "src/runtime/jev/live-routing.ts": "c648527ab7e0af9c2eb6a245d9c8f41476616de2b2e6eebeaa3a8e1b8cd64d77",
+      "src/runtime/request-action-segments.ts": "bffa9a1f779bfb86fcf6c9a106dfa08194e425049d5748ad9c50ac412b2bdd6e",
+      "src/runtime/request-requirements.ts": "de316f4fae0289ec2b7abe1810e1fa6c75318c769fd047ff48122f1283abd230",
+      "assets/evals/jev-routing-v4.json": "996b6acc5685bfb180cd9577f89120cbe34ccb72af31d0d7488380de657d1b8a"
+    },
+    "policy": {
+      "acceptAt": 0.75,
+      "rejectAt": 0.4
+    },
+    "acceptance": "18 unseen requests x 3 trials; baseline replay uses identical recorded requests and responses; no thresholds/questions changed"
+  },
+  "comparisons": {
+    "development": {
+      "baseline": {
+        "version": 1,
+        "experimentHash": "3f3c340a423315da9621550367ebc070a94759dc8bd2ba16e17eba505b5e89b3",
+        "variant": "baseline",
+        "probabilityCalibration": {
+          "intents": {
+            "unresolved": 11,
+            "missing": 0,
+            "positiveCount": 19,
+            "negativeCount": 242,
+            "positiveBrier": 0.02456315789473685,
+            "negativeBrier": 0.019765289256198346,
+            "bins": [
+              {
+                "from": 0,
+                "to": 0.2,
+                "count": 222,
+                "meanProbability": 0.0364864864864864,
+                "observedPositiveRate": 0
+              },
+              {
+                "from": 0.2,
+                "to": 0.4,
+                "count": 12,
+                "meanProbability": 0.29250000000000004,
+                "observedPositiveRate": 0
+              },
+              {
+                "from": 0.4,
+                "to": 0.6000000000000001,
+                "count": 6,
+                "meanProbability": 0.49333333333333335,
+                "observedPositiveRate": 0.16666666666666666
+              },
+              {
+                "from": 0.6000000000000001,
+                "to": 0.8,
+                "count": 3,
+                "meanProbability": 0.7166666666666668,
+                "observedPositiveRate": 0.6666666666666666
+              },
+              {
+                "from": 0.8,
+                "to": 1,
+                "count": 18,
+                "meanProbability": 0.9405555555555556,
+                "observedPositiveRate": 0.8888888888888888
+              }
+            ]
+          },
+          "skills": {
+            "unresolved": 3,
+            "missing": 0,
+            "positiveCount": 4,
+            "negativeCount": 384,
+            "positiveBrier": 0.40347500000000003,
+            "negativeBrier": 0.003491406249999985,
+            "bins": [
+              {
+                "from": 0,
+                "to": 0.2,
+                "count": 380,
+                "meanProbability": 0.029526315789473484,
+                "observedPositiveRate": 0.005263157894736842
+              },
+              {
+                "from": 0.2,
+                "to": 0.4,
+                "count": 3,
+                "meanProbability": 0.26333333333333336,
+                "observedPositiveRate": 0
+              },
+              {
+                "from": 0.4,
+                "to": 0.6000000000000001,
+                "count": 3,
+                "meanProbability": 0.4833333333333334,
+                "observedPositiveRate": 0
+              },
+              {
+                "from": 0.6000000000000001,
+                "to": 0.8,
+                "count": 0,
+                "meanProbability": null,
+                "observedPositiveRate": null
+              },
+              {
+                "from": 0.8,
+                "to": 1,
+                "count": 2,
+                "meanProbability": 0.9299999999999999,
+                "observedPositiveRate": 1
+              }
+            ]
+          },
+          "tools": {
+            "unresolved": 140,
+            "missing": 0,
+            "positiveCount": 21,
+            "negativeCount": 1742,
+            "positiveBrier": 0.06337142857142856,
+            "negativeBrier": 0.04375568312284716,
+            "bins": [
+              {
+                "from": 0,
+                "to": 0.2,
+                "count": 1306,
+                "meanProbability": 0.10407350689127075,
+                "observedPositiveRate": 0
+              },
+              {
+                "from": 0.2,
+                "to": 0.4,
+                "count": 331,
+                "meanProbability": 0.26583081570996975,
+                "observedPositiveRate": 0.006042296072507553
+              },
+              {
+                "from": 0.4,
+                "to": 0.6000000000000001,
+                "count": 69,
+                "meanProbability": 0.4908695652173914,
+                "observedPositiveRate": 0.014492753623188406
+              },
+              {
+                "from": 0.6000000000000001,
+                "to": 0.8,
+                "count": 35,
+                "meanProbability": 0.6819999999999999,
+                "observedPositiveRate": 0.02857142857142857
+              },
+              {
+                "from": 0.8,
+                "to": 1,
+                "count": 22,
+                "meanProbability": 0.8677272727272726,
+                "observedPositiveRate": 0.7727272727272727
+              }
+            ]
+          }
+        },
+        "recordedLiveProviderCalls": 54,
+        "split": "development",
+        "cases": 18,
+        "corpusHash": "996b6acc5685bfb180cd9577f89120cbe34ccb72af31d0d7488380de657d1b8a",
+        "catalogHash": "6079343f7e378f12aa4057150931bbff44dbb7a1cf6f7b8f7526ba344dff542c",
+        "model": "jev-1.13.0",
+        "policy": {
+          "acceptAt": 0.75,
+          "rejectAt": 0.4,
+          "toolAcceptAt": 0.75,
+          "toolRejectAt": 0.4
+        },
+        "live": true,
+        "standard": {
+          "intents": {
+            "required": 19,
+            "met": 7,
+            "recall": 0.3684210526315789,
+            "irrelevantSelections": 3,
+            "casesWithMiss": 11,
+            "casesWithIrrelevant": 3,
+            "totalSelections": 13
+          },
+          "skills": {
+            "required": 4,
+            "met": 4,
+            "recall": 1,
+            "irrelevantSelections": 0,
+            "casesWithMiss": 0,
+            "casesWithIrrelevant": 0,
+            "totalSelections": 4
+          },
+          "tools": {
+            "required": 23,
+            "met": 23,
+            "recall": 1,
+            "irrelevantSelections": 565,
+            "casesWithMiss": 0,
+            "casesWithIrrelevant": 18,
+            "totalSelections": 684
+          }
+        },
+        "raw": {
+          "intents": {
+            "required": 19,
+            "met": 17,
+            "recall": 0.8947368421052632,
+            "irrelevantSelections": 2,
+            "casesWithMiss": 2,
+            "casesWithIrrelevant": 2,
+            "totalSelections": 23
+          },
+          "skills": {
+            "required": 4,
+            "met": 2,
+            "recall": 0.5,
+            "irrelevantSelections": 0,
+            "casesWithMiss": 1,
+            "casesWithIrrelevant": 0,
+            "totalSelections": 4
+          },
+          "tools": {
+            "required": 23,
+            "met": 20,
+            "recall": 0.8695652173913043,
+            "irrelevantSelections": 11,
+            "casesWithMiss": 3,
+            "casesWithIrrelevant": 7,
+            "totalSelections": 34
+          }
+        },
+        "exposed": {
+          "intents": {
+            "required": 19,
+            "met": 15,
+            "recall": 0.7894736842105263,
+            "irrelevantSelections": 2,
+            "casesWithMiss": 4,
+            "casesWithIrrelevant": 2,
+            "totalSelections": 21
+          },
+          "skills": {
+            "required": 4,
+            "met": 4,
+            "recall": 1,
+            "irrelevantSelections": 0,
+            "casesWithMiss": 0,
+            "casesWithIrrelevant": 0,
+            "totalSelections": 6
+          },
+          "tools": {
+            "required": 23,
+            "met": 22,
+            "recall": 0.9565217391304348,
+            "irrelevantSelections": 243,
+            "casesWithMiss": 1,
+            "casesWithIrrelevant": 14,
+            "totalSelections": 361
+          }
+        },
+        "latencyMs": {
+          "median": 1161,
+          "p95": 1391
+        },
+        "failures": [],
+        "usage": {
+          "calls": 54,
+          "tokens": 492201,
+          "estimatedUsd": 0.018407466
+        },
+        "perLanguage": {
+          "en": {
+            "intents": {
+              "required": 17,
+              "met": 14,
+              "recall": 0.8235294117647058,
+              "irrelevantSelections": 2,
+              "casesWithMiss": 3,
+              "casesWithIrrelevant": 2,
+              "totalSelections": 19
+            },
+            "skills": {
+              "required": 4,
+              "met": 4,
+              "recall": 1,
+              "irrelevantSelections": 0,
+              "casesWithMiss": 0,
+              "casesWithIrrelevant": 0,
+              "totalSelections": 6
+            },
+            "tools": {
+              "required": 20,
+              "met": 19,
+              "recall": 0.95,
+              "irrelevantSelections": 240,
+              "casesWithMiss": 1,
+              "casesWithIrrelevant": 12,
+              "totalSelections": 344
+            }
+          },
+          "ar": {
+            "intents": {
+              "required": 2,
+              "met": 1,
+              "recall": 0.5,
+              "irrelevantSelections": 0,
+              "casesWithMiss": 1,
+              "casesWithIrrelevant": 0,
+              "totalSelections": 2
+            },
+            "skills": {
+              "required": 0,
+              "met": 0,
+              "recall": null,
+              "irrelevantSelections": 0,
+              "casesWithMiss": 0,
+              "casesWithIrrelevant": 0,
+              "totalSelections": 0
+            },
+            "tools": {
+              "required": 3,
+              "met": 3,
+              "recall": 1,
+              "irrelevantSelections": 3,
+              "casesWithMiss": 0,
+              "casesWithIrrelevant": 2,
+              "totalSelections": 17
+            }
+          }
+        }
+      },
+      "candidate": {
+        "version": 1,
+        "experimentHash": "7c6a567c4cb4570a33f5aa4fd5440dc48c69ca51c7b1cd05e18ba075f8efb906",
+        "variant": "baseline",
+        "probabilityCalibration": {
+          "intents": {
+            "unresolved": 11,
+            "missing": 0,
+            "positiveCount": 19,
+            "negativeCount": 242,
+            "positiveBrier": 0.02456315789473685,
+            "negativeBrier": 0.019765289256198346,
+            "bins": [
+              {
+                "from": 0,
+                "to": 0.2,
+                "count": 222,
+                "meanProbability": 0.0364864864864864,
+                "observedPositiveRate": 0
+              },
+              {
+                "from": 0.2,
+                "to": 0.4,
+                "count": 12,
+                "meanProbability": 0.29250000000000004,
+                "observedPositiveRate": 0
+              },
+              {
+                "from": 0.4,
+                "to": 0.6000000000000001,
+                "count": 6,
+                "meanProbability": 0.49333333333333335,
+                "observedPositiveRate": 0.16666666666666666
+              },
+              {
+                "from": 0.6000000000000001,
+                "to": 0.8,
+                "count": 3,
+                "meanProbability": 0.7166666666666668,
+                "observedPositiveRate": 0.6666666666666666
+              },
+              {
+                "from": 0.8,
+                "to": 1,
+                "count": 18,
+                "meanProbability": 0.9405555555555556,
+                "observedPositiveRate": 0.8888888888888888
+              }
+            ]
+          },
+          "skills": {
+            "unresolved": 3,
+            "missing": 0,
+            "positiveCount": 4,
+            "negativeCount": 384,
+            "positiveBrier": 0.40347500000000003,
+            "negativeBrier": 0.003491406249999985,
+            "bins": [
+              {
+                "from": 0,
+                "to": 0.2,
+                "count": 380,
+                "meanProbability": 0.029526315789473484,
+                "observedPositiveRate": 0.005263157894736842
+              },
+              {
+                "from": 0.2,
+                "to": 0.4,
+                "count": 3,
+                "meanProbability": 0.26333333333333336,
+                "observedPositiveRate": 0
+              },
+              {
+                "from": 0.4,
+                "to": 0.6000000000000001,
+                "count": 3,
+                "meanProbability": 0.4833333333333334,
+                "observedPositiveRate": 0
+              },
+              {
+                "from": 0.6000000000000001,
+                "to": 0.8,
+                "count": 0,
+                "meanProbability": null,
+                "observedPositiveRate": null
+              },
+              {
+                "from": 0.8,
+                "to": 1,
+                "count": 2,
+                "meanProbability": 0.9299999999999999,
+                "observedPositiveRate": 1
+              }
+            ]
+          },
+          "tools": {
+            "unresolved": 140,
+            "missing": 0,
+            "positiveCount": 21,
+            "negativeCount": 1742,
+            "positiveBrier": 0.06337142857142856,
+            "negativeBrier": 0.04375568312284716,
+            "bins": [
+              {
+                "from": 0,
+                "to": 0.2,
+                "count": 1306,
+                "meanProbability": 0.10407350689127075,
+                "observedPositiveRate": 0
+              },
+              {
+                "from": 0.2,
+                "to": 0.4,
+                "count": 331,
+                "meanProbability": 0.26583081570996975,
+                "observedPositiveRate": 0.006042296072507553
+              },
+              {
+                "from": 0.4,
+                "to": 0.6000000000000001,
+                "count": 69,
+                "meanProbability": 0.4908695652173914,
+                "observedPositiveRate": 0.014492753623188406
+              },
+              {
+                "from": 0.6000000000000001,
+                "to": 0.8,
+                "count": 35,
+                "meanProbability": 0.6819999999999999,
+                "observedPositiveRate": 0.02857142857142857
+              },
+              {
+                "from": 0.8,
+                "to": 1,
+                "count": 22,
+                "meanProbability": 0.8677272727272726,
+                "observedPositiveRate": 0.7727272727272727
+              }
+            ]
+          }
+        },
+        "recordedLiveProviderCalls": 0,
+        "split": "development",
+        "cases": 18,
+        "corpusHash": "996b6acc5685bfb180cd9577f89120cbe34ccb72af31d0d7488380de657d1b8a",
+        "catalogHash": "6079343f7e378f12aa4057150931bbff44dbb7a1cf6f7b8f7526ba344dff542c",
+        "model": "jev-1.13.0",
+        "policy": {
+          "acceptAt": 0.75,
+          "rejectAt": 0.4,
+          "toolAcceptAt": 0.75,
+          "toolRejectAt": 0.4
+        },
+        "live": false,
+        "standard": {
+          "intents": {
+            "required": 19,
+            "met": 7,
+            "recall": 0.3684210526315789,
+            "irrelevantSelections": 3,
+            "casesWithMiss": 11,
+            "casesWithIrrelevant": 3,
+            "totalSelections": 13
+          },
+          "skills": {
+            "required": 4,
+            "met": 4,
+            "recall": 1,
+            "irrelevantSelections": 0,
+            "casesWithMiss": 0,
+            "casesWithIrrelevant": 0,
+            "totalSelections": 4
+          },
+          "tools": {
+            "required": 23,
+            "met": 23,
+            "recall": 1,
+            "irrelevantSelections": 565,
+            "casesWithMiss": 0,
+            "casesWithIrrelevant": 18,
+            "totalSelections": 682
+          }
+        },
+        "raw": {
+          "intents": {
+            "required": 19,
+            "met": 17,
+            "recall": 0.8947368421052632,
+            "irrelevantSelections": 2,
+            "casesWithMiss": 2,
+            "casesWithIrrelevant": 2,
+            "totalSelections": 23
+          },
+          "skills": {
+            "required": 4,
+            "met": 2,
+            "recall": 0.5,
+            "irrelevantSelections": 0,
+            "casesWithMiss": 1,
+            "casesWithIrrelevant": 0,
+            "totalSelections": 4
+          },
+          "tools": {
+            "required": 23,
+            "met": 20,
+            "recall": 0.8695652173913043,
+            "irrelevantSelections": 11,
+            "casesWithMiss": 3,
+            "casesWithIrrelevant": 7,
+            "totalSelections": 34
+          }
+        },
+        "exposed": {
+          "intents": {
+            "required": 19,
+            "met": 16,
+            "recall": 0.8421052631578947,
+            "irrelevantSelections": 1,
+            "casesWithMiss": 3,
+            "casesWithIrrelevant": 1,
+            "totalSelections": 21
+          },
+          "skills": {
+            "required": 4,
+            "met": 4,
+            "recall": 1,
+            "irrelevantSelections": 0,
+            "casesWithMiss": 0,
+            "casesWithIrrelevant": 0,
+            "totalSelections": 6
+          },
+          "tools": {
+            "required": 23,
+            "met": 23,
+            "recall": 1,
+            "irrelevantSelections": 58,
+            "casesWithMiss": 0,
+            "casesWithIrrelevant": 13,
+            "totalSelections": 167
+          }
+        },
+        "latencyMs": {
+          "median": 1161,
+          "p95": 1391
+        },
+        "failures": [],
+        "usage": {
+          "calls": 54,
+          "tokens": 492201,
+          "estimatedUsd": 0.018407466
+        },
+        "perLanguage": {
+          "en": {
+            "intents": {
+              "required": 17,
+              "met": 15,
+              "recall": 0.8823529411764706,
+              "irrelevantSelections": 1,
+              "casesWithMiss": 2,
+              "casesWithIrrelevant": 1,
+              "totalSelections": 19
+            },
+            "skills": {
+              "required": 4,
+              "met": 4,
+              "recall": 1,
+              "irrelevantSelections": 0,
+              "casesWithMiss": 0,
+              "casesWithIrrelevant": 0,
+              "totalSelections": 6
+            },
+            "tools": {
+              "required": 20,
+              "met": 20,
+              "recall": 1,
+              "irrelevantSelections": 55,
+              "casesWithMiss": 0,
+              "casesWithIrrelevant": 11,
+              "totalSelections": 150
+            }
+          },
+          "ar": {
+            "intents": {
+              "required": 2,
+              "met": 1,
+              "recall": 0.5,
+              "irrelevantSelections": 0,
+              "casesWithMiss": 1,
+              "casesWithIrrelevant": 0,
+              "totalSelections": 2
+            },
+            "skills": {
+              "required": 0,
+              "met": 0,
+              "recall": null,
+              "irrelevantSelections": 0,
+              "casesWithMiss": 0,
+              "casesWithIrrelevant": 0,
+              "totalSelections": 0
+            },
+            "tools": {
+              "required": 3,
+              "met": 3,
+              "recall": 1,
+              "irrelevantSelections": 3,
+              "casesWithMiss": 0,
+              "casesWithIrrelevant": 2,
+              "totalSelections": 17
+            }
+          }
+        }
+      },
+      "trials": [
+        {
+          "trial": 0,
+          "requiredTools": 23,
+          "metTools": 23,
+          "recall": 1.0
+        }
+      ],
+      "explicitSkillsLoaded": {
+        "required": 4,
+        "loaded": 4
+      },
+      "gates": {
+        "requiredToolRecallPerTrial": true,
+        "requiredIntentRecall": false,
+        "explicitSkillsAllLoaded": true,
+        "noRequiredRecallRegression": true,
+        "noExcessToolOrSkillRegression": true,
+        "identicalRawSelections": true
+      },
+      "cases": [
+        {"id":"r4-ar-browse","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":2}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":2}},"loadedSkills":[]},
+        {"id":"r4-ar-read","trial":0,"baselineScores":{"intents":{"required":1,"met":0,"missing":[["repo-inspection"]],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":1}},"candidateScores":{"intents":{"required":1,"met":0,"missing":[["repo-inspection"]],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":1}},"loadedSkills":[]},
+        {"id":"r4-extract","trial":0,"baselineScores":{"intents":{"required":1,"met":0,"missing":[["research"]],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":0,"missing":[["web.extract"]],"excess":2}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":10}},"loadedSkills":[]},
+        {"id":"r4-find-function","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":1}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":1}},"loadedSkills":[]},
+        {"id":"r4-fix-test","trial":0,"baselineScores":{"intents":{"required":3,"met":3,"missing":[],"excess":1},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":3,"met":3,"missing":[],"excess":42}},"candidateScores":{"intents":{"required":3,"met":3,"missing":[],"excess":1},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":3,"met":3,"missing":[],"excess":1}},"loadedSkills":["verify"]},
+        {"id":"r4-hypothetical","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"loadedSkills":[]},
+        {"id":"r4-inline-review","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"loadedSkills":[]},
+        {"id":"r4-navigate","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":1}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":1}},"loadedSkills":[]},
+        {"id":"r4-read-license","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":1}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":1}},"loadedSkills":[]},
+        {"id":"r4-research-save","trial":0,"baselineScores":{"intents":{"required":2,"met":2,"missing":[],"excess":0},"skills":{"required":1,"met":1,"missing":[],"excess":0},"tools":{"required":5,"met":5,"missing":[],"excess":62}},"candidateScores":{"intents":{"required":2,"met":2,"missing":[],"excess":0},"skills":{"required":1,"met":1,"missing":[],"excess":0},"tools":{"required":5,"met":5,"missing":[],"excess":24}},"loadedSkills":["researcher","research-discovery"]},
+        {"id":"r4-save-only","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":3}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":1}},"loadedSkills":[]},
+        {"id":"r4-search-read","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":13}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":13}},"loadedSkills":[]},
+        {"id":"r4-status","trial":0,"baselineScores":{"intents":{"required":0,"met":0,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":1}},"candidateScores":{"intents":{"required":0,"met":0,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":1}},"loadedSkills":[]},
+        {"id":"r4-task-read","trial":0,"baselineScores":{"intents":{"required":0,"met":0,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":1}},"candidateScores":{"intents":{"required":0,"met":0,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":1}},"loadedSkills":[]},
+        {"id":"r4-thanks","trial":0,"baselineScores":{"intents":{"required":1,"met":0,"missing":[["conversation"]],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"candidateScores":{"intents":{"required":1,"met":0,"missing":[["conversation"]],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"loadedSkills":[]},
+        {"id":"r4-two-skills","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":1},"skills":{"required":2,"met":2,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":68}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":2,"met":2,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"loadedSkills":["system-diagram","researcher"]},
+        {"id":"r4-untrusted","trial":0,"baselineScores":{"intents":{"required":1,"met":0,"missing":[["conversation"]],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"candidateScores":{"intents":{"required":1,"met":0,"missing":[["conversation"]],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"loadedSkills":[]},
+        {"id":"r4-verify","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":1,"met":1,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":45}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":1,"met":1,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":1}},"loadedSkills":["verify"]}
+      ]
+    },
+    "acceptance": {
+      "baseline": {
+        "version": 1,
+        "experimentHash": "3f3c340a423315da9621550367ebc070a94759dc8bd2ba16e17eba505b5e89b3",
+        "variant": "baseline",
+        "probabilityCalibration": {
+          "intents": {
+            "unresolved": 25,
+            "missing": 0,
+            "positiveCount": 57,
+            "negativeCount": 726,
+            "positiveBrier": 0.014636842105263169,
+            "negativeBrier": 0.02181308539944912,
+            "bins": [
+              {
+                "from": 0,
+                "to": 0.2,
+                "count": 666,
+                "meanProbability": 0.035540540540540455,
+                "observedPositiveRate": 0
+              },
+              {
+                "from": 0.2,
+                "to": 0.4,
+                "count": 31,
+                "meanProbability": 0.30258064516129035,
+                "observedPositiveRate": 0
+              },
+              {
+                "from": 0.4,
+                "to": 0.6000000000000001,
+                "count": 15,
+                "meanProbability": 0.47266666666666673,
+                "observedPositiveRate": 0.13333333333333333
+              },
+              {
+                "from": 0.6000000000000001,
+                "to": 0.8,
+                "count": 15,
+                "meanProbability": 0.6846666666666665,
+                "observedPositiveRate": 0.13333333333333333
+              },
+              {
+                "from": 0.8,
+                "to": 1,
+                "count": 56,
+                "meanProbability": 0.9351785714285713,
+                "observedPositiveRate": 0.9464285714285714
+              }
+            ]
+          },
+          "skills": {
+            "unresolved": 9,
+            "missing": 0,
+            "positiveCount": 12,
+            "negativeCount": 1152,
+            "positiveBrier": 0.26414166666666666,
+            "negativeBrier": 0.0032534722222222184,
+            "bins": [
+              {
+                "from": 0,
+                "to": 0.2,
+                "count": 1138,
+                "meanProbability": 0.03013181019332169,
+                "observedPositiveRate": 0.0026362038664323375
+              },
+              {
+                "from": 0.2,
+                "to": 0.4,
+                "count": 12,
+                "meanProbability": 0.2841666666666666,
+                "observedPositiveRate": 0.16666666666666666
+              },
+              {
+                "from": 0.4,
+                "to": 0.6000000000000001,
+                "count": 8,
+                "meanProbability": 0.46874999999999994,
+                "observedPositiveRate": 0.125
+              },
+              {
+                "from": 0.6000000000000001,
+                "to": 0.8,
+                "count": 0,
+                "meanProbability": null,
+                "observedPositiveRate": null
+              },
+              {
+                "from": 0.8,
+                "to": 1,
+                "count": 6,
+                "meanProbability": 0.9166666666666666,
+                "observedPositiveRate": 1
+              }
+            ]
+          },
+          "tools": {
+            "unresolved": 410,
+            "missing": 0,
+            "positiveCount": 66,
+            "negativeCount": 5226,
+            "positiveBrier": 0.05347272727272728,
+            "negativeBrier": 0.041051033295063356,
+            "bins": [
+              {
+                "from": 0,
+                "to": 0.2,
+                "count": 4043,
+                "meanProbability": 0.09948305713579059,
+                "observedPositiveRate": 0
+              },
+              {
+                "from": 0.2,
+                "to": 0.4,
+                "count": 863,
+                "meanProbability": 0.27064889918887597,
+                "observedPositiveRate": 0.0034762456546929316
+              },
+              {
+                "from": 0.4,
+                "to": 0.6000000000000001,
+                "count": 219,
+                "meanProbability": 0.47630136986301397,
+                "observedPositiveRate": 0.0182648401826484
+              },
+              {
+                "from": 0.6000000000000001,
+                "to": 0.8,
+                "count": 98,
+                "meanProbability": 0.6805102040816328,
+                "observedPositiveRate": 0.02040816326530612
+              },
+              {
+                "from": 0.8,
+                "to": 1,
+                "count": 69,
+                "meanProbability": 0.8688405797101452,
+                "observedPositiveRate": 0.8260869565217391
+              }
+            ]
+          }
+        },
+        "recordedLiveProviderCalls": 0,
+        "split": "acceptance",
+        "cases": 54,
+        "corpusHash": "996b6acc5685bfb180cd9577f89120cbe34ccb72af31d0d7488380de657d1b8a",
+        "catalogHash": "6079343f7e378f12aa4057150931bbff44dbb7a1cf6f7b8f7526ba344dff542c",
+        "model": "jev-1.13.0",
+        "policy": {
+          "acceptAt": 0.75,
+          "rejectAt": 0.4,
+          "toolAcceptAt": 0.75,
+          "toolRejectAt": 0.4
+        },
+        "live": false,
+        "standard": {
+          "intents": {
+            "required": 57,
+            "met": 21,
+            "recall": 0.3684210526315789,
+            "irrelevantSelections": 15,
+            "casesWithMiss": 33,
+            "casesWithIrrelevant": 15,
+            "totalSelections": 45
+          },
+          "skills": {
+            "required": 12,
+            "met": 12,
+            "recall": 1,
+            "irrelevantSelections": 0,
+            "casesWithMiss": 0,
+            "casesWithIrrelevant": 0,
+            "totalSelections": 12
+          },
+          "tools": {
+            "required": 72,
+            "met": 66,
+            "recall": 0.9166666666666666,
+            "irrelevantSelections": 1410,
+            "casesWithMiss": 3,
+            "casesWithIrrelevant": 54,
+            "totalSelections": 1752
+          }
+        },
+        "raw": {
+          "intents": {
+            "required": 57,
+            "met": 54,
+            "recall": 0.9473684210526315,
+            "irrelevantSelections": 6,
+            "casesWithMiss": 3,
+            "casesWithIrrelevant": 6,
+            "totalSelections": 78
+          },
+          "skills": {
+            "required": 12,
+            "met": 6,
+            "recall": 0.5,
+            "irrelevantSelections": 0,
+            "casesWithMiss": 3,
+            "casesWithIrrelevant": 0,
+            "totalSelections": 12
+          },
+          "tools": {
+            "required": 72,
+            "met": 63,
+            "recall": 0.875,
+            "irrelevantSelections": 29,
+            "casesWithMiss": 9,
+            "casesWithIrrelevant": 13,
+            "totalSelections": 97
+          }
+        },
+        "exposed": {
+          "intents": {
+            "required": 57,
+            "met": 51,
+            "recall": 0.8947368421052632,
+            "irrelevantSelections": 6,
+            "casesWithMiss": 6,
+            "casesWithIrrelevant": 6,
+            "totalSelections": 72
+          },
+          "skills": {
+            "required": 12,
+            "met": 12,
+            "recall": 1,
+            "irrelevantSelections": 0,
+            "casesWithMiss": 0,
+            "casesWithIrrelevant": 0,
+            "totalSelections": 18
+          },
+          "tools": {
+            "required": 72,
+            "met": 69,
+            "recall": 0.9583333333333334,
+            "irrelevantSelections": 664,
+            "casesWithMiss": 3,
+            "casesWithIrrelevant": 39,
+            "totalSelections": 1012
+          }
+        },
+        "latencyMs": {
+          "median": 1091,
+          "p95": 1383
+        },
+        "failures": [],
+        "usage": {
+          "calls": 162,
+          "tokens": 1476783,
+          "estimatedUsd": 0.05522995800000003
+        },
+        "perLanguage": {
+          "en": {
+            "intents": {
+              "required": 51,
+              "met": 45,
+              "recall": 0.8823529411764706,
+              "irrelevantSelections": 3,
+              "casesWithMiss": 6,
+              "casesWithIrrelevant": 3,
+              "totalSelections": 60
+            },
+            "skills": {
+              "required": 12,
+              "met": 12,
+              "recall": 1,
+              "irrelevantSelections": 0,
+              "casesWithMiss": 0,
+              "casesWithIrrelevant": 0,
+              "totalSelections": 18
+            },
+            "tools": {
+              "required": 63,
+              "met": 60,
+              "recall": 0.9523809523809523,
+              "irrelevantSelections": 653,
+              "casesWithMiss": 3,
+              "casesWithIrrelevant": 33,
+              "totalSelections": 962
+            }
+          },
+          "ar": {
+            "intents": {
+              "required": 3,
+              "met": 3,
+              "recall": 1,
+              "irrelevantSelections": 0,
+              "casesWithMiss": 0,
+              "casesWithIrrelevant": 0,
+              "totalSelections": 3
+            },
+            "skills": {
+              "required": 0,
+              "met": 0,
+              "recall": null,
+              "irrelevantSelections": 0,
+              "casesWithMiss": 0,
+              "casesWithIrrelevant": 0,
+              "totalSelections": 0
+            },
+            "tools": {
+              "required": 3,
+              "met": 3,
+              "recall": 1,
+              "irrelevantSelections": 3,
+              "casesWithMiss": 0,
+              "casesWithIrrelevant": 3,
+              "totalSelections": 21
+            }
+          },
+          "mixed": {
+            "intents": {
+              "required": 3,
+              "met": 3,
+              "recall": 1,
+              "irrelevantSelections": 3,
+              "casesWithMiss": 0,
+              "casesWithIrrelevant": 3,
+              "totalSelections": 9
+            },
+            "skills": {
+              "required": 0,
+              "met": 0,
+              "recall": null,
+              "irrelevantSelections": 0,
+              "casesWithMiss": 0,
+              "casesWithIrrelevant": 0,
+              "totalSelections": 0
+            },
+            "tools": {
+              "required": 6,
+              "met": 6,
+              "recall": 1,
+              "irrelevantSelections": 8,
+              "casesWithMiss": 0,
+              "casesWithIrrelevant": 3,
+              "totalSelections": 29
+            }
+          }
+        }
+      },
+      "candidate": {
+        "version": 1,
+        "experimentHash": "7c6a567c4cb4570a33f5aa4fd5440dc48c69ca51c7b1cd05e18ba075f8efb906",
+        "variant": "baseline",
+        "probabilityCalibration": {
+          "intents": {
+            "unresolved": 25,
+            "missing": 0,
+            "positiveCount": 57,
+            "negativeCount": 726,
+            "positiveBrier": 0.014636842105263169,
+            "negativeBrier": 0.02181308539944912,
+            "bins": [
+              {
+                "from": 0,
+                "to": 0.2,
+                "count": 666,
+                "meanProbability": 0.035540540540540455,
+                "observedPositiveRate": 0
+              },
+              {
+                "from": 0.2,
+                "to": 0.4,
+                "count": 31,
+                "meanProbability": 0.30258064516129035,
+                "observedPositiveRate": 0
+              },
+              {
+                "from": 0.4,
+                "to": 0.6000000000000001,
+                "count": 15,
+                "meanProbability": 0.47266666666666673,
+                "observedPositiveRate": 0.13333333333333333
+              },
+              {
+                "from": 0.6000000000000001,
+                "to": 0.8,
+                "count": 15,
+                "meanProbability": 0.6846666666666665,
+                "observedPositiveRate": 0.13333333333333333
+              },
+              {
+                "from": 0.8,
+                "to": 1,
+                "count": 56,
+                "meanProbability": 0.9351785714285713,
+                "observedPositiveRate": 0.9464285714285714
+              }
+            ]
+          },
+          "skills": {
+            "unresolved": 9,
+            "missing": 0,
+            "positiveCount": 12,
+            "negativeCount": 1152,
+            "positiveBrier": 0.26414166666666666,
+            "negativeBrier": 0.0032534722222222184,
+            "bins": [
+              {
+                "from": 0,
+                "to": 0.2,
+                "count": 1138,
+                "meanProbability": 0.03013181019332169,
+                "observedPositiveRate": 0.0026362038664323375
+              },
+              {
+                "from": 0.2,
+                "to": 0.4,
+                "count": 12,
+                "meanProbability": 0.2841666666666666,
+                "observedPositiveRate": 0.16666666666666666
+              },
+              {
+                "from": 0.4,
+                "to": 0.6000000000000001,
+                "count": 8,
+                "meanProbability": 0.46874999999999994,
+                "observedPositiveRate": 0.125
+              },
+              {
+                "from": 0.6000000000000001,
+                "to": 0.8,
+                "count": 0,
+                "meanProbability": null,
+                "observedPositiveRate": null
+              },
+              {
+                "from": 0.8,
+                "to": 1,
+                "count": 6,
+                "meanProbability": 0.9166666666666666,
+                "observedPositiveRate": 1
+              }
+            ]
+          },
+          "tools": {
+            "unresolved": 410,
+            "missing": 0,
+            "positiveCount": 66,
+            "negativeCount": 5226,
+            "positiveBrier": 0.05347272727272728,
+            "negativeBrier": 0.041051033295063356,
+            "bins": [
+              {
+                "from": 0,
+                "to": 0.2,
+                "count": 4043,
+                "meanProbability": 0.09948305713579059,
+                "observedPositiveRate": 0
+              },
+              {
+                "from": 0.2,
+                "to": 0.4,
+                "count": 863,
+                "meanProbability": 0.27064889918887597,
+                "observedPositiveRate": 0.0034762456546929316
+              },
+              {
+                "from": 0.4,
+                "to": 0.6000000000000001,
+                "count": 219,
+                "meanProbability": 0.47630136986301397,
+                "observedPositiveRate": 0.0182648401826484
+              },
+              {
+                "from": 0.6000000000000001,
+                "to": 0.8,
+                "count": 98,
+                "meanProbability": 0.6805102040816328,
+                "observedPositiveRate": 0.02040816326530612
+              },
+              {
+                "from": 0.8,
+                "to": 1,
+                "count": 69,
+                "meanProbability": 0.8688405797101452,
+                "observedPositiveRate": 0.8260869565217391
+              }
+            ]
+          }
+        },
+        "recordedLiveProviderCalls": 162,
+        "split": "acceptance",
+        "cases": 54,
+        "corpusHash": "996b6acc5685bfb180cd9577f89120cbe34ccb72af31d0d7488380de657d1b8a",
+        "catalogHash": "6079343f7e378f12aa4057150931bbff44dbb7a1cf6f7b8f7526ba344dff542c",
+        "model": "jev-1.13.0",
+        "policy": {
+          "acceptAt": 0.75,
+          "rejectAt": 0.4,
+          "toolAcceptAt": 0.75,
+          "toolRejectAt": 0.4
+        },
+        "live": true,
+        "standard": {
+          "intents": {
+            "required": 57,
+            "met": 21,
+            "recall": 0.3684210526315789,
+            "irrelevantSelections": 15,
+            "casesWithMiss": 33,
+            "casesWithIrrelevant": 15,
+            "totalSelections": 45
+          },
+          "skills": {
+            "required": 12,
+            "met": 12,
+            "recall": 1,
+            "irrelevantSelections": 0,
+            "casesWithMiss": 0,
+            "casesWithIrrelevant": 0,
+            "totalSelections": 12
+          },
+          "tools": {
+            "required": 72,
+            "met": 66,
+            "recall": 0.9166666666666666,
+            "irrelevantSelections": 1410,
+            "casesWithMiss": 3,
+            "casesWithIrrelevant": 54,
+            "totalSelections": 1752
+          }
+        },
+        "raw": {
+          "intents": {
+            "required": 57,
+            "met": 54,
+            "recall": 0.9473684210526315,
+            "irrelevantSelections": 6,
+            "casesWithMiss": 3,
+            "casesWithIrrelevant": 6,
+            "totalSelections": 78
+          },
+          "skills": {
+            "required": 12,
+            "met": 6,
+            "recall": 0.5,
+            "irrelevantSelections": 0,
+            "casesWithMiss": 3,
+            "casesWithIrrelevant": 0,
+            "totalSelections": 12
+          },
+          "tools": {
+            "required": 72,
+            "met": 63,
+            "recall": 0.875,
+            "irrelevantSelections": 29,
+            "casesWithMiss": 9,
+            "casesWithIrrelevant": 13,
+            "totalSelections": 97
+          }
+        },
+        "exposed": {
+          "intents": {
+            "required": 57,
+            "met": 54,
+            "recall": 0.9473684210526315,
+            "irrelevantSelections": 6,
+            "casesWithMiss": 3,
+            "casesWithIrrelevant": 6,
+            "totalSelections": 75
+          },
+          "skills": {
+            "required": 12,
+            "met": 12,
+            "recall": 1,
+            "irrelevantSelections": 0,
+            "casesWithMiss": 0,
+            "casesWithIrrelevant": 0,
+            "totalSelections": 18
+          },
+          "tools": {
+            "required": 72,
+            "met": 72,
+            "recall": 1,
+            "irrelevantSelections": 167,
+            "casesWithMiss": 0,
+            "casesWithIrrelevant": 33,
+            "totalSelections": 480
+          }
+        },
+        "latencyMs": {
+          "median": 1091,
+          "p95": 1383
+        },
+        "failures": [],
+        "usage": {
+          "calls": 162,
+          "tokens": 1476783,
+          "estimatedUsd": 0.05522995800000003
+        },
+        "perLanguage": {
+          "en": {
+            "intents": {
+              "required": 51,
+              "met": 48,
+              "recall": 0.9411764705882353,
+              "irrelevantSelections": 3,
+              "casesWithMiss": 3,
+              "casesWithIrrelevant": 3,
+              "totalSelections": 63
+            },
+            "skills": {
+              "required": 12,
+              "met": 12,
+              "recall": 1,
+              "irrelevantSelections": 0,
+              "casesWithMiss": 0,
+              "casesWithIrrelevant": 0,
+              "totalSelections": 18
+            },
+            "tools": {
+              "required": 63,
+              "met": 63,
+              "recall": 1,
+              "irrelevantSelections": 156,
+              "casesWithMiss": 0,
+              "casesWithIrrelevant": 27,
+              "totalSelections": 430
+            }
+          },
+          "ar": {
+            "intents": {
+              "required": 3,
+              "met": 3,
+              "recall": 1,
+              "irrelevantSelections": 0,
+              "casesWithMiss": 0,
+              "casesWithIrrelevant": 0,
+              "totalSelections": 3
+            },
+            "skills": {
+              "required": 0,
+              "met": 0,
+              "recall": null,
+              "irrelevantSelections": 0,
+              "casesWithMiss": 0,
+              "casesWithIrrelevant": 0,
+              "totalSelections": 0
+            },
+            "tools": {
+              "required": 3,
+              "met": 3,
+              "recall": 1,
+              "irrelevantSelections": 3,
+              "casesWithMiss": 0,
+              "casesWithIrrelevant": 3,
+              "totalSelections": 21
+            }
+          },
+          "mixed": {
+            "intents": {
+              "required": 3,
+              "met": 3,
+              "recall": 1,
+              "irrelevantSelections": 3,
+              "casesWithMiss": 0,
+              "casesWithIrrelevant": 3,
+              "totalSelections": 9
+            },
+            "skills": {
+              "required": 0,
+              "met": 0,
+              "recall": null,
+              "irrelevantSelections": 0,
+              "casesWithMiss": 0,
+              "casesWithIrrelevant": 0,
+              "totalSelections": 0
+            },
+            "tools": {
+              "required": 6,
+              "met": 6,
+              "recall": 1,
+              "irrelevantSelections": 8,
+              "casesWithMiss": 0,
+              "casesWithIrrelevant": 3,
+              "totalSelections": 29
+            }
+          }
+        }
+      },
+      "trials": [
+        {
+          "trial": 0,
+          "requiredTools": 24,
+          "metTools": 24,
+          "recall": 1.0
+        },
+        {
+          "trial": 1,
+          "requiredTools": 24,
+          "metTools": 24,
+          "recall": 1.0
+        },
+        {
+          "trial": 2,
+          "requiredTools": 24,
+          "metTools": 24,
+          "recall": 1.0
+        }
+      ],
+      "explicitSkillsLoaded": {
+        "required": 12,
+        "loaded": 12
+      },
+      "gates": {
+        "requiredToolRecallPerTrial": true,
+        "requiredIntentRecall": true,
+        "explicitSkillsAllLoaded": true,
+        "noRequiredRecallRegression": true,
+        "noExcessToolOrSkillRegression": true,
+        "identicalRawSelections": true
+      },
+      "cases": [
+        {"id":"r4-ability-no-action","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"loadedSkills":[]},
+        {"id":"r4-ability-no-action","trial":1,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"loadedSkills":[]},
+        {"id":"r4-ability-no-action","trial":2,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"loadedSkills":[]},
+        {"id":"r4-actual-provider","trial":0,"baselineScores":{"intents":{"required":0,"met":0,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":1}},"candidateScores":{"intents":{"required":0,"met":0,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":1}},"loadedSkills":[]},
+        {"id":"r4-actual-provider","trial":1,"baselineScores":{"intents":{"required":0,"met":0,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":1}},"candidateScores":{"intents":{"required":0,"met":0,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":1}},"loadedSkills":[]},
+        {"id":"r4-actual-provider","trial":2,"baselineScores":{"intents":{"required":0,"met":0,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":1}},"candidateScores":{"intents":{"required":0,"met":0,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":1}},"loadedSkills":[]},
+        {"id":"r4-ar-config","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":1}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":1}},"loadedSkills":[]},
+        {"id":"r4-ar-config","trial":1,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":1}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":1}},"loadedSkills":[]},
+        {"id":"r4-ar-config","trial":2,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":1}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":1}},"loadedSkills":[]},
+        {"id":"r4-browser-capture","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":2}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":2}},"loadedSkills":[]},
+        {"id":"r4-browser-capture","trial":1,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":2}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":2}},"loadedSkills":[]},
+        {"id":"r4-browser-capture","trial":2,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":2}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":2}},"loadedSkills":[]},
+        {"id":"r4-config-read","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":1}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":1}},"loadedSkills":[]},
+        {"id":"r4-config-read","trial":1,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":1}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":1}},"loadedSkills":[]},
+        {"id":"r4-config-read","trial":2,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":1}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":1}},"loadedSkills":[]},
+        {"id":"r4-copy-complete","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":2}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":2}},"loadedSkills":[]},
+        {"id":"r4-copy-complete","trial":1,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":2}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":2}},"loadedSkills":[]},
+        {"id":"r4-copy-complete","trial":2,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":2}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":2}},"loadedSkills":[]},
+        {"id":"r4-delegated-report","trial":0,"baselineScores":{"intents":{"required":2,"met":2,"missing":[],"excess":0},"skills":{"required":1,"met":1,"missing":[],"excess":0},"tools":{"required":5,"met":5,"missing":[],"excess":62}},"candidateScores":{"intents":{"required":2,"met":2,"missing":[],"excess":0},"skills":{"required":1,"met":1,"missing":[],"excess":0},"tools":{"required":5,"met":5,"missing":[],"excess":26}},"loadedSkills":["researcher","research-discovery"]},
+        {"id":"r4-delegated-report","trial":1,"baselineScores":{"intents":{"required":2,"met":2,"missing":[],"excess":0},"skills":{"required":1,"met":1,"missing":[],"excess":0},"tools":{"required":5,"met":5,"missing":[],"excess":63}},"candidateScores":{"intents":{"required":2,"met":2,"missing":[],"excess":0},"skills":{"required":1,"met":1,"missing":[],"excess":0},"tools":{"required":5,"met":5,"missing":[],"excess":27}},"loadedSkills":["researcher","research-discovery"]},
+        {"id":"r4-delegated-report","trial":2,"baselineScores":{"intents":{"required":2,"met":2,"missing":[],"excess":0},"skills":{"required":1,"met":1,"missing":[],"excess":0},"tools":{"required":5,"met":5,"missing":[],"excess":63}},"candidateScores":{"intents":{"required":2,"met":2,"missing":[],"excess":0},"skills":{"required":1,"met":1,"missing":[],"excess":0},"tools":{"required":5,"met":5,"missing":[],"excess":28}},"loadedSkills":["researcher","research-discovery"]},
+        {"id":"r4-edit-and-validate","trial":0,"baselineScores":{"intents":{"required":3,"met":3,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":3,"met":3,"missing":[],"excess":42}},"candidateScores":{"intents":{"required":3,"met":3,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":3,"met":3,"missing":[],"excess":1}},"loadedSkills":["verify"]},
+        {"id":"r4-edit-and-validate","trial":1,"baselineScores":{"intents":{"required":3,"met":3,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":3,"met":3,"missing":[],"excess":42}},"candidateScores":{"intents":{"required":3,"met":3,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":3,"met":3,"missing":[],"excess":1}},"loadedSkills":["verify"]},
+        {"id":"r4-edit-and-validate","trial":2,"baselineScores":{"intents":{"required":3,"met":3,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":3,"met":3,"missing":[],"excess":42}},"candidateScores":{"intents":{"required":3,"met":3,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":3,"met":3,"missing":[],"excess":1}},"loadedSkills":["verify"]},
+        {"id":"r4-explicit-checks","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":1,"met":1,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":44}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":1,"met":1,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":0}},"loadedSkills":["verify"]},
+        {"id":"r4-explicit-checks","trial":1,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":1,"met":1,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":44}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":1,"met":1,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":0}},"loadedSkills":["verify"]},
+        {"id":"r4-explicit-checks","trial":2,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":1,"met":1,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":44}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":1,"met":1,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":0}},"loadedSkills":["verify"]},
+        {"id":"r4-explicit-complement","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":2,"met":2,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":46}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":2,"met":2,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"loadedSkills":["system-diagram","researcher"]},
+        {"id":"r4-explicit-complement","trial":1,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":2,"met":2,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":46}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":2,"met":2,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"loadedSkills":["system-diagram","researcher"]},
+        {"id":"r4-explicit-complement","trial":2,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":2,"met":2,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":46}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":2,"met":2,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"loadedSkills":["system-diagram","researcher"]},
+        {"id":"r4-fresh-announcement","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":13}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":13}},"loadedSkills":[]},
+        {"id":"r4-fresh-announcement","trial":1,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":13}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":13}},"loadedSkills":[]},
+        {"id":"r4-fresh-announcement","trial":2,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":13}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":13}},"loadedSkills":[]},
+        {"id":"r4-mixed-browser","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":1},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":3}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":1},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":3}},"loadedSkills":[]},
+        {"id":"r4-mixed-browser","trial":1,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":1},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":2}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":1},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":2}},"loadedSkills":[]},
+        {"id":"r4-mixed-browser","trial":2,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":1},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":3}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":1},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":3}},"loadedSkills":[]},
+        {"id":"r4-one-source","trial":0,"baselineScores":{"intents":{"required":1,"met":0,"missing":[["research"]],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":0,"missing":[["web.extract"]],"excess":1}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":2}},"loadedSkills":[]},
+        {"id":"r4-one-source","trial":1,"baselineScores":{"intents":{"required":1,"met":0,"missing":[["research"]],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":0,"missing":[["web.extract"]],"excess":1}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":2}},"loadedSkills":[]},
+        {"id":"r4-one-source","trial":2,"baselineScores":{"intents":{"required":1,"met":0,"missing":[["research"]],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":0,"missing":[["web.extract"]],"excess":1}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":2}},"loadedSkills":[]},
+        {"id":"r4-pasted-js","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"loadedSkills":[]},
+        {"id":"r4-pasted-js","trial":1,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"loadedSkills":[]},
+        {"id":"r4-pasted-js","trial":2,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"loadedSkills":[]},
+        {"id":"r4-quoted-plan","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"loadedSkills":[]},
+        {"id":"r4-quoted-plan","trial":1,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"loadedSkills":[]},
+        {"id":"r4-quoted-plan","trial":2,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"loadedSkills":[]},
+        {"id":"r4-read-existing-task","trial":0,"baselineScores":{"intents":{"required":0,"met":0,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":0}},"candidateScores":{"intents":{"required":0,"met":0,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":0}},"loadedSkills":[]},
+        {"id":"r4-read-existing-task","trial":1,"baselineScores":{"intents":{"required":0,"met":0,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":0}},"candidateScores":{"intents":{"required":0,"met":0,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":0}},"loadedSkills":[]},
+        {"id":"r4-read-existing-task","trial":2,"baselineScores":{"intents":{"required":0,"met":0,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":0}},"candidateScores":{"intents":{"required":0,"met":0,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":0}},"loadedSkills":[]},
+        {"id":"r4-search-references","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":1},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":3}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":1},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":3}},"loadedSkills":[]},
+        {"id":"r4-search-references","trial":1,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":1},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":3}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":1},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":3}},"loadedSkills":[]},
+        {"id":"r4-search-references","trial":2,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":1},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":3}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":1},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":3}},"loadedSkills":[]},
+        {"id":"r4-text-transform","trial":0,"baselineScores":{"intents":{"required":1,"met":0,"missing":[["conversation"]],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"candidateScores":{"intents":{"required":1,"met":0,"missing":[["conversation"]],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"loadedSkills":[]},
+        {"id":"r4-text-transform","trial":1,"baselineScores":{"intents":{"required":1,"met":0,"missing":[["conversation"]],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"candidateScores":{"intents":{"required":1,"met":0,"missing":[["conversation"]],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"loadedSkills":[]},
+        {"id":"r4-text-transform","trial":2,"baselineScores":{"intents":{"required":1,"met":0,"missing":[["conversation"]],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"candidateScores":{"intents":{"required":1,"met":0,"missing":[["conversation"]],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"loadedSkills":[]}
+      ]
+    },
+    "previousAcceptanceRegression": {
+      "baseline": {
+        "version": 1,
+        "experimentHash": "3f3c340a423315da9621550367ebc070a94759dc8bd2ba16e17eba505b5e89b3",
+        "variant": "baseline",
+        "probabilityCalibration": {
+          "intents": {
+            "unresolved": 37,
+            "missing": 0,
+            "positiveCount": 69,
+            "negativeCount": 966,
+            "positiveBrier": 0.009043478260869564,
+            "negativeBrier": 0.018577536231884066,
+            "bins": [
+              {
+                "from": 0,
+                "to": 0.2,
+                "count": 887,
+                "meanProbability": 0.03419391206313418,
+                "observedPositiveRate": 0
+              },
+              {
+                "from": 0.2,
+                "to": 0.4,
+                "count": 53,
+                "meanProbability": 0.30584905660377365,
+                "observedPositiveRate": 0
+              },
+              {
+                "from": 0.4,
+                "to": 0.6000000000000001,
+                "count": 9,
+                "meanProbability": 0.4366666666666667,
+                "observedPositiveRate": 0
+              },
+              {
+                "from": 0.6000000000000001,
+                "to": 0.8,
+                "count": 17,
+                "meanProbability": 0.6794117647058824,
+                "observedPositiveRate": 0.17647058823529413
+              },
+              {
+                "from": 0.8,
+                "to": 1,
+                "count": 69,
+                "meanProbability": 0.9386956521739132,
+                "observedPositiveRate": 0.9565217391304348
+              }
+            ]
+          },
+          "skills": {
+            "unresolved": 11,
+            "missing": 0,
+            "positiveCount": 12,
+            "negativeCount": 1554,
+            "positiveBrier": 0.010816666666666667,
+            "negativeBrier": 0.003138803088803062,
+            "bins": [
+              {
+                "from": 0,
+                "to": 0.2,
+                "count": 1535,
+                "meanProbability": 0.03164169381107527,
+                "observedPositiveRate": 0
+              },
+              {
+                "from": 0.2,
+                "to": 0.4,
+                "count": 11,
+                "meanProbability": 0.24909090909090906,
+                "observedPositiveRate": 0
+              },
+              {
+                "from": 0.4,
+                "to": 0.6000000000000001,
+                "count": 8,
+                "meanProbability": 0.49,
+                "observedPositiveRate": 0
+              },
+              {
+                "from": 0.6000000000000001,
+                "to": 0.8,
+                "count": 0,
+                "meanProbability": null,
+                "observedPositiveRate": null
+              },
+              {
+                "from": 0.8,
+                "to": 1,
+                "count": 12,
+                "meanProbability": 0.9033333333333333,
+                "observedPositiveRate": 1
+              }
+            ]
+          },
+          "tools": {
+            "unresolved": 434,
+            "missing": 0,
+            "positiveCount": 78,
+            "negativeCount": 6899,
+            "positiveBrier": 0.03963846153846153,
+            "negativeBrier": 0.035534193361357144,
+            "bins": [
+              {
+                "from": 0,
+                "to": 0.2,
+                "count": 5586,
+                "meanProbability": 0.10026136770497708,
+                "observedPositiveRate": 0
+              },
+              {
+                "from": 0.2,
+                "to": 0.4,
+                "count": 981,
+                "meanProbability": 0.27117227319062187,
+                "observedPositiveRate": 0
+              },
+              {
+                "from": 0.4,
+                "to": 0.6000000000000001,
+                "count": 233,
+                "meanProbability": 0.4851502145922747,
+                "observedPositiveRate": 0.012875536480686695
+              },
+              {
+                "from": 0.6000000000000001,
+                "to": 0.8,
+                "count": 98,
+                "meanProbability": 0.6838775510204081,
+                "observedPositiveRate": 0.10204081632653061
+              },
+              {
+                "from": 0.8,
+                "to": 1,
+                "count": 79,
+                "meanProbability": 0.8653164556962025,
+                "observedPositiveRate": 0.8227848101265823
+              }
+            ]
+          }
+        },
+        "recordedLiveProviderCalls": 0,
+        "split": "acceptance",
+        "cases": 72,
+        "corpusHash": "f62d7144a24251f6b8add1650f45f0f949a68346a6916b03bae39ca29e2c44b3",
+        "catalogHash": "6079343f7e378f12aa4057150931bbff44dbb7a1cf6f7b8f7526ba344dff542c",
+        "model": "jev-1.13.0",
+        "policy": {
+          "acceptAt": 0.75,
+          "rejectAt": 0.4,
+          "toolAcceptAt": 0.75,
+          "toolRejectAt": 0.4
+        },
+        "live": false,
+        "standard": {
+          "intents": {
+            "required": 69,
+            "met": 24,
+            "recall": 0.34782608695652173,
+            "irrelevantSelections": 12,
+            "casesWithMiss": 42,
+            "casesWithIrrelevant": 9,
+            "totalSelections": 42
+          },
+          "skills": {
+            "required": 12,
+            "met": 12,
+            "recall": 1,
+            "irrelevantSelections": 0,
+            "casesWithMiss": 0,
+            "casesWithIrrelevant": 0,
+            "totalSelections": 12
+          },
+          "tools": {
+            "required": 84,
+            "met": 75,
+            "recall": 0.8928571428571429,
+            "irrelevantSelections": 2160,
+            "casesWithMiss": 6,
+            "casesWithIrrelevant": 72,
+            "totalSelections": 2562
+          }
+        },
+        "raw": {
+          "intents": {
+            "required": 69,
+            "met": 66,
+            "recall": 0.9565217391304348,
+            "irrelevantSelections": 6,
+            "casesWithMiss": 3,
+            "casesWithIrrelevant": 6,
+            "totalSelections": 87
+          },
+          "skills": {
+            "required": 12,
+            "met": 12,
+            "recall": 1,
+            "irrelevantSelections": 0,
+            "casesWithMiss": 0,
+            "casesWithIrrelevant": 0,
+            "totalSelections": 18
+          },
+          "tools": {
+            "required": 84,
+            "met": 72,
+            "recall": 0.8571428571428571,
+            "irrelevantSelections": 24,
+            "casesWithMiss": 12,
+            "casesWithIrrelevant": 18,
+            "totalSelections": 99
+          }
+        },
+        "exposed": {
+          "intents": {
+            "required": 69,
+            "met": 66,
+            "recall": 0.9565217391304348,
+            "irrelevantSelections": 6,
+            "casesWithMiss": 3,
+            "casesWithIrrelevant": 6,
+            "totalSelections": 84
+          },
+          "skills": {
+            "required": 12,
+            "met": 12,
+            "recall": 1,
+            "irrelevantSelections": 0,
+            "casesWithMiss": 0,
+            "casesWithIrrelevant": 0,
+            "totalSelections": 18
+          },
+          "tools": {
+            "required": 84,
+            "met": 81,
+            "recall": 0.9642857142857143,
+            "irrelevantSelections": 724,
+            "casesWithMiss": 3,
+            "casesWithIrrelevant": 48,
+            "totalSelections": 1134
+          }
+        },
+        "latencyMs": {
+          "median": 1141,
+          "p95": 1322
+        },
+        "failures": [
+          {
+            "id": "r3-social",
+            "code": "service-error",
+            "httpStatus": 499
+          }
+        ],
+        "usage": {
+          "calls": 215,
+          "tokens": 1948754,
+          "estimatedUsd": 0.07288419600000001
+        },
+        "perLanguage": {
+          "en": {
+            "intents": {
+              "required": 57,
+              "met": 54,
+              "recall": 0.9473684210526315,
+              "irrelevantSelections": 6,
+              "casesWithMiss": 3,
+              "casesWithIrrelevant": 6,
+              "totalSelections": 69
+            },
+            "skills": {
+              "required": 12,
+              "met": 12,
+              "recall": 1,
+              "irrelevantSelections": 0,
+              "casesWithMiss": 0,
+              "casesWithIrrelevant": 0,
+              "totalSelections": 18
+            },
+            "tools": {
+              "required": 69,
+              "met": 66,
+              "recall": 0.9565217391304348,
+              "irrelevantSelections": 709,
+              "casesWithMiss": 3,
+              "casesWithIrrelevant": 39,
+              "totalSelections": 1050
+            }
+          },
+          "ar": {
+            "intents": {
+              "required": 12,
+              "met": 12,
+              "recall": 1,
+              "irrelevantSelections": 0,
+              "casesWithMiss": 0,
+              "casesWithIrrelevant": 0,
+              "totalSelections": 15
+            },
+            "skills": {
+              "required": 0,
+              "met": 0,
+              "recall": null,
+              "irrelevantSelections": 0,
+              "casesWithMiss": 0,
+              "casesWithIrrelevant": 0,
+              "totalSelections": 0
+            },
+            "tools": {
+              "required": 9,
+              "met": 9,
+              "recall": 1,
+              "irrelevantSelections": 12,
+              "casesWithMiss": 0,
+              "casesWithIrrelevant": 6,
+              "totalSelections": 66
+            }
+          },
+          "mixed": {
+            "intents": {
+              "required": 0,
+              "met": 0,
+              "recall": null,
+              "irrelevantSelections": 0,
+              "casesWithMiss": 0,
+              "casesWithIrrelevant": 0,
+              "totalSelections": 0
+            },
+            "skills": {
+              "required": 0,
+              "met": 0,
+              "recall": null,
+              "irrelevantSelections": 0,
+              "casesWithMiss": 0,
+              "casesWithIrrelevant": 0,
+              "totalSelections": 0
+            },
+            "tools": {
+              "required": 6,
+              "met": 6,
+              "recall": 1,
+              "irrelevantSelections": 3,
+              "casesWithMiss": 0,
+              "casesWithIrrelevant": 3,
+              "totalSelections": 18
+            }
+          }
+        }
+      },
+      "candidate": {
+        "version": 1,
+        "experimentHash": "7c6a567c4cb4570a33f5aa4fd5440dc48c69ca51c7b1cd05e18ba075f8efb906",
+        "variant": "baseline",
+        "probabilityCalibration": {
+          "intents": {
+            "unresolved": 37,
+            "missing": 0,
+            "positiveCount": 69,
+            "negativeCount": 966,
+            "positiveBrier": 0.009043478260869564,
+            "negativeBrier": 0.018577536231884066,
+            "bins": [
+              {
+                "from": 0,
+                "to": 0.2,
+                "count": 887,
+                "meanProbability": 0.03419391206313418,
+                "observedPositiveRate": 0
+              },
+              {
+                "from": 0.2,
+                "to": 0.4,
+                "count": 53,
+                "meanProbability": 0.30584905660377365,
+                "observedPositiveRate": 0
+              },
+              {
+                "from": 0.4,
+                "to": 0.6000000000000001,
+                "count": 9,
+                "meanProbability": 0.4366666666666667,
+                "observedPositiveRate": 0
+              },
+              {
+                "from": 0.6000000000000001,
+                "to": 0.8,
+                "count": 17,
+                "meanProbability": 0.6794117647058824,
+                "observedPositiveRate": 0.17647058823529413
+              },
+              {
+                "from": 0.8,
+                "to": 1,
+                "count": 69,
+                "meanProbability": 0.9386956521739132,
+                "observedPositiveRate": 0.9565217391304348
+              }
+            ]
+          },
+          "skills": {
+            "unresolved": 11,
+            "missing": 0,
+            "positiveCount": 12,
+            "negativeCount": 1554,
+            "positiveBrier": 0.010816666666666667,
+            "negativeBrier": 0.003138803088803062,
+            "bins": [
+              {
+                "from": 0,
+                "to": 0.2,
+                "count": 1535,
+                "meanProbability": 0.03164169381107527,
+                "observedPositiveRate": 0
+              },
+              {
+                "from": 0.2,
+                "to": 0.4,
+                "count": 11,
+                "meanProbability": 0.24909090909090906,
+                "observedPositiveRate": 0
+              },
+              {
+                "from": 0.4,
+                "to": 0.6000000000000001,
+                "count": 8,
+                "meanProbability": 0.49,
+                "observedPositiveRate": 0
+              },
+              {
+                "from": 0.6000000000000001,
+                "to": 0.8,
+                "count": 0,
+                "meanProbability": null,
+                "observedPositiveRate": null
+              },
+              {
+                "from": 0.8,
+                "to": 1,
+                "count": 12,
+                "meanProbability": 0.9033333333333333,
+                "observedPositiveRate": 1
+              }
+            ]
+          },
+          "tools": {
+            "unresolved": 434,
+            "missing": 0,
+            "positiveCount": 78,
+            "negativeCount": 6899,
+            "positiveBrier": 0.03963846153846153,
+            "negativeBrier": 0.035534193361357144,
+            "bins": [
+              {
+                "from": 0,
+                "to": 0.2,
+                "count": 5586,
+                "meanProbability": 0.10026136770497708,
+                "observedPositiveRate": 0
+              },
+              {
+                "from": 0.2,
+                "to": 0.4,
+                "count": 981,
+                "meanProbability": 0.27117227319062187,
+                "observedPositiveRate": 0
+              },
+              {
+                "from": 0.4,
+                "to": 0.6000000000000001,
+                "count": 233,
+                "meanProbability": 0.4851502145922747,
+                "observedPositiveRate": 0.012875536480686695
+              },
+              {
+                "from": 0.6000000000000001,
+                "to": 0.8,
+                "count": 98,
+                "meanProbability": 0.6838775510204081,
+                "observedPositiveRate": 0.10204081632653061
+              },
+              {
+                "from": 0.8,
+                "to": 1,
+                "count": 79,
+                "meanProbability": 0.8653164556962025,
+                "observedPositiveRate": 0.8227848101265823
+              }
+            ]
+          }
+        },
+        "recordedLiveProviderCalls": 0,
+        "split": "acceptance",
+        "cases": 72,
+        "corpusHash": "f62d7144a24251f6b8add1650f45f0f949a68346a6916b03bae39ca29e2c44b3",
+        "catalogHash": "6079343f7e378f12aa4057150931bbff44dbb7a1cf6f7b8f7526ba344dff542c",
+        "model": "jev-1.13.0",
+        "policy": {
+          "acceptAt": 0.75,
+          "rejectAt": 0.4,
+          "toolAcceptAt": 0.75,
+          "toolRejectAt": 0.4
+        },
+        "live": false,
+        "standard": {
+          "intents": {
+            "required": 69,
+            "met": 24,
+            "recall": 0.34782608695652173,
+            "irrelevantSelections": 12,
+            "casesWithMiss": 42,
+            "casesWithIrrelevant": 9,
+            "totalSelections": 42
+          },
+          "skills": {
+            "required": 12,
+            "met": 12,
+            "recall": 1,
+            "irrelevantSelections": 0,
+            "casesWithMiss": 0,
+            "casesWithIrrelevant": 0,
+            "totalSelections": 12
+          },
+          "tools": {
+            "required": 84,
+            "met": 75,
+            "recall": 0.8928571428571429,
+            "irrelevantSelections": 2160,
+            "casesWithMiss": 6,
+            "casesWithIrrelevant": 72,
+            "totalSelections": 2562
+          }
+        },
+        "raw": {
+          "intents": {
+            "required": 69,
+            "met": 66,
+            "recall": 0.9565217391304348,
+            "irrelevantSelections": 6,
+            "casesWithMiss": 3,
+            "casesWithIrrelevant": 6,
+            "totalSelections": 87
+          },
+          "skills": {
+            "required": 12,
+            "met": 12,
+            "recall": 1,
+            "irrelevantSelections": 0,
+            "casesWithMiss": 0,
+            "casesWithIrrelevant": 0,
+            "totalSelections": 18
+          },
+          "tools": {
+            "required": 84,
+            "met": 72,
+            "recall": 0.8571428571428571,
+            "irrelevantSelections": 24,
+            "casesWithMiss": 12,
+            "casesWithIrrelevant": 18,
+            "totalSelections": 99
+          }
+        },
+        "exposed": {
+          "intents": {
+            "required": 69,
+            "met": 66,
+            "recall": 0.9565217391304348,
+            "irrelevantSelections": 6,
+            "casesWithMiss": 3,
+            "casesWithIrrelevant": 6,
+            "totalSelections": 84
+          },
+          "skills": {
+            "required": 12,
+            "met": 12,
+            "recall": 1,
+            "irrelevantSelections": 0,
+            "casesWithMiss": 0,
+            "casesWithIrrelevant": 0,
+            "totalSelections": 18
+          },
+          "tools": {
+            "required": 84,
+            "met": 84,
+            "recall": 1,
+            "irrelevantSelections": 179,
+            "casesWithMiss": 0,
+            "casesWithIrrelevant": 45,
+            "totalSelections": 556
+          }
+        },
+        "latencyMs": {
+          "median": 1141,
+          "p95": 1322
+        },
+        "failures": [
+          {
+            "id": "r3-social",
+            "code": "service-error",
+            "httpStatus": 499
+          }
+        ],
+        "usage": {
+          "calls": 215,
+          "tokens": 1948754,
+          "estimatedUsd": 0.07288419600000001
+        },
+        "perLanguage": {
+          "en": {
+            "intents": {
+              "required": 57,
+              "met": 54,
+              "recall": 0.9473684210526315,
+              "irrelevantSelections": 6,
+              "casesWithMiss": 3,
+              "casesWithIrrelevant": 6,
+              "totalSelections": 69
+            },
+            "skills": {
+              "required": 12,
+              "met": 12,
+              "recall": 1,
+              "irrelevantSelections": 0,
+              "casesWithMiss": 0,
+              "casesWithIrrelevant": 0,
+              "totalSelections": 18
+            },
+            "tools": {
+              "required": 69,
+              "met": 69,
+              "recall": 1,
+              "irrelevantSelections": 164,
+              "casesWithMiss": 0,
+              "casesWithIrrelevant": 36,
+              "totalSelections": 472
+            }
+          },
+          "ar": {
+            "intents": {
+              "required": 12,
+              "met": 12,
+              "recall": 1,
+              "irrelevantSelections": 0,
+              "casesWithMiss": 0,
+              "casesWithIrrelevant": 0,
+              "totalSelections": 15
+            },
+            "skills": {
+              "required": 0,
+              "met": 0,
+              "recall": null,
+              "irrelevantSelections": 0,
+              "casesWithMiss": 0,
+              "casesWithIrrelevant": 0,
+              "totalSelections": 0
+            },
+            "tools": {
+              "required": 9,
+              "met": 9,
+              "recall": 1,
+              "irrelevantSelections": 12,
+              "casesWithMiss": 0,
+              "casesWithIrrelevant": 6,
+              "totalSelections": 66
+            }
+          },
+          "mixed": {
+            "intents": {
+              "required": 0,
+              "met": 0,
+              "recall": null,
+              "irrelevantSelections": 0,
+              "casesWithMiss": 0,
+              "casesWithIrrelevant": 0,
+              "totalSelections": 0
+            },
+            "skills": {
+              "required": 0,
+              "met": 0,
+              "recall": null,
+              "irrelevantSelections": 0,
+              "casesWithMiss": 0,
+              "casesWithIrrelevant": 0,
+              "totalSelections": 0
+            },
+            "tools": {
+              "required": 6,
+              "met": 6,
+              "recall": 1,
+              "irrelevantSelections": 3,
+              "casesWithMiss": 0,
+              "casesWithIrrelevant": 3,
+              "totalSelections": 18
+            }
+          }
+        }
+      },
+      "trials": [
+        {
+          "trial": 0,
+          "requiredTools": 28,
+          "metTools": 28,
+          "recall": 1.0
+        },
+        {
+          "trial": 1,
+          "requiredTools": 28,
+          "metTools": 28,
+          "recall": 1.0
+        },
+        {
+          "trial": 2,
+          "requiredTools": 28,
+          "metTools": 28,
+          "recall": 1.0
+        }
+      ],
+      "explicitSkillsLoaded": {
+        "required": 12,
+        "loaded": 12
+      },
+      "gates": {
+        "requiredToolRecallPerTrial": true,
+        "requiredIntentRecall": true,
+        "explicitSkillsAllLoaded": true,
+        "noRequiredRecallRegression": true,
+        "noExcessToolOrSkillRegression": true,
+        "identicalRawSelections": true
+      },
+      "cases": [
+        {"id":"r3-ar-browser","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":3}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":3}},"loadedSkills":[]},
+        {"id":"r3-ar-browser","trial":1,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":3}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":3}},"loadedSkills":[]},
+        {"id":"r3-ar-browser","trial":2,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":3}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":3}},"loadedSkills":[]},
+        {"id":"r3-ar-explain","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"loadedSkills":[]},
+        {"id":"r3-ar-explain","trial":1,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"loadedSkills":[]},
+        {"id":"r3-ar-explain","trial":2,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"loadedSkills":[]},
+        {"id":"r3-ar-read","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":1}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":1}},"loadedSkills":[]},
+        {"id":"r3-ar-read","trial":1,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":1}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":1}},"loadedSkills":[]},
+        {"id":"r3-ar-read","trial":2,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":1}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":1}},"loadedSkills":[]},
+        {"id":"r3-ar-social","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"loadedSkills":[]},
+        {"id":"r3-ar-social","trial":1,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"loadedSkills":[]},
+        {"id":"r3-ar-social","trial":2,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"loadedSkills":[]},
+        {"id":"r3-architecture","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"loadedSkills":[]},
+        {"id":"r3-architecture","trial":1,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"loadedSkills":[]},
+        {"id":"r3-architecture","trial":2,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"loadedSkills":[]},
+        {"id":"r3-browser-simple","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":1}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":1}},"loadedSkills":[]},
+        {"id":"r3-browser-simple","trial":1,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":1}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":1}},"loadedSkills":[]},
+        {"id":"r3-browser-simple","trial":2,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":1}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":1}},"loadedSkills":[]},
+        {"id":"r3-capability-conditional","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"loadedSkills":[]},
+        {"id":"r3-capability-conditional","trial":1,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"loadedSkills":[]},
+        {"id":"r3-capability-conditional","trial":2,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"loadedSkills":[]},
+        {"id":"r3-complementary-skills","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":1},"skills":{"required":2,"met":2,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":62}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":1},"skills":{"required":2,"met":2,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":5}},"loadedSkills":["system-diagram","wiki-builder"]},
+        {"id":"r3-complementary-skills","trial":1,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":1},"skills":{"required":2,"met":2,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":62}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":1},"skills":{"required":2,"met":2,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":5}},"loadedSkills":["system-diagram","wiki-builder"]},
+        {"id":"r3-complementary-skills","trial":2,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":1},"skills":{"required":2,"met":2,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":62}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":1},"skills":{"required":2,"met":2,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":4}},"loadedSkills":["system-diagram","wiki-builder"]},
+        {"id":"r3-edit-test","trial":0,"baselineScores":{"intents":{"required":3,"met":3,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":3,"met":3,"missing":[],"excess":43}},"candidateScores":{"intents":{"required":3,"met":3,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":3,"met":3,"missing":[],"excess":1}},"loadedSkills":["verify"]},
+        {"id":"r3-edit-test","trial":1,"baselineScores":{"intents":{"required":3,"met":3,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":3,"met":3,"missing":[],"excess":43}},"candidateScores":{"intents":{"required":3,"met":3,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":3,"met":3,"missing":[],"excess":2}},"loadedSkills":["verify"]},
+        {"id":"r3-edit-test","trial":2,"baselineScores":{"intents":{"required":3,"met":3,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":3,"met":3,"missing":[],"excess":43}},"candidateScores":{"intents":{"required":3,"met":3,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":3,"met":3,"missing":[],"excess":2}},"loadedSkills":["verify"]},
+        {"id":"r3-existing-result","trial":0,"baselineScores":{"intents":{"required":0,"met":0,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":3}},"candidateScores":{"intents":{"required":0,"met":0,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":3}},"loadedSkills":[]},
+        {"id":"r3-existing-result","trial":1,"baselineScores":{"intents":{"required":0,"met":0,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":1}},"candidateScores":{"intents":{"required":0,"met":0,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":1}},"loadedSkills":[]},
+        {"id":"r3-existing-result","trial":2,"baselineScores":{"intents":{"required":0,"met":0,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":1}},"candidateScores":{"intents":{"required":0,"met":0,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":1}},"loadedSkills":[]},
+        {"id":"r3-explicit-research","trial":0,"baselineScores":{"intents":{"required":2,"met":2,"missing":[],"excess":0},"skills":{"required":1,"met":1,"missing":[],"excess":0},"tools":{"required":5,"met":5,"missing":[],"excess":62}},"candidateScores":{"intents":{"required":2,"met":2,"missing":[],"excess":0},"skills":{"required":1,"met":1,"missing":[],"excess":0},"tools":{"required":5,"met":5,"missing":[],"excess":24}},"loadedSkills":["researcher","research-discovery"]},
+        {"id":"r3-explicit-research","trial":1,"baselineScores":{"intents":{"required":2,"met":2,"missing":[],"excess":0},"skills":{"required":1,"met":1,"missing":[],"excess":0},"tools":{"required":5,"met":5,"missing":[],"excess":62}},"candidateScores":{"intents":{"required":2,"met":2,"missing":[],"excess":0},"skills":{"required":1,"met":1,"missing":[],"excess":0},"tools":{"required":5,"met":5,"missing":[],"excess":24}},"loadedSkills":["researcher","research-discovery"]},
+        {"id":"r3-explicit-research","trial":2,"baselineScores":{"intents":{"required":2,"met":2,"missing":[],"excess":0},"skills":{"required":1,"met":1,"missing":[],"excess":0},"tools":{"required":5,"met":5,"missing":[],"excess":62}},"candidateScores":{"intents":{"required":2,"met":2,"missing":[],"excess":0},"skills":{"required":1,"met":1,"missing":[],"excess":0},"tools":{"required":5,"met":5,"missing":[],"excess":24}},"loadedSkills":["researcher","research-discovery"]},
+        {"id":"r3-inert-log","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"loadedSkills":[]},
+        {"id":"r3-inert-log","trial":1,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"loadedSkills":[]},
+        {"id":"r3-inert-log","trial":2,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"loadedSkills":[]},
+        {"id":"r3-inline-bug","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":1},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":2}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":1},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":2}},"loadedSkills":[]},
+        {"id":"r3-inline-bug","trial":1,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":1},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":2}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":1},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":2}},"loadedSkills":[]},
+        {"id":"r3-inline-bug","trial":2,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":1},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":2}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":1},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":2}},"loadedSkills":[]},
+        {"id":"r3-inspect-web","trial":0,"baselineScores":{"intents":{"required":0,"met":0,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":1}},"candidateScores":{"intents":{"required":0,"met":0,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":1}},"loadedSkills":[]},
+        {"id":"r3-inspect-web","trial":1,"baselineScores":{"intents":{"required":0,"met":0,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":1}},"candidateScores":{"intents":{"required":0,"met":0,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":1}},"loadedSkills":[]},
+        {"id":"r3-inspect-web","trial":2,"baselineScores":{"intents":{"required":0,"met":0,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":1}},"candidateScores":{"intents":{"required":0,"met":0,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":1}},"loadedSkills":[]},
+        {"id":"r3-live-research","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":14}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":14}},"loadedSkills":[]},
+        {"id":"r3-live-research","trial":1,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":14}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":14}},"loadedSkills":[]},
+        {"id":"r3-live-research","trial":2,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":14}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":14}},"loadedSkills":[]},
+        {"id":"r3-local-config","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":2}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":2}},"loadedSkills":[]},
+        {"id":"r3-local-config","trial":1,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":1}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":1}},"loadedSkills":[]},
+        {"id":"r3-local-config","trial":2,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":2}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":2}},"loadedSkills":[]},
+        {"id":"r3-mixed-status","trial":0,"baselineScores":{"intents":{"required":0,"met":0,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":1}},"candidateScores":{"intents":{"required":0,"met":0,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":1}},"loadedSkills":[]},
+        {"id":"r3-mixed-status","trial":1,"baselineScores":{"intents":{"required":0,"met":0,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":1}},"candidateScores":{"intents":{"required":0,"met":0,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":1}},"loadedSkills":[]},
+        {"id":"r3-mixed-status","trial":2,"baselineScores":{"intents":{"required":0,"met":0,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":1}},"candidateScores":{"intents":{"required":0,"met":0,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":1}},"loadedSkills":[]},
+        {"id":"r3-project-validation","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":1,"met":1,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":45}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":1,"met":1,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":0}},"loadedSkills":["verify"]},
+        {"id":"r3-project-validation","trial":1,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":1,"met":1,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":45}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":1,"met":1,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":0}},"loadedSkills":["verify"]},
+        {"id":"r3-project-validation","trial":2,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":1,"met":1,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":45}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":1,"met":1,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":0}},"loadedSkills":["verify"]},
+        {"id":"r3-public-source","trial":0,"baselineScores":{"intents":{"required":1,"met":0,"missing":[["research"]],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":0,"missing":[["web.extract"]],"excess":1}},"candidateScores":{"intents":{"required":1,"met":0,"missing":[["research"]],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":1}},"loadedSkills":[]},
+        {"id":"r3-public-source","trial":1,"baselineScores":{"intents":{"required":1,"met":0,"missing":[["research"]],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":0,"missing":[["web.extract"]],"excess":1}},"candidateScores":{"intents":{"required":1,"met":0,"missing":[["research"]],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":1}},"loadedSkills":[]},
+        {"id":"r3-public-source","trial":2,"baselineScores":{"intents":{"required":1,"met":0,"missing":[["research"]],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":0,"missing":[["web.extract"]],"excess":1}},"candidateScores":{"intents":{"required":1,"met":0,"missing":[["research"]],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":1}},"loadedSkills":[]},
+        {"id":"r3-review-change","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":0}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":0}},"loadedSkills":[]},
+        {"id":"r3-review-change","trial":1,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":0}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":0}},"loadedSkills":[]},
+        {"id":"r3-review-change","trial":2,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":0}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":0}},"loadedSkills":[]},
+        {"id":"r3-router-facts","trial":0,"baselineScores":{"intents":{"required":0,"met":0,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":0}},"candidateScores":{"intents":{"required":0,"met":0,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":0}},"loadedSkills":[]},
+        {"id":"r3-router-facts","trial":1,"baselineScores":{"intents":{"required":0,"met":0,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":0}},"candidateScores":{"intents":{"required":0,"met":0,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":0}},"loadedSkills":[]},
+        {"id":"r3-router-facts","trial":2,"baselineScores":{"intents":{"required":0,"met":0,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":0}},"candidateScores":{"intents":{"required":0,"met":0,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":0}},"loadedSkills":[]},
+        {"id":"r3-save-continuity","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":1}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":1}},"loadedSkills":[]},
+        {"id":"r3-save-continuity","trial":1,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":1}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":1}},"loadedSkills":[]},
+        {"id":"r3-save-continuity","trial":2,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":1}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":1}},"loadedSkills":[]},
+        {"id":"r3-social","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"loadedSkills":[]},
+        {"id":"r3-social","trial":1,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"loadedSkills":[]},
+        {"id":"r3-social","trial":2,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"loadedSkills":[]},
+        {"id":"r3-two-file","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":1}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":1}},"loadedSkills":[]},
+        {"id":"r3-two-file","trial":1,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":1}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":1}},"loadedSkills":[]},
+        {"id":"r3-two-file","trial":2,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":1}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":1}},"loadedSkills":[]}
+      ]
+    },
+    "previousDevelopmentRegression": {
+      "baseline": {
+        "version": 1,
+        "experimentHash": "3f3c340a423315da9621550367ebc070a94759dc8bd2ba16e17eba505b5e89b3",
+        "variant": "baseline",
+        "probabilityCalibration": {
+          "intents": {
+            "unresolved": 41,
+            "missing": 0,
+            "positiveCount": 79,
+            "negativeCount": 1074,
+            "positiveBrier": 0.02188481012658227,
+            "negativeBrier": 0.015927281191806357,
+            "bins": [
+              {
+                "from": 0,
+                "to": 0.2,
+                "count": 993,
+                "meanProbability": 0.03922457200402837,
+                "observedPositiveRate": 0
+              },
+              {
+                "from": 0.2,
+                "to": 0.4,
+                "count": 49,
+                "meanProbability": 0.2761224489795919,
+                "observedPositiveRate": 0.02040816326530612
+              },
+              {
+                "from": 0.4,
+                "to": 0.6000000000000001,
+                "count": 22,
+                "meanProbability": 0.5004545454545455,
+                "observedPositiveRate": 0.045454545454545456
+              },
+              {
+                "from": 0.6000000000000001,
+                "to": 0.8,
+                "count": 15,
+                "meanProbability": 0.6566666666666667,
+                "observedPositiveRate": 0.2
+              },
+              {
+                "from": 0.8,
+                "to": 1,
+                "count": 74,
+                "meanProbability": 0.9221621621621625,
+                "observedPositiveRate": 1
+              }
+            ]
+          },
+          "skills": {
+            "unresolved": 15,
+            "missing": 0,
+            "positiveCount": 9,
+            "negativeCount": 1723,
+            "positiveBrier": 0.017166666666666663,
+            "negativeBrier": 0.006060127684271613,
+            "bins": [
+              {
+                "from": 0,
+                "to": 0.2,
+                "count": 1692,
+                "meanProbability": 0.03768912529550869,
+                "observedPositiveRate": 0
+              },
+              {
+                "from": 0.2,
+                "to": 0.4,
+                "count": 19,
+                "meanProbability": 0.2521052631578948,
+                "observedPositiveRate": 0
+              },
+              {
+                "from": 0.4,
+                "to": 0.6000000000000001,
+                "count": 4,
+                "meanProbability": 0.475,
+                "observedPositiveRate": 0
+              },
+              {
+                "from": 0.6000000000000001,
+                "to": 0.8,
+                "count": 5,
+                "meanProbability": 0.6679999999999999,
+                "observedPositiveRate": 0.4
+              },
+              {
+                "from": 0.8,
+                "to": 1,
+                "count": 12,
+                "meanProbability": 0.8925,
+                "observedPositiveRate": 0.5833333333333334
+              }
+            ]
+          },
+          "tools": {
+            "unresolved": 629,
+            "missing": 0,
+            "positiveCount": 82,
+            "negativeCount": 7699,
+            "positiveBrier": 0.05590853658536585,
+            "negativeBrier": 0.04043271853487509,
+            "bins": [
+              {
+                "from": 0,
+                "to": 0.2,
+                "count": 5864,
+                "meanProbability": 0.10484311050477592,
+                "observedPositiveRate": 0
+              },
+              {
+                "from": 0.2,
+                "to": 0.4,
+                "count": 1382,
+                "meanProbability": 0.26533285094066533,
+                "observedPositiveRate": 0.002894356005788712
+              },
+              {
+                "from": 0.4,
+                "to": 0.6000000000000001,
+                "count": 337,
+                "meanProbability": 0.4797626112759645,
+                "observedPositiveRate": 0.008902077151335312
+              },
+              {
+                "from": 0.6000000000000001,
+                "to": 0.8,
+                "count": 126,
+                "meanProbability": 0.6870634920634922,
+                "observedPositiveRate": 0.07936507936507936
+              },
+              {
+                "from": 0.8,
+                "to": 1,
+                "count": 72,
+                "meanProbability": 0.8725,
+                "observedPositiveRate": 0.9027777777777778
+              }
+            ]
+          }
+        },
+        "recordedLiveProviderCalls": 0,
+        "split": "development",
+        "cases": 80,
+        "corpusHash": "f62d7144a24251f6b8add1650f45f0f949a68346a6916b03bae39ca29e2c44b3",
+        "catalogHash": "6079343f7e378f12aa4057150931bbff44dbb7a1cf6f7b8f7526ba344dff542c",
+        "model": "jev-1.13.0",
+        "policy": {
+          "acceptAt": 0.75,
+          "rejectAt": 0.4,
+          "toolAcceptAt": 0.75,
+          "toolRejectAt": 0.4
+        },
+        "live": false,
+        "standard": {
+          "intents": {
+            "required": 79,
+            "met": 32,
+            "recall": 0.4050632911392405,
+            "irrelevantSelections": 13,
+            "casesWithMiss": 44,
+            "casesWithIrrelevant": 13,
+            "totalSelections": 50
+          },
+          "skills": {
+            "required": 9,
+            "met": 9,
+            "recall": 1,
+            "irrelevantSelections": 2,
+            "casesWithMiss": 0,
+            "casesWithIrrelevant": 2,
+            "totalSelections": 11
+          },
+          "tools": {
+            "required": 89,
+            "met": 79,
+            "recall": 0.8876404494382022,
+            "irrelevantSelections": 2269,
+            "casesWithMiss": 8,
+            "casesWithIrrelevant": 79,
+            "totalSelections": 2764
+          }
+        },
+        "raw": {
+          "intents": {
+            "required": 79,
+            "met": 75,
+            "recall": 0.9493670886075949,
+            "irrelevantSelections": 1,
+            "casesWithMiss": 4,
+            "casesWithIrrelevant": 1,
+            "totalSelections": 89
+          },
+          "skills": {
+            "required": 9,
+            "met": 8,
+            "recall": 0.8888888888888888,
+            "irrelevantSelections": 5,
+            "casesWithMiss": 1,
+            "casesWithIrrelevant": 5,
+            "totalSelections": 27
+          },
+          "tools": {
+            "required": 89,
+            "met": 78,
+            "recall": 0.8764044943820225,
+            "irrelevantSelections": 32,
+            "casesWithMiss": 8,
+            "casesWithIrrelevant": 24,
+            "totalSelections": 139
+          }
+        },
+        "exposed": {
+          "intents": {
+            "required": 79,
+            "met": 74,
+            "recall": 0.9367088607594937,
+            "irrelevantSelections": 6,
+            "casesWithMiss": 5,
+            "casesWithIrrelevant": 6,
+            "totalSelections": 91
+          },
+          "skills": {
+            "required": 9,
+            "met": 9,
+            "recall": 1,
+            "irrelevantSelections": 5,
+            "casesWithMiss": 0,
+            "casesWithIrrelevant": 5,
+            "totalSelections": 28
+          },
+          "tools": {
+            "required": 89,
+            "met": 88,
+            "recall": 0.9887640449438202,
+            "irrelevantSelections": 940,
+            "casesWithMiss": 1,
+            "casesWithIrrelevant": 50,
+            "totalSelections": 1469
+          }
+        },
+        "latencyMs": {
+          "median": 1121,
+          "p95": 1209
+        },
+        "failures": [],
+        "usage": {
+          "calls": 249,
+          "tokens": 2254950,
+          "estimatedUsd": 0.08435154
+        },
+        "perLanguage": {
+          "en": {
+            "intents": {
+              "required": 66,
+              "met": 61,
+              "recall": 0.9242424242424242,
+              "irrelevantSelections": 5,
+              "casesWithMiss": 5,
+              "casesWithIrrelevant": 5,
+              "totalSelections": 75
+            },
+            "skills": {
+              "required": 9,
+              "met": 9,
+              "recall": 1,
+              "irrelevantSelections": 3,
+              "casesWithMiss": 0,
+              "casesWithIrrelevant": 3,
+              "totalSelections": 25
+            },
+            "tools": {
+              "required": 74,
+              "met": 73,
+              "recall": 0.9864864864864865,
+              "irrelevantSelections": 812,
+              "casesWithMiss": 1,
+              "casesWithIrrelevant": 39,
+              "totalSelections": 1264
+            }
+          },
+          "ar": {
+            "intents": {
+              "required": 9,
+              "met": 9,
+              "recall": 1,
+              "irrelevantSelections": 0,
+              "casesWithMiss": 0,
+              "casesWithIrrelevant": 0,
+              "totalSelections": 11
+            },
+            "skills": {
+              "required": 0,
+              "met": 0,
+              "recall": null,
+              "irrelevantSelections": 2,
+              "casesWithMiss": 0,
+              "casesWithIrrelevant": 2,
+              "totalSelections": 3
+            },
+            "tools": {
+              "required": 13,
+              "met": 13,
+              "recall": 1,
+              "irrelevantSelections": 122,
+              "casesWithMiss": 0,
+              "casesWithIrrelevant": 9,
+              "totalSelections": 186
+            }
+          },
+          "mixed": {
+            "intents": {
+              "required": 4,
+              "met": 4,
+              "recall": 1,
+              "irrelevantSelections": 1,
+              "casesWithMiss": 0,
+              "casesWithIrrelevant": 1,
+              "totalSelections": 5
+            },
+            "skills": {
+              "required": 0,
+              "met": 0,
+              "recall": null,
+              "irrelevantSelections": 0,
+              "casesWithMiss": 0,
+              "casesWithIrrelevant": 0,
+              "totalSelections": 0
+            },
+            "tools": {
+              "required": 2,
+              "met": 2,
+              "recall": 1,
+              "irrelevantSelections": 6,
+              "casesWithMiss": 0,
+              "casesWithIrrelevant": 2,
+              "totalSelections": 19
+            }
+          }
+        }
+      },
+      "candidate": {
+        "version": 1,
+        "experimentHash": "7c6a567c4cb4570a33f5aa4fd5440dc48c69ca51c7b1cd05e18ba075f8efb906",
+        "variant": "baseline",
+        "probabilityCalibration": {
+          "intents": {
+            "unresolved": 41,
+            "missing": 0,
+            "positiveCount": 79,
+            "negativeCount": 1074,
+            "positiveBrier": 0.02188481012658227,
+            "negativeBrier": 0.015927281191806357,
+            "bins": [
+              {
+                "from": 0,
+                "to": 0.2,
+                "count": 993,
+                "meanProbability": 0.03922457200402837,
+                "observedPositiveRate": 0
+              },
+              {
+                "from": 0.2,
+                "to": 0.4,
+                "count": 49,
+                "meanProbability": 0.2761224489795919,
+                "observedPositiveRate": 0.02040816326530612
+              },
+              {
+                "from": 0.4,
+                "to": 0.6000000000000001,
+                "count": 22,
+                "meanProbability": 0.5004545454545455,
+                "observedPositiveRate": 0.045454545454545456
+              },
+              {
+                "from": 0.6000000000000001,
+                "to": 0.8,
+                "count": 15,
+                "meanProbability": 0.6566666666666667,
+                "observedPositiveRate": 0.2
+              },
+              {
+                "from": 0.8,
+                "to": 1,
+                "count": 74,
+                "meanProbability": 0.9221621621621625,
+                "observedPositiveRate": 1
+              }
+            ]
+          },
+          "skills": {
+            "unresolved": 15,
+            "missing": 0,
+            "positiveCount": 9,
+            "negativeCount": 1723,
+            "positiveBrier": 0.017166666666666663,
+            "negativeBrier": 0.006060127684271613,
+            "bins": [
+              {
+                "from": 0,
+                "to": 0.2,
+                "count": 1692,
+                "meanProbability": 0.03768912529550869,
+                "observedPositiveRate": 0
+              },
+              {
+                "from": 0.2,
+                "to": 0.4,
+                "count": 19,
+                "meanProbability": 0.2521052631578948,
+                "observedPositiveRate": 0
+              },
+              {
+                "from": 0.4,
+                "to": 0.6000000000000001,
+                "count": 4,
+                "meanProbability": 0.475,
+                "observedPositiveRate": 0
+              },
+              {
+                "from": 0.6000000000000001,
+                "to": 0.8,
+                "count": 5,
+                "meanProbability": 0.6679999999999999,
+                "observedPositiveRate": 0.4
+              },
+              {
+                "from": 0.8,
+                "to": 1,
+                "count": 12,
+                "meanProbability": 0.8925,
+                "observedPositiveRate": 0.5833333333333334
+              }
+            ]
+          },
+          "tools": {
+            "unresolved": 629,
+            "missing": 0,
+            "positiveCount": 82,
+            "negativeCount": 7699,
+            "positiveBrier": 0.05590853658536585,
+            "negativeBrier": 0.04043271853487509,
+            "bins": [
+              {
+                "from": 0,
+                "to": 0.2,
+                "count": 5864,
+                "meanProbability": 0.10484311050477592,
+                "observedPositiveRate": 0
+              },
+              {
+                "from": 0.2,
+                "to": 0.4,
+                "count": 1382,
+                "meanProbability": 0.26533285094066533,
+                "observedPositiveRate": 0.002894356005788712
+              },
+              {
+                "from": 0.4,
+                "to": 0.6000000000000001,
+                "count": 337,
+                "meanProbability": 0.4797626112759645,
+                "observedPositiveRate": 0.008902077151335312
+              },
+              {
+                "from": 0.6000000000000001,
+                "to": 0.8,
+                "count": 126,
+                "meanProbability": 0.6870634920634922,
+                "observedPositiveRate": 0.07936507936507936
+              },
+              {
+                "from": 0.8,
+                "to": 1,
+                "count": 72,
+                "meanProbability": 0.8725,
+                "observedPositiveRate": 0.9027777777777778
+              }
+            ]
+          }
+        },
+        "recordedLiveProviderCalls": 0,
+        "split": "development",
+        "cases": 80,
+        "corpusHash": "f62d7144a24251f6b8add1650f45f0f949a68346a6916b03bae39ca29e2c44b3",
+        "catalogHash": "6079343f7e378f12aa4057150931bbff44dbb7a1cf6f7b8f7526ba344dff542c",
+        "model": "jev-1.13.0",
+        "policy": {
+          "acceptAt": 0.75,
+          "rejectAt": 0.4,
+          "toolAcceptAt": 0.75,
+          "toolRejectAt": 0.4
+        },
+        "live": false,
+        "standard": {
+          "intents": {
+            "required": 79,
+            "met": 32,
+            "recall": 0.4050632911392405,
+            "irrelevantSelections": 13,
+            "casesWithMiss": 44,
+            "casesWithIrrelevant": 13,
+            "totalSelections": 50
+          },
+          "skills": {
+            "required": 9,
+            "met": 9,
+            "recall": 1,
+            "irrelevantSelections": 2,
+            "casesWithMiss": 0,
+            "casesWithIrrelevant": 2,
+            "totalSelections": 11
+          },
+          "tools": {
+            "required": 89,
+            "met": 79,
+            "recall": 0.8876404494382022,
+            "irrelevantSelections": 2269,
+            "casesWithMiss": 8,
+            "casesWithIrrelevant": 79,
+            "totalSelections": 2764
+          }
+        },
+        "raw": {
+          "intents": {
+            "required": 79,
+            "met": 75,
+            "recall": 0.9493670886075949,
+            "irrelevantSelections": 1,
+            "casesWithMiss": 4,
+            "casesWithIrrelevant": 1,
+            "totalSelections": 89
+          },
+          "skills": {
+            "required": 9,
+            "met": 8,
+            "recall": 0.8888888888888888,
+            "irrelevantSelections": 5,
+            "casesWithMiss": 1,
+            "casesWithIrrelevant": 5,
+            "totalSelections": 27
+          },
+          "tools": {
+            "required": 89,
+            "met": 78,
+            "recall": 0.8764044943820225,
+            "irrelevantSelections": 32,
+            "casesWithMiss": 8,
+            "casesWithIrrelevant": 24,
+            "totalSelections": 139
+          }
+        },
+        "exposed": {
+          "intents": {
+            "required": 79,
+            "met": 75,
+            "recall": 0.9493670886075949,
+            "irrelevantSelections": 6,
+            "casesWithMiss": 4,
+            "casesWithIrrelevant": 6,
+            "totalSelections": 92
+          },
+          "skills": {
+            "required": 9,
+            "met": 9,
+            "recall": 1,
+            "irrelevantSelections": 5,
+            "casesWithMiss": 0,
+            "casesWithIrrelevant": 5,
+            "totalSelections": 28
+          },
+          "tools": {
+            "required": 89,
+            "met": 89,
+            "recall": 1,
+            "irrelevantSelections": 255,
+            "casesWithMiss": 0,
+            "casesWithIrrelevant": 50,
+            "totalSelections": 733
+          }
+        },
+        "latencyMs": {
+          "median": 1121,
+          "p95": 1209
+        },
+        "failures": [],
+        "usage": {
+          "calls": 249,
+          "tokens": 2254950,
+          "estimatedUsd": 0.08435154
+        },
+        "perLanguage": {
+          "en": {
+            "intents": {
+              "required": 66,
+              "met": 62,
+              "recall": 0.9393939393939394,
+              "irrelevantSelections": 5,
+              "casesWithMiss": 4,
+              "casesWithIrrelevant": 5,
+              "totalSelections": 76
+            },
+            "skills": {
+              "required": 9,
+              "met": 9,
+              "recall": 1,
+              "irrelevantSelections": 3,
+              "casesWithMiss": 0,
+              "casesWithIrrelevant": 3,
+              "totalSelections": 25
+            },
+            "tools": {
+              "required": 74,
+              "met": 74,
+              "recall": 1,
+              "irrelevantSelections": 209,
+              "casesWithMiss": 0,
+              "casesWithIrrelevant": 39,
+              "totalSelections": 613
+            }
+          },
+          "ar": {
+            "intents": {
+              "required": 9,
+              "met": 9,
+              "recall": 1,
+              "irrelevantSelections": 0,
+              "casesWithMiss": 0,
+              "casesWithIrrelevant": 0,
+              "totalSelections": 11
+            },
+            "skills": {
+              "required": 0,
+              "met": 0,
+              "recall": null,
+              "irrelevantSelections": 2,
+              "casesWithMiss": 0,
+              "casesWithIrrelevant": 2,
+              "totalSelections": 3
+            },
+            "tools": {
+              "required": 13,
+              "met": 13,
+              "recall": 1,
+              "irrelevantSelections": 40,
+              "casesWithMiss": 0,
+              "casesWithIrrelevant": 9,
+              "totalSelections": 101
+            }
+          },
+          "mixed": {
+            "intents": {
+              "required": 4,
+              "met": 4,
+              "recall": 1,
+              "irrelevantSelections": 1,
+              "casesWithMiss": 0,
+              "casesWithIrrelevant": 1,
+              "totalSelections": 5
+            },
+            "skills": {
+              "required": 0,
+              "met": 0,
+              "recall": null,
+              "irrelevantSelections": 0,
+              "casesWithMiss": 0,
+              "casesWithIrrelevant": 0,
+              "totalSelections": 0
+            },
+            "tools": {
+              "required": 2,
+              "met": 2,
+              "recall": 1,
+              "irrelevantSelections": 6,
+              "casesWithMiss": 0,
+              "casesWithIrrelevant": 2,
+              "totalSelections": 19
+            }
+          }
+        }
+      },
+      "trials": [
+        {
+          "trial": 0,
+          "requiredTools": 89,
+          "metTools": 89,
+          "recall": 1.0
+        }
+      ],
+      "explicitSkillsLoaded": {
+        "required": 9,
+        "loaded": 9
+      },
+      "gates": {
+        "requiredToolRecallPerTrial": true,
+        "requiredIntentRecall": true,
+        "explicitSkillsAllLoaded": true,
+        "noRequiredRecallRegression": true,
+        "noExcessToolOrSkillRegression": true,
+        "identicalRawSelections": true
+      },
+      "cases": [
+        {"id":"ability","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"loadedSkills":[]},
+        {"id":"ar-ability","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":1}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":1}},"loadedSkills":[]},
+        {"id":"ar-browser","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":1},"tools":{"required":2,"met":2,"missing":[],"excess":42}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":1},"tools":{"required":2,"met":2,"missing":[],"excess":3}},"loadedSkills":["dogfooding"]},
+        {"id":"ar-greeting","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"loadedSkills":[]},
+        {"id":"ar-multi-local","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":2}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":2}},"loadedSkills":[]},
+        {"id":"ar-research","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":20}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":14}},"loadedSkills":["research-discovery"]},
+        {"id":"ar-save","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":3}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":3}},"loadedSkills":[]},
+        {"id":"ar-source","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":1}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":1}},"loadedSkills":[]},
+        {"id":"ar-task-status","trial":0,"baselineScores":{"intents":{"required":0,"met":0,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":4}},"candidateScores":{"intents":{"required":0,"met":0,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":4}},"loadedSkills":[]},
+        {"id":"cancelled-objective","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"loadedSkills":[]},
+        {"id":"capability-abstract","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":1}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":1}},"loadedSkills":[]},
+        {"id":"cited-policy","trial":0,"baselineScores":{"intents":{"required":2,"met":2,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":1},"tools":{"required":3,"met":3,"missing":[],"excess":61}},"candidateScores":{"intents":{"required":2,"met":2,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":1},"tools":{"required":3,"met":3,"missing":[],"excess":21}},"loadedSkills":["research-discovery","wiki-builder"]},
+        {"id":"compare-local","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":2}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":2}},"loadedSkills":[]},
+        {"id":"cross-surface-delegation","trial":0,"baselineScores":{"intents":{"required":2,"met":2,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":4}},"candidateScores":{"intents":{"required":2,"met":2,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":4}},"loadedSkills":[]},
+        {"id":"delegation-concept","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"loadedSkills":[]},
+        {"id":"design-advice","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"loadedSkills":[]},
+        {"id":"diff-review","trial":0,"baselineScores":{"intents":{"required":2,"met":2,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":26}},"candidateScores":{"intents":{"required":2,"met":2,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":3}},"loadedSkills":["simplify"]},
+        {"id":"dual-output","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":1}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":1}},"loadedSkills":[]},
+        {"id":"empty-selection","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"loadedSkills":[]},
+        {"id":"explicit-verify","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":1,"met":1,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":46}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":1,"met":1,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":1}},"loadedSkills":["verify"]},
+        {"id":"extract-known","trial":0,"baselineScores":{"intents":{"required":1,"met":0,"missing":[["research"]],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":0,"missing":[["web.extract"]],"excess":1}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":8}},"loadedSkills":[]},
+        {"id":"fact-check-save","trial":0,"baselineScores":{"intents":{"required":2,"met":2,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":3,"met":3,"missing":[],"excess":21}},"candidateScores":{"intents":{"required":2,"met":2,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":3,"met":3,"missing":[],"excess":11}},"loadedSkills":["research-discovery"]},
+        {"id":"follow-save","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":2}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":2}},"loadedSkills":[]},
+        {"id":"fresh-ability","trial":0,"baselineScores":{"intents":{"required":1,"met":0,"missing":[["conversation"]],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"candidateScores":{"intents":{"required":1,"met":0,"missing":[["conversation"]],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"loadedSkills":[]},
+        {"id":"fresh-ar-browser","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":1},"tools":{"required":2,"met":2,"missing":[],"excess":42}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":1},"tools":{"required":2,"met":2,"missing":[],"excess":5}},"loadedSkills":["dogfooding"]},
+        {"id":"fresh-ar-config","trial":0,"baselineScores":{"intents":{"required":0,"met":0,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":7}},"candidateScores":{"intents":{"required":0,"met":0,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":7}},"loadedSkills":[]},
+        {"id":"fresh-ar-task","trial":0,"baselineScores":{"intents":{"required":0,"met":0,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":0}},"candidateScores":{"intents":{"required":0,"met":0,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":0}},"loadedSkills":[]},
+        {"id":"fresh-browser","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":1},"tools":{"required":2,"met":2,"missing":[],"excess":41}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":1},"tools":{"required":2,"met":2,"missing":[],"excess":3}},"loadedSkills":["dogfooding"]},
+        {"id":"fresh-compare","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":1}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":1}},"loadedSkills":[]},
+        {"id":"fresh-diff","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":26}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":4}},"loadedSkills":["simplify"]},
+        {"id":"fresh-explain-task","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"loadedSkills":[]},
+        {"id":"fresh-filename","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":1}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":1}},"loadedSkills":[]},
+        {"id":"fresh-greeting","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"loadedSkills":[]},
+        {"id":"fresh-no-inspect","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"loadedSkills":[]},
+        {"id":"fresh-quoted","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"loadedSkills":[]},
+        {"id":"fresh-replace","trial":0,"baselineScores":{"intents":{"required":2,"met":2,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":4,"met":4,"missing":[],"excess":22}},"candidateScores":{"intents":{"required":2,"met":2,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":4,"met":4,"missing":[],"excess":12}},"loadedSkills":["research-discovery"]},
+        {"id":"fresh-research-workers","trial":0,"baselineScores":{"intents":{"required":2,"met":2,"missing":[],"excess":0},"skills":{"required":1,"met":1,"missing":[],"excess":0},"tools":{"required":7,"met":7,"missing":[],"excess":56}},"candidateScores":{"intents":{"required":2,"met":2,"missing":[],"excess":0},"skills":{"required":1,"met":1,"missing":[],"excess":0},"tools":{"required":7,"met":7,"missing":[],"excess":11}},"loadedSkills":["researcher","research-discovery"]},
+        {"id":"fresh-stop","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"loadedSkills":[]},
+        {"id":"fresh-task-output","trial":0,"baselineScores":{"intents":{"required":0,"met":0,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":2}},"candidateScores":{"intents":{"required":0,"met":0,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":2}},"loadedSkills":[]},
+        {"id":"fresh-task-question","trial":0,"baselineScores":{"intents":{"required":0,"met":0,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":0}},"candidateScores":{"intents":{"required":0,"met":0,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":0}},"loadedSkills":[]},
+        {"id":"fresh-two-skills","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":2,"met":2,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":56}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":2,"met":2,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":3}},"loadedSkills":["researcher","system-diagram","research-discovery"]},
+        {"id":"fresh-web-config","trial":0,"baselineScores":{"intents":{"required":0,"met":0,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":6}},"candidateScores":{"intents":{"required":0,"met":0,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":6}},"loadedSkills":[]},
+        {"id":"fresh-wiki","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":1,"met":1,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":60}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":1,"met":1,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":2}},"loadedSkills":["wiki-builder"]},
+        {"id":"greeting","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"loadedSkills":[]},
+        {"id":"index-query","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":1},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":5}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":1},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":5}},"loadedSkills":[]},
+        {"id":"inline-review","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"loadedSkills":[]},
+        {"id":"inspect-configuration","trial":0,"baselineScores":{"intents":{"required":0,"met":0,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":7}},"candidateScores":{"intents":{"required":0,"met":0,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":7}},"loadedSkills":[]},
+        {"id":"locate","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":1},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":3}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":1},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":3}},"loadedSkills":[]},
+        {"id":"lookup","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":11}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":11}},"loadedSkills":[]},
+        {"id":"memory-read","trial":0,"baselineScores":{"intents":{"required":0,"met":0,"missing":[],"excess":1},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":3}},"candidateScores":{"intents":{"required":0,"met":0,"missing":[],"excess":1},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":3}},"loadedSkills":[]},
+        {"id":"missing-skill","trial":0,"baselineScores":{"intents":{"required":0,"met":0,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"candidateScores":{"intents":{"required":0,"met":0,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"loadedSkills":[]},
+        {"id":"mixed-code","trial":0,"baselineScores":{"intents":{"required":2,"met":2,"missing":[],"excess":1},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":4}},"candidateScores":{"intents":{"required":2,"met":2,"missing":[],"excess":1},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":4}},"loadedSkills":[]},
+        {"id":"mixed-inline","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"loadedSkills":[]},
+        {"id":"mixed-save","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":2}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":2}},"loadedSkills":[]},
+        {"id":"multi-explicit","trial":0,"baselineScores":{"intents":{"required":2,"met":2,"missing":[],"excess":0},"skills":{"required":1,"met":1,"missing":[],"excess":0},"tools":{"required":4,"met":4,"missing":[],"excess":58}},"candidateScores":{"intents":{"required":2,"met":2,"missing":[],"excess":0},"skills":{"required":1,"met":1,"missing":[],"excess":0},"tools":{"required":4,"met":4,"missing":[],"excess":18}},"loadedSkills":["researcher","research-discovery"]},
+        {"id":"multiple-skills","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":1},"skills":{"required":2,"met":2,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":62}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":1},"skills":{"required":2,"met":2,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":17}},"loadedSkills":["system-diagram","researcher","research-discovery"]},
+        {"id":"no-new-search","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":2}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":2}},"loadedSkills":[]},
+        {"id":"no-tools","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"loadedSkills":[]},
+        {"id":"patch","trial":0,"baselineScores":{"intents":{"required":2,"met":2,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":3,"met":3,"missing":[],"excess":42}},"candidateScores":{"intents":{"required":2,"met":2,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":3,"met":3,"missing":[],"excess":1}},"loadedSkills":["verify"]},
+        {"id":"provider","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":0}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":0}},"loadedSkills":[]},
+        {"id":"quoted-action","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"loadedSkills":[]},
+        {"id":"quoted-skill","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"loadedSkills":[]},
+        {"id":"read-before-fix","trial":0,"baselineScores":{"intents":{"required":3,"met":3,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":3,"met":3,"missing":[],"excess":42}},"candidateScores":{"intents":{"required":3,"met":3,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":3,"met":3,"missing":[],"excess":1}},"loadedSkills":["verify"]},
+        {"id":"read-config","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":1}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":1}},"loadedSkills":[]},
+        {"id":"recover-task-result","trial":0,"baselineScores":{"intents":{"required":0,"met":0,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":0}},"candidateScores":{"intents":{"required":0,"met":0,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":0}},"loadedSkills":[]},
+        {"id":"recovery-file","trial":0,"baselineScores":{"intents":{"required":1,"met":0,"missing":[["docs-writing"]],"excess":1},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":2}},"candidateScores":{"intents":{"required":1,"met":0,"missing":[["docs-writing"]],"excess":1},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":2}},"loadedSkills":[]},
+        {"id":"research-report","trial":0,"baselineScores":{"intents":{"required":2,"met":2,"missing":[],"excess":0},"skills":{"required":1,"met":1,"missing":[],"excess":0},"tools":{"required":4,"met":4,"missing":[],"excess":56}},"candidateScores":{"intents":{"required":2,"met":2,"missing":[],"excess":0},"skills":{"required":1,"met":1,"missing":[],"excess":0},"tools":{"required":4,"met":4,"missing":[],"excess":19}},"loadedSkills":["researcher","research-discovery"]},
+        {"id":"review-source","trial":0,"baselineScores":{"intents":{"required":2,"met":2,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":25}},"candidateScores":{"intents":{"required":2,"met":2,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":2}},"loadedSkills":["simplify"]},
+        {"id":"router-status","trial":0,"baselineScores":{"intents":{"required":0,"met":0,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":0}},"candidateScores":{"intents":{"required":0,"met":0,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":0}},"loadedSkills":[]},
+        {"id":"save-only","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":2}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":2}},"loadedSkills":[]},
+        {"id":"search-recovery","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":7}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":7}},"loadedSkills":[]},
+        {"id":"skill-inspect","trial":0,"baselineScores":{"intents":{"required":0,"met":0,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":0}},"candidateScores":{"intents":{"required":0,"met":0,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":0}},"loadedSkills":[]},
+        {"id":"skill-question","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"loadedSkills":[]},
+        {"id":"task-monitor","trial":0,"baselineScores":{"intents":{"required":0,"met":0,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":0}},"candidateScores":{"intents":{"required":0,"met":0,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":2,"met":2,"missing":[],"excess":0}},"loadedSkills":[]},
+        {"id":"test-run","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":0}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":0}},"loadedSkills":[]},
+        {"id":"thanks","trial":0,"baselineScores":{"intents":{"required":1,"met":0,"missing":[["conversation"]],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"candidateScores":{"intents":{"required":1,"met":0,"missing":[["conversation"]],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"loadedSkills":[]},
+        {"id":"untrusted-data","trial":0,"baselineScores":{"intents":{"required":1,"met":0,"missing":[["conversation"]],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":1}},"candidateScores":{"intents":{"required":1,"met":0,"missing":[["conversation"]],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":1}},"loadedSkills":[]},
+        {"id":"visit-website","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":1},"tools":{"required":2,"met":2,"missing":[],"excess":42}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":1},"tools":{"required":2,"met":2,"missing":[],"excess":3}},"loadedSkills":["dogfooding"]},
+        {"id":"web-negative","trial":0,"baselineScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"candidateScores":{"intents":{"required":1,"met":1,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":0,"met":0,"missing":[],"excess":0}},"loadedSkills":[]},
+        {"id":"web-setup","trial":0,"baselineScores":{"intents":{"required":0,"met":0,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":5}},"candidateScores":{"intents":{"required":0,"met":0,"missing":[],"excess":0},"skills":{"required":0,"met":0,"missing":[],"excess":0},"tools":{"required":1,"met":1,"missing":[],"excess":5}},"loadedSkills":[]}
+      ]
+    }
+  },
+  "additionalLiveDevelopment": {
+    "version": 1,
+    "experimentHash": "d88cfec5aed6fb3797e6398ead5bfe9835c268ea1bfc428c7c8e83936a872e93",
+    "variant": "baseline",
+    "probabilityCalibration": {
+      "intents": {
+        "unresolved": 11,
+        "missing": 0,
+        "positiveCount": 19,
+        "negativeCount": 242,
+        "positiveBrier": 0.02666315789473685,
+        "negativeBrier": 0.020477685950413226,
+        "bins": [
+          {
+            "from": 0,
+            "to": 0.2,
+            "count": 221,
+            "meanProbability": 0.03619909502262433,
+            "observedPositiveRate": 0
+          },
+          {
+            "from": 0.2,
+            "to": 0.4,
+            "count": 12,
+            "meanProbability": 0.29250000000000004,
+            "observedPositiveRate": 0
+          },
+          {
+            "from": 0.4,
+            "to": 0.6000000000000001,
+            "count": 7,
+            "meanProbability": 0.4785714285714286,
+            "observedPositiveRate": 0.14285714285714285
+          },
+          {
+            "from": 0.6000000000000001,
+            "to": 0.8,
+            "count": 3,
+            "meanProbability": 0.7366666666666667,
+            "observedPositiveRate": 0.6666666666666666
+          },
+          {
+            "from": 0.8,
+            "to": 1,
+            "count": 18,
+            "meanProbability": 0.9383333333333334,
+            "observedPositiveRate": 0.8888888888888888
+          }
+        ]
+      },
+      "skills": {
+        "unresolved": 3,
+        "missing": 0,
+        "positiveCount": 4,
+        "negativeCount": 384,
+        "positiveBrier": 0.389625,
+        "negativeBrier": 0.00386484374999998,
+        "bins": [
+          {
+            "from": 0,
+            "to": 0.2,
+            "count": 380,
+            "meanProbability": 0.03005263157894717,
+            "observedPositiveRate": 0.005263157894736842
+          },
+          {
+            "from": 0.2,
+            "to": 0.4,
+            "count": 3,
+            "meanProbability": 0.27666666666666667,
+            "observedPositiveRate": 0
+          },
+          {
+            "from": 0.4,
+            "to": 0.6000000000000001,
+            "count": 2,
+            "meanProbability": 0.465,
+            "observedPositiveRate": 0
+          },
+          {
+            "from": 0.6000000000000001,
+            "to": 0.8,
+            "count": 1,
+            "meanProbability": 0.61,
+            "observedPositiveRate": 0
+          },
+          {
+            "from": 0.8,
+            "to": 1,
+            "count": 2,
+            "meanProbability": 0.935,
+            "observedPositiveRate": 1
+          }
+        ]
+      },
+      "tools": {
+        "unresolved": 147,
+        "missing": 0,
+        "positiveCount": 21,
+        "negativeCount": 1742,
+        "positiveBrier": 0.06108095238095238,
+        "negativeBrier": 0.044170149253731215,
+        "bins": [
+          {
+            "from": 0,
+            "to": 0.2,
+            "count": 1302,
+            "meanProbability": 0.10377880184331748,
+            "observedPositiveRate": 0
+          },
+          {
+            "from": 0.2,
+            "to": 0.4,
+            "count": 330,
+            "meanProbability": 0.2655757575757577,
+            "observedPositiveRate": 0.0030303030303030303
+          },
+          {
+            "from": 0.4,
+            "to": 0.6000000000000001,
+            "count": 70,
+            "meanProbability": 0.4809999999999998,
+            "observedPositiveRate": 0.014285714285714285
+          },
+          {
+            "from": 0.6000000000000001,
+            "to": 0.8,
+            "count": 39,
+            "meanProbability": 0.6753846153846153,
+            "observedPositiveRate": 0.05128205128205128
+          },
+          {
+            "from": 0.8,
+            "to": 1,
+            "count": 22,
+            "meanProbability": 0.8672727272727272,
+            "observedPositiveRate": 0.7727272727272727
+          }
+        ]
+      }
+    },
+    "recordedLiveProviderCalls": 54,
+    "split": "development",
+    "cases": 18,
+    "corpusHash": "996b6acc5685bfb180cd9577f89120cbe34ccb72af31d0d7488380de657d1b8a",
+    "catalogHash": "6079343f7e378f12aa4057150931bbff44dbb7a1cf6f7b8f7526ba344dff542c",
+    "model": "jev-1.13.0",
+    "policy": {
+      "acceptAt": 0.75,
+      "rejectAt": 0.4,
+      "toolAcceptAt": 0.75,
+      "toolRejectAt": 0.4
+    },
+    "live": true,
+    "standard": {
+      "intents": {
+        "required": 19,
+        "met": 7,
+        "recall": 0.3684210526315789,
+        "irrelevantSelections": 3,
+        "casesWithMiss": 11,
+        "casesWithIrrelevant": 3,
+        "totalSelections": 13
+      },
+      "skills": {
+        "required": 4,
+        "met": 4,
+        "recall": 1,
+        "irrelevantSelections": 0,
+        "casesWithMiss": 0,
+        "casesWithIrrelevant": 0,
+        "totalSelections": 4
+      },
+      "tools": {
+        "required": 23,
+        "met": 23,
+        "recall": 1,
+        "irrelevantSelections": 565,
+        "casesWithMiss": 0,
+        "casesWithIrrelevant": 18,
+        "totalSelections": 682
+      }
+    },
+    "raw": {
+      "intents": {
+        "required": 19,
+        "met": 18,
+        "recall": 0.9473684210526315,
+        "irrelevantSelections": 2,
+        "casesWithMiss": 1,
+        "casesWithIrrelevant": 2,
+        "totalSelections": 24
+      },
+      "skills": {
+        "required": 4,
+        "met": 2,
+        "recall": 0.5,
+        "irrelevantSelections": 0,
+        "casesWithMiss": 1,
+        "casesWithIrrelevant": 0,
+        "totalSelections": 4
+      },
+      "tools": {
+        "required": 23,
+        "met": 20,
+        "recall": 0.8695652173913043,
+        "irrelevantSelections": 11,
+        "casesWithMiss": 3,
+        "casesWithIrrelevant": 7,
+        "totalSelections": 34
+      }
+    },
+    "exposed": {
+      "intents": {
+        "required": 19,
+        "met": 17,
+        "recall": 0.8947368421052632,
+        "irrelevantSelections": 1,
+        "casesWithMiss": 2,
+        "casesWithIrrelevant": 1,
+        "totalSelections": 22
+      },
+      "skills": {
+        "required": 4,
+        "met": 4,
+        "recall": 1,
+        "irrelevantSelections": 0,
+        "casesWithMiss": 0,
+        "casesWithIrrelevant": 0,
+        "totalSelections": 6
+      },
+      "tools": {
+        "required": 23,
+        "met": 23,
+        "recall": 1,
+        "irrelevantSelections": 58,
+        "casesWithMiss": 0,
+        "casesWithIrrelevant": 13,
+        "totalSelections": 169
+      }
+    },
+    "latencyMs": {
+      "median": 1138,
+      "p95": 1268
+    },
+    "failures": [],
+    "usage": {
+      "calls": 54,
+      "tokens": 492201,
+      "estimatedUsd": 0.018407466
+    },
+    "perLanguage": {
+      "en": {
+        "intents": {
+          "required": 17,
+          "met": 16,
+          "recall": 0.9411764705882353,
+          "irrelevantSelections": 1,
+          "casesWithMiss": 1,
+          "casesWithIrrelevant": 1,
+          "totalSelections": 20
+        },
+        "skills": {
+          "required": 4,
+          "met": 4,
+          "recall": 1,
+          "irrelevantSelections": 0,
+          "casesWithMiss": 0,
+          "casesWithIrrelevant": 0,
+          "totalSelections": 6
+        },
+        "tools": {
+          "required": 20,
+          "met": 20,
+          "recall": 1,
+          "irrelevantSelections": 55,
+          "casesWithMiss": 0,
+          "casesWithIrrelevant": 11,
+          "totalSelections": 152
+        }
+      },
+      "ar": {
+        "intents": {
+          "required": 2,
+          "met": 1,
+          "recall": 0.5,
+          "irrelevantSelections": 0,
+          "casesWithMiss": 1,
+          "casesWithIrrelevant": 0,
+          "totalSelections": 2
+        },
+        "skills": {
+          "required": 0,
+          "met": 0,
+          "recall": null,
+          "irrelevantSelections": 0,
+          "casesWithMiss": 0,
+          "casesWithIrrelevant": 0,
+          "totalSelections": 0
+        },
+        "tools": {
+          "required": 3,
+          "met": 3,
+          "recall": 1,
+          "irrelevantSelections": 3,
+          "casesWithMiss": 0,
+          "casesWithIrrelevant": 2,
+          "totalSelections": 17
+        }
+      }
+    }
+  },
+  "liveUsage": {
+    "calls": 270,
+    "tokens": 2461185,
+    "estimatedUsd": 0.09204489000000003
+  },
+  "environmentAttempt": {
+    "excludedFromQualityComparison": true,
+    "reason": "Sandbox prevented all provider connections; retained separately as environment failures.",
+    "caseTrials": 18,
+    "failedStageRequests": 36,
+    "reportedTokens": 0
+  },
+  "evidenceArchive": {
+    "path": "/tmp/estacoda-jev-calibration-round4-evidence-2026-10-15.tar.gz",
+    "sha256": "ec38652daefb16e65b40a131db7b1cca55ce585dcd3f546cdf4f83e6d419f847",
+    "excludes": [
+      "usage databases",
+      "credentials",
+      "user transcripts"
+    ]
+  },
+  "limitations": [
+    "Selection-only; no live benchmark tool is executed.",
+    "Required skill delivery relies on deterministic explicit references; raw Jev selected only 6/12 fresh acceptance skill obligations.",
+    "Text rewriting missed the conversation label in all three acceptance trials.",
+    "167 rubric-excess tool selections remain in the acceptance trials.",
+    "Four old development intent misses and five old development excess skill selections remain.",
+    "External MCP/private skill catalogs and attachment processing are not covered.",
+    "Installed app/gateway were not updated in this round."
+  ],
+  "validation": {
+    "node": "24.14.1",
+    "pnpm": "10.33.0",
+    "isolatedSource": "tracked HEAD plus focused patch; unrelated checkout edits excluded",
+    "checks": [
+      {
+        "command": "pnpm install --frozen-lockfile",
+        "passed": true
+      },
+      {
+        "command": "pnpm run typecheck",
+        "passed": true
+      },
+      {
+        "command": "pnpm run test",
+        "passed": true
+      },
+      {
+        "command": "pnpm run smoke",
+        "passed": true
+      },
+      {
+        "command": "pnpm run build",
+        "passed": true
+      },
+      {
+        "command": "pnpm run audit:runtime-imports",
+        "passed": true
+      },
+      {
+        "command": "pnpm run audit:esm",
+        "passed": true
+      },
+      {
+        "command": "pnpm run smoke:dist",
+        "passed": true
+      },
+      {
+        "command": "git diff --check",
+        "passed": true
+      }
+    ],
+    "coreTestFiles": 763,
+    "coreTests": 12462,
+    "initialEnvironmentFailures": "Missing workspace package link and sandbox-denied local sockets. Correct installation and unrestricted full rerun passed.",
+    "scope": "No packaged application rebuild or live conversation workflow run for this patch."
+  }
+}

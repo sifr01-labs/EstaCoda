@@ -140,7 +140,7 @@ it("does not record skill delivery when cancelled after the instruction read", a
   } finally { await h.dispose(); }
 });
 
-it.each([false, true])("uses live Jev selection and discovery without same-batch execution or approval bypass (fallback=%s)", async fallback => {
+it.each([false, true])("recovers a Jev-rejected skill dependency without same-batch execution or approval bypass (fallback=%s)", async fallback => {
   const { mkdir, writeFile } = await import("node:fs/promises");
   const { resolveProfileStateHome } = await import("../config/profile-home.js");
   const { vi } = await import("vitest");
@@ -172,7 +172,7 @@ it.each([false, true])("uses live Jev selection and discovery without same-batch
       expect(names(request)).toContain("file_write");
       return nativeCall("file_write", { path: "denied.md", content: "requires approval" })(request);
     }, answer("The write was denied."));
-    await h.turn("Investigate battery methods.");
+    await h.turn("Use the researcher skill to investigate battery methods.");
     expect(h.scriptErrors).toEqual([]);
     expect(h.events).toContainEqual(expect.objectContaining({ kind: "provider-tool-inventory", selection: expect.objectContaining({ routing: expect.objectContaining({ actualEngine: "jev" }) }) }));
     expect(approvals).toContain("file.write");
