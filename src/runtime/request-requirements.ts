@@ -8,6 +8,25 @@ const FILE_OPERAND = /[\p{L}\p{N}_./\\:-]+\.(?:md|markdown|txt|json|ts|tsx|js|py
 const INERT_CONTEXT = /\b(?:hypothetically|imagine|what\s+if|if\s+(?:we|you|I)|example|said|says|quoted?)\b|(?:افترض|ماذا لو|مثال|قال)/iu;
 const INFORMATIONAL = /\b(?:explain|describe|hypothetically|imagine|what\s+if|how\s+(?:would|could|to)|if\s+(?:we|you|I)|example|said|says|quoted?)\b|(?:اشرح|افترض|ماذا لو|مثال|قال)/iu;
 
+// An invocation can own a coordinated noun list; ordinary skill mentions cannot.
+const SKILL_NAME = String.raw`[\p{L}\p{N}_-]{1,80}`;
+const SKILL_SEPARATOR = String.raw`\s*(?:,\s*(?:and\s+)?|(?:\band\b|&)\s+)`;
+const SKILL_OBJECT = String.raw`(?:the\s+)?${SKILL_NAME}\s+skills?`;
+const ENGLISH_SKILL_INVOCATION = String.raw`\b(?:use|using|invoke|load|apply)\s+(?:both\s+)?(${SKILL_OBJECT}(?:${SKILL_SEPARATOR}${SKILL_OBJECT})*|(?:the\s+)?${SKILL_NAME}(?:${SKILL_SEPARATOR}(?:the\s+)?${SKILL_NAME})+\s+skills)\b`;
+
+function explicitSkillReferences(segment: string): string[] {
+  const references: string[] = [];
+  // Keep matches in request order, including slash commands and Arabic.
+  const invocations = new RegExp(`${ENGLISH_SKILL_INVOCATION}|(?:استخدم|حمّل|فعّل)\\s+مهارة\\s+(${SKILL_NAME})|^\\s*/(${SKILL_NAME})(?:\\s|$)`, "giu");
+  for (const match of segment.matchAll(invocations)) {
+    if (match[1] !== undefined) {
+      references.push(...match[1].split(new RegExp(SKILL_SEPARATOR, "iu"))
+        .map(name => name.replace(/^the\s+/iu, "").replace(/\s+skills?$/iu, "")));
+    } else references.push((match[2] ?? match[3])!);
+  }
+  return references;
+}
+
 /** Only affirmative user clauses may supply new requirements. Quoted filenames
  * are operands; other quoted material, fenced code and blockquotes are inert. */
 export function explicitRequestSegments(text: string): string[] {
@@ -47,8 +66,7 @@ export function deriveRequestRequirements(userText: string, originTurnId?: strin
     const actionSegment = segment.replace(/`[^`]*`/gu, " ").replace(FILE_OPERAND, " [file] ");
     // Cancelling an old objective does not request its named work again.
     if (/^\s*(?:(?:please|just)\s+)?(?:forget|cancel|stop|abandon|discard|ignore)\b|^\s*(?:انسَ?|ألغ|الغ|توقف|تجاهل)/iu.test(actionSegment)) continue;
-    for (const skill of actionSegment.matchAll(/(?:\b(?:use|using|invoke|load|apply)\s+(?:the\s+)?([\p{L}\p{N}_-]{1,80})\s+skill\b|(?:استخدم|حمّل|فعّل)\s+مهارة\s+([\p{L}\p{N}_-]{1,80})|^\s*\/([\p{L}\p{N}_-]{1,80})(?:\s|$))/giu)) {
-      const reference = skill[1] ?? skill[2] ?? skill[3];
+    for (const reference of explicitSkillReferences(actionSegment)) {
       if (reference === undefined || result.skillReferences.includes(reference.toLocaleLowerCase("en-US"))) continue;
       if (result.skillReferences.length >= 4) { result.issues.push("request-too-long"); break; }
       result.skillReferences.push(reference.toLocaleLowerCase("en-US"));
@@ -57,7 +75,7 @@ export function deriveRequestRequirements(userText: string, originTurnId?: strin
     // and three workers"). Keep the antecedent bounded to a skill request;
     // arbitrary mentions, quoted text and negated clauses remain inert.
     const delegationSegment = actionSegment
-      .replace(/\b(use|using)\s+(?:the\s+)?[\p{L}\p{N}_-]{1,80}\s+skill\s*(?:,\s*)?(?:and|&)\s+/giu, "$1 ")
+      .replace(new RegExp(`${ENGLISH_SKILL_INVOCATION}\\s*(?:,\\s*)?(?:and|&)\\s+`, "giu"), "use ")
       .replace(/استخدم\s+مهارة\s+[\p{L}\p{N}_-]{1,80}\s+و\s*/gu, "استخدم ");
     const delegation = delegationSegment.match(/\b(?:use|using|launch|spawn|delegate\s+to|assign\s+to)\s+(?:(\d{1,9}|one|two|three|four|five|six|seven|eight|nine|ten)\s+)?(?:sub[- ]?agents?|workers?|agents?)\b|(?:استخدم|شغّل|شغل|كلّف)\s+(?:(\d{1,9}|[٠-٩]{1,9}|ثلاثة|ثلاث|اثنين|اثنان)\s+)?(?:وكلاء|عمال|وكيل|sub[- ]?agents?|workers?)(?:\s+فرعيين)?/iu);
     if (delegation !== null) {

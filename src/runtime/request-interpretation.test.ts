@@ -7,6 +7,8 @@ import { deriveExecutionCompletionFloor, deriveExecutionFinalOutcome } from "./e
 const capabilities = [{ tool: "knowledge.code.query", kind: "read" as const }];
 it.each([
  "Are you able to review your own source code?",
+ "Are you able to review source code in this workspace?",
+ "Are you able to review source code in this workspace? I am asking about your capability; do not review files yet.",
  "are you able tto review your own source code?",
  "Are you capable of reviewing your own source code?",
  "Do you have the ability to research and save reports?",
@@ -24,6 +26,8 @@ it.each([
 });
 it.each([
  ["Can you review this code for bugs?", "read"],
+ ["Are you able to review this code in this workspace for bugs?", "read"],
+ ["Are you able to review code in this workspace? I am just asking about your capability. Then read source.ts.", "read"],
  ["Could you inspect the files?", "read"],
  ["Are you able to review this code now?", "read"],
  ["Are you able to review this code for bugs?", "read"],

@@ -16,6 +16,34 @@ describe("bounded explicit request requirements", () => {
     expect(deriveRequestRequirements("Use the researcher skill and use the research-discovery skill").skillReferences).toEqual(["researcher", "research-discovery"]);
     expect(deriveRequestRequirements("Use a skill, use b skill, use c skill, use d skill, use e skill").issues).toContain("request-too-long");
   });
+  it.each([
+    "Use both the researcher skill and the system-diagram skill",
+    "Use the researcher and system-diagram skills",
+    "Apply researcher skill & system-diagram skill",
+    "Use researcher skill, system-diagram skill",
+  ])("retains explicitly coordinated skills: %s", text => {
+    expect(deriveRequestRequirements(text).skillReferences).toEqual(["researcher", "system-diagram"]);
+  });
+  it.each([
+    "Do not use both the researcher skill and the system-diagram skill",
+    "Explain how to use both the researcher skill and the system-diagram skill",
+    'The note says "use both the researcher skill and the system-diagram skill"',
+    "What if we use the researcher and system-diagram skills?",
+    "The researcher skill and system-diagram skill are available",
+  ])("keeps coordinated inert references out of requirements: %s", text => {
+    expect(deriveRequestRequirements(text).skillReferences).toEqual([]);
+  });
+  it("keeps conjunction substrings inside skill names intact", () => {
+    expect(deriveRequestRequirements("Use command skill and brand skill").skillReferences).toEqual(["command", "brand"]);
+    expect(deriveRequestRequirements("Use the command and brand skills").skillReferences).toEqual(["command", "brand"]);
+  });
+  it("does not extend an invocation across another action, a negation or an alternative", () => {
+    for (const text of ["Use researcher skill and describe system-diagram skill", "Use researcher skill without system-diagram skill", "Use researcher skill or system-diagram skill"]) {
+      expect(deriveRequestRequirements(text).skillReferences).toEqual(["researcher"]);
+    }
+    expect(deriveRequestRequirements("Use a skill, b skill, c skill, d skill and e skill")).toMatchObject({ skillReferences: ["a", "b", "c", "d"], issues: ["request-too-long"] });
+    expect(deriveRequestRequirements("Use researcher skill and researcher skill").skillReferences).toEqual(["researcher"]);
+  });
   it("preserves affirmative work whose subject contains how-to phrasing", () => {
     expect(deriveRequestRequirements("Research how to recycle batteries and save report.md using 3 subagents")).toMatchObject({
       research: { domain: "general" }, fileOutput: { path: "report.md" }, delegation: { count: 3 }
@@ -26,6 +54,7 @@ describe("bounded explicit request requirements", () => {
     "Use the researcher skill and three workers to research batteries",
     "Using the researcher skill, and 3 sub-agents, research batteries",
     "Use the researcher skill & 3 agents to research batteries",
+    "Use both the researcher skill and the system-diagram skill and 3 workers to research batteries",
     "استخدم مهارة researcher وثلاثة وكلاء فرعيين"
   ])("inherits an explicit use verb for coordinated workers: %s", text => {
     expect(deriveRequestRequirements(text).delegation).toEqual({ count: 3 });

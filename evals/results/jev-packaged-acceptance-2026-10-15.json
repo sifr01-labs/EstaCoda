@@ -1,0 +1,213 @@
+{
+  "version": 1,
+  "measuredAt": "2026-10-15T10:44:27.454Z",
+  "sourceBaseCommit": "c898bfe349291d1accb3687b629541e94c8d9847",
+  "sourceOverlay": [
+    {
+      "path": "apps/desktop/src/renderer/components/chat-tasks.tsx",
+      "sha256": "7435f84d8181ff2a362b176081445913858d8ee9f14aec78999851f014253da5"
+    },
+    {
+      "path": "apps/desktop/src/shared/i18n/chat-tasks.ts",
+      "sha256": "783756f929006ccacfc13285841b6bf75f849aef8c22234c79f3d3ff29ba0254"
+    },
+    {
+      "path": "apps/desktop/tests/research-packaged.mts",
+      "sha256": "f5ea1b22b723ed36b5dd8e03dab3f15fc0967634191636b6210dc609c8b98e23"
+    },
+    {
+      "path": "package.json",
+      "sha256": "d79aaeb36c98dfb633b01679100a8d630ada6c87de98968a44f4ff3048f5bf3b"
+    },
+    {
+      "path": "scripts/validate-research-reliability.ts",
+      "sha256": "f3d6588b2aec58436ea33ef50ae52238f2bc07116f30a7ca01f9fba7fcd2fae1"
+    },
+    {
+      "path": "src/eval/fixtures/research-workflow-harness.ts",
+      "sha256": "17b562f99c75c413238835f053e0e43b9f1f52a7257a8554fae4a3bbf4984630"
+    },
+    {
+      "path": "src/eval/fixtures/research-workflow-release.ts",
+      "sha256": "8b2e582fed53c3a1b6c9feb907ef2a39bf84b19c74ba4d839fd0ee30f765ef3e"
+    },
+    {
+      "path": "src/prompt/history-content.ts",
+      "sha256": "0ae11e0af37752cb51607fb9f5574bfe4a88631d27748f325d4554b3e07eda97"
+    },
+    {
+      "path": "src/prompt/task-result-context.test.ts",
+      "sha256": "22715d4d69c566b8a921d1d55b4c418b78e1c69f99fd11327e20446239838a50"
+    },
+    {
+      "path": "src/prompt/task-result-context.ts",
+      "sha256": "a2ed6397670145034c28a0e2a63931a9b71aa4ae7842c88ff98e145a12e3bb81"
+    },
+    {
+      "path": "src/runtime/intent-router.ts",
+      "sha256": "635a107856d54d23d2b12c1646e0a8b7267cbed9e748479ac41a12a6be015bc4"
+    },
+    {
+      "path": "src/runtime/jev/live-routing.test.ts",
+      "sha256": "a8da7577a54c2e4107c6b9a3018377028595be32ad29cb22a9757381a80ca49f"
+    },
+    {
+      "path": "src/runtime/request-interpretation.test.ts",
+      "sha256": "3ec728aaa99c663bf588b53b109ebe8ac742f8f86171eac52b50e8df051c6799"
+    },
+    {
+      "path": "src/runtime/request-interpretation.ts",
+      "sha256": "18d852df543ea28fce352c7901e69c075c20e7cbc3d3d493bb2ced8daecbaaa1"
+    },
+    {
+      "path": "src/runtime/request-requirements.test.ts",
+      "sha256": "919744768fa8db886ad7390389e0110ad5ba04c6e728477ddc4ef8abfad03e34"
+    },
+    {
+      "path": "src/runtime/request-requirements.ts",
+      "sha256": "efc5003d6a84a4984ca1eb8c06fa5d3d152f0eef5b00b0d30bb9491b18a0f3c2"
+    },
+    {
+      "path": "src/runtime/research-request.acceptance.test.ts",
+      "sha256": "7e912699df4b1c51acfd97b3b6327ecb2e8121b5523a6293b833152c09c05e8d"
+    },
+    {
+      "path": "src/runtime/research-surfaces.acceptance.test.ts",
+      "sha256": "66ca8b7571c8cbb4f103a848cb17f32f9bf4199f3b1a4972a3dc286ca0d21b24"
+    },
+    {
+      "path": "src/runtime/runtime-router.ts",
+      "sha256": "652c95d444506a17f49d328ec1d4ce9ac57e3ac7e1e503a833c087bca007e699"
+    }
+  ],
+  "validation": {
+    "coreFiles": 763,
+    "coreTests": 12424,
+    "desktopFiles": 48,
+    "desktopTests": 186,
+    "typechecks": true,
+    "frozenLockfile": true,
+    "sourceSmoke": true,
+    "build": true,
+    "runtimeImportAudit": true,
+    "esmAudit": true,
+    "compiledSmoke": true
+  },
+  "packaged": {
+    "runtime": {
+      "sha256": "9ceb0aea5ea2d322e52c8998ec4431d1dea87813cb7630ad174920bcfd67a968",
+      "nodeVersion": "v24.14.1",
+      "coreVersion": "0.1.0",
+      "entrySha256": "8b7b5e8816ffe62d9baa2133dd5cc54a1a8ea36997b0bda6fc631039c700f6ec",
+      "signature": "ad-hoc verified",
+      "ownedBridgeVerified": true,
+      "inventoryVerified": true,
+      "matchesCurrentDist": true,
+      "supervisorRetainedPathWithSpaces": true
+    },
+    "fixtures": {
+      "model": "scripted loopback HTTP",
+      "web": "in-process registered synthetic provider in packaged supervisor",
+      "liveModelCalls": 0,
+      "transport": "actual signed app + preload/Main + owned bridge + private control"
+    },
+    "workflow": {
+      "longCallMs": 65001,
+      "siblingCompletedDuringLongCall": true,
+      "workers": 3,
+      "acceptedResults": 5,
+      "distinctChildSessions": 6,
+      "tasks": 1,
+      "searches": 16,
+      "providerCalls": 29,
+      "appRestartNoReplay": true,
+      "fileBytes": 52350,
+      "fileSha256": "f9b7de8ddd48b40826dc841c5e522f98028ab3c51c3995da571b786f851cbf43",
+      "readbackVerified": true,
+      "historicalTaskStatus": "completed"
+    },
+    "allScenarios": {
+      "providerCalls": 58,
+      "actualToolResults": 49,
+      "failedToolResults": 16
+    },
+    "scenarios": {
+      "compoundDelegation": true,
+      "foregroundReportReadbackRepair": true,
+      "foregroundReportCitationValidation": true,
+      "extractionProviderFailureRecovery": true,
+      "dnsFailureRecovery": true,
+      "searchProviderFailureRecovery": true,
+      "largeFileRangeReadback": true,
+      "longProviderLeaseRenewal": true,
+      "attentionReceiptAcrossRestart": true,
+      "emptySearchRecovery": true,
+      "disclosedBlockedSource": true,
+      "markdownSourceUrls": true,
+      "largeReportContext": true,
+      "stepScopedRequirements": true,
+      "evidenceCorrection": true,
+      "exhaustedRepairDraftPreserved": true,
+      "redundantResourceMode": true,
+      "researchThroughFallback": true,
+      "fallbackComposer": true,
+      "fallbackNotice": true,
+      "fallbackRestart": true,
+      "preferredModelPreserved": true,
+      "research": true,
+      "automaticReportDelivery": true,
+      "alternativeSourceRecovery": true,
+      "desktopTranscriptExactlyOnce": true,
+      "chatOwnedTasksUi": true,
+      "oneSidebarEntry": true,
+      "handoffRemainsRunning": true,
+      "gatewayRestartNoReplay": true,
+      "failedWorkerDraftPreserved": true,
+      "targetedRetryAfterGatewayRestart": true,
+      "saveOnlyAfterRestart": true,
+      "skillRecovery": true,
+      "missingSearch": true,
+      "falseSaveBlocked": true
+    },
+    "liveAssessment": "not exercised; synthetic responses do not assess live research quality"
+  },
+  "installed": {
+    "appRuntime": "9ceb0aea5ea2d322e52c8998ec4431d1dea87813cb7630ad174920bcfd67a968",
+    "gatewayRuntime": "9ceb0aea5ea2d322e52c8998ec4431d1dea87813cb7630ad174920bcfd67a968",
+    "authenticatedMatch": true,
+    "compiledSourceInventoryMatched": true,
+    "normalAppLaunch": true,
+    "ownedBridgeMatched": true
+  },
+  "live": {
+    "completed": false,
+    "status": "blocked-by-conversation-provider",
+    "attemptRuntime": "b089a6065ae4c99d5542ff15f6de16f147e4fbf68dbc6c6a0b499208d58b4a50",
+    "jevBatchesResponded": 4,
+    "routingStages": [
+      {
+        "stage": "intent-skills",
+        "actualEngine": "jev",
+        "fallbackReason": null
+      },
+      {
+        "stage": "capabilities",
+        "actualEngine": "jev",
+        "fallbackReason": "uncertain"
+      }
+    ],
+    "providerFailure": {
+      "primaryHttpStatus": 429,
+      "fallbackHttpStatus": 400,
+      "fallbackReason": "configured-model-unsupported"
+    },
+    "toolExecutions": 0,
+    "remaining": [
+      "live-capability-answer",
+      "live-code-review",
+      "live-two-skill-workflow",
+      "live-primary-source-research",
+      "live-save-only-follow-up"
+    ]
+  }
+}

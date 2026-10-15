@@ -142,17 +142,18 @@ export class IntentRouter {
       });
       const resolved = contextual.length === 1 ? contextual[0] : undefined;
       const deferred = resolved !== undefined && matchActionableSkill(resolved, matchInput)?.deferred === true;
-      if (resolved !== undefined && !deferred) selected.push(resolved);
+      if (resolved !== undefined && !deferred && !selected.some(skill => skill.name === resolved.name)) selected.push(resolved);
       return { reference, status: candidates.length === 0 ? "unavailable" : deferred ? "deferred" : resolved === undefined ? "ambiguous" : "resolved", candidates: (resolved === undefined ? candidates : [resolved]).slice(0, 8).map((skill) => skill.name) };
     });
     // An unresolved explicit request must not silently select a different skill.
     const primary = route.skillRequests.every((request) => request.status === "resolved") ? selected[0] : undefined;
+    const selectedNames = new Set(primary === undefined ? [] : selected.map(skill => skill.name));
     route.primarySkill = primary;
-    route.supportingSkills = [];
-    route.suggestedSkills = primary === undefined ? [] : [primary];
-    route.suggestedToolsets = dedupe([...NATIVE_INTENT_TOOLSETS[route.nativeIntent], ...(primary === undefined ? [] : routingToolsets(primary))]);
+    route.supportingSkills = primary === undefined ? [] : selected.slice(1);
+    route.suggestedSkills = primary === undefined ? [] : selected;
+    route.suggestedToolsets = dedupe([...NATIVE_INTENT_TOOLSETS[route.nativeIntent], ...route.suggestedSkills.flatMap(routingToolsets)]);
     route.evidence.push(...route.skillRequests.map((request): IntentRouteEvidence => ({ kind: "explicit-skill-reference", source: request.reference, detail: `Explicit skill reference ${request.status}.`, weight: request.status === "resolved" ? 1 : 0 })));
-    route.candidates = route.skillRequests.flatMap((request) => request.candidates.map((name): SkillRouteCandidate => ({ skill: this.#skillRegistry.resolve(name)!, role: name === primary?.name ? "primary" : request.status === "deferred" ? "deferred" : "candidate", score: name === primary?.name ? 1 : 0, confidence: name === primary?.name ? 1 : 0, evidence: route.evidence.filter((item) => item.kind === "explicit-skill-reference") })));
+    route.candidates = route.skillRequests.flatMap((request) => request.candidates.map((name): SkillRouteCandidate => ({ skill: this.#skillRegistry.resolve(name)!, role: name === primary?.name ? "primary" : selectedNames.has(name) ? "supporting" : request.status === "deferred" ? "deferred" : "candidate", score: selectedNames.has(name) ? 1 : 0, confidence: selectedNames.has(name) ? 1 : 0, evidence: route.evidence.filter((item) => item.kind === "explicit-skill-reference") })));
     route.rejectedCandidates = route.candidates.filter((candidate) => candidate.role === "deferred");
     route.confidence = primary === undefined ? 0 : 1;
     route.confirmationRequired = confirmationForSkills(route.suggestedSkills, route.evidence);

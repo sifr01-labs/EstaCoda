@@ -394,13 +394,16 @@ describe.sequential("research workflow acceptance harness", () => {
     scriptConsumed(h);
   });
 
-  it.each(["Use the researcher skill. Use the research-discovery skill.", "Use the researcher skill and use the research-discovery skill."])("requires every explicit skill and accepts owned recovery reads: %s", async (prompt) => {
+  it.each(["Use the researcher skill. Use the research-discovery skill.", "Use the researcher skill and use the research-discovery skill.", "Use both the researcher skill and the research-discovery skill."])("delivers every explicit skill without requiring recovery: %s", async (prompt) => {
     const h = await harness();
-    h.enqueue(answer("Done."));
-    expect((await h.turn(prompt)).finalOutcome?.status).toBe("blocked");
-    h.enqueue(nativeCall("capability_request", { ids: ["skill:research-discovery"], reason: "Second explicitly requested skill" }),
-      nativeCall("skill_read", { name: "research-discovery" }), answer("Both skill instructions loaded."));
+    h.enqueue(answer("Both skill instructions loaded."));
     expect((await h.turn(prompt)).finalOutcome?.status).toBe("completed");
+    for (const name of ["researcher", "research-discovery"]) {
+      const skill = h.runtime.resolveSkill?.(name);
+      if (skill === undefined || !isLoadedSkill(skill)) throw new Error("Bundled skill missing");
+      expect(h.requests[0]?.messages.some(message => typeof message.content === "string" && message.content.includes(selectSkillPromptContent(skill).content))).toBe(true);
+    }
+    expect(h.requests).toHaveLength(1);
     scriptConsumed(h);
   });
 
@@ -575,7 +578,11 @@ describe.sequential("research workflow acceptance harness", () => {
     await expect(readFile(join(h.workspaceRoot, "report.md"), "utf8")).resolves.toBe(savedResult.content);
     expect(h.store.listTasks()).toHaveLength(1);
     scriptConsumed(h);
-    // An accepted research result satisfies prior research, not a newly requested skill.
+    // Prior research cannot satisfy a newly requested skill with missing setup,
+    // even when its bounded instructions are automatically supplied.
+    const additionalSkill = h.runtime.resolveSkill?.("research-discovery");
+    if (additionalSkill === undefined || !isLoadedSkill(additionalSkill)) throw new Error("Bundled skill missing");
+    additionalSkill.requiredEnvironmentVariables = ["FIXTURE_UNCONFIGURED_SKILL_CREDENTIAL"];
     h.enqueue(nativeCall("task_result_read", { task_id: task.id, result_id: final.id }),
       nativeCall("file_write", { path: "report.md", content: savedResult.content, overwrite: true }), nativeCall("file_read", { path: "report.md" }), answer("All done."));
     const newSkill = await h.turn("Save this report to report.md. Use the researcher skill. Use the research-discovery skill.");

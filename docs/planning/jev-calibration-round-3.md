@@ -80,3 +80,9 @@ pnpm run eval:jev --replay /tmp/jev-current-check --corpus assets/evals/jev-rout
 ```
 
 Historical variants are source-dependent transformations. Reproducing the original baseline/candidate comparison requires its recorded base source plus evaluation changes; the promoted production baseline reproduces the accepted candidate. Acceptance cases are now observed diagnostic material and must not be reused as an untouched gate for future tuning.
+
+## Explicit multi-skill follow-through
+
+Explicit English invocations now retain coordinated names (`use both the researcher skill and the system-diagram skill`, or `use the researcher and system-diagram skills`). This is a bounded request requirement, independent of Jev probabilities. The existing four-reference limit, deduplication, session-visible resolution, readiness and confirmation checks remain in force. Quoted instructions, hypotheticals, negation and unrelated mentions do not create requirements. Coordinated workers still inherit an explicit invocation. Regression tests reject every Jev candidate and verify that both requested instruction bodies load. Standard mode and full Jev service fallback also retain all resolved explicit skills and their bounded instruction bodies, with canonical-name deduplication and confirmation computed across the complete selection. An unavailable reference still prevents silently substituting a partial selection.
+
+The packaged research acceptance harness checks fallback attribution through the response info popover before and after restart, matching the current Desktop UX. Routing selection does not establish research quality or successful delivery; those require the packaged and live workflow checks.

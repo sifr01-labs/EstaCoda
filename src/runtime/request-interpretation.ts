@@ -27,8 +27,9 @@ export function splitRequestClauses(clause: string): string[] {
 export function isCapabilityQuestion(text: string): boolean {
   // A concrete target turns "are you able" into a polite request. Access and
   // support questions remain questions even when they name a resource.
+  const targetText = text.replace(/\b(?:in|within)\s+this\s+workspace\b/giu, " ");
   if (/^are\s+you\s+(?:able|capable)\b/iu.test(text) &&
-    /\b(?:this|these|following|attached|please)\b|(?:[\w-]+\.(?:md|ts|tsx|js|py|json|txt))\b/iu.test(text)) return false;
+    /\b(?:this|these|following|attached|please)\b|(?:[\w-]+\.(?:md|ts|tsx|js|py|json|txt))\b/iu.test(targetText)) return false;
   return /^(?:are\s+you\s+(?:able\s+t+o\b|capable\s+of\b)|do\s+you\s+(?:have\s+(?:the\s+)?(?:ability|access)|support\b))|^هل\s+(?:لديك\s+(?:القدرة|إمكانية)|أنت\s+قادر)/iu.test(text);
 }
 
@@ -36,5 +37,5 @@ function isInformationClause(text: string): boolean {
   // "Can you review this?" remains a polite action request. Explicit capability
   // questions are different; a coordinated action or "do it now" still wins.
   if (/\b(?:now|go ahead|do it|make the change)\b|(?:الآن|نفذ ذلك)/iu.test(text)) return false;
-  return isCapabilityQuestion(text) || /^(?:how\s+(?:do|can|would|should)|explain\b|describe\b|what\s+(?:is|are)|tell\s+me\s+how|should\s+i)|^(?:اشرح|صف\s|كيف\s|ما\s+(?:هو|هي))/iu.test(text);
+  return isCapabilityQuestion(text) || /^I(?:\s+am|['’]m)\s+(?:(?:only|just)\s+)?asking\s+about\s+(?:your\s+)?(?:capabilit(?:y|ies)|ability|access)\b/iu.test(text) || /^(?:how\s+(?:do|can|would|should)|explain\b|describe\b|what\s+(?:is|are)|tell\s+me\s+how|should\s+i)|^(?:اشرح|صف\s|كيف\s|ما\s+(?:هو|هي))/iu.test(text);
 }

@@ -154,6 +154,12 @@ export class RuntimeRouter {
       selectedSkill,
       selectedSkillPromptContent,
       selectedSkillInstructions,
+      // Explicit requirements are shared by Standard and Jev fallback. At most
+      // four references with <=8k inline bodies keep this within the 32k bound.
+      ...((intent.requestRequirements?.skillReferences.length ?? 0) > 1 && intent.primarySkill !== undefined ? {
+        supportingSkillPromptContents: (intent.supportingSkills ?? []).filter(isLoadedSkill).map(skill => ({ ...selectSkillPromptContent(skill),
+          readiness: buildSkillReadinessMetadata(skill, resolveSkillSetupContext(skill, this.#skillConfig[skill.name])) }))
+      } : {}),
       selectedSkillResources,
       selectedSkillSetup,
       attachments

@@ -70,6 +70,41 @@ describe('live Jev intent and skill routing', () => {
   expect(result.intent.requestRequirements).toMatchObject({ delegation: { count: 3 }, fileOutput: { path: 'output.md' } });
   expect(result.intent.suggestedSkills.map(s => s.name)).toEqual(['researcher', 'writer']);
  });
+ it.each(['Use both the researcher skill and the system-diagram skill', 'Use the researcher and system-diagram skills'])('loads both explicit instructions even when Jev rejects every candidate: %s', async text => {
+  registry.register(skill('researcher')); registry.register(skill('system-diagram'));
+  const result = await route(text);
+  expect(result.intent.requestRequirements?.skillReferences).toEqual(['researcher', 'system-diagram']);
+  expect(result.intent.suggestedSkills.map(s => s.name)).toEqual(['researcher', 'system-diagram']);
+  expect(result.selectedSkillInstructions).toBe('researcher instructions');
+  expect(result.supportingSkillPromptContents?.map(s => s.content)).toContain('system-diagram instructions');
+ });
+ it.each(['standard', 'service-error'])('preserves both explicit skills and instruction bodies under %s', async mode => {
+  registry.register(skill('researcher', {requiredToolsets: ['web']})); registry.register(skill('system-diagram', {requiredToolsets: ['files']}));
+  if(mode==='standard')await writeFile(resolveProfileStateHome({homeDir:home,profileId:'p'}).configPath,config('standard'));
+  else fetcher.mockImplementation(async()=>new Response('{}',{status:503}));
+  const result=await route('Use both the researcher skill and the system-diagram skill');
+  expect(result.intent.routingDecision?.actualEngine).toBe('standard');
+  expect(result.intent.suggestedSkills.map(s=>s.name)).toEqual(['researcher','system-diagram']);
+  expect(result.intent.suggestedToolsets).toEqual(expect.arrayContaining(['web','files']));
+  expect(result.selectedSkillInstructions).toBe('researcher instructions');
+  expect(result.supportingSkillPromptContents?.map(s=>s.content)).toEqual(['system-diagram instructions']);
+ });
+ it('deduplicates aliases and preserves confirmation in Standard multi-skill selection', async()=>{
+  registry.register(skill('researcher', {routing:{aliases:['survey'],confirmation:'ask'}}));
+  await writeFile(resolveProfileStateHome({homeDir:home,profileId:'p'}).configPath,config('standard'));
+  const result=await route('Use researcher skill and survey skill');
+  expect(result.intent.suggestedSkills.map(s=>s.name)).toEqual(['researcher']);
+  expect(result.intent.confirmationRequired).toBe(true);
+  expect(result.supportingSkillPromptContents).toEqual([]);
+ });
+ it('does not deliver a partial explicit skill list when the second reference is unavailable', async()=>{
+  registry.register(skill('researcher'));
+  fetcher.mockImplementation(async()=>new Response('{}',{status:503}));
+  const result=await route('Use both the researcher skill and the absent skill');
+  expect(result.intent.skillRequests?.map(r=>r.status)).toEqual(['resolved','unavailable']);
+  expect(result.selectedSkillInstructions).toBeUndefined();
+  expect(result.supportingSkillPromptContents).toBeUndefined();
+ });
  it('never substitutes another skill for an unavailable or ambiguous explicit reference', async () => {
   registry.register(skill('other')); chosen = ['other'];
   const unavailable = await route('Use the absent skill.');
