@@ -809,3 +809,27 @@ describe("supplied content and prohibited external reads", () => {
     expect(deriveExecutionCompletionFloor({ userText })).toBe("read");
   });
 });
+
+
+describe("supplied content and hypothetical execution boundaries", () => {
+  const capabilities = [{ tool: "python.probe", kind: "read" as const }, { tool: "file.read", kind: "read" as const }];
+  it.each([
+    "Desktop acceptance check for the updated build: review only this supplied Python: def head(xs): return xs[0]. What happens for an empty list, and what would you change? Do not inspect files, run commands, or browse. Keep the answer under 90 words.",
+    "Review only this supplied Python: def head(xs): return xs[0]. What happens for an empty list, and what would you change? Do not inspect files, run commands, or browse. Keep the answer under 90 words.",
+    "If I later asked you to publish a website, what information would you need? This is a planning question only. Do not create files, run commands, browse, or publish anything. Keep it under 100 words."
+  ])("requires no execution for %s", userText => {
+    const completionFloor = deriveExecutionCompletionFloor({userText,capabilities});
+    expect(completionFloor).toBe("none");
+    expect(deriveExecutionFinalOutcome({completionFloor,toolExecutions:[],executionReceipts:[]}).status).toBe("completed");
+  });
+  it.each([
+    ["Review this supplied Python: print(1). Then read actual.py.", "read"],
+    ["If I later asked you to publish a website, what would you need? Now read config.json.", "read"],
+    ["Review this supplied Python: print(1). Save your review to review.md.", "mutation_with_verification"],
+    ["Review this supplied Python file in the workspace.", "read"],
+    ["Update config.json to review this supplied Python: print(1).", "mutation"],
+    ["افترض أننا ننشر موقعاً. ثم اقرأ config.json.", "read"]
+  ])("retains actual execution requirements for %s", (userText, floor) => {
+    expect(deriveExecutionCompletionFloor({userText,capabilities})).toBe(floor);
+  });
+});

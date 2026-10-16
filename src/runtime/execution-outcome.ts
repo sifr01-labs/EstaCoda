@@ -14,7 +14,7 @@ import type { ProviderExecutionResult } from "../providers/provider-executor.js"
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { isolateLtr } from "../ui/bidi.js";
 import { affirmativeRequestSegments } from "./request-action-segments.js";
-import { interpretRequest } from "./request-interpretation.js";
+import { interpretRequest, isInformationClause, splitRequestClauses } from "./request-interpretation.js";
 import type { RequestInterpretation, RequestRequirements } from "../contracts/intent.js";
 import { deriveRequestRequirements } from "./request-requirements.js";
 import { fileOutputEvidence } from "./file-output-evidence.js";
@@ -46,12 +46,14 @@ export function deriveExecutionCompletionFloor(input: {
   // Scope negation before punctuation/contractions are flattened: "and add"
   // inside "do not modify ... and add" is not a requested mutation.
   const affirmative = affirmativeRequestSegments(input.userText.normalize("NFKC")
-    .replace(/```[\s\S]*?(?:```|$)|~~~[\s\S]*?(?:~~~|$)|^\s*>.*$/gmu, " "));
+    .replace(/```[\s\S]*?(?:```|$)|~~~[\s\S]*?(?:~~~|$)|^\s*>.*$/gmu, " "))
+    .flatMap(splitRequestClauses).filter(segment => !isInformationClause(segment.trim()));
   const text = affirmative.map(normalizeExpectationText).join(" ").trim();
   // Preserve comma boundaries only after negation and quoted examples are scoped.
   // Flattening them loses the requested edit in "read the file, update it".
   const mutationText = affirmativeRequestSegments(input.userText.normalize("NFKC").replace(/`[^`\n]*`/gu, " "))
-    .map((segment) => segment.split(",").map(normalizeExpectationText).join(", ")).join(" ");
+    .map(segment => splitRequestClauses(segment).filter(clause => !isInformationClause(clause.trim()))
+      .map(clause => clause.split(",").map(normalizeExpectationText).join(", ")).join(", ")).join(" ");
   if (text.length === 0 || (input.requestInterpretation ?? interpretRequest(input.userText)) === "information") return "none";
 
   const capabilities = input.capabilities ?? [];

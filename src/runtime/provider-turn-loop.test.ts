@@ -362,6 +362,7 @@ async function runBasicProviderTurn(
   callbacks: {
     validateCompletion?: Parameters<ProviderTurnLoop["run"]>[0]["validateCompletion"];
     diagnosticOnly?: boolean;
+    research?: boolean;
     onEvent?: (event: RuntimeEvent) => void;
     onDelta?: (text: string) => void;
     onSegmentBreak?: (reason?: string) => void | Promise<void>;
@@ -390,7 +391,8 @@ async function runBasicProviderTurn(
     selectedSkillInstructions: undefined,
     selectedSkillResources: undefined,
     selectedSkillSetup: undefined,
-    intent: { labels: ["general"], confidence: 1, nativeIntent: "general", evidence: [], suggestedToolsets: [], suggestedSkills: [], confirmationRequired: false, rationale: "" },
+    intent: { labels: ["general"], confidence: 1, nativeIntent: "general", evidence: [], suggestedToolsets: [], suggestedSkills: [], confirmationRequired: false, rationale: "",
+      ...(callbacks.research ? {requestRequirements:{skillReferences:[],issues:[],research:{domain:"general" as const,fresh:false}}} : {}) },
     securityDecision: "allow",
     toolExecutions: callbacks.toolExecutions ?? [],
     context: callbacks.context,
@@ -6880,4 +6882,60 @@ it("selects and admits a relevant late tool from the same bounded catalog", asyn
   expect(selection.initialTools.map((schema) => schema.function.name)).toEqual(["test_tool"]);
   expect(harness.executeTool).toHaveBeenCalledOnce();
   expect(toolPlans[0]?.status).toBe("executed");
+});
+
+
+describe("research failure finalization", () => {
+  it.each([
+    "summary", "hallucinated-tool", "unobserved-citation", "iteration-limit",
+    "denied", "non-research", "deadline", "cancelled", "provider-failed"
+  ])("stops reads and bounds finalization: %s", async mode => {
+    const failed: ToolExecutionRecord = {
+      tool: { ...testTool, name: "web.extract", riskClass: "read-only-network", toolsets: ["web"] },
+      input: { url: "https://example.com/source" },
+      riskClass: "read-only-network",
+      decision: mode === "denied" ? "deny" : "allow",
+      result: { ok: false, content: "fetch failed", metadata: { reason: "fetch-failed" } }
+    };
+    const start = Date.now();
+    const controller = new AbortController();
+    const clock = vi.spyOn(Date, "now");
+    const harness = await createPostToolNudgeHarness({
+      maxProviderIterations: mode === "iteration-limit" ? 1 : 4,
+      onExecutePlans: () => {
+        if (mode === "deadline") clock.mockReturnValue(start + 20000);
+        if (mode === "cancelled") controller.abort();
+      },
+      responses: [
+        providerExecution("", [providerToolCall("a"), providerToolCall("b"), providerToolCall("c")]),
+        {
+          ...providerExecution(
+            "Only search snippets were available; page verification remains incomplete." +
+              (mode === "unobserved-citation" ? " See https://example.com/unread." : ""),
+            mode === "hallucinated-tool" ? [providerToolCall("unexpected-write")] : []
+          ),
+          ok: mode !== "provider-failed"
+        }
+      ],
+      toolSteps: [{ executions: [{ ...failed }, { ...failed }, { ...failed }] }]
+    });
+    let result: Awaited<ReturnType<typeof runBasicProviderTurn>>;
+    try {
+      result = await runBasicProviderTurn(harness.loop, { research: mode !== "non-research", signal: controller.signal });
+    } finally {
+      clock.mockRestore();
+    }
+    const canSummarize = ["summary", "hallucinated-tool", "unobserved-citation", "provider-failed"].includes(mode);
+    expect(harness.completeSpy).toHaveBeenCalledTimes(canSummarize ? 2 : 1);
+    expect(harness.executePlans).toHaveBeenCalledTimes(1);
+    expect(result.terminationCause).toBe("budget_exhausted");
+    expect(result.toolExecutions).toHaveLength(3);
+    if (canSummarize) expect(harness.completeSpy.mock.calls[1]![0].tools ?? []).toEqual([]);
+    if (mode === "summary") expect(result.researchRecoverySummary).toContain("Only search snippets");
+    if (["hallucinated-tool", "unobserved-citation", "provider-failed"].includes(mode)) {
+      expect(result.researchRecoverySummary).not.toContain("Only search snippets");
+    }
+    if (mode === "iteration-limit") expect(result.researchRecoverySummary).toContain("Retry with an alternative");
+    if (["denied", "non-research"].includes(mode)) expect(result.researchRecoverySummary).toBeUndefined();
+  });
 });

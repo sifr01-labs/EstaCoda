@@ -1,3 +1,4 @@
+import { createWebTools } from "../tools/web-tools.js";
 import { ProviderAccountingError } from "../providers/provider-executor.js";
 import { mkdtempSync, readdirSync, readFileSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -932,6 +933,39 @@ describe("AgentStepExecutor", () => {
     const result=await executor.execute({task:graph.task,step,attempt:attempt({...graph,steps:[step]}),signal:new AbortController().signal,heartbeat:vi.fn(),checkpoint:vi.fn()});
     expect(result.outcome).toBe(["alternative", "disclosed", "missing-table", "search-recovered", "dns-unavailable", "fetch-failed", "provider-failed"].includes(mode)?"succeeded":"failed");
     if(result.outcome==="succeeded")expect(result.results?.[0]?.content).toContain("Source access limitation: 1");
+  });
+
+  it.each(["recovered", "offset", "unrecovered", "different-source", "denied", "empty"])("handles bounded passage recovery: %s", async mode => {
+    const graph = makeGraph(), base = graph.steps[0]!;
+    const url = "https://observed.example/report";
+    const step: TaskStep = { ...base, objective: "Research validator behavior", executor: { ...base.executor, role: "worker",
+      research: { scope: "validator behavior", requireLiveSources: true, requireRepositoryEvidence: false },
+      requestContract: { version: 1, objective: "Research validator behavior", requirements: { skillReferences: [], issues: [], research: { fresh: true, domain: "general" } } } } };
+    const extract = createWebTools({ enableNetwork: true, resolveHostname: async () => ["93.184.216.34"],
+      fetch: async () => ({ ok: true, status: 200, statusText: "OK", headers: { get: () => "text/plain" },
+        text: async () => "If-None-Match uses weak comparison for cache validation." }) }).find(t => t.name === "web.extract")!;
+    const accepted = mode === "recovered" || mode === "offset";
+    const firstInput = mode === "offset" ? { url, startChar: 99999 } : { url, query: "A sender MAY generate a weak" };
+    const secondInput = { url: mode === "different-source" ? "https://other.example/report" : url, query: mode === "unrecovered" ? "missing phrase" : "uses weak comparison" };
+    const calls: import("../tools/tool-executor.js").ToolExecutionRecord[] = [
+      successfulEvidenceExecution("web.search", "read-only-network", ["web", "research"], { query: "validator behavior" }, "Observed", {provider: "ddgs", results: [{ url, snippet: "If-None-Match uses weak comparison." }]}),
+      ...await Promise.all([firstInput,secondInput].map(async input => ({tool:extract,input,decision:"allow" as const,riskClass:"read-only-network" as const,result:await extract.run(input)})))
+    ];
+    if (mode === "denied") calls[1]!.decision = "deny";
+    if (mode === "empty") calls[2]!.result!.metadata = { ...calls[2]!.result!.metadata, content: "" };
+    const text = `If-None-Match uses weak comparison for cache validation. Source: ${url}. Evidence: retrieved source text; not an interoperability test.`;
+    const childFactory:ChildAgentLoopFactory={createChild:vi.fn(async input=>{
+      await sessionDb.createSession({id:"regression-worker",profileId:input.profileId,parentSessionId:input.parentSessionId});
+      return childRuntime(async request=>{
+        const feedback=request.stepCompletion?.validate?.(text,calls);
+        expect(feedback === undefined).toBe(accepted);
+        return response({text,toolExecutions:calls});
+      },async()=>undefined,{sessionId:"regression-worker",trajectoryId:"regression-trajectory"},{tools:calls.map(call=>call.tool.name),toolsets:["web","research"]});
+    })};
+    const executor=new AgentStepExecutor({childFactory,sessionDb,taskStore:store,hostWorkspace:graph.task.workspace,isWorkspaceTrusted:()=>true,parentVisibleTools:()=>tools(),approvalService:new TaskApprovalService({store}),securityPolicy:capabilityFirstDefaults});
+    const result=await executor.execute({task:graph.task,step,attempt:attempt({...graph,steps:[step]}),signal:new AbortController().signal,heartbeat:vi.fn(),checkpoint:vi.fn()});
+
+    expect(result.outcome).toBe(accepted ? "succeeded" : "failed");
   });
 
   it("accepts an exact read retry that succeeds later in the same Attempt", async () => {

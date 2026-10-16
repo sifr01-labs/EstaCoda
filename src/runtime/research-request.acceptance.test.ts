@@ -46,6 +46,24 @@ function schedulerFor(h: Harness, taskId: string) {
 }
 
 describe.sequential("research workflow acceptance harness", () => {
+  it("retains a partial explanation and honest file status after repeated source failures", async () => {
+    const h = await harness({sourceAccessFailures:true});
+    h.enqueue(nativeCall("web_search",{query:"recycling methods"}));
+    for(let i=0;i<5;i++) h.enqueue(nativeCall("web_extract",{url:SOURCE_URL,refresh:true}));
+    h.enqueue(request => {
+      expect(request.tools ?? []).toEqual([]);
+      return answer(`Only a search snippet was available from ${SOURCE_URL}. Page access failed; the comparison remains unverified. Provide an accessible source to continue.`)(request);
+    });
+    const result=await h.turn("Research recycling methods and save a cited report to partial.md. Verify the file.");
+    expect(result.finalOutcome).toMatchObject({status:"partially_completed",terminationCause:"budget_exhausted"});
+    expect(result.text).toContain("Only a search snippet");
+    expect(result.text).toContain("File output is incomplete");
+    expect(result.text).not.toContain("Saved and verified");
+    expect(result.toolExecutions.some(call=>call.tool.name==='file.write')).toBe(false);
+    await expect(readFile(join(h.workspaceRoot,"partial.md"))).rejects.toMatchObject({code:"ENOENT"});
+    scriptConsumed(h);
+  });
+
   it.each([
     { topic: "latest developments in agentic harnesses", depth: "deep research", extract: true, blocked: false },
     { topic: "current battery recycling methods", depth: "deep research", extract: true, blocked: true },

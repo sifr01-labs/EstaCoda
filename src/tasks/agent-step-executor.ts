@@ -923,7 +923,7 @@ function safeDiagnosticOutput(
 
 function hasUnrecoveredToolFailure(step: TaskStep, executions: readonly ToolExecutionRecord[]): boolean {
   return executions.some((execution, index) => execution.result?.ok === false &&
-    !isRecoveredRead(execution, index, executions) && !isRecoveredDeliveryValidation(step, execution, index, executions) && !isAlternativeResearchRead(step, execution, executions));
+    !isRecoveredRead(execution, index, executions) && !isRecoveredPassageLookup(execution, index, executions) && !isRecoveredDeliveryValidation(step, execution, index, executions) && !isAlternativeResearchRead(step, execution, executions));
 }
 
 /** A pre-write validation error has no uncertain effect. A later authorized
@@ -954,6 +954,20 @@ function isAlternativeResearchRead(step: TaskStep, execution: ToolExecutionRecor
   return (["url-resolution-failed", "fetch-failed", "provider-failed"].includes(String(execution.result?.metadata?.reason)) ||
       typeof status === "number" && [403, 404, 406, 410, 429, 500, 502, 503, 504].includes(status)) &&
     typeof url === "string" && !collectHttpUrls([step.objective, step.executor.research.scope]).includes(normalizedHttpUrl(url) ?? url);
+}
+
+/** A literal lookup miss is navigation feedback, not unavailable source text.
+ * Only a later authorized, nonempty read of that same source repairs it. */
+function isRecoveredPassageLookup(failed: ToolExecutionRecord, index: number, executions: readonly ToolExecutionRecord[]): boolean {
+  if (failed.tool.name !== "web.extract" || failed.decision !== "allow" || failed.riskClass !== "read-only-network" ||
+      !["query-not-found", "offset-out-of-range"].includes(String(failed.result?.metadata?.reason)) ||
+      (typeof failed.result?.metadata?.status === "number" && (failed.result.metadata.status < 200 || failed.result.metadata.status >= 400)) ||
+      typeof failed.input?.url !== "string") return false;
+  const url = normalizedHttpUrl(failed.input.url);
+  return url !== undefined && executions.slice(index + 1).some(next => next.tool.name === "web.extract" &&
+    next.decision === "allow" && next.riskClass === "read-only-network" && next.result?.ok === true &&
+    typeof next.input?.url === "string" && normalizedHttpUrl(next.input.url) === url &&
+    typeof next.result.metadata?.content === "string" && next.result.metadata.content.trim().length > 0);
 }
 
 function isRecoveredRead(

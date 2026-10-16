@@ -1492,6 +1492,11 @@ export class AgentLoop {
           (intent.requestRequirements?.fileOutput === undefined ? "" : " The requested report has not been written or verified in this turn.");
       }
     }
+    if (providerLoop.researchRecoverySummary !== undefined) {
+      // Keep the verified incomplete/file status while retaining useful evidence.
+      response.text = `${providerLoop.researchRecoverySummary}\n\n${response.text}`;
+      if (response.providerExecution !== undefined) response.providerExecution = suppressProviderGeneratedText(response.providerExecution);
+    }
     if (finalizationNote) response.text += `\n\n${finalizationNote}`;
     await this.#skillLearningManager?.observeTurn({
       profileId: this.#profileId,

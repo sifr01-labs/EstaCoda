@@ -33,9 +33,14 @@ export function isCapabilityQuestion(text: string): boolean {
   return /^(?:are\s+you\s+(?:able\s+t+o\b|capable\s+of\b)|do\s+you\s+(?:have\s+(?:the\s+)?(?:ability|access)|support\b))|^هل\s+(?:لديك\s+(?:القدرة|إمكانية)|أنت\s+قادر)/iu.test(text);
 }
 
-function isInformationClause(text: string): boolean {
+export function isInformationClause(text: string): boolean {
   // "Can you review this?" remains a polite action request. Explicit capability
   // questions are different; a coordinated action or "do it now" still wins.
   if (/\b(?:now|go ahead|do it|make the change)\b|(?:الآن|نفذ ذلك)/iu.test(text)) return false;
-  return isCapabilityQuestion(text) || /^I(?:\s+am|['’]m)\s+(?:(?:only|just)\s+)?asking\s+about\s+(?:your\s+)?(?:capabilit(?:y|ies)|ability|access)\b/iu.test(text) || /^(?:how\s+(?:do|can|would|should)|explain\b|describe\b|what\s+(?:is|are)|tell\s+me\s+how|should\s+i)|^(?:اشرح|صف\s|كيف\s|ما\s+(?:هو|هي))/iu.test(text);
+  // Supplied snippets and hypothetical future actions do not require access to
+  // a similarly named runtime tool. Coordinated real actions are split first.
+  const supplied = /\b(?:review|explain|analy[sz]e)\s+(?:only\s+)?(?:this|the|following)\s+(?:supplied|pasted|inline)\s+(?:code|SQL|Python|JavaScript|TypeScript|snippet)\s*:/iu.exec(text);
+  if (supplied && !/\b(?:read|inspect|run|execute|update|write|save|delete|create|modify|fix|send|publish)\b/iu.test(text.slice(0, supplied.index))) return true;
+  if (/^(?:if\s+(?:I|we|you)\s+(?:(?:later|eventually)\s+)?(?:asked|wanted|were|could)|what\s+if|hypothetically|ماذا لو|افترض)(?=\s|[,:؟?]|$)/iu.test(text)) return true;
+  return isCapabilityQuestion(text) || /^I(?:\s+am|['’]m)\s+(?:(?:only|just)\s+)?asking\s+about\s+(?:your\s+)?(?:capabilit(?:y|ies)|ability|access)\b/iu.test(text) || /^(?:how\s+(?:do|can|would|should)|explain\b|describe\b|what\s+(?:is|are|happens|would|should)|tell\s+me\s+how|should\s+i)|^(?:اشرح|صف\s|كيف\s|ما\s+(?:هو|هي))/iu.test(text);
 }

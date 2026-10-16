@@ -14,6 +14,8 @@ it.each([
  "Do you have the ability to research and save reports?",
  "هل لديك القدرة على مراجعة الكود؟",
  "Explain how to review code.",
+ "If I later asked you to publish a website, what would you need?",
+ "ماذا لو طلبت منك نشر موقع؟",
  "Explain how to read and write files.",
 ])("finishes a capability explanation without manufactured execution: %s", userText => {
  const route = new IntentRouter({skillRegistry: new SkillRegistry()}).route(userText);

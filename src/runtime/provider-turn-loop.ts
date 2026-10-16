@@ -1,5 +1,5 @@
 import { redactSensitiveText } from "../utils/redaction.js";
-import { RESEARCH_EVIDENCE_INSTRUCTION } from "../tasks/research-result-evidence.js";
+import { groundForegroundResearch, researchCitationUrls, RESEARCH_EVIDENCE_INSTRUCTION } from "../tasks/research-result-evidence.js";
 import { projectCapabilityState, type RuntimeCapabilityState } from "./capability-state.js";
 import { requiredRequestTools, requiredSkillsDelivered } from "./request-requirements.js";
 import { MAX_CAPABILITY_ADDITIONS, type SessionCapabilityRecovery } from "../tools/capability-tools.js";
@@ -132,6 +132,7 @@ export type ProviderTurnLoopRequestDefaults = {
 export type ProviderTurnLoopResult = {
   completionValidationFailure?: string;
   completionCandidate?: string;
+  researchRecoverySummary?: string;
   deliveredSkillNames?: string[];
   providerExecution: ProviderExecutionResult | undefined;
   toolExecutions: ToolExecutionRecord[];
@@ -335,6 +336,7 @@ export class ProviderTurnLoop {
     }
     const providerToolExecutions: ToolExecutionRecord[] = [];
     const deliveredSkillNames = new Set<string>();
+    let researchRecoverySummary: string | undefined;
     let effectiveProviderExecution: ProviderExecutionResult | undefined;
     let previousProviderExecution: ProviderExecutionResult | undefined;
     let iterations = 0;
@@ -1145,6 +1147,35 @@ export class ProviderTurnLoop {
             "provider-iteration"
           );
         }
+        // Stop network work at the existing failure limit, but preserve an honest
+        // partial explanation. This single tool-free continuation uses remaining
+        // provider/time limits and can never dispatch even hallucinated calls.
+        if (repeatedFailureBudgetExceeded !== undefined &&
+          ["web.search", "web.extract"].includes(repeatedFailureBudgetExceeded.tool) &&
+          input.intent.requestRequirements?.research !== undefined &&
+          [...input.toolExecutions, ...providerToolExecutions].every(call => call.decision === "allow")) {
+          researchRecoverySummary = `Research stopped after ${repeatedFailureBudgetExceeded.count} repeated source-read failures. The requested research is incomplete. Available observations remain in this conversation's activity. Retry with an alternative accessible source or provide the missing source text.`;
+          if (!input.signal?.aborted && iteration + consumedProviderIterations < this.#budgets.maxProviderIterations &&
+            Date.now() - loopStartedAt < this.#budgets.maxProviderWallClockMs - this.#budgets.finalizationReserveMs) {
+            const summary = await this.#continueProviderAfterTools({
+              ...input, foregroundTurnId, providerToolCallNamespace, providerTools: [],
+              toolExecutions: [...input.toolExecutions, ...providerToolExecutions], toolFeedbackLedger,
+              providerExecution: execution, iteration: iteration + consumedProviderIterations, loopStartedAt,
+              onDelta: undefined,
+              completionFeedback: "Network research has stopped at the repeated-failure limit. No further tools may run. Give a concise partial-results explanation using only observed evidence. Distinguish search snippets from retrieved page text, describe the actual failures without guessing their cause, and identify what remains unverified and an actionable next step. Do not claim research completion or that a requested file was saved."
+            });
+            if (summary !== undefined) {
+              iterations += providerIterationCost(summary);
+              effectiveProviderExecution = mergeProviderExecutions(effectiveProviderExecution, summary);
+              const summaryText = summary.response?.content.trim() ?? "";
+              const citationsGrounded = researchCitationUrls(summaryText).length === 0 ||
+                groundForegroundResearch(summaryText, [...input.toolExecutions, ...providerToolExecutions], new Date()).failure === undefined;
+              if (summary.ok && summary.toolCalls.length === 0 && summaryText && citationsGrounded) {
+                researchRecoverySummary += "\n\nPartial findings (not a completed report):\n" + redactSensitiveText(summaryText).slice(0, 6000);
+              }
+            }
+          }
+        }
         break;
       }
 
@@ -1161,6 +1192,7 @@ export class ProviderTurnLoop {
     return {
       completionValidationFailure,
       completionCandidate,
+      researchRecoverySummary,
       providerExecution: effectiveProviderExecution,
       deliveredSkillNames: [...deliveredSkillNames],
       toolExecutions: providerToolExecutions,

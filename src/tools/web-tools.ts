@@ -3330,9 +3330,9 @@ async function extractWithFetch(input: {
       ].filter((line) => line !== undefined).join("\n"),
       metadata: {
         ...result,
-        ...(extractionFailure === undefined ? {} : { reason: extractionFailure }),
         redirectCount,
         ...view,
+        ...(extractionFailure === undefined ? {} : { reason: extractionFailure }),
         publicReadReusable: extractionFailure === undefined && response.ok && redirectCount === 0
           && !response.headers.get("set-cookie") && !response.headers.get("vary")
           && !/private|no-store|no-cache|must-revalidate/i.test(response.headers.get("cache-control") ?? "")

@@ -46,7 +46,7 @@ export function webExtractWindow(text: string, limit: number, options: WebExtrac
     ? windows.map(window => `[Characters ${window.start}-${window.end}]\n${window.text}`).join("\n\n")
     : windows[0]?.text ?? "";
   return {
-    content, notice, guidance, truncated, sourceTruncated, retrievedTextChars: bounded.length,
+    content, notice, ...(notice === undefined ? {} : { reason: query ? "query-not-found" : "offset-out-of-range" }), guidance, truncated, sourceTruncated, retrievedTextChars: bounded.length,
     windows: windows.map(({ start, end }) => ({ start, end })),
     ...(nextStartChar === undefined ? {} : { nextStartChar })
   };

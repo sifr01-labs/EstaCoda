@@ -167,3 +167,11 @@ argument finds a URL and is not a section-search instruction.
 Passage and query options are part of the turn-local reuse key. Different
 windows cannot reuse a cached prefix as if it contained the requested section.
 URL, redirect, authentication, workspace, and approval policies still apply.
+
+### Recovery and incomplete research
+
+A literal passage lookup with no match (or an offset beyond retrieved text) is recorded as navigation feedback. A later authorized, nonempty extraction of the same source repairs that lookup for worker acceptance; a different source, empty read, or denied operation does not. Existing source-grounding checks still apply.
+
+The repeated-tool-failure limit still stops network research. When the stopped tool is web search/extraction and no tool action was denied, the runtime can make one tool-free continuation within the remaining iteration and wall-clock limits to summarize observed partial findings and next steps. It does not dispatch further tools, even if the provider requests them. If no continuation is possible, a deterministic explanation remains. The turn stays incomplete; missing file writes/readbacks remain explicitly reported, and this summary is not a verified report.
+
+Completion checks exclude explicitly supplied code explanations and hypothetical future-action clauses while preserving obligations for separately requested reads, edits and saves. Capability-name matches alone do not turn those informational clauses into an execution request.
