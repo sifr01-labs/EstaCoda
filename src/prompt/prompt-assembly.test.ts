@@ -330,6 +330,14 @@ describe("assembleProviderPrompt", () => {
     expect(rendered).not.toContain("skills-first");
   });
 
+  it("scopes the preliminary security assessment without authorizing denied tools", () => {
+    const rendered = renderMessages(assembleProviderPrompt(basePromptInput({ securityDecision: "deny" })).messages);
+    expect(rendered).toContain("Initial routing security assessment: deny");
+    expect(rendered).toContain("Each tool call is authorized separately");
+    expect(rendered).toContain("obey each actual tool denial and never bypass it");
+    expect(rendered).not.toContain("Security decision: deny");
+  });
+
   it("uses direct-response guidance instead of exposing no-skill fallback copy", () => {
     const prompt = assembleProviderPrompt({
       model,

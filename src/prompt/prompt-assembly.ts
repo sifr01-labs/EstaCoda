@@ -695,7 +695,7 @@ function buildBaseLayers(
         ...(input.intent.skillRequests === undefined ? [] : [
           `Explicit skill resolution: ${JSON.stringify(input.intent.skillRequests)}. Ask for clarification for ambiguous references; report unavailable/deferred references rather than claiming the skill was used.`
         ]),
-        `Security decision: ${input.securityDecision}`
+        `Initial routing security assessment: ${input.securityDecision}. This assesses the proposed routing posture, not every available action. Each tool call is authorized separately against the active policy and Task authority. Use permitted tools for the request; obey each actual tool denial and never bypass it.`
       ].join("\n")
     }),
     layer({

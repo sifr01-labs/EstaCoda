@@ -37,6 +37,10 @@ export function isInformationClause(text: string): boolean {
   // "Can you review this?" remains a polite action request. Explicit capability
   // questions are different; a coordinated action or "do it now" still wins.
   if (/\b(?:now|go ahead|do it|make the change)\b|(?:الآن|نفذ ذلك)/iu.test(text)) return false;
+  // Drafting supplied prose is an in-conversation operation. A filename, URL,
+  // or coordinated execution request keeps the normal action interpretation.
+  const prose = /^(?:(?:please|can you|could you)\s+)?(?:rewrite|rephrase|summarize|translate)\s+(?:these|this|the following|supplied|pasted)\s+(?:facts|text|notes|sentence|paragraph|copy)\b|^(?:من فضلك\s+)?اكتب\s+مسودة\s/iu.test(text);
+  if (prose && !/(?:https?:\/\/|[\w-]+\.(?:md|txt|json|csv|tsv|log|[jt]sx?|py)\b)|\b(?:save|send|publish|upload|execute|inspect|browse)\b|(?:احفظ|أرسل|انشر|افحص)/iu.test(text)) return true;
   // Supplied snippets and hypothetical future actions do not require access to
   // a similarly named runtime tool. Coordinated real actions are split first.
   const supplied = /\b(?:review|explain|analy[sz]e)\s+(?:only\s+)?(?:this|the|following)\s+(?:supplied|pasted|inline)\s+(?:code|SQL|Python|JavaScript|TypeScript|snippet)\s*:/iu.exec(text);

@@ -76,6 +76,13 @@ describe("ToolLoopProgressGuard", () => {
     }
   });
 
+  it("credits new extracted evidence during completion repair but still stops repeated reads", () => {
+    const guard = new ToolLoopProgressGuard({ research: true, noProgressNudgeIteration: 2, maxNoProgressIterations: 3 });
+    const read = execution({ tool: { ...execution().tool, name: "web.extract" }, result: { ok: true, content: "Observed primary passage", metadata: { url: "https://example.org/source", content: "Observed primary passage" } } });
+    expect(guard.observe([read], true).materialProgress).toBe(true);
+    for (let i = 0; i < 3; i++) expect(guard.observe([read], true)).toMatchObject({ materialProgress: false, shouldStop: i === 2 });
+  });
+
   it("does not credit reused web observations even when feedback labels change", async () => {
     const guard = new ToolLoopProgressGuard({ noProgressNudgeIteration: 3, maxNoProgressIterations: 6 });
     const read = execution({ tool: { ...execution().tool, name: "web.extract" }, executionEffect: { kind: "read" } });

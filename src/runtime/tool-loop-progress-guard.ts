@@ -116,7 +116,9 @@ export class ToolLoopProgressGuard {
         continue;
       }
 
-      if (unchangedCompletionRepair && (execution.tool.name === "web.search" || execution.tool.name === "web.extract")) continue;
+      // New page text can repair a citation-free candidate. Merely discovering
+      // more URLs cannot; identical pages and reused reads still do not count.
+      if (unchangedCompletionRepair && execution.tool.name === "web.search") continue;
       if (this.#research) {
         const sources = researchEvidence(execution);
         const newEvidence = sources.some((source) => !this.#seenResearchSources.has(source));

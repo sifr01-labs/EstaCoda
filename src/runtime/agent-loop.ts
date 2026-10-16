@@ -1449,6 +1449,7 @@ export class AgentLoop {
         this.#ui?.language === "ar" ? "ar" : "en"
       ), artifacts);
     }
+    const responseBeforeEvidenceValidation = response.text;
     if (delegatedAnswerAcknowledgement === undefined) {
       const correctedCapability = correctContradictedCapabilityClaim(response.text, toolExecutions, this.#providerToolSchemaCatalog);
       if (correctedCapability !== undefined) {
@@ -1494,7 +1495,9 @@ export class AgentLoop {
     }
     if (providerLoop.researchRecoverySummary !== undefined) {
       // Keep the verified incomplete/file status while retaining useful evidence.
-      response.text = `${providerLoop.researchRecoverySummary}\n\n${response.text}`;
+      response.text = response.text === responseBeforeEvidenceValidation && !needsDeterministicReceipt
+        ? providerLoop.researchRecoverySummary
+        : `${providerLoop.researchRecoverySummary}\n\n${response.text}`;
       if (response.providerExecution !== undefined) response.providerExecution = suppressProviderGeneratedText(response.providerExecution);
     }
     if (finalizationNote) response.text += `\n\n${finalizationNote}`;

@@ -6886,6 +6886,36 @@ it("selects and admits a relevant late tool from the same bounded catalog", asyn
 
 
 describe("research failure finalization", () => {
+  it("does not mislabel later stalled file delivery as network recovery", async () => {
+    const read: ToolExecutionRecord = { tool: { ...testTool, name: "web.extract", riskClass: "read-only-network", toolsets: ["web"] },
+      riskClass: "read-only-network", decision: "allow", result: { ok: true, content: "Primary evidence", metadata: { url: "https://example.org/source", content: "Primary evidence" } } };
+    const failed: ToolExecutionRecord = { tool: { ...testTool, name: "file.write" }, riskClass: "workspace-write", decision: "allow", result: { ok: false, content: "Write failed" } };
+    const harness = await createPostToolNudgeHarness({ maxProviderIterations: 6, maxNoProgressIterations: 2, noProgressNudgeIteration: 1,
+      responses: [providerExecution("", [providerToolCall("read")]), providerExecution("", [providerToolCall("write")]), providerExecution("", [providerToolCall("retry-write")])],
+      toolSteps: [{ executions: [read] }, { executions: [failed] }, { executions: [failed] }]
+    });
+    const result = await runBasicProviderTurn(harness.loop, { research: true });
+    expect(result.terminationCause).toBe("tool_loop_no_progress");
+    expect(result.researchRecoverySummary).toBeUndefined();
+    expect(harness.completeSpy).toHaveBeenCalledTimes(3);
+  });
+
+  it.each(["tool", "reasoning"])("finalizes research after no progress in the %s branch", async branch => {
+    const failed: ToolExecutionRecord = { tool: { ...testTool, name: "web.extract", riskClass: "read-only-network", toolsets: ["web"] },
+      input: { url: "https://example.org/missing" }, riskClass: "read-only-network", decision: "allow", result: { ok: false, content: "HTTP 404" } };
+    const harness = await createPostToolNudgeHarness({ maxProviderIterations: 5, maxNoProgressIterations: 2, noProgressNudgeIteration: 1,
+      responses: [providerExecution("", [providerToolCall("read")]),
+        branch === "reasoning" ? reasoningOnlyExecution({ reasoning: "The sources failed; consider how to explain this." }) : providerExecution("", [providerToolCall("read-again")]),
+        providerExecution("The supplied page returned HTTP 404, so I cannot verify the policy. Please provide an accessible reference.")],
+      toolSteps: [{ executions: [failed] }, ...(branch === "tool" ? [{ executions: [failed] }] : [])]
+    });
+    const result = await runBasicProviderTurn(harness.loop, { research: true });
+    expect(result.terminationCause).toBe("tool_loop_no_progress");
+    expect(result.researchRecoverySummary).toContain("cannot verify the policy");
+    expect(result.toolExecutions).toHaveLength(branch === "tool" ? 2 : 1);
+    expect(harness.completeSpy.mock.calls.at(-1)![0].tools ?? []).toEqual([]);
+  });
+
   it.each([
     "summary", "hallucinated-tool", "unobserved-citation", "iteration-limit",
     "denied", "non-research", "deadline", "cancelled", "provider-failed"

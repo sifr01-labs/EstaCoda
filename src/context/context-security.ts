@@ -17,6 +17,8 @@ const TEXTY_EXTENSIONS = new Set([
   ".cjs",
   ".css",
   ".csv",
+  ".tsv",
+  ".log",
   ".env.example",
   ".html",
   ".js",

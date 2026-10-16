@@ -1,8 +1,12 @@
+import { mkdtemp, writeFile, rm } from "node:fs/promises";
+import { tmpdir } from "node:os";
+import { join } from "node:path";
+import { createWorkspaceTools } from "../tools/workspace-tools.js";
 import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { ExecutionEvidenceIndex } from "./execution-evidence-index.js";
-import { fileOutputEvidence, verifiedFileOutputContent } from "./file-output-evidence.js";
+import { fileOutputEvidence, verifiedFileOutputContent, verifiedFileMutationCallIds } from "./file-output-evidence.js";
 import { deriveRequestRequirements } from "./request-requirements.js";
 import { deriveExecutionFinalOutcome } from "./execution-outcome.js";
 
@@ -25,6 +29,38 @@ function observe(executions: ToolExecutionRecord[], prompt = "Save report.md", t
 }
 
 describe("file output evidence", () => {
+  it("verifies a real replacement patch through materialized readback", async () => {
+    const root = await mkdtemp(join(tmpdir(), "estacoda-patch-evidence-"));
+    try {
+      await writeFile(join(root, "settings.json"), '{"retry":{"count":2},"enabled":true}');
+      const tools = createWorkspaceTools({ workspaceRoot: root });
+      const patch = tools.find(tool => tool.name === "file.patch")!;
+      const read = tools.find(tool => tool.name === "file.read")!;
+      const patchInput = { path: "settings.json", mode: "replace", old_string: '"count":2', new_string: '"count":4' };
+      const executions: ToolExecutionRecord[] = [
+        { tool: patch, input: patchInput, decision: "allow", riskClass: "workspace-write", executionEffect: { kind: "mutation" }, result: await patch.run(patchInput) },
+        { tool: read, input: { path: "settings.json" }, decision: "allow", riskClass: "read-only-local", executionEffect: { kind: "read" }, result: await read.run({ path: "settings.json", lineStart: null, lineEnd: null }) }
+      ];
+      const input = observe(executions, "Update the setting and verify it.");
+      expect(deriveExecutionFinalOutcome({ ...input, requestRequirements: input.requirements, completionFloor: "mutation_with_verification" }))
+        .toMatchObject({ status: "completed", confirmedActions: [{ verification: "verified" }] });
+    } finally { await rm(root, { recursive: true, force: true }); }
+  });
+  it.each(["file.write", "file.patch"])("verifies generic JSON edits without a report requirement: %s", name => {
+    const input = observe([call(name, "settings.json"), call("file.read", "settings.json")], "Update the setting and verify it.");
+    expect(input.requirements.fileOutput).toBeUndefined();
+    expect(verifiedFileMutationCallIds({ ...input, executionReceipts: input.executionReceipts.map(r => ({ ...r, visibleTurnId: undefined })) }).size).toBe(0);
+    expect(deriveExecutionFinalOutcome({ ...input, requestRequirements: input.requirements, completionFloor: "mutation_with_verification" }))
+      .toMatchObject({ status: "completed", confirmedActions: [{ verification: "verified" }] });
+    expect(verifiedFileMutationCallIds({ ...input, executionReceipts: input.executionReceipts.map((r, i) => ({ ...r, visibleTurnId: `turn-${i}` })) }).size).toBe(0);
+    expect(verifiedFileMutationCallIds(observe([call(name, "settings.json"), call("file.read", "settings.json", { truncated: true })])).size).toBe(0);
+    expect(verifiedFileMutationCallIds(observe([call(name, "settings.json"), call("file.read", "settings.json"), call("file.patch", "settings.json")])).size).toBe(0);
+  });
+  it("requires every output of a generic multi-file patch to be read back", () => {
+    const patch = call("file.patch", "a.json", { paths: ["a.json", "b.json"], fileOutputs: [{ path: "a.json", contentSha256: digest }, { path: "b.json", contentSha256: digest }] });
+    expect(verifiedFileMutationCallIds(observe([patch, call("file.read", "a.json")])).size).toBe(0);
+    expect([...verifiedFileMutationCallIds(observe([patch, call("file.read", "a.json"), call("file.read", "b.json")]))]).toEqual(["call-0"]);
+  });
   it.each(["file.write", "file.patch"])("accepts %s plus matching readback", (name) => {
     const input = observe([call(name), call("file.read")]);
     expect(fileOutputEvidence(input)).toEqual({ satisfied: true, writeCallId: "call-0", path: "report.md" });

@@ -528,6 +528,7 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
           content: `Updated ${relativePath}.`,
           metadata: {
             path: relativePath,
+            contentSha256: createHash("sha256").update(next).digest("hex"),
             oldBytes: Buffer.byteLength(existing),
             newBytes: Buffer.byteLength(next),
             matchCount,

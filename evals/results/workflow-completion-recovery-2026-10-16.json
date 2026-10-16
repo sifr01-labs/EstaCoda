@@ -1,0 +1,290 @@
+{
+  "baseCommit": "e66431693f8dc7dfd31ea6e717202c0d25541fea",
+  "sourcePatchSha256": "559e136033be58562512c68fc724204f9f1121b04ac6afc3bfca132b3b895106",
+  "runtime": "Compiled Node runtime from a clean archive plus focused source patch; installed app and gateway unchanged",
+  "providers": {
+    "conversation": "codex/gpt-6.1-sol",
+    "routing": "configured Jev-assisted"
+  },
+  "syntheticWorkspaces": true,
+  "profileConfigurationUnchanged": true,
+  "scope": "Nine targeted live reruns, not a repeat of all thirty workflows",
+  "cases": [
+    {
+      "id": "32-invoice-totals",
+      "sessionId": "ebef462f-7810-452c-9e2a-f256731d4750",
+      "passed": true,
+      "functionalPassed": true,
+      "status": "completed",
+      "durationMs": 11857,
+      "toolCalls": [
+        {
+          "name": "file.read",
+          "ok": true,
+          "decision": "allow"
+        },
+        {
+          "name": "file.write",
+          "ok": true,
+          "decision": "allow"
+        },
+        {
+          "name": "file.read",
+          "ok": true,
+          "decision": "allow"
+        }
+      ],
+      "initialPatchRun": {
+        "sessionId": "ea530a1d-4840-4502-9424-c7e291e4b11e",
+        "passed": true,
+        "status": "completed"
+      }
+    },
+    {
+      "id": "38-tsv-aggregation",
+      "sessionId": "1198ee20-44f2-4936-847a-ed7dadf43688",
+      "passed": true,
+      "functionalPassed": true,
+      "status": "completed",
+      "durationMs": 13469,
+      "toolCalls": [
+        {
+          "name": "file.read",
+          "ok": true,
+          "decision": "allow"
+        },
+        {
+          "name": "file.write",
+          "ok": true,
+          "decision": "allow"
+        },
+        {
+          "name": "file.read",
+          "ok": true,
+          "decision": "allow"
+        }
+      ],
+      "initialPatchRun": {
+        "sessionId": "63207c37-243d-4f20-a3d6-b401ec611699",
+        "passed": true,
+        "status": "completed"
+      }
+    },
+    {
+      "id": "39-incident-timeline",
+      "sessionId": "d0dd7589-f960-4950-a3ff-8be763e40793",
+      "passed": true,
+      "functionalPassed": true,
+      "status": "completed",
+      "durationMs": 16068,
+      "toolCalls": [
+        {
+          "name": "file.read",
+          "ok": true,
+          "decision": "allow"
+        },
+        {
+          "name": "file.write",
+          "ok": true,
+          "decision": "allow"
+        },
+        {
+          "name": "file.read",
+          "ok": true,
+          "decision": "allow"
+        }
+      ],
+      "initialPatchRun": {
+        "sessionId": "823b153d-f31d-4fbe-bce0-90721d5500b5",
+        "passed": true,
+        "status": "completed"
+      }
+    },
+    {
+      "id": "42-arabic-draft",
+      "sessionId": "23ef2f34-fd40-4bbd-ae0d-7688db2be711",
+      "passed": true,
+      "functionalPassed": true,
+      "status": "completed",
+      "durationMs": 5849,
+      "toolCalls": [],
+      "initialPatchRun": {
+        "sessionId": "3e3a076e-618f-43d8-aea9-4d1272692441",
+        "passed": true,
+        "status": "completed"
+      }
+    },
+    {
+      "id": "43-release-copy",
+      "sessionId": "8f308160-903d-4d8f-a65f-5c9c9af2ae5d",
+      "passed": true,
+      "functionalPassed": true,
+      "status": "completed",
+      "durationMs": 4516,
+      "toolCalls": [],
+      "initialPatchRun": {
+        "sessionId": "2ef20b21-659a-48fb-be75-4972e1f76cfa",
+        "passed": true,
+        "status": "completed"
+      }
+    },
+    {
+      "id": "48-targeted-config",
+      "sessionId": "e467c710-e621-484a-866a-2cd08acd9cf5",
+      "passed": true,
+      "functionalPassed": true,
+      "status": "completed",
+      "durationMs": 13414,
+      "toolCalls": [
+        {
+          "name": "file.read",
+          "ok": true,
+          "decision": "allow"
+        },
+        {
+          "name": "file.patch",
+          "ok": true,
+          "decision": "allow"
+        },
+        {
+          "name": "file.read",
+          "ok": true,
+          "decision": "allow"
+        }
+      ],
+      "initialPatchRun": {
+        "sessionId": "db79f96e-a9c9-4469-86a9-96c6250b1071",
+        "passed": false,
+        "status": "partially_completed"
+      }
+    },
+    {
+      "id": "54-restart-guidance",
+      "sessionId": "c22aa579-4b99-4c67-b434-1891d3153da4",
+      "passed": true,
+      "functionalPassed": true,
+      "status": "completed",
+      "durationMs": 25468,
+      "toolCalls": [
+        {
+          "name": "file.read",
+          "ok": true,
+          "decision": "allow"
+        },
+        {
+          "name": "capability.discover",
+          "ok": true,
+          "decision": "allow"
+        },
+        {
+          "name": "capability.request",
+          "ok": true,
+          "decision": "allow"
+        },
+        {
+          "name": "file.patch",
+          "ok": true,
+          "decision": "allow"
+        },
+        {
+          "name": "file.read",
+          "ok": true,
+          "decision": "allow"
+        }
+      ],
+      "initialPatchRun": {
+        "sessionId": "abd7f088-7fe9-478b-9a45-3e7eec7b2a90",
+        "passed": false,
+        "status": "partially_completed"
+      }
+    },
+    {
+      "id": "59-two-worker-research",
+      "sessionId": "c7466620-b8a1-4c2a-89d3-b5c4714ae467",
+      "passed": true,
+      "functionalPassed": true,
+      "status": "completed",
+      "durationMs": 97610,
+      "toolCalls": [
+        {
+          "name": "skill.read",
+          "ok": true,
+          "decision": "allow"
+        },
+        {
+          "name": "delegate_task",
+          "ok": true,
+          "decision": "allow"
+        }
+      ],
+      "initialPatchRun": {
+        "sessionId": "003d9b4d-9cdd-4aaa-9496-c44a63e7b36b",
+        "passed": true,
+        "status": "completed"
+      },
+      "steps": [
+        {
+          "role": "worker",
+          "status": "completed"
+        },
+        {
+          "role": "worker",
+          "status": "completed"
+        },
+        {
+          "role": "synthesis",
+          "status": "completed"
+        },
+        {
+          "role": "report-delivery",
+          "status": "completed"
+        }
+      ],
+      "report": {
+        "bytes": 4260,
+        "words": 520,
+        "sha256": "a0490418dd23639f8af2abae4efa56c7bc7f9af3ed56d78a9ce35890aa0a33bd"
+      }
+    },
+    {
+      "id": "60-unavailable-sources",
+      "sessionId": "4729b34b-c952-4330-a1c0-88be62f740b4",
+      "passed": true,
+      "functionalPassed": true,
+      "status": "blocked",
+      "durationMs": 27560,
+      "toolCalls": [
+        {
+          "name": "web.extract",
+          "ok": false,
+          "decision": "allow"
+        },
+        {
+          "name": "web.extract",
+          "ok": false,
+          "decision": "allow"
+        },
+        {
+          "name": "web.extract",
+          "ok": false,
+          "decision": "allow"
+        },
+        {
+          "name": "web.extract",
+          "ok": false,
+          "decision": "allow"
+        },
+        {
+          "name": "web.extract",
+          "ok": false,
+          "decision": "allow"
+        }
+      ],
+      "initialPatchRun": {
+        "sessionId": "dc6041a7-4643-4ac5-81fd-67d5ff2b0ba6",
+        "passed": true,
+        "status": "blocked"
+      }
+    }
+  ]
+}

@@ -191,6 +191,20 @@ function toolPlan(overrides: Partial<ToolCallPlan> = {}): ToolCallPlan {
 }
 
 describe("execution outcome receipts", () => {
+  it.each([
+    "Rewrite these facts as exactly three concise bullet points for users: offline search added; startup time reduced from 4 seconds to 2 seconds; export sometimes fails on empty folders and is not fixed yet. Do not use tools or claim the export bug is fixed.",
+    "اكتب مسودة رسالة عربية ودية من ٤٠ كلمة أو أقل تخبر الفريق أن الاجتماع انتقل من الثلاثاء إلى الخميس الساعة العاشرة صباحاً. لا ترسل الرسالة ولا تستخدم أدوات."
+  ])("does not require execution for supplied prose: %s", userText => {
+    expect(deriveExecutionCompletionFloor({ userText, capabilities: [{ tool: "web.search", kind: "read" }] })).toBe("none");
+  });
+  it.each([
+    "Rewrite these facts as bullet points, then save release.md.",
+    "اكتب مسودة رسالة ثم احفظ draft.md",
+    "Rewrite this text in notes.txt and verify the file."
+  ])("preserves execution requirements alongside drafting: %s", userText => {
+    expect(deriveExecutionCompletionFloor({ userText })).not.toBe("none");
+  });
+
   it("derives only a coarse completion floor from the request and trusted capabilities", () => {
     const capabilities = [{
       tool: "mcp.postman.updateCollection",

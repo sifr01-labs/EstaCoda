@@ -46,6 +46,20 @@ function schedulerFor(h: Harness, taskId: string) {
 }
 
 describe.sequential("research workflow acceptance harness", () => {
+  it("delivers an unavailable-source explanation once without claiming completion", async () => {
+    const h = await harness({ sourceAccessFailures: true });
+    for (let i = 0; i < 5; i++) h.enqueue(nativeCall("web_extract", { url: SOURCE_URL, refresh: true }));
+    h.enqueue(request => {
+      expect(request.tools ?? []).toEqual([]);
+      return answer("The supplied reference was inaccessible. The policy cannot be verified; provide its text or an accessible reference.")(request);
+    });
+    const result = await h.turn(`Research the policy using only ${SOURCE_URL}. Do not search or create files.`);
+    expect(result.text.split("The policy cannot be verified")).toHaveLength(2);
+    expect(result.finalOutcome?.status).not.toBe("completed");
+    expect(result.toolExecutions.every(call => call.tool.name === "web.extract")).toBe(true);
+    scriptConsumed(h);
+  });
+
   it("retains a partial explanation and honest file status after repeated source failures", async () => {
     const h = await harness({sourceAccessFailures:true});
     h.enqueue(nativeCall("web_search",{query:"recycling methods"}));

@@ -74,6 +74,29 @@ export function fileOutputEvidence(input: {
     : { satisfied: true, path: verifiedFile[0], writeCallId: verifiedFile[1] };
 }
 
+/** General file edits use the same byte/readback contract as report delivery.
+ * Pair each write only with receipts from its own turn, including save-only
+ * follow-ups whose filename was established in earlier conversation context. */
+export function verifiedFileMutationCallIds(input: Omit<Parameters<typeof fileOutputEvidence>[0], "requirements">): Set<string> {
+  const verified = new Set<string>();
+  for (const receipt of input.executionReceipts) {
+    if (receipt.status !== "success" || receipt.visibleTurnId === undefined || !["file.write", "file.patch"].includes(receipt.tool)) continue;
+    const write = input.toolExecutions.find(call => call.toolCallId === receipt.toolCallId && call.tool.name === receipt.tool);
+    const metadata = write?.result?.metadata;
+    const outputs = Array.isArray(metadata?.fileOutputs) ? metadata.fileOutputs : [metadata];
+    const paths = outputs.map(output => output !== null && typeof output === "object"
+      ? safePath((output as Record<string, unknown>).path) : undefined);
+    if (paths.length === 0 || paths.some(path => path === undefined)) continue;
+    if (paths.every(path => {
+      const evidence = fileOutputEvidence({ ...input, requirements: {
+        skillReferences: [], originTurnId: receipt.visibleTurnId, fileOutput: { path: path!, format: "text" }, issues: []
+      } });
+      return evidence.satisfied && evidence.writeCallId === receipt.toolCallId;
+    })) verified.add(receipt.toolCallId);
+  }
+  return verified;
+}
+
 function safePath(value: unknown): string | undefined {
   if (typeof value !== "string" || value.length > 240 || value.length === 0 || /^(?:[/\\]|[a-z]:)/iu.test(value)) return undefined;
   const path = value.replaceAll("\\", "/");

@@ -17,7 +17,7 @@ import { affirmativeRequestSegments } from "./request-action-segments.js";
 import { interpretRequest, isInformationClause, splitRequestClauses } from "./request-interpretation.js";
 import type { RequestInterpretation, RequestRequirements } from "../contracts/intent.js";
 import { deriveRequestRequirements } from "./request-requirements.js";
-import { fileOutputEvidence } from "./file-output-evidence.js";
+import { fileOutputEvidence, verifiedFileMutationCallIds } from "./file-output-evidence.js";
 import { researchRequestEvidence } from "./research-request-evidence.js";
 
 const RECEIPT_RISK_CLASSES = new Set<ToolRiskClass>([
@@ -61,7 +61,7 @@ export function deriveExecutionCompletionFloor(input: {
     /(?:^|[\s`])(?:[\w.-]+\/)*[\w.-]+\.(?:[cm]?[jt]sx?|py|rb|rs|go|java|c|cpp|h|md|txt|csv|json|ya?ml|toml)(?=[\s`,;!?]|$)/iu.test(segment));
   const requestsRead = /\b(?:inspect|review|check|find|list|show|get|read|analy[sz]e|look\s+at|search|open)\b/iu.test(text) ||
     /(?:افحص|راجع|تحقق|ابحث|اعرض|اقرأ|حلل|انظر|افتح)/u.test(text);
-  const mutationAction = /\b(?:update|set\s*up|configure|create|add|change|edit|modify|write|save|upload|send|post|delete|remove|install|connect|fill|enter|submit|provision|fix|implement|build|complete|finish|apply|deploy|publish)\b/iu;
+  const mutationAction = /\b(?:update|set\s*up|configure|create|add|change|edit|modify|rewrite|write|save|upload|send|post|delete|remove|install|connect|fill|enter|submit|provision|fix|implement|build|complete|finish|apply|deploy|publish)\b/iu;
   const arabicMutationAction = /(?:حد[ّ]?ث|حدّث|أعد|اضبط|هيئ|أنشئ|أضف|غيّر|عدّل|اكتب|احفظ|ارفع|أرسل|احذف|أزل|ثبّت|اربط|املأ|أدخل|نفّذ|ابن|أكمل|أنه|طبّق|انشر)/u;
   const readLedRequest = /^(?:(?:can|could|would)\s+you\s+|please\s+)?(?:inspect|review|check|find|list|show|get|read|analy[sz]e|look\s+at|search|open)\b/iu.test(text) ||
     /^(?:من فضلك\s+)?(?:افحص|راجع|تحقق|ابحث|اعرض|اقرأ|حلل|انظر|افتح)/u.test(text);
@@ -97,8 +97,10 @@ export function deriveExecutionFinalOutcome(input: {
   openContinuation?: boolean;
 }): ExecutionFinalOutcome {
   const fileEvidence = fileOutputEvidence({ requirements: input.requestRequirements, ...input });
+  const verifiedFiles = verifiedFileMutationCallIds(input);
   const confirmedActions = confirmedActionReceipts(input.executionReceipts).map((receipt) =>
-    fileEvidence.satisfied && fileEvidence.writeCallId !== undefined && fileEvidence.writeCallId === receipt.toolCallId
+    (receipt.toolCallId !== undefined && verifiedFiles.has(receipt.toolCallId)) ||
+    (fileEvidence.satisfied && fileEvidence.writeCallId !== undefined && fileEvidence.writeCallId === receipt.toolCallId)
       ? { ...receipt, verification: "verified" as const } : receipt);
   const uncertainActions = uncertainActionReceipts(input.toolExecutions, input.toolPlans ?? []);
   const terminationCause = input.cancelled === true

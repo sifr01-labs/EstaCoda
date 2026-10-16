@@ -23,6 +23,15 @@ afterEach(async () => {
 });
 
 describe("workspace file change preview metadata", () => {
+  it.each(["tsv", "log"])("reads ordinary %s text while retaining binary and path protections", async extension => {
+    const root = await makeTempDir();
+    const tool = createWorkspaceTools({ workspaceRoot: root }).find(tool => tool.name === "file.read")!;
+    await writeFile(join(root, `input.${extension}`), "name\tvalue\nArabic\tمرحبا\n");
+    expect(await tool.run({ path: `input.${extension}` })).toMatchObject({ ok: true, metadata: { completeFileRead: true } });
+    await writeFile(join(root, `binary.${extension}`), Buffer.from([1, 0, 2]));
+    expect((await tool.run({ path: `binary.${extension}` })).ok).toBe(false);
+    expect((await tool.run({ path: `../outside.${extension}` })).ok).toBe(false);
+  });
   it("copies authorized accepted results exactly and verifies a large file without echoing all bytes", async () => {
     const root = await makeTempDir();
     const content = "العربية 😀 Evidence\n".repeat(4000);
