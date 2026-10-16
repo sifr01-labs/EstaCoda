@@ -335,7 +335,8 @@ export class ExecutionCheckpointController implements ExecutionCheckpointReader 
       return { disposition: "requirement_followup", checkpoint: current, requirementMode };
     }
     if (current?.status === "completed" && current.requestRequirements !== undefined) {
-      if (isExplicitCheckpointCancellation(userText) || isExplicitCheckpointSupersession(userText)) {
+      if (isExplicitCheckpointCancellation(userText) || isExplicitCheckpointSupersession(userText) ||
+          (!isAcknowledgementContinuation(userText) && !referencesCheckpointWork(userText, current))) {
         const disposition = isExplicitCheckpointCancellation(userText) ? "cancelled" : "superseded";
         const checkpoint = await this.#close(current.revision, disposition, disposition);
         return { disposition, ...(checkpoint === undefined ? {} : { checkpoint }) };
@@ -365,6 +366,15 @@ export class ExecutionCheckpointController implements ExecutionCheckpointReader 
     }
     if (isCheckpointBlockerResponse(userText, current)) {
       return { disposition: "continuation", checkpoint: current };
+    }
+    // A durable research/file contract is an obligation for its objective, not
+    // for every subsequent message. Keep history available, but carry that
+    // obligation only for an explicit continuation or a reference to its work.
+    // Corrections, recovery, save-only and blocker responses are handled above.
+    if ((current.requestRequirements?.research || current.requestRequirements?.fileOutput || current.requestRequirements?.delegation) && !isAcknowledgementContinuation(userText) &&
+        !referencesCheckpointWork(userText, current)) {
+      const checkpoint = await this.#close(current.revision, "superseded", "superseded");
+      return { disposition: "superseded", ...(checkpoint === undefined ? {} : { checkpoint }) };
     }
     const newResearchObjective = current.requestRequirements?.research !== undefined &&
       /^(?:(?:please|can you)\s+)?(?:research|find|investigate|survey)\b|^(?:من فضلك\s+)?ابحث(?:\s|$)/iu.test(explicitRequestSegments(userText).join(" ")) &&
@@ -534,6 +544,14 @@ function isExplicitCheckpointSupersession(text: string): boolean {
     /^(?:(?:forget\s+that|never\s*mind\s+that|new\s+topic)|(?:(?:انس|انسى|دعك\s+من)\s+(?:ذلك|هذا)|موضوع\s+جديد))\s*[:.!،-]\s*[\p{L}\p{N}]/iu.test(normalized) ||
     /^(?:ok(?:ay)?|yes|great|thanks?)[,!.، -]+(?:now\s+)?(?:can\s+you|please|tell\s+me|explain|review|implement|fix|write|create|show|summarize|search|run|update|change|add|remove)\b/iu.test(normalized) ||
     isExplicitNewRequest(normalized);
+}
+
+function referencesCheckpointWork(text: string, checkpoint: ForegroundExecutionCheckpoint): boolean {
+  const normalized = text.normalize("NFKC").replace(/```[\s\S]*?(?:```|$)|"[^"\n]*"|^\s*>.*$/gmu, " ");
+  const target = checkpoint.requestRequirements?.fileOutput?.path;
+  if (target && normalized.includes(target)) return true;
+  return /\b(?:continue|resume|retry|again|go\s+ahead|carry\s+on)\b|\b(?:it|that)\b|\b(?:this|the|previous|same|existing)\s+(?:task|work|report|result|file|research|error|failure|output|step)\b|\b(?:progress|status)\s+(?:of|on)\b/iu.test(normalized) ||
+    /(?:تابع|أكمل|اكمل|أعد المحاولة|مرة أخرى|المهمة|التقرير|النتائج|الملف السابق)/u.test(normalized);
 }
 
 function isCheckpointBlockerResponse(

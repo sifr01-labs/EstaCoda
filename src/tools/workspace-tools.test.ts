@@ -23,7 +23,7 @@ afterEach(async () => {
 });
 
 describe("workspace file change preview metadata", () => {
-  it.each(["tsv", "log"])("reads ordinary %s text while retaining binary and path protections", async extension => {
+  it.each(["tsv", "log", "jsonl", "ndjson"])("reads ordinary %s text while retaining binary and path protections", async extension => {
     const root = await makeTempDir();
     const tool = createWorkspaceTools({ workspaceRoot: root }).find(tool => tool.name === "file.read")!;
     await writeFile(join(root, `input.${extension}`), "name\tvalue\nArabic\tمرحبا\n");

@@ -63,7 +63,8 @@ export function fileOutputEvidence(input: {
         verified.delete(target); // A later write invalidates an earlier readback.
       }
     }
-    if (name !== "file.read" || metadata?.materialized !== true || (metadata.truncated === true && metadata.completeFileRead !== true) || typeof metadata.bytes !== "number" || metadata.bytes <= 0) continue;
+    if (name !== "file.read" || metadata?.materialized !== true || (metadata.truncated === true && metadata.completeFileRead !== true) || !Number.isSafeInteger(metadata.bytes) || (metadata.bytes as number) < 0) continue;
+    if (metadata.bytes === 0 && metadata.contentSha256 !== createHash("sha256").update("").digest("hex")) continue;
     const target = safePath(metadata.path);
     const write = target === undefined ? undefined : writes.get(target);
     if (target !== undefined && write !== undefined && recorded.index > write.index && metadata.contentSha256 === write.digest) verified.set(target, write.callId);

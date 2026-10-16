@@ -165,7 +165,12 @@ it('derives live action hints from read-only target validation and current trust
     await trust.revoke(f.input.homeDir);
     state = await f.capture();
     expect(state.work[0]?.actions?.find(a => a.id === 'sessions.send')).toMatchObject({ enabled: false, reason: expect.any(String), sessionId: 's' });
-    expect(state.work[0]?.actions?.find(a => a.id === 'sessions.cancelTurn')?.enabled).toBe(true);
+    expect(state.work[0]?.actions?.find(a => a.id === 'sessions.cancelTurn')?.enabled).toBe(false);
+    const { SessionExecutionOwnership } = await import('../session/execution-ownership.js');
+    const ownership = new SessionExecutionOwnership(f.db.db);
+    const claim = ownership.claim({ sessionId: 's', profileId: 'p', targetId: target.id });
+    expect((await f.capture()).work[0]?.actions?.find(a => a.id === 'sessions.cancelTurn')?.enabled).toBe(true);
+    ownership.release(claim);
     await trust.grant(f.input.homeDir);
     const stale = { ...targetBinding(target), targetGeneration: target.generation + 1 };
     await f.db.createSession({ id: 'stale', profileId: 'p', executionTarget: stale });

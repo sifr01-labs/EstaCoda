@@ -413,3 +413,14 @@ After a successful fallback, foreground tool continuations start with that route
 A budget/deadline stop without successful or uncertain execution evidence is `blocked`, not `partially_completed`. Useful completed or potentially effected work still yields partial status; stopping rules do not imply that research, delegation or file delivery happened.
 
 The follow-up signed-app measurements are in [`skill-resource-recovery-packaged-v1.json`](../../evals/results/skill-resource-recovery-packaged-v1.json), including the resource-path/mode incident and research through fallback. Model and web responses remain synthetic; this is not a claim of live research quality.
+
+
+## Workflow recovery and completion evidence
+
+A collected terminal exit with a numeric exit code, no signal, and no timeout or cancellation is a known execution outcome even when the command fails. Its failure remains in the execution record. A later retry passes the normal trust, hardline, and authorization checks again. Interrupted or indeterminate mutations retain replay protection; external tool metadata cannot opt into the trusted terminal settlement rule.
+
+Under an active checkpoint, file edits count as progress by distinct path and content digest, with a matching materialized readback counted once. This includes code edits without a named report requirement. Repeated versions, unchanged writes, denied calls, and cached reads do not reset the progress limit. Empty files can be verified with a successful write and same-turn readback carrying the empty-content digest. JSONL and NDJSON use ordinary text reading, retaining binary-content and workspace-path checks.
+
+Research and file obligations carry into explicit continuations and save-only follow-ups, but a standalone unrelated request retires the prior checkpoint instead of inheriting its deliverable. The retained history remains available. A denied file write produces an authorization explanation. Repeated source failures can receive one bounded, tool-free explanation even when the user did not explicitly call the request research; denial never enables that continuation.
+
+`config.provider.execution_status` distinguishes the latest observed provider attempt for the requested turn from the last completed response. It does not infer the current model from saved configuration. Desktop offers Stop only for active or queued execution; a settled turn needing attention accepts a new message without leaving the composer stuck in Stopping.

@@ -483,24 +483,26 @@ it("does not count duplicate capability requests as material progress", () => {
 });
 
 
-it.each([true, false])("counts report versions and matching readbacks once while checkpoint progress lags (research=%s)", async (research) => {
+it.each(["research", "report", "code"])("counts file versions and matching readbacks once while checkpoint progress lags (%s)", async mode => {
+  const research = mode === "research";
   const checkpoint = new ExecutionCheckpointController({ sessionId: "session-1", profileId: "profile-1" });
   await checkpoint.ensure({ originTurnId: "turn-1", originalObjective: "Research and save report.md",
     qualificationReasons: ["research_request"], intentLabels: [], requiredOperations: ["mutation", "verification"],
     connectorIds: [], completionFloor: "mutation_with_verification",
-    requestRequirements: { skillReferences: [], issues: [], research: { domain: "general", fresh: true }, fileOutput: { path: "report.md", format: "markdown" } } });
+    requestRequirements: mode === "code" ? undefined : { skillReferences: [], issues: [], research: { domain: "general", fresh: true }, fileOutput: { path: "report.md", format: "markdown" } } });
   const guard = new ToolLoopProgressGuard({ research, checkpointReader: checkpoint, noProgressNudgeIteration: 2, maxNoProgressIterations: 6 });
   const file = (name: string, digest: string, path = "report.md") => execution({
     tool: { ...execution().tool, name, toolsets: ["files"] }, input: { path },
     executionEffect: { kind: name === "file.read" ? "read" : "mutation" },
     result: { ok: true, content: "report", metadata: { path, contentSha256: digest.repeat(64), materialized: true, completeFileRead: true, changed: true } }
   });
-  expect(guard.observe([file("file.write", "a", "unrelated.md")]).materialProgress).toBe(false);
+  if (mode !== "code") expect(guard.observe([file("file.write", "a", "unrelated.md")]).materialProgress).toBe(false);
   expect(guard.observe([file("file.write", "a")]).progressKinds).toContain("target-mutation");
   expect(guard.observe([file("file.write", "a")]).materialProgress).toBe(false);
   expect(guard.observe([file("file.read", "b")]).materialProgress).toBe(false);
   expect(guard.observe([file("file.read", "a")]).progressKinds).toContain("verification");
   expect(guard.observe([file("file.read", "a")]).materialProgress).toBe(false);
+  expect(guard.observe([{ ...file("file.write", "c"), result: { ok: true, content: "Unchanged", metadata: { path: "report.md", contentSha256: "c".repeat(64), changed: false } } }]).materialProgress).toBe(false);
   expect(guard.observe([file("file.write", "b")]).progressKinds).toContain("target-mutation");
   expect(guard.observe([file("file.read", "b")]).progressKinds).toContain("verification");
   expect(guard.observe([{ ...file("file.write", "c"), decision: "deny" }]).materialProgress).toBe(false);

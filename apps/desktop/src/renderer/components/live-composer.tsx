@@ -47,10 +47,10 @@ export function LiveComposer({api,work,draft,change,modelControl,inspect,inspect
  const sending=useRef(false),[stopping,setStopping]=useState(false),[delivery,setDelivery]=useState(false);
  // Returning to a conversation during a send must reconcile, never replay it.
  useEffect(()=>{const pending=latestDraft.current.pending;if(pending?.state==='sending'){setDelivery(true);setError('We couldn’t check whether your message was sent. Your draft is saved.');change({...latestDraft.current,pending:{...pending,state:'uncertain'}});}},[]);
- const active=work?.kind==='session'&&['running','queued','needs_attention'].includes(work.status);
+ const active=work?.kind==='session'&&(work.status==='running'||work.status==='queued'||work.status==='needs_attention'&&work.actions?.some(action=>action.id==='sessions.cancelTurn'&&action.enabled));
  const canStop=active&&work.actions?.some(action=>action.id==='sessions.cancelTurn'&&action.enabled);
  const stop=async()=>{if(!work||stopping)return;setStopping(true);if(latestDraft.current.queued)change({...latestDraft.current,queued:{...latestDraft.current.queued,paused:true}});try{await api.act({workId:work.id,action:'sessions.cancelTurn'});}catch{setError('Could not confirm the stop request. Check status.');setStopping(false);}};
- useEffect(()=>{if(work&&!['running','queued','needs_attention'].includes(work.status))setStopping(false);if((work?.status==='cancelled'||work?.reason==='cancellation_requested')&&latestDraft.current.queued&&!latestDraft.current.queued.paused)change({...latestDraft.current,queued:{...latestDraft.current.queued,paused:true}});},[work?.status,work?.reason]);
+ useEffect(()=>{if(!canStop)setStopping(false);if((work?.status==='cancelled'||work?.reason==='cancellation_requested')&&latestDraft.current.queued&&!latestDraft.current.queued.paused)change({...latestDraft.current,queued:{...latestDraft.current.queued,paused:true}});},[canStop,work?.status,work?.reason]);
 
  const send=async(interrupt=false,queued=false,inspectOnly=false)=>{const draft=queued&&latestDraft.current.queued?{...latestDraft.current,...latestDraft.current.queued}:latestDraft.current;if(sending.current||!inspectOnly&&!enabled||busy||!target||(!draft.text.trim()&&!draft.attachments.length))return;sending.current=true;setBusy(true);setDelivery(false);setError('');let submission:Draft['pending'];try{if(draft.text.trim()==='/reload-mcp'){
    if(!work||work.kind!=='session'||draft.attachments.length||!window.desktop?.connections){setError('Open a chat without attachments to reconnect its connectors.');return;}

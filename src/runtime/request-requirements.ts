@@ -98,7 +98,7 @@ export function deriveRequestRequirements(userText: string, originTurnId?: strin
       result.research = { domain: domain === "general" ? result.research?.domain ?? domain : domain, fresh: result.research?.fresh === true || /\b(?:latest|recent|current|fresh|newest)\b|(?:أحدث|حديث|الحالية)/iu.test(actionSegment) };
     }
     const copy = /^\s*(?:(?:can|could|would)\s+you\s+)?(?:(?:please|just)\s+)?(?:copy\b|(?:make|create)\s+(?:(?:an?|the|identical|exact|unchanged)\s+)*copy\b)/iu.test(actionSegment) && /\b(?:as|to)\s+`?[^`\s]+\.(?:md|markdown|txt)`?\s*[.!]?$/iu.test(segment);
-    if (!copy && !/\b(?:prepare|save|export|write|create|generate)\s+|(?:احفظ(?:ها|ه)?|صدّر(?:ها|ه)?|صدر(?:ها|ه)?|أنشئ|اكتب(?:ها|ه)?|جهّز|جهز|أعد)\s+/iu.test(actionSegment)) continue;
+    if (!copy && !/\b(?:prepare|save|export|write|create|generate|clear|empty|truncate)\s+|(?:احفظ(?:ها|ه)?|صدّر(?:ها|ه)?|صدر(?:ها|ه)?|أنشئ|اكتب(?:ها|ه)?|جهّز|جهز|أعد|أفرغ|افرغ)\s+/iu.test(actionSegment)) continue;
     const namedPaths = [...segment.matchAll(FILE_NAME)].map((match) => match[1] ?? match[0]);
     // In an explicit copy, the final as/to operand is the destination; the
     // preceding source is not a second output. Multiple sources stay ambiguous.
@@ -159,7 +159,7 @@ export function requirementFollowUp(text: string, previous: RequestRequirements 
   if (next.fileOutput !== undefined && next.research === undefined && next.delegation === undefined &&
     (previous.research !== undefined || previous.fileOutput !== undefined) &&
     /\b(?:save|export|prepare|this|that|existing|above)\b|(?:احفظ|صدر|صدّر|جهز|جهّز)/iu.test(segments) &&
-    !/\b(?:new topic|instead|forget|unrelated|another|about)\b|موضوع جديد/iu.test(segments)) return "save";
+    !/\b(?:new topic|instead|forget|unrelated|another|about|clear|empty|truncate)\b|موضوع جديد|أفرغ|افرغ/iu.test(segments)) return "save";
   return undefined;
 }
 

@@ -1166,7 +1166,6 @@ export class ProviderTurnLoop {
     if ((researchFailureLimitReached || researchNoProgress) &&
       effectiveProviderExecution !== undefined &&
       [...input.toolExecutions, ...providerToolExecutions].some(call => ["web.search", "web.extract"].includes(call.tool.name)) &&
-      input.intent.requestRequirements?.research !== undefined &&
       [...input.toolExecutions, ...providerToolExecutions].every(call => call.decision === "allow")) {
       researchRecoverySummary = `Research stopped because source reads failed or no longer added evidence. The requested research is incomplete. Available observations remain in this conversation's activity. Retry with an alternative accessible source or provide the missing source text.`;
       if (!input.signal?.aborted && iterations < this.#budgets.maxProviderIterations &&

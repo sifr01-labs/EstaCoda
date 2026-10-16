@@ -19,9 +19,16 @@ describe("bounded research requirement continuity", () => {
     expect(continueRequestRequirements(requirements, deriveRequestRequirements("Save result.md"), "save")).toEqual({
       skillReferences: [], issues: [], fileOutput: { format: "markdown", path: "result.md" }
     });
-    for (const text of ['He said "rerun this task"', "Do not rerun this task", "Write a new poem in poem.md", "Save a file about cats in cats.md"]) {
+    for (const text of ['He said "rerun this task"', "Do not rerun this task", "Write a new poem in poem.md", "Save a file about cats in cats.md", "Clear this file scratch.txt"]) {
       expect(requirementFollowUp(text, requirements)).toBeUndefined();
     }
+  });
+
+  it.each(["continue", "Try again", "Continue with two workers instead", "تابع التقرير"])("retains genuine follow-up context: %s", async text => {
+    const controller = new ExecutionCheckpointController({ sessionId: "session", profileId: "profile" });
+    await controller.ensure({ originTurnId: "original-turn", originalObjective: objective, qualificationReasons: ["research_request"],
+      requestRequirements: requirements, intentLabels: [], requiredOperations: ["read"], connectorIds: [], completionFloor: "none" });
+    expect((await controller.prepareForTurn(text)).disposition).not.toBe("superseded");
   });
 
   it("rejects malformed, oversized, absolute-path and forged satisfaction state", () => {
@@ -68,14 +75,33 @@ describe("bounded research requirement continuity", () => {
     } finally { await h.dispose(); }
   });
 
-  it.each(["cancel", "Research ocean temperatures.", "ابحث عن درجات حرارة المحيط"])("does not carry requirements into %s", async (text) => {
+  it("answers an unrelated question after restart without replaying the old research contract", async () => {
+    const h = await createResearchWorkflowHarness();
+    try {
+      h.enqueue(answer("No file was written."), answer("No file was written."), answer("No file was written."));
+      await h.turn(objective);
+      await h.restart();
+      h.enqueue(answer("30%"));
+      const result = await h.turn("What percentage is 30 out of 100? No tools.");
+      expect(result.text).toBe("30%");
+      expect(result.intent.requestRequirements?.research).toBeUndefined();
+      expect(result.intent.requestRequirements?.delegation).toBeUndefined();
+      expect(result.intent.requestRequirements?.fileOutput).toBeUndefined();
+      expect(result.finalOutcome?.status).toBe("completed");
+      expect(result.toolExecutions).toHaveLength(0);
+      expect(h.scriptErrors).toEqual([]);
+      expect(h.remainingSteps()).toBe(0);
+    } finally { await h.dispose(); }
+  });
+
+  it.each(["cancel", "Research ocean temperatures.", "ابحث عن درجات حرارة المحيط", "What percentage is 30 out of 100?", "كم يساوي ٣٠ من ١٠٠؟"])("does not carry requirements into %s", async (text) => {
     const controller = new ExecutionCheckpointController({ sessionId: "session", profileId: "profile" });
     await controller.ensure({ originTurnId: "original-turn", originalObjective: objective, qualificationReasons: ["research_request"],
       requestRequirements: requirements, intentLabels: [], requiredOperations: ["read"], connectorIds: [], completionFloor: "none" });
     expect((await controller.prepareForTurn(text)).disposition).toBe(text === "cancel" ? "cancelled" : "superseded");
     expect((await controller.prepareForTurn("continue")).disposition).toBe("none");
   });
-  it.each(["cancel", "New topic: write a poem"])("retires completed requirements durably on %s", async (text) => {
+  it.each(["cancel", "New topic: write a poem", "What percentage is 30 out of 100?"])("retires completed requirements durably on %s", async (text) => {
     const events: import("../contracts/session.js").SessionEvent[] = [];
     const controller = new ExecutionCheckpointController({ sessionId: "session", profileId: "profile", record: async (event) => { events.push(event); } });
     const created = await controller.ensure({ originTurnId: "original-turn", originalObjective: objective, qualificationReasons: ["research_request"],

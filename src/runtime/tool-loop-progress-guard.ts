@@ -35,8 +35,8 @@ export class ToolLoopProgressGuard {
   readonly #stopIteration: number;
   readonly #research: boolean;
   readonly #seenResearchSources = new Set<string>();
-  readonly #seenReportWrites = new Set<string>();
-  readonly #pendingReportReadbacks = new Set<string>();
+  readonly #seenFileWrites = new Set<string>();
+  readonly #pendingFileReadbacks = new Set<string>();
   readonly #seenRecoveryIds = new Set<string>();
   readonly #resultReadEnds = new Map<string, number>();
   readonly #seenCallFingerprints = new Set<string>();
@@ -138,9 +138,9 @@ export class ToolLoopProgressGuard {
         }
         continue;
       }
-      // Foreground file delivery can progress before checkpoint projection
+      // File edits and delivery can progress before checkpoint projection
       // catches up. Count exact file versions, not changing model prose.
-      if (this.#checkpointReader?.current()?.requestRequirements?.fileOutput !== undefined) {
+      if (checkpointControlsProgress) {
         const metadata = execution.result?.metadata;
         const outputs = execution.tool.name === "file.patch" && Array.isArray(metadata?.fileOutputs) ? metadata.fileOutputs : [metadata];
         let reportProgress = false;
@@ -152,13 +152,13 @@ export class ToolLoopProgressGuard {
             typeof contentSha256 !== "string" || !/^[a-f0-9]{64}$/u.test(contentSha256)) continue;
           const key = fingerprint({ path, contentSha256 });
           if ((execution.tool.name === "file.write" || execution.tool.name === "file.patch") &&
-            metadata?.changed !== false && !this.#seenReportWrites.has(key)) {
-            this.#seenReportWrites.add(key);
-            this.#pendingReportReadbacks.add(key);
+            metadata?.changed !== false && !this.#seenFileWrites.has(key)) {
+            this.#seenFileWrites.add(key);
+            this.#pendingFileReadbacks.add(key);
             progressKinds.add("target-mutation");
             reportProgress = true;
           } else if (execution.tool.name === "file.read" && metadata?.materialized === true &&
-            metadata.completeFileRead === true && this.#pendingReportReadbacks.delete(key)) {
+            metadata.completeFileRead === true && this.#pendingFileReadbacks.delete(key)) {
             progressKinds.add("verification");
             reportProgress = true;
           }

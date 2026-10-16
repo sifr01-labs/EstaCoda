@@ -1,0 +1,204 @@
+{
+  "schemaVersion": 1,
+  "date": "2026-10-16",
+  "baseCommit": "b7a7577b9d0daab3934745a1bd51f26901a2a644",
+  "scope": "Focused recovery fixes from the 25 varied workflow run; rebuilt core with live Jev-assisted routing and configured conversation provider. Desktop composer verified separately in browser integration tests. Installed app and gateway not updated by this validation.",
+  "results": [
+    {
+      "workflow": "64-malformed-jsonl",
+      "passed": true,
+      "sessionId": "03caa6b3-329b-4938-bb10-cf9535a9214e",
+      "durationMs": 12749,
+      "status": "completed",
+      "terminationCause": "normal",
+      "tools": [
+        {
+          "name": "file.read",
+          "allowed": true,
+          "succeeded": true
+        },
+        {
+          "name": "file.write",
+          "allowed": true,
+          "succeeded": true
+        },
+        {
+          "name": "file.read",
+          "allowed": true,
+          "succeeded": true
+        }
+      ]
+    },
+    {
+      "workflow": "66-code-repair",
+      "passed": true,
+      "sessionId": "e4ab5a1f-c3a2-41b5-ba8f-6cc1a34d960c",
+      "durationMs": 19914,
+      "status": "completed_with_recovered_errors",
+      "terminationCause": "normal",
+      "tools": [
+        {
+          "name": "terminal.run",
+          "allowed": true,
+          "succeeded": false
+        },
+        {
+          "name": "file.read",
+          "allowed": true,
+          "succeeded": true
+        },
+        {
+          "name": "file.patch",
+          "allowed": true,
+          "succeeded": true
+        },
+        {
+          "name": "file.read",
+          "allowed": true,
+          "succeeded": true
+        },
+        {
+          "name": "terminal.run",
+          "allowed": true,
+          "succeeded": true
+        }
+      ]
+    },
+    {
+      "workflow": "69-empty-file",
+      "passed": true,
+      "sessionId": "24b9a0a0-167f-4383-8c40-4a0b7686141c",
+      "durationMs": 8819,
+      "status": "completed",
+      "terminationCause": "normal",
+      "tools": [
+        {
+          "name": "file.write",
+          "allowed": true,
+          "succeeded": true
+        },
+        {
+          "name": "file.read",
+          "allowed": true,
+          "succeeded": true
+        }
+      ]
+    },
+    {
+      "workflow": "77-denied-write",
+      "passed": true,
+      "sessionId": "7e0d0aa8-9aee-454e-8e21-453839a065b8",
+      "durationMs": 5979,
+      "status": "blocked",
+      "terminationCause": "normal",
+      "tools": [
+        {
+          "name": "file.write",
+          "allowed": false,
+          "succeeded": false
+        }
+      ]
+    },
+    {
+      "workflow": "80-routing-self-status",
+      "passed": true,
+      "sessionId": "dfca80ad-e332-483b-8596-168756df6253",
+      "durationMs": 9960,
+      "status": "completed",
+      "terminationCause": "normal",
+      "tools": [
+        {
+          "name": "config.provider.execution_status",
+          "allowed": true,
+          "succeeded": true
+        }
+      ]
+    },
+    {
+      "workflow": "85-unavailable-reference-set",
+      "passed": true,
+      "sessionId": "f675b663-5420-48a6-a5b9-73a7e5e6104a",
+      "durationMs": 25234,
+      "status": "blocked",
+      "terminationCause": "tool_loop_no_progress",
+      "tools": [
+        {
+          "name": "web.extract",
+          "allowed": true,
+          "succeeded": false
+        },
+        {
+          "name": "web.extract",
+          "allowed": true,
+          "succeeded": false
+        },
+        {
+          "name": "web.extract",
+          "allowed": true,
+          "succeeded": false
+        },
+        {
+          "name": "web.extract",
+          "allowed": true,
+          "succeeded": false
+        },
+        {
+          "name": "web.extract",
+          "allowed": true,
+          "succeeded": false
+        }
+      ]
+    }
+  ],
+  "notes": [
+    "Initial JSONL predicate assumed invalidLines was an array of integers, although the prompt allowed structured line/error records. Corrected predicate checks the same one-based line numbers in either representation; rerun passed.",
+    "The first code-repair rerun fixed and independently passed the test but exposed stale progress accounting under a checkpoint. The final rerun includes the progress fix and completes with recovered errors.",
+    "Denial fixture explicitly requests approval and rejects the write. No alternate tool or path was used.",
+    "Profile configuration was byte-for-byte unchanged after the live checks.",
+    "Continuation after restart, same-turn empty readback, interrupted replay protection, policy revocation before retry, and Desktop Stop-to-Send transitions have deterministic regression tests."
+  ],
+  "riskNote": "Known process exits permit a new, normally authorized attempt; they do not assert rollback or success. Signals, timeout, cancellation, unknown effects, and untrusted tool metadata retain replay protection. No trust, hardline, profile, browser, or approval bypass was added.",
+  "validation": {
+    "environment": {
+      "node": "v24.14.1",
+      "pnpm": "10.33.0"
+    },
+    "lockedInstall": "passed",
+    "typecheck": "passed",
+    "desktopFoundationCheck": "passed",
+    "build": "passed",
+    "unitAndIntegration": {
+      "files": 764,
+      "passed": 12561
+    },
+    "desktopComposer": {
+      "passed": 16
+    },
+    "sourceSmoke": {
+      "passed": 13
+    },
+    "compiledSmoke": {
+      "passed": 13
+    },
+    "runtimeImportAudit": "passed",
+    "esmAudit": "passed",
+    "diffCheck": "passed",
+    "note": "The sandbox denied local socket creation for gateway fixtures; the complete suite passed after rerunning with local socket access.",
+    "workspaceCaveat": "Validation used a clean archive of the base plus exactly this patch. Direct working-folder typecheck reports duplicate Bidi declarations from the pre-existing untracked src/types/bidi-js.d 2.ts; unrelated files were left untouched."
+  },
+  "sourceSha256": {
+    "apps/desktop/src/renderer/components/live-composer.tsx": "b20968841629ef3b628d86c853596b6090f2493e07a264655306ac2d27b80b46",
+    "src/context/context-security.ts": "ef673e349a61c375a35d02cecc39a01d34a2a5fbf47efa7db2d298feba9962cf",
+    "src/contracts/tool.ts": "b665ca72811a6718d821cbb4d8eec9e134f27e8f7b95fd7951d0f802d4beef74",
+    "src/control-service/action-projections.ts": "577ce45efda395c07313320739f2cc97f4b1e78b94dedfce59e5b3643c2729a8",
+    "src/runtime/agent-loop.ts": "196fa0aac720badccf64c9edabe53437d1eabb064539b2fc2c8242dacf273037",
+    "src/runtime/execution-checkpoint-controller.ts": "4aacd733917a79bad9545961a7e83b8287f7b3ff9b01af7ea84c6a7799816095",
+    "src/runtime/file-output-evidence.ts": "fbbbbe7fd321eb5358e6fdd26cce1dfe882ed8703efd53058a41027ad8cba427",
+    "src/runtime/provider-turn-loop.ts": "2089ed98665e18bfc28dc80d7c6b529b2cb1c94b339ca4369244f9995c10d4bf",
+    "src/runtime/request-requirements.ts": "12e343859d90800ea8d5161ea565375486b12e46234795a227601667a4c04008",
+    "src/tools/config-tools.ts": "99b481b469ee68be2e599fc0a2eada97bb7b1e8d1d54ea68b2520f3f93f69bb0",
+    "src/tools/tool-executor.ts": "c07110a0cb1668703e5f6cbafde85a66098cb9cf2dff6b2c42f2d6d074d34800",
+    "src/tools/workspace-tools.ts": "b3c7486d3d8a5d6856a5dc07a9d884ee34154466d01448ea6e3818d89ef3e9e2",
+    "src/runtime/tool-loop-progress-guard.ts": "2228d831322f83b849fddca851e8f3dd698daf2d5cd779a0d4aed63785d972d8"
+  }
+}

@@ -1472,11 +1472,17 @@ export class AgentLoop {
         if (response.providerExecution !== undefined) response.providerExecution = suppressProviderGeneratedText(response.providerExecution);
       }
       if (!fileEvidence.satisfied) {
+        const deniedWrite = fileEvidence.reason === "missing-write" ? toolExecutions.find(call =>
+          ["file.write", "file.patch"].includes(call.tool.name) && call.decision !== "allow") : undefined;
         const available = new Set(this.#providerToolSchemaCatalog?.entries.map((entry) => entry.tool.name) ?? []);
         const unavailable = !available.has("file.write") && !available.has("file.patch")
           ? " A workspace file-writing tool is unavailable in this session."
           : !available.has("file.read") ? " The workspace file-readback tool is unavailable in this session." : "";
-        const reason = fileEvidence.reason === "unresolved-target"
+        const reason = deniedWrite !== undefined
+          ? deniedWrite.decision === "deny"
+            ? `Authorization denied ${deniedWrite.tool.name}; the requested write was not permitted.`
+            : `Approval is required for ${deniedWrite.tool.name}; the requested write has not been authorized.`
+          : fileEvidence.reason === "unresolved-target"
           ? "The requested file target is ambiguous or outside the supported workspace-relative targets."
           : fileEvidence.reason === "missing-research-result"
             ? "Read the complete accepted primary research result from its authorized Task before saving."

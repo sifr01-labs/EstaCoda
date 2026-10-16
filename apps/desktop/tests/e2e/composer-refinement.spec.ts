@@ -63,3 +63,15 @@ for(const language of ['en','ar'] as const)for(const theme of ['light','dark'])t
  }
  await page.locator('.ec-composer-stop').focus();await page.keyboard.press('Enter');expect(await calls(page)).toContainEqual(['act',{workId:'session:s',action:'sessions.cancelTurn'}]);
 });
+
+test('settled attention replaces Stop with Send and preserves the draft',async({page})=>{
+ await mount(page,'en','running');
+ await page.getByLabel('Draft guidance').fill('What percentage is 30 out of 100?');
+ await page.getByRole('button',{name:'Stop',exact:true}).click();
+ await page.evaluate(()=>{const s=(window as any).composerTest;s.setWork({...s.work,status:'needs_attention',actions:[{id:'sessions.send',enabled:true},{id:'sessions.cancelTurn',enabled:false}]});});
+ await expect(page.getByRole('button',{name:'Stop',exact:true})).toHaveCount(0);
+ await expect(page.getByRole('button',{name:'Stopping…',exact:true})).toHaveCount(0);
+ await expect(page.getByLabel('Draft guidance')).toHaveValue('What percentage is 30 out of 100?');
+ await page.getByRole('button',{name:'Send prompt',exact:true}).click();
+ expect((await calls(page)).filter((c:any)=>c[0]==='submit')).toHaveLength(1);
+});

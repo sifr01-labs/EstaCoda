@@ -194,12 +194,22 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
           sessionId
         });
 
-        const routing = inspectRouting(sessionId && options.sessionDb ? await options.sessionDb.listEvents(sessionId) : [], {
+        const events = sessionId && options.sessionDb ? await options.sessionDb.listEvents(sessionId) : [];
+        const routing = inspectRouting(events, {
           turnId: input.routingTurnId ?? context?.visibleTurnId, details: input.routingDetails, offset: input.routingOffset
         });
+        // The final agent message is not persisted while its tool call runs.
+        // Use turn-scoped route receipts, never saved configuration or a prior
+        // turn, to describe the currently observed conversation provider.
+        const observed = routing.turnId === undefined ? undefined : events.filter(event =>
+          event.kind === "provider-route" && event.turnMessageId === routing.turnId).at(-1);
+        const currentTurnProvider = observed?.kind === "provider-route" ? {
+          turnId: routing.turnId, state: observed.state, provider: safeLabelToken(observed.provider),
+          model: safeLabelToken(observed.model), fallback: observed.fallback
+        } : undefined;
         return {
           ok: true,
-          content: `Saved routing mode: ${loaded.routing.mode}; configured Jev model: ${loaded.routing.jev.id}\nRouting execution: ${JSON.stringify(routing)}\nLast recorded conversation-provider execution (separate from routing):\n` + formatProviderTruthStatus({
+          content: `Saved routing mode: ${loaded.routing.mode}; configured Jev model: ${loaded.routing.jev.id}\nRouting execution: ${JSON.stringify(routing)}\nCurrent-turn conversation provider (latest observed attempt; later attempts may change): ${JSON.stringify(currentTurnProvider ?? { state: "unknown" })}\nLast recorded conversation-provider execution (separate from routing):\n` + formatProviderTruthStatus({
             config: diagnostic,
             lastExecution
           }),
@@ -207,6 +217,7 @@ export function createConfigTools(options: ConfigToolsOptions): RegisteredTool[]
             routing, configuredRoutingMode: loaded.routing.mode, configuredRoutingModel: loaded.routing.jev.id,
             providerDiagnostic: diagnostic,
             providerExecution: lastExecution,
+            currentTurnProvider,
             sessionModelOverrideStatus: effectiveOverride === undefined
               ? "none"
               : effectiveOverride.ok

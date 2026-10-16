@@ -29,6 +29,15 @@ function observe(executions: ToolExecutionRecord[], prompt = "Save report.md", t
 }
 
 describe("file output evidence", () => {
+  it("verifies an intentional empty file only with matching same-turn readback", () => {
+    const metadata = { bytes: 0, contentSha256: createHash("sha256").update("").digest("hex") };
+    const input = observe([call("file.write", "scratch.txt", metadata), call("file.read", "scratch.txt", metadata)], "Clear scratch.txt and verify it is empty.");
+    expect(input.requirements.fileOutput?.path).toBe("scratch.txt");
+    expect(fileOutputEvidence(input).satisfied).toBe(true);
+    expect(deriveExecutionFinalOutcome({ ...input, requestRequirements: input.requirements, completionFloor: "mutation_with_verification" }))
+      .toMatchObject({ status: "completed", confirmedActions: [{ verification: "verified" }] });
+    expect(fileOutputEvidence(observe([call("file.read", "scratch.txt", metadata)], "Clear scratch.txt")).satisfied).toBe(false);
+  });
   it("verifies a real replacement patch through materialized readback", async () => {
     const root = await mkdtemp(join(tmpdir(), "estacoda-patch-evidence-"));
     try {

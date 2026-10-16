@@ -12,7 +12,7 @@ export function sessionActions(session: SessionRecord, work: WorkProjection): Ac
   const bound = Boolean(session.executionTarget), open = !session.endedAt;
   return [action('inspect_result'), action('sessions.resume', bound && open, 'This Session is ended or has no execution target.'),
     action('sessions.send', bound && open, 'This Session is ended or has no execution target.'),
-    action('sessions.cancelTurn', bound && open && ['running', 'queued', 'needs_attention'].includes(work.status), 'There is no active turn to cancel.')].map(item => item.id.startsWith('sessions.') ? { ...item, sessionId: session.id } : item);
+    action('sessions.cancelTurn', bound && open && (work.executionModelActive === true || work.status === 'queued'), 'There is no active turn to cancel.')].map(item => item.id.startsWith('sessions.') ? { ...item, sessionId: session.id } : item);
 }
 export function taskActions(task: Task, store: TaskStore): ActionProjection[] {
   const live = !['completed', 'partial', 'failed', 'cancelled'].includes(task.status), bound = Boolean(task.executionTarget);

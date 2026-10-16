@@ -156,6 +156,7 @@ describe.sequential("research workflow acceptance harness", () => {
       nativeCall("file_write", { path: "report.md", content: REPORT }), answer("The write was denied."));
     const result = await h.turn("Research current recycling and save report.md");
     expect(result.finalOutcome?.status).not.toMatch(/^completed/u);
+    expect(result.text).toMatch(/denied|not permitted/iu);
     expect(result.toolExecutions.filter(call => call.tool.name === "file.write")).toHaveLength(1);
     await expect(readFile(join(h.workspaceRoot, "report.md"))).rejects.toThrow();
     scriptConsumed(h);

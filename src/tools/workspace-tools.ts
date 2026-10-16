@@ -642,6 +642,11 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
       progressLabel: "running command",
       maxResultSizeChars: 16_000,
       isAvailable: () => true,
+      // A collected process exit is a failed command, not a lost execution.
+      // Its output may describe partial changes; every later call still passes
+      // normal authorization. Signals, deadlines and cancellation stay uncertain.
+      isFailureOutcomeKnown: result => Number.isInteger(result.metadata?.code) &&
+        result.metadata?.signal === null && result.metadata.timedOut === false && result.metadata.cancelled === false,
       run: async (input: { command?: string; timeoutMs?: number }, context) => {
         if (typeof input.command !== "string" || input.command.trim().length === 0) {
           return errorResult("command must be a non-empty string");

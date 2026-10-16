@@ -242,6 +242,10 @@ export type RegisteredTool<TInput = any> = ToolDefinition & {
    * exclusive execution resource is treated as unsettled.
    */
   executionAbortSettlementGraceMs?: number;
+  /** Trusted handler evidence that a failed execution finished with a known
+   * outcome. This does not assert rollback or success, and never changes policy.
+   * Interrupted or indeterminate executions must return false. */
+  isFailureOutcomeKnown?(result: ToolResult): boolean;
   /** Runtime-only reviewed operation identity; never projected into provider schemas. */
   operationJournal?: RegisteredToolOperationJournal<TInput>;
   isAvailable(): Promise<boolean> | boolean;

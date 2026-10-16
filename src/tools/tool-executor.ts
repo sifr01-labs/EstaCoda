@@ -659,7 +659,8 @@ export class ToolExecutor {
           dispatchState,
           sideEffectState: executionEffect?.kind !== "mutation" || isUndispatchedResult(result)
             ? "none"
-            : result.ok ? "confirmed" : dispatchState === "not_started" ? "none" : "possible"
+            : result.ok || ((dispatchState as ToolExecutionSettlement["dispatchState"]) === "finished" && tool.isFailureOutcomeKnown?.(result) === true)
+              ? "confirmed" : dispatchState === "not_started" ? "none" : "possible"
         };
       } catch (error) {
         const terminalStatus = timeout.timedOut()

@@ -395,6 +395,22 @@ describe("config.browser.setup", () => {
 });
 
 describe("config.provider.execution_status", () => {
+  it("reports the observed provider before the first agent message and isolates turns", async () => {
+    const homeDir = await configHome(localModelConfig({ primaryModel: "qwen2.5:3b", models: ["qwen2.5:3b"] }));
+    const sessionDb = new InMemorySessionDB();
+    await sessionDb.createSession({ id: "s", profileId: "default" });
+    await sessionDb.appendEvent("s", { kind: "provider-route", turnMessageId: "current", provider: "codex", model: "gpt-5.5", fallback: true, state: "responded" });
+    await sessionDb.appendEvent("s", { kind: "provider-route", turnMessageId: "other", provider: "local", model: "other-model", fallback: false, state: "attempting" });
+    const tool = createConfigTools({ workspaceRoot: homeDir, homeDir, profileId: "default", sessionId: "s", sessionDb })
+      .find(candidate => candidate.name === "config.provider.execution_status")!;
+    const result = await tool.run({ routingTurnId: "current" });
+    expect(result.metadata?.providerExecution).toBeUndefined();
+    expect(result.metadata?.currentTurnProvider).toEqual({ turnId: "current", provider: "codex", model: "gpt-5.5", fallback: true, state: "responded" });
+    expect((await tool.run({ routingTurnId: "missing" })).metadata?.currentTurnProvider).toBeUndefined();
+    await sessionDb.appendEvent("s", { kind: "provider-route", turnMessageId: "current", provider: "codex", model: "gpt-5.5", fallback: true, state: "failed" });
+    expect((await tool.run({ routingTurnId: "current" })).metadata?.currentTurnProvider).toMatchObject({ state: "failed" });
+  });
+
   it("reports no latest execution without making a live check", async () => {
     const homeDir = await configHome(localModelConfig({
       primaryModel: "qwen2.5:3b",

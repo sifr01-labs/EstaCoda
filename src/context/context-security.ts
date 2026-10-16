@@ -23,6 +23,8 @@ const TEXTY_EXTENSIONS = new Set([
   ".html",
   ".js",
   ".json",
+  ".jsonl",
+  ".ndjson",
   ".jsx",
   ".md",
   ".mdc",

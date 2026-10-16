@@ -3333,8 +3333,11 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
 
     const result = await runBasicProviderTurn(harness.loop);
 
-    expect(harness.completeSpy).toHaveBeenCalledTimes(7);
-    expect(result.providerExecution?.response?.content).toContain("Stopped retrying after");
+    expect(harness.completeSpy).toHaveBeenCalledTimes(8);
+    expect(harness.executePlans).toHaveBeenCalledTimes(7);
+    expect(harness.completeSpy.mock.calls.at(-1)![0].tools ?? []).toEqual([]);
+    expect(result.terminationCause).toBe("tool_loop_no_progress");
+    expect(result.researchRecoverySummary).toContain("no longer added evidence");
     const nudgeText = "The foreground tool loop has repeated the same calls or results without material progress.";
     const requests = harness.completeSpy.mock.calls.map(([request]) => request as ProviderRequest);
     expect(requests.filter((request) => JSON.stringify(request.messages).includes(nudgeText))).toHaveLength(1);
@@ -6900,19 +6903,19 @@ describe("research failure finalization", () => {
     expect(harness.completeSpy).toHaveBeenCalledTimes(3);
   });
 
-  it.each(["tool", "reasoning"])("finalizes research after no progress in the %s branch", async branch => {
+  it.each(["tool", "reasoning", "non-research"])("finalizes source failures after no progress in the %s branch", async branch => {
     const failed: ToolExecutionRecord = { tool: { ...testTool, name: "web.extract", riskClass: "read-only-network", toolsets: ["web"] },
       input: { url: "https://example.org/missing" }, riskClass: "read-only-network", decision: "allow", result: { ok: false, content: "HTTP 404" } };
     const harness = await createPostToolNudgeHarness({ maxProviderIterations: 5, maxNoProgressIterations: 2, noProgressNudgeIteration: 1,
       responses: [providerExecution("", [providerToolCall("read")]),
         branch === "reasoning" ? reasoningOnlyExecution({ reasoning: "The sources failed; consider how to explain this." }) : providerExecution("", [providerToolCall("read-again")]),
         providerExecution("The supplied page returned HTTP 404, so I cannot verify the policy. Please provide an accessible reference.")],
-      toolSteps: [{ executions: [failed] }, ...(branch === "tool" ? [{ executions: [failed] }] : [])]
+      toolSteps: [{ executions: [failed] }, ...(branch !== "reasoning" ? [{ executions: [failed] }] : [])]
     });
-    const result = await runBasicProviderTurn(harness.loop, { research: true });
+    const result = await runBasicProviderTurn(harness.loop, { research: branch !== "non-research" });
     expect(result.terminationCause).toBe("tool_loop_no_progress");
     expect(result.researchRecoverySummary).toContain("cannot verify the policy");
-    expect(result.toolExecutions).toHaveLength(branch === "tool" ? 2 : 1);
+    expect(result.toolExecutions).toHaveLength(branch !== "reasoning" ? 2 : 1);
     expect(harness.completeSpy.mock.calls.at(-1)![0].tools ?? []).toEqual([]);
   });
 
@@ -6955,17 +6958,17 @@ describe("research failure finalization", () => {
     } finally {
       clock.mockRestore();
     }
-    const canSummarize = ["summary", "hallucinated-tool", "unobserved-citation", "provider-failed"].includes(mode);
+    const canSummarize = ["summary", "hallucinated-tool", "unobserved-citation", "provider-failed", "non-research"].includes(mode);
     expect(harness.completeSpy).toHaveBeenCalledTimes(canSummarize ? 2 : 1);
     expect(harness.executePlans).toHaveBeenCalledTimes(1);
     expect(result.terminationCause).toBe("budget_exhausted");
     expect(result.toolExecutions).toHaveLength(3);
     if (canSummarize) expect(harness.completeSpy.mock.calls[1]![0].tools ?? []).toEqual([]);
-    if (mode === "summary") expect(result.researchRecoverySummary).toContain("Only search snippets");
+    if (["summary", "non-research"].includes(mode)) expect(result.researchRecoverySummary).toContain("Only search snippets");
     if (["hallucinated-tool", "unobserved-citation", "provider-failed"].includes(mode)) {
       expect(result.researchRecoverySummary).not.toContain("Only search snippets");
     }
     if (mode === "iteration-limit") expect(result.researchRecoverySummary).toContain("Retry with an alternative");
-    if (["denied", "non-research"].includes(mode)) expect(result.researchRecoverySummary).toBeUndefined();
+    if (mode === "denied") expect(result.researchRecoverySummary).toBeUndefined();
   });
 });

@@ -1,3 +1,4 @@
+import { sessionActions } from "./action-projections.js";
 import { mkdtemp, rm } from 'node:fs/promises';
 import { join } from 'node:path';
 import { it, expect } from 'vitest';
@@ -121,4 +122,23 @@ it('restores actual fallback identity from persisted route events and clears it 
   const next=await captureWork({homeDir,profileId:'p'},new AbortController().signal);
   expect(next.work[0]?.executionModel).toBeUndefined();
  }finally{db.close();await rm(homeDir,{recursive:true,force:true});}
+});
+
+it('keeps blocked settled turns sendable and only offers Stop for active or queued execution', async () => {
+  const { InMemorySessionDB } = await import('../session/in-memory-session-db.js');
+  const db = new InMemorySessionDB();
+  const session = await db.createSession({ id: 's', profileId: 'p' });
+  // Action projection only needs the presence of a binding; dispatch revalidates it.
+  const work = sessionWork(session, [], false);
+  session.executionTarget = { kind: 'workspace' } as never;
+  work.status = 'needs_attention';
+  for (const active of [false, true]) {
+    work.executionModelActive = active;
+    const actions = sessionActions(session, work);
+    expect(actions.find(a => a.id === 'sessions.cancelTurn')?.enabled).toBe(active);
+    expect(actions.find(a => a.id === 'sessions.send')?.enabled).toBe(true);
+  }
+  work.executionModelActive = false;
+  work.status = 'queued';
+  expect(sessionActions(session, work).find(a => a.id === 'sessions.cancelTurn')?.enabled).toBe(true);
 });

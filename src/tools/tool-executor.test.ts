@@ -1,3 +1,4 @@
+import { createWorkspaceTools } from "./workspace-tools.js";
 import { undispatchedResult } from "./undispatched-result.js";
 import { verifyHostExecution } from "../execution/host-authority.js";
 import { localApprovalScope } from "../security/approval-scope.js";
@@ -409,6 +410,40 @@ describe("ToolExecutor exception containment", () => {
       reason: "timeout",
       dispatchState: "finished"
     });
+  });
+
+  it.each(["known", "timeout", "signal", "cancelled", "spoofed"])("preserves authorization and uncertainty for %s command failures", async kind => {
+    const terminal = createWorkspaceTools({ workspaceRoot: process.cwd() }).find(tool => tool.name === "terminal.run")!;
+    const run = vi.fn(async (): Promise<ToolResult> => ({ ok: false, content: "Test failed", metadata: {
+      code: 1, signal: kind === "signal" ? "SIGTERM" : null, timedOut: kind === "timeout", cancelled: kind === "cancelled"
+    } }));
+    const decide = vi.fn(() => "allow" as const);
+    const tool: RegisteredTool = { ...createEchoTool("test.command"), riskClass: "workspace-write",
+      run,
+      ...(kind === "spoofed" ? {} : { isFailureOutcomeKnown: terminal.isFailureOutcomeKnown }) };
+    const { executor } = await setupExecutor({ tools: [tool], policy: { decide } });
+    const request = { tool: tool.name, input: {}, trustedWorkspace: true, sessionId: "test-session" };
+    const first = await executor.executeTool(request);
+    const second = await executor.executeTool(request);
+    expect(first?.result?.ok).toBe(false);
+    expect(first?.settlement?.sideEffectState).toBe(kind === "known" ? "confirmed" : "possible");
+    expect(run).toHaveBeenCalledTimes(kind === "known" ? 2 : 1);
+    if (kind === "known") expect(decide).toHaveBeenCalledTimes(2);
+    else expect(second?.result?.metadata?.reason).toBe("uncertain-mutation-replay");
+  });
+
+  it("rechecks policy before retrying a known failed command", async () => {
+    const terminal = createWorkspaceTools({ workspaceRoot: process.cwd() }).find(tool => tool.name === "terminal.run")!;
+    const run = vi.fn(async (): Promise<ToolResult> => ({ ok: false, content: "Test failed",
+      metadata: { code: 1, signal: null, timedOut: false, cancelled: false } }));
+    let allowed = true;
+    const { executor } = await setupExecutor({ tools: [{ ...createEchoTool("test.command"), riskClass: "workspace-write", run,
+      isFailureOutcomeKnown: terminal.isFailureOutcomeKnown }], policy: { decide: () => allowed ? "allow" : "deny" } });
+    const request = { tool: "test.command", input: {}, trustedWorkspace: true, sessionId: "test-session" };
+    expect((await executor.executeTool(request))?.settlement?.sideEffectState).toBe("confirmed");
+    allowed = false;
+    expect((await executor.executeTool(request))?.decision).toBe("deny");
+    expect(run).toHaveBeenCalledOnce();
   });
 
   it("marks a timed-out mutation uncertain and blocks an identical replay", async () => {
