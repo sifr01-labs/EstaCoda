@@ -97,7 +97,7 @@ export function deriveExecutionFinalOutcome(input: {
   openContinuation?: boolean;
 }): ExecutionFinalOutcome {
   const fileEvidence = fileOutputEvidence({ requirements: input.requestRequirements, ...input });
-  const verifiedFiles = verifiedFileMutationCallIds(input);
+  const verifiedFiles = verifiedFileMutationCallIds({ ...input, requirements: input.requestRequirements });
   const confirmedActions = confirmedActionReceipts(input.executionReceipts).map((receipt) =>
     (receipt.toolCallId !== undefined && verifiedFiles.has(receipt.toolCallId)) ||
     (fileEvidence.satisfied && fileEvidence.writeCallId !== undefined && fileEvidence.writeCallId === receipt.toolCallId)

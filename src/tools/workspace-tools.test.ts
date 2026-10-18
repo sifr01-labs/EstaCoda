@@ -1187,3 +1187,83 @@ describe("terminal.run child process environment", () => {
     }
   });
 });
+
+describe("exact workspace text copies", () => {
+  it.each(["# قرار — Décision\r\n\r\nKeep café and العربية.\r\n\r\n", "", "large\n".repeat(12000)])("copies source bytes without retyping a preview %#", async content => {
+    const root = await makeTempDir();
+    await writeFile(join(root, "source.md"), content);
+    const tools = createWorkspaceTools({ workspaceRoot: root, maxReadBytes: 100 });
+    const read = tools.find(t => t.name === "file.read")!;
+    const write = tools.find(t => t.name === "file.write")!;
+    const source = await read.run({ path: "source.md" });
+    const result = await write.run({ path: "copy.md", sourceFile: { path: "source.md" } });
+    expect(result).toMatchObject({ ok: true, metadata: { copiedSource: { path: "source.md", contentSha256: source.metadata!.contentSha256 } } });
+    expect(await readFile(join(root, "copy.md"))).toEqual(await readFile(join(root, "source.md")));
+    expect((await read.run({ path: "copy.md" })).metadata!.contentSha256).toBe(source.metadata!.contentSha256);
+  });
+  it("rejects stale sources, source aliases, escape paths, binary and lossy UTF-8, with no write", async () => {
+    const root = await makeTempDir();
+    const tools = createWorkspaceTools({ workspaceRoot: root });
+    const write = tools.find(t => t.name === "file.write")!;
+    const original = Buffer.from("original\n");
+    await writeFile(join(root, "source.txt"), original);
+    await symlink(join(root, "source.txt"), join(root, "alias.txt"));
+    await tools.find(t => t.name === "file.read")!.run({ path: "source.txt" });
+    const input = { path: "copy.txt", sourceFile: { path: "source.txt" } };
+    for (const source of ["../outside.txt", "/etc/passwd", "alias.txt"]) expect((await write.run({ ...input, sourceFile: { path: source } })).ok).toBe(false);
+    expect((await write.run({ ...input, path: "source.txt" })).ok).toBe(false);
+    expect((await write.run({ ...input, content: "conflict" })).ok).toBe(false);
+    expect((await write.run({ ...input, sourceResult: { taskId: "t", resultId: "r" } })).ok).toBe(false);
+    for (const bytes of [Buffer.from("changed\n"), Buffer.from([0, 1, 2]), Buffer.from([0xff, 0xfe])]) {
+      await writeFile(join(root, "source.txt"), bytes);
+      expect((await write.run(input)).ok).toBe(false);
+    }
+    await expect(access(join(root, "copy.txt"))).rejects.toThrow();
+  });
+  it("preserves overwrite and shrink guards for copies", async () => {
+    const root = await makeTempDir();
+    await writeFile(join(root, "source.txt"), "x");
+    await writeFile(join(root, "copy.txt"), "original\n".repeat(200));
+    const tools = createWorkspaceTools({ workspaceRoot: root });
+    const write = tools.find(t => t.name === "file.write")!;
+    await tools.find(t => t.name === "file.read")!.run({ path: "source.txt" });
+    const input = { path: "copy.txt", sourceFile: { path: "source.txt" } };
+    expect((await write.run(input)).metadata?.overwriteRequired).toBe(true);
+    expect((await write.run({ ...input, overwrite: true })).metadata?.suspiciousShrink).toBe(true);
+    expect((await write.run({ ...input, overwrite: true, allowShrink: true })).ok).toBe(true);
+  });
+  it("does not copy unsaved editor text as disk evidence", async () => {
+    const root = await makeTempDir();
+    await writeFile(join(root, "source.txt"), "disk");
+    const writeTextFile = vi.fn();
+    let editorContent = "disk";
+    const tools = createWorkspaceTools({ workspaceRoot: root, fsAdapter: { readTextFile: async () => editorContent, writeTextFile } });
+    await tools.find(t => t.name === "file.read")!.run({ path: "source.txt" });
+    editorContent = "unsaved";
+    const write = tools.find(t => t.name === "file.write")!;
+    expect((await write.run({ path: "copy.txt", sourceFile: { path: "source.txt" } })).ok).toBe(false);
+    expect(writeTextFile).not.toHaveBeenCalled();
+  });
+});
+
+it("requires an actual source read before copying", async () => {
+  const root = await makeTempDir();
+  await writeFile(join(root, "source.txt"), "known");
+  const write = createWorkspaceTools({ workspaceRoot: root }).find(t => t.name === "file.write")!;
+  const result = await write.run({ path: "copy.txt", sourceFile: { path: "source.txt" } });
+  expect(result.ok).toBe(false);
+  expect(isUndispatchedResult(result)).toBe(true);
+  await expect(access(join(root, "copy.txt"))).rejects.toThrow();
+});
+
+it("refuses lossy UTF-8 copies even after a successful source read", async () => {
+  const root = await makeTempDir();
+  await writeFile(join(root, "source.txt"), Buffer.from([0x61, 0xff, 0x0a]));
+  const tools = createWorkspaceTools({ workspaceRoot: root });
+  const read = await tools.find(t => t.name === "file.read")!.run({ path: "source.txt" });
+  expect(read.ok).toBe(true);
+  const result = await tools.find(t => t.name === "file.write")!.run({ path: "copy.txt", sourceFile: { path: "source.txt" } });
+  expect(result).toMatchObject({ ok: false });
+  expect(result.content).toContain("valid UTF-8");
+  await expect(access(join(root, "copy.txt"))).rejects.toThrow();
+});

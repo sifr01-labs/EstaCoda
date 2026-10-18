@@ -117,7 +117,13 @@ Patch failures are counted per target file within the active tool provider. Afte
 
 Changing an existing file requires `overwrite: true`; otherwise the tool returns a structured failure with byte deltas and a bounded change preview without modifying the file. Large suspicious shrink overwrites, such as replacing a long transcript or markdown document with a tiny summary, are blocked even with `overwrite: true` unless `allowShrink: true` is also explicit.
 
-Use `file.patch` for targeted edits to existing files. Use `file.write` with overwrite intent only when replacing the whole file is the desired operation.
+Use `file.patch` for targeted edits to existing files. Preserve explicitly protected fields and types; clarify conflicting requirements before changing protected content. Use `file.write` with overwrite intent only when replacing the whole file is the desired operation.
+
+For an exact UTF-8 text copy, first `file.read` the source, then call `file.write` with `sourceFile: { path }`. The runtime retains the source digest internally. Omit `content` (or supply an empty string for provider compatibility). The tool copies the actual source content, including Unicode, line endings and trailing blank lines, rather than retyping the displayed preview. The leading `# path` line in a read response is a display label, not file content.
+
+A source-copy reference requires a successful materialized read in the active workspace tool instance; a supplied path does not grant a read. The source must still match that digest. Source paths use existing workspace protections and reject symlinks, binary/invalid UTF-8 content, unsaved editor differences, and copying onto the same path. Destination overwrite/shrink guards and execution approvals remain unchanged. After restart or reference eviction, read the source again.
+
+Explicit copy requests bind source equality separately from destination write/readback. Completion requires same-turn authorized source evidence and a destination digest equal to the source, as well as matching destination readback. An unnamed follow-up uses the tool's source-copy receipt; it cannot qualify by merely writing and rereading the same incorrect text. This verifies the bytes observed during execution, not future external edits or arbitrary semantic preservation requirements.
 
 ### `file.search`
 

@@ -34,7 +34,11 @@ export function validateRequestRequirements(value: unknown): RequestRequirements
     if (!["general", "literature", "paper"].includes(String(research.domain)) || typeof research.fresh !== "boolean") throw new Error("Invalid research requirement.");
   }
   if (record.fileOutput !== undefined) {
-    const file = object(record.fileOutput, ["format", "path"]);
+    const file = object(record.fileOutput, ["format", "path", "exactCopy"]);
+    if (file.exactCopy !== undefined) {
+      const copy = object(file.exactCopy, ["sourcePath"]);
+      if (copy.sourcePath !== undefined) validateRequestRequirements({ skillReferences: [], issues: [], fileOutput: { format: "text", path: copy.sourcePath } });
+    }
     if (file.format !== "markdown" && file.format !== "text") throw new Error("Invalid file format.");
     if (file.path !== undefined && (typeof file.path !== "string" || file.path.length === 0 || file.path.length > 240 ||
       /^(?:[/\\]|[a-z]:)|[\u0000-\u001f\u007f]/iu.test(file.path) || file.path.split(/[/\\]/u).includes("..") ||

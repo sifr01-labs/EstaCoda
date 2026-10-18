@@ -1,0 +1,772 @@
+{
+  "baseCommit": "c4ac335d45086221e7e1305b2ac00e181ff042a3",
+  "date": "2026-10-18",
+  "runtime": "isolated compiled core, not installed Desktop/gateway",
+  "sourceSha256": {
+    "src/contracts/intent.ts": "76c5c5936c36364060651d03e99ea6efcc187a42ca64a25c5754634bf9835fe1",
+    "src/contracts/request-requirements.ts": "6dcfa0eecd93c2e8a72d75758e2838de1ac25d40fbc04df07011a53669b4c42f",
+    "src/runtime/request-requirements.ts": "433a33ce45b56c8bc68745ffb1f9be088535e66a76541f7cdb67c3c159591ae2",
+    "src/runtime/file-output-evidence.ts": "b614cb52899f5acff82038993a475eb143457e731bc44a8ea086e1d343c85941",
+    "src/runtime/execution-outcome.ts": "fdc2044f6dd83ba798bd6fe5225b0a9db0756694003a775d4aa4d65dcac0573a",
+    "src/runtime/agent-loop.ts": "577913c67af739fdd5baa3b791fb82bf60a0188e353b4a8f0c40be24ccfb1e0f",
+    "src/prompt/prompt-assembly.ts": "bd11774977c3d977e3bf2c558ab56515c96c5ebfefb1e2b56195000c361ce5b2",
+    "src/tools/workspace-tools.ts": "3826936fa92b245b90daf5899488e7497ecbe1b7d9154ae8c6168314c3e7f808"
+  },
+  "method": "Frozen original failure fixtures, four adjacent regressions and one separate two-turn clarification scenario. Actual configured GPT/Jev; isolated workspaces and databases; original approval policy. Five original failures passed; the external SQLite timeout was not rerun or counted as fixed. This is not a rerun of all 120 cases.",
+  "validation": [
+    {
+      "command": "pnpm run typecheck",
+      "exit": 0,
+      "seconds": 8.5,
+      "log": "/tmp/exact-copy-final-typecheck.log"
+    },
+    {
+      "command": "pnpm run build",
+      "exit": 0,
+      "seconds": 5.5,
+      "log": "/tmp/exact-copy-final-build.log"
+    },
+    {
+      "command": "pnpm run test --maxWorkers=4",
+      "exit": 0,
+      "seconds": 137.5,
+      "log": "/tmp/exact-copy-final-test.log"
+    },
+    {
+      "command": "pnpm run audit:runtime-imports",
+      "exit": 0,
+      "seconds": 0.7,
+      "log": "/tmp/exact-copy-final-audit-runtime-imports.log"
+    },
+    {
+      "command": "pnpm run audit:esm",
+      "exit": 0,
+      "seconds": 0.9,
+      "log": "/tmp/exact-copy-final-audit-esm.log"
+    },
+    {
+      "command": "pnpm run smoke",
+      "exit": 0,
+      "log": "/tmp/exact-copy-final-smoke.log"
+    },
+    {
+      "command": "pnpm run smoke:dist",
+      "exit": 0,
+      "log": "/tmp/exact-copy-final-smoke-dist.log"
+    }
+  ],
+  "results": [
+    {
+      "id": "early-11-restart-save-only",
+      "fixture": {
+        "setupPrompt": "Read sales-summary.md and tell me the total. Do not modify it or browse.",
+        "prompt": "Make an identical copy of the report you just saved as sales-summary-copy.md. Do not reanalyse the CSV or do any research. Read back the copy to verify it.",
+        "followup": null,
+        "files": {
+          "sales-summary.md": "# Paid sales\nEast: 180\nWest: 120\nTotal: 300\nPaid orders: 4\n"
+        },
+        "checks": [
+          {
+            "kind": "copy",
+            "source": "sales-summary.md",
+            "path": "sales-summary-copy.md"
+          }
+        ]
+      },
+      "status": "completed",
+      "faults": [],
+      "verdict": "pass",
+      "model": {
+        "provider": "codex",
+        "id": "gpt-6.1-sol"
+      },
+      "routingMode": "jev-assisted",
+      "outputs": {
+        "sales-summary.md": {
+          "bytes": 59,
+          "sha256": "88ffcc1e8a3855a0f8521ac382e71143b76d759eecee4c6b00f93496fa0b1244",
+          "content": "# Paid sales\nEast: 180\nWest: 120\nTotal: 300\nPaid orders: 4\n"
+        },
+        "sales-summary-copy.md": {
+          "bytes": 59,
+          "sha256": "88ffcc1e8a3855a0f8521ac382e71143b76d759eecee4c6b00f93496fa0b1244",
+          "content": "# Paid sales\nEast: 180\nWest: 120\nTotal: 300\nPaid orders: 4\n"
+        }
+      },
+      "turns": [
+        {
+          "kind": "setup",
+          "answer": "The total is **300** (East: 180 + West: 120).",
+          "tools": [
+            {
+              "name": "file.read",
+              "decision": "allow",
+              "ok": true,
+              "sourceFile": null
+            }
+          ]
+        },
+        {
+          "kind": "initial",
+          "answer": "Created `sales-summary-copy.md` as an identical copy of `sales-summary.md` and read it back to verify. No CSV reanalysis or research was performed.",
+          "tools": [
+            {
+              "name": "file.read",
+              "decision": "allow",
+              "ok": true,
+              "sourceFile": null
+            },
+            {
+              "name": "file.write",
+              "decision": "allow",
+              "ok": true,
+              "sourceFile": {
+                "path": "sales-summary.md"
+              }
+            },
+            {
+              "name": "file.read",
+              "decision": "allow",
+              "ok": true,
+              "sourceFile": null
+            },
+            {
+              "name": "file.read",
+              "decision": "allow",
+              "ok": true,
+              "sourceFile": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "latest-100-authorization-denial",
+      "fixture": {
+        "prompt": "Create approval-check.txt containing APPROVED and verify it. If permission is denied, stop and clearly explain the denial. Do not attempt another path or tool.",
+        "followup": null,
+        "files": {},
+        "checks": [],
+        "expectedBlocked": true,
+        "denyWrites": true
+      },
+      "status": "blocked",
+      "faults": [],
+      "verdict": "pass",
+      "model": {
+        "provider": "codex",
+        "id": "gpt-6.1-sol"
+      },
+      "routingMode": "jev-assisted",
+      "outputs": {},
+      "turns": [
+        {
+          "kind": "initial",
+          "answer": "File output is incomplete. Authorization denied file.write; the requested write was not permitted.",
+          "tools": [
+            {
+              "name": "file.write",
+              "decision": "deny",
+              "ok": null,
+              "sourceFile": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "latest-103-restart-supersede-denial",
+      "fixture": {
+        "prompt": "Write blocked-note.md containing a short note and verify it. If authorization denies it, stop and explain.",
+        "followup": "New unrelated question: 27 of 90 tickets are resolved. What percentage is resolved? Answer from these numbers only, under 20 words, without tools.",
+        "files": {},
+        "checks": [],
+        "denyWrites": true
+      },
+      "status": "completed",
+      "faults": [],
+      "verdict": "pass",
+      "model": {
+        "provider": "codex",
+        "id": "gpt-6.1-sol"
+      },
+      "routingMode": "jev-assisted",
+      "outputs": {},
+      "turns": [
+        {
+          "kind": "initial",
+          "answer": "File output is incomplete. Authorization denied file.write; the requested write was not permitted.",
+          "tools": [
+            {
+              "name": "file.write",
+              "decision": "deny",
+              "ok": null,
+              "sourceFile": null
+            }
+          ]
+        },
+        {
+          "kind": "followup",
+          "answer": "30% of tickets are resolved.",
+          "tools": []
+        }
+      ]
+    },
+    {
+      "id": "latest-104-unicode-exact-copy",
+      "fixture": {
+        "prompt": "Copy memo.md exactly to archive.md, preserving Unicode, blank lines and the trailing newline. Read back to verify identical content. No browsing or commands.",
+        "followup": null,
+        "files": {
+          "memo.md": "# قرار — Décision\n\nKeep café and العربية unchanged.\n\n"
+        },
+        "checks": [
+          {
+            "kind": "copy",
+            "source": "memo.md",
+            "path": "archive.md"
+          }
+        ]
+      },
+      "status": "completed",
+      "faults": [],
+      "verdict": "pass",
+      "model": {
+        "provider": "codex",
+        "id": "gpt-6.1-sol"
+      },
+      "routingMode": "jev-assisted",
+      "outputs": {
+        "memo.md": {
+          "bytes": 68,
+          "sha256": "b6d1c4248a198be5ad5504df05969258a13dcf0f202f81860c7bfebd16ac4a4e",
+          "content": "# قرار — Décision\n\nKeep café and العربية unchanged.\n\n"
+        },
+        "archive.md": {
+          "bytes": 68,
+          "sha256": "b6d1c4248a198be5ad5504df05969258a13dcf0f202f81860c7bfebd16ac4a4e",
+          "content": "# قرار — Décision\n\nKeep café and العربية unchanged.\n\n"
+        }
+      },
+      "turns": [
+        {
+          "kind": "initial",
+          "answer": "Copied `memo.md` exactly to `archive.md` and read it back to verify identical content, preserving Unicode, blank lines, and the trailing newline. No browsing or commands used.",
+          "tools": [
+            {
+              "name": "file.read",
+              "decision": "allow",
+              "ok": true,
+              "sourceFile": null
+            },
+            {
+              "name": "file.write",
+              "decision": "allow",
+              "ok": true,
+              "sourceFile": {
+                "path": "memo.md"
+              }
+            },
+            {
+              "name": "file.read",
+              "decision": "allow",
+              "ok": true,
+              "sourceFile": null
+            },
+            {
+              "name": "file.read",
+              "decision": "allow",
+              "ok": true,
+              "sourceFile": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "latest-90-nested-json-types",
+      "fixture": {
+        "prompt": "In settings.json enable only job a. Preserve job order, job b, the numeric zero limit and the string label 001. Read back and verify. No browsing.",
+        "followup": null,
+        "files": {
+          "settings.json": "{\"jobs\":[{\"id\":\"a\",\"enabled\":false},{\"id\":\"b\",\"enabled\":true}],\"limit\":0,\"label\":\"001\"}"
+        },
+        "checks": [
+          {
+            "kind": "json",
+            "path": "settings.json",
+            "value": {
+              "jobs": [
+                {
+                  "id": "a",
+                  "enabled": true
+                },
+                {
+                  "id": "b",
+                  "enabled": true
+                }
+              ],
+              "limit": 0,
+              "label": "001"
+            }
+          }
+        ]
+      },
+      "status": "completed",
+      "faults": [],
+      "verdict": "pass",
+      "model": {
+        "provider": "codex",
+        "id": "gpt-6.1-sol"
+      },
+      "routingMode": "jev-assisted",
+      "outputs": {
+        "settings.json": {
+          "bytes": 86,
+          "sha256": "adf8371bc71e27ba8e4fff6c3143ac685c0df844ebf1069c421cdc65ba8d58c2",
+          "content": "{\"jobs\":[{\"id\":\"a\",\"enabled\":true},{\"id\":\"b\",\"enabled\":true}],\"limit\":0,\"label\":\"001\"}"
+        }
+      },
+      "turns": [
+        {
+          "kind": "initial",
+          "answer": "Updated and read back `settings.json`. Only job **a** was changed to enabled.\n\nVerified:\n- Job order remains **a, b**.\n- Job **b** is unchanged (`enabled: true`).\n- `limit` remains numeric `0`.\n- `label` remains string `\"001\"`.\n\nNo browsing was used.",
+          "tools": [
+            {
+              "name": "file.read",
+              "decision": "allow",
+              "ok": true,
+              "sourceFile": null
+            },
+            {
+              "name": "file.patch",
+              "decision": "allow",
+              "ok": true,
+              "sourceFile": null
+            },
+            {
+              "name": "file.read",
+              "decision": "allow",
+              "ok": true,
+              "sourceFile": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "latest-91-relative-link-audit",
+      "fixture": {
+        "prompt": "Audit only the relative links in docs/index.md against local files. Save links.json with existing:[\"docs/setup.md\"] and missing:[\"docs/missing.md\"] if those are the findings; verify from the filesystem rather than assuming the example is true. Do not create the missing page or browse. Read back the report.",
+        "followup": null,
+        "files": {
+          "docs/index.md": "# Manual\n[Setup](setup.md)\n[Missing](missing.md)\n",
+          "docs/setup.md": "# Setup\nUse defaults.\n"
+        },
+        "checks": [
+          {
+            "kind": "json",
+            "path": "links.json",
+            "value": {
+              "existing": [
+                "docs/setup.md"
+              ],
+              "missing": [
+                "docs/missing.md"
+              ]
+            }
+          }
+        ]
+      },
+      "status": "completed",
+      "faults": [],
+      "verdict": "pass",
+      "model": {
+        "provider": "codex",
+        "id": "gpt-6.1-sol"
+      },
+      "routingMode": "jev-assisted",
+      "outputs": {
+        "docs/index.md": {
+          "bytes": 49,
+          "sha256": "919adcf97b1fe9c9ede14b55cf2ae13d706f525bfbd027386ecc28f024703d3d",
+          "content": "# Manual\n[Setup](setup.md)\n[Missing](missing.md)\n"
+        },
+        "docs/setup.md": {
+          "bytes": 22,
+          "sha256": "25875f56b91a0eae2f0691cce0056db4a292bccefe364bf003775435cb0aefe0",
+          "content": "# Setup\nUse defaults.\n"
+        },
+        "links.json": {
+          "bytes": 70,
+          "sha256": "ca1b4db676f3dd189b1d92611104692852b031bfbd8069fed111c2c07cf54560",
+          "content": "{\n  \"existing\": [\"docs/setup.md\"],\n  \"missing\": [\"docs/missing.md\"]\n}\n"
+        }
+      },
+      "turns": [
+        {
+          "kind": "initial",
+          "answer": "Audited the relative links in `docs/index.md` against local files, saved `links.json`, and read it back:\n\n```json\n{\n  \"existing\": [\"docs/setup.md\"],\n  \"missing\": [\"docs/missing.md\"]\n}\n```\n\nNo missing page was created, and no browsing was performed.",
+          "tools": [
+            {
+              "name": "file.read",
+              "decision": "allow",
+              "ok": true,
+              "sourceFile": null
+            },
+            {
+              "name": "terminal.run",
+              "decision": "allow",
+              "ok": true,
+              "sourceFile": null
+            },
+            {
+              "name": "terminal.run",
+              "decision": "allow",
+              "ok": true,
+              "sourceFile": null
+            },
+            {
+              "name": "file.write",
+              "decision": "allow",
+              "ok": true,
+              "sourceFile": null
+            },
+            {
+              "name": "file.read",
+              "decision": "allow",
+              "ok": true,
+              "sourceFile": null
+            },
+            {
+              "name": "file.read",
+              "decision": "allow",
+              "ok": true,
+              "sourceFile": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "latest-93-german-placeholders",
+      "fixture": {
+        "prompt": "Translate welcome and remaining in en.json to German and save de.json. Preserve every key, placeholders {name} and {n}, and token exactly SESSION_ID. Verify the saved JSON. No browsing.",
+        "followup": null,
+        "files": {
+          "en.json": "{\"welcome\":\"Welcome, {name}\",\"remaining\":\"{n} minutes remaining\",\"token\":\"SESSION_ID\"}"
+        },
+        "checks": []
+      },
+      "status": "completed",
+      "faults": [],
+      "verdict": "pass",
+      "model": {
+        "provider": "codex",
+        "id": "gpt-6.1-sol"
+      },
+      "routingMode": "jev-assisted",
+      "outputs": {
+        "de.json": {
+          "bytes": 91,
+          "sha256": "8ad80d0b1bbe97aabf296ae657cf2ebbf0300a9e16e6592da62275674a5dc175",
+          "content": "{\"welcome\":\"Willkommen, {name}\",\"remaining\":\"{n} Minuten verbleibend\",\"token\":\"SESSION_ID\"}"
+        },
+        "en.json": {
+          "bytes": 86,
+          "sha256": "c8977e7ad6f88e037b7552583ecf0bb64da4ee1727ea4abc4a9a82727bf3bdcb",
+          "content": "{\"welcome\":\"Welcome, {name}\",\"remaining\":\"{n} minutes remaining\",\"token\":\"SESSION_ID\"}"
+        }
+      },
+      "turns": [
+        {
+          "kind": "initial",
+          "answer": "Saved `de.json` with:\n- `welcome`: `Willkommen, {name}`\n- `remaining`: `{n} Minuten verbleibend`\n\nRead back the saved file and checked valid JSON, keys, and placeholders. The token was written as exactly `SESSION_ID`, but readback redacts its value, so I could not independently verify it. No browsing was used.",
+          "tools": [
+            {
+              "name": "file.read",
+              "decision": "allow",
+              "ok": true,
+              "sourceFile": null
+            },
+            {
+              "name": "file.write",
+              "decision": "allow",
+              "ok": true,
+              "sourceFile": null
+            },
+            {
+              "name": "file.read",
+              "decision": "allow",
+              "ok": true,
+              "sourceFile": null
+            },
+            {
+              "name": "file.read",
+              "decision": "allow",
+              "ok": true,
+              "sourceFile": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "narrow-edit-clarified",
+      "fixture": {
+        "setupPrompt": "In settings.json enable only job a. Preserve job order, job b, the numeric zero limit and the string label 001. Read back and verify. No browsing.",
+        "prompt": "Enable job a and leave job b completely unchanged, including its enabled value. Preserve order, numeric zero limit, and string label 001. Read back and verify.",
+        "followup": null,
+        "files": {
+          "settings.json": "{\"jobs\":[{\"id\":\"a\",\"enabled\":false},{\"id\":\"b\",\"enabled\":true}],\"limit\":0,\"label\":\"001\"}"
+        },
+        "checks": [
+          {
+            "kind": "json",
+            "path": "settings.json",
+            "value": {
+              "jobs": [
+                {
+                  "id": "a",
+                  "enabled": true
+                },
+                {
+                  "id": "b",
+                  "enabled": true
+                }
+              ],
+              "limit": 0,
+              "label": "001"
+            }
+          }
+        ]
+      },
+      "status": "completed",
+      "faults": [],
+      "verdict": "pass",
+      "model": {
+        "provider": "codex",
+        "id": "gpt-6.1-sol"
+      },
+      "routingMode": "jev-assisted",
+      "outputs": {
+        "settings.json": {
+          "bytes": 86,
+          "sha256": "adf8371bc71e27ba8e4fff6c3143ac685c0df844ebf1069c421cdc65ba8d58c2",
+          "content": "{\"jobs\":[{\"id\":\"a\",\"enabled\":true},{\"id\":\"b\",\"enabled\":true}],\"limit\":0,\"label\":\"001\"}"
+        }
+      },
+      "turns": [
+        {
+          "kind": "setup",
+          "answer": "`settings.json` currently has job `b` enabled. “Enable only job a” would require disabling `b`, which conflicts with preserving job `b` unchanged.\n\nShould I enable `a` and **leave `b` enabled**, or enable `a` and **disable `b`**? No changes made yet.",
+          "tools": [
+            {
+              "name": "file.read",
+              "decision": "allow",
+              "ok": true,
+              "sourceFile": null
+            }
+          ]
+        },
+        {
+          "kind": "initial",
+          "answer": "Updated `settings.json` and read it back to verify:\n\n```json\n{\"jobs\":[{\"id\":\"a\",\"enabled\":true},{\"id\":\"b\",\"enabled\":true}],\"limit\":0,\"label\":\"001\"}\n```\n\nVerified that only job `a` changed. Job `b` is unchanged, job order is preserved, `limit` remains numeric `0`, and `label` remains the string `\"001\"`. No browsing used.",
+          "tools": [
+            {
+              "name": "capability.discover",
+              "decision": "allow",
+              "ok": true,
+              "sourceFile": null
+            },
+            {
+              "name": "capability.request",
+              "decision": "allow",
+              "ok": true,
+              "sourceFile": null
+            },
+            {
+              "name": "file.read",
+              "decision": "allow",
+              "ok": true,
+              "sourceFile": null
+            },
+            {
+              "name": "file.patch",
+              "decision": "allow",
+              "ok": true,
+              "sourceFile": null
+            },
+            {
+              "name": "file.read",
+              "decision": "allow",
+              "ok": true,
+              "sourceFile": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "packaged-21-restart-save-only",
+      "fixture": {
+        "setupPrompt": "Read sales-summary.md and tell me the total. Do not modify it or browse.",
+        "prompt": "Make an identical copy of the report you just saved as sales-summary-copy.md. Do not reanalyse the CSV or do any research. Read back the copy to verify it.",
+        "followup": null,
+        "files": {
+          "sales-summary.md": "# Paid sales\nEast: 180\nWest: 120\nTotal: 300\nPaid orders: 4\n"
+        },
+        "checks": [
+          {
+            "kind": "copy",
+            "source": "sales-summary.md",
+            "path": "sales-summary-copy.md"
+          }
+        ]
+      },
+      "status": "completed",
+      "faults": [],
+      "verdict": "pass",
+      "model": {
+        "provider": "codex",
+        "id": "gpt-6.1-sol"
+      },
+      "routingMode": "jev-assisted",
+      "outputs": {
+        "sales-summary.md": {
+          "bytes": 59,
+          "sha256": "88ffcc1e8a3855a0f8521ac382e71143b76d759eecee4c6b00f93496fa0b1244",
+          "content": "# Paid sales\nEast: 180\nWest: 120\nTotal: 300\nPaid orders: 4\n"
+        },
+        "sales-summary-copy.md": {
+          "bytes": 59,
+          "sha256": "88ffcc1e8a3855a0f8521ac382e71143b76d759eecee4c6b00f93496fa0b1244",
+          "content": "# Paid sales\nEast: 180\nWest: 120\nTotal: 300\nPaid orders: 4\n"
+        }
+      },
+      "turns": [
+        {
+          "kind": "setup",
+          "answer": "The total paid sales are **300** (East: 180 + West: 120).",
+          "tools": [
+            {
+              "name": "file.read",
+              "decision": "allow",
+              "ok": true,
+              "sourceFile": null
+            }
+          ]
+        },
+        {
+          "kind": "initial",
+          "answer": "Created `sales-summary-copy.md` as an identical copy of `sales-summary.md` and read it back to verify:\n\n```markdown\n# Paid sales\nEast: 180\nWest: 120\nTotal: 300\nPaid orders: 4\n```\n\nNo CSV reanalysis or research was performed.",
+          "tools": [
+            {
+              "name": "file.read",
+              "decision": "allow",
+              "ok": true,
+              "sourceFile": null
+            },
+            {
+              "name": "file.write",
+              "decision": "allow",
+              "ok": true,
+              "sourceFile": {
+                "path": "sales-summary.md"
+              }
+            },
+            {
+              "name": "file.read",
+              "decision": "allow",
+              "ok": true,
+              "sourceFile": null
+            }
+          ]
+        }
+      ]
+    },
+    {
+      "id": "twentyfive-79-restart-exact-copy",
+      "fixture": {
+        "prompt": "Read decision.txt and tell me the decision and owner. Do not modify it or browse.",
+        "followup": "Save an identical copy of that file as decision-copy.txt, preserving blank lines and trailing newline. Read back the copy. Do not redo any analysis or research.",
+        "files": {
+          "decision.txt": "Decision: hold launch.\n\nOwner: Lina\n"
+        },
+        "checks": [
+          {
+            "kind": "copy",
+            "source": "decision.txt",
+            "path": "decision-copy.txt"
+          }
+        ]
+      },
+      "status": "completed",
+      "faults": [],
+      "verdict": "pass",
+      "model": {
+        "provider": "codex",
+        "id": "gpt-6.1-sol"
+      },
+      "routingMode": "jev-assisted",
+      "outputs": {
+        "decision-copy.txt": {
+          "bytes": 36,
+          "sha256": "63d7d519f1b9a5bbde8544023fac5b3fcd7ec7266472dd696657d59bb01a8408",
+          "content": "Decision: hold launch.\n\nOwner: Lina\n"
+        },
+        "decision.txt": {
+          "bytes": 36,
+          "sha256": "63d7d519f1b9a5bbde8544023fac5b3fcd7ec7266472dd696657d59bb01a8408",
+          "content": "Decision: hold launch.\n\nOwner: Lina\n"
+        }
+      },
+      "turns": [
+        {
+          "kind": "initial",
+          "answer": "- **Decision:** Hold launch.\n- **Owner:** Lina.",
+          "tools": [
+            {
+              "name": "file.read",
+              "decision": "allow",
+              "ok": true,
+              "sourceFile": null
+            }
+          ]
+        },
+        {
+          "kind": "followup",
+          "answer": "Saved and read back `decision-copy.txt`, preserving the blank line and trailing newline exactly.\n\n```text\nDecision: hold launch.\n\nOwner: Lina\n```",
+          "tools": [
+            {
+              "name": "file.read",
+              "decision": "allow",
+              "ok": true,
+              "sourceFile": null
+            },
+            {
+              "name": "file.write",
+              "decision": "allow",
+              "ok": true,
+              "sourceFile": {
+                "path": "decision.txt"
+              }
+            },
+            {
+              "name": "file.read",
+              "decision": "allow",
+              "ok": true,
+              "sourceFile": null
+            },
+            {
+              "name": "file.read",
+              "decision": "allow",
+              "ok": true,
+              "sourceFile": null
+            }
+          ]
+        }
+      ]
+    }
+  ]
+}

@@ -1129,7 +1129,7 @@ export class AgentLoop {
           toolExecutions: executions, executionReceipts: receipts, skillRequirementsSatisfied: true });
         if (research.missing.includes("requested-worker-evidence")) return "Requested worker evidence is missing. Use delegate_task to fulfill the user's worker requirement. If it is not exposed, discover and request the delegation capability before continuing.";
         const file = fileOutputEvidence({ requirements: intent.requestRequirements, toolExecutions: executions, executionReceipts: receipts });
-        if (!file.satisfied) return `File output: ${file.reason}. Use file.write or file.patch for the requested target, then file.read with only path, without lineStart or lineEnd, to verify the entire file. Shell operations alone do not provide file-write evidence. For a copy, first read the source and preserve its exact content; for an accepted task result use file.write sourceResult. Respect overwrite approvals and do not repeat research. Do not claim completion before verification.`;
+        if (!file.satisfied) return `File output: ${file.reason}. Use file.write or file.patch for the requested target, then file.read with only path, without lineStart or lineEnd, to verify the entire file. Shell operations alone do not provide file-write evidence. For a copy, read the source and use file.write sourceFile with its path; the runtime checks that destination readback matches the observed source; for an accepted task result use file.write sourceResult. Respect overwrite approvals and do not repeat research. Do not claim completion before verification.`;
         return research.satisfied ? undefined : `Research requirements remain incomplete: ${research.missing.join(", ")}. Correct the report using observed sources. After changing a saved report, read the complete file again before completing.`;
       }),
       visibleTurnId: visibleTurn.id,
@@ -1488,6 +1488,8 @@ export class AgentLoop {
             ? "Read the complete accepted primary research result from its authorized Task before saving."
           : fileEvidence.reason === "report-content-mismatch"
             ? "The written file does not match the accepted research report."
+          : fileEvidence.reason === "copy-source-mismatch"
+            ? "The output has not been verified as identical to its source. Read the source and copy it with file.write sourceFile, then read back the destination."
           : fileEvidence.reason === "missing-write"
             ? "There is no successful write or patch for the requested output."
             : "The requested output has not been confirmed by a complete, matching readback from disk.";

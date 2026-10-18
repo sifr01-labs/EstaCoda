@@ -38,7 +38,7 @@ export type RequestRequirements = {
   originTurnId?: string;
   skillReferences: string[];
   delegation?: { count?: number };
-  fileOutput?: { format: "markdown" | "text"; path?: string };
+  fileOutput?: { format: "markdown" | "text"; path?: string; exactCopy?: { sourcePath?: string } };
   research?: { domain: "general" | "literature" | "paper"; fresh: boolean };
   issues: Array<"request-too-long" | "ambiguous-file-target" | "unsafe-file-target">;
 };

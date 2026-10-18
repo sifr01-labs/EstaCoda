@@ -101,7 +101,7 @@ export function deriveRequestRequirements(userText: string, originTurnId?: strin
         : /\b(?:papers?|arxiv|literature|academic|publications?)\b|(?:أوراق|أبحاث|أدبيات)/iu.test(actionSegment) ? "literature" : "general";
       result.research = { domain: domain === "general" ? result.research?.domain ?? domain : domain, fresh: result.research?.fresh === true || /\b(?:latest|recent|current|fresh|newest)\b|(?:أحدث|حديث|الحالية)/iu.test(actionSegment) };
     }
-    const copy = /^\s*(?:(?:can|could|would)\s+you\s+)?(?:(?:please|just)\s+)?(?:copy\b|(?:make|create)\s+(?:(?:an?|the|identical|exact|unchanged)\s+)*copy\b)/iu.test(actionSegment) && /\b(?:as|to)\s+`?[^`\s]+\.(?:md|markdown|txt)`?\s*[.!]?$/iu.test(segment);
+    const copy = /^\s*(?:(?:can|could|would)\s+you\s+)?(?:(?:please|just)\s+)?(?:copy\b|(?:make|create|save)\s+(?:(?:an?|the|identical|exact|unchanged)\s+)*copy\b)/iu.test(actionSegment) && new RegExp(String.raw`\b(?:as|to)\s+(?:\x60[^\x60]+\x60|[^\s]+\.(?:${TEXT_EXTENSIONS}))\s*(?:[.!]|,?\s*(?:preserving|while preserving)\b|$)`, "iu").test(segment);
     // Locate the output action without treating a filename as a verb. Keep
     // offsets stable so input paths preceding the action are not destinations.
     const masked = segment.replace(/`[^`]*`/gu, value => " ".repeat(value.length)).replace(FILE_OPERAND, value => " ".repeat(value.length));
@@ -124,7 +124,10 @@ export function deriveRequestRequirements(userText: string, originTurnId?: strin
     if (new Set([...paths, ...(result.fileOutput?.path === undefined ? [] : [result.fileOutput.path])]).size > 1) result.issues.push("ambiguous-file-target");
     const safePath = path !== undefined && path.length <= 240 && !/^(?:[/\\]|[a-z]:)/iu.test(path) && !path.split(/[/\\]/u).includes("..");
     if (path !== undefined && !safePath) result.issues.push("unsafe-file-target");
-    result.fileOutput = { format: markdown ? "markdown" : "text", ...(safePath ? { path: path!.replaceAll("\\", "/") } : {}) };
+    const sourcePath = copy && namedPaths.length === 2 ? namedPaths[0] : undefined;
+    const safeSource = sourcePath !== undefined && !/^(?:[/\\]|[a-z]:)/iu.test(sourcePath) && !sourcePath.split(/[/\\]/u).includes("..");
+    if (sourcePath !== undefined && !safeSource) result.issues.push("unsafe-file-target");
+    result.fileOutput = { ...(copy ? { exactCopy: safeSource ? { sourcePath: sourcePath!.replaceAll("\\", "/") } : {} } : {}), format: markdown ? "markdown" : "text", ...(safePath ? { path: path!.replaceAll("\\", "/") } : {}) };
   }
   result.skillReferences = [...new Set(result.skillReferences)];
   result.issues = [...new Set(result.issues)];

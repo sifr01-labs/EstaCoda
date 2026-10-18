@@ -148,3 +148,69 @@ describe("verified report content", () => {
     expect(verifiedFileOutputContent(observe([write, call("file.read")]))).toBeUndefined();
   });
 });
+
+describe("exact-copy source equality", () => {
+  const prompt = "Copy source.md to report.md";
+  it("requires source equality, not just a consistent destination write/readback", () => {
+    const bad = { contentSha256: "a".repeat(64) };
+    const input = observe([call("file.read", "source.md"), call("file.write", "report.md", bad), call("file.read", "report.md", bad)], prompt);
+    expect(fileOutputEvidence(input)).toEqual({ satisfied: false, reason: "copy-source-mismatch" });
+    expect(deriveExecutionFinalOutcome({ ...input, requestRequirements: input.requirements, completionFloor: "mutation_with_verification" }).status).not.toMatch(/^completed/u);
+    expect(fileOutputEvidence(observe([call("file.read", "source.md"), call("file.write"), call("file.read")], prompt)).satisfied).toBe(true);
+  });
+  it.each(["missing", "denied", "partial", "stale-turn", "changed-after-copy", "wrong-source"])("rejects %s source evidence", kind => {
+    const read = call("file.read", "source.md", kind === "partial" ? { truncated: true } : {});
+    if (kind === "denied") read.decision = "deny";
+    const input = observe([...(kind === "missing" ? [] : [read]), call("file.write", "report.md", kind === "wrong-source" ? { copiedSource: { path: "other.md", contentSha256: digest } } : {}), call("file.read"), ...(kind === "changed-after-copy" ? [call("file.patch", "source.md")] : [])], prompt);
+    if (kind === "stale-turn") input.executionReceipts[0]!.visibleTurnId = "earlier";
+    expect(fileOutputEvidence(input).satisfied).toBe(false);
+  });
+  it("requires an observed source even for sourceFile metadata on an unnamed follow-up", () => {
+    const write = call("file.write", "report.md", { copiedSource: { path: "source.md", contentSha256: digest } });
+    const followup = "Make an identical copy of the report you just saved as report.md.";
+    expect(fileOutputEvidence(observe([write, call("file.read")], followup)).satisfied).toBe(false);
+    expect(fileOutputEvidence(observe([call("file.read", "source.md"), write, call("file.read")], followup)).satisfied).toBe(true);
+  });
+});
+
+it.each(["preview-heading", "trailing-newline"])("rejects and repairs the live %s copy failure with real file tools", async kind => {
+  const root = await mkdtemp(join(tmpdir(), "estacoda-copy-evidence-"));
+  try {
+    const source = "# قرار — Décision\n\nKeep café and العربية unchanged.\n\n";
+    await writeFile(join(root, "source.md"), source);
+    const tools = createWorkspaceTools({ workspaceRoot: root });
+    const executions: ToolExecutionRecord[] = [];
+    async function execute(name: string, input: Record<string, unknown>) {
+      const tool = tools.find(t => t.name === name)!;
+      const result = await tool.run(input);
+      executions.push({ tool, input, decision: "allow", riskClass: tool.riskClass, executionEffect: { kind: name === "file.read" ? "read" : "mutation" }, result });
+      return result;
+    }
+    await execute("file.read", { path: "source.md" });
+    await execute("file.write", { path: "report.md", content: kind === "preview-heading" ? `# source.md\n${source}` : source.slice(0, -1) });
+    await execute("file.read", { path: "report.md" });
+    expect(fileOutputEvidence(observe(executions, "Copy source.md to report.md"))).toMatchObject({ satisfied: false, reason: "copy-source-mismatch" });
+    await execute("file.write", { path: "report.md", sourceFile: { path: "source.md" }, overwrite: true });
+    await execute("file.read", { path: "report.md" });
+    const input = observe(executions, "Copy source.md to report.md");
+    expect(fileOutputEvidence(input).satisfied).toBe(true);
+    expect(verifiedFileOutputContent(input)).toBe(source);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+it("preserves exact-copy delivery from an authorized accepted Task result", () => {
+  const taskRead = { ...call("file.read"), tool: { ...call("file.read").tool, name: "task.result.read" },
+    result: { ok: true, content: "report", metadata: { taskId: "task", resultId: "result", disposition: "accepted", primary: true,
+      totalChars: 6, offset: 0, contentHash: `sha256:${digest}`, hasMore: false } } };
+  const input = observe([taskRead, call("file.write"), call("file.read")], "Save an identical copy of the accepted report as report.md.");
+  input.requirements.sourceTaskId = "task";
+  expect(fileOutputEvidence(input).satisfied).toBe(true);
+});
+
+it("keeps unrelated edits verified without blessing an incorrect copy", () => {
+  const bad = { contentSha256: "a".repeat(64) };
+  const input = observe([call("file.read", "source.md"), call("file.write", "report.md", bad), call("file.read", "report.md", bad),
+    call("file.write", "other.json"), call("file.read", "other.json")], "Copy source.md to report.md");
+  expect([...verifiedFileMutationCallIds(input)]).toEqual(["call-3"]);
+  expect(fileOutputEvidence(input).satisfied).toBe(false);
+});

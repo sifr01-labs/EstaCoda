@@ -183,11 +183,14 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
     } : undefined)
   };
   const patchFailureTracker = createPatchFailureTracker();
+  // Only a file.read that actually reached its authorized handler can mint a
+  // source-copy reference. A hash supplied by the model alone grants no read.
+  const copySources = new Map<string, string>();
 
   return [
     {
       name: "file.read",
-      description: "Read a text file inside the active workspace.",
+      description: "Read a text file inside the active workspace. The leading # path line is a display label, not file content; do not include it when copying or editing the file.",
       inputSchema: {
         type: "object",
         properties: {
@@ -230,6 +233,11 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
         }
 
         const materialized = fsAdapter === undefined || await contentView.isMaterialized(path.path);
+        copySources.delete(path.path);
+        if (materialized && typeof result.metadata?.contentSha256 === "string") {
+          copySources.set(path.path, result.metadata.contentSha256);
+          if (copySources.size > 128) copySources.delete(copySources.keys().next().value!);
+        }
         result.metadata = { ...result.metadata, contentSource: fsAdapter === undefined ? "materialized" : "editor", materialized };
         if (!materialized) result.content += "\n[Editor content differs from disk. Save or reload it before command execution.]";
         recordFileStateOperation(options, {
@@ -245,12 +253,15 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
     },
     {
       name: "file.write",
-      description: "Write a text file inside the active workspace, creating parent directories as needed. Supply content, or sourceResult to copy an authorized accepted Task result exactly without retyping it. Existing files require overwrite=true when content changes; suspicious shrink overwrites also require allowShrink=true.",
+      description: "Write a text file inside the active workspace, creating parent directories as needed. Supply content, sourceFile to copy a workspace UTF-8 text file exactly, or sourceResult to copy an authorized accepted Task result exactly without retyping it. For narrow edits prefer file.patch; preserve explicitly protected fields, types, and whitespace. If requested changes conflict with preservation constraints, ask before changing protected content. Existing files require overwrite=true when content changes; suspicious shrink overwrites also require allowShrink=true.",
       inputSchema: {
         type: "object",
         properties: {
           path: { type: "string" },
           content: { type: ["string", "null"] },
+          sourceFile: { type: ["object", "null"], additionalProperties: false,
+            properties: { path: { type: "string" } },
+            required: ["path"], description: "Exact copy of a workspace text file. First file.read the complete source, then supply its path. The runtime binds the copy to that observed source internally. Preserves Unicode, line endings and all trailing newlines; fails if the source changed. Omit content or supply an empty string." },
           sourceResult: { type: ["object", "null"], additionalProperties: false,
             properties: { taskId: { type: "string" }, resultId: { type: "string" } },
             required: ["taskId", "resultId"], description: "Copy this session-authorized accepted Task result exactly. Omit content or supply an empty string if the provider requires the field." },
@@ -272,7 +283,36 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
       progressLabel: "writing file",
       maxResultSizeChars: 2000,
       isAvailable: () => true,
-      run: async (input: { path?: string; content?: string | null; sourceResult?: { taskId?: string; resultId?: string } | null; overwrite?: boolean; allowShrink?: boolean }) => {
+      run: async (input: { path?: string; content?: string | null; sourceResult?: { taskId?: string; resultId?: string } | null; sourceFile?: { path?: string } | null; overwrite?: boolean; allowShrink?: boolean }) => {
+        let copiedSource: { path: string; contentSha256: string } | undefined;
+        if (input.sourceFile != null) {
+          const source = input.sourceFile;
+          if (input.sourceResult != null || (input.content != null && input.content !== "") ||
+              typeof source.path !== "string" || Object.keys(source).some(key => key !== "path")) {
+            return undispatchedResult(errorResult("Use only sourceFile with path after file.read; do not combine it with content or sourceResult."));
+          }
+          const canonicalRoot = await realpath(root);
+          const sourcePath = await resolveWorkspacePath(canonicalRoot, source.path, { forbidSymlinks: true });
+          if (!sourcePath.ok) return undispatchedResult(sourcePath);
+          const observedDigest = copySources.get(sourcePath.path);
+          if (observedDigest === undefined) {
+            return undispatchedResult(errorResult("Read the complete source with file.read before using sourceFile. A source path alone does not authorize a read."));
+          }
+          if (!isTextyPath(sourcePath.path)) return undispatchedResult(errorResult("Source file type is not included as text."));
+          if (fsAdapter !== undefined && !await contentView.isMaterialized(sourcePath.path).catch(() => false)) {
+            return undispatchedResult(errorResult("Save or reload the source editor buffer before copying its disk content."));
+          }
+          const bytes = await readFile(sourcePath.path).catch(() => undefined);
+          if (bytes === undefined) return undispatchedResult(errorResult("Source could not be read. Read it again before copying."));
+          const content = bytes.toString("utf8");
+          if (isLikelyBinary(bytes) || !Buffer.from(content, "utf8").equals(bytes)) {
+            return undispatchedResult(errorResult("Exact text copies require valid UTF-8 text, not binary content."));
+          }
+          const digest = createHash("sha256").update(bytes).digest("hex");
+          if (digest !== observedDigest) return undispatchedResult(errorResult("Source changed since it was read. Read the source again before copying."));
+          copiedSource = { path: relative(canonicalRoot, sourcePath.path), contentSha256: digest };
+          input = { ...input, content };
+        }
         if (input.sourceResult != null) {
           const source = input.sourceResult;
           const sessionId = resolveString(options.sessionId);
@@ -296,6 +336,7 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
         }
 
         const relativePath = relative(canonicalRoot, path.path);
+        if (copiedSource?.path === relativePath) return undispatchedResult(errorResult("Source and destination must be different files."));
         const existing = await readExistingWorkspaceText(path.path, fsAdapter);
         const oldBytes = existing === undefined ? 0 : Buffer.byteLength(existing);
         const bytes = Buffer.byteLength(input.content);
@@ -365,6 +406,7 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
           metadata: {
             path: relativePath,
             contentSha256: createHash("sha256").update(input.content).digest("hex"),
+            ...(copiedSource === undefined ? {} : { copiedSource }),
             bytes,
             oldBytes,
             newBytes: bytes,
@@ -389,7 +431,7 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
     },
     {
       name: "file.patch",
-      description: "Patch workspace files. Replace and insert modes find anchors with exact matching first, then deterministic fuzzy fallbacks for minor whitespace, indentation, escaping, and Unicode differences. Append/prepend modes add content without rewriting whole files. Patch mode validates every operation before writing and rolls back already-applied changes if a later write/delete fails.",
+      description: "For narrow edits change only requested content and compare the diff against explicit preservation constraints. Preserve unrelated fields and types. If constraints conflict, clarify before editing. Patch workspace files. Replace and insert modes find anchors with exact matching first, then deterministic fuzzy fallbacks for minor whitespace, indentation, escaping, and Unicode differences. Append/prepend modes add content without rewriting whole files. Patch mode validates every operation before writing and rolls back already-applied changes if a later write/delete fails.",
       inputSchema: {
         type: "object",
         properties: {

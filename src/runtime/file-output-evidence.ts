@@ -7,7 +7,7 @@ import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 
 export type FileOutputEvidence =
   | { satisfied: true; writeCallId?: string; path?: string }
-  | { satisfied: false; reason: "unresolved-target" | "missing-write" | "missing-readback" | "missing-research-result" | "report-content-mismatch" };
+  | { satisfied: false; reason: "unresolved-target" | "missing-write" | "missing-readback" | "missing-research-result" | "report-content-mismatch" | "copy-source-mismatch" };
 
 /** Reconciles executor-owned call identities with workspace-tool results from
  * this turn. Provider prose, artifact handles and unrelated tools cannot qualify. */
@@ -31,7 +31,9 @@ export function fileOutputEvidence(input: {
     }), input.requirements.sourceTaskId).find((page) => page.primary);
   if (input.requirements?.sourceTaskId !== undefined && result === undefined) return { satisfied: false, reason: "missing-research-result" };
   let contentMismatch = false;
-  const writes = new Map<string, { digest: string; callId: string; index: number }>();
+  let copyMismatch = false;
+  const sourceReads = new Map<string, { digest: string; index: number }>();
+  const writes = new Map<string, { digest: string; callId: string; index: number; sourcePath?: string }>();
   const verified = new Map<string, string>();
   for (const execution of input.toolExecutions) {
     const callId = execution.toolCallId;
@@ -45,6 +47,7 @@ export function fileOutputEvidence(input: {
         const target = safePath(path);
         if (target !== undefined) {
           verified.delete(target);
+          sourceReads.delete(target);
           if (name !== "file.read") writes.delete(target);
         }
       }
@@ -59,26 +62,47 @@ export function fileOutputEvidence(input: {
         if (target === undefined || !matchesTarget(target, requirement) || !validDigest(contentSha256)) continue;
         if (result !== undefined && result.contentHash !== `sha256:${contentSha256}`) { contentMismatch = true; continue; }
         contentMismatch = false;
-        writes.set(target, { digest: contentSha256, callId, index: recorded.index });
+        let sourcePath: string | undefined;
+        if (requirement.exactCopy !== undefined && (result === undefined || requirement.exactCopy.sourcePath !== undefined)) {
+          const copied = metadata?.copiedSource;
+          const copiedSource = copied !== null && typeof copied === "object" ? copied as Record<string, unknown> : undefined;
+          sourcePath = safePath(requirement.exactCopy.sourcePath ?? copiedSource?.path);
+          const sourceRead = sourcePath === undefined ? undefined : sourceReads.get(sourcePath);
+          if (sourcePath === target || sourceRead === undefined || sourceRead.index >= recorded.index || sourceRead.digest !== contentSha256 ||
+              (copiedSource !== undefined && (safePath(copiedSource.path) !== sourcePath || copiedSource.contentSha256 !== contentSha256))) {
+            copyMismatch = true;
+            continue;
+          }
+          copyMismatch = false;
+        }
+        writes.set(target, { digest: contentSha256, callId, index: recorded.index, sourcePath });
         verified.delete(target); // A later write invalidates an earlier readback.
       }
     }
     if (name !== "file.read" || metadata?.materialized !== true || (metadata.truncated === true && metadata.completeFileRead !== true) || !Number.isSafeInteger(metadata.bytes) || (metadata.bytes as number) < 0) continue;
     if (metadata.bytes === 0 && metadata.contentSha256 !== createHash("sha256").update("").digest("hex")) continue;
     const target = safePath(metadata.path);
+    if (target !== undefined && validDigest(metadata.contentSha256)) sourceReads.set(target, { digest: metadata.contentSha256, index: recorded.index });
     const write = target === undefined ? undefined : writes.get(target);
     if (target !== undefined && write !== undefined && recorded.index > write.index && metadata.contentSha256 === write.digest) verified.set(target, write.callId);
   }
+  for (const [path] of verified) {
+    const write = writes.get(path)!;
+    if (write.sourcePath !== undefined && sourceReads.get(write.sourcePath)?.digest !== write.digest) {
+      verified.delete(path);
+      copyMismatch = true;
+    }
+  }
   const verifiedFile = verified.entries().next().value as [string, string] | undefined;
   return verifiedFile === undefined
-    ? { satisfied: false, reason: contentMismatch ? "report-content-mismatch" : writes.size === 0 ? "missing-write" : "missing-readback" }
+    ? { satisfied: false, reason: copyMismatch ? "copy-source-mismatch" : contentMismatch ? "report-content-mismatch" : writes.size === 0 ? "missing-write" : "missing-readback" }
     : { satisfied: true, path: verifiedFile[0], writeCallId: verifiedFile[1] };
 }
 
 /** General file edits use the same byte/readback contract as report delivery.
  * Pair each write only with receipts from its own turn, including save-only
  * follow-ups whose filename was established in earlier conversation context. */
-export function verifiedFileMutationCallIds(input: Omit<Parameters<typeof fileOutputEvidence>[0], "requirements">): Set<string> {
+export function verifiedFileMutationCallIds(input: Parameters<typeof fileOutputEvidence>[0]): Set<string> {
   const verified = new Set<string>();
   for (const receipt of input.executionReceipts) {
     if (receipt.status !== "success" || receipt.visibleTurnId === undefined || !["file.write", "file.patch"].includes(receipt.tool)) continue;
@@ -89,8 +113,10 @@ export function verifiedFileMutationCallIds(input: Omit<Parameters<typeof fileOu
       ? safePath((output as Record<string, unknown>).path) : undefined);
     if (paths.length === 0 || paths.some(path => path === undefined)) continue;
     if (paths.every(path => {
+      const bound = input.requirements?.fileOutput?.path === path ? input.requirements : undefined;
       const evidence = fileOutputEvidence({ ...input, requirements: {
-        skillReferences: [], originTurnId: receipt.visibleTurnId, fileOutput: { path: path!, format: "text" }, issues: []
+        ...bound, skillReferences: [], originTurnId: receipt.visibleTurnId,
+        fileOutput: { ...bound?.fileOutput, path: path!, format: "text" }, issues: bound?.issues ?? []
       } });
       return evidence.satisfied && evidence.writeCallId === receipt.toolCallId;
     })) verified.add(receipt.toolCallId);

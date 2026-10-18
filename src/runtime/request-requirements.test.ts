@@ -249,3 +249,22 @@ it.each(["Do not copy source.md to report.md", "Explain how to copy source.md to
 it("retains an exactly-qualified worker count", () => {
   expect(deriveRequestRequirements("Use the researcher skill and exactly 3 subagents to research accessible forms.").delegation).toEqual({ count: 3 });
 });
+
+it.each([
+  ["Copy source.md to report.md", "source.md", "report.md"],
+  ["Make an identical copy of decision.txt as decision-copy.txt.", "decision.txt", "decision-copy.txt"],
+  ['Copy `source file.json` to `copy file.json`.', "source file.json", "copy file.json"],
+  ["Make an identical copy of the report you just saved as sales-summary-copy.md.", undefined, "sales-summary-copy.md"]
+])("binds exact-copy sources separately from destinations: %s", (text, sourcePath, path) => {
+  expect(deriveRequestRequirements(text!)).toMatchObject({ fileOutput: { path, exactCopy: sourcePath ? { sourcePath } : {} }, issues: [] });
+});
+it.each(["Explain how to copy source.md to copy.md", "Do not copy source.md to copy.md", '> Copy source.md to copy.md'])('does not activate copy for inert text: %s', text => {
+  expect(deriveRequestRequirements(text).fileOutput).toBeUndefined();
+});
+
+it.each([
+  ["Copy memo.md exactly to archive.md, preserving Unicode, blank lines and the trailing newline. Read back to verify identical content. No browsing or commands.", "memo.md", "archive.md"],
+  ["Save an identical copy of that file as decision-copy.txt, preserving blank lines and trailing newline. Read back the copy. Do not redo any analysis or research.", undefined, "decision-copy.txt"]
+])("recognizes live copy phrasing: %s", (text, sourcePath, path) => {
+  expect(deriveRequestRequirements(text!)).toMatchObject({ fileOutput: { path, exactCopy: sourcePath ? { sourcePath } : {} }, issues: [] });
+});
