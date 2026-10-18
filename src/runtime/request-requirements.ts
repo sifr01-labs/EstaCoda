@@ -3,8 +3,12 @@ import { interpretRequest, splitRequestClauses, isCapabilityQuestion } from "./r
 import { affirmativeRequestSegments } from "./request-action-segments.js";
 
 const MAX_REQUEST_CHARS = 32_768;
-const FILE_NAME = /`([^`\n]{1,240}\.(?:md|markdown|txt))`|(?:[\p{L}\p{N}_./\\:-]+\.(?:md|markdown|txt))\b/giu;
-const FILE_OPERAND = /[\p{L}\p{N}_./\\:-]+\.(?:md|markdown|txt|json|ts|tsx|js|py)\b/giu;
+// Text deliverables use the existing file tools and materialized read-back contract.
+const TEXT_EXTENSIONS = "md|markdown|txt|json|jsonl|ndjson|csv|tsv|yaml|yml|xml|html|css|ts|tsx|js|jsx|py";
+const FILE_NAME = new RegExp("`([^`\\n]{1,240}\\.(?:" + TEXT_EXTENSIONS + "))`|" + String.raw`(?:[\p{L}\p{N}_./\\:-]+\.(?:${TEXT_EXTENSIONS}))\b`, "giu");
+const QUOTED_FILE_NAME = new RegExp(String.raw`^[\p{L}\p{N}_ ./\\:-]{1,240}\.(?:${TEXT_EXTENSIONS})$`, "iu");
+const OUTPUT_ACTION = /\b(?:prepare|save|export|write|create|generate|clear|empty|truncate)\s+|(?:احفظ(?:ها|ه)?|صدّر(?:ها|ه)?|صدر(?:ها|ه)?|أنشئ|اكتب(?:ها|ه)?|جهّز|جهز|أعد|أفرغ|افرغ)\s+/iu;
+const FILE_OPERAND = new RegExp(String.raw`[\p{L}\p{N}_./\\:-]+\.(?:${TEXT_EXTENSIONS})\b`, "giu");
 const INERT_CONTEXT = /\b(?:hypothetically|imagine|what\s+if|if\s+(?:we|you|I)|example|said|says|quoted?)\b|(?:افترض|ماذا لو|مثال|قال)/iu;
 const INFORMATIONAL = /\b(?:explain|describe|hypothetically|imagine|what\s+if|how\s+(?:would|could|to)|if\s+(?:we|you|I)|example|said|says|quoted?)\b|(?:اشرح|افترض|ماذا لو|مثال|قال)/iu;
 
@@ -38,7 +42,7 @@ export function explicitRequestSegments(text: string): string[] {
     .replace(/https?:\/\/[^\s<>"“”`]+/giu, url => ` [URL] ${url.match(/[.!?;؛]+$/u)?.[0] ?? ""}`)
     .replace(/`([^`\n]*)`|"([^"\n]*)"|“([^”\n]*)”|'([^'\n]*)'|‘([^’\n]*)’/gu, (match, ...groups: unknown[]) => {
       const value = groups.slice(0, 5).find((group) => typeof group === "string") as string | undefined;
-      if (value !== undefined && /^[\p{L}\p{N}_ ./\\:-]{1,240}\.(?:md|markdown|txt)$/iu.test(value)) {
+      if (value !== undefined && QUOTED_FILE_NAME.test(value)) {
         operands.push(value);
         return ` FILEOPERAND${operands.length - 1} `;
       }
@@ -98,8 +102,19 @@ export function deriveRequestRequirements(userText: string, originTurnId?: strin
       result.research = { domain: domain === "general" ? result.research?.domain ?? domain : domain, fresh: result.research?.fresh === true || /\b(?:latest|recent|current|fresh|newest)\b|(?:أحدث|حديث|الحالية)/iu.test(actionSegment) };
     }
     const copy = /^\s*(?:(?:can|could|would)\s+you\s+)?(?:(?:please|just)\s+)?(?:copy\b|(?:make|create)\s+(?:(?:an?|the|identical|exact|unchanged)\s+)*copy\b)/iu.test(actionSegment) && /\b(?:as|to)\s+`?[^`\s]+\.(?:md|markdown|txt)`?\s*[.!]?$/iu.test(segment);
-    if (!copy && !/\b(?:prepare|save|export|write|create|generate|clear|empty|truncate)\s+|(?:احفظ(?:ها|ه)?|صدّر(?:ها|ه)?|صدر(?:ها|ه)?|أنشئ|اكتب(?:ها|ه)?|جهّز|جهز|أعد|أفرغ|افرغ)\s+/iu.test(actionSegment)) continue;
-    const namedPaths = [...segment.matchAll(FILE_NAME)].map((match) => match[1] ?? match[0]);
+    // Locate the output action without treating a filename as a verb. Keep
+    // offsets stable so input paths preceding the action are not destinations.
+    const masked = segment.replace(/`[^`]*`/gu, value => " ".repeat(value.length)).replace(FILE_OPERAND, value => " ".repeat(value.length));
+    const outputAction = OUTPUT_ACTION.exec(masked);
+    if (!copy && outputAction === null) continue;
+    const outputStart = copy ? 0 : outputAction!.index;
+    // A payload introduced by with/containing (or a JSON colon) is content,
+    // even when it includes quoted filenames. It cannot add output targets.
+    const contentStart = /\b(?:with|containing)\s+|:\s*(?=[{\[])/iu.exec(masked.slice(outputStart));
+    const beforeContent = contentStart ? segment.slice(outputStart, outputStart + contentStart.index) : undefined;
+    const outputSegment = beforeContent !== undefined && [...beforeContent.matchAll(FILE_NAME)].length > 0
+      ? beforeContent : segment.slice(outputStart);
+    const namedPaths = [...outputSegment.matchAll(FILE_NAME)].map((match) => match[1] ?? match[0]);
     // In an explicit copy, the final as/to operand is the destination; the
     // preceding source is not a second output. Multiple sources stay ambiguous.
     const paths = copy && namedPaths.length <= 2 ? namedPaths.slice(-1) : namedPaths;

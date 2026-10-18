@@ -3,6 +3,37 @@ import { SkillRegistry } from "../skills/skill-registry.js";
 import { IntentRouter } from "./intent-router.js";
 import { deriveRequestRequirements, explicitRequestSegments, explicitInspectionTools, requiredRequestTools } from "./request-requirements.js";
 
+describe("explicit text destinations", () => {
+  it.each([
+    ['Save links.json with existing:["docs/setup.md"] and missing:["docs/missing.md"].', "links.json"],
+    ['Save links.json containing "docs/setup.md" and "docs/missing.md".', "links.json"],
+    ['Save links.json: {"existing":["docs/setup.md"]}', "links.json"],
+    ['Translate welcome and remaining in en.json to German and save de.json.', "de.json"],
+    ['Translate en.json into German, save de.json.', "de.json"],
+    ['Save "reports/links with spaces.json" with entries from "docs/setup.md".', "reports/links with spaces.json"],
+    ['Write a report with results to report.json.', "report.json"],
+    ['احفظ النتيجة في result.json', "result.json"],
+  ])("binds the destination rather than input or payload paths: %s", (text, path) => {
+    const requirements = deriveRequestRequirements(text);
+    expect(requirements.fileOutput).toEqual({ format: "text", path });
+    expect(requirements.issues).toEqual([]);
+    expect(requiredRequestTools(requirements)).toEqual(expect.arrayContaining(["file.write", "file.read"]));
+  });
+  it.each(["json", "jsonl", "ndjson", "csv", "tsv", "yaml", "yml", "xml", "html", "css", "ts", "tsx", "js", "jsx", "py"])("recognizes explicit .%s text delivery", extension => {
+    expect(deriveRequestRequirements(`Save output.${extension}`).fileOutput).toEqual({ format: "text", path: `output.${extension}` });
+  });
+  it.each(['Do not save de.json.', 'Explain how to save de.json.', 'The note says "save de.json".', '```\nsave de.json\n```', 'Are you able to save JSON files?', 'save.json', 'Save image.png'])('does not invent text delivery: %s', text => {
+    expect(deriveRequestRequirements(text).fileOutput).toBeUndefined();
+  });
+  it("keeps multiple destinations and unsafe paths unresolved", () => {
+    expect(deriveRequestRequirements("Save a.json and b.json").issues).toContain("ambiguous-file-target");
+    for (const path of ["../de.json", "/tmp/de.json", "C:\\de.json"]) {
+      expect(deriveRequestRequirements(`Save ${path}`)).toMatchObject({ fileOutput: { format: "text" }, issues: ["unsafe-file-target"] });
+      expect(deriveRequestRequirements(`Save ${path}`).fileOutput?.path).toBeUndefined();
+    }
+  });
+});
+
 describe("bounded explicit request requirements", () => {
   it("keeps explicit research tools in a compound file request and accepts bounded Arabic pronouns", () => {
     const requirements = deriveRequestRequirements("ابحث عن أبحاث الحرارة الجوفية واحفظها في heat.md");

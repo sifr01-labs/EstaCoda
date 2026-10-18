@@ -163,7 +163,7 @@ export function selectProviderToolsForTurn(input: {
     (input.attachments ?? []).some((attachment) => (attachment.status ?? "ready") === "ready")
   );
   const requestText = explicitRequestSegments(input.userText ?? "").join(" ");
-  const recoveryRelevant = isActionableToolRequest(requestText) || /\b(?:research|analyze|analyse|summarize|prepare|investigate)\b/iu.test(requestText) || /(?:\b(?:what|which)\b.{0,50}\b(?:tools|skills|capabilities)\b|\bcan you\s+(?:browse|search|delegate|save)\b|ما.{0,30}(?:أدوات|مهارات|قدرات))/iu.test(requestText);
+  const recoveryRelevant = exactRequestTools.size > 0 || isActionableToolRequest(requestText) || /\b(?:research|analyze|analyse|summarize|prepare|investigate)\b/iu.test(requestText) || /(?:\b(?:what|which)\b.{0,50}\b(?:tools|skills|capabilities)\b|\bcan you\s+(?:browse|search|delegate|save)\b|ما.{0,30}(?:أدوات|مهارات|قدرات))/iu.test(requestText);
   const recoveryNames = new Set<string>(CAPABILITY_RECOVERY_TOOLS);
   const initialTools: OpenAICompatibleToolSchema[] = [];
   const expansionCandidates: ProviderToolExpansionCandidate[] = [];
