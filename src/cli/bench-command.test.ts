@@ -4,6 +4,7 @@ import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { ModelProfile, ResolvedModelRoute } from "../contracts/provider.js";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
+import type { ExecutionFinalOutcome } from "../contracts/execution-plan.js";
 import type { Runtime, RuntimeOptions } from "../runtime/create-runtime.js";
 import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
 import { runCliCommand } from "./cli.js";
@@ -130,7 +131,8 @@ describe("benchCommand", () => {
     expect(result.output).toContain("Benchmark run: success");
     const runtimeInput = vi.mocked(runtime.handle).mock.calls[0]?.[0];
     expect(runtimeInput).toEqual(expect.objectContaining({
-      trustedWorkspace: true
+      trustedWorkspace: true,
+      requirementText: "solve the task"
     }));
     expect(runtimeInput?.text).toContain("Benchmark execution contract:");
     expect(runtimeInput?.text).toContain("isolated benchmark workspace or container");
@@ -147,7 +149,7 @@ describe("benchCommand", () => {
         }
       },
       securityMode: "open",
-      workspaceTrusted: true,
+      trustStorePath: expect.stringContaining("benchmark-trust-"),
       executionControls: {
         providerRequestDefaults: {
           temperature: 0,
@@ -425,6 +427,74 @@ describe("benchCommand", () => {
       toolCalls: 0
     });
     expect(summary.finalAnswer).toBe("Implementation plan only.");
+  });
+
+  it.each([
+    ["completed", "normal", "success"],
+    ["completed_with_recovered_errors", "normal", "success"],
+    ["partially_completed", "normal", "task_failed"],
+    ["blocked", "tool_loop_no_progress", "task_failed"],
+    ["blocked", "budget_exhausted", "task_failed"],
+    ["blocked", "user_input_required", "task_failed"],
+    ["failed", "normal", "task_failed"],
+    ["cancelled", "cancelled", "task_failed"],
+    ["partially_completed", "deadline_reached", "timeout"],
+    ["failed", "provider_failed", "provider_error"]
+  ] as const)("reports %s / %s as %s", async (outcomeStatus, terminationCause, expectedStatus) => {
+    const root = await makeTempDir();
+    const workspace = join(root, "workspace");
+    const outDir = join(root, "artifacts");
+    await mkdir(workspace);
+    const runtime = fakeRuntime([]);
+    const originalHandle = runtime.handle;
+    runtime.handle = vi.fn(async (input) => ({
+      ...await originalHandle(input),
+      finalOutcome: {
+        status: outcomeStatus, terminationCause, completionFloor: "none", confirmedActions: [], uncertainActions: []
+      } satisfies ExecutionFinalOutcome
+    }));
+    const result = await benchCommand(
+      { argv: [], workspaceRoot: workspace },
+      ["run", "--workspace", workspace, "--instruction", "solve the task", "--out", outDir, "--model", "openai/gpt-test"],
+      dependenciesForRuntime(root, runtime)
+    );
+    expect(result.exitCode).toBe(expectedStatus === "success" ? 0 : 1);
+    const summary = JSON.parse(await readFile(join(outDir, "summary.json"), "utf8"));
+    const history = JSON.parse((await readFile(join(outDir, "history.jsonl"), "utf8")).trim());
+    expect(summary.execution.status).toBe(expectedStatus);
+    expect(history.execution.status).toBe(expectedStatus);
+    expect(summary.finalAnswer).toBe("done");
+    if (expectedStatus === "success") {
+      expect(summary.failure).toBeNull();
+    } else {
+      expect(summary.failure).toMatchObject({ status: expectedStatus, code: terminationCause });
+      expect(await readFile(join(outDir, "stderr.txt"), "utf8")).toContain(terminationCause);
+    }
+  });
+
+  it("reports and redacts completion validation failures even without a final outcome", async () => {
+    const root = await makeTempDir();
+    const workspace = join(root, "workspace");
+    const outDir = join(root, "artifacts");
+    await mkdir(workspace);
+    const runtime = fakeRuntime([]);
+    const originalHandle = runtime.handle;
+    const secret = "sk-123456789012345678901234";
+    runtime.handle = vi.fn(async (input) => ({
+      ...await originalHandle(input),
+      completionValidationFailure: `Output incomplete API_KEY=${secret}`
+    }));
+    const result = await benchCommand(
+      { argv: [], workspaceRoot: workspace },
+      ["run", "--workspace", workspace, "--instruction", "solve the task", "--out", outDir, "--model", "openai/gpt-test"],
+      dependenciesForRuntime(root, runtime)
+    );
+    expect(result.exitCode).toBe(1);
+    const summaryText = await readFile(join(outDir, "summary.json"), "utf8");
+    expect(JSON.parse(summaryText).failure.status).toBe("task_failed");
+    expect(summaryText).not.toContain(secret);
+    expect(result.output).not.toContain(secret);
+    expect(await readFile(join(outDir, "stderr.txt"), "utf8")).not.toContain(secret);
   });
 
   it("redacts stdout and stderr artifacts by default", async () => {

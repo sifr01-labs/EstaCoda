@@ -1,5 +1,5 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -32,11 +32,13 @@ import {
 import { redactBenchmarkText, stripBenchmarkAnsi } from "../benchmark/redaction.js";
 import { buildProviderRegistry, loadRuntimeConfig, type LoadedRuntimeConfig } from "../config/runtime-config.js";
 import { applyRegisterProviderConfig, applyRegisterProviderModel } from "../config/provider-config-mutations.js";
+import { resolveGlobalStateHome } from "../config/profile-home.js";
 import type { ResolvedModelRoute } from "../contracts/provider.js";
 import type { RuntimeEvent } from "../contracts/runtime-event.js";
 import type { SessionDB } from "../contracts/session.js";
 import type { TrajectoryStore } from "../contracts/trajectory-store.js";
 import { InMemorySessionDB } from "../session/in-memory-session-db.js";
+import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
 import { resolveTokens } from "../theme/token-resolver.js";
 import { createRuntime, type Runtime } from "../runtime/create-runtime.js";
 import { normalizeModelInput } from "../providers/model-normalization.js";
@@ -186,6 +188,7 @@ async function runBenchRun(
   const artifacts = benchmarkArtifactPaths(args.outDir, args.artifactPaths);
   const events: RuntimeEvent[] = [];
   let runtime: Runtime | undefined;
+  let trustDirectory: string | undefined;
   let finalAnswer = "";
   let status: BenchmarkRunStatus = "success";
   let failure: BenchmarkFailureSummary | null = null;
@@ -233,6 +236,14 @@ async function runBenchRun(
       }
     };
 
+    // The explicit benchmark workspace is trusted only through this run's store.
+    // Never add grants to (or inherit grants from) the selected home's trust file.
+    const stateHome = resolveGlobalStateHome({ homeDir: benchmarkHome }).stateRoot;
+    await mkdir(stateHome, { recursive: true });
+    trustDirectory = await mkdtemp(join(stateHome, "benchmark-trust-"));
+    const trustStorePath = join(trustDirectory, "trust.json");
+    await new WorkspaceTrustStore({ path: trustStorePath }).grant(args.workspace, { label: "Benchmark workspace" });
+
     runtime = await (dependencies.createRuntime ?? createRuntime)({
       tokens: resolveTokens("standard", "dark", "kemetBlue"),
       model: route.profile,
@@ -273,7 +284,7 @@ async function runBenchRun(
         websiteBlocklist: runtimeConfig.security.websiteBlocklist
       },
       securityMode: "open",
-      workspaceTrusted: true,
+      trustStorePath,
       executionControls: {
         providerBudgets: args.providerBudgets,
         providerRequestDefaults: {
@@ -291,6 +302,7 @@ async function runBenchRun(
       args.timeoutMs,
       (signal) => runtime!.handle({
         text: renderBenchmarkExecutionInstruction(args.instruction),
+        requirementText: args.instruction,
         channel: "cli",
         trustedWorkspace: true,
         signal,
@@ -301,12 +313,20 @@ async function runBenchRun(
       })
     );
     finalAnswer = response.text;
+    failure = classifyBenchmarkResponse(response);
+    status = failure?.status ?? "success";
   } catch (error) {
     const classified = classifyBenchmarkError(error);
     status = classified.status;
     failure = classified.failure;
   } finally {
-    await runtime?.dispose();
+    try {
+      await runtime?.dispose();
+    } finally {
+      if (trustDirectory !== undefined) {
+        await rm(trustDirectory, { recursive: true, force: true });
+      }
+    }
   }
 
   const endedAt = now();
@@ -369,7 +389,7 @@ async function runBenchRun(
       `Summary: ${artifacts.summary}`,
       `Events: ${artifacts.eventLog}`,
       `Home: ${benchmarkHome}`,
-      failure === null ? undefined : `Error: ${failure.message}`
+      failure === null ? undefined : `Error: ${args.redact ? redactBenchmarkText(failure.message) : failure.message}`
     ].filter((line) => line !== undefined).join("\n")
   };
 }
@@ -671,6 +691,26 @@ async function runWithTimeout<T>(
       runPromise.catch(() => {});
     }
   }
+}
+
+function classifyBenchmarkResponse(response: Awaited<ReturnType<Runtime["handle"]>>): BenchmarkFailureSummary | null {
+  const outcome = response.finalOutcome;
+  const cause = outcome?.terminationCause;
+  const status: BenchmarkRunStatus | undefined = cause === "deadline_reached"
+    ? "timeout"
+    : cause === "provider_failed" || response.providerExecution?.ok === false
+      ? "provider_error"
+      : response.completionValidationFailure !== undefined || (outcome !== undefined && (
+        cause !== "normal" || (outcome.status !== "completed" && outcome.status !== "completed_with_recovered_errors")
+      ))
+        ? "task_failed"
+        : undefined;
+  if (status === undefined) return null;
+  return {
+    status,
+    code: cause ?? (status === "provider_error" ? "provider_failed" : "completion_validation_failed"),
+    message: response.completionValidationFailure ?? `Benchmark execution did not complete (${outcome?.status ?? status}; ${cause ?? "provider_failed"}).`
+  };
 }
 
 function classifyBenchmarkError(error: unknown): {

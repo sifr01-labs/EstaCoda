@@ -40,6 +40,8 @@ Full Terminal-Bench runs are manual. Do not run Harbor, Docker-backed benchmark 
 
 `estacoda bench run` wraps task instructions with a benchmark execution contract before entering the runtime. The contract tells the agent that benchmark success is judged by workspace, process, or verifier state rather than prose alone, and that it should use available file and terminal tools when the task requires workspace changes. This wrapper is limited to the benchmark CLI path and does not affect ordinary EstaCoda sessions.
 
+Requirement analysis uses the original task instruction, separately from this generic guidance. A read-only task does not acquire a file-mutation requirement from the wrapper.
+
 ## Local Smoke
 
 Run the local fake benchmark first:
@@ -60,7 +62,7 @@ This verifies that `estacoda bench run` can:
 - write trajectory artifacts when a scenario run uses a persistent trajectory store
 - exercise cross-session memory recall with isolated home, workspace, and SQLite state
 
-The local smoke does not call a live model and does not prove Terminal-Bench scoring.
+The local smoke includes a real-runtime integration test with an offline provider. It checks tool dispatch, workspace trust isolation and cleanup, the hard-deny floor, and failure reporting when a tool loop exhausts its budget. The other deterministic scenarios also use mocked runtime components. The smoke does not call a live model and does not prove Terminal-Bench scoring.
 
 ## Operator Suite Smoke
 
@@ -243,6 +245,8 @@ The summary status is one of:
 - `adapter_error`
 - `config_error`
 
+Returned runtime outcomes affect the exit code and all summary/history artifacts: completed and recovered completions are `success`; blocked, partial, failed, cancelled, or budget-exhausted runs are `task_failed`; runtime deadlines are `timeout`; provider failures are `provider_error`. Completion-validation failures also prevent success. Recovered tool errors alone do not fail a completed run. Runtime success is not an external verifier score; Harbor still evaluates the task independently.
+
 `estimatedCostUsd` is always present and may be `null` when pricing data is unavailable.
 
 Compare two run-history or summary artifacts with:
@@ -268,6 +272,8 @@ Benchmark mode uses the `container-benchmark` policy:
 - no access to the real user home unless explicitly passed
 - no memory or session carryover by default
 - artifacts are redacted by default
+
+The runner grants the explicit workspace through the normal trust-store API before runtime creation, using a fresh store under the benchmark home. That store is passed to the runtime and removed during cleanup, including startup errors and timeouts. Existing home trust grants are neither inherited nor modified. This does not disable dispatch authorization checks or the hard-deny floor. As with other temporary state, abrupt process termination can leave a directory behind; later runs create fresh stores and do not reuse it.
 
 For public benchmark runs, pass `--home /tmp/estacoda-home` or use the adapter default that maps to `--isolated-home`. Do not default to a real `~/.estacoda` home.
 
