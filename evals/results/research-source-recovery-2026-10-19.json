@@ -1,0 +1,192 @@
+{
+  "baseCommit": "bbc5b20460391c05d475343f2cca6a05eb1e1edb",
+  "runtime": "isolated compiled source with focused patch; not installed package",
+  "sourceHashes": {
+    "src/tasks/agent-step-executor.ts": "313756d85677ed52edfdea98a04ad4e0226892e9b8a256f72da0b9cc2b20334f",
+    "src/tasks/agent-step-executor.test.ts": "213931f04b32848e6167e9a0e99e361be241a32667a23fa075a8259a1282e68f",
+    "docs/subsystems/tools.md": "bc20bea9dce4c8d8dea1065e17d00a1d9bc83793702a3d4f84332fa8857c4dd2"
+  },
+  "validation": [
+    {
+      "command": "node --version",
+      "exitCode": 0
+    },
+    {
+      "command": "pnpm --version",
+      "exitCode": 0
+    },
+    {
+      "command": "pnpm install --frozen-lockfile",
+      "exitCode": 0
+    },
+    {
+      "command": "pnpm run typecheck",
+      "exitCode": 0
+    },
+    {
+      "command": "pnpm run build",
+      "exitCode": 0
+    },
+    {
+      "command": "pnpm run test --maxWorkers=4",
+      "exitCode": 0
+    },
+    {
+      "command": "pnpm run audit:runtime-imports",
+      "exitCode": 0
+    },
+    {
+      "command": "pnpm run audit:esm",
+      "exitCode": 0
+    },
+    {
+      "command": "pnpm run smoke",
+      "exitCode": 0
+    },
+    {
+      "command": "pnpm run smoke:dist",
+      "exitCode": 0
+    }
+  ],
+  "unitTests": {
+    "passed": 12652,
+    "files": 766,
+    "newRecoveryCases": 18
+  },
+  "liveCases": [
+    {
+      "id": "early-10-delegated-research",
+      "startedAt": "2026-10-19T08:37:38.913Z",
+      "finishedAt": "2026-10-19T08:42:23.855Z",
+      "durationMs": 284942,
+      "status": "completed",
+      "checkFaults": [],
+      "automatedVerdict": "pass",
+      "files": {
+        "forms-checklist.md": {
+          "bytes": 5520,
+          "sha256": "c04537bdf89336f13d682014e1b14691bb3758229a06b910f75a05660520437c"
+        }
+      },
+      "words": 629,
+      "steps": [
+        {
+          "role": "worker",
+          "status": "completed"
+        },
+        {
+          "role": "worker",
+          "status": "completed"
+        },
+        {
+          "role": "worker",
+          "status": "completed"
+        },
+        {
+          "role": "synthesis",
+          "status": "completed"
+        },
+        {
+          "role": "report-delivery",
+          "status": "completed"
+        }
+      ],
+      "matchedSkills": [
+        "researcher",
+        "research-discovery"
+      ],
+      "toolResults": [
+        {
+          "tool": "delegate_task",
+          "ok": true,
+          "count": 1
+        },
+        {
+          "tool": "file.read",
+          "ok": true,
+          "count": 2
+        },
+        {
+          "tool": "file.write",
+          "ok": true,
+          "count": 1
+        },
+        {
+          "tool": "skill.read",
+          "ok": true,
+          "count": 2
+        },
+        {
+          "tool": "task.result.read",
+          "ok": true,
+          "count": 4
+        },
+        {
+          "tool": "web.extract",
+          "ok": true,
+          "count": 10
+        },
+        {
+          "tool": "web.search",
+          "ok": true,
+          "count": 20
+        }
+      ],
+      "failedToolResults": 0
+    },
+    {
+      "id": "twentyfive-77-denied-write",
+      "startedAt": "2026-10-19T08:37:38.914Z",
+      "finishedAt": "2026-10-19T08:37:47.236Z",
+      "durationMs": 8322,
+      "status": "blocked",
+      "checkFaults": [],
+      "automatedVerdict": "pass",
+      "files": {}
+    },
+    {
+      "id": "latest-103-restart-supersede-denial",
+      "startedAt": "2026-10-19T08:37:47.237Z",
+      "finishedAt": "2026-10-19T08:37:58.023Z",
+      "durationMs": 10786,
+      "status": "completed",
+      "checkFaults": [],
+      "automatedVerdict": "pass",
+      "files": {}
+    },
+    {
+      "id": "latest-104-unicode-exact-copy",
+      "startedAt": "2026-10-19T08:37:58.024Z",
+      "finishedAt": "2026-10-19T08:38:12.932Z",
+      "durationMs": 14908,
+      "status": "completed",
+      "checkFaults": [],
+      "automatedVerdict": "pass",
+      "files": {
+        "archive.md": {
+          "bytes": 68,
+          "sha256": "b6d1c4248a198be5ad5504df05969258a13dcf0f202f81860c7bfebd16ac4a4e"
+        },
+        "memo.md": {
+          "bytes": 68,
+          "sha256": "b6d1c4248a198be5ad5504df05969258a13dcf0f202f81860c7bfebd16ac4a4e"
+        }
+      }
+    },
+    {
+      "id": "latest-110-unavailable-sources",
+      "startedAt": "2026-10-19T08:38:12.934Z",
+      "finishedAt": "2026-10-19T08:38:36.569Z",
+      "durationMs": 23635,
+      "status": "blocked",
+      "checkFaults": [],
+      "automatedVerdict": "pass",
+      "files": {}
+    }
+  ],
+  "limitations": [
+    "Five targeted workflows; the full 120-case live set was not rerun.",
+    "The live research replay encountered no token-bearing URL failure. Real-guard deterministic tests cover that recovery sequence.",
+    "Desktop application and gateway were not rebuilt or updated."
+  ]
+}

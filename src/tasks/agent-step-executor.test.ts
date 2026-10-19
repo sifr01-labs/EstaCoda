@@ -935,6 +935,71 @@ describe("AgentStepExecutor", () => {
     if(result.outcome==="succeeded")expect(result.results?.[0]?.content).toContain("Source access limitation: 1");
   });
 
+  it.each([
+    "alternative", "public-canonical", "no-read", "earlier-read", "uncited-read", "empty-read",
+    "denied", "denied-alternative", "required-step", "required-scope", "required-parent",
+    "rejected-citation", "unsafe-url", "redirect-secret-in-url", "network-disabled", "unavailable",
+    "uncertain-effect", "other-failure"
+  ])("abandons only optional pre-fetch secret URLs with cited later evidence: %s", async mode => {
+    const graph = makeGraph(), base = graph.steps[0]!;
+    const rejected = "https://candidate.example/keyboard?token=test-only-secret";
+    const alternative = mode === "public-canonical" ? "https://candidate.example/keyboard" : "https://primary.example/keyboard";
+    const observed = "Keyboard navigation must provide visible focus.";
+    const fetch = vi.fn(async () => ({ ok: true, status: 200, statusText: "OK", headers: { get: () => "text/plain" }, text: async () => observed }));
+    const resolveHostname = vi.fn(async () => ["93.184.216.34"]);
+    const extract = createWebTools({ enableNetwork: true, fetch, resolveHostname }).find(t => t.name === "web.extract")!;
+    const blocked = await extract.run({ url: rejected });
+    expect(blocked).toMatchObject({ ok: false, metadata: { reason: "secret-in-url" } });
+    expect(JSON.stringify(blocked)).not.toContain("test-only-secret");
+    expect(fetch).not.toHaveBeenCalled();
+    expect(resolveHostname).not.toHaveBeenCalled();
+    const step: TaskStep = { ...base, objective: mode === "required-step" ? `Read ${rejected}` : "Research keyboard navigation",
+      executor: { ...base.executor, role: "worker",
+        research: { scope: mode === "required-scope" ? `Read ${rejected}` : "keyboard navigation", requireLiveSources: true, requireRepositoryEvidence: false },
+        requestContract: { version: 1, objective: mode === "required-parent" ? `Use only ${rejected}` : "Research accessible forms",
+          requirements: { skillReferences: [], issues: [], research: { fresh: true, domain: "general" } } } } };
+    const failure: import("../tools/tool-executor.js").ToolExecutionRecord = {
+      tool: extract, input: { url: rejected }, decision: mode === "denied" ? "deny" : "allow", riskClass: "read-only-network", result: blocked
+    };
+    if (["unsafe-url", "redirect-secret-in-url", "network-disabled", "unavailable"].includes(mode)) {
+      failure.result = { ...blocked, metadata: { ...blocked.metadata, reason: mode } };
+    }
+    if (mode === "uncertain-effect") failure.settlement = { terminalStatus: "failed", dispatchState: "finished", sideEffectState: "possible" };
+    const calls: import("../tools/tool-executor.js").ToolExecutionRecord[] = [
+      successfulEvidenceExecution("web.search", "read-only-network", ["web", "research"], { query: "keyboard navigation" }, "Observed candidates",
+        { provider: "ddgs", results: [{ url: alternative, snippet: observed }, { url: rejected, snippet: "Unverified candidate" }, { url: "https://snippet.example/overview", snippet: "Overview" }] }), failure
+    ];
+    if (mode !== "no-read") {
+      const read: import("../tools/tool-executor.js").ToolExecutionRecord = { tool: extract, input: { url: alternative },
+        decision: mode === "denied-alternative" ? "deny" : "allow", riskClass: "read-only-network", result: await extract.run({ url: alternative }) };
+      if (mode === "empty-read") read.result!.metadata = { ...read.result!.metadata, content: "" };
+      if (mode === "earlier-read") calls.splice(1, 0, read); else calls.push(read);
+    }
+    if (mode === "other-failure") calls.push({ ...failure, input: { url: "http://127.0.0.1/private" }, result: { ok: false, content: "Blocked", metadata: { reason: "unsafe-url" } } });
+    const text = mode === "uncited-read" ? "Keyboard overview. Source: https://snippet.example/overview" :
+      `${observed} Source: ${alternative}. Evidence: retrieved passage, not an interactive accessibility test.` + (mode === "rejected-citation" ? ` Also supported by ${rejected}` : "");
+    const accepted = mode === "alternative" || mode === "public-canonical";
+    const childFactory: ChildAgentLoopFactory = { createChild: vi.fn(async input => {
+      await sessionDb.createSession({ id: "secret-url-worker", profileId: input.profileId, parentSessionId: input.parentSessionId });
+      return childRuntime(async request => {
+        // Search observations alone do not resolve a rejected candidate.
+        expect(request.stepCompletion?.validate?.(text, [calls[0]!, failure])).toBeDefined();
+        expect(request.stepCompletion?.validate?.(text, calls) === undefined).toBe(accepted);
+        return response({ text, toolExecutions: calls });
+      }, async () => undefined, { sessionId: "secret-url-worker", trajectoryId: "secret-url-trajectory" },
+      { tools: ["web.search", "web.extract"], toolsets: ["web", "research"] });
+    }) };
+    const executor = new AgentStepExecutor({ childFactory, sessionDb, taskStore: store, hostWorkspace: graph.task.workspace,
+      isWorkspaceTrusted: () => true, parentVisibleTools: () => tools(), approvalService: new TaskApprovalService({ store }), securityPolicy: capabilityFirstDefaults });
+    const result = await executor.execute({ task: graph.task, step, attempt: attempt({ ...graph, steps: [step] }), signal: new AbortController().signal, heartbeat: vi.fn(), checkpoint: vi.fn() });
+    expect(result.outcome).toBe(accepted ? "succeeded" : "failed");
+    if (result.outcome === "succeeded") {
+      expect(result.results?.[0]?.content).toContain("Source access limitation: 1");
+      expect(result.results?.[0]?.content).not.toContain("test-only-secret");
+      expect(fetch).toHaveBeenCalledTimes(1);
+    }
+  });
+
   it.each(["recovered", "offset", "unrecovered", "different-source", "denied", "empty"])("handles bounded passage recovery: %s", async mode => {
     const graph = makeGraph(), base = graph.steps[0]!;
     const url = "https://observed.example/report";

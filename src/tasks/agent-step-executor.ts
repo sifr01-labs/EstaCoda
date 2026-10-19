@@ -414,7 +414,7 @@ export class AgentStepExecutor implements TaskStepExecutor {
           ...common
         };
       }
-      if (hasUnrecoveredToolFailure(input.step, response.toolExecutions)) {
+      if (hasUnrecoveredToolFailure(input.step, response.toolExecutions, response.text)) {
         return {
           outcome: "failed",
           failure: taskFailure("tool-error", true),
@@ -451,7 +451,7 @@ export class AgentStepExecutor implements TaskStepExecutor {
       const grounded = groundResearchResult({ task: input.task, step: input.step, store: this.#taskStore,
         text: response.text, executions: response.toolExecutions, now: this.#now() });
       const unavailableSources = response.toolExecutions.filter(execution => execution.result?.ok === false &&
-        isAlternativeResearchRead(input.step, execution, response.toolExecutions)).length;
+        isAlternativeResearchRead(input.step, execution, response.toolExecutions, response.text)).length;
       const researchText = (grounded.text ?? response.text) + (unavailableSources
         ? `\n\nSource access limitation: ${unavailableSources} source read(s) failed. Findings use other observed sources; failed retrievals remain in the attempt history.` : "");
       const captured = await captureResults(researchText, response.artifacts, input, this.#resolveArtifactContent);
@@ -715,7 +715,7 @@ function researchCompletionFailure(
   if (grounded.failure !== undefined) return `Research evidence needs correction: ${grounded.failure}. ${grounded.feedback ?? "Return the corrected report with observed citations and source limitations."}`;
   // Use the same failure recovery decision before completion and at settlement.
   // A provider must be able to repair required reads before its Attempt ends.
-  if (hasUnrecoveredToolFailure(input.step, executions)) return "Research evidence needs correction: unresolved-tool-error. Retry the failed required read with the same arguments, or report that the assigned evidence could not be obtained. Failed optional source reads may use other observed evidence; authorization failures are never recoverable here.";
+  if (hasUnrecoveredToolFailure(input.step, executions, text)) return "Research evidence needs correction: unresolved-tool-error. Obtain the missing required evidence with allowed tools, or report the gap. An optional token-bearing source URL may be abandoned only after citing a later successful authorized source read. Never retry a blocked URL or bypass a denial. Required-source failures, execution-policy denials, and other URL safety blocks remain unresolved.";
   const missing = researchEvidenceFailure(input.step, text, [...executions]);
   return missing === undefined ? undefined : `Research evidence needs correction: ${missing}. Cite evidence observed with the assigned tools; obtain missing evidence or explicitly report the unresolved gap.`;
 }
@@ -921,9 +921,9 @@ function safeDiagnosticOutput(
   };
 }
 
-function hasUnrecoveredToolFailure(step: TaskStep, executions: readonly ToolExecutionRecord[]): boolean {
+function hasUnrecoveredToolFailure(step: TaskStep, executions: readonly ToolExecutionRecord[], text: string): boolean {
   return executions.some((execution, index) => execution.result?.ok === false &&
-    !isRecoveredRead(execution, index, executions) && !isRecoveredPassageLookup(execution, index, executions) && !isRecoveredDeliveryValidation(step, execution, index, executions) && !isAlternativeResearchRead(step, execution, executions));
+    !isRecoveredRead(execution, index, executions) && !isRecoveredPassageLookup(execution, index, executions) && !isRecoveredDeliveryValidation(step, execution, index, executions) && !isAlternativeResearchRead(step, execution, executions, text));
 }
 
 /** A pre-write validation error has no uncertain effect. A later authorized
@@ -936,7 +936,7 @@ function isRecoveredDeliveryValidation(step: TaskStep, failed: ToolExecutionReco
 
 /** Source read failures can be replaced by other observed evidence.
  * The research and grounding gates below still validate the returned report. */
-function isAlternativeResearchRead(step: TaskStep, execution: ToolExecutionRecord, executions: readonly ToolExecutionRecord[]): boolean {
+function isAlternativeResearchRead(step: TaskStep, execution: ToolExecutionRecord, executions: readonly ToolExecutionRecord[], text: string): boolean {
   if (step.executor.role !== "worker" || !step.executor.requestContract?.requirements.research ||
       !step.executor.research?.requireLiveSources || execution.decision !== "allow" ||
       execution.riskClass !== "read-only-network") return false;
@@ -949,11 +949,33 @@ function isAlternativeResearchRead(step: TaskStep, execution: ToolExecutionRecor
         other.result.metadata?.provider === provider && Array.isArray(other.result.metadata.results) && other.result.metadata.results.length > 0);
   }
   if (execution.tool.name !== "web.extract") return false;
+  if (execution.result?.metadata?.reason === "secret-in-url") {
+    return isAbandonedSecretUrl(step, execution, executions, text);
+  }
   const status = execution.result?.metadata?.status;
   const url = execution.input?.url;
   return (["url-resolution-failed", "fetch-failed", "provider-failed"].includes(String(execution.result?.metadata?.reason)) ||
       typeof status === "number" && [403, 404, 406, 410, 429, 500, 502, 503, 504].includes(status)) &&
     typeof url === "string" && !collectHttpUrls([step.objective, step.executor.research.scope]).includes(normalizedHttpUrl(url) ?? url);
+}
+
+/** Abandon a model-selected candidate, never authorize the rejected request.
+ * Only the pre-fetch secret guard qualifies; redirects and other safety blocks
+ * remain failures. Grounding still validates every citation and assigned scope. */
+function isAbandonedSecretUrl(step: TaskStep, failed: ToolExecutionRecord, executions: readonly ToolExecutionRecord[], text: string): boolean {
+  const url = typeof failed.input?.url === "string" ? normalizedHttpUrl(failed.input.url) : undefined;
+  if (url === undefined || (failed.settlement !== undefined && failed.settlement.sideEffectState !== "none")) return false;
+  const required = collectHttpUrls([step.objective, step.executor.research?.scope, step.executor.requestContract?.objective]);
+  const cited = new Set(collectHttpUrls([text]));
+  if (required.includes(url) || cited.has(url)) return false;
+  return executions.slice(executions.indexOf(failed) + 1).some(next => {
+    if (next.tool.name !== "web.extract" || next.decision !== "allow" || next.riskClass !== "read-only-network" ||
+        next.result?.ok !== true || typeof next.result.metadata?.content !== "string" ||
+        next.result.metadata.content.trim().length === 0) return false;
+    const observed = next.result.metadata.url;
+    const alternative = typeof observed === "string" ? normalizedHttpUrl(observed) : undefined;
+    return alternative !== undefined && alternative !== url && cited.has(alternative);
+  });
 }
 
 /** A literal lookup miss is navigation feedback, not unavailable source text.
