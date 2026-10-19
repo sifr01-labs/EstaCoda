@@ -61,6 +61,16 @@ class EstaCodaHarborAgentTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("--isolated-home", args)
         self.assertNotIn("--home", args)
 
+    def test_workspace_scope_is_an_explicit_operator_setting(self):
+        for values, expected in [({}, "/app"), ({"ESTACODA_BENCH_WORKSPACE": "/"}, "/"),
+                                 ({"ESTACODA_BENCH_WORKSPACE": "/app/personal-site"}, "/app/personal-site")]:
+            with self.subTest(workspace=expected):
+                config = build_config(values)
+                args = build_bench_args(config, "/tmp/instruction.txt")
+                self.assertEqual(args[args.index("--workspace") + 1], expected)
+                command = build_installed_agent_command(config, "Write /etc/service.conf; workspace is /")
+                self.assertIn("--workspace " + shlex.quote(expected), command)
+
     def test_agent_extra_env_overrides_host_env_for_config(self):
         agent = SimpleNamespace(_extra_env={
             "ESTACODA_BENCH_COMMAND": "/estacoda/node dist/index.js",

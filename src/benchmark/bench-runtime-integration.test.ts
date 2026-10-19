@@ -18,6 +18,8 @@ describe("benchmark real runtime integration", () => {
     { explicitHome: true, scenario: "read" },
     { explicitHome: true, scenario: "write" },
     { explicitHome: true, scenario: "absolute-write" },
+    { explicitHome: true, scenario: "terminal-write" },
+    { explicitHome: true, scenario: "system-write" },
     { explicitHome: true, scenario: "absolute-no-readback" },
     { explicitHome: true, scenario: "outside-write" },
     { explicitHome: true, scenario: "symlink-write" },
@@ -34,11 +36,18 @@ describe("benchmark real runtime integration", () => {
     await writeFile(join(workspace, "input.txt"), "synthetic benchmark input\n");
     await writeFile(join(outside, "output.txt"), "outside file must remain unchanged\n");
     if (scenario === "symlink-write") await symlink(join(outside, "output.txt"), join(workspace, "output.txt"));
+    const terminalSteps = scenario === "terminal-write" ? 8 : 0;
+    const setupSteps = terminalSteps > 0 ? 1 : 0;
+    for (let index = 1; index <= terminalSteps; index++) {
+      await writeFile(join(workspace, `diagnostic-${index}.txt`), `diagnostic result ${index}\n`);
+    }
+    const outputRelativePath = scenario === "system-write" ? "var/www/html/index.html" : "output.txt";
+    if (scenario === "system-write") await mkdir(join(workspace, "var/www/html"), { recursive: true });
     const writesFile = scenario.includes("write") || scenario === "absolute-no-readback";
     const noReadback = scenario === "absolute-no-readback";
     const unsafeWrite = scenario === "outside-write" || scenario === "symlink-write";
     const expectedFailure = failTools || noReadback || unsafeWrite;
-    const outputPath = scenario === "write" ? "output.txt" : join(scenario === "outside-write" ? outside : workspace, "output.txt");
+    const outputPath = scenario === "write" ? "output.txt" : join(scenario === "outside-write" ? outside : workspace, outputRelativePath);
     const originalTrust = new WorkspaceTrustStore({ homeDir });
     await originalTrust.grant(outside);
     const originalTrustBytes = await readFile(originalTrust.path, "utf8");
@@ -48,7 +57,19 @@ describe("benchmark real runtime integration", () => {
     };
     const registry = new ProviderRegistry();
     const complete = vi.fn(async () => {
-      const iteration = complete.mock.calls.length;
+      const step = complete.mock.calls.length;
+      if (setupSteps && step === 1) return {
+        ok: true, provider: model.provider, model: model.id, content: "",
+        raw: { output: [{ type: "function_call", call_id: "request-terminal", name: "capability_request",
+          arguments: JSON.stringify({ ids: ["tool:terminal.run"], reason: "Inspect the local diagnostics before writing the result." }) }] }
+      };
+      const terminalIndex = step - setupSteps;
+      if (terminalIndex <= terminalSteps) return {
+        ok: true, provider: model.provider, model: model.id, content: "",
+        raw: { output: [{ type: "function_call", call_id: `terminal-${terminalIndex}`, name: "terminal_run",
+          arguments: JSON.stringify({ command: `cat diagnostic-${terminalIndex}.txt` }) }] }
+      };
+      const iteration = terminalIndex - terminalSteps;
       const writes = writesFile && iteration === 1;
       const call = failTools || iteration <= (writesFile && !noReadback ? 2 : 1);
       return {
@@ -68,7 +89,7 @@ describe("benchmark real runtime integration", () => {
       ["run", "--workspace", workspace, "--instruction", writesFile
         ? `Write ${outputPath} with synthetic benchmark output and verify its contents.`
         : "Read input.txt and report its contents.", "--out", outDir,
-        ...(explicitHome ? ["--home", homeDir] : []), "--timeout-ms", "10000", "--max-provider-iterations", "3"],
+        ...(explicitHome ? ["--home", homeDir] : []), "--timeout-ms", "10000", "--max-provider-iterations", String(terminalSteps + setupSteps + 3)],
       {
         makeTempHome: async () => homeDir,
         loadConfig: async (options) => ({
@@ -96,10 +117,14 @@ describe("benchmark real runtime integration", () => {
       }
     );
     expect(result.exitCode, result.output).toBe(expectedFailure ? 1 : 0);
-    if (!expectedFailure) expect(complete).toHaveBeenCalledTimes(writesFile ? 3 : 2);
-    if (writesFile && !unsafeWrite) expect(await readFile(join(workspace, "output.txt"), "utf8")).toBe("synthetic benchmark output\n");
+    if (!expectedFailure) expect(complete).toHaveBeenCalledTimes(terminalSteps + setupSteps + (writesFile ? 3 : 2));
+    if (writesFile && !unsafeWrite) expect(await readFile(join(workspace, outputRelativePath), "utf8")).toBe("synthetic benchmark output\n");
     expect(await readFile(join(outside, "output.txt"), "utf8")).toBe("outside file must remain unchanged\n");
     const events = (await readFile(join(outDir, "events.ndjson"), "utf8")).trim().split("\n").map((line) => JSON.parse(line));
+    if (terminalSteps > 0) {
+      expect(events.filter(event => event.kind === "tool-result" && event.tool === "terminal.run" && event.ok)).toHaveLength(terminalSteps);
+      expect(events.some(event => event.kind === "provider-budget-exhausted")).toBe(false);
+    }
     if (noReadback) {
       expect(events.filter(event => event.kind === "tool-result" && event.tool === "file.read")).toEqual([]);
     } else {

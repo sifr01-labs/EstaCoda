@@ -64,6 +64,8 @@ This verifies that `estacoda bench run` can:
 - write trajectory artifacts when a scenario run uses a persistent trajectory store
 - exercise cross-session memory recall with isolated home, workspace, and SQLite state
 
+The progress guard credits distinct successful terminal commands with new results even while a completion checkpoint is active. Failed, denied, cancelled, timed-out, reused, and repeated commands do not reset that checkpoint guard. Changing only deadlines or receipt identifiers is not progress. This accounting does not satisfy file delivery or other completion requirements; the agent must still produce and verify the requested result.
+
 The local smoke includes a real-runtime integration test with an offline provider. It checks tool dispatch, workspace trust isolation and cleanup, the hard-deny floor, and failure reporting when a tool loop exhausts its budget. The other deterministic scenarios also use mocked runtime components. The smoke does not call a live model and does not prove Terminal-Bench scoring.
 
 ## Operator Suite Smoke
@@ -147,6 +149,8 @@ Document these details in every reproducible run note:
 - The EstaCoda process runs inside the Terminal-Bench task container. Do not point `ESTACODA_BENCH_COMMAND` at macOS `node_modules`, host-native binaries, or a host-only checkout path. Use a Linux-built runtime available in the task container, or build/install EstaCoda inside the container with `ESTACODA_HARBOR_INSTALL_COMMAND`.
 - Live runs need explicit provider configuration. Pass `ESTACODA_BENCH_MODEL`, provider credentials, `ESTACODA_BENCH_TEMPERATURE`, and any max-token setting through the Harbor agent environment or an explicit benchmark home. Do not rely on a real user `~/.estacoda` home.
 - Some providers constrain temperature. Record the actual value and set `ESTACODA_BENCH_TEMPERATURE` accordingly.
+- Select the workspace explicitly with `ESTACODA_BENCH_WORKSPACE` (Harbor `--ae ESTACODA_BENCH_WORKSPACE=<path>`). The adapter defaults to `/app`; file tools cannot write `/etc` or `/var` under that scope. For an operator-authorized disposable container requiring system-wide configuration, choose `/` inside that container, without host filesystem mounts. Keep project-only runs scoped to their project directory. This is an explicit operator choice, never inferred from task prose or container-detection heuristics, and does not disable hardline command checks.
+- Workspace selection does not resolve multiple output requirements. The current text-delivery parser represents one destination; tasks naming several output files can still produce `ambiguous-file-target`. Record this as a completion-contract limitation when evaluating system-configuration tasks, even if filesystem access is correctly scoped.
 - Long tasks may exhaust default provider-loop budgets before Harbor verification. Use `ESTACODA_BENCH_MAX_PROVIDER_ITERATIONS`, `ESTACODA_BENCH_MAX_PROVIDER_TOOL_CALLS`, and `ESTACODA_BENCH_MAX_PROVIDER_WALL_CLOCK_MS` when a run intentionally needs larger limits.
 - Prefer explicit task identity for one-task probes. If Harbor does not expose the task id to the installed-agent context, pass `ESTACODA_BENCH_TASK_ID` so artifacts and summaries do not fall back to `unknown-task`.
 

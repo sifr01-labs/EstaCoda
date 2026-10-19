@@ -551,3 +551,74 @@ it("credits accepted result page coverage once and only for the bound source tas
   expect(seeded.observe([page(100, 200)]).materialProgress).toBe(false);
   expect(seeded.observe([page(200, 1000, { nextOffset: undefined })]).materialProgress).toBe(true);
 });
+
+
+describe("terminal progress while a completion checkpoint is active", () => {
+  function terminal(index: number, name = "terminal.run"): ToolExecutionRecord {
+    return execution({
+      tool: { ...execution().tool, name, riskClass: "workspace-write" },
+      input: name === "terminal.inspect" ? { argv: ["cat", `diagnostic-${index}.txt`] }
+        : { command: `cat diagnostic-${index}.txt`, timeoutMs: 1000 },
+      riskClass: "workspace-write", executionEffect: { kind: "read" },
+      result: { ok: true, content: `Observed diagnostic ${index}`, metadata: {
+        code: 0, signal: null, timedOut: false, cancelled: false
+      } }
+    });
+  }
+
+  it.each(["terminal.run", "terminal.inspect"])("credits distinct successful %s observations beyond the stop limit", async name => {
+    const guard = await discoveryGuard();
+    for (let index = 0; index < 8; index++) {
+      expect(guard.observe([terminal(index, name)])).toMatchObject({
+        materialProgress: true, noProgressIterations: 0, shouldStop: false,
+        progressKinds: ["new-tool-result"]
+      });
+    }
+    for (let index = 1; index <= 6; index++) {
+      expect(guard.observe([terminal(7, name)])).toMatchObject({ materialProgress: false, shouldStop: index === 6 });
+    }
+  });
+
+  it("ignores timeout, receipt and output churn on the same command, including seeded calls", async () => {
+    const prior = terminal(0);
+    const guard = await discoveryGuard([prior]);
+    for (let index = 1; index <= 6; index++) {
+      const repeated = terminal(0);
+      repeated.input = { command: "cat diagnostic-0.txt", timeoutMs: 1000 + index };
+      repeated.toolCallId = `new-receipt-${index}`;
+      repeated.targetKey = `new-target-${index}`;
+      repeated.result = { ...repeated.result!, content: `clock ${index}` };
+      expect(guard.observe([repeated])).toMatchObject({ materialProgress: false, shouldStop: index === 6 });
+    }
+  });
+
+  it("does not credit different commands with identical results", async () => {
+    const guard = await discoveryGuard();
+    expect(guard.observe([terminal(0)]).materialProgress).toBe(true);
+    for (let index = 1; index <= 6; index++) {
+      const repeated = terminal(index);
+      repeated.result = terminal(0).result;
+      expect(guard.observe([repeated])).toMatchObject({ materialProgress: false, shouldStop: index === 6 });
+    }
+  });
+
+  it.each(["failed", "denied", "reused", "cached", "timeout", "cancelled", "signal", "nonzero", "missing-receipt", "completion-repair"])(
+    "keeps %s terminal activity bounded", async scenario => {
+      const guard = await discoveryGuard();
+      for (let index = 1; index <= 6; index++) {
+        const record = terminal(index);
+        if (scenario === "failed") record.result!.ok = false;
+        if (scenario === "denied") record.decision = "deny";
+        if (scenario === "reused") record.readReuseOf = "prior-call";
+        if (scenario === "cached") record.result!.metadata!.mcpReadReuse = true;
+        if (scenario === "timeout") record.result!.metadata!.timedOut = true;
+        if (scenario === "cancelled") record.result!.metadata!.cancelled = true;
+        if (scenario === "signal") record.result!.metadata!.signal = "SIGTERM";
+        if (scenario === "nonzero") record.result!.metadata!.code = 1;
+        if (scenario === "missing-receipt") delete record.result!.metadata;
+        expect(guard.observe([record], scenario === "completion-repair"))
+          .toMatchObject({ materialProgress: false, shouldStop: index === 6 });
+      }
+    }
+  );
+});

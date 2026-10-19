@@ -166,11 +166,7 @@ export class ToolLoopProgressGuard {
         if (reportProgress) { materialProgress = true; continue; }
         if (["file.write", "file.patch", "file.read"].includes(execution.tool.name)) continue;
       }
-      const callFingerprint = fingerprint({
-        tool: execution.tool.name,
-        input: execution.input,
-        target: execution.targetKey ?? execution.targetSummary
-      });
+      const callFingerprint = toolCallFingerprint(execution);
       const callIsNew = !this.#seenCallFingerprints.has(callFingerprint);
       this.#seenCallFingerprints.add(callFingerprint);
       const browserDiscovery = browserDiscoveryFingerprint(execution);
@@ -233,7 +229,11 @@ export class ToolLoopProgressGuard {
         progressKinds.add("repeated-tool-call");
         continue;
       }
-      if (!checkpointControlsProgress) {
+      // A checkpoint may not project shell diagnostics or intermediate repairs.
+      // A fresh successful process result can keep work moving, but never proves
+      // the requested deliverable complete. Both call and result must be new;
+      // unchanged completion repairs still need their specific evidence.
+      if (!checkpointControlsProgress || (!unchangedCompletionRepair && successfulTerminalReceipt(execution))) {
         materialProgress = true;
         progressKinds.add("new-tool-result");
       }
@@ -268,11 +268,7 @@ export class ToolLoopProgressGuard {
       if (this.#research) researchEvidence(execution).forEach((source) => this.#seenResearchSources.add(source));
       const discovery = browserDiscoveryFingerprint(execution) ?? connectorDiscoveryFingerprint(execution);
       if (discovery !== undefined) this.#seenDiscoveryFingerprints.add(discovery);
-      this.#seenCallFingerprints.add(fingerprint({
-        tool: execution.tool.name,
-        input: execution.input,
-        target: execution.targetKey ?? execution.targetSummary
-      }));
+      this.#seenCallFingerprints.add(toolCallFingerprint(execution));
       this.#seenResultFingerprints.add(fingerprint({
         tool: execution.tool.name,
         ok: execution.result?.ok,
@@ -315,6 +311,25 @@ export class ToolLoopProgressGuard {
     this.#resultReadEnds.set(key, Math.max(previousEnd, end));
     return end > previousEnd;
   }
+}
+
+function toolCallFingerprint(execution: ToolExecutionRecord): string {
+  // Process deadlines and transient target handles do not make a command new.
+  const input = execution.input ?? {};
+  if (execution.tool.name === "terminal.run") {
+    return fingerprint({ tool: execution.tool.name, command: input.command });
+  }
+  if (execution.tool.name === "terminal.inspect") {
+    return fingerprint({ tool: execution.tool.name, argv: input.argv });
+  }
+  return fingerprint({ tool: execution.tool.name, input: execution.input,
+    target: execution.targetKey ?? execution.targetSummary });
+}
+
+function successfulTerminalReceipt(execution: ToolExecutionRecord): boolean {
+  if (execution.tool.name !== "terminal.run" && execution.tool.name !== "terminal.inspect") return false;
+  const metadata = execution.result?.metadata;
+  return metadata?.code === 0 && metadata.signal === null && metadata.timedOut === false && metadata.cancelled === false;
 }
 
 function connectorDiscoveryFingerprint(execution: ToolExecutionRecord): string | undefined {
