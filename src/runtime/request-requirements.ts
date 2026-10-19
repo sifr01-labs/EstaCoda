@@ -44,7 +44,7 @@ export function explicitRequestSegments(text: string): string[] {
     .replace(/https?:\/\/[^\s<>"“”`]+/giu, url => ` [URL] ${url.match(/[.!?;؛]+$/u)?.[0] ?? ""}`)
     .replace(/`([^`\n]*)`|"([^"\n]*)"|“([^”\n]*)”|'([^'\n]*)'|‘([^’\n]*)’/gu, (match, ...groups: unknown[]) => {
       const value = groups.slice(0, 5).find((group) => typeof group === "string") as string | undefined;
-      if (value !== undefined && QUOTED_FILE_NAME.test(value)) {
+      if (value !== undefined && (QUOTED_FILE_NAME.test(value) || /^(?:\/|\.\.?\/)[\p{L}\p{N}_ .\/-]{1,240}$/u.test(value))) {
         operands.push(value);
         return ` FILEOPERAND${operands.length - 1} `;
       }
@@ -77,7 +77,14 @@ export function deriveRequestRequirements(userText: string, originTurnId?: strin
     result.issues.push("request-too-long");
     return result;
   }
-  for (const segment of explicitRequestSegments(userText)) {
+  const segments = explicitRequestSegments(userText);
+  // Directory declarations identify output destinations, never workspace trust.
+  // A conflicting declaration stays unresolved instead of guessing by basename.
+  const outputDirectories = [...new Set(segments.flatMap(segment => {
+    const match = /\b(?:create|use|set)\s+(?:the\s+)?(?:document\s+root(?:\s+directory)?|output\s+directory|destination\s+directory)\s+(?:to\s+|at\s+)?(?:`([^`]+)`|([\w./-]+))/iu.exec(segment);
+    return match ? [match[1] ?? match[2]!] : [];
+  }))];
+  for (const segment of segments) {
     const actionSegment = segment.replace(/`[^`]*`/gu, " ").replace(FILE_OPERAND, " [file] ");
     // Cancelling an old objective does not request its named work again.
     if (/^\s*(?:(?:please|just)\s+)?(?:forget|cancel|stop|abandon|discard|ignore)\b|^\s*(?:انسَ?|ألغ|الغ|توقف|تجاهل)/iu.test(actionSegment)) continue;
@@ -138,7 +145,13 @@ export function deriveRequestRequirements(userText: string, originTurnId?: strin
     if (sourcePath !== undefined && normalizedSource === undefined) result.issues.push("unsafe-file-target");
     const outputs = requestedFileOutputs(result);
     for (const candidate of paths.length === 0 ? [undefined] : paths) {
-      const path = candidate === undefined ? undefined : workspaceRelativeRequirementPath(candidate, workspaceRoot);
+      const bareName = candidate !== undefined && !/[/\\:]/u.test(candidate);
+      const directDirectory = /\b(?:in|under|into)\s+(?:the\s+)?(?:directory\s+)?(?:`([^`]+)`|((?:\/|\.\/)[\w./-]+))/iu.exec(outputSegment);
+      const directories = directDirectory ? [directDirectory[1] ?? directDirectory[2]!] : outputDirectories;
+      if (bareName && directories.length > 1) result.issues.push("ambiguous-file-target");
+      const destination = bareName && directories.length === 1
+        ? `${directories[0]!.replace(/\/$/u, "")}/${candidate}` : candidate;
+      const path = destination === undefined ? undefined : workspaceRelativeRequirementPath(destination, workspaceRoot);
       if (candidate !== undefined && path === undefined) result.issues.push("unsafe-file-target");
       const output: FileOutputRequirement = {
         format: candidate === undefined ? (markdown ? "markdown" : "text") : /\.(?:md|markdown)$/iu.test(candidate) ? "markdown" : "text",

@@ -6,7 +6,7 @@ import type { ArtifactRecord } from "../contracts/artifact.js";
 import type { ChannelAttachment, ChannelKind } from "../contracts/channel.js";
 import type { ContextExpansionResult, ProjectContextSnapshot } from "../contracts/context.js";
 import type { IntentRoute, RequestRequirements } from "../contracts/intent.js";
-import { fileOutputEvidence } from "./file-output-evidence.js";
+import { fileOutputEvidence, pendingFileReadbackPaths } from "./file-output-evidence.js";
 import { continueRequestRequirements, requiredSkillsDelivered } from "./request-requirements.js";
 import { researchPrerequisiteBlockers, researchRequestEvidence } from "./research-request-evidence.js";
 import type { ExecutionFinalOutcome, ExecutionPlan, ExecutionPlanReader } from "../contracts/execution-plan.js";
@@ -1123,6 +1123,10 @@ export class AgentLoop {
     const providerLoop: ProviderTurnLoopResult = researchBlockers.length > 0
       ? { providerExecution: undefined, toolExecutions: [], iterations: 0, terminationCause: "user_input_required" }
       : await this.#providerTurnLoop.run({
+      completionReadbackPaths: input.stepCompletion === undefined ? executions => pendingFileReadbackPaths({
+        requirements: intent.requestRequirements, toolExecutions: executions,
+        executionReceipts: this.#executionEvidenceIndex.recordsForTurn(visibleTurn.id)
+      }) : undefined,
       validateCompletion: input.stepCompletion?.validate ?? (intent.requestRequirements?.research === undefined && intent.requestRequirements?.fileOutput === undefined ? undefined : (text, executions) => {
         const receipts = this.#executionEvidenceIndex.recordsForTurn(visibleTurn.id);
         const research = researchRequestEvidence({ finalText: text, requestRequirements: intent.requestRequirements,

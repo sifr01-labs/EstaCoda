@@ -264,6 +264,7 @@ export class ProviderTurnLoop {
 
   async run(input: {
     /** Trusted host validator; feedback cannot change the tool/authority boundary. */
+    completionReadbackPaths?: (executions: readonly ToolExecutionRecord[]) => string[] | undefined;
     validateCompletion?: (text: string, executions: readonly ToolExecutionRecord[]) => string | undefined;
     /** Explain a blocked task without executing tools or supervising its checkpoint. */
     diagnosticOnly?: boolean;
@@ -326,6 +327,10 @@ export class ProviderTurnLoop {
         iteration: 0,
         loopStartedAt: Date.now()
       });
+      if (execution !== undefined) await this.#runRecorder.recordProviderIteration({
+        iteration: 0, phase: "initial", ok: execution.ok, toolCalls: execution.toolCalls.length,
+        executedTools: 0, exhausted: false, count: providerIterationCost(execution)
+      }, input.onEvent);
       // Even a hallucinated tool call cannot reach the runner in diagnostic mode.
       return {
         providerExecution: execution,
@@ -353,6 +358,7 @@ export class ProviderTurnLoop {
     let completionValidationFailure: string | undefined;
     let completionCandidate: string | undefined;
     let completionRepairs = 0;
+    let completionReadbackPaths: readonly string[] | undefined;
     let pendingEmptyResponseNudge = false;
     let postToolEmptyRetried = false;
     let capturedContentWithHousekeepingTools: string | undefined;
@@ -469,7 +475,8 @@ export class ProviderTurnLoop {
       retryEmptyInitialResponse = false;
       retryReasoningOnlyInitialResponse = false;
       const providerToolsForIteration = filterSuppressedBrowserProviderTools(
-        activeProviderTools,
+        completionReadbackPaths === undefined ? activeProviderTools : activeProviderTools.filter(tool =>
+          (input.providerToolSchemaCatalog?.aliases.get(tool.function.name) ?? tool.function.name) === "file.read"),
         supervisionPrompt.suppressedBrowserTools
       );
 
@@ -575,8 +582,9 @@ export class ProviderTurnLoop {
           ok: execution.ok,
           toolCalls: 0,
           executedTools: 0,
-          exhausted: false
-        });
+          exhausted: false,
+          count: consumedProviderIterations
+        }, input.onEvent);
         effectiveProviderExecution = mergeProviderExecutions(effectiveProviderExecution, execution);
         previousProviderExecution = execution;
         if (consumedProviderIterations > 1) {
@@ -595,8 +603,9 @@ export class ProviderTurnLoop {
             ok: execution.ok,
             toolCalls: 0,
             executedTools: 0,
-            exhausted: false
-          });
+            exhausted: false,
+            count: consumedProviderIterations
+          }, input.onEvent);
           effectiveProviderExecution = mergeProviderExecutions(effectiveProviderExecution, execution);
           previousProviderExecution = execution;
           if (consumedProviderIterations > 1) {
@@ -613,8 +622,9 @@ export class ProviderTurnLoop {
             ok: execution.ok,
             toolCalls: 0,
             executedTools: 0,
-            exhausted: toolLoopProgress.shouldStop
-          });
+            exhausted: toolLoopProgress.shouldStop,
+            count: consumedProviderIterations
+          }, input.onEvent);
           effectiveProviderExecution = mergeProviderExecutions(effectiveProviderExecution, execution);
           previousProviderExecution = execution;
           if (toolLoopProgress.shouldStop) {
@@ -659,8 +669,9 @@ export class ProviderTurnLoop {
             ok: execution.ok,
             toolCalls: 0,
             executedTools: 0,
-            exhausted: false
-          });
+            exhausted: false,
+            count: consumedProviderIterations
+          }, input.onEvent);
           effectiveProviderExecution = mergeProviderExecutions(effectiveProviderExecution, execution);
           previousProviderExecution = execution;
           if (consumedProviderIterations > 1) {
@@ -677,8 +688,9 @@ export class ProviderTurnLoop {
           ok: execution.ok,
           toolCalls: 0,
           executedTools: 0,
-          exhausted: false
-        });
+          exhausted: false,
+          count: consumedProviderIterations
+        }, input.onEvent);
         effectiveProviderExecution = mergeProviderExecutions(effectiveProviderExecution, execution);
         previousProviderExecution = execution;
         if (consumedProviderIterations > 1) {
@@ -711,6 +723,10 @@ export class ProviderTurnLoop {
           },
           "provider-budget-exhausted"
         );
+        await this.#runRecorder.recordProviderIteration({
+          iteration, phase, ok: execution.ok, toolCalls: execution.toolCalls.length,
+          executedTools: 0, exhausted: true, count: consumedProviderIterations
+        }, input.onEvent);
         execution = executionSupervision.emergencyDeadlineReceipt(execution);
         effectiveProviderExecution = mergeProviderExecutions(effectiveProviderExecution, execution);
         previousProviderExecution = execution;
@@ -753,7 +769,13 @@ export class ProviderTurnLoop {
           profileId: this.#profileId,
           sessionId: this.#sessionRuntimeContext?.currentSessionId() ?? this.#sessionId
         },
-        runtimeAdmissionGuard: executionSupervision.runtimeAdmissionGuard(),
+        runtimeAdmissionGuard: admission => {
+          const blocker = executionSupervision.runtimeAdmissionGuard()(admission);
+          if (blocker || completionReadbackPaths === undefined) return blocker;
+          if (admission.tool.name === "file.read" && typeof admission.input.path === "string" &&
+              completionReadbackPaths.includes(admission.input.path) && Object.keys(admission.input).every(key => key === "path")) return undefined;
+          return { code: "completion-readback-only", reason: "Completion repair permits only full file.read calls for the already written output paths." };
+        },
         onExecution: async (toolExecution) => {
           await executionSupervision.applyRuntimeEffects({ executions: [toolExecution] });
         }
@@ -928,8 +950,9 @@ export class ProviderTurnLoop {
           ok: execution.ok,
           toolCalls: execution.toolCalls.length,
           executedTools: providerToolExecutions.length - beforeExecutions,
-          exhausted: false
-        });
+          exhausted: false,
+          count: consumedProviderIterations
+        }, input.onEvent);
         effectiveProviderExecution = mergeProviderExecutions(effectiveProviderExecution, execution);
         previousProviderExecution = execution;
         break;
@@ -1020,8 +1043,9 @@ export class ProviderTurnLoop {
         ok: execution.ok,
         toolCalls: execution.toolCalls.length,
         executedTools: providerToolExecutions.length - beforeExecutions,
-        exhausted
-      });
+        exhausted,
+        count: consumedProviderIterations
+      }, input.onEvent);
 
       if (browserObservation?.shouldStop === true) {
         execution = executionSupervision.browserNoProgressStopReceipt(execution);
@@ -1101,9 +1125,11 @@ export class ProviderTurnLoop {
         !toolLoopProgress.shouldStop && browserObservation?.shouldStop !== true) {
         const validationFailure = input.validateCompletion(execution.response.content, [...input.toolExecutions, ...providerToolExecutions]);
         completionValidationFailure = validationFailure === undefined ? undefined : redactSensitiveText(validationFailure).slice(0, 6_000);
+        const hasBoundary = [...input.toolExecutions, ...providerToolExecutions].some(call => call.decision !== "allow");
+        const readbackPaths = hasBoundary ? input.completionReadbackPaths?.([...input.toolExecutions, ...providerToolExecutions]) : undefined;
         const repair = completionValidationFailure !== undefined && completionRepairs < 2 &&
           iteration + consumedProviderIterations < this.#budgets.maxProviderIterations && !input.signal?.aborted &&
-          ![...input.toolExecutions, ...providerToolExecutions].some(call => call.decision !== "allow");
+          (!hasBoundary || (readbackPaths !== undefined && readbackPaths.length > 0));
         await this.#sessionDb.appendEvent(this.#currentSessionId(), {
           kind: "step-completion-validation", accepted: completionValidationFailure === undefined,
           ...(completionValidationFailure === undefined ? {} : { feedback: completionValidationFailure }),
@@ -1117,6 +1143,10 @@ export class ProviderTurnLoop {
             content: completionCandidate, metadata: { completionCandidate: true, accepted: false } });
         }
         if (repair) {
+          if (hasBoundary) {
+            completionReadbackPaths = readbackPaths;
+            pendingCompletionFeedback = `Read-only completion repair: use file.read with only path for ${JSON.stringify(readbackPaths)}. These outputs were already written successfully. Do not retry denied actions or make further changes.`;
+          }
           completionRepairs += 1;
           effectiveProviderExecution = mergeProviderExecutions(effectiveProviderExecution, execution);
           previousProviderExecution = execution;
@@ -1141,6 +1171,15 @@ export class ProviderTurnLoop {
               : "normal";
         }
         if (exhausted && execution.ok === true && !toolLoopProgress.shouldStop) {
+          if (repeatedFailureBudgetExceeded === undefined && browserObservation?.shouldStop !== true) {
+            const toolLimit = providerToolExecutions.length >= this.#budgets.maxProviderToolCalls;
+            await this.#runRecorder.recordProviderBudgetExhausted({
+              budget: toolLimit ? "provider-tool-calls" : "provider-iterations",
+              limit: toolLimit ? this.#budgets.maxProviderToolCalls : this.#budgets.maxProviderIterations,
+              observed: toolLimit ? providerToolExecutions.length : iterations,
+              reason: "Provider loop reached its limit with pending tool work."
+            }, input.onEvent);
+          }
           const exhaustionReason = browserObservation?.shouldStop === true
             ? "browser evidence or ineffective targets repeated without a new grounded strategy"
             : "max iterations, tool calls, or repeated tool failures reached with pending work";
@@ -1178,6 +1217,10 @@ export class ProviderTurnLoop {
           completionFeedback: "Network research has stopped at its failure or no-progress limit. No further tools may run. Give a concise partial-results explanation using only observed evidence. Distinguish search snippets from retrieved page text, describe the actual failures without guessing their cause, and identify what remains unverified and an actionable next step. Do not claim research completion or that a requested file was saved."
         });
         if (summary !== undefined) {
+          await this.#runRecorder.recordProviderIteration({
+            iteration: iterations, phase: "continuation", ok: summary.ok, toolCalls: summary.toolCalls.length,
+            executedTools: 0, exhausted: false, count: providerIterationCost(summary)
+          }, input.onEvent);
           iterations += providerIterationCost(summary);
           effectiveProviderExecution = mergeProviderExecutions(effectiveProviderExecution, summary);
           const summaryText = summary.response?.content.trim() ?? "";
@@ -1793,6 +1836,7 @@ export class ProviderTurnLoop {
       primaryRoute,
       fallbackChain,
       retryRateLimits: true,
+      retryTransientFailures: true,
       deadlineAtMs: providerWorkDeadlineAt(input.loopStartedAt, this.#budgets),
       usage: await this.#nextProviderUsageContext(input.visibleTurnId, input.imageInputs),
       onEvent: async (event) => { await initialEvents.onEvent(await recordRoute(event)); }
@@ -1862,6 +1906,7 @@ export class ProviderTurnLoop {
       primaryRoute: retryPrimaryRoute,
       fallbackChain: retryChain.slice(1),
       retryRateLimits: true,
+      retryTransientFailures: true,
       deadlineAtMs: providerWorkDeadlineAt(input.loopStartedAt, this.#budgets),
       usage: await this.#nextProviderUsageContext(input.visibleTurnId, input.imageInputs),
       onEvent: async (event) => { await retryEvents.onEvent(await recordRoute(event)); }

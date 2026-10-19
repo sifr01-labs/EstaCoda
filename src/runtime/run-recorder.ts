@@ -285,12 +285,14 @@ export class RunRecorder {
     toolCalls: number;
     executedTools: number;
     exhausted: boolean;
-  }): Promise<void> {
+    count?: number;
+  }, sink?: RuntimeEventSink): Promise<void> {
     await this.#sessionDb.appendEvent(this.#currentSessionId(), {
       kind: "provider-iteration",
       ...input
     });
     this.#trajectoryRecorder.record("provider-iteration", input);
+    await emit(sink, { kind: "provider-iteration", ...input });
   }
 
   async recordProviderToolInventory(

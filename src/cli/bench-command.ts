@@ -63,6 +63,7 @@ type BenchRunArgs = {
   maxTokens: number | null;
   timeoutMs: number;
   redact: boolean;
+  allowModelFallback: boolean;
   providerBudgets: {
     maxProviderIterations?: number;
     maxProviderToolCalls?: number;
@@ -230,6 +231,8 @@ async function runBenchRun(
     modelSummary = {
       provider: route.provider,
       id: route.id,
+      fallbackPolicy: args.allowModelFallback ? "configured" : "disabled",
+      fallbackRoutes: args.allowModelFallback ? runtimeConfig.modelFallbackRoutes.map(({ provider, id }) => ({ provider, id })) : [],
       settings: {
         temperature: args.temperature,
         maxTokens: args.maxTokens
@@ -248,7 +251,7 @@ async function runBenchRun(
       tokens: resolveTokens("standard", "dark", "kemetBlue"),
       model: route.profile,
       primaryModelRoute: route,
-      modelFallbackRoutes: runtimeConfig.modelFallbackRoutes,
+      modelFallbackRoutes: args.allowModelFallback ? runtimeConfig.modelFallbackRoutes : [],
       homeDir: benchmarkHome,
       profileId: options.profileId ?? runtimeConfig.profileId,
       workspaceRoot: args.workspace,
@@ -521,6 +524,7 @@ async function parseBenchRunArgs(args: string[]): Promise<{ ok: true; args: Benc
   let taskId: string | undefined;
   let attempt = 1;
   let temperature = 0;
+  let allowModelFallback = false;
   let maxTokens: number | null = null;
   let timeoutMs = 30 * 60_000;
   let redact = true;
@@ -591,6 +595,9 @@ async function parseBenchRunArgs(args: string[]): Promise<{ ok: true; args: Benc
         case "--max-provider-wall-clock-ms":
           providerBudgets.maxProviderWallClockMs = parsePositiveInteger(requiredValue(args, ++index, arg), arg);
           break;
+        case "--allow-model-fallback":
+          allowModelFallback = true;
+          break;
         case "--no-redact":
           redact = false;
           break;
@@ -657,6 +664,7 @@ async function parseBenchRunArgs(args: string[]): Promise<{ ok: true; args: Benc
         ? null
         : { name: benchmarkName, version: benchmarkVersion, taskId, attempt },
       modelInput,
+      allowModelFallback,
       temperature,
       maxTokens,
       timeoutMs,
@@ -929,6 +937,7 @@ function renderBenchRunHelp(): string {
     "  --home <dir>                   Explicit EstaCoda home for this run",
     "  --isolated-home                Use a generated isolated home (default)",
     "  --model <provider/model>       Command-local model override",
+    "  --allow-model-fallback          Opt in to configured fallback routes (default: disabled)",
     "  --temperature <n>              Provider temperature (default: 0)",
     "  --max-tokens <n>               Provider max tokens",
     "  --timeout-ms <n>               Run timeout in milliseconds",

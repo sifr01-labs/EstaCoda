@@ -3,6 +3,15 @@ import type { RuntimeEvent } from "../contracts/runtime-event.js";
 import type { Trajectory } from "../contracts/trajectory.js";
 import { aggregateBenchmarkMetrics, estimateBenchmarkCostUsd } from "./metrics.js";
 
+
+it("counts an exhausted forty-iteration run without trajectory export and never double-counts it", () => {
+  const iterations: RuntimeEvent[] = Array.from({ length: 40 }, (_, iteration) => ({ kind: "provider-iteration", iteration, phase: "continuation", ok: true, toolCalls: 1, executedTools: 1, exhausted: iteration === 39, count: 1 }));
+  const events: RuntimeEvent[] = [...iterations, { kind: "provider-budget-exhausted", budget: "provider-iterations", limit: 40, observed: 40, reason: "limit" }];
+  expect(aggregateBenchmarkMetrics(events)).toMatchObject({ providerIterations: 40, providerBudgetExhaustions: 1 });
+  const trajectory = { events: events.map((event, i) => ({ id: String(i), kind: event.kind, data: event })) } as unknown as Trajectory;
+  expect(aggregateBenchmarkMetrics(events, undefined, trajectory)).toMatchObject({ providerIterations: 40, providerBudgetExhaustions: 1 });
+});
+
 describe("aggregateBenchmarkMetrics", () => {
   it("counts providers, provider tool calls, tool starts, and token usage", () => {
     const events: RuntimeEvent[] = [

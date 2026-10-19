@@ -1,6 +1,16 @@
 import { describe, it, expect } from "vitest";
 import { assessCommandSafety, normalizeCommandForSafety } from "./command-safety.js";
 
+
+describe("shell safety options", () => {
+  it.each(["set -e", "set -u", "set -eu", "set -ue", "set -e -u", "set -e -o pipefail", "set -eu\nprintf ok", "set -eu; printf ok"])("does not classify %s as secret enumeration", command => {
+    expect(assessCommandSafety(command).hardBlock).toBeUndefined();
+  });
+  it.each(["set", "set -o", "set +o", "set -x", "set -eu; set", "set -eu\nprintenv", "set -eu\nenv", "set -eu; cat .env", "set -eu\ncat .env", "set -eu $(printenv)", "set -eu; rm -rf /"])("preserves the hardline floor for %s", command => {
+    expect(assessCommandSafety(command).hardBlock).toBeDefined();
+  });
+});
+
 describe("command-safety", () => {
   describe("core dangerous patterns on host", () => {
     const cases: Array<{

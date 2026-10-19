@@ -670,12 +670,14 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
     }),
     {
       name: "terminal.run",
-      description: "Run a bounded shell command in the active workspace.",
+      // Let the command timer collect its outcome before the outer tool deadline.
+      executionTimeoutMs: commandTimeoutMs + 5_000,
+      description: `Run a shell command in the active workspace for at most ${commandTimeoutMs} ms. For longer jobs, discover and request managed process tools, then start and poll the process within the task budget.`,
       inputSchema: {
         type: "object",
         properties: {
           command: { type: "string" },
-          timeoutMs: { type: "number" }
+          timeoutMs: { type: "number", minimum: 1, maximum: commandTimeoutMs, description: `Execution limit in milliseconds (default and maximum: ${commandTimeoutMs}). Longer jobs require managed process tools.` }
         },
         required: ["command"]
       },
@@ -697,6 +699,10 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
         const blockedReason = explainCommandBlock(input.command, context?.environmentType);
         if (blockedReason !== undefined) {
           return errorResult(blockedReason);
+        }
+
+        if (input.timeoutMs !== undefined && (!Number.isFinite(input.timeoutMs) || input.timeoutMs < 1 || input.timeoutMs > commandTimeoutMs)) {
+          return undispatchedResult(errorResult(`Command was not started: timeoutMs must be between 1 and ${commandTimeoutMs}. For longer jobs, discover and request managed process tools, then start and poll the process within the task budget.`));
         }
 
         try { await contentView.assertMaterialized(); } catch (error) { return errorResult(error instanceof Error ? error.message : "Editor content is not materialized."); }
@@ -1819,6 +1825,9 @@ async function runCommand(
       clearTimeout(timeout);
       abortSignal?.removeEventListener("abort", onAbort);
       const content = [
+        timedOut ? `Command timed out after ${timeoutMs} ms and was terminated. Inspect partial changes before retrying; use managed process tools for longer jobs.`
+          : abortSignal?.aborted ? "Command cancelled and terminated. Inspect partial changes before retrying."
+          : code !== 0 || signal !== null ? `Command failed: exit code ${code ?? "none"}${signal === null ? "" : `, signal ${signal}`}.` : undefined,
         stdout.trimEnd(),
         stderr.length === 0 ? undefined : `stderr:\n${stderr.trimEnd()}`
       ]
@@ -1839,6 +1848,9 @@ async function runCommand(
           _estacoda_context_summary: terminalContextSummary({
             command,
             code,
+            timedOut,
+            timeoutMs,
+            cancelled: abortSignal?.aborted ?? false,
             stdout,
             stderr
           })
@@ -1851,11 +1863,14 @@ async function runCommand(
 function terminalContextSummary(input: {
   command: string;
   code: number | null;
+  timedOut: boolean;
+  timeoutMs: number;
+  cancelled: boolean;
   stdout: string;
   stderr: string;
 }): string {
   return boundText([
-    `Command ${terminalCommandLabel(input.command)} exited with code ${input.code ?? "signal"}.`,
+    `Command ${terminalCommandLabel(input.command)} ${input.timedOut ? `timed out after ${input.timeoutMs} ms` : input.cancelled ? "was cancelled" : `exited with code ${input.code ?? "signal"}`}.`,
     `stdout: ${lineCount(input.stdout)} lines / ${input.stdout.length} chars.`,
     `stderr: ${lineCount(input.stderr)} lines / ${input.stderr.length} chars.`
   ].join(" "), MAX_TERMINAL_CONTEXT_SUMMARY_CHARS);

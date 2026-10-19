@@ -601,11 +601,11 @@ describe("ProviderExecutor fallback behavior", () => {
     expect(primary.calls.length).toBe(1);
   });
 
-  it("retries one foreground rate limit after bounded backoff", async () => {
+  it.each(["rate-limit", "network", "server"] as const)("retries one foreground %s after bounded backoff", async errorClass => {
     const primary = createMockAdapter({
       id: "test-primary",
       completeHandler: () => primary.calls.length === 1
-        ? { ok: false, content: "rate limited", model: "m1", provider: "test-primary", errorClass: "rate-limit" }
+        ? { ok: false, content: "rate limited", model: "m1", provider: "test-primary", errorClass }
         : { ok: true, content: "recovered", model: "m1", provider: "test-primary" }
     });
     registry.register(primary);
@@ -618,7 +618,8 @@ describe("ProviderExecutor fallback behavior", () => {
       {},
       {
         primaryRoute: createRoute("test-primary", "m1"),
-        retryRateLimits: true,
+        retryRateLimits: errorClass === "rate-limit",
+        retryTransientFailures: errorClass !== "rate-limit",
         onEvent: (event) => { events.push(event); }
       }
     );
@@ -690,6 +691,47 @@ describe("ProviderExecutor fallback behavior", () => {
       event.kind === "provider-attempt-end" && !event.ok ? [event.willFallback] : []
     ))
       .toEqual([true, false]);
+  });
+
+
+  it.each(["network", "server"] as const)("bounds %s retries and respects deadlines and cancellation", async errorClass => {
+    const primary = createMockAdapter({ id: "test-primary", completeResponse: { ok: false, content: "transient", provider: "test-primary", model: "m1", errorClass } });
+    registry.register(primary);
+    const retrySleep = vi.fn(async () => true);
+    const executor = new ProviderExecutor({ registry, retrySleep });
+    const options = { primaryRoute: createRoute("test-primary", "m1"), retryTransientFailures: true };
+    const result = await executor.complete({ messages: [] }, {}, options);
+    expect(result.attempts).toHaveLength(2);
+    expect(primary.calls).toHaveLength(2);
+    expect(retrySleep).toHaveBeenCalledOnce();
+    primary.calls.length = 0; retrySleep.mockClear();
+    await executor.complete({ messages: [] }, {}, { ...options, now: () => 0, deadlineAtMs: 500 });
+    expect(primary.calls).toHaveLength(1);
+    expect(retrySleep).not.toHaveBeenCalled();
+    primary.calls.length = 0;
+    const controller = new AbortController();
+    retrySleep.mockImplementation(async () => { controller.abort(); return false; });
+    await executor.complete({ messages: [] }, {}, { ...options, signal: controller.signal });
+    expect(primary.calls).toHaveLength(1);
+  });
+
+  it.each(["partial-text", "partial-tool", "raw-tool", "auth", "quota", "unknown"])("does not retry %s as an empty transient response", async scenario => {
+    const errorClass = ["auth", "quota", "unknown"].includes(scenario) ? scenario as "auth" | "quota" | "unknown" : "network";
+    const failed: ProviderResponse = { ok: false, content: "failure", provider: "test-primary", model: "m1", errorClass,
+      ...(scenario === "raw-tool" ? { raw: rawToolCall("unexecuted") } : {}) };
+    const primary = createMockAdapter({ id: "test-primary", completeResponse: failed, streamEvents: [
+      ...(scenario === "partial-text" ? [{ kind: "token" as const, provider: "test-primary", model: "m1", text: "partial" }] : []),
+      ...(scenario === "partial-tool" ? [{ kind: "tool-call" as const, provider: "test-primary", model: "m1", id: "unexecuted", name: "file.write", argumentsText: "{" }] : []),
+      { kind: "done", provider: "test-primary", model: "m1", response: failed }
+    ] });
+    registry.register(primary);
+    const retrySleep = vi.fn(async () => true);
+    const result = await new ProviderExecutor({ registry, retrySleep, readOnlyCredentials: true }).complete({ messages: [] }, {}, {
+      primaryRoute: createRoute("test-primary", "m1"), retryTransientFailures: true, stream: scenario.startsWith("partial-")
+    });
+    expect(primary.calls).toHaveLength(1);
+    expect(retrySleep).not.toHaveBeenCalled();
+    expect(result.toolCalls).toHaveLength(0);
   });
 
   it("does not use arbitrary registered models as fallbacks", async () => {

@@ -58,7 +58,7 @@ export function assessCommandSafety(
 
   // EnvironmentType is compatibility metadata. Until a backend verifies actual
   // containment, every label retains the same command floor and risk triage.
-  const policyBlock = detectPolicyBlock(normalized);
+  const policyBlock = detectPolicyBlock(normalized, stripAnsi(command.normalize("NFKC")));
   if (policyBlock !== undefined) return toAssessment(normalized, policyBlock);
 
   const riskClass = inferRiskClass(normalized);
@@ -171,7 +171,7 @@ function detectHardlineBlock(command: string): Detection | undefined {
   return undefined;
 }
 
-function detectPolicyBlock(command: string): Detection | undefined {
+function detectPolicyBlock(command: string, originalCommand: string): Detection | undefined {
   if (matchesBroadDelete(command)) {
     return {
       code: "destructive-delete-root-or-broad-path",
@@ -271,7 +271,7 @@ function detectPolicyBlock(command: string): Detection | undefined {
     };
   }
 
-  if (matchesSecretRead(command)) {
+  if (matchesSecretRead(command, originalCommand)) {
     return {
       code: "secret-read",
       reason: "command attempts to read or reveal secrets or credential material",
@@ -712,9 +712,13 @@ function matchesTerraformDestroy(command: string): boolean {
   return /\bterraform\s+destroy\b/iu.test(command);
 }
 
-function matchesSecretRead(command: string): boolean {
+function matchesSecretRead(command: string, originalCommand: string): boolean {
+  // Only option-only safety settings qualify. Keep line boundaries here: the
+  // general normalization deliberately collapses whitespace for other checks.
+  const enumeratesShellState = [...originalCommand.matchAll(/(?:^|[;&|\r\n])\s*set\b([^;&|\r\n]*)/giu)]
+    .some(match => !/^(?:\s+-[eu]+|\s+-o\s+pipefail)+\s*$/u.test(match[1]!));
   return /\b(?:cat|less|more|head|tail|grep|sed|awk)\b.*(?:\.env(?:\b|$)|\.ssh\/|id_rsa\b|id_ed25519\b|\.aws\/credentials\b|\.npmrc\b|\.gnupg\/)/iu.test(command) ||
-    /(?:^|[;&|]\s*)(?:env|printenv|set)(?:\s|$)/iu.test(command) ||
+    enumeratesShellState || /(?:^|[;&|\r\n])\s*(?:env|printenv)(?:\s|$)/iu.test(originalCommand) ||
     /\bsecurity\s+find-(?:generic-password|internet-password)\b/iu.test(command) ||
     /\bop\s+read\b/iu.test(command) ||
     /\bgh\s+auth\s+token\b/iu.test(command);

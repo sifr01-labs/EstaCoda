@@ -34,6 +34,8 @@ export type BenchmarkModelSummary = {
   provider: string;
   id: string;
   settings: BenchmarkModelSettings;
+  fallbackPolicy?: "disabled" | "configured";
+  fallbackRoutes?: Array<{ provider: string; id: string }>;
 };
 
 export type BenchmarkMetrics = {

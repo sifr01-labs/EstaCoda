@@ -124,6 +124,7 @@ export type RuntimeEvent =
       chars?: number;
       sentChars?: number;
       truncated?: boolean;
+      commandOutcome?: { exitCode?: number | null; signal?: string | null; timeoutMs?: number; timedOut?: boolean; cancelled?: boolean };
       fileChangePreview?: FileChangePreviewViewModel;
       targetSummary?: string;
       displayPreview?: string;
@@ -168,6 +169,16 @@ export type RuntimeEvent =
       transition: "fallback-active" | "primary-recovered";
       provider: string;
       model: string;
+    }
+  | {
+      kind: "provider-iteration";
+      iteration: number;
+      phase: "initial" | "continuation";
+      ok: boolean;
+      toolCalls: number;
+      executedTools: number;
+      exhausted: boolean;
+      count?: number;
     }
   | {
       kind: "provider-budget-exhausted";

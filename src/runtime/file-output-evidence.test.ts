@@ -6,7 +6,7 @@ import { createHash } from "node:crypto";
 import { describe, expect, it } from "vitest";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { ExecutionEvidenceIndex } from "./execution-evidence-index.js";
-import { fileOutputEvidence, verifiedFileOutputContent, verifiedFileMutationCallIds } from "./file-output-evidence.js";
+import { fileOutputEvidence, pendingFileReadbackPaths, verifiedFileOutputContent, verifiedFileMutationCallIds } from "./file-output-evidence.js";
 import { deriveRequestRequirements } from "./request-requirements.js";
 import { deriveExecutionFinalOutcome } from "./execution-outcome.js";
 
@@ -27,6 +27,24 @@ function observe(executions: ToolExecutionRecord[], prompt = "Save report.md", t
   const requirements = deriveRequestRequirements(prompt, "turn-1");
   return { requirements, toolExecutions, executionReceipts: index.recordsForTurn(turn) };
 }
+
+
+describe("readback-only completion repair", () => {
+  it("allows verification of successful writes after an unrelated terminal denial", () => {
+    const denied = { ...call("terminal.run"), decision: "deny" as const, result: { ok: false, content: "Denied" } };
+    const input = observe([denied, call("file.write", "a.md"), call("file.write", "b.md")], "Write a.md and b.md");
+    expect(pendingFileReadbackPaths(input)).toEqual(["a.md", "b.md"]);
+    expect(pendingFileReadbackPaths({ ...input, executionReceipts: [] })).toBeUndefined();
+  });
+  it.each(["file.read", "file.write", "file.patch"])("does not retry a denied %s boundary", name => {
+    expect(pendingFileReadbackPaths(observe([{ ...call(name), decision: "deny" }, call("file.write")]))).toBeUndefined();
+  });
+  it("does not repair a missing write, unresolved output or changed copy source by reading", () => {
+    expect(pendingFileReadbackPaths(observe([]))).toBeUndefined();
+    expect(pendingFileReadbackPaths(observe([call("file.write")], "Save a.md or b.md"))).toBeUndefined();
+    expect(pendingFileReadbackPaths(observe([call("file.write")], "Copy source.md to report.md"))).toBeUndefined();
+  });
+});
 
 describe("file output evidence", () => {
   it("verifies an intentional empty file only with matching same-turn readback", () => {

@@ -4,6 +4,30 @@ import { SkillRegistry } from "../skills/skill-registry.js";
 import { IntentRouter } from "./intent-router.js";
 import { deriveRequestRequirements, explicitRequestSegments, explicitInspectionTools, requiredRequestTools } from "./request-requirements.js";
 
+
+describe("explicit output directories", () => {
+  it("binds multiple bare outputs to the declared document root", () => {
+    expect(deriveRequestRequirements("Create the document root directory `/var/www/html` if it doesn't exist. Create a simple index.html file in the document root with content. Create a custom 404.html page with content.", undefined, "/"))
+      .toMatchObject({ issues: [], fileOutput: { path: "var/www/html/index.html", additionalFiles: [{ path: "var/www/html/404.html" }] } });
+  });
+  it.each(["Create output directory `/app/reports`. Write result.json", "Write result.json in `/app/reports`", "Create output directory ./reports. Write result.json"])("resolves %s inside the actual workspace", text => {
+    expect(deriveRequestRequirements(text, undefined, "/app")).toMatchObject({ issues: [], fileOutput: { path: "reports/result.json" } });
+  });
+  it("leaves conflicting declarations unresolved", () => {
+    expect(deriveRequestRequirements("Create output directory /app/a. Create output directory /app/b. Write result.json", undefined, "/app").issues).toContain("ambiguous-file-target");
+  });
+  it.each(["/elsewhere", "/app/../outside"])("does not authorize an outside directory %s", path => {
+    expect(deriveRequestRequirements(`Create output directory ${path}. Write result.json`, undefined, "/app").issues).toContain("unsafe-file-target");
+  });
+  it.each(['Example: create output directory /elsewhere.', 'Do not create output directory /elsewhere.', '> Create output directory /elsewhere.\n', '"Create output directory /elsewhere."'])('does not use inert directory declarations: %s', prefix => {
+    expect(deriveRequestRequirements(`${prefix}\nWrite result.json`, undefined, "/app")).toMatchObject({ issues: [], fileOutput: { path: "result.json" } });
+  });
+  it("keeps an explicitly pathed destination and exact-copy source independent", () => {
+    expect(deriveRequestRequirements("Create output directory /app/reports. Copy source.json to result.json. Write other/final.json", undefined, "/app"))
+      .toMatchObject({ issues: [], fileOutput: { path: "reports/result.json", exactCopy: { sourcePath: "source.json" }, additionalFiles: [{ path: "other/final.json" }] } });
+  });
+});
+
 describe("explicit text destinations", () => {
   it.each([
     ["/app", "Write /app/summary.csv", "summary.csv"],

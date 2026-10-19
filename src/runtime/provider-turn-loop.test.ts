@@ -33,7 +33,7 @@ import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { ToolRegistry } from "../tools/tool-registry.js";
 import { createPlanTools } from "../tools/plan-tools.js";
 import { RunRecorder } from "./run-recorder.js";
-import { ToolPlanRunner } from "./tool-plan-runner.js";
+import { ToolPlanRunner, toolResultStats } from "./tool-plan-runner.js";
 import { ProviderTurnLoop, providerEfficiencySignals, type ProviderTurnLoopOptions } from "./provider-turn-loop.js";
 import { ExecutionPlanStore } from "./execution-plan-store.js";
 import { ExecutionPlanController } from "./execution-plan-controller.js";
@@ -357,9 +357,20 @@ async function appendProviderToolHistory(db: InMemorySessionDB, sessionId: strin
   });
 }
 
+
+it("exports only typed command outcomes, excluding raw errors and secrets", () => {
+  const call = toolExecutionForTool("cmd", "terminal.run", "token=private");
+  call.result!.metadata = { code: 7, signal: null, timedOut: false, timeoutMs: 30000, cancelled: false, command: "private", error: "private", auth: "private" };
+  expect(toolResultStats(call)).toMatchObject({ commandOutcome: { exitCode: 7, signal: null, timedOut: false, timeoutMs: 30000, cancelled: false } });
+  expect(JSON.stringify(toolResultStats(call))).not.toContain("private");
+  call.result!.metadata = { code: "private", signal: "private", timedOut: "private", timeoutMs: Infinity, cancelled: {} };
+  expect(toolResultStats(call).commandOutcome).toEqual({});
+});
+
 async function runBasicProviderTurn(
   loop: ProviderTurnLoop,
   callbacks: {
+    completionReadbackPaths?: Parameters<ProviderTurnLoop["run"]>[0]["completionReadbackPaths"];
     validateCompletion?: Parameters<ProviderTurnLoop["run"]>[0]["validateCompletion"];
     diagnosticOnly?: boolean;
     research?: boolean;
@@ -382,6 +393,7 @@ async function runBasicProviderTurn(
   } = {}
 ): Promise<Awaited<ReturnType<ProviderTurnLoop["run"]>>> {
   return await loop.run({
+    completionReadbackPaths: callbacks.completionReadbackPaths,
     validateCompletion: callbacks.validateCompletion,
     diagnosticOnly: callbacks.diagnosticOnly,
     visibleTurnId: callbacks.visibleTurnId,
@@ -3366,7 +3378,9 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     });
 
     try {
-      const result = await runBasicProviderTurn(harness.loop);
+      const events: RuntimeEvent[] = [];
+      const result = await runBasicProviderTurn(harness.loop, { onEvent: event => { events.push(event); } });
+      expect(events).toContainEqual(expect.objectContaining({ kind: "provider-iteration", count: 1, exhausted: true }));
 
       expect(harness.executePlans).not.toHaveBeenCalled();
       expect(result.providerExecution?.response?.content).toContain("emergency deadline reserve");
@@ -5214,6 +5228,41 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     expect(JSON.stringify(await harness.sessionDb.listEvents(harness.sessionId))).not.toContain("hunter2");
   });
 
+
+  it("restricts repair after an unrelated denial to the written output readbacks", async () => {
+    const harness = await createPostToolNudgeHarness({
+      responses: [providerExecution("Draft"), providerExecution("", [providerToolCall("read", '{"path":"report.md"}', "file.read")]), providerExecution("Verified")],
+      toolSteps: [{}, { executions: [toolExecutionForTool("read", "file.read", "report")] }, {}], maxProviderIterations: 5
+    });
+    const blocked = { ...toolExecution("blocked"), decision: "deny" as const, result: { ok: false, content: "Blocked" } };
+    const events: RuntimeEvent[] = [];
+    const result = await runBasicProviderTurn(harness.loop, {
+      toolExecutions: [blocked], providerTools: [toolProviderSchema("file.read"), toolProviderSchema("file.write"), toolProviderSchema("terminal.run")],
+      completionReadbackPaths: () => ["report.md"], validateCompletion: text => text === "Verified" ? undefined : "missing-readback",
+      onEvent: event => { events.push(event); }
+    });
+    expect(result.completionValidationFailure).toBeUndefined();
+    expect(harness.completeSpy).toHaveBeenCalledTimes(3);
+    const step = harness.executePlans.mock.calls[1]![0];
+    expect([...step.activeProviderTools!]).toEqual(["file.read"]);
+    const guard = step.runtimeAdmissionGuard!;
+    const admission = (name: string, input: Record<string, unknown>) => ({ tool: { ...testTool, name }, input, executionEffect: undefined });
+    expect(guard(admission("file.read", { path: "report.md" }))).toBeUndefined();
+    for (const [name, value] of [["file.write", { path: "report.md" }], ["terminal.run", { command: "denied again" }], ["file.read", { path: "other.md" }], ["file.read", { path: "report.md", lineStart: 1 }]] as const) {
+      expect(guard(admission(name, value))?.code).toBe("completion-readback-only");
+    }
+    expect(events.filter(event => event.kind === "provider-iteration")).toHaveLength(3);
+  });
+
+  it("emits iteration-limit exhaustion when the last call still requests work", async () => {
+    const harness = await createPostToolNudgeHarness({ responses: [providerExecution("", [providerToolCall("read", "{}", "file.read")])],
+      toolSteps: [{ executions: [toolExecutionForTool("read", "file.read", "content")] }], maxProviderIterations: 1 });
+    const events: RuntimeEvent[] = [];
+    const result = await runBasicProviderTurn(harness.loop, { onEvent: event => { events.push(event); } });
+    expect(result.terminationCause).toBe("budget_exhausted");
+    expect(events).toContainEqual(expect.objectContaining({ kind: "provider-budget-exhausted", budget: "provider-iterations", limit: 1, observed: 1 }));
+  });
+
   it.each(["deny", "ask"] as const)("does not use completion repair to retry a %s boundary", async (decision) => {
     const harness = await createPostToolNudgeHarness({ responses: [providerExecution("Unverified draft")], toolSteps: [], maxProviderIterations: 8 });
     const blocked = { ...toolExecution("blocked"), decision, result: { ok: false, content: "Blocked" } };
@@ -6420,7 +6469,9 @@ describe("ProviderTurnLoop explicit route propagation", () => {
       id: "unexpected", name: "terminal.run", argumentsText: '{"command":"echo forbidden"}'
     }]));
     const loop = await createProviderTurnLoopForTest({ providerExecutor: executor });
-    const result = await runBasicProviderTurn(loop, { diagnosticOnly: true, userText: "Why is the connector unavailable?" });
+    const events: RuntimeEvent[] = [];
+    const result = await runBasicProviderTurn(loop, { diagnosticOnly: true, userText: "Why is the connector unavailable?", onEvent: event => { events.push(event); } });
+    expect(events).toContainEqual(expect.objectContaining({ kind: "provider-iteration", count: 1 }));
     expect(complete).toHaveBeenCalledOnce();
     expect(result.toolExecutions).toEqual([]);
     expect(complete.mock.calls[0]?.[0].tools ?? []).toEqual([]);
@@ -6952,14 +7003,16 @@ describe("research failure finalization", () => {
       ],
       toolSteps: [{ executions: [{ ...failed }, { ...failed }, { ...failed }] }]
     });
+    const events: RuntimeEvent[] = [];
     let result: Awaited<ReturnType<typeof runBasicProviderTurn>>;
     try {
-      result = await runBasicProviderTurn(harness.loop, { research: mode !== "non-research", signal: controller.signal });
+      result = await runBasicProviderTurn(harness.loop, { research: mode !== "non-research", signal: controller.signal, onEvent: event => { events.push(event); } });
     } finally {
       clock.mockRestore();
     }
     const canSummarize = ["summary", "hallucinated-tool", "unobserved-citation", "provider-failed", "non-research"].includes(mode);
     expect(harness.completeSpy).toHaveBeenCalledTimes(canSummarize ? 2 : 1);
+    expect(events.filter(event => event.kind === "provider-iteration").length).toBe(result.iterations);
     expect(harness.executePlans).toHaveBeenCalledTimes(1);
     expect(result.terminationCause).toBe("budget_exhausted");
     expect(result.toolExecutions).toHaveLength(3);

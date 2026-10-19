@@ -88,6 +88,28 @@ describe("ProviderExecutor spending enforcement", () => {
     });
   });
 
+
+  it.each([false, true])("settles transient attempts separately and rechecks spend before retry (deny=%s)", async denyRetry => {
+    await createUsageSession("retry-spend", 1);
+    const controller = new SQLiteProviderSpendController({ db: sessionDb.db, profileId: PROFILE_ID });
+    let calls = 0;
+    registry.register(adapter(async request => {
+      calls += 1;
+      return { ...response(request, { inputTokens: denyRetry ? 1_000_000 : 100, outputTokens: 5 }), ok: calls > 1,
+        ...(calls === 1 ? { errorClass: "network" as const } : {}) };
+    }));
+    const provider = new ProviderExecutor({ registry, profileId: PROFILE_ID, spendController: controller, retrySleep: async () => true });
+    const result = await provider.complete({ messages: [], maxTokens: 10 }, {}, {
+      primaryRoute: pricedRoute(), usage: usage("retry-spend", "transient"), retryTransientFailures: true
+    });
+    expect(calls).toBe(denyRetry ? 1 : 2);
+    expect(result.ok).toBe(!denyRetry);
+    const rows = sessionDb.db.query<{ state: string }>("select state from provider_spend_attempts where profile_id = ?").all(PROFILE_ID);
+    expect(rows.filter(row => row.state === "settled")).toHaveLength(calls);
+    expect(controller.getScope("session", "retry-spend")?.reservedCostUsd).toBe(0);
+    controller.dispose();
+  });
+
   it("emits the durable threshold warning before provider dispatch exactly once", async () => {
     await createUsageSession("warning", 1, 0.01);
     registry.register(adapter(async (request) => response(request)));

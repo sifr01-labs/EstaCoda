@@ -34,6 +34,23 @@ export function fileOutputEvidence(input: {
   return { satisfied: true, ...files[0], files };
 }
 
+/** Only existing, receipt-backed writes may enter read-only completion repair.
+ * A denied file operation stays a boundary even if another operation succeeded. */
+export function pendingFileReadbackPaths(input: Parameters<typeof fileOutputEvidence>[0]): string[] | undefined {
+  const files = requestedFileOutputs(input.requirements);
+  if (!files.length || files.length > MAX_FILE_OUTPUTS || input.requirements?.issues.length ||
+      input.toolExecutions.some(call => call.decision !== "allow" && call.tool.name.startsWith("file."))) return undefined;
+  const paths: string[] = [];
+  for (const file of files) {
+    if (file.path === undefined || safePath(file.path) !== file.path) return undefined;
+    const evidence = singleFileOutputEvidence({ ...input, requirements: { ...input.requirements!, fileOutput: file } });
+    if (evidence.satisfied) continue;
+    if (evidence.reason !== "missing-readback") return undefined;
+    paths.push(file.path);
+  }
+  return paths.length ? paths : undefined;
+}
+
 function singleFileOutputEvidence(input: Parameters<typeof fileOutputEvidence>[0]): FileOutputEvidence {
   const requirement = input.requirements?.fileOutput;
   if (requirement === undefined) return { satisfied: true };

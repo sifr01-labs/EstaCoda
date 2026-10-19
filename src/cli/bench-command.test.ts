@@ -654,6 +654,27 @@ function hangingRuntime(): Runtime {
   } as Runtime;
 }
 
+
+it.each([false, true])("pins benchmark fallback policy without mutating profile routes (opt-in=%s)", async allowFallback => {
+  const root = await mkdtemp(join(tmpdir(), "benchmark-fallback-policy-"));
+  try {
+    const config = fakeLoadedConfig("openai", "gpt-test");
+    const fallback = { ...config.primaryModelRoute!, id: "fallback-model", provider: "openai", profile: { ...config.model, id: "fallback-model" } };
+    config.modelFallbackRoutes = [fallback];
+    const createRuntime = vi.fn(async (_options: Parameters<typeof import("../runtime/create-runtime.js").createRuntime>[0]) => fakeRuntime([]));
+    const out = join(root, "out");
+    const result = await benchCommand({ argv: [], workspaceRoot: root }, ["run", "--workspace", root, "--out", out, "--instruction", "task", ...(allowFallback ? ["--allow-model-fallback"] : [])], {
+      ...dependenciesForRuntime(root, fakeRuntime([])), loadConfig: async () => config, createRuntime: createRuntime as never
+    });
+    expect(result.exitCode).toBe(0);
+    expect(createRuntime.mock.calls[0]?.[0]).toMatchObject({ modelFallbackRoutes: allowFallback ? [fallback] : [] });
+    expect(config.modelFallbackRoutes).toEqual([fallback]);
+    const summary = JSON.parse(await readFile(join(out, "summary.json"), "utf8"));
+    expect(summary.model).toMatchObject({ fallbackPolicy: allowFallback ? "configured" : "disabled", fallbackRoutes: allowFallback ? [{ provider: "openai", id: "fallback-model" }] : [] });
+  } finally { await rm(root, { recursive: true, force: true }); }
+});
+
+
 function dependenciesForRuntime(root: string, runtime: Runtime) {
   return {
     loadConfig: async () => fakeLoadedConfig("unconfigured", "unconfigured"),

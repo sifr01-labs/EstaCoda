@@ -20,6 +20,9 @@ export function aggregateBenchmarkMetrics(
 
   for (const event of events) {
     switch (event.kind) {
+      case "provider-iteration":
+        metrics.providerIterations += Math.max(1, normalizeTokenCount(event.count));
+        break;
       case "provider-result":
         metrics.providerCalls += 1;
         metrics.inputTokens += normalizeTokenCount(event.usage?.inputTokens);
@@ -124,6 +127,7 @@ function applyTrajectoryMetrics(
     runtimeSessionRecallCount: number;
   }
 ): void {
+  let trajectoryProviderIterations = 0;
   let trajectoryProviderBudgetExhaustions = 0;
   let trajectorySecurityEscalations = 0;
   let trajectorySessionRecallCount = 0;
@@ -132,7 +136,7 @@ function applyTrajectoryMetrics(
   for (const event of trajectory.events) {
     switch (event.kind) {
       case "provider-iteration":
-        metrics.providerIterations += 1;
+        trajectoryProviderIterations += Math.max(1, readNonNegativeInteger(event.data.count));
         break;
       case "provider-budget-exhausted":
         trajectoryProviderBudgetExhaustions += 1;
@@ -167,6 +171,7 @@ function applyTrajectoryMetrics(
     }
   }
 
+  metrics.providerIterations = Math.max(metrics.providerIterations, trajectoryProviderIterations);
   metrics.providerBudgetExhaustions = Math.max(
     metrics.providerBudgetExhaustions,
     runtimeCounts.runtimeProviderBudgetExhaustions,

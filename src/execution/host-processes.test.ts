@@ -7,7 +7,35 @@ import { promisify } from "node:util";
 import { expect, it, vi } from "vitest";
 import { HostProcessScope } from "./host-processes.js";
 import { HostEnvironment } from "./host-environment.js";
+import { createWorkspaceTools } from "../tools/workspace-tools.js";
+import { createProcessTools } from "../tools/process-tools.js";
 import { ProcessManager } from "../process/process-manager.js";
+
+
+it("lets managed jobs finish beyond a short command timeout and releases unfinished jobs with their scope", async () => {
+  const root = await mkdtemp(join(tmpdir(), "managed-long-command-"));
+  const env = await HostEnvironment.create({ profileId: "test", workspaceRoot: root });
+  const lease = env.acquire({ profileId: "test", sessionId: "long-command", surface: "test" });
+  const manager = new ProcessManager({ workspaceRoot: root, executionLease: lease });
+  const tools = createProcessTools({ processManager: manager });
+  try {
+    const terminal = createWorkspaceTools({ workspaceRoot: root, commandTimeoutMs: 50 }).find(tool => tool.name === "terminal.run")!;
+    expect(await terminal.run({ command: "sleep 0.2; printf finished" })).toMatchObject({ ok: false, metadata: { timedOut: true } });
+    const start = tools.find(tool => tool.name === "process.start")!;
+    const result = await start.run({ command: "sleep 0.2; printf finished" });
+    expect(result.ok).toBe(true);
+    const id = (result.metadata?.process as { id: string }).id;
+    await vi.waitFor(() => expect(manager.get(id)?.status).toBe("exited"), { timeout: 3000, interval: 25 });
+    expect(manager.get(id)?.exitCode).toBe(0);
+    expect(manager.logs(id)?.map(log => log.text).join("")).toContain("finished");
+    const pending = await manager.start("sleep 30");
+    await lease.release();
+    expect(manager.get(pending.id)).toBeUndefined();
+    expect(lease.signal.aborted).toBe(true);
+    await expect(manager.start("printf forbidden")).rejects.toThrow();
+  } finally { await manager.dispose(); await lease.release(); env.destroy(); await rm(root, { recursive: true, force: true }); }
+});
+
 
 it("keeps shared-view process resources isolated and releases only the owning scope", async () => {
   const root = await mkdtemp(join(tmpdir(), "host-processes-"));

@@ -156,6 +156,8 @@ export type ProviderExecutionOptions = {
   deadlineAtMs?: number;
   /** Foreground-only opt-in for one same-route retry before normal fallback. */
   retryRateLimits?: boolean;
+  /** One same-route retry for a network/server failure before any streamed output. */
+  retryTransientFailures?: boolean;
 };
 
 export type ProviderExecutorOptions = {
@@ -554,17 +556,21 @@ export class ProviderExecutor {
         const nextRoute = chain[index + 1];
         const retryBackoffMs = 1_000;
         const remainingRetryWindowMs = remainingDeadlineMs(options.deadlineAtMs, options.now);
-        const canRetryRateLimit =
-          options.retryRateLimits === true &&
+        const canRetrySameRoute =
+          (options.retryRateLimits === true && callResponse.errorClass === "rate-limit" ||
+            options.retryTransientFailures === true && ["network", "server"].includes(callResponse.errorClass ?? "") &&
+            !callResponse.partialContent && callResult.toolCalls.length === 0 &&
+            extractToolCallsFromProviderResponse(callResponse.raw).length === 0 &&
+            (callResult.streamDiagnostics?.visibleChars ?? 0) === 0 &&
+            (callResult.streamDiagnostics?.toolCallChunks ?? 0) === 0) &&
           !isSignalAborted(options.signal) &&
           callResponse.ok === false &&
-          callResponse.errorClass === "rate-limit" &&
           routeAttemptCount < maxRouteAttempts &&
           (remainingRetryWindowMs === undefined || remainingRetryWindowMs > retryBackoffMs);
         // Live consumers use this legacy flag to decide whether provider work is still
         // continuing. A bounded same-route retry must therefore keep the turn open too.
         const callWillFallback =
-          canRetryRateLimit || (
+          canRetrySameRoute || (
             !isSignalAborted(options.signal) &&
             !callResponse.ok &&
             shouldFallback(callResponse, route, nextRoute)
@@ -638,7 +644,7 @@ export class ProviderExecutor {
           break;
         }
 
-        if (canRetryRateLimit) {
+        if (canRetrySameRoute) {
           const retryReady = await this.#retrySleep(retryBackoffMs, options.signal);
           if (retryReady) continue;
           response = callResponse;

@@ -1045,6 +1045,44 @@ describe("safe nested file.write", () => {
   });
 });
 
+
+describe("terminal.run duration contract", () => {
+  it("rejects an excessive timeout before dispatch instead of silently clamping it", async () => {
+    const root = await makeTempDir();
+    const terminal = createWorkspaceTools({ workspaceRoot: root, commandTimeoutMs: 100 }).find(tool => tool.name === "terminal.run")!;
+    expect(terminal.inputSchema).toMatchObject({ properties: { timeoutMs: { maximum: 100 } } });
+    const result = await terminal.run({ command: "printf started > started.txt", timeoutMs: 5000 });
+    expect(result).toMatchObject({ ok: false });
+    expect(result.content).toContain("not started");
+    expect(result.content).toContain("managed process");
+    await expect(access(join(root, "started.txt"))).rejects.toThrow();
+  });
+  it("reports cancellation separately and terminates the running command", async () => {
+    const root = await makeTempDir();
+    const terminal = createWorkspaceTools({ workspaceRoot: root, commandTimeoutMs: 5000 }).find(tool => tool.name === "terminal.run")!;
+    const controller = new AbortController();
+    const pending = terminal.run({ command: "printf ready > ready.txt; sleep 30" }, { signal: controller.signal } as never);
+    try {
+      await vi.waitFor(async () => { expect(await readFile(join(root, "ready.txt"), "utf8")).toBe("ready"); });
+      controller.abort();
+      const result = await pending;
+      expect(result).toMatchObject({ ok: false, metadata: { cancelled: true, timedOut: false } });
+      expect(result.content).toContain("cancelled and terminated");
+    } finally { controller.abort(); await pending; }
+  });
+  it("reports a silent timed-out process distinctly from a nonzero exit", async () => {
+    const root = await makeTempDir();
+    const terminal = createWorkspaceTools({ workspaceRoot: root, commandTimeoutMs: 100 }).find(tool => tool.name === "terminal.run")!;
+    const timed = await terminal.run({ command: "sleep 3" });
+    expect(timed).toMatchObject({ ok: false, metadata: { timeoutMs: 100, timedOut: true, cancelled: false } });
+    expect(timed.content).toContain("timed out after 100 ms");
+    expect(timed.metadata?._estacoda_context_summary).toContain("timed out");
+    const failed = await terminal.run({ command: "exit 7" });
+    expect(failed).toMatchObject({ ok: false, metadata: { code: 7, timedOut: false } });
+    expect(failed.content).toContain("exit code 7");
+  });
+});
+
 describe("terminal.run hardline floor", () => {
   it("allows approved non-hardline destructive-local commands to reach execution", async () => {
     const root = await makeTempDir();

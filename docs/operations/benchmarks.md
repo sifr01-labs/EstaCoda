@@ -44,6 +44,16 @@ Requirement analysis uses the original task instruction, separately from this ge
 
 Absolute output targets inside the execution workspace, such as `/app/summary.csv` when the workspace is `/app`, resolve to the same completion requirement as `summary.csv`. A successful write and matching read-back are still required; outside-workspace paths and symlink escapes cannot qualify as completed outputs.
 
+## Reliability and interpretation
+
+`bench run` pins the primary model and disables configured model fallbacks by default. Use `--allow-model-fallback` only for an explicitly mixed-model experiment. The summary records `model.fallbackPolicy` and the ordered provider/model fallback routes without copying credentials or changing the selected profile. Foreground requests may retry one eligible network/server failure on the same route before fallback; retry dispatch still requires remaining time and a fresh spending reservation. Partial streamed text or tool arguments are not eligible for this transient retry.
+
+`terminal.run` exposes its configured duration ceiling (normally 30 seconds). An excessive requested timeout is rejected before starting the command, rather than silently shortened. Timed-out, cancelled, and nonzero-exit commands have distinct feedback. For longer compilation or service jobs, discover/request the existing managed process tools, use `process.start`, inspect `process.list` and `process.logs`, and stop unfinished work with `process.stop`. These tools retain normal authorization; benchmark disposal releases owned processes at the run deadline.
+
+Explicit document-root/output-directory declarations can bind bare output filenames within the actual workspace. Conflicting directories remain unresolved. After an unrelated command denial, completion repair may only read back receipt-backed successful output writes: exposure and dispatch are restricted to complete `file.read` calls on those exact paths. Denied file operations, missing writes, unresolved paths, and copy mismatches do not qualify. This does not grant workspace access or bypass approval, containment, or symlink checks.
+
+Provider iteration and exhaustion events are exported even without a trajectory. Metrics reconcile event and trajectory counts without double counting. Terminal events include only typed exit, signal, timeout, and cancellation fields; they do not export raw command environments or private error objects. Harness completion and official verifier scores remain separate: these reliability checks do not guarantee that a model solves every task.
+
 ## Local Smoke
 
 Run the local fake benchmark first:

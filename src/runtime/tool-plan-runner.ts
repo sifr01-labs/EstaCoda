@@ -567,6 +567,7 @@ export function toolResultStats(execution: ToolExecutionRecord): {
   chars?: number;
   sentChars?: number;
   truncated?: boolean;
+  commandOutcome?: Extract<RuntimeEvent, { kind: "tool-result" }>["commandOutcome"];
 } {
   if (execution.result === undefined) {
     return {};
@@ -580,7 +581,20 @@ export function toolResultStats(execution: ToolExecutionRecord): {
   return {
     chars: packet.chars,
     sentChars: packet.sentChars,
-    truncated: packet.truncated
+    truncated: packet.truncated,
+    ...(execution.tool.name !== "terminal.run" ? {} : { commandOutcome: commandOutcome(execution.result.metadata) })
+  };
+}
+
+/** Export only bounded outcome fields, never command text, environment or raw errors. */
+function commandOutcome(metadata: Record<string, unknown> | undefined): Extract<RuntimeEvent, { kind: "tool-result" }>["commandOutcome"] {
+  if (!metadata) return undefined;
+  return {
+    ...(metadata.code === null || Number.isSafeInteger(metadata.code) ? { exitCode: metadata.code as number | null } : {}),
+    ...(metadata.signal === null || typeof metadata.signal === "string" && /^SIG[A-Z0-9]{1,12}$/u.test(metadata.signal) ? { signal: metadata.signal as string | null } : {}),
+    ...(typeof metadata.timeoutMs === "number" && Number.isFinite(metadata.timeoutMs) && metadata.timeoutMs > 0 ? { timeoutMs: metadata.timeoutMs } : {}),
+    ...(typeof metadata.timedOut === "boolean" ? { timedOut: metadata.timedOut } : {}),
+    ...(typeof metadata.cancelled === "boolean" ? { cancelled: metadata.cancelled } : {})
   };
 }
 
