@@ -727,7 +727,8 @@ export class AgentLoopBuilder {
     });
     const intentRouter = new IntentRouter({
       skillRegistry: sessionSkillRegistry,
-      model: routes.model
+      model: routes.model,
+      workspaceRoot: substrate.workspaceRoot
     });
     const routingSnapshot = routingSnapshotReader({ homeDir: substrate.homeDir, profileId: substrate.profileId, router: intentRouter, initial: substrate.loadedConfig?.routing, capabilityRevision: () => ({ sessionId: sessionRuntimeContext.currentSessionId(), catalog: capabilityRecovery.catalogRevision(), execution: executionBinding() }) });
     const jevClient = new JevDecisionClient({ homeDir: resolveHomeDir(substrate.homeDir), profileId: substrate.profileId,

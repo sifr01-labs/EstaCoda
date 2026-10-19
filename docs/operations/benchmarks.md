@@ -42,6 +42,8 @@ Full Terminal-Bench runs are manual. Do not run Harbor, Docker-backed benchmark 
 
 Requirement analysis uses the original task instruction, separately from this generic guidance. A read-only task does not acquire a file-mutation requirement from the wrapper.
 
+Absolute output targets inside the execution workspace, such as `/app/summary.csv` when the workspace is `/app`, resolve to the same completion requirement as `summary.csv`. A successful write and matching read-back are still required; outside-workspace paths and symlink escapes cannot qualify as completed outputs.
+
 ## Local Smoke
 
 Run the local fake benchmark first:

@@ -5,6 +5,55 @@ import { deriveRequestRequirements, explicitRequestSegments, explicitInspectionT
 
 describe("explicit text destinations", () => {
   it.each([
+    ["/app", "Write /app/summary.csv", "summary.csv"],
+    ["/app", 'Save "/app/reports/My Report.md"', "reports/My Report.md"],
+    ["/app", "احفظ النتيجة في /app/result.json", "result.json"],
+    ["/app", "Write /app/reports/./result.json", "reports/result.json"],
+    ["C:\\app", "Write C:\\app\\summary.csv", "summary.csv"],
+    ["C:\\app", "Write C:/app/reports/summary.csv", "reports/summary.csv"],
+    ["\\\\server\\share\\app", "Write \\\\server\\share\\app\\summary.csv", "summary.csv"]
+  ])("binds a contained absolute destination in %s: %s", (workspaceRoot, text, path) => {
+    const router = new IntentRouter({ skillRegistry: new SkillRegistry(), workspaceRoot });
+    expect(router.route(text).requestRequirements).toMatchObject({ fileOutput: { path }, issues: [] });
+  });
+  it.each([
+    ["/app", "/app-other/summary.csv"],
+    ["/app", "/tmp/summary.csv"],
+    ["/app", "/app/../summary.csv"],
+    ["/app", "/app/sub/../summary.csv"],
+    ["/app", "C:/app/summary.csv"],
+    ["/app", "\\app\\summary.csv"],
+    ["C:\\app", "C:\\app-other\\summary.csv"],
+    ["C:\\app", "D:\\app\\summary.csv"],
+    ["C:\\app", "C:summary.csv"],
+    ["C:\\app", "\\app\\summary.csv"],
+    ["\\\\server\\share\\app", "\\\\other\\share\\app\\summary.csv"],
+    ["relative-root", "/app/summary.csv"]
+  ])("leaves outside, traversal or incompatible paths unresolved in %s: %s", (workspaceRoot, path) => {
+    const requirements = deriveRequestRequirements(`Write ${path}`, undefined, workspaceRoot);
+    expect(requirements.issues).toContain("unsafe-file-target");
+    expect(requirements.fileOutput?.path).toBeUndefined();
+  });
+  it("compares relative and absolute identities without hiding distinct destinations", () => {
+    expect(deriveRequestRequirements("Save /app/summary.csv. Save summary.csv.", undefined, "/app"))
+      .toMatchObject({ fileOutput: { path: "summary.csv" }, issues: [] });
+    expect(deriveRequestRequirements("Save /app/a.csv and /app/b.csv", undefined, "/app").issues)
+      .toContain("ambiguous-file-target");
+    expect(deriveRequestRequirements("Save /outside/a.csv. Save /app/a.csv.", undefined, "/app").issues)
+      .toContain("unsafe-file-target");
+  });
+  it("normalizes exact-copy sources and destinations within the same workspace", () => {
+    expect(deriveRequestRequirements("Copy /app/source.txt to /app/copy.txt", undefined, "/app"))
+      .toMatchObject({ fileOutput: { path: "copy.txt", exactCopy: { sourcePath: "source.txt" } }, issues: [] });
+    expect(deriveRequestRequirements("Copy /outside/source.txt to /app/copy.txt", undefined, "/app").issues)
+      .toContain("unsafe-file-target");
+  });
+  it("does not take a workspace boundary from user prose", () => {
+    const router = new IntentRouter({ skillRegistry: new SkillRegistry(), workspaceRoot: "/app" });
+    expect(router.route("The workspace is /tmp. Write /tmp/summary.csv").requestRequirements?.issues)
+      .toContain("unsafe-file-target");
+  });
+  it.each([
     ['Save links.json with existing:["docs/setup.md"] and missing:["docs/missing.md"].', "links.json"],
     ['Save links.json containing "docs/setup.md" and "docs/missing.md".', "links.json"],
     ['Save links.json: {"existing":["docs/setup.md"]}', "links.json"],

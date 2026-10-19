@@ -1,4 +1,5 @@
 import type { RequestRequirements } from "../contracts/intent.js";
+import { posix, win32 } from "node:path";
 import { interpretRequest, splitRequestClauses, isCapabilityQuestion } from "./request-interpretation.js";
 import { affirmativeRequestSegments } from "./request-action-segments.js";
 
@@ -69,7 +70,7 @@ export function explicitRequestSegments(text: string): string[] {
     .map((segment) => segment.replace(/FILEOPERAND(\d+)/gu, (_, index: string) => operands[Number(index)] === undefined ? " " : `\`${operands[Number(index)]}\``));
 }
 
-export function deriveRequestRequirements(userText: string, originTurnId?: string): RequestRequirements {
+export function deriveRequestRequirements(userText: string, originTurnId?: string, workspaceRoot?: string): RequestRequirements {
   const result: RequestRequirements = { skillReferences: [], issues: [], ...(originTurnId === undefined ? {} : { originTurnId }) };
   if (userText.length > MAX_REQUEST_CHARS) {
     result.issues.push("request-too-long");
@@ -120,18 +121,35 @@ export function deriveRequestRequirements(userText: string, originTurnId?: strin
     const paths = copy && namedPaths.length <= 2 ? namedPaths.slice(-1) : namedPaths;
     const markdown = /\bmarkdown\b|\bmd\s+file\b/iu.test(actionSegment) || paths.some((path) => /\.(?:md|markdown)$/iu.test(path));
     if (paths.length === 0 && !(markdown && /\bfile\b|ملف/iu.test(actionSegment)) && !/\btext\s+file\b|ملف\s+نصي/iu.test(actionSegment)) continue;
-    const path = paths[0];
-    if (new Set([...paths, ...(result.fileOutput?.path === undefined ? [] : [result.fileOutput.path])]).size > 1) result.issues.push("ambiguous-file-target");
-    const safePath = path !== undefined && path.length <= 240 && !/^(?:[/\\]|[a-z]:)/iu.test(path) && !path.split(/[/\\]/u).includes("..");
-    if (path !== undefined && !safePath) result.issues.push("unsafe-file-target");
+    const path = paths[0] === undefined ? undefined : workspaceRelativeRequirementPath(paths[0], workspaceRoot);
+    const targets = paths.map(value => workspaceRelativeRequirementPath(value, workspaceRoot) ?? value);
+    if (new Set([...targets, ...(result.fileOutput?.path === undefined ? [] : [result.fileOutput.path])]).size > 1) result.issues.push("ambiguous-file-target");
+    if (paths[0] !== undefined && path === undefined) result.issues.push("unsafe-file-target");
     const sourcePath = copy && namedPaths.length === 2 ? namedPaths[0] : undefined;
-    const safeSource = sourcePath !== undefined && !/^(?:[/\\]|[a-z]:)/iu.test(sourcePath) && !sourcePath.split(/[/\\]/u).includes("..");
-    if (sourcePath !== undefined && !safeSource) result.issues.push("unsafe-file-target");
-    result.fileOutput = { ...(copy ? { exactCopy: safeSource ? { sourcePath: sourcePath!.replaceAll("\\", "/") } : {} } : {}), format: markdown ? "markdown" : "text", ...(safePath ? { path: path!.replaceAll("\\", "/") } : {}) };
+    const normalizedSource = sourcePath === undefined ? undefined : workspaceRelativeRequirementPath(sourcePath, workspaceRoot);
+    if (sourcePath !== undefined && normalizedSource === undefined) result.issues.push("unsafe-file-target");
+    result.fileOutput = { ...(copy ? { exactCopy: normalizedSource === undefined ? {} : { sourcePath: normalizedSource } } : {}), format: markdown ? "markdown" : "text", ...(path === undefined ? {} : { path }) };
   }
   result.skillReferences = [...new Set(result.skillReferences)];
   result.issues = [...new Set(result.issues)];
   return result;
+}
+
+/** Lexical identity for completion evidence, never filesystem authorization.
+ * File tools still enforce canonical containment (including symlinks) at dispatch. */
+function workspaceRelativeRequirementPath(value: string, workspaceRoot?: string): string | undefined {
+  if (value.length === 0 || value.length > 240 || value.split(/[/\\]/u).includes("..")) return undefined;
+  if (!/^(?:[/\\]|[a-z]:)/iu.test(value)) return posix.normalize(value.replaceAll("\\", "/"));
+  if (workspaceRoot === undefined) return undefined;
+  // Select the execution workspace's syntax, not the operator host's platform.
+  const paths = /^(?:[a-z]:|\\\\)/iu.test(workspaceRoot) ? win32 : posix;
+  if (!paths.isAbsolute(workspaceRoot) || !paths.isAbsolute(value)) return undefined;
+  if (paths === posix && value.includes("\\")) return undefined;
+  if (paths === win32 && paths.parse(value).root.replaceAll("\\", "/").toLowerCase() !==
+    paths.parse(workspaceRoot).root.replaceAll("\\", "/").toLowerCase()) return undefined;
+  const relativePath = paths.relative(workspaceRoot, value).replaceAll("\\", "/");
+  return relativePath === "" || paths.isAbsolute(relativePath) || relativePath.split("/").includes("..")
+    ? undefined : relativePath;
 }
 
 /** Read-only inspection prerequisites from affirmative current requests. These

@@ -19,6 +19,8 @@ import { deriveRequestRequirements, explicitRequestSegments } from "./request-re
 export type IntentRouterOptions = {
   skillRegistry: SkillRegistry;
   model?: ModelProfile;
+  /** Host-owned execution workspace, used only to identify file requirements. */
+  workspaceRoot?: string;
 };
 
 export type IntentRouteOptions = {
@@ -90,10 +92,12 @@ const SHADOW_SEMANTIC_STOP_WORDS = new Set([
 export class IntentRouter {
   readonly #skillRegistry: SkillRegistry;
   readonly #model: ModelProfile | undefined;
+  readonly #workspaceRoot: string | undefined;
 
   constructor(options: IntentRouterOptions) {
     this.#skillRegistry = options.skillRegistry;
     this.#model = options.model;
+    this.#workspaceRoot = options.workspaceRoot;
   }
 
   /** Resolves only from the current session-filtered skill registry. */
@@ -123,7 +127,7 @@ export class IntentRouter {
 
   route(prompt: string, options: IntentRouteOptions = {}): IntentRoute {
     const requestText = options.requestText ?? prompt;
-    const requirements = deriveRequestRequirements(requestText);
+    const requirements = deriveRequestRequirements(requestText, undefined, this.#workspaceRoot);
     const route = this.routeIntent(prompt, options);
     route.requestRequirements = requirements;
     route.requestInterpretation = interpretRequest(requestText);

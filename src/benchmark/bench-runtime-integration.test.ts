@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, readdir, realpath, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, readdir, realpath, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -17,6 +17,10 @@ describe("benchmark real runtime integration", () => {
     { explicitHome: false, scenario: "read" },
     { explicitHome: true, scenario: "read" },
     { explicitHome: true, scenario: "write" },
+    { explicitHome: true, scenario: "absolute-write" },
+    { explicitHome: true, scenario: "absolute-no-readback" },
+    { explicitHome: true, scenario: "outside-write" },
+    { explicitHome: true, scenario: "symlink-write" },
     { explicitHome: true, scenario: "failure" }
   ])("executes $scenario with scoped trust (explicit home: $explicitHome)", async ({ explicitHome, scenario }) => {
     const failTools = scenario === "failure";
@@ -28,6 +32,13 @@ describe("benchmark real runtime integration", () => {
     await mkdir(workspace);
     await mkdir(outside);
     await writeFile(join(workspace, "input.txt"), "synthetic benchmark input\n");
+    await writeFile(join(outside, "output.txt"), "outside file must remain unchanged\n");
+    if (scenario === "symlink-write") await symlink(join(outside, "output.txt"), join(workspace, "output.txt"));
+    const writesFile = scenario.includes("write") || scenario === "absolute-no-readback";
+    const noReadback = scenario === "absolute-no-readback";
+    const unsafeWrite = scenario === "outside-write" || scenario === "symlink-write";
+    const expectedFailure = failTools || noReadback || unsafeWrite;
+    const outputPath = scenario === "write" ? "output.txt" : join(scenario === "outside-write" ? outside : workspace, "output.txt");
     const originalTrust = new WorkspaceTrustStore({ homeDir });
     await originalTrust.grant(outside);
     const originalTrustBytes = await readFile(originalTrust.path, "utf8");
@@ -38,14 +49,14 @@ describe("benchmark real runtime integration", () => {
     const registry = new ProviderRegistry();
     const complete = vi.fn(async () => {
       const iteration = complete.mock.calls.length;
-      const writes = scenario === "write" && iteration === 1;
-      const call = failTools || iteration <= (scenario === "write" ? 2 : 1);
+      const writes = writesFile && iteration === 1;
+      const call = failTools || iteration <= (writesFile && !noReadback ? 2 : 1);
       return {
         ok: true, provider: model.provider, model: model.id,
-        content: call ? "" : scenario === "write" ? "Created and verified output.txt." : "The file contains synthetic benchmark input.",
+        content: call ? "" : writesFile ? "Created and verified output.txt." : "The file contains synthetic benchmark input.",
         ...(call ? { raw: { output: [{
           type: "function_call", call_id: `fixture-${iteration}`, name: writes ? "file_write" : "file_read",
-          arguments: JSON.stringify({ path: failTools ? "missing.txt" : scenario === "write" ? "output.txt" : "input.txt",
+          arguments: JSON.stringify({ path: failTools ? "missing.txt" : writesFile ? outputPath : "input.txt",
             ...(writes ? { content: "synthetic benchmark output\n" } : {}) })
         }] } } : {})
       };
@@ -54,8 +65,8 @@ describe("benchmark real runtime integration", () => {
     let trustPath: string | undefined;
     const result = await benchCommand(
       { argv: [], workspaceRoot: workspace, homeDir: join(root, "caller-home") },
-      ["run", "--workspace", workspace, "--instruction", scenario === "write"
-        ? "Write output.txt with synthetic benchmark output and verify its contents."
+      ["run", "--workspace", workspace, "--instruction", writesFile
+        ? `Write ${outputPath} with synthetic benchmark output and verify its contents.`
         : "Read input.txt and report its contents.", "--out", outDir,
         ...(explicitHome ? ["--home", homeDir] : []), "--timeout-ms", "10000", "--max-provider-iterations", "3"],
       {
@@ -84,13 +95,18 @@ describe("benchmark real runtime integration", () => {
         getPackageVersion: async () => "0.1.test", getGitCommit: async () => null, getGitBranch: async () => null
       }
     );
-    expect(result.exitCode, result.output).toBe(failTools ? 1 : 0);
-    if (!failTools) expect(complete).toHaveBeenCalledTimes(scenario === "write" ? 3 : 2);
-    if (scenario === "write") expect(await readFile(join(workspace, "output.txt"), "utf8")).toBe("synthetic benchmark output\n");
+    expect(result.exitCode, result.output).toBe(expectedFailure ? 1 : 0);
+    if (!expectedFailure) expect(complete).toHaveBeenCalledTimes(writesFile ? 3 : 2);
+    if (writesFile && !unsafeWrite) expect(await readFile(join(workspace, "output.txt"), "utf8")).toBe("synthetic benchmark output\n");
+    expect(await readFile(join(outside, "output.txt"), "utf8")).toBe("outside file must remain unchanged\n");
     const events = (await readFile(join(outDir, "events.ndjson"), "utf8")).trim().split("\n").map((line) => JSON.parse(line));
-    expect(events).toContainEqual(expect.objectContaining({ kind: "tool-result", tool: "file.read", ok: !failTools }));
+    if (noReadback) {
+      expect(events.filter(event => event.kind === "tool-result" && event.tool === "file.read")).toEqual([]);
+    } else {
+      expect(events).toContainEqual(expect.objectContaining({ kind: "tool-result", tool: "file.read", ok: !failTools && !unsafeWrite }));
+    }
     const summary = JSON.parse(await readFile(join(outDir, "summary.json"), "utf8"));
-    expect(summary.execution.status).toBe(failTools ? "task_failed" : "success");
+    expect(summary.execution.status).toBe(expectedFailure ? "task_failed" : "success");
     if (failTools) expect(summary.failure.code).toBe("budget_exhausted");
     expect(await readFile(originalTrust.path, "utf8")).toBe(originalTrustBytes);
     expect(await originalTrust.isTrusted(workspace)).toBe(false);

@@ -131,6 +131,8 @@ The command safety detector normalizes commands before matching, including ANSI 
 
 Workspace trust is explicit and path-scoped. A trusted workspace allows normal local file and terminal work under the configured security policy. It does not enable project config loading and does not change which profile config is used.
 
+File completion requirements may identify an absolute path inside the runtime-owned execution workspace. The parser converts it to a workspace-relative identity; this does not grant file access. File tools still enforce canonical containment, including symlink escape checks, and completion still requires successful write and matching read-back evidence. Outside paths and parent traversal remain unresolved.
+
 Persistent approvals match normalized target keys that include operation type and normalized targets. Display summaries are not the approval boundary.
 
 Approval bypasses that execute gated actions without the required operator approval are security issues.

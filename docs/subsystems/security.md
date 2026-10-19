@@ -129,6 +129,8 @@ Persistent approvals do not override hardline command blocks, deterministic deni
 - Trust is global directory-owned state persisted per workspace root in `~/.estacoda/trust.json`.
 - Trust does not control config loading. Runtime config always comes from the selected profile.
 
+File-output requirement parsing receives the execution workspace from the runtime, never from user or model prose. An absolute destination or exact-copy source lexically contained by that root is normalized to a relative identity for completion evidence. Without a workspace root, absolute requirements remain unresolved. Outside paths, sibling-prefix matches, incompatible drive roots, and `..` segments are rejected. This normalization does not authorize I/O: the existing file tools still check canonical containment and symlink escapes. A completed file deliverable still requires the same successful write and matching full read-back receipts.
+
 ## Browser And Web URL Safety
 
 Network-capable browser and web tools enforce a separate URL-safety floor before the normal tool result is returned. Private and internal URLs are blocked by default, including loopback, RFC1918, link-local, multicast, unspecified, reserved, CGNAT, and equivalent IPv6 ranges. Cloud metadata endpoints are always blocked, even when private URLs are otherwise allowed.
