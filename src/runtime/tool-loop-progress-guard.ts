@@ -1,3 +1,4 @@
+import { requestedFileOutputs } from "../contracts/request-requirements.js";
 import { createHash } from "node:crypto";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import type { ExecutionCheckpointReader } from "../contracts/execution-checkpoint.js";
@@ -147,8 +148,8 @@ export class ToolLoopProgressGuard {
         for (const output of outputs) {
           if (output === null || typeof output !== "object") continue;
           const { path, contentSha256 } = output as Record<string, unknown>;
-          const requestedPath = this.#checkpointReader?.current()?.requestRequirements?.fileOutput?.path;
-          if (typeof path !== "string" || (requestedPath !== undefined && path !== requestedPath) ||
+          const requestedPaths = requestedFileOutputs(this.#checkpointReader?.current()?.requestRequirements).flatMap(file => file.path === undefined ? [] : [file.path]);
+          if (typeof path !== "string" || (requestedPaths.length > 0 && !requestedPaths.includes(path)) ||
             typeof contentSha256 !== "string" || !/^[a-f0-9]{64}$/u.test(contentSha256)) continue;
           const key = fingerprint({ path, contentSha256 });
           if ((execution.tool.name === "file.write" || execution.tool.name === "file.patch") &&

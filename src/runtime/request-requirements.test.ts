@@ -1,3 +1,4 @@
+import { validateRequestRequirements } from "../contracts/request-requirements.js";
 import { describe, expect, it } from "vitest";
 import { SkillRegistry } from "../skills/skill-registry.js";
 import { IntentRouter } from "./intent-router.js";
@@ -37,7 +38,7 @@ describe("explicit text destinations", () => {
   it("compares relative and absolute identities without hiding distinct destinations", () => {
     expect(deriveRequestRequirements("Save /app/summary.csv. Save summary.csv.", undefined, "/app"))
       .toMatchObject({ fileOutput: { path: "summary.csv" }, issues: [] });
-    expect(deriveRequestRequirements("Save /app/a.csv and /app/b.csv", undefined, "/app").issues)
+    expect(deriveRequestRequirements("Save /app/a.csv or /app/b.csv", undefined, "/app").issues)
       .toContain("ambiguous-file-target");
     expect(deriveRequestRequirements("Save /outside/a.csv. Save /app/a.csv.", undefined, "/app").issues)
       .toContain("unsafe-file-target");
@@ -75,7 +76,7 @@ describe("explicit text destinations", () => {
     expect(deriveRequestRequirements(text).fileOutput).toBeUndefined();
   });
   it("keeps multiple destinations and unsafe paths unresolved", () => {
-    expect(deriveRequestRequirements("Save a.json and b.json").issues).toContain("ambiguous-file-target");
+    expect(deriveRequestRequirements("Save a.json or b.json").issues).toContain("ambiguous-file-target");
     for (const path of ["../de.json", "/tmp/de.json", "C:\\de.json"]) {
       expect(deriveRequestRequirements(`Save ${path}`)).toMatchObject({ fileOutput: { format: "text" }, issues: ["unsafe-file-target"] });
       expect(deriveRequestRequirements(`Save ${path}`).fileOutput?.path).toBeUndefined();
@@ -185,7 +186,7 @@ describe("bounded explicit request requirements", () => {
     expect(deriveRequestRequirements('Save "reports/My Report.md"').fileOutput?.path).toBe("reports/My Report.md");
   });
   it("keeps ambiguous and unsafe targets explicitly unresolved", () => {
-    expect(deriveRequestRequirements("Save a.md and b.md").issues).toContain("ambiguous-file-target");
+    expect(deriveRequestRequirements("Save a.md or b.md").issues).toContain("ambiguous-file-target");
     expect(deriveRequestRequirements("Save ../report.md")).toMatchObject({ fileOutput: { format: "markdown" }, issues: ["unsafe-file-target"] });
     expect(deriveRequestRequirements("Save /tmp/report.md").fileOutput?.path).toBeUndefined();
   });
@@ -316,4 +317,42 @@ it.each([
   ["Save an identical copy of that file as decision-copy.txt, preserving blank lines and trailing newline. Read back the copy. Do not redo any analysis or research.", undefined, "decision-copy.txt"]
 ])("recognizes live copy phrasing: %s", (text, sourcePath, path) => {
   expect(deriveRequestRequirements(text!)).toMatchObject({ fileOutput: { path, exactCopy: sourcePath ? { sourcePath } : {} }, issues: [] });
+});
+
+describe("explicit multiple output requirements", () => {
+  it.each([
+    "Save report.md and data.json", "Save report.md, data.json", "Save report.md & data.json",
+    "Save report.md and write data.json", "Save report.md. Create data.json.",
+    "احفظ report.md و data.json", "Save `report.md` and `data.json`",
+    "Save /app/report.md and /app/data.json"
+  ])("retains each conjunctive destination: %s", prompt => {
+    expect(deriveRequestRequirements(prompt, "turn", "/app")).toEqual({ originTurnId: "turn", skillReferences: [], issues: [],
+      fileOutput: { format: "markdown", path: "report.md", additionalFiles: [{ format: "text", path: "data.json" }] } });
+  });
+  it("deduplicates equivalent workspace paths", () => {
+    expect(deriveRequestRequirements("Save a.md and /app/a.md and b.md", undefined, "/app")).toMatchObject({ issues: [],
+      fileOutput: { path: "a.md", additionalFiles: [{ path: "b.md" }] } });
+  });
+  it.each(["Save a.md or b.md", "Save a.md or save b.md", "احفظ a.md أو b.md", "Write a.md using b.md", "Copy a.md and b.md to c.md", "Prepare a markdown file. Save a.md."])("keeps genuinely ambiguous targets unresolved: %s", prompt => {
+    expect(deriveRequestRequirements(prompt).issues).toContain("ambiguous-file-target");
+  });
+  it("preserves copy sources independently for each destination", () => {
+    expect(deriveRequestRequirements("Copy a.md to b.md. Copy c.json to d.json.")).toMatchObject({ issues: [], fileOutput: {
+      path: "b.md", exactCopy: { sourcePath: "a.md" }, additionalFiles: [{ path: "d.json", exactCopy: { sourcePath: "c.json" } }]
+    } });
+  });
+  it("rejects an unsafe secondary destination and bounds the output count", () => {
+    expect(deriveRequestRequirements("Save a.md and ../b.md").issues).toContain("unsafe-file-target");
+    const prompt = "Save " + Array.from({ length: 9 }, (_, i) => `file-${i}.txt`).join(" and ");
+    expect(deriveRequestRequirements(prompt)).toMatchObject({ issues: ["request-too-long"] });
+    expect(deriveRequestRequirements(prompt).fileOutput?.additionalFiles).toHaveLength(7);
+  });
+});
+
+
+it("keeps long multi-copy requirements persistable and explicitly incomplete", () => {
+  const prompt = Array.from({ length: 8 }, (_, i) => `Copy ${"s".repeat(230)}${i}.md to ${"d".repeat(230)}${i}.md.`).join(" ");
+  const requirements = deriveRequestRequirements(prompt);
+  expect(requirements.issues).toContain("request-too-long");
+  expect(() => validateRequestRequirements(requirements)).not.toThrow();
 });

@@ -1,3 +1,4 @@
+import { requestedFileOutputs } from "../contracts/request-requirements.js";
 import { createHash, randomUUID } from "node:crypto";
 import type {
   CheckpointExecutionBinding,
@@ -548,8 +549,7 @@ function isExplicitCheckpointSupersession(text: string): boolean {
 
 function referencesCheckpointWork(text: string, checkpoint: ForegroundExecutionCheckpoint): boolean {
   const normalized = text.normalize("NFKC").replace(/```[\s\S]*?(?:```|$)|"[^"\n]*"|^\s*>.*$/gmu, " ");
-  const target = checkpoint.requestRequirements?.fileOutput?.path;
-  if (target && normalized.includes(target)) return true;
+  if (requestedFileOutputs(checkpoint.requestRequirements).some(file => file.path && normalized.includes(file.path))) return true;
   return /\b(?:continue|resume|retry|again|go\s+ahead|carry\s+on)\b|\b(?:it|that)\b|\b(?:this|the|previous|same|existing)\s+(?:task|work|report|result|file|research|error|failure|output|step)\b|\b(?:progress|status)\s+(?:of|on)\b/iu.test(normalized) ||
     /(?:تابع|أكمل|اكمل|أعد المحاولة|مرة أخرى|المهمة|التقرير|النتائج|الملف السابق)/u.test(normalized);
 }

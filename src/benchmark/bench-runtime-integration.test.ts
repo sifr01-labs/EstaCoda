@@ -23,7 +23,11 @@ describe("benchmark real runtime integration", () => {
     { explicitHome: true, scenario: "absolute-no-readback" },
     { explicitHome: true, scenario: "outside-write" },
     { explicitHome: true, scenario: "symlink-write" },
-    { explicitHome: true, scenario: "failure" }
+    { explicitHome: true, scenario: "failure" },
+    { explicitHome: true, scenario: "multi-write" },
+    { explicitHome: true, scenario: "multi-missing-write" },
+    { explicitHome: true, scenario: "multi-no-readback" },
+    { explicitHome: true, scenario: "multi-outside-write" }
   ])("executes $scenario with scoped trust (explicit home: $explicitHome)", async ({ explicitHome, scenario }) => {
     const failTools = scenario === "failure";
     root = await realpath(await mkdtemp(join(tmpdir(), "estacoda-bench-runtime-")));
@@ -43,11 +47,13 @@ describe("benchmark real runtime integration", () => {
     }
     const outputRelativePath = scenario === "system-write" ? "var/www/html/index.html" : "output.txt";
     if (scenario === "system-write") await mkdir(join(workspace, "var/www/html"), { recursive: true });
-    const writesFile = scenario.includes("write") || scenario === "absolute-no-readback";
+    const multiple = scenario.startsWith("multi-");
+    const writesFile = multiple || scenario.includes("write") || scenario === "absolute-no-readback";
     const noReadback = scenario === "absolute-no-readback";
     const unsafeWrite = scenario === "outside-write" || scenario === "symlink-write";
-    const expectedFailure = failTools || noReadback || unsafeWrite;
+    const expectedFailure = failTools || noReadback || unsafeWrite || (multiple && scenario !== "multi-write");
     const outputPath = scenario === "write" ? "output.txt" : join(scenario === "outside-write" ? outside : workspace, outputRelativePath);
+    const secondaryPath = join(scenario === "multi-outside-write" ? outside : workspace, "second.txt");
     const originalTrust = new WorkspaceTrustStore({ homeDir });
     await originalTrust.grant(outside);
     const originalTrustBytes = await readFile(originalTrust.path, "utf8");
@@ -58,6 +64,17 @@ describe("benchmark real runtime integration", () => {
     const registry = new ProviderRegistry();
     const complete = vi.fn(async () => {
       const step = complete.mock.calls.length;
+      if (multiple) {
+        const operations = [
+          { name: "file_write", path: outputPath }, { name: "file_read", path: outputPath },
+          ...(scenario === "multi-missing-write" ? [] : [{ name: "file_write", path: secondaryPath }]),
+          ...(scenario === "multi-missing-write" || scenario === "multi-no-readback" ? [] : [{ name: "file_read", path: secondaryPath }])
+        ];
+        const operation = operations[step - 1];
+        return { ok: true, provider: model.provider, model: model.id, content: operation ? "" : "Both files are complete.",
+          ...(operation ? { raw: { output: [{ type: "function_call", call_id: `multi-${step}`, name: operation.name,
+            arguments: JSON.stringify({ path: operation.path, ...(operation.name === "file_write" ? { content: "synthetic benchmark output\n" } : {}) }) }] } } : {}) };
+      }
       if (setupSteps && step === 1) return {
         ok: true, provider: model.provider, model: model.id, content: "",
         raw: { output: [{ type: "function_call", call_id: "request-terminal", name: "capability_request",
@@ -87,9 +104,9 @@ describe("benchmark real runtime integration", () => {
     const result = await benchCommand(
       { argv: [], workspaceRoot: workspace, homeDir: join(root, "caller-home") },
       ["run", "--workspace", workspace, "--instruction", writesFile
-        ? `Write ${outputPath} with synthetic benchmark output and verify its contents.`
+        ? multiple ? `Write ${outputPath} and ${secondaryPath} with synthetic benchmark output and verify both files.` : `Write ${outputPath} with synthetic benchmark output and verify its contents.`
         : "Read input.txt and report its contents.", "--out", outDir,
-        ...(explicitHome ? ["--home", homeDir] : []), "--timeout-ms", "10000", "--max-provider-iterations", String(terminalSteps + setupSteps + 3)],
+        ...(explicitHome ? ["--home", homeDir] : []), "--timeout-ms", "10000", "--max-provider-iterations", String(multiple ? 6 : terminalSteps + setupSteps + 3)],
       {
         makeTempHome: async () => homeDir,
         loadConfig: async (options) => ({
@@ -117,9 +134,11 @@ describe("benchmark real runtime integration", () => {
       }
     );
     expect(result.exitCode, result.output).toBe(expectedFailure ? 1 : 0);
-    if (!expectedFailure) expect(complete).toHaveBeenCalledTimes(terminalSteps + setupSteps + (writesFile ? 3 : 2));
+    if (!expectedFailure) expect(complete).toHaveBeenCalledTimes(multiple ? 5 : terminalSteps + setupSteps + (writesFile ? 3 : 2));
     if (writesFile && !unsafeWrite) expect(await readFile(join(workspace, outputRelativePath), "utf8")).toBe("synthetic benchmark output\n");
     expect(await readFile(join(outside, "output.txt"), "utf8")).toBe("outside file must remain unchanged\n");
+    if (scenario === "multi-write") expect(await readFile(secondaryPath, "utf8")).toBe("synthetic benchmark output\n");
+    if (scenario === "multi-outside-write") await expect(readFile(secondaryPath)).rejects.toMatchObject({ code: "ENOENT" });
     const events = (await readFile(join(outDir, "events.ndjson"), "utf8")).trim().split("\n").map((line) => JSON.parse(line));
     if (terminalSteps > 0) {
       expect(events.filter(event => event.kind === "tool-result" && event.tool === "terminal.run" && event.ok)).toHaveLength(terminalSteps);

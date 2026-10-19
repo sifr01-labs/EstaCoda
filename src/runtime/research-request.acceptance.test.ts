@@ -136,17 +136,23 @@ describe.sequential("research workflow acceptance harness", () => {
     scriptConsumed(h);
   });
 
-  it("repairs unsupported citations in the deliverable even when the chat reply is grounded", async () => {
+  it.each([false, true])("repairs unsupported citations in every deliverable (secondary=%s)", async secondary => {
     const h = await harness();
+    const path = secondary ? "second.md" : "report.md";
     h.enqueue(nativeCall("web_search", { query: "current recycling" }),
-      nativeCall("file_write", { path: "report.md", content: REPORT.replace(SOURCE_URL, "https://unobserved.example/paper") }),
-      nativeCall("file_read", { path: "report.md" }), answer(REPORT), request => {
+      ...(secondary ? [nativeCall("file_write", { path: "report.md", content: REPORT })] : []),
+      nativeCall("file_write", { path, content: REPORT.replace(SOURCE_URL, "https://unobserved.example/paper") }),
+      request => {
+        const paths = secondary ? ["report.md", path] : [path];
+        return { content: "", toolCalls: paths.flatMap((target, index) =>
+          nativeCall("file_read", { path: target })(request).toolCalls!.map(call => ({ ...call, id: `read-${index}` }))) };
+      }, answer(REPORT), request => {
         expect(JSON.stringify(request.messages)).toContain("unobserved-source");
-        return nativeCall("file_write", { path: "report.md", content: REPORT, overwrite: true })(request);
-      }, nativeCall("file_read", { path: "report.md" }), answer("Saved and verified report.md."));
-    const result = await h.turn("Research current recycling and save report.md");
+        return nativeCall("file_write", { path, content: REPORT, overwrite: true })(request);
+      }, nativeCall("file_read", { path }), answer("Saved and verified report.md."));
+    const result = await h.turn(`Research current recycling and save report.md${secondary ? " and second.md" : ""}`);
     expect(result.finalOutcome?.status).toMatch(/^completed/u);
-    expect(await readFile(join(h.workspaceRoot, "report.md"), "utf8")).toBe(REPORT);
+    expect(await readFile(join(h.workspaceRoot, path), "utf8")).toBe(REPORT);
     scriptConsumed(h);
   });
 
@@ -162,7 +168,7 @@ describe.sequential("research workflow acceptance harness", () => {
     scriptConsumed(h);
   });
 
-  it("recovers the incident under provider fallback and retains required synthesis", async () => {
+  it.each([false, true])("recovers under provider fallback and delivers every requested report (multiple=%s)", async multiple => {
     const h=await harness({fallbackOnRequest:1,sourceAccessFailures:true});
     const tasks=["collection","processing","reuse"].map(scope=>({task:`Research ${scope}.`,context:"User requested current research using 3 subagents. Save report.md. This is background context, not this worker's assignment.",allowedTools:["web.search","web.extract"],
       allowedToolsets:["research","core"],research:{scope,requireLiveSources:true,requireRepositoryEvidence:false}}));
@@ -170,7 +176,7 @@ describe.sequential("research workflow acceptance harness", () => {
     // Three pre-admission errors must leave capacity for the corrected batch.
     for(let i=0;i<3;i++) h.enqueue(nativeCall("delegate_task",{tasks:tasks.slice(0,2),synthesis:false}));
     h.enqueue(nativeCall("delegate_task",{tasks,synthesis:false}));
-    const result=await h.turn("Use the researcher skill and 3 subagents to research current battery recycling. Save report.md.");
+    const result=await h.turn(`Use the researcher skill and 3 subagents to research current battery recycling. Save report.md${multiple ? " and second.md" : ""}.`);
     expect(result.toolExecutions.filter(call=>call.result?.metadata?.code==="request-requirements-unsatisfied")).toHaveLength(3);
     expect(result.toolExecutions.at(-1)?.result).toMatchObject({ok:true});
     expect(result.toolExecutions.find(call=>call.tool.name==="skill.read")?.result).toMatchObject({ok:true,metadata:{mode:"reference"}});
@@ -183,6 +189,7 @@ describe.sequential("research workflow acceptance harness", () => {
     expect(steps.filter(step=>step.executor.role==="worker")).toHaveLength(3);
     expect(steps.some(step=>step.executor.role==="synthesis")).toBe(true);
     expect(steps.some(step=>step.executor.role==="report-delivery")).toBe(true);
+    if (multiple) expect(steps.find(step=>step.executor.role==="report-delivery")?.objective).toContain('"second.md"');
     const routes=(await h.sessionDb.listEvents(h.runtime.sessionId)).filter(event=>event.kind==="provider-route");
     expect(routes).toEqual(expect.arrayContaining([expect.objectContaining({model:"research-fallback",fallback:true,state:"responded"})]));
     expect(task.status).toBe("queued");
@@ -216,10 +223,11 @@ describe.sequential("research workflow acceptance harness", () => {
     const final=h.store.listResults(task.id).find(item=>item.stepId===synthesis.id&&item.disposition==="accepted")!;
     const report=await resultService.readText({taskId:task.id,resultId:final.id,sessionId:h.runtime.sessionId});
     await h.restart();
-    h.enqueue(nativeCall("task_result_read",{task_id:task.id,result_id:final.id}),nativeCall("file_write",{path:"report.md",content:report.content}),nativeCall("file_read",{path:"report.md"}),answer("Saved report.md."));
+    h.enqueue(nativeCall("task_result_read",{task_id:task.id,result_id:final.id}),nativeCall("file_write",{path:"report.md",content:report.content}),nativeCall("file_read",{path:"report.md"}),...(multiple ? [nativeCall("file_write",{path:"second.md",content:report.content}),nativeCall("file_read",{path:"second.md"})] : []),answer("Saved report.md."));
     expect(await schedulerFor(h,task.id).scheduler.runOnce()).toMatchObject({completed:1,failed:0});
     expect(h.store.getTask(task.id)?.status).toBe("completed");
     expect(await readFile(join(h.workspaceRoot,"report.md"),"utf8")).toBe(report.content);
+    if (multiple) expect(await readFile(join(h.workspaceRoot,"second.md"),"utf8")).toBe(report.content);
     scriptConsumed(h);
   }, 30_000);
 

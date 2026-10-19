@@ -1,6 +1,17 @@
-import type { RequestRequirements } from "./intent.js";
+import { posix } from "node:path";
+import type { FileOutputRequirement, RequestRequirements } from "./intent.js";
 import { redactString } from "../utils/redaction.js";
 import type { DelegatedRequestContract } from "./delegation.js";
+
+export const MAX_FILE_OUTPUTS = 8;
+export const MAX_REQUEST_REQUIREMENTS_CHARS = 4096;
+
+/** The first output remains the primary report for existing presentation APIs. */
+export function requestedFileOutputs(requirements: RequestRequirements | undefined): FileOutputRequirement[] {
+  if (requirements?.fileOutput === undefined) return [];
+  const { additionalFiles, ...primary } = requirements.fileOutput;
+  return [primary, ...(additionalFiles ?? [])];
+}
 
 export function validateDelegatedRequestContract(value: unknown): DelegatedRequestContract {
   const record = object(value, ["version", "objective", "requirements", "skillName"]);
@@ -19,7 +30,7 @@ export function isDelegatedRequestContractValid(value: unknown): boolean {
 export function validateRequestRequirements(value: unknown): RequestRequirements {
   const record = object(value, ["sourceTaskId", "originTurnId", "skillReferences", "delegation", "fileOutput", "research", "issues"]);
   if (record.sourceTaskId !== undefined && (typeof record.sourceTaskId !== "string" || !/^[A-Za-z0-9_.:-]{1,256}$/u.test(record.sourceTaskId))) throw new Error("Invalid source Task reference.");
-  if (JSON.stringify(record).length > 4096) throw new Error("Request requirements exceed their budget.");
+  if (JSON.stringify(record).length > MAX_REQUEST_REQUIREMENTS_CHARS) throw new Error("Request requirements exceed their budget.");
   if (!Array.isArray(record.skillReferences) || record.skillReferences.length > 4 || !record.skillReferences.every((name) =>
     typeof name === "string" && /^[\p{L}\p{N}_-]{1,80}$/u.test(name))) throw new Error("Invalid skill requirements.");
   if (!Array.isArray(record.issues) || record.issues.length > 3 || !record.issues.every((issue) =>
@@ -34,15 +45,18 @@ export function validateRequestRequirements(value: unknown): RequestRequirements
     if (!["general", "literature", "paper"].includes(String(research.domain)) || typeof research.fresh !== "boolean") throw new Error("Invalid research requirement.");
   }
   if (record.fileOutput !== undefined) {
-    const file = object(record.fileOutput, ["format", "path", "exactCopy"]);
-    if (file.exactCopy !== undefined) {
-      const copy = object(file.exactCopy, ["sourcePath"]);
-      if (copy.sourcePath !== undefined) validateRequestRequirements({ skillReferences: [], issues: [], fileOutput: { format: "text", path: copy.sourcePath } });
+    const primary = object(record.fileOutput, ["format", "path", "exactCopy", "additionalFiles"]);
+    const { additionalFiles, ...file } = primary;
+    validateFile(file);
+    if (additionalFiles !== undefined) {
+      if (!Array.isArray(additionalFiles) || additionalFiles.length === 0 || additionalFiles.length >= MAX_FILE_OUTPUTS || file.path === undefined) throw new Error("Invalid additional file targets.");
+      const paths = new Set([posix.normalize(String(file.path).replaceAll("\\", "/"))]);
+      for (const additional of additionalFiles) {
+        const output = validateFile(additional);
+        if (output.path === undefined || paths.has(posix.normalize(String(output.path).replaceAll("\\", "/")))) throw new Error("Invalid duplicate or unnamed file target.");
+        paths.add(posix.normalize(String(output.path).replaceAll("\\", "/")));
+      }
     }
-    if (file.format !== "markdown" && file.format !== "text") throw new Error("Invalid file format.");
-    if (file.path !== undefined && (typeof file.path !== "string" || file.path.length === 0 || file.path.length > 240 ||
-      /^(?:[/\\]|[a-z]:)|[\u0000-\u001f\u007f]/iu.test(file.path) || file.path.split(/[/\\]/u).includes("..") ||
-      redactString(file.path, { strict: true }) !== file.path)) throw new Error("Invalid relative file target.");
   }
   return structuredClone(record) as RequestRequirements;
 }
@@ -50,4 +64,17 @@ export function validateRequestRequirements(value: unknown): RequestRequirements
 function object(value: unknown, keys: string[]): Record<string, unknown> {
   if (value === null || typeof value !== "object" || Array.isArray(value) || Object.keys(value).some((key) => !keys.includes(key))) throw new Error("Invalid request requirement state.");
   return value as Record<string, unknown>;
+}
+
+function validateFile(value: unknown): Record<string, unknown> {
+  const file = object(value, ["format", "path", "exactCopy"]);
+  if (file.exactCopy !== undefined) {
+    const copy = object(file.exactCopy, ["sourcePath"]);
+    if (copy.sourcePath !== undefined) validateFile({ format: "text", path: copy.sourcePath });
+  }
+  if (file.format !== "markdown" && file.format !== "text") throw new Error("Invalid file format.");
+  if (file.path !== undefined && (typeof file.path !== "string" || file.path.length === 0 || file.path.length > 240 ||
+    /^(?:[/\\]|[a-z]:)|[\u0000-\u001f\u007f]/iu.test(file.path) || file.path.split(/[/\\]/u).includes("..") ||
+    redactString(file.path, { strict: true }) !== file.path)) throw new Error("Invalid relative file target.");
+  return file;
 }

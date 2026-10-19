@@ -345,6 +345,13 @@ describe("ExecutionCheckpointController", () => {
     await expect(controller.prepareForTurn("Explain what a rain jacket is?")).resolves.toMatchObject({ disposition: "superseded" });
   });
 
+  it("retains all output obligations when a follow-up names the secondary file", async () => {
+    const controller = target();
+    const checkpoint = await controller.ensure(creation({ requestRequirements: { skillReferences: [], issues: [],
+      fileOutput: { format: "text", path: "a.txt", additionalFiles: [{ format: "text", path: "b.txt" }] } } }));
+    await expect(controller.prepareForTurn("Check b.txt")).resolves.toMatchObject({ disposition: "continuation", checkpoint });
+  });
+
   it("does not allow a model-facing Plan update to mutate checkpoint state", async () => {
     const controller = target();
     const checkpoint = await controller.ensure(creation());

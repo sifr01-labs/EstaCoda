@@ -1,3 +1,4 @@
+import { requestedFileOutputs } from "../contracts/request-requirements.js";
 import { resolve } from "node:path";
 import { releaseExecutionActionRetention, retainExecutionActionIdentity } from "../security/execution-action-identity.js";
 import { withDispatchAuthorization, validateDispatchAuthorization } from "../security/dispatch-authorization.js";
@@ -273,10 +274,12 @@ export class TaskApprovalService {
     if (step.executor.role === "report-delivery" && request.toolName !== undefined) {
       if (!["task.result.read", "file.write", "file.read"].includes(request.toolName ?? "")) return "deny";
       if (request.toolName !== "task.result.read") {
-        const path = step.executor.requestContract?.requirements.fileOutput?.path;
-        const resolvedTarget = path === undefined ? undefined : resolve(task.workspace.canonicalPath, path).replaceAll("\\", "/");
-        const target = process.platform === "win32" ? resolvedTarget?.toLowerCase() : resolvedTarget;
-        if (target === undefined || request.targetKey !== `${request.toolName}:path:${target}`) return "deny";
+        const targets = requestedFileOutputs(step.executor.requestContract?.requirements).flatMap(file => {
+          if (file.path === undefined) return [];
+          const resolved = resolve(task.workspace.canonicalPath, file.path).replaceAll("\\", "/");
+          return [process.platform === "win32" ? resolved.toLowerCase() : resolved];
+        });
+        if (!targets.some(target => request.targetKey === `${request.toolName}:path:${target}`)) return "deny";
       }
     }
     const taskDisposition = task.authorityPolicy.riskClassPolicy[request.riskClass];

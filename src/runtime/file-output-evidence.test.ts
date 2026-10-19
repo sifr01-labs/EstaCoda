@@ -109,7 +109,7 @@ describe("file output evidence", () => {
     expect(fileOutputEvidence(observe([call("file.write"), call("file.read")], "Save report.md", "old-turn")).satisfied).toBe(false);
     expect(fileOutputEvidence({ ...observe([call("file.write"), call("file.read")]), executionReceipts: [] }).satisfied).toBe(false);
   });
-  it.each(["Save a.md and b.md", "Save ../report.md"])("does not silently substitute an unresolved target: %s", (prompt) => {
+  it.each(["Save a.md or b.md", "Save ../report.md"])("does not silently substitute an unresolved target: %s", (prompt) => {
     expect(fileOutputEvidence(observe([call("file.write"), call("file.read")], prompt))).toEqual({ satisfied: false, reason: "unresolved-target" });
   });
   it("preserves foreground completion when a durable Task owns the file objective", () => {
@@ -213,4 +213,56 @@ it("keeps unrelated edits verified without blessing an incorrect copy", () => {
     call("file.write", "other.json"), call("file.read", "other.json")], "Copy source.md to report.md");
   expect([...verifiedFileMutationCallIds(input)]).toEqual(["call-3"]);
   expect(fileOutputEvidence(input).satisfied).toBe(false);
+});
+
+describe("multiple requested file outputs", () => {
+  const prompt = "Save a.md and b.json";
+  const first = () => [call("file.write", "a.md"), call("file.read", "a.md")];
+  it("requires and identifies independent writes and readbacks for every target", () => {
+    const input = observe([...first(), call("file.write", "b.json"), call("file.read", "b.json")], prompt);
+    expect(fileOutputEvidence(input)).toEqual({ satisfied: true, path: "a.md", writeCallId: "call-0", files: [
+      { path: "a.md", writeCallId: "call-0" }, { path: "b.json", writeCallId: "call-2" }
+    ] });
+    expect(deriveExecutionFinalOutcome({ ...input, requestRequirements: input.requirements, completionFloor: "mutation_with_verification" }).status).toBe("completed");
+  });
+  it.each([
+    [], [call("file.read", "b.json")], [call("file.write", "b.json")],
+    [call("file.write", "b.json"), call("file.read", "b.json", { truncated: true })],
+    [call("file.write", "b.json"), call("file.read", "b.json", { contentSha256: "b".repeat(64) })],
+    [{ ...call("file.write", "b.json"), decision: "deny" as const }, call("file.read", "b.json")],
+    [call("other.write", "b.json"), call("file.read", "b.json")],
+    [call("file.write", "b.json"), call("file.read", "b.json"), call("file.write", "b.json")],
+    [call("file.write", "b.json"), call("file.read", "b.json"), call("file.patch", "b.json", { operation: "delete", contentSha256: undefined })]
+  ])("does not complete when the second file is missing, denied, stale or unverified %#", (...second) => {
+    const input = observe([...first(), ...second as ToolExecutionRecord[]], prompt);
+    expect(fileOutputEvidence(input)).toMatchObject({ satisfied: false, path: "b.json" });
+    expect(deriveExecutionFinalOutcome({ ...input, requestRequirements: input.requirements, completionFloor: "mutation_with_verification" }).status).not.toMatch(/^completed/u);
+  });
+  it("does not borrow second-file evidence from a previous turn", () => {
+    const input = observe([...first(), call("file.write", "b.json"), call("file.read", "b.json")], prompt);
+    input.executionReceipts = input.executionReceipts.map((receipt, i) => i < 2 ? receipt : { ...receipt, visibleTurnId: "old-turn" });
+    expect(fileOutputEvidence(input)).toMatchObject({ satisfied: false, path: "b.json" });
+  });
+  it("verifies a multi-file patch only after both targets are read back", () => {
+    const patch = call("file.patch", "a.md", { paths: ["a.md", "b.json"], fileOutputs: [{ path: "a.md", contentSha256: digest }, { path: "b.json", contentSha256: digest }] });
+    expect(fileOutputEvidence(observe([patch, call("file.read", "a.md")], prompt))).toMatchObject({ satisfied: false, path: "b.json" });
+    expect(fileOutputEvidence(observe([patch, call("file.read", "a.md"), call("file.read", "b.json")], prompt)).satisfied).toBe(true);
+  });
+  it("keeps secondary exact-copy constraints when verifying mutation receipts", () => {
+    const input = observe([...first(), call("file.read", "source.json", { contentSha256: "b".repeat(64) }), call("file.write", "b.json"), call("file.read", "b.json")], "Save a.md. Copy source.json to b.json.");
+    expect(fileOutputEvidence(input)).toMatchObject({ satisfied: false, path: "b.json", reason: "copy-source-mismatch" });
+    expect([...verifiedFileMutationCallIds(input)]).toEqual(["call-0"]);
+  });
+  it("cannot complete only the retained prefix of an excessive request", () => {
+    const paths = Array.from({ length: 9 }, (_, i) => `file-${i}.txt`);
+    const input = observe(paths.slice(0, 8).flatMap(path => [call("file.write", path), call("file.read", path)]), "Save " + paths.join(" and "));
+    expect(fileOutputEvidence(input)).toEqual({ satisfied: false, reason: "unresolved-target" });
+  });
+});
+
+
+it("includes secondary output content in research validation only after all outputs are verified", () => {
+  const writes = ["a.md", "b.md"].flatMap(path => [{ ...call("file.write", path), input: { path, content: "report" } }, call("file.read", path)]);
+  expect(verifiedFileOutputContent(observe(writes, "Save a.md and b.md"))).toBe("report\n\nreport");
+  expect(verifiedFileOutputContent(observe(writes.slice(0, -1), "Save a.md and b.md"))).toBeUndefined();
 });

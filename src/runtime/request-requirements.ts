@@ -1,4 +1,5 @@
-import type { RequestRequirements } from "../contracts/intent.js";
+import { MAX_FILE_OUTPUTS, MAX_REQUEST_REQUIREMENTS_CHARS, requestedFileOutputs } from "../contracts/request-requirements.js";
+import type { FileOutputRequirement, RequestRequirements } from "../contracts/intent.js";
 import { posix, win32 } from "node:path";
 import { interpretRequest, splitRequestClauses, isCapabilityQuestion } from "./request-interpretation.js";
 import { affirmativeRequestSegments } from "./request-action-segments.js";
@@ -115,22 +116,59 @@ export function deriveRequestRequirements(userText: string, originTurnId?: strin
     const beforeContent = contentStart ? segment.slice(outputStart, outputStart + contentStart.index) : undefined;
     const outputSegment = beforeContent !== undefined && [...beforeContent.matchAll(FILE_NAME)].length > 0
       ? beforeContent : segment.slice(outputStart);
-    const namedPaths = [...outputSegment.matchAll(FILE_NAME)].map((match) => match[1] ?? match[0]);
+    const pathMatches = [...outputSegment.matchAll(FILE_NAME)];
+    const namedPaths = pathMatches.map((match) => match[1] ?? match[0]);
     // In an explicit copy, the final as/to operand is the destination; the
     // preceding source is not a second output. Multiple sources stay ambiguous.
     const paths = copy && namedPaths.length <= 2 ? namedPaths.slice(-1) : namedPaths;
     const markdown = /\bmarkdown\b|\bmd\s+file\b/iu.test(actionSegment) || paths.some((path) => /\.(?:md|markdown)$/iu.test(path));
     if (paths.length === 0 && !(markdown && /\bfile\b|ملف/iu.test(actionSegment)) && !/\btext\s+file\b|ملف\s+نصي/iu.test(actionSegment)) continue;
-    const path = paths[0] === undefined ? undefined : workspaceRelativeRequirementPath(paths[0], workspaceRoot);
-    const targets = paths.map(value => workspaceRelativeRequirementPath(value, workspaceRoot) ?? value);
-    if (new Set([...targets, ...(result.fileOutput?.path === undefined ? [] : [result.fileOutput.path])]).size > 1) result.issues.push("ambiguous-file-target");
-    if (paths[0] !== undefined && path === undefined) result.issues.push("unsafe-file-target");
+    // Conjunctive destinations are separate obligations. Alternatives and
+    // ambiguous copy sources must not silently become a choice or a merge.
+    const conjunctive = pathMatches.slice(1).every((match, index) => {
+      const previous = pathMatches[index]!;
+      const separator = outputSegment.slice(previous.index! + previous[0].length, match.index);
+      return /^\s*(?:,\s*(?:and\s+)?|and\s+|&\s*|و\s*)$/iu.test(separator);
+    });
+    if ((!copy && paths.length > 1 && !conjunctive) || (copy && namedPaths.length > 2)) {
+      result.issues.push("ambiguous-file-target");
+    }
     const sourcePath = copy && namedPaths.length === 2 ? namedPaths[0] : undefined;
     const normalizedSource = sourcePath === undefined ? undefined : workspaceRelativeRequirementPath(sourcePath, workspaceRoot);
     if (sourcePath !== undefined && normalizedSource === undefined) result.issues.push("unsafe-file-target");
-    result.fileOutput = { ...(copy ? { exactCopy: normalizedSource === undefined ? {} : { sourcePath: normalizedSource } } : {}), format: markdown ? "markdown" : "text", ...(path === undefined ? {} : { path }) };
+    const outputs = requestedFileOutputs(result);
+    for (const candidate of paths.length === 0 ? [undefined] : paths) {
+      const path = candidate === undefined ? undefined : workspaceRelativeRequirementPath(candidate, workspaceRoot);
+      if (candidate !== undefined && path === undefined) result.issues.push("unsafe-file-target");
+      const output: FileOutputRequirement = {
+        format: candidate === undefined ? (markdown ? "markdown" : "text") : /\.(?:md|markdown)$/iu.test(candidate) ? "markdown" : "text",
+        ...(path === undefined ? {} : { path }),
+        ...(copy ? { exactCopy: normalizedSource === undefined ? {} : { sourcePath: normalizedSource } } : {})
+      };
+      const existing = outputs.find(value => value.path === path);
+      if (existing !== undefined) {
+        if (JSON.stringify(existing.exactCopy) !== JSON.stringify(output.exactCopy) || existing.format !== output.format) result.issues.push("ambiguous-file-target");
+        continue;
+      }
+      if (outputs.length > 0 && (path === undefined || outputs.some(value => value.path === undefined))) {
+        result.issues.push("ambiguous-file-target");
+        continue;
+      }
+      if (outputs.length >= MAX_FILE_OUTPUTS) { result.issues.push("request-too-long"); continue; }
+      outputs.push(output);
+    }
+    if (outputs.length > 0) result.fileOutput = { ...outputs[0], ...(outputs.length > 1 ? { additionalFiles: outputs.slice(1) } : {}) };
   }
   result.skillReferences = [...new Set(result.skillReferences)];
+  // Several long copy source/destination pairs can exceed the persistence
+  // budget before reaching the count limit. Retain a bounded, unresolved prefix.
+  if (JSON.stringify(result).length > MAX_REQUEST_REQUIREMENTS_CHARS) {
+    result.issues.push("request-too-long");
+    while (result.fileOutput?.additionalFiles?.length && JSON.stringify(result).length > MAX_REQUEST_REQUIREMENTS_CHARS) {
+      result.fileOutput.additionalFiles.pop();
+      if (result.fileOutput.additionalFiles.length === 0) delete result.fileOutput.additionalFiles;
+    }
+  }
   result.issues = [...new Set(result.issues)];
   return result;
 }

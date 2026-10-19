@@ -1,3 +1,4 @@
+import { MAX_FILE_OUTPUTS, requestedFileOutputs } from "../contracts/request-requirements.js";
 import { createHash } from "node:crypto";
 import { readTaskResultEvidence } from "../tasks/task-result-read-evidence.js";
 import { posix } from "node:path";
@@ -6,8 +7,8 @@ import type { RequestRequirements } from "../contracts/intent.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 
 export type FileOutputEvidence =
-  | { satisfied: true; writeCallId?: string; path?: string }
-  | { satisfied: false; reason: "unresolved-target" | "missing-write" | "missing-readback" | "missing-research-result" | "report-content-mismatch" | "copy-source-mismatch" };
+  | { satisfied: true; writeCallId?: string; path?: string; files?: Array<{ path: string; writeCallId: string }> }
+  | { satisfied: false; path?: string; reason: "unresolved-target" | "missing-write" | "missing-readback" | "missing-research-result" | "report-content-mismatch" | "copy-source-mismatch" };
 
 /** Reconciles executor-owned call identities with workspace-tool results from
  * this turn. Provider prose, artifact handles and unrelated tools cannot qualify. */
@@ -16,6 +17,24 @@ export function fileOutputEvidence(input: {
   toolExecutions: readonly ToolExecutionRecord[];
   executionReceipts: readonly ExecutionEvidenceRecord[];
 }): FileOutputEvidence {
+  const requirements = requestedFileOutputs(input.requirements);
+  if (requirements.length === 0) return { satisfied: true };
+  if (requirements.length > MAX_FILE_OUTPUTS || input.requirements?.issues.length) return { satisfied: false, reason: "unresolved-target" };
+  if (requirements.length <= 1) return singleFileOutputEvidence(input);
+  if (requirements.some(file => file.path === undefined)) return { satisfied: false, reason: "unresolved-target" };
+  const files: Array<{ path: string; writeCallId: string }> = [];
+  for (const requirement of requirements) {
+    const evidence = singleFileOutputEvidence({ ...input, requirements: {
+      ...input.requirements!, fileOutput: requirement
+    } });
+    if (!evidence.satisfied) return { ...evidence, path: requirement.path };
+    if (evidence.path === undefined || evidence.writeCallId === undefined) return { satisfied: false, reason: "unresolved-target" };
+    files.push({ path: evidence.path, writeCallId: evidence.writeCallId });
+  }
+  return { satisfied: true, ...files[0], files };
+}
+
+function singleFileOutputEvidence(input: Parameters<typeof fileOutputEvidence>[0]): FileOutputEvidence {
   const requirement = input.requirements?.fileOutput;
   if (requirement === undefined) return { satisfied: true };
   if (input.requirements?.issues.some((issue) => issue === "ambiguous-file-target" || issue === "unsafe-file-target")) {
@@ -113,10 +132,11 @@ export function verifiedFileMutationCallIds(input: Parameters<typeof fileOutputE
       ? safePath((output as Record<string, unknown>).path) : undefined);
     if (paths.length === 0 || paths.some(path => path === undefined)) continue;
     if (paths.every(path => {
-      const bound = input.requirements?.fileOutput?.path === path ? input.requirements : undefined;
+      const outputRequirement = requestedFileOutputs(input.requirements).find(file => file.path === path);
+      const bound = outputRequirement === undefined ? undefined : input.requirements;
       const evidence = fileOutputEvidence({ ...input, requirements: {
         ...bound, skillReferences: [], originTurnId: receipt.visibleTurnId,
-        fileOutput: { ...bound?.fileOutput, path: path!, format: "text" }, issues: bound?.issues ?? []
+        fileOutput: { ...outputRequirement, path: path!, format: "text" }, issues: bound?.issues ?? []
       } });
       return evidence.satisfied && evidence.writeCallId === receipt.toolCallId;
     })) verified.add(receipt.toolCallId);
@@ -141,10 +161,16 @@ function validDigest(value: unknown): value is string {
 }
 
 /** Returns only bytes bound to a successful write and subsequent complete
- * readback. A file tool's prose or an unrelated earlier report is not evidence. */
+ * readback, concatenating all requested outputs for citation validation.
+ * A file tool's prose or an unrelated earlier report is not evidence. */
 export function verifiedFileOutputContent(input: Parameters<typeof fileOutputEvidence>[0]): string | undefined {
   const evidence = fileOutputEvidence(input);
   if (!evidence.satisfied || evidence.writeCallId === undefined) return undefined;
+  const contents = (evidence.files ?? [evidence]).map(file => verifiedFileContent(input, file));
+  return contents.some(content => content === undefined) ? undefined : contents.join("\n\n");
+}
+
+function verifiedFileContent(input: Parameters<typeof fileOutputEvidence>[0], evidence: { path?: string; writeCallId?: string }): string | undefined {
   const write = input.toolExecutions.find(execution => execution.toolCallId === evidence.writeCallId);
   if (write === undefined) return undefined;
   const metadata = write.result?.metadata;

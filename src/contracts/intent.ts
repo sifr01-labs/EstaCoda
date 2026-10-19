@@ -31,6 +31,8 @@ export type IntentRouteEvidence = {
 
 export type IntentLabel = string;
 
+export type FileOutputRequirement = { format: "markdown" | "text"; path?: string; exactCopy?: { sourcePath?: string } };
+
 /** Turn-local routing/completion hints, never execution authority. */
 export type RequestRequirements = {
   /** Runtime-owned locator for a prior admitted Task; never completion evidence. */
@@ -38,7 +40,7 @@ export type RequestRequirements = {
   originTurnId?: string;
   skillReferences: string[];
   delegation?: { count?: number };
-  fileOutput?: { format: "markdown" | "text"; path?: string; exactCopy?: { sourcePath?: string } };
+  fileOutput?: FileOutputRequirement & { additionalFiles?: FileOutputRequirement[] };
   research?: { domain: "general" | "literature" | "paper"; fresh: boolean };
   issues: Array<"request-too-long" | "ambiguous-file-target" | "unsafe-file-target">;
 };
