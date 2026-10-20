@@ -256,12 +256,15 @@ The summary status is one of:
 - `timeout`
 - `model_error`
 - `provider_error`
+- `provider_rejected`
 - `tool_error`
 - `runtime_error`
 - `adapter_error`
 - `config_error`
 
 Returned runtime outcomes affect the exit code and all summary/history artifacts: completed and recovered completions are `success`; blocked, partial, failed, cancelled, or budget-exhausted runs are `task_failed`; runtime deadlines are `timeout`; provider failures are `provider_error`. Completion-validation failures also prevent success. Recovered tool errors alone do not fail a completed run. Runtime success is not an external verifier score; Harbor still evaluates the task independently.
+
+An explicit Responses API `cyber_policy` error is classified as a provider safety-policy rejection. It is not retried or sent to a fallback route. A terminal rejection is reported as `provider_rejected` with failure code `provider_policy` and a nonzero exit code, unless the runtime deadline took precedence. Provider diagnostics remain visible even when requested files or research are incomplete; diagnostics use controlled descriptions rather than raw provider error bodies. Batch owners can record the rejection as a task failure and continue with the next task, while pausing on `provider_error` or missing verifier results to investigate provider, authentication, network, or infrastructure failures. Do not rewrite a rejected task's prompt or change routes to bypass the rejection.
 
 `estimatedCostUsd` is always present and may be `null` when pricing data is unavailable.
 

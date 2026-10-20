@@ -42,6 +42,7 @@ import { WorkspaceTrustStore } from "../security/workspace-trust-store.js";
 import { resolveTokens } from "../theme/token-resolver.js";
 import { createRuntime, type Runtime } from "../runtime/create-runtime.js";
 import { normalizeModelInput } from "../providers/model-normalization.js";
+import { summarizeProviderFailure } from "../providers/provider-diagnostics.js";
 import { getPackageVersion } from "./version-command.js";
 import type { CliCommandResult, CliOptions } from "./cli.js";
 
@@ -704,10 +705,12 @@ async function runWithTimeout<T>(
 function classifyBenchmarkResponse(response: Awaited<ReturnType<Runtime["handle"]>>): BenchmarkFailureSummary | null {
   const outcome = response.finalOutcome;
   const cause = outcome?.terminationCause;
+  const providerFailure = response.providerExecution?.ok === false ? response.providerExecution : undefined;
+  const policyRejected = (providerFailure?.response?.errorClass ?? providerFailure?.attempts.at(-1)?.errorClass) === "policy";
   const status: BenchmarkRunStatus | undefined = cause === "deadline_reached"
     ? "timeout"
     : cause === "provider_failed" || response.providerExecution?.ok === false
-      ? "provider_error"
+      ? policyRejected ? "provider_rejected" : "provider_error"
       : response.completionValidationFailure !== undefined || (outcome !== undefined && (
         cause !== "normal" || (outcome.status !== "completed" && outcome.status !== "completed_with_recovered_errors")
       ))
@@ -716,8 +719,10 @@ function classifyBenchmarkResponse(response: Awaited<ReturnType<Runtime["handle"
   if (status === undefined) return null;
   return {
     status,
-    code: cause ?? (status === "provider_error" ? "provider_failed" : "completion_validation_failed"),
-    message: response.completionValidationFailure ?? `Benchmark execution did not complete (${outcome?.status ?? status}; ${cause ?? "provider_failed"}).`
+    code: status === "provider_rejected" ? "provider_policy" : cause ?? (status === "provider_error" ? "provider_failed" : "completion_validation_failed"),
+    message: providerFailure !== undefined && status !== "timeout"
+      ? summarizeProviderFailure(providerFailure)
+      : response.completionValidationFailure ?? `Benchmark execution did not complete (${outcome?.status ?? status}; ${cause ?? "provider_failed"}).`
   };
 }
 

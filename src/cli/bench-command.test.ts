@@ -472,6 +472,57 @@ describe("benchCommand", () => {
     }
   });
 
+  it.each([
+    ["policy", false, "provider_failed", "provider_rejected"],
+    ["policy", false, "deadline_reached", "timeout"],
+    ["policy", true, "normal", "success"],
+    ["network", false, "provider_failed", "provider_error"],
+    ["auth", false, "provider_failed", "provider_error"],
+    ["unknown", false, "provider_failed", "provider_error"]
+  ] as const)("classifies %s (recovered=%s, cause=%s) as %s", async (errorClass, recovered, terminationCause, expectedStatus) => {
+    const root = await makeTempDir();
+    const workspace = join(root, "workspace");
+    const outDir = join(root, "artifacts");
+    await mkdir(workspace);
+    const runtime = fakeRuntime([]);
+    const originalHandle = runtime.handle;
+    runtime.handle = vi.fn(async input => ({
+      ...await originalHandle(input),
+      providerExecution: {
+        ok: recovered, fallbackUsed: false, toolCalls: [],
+        attempts: [{
+          provider: "openai", model: "gpt-test", state: "dispatched" as const,
+          dispatchedAt: "2026-10-20T00:00:00.000Z", ok: false, errorClass, content: "private-provider-error-body"
+        }]
+      },
+      ...(recovered ? {} : { completionValidationFailure: "File output is incomplete." }),
+      finalOutcome: {
+        status: recovered ? "completed_with_recovered_errors" : "failed",
+        terminationCause, completionFloor: "none", confirmedActions: [], uncertainActions: []
+      } satisfies ExecutionFinalOutcome
+    }));
+    const result = await benchCommand(
+      { argv: [], workspaceRoot: workspace },
+      ["run", "--workspace", workspace, "--instruction", "solve the task", "--out", outDir, "--model", "openai/gpt-test"],
+      dependenciesForRuntime(root, runtime)
+    );
+    expect(result.exitCode).toBe(recovered ? 0 : 1);
+    const summary = JSON.parse(await readFile(join(outDir, "summary.json"), "utf8"));
+    const history = JSON.parse((await readFile(join(outDir, "history.jsonl"), "utf8")).trim());
+    expect(summary.execution.status).toBe(expectedStatus);
+    expect(history.execution.status).toBe(expectedStatus);
+    if (expectedStatus === "provider_rejected") {
+      expect(summary.failure).toMatchObject({ code: "provider_policy", status: "provider_rejected" });
+      expect(summary.failure.message).toContain("request rejected by provider safety policy");
+      expect(await readFile(join(outDir, "stderr.txt"), "utf8")).toContain("request rejected by provider safety policy");
+    }
+    if (["provider_rejected", "provider_error"].includes(expectedStatus)) {
+      expect(summary.failure.message).not.toContain("File output is incomplete");
+      expect(summary.failure.message).not.toContain("private-provider-error-body");
+    }
+    if (recovered) expect(summary.failure).toBeNull();
+  });
+
   it("reports and redacts completion validation failures even without a final outcome", async () => {
     const root = await makeTempDir();
     const workspace = join(root, "workspace");

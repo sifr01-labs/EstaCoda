@@ -107,6 +107,36 @@ describe("ProviderExecutor fallback behavior", () => {
     registry = new ProviderRegistry();
   });
 
+  it.each([false, true])("does not retry or fall back after a safety rejection (stream=%s)", async (stream) => {
+    const response: ProviderResponse = {
+      ok: false, provider: "primary", model: "m1", errorClass: "policy", content: "Synthetic safety rejection."
+    };
+    const primary = createMockAdapter({
+      id: "primary", completeResponse: response,
+      streamEvents: [{ kind: "error", provider: "primary", model: "m1", response }]
+    });
+    const fallback = createMockAdapter({ id: "fallback" });
+    registry.register(primary);
+    registry.register(fallback);
+    const retrySleep = vi.fn(async () => true);
+    const executor = new ProviderExecutor({ registry, retrySleep });
+    const events: ProviderRuntimeEvent[] = [];
+    const result = await executor.complete({ messages: [] }, {}, {
+      primaryRoute: createRoute("primary", "m1"), fallbackChain: [createRoute("fallback", "m2")],
+      retryRateLimits: true, retryTransientFailures: true, stream,
+      onEvent: event => { events.push(event); }
+    });
+    expect(result).toMatchObject({ ok: false, fallbackUsed: false, toolCalls: [] });
+    expect(result.attempts).toHaveLength(1);
+    expect(result.attempts[0]).toMatchObject({ errorClass: "policy", content: "Synthetic safety rejection." });
+    expect(primary.calls).toHaveLength(1);
+    expect(fallback.calls).toHaveLength(0);
+    expect(retrySleep).not.toHaveBeenCalled();
+    expect(events).toContainEqual(expect.objectContaining({
+      kind: "provider-attempt-end", errorClass: "policy", willFallback: false
+    }));
+  });
+
   it("uses explicit fallback route order when primary fails", async () => {
     const primary = createMockAdapter({
       id: "primary",

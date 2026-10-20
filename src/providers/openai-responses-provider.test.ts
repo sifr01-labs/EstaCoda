@@ -1591,6 +1591,33 @@ describe("openai-responses-provider", () => {
       expect((doneResponse as { raw?: { output?: unknown[] } }).raw?.output).toEqual([]);
     });
 
+    it.each(["error", "response.failed"] as const)("recognizes cyber_policy in an HTTP 200 %s event", async (type) => {
+      const error = { type: "invalid_request", code: "cyber_policy", message: "Synthetic safety rejection." };
+      const provider = createOpenAIResponsesProvider({
+        id: "codex",
+        endpoint: { baseUrl: "https://api.openai.com/v1", apiKey: { kind: "none" } },
+        enableNetwork: true,
+        fetch: createSseFetch({
+          chunks: [sse(type === "error" ? { type, error } : { type, response: { status: "failed", error } })]
+        })
+      });
+      const events = [];
+      for await (const event of provider.stream!({ model: "codex-model", messages: [{ role: "user", content: "Hello" }] })) {
+        events.push(event);
+      }
+      expect(events.find(event => event.kind === "error")?.response).toMatchObject({
+        ok: false, errorClass: "policy", content: "Synthetic safety rejection."
+      });
+      expect(events.some(event => event.kind === "tool-call")).toBe(false);
+    });
+
+    it("does not infer a policy rejection from arbitrary error text", () => {
+      expect(parseResponsesPayload({
+        provider: "codex", model: "codex-model",
+        payload: { error: { type: "invalid_request", code: "other", message: "cyber_policy" } }
+      })).toMatchObject({ ok: false, errorClass: "unknown" });
+    });
+
     it("maps response failed events to structured provider errors", async () => {
       const provider = createOpenAIResponsesProvider({
         id: "codex",

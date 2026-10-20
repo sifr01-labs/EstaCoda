@@ -1442,7 +1442,7 @@ export class AgentLoop {
       const receiptLead = effectiveProviderExecution?.ok === false
         ? effectiveProviderExecution.spendDenialReason === undefined
           ? [
-              "The model provider became unavailable before final synthesis.",
+              "The model provider did not complete final synthesis.",
               `Provider note: ${summarizeProviderFailure(effectiveProviderExecution)}`
             ].join("\n\n")
           : providerSpendDenialMessage(effectiveProviderExecution.spendDenialReason)
@@ -1454,7 +1454,10 @@ export class AgentLoop {
       ), artifacts);
     }
     const responseBeforeEvidenceValidation = response.text;
-    if (delegatedAnswerAcknowledgement === undefined) {
+    // A terminal provider failure is the primary result; unmet output requirements
+    // must not replace its diagnostic or receipts for already confirmed actions.
+    const terminalProviderFailure = effectiveProviderExecution?.ok === false;
+    if (delegatedAnswerAcknowledgement === undefined && !terminalProviderFailure) {
       const correctedCapability = correctContradictedCapabilityClaim(response.text, toolExecutions, this.#providerToolSchemaCatalog);
       if (correctedCapability !== undefined) {
         response.text = correctedCapability;
@@ -1507,7 +1510,7 @@ export class AgentLoop {
     }
     if (providerLoop.researchRecoverySummary !== undefined) {
       // Keep the verified incomplete/file status while retaining useful evidence.
-      response.text = response.text === responseBeforeEvidenceValidation && !needsDeterministicReceipt
+      response.text = response.text === responseBeforeEvidenceValidation && !needsDeterministicReceipt && !terminalProviderFailure
         ? providerLoop.researchRecoverySummary
         : `${providerLoop.researchRecoverySummary}\n\n${response.text}`;
       if (response.providerExecution !== undefined) response.providerExecution = suppressProviderGeneratedText(response.providerExecution);

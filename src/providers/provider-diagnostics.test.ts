@@ -87,20 +87,23 @@ describe("provider diagnostics", () => {
       .toBe("No configured provider route was available for this request.");
   });
 
-  it("does not expose provider content, partial output, or credential identifiers", () => {
+  it.each([
+    ["auth", "authentication needs attention"],
+    ["policy", "request rejected by provider safety policy"]
+  ])("describes %s without exposing provider content or credential identifiers", (errorClass, description) => {
     const summary = summarizeProviderFailure(execution([
       attempt({
         provider: "primary",
         model: "model-a",
         ok: false,
-        errorClass: "auth",
+        errorClass,
         content: "response-secret-value",
         partialContent: "partial-secret-value",
         credentialId: "PRIVATE_API_KEY"
       })
     ]));
 
-    expect(summary).toContain("authentication needs attention");
+    expect(summary).toContain(description);
     expect(summary).not.toContain("response-secret-value");
     expect(summary).not.toContain("partial-secret-value");
     expect(summary).not.toContain("PRIVATE_API_KEY");

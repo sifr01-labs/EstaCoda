@@ -68,6 +68,8 @@ export function humanProviderIssue(errorClass: string | undefined): string {
   switch (errorClass) {
     case "auth":
       return "authentication needs attention";
+    case "policy":
+      return "request rejected by provider safety policy";
     case "rate-limit":
       return "rate limited";
     case "quota":

@@ -1148,7 +1148,9 @@ export function parseResponsesPayload(input: {
       content: payload.error.message ?? "Provider returned an error.",
       model: input.model,
       provider: input.provider,
-      errorClass: classifyProviderError(payload.error.type ?? payload.error.code),
+      errorClass: payload.error.code === "cyber_policy"
+        ? "policy"
+        : classifyProviderError(payload.error.type ?? payload.error.code),
       raw: input.payload
     };
   }

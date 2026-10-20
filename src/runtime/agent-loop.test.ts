@@ -372,6 +372,7 @@ async function createAgentLoop(input: {
   providerExecution?: ProviderExecutionResult;
   providerTerminationCause?: ExecutionTerminationCause;
   providerLoopToolExecutions?: ToolExecutionRecord[];
+  providerLoopResearchRecoverySummary?: string;
   delegatedAnswerOwnership?: PendingDelegatedAnswerOwnership;
   providerUsageCostUsd?: number;
   skillLearningManager?: SkillLearningManager;
@@ -513,6 +514,7 @@ async function createAgentLoop(input: {
       return {
         providerExecution: input.providerExecution,
         toolExecutions: providerLoopExecutions,
+        researchRecoverySummary: input.providerLoopResearchRecoverySummary,
         iterations: input.providerExecution === undefined ? 0 : 1,
         terminationCause: input.providerTerminationCause ?? (
           input.providerExecution?.ok === false ? "provider_failed" : "normal"
@@ -2382,12 +2384,43 @@ describe("AgentLoop provider availability gating", () => {
     });
   });
 
-  it("preserves a successful Postman mutation when the provider later fails", async () => {
+  it.each(["network", "policy"] as const)("preserves the %s failure when requested files and research are incomplete", async (errorClass) => {
+    const execution = failedProviderExecution();
+    execution.attempts[0]!.errorClass = errorClass;
+    execution.attempts[0]!.content = "private-provider-error-body";
+    const { loop } = await createAgentLoop({
+      canRunProvider: true, runSkillPlaybook: vi.fn(async () => []), providerExecution: execution,
+      providerLoopResearchRecoverySummary: "Retained partial research.",
+      routeIntent: structuredClone(intent),
+      providerToolDefinitions: [{
+        name: "web.search", description: "Search", inputSchema: { type: "object" },
+        riskClass: "read-only-network", toolsets: ["web"], progressLabel: "Searching", maxResultSizeChars: 1000
+      }]
+    });
+    const response = await loop.handle({
+      text: "Write report.txt", channel: "cli", trustedWorkspace: true,
+      stepCompletion: { requirements: {
+        skillReferences: [], issues: [], fileOutput: { format: "text", path: "report.txt" },
+        research: { domain: "general", fresh: true }
+      } }
+    });
+    expect(response.finalOutcome).toMatchObject({ status: "failed", terminationCause: "provider_failed" });
+    expect(response.text).toContain("Provider note:");
+    expect(response.text).toContain("Retained partial research.");
+    expect(response.text).toContain(errorClass === "policy" ? "request rejected by provider safety policy" : "network issue");
+    expect(response.text).not.toContain("File output is incomplete");
+    expect(response.text).not.toContain("Research requirements remain incomplete");
+    expect(response.text).not.toContain("private-provider-error-body");
+  });
+
+  it.each(["network", "policy"] as const)("preserves a successful Postman mutation when the provider later fails with %s", async (errorClass) => {
     const learning = { observeTurn: vi.fn(async () => undefined) } as unknown as SkillLearningManager;
+    const execution = failedProviderExecution();
+    execution.attempts[0]!.errorClass = errorClass;
     const { loop, sessionDb, sessionId, trajectoryRecorder } = await createAgentLoop({
       canRunProvider: true,
       runSkillPlaybook: vi.fn(async () => []),
-      providerExecution: failedProviderExecution(),
+      providerExecution: execution,
       providerLoopToolExecutions: [postmanMutation()],
       skillLearningManager: learning
     });

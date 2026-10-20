@@ -6,6 +6,7 @@ export const BENCHMARK_RUN_STATUSES = [
   "timeout",
   "model_error",
   "provider_error",
+  "provider_rejected",
   "tool_error",
   "runtime_error",
   "adapter_error",

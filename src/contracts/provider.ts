@@ -352,6 +352,7 @@ export type ProviderStreamEvent =
 
 export type ProviderErrorClass =
   | "auth"
+  | "policy"
   | "rate-limit"
   | "quota"
   | "network"
