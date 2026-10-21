@@ -1,4 +1,4 @@
-import { requestedFileOutputs } from "../contracts/request-requirements.js";
+import { matchesFileOutputPath, requestedFileOutputs } from "../contracts/request-requirements.js";
 import { createHash } from "node:crypto";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import type { ExecutionCheckpointReader } from "../contracts/execution-checkpoint.js";
@@ -13,6 +13,7 @@ export type ToolLoopProgressKind =
   | "target-mutation"
   | "verification"
   | "checkpoint-semantic-progress"
+  | "managed-process-wait"
   | "repeated-tool-call"
   | "no-tool-activity";
 
@@ -43,6 +44,8 @@ export class ToolLoopProgressGuard {
   readonly #seenCallFingerprints = new Set<string>();
   readonly #seenResultFingerprints = new Set<string>();
   readonly #seenDiscoveryFingerprints = new Set<string>();
+  readonly #seenProcessExits = new Set<string>();
+  readonly #seenWaitCalls = new Set<string>();
   readonly #successfulConnectorMutations = new Map<string, number>();
   readonly #verifiedConnectorMutations = new Map<string, number>();
   #active = false;
@@ -90,6 +93,7 @@ export class ToolLoopProgressGuard {
     if (eligible.length > 0) this.#active = true;
     const progressKinds = new Set<ToolLoopProgressKind>();
     let materialProgress = false;
+    let waitingForProcess = false;
     const currentCheckpointRevision = activeCheckpointProgressRevision(this.#checkpointReader);
     const checkpointControlsProgress = currentCheckpointRevision !== undefined;
     const checkpointAdvanced =
@@ -104,6 +108,30 @@ export class ToolLoopProgressGuard {
     for (const execution of eligible) {
       const status = executionEvidenceStatus(execution);
       if (status !== "success" || (execution.readReuseOf !== undefined || execution.result?.metadata?.mcpReadReuse === true)) continue;
+      // Host-owned, bounded waits are not stuck model polling. Preserve the
+      // counter rather than pretending time elapsed is deliverable progress.
+      // Deadlines, provider budgets and cancellation still bound the execution.
+      if (execution.tool.name === "process.logs") {
+        const metadata = execution.result?.metadata;
+        const process = metadata?.process as { id?: string; status?: string } | undefined;
+        if (typeof process?.id === "string" && process.id === execution.input?.id) {
+          if (process.status === "running" && !unchangedCompletionRepair &&
+            typeof metadata?.waitedMs === "number" && Number.isFinite(metadata.waitedMs) && metadata.waitedMs >= 1_000 &&
+            execution.toolCallId !== undefined && !this.#seenWaitCalls.has(execution.toolCallId)) {
+            this.#seenWaitCalls.add(execution.toolCallId);
+            waitingForProcess = true;
+            progressKinds.add("managed-process-wait");
+          }
+          if (["exited", "failed", "stopped"].includes(process.status ?? "") && !unchangedCompletionRepair &&
+            !this.#seenProcessExits.has(process.id)) {
+            this.#seenProcessExits.add(process.id);
+            materialProgress = true;
+            progressKinds.add("new-tool-result");
+          }
+        }
+        // Logs and clocks alone are not semantic progress, even without a checkpoint.
+        continue;
+      }
       if (execution.tool.name === "capability.request" && Array.isArray(execution.result?.metadata?.requests) &&
         !execution.result.metadata.requests.some((request: unknown) => request !== null && typeof request === "object" && "status" in request && request.status === "queued")) continue;
 
@@ -148,8 +176,8 @@ export class ToolLoopProgressGuard {
         for (const output of outputs) {
           if (output === null || typeof output !== "object") continue;
           const { path, contentSha256 } = output as Record<string, unknown>;
-          const requestedPaths = requestedFileOutputs(this.#checkpointReader?.current()?.requestRequirements).flatMap(file => file.path === undefined ? [] : [file.path, ...(file.alternativePaths ?? [])]);
-          if (typeof path !== "string" || (requestedPaths.length > 0 && !requestedPaths.includes(path)) ||
+          const requestedFiles = requestedFileOutputs(this.#checkpointReader?.current()?.requestRequirements).filter(file => file.path !== undefined);
+          if (typeof path !== "string" || (requestedFiles.length > 0 && !requestedFiles.some(file => matchesFileOutputPath(path, file))) ||
             typeof contentSha256 !== "string" || !/^[a-f0-9]{64}$/u.test(contentSha256)) continue;
           const key = fingerprint({ path, contentSha256 });
           if ((execution.tool.name === "file.write" || execution.tool.name === "file.patch") &&
@@ -244,7 +272,7 @@ export class ToolLoopProgressGuard {
       progressKinds.add(eligible.length === 0 ? "no-tool-activity" : "repeated-tool-call");
     }
 
-    this.#noProgressIterations = materialProgress ? 0 : this.#noProgressIterations + 1;
+    this.#noProgressIterations = materialProgress ? 0 : this.#noProgressIterations + (waitingForProcess ? 0 : 1);
     const shouldNudge = !this.#nudged && this.#noProgressIterations >= this.#nudgeIteration;
     if (shouldNudge) this.#nudged = true;
 
@@ -265,6 +293,11 @@ export class ToolLoopProgressGuard {
         (execution.readReuseOf !== undefined || execution.result?.metadata?.mcpReadReuse === true)
       ) continue;
       this.#active = true;
+      if (execution.tool.name === "process.logs") {
+        const process = execution.result?.metadata?.process as { id?: string; status?: string } | undefined;
+        if (typeof process?.id === "string" && ["exited", "failed", "stopped"].includes(process.status ?? "")) this.#seenProcessExits.add(process.id);
+        if (execution.toolCallId) this.#seenWaitCalls.add(execution.toolCallId);
+      }
       this.#observeRecoveryOrResult(execution);
       if (this.#research) researchEvidence(execution).forEach((source) => this.#seenResearchSources.add(source));
       const discovery = browserDiscoveryFingerprint(execution) ?? connectorDiscoveryFingerprint(execution);

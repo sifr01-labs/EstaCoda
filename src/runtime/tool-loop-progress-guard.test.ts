@@ -622,3 +622,36 @@ describe("terminal progress while a completion checkpoint is active", () => {
     }
   );
 });
+
+
+describe("bounded process waits", () => {
+  const poll = (i: number, overrides: Partial<ToolExecutionRecord> = {}) => execution({
+    tool: { ...execution().tool, name: "process.logs" }, input: { id: "proc-1" }, toolCallId: `poll-${i}`,
+    result: { ok: true, content: `fresh output ${i}`, metadata: { waitedMs: 30000, process: { id: "proc-1", status: "running" } } }, ...overrides
+  });
+  it("preserves the stuck counter during real waits but still stops immediate polling", async () => {
+    const guard = await discoveryGuard();
+    const immediate = (i: number) => poll(i, { result: { ok: true, content: `new log ${i}`, metadata: { waitedMs: 0, process: { id: "proc-1", status: "running" } } } });
+    expect(guard.observe([immediate(0)]).noProgressIterations).toBe(1);
+    for (let i = 1; i <= 8; i++) expect(guard.observe([poll(i)])).toMatchObject({ materialProgress: false, noProgressIterations: 1, shouldStop: false });
+    for (let i = 1; i <= 5; i++) expect(guard.observe([immediate(10+i)])).toMatchObject({ noProgressIterations: i+1, shouldStop: i === 5 });
+  });
+  it("does not let reused waits or completion-repair polling suspend supervision", async () => {
+    for (const mode of ["reuse", "same-call", "repair", "wrong-id"]) {
+      const guard = await discoveryGuard();
+      if (mode === "same-call") guard.observe([poll(0)]);
+      for (let i = 0; i < 6; i++) {
+        const record = mode === "reuse" ? poll(i, { readReuseOf: "old" }) : mode === "same-call" ? poll(0) : mode === "wrong-id" ? poll(i, { input: { id: "other" } }) : poll(i);
+        expect(guard.observe([record], mode === "repair").shouldStop).toBe(i === 5);
+      }
+    }
+  });
+  it("credits an exit once, including failure, without accepting repeated exit snapshots", async () => {
+    const guard = await discoveryGuard();
+    const exited = poll(0, { result: { ok: true, content: "exited", metadata: { process: { id: "proc-1", status: "exited", exitCode: 7 } } } });
+    expect(guard.observe([exited]).materialProgress).toBe(true);
+    for (let i = 0; i < 6; i++) expect(guard.observe([{ ...exited, toolCallId: `exit-${i}` }]).shouldStop).toBe(i === 5);
+    const seeded = await discoveryGuard([exited]);
+    expect(seeded.observe([exited]).materialProgress).toBe(false);
+  });
+});

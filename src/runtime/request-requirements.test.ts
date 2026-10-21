@@ -89,12 +89,12 @@ describe("explicit text destinations", () => {
     ['احفظ النتيجة في result.json', "result.json"],
   ])("binds the destination rather than input or payload paths: %s", (text, path) => {
     const requirements = deriveRequestRequirements(text);
-    expect(requirements.fileOutput).toEqual({ format: "text", path });
+    expect(requirements.fileOutput).toEqual({ format: "text", path, ...(!path.includes("/") ? { directoryUnspecified: true } : {}) });
     expect(requirements.issues).toEqual([]);
     expect(requiredRequestTools(requirements)).toEqual(expect.arrayContaining(["file.write", "file.read"]));
   });
   it.each(["json", "jsonl", "ndjson", "csv", "tsv", "yaml", "yml", "xml", "html", "css", "ts", "tsx", "js", "jsx", "py"])("recognizes explicit .%s text delivery", extension => {
-    expect(deriveRequestRequirements(`Save output.${extension}`).fileOutput).toEqual({ format: "text", path: `output.${extension}` });
+    expect(deriveRequestRequirements(`Save output.${extension}`).fileOutput).toEqual({ format: "text", path: `output.${extension}`, directoryUnspecified: true });
   });
   it.each(['Do not save de.json.', 'Explain how to save de.json.', 'The note says "save de.json".', '```\nsave de.json\n```', 'Are you able to save JSON files?', 'save.json', 'Save image.png'])('does not invent text delivery: %s', text => {
     expect(deriveRequestRequirements(text).fileOutput).toBeUndefined();
@@ -351,7 +351,7 @@ describe("explicit multiple output requirements", () => {
     "Save /app/report.md and /app/data.json"
   ])("retains each conjunctive destination: %s", prompt => {
     expect(deriveRequestRequirements(prompt, "turn", "/app")).toEqual({ originTurnId: "turn", skillReferences: [], issues: [],
-      fileOutput: { format: "markdown", path: "report.md", additionalFiles: [{ format: "text", path: "data.json" }] } });
+      fileOutput: { format: "markdown", path: "report.md", ...(!prompt.includes("/app/") ? { directoryUnspecified: true } : {}), additionalFiles: [{ format: "text", path: "data.json", ...(!prompt.includes("/app/") ? { directoryUnspecified: true } : {}) }] } });
   });
   it("deduplicates equivalent workspace paths", () => {
     expect(deriveRequestRequirements("Save a.md and /app/a.md and b.md", undefined, "/app")).toMatchObject({ issues: [],
@@ -390,7 +390,7 @@ describe("completion target parsing regressions", () => {
     ["Save your implementation in a file named \"/app/ars.R\"", "ars.R"],
     ["Save report.toml in `/app`", "report.toml"]
   ])("binds actual destination: %s", (prompt, path) => {
-    expect(deriveRequestRequirements(prompt, "turn", "/app")).toEqual({ originTurnId: "turn", skillReferences: [], issues: [], fileOutput: { format: path.endsWith(".md") ? "markdown" : "text", path } });
+    expect(deriveRequestRequirements(prompt, "turn", "/app")).toEqual({ originTurnId: "turn", skillReferences: [], issues: [], fileOutput: { format: path.endsWith(".md") ? "markdown" : "text", path, ...(["a.md", "data.comp"].includes(path) ? { directoryUnspecified: true } : {}) } });
   });
   it("retains an explicit choice as one obligation alongside required outputs", () => {
     const requirements = deriveRequestRequirements('Save ars.R. Generate at least one sample file named "/app/normal_samples.txt" or "/app/exponential_samples.txt" containing samples.', "turn", "/app");
@@ -405,4 +405,14 @@ it("keeps bullet output requirements independent of earlier payloads", () => {
   expect(deriveRequestRequirements(prompt, "turn", "/app")).toMatchObject({ issues: [], fileOutput: { path: "ars.R", additionalFiles: [{ path: "normal_samples.txt", alternativePaths: ["exponential_samples.txt"] }] } });
   expect(deriveRequestRequirements('Do not:\n- Save a.md\n- Write b.md').fileOutput).toBeUndefined();
   expect(deriveRequestRequirements('Example:\n- Save a.md\n- Write b.md').fileOutput).toBeUndefined();
+});
+
+
+describe("unspecified output directories", () => {
+  it.each(["Write extract.js", "اكتب result.json"])("retains a bare name without inventing a directory: %s", text => {
+    expect(deriveRequestRequirements(text, "turn", "/").fileOutput?.directoryUnspecified).toBe(true);
+  });
+  it.each(["Write ./extract.js", "Write /extract.js", "Write app/extract.js", "Write extract.js in /app", "Write extract.js in the current directory", "Write extract.js in the current working directory", "Write extract.js at the workspace root", "Create output directory /app. Write extract.js", "Copy source.js to extract.js", "Write extract.js. Write ./extract.js", "Write ./extract.js. Write extract.js"])("preserves exact destination constraints: %s", text => {
+    expect(deriveRequestRequirements(text, "turn", "/").fileOutput?.directoryUnspecified).toBeUndefined();
+  });
 });

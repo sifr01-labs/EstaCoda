@@ -17,7 +17,7 @@ describe("bounded research requirement continuity", () => {
     });
     expect(requirementFollowUp("Please prepare a markdown file", requirements)).toBe("save");
     expect(continueRequestRequirements(requirements, deriveRequestRequirements("Save result.md"), "save")).toEqual({
-      skillReferences: [], issues: [], fileOutput: { format: "markdown", path: "result.md" }
+      skillReferences: [], issues: [], fileOutput: { format: "markdown", path: "result.md", directoryUnspecified: true }
     });
     for (const text of ['He said "rerun this task"', "Do not rerun this task", "Write a new poem in poem.md", "Save a file about cats in cats.md", "Clear this file scratch.txt"]) {
       expect(requirementFollowUp(text, requirements)).toBeUndefined();

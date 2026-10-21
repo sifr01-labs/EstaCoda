@@ -11,6 +11,7 @@ import { ProcessManager } from "../process/process-manager.js";
 import { ExecutionEvidenceIndex } from "./execution-evidence-index.js";
 import { deriveRequestRequirements } from "./request-requirements.js";
 import { fileOutputEvidence, pendingFileReadbackPaths, verifiedFileOutputContent } from "./file-output-evidence.js";
+import { ToolLoopProgressGuard } from "./tool-loop-progress-guard.js";
 import { deriveExecutionFinalOutcome } from "./execution-outcome.js";
 import type { SessionDB } from "../contracts/session.js";
 import type { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
@@ -98,6 +99,76 @@ describe("command-generated file completion", () => {
       expect(fileOutputEvidence(f.evidence()).satisfied).toBe(false);
       await f.run("file.read", { path: "main.R" });
       expect(fileOutputEvidence(f.evidence())).toMatchObject({ satisfied: true, files: [{ path: "main.R" }, { path: "b.txt" }] });
+    } finally { await f.close(); }
+  });
+});
+
+
+describe("managed wait and output lifecycle", () => {
+  it("survives more than six bounded waits, then verifies the completed output", async () => {
+    const f = await fixture();
+    const guard = new ToolLoopProgressGuard({ noProgressNudgeIteration: 3, maxNoProgressIterations: 6,
+      checkpointReader: { current: () => ({ status: "active", progressRevision: 0 }) } as never });
+    try {
+      const start = await f.run("terminal.run", { command: "sleep 12; printf completed > output.c" });
+      guard.observe([start]);
+      const id = (start.result!.metadata!.process as { id: string }).id;
+      for (let i = 0; i < 7; i++) {
+        const poll = await f.run("process.logs", { id, waitMs: 1100 });
+        expect(poll.result?.metadata?.process).toMatchObject({ status: "running" });
+        expect(guard.observe([poll])).toMatchObject({ materialProgress: false, noProgressIterations: 1, shouldStop: false });
+        expect(fileOutputEvidence(f.evidence()).satisfied).toBe(false);
+      }
+      const completed = await f.run("process.logs", { id });
+      expect(guard.observe([completed])).toMatchObject({ materialProgress: true, noProgressIterations: 0 });
+      expect(fileOutputEvidence(f.evidence()).satisfied).toBe(false);
+      await f.run("file.read", { path: "output.c" });
+      expect(fileOutputEvidence(f.evidence()).satisfied).toBe(true);
+      expect(deriveExecutionFinalOutcome({ ...f.evidence(), requestRequirements: f.evidence().requirements, completionFloor: "mutation_with_verification" }).status).toBe("completed");
+    } finally { await f.close(); }
+  }, 20000);
+
+  it("binds an unspecified directory to the unique written and read-back file", async () => {
+    const f = await fixture("Write a program extract.js");
+    try {
+      await f.run("file.write", { path: "app/extract.js", content: "console.log('{}')" });
+      expect(pendingFileReadbackPaths(f.evidence())).toEqual(["app/extract.js"]);
+      await f.run("file.read", { path: "app/extract.js" });
+      expect(fileOutputEvidence(f.evidence())).toMatchObject({ satisfied: true, path: "app/extract.js" });
+      expect(deriveExecutionFinalOutcome({ ...f.evidence(), requestRequirements: f.evidence().requirements, completionFloor: "mutation_with_verification" }).status).toBe("completed");
+      await f.run("file.write", { path: "other/extract.js", content: "console.log('{}')" });
+      await f.run("file.read", { path: "other/extract.js" });
+      expect(fileOutputEvidence(f.evidence())).toMatchObject({ satisfied: false, reason: "unresolved-target" });
+    } finally { await f.close(); }
+  });
+
+  it.each(["Write ./extract.js", "Write specified/extract.js"])("does not relax an explicit directory: %s", async prompt => {
+    const f = await fixture(prompt);
+    try {
+      await f.run("file.write", { path: "app/extract.js", content: "console.log('{}')" });
+      await f.run("file.read", { path: "app/extract.js" });
+      expect(fileOutputEvidence(f.evidence())).toMatchObject({ satisfied: false, reason: "missing-write" });
+    } finally { await f.close(); }
+  });
+});
+
+
+describe("output directory ambiguity", () => {
+  it("repairs the observed path for an alternative bare filename", async () => {
+    const f = await fixture("Generate at least one file named a.txt or b.txt.");
+    try {
+      await f.run("file.write", { path: "app/b.txt", content: "sample" });
+      expect(pendingFileReadbackPaths(f.evidence())).toEqual(["app/b.txt"]);
+      await f.run("file.read", { path: "app/b.txt" });
+      expect(fileOutputEvidence(f.evidence())).toMatchObject({ satisfied: true, path: "app/b.txt" });
+    } finally { await f.close(); }
+  });
+  it("cannot count one file as two requested deliverables", async () => {
+    const f = await fixture("Write output.c and app/output.c.");
+    try {
+      await f.run("file.write", { path: "app/output.c", content: "code" });
+      await f.run("file.read", { path: "app/output.c" });
+      expect(fileOutputEvidence(f.evidence())).toMatchObject({ satisfied: false, reason: "unresolved-target" });
     } finally { await f.close(); }
   });
 });

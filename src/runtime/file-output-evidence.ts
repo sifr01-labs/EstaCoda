@@ -1,4 +1,4 @@
-import { MAX_FILE_OUTPUTS, requestedFileOutputs, validateRequestRequirements } from "../contracts/request-requirements.js";
+import { MAX_FILE_OUTPUTS, matchesFileOutputPath, requestedFileOutputs, validateRequestRequirements } from "../contracts/request-requirements.js";
 import { createHash } from "node:crypto";
 import { readTaskResultEvidence } from "../tasks/task-result-read-evidence.js";
 import { posix } from "node:path";
@@ -30,6 +30,7 @@ export function fileOutputEvidence(input: {
     } });
     if (!evidence.satisfied) return { ...evidence, path: evidence.path ?? requirement.path };
     if (evidence.path === undefined || evidence.writeCallId === undefined) return { satisfied: false, reason: "unresolved-target" };
+    if (files.some(file => file.path === evidence.path)) return { satisfied: false, reason: "unresolved-target" };
     files.push({ path: evidence.path, writeCallId: evidence.writeCallId });
   }
   return { satisfied: true, ...files[0], files };
@@ -62,7 +63,7 @@ function singleFileOutputEvidence(input: Parameters<typeof fileOutputEvidence>[0
     const evidence = concreteFileOutputEvidence({ ...input, requirements: { ...input.requirements!, fileOutput: { ...requirement, path, alternativePaths: undefined } } });
     if (evidence.satisfied) return evidence;
     failure ??= evidence;
-    if (evidence.reason === "missing-readback") pending = { ...evidence, path };
+    if (evidence.reason === "missing-readback") pending = { ...evidence, path: evidence.path ?? path };
   }
   return pending ?? failure ?? { satisfied: false, reason: "unresolved-target" };
 }
@@ -159,9 +160,10 @@ function concreteFileOutputEvidence(input: Parameters<typeof fileOutputEvidence>
       copyMismatch = true;
     }
   }
+  if (requirement.directoryUnspecified && writes.size > 1) return { satisfied: false, reason: "unresolved-target" };
   const verifiedFile = verified.entries().next().value as [string, string] | undefined;
   return verifiedFile === undefined
-    ? { satisfied: false, reason: copyMismatch ? "copy-source-mismatch" : contentMismatch ? "report-content-mismatch" : writes.size === 0 ? "missing-write" : "missing-readback" }
+    ? { satisfied: false, ...(requirement.directoryUnspecified && writes.size === 1 ? { path: writes.keys().next().value! } : {}), reason: copyMismatch ? "copy-source-mismatch" : contentMismatch ? "report-content-mismatch" : writes.size === 0 ? "missing-write" : "missing-readback" }
     : { satisfied: true, path: verifiedFile[0], writeCallId: verifiedFile[1] };
 }
 
@@ -179,11 +181,11 @@ export function verifiedFileMutationCallIds(input: Parameters<typeof fileOutputE
       ? safePath((output as Record<string, unknown>).path) : undefined);
     if (paths.length === 0 || paths.some(path => path === undefined)) continue;
     if (paths.every(path => {
-      const outputRequirement = requestedFileOutputs(input.requirements).find(file => file.path === path || file.alternativePaths?.includes(path!));
+      const outputRequirement = requestedFileOutputs(input.requirements).find(file => matchesFileOutputPath(path!, file));
       const bound = outputRequirement === undefined ? undefined : input.requirements;
       const evidence = fileOutputEvidence({ ...input, requirements: {
         ...bound, skillReferences: [], originTurnId: receipt.visibleTurnId,
-        fileOutput: { ...outputRequirement, alternativePaths: undefined, path: path!, format: "text" }, issues: bound?.issues ?? []
+        fileOutput: { ...outputRequirement, directoryUnspecified: undefined, alternativePaths: undefined, path: path!, format: "text" }, issues: bound?.issues ?? []
       } });
       return evidence.satisfied && evidence.writeCallId === receipt.toolCallId;
     })) verified.add(receipt.toolCallId);
@@ -200,7 +202,7 @@ function safePath(value: unknown): string | undefined {
 function matchesTarget(path: string, requirement: NonNullable<RequestRequirements["fileOutput"]>): boolean {
   return requirement.path === undefined
     ? (requirement.format === "markdown" ? /\.(?:md|markdown)$/iu : /\.txt$/iu).test(path)
-    : path === safePath(requirement.path);
+    : matchesFileOutputPath(path, requirement);
 }
 
 function validDigest(value: unknown): value is string {

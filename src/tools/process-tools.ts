@@ -176,12 +176,13 @@ export function createProcessTools(options: ProcessToolOptions): readonly Regist
     },
     {
       name: "process.logs",
-      description: "Read recent logs from a managed background process.",
+      description: "Wait for a managed process to finish and read its logs. Defaults to a bounded 30-second wait while running; repeat for long jobs instead of shell polling. Set waitMs to 0 for an immediate snapshot. Waiting never proves task completion.",
       inputSchema: {
         type: "object",
         properties: {
           id: { type: "string" },
-          tailChars: { type: "number" }
+          tailChars: { type: "number" },
+          waitMs: { type: "number", minimum: 0, maximum: 30_000 }
         },
         required: ["id"]
       },
@@ -190,10 +191,17 @@ export function createProcessTools(options: ProcessToolOptions): readonly Regist
       progressLabel: "reading process logs",
       maxResultSizeChars: 12_000,
       isAvailable: () => true,
-      run: async (input: { id?: string; tailChars?: number }) => {
+      run: async (input: { id?: string; tailChars?: number; waitMs?: number | null }, context) => {
         if (typeof input.id !== "string" || input.id.length === 0) {
           return errorResult("id must be a non-empty string");
         }
+        const waitMs = input.waitMs ?? 30_000;
+        if (!Number.isFinite(waitMs) || waitMs < 0 || waitMs > 30_000) {
+          return errorResult("waitMs must be between 0 and 30000 ms");
+        }
+        const started = performance.now();
+        const process = await options.processManager.wait(input.id, waitMs, context?.signal);
+        const waitedMs = Math.floor(performance.now() - started);
 
         const logs = options.processManager.logs(input.id, {
           tailChars: input.tailChars
@@ -202,7 +210,6 @@ export function createProcessTools(options: ProcessToolOptions): readonly Regist
         if (logs === undefined) {
           return errorResult(`No managed process found for ${input.id}.`);
         }
-        const process = options.processManager.get(input.id);
         return {
           ok: true,
           content: [`Process ${input.id}: ${process?.status ?? "unknown"}${process?.exitCode == null ? "" : `, exit code ${process.exitCode}`}${process?.signal ? `, signal ${process.signal}` : ""}.`, logs.length === 0
@@ -210,6 +217,7 @@ export function createProcessTools(options: ProcessToolOptions): readonly Regist
             : logs.map((log) => `[${log.stream}] ${log.text.trimEnd()}`).join("\n")].join("\n"),
           metadata: {
             id: input.id,
+            waitedMs,
             logs,
             commandFileObservation: await options.processManager.fileObservation(input.id),
             process

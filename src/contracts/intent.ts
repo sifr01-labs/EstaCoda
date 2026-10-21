@@ -31,7 +31,7 @@ export type IntentRouteEvidence = {
 
 export type IntentLabel = string;
 
-export type FileOutputRequirement = { format: "markdown" | "text"; path?: string; alternativePaths?: string[]; exactCopy?: { sourcePath?: string } };
+export type FileOutputRequirement = { format: "markdown" | "text"; path?: string; directoryUnspecified?: true; alternativePaths?: string[]; exactCopy?: { sourcePath?: string } };
 
 /** Turn-local routing/completion hints, never execution authority. */
 export type RequestRequirements = {

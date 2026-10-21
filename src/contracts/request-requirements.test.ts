@@ -41,3 +41,17 @@ describe("explicit alternative destinations", () => {
     expect(() => validateRequestRequirements({ skillReferences: [], issues: [], fileOutput: { format: "text", path: "a.txt", alternativePaths: ["b.txt"], additionalFiles: [{ format: "text", path: "b.txt" }] } })).toThrow();
   });
 });
+
+
+describe("unspecified directory state", () => {
+  it("round trips a bare filename constraint", () => {
+    const value = { skillReferences: [], issues: [], fileOutput: { format: "text", path: "extract.js", directoryUnspecified: true } };
+    expect(validateRequestRequirements(value)).toEqual(value);
+  });
+  it.each([
+    { path: "app/extract.js" }, { path: "../extract.js" }, { path: "/extract.js" }, { path: "extract.js", directoryUnspecified: false },
+    { path: "extract.js", alternativePaths: ["app/other.js"] }, { path: "extract.js", exactCopy: {} }, { path: undefined }
+  ])("rejects invalid broadening %#", file => {
+    expect(() => validateRequestRequirements({ skillReferences: [], issues: [], fileOutput: { format: "text", directoryUnspecified: true, ...file } })).toThrow();
+  });
+});

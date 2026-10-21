@@ -676,7 +676,7 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
       // Let the command timer collect its outcome before the outer tool deadline.
       executionTimeoutMs: commandTimeoutMs + 5_000,
       description: options.processManager
-        ? `Run a shell command in the active workspace. With timeoutMs omitted or null, wait up to ${Math.min(commandTimeoutMs, 30_000)} ms, then return a managed process ID if still running. Poll process.logs/process.list until it exits; process.stop cancels it. A running process is not task completion. An explicit timeoutMs is a hard execution limit.`
+        ? `Run a shell command in the active workspace. With timeoutMs omitted or null, wait up to ${Math.min(commandTimeoutMs, 30_000)} ms, then return a managed process ID if still running. Use process.logs (bounded wait) until it exits; process.stop cancels it. A running process is not task completion. An explicit timeoutMs is a hard execution limit.`
         : `Run a shell command in the active workspace for at most ${commandTimeoutMs} ms. For longer jobs, discover and request managed process tools, then start and poll the process within the task budget.`,
       inputSchema: {
         type: "object",
@@ -1813,7 +1813,7 @@ async function runManagedCommand(manager: ProcessManager, command: string, waitM
   const stderr = logs.filter(log => log.stream === "stderr").map(log => log.text).join("");
   const running = process.status === "running";
   const content = [
-    running ? `Command is still running as ${process.id}. Use process.logs/process.list to check completion; process.stop cancels it. Do not restart the command.`
+    running ? `Command is still running as ${process.id}. Use process.logs to wait for completion; process.stop cancels it. Do not restart the command.`
       : process.status === "exited" ? undefined : `Command failed: exit code ${process.exitCode ?? "none"}, status ${process.status}.`,
     ...logs.map(log => log.stream === "stderr" ? `stderr: ${log.text.trimEnd()}` : log.text.trimEnd())
   ].filter(Boolean).join("\n\n");

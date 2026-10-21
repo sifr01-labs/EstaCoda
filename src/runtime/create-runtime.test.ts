@@ -1915,6 +1915,7 @@ describe("createRuntime MCP trust gating", () => {
             "schemaAliasOrder": [
               "id",
               "tailChars",
+              "waitMs",
             ],
             "toolsets": [
               "shell-readonly",

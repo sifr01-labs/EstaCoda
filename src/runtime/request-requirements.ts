@@ -163,7 +163,8 @@ export function deriveRequestRequirements(userText: string, originTurnId?: strin
       const bareName = candidate !== undefined && !/[/\\:]/u.test(candidate);
       const directDirectory = /\b(?:in|under|into)\s+(?:the\s+)?(?:directory\s+)?(?:`([^`]+)`|((?:\/|\.\/)[\w./-]+))/iu.exec(outputSegment);
       const directory = directDirectory?.[1] ?? directDirectory?.[2];
-      const directories = directory !== undefined && (!QUOTED_FILE_NAME.test(directory) || /\bdirectory\b/iu.test(directDirectory![0])) ? [directory] : outputDirectories;
+      const currentDirectory = /\b(?:in|under|into|at)\s+(?:the\s+)?(?:current(?:\s+working)?\s+directory|workspace\s+root|project\s+root)\b/iu.test(outputSegment);
+      const directories = directory !== undefined && (!QUOTED_FILE_NAME.test(directory) || /\bdirectory\b/iu.test(directDirectory![0])) ? [directory] : currentDirectory ? ["."] : outputDirectories;
       if (bareName && directories.length > 1) result.issues.push("ambiguous-file-target");
       const destination = bareName && directories.length === 1
         ? `${directories[0]!.replace(/\/$/u, "")}/${candidate}` : candidate;
@@ -172,11 +173,13 @@ export function deriveRequestRequirements(userText: string, originTurnId?: strin
       const output: FileOutputRequirement = {
         format: candidate === undefined ? (markdown ? "markdown" : "text") : /\.(?:md|markdown)$/iu.test(candidate) ? "markdown" : "text",
         ...(path === undefined ? {} : { path }),
+        ...(bareName && directories.length === 0 && !copy ? { directoryUnspecified: true as const } : {}),
         ...(copy ? { exactCopy: normalizedSource === undefined ? {} : { sourcePath: normalizedSource } } : {})
       };
       if (alternatives) { group.push(output); continue; }
       const existing = outputs.find(value => value.path === path);
       if (existing !== undefined) {
+        if (!output.directoryUnspecified) delete existing.directoryUnspecified;
         if (JSON.stringify(existing.exactCopy) !== JSON.stringify(output.exactCopy) || existing.format !== output.format) result.issues.push("ambiguous-file-target");
         continue;
       }
@@ -190,7 +193,7 @@ export function deriveRequestRequirements(userText: string, originTurnId?: strin
     if (alternatives && group.length) {
       const paths = group.map(file => file.path);
       if (paths.some(path => path === undefined) || outputs.flatMap(file => [file.path, ...(file.alternativePaths ?? [])]).length + paths.length > MAX_FILE_OUTPUTS) result.issues.push("request-too-long");
-      else outputs.push({ ...group[0]!, alternativePaths: paths.slice(1) as string[] });
+      else outputs.push({ ...group[0]!, directoryUnspecified: group.every(file => file.directoryUnspecified) ? true : undefined, alternativePaths: paths.slice(1) as string[] });
     }
     const allPaths = outputs.flatMap(file => [file.path, ...(file.alternativePaths ?? [])]);
     if (new Set(allPaths).size !== allPaths.length) result.issues.push("ambiguous-file-target");

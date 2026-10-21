@@ -116,3 +116,42 @@ describe("managed terminal continuation", () => {
     } finally { await f.close(); }
   });
 });
+
+
+describe("process log waits", () => {
+  it("waits by default for a yielded command and retains its real exit status", async () => {
+    const f = await fixture();
+    try {
+      const result = await f.terminal.run({ command: "sleep 0.3; printf finished; exit 7" });
+      const id = (result.metadata?.process as { id: string }).id;
+      const logs = createProcessTools({ processManager: f.manager }).find(tool => tool.name === "process.logs")!;
+      expect(await logs.run({ id, waitMs: 0 })).toMatchObject({ metadata: { process: { status: "running" } } });
+      expect(await logs.run({ id })).toMatchObject({ metadata: { process: { status: "failed", exitCode: 7 } } });
+    } finally { await f.close(); }
+  });
+
+  it("cancels and settles the owned process during a default log wait", async () => {
+    const f = await fixture();
+    const abort = new AbortController();
+    try {
+      const result = await f.terminal.run({ command: "sleep 30; printf late > late.txt" });
+      const id = (result.metadata?.process as { id: string }).id;
+      const logs = createProcessTools({ processManager: f.manager }).find(tool => tool.name === "process.logs")!;
+      const pending = logs.run({ id }, { signal: abort.signal });
+      const rejected = expect(pending).rejects.toThrow("cancelled");
+      abort.abort(new Error("cancelled"));
+      await rejected;
+      expect(f.manager.get(id)).toMatchObject({ status: "stopped" });
+      await expect(access(join(f.root, "late.txt"))).rejects.toThrow();
+    } finally { await f.close(); }
+  });
+
+  it("rejects invalid waits and missing process IDs", async () => {
+    const f = await fixture();
+    try {
+      const logs = createProcessTools({ processManager: f.manager }).find(tool => tool.name === "process.logs")!;
+      for (const waitMs of [-1, 30001, NaN, Infinity, "1000"]) expect((await logs.run({ id: "missing", waitMs })).ok).toBe(false);
+      expect((await logs.run({ id: "missing" })).ok).toBe(false);
+    } finally { await f.close(); }
+  });
+});

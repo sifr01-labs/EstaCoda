@@ -190,7 +190,7 @@ describe.sequential("research workflow acceptance harness", () => {
     expect(steps.some(step=>step.executor.role==="synthesis")).toBe(true);
     expect(steps.some(step=>step.executor.role==="report-delivery")).toBe(true);
     if (multiple === "choice") {
-      expect(steps.find(step=>step.executor.role==="report-delivery")?.executor.requestContract?.requirements.fileOutput).toEqual({ format: "markdown", path: "report.md" });
+      expect(steps.find(step=>step.executor.role==="report-delivery")?.executor.requestContract?.requirements.fileOutput).toEqual({ format: "markdown", path: "report.md", directoryUnspecified: true });
       expect(steps.find(step=>step.executor.role==="synthesis")?.executor.requestContract?.requirements.fileOutput?.alternativePaths).toEqual(["second.md"]);
     }
     if (multiple === true) expect(steps.find(step=>step.executor.role==="report-delivery")?.objective).toContain('"second.md"');
@@ -534,6 +534,17 @@ describe.sequential("research workflow acceptance harness", () => {
     await expect(readFile(join(h.workspaceRoot, "report.md"), "utf8")).rejects.toMatchObject({ code: "ENOENT" });
     expect(h.store.listTasks()).toEqual([]);
     expect(h.requests).toHaveLength(11);
+    scriptConsumed(h);
+  });
+
+  it("completes a bare filename written in a workspace subdirectory through the real runtime", async () => {
+    const h = await harness();
+    h.enqueue(nativeCall("file_write", { path: "app/extract.js", content: "console.log('{}')" }),
+      nativeCall("file_read", { path: "app/extract.js" }), answer("Saved app/extract.js."));
+    const result = await h.turn("Write a program extract.js");
+    expect(result.finalOutcome?.status).toBe("completed");
+    expect(result.toolExecutions.map(call => call.tool.name)).toEqual(["file.write", "file.read"]);
+    expect(await readFile(join(h.workspaceRoot, "app/extract.js"), "utf8")).toBe("console.log('{}')");
     scriptConsumed(h);
   });
 

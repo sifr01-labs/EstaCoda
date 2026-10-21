@@ -13,6 +13,15 @@ export function requestedFileOutputs(requirements: RequestRequirements | undefin
   return [primary, ...(additionalFiles ?? [])];
 }
 
+/** Completion identity only. Tool dispatch still enforces workspace containment.
+ * Only a user-named bare filename may be fulfilled in an unspecified directory. */
+export function matchesFileOutputPath(path: string, file: FileOutputRequirement): boolean {
+  if (!path || /^(?:[/\\]|[a-z]:)/iu.test(path) || path.split(/[/\\]/u).includes("..")) return false;
+  const normalized = posix.normalize(path.replaceAll("\\", "/"));
+  return [file.path, ...(file.alternativePaths ?? [])].some(target => target !== undefined &&
+    (file.directoryUnspecified === true ? posix.basename(normalized) === target : normalized === posix.normalize(target.replaceAll("\\", "/"))));
+}
+
 export function validateDelegatedRequestContract(value: unknown): DelegatedRequestContract {
   const record = object(value, ["version", "objective", "requirements", "skillName"]);
   if (record.version !== 1 || typeof record.objective !== "string" || record.objective.length === 0 || record.objective.length > 2000 ||
@@ -45,7 +54,7 @@ export function validateRequestRequirements(value: unknown): RequestRequirements
     if (!["general", "literature", "paper"].includes(String(research.domain)) || typeof research.fresh !== "boolean") throw new Error("Invalid research requirement.");
   }
   if (record.fileOutput !== undefined) {
-    const primary = object(record.fileOutput, ["format", "path", "alternativePaths", "exactCopy", "additionalFiles"]);
+    const primary = object(record.fileOutput, ["format", "path", "directoryUnspecified", "alternativePaths", "exactCopy", "additionalFiles"]);
     const { additionalFiles, ...file } = primary;
     validateFile(file);
     if (additionalFiles !== undefined) {
@@ -69,7 +78,10 @@ function object(value: unknown, keys: string[]): Record<string, unknown> {
 }
 
 function validateFile(value: unknown): Record<string, unknown> {
-  const file = object(value, ["format", "path", "alternativePaths", "exactCopy"]);
+  const file = object(value, ["format", "path", "directoryUnspecified", "alternativePaths", "exactCopy"]);
+  if (file.directoryUnspecified !== undefined && (file.directoryUnspecified !== true || file.exactCopy !== undefined ||
+    [file.path, ...(Array.isArray(file.alternativePaths) ? file.alternativePaths : [])].some(path =>
+      typeof path !== "string" || /[/\\:]|^\.{1,2}$/u.test(path)))) throw new Error("Invalid unspecified file directory.");
   if (file.alternativePaths !== undefined) {
     if (file.path === undefined || !Array.isArray(file.alternativePaths) || file.alternativePaths.length === 0 || file.alternativePaths.length >= MAX_FILE_OUTPUTS || file.exactCopy !== undefined) throw new Error("Invalid alternative file targets.");
     for (const path of file.alternativePaths) {
