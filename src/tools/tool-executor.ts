@@ -619,6 +619,7 @@ export class ToolExecutor {
         visionDispatchPhase: request.visionDispatchPhase,
         securityResolution,
         signal: timeout.signal,
+        continuationSignal: request.signal,
         environmentType,
         onEvent: request.onEvent,
         onApprovalRequest: tool.name === "execute_code" ? request.onApprovalRequest : undefined,

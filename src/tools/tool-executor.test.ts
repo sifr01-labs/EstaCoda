@@ -432,6 +432,21 @@ describe("ToolExecutor exception containment", () => {
     else expect(second?.result?.metadata?.reason).toBe("uncertain-mutation-replay");
   });
 
+  it("passes parent cancellation separately from the per-call deadline for managed continuation", async () => {
+    const controller = new AbortController();
+    let continuationSignal: AbortSignal | undefined;
+    const tool: RegisteredTool = { ...createEchoTool("test.command"), run: async (_input, context) => {
+      continuationSignal = context?.continuationSignal;
+      expect(continuationSignal).toBe(controller.signal);
+      expect(context?.signal).not.toBe(controller.signal);
+      return { ok: true, content: "Dispatched" };
+    } };
+    const { executor } = await setupExecutor({ tools: [tool] });
+    expect((await executor.executeTool({ tool: tool.name, input: {}, trustedWorkspace: true, sessionId: "test-session", signal: controller.signal }))?.result?.ok).toBe(true);
+    controller.abort();
+    expect(continuationSignal?.aborted).toBe(true);
+  });
+
   it("rechecks policy before retrying a known failed command", async () => {
     const terminal = createWorkspaceTools({ workspaceRoot: process.cwd() }).find(tool => tool.name === "terminal.run")!;
     const run = vi.fn(async (): Promise<ToolResult> => ({ ok: false, content: "Test failed",

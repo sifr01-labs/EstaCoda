@@ -68,11 +68,49 @@ export class ProcessManager {
     options.executionLease?.own({ release: () => this.dispose() });
   }
 
-  async start(command: string, signal?: AbortSignal): Promise<ManagedProcessRecord> {
+  async start(command: string, signal?: AbortSignal, options: { input?: boolean; continuationSignal?: AbortSignal } = {}): Promise<ManagedProcessRecord> {
     signal?.throwIfAborted();
+    options.continuationSignal?.throwIfAborted();
     const record = await this.#createRecord(command, "running");
     if (signal?.aborted) { this.#processes.delete(record.id); signal.throwIfAborted(); }
-    this.#spawn(record);
+    if (options.continuationSignal?.aborted) { this.#processes.delete(record.id); options.continuationSignal.throwIfAborted(); }
+    this.#spawn(record, undefined, options.input ?? true);
+    if (record.child && record.status === "running" && options.continuationSignal) {
+      const continuationSignal = options.continuationSignal;
+      const onAbort = () => {
+        void this.stop(record.id).catch(() => this.#appendLog(record, "system", "Process cancellation could not be confirmed; execution scope retains cleanup ownership."));
+      };
+      record.child.once("close", () => continuationSignal.removeEventListener("abort", onAbort));
+      continuationSignal.addEventListener("abort", onAbort, { once: true });
+      if (continuationSignal.aborted) onAbort();
+    }
+    return toRecord(record);
+  }
+
+  /** Yield without killing the process. Cancellation while waiting still settles it. */
+  async wait(id: string, waitMs: number, signal?: AbortSignal): Promise<ManagedProcessRecord | undefined> {
+    if (!Number.isFinite(waitMs) || waitMs < 0 || waitMs > 30_000) throw new Error("Process wait must be between 0 and 30000 ms.");
+    const record = this.#processes.get(id);
+    if (record === undefined) return undefined;
+    if (signal?.aborted) { await this.stop(id); signal.throwIfAborted(); }
+    if (record.status !== "running" || record.child === undefined) return toRecord(record);
+    const child = record.child;
+    await new Promise<void>((resolve, reject) => {
+      const cleanup = () => {
+        clearTimeout(timer);
+        child.removeListener("close", onClose);
+        signal?.removeEventListener("abort", onAbort);
+      };
+      const onClose = () => { cleanup(); resolve(); };
+      const onAbort = () => {
+        cleanup();
+        void this.stop(id).then(() => reject(signal?.reason ?? new Error("Process wait cancelled.")), reject);
+      };
+      const timer = setTimeout(onClose, waitMs);
+      child.once("close", onClose);
+      signal?.addEventListener("abort", onAbort, { once: true });
+      if (signal?.aborted) onAbort();
+    });
     return toRecord(record);
   }
 
@@ -157,7 +195,7 @@ export class ProcessManager {
     return record;
   }
 
-  #spawn(record: InternalManagedProcess, protectedEnvironment?: Record<string, string>): void {
+  #spawn(record: InternalManagedProcess, protectedEnvironment?: Record<string, string>, input = true): void {
     try {
       const shell = this.#processScope.shell?.() ?? resolveShell();
       const child = this.#processScope.spawn(shell.command, [...shell.args, record.command], {
@@ -166,7 +204,7 @@ export class ProcessManager {
           PWD: record.cwd,
           ...protectedEnvironment
         },
-        input: true
+        input
       });
       record.child = child;
       this.#appendLog(record, "system", `started pid ${child.pid ?? "unknown"}`);
@@ -247,13 +285,16 @@ export class ProcessManager {
       return undefined;
     }
 
-    if (process.status !== "running" || process.child === undefined) {
+    if ((process.status !== "running" && process.status !== "stopped") || process.child === undefined) {
       return toRecord(process);
     }
 
-    process.status = "stopped";
-    process.updatedAt = this.#now().toISOString();
-    this.#appendLog(process, "system", `stopping with ${signal}`);
+    if (process.status === "running") {
+      process.status = "stopped";
+      process.updatedAt = this.#now().toISOString();
+      this.#appendLog(process, "system", `stopping with ${signal}`);
+    }
+    // Concurrent cancellation and explicit stop must await the same OS cleanup.
     await this.#processScope.terminate(process.child, signal);
 
     return toRecord(process);

@@ -156,6 +156,14 @@ Output is bounded:
 
 Supported output modes are content, files, and count. Content mode includes line numbers by default and is the only mode where before/after context applies. If output is truncated, narrow `pattern`, `glob`, or `path`, increase `offset`, or use `output_mode: "files"` to inspect the match set before requesting content.
 
+### Terminal commands and managed continuation
+
+In a session with a process manager, `terminal.run` starts a command once and waits up to 30 seconds by default. If it is still running, the tool returns a managed process ID and `running: true` instead of terminating it. This is a successful dispatch, not evidence that the command or task completed. `process.logs` returns bounded logs and the current process status/exit code; `process.list` lists managed work, and `process.stop` cancels it. These available controls accompany a selected terminal in the provider catalog, with normal per-call authorization.
+
+An explicit `timeoutMs` remains a hard execution deadline (default maximum 30 seconds). Omission or `null` selects managed continuation. Callers without a process manager retain bounded foreground execution. Waiting cancellation terminates the process; yielded processes remain owned by the session execution scope and are cleaned up on scope release. Existing task deadlines, trust, approvals, hardline checks, environment isolation and authority revocation still apply.
+
+For `process.start`, omit `protectedEnvironment` or use `null` for ordinary commands. Entirely empty known credential envelopes are treated as absence for provider compatibility. Partially populated or malformed credential requests fail closed, and denied protected delivery never falls back to ordinary execution.
+
 ### `notebook.edit`
 
 `notebook.edit` edits Jupyter `.ipynb` files scoped to the active workspace. Prefer workspace-relative notebook paths in tool calls and examples. The tool uses the same containment model as `file.read`: paths that resolve outside the workspace, including absolute paths outside the workspace and `..` traversal, are rejected. Non-`.ipynb` paths are rejected.

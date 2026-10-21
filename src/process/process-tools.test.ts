@@ -44,7 +44,7 @@ describe("process.start hardline floor", () => {
     const result = await start?.run({ command: "rm -rf ./build" });
 
     expect(result?.ok).toBe(true);
-    expect(processManager.start).toHaveBeenCalledWith("rm -rf ./build", undefined);
+    expect(processManager.start).toHaveBeenCalledWith("rm -rf ./build", undefined, { continuationSignal: undefined });
   });
 
   it("rejects hardBlock commands inside the process handler", async () => {
@@ -71,6 +71,50 @@ describe("process.start hardline floor", () => {
 });
 
 describe("protected process tool requests", () => {
+  it.each([undefined, null, {}, { ref: "", protectedInput: { kind: "", purpose: "", retention: "" } }])(
+    "starts ordinary commands with an absent credential envelope: %j", async (protectedEnvironment) => {
+      const processManager = createFakeProcessManager();
+      const start = createProcessTools({ processManager }).find(tool => tool.name === "process.start")!;
+      const onSecureInputRequest = vi.fn();
+      const result = await start.run({ command: "sleep 1", protectedEnvironment }, { onSecureInputRequest });
+      expect(result.ok).toBe(true);
+      expect(processManager.start).toHaveBeenCalledExactlyOnceWith("sleep 1", undefined, { continuationSignal: undefined });
+      expect(processManager.prepareProtectedEnvironment).not.toHaveBeenCalled();
+      expect(onSecureInputRequest).not.toHaveBeenCalled();
+    }
+  );
+
+  it.each([
+    { ref: "SERVICE_TOKEN", protectedInput: { kind: "", purpose: "", retention: "" } },
+    { ref: "", protectedInput: { kind: "access-token", purpose: "Authenticate" } },
+    { ref: "", protectedInput: { kind: "", purpose: "", value: "must-not-be-ignored" } },
+    { protectedInput: null }, { value: "must-not-be-ignored" }, "", []
+  ])("rejects partial or malformed credential requests without dispatch: %j", async (protectedEnvironment) => {
+    const processManager = createFakeProcessManager();
+    const start = createProcessTools({ processManager }).find(tool => tool.name === "process.start")!;
+    expect((await start.run({ command: "sleep 1", protectedEnvironment })).ok).toBe(false);
+    expect(processManager.start).not.toHaveBeenCalled();
+    expect(processManager.prepareProtectedEnvironment).not.toHaveBeenCalled();
+  });
+
+  it("does not start a cancelled ordinary command", async () => {
+    const processManager = createFakeProcessManager();
+    const start = createProcessTools({ processManager }).find(tool => tool.name === "process.start")!;
+    expect((await start.run({ command: "sleep 1", protectedEnvironment: null }, { signal: AbortSignal.abort() })).ok).toBe(false);
+    expect(processManager.start).not.toHaveBeenCalled();
+  });
+
+  it("releases a denied protected request without falling back to ordinary execution", async () => {
+    const processManager = createFakeProcessManager();
+    const start = createProcessTools({ processManager }).find(tool => tool.name === "process.start")!;
+    const result = await start.run({ command: "service start", protectedEnvironment: {
+      ref: "SERVICE_TOKEN", protectedInput: { kind: "access-token", purpose: "Authenticate" }
+    } }, { onSecureInputRequest: async () => ({ status: "denied", reason: "Denied", persisted: false }) } as never);
+    expect(result.ok).toBe(false);
+    expect(processManager.releasePrepared).toHaveBeenCalledWith("proc-protected");
+    expect(processManager.start).not.toHaveBeenCalled();
+  });
+
   it("reserves a process and requests one-process environment delivery without putting the value in the command", async () => {
     const processManager = createFakeProcessManager();
     const start = createProcessTools({ processManager }).find((tool) => tool.name === "process.start");

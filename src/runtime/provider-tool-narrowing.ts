@@ -205,9 +205,21 @@ export function selectProviderToolsForTurn(input: {
     initialTools.push(entry.schema);
   }
 
+  // A selected shell must include the controls needed to observe/stop a yielded
+  // command. Catalog membership still enforces capability availability; every
+  // invocation retains its own authorization and hardline checks.
+  const processCompanions = new Set<string>();
+  if (initialTools.some(schema => schema.function.name === "terminal_run" || schema.function.name === "process_start")) {
+    for (const entry of input.catalog.entries) {
+      if (!["process.start", "process.list", "process.logs", "process.stop"].includes(entry.tool.name)) continue;
+      processCompanions.add(entry.schema.function.name);
+      if (!initialTools.includes(entry.schema)) initialTools.push(entry.schema);
+    }
+    if (processCompanions.size > 0 && initialTools.some(schema => schema.function.name === "terminal_run")) processCompanions.add("terminal_run");
+  }
   const budget = budgetProviderTools({
     tools: initialTools,
-    priorityNames: new Set(input.catalog.entries.filter((entry) => entry.tool.name === "config.provider.execution_status" || exactRequestTools.has(entry.tool.name) || recoveryNames.has(entry.tool.name)).map((entry) => entry.schema.function.name))
+    priorityNames: new Set([...processCompanions, ...input.catalog.entries.filter((entry) => entry.tool.name === "config.provider.execution_status" || exactRequestTools.has(entry.tool.name) || recoveryNames.has(entry.tool.name)).map((entry) => entry.schema.function.name)])
   });
   return {
     initialTools: budget.tools,

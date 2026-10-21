@@ -23,12 +23,12 @@ export function createProcessTools(options: ProcessToolOptions): readonly Regist
   return [
     {
       name: "process.start",
-      description: "Start a long-running workspace process in the background.",
+      description: "Start a long-running workspace process in the background. Omit protectedEnvironment or use null for ordinary commands; supply it only when requesting protected credential delivery. Use process.logs and process.list to observe completion, and process.stop to cancel.",
       inputSchema: {
         type: "object",
         properties: {
           command: { type: "string" },
-          protectedEnvironment: protectedInputEnvelopeSchema()
+          protectedEnvironment: { anyOf: [protectedInputEnvelopeSchema(), { type: "null" }] }
         },
         required: ["command"]
       },
@@ -37,7 +37,7 @@ export function createProcessTools(options: ProcessToolOptions): readonly Regist
       progressLabel: "starting process",
       maxResultSizeChars: 3000,
       isAvailable: () => true,
-      run: async (input: { command?: string; protectedEnvironment?: ProtectedInputEnvelope }, context) => {
+      run: async (input: { command?: string; protectedEnvironment?: ProtectedInputEnvelope | null }, context) => {
         if (context?.signal?.aborted) return errorResult("Process start cancelled before dispatch.");
         if (typeof input.command !== "string" || input.command.trim().length === 0) {
           return errorResult("command must be a non-empty string");
@@ -48,7 +48,10 @@ export function createProcessTools(options: ProcessToolOptions): readonly Regist
           return errorResult(blockedReason);
         }
 
-        if (input.protectedEnvironment !== undefined) {
+        if (!isAbsentProtectedEnvironment(input.protectedEnvironment)) {
+          if (input.protectedEnvironment === null || typeof input.protectedEnvironment !== "object" || Array.isArray(input.protectedEnvironment)) {
+            return errorResult("protectedEnvironment must be a protected input object or null");
+          }
           const descriptor = parseProtectedInputEnvelope(input.protectedEnvironment, "use-once");
           const variableName = input.protectedEnvironment.ref;
           if (descriptor === undefined || typeof variableName !== "string" || !isEnvironmentVariableName(variableName)) {
@@ -82,7 +85,7 @@ export function createProcessTools(options: ProcessToolOptions): readonly Regist
           };
         }
 
-        const process = await options.processManager.start(input.command, context?.signal);
+        const process = await options.processManager.start(input.command, context?.signal, { continuationSignal: context?.continuationSignal });
 
         return {
           ok: process.status === "running",
@@ -198,15 +201,16 @@ export function createProcessTools(options: ProcessToolOptions): readonly Regist
         if (logs === undefined) {
           return errorResult(`No managed process found for ${input.id}.`);
         }
-
+        const process = options.processManager.get(input.id);
         return {
           ok: true,
-          content: logs.length === 0
+          content: [`Process ${input.id}: ${process?.status ?? "unknown"}${process?.exitCode == null ? "" : `, exit code ${process.exitCode}`}${process?.signal ? `, signal ${process.signal}` : ""}.`, logs.length === 0
             ? "(no logs)"
-            : logs.map((log) => `[${log.stream}] ${log.text.trimEnd()}`).join("\n"),
+            : logs.map((log) => `[${log.stream}] ${log.text.trimEnd()}`).join("\n")].join("\n"),
           metadata: {
             id: input.id,
-            logs
+            logs,
+            process
           }
         };
       }
@@ -262,6 +266,18 @@ function protectedInputDescriptorSchema(): Record<string, unknown> {
   };
 }
 
+// Some providers fill optional objects with empty fields. Only an entirely
+// empty known envelope means absence; partial requests and unknown fields fail closed.
+function isAbsentProtectedEnvironment(value: unknown): boolean {
+  if (value === undefined || value === null) return true;
+  if (typeof value !== "object" || Array.isArray(value)) return false;
+  return Object.entries(value).every(([key, entry]) => {
+    if (key === "ref") return entry === "";
+    if (key !== "protectedInput" || entry === null || typeof entry !== "object" || Array.isArray(entry)) return false;
+    return Object.entries(entry).every(([name, field]) => ["kind", "purpose", "retention"].includes(name) && field === "");
+  });
+}
+
 function protectedInputEnvelopeSchema(): Record<string, unknown> {
   return {
     type: "object",
@@ -284,7 +300,7 @@ function parseProtectedInputDescriptor(
   value: ProtectedInputDescriptor | undefined,
   retention: SecureInputRetention
 ): { kind: SecureInputKind; purpose: string } | undefined {
-  if (value === undefined || !SECURE_INPUT_KINDS.has(value.kind as SecureInputKind)) return undefined;
+  if (value === undefined || value === null || typeof value !== "object" || !SECURE_INPUT_KINDS.has(value.kind as SecureInputKind)) return undefined;
   if (typeof value.purpose !== "string" || value.purpose.trim().length === 0 || value.purpose.length > 500) return undefined;
   if (value.retention !== undefined && value.retention !== retention) return undefined;
   return { kind: value.kind as SecureInputKind, purpose: value.purpose.trim() };

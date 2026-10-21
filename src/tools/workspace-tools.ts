@@ -14,6 +14,7 @@ import type { FileStateOperationKind, FileStateTracker } from "../delegation/fil
 import { isLikelyBinary, isTextyPath } from "../context/context-security.js";
 import { assessHardlineFloor } from "../security/command-safety.js";
 import { createTerminalInspectTool } from "./terminal-inspect-tool.js";
+import type { ProcessManager } from "../process/process-manager.js";
 import { errorResult } from "./workspace-paths.js";
 
 export type WorkspaceToolOptions = {
@@ -24,6 +25,7 @@ export type WorkspaceToolOptions = {
   maxReadBytes?: number;
   maxSearchResults?: number;
   commandTimeoutMs?: number;
+  processManager?: ProcessManager;
   fsAdapter?: WorkspaceFsAdapter;
   fileStateTracker?: FileStateTracker;
   sessionId?: string | (() => string);
@@ -672,12 +674,14 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
       name: "terminal.run",
       // Let the command timer collect its outcome before the outer tool deadline.
       executionTimeoutMs: commandTimeoutMs + 5_000,
-      description: `Run a shell command in the active workspace for at most ${commandTimeoutMs} ms. For longer jobs, discover and request managed process tools, then start and poll the process within the task budget.`,
+      description: options.processManager
+        ? `Run a shell command in the active workspace. With timeoutMs omitted or null, wait up to ${Math.min(commandTimeoutMs, 30_000)} ms, then return a managed process ID if still running. Poll process.logs/process.list until it exits; process.stop cancels it. A running process is not task completion. An explicit timeoutMs is a hard execution limit.`
+        : `Run a shell command in the active workspace for at most ${commandTimeoutMs} ms. For longer jobs, discover and request managed process tools, then start and poll the process within the task budget.`,
       inputSchema: {
         type: "object",
         properties: {
           command: { type: "string" },
-          timeoutMs: { type: "number", minimum: 1, maximum: commandTimeoutMs, description: `Execution limit in milliseconds (default and maximum: ${commandTimeoutMs}). Longer jobs require managed process tools.` }
+          timeoutMs: { type: ["number", "null"], minimum: 1, maximum: commandTimeoutMs, description: `Explicit hard execution limit in milliseconds, maximum ${commandTimeoutMs}. Omit or use null for the default behavior described above.` }
         },
         required: ["command"]
       },
@@ -691,7 +695,7 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
       // normal authorization. Signals, deadlines and cancellation stay uncertain.
       isFailureOutcomeKnown: result => Number.isInteger(result.metadata?.code) &&
         result.metadata?.signal === null && result.metadata.timedOut === false && result.metadata.cancelled === false,
-      run: async (input: { command?: string; timeoutMs?: number }, context) => {
+      run: async (input: { command?: string; timeoutMs?: number | null }, context) => {
         if (typeof input.command !== "string" || input.command.trim().length === 0) {
           return errorResult("command must be a non-empty string");
         }
@@ -701,11 +705,15 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
           return errorResult(blockedReason);
         }
 
-        if (input.timeoutMs !== undefined && (!Number.isFinite(input.timeoutMs) || input.timeoutMs < 1 || input.timeoutMs > commandTimeoutMs)) {
+        if (input.timeoutMs != null && (!Number.isFinite(input.timeoutMs) || input.timeoutMs < 1 || input.timeoutMs > commandTimeoutMs)) {
           return undispatchedResult(errorResult(`Command was not started: timeoutMs must be between 1 and ${commandTimeoutMs}. For longer jobs, discover and request managed process tools, then start and poll the process within the task budget.`));
         }
 
         try { await contentView.assertMaterialized(); } catch (error) { return errorResult(error instanceof Error ? error.message : "Editor content is not materialized."); }
+        const signal = AbortSignal.any([...[context?.signal, options.executionLease?.signal].filter((value): value is AbortSignal => value !== undefined)]);
+        if (options.processManager && input.timeoutMs == null) {
+          return runManagedCommand(options.processManager, input.command, Math.min(commandTimeoutMs, 30_000), signal, context?.continuationSignal ?? options.executionLease?.signal);
+        }
         const ownedProcesses = options.executionLease ? undefined : new HostProcessScope(root);
         try { return await runCommand(
           await realpath(root),
@@ -713,7 +721,7 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
           Math.max(1, Math.min(Number.isFinite(input.timeoutMs) ? input.timeoutMs! : commandTimeoutMs, commandTimeoutMs)),
           options.childProcessEnv,
           options.executionLease?.processes ?? ownedProcesses!,
-          AbortSignal.any([...[context?.signal, options.executionLease?.signal].filter((value): value is AbortSignal => value !== undefined)])
+          signal
         ); } finally { await ownedProcesses?.release(); }
       }
     }
@@ -729,6 +737,7 @@ export const workspaceToolProvider: SessionToolProvider = {
       taskResultService: ctx.taskResultService,
       workspaceRoot: ctx.workspaceRoot,
       executionLease: ctx.executionLease,
+      processManager: ctx.processManager,
       fsAdapter: ctx.workspaceFsAdapter,
       fileStateTracker: ctx.fileStateTracker,
       sessionId: ctx.currentSessionId,
@@ -1790,6 +1799,31 @@ function splitPreviewLines(content: string): string[] {
 
 function isNodeError(error: unknown): error is NodeJS.ErrnoException {
   return typeof error === "object" && error !== null && "code" in error;
+}
+
+async function runManagedCommand(manager: ProcessManager, command: string, waitMs: number, signal: AbortSignal, continuationSignal?: AbortSignal): Promise<ToolResult> {
+  const started = await manager.start(command, signal, { input: false, continuationSignal });
+  const process = (await manager.wait(started.id, waitMs, signal))!;
+  const logs = manager.logs(process.id, { tailChars: 16_000 }) ?? [];
+  const stdout = logs.filter(log => log.stream === "stdout").map(log => log.text).join("");
+  const stderr = logs.filter(log => log.stream === "stderr").map(log => log.text).join("");
+  const running = process.status === "running";
+  const content = [
+    running ? `Command is still running as ${process.id}. Use process.logs/process.list to check completion; process.stop cancels it. Do not restart the command.`
+      : process.status === "exited" ? undefined : `Command failed: exit code ${process.exitCode ?? "none"}, status ${process.status}.`,
+    ...logs.map(log => log.stream === "stderr" ? `stderr: ${log.text.trimEnd()}` : log.text.trimEnd())
+  ].filter(Boolean).join("\n\n");
+  return {
+    ok: running || process.status === "exited",
+    content: content.slice(0, 16_000) || "(no output)",
+    metadata: {
+      command, process, running, code: process.exitCode ?? null, signal: process.signal ?? null,
+      timedOut: false, cancelled: false,
+      _estacoda_context_summary: running
+        ? `Command is still running as ${process.id}; its exit status has not been collected.`
+        : terminalContextSummary({ command, code: process.exitCode ?? null, timedOut: false, timeoutMs: waitMs, cancelled: false, stdout, stderr })
+    }
+  };
 }
 
 async function runCommand(

@@ -91,6 +91,8 @@ export type ToolExecutionContext = {
   /** Security resolution supplied by ToolExecutor after policy assessment. */
   securityResolution?: ToolSecurityResolution;
   signal?: AbortSignal;
+  /** Parent cancellation/deadline for managed work that outlives this tool call. */
+  continuationSignal?: AbortSignal;
   environmentType?: EnvironmentType;
   onEvent?: RuntimeEventSink;
   /** Suspends an approval-gated call until the active surface approves or denies it. */

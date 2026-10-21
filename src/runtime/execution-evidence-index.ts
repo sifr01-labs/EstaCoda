@@ -35,7 +35,9 @@ type IndexedExecutionEvidence =
 export type ExecutionEvidenceStatus = IndexedExecutionEvidence["status"];
 
 export function executionEvidenceStatus(execution: ToolExecutionRecord): ExecutionEvidenceStatus {
-  return execution.readReuseOf !== undefined || INELIGIBLE_EVIDENCE_TOOLS.has(execution.tool.name)
+  // A yielded shell call proves dispatch only, not the requested command's result.
+  return execution.readReuseOf !== undefined || INELIGIBLE_EVIDENCE_TOOLS.has(execution.tool.name) ||
+    (execution.tool.name === "terminal.run" && execution.result?.metadata?.running === true)
     ? "ineligible"
     : execution.decision !== "allow"
       ? "blocked"

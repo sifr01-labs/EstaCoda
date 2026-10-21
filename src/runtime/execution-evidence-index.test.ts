@@ -26,6 +26,16 @@ function execution(overrides: Partial<ToolExecutionRecord> = {}): ToolExecutionR
 }
 
 describe("ExecutionEvidenceIndex", () => {
+  it("cannot use a still-running terminal command as completion evidence", () => {
+    const index = new ExecutionEvidenceIndex();
+    const record = execution({ tool: { ...execution().tool, name: "terminal.run" }, result: {
+      ok: true, content: "Still running", metadata: { running: true, code: null }
+    } });
+    expect(index.record(record)?.status).toBe("ineligible");
+    expect(() => index.resolve(["call-ok"])).toThrow("ineligible");
+    expect(executionEvidenceStatus({ ...record, result: { ok: true, content: "Done", metadata: { running: false, code: 0 } } })).toBe("success");
+  });
+
   it("does not link a readback of another resource even in the same workspace without target keys", () => {
     const index = new ExecutionEvidenceIndex();
     index.record(execution({

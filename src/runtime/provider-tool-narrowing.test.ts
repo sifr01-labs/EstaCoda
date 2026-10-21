@@ -63,6 +63,25 @@ function names(result: ReturnType<typeof narrowProviderToolsForTurn>): string[] 
 }
 
 describe("narrowProviderToolsForTurn", () => {
+  it("keeps available process controls beside an explicitly selected terminal", () => {
+    const catalog = buildProviderToolSchemaCatalog({ tools: [
+      tool("process.logs", ["coding"]), tool("process.list", ["coding"]),
+      tool("process.stop", ["coding"], undefined, "workspace-write"),
+      tool("process.start", ["coding"], undefined, "workspace-write"),
+      tool("terminal.run", ["coding"], undefined, "workspace-write"),
+      tool("process.input", ["coding"], undefined, "credential-access")
+    ] });
+    expect(names(narrowProviderToolsForTurn({ catalog, intent: intent(0.35), requiredTools: ["terminal.run"] })))
+      .toEqual(expect.arrayContaining(["terminal_run", "process_start", "process_list", "process_logs", "process_stop"]));
+    expect(names(narrowProviderToolsForTurn({ catalog, intent: intent(0.35), requiredTools: ["terminal.run"] })))
+      .not.toContain("process_input");
+    expect(names(narrowProviderToolsForTurn({ catalog, intent: intent(0.35, [], "repo-inspection") })))
+      .not.toContain("process_start");
+    const restricted = buildProviderToolSchemaCatalog({ tools: [tool("terminal.run", ["coding"], undefined, "workspace-write")] });
+    expect(names(narrowProviderToolsForTurn({ catalog: restricted, intent: intent(0.35), requiredTools: ["terminal.run"] })))
+      .toEqual(["terminal_run"]);
+  });
+
   it("uses a small bounded policy for low-confidence routing", () => {
     const catalog = buildProviderToolSchemaCatalog({ tools });
 
