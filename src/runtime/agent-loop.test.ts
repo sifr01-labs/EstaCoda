@@ -3932,3 +3932,21 @@ it("completes a capability question using the same interpretation passed to the 
   expect(response.finalOutcome?.completionFloor).toBe("none");
   expect(vi.mocked(harness.providerTurnLoop.run).mock.calls[0]?.[0].intent.requestInterpretation).toBe("information");
 });
+
+it("preserves a credential-bearing new task before routing, persistence and provider dispatch", async () => {
+  const secret = "fixture-new-task-credential";
+  const h = await createAgentLoop({ canRunProvider: true, runSkillPlaybook: vi.fn(async () => []) });
+  const events: RuntimeEvent[] = [];
+  await h.loop.handle({ text: `Inspect /app/archive.zip.\npassword="${secret}"\nWrite /app/result.txt; preserve all 23 characters.`,
+    channel: "cli", trustedWorkspace: true, onEvent: async event => { events.push(event); } });
+  const call = vi.mocked(h.providerTurnLoop.run).mock.calls[0]![0];
+  expect(call.routedText).toContain("Inspect /app/archive.zip");
+  expect(call.routedText).toContain("Write /app/result.txt");
+  expect(call.routedText).toContain("all 23 characters");
+  expect(JSON.stringify(vi.mocked(h.runtimeRouter.route).mock.calls)).not.toContain(secret);
+  const messages = await h.sessionDb.listMessages(h.sessionId);
+  expect(messages.find(message => message.role === "user")?.content).toContain("/app/result.txt");
+  for (const surface of [call, messages, events, await h.sessionDb.listEvents(h.sessionId), h.trajectoryRecorder.snapshot()]) {
+    expect(JSON.stringify(surface)).not.toContain(secret);
+  }
+});

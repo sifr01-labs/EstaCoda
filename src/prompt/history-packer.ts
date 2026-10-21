@@ -3,7 +3,7 @@ import type { SessionMessage } from "../contracts/session.js";
 import { stripInlineReasoning } from "../providers/provider-reasoning.js";
 import { estimateMessageTokensRough, estimateMessagesTokensRough } from "./token-estimator.js";
 import { sanitizeProviderExecutionMetadata } from "./provider-execution-history.js";
-import { inspectPlaintextCredentials } from "../security/plaintext-credential-guard.js";
+import { inspectPlaintextCredentials, interceptPlaintextCredentialInput } from "../security/plaintext-credential-guard.js";
 
 export const DEFAULT_HISTORY_CONTEXT_WINDOW = 128_000;
 export const HISTORY_BUDGET_RATIO = 0.12;
@@ -120,14 +120,12 @@ export function packSessionHistory(
 
 export function sanitizeSessionHistoryCredentials<T extends PackableSessionMessage>(messages: readonly T[]): T[] {
   return messages.map((message) => {
+    if (message.role === "user") {
+      const interception = interceptPlaintextCredentialInput(message.content);
+      return { ...message, content: interception?.projectedText ?? message.content };
+    }
     const inspection = inspectPlaintextCredentials(message.content);
-    if (!inspection.detected) return { ...message };
-    if (message.role !== "user") return { ...message, content: inspection.redactedText };
-    const labels = inspection.kinds.join(", ");
-    return {
-      ...message,
-      content: `A plaintext credential submission (${labels}) was withheld from provider history. Request the values again through protected input if they are still required.`
-    };
+    return { ...message, content: inspection.detected ? inspection.redactedText : message.content };
   });
 }
 

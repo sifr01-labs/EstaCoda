@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { IMAGE_TOKEN_ESTIMATE } from "./token-estimator.js";
-import { deriveSessionHistoryBudget, packSessionHistory } from "./history-packer.js";
+import { deriveSessionHistoryBudget, packSessionHistory, sanitizeSessionHistoryCredentials } from "./history-packer.js";
 
 describe("deriveSessionHistoryBudget", () => {
   it("scales history budget with model context window", () => {
@@ -51,7 +51,7 @@ describe("packSessionHistory", () => {
 
     expect(JSON.stringify(packed.messages)).not.toContain(apiKey);
     expect(JSON.stringify(packed.messages)).not.toContain(clientSecret);
-    expect(packed.messages[0]?.content).toContain("withheld from provider history");
+    expect(packed.messages[0]?.content).toContain("withheld the values");
     expect(packed.messages[1]?.content).toContain("[REDACTED]");
   });
 
@@ -718,3 +718,21 @@ function providerExecutionMetadataWithCredentialLeak(): Record<string, unknown> 
     status: "fallback-success"
   };
 }
+
+it("retains redacted task context through legacy history, summaries and repeated packing", () => {
+  const secret = "fixture-history-credential";
+  const content = `Inspect /app/archive.zip and save /app/result.txt. Keep all 23 characters.\npassword="${secret}"`;
+  const original = [
+    { role: "user" as const, content },
+    { role: "agent" as const, content: `password="${secret}"\nI will inspect the archive.` },
+    { role: "user" as const, content: "Continue the archive work." }
+  ];
+  const sanitized = sanitizeSessionHistoryCredentials(original);
+  expect(sanitizeSessionHistoryCredentials(sanitized)).toEqual(sanitized);
+  expect(sanitized[0]!.content).toContain("/app/result.txt");
+  expect(sanitized[0]!.content).toContain("all 23 characters");
+  const packed = packSessionHistory(original, { maxProtectedMessages: 1 });
+  expect(JSON.stringify(packed)).not.toContain(secret);
+  expect(packed.summary).toContain("/app/result.txt");
+  expect(original[0]!.content).toBe(content); // Historical storage is not mutated.
+});

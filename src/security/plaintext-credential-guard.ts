@@ -1,4 +1,4 @@
-import { redactSensitiveText } from "../utils/redaction.js";
+import { QUOTED_CREDENTIAL_VALUE_PATTERN, redactKnownCredentialValues, redactSensitiveText } from "../utils/redaction.js";
 import { parseProtectedArgumentPattern } from "./protected-argument-path.js";
 
 export type PlaintextCredentialKind =
@@ -23,6 +23,7 @@ export type PlaintextCredentialInterception = {
 const CREDENTIAL_LABEL = String.raw`(?:and[\s_-]+)?(?:(?:consumer|client|api|access|refresh|private|public)[\s_-]+)?(?:api[\s_-]+)?(?:key|secret|token|password|passwd|passcode|credential)`;
 const LABEL_ONLY_PATTERN = new RegExp(String.raw`^\s*(?:[-*]\s*)?(${CREDENTIAL_LABEL})\s*[:=]?\s*$`, "iu");
 const INLINE_LABEL_PATTERN = new RegExp(String.raw`^(\s*(?:[-*]\s*)?(${CREDENTIAL_LABEL})\s*[:=]\s*)(.+?)\s*$`, "iu");
+const LABELLED_VALUE_PATTERN = new RegExp(String.raw`(^|[\r\n])([ \t]*(?:[-*][ \t]*)?${CREDENTIAL_LABEL}[ \t]*(?:[:=]\s*|(?:\r\n|[\r\n])\s*))(?!${CREDENTIAL_LABEL}[ \t]*(?:[\r\n]|$))(${QUOTED_CREDENTIAL_VALUE_PATTERN}|[^\r\n]+)`, "giu");
 const TABLE_LABEL_PATTERN = new RegExp(String.raw`^(${CREDENTIAL_LABEL})$`, "iu");
 const PLACEHOLDER_PATTERN = /^(?:\[?(?:redacted|protected(?:_input|_value)?|hidden)\]?|<[^>]+>|\$\{[^}]+\}|process\.env\.[A-Z0-9_]+|(?:your|example|sample|test|dummy)[_-].*)$/iu;
 
@@ -35,35 +36,52 @@ const PLACEHOLDER_PATTERN = /^(?:\[?(?:redacted|protected(?:_input|_value)?|hidd
 export function inspectPlaintextCredentials(input: string): PlaintextCredentialInspection {
   const kinds = new Set<PlaintextCredentialKind>();
   let detected = false;
-  const baseline = redactSensitiveText(input);
-  if (baseline !== input && !containsOnlyPlaceholderAssignments(input)) {
+  const submittedValues = new Set<string>();
+  // Explicit line labels delimit an unquoted passphrase at the end of the
+  // line. Quoted values share the multiline parser used by text redaction.
+  const prepared = input.replace(LABELLED_VALUE_PATTERN, (match, separator: string, prefix: string, value: string) => {
+    if (!looksLikeLabelledValue(value) || /^-----BEGIN (?:[A-Z0-9]+ )*PRIVATE KEY-----/u.test(value)) return match;
     detected = true;
-    collectKindsFromText(input, kinds);
+    kinds.add(kindForLabel(prefix));
+    const quote = /^["'`]/u.test(value) ? value[0]! : undefined;
+    submittedValues.add(quote === undefined ? value.trim() : value.slice(1, value.endsWith(quote) ? -1 : undefined));
+    if (quote === '"') {
+      try { submittedValues.add(JSON.parse(value) as string); }
+      catch { /* Incomplete values remain masked. */ }
+    }
+    return `${separator}${prefix}[REDACTED]`;
+  });
+  const baseline = redactSensitiveText(prepared);
+  if (baseline !== prepared && !containsOnlyPlaceholderAssignments(prepared)) {
+    detected = true;
+    collectKindsFromText(prepared, kinds);
   }
 
-  const originalLines = input.split(/\r\n|[\r\n]/u);
-  const redactedLines = baseline.split(/\r\n|[\r\n]/u);
+  // Baseline redaction can collapse quoted multiline values. Work on its own
+  // lines so subsequent label/table edits cannot restore already masked text.
+  const originalLines = baseline.split(/\r\n|[\r\n]/u);
+  const redactedLines = [...originalLines];
   // Terminal paste blocks may contain CR-only line endings and no per-value
   // labels. Require an explicit submission cue, not merely credential prose.
-  const submission = originalLines.findIndex((line) =>
-    /\b(?:here (?:are|is)|these are|this is) (?:the |my |our )?(?:(?:api|client|consumer) )?(?:key|secret|token|password|credentials?)\b/iu.test(line)
-  );
-  if (submission >= 0) {
+  for (let submission = 0; submission < originalLines.length; submission++) {
+    if (!/\b(?:here (?:are|is)|these are|this is) (?:the |my |our )?(?:(?:api|client|consumer) )?(?:key|secret|token|password|credentials?)\b/iu.test(originalLines[submission]!)) continue;
     for (let index = submission + 1; index < originalLines.length; index += 1) {
       const line = originalLines[index]!.trim();
-      if (line === "" || /^\[Pasted text(?:\s+\d+)?\]$/iu.test(line) || /^```\w*$/u.test(line)) continue;
+      if (line === "" || /^\[Pasted text(?:\s+\d+)?\]$/iu.test(line) || /^```\w*$/u.test(line) || PLACEHOLDER_PATTERN.test(line)) continue;
       if (!looksLikeSubmittedValue(line)) break;
       detected = true;
       kinds.add("generic-secret");
+      submittedValues.add(unquote(line));
       redactedLines[index] = "[REDACTED]";
     }
   }
   for (let index = 0; index < originalLines.length; index += 1) {
     const originalLine = originalLines[index] ?? "";
     const inline = INLINE_LABEL_PATTERN.exec(originalLine);
-    if (inline !== null && looksLikeSubmittedValue(inline[3] ?? "")) {
+    if (inline !== null && looksLikeLabelledValue(inline[3] ?? "")) {
       detected = true;
       kinds.add(kindForLabel(inline[2] ?? ""));
+      submittedValues.add(unquote(inline[3]!));
       redactedLines[index] = `${inline[1]}[REDACTED]`;
       continue;
     }
@@ -71,17 +89,18 @@ export function inspectPlaintextCredentials(input: string): PlaintextCredentialI
     const label = LABEL_ONLY_PATTERN.exec(originalLine);
     if (label !== null) {
       const valueIndex = nextNonEmptyLine(originalLines, index + 1);
-      if (valueIndex !== undefined && looksLikeSubmittedValue(originalLines[valueIndex] ?? "")) {
+      if (valueIndex !== undefined && looksLikeLabelledValue(originalLines[valueIndex] ?? "")) {
         detected = true;
         kinds.add(kindForLabel(label[1] ?? ""));
+        submittedValues.add(unquote(originalLines[valueIndex]!));
         redactedLines[valueIndex] = preserveIndent(originalLines[valueIndex] ?? "", "[REDACTED]");
       }
     }
 
-    const table = redactCredentialTableRow(originalLine);
+    const table = redactCredentialTableRow(redactedLines[index]!, submittedValues);
     if (table !== undefined) {
       detected = true;
-      kinds.add(table.kind);
+      for (const kind of table.kinds) kinds.add(kind);
       redactedLines[index] = table.text;
     }
   }
@@ -90,7 +109,7 @@ export function inspectPlaintextCredentials(input: string): PlaintextCredentialI
   return {
     detected,
     kinds: [...kinds],
-    redactedText: redactedLines.join("\n")
+    redactedText: redactKnownCredentialValues(redactedLines.join("\n"), submittedValues)
   };
 }
 
@@ -106,10 +125,12 @@ export function interceptPlaintextCredentialInput(input: string): PlaintextCrede
   return {
     kinds: inspection.kinds,
     projectedText: [
+      inspection.redactedText,
+      "",
       `The user attempted to submit plaintext credentials (${labels}).`,
-      "EstaCoda withheld the values before session persistence and provider dispatch.",
-      "Continue the active task and request each value through the configured protected-input tool argument flow; do not ask for or repeat credentials in ordinary chat."
-    ].join(" ")
+      "EstaCoda withheld the values from this task context.",
+      "Continue using the remaining task context. Only if a withheld value is needed, request it through the configured protected-input tool argument flow; do not ask for or repeat credentials in ordinary chat."
+    ].join("\n")
   };
 }
 
@@ -194,10 +215,15 @@ function nextNonEmptyLine(lines: readonly string[], start: number): number | und
 }
 
 function looksLikeSubmittedValue(value: string): boolean {
-  const normalized = value.trim().replace(/^[`'"]|[`'"]$/gu, "");
-  if (normalized.length < 8 || normalized.length > 4_096) return false;
+  const normalized = unquote(value);
+  if (normalized.length < 8) return false;
   if (PLACEHOLDER_PATTERN.test(normalized)) return false;
   return !/\s/u.test(normalized) && !TABLE_LABEL_PATTERN.test(normalized);
+}
+
+function looksLikeLabelledValue(value: string): boolean {
+  const normalized = unquote(value);
+  return normalized.length > 0 && !PLACEHOLDER_PATTERN.test(normalized) && !TABLE_LABEL_PATTERN.test(normalized);
 }
 
 function containsOnlyPlaceholderAssignments(input: string): boolean {
@@ -215,15 +241,21 @@ function preserveIndent(original: string, replacement: string): string {
   return `${/^\s*/u.exec(original)?.[0] ?? ""}${replacement}`;
 }
 
-function redactCredentialTableRow(line: string): { kind: PlaintextCredentialKind; text: string } | undefined {
+function redactCredentialTableRow(line: string, values: Set<string>): { kinds: PlaintextCredentialKind[]; text: string } | undefined {
   if (!line.includes("|")) return undefined;
   const cells = line.split("|");
+  const kinds: PlaintextCredentialKind[] = [];
   for (let index = 0; index < cells.length - 1; index += 1) {
     const label = cells[index]?.trim() ?? "";
     const value = cells[index + 1]?.trim() ?? "";
-    if (!TABLE_LABEL_PATTERN.test(label) || !looksLikeSubmittedValue(value)) continue;
+    if (!TABLE_LABEL_PATTERN.test(label) || !looksLikeLabelledValue(value)) continue;
+    values.add(unquote(value));
     cells[index + 1] = ` [REDACTED] `;
-    return { kind: kindForLabel(label), text: cells.join("|") };
+    kinds.push(kindForLabel(label));
   }
-  return undefined;
+  return kinds.length ? { kinds, text: cells.join("|") } : undefined;
+}
+
+function unquote(value: string): string {
+  return value.trim().replace(/^[`'"]|[`'"]$/gu, "");
 }

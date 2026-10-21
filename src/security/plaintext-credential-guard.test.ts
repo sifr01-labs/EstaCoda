@@ -80,3 +80,60 @@ describe("plaintext credential guard", () => {
     expect(interceptPlaintextCredentialInput("Can you review the README?")).toBeUndefined();
   });
 });
+
+describe("task-preserving credential projection", () => {
+  it.each(["client key:", "key", "api key=", "key\n", "key\nsecret"])("masks multiline quoted values after %s", label => {
+    const input = `Inspect report.md\n${label}\n"fixture first words\nsecond secret line"\nVerify report.md`;
+    const result = interceptPlaintextCredentialInput(input)!.projectedText;
+    expect(result).not.toContain("fixture");
+    expect(result).not.toContain("second secret line");
+    expect(result).toContain("Verify report.md");
+  });
+  it("does not consume a labelled private-key header before masking the whole block", () => {
+    const input = "Inspect report.md\nprivate key\n-----BEGIN PRIVATE KEY-----\nfixture-private-material\nsecond-secret-line\n-----END PRIVATE KEY-----\nVerify report.md";
+    const result = interceptPlaintextCredentialInput(input)!.projectedText;
+    expect(result).not.toContain("fixture-private-material");
+    expect(result).not.toContain("second-secret-line");
+    expect(result).toContain("Verify report.md");
+  });
+  it("withholds complete unquoted passphrases and short explicitly labelled values", () => {
+    const input = 'Inspect report.md\npassword: fixture passphrase with spaces\nRepeated: fixture passphrase with spaces\nkey\nabcd\n| secret | another table passphrase | token | xyz |\nVerify report.md';
+    const result = interceptPlaintextCredentialInput(input)!.projectedText;
+    for (const value of ["fixture", "passphrase", "spaces", "abcd", "another", "xyz"]) expect(result).not.toContain(value);
+    expect(result).toContain("Inspect report.md");
+    expect(result).toContain("Verify report.md");
+    expect(interceptPlaintextCredentialInput(result)).toBeUndefined();
+  });
+  it("retains file paths and constraints around a credential-shaped format example", () => {
+    const task = "Recover the local fixture.\nThe file format is PASSWORD=XXXXXXXXXX\n- It is exactly 23 characters long.\nWrite /app/recovered_passwords.txt and verify the result.";
+    const projected = interceptPlaintextCredentialInput(task)!.projectedText;
+    expect(projected).toContain("Recover the local fixture.");
+    expect(projected).toContain("PASSWORD=[REDACTED]");
+    expect(projected).toContain("exactly 23 characters long");
+    expect(projected).toContain("/app/recovered_passwords.txt");
+    expect(projected).toContain("Only if a withheld value is needed");
+    expect(projected).not.toContain("XXXXXXXXXX");
+    expect(interceptPlaintextCredentialInput(projected)).toBeUndefined();
+  });
+  it("redacts every table value without restoring baseline secrets", () => {
+    const task = "Inspect report.md\n| key | fixture-key-123 | secret | fixture-secret-456 | Bearer abcdefghijklmnopqrstuvwxyz |\nThen verify report.md";
+    const result = inspectPlaintextCredentials(task);
+    for (const value of ["fixture-key-123", "fixture-secret-456", "abcdefghijklmnopqrstuvwxyz"]) expect(result.redactedText).not.toContain(value);
+    expect(result.redactedText).toContain("Then verify report.md");
+  });
+  it.each(["\n", "\r", "\r\n"])("handles multiple paste blocks, repeated values, and surrounding Arabic (%j)", separator => {
+    const secret = "fixture-first-credential";
+    const second = "fixture-second-credential";
+    const input = ["افحص /app/input.txt", "Here are the credentials", secret, "Continue inspecting the report.", "Here is my token", second, `Repeated: ${secret}`, "احفظ /app/result.txt"].join(separator);
+    const result = interceptPlaintextCredentialInput(input)!;
+    expect(result.projectedText).not.toContain(secret);
+    expect(result.projectedText).not.toContain(second);
+    expect(result.projectedText).toContain("افحص /app/input.txt");
+    expect(result.projectedText).toContain("احفظ /app/result.txt");
+  });
+  it("does not use stale line indexes after masking a multiline quoted credential", () => {
+    const result = interceptPlaintextCredentialInput('Inspect report.md\npassword="fixture secret\nsecond line"\nkey\nfixture-api-key-123\nVerify report.md')!;
+    for (const value of ["fixture secret", "second line", "fixture-api-key-123"]) expect(result.projectedText).not.toContain(value);
+    expect(result.projectedText).toContain("Verify report.md");
+  });
+});
