@@ -345,10 +345,10 @@ describe("ExecutionCheckpointController", () => {
     await expect(controller.prepareForTurn("Explain what a rain jacket is?")).resolves.toMatchObject({ disposition: "superseded" });
   });
 
-  it("retains all output obligations when a follow-up names the secondary file", async () => {
+  it.each([false, true])("retains output obligations when a follow-up names a secondary or alternative file (%s)", async alternative => {
     const controller = target();
     const checkpoint = await controller.ensure(creation({ requestRequirements: { skillReferences: [], issues: [],
-      fileOutput: { format: "text", path: "a.txt", additionalFiles: [{ format: "text", path: "b.txt" }] } } }));
+      fileOutput: { format: "text", path: "a.txt", ...(alternative ? { alternativePaths: ["b.txt"] } : { additionalFiles: [{ format: "text" as const, path: "b.txt" }] }) } } }));
     await expect(controller.prepareForTurn("Check b.txt")).resolves.toMatchObject({ disposition: "continuation", checkpoint });
   });
 

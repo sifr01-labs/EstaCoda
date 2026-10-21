@@ -168,7 +168,7 @@ describe.sequential("research workflow acceptance harness", () => {
     scriptConsumed(h);
   });
 
-  it.each([false, true])("recovers under provider fallback and delivers every requested report (multiple=%s)", async multiple => {
+  it.each([false, true, "choice"])("recovers under provider fallback and delivers every requested report (multiple=%s)", async multiple => {
     const h=await harness({fallbackOnRequest:1,sourceAccessFailures:true});
     const tasks=["collection","processing","reuse"].map(scope=>({task:`Research ${scope}.`,context:"User requested current research using 3 subagents. Save report.md. This is background context, not this worker's assignment.",allowedTools:["web.search","web.extract"],
       allowedToolsets:["research","core"],research:{scope,requireLiveSources:true,requireRepositoryEvidence:false}}));
@@ -176,7 +176,7 @@ describe.sequential("research workflow acceptance harness", () => {
     // Three pre-admission errors must leave capacity for the corrected batch.
     for(let i=0;i<3;i++) h.enqueue(nativeCall("delegate_task",{tasks:tasks.slice(0,2),synthesis:false}));
     h.enqueue(nativeCall("delegate_task",{tasks,synthesis:false}));
-    const result=await h.turn(`Use the researcher skill and 3 subagents to research current battery recycling. Save report.md${multiple ? " and second.md" : ""}.`);
+    const result=await h.turn(`Use the researcher skill and 3 subagents to research current battery recycling. ${multiple === "choice" ? "Save at least one file named report.md or second.md" : `Save report.md${multiple ? " and second.md" : ""}`}.`);
     expect(result.toolExecutions.filter(call=>call.result?.metadata?.code==="request-requirements-unsatisfied")).toHaveLength(3);
     expect(result.toolExecutions.at(-1)?.result).toMatchObject({ok:true});
     expect(result.toolExecutions.find(call=>call.tool.name==="skill.read")?.result).toMatchObject({ok:true,metadata:{mode:"reference"}});
@@ -189,7 +189,11 @@ describe.sequential("research workflow acceptance harness", () => {
     expect(steps.filter(step=>step.executor.role==="worker")).toHaveLength(3);
     expect(steps.some(step=>step.executor.role==="synthesis")).toBe(true);
     expect(steps.some(step=>step.executor.role==="report-delivery")).toBe(true);
-    if (multiple) expect(steps.find(step=>step.executor.role==="report-delivery")?.objective).toContain('"second.md"');
+    if (multiple === "choice") {
+      expect(steps.find(step=>step.executor.role==="report-delivery")?.executor.requestContract?.requirements.fileOutput).toEqual({ format: "markdown", path: "report.md" });
+      expect(steps.find(step=>step.executor.role==="synthesis")?.executor.requestContract?.requirements.fileOutput?.alternativePaths).toEqual(["second.md"]);
+    }
+    if (multiple === true) expect(steps.find(step=>step.executor.role==="report-delivery")?.objective).toContain('"second.md"');
     const routes=(await h.sessionDb.listEvents(h.runtime.sessionId)).filter(event=>event.kind==="provider-route");
     expect(routes).toEqual(expect.arrayContaining([expect.objectContaining({model:"research-fallback",fallback:true,state:"responded"})]));
     expect(task.status).toBe("queued");
@@ -223,11 +227,11 @@ describe.sequential("research workflow acceptance harness", () => {
     const final=h.store.listResults(task.id).find(item=>item.stepId===synthesis.id&&item.disposition==="accepted")!;
     const report=await resultService.readText({taskId:task.id,resultId:final.id,sessionId:h.runtime.sessionId});
     await h.restart();
-    h.enqueue(nativeCall("task_result_read",{task_id:task.id,result_id:final.id}),nativeCall("file_write",{path:"report.md",content:report.content}),nativeCall("file_read",{path:"report.md"}),...(multiple ? [nativeCall("file_write",{path:"second.md",content:report.content}),nativeCall("file_read",{path:"second.md"})] : []),answer("Saved report.md."));
+    h.enqueue(nativeCall("task_result_read",{task_id:task.id,result_id:final.id}),nativeCall("file_write",{path:"report.md",content:report.content}),nativeCall("file_read",{path:"report.md"}),...(multiple === true ? [nativeCall("file_write",{path:"second.md",content:report.content}),nativeCall("file_read",{path:"second.md"})] : []),answer("Saved report.md."));
     expect(await schedulerFor(h,task.id).scheduler.runOnce()).toMatchObject({completed:1,failed:0});
     expect(h.store.getTask(task.id)?.status).toBe("completed");
     expect(await readFile(join(h.workspaceRoot,"report.md"),"utf8")).toBe(report.content);
-    if (multiple) expect(await readFile(join(h.workspaceRoot,"second.md"),"utf8")).toBe(report.content);
+    if (multiple === true) expect(await readFile(join(h.workspaceRoot,"second.md"),"utf8")).toBe(report.content);
     scriptConsumed(h);
   }, 30_000);
 
@@ -833,6 +837,16 @@ describe("explicit delegation limit admission", () => {
 });
 
 describe.sequential("file output completion requirements", () => {
+  it.each(["terminal_run", "execute_code"])("accepts verified command-generated output through the real executor (%s)", async tool => {
+    const h = await harness();
+    h.enqueue(nativeCall("capability_request", { ids: [`tool:${tool === "terminal_run" ? "terminal.run" : "execute_code"}`], reason: "Run the requested file generator" }),
+      nativeCall(tool, tool === "terminal_run" ? { command: "printf generated > output.c", timeoutMs: 1000 } : { code: 'open("output.c", "w").write("generated")' }),
+      nativeCall("file_read", { path: "output.c" }), answer("Created and verified output.c."));
+    const result = await h.turn(`Write output.c using ${tool === "terminal_run" ? "terminal.run" : "execute_code"}. Verify the file.`);
+    expect(result.finalOutcome?.status, JSON.stringify({ text: result.text, errors: h.scriptErrors })).toBe("completed");
+    expect(await readFile(join(h.workspaceRoot, "output.c"), "utf8")).toBe("generated");
+    scriptConsumed(h);
+  });
   it("replaces a false saved claim when the file was written without readback", async () => {
     const h = await harness();
     h.enqueue(nativeCall("file_write", { path: "report.md", content: REPORT }), answer("Saved and verified report.md."), answer("Saved and verified report.md."), answer("Saved and verified report.md."));

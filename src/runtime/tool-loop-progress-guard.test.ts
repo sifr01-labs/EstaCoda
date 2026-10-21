@@ -483,15 +483,15 @@ it("does not count duplicate capability requests as material progress", () => {
 });
 
 
-it.each(["research", "report", "code", "multi"])("counts file versions and matching readbacks once while checkpoint progress lags (%s)", async mode => {
+it.each(["research", "report", "code", "multi", "alternative"])("counts file versions and matching readbacks once while checkpoint progress lags (%s)", async mode => {
   const research = mode === "research";
   const checkpoint = new ExecutionCheckpointController({ sessionId: "session-1", profileId: "profile-1" });
   await checkpoint.ensure({ originTurnId: "turn-1", originalObjective: "Research and save report.md",
     qualificationReasons: ["research_request"], intentLabels: [], requiredOperations: ["mutation", "verification"],
     connectorIds: [], completionFloor: "mutation_with_verification",
-    requestRequirements: mode === "code" ? undefined : { skillReferences: [], issues: [], research: { domain: "general", fresh: true }, fileOutput: { path: "report.md", format: "markdown", ...(mode === "multi" ? { additionalFiles: [{ path: "second.md", format: "markdown" as const }] } : {}) } } });
+    requestRequirements: mode === "code" ? undefined : { skillReferences: [], issues: [], research: { domain: "general", fresh: true }, fileOutput: { path: "report.md", format: "markdown", ...(mode === "alternative" ? { alternativePaths: ["alternative.md"] } : {}), ...(mode === "multi" ? { additionalFiles: [{ path: "second.md", format: "markdown" as const }] } : {}) } } });
   const guard = new ToolLoopProgressGuard({ research, checkpointReader: checkpoint, noProgressNudgeIteration: 2, maxNoProgressIterations: 6 });
-  const file = (name: string, digest: string, path = mode === "multi" ? "second.md" : "report.md") => execution({
+  const file = (name: string, digest: string, path = mode === "multi" ? "second.md" : mode === "alternative" ? "alternative.md" : "report.md") => execution({
     tool: { ...execution().tool, name, toolsets: ["files"] }, input: { path },
     executionEffect: { kind: name === "file.read" ? "read" : "mutation" },
     result: { ok: true, content: "report", metadata: { path, contentSha256: digest.repeat(64), materialized: true, completeFileRead: true, changed: true } }
@@ -557,16 +557,16 @@ describe("terminal progress while a completion checkpoint is active", () => {
   function terminal(index: number, name = "terminal.run"): ToolExecutionRecord {
     return execution({
       tool: { ...execution().tool, name, riskClass: "workspace-write" },
-      input: name === "terminal.inspect" ? { argv: ["cat", `diagnostic-${index}.txt`] }
+      input: name === "execute_code" ? { code: `print(${index})` } : name === "terminal.inspect" ? { argv: ["cat", `diagnostic-${index}.txt`] }
         : { command: `cat diagnostic-${index}.txt`, timeoutMs: 1000 },
       riskClass: "workspace-write", executionEffect: { kind: "read" },
       result: { ok: true, content: `Observed diagnostic ${index}`, metadata: {
-        code: 0, signal: null, timedOut: false, cancelled: false
+        ...(name === "execute_code" ? { exitCode: 0 } : { code: 0 }), signal: null, timedOut: false, cancelled: false
       } }
     });
   }
 
-  it.each(["terminal.run", "terminal.inspect"])("credits distinct successful %s observations beyond the stop limit", async name => {
+  it.each(["terminal.run", "terminal.inspect", "execute_code"])("credits distinct successful %s observations beyond the stop limit", async name => {
     const guard = await discoveryGuard();
     for (let index = 0; index < 8; index++) {
       expect(guard.observe([terminal(index, name)])).toMatchObject({
@@ -602,11 +602,11 @@ describe("terminal progress while a completion checkpoint is active", () => {
     }
   });
 
-  it.each(["failed", "denied", "reused", "cached", "timeout", "cancelled", "signal", "nonzero", "missing-receipt", "completion-repair"])(
-    "keeps %s terminal activity bounded", async scenario => {
+  it.each(["terminal.run", "execute_code"].flatMap(name => ["failed", "denied", "reused", "cached", "timeout", "cancelled", "signal", "nonzero", "missing-receipt", "completion-repair"].map(scenario => [name, scenario])))(
+    "keeps %s %s activity bounded", async (name, scenario) => {
       const guard = await discoveryGuard();
       for (let index = 1; index <= 6; index++) {
-        const record = terminal(index);
+        const record = terminal(index, name);
         if (scenario === "failed") record.result!.ok = false;
         if (scenario === "denied") record.decision = "deny";
         if (scenario === "reused") record.readReuseOf = "prior-call";
@@ -614,7 +614,7 @@ describe("terminal progress while a completion checkpoint is active", () => {
         if (scenario === "timeout") record.result!.metadata!.timedOut = true;
         if (scenario === "cancelled") record.result!.metadata!.cancelled = true;
         if (scenario === "signal") record.result!.metadata!.signal = "SIGTERM";
-        if (scenario === "nonzero") record.result!.metadata!.code = 1;
+        if (scenario === "nonzero") record.result!.metadata![name === "execute_code" ? "exitCode" : "code"] = 1;
         if (scenario === "missing-receipt") delete record.result!.metadata;
         expect(guard.observe([record], scenario === "completion-repair"))
           .toMatchObject({ materialProgress: false, shouldStop: index === 6 });

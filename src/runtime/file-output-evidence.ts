@@ -1,4 +1,4 @@
-import { MAX_FILE_OUTPUTS, requestedFileOutputs } from "../contracts/request-requirements.js";
+import { MAX_FILE_OUTPUTS, requestedFileOutputs, validateRequestRequirements } from "../contracts/request-requirements.js";
 import { createHash } from "node:crypto";
 import { readTaskResultEvidence } from "../tasks/task-result-read-evidence.js";
 import { posix } from "node:path";
@@ -19,6 +19,7 @@ export function fileOutputEvidence(input: {
 }): FileOutputEvidence {
   const requirements = requestedFileOutputs(input.requirements);
   if (requirements.length === 0) return { satisfied: true };
+  try { validateRequestRequirements(input.requirements); } catch { return { satisfied: false, reason: "unresolved-target" }; }
   if (requirements.length > MAX_FILE_OUTPUTS || input.requirements?.issues.length) return { satisfied: false, reason: "unresolved-target" };
   if (requirements.length <= 1) return singleFileOutputEvidence(input);
   if (requirements.some(file => file.path === undefined)) return { satisfied: false, reason: "unresolved-target" };
@@ -27,7 +28,7 @@ export function fileOutputEvidence(input: {
     const evidence = singleFileOutputEvidence({ ...input, requirements: {
       ...input.requirements!, fileOutput: requirement
     } });
-    if (!evidence.satisfied) return { ...evidence, path: requirement.path };
+    if (!evidence.satisfied) return { ...evidence, path: evidence.path ?? requirement.path };
     if (evidence.path === undefined || evidence.writeCallId === undefined) return { satisfied: false, reason: "unresolved-target" };
     files.push({ path: evidence.path, writeCallId: evidence.writeCallId });
   }
@@ -40,18 +41,33 @@ export function pendingFileReadbackPaths(input: Parameters<typeof fileOutputEvid
   const files = requestedFileOutputs(input.requirements);
   if (!files.length || files.length > MAX_FILE_OUTPUTS || input.requirements?.issues.length ||
       input.toolExecutions.some(call => call.decision !== "allow" && call.tool.name.startsWith("file."))) return undefined;
+  try { validateRequestRequirements(input.requirements); } catch { return undefined; }
   const paths: string[] = [];
   for (const file of files) {
     if (file.path === undefined || safePath(file.path) !== file.path) return undefined;
     const evidence = singleFileOutputEvidence({ ...input, requirements: { ...input.requirements!, fileOutput: file } });
     if (evidence.satisfied) continue;
     if (evidence.reason !== "missing-readback") return undefined;
-    paths.push(file.path);
+    paths.push(evidence.path ?? file.path);
   }
   return paths.length ? paths : undefined;
 }
 
 function singleFileOutputEvidence(input: Parameters<typeof fileOutputEvidence>[0]): FileOutputEvidence {
+  const requirement = input.requirements?.fileOutput;
+  if (!requirement?.alternativePaths?.length) return concreteFileOutputEvidence(input);
+  let pending: FileOutputEvidence | undefined;
+  let failure: FileOutputEvidence | undefined;
+  for (const path of [requirement.path, ...requirement.alternativePaths]) {
+    const evidence = concreteFileOutputEvidence({ ...input, requirements: { ...input.requirements!, fileOutput: { ...requirement, path, alternativePaths: undefined } } });
+    if (evidence.satisfied) return evidence;
+    failure ??= evidence;
+    if (evidence.reason === "missing-readback") pending = { ...evidence, path };
+  }
+  return pending ?? failure ?? { satisfied: false, reason: "unresolved-target" };
+}
+
+function concreteFileOutputEvidence(input: Parameters<typeof fileOutputEvidence>[0]): FileOutputEvidence {
   const requirement = input.requirements?.fileOutput;
   if (requirement === undefined) return { satisfied: true };
   if (input.requirements?.issues.some((issue) => issue === "ambiguous-file-target" || issue === "unsafe-file-target")) {
@@ -71,12 +87,24 @@ function singleFileOutputEvidence(input: Parameters<typeof fileOutputEvidence>[0
   const sourceReads = new Map<string, { digest: string; index: number }>();
   const writes = new Map<string, { digest: string; callId: string; index: number; sourcePath?: string }>();
   const verified = new Map<string, string>();
+  const observedCommands = new Set<string>();
   for (const execution of input.toolExecutions) {
     const callId = execution.toolCallId;
     const recorded = callId === undefined ? undefined : receipts.get(callId);
     if (callId === undefined || recorded === undefined || recorded.receipt.tool !== execution.tool.name) continue;
     const metadata = execution.result?.metadata;
     const name = execution.tool.name;
+    const observation = metadata?.commandFileObservation as { id?: string; completed?: boolean } | undefined;
+    const repeatedCommand = typeof observation?.id === "string" && observedCommands.has(observation.id);
+    const command = repeatedCommand ? [] : commandFileChanges(execution, recorded.receipt.visibleTurnId);
+    if (command.length && observation?.completed === true && typeof observation.id === "string") observedCommands.add(observation.id);
+    // A later command may remove/replace an already verified destination, even
+    // if it fails. Unfinished or unreadable observations cannot preserve proof.
+    for (const output of command) {
+      verified.delete(output.path);
+      writes.delete(output.path);
+      sourceReads.delete(output.path);
+    }
     const touched = Array.isArray(metadata?.paths) ? metadata.paths : [metadata?.path ?? execution.input?.path];
     if (name === "file.read" || name === "file.write" || name === "file.patch") {
       for (const path of touched) {
@@ -89,8 +117,10 @@ function singleFileOutputEvidence(input: Parameters<typeof fileOutputEvidence>[0
       }
     }
     if (recorded.receipt.status !== "success" || execution.decision !== "allow" || execution.result?.ok !== true) continue;
-    if (name === "file.write" || name === "file.patch") {
-      const outputs = Array.isArray(metadata?.fileOutputs) ? metadata.fileOutputs : [metadata];
+    if (name === "file.write" || name === "file.patch" || commandCompleted(execution)) {
+      const outputs = name === "file.write" || name === "file.patch"
+        ? Array.isArray(metadata?.fileOutputs) ? metadata.fileOutputs : [metadata]
+        : command;
       for (const output of outputs) {
         if (output === null || typeof output !== "object") continue;
         const { path, contentSha256 } = output as Record<string, unknown>;
@@ -141,19 +171,19 @@ function singleFileOutputEvidence(input: Parameters<typeof fileOutputEvidence>[0
 export function verifiedFileMutationCallIds(input: Parameters<typeof fileOutputEvidence>[0]): Set<string> {
   const verified = new Set<string>();
   for (const receipt of input.executionReceipts) {
-    if (receipt.status !== "success" || receipt.visibleTurnId === undefined || !["file.write", "file.patch"].includes(receipt.tool)) continue;
+    if (receipt.status !== "success" || receipt.visibleTurnId === undefined || !["file.write", "file.patch", "terminal.run", "execute_code", "process.logs"].includes(receipt.tool)) continue;
     const write = input.toolExecutions.find(call => call.toolCallId === receipt.toolCallId && call.tool.name === receipt.tool);
     const metadata = write?.result?.metadata;
-    const outputs = Array.isArray(metadata?.fileOutputs) ? metadata.fileOutputs : [metadata];
+    const outputs = write && commandCompleted(write) ? commandFileChanges(write, receipt.visibleTurnId) : Array.isArray(metadata?.fileOutputs) ? metadata.fileOutputs : [metadata];
     const paths = outputs.map(output => output !== null && typeof output === "object"
       ? safePath((output as Record<string, unknown>).path) : undefined);
     if (paths.length === 0 || paths.some(path => path === undefined)) continue;
     if (paths.every(path => {
-      const outputRequirement = requestedFileOutputs(input.requirements).find(file => file.path === path);
+      const outputRequirement = requestedFileOutputs(input.requirements).find(file => file.path === path || file.alternativePaths?.includes(path!));
       const bound = outputRequirement === undefined ? undefined : input.requirements;
       const evidence = fileOutputEvidence({ ...input, requirements: {
         ...bound, skillReferences: [], originTurnId: receipt.visibleTurnId,
-        fileOutput: { ...outputRequirement, path: path!, format: "text" }, issues: bound?.issues ?? []
+        fileOutput: { ...outputRequirement, alternativePaths: undefined, path: path!, format: "text" }, issues: bound?.issues ?? []
       } });
       return evidence.satisfied && evidence.writeCallId === receipt.toolCallId;
     })) verified.add(receipt.toolCallId);
@@ -191,7 +221,8 @@ function verifiedFileContent(input: Parameters<typeof fileOutputEvidence>[0], ev
   const write = input.toolExecutions.find(execution => execution.toolCallId === evidence.writeCallId);
   if (write === undefined) return undefined;
   const metadata = write.result?.metadata;
-  const outputs = Array.isArray(metadata?.fileOutputs) ? metadata.fileOutputs : [metadata];
+  const receipt = input.executionReceipts.find(receipt => receipt.toolCallId === write.toolCallId);
+  const outputs = commandCompleted(write) ? commandFileChanges(write, receipt?.visibleTurnId) : Array.isArray(metadata?.fileOutputs) ? metadata.fileOutputs : [metadata];
   const output = outputs.find(value => value !== null && typeof value === "object" &&
     safePath((value as Record<string, unknown>).path) === evidence.path) as Record<string, unknown> | undefined;
   const digest = output?.contentSha256;
@@ -210,4 +241,31 @@ function verifiedFileContent(input: Parameters<typeof fileOutputEvidence>[0], ev
     if (content.startsWith(prefix) && matches(content.slice(prefix.length))) return content.slice(prefix.length);
   }
   return undefined;
+}
+
+/** Only known runtime-owned command observations qualify, bound to the turn
+ * that started the command. Arbitrary tools and provider metadata cannot write. */
+function commandFileChanges(execution: ToolExecutionRecord, visibleTurnId?: string): Array<{ path: string; contentSha256?: string }> {
+  if (!["terminal.run", "execute_code", "process.start", "process.logs"].includes(execution.tool.name)) return [];
+  const value = execution.result?.metadata?.commandFileObservation;
+  if (!value || typeof value !== "object") return [];
+  const observation = value as Record<string, unknown>;
+  if (typeof observation.id !== "string" || !/^[a-f0-9-]{36}$/u.test(observation.id) || typeof observation.completed !== "boolean") return [];
+  if (!visibleTurnId || observation.originTurnId !== visibleTurnId || !Array.isArray(observation.files) || observation.files.length > MAX_FILE_OUTPUTS) return [];
+  return observation.files.flatMap(value => {
+    if (!value || typeof value !== "object") return [];
+    const { path, before, after } = value as Record<string, unknown>;
+    const target = safePath(path);
+    if (!target || (before !== null && !validDigest(before)) || before === after) return [];
+    return [{ path: target, ...(observation.completed === true && validDigest(after) ? { contentSha256: after } : {}) }];
+  });
+}
+
+function commandCompleted(execution: ToolExecutionRecord): boolean {
+  const metadata = execution.result?.metadata;
+  if (execution.tool.name === "terminal.run") return metadata?.code === 0 && metadata.signal === null && metadata.timedOut === false && metadata.cancelled === false && metadata.running !== true;
+  if (execution.tool.name === "execute_code") return metadata?.exitCode === 0 && metadata.signal === null && metadata.timedOut !== true && metadata.cancelled !== true;
+  if (execution.tool.name !== "process.logs" || !metadata?.process || typeof metadata.process !== "object") return false;
+  const process = metadata.process as Record<string, unknown>;
+  return process.status === "exited" && process.exitCode === 0 && process.signal == null;
 }

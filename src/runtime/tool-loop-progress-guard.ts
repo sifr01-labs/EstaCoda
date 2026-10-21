@@ -148,7 +148,7 @@ export class ToolLoopProgressGuard {
         for (const output of outputs) {
           if (output === null || typeof output !== "object") continue;
           const { path, contentSha256 } = output as Record<string, unknown>;
-          const requestedPaths = requestedFileOutputs(this.#checkpointReader?.current()?.requestRequirements).flatMap(file => file.path === undefined ? [] : [file.path]);
+          const requestedPaths = requestedFileOutputs(this.#checkpointReader?.current()?.requestRequirements).flatMap(file => file.path === undefined ? [] : [file.path, ...(file.alternativePaths ?? [])]);
           if (typeof path !== "string" || (requestedPaths.length > 0 && !requestedPaths.includes(path)) ||
             typeof contentSha256 !== "string" || !/^[a-f0-9]{64}$/u.test(contentSha256)) continue;
           const key = fingerprint({ path, contentSha256 });
@@ -234,7 +234,7 @@ export class ToolLoopProgressGuard {
       // A fresh successful process result can keep work moving, but never proves
       // the requested deliverable complete. Both call and result must be new;
       // unchanged completion repairs still need their specific evidence.
-      if (!checkpointControlsProgress || (!unchangedCompletionRepair && successfulTerminalReceipt(execution))) {
+      if (!checkpointControlsProgress || (!unchangedCompletionRepair && successfulCommandReceipt(execution))) {
         materialProgress = true;
         progressKinds.add("new-tool-result");
       }
@@ -327,7 +327,11 @@ function toolCallFingerprint(execution: ToolExecutionRecord): string {
     target: execution.targetKey ?? execution.targetSummary });
 }
 
-function successfulTerminalReceipt(execution: ToolExecutionRecord): boolean {
+function successfulCommandReceipt(execution: ToolExecutionRecord): boolean {
+  if (execution.tool.name === "execute_code") {
+    const metadata = execution.result?.metadata;
+    return metadata?.exitCode === 0 && metadata.signal === null && metadata.timedOut !== true && metadata.cancelled !== true;
+  }
   if (execution.tool.name !== "terminal.run" && execution.tool.name !== "terminal.inspect") return false;
   const metadata = execution.result?.metadata;
   return metadata?.code === 0 && metadata.signal === null && metadata.timedOut === false && metadata.cancelled === false;

@@ -1,3 +1,5 @@
+import { beginCommandFileObservation, finishCommandFileObservation } from "../execution/command-file-evidence.js";
+import type { ToolExecutionContext } from "../contracts/tool.js";
 import { undispatchedResult } from "./undispatched-result.js";
 import { EditorContentView } from "../execution/editor-content-view.js";
 import { HostProcessScope, type HostProcesses } from "../execution/host-processes.js";
@@ -300,7 +302,6 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
           if (observedDigest === undefined) {
             return undispatchedResult(errorResult("Read the complete source with file.read before using sourceFile. A source path alone does not authorize a read."));
           }
-          if (!isTextyPath(sourcePath.path)) return undispatchedResult(errorResult("Source file type is not included as text."));
           if (fsAdapter !== undefined && !await contentView.isMaterialized(sourcePath.path).catch(() => false)) {
             return undispatchedResult(errorResult("Save or reload the source editor buffer before copying its disk content."));
           }
@@ -712,17 +713,20 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
         try { await contentView.assertMaterialized(); } catch (error) { return errorResult(error instanceof Error ? error.message : "Editor content is not materialized."); }
         const signal = AbortSignal.any([...[context?.signal, options.executionLease?.signal].filter((value): value is AbortSignal => value !== undefined)]);
         if (options.processManager && input.timeoutMs == null) {
-          return runManagedCommand(options.processManager, input.command, Math.min(commandTimeoutMs, 30_000), signal, context?.continuationSignal ?? options.executionLease?.signal);
+          return runManagedCommand(options.processManager, input.command, Math.min(commandTimeoutMs, 30_000), signal, context?.continuationSignal ?? options.executionLease?.signal, context);
         }
         const ownedProcesses = options.executionLease ? undefined : new HostProcessScope(root);
-        try { return await runCommand(
+        const observation = await beginCommandFileObservation(files, context?.requestContract?.requirements, context?.visibleTurnId);
+        try { const result = await runCommand(
           await realpath(root),
           input.command,
           Math.max(1, Math.min(Number.isFinite(input.timeoutMs) ? input.timeoutMs! : commandTimeoutMs, commandTimeoutMs)),
           options.childProcessEnv,
           options.executionLease?.processes ?? ownedProcesses!,
           signal
-        ); } finally { await ownedProcesses?.release(); }
+        );
+          return { ...result, metadata: { ...result.metadata, commandFileObservation: await finishCommandFileObservation(files, observation) } };
+        } finally { await ownedProcesses?.release(); }
       }
     }
   ];
@@ -1801,8 +1805,8 @@ function isNodeError(error: unknown): error is NodeJS.ErrnoException {
   return typeof error === "object" && error !== null && "code" in error;
 }
 
-async function runManagedCommand(manager: ProcessManager, command: string, waitMs: number, signal: AbortSignal, continuationSignal?: AbortSignal): Promise<ToolResult> {
-  const started = await manager.start(command, signal, { input: false, continuationSignal });
+async function runManagedCommand(manager: ProcessManager, command: string, waitMs: number, signal: AbortSignal, continuationSignal?: AbortSignal, context?: ToolExecutionContext): Promise<ToolResult> {
+  const started = await manager.start(command, signal, { input: false, continuationSignal, requirements: context?.requestContract?.requirements, visibleTurnId: context?.visibleTurnId });
   const process = (await manager.wait(started.id, waitMs, signal))!;
   const logs = manager.logs(process.id, { tailChars: 16_000 }) ?? [];
   const stdout = logs.filter(log => log.stream === "stdout").map(log => log.text).join("");
@@ -1817,6 +1821,7 @@ async function runManagedCommand(manager: ProcessManager, command: string, waitM
     ok: running || process.status === "exited",
     content: content.slice(0, 16_000) || "(no output)",
     metadata: {
+      commandFileObservation: await manager.fileObservation(process.id),
       command, process, running, code: process.exitCode ?? null, signal: process.signal ?? null,
       timedOut: false, cancelled: false,
       _estacoda_context_summary: running
@@ -2514,15 +2519,14 @@ function createWorkspaceIO(files: WorkspaceFiles) {
     path: string,
     options: { maxReadBytes: number; lineStart?: number; lineEnd?: number }
   ): Promise<ToolResult> {
-    if (!isTextyPath(path)) {
-      return errorResult("file type is not included as text");
-    }
-
     const bytes = await readFile(path);
     if (isLikelyBinary(bytes)) {
       return errorResult("file appears to be binary");
     }
 
+    if (!Buffer.from(bytes.toString("utf8"), "utf8").equals(bytes)) {
+      return errorResult("file is not valid UTF-8 text");
+    }
     const content = bytes.subarray(0, options.maxReadBytes).toString("utf8");
     const result = renderWorkspaceFile(root, path, content, {
       ...options,

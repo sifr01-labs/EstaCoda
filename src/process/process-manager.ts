@@ -1,3 +1,6 @@
+import { beginCommandFileObservation, finishCommandFileObservation, type CommandFileObservation } from "../execution/command-file-evidence.js";
+import { HostWorkspaceFiles, type WorkspaceFiles } from "../execution/host-workspace-files.js";
+import type { RequestRequirements } from "../contracts/intent.js";
 import { HostProcessScope, type HostProcesses } from "../execution/host-processes.js";
 import type { HostExecutionLease } from "../execution/host-environment.js";
 import { type ChildProcessByStdio } from "node:child_process";
@@ -26,6 +29,8 @@ export type ManagedProcessLog = {
 };
 
 type InternalManagedProcess = ManagedProcessRecord & {
+  fileObservation?: CommandFileObservation;
+  finalFileObservation?: Promise<CommandFileObservation | undefined>;
   child?: ChildProcessByStdio<Writable, Readable, Readable>;
   logs: ManagedProcessLog[];
   protectedEnvironmentVariable?: string;
@@ -44,6 +49,7 @@ export type ProcessManagerOptions = {
 const DEFAULT_MAX_LOG_CHARS = 96_000;
 
 export class ProcessManager {
+  readonly #files: WorkspaceFiles;
   readonly #workspaceRoot: string;
   readonly #childProcessEnv: ProcessManagerOptions["childProcessEnv"];
   readonly #processScope: HostProcesses;
@@ -60,6 +66,7 @@ export class ProcessManager {
     this.#lease = options.executionLease;
     this.#childProcessEnv = options.childProcessEnv;
     this.#workspaceRoot = options.executionLease?.workspaceRoot ?? resolve(options.workspaceRoot);
+    this.#files = options.executionLease?.files ?? new HostWorkspaceFiles(this.#workspaceRoot);
     this.#ownedScope = options.executionLease === undefined ? new HostProcessScope(this.#workspaceRoot) : undefined;
     this.#processScope = options.executionLease?.processes ?? this.#ownedScope!;
     this.#maxLogChars = Math.max(1, Math.min(options.maxLogChars ?? DEFAULT_MAX_LOG_CHARS, DEFAULT_MAX_LOG_CHARS));
@@ -68,12 +75,14 @@ export class ProcessManager {
     options.executionLease?.own({ release: () => this.dispose() });
   }
 
-  async start(command: string, signal?: AbortSignal, options: { input?: boolean; continuationSignal?: AbortSignal } = {}): Promise<ManagedProcessRecord> {
+  async start(command: string, signal?: AbortSignal, options: { input?: boolean; continuationSignal?: AbortSignal; requirements?: RequestRequirements; visibleTurnId?: string } = {}): Promise<ManagedProcessRecord> {
     signal?.throwIfAborted();
     options.continuationSignal?.throwIfAborted();
     const record = await this.#createRecord(command, "running");
     if (signal?.aborted) { this.#processes.delete(record.id); signal.throwIfAborted(); }
     if (options.continuationSignal?.aborted) { this.#processes.delete(record.id); options.continuationSignal.throwIfAborted(); }
+    record.fileObservation = await beginCommandFileObservation(this.#files, options.requirements, options.visibleTurnId);
+    if (signal?.aborted || options.continuationSignal?.aborted) { this.#processes.delete(record.id); (signal?.aborted ? signal : options.continuationSignal)!.throwIfAborted(); }
     this.#spawn(record, undefined, options.input ?? true);
     if (record.child && record.status === "running" && options.continuationSignal) {
       const continuationSignal = options.continuationSignal;
@@ -112,6 +121,12 @@ export class ProcessManager {
       if (signal?.aborted) onAbort();
     });
     return toRecord(record);
+  }
+
+  async fileObservation(id: string): Promise<CommandFileObservation | undefined> {
+    const record = this.#processes.get(id);
+    if (!record || record.status === "prepared") return undefined;
+    return record.finalFileObservation ?? record.fileObservation;
   }
 
   async prepareProtectedEnvironment(command: string, variableName: string): Promise<ManagedProcessRecord> {
@@ -218,6 +233,7 @@ export class ProcessManager {
         this.#appendLog(record, "system", error.message);
       });
       child.on("close", (code, signal) => {
+        record.finalFileObservation = finishCommandFileObservation(this.#files, record.fileObservation);
         record.protectedEnvironmentVariable = undefined;
         if (record.status === "stopped") {
           record.exitCode = code;

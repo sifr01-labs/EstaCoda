@@ -1,3 +1,5 @@
+import { beginCommandFileObservation, finishCommandFileObservation } from "../execution/command-file-evidence.js";
+import { HostWorkspaceFiles } from "../execution/host-workspace-files.js";
 import type { HostExecutionLease } from "../execution/host-environment.js";
 import { HostProcessScope, type HostProcesses } from "../execution/host-processes.js";
 import { mkdir, mkdtemp, rm, writeFile } from "node:fs/promises";
@@ -66,7 +68,9 @@ export function createExecuteCodeTool(options: ExecuteCodeToolOptions): Register
       }
       try { await options.executionLease?.content.assertMaterialized(); }
       catch (error) { return errorResult(error instanceof Error ? error.message : "Editor content is not materialized."); }
-      return runCode({
+      const files = options.executionLease?.files ?? new HostWorkspaceFiles(options.workspaceRoot);
+      const observation = await beginCommandFileObservation(files, context?.requestContract?.requirements, context?.visibleTurnId);
+      const result = await runCode({
         signal: context?.signal,
         code: input.code,
         input: asRecord(input.input),
@@ -95,6 +99,7 @@ export function createExecuteCodeTool(options: ExecuteCodeToolOptions): Register
             trustedWorkspace: await options.trustedWorkspace(),
             sessionId: typeof options.sessionId === "function" ? options.sessionId() : options.sessionId,
             visibleTurnId: context?.visibleTurnId,
+            requestContract: context?.requestContract,
             providerUsageLineage: context?.providerUsageLineage,
             visionInputProvenance: context?.visionInputProvenance,
             signal,
@@ -125,6 +130,7 @@ export function createExecuteCodeTool(options: ExecuteCodeToolOptions): Register
           return execution.result;
         }
       });
+      return { ...result, metadata: { ...result.metadata, commandFileObservation: await finishCommandFileObservation(files, observation) } };
     }
   };
 }

@@ -31,3 +31,13 @@ describe("persisted multiple file requirements", () => {
     expect(() => validateRequestRequirements({ skillReferences: [], issues: [], fileOutput: { format: "text", additionalFiles: [secondary] } })).toThrow();
   });
 });
+
+
+describe("explicit alternative destinations", () => {
+  it.each([[], ["a.txt"], ["./a.txt"], ["../escape.txt"], ["/outside.txt"], [undefined], [2], Array.from({ length: 8 }, (_, i) => `b${i}.txt`)])("rejects invalid alternatives %#", (...alternativePaths) => {
+    expect(() => validateRequestRequirements({ skillReferences: [], issues: [], fileOutput: { format: "text", path: "a.txt", alternativePaths } })).toThrow();
+  });
+  it("counts alternatives together with mandatory outputs", () => {
+    expect(() => validateRequestRequirements({ skillReferences: [], issues: [], fileOutput: { format: "text", path: "a.txt", alternativePaths: ["b.txt"], additionalFiles: [{ format: "text", path: "b.txt" }] } })).toThrow();
+  });
+});

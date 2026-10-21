@@ -45,7 +45,7 @@ export function validateRequestRequirements(value: unknown): RequestRequirements
     if (!["general", "literature", "paper"].includes(String(research.domain)) || typeof research.fresh !== "boolean") throw new Error("Invalid research requirement.");
   }
   if (record.fileOutput !== undefined) {
-    const primary = object(record.fileOutput, ["format", "path", "exactCopy", "additionalFiles"]);
+    const primary = object(record.fileOutput, ["format", "path", "alternativePaths", "exactCopy", "additionalFiles"]);
     const { additionalFiles, ...file } = primary;
     validateFile(file);
     if (additionalFiles !== undefined) {
@@ -58,6 +58,8 @@ export function validateRequestRequirements(value: unknown): RequestRequirements
       }
     }
   }
+  const targets = requestedFileOutputs(record as RequestRequirements).flatMap(file => [file.path, ...(file.alternativePaths ?? [])]);
+  if (targets.length > MAX_FILE_OUTPUTS || new Set(targets.map(path => path === undefined ? path : posix.normalize(path.replaceAll("\\", "/")))).size !== targets.length) throw new Error("Invalid file target count or duplicates.");
   return structuredClone(record) as RequestRequirements;
 }
 
@@ -67,7 +69,14 @@ function object(value: unknown, keys: string[]): Record<string, unknown> {
 }
 
 function validateFile(value: unknown): Record<string, unknown> {
-  const file = object(value, ["format", "path", "exactCopy"]);
+  const file = object(value, ["format", "path", "alternativePaths", "exactCopy"]);
+  if (file.alternativePaths !== undefined) {
+    if (file.path === undefined || !Array.isArray(file.alternativePaths) || file.alternativePaths.length === 0 || file.alternativePaths.length >= MAX_FILE_OUTPUTS || file.exactCopy !== undefined) throw new Error("Invalid alternative file targets.");
+    for (const path of file.alternativePaths) {
+      if (typeof path !== "string") throw new Error("Invalid alternative file target.");
+      validateFile({ format: "text", path });
+    }
+  }
   if (file.exactCopy !== undefined) {
     const copy = object(file.exactCopy, ["sourcePath"]);
     if (copy.sourcePath !== undefined) validateFile({ format: "text", path: copy.sourcePath });

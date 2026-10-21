@@ -14,6 +14,7 @@ function createFakeProcessManager(): ProcessManager {
     })),
     list: vi.fn(() => []),
     logs: vi.fn(() => []),
+    fileObservation: vi.fn(async () => undefined),
     stop: vi.fn(),
     prepareProtectedEnvironment: vi.fn(async (command: string, variableName: string) => ({
       id: "proc-protected",
@@ -44,7 +45,7 @@ describe("process.start hardline floor", () => {
     const result = await start?.run({ command: "rm -rf ./build" });
 
     expect(result?.ok).toBe(true);
-    expect(processManager.start).toHaveBeenCalledWith("rm -rf ./build", undefined, { continuationSignal: undefined });
+    expect(processManager.start).toHaveBeenCalledWith("rm -rf ./build", undefined, { continuationSignal: undefined, requirements: undefined, visibleTurnId: undefined });
   });
 
   it("rejects hardBlock commands inside the process handler", async () => {
@@ -78,7 +79,7 @@ describe("protected process tool requests", () => {
       const onSecureInputRequest = vi.fn();
       const result = await start.run({ command: "sleep 1", protectedEnvironment }, { onSecureInputRequest });
       expect(result.ok).toBe(true);
-      expect(processManager.start).toHaveBeenCalledExactlyOnceWith("sleep 1", undefined, { continuationSignal: undefined });
+      expect(processManager.start).toHaveBeenCalledExactlyOnceWith("sleep 1", undefined, { continuationSignal: undefined, requirements: undefined, visibleTurnId: undefined });
       expect(processManager.prepareProtectedEnvironment).not.toHaveBeenCalled();
       expect(onSecureInputRequest).not.toHaveBeenCalled();
     }

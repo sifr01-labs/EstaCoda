@@ -116,6 +116,7 @@ export function deriveExecutionFinalOutcome(input: {
     confirmedActions,
     uncertainActions,
     fileOutputSatisfied: (input.delegatedAnswerOwned === true || fileEvidence.satisfied) && researchRequestEvidence(input).satisfied,
+    verifiedFileOutput: fileEvidence.satisfied && fileEvidence.writeCallId !== undefined,
     delegatedFileOutput: input.delegatedAnswerOwned === true && input.requestRequirements?.fileOutput !== undefined
   });
   return { status, terminationCause, completionFloor, confirmedActions, uncertainActions };
@@ -317,6 +318,7 @@ function recoveredReplayCallIds(receipts: readonly ExecutionEvidenceRecord[]): R
 function classifyFinalStatus(input: {
   fileOutputSatisfied: boolean;
   delegatedFileOutput: boolean;
+  verifiedFileOutput: boolean;
   providerExecution?: ProviderExecutionResult;
   executionReceipts: readonly ExecutionEvidenceRecord[];
   toolPlans?: readonly ToolCallPlan[];
@@ -347,7 +349,7 @@ function classifyFinalStatus(input: {
   const hasConfirmedWork = input.confirmedActions.length > 0 || succeeded > 0;
   const hasUsefulEvidence = hasConfirmedWork || input.uncertainActions.length > 0;
   const unresolvedToolPlans = (input.toolPlans ?? []).some(isUnresolvedPlan);
-  const completionFloorSatisfied = input.fileOutputSatisfied && (input.delegatedFileOutput || settlesCompletionFloor(
+  const completionFloorSatisfied = input.fileOutputSatisfied && (input.delegatedFileOutput || input.verifiedFileOutput || settlesCompletionFloor(
     input.completionFloor,
     authoritativeReceipts,
     input.confirmedActions

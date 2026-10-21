@@ -23,13 +23,15 @@ afterEach(async () => {
 });
 
 describe("workspace file change preview metadata", () => {
-  it.each(["tsv", "log", "jsonl", "ndjson"])("reads ordinary %s text while retaining binary and path protections", async extension => {
+  it.each(["tsv", "log", "jsonl", "ndjson", "c", "h", "R", "scm", "xml", "fasta", "conf", "proto", "custom"])("reads ordinary %s text while retaining binary and path protections", async extension => {
     const root = await makeTempDir();
     const tool = createWorkspaceTools({ workspaceRoot: root }).find(tool => tool.name === "file.read")!;
     await writeFile(join(root, `input.${extension}`), "name\tvalue\nArabic\tمرحبا\n");
     expect(await tool.run({ path: `input.${extension}` })).toMatchObject({ ok: true, metadata: { completeFileRead: true } });
     await writeFile(join(root, `binary.${extension}`), Buffer.from([1, 0, 2]));
     expect((await tool.run({ path: `binary.${extension}` })).ok).toBe(false);
+    await writeFile(join(root, `invalid.${extension}`), Buffer.from([0xc3, 0x28]));
+    expect((await tool.run({ path: `invalid.${extension}` })).ok).toBe(false);
     expect((await tool.run({ path: `../outside.${extension}` })).ok).toBe(false);
   });
   it("copies authorized accepted results exactly and verifies a large file without echoing all bytes", async () => {
@@ -1294,14 +1296,15 @@ it("requires an actual source read before copying", async () => {
   await expect(access(join(root, "copy.txt"))).rejects.toThrow();
 });
 
-it("refuses lossy UTF-8 copies even after a successful source read", async () => {
+it("refuses lossy UTF-8 reads and copies", async () => {
   const root = await makeTempDir();
   await writeFile(join(root, "source.txt"), Buffer.from([0x61, 0xff, 0x0a]));
   const tools = createWorkspaceTools({ workspaceRoot: root });
   const read = await tools.find(t => t.name === "file.read")!.run({ path: "source.txt" });
-  expect(read.ok).toBe(true);
+  expect(read.ok).toBe(false);
   const result = await tools.find(t => t.name === "file.write")!.run({ path: "copy.txt", sourceFile: { path: "source.txt" } });
   expect(result).toMatchObject({ ok: false });
-  expect(result.content).toContain("valid UTF-8");
+  expect(read.content).toContain("valid UTF-8");
+  expect(result.content).toContain("Read the complete source");
   await expect(access(join(root, "copy.txt"))).rejects.toThrow();
 });

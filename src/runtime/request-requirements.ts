@@ -6,7 +6,9 @@ import { affirmativeRequestSegments } from "./request-action-segments.js";
 
 const MAX_REQUEST_CHARS = 32_768;
 // Text deliverables use the existing file tools and materialized read-back contract.
-const TEXT_EXTENSIONS = "md|markdown|txt|json|jsonl|ndjson|csv|tsv|yaml|yml|xml|html|css|ts|tsx|js|jsx|py";
+const TEXT_EXTENSIONS = "[a-z][a-z0-9_+-]{0,15}";
+// Binary/media deliverables use their own completion contracts, not text readback.
+const BINARY_EXTENSION = /\.(?:png|jpe?g|gif|webp|ico|pdf|zip|gz|tar|7z|exe|dll|so|dylib|mp[34]|wav|mov|avi|woff2?|ttf|docx?|xlsx?|pptx?)$/iu;
 const FILE_NAME = new RegExp("`([^`\\n]{1,240}\\.(?:" + TEXT_EXTENSIONS + "))`|" + String.raw`(?:[\p{L}\p{N}_./\\:-]+\.(?:${TEXT_EXTENSIONS}))\b`, "giu");
 const QUOTED_FILE_NAME = new RegExp(String.raw`^[\p{L}\p{N}_ ./\\:-]{1,240}\.(?:${TEXT_EXTENSIONS})$`, "iu");
 const OUTPUT_ACTION = /\b(?:prepare|save|export|write|create|generate|clear|empty|truncate)\s+|(?:احفظ(?:ها|ه)?|صدّر(?:ها|ه)?|صدر(?:ها|ه)?|أنشئ|اكتب(?:ها|ه)?|جهّز|جهز|أعد|أفرغ|افرغ)\s+/iu;
@@ -51,7 +53,8 @@ export function explicitRequestSegments(text: string): string[] {
       return " ";
     });
   return affirmativeRequestSegments(sanitized)
-    .flatMap(segment => INERT_CONTEXT.test(segment.replace(FILE_OPERAND, " [file] ")) ? [segment] : splitRequestClauses(segment))
+    .flatMap(segment => INERT_CONTEXT.test(segment.replace(FILE_OPERAND, " [file] ")) ? [segment]
+      : segment.split(/\n\s*[-*+]\s+/u).flatMap(splitRequestClauses))
     .map(segment => {
       // Invoking a skill to explain something still invokes the skill. Keep the
       // purpose informational: "explain how to save" must not require a write.
@@ -121,9 +124,18 @@ export function deriveRequestRequirements(userText: string, originTurnId?: strin
     // even when it includes quoted filenames. It cannot add output targets.
     const contentStart = /\b(?:with|containing)\s+|:\s*(?=[{\[])/iu.exec(masked.slice(outputStart));
     const beforeContent = contentStart ? segment.slice(outputStart, outputStart + contentStart.index) : undefined;
-    const outputSegment = beforeContent !== undefined && [...beforeContent.matchAll(FILE_NAME)].length > 0
+    let outputSegment = beforeContent !== undefined && [...beforeContent.matchAll(FILE_NAME)].length > 0
       ? beforeContent : segment.slice(outputStart);
-    const pathMatches = [...outputSegment.matchAll(FILE_NAME)];
+    // A source or behavioral constraint following a named output is not another output.
+    const inputStart = /\b(?:using|from|based on|such that|that when|that's|that is|so that)\s+/iu.exec(outputSegment);
+    if (!copy && inputStart && [...outputSegment.slice(0, inputStart.index).matchAll(FILE_NAME)].length > 0) outputSegment = outputSegment.slice(0, inputStart.index);
+    let pathMatches = [...outputSegment.matchAll(FILE_NAME)].filter(match => !BINARY_EXTENSION.test(match[1] ?? match[0]) && !/^(?:e\.g|i\.e)$/iu.test(match[1] ?? match[0]));
+    // "named x.py, and place it in /app/x.py" names one file twice.
+    if (pathMatches.length === 2) {
+      const names = pathMatches.map(match => match[1] ?? match[0]);
+      if (!/[/\\:]/u.test(names[0]!) && posix.basename(names[1]!) === names[0] &&
+          /\b(?:place|put|save)\s+it\s+(?:in|at|to)\b/iu.test(outputSegment)) pathMatches = pathMatches.slice(1);
+    }
     const namedPaths = pathMatches.map((match) => match[1] ?? match[0]);
     // In an explicit copy, the final as/to operand is the destination; the
     // preceding source is not a second output. Multiple sources stay ambiguous.
@@ -137,17 +149,21 @@ export function deriveRequestRequirements(userText: string, originTurnId?: strin
       const separator = outputSegment.slice(previous.index! + previous[0].length, match.index);
       return /^\s*(?:,\s*(?:and\s+)?|and\s+|&\s*|و\s*)$/iu.test(separator);
     });
-    if ((!copy && paths.length > 1 && !conjunctive) || (copy && namedPaths.length > 2)) {
+    const alternatives = !copy && /\bat least one\b|واحد على الأقل/iu.test(actionSegment) && pathMatches.length > 1 &&
+      pathMatches.slice(1).every((match, index) => /^\s*(?:or|أو)\s*$/iu.test(outputSegment.slice(pathMatches[index]!.index! + pathMatches[index]![0].length, match.index)));
+    if ((!copy && paths.length > 1 && !conjunctive && !alternatives) || (copy && namedPaths.length > 2)) {
       result.issues.push("ambiguous-file-target");
     }
     const sourcePath = copy && namedPaths.length === 2 ? namedPaths[0] : undefined;
     const normalizedSource = sourcePath === undefined ? undefined : workspaceRelativeRequirementPath(sourcePath, workspaceRoot);
     if (sourcePath !== undefined && normalizedSource === undefined) result.issues.push("unsafe-file-target");
     const outputs = requestedFileOutputs(result);
+    const group: FileOutputRequirement[] = [];
     for (const candidate of paths.length === 0 ? [undefined] : paths) {
       const bareName = candidate !== undefined && !/[/\\:]/u.test(candidate);
       const directDirectory = /\b(?:in|under|into)\s+(?:the\s+)?(?:directory\s+)?(?:`([^`]+)`|((?:\/|\.\/)[\w./-]+))/iu.exec(outputSegment);
-      const directories = directDirectory ? [directDirectory[1] ?? directDirectory[2]!] : outputDirectories;
+      const directory = directDirectory?.[1] ?? directDirectory?.[2];
+      const directories = directory !== undefined && (!QUOTED_FILE_NAME.test(directory) || /\bdirectory\b/iu.test(directDirectory![0])) ? [directory] : outputDirectories;
       if (bareName && directories.length > 1) result.issues.push("ambiguous-file-target");
       const destination = bareName && directories.length === 1
         ? `${directories[0]!.replace(/\/$/u, "")}/${candidate}` : candidate;
@@ -158,6 +174,7 @@ export function deriveRequestRequirements(userText: string, originTurnId?: strin
         ...(path === undefined ? {} : { path }),
         ...(copy ? { exactCopy: normalizedSource === undefined ? {} : { sourcePath: normalizedSource } } : {})
       };
+      if (alternatives) { group.push(output); continue; }
       const existing = outputs.find(value => value.path === path);
       if (existing !== undefined) {
         if (JSON.stringify(existing.exactCopy) !== JSON.stringify(output.exactCopy) || existing.format !== output.format) result.issues.push("ambiguous-file-target");
@@ -167,9 +184,16 @@ export function deriveRequestRequirements(userText: string, originTurnId?: strin
         result.issues.push("ambiguous-file-target");
         continue;
       }
-      if (outputs.length >= MAX_FILE_OUTPUTS) { result.issues.push("request-too-long"); continue; }
+      if (outputs.flatMap(file => [file.path, ...(file.alternativePaths ?? [])]).length >= MAX_FILE_OUTPUTS) { result.issues.push("request-too-long"); continue; }
       outputs.push(output);
     }
+    if (alternatives && group.length) {
+      const paths = group.map(file => file.path);
+      if (paths.some(path => path === undefined) || outputs.flatMap(file => [file.path, ...(file.alternativePaths ?? [])]).length + paths.length > MAX_FILE_OUTPUTS) result.issues.push("request-too-long");
+      else outputs.push({ ...group[0]!, alternativePaths: paths.slice(1) as string[] });
+    }
+    const allPaths = outputs.flatMap(file => [file.path, ...(file.alternativePaths ?? [])]);
+    if (new Set(allPaths).size !== allPaths.length) result.issues.push("ambiguous-file-target");
     if (outputs.length > 0) result.fileOutput = { ...outputs[0], ...(outputs.length > 1 ? { additionalFiles: outputs.slice(1) } : {}) };
   }
   result.skillReferences = [...new Set(result.skillReferences)];

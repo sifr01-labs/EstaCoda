@@ -85,13 +85,14 @@ export function createProcessTools(options: ProcessToolOptions): readonly Regist
           };
         }
 
-        const process = await options.processManager.start(input.command, context?.signal, { continuationSignal: context?.continuationSignal });
+        const process = await options.processManager.start(input.command, context?.signal, { continuationSignal: context?.continuationSignal, requirements: context?.requestContract?.requirements, visibleTurnId: context?.visibleTurnId });
 
         return {
           ok: process.status === "running",
           content: `Started ${process.id}: ${process.command}`,
           metadata: {
-            process
+            process,
+            commandFileObservation: await options.processManager.fileObservation(process.id)
           }
         };
       }
@@ -210,6 +211,7 @@ export function createProcessTools(options: ProcessToolOptions): readonly Regist
           metadata: {
             id: input.id,
             logs,
+            commandFileObservation: await options.processManager.fileObservation(input.id),
             process
           }
         };

@@ -365,6 +365,10 @@ export class DurableDelegationService {
     if (deliveryAuthority !== undefined && requestContract !== undefined) {
       const deliveryContract = structuredClone(requestContract);
       deliveryContract.requirements.fileOutput!.path ??= deliveryContract.requirements.fileOutput!.format === "markdown" ? "report.md" : "report.txt";
+      // Bind delivery authority and its receipt to one explicitly permitted
+      // choice per group. The parent contract retains the user's alternatives.
+      delete deliveryContract.requirements.fileOutput!.alternativePaths;
+      for (const file of deliveryContract.requirements.fileOutput!.additionalFiles ?? []) delete file.alternativePaths;
       const idempotency = delegatedStepIdempotency(deliveryAuthority);
       steps.push({
         key: "report-delivery", title: "Save and verify research report",

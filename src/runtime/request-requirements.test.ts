@@ -357,7 +357,7 @@ describe("explicit multiple output requirements", () => {
     expect(deriveRequestRequirements("Save a.md and /app/a.md and b.md", undefined, "/app")).toMatchObject({ issues: [],
       fileOutput: { path: "a.md", additionalFiles: [{ path: "b.md" }] } });
   });
-  it.each(["Save a.md or b.md", "Save a.md or save b.md", "احفظ a.md أو b.md", "Write a.md using b.md", "Copy a.md and b.md to c.md", "Prepare a markdown file. Save a.md."])("keeps genuinely ambiguous targets unresolved: %s", prompt => {
+  it.each(["Save a.md or b.md", "Save a.md or save b.md", "احفظ a.md أو b.md", "Copy a.md and b.md to c.md", "Prepare a markdown file. Save a.md."])("keeps genuinely ambiguous targets unresolved: %s", prompt => {
     expect(deriveRequestRequirements(prompt).issues).toContain("ambiguous-file-target");
   });
   it("preserves copy sources independently for each destination", () => {
@@ -379,4 +379,30 @@ it("keeps long multi-copy requirements persistable and explicitly incomplete", (
   const requirements = deriveRequestRequirements(prompt);
   expect(requirements.issues).toContain("request-too-long");
   expect(() => validateRequestRequirements(requirements)).not.toThrow();
+});
+
+
+describe("completion target parsing regressions", () => {
+  it.each([
+    ["Write a.md using b.md", "a.md"],
+    ["Write me data.comp that's compressed such that running cat data.comp gives data.txt.", "data.comp"],
+    ["Write a script, named jump_analyzer.py, and place it in `/app/jump_analyzer.py`.", "jump_analyzer.py"],
+    ["Save your implementation in a file named \"/app/ars.R\"", "ars.R"],
+    ["Save report.toml in `/app`", "report.toml"]
+  ])("binds actual destination: %s", (prompt, path) => {
+    expect(deriveRequestRequirements(prompt, "turn", "/app")).toEqual({ originTurnId: "turn", skillReferences: [], issues: [], fileOutput: { format: path.endsWith(".md") ? "markdown" : "text", path } });
+  });
+  it("retains an explicit choice as one obligation alongside required outputs", () => {
+    const requirements = deriveRequestRequirements('Save ars.R. Generate at least one sample file named "/app/normal_samples.txt" or "/app/exponential_samples.txt" containing samples.', "turn", "/app");
+    expect(requirements).toMatchObject({ issues: [], fileOutput: { path: "ars.R", additionalFiles: [{ path: "normal_samples.txt", alternativePaths: ["exponential_samples.txt"] }] } });
+    expect(validateRequestRequirements(requirements)).toEqual(requirements);
+  });
+});
+
+
+it("keeps bullet output requirements independent of earlier payloads", () => {
+  const prompt = '- The function must be able to generate valid samples from distributions (e.g., normal)\n- Save the implementation in "/app/ars.R"\n- Your test should print results with statistics\n- Generate at least one sample file named "/app/normal_samples.txt" or "/app/exponential_samples.txt" containing samples';
+  expect(deriveRequestRequirements(prompt, "turn", "/app")).toMatchObject({ issues: [], fileOutput: { path: "ars.R", additionalFiles: [{ path: "normal_samples.txt", alternativePaths: ["exponential_samples.txt"] }] } });
+  expect(deriveRequestRequirements('Do not:\n- Save a.md\n- Write b.md').fileOutput).toBeUndefined();
+  expect(deriveRequestRequirements('Example:\n- Save a.md\n- Write b.md').fileOutput).toBeUndefined();
 });
