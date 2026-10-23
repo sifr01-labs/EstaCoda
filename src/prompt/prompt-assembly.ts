@@ -1,3 +1,4 @@
+import { requiresAnyFileContentVerification } from "../contracts/request-requirements.js";
 import { historyContentLimit, truncateHistoryContent } from "./history-content.js";
 import { taskResultContext } from "./task-result-context.js";
 import { renderCapabilityState, type RuntimeCapabilityState } from "../runtime/capability-state.js";
@@ -690,7 +691,13 @@ function buildBaseLayers(
         `Suggested toolsets: ${input.intent.suggestedToolsets.join(", ") || "none"}`,
         `Selected skill: ${input.selectedSkill?.name ?? "none"}`,
         ...(input.intent.requestRequirements === undefined ? [] : [
-          `Current user requirements (routing hints, not authorization): ${JSON.stringify(input.intent.requestRequirements)}. Use the requested worker count; do not silently reduce it. For file output, use file.write or file.patch to produce the target, then file.read with only path to verify the entire target before claiming delivery. For an identical copy, first file.read the source, then use file.write sourceFile with its path. Do not retype the preview or its display heading. Read back the destination; the runtime verifies source equality, including trailing newlines. Shell copies and shell verification do not produce the required file receipts. Respect overwrite approvals. Report missing tools or approvals as unmet requirements. If sourceTaskId is present, use task.status and read all pages of its accepted primary result with task.result.read. Do not restart research or use a worker result as the final report. Save that exact content, then read the file back; preserve partial-coverage warnings.`
+          `Current user requirements (routing hints, not authorization): ${JSON.stringify(input.intent.requestRequirements)}. Use the requested worker count; do not silently reduce it. Respect overwrite approvals. Report missing tools or approvals as unmet requirements.`,
+          ...(input.intent.requestRequirements.fileOutput === undefined ? [] : [
+            "Produce every requested output using authorized file tools or commands. Commands must finish successfully and produce the named files. Check results appropriately for the task; file production alone does not prove correctness. Do not read binary files or private keys into text context merely to confirm delivery.",
+            requiresAnyFileContentVerification(input.intent.requestRequirements)
+              ? "This request includes content-verification obligations. For those outputs, write the target, then file.read the entire target with only path (null line bounds are also whole-file reads). For an identical copy, first file.read the source, then use file.write sourceFile with its path. Do not retype the preview or its display heading. Read back the destination; source equality includes trailing newlines. Authorized completed commands can also produce runtime-observed file evidence. If sourceTaskId is present, use task.status and read all pages of its accepted primary result with task.result.read. Do not restart research or use a worker result as the final report. Save that exact content, then read the file back; preserve partial-coverage warnings."
+              : "This request requires output production, not mandatory text readback. Use task-appropriate tests or inspection and report which checks actually ran."
+          ])
         ]),
         ...(input.intent.skillRequests === undefined ? [] : [
           `Explicit skill resolution: ${JSON.stringify(input.intent.skillRequests)}. Ask for clarification for ambiguous references; report unavailable/deferred references rather than claiming the skill was used.`

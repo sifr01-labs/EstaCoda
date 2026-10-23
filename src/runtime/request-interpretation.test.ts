@@ -36,10 +36,10 @@ it.each([
  ["Are you able to review the code in source.ts?", "read"],
  ["Are you able to review code? Review this code now.", "read"],
  ["Explain your capabilities and review this code.", "read"],
- ["Explain your capabilities. Save a report to findings.md.", "mutation_with_verification"],
- ["Explain your capabilities and save a report to findings.md.", "mutation_with_verification"],
- ["اشرح قدراتك ثم احفظ التقرير في findings.md.", "mutation_with_verification"],
- ["Can you save this to findings.md?", "mutation_with_verification"],
+ ["Explain your capabilities. Save a report to findings.md.", "mutation"],
+ ["Explain your capabilities and save a report to findings.md.", "mutation"],
+ ["اشرح قدراتك ثم احفظ التقرير في findings.md.", "mutation"],
+ ["Can you save this to findings.md?", "mutation"],
  ["هل لديك القدرة على مراجعة الكود؟ افحص الملف الآن.", "read"],
 ])("keeps evidence obligations for actions and mixed requests: %s", (userText, floor) => {
  const route = new IntentRouter({skillRegistry: new SkillRegistry()}).route(userText);

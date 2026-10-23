@@ -153,7 +153,7 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
   const root = options.executionLease?.workspaceRoot ?? resolve(options.workspaceRoot);
   const processes = options.executionLease?.processes ?? new HostProcessScope(root);
   const files = options.executionLease?.files ?? new HostWorkspaceFiles(root);
-  const { applyWorkspacePatchMode, applyPreparedWorkspacePatchFiles, writePreparedWorkspacePatchFile, deletePreparedWorkspacePatchFile, writeTextFileAtomically, applyWorkspacePatchOperationMode, prepareWorkspacePatchFiles, ensureSafeParentDirectories, readWorkspaceFile, searchDirectory, searchFile, readExistingWorkspaceText, realpath, readFile, writeFile, resolveWorkspacePath } = createWorkspaceIO(files);
+  const { isOutputMaterialized, applyWorkspacePatchMode, applyPreparedWorkspacePatchFiles, writePreparedWorkspacePatchFile, deletePreparedWorkspacePatchFile, writeTextFileAtomically, applyWorkspacePatchOperationMode, prepareWorkspacePatchFiles, ensureSafeParentDirectories, readWorkspaceFile, searchDirectory, searchFile, readExistingWorkspaceText, realpath, readFile, writeFile, resolveWorkspacePath } = createWorkspaceIO(files);
   const maxReadBytes = options.maxReadBytes ?? DEFAULT_MAX_READ_BYTES;
   const maxSearchResults = options.maxSearchResults ?? DEFAULT_MAX_SEARCH_RESULTS;
   const commandTimeoutMs = options.commandTimeoutMs ?? DEFAULT_COMMAND_TIMEOUT_MS;
@@ -409,6 +409,7 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
           metadata: {
             path: relativePath,
             contentSha256: createHash("sha256").update(input.content).digest("hex"),
+            materialized: await isOutputMaterialized(path.path, input.content, fsAdapter),
             ...(copiedSource === undefined ? {} : { copiedSource }),
             bytes,
             oldBytes,
@@ -574,6 +575,7 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
           metadata: {
             path: relativePath,
             contentSha256: createHash("sha256").update(next).digest("hex"),
+            materialized: await isOutputMaterialized(path.path, next, fsAdapter),
             oldBytes: Buffer.byteLength(existing),
             newBytes: Buffer.byteLength(next),
             matchCount,
@@ -1967,6 +1969,12 @@ function explainCommandBlock(command: string, environmentType?: EnvironmentType)
 }
 
 function createWorkspaceIO(files: WorkspaceFiles) {
+  // An editor write may only change an unsaved buffer. Inspect the execution
+  // view directly, including new files that have no prior editor observation.
+  async function isOutputMaterialized(path: string, content: string, adapter?: WorkspaceFsAdapter): Promise<boolean> {
+    if (adapter === undefined) return true;
+    try { return await files.readFile(path, "utf8") === content; } catch { return false; }
+  }
   const realpath = files.realpath.bind(files);
   const readFile = files.readFile.bind(files);
   const writeFile = files.writeFile.bind(files);
@@ -2036,9 +2044,10 @@ function createWorkspaceIO(files: WorkspaceFiles) {
       content: `Applied patch to ${fileCount} file(s), ${hunkCount} hunk(s).`,
       metadata: {
         paths: prepared.files.map((file) => file.path),
-        fileOutputs: prepared.files.filter((file) => file.operation !== "delete").map((file) => ({
-          path: file.path, contentSha256: createHash("sha256").update(file.after).digest("hex")
-        })),
+        fileOutputs: await Promise.all(prepared.files.filter((file) => file.operation !== "delete").map(async (file) => ({
+          path: file.path, contentSha256: createHash("sha256").update(file.after).digest("hex"),
+          materialized: await isOutputMaterialized(file.absolutePath, file.after, input.fsAdapter)
+        }))),
         fileCount,
         hunkCount,
         oldBytes,
@@ -2281,6 +2290,7 @@ function createWorkspaceIO(files: WorkspaceFiles) {
     const metadata: Record<string, unknown> = {
       path: relativePath,
       contentSha256: createHash("sha256").update(after).digest("hex"),
+      materialized: await isOutputMaterialized(resolved.path, after, input.fsAdapter),
       operation: input.mode,
       oldBytes,
       newBytes,
@@ -2649,5 +2659,5 @@ function createWorkspaceIO(files: WorkspaceFiles) {
       throw error;
     }
   }
-  return { applyWorkspacePatchMode, applyPreparedWorkspacePatchFiles, writePreparedWorkspacePatchFile, deletePreparedWorkspacePatchFile, writeTextFileAtomically, applyWorkspacePatchOperationMode, prepareWorkspacePatchFiles, ensureSafeParentDirectories, readWorkspaceFile, searchDirectory, searchFile, readExistingWorkspaceText, realpath, readFile, writeFile, resolveWorkspacePath };
+  return { isOutputMaterialized, applyWorkspacePatchMode, applyPreparedWorkspacePatchFiles, writePreparedWorkspacePatchFile, deletePreparedWorkspacePatchFile, writeTextFileAtomically, applyWorkspacePatchOperationMode, prepareWorkspacePatchFiles, ensureSafeParentDirectories, readWorkspaceFile, searchDirectory, searchFile, readExistingWorkspaceText, realpath, readFile, writeFile, resolveWorkspacePath };
 }

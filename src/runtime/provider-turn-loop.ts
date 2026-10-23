@@ -773,7 +773,7 @@ export class ProviderTurnLoop {
           const blocker = executionSupervision.runtimeAdmissionGuard()(admission);
           if (blocker || completionReadbackPaths === undefined) return blocker;
           if (admission.tool.name === "file.read" && typeof admission.input.path === "string" &&
-              completionReadbackPaths.includes(admission.input.path) && Object.keys(admission.input).every(key => key === "path")) return undefined;
+              completionReadbackPaths.includes(admission.input.path) && Object.entries(admission.input).every(([key, value]) => key === "path" || ((key === "lineStart" || key === "lineEnd") && value == null))) return undefined;
           return { code: "completion-readback-only", reason: "Completion repair permits only full file.read calls for the already written output paths." };
         },
         onExecution: async (toolExecution) => {

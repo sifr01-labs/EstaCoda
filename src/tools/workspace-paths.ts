@@ -16,7 +16,7 @@ export type WorkspacePathResolution =
 export async function resolveWorkspacePath(
   root: string,
   path: string | undefined,
-  options: { allowMissingLeaf?: boolean; allowDirectory?: boolean; forbidSymlinks?: boolean } = {}
+  options: { allowMissingLeaf?: boolean; allowDirectory?: boolean; forbidSymlinks?: boolean; outputMetadataOnly?: boolean } = {}
 ): Promise<WorkspacePathResolution> {
   if (typeof path !== "string" || path.length === 0) {
     return pathError("path must be a non-empty string");
@@ -26,7 +26,7 @@ export async function resolveWorkspacePath(
   const candidate = resolve(root, path);
 
   // Step 2: Reject traversal before filesystem mutation
-  const blockedReason = explainPathBlock(root, candidate);
+  const blockedReason = explainPathBlock(root, candidate, { outputMetadataOnly: options.outputMetadataOnly });
   if (blockedReason !== undefined) {
     return pathError(blockedReason);
   }

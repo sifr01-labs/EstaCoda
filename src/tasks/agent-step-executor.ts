@@ -322,6 +322,7 @@ export class AgentStepExecutor implements TaskStepExecutor {
           requirements: {
             skillReferences: [], issues: [],
             ...(input.step.executor.role !== "report-delivery" ? {} : {
+              sourceTaskId: input.task.id,
               fileOutput: input.step.executor.requestContract?.requirements.fileOutput
             })
           },

@@ -5248,6 +5248,9 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     const guard = step.runtimeAdmissionGuard!;
     const admission = (name: string, input: Record<string, unknown>) => ({ tool: { ...testTool, name }, input, executionEffect: undefined });
     expect(guard(admission("file.read", { path: "report.md" }))).toBeUndefined();
+    expect(guard(admission("file.read", { path: "report.md", lineStart: null, lineEnd: null }))).toBeUndefined();
+    expect(guard(admission("file.read", { path: "report.md", lineEnd: null }))).toBeUndefined();
+    expect(guard(admission("file.read", { path: "report.md", unknown: null }))?.code).toBe("completion-readback-only");
     for (const [name, value] of [["file.write", { path: "report.md" }], ["terminal.run", { command: "denied again" }], ["file.read", { path: "other.md" }], ["file.read", { path: "report.md", lineStart: 1 }]] as const) {
       expect(guard(admission(name, value))?.code).toBe("completion-readback-only");
     }

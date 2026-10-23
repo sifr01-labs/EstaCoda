@@ -1,4 +1,4 @@
-import { validateRequestRequirements } from "../contracts/request-requirements.js";
+import { validateRequestRequirements, requiresAnyFileContentVerification } from "../contracts/request-requirements.js";
 import { describe, expect, it } from "vitest";
 import { SkillRegistry } from "../skills/skill-registry.js";
 import { IntentRouter } from "./intent-router.js";
@@ -89,12 +89,12 @@ describe("explicit text destinations", () => {
     ['احفظ النتيجة في result.json', "result.json"],
   ])("binds the destination rather than input or payload paths: %s", (text, path) => {
     const requirements = deriveRequestRequirements(text);
-    expect(requirements.fileOutput).toEqual({ format: "text", path, ...(!path.includes("/") ? { directoryUnspecified: true } : {}) });
+    expect(requirements.fileOutput).toEqual({ format: "text", verification: "execution", path, ...(!path.includes("/") ? { directoryUnspecified: true } : {}) });
     expect(requirements.issues).toEqual([]);
     expect(requiredRequestTools(requirements)).toEqual(expect.arrayContaining(["file.write", "file.read"]));
   });
   it.each(["json", "jsonl", "ndjson", "csv", "tsv", "yaml", "yml", "xml", "html", "css", "ts", "tsx", "js", "jsx", "py"])("recognizes explicit .%s text delivery", extension => {
-    expect(deriveRequestRequirements(`Save output.${extension}`).fileOutput).toEqual({ format: "text", path: `output.${extension}`, directoryUnspecified: true });
+    expect(deriveRequestRequirements(`Save output.${extension}`).fileOutput).toEqual({ format: "text", verification: "execution", path: `output.${extension}`, directoryUnspecified: true });
   });
   it.each(['Do not save de.json.', 'Explain how to save de.json.', 'The note says "save de.json".', '```\nsave de.json\n```', 'Are you able to save JSON files?', 'save.json', 'Save image.png'])('does not invent text delivery: %s', text => {
     expect(deriveRequestRequirements(text).fileOutput).toBeUndefined();
@@ -351,7 +351,7 @@ describe("explicit multiple output requirements", () => {
     "Save /app/report.md and /app/data.json"
   ])("retains each conjunctive destination: %s", prompt => {
     expect(deriveRequestRequirements(prompt, "turn", "/app")).toEqual({ originTurnId: "turn", skillReferences: [], issues: [],
-      fileOutput: { format: "markdown", path: "report.md", ...(!prompt.includes("/app/") ? { directoryUnspecified: true } : {}), additionalFiles: [{ format: "text", path: "data.json", ...(!prompt.includes("/app/") ? { directoryUnspecified: true } : {}) }] } });
+      fileOutput: { format: "markdown", verification: "execution", path: "report.md", ...(!prompt.includes("/app/") ? { directoryUnspecified: true } : {}), additionalFiles: [{ format: "text", verification: "execution", path: "data.json", ...(!prompt.includes("/app/") ? { directoryUnspecified: true } : {}) }] } });
   });
   it("deduplicates equivalent workspace paths", () => {
     expect(deriveRequestRequirements("Save a.md and /app/a.md and b.md", undefined, "/app")).toMatchObject({ issues: [],
@@ -390,7 +390,7 @@ describe("completion target parsing regressions", () => {
     ["Save your implementation in a file named \"/app/ars.R\"", "ars.R"],
     ["Save report.toml in `/app`", "report.toml"]
   ])("binds actual destination: %s", (prompt, path) => {
-    expect(deriveRequestRequirements(prompt, "turn", "/app")).toEqual({ originTurnId: "turn", skillReferences: [], issues: [], fileOutput: { format: path.endsWith(".md") ? "markdown" : "text", path, ...(["a.md", "data.comp"].includes(path) ? { directoryUnspecified: true } : {}) } });
+    expect(deriveRequestRequirements(prompt, "turn", "/app")).toEqual({ originTurnId: "turn", skillReferences: [], issues: [], fileOutput: { format: path.endsWith(".md") ? "markdown" : path === "data.comp" ? "artifact" : "text", verification: "execution", path, ...(["a.md", "data.comp"].includes(path) ? { directoryUnspecified: true } : {}) } });
   });
   it("retains an explicit choice as one obligation alongside required outputs", () => {
     const requirements = deriveRequestRequirements('Save ars.R. Generate at least one sample file named "/app/normal_samples.txt" or "/app/exponential_samples.txt" containing samples.', "turn", "/app");
@@ -414,5 +414,27 @@ describe("unspecified output directories", () => {
   });
   it.each(["Write ./extract.js", "Write /extract.js", "Write app/extract.js", "Write extract.js in /app", "Write extract.js in the current directory", "Write extract.js in the current working directory", "Write extract.js at the workspace root", "Create output directory /app. Write extract.js", "Copy source.js to extract.js", "Write extract.js. Write ./extract.js", "Write ./extract.js. Write extract.js"])("preserves exact destination constraints: %s", text => {
     expect(deriveRequestRequirements(text, "turn", "/").fileOutput?.directoryUnspecified).toBeUndefined();
+  });
+});
+
+describe("file production policy", () => {
+  it.each(["readback.txt", "re-read.txt"])("does not infer verification from a filename: %s", path => {
+    expect(requiresAnyFileContentVerification(deriveRequestRequirements(`Write ${path}`))).toBe(false);
+  });
+  it.each(["pt", "npy", "parquet", "key", "custom"])("does not prescribe text readback for .%s", extension => {
+    const requirements = deriveRequestRequirements(`Generate output.${extension} and verify it works.`);
+    expect(requirements.fileOutput).toMatchObject({ format: "artifact", verification: "execution" });
+    expect(requiresAnyFileContentVerification(requirements)).toBe(false);
+    expect(requiredRequestTools(requirements)).toContain("terminal.run");
+    const route = new IntentRouter({ skillRegistry: new SkillRegistry() }).route(`Generate output.${extension}`);
+    expect(route.taskClass).not.toBe("docs-writing");
+  });
+  it.each(["Save notes.txt. Read back the file.", "Save notes.txt and re-read it.", "احفظ notes.txt ثم أعد قراءة الملف.", "Copy source.txt to notes.txt", "Research batteries and save notes.txt"])("retains content checks for %s", prompt => {
+    const requirements = deriveRequestRequirements(prompt);
+    expect(requiresAnyFileContentVerification(requirements)).toBe(true);
+    expect(requiredRequestTools(requirements)).toContain("file.read");
+  });
+  it.each(['Do not read back files.', 'The note says "read back".', '> Read back the file.\n', '```\nread back\n```'])("does not infer readback from inert prose: %s", prefix => {
+    expect(requiresAnyFileContentVerification(deriveRequestRequirements(`${prefix}\nWrite notes.txt`))).toBe(false);
   });
 });

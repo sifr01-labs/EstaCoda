@@ -857,6 +857,27 @@ describe("AgentStepExecutor", () => {
     expect(JSON.stringify(settled)).not.toContain("source-citations-missing");
   });
 
+  it("keeps accepted-report content checks in the delivery runtime even with an execution marker", async () => {
+    const graph = makeGraph();
+    graph.steps[0]!.executor = { ...graph.steps[0]!.executor, role: "report-delivery", requestContract: {
+      version: 1, objective: "Save report.md", requirements: { skillReferences: [], issues: [],
+        fileOutput: { format: "markdown", path: "report.md", verification: "execution" } }
+    } };
+    let handled: AgentLoopInput | undefined;
+    const childFactory: ChildAgentLoopFactory = { createChild: vi.fn(async input => {
+      await sessionDb.createSession({ id: "delivery-worker", profileId: input.profileId, parentSessionId: input.parentSessionId });
+      return childRuntime(async request => { handled = request; return response(); }, async () => undefined,
+        { sessionId: "delivery-worker", trajectoryId: "delivery" });
+    }) };
+    const executor = new AgentStepExecutor({ childFactory, sessionDb, taskStore: store, hostWorkspace: graph.task.workspace,
+      isWorkspaceTrusted: () => true, parentVisibleTools: tools, approvalService: new TaskApprovalService({ store }), securityPolicy: capabilityFirstDefaults });
+    const settled = await executor.execute({ task: graph.task, step: graph.steps[0]!, attempt: attempt(graph), signal: new AbortController().signal, heartbeat: vi.fn(), checkpoint: vi.fn() });
+    expect(handled?.stepCompletion?.requirements).toMatchObject({ sourceTaskId: graph.task.id, fileOutput: { verification: "execution" } });
+    const { requiresAnyFileContentVerification } = await import("../contracts/request-requirements.js");
+    expect(requiresAnyFileContentVerification(handled?.stepCompletion?.requirements)).toBe(true);
+    expect(settled).toMatchObject({ outcome: "failed", failure: { class: "evidence-contract-unsatisfied" } });
+  });
+
   it("returns safe read-only failure output as diagnostic content", async () => {
     const graph = makeGraph();
     const childFactory: ChildAgentLoopFactory = {

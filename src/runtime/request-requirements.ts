@@ -1,18 +1,19 @@
-import { MAX_FILE_OUTPUTS, MAX_REQUEST_REQUIREMENTS_CHARS, requestedFileOutputs } from "../contracts/request-requirements.js";
+import { MAX_FILE_OUTPUTS, MAX_REQUEST_REQUIREMENTS_CHARS, requestedFileOutputs, requiresFileContentVerification } from "../contracts/request-requirements.js";
 import type { FileOutputRequirement, RequestRequirements } from "../contracts/intent.js";
 import { posix, win32 } from "node:path";
 import { interpretRequest, splitRequestClauses, isCapabilityQuestion } from "./request-interpretation.js";
 import { affirmativeRequestSegments } from "./request-action-segments.js";
 
 const MAX_REQUEST_CHARS = 32_768;
-// Text deliverables use the existing file tools and materialized read-back contract.
-const TEXT_EXTENSIONS = "[a-z][a-z0-9_+-]{0,15}";
-// Binary/media deliverables use their own completion contracts, not text readback.
-const BINARY_EXTENSION = /\.(?:png|jpe?g|gif|webp|ico|pdf|zip|gz|tar|7z|exe|dll|so|dylib|mp[34]|wav|mov|avi|woff2?|ttf|docx?|xlsx?|pptx?)$/iu;
-const FILE_NAME = new RegExp("`([^`\\n]{1,240}\\.(?:" + TEXT_EXTENSIONS + "))`|" + String.raw`(?:[\p{L}\p{N}_./\\:-]+\.(?:${TEXT_EXTENSIONS}))\b`, "giu");
-const QUOTED_FILE_NAME = new RegExp(String.raw`^[\p{L}\p{N}_ ./\\:-]{1,240}\.(?:${TEXT_EXTENSIONS})$`, "iu");
+// File names identify destinations; they do not prescribe a text-reading workflow.
+const FILE_EXTENSIONS = "[a-z][a-z0-9_+-]{0,15}";
+// Preserve the existing dedicated media/document/archive completion contracts.
+const NATIVE_ARTIFACT_EXTENSION = /\.(?:png|jpe?g|gif|webp|ico|pdf|zip|gz|tar|7z|exe|dll|so|dylib|mp[34]|wav|mov|avi|woff2?|ttf|docx?|xlsx?|pptx?)$/iu;
+const TEXT_EXTENSION = /\.(?:txt|md|markdown|[cm]?[jt]sx?|py|rb|rs|go|java|c|cpp|h|css|html|jsonl?|ndjson|ya?ml|toml|csv|tsv|log|sh|sql|xml|conf|proto|r|scm|fasta)$/iu;
+const FILE_NAME = new RegExp("`([^`\\n]{1,240}\\.(?:" + FILE_EXTENSIONS + "))`|" + String.raw`(?:[\p{L}\p{N}_./\\:-]+\.(?:${FILE_EXTENSIONS}))\b`, "giu");
+const QUOTED_FILE_NAME = new RegExp(String.raw`^[\p{L}\p{N}_ ./\\:-]{1,240}\.(?:${FILE_EXTENSIONS})$`, "iu");
 const OUTPUT_ACTION = /\b(?:prepare|save|export|write|create|generate|clear|empty|truncate)\s+|(?:احفظ(?:ها|ه)?|صدّر(?:ها|ه)?|صدر(?:ها|ه)?|أنشئ|اكتب(?:ها|ه)?|جهّز|جهز|أعد|أفرغ|افرغ)\s+/iu;
-const FILE_OPERAND = new RegExp(String.raw`[\p{L}\p{N}_./\\:-]+\.(?:${TEXT_EXTENSIONS})\b`, "giu");
+const FILE_OPERAND = new RegExp(String.raw`[\p{L}\p{N}_./\\:-]+\.(?:${FILE_EXTENSIONS})\b`, "giu");
 const INERT_CONTEXT = /\b(?:hypothetically|imagine|what\s+if|if\s+(?:we|you|I)|example|said|says|quoted?)\b|(?:افترض|ماذا لو|مثال|قال)/iu;
 const INFORMATIONAL = /\b(?:explain|describe|hypothetically|imagine|what\s+if|how\s+(?:would|could|to)|if\s+(?:we|you|I)|example|said|says|quoted?)\b|(?:اشرح|افترض|ماذا لو|مثال|قال)/iu;
 
@@ -113,7 +114,7 @@ export function deriveRequestRequirements(userText: string, originTurnId?: strin
         : /\b(?:papers?|arxiv|literature|academic|publications?)\b|(?:أوراق|أبحاث|أدبيات)/iu.test(actionSegment) ? "literature" : "general";
       result.research = { domain: domain === "general" ? result.research?.domain ?? domain : domain, fresh: result.research?.fresh === true || /\b(?:latest|recent|current|fresh|newest)\b|(?:أحدث|حديث|الحالية)/iu.test(actionSegment) };
     }
-    const copy = /^\s*(?:(?:can|could|would)\s+you\s+)?(?:(?:please|just)\s+)?(?:copy\b|(?:make|create|save)\s+(?:(?:an?|the|identical|exact|unchanged)\s+)*copy\b)/iu.test(actionSegment) && new RegExp(String.raw`\b(?:as|to)\s+(?:\x60[^\x60]+\x60|[^\s]+\.(?:${TEXT_EXTENSIONS}))\s*(?:[.!]|,?\s*(?:preserving|while preserving)\b|$)`, "iu").test(segment);
+    const copy = /^\s*(?:(?:can|could|would)\s+you\s+)?(?:(?:please|just)\s+)?(?:copy\b|(?:make|create|save)\s+(?:(?:an?|the|identical|exact|unchanged)\s+)*copy\b)/iu.test(actionSegment) && new RegExp(String.raw`\b(?:as|to)\s+(?:\x60[^\x60]+\x60|[^\s]+\.(?:${FILE_EXTENSIONS}))\s*(?:[.!]|,?\s*(?:preserving|while preserving)\b|$)`, "iu").test(segment);
     // Locate the output action without treating a filename as a verb. Keep
     // offsets stable so input paths preceding the action are not destinations.
     const masked = segment.replace(/`[^`]*`/gu, value => " ".repeat(value.length)).replace(FILE_OPERAND, value => " ".repeat(value.length));
@@ -129,7 +130,7 @@ export function deriveRequestRequirements(userText: string, originTurnId?: strin
     // A source or behavioral constraint following a named output is not another output.
     const inputStart = /\b(?:using|from|based on|such that|that when|that's|that is|so that)\s+/iu.exec(outputSegment);
     if (!copy && inputStart && [...outputSegment.slice(0, inputStart.index).matchAll(FILE_NAME)].length > 0) outputSegment = outputSegment.slice(0, inputStart.index);
-    let pathMatches = [...outputSegment.matchAll(FILE_NAME)].filter(match => !BINARY_EXTENSION.test(match[1] ?? match[0]) && !/^(?:e\.g|i\.e)$/iu.test(match[1] ?? match[0]));
+    let pathMatches = [...outputSegment.matchAll(FILE_NAME)].filter(match => !NATIVE_ARTIFACT_EXTENSION.test(match[1] ?? match[0]) && !/^(?:e\.g|i\.e)$/iu.test(match[1] ?? match[0]));
     // "named x.py, and place it in /app/x.py" names one file twice.
     if (pathMatches.length === 2) {
       const names = pathMatches.map(match => match[1] ?? match[0]);
@@ -171,7 +172,7 @@ export function deriveRequestRequirements(userText: string, originTurnId?: strin
       const path = destination === undefined ? undefined : workspaceRelativeRequirementPath(destination, workspaceRoot);
       if (candidate !== undefined && path === undefined) result.issues.push("unsafe-file-target");
       const output: FileOutputRequirement = {
-        format: candidate === undefined ? (markdown ? "markdown" : "text") : /\.(?:md|markdown)$/iu.test(candidate) ? "markdown" : "text",
+        format: candidate === undefined ? (markdown ? "markdown" : "text") : /\.(?:md|markdown)$/iu.test(candidate) ? "markdown" : TEXT_EXTENSION.test(candidate) ? "text" : "artifact",
         ...(path === undefined ? {} : { path }),
         ...(bareName && directories.length === 0 && !copy ? { directoryUnspecified: true as const } : {}),
         ...(copy ? { exactCopy: normalizedSource === undefined ? {} : { sourcePath: normalizedSource } } : {})
@@ -198,6 +199,13 @@ export function deriveRequestRequirements(userText: string, originTurnId?: strin
     const allPaths = outputs.flatMap(file => [file.path, ...(file.alternativePaths ?? [])]);
     if (new Set(allPaths).size !== allPaths.length) result.issues.push("ambiguous-file-target");
     if (outputs.length > 0) result.fileOutput = { ...outputs[0], ...(outputs.length > 1 ? { additionalFiles: outputs.slice(1) } : {}) };
+  }
+  // A generic "verify" asks for task-appropriate checks, not a full text read.
+  const explicitReadback = /\b(?:read[ -]?back|re-?read)\b|(?:اقرأ.*مرة أخرى|أعد قراءة)/iu.test(segments.map(segment => segment.replace(/`[^`]*`/gu, " ").replace(FILE_OPERAND, " [file] ")).join(" "));
+  if (result.research === undefined && !explicitReadback) {
+    for (const file of [result.fileOutput, ...(result.fileOutput?.additionalFiles ?? [])]) {
+      if (file && file.exactCopy === undefined) file.verification = "execution";
+    }
   }
   result.skillReferences = [...new Set(result.skillReferences)];
   // Several long copy source/destination pairs can exceed the persistence
@@ -261,6 +269,7 @@ export function requiredRequestTools(requirements: RequestRequirements | undefin
     ...(requirements.research === undefined ? [] : ["web.search", "web.extract"]),
     ...(requirements.sourceTaskId !== undefined ? ["task.status", "task.result.read"] : requirements.delegation === undefined ? [] : ["delegate_task", "task.status", "task.result.read"]),
     ...(requirements.fileOutput === undefined ? [] : ["file.write", "file.patch", "file.read"]),
+    ...(requestedFileOutputs(requirements).some(file => file.format === "artifact" && !requiresFileContentVerification(requirements, file)) ? ["terminal.run"] : []),
     ...(requirements.skillReferences.length === 0 ? [] : ["skill.list", "skill.read"])
   ];
 }

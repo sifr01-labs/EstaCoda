@@ -1,4 +1,5 @@
-import { MAX_FILE_OUTPUTS, matchesFileOutputPath, requestedFileOutputs, validateRequestRequirements } from "../contracts/request-requirements.js";
+import { MAX_FILE_OUTPUTS, matchesFileOutputPath, requestedFileOutputs, requiresFileContentVerification, validateRequestRequirements } from "../contracts/request-requirements.js";
+import type { CommandFileObservation } from "../execution/command-file-evidence.js";
 import { createHash } from "node:crypto";
 import { readTaskResultEvidence } from "../tasks/task-result-read-evidence.js";
 import { posix } from "node:path";
@@ -7,7 +8,7 @@ import type { RequestRequirements } from "../contracts/intent.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 
 export type FileOutputEvidence =
-  | { satisfied: true; writeCallId?: string; path?: string; files?: Array<{ path: string; writeCallId: string }> }
+  | { satisfied: true; contentVerified?: boolean; writeCallId?: string; path?: string; files?: Array<{ path: string; writeCallId: string }> }
   | { satisfied: false; path?: string; reason: "unresolved-target" | "missing-write" | "missing-readback" | "missing-research-result" | "report-content-mismatch" | "copy-source-mismatch" };
 
 /** Reconciles executor-owned call identities with workspace-tool results from
@@ -24,6 +25,7 @@ export function fileOutputEvidence(input: {
   if (requirements.length <= 1) return singleFileOutputEvidence(input);
   if (requirements.some(file => file.path === undefined)) return { satisfied: false, reason: "unresolved-target" };
   const files: Array<{ path: string; writeCallId: string }> = [];
+  let contentVerified = true;
   for (const requirement of requirements) {
     const evidence = singleFileOutputEvidence({ ...input, requirements: {
       ...input.requirements!, fileOutput: requirement
@@ -31,9 +33,10 @@ export function fileOutputEvidence(input: {
     if (!evidence.satisfied) return { ...evidence, path: evidence.path ?? requirement.path };
     if (evidence.path === undefined || evidence.writeCallId === undefined) return { satisfied: false, reason: "unresolved-target" };
     if (files.some(file => file.path === evidence.path)) return { satisfied: false, reason: "unresolved-target" };
+    contentVerified &&= evidence.contentVerified === true;
     files.push({ path: evidence.path, writeCallId: evidence.writeCallId });
   }
-  return { satisfied: true, ...files[0], files };
+  return { satisfied: true, contentVerified, ...files[0], files };
 }
 
 /** Only existing, receipt-backed writes may enter read-only completion repair.
@@ -74,6 +77,7 @@ function concreteFileOutputEvidence(input: Parameters<typeof fileOutputEvidence>
   if (input.requirements?.issues.some((issue) => issue === "ambiguous-file-target" || issue === "unsafe-file-target")) {
     return { satisfied: false, reason: "unresolved-target" };
   }
+  if (!requiresFileContentVerification(input.requirements, requirement)) return producedFileEvidence(input);
   const receipts = new Map(input.executionReceipts.filter((receipt) =>
     input.requirements?.originTurnId === undefined || receipt.visibleTurnId === input.requirements.originTurnId
   ).map((receipt, index) => [receipt.toolCallId, { receipt, index }]));
@@ -164,10 +168,64 @@ function concreteFileOutputEvidence(input: Parameters<typeof fileOutputEvidence>
   const verifiedFile = verified.entries().next().value as [string, string] | undefined;
   return verifiedFile === undefined
     ? { satisfied: false, ...(requirement.directoryUnspecified && writes.size === 1 ? { path: writes.keys().next().value! } : {}), reason: copyMismatch ? "copy-source-mismatch" : contentMismatch ? "report-content-mismatch" : writes.size === 0 ? "missing-write" : "missing-readback" }
-    : { satisfied: true, path: verifiedFile[0], writeCallId: verifiedFile[1] };
+    : { satisfied: true, contentVerified: true, path: verifiedFile[0], writeCallId: verifiedFile[1] };
 }
 
-/** General file edits use the same byte/readback contract as report delivery.
+/** Production evidence is deliberately weaker than content verification. A
+ * successful command alone is insufficient: the runtime must observe the named
+ * output change. Missing, pending, failed and later-invalidated outputs fail. */
+function producedFileEvidence(input: Parameters<typeof fileOutputEvidence>[0]): FileOutputEvidence {
+  const requirement = input.requirements!.fileOutput!;
+  const receipts = new Map(input.executionReceipts.filter(receipt =>
+    input.requirements?.originTurnId === undefined || receipt.visibleTurnId === input.requirements.originTurnId
+  ).map(receipt => [receipt.toolCallId, receipt]));
+  const produced = new Map<string, string>();
+  const seen = new Set<string>();
+  const pending = new Map<string, string[]>();
+  for (const execution of input.toolExecutions) {
+    const callId = execution.toolCallId;
+    const receipt = callId === undefined ? undefined : receipts.get(callId);
+    if (!callId || !receipt || receipt.tool !== execution.tool.name) continue;
+    const metadata = execution.result?.metadata;
+    const observation = commandFileObservation(execution, receipt.visibleTurnId);
+    const repeated = observation !== undefined && seen.has(observation.id);
+    if (observation && !repeated) {
+      if (observation.completed) pending.delete(observation.id);
+      else pending.set(observation.id, observation.files.map(file => file.path));
+    }
+    // A running validation command temporarily blocks completion. If it exits
+    // without changing the file, the earlier production evidence remains valid.
+    const changes = !observation?.completed || repeated ? [] : commandFileChanges(execution, receipt.visibleTurnId);
+    if (observation?.completed) seen.add(observation.id);
+    for (const change of changes) produced.delete(change.path);
+    const fileTool = ["file.write", "file.patch"].includes(execution.tool.name);
+    const outputs = fileTool ? Array.isArray(metadata?.fileOutputs) ? metadata.fileOutputs : [metadata] : changes;
+    if (fileTool) {
+      const touched = Array.isArray(metadata?.paths) ? metadata.paths : [metadata?.path ?? execution.input?.path];
+      for (const value of touched) {
+        const path = safePath(value);
+        if (path) produced.delete(path);
+      }
+    }
+    if (receipt.status !== "success" || execution.decision !== "allow" || execution.result?.ok !== true || (!fileTool && !commandCompleted(execution))) continue;
+    for (const output of outputs) {
+      if (!output || typeof output !== "object") continue;
+      const item = output as Record<string, unknown>;
+      const path = safePath(item.path);
+      if (!path || !matchesTarget(path, requirement)) continue;
+      if (fileTool ? (item.materialized ?? metadata?.materialized) !== true || !validDigest(item.contentSha256) : !validDigest(item.contentSha256) && !validMetadataFingerprint(item.metadataFingerprint)) continue;
+      produced.set(path, callId);
+    }
+  }
+  for (const paths of pending.values()) for (const path of paths) produced.delete(path);
+  if (requirement.directoryUnspecified && produced.size > 1) return { satisfied: false, reason: "unresolved-target" };
+  const found = produced.entries().next().value as [string, string] | undefined;
+  return found ? { satisfied: true, contentVerified: false, path: found[0], writeCallId: found[1] }
+    : { satisfied: false, path: requirement.path, reason: "missing-write" };
+}
+
+/** Label a file edit verified only under the byte/readback contract; ordinary
+ * production evidence alone never upgrades its verification status.
  * Pair each write only with receipts from its own turn, including save-only
  * follow-ups whose filename was established in earlier conversation context. */
 export function verifiedFileMutationCallIds(input: Parameters<typeof fileOutputEvidence>[0]): Set<string> {
@@ -185,7 +243,7 @@ export function verifiedFileMutationCallIds(input: Parameters<typeof fileOutputE
       const bound = outputRequirement === undefined ? undefined : input.requirements;
       const evidence = fileOutputEvidence({ ...input, requirements: {
         ...bound, skillReferences: [], originTurnId: receipt.visibleTurnId,
-        fileOutput: { ...outputRequirement, directoryUnspecified: undefined, alternativePaths: undefined, path: path!, format: "text" }, issues: bound?.issues ?? []
+        fileOutput: { ...outputRequirement, verification: undefined, directoryUnspecified: undefined, alternativePaths: undefined, path: path!, format: "text" }, issues: bound?.issues ?? []
       } });
       return evidence.satisfied && evidence.writeCallId === receipt.toolCallId;
     })) verified.add(receipt.toolCallId);
@@ -214,7 +272,7 @@ function validDigest(value: unknown): value is string {
  * A file tool's prose or an unrelated earlier report is not evidence. */
 export function verifiedFileOutputContent(input: Parameters<typeof fileOutputEvidence>[0]): string | undefined {
   const evidence = fileOutputEvidence(input);
-  if (!evidence.satisfied || evidence.writeCallId === undefined) return undefined;
+  if (!evidence.satisfied || evidence.contentVerified !== true || evidence.writeCallId === undefined) return undefined;
   const contents = (evidence.files ?? [evidence]).map(file => verifiedFileContent(input, file));
   return contents.some(content => content === undefined) ? undefined : contents.join("\n\n");
 }
@@ -247,20 +305,35 @@ function verifiedFileContent(input: Parameters<typeof fileOutputEvidence>[0], ev
 
 /** Only known runtime-owned command observations qualify, bound to the turn
  * that started the command. Arbitrary tools and provider metadata cannot write. */
-function commandFileChanges(execution: ToolExecutionRecord, visibleTurnId?: string): Array<{ path: string; contentSha256?: string }> {
-  if (!["terminal.run", "execute_code", "process.start", "process.logs"].includes(execution.tool.name)) return [];
+function commandFileChanges(execution: ToolExecutionRecord, visibleTurnId?: string): Array<{ path: string; contentSha256?: string; metadataFingerprint?: string }> {
+  const observation = commandFileObservation(execution, visibleTurnId);
+  return observation?.files.flatMap(({ path, before, after, metadataOnly }) => {
+    const valid = metadataOnly === true ? validMetadataFingerprint : validDigest;
+    if (before === after) return [];
+    return [{ path, ...(observation.completed && valid(after)
+      ? metadataOnly === true ? { metadataFingerprint: after as string } : { contentSha256: after as string } : {}) }];
+  }) ?? [];
+}
+
+function commandFileObservation(execution: ToolExecutionRecord, visibleTurnId?: string): CommandFileObservation | undefined {
+  if (!["terminal.run", "execute_code", "process.start", "process.logs"].includes(execution.tool.name)) return undefined;
   const value = execution.result?.metadata?.commandFileObservation;
-  if (!value || typeof value !== "object") return [];
+  if (!value || typeof value !== "object") return undefined;
   const observation = value as Record<string, unknown>;
-  if (typeof observation.id !== "string" || !/^[a-f0-9-]{36}$/u.test(observation.id) || typeof observation.completed !== "boolean") return [];
-  if (!visibleTurnId || observation.originTurnId !== visibleTurnId || !Array.isArray(observation.files) || observation.files.length > MAX_FILE_OUTPUTS) return [];
-  return observation.files.flatMap(value => {
+  if (typeof observation.id !== "string" || !/^[a-f0-9-]{36}$/u.test(observation.id) || typeof observation.completed !== "boolean") return undefined;
+  if (!visibleTurnId || observation.originTurnId !== visibleTurnId || !Array.isArray(observation.files) || observation.files.length > MAX_FILE_OUTPUTS) return undefined;
+  const files = observation.files.flatMap(value => {
     if (!value || typeof value !== "object") return [];
-    const { path, before, after } = value as Record<string, unknown>;
+    const { path, before, after, metadataOnly } = value as CommandFileObservation["files"][number];
     const target = safePath(path);
-    if (!target || (before !== null && !validDigest(before)) || before === after) return [];
-    return [{ path: target, ...(observation.completed === true && validDigest(after) ? { contentSha256: after } : {}) }];
+    const valid = metadataOnly === true ? validMetadataFingerprint : validDigest;
+    return !target || (before !== null && !valid(before)) ? [] : [{ path: target, before, after, metadataOnly }];
   });
+  return { id: observation.id, completed: observation.completed, originTurnId: visibleTurnId, files };
+}
+
+function validMetadataFingerprint(value: unknown): value is string {
+  return typeof value === "string" && /^metadata:[a-f0-9]{64}$/u.test(value);
 }
 
 function commandCompleted(execution: ToolExecutionRecord): boolean {

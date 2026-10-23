@@ -1,5 +1,5 @@
 import { createHash, randomUUID } from "node:crypto";
-import { MAX_FILE_OUTPUTS, requestedFileOutputs, validateRequestRequirements } from "../contracts/request-requirements.js";
+import { MAX_FILE_OUTPUTS, requestedFileOutputs, requiresFileContentVerification, validateRequestRequirements } from "../contracts/request-requirements.js";
 import type { RequestRequirements } from "../contracts/intent.js";
 import type { WorkspaceFiles } from "./host-workspace-files.js";
 
@@ -9,19 +9,22 @@ export type CommandFileObservation = {
   id: string;
   completed: boolean;
   originTurnId: string;
-  files: Array<{ path: string; before: string | null; after?: string | null }>;
+  files: Array<{ path: string; before: string | null; after?: string | null; metadataOnly?: true }>;
 };
 
 export async function beginCommandFileObservation(files: WorkspaceFiles, requirements?: RequestRequirements, visibleTurnId?: string): Promise<CommandFileObservation | undefined> {
   if (!requirements || !visibleTurnId || requirements.issues.length) return undefined;
   try { validateRequestRequirements(requirements); } catch { return undefined; }
-  const paths = [...new Set(requestedFileOutputs(requirements).flatMap(file => [file.path, ...(file.alternativePaths ?? [])]))];
+  const outputs = requestedFileOutputs(requirements);
+  const paths = [...new Set(outputs.flatMap(file => [file.path, ...(file.alternativePaths ?? [])]))];
   if (!paths.length || paths.length > MAX_FILE_OUTPUTS) return undefined;
   const observations: CommandFileObservation["files"] = [];
   for (const path of paths) {
     if (path === undefined) continue;
-    const before = await digest(files, path);
-    if (before !== undefined) observations.push({ path, before });
+    const requirement = outputs.find(file => file.path === path || file.alternativePaths?.includes(path))!;
+    const metadataOnly = !requiresFileContentVerification(requirements, requirement);
+    const before = await observe(files, path, metadataOnly);
+    if (before !== undefined) observations.push({ path, before, ...(metadataOnly ? { metadataOnly: true as const } : {}) });
   }
   return observations.length ? { id: randomUUID(), completed: false, originTurnId: visibleTurnId, files: observations } : undefined;
 }
@@ -29,8 +32,13 @@ export async function beginCommandFileObservation(files: WorkspaceFiles, require
 export async function finishCommandFileObservation(files: WorkspaceFiles, observation?: CommandFileObservation): Promise<CommandFileObservation | undefined> {
   if (!observation) return undefined;
   const outputs: CommandFileObservation["files"] = [];
-  for (const file of observation.files) outputs.push({ path: file.path, before: file.before, after: await digest(files, file.path) });
+  for (const file of observation.files) outputs.push({ ...file, after: await observe(files, file.path, file.metadataOnly === true) });
   return { ...observation, completed: true, files: outputs };
+}
+
+async function observe(files: WorkspaceFiles, path: string, metadataOnly: boolean): Promise<string | null | undefined> {
+  if (!metadataOnly) return digest(files, path);
+  try { return await files.observeOutput?.(path); } catch { return undefined; }
 }
 
 async function digest(files: WorkspaceFiles, path: string): Promise<string | null | undefined> {

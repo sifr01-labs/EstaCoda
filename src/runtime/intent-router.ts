@@ -1,3 +1,4 @@
+import { requiresAnyFileContentVerification } from "../contracts/request-requirements.js";
 import type { ChannelAttachment, ChannelAttachmentKind, ChannelKind } from "../contracts/channel.js";
 import type {
   IntentLabel,
@@ -131,7 +132,7 @@ export class IntentRouter {
     const route = this.routeIntent(prompt, options);
     route.requestRequirements = requirements;
     route.requestInterpretation = interpretRequest(requestText);
-    if (requirements.fileOutput !== undefined && route.taskClass === "general") route.taskClass = "docs-writing";
+    if (requirements.fileOutput !== undefined && requirements.fileOutput.format !== "artifact" && requiresAnyFileContentVerification(requirements) && route.taskClass === "general") route.taskClass = "docs-writing";
     if (requirements.research !== undefined && route.taskClass === "general") route.taskClass = "research";
     if (requirements.skillReferences.length === 0 || route.invocation !== undefined) return route;
 

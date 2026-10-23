@@ -55,3 +55,15 @@ describe("unspecified directory state", () => {
     expect(() => validateRequestRequirements({ skillReferences: [], issues: [], fileOutput: { format: "text", directoryUnspecified: true, ...file } })).toThrow();
   });
 });
+
+it("round trips execution policy while preserving legacy and report/copy content checks", async () => {
+  const { requiresAnyFileContentVerification } = await import("./request-requirements.js");
+  const ordinary = validateRequestRequirements({ skillReferences: [], issues: [], fileOutput: { format: "artifact", path: "model.pt", verification: "execution" } });
+  expect(validateRequestRequirements(JSON.parse(JSON.stringify(ordinary)))).toEqual(ordinary);
+  expect(requiresAnyFileContentVerification(ordinary)).toBe(false);
+  expect(requiresAnyFileContentVerification({ ...ordinary, fileOutput: { ...ordinary.fileOutput!, verification: undefined } })).toBe(true);
+  expect(requiresAnyFileContentVerification({ ...ordinary, sourceTaskId: "accepted-task" })).toBe(true);
+  expect(requiresAnyFileContentVerification({ ...ordinary, research: { domain: "general", fresh: false } })).toBe(true);
+  expect(requiresAnyFileContentVerification({ ...ordinary, fileOutput: { ...ordinary.fileOutput!, exactCopy: { sourcePath: "source.pt" } } })).toBe(true);
+  expect(() => validateRequestRequirements({ ...ordinary, fileOutput: { ...ordinary.fileOutput!, verification: "skip" } })).toThrow();
+});

@@ -17,6 +17,7 @@ import { affirmativeRequestSegments } from "./request-action-segments.js";
 import { interpretRequest, isInformationClause, splitRequestClauses } from "./request-interpretation.js";
 import type { RequestInterpretation, RequestRequirements } from "../contracts/intent.js";
 import { deriveRequestRequirements } from "./request-requirements.js";
+import { requiresAnyFileContentVerification } from "../contracts/request-requirements.js";
 import { fileOutputEvidence, verifiedFileMutationCallIds } from "./file-output-evidence.js";
 import { researchRequestEvidence } from "./research-request-evidence.js";
 
@@ -42,7 +43,8 @@ export function deriveExecutionCompletionFloor(input: {
   requestInterpretation?: RequestInterpretation;
   capabilities?: readonly ExecutionCompletionCapability[];
 }): ExecutionCompletionFloor {
-  if (deriveRequestRequirements(input.userText).fileOutput !== undefined) return "mutation_with_verification";
+  const requirements = deriveRequestRequirements(input.userText);
+  if (requirements.fileOutput !== undefined) return requiresAnyFileContentVerification(requirements) ? "mutation_with_verification" : "mutation";
   // Scope negation before punctuation/contractions are flattened: "and add"
   // inside "do not modify ... and add" is not a requested mutation.
   const affirmative = affirmativeRequestSegments(input.userText.normalize("NFKC")
@@ -100,7 +102,7 @@ export function deriveExecutionFinalOutcome(input: {
   const verifiedFiles = verifiedFileMutationCallIds({ ...input, requirements: input.requestRequirements });
   const confirmedActions = confirmedActionReceipts(input.executionReceipts).map((receipt) =>
     (receipt.toolCallId !== undefined && verifiedFiles.has(receipt.toolCallId)) ||
-    (fileEvidence.satisfied && fileEvidence.writeCallId !== undefined && fileEvidence.writeCallId === receipt.toolCallId)
+    (fileEvidence.satisfied && fileEvidence.contentVerified === true && fileEvidence.writeCallId !== undefined && fileEvidence.writeCallId === receipt.toolCallId)
       ? { ...receipt, verification: "verified" as const } : receipt);
   const uncertainActions = uncertainActionReceipts(input.toolExecutions, input.toolPlans ?? []);
   const terminationCause = input.cancelled === true
@@ -116,7 +118,7 @@ export function deriveExecutionFinalOutcome(input: {
     confirmedActions,
     uncertainActions,
     fileOutputSatisfied: (input.delegatedAnswerOwned === true || fileEvidence.satisfied) && researchRequestEvidence(input).satisfied,
-    verifiedFileOutput: fileEvidence.satisfied && fileEvidence.writeCallId !== undefined,
+    fileOutputMeetsFloor: fileEvidence.satisfied && fileEvidence.writeCallId !== undefined && (fileEvidence.contentVerified === true || completionFloor === "mutation" || requiresAnyFileContentVerification(input.requestRequirements)),
     delegatedFileOutput: input.delegatedAnswerOwned === true && input.requestRequirements?.fileOutput !== undefined
   });
   return { status, terminationCause, completionFloor, confirmedActions, uncertainActions };
@@ -318,7 +320,7 @@ function recoveredReplayCallIds(receipts: readonly ExecutionEvidenceRecord[]): R
 function classifyFinalStatus(input: {
   fileOutputSatisfied: boolean;
   delegatedFileOutput: boolean;
-  verifiedFileOutput: boolean;
+  fileOutputMeetsFloor: boolean;
   providerExecution?: ProviderExecutionResult;
   executionReceipts: readonly ExecutionEvidenceRecord[];
   toolPlans?: readonly ToolCallPlan[];
@@ -349,7 +351,7 @@ function classifyFinalStatus(input: {
   const hasConfirmedWork = input.confirmedActions.length > 0 || succeeded > 0;
   const hasUsefulEvidence = hasConfirmedWork || input.uncertainActions.length > 0;
   const unresolvedToolPlans = (input.toolPlans ?? []).some(isUnresolvedPlan);
-  const completionFloorSatisfied = input.fileOutputSatisfied && (input.delegatedFileOutput || input.verifiedFileOutput || settlesCompletionFloor(
+  const completionFloorSatisfied = input.fileOutputSatisfied && (input.delegatedFileOutput || input.fileOutputMeetsFloor || settlesCompletionFloor(
     input.completionFloor,
     authoritativeReceipts,
     input.confirmedActions

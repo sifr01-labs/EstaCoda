@@ -68,7 +68,7 @@ describe("research routing regression (PR 1 and PR 2)", () => {
     const prompt = "Please prepare a markdown file";
     const completionFloor = deriveExecutionCompletionFloor({ userText: prompt });
     expect(inspect(prompt).names).toContain("file.write");
-    expect(completionFloor).toBe("mutation_with_verification");
+    expect(completionFloor).toBe("mutation");
     const outcome = deriveExecutionFinalOutcome({
       providerExecution: { ok: true, attempts: [], fallbackUsed: false, toolCalls: [], response: { ok: true, provider: "baseline", model: "fake", content: "Copy this Markdown into a file." } },
       toolExecutions: [], executionReceipts: [], completionFloor
@@ -79,7 +79,7 @@ describe("research routing regression (PR 1 and PR 2)", () => {
 
   it("exposes file.write for an Arabic save requirement (PR 1)", () => {
     const prompt = "احفظ التقرير في ملف Markdown";
-    expect(deriveExecutionCompletionFloor({ userText: prompt })).toBe("mutation_with_verification");
+    expect(deriveExecutionCompletionFloor({ userText: prompt })).toBe("mutation");
     expect(inspect(prompt).names).toContain("file.write");
   });
 

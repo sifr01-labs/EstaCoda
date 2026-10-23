@@ -30,7 +30,9 @@ it("uses the leased view for reads, search and transactional patches, then fence
     expect((await patch.run({ mode: "patch", patch: "*** Begin Patch\n*** Update File: inside.txt\n@@\n-visible needle\n+changed needle\n*** Add File: added.txt\n+new\n*** End Patch" })).ok).toBe(true);
     expect(await readFile(join(root, "inside.txt"), "utf8")).toBe("changed needle\n");
     expect(await readFile(join(root, "added.txt"), "utf8")).toBe("new\n");
+    await expect(lease.files.observeOutput!("inside.txt")).resolves.toMatch(/^metadata:[a-f0-9]{64}$/u);
     await lease.release();
+    await expect(lease.files.observeOutput!("inside.txt")).rejects.toThrow(/released/);
     await expect(read.run({ path: "inside.txt" })).rejects.toThrow(/released/);
   } finally { await lease.release(); environment.destroy(); await rm(home, { recursive: true, force: true }); }
 });

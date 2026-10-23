@@ -6,6 +6,7 @@ import type { ArtifactRecord } from "../contracts/artifact.js";
 import type { ChannelAttachment, ChannelKind } from "../contracts/channel.js";
 import type { ContextExpansionResult, ProjectContextSnapshot } from "../contracts/context.js";
 import type { IntentRoute, RequestRequirements } from "../contracts/intent.js";
+import { requiresAnyFileContentVerification } from "../contracts/request-requirements.js";
 import { fileOutputEvidence, pendingFileReadbackPaths } from "./file-output-evidence.js";
 import { continueRequestRequirements, requiredSkillsDelivered } from "./request-requirements.js";
 import { researchPrerequisiteBlockers, researchRequestEvidence } from "./research-request-evidence.js";
@@ -668,7 +669,7 @@ export class AgentLoop {
     const selectedSkillInstructions = route.selectedSkillInstructions;
     const selectedSkillResources = route.selectedSkillResources;
     const selectedSkillSetup = route.selectedSkillSetup;
-    const turnCompletionFloor = intent.requestRequirements?.fileOutput !== undefined ? "mutation_with_verification" :
+    const turnCompletionFloor = intent.requestRequirements?.fileOutput !== undefined ? (requiresAnyFileContentVerification(intent.requestRequirements) ? "mutation_with_verification" : "mutation") :
       (checkpointPreparation?.requirementMode === "save" ? undefined : resumedCheckpoint?.completionFloor) ?? deriveExecutionCompletionFloor({
       userText: input.requirementText ?? turnText,
       requestInterpretation: input.requirementText === undefined ? intent.requestInterpretation : undefined,
@@ -1133,7 +1134,7 @@ export class AgentLoop {
           toolExecutions: executions, executionReceipts: receipts, skillRequirementsSatisfied: true });
         if (research.missing.includes("requested-worker-evidence")) return "Requested worker evidence is missing. Use delegate_task to fulfill the user's worker requirement. If it is not exposed, discover and request the delegation capability before continuing.";
         const file = fileOutputEvidence({ requirements: intent.requestRequirements, toolExecutions: executions, executionReceipts: receipts });
-        if (!file.satisfied) return `File output${file.path === undefined ? "" : ` ${JSON.stringify(file.path)}`}: ${file.reason}. Use file.write or file.patch for the requested target, then file.read with only path, without lineStart or lineEnd, to verify the entire file. Shell operations alone do not provide file-write evidence. For a copy, read the source and use file.write sourceFile with its path; the runtime checks that destination readback matches the observed source; for an accepted task result use file.write sourceResult. Respect overwrite approvals and do not repeat research. Do not claim completion before verification.`;
+        if (!file.satisfied) return `File output${file.path === undefined ? "" : ` ${JSON.stringify(file.path)}`}: ${file.reason}. ${requiresAnyFileContentVerification(intent.requestRequirements) ? "This request requires content verification. Read the complete output after writing it, without lineStart or lineEnd (null bounds also mean the whole file). Exact copies must match their observed source; accepted reports must match their Task result." : "Produce the named outputs using authorized file tools or commands and check the result appropriately. Commands must exit successfully and produce the requested files; text readback is not required."} Respect overwrite approvals and do not retry denied actions. Do not claim unobserved results.`;
         return research.satisfied ? undefined : `Research requirements remain incomplete: ${research.missing.join(", ")}. Correct the report using observed sources. After changing a saved report, read the complete file again before completing.`;
       }),
       visibleTurnId: visibleTurn.id,
@@ -1482,9 +1483,9 @@ export class AgentLoop {
         const deniedWrite = fileEvidence.reason === "missing-write" ? toolExecutions.find(call =>
           ["file.write", "file.patch"].includes(call.tool.name) && call.decision !== "allow") : undefined;
         const available = new Set(this.#providerToolSchemaCatalog?.entries.map((entry) => entry.tool.name) ?? []);
-        const unavailable = !available.has("file.write") && !available.has("file.patch")
+        const unavailable = !available.has("file.write") && !available.has("file.patch") && !available.has("terminal.run") && !available.has("execute_code")
           ? " A workspace file-writing tool is unavailable in this session."
-          : !available.has("file.read") ? " The workspace file-readback tool is unavailable in this session." : "";
+          : requiresAnyFileContentVerification(intent.requestRequirements) && !available.has("file.read") ? " The workspace file-readback tool is unavailable in this session." : "";
         const reason = deniedWrite !== undefined
           ? deniedWrite.decision === "deny"
             ? `Authorization denied ${deniedWrite.tool.name}; the requested write was not permitted.`
@@ -1498,7 +1499,7 @@ export class AgentLoop {
           : fileEvidence.reason === "copy-source-mismatch"
             ? "The output has not been verified as identical to its source. Read the source and copy it with file.write sourceFile, then read back the destination."
           : fileEvidence.reason === "missing-write"
-            ? "There is no successful write or patch for the requested output."
+            ? "Production of the requested output was not confirmed. The output may be missing, unfinished, or unavailable to runtime observation."
             : "The requested output has not been confirmed by a complete, matching readback from disk.";
         response.text = `${researchEvidence.satisfied ? "" : response.text + "\n\n"}File output is incomplete. ${reason}${unavailable}`;
         if (response.providerExecution !== undefined) response.providerExecution = suppressProviderGeneratedText(response.providerExecution);

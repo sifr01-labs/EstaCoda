@@ -17,11 +17,11 @@ import type { SessionDB } from "../contracts/session.js";
 import type { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import { resolveTestPythonBinary } from "../test/test-python.js";
 
-async function fixture(prompt = "Write output.c") {
+async function fixture(prompt = "Write output.c", contentVerification = true) {
   const root = await mkdtemp(join(tmpdir(), "estacoda-command-completion-"));
   const manager = new ProcessManager({ workspaceRoot: root });
   const tools = [...createWorkspaceTools({ workspaceRoot: root, processManager: manager, commandTimeoutMs: 100 }), ...createProcessTools({ processManager: manager })];
-  const requirements = deriveRequestRequirements(prompt, "turn", root);
+  const requirements = deriveRequestRequirements(contentVerification ? `${prompt}. Read back the requested files.` : prompt, "turn", root);
   const context: ToolExecutionContext = { visibleTurnId: "turn", requestContract: { version: 1, objective: prompt, requirements } };
   const index = new ExecutionEvidenceIndex();
   const toolExecutions: ToolExecutionRecord[] = [];
@@ -169,6 +169,76 @@ describe("output directory ambiguity", () => {
       await f.run("file.write", { path: "app/output.c", content: "code" });
       await f.run("file.read", { path: "app/output.c" });
       expect(fileOutputEvidence(f.evidence())).toMatchObject({ satisfied: false, reason: "unresolved-target" });
+    } finally { await f.close(); }
+  });
+});
+
+describe("ordinary output production", () => {
+  it.each(["model.pt", "weights.npy", "data.parquet", "server.key"])("completes %s without text readback or claiming content verification", async path => {
+    const f = await fixture(`Generate ${path}`, false);
+    try {
+      const command = await f.run("terminal.run", { command: `dd if=/dev/zero of=${path} bs=1048576 count=9`, timeoutMs: 100 });
+      expect(command.result?.ok, command.result?.content).toBe(true);
+      expect(fileOutputEvidence(f.evidence())).toMatchObject({ satisfied: true, contentVerified: false, path });
+      expect(pendingFileReadbackPaths(f.evidence())).toBeUndefined();
+      expect(verifiedFileOutputContent(f.evidence())).toBeUndefined();
+      const outcome = deriveExecutionFinalOutcome({ ...f.evidence(), requestRequirements: f.evidence().requirements, completionFloor: "mutation" });
+      expect(outcome.status).toBe("completed");
+      expect(outcome.confirmedActions.every(action => action.verification !== "verified")).toBe(true);
+    } finally { await f.close(); }
+  });
+  it.each(["missing", "unchanged", "failed", "deleted", "stale", "unowned", "denied"])("rejects %s command evidence", async scenario => {
+    const f = await fixture("Write output.c", false);
+    try {
+      if (scenario === "unchanged") await writeFile(join(f.root, "output.c"), "old");
+      const command = await f.run("terminal.run", { command: ["missing", "unchanged"].includes(scenario) ? "true" : "printf new > output.c" + (scenario === "failed" ? "; exit 1" : ""), timeoutMs: 100 });
+      if (scenario === "deleted") await f.run("terminal.run", { command: "rm output.c", timeoutMs: 100 });
+      if (scenario === "stale") (command.result!.metadata!.commandFileObservation as { originTurnId: string }).originTurnId = "other";
+      if (scenario === "denied") command.decision = "deny";
+      expect(fileOutputEvidence({ ...f.evidence(), ...(scenario === "unowned" ? { executionReceipts: [] } : {}) }).satisfied).toBe(false);
+    } finally { await f.close(); }
+  });
+  it("requires all outputs, invalidates patch deletions, and permits an explicit alternative", async () => {
+    const f = await fixture("Write a.txt and b.txt. Generate at least one file named c.txt or d.txt.", false);
+    try {
+      await f.run("file.patch", { mode: "patch", patch: "*** Begin Patch\n*** Add File: a.txt\n+a\n*** Add File: b.txt\n+b\n*** End Patch" });
+      expect(fileOutputEvidence(f.evidence()).satisfied).toBe(false);
+      await f.run("file.patch", { mode: "append", path: "d.txt", content: "d" });
+      expect(fileOutputEvidence(f.evidence())).toMatchObject({ satisfied: true, files: [{ path: "a.txt" }, { path: "b.txt" }, { path: "d.txt" }] });
+      await f.run("file.patch", { mode: "patch", patch: "*** Begin Patch\n*** Delete File: a.txt\n*** End Patch" });
+      expect(fileOutputEvidence(f.evidence()).satisfied).toBe(false);
+    } finally { await f.close(); }
+  });
+  it("waits for command exit even when the output already exists", async () => {
+    const f = await fixture("Write output.c", false);
+    try {
+      const started = await f.run("terminal.run", { command: "printf new > output.c; sleep 0.4" });
+      expect(started.result?.metadata?.running).toBe(true);
+      expect(fileOutputEvidence(f.evidence()).satisfied).toBe(false);
+      await f.run("process.logs", { id: (started.result!.metadata!.process as { id: string }).id, waitMs: 1000 });
+      expect(fileOutputEvidence(f.evidence())).toMatchObject({ satisfied: true, contentVerified: false });
+    } finally { await f.close(); }
+  });
+  it("preserves produced files after a long successful validation that leaves them unchanged", async () => {
+    const f = await fixture("Write output.c", false);
+    try {
+      await f.run("file.write", { path: "output.c", content: "generated" });
+      expect(fileOutputEvidence(f.evidence()).satisfied).toBe(true);
+      const started = await f.run("terminal.run", { command: "sleep 0.4; test -f output.c" });
+      expect(started.result?.metadata?.running).toBe(true);
+      expect(fileOutputEvidence(f.evidence()).satisfied).toBe(false);
+      await f.run("process.logs", { id: (started.result!.metadata!.process as { id: string }).id, waitMs: 1000 });
+      expect(fileOutputEvidence(f.evidence())).toMatchObject({ satisfied: true, contentVerified: false });
+    } finally { await f.close(); }
+  });
+  it("does not count a new unsaved editor file as materialized output", async () => {
+    const f = await fixture("Write draft.txt", false);
+    try {
+      let buffer = "";
+      const tools = createWorkspaceTools({ workspaceRoot: f.root, fsAdapter: { readTextFile: async () => buffer, writeTextFile: async ({ content }) => { buffer = content; } } });
+      await f.run("file.write", { path: "draft.txt", content: "draft", overwrite: true }, tools.find(tool => tool.name === "file.write"));
+      expect(buffer).toBe("draft");
+      expect(fileOutputEvidence(f.evidence()).satisfied).toBe(false);
     } finally { await f.close(); }
   });
 });

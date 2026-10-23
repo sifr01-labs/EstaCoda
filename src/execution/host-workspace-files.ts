@@ -1,3 +1,4 @@
+import { createHash } from "node:crypto";
 import { constants } from "node:fs";
 import { explainPathBlock } from "../context/context-security.js";
 import * as fs from "node:fs/promises";
@@ -9,6 +10,7 @@ export type WorkspacePathOptions = { allowMissingLeaf?: boolean; allowDirectory?
 /** Only operations used by workspace tools and inspection. Paths belong to this
  * execution view; implementations must not fall back to the caller's host FS. */
 export interface WorkspaceFiles {
+  observeOutput?(path: string): Promise<string | null>;
   preview(path: string): Promise<{ bytes: Buffer; size: number }>;
   realpath(path: string): Promise<string>;
   resolvePath(path: string | undefined, options?: WorkspacePathOptions): Promise<WorkspacePathResolution>;
@@ -94,6 +96,21 @@ export class HostWorkspaceFiles implements WorkspaceFiles {
       return encoding === undefined ? bytes : bytes.toString(encoding);
     } finally { await handle.close(); }
   }
+  /** Runtime-only metadata for a named output. Never reads content or grants
+   * model file access; secret directories, symlinks and escapes stay blocked. */
+  async observeOutput(path: string): Promise<string | null> {
+    const root = await this.#rootPath();
+    const resolved = await resolveWorkspacePath(root, path, { allowMissingLeaf: true, forbidSymlinks: true, outputMetadataOnly: true });
+    if (!resolved.ok) throw new Error(resolved.content);
+    let info;
+    try { info = await fs.lstat(resolved.path); }
+    catch (error) { if ((error as NodeJS.ErrnoException).code === "ENOENT") return null; throw error; }
+    if (!info.isFile() || info.isSymbolicLink()) throw new Error("Output is not a regular file.");
+    const checked = await resolveWorkspacePath(root, path, { forbidSymlinks: true, outputMetadataOnly: true });
+    if (!checked.ok || checked.path !== resolved.path) throw new Error("Output changed during observation.");
+    this.#assertActive();
+    return outputMetadataFingerprint(info);
+  }
   async preview(path: string): Promise<{ bytes: Buffer; size: number }> {
     const options = { forbidSymlinks: true };
     const checked = await this.#checked(path, options);
@@ -126,3 +143,8 @@ export class HostWorkspaceFiles implements WorkspaceFiles {
 }
 
 const MAX_WORKSPACE_FILE_BYTES = 8 * 1024 * 1024;
+
+/** Metadata identity, never a content hash or proof of functional correctness. */
+export function outputMetadataFingerprint(info: Pick<Stats, "ino" | "size" | "mtimeMs" | "ctimeMs">): string {
+  return "metadata:" + createHash("sha256").update(JSON.stringify([info.ino, info.size, info.mtimeMs, info.ctimeMs])).digest("hex");
+}

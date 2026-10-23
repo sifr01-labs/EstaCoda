@@ -13,6 +13,16 @@ export function requestedFileOutputs(requirements: RequestRequirements | undefin
   return [primary, ...(additionalFiles ?? [])];
 }
 
+/** Old persisted contracts retain readback semantics. Neither a provider nor a
+ * delivery step can downgrade exact-copy or accepted-report content checks. */
+export function requiresFileContentVerification(requirements: RequestRequirements | undefined, file: FileOutputRequirement): boolean {
+  return file.verification !== "execution" || file.exactCopy !== undefined || requirements?.sourceTaskId !== undefined || requirements?.research !== undefined;
+}
+
+export function requiresAnyFileContentVerification(requirements: RequestRequirements | undefined): boolean {
+  return requestedFileOutputs(requirements).some(file => requiresFileContentVerification(requirements, file));
+}
+
 /** Completion identity only. Tool dispatch still enforces workspace containment.
  * Only a user-named bare filename may be fulfilled in an unspecified directory. */
 export function matchesFileOutputPath(path: string, file: FileOutputRequirement): boolean {
@@ -54,7 +64,7 @@ export function validateRequestRequirements(value: unknown): RequestRequirements
     if (!["general", "literature", "paper"].includes(String(research.domain)) || typeof research.fresh !== "boolean") throw new Error("Invalid research requirement.");
   }
   if (record.fileOutput !== undefined) {
-    const primary = object(record.fileOutput, ["format", "path", "directoryUnspecified", "alternativePaths", "exactCopy", "additionalFiles"]);
+    const primary = object(record.fileOutput, ["format", "verification", "path", "directoryUnspecified", "alternativePaths", "exactCopy", "additionalFiles"]);
     const { additionalFiles, ...file } = primary;
     validateFile(file);
     if (additionalFiles !== undefined) {
@@ -78,7 +88,7 @@ function object(value: unknown, keys: string[]): Record<string, unknown> {
 }
 
 function validateFile(value: unknown): Record<string, unknown> {
-  const file = object(value, ["format", "path", "directoryUnspecified", "alternativePaths", "exactCopy"]);
+  const file = object(value, ["format", "verification", "path", "directoryUnspecified", "alternativePaths", "exactCopy"]);
   if (file.directoryUnspecified !== undefined && (file.directoryUnspecified !== true || file.exactCopy !== undefined ||
     [file.path, ...(Array.isArray(file.alternativePaths) ? file.alternativePaths : [])].some(path =>
       typeof path !== "string" || /[/\\:]|^\.{1,2}$/u.test(path)))) throw new Error("Invalid unspecified file directory.");
@@ -93,7 +103,8 @@ function validateFile(value: unknown): Record<string, unknown> {
     const copy = object(file.exactCopy, ["sourcePath"]);
     if (copy.sourcePath !== undefined) validateFile({ format: "text", path: copy.sourcePath });
   }
-  if (file.format !== "markdown" && file.format !== "text") throw new Error("Invalid file format.");
+  if (file.verification !== undefined && file.verification !== "execution") throw new Error("Invalid file verification policy.");
+  if (file.format !== "markdown" && file.format !== "text" && file.format !== "artifact") throw new Error("Invalid file format.");
   if (file.path !== undefined && (typeof file.path !== "string" || file.path.length === 0 || file.path.length > 240 ||
     /^(?:[/\\]|[a-z]:)|[\u0000-\u001f\u007f]/iu.test(file.path) || file.path.split(/[/\\]/u).includes("..") ||
     redactString(file.path, { strict: true }) !== file.path)) throw new Error("Invalid relative file target.");

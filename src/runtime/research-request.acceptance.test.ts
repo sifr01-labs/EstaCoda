@@ -858,10 +858,10 @@ describe.sequential("file output completion requirements", () => {
     expect(await readFile(join(h.workspaceRoot, "output.c"), "utf8")).toBe("generated");
     scriptConsumed(h);
   });
-  it("replaces a false saved claim when the file was written without readback", async () => {
+  it("rejects completion when explicitly requested readback was omitted", async () => {
     const h = await harness();
     h.enqueue(nativeCall("file_write", { path: "report.md", content: REPORT }), answer("Saved and verified report.md."), answer("Saved and verified report.md."), answer("Saved and verified report.md."));
-    const result = await h.turn("Save report.md");
+    const result = await h.turn("Save report.md and read back the file.");
     expect(result.finalOutcome?.status).toBe("partially_completed");
     expect(result.text).toContain("matching readback");
     expect(result.text).not.toContain("Saved and verified");
@@ -888,7 +888,7 @@ describe.sequential("file output completion requirements", () => {
     const h = await harness();
     await writeFile(join(h.workspaceRoot, "report.md"), REPORT);
     h.enqueue(nativeCall("file_write", { path: "report.md", content: REPORT }), nativeCall("file_read", { path: "report.md" }), answer("Verified report.md."));
-    const result = await h.turn("Export the report to report.md");
+    const result = await h.turn("Export the report to report.md and read back the file.");
     expect(result.toolExecutions[0]?.result?.metadata?.changed).toBe(false);
     expect(result.finalOutcome?.status).toBe("completed");
     scriptConsumed(h);
@@ -904,7 +904,7 @@ describe.sequential("file output completion requirements", () => {
   it("does not count a partial read as complete readback", async () => {
     const h = await harness();
     h.enqueue(nativeCall("file_write", { path: "report.md", content: REPORT }), nativeCall("file_read", { path: "report.md", lineStart: 1, lineEnd: 1 }), answer("Saved and verified."), answer("Saved and verified."), answer("Saved and verified."));
-    const result = await h.turn("Save report.md");
+    const result = await h.turn("Save report.md and read back the file.");
     expect(result.finalOutcome?.status).toBe("partially_completed");
     expect(result.text).toContain("matching readback");
     scriptConsumed(h);

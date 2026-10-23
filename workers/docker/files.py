@@ -48,6 +48,18 @@ def main(request):
     op, path = request["op"], request.get("path")
     options = request.get("options", {})
     if op == "resolve": return checked(root, path, options)
+    if op == "output-metadata":
+        resolved = checked(root, path, {"allowMissingLeaf": True, "forbidSymlinks": True})
+        try:
+            fd, leaf = parent_fd(root, resolved)
+        except FileNotFoundError:
+            return None
+        try:
+            try: info = os.stat(leaf, dir_fd=fd, follow_symlinks=False)
+            except FileNotFoundError: return None
+            if not stat.S_ISREG(info.st_mode): raise ValueError("output must be a regular file")
+            return metadata(info)
+        finally: os.close(fd)
     mutation = op in ("write", "mkdir", "rm", "rename")
     resolved = checked(root, path, {"allowDirectory":op in ("stat", "lstat", "readdir", "mkdir"), "allowMissingLeaf":op in ("write", "mkdir") or (op=="rm" and options.get("force")), "forbidSymlinks":mutation or op == "preview"})
     if mutation and resolved == root: raise PermissionError("cannot replace workspace root")

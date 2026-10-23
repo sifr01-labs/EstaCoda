@@ -839,7 +839,7 @@ describe("supplied content and hypothetical execution boundaries", () => {
   it.each([
     ["Review this supplied Python: print(1). Then read actual.py.", "read"],
     ["If I later asked you to publish a website, what would you need? Now read config.json.", "read"],
-    ["Review this supplied Python: print(1). Save your review to review.md.", "mutation_with_verification"],
+    ["Review this supplied Python: print(1). Save your review to review.md.", "mutation"],
     ["Review this supplied Python file in the workspace.", "read"],
     ["Update config.json to review this supplied Python: print(1).", "mutation"],
     ["افترض أننا ننشر موقعاً. ثم اقرأ config.json.", "read"]

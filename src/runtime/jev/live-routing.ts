@@ -1,3 +1,4 @@
+import { requiresAnyFileContentVerification } from "../../contracts/request-requirements.js";
 import { resolveJevSelection } from './selection-evidence.js';
 import type { IntentRoute, IntentTaskClass, NativeIntent } from '../../contracts/intent.js';
 import type { RoutingDecision } from '../../contracts/routing.js';
@@ -82,7 +83,7 @@ export async function selectJevRoute(input: {
   if (!input.options.attachments?.some(a => (a.status ?? 'ready') === 'ready')) labels = labels.filter(id => id !== 'attachment-analysis');
   if (!actionable) labels = labels.filter(id => ['conversation', 'architecture-advice'].includes(id));
   if (input.saveOnly) labels = labels.filter(id => !['research', ...native].includes(id));
-  if (base.requestRequirements?.fileOutput) labels.push('docs-writing');
+  if (base.requestRequirements?.fileOutput && base.requestRequirements.fileOutput.format !== 'artifact' && requiresAnyFileContentVerification(base.requestRequirements)) labels.push('docs-writing');
   if (base.requestRequirements?.research && !input.saveOnly) labels.push('research');
   // Native attachment handling and explicit slash semantics are deterministic boundaries.
   if (base.invocation || base.evidence.some(item => item.kind === 'attachment')) labels.push(base.nativeIntent);

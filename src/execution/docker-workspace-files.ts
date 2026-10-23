@@ -3,7 +3,7 @@ import type { HostProcesses } from "./host-processes.js";
 import { resolve } from "node:path";
 import type { Stats, Dirent } from "node:fs";
 import { explainPathBlock } from "../context/context-security.js";
-import type { WorkspaceFiles, WorkspacePathOptions } from "./host-workspace-files.js";
+import { outputMetadataFingerprint, type WorkspaceFiles, type WorkspacePathOptions } from "./host-workspace-files.js";
 import type { WorkspacePathResolution } from "../tools/workspace-paths.js";
 import { DockerContainer } from "./docker-container.js";
 const services = new WeakMap<DockerContainer, DockerFileService>();
@@ -15,7 +15,7 @@ export class DockerWorkspaceFiles implements WorkspaceFiles {
     const root = this.container.workspace.canonicalPath;
     if (typeof path !== "string" || !path) throw new Error("path must be a non-empty string");
     for (const raw of [path, extra.to].filter((p): p is string => typeof p === "string")) {
-      const blocked = explainPathBlock(root, resolve(root, raw)); if (blocked) throw new Error(blocked);
+      const blocked = explainPathBlock(root, resolve(root, raw), { outputMetadataOnly: op === "output-metadata" }); if (blocked) throw new Error(blocked);
     }
     if (["write", "mkdir", "rm", "rename"].includes(op) && this.container.facts.workspaceAccess !== "read-write") throw new Error("Docker workspace is read-only.");
     const input = JSON.stringify({ root, op, path, ...extra });
@@ -55,6 +55,10 @@ export class DockerWorkspaceFiles implements WorkspaceFiles {
   async readFile(path: string, encoding?: "utf8"): Promise<Buffer | string> {
     const result = Buffer.from(await this.#call("read", await this.#resolved(path)), "base64");
     return encoding ? result.toString(encoding) : result;
+  }
+  async observeOutput(path: string): Promise<string | null> {
+    const result = await this.#call("output-metadata", path);
+    return result === null ? null : outputMetadataFingerprint(result);
   }
   async preview(path: string): Promise<{bytes:Buffer;size:number}> {
     const result = await this.#call("preview", path);

@@ -41,7 +41,7 @@ const TEXTY_EXTENSIONS = new Set([
   ".yml"
 ]);
 
-export function explainPathBlock(root: string, target: string): string | undefined {
+export function explainPathBlock(root: string, target: string, options: { outputMetadataOnly?: boolean } = {}): string | undefined {
   const relativePath = relative(root, target);
 
   if (relativePath === "") {
@@ -62,7 +62,7 @@ export function explainPathBlock(root: string, target: string): string | undefin
   }
 
   const extension = extname(target).toLowerCase();
-  if (SENSITIVE_EXTENSIONS.has(extension)) {
+  if (SENSITIVE_EXTENSIONS.has(extension) && !options.outputMetadataOnly) {
     return `file extension ${extension} is treated as sensitive`;
   }
 

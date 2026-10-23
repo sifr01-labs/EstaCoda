@@ -61,11 +61,36 @@ describe("text file delivery through the real runtime", () => {
     } else expect(fetcher).not.toHaveBeenCalled();
   });
 
-  it("rejects a JSON saved-and-verified claim without matching readback", async () => {
+  it.each([false, true])("completes ordinary JSON production without prescribing readback (Jev timeout=%s)", async timeout => {
+    const { runtime: h } = await setup(timeout);
+    h.enqueue(request => {
+      expect(JSON.stringify(request.messages)).toContain("not mandatory text readback");
+      return nativeCall("file_write", { path: "de.json", content: translation })(request);
+    }, answer("Saved de.json."));
+    const result = await h.turn("Save de.json");
+    expect(result.finalOutcome?.status).toBe("completed");
+    expect(result.finalOutcome?.confirmedActions).toContainEqual(expect.objectContaining({ tool: "file.write", verification: "not_verified" }));
+    expect(result.toolExecutions.some(call => call.tool.name === "file.read")).toBe(false);
+    expect(await readFile(join(h.workspaceRoot, "de.json"), "utf8")).toBe(translation);
+    expect(h.scriptErrors).toEqual([]); expect(h.remainingSteps()).toBe(0);
+  });
+
+  it.each(["model.pt", "server.key"])("accepts command-produced %s through the real executor without text reads", async path => {
+    const { runtime: h } = await setup(false);
+    h.enqueue(nativeCall("terminal_run", { command: `dd if=/dev/zero of=${path} bs=1048576 count=9`, timeoutMs: 1000 }), answer(`Created ${path}.`));
+    const result = await h.turn(`Generate ${path}`);
+    expect(result.finalOutcome?.status, result.text).toBe("completed");
+    expect(result.toolExecutions.map(call => call.tool.name)).toEqual(["terminal.run"]);
+    expect(result.finalOutcome?.confirmedActions.every(action => action.verification !== "verified")).toBe(true);
+    expect((await readFile(join(h.workspaceRoot, path))).length).toBe(9 * 1024 * 1024);
+    expect(h.scriptErrors).toEqual([]); expect(h.remainingSteps()).toBe(0);
+  });
+
+  it("rejects completion without explicitly requested JSON readback", async () => {
     const { runtime: h } = await setup(false);
     h.enqueue(nativeCall("file_write", { path: "de.json", content: translation }),
       answer("Saved and verified de.json."), answer("Saved and verified de.json."), answer("Saved and verified de.json."));
-    const result = await h.turn("Save de.json");
+    const result = await h.turn("Save de.json and read back the file.");
     expect(result.finalOutcome?.status).toBe("partially_completed");
     expect(result.text).toContain("matching readback");
     expect(result.text).not.toContain("Saved and verified");

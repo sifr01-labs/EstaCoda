@@ -2817,3 +2817,20 @@ function promptMemoryBlock(
 function countOccurrences(value: string, needle: string): number {
   return value.split(needle).length - 1;
 }
+
+it.each(["ordinary", "readback", "accepted-report"])("aligns provider guidance with the %s file contract", kind => {
+  const input = basePromptInput({ intent: { ...generalIntent, requestRequirements: {
+    skillReferences: [], issues: [], ...(kind === "accepted-report" ? { sourceTaskId: "task" } : {}),
+    fileOutput: { format: "artifact", path: "output.pt", ...(kind === "readback" ? {} : { verification: "execution" }) }
+  } } });
+  const rendered = renderMessages(assembleProviderPrompt(input).messages);
+  expect(rendered).toContain("file production alone does not prove correctness");
+  expect(rendered).not.toContain("Shell copies and shell verification do not produce");
+  if (kind === "ordinary") {
+    expect(rendered).toContain("not mandatory text readback");
+    expect(rendered).not.toContain("then file.read the entire target");
+  } else {
+    expect(rendered).toContain("then file.read the entire target");
+    expect(rendered).toContain("accepted primary result");
+  }
+});

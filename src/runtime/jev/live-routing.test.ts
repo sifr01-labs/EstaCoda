@@ -292,3 +292,10 @@ it('keeps research intent for reading a known page without searching', async () 
  chosen = ['intent.research'];
  expect((await route('Read https://www.python.org/about/. Do not search for other pages.')).intent.labels).toContain('research');
 });
+
+it('does not force a document workflow for a produced binary artifact', async () => {
+ chosen = ['intent.repo-change'];
+ const result = await route('Generate model.pt');
+ expect(result.intent.labels).not.toContain('docs-writing');
+ expect(result.intent.requestRequirements?.fileOutput).toMatchObject({format:'artifact',verification:'execution',path:'model.pt'});
+});

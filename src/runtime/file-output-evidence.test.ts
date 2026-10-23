@@ -24,7 +24,7 @@ function observe(executions: ToolExecutionRecord[], prompt = "Save report.md", t
   const index = new ExecutionEvidenceIndex();
   const toolExecutions = executions.map((execution, i) => ({ ...execution, toolCallId: `call-${i}` }));
   for (const execution of toolExecutions) index.record(execution, turn);
-  const requirements = deriveRequestRequirements(prompt, "turn-1");
+  const requirements = deriveRequestRequirements(`${prompt}. Read back the requested files.`, "turn-1");
   return { requirements, toolExecutions, executionReceipts: index.recordsForTurn(turn) };
 }
 
@@ -90,7 +90,7 @@ describe("file output evidence", () => {
   });
   it.each(["file.write", "file.patch"])("accepts %s plus matching readback", (name) => {
     const input = observe([call(name), call("file.read")]);
-    expect(fileOutputEvidence(input)).toEqual({ satisfied: true, writeCallId: "call-0", path: "report.md" });
+    expect(fileOutputEvidence(input)).toEqual({ satisfied: true, contentVerified: true, writeCallId: "call-0", path: "report.md" });
     expect(deriveExecutionFinalOutcome({ ...input, requestRequirements: input.requirements, completionFloor: "mutation_with_verification" })).toMatchObject({ status: "completed", confirmedActions: [{ verification: "verified" }] });
   });
   it("accepts a bounded preview only when a complete materialized file read verifies the digest", () => {
@@ -238,7 +238,7 @@ describe("multiple requested file outputs", () => {
   const first = () => [call("file.write", "a.md"), call("file.read", "a.md")];
   it("requires and identifies independent writes and readbacks for every target", () => {
     const input = observe([...first(), call("file.write", "b.json"), call("file.read", "b.json")], prompt);
-    expect(fileOutputEvidence(input)).toEqual({ satisfied: true, path: "a.md", writeCallId: "call-0", files: [
+    expect(fileOutputEvidence(input)).toEqual({ satisfied: true, contentVerified: true, path: "a.md", writeCallId: "call-0", files: [
       { path: "a.md", writeCallId: "call-0" }, { path: "b.json", writeCallId: "call-2" }
     ] });
     expect(deriveExecutionFinalOutcome({ ...input, requestRequirements: input.requirements, completionFloor: "mutation_with_verification" }).status).toBe("completed");
@@ -283,4 +283,27 @@ it("includes secondary output content in research validation only after all outp
   const writes = ["a.md", "b.md"].flatMap(path => [{ ...call("file.write", path), input: { path, content: "report" } }, call("file.read", path)]);
   expect(verifiedFileOutputContent(observe(writes, "Save a.md and b.md"))).toBe("report\n\nreport");
   expect(verifiedFileOutputContent(observe(writes.slice(0, -1), "Save a.md and b.md"))).toBeUndefined();
+});
+
+
+it("counts materialized patch outputs independently of unsaved sibling buffers", () => {
+  const patch = call("file.patch", "unused", { paths: ["a.txt", "b.txt"], fileOutputs: [
+    { path: "a.txt", contentSha256: digest, materialized: true },
+    { path: "b.txt", contentSha256: digest, materialized: false }
+  ] });
+  const input = observe([patch]);
+  expect(fileOutputEvidence({ ...input, requirements: deriveRequestRequirements("Write a.txt", "turn-1") })).toMatchObject({ satisfied: true, contentVerified: false });
+  expect(fileOutputEvidence({ ...input, requirements: deriveRequestRequirements("Write a.txt and b.txt", "turn-1") }).satisfied).toBe(false);
+});
+
+it("settles a mixed copy/ordinary-output contract without requiring readback of the ordinary sibling", () => {
+  const patch = call("file.patch", "unused", { paths: ["a.txt", "b.txt"], fileOutputs: [
+    { path: "a.txt", contentSha256: digest, materialized: true },
+    { path: "b.txt", contentSha256: digest, materialized: true }
+  ] });
+  const input = { ...observe([call("file.read", "source.txt"), patch, call("file.read", "a.txt")]),
+    requirements: deriveRequestRequirements("Copy source.txt to a.txt. Write b.txt", "turn-1") };
+  expect(fileOutputEvidence(input)).toMatchObject({ satisfied: true, contentVerified: false });
+  expect(deriveExecutionFinalOutcome({ ...input, requestRequirements: input.requirements, completionFloor: "mutation_with_verification" }).status).toBe("completed");
+  expect(verifiedFileOutputContent(input)).toBeUndefined();
 });
