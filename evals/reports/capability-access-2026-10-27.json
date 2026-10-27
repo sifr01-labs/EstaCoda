@@ -1,0 +1,815 @@
+{
+  "title": "Stable capability access: targeted live before/after comparison",
+  "date": "2026-10-27",
+  "baselineCommit": "3799157b",
+  "candidateBranch": "ame/stable-capability-access",
+  "purpose": "Test whether routing can strand an otherwise configured harness without file creation or capability recovery; measure delivered artifacts separately from completion labels.",
+  "runtimeFilesSha256": {
+    "src/runtime/tool-selection-policies.ts": "3b9a069adebdf11555f09fd90d11f96546fab6e4a47e06bc3f1f8af891fccbeb",
+    "src/runtime/provider-tool-narrowing.ts": "9d2c778afa6c60580dbe66e8b87f106591550ce893d8e2f495c4e871f50c545f",
+    "src/runtime/jev/capability-selection.ts": "06691fef4d260ea4f2131987e7252a74006cea7a5993442d23b050f5f3af651e",
+    "src/tools/capability-tools.ts": "14a216d9743a22725258e38caf291842948a21f5d1513de4e694bdeff1e9cec0"
+  },
+  "method": {
+    "model": "codex/gpt-6.1-sol",
+    "routing": "standard",
+    "fallbacks": false,
+    "mode": "adaptive",
+    "repeatsPerCase": 2,
+    "maximumConcurrentTrials": 2,
+    "primaryAgentBudgetSeconds": 240,
+    "extendedWebsiteBudgetSeconds": 600,
+    "maximumProviderIterations": 20,
+    "maximumToolCalls": 40,
+    "providerTransport": "Same native provider adapter through a bounded loopback host relay; full built baseline/candidate harness runs inside an isolated Linux container. Relay provider label is benchmark-native in both variants. Native credentials never enter containers.",
+    "environment": "Same amd64 Linux image under Colima on an ARM Mac; Python, ReportLab 4.4.5, pypdf 6.1.3, BeautifulSoup 4.14.2. No browser. No PDF-specific prompt guidance beyond the same available-library note.",
+    "webSource": "https://sleepnomad.github.io/hermes-trismegistus/",
+    "webSourceSha256": "00b5f48a36bbb7f9c0f649e3324e085b605ba6150ece595b607a83c8248dad13",
+    "webSourceBytes": 576861,
+    "order": "Before then after for first repeats; after then before for second repeats. Two parallel trial lanes.",
+    "imageTag": "estacoda-capability-relay:20261027",
+    "imageId": "sha256:8d1b6dc4f14f7dd5bb1f6413d6390e59f9e82cec9ceb60f440f0021da955a56e"
+  },
+  "cases": [
+    {
+      "id": "web-pdf",
+      "prompt": "https://sleepnomad.github.io/hermes-trismegistus/ Can you extract all the content here into a well formatted and designed PDF?"
+    },
+    {
+      "id": "arabic-pdf",
+      "prompt": "نسخة PDF منسقة وجميلة من جميع محتويات notes.txt من فضلك. احتفظ بالنص الإنجليزي كما هو داخل الملف.",
+      "files": {
+        "notes.txt": "FIELD REPORT: TIDAL GARDENS\n\nOverview\nThe tidal garden pilot began on 14 March 2025. Its purpose is to measure how planted barriers reduce coastal erosion.\n\nSites\nSite Amber has 24 planting beds and a 120 metre shoreline. Site Cobalt has 18 beds and a 95 metre shoreline. Site Jade has 30 beds and a 150 metre shoreline.\n\nMeasurements\nAmber recorded a sediment gain of 12 millimetres. Cobalt recorded 8 millimetres. Jade recorded 17 millimetres. These preliminary observations are not proof of long term effectiveness.\n\nMethods\nEach site was measured at the same tidal stage. Three samples were collected from each planting bed. Measurements were repeated after six weeks.\n\nLimitations\nThe pilot did not include an unplanted control site. Seasonal variation and storm effects remain unresolved. The team should repeat sampling over a full year.\n\nNext steps\nInstall control transects, publish measurement protocols, and schedule quarterly surveys. The next review is on 30 September 2025.\n\nSource note\nThis is a synthetic benchmark fixture, not a scientific publication. END OF FIELD REPORT.\n"
+      }
+    },
+    {
+      "id": "csv",
+      "prompt": "A file named totals.csv with the totals by region from sales.json, please. Use the columns region,total and alphabetical region order.",
+      "files": {
+        "sales.json": "[{\"region\":\"West\",\"amount\":12.5},{\"region\":\"East\",\"amount\":20},{\"region\":\"West\",\"amount\":7.5},{\"region\":\"North\",\"amount\":3}]\n"
+      }
+    },
+    {
+      "id": "read-only",
+      "prompt": "Explain in two sentences what a PDF is. Do not use tools or create or change any files.",
+      "readOnly": true,
+      "files": {
+        "untouched.txt": "This file must not change.\n"
+      }
+    }
+  ],
+  "gates": {
+    "webPdf": "Parseable PDF, over 20 pages, over 250000 extracted characters, expected title/topic words. This is an artifact-production gate, not a proof of exact completeness.",
+    "arabicPdf": "Parseable PDF with at least 98% source-word presence and the final source sentinel; English source with Arabic task instruction.",
+    "csv": "Exact numeric totals, column names, and region order in a real CSV file.",
+    "readOnly": "No tool executions, no added output files, unchanged inputs.",
+    "all": "Original fixture files unchanged. Runtime completion must be completed or completed_with_recovered_errors for the stricter combined measure."
+  },
+  "summary": {
+    "primary": {
+      "before": {
+        "trials": 8,
+        "artifactOrReadOnlyGatesPassed": 4,
+        "gateAndRuntimeCompleted": 4
+      },
+      "after": {
+        "trials": 8,
+        "artifactOrReadOnlyGatesPassed": 8,
+        "gateAndRuntimeCompleted": 7
+      }
+    },
+    "extended": {
+      "before": {
+        "trials": 2,
+        "artifactOrReadOnlyGatesPassed": 0,
+        "gateAndRuntimeCompleted": 0
+      },
+      "after": {
+        "trials": 2,
+        "artifactOrReadOnlyGatesPassed": 2,
+        "gateAndRuntimeCompleted": 1
+      }
+    }
+  },
+  "trials": [
+    {
+      "phase": "primary",
+      "variant": "before",
+      "case": "arabic-pdf",
+      "repeat": 1,
+      "agentBudgetSeconds": 240,
+      "durationSeconds": 18.579,
+      "providerDispatches": 3,
+      "inputTokens": 8211,
+      "outputTokens": 260,
+      "initialSchemaTokensEstimate": 1121,
+      "artifactOrReadOnlyGatePassed": false,
+      "runtimeStatus": "completed",
+      "terminationCause": "normal",
+      "gateAndRuntimeCompleted": false,
+      "changedInputs": [],
+      "pdfs": [],
+      "toolFailures": []
+    },
+    {
+      "phase": "primary",
+      "variant": "before",
+      "case": "arabic-pdf",
+      "repeat": 2,
+      "agentBudgetSeconds": 240,
+      "durationSeconds": 18.004,
+      "providerDispatches": 3,
+      "inputTokens": 8199,
+      "outputTokens": 307,
+      "initialSchemaTokensEstimate": 1121,
+      "artifactOrReadOnlyGatePassed": false,
+      "runtimeStatus": "completed",
+      "terminationCause": "normal",
+      "gateAndRuntimeCompleted": false,
+      "changedInputs": [],
+      "pdfs": [],
+      "toolFailures": []
+    },
+    {
+      "phase": "primary",
+      "variant": "before",
+      "case": "csv",
+      "repeat": 1,
+      "agentBudgetSeconds": 240,
+      "durationSeconds": 28.068,
+      "providerDispatches": 6,
+      "inputTokens": 21228,
+      "outputTokens": 237,
+      "initialSchemaTokensEstimate": 1527,
+      "artifactOrReadOnlyGatePassed": true,
+      "runtimeStatus": "completed",
+      "terminationCause": "normal",
+      "gateAndRuntimeCompleted": true,
+      "changedInputs": [],
+      "pdfs": [],
+      "toolFailures": []
+    },
+    {
+      "phase": "primary",
+      "variant": "before",
+      "case": "csv",
+      "repeat": 2,
+      "agentBudgetSeconds": 240,
+      "durationSeconds": 22.19,
+      "providerDispatches": 6,
+      "inputTokens": 21192,
+      "outputTokens": 241,
+      "initialSchemaTokensEstimate": 1527,
+      "artifactOrReadOnlyGatePassed": true,
+      "runtimeStatus": "completed",
+      "terminationCause": "normal",
+      "gateAndRuntimeCompleted": true,
+      "changedInputs": [],
+      "pdfs": [],
+      "toolFailures": []
+    },
+    {
+      "phase": "primary",
+      "variant": "before",
+      "case": "read-only",
+      "repeat": 1,
+      "agentBudgetSeconds": 240,
+      "durationSeconds": 6.71,
+      "providerDispatches": 1,
+      "inputTokens": 2468,
+      "outputTokens": 54,
+      "initialSchemaTokensEstimate": 1357,
+      "artifactOrReadOnlyGatePassed": true,
+      "runtimeStatus": "completed",
+      "terminationCause": "normal",
+      "gateAndRuntimeCompleted": true,
+      "changedInputs": [],
+      "pdfs": [],
+      "toolFailures": []
+    },
+    {
+      "phase": "primary",
+      "variant": "before",
+      "case": "read-only",
+      "repeat": 2,
+      "agentBudgetSeconds": 240,
+      "durationSeconds": 6.549,
+      "providerDispatches": 1,
+      "inputTokens": 2474,
+      "outputTokens": 54,
+      "initialSchemaTokensEstimate": 1357,
+      "artifactOrReadOnlyGatePassed": true,
+      "runtimeStatus": "completed",
+      "terminationCause": "normal",
+      "gateAndRuntimeCompleted": true,
+      "changedInputs": [],
+      "pdfs": [],
+      "toolFailures": []
+    },
+    {
+      "phase": "primary",
+      "variant": "before",
+      "case": "web-pdf",
+      "repeat": 1,
+      "agentBudgetSeconds": 240,
+      "durationSeconds": 17.819,
+      "providerDispatches": 2,
+      "inputTokens": 10828,
+      "outputTokens": 290,
+      "initialSchemaTokensEstimate": 1121,
+      "artifactOrReadOnlyGatePassed": false,
+      "runtimeStatus": "completed",
+      "terminationCause": "normal",
+      "gateAndRuntimeCompleted": false,
+      "changedInputs": [],
+      "pdfs": [],
+      "toolFailures": []
+    },
+    {
+      "phase": "primary",
+      "variant": "before",
+      "case": "web-pdf",
+      "repeat": 2,
+      "agentBudgetSeconds": 240,
+      "durationSeconds": 22.209,
+      "providerDispatches": 2,
+      "inputTokens": 10840,
+      "outputTokens": 300,
+      "initialSchemaTokensEstimate": 1121,
+      "artifactOrReadOnlyGatePassed": false,
+      "runtimeStatus": "completed",
+      "terminationCause": "normal",
+      "gateAndRuntimeCompleted": false,
+      "changedInputs": [],
+      "pdfs": [],
+      "toolFailures": []
+    },
+    {
+      "phase": "primary",
+      "variant": "after",
+      "case": "arabic-pdf",
+      "repeat": 1,
+      "agentBudgetSeconds": 240,
+      "durationSeconds": 37.429,
+      "providerDispatches": 6,
+      "inputTokens": 27816,
+      "outputTokens": 836,
+      "initialSchemaTokensEstimate": 3279,
+      "artifactOrReadOnlyGatePassed": true,
+      "runtimeStatus": "completed",
+      "terminationCause": "normal",
+      "gateAndRuntimeCompleted": true,
+      "changedInputs": [],
+      "pdfs": [
+        {
+          "file": "tidal-gardens-report.pdf",
+          "pages": 1,
+          "characters": 1084,
+          "wordCoverage": 1.0,
+          "pass": true
+        }
+      ],
+      "toolFailures": []
+    },
+    {
+      "phase": "primary",
+      "variant": "after",
+      "case": "arabic-pdf",
+      "repeat": 2,
+      "agentBudgetSeconds": 240,
+      "durationSeconds": 54.075,
+      "providerDispatches": 11,
+      "inputTokens": 56852,
+      "outputTokens": 1442,
+      "initialSchemaTokensEstimate": 3279,
+      "artifactOrReadOnlyGatePassed": true,
+      "runtimeStatus": "completed_with_recovered_errors",
+      "terminationCause": "normal",
+      "gateAndRuntimeCompleted": true,
+      "changedInputs": [],
+      "pdfs": [
+        {
+          "file": "notes-formatted.pdf",
+          "pages": 1,
+          "characters": 1083,
+          "wordCoverage": 1.0,
+          "pass": true
+        }
+      ],
+      "toolFailures": [
+        {
+          "tool": "terminal.run",
+          "decision": "allow",
+          "category": "other_tool_error"
+        },
+        {
+          "tool": "terminal.run",
+          "decision": "allow",
+          "category": "other_tool_error"
+        },
+        {
+          "tool": "terminal.run",
+          "decision": "allow",
+          "category": "other_tool_error"
+        }
+      ]
+    },
+    {
+      "phase": "primary",
+      "variant": "after",
+      "case": "csv",
+      "repeat": 1,
+      "agentBudgetSeconds": 240,
+      "durationSeconds": 16.612,
+      "providerDispatches": 4,
+      "inputTokens": 16547,
+      "outputTokens": 166,
+      "initialSchemaTokensEstimate": 3467,
+      "artifactOrReadOnlyGatePassed": true,
+      "runtimeStatus": "completed",
+      "terminationCause": "normal",
+      "gateAndRuntimeCompleted": true,
+      "changedInputs": [],
+      "pdfs": [],
+      "toolFailures": []
+    },
+    {
+      "phase": "primary",
+      "variant": "after",
+      "case": "csv",
+      "repeat": 2,
+      "agentBudgetSeconds": 240,
+      "durationSeconds": 14.401,
+      "providerDispatches": 4,
+      "inputTokens": 16555,
+      "outputTokens": 166,
+      "initialSchemaTokensEstimate": 3467,
+      "artifactOrReadOnlyGatePassed": true,
+      "runtimeStatus": "completed",
+      "terminationCause": "normal",
+      "gateAndRuntimeCompleted": true,
+      "changedInputs": [],
+      "pdfs": [],
+      "toolFailures": []
+    },
+    {
+      "phase": "primary",
+      "variant": "after",
+      "case": "read-only",
+      "repeat": 1,
+      "agentBudgetSeconds": 240,
+      "durationSeconds": 6.564,
+      "providerDispatches": 1,
+      "inputTokens": 3625,
+      "outputTokens": 54,
+      "initialSchemaTokensEstimate": 3201,
+      "artifactOrReadOnlyGatePassed": true,
+      "runtimeStatus": "completed",
+      "terminationCause": "normal",
+      "gateAndRuntimeCompleted": true,
+      "changedInputs": [],
+      "pdfs": [],
+      "toolFailures": []
+    },
+    {
+      "phase": "primary",
+      "variant": "after",
+      "case": "read-only",
+      "repeat": 2,
+      "agentBudgetSeconds": 240,
+      "durationSeconds": 6.833,
+      "providerDispatches": 1,
+      "inputTokens": 3630,
+      "outputTokens": 55,
+      "initialSchemaTokensEstimate": 3201,
+      "artifactOrReadOnlyGatePassed": true,
+      "runtimeStatus": "completed",
+      "terminationCause": "normal",
+      "gateAndRuntimeCompleted": true,
+      "changedInputs": [],
+      "pdfs": [],
+      "toolFailures": []
+    },
+    {
+      "phase": "primary",
+      "variant": "after",
+      "case": "web-pdf",
+      "repeat": 1,
+      "agentBudgetSeconds": 240,
+      "durationSeconds": 251.676,
+      "providerDispatches": 17,
+      "inputTokens": 232705,
+      "outputTokens": 4260,
+      "initialSchemaTokensEstimate": 3279,
+      "artifactOrReadOnlyGatePassed": true,
+      "runtimeStatus": "partially_completed",
+      "terminationCause": "deadline_reached",
+      "gateAndRuntimeCompleted": false,
+      "changedInputs": [],
+      "pdfs": [
+        {
+          "file": "artifacts/Hermes_Trismegistus_Complete.pdf",
+          "pages": 137,
+          "characters": 341503,
+          "pass": true
+        }
+      ],
+      "toolFailures": [
+        {
+          "tool": "terminal.run",
+          "decision": "allow",
+          "category": "other_tool_error"
+        },
+        {
+          "tool": "terminal.run",
+          "decision": "allow",
+          "category": "command_timeout"
+        },
+        {
+          "tool": "terminal.run",
+          "decision": "allow",
+          "category": "command_timeout"
+        }
+      ]
+    },
+    {
+      "phase": "primary",
+      "variant": "after",
+      "case": "web-pdf",
+      "repeat": 2,
+      "agentBudgetSeconds": 240,
+      "durationSeconds": 194.112,
+      "providerDispatches": 16,
+      "inputTokens": 234058,
+      "outputTokens": 4601,
+      "initialSchemaTokensEstimate": 3279,
+      "artifactOrReadOnlyGatePassed": true,
+      "runtimeStatus": "completed_with_recovered_errors",
+      "terminationCause": "normal",
+      "gateAndRuntimeCompleted": true,
+      "changedInputs": [],
+      "pdfs": [
+        {
+          "file": "artifacts/Hermes_Trismegistus_Complete.pdf",
+          "pages": 159,
+          "characters": 343028,
+          "pass": true
+        }
+      ],
+      "toolFailures": [
+        {
+          "tool": "terminal.run",
+          "decision": "allow",
+          "category": "other_tool_error"
+        }
+      ]
+    },
+    {
+      "phase": "extended",
+      "variant": "before",
+      "case": "web-pdf",
+      "repeat": 3,
+      "agentBudgetSeconds": 600,
+      "durationSeconds": 19.171,
+      "providerDispatches": 2,
+      "inputTokens": 10834,
+      "outputTokens": 299,
+      "initialSchemaTokensEstimate": 1121,
+      "artifactOrReadOnlyGatePassed": false,
+      "runtimeStatus": "completed",
+      "terminationCause": "normal",
+      "gateAndRuntimeCompleted": false,
+      "changedInputs": [],
+      "pdfs": [],
+      "toolFailures": []
+    },
+    {
+      "phase": "extended",
+      "variant": "before",
+      "case": "web-pdf",
+      "repeat": 4,
+      "agentBudgetSeconds": 600,
+      "durationSeconds": 17.273,
+      "providerDispatches": 2,
+      "inputTokens": 10828,
+      "outputTokens": 294,
+      "initialSchemaTokensEstimate": 1121,
+      "artifactOrReadOnlyGatePassed": false,
+      "runtimeStatus": "completed",
+      "terminationCause": "normal",
+      "gateAndRuntimeCompleted": false,
+      "changedInputs": [],
+      "pdfs": [],
+      "toolFailures": []
+    },
+    {
+      "phase": "extended",
+      "variant": "after",
+      "case": "web-pdf",
+      "repeat": 3,
+      "agentBudgetSeconds": 600,
+      "durationSeconds": 191.429,
+      "providerDispatches": 15,
+      "inputTokens": 171690,
+      "outputTokens": 4041,
+      "initialSchemaTokensEstimate": 3279,
+      "artifactOrReadOnlyGatePassed": true,
+      "runtimeStatus": "completed_with_recovered_errors",
+      "terminationCause": "normal",
+      "gateAndRuntimeCompleted": true,
+      "changedInputs": [],
+      "pdfs": [
+        {
+          "file": "output/Hermes_Trismegistus.pdf",
+          "pages": 150,
+          "characters": 345404,
+          "pass": true
+        }
+      ],
+      "toolFailures": [
+        {
+          "tool": "terminal.run",
+          "decision": "allow",
+          "category": "other_tool_error"
+        },
+        {
+          "tool": "terminal.run",
+          "decision": "allow",
+          "category": "other_tool_error"
+        },
+        {
+          "tool": "terminal.run",
+          "decision": "allow",
+          "category": "other_tool_error"
+        }
+      ]
+    },
+    {
+      "phase": "extended",
+      "variant": "after",
+      "case": "web-pdf",
+      "repeat": 4,
+      "agentBudgetSeconds": 600,
+      "durationSeconds": 197.771,
+      "providerDispatches": 17,
+      "inputTokens": 244319,
+      "outputTokens": 3993,
+      "initialSchemaTokensEstimate": 3279,
+      "artifactOrReadOnlyGatePassed": true,
+      "runtimeStatus": "partially_completed",
+      "terminationCause": "normal",
+      "gateAndRuntimeCompleted": false,
+      "changedInputs": [],
+      "pdfs": [
+        {
+          "file": "hermes/Hermes_Trismegistus.pdf",
+          "pages": 127,
+          "characters": 339370,
+          "pass": true
+        }
+      ],
+      "toolFailures": [
+        {
+          "tool": "terminal.run",
+          "decision": "allow",
+          "category": "other_tool_error"
+        },
+        {
+          "tool": "terminal.run",
+          "decision": "allow",
+          "category": "command_timeout"
+        }
+      ]
+    }
+  ],
+  "independentPdfAudit": {
+    "method": "Compare 391 script paragraphs, 265 claim texts, 388 citations and locations, and 530 caveats against reference HTML. Normalize punctuation/whitespace; remove source superscripts and PDF superscript glyphs plus page headers/footers to avoid extraction-order artifacts. Check full blocks and 24-character chunks at 12-character intervals. Sample-render cover, body and source pages.",
+    "results": [
+      {
+        "file": "extended/after/web-pdf-3/workspace/output/Hermes_Trismegistus.pdf",
+        "pages": 150,
+        "blocks": {
+          "script": {
+            "total": 391,
+            "exactBlocks": 391,
+            "chunks": 10008,
+            "matchedChunks": 10008,
+            "chunkCoverage": 1.0
+          },
+          "claim": {
+            "total": 265,
+            "exactBlocks": 265,
+            "chunks": 2193,
+            "matchedChunks": 2193,
+            "chunkCoverage": 1.0
+          },
+          "citation": {
+            "total": 388,
+            "exactBlocks": 387,
+            "chunks": 1983,
+            "matchedChunks": 1983,
+            "chunkCoverage": 1.0
+          },
+          "location": {
+            "total": 388,
+            "exactBlocks": 386,
+            "chunks": 421,
+            "matchedChunks": 419,
+            "chunkCoverage": 0.995249
+          },
+          "caveat": {
+            "total": 530,
+            "exactBlocks": 530,
+            "chunks": 3204,
+            "matchedChunks": 3204,
+            "chunkCoverage": 1.0
+          }
+        },
+        "unmatchedBlockCounts": {
+          "location": 2
+        }
+      },
+      {
+        "file": "extended/after/web-pdf-4/workspace/hermes/Hermes_Trismegistus.pdf",
+        "pages": 127,
+        "blocks": {
+          "script": {
+            "total": 391,
+            "exactBlocks": 391,
+            "chunks": 10008,
+            "matchedChunks": 10008,
+            "chunkCoverage": 1.0
+          },
+          "claim": {
+            "total": 265,
+            "exactBlocks": 265,
+            "chunks": 2193,
+            "matchedChunks": 2193,
+            "chunkCoverage": 1.0
+          },
+          "citation": {
+            "total": 388,
+            "exactBlocks": 388,
+            "chunks": 1983,
+            "matchedChunks": 1983,
+            "chunkCoverage": 1.0
+          },
+          "location": {
+            "total": 388,
+            "exactBlocks": 388,
+            "chunks": 421,
+            "matchedChunks": 421,
+            "chunkCoverage": 1.0
+          },
+          "caveat": {
+            "total": 530,
+            "exactBlocks": 530,
+            "chunks": 3204,
+            "matchedChunks": 3204,
+            "chunkCoverage": 1.0
+          }
+        },
+        "unmatchedBlockCounts": {}
+      },
+      {
+        "file": "primary/after/web-pdf-1/workspace/artifacts/Hermes_Trismegistus_Complete.pdf",
+        "pages": 137,
+        "blocks": {
+          "script": {
+            "total": 391,
+            "exactBlocks": 391,
+            "chunks": 10008,
+            "matchedChunks": 10008,
+            "chunkCoverage": 1.0
+          },
+          "claim": {
+            "total": 265,
+            "exactBlocks": 265,
+            "chunks": 2193,
+            "matchedChunks": 2193,
+            "chunkCoverage": 1.0
+          },
+          "citation": {
+            "total": 388,
+            "exactBlocks": 388,
+            "chunks": 1983,
+            "matchedChunks": 1983,
+            "chunkCoverage": 1.0
+          },
+          "location": {
+            "total": 388,
+            "exactBlocks": 386,
+            "chunks": 421,
+            "matchedChunks": 419,
+            "chunkCoverage": 0.995249
+          },
+          "caveat": {
+            "total": 530,
+            "exactBlocks": 526,
+            "chunks": 3204,
+            "matchedChunks": 3192,
+            "chunkCoverage": 0.996255
+          }
+        },
+        "unmatchedBlockCounts": {
+          "location": 2,
+          "caveat": 4
+        }
+      },
+      {
+        "file": "primary/after/web-pdf-2/workspace/artifacts/Hermes_Trismegistus_Complete.pdf",
+        "pages": 159,
+        "blocks": {
+          "script": {
+            "total": 391,
+            "exactBlocks": 391,
+            "chunks": 10008,
+            "matchedChunks": 10008,
+            "chunkCoverage": 1.0
+          },
+          "claim": {
+            "total": 265,
+            "exactBlocks": 265,
+            "chunks": 2193,
+            "matchedChunks": 2193,
+            "chunkCoverage": 1.0
+          },
+          "citation": {
+            "total": 388,
+            "exactBlocks": 388,
+            "chunks": 1983,
+            "matchedChunks": 1983,
+            "chunkCoverage": 1.0
+          },
+          "location": {
+            "total": 388,
+            "exactBlocks": 388,
+            "chunks": 421,
+            "matchedChunks": 421,
+            "chunkCoverage": 1.0
+          },
+          "caveat": {
+            "total": 530,
+            "exactBlocks": 530,
+            "chunks": 3204,
+            "matchedChunks": 3204,
+            "chunkCoverage": 1.0
+          }
+        },
+        "unmatchedBlockCounts": {}
+      }
+    ],
+    "interpretation": "All four generated website PDFs contained every script paragraph and claim text. Two matched every audited content block; two had unmatched citation-location or caveat blocks. This audit is stricter than the predeclared artifact gate; unmatched text is not silently counted as exact completeness."
+  },
+  "findings": [
+    "The unchanged baseline reproduced successful web extraction followed by refusal because no write/rendering tools were exposed in every website trial.",
+    "The candidate created a website PDF in 4/4 trials and a local PDF in 2/2 trials; the baseline created neither (0/4 and 0/2).",
+    "CSV and read-only controls passed in both variants. CSV median latency fell from 25.129s to 15.506s and dispatches fell from six to four.",
+    "The candidate costs additional schema context: the website initial schema estimate rose from 1121 to 3279 tokens; read-only input tokens rose from a mean of 2471 to 3627.5.",
+    "Primary combined artifact/runtime success improved from 4/8 to 7/8. One candidate website trial exhausted its four-minute budget after creating the PDF.",
+    "Under the extended budget both candidate PDFs were created and delivered, but one runtime retained partially_completed after an earlier command timeout. The other completed_with_recovered_errors. Both baselines still lacked write tools.",
+    "These results establish removal of the observed capability-visibility blocker. They do not establish universally reliable document completeness, recovery classification, or deadline handling."
+  ],
+  "limitations": [
+    "Small targeted sample, one model, Standard routing only; not a Terminal-Bench score or statistical reliability estimate. JEV behavior is covered by deterministic negative/uncertain/stale-response regression tests, not a live JEV comparison.",
+    "Preliminary Docker-execution-mode trials were confounded by host-tool admission restrictions; their complete 16-trial calibration results are retained locally but excluded from primary scoring. CSV wording was clarified before primary trials to require a file.",
+    "The extended phase was added after observing the primary deadline stop. Original primary failures remain in the report; no successful retry replaces them.",
+    "Container emulation and concurrent regression work can affect wall-clock measurements. Latencies are observations, not portable speed guarantees.",
+    "Two PDFs did not match every block in the stricter content audit. Artifact production alone must not be presented as complete content fidelity.",
+    "Native Telegram delivery, Chrome startup, Docker host-tool admission, completion classification after command errors, and output-quality guarantees are outside this patch."
+  ],
+  "validation": {
+    "node": "v24.14.1",
+    "pnpm": "10.33.0",
+    "frozenInstall": "passed",
+    "typecheck": "passed",
+    "build": "passed",
+    "tests": {
+      "command": "pnpm run test --maxWorkers=4 --testTimeout=15000",
+      "filesPassed": 770,
+      "testsPassed": 13039,
+      "note": "Earlier full runs had resource-load CLI startup timeouts; affected tests passed isolated reruns. Final full run passed with the stated concurrency/startup allowance, without changed assertions."
+    },
+    "smoke": "passed",
+    "runtimeImportAudit": "passed",
+    "esmAudit": "passed",
+    "distSmoke": "passed"
+  },
+  "review": {
+    "scope": "Four production files; existing selection and recovery paths reused. No new dependencies or subsystem.",
+    "safety": "The eligible session catalog, workspace trust, execution approvals, hardline checks, credential restrictions, profile scoping, schema budgets, and same-batch recovery rejection are retained. Core visibility no longer depends on a task verb or relevance score. Explicit tool restrictions apply to selection and recovery.",
+    "risk": "More callable schemas and prompt tokens on simple turns. Models still choose actions and can make content or workflow mistakes; visibility does not grant execution authority.",
+    "remainingScopeGaps": []
+  },
+  "localEvidenceRoot": ".estacoda/capability-benchmark-20261027",
+  "harnessFilesSha256": {
+    "relay-cases.json": "d1d821d1e130ee4923ade574258dfd91bc81b3fdf9465ca6077849a07cdd43f7",
+    "container-run.mjs": "f26747cc26f8f4155f41edcb89b82087f401e0ada4efa41d6fb2ce25b1bec593",
+    "container-extended.mjs": "64b507f6293cb52851d98696bfc78861bd1dae18362c75d0cbda26ec44600b7b",
+    "relay-batch.py": "3550d40974f2b3aba295dd5da97032a6d2b937a2bacd3f8c34ad0801b87d17e8",
+    "extended-batch.py": "91f33922fd971c4054d0abd46a5e2e75dd04cfb6b5537a3f09eccc07cc357bef",
+    "relay.mjs": "2797d19f7c742779bce1284f74d6be9065b7275e055d26d72a7afd1d442ef9f6",
+    "verify.py": "1d0d8fb6a4efaff7e39423f552c37bb7f440386fccc0abf9c8aeaae13d33941c"
+  },
+  "cleanup": "All trial containers exited and were removed. Temporary native-auth references and relay credential files removed; loopback relay stopped."
+}

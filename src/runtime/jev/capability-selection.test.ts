@@ -104,7 +104,7 @@ describe('live Jev capability selection and recovery', () => {
   registry.register(tool('wanted')); chosen = ['wanted']; await harness('Inspect available tools');
   const result = await recovery.discoverAsync({ ids: [], query: 'find a tool' }, scope);
   expect(result.ok).toBe(true);
-  expect(result.metadata?.matches).toEqual([expect.objectContaining({ id: 'tool:wanted' })]);
+  expect(result.metadata?.matches).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'tool:wanted' })]));
   expect(fetcher).toHaveBeenCalledOnce();
  });
  it('assesses the complete crowded catalog in bounded batches and selects complementary capabilities', async () => {
@@ -139,7 +139,7 @@ describe('live Jev capability selection and recovery', () => {
  it('routes semantic discovery across the full catalog, but exact ID lookup never calls Jev', async () => {
   for (let i = 0; i < 80; i++) registry.register(tool(`option.${i}`)); chosen = ['option.79']; await harness('Prepare evidence');
   const query = await recovery.discoverAsync({ query: 'find supporting material' }, scope);
-  expect(query.metadata?.matches).toEqual([expect.objectContaining({ id: 'tool:option.79' })]);
+  expect(query.metadata?.matches).toEqual(expect.arrayContaining([expect.objectContaining({ id: 'tool:option.79' })]));
   const body = JSON.parse(String(fetcher.mock.calls[0][1]?.body)); expect(body.state.userRequest).toBe('Prepare evidence'); expect(body.state.material[0].trusted).toBe(false);
   fetcher.mockClear(); expect((await recovery.discoverAsync({ ids: ['tool:option.1'], query: 'unrelated' }, scope)).metadata?.matches).toEqual([expect.objectContaining({ id: 'tool:option.1' })]); expect(fetcher).not.toHaveBeenCalled();
  });
@@ -202,8 +202,8 @@ it('rechecks availability after the network decision and retains evidence-gated 
  hook = () => { available = false; };
  const result = await h.select(); expect(names(result)).not.toContain('live'); expect(names(result)).not.toContain('browser_vision'); expect(result.expansionCandidates).toHaveLength(1);
 });
-it('selects no capabilities when none are relevant', async () => {
- registry.register(tool('irrelevant')); const h = await harness('Hello'); const result = await h.select(); expect(result.initialTools).toEqual([]); expect(result.capabilityRouting?.actualEngine).toBe('jev');
+it('keeps discovery when optional capabilities are all rejected', async () => {
+ registry.register(tool('irrelevant')); const h = await harness('Hello'); const result = await h.select(); expect(names(result)).toEqual(['capability_discover', 'capability_request']); expect(result.capabilityRouting?.actualEngine).toBe('jev');
 });
 it('discards a response after the mode changes and performs current Standard selection', async () => {
  registry.register(tool('unrelated')); chosen = ['unrelated']; const h = await harness('Hello');
@@ -244,7 +244,7 @@ it('merges missing candidates with Standard without discarding confident selecti
    return name==='file.read'?[]:[[id,{type:'noul',noul:name==='special'?.95:.05}]];
   }))}));
  });
- const result=await h.select();expect(names(result)).toEqual(expect.arrayContaining(['special','file_read']));expect(names(result)).not.toContain('file_grep');
+ const result=await h.select();expect(names(result)).toEqual(expect.arrayContaining(['special','file_read']));expect(names(result)).toContain('file_grep');
  expect(result.capabilityRouting).toMatchObject({actualEngine:'jev',partialFallback:true,fallbackReason:'invalid-response'});
  expect(result.capabilityRouting?.diagnostics?.candidates).toContainEqual(expect.objectContaining({id:'tool:file.read',outcome:'missing',source:'standard'}));
 });
@@ -259,7 +259,7 @@ it.each(['rejected', 'uncertain'])("preserves explicit inspection prerequisites 
  });
  const result = await h.select();
  expect(names(result)).toEqual(expect.arrayContaining(['task_status','task_result_read','config_provider_status','terminal_inspect']));
- expect(names(result)).not.toContain('config_web_setup'); expect(names(result)).not.toContain('terminal_run');
+ expect(names(result)).not.toContain('config_web_setup'); expect(names(result)).toContain('terminal_run');
 });
 it('does not expose an unavailable explicit inspection prerequisite', async () => {
  registry.register(tool('task.status', {isAvailable:()=>false}));
@@ -303,4 +303,28 @@ it.each([
  const h = await harness(request);
  const selected = names(await h.select());
  expect(selected).not.toContain('web_search'); expect(selected).not.toContain('web_extract');
+});
+
+it.each(['A polished PDF of the notes, please.', 'حوّل النص إلى ملف منسق.'])('keeps core tools despite unanimous negative relevance: %s', async request => {
+ for (const name of ['file.write','file.patch','terminal.run','execute_code','skill.list','skill.read']) registry.register(tool(name));
+ registry.register(tool('optional.action'));
+ const h = await harness(request);
+ expect(names(await h.select())).toEqual(expect.arrayContaining(['file_write','file_patch','terminal_run','execute_code','skill_list','skill_read','capability_discover','capability_request']));
+ expect(names(await h.select())).not.toContain('optional_action');
+});
+
+it('retains literal discovery matches when Jev confidently rejects them', async () => {
+ registry.register(tool('notebook.edit', {description:'Edit notebook cells'}));
+ await harness('Arrange this material.');
+ const result = await recovery.discoverAsync({query:'notebook'}, scope);
+ expect(result.metadata?.matches).toContainEqual(expect.objectContaining({id:'tool:notebook.edit'}));
+});
+
+it('cannot recover an explicitly prohibited core capability', async () => {
+ registry.register(tool('file.write'));
+ const h = await harness('Do not use file.write.');
+ const result = await h.select();
+ const expanded = await recovery.applyRequests([{id:'tool:file.write',callId:'call'}], result.initialTools);
+ expect(expanded.applied).toEqual([]);
+ expect(expanded.tools.map(t=>t.function.name)).not.toContain('file_write');
 });

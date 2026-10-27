@@ -115,19 +115,22 @@ it("applies at most eight additions per round, preserving active tools and budge
   expect(recovery.request({ ids: ["tool:test.0"], reason: "repeat" }, scope).metadata?.requests).toEqual([{ id: "tool:test.0", status: "already_exposed" }]);
 });
 
-it("reports schema budget rejection without evicting active schemas or consuming a round", async () => {
+it("evicts optional schemas for a requested capability without exceeding the count limit", async () => {
   const { recovery, catalog } = harness();
   const active = Array.from({ length: 100 }, (_, i) => ({ ...catalog.tools[0]!, function: { ...catalog.tools[0]!.function, name: `active_${i}` } }));
   const result = recovery.request({ ids: ["tool:test.0"], reason: "needed" }, scope);
   const expansion = await recovery.applyRequests(recovery.takeRequests([execution(result)]), active);
-  expect(expansion.tools).toEqual(active);
-  expect(expansion.rejected).toEqual([{ id: "tool:test.0", reason: "schema_budget" }]);
-  expect(recovery.roundsRemaining).toBe(2);
+  expect(expansion.tools).toHaveLength(100);
+  expect(expansion.tools.map(tool => tool.function.name)).toContain("test_0");
+  expect(expansion.deferred).toHaveLength(1);
+  expect(expansion.applied).toEqual(["tool:test.0"]);
+  expect(expansion.rejected).toEqual([]);
+  expect(recovery.roundsRemaining).toBe(1);
 });
 
 it("enforces the serialized schema token ceiling even below the tool count limit", async () => {
   const { recovery, catalog } = harness();
-  const active = [{ ...catalog.tools[0]!, function: { ...catalog.tools[0]!.function, name: "active", description: "" } }];
+  const active = [{ ...catalog.tools[0]!, function: { ...catalog.tools[0]!.function, name: "capability_discover", description: "" } }];
   active[0]!.function.description = "x".repeat(MAX_PROVIDER_SCHEMA_TOKENS * CHARS_PER_TOKEN - JSON.stringify(active).length - 5);
   const result = recovery.request({ ids: ["tool:test.1"], reason: "needed" }, scope);
   const expansion = await recovery.applyRequests(recovery.takeRequests([execution(result)]), active);

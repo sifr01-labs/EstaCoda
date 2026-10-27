@@ -1,5 +1,6 @@
 import type { IntentRoute, IntentTaskClass } from "../contracts/intent.js";
-import type { ToolRiskClass, ToolsetName } from "../contracts/tool.js";
+import { explicitlyProhibited } from "./jev/live-routing.js";
+import type { ToolDefinition, ToolRiskClass, ToolsetName } from "../contracts/tool.js";
 
 export type ToolSelectionPolicyName =
   | "conversation"
@@ -156,4 +157,21 @@ function looksLongRunning(userText: string): boolean {
   return /\b(?:all|every|multiple|several|end[- ]to[- ]end|across|migrate|set\s+up|then|after that|step by step)\b/iu.test(normalized) ||
     /\b(?:and|then)\s+(?:run|test|verify|validate|check|import|configure|connect|transfer|download|upload)\b/iu.test(normalized) ||
     /(?:كل|جميع|متعدد|عد[ّ]?ة|شامل|عبر|رح[ّ]?ل|إعداد|اعداد|ثم|بعد ذلك|خطوة بخطوة)/u.test(normalized);
+}
+
+/** A stable working set, intersected with the session's eligible catalog. This
+ * is schema exposure, never execution authority or a task-specific workflow. */
+export const CORE_WORKING_TOOLS: ReadonlySet<string> = new Set([
+  "file.read", "file.write", "file.patch", "file.search", "file.glob", "file.grep",
+  "terminal.run", "terminal.inspect", "execute_code",
+  "process.start", "process.list", "process.logs", "process.stop",
+  "skill.list", "skill.read", "capability.discover", "capability.request"
+]);
+
+/** Keep existing explicit restrictions consistent across selection and recovery. */
+export function isToolExplicitlyProhibited(tool: Pick<ToolDefinition, "name" | "toolsets" | "riskClass">, request: string): boolean {
+  const categories = tool.toolsets.flatMap(set => set === "web" || (set === "research" && tool.riskClass === "read-only-network")
+    ? ["research"] : set === "browser" ? ["browser-operation"] : []);
+  if (tool.name === "web.search") categories.push("web-search");
+  return [tool.name, ...categories].some(category => explicitlyProhibited(request, category));
 }

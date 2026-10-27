@@ -454,7 +454,7 @@ describe("protected authentication journey acceptance", () => {
         ...(firstActionTools.some((name) => name === "browser_navigate")
           ? []
           : ["the first actionable provider inventory did not expose browser navigation"]),
-        ...(firstActionTools.some((name) => name.startsWith("terminal_") || name.startsWith("mcp_") || name.startsWith("file_"))
+        ...(firstActionTools.some((name) => name.startsWith("mcp_") || name === "config_provider_setup")
           ? ["the browser-authentication turn exposed unrelated tool systems"]
           : []),
       ];
