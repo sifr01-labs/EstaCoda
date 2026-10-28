@@ -579,15 +579,16 @@ describe("terminal progress while a completion checkpoint is active", () => {
     }
   });
 
-  it("ignores timeout, receipt and output churn on the same command, including seeded calls", async () => {
+  it("ignores deadline, receipt and timestamp-only churn, including seeded calls", async () => {
     const prior = terminal(0);
+    prior.result!.content = "Observed at 2030-01-01T00:00:00Z";
     const guard = await discoveryGuard([prior]);
     for (let index = 1; index <= 6; index++) {
       const repeated = terminal(0);
       repeated.input = { command: "cat diagnostic-0.txt", timeoutMs: 1000 + index };
       repeated.toolCallId = `new-receipt-${index}`;
       repeated.targetKey = `new-target-${index}`;
-      repeated.result = { ...repeated.result!, content: `clock ${index}` };
+      repeated.result = { ...repeated.result!, content: `Observed at 2030-01-01T00:00:0${index}Z` };
       expect(guard.observe([repeated])).toMatchObject({ materialProgress: false, shouldStop: index === 6 });
     }
   });
@@ -653,5 +654,50 @@ describe("bounded process waits", () => {
     for (let i = 0; i < 6; i++) expect(guard.observe([{ ...exited, toolCallId: `exit-${i}` }]).shouldStop).toBe(i === 5);
     const seeded = await discoveryGuard([exited]);
     expect(seeded.observe([exited]).materialProgress).toBe(false);
+  });
+});
+
+
+describe("diagnostic progress and per-stall warnings", () => {
+  const guard = () => new ToolLoopProgressGuard({ noProgressNudgeIteration: 2, maxNoProgressIterations: 4 });
+  const command = (content: string, code = 1, input = "check") => execution({
+    tool: { ...execution().tool, name: "terminal.run" }, input: { command: input },
+    executionEffect: { kind: "read" }, result: { ok: code === 0, content,
+      metadata: { code, signal: null, timedOut: false, cancelled: false } }
+  });
+  it("keeps distinct failing diagnostics and changing results from the same command alive", async () => {
+    for (const code of [0, 1]) {
+      const g = guard();
+      for (let i = 0; i < 8; i++) expect(g.observe([command(`module ${i}: diagnostic`, code)]))
+        .toMatchObject({ materialProgress: true, shouldStop: false, noProgressIterations: 0 });
+    }
+  });
+  it("still stops identical diagnostics even with changing command arguments", () => {
+    const g = guard();
+    expect(g.observe([command("same failure")]).materialProgress).toBe(true);
+    for (let i = 1; i <= 4; i++) expect(g.observe([command("same failure", 1, `check ${i}`)]).shouldStop).toBe(i === 4);
+  });
+  it("warns again after recovery and bounds the second stall", () => {
+    const g = guard();
+    g.observe([command("first")]);
+    g.observe([command("first")]);
+    expect(g.observe([command("first")]).shouldNudge).toBe(true);
+    expect(g.observe([command("new evidence")]).materialProgress).toBe(true);
+    g.observe([command("new evidence")]);
+    expect(g.observe([command("new evidence")]).shouldNudge).toBe(true);
+    g.observe([command("new evidence")]);
+    expect(g.observe([command("new evidence")]).shouldStop).toBe(true);
+  });
+  it("does not credit denied, cancelled, timed-out or running commands", () => {
+    for (const patch of [{ decision: "deny" as const }, ...["cancelled", "timedOut", "running"].map(key => ({
+      result: { ...command("x").result!, metadata: { code: 1, signal: null, [key]: true } }
+    }))]) {
+      const g = guard();
+      for (let i = 0; i < 4; i++) expect(g.observe([{ ...command(`new ${i}`), ...patch }]).materialProgress).toBe(false);
+    }
+  });
+  it("seeds failed observations so an existing failure is not novel again", () => {
+    const g = new ToolLoopProgressGuard({ existingExecutions: [command("old")], noProgressNudgeIteration: 2, maxNoProgressIterations: 4 });
+    expect(g.observe([command("old")]).materialProgress).toBe(false);
   });
 });

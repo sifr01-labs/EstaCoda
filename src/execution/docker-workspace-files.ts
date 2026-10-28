@@ -42,7 +42,8 @@ export class DockerWorkspaceFiles implements WorkspaceFiles {
       const result = await this.#call("resolve", path, { options });
       const blocked = explainPathBlock(this.container.workspace.canonicalPath, result);
       return blocked ? { ok: false, content: blocked } : { ok: true, path: result };
-    } catch (error) { return { ok: false, content: error instanceof Error ? error.message : "Docker path is unavailable." }; }
+    } catch (error) { return { ok: false, content: error instanceof Error ? error.message : "Docker path is unavailable.",
+      ...((error as NodeJS.ErrnoException)?.code === "ENOENT" ? { metadata: { code: "ENOENT" } } : {}) }; }
   }
   async #resolved(path: string, options: WorkspacePathOptions = {}): Promise<string> {
     const result = await this.resolvePath(path, options);

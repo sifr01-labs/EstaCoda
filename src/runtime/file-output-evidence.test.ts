@@ -307,3 +307,77 @@ it("settles a mixed copy/ordinary-output contract without requiring readback of 
   expect(deriveExecutionFinalOutcome({ ...input, requestRequirements: input.requirements, completionFloor: "mutation_with_verification" }).status).toBe("completed");
   expect(verifiedFileOutputContent(input)).toBeUndefined();
 });
+
+
+describe("verification survives observational reads", () => {
+  it("preserves full verification after a partial read of the same file version", () => {
+    const input = observe([call("file.write"), call("file.read"),
+      call("file.read", "report.md", { truncated: true, completeFileRead: false })]);
+    expect(fileOutputEvidence(input)).toMatchObject({ satisfied: true, contentVerified: true });
+  });
+  it("invalidates proof when a partial read observes a different digest", () => {
+    const input = observe([call("file.write"), call("file.read"),
+      call("file.read", "report.md", { truncated: true, completeFileRead: false, contentSha256: "a".repeat(64) })]);
+    expect(fileOutputEvidence(input).satisfied).toBe(false);
+  });
+  it("does not promote a partial read into initial verification", () => {
+    expect(fileOutputEvidence(observe([call("file.write"),
+      call("file.read", "report.md", { truncated: true, completeFileRead: false })])).satisfied).toBe(false);
+  });
+});
+
+
+describe("current file outcome after recovery", () => {
+  const terminal = (command: string, ok: boolean, decision: "allow" | "deny" = "allow") => ({
+    ...call("terminal.run"), input: { command }, decision,
+    executionEffect: { kind: "read" as const }, result: { ok, content: ok ? "passed" : "failed" }
+  });
+  const outcome = (calls: ToolExecutionRecord[]) => {
+    const input = observe(calls);
+    return deriveExecutionFinalOutcome({ ...input, requestRequirements: input.requirements, completionFloor: "mutation_with_verification" });
+  };
+  it("completes a verified output produced after a denied local approach", () => {
+    expect(outcome([terminal("unavailable approach", false, "deny"), call("file.write"), call("file.read")]).status)
+      .toBe("completed_with_recovered_errors");
+  });
+  it("does not clear a failing validator with an unrelated successful command", () => {
+    expect(outcome([call("file.write"), call("file.read"), terminal("validate", false), terminal("pwd", true)]).status)
+      .toBe("partially_completed");
+  });
+  it("recovers when that same validator subsequently passes", () => {
+    expect(outcome([call("file.write"), call("file.read"), terminal("validate", false), terminal("validate", true)]).status)
+      .toBe("completed_with_recovered_errors");
+  });
+  it("does not clear a denied external action or later denial with a local output", () => {
+    const denied = terminal("send", false, "deny");
+    expect(outcome([{ ...denied, riskClass: "external-side-effect" }, call("file.write"), call("file.read")]).status)
+      .toBe("partially_completed");
+    expect(outcome([call("file.write"), call("file.read"), denied]).status).toBe("partially_completed");
+  });
+});
+
+
+it("preserves real bounded-read evidence, but detects an external change of the same size", async () => {
+  const root = await mkdtemp(join(tmpdir(), "evidence-read-"));
+  try {
+    const tools = createWorkspaceTools({ workspaceRoot: root });
+    const run = async (name: string, input: Record<string, unknown>) => {
+      const tool = tools.find(tool => tool.name === name)!;
+      const result = await tool.run(input, {} as never);
+      return { tool, input, result, decision: "allow" as const, riskClass: tool.riskClass,
+        executionEffect: { kind: name === "file.read" ? "read" as const : "mutation" as const } };
+    };
+    const written = await run("file.write", { path: "report.md", content: "one\ntwo\nthree\n" });
+    const full = await run("file.read", { path: "report.md" });
+    const partial = await run("file.read", { path: "report.md", lineStart: 1, lineEnd: 1 });
+    expect(partial.result.metadata?.contentSha256).toBeUndefined();
+    expect(partial.result.metadata?.observedContentSha256).toBe(full.result.metadata?.contentSha256);
+    expect(fileOutputEvidence(observe([written, full, partial])).satisfied).toBe(true);
+    expect(fileOutputEvidence(observe([written, partial])).satisfied).toBe(false);
+    const copied = await run("file.write", { path: "copy.md", sourceFile: { path: "report.md" } });
+    expect(copied.result.ok).toBe(true);
+    await writeFile(join(root, "report.md"), "ONE\ntwo\nthree\n");
+    const changed = await run("file.read", { path: "report.md", lineStart: 2, lineEnd: 2 });
+    expect(fileOutputEvidence(observe([written, full, changed])).satisfied).toBe(false);
+  } finally { await rm(root, { recursive: true, force: true }); }
+});

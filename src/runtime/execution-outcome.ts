@@ -1,3 +1,5 @@
+import { toolOperationFingerprint } from "./tool-result-fingerprint.js";
+import { semanticMutationKey } from "../tools/execution-operation-ledger.js";
 import type {
   ConfirmedActionReceipt,
   ExecutionCompletionFloor,
@@ -17,7 +19,7 @@ import { affirmativeRequestSegments } from "./request-action-segments.js";
 import { interpretRequest, isInformationClause, splitRequestClauses } from "./request-interpretation.js";
 import type { RequestInterpretation, RequestRequirements } from "../contracts/intent.js";
 import { deriveRequestRequirements } from "./request-requirements.js";
-import { requiresAnyFileContentVerification } from "../contracts/request-requirements.js";
+import { matchesFileOutputPath, requestedFileOutputs, requiresAnyFileContentVerification } from "../contracts/request-requirements.js";
 import { fileOutputEvidence, verifiedFileMutationCallIds } from "./file-output-evidence.js";
 import { researchRequestEvidence } from "./research-request-evidence.js";
 
@@ -117,6 +119,7 @@ export function deriveExecutionFinalOutcome(input: {
     completionFloor,
     confirmedActions,
     uncertainActions,
+    recoveredCalls: recoveredExecutionCalls(input, fileEvidence),
     fileOutputSatisfied: (input.delegatedAnswerOwned === true || fileEvidence.satisfied) && researchRequestEvidence(input).satisfied,
     fileOutputMeetsFloor: fileEvidence.satisfied && fileEvidence.writeCallId !== undefined && (fileEvidence.contentVerified === true || completionFloor === "mutation" || requiresAnyFileContentVerification(input.requestRequirements)),
     delegatedFileOutput: input.delegatedAnswerOwned === true && input.requestRequirements?.fileOutput !== undefined
@@ -317,7 +320,61 @@ function recoveredReplayCallIds(receipts: readonly ExecutionEvidenceRecord[]): R
   return recovered;
 }
 
+/** Recovery needs a later receipt for the same operation, or a completed
+ * explicit file contract after an unavailable/denied local approach. History
+ * remains intact; this never grants permission or settles uncertain effects. */
+function recoveredExecutionCalls(
+  input: Parameters<typeof deriveExecutionFinalOutcome>[0],
+  fileEvidence: ReturnType<typeof fileOutputEvidence>
+): Set<string> {
+  const recovered = new Set<string>();
+  const executions = new Map(input.toolExecutions.map(call => [call.toolCallId, call]));
+  const receipts = input.executionReceipts;
+  const outputIndex = fileEvidence.satisfied && fileEvidence.writeCallId !== undefined
+    ? receipts.findIndex(receipt => receipt.toolCallId === fileEvidence.writeCallId && receipt.status === "success") : -1;
+  for (let i = 0; i < receipts.length; i++) {
+    const receipt = receipts[i]!;
+    if (!["failed", "blocked", "unavailable"].includes(receipt.status)) continue;
+    const call = executions.get(receipt.toolCallId);
+    const key = call?.tool.name === receipt.tool ? recoveryOperationKey(call) : undefined;
+    const sameOperationRecovered = key !== undefined && receipt.visibleTurnId !== undefined && receipts.slice(i + 1).some(later => {
+      if (later.status !== "success" || later.visibleTurnId !== receipt.visibleTurnId) return false;
+      const successful = executions.get(later.toolCallId);
+      return successful?.tool.name === later.tool && successful.decision === "allow" &&
+        successful.result?.ok === true && recoveryOperationKey(successful) === key;
+    });
+    // Failed validators are never cleared just because a file was produced.
+    // Nor can a local file satisfy a denied external side effect or a file ACL.
+    const alternativeProducedOutput = receipt.status !== "failed" && outputIndex > i &&
+      receipts[outputIndex]?.visibleTurnId === receipt.visibleTurnId &&
+      ["terminal.run", "terminal.inspect", "execute_code"].includes(receipt.tool) &&
+      receipt.executionEffect?.connector === undefined && receipt.riskClass !== "external-side-effect";
+    // A missing input discovered while auditing is a negative observation, not
+    // an outstanding mutation. Preserve failed reads of required outputs and all
+    // permission/transport errors; only an authoritative ENOENT qualifies.
+    const reportedMissingInput = receipt.status === "failed" && receipt.tool === "file.read" &&
+      call?.decision === "allow" && call.result?.metadata?.code === "ENOENT" &&
+      typeof call.input?.path === "string" && outputIndex > i &&
+      receipt.visibleTurnId !== undefined && receipts[outputIndex]?.visibleTurnId === receipt.visibleTurnId &&
+      !requestedFileOutputs(input.requestRequirements).some(file => matchesFileOutputPath(call.input!.path as string, file));
+    if (sameOperationRecovered || alternativeProducedOutput || reportedMissingInput) recovered.add(receipt.toolCallId);
+  }
+  return recovered;
+}
+
+function recoveryOperationKey(call: ToolExecutionRecord): string | undefined {
+  if (call.input === undefined) return undefined;
+  // Changes to content are expected when repairing a file, but operations on
+  // different paths (or different tools) must not cancel each other's failures.
+  const input = ["file.read", "file.write"].includes(call.tool.name) && typeof call.input.path === "string"
+    ? { path: call.input.path } : call.input;
+  return semanticMutationKey(call.tool.name, {
+    operation: toolOperationFingerprint({ ...call, input }), target: call.targetKey
+  });
+}
+
 function classifyFinalStatus(input: {
+  recoveredCalls: ReadonlySet<string>;
   fileOutputSatisfied: boolean;
   delegatedFileOutput: boolean;
   fileOutputMeetsFloor: boolean;
@@ -341,12 +398,13 @@ function classifyFinalStatus(input: {
   const recoveredReplays = recoveredReplayCallIds(authoritativeReceipts);
   for (const [index, receipt] of authoritativeReceipts.entries()) {
     if (receipt.status === "success") successfulIndexes.push(index);
-    if (receipt.status === "failed") failedIndexes.push(index);
+    if (receipt.status === "failed" && !input.recoveredCalls.has(receipt.toolCallId)) failedIndexes.push(index);
   }
   const succeeded = successfulIndexes.length;
   const failed = failedIndexes.length;
   const blocked = authoritativeReceipts.some((receipt) =>
-    (receipt.status === "blocked" && !recoveredReplays.has(receipt.toolCallId)) || receipt.status === "unavailable"
+    !input.recoveredCalls.has(receipt.toolCallId) &&
+    ((receipt.status === "blocked" && !recoveredReplays.has(receipt.toolCallId)) || receipt.status === "unavailable")
   );
   const hasConfirmedWork = input.confirmedActions.length > 0 || succeeded > 0;
   const hasUsefulEvidence = hasConfirmedWork || input.uncertainActions.length > 0;
@@ -365,7 +423,7 @@ function classifyFinalStatus(input: {
     input.uncertainActions.length === 0 &&
     !unresolvedToolPlans &&
     !blocked &&
-    failed === 0 && recoveredReplays.size === 0
+    failed === 0 && recoveredReplays.size === 0 && input.recoveredCalls.size === 0
   ) {
     return "completed";
   }
@@ -398,11 +456,7 @@ function classifyFinalStatus(input: {
   }
   if (failed > 0) {
     if (succeeded === 0) return "failed";
-    const lastSuccessIndex = successfulIndexes.at(-1) ?? -1;
-    const lastFailureIndex = failedIndexes.at(-1) ?? -1;
-    return lastSuccessIndex > lastFailureIndex
-      ? "completed_with_recovered_errors"
-      : "partially_completed";
+    return "partially_completed";
   }
   if (
     input.providerExecution?.ok === true &&
@@ -410,7 +464,7 @@ function classifyFinalStatus(input: {
   ) {
     return hasConfirmedWork ? "partially_completed" : "failed";
   }
-  return recoveredReplays.size > 0 ? "completed_with_recovered_errors" : "completed";
+  return recoveredReplays.size > 0 || input.recoveredCalls.size > 0 ? "completed_with_recovered_errors" : "completed";
 }
 
 function settlesCompletionFloor(

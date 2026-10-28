@@ -5257,6 +5257,24 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     expect(events.filter(event => event.kind === "provider-iteration")).toHaveLength(3);
   });
 
+  it("allows an authorized alternative repair while keeping the refused tool blocked", async () => {
+    const harness = await createPostToolNudgeHarness({
+      responses: [providerExecution("Draft"), providerExecution("", [providerToolCall("write", '{"path":"report.md","content":"done"}', "file.write")]), providerExecution("Done")],
+      toolSteps: [{}, { executions: [toolExecutionForTool("write", "file.write", "written")] }, {}], maxProviderIterations: 5
+    });
+    const blocked = { ...toolExecutionForTool("blocked", "terminal.run", "Denied"), decision: "deny" as const, result: { ok: false, content: "Denied" } };
+    const result = await runBasicProviderTurn(harness.loop, {
+      toolExecutions: [blocked], providerTools: [toolProviderSchema("file.write"), toolProviderSchema("terminal.run")],
+      validateCompletion: text => text === "Done" ? undefined : "missing-write"
+    });
+    expect(result.completionValidationFailure).toBeUndefined();
+    expect(harness.completeSpy).toHaveBeenCalledTimes(3);
+    const guard = harness.executePlans.mock.calls[1]![0].runtimeAdmissionGuard!;
+    const admission = (name: string) => ({ tool: { ...testTool, name }, input: {}, executionEffect: undefined });
+    expect(guard(admission("file.write"))).toBeUndefined();
+    expect(guard(admission("terminal.run"))?.code).toBe("completion-denied-tool");
+  });
+
   it("emits iteration-limit exhaustion when the last call still requests work", async () => {
     const harness = await createPostToolNudgeHarness({ responses: [providerExecution("", [providerToolCall("read", "{}", "file.read")])],
       toolSteps: [{ executions: [toolExecutionForTool("read", "file.read", "content")] }], maxProviderIterations: 1 });
@@ -7026,5 +7044,31 @@ describe("research failure finalization", () => {
     }
     if (mode === "iteration-limit") expect(result.researchRecoverySummary).toContain("Retry with an alternative");
     if (mode === "denied") expect(result.researchRecoverySummary).toBeUndefined();
+  });
+});
+
+
+describe("operation-scoped failure budgets", () => {
+  const failed = (path: string, content = "Same diagnostic") => ({
+    ...toolExecutionForTool("attempt", "file.read", content), input: { path },
+    executionEffect: { kind: "read" as const }, result: { ok: false, content }
+  });
+  async function sequence(calls: ToolExecutionRecord[]) {
+    const harness = await createPostToolNudgeHarness({ maxProviderIterations: 8, maxNoProgressIterations: 10,
+      responses: [...calls.map((_, i) => providerExecution("", [providerToolCall(`call-${i}`)])), providerExecution("Finished")],
+      toolSteps: calls.map(call => ({ executions: [call] }))
+    });
+    return runBasicProviderTurn(harness.loop);
+  }
+  it("does not accumulate different operations with the same error prefix", async () => {
+    expect((await sequence([failed("a"), failed("b"), failed("c"), failed("d")])).terminationCause).toBe("normal");
+  });
+  it("resets a failed operation after a successful retry", async () => {
+    const succeeded = { ...failed("a"), result: { ok: true, content: "recovered" } };
+    expect((await sequence([failed("a"), failed("a"), succeeded, failed("a"), failed("a")])).terminationCause).toBe("normal");
+  });
+  it("does not reset a failed operation after an unrelated successful read", async () => {
+    const succeeded = { ...failed("b"), result: { ok: true, content: "unrelated" } };
+    expect((await sequence([failed("a"), failed("a"), succeeded, failed("a")])).terminationCause).toBe("budget_exhausted");
   });
 });

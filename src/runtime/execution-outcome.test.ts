@@ -131,7 +131,10 @@ function completedPlan(): ExecutionPlan {
 describe("successful mutation replay recovery", () => {
   const duplicate = () => unsuccessfulReceipt("blocked", { completedReplayOf: "call-update" });
   const outcome = (receipts: ExecutionEvidenceRecord[], openContinuation = false) => deriveExecutionFinalOutcome({
-    toolExecutions: [], executionReceipts: receipts, openContinuation,
+    toolExecutions: receipts.filter(receipt => receipt.tool === "mcp.postman.updateCollection").map(receipt => execution({
+      toolCallId: receipt.toolCallId, result: { ok: receipt.status === "success", content: receipt.status },
+      decision: receipt.status === "blocked" ? "deny" : "allow"
+    })), executionReceipts: receipts, openContinuation,
     completionFloor: "mutation_with_verification"
   });
 
@@ -625,7 +628,7 @@ describe("execution outcome receipts", () => {
     expect(outcome.status).toBe("completed");
   });
 
-  it("classifies successful recovery after an intermediate failure", () => {
+  it("does not infer recovery from an unrelated successful operation", () => {
     const outcome = deriveExecutionFinalOutcome({
       providerExecution: {
         ok: true,
@@ -653,7 +656,7 @@ describe("execution outcome receipts", () => {
       ]
     });
 
-    expect(outcome.status).toBe("completed_with_recovered_errors");
+    expect(outcome.status).toBe("partially_completed");
     expect(learningOutcomeStatus(outcome.status)).toBe("partial");
   });
 

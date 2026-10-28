@@ -1,3 +1,4 @@
+import { toolResultFingerprint } from "./tool-result-fingerprint.js";
 import { matchesFileOutputPath, requestedFileOutputs } from "../contracts/request-requirements.js";
 import { createHash } from "node:crypto";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
@@ -43,6 +44,7 @@ export class ToolLoopProgressGuard {
   readonly #resultReadEnds = new Map<string, number>();
   readonly #seenCallFingerprints = new Set<string>();
   readonly #seenResultFingerprints = new Set<string>();
+  readonly #seenCommandObservations = new Set<string>();
   readonly #seenDiscoveryFingerprints = new Set<string>();
   readonly #seenProcessExits = new Set<string>();
   readonly #seenWaitCalls = new Set<string>();
@@ -107,7 +109,21 @@ export class ToolLoopProgressGuard {
 
     for (const execution of eligible) {
       const status = executionEvidenceStatus(execution);
-      if (status !== "success" || (execution.readReuseOf !== undefined || execution.result?.metadata?.mcpReadReuse === true)) continue;
+      if (execution.readReuseOf !== undefined || execution.result?.metadata?.mcpReadReuse === true) continue;
+      // Failed diagnostics and changed results from the same command are useful
+      // observations, not completion evidence. Admission failures and unfinished
+      // commands cannot earn progress; deadlines still bound novel diagnostics.
+      const commandObservation = commandObservationFingerprint(execution);
+      if (commandObservation !== undefined) {
+        const novel = !this.#seenCommandObservations.has(commandObservation);
+        this.#seenCommandObservations.add(commandObservation);
+        if (novel && !unchangedCompletionRepair) {
+          materialProgress = true;
+          progressKinds.add("new-tool-result");
+        } else progressKinds.add("repeated-tool-call");
+        continue;
+      }
+      if (status !== "success") continue;
       // Host-owned, bounded waits are not stuck model polling. Preserve the
       // counter rather than pretending time elapsed is deliverable progress.
       // Deadlines, provider budgets and cancellation still bound the execution.
@@ -258,11 +274,9 @@ export class ToolLoopProgressGuard {
         progressKinds.add("repeated-tool-call");
         continue;
       }
-      // A checkpoint may not project shell diagnostics or intermediate repairs.
-      // A fresh successful process result can keep work moving, but never proves
-      // the requested deliverable complete. Both call and result must be new;
-      // unchanged completion repairs still need their specific evidence.
-      if (!checkpointControlsProgress || (!unchangedCompletionRepair && successfulCommandReceipt(execution))) {
+      // Connector observations still need their checkpoint relationship.
+      // Completed command diagnostics are handled separately above.
+      if (!checkpointControlsProgress) {
         materialProgress = true;
         progressKinds.add("new-tool-result");
       }
@@ -273,6 +287,7 @@ export class ToolLoopProgressGuard {
     }
 
     this.#noProgressIterations = materialProgress ? 0 : this.#noProgressIterations + (waitingForProcess ? 0 : 1);
+    if (materialProgress) this.#nudged = false;
     const shouldNudge = !this.#nudged && this.#noProgressIterations >= this.#nudgeIteration;
     if (shouldNudge) this.#nudged = true;
 
@@ -287,6 +302,11 @@ export class ToolLoopProgressGuard {
 
   #seed(executions: readonly ToolExecutionRecord[]): void {
     for (const execution of executions) {
+      const commandObservation = commandObservationFingerprint(execution);
+      if (commandObservation !== undefined) {
+        this.#seenCommandObservations.add(commandObservation);
+        this.#active = true;
+      }
       if (
         INELIGIBLE_TOOLS.has(execution.tool.name) ||
         executionEvidenceStatus(execution) !== "success" ||
@@ -360,14 +380,14 @@ function toolCallFingerprint(execution: ToolExecutionRecord): string {
     target: execution.targetKey ?? execution.targetSummary });
 }
 
-function successfulCommandReceipt(execution: ToolExecutionRecord): boolean {
-  if (execution.tool.name === "execute_code") {
-    const metadata = execution.result?.metadata;
-    return metadata?.exitCode === 0 && metadata.signal === null && metadata.timedOut !== true && metadata.cancelled !== true;
-  }
-  if (execution.tool.name !== "terminal.run" && execution.tool.name !== "terminal.inspect") return false;
-  const metadata = execution.result?.metadata;
-  return metadata?.code === 0 && metadata.signal === null && metadata.timedOut === false && metadata.cancelled === false;
+function commandObservationFingerprint(execution: ToolExecutionRecord): string | undefined {
+  if (execution.decision !== "allow" || execution.result === undefined) return undefined;
+  const metadata = execution.result.metadata;
+  const code = execution.tool.name === "execute_code" ? metadata?.exitCode
+    : ["terminal.run", "terminal.inspect"].includes(execution.tool.name) ? metadata?.code : undefined;
+  if (typeof code !== "number" || !Number.isInteger(code) || code < 0 || metadata?.signal !== null ||
+    metadata?.timedOut !== false || metadata?.cancelled !== false || metadata?.running === true || execution.result.ok !== (code === 0)) return undefined;
+  return fingerprint({ code, result: toolResultFingerprint(execution) });
 }
 
 function connectorDiscoveryFingerprint(execution: ToolExecutionRecord): string | undefined {

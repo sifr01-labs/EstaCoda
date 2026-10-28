@@ -1,3 +1,4 @@
+import { toolOperationFingerprint, toolResultFingerprint } from "./tool-result-fingerprint.js";
 import { redactSensitiveText } from "../utils/redaction.js";
 import { groundForegroundResearch, researchCitationUrls, RESEARCH_EVIDENCE_INSTRUCTION } from "../tasks/research-result-evidence.js";
 import { projectCapabilityState, type RuntimeCapabilityState } from "./capability-state.js";
@@ -64,7 +65,7 @@ import {
 } from "../providers/provider-executor.js";
 import type { ProviderUsageTaskAttribution } from "../providers/provider-usage-ledger.js";
 import { budgetProviderTools, type OpenAICompatibleToolSchema, type ProviderToolSchemaCatalog } from "../tools/tool-schema.js";
-import type { ToolExecutionRecord } from "../tools/tool-executor.js";
+import type { RuntimeToolAdmissionGuard, ToolExecutionRecord } from "../tools/tool-executor.js";
 import type { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import type { RunRecorder } from "./run-recorder.js";
 import type { ToolPlanRunner } from "./tool-plan-runner.js";
@@ -359,6 +360,7 @@ export class ProviderTurnLoop {
     let completionCandidate: string | undefined;
     let completionRepairs = 0;
     let completionReadbackPaths: readonly string[] | undefined;
+    const completionDeniedTools = new Set<string>();
     let pendingEmptyResponseNudge = false;
     let postToolEmptyRetried = false;
     let capturedContentWithHousekeepingTools: string | undefined;
@@ -739,6 +741,17 @@ export class ProviderTurnLoop {
 
       const beforeExecutions = providerToolExecutions.length;
       const beforePlans = input.toolPlans.length;
+      const runtimeAdmissionGuard: RuntimeToolAdmissionGuard = admission => {
+        const blocker = executionSupervision.runtimeAdmissionGuard()(admission);
+        if (blocker) return blocker;
+        if (completionDeniedTools.has(admission.tool.name)) return {
+          code: "completion-denied-tool", reason: "Completion repair cannot retry a tool refused earlier in this turn. Use an authorized alternative or report the blocker."
+        };
+        if (completionReadbackPaths === undefined) return undefined;
+        if (admission.tool.name === "file.read" && typeof admission.input.path === "string" &&
+            completionReadbackPaths.includes(admission.input.path) && Object.entries(admission.input).every(([key, value]) => key === "path" || ((key === "lineStart" || key === "lineEnd") && value == null))) return undefined;
+        return { code: "completion-readback-only", reason: "Completion repair permits only full file.read calls for the already written output paths." };
+      };
       const loopToolExecutionResult = await this.#toolPlanRunner.executePlans({
         requestContract: input.intent.requestRequirements === undefined ||
           (input.intent.requestRequirements.research === undefined && input.intent.requestRequirements.delegation === undefined && input.intent.requestRequirements.fileOutput === undefined && input.intent.requestRequirements.skillReferences.length === 0)
@@ -769,13 +782,7 @@ export class ProviderTurnLoop {
           profileId: this.#profileId,
           sessionId: this.#sessionRuntimeContext?.currentSessionId() ?? this.#sessionId
         },
-        runtimeAdmissionGuard: admission => {
-          const blocker = executionSupervision.runtimeAdmissionGuard()(admission);
-          if (blocker || completionReadbackPaths === undefined) return blocker;
-          if (admission.tool.name === "file.read" && typeof admission.input.path === "string" &&
-              completionReadbackPaths.includes(admission.input.path) && Object.entries(admission.input).every(([key, value]) => key === "path" || ((key === "lineStart" || key === "lineEnd") && value == null))) return undefined;
-          return { code: "completion-readback-only", reason: "Completion repair permits only full file.read calls for the already written output paths." };
-        },
+        runtimeAdmissionGuard,
         onExecution: async (toolExecution) => {
           await executionSupervision.applyRuntimeEffects({ executions: [toolExecution] });
         }
@@ -815,7 +822,7 @@ export class ProviderTurnLoop {
             onEvent: input.onEvent,
             onApprovalRequest: input.onApprovalRequest,
             onSecureInputRequest,
-            runtimeAdmissionGuard: executionSupervision.runtimeAdmissionGuard(),
+            runtimeAdmissionGuard,
             onExecution: async (toolExecution) => {
               await executionSupervision.applyRuntimeEffects({ executions: [toolExecution] });
             }
@@ -1125,11 +1132,17 @@ export class ProviderTurnLoop {
         !toolLoopProgress.shouldStop && browserObservation?.shouldStop !== true) {
         const validationFailure = input.validateCompletion(execution.response.content, [...input.toolExecutions, ...providerToolExecutions]);
         completionValidationFailure = validationFailure === undefined ? undefined : redactSensitiveText(validationFailure).slice(0, 6_000);
-        const hasBoundary = [...input.toolExecutions, ...providerToolExecutions].some(call => call.decision !== "allow");
+        const boundaries = [...input.toolExecutions, ...providerToolExecutions].filter(call => call.decision !== "allow");
+        const hasBoundary = boundaries.length > 0;
+        const canUseAlternative = boundaries.every(call =>
+          ["terminal.run", "terminal.inspect", "execute_code"].includes(call.tool.name) &&
+          call.riskClass !== "external-side-effect" && call.executionEffect?.connector === undefined);
         const readbackPaths = hasBoundary ? input.completionReadbackPaths?.([...input.toolExecutions, ...providerToolExecutions]) : undefined;
         const repair = completionValidationFailure !== undefined && completionRepairs < 2 &&
           iteration + consumedProviderIterations < this.#budgets.maxProviderIterations && !input.signal?.aborted &&
-          (!hasBoundary || (readbackPaths !== undefined && readbackPaths.length > 0));
+          (!hasBoundary || (readbackPaths !== undefined && readbackPaths.length > 0) ||
+            (canUseAlternative && activeProviderTools.some(tool => !boundaries.some(call =>
+              call.tool.name === (input.providerToolSchemaCatalog?.aliases.get(tool.function.name) ?? tool.function.name)))));
         await this.#sessionDb.appendEvent(this.#currentSessionId(), {
           kind: "step-completion-validation", accepted: completionValidationFailure === undefined,
           ...(completionValidationFailure === undefined ? {} : { feedback: completionValidationFailure }),
@@ -1144,8 +1157,15 @@ export class ProviderTurnLoop {
         }
         if (repair) {
           if (hasBoundary) {
-            completionReadbackPaths = readbackPaths;
-            pendingCompletionFeedback = `Read-only completion repair: use file.read with only path for ${JSON.stringify(readbackPaths)}. These outputs were already written successfully. Do not retry denied actions or make further changes.`;
+            for (const call of [...input.toolExecutions, ...providerToolExecutions]) {
+              if (call.decision !== "allow") completionDeniedTools.add(call.tool.name);
+            }
+            if (readbackPaths !== undefined && readbackPaths.length > 0) {
+              completionReadbackPaths = readbackPaths;
+              pendingCompletionFeedback = `Read-only completion repair: use file.read with only path for ${JSON.stringify(readbackPaths)}. These outputs were already written successfully. Do not retry denied actions or make further changes.`;
+            } else {
+              pendingCompletionFeedback += " Use an authorized alternative. Previously refused tools remain blocked during this repair; report the blocker if the requirement cannot be met.";
+            }
           }
           completionRepairs += 1;
           effectiveProviderExecution = mergeProviderExecutions(effectiveProviderExecution, execution);
@@ -1332,11 +1352,16 @@ export class ProviderTurnLoop {
     repeatedFailures: Map<string, number>
   ): { tool: string; count: number } | undefined {
     for (const execution of executions) {
-      if (execution.result?.ok !== false) {
+      const operation = toolOperationFingerprint(execution);
+      if (execution.decision === "allow" && execution.result?.ok === true) {
+        // A successful retry resets its operation. A successful mutation makes
+        // pending failures new experiments; an unrelated read does neither.
+        if (execution.executionEffect?.kind === "mutation") repeatedFailures.clear();
+        else for (const key of repeatedFailures.keys()) if (key.startsWith(`${operation}:`)) repeatedFailures.delete(key);
         continue;
       }
-
-      const key = `${execution.tool.name}:${execution.result.content.slice(0, 160)}`;
+      if (execution.result?.ok !== false) continue;
+      const key = `${operation}:${toolResultFingerprint(execution)}`;
       const count = (repeatedFailures.get(key) ?? 0) + 1;
       repeatedFailures.set(key, count);
 

@@ -237,7 +237,8 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
         }
 
         const materialized = fsAdapter === undefined || await contentView.isMaterialized(path.path);
-        copySources.delete(path.path);
+        if (!materialized || typeof result.metadata?.observedContentSha256 !== "string" ||
+          copySources.get(path.path) !== result.metadata.observedContentSha256) copySources.delete(path.path);
         if (materialized && typeof result.metadata?.contentSha256 === "string") {
           copySources.set(path.path, result.metadata.contentSha256);
           if (copySources.size > 128) copySources.delete(copySources.keys().next().value!);
@@ -2549,8 +2550,10 @@ function createWorkspaceIO(files: WorkspaceFiles) {
     const complete = options.lineStart === undefined ||
       (Number.isInteger(options.lineStart) && options.lineStart <= 1 &&
         Number.isInteger(options.lineEnd ?? 1) && (options.lineEnd ?? 1) >= totalLines);
-    if (complete) result.metadata = { ...result.metadata, completeFileRead: true,
-      contentSha256: createHash("sha256").update(bytes).digest("hex") };
+    const observedContentSha256 = createHash("sha256").update(bytes).digest("hex");
+    // A range read observes the on-disk version without becoming a full readback.
+    result.metadata = { ...result.metadata, observedContentSha256,
+      ...(complete ? { completeFileRead: true, contentSha256: observedContentSha256 } : {}) };
     return result;
   }
 

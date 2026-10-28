@@ -44,7 +44,8 @@ export async function resolveWorkspacePath(
     canonical = await realpath(candidate);
   } catch (error) {
     if (options.allowMissingLeaf !== true) {
-      return pathError(error instanceof Error ? error.message : "path does not exist");
+      return { ...pathError(error instanceof Error ? error.message : "path does not exist"),
+        ...(isNodeError(error) && error.code === "ENOENT" ? { metadata: { code: "ENOENT" } } : {}) };
     }
 
     // Step 3: Find nearest existing ancestor

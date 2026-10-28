@@ -1,0 +1,519 @@
+{
+  "title": "Progress and completion reliability comparison",
+  "date": "2026-10-28",
+  "benchmarkKind": "Targeted live harness microbenchmark; not a Terminal-Bench score",
+  "baselineHead": "b92ac179b4f1ed7b6c4e7cd05f6d6f46294b326b",
+  "baseline": "Exact tracked working-tree snapshot before this patch, including pre-existing local changes held constant in both variants",
+  "candidateFiles": {
+    "docs/architecture/runtime.md": "f3017de46fd2c667cf40bc4f928a547e95cdc8bc6aa320b9dbf0c29d2c7e5d00",
+    "src/execution/docker-workspace-files.ts": "030b491c150bf8596919a9b1f759e092287093c954ac5e84cab23ad1577488c9",
+    "src/runtime/execution-outcome.ts": "8973d784fdbbcd9fbfca6f8aff88ffd1d4e2f58ae5079e4e50d251f2c951ba28",
+    "src/runtime/execution-outcome.test.ts": "b5d26a7f8d37321c831dccacd22ab894262d0cc3fb35d8f454fdd122db809619",
+    "src/runtime/file-output-evidence.ts": "16608b18c2ef243c5d5cd9b24049c17486584dac5e1afdb86c3dc70ff3389f01",
+    "src/runtime/file-output-evidence.test.ts": "c8cebc8d18d7d23814aa644f346460fc41c0202a09cd21c8d2fc4b3d0f53853d",
+    "src/runtime/provider-turn-loop.ts": "29b353ce2271ad4447cb7ad9289ebd7137aa9417aadf7d67a4145a3fa0c64aeb",
+    "src/runtime/provider-turn-loop.test.ts": "e02902a71b30e6249787d792a77c2965e57101d6b7585a742fa32ae37f99bfa1",
+    "src/runtime/tool-loop-progress-guard.ts": "649018aa39eb47d906edbc5d01627b463d5b0a614c3efc132d80ad550eed547f",
+    "src/runtime/tool-loop-progress-guard.test.ts": "822178d75c6210937c636ead19264a2351ef0fd766416f532dfa3591b4cd997a",
+    "src/runtime/tool-result-fingerprint.ts": "df8cac2e86f6e2738c4014428dabe6f4bd8bd51cdbd757d78401c74077427cac",
+    "src/runtime/tool-result-fingerprint.test.ts": "1e3812af5f294e22069410a6bee0d79f3a65dfc1c8f7c565e28b0746e88eb7e6",
+    "src/tools/workspace-paths.ts": "a8ff8e132a4f54a988a9e59e415159e903f9c8b3788038b604c1a614df1f01af",
+    "src/tools/workspace-tools.ts": "61783546e86eac1c1c559848c16d53181bbd7d623f081194242359d775e37f2a"
+  },
+  "protocol": {
+    "model": "codex/gpt-6.1-sol",
+    "routing": "standard",
+    "image": "sha256:8d1b6dc4f14f7dd5bb1f6413d6390e59f9e82cec9ceb60f440f0021da955a56e",
+    "platform": "linux/amd64",
+    "memory": "2 GiB",
+    "cpus": 2,
+    "providerIterations": 24,
+    "toolCalls": 40,
+    "wallClockMs": 180000,
+    "finalizationReserveMs": 15000,
+    "credentials": "Native credentials remain on host; per-trial bounded relay capability only inside containers",
+    "repetitions": "Two per scenario, then one additional before/after diagnostic pair following a verification-process crash. Exploratory candidate results excluded.",
+    "passCriteria": "Positive: independent artifact checks AND runtime completion. Control: no output mutation or completed claim and at most six calls. Original control criterion demanded a runtime termination flag; revised to include voluntary stopping after the guard warning, applied symmetrically."
+  },
+  "results": [
+    {
+      "variant": "after",
+      "scenario": "changing-observation",
+      "repeat": 1,
+      "startedAt": "2026-10-28T12:39:40.549Z",
+      "artifactPass": true,
+      "runtimeAccepted": true,
+      "pass": true,
+      "outcome": "completed",
+      "termination": "normal",
+      "toolCalls": 9,
+      "providerRequests": 10,
+      "durationMs": 44736,
+      "usage": {
+        "inputTokens": 51282,
+        "outputTokens": 282,
+        "totalTokens": 51564
+      },
+      "rawEvidenceSha256": "661cf026693b1d9c7855f014e4671b7c70f2487e3c1f69a57146f49c7a3a13d5",
+      "evidenceDirectory": "after-changing-observation-1",
+      "artifactVerdictSource": "immediate post-run independent verifier"
+    },
+    {
+      "variant": "after",
+      "scenario": "changing-observation",
+      "repeat": 2,
+      "startedAt": "2026-10-28T12:41:28.744Z",
+      "artifactPass": true,
+      "runtimeAccepted": true,
+      "pass": true,
+      "outcome": "completed",
+      "termination": "normal",
+      "toolCalls": 9,
+      "providerRequests": 10,
+      "durationMs": 43170,
+      "usage": {
+        "inputTokens": 51184,
+        "outputTokens": 295,
+        "totalTokens": 51479
+      },
+      "rawEvidenceSha256": "3bdd8d2d16cba00d66f9278490195ec7d6ba480dee9cc05ea268a85a0159c568",
+      "evidenceDirectory": "after-changing-observation-2",
+      "artifactVerdictSource": "immediate post-run independent verifier"
+    },
+    {
+      "variant": "after",
+      "scenario": "diagnostic-recovery",
+      "repeat": 1,
+      "startedAt": "2026-10-28T12:39:41.120Z",
+      "artifactPass": true,
+      "runtimeAccepted": true,
+      "pass": true,
+      "outcome": "completed_with_recovered_errors",
+      "termination": "normal",
+      "toolCalls": 17,
+      "providerRequests": 18,
+      "durationMs": 85948,
+      "usage": {
+        "inputTokens": 105825,
+        "outputTokens": 1002,
+        "totalTokens": 106827
+      },
+      "rawEvidenceSha256": "323a9baab58456a15f657edfa6179dc97f01fc34a5b947710b2397f6f4b7f659",
+      "evidenceDirectory": "after-diagnostic-recovery-1",
+      "artifactVerdictSource": "immediate post-run independent verifier"
+    },
+    {
+      "variant": "after",
+      "scenario": "diagnostic-recovery",
+      "repeat": 2,
+      "startedAt": "2026-10-28T12:41:12.276Z",
+      "artifactPass": true,
+      "runtimeAccepted": false,
+      "pass": false,
+      "outcome": "partially_completed",
+      "termination": "normal",
+      "toolCalls": 19,
+      "providerRequests": 20,
+      "durationMs": 86734,
+      "usage": {
+        "inputTokens": 119563,
+        "outputTokens": 1051,
+        "totalTokens": 120614
+      },
+      "rawEvidenceSha256": "7a8936573bca6173c7a7f90ff5ab9ddb0cd70a28f59ebff80dc39bd8159926c8",
+      "evidenceDirectory": "after-diagnostic-recovery-2",
+      "artifactVerdictSource": "immediate post-run independent verifier"
+    },
+    {
+      "variant": "after",
+      "scenario": "diagnostic-recovery",
+      "repeat": 3,
+      "startedAt": "2026-10-28T12:44:58.806Z",
+      "artifactPass": true,
+      "runtimeAccepted": true,
+      "pass": true,
+      "outcome": "completed_with_recovered_errors",
+      "termination": "normal",
+      "toolCalls": 17,
+      "providerRequests": 18,
+      "durationMs": 74670,
+      "usage": {
+        "inputTokens": 105179,
+        "outputTokens": 892,
+        "totalTokens": 106071
+      },
+      "rawEvidenceSha256": "f4d92d6425107a46840576141868d2a66d0f13d11fa84803b71ded8e8eb02d51",
+      "evidenceDirectory": "after-diagnostic-recovery-3",
+      "artifactVerdictSource": "immediate post-run independent verifier"
+    },
+    {
+      "variant": "after",
+      "scenario": "readback-retention",
+      "repeat": 1,
+      "startedAt": "2026-10-28T12:40:36.916Z",
+      "artifactPass": true,
+      "runtimeAccepted": true,
+      "pass": true,
+      "outcome": "completed",
+      "termination": "normal",
+      "toolCalls": 3,
+      "providerRequests": 4,
+      "durationMs": 21065,
+      "usage": {
+        "inputTokens": 18940,
+        "outputTokens": 425,
+        "totalTokens": 19365
+      },
+      "rawEvidenceSha256": "9ede1ee2ef9e4dc9eb560b641789fdb52a9838475a14bae7ecb0e70fbfa4b0c1",
+      "evidenceDirectory": "after-readback-retention-1",
+      "artifactVerdictSource": "immediate post-run independent verifier"
+    },
+    {
+      "variant": "after",
+      "scenario": "readback-retention",
+      "repeat": 2,
+      "startedAt": "2026-10-28T12:42:16.853Z",
+      "artifactPass": true,
+      "runtimeAccepted": true,
+      "pass": true,
+      "outcome": "completed",
+      "termination": "normal",
+      "toolCalls": 3,
+      "providerRequests": 4,
+      "durationMs": 19382,
+      "usage": {
+        "inputTokens": 18939,
+        "outputTokens": 415,
+        "totalTokens": 19354
+      },
+      "rawEvidenceSha256": "041d574b364376531d3cf0fc33022bd47afdfe44eec19841d1732bd7fe50302c",
+      "evidenceDirectory": "after-readback-retention-2",
+      "artifactVerdictSource": "immediate post-run independent verifier"
+    },
+    {
+      "variant": "after",
+      "scenario": "unchanged-loop-control",
+      "repeat": 1,
+      "startedAt": "2026-10-28T12:41:02.910Z",
+      "artifactPass": true,
+      "runtimeAccepted": false,
+      "pass": true,
+      "outcome": "blocked",
+      "termination": "normal",
+      "toolCalls": 4,
+      "providerRequests": 5,
+      "durationMs": 21989,
+      "usage": {
+        "inputTokens": 21125,
+        "outputTokens": 180,
+        "totalTokens": 21305
+      },
+      "rawEvidenceSha256": "8aa0172155c853923ded837a9d4fa2e95946efe2d59429176187c67bcb8cb1e6",
+      "evidenceDirectory": "after-unchanged-loop-control-1"
+    },
+    {
+      "variant": "after",
+      "scenario": "unchanged-loop-control",
+      "repeat": 2,
+      "startedAt": "2026-10-28T12:42:40.151Z",
+      "artifactPass": true,
+      "runtimeAccepted": false,
+      "pass": true,
+      "outcome": "blocked",
+      "termination": "normal",
+      "toolCalls": 4,
+      "providerRequests": 5,
+      "durationMs": 23119,
+      "usage": {
+        "inputTokens": 21134,
+        "outputTokens": 160,
+        "totalTokens": 21294
+      },
+      "rawEvidenceSha256": "7db8bf9c8c26dd9d62f35a71e93dbd252dca2830a7f6c0be1802eaa176c18ea3",
+      "evidenceDirectory": "after-unchanged-loop-control-2"
+    },
+    {
+      "variant": "before",
+      "scenario": "changing-observation",
+      "repeat": 1,
+      "startedAt": "2026-10-28T12:25:01.392Z",
+      "artifactPass": false,
+      "runtimeAccepted": false,
+      "pass": false,
+      "outcome": "partially_completed",
+      "termination": "tool_loop_no_progress",
+      "toolCalls": 7,
+      "providerRequests": 7,
+      "durationMs": 26206,
+      "usage": {
+        "inputTokens": 35123,
+        "outputTokens": 189,
+        "totalTokens": 35312
+      },
+      "rawEvidenceSha256": "ddc557f2c5f4717c7a7fd4483266622447b04e46d0ae61a46da2481f1ba776ec",
+      "evidenceDirectory": "before-changing-observation-1",
+      "artifactVerdictSource": "immediate post-run independent verifier"
+    },
+    {
+      "variant": "before",
+      "scenario": "changing-observation",
+      "repeat": 2,
+      "startedAt": "2026-10-28T12:29:21.141Z",
+      "artifactPass": false,
+      "runtimeAccepted": false,
+      "pass": false,
+      "outcome": "partially_completed",
+      "termination": "tool_loop_no_progress",
+      "toolCalls": 7,
+      "providerRequests": 7,
+      "durationMs": 26066,
+      "usage": {
+        "inputTokens": 35140,
+        "outputTokens": 189,
+        "totalTokens": 35329
+      },
+      "rawEvidenceSha256": "b7c39ab02114a558979fa17f54277031f33e3efc82fde100d4907fcb1af3e395",
+      "evidenceDirectory": "before-changing-observation-2",
+      "artifactVerdictSource": "immediate post-run independent verifier"
+    },
+    {
+      "variant": "before",
+      "scenario": "diagnostic-recovery",
+      "repeat": 1,
+      "startedAt": "2026-10-28T12:24:33.175Z",
+      "artifactPass": false,
+      "runtimeAccepted": false,
+      "pass": false,
+      "outcome": "blocked",
+      "termination": "tool_loop_no_progress",
+      "toolCalls": 6,
+      "providerRequests": 6,
+      "durationMs": 24212,
+      "usage": {
+        "inputTokens": 31901,
+        "outputTokens": 174,
+        "totalTokens": 32075
+      },
+      "rawEvidenceSha256": "e5c946676495dce200c11516f4f4f1e8ab76eff85f2e456b590e26ffc226dda1",
+      "evidenceDirectory": "before-diagnostic-recovery-1",
+      "artifactVerdictSource": "immediate post-run independent verifier"
+    },
+    {
+      "variant": "before",
+      "scenario": "diagnostic-recovery",
+      "repeat": 2,
+      "startedAt": "2026-10-28T12:28:49.044Z",
+      "artifactPass": false,
+      "runtimeAccepted": false,
+      "pass": false,
+      "outcome": "blocked",
+      "termination": "tool_loop_no_progress",
+      "toolCalls": 6,
+      "providerRequests": 6,
+      "durationMs": 21669,
+      "usage": {
+        "inputTokens": 31883,
+        "outputTokens": 174,
+        "totalTokens": 32057
+      },
+      "rawEvidenceSha256": "9aa8b8530b3113f8696a158716cf08107ab1e7b5f6c244db76906643f3c8fee2",
+      "evidenceDirectory": "before-diagnostic-recovery-2",
+      "artifactVerdictSource": "immediate post-run independent verifier"
+    },
+    {
+      "variant": "before",
+      "scenario": "diagnostic-recovery",
+      "repeat": 3,
+      "startedAt": "2026-10-28T12:44:58.855Z",
+      "artifactPass": false,
+      "runtimeAccepted": false,
+      "pass": false,
+      "outcome": "blocked",
+      "termination": "tool_loop_no_progress",
+      "toolCalls": 6,
+      "providerRequests": 6,
+      "durationMs": 27832,
+      "usage": {
+        "inputTokens": 31896,
+        "outputTokens": 174,
+        "totalTokens": 32070
+      },
+      "rawEvidenceSha256": "d51312891fbc5958a7028265f7bc6c6832853c3a66c61371f1bf48461d3a7f19",
+      "evidenceDirectory": "before-diagnostic-recovery-3",
+      "artifactVerdictSource": "immediate post-run independent verifier"
+    },
+    {
+      "variant": "before",
+      "scenario": "readback-retention",
+      "repeat": 1,
+      "startedAt": "2026-10-28T12:26:02.160Z",
+      "artifactPass": true,
+      "runtimeAccepted": false,
+      "pass": false,
+      "outcome": "partially_completed",
+      "termination": "normal",
+      "toolCalls": 3,
+      "providerRequests": 6,
+      "durationMs": 42776,
+      "usage": {
+        "inputTokens": 29668,
+        "outputTokens": 622,
+        "totalTokens": 30290
+      },
+      "rawEvidenceSha256": "c1e6c24cd292467ee5cd7e16612b05fee0eeee82dd5b9bc29fa1865f4afcef02",
+      "evidenceDirectory": "before-readback-retention-1",
+      "artifactVerdictSource": "immediate post-run independent verifier"
+    },
+    {
+      "variant": "before",
+      "scenario": "readback-retention",
+      "repeat": 2,
+      "startedAt": "2026-10-28T12:29:55.148Z",
+      "artifactPass": true,
+      "runtimeAccepted": false,
+      "pass": false,
+      "outcome": "partially_completed",
+      "termination": "normal",
+      "toolCalls": 3,
+      "providerRequests": 6,
+      "durationMs": 35966,
+      "usage": {
+        "inputTokens": 29621,
+        "outputTokens": 633,
+        "totalTokens": 30254
+      },
+      "rawEvidenceSha256": "2980a076269c935e8c9439985ddb241804b43ca741c72f9b308bd4bd3459fbca",
+      "evidenceDirectory": "before-readback-retention-2",
+      "artifactVerdictSource": "immediate post-run independent verifier"
+    },
+    {
+      "variant": "before",
+      "scenario": "unchanged-loop-control",
+      "repeat": 1,
+      "startedAt": "2026-10-28T12:26:55.724Z",
+      "artifactPass": true,
+      "runtimeAccepted": false,
+      "pass": true,
+      "outcome": "blocked",
+      "termination": "normal",
+      "toolCalls": 3,
+      "providerRequests": 4,
+      "durationMs": 25468,
+      "usage": {
+        "inputTokens": 16681,
+        "outputTokens": 127,
+        "totalTokens": 16808
+      },
+      "rawEvidenceSha256": "cf683648b3c022b3f18663ebc5ff40cfe4e1464ab803c3363c70054d6effac19",
+      "evidenceDirectory": "before-unchanged-loop-control-1"
+    },
+    {
+      "variant": "before",
+      "scenario": "unchanged-loop-control",
+      "repeat": 2,
+      "startedAt": "2026-10-28T12:30:35.505Z",
+      "artifactPass": true,
+      "runtimeAccepted": false,
+      "pass": true,
+      "outcome": "blocked",
+      "termination": "normal",
+      "toolCalls": 3,
+      "providerRequests": 4,
+      "durationMs": 18266,
+      "usage": {
+        "inputTokens": 16712,
+        "outputTokens": 128,
+        "totalTokens": 16840
+      },
+      "rawEvidenceSha256": "42136da26e1879182faff71889218a473ac479b8b05d69d97eb1aea40426caa0",
+      "evidenceDirectory": "before-unchanged-loop-control-2"
+    }
+  ],
+  "cases": [
+    {
+      "id": "diagnostic-recovery",
+      "files": {
+        "check.py": "import json,sys\nvalues=json.load(open('modules.json'))\nname=sys.argv[1]\nok=values[name]=='fixed'\nprint(f'{name}: '+('PASS' if ok else 'FAIL: expected fixed, found '+values[name]))\nsys.exit(0 if ok else 1)\n",
+        "modules.json": "{\"module1\": \"broken1\", \"module2\": \"broken2\", \"module3\": \"broken3\", \"module4\": \"broken4\", \"module5\": \"broken5\", \"module6\": \"broken6\", \"module7\": \"broken7\"}"
+      },
+      "prompt": "Repair modules.json and produce report.txt. The diagnostic procedure requires you to first run python3 check.py module1 through python3 check.py module7, each as a separate terminal.run tool call in a separate response, before editing anything. Do not combine or loop commands: collect each diagnostic before requesting the next. Nonzero exits are expected diagnostics. Then change every module value to fixed, rerun those same seven commands separately to verify the repair, and write report.txt summarizing the checks. Do not edit check.py."
+    },
+    {
+      "id": "changing-observation",
+      "files": {
+        "observe.py": "from pathlib import Path\np=Path('counter.txt'); n=int(p.read_text())+1 if p.exists() else 1\np.write_text(str(n));print('Observed stage',n)\n"
+      },
+      "prompt": "Produce report.txt containing the observed final stage. Run exactly python3 observe.py eight times, each as a separate terminal.run tool call in a separate response, observing its output before requesting the next. The same command returns a new stage each time; these are required observations. Do not combine commands or use a loop and do not edit observe.py or counter.txt. After stage 8, write report.txt with stage 8 and finish."
+    },
+    {
+      "id": "readback-retention",
+      "files": {},
+      "prompt": "Write report.txt with 120 numbered lines, one line for each integer 1 through 120. Read back the entire file using file.read without bounds to verify its contents. Then inspect just lines 1 through 3 using file.read with lineStart and lineEnd. This final spot check is part of the procedure; do not modify the file or do another full read after it. Finish with a brief report of both checks."
+    },
+    {
+      "id": "unchanged-loop-control",
+      "files": {
+        "check.py": "print(\"UNCHANGED: endpoint unavailable\")\nraise SystemExit(1)\n"
+      },
+      "prompt": "Try python3 check.py repeatedly in separate terminal.run calls. The endpoint is currently unavailable. Do not change files or commands. Stop after the runtime indicates the repetition budget is reached and report that the endpoint remains unavailable."
+    }
+  ],
+  "summary": {
+    "beforePositivePasses": 0,
+    "afterPositivePasses": 6,
+    "positiveTrialsPerVariant": 7,
+    "beforeControlPasses": 2,
+    "afterControlPasses": 2,
+    "controlTrialsPerVariant": 2,
+    "originalPlannedPositiveTrials": {
+      "before": "0/6",
+      "after": "5/6"
+    },
+    "extraDiagnosticPair": {
+      "before": "fail",
+      "after": "pass"
+    }
+  },
+  "verificationCrash": {
+    "trial": "after/diagnostic-recovery/2",
+    "command": "python3 check.py module4",
+    "exitCode": 139,
+    "runtimeOutcome": "partially_completed",
+    "artifactState": "All module values repaired; one verification command crashed. Later unrelated successful checks correctly did not erase its failure.",
+    "rechecks": "10/10 passes with the same fixture and captured repaired module content in a network-disabled container. Root cause of the original process crash not established."
+  },
+  "validation": {
+    "fullSuite": "771 files, 13071 tests passed",
+    "baselineRegressionProbes": "11 failed, 7 passed, 372 skipped; test overlay against unchanged baseline implementation",
+    "frozenInstall": "passed",
+    "trackedSnapshotTypecheck": "passed",
+    "trackedSnapshotBuild": "passed",
+    "sourceSmoke": "passed",
+    "runtimeImportAudit": "passed",
+    "esmAudit": "passed",
+    "distributionSmoke": "passed",
+    "diffCheck": "passed",
+    "checkoutTypecheck": "Blocked by pre-existing duplicate declarations in src/types/bidi-js.d 2.ts. No duplicate files removed."
+  },
+  "review": {
+    "result": "No remaining identified patch gaps after review and regressions. No security policy bypass added.",
+    "checks": [
+      "Distinct diagnostics versus identical loops and timestamp/PID churn",
+      "Per-operation failure recovery and per-stall warnings",
+      "Same-version partial reads and exact-copy source preservation",
+      "Changed files and initial partial-only reads remain unverified",
+      "Denied file/external actions remain restricted; alternate repair retains normal authorization",
+      "Failed validators cannot be cleared by unrelated success",
+      "Protected authentication recovery, source absence observations and cross-turn recovery boundaries"
+    ],
+    "risk": "Recovery remains conservative when operations cannot be linked. New diagnostic output is not proof of completion. Existing hardline checks, approval decisions, deadlines, uncertain-effect handling and cancellation remain authoritative."
+  },
+  "limitations": [
+    "Small targeted sample; does not establish general Terminal-Bench improvement or statistical reliability across arbitrary tasks.",
+    "The final after batch followed exploratory runs, so this is not a randomized latency study.",
+    "Pre-existing local changes were held constant; this is not a clean historical release comparison.",
+    "Artifact folders were unexpectedly renamed/merged during collection. Raw session records survived and were preserved separately. Original immediate verifier results are retained where available; other preserved outputs were matched against runtime file digests. Source snapshot hashes were checked for drift.",
+    "No dollar cost inferred from native subscription tokens."
+  ],
+  "localEvidence": ".estacoda/progress-completion-fix-20261028/final-evidence-20261028-1650"
+}

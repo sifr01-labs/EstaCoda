@@ -115,8 +115,16 @@ function concreteFileOutputEvidence(input: Parameters<typeof fileOutputEvidence>
       for (const path of touched) {
         const target = safePath(path);
         if (target !== undefined) {
-          verified.delete(target);
-          sourceReads.delete(target);
+          // Reading unchanged bytes cannot undo earlier full verification. A
+          // changed digest or a failed observation still invalidates that proof.
+          const observedDigest = metadata?.observedContentSha256 ?? metadata?.contentSha256;
+          const unchangedRead = name === "file.read" && recorded.receipt.status === "success" &&
+            execution.decision === "allow" && execution.result?.ok === true && metadata?.materialized === true && validDigest(observedDigest) &&
+            (writes.get(target)?.digest ?? sourceReads.get(target)?.digest) === observedDigest;
+          if (!unchangedRead) {
+            verified.delete(target);
+            sourceReads.delete(target);
+          }
           if (name !== "file.read") writes.delete(target);
         }
       }
