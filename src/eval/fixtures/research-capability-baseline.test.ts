@@ -27,9 +27,9 @@ describe("executed research capability baseline", () => {
     expect(perLanguage.mixed).toMatchObject({ caseCount: 2, requestedCapabilityRecall: { numerator: 4, denominator: 4 } });
   });
 
-  it("distinguishes zero greeting schemas from estimates for actionable turns", () => {
+  it("measures the stable core schema cost even for greetings", () => {
     const report = buildResearchCapabilityBaseline();
-    expect(report.cases.find((row) => row.id === "greeting-control")).toMatchObject({ exposedTools: [], schemaTokensRough: 0 });
+    expect(report.cases.find((row) => row.id === "greeting-control")).toMatchObject({ exposedTools: ["file.read", "file.write", "skill.list", "skill.read"] });
     expect(report.cases.find((row) => row.id === "compound-research")?.schemaTokensRough).toBeGreaterThan(0);
     expect(report.schemaTokensRough.p95).toBeGreaterThanOrEqual(report.schemaTokensRough.median);
   });

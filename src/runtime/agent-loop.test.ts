@@ -794,6 +794,7 @@ describe("AgentLoop execution checkpoints", () => {
     const resumedProviderInput = vi.mocked(providerTurnLoop.run).mock.calls[1]?.[0];
     expect(resumedProviderInput.routedText).toBe(`${objective}\nFollow-up: ${retryText}`);
     expect(resumedProviderInput.providerTools.map((entry) => entry.function.name)).toEqual([
+      "file_write",
       "browser_snapshot",
       "browser_click",
       "browser_download",
@@ -801,7 +802,7 @@ describe("AgentLoop execution checkpoints", () => {
       "mcp_postman_updateCollection"
     ]);
     expect(resumedProviderInput.providerTools.map((entry) => entry.function.name)).not.toContain("mcp_linear_getIssues");
-    expect(resumedProviderInput.providerTools.map((entry) => entry.function.name)).not.toContain("file_write");
+    expect(resumedProviderInput.providerTools.map((entry) => entry.function.name)).toContain("file_write");
     expect(retry.finalOutcome?.completionFloor).toBe("mutation_with_verification");
     expect(executionCheckpointController?.current()).toMatchObject({
       status: "retryable",

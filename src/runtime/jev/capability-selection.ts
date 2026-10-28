@@ -1,9 +1,10 @@
+import { CORE_WORKING_TOOLS, isToolExplicitlyProhibited } from "../tool-selection-policies.js";
 import type { IntentRoute } from '../../contracts/intent.js';
 import { CAPABILITY_RECOVERY_TOOLS } from '../../tools/capability-tools.js';
 import { budgetProviderTools, type ProviderToolSchemaCatalog } from '../../tools/tool-schema.js';
 import type { ProviderToolSelection } from '../provider-tool-narrowing.js';
 import { explicitInspectionTools, requiredRequestTools } from '../request-requirements.js';
-import { explicitlyProhibited, type LiveJevRouting } from './live-routing.js';
+import { type LiveJevRouting } from './live-routing.js';
 import { evaluateCapabilities, type CapabilityEvaluation } from './capability-decisions.js';
 export type { CapabilityEvaluation } from './capability-decisions.js';
 
@@ -27,7 +28,7 @@ export async function selectJevCapabilities(input: {
   };
   if (decision.actualEngine !== 'jev') return fallback();
   const explicit = new Set([...(input.requiredTools ?? []), ...requiredRequestTools(input.intent.requestRequirements), ...explicitInspectionTools(input.evaluation.context.userRequest)]);
-  const required = new Set(explicit);
+  const required = new Set([...explicit, ...input.catalog.entries.filter(entry => CORE_WORKING_TOOLS.has(entry.tool.name)).map(entry => entry.tool.name)]);
   if (input.catalog.entries.some(entry => entry.tool.name === "config.provider.execution_status")) required.add("config.provider.execution_status");
   // Skill toolsets describe dependency availability, not a requirement to expose
   // every member. Prioritize relevant dependencies without undoing Jev's
@@ -36,18 +37,12 @@ export async function selectJevCapabilities(input: {
   const dependencies = new Set(input.catalog.inventory.filter(tool => tool.toolsets.some(set => requiredToolsets.has(set))).map(tool => tool.name));
   const selected = new Set(decision.selections.filter(item => item.selected).map(item => item.id.slice(5)));
   for (const name of required) selected.add(name);
-  const riskClasses = new Map(input.catalog.entries.map(entry => [entry.tool.name, entry.tool.riskClass]));
-  for (const tool of input.catalog.inventory) {
-    // Research is an activity, not a ban on shared local readers. A save-only
-    // request still needs task results and file readback. Exact tool prohibitions
-    // remain binding, as do the session catalog and execution authorization.
-    const categories = tool.toolsets.flatMap(set => set === 'web' || (set === 'research' && riskClasses.get(tool.name) === 'read-only-network') ? ['research'] : set === 'browser' ? ['browser-operation'] : []);
-    // Reading a supplied page is distinct from searching for more pages.
-    if (tool.name === 'web.search') categories.push('web-search');
-    if ([tool.name, ...categories].some(category => explicitlyProhibited(input.evaluation.context.userRequest, category))) selected.delete(tool.name);
+  for (const entry of input.catalog.entries) {
+    if (isToolExplicitlyProhibited(entry.tool, input.evaluation.context.userRequest)) {
+      selected.delete(entry.tool.name);
+      required.delete(entry.tool.name);
+    }
   }
-  const needsRecovery = selected.size > 0 || input.standard.initialTools.some(schema => CAPABILITY_RECOVERY_TOOLS.some(name => name === (input.catalog.aliases.get(schema.function.name) ?? schema.function.name)));
-  if (needsRecovery) for (const name of CAPABILITY_RECOVERY_TOOLS) selected.add(name);
   const evidenceGated = new Set(input.standard.expansionCandidates.map(candidate => candidate.toolName));
   const candidates = input.catalog.entries.filter(entry => selected.has(entry.tool.name) && !evidenceGated.has(entry.tool.name));
   const valid = [];
@@ -62,7 +57,7 @@ export async function selectJevCapabilities(input: {
   }
   const recovery = new Set<string>([...CAPABILITY_RECOVERY_TOOLS, "config.provider.execution_status"]);
   // Keep recovery reachable even when required dependencies exceed the schema budget.
-  valid.sort((a, b) => Number(recovery.has(b.tool.name)) - Number(recovery.has(a.tool.name)) || Number(explicit.has(b.tool.name)) - Number(explicit.has(a.tool.name)) || Number(required.has(b.tool.name)) - Number(required.has(a.tool.name)) || Number(dependencies.has(b.tool.name)) - Number(dependencies.has(a.tool.name)) ||
+  valid.sort((a, b) => Number(recovery.has(b.tool.name)) - Number(recovery.has(a.tool.name)) || Number(CORE_WORKING_TOOLS.has(b.tool.name)) - Number(CORE_WORKING_TOOLS.has(a.tool.name)) || Number(explicit.has(b.tool.name)) - Number(explicit.has(a.tool.name)) || Number(required.has(b.tool.name)) - Number(required.has(a.tool.name)) || Number(dependencies.has(b.tool.name)) - Number(dependencies.has(a.tool.name)) ||
     (decision.selections.find(s => s.id === `tool:${b.tool.name}`)?.probability ?? 0) - (decision.selections.find(s => s.id === `tool:${a.tool.name}`)?.probability ?? 0));
   const budget = budgetProviderTools({ tools: valid.map(entry => entry.schema) });
   const exposed = new Set(budget.tools.map(schema => input.catalog.aliases.get(schema.function.name) ?? schema.function.name));

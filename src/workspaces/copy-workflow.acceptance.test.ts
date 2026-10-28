@@ -29,7 +29,7 @@ it.each(["apply", "review", "conflict", "remote", "attached", "busy"])("real run
         if (call) expect(request.tools).toEqual(expect.arrayContaining([expect.objectContaining({ function: expect.objectContaining({ name: call[0].replaceAll(".", "_") }) })]));
         if (step === 5) {
           for (const name of ["file_patch", "terminal_run"]) {
-            expect(request.tools).not.toEqual(expect.arrayContaining([expect.objectContaining({ function: expect.objectContaining({ name }) })]));
+            expect(request.tools).toEqual(expect.arrayContaining([expect.objectContaining({ function: expect.objectContaining({ name }) })]));
           }
         }
         return { ok: true, provider: model.provider, model: model.id, content: call ? "" : "Edit verified.", finishReason: call ? "tool_calls" : "stop",
@@ -138,7 +138,7 @@ it.each([
       complete: async (request: ProviderRequest): Promise<ProviderResponse> => {
         const names = (request.tools ?? []).map((schema) => (schema as { function: { name: string } }).function.name);
         expect(names).toContain("file_read");
-        expect(names).not.toContain("file_patch"); expect(names).not.toContain("terminal_run");
+        expect(names).toContain("file_patch"); expect(names).toContain("terminal_run");
         const call = read && step++ === 0;
         return { ok: true, provider: model.provider, model: model.id, content: call ? "" : `The function increments its argument. ${ending ?? ""}`, finishReason: call ? "tool_calls" : "stop",
           ...(call ? { raw: { choices: [{ message: { tool_calls: [{ id: "read-counter", function: { name: "file_read", arguments: JSON.stringify({ path: "counter.cjs" }) } }] } }] } } : {}) };

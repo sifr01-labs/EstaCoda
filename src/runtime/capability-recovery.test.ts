@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
 import { answer, createResearchWorkflowHarness, nativeCall, REPORT } from "../test/fakes/research-workflow-harness.js";
@@ -29,19 +29,20 @@ describe("capability recovery through the real runtime", () => {
   it.each([false, true])("expands on the next iteration, including provider fallback (%s)", async (fallback) => {
     const harness = await createResearchWorkflowHarness({ fallbackOnRequest: fallback ? 3 : undefined });
     try {
+      await seedNotebook(harness.workspaceRoot);
       harness.enqueue(
         (request) => {
-          expect(names(request)).not.toContain("file_write");
-          return nativeCall("capability_discover", { ids: ["tool:file.write"] })(request);
+          expect(names(request)).not.toContain("notebook_edit");
+          return nativeCall("capability_discover", { ids: ["tool:notebook.edit"] })(request);
         },
-        nativeCall("capability_request", { ids: ["tool:file.write"], reason: "Deliver the research notes" }),
-        nativeCall("file_write", { path: "recovered.md", content: "# Recovered notes\n" }),
+        nativeCall("capability_request", { ids: ["tool:notebook.edit"], reason: "Deliver the research notes" }),
+        nativeCall("notebook_edit", { notebook_path: "notes.ipynb", edit_mode: "insert", cell_type: "markdown", new_source: "Recovered notes" }),
         nativeCall("web_search", { query: "current recycling" }), answer(REPORT)
       );
       await harness.turn("Find recent battery research.");
       expect(harness.scriptErrors).toEqual([]);
-      expect(await readFile(join(harness.workspaceRoot, "recovered.md"), "utf8")).toContain("Recovered notes");
-      expect(harness.events).toContainEqual(expect.objectContaining({ kind: "capability-recovery", applied: ["tool:file.write"] }));
+      expect(await readFile(join(harness.workspaceRoot, "notes.ipynb"), "utf8")).toContain("Recovered notes");
+      expect(harness.events).toContainEqual(expect.objectContaining({ kind: "capability-recovery", applied: ["tool:notebook.edit"] }));
       if (fallback) {
         expect(harness.requests.some((request) => request.model === "research-fallback")).toBe(true);
         const attempted = harness.requests.slice(2, 4).map(names);
@@ -53,14 +54,15 @@ describe("capability recovery through the real runtime", () => {
   it("rejects same-batch use before the requested tool is exposed", async () => {
     const harness = await createResearchWorkflowHarness();
     try {
+      await seedNotebook(harness.workspaceRoot);
       harness.enqueue(() => ({ content: "", toolCalls: [
-        { id: "request", name: "capability_request", argumentsText: JSON.stringify({ ids: ["tool:file.write"], reason: "Save research notes" }) },
-        { id: "premature", name: "file_write", argumentsText: JSON.stringify({ path: "premature.md", content: "should not exist" }) }
-      ] }), nativeCall("file_write", { path: "later.md", content: "next iteration" }), nativeCall("web_search", { query: "current recycling" }), answer(REPORT));
+        { id: "request", name: "capability_request", argumentsText: JSON.stringify({ ids: ["tool:notebook.edit"], reason: "Save research notes" }) },
+        { id: "premature", name: "notebook_edit", argumentsText: JSON.stringify({ notebook_path: "notes.ipynb", edit_mode: "insert", new_source: "should not exist" }) }
+      ] }), nativeCall("notebook_edit", { notebook_path: "notes.ipynb", edit_mode: "insert", new_source: "next iteration" }), nativeCall("web_search", { query: "current recycling" }), answer(REPORT));
       await harness.turn("Find recent battery research.");
       expect(harness.scriptErrors).toEqual([]);
-      await expect(readFile(join(harness.workspaceRoot, "premature.md"))).rejects.toThrow();
-      expect(await readFile(join(harness.workspaceRoot, "later.md"), "utf8")).toBe("next iteration");
+      expect(await readFile(join(harness.workspaceRoot, "notes.ipynb"), "utf8")).not.toContain("should not exist");
+      expect(await readFile(join(harness.workspaceRoot, "notes.ipynb"), "utf8")).toContain("next iteration");
     } finally { await harness.dispose(); }
   });
 
@@ -101,7 +103,7 @@ it.each([false, true])("loads a recovered skill through skill.read and records d
       nativeCall("skill_read", { name: "research-discovery", mode: "contract" }),
       (request) => {
         expect(request.messages.some((message) => typeof message.content === "string" && message.content.includes("Recovered skill research-discovery; readiness="))).toBe(true);
-        expect(names(request)).not.toContain("terminal_run");
+        expect(names(request)).toContain("terminal_run");
         return { content: "The research workflow instructions are loaded." };
       });
     const result = await h.turn("Find battery studies.");
@@ -147,7 +149,7 @@ it.each([false, true])("recovers a Jev-rejected skill dependency without same-ba
   const approvals: string[] = [];
   const h = await createResearchWorkflowHarness({ fallbackOnRequest: fallback ? 3 : undefined, approvalDecision: async request => {
     approvals.push(request.tool.name);
-    return request.tool.name === "file.write" ? "denied" : "approved";
+    return request.tool.name === "notebook.edit" ? "denied" : "approved";
   } });
   const paths = resolveProfileStateHome({ homeDir: h.homeDir, profileId: "baseline" });
   await mkdir(paths.profileRoot, { recursive: true });
@@ -156,29 +158,31 @@ it.each([false, true])("recovers a Jev-rejected skill dependency without same-ba
   const fetch = vi.spyOn(globalThis, "fetch").mockImplementation(async (_url, init) => {
     const payload = JSON.parse(String(init?.body));
     const discovery = payload.state.material.some((item: { text: string }) => item.text.includes("Agent discovery query"));
-    return new Response(JSON.stringify({ model: "jev-1.13.0", usage: { input_tokens: 10, output_tokens: 0 }, answers: Object.fromEntries(Object.entries(payload.questions).map(([id, q]) => [id, { type: "noul", noul: id === "intent.research" || (q as { instructions: { subjectDescription: string } }).instructions.subjectDescription.startsWith(discovery ? "file.write:" : "web.search:") ? .95 : .05 }])) }));
+    return new Response(JSON.stringify({ model: "jev-1.13.0", usage: { input_tokens: 10, output_tokens: 0 }, answers: Object.fromEntries(Object.entries(payload.questions).map(([id, q]) => [id, { type: "noul", noul: id === "intent.research" || (q as { instructions: { subjectDescription: string } }).instructions.subjectDescription.startsWith(discovery ? "notebook.edit:" : "web.search:") ? .95 : .05 }])) }));
   });
   try {
+    await seedNotebook(h.workspaceRoot);
     h.enqueue(request => {
-      expect(names(request)).toContain("web_search"); expect(names(request)).not.toContain("file_write");
+      expect(names(request)).toContain("web_search"); expect(names(request)).not.toContain("notebook_edit");
       return nativeCall("capability_discover", { query: "retain the findings on disk", kind: "tool" })(request);
     }, request => {
-      expect(request.messages.some(message => typeof message.content === "string" && message.content.includes('"id":"tool:file.write"'))).toBe(true);
+      expect(request.messages.some(message => typeof message.content === "string" && message.content.includes('"id":"tool:notebook.edit"'))).toBe(true);
       return { content: "", toolCalls: [
-        { id: "request", name: "capability_request", argumentsText: JSON.stringify({ ids: ["tool:file.write"], reason: "Retain the findings" }) },
-        { id: "premature", name: "file_write", argumentsText: JSON.stringify({ path: "premature.md", content: "must not execute" }) }
+        { id: "request", name: "capability_request", argumentsText: JSON.stringify({ ids: ["tool:notebook.edit"], reason: "Retain the findings" }) },
+        { id: "premature", name: "notebook_edit", argumentsText: JSON.stringify({ notebook_path: "notes.ipynb", edit_mode: "insert", new_source: "must not execute" }) }
       ] };
     }, request => {
-      expect(names(request)).toContain("file_write");
-      return nativeCall("file_write", { path: "denied.md", content: "requires approval" })(request);
+      expect(names(request)).toContain("notebook_edit");
+      return nativeCall("notebook_edit", { notebook_path: "notes.ipynb", edit_mode: "insert", new_source: "requires approval" })(request);
     }, answer("The write was denied."));
     await h.turn("Use the researcher skill to investigate battery methods.");
     expect(h.scriptErrors).toEqual([]);
     expect(h.events).toContainEqual(expect.objectContaining({ kind: "provider-tool-inventory", selection: expect.objectContaining({ routing: expect.objectContaining({ actualEngine: "jev" }) }) }));
-    expect(approvals).toContain("file.write");
-    expect(h.events).toContainEqual(expect.objectContaining({ kind: "tool-result", tool: "file.write", decision: "deny" }));
-    await expect(readFile(join(h.workspaceRoot, "premature.md"))).rejects.toThrow();
-    await expect(readFile(join(h.workspaceRoot, "denied.md"))).rejects.toThrow();
+    expect(approvals).toContain("notebook.edit");
+    expect(h.events).toContainEqual(expect.objectContaining({ kind: "tool-result", tool: "notebook.edit", decision: "deny" }));
+    const notebook = JSON.parse(await readFile(join(h.workspaceRoot, "notes.ipynb"), "utf8"));
+    expect(notebook.cells).toEqual([]);
+    expect(approvals.filter(name => name === "notebook.edit")).toHaveLength(1);
     expect((await h.sessionDb.listProviderUsageEntries("baseline")).some(entry => entry.provider === "typesafe")).toBe(true);
     if (fallback) expect(h.requests.some(request => request.model === "research-fallback")).toBe(true);
   } finally { fetch.mockRestore(); await h.dispose(); }
@@ -212,3 +216,7 @@ it('answers runtime questions using current-turn status even when Jev rejects th
     expect(h.events.filter(e=>e.kind==='tool-result').map(e=>e.tool)).toEqual(['config.provider.execution_status']);
   } finally {fetch.mockRestore();await h.dispose();}
 });
+
+async function seedNotebook(workspaceRoot: string) {
+  await writeFile(join(workspaceRoot, "notes.ipynb"), JSON.stringify({ cells: [], metadata: {}, nbformat: 4, nbformat_minor: 5 }));
+}

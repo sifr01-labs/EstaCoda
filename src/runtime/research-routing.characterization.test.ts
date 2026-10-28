@@ -105,16 +105,16 @@ describe("research routing baseline healthy controls", () => {
     expect(inspect(prompt).names).toContain("delegate_task");
   });
 
-  it("keeps a greeting at zero exposed tools", () => {
-    expect(inspect("hello").names).toEqual([]);
+  it("keeps the core working set available for a greeting", () => {
+    expect(inspect("hello").names).toEqual(["file.read", "file.write", "skill.list", "skill.read", "file.patch", "terminal.run"]);
   });
 
   it("exposes file.write for recognized document creation", () => {
     expect(inspect("Write documentation for the project").names).toContain("file.write");
   });
 
-  it("does not expose writes for a negated save request", () => {
-    expect(inspect("Do not save any files; explain the topic").names).not.toContain("file.write");
+  it("does not infer a file output obligation from a negated save request", () => {
+    expect(inspect("Do not save any files; explain the topic").intent.requestRequirements?.fileOutput).toBeUndefined();
   });
 });
 
@@ -140,12 +140,12 @@ describe("exact requested tools stay within the session catalog", () => {
     const { names } = inspect("Use 3 subagents to investigate battery recycling");
     expect(names).toEqual(expect.arrayContaining(["delegate_task", "task.status", "task.result.read"]));
     expect(names).not.toContain("unrelated.mutate");
-    expect(names).not.toContain("terminal.run");
+    expect(names).toContain("terminal.run");
   });
-  it.each(["Prepare report.md", "Find papers and save report.md", "احفظ التقرير في ملف Markdown"])("exposes file tools without shell tools: %s", (prompt) => {
+  it.each(["Prepare report.md", "Find papers and save report.md", "احفظ التقرير في ملف Markdown"])("exposes file and shell tools: %s", (prompt) => {
     const { names } = inspect(prompt);
     expect(names).toEqual(expect.arrayContaining(["file.write", "file.patch", "file.read"]));
-    expect(names).not.toContain("terminal.run");
+    expect(names).toContain("terminal.run");
   });
   it("cannot add a delegation capability excluded from a child/session catalog", () => {
     const filtered = buildProviderToolSchemaCatalog({ tools: definitions.filter((entry) => entry.name !== "delegate_task") });
@@ -155,7 +155,7 @@ describe("exact requested tools stay within the session catalog", () => {
   it.each(["Do not use 3 subagents", "Explain how to use 3 subagents", "What if we save report.md and use 3 subagents?", "لا تستخدم ثلاثة وكلاء فرعيين"])("keeps negatives and hypothetical requests bounded: %s", (prompt) => {
     const { names } = inspect(prompt);
     expect(names).not.toContain("delegate_task");
-    expect(names).not.toContain("file.write");
+    expect(inspect(prompt).intent.requestRequirements?.fileOutput).toBeUndefined();
   });
 });
 

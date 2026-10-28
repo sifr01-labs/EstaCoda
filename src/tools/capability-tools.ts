@@ -1,3 +1,4 @@
+import { CORE_WORKING_TOOLS, isToolExplicitlyProhibited } from "../runtime/tool-selection-policies.js";
 import { routingStatus } from "../runtime/jev/routing-status.js";
 import { evaluateCapabilities } from "../runtime/jev/capability-decisions.js";
 import { jevRoutingContext, type LiveJevRouting } from "../runtime/jev/live-routing.js";
@@ -156,7 +157,10 @@ export class SessionCapabilityRecovery {
       return { ...fallback, content: JSON.stringify({ ...fallback.metadata, routing: summary }), metadata: { ...fallback.metadata, routing: summary } };
     }
     const selected = new Map(decision.selections.filter(item => item.selected).map(item => [item.id, item.probability ?? 0]));
-    const result = discoveryResult(entries.filter(entry => selected.has(entry.id)).sort((a, b) => selected.get(b.id)! - selected.get(a.id)! || a.id.localeCompare(b.id)));
+    // Semantic routing ranks discovery; retain lexical matches as additional candidates.
+    const standardIds = new Set((standard.metadata?.matches as Array<{ id: string }> | undefined)?.map(entry => entry.id) ?? []);
+    const result = discoveryResult(entries.filter(entry => selected.has(entry.id) || standardIds.has(entry.id))
+      .sort((a, b) => (selected.get(b.id) ?? 0) - (selected.get(a.id) ?? 0) || a.id.localeCompare(b.id)));
     // Bounded diagnostics: complete decisions are used, only returned IDs are presented to the agent.
     return { ...result, content: JSON.stringify({ ...result.metadata, routing: summary }), metadata: { ...result.metadata, routing: summary } };
   }
@@ -196,6 +200,7 @@ export class SessionCapabilityRecovery {
     const name = id.slice(5);
     const saved = this.#definitions.get(name);
     const live = this.#registry.get(name);
+    if (live && isToolExplicitlyProhibited(live, this.#turn?.objective ?? "")) return undefined;
     if (!saved || live !== saved.instance || live.run !== saved.run || definitionSignature(live) !== saved.signature) return undefined;
     try { if (!await live.isAvailable()) return undefined; } catch { return undefined; }
     if (this.#registry.get(name) !== live || live.run !== saved.run || definitionSignature(live) !== saved.signature) return undefined;
@@ -207,7 +212,7 @@ export class SessionCapabilityRecovery {
   }> {
     let tools = [...active];
     const deferred: string[] = [];
-    const protectedNames = new Set<string>([...CAPABILITY_RECOVERY_TOOLS, "config.provider.execution_status"]);
+    const protectedNames = new Set<string>([...CORE_WORKING_TOOLS, "config.provider.execution_status"]);
     const appliedNames = new Set<string>();
     const stagedTools = new Set(this.#stagedTools);
     const requestedSkills = new Map(this.#requestedSkills);
@@ -229,9 +234,11 @@ export class SessionCapabilityRecovery {
       if (!schema) { rejected.push({ id, reason: "unavailable_or_changed" }); continue; }
       const alreadyExposed = tools.some((tool) => tool.function.name === schema.function.name);
       if (alreadyExposed && !skill) continue;
-      const staged = stagedTools.has(id.slice(5));
-      const budget = budgetProviderTools({ tools: alreadyExposed ? tools : staged ? [...tools.filter(tool => protectedNames.has(this.#catalog?.aliases.get(tool.function.name) ?? tool.function.name) || appliedNames.has(tool.function.name)), schema, ...tools] : [...tools, schema],
-        priorityNames: new Set(staged ? [schema.function.name, ...tools.filter(tool => protectedNames.has(this.#catalog?.aliases.get(tool.function.name) ?? tool.function.name) || appliedNames.has(tool.function.name)).map(tool => tool.function.name)] : tools.map(tool => tool.function.name)) });
+      const protectedTools = tools.filter(tool => protectedNames.has(this.#catalog?.aliases.get(tool.function.name) ?? tool.function.name) || appliedNames.has(tool.function.name));
+      const budget = budgetProviderTools({
+        tools: alreadyExposed ? tools : [...protectedTools, schema, ...tools],
+        priorityNames: new Set([...protectedTools.map(tool => tool.function.name), schema.function.name])
+      });
       if (!budget.tools.some((tool) => tool.function.name === schema.function.name)) { rejected.push({ id, reason: "schema_budget" }); continue; }
       if (!alreadyExposed) {
         for (const name of budget.omitted) {

@@ -17,6 +17,7 @@ type ResearchRoutingCase = {
   expectedSkill?: string;
   expectedTaskClass: IntentTaskClass;
   requiredTools: string[];
+  /** Optional capabilities that must not be selected; core visibility is not action authority. */
   forbiddenTools?: string[];
   requiresExecution?: true;
 };
@@ -38,11 +39,11 @@ export const researchRoutingCases: readonly ResearchRoutingCase[] = [
   { id: "mixed-save", language: "mixed", prompt: "احفظ التقرير في ملف Markdown", expectedTaskClass: "docs-writing", requiredTools: ["file.write", "file.read"], requiresExecution: true },
   { id: "mixed-delegation", language: "mixed", prompt: "ابحث عن battery recycling واستخدم 3 subagents", expectedSkill: "research-discovery", expectedTaskClass: "research", requiredTools: ["delegate_task", "web.search"], requiresExecution: true },
   { id: "docs-control", language: "en", prompt: "Write documentation for the project", expectedTaskClass: "docs-writing", requiredTools: ["file.write", "file.read"], requiresExecution: true },
-  { id: "greeting-control", language: "en", prompt: "hello", expectedTaskClass: "conversation", requiredTools: [], forbiddenTools: ["file.write", "delegate_task"] },
-  { id: "negated-save-control", language: "en", prompt: "Do not save any files; explain the topic", expectedTaskClass: "general", requiredTools: [], forbiddenTools: ["file.write", "delegate_task"] },
+  { id: "greeting-control", language: "en", prompt: "hello", expectedTaskClass: "conversation", requiredTools: [], forbiddenTools: ["delegate_task"] },
+  { id: "negated-save-control", language: "en", prompt: "Do not save any files; explain the topic", expectedTaskClass: "general", requiredTools: [], forbiddenTools: ["delegate_task"] },
   { id: "informational-delegation", language: "en", prompt: "What are subagents?", expectedTaskClass: "general", requiredTools: [], forbiddenTools: ["delegate_task"] },
-  { id: "quoted-save", language: "en", prompt: "Explain the phrase ‘save a markdown file’ without taking action.", expectedTaskClass: "general", requiredTools: [], forbiddenTools: ["file.write", "delegate_task"] },
-  { id: "negated-arabic-save", language: "ar", prompt: "لا تحفظ أي ملفات، اشرح الفكرة فقط", expectedTaskClass: "general", requiredTools: [], forbiddenTools: ["file.write", "delegate_task"] }
+  { id: "quoted-save", language: "en", prompt: "Explain the phrase ‘save a markdown file’ without taking action.", expectedTaskClass: "general", requiredTools: [], forbiddenTools: ["delegate_task"] },
+  { id: "negated-arabic-save", language: "ar", prompt: "لا تحفظ أي ملفات، اشرح الفكرة فقط", expectedTaskClass: "general", requiredTools: [], forbiddenTools: ["delegate_task"] }
 ];
 
 function tool(name: string, toolsets: ToolDefinition["toolsets"], riskClass: ToolDefinition["riskClass"] = "read-only-local"): ToolDefinition {

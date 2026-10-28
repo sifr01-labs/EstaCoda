@@ -5,13 +5,15 @@ import type { LoadedSkill, SkillDefinition } from "../contracts/skill.js";
 import type { ToolDefinition, ToolsetName } from "../contracts/tool.js";
 import type { MCPServerSnapshot } from "../mcp/mcp-tools.js";
 import { CAPABILITY_RECOVERY_TOOLS } from "../tools/capability-tools.js";
-import { explicitInspectionTools, explicitRequestSegments, requiredRequestTools } from "./request-requirements.js";
+import { explicitInspectionTools, requiredRequestTools } from "./request-requirements.js";
 import {
   budgetProviderTools,
   type OpenAICompatibleToolSchema,
   type ProviderToolSchemaCatalog
 } from "../tools/tool-schema.js";
 import {
+  CORE_WORKING_TOOLS,
+  isToolExplicitlyProhibited,
   isActionableToolRequest,
   selectToolSelectionPolicy,
   shouldIncludePlan
@@ -162,16 +164,15 @@ export function selectProviderToolsForTurn(input: {
     input.selectedSkill !== undefined ||
     (input.attachments ?? []).some((attachment) => (attachment.status ?? "ready") === "ready")
   );
-  const requestText = explicitRequestSegments(input.userText ?? "").join(" ");
-  const recoveryRelevant = exactRequestTools.size > 0 || isActionableToolRequest(requestText) || /\b(?:research|analyze|analyse|summarize|prepare|investigate)\b/iu.test(requestText) || /(?:\b(?:what|which)\b.{0,50}\b(?:tools|skills|capabilities)\b|\bcan you\s+(?:browse|search|delegate|save)\b|ما.{0,30}(?:أدوات|مهارات|قدرات))/iu.test(requestText);
   const recoveryNames = new Set<string>(CAPABILITY_RECOVERY_TOOLS);
   const initialTools: OpenAICompatibleToolSchema[] = [];
   const expansionCandidates: ProviderToolExpansionCandidate[] = [];
 
   for (const entry of input.catalog.entries) {
+    if (isToolExplicitlyProhibited(entry.tool, input.userText ?? "")) continue;
     const selected = (() => {
       if (entry.tool.name === "config.provider.execution_status") return true;
-      if (recoveryNames.has(entry.tool.name)) return recoveryRelevant;
+      if (CORE_WORKING_TOOLS.has(entry.tool.name)) return true;
       if (entry.tool.name === "plan") return includePlan;
       if (entry.tool.connector !== undefined) {
         return namedConnectors.has(connectorKey(entry.tool.connector));
@@ -211,15 +212,20 @@ export function selectProviderToolsForTurn(input: {
   const processCompanions = new Set<string>();
   if (initialTools.some(schema => schema.function.name === "terminal_run" || schema.function.name === "process_start")) {
     for (const entry of input.catalog.entries) {
-      if (!["process.start", "process.list", "process.logs", "process.stop"].includes(entry.tool.name)) continue;
+      if (!["process.start", "process.list", "process.logs", "process.stop"].includes(entry.tool.name) || isToolExplicitlyProhibited(entry.tool, input.userText ?? "")) continue;
       processCompanions.add(entry.schema.function.name);
       if (!initialTools.includes(entry.schema)) initialTools.push(entry.schema);
     }
     if (processCompanions.size > 0 && initialTools.some(schema => schema.function.name === "terminal_run")) processCompanions.add("terminal_run");
   }
+  // Reserve discovery first, then the core working set before optional routing.
+  initialTools.sort((a, b) => {
+    const rank = (name: string) => recoveryNames.has(name) ? 2 : CORE_WORKING_TOOLS.has(name) ? 1 : 0;
+    return rank(input.catalog.aliases.get(b.function.name) ?? b.function.name) - rank(input.catalog.aliases.get(a.function.name) ?? a.function.name);
+  });
   const budget = budgetProviderTools({
     tools: initialTools,
-    priorityNames: new Set([...processCompanions, ...input.catalog.entries.filter((entry) => entry.tool.name === "config.provider.execution_status" || exactRequestTools.has(entry.tool.name) || recoveryNames.has(entry.tool.name)).map((entry) => entry.schema.function.name)])
+    priorityNames: new Set([...processCompanions, ...input.catalog.entries.filter((entry) => entry.tool.name === "config.provider.execution_status" || exactRequestTools.has(entry.tool.name) || CORE_WORKING_TOOLS.has(entry.tool.name)).map((entry) => entry.schema.function.name)])
   });
   return {
     initialTools: budget.tools,
