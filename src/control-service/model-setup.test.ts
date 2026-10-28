@@ -208,3 +208,27 @@ it('tests an existing fallback with its saved endpoint but cannot apply a verifi
   await expect(setup.apply(binding,new AbortController().signal)).rejects.toThrow();expect(()=>setup.reviewed(binding)).toThrow();expect(await readFile(paths.configPath,'utf8')).toBe(config);expect(setup.cancel(binding).cancelled).toBe(true);
  }finally{verifier.dispose();setup.dispose();candidates.dispose();await rm(homeDir,{recursive:true,force:true});}
 });
+
+it('changes the Codex model only after review and Apply while reusing profile OAuth',async()=>{
+ const homeDir=await mkdtemp('/tmp/ec-codex-model-selection-'),input={homeDir,profileId:'p'},paths=resolveProfileStateHome(input);
+ const candidates=new CredentialCandidates('p','b'),setup=new ModelSetup(input,candidates,()=>{});
+ try{
+  await mkdir(paths.profileRoot,{recursive:true});
+  const provider={baseUrl:'https://chatgpt.com/backend-api/codex',authMethod:'oauth_device_pkce',apiMode:'openai_responses',enableNetwork:true,models:['gpt-5.5']};
+  await writeFile(paths.configPath,JSON.stringify({model:{provider:'codex',id:'gpt-5.5'},providers:{codex:provider},security:{mode:'strict'}}));
+  const auth=JSON.stringify({version:1,providers:{codex:{authMethod:'oauth_device_pkce',accessToken:'synthetic-access',refreshToken:'synthetic-refresh',expiresAt:'2999-01-01T00:00:00.000Z'}}});
+  await writeFile(paths.authJsonPath,auth);
+  const before=await readFile(paths.configPath,'utf8');
+  const draft=await setup.reviewConfigured({windowId:'w',generation:1,providerId:'codex',modelId:'gpt-6-luna',role:'primary'});
+  expect(draft).toMatchObject({credentialState:'existing',route:{providerId:'codex',modelId:'gpt-6-luna',endpoint:provider.baseUrl,apiMode:'openai_responses',authMethod:'oauth'}});
+  expect(await readFile(paths.configPath,'utf8')).toBe(before);
+  expect(await setup.apply({windowId:'w',generation:1,draftId:draft.draftId},new AbortController().signal)).toMatchObject({state:'applied'});
+  const saved=JSON.parse(await readFile(paths.configPath,'utf8'));
+  expect(saved.model.id).toBe('gpt-6-luna');expect(saved.security.mode).toBe('strict');
+  expect(saved.providers.codex).toMatchObject({authMethod:provider.authMethod,apiMode:provider.apiMode,enableNetwork:true,models:expect.arrayContaining(['gpt-6-luna'])});
+  const {loadRuntimeConfig}=await import('../config/runtime-config.js');
+  expect((await loadRuntimeConfig({...input,workspaceRoot:homeDir,configurationInspection:true})).primaryModelRoute.baseUrl).toBe(provider.baseUrl);
+  expect(await readFile(paths.authJsonPath,'utf8')).toBe(auth);
+  await expect(readFile(paths.envPath)).rejects.toThrow();
+ }finally{setup.dispose();candidates.dispose();await rm(homeDir,{recursive:true,force:true});}
+});

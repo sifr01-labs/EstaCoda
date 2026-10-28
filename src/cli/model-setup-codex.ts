@@ -10,13 +10,14 @@ import type { FetchLike } from "../providers/oauth/codex-oauth.js";
 import {
   buildCodexOAuthTokenRecord,
   CODEX_DEFAULT_BASE_URL,
-  CODEX_DEFAULT_MODEL,
   CODEX_OAUTH_AUTH_METHOD,
   codexOAuthStatusFromStore,
   formatCodexOAuthFailure,
   runCodexOAuthFlowWithDeviceCodeNotice,
   type OutputSink,
 } from "../providers/oauth/codex-setup.js";
+import { fallbackKnownModelProfiles } from "../providers/model-catalog.js";
+import { selectModelForProvider } from "../setup/provider-model-route-prompt.js";
 import { getProviderMetadata } from "../providers/provider-metadata.js";
 import type { Prompt } from "./prompt-contract.js";
 import type { CliOptions, CliCommandResult } from "./cli.js";
@@ -26,6 +27,8 @@ const CODEX_API_MODE = getProviderMetadata("codex").apiMode;
 export type ModelSetupCodexOptions = {
   homeDir?: string;
   profileId?: string;
+  /** Model already chosen by the shared route picker. Direct setup prompts when omitted. */
+  modelId?: string;
   workspaceRoot: string;
   prompt?: Prompt;
   fetchLike?: FetchLike;
@@ -36,22 +39,45 @@ export type ModelSetupCodexOptions = {
 export async function runModelSetupCodex(
   options: ModelSetupCodexOptions
 ): Promise<CliCommandResult> {
-  const prompt = options.prompt;
+  if (options.prompt === undefined) return cancelResult();
+  const profileId = options.profileId ?? readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId();
+  // Reading the current selection is advisory; the existing save path reports configuration failures.
+  const existing = await readConfig(resolveProfileStateHome({ homeDir: options.homeDir, profileId }).configPath).catch(() => undefined);
+  const models = fallbackKnownModelProfiles.filter((model) => model.provider === "codex" && model.status !== "deprecated");
+  const selection = options.modelId === undefined ? await selectModelForProvider({
+    prompt: options.prompt,
+    locale: options.prompt.uiContext?.locale === "ar" ? "ar" : "en",
+    mode: "primary",
+    allowCancel: true,
+    currentProviderId: existing?.config.model?.provider,
+    currentModelId: existing?.config.model?.id,
+  }, {
+    id: "codex", displayName: getProviderMetadata("codex").displayName,
+    configurable: true, runnable: true, catalogOnly: false, credentialReady: false,
+    modelsCount: models.length,
+  }, models.map((profile) => ({
+    id: profile.id, provider: profile.provider, profile, configured: false,
+    executable: true, catalogOnly: false, supportsVision: profile.supportsVision,
+    lifecycle: "available", usageClass: "primary-chat",
+  }))) : undefined;
+  const modelId = options.modelId ?? (selection?.kind === "model" ? selection.model.id : undefined);
+  if (modelId === undefined) return cancelResult();
+  const selectedOptions = { ...options, profileId, modelId };
   const homeDir = options.homeDir;
 
   // Read existing auth state
-  const oauthResult = await loadOAuthStore({ homeDir, profileId: options.profileId });
+  const oauthResult = await loadOAuthStore({ homeDir, profileId });
   const oauthStatus = codexOAuthStatusFromStore(oauthResult.store);
 
   if (oauthStatus.status === "ready") {
-    return await handleExistingCredentials(options, oauthResult.store);
+    return await handleExistingCredentials(selectedOptions, oauthResult.store);
   }
 
-  return await handleNewAuthentication(options);
+  return await handleNewAuthentication(selectedOptions);
 }
 
 async function handleExistingCredentials(
-  options: ModelSetupCodexOptions,
+  options: ModelSetupCodexOptions & { modelId: string },
   existingStore: Awaited<ReturnType<typeof loadOAuthStore>>["store"]
 ): Promise<CliCommandResult> {
   const prompt = options.prompt;
@@ -61,7 +87,7 @@ async function handleExistingCredentials(
     { label: "Use existing credentials", value: "use" },
     { label: "Reauthenticate (creates a new OAuth session)", value: "reauth" },
     { label: "Cancel", value: "cancel" }
-  ], "Codex credentials found in ~/.estacoda/auth.json.\n");
+  ], "Codex credentials found in the selected profile.\n");
 
   if (choice === "cancel" || choice === null) {
     return cancelResult();
@@ -83,7 +109,7 @@ async function handleExistingCredentials(
         "Using existing Codex credentials.",
         "Codex route configured.",
         `  Provider: codex`,
-        `  Model: ${CODEX_DEFAULT_MODEL}`
+        `  Model: ${options.modelId}`
       ].join("\n")
     };
   }
@@ -141,13 +167,13 @@ async function handleExistingCredentials(
       "",
       "Codex route configured.",
       `  Provider: codex`,
-      `  Model: ${CODEX_DEFAULT_MODEL}`
+      `  Model: ${options.modelId}`
     ].join("\n")
   };
 }
 
 async function handleNewAuthentication(
-  options: ModelSetupCodexOptions
+  options: ModelSetupCodexOptions & { modelId: string }
 ): Promise<CliCommandResult> {
   const prompt = options.prompt;
 
@@ -210,13 +236,13 @@ async function handleNewAuthentication(
     output: [
       "Codex route configured.",
       `  Provider: codex`,
-      `  Model: ${CODEX_DEFAULT_MODEL}`
+      `  Model: ${options.modelId}`
     ].join("\n")
   };
 }
 
 async function configureCodexRoute(
-  options: ModelSetupCodexOptions
+  options: ModelSetupCodexOptions & { modelId: string }
 ): Promise<{ ok: true } | { ok: false; message: string }> {
   const profileId = options.profileId ?? readActiveProfile({ homeDir: options.homeDir }).profileId ?? defaultProfileId();
   const targetPath = resolveProfileStateHome({ homeDir: options.homeDir, profileId }).configPath;
@@ -228,8 +254,9 @@ async function configureCodexRoute(
     const config = {
       ...existing.config,
       model: {
+        ...existing.config.model,
         provider: "codex" as const,
-        id: CODEX_DEFAULT_MODEL
+        id: options.modelId
       },
       providers: {
         ...(existing.config.providers ?? {}),

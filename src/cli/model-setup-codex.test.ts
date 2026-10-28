@@ -45,7 +45,7 @@ function profileAuthPath(homeDir: string): string {
   return resolveProfileStateHome({ homeDir, profileId: "default" }).authJsonPath;
 }
 
-function createMockPrompt(responses: string[]): Prompt {
+function createMockPrompt(responses: string[], modelId = "gpt-6.1-sol"): Prompt {
   let index = 0;
   const prompt = async (_question: string, _options?: { secret?: boolean }) => {
     const value = responses[index] ?? "";
@@ -53,7 +53,9 @@ function createMockPrompt(responses: string[]): Prompt {
     return value;
   };
   prompt.select = async <T>(_input: any): Promise<T> => {
-    throw new Error("select not used in these tests");
+    const option = _input.options.find((option: {id: string}) => option.id === modelId);
+    expect(option).toBeDefined();
+    return option.value;
   };
   return prompt as Prompt;
 }
@@ -150,7 +152,7 @@ function createMockFetch(scenarios: {
 
 function expectCodexRouteConfig(config: any): void {
   expect(config.model.provider).toBe("codex");
-  expect(config.model.id).toBe("gpt-5.5");
+  expect(config.model.id).toBe("gpt-6.1-sol");
   expect(config.providers.codex.baseUrl).toBe("https://chatgpt.com/backend-api/codex");
   expect(config.providers.codex.apiMode).toBe("openai_responses");
   expect(config.providers.codex.authMethod).toBe("oauth_device_pkce");
@@ -176,6 +178,25 @@ describe("model setup codex", () => {
       ...overrides
     } as ModelSetupCodexOptions;
   }
+
+  it("chooses another model using existing OAuth without changing credentials or other settings", async () => {
+    const auth = {version: 1, providers: {codex: {authMethod: "oauth_device_pkce", accessToken: "synthetic-access", refreshToken: "synthetic-refresh"}}};
+    await writeAuthJson(tmpDir, auth);
+    await writeUserConfig(tmpDir, {model: {provider: "codex", id: "gpt-5.5", maxTokens: 2048, fallbacks: [{provider: "local", id: "local-model"}]}, security: {mode: "strict"}});
+    const before = await readFile(profileAuthPath(tmpDir), "utf8");
+    const result = await runModelSetupCodex(baseOptions({prompt: createMockPrompt(["1"], "gpt-6-luna"), fetchLike: async () => {throw Error("Sign-in must not run");}}));
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toContain("Model: gpt-6-luna");
+    expect(await readUserConfig(tmpDir)).toMatchObject({model: {provider: "codex", id: "gpt-6-luna", maxTokens: 2048, fallbacks: [{provider: "local", id: "local-model"}]}, security: {mode: "strict"}});
+    expect(await readFile(profileAuthPath(tmpDir), "utf8")).toBe(before);
+  });
+
+  it("cancels model selection before requesting OAuth or writing any profile state", async () => {
+    const result = await runModelSetupCodex(baseOptions({prompt: createMockPrompt([], "cancel"), fetchLike: async () => {throw Error("Sign-in must not run");}}));
+    expect(result.output).toBe("Cancelled. No changes were made.");
+    await expect(readFile(profileAuthPath(tmpDir))).rejects.toThrow();
+    await expect(readFile(profileConfigPath(tmpDir))).rejects.toThrow();
+  });
 
   describe("new authentication", () => {
     it("completes device flow and writes auth.json + config.json", async () => {
@@ -675,7 +696,7 @@ describe("model setup codex", () => {
       // Config should now exist
       const config = await readUserConfig(tmpDir) as any;
       expect(config.model.provider).toBe("codex");
-      expect(config.model.id).toBe("gpt-5.5");
+      expect(config.model.id).toBe("gpt-6.1-sol");
     });
   });
 

@@ -1218,7 +1218,7 @@ describe("setup copy", () => {
     expect(rawSetupCopy("en", "setupEditor.prompt.openAiRoute.openAiModels")).toBe("OpenAI Models");
     expect(rawSetupCopy("en", "setupEditor.prompt.openAiRoute.openAiModels.description")).toBe("Use API-key OpenAI models.");
     expect(rawSetupCopy("en", "setupEditor.prompt.openAiRoute.codex")).toBe("Codex");
-    expect(rawSetupCopy("en", "setupEditor.prompt.openAiRoute.codex.description")).toBe("Use OpenAI Codex with OAuth. Default model: gpt-5.5.");
+    expect(rawSetupCopy("en", "setupEditor.prompt.openAiRoute.codex.description")).toBe("Use OpenAI Codex with OAuth, then choose a model.");
 
     expect(rawSetupCopy("ar", "setupEditor.shell.title")).toBe("محرّر الإعدادات");
     expect(rawSetupCopy("ar", "setupEditor.prompt.action.body")).toBe("اختار اللي تحب تضبطه:");
@@ -1232,7 +1232,7 @@ describe("setup copy", () => {
     expect(rawSetupCopy("ar", "setupEditor.prompt.voice.sttSecretValue")).toBe("أدخل مفتاح API لمزوّد STT لـ {envVar}:");
     expect(rawSetupCopy("ar", "setupEditor.prompt.openAiRoute.title")).toBe("إعداد OpenAI");
     expect(rawSetupCopy("ar", "setupEditor.prompt.openAiRoute.openAiModels.description")).toBe("استخدم نماذج OpenAI عبر مفتاح API.");
-    expect(rawSetupCopy("ar", "setupEditor.prompt.openAiRoute.codex.description")).toBe("استخدم OpenAI Codex عبر OAuth. النموذج الافتراضي: gpt-5.5.");
+    expect(rawSetupCopy("ar", "setupEditor.prompt.openAiRoute.codex.description")).toBe("استخدم OpenAI Codex عبر OAuth، ثم اختر نموذجًا.");
     expect(rawSetupCopy("ar", "setupEditor.actions.editPrimaryModelRoute")).toBe("النموذج الأساسي");
     expect(rawSetupCopy("ar", "setupEditor.actions.editPrimaryModelRoute.description")).toBe("النموذج الافتراضي الذي يستخدمه الوكيل.");
     expect(rawSetupCopy("ar", "setupEditor.actions.addCustomProviderRoute")).toBe("مزوّد مخصص متوافق مع OpenAI");
@@ -1283,7 +1283,6 @@ describe("setup copy", () => {
     expect(resolveSetupCopy("ar", "setupEditor.prompt.openAiRoute.codex")).toContain(isolateLtr("Codex"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.openAiRoute.codex.description")).toContain(isolateLtr("OpenAI Codex"));
     expect(resolveSetupCopy("ar", "setupEditor.prompt.openAiRoute.codex.description")).toContain(isolateLtr("OAuth"));
-    expect(resolveSetupCopy("ar", "setupEditor.prompt.openAiRoute.codex.description")).toContain(isolateLtr("gpt-5.5"));
     expect(rawSetupCopy("en", "setupEditor.prompt.codexOAuth.title")).toBe("Codex OAuth");
     expect(rawSetupCopy("en", "setupEditor.prompt.codexOAuth.signIn")).toBe("Sign in with device code");
     expect(rawSetupCopy("en", "setupEditor.prompt.codexOAuth.device.open")).toBe("Open: {url}");

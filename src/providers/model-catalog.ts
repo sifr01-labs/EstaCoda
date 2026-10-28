@@ -17,7 +17,17 @@ export const fallbackKnownModelProfiles: readonly ModelProfile[] = [
   model("openai", "gpt-4.1", 1047576, { tools: true, vision: true, structured: true, status: "stable" }),
   model("openai", "gpt-4.1-mini", 1047576, { tools: true, vision: true, structured: true, status: "stable" }),
   model("openai", "gpt-4o", 128000, { tools: true, vision: true, structured: true, status: "stable" }),
-  model("codex", "gpt-5.5", 128000, { tools: true, vision: true, structured: true, reasoning: true, status: "stable" }),
+  // Codex ChatGPT sign-in choices, checked against https://learn.chatgpt.com/docs/models
+  // on 2026-10-15. Catalog entries do not establish account/workspace entitlement.
+  // Limits below are published model metadata; the OAuth service may impose lower limits.
+  { ...model("codex", "gpt-6.1-sol", 1050000, { tools: true, vision: true, structured: true, reasoning: true, status: "stable" }), maxOutputTokens: 128000 },
+  { ...model("codex", "gpt-6-astra", 1050000, { tools: true, vision: true, structured: true, reasoning: true, status: "stable" }), maxOutputTokens: 128000 },
+  { ...model("codex", "gpt-6-sol", 1050000, { tools: true, vision: true, structured: true, reasoning: true, status: "stable" }), maxOutputTokens: 128000 },
+  { ...model("codex", "gpt-6-luna", 1050000, { tools: true, vision: true, structured: true, reasoning: true, status: "stable" }), maxOutputTokens: 128000 },
+  { ...model("codex", "gpt-5.6-sol", 1050000, { tools: true, vision: true, structured: true, reasoning: true, status: "stable" }), maxOutputTokens: 128000 },
+  { ...model("codex", "gpt-5.6-terra", 1050000, { tools: true, vision: true, structured: true, reasoning: true, status: "stable" }), maxOutputTokens: 128000 },
+  { ...model("codex", "gpt-5.6-luna", 1050000, { tools: true, vision: true, structured: true, reasoning: true, status: "stable" }), maxOutputTokens: 128000 },
+  model("codex", "gpt-5.5", 128000, { tools: true, vision: true, structured: true, reasoning: true, status: "deprecated" }),
   model("openrouter", "openrouter/auto", 128000, { tools: true, vision: true, structured: true, status: "stable" }),
   model("openrouter", "qwen/qwen3.6-plus", 256000, { tools: true, vision: true, structured: true, reasoning: true, status: "stable" }),
   model("zai", "glm-5.2", 128000, { tools: true, structured: true, reasoning: true, status: "stable" }),

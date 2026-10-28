@@ -17,7 +17,7 @@ Connection settings belong to a provider within the selected profile. Other rout
 
 ### Codex authorization
 
-Choose Codex, enter the model ID, then Authorize Codex. The service requests a device code and polls authorization status. Click **Open Codex sign-in** to open the fixed provider URL and enter the displayed code. Successful authorization stages tokens; it does not save them. Review and Apply persist the authorization in the selected profile `auth.json`.
+Choose OpenAI Codex, pick a model from the catalog, then Authorize Codex. The list includes current GPT-6 and GPT-5.6 choices; availability depends on the signed-in account and workspace. For an existing connection, choose another model and Review selection to reuse its authorization. Retired models are omitted from new Codex choices; existing saved selections are not migrated automatically. The service requests a device code and polls authorization status. Click **Open Codex sign-in** to open the fixed provider URL and enter the displayed code. Successful authorization stages tokens; it does not save them. Review and Apply persist the authorization in the selected profile `auth.json`.
 
 Cancellation, profile changes, service shutdown and the authorization deadline discard pending authorization. Late browser/exchange results cannot revive a cancelled setup. Desktop does not expose access or refresh tokens to the ordinary renderer.
 

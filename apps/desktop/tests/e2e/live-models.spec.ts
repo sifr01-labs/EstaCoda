@@ -1,22 +1,22 @@
 import {translate,type DisplayLanguage} from '../../src/shared/i18n/index.js';
 import{test,expect,type Page}from'@playwright/test';
-export async function mount(page:Page,view='models',language:DisplayLanguage='en',knownModel=false){
+export async function mount(page:Page,view='models',language:DisplayLanguage='en',knownModel=false,connectedCodex=false){
  await page.goto('/fixture.html');
- await page.evaluate(async({view,language,knownModel})=>{
+ await page.evaluate(async({view,language,knownModel,connectedCodex})=>{
   const reactPath='/node_modules/.vite/deps/react.js',domPath='/node_modules/.vite/deps/react-dom_client.js';
   const React=(await import(reactPath)).default,{createRoot}=(await import(domPath)).default;
   const componentPath=view==='models'?'/src/renderer/components/live-models.tsx':'/src/renderer/components/work-model-picker.tsx';const component=await import(componentPath);
   document.getElementById('root')!.remove();const host=document.createElement('div');host.className='ec-window';document.body.append(host);
   const calls:any[]=[],state={calls,failRefresh:false,delayRefresh:false,releaseRefresh:()=>{},delayVerify:false,releaseVerify:()=>{},failVerify:false,uncertain:false,authorized:false,oauthExpired:false,clipboard:'' as string,failApply:false,issue:false,receipt:'accepted',selection:null as any};let route:any;
   const models=[{providerId:'local',id:'first',label:'First model',runnable:true,credentialState:'not_required',role:'primary',health:'configured',catalog:{configured:true,contextTokens:1000000,outputTokens:128000,tools:true,vision:true,price:{inputPerMillion:3,outputPerMillion:15},lifecycle:'active',source:'configured',catalogOnly:false}},{providerId:'local',id:'second',label:'Second model',runnable:true,credentialState:'not_required',role:null,health:'configured',catalog:{configured:true,contextTokens:32000,outputTokens:8192,tools:true,vision:false,price:{inputPerMillion:0,outputPerMillion:null},lifecycle:'active',source:'configured',catalogOnly:false}}];
-  if(knownModel)models.push({...models[0]!,providerId:'codex',id:'gpt-5.5',label:'GPT-5.5',runnable:false,credentialState:'missing',role:null,health:'credential_required',catalog:{...models[0]!.catalog,configured:false,catalogOnly:true}});
-  const providers=['kimi','local','codex'].map(id=>({id,label:id,authMethods:id==='local'?['none','api_key']:id==='codex'?['oauth']:['api_key'],state:'unconfigured',metadata:{configurable:true,runnable:true,catalogOnly:false,apiMode:id==='codex'?'openai_responses':'openai_chat_completions',defaultEndpoint:id==='codex'?'https://chatgpt.com/backend-api/codex':id==='local'?'http://localhost:11434/v1':'https://api.moonshot.ai/v1'}}));
+  if(knownModel)for(const id of ['gpt-6.1-sol','gpt-6-astra','gpt-6-sol','gpt-6-luna','gpt-5.6-sol','gpt-5.6-terra','gpt-5.6-luna','gpt-5.5'])models.push({...models[0]!,providerId:'codex',id,label:id,runnable:false,credentialState:connectedCodex?'present':'missing',role:null,health:'not_configured',catalog:{...models[0]!.catalog,configured:false,catalogOnly:false,lifecycle:id==='gpt-5.5'?'retired':'available'}});
+  const providers=['kimi','local','codex'].map(id=>({id,label:id,authMethods:id==='local'?['none','api_key']:id==='codex'?['oauth']:['api_key'],state:connectedCodex&&id==='codex'?'unknown':'unconfigured',metadata:{configurable:true,runnable:true,catalogOnly:false,apiMode:id==='codex'?'openai_responses':'openai_chat_completions',defaultEndpoint:id==='codex'?'https://chatgpt.com/backend-api/codex':id==='local'?'http://localhost:11434/v1':'https://api.moonshot.ai/v1'}}));
   const draft=(role='primary')=>({draftId:'draft',role,route,expiresInMs:300000,credentialState:route?.authMethod==='none'?'not_required':'existing'});
   const receipt=()=>({operationId:'draft',state:state.uncertain?'uncertain':'applied',verification:state.issue?'repair_required':'configured',...(state.issue?{issue:{providerId:'codex',modelId:'codex-model',reason:'authorization_expired'}}:{})});
   const api={models:async(cursor?:string)=>({items:view==='work'?models:cursor?models.slice(1):models.slice(0,1),nextCursor:view==='work'||cursor?null:'remaining'}),providers:async()=>({items:providers,nextCursor:null}),refreshCatalog:async()=>{calls.push(['refresh']);if(state.delayRefresh)await new Promise<void>(resolve=>{state.releaseRefresh=resolve;});if(state.failRefresh)throw Error('offline');if(!models.some(m=>m.id==='new-model'))models.push({...models[1]!,id:'new-model',label:'New catalog model'});return{refreshed:true};},routes:async()=>({fallbacks:{revision:'rev',items:[{index:0,providerId:'local',modelId:'second'}]},auxiliary:{items:[{slot:'assessor',mode:'main',providerId:'local',modelId:'first',credentialState:'not_required',runnable:true,fallbackToMain:true}]}}),
    begin:async(value:any)=>{route=value;calls.push(['begin',value]);return{setupId:'setup'};},stage:async(id:string)=>{calls.push(['stage',id]);return{staged:true};},cancel:async(id:string)=>{calls.push(['cancel',id]);return{cancelled:true};},review:async(_id:string,role:any)=>{calls.push(['review',role]);return draft(role.role);},verify:async()=>{calls.push(['verify']);if(state.delayVerify)await new Promise<void>(resolve=>{state.releaseVerify=resolve;});return{state:state.failVerify?'failed':'passed',reason:state.failVerify?'invalid_credential':'verified',latencyMs:12};},apply:async()=>{calls.push(['apply']);if(state.failApply)throw Error('Lost response');return receipt();},inspect:async()=>{calls.push(['inspect']);return receipt();},
-   reviewConfigured:async(value:any)=>{calls.push(['configured',value]);route={providerId:value.providerId,modelId:value.modelId,endpoint:'http://localhost:11434/v1',authMethod:'none',apiMode:'openai_chat_completions'};return{setupId:'setup',draft:draft(value.role)};},reviewOrder:async(value:any)=>{calls.push(['order',value]);return{setupId:'setup',draft:{...draft('fallback_order'),route:undefined}};},reviewMode:async(value:any)=>{calls.push(['mode',value]);return{setupId:'setup',draft:{...draft('auxiliary_mode'),route:undefined,slot:value.slot}};},verifyReviewed:async()=>{calls.push(['verifyReviewed']);return{state:'passed'};},
-   oauthStart:async()=>({authorizationId:'auth',state:'pending',userCode:'SAMPLE-CODE',verificationUrl:'https://auth.openai.com/codex/device',candidateId:null}),oauthOpen:async()=>{calls.push(['open']);},oauthStatus:async()=>({authorizationId:'auth',state:state.oauthExpired?'expired':state.authorized?'authorized':'pending',userCode:state.authorized?null:'SAMPLE-CODE',verificationUrl:state.authorized?null:'https://auth.openai.com/codex/device',candidateId:state.authorized?'opaque-handle':null}),
+   reviewConfigured:async(value:any)=>{calls.push(['configured',value]);route={providerId:value.providerId,modelId:value.modelId,endpoint:value.providerId==='codex'?'https://chatgpt.com/backend-api/codex':'http://localhost:11434/v1',authMethod:value.providerId==='codex'?'oauth':'none',apiMode:value.providerId==='codex'?'openai_responses':'openai_chat_completions'};return{setupId:'setup',draft:draft(value.role)};},reviewOrder:async(value:any)=>{calls.push(['order',value]);return{setupId:'setup',draft:{...draft('fallback_order'),route:undefined}};},reviewMode:async(value:any)=>{calls.push(['mode',value]);return{setupId:'setup',draft:{...draft('auxiliary_mode'),route:undefined,slot:value.slot}};},verifyReviewed:async()=>{calls.push(['verifyReviewed']);return{state:'passed'};},
+   oauthStart:async()=>{calls.push(['oauthStart']);return({authorizationId:'auth',state:'pending',userCode:'SAMPLE-CODE',verificationUrl:'https://auth.openai.com/codex/device',candidateId:null});},oauthOpen:async()=>{calls.push(['open']);},oauthStatus:async()=>({authorizationId:'auth',state:state.oauthExpired?'expired':state.authorized?'authorized':'pending',userCode:state.authorized?null:'SAMPLE-CODE',verificationUrl:state.authorized?null:'https://auth.openai.com/codex/device',candidateId:state.authorized?'opaque-handle':null}),
    workOverride:async()=>({selection:state.selection,effective:'next_turn'}),inspectOverride:async()=>calls.some(c=>c[0]==='override')?{state:state.receipt}:null,setOverride:async(id:string,selection:any)=>{calls.push(['override',id,selection]);state.selection=selection;return{state:state.receipt};}};
   (window as any).modelTest=state;Object.defineProperty(navigator,'clipboard',{configurable:true,value:{writeText:async(text:string)=>{state.clipboard=text;}}});
   if(view==='models'){
@@ -26,7 +26,7 @@ export async function mount(page:Page,view='models',language:DisplayLanguage='en
    createRoot(host).render(React.createElement(React.StrictMode,null,React.createElement(AppearanceProvider,{store},React.createElement(App,{adapter:{kind:'live',api:desktop,appearance:store}}))));
   }else createRoot(host).render(React.createElement(React.StrictMode,null,React.createElement(component.WorkModelPicker,{api,work:{id:'session:s',canonicalId:'s',kind:'session',target:{targetId:'t',targetGeneration:1},modelBinding:{sessionId:'s'}},draft:{model:'',text:'',attachments:[],note:''},change:()=>{}})));
 
- },{view,language,knownModel});
+ },{view,language,knownModel,connectedCodex});
  if(view==='models'){await page.getByRole('button',{name:translate(language,'Settings'),exact:true}).click();await page.locator('.ec-settingslink').filter({hasText:translate(language,'Models & providers')}).click();}
 }
 export const calls=(page:Page)=>page.evaluate(()=>(window as any).modelTest.calls);
@@ -118,8 +118,8 @@ for(const language of ['en','ar'] as const)for(const dark of [false,true])test(`
 });
 
  test('selected catalog model keeps pricing visible and does not repeat editable identity fields',async({page})=>{
- await mount(page,'models','en',true);await page.getByRole('button',{name:'Add fallback',exact:true}).click();await page.getByRole('button',{name:/codex.*Set up/}).click();await page.getByRole('button',{name:/GPT-5.5/}).click();await page.getByRole('button',{name:'Continue to setup',exact:true}).click();
- const dialog=page.getByRole('dialog');await expect(dialog.locator('.ec-setup-model')).toContainText('GPT-5.5');await expect(dialog.locator('.ec-model-metadata')).toContainText('$3');await expect(dialog.getByLabel('Model ID',{exact:true})).toHaveCount(0);await expect(dialog.getByLabel('Provider',{exact:true})).toHaveCount(0);
+ await mount(page,'models','en',true);await page.getByRole('button',{name:'Add fallback',exact:true}).click();await page.getByRole('button',{name:/codex.*Set up/}).click();await page.getByRole('button',{name:/gpt-6.1-sol/}).click();await page.getByRole('button',{name:'Continue to setup',exact:true}).click();
+ const dialog=page.getByRole('dialog');await expect(dialog.locator('.ec-setup-model')).toContainText('gpt-6.1-sol');await expect(dialog.locator('.ec-model-metadata')).toContainText('$3');await expect(dialog.getByLabel('Model ID',{exact:true})).toHaveCount(0);await expect(dialog.getByLabel('Provider',{exact:true})).toHaveCount(0);
  await dialog.getByRole('button',{name:'Authorize Codex'}).click();await expect(dialog.getByText('SAMPLE-CODE',{exact:true})).toBeVisible();await page.screenshot({path:'/tmp/provider-known-model.png'});await page.keyboard.press('Escape');expect((await calls(page)).some((c:any)=>c[0]==='apply')).toBe(false);
  });
 
@@ -128,4 +128,23 @@ test('catalog refresh is one click, prevents duplicate requests, and can retry i
  await expect(page.getByRole('button',{name:'Refreshing…',exact:true})).toBeDisabled();await expect(page.getByRole('status').filter({hasText:'Updating models and prices…'})).toBeVisible();await expect(page.getByRole('button',{name:'Fetch metadata',exact:true})).toHaveCount(0);expect((await calls(page)).filter((c:any)=>c[0]==='refresh')).toHaveLength(1);
  await page.evaluate(()=>(window as any).modelTest.releaseRefresh());await expect(page.getByRole('alert')).toContainText('Your current models are still available.');await expect(page.getByText('First model',{exact:true})).toBeVisible();
  await page.evaluate(()=>{Object.assign((window as any).modelTest,{delayRefresh:false,failRefresh:false});});await page.getByRole('button',{name:'Try again',exact:true}).click();await expect(page.locator('.ec-model-additions')).toContainText(translate('en','{count} models added since your last catalog',{count:1}));expect((await calls(page)).filter((c:any)=>c[0]==='refresh')).toHaveLength(2);expect((await calls(page)).some((c:any)=>c[0]==='apply')).toBe(false);
+});
+
+for(const language of ['en','ar'] as const)test(`Codex model choice reuses OAuth and waits for reviewed Apply in ${language}`,async({page})=>{
+ const t=(key:Parameters<typeof translate>[1])=>translate(language,key);
+ await mount(page,'models',language,true,true);
+ await page.getByRole('button',{name:t('Change'),exact:true}).click();
+ await page.getByRole('button',{name:/codex/}).click();
+ await expect(page.getByText(t('Choose a model for your ChatGPT sign-in. Availability depends on your plan and workspace. Your existing authorization can be reused.'))).toBeVisible();
+ await expect(page.getByRole('button',{name:/gpt-5.5/})).toHaveCount(0);
+ await page.getByRole('searchbox',{name:t('Search providers and models')}).fill('gpt-5.5');
+ await expect(page.getByText(t('No matching models in this catalog.'))).toBeVisible();
+ await page.getByRole('searchbox',{name:t('Search providers and models')}).fill('');
+ await expect(page.getByRole('button',{name:/gpt-6.1-sol/})).toBeVisible();
+ await page.screenshot({path:`/tmp/estacoda-codex-model-list-${language}.png`});
+ await page.getByRole('button',{name:/gpt-6-luna/}).click();
+ await page.getByRole('button',{name:t('Review selection'),exact:true}).click();
+ expect((await calls(page)).some((c:any)=>['begin','oauthStart','stage','apply'].includes(c[0]))).toBe(false);
+ expect((await calls(page)).find((c:any)=>c[0]==='configured')[1]).toMatchObject({providerId:'codex',modelId:'gpt-6-luna',role:'primary'});
+ await page.screenshot({path:`/tmp/estacoda-codex-model-${language}.png`});
 });

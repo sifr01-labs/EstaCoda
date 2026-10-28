@@ -1,3 +1,4 @@
+import { codex_model_selection_case } from "./codex-model-selection.js";
 import { corrupt_skill_usage_case } from "./corrupt-skill-usage.js";
 import { bundled_skill_sync_case } from "./bundled-skill-sync.js";
 import { state_bootstrap_case } from "./state-bootstrap.js";
@@ -25,5 +26,6 @@ export const allSmokeCases = [
   whatsapp_support_case,
   delegation_mvp_case,
   provider_setup_endpoint_first_case,
-  session_continuation_case
+  session_continuation_case,
+  codex_model_selection_case
 ];

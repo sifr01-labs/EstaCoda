@@ -483,3 +483,7 @@ Selected profile config supports:
 | `agent.responseLanguage` | response language policy |
 
 **Evidence:** `smoke-tested`
+
+### Codex OAuth model selection
+
+`estacoda model setup codex` opens the shared model picker before requesting device authorization. It offers current documented Codex models, initially highlighting `gpt-6.1-sol` (or the current supported Codex model), then offers existing authorization reuse where available. Cancel leaves configuration and credentials untouched. The Setup Editor's OpenAI → Codex path also opens this model picker before its existing reviewed apply flow. Account/workspace availability is not inferred from catalog visibility. See the [provider guide](../../website/docs/user-guide/providers.md#codex-setup-path).

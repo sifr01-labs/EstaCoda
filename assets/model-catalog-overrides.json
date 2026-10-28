@@ -2,6 +2,13 @@
   "version": 1,
   "models": [
     {
+      "provider": "codex",
+      "model": "gpt-5.5",
+      "lifecycle": "retired",
+      "usageClass": "primary-chat",
+      "note": "Retired from Codex with ChatGPT sign-in on 2026-10-14. Choose a model available to your account."
+    },
+    {
       "provider": "openai",
       "model": "text-embedding-3-large",
       "lifecycle": "available",

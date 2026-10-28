@@ -258,9 +258,11 @@ describe("selectProviderModelRoute", () => {
       providers: [
         providerCandidate("openai", "OpenAI", 1),
         providerCandidate("local", "Local", 1),
+        providerCandidate("codex", "Codex", 2),
       ],
+      models: {codex: [modelCandidate("codex", "gpt-6.1-sol"), modelCandidate("codex", "gpt-6-luna")]},
     });
-    const prompt = fakePrompt(["openai", "codex-oauth"]);
+    const prompt = fakePrompt(["openai", "codex-oauth", "gpt-6-luna"]);
 
     const result = await selectProviderModelRoute({
       prompt,
@@ -274,11 +276,12 @@ describe("selectProviderModelRoute", () => {
 
     expect(result).toEqual({
       kind: "selected",
-      selection: selectionResult("codex", "gpt-5.5"),
+      selection: selectionResult("codex", "gpt-6-luna"),
     });
     expect(prompt.calls.map((call) => call.title)).toEqual([
       "Primary provider",
       "OpenAI setup",
+      "Primary model",
     ]);
     expect(prompt.calls[0]?.options.map((option) => option.id)).toEqual([
       "openai",
@@ -292,8 +295,16 @@ describe("selectProviderModelRoute", () => {
       "back",
       "cancel",
     ]);
-    expect(flow.modelListCount).toBe(0);
-    expect(flow.resolved).toEqual([{ providerId: "codex", modelId: "gpt-5.5" }]);
+    expect(flow.modelListCount).toBe(1);
+    expect(flow.resolved).toEqual([{ providerId: "codex", modelId: "gpt-6-luna" }]);
+  });
+
+  it.each(["en", "ar"] as const)("can cancel the nested Codex model picker in %s without resolving a route", async locale => {
+    const flow = fakeFlow({providers: [providerCandidate("openai", "OpenAI", 1), providerCandidate("codex", "Codex", 1)], models: {codex: [modelCandidate("codex", "gpt-6.1-sol")]}});
+    const prompt = fakePrompt(["openai", "codex-oauth", "cancel"]);
+    expect(await selectProviderModelRoute({prompt, flowEngine: flow.engine, locale, mode: "primary", openAiCodexChoice: true, allowCancel: true})).toEqual({kind: "cancel"});
+    expect(flow.resolved).toEqual([]);
+    expect(prompt.calls.at(-1)?.direction).toBe(locale === "ar" ? "rtl" : "ltr");
   });
 
   it("continues to normal OpenAI model selection from the OpenAI sub-choice", async () => {

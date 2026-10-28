@@ -289,7 +289,7 @@ describe("cli model", () => {
 
       const selectInputs: Array<SelectPromptInput<unknown>> = [];
       const prompt = createMockPrompt({
-        selects: ["openai", "codex-oauth"],
+        selects: ["openai", "codex-oauth", "gpt-6-luna"],
         onSelect: (input) => selectInputs.push(input)
       });
 
@@ -307,6 +307,7 @@ describe("cli model", () => {
       expect(selectInputs.map((input) => input.title)).toEqual([
         "Primary provider",
         "OpenAI setup",
+        "Primary model",
       ]);
       expect(selectInputs[0]?.options.map((option) => option.id)).not.toContain("codex");
       expect(selectInputs[1]?.options.map((option) => option.id)).toEqual(
@@ -314,7 +315,7 @@ describe("cli model", () => {
       );
 
       const config = await readUserConfig(tmpDir) as any;
-      expect(config.model).toEqual({ provider: "codex", id: "gpt-5.5", contextWindowTokens: expect.any(Number) });
+      expect(config.model).toEqual({ provider: "codex", id: "gpt-6-luna", contextWindowTokens: expect.any(Number) });
       expect(config.providers?.codex).toEqual(expect.objectContaining({
         authMethod: "oauth_device_pkce",
         apiMode: "custom_openai_compatible"

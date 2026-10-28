@@ -1275,6 +1275,7 @@ async function persistModelSelection(
       }
       if (resolution.credentialAction.status !== "ready") {
         return runModelSetupCodex({
+          modelId: resolution.model,
           workspaceRoot: options.workspaceRoot,
           homeDir: options.homeDir,
           profileId: options.profileId,

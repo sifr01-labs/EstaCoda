@@ -242,24 +242,33 @@ To clear a session override:
 
 ## Codex Setup Path
 
-Codex can be configured from the model picker where the nested OpenAI choice is enabled:
-
-1. Choose **OpenAI**.
-2. Choose **Codex**.
-
-The **OpenAI Models** choice is the API-key path for normal OpenAI models. The **Codex** choice is the OAuth path. Codex configuration uses provider `codex`, default model `gpt-5.5`, auth method `oauth_device_pkce`, and Responses API mode (`openai_responses`). It does not use `apiKeyEnv`.
-
-The direct CLI setup command remains available:
+Choose **OpenAI → Codex → model** in the Setup Editor, or run:
 
 ```bash
 estacoda model setup codex
 ```
 
-This command runs OAuth device-code authentication, stores tokens in the selected profile's `auth.json`, and configures the `codex/gpt-5.5` route. Raw OAuth tokens are not printed. Route config remains separate from token storage.
+The direct command opens the model picker before sign-in. Select a model, then reuse the selected profile's existing authorization or sign in with a device code. Cancelling the model picker does not request authorization or save changes. The selected model ID is saved with provider `codex`, auth method `oauth_device_pkce`, and Responses mode (`openai_responses`). The endpoint remains `https://chatgpt.com/backend-api/codex`; no API key is needed. Tokens stay in the selected profile's `auth.json`, separate from route configuration.
 
-The Setup Editor can configure Codex for the primary model route and fallback model routes through reviewed apply. OAuth tokens collected through the Setup Editor are written only after review approval; cancelling review after OAuth does not persist tokens.
+In Desktop, open **Settings → Models & providers → Change → OpenAI Codex**, choose a model, then review and save. A configured OAuth connection can be reused for another model. Adding a connection or onboarding uses the same catalog and authorization flow. Active work keeps its existing model.
 
-Codex setup uses the fixed default model `gpt-5.5`. EstaCoda does not fetch a live Codex model list in this pass, and it does not maintain or apply a fallback Codex model list in this pass. First-run onboarding is unchanged and does not introduce Codex OAuth setup. Auxiliary model routes are unchanged too; they do not introduce Codex OAuth setup in this pass.
+The bundled choices were checked against [OpenAI's Codex model documentation](https://learn.chatgpt.com/docs/models) on **October 15, 2026**:
+
+| Model ID | Intended use |
+| --- | --- |
+| `gpt-6.1-sol` | Recommended starting choice for complex coding and agent work |
+| `gpt-6-astra` | Most demanding reasoning and multi-step work |
+| `gpt-6-sol` | Previous Sol model for coding and agent workflows |
+| `gpt-6-luna` | Focused, repeatable work |
+| `gpt-5.6-sol` | Previous-generation complex-work option |
+| `gpt-5.6-terra` | Previous-generation balance of capability and cost |
+| `gpt-5.6-luna` | Previous-generation option for high-volume tasks |
+
+These are documented choices, not a live list of models authorized for your account. Availability depends on plan, client rollout and workspace permissions. GPT-6.1 Sol's launch includes Plus, Pro, Business, Enterprise and Edu; Enterprise/Edu administrators must enable it. OpenAI directs Free/Go users to GPT-6 Luna in its desktop app when available; this does not establish access through EstaCoda. Desktop's optional connection test checks the selected route and may consume usage. No automatic model probe or new sign-in is performed just to browse the list.
+
+GPT-5.5 retired from Codex with ChatGPT sign-in on October 14, 2026. Existing saved selections are retained for inspection, but it is no longer offered as a new Codex selection. Select and apply a replacement yourself. This retirement does not affect OpenAI API-key access.
+
+The Setup Editor still stages credentials until reviewed Apply. Desktop still stages credentials inside the service until Review/Apply. Selecting a different model does not change OAuth permissions, token storage, request transport, reasoning controls, tool approvals, or fallback execution policy. Published model limits are catalog metadata, not proof of the OAuth service's account-specific limits.
 
 ---
 

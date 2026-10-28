@@ -2240,7 +2240,7 @@ describe("runConfigEditor", () => {
     await writeUserConfig(tempDir, localReadyConfig());
     await trustWorkspace(tempDir, workspaceRoot);
 
-    const prompt = fakePrompt({ values: ["OpenAI", "Codex", true] });
+    const prompt = fakePrompt({ values: ["OpenAI", "Codex", "gpt-5.5", true] });
     const selectInputs: SelectPromptInput<unknown>[] = [];
     const baseSelect = prompt.select!;
     prompt.select = async (input) => {
@@ -2304,7 +2304,7 @@ describe("runConfigEditor", () => {
     await writeUserConfig(tempDir, localReadyConfig());
     await trustWorkspace(tempDir, workspaceRoot);
 
-    const prompt = trackingPrompt({ values: ["OpenAI", "Codex", "signin", true] });
+    const prompt = trackingPrompt({ values: ["OpenAI", "Codex", "gpt-5.5", "signin", true] });
     const selectInputs = captureSelectInputs(prompt);
     const cards: Array<Parameters<NonNullable<Prompt["onboardingCard"]>>[0]> = [];
     prompt.onboardingCard = (input) => {
@@ -2371,10 +2371,11 @@ describe("runConfigEditor", () => {
     expect(selectInputs.map((input) => input.title)).toEqual([
       "Primary provider",
       "OpenAI setup",
+      "Primary model",
       "Codex OAuth",
       "Finalize configuration",
     ]);
-    expect(selectInputs[2]?.options.map((option) => option.id)).toEqual([
+    expect(selectInputs[3]?.options.map((option) => option.id)).toEqual([
       "codex-oauth-signin",
       "codex-oauth-cancel",
     ]);
@@ -2422,7 +2423,7 @@ describe("runConfigEditor", () => {
     await writeUserConfig(tempDir, localReadyConfig());
     await trustWorkspace(tempDir, workspaceRoot);
 
-    const prompt = trackingPrompt({ values: ["OpenAI", "Codex", "cancel"] });
+    const prompt = trackingPrompt({ values: ["OpenAI", "Codex", "gpt-5.5", "cancel"] });
     const selectInputs = captureSelectInputs(prompt);
     const providerFetch = vi.fn();
 
@@ -2451,6 +2452,7 @@ describe("runConfigEditor", () => {
     expect(selectInputs.map((input) => input.title)).toEqual([
       "Primary provider",
       "OpenAI setup",
+      "Primary model",
       "Codex OAuth",
     ]);
     expect(JSON.parse(rawConfig)).toEqual(localReadyConfig());

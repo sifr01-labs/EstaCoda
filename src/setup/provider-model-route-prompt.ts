@@ -85,7 +85,7 @@ export async function selectProviderModelRoute(
       return { kind: providerAction.kind };
     }
 
-    const provider = providerAction.provider;
+    let provider = providerAction.provider;
     if (shouldPromptOpenAiCodexChoice(options, allProviders, provider)) {
       const choiceAction = await promptOpenAiCodexChoice(options);
       if (choiceAction.kind === "back") {
@@ -95,11 +95,11 @@ export async function selectProviderModelRoute(
         return { kind: "cancel" };
       }
       if (choiceAction.kind === "codex") {
-        const resolved = await options.flowEngine.resolveSelection("codex", CODEX_DEFAULT_MODEL);
-        if (resolved.kind === "diagnostic") {
-          return { kind: "diagnostic", output: `Provider/model selection failed: ${resolved.reason}` };
+        const codex = allProviders.find((candidate) => candidate.id === "codex");
+        if (codex === undefined) {
+          return { kind: "diagnostic", output: noProviderCandidatesMessage(options.locale, options.mode) };
         }
-        return { kind: "selected", selection: resolved };
+        provider = codex;
       }
     }
 
@@ -117,7 +117,7 @@ export async function selectProviderModelRoute(
       return { kind: "selected", selection: resolved };
     }
 
-    const modelAction = await promptModel(options, provider, models);
+    const modelAction = await selectModelForProvider(options, provider, models.filter((model) => provider.id !== "codex" || model.lifecycle === "available"));
     if (modelAction.kind === "back") {
       continue;
     }
@@ -202,18 +202,19 @@ async function promptProvider(
   });
 }
 
-async function promptModel(
-  options: SelectProviderModelRouteOptions,
+export async function selectModelForProvider(
+  options: Omit<SelectProviderModelRouteOptions, "flowEngine">,
   provider: ProviderCandidate,
   candidates: readonly ModelCandidate[]
 ): Promise<ModelPromptResultAction> {
+  if (candidates.length === 0) return { kind: "cancel" };
   const currentModelInProviderList =
     provider.id === options.currentProviderId &&
     options.currentModelId !== undefined &&
     candidates.some((candidate) => candidate.id === options.currentModelId);
   const currentModelIndex = currentModelInProviderList
     ? candidates.findIndex((candidate) => candidate.id === options.currentModelId)
-    : -1;
+    : provider.id === "codex" ? candidates.findIndex((candidate) => candidate.id === CODEX_DEFAULT_MODEL) : -1;
   const pageSize = modelPageSize(options, provider, candidates);
   const totalPages = pageSize !== undefined ? Math.ceil(candidates.length / pageSize) : 1;
   let pageIndex = pageSize !== undefined && currentModelIndex >= 0
@@ -244,7 +245,7 @@ async function promptModel(
 
     const modelAction = await selectStructuredOption(options.prompt, {
       title: modelTitle(options.locale, options.mode),
-      body: `${modelBody(options.locale, options.mode).replace("{providerId}", provider.id)}\n`,
+      body: `${modelBody(options.locale, options.mode).replace("{providerId}", provider.id)}\n${provider.id === "codex" ? setupCopyText(options.locale, "setupEditor.prompt.codexModels.availability") + "\n" : ""}`,
       statusLines: currentRouteStatusLines(options.locale, options.currentProviderId, options.currentModelId),
       technicalLines: modelTechnicalLines(options.locale, provider, options, candidates, pageStart, pageEnd, currentModelInProviderList, pageSize !== undefined),
       columns: promptColumns(options.locale),
@@ -271,7 +272,7 @@ async function promptModel(
 }
 
 function modelPageSize(
-  options: SelectProviderModelRouteOptions,
+  options: Omit<SelectProviderModelRouteOptions, "flowEngine">,
   provider: ProviderCandidate,
   candidates: readonly ModelCandidate[]
 ): number | undefined {
@@ -333,7 +334,7 @@ function modelPageNavigationOptions(
 function modelTechnicalLines(
   locale: SetupCopyLocale,
   provider: ProviderCandidate,
-  options: SelectProviderModelRouteOptions,
+  options: Omit<SelectProviderModelRouteOptions, "flowEngine">,
   candidates: readonly ModelCandidate[],
   pageStart: number,
   pageEnd: number,
@@ -438,7 +439,7 @@ async function selectStructuredOption<T>(
 }
 
 function navigationOptions<T extends { readonly kind: string }>(
-  options: SelectProviderModelRouteOptions
+  options: Omit<SelectProviderModelRouteOptions, "flowEngine">
 ): Array<SelectPromptInput<T>["options"][number]> {
   const rows: Array<SelectPromptInput<T>["options"][number]> = [];
   if (options.allowBack === true) {

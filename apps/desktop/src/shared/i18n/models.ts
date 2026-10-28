@@ -1,4 +1,6 @@
 export const modelsArabic={
+ 'Choose a model for your ChatGPT sign-in. Availability depends on your plan and workspace. Your existing authorization can be reused.':'اختر نموذجًا لتسجيل الدخول بحساب ChatGPT. يعتمد التوفر على خطتك ومساحة العمل. يمكن استخدام التفويض الحالي.',
+
  'Your changes are saved. Resolve the issue below before using this model.':'تم حفظ التغييرات. عالج المشكلة أدناه قبل استخدام هذا النموذج.',
  'Change':'تغيير',
  'Approval assessment':'تقييم الموافقات',

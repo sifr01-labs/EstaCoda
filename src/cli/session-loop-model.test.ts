@@ -406,14 +406,14 @@ describe("session-loop /model", () => {
     }, sessionDb);
     const refreshed = fakeRuntime({
       provider: "codex",
-      model: "gpt-5.5",
+      model: "gpt-6-luna",
       contextWindowTokens: 128000,
       supportsTools: true,
       supportsVision: true,
       supportsStructuredOutput: true
     }, sessionDb);
     const selectInputs: Array<SelectPromptInput<unknown>> = [];
-    const selections = ["openai", "codex-oauth"];
+    const selections = ["openai", "codex-oauth", "gpt-6-luna"];
     let selectionIndex = 0;
     const prompt = (async () => "") as Prompt;
     prompt.select = async <T>(input: SelectPromptInput<T>): Promise<T> => {
@@ -447,7 +447,8 @@ describe("session-loop /model", () => {
     expect(result).not.toBe(false);
     expect(selectInputs.map((input) => input.title)).toEqual([
       "Session provider",
-      "OpenAI setup"
+      "OpenAI setup",
+      "Session model"
     ]);
     expect(selectInputs[0]?.options.map((option) => option.id)).toContain("openai");
     expect(selectInputs[0]?.options.map((option) => option.id)).not.toContain("codex");
@@ -458,7 +459,7 @@ describe("session-loop /model", () => {
     ]);
     const override = await sessionDb.getSessionModelOverride("test-session");
     expect(override?.route.provider).toBe("codex");
-    expect(override?.route.id).toBe("gpt-5.5");
+    expect(override?.route.id).toBe("gpt-6-luna");
   });
 
   it("/model set stores a session-scoped override and refreshes the runtime", async () => {

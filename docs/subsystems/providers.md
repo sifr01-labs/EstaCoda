@@ -464,8 +464,8 @@ Cloud browser providers are separate from web research providers. Browserbase is
 - Chat-capable providers can be live inference routes.
 - Vision routing is implemented in code, but live success depends on actual provider capability plus working credentials.
 - Smart approval does not build a legacy provider/model assessor fallback. It requires the resolved `auxiliaryModels.assessor` route, the main route, and a provider executor; missing route/config fails safe to manual approval.
-- Codex can be configured from the model picker when the nested OpenAI choice is enabled: choose `OpenAI`, then `Codex`. `OpenAI Models` is the API-key OpenAI path; `Codex` is the OAuth path.
-- `estacoda model setup codex` remains the direct CLI path. It authenticates through OAuth device code, stores tokens in the selected profile's `auth.json`, and configures the `codex/gpt-5.5` route with provider `codex`, auth method `oauth_device_pkce`, and API mode `openai_responses`. Raw OAuth tokens are not printed, and route config remains separate from token storage.
+- Codex can be configured from the model picker when the nested OpenAI choice is enabled: choose `OpenAI`, then `Codex`, then a model. `OpenAI Models` is the API-key OpenAI path; `Codex` is the OAuth path.
+- `estacoda model setup codex` remains the direct CLI path. It first asks for a model (initial recommendation: `gpt-6.1-sol`), then reuses existing authorization or authenticates through OAuth device code, stores tokens in the selected profile's `auth.json`, and configures the chosen Codex route with provider `codex`, auth method `oauth_device_pkce`, and API mode `openai_responses`. Raw OAuth tokens are not printed, and route config remains separate from token storage.
 - The Setup Editor can configure Codex as a primary or fallback route through reviewed apply. OAuth tokens are written only after review approval; cancelling review after OAuth does not persist tokens.
 - Codex OAuth setup does not live in the Onboarding Wizard in this pass. If the Onboarding Wizard later offers Codex OAuth, it must delegate to that model setup/OAuth boundary.
 - Auxiliary model routes remain unchanged in this pass and do not introduce Codex OAuth setup.
@@ -527,3 +527,9 @@ after testing. These drafts match the saved endpoint, retain the ordinary spend 
 endpoint gates, and reject Apply, including when the model is already a fallback. A configured badge indicates saved
 configuration, not a successful live request. Supported providers use bundled brand marks;
 unsupported catalog entries are labelled Browse only without promising a release date.
+
+### Codex model choices
+
+The shared fallback catalog contains the seven documented ChatGPT sign-in model IDs listed in the [user guide](../../website/docs/user-guide/providers.md#codex-setup-path), verified against [OpenAI](https://learn.chatgpt.com/docs/models) on 2026-10-15. Both the nested Setup Editor path and direct CLI command use the existing model selector. Desktop consumes the same catalog through `captureModelCatalog`; changing a model on a configured provider reuses its OAuth credential through reviewed Apply. No model-list network endpoint or new credential surface is introduced.
+
+The Codex-only lifecycle override marks `gpt-5.5` retired. Saved routes remain unchanged and inspectable; fresh picker choices omit it. API-key OpenAI routes are unaffected. The public model metadata does not prove entitlement or live compatibility for a particular account; optional Desktop verification remains explicit. OAuth endpoints, refresh, token persistence, inference transport and tool governance are unchanged.

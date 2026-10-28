@@ -29,6 +29,9 @@ it('projects the offline catalog without network calls, profile writes, or usabl
     expect(catalog.providers.length).toBeGreaterThan(0);
     expect(catalog.models.length).toBeGreaterThan(0);
     for(const id of ['kimi','local','codex'])expect(catalog.providers.find(p=>p.id===id)?.metadata).toMatchObject({configurable:true,catalogOnly:false});
+    const codex = catalog.models.filter(m => m.providerId === 'codex');
+    expect(codex.filter(m => m.catalog?.lifecycle === 'available').map(m => m.id)).toEqual(expect.arrayContaining(['gpt-6.1-sol','gpt-6-astra','gpt-6-sol','gpt-6-luna','gpt-5.6-sol','gpt-5.6-terra','gpt-5.6-luna']));
+    expect(codex.find(m => m.id === 'gpt-5.5')).toMatchObject({runnable: false, catalog: {lifecycle: 'retired'}});
     expect(catalog.models.some(m => m.catalog?.tools)).toBe(true);
     expect(catalog.models.every(m => !m.runnable)).toBe(true);
     expect(fetch).not.toHaveBeenCalled();
