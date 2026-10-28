@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import asyncio
 import base64
 import os
 import re
@@ -55,6 +56,7 @@ class EstaCodaHarborConfig:
     temperature: float
     max_tokens: int | None
     timeout_ms: int
+    service_grace_ms: int | None
     redact: bool
     provider_budget_flags: tuple[tuple[str, str], ...]
 
@@ -98,6 +100,10 @@ def build_config(
         if (value := optional_positive_int_text(values.get(env_name), env_name)) is not None
     )
 
+    service_grace_ms = optional_positive_int(values.get("ESTACODA_BENCH_SERVICE_GRACE_MS"), "ESTACODA_BENCH_SERVICE_GRACE_MS")
+    if service_grace_ms is not None and service_grace_ms > 3_600_000:
+        raise AdapterConfigError("ESTACODA_BENCH_SERVICE_GRACE_MS must be at most 3600000.")
+
     return EstaCodaHarborConfig(
         estacoda_command=command,
         workspace=values.get("ESTACODA_BENCH_WORKSPACE", DEFAULT_WORKSPACE),
@@ -115,6 +121,7 @@ def build_config(
         temperature=parse_float(values.get("ESTACODA_BENCH_TEMPERATURE", "0"), "ESTACODA_BENCH_TEMPERATURE"),
         max_tokens=optional_positive_int(values.get("ESTACODA_BENCH_MAX_TOKENS"), "ESTACODA_BENCH_MAX_TOKENS"),
         timeout_ms=parse_positive_int(values.get("ESTACODA_BENCH_TIMEOUT_MS", str(DEFAULT_TIMEOUT_MS)), "ESTACODA_BENCH_TIMEOUT_MS"),
+        service_grace_ms=service_grace_ms,
         redact=parse_bool(values.get("ESTACODA_BENCH_REDACT", "true"), "ESTACODA_BENCH_REDACT"),
         provider_budget_flags=provider_budget_flags,
     )
@@ -128,6 +135,8 @@ def resolve_agent_config_env(agent: Any) -> Mapping[str, str]:
 
 
 def build_bench_args(config: EstaCodaHarborConfig, instruction_file: str) -> list[str]:
+    # Harbor's clock also covers startup, handoff, and artifact collection.
+    execution_timeout_ms = config.timeout_ms - min(30_000, config.timeout_ms // 10)
     args = [
         *config.estacoda_command,
         "bench",
@@ -149,7 +158,7 @@ def build_bench_args(config: EstaCodaHarborConfig, instruction_file: str) -> lis
         "--temperature",
         format_number(config.temperature),
         "--timeout-ms",
-        str(config.timeout_ms),
+        str(execution_timeout_ms),
     ]
     if config.home is None:
         args.append("--isolated-home")
@@ -161,7 +170,11 @@ def build_bench_args(config: EstaCodaHarborConfig, instruction_file: str) -> lis
         args.extend(["--max-tokens", str(config.max_tokens)])
     if not config.redact:
         args.append("--no-redact")
+    if config.service_grace_ms is not None:
+        args.extend(["--service-grace-ms", str(config.service_grace_ms)])
     for flag, value in config.provider_budget_flags:
+        if flag == "--max-provider-wall-clock-ms":
+            value = str(min(int(value), execution_timeout_ms))
         args.extend([flag, value])
     return args
 
@@ -183,6 +196,21 @@ def build_installed_agent_command(config: EstaCodaHarborConfig, instruction: str
         f"{{ {bench_command}; estacoda_status=$?; "
         f"{copy_artifacts}; exit \"$estacoda_status\"; }}"
     )
+    if config.service_grace_ms is not None:
+        ready = shlex.quote(str(PurePosixPath(config.out_dir) / "agent-finished"))
+        log = shlex.quote(str(PurePosixPath(config.out_dir) / "owner.log"))
+        # The shell returns on agent completion, not owner exit. Redirect every
+        # descriptor so Docker exec can return while the session owns services.
+        # The bounded CLI grace or final trial teardown releases the owner.
+        run_and_collect = (
+            f"{{ rm -f {ready}; {bench_command} > {log} 2>&1 < /dev/null & estacoda_owner=$!; "
+            f"while [ ! -f {ready} ]; do "
+            'if ! kill -0 "$estacoda_owner" 2>/dev/null; then '
+            f'wait "$estacoda_owner"; cat {log}; {copy_artifacts}; exit 1; fi; sleep 0.1; done; '
+            f"estacoda_status=$(cat {ready}); "
+            'case "$estacoda_status" in 0|1) ;; *) estacoda_status=1;; esac; '
+            f'{copy_artifacts}; exit "$estacoda_status"; }}'
+        )
     return " && ".join([
         shlex.join(["mkdir", "-p", config.out_dir]),
         write_instruction,
@@ -214,7 +242,12 @@ class EstaCodaHarborAgent(BaseInstalledAgent):
     ) -> None:
         config = build_config(resolve_agent_config_env(self), context)
         command = build_installed_agent_command(config, instruction)
-        result = await self.exec_as_agent(environment, command=command)
+        try:
+            result = await self.exec_as_agent(environment, command=command)
+        except asyncio.CancelledError:
+            # Cancellation of a remote await alone does not stop its processes.
+            await asyncio.shield(environment.stop(delete=True))
+            raise
         record_context(context, config, result)
 
 

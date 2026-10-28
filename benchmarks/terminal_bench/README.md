@@ -54,6 +54,32 @@ export ESTACODA_BENCH_COMMAND="node /path/to/estacoda/dist/index.js"
 
 ## Configuration
 
+### Services needed by the verifier
+
+For a disposable **shared-environment** trial whose task requires a live service,
+set `ESTACODA_BENCH_SERVICE_GRACE_MS` to the published verifier timeout plus a
+bounded allowance for artifact collection (for example, `960000` for a 900-second
+verifier). The maximum is one hour; the default is off. This is an operator setting,
+not a model-controlled persistence capability. Do not use it with separate agent
+and verifier environments or as a persistent host-service launcher.
+
+The adapter launches the benchmark session with redirected standard streams and
+returns when the CLI atomically publishes `agent-finished`, after writing its
+summary and artifacts. The same runtime continues owning its managed processes
+through the grading window; it makes no further provider calls. A normal answer
+can carry a failing task status without destroying the service before independent
+grading. Agent timeout, provider/runtime failure, or cancellation does not receive
+this extension. SIGINT/SIGTERM during the window releases the runtime normally;
+grace expiry also disposes it. Final Harbor container teardown ends every process,
+including on verifier failure. Retained debug environments still have the bounded
+grace deadline. Ordinary CLI/session disposal is unchanged.
+
+The adapter reserves the smaller of 30 seconds or 10% of the agent timeout for
+startup and artifact handoff, capping the provider wall-clock budget accordingly.
+Cancellation tears down the disposable environment before returning; subclasses
+must await the base `run` before removing credentials. The published outer agent
+and verifier limits are unchanged. Grading grace is never additional agent time.
+
 Supported environment variables:
 
 | Variable | Default | Purpose |
@@ -67,7 +93,8 @@ Supported environment variables:
 | `ESTACODA_BENCH_ATTEMPT` | Harbor context or `1` | Attempt number for benchmark identity. |
 | `ESTACODA_BENCH_TEMPERATURE` | `0` | Provider request temperature. |
 | `ESTACODA_BENCH_MAX_TOKENS` | unset | Optional max output tokens. |
-| `ESTACODA_BENCH_TIMEOUT_MS` | `1800000` | Headless run timeout in milliseconds. |
+| `ESTACODA_BENCH_TIMEOUT_MS` | `1800000` | Outer agent timeout; the adapter deducts its startup/handoff reserve. |
+| `ESTACODA_BENCH_SERVICE_GRACE_MS` | unset | Session lifetime after agent completion for shared-environment service grading; maximum 3600000. |
 | `ESTACODA_BENCH_REDACT` | `true` | Keep benchmark artifacts redacted by default. |
 | `ESTACODA_BENCHMARK_VERSION` | `2.0` | Terminal-Bench version label recorded in artifacts. |
 

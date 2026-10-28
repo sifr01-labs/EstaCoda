@@ -1,5 +1,6 @@
 import { execFile } from "node:child_process";
-import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
+import { randomUUID } from "node:crypto";
+import { mkdtemp, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { promisify } from "node:util";
@@ -63,6 +64,7 @@ type BenchRunArgs = {
   temperature: number;
   maxTokens: number | null;
   timeoutMs: number;
+  serviceGraceMs: number;
   redact: boolean;
   allowModelFallback: boolean;
   providerBudgets: {
@@ -190,6 +192,7 @@ async function runBenchRun(
   const artifacts = benchmarkArtifactPaths(args.outDir, args.artifactPaths);
   const events: RuntimeEvent[] = [];
   let runtime: Runtime | undefined;
+  let retainRuntime = false;
   let trustDirectory: string | undefined;
   let finalAnswer = "";
   let status: BenchmarkRunStatus = "success";
@@ -319,83 +322,124 @@ async function runBenchRun(
     finalAnswer = response.text;
     failure = classifyBenchmarkResponse(response);
     status = failure?.status ?? "success";
+    // The operator can extend this benchmark session through external grading.
+    // No new provider calls run during this window; ownership is never detached.
+    retainRuntime = args.serviceGraceMs > 0 && (response.finalOutcome?.terminationCause ?? "normal") === "normal" &&
+      (status === "success" || status === "task_failed") && !runtime.hasActiveSubagents?.(runtime.sessionId);
   } catch (error) {
     const classified = classifyBenchmarkError(error);
     status = classified.status;
     failure = classified.failure;
   } finally {
-    try {
-      await runtime?.dispose();
-    } finally {
-      if (trustDirectory !== undefined) {
-        await rm(trustDirectory, { recursive: true, force: true });
-      }
-    }
+    if (!retainRuntime) await releaseRuntime();
   }
 
-  const endedAt = now();
-  const estacoda = await buildEstaCodaBenchmarkIdentity(args.workspace, dependencies);
-  const gitBranch = await (dependencies.getGitBranch ?? defaultGetGitBranch)(args.workspace);
-  const trajectory = await loadBenchmarkTrajectory(sessionDb, runtime?.trajectoryId);
-  const metrics = aggregateBenchmarkMetrics(events, undefined, trajectory);
-  if (trajectory !== undefined) {
-    await writeBenchmarkTrajectoryArtifact(artifacts.trajectory, trajectory, { redact: args.redact });
-    await writeBenchmarkTrajectorySummaryArtifact(
-      artifacts.trajectorySummary,
-      buildBenchmarkTrajectorySummary(trajectory, metrics),
+  try {
+    const endedAt = now();
+    const estacoda = await buildEstaCodaBenchmarkIdentity(args.workspace, dependencies);
+    const gitBranch = await (dependencies.getGitBranch ?? defaultGetGitBranch)(args.workspace);
+    const trajectory = await loadBenchmarkTrajectory(sessionDb, runtime?.trajectoryId);
+    const metrics = aggregateBenchmarkMetrics(events, undefined, trajectory);
+    if (trajectory !== undefined) {
+      await writeBenchmarkTrajectoryArtifact(artifacts.trajectory, trajectory, { redact: args.redact });
+      await writeBenchmarkTrajectorySummaryArtifact(
+        artifacts.trajectorySummary,
+        buildBenchmarkTrajectorySummary(trajectory, metrics),
+        { redact: args.redact }
+      );
+    }
+    const summary = buildBenchmarkRunManifest({
+      benchmark: args.benchmark,
+      estacoda,
+      execution: buildBenchmarkExecutionSummary({
+        status,
+        startedAt,
+        endedAt,
+        workspace: args.workspace,
+        home: benchmarkHome,
+        homeMode: args.homeMode,
+        sessionId: runtime?.sessionId ?? null,
+        trajectoryId: runtime?.trajectoryId ?? null
+      }),
+      model: modelSummary,
+      metrics,
+      finalAnswer,
+      artifacts: {
+        summary: artifacts.summary,
+        eventLog: artifacts.eventLog,
+        trajectory: trajectory === undefined ? null : artifacts.trajectory,
+        trajectorySummary: trajectory === undefined ? null : artifacts.trajectorySummary,
+        history: artifacts.history,
+        stdout: artifacts.stdout,
+        stderr: failure === null ? null : artifacts.stderr
+      },
+      failure
+    });
+
+    await writeBenchmarkHistoryArtifact(
+      artifacts.history,
+      createBenchmarkHistoryRecord(summary, { timestamp: endedAt, branch: gitBranch }),
       { redact: args.redact }
     );
+    await writeBenchmarkSummaryArtifact(artifacts.summary, summary, { redact: args.redact });
+    await writeTextBenchmarkArtifact(artifacts.stdout, renderBenchmarkStdout(summary), args.redact);
+    if (failure !== null) {
+      await writeTextBenchmarkArtifact(artifacts.stderr, `${failure.message}\n`, args.redact);
+    }
+
+    if (args.serviceGraceMs > 0) {
+      // Publish only after all agent artifacts are complete. The Harbor adapter
+      // returns to grading on this marker while this runtime still owns services.
+      const ready = join(args.outDir, "agent-finished");
+      const temporaryReady = join(args.outDir, `.agent-finished-${randomUUID()}`);
+      const stopped = new AbortController();
+      const grading = retainRuntime ? waitForGrading(args.serviceGraceMs, stopped.signal) : undefined;
+      try {
+        await writeFile(temporaryReady, status === "success" ? "0\n" : "1\n", { mode: 0o600, flag: "wx" });
+        await rename(temporaryReady, ready);
+        await grading;
+      } finally { stopped.abort(); await grading; await rm(temporaryReady, { force: true }); }
+    }
+
+    return {
+      handled: true,
+      exitCode: status === "success" ? 0 : 1,
+      output: [
+        `Benchmark run: ${status}`,
+        `Summary: ${artifacts.summary}`,
+        `Events: ${artifacts.eventLog}`,
+        `Home: ${benchmarkHome}`,
+        failure === null ? undefined : `Error: ${args.redact ? redactBenchmarkText(failure.message) : failure.message}`
+      ].filter((line) => line !== undefined).join("\n")
+    };
+  } finally {
+    if (retainRuntime) await releaseRuntime();
   }
-  const summary = buildBenchmarkRunManifest({
-    benchmark: args.benchmark,
-    estacoda,
-    execution: buildBenchmarkExecutionSummary({
-      status,
-      startedAt,
-      endedAt,
-      workspace: args.workspace,
-      home: benchmarkHome,
-      homeMode: args.homeMode,
-      sessionId: runtime?.sessionId ?? null,
-      trajectoryId: runtime?.trajectoryId ?? null
-    }),
-    model: modelSummary,
-    metrics,
-    finalAnswer,
-    artifacts: {
-      summary: artifacts.summary,
-      eventLog: artifacts.eventLog,
-      trajectory: trajectory === undefined ? null : artifacts.trajectory,
-      trajectorySummary: trajectory === undefined ? null : artifacts.trajectorySummary,
-      history: artifacts.history,
-      stdout: artifacts.stdout,
-      stderr: failure === null ? null : artifacts.stderr
-    },
-    failure
+
+  async function releaseRuntime(): Promise<void> {
+    try { await runtime?.dispose(); }
+    finally {
+      if (trustDirectory !== undefined) await rm(trustDirectory, { recursive: true, force: true });
+    }
+  }
+}
+
+/** The owning benchmark session stays alive, bounded by an operator-selected
+ * deadline. Interrupting it still releases its ordinary execution resources. */
+async function waitForGrading(milliseconds: number, signal: AbortSignal): Promise<void> {
+  await new Promise<void>(resolve => {
+    const finish = () => {
+      clearTimeout(timer);
+      process.removeListener("SIGINT", finish);
+      process.removeListener("SIGTERM", finish);
+      signal.removeEventListener("abort", finish);
+      resolve();
+    };
+    const timer = setTimeout(finish, milliseconds);
+    process.once("SIGINT", finish);
+    process.once("SIGTERM", finish);
+    signal.addEventListener("abort", finish, { once: true });
   });
-
-  await writeBenchmarkHistoryArtifact(
-    artifacts.history,
-    createBenchmarkHistoryRecord(summary, { timestamp: endedAt, branch: gitBranch }),
-    { redact: args.redact }
-  );
-  await writeBenchmarkSummaryArtifact(artifacts.summary, summary, { redact: args.redact });
-  await writeTextBenchmarkArtifact(artifacts.stdout, renderBenchmarkStdout(summary), args.redact);
-  if (failure !== null) {
-    await writeTextBenchmarkArtifact(artifacts.stderr, `${failure.message}\n`, args.redact);
-  }
-
-  return {
-    handled: true,
-    exitCode: status === "success" ? 0 : 1,
-    output: [
-      `Benchmark run: ${status}`,
-      `Summary: ${artifacts.summary}`,
-      `Events: ${artifacts.eventLog}`,
-      `Home: ${benchmarkHome}`,
-      failure === null ? undefined : `Error: ${args.redact ? redactBenchmarkText(failure.message) : failure.message}`
-    ].filter((line) => line !== undefined).join("\n")
-  };
 }
 
 function renderBenchmarkExecutionInstruction(instruction: string): string {
@@ -528,6 +572,7 @@ async function parseBenchRunArgs(args: string[]): Promise<{ ok: true; args: Benc
   let allowModelFallback = false;
   let maxTokens: number | null = null;
   let timeoutMs = 30 * 60_000;
+  let serviceGraceMs = 0;
   let redact = true;
   const providerBudgets: BenchRunArgs["providerBudgets"] = {};
 
@@ -584,6 +629,10 @@ async function parseBenchRunArgs(args: string[]): Promise<{ ok: true; args: Benc
         case "--timeout-ms":
           timeoutMs = parsePositiveInteger(requiredValue(args, ++index, arg), arg);
           break;
+        case "--service-grace-ms":
+          serviceGraceMs = parsePositiveInteger(requiredValue(args, ++index, arg), arg);
+          if (serviceGraceMs > 3_600_000) throw new Error("--service-grace-ms must be at most 3600000.");
+          break;
         case "--max-provider-iterations":
           providerBudgets.maxProviderIterations = parsePositiveInteger(requiredValue(args, ++index, arg), arg);
           break;
@@ -633,6 +682,9 @@ async function parseBenchRunArgs(args: string[]): Promise<{ ok: true; args: Benc
       error: "Benchmark identity requires --benchmark-name, --benchmark-version, and --task-id together."
     };
   }
+  if (serviceGraceMs > 0 && identityFields !== 3) {
+    return { ok: false, error: "--service-grace-ms requires a complete benchmark identity." };
+  }
 
   let resolvedInstruction: string;
   try {
@@ -669,6 +721,7 @@ async function parseBenchRunArgs(args: string[]): Promise<{ ok: true; args: Benc
       temperature,
       maxTokens,
       timeoutMs,
+      serviceGraceMs,
       redact,
       providerBudgets
     }
@@ -946,6 +999,7 @@ function renderBenchRunHelp(): string {
     "  --temperature <n>              Provider temperature (default: 0)",
     "  --max-tokens <n>               Provider max tokens",
     "  --timeout-ms <n>               Run timeout in milliseconds",
+    "  --service-grace-ms <n>         Keep the benchmark session alive for external grading (max 3600000; default off)",
     "  --benchmark-name <name>        Benchmark identity name",
     "  --benchmark-version <version>  Benchmark identity version",
     "  --task-id <id>                 Benchmark task id",

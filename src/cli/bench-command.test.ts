@@ -9,6 +9,7 @@ import type { Runtime, RuntimeOptions } from "../runtime/create-runtime.js";
 import type { LoadedRuntimeConfig } from "../config/runtime-config.js";
 import { runCliCommand } from "./cli.js";
 import { benchCommand } from "./bench-command.js";
+import { ProcessManager } from "../process/process-manager.js";
 
 let tempDir: string | undefined;
 
@@ -616,6 +617,96 @@ describe("benchCommand", () => {
     expect(runtime.dispose).toHaveBeenCalled();
     const summary = JSON.parse(await readFile(join(outDir, "summary.json"), "utf8"));
     expect(summary.execution.status).toBe("timeout");
+  });
+
+  it.each([false, true])("publishes agent completion before disposing the service owner (interrupt: %s)", async interrupt => {
+    const root = await makeTempDir();
+    const runtime = fakeRuntime([]);
+    const out = join(root, "artifacts");
+    const args = ["run", "--workspace", root, "--instruction", "keep the service running", "--out", out,
+      "--model", "openai/gpt-test", "--benchmark-name", "terminal-bench", "--benchmark-version", "2.0",
+      "--task-id", "service", "--service-grace-ms", interrupt ? "60000" : "300"];
+    const before = process.listenerCount("SIGTERM");
+    const pending = benchCommand({ argv: [], workspaceRoot: root }, args, dependenciesForRuntime(root, runtime));
+    await vi.waitFor(async () => expect(await readFile(join(out, "agent-finished"), "utf8")).toBe("0\n"));
+    expect(JSON.parse(await readFile(join(out, "summary.json"), "utf8")).execution.status).toBe("success");
+    expect(runtime.dispose).not.toHaveBeenCalled();
+    if (interrupt) process.emit("SIGTERM");
+    expect((await pending).exitCode).toBe(0);
+    expect(runtime.dispose).toHaveBeenCalledTimes(1);
+    expect(process.listenerCount("SIGTERM")).toBe(before);
+  });
+
+  it("does not retain a timed-out run even when grading grace is requested", async () => {
+    const root = await makeTempDir();
+    const runtime = hangingRuntime();
+    const result = await benchCommand({ argv: [], workspaceRoot: root }, ["run", "--workspace", root,
+      "--instruction", "keep service running", "--out", join(root, "out"), "--model", "openai/gpt-test",
+      "--benchmark-name", "terminal-bench", "--benchmark-version", "2.0", "--task-id", "service",
+      "--timeout-ms", "10", "--service-grace-ms", "60000"], dependenciesForRuntime(root, runtime));
+    expect(result.exitCode).toBe(1);
+    expect(runtime.dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it("does not extend active subagent execution into the grading window", async () => {
+    const root = await makeTempDir();
+    const runtime = fakeRuntime([]);
+    runtime.hasActiveSubagents = () => true;
+    const result = await benchCommand({ argv: [], workspaceRoot: root }, ["run", "--workspace", root,
+      "--instruction", "service", "--out", join(root, "out"), "--model", "openai/gpt-test",
+      "--benchmark-name", "terminal-bench", "--benchmark-version", "2.0", "--task-id", "service",
+      "--service-grace-ms", "60000"], dependenciesForRuntime(root, runtime));
+    expect(result.exitCode).toBe(0);
+    expect(runtime.dispose).toHaveBeenCalledTimes(1);
+  });
+
+  it.each(["0", "-1", "3600001", "NaN"])("rejects an invalid service grace %s", async value => {
+    const root = await makeTempDir();
+    const runtime = fakeRuntime([]);
+    const result = await benchCommand({ argv: [], workspaceRoot: root }, ["run", "--workspace", root,
+      "--instruction", "test", "--out", join(root, "out"), "--service-grace-ms", value], dependenciesForRuntime(root, runtime));
+    expect(result.exitCode).toBe(1);
+    expect(runtime.handle).not.toHaveBeenCalled();
+  });
+
+  it("keeps a real managed service reachable for grading, then stops it on owner interruption", async () => {
+    const root = await makeTempDir();
+    const manager = new ProcessManager({ workspaceRoot: root });
+    await writeFile(join(root, "service.mjs"), 'import http from "node:http"; const s=http.createServer((q,r)=>r.end("ready")); s.listen(0,"127.0.0.1",()=>console.log(s.address().port));');
+    const runtime = fakeRuntime([]);
+    const handle = runtime.handle;
+    let port = 0;
+    runtime.handle = async input => {
+      const service = await manager.start(`'${process.execPath.replaceAll("'", "'\\''")}' service.mjs`);
+      await vi.waitFor(() => {
+        port = Number(manager.logs(service.id)?.find(line => line.stream === "stdout")?.text.trim());
+        expect(port).toBeGreaterThan(0);
+      });
+      return handle(input);
+    };
+    runtime.dispose = () => manager.dispose();
+    const out = join(root, "artifacts");
+    const pending = benchCommand({ argv: [], workspaceRoot: root }, ["run", "--workspace", root,
+      "--instruction", "Keep service alive", "--out", out, "--model", "openai/gpt-test",
+      "--benchmark-name", "terminal-bench", "--benchmark-version", "2.0", "--task-id", "service",
+      "--service-grace-ms", "60000"], dependenciesForRuntime(root, runtime));
+    try {
+      await vi.waitFor(async () => expect(await readFile(join(out, "agent-finished"), "utf8")).toBe("0\n"));
+      expect(await (await fetch(`http://127.0.0.1:${port}`)).text()).toBe("ready");
+      process.emit("SIGTERM");
+      await pending;
+      await expect(fetch(`http://127.0.0.1:${port}`)).rejects.toThrow();
+    } finally { await manager.dispose(); }
+  });
+
+  it("releases the retained runtime if writing the completion artifacts fails", async () => {
+    const root = await makeTempDir();
+    const runtime = fakeRuntime([]);
+    await expect(benchCommand({ argv: [], workspaceRoot: root }, ["run", "--workspace", root,
+      "--instruction", "service", "--out", join(root, "out"), "--model", "openai/gpt-test",
+      "--benchmark-name", "terminal-bench", "--benchmark-version", "2.0", "--task-id", "service",
+      "--service-grace-ms", "60000"], { ...dependenciesForRuntime(root, runtime), getGitCommit: async () => { throw new Error("artifact failure"); } })).rejects.toThrow("artifact failure");
+    expect(runtime.dispose).toHaveBeenCalledTimes(1);
   });
 
   it("compares benchmark history artifacts with positional paths", async () => {

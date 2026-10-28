@@ -1,3 +1,4 @@
+import asyncio
 import shlex
 import unittest
 from types import SimpleNamespace
@@ -196,6 +197,34 @@ class EstaCodaHarborAgentTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("4", args)
         self.assertIn("--max-provider-tool-calls", args)
         self.assertIn("12", args)
+
+    def test_service_handoff_is_opt_in_and_bounded(self):
+        config = build_config({"ESTACODA_BENCH_TASK_ID": "pypi", "ESTACODA_BENCH_SERVICE_GRACE_MS": "960000",
+                               "ESTACODA_BENCH_TIMEOUT_MS": "900000", "ESTACODA_BENCH_MAX_PROVIDER_WALL_CLOCK_MS": "900000"})
+        args = build_bench_args(config, "/tmp/instruction.txt")
+        self.assertEqual(args[args.index("--service-grace-ms") + 1], "960000")
+        self.assertEqual(args[args.index("--timeout-ms") + 1], "870000")
+        self.assertEqual(args[args.index("--max-provider-wall-clock-ms") + 1], "870000")
+        command = build_installed_agent_command(config, "Start service")
+        self.assertIn("agent-finished", command)
+        self.assertIn("< /dev/null & estacoda_owner=$!", command)
+        self.assertIn('kill -0 "$estacoda_owner"', command)
+        self.assertNotIn("--service-grace-ms", build_bench_args(build_config({}), "/tmp/instruction.txt"))
+        for value in ["0", "-1", "3600001", "nan"]:
+            with self.assertRaises(AdapterConfigError):
+                build_config({"ESTACODA_BENCH_SERVICE_GRACE_MS": value})
+
+    async def test_cancellation_deletes_environment_before_returning(self):
+        class CancelledEnvironment:
+            stopped = False
+            async def exec(self, command):
+                raise asyncio.CancelledError()
+            async def stop(self, delete):
+                self.stopped = delete
+        env = CancelledEnvironment()
+        with self.assertRaises(asyncio.CancelledError):
+            await EstaCodaHarborAgent().run("test", env, SimpleNamespace(metadata={}))
+        self.assertTrue(env.stopped)
 
 
 if __name__ == "__main__":
