@@ -1,3 +1,6 @@
+import {imageRunState,imageResponseText,isImageOutput} from '../image-activity.js';
+import {activityRuns} from '../conversation-activity.js';
+import type {ImageEditAction} from './image-canvas.js';
 import {BrandEye} from './primitives.js';
 import {ResponseMarkdown} from './response-markdown.js';
 import {CanonicalActivity} from './canonical-activity.js';
@@ -15,7 +18,7 @@ export function appendPreview(segments:LiveSegment[],preview:Preview):LiveSegmen
  return [...segments,{key:crypto.randomUUID(),turnId:preview.turnId,text:preview.text,truncated:preview.truncated}].slice(-32);
 }
 /** One in-flight read, coalesced at 4Hz while active. No simulated typing or delayed final text. */
-export function LiveActivity({api,work,items=[],waiting=false,results=()=>{},browser,desktopApi,more}:{api:DesktopWorkApi;work:WorkProjection;items?:ActivityProjection[];waiting?:boolean;results?:()=>void;browser?:()=>void;desktopApi?:DesktopApi;more?:boolean}){
+export function LiveActivity({api,work,items=[],waiting=false,results=()=>{},browser,desktopApi,more,onImageEdit,imageEditDisabled,onStopImage,onRetryImage}:{api:DesktopWorkApi;work:WorkProjection;items?:ActivityProjection[];waiting?:boolean;results?:()=>void;browser?:()=>void;desktopApi?:DesktopApi;more?:boolean;onImageEdit?:ImageEditAction;imageEditDisabled?:boolean;onStopImage?:()=>Promise<void>;onRetryImage?:(text:string)=>boolean}){
  const {t}=useI18n();const[preview,setPreview]=useState<Preview|null>(null),[segments,setSegments]=useState<LiveSegment[]>([]);
  const baseline=useRef(new Set(items.filter(item=>item.kind==='message').map(item=>item.id)));
  // Existing history may arrive after mounting; only start a segment when a live turn exists.
@@ -29,5 +32,6 @@ export function LiveActivity({api,work,items=[],waiting=false,results=()=>{},bro
  const committed=items.filter((item):item is Extract<ActivityProjection,{kind:'message'}>=>item.kind==='message'&&item.role==='assistant'&&!baseline.current.has(item.id));
  const pending=segments.filter(segment=>!committed.some(item=>item.text.trim().startsWith(segment.text.trim())));
  const running=preview?.active&&work.status==='running'&&!waiting;
- return <><CanonicalActivity items={items} results={results} browser={browser} api={desktopApi} workStatus={waiting?'needs_attention':work.status} more={more}/>{pending.map(segment=><section className="ec-agent ec-live-response" aria-label={t('Live assistant activity')} key={segment.key}><ResponseMarkdown text={segment.text}/>{segment.truncated&&<p className="ec-footnote">{t('Live preview limit reached. The settled response will appear in activity.')}</p>}</section>)}{running&&<div className="ec-live-working" role="status"><span className="ec-working-presence" aria-hidden="true"><BrandEye/></span><span className="ec-working-word">{t('Working')}</span></div>}</>;
+ const latestRun=activityRuns(items).at(-1);const imageBusy=latestRun&&imageRunState(latestRun,!!running)?.state==='running';
+ return <><CanonicalActivity onRetryImage={onRetryImage} onImageEdit={onImageEdit} imageEditDisabled={imageEditDisabled} onStopImage={onStopImage} items={items} results={results} browser={browser} api={desktopApi} workStatus={waiting?'needs_attention':work.status} more={more}/>{pending.map(segment=><section className="ec-agent ec-live-response" aria-label={t('Live assistant activity')} key={segment.key}><ResponseMarkdown text={imageResponseText(segment.text,items.filter(isImageOutput))}/>{segment.truncated&&<p className="ec-footnote">{t('Live preview limit reached. The settled response will appear in activity.')}</p>}</section>)}{running&&!imageBusy&&<div className="ec-live-working" role="status"><span className="ec-working-presence" aria-hidden="true"><BrandEye/></span><span className="ec-working-word">{t('Working')}</span></div>}</>;
 }

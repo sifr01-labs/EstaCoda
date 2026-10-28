@@ -2,6 +2,8 @@ import {resolveProfileStateHome} from '../config/profile-home.js';
 import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { extname, isAbsolute, join, relative, resolve } from "node:path";
 import { createHash,randomUUID } from "node:crypto";
+import { parseRegistration } from "../artifacts/artifact-store.js";
+import type { SessionArtifactRegistration } from "../contracts/artifact.js";
 import type { ArtifactStore } from "../artifacts/artifact-store.js";
 import {
   isAlwaysBlockedUrl,
@@ -32,6 +34,7 @@ export type ImageGenerationFetchLike = (url: string, init?: {
 
 export type ImageGenerationToolOptions = {
   profileId?:string;currentSessionId?:()=>string;persistSessionArtifact?:(sessionId:string,artifact:import('../contracts/artifact.js').SessionArtifactRegistration)=>Promise<void>;
+  readSessionArtifacts?: (sessionId: string) => Promise<readonly SessionArtifactRegistration[]>;
   imageCacheRoot: string;
   retainedImageRoot?:string;
   artifactStore: ArtifactStore;
@@ -42,6 +45,7 @@ export type ImageGenerationToolOptions = {
 
 type ImageAspect = "square" | "landscape" | "portrait";
 type ResolvedSourceImage = {
+  bytes?: Buffer;
   reference: string;
   url?: string;
   localPath?: string;
@@ -159,9 +163,12 @@ export function createImageGenerationTools(options: ImageGenerationToolOptions):
         return { ok: false, content: "image.edit aspectRatio must be square, landscape, or portrait." };
       }
 
-      const sourceImages = resolveSourceImages(input, options.artifactStore, {
+      const sessionId = options.currentSessionId?.();
+      const sourceImages = await resolveSourceImages(input, options.artifactStore, {
         provider: imageGen.provider,
-        imageCacheRoot: options.imageCacheRoot,retainedImageRoot:options.retainedImageRoot
+        imageCacheRoot: options.imageCacheRoot,retainedImageRoot:options.retainedImageRoot,
+        scope: sessionId && options.profileId ? {sessionId,profileId:options.profileId} : undefined,
+        readSessionArtifacts: options.readSessionArtifacts
       });
       if (!sourceImages.ok) {
         return sourceImages;
@@ -188,7 +195,7 @@ export function createImageGenerationTools(options: ImageGenerationToolOptions):
           provider: imageGen.provider,
           model: result.model,
           aspectRatio: result.aspectRatio,
-          sourceImages: sourceImages.sources.map((source) => source.url ?? source.reference),
+          sourceImages: sourceImages.sources.map((source) => source.bytes ? source.reference : source.url ?? source.reference),
           sourceUrl: result.sourceUrl
         }
       });
@@ -220,6 +227,11 @@ export const imageGenerationToolProvider: SessionToolProvider = {
       imageGen: ctx.imageGen,
       retainedImageRoot:join(resolveProfileStateHome({homeDir:ctx.homeDir,profileId:ctx.profileId}).profileRoot,'artifacts'),
       profileId:ctx.profileId,currentSessionId:()=>ctx.currentSessionId(),persistSessionArtifact:ctx.sessionDb?async(sessionId,artifact)=>{await ctx.sessionDb!.appendEvent(sessionId,{kind:'session-artifact-registered',artifact});}:undefined,
+      readSessionArtifacts: ctx.sessionDb ? async sessionId => (await ctx.sessionDb!.listEvents(sessionId)).flatMap(event => {
+        if (event.kind !== 'session-artifact-registered') return [];
+        const registration = parseRegistration(event.artifact);
+        return registration ? [registration] : [];
+      }) : undefined,
       fetch: ctx.imageGenerationFetch
     });
   }
@@ -821,7 +833,12 @@ async function openAIImageSourceParts(
 > {
   const parts: Array<{ bytes: Buffer; mimeType: string; fileName?: string }> = [];
   for (const [index, source] of sources.entries()) {
-    const part = source.localPath !== undefined
+    if (source.bytes && !normalizeOpenAIImageInputMime(source.mimeType)) {
+      return openAIUnsupportedImageSource(source.reference, source.mimeType);
+    }
+    const part = source.bytes && source.mimeType
+      ? {ok:true as const,bytes:source.bytes,mimeType:source.mimeType,fileName:undefined}
+      : source.localPath !== undefined
       ? await openAILocalImageSourcePart(source)
       : await openAIRemoteImageSourcePart(source, fetcher, signal);
     if (!part.ok) return part;
@@ -1031,15 +1048,19 @@ async function storeImageArtifact(
   });
 }
 
-function resolveSourceImages(
+type SourceResolutionOptions = {
+  provider: LoadedRuntimeConfig["imageGen"]["provider"];
+  imageCacheRoot: string;
+  retainedImageRoot?: string;
+  scope?: {sessionId:string;profileId:string};
+  readSessionArtifacts?: ImageGenerationToolOptions["readSessionArtifacts"];
+};
+
+async function resolveSourceImages(
   input: { sourceImages?: string[]; sourceImage?: string },
   artifactStore: ArtifactStore,
-  options: {
-    provider: LoadedRuntimeConfig["imageGen"]["provider"];
-    imageCacheRoot: string;
-  retainedImageRoot?:string;
-  }
-): { ok: true; sources: ResolvedSourceImage[] } | { ok: false; content: string; metadata?: Record<string, unknown> } {
+  options: SourceResolutionOptions
+): Promise<{ ok: true; sources: ResolvedSourceImage[] } | { ok: false; content: string; metadata?: Record<string, unknown> }> {
   const requested = [
     ...(Array.isArray(input.sourceImages) ? input.sourceImages : []),
     input.sourceImage
@@ -1052,9 +1073,15 @@ function resolveSourceImages(
     };
   }
 
+  if(requested.length>16)return {ok:false,content:"image.edit accepts at most 16 source images."};
+  let registrations:readonly SessionArtifactRegistration[]=[];
+  if(options.scope&&options.readSessionArtifacts&&requested.some(source=>!isSafeRemoteImageUrl(source.trim()))){
+    try{registrations=await options.readSessionArtifacts(options.scope.sessionId);}
+    catch{return {ok:false,content:"The retained source image is unavailable. No edit was sent."};}
+  }
   const sources: ResolvedSourceImage[] = [];
   for (const source of requested) {
-    const resolved = resolveSourceImage(source.trim(), artifactStore, options);
+    const resolved = await resolveSourceImage(source.trim(), artifactStore, options, registrations);
     if (!resolved.ok) return resolved;
     sources.push(resolved.source);
   }
@@ -1062,20 +1089,26 @@ function resolveSourceImages(
   return { ok: true, sources };
 }
 
-function resolveSourceImage(
+async function resolveSourceImage(
   source: string,
   artifactStore: ArtifactStore,
-  options: {
-    provider: LoadedRuntimeConfig["imageGen"]["provider"];
-    imageCacheRoot: string;
-  retainedImageRoot?:string;
-  }
-): { ok: true; source: ResolvedSourceImage } | { ok: false; content: string; metadata?: Record<string, unknown> } {
+  options: SourceResolutionOptions,
+  registrations:readonly SessionArtifactRegistration[]
+): Promise<{ ok: true; source: ResolvedSourceImage } | { ok: false; content: string; metadata?: Record<string, unknown> }> {
   if (isSafeRemoteImageUrl(source)) {
     return { ok: true, source: { reference: source, url: source } };
   }
 
   const artifactId = source.startsWith("artifact://") ? source.slice("artifact://".length) : source;
+  const registration=registrations.find(item=>item.id===artifactId&&item.sessionId===options.scope?.sessionId&&item.profileId===options.scope?.profileId);
+  if(registration&&options.scope){
+    try{
+      if(registration.kind!=='image'||!['image/png','image/jpeg','image/webp','image/gif'].includes(registration.mimeType))throw new Error('Not an image');
+      const bytes=await artifactStore.verifiedMedia(registration,options.scope);
+      return {ok:true,source:{reference:`artifact://${registration.id}`,bytes,mimeType:registration.mimeType,
+        ...(options.provider==='openai'?{}:{url:`data:${registration.mimeType};base64,${bytes.toString('base64')}`})}};
+    }catch{return {ok:false,content:"The retained source image is unavailable or changed. No edit was sent."};}
+  }
   const artifact = artifactStore.list().find((candidate) => candidate.id === artifactId || candidate.path === source);
   const sourceUrl = typeof artifact?.metadata?.sourceUrl === "string" ? artifact.metadata.sourceUrl : undefined;
   if (sourceUrl !== undefined && isSafeRemoteImageUrl(sourceUrl)) {

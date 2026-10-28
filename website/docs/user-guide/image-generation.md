@@ -10,6 +10,18 @@ Image generation is a provider-backed tool workflow. The agent calls `image.gene
 
 It is not a built-in model capability. You need a provider account, an API key, and a selected profile configured to use it.
 
+## Desktop image canvas
+
+In the desktop conversation, image generation appears as a canvas with the actual tool status and elapsed time. A verified retained image loads automatically when its canvas approaches the visible area. The canvas follows the app's light or dark appearance and supports Arabic, keyboard navigation, and reduced motion.
+
+- Open an image at full size, inspect its details, or save it through the desktop save dialog.
+- Describe a change beneath the image, or choose a lighting or color suggestion. The request names the selected image and goes through the normal chat submission, model selection, permissions, and approval flow.
+- After a refinement, switch between the reference and result or use the comparison slider. These links are reconstructed from the recorded refinement request when you reopen the conversation.
+- An unfinished message or pending submission disables refinement so your draft is preserved. If a submission response is lost, use the composer's **Check status** action before sending again.
+- **Retry preview** reloads retained media only. **Retry image request** starts a new request after a failed or stopped image operation. Provider support and the chat's permissions still apply.
+
+Previews use verified retained raster files, not arbitrary image URLs in assistant text. Missing, changed, or expired images show an unavailable state. Disconnecting or switching profiles clears displayed media. Other saved files remain in the existing file viewer.
+
 ## Supported providers in v0.1.0
 
 | Provider | Default model | Default env var | Base URL |
@@ -142,23 +154,23 @@ OpenAI requests use `/v1/images/generations` with the actual API model `gpt-imag
 
 `image.edit` uses the same provider configuration, API key, model, and endpoint family as `image.generate`; there is no separate editing setup step.
 
-For BytePlus, the tool sends the documented `image` request field with one HTTPS source image URL or an array of HTTPS source image URLs, and sets `sequential_image_generation: "disabled"` for a single edited result.
+For BytePlus, the tool sends the documented `image` request field with one source image or an array of source images (safe HTTPS URLs or runtime-created base64 data URIs for verified retained images), and sets `sequential_image_generation: "disabled"` for a single edited result.
 
 For FAL, the tool is enabled only when the selected catalog entry has an `editEndpoint`. It calls that endpoint with the documented `image_urls` field and any cataloged defaults supported by that edit endpoint.
 
-For OpenAI, the tool calls `/v1/images/edits` with multipart `image[]` file parts. Safe HTTPS source images are downloaded by EstaCoda and uploaded to OpenAI. Local image artifacts are accepted only when they are image artifacts stored in the selected profile image cache.
+For OpenAI, the tool calls `/v1/images/edits` with multipart `image[]` file parts. Safe HTTPS source images are downloaded by EstaCoda and uploaded to OpenAI. Local image artifacts are accepted from the selected profile image cache or from verified retained images owned by the current session and profile.
 
 Parameters:
 
 | Parameter | Type | Required | Notes |
 |-----------|------|----------|-------|
 | `prompt` | `string` | yes | The edit instruction. |
-| `sourceImages` | `string[]` | yes, unless `sourceImage` is set | HTTPS image URLs, `artifact://` references, or artifact ids. FAL and BytePlus require source URLs; OpenAI can also use local image-cache artifacts. |
+| `sourceImages` | `string[]` | yes, unless `sourceImage` is set | HTTPS image URLs, `artifact://` references, or artifact ids. All three providers accept verified retained images from the current session and profile. OpenAI also accepts selected-profile image-cache artifacts. Maximum 16 sources. |
 | `sourceImage` | `string` | yes, unless `sourceImages` is set | Convenience single-image input. |
 | `aspectRatio` | `string` | no | `square`, `landscape`, or `portrait`. Defaults to square. |
 | `model` | `string` | no | Overrides the configured provider model for this request. |
 
-Arbitrary local image paths are not uploaded by this tool. Use an HTTPS image URL or a prior generated artifact. For FAL and BytePlus, that artifact must still have provider `sourceUrl` metadata. For OpenAI, image artifacts in the selected profile image cache can be uploaded directly.
+Arbitrary local image paths and user-supplied data URIs are not uploaded by this tool. Use a safe HTTPS image URL or an artifact reference. Retained session images are reverified for ownership, content, and digest before upload, with an 8 MiB limit per retained image. FAL and BytePlus receive these verified bytes as data URIs; OpenAI receives multipart file parts. The source reference, rather than the encoded image, is recorded in result metadata. Legacy FAL and BytePlus artifacts still require safe provider `sourceUrl` metadata; legacy OpenAI artifacts must belong to the selected profile image cache.
 
 Result:
 
@@ -175,7 +187,7 @@ Result:
 | Unsupported provider | The configured provider is not implemented for image generation. | Select `fal`, `byteplus`, or `openai`. |
 | Remote provider error | HTTP 4xx/5xx, auth failure, or model not activated. | Check provider status, credentials, and model activation. |
 | Generated URL download failed | Provider returned a URL that could not be fetched. | Retry the request; transient network issues are possible. |
-| Local source image rejected by `image.edit` | Editing accepts safe HTTPS source URLs. FAL and BytePlus require provider source URLs; OpenAI accepts selected-profile image-cache artifacts. | Use an HTTPS image URL or a compatible prior generated artifact. |
+| Local source image rejected by `image.edit` | Editing accepts safe HTTPS sources or verified retained images from the current session and profile. OpenAI also accepts selected-profile image-cache artifacts. | Use an HTTPS image URL or a compatible prior generated artifact. |
 | FAL model does not support `image.edit` | The selected cataloged FAL model has no edit endpoint. | Choose an edit-capable FAL model with `estacoda image models --provider fal`. |
 | OpenAI source image too large or unsupported | OpenAI edit sources must be PNG, JPEG, or WebP images of 50 MB or less. | Use a supported source image format and size. |
 | Invalid output path | Cache directory missing or unwritable. | EstaCoda creates the directory recursively; check filesystem permissions. |

@@ -1,3 +1,4 @@
+import {imageCanvasArabic} from './image-canvas.js';
 import {chatTasksArabic} from './chat-tasks.js';
 import {composerArabic} from './composer.js';
 import {conversationActivityArabic} from './conversation-activity.js';
@@ -16,6 +17,7 @@ import {setupArabic} from './setup.js';
 import {workArabic} from './work.js';
 /** Product-owned message keys. Never pass provider output or backend error text here. */
 export const arabic = {
+ ...imageCanvasArabic,
  ...chatTasksArabic,
  "Install a compatible Python interpreter, then retry.":"ثبّت إصدارًا متوافقًا من ⁨Python⁩ ثم أعد المحاولة.",
  "Preparing Python environment…":"جارٍ تجهيز بيئة ⁨Python⁩…",

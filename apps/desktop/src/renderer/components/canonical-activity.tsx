@@ -1,3 +1,5 @@
+import {ImageCanvas,type ImageEditAction} from './image-canvas.js';
+import {isImageOutput,imageReferenceForRun,imageRunState,imageResponseText,imageEditRequest,type ImageOutput} from '../image-activity.js';
 import {ResponseDetails} from './response-details.js';
 import type {ActivityProjection,WorkDisplayStatus} from '@estacoda/control-protocol';
 import type {DesktopApi} from '../../shared/desktop-api.js';
@@ -10,6 +12,7 @@ import {ResponseMarkdown} from './response-markdown.js';
 import {RunOutputs} from './run-outputs.js';
 import '../styles/conversation-activity.css';
 const toolLabels:Record<string,MessageKey>={
+ 'image.generate':'Image generation','image.edit':'Image refinement',
  'browser.navigate':'Open page','browser.status':'Check browser readiness','browser.snapshot':'Inspect page','browser.find':'Find on page',
  'browser.click':'Click page element','browser.type':'Enter field value','browser.fill_protected_form':'Secure credential entry','browser.screenshot':'Capture page',
  'browser.download':'Download file','files.read':'Read file','files.write':'Write file','files.edit':'Edit file','files.list':'List files','files.search':'Search files',
@@ -55,16 +58,18 @@ function Notices({items,results,browser}:{items:ActivityProjection[];results:()=
  if(!item||!['failed','partial','needs_attention','paused','cancelled'].includes(item.status))return null;
  return <div className="ec-activitynotice"><Icon name="circle-alert"/><span>{status(item.status)}</span>{item.kind==='status'&&item.reason&&<span dir="auto">{item.reason}</span>}<Button className="ec-ghost" onClick={results}>{t('View results')}</Button>{browser&&<Button className="ec-ghost" icon="globe" onClick={browser}>{t('Open browser')}</Button>}</div>;
 }
-export function CanonicalActivity({items,results,browser,api,workStatus,more=false}:{items:ActivityProjection[];results:()=>void;browser?:()=>void;api?:DesktopApi;workStatus?:WorkDisplayStatus;more?:boolean}){
- const {t}=useI18n();const runs=activityRuns(items);const hasBrowser=items.some(item=>item.kind==='tool'&&item.name.startsWith('browser.'));
- return <div className="ec-conversation-runs">{runs.map((run,index)=>{const content=runContent(run),latest=index===runs.length-1;const active=latest&&!more&&workStatus==='running'&&!content.outcome;return <div className="ec-conversation-run" key={run.id}>
- {run.user&&<section className="ec-usernote" data-conversation-turn={run.user.id} aria-label={t('Your message')}><div dir="auto" style={{whiteSpace:'pre-wrap'}}>{run.user.text}</div><MessageActions text={run.user.text} timestamp={run.user.timestamp}/></section>}
- {!!run.items.length&&<section className="ec-agent"><div className="ec-msghead"><BrandEye/><b>EstaCoda</b></div>{content.operational&&<History run={run} active={active} more={latest&&more}/>}
- {content.responses.map(item=><section className="ec-run-answer" key={item.id}><ResponseMarkdown text={item.text}/><MessageActions text={item.text} timestamp={item.timestamp}><ResponseDetails items={item===content.responses.at(-1)?run.items:run.items.slice(0,run.items.indexOf(item)+1)} active={active&&item===content.responses.at(-1)} answered={true}/></MessageActions></section>)}
+export function CanonicalActivity({items,results,browser,api,workStatus,more=false,onImageEdit,imageEditDisabled,onStopImage,onRetryImage}:{items:ActivityProjection[];results:()=>void;browser?:()=>void;api?:DesktopApi;workStatus?:WorkDisplayStatus;more?:boolean;onImageEdit?:ImageEditAction;imageEditDisabled?:boolean;onStopImage?:()=>Promise<void>;onRetryImage?:(text:string)=>boolean}){
+ const {t}=useI18n();const runs=activityRuns(items);const hasBrowser=items.some(item=>item.kind==='tool'&&item.name.startsWith('browser.'));const earlierImages:ImageOutput[]=[];
+ return <div className="ec-conversation-runs">{runs.map((run,index)=>{const content=runContent(run),latest=index===runs.length-1;const active=latest&&!more&&workStatus==='running'&&!content.outcome;const images=api?.artifacts?.media?content.outputs.filter(isImageOutput):[];const reference=imageReferenceForRun(run,earlierImages);earlierImages.push(...images);const generation=imageRunState(run,active);const canvas=!!api?.artifacts?.media&&(images.length>0||!!generation);const otherOutputs=content.outputs.filter(item=>!images.includes(item));const imageOnly=canvas&&!otherOutputs.length&&!content.plans.length&&content.actions.every(action=>['image.generate','image.edit'].includes(action.records[0]!.name));return <div className={'ec-conversation-run'+(imageOnly?' ec-image-run':'')} key={run.id}>
+ {run.user&&<section className="ec-usernote" data-conversation-turn={run.user.id} aria-label={t('Your message')}><div dir="auto" style={{whiteSpace:'pre-wrap'}}>{imageEditRequest(run.user.text)?.instruction??run.user.text}</div><MessageActions text={run.user.text} timestamp={run.user.timestamp}/></section>}
+ {!!run.items.length&&<section className="ec-agent"><div className="ec-msghead"><BrandEye/><b>EstaCoda</b></div>{content.operational&&!imageOnly&&<History run={run} active={active} more={latest&&more}/>}
+ {content.responses.map(item=><section className="ec-run-answer" key={item.id}><ResponseMarkdown text={imageResponseText(item.text,images)}/><MessageActions text={item.text} timestamp={item.timestamp}><ResponseDetails items={item===content.responses.at(-1)?run.items:run.items.slice(0,run.items.indexOf(item)+1)} active={active&&item===content.responses.at(-1)} answered={true}/></MessageActions></section>)}
  {active&&!content.responses.length&&content.latestProgress&&<div className="ec-run-currentprose"><ResponseMarkdown text={content.latestProgress.text}/></div>}
  {!content.operational&&run.items.filter(item=>item.kind==='assistant_delta').map(item=><ResponseMarkdown key={item.id} text={item.text}/>)}
  {!content.responses.length&&<div className="ec-response-pending-details"><ResponseDetails items={run.items} active={active} answered={false}/></div>}
  <Notices items={run.items} results={results} browser={hasBrowser?browser:undefined}/>
- {!!content.outputs.length&&<RunOutputs items={content.outputs} api={api} results={results}/ >}</section>}
+ {canvas&&<ImageCanvas images={images} reference={reference} generation={generation} api={api!} profileId={(run.user??run.items[0]!).profileId} workId={(run.user??run.items[0]!).workId} onRetry={imageOnly&&run.user&&onRetryImage?()=>onRetryImage(run.user!.text):undefined} onEdit={onImageEdit} editDisabled={imageEditDisabled} onStop={active?onStopImage:undefined}/>}
+ {imageOnly&&<div className="ec-image-history"><History run={run} active={active} more={latest&&more}/></div>}
+ {!!otherOutputs.length&&<RunOutputs items={otherOutputs} api={api} results={results}/ >}</section>}
  </div>;})}</div>;
 }
