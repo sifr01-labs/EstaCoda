@@ -323,7 +323,7 @@ function commandFileChanges(execution: ToolExecutionRecord, visibleTurnId?: stri
   }) ?? [];
 }
 
-function commandFileObservation(execution: ToolExecutionRecord, visibleTurnId?: string): CommandFileObservation | undefined {
+export function commandFileObservation(execution: ToolExecutionRecord, visibleTurnId?: string): CommandFileObservation | undefined {
   if (!["terminal.run", "execute_code", "process.start", "process.logs"].includes(execution.tool.name)) return undefined;
   const value = execution.result?.metadata?.commandFileObservation;
   if (!value || typeof value !== "object") return undefined;

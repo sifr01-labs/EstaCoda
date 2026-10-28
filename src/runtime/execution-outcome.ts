@@ -1,4 +1,5 @@
 import { toolOperationFingerprint } from "./tool-result-fingerprint.js";
+import { declaresCommandCheck, commandCompletionChecks } from "./command-completion-checks.js";
 import { semanticMutationKey } from "../tools/execution-operation-ledger.js";
 import type {
   ConfirmedActionReceipt,
@@ -113,13 +114,16 @@ export function deriveExecutionFinalOutcome(input: {
       ? "deadline_reached"
       : input.providerExecution?.ok === false ? "provider_failed" : "normal");
   const completionFloor = input.completionFloor ?? "none";
+  const commandChecks = commandCompletionChecks(input.toolExecutions, input.executionReceipts);
   const status = classifyFinalStatus({
     ...input,
     terminationCause,
     completionFloor,
     confirmedActions,
     uncertainActions,
-    recoveredCalls: recoveredExecutionCalls(input, fileEvidence),
+    recoveredCalls: recoveredExecutionCalls(input, fileEvidence, commandChecks),
+    unresolvedChecks: commandChecks.unresolved,
+    commandVerificationPassed: commandChecks.passed,
     fileOutputSatisfied: (input.delegatedAnswerOwned === true || fileEvidence.satisfied) && researchRequestEvidence(input).satisfied,
     fileOutputMeetsFloor: fileEvidence.satisfied && fileEvidence.writeCallId !== undefined && (fileEvidence.contentVerified === true || completionFloor === "mutation" || requiresAnyFileContentVerification(input.requestRequirements)),
     delegatedFileOutput: input.delegatedAnswerOwned === true && input.requestRequirements?.fileOutput !== undefined
@@ -325,13 +329,16 @@ function recoveredReplayCallIds(receipts: readonly ExecutionEvidenceRecord[]): R
  * remains intact; this never grants permission or settles uncertain effects. */
 function recoveredExecutionCalls(
   input: Parameters<typeof deriveExecutionFinalOutcome>[0],
-  fileEvidence: ReturnType<typeof fileOutputEvidence>
+  fileEvidence: ReturnType<typeof fileOutputEvidence>,
+  commandChecks: ReturnType<typeof commandCompletionChecks>
 ): Set<string> {
-  const recovered = new Set<string>();
+  const recovered = new Set(commandChecks.recoveredCalls);
   const executions = new Map(input.toolExecutions.map(call => [call.toolCallId, call]));
   const receipts = input.executionReceipts;
   const outputIndex = fileEvidence.satisfied && fileEvidence.writeCallId !== undefined
     ? receipts.findIndex(receipt => receipt.toolCallId === fileEvidence.writeCallId && receipt.status === "success") : -1;
+  const checkIndex = commandChecks.lastPassedCallId === undefined ? -1
+    : receipts.findIndex(receipt => receipt.toolCallId === commandChecks.lastPassedCallId && receipt.status === "success");
   for (let i = 0; i < receipts.length; i++) {
     const receipt = receipts[i]!;
     if (!["failed", "blocked", "unavailable"].includes(receipt.status)) continue;
@@ -343,10 +350,17 @@ function recoveredExecutionCalls(
       return successful?.tool.name === later.tool && successful.decision === "allow" &&
         successful.result?.ok === true && recoveryOperationKey(successful) === key;
     });
-    // Failed validators are never cleared just because a file was produced.
-    // Nor can a local file satisfy a denied external side effect or a file ACL.
-    const alternativeProducedOutput = receipt.status !== "failed" && outputIndex > i &&
-      receipts[outputIndex]?.visibleTurnId === receipt.visibleTurnId &&
+    // A collected local failure is an unsuccessful approach, not a new output
+    // requirement. A later satisfied file contract may supersede it. Declared
+    // checks, uncertain effects and denied file/external boundaries stay open.
+    const settledAttempt = call?.tool.name === receipt.tool && call?.decision === "allow" && call.result?.ok === false &&
+      call.executionEffect?.kind !== "verification" && !declaresCommandCheck(call) &&
+      call.settlement?.sideEffectState !== "possible" && call.settlement?.dispatchState !== "unknown" &&
+      Number.isInteger(call.result.metadata?.code) && call.result.metadata?.signal === null &&
+      call.result.metadata?.timedOut === false && call.result.metadata?.cancelled === false;
+    const requirementIndex = settledAttempt ? Math.max(outputIndex, checkIndex) : outputIndex;
+    const alternativeProducedOutput = (receipt.status !== "failed" || settledAttempt) && requirementIndex > i &&
+      receipts[requirementIndex]?.visibleTurnId === receipt.visibleTurnId &&
       ["terminal.run", "terminal.inspect", "execute_code"].includes(receipt.tool) &&
       receipt.executionEffect?.connector === undefined && receipt.riskClass !== "external-side-effect";
     // A missing input discovered while auditing is a negative observation, not
@@ -374,6 +388,8 @@ function recoveryOperationKey(call: ToolExecutionRecord): string | undefined {
 }
 
 function classifyFinalStatus(input: {
+  unresolvedChecks: boolean;
+  commandVerificationPassed: boolean;
   recoveredCalls: ReadonlySet<string>;
   fileOutputSatisfied: boolean;
   delegatedFileOutput: boolean;
@@ -412,7 +428,8 @@ function classifyFinalStatus(input: {
   const completionFloorSatisfied = input.fileOutputSatisfied && (input.delegatedFileOutput || input.fileOutputMeetsFloor || settlesCompletionFloor(
     input.completionFloor,
     authoritativeReceipts,
-    input.confirmedActions
+    input.confirmedActions,
+    input.commandVerificationPassed
   ));
 
   if (
@@ -422,6 +439,7 @@ function classifyFinalStatus(input: {
     completionFloorSatisfied &&
     input.uncertainActions.length === 0 &&
     !unresolvedToolPlans &&
+    !input.unresolvedChecks &&
     !blocked &&
     failed === 0 && recoveredReplays.size === 0 && input.recoveredCalls.size === 0
   ) {
@@ -440,7 +458,7 @@ function classifyFinalStatus(input: {
     input.terminationCause === "deadline_reached"
   ) return hasUsefulEvidence ? "partially_completed" : "blocked";
   if (
-    input.uncertainActions.length > 0 ||
+    input.uncertainActions.length > 0 || input.unresolvedChecks ||
     unresolvedToolPlans
   ) {
     return "partially_completed";
@@ -470,7 +488,8 @@ function classifyFinalStatus(input: {
 function settlesCompletionFloor(
   floor: ExecutionCompletionFloor,
   receipts: readonly ExecutionEvidenceRecord[],
-  confirmedActions: readonly ConfirmedActionReceipt[]
+  confirmedActions: readonly ConfirmedActionReceipt[],
+  commandVerificationPassed: boolean
 ): boolean {
   if (floor === "none") return true;
   if (floor === "read") {
@@ -479,7 +498,8 @@ function settlesCompletionFloor(
     ));
   }
   if (floor === "mutation") return confirmedActions.length > 0;
-  return confirmedActions.some((receipt) => receipt.verification === "verified");
+  return confirmedActions.some((receipt) => receipt.verification === "verified") ||
+    (confirmedActions.length > 0 && commandVerificationPassed);
 }
 
 function hasConfiguredVerificationRelationship(

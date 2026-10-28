@@ -5,7 +5,7 @@ import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 export function toolOperationFingerprint(call: ToolExecutionRecord): string {
   const input = call.input ?? {};
   const process = call.result?.metadata?.process as { cwd?: unknown } | undefined;
-  const operation = call.tool.name === "terminal.run" ? { command: input.command, cwd: input.cwd ?? process?.cwd }
+  const operation = call.tool.name === "terminal.run" ? { command: input.command, cwd: input.cwd ?? process?.cwd ?? call.result?.metadata?.cwd }
     : call.tool.name === "terminal.inspect" ? { argv: input.argv, cwd: input.cwd ?? process?.cwd }
     : call.tool.name.startsWith("browser.") && input.identity !== null && typeof input.identity === "object"
       ? { ...input, identity: { ...input.identity, observationId: undefined } } : input;

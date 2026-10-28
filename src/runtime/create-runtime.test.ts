@@ -1600,6 +1600,7 @@ describe("createRuntime MCP trust gating", () => {
             "schemaAliasOrder": [
               "command",
               "timeoutMs",
+              "verification",
             ],
             "toolsets": [
               "shell-readonly",

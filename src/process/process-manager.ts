@@ -12,6 +12,8 @@ import { platform } from "node:os";
 export type ManagedProcessStatus = "prepared" | "running" | "exited" | "stopped" | "failed";
 
 export type ManagedProcessRecord = {
+  /** Declared completion check; starting it is not passing it. */
+  verification?: string;
   id: string;
   command: string;
   cwd: string;
@@ -75,10 +77,11 @@ export class ProcessManager {
     options.executionLease?.own({ release: () => this.dispose() });
   }
 
-  async start(command: string, signal?: AbortSignal, options: { input?: boolean; continuationSignal?: AbortSignal; requirements?: RequestRequirements; visibleTurnId?: string } = {}): Promise<ManagedProcessRecord> {
+  async start(command: string, signal?: AbortSignal, options: { input?: boolean; continuationSignal?: AbortSignal; requirements?: RequestRequirements; visibleTurnId?: string; verification?: string } = {}): Promise<ManagedProcessRecord> {
     signal?.throwIfAborted();
     options.continuationSignal?.throwIfAborted();
     const record = await this.#createRecord(command, "running");
+    if (options.verification !== undefined) record.verification = options.verification;
     if (signal?.aborted) { this.#processes.delete(record.id); signal.throwIfAborted(); }
     if (options.continuationSignal?.aborted) { this.#processes.delete(record.id); options.continuationSignal.throwIfAborted(); }
     record.fileObservation = await beginCommandFileObservation(this.#files, options.requirements, options.visibleTurnId);
@@ -374,6 +377,7 @@ function resolveShell(): { command: string; args: string[] } {
 
 function toRecord(process: InternalManagedProcess): ManagedProcessRecord {
   return {
+    ...(process.verification ? { verification: process.verification } : {}),
     id: process.id,
     command: process.command,
     cwd: process.cwd,
