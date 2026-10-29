@@ -121,7 +121,7 @@ export function deriveExecutionFinalOutcome(input: {
     completionFloor,
     confirmedActions,
     uncertainActions,
-    recoveredCalls: recoveredExecutionCalls(input, fileEvidence, commandChecks),
+    recoveredCalls: recoveredExecutionCalls(input, fileEvidence, commandChecks, verifiedFiles),
     unresolvedChecks: commandChecks.unresolved,
     commandVerificationPassed: commandChecks.passed,
     fileOutputSatisfied: (input.delegatedAnswerOwned === true || fileEvidence.satisfied) && researchRequestEvidence(input).satisfied,
@@ -330,7 +330,8 @@ function recoveredReplayCallIds(receipts: readonly ExecutionEvidenceRecord[]): R
 function recoveredExecutionCalls(
   input: Parameters<typeof deriveExecutionFinalOutcome>[0],
   fileEvidence: ReturnType<typeof fileOutputEvidence>,
-  commandChecks: ReturnType<typeof commandCompletionChecks>
+  commandChecks: ReturnType<typeof commandCompletionChecks>,
+  verifiedFiles: ReadonlySet<string>
 ): Set<string> {
   const recovered = new Set(commandChecks.recoveredCalls);
   const executions = new Map(input.toolExecutions.map(call => [call.toolCallId, call]));
@@ -371,7 +372,20 @@ function recoveredExecutionCalls(
       typeof call.input?.path === "string" && outputIndex > i &&
       receipt.visibleTurnId !== undefined && receipts[outputIndex]?.visibleTurnId === receipt.visibleTurnId &&
       !requestedFileOutputs(input.requestRequirements).some(file => matchesFileOutputPath(call.input!.path as string, file));
-    if (sameOperationRecovered || alternativeProducedOutput || reportedMissingInput) recovered.add(receipt.toolCallId);
+    // Optional local exploration is history, not an additional requirement.
+    // Require later independently verified work in this turn; a random successful
+    // read, a denial, a required-output read or an uncertain effect cannot erase it.
+    const recoveredExploration = receipt.status === "failed" && receipt.visibleTurnId !== undefined &&
+      receipt.riskClass === "read-only-local" && receipt.executionEffect?.kind === "read" &&
+      receipt.executionEffect.connector === undefined && call?.tool.name === receipt.tool &&
+      call.decision === "allow" && call.result?.ok === false && !declaresCommandCheck(call) &&
+      call.executionEffect?.kind === "read" && call.settlement?.sideEffectState !== "possible" &&
+      call.settlement?.dispatchState !== "unknown" && call.result.metadata?.cancelled !== true &&
+      call.result.metadata?.timedOut !== true && !["cancelled", "EACCES", "EPERM"].includes(String(call.result.metadata?.code ?? call.result.metadata?.reason)) &&
+      !(typeof call.input?.path === "string" && requestedFileOutputs(input.requestRequirements).some(file => matchesFileOutputPath(call.input!.path as string, file))) &&
+      receipts.slice(i + 1).some(later => later.visibleTurnId === receipt.visibleTurnId && later.status === "success" &&
+        (verifiedFiles.has(later.toolCallId) || later.toolCallId === commandChecks.lastPassedCallId));
+    if (sameOperationRecovered || alternativeProducedOutput || reportedMissingInput || recoveredExploration) recovered.add(receipt.toolCallId);
   }
   return recovered;
 }

@@ -1864,6 +1864,7 @@ describe("createRuntime MCP trust gating", () => {
             "schemaAliasOrder": [
               "command",
               "protectedEnvironment",
+              "purpose",
             ],
             "toolsets": [
               "shell-write",

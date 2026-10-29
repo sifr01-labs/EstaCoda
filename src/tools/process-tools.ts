@@ -23,11 +23,12 @@ export function createProcessTools(options: ProcessToolOptions): readonly Regist
   return [
     {
       name: "process.start",
-      description: "Start a long-running workspace process in the background. Omit protectedEnvironment or use null for ordinary commands; supply it only when requesting protected credential delivery. Use process.logs and process.list to observe completion, and process.stop to cancel.",
+      description: "Start a long-running workspace process in the background. Use purpose=service only for a server the user wants left running; verify readiness separately. Jobs (the default) must finish. Service intent grants no persistence beyond runtime cleanup. Omit protectedEnvironment or use null for ordinary commands; supply it only when requesting protected credential delivery. Use process.logs and process.list to observe completion, and process.stop to cancel.",
       inputSchema: {
         type: "object",
         properties: {
           command: { type: "string" },
+          purpose: { anyOf: [{ type: "string", enum: ["job", "service"] }, { type: "null" }] },
           protectedEnvironment: { anyOf: [protectedInputEnvelopeSchema(), { type: "null" }] }
         },
         required: ["command"]
@@ -37,12 +38,14 @@ export function createProcessTools(options: ProcessToolOptions): readonly Regist
       progressLabel: "starting process",
       maxResultSizeChars: 3000,
       isAvailable: () => true,
-      run: async (input: { command?: string; protectedEnvironment?: ProtectedInputEnvelope | null }, context) => {
+      run: async (input: { command?: string; purpose?: "job" | "service" | null; protectedEnvironment?: ProtectedInputEnvelope | null }, context) => {
         if (context?.signal?.aborted) return errorResult("Process start cancelled before dispatch.");
         if (typeof input.command !== "string" || input.command.trim().length === 0) {
           return errorResult("command must be a non-empty string");
         }
 
+        if (input.purpose != null && input.purpose !== "job" && input.purpose !== "service") return errorResult("purpose must be job, service or null");
+        if (input.purpose === "service" && !isAbsentProtectedEnvironment(input.protectedEnvironment)) return errorResult("Service file checkpoints are unavailable for protected-environment processes");
         const blockedReason = explainCommandBlock(input.command, context?.environmentType);
         if (blockedReason !== undefined) {
           return errorResult(blockedReason);
@@ -85,7 +88,7 @@ export function createProcessTools(options: ProcessToolOptions): readonly Regist
           };
         }
 
-        const process = await options.processManager.start(input.command, context?.signal, { continuationSignal: context?.continuationSignal, requirements: context?.requestContract?.requirements, visibleTurnId: context?.visibleTurnId });
+        const process = await options.processManager.start(input.command, context?.signal, { purpose: input.purpose ?? undefined, continuationSignal: context?.continuationSignal, requirements: context?.requestContract?.requirements, visibleTurnId: context?.visibleTurnId });
 
         return {
           ok: process.status === "running",

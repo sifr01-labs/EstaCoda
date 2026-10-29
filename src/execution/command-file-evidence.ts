@@ -8,11 +8,13 @@ import type { WorkspaceFiles } from "./host-workspace-files.js";
 export type CommandFileObservation = {
   id: string;
   completed: boolean;
+  /** A file snapshot while an explicitly declared service remains running. */
+  serviceCheckpoint?: true;
   originTurnId: string;
-  files: Array<{ path: string; before: string | null; after?: string | null; metadataOnly?: true }>;
+  files: Array<{ path: string; before: string | null | undefined; after?: string | null; metadataOnly?: true }>;
 };
 
-export async function beginCommandFileObservation(files: WorkspaceFiles, requirements?: RequestRequirements, visibleTurnId?: string): Promise<CommandFileObservation | undefined> {
+export async function beginCommandFileObservation(files: WorkspaceFiles, requirements?: RequestRequirements, visibleTurnId?: string, contentOnly = false): Promise<CommandFileObservation | undefined> {
   if (!requirements || !visibleTurnId || requirements.issues.length) return undefined;
   try { validateRequestRequirements(requirements); } catch { return undefined; }
   const outputs = requestedFileOutputs(requirements);
@@ -22,9 +24,9 @@ export async function beginCommandFileObservation(files: WorkspaceFiles, require
   for (const path of paths) {
     if (path === undefined) continue;
     const requirement = outputs.find(file => file.path === path || file.alternativePaths?.includes(path))!;
-    const metadataOnly = !requiresFileContentVerification(requirements, requirement);
+    const metadataOnly = !contentOnly && !requiresFileContentVerification(requirements, requirement);
     const before = await observe(files, path, metadataOnly);
-    if (before !== undefined) observations.push({ path, before, ...(metadataOnly ? { metadataOnly: true as const } : {}) });
+    if (before !== undefined || contentOnly) observations.push({ path, before, ...(metadataOnly ? { metadataOnly: true as const } : {}) });
   }
   return observations.length ? { id: randomUUID(), completed: false, originTurnId: visibleTurnId, files: observations } : undefined;
 }

@@ -4,6 +4,7 @@ import type { RequestRequirements } from "../contracts/intent.js";
 import { HostProcessScope, type HostProcesses } from "../execution/host-processes.js";
 import type { HostExecutionLease } from "../execution/host-environment.js";
 import { type ChildProcessByStdio } from "node:child_process";
+import { randomUUID } from "node:crypto";
 import { realpath } from "node:fs/promises";
 import type { Readable, Writable } from "node:stream";
 import { resolve } from "node:path";
@@ -14,6 +15,7 @@ export type ManagedProcessStatus = "prepared" | "running" | "exited" | "stopped"
 export type ManagedProcessRecord = {
   /** Declared completion check; starting it is not passing it. */
   verification?: string;
+  purpose?: "service";
   id: string;
   command: string;
   cwd: string;
@@ -32,6 +34,7 @@ export type ManagedProcessLog = {
 
 type InternalManagedProcess = ManagedProcessRecord & {
   fileObservation?: CommandFileObservation;
+  fileCheckpoint?: Promise<CommandFileObservation | undefined>;
   finalFileObservation?: Promise<CommandFileObservation | undefined>;
   child?: ChildProcessByStdio<Writable, Readable, Readable>;
   logs: ManagedProcessLog[];
@@ -77,14 +80,15 @@ export class ProcessManager {
     options.executionLease?.own({ release: () => this.dispose() });
   }
 
-  async start(command: string, signal?: AbortSignal, options: { input?: boolean; continuationSignal?: AbortSignal; requirements?: RequestRequirements; visibleTurnId?: string; verification?: string } = {}): Promise<ManagedProcessRecord> {
+  async start(command: string, signal?: AbortSignal, options: { input?: boolean; continuationSignal?: AbortSignal; requirements?: RequestRequirements; visibleTurnId?: string; verification?: string; purpose?: "service" | "job" } = {}): Promise<ManagedProcessRecord> {
     signal?.throwIfAborted();
     options.continuationSignal?.throwIfAborted();
     const record = await this.#createRecord(command, "running");
     if (options.verification !== undefined) record.verification = options.verification;
+    if (options.purpose === "service" && options.verification === undefined) record.purpose = "service";
     if (signal?.aborted) { this.#processes.delete(record.id); signal.throwIfAborted(); }
     if (options.continuationSignal?.aborted) { this.#processes.delete(record.id); options.continuationSignal.throwIfAborted(); }
-    record.fileObservation = await beginCommandFileObservation(this.#files, options.requirements, options.visibleTurnId);
+    record.fileObservation = await beginCommandFileObservation(this.#files, options.requirements, options.visibleTurnId, record.purpose === "service");
     if (signal?.aborted || options.continuationSignal?.aborted) { this.#processes.delete(record.id); (signal?.aborted ? signal : options.continuationSignal)!.throwIfAborted(); }
     this.#spawn(record, undefined, options.input ?? true);
     if (record.child && record.status === "running" && options.continuationSignal) {
@@ -129,7 +133,22 @@ export class ProcessManager {
   async fileObservation(id: string): Promise<CommandFileObservation | undefined> {
     const record = this.#processes.get(id);
     if (!record || record.status === "prepared") return undefined;
-    return record.finalFileObservation ?? record.fileObservation;
+    if (record.purpose !== "service" || record.status !== "running") return record.finalFileObservation ?? record.fileObservation;
+    // Complete a bounded file-state observation, not the service. Checkpoints
+    // cannot produce outputs or pass checks: those still require a collected exit.
+    // Serialize samples so concurrent polls cannot replay stale file changes.
+    const previous = record.fileCheckpoint;
+    record.fileCheckpoint = (async () => {
+      await previous;
+      if (record.status !== "running") return record.finalFileObservation ?? record.fileObservation;
+      const snapshot = await finishCommandFileObservation(this.#files, record.fileObservation);
+      if (snapshot && record.status === "running") record.fileObservation = {
+        ...snapshot, id: randomUUID(), completed: false,
+        files: snapshot.files.map(file => ({ ...file, before: file.after === undefined ? file.before : file.after, after: undefined }))
+      };
+      return snapshot ? { ...snapshot, serviceCheckpoint: true } : undefined;
+    })();
+    return record.fileCheckpoint;
   }
 
   async prepareProtectedEnvironment(command: string, variableName: string): Promise<ManagedProcessRecord> {
@@ -378,6 +397,7 @@ function resolveShell(): { command: string; args: string[] } {
 function toRecord(process: InternalManagedProcess): ManagedProcessRecord {
   return {
     ...(process.verification ? { verification: process.verification } : {}),
+    ...(process.purpose ? { purpose: process.purpose } : {}),
     id: process.id,
     command: process.command,
     cwd: process.cwd,

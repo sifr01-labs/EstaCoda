@@ -1,4 +1,8 @@
-import { access, mkdtemp, readFile, rm } from "node:fs/promises";
+import { fileOutputEvidence } from "../runtime/file-output-evidence.js";
+import { ExecutionEvidenceIndex } from "../runtime/execution-evidence-index.js";
+import { deriveRequestRequirements } from "../runtime/request-requirements.js";
+import type { ToolExecutionRecord } from "../tools/tool-executor.js";
+import { access, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -153,5 +157,51 @@ describe("process log waits", () => {
       for (const waitMs of [-1, 30001, NaN, Infinity, "1000"]) expect((await logs.run({ id: "missing", waitMs })).ok).toBe(false);
       expect((await logs.run({ id: "missing" })).ok).toBe(false);
     } finally { await f.close(); }
+  });
+});
+
+
+describe("service file-state checkpoints", () => {
+  it.each(["service", "job"] as const)("preserves prior production only for an explicitly declared %s", async purpose => {
+    const f = await fixture();
+    try {
+      const requirements = deriveRequestRequirements("Save server.py", "turn");
+      const tools = createWorkspaceTools({workspaceRoot: f.root});
+      const write = tools.find(t => t.name === "file.write")!;
+      const input = {path: "server.py", content: "ready", overwrite: true};
+      const calls: ToolExecutionRecord[] = [{tool: write, input, decision: "allow", riskClass: "workspace-write", executionEffect: {kind: "mutation"}, result: await write.run(input), toolCallId: "write"}];
+      const proc = await f.manager.start("sleep 30", undefined, {purpose, requirements, visibleTurnId: "turn"});
+      const start = createProcessTools({processManager:f.manager}).find(t => t.name === "process.start")!;
+      const record = async () => {
+        calls.push({tool: start, decision: "allow", riskClass: "workspace-write", result: {ok:true, content:"running", metadata:{process:proc,commandFileObservation:await f.manager.fileObservation(proc.id)}}, toolCallId:`sample-${calls.length}`});
+        const index = new ExecutionEvidenceIndex(); for (const call of calls) index.record(call,"turn");
+        return fileOutputEvidence({requirements, toolExecutions:calls, executionReceipts:index.recordsForTurn("turn")});
+      };
+      expect((await record()).satisfied).toBe(purpose === "service");
+      expect(f.manager.get(proc.id)?.status).toBe("running");
+      if (purpose === "service") {
+        await writeFile(join(f.root,"server.py"), "changed");
+        expect((await record()).satisfied).toBe(false);
+        // A second checkpoint must not manufacture production from a running service.
+        expect((await record()).satisfied).toBe(false);
+        calls.push({tool:write,input,decision:"allow",riskClass:"workspace-write",result:await write.run(input),toolCallId:"repair"});
+        const outcome = await record();
+        expect(outcome.satisfied).toBe(true);
+      }
+      if (purpose === "service") {
+        await rm(join(f.root, "server.py"));
+        expect((await record()).satisfied).toBe(false);
+      }
+      await f.manager.stop(proc.id);
+      expect(f.manager.get(proc.id)?.status).not.toBe("running");
+    } finally {await f.close();}
+  });
+  it("never lets service intent turn a required running check into a completed observation", async () => {
+    const f=await fixture();
+    try {
+      await writeFile(join(f.root,"server.py"),"ready");
+      const proc=await f.manager.start("sleep 30",undefined,{purpose:"service",verification:"readiness",requirements:deriveRequestRequirements("Save server.py","turn"),visibleTurnId:"turn"});
+      expect((await f.manager.fileObservation(proc.id))?.completed).toBe(false);
+    } finally {await f.close();}
   });
 });

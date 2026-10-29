@@ -127,9 +127,11 @@ export function deriveRequestRequirements(userText: string, originTurnId?: strin
     const beforeContent = contentStart ? segment.slice(outputStart, outputStart + contentStart.index) : undefined;
     let outputSegment = beforeContent !== undefined && [...beforeContent.matchAll(FILE_NAME)].length > 0
       ? beforeContent : segment.slice(outputStart);
-    // A source or behavioral constraint following a named output is not another output.
-    const inputStart = /\b(?:using|from|based on|such that|that when|that's|that is|so that)\s+/iu.exec(outputSegment);
-    if (!copy && inputStart && [...outputSegment.slice(0, inputStart.index).matchAll(FILE_NAME)].length > 0) outputSegment = outputSegment.slice(0, inputStart.index);
+    // Sources and preservation constraints never introduce destinations, even
+    // when the action names a service rather than a file. Explicit later save
+    // clauses are processed separately; copy destinations keep their contract.
+    const inputStart = /\b(?:using|from|based on|preserving|preserve|keep|without changing|such that|that when|that's|that is|so that)\s+/iu.exec(outputSegment.replace(/`[^`]*`/gu, value => " ".repeat(value.length)));
+    if (!copy && inputStart) outputSegment = outputSegment.slice(0, inputStart.index);
     let pathMatches = [...outputSegment.matchAll(FILE_NAME)].filter(match => !NATIVE_ARTIFACT_EXTENSION.test(match[1] ?? match[0]) && !/^(?:e\.g|i\.e)$/iu.test(match[1] ?? match[0]));
     // "named x.py, and place it in /app/x.py" names one file twice.
     if (pathMatches.length === 2) {

@@ -45,7 +45,7 @@ describe("process.start hardline floor", () => {
     const result = await start?.run({ command: "rm -rf ./build" });
 
     expect(result?.ok).toBe(true);
-    expect(processManager.start).toHaveBeenCalledWith("rm -rf ./build", undefined, { continuationSignal: undefined, requirements: undefined, visibleTurnId: undefined });
+    expect(processManager.start).toHaveBeenCalledWith("rm -rf ./build", undefined, { purpose: undefined, continuationSignal: undefined, requirements: undefined, visibleTurnId: undefined });
   });
 
   it("rejects hardBlock commands inside the process handler", async () => {
@@ -79,7 +79,7 @@ describe("protected process tool requests", () => {
       const onSecureInputRequest = vi.fn();
       const result = await start.run({ command: "sleep 1", protectedEnvironment }, { onSecureInputRequest });
       expect(result.ok).toBe(true);
-      expect(processManager.start).toHaveBeenCalledExactlyOnceWith("sleep 1", undefined, { continuationSignal: undefined, requirements: undefined, visibleTurnId: undefined });
+      expect(processManager.start).toHaveBeenCalledExactlyOnceWith("sleep 1", undefined, { purpose: undefined, continuationSignal: undefined, requirements: undefined, visibleTurnId: undefined });
       expect(processManager.prepareProtectedEnvironment).not.toHaveBeenCalled();
       expect(onSecureInputRequest).not.toHaveBeenCalled();
     }
@@ -159,4 +159,15 @@ describe("protected process tool requests", () => {
       destination: { type: "process-stdin", processId: "proc-1", promptLabel: "Password:" }
     }), expect.any(Function));
   });
+});
+
+
+it("validates service intent without relaxing command safety", async () => {
+  const manager = createFakeProcessManager();
+  const start = createProcessTools({processManager: manager}).find(t => t.name === "process.start")!;
+  expect((await start.run({command: "sleep 30", purpose: "forever"})).ok).toBe(false);
+  expect((await start.run({command: "rm -rf /", purpose: "service"})).ok).toBe(false);
+  expect(manager.start).not.toHaveBeenCalled();
+  expect((await start.run({command: "sleep 30", purpose: "service"})).ok).toBe(true);
+  expect(manager.start).toHaveBeenCalledWith("sleep 30", undefined, expect.objectContaining({purpose: "service"}));
 });

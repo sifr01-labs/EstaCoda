@@ -27,7 +27,7 @@ export function commandCompletionChecks(calls: readonly ToolExecutionRecord[], r
     const ownedProcess = processId ? processes.get(processId) : undefined;
     const observation = commandFileObservation(call, receipt.visibleTurnId);
     const changed = observation && !observed.has(observation.id) && observation.completed &&
-      observation.files.some(file => file.before !== file.after);
+      observation.files.some(file => file.after === undefined || file.before !== file.after);
     if (observation?.completed) observed.add(observation.id);
     // Invalidate observed edits, not every operation authorized to write. Shell
     // inspections and service starts share that risk class with actual edits.

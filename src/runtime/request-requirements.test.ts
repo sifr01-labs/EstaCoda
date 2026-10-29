@@ -438,3 +438,23 @@ describe("file production policy", () => {
     expect(requiresAnyFileContentVerification(deriveRequestRequirements(`${prefix}\nWrite notes.txt`))).toBe(false);
   });
 });
+
+
+describe("input roles are not output obligations", () => {
+  it.each([
+    "Create a redirect service using redirects.json. Preserve redirects.json. Save server.py.",
+    "Create a report from source.csv. Save report.md.",
+    "Create a report based on source.csv. Save report.md.",
+    "Create a service preserving settings.json. Save server.py."
+  ])("does not promote source operands: %s", text => {
+    const result = deriveRequestRequirements(text);
+    expect(result.issues).toEqual([]);
+    expect(result.fileOutput?.path).toBe(text.includes("report") ? "report.md" : "server.py");
+    expect(result.fileOutput?.additionalFiles).toBeUndefined();
+  });
+  it("still requires an explicitly saved input and exact copy destination", () => {
+    expect(deriveRequestRequirements("Create a service using settings.json. Save settings.json.").fileOutput?.path).toBe("settings.json");
+    expect(deriveRequestRequirements("Copy source.json to result.json.").fileOutput).toMatchObject({path: "result.json", exactCopy: {sourcePath: "source.json"}});
+    expect(deriveRequestRequirements("Write a.py and b.py using input.csv.").fileOutput).toMatchObject({path: "a.py", additionalFiles: [{path: "b.py"}]});
+  });
+});

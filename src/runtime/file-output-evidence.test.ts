@@ -381,3 +381,42 @@ it("preserves real bounded-read evidence, but detects an external change of the 
     expect(fileOutputEvidence(observe([written, full, changed])).satisfied).toBe(false);
   } finally { await rm(root, { recursive: true, force: true }); }
 });
+
+
+describe("optional read-only exploration recovery", () => {
+  const failedRead = (): ToolExecutionRecord => ({
+    ...call("terminal.inspect"), input: { argv: ["ls", "-laR", "docs"] },
+    riskClass: "read-only-local", executionEffect: { kind: "read" },
+    result: { ok: false, content: "Unsupported inspection arguments" }
+  });
+  const outcome = (calls: ToolExecutionRecord[]) => {
+    const input = observe(calls, "Repair the runbook links and verify the result");
+    return deriveExecutionFinalOutcome({ ...input, requestRequirements: input.requirements, completionFloor: "mutation_with_verification" });
+  };
+  it.each(["terminal.inspect", "file.glob"])("recovers %s through independently verified work, not a tool-name exception", name => {
+    const failure = failedRead(); failure.tool = { ...failure.tool, name };
+    expect(outcome([failure, call("file.patch"), call("file.read")]).status).toBe("completed_with_recovered_errors");
+  });
+  it.each(["denied", "verification", "uncertain", "permission", "cancelled", "external"])("retains %s failures", kind => {
+    const failure = failedRead();
+    if (kind === "denied") failure.decision = "deny";
+    if (kind === "verification") failure.executionEffect = { kind: "verification", verifies: ["file.patch"] };
+    if (kind === "uncertain") failure.settlement = { dispatchState: "unknown", sideEffectState: "possible", failureClass: "unknown" } as never;
+    if (kind === "permission") failure.result!.metadata = { code: "EACCES" };
+    if (kind === "cancelled") failure.result!.metadata = { reason: "cancelled" };
+    if (kind === "external") failure.executionEffect = { kind: "read", connector: { kind: "mcp", id: "remote" } };
+    expect(outcome([failure, call("file.patch"), call("file.read")]).status).toBe("partially_completed");
+  });
+  it("cannot recover using unrelated reads, an unverified write or a later failure", () => {
+    expect(outcome([failedRead(), call("file.read")]).status).toBe("partially_completed");
+    expect(outcome([failedRead(), call("file.patch")]).status).toBe("partially_completed");
+    expect(outcome([call("file.patch"), call("file.read"), failedRead()]).status).toBe("partially_completed");
+  });
+  it("does not suppress a failed required-output read", () => {
+    const failure = { ...failedRead(), tool: call("file.read").tool, input: {path: "report.md"} };
+    const input = observe([failure, call("file.write"), call("file.read")]);
+    // Same-operation recovery remains valid; a different output cannot settle it.
+    const missingReadback = observe([failure, call("file.write", "other.md"), call("file.read", "other.md")]);
+    expect(deriveExecutionFinalOutcome({...missingReadback, requestRequirements: input.requirements}).status).toBe("partially_completed");
+  });
+});

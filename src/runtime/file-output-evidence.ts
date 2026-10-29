@@ -106,6 +106,10 @@ function concreteFileOutputEvidence(input: Parameters<typeof fileOutputEvidence>
     // A later command may remove/replace an already verified destination, even
     // if it fails. Unfinished or unreadable observations cannot preserve proof.
     for (const output of command) {
+      // A service snapshot may observe our own intervening write. Matching bytes
+      // preserve its evidence; the snapshot never creates new production proof.
+      if (commandFileObservation(execution, recorded.receipt.visibleTurnId)?.serviceCheckpoint &&
+          output.contentSha256 !== undefined && writes.get(output.path)?.digest === output.contentSha256) continue;
       verified.delete(output.path);
       writes.delete(output.path);
       sourceReads.delete(output.path);
@@ -187,7 +191,7 @@ function producedFileEvidence(input: Parameters<typeof fileOutputEvidence>[0]): 
   const receipts = new Map(input.executionReceipts.filter(receipt =>
     input.requirements?.originTurnId === undefined || receipt.visibleTurnId === input.requirements.originTurnId
   ).map(receipt => [receipt.toolCallId, receipt]));
-  const produced = new Map<string, string>();
+  const produced = new Map<string, { callId: string; digest?: string }>();
   const seen = new Set<string>();
   const pending = new Map<string, string[]>();
   for (const execution of input.toolExecutions) {
@@ -205,7 +209,10 @@ function producedFileEvidence(input: Parameters<typeof fileOutputEvidence>[0]): 
     // without changing the file, the earlier production evidence remains valid.
     const changes = !observation?.completed || repeated ? [] : commandFileChanges(execution, receipt.visibleTurnId);
     if (observation?.completed) seen.add(observation.id);
-    for (const change of changes) produced.delete(change.path);
+    for (const change of changes) {
+      if (observation?.serviceCheckpoint && change.contentSha256 !== undefined && produced.get(change.path)?.digest === change.contentSha256) continue;
+      produced.delete(change.path);
+    }
     const fileTool = ["file.write", "file.patch"].includes(execution.tool.name);
     const outputs = fileTool ? Array.isArray(metadata?.fileOutputs) ? metadata.fileOutputs : [metadata] : changes;
     if (fileTool) {
@@ -222,13 +229,13 @@ function producedFileEvidence(input: Parameters<typeof fileOutputEvidence>[0]): 
       const path = safePath(item.path);
       if (!path || !matchesTarget(path, requirement)) continue;
       if (fileTool ? (item.materialized ?? metadata?.materialized) !== true || !validDigest(item.contentSha256) : !validDigest(item.contentSha256) && !validMetadataFingerprint(item.metadataFingerprint)) continue;
-      produced.set(path, callId);
+      produced.set(path, { callId, digest: validDigest(item.contentSha256) ? item.contentSha256 : undefined });
     }
   }
   for (const paths of pending.values()) for (const path of paths) produced.delete(path);
   if (requirement.directoryUnspecified && produced.size > 1) return { satisfied: false, reason: "unresolved-target" };
-  const found = produced.entries().next().value as [string, string] | undefined;
-  return found ? { satisfied: true, contentVerified: false, path: found[0], writeCallId: found[1] }
+  const found = produced.entries().next().value;
+  return found ? { satisfied: true, contentVerified: false, path: found[0], writeCallId: found[1].callId }
     : { satisfied: false, path: requirement.path, reason: "missing-write" };
 }
 
@@ -317,7 +324,7 @@ function commandFileChanges(execution: ToolExecutionRecord, visibleTurnId?: stri
   const observation = commandFileObservation(execution, visibleTurnId);
   return observation?.files.flatMap(({ path, before, after, metadataOnly }) => {
     const valid = metadataOnly === true ? validMetadataFingerprint : validDigest;
-    if (before === after) return [];
+    if (before === after && after !== undefined) return [];
     return [{ path, ...(observation.completed && valid(after)
       ? metadataOnly === true ? { metadataFingerprint: after as string } : { contentSha256: after as string } : {}) }];
   }) ?? [];
@@ -335,9 +342,11 @@ export function commandFileObservation(execution: ToolExecutionRecord, visibleTu
     const { path, before, after, metadataOnly } = value as CommandFileObservation["files"][number];
     const target = safePath(path);
     const valid = metadataOnly === true ? validMetadataFingerprint : validDigest;
-    return !target || (before !== null && !valid(before)) ? [] : [{ path: target, before, after, metadataOnly }];
+    return !target || (before !== null && before !== undefined && !valid(before)) ? [] : [{ path: target, before, after, metadataOnly }];
   });
-  return { id: observation.id, completed: observation.completed, originTurnId: visibleTurnId, files };
+  return { id: observation.id, completed: observation.completed, originTurnId: visibleTurnId, files,
+    ...(observation.serviceCheckpoint === true && ["process.start", "process.logs"].includes(execution.tool.name) &&
+      (execution.result?.metadata?.process as { purpose?: unknown } | undefined)?.purpose === "service" ? { serviceCheckpoint: true as const } : {}) };
 }
 
 function validMetadataFingerprint(value: unknown): value is string {
