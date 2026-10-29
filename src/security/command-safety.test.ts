@@ -575,3 +575,44 @@ shell-tokenization edge cases, wrappers, quoting, escaped spaces, aliases,
 and platform-specific rm behavior. Tests cover the supported safety boundary
 explicitly.
 */
+
+
+describe("literal data and executable context", () => {
+  it.each([
+    "set -- one two", "set -o errexit", "env NODE_ENV=test node app.js",
+    "/usr/bin/python3 - <<'PY'\nprint(set([1,2]))\nPY",
+    "cd /app && python3 - <<'PY'\nprint(set ([1,2]))\nPY",
+    "cat > fit.R <<'RS'\nset.seed(2026)\nRS\nRscript fit.R",
+    "Rscript - <<'RS'\nset.seed(2026)\nRS",
+    "expect <<'EOF'\nset timeout 90\nEOF",
+    "printf '%s' 'DROP TABLE example;'",
+    "grep -n 'DROP TABLE' schema.sql",
+    "git commit -m 'Document git reset --hard recovery'",
+    "cat > safety.md <<'DOC'\nDo not run git reset --hard\nDOC",
+    "cat README.md; printf '%s' '.env.example'",
+    "cat tokenizer.py", "cat secret-santa.md"
+  ])("does not invent dangerous behavior from %s", command => {
+    expect(assessCommandSafety(command).hardBlock).toBeUndefined();
+    expect(assessCommandSafety(command).riskClass).not.toBe("credential-access");
+  });
+  it.each([
+    "env NODE_ENV=test", "env NODE_ENV=test printenv", "env NODE_ENV=test command env",
+    "env NODE_ENV=test /usr/bin/env", "env NODE_ENV=test cat .env",
+    "env NODE_ENV=test sh -c 'set'", "set -- $(printenv)", "set -o xtrace",
+    "cat > safety.md <<'DOC'\nsafe\nDOC\nrm -rf /\nDOC",
+    "cat > safety.md <<DOC\n$(set)\nDOC",
+    "printf '%s' 'rm -rf /' | sh",
+    "printf '%s' 'git reset --hard'; X=y sh script.sh",
+    'printf "%s" "$(cat .env)"',
+    "grep -n 'harmless' .env", "cat .env.example",
+    "python3 - <<'PY'\nprint(set([1,2]))\nPY\nprintenv",
+    "Rscript - <<'RS'\nset.seed(2026)\nsystem('cat .env')\nRS",
+    "expect <<'EOF'\nset timeout 90\nexec cat .env\nEOF",
+    "git reset --hard", "git push --force-with-lease", "pip uninstall some-package"
+  ])("retains denial for execution or actual sensitive operations: %s", command => {
+    expect(assessCommandSafety(command).hardBlock).toBeDefined();
+  });
+  it.each(["cat secrets.json", "cat credentials", "printf '%s' $TOKEN", "printf '%s' $token"])("keeps actual credential signals for %s", command => {
+    expect(assessCommandSafety(command).riskClass).toBe("credential-access");
+  });
+});

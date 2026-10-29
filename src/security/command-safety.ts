@@ -1,3 +1,4 @@
+import { commandDetectionSource } from "./command-data.js";
 import type { EnvironmentType } from "../contracts/security.js";
 import type { ToolRiskClass } from "../contracts/tool.js";
 
@@ -50,21 +51,23 @@ export function assessCommandSafety(
   _options: { environmentType?: EnvironmentType } = {}
 ): CommandSafetyAssessment {
   const normalized = normalizeCommandForSafety(command);
+  const source = commandDetectionSource(stripAnsi(command.normalize("NFKC")));
+  const detection = normalizeCommandForSafety(source);
   // Whitespace normalization must not hide a command following a heredoc or
   // another newline. Retain the conservative whole-payload floor as well.
-  const hardline = detectHardlineBlock(normalized) ?? command.split(/\r?\n/u)
+  const hardline = detectHardlineBlock(detection) ?? source.split(/\r?\n/u)
     .map(line => detectHardlineBlock(normalizeCommandForSafety(line))).find(block => block !== undefined);
 
   if (hardline !== undefined) {
-    return toAssessment(normalized, hardline);
+    return { ...toAssessment(detection, hardline), normalized };
   }
 
   // EnvironmentType is compatibility metadata. Until a backend verifies actual
   // containment, every label retains the same command floor and risk triage.
-  const policyBlock = detectPolicyBlock(normalized, stripAnsi(command.normalize("NFKC")));
-  if (policyBlock !== undefined) return toAssessment(normalized, policyBlock);
+  const policyBlock = detectPolicyBlock(detection, source);
+  if (policyBlock !== undefined) return { ...toAssessment(detection, policyBlock), normalized };
 
-  const riskClass = inferRiskClass(normalized);
+  const riskClass = inferRiskClass(detection);
   return {
     normalized,
     riskClass,
@@ -483,8 +486,10 @@ function looksDestructive(command: string): boolean {
 
 function looksCredentialSeeking(command: string): boolean {
   return looksBrowserProfileDatabaseRead(command) ||
-    /\b(printenv|env|security\s+find|op\s+read|gh\s+auth\s+token|pass\s+show)\b/iu.test(command) ||
-    /(\.env|\.ssh|\.aws|\.gnupg|id_rsa|id_ed25519|\.npmrc|token|secret|api[_-]?key|credentials)/iu.test(command);
+    /\b(printenv|security\s+find|op\s+read|gh\s+auth\s+token|pass\s+show)\b/iu.test(command) ||
+    /(\.env|\.ssh|\.aws|\.gnupg|id_rsa|id_ed25519|\.npmrc)/iu.test(command) ||
+    /(?:^|[\s/"'=])(?:tokens?|secrets?|credentials|api[_-]?keys?)(?:\.(?:json|ya?ml|txt|toml|ini|conf))?(?=$|[\s"';&|])/iu.test(command) ||
+    /\$\{?[A-Za-z_0-9]*(?:TOKEN|SECRET|PASSWORD|API_KEY|CREDENTIAL)[A-Za-z_0-9]*\}?/iu.test(command);
 }
 
 const BROWSER_PROFILE_DATABASE_PATHS = [
@@ -716,30 +721,49 @@ function matchesTerraformDestroy(command: string): boolean {
 }
 
 function matchesSecretRead(command: string, originalCommand: string): boolean {
-  // Only option-only safety settings qualify. Keep line boundaries here: the
-  // general normalization deliberately collapses whitespace for other checks.
-  // Exempt a Python function call only in code within a simple quoted heredoc.
+  // Distinguish bounded option/positional settings from shell enumeration.
+  // Keep line boundaries: general normalization collapses whitespace.
+  // Recognize language calls only inside supported quoted heredocs.
   // Keep shell glob/function syntax, embedded shell strings, substitutions and
   // the rest of the payload visible; this is not an interpreter allowlist.
   const shellStateSource = originalCommand.replace(/\b(?:sh|bash|dash|zsh|ksh)\s+-(?:c|lc)\s+(?:"((?:\\.|[^"\\])*)"|'([^']*)')/giu,
     (_match, doubleQuoted: string | undefined, singleQuoted: string | undefined) => `; ${doubleQuoted ?? singleQuoted};`);
   const enumeratesShellState = [...shellStateSource.matchAll(/(?:^|[;&|(\r\n])\s*set\b([^;&|\r\n]*)/giu)]
-    .some(match => !isPythonSetCall(shellStateSource, match.index! + match[0].toLowerCase().indexOf("set")) &&
-      !/^(?:\s+-[eu]+|\s+-o\s+pipefail)+\s*$/u.test(match[1]!));
+    .some(match => !isLanguageSetCall(shellStateSource, match.index! + match[0].toLowerCase().indexOf("set")) &&
+      !isSafeSetArguments(match[1]!));
   return /\b(?:cat|less|more|head|tail|grep|sed|awk)\b.*(?:\.env(?:\b|$)|\.ssh\/|id_rsa\b|id_ed25519\b|\.aws\/credentials\b|\.npmrc\b|\.gnupg\/)/iu.test(command) ||
-    enumeratesShellState || /(?:^|[;&|(\r\n])\s*(?:env|printenv)(?=[\s;'"|&)<>]|$)/iu.test(shellStateSource) ||
+    enumeratesShellState || enumeratesEnvironment(shellStateSource) ||
     /\bsecurity\s+find-(?:generic-password|internet-password)\b/iu.test(command) ||
     /\bop\s+read\b/iu.test(command) ||
     /\bgh\s+auth\s+token\b/iu.test(command);
 }
 
+function isSafeSetArguments(args: string): boolean {
+  return /^(?:\s+-[eu]+|\s+-o\s+(?:pipefail|errexit|nounset|noclobber))+\s*$/u.test(args) ||
+    /^\s+--(?:\s+[\w./:-]+)*\s*$/u.test(args) || /^\s+timeout\s+\d+\s*$/u.test(args);
+}
+
+function enumeratesEnvironment(command: string): boolean {
+  return [...command.matchAll(/(?:^|[;&|(\r\n])\s*(env|printenv)(?=[\s;'"|&)<>]|$)([^;&|\r\n]*)/giu)].some(match => {
+    if (match[1] === "printenv") return true;
+    const invocation = /^(?:\s+[A-Za-z_]\w*=[\w./:-]+)+\s+([\w./-]+)(?:\s|$)/u.exec(match[2]!);
+    return !invocation || /(?:^|[\s/])(?:env|printenv)(?=\s|$)/u.test(match[2]!);
+  });
+}
+
 /** Recognize only the concrete language boundary needed by the shell-state
  * check. Unknown openers/quoting remain subject to the conservative floor. */
-function isPythonSetCall(command: string, offset: number): boolean {
-  if (command.slice(offset, offset + 4) !== "set(") return false;
-  const opener = /^\s*python(?:3(?:\.\d+)?)?(?:[ \t]+-)?[ \t]+<<(['"])([A-Za-z_][A-Za-z_0-9]*)\1[ \t]*\r?\n/u.exec(command);
+function isLanguageSetCall(command: string, offset: number): boolean {
+  const python = /^set\s*\(/u.test(command.slice(offset));
+  const rSeed = /^set\.seed\(\s*\d+\s*\)\s*(?:\r?\n|$)/u.test(command.slice(offset));
+  if (!python && !rSeed) return false;
+  const prefix = /^(?:\s*cd\s+[\w./-]+\s*&&)?\s*/u.exec(command)![0];
+  const head = command.slice(prefix.length);
+  const opener = (python
+    ? /^(?:\/(?:[\w.-]+\/)*)?(?:python(?:3(?:\.\d+)?)?)(?:[ \t]+-)?[ \t]+<<(['"])([A-Za-z_][A-Za-z_0-9]*)\1[ \t]*\r?\n/u
+    : /^(?:(?:Rscript|R)\s+-|cat\s+>\s+[\w./-]+\.[Rr])\s+<<(['"])([A-Za-z_][A-Za-z_0-9]*)\1[ \t]*\r?\n/u).exec(head);
   if (!opener) return false;
-  const start = opener[0].length;
+  const start = prefix.length + opener[0].length;
   const close = new RegExp(`^${opener[2]}\\r?$`, "mu").exec(command.slice(start));
   if (!close || offset < start || offset >= start + close.index) return false;
   // Python strings (including triple quotes), comments and escaped characters
@@ -764,7 +788,8 @@ function isPythonSetCall(command: string, offset: number): boolean {
 }
 
 function matchesPipeToInterpreter(command: string): boolean {
-  return /\b(?:curl|wget|fetch)\b[^|;&]*(?:\|\s*|>\s*>\([^)]*\)\s*|\|\s*(?:sudo\s+)?)(?:sudo\s+)?(?:sh|bash|zsh|fish|python|python3|node|bun|ruby|perl|php|deno)\b/iu.test(command) ||
+  return /\|\s*(?:\/(?:[\w.-]+\/)*)?(?:sh|bash|dash|zsh|ksh)(?:\s+-(?:s|e|u|eu))?\s*(?:$|[;&|])/iu.test(command) ||
+    /\b(?:curl|wget|fetch)\b[^|;&]*(?:\|\s*|>\s*>\([^)]*\)\s*|\|\s*(?:sudo\s+)?)(?:sudo\s+)?(?:sh|bash|zsh|fish|python|python3|node|bun|ruby|perl|php|deno)\b/iu.test(command) ||
     /\b(?:sh|bash|zsh|fish|python|python3|node|bun|ruby|perl|php|deno)\b\s*<\s*<\s*\(/iu.test(command);
 }
 

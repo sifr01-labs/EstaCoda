@@ -349,3 +349,21 @@ CLI and Telegram memory controls share the same operator path. Channel output ma
 - The base policy and `WorkspaceApprovalController` both use this shared path.
 - There is no `auxiliaryModels.approval` route and no legacy provider/model fallback assessor architecture.
 - Hardline commands deny before assessor invocation; a post-assessor hardline check remains as defense in depth.
+
+
+### Literal command data and credential classification
+
+Command matching distinguishes narrowly recognized literal arguments from
+execution: quoted `printf`/`echo` data, quoted search patterns, commit messages,
+and a single quoted `cat` heredoc. Substitutions, execution carriers, pipelines,
+ambiguous syntax and additional heredoc commands retain conservative inspection.
+Shell option/positional settings and scoped `env NAME=value command` invocation
+are not environment dumps; bare `set`, `env`, `printenv`, tracing and nested
+credential reads remain protected. Python collection calls and numeric R seeds
+are recognized only within supported quoted language boundaries.
+
+Credential classification retains sensitive paths and credential variables/files;
+arbitrary words in names such as `tokenizer.py` or `secret-santa.md` are not enough.
+An `.env.example` filename alone does not establish that its contents are safe.
+Actual package removal, destructive Git operations, broad deletion and unknown
+inline subprocess execution retain their existing hard-denial policy in all modes.
