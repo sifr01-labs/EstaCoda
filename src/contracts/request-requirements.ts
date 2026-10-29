@@ -52,16 +52,16 @@ export function validateRequestRequirements(value: unknown): RequestRequirements
   if (JSON.stringify(record).length > MAX_REQUEST_REQUIREMENTS_CHARS) throw new Error("Request requirements exceed their budget.");
   if (!Array.isArray(record.skillReferences) || record.skillReferences.length > 4 || !record.skillReferences.every((name) =>
     typeof name === "string" && /^[\p{L}\p{N}_-]{1,80}$/u.test(name))) throw new Error("Invalid skill requirements.");
-  if (!Array.isArray(record.issues) || record.issues.length > 3 || !record.issues.every((issue) =>
-    ["request-too-long", "ambiguous-file-target", "unsafe-file-target"].includes(String(issue)))) throw new Error("Invalid requirement issues.");
+  if (!Array.isArray(record.issues) || record.issues.length > 4 || !record.issues.every((issue) =>
+    ["request-too-long", "file-output-limit", "ambiguous-file-target", "unsafe-file-target"].includes(String(issue)))) throw new Error("Invalid requirement issues.");
   if (record.originTurnId !== undefined && (typeof record.originTurnId !== "string" || !/^[A-Za-z0-9_.:-]{1,256}$/u.test(record.originTurnId))) throw new Error("Invalid requirement origin.");
   if (record.delegation !== undefined) {
     const delegation = object(record.delegation, ["count"]);
     if (delegation.count !== undefined && (!Number.isSafeInteger(delegation.count) || Number(delegation.count) < 0 || Number(delegation.count) > 999_999_999)) throw new Error("Invalid worker count.");
   }
   if (record.research !== undefined) {
-    const research = object(record.research, ["domain", "fresh"]);
-    if (!["general", "literature", "paper"].includes(String(research.domain)) || typeof research.fresh !== "boolean") throw new Error("Invalid research requirement.");
+    const research = object(record.research, ["domain", "fresh", "searchRequired"]);
+    if (!["general", "literature", "paper"].includes(String(research.domain)) || typeof research.fresh !== "boolean" || (research.searchRequired !== undefined && research.searchRequired !== true)) throw new Error("Invalid research requirement.");
   }
   if (record.fileOutput !== undefined) {
     const primary = object(record.fileOutput, ["format", "verification", "path", "directoryUnspecified", "alternativePaths", "exactCopy", "additionalFiles"]);
@@ -109,4 +109,10 @@ function validateFile(value: unknown): Record<string, unknown> {
     /^(?:[/\\]|[a-z]:)|[\u0000-\u001f\u007f]/iu.test(file.path) || file.path.split(/[/\\]/u).includes("..") ||
     redactString(file.path, { strict: true }) !== file.path)) throw new Error("Invalid relative file target.");
   return file;
+}
+
+
+/** Capacity limits preserve a bounded prefix; ambiguous/unsafe intent does not. */
+export function hasUnresolvedRequirementTargets(requirements: RequestRequirements | undefined): boolean {
+  return requirements?.issues.some(issue => issue !== "file-output-limit") === true;
 }

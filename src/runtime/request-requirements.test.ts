@@ -1,3 +1,4 @@
+import { continueRequestRequirements } from "./request-requirements.js";
 import { validateRequestRequirements, requiresAnyFileContentVerification } from "../contracts/request-requirements.js";
 import { describe, expect, it } from "vitest";
 import { SkillRegistry } from "../skills/skill-registry.js";
@@ -382,7 +383,7 @@ describe("explicit multiple output requirements", () => {
   it("rejects an unsafe secondary destination and bounds the output count", () => {
     expect(deriveRequestRequirements("Save a.md and ../b.md").issues).toContain("unsafe-file-target");
     const prompt = "Save " + Array.from({ length: 9 }, (_, i) => `file-${i}.txt`).join(" and ");
-    expect(deriveRequestRequirements(prompt)).toMatchObject({ issues: ["request-too-long"] });
+    expect(deriveRequestRequirements(prompt)).toMatchObject({ issues: ["file-output-limit"] });
     expect(deriveRequestRequirements(prompt).fileOutput?.additionalFiles).toHaveLength(7);
   });
 });
@@ -391,7 +392,7 @@ describe("explicit multiple output requirements", () => {
 it("keeps long multi-copy requirements persistable and explicitly incomplete", () => {
   const prompt = Array.from({ length: 8 }, (_, i) => `Copy ${"s".repeat(230)}${i}.md to ${"d".repeat(230)}${i}.md.`).join(" ");
   const requirements = deriveRequestRequirements(prompt);
-  expect(requirements.issues).toContain("request-too-long");
+  expect(requirements.issues).toContain("file-output-limit");
   expect(() => validateRequestRequirements(requirements)).not.toThrow();
 });
 
@@ -493,5 +494,30 @@ describe("input roles are not output obligations", () => {
     expect(deriveRequestRequirements("Create a service using settings.json. Save settings.json.").fileOutput?.path).toBe("settings.json");
     expect(deriveRequestRequirements("Copy source.json to result.json.").fileOutput).toMatchObject({path: "result.json", exactCopy: {sourcePath: "source.json"}});
     expect(deriveRequestRequirements("Write a.py and b.py using input.csv.").fileOutput).toMatchObject({path: "a.py", additionalFiles: [{path: "b.py"}]});
+  });
+});
+
+
+describe("research intent rather than incidental words", () => {
+  it.each([
+    "Here is some information you may find useful. Write result.csv.",
+    "These research notes may help. Write result.csv.",
+    "ابحث عن أعلى قيمة في data.csv. Write result.csv.",
+    "Find the largest value in data.csv and write result.csv.",
+    "Search the local log for errors and save summary.txt.",
+    "Investigate the failing unit tests and write result.json."
+  ])("keeps ordinary output verification for %s", text => {
+    const requirements = deriveRequestRequirements(text);
+    expect(requirements.research).toBeUndefined();
+    expect(requirements.fileOutput?.verification).toBe("execution");
+  });
+  it.each(["Research current battery recycling", "Find recent arXiv papers", "Investigate current release notes", "ابحث عن أحدث الدراسات"])("preserves research for %s", text => {
+    expect(deriveRequestRequirements(text).research?.fresh).toBe(true);
+  });
+  it("retains explicit web search across continuation and persistence", () => {
+    const requirements = deriveRequestRequirements("Search the web for current releases", "turn");
+    expect(requirements.research?.searchRequired).toBe(true);
+    expect(validateRequestRequirements(requirements)).toEqual(requirements);
+    expect(continueRequestRequirements(requirements, deriveRequestRequirements("Rerun this research")).research?.searchRequired).toBe(true);
   });
 });

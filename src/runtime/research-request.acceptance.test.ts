@@ -335,7 +335,7 @@ describe.sequential("research workflow acceptance harness", () => {
       }}));
     const route=(profile:typeof primaryModel,baseUrl:string)=>buildResolvedModelRoute({provider:profile.provider,model:profile.id,profile,baseUrl,authMethod:"api_key",apiKeyEnv:"ESTACODA_TEST_PROVIDER_KEY"});
     const h=await harness({providerHarness:{model:primaryModel,primary:route(primaryModel,primaryEndpoint.baseUrl),fallbacks:[route(fallbackModel,fallbackEndpoint.baseUrl)],registry}});
-    const result=await h.turn("Use the researcher skill and use 3 subagents to research current battery recycling. Save report.md.");
+    const result=await h.turn("Use the researcher skill and use 3 subagents to search the web for current battery recycling. Save report.md.");
     expect(primaryCalls).toBe(2);
     expect(bodies).toHaveLength(3);
     const attempts=h.events.filter(event=>event.kind==="provider-attempt"&&event.provider==="codex");
@@ -365,7 +365,7 @@ describe.sequential("research workflow acceptance harness", () => {
   it("marks repeated rejected skill reads blocked with no research or report completed", async () => {
     const h=await harness();
     for(let i=0;i<5;i++)h.enqueue(nativeCall("skill_read",{name:"researcher",path:"references/sources.md",mode:"invalid"}));
-    const result=await h.turn("Use the researcher skill and use 3 subagents to research current battery recycling. Save report.md.");
+    const result=await h.turn("Use the researcher skill and use 3 subagents to search the web for current battery recycling. Save report.md.");
     expect(result.toolExecutions).toHaveLength(5);
     expect(result.toolExecutions.every(call=>call.result?.ok===false)).toBe(true);
     expect(h.store.listTasks()).toHaveLength(0);
@@ -392,9 +392,20 @@ describe.sequential("research workflow acceptance harness", () => {
     expect(h.store.listTasks()).toHaveLength(0);scriptConsumed(h);
   });
 
+  it("accepts cited fresh extraction without a configured search provider", async () => {
+    const h = await harness({ searchAvailable: false });
+    h.enqueue(nativeCall("web_extract", { url: SOURCE_URL }), answer(REPORT));
+    const result = await h.turn(`Research current recycling using ${SOURCE_URL}.`);
+    expect(result.finalOutcome?.status).toBe("completed");
+    expect(h.searches).toHaveLength(0);
+    expect(h.extracts).toHaveLength(1);
+    expect(result.text).toContain("extracted; full text unverified");
+    scriptConsumed(h);
+  });
+
   it("blocks missing fresh-search prerequisites before spending a provider iteration", async () => {
     const h = await harness({ searchAvailable: false });
-    const result = await h.turn("Use the researcher skill and use 3 subagents to research current battery recycling. Save report.md.");
+    const result = await h.turn("Use the researcher skill and use 3 subagents to search the web for current battery recycling. Save report.md.");
     expect(result.finalOutcome).toMatchObject({ status: "blocked", terminationCause: "user_input_required" });
     expect(result.text).toContain("web.search is unavailable");
     expect(result.text).toContain("config.web.setup");
@@ -408,7 +419,7 @@ describe.sequential("research workflow acceptance harness", () => {
 
   it("reports all missing research prerequisites without delegation retries", async () => {
     const h = await harness({ searchAvailable: false });
-    const result = await h.turn("Use the nonexistent-skill skill and use 3 subagents to research current batteries. Save report.md.");
+    const result = await h.turn("Use the nonexistent-skill skill and use 3 subagents to search the web for current batteries. Save report.md.");
     expect(result.text).toContain("skill instructions are unavailable");
     expect(result.text).toContain("web.search is unavailable");
     expect(result.finalOutcome?.status).toBe("blocked");

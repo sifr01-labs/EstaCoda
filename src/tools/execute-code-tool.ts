@@ -59,6 +59,12 @@ export function createExecuteCodeTool(options: ExecuteCodeToolOptions): Register
     progressLabel: "executing code",
     maxResultSizeChars: 48_000,
     isAvailable: () => true,
+    // Match terminal settlement for a collected local exit. Nested tool effects
+    // are not established by Python's exit status and remain conservative.
+    isFailureOutcomeKnown: result => Number.isInteger(result.metadata?.exitCode) &&
+      Number(result.metadata?.exitCode) >= 0 && result.metadata?.signal === null &&
+      result.metadata.timedOut === false && result.metadata.cancelled === false &&
+      result.metadata.cleanupUncertain !== true && result.metadata.toolCalls === 0,
     run: async (input: Record<string, unknown>, context) => {
       if (typeof input.code !== "string" || input.code.trim().length === 0) {
         return errorResult("execute_code requires non-empty Python code");

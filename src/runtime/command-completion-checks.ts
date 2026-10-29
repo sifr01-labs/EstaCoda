@@ -1,17 +1,19 @@
+import { posix } from "node:path";
 import { settledLocalCommandExit } from "./local-command-result.js";
 import { semanticMutationKey } from "../tools/execution-operation-ledger.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import type { ExecutionEvidenceRecord } from "../contracts/execution-plan.js";
-import { commandFileObservation } from "./file-output-evidence.js";
+import { commandFileObservation } from "./command-file-observation.js";
 
 /** A check declaration can only add an obligation. Proof comes from the owned
  * command's collected exit, never its prose, tool-call success, or a new label.
  * A stable requirement label links different approaches to the same check. */
 export function commandCompletionChecks(calls: readonly ToolExecutionRecord[], receipts: readonly ExecutionEvidenceRecord[]): {
-  unresolved: boolean; unresolvedRequirements: string[]; passed: boolean; recoveredCalls: Set<string>; lastPassedCallId?: string;
+  unresolved: boolean; unresolvedRequirements: string[]; passedRequirements: string[]; passed: boolean; recoveredCalls: Set<string>; lastPassedCallId?: string;
 } {
   const records = new Map(receipts.map(receipt => [receipt.toolCallId, receipt]));
   const checks = new Map<string, boolean>();
+  const filePredicates = new Map<string, string>();
   const failedChecks = new Map<string, string[]>();
   const requirements = new Map<string, string>();
   const deniedChecks: { id: string; turn: string; requirement: string; index: number }[] = [];
@@ -51,7 +53,17 @@ export function commandCompletionChecks(calls: readonly ToolExecutionRecord[], r
       changed || (["file.write", "file.patch"].includes(call.tool.name) && call.result?.metadata?.changed !== false)
     );
     if (mutation) {
-      for (const key of checks.keys()) if (key.startsWith(`${receipt.visibleTurnId}:`)) checks.set(key, false);
+      for (const key of checks.keys()) if (key.startsWith(`${receipt.visibleTurnId}:`)) {
+        const target = filePredicates.get(key);
+        // Only a literal existence/size predicate with an observed regular file
+        // has a known dependency. Generic tests and shell mutations stay broad.
+        const written = call.result?.metadata?.path;
+        const independentWrite = target !== undefined && call.tool.name === "file.write" &&
+          call.result?.ok === true && call.result.metadata?.materialized === true &&
+          typeof written === "string" && !posix.isAbsolute(written) && !written.split("/").includes("..") &&
+          posix.normalize(written) !== target && !target.startsWith(`${posix.normalize(written)}/`);
+        if (!independentWrite) checks.set(key, false);
+      }
       for (const [id, state] of processes) {
         if (state.turn === receipt.visibleTurnId && id !== processId) state.stale = true;
       }
@@ -62,6 +74,14 @@ export function commandCompletionChecks(calls: readonly ToolExecutionRecord[], r
     if (!command || (!command.declared && !checks.has(command.key))) continue;
     const passed = receipt.status === "success" && !ownedProcess?.stale && commandSucceeded(call);
     checks.set(command.key, passed);
+    filePredicates.delete(command.key);
+    const predicate = call.tool.name === "terminal.run" && typeof call.input?.command === "string"
+      ? /^test\s+-(?:f|s)\s+([A-Za-z0-9_./-]+)\s*$/u.exec(call.input.command) : null;
+    const path = predicate?.[1];
+    if (passed && path && !posix.isAbsolute(path) && !path.split("/").includes("..") && observation?.completed &&
+        observation.files.some(file => file.path === posix.normalize(path) && typeof file.after === "string" && file.before === file.after)) {
+      filePredicates.set(command.key, posix.normalize(path));
+    }
     requirements.set(command.key, command.requirement);
     if (passed && call.executionEffect?.connector === undefined && receipt.executionEffect?.connector === undefined &&
       call.riskClass !== "external-side-effect" && receipt.riskClass !== "external-side-effect") {
@@ -79,7 +99,8 @@ export function commandCompletionChecks(calls: readonly ToolExecutionRecord[], r
     else unresolvedRequirements.add(denied.requirement);
   }
   const unresolved = unresolvedRequirements.size > 0;
-  return { unresolved, unresolvedRequirements: [...unresolvedRequirements], passed: checks.size > 0 && !unresolved, recoveredCalls,
+  return { unresolved, unresolvedRequirements: [...unresolvedRequirements],
+    passedRequirements: [...new Set([...checks].flatMap(([key, passed]) => passed ? [requirements.get(key)!] : []))].filter(label => !unresolvedRequirements.has(label)), passed: checks.size > 0 && !unresolved, recoveredCalls,
     ...(!unresolved && checks.size > 0 ? { lastPassedCallId } : {}) };
 }
 
@@ -118,4 +139,13 @@ function commandSucceeded(call: ToolExecutionRecord): boolean {
   const process = metadata?.process as { status?: unknown; exitCode?: unknown; signal?: unknown } | undefined;
   if (process) return process.status === "exited" && process.exitCode === 0 && process.signal == null;
   return settledLocalCommandExit(call) === 0;
+}
+
+
+/** Bound the fallback check to the current execution turn, never an earlier
+ * successful task. Step delivery may omit originTurnId but retains receipts. */
+export function hasFileOutputCoverage(calls: readonly ToolExecutionRecord[], receipts: readonly ExecutionEvidenceRecord[], originTurnId?: string): boolean {
+  const turn = originTurnId ?? receipts.at(-1)?.visibleTurnId;
+  return turn !== undefined && commandCompletionChecks(calls, receipts.filter(receipt => receipt.visibleTurnId === turn))
+    .passedRequirements.includes("file-output-coverage");
 }

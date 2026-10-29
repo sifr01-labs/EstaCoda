@@ -1,3 +1,4 @@
+import { hasUnresolvedRequirementTargets } from "../contracts/request-requirements.js";
 import { createHash, randomUUID } from "node:crypto";
 import { MAX_FILE_OUTPUTS, requestedFileOutputs, requiresFileContentVerification, validateRequestRequirements } from "../contracts/request-requirements.js";
 import type { RequestRequirements } from "../contracts/intent.js";
@@ -15,7 +16,7 @@ export type CommandFileObservation = {
 };
 
 export async function beginCommandFileObservation(files: WorkspaceFiles, requirements?: RequestRequirements, visibleTurnId?: string, contentOnly = false): Promise<CommandFileObservation | undefined> {
-  if (!requirements || !visibleTurnId || requirements.issues.length) return undefined;
+  if (!requirements || !visibleTurnId || hasUnresolvedRequirementTargets(requirements)) return undefined;
   try { validateRequestRequirements(requirements); } catch { return undefined; }
   const outputs = requestedFileOutputs(requirements);
   const paths = [...new Set(outputs.flatMap(file => [file.path, ...(file.alternativePaths ?? [])]))];

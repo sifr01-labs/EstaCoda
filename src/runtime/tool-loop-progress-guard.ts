@@ -1,5 +1,5 @@
 import { settledLocalCommandExit } from "./local-command-result.js";
-import { commandFileChanges, commandFileObservation } from "./file-output-evidence.js";
+import { commandFileChanges, commandFileObservation } from "./command-file-observation.js";
 import { toolResultFingerprint } from "./tool-result-fingerprint.js";
 import { matchesFileOutputPath, requestedFileOutputs } from "../contracts/request-requirements.js";
 import { createHash } from "node:crypto";

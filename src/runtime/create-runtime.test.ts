@@ -2993,6 +2993,7 @@ describe("createRuntime MCP trust gating", () => {
               "input",
               "maxOutputChars",
               "timeoutMs",
+              "verification",
             ],
             "toolsets": [
               "coding",

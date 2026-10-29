@@ -75,6 +75,18 @@ export function explicitRequestSegments(text: string): string[] {
     .map((segment) => segment.replace(/FILEOPERAND(\d+)/gu, (_, index: string) => operands[Number(index)] === undefined ? " " : `\`${operands[Number(index)]}\``));
 }
 
+/** Research is an affirmative task, not any occurrence of “find”. Local
+ * investigation/search retains the original request without inventing web proof. */
+function requestsResearch(text: string): boolean {
+  if (/(?:^|\s)ابحث(?:\s|$)/u.test(text)) {
+    return !/(?:في\s+(?:الملف|المجلد|الشيفرة)|(?:أعلى|أقل|أكبر|أصغر)\s+قيمة)/u.test(text);
+  }
+  const action = /(?:^|[.!?;:]|\b(?:to|and|then)|\b(?:can|could|would)\s+you)\s*(?:please\s+)?(?:(?:do|conduct|perform|provide)\s+)?(?:(?:deep|thorough|detailed|quick)\s+)?(research|investigate|find|search|survey)\b/iu.exec(text);
+  if (!action) return false;
+  if (action[1]!.toLowerCase() === "research") return true;
+  return /\b(?:web|online|internet|sources?|citations?|papers?|arxiv|literature|academic|publications?|studies|articles?|news|markets?|competitors?|releases?|documentation)\b/iu.test(text.slice(action.index));
+}
+
 export function deriveRequestRequirements(userText: string, originTurnId?: string, workspaceRoot?: string): RequestRequirements {
   const result: RequestRequirements = { skillReferences: [], issues: [], ...(originTurnId === undefined ? {} : { originTurnId }) };
   if (userText.length > MAX_REQUEST_CHARS) {
@@ -109,10 +121,11 @@ export function deriveRequestRequirements(userText: string, originTurnId?: strin
       const words: Record<string, number> = { one: 1, two: 2, three: 3, four: 4, five: 5, six: 6, seven: 7, eight: 8, nine: 9, ten: 10, ثلاثة: 3, ثلاث: 3, اثنين: 2, اثنان: 2 };
       result.delegation = countText === undefined ? {} : { count: words[countText.toLowerCase()] ?? Number(countText.replace(/[٠-٩]/gu, (digit) => String("٠١٢٣٤٥٦٧٨٩".indexOf(digit)))) };
     }
-    if (explicitInspectionTools(segment).length === 0 && /\b(?:research|investigate|find|search|survey)\b|(?:ابحث|بحث)/iu.test(actionSegment)) {
+    if (explicitInspectionTools(segment).length === 0 && (requestsResearch(actionSegment) || (explicitSkillReferences(segment).some(name => ["research", "researcher", "research-discovery"].includes(name)) && /\b(?:for|on|about)\b/iu.test(actionSegment)))) {
       const domain = /\b(?:write|draft|author)\s+(?:a\s+)?(?:paper|manuscript)\b|\bexperiment\b/iu.test(actionSegment) ? "paper"
         : /\b(?:papers?|arxiv|literature|academic|publications?)\b|(?:أوراق|أبحاث|أدبيات)/iu.test(actionSegment) ? "literature" : "general";
-      result.research = { domain: domain === "general" ? result.research?.domain ?? domain : domain, fresh: result.research?.fresh === true || /\b(?:latest|recent|current|fresh|newest)\b|(?:أحدث|حديث|الحالية)/iu.test(actionSegment) };
+      result.research = { domain: domain === "general" ? result.research?.domain ?? domain : domain, fresh: result.research?.fresh === true || /\b(?:latest|recent|current|fresh|newest)\b|(?:أحدث|حديث|الحالية)/iu.test(actionSegment),
+        ...(result.research?.searchRequired || /\bsearch\b|ابحث\s+(?:في|على)\s+(?:الويب|الإنترنت)/iu.test(actionSegment) ? { searchRequired: true as const } : {}) };
     }
     const copy = /^\s*(?:(?:can|could|would)\s+you\s+)?(?:(?:please|just)\s+)?(?:copy\b|(?:make|create|save)\s+(?:(?:an?|the|identical|exact|unchanged)\s+)*copy\b)/iu.test(actionSegment) && new RegExp(String.raw`\b(?:as|to)\s+(?:\x60[^\x60]+\x60|[^\s]+\.(?:${FILE_EXTENSIONS}))\s*(?:[.!]|,?\s*(?:preserving|while preserving)\b|$)`, "iu").test(segment);
     // Locate the output action without treating a filename as a verb. Keep
@@ -199,12 +212,12 @@ export function deriveRequestRequirements(userText: string, originTurnId?: strin
         result.issues.push("ambiguous-file-target");
         continue;
       }
-      if (outputs.flatMap(file => [file.path, ...(file.alternativePaths ?? [])]).length >= MAX_FILE_OUTPUTS) { result.issues.push("request-too-long"); continue; }
+      if (outputs.flatMap(file => [file.path, ...(file.alternativePaths ?? [])]).length >= MAX_FILE_OUTPUTS) { result.issues.push("file-output-limit"); continue; }
       outputs.push(output);
     }
     if (alternatives && group.length) {
       const paths = group.map(file => file.path);
-      if (paths.some(path => path === undefined) || outputs.flatMap(file => [file.path, ...(file.alternativePaths ?? [])]).length + paths.length > MAX_FILE_OUTPUTS) result.issues.push("request-too-long");
+      if (paths.some(path => path === undefined) || outputs.flatMap(file => [file.path, ...(file.alternativePaths ?? [])]).length + paths.length > MAX_FILE_OUTPUTS) result.issues.push("file-output-limit");
       else outputs.push({ ...group[0]!, directoryUnspecified: group.every(file => file.directoryUnspecified) ? true : undefined, alternativePaths: paths.slice(1) as string[] });
     }
     const allPaths = outputs.flatMap(file => [file.path, ...(file.alternativePaths ?? [])]);
@@ -222,7 +235,7 @@ export function deriveRequestRequirements(userText: string, originTurnId?: strin
   // Several long copy source/destination pairs can exceed the persistence
   // budget before reaching the count limit. Retain a bounded, unresolved prefix.
   if (JSON.stringify(result).length > MAX_REQUEST_REQUIREMENTS_CHARS) {
-    result.issues.push("request-too-long");
+    result.issues.push("file-output-limit");
     while (result.fileOutput?.additionalFiles?.length && JSON.stringify(result).length > MAX_REQUEST_REQUIREMENTS_CHARS) {
       result.fileOutput.additionalFiles.pop();
       if (result.fileOutput.additionalFiles.length === 0) delete result.fileOutput.additionalFiles;
@@ -303,7 +316,8 @@ export function continueRequestRequirements(previous: RequestRequirements, next:
     ...structuredClone(previous), ...structuredClone(next),
     ...(previous.research === undefined ? {} : { research: {
       domain: next.research?.domain !== undefined && next.research.domain !== "general" ? next.research.domain : previous.research.domain,
-      fresh: previous.research.fresh || next.research?.fresh === true
+      fresh: previous.research.fresh || next.research?.fresh === true,
+      ...(previous.research.searchRequired || next.research?.searchRequired ? { searchRequired: true as const } : {})
     } }),
     skillReferences: next.skillReferences.length > 0 ? [...next.skillReferences] : [...previous.skillReferences],
     issues: [...new Set([...previous.issues, ...next.issues])]

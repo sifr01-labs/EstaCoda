@@ -9,13 +9,16 @@ import { describe, expect, it } from "vitest";
 import { createWorkspaceTools } from "../tools/workspace-tools.js";
 import { createProcessTools } from "../tools/process-tools.js";
 import { ProcessManager } from "../process/process-manager.js";
-import type { ToolExecutionRecord } from "../tools/tool-executor.js";
+import { ToolExecutor, type ToolExecutionRecord } from "../tools/tool-executor.js";
+import { ToolRegistry } from "../tools/tool-registry.js";
+import { InMemorySessionDB } from "../session/in-memory-session-db.js";
+import { TrajectoryRecorder } from "../trajectory/trajectory-recorder.js";
 import { ExecutionEvidenceIndex } from "./execution-evidence-index.js";
 import { deriveRequestRequirements } from "./request-requirements.js";
 import { commandCompletionChecks, commandCompletionFeedback } from "./command-completion-checks.js";
 import { deriveExecutionFinalOutcome } from "./execution-outcome.js";
 
-async function fixture(request = "Write report.txt and read it back", floor: "mutation" | "mutation_with_verification" = "mutation") {
+async function fixture(request = "Write report.txt and read it back", floor: "mutation" | "mutation_with_verification" = "mutation", throughExecutor = false) {
   const root = await mkdtemp(join(tmpdir(), "completion-checks-"));
   const manager = new ProcessManager({ workspaceRoot: root });
   const tools = [...createWorkspaceTools({ workspaceRoot: root, processManager: manager, commandTimeoutMs: 100 }), ...createProcessTools({ processManager: manager })];
@@ -25,7 +28,18 @@ async function fixture(request = "Write report.txt and read it back", floor: "mu
   const requirements = deriveRequestRequirements(request, "turn-1");
   const calls: ToolExecutionRecord[] = [];
   const index = new ExecutionEvidenceIndex();
+  const registry = new ToolRegistry();
+  for (const tool of tools) registry.register(tool);
+  const sessionDb = new InMemorySessionDB();
+  await sessionDb.createSession({ profileId: "test", id: "test" });
+  const executor = new ToolExecutor({ registry, workspaceRoot: root, securityPolicy: { decide: () => "allow" }, sessionDb,
+    trajectoryRecorder: new TrajectoryRecorder({ profileId: "test", sessionId: "test", modelId: "test" }) });
   const run = async (name: string, input: Record<string, unknown>, turn = "turn-1") => {
+    if (throughExecutor) {
+      const call = await executor.executeTool({ tool: name, input, toolCallId: `call-${calls.length}`, trustedWorkspace: true, sessionId: "test", visibleTurnId: turn, requestContract: { version: 1, objective: request, requirements } });
+      expect(call).toBeDefined();
+      calls.push(call!); index.record(call!, turn); return call!.result!;
+    }
     const tool = tools.find(tool => tool.name === name)!;
     const result = await tool.run(input, { visibleTurnId: turn, requestContract: { requirements } } as never);
     const call: ToolExecutionRecord = { tool, input, result, decision: "allow", riskClass: tool.riskClass,
@@ -286,9 +300,10 @@ describe("declared check recovery boundaries", () => {
 
 describe("Python and terminal evidence interoperability", () => {
   it("recovers a settled Python exploration failure after verified output", async () => {
-    const f = await fixture();
+    const f = await fixture(undefined, "mutation", true);
     try {
       expect(await f.run("execute_code", { code: "raise ValueError('unavailable approach')" })).toMatchObject({ ok: false, metadata: { exitCode: 1, timedOut: false, cancelled: false } });
+      expect(f.calls[0]?.settlement?.sideEffectState).toBe("confirmed");
       await f.output();
       expect(f.outcome().status).toBe("completed_with_recovered_errors");
     } finally { await f.close(); }
@@ -307,9 +322,18 @@ describe("Python and terminal evidence interoperability", () => {
     } finally { await f.close(); }
   });
   it("preserves a timed-out Python attempt after producing an output", async () => {
-    const f = await fixture();
+    const f = await fixture(undefined, "mutation", true);
     try {
       expect(await f.run("execute_code", { code: "import time; time.sleep(30)", timeoutMs: 50 })).toMatchObject({ ok: false, metadata: { timedOut: true } });
+      await f.output();
+      expect(f.outcome().status).toBe("partially_completed");
+    } finally { await f.close(); }
+  });
+  it("does not settle nested tool effects from a Python exit", async () => {
+    const f = await fixture(undefined, "mutation", true);
+    try {
+      expect(await f.run("execute_code", { code: "tool('file.read', {'path': 'missing.txt'})\nraise ValueError('after nested call')" })).toMatchObject({ ok: false, metadata: { exitCode: 1, toolCalls: 1 } });
+      expect(f.calls[0]?.settlement?.sideEffectState).toBe("possible");
       await f.output();
       expect(f.outcome().status).toBe("partially_completed");
     } finally { await f.close(); }
@@ -339,5 +363,43 @@ it.each(["terminal.run", "execute_code"])("credits full readback of %s output on
     expect(guard.observe([read]).progressKinds).toContain("verification");
     expect(guard.observe([write]).materialProgress).toBe(false);
     expect(guard.observe([read]).materialProgress).toBe(false);
+  } finally { await f.close(); }
+});
+
+
+it("finishes nine outputs only after a current check covers the full request", async () => {
+  const paths = Array.from({ length: 9 }, (_, i) => `output${i}.txt`);
+  const f = await fixture(`Write ${paths.join(", ")}`);
+  try {
+    for (const path of paths.slice(0, 8)) await f.run("file.write", { path, content: "ready" });
+    await f.run("terminal.run", { command: "true", verification: "unrelated-check", timeoutMs: 100 });
+    expect(f.outcome().status).toBe("partially_completed");
+    const input = { code: `from pathlib import Path\nassert all(Path(p).read_text() == 'ready' for p in ${JSON.stringify(paths)})`, verification: "file-output-coverage" };
+    await f.run("execute_code", input);
+    expect(f.outcome().status).toBe("partially_completed");
+    await f.run("file.write", { path: paths[8], content: "ready" });
+    await f.run("terminal.run", { command: "true", verification: "unrelated-check", timeoutMs: 100 });
+    await f.run("execute_code", input, "other-turn");
+    expect(f.outcome().status).toBe("partially_completed");
+    await f.run("execute_code", input);
+    expect(f.outcome().status).toBe("completed_with_recovered_errors");
+    await f.run("file.write", { path: paths[8], content: "broken", overwrite: true });
+    expect(f.outcome().status).toBe("partially_completed");
+  } finally { await f.close(); }
+});
+
+
+it("retains an observed file predicate across unrelated writes without narrowing generic checks", async () => {
+  const f = await fixture();
+  try {
+    await f.output();
+    await f.run("terminal.run", { command: "test -s report.txt", verification: "output-check", timeoutMs: 100 });
+    await f.run("file.write", { path: "notes.txt", content: "notes" });
+    expect(f.outcome().status).toBe("completed");
+    await f.run("terminal.run", { command: "test -s report.txt && test -s notes.txt", verification: "both-files", timeoutMs: 100 });
+    await f.run("file.write", { path: "other.txt", content: "unknown dependency" });
+    expect(f.outcome().status).toBe("partially_completed");
+    await f.output("updated");
+    expect(commandCompletionChecks(f.calls, f.calls.map(c => ({ toolCallId: c.toolCallId!, tool: c.tool.name, visibleTurnId: "turn-1", status: "success" } as never))).unresolvedRequirements).toContain("output-check");
   } finally { await f.close(); }
 });

@@ -41,8 +41,8 @@ export type RequestRequirements = {
   skillReferences: string[];
   delegation?: { count?: number };
   fileOutput?: FileOutputRequirement & { additionalFiles?: FileOutputRequirement[] };
-  research?: { domain: "general" | "literature" | "paper"; fresh: boolean };
-  issues: Array<"request-too-long" | "ambiguous-file-target" | "unsafe-file-target">;
+  research?: { domain: "general" | "literature" | "paper"; fresh: boolean; searchRequired?: true };
+  issues: Array<"request-too-long" | "file-output-limit" | "ambiguous-file-target" | "unsafe-file-target">;
 };
 
 export type SkillInvocation = {

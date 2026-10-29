@@ -1,3 +1,4 @@
+import { hasFileOutputCoverage } from "./command-completion-checks.js";
 import { verifiedFileOutputContent } from "./file-output-evidence.js";
 import { groundForegroundResearch } from "../tasks/research-result-evidence.js";
 import { readTaskResultEvidence } from "../tasks/task-result-read-evidence.js";
@@ -15,9 +16,11 @@ export function researchPrerequisiteBlockers(intent: Pick<IntentRoute, "requestR
   if (intent.skillRequests?.some((request) => request.status === "unavailable")) {
     blockers.push("Requested research skill instructions are unavailable in this session. Check the selected profile's skill visibility and the installed bundled skills before retrying.");
   }
-  if (requirements.research.fresh && requirements.sourceTaskId === undefined && catalog !== undefined &&
-    !catalog.entries.some((entry) => entry.tool.name === "web.search")) {
-    blockers.push("web.search is unavailable in this session. Review and verify a search provider through Web Research setup (config.web.setup), then retry. Direct URL extraction cannot satisfy the requested fresh-search evidence.");
+  if ((requirements.research.fresh || requirements.research.searchRequired) && requirements.sourceTaskId === undefined && catalog !== undefined &&
+    !catalog.entries.some((entry) => entry.tool.name === "web.search" || (!requirements.research?.searchRequired && entry.tool.name === "web.extract"))) {
+    blockers.push(requirements.research.searchRequired
+      ? "web.search is unavailable in this session. The user explicitly requested search; configure a search provider through config.web.setup."
+      : "Live source retrieval is unavailable in this session. Configure web.search or web.extract through config.web.setup.");
   }
   return blockers;
 }
@@ -46,15 +49,20 @@ export function researchRequestEvidence(input: {
   });
   const handoff = input.delegatedAnswerOwned === true && admitted;
   const missing: string[] = requirements.issues.includes("request-too-long") ? ["request-requirements-exceed-bound"] : [];
+  if (requirements.issues.includes("file-output-limit")) {
+    if (!hasFileOutputCoverage(input.toolExecutions, input.executionReceipts, requirements.originTurnId)) missing.push("file-output-coverage");
+  }
   const sourceResult = requirements.sourceTaskId === undefined ? undefined : readTaskResultEvidence(observed, requirements.sourceTaskId).find((page) => page.primary);
   const settledResearch = sourceResult?.researchComplete === true;
   if (requirements.sourceTaskId !== undefined && sourceResult === undefined) missing.push("accepted-research-result");
   if (requirements.delegation !== undefined && !handoff && !settledResearch) missing.push("requested-worker-evidence");
-  if (requirements.research?.fresh && !handoff && !settledResearch && !observed.some((execution) => execution.tool.name === "web.search")) missing.push("live-source-evidence");
+  if ((requirements.research?.fresh || requirements.research?.searchRequired) && !handoff && !settledResearch && !observed.some((execution) =>
+    execution.tool.name === "web.search" || (!requirements.research?.searchRequired && execution.tool.name === "web.extract" &&
+      typeof execution.result?.metadata?.url === "string" && typeof execution.result.metadata.content === "string" && execution.result.metadata.content.trim().length > 0))) missing.push("live-source-evidence");
   const report = requirements.fileOutput === undefined ? input.finalText : verifiedFileOutputContent({
     requirements, toolExecutions: input.toolExecutions, executionReceipts: input.executionReceipts
   });
-  const grounded = requirements.research?.fresh && !handoff && !settledResearch
+  const grounded = (requirements.research?.fresh || requirements.research?.searchRequired) && !handoff && !settledResearch
     ? groundForegroundResearch(report ?? "", observed, new Date()) : undefined;
   if (grounded?.failure !== undefined) missing.push(requirements.fileOutput !== undefined && report === undefined ? "verified-report-content-missing" : grounded.failure);
   if (requirements.skillReferences.length > 0 && input.skillRequirementsSatisfied !== true) missing.push("requested-skill-instructions");
