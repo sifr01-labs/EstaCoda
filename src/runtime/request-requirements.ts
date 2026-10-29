@@ -130,7 +130,7 @@ export function deriveRequestRequirements(userText: string, originTurnId?: strin
     // Sources and preservation constraints never introduce destinations, even
     // when the action names a service rather than a file. Explicit later save
     // clauses are processed separately; copy destinations keep their contract.
-    const inputStart = /\b(?:using|from|based on|preserving|preserve|keep|without changing|such that|that when|that's|that is|so that)\s+/iu.exec(outputSegment.replace(/`[^`]*`/gu, value => " ".repeat(value.length)));
+    const inputStart = /\b(?:using|from|based on|documenting|summari[sz]ing|listing|excluding|except(?: for)?|other than|preserving|preserve|keep|without changing|such that|that when|that's|that is|so that)\s+/iu.exec(outputSegment.replace(/`[^`]*`/gu, value => " ".repeat(value.length)));
     if (!copy && inputStart) outputSegment = outputSegment.slice(0, inputStart.index);
     let pathMatches = [...outputSegment.matchAll(FILE_NAME)].filter(match => !NATIVE_ARTIFACT_EXTENSION.test(match[1] ?? match[0]) && !/^(?:e\.g|i\.e)$/iu.test(match[1] ?? match[0]));
     // "named x.py, and place it in /app/x.py" names one file twice.

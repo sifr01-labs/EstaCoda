@@ -27,6 +27,12 @@ Exact copies, research reports, accepted Task-result delivery, explicit readback
 
 Output formats do not select a document workflow by themselves. Standard and JEV routing share the completion policy. Existing dedicated media, office-document, and archive output handling is unchanged.
 
+Output extraction also treats documentation topics (`documenting`, `summarizing`, `listing`) and exclusions (`excluding`, `except for`, `other than`) as context rather than extra destinations. A later explicit save clause still creates its own requirement; exact-copy contracts and path authorization are unchanged.
+
+Declared command checks participate in the existing bounded completion-repair loop, including work without a named file output. The runtime supplies up to eight unresolved requirement labels at a time and requires successful checks on current output using those same labels. A missing interpreter, crash, failed exit, or stale result cannot be cleared by prose, readback, or an unrelated check. The loop retains its two-correction ceiling, budgets, cancellation, and denied-tool restrictions. If validation remains unresolved, the final response reports incomplete validation rather than accepting a completion claim.
+
+A denied local `terminal.run` check may be recorded as recovered only when trusted settlement proves it never started and had no effects, and a later authorized check of the same requirement in the same turn passes on current output. The original denial remains in the trace. Pending approvals, external/connector actions, unknown dispatch and uncertain effects do not use this recovery. No command is automatically retried, and trust, permissions and the non-overridable hardline floor still apply to every alternative.
+
 Explicit `file.read` and text-copy operations determine text eligibility from actual bytes, accepting valid UTF-8 source/configuration formats without an extension allowlist. Binary and invalid UTF-8 content is rejected. Automatic context discovery and search retain their existing filters; path, trust, approval, and editor-materialization checks still apply.
 
 Distinct successful Python execution results receive the same progress credit as shell results while a checkpoint is active. Repeated calls, repeated output, failed/cancelled execution, and unchanged completion-repair loops remain bounded. Progress credit alone never proves completion.

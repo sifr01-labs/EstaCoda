@@ -8,6 +8,7 @@ import { ProcessManager } from "../process/process-manager.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import { ExecutionEvidenceIndex } from "./execution-evidence-index.js";
 import { deriveRequestRequirements } from "./request-requirements.js";
+import { commandCompletionChecks, commandCompletionFeedback } from "./command-completion-checks.js";
 import { deriveExecutionFinalOutcome } from "./execution-outcome.js";
 
 async function fixture(request = "Write report.txt and read it back", floor: "mutation" | "mutation_with_verification" = "mutation") {
@@ -211,5 +212,66 @@ describe("completion checks and unsuccessful approaches", () => {
       expect((await f.run("terminal.run", { command: "touch never-created", verification: true })).ok).toBe(false);
       expect((await f.run("file.read", { path: "never-created" })).ok).toBe(false);
     } finally { await f.close(); }
+  });
+});
+
+// Runtime settlement, not a provider-supplied exit code, identifies an approach
+// that was refused before dispatch. The original boundary remains inspectable.
+describe("declared check recovery boundaries", () => {
+  const check = (id: string, overrides: Partial<ToolExecutionRecord> = {}): ToolExecutionRecord => ({
+    tool: { name: "terminal.run", riskClass: "workspace-write", description: "Run", inputSchema: {}, toolsets: [], progressLabel: "run", maxResultSizeChars: 100 },
+    toolCallId: id, input: { command: "test -s output.txt", verification: "output-check" },
+    decision: "allow", riskClass: "workspace-write", executionEffect: { kind: "mutation" },
+    settlement: { terminalStatus: "completed", dispatchState: "finished", sideEffectState: "confirmed" },
+    result: { ok: true, content: "", metadata: { code: 0, cwd: "/work", signal: null, timedOut: false, cancelled: false } },
+    ...overrides
+  });
+  const denied = (): ToolExecutionRecord => check("denied", {
+    decision: "deny", riskClass: "destructive-local", result: undefined,
+    settlement: { terminalStatus: "failed", dispatchState: "not_started", sideEffectState: "none" }
+  });
+  const observe = (calls: ToolExecutionRecord[], turns: string[] = []) => {
+    const index = new ExecutionEvidenceIndex();
+    calls.forEach((call, i) => index.record(call, turns[i] ?? "turn-1"));
+    return { calls, receipts: index.recordsForTurn("turn-1") };
+  };
+  it("recovers a refused local check only after a fresh authorized check of the same requirement", () => {
+    const refused = denied();
+    const first = observe([refused]);
+    expect(commandCompletionChecks(first.calls, first.receipts)).toMatchObject({ unresolved: true, unresolvedRequirements: ["output-check"] });
+    const success = observe([refused, check("passed")]);
+    expect(commandCompletionChecks(success.calls, success.receipts)).toMatchObject({ unresolved: false, recoveredCalls: new Set(["denied"]) });
+    expect(refused.decision).toBe("deny");
+    expect(deriveExecutionFinalOutcome({ toolExecutions: success.calls, executionReceipts: success.receipts, completionFloor: "mutation_with_verification" }).status).toBe("completed_with_recovered_errors");
+  });
+  it.each(["ask", "unknown-dispatch", "uncertain", "connector", "external"])("does not recover the %s boundary", kind => {
+    const refused = denied();
+    if (kind === "ask") refused.decision = "ask";
+    if (kind === "unknown-dispatch") refused.settlement = { terminalStatus: "failed", dispatchState: "unknown", sideEffectState: "none" };
+    if (kind === "uncertain") refused.settlement = { terminalStatus: "failed", dispatchState: "started", sideEffectState: "possible" };
+    if (kind === "connector") refused.executionEffect = { kind: "mutation", connector: { kind: "mcp", id: "remote" } };
+    if (kind === "external") refused.riskClass = "external-side-effect";
+    const f = observe([refused, check("passed")]);
+    expect(commandCompletionChecks(f.calls, f.receipts).recoveredCalls.has("denied")).toBe(false);
+  });
+  it("requires the same requirement in the same turn, after the denial and on current output", () => {
+    for (const f of [
+      observe([denied(), check("other", { input: { command: "true", verification: "unrelated" } })]),
+      observe([denied(), check("later")], ["turn-1", "turn-2"]),
+      observe([denied(), check("remote", { executionEffect: { kind: "mutation", connector: { kind: "mcp", id: "remote" } } })]),
+      observe([denied(), check("external", { riskClass: "external-side-effect" })]),
+      observe([check("earlier"), denied()]),
+      observe([denied(), check("pass"), check("edit", { tool: { ...check("edit").tool, name: "file.write" }, input: { path: "output.txt", content: "changed" } })])
+    ]) expect(commandCompletionChecks(f.calls, f.receipts).recoveredCalls.has("denied")).toBe(false);
+  });
+  it.each([127, 139, 1])("names the failed requirement after exit %i instead of accepting readback or another label", code => {
+    const failed = check("failed", { result: { ok: false, content: "failure", metadata: { code, cwd: "/work", signal: null, timedOut: false, cancelled: false } } });
+    const other = check("renamed", { input: { command: "test -s output.txt", verification: "new-label" } });
+    const f = observe([failed, other]);
+    expect(commandCompletionFeedback(f.calls, f.receipts)).toContain('["output-check"]');
+    expect(commandCompletionChecks(f.calls, f.receipts).recoveredCalls.size).toBe(0);
+    const recovered = observe([failed, other, check("recheck")]);
+    expect(commandCompletionFeedback(recovered.calls, recovered.receipts)).toBeUndefined();
+    expect(commandCompletionChecks(recovered.calls, recovered.receipts).recoveredCalls.has("failed")).toBe(true);
   });
 });

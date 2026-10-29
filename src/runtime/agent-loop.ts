@@ -8,6 +8,7 @@ import type { ContextExpansionResult, ProjectContextSnapshot } from "../contract
 import type { IntentRoute, RequestRequirements } from "../contracts/intent.js";
 import { requiresAnyFileContentVerification } from "../contracts/request-requirements.js";
 import { fileOutputEvidence, pendingFileReadbackPaths } from "./file-output-evidence.js";
+import { commandCompletionChecks, commandCompletionFeedback } from "./command-completion-checks.js";
 import { continueRequestRequirements, requiredSkillsDelivered } from "./request-requirements.js";
 import { researchPrerequisiteBlockers, researchRequestEvidence } from "./research-request-evidence.js";
 import type { ExecutionFinalOutcome, ExecutionPlan, ExecutionPlanReader } from "../contracts/execution-plan.js";
@@ -1128,15 +1129,18 @@ export class AgentLoop {
         requirements: intent.requestRequirements, toolExecutions: executions,
         executionReceipts: this.#executionEvidenceIndex.recordsForTurn(visibleTurn.id)
       }) : undefined,
-      validateCompletion: input.stepCompletion?.validate ?? (intent.requestRequirements?.research === undefined && intent.requestRequirements?.fileOutput === undefined ? undefined : (text, executions) => {
+      validateCompletion: (text, executions) => {
         const receipts = this.#executionEvidenceIndex.recordsForTurn(visibleTurn.id);
+        const checks = commandCompletionFeedback(executions, receipts);
+        if (input.stepCompletion?.validate !== undefined) return input.stepCompletion.validate(text, executions) ?? checks;
+        if (intent.requestRequirements?.research === undefined && intent.requestRequirements?.fileOutput === undefined) return checks;
         const research = researchRequestEvidence({ finalText: text, requestRequirements: intent.requestRequirements,
           toolExecutions: executions, executionReceipts: receipts, skillRequirementsSatisfied: true });
         if (research.missing.includes("requested-worker-evidence")) return "Requested worker evidence is missing. Use delegate_task to fulfill the user's worker requirement. If it is not exposed, discover and request the delegation capability before continuing.";
         const file = fileOutputEvidence({ requirements: intent.requestRequirements, toolExecutions: executions, executionReceipts: receipts });
         if (!file.satisfied) return `File output${file.path === undefined ? "" : ` ${JSON.stringify(file.path)}`}: ${file.reason}. ${requiresAnyFileContentVerification(intent.requestRequirements) ? "This request requires content verification. Read the complete output after writing it, without lineStart or lineEnd (null bounds also mean the whole file). Exact copies must match their observed source; accepted reports must match their Task result." : "Produce the named outputs using authorized file tools or commands and check the result appropriately. Commands must exit successfully and produce the requested files; text readback is not required."} Respect overwrite approvals and do not retry denied actions. Do not claim unobserved results.`;
-        return research.satisfied ? undefined : `Research requirements remain incomplete: ${research.missing.join(", ")}. Correct the report using observed sources. After changing a saved report, read the complete file again before completing.`;
-      }),
+        return research.satisfied ? checks : `Research requirements remain incomplete: ${research.missing.join(", ")}. Correct the report using observed sources. After changing a saved report, read the complete file again before completing.`;
+      },
       visibleTurnId: visibleTurn.id,
       userText: effectiveText,
       routedText: executionText,
@@ -1507,6 +1511,11 @@ export class AgentLoop {
       if (researchBlockers.length > 0) {
         response.text = `Research is blocked. ${researchBlockers.join(" ")}` +
           (intent.requestRequirements?.fileOutput === undefined ? "" : " The requested report has not been written or verified in this turn.");
+      }
+      const checks = commandCompletionChecks(toolExecutions, this.#executionEvidenceIndex.recordsForTurn(visibleTurn.id));
+      if (fileEvidence.satisfied && researchEvidence.satisfied && checks.unresolved) {
+        response.text = `Required validation remains incomplete: ${checks.unresolvedRequirements.slice(0, 8).join(", ")}. No successful current result was recorded for these checks.`;
+        if (response.providerExecution !== undefined) response.providerExecution = suppressProviderGeneratedText(response.providerExecution);
       }
     }
     if (providerLoop.researchRecoverySummary !== undefined) {

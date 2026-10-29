@@ -442,6 +442,29 @@ describe("file production policy", () => {
 
 describe("input roles are not output obligations", () => {
   it.each([
+    ["Write CONFIGURATION.md documenting every key in schema.json with its type and default. Preserve schema.json.", "CONFIGURATION.md"],
+    ["Create docs/index.md listing each document below docs, excluding index.md.", "docs/index.md"],
+    ["Write summary.md summarizing changes.json.", "summary.md"],
+    ["Write index.md excluding draft.md.", "index.md"],
+    ["Write index.md except for draft.md.", "index.md"]
+  ])("keeps topics and exclusions out of the destination list: %s", (text, path) => {
+    const result = deriveRequestRequirements(text!);
+    expect(result).toMatchObject({ issues: [], fileOutput: { path } });
+    expect(result.fileOutput?.additionalFiles).toBeUndefined();
+  });
+  it("retains explicit destinations after a source or exclusion clause", () => {
+    for (const clause of ["documenting schema.json", "excluding draft.md"]) {
+      const result = deriveRequestRequirements(`Write index.md ${clause}. Save summary.json.`);
+      expect(result).toMatchObject({ issues: [], fileOutput: { path: "index.md", additionalFiles: [{ path: "summary.json" }] } });
+    }
+    expect(deriveRequestRequirements("Write documenting.md and excluding.json.")).toMatchObject({
+      issues: [], fileOutput: { path: "documenting.md", additionalFiles: [{ path: "excluding.json" }] }
+    });
+    expect(deriveRequestRequirements("Copy listing.json to documenting.json.")).toMatchObject({
+      issues: [], fileOutput: { path: "documenting.json", exactCopy: { sourcePath: "listing.json" } }
+    });
+  });
+  it.each([
     "Create a redirect service using redirects.json. Preserve redirects.json. Save server.py.",
     "Create a report from source.csv. Save report.md.",
     "Create a report based on source.csv. Save report.md.",
