@@ -977,6 +977,69 @@ describe("runtime tool activity events", () => {
     }));
   });
 
+  it.each([
+    ["image-generation", "allow"], ["image-generation", "deny"], ["general", "allow"], ["general", "deny"]
+  ] as const)("routes a canvas refinement to image.edit through the governed executor (%s, %s)", async (nativeIntent, decision) => {
+    const events: RuntimeEvent[] = [];
+    const editTool = { ...fileReadTool, name: "image.edit", riskClass: "external-side-effect" as const };
+    const executeTool = vi.fn().mockResolvedValue(execution({tool: editTool, decision}));
+    const onApprovalRequest = vi.fn();
+    const executor = new NativeToolExecutor({
+      toolExecutor: {getToolDefinition: (name: string) => name === "image.edit" ? editTool : undefined, executeTool} as never,
+      runRecorder: runRecorder() as never,
+      sessionId: "old-session",
+      sessionRuntimeContext: {currentSessionId: () => "current-session"} as never,
+    });
+    const outcome = await executor.executeDeterministicNativeTools({
+      intent: intent({labels: ["image"], nativeIntent}),
+      text: "Edit this image with image.edit: artifact://7f8abcfa-a30f-4714-9120-20ac6e08a60e\n\nnow show me it in someones hands",
+      trustedWorkspace: false,
+      visibleTurnId: "edit-turn",
+      onApprovalRequest,
+      onEvent: event => {events.push(event);},
+    });
+    expect(executeTool).toHaveBeenCalledTimes(1);
+    expect(executeTool).toHaveBeenCalledWith(expect.objectContaining({
+      tool: "image.edit",
+      input: {prompt: "now show me it in someones hands", sourceImages: ["artifact://7f8abcfa-a30f-4714-9120-20ac6e08a60e"], aspectRatio: "square"},
+      trustedWorkspace: false, sessionId: "current-session", visibleTurnId: "edit-turn", onApprovalRequest,
+    }));
+    expect(outcome.plans[0]?.status).toBe(decision === "allow" ? "executed" : "blocked");
+    expect(events).toContainEqual(expect.objectContaining({kind: "tool-start", tool: "image.edit"}));
+    expect(events).toContainEqual(expect.objectContaining({kind: "tool-result", tool: "image.edit", decision}));
+  });
+
+  it("never falls back to generating a new image when the requested edit tool is unavailable", async () => {
+    const executeTool = vi.fn();
+    const executor = new NativeToolExecutor({
+      toolExecutor: {getToolDefinition: (name: string) => name === "image.generate" ? fileReadTool : undefined, executeTool} as never,
+      runRecorder: runRecorder() as never, sessionId: "s1",
+    });
+    const outcome = await executor.executeDeterministicNativeTools({
+      intent: intent({labels: ["image"], nativeIntent: "image-generation"}),
+      text: "Edit this image with image.edit: artifact://original\n\nاجعل الإضاءة أدفأ",
+      trustedWorkspace: true,
+    });
+    expect(outcome).toEqual({executions: [], plans: []});
+    expect(executeTool).not.toHaveBeenCalled();
+  });
+
+  it.each([
+    "Explain image.edit and artifact://original",
+    "Here is an example: Edit this image with image.edit: artifact://original\n\nUse softer lighting.",
+    "Edit this image with image.edit: artifact://../other\n\nUse softer lighting.",
+    "Edit this image with image.edit: artifact://original\n\n",
+  ])("does not treat prose or malformed canvas requests as a direct edit: %s", async text => {
+    const executeTool = vi.fn();
+    const executor = new NativeToolExecutor({
+      toolExecutor: {getToolDefinition: () => fileReadTool, executeTool} as never,
+      runRecorder: runRecorder() as never, sessionId: "s1",
+    });
+    expect(await executor.executeDeterministicNativeTools({intent: intent(), text, trustedWorkspace: true}))
+      .toEqual({executions: [], plans: []});
+    expect(executeTool).not.toHaveBeenCalled();
+  });
+
   it("dispatches ready initial images through vision with runtime-only provenance", async () => {
     const result = attachEphemeralVisionImages({ ok: true, content: "prepared" }, [{
       content: { type: "image_url", image_url: { url: "data:image/png;base64,aW1hZ2U=" } },

@@ -15,7 +15,7 @@ It is not a built-in model capability. You need a provider account, an API key, 
 In the desktop conversation, image generation appears as a canvas with the actual tool status and elapsed time. A verified retained image loads automatically when its canvas approaches the visible area. The canvas follows the app's light or dark appearance and supports Arabic, keyboard navigation, and reduced motion.
 
 - Open an image at full size, inspect its details, or save it through the desktop save dialog.
-- Describe a change beneath the image, or choose a lighting or color suggestion. The request names the selected image and goes through the normal chat submission, model selection, permissions, and approval flow.
+- Describe a change beneath the image. The request names the selected image and routes to `image.edit` with that source, through the normal chat submission, model selection, permissions, and approval flow.
 - After a refinement, switch between the reference and result or use the comparison slider. These links are reconstructed from the recorded refinement request when you reopen the conversation.
 - An unfinished message or pending submission disables refinement so your draft is preserved. If a submission response is lost, use the composer's **Check status** action before sending again.
 - **Retry preview** reloads retained media only. **Retry image request** starts a new request after a failed or stopped image operation. Provider support and the chat's permissions still apply.

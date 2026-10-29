@@ -1,6 +1,6 @@
 /* Image-first evidence, using the existing desktop palette and controls. */
 #ec-branded-workspace .ec-image-canvas{width:100%;max-width:560px;margin:22px auto 28px;min-width:0;--ec-image-radius:18px}
-#ec-branded-workspace .ec-image-stage{position:relative;isolation:isolate;aspect-ratio:1;max-height:560px;overflow:hidden;border-radius:var(--ec-image-radius);background:var(--ec-panel);box-shadow:0 20px 48px -18px var(--ec-shadow),0 2px 8px var(--ec-shadow)}
+#ec-branded-workspace .ec-image-stage{position:relative;isolation:isolate;aspect-ratio:1;max-height:560px;overflow:hidden;border-radius:var(--ec-image-radius);background:var(--ec-panel);box-shadow:0 8px 28px -16px var(--ec-shadow)}
 #ec-branded-workspace .ec-image-open{display:block;width:100%;height:100%;border:0;padding:0;background:transparent;cursor:zoom-in}
 #ec-branded-workspace .ec-image-open:disabled{opacity:1;cursor:default}
 #ec-branded-workspace .ec-image-open img{display:block;width:100%;height:100%;object-fit:contain;animation:ec-image-reveal .65s cubic-bezier(.16,1,.3,1)}
@@ -19,7 +19,7 @@
 #ec-branded-workspace .ec-image-caption h3{font-size:14px;font-weight:500;line-height:1.45;letter-spacing:-.2px;margin:0;overflow-wrap:anywhere}
 #ec-branded-workspace .ec-image-caption small{font-size:11px;color:var(--ec-muted);display:block;margin-top:3px}
 #ec-branded-workspace .ec-image-actions{display:flex;align-items:center;gap:5px;flex:none}
-#ec-branded-workspace .ec-image-save{border-radius:20px;font-size:12px;padding:7px 12px;background:var(--ec-bg)}
+#ec-branded-workspace .ec-image-actions .ec-image-save{border-radius:20px;font-size:12px;padding:7px 12px;background:var(--ec-bg)}
 #ec-branded-workspace .ec-image-details{margin-top:8px;font-size:12px;background:var(--ec-panel);border-radius:10px;overflow:hidden}
 #ec-branded-workspace .ec-image-details:not([open]){display:none}
 #ec-branded-workspace .ec-image-details summary{padding:10px 13px;color:var(--ec-muted);cursor:pointer}
@@ -30,18 +30,17 @@
 #ec-branded-workspace .ec-image-versions .ec-btn{font-size:11px;border-radius:18px;padding:6px 9px}
 #ec-branded-workspace .ec-image-versions .ec-btn[aria-pressed=true]{background:var(--ec-tint);color:var(--ec-accent)}
 #ec-branded-workspace .ec-image-versions svg{width:13px;height:13px}
-#ec-branded-workspace .ec-image-refine{max-width:470px;margin:24px auto 0}
-#ec-branded-workspace .ec-image-refine form{display:flex;gap:10px;align-items:center;padding:8px;background:var(--ec-bg);border:1px solid var(--ec-line);border-radius:24px;box-shadow:0 5px 18px -8px var(--ec-shadow);transition:border-color .2s,box-shadow .2s}
-#ec-branded-workspace .ec-image-refine form:focus-within{border-color:var(--ec-accent);box-shadow:0 0 0 2px var(--ec-tint)}
+#ec-branded-workspace .ec-image-refine{margin:16px 0 0}
+#ec-branded-workspace .ec-image-refine form{display:flex;gap:10px;align-items:center;padding:8px 10px;background:var(--ec-panel);border:1px solid var(--ec-line);border-radius:18px;box-shadow:0 3px 12px -8px var(--ec-shadow);transition:border-color .2s,box-shadow .2s}
+#ec-branded-workspace .ec-image-refine form:focus-within{border-color:var(--ec-accent);box-shadow:0 0 0 1px var(--ec-tint)}
 #ec-branded-workspace .ec-image-reference{width:30px;height:30px;flex:none;display:grid;place-items:center;background:var(--ec-panel);border-radius:10px;overflow:hidden;color:var(--ec-muted)}
 #ec-branded-workspace .ec-image-reference img{width:100%;height:100%;object-fit:cover}
 #ec-branded-workspace .ec-image-refine input{flex:1;min-width:0;background:transparent;border:0;border-radius:3px;color:var(--ec-text);font:inherit;font-size:13px;padding:5px 0}
+#ec-branded-workspace .ec-image-refine input:focus-visible{outline:none}
 #ec-branded-workspace .ec-image-refine input::placeholder{color:var(--ec-muted)}
 #ec-branded-workspace .ec-image-refine input:disabled{opacity:.6}
-#ec-branded-workspace .ec-image-send{width:31px;height:31px;flex:none;border-radius:50%;background:var(--ec-text);color:var(--ec-bg);border:0}
-#ec-branded-workspace .ec-image-suggestions{display:flex;justify-content:center;gap:5px;flex-wrap:wrap;margin-top:10px}
-#ec-branded-workspace .ec-image-suggestions .ec-btn{font-size:11px;color:var(--ec-muted);padding:5px 9px;border:1px solid var(--ec-line);border-radius:18px}
-#ec-branded-workspace .ec-image-permissions{display:block;font-size:11px;color:var(--ec-muted);text-align:center;margin-top:10px}
+#ec-branded-workspace .ec-image-refine .ec-image-send{width:32px;height:32px;flex:none;border-radius:50%;background:var(--ec-text);color:var(--ec-bg);border:0}
+#ec-branded-workspace .ec-image-refine .ec-image-send:disabled{background:var(--ec-inset);color:var(--ec-muted);opacity:.5}
 #ec-branded-workspace .ec-image-notice{font-size:12px;color:var(--ec-muted);text-align:center;margin-top:9px;overflow-wrap:anywhere}
 #ec-branded-workspace .ec-image-notice:empty{display:none}
 #ec-branded-workspace .ec-image-comparison{position:absolute;inset:0;pointer-events:none}

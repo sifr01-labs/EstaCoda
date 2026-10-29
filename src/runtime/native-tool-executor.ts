@@ -54,21 +54,26 @@ export class NativeToolExecutor {
       return await this.#executeInitialVisionAttachments(input);
     }
 
-    if (input.intent.nativeIntent !== "image-generation") {
+    // The desktop canvas supplies an explicit source, not a text-to-image prompt.
+    // Selection still goes through the ordinary tool executor and its approval gates.
+    const edit = /^Edit this image with image\.edit: artifact:\/\/([a-zA-Z0-9_-]{1,128})\n\n([\s\S]+)$/.exec(input.text);
+    if (input.intent.nativeIntent !== "image-generation" && !edit) {
       return { executions: [], plans: [] };
     }
 
-    const tool = this.#toolExecutor.getToolDefinition("image.generate");
+    const toolName = edit ? "image.edit" : "image.generate";
+    const tool = this.#toolExecutor.getToolDefinition(toolName);
     if (tool === undefined) {
       return { executions: [], plans: [] };
     }
 
     const plan: ToolCallPlan = {
       id: `native-image-${Date.now()}`,
-      tool: "image.generate",
+      tool: toolName,
       input: {
-        prompt: input.text,
-        aspectRatio: inferImageAspectRatio(input.text)
+        prompt: edit ? edit[2]!.trim() : input.text,
+        ...(edit ? {sourceImages: [`artifact://${edit[1]}`]} : {}),
+        aspectRatio: inferImageAspectRatio(edit ? edit[2]! : input.text)
       },
       source: "internal",
       status: "planned",

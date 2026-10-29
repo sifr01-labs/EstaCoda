@@ -27,10 +27,15 @@ async function mount(page:Page,options:{language?:'en'|'ar';appearance?:'light'|
 
 test('automatically previews verified images, hides redundant artifact text, and saves the selected reference',async({page})=>{
  await mount(page);const image=page.locator('.ec-image-open img');await expect(image).toBeVisible();await expect(image).toHaveJSProperty('naturalWidth',640);
+ await expect(page.getByRole('button',{name:/Cooler light|Warmer tones|Black & white/})).toHaveCount(0);
+ await expect(page.getByText('Refinement follows your chat permissions.')).toHaveCount(0);
  await expect(page.locator('.ec-run-answer')).not.toContainText('artifact://');await expect(page.locator('.ec-run-files')).toHaveCount(0);await expect(page.getByText('Binary output. Text preview unavailable.')).toHaveCount(0);
  await page.getByRole('button',{name:'Save image',exact:true}).click();expect(await page.evaluate(()=>(window as any).imageTest.saves[0])).toEqual({source:'session',ownerId:'s',artifactId:'original'});
  await page.locator('.ec-image-expand').click();await expect(page.getByRole('dialog')).toBeVisible();await page.keyboard.press('Escape');await expect(page.getByRole('dialog')).toHaveCount(0);await expect(page.locator('.ec-image-expand')).toBeFocused();
- await page.getByRole('textbox',{name:'Refine image'}).fill('More intricate engraving');await page.getByRole('button',{name:'Refine image',exact:true}).click();expect(await page.evaluate(()=>(window as any).imageTest.edits[0])).toEqual({reference:{source:'session',ownerId:'s',artifactId:'original'},instruction:'More intricate engraving'});
+ const refine=page.getByRole('textbox',{name:'Refine image'});await refine.fill('More intricate engraving');
+ expect(await refine.evaluate(el=>getComputedStyle(el).outlineStyle)).toBe('none');
+ expect(await page.locator('.ec-image-refine form').evaluate(el=>getComputedStyle(el).borderColor)).not.toBe(await page.locator('.ec-image-stage').evaluate(el=>getComputedStyle(el).borderColor));
+ await page.getByRole('button',{name:'Refine image',exact:true}).click();expect(await page.evaluate(()=>(window as any).imageTest.edits[0])).toEqual({reference:{source:'session',ownerId:'s',artifactId:'original'},instruction:'More intricate engraving'});
 });
 
 test('moves from real generation to the image without a second canvas and routes cancellation',async({page})=>{
@@ -51,6 +56,20 @@ test('discards late media, closes the viewer and revokes displayed images when p
 
 test('restores a source comparison from recorded edit messages and allows keyboard comparison',async({page})=>{
  await mount(page,{state:'compare'});const canvas=page.locator('.ec-image-canvas').last();await canvas.scrollIntoViewIfNeeded();await expect(canvas.locator('.ec-image-open img')).toBeVisible();await canvas.getByRole('button',{name:'Compare images'}).click();const slider=canvas.getByRole('slider',{name:'Compare reference and result'});await expect(slider).toBeEnabled();await slider.focus();await page.keyboard.press('ArrowRight');await expect(slider).toHaveValue('51');await expect(canvas.locator('.ec-image-split')).toHaveAttribute('style',/51%/);await canvas.getByRole('button',{name:'Reference image',exact:true}).click();await expect(canvas.getByRole('heading')).toHaveText('original.png');await expect(canvas.getByRole('slider')).toHaveCount(0);
+});
+
+test('shows the edit instruction in the conversation navigator without internal image references',async({page})=>{
+ await mount(page,{state:'compare'});
+ await page.evaluate(async()=>{
+  const React=(await import('/node_modules/.vite/deps/react.js')).default,{createRoot}=(await import('/node_modules/.vite/deps/react-dom_client.js')).default;
+  const {ConversationNavigator}=await import('/src/renderer/components/conversation-navigator.tsx');
+  const host=document.createElement('div');document.querySelector('#ec-branded-workspace')!.append(host);
+  createRoot(host).render(React.createElement(ConversationNavigator,{items:(window as any).imageTest.items,workId:'session:s'}));
+ });
+ const nav=page.getByRole('navigation',{name:'Loaded conversation turns'});
+ await expect(nav.getByRole('button').last()).toHaveAccessibleName(/Use cooler lighting\./);
+ await expect(nav.getByRole('button').last()).not.toHaveAccessibleName(/artifact:|image\.edit/);
+ await expect(nav).not.toContainText('artifact://');
 });
 
 for(const language of ['en','ar'] as const)for(const appearance of ['light','dark'] as const)test(`canvas ${language} ${appearance} adapts to desktop and narrow widths`,async({page},info)=>{
