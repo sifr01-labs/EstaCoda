@@ -1,3 +1,5 @@
+import { settledLocalCommandExit } from "./local-command-result.js";
+import { commandFileChanges, commandFileObservation } from "./file-output-evidence.js";
 import { toolResultFingerprint } from "./tool-result-fingerprint.js";
 import { matchesFileOutputPath, requestedFileOutputs } from "../contracts/request-requirements.js";
 import { createHash } from "node:crypto";
@@ -38,7 +40,10 @@ export class ToolLoopProgressGuard {
   readonly #stopIteration: number;
   readonly #research: boolean;
   readonly #seenResearchSources = new Set<string>();
+  readonly #seenFileObservations = new Set<string>();
   readonly #seenFileWrites = new Set<string>();
+  readonly #pendingCommandReadbacks = new Set<string>();
+  readonly #seenFileReadbacks = new Set<string>();
   readonly #pendingFileReadbacks = new Set<string>();
   readonly #seenRecoveryIds = new Set<string>();
   readonly #resultReadEnds = new Map<string, number>();
@@ -109,6 +114,18 @@ export class ToolLoopProgressGuard {
 
     for (const execution of eligible) {
       const status = executionEvidenceStatus(execution);
+      if (status === "success" && execution.readReuseOf === undefined && execution.result?.metadata?.mcpReadReuse !== true) {
+        const turn = this.#checkpointReader?.current()?.originTurnId;
+        const observation = commandFileObservation(execution, turn);
+        if (observation?.completed && !observation.serviceCheckpoint && !this.#seenFileObservations.has(observation.id)) {
+          this.#seenFileObservations.add(observation.id);
+          for (const output of commandFileChanges(execution, turn)) {
+            if (output.contentSha256) this.#pendingFileReadbacks.add(fingerprint({ path: output.path, contentSha256: output.contentSha256 }));
+            else if (output.metadataFingerprint) this.#pendingCommandReadbacks.add(output.path);
+            else this.#pendingCommandReadbacks.delete(output.path);
+          }
+        }
+      }
       if (execution.readReuseOf !== undefined || execution.result?.metadata?.mcpReadReuse === true) continue;
       // Failed diagnostics and changed results from the same command are useful
       // observations, not completion evidence. Admission failures and unfinished
@@ -203,7 +220,9 @@ export class ToolLoopProgressGuard {
             progressKinds.add("target-mutation");
             reportProgress = true;
           } else if (execution.tool.name === "file.read" && metadata?.materialized === true &&
-            metadata.completeFileRead === true && this.#pendingFileReadbacks.delete(key)) {
+            metadata.completeFileRead === true && !this.#seenFileReadbacks.has(key) &&
+            (this.#pendingFileReadbacks.delete(key) || this.#pendingCommandReadbacks.delete(path))) {
+            this.#seenFileReadbacks.add(key);
             progressKinds.add("verification");
             reportProgress = true;
           }
@@ -381,12 +400,8 @@ function toolCallFingerprint(execution: ToolExecutionRecord): string {
 }
 
 function commandObservationFingerprint(execution: ToolExecutionRecord): string | undefined {
-  if (execution.decision !== "allow" || execution.result === undefined) return undefined;
-  const metadata = execution.result.metadata;
-  const code = execution.tool.name === "execute_code" ? metadata?.exitCode
-    : ["terminal.run", "terminal.inspect"].includes(execution.tool.name) ? metadata?.code : undefined;
-  if (typeof code !== "number" || !Number.isInteger(code) || code < 0 || metadata?.signal !== null ||
-    metadata?.timedOut !== false || metadata?.cancelled !== false || metadata?.running === true || execution.result.ok !== (code === 0)) return undefined;
+  const code = settledLocalCommandExit(execution);
+  if (code === undefined) return undefined;
   return fingerprint({ code, result: toolResultFingerprint(execution) });
 }
 

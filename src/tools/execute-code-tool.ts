@@ -47,6 +47,7 @@ export function createExecuteCodeTool(options: ExecuteCodeToolOptions): Register
       type: "object",
       properties: {
         code: { type: "string" },
+        verification: { type: ["string", "null"], pattern: "^[a-z][a-z0-9-]{0,79}$", description: "Stable task requirement checked by this code. Reuse the same label as terminal.run for alternative checks; omit for exploration. A collected successful exit proves the check, not printed prose. Grants no execution authority." },
         input: { type: "object" },
         timeoutMs: { type: "number" },
         maxOutputChars: { type: "number" }
@@ -61,6 +62,10 @@ export function createExecuteCodeTool(options: ExecuteCodeToolOptions): Register
     run: async (input: Record<string, unknown>, context) => {
       if (typeof input.code !== "string" || input.code.trim().length === 0) {
         return errorResult("execute_code requires non-empty Python code");
+      }
+
+      if (input.verification != null && (typeof input.verification !== "string" || !/^[a-z][a-z0-9-]{0,79}$/u.test(input.verification))) {
+        return errorResult("verification must be a requirement name using 1–80 lowercase letters, digits, or hyphens, beginning with a letter");
       }
 
       if (Buffer.byteLength(input.code) > 256 * 1024 || Buffer.byteLength(JSON.stringify(asRecord(input.input))) > MAX_FRAME_BYTES) {
@@ -130,7 +135,7 @@ export function createExecuteCodeTool(options: ExecuteCodeToolOptions): Register
           return execution.result;
         }
       });
-      return { ...result, metadata: { ...result.metadata, commandFileObservation: await finishCommandFileObservation(files, observation) } };
+      return { ...result, metadata: { ...result.metadata, cwd: options.executionLease?.workspaceRoot ?? options.workspaceRoot, verification: input.verification ?? undefined, commandFileObservation: await finishCommandFileObservation(files, observation) } };
     }
   };
 }
@@ -266,7 +271,7 @@ async function runHarness(options: RunCodeOptions, processes: HostProcesses, tem
       if (pendingLine.startsWith(TOOL_CALL_PREFIX)) { await stop("execute_code ended with an incomplete tool-call frame."); return; }
       appendStdout(pendingLine);
       finish({ ok: code === 0 && !signal.aborted, content: formatCodeOutput(stdout, stderr, options.maxOutputChars),
-        metadata: { exitCode: code, signal: exitSignal, timeoutMs: options.timeoutMs, maxOutputChars: options.maxOutputChars, toolCalls: callIds.size, outputTruncated } });
+        metadata: { exitCode: code, signal: exitSignal, timedOut: false, cancelled: signal.aborted, timeoutMs: options.timeoutMs, maxOutputChars: options.maxOutputChars, toolCalls: callIds.size, outputTruncated } });
     });
     child.stdin.write(`${JSON.stringify({ kind: "ready" })}\n`);
     function appendStdout(chunk: string): void {

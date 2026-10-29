@@ -1,3 +1,7 @@
+import { ToolLoopProgressGuard } from "./tool-loop-progress-guard.js";
+import { ExecutionCheckpointController } from "./execution-checkpoint-controller.js";
+import { createExecuteCodeTool } from "../tools/execute-code-tool.js";
+import { resolveTestPythonBinary } from "../test/test-python.js";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -15,6 +19,9 @@ async function fixture(request = "Write report.txt and read it back", floor: "mu
   const root = await mkdtemp(join(tmpdir(), "completion-checks-"));
   const manager = new ProcessManager({ workspaceRoot: root });
   const tools = [...createWorkspaceTools({ workspaceRoot: root, processManager: manager, commandTimeoutMs: 100 }), ...createProcessTools({ processManager: manager })];
+  tools.push(createExecuteCodeTool({ workspaceRoot: root, pythonBinary: await resolveTestPythonBinary(),
+    toolExecutor: { executeTool: async () => undefined } as never, sessionDb: {} as never,
+    trajectoryRecorder: {} as never, sessionId: "test", trustedWorkspace: async () => true, allowedTools: [] }));
   const requirements = deriveRequestRequirements(request, "turn-1");
   const calls: ToolExecutionRecord[] = [];
   const index = new ExecutionEvidenceIndex();
@@ -274,4 +281,63 @@ describe("declared check recovery boundaries", () => {
     expect(commandCompletionFeedback(recovered.calls, recovered.receipts)).toBeUndefined();
     expect(commandCompletionChecks(recovered.calls, recovered.receipts).recoveredCalls.has("failed")).toBe(true);
   });
+});
+
+
+describe("Python and terminal evidence interoperability", () => {
+  it("recovers a settled Python exploration failure after verified output", async () => {
+    const f = await fixture();
+    try {
+      expect(await f.run("execute_code", { code: "raise ValueError('unavailable approach')" })).toMatchObject({ ok: false, metadata: { exitCode: 1, timedOut: false, cancelled: false } });
+      await f.output();
+      expect(f.outcome().status).toBe("completed_with_recovered_errors");
+    } finally { await f.close(); }
+  });
+  it("lets Python prove the same failed terminal requirement, but not an unrelated one", async () => {
+    const f = await fixture();
+    try {
+      await f.run("terminal.run", { command: "exit 1", verification: "output-check", timeoutMs: 100 });
+      await f.output();
+      await f.run("execute_code", { code: "assert True", verification: "other-check" });
+      expect(f.outcome().status).toBe("partially_completed");
+      await f.run("execute_code", { code: "from pathlib import Path\nassert Path('report.txt').read_text() == 'ready'", verification: "output-check" });
+      expect(f.outcome().status).toBe("completed_with_recovered_errors");
+      await f.output("changed");
+      expect(f.outcome().status).toBe("partially_completed");
+    } finally { await f.close(); }
+  });
+  it("preserves a timed-out Python attempt after producing an output", async () => {
+    const f = await fixture();
+    try {
+      expect(await f.run("execute_code", { code: "import time; time.sleep(30)", timeoutMs: 50 })).toMatchObject({ ok: false, metadata: { timedOut: true } });
+      await f.output();
+      expect(f.outcome().status).toBe("partially_completed");
+    } finally { await f.close(); }
+  });
+  it("rejects invalid Python verification labels before dispatch", async () => {
+    const f = await fixture();
+    try {
+      expect(await f.run("execute_code", { code: "raise RuntimeError('must not run')", verification: true })).toMatchObject({ ok: false, content: expect.stringContaining("verification must") });
+    } finally { await f.close(); }
+  });
+});
+
+
+it.each(["terminal.run", "execute_code"])("credits full readback of %s output once", async tool => {
+  const f = await fixture("Write report.txt");
+  try {
+    const checkpoint = new ExecutionCheckpointController({ sessionId: "test", profileId: "test" });
+    await checkpoint.ensure({ originTurnId: "turn-1", originalObjective: "Write report.txt",
+      requestRequirements: deriveRequestRequirements("Write report.txt", "turn-1"),
+      qualificationReasons: ["verified_mutation"], intentLabels: [], requiredOperations: ["mutation", "verification"], connectorIds: [], completionFloor: "mutation_with_verification" });
+    const guard = new ToolLoopProgressGuard({ checkpointReader: checkpoint, noProgressNudgeIteration: 2, maxNoProgressIterations: 3 });
+    await f.run(tool, tool === "terminal.run" ? { command: "printf ready > report.txt", timeoutMs: 100 } : { code: "from pathlib import Path\nPath('report.txt').write_text('ready')" });
+    const write = f.calls.at(-1)!;
+    expect(guard.observe([write]).materialProgress).toBe(true);
+    await f.run("file.read", { path: "report.txt" });
+    const read = f.calls.at(-1)!;
+    expect(guard.observe([read]).progressKinds).toContain("verification");
+    expect(guard.observe([write]).materialProgress).toBe(false);
+    expect(guard.observe([read]).materialProgress).toBe(false);
+  } finally { await f.close(); }
 });

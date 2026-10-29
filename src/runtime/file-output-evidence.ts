@@ -320,7 +320,7 @@ function verifiedFileContent(input: Parameters<typeof fileOutputEvidence>[0], ev
 
 /** Only known runtime-owned command observations qualify, bound to the turn
  * that started the command. Arbitrary tools and provider metadata cannot write. */
-function commandFileChanges(execution: ToolExecutionRecord, visibleTurnId?: string): Array<{ path: string; contentSha256?: string; metadataFingerprint?: string }> {
+export function commandFileChanges(execution: ToolExecutionRecord, visibleTurnId?: string): Array<{ path: string; contentSha256?: string; metadataFingerprint?: string }> {
   const observation = commandFileObservation(execution, visibleTurnId);
   return observation?.files.flatMap(({ path, before, after, metadataOnly }) => {
     const valid = metadataOnly === true ? validMetadataFingerprint : validDigest;

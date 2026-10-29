@@ -1,3 +1,4 @@
+import { settledLocalCommandExit } from "./local-command-result.js";
 import { semanticMutationKey } from "../tools/execution-operation-ledger.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import type { ExecutionEvidenceRecord } from "../contracts/execution-plan.js";
@@ -25,7 +26,7 @@ export function commandCompletionChecks(calls: readonly ToolExecutionRecord[], r
     // A refused local approach never ran. Only a later authorized check of the
     // same requirement can recover it; retain the denial receipt and authority.
     if (command && receipt.status === "blocked" && call.decision === "deny" &&
-      call.tool.name === "terminal.run" && call.executionEffect?.connector === undefined &&
+      ["terminal.run", "execute_code"].includes(call.tool.name) && call.executionEffect?.connector === undefined &&
       receipt.executionEffect?.connector === undefined && call.riskClass !== "external-side-effect" &&
       receipt.riskClass !== "external-side-effect" &&
       call.settlement?.dispatchState === "not_started" && call.settlement.sideEffectState === "none") {
@@ -93,7 +94,7 @@ export function commandCompletionFeedback(calls: readonly ToolExecutionRecord[],
 
 export function declaresCommandCheck(call: ToolExecutionRecord): boolean {
   const process = call.result?.metadata?.process as { verification?: unknown } | undefined;
-  return (call.tool.name === "terminal.run" && checkLabel(call.input?.verification) !== undefined) ||
+  return (["terminal.run", "execute_code"].includes(call.tool.name) && checkLabel(call.input?.verification) !== undefined) ||
     (["terminal.run", "process.logs"].includes(call.tool.name) && checkLabel(process?.verification) !== undefined);
 }
 
@@ -102,7 +103,7 @@ function checkLabel(value: unknown): string | undefined {
 }
 
 function commandCheckIdentity(call: ToolExecutionRecord, turn: string): { key: string; requirement: string; declared: boolean } | undefined {
-  if (!["terminal.run", "process.logs"].includes(call.tool.name)) return undefined;
+  if (!["terminal.run", "execute_code", "process.logs"].includes(call.tool.name)) return undefined;
   const metadata = call.result?.metadata;
   const process = metadata?.process as { verification?: unknown; cwd?: unknown } | undefined;
   const requirement = checkLabel(call.input?.verification) ?? checkLabel(process?.verification);
@@ -116,6 +117,5 @@ function commandSucceeded(call: ToolExecutionRecord): boolean {
   const metadata = call.result.metadata;
   const process = metadata?.process as { status?: unknown; exitCode?: unknown; signal?: unknown } | undefined;
   if (process) return process.status === "exited" && process.exitCode === 0 && process.signal == null;
-  return call.tool.name === "terminal.run" && metadata?.code === 0 && metadata.signal === null &&
-    metadata.timedOut === false && metadata.cancelled === false && metadata.running !== true;
+  return settledLocalCommandExit(call) === 0;
 }

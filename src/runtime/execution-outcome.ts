@@ -1,3 +1,4 @@
+import { settledLocalCommandExit } from "./local-command-result.js";
 import { toolOperationFingerprint } from "./tool-result-fingerprint.js";
 import { declaresCommandCheck, commandCompletionChecks } from "./command-completion-checks.js";
 import { semanticMutationKey } from "../tools/execution-operation-ledger.js";
@@ -357,8 +358,7 @@ function recoveredExecutionCalls(
     const settledAttempt = call?.tool.name === receipt.tool && call?.decision === "allow" && call.result?.ok === false &&
       call.executionEffect?.kind !== "verification" && !declaresCommandCheck(call) &&
       call.settlement?.sideEffectState !== "possible" && call.settlement?.dispatchState !== "unknown" &&
-      Number.isInteger(call.result.metadata?.code) && call.result.metadata?.signal === null &&
-      call.result.metadata?.timedOut === false && call.result.metadata?.cancelled === false;
+      settledLocalCommandExit(call) !== undefined;
     const requirementIndex = settledAttempt ? Math.max(outputIndex, checkIndex) : outputIndex;
     const alternativeProducedOutput = (receipt.status !== "failed" || settledAttempt) && requirementIndex > i &&
       receipts[requirementIndex]?.visibleTurnId === receipt.visibleTurnId &&
