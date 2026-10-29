@@ -1,4 +1,5 @@
 import { toolOperationFingerprint, toolResultFingerprint } from "./tool-result-fingerprint.js";
+import { assessHardlineFloor } from "../security/command-safety.js";
 import { redactSensitiveText } from "../utils/redaction.js";
 import { groundForegroundResearch, researchCitationUrls, RESEARCH_EVIDENCE_INSTRUCTION } from "../tasks/research-result-evidence.js";
 import { projectCapabilityState, type RuntimeCapabilityState } from "./capability-state.js";
@@ -179,6 +180,17 @@ export type ProviderTurnLoopOptions = {
   browserSessionLease?: BrowserSessionLease;
   browserBackend?: BrowserBackend;
 };
+
+/** A deterministic command refusal is not a revocation of the terminal tool.
+ * Only known-undispatched hardline refusals qualify: the same hardline floor
+ * will reject the operation again. Operator/unknown/uncertain boundaries keep
+ * the existing conservative repair restriction. */
+function canReassessHardlineCommand(call: ToolExecutionRecord): boolean {
+  return call.tool.name === "terminal.run" && call.decision === "deny" &&
+    call.executionEffect?.connector === undefined && call.riskClass !== "external-side-effect" &&
+    call.settlement?.dispatchState === "not_started" && call.settlement.sideEffectState === "none" &&
+    typeof call.input?.command === "string" && assessHardlineFloor(call.input.command) !== undefined;
+}
 
 export class ProviderTurnLoop {
   readonly #capabilityRecovery: SessionCapabilityRecovery | undefined;
@@ -860,8 +872,21 @@ export class ProviderTurnLoop {
       const repeatedFailureBudgetExceeded = this.#recordRepeatedToolFailures(loopToolExecutions, repeatedFailures);
       // New search URLs alone do not resolve a rejected candidate. Re-evaluate
       // the outstanding defect against accumulated evidence before rewarding discovery.
-      const unchangedRepair = completionCandidate !== undefined && completionValidationFailure !== undefined &&
-        redactSensitiveText(input.validateCompletion?.(completionCandidate, [...input.toolExecutions, ...providerToolExecutions]) ?? "").slice(0, 6_000) === completionValidationFailure;
+      let unchangedRepair = false;
+      if (completionCandidate !== undefined) {
+        const feedback = redactSensitiveText(input.validateCompletion?.(completionCandidate, [...input.toolExecutions, ...providerToolExecutions]) ?? "").slice(0, 6_000) || undefined;
+        unchangedRepair = feedback === completionValidationFailure;
+        // Repair evidence changes during tool calls, not just at the next final
+        // answer. Never keep instructing the model to fix an already settled
+        // check. Revalidate the final answer normally; this grants no authority.
+        if (loopToolExecutions.length > 0) {
+          completionValidationFailure = feedback;
+          pendingCompletionFeedback = feedback === undefined
+            ? "The previously reported completion issue is resolved by the current evidence. Provide your final answer unless a concrete requirement remains unfinished. Do not repeat checks solely to resolve the previous feedback."
+            : completionReadbackPaths === undefined ? feedback
+              : `Read-only completion repair: ${feedback} Use only full file.read calls for ${JSON.stringify(completionReadbackPaths)}. Do not retry denied actions or make further changes.`;
+        }
+      }
       const supervisionAssessment = executionSupervision.assessProgress(loopToolExecutions, unchangedRepair);
       const { browserObservation, toolLoopProgress, runtimeUserInputBlocker } = supervisionAssessment;
       const canContinueWithExpandedInventory =
@@ -1142,7 +1167,7 @@ export class ProviderTurnLoop {
           iteration + consumedProviderIterations < this.#budgets.maxProviderIterations && !input.signal?.aborted &&
           (!hasBoundary || (readbackPaths !== undefined && readbackPaths.length > 0) ||
             (canUseAlternative && activeProviderTools.some(tool => !boundaries.some(call =>
-              call.tool.name === (input.providerToolSchemaCatalog?.aliases.get(tool.function.name) ?? tool.function.name)))));
+              !canReassessHardlineCommand(call) && call.tool.name === (input.providerToolSchemaCatalog?.aliases.get(tool.function.name) ?? tool.function.name)))));
         await this.#sessionDb.appendEvent(this.#currentSessionId(), {
           kind: "step-completion-validation", accepted: completionValidationFailure === undefined,
           ...(completionValidationFailure === undefined ? {} : { feedback: completionValidationFailure }),
@@ -1158,13 +1183,13 @@ export class ProviderTurnLoop {
         if (repair) {
           if (hasBoundary) {
             for (const call of [...input.toolExecutions, ...providerToolExecutions]) {
-              if (call.decision !== "allow") completionDeniedTools.add(call.tool.name);
+              if (call.decision !== "allow" && !canReassessHardlineCommand(call)) completionDeniedTools.add(call.tool.name);
             }
             if (readbackPaths !== undefined && readbackPaths.length > 0) {
               completionReadbackPaths = readbackPaths;
               pendingCompletionFeedback = `Read-only completion repair: use file.read with only path for ${JSON.stringify(readbackPaths)}. These outputs were already written successfully. Do not retry denied actions or make further changes.`;
             } else {
-              pendingCompletionFeedback += " Use an authorized alternative. Previously refused tools remain blocked during this repair; report the blocker if the requirement cannot be met.";
+              pendingCompletionFeedback += " Use an authorized alternative. Refused actions remain forbidden; every new command must pass normal security policy. Operator approval boundaries remain in force. Report the blocker if the requirement cannot be met.";
             }
           }
           completionRepairs += 1;

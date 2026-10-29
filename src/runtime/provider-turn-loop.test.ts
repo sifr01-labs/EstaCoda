@@ -1,4 +1,6 @@
 import { selectProviderToolsForTurn } from "./provider-tool-narrowing.js";
+import { commandCompletionFeedback } from "./command-completion-checks.js";
+import { assessHardlineFloor } from "../security/command-safety.js";
 import { describe, expect, it, vi } from "vitest";
 import { Buffer } from "node:buffer";
 import { mkdtempSync, rmSync, writeFileSync } from "node:fs";
@@ -5201,6 +5203,82 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     expect(result.completionValidationFailure).toBeUndefined();
     expect(result.completionCandidate).toBeUndefined();
     expect(result.providerExecution?.response?.content).toBe("Corrected findings");
+  });
+
+  it("refreshes the actual next prompt when a matching check recovers an earlier failure", async () => {
+    const check = (id: string, label: string, code: number): ToolExecutionRecord => ({
+      ...toolExecutionForTool(id, "terminal.run", code ? "missing interpreter" : "passed"),
+      input: { command: code ? "missing-python" : "python3 check.py", verification: label },
+      result: { ok: code === 0, content: code ? "missing interpreter" : "passed",
+        metadata: { code, signal: null, timedOut: false, cancelled: false, cwd: "/work" } }
+    });
+    const failure = check("missing", "lru-cache-tests", 127);
+    const wrongLabel = check("wrong", "cache-tests", 0);
+    const recovery = check("recovered", "lru-cache-tests", 0);
+    const harness = await createPostToolNudgeHarness({
+      responses: [providerExecution("Draft"), providerExecution("", [providerToolCall("wrong", "{}", "terminal.run")]),
+        providerExecution("", [providerToolCall("recovered", "{}", "terminal.run")]), providerExecution("Verified")],
+      toolSteps: [{}, { executions: [wrongLabel] }, { executions: [recovery] }, {}], maxProviderIterations: 8
+    });
+    const result = await runBasicProviderTurn(harness.loop, { toolExecutions: [failure], validateCompletion: (_text, calls) => {
+      const index = new ExecutionEvidenceIndex();
+      for (const call of calls) index.record(call, "turn");
+      return commandCompletionFeedback(calls, index.recordsForTurn("turn"));
+    } });
+    const prompts = harness.completeSpy.mock.calls.map(([request]) => JSON.stringify(request.messages));
+    expect(prompts[2]).toContain('Declared checks remain unresolved');
+    expect(prompts[3]).toContain('previously reported completion issue is resolved');
+    expect(prompts[3]).not.toContain('Declared checks remain unresolved');
+    expect(result.completionValidationFailure).toBeUndefined();
+    expect(result.completionCandidate).toBeUndefined();
+    expect(harness.completeSpy).toHaveBeenCalledTimes(4);
+  });
+
+  it("bounds repeated successful validation after a repair is resolved", async () => {
+    const passed: ToolExecutionRecord = { ...toolExecutionForTool("passed", "terminal.run", "PASS"),
+      input: { command: "python3 check.py", verification: "unit-tests" },
+      result: { ok: true, content: "PASS", metadata: { code: 0, signal: null, timedOut: false, cancelled: false } } };
+    const harness = await createPostToolNudgeHarness({ responses: [providerExecution("Draft"),
+      providerExecution("", [providerToolCall("check", "{}", "terminal.run")])],
+      toolSteps: [{}, ...Array.from({ length: 10 }, () => ({ executions: [structuredClone(passed)] }))],
+      maxProviderIterations: 15, noProgressNudgeIteration: 2, maxNoProgressIterations: 3 });
+    const result = await runBasicProviderTurn(harness.loop, { validateCompletion: (_text, calls) => calls.length ? undefined : "missing-check" });
+    expect(result.terminationCause).toBe("tool_loop_no_progress");
+    expect(harness.completeSpy.mock.calls.length).toBeLessThan(8);
+    expect(result.completionValidationFailure).toBeUndefined();
+  });
+
+  it("reassesses independent commands after a known-undispatched hardline refusal", async () => {
+    const blocked: ToolExecutionRecord = { ...toolExecutionForTool("blocked", "terminal.run", "Denied"),
+      decision: "deny", input: { command: "printenv", verification: "output-check" },
+      result: { ok: false, content: "Denied" },
+      settlement: { terminalStatus: "failed", dispatchState: "not_started", sideEffectState: "none" } };
+    const harness = await createPostToolNudgeHarness({ responses: [providerExecution("Draft"),
+      providerExecution("", [providerToolCall("check", '{"command":"test -s result.json"}', "terminal.run")]), providerExecution("Done")],
+      toolSteps: [{}, { executions: [toolExecutionForTool("check", "terminal.run", "checked")] }, {}], maxProviderIterations: 5 });
+    const result = await runBasicProviderTurn(harness.loop, { toolExecutions: [blocked],
+      providerTools: [toolProviderSchema("terminal.run")], validateCompletion: text => text === "Done" ? undefined : "missing-check" });
+    expect(result.completionValidationFailure).toBeUndefined();
+    const guard = harness.executePlans.mock.calls[1]![0].runtimeAdmissionGuard!;
+    expect(guard({ tool: { ...testTool, name: "terminal.run" }, input: { command: "test -s result.json" }, executionEffect: undefined })).toBeUndefined();
+    // Admission is not permission: the shared hardline floor still denies the
+    // original command and an equivalent wrapped invocation.
+    expect(assessHardlineFloor("printenv")).toBeDefined();
+    expect(assessHardlineFloor("sh -c 'printenv'")).toBeDefined();
+  });
+
+  it.each(["operator", "ask", "unknown-dispatch", "possible-effects", "external"])("keeps the %s boundary during completion repair", async boundary => {
+    const blocked: ToolExecutionRecord = { ...toolExecutionForTool("blocked", "terminal.run", "Denied"),
+      decision: boundary === "ask" ? "ask" : "deny", input: { command: boundary === "operator" ? "test -s result.json" : "printenv" },
+      riskClass: boundary === "external" ? "external-side-effect" : "workspace-write",
+      result: { ok: false, content: "Denied" },
+      settlement: { terminalStatus: "failed", dispatchState: boundary === "unknown-dispatch" ? "unknown" : "not_started",
+        sideEffectState: boundary === "possible-effects" ? "possible" : "none" } };
+    const harness = await createPostToolNudgeHarness({ responses: [providerExecution("Draft")], toolSteps: [], maxProviderIterations: 5 });
+    const result = await runBasicProviderTurn(harness.loop, { toolExecutions: [blocked],
+      providerTools: [toolProviderSchema("terminal.run")], validateCompletion: () => "missing-check" });
+    expect(harness.completeSpy).toHaveBeenCalledOnce();
+    expect(result.completionValidationFailure).toBe("missing-check");
   });
 
   it("retains the substantive rejected candidate and original defect when the repair exhausts its iterations", async () => {

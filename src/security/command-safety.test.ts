@@ -3,7 +3,29 @@ import { assessCommandSafety, normalizeCommandForSafety } from "./command-safety
 
 
 describe("shell safety options", () => {
-  it.each(["set -e", "set -u", "set -eu", "set -ue", "set -e -u", "set -e -o pipefail", "set -eu\nprintf ok", "set -eu; printf ok"])("does not classify %s as secret enumeration", command => {
+  it.each([
+    "python3 - <<'PY'\na = {'x'} & set(['x'])\nprint(a)\nPY",
+    "python3 - <<'PY'\nset(['x'])\nPY",
+    'python3 - <<"PY"\na = {"x"} & set(["x"])\nPY'
+  ])("does not mistake a Python set call for shell-state enumeration: %s", command => {
+    expect(assessCommandSafety(command).hardBlock).toBeUndefined();
+  });
+  it.each([
+    "set>state.txt", "set; printf ok", "set\n", "set() { :; }; set",
+    "set(N)", "sh <<'PY'\ntrue & set(N)\nPY",
+    "python3 - <<'PY'\nimport os\nos.system('true & set(N)')\nPY",
+    "python3 - <<'PY'\nscript = '''true & set(N)'''\nPY",
+    "python3 - <<PY\na = {'x'} & set(['x'])\nPY",
+    "python3 - <<'PY'\na = {'x'} & set(['x'])",
+    "python3 - <<'PY'\na = {'x'} & set(['x'])\nPY\nset",
+    "python3 - <<PY\nprint('$(set)')\nPY",
+    "python3 - <<'PY'\nimport os\nos.system('true; set')\nPY",
+    "python3 - <<'PY'\na = {'x'} & set(['x'])\nPY\ncat .env",
+    "python3 - <<'PY'\na = {'x'} & set(['x'])\nPY\nrm -rf /"
+  ])("retains hard blocks around function-call syntax: %s", command => {
+    expect(assessCommandSafety(command).hardBlock).toBeDefined();
+  });
+  it.each(["set -e", "set -u", "set -eu", "set -ue", "set -e -u", "set -e -o pipefail", "set -eu\nprintf ok", "set -eu; printf ok", "bash -c 'set -eu'", 'sh -c "set -e -o pipefail"'])("does not classify %s as secret enumeration", command => {
     expect(assessCommandSafety(command).hardBlock).toBeUndefined();
   });
   it.each(["set", "set -o", "set +o", "set -x", "set -eu; set", "set -eu\nprintenv", "set -eu\nenv", "set -eu; cat .env", "set -eu\ncat .env", "set -eu $(printenv)", "set -eu; rm -rf /"])("preserves the hardline floor for %s", command => {

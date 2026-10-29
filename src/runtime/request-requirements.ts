@@ -142,20 +142,29 @@ export function deriveRequestRequirements(userText: string, originTurnId?: strin
     const namedPaths = pathMatches.map((match) => match[1] ?? match[0]);
     // In an explicit copy, the final as/to operand is the destination; the
     // preceding source is not a second output. Multiple sources stay ambiguous.
-    const paths = copy && namedPaths.length <= 2 ? namedPaths.slice(-1) : namedPaths;
+    let paths = copy && namedPaths.length <= 2 ? namedPaths.slice(-1) : namedPaths;
     const markdown = /\bmarkdown\b|\bmd\s+file\b/iu.test(actionSegment) || paths.some((path) => /\.(?:md|markdown)$/iu.test(path));
     if (paths.length === 0 && !(markdown && /\bfile\b|ملف/iu.test(actionSegment)) && !/\btext\s+file\b|ملف\s+نصي/iu.test(actionSegment)) continue;
     // Conjunctive destinations are separate obligations. Alternatives and
     // ambiguous copy sources must not silently become a choice or a merge.
-    const conjunctive = pathMatches.slice(1).every((match, index) => {
+    const separators = pathMatches.slice(1).map((match, index) => {
       const previous = pathMatches[index]!;
-      const separator = outputSegment.slice(previous.index! + previous[0].length, match.index);
-      return /^\s*(?:,\s*(?:and\s+)?|and\s+|&\s*|و\s*)$/iu.test(separator);
+      return outputSegment.slice(previous.index! + previous[0].length, match.index);
     });
+    const conjunction = /^\s*(?:,\s*(?:and\s+)?|and\s+|&\s*|و\s*)$/iu;
+    const conjunctive = separators.every(separator => conjunction.test(separator));
     const alternatives = !copy && /\bat least one\b|واحد على الأقل/iu.test(actionSegment) && pathMatches.length > 1 &&
       pathMatches.slice(1).every((match, index) => /^\s*(?:or|أو)\s*$/iu.test(outputSegment.slice(pathMatches[index]!.index! + pathMatches[index]![0].length, match.index)));
-    if ((!copy && paths.length > 1 && !conjunctive && !alternatives) || (copy && namedPaths.length > 2)) {
+    const explicitChoice = separators.some(separator => /^\s*(?:or|أو)(?:\s+(?:save|write|create|احفظ|اكتب))?\s*$/iu.test(separator));
+    if ((!copy && explicitChoice && !alternatives) || (copy && namedPaths.length > 2)) {
       result.issues.push("ambiguous-file-target");
+    }
+    // Prose between operands may describe outputs or mention inputs. Keep the
+    // definite destination prefix; leave the rest in the original user request
+    // rather than turning uncertain extraction into a hard completion veto.
+    // Explicit choices, copy contracts, and path safety retain their checks.
+    if (!copy && !conjunctive && !alternatives && !explicitChoice) {
+      paths = paths.slice(0, separators.findIndex(separator => !conjunction.test(separator)) + 1);
     }
     const sourcePath = copy && namedPaths.length === 2 ? namedPaths[0] : undefined;
     const normalizedSource = sourcePath === undefined ? undefined : workspaceRelativeRequirementPath(sourcePath, workspaceRoot);

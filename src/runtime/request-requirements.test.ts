@@ -6,6 +6,20 @@ import { deriveRequestRequirements, explicitRequestSegments, explicitInspectionT
 
 
 describe("explicit output directories", () => {
+  it.each([
+    "From attendance.json create attendees.json sorted unique attended names, absent.json sorted absent names, and ATTENDANCE.md listing counts.",
+    "Write attendees.json comparing old.json and new.json."
+  ])("does not turn uncertain descriptive operands into hard requirements: %s", text => {
+    const result = deriveRequestRequirements(text);
+    expect(result.issues).toEqual([]);
+    expect(result.fileOutput?.path).toBe("attendees.json");
+    expect(result.fileOutput?.additionalFiles).toBeUndefined();
+    expect(validateRequestRequirements(result)).toEqual(result);
+  });
+  it("keeps definite list prefixes and separately stated output actions", () => {
+    expect(deriveRequestRequirements("Write a.json and b.json comparing source.json. Write summary.md."))
+      .toMatchObject({ issues: [], fileOutput: { path: "a.json", additionalFiles: [{ path: "b.json" }, { path: "summary.md" }] } });
+  });
   it("binds multiple bare outputs to the declared document root", () => {
     expect(deriveRequestRequirements("Create the document root directory `/var/www/html` if it doesn't exist. Create a simple index.html file in the document root with content. Create a custom 404.html page with content.", undefined, "/"))
       .toMatchObject({ issues: [], fileOutput: { path: "var/www/html/index.html", additionalFiles: [{ path: "var/www/html/404.html" }] } });

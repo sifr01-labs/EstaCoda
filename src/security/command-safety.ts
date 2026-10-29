@@ -50,7 +50,10 @@ export function assessCommandSafety(
   _options: { environmentType?: EnvironmentType } = {}
 ): CommandSafetyAssessment {
   const normalized = normalizeCommandForSafety(command);
-  const hardline = detectHardlineBlock(normalized);
+  // Whitespace normalization must not hide a command following a heredoc or
+  // another newline. Retain the conservative whole-payload floor as well.
+  const hardline = detectHardlineBlock(normalized) ?? command.split(/\r?\n/u)
+    .map(line => detectHardlineBlock(normalizeCommandForSafety(line))).find(block => block !== undefined);
 
   if (hardline !== undefined) {
     return toAssessment(normalized, hardline);
@@ -715,13 +718,49 @@ function matchesTerraformDestroy(command: string): boolean {
 function matchesSecretRead(command: string, originalCommand: string): boolean {
   // Only option-only safety settings qualify. Keep line boundaries here: the
   // general normalization deliberately collapses whitespace for other checks.
-  const enumeratesShellState = [...originalCommand.matchAll(/(?:^|[;&|\r\n])\s*set\b([^;&|\r\n]*)/giu)]
-    .some(match => !/^(?:\s+-[eu]+|\s+-o\s+pipefail)+\s*$/u.test(match[1]!));
+  // Exempt a Python function call only in code within a simple quoted heredoc.
+  // Keep shell glob/function syntax, embedded shell strings, substitutions and
+  // the rest of the payload visible; this is not an interpreter allowlist.
+  const shellStateSource = originalCommand.replace(/\b(?:sh|bash|dash|zsh|ksh)\s+-(?:c|lc)\s+(?:"((?:\\.|[^"\\])*)"|'([^']*)')/giu,
+    (_match, doubleQuoted: string | undefined, singleQuoted: string | undefined) => `; ${doubleQuoted ?? singleQuoted};`);
+  const enumeratesShellState = [...shellStateSource.matchAll(/(?:^|[;&|(\r\n])\s*set\b([^;&|\r\n]*)/giu)]
+    .some(match => !isPythonSetCall(shellStateSource, match.index! + match[0].toLowerCase().indexOf("set")) &&
+      !/^(?:\s+-[eu]+|\s+-o\s+pipefail)+\s*$/u.test(match[1]!));
   return /\b(?:cat|less|more|head|tail|grep|sed|awk)\b.*(?:\.env(?:\b|$)|\.ssh\/|id_rsa\b|id_ed25519\b|\.aws\/credentials\b|\.npmrc\b|\.gnupg\/)/iu.test(command) ||
-    enumeratesShellState || /(?:^|[;&|\r\n])\s*(?:env|printenv)(?:\s|$)/iu.test(originalCommand) ||
+    enumeratesShellState || /(?:^|[;&|(\r\n])\s*(?:env|printenv)(?=[\s;'"|&)<>]|$)/iu.test(shellStateSource) ||
     /\bsecurity\s+find-(?:generic-password|internet-password)\b/iu.test(command) ||
     /\bop\s+read\b/iu.test(command) ||
     /\bgh\s+auth\s+token\b/iu.test(command);
+}
+
+/** Recognize only the concrete language boundary needed by the shell-state
+ * check. Unknown openers/quoting remain subject to the conservative floor. */
+function isPythonSetCall(command: string, offset: number): boolean {
+  if (command.slice(offset, offset + 4) !== "set(") return false;
+  const opener = /^\s*python(?:3(?:\.\d+)?)?(?:[ \t]+-)?[ \t]+<<(['"])([A-Za-z_][A-Za-z_0-9]*)\1[ \t]*\r?\n/u.exec(command);
+  if (!opener) return false;
+  const start = opener[0].length;
+  const close = new RegExp(`^${opener[2]}\\r?$`, "mu").exec(command.slice(start));
+  if (!close || offset < start || offset >= start + close.index) return false;
+  // Python strings (including triple quotes), comments and escaped characters
+  // cannot establish a code-level set call. F-string contents stay conservative.
+  let quote = "";
+  let comment = false;
+  for (let i = start; i < offset; i += 1) {
+    const char = command[i]!;
+    if (comment) { if (char === "\n") comment = false; continue; }
+    if (quote) {
+      if (char === "\\") { i += 1; continue; }
+      if (command.startsWith(quote, i)) { i += quote.length - 1; quote = ""; }
+      continue;
+    }
+    if (char === "#") { comment = true; continue; }
+    if (char === "'" || char === '"') {
+      quote = command.startsWith(char.repeat(3), i) ? char.repeat(3) : char;
+      i += quote.length - 1;
+    }
+  }
+  return quote === "" && !comment;
 }
 
 function matchesPipeToInterpreter(command: string): boolean {
