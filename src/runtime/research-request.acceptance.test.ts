@@ -46,6 +46,19 @@ function schedulerFor(h: Harness, taskId: string) {
 }
 
 describe.sequential("research workflow acceptance harness", () => {
+  it('keeps a configured run stop visible alongside incomplete-output evidence and retained writes',async()=>{
+    const h=await harness({maxToolCalls:1});
+    h.enqueue(nativeCall('file_write',{path:'first.md',content:'Saved work.'}));
+    const result=await h.turn('Write first.md and second.md with the text Saved work.');
+    expect(result.finalOutcome?.terminationCause).toBe('budget_exhausted');
+    expect(result.text).toContain('configured run limit: 1 tool call');
+    expect(result.text).toContain('Send Continue');
+    expect(result.text).toContain('first.md');
+    expect(await readFile(join(h.workspaceRoot,'first.md'),'utf8')).toBe('Saved work.');
+    await expect(readFile(join(h.workspaceRoot,'second.md'))).rejects.toMatchObject({code:'ENOENT'});
+    scriptConsumed(h);
+  });
+
   it("delivers an unavailable-source explanation once without claiming completion", async () => {
     const h = await harness({ sourceAccessFailures: true });
     for (let i = 0; i < 5; i++) h.enqueue(nativeCall("web_extract", { url: SOURCE_URL, refresh: true }));

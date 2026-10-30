@@ -1,6 +1,6 @@
 # Run-limit live comparison — 2026-10-30
 
-Tested before creating any implementation commit, on `ame/jev-assisted-routing`.
+The baseline comparisons were tested before creating any implementation commit, on `ame/jev-assisted-routing`. The stop/resume case was additionally tested before its own commit.
 
 Baseline: `eb585bdc17aa2a1c52b7120389b5e78aea240a2f`, built before editing. Separate immutable compiled copies preserved both candidates. Model: configured Codex `gpt-6.1-sol`; Jev-assisted routing; same profile configuration, fixtures, tool policy, and provider; fallback routes disabled for comparison. All state and files were isolated from production. No mocked provider responses were used for these live cases.
 
@@ -19,6 +19,8 @@ These are controlled sequential case-review workloads, chosen to cross real exis
 
 Small coding control: both builds fixed numeric-price handling, preserved the tests, and passed the real Node test command; baseline 25.1s / 7 calls, candidate 24.7s / 7 calls. That single sample is not evidence of a speed improvement.
 
+Live stop/resume check: an interactive four-model-step limit completed a four-case review plus summary in five turns, taking 66.8 seconds overall. Main-model calls per turn were **4, 4, 4, 4, 3**. The first four turns stopped with `budget_exhausted`; the final turn completed. The harness simulated an explicit user “Continue” after each stop and disposed/rebuilt the runtime between turns, retaining the session database. All five output files were correct, each was written exactly once, and all inputs were unchanged. The visible stop message identified the four-step ceiling and explained that Continue starts another turn with saved limits. This verifies checkpoint continuity across runtime restarts, not automatic continuation or a reset of durable Task budgets.
+
 ## Limitations and diagnostic runs
 
 An initial 52-case fixture used a placeholder output filename (`Rxxx.json`). Both builds reported incomplete output; the candidate nevertheless produced 52 correct actual files while the baseline stopped after 15. The final comparison removed that ambiguity and added an explicit `summary.json`; both builds were rerun on the identical corrected prompt. Diagnostic results are not substituted for final results.
@@ -31,6 +33,8 @@ Use `scripts/eval-run-limits-live.mjs` with `RUNTIME_CORE` pointing at an immuta
 
 For the foreground comparison, leave interactive limits at defaults. For `task-refund-audit`, use `runLimits.unattended` with `maxIterations:120`, `maxToolCalls:300`, `maxDurationMinutes:90` in both test profiles. The baseline ignores this previously unsupported configuration.
 
+For `resume-short-review`, set interactive `maxIterations:4`, `maxToolCalls:0`, and `maxDurationMinutes:0`. This checks explicit foreground continuation rather than unattended Task retry.
+
 Compiled JavaScript digests (SHA-256 over sorted relative paths and bytes):
 
 - `baseline`: `699a124307a0b1224b65859512681f1e88d812bdf2ec4c51e5278c8bac4e5e0e`
@@ -42,3 +46,5 @@ Compiled JavaScript digests (SHA-256 over sorted relative paths and bytes):
 The initial full core run exercised 13,346 tests: 13,331 passed; 15 failed across 11 files. Two menu-order expectations needed the new reviewed action; the remaining failures were blocked local sockets/processes. All 225 tests in the affected ten-file rerun passed after fixing those expectations and granting the required local test permissions. Desktop unit tests passed across 48 files; the seven native terminal tests passed when rerun with PTY permission. English/Arabic desktop browser checks passed, including run-limit review/save and both host and Docker settings. Typecheck, build, source and distribution smoke, runtime-import audit, ESM audit, and diff checks were run; early typecheck failures were fixed and the dependent smoke checks rerun successfully.
 
 Runtime limits and Task admission are security-sensitive. Unlimited foreground defaults can consume more provider capacity; explicit configured limits, spending controls, cancellation, request timeouts, no-progress/failure detection, trust, and approval enforcement remain in place. Unattended limits stay finite and Task ancestry accounting remains cumulative.
+
+Final verification: the full core suite passed 13,358 of 13,359 tests; one CLI entrypoint test exceeded its 15-second timeout under parallel load. Its entire three-test file passed on an isolated rerun without changing the timeout or assertions. Desktop unit tests passed all 190 tests across 49 files, and the focused desktop browser suite passed all 55 checks, including English/Arabic settings, Task limits, and work continuity. Typecheck, release build, desktop foundation boundaries, source smoke, distribution smoke, runtime-import audit, ESM audit, execution-budget validation (four scenarios, three runs each), and diff checks passed. Focused Task tests and typecheck/build were rerun after preserving spending/status projection callbacks in the final Task creation wiring.

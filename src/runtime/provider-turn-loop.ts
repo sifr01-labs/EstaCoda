@@ -1,3 +1,4 @@
+import {runLimitStop,type RunLimitStop} from './run-limit-receipt.js';
 import { toolOperationFingerprint, toolResultFingerprint } from "./tool-result-fingerprint.js";
 import { assessHardlineFloor } from "../security/command-safety.js";
 import { redactSensitiveText } from "../utils/redaction.js";
@@ -132,6 +133,7 @@ export type ProviderTurnLoopRequestDefaults = {
 };
 
 export type ProviderTurnLoopResult = {
+  runLimitStop?: RunLimitStop;
   completionValidationFailure?: string;
   completionCandidate?: string;
   researchRecoverySummary?: string;
@@ -1292,6 +1294,7 @@ export class ProviderTurnLoop {
     );
 
     return {
+      runLimitStop: runLimitStop(terminationCause,this.#budgets,{iterations,toolCalls:providerToolExecutions.length,elapsedMs:Date.now()-loopStartedAt}),
       completionValidationFailure,
       completionCandidate,
       researchRecoverySummary,

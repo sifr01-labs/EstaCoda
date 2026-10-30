@@ -7,6 +7,19 @@ import { ExecutionCheckpointController, ExecutionCheckpointConflictError } from 
 const now = "2030-01-01T00:00:00.000Z";
 
 describe("ExecutionCheckpointController", () => {
+  it.each(['budget_exhausted','deadline_reached'] as const)('restores completed artifacts after a %s stop without creating a new objective',async cause=>{
+    const events:ExecutionCheckpointLifecycleEvent[]=[];
+    const controller=new ExecutionCheckpointController({sessionId:'session-1',profileId:'profile-1',record:async event=>{events.push(event);},now:()=>now});
+    const created=await controller.ensure(creation());
+    const saved=await controller.attachArtifact(created.revision,{id:'saved-report',sha256:'a'.repeat(64)});
+    await controller.settleAttempt(saved!.revision,{outcome:outcome('partially_completed',cause)});
+    const restored=new ExecutionCheckpointController({sessionId:'session-1',profileId:'profile-1',now:()=>now});
+    restored.hydrate(hydratableExecutionCheckpoint({events,sessionId:'session-1',profileId:'profile-1'})!);
+    const resumed=await restored.prepareForTurn('Continue');
+    expect(resumed).toMatchObject({disposition:'continuation',checkpoint:{id:created.id,lastTerminationCause:cause,artifactReferences:[{id:'saved-report'}]}});
+    expect(restored.current()!.progressRevision).toBe(saved!.progressRevision);
+  });
+
   it("persists a bounded runtime-owned checkpoint and redacts its objective", async () => {
     const events: unknown[] = [];
     const controller = new ExecutionCheckpointController({

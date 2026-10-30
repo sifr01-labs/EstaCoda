@@ -1,3 +1,4 @@
+import {formatRunLimitStop} from './run-limit-receipt.js';
 import { completionAdmissionFeedback } from "./completion-admission.js";
 import { recordRoutingStatus, routingStatus, routingNotice } from "./jev/routing-status.js";
 import { selectJevCapabilities, type CapabilityEvaluation } from "./jev/capability-selection.js";
@@ -1442,7 +1443,7 @@ export class AgentLoop {
     response.finalOutcome = finalOutcome;
     response.completionValidationFailure = providerLoop.completionValidationFailure;
     response.completionCandidate = providerLoop.completionCandidate;
-    const needsDeterministicReceipt = delegatedAnswerAcknowledgement === undefined &&
+    const needsDeterministicReceipt = providerLoop.runLimitStop === undefined && delegatedAnswerAcknowledgement === undefined &&
       (finalOutcome.confirmedActions.length > 0 || finalOutcome.uncertainActions.length > 0) &&
       (
         effectiveProviderExecution?.ok === false ||
@@ -1531,6 +1532,10 @@ export class AgentLoop {
         ? providerLoop.researchRecoverySummary
         : `${providerLoop.researchRecoverySummary}\n\n${response.text}`;
       if (response.providerExecution !== undefined) response.providerExecution = suppressProviderGeneratedText(response.providerExecution);
+    }
+    if (providerLoop.runLimitStop !== undefined) {
+      const locale=this.#ui?.language === 'ar' ? 'ar' : 'en';
+      response.text=appendExecutionReceipt(`${formatRunLimitStop(providerLoop.runLimitStop,locale,this.#taskExecution!==undefined)}\n\n${response.text}`,finalOutcome,locale);
     }
     if (finalizationNote) response.text += `\n\n${finalizationNote}`;
     await this.#skillLearningManager?.observeTurn({

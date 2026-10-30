@@ -3383,6 +3383,21 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     expect(result.terminationCause).toBe("normal");
   });
 
+  it("allows progressing interactive work past thirty minutes without a whole-run deadline",async()=>{
+    let now=0;
+    const harness=await createPostToolNudgeHarness({responses:[providerExecution('',[providerToolCall('slow')]),providerExecution('Finished.')],toolSteps:[{executions:[toolExecutionForTool('slow',testTool.name,'fresh evidence')]}],resolveRunBudgets:async()=>({maxProviderIterations:Infinity,maxProviderToolCalls:Infinity,maxProviderWallClockMs:Infinity}),onExecutePlans:()=>{now=31*60_000;}});
+    const clock=vi.spyOn(Date,'now').mockImplementation(()=>now);
+    try{const result=await runBasicProviderTurn(harness.loop);expect(result.terminationCause).toBe('normal');expect(result.iterations).toBe(2);expect(result.runLimitStop).toBeUndefined();}finally{clock.mockRestore();}
+  });
+
+  it("retains no-progress protection with unlimited run limits",async()=>{
+    const harness=await createPostToolNudgeHarness({responses:Array.from({length:10},()=>providerExecution('',[providerToolCall('repeat')])),toolSteps:Array.from({length:10},()=>({executions:[toolExecutionForTool('repeat',testTool.name,'same result')]})),resolveRunBudgets:async()=>({maxProviderIterations:Infinity,maxProviderToolCalls:Infinity,maxProviderWallClockMs:Infinity})});
+    const result=await runBasicProviderTurn(harness.loop);
+    expect(result.terminationCause).toBe('tool_loop_no_progress');
+    expect(harness.completeSpy.mock.calls.length).toBeLessThan(10);
+    expect(result.runLimitStop).toBeUndefined();
+  });
+
   it("snapshots run limits anew for each turn without changing an active turn", async () => {
     const resolveRunBudgets = vi.fn().mockResolvedValueOnce({maxProviderIterations:1}).mockResolvedValueOnce({maxProviderIterations:3});
     const harness = await createPostToolNudgeHarness({responses:[providerExecution("",[providerToolCall("step")]), providerExecution("Done.")],toolSteps:[{executions:[toolExecutionForTool("step","file.read","evidence")]}],resolveRunBudgets});

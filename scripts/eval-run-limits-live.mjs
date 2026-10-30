@@ -38,6 +38,8 @@ const taskCases=Object.values(long.files).map(JSON.parse),eligibleCases=taskCase
 manifest.push({id:'task-refund-audit',task:true,fixtureSource:'live durable Task audit',files:long.files,mutable:[],checks:[],
  expectedTaskResult:{reviewed:52,eligibleCount:eligibleCases.length,totalRefundCents:eligibleCases.reduce((sum,c)=>sum+c.paidCents,0)},
  prompt:'Read and audit the 52 refund requests in cases, one file at a time in numerical order. Use individual file reads, no batching, scripts, or delegation. A refund is eligible only when delivery was at most 30 days ago, the item is unused, and it was not custom made. Eligible refunds equal paidCents. Do not change any files. Review all 52 records and return a final JSON object with exactly reviewed, eligibleCount, totalRefundCents. Do not claim completion until all records have been read.'});
+const resume={...long,id:'resume-short-review',resume:true,files:Object.fromEntries(Object.entries(long.files).slice(0,4)),checks:long.checks.slice(0,4),additionalOutputs:long.additionalOutputs.slice(0,4),prompt:long.prompt.replaceAll('R052','R004').replaceAll('52','4')};
+resume.checks=[...resume.checks,{kind:'json',path:'summary.json',value:{reviewed:4}}];resume.additionalOutputs=[...resume.additionalOutputs,'summary.json'];manifest.push(resume);
 await fs.mkdir(root,{recursive:true});
 const homeDir=process.env.EVAL_HOME,profileId=process.env.EVAL_PROFILE||'default';
 if(!homeDir)throw Error('EVAL_HOME required: use an isolated profile home with test provider credentials');
@@ -63,6 +65,12 @@ async function check(c,r,workspace){
  if(c.arabic&&!/[\u0600-\u06ff]/u.test(body||''))faults.push('arabic-missing');
  if(c.cited&&!/https?:\/\//.test(body||''))faults.push('citations-missing');
  if(c.testCommand){const t=spawnSync(process.execPath,c.testCommand.slice(1),{cwd:workspace,encoding:'utf8',timeout:30000});r.codeTest={status:t.status,output:(t.stdout+t.stderr).slice(-8000)};if(t.status!==0)faults.push('code-test');}
+ if(c.resume){
+  if(r.turns.length<2||!r.turns[0].text.includes('configured run limit'))faults.push('missing-explicit-budget-stop');
+  if(r.turns.some(t=>(t.turnUsage?.mainAgent?.providerCalls??Infinity)>4))faults.push('per-turn-budget-exceeded');
+  const writes=r.turns.flatMap(t=>t.toolExecutions).filter(t=>t.tool.name==='file.write').map(t=>t.input.path);
+  if(new Set(writes).size!==writes.length)faults.push('repeated-completed-write');
+ }
  if(c.expectedTaskResult){try{const text=r.resultText??'',match=text.match(/\{[^{}]*\}/s);if(!match||!isDeepStrictEqual(JSON.parse(match[0]),c.expectedTaskResult))faults.push('task-result-value');}catch{faults.push('task-result-json');}}
  const status=r.tasks.length?r.tasks.at(-1).status:r.turns.at(-1)?.finalOutcome?.status;r.status=status;
  if(!c.expectedBlocked&&!['completed','completed_with_recovered_errors'].includes(status))faults.push('outcome:'+status);
@@ -86,6 +94,7 @@ async function run(c){
  await build();
  if(c.setupPrompt){await turn(c.setupPrompt,'setup');await runtime.dispose();await db.close();await build()}
  if(c.task)await runtime.beginTask(c.prompt);else await turn(c.prompt,'initial');
+ if(c.resume){for(let i=0;i<7&&!['completed','completed_with_recovered_errors'].includes(r.turns.at(-1)?.finalOutcome?.status);i++){await runtime.dispose();await db.close();await build();await turn('Continue','explicit-user-continuation');}}
  if(c.followup){await runtime.dispose();await db.close();await build();await turn(c.followup,'followup')}
  const store=new SQLiteTaskStore({db:db.db,profileId});const tasks=store.listTasks();
  if(tasks.length){const ownerId='live120-'+sessionId;const results=new TaskResultService({store,profileId,sessionDb:db,contentRoot:resolveProfileStateHome({homeDir,profileId}).taskResultsPath});const scheduler=new TaskScheduler({store,resultService:results,ownerId,limits:{maxProfileConcurrentAttempts:1},resolveExecutor:()=>runtime.taskAgentExecutor});for(let i=0;i<15;i++){const active=store.listTasks().filter(t=>['queued','running'].includes(t.status));if(!active.length)break;for(const t of active)store.acquireTaskHostLease({taskId:t.id,workspaceIdentityHash:t.workspace.identityHash,ownerId,kind:'foreground',acquiredAt:new Date().toISOString(),expiresAt:new Date(Date.now()+900000).toISOString()});const iteration=await scheduler.runOnce();await fs.appendFile(join(dir,'scheduler.jsonl'),JSON.stringify(iteration)+'\n');if(!iteration.completed&&!iteration.failed&&!iteration.started)break;}
