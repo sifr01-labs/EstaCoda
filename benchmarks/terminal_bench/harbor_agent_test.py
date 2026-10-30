@@ -39,7 +39,7 @@ class EstaCodaHarborAgentTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("--benchmark-name", args)
         self.assertIn("terminal-bench", args)
         self.assertIn("--benchmark-version", args)
-        self.assertIn("2.0", args)
+        self.assertEqual(args[args.index("--benchmark-version") + 1], "4.0.0")
         self.assertIn("--task-id", args)
         self.assertIn("task/with spaces", args)
         self.assertIn("--attempt", args)
@@ -51,6 +51,38 @@ class EstaCodaHarborAgentTest(unittest.IsolatedAsyncioTestCase):
         self.assertIn("--max-tokens", args)
         self.assertNotIn("--isolated-home", args)
         self.assertEqual(config.out_dir, "/tmp/estacoda-terminal-bench/task-with-spaces/attempt-2")
+
+    def test_tb4_defaults_share_eight_hour_deadline_with_cleanup_reserve(self):
+        config = build_config({})
+        args = build_bench_args(config, "/tmp/instruction.txt")
+        self.assertEqual(config.timeout_ms, 28_800_000)
+        self.assertEqual(args[args.index("--benchmark-version") + 1], "4.0.0")
+        self.assertEqual(args[args.index("--timeout-ms") + 1], "28770000")
+        self.assertEqual(args[args.index("--max-provider-wall-clock-ms") + 1], "28770000")
+        self.assertEqual(args.count("--max-provider-wall-clock-ms"), 1)
+        self.assertNotIn("--service-grace-ms", args)
+        self.assertNotIn("--max-provider-iterations", args)
+        self.assertNotIn("--max-provider-tool-calls", args)
+        self.assertIn("--isolated-home", args)
+        self.assertNotIn("--no-redact", args)
+
+    def test_explicit_legacy_version_and_deadline_remain_available(self):
+        config = build_config({
+            "ESTACODA_BENCHMARK_VERSION": "2.0",
+            "ESTACODA_BENCH_TIMEOUT_MS": "1800000",
+            "ESTACODA_BENCH_MAX_PROVIDER_WALL_CLOCK_MS": "600000",
+        })
+        args = build_bench_args(config, "/tmp/instruction.txt")
+        self.assertEqual(args[args.index("--benchmark-version") + 1], "2.0")
+        self.assertEqual(args[args.index("--timeout-ms") + 1], "1770000")
+        self.assertEqual(args[args.index("--max-provider-wall-clock-ms") + 1], "600000")
+        self.assertEqual(args.count("--max-provider-wall-clock-ms"), 1)
+
+    def test_short_smoke_deadline_also_caps_default_provider_budget(self):
+        config = build_config({"ESTACODA_BENCH_TIMEOUT_MS": "9000"})
+        args = build_bench_args(config, "/tmp/instruction.txt")
+        self.assertEqual(args[args.index("--timeout-ms") + 1], "8100")
+        self.assertEqual(args[args.index("--max-provider-wall-clock-ms") + 1], "8100")
 
     def test_defaults_to_isolated_home_without_real_user_home(self):
         config = build_config({

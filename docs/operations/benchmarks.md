@@ -7,6 +7,11 @@ description: "Reproducible Terminal-Bench and SWE-bench run guidance for EstaCod
 
 This runbook covers public benchmark execution for EstaCoda. It is an operator surface, not normal product UX. The benchmark path uses the existing CLI and writes artifacts; it does not add interactive screens or change ordinary EstaCoda sessions.
 
+New Terminal-Bench runs use **4.0**, pinned to
+`terminal-bench/terminal-bench@4.0.0`, with artifact version `4.0.0`.
+Existing 2.0 reports remain historical evidence; 4.0 requires a new baseline.
+Changing the adapter's version label does not change Harbor's dataset selection.
+
 ## Current Priority
 
 Use this order:
@@ -136,10 +141,10 @@ export ESTACODA_BENCH_HOME="/tmp/estacoda-home"
 export PYTHONPATH="/path/to/estacoda:${PYTHONPATH:-}"
 
 harbor run \
-  -d terminal-bench/terminal-bench-2 \
+  -d terminal-bench/terminal-bench@4.0.0 \
   -a benchmarks.terminal_bench.estacoda_harbor_agent:EstaCodaAgent \
   --artifact /tmp/estacoda-terminal-bench \
-  -n 5
+  -l 5 -n 1 -k 1 -r 0
 ```
 
 If `estacoda` is not installed in the task container, set:
@@ -150,6 +155,33 @@ export ESTACODA_BENCH_COMMAND="node /path/to/estacoda/dist/index.js"
 ```
 
 The smoke goal is not a public score. The goal is to prove that EstaCoda can run under Harbor without harness failures and produce reproducible artifacts.
+
+`-l 5` limits task count; `-n 1` sets concurrency, `-k 1` sets attempts per task,
+and `-r 0` disables automatic retries. Record the resolved five-task subset.
+Use a Harbor release supporting the pinned Hub dataset and separate verification;
+record its version and resolved job configuration before comparing results.
+
+### Terminal-Bench 4.0 execution contract
+
+The [4.0 release](https://www.tbench.ai/news/terminal-bench-4-0) sets an eight-hour
+agent limit per task. The adapter defaults to `28800000` ms and reserves 30 seconds
+for startup, disposal, and artifact collection. Its default provider wall-clock
+budget follows that remaining time (`28770000` ms); explicit smaller budgets are
+preserved. Iteration, tool-call, and repeated-failure limits still use the runtime
+defaults unless overridden. Record all effective limits, including intentional
+shorter smoke budgets, and do not present a constrained run as leaderboard parity.
+The generic `estacoda bench run` timeout is unchanged; this default is adapter-only.
+
+Preserve the published task resources and separate verifier configuration. Harbor
+transfers task-declared outputs to the verifier; the adapter's diagnostic artifacts
+do not replace them. Leave `ESTACODA_BENCH_SERVICE_GRACE_MS` unset for separate
+verification. A service kept alive in the agent environment is not available in a
+fresh verifier environment. See the [adapter runbook](../../benchmarks/terminal_bench/README.md).
+
+Risk note: the larger adapter deadline permits longer and potentially more costly
+provider execution. Workspace isolation, redaction, hardline checks, cancellation
+cleanup, and operator-controlled iteration/tool-call limits remain in force.
+Local tests do not establish a live 4.0 pass rate or full environment compatibility.
 
 ### Harbor Sharp Edges
 
@@ -166,7 +198,7 @@ Document these details in every reproducible run note:
 
 ## Full Baseline
 
-After the smoke passes, run all Terminal-Bench 2.0 tasks with the same settings:
+After the smoke passes, run all Terminal-Bench 4.0 tasks with the same settings:
 
 ```bash
 export ESTACODA_BENCH_MODEL="anthropic/claude-sonnet"
@@ -175,9 +207,10 @@ export ESTACODA_BENCH_TEMPERATURE="0"
 export PYTHONPATH="/path/to/estacoda:${PYTHONPATH:-}"
 
 harbor run \
-  -d terminal-bench/terminal-bench-2 \
+  -d terminal-bench/terminal-bench@4.0.0 \
   -a benchmarks.terminal_bench.estacoda_harbor_agent:EstaCodaAgent \
-  --artifact /tmp/estacoda-terminal-bench
+  --artifact /tmp/estacoda-terminal-bench \
+  -n 1 -k 1 -r 0
 ```
 
 Record:
@@ -186,6 +219,8 @@ Record:
 - model provider and model id
 - temperature and max token setting
 - benchmark name and version
+- Harbor version, resolved dataset/task revisions, images, and resource limits
+- effective agent/provider deadlines and iteration/tool-call budgets
 - task count
 - attempt count
 - pass rate
@@ -207,6 +242,11 @@ same model in another baseline agent
 ```
 
 Do not frame the comparison as EstaCoda versus a model. Keep model, temperature, task set, attempt count, and environment as close as possible so the comparison isolates the runtime.
+
+Compare only matching benchmark versions and task revisions. Preserve the 2.0
+reports as historical baselines; do not relabel or aggregate them with 4.0 results.
+To reproduce an older run, explicitly select its dataset, artifact version, timeout,
+and provider budgets. The adapter's version label alone does not restore old defaults.
 
 ## No Benchmark Tuning
 
@@ -301,7 +341,7 @@ For public benchmark runs, pass `--home /tmp/estacoda-home` or use the adapter d
 Use conservative wording:
 
 ```text
-We ran EstaCoda v0.1.x on Terminal-Bench 2.0 using [model].
+We ran EstaCoda v0.1.x on Terminal-Bench 4.0 (dataset 4.0.0) using [model].
 This is an early baseline, not a leaderboard claim.
 We report pass rate, cost, time, and the full run configuration.
 ```

@@ -2,6 +2,11 @@
 
 This directory contains the Harbor custom-agent adapter for running EstaCoda on Terminal-Bench through the existing headless benchmark CLI.
 
+New runs target **Terminal-Bench 4.0**, pinned to Harbor dataset
+`terminal-bench/terminal-bench@4.0.0`. The adapter records `4.0.0` in its artifacts.
+The dataset selection and artifact label are separate settings: changing the label
+does not select or download a dataset. Historical reports retain their original versions.
+
 The adapter is intentionally thin. Harbor supplies the task instruction and terminal environment; the adapter invokes:
 
 ```bash
@@ -10,7 +15,7 @@ estacoda bench run \
   --instruction-file /tmp/estacoda-terminal-bench/<task>/attempt-1/instruction.txt \
   --out /tmp/estacoda-terminal-bench/<task>/attempt-1 \
   --benchmark-name terminal-bench \
-  --benchmark-version 2.0 \
+  --benchmark-version 4.0.0 \
   --task-id <task> \
   --attempt 1 \
   --isolated-home
@@ -28,13 +33,21 @@ export ESTACODA_BENCH_HOME="/tmp/estacoda-home"
 export PYTHONPATH="/path/to/estacoda:${PYTHONPATH:-}"
 
 harbor run \
-  -d terminal-bench/terminal-bench-2 \
+  -d terminal-bench/terminal-bench@4.0.0 \
   -a benchmarks.terminal_bench.estacoda_harbor_agent:EstaCodaAgent \
-  --artifact /tmp/estacoda-terminal-bench
+  --artifact /tmp/estacoda-terminal-bench \
+  -l 5 -n 1 -k 1 -r 0
 ```
 
 The importable compatibility path is `benchmarks.terminal_bench.estacoda_harbor_agent:EstaCodaAgent`. The internal implementation remains in `benchmarks.terminal_bench.harbor_agent`.
 When running from a source checkout, `PYTHONPATH` must include the checkout root. The explicit `--artifact /tmp/estacoda-terminal-bench` flag lets Harbor collect EstaCoda's benchmark artifacts from the task container.
+
+This smoke selects at most five tasks (`-l 5`), runs one at a time (`-n 1`),
+and makes one attempt per task (`-k 1`) with no automatic retries (`-r 0`).
+Record the resolved task identities; the subset is not a public benchmark score.
+Remove `-l 5` for a full baseline after the smoke passes. Use a Harbor release
+supporting the pinned Hub dataset and separate verifier environments, and record
+`harbor --version` with each run.
 
 If `estacoda` is not already available in the task container, provide an install command controlled by the benchmark operator:
 
@@ -52,7 +65,35 @@ export ESTACODA_BENCH_COMMAND="node /path/to/estacoda/dist/index.js"
 - Long Terminal-Bench tasks may need explicit provider budgets. Use `ESTACODA_BENCH_MAX_PROVIDER_ITERATIONS`, `ESTACODA_BENCH_MAX_PROVIDER_TOOL_CALLS`, and `ESTACODA_BENCH_MAX_PROVIDER_WALL_CLOCK_MS` to make those limits intentional and reproducible.
 - Prefer explicit task identity when probing a single task. If Harbor does not supply a task id to the installed-agent context, pass `ESTACODA_BENCH_TASK_ID` so EstaCoda artifacts do not fall back to `unknown-task`.
 
+## Deadlines, cleanup, and comparison quality
+
+The default outer agent deadline is **28,800,000 ms (eight hours)**, matching the
+[Terminal-Bench 4.0 release](https://www.tbench.ai/news/terminal-bench-4-0).
+The adapter also sets the provider wall-clock budget to the remaining execution
+time unless the operator supplies a smaller value. Iteration, tool-call, and
+repeated-failure limits remain the runtime defaults unless explicitly configured;
+record them when comparing agents. The longer time allowance can increase run cost.
+No live provider campaign is part of the local adapter test.
+
 ## Configuration
+
+### Separate verification in Terminal-Bench 4.0
+
+Use the dataset's published agent/verifier environments and artifact declarations.
+Harbor transfers the declared task outputs into the separate verifier; EstaCoda's
+diagnostic logs are additional artifacts, not substitutes for those outputs.
+Leave `ESTACODA_BENCH_SERVICE_GRACE_MS` unset for separate verification: keeping a
+service alive in the agent container does not transfer it into the verifier.
+Do not change task images, resource limits, artifact paths, or verifier mode to
+make a run pass. See Harbor's [separate verifier documentation](https://docs.harborframework.com/tasks/separate-verifier).
+
+### Reproducing older runs
+
+Select the historical dataset explicitly in Harbor and set
+`ESTACODA_BENCHMARK_VERSION` to its exact recorded version. Also set
+`ESTACODA_BENCH_TIMEOUT_MS` and provider budgets to the original run's values;
+the version label does not restore older budget defaults. Never relabel existing
+2.x reports as 4.0 or compare their aggregate pass rates as a regression delta.
 
 ### Services needed by the verifier
 
@@ -93,10 +134,10 @@ Supported environment variables:
 | `ESTACODA_BENCH_ATTEMPT` | Harbor context or `1` | Attempt number for benchmark identity. |
 | `ESTACODA_BENCH_TEMPERATURE` | `0` | Provider request temperature. |
 | `ESTACODA_BENCH_MAX_TOKENS` | unset | Optional max output tokens. |
-| `ESTACODA_BENCH_TIMEOUT_MS` | `1800000` | Outer agent timeout; the adapter deducts its startup/handoff reserve. |
+| `ESTACODA_BENCH_TIMEOUT_MS` | `28800000` | Outer agent timeout in milliseconds (eight hours); the adapter deducts its startup/cleanup reserve for the headless run. Keep aligned with the published Harbor task limit. |
 | `ESTACODA_BENCH_SERVICE_GRACE_MS` | unset | Session lifetime after agent completion for shared-environment service grading; maximum 3600000. |
 | `ESTACODA_BENCH_REDACT` | `true` | Keep benchmark artifacts redacted by default. |
-| `ESTACODA_BENCHMARK_VERSION` | `2.0` | Terminal-Bench version label recorded in artifacts. |
+| `ESTACODA_BENCHMARK_VERSION` | `4.0.0` | Terminal-Bench version label recorded in artifacts; does not select the Harbor dataset. |
 
 Provider budget variables map directly to the matching `estacoda bench run` flags:
 
@@ -104,6 +145,10 @@ Provider budget variables map directly to the matching `estacoda bench run` flag
 - `ESTACODA_BENCH_MAX_PROVIDER_TOOL_CALLS`
 - `ESTACODA_BENCH_MAX_REPEATED_TOOL_FAILURES`
 - `ESTACODA_BENCH_MAX_PROVIDER_WALL_CLOCK_MS`
+
+When omitted, the provider wall-clock budget follows the effective CLI deadline
+(28,770,000 ms at the default eight-hour limit). An explicit value is capped at
+that deadline. Other provider budget flags are only forwarded when supplied.
 
 ## Testing
 

@@ -31,10 +31,11 @@ except ImportError:  # pragma: no cover - exercised by local unit tests without 
 
 
 DEFAULT_BENCHMARK_NAME = "terminal-bench"
-DEFAULT_BENCHMARK_VERSION = "2.0"
+DEFAULT_BENCHMARK_VERSION = "4.0.0"
 DEFAULT_WORKSPACE = "/app"
 DEFAULT_OUT_ROOT = "/tmp/estacoda-terminal-bench"
-DEFAULT_TIMEOUT_MS = 30 * 60 * 1000
+# Terminal-Bench 4.0 gives each agent trial eight hours.
+DEFAULT_TIMEOUT_MS = 8 * 60 * 60 * 1000
 HARBOR_ARTIFACTS_DIR = "/logs/artifacts/estacoda"
 
 
@@ -176,6 +177,10 @@ def build_bench_args(config: EstaCodaHarborConfig, instruction_file: str) -> lis
         if flag == "--max-provider-wall-clock-ms":
             value = str(min(int(value), execution_timeout_ms))
         args.extend([flag, value])
+    if not any(flag == "--max-provider-wall-clock-ms" for flag, _ in config.provider_budget_flags):
+        # Do not let the ordinary runtime's shorter default truncate a TB4 trial.
+        # Explicit operator budgets above still take precedence.
+        args.extend(["--max-provider-wall-clock-ms", str(execution_timeout_ms)])
     return args
 
 
