@@ -49,6 +49,40 @@ async function harness(request = 'Investigate and prepare a briefing.', required
 const names = (result: Awaited<ReturnType<typeof selectJevCapabilities>>) => result.initialTools.map(t => t.function.name);
 
 describe('live Jev capability selection and recovery', () => {
+ it('retains process controls when Jev selects only the shell', async () => {
+  for (const name of ['terminal.run', 'process.start', 'process.list', 'process.logs', 'process.stop']) registry.register(tool(name));
+  chosen = ['terminal.run']; const h = await harness('Run a long build.');
+  expect(names(await h.select())).toEqual(expect.arrayContaining(['terminal_run', 'process_start', 'process_list', 'process_logs', 'process_stop']));
+ });
+ it('recovers shell controls together when absent from active schemas', async () => {
+  for (const name of ['terminal.run', 'process.start', 'process.list', 'process.logs', 'process.stop']) registry.register(tool(name));
+  const h = await harness('Extract the moves from this video.');
+  const selected = await h.select();
+  expect(names(selected)).toContain('terminal_run');
+  const expanded = await recovery.applyRequests([{id:'tool:terminal.run',callId:'call'}], []);
+  expect(expanded.tools.map(t=>t.function.name)).toEqual(expect.arrayContaining(['terminal_run','process_start','process_list','process_logs','process_stop']));
+ });
+ it('does not resurrect unavailable or explicitly prohibited process controls', async () => {
+  for (const name of ['terminal.run', 'process.logs', 'process.stop']) registry.register(tool(name));
+  registry.get('process.logs')!.isAvailable = () => false;
+  chosen = ['terminal.run']; const h = await harness('Run a build. Do not use process.stop.');
+  const selected = await h.select();
+  expect(names(selected)).toContain('terminal_run');
+  expect(names(selected)).not.toContain('process_logs');
+  expect(names(selected)).not.toContain('process_stop');
+  const expanded = await recovery.applyRequests([{id:'tool:terminal.run',callId:'call'}], []);
+  expect(expanded.tools.map(t=>t.function.name)).toEqual(['terminal_run']);
+ });
+ it('rejects shell recovery if its available controls cannot fit the schema budget', async () => {
+  registry.register(tool('terminal.run'));
+  registry.register(tool('process.logs', {description:'x'.repeat(MAX_PROVIDER_SCHEMA_TOKENS * 8)}));
+  await harness();
+  const expanded = await recovery.applyRequests([{id:'tool:terminal.run',callId:'call'}], []);
+  expect(expanded.applied).toEqual([]);
+  expect(expanded.rejected).toEqual([{id:'tool:terminal.run',reason:'schema_budget'}]);
+  expect(expanded.tools).toEqual([]);
+ });
+
  it.each([true, false])('keeps host-required dependency reading only when available (available=%s)', async available => {
   registry.register(tool('task.result.read', { toolsets: ['core'], isAvailable: () => available }));
   const h = await harness('Combine the accepted worker findings into a report.', ['task.result.read', 'unregistered.tool']);

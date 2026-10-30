@@ -150,11 +150,21 @@ describe("process log waits", () => {
     } finally { await f.close(); }
   });
 
+  it("accepts a two-minute bound without waiting after the process exits", async () => {
+    const f = await fixture();
+    try {
+      const result = await f.terminal.run({ command: "sleep 0.2; printf finished" });
+      const id = (result.metadata?.process as { id: string }).id;
+      const logs = createProcessTools({ processManager: f.manager }).find(tool => tool.name === "process.logs")!;
+      expect(await logs.run({ id, waitMs: 120_000 })).toMatchObject({ metadata: { process: { status: "exited", exitCode: 0 } } });
+    } finally { await f.close(); }
+  });
+
   it("rejects invalid waits and missing process IDs", async () => {
     const f = await fixture();
     try {
       const logs = createProcessTools({ processManager: f.manager }).find(tool => tool.name === "process.logs")!;
-      for (const waitMs of [-1, 30001, NaN, Infinity, "1000"]) expect((await logs.run({ id: "missing", waitMs })).ok).toBe(false);
+      for (const waitMs of [-1, 120001, NaN, Infinity, "1000"]) expect((await logs.run({ id: "missing", waitMs })).ok).toBe(false);
       expect((await logs.run({ id: "missing" })).ok).toBe(false);
     } finally { await f.close(); }
   });

@@ -179,28 +179,29 @@ export function createProcessTools(options: ProcessToolOptions): readonly Regist
     },
     {
       name: "process.logs",
-      description: "Wait for a managed process to finish and read its logs. Defaults to a bounded 30-second wait while running; repeat for long jobs instead of shell polling. Set waitMs to 0 for an immediate snapshot. Waiting never proves task completion.",
+      description: "Wait for a managed process to finish and read its logs. Defaults to a bounded 60-second wait while running; use up to 120 seconds for builds. Repeat this wait instead of alternating with shell tail/ps polling. Set waitMs to 0 for an immediate snapshot. Waiting never proves task completion.",
       inputSchema: {
         type: "object",
         properties: {
           id: { type: "string" },
           tailChars: { type: "number" },
-          waitMs: { type: "number", minimum: 0, maximum: 30_000 }
+          waitMs: { type: "number", minimum: 0, maximum: 120_000 }
         },
         required: ["id"]
       },
       riskClass: "read-only-local",
       toolsets: ["shell-readonly", "coding", "research"],
       progressLabel: "reading process logs",
+      executionTimeoutMs: 125_000,
       maxResultSizeChars: 12_000,
       isAvailable: () => true,
       run: async (input: { id?: string; tailChars?: number; waitMs?: number | null }, context) => {
         if (typeof input.id !== "string" || input.id.length === 0) {
           return errorResult("id must be a non-empty string");
         }
-        const waitMs = input.waitMs ?? 30_000;
-        if (!Number.isFinite(waitMs) || waitMs < 0 || waitMs > 30_000) {
-          return errorResult("waitMs must be between 0 and 30000 ms");
+        const waitMs = input.waitMs ?? 60_000;
+        if (!Number.isFinite(waitMs) || waitMs < 0 || waitMs > 120_000) {
+          return errorResult("waitMs must be between 0 and 120000 ms");
         }
         const started = performance.now();
         const process = await options.processManager.wait(input.id, waitMs, context?.signal);

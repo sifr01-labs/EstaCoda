@@ -1,3 +1,4 @@
+import { processCompanionNames } from "../tools/process-tool-dependencies.js";
 import type { CapabilitySelectionDiagnostics, CapabilityOmissionReason } from "../contracts/runtime-event.js";
 import type { ChannelAttachment } from "../contracts/channel.js";
 import type { IntentRoute } from "../contracts/intent.js";
@@ -210,9 +211,10 @@ export function selectProviderToolsForTurn(input: {
   // command. Catalog membership still enforces capability availability; every
   // invocation retains its own authorization and hardline checks.
   const processCompanions = new Set<string>();
-  if (initialTools.some(schema => schema.function.name === "terminal_run" || schema.function.name === "process_start")) {
+  const companions = processCompanionNames(new Set(initialTools.map(schema => input.catalog.aliases.get(schema.function.name) ?? schema.function.name)));
+  if (companions.length > 0) {
     for (const entry of input.catalog.entries) {
-      if (!["process.start", "process.list", "process.logs", "process.stop"].includes(entry.tool.name) || isToolExplicitlyProhibited(entry.tool, input.userText ?? "")) continue;
+      if (!companions.includes(entry.tool.name) || isToolExplicitlyProhibited(entry.tool, input.userText ?? "")) continue;
       processCompanions.add(entry.schema.function.name);
       if (!initialTools.includes(entry.schema)) initialTools.push(entry.schema);
     }

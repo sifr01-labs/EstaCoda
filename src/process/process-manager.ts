@@ -105,7 +105,7 @@ export class ProcessManager {
 
   /** Yield without killing the process. Cancellation while waiting still settles it. */
   async wait(id: string, waitMs: number, signal?: AbortSignal): Promise<ManagedProcessRecord | undefined> {
-    if (!Number.isFinite(waitMs) || waitMs < 0 || waitMs > 30_000) throw new Error("Process wait must be between 0 and 30000 ms.");
+    if (!Number.isFinite(waitMs) || waitMs < 0 || waitMs > 120_000) throw new Error("Process wait must be between 0 and 120000 ms.");
     const record = this.#processes.get(id);
     if (record === undefined) return undefined;
     if (signal?.aborted) { await this.stop(id); signal.throwIfAborted(); }

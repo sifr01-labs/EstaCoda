@@ -1,7 +1,8 @@
 import { CORE_WORKING_TOOLS, isToolExplicitlyProhibited } from "../runtime/tool-selection-policies.js";
+import { processCompanionNames } from "./process-tool-dependencies.js";
 import { routingStatus } from "../runtime/jev/routing-status.js";
 import { evaluateCapabilities } from "../runtime/jev/capability-decisions.js";
-import { jevRoutingContext, type LiveJevRouting } from "../runtime/jev/live-routing.js";
+import { explicitlyProhibited, jevRoutingContext, type LiveJevRouting } from "../runtime/jev/live-routing.js";
 import { createHash } from "node:crypto";
 import type { LoadedSkill, SkillDefinition } from "../contracts/skill.js";
 import type { RecoveredSkillReceipt } from "../contracts/runtime-event.js";
@@ -234,12 +235,20 @@ export class SessionCapabilityRecovery {
       if (!schema) { rejected.push({ id, reason: "unavailable_or_changed" }); continue; }
       const alreadyExposed = tools.some((tool) => tool.function.name === schema.function.name);
       if (alreadyExposed && !skill) continue;
+      const companions: OpenAICompatibleToolSchema[] = [];
+      for (const name of processCompanionNames(new Set([id.slice(5)]))) {
+        if (explicitlyProhibited(this.#turn?.objective ?? "", name)) continue;
+        const companion = await this.toolSchema(`tool:${name}`);
+        if (companion && companion.function.name !== schema.function.name && !tools.some(tool => tool.function.name === companion.function.name)) companions.push(companion);
+      }
+      if (this.#turn?.token !== token || this.#turn?.signal?.aborted || revision !== this.catalogRevision() || routingAtStart !== routingRevision()) return { tools: [...active], applied: [], rejected: [{ id, reason: "inactive_scope" }] };
+      const additions = [schema, ...companions];
       const protectedTools = tools.filter(tool => protectedNames.has(this.#catalog?.aliases.get(tool.function.name) ?? tool.function.name) || appliedNames.has(tool.function.name));
       const budget = budgetProviderTools({
-        tools: alreadyExposed ? tools : [...protectedTools, schema, ...tools],
-        priorityNames: new Set([...protectedTools.map(tool => tool.function.name), schema.function.name])
+        tools: alreadyExposed ? tools : [...protectedTools, ...additions, ...tools],
+        priorityNames: new Set([...protectedTools.map(tool => tool.function.name), ...additions.map(tool => tool.function.name)])
       });
-      if (!budget.tools.some((tool) => tool.function.name === schema.function.name)) { rejected.push({ id, reason: "schema_budget" }); continue; }
+      if (additions.some(addition => !budget.tools.some(tool => tool.function.name === addition.function.name))) { rejected.push({ id, reason: "schema_budget" }); continue; }
       if (!alreadyExposed) {
         for (const name of budget.omitted) {
           const canonical = this.#catalog?.aliases.get(name) ?? name;

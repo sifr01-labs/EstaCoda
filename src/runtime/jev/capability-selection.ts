@@ -1,10 +1,11 @@
 import { CORE_WORKING_TOOLS, isToolExplicitlyProhibited } from "../tool-selection-policies.js";
+import { processCompanionNames } from "../../tools/process-tool-dependencies.js";
 import type { IntentRoute } from '../../contracts/intent.js';
 import { CAPABILITY_RECOVERY_TOOLS } from '../../tools/capability-tools.js';
 import { budgetProviderTools, type ProviderToolSchemaCatalog } from '../../tools/tool-schema.js';
 import type { ProviderToolSelection } from '../provider-tool-narrowing.js';
 import { explicitInspectionTools, requiredRequestTools } from '../request-requirements.js';
-import { type LiveJevRouting } from './live-routing.js';
+import { explicitlyProhibited, type LiveJevRouting } from './live-routing.js';
 import { evaluateCapabilities, type CapabilityEvaluation } from './capability-decisions.js';
 export type { CapabilityEvaluation } from './capability-decisions.js';
 
@@ -43,6 +44,12 @@ export async function selectJevCapabilities(input: {
       required.delete(entry.tool.name);
     }
   }
+  // A yielded shell command needs its controls even when their individual
+  // relevance scores are low. Availability and explicit prohibitions still apply.
+  const processDependencies = new Set(processCompanionNames(selected).filter(name =>
+    !explicitlyProhibited(input.evaluation.context.userRequest, name)));
+  for (const name of processDependencies) { selected.add(name); required.add(name); }
+  if (processDependencies.size > 0 && selected.has("terminal.run")) processDependencies.add("terminal.run");
   const evidenceGated = new Set(input.standard.expansionCandidates.map(candidate => candidate.toolName));
   const candidates = input.catalog.entries.filter(entry => selected.has(entry.tool.name) && !evidenceGated.has(entry.tool.name));
   const valid = [];
@@ -57,7 +64,7 @@ export async function selectJevCapabilities(input: {
   }
   const recovery = new Set<string>([...CAPABILITY_RECOVERY_TOOLS, "config.provider.execution_status"]);
   // Keep recovery reachable even when required dependencies exceed the schema budget.
-  valid.sort((a, b) => Number(recovery.has(b.tool.name)) - Number(recovery.has(a.tool.name)) || Number(CORE_WORKING_TOOLS.has(b.tool.name)) - Number(CORE_WORKING_TOOLS.has(a.tool.name)) || Number(explicit.has(b.tool.name)) - Number(explicit.has(a.tool.name)) || Number(required.has(b.tool.name)) - Number(required.has(a.tool.name)) || Number(dependencies.has(b.tool.name)) - Number(dependencies.has(a.tool.name)) ||
+  valid.sort((a, b) => Number(recovery.has(b.tool.name)) - Number(recovery.has(a.tool.name)) || Number(CORE_WORKING_TOOLS.has(b.tool.name)) - Number(CORE_WORKING_TOOLS.has(a.tool.name)) || Number(processDependencies.has(b.tool.name)) - Number(processDependencies.has(a.tool.name)) || Number(explicit.has(b.tool.name)) - Number(explicit.has(a.tool.name)) || Number(required.has(b.tool.name)) - Number(required.has(a.tool.name)) || Number(dependencies.has(b.tool.name)) - Number(dependencies.has(a.tool.name)) ||
     (decision.selections.find(s => s.id === `tool:${b.tool.name}`)?.probability ?? 0) - (decision.selections.find(s => s.id === `tool:${a.tool.name}`)?.probability ?? 0));
   const budget = budgetProviderTools({ tools: valid.map(entry => entry.schema) });
   const exposed = new Set(budget.tools.map(schema => input.catalog.aliases.get(schema.function.name) ?? schema.function.name));
