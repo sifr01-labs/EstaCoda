@@ -84,6 +84,35 @@ class EstaCodaHarborAgentTest(unittest.IsolatedAsyncioTestCase):
         self.assertEqual(args[args.index("--timeout-ms") + 1], "8100")
         self.assertEqual(args[args.index("--max-provider-wall-clock-ms") + 1], "8100")
 
+    def test_reserves_cleanup_time_inside_the_published_deadline(self):
+        config = build_config({"ESTACODA_BENCH_TIMEOUT_MS": "1200000",
+                               "ESTACODA_BENCH_MAX_PROVIDER_WALL_CLOCK_MS": "1200000"})
+        args = build_bench_args(config, "/tmp/instruction.txt")
+        self.assertEqual(args[args.index("--timeout-ms") + 1], "1170000")
+        self.assertEqual(args[args.index("--max-provider-wall-clock-ms") + 1], "1170000")
+        smaller = build_config({"ESTACODA_BENCH_TIMEOUT_MS": "9000",
+                                "ESTACODA_BENCH_MAX_PROVIDER_WALL_CLOCK_MS": "1000"})
+        args = build_bench_args(smaller, "/tmp/instruction.txt")
+        self.assertEqual(args[args.index("--timeout-ms") + 1], "8100")
+        self.assertEqual(args[args.index("--max-provider-wall-clock-ms") + 1], "1000")
+
+    async def test_cancellation_stops_environment_before_operator_cleanup(self):
+        order = []
+        class FakeEnvironment:
+            async def exec(self, command):
+                raise asyncio.CancelledError()
+            async def stop(self, delete):
+                if not delete:
+                    raise AssertionError("Cancellation must delete the disposable environment")
+                order.append("container-stopped")
+        agent = EstaCodaHarborAgent()
+        with self.assertRaises(asyncio.CancelledError):
+            try:
+                await agent.run("work", FakeEnvironment(), SimpleNamespace(metadata={}))
+            finally:
+                order.append("operator-credential-cleanup")
+        self.assertEqual(order, ["container-stopped", "operator-credential-cleanup"])
+
     def test_defaults_to_isolated_home_without_real_user_home(self):
         config = build_config({
             "ESTACODA_BENCH_TASK_ID": "openssl-selfsigned-cert",

@@ -136,8 +136,10 @@ def resolve_agent_config_env(agent: Any) -> Mapping[str, str]:
 
 
 def build_bench_args(config: EstaCodaHarborConfig, instruction_file: str) -> list[str]:
-    # Harbor's clock also covers startup, handoff, and artifact collection.
-    execution_timeout_ms = config.timeout_ms - min(30_000, config.timeout_ms // 10)
+    # Harbor's outer clock includes CLI startup, disposal and artifact collection.
+    # Keep all of that inside the operator's published task deadline.
+    shutdown_reserve_ms = min(30_000, config.timeout_ms // 10)
+    execution_timeout_ms = config.timeout_ms - shutdown_reserve_ms
     args = [
         *config.estacoda_command,
         "bench",
@@ -250,7 +252,9 @@ class EstaCodaHarborAgent(BaseInstalledAgent):
         try:
             result = await self.exec_as_agent(environment, command=command)
         except asyncio.CancelledError:
-            # Cancellation of a remote await alone does not stop its processes.
+            # Cancelling the host await does not prove the remote CLI or its
+            # children exited. Tear down this disposable environment before an
+            # operator subclass can remove credentials or Harbor can grade it.
             await asyncio.shield(environment.stop(delete=True))
             raise
         record_context(context, config, result)

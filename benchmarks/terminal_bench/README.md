@@ -75,6 +75,27 @@ repeated-failure limits remain the runtime defaults unless explicitly configured
 record them when comparing agents. The longer time allowance can increase run cost.
 No live provider campaign is part of the local adapter test.
 
+The adapter reserves the smaller of 30 seconds or 10% of the supplied task timeout
+for startup, runtime disposal, and artifact collection. It caps the inner provider
+wall-clock budget at the remaining execution time. The outer published Harbor
+limit is unchanged; resolved CLI arguments record the effective inner limit.
+Unexpected host cancellation tears down the disposable environment before an
+operator subclass can clean credentials. Such an attempt needs infrastructure
+review, rather than grading while the agent might still be mutating files.
+Credential-installing subclasses must await the base `run` before removing secrets;
+never delete credentials from a live, unsettled agent.
+
+`summary.json` includes `providerUsage.session` and `providerUsage.routing`, aggregated
+from the conversation's actual ledger and verified compression ancestors, including
+the default in-memory database. Separate delegated-task ledgers are not included. Inspect
+`usageComplete` and `pricingComplete` before comparing costs; missing usage is not
+zero cost. A separate SQLite exporter is neither necessary nor authoritative.
+
+For fair build-heavy comparisons, use native Linux amd64 execution when possible.
+Record emulation and CPU/memory limits, and investigate compiler crashes separately
+from solution correctness. Keep task images, instructions, deadlines, and attempts
+unchanged. A correct source patch does not establish a passing build/test result.
+
 ## Configuration
 
 ### Separate verification in Terminal-Bench 4.0

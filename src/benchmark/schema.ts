@@ -1,3 +1,4 @@
+import type { ProviderUsageTotals } from "../contracts/provider-usage.js";
 export const BENCHMARK_SCHEMA_VERSION = 1;
 
 export const BENCHMARK_RUN_STATUSES = [
@@ -106,6 +107,7 @@ export type BenchmarkRunSummary = {
   execution: BenchmarkExecutionSummary;
   model: BenchmarkModelSummary;
   metrics: BenchmarkMetrics;
+  providerUsage?: { session: ProviderUsageTotals; routing: ProviderUsageTotals };
   finalAnswer: string;
   artifacts: BenchmarkArtifactSummary;
   failure: BenchmarkFailureSummary | null;

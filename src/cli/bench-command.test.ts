@@ -1,3 +1,5 @@
+import { InMemorySessionDB } from "../session/in-memory-session-db.js";
+import { providerUsageEntryFromAttempt } from "../providers/provider-usage-ledger.js";
 import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -26,6 +28,33 @@ afterEach(async () => {
 });
 
 describe("benchCommand", () => {
+  it("exports aggregate routing usage from the run's in-memory ledger without other sessions", async () => {
+    const root = await makeTempDir();
+    const db = new InMemorySessionDB();
+    for (const id of ["session-1", "unrelated-session"]) await db.createSession({ id, profileId: "default" });
+    await db.endSession("session-1", "compression");
+    await db.createSession({ id: "compressed-session", profileId: "default", parentSessionId: "session-1", metadata: { compactedFromSessionId: "session-1" } });
+    const route = fakeLoadedConfig("typesafe", "jev-1.13.0").primaryModelRoute!;
+    route.profile = { ...route.profile, cost: { inputPerMillionTokens: 1, outputPerMillionTokens: 0 } };
+    for (const [sessionId, inputTokens] of [["session-1", 40], ["compressed-session", 60], ["unrelated-session", 900]] as const) {
+      await db.recordProviderUsageEntries([providerUsageEntryFromAttempt({
+        profileId: "default", providerAttemptIndex: 0, routes: [route],
+        context: { requestKey: sessionId, executionSessionId: sessionId, sourceKind: "auxiliary", auxiliaryKind: "routing" },
+        attempt: { state: "dispatched", dispatchedAt: "2026-01-01T00:00:00Z", provider: "typesafe", model: "jev-1.13.0", ok: true, content: "", usage: { inputTokens, outputTokens: 0, totalTokens: inputTokens } }
+      })]);
+    }
+    const runtime = { ...fakeRuntime([]), sessionId: "compressed-session" };
+    const result = await benchCommand({ argv: [], workspaceRoot: root }, ["run", "--workspace", root, "--instruction", "work", "--model", "openai/gpt-test", "--out", join(root,"out")], {
+      ...dependenciesForRuntime(root, runtime), createSessionDb: () => db
+    });
+    expect(result.exitCode).toBe(0);
+    const summary = JSON.parse(await readFile(join(root,"out/summary.json"),"utf8"));
+    expect(summary.providerUsage.routing).toMatchObject({ providerCalls: 2, inputTokens: 100, usageComplete: true, pricingComplete: true, estimatedCostUsd: 0.0001 });
+    expect(summary.providerUsage.session.providerCalls).toBe(2);
+    expect(JSON.stringify(summary.providerUsage)).not.toContain("requestKey");
+    expect(JSON.stringify(summary.providerUsage)).not.toContain("unrelated-session");
+  });
+
   it("renders help through the central CLI dispatcher", async () => {
     const result = await runCliCommand({
       argv: ["bench", "--help"],

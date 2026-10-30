@@ -1,3 +1,5 @@
+import { verifiedCompressionLineage } from "../session/session-lineage.js";
+import { providerUsageTotals } from "../providers/provider-usage-ledger.js";
 import { execFile } from "node:child_process";
 import { randomUUID } from "node:crypto";
 import { mkdtemp, mkdir, readFile, rename, rm, writeFile } from "node:fs/promises";
@@ -192,6 +194,7 @@ async function runBenchRun(
   const artifacts = benchmarkArtifactPaths(args.outDir, args.artifactPaths);
   const events: RuntimeEvent[] = [];
   let runtime: Runtime | undefined;
+  let profileId: string | undefined;
   let retainRuntime = false;
   let trustDirectory: string | undefined;
   let finalAnswer = "";
@@ -221,6 +224,7 @@ async function runBenchRun(
       profileId: options.profileId,
       loadConfig: dependencies.loadConfig ?? loadRuntimeConfig
     });
+    profileId = options.profileId ?? config.profileId;
     const route = await resolveBenchmarkModelRoute(config, args.modelInput);
     if (route === undefined) {
       throw benchmarkError(
@@ -375,6 +379,18 @@ async function runBenchRun(
       },
       failure
     });
+
+    // Read the actual run ledger, including when benchmark mode uses an in-memory
+    // DB. Persist aggregate counters only, never request context or credential data.
+    if (profileId !== undefined && runtime?.sessionId !== undefined) {
+      const lineage = await verifiedCompressionLineage(sessionDb, runtime.sessionId, profileId);
+      const entries = (await Promise.all((lineage ?? []).map(session =>
+        sessionDb.listProviderUsageEntries(profileId!, { sessionId: session.id })))).flat();
+      summary.providerUsage = {
+        session: providerUsageTotals(entries, { emptyUsageIsComplete: lineage !== undefined && metrics.providerCalls === 0 }),
+        routing: providerUsageTotals(entries.filter(entry => entry.auxiliaryKind === "routing"), { emptyUsageIsComplete: lineage !== undefined && !events.some(event => event.kind === "routing-status" && event.diagnostics?.contacted) })
+      };
+    }
 
     await writeBenchmarkHistoryArtifact(
       artifacts.history,
