@@ -1199,6 +1199,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
                 mediaRoot,
                 voiceTempRoot: join(profilePaths.tempPath, "audio", "telegram"),
                 activityLabelsLocale: config.ui.activityLabels,
+                progressMode: telegram.progressMode,
                 fetch: options.telegramFetch,
               })
             : new TelegramAdapter({
@@ -1209,6 +1210,7 @@ export async function runGatewaySupervisor(options: GatewaySupervisorOptions): P
                 mediaRoot,
                 voiceTempRoot: join(profilePaths.tempPath, "audio", "telegram"),
                 activityLabelsLocale: config.ui.activityLabels,
+                progressMode: telegram.progressMode,
                 fetch: options.telegramFetch,
               });
           router.registerAdapter(adapter);

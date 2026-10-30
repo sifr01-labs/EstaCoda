@@ -859,6 +859,7 @@ export class AgentLoop {
           nativeSchemaTokens: 0, connectors: this.#connectorInventory([])
         }, input.onEvent);
         const diagnostic = await this.#providerTurnLoop.run({
+          channel: input.channel,
           diagnosticOnly: true,
           visibleTurnId: visibleTurn.id,
           userText: effectiveText,
@@ -1125,6 +1126,7 @@ export class AgentLoop {
     const providerLoop: ProviderTurnLoopResult = researchBlockers.length > 0
       ? { providerExecution: undefined, toolExecutions: [], iterations: 0, terminationCause: "user_input_required" }
       : await this.#providerTurnLoop.run({
+      channel: input.channel,
       completionReadbackPaths: input.stepCompletion === undefined ? executions => pendingFileReadbackPaths({
         requirements: intent.requestRequirements, toolExecutions: executions,
         executionReceipts: this.#executionEvidenceIndex.recordsForTurn(visibleTurn.id)

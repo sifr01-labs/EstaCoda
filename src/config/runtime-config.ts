@@ -541,6 +541,7 @@ export type EstaCodaConfig = {
 export type TelegramSecureInputMode = "protected-handoff" | "direct-dm" | "disabled";
 
 export type TelegramChannelConfig = {
+  progressMode?: "compact" | "detailed" | "off";
   enabled?: boolean;
   botTokenEnv?: string;
   defaultChatId?: string;
@@ -1161,6 +1162,7 @@ export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Prom
         textDebounceMaxMessages: normalizeTextDebounceMaxMessages(telegram.textDebounceMaxMessages),
         textDebounceMaxChars: normalizeTextDebounceMaxChars(telegram.textDebounceMaxChars),
         secureInputMode: normalizeTelegramSecureInputMode(telegram.secureInputMode),
+        progressMode: telegram.progressMode === "detailed" || telegram.progressMode === "off" ? telegram.progressMode : "compact",
         streaming: normalizeTelegramStreamingConfig(telegram.streaming)
       },
       discord: {

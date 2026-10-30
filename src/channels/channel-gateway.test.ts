@@ -651,6 +651,58 @@ describe("ChannelGateway Telegram processing indicator", () => {
 });
 
 describe("ChannelGateway Telegram streaming", () => {
+  it.each([true, false])("anchors the original Telegram message with streaming=%s", async (enabled) => {
+    const { adapter, gateway } = createStreamingGatewayHarness({ enabled });
+    const send = vi.spyOn(adapter.delivery!, "sendText");
+    await gateway.receive(makeMessage("question", { metadata: { telegram: { messageId: 77, replyToMessageId: 22 } } }));
+    if (enabled) expect(adapter.streamStarts[0]?.options?.replyTo).toBe("77");
+    else expect(send).toHaveBeenCalledWith(expect.anything(), "final answer", { replyTo: "77" });
+  });
+
+  it("passes the same reply anchor through a streaming delivery failure", async () => {
+    const handle = createStreamingHandleSpy({ finishResult: { delivered: false, fallbackRequired: true } });
+    const { adapter, gateway } = createStreamingGatewayHarness({ handle });
+    const send = vi.spyOn(adapter.delivery!, "sendText");
+    await gateway.receive(makeMessage("question", { metadata: { telegram: { messageId: 77 } } }));
+    expect(adapter.streamStarts[0]?.options?.replyTo).toBe("77");
+    expect(send).toHaveBeenCalledWith(expect.anything(), "final answer", { replyTo: "77" });
+  });
+
+  it.each([true, false])("cleans progress only after a confirmed normal delivery (receipt=%s)", async (delivered) => {
+    const { adapter, gateway } = createStreamingGatewayHarness({ enabled: false });
+    adapter.delivery!.sendText = async () => delivered ? { messageIds: ["55"] } : undefined;
+    const finish = vi.fn(async () => {});
+    adapter.delivery!.finishProgress = finish;
+    await gateway.receive(makeMessage("question"));
+    expect(finish).toHaveBeenCalledWith(expect.anything(), delivered);
+  });
+
+  it.each(["failed", "blocked", "cancelled"] as const)("preserves progress for %s outcomes even after delivery", async (status) => {
+    const response = runtimeResponse({ text: "final answer", securityDecision: "allow" });
+    response.finalOutcome = { status, terminationCause: "normal", completionFloor: "read", confirmedActions: [], uncertainActions: [] };
+    const { adapter, gateway } = createStreamingGatewayHarness({ runtimeResponse: response });
+    const finish = vi.fn(async () => {});
+    adapter.delivery!.finishProgress = finish;
+    await gateway.receive(makeMessage("question"));
+    expect(finish).toHaveBeenCalledWith(expect.anything(), false);
+  });
+
+  it("settles progress on runtime errors without deleting the evidence", async () => {
+    const { adapter, gateway, runtime } = createStreamingGatewayHarness();
+    runtime.handle = async () => { throw new Error("test failure"); };
+    const finish = vi.fn(async () => {});
+    adapter.delivery!.finishProgress = finish;
+    await gateway.receive(makeMessage("question"));
+    expect(finish).toHaveBeenCalledWith(expect.anything(), false);
+  });
+
+  it("does not let cosmetic progress cleanup failure fail the answer", async () => {
+    const { adapter, gateway } = createStreamingGatewayHarness();
+    adapter.delivery!.finishProgress = async () => { throw new Error("cleanup failed"); };
+    const response = await gateway.receive(makeMessage("question"));
+    expect(response.replyText).toBe("final answer");
+  });
+
   it("starts streaming only for Telegram when config is enabled and passes config options", async () => {
     const { adapter, gateway } = createStreamingGatewayHarness();
 

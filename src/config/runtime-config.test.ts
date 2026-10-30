@@ -1969,6 +1969,17 @@ describe("loadRuntimeConfig channel readiness", () => {
     await rm(workspace, { recursive: true, force: true });
   });
 
+
+  it.each([undefined, "compact", "detailed", "off", "invalid"])("normalizes Telegram progress mode %s", async (progressMode) => {
+    const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
+    try {
+      await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });
+      await writeFile(profileConfigPath(workspace), JSON.stringify({ channels: { telegram: { enabled: false, progressMode } } }));
+      const loaded = await loadRuntimeConfig({ workspaceRoot: workspace, homeDir: workspace });
+      expect(loaded.channels.telegram.progressMode).toBe(progressMode === "detailed" || progressMode === "off" ? progressMode : "compact");
+    } finally { await rm(workspace, { recursive: true, force: true }); }
+  });
+
   it("normalizes Telegram streaming config as enabled with auto transport by default", async () => {
     const workspace = await mkdtemp(join(tmpdir(), "estacoda-config-test-"));
     await mkdir(dirname(profileConfigPath(workspace)), { recursive: true });

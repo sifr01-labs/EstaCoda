@@ -372,6 +372,7 @@ it("exports only typed command outcomes, excluding raw errors and secrets", () =
 async function runBasicProviderTurn(
   loop: ProviderTurnLoop,
   callbacks: {
+    channel?: Parameters<ProviderTurnLoop["run"]>[0]["channel"];
     completionReadbackPaths?: Parameters<ProviderTurnLoop["run"]>[0]["completionReadbackPaths"];
     validateCompletion?: Parameters<ProviderTurnLoop["run"]>[0]["validateCompletion"];
     diagnosticOnly?: boolean;
@@ -395,6 +396,7 @@ async function runBasicProviderTurn(
   } = {}
 ): Promise<Awaited<ReturnType<ProviderTurnLoop["run"]>>> {
   return await loop.run({
+    channel: callbacks.channel,
     completionReadbackPaths: callbacks.completionReadbackPaths,
     validateCompletion: callbacks.validateCompletion,
     diagnosticOnly: callbacks.diagnosticOnly,
@@ -1015,6 +1017,14 @@ describe("providerEfficiencySignals", () => {
 });
 
 describe("ProviderTurnLoop streaming callbacks", () => {
+  it("passes Telegram presentation guidance to the provider", async () => {
+    const harness = await createCompressionHarness();
+    harness.completeSpy.mockResolvedValue(providerExecution("answer"));
+    await runBasicProviderTurn(harness.loop(), { channel: "telegram" });
+    const request = harness.completeSpy.mock.calls[0]?.[0] as ProviderRequest;
+    expect(JSON.stringify(request.messages)).toContain("Rich tables are supported");
+  });
+
   it("continues emitting provider-token events when callbacks are omitted", async () => {
     const harness = await createCompressionHarness();
     harness.completeSpy.mockImplementation(async (_request, _preferences, options) => {

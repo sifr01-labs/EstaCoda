@@ -131,6 +131,8 @@ export type ChannelStreamingTextHandle = {
 };
 
 export type ChannelStreamingTextOptions = {
+  /** Originating platform message; only the first answer chunk is anchored. */
+  replyTo?: string;
   signal?: AbortSignal;
   editIntervalMs?: number;
   minInitialChars?: number;
@@ -173,6 +175,8 @@ export type ChannelDelivery = {
     options?: ChannelTextOptions
   ): Promise<ChannelTextDeliveryReceipt | void>;
   sendProgress?(sessionKey: ChannelSessionKey, event: RuntimeEvent): Promise<void>;
+  /** End transient progress after the gateway settles a turn. Cleanup requires confirmed delivery. */
+  finishProgress?(sessionKey: ChannelSessionKey, completed: boolean): Promise<void>;
   sendArtifact?(sessionKey: ChannelSessionKey, artifact: ArtifactRecord): Promise<ArtifactDeliveryOutcome>;
   startStreamingText?(sessionKey: ChannelSessionKey, options?: ChannelStreamingTextOptions): ChannelStreamingTextHandle;
 };

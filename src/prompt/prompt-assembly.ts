@@ -5,7 +5,7 @@ import { renderCapabilityState, type RuntimeCapabilityState } from "../runtime/c
 import { reviewedApiDescription } from "../contracts/artifact.js";
 import type { ArtifactRecord } from "../contracts/artifact.js";
 import type { BrowserStateProjection, BrowserTab } from "../contracts/browser.js";
-import type { ChannelAttachment } from "../contracts/channel.js";
+import type { ChannelAttachment, ChannelKind } from "../contracts/channel.js";
 import type { ContextExpansionResult, ProjectContextSnapshot } from "../contracts/context.js";
 import { DELEGATE_TASK_MAX_RESULT_CHARS } from "../contracts/delegation.js";
 import type { IntentRoute } from "../contracts/intent.js";
@@ -78,6 +78,7 @@ export type ProviderPromptAssembly = {
 };
 
 export type ProviderPromptInput = {
+  channel?: ChannelKind;
   completionFeedback?: string;
   completionCandidate?: string;
   capabilityState?: readonly RuntimeCapabilityState[];
@@ -2058,6 +2059,11 @@ function renderProfileGuidance(input: ProviderPromptInput): string {
     `- Agent profile: ${profile.mode}`,
     `- Response language: ${profile.responseLanguage}`,
     "",
+    ...(input.channel === "telegram" ? [
+      "Telegram presentation: Lead with the answer. Use short paragraphs, descriptive Markdown links beside the claims they support, and compact tables when useful. Rich tables are supported; do not avoid them just because this is chat.",
+      "Keep progress commentary brief and meaningful; the interface already reports tool activity. Do not repeat internal routing labels or raw tool arguments.",
+      "For current availability comparisons, distinguish the exact version, region, managed service versus self-deployment, and retirement status when relevant. Verify those qualifications against current sources; state uncertainty instead of turning a catalog listing into an unqualified availability claim."
+    ] : []),
     profileGuidance(profile.mode),
     responseLanguageGuidance(profile.responseLanguage),
     ui.flavor === "standard"

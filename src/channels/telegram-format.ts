@@ -85,12 +85,37 @@ function renderTelegramHtml(input: string): string {
 }
 
 function renderTextLines(lines: string[]): string {
-  return lines
-    .map((line, index) => renderTextLine(line, {
-      previous: lines[index - 1],
-      next: lines[index + 1]
-    }))
-    .join("\n");
+  const rendered: string[] = [];
+  for (let index = 0; index < lines.length; index += 1) {
+    const headers = tableCells(lines[index]);
+    const separator = tableCells(lines[index + 1]);
+    if (headers !== undefined && separator?.length === headers.length
+      && separator.every((cell) => /^:?-{3,}:?$/u.test(cell))) {
+      let rowIndex = index + 2;
+      const rows: string[] = [];
+      while (rowIndex < lines.length) {
+        const cells = tableCells(lines[rowIndex]);
+        if (cells === undefined || cells.length !== headers.length) break;
+        rows.push(cells.map((cell, column) => `${renderInline(headers[column]!)}: ${renderInline(cell)}`).join("\n"));
+        rowIndex += 1;
+      }
+      if (rows.length > 0) {
+        rendered.push(rows.join("\n\n"));
+        index = rowIndex - 1;
+        continue;
+      }
+    }
+    rendered.push(renderTextLine(lines[index]!, { previous: lines[index - 1], next: lines[index + 1] }));
+  }
+  return rendered.join("\n");
+}
+
+// Only used by the legacy HTML fallback. Native rich Markdown retains its tables.
+function tableCells(line: string | undefined): string[] | undefined {
+  if (line === undefined || !line.includes("|")) return undefined;
+  const trimmed = line.trim().replace(/^\|/u, "").replace(/(?<!\\)\|$/u, "");
+  const cells = trimmed.split(/(?<!\\)\|/u).map((cell) => cell.trim().replaceAll("\\|", "|"));
+  return cells.length > 1 ? cells : undefined;
 }
 
 function renderTextLine(
@@ -149,11 +174,19 @@ function renderInline(input: string): string {
   let cursor = 0;
 
   while (cursor < input.length) {
+    if (input[cursor] === "[") {
+      const link = readMarkdownLink(input, cursor);
+      if (link !== undefined) {
+        output += `<a href="${escapeHtml(link.url).replaceAll('"', "&quot;")}">${renderInline(link.label)}</a>`;
+        cursor = link.end;
+        continue;
+      }
+    }
     if (input.startsWith("**", cursor)) {
       const close = input.indexOf("**", cursor + 2);
 
       if (close > cursor + 2) {
-        output += `<b>${escapeHtml(input.slice(cursor + 2, close))}</b>`;
+        output += `<b>${renderInline(input.slice(cursor + 2, close))}</b>`;
         cursor = close + 2;
         continue;
       }
@@ -193,4 +226,30 @@ function escapeHtml(value: string): string {
     .replaceAll("&", "&amp;")
     .replaceAll("<", "&lt;")
     .replaceAll(">", "&gt;");
+}
+
+function readMarkdownLink(input: string, start: number): { label: string; url: string; end: number } | undefined {
+  const labelEnd = input.indexOf("](", start + 1);
+  if (labelEnd < 0) return undefined;
+  const urlStart = labelEnd + 2;
+  let depth = 1;
+  for (let end = urlStart; end < input.length; end += 1) {
+    if (input[end] === "\n") return undefined;
+    if (input[end] === "(") depth += 1;
+    if (input[end] !== ")" || --depth !== 0) continue;
+    const url = input.slice(urlStart, end);
+    // Render links only; never fetch them or allow active/local URI schemes.
+    // Keep opening tags bounded so the existing HTML chunk balancer can reopen them safely.
+    if (escapeHtml(url).replaceAll('"', "&quot;").length > 512 || /[\s<>\x00-\x1f]/u.test(url)) return undefined;
+    try {
+      const parsed = new URL(url);
+      if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return undefined;
+    } catch { return undefined; }
+    return { label: input.slice(start + 1, labelEnd), url, end: end + 1 };
+  }
+  return undefined;
+}
+
+export function containsTelegramTable(text: string): boolean {
+  return /^\s*\|?.*\|.*\n\s*\|?\s*:?-{3,}/mu.test(text);
 }

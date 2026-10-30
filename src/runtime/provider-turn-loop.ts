@@ -9,7 +9,7 @@ import { buildSkillReadinessMetadata } from "../skills/skill-readiness.js";
 import { sanitizeCheckpointText } from "../session/execution-checkpoint-state.js";
 import type { RecoveredSkillReceipt, CapabilitySelectionDiagnostics } from "../contracts/runtime-event.js";
 import { describeCapabilitySelection } from "./provider-tool-narrowing.js";
-import type { ChannelAttachment } from "../contracts/channel.js";
+import type { ChannelAttachment, ChannelKind } from "../contracts/channel.js";
 import type { ContextExpansionResult, ProjectContextSnapshot } from "../contracts/context.js";
 import type { IntentRoute } from "../contracts/intent.js";
 import type { ExecutionPlanReader, ExecutionTerminationCause } from "../contracts/execution-plan.js";
@@ -282,6 +282,7 @@ export class ProviderTurnLoop {
     /** Explain a blocked task without executing tools or supervising its checkpoint. */
     diagnosticOnly?: boolean;
     visibleTurnId?: string;
+    channel?: ChannelKind;
     userText: string;
     routedText: string;
     selectedSkill: LoadedSkill | SkillDefinition | undefined;
@@ -1406,6 +1407,7 @@ export class ProviderTurnLoop {
     foregroundTurnId: string;
     providerToolCallNamespace: string;
     visibleTurnId?: string;
+    channel?: ChannelKind;
     userText: string;
     routedText: string;
     selectedSkill: LoadedSkill | SkillDefinition | undefined;
@@ -1560,6 +1562,7 @@ export class ProviderTurnLoop {
     foregroundTurnId: string;
     providerToolCallNamespace: string;
     visibleTurnId?: string;
+    channel?: ChannelKind;
     userText: string;
     routedText: string;
     selectedSkill: LoadedSkill | SkillDefinition | undefined;

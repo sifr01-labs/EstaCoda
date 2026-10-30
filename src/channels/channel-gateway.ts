@@ -835,7 +835,8 @@ export class ChannelGateway {
   #startStreamingTextIfEligible(
     adapter: ChannelAdapter,
     sessionKey: ChannelSessionKey,
-    signal: AbortSignal | undefined
+    signal: AbortSignal | undefined,
+    replyTo?: string
   ): ChannelStreamingTextHandle | undefined {
     if (
       adapter.kind !== "telegram" ||
@@ -849,6 +850,7 @@ export class ChannelGateway {
 
     return adapter.delivery.startStreamingText(sessionKey, {
       signal,
+      replyTo,
       editIntervalMs: this.#telegramStreaming.editIntervalMs,
       minInitialChars: this.#telegramStreaming.minInitialChars,
       cursor: this.#telegramStreaming.cursor,
@@ -2240,6 +2242,8 @@ export class ChannelGateway {
     let terminalEventEmitted = false;
     let streamHandle: ChannelStreamingTextHandle | undefined;
     let processingIndicatorActive = false;
+    let progressCompleted = false;
+    const telegramReplyTo = telegramAttributionMessageIds(message)[0];
     const turnStartTime = Date.now();
     try {
       processingIndicatorActive = await this.#setInboundProcessingIndicator(adapter, message, true);
@@ -2287,7 +2291,7 @@ export class ChannelGateway {
         : this.#trustedWorkspace;
       const debounceMetadata = readDebounceMetadata(message.metadata);
       const busyTextCoalescingMetadata = readBusyTextCoalescingMetadata(message.metadata);
-      streamHandle = this.#startStreamingTextIfEligible(adapter, normalizedSessionKey, controller.signal);
+      streamHandle = this.#startStreamingTextIfEligible(adapter, normalizedSessionKey, controller.signal, telegramReplyTo);
       const streamCallbacksWired = streamHandle !== undefined;
 
       // Handle the turn
@@ -2396,13 +2400,15 @@ export class ChannelGateway {
         !artifactBoundary;
 
       let finalMessageIds = streamingDeliveredFinalText ? streamResult?.messageIds : undefined;
+      let finalDelivered = streamingDeliveredFinalText;
       if (!streamingDeliveredFinalText) {
         const receipt = await this.#deliverText(
           adapter,
           normalizedSessionKey,
           streamResult?.fallbackText ?? response.text,
-          message.channel === "whatsapp" ? { replyTo: message.id } : undefined
+          message.channel === "whatsapp" ? { replyTo: message.id } : message.channel === "telegram" ? { replyTo: telegramReplyTo } : undefined
         );
+        finalDelivered = (receipt?.messageIds.length ?? 0) > 0;
         finalMessageIds = [...new Set([
           ...(streamResult?.messageIds ?? []),
           ...(receipt?.messageIds ?? [])
@@ -2472,6 +2478,8 @@ export class ChannelGateway {
         });
       }
 
+      progressCompleted = finalDelivered && !approvalBoundary && !controller.signal.aborted
+        && (response.finalOutcome === undefined || response.finalOutcome.status === "completed" || response.finalOutcome.status === "completed_with_recovered_errors");
       terminalEventEmitted = true;
       const abortReason = this.#abortReasonByKey.get(activeTurnKey);
       if (abortReason !== undefined) {
@@ -2554,6 +2562,11 @@ export class ChannelGateway {
 
       return { sessionId, replyText: errorText, artifactCount: 0, progressCount: 0 };
     } finally {
+      try {
+        await adapter.delivery?.finishProgress?.(normalizedSessionKey, progressCompleted);
+      } catch {
+        // Progress cleanup is cosmetic and must not block turn settlement.
+      }
       // 1. Clear any channel-native processing indicator.
       if (processingIndicatorActive) {
         await this.#setInboundProcessingIndicator(adapter, message, false);

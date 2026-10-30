@@ -138,9 +138,13 @@ The ordering model is:
 streamed text -> tool progress -> streamed continuation -> final edit
 ```
 
-Tool boundaries seal the current streamed Telegram message. Later provider tokens start a new streamed Telegram message below the tool-progress message. Sealed streamed messages are never edited into the final answer. If streaming fails, degrades, or becomes ambiguous, the gateway falls back to normal final text delivery.
+Tool boundaries seal the current streamed Telegram message. Later provider tokens start a new streamed Telegram message; the same turn-wide progress bubble survives tool boundaries and provider fallback. Sealed streamed messages are never edited into the final answer. If streaming fails, degrades, or becomes ambiguous, the gateway falls back to normal final text delivery.
 
-Telegram delivery preserves the originating topic for text, typing indicators, streamed previews, progress, and artifacts. Tool progress uses redacted display previews, keeps independent state per supplied account/chat/topic/user identity, sends the first visible update immediately, and coalesces later edits on a bounded cadence. The progress bubble retains at most the 12 most recent entries and always stays within Telegram's text limit. It is transient delivery UX; session state and execution records remain authoritative elsewhere.
+Telegram delivery preserves the originating topic for text, typing indicators, streamed previews, progress, and artifacts. Final replies quote the originating user message when its Telegram ID is available; only the first chunk is anchored. Deleted anchors may fall back to unquoted delivery in the same chat/topic.
+
+`channels.telegram.progressMode` defaults to `"compact"`: one updating activity line without raw tool arguments, URLs, or ordinary routing diagnostics. Use `"detailed"` for a redacted rolling window of up to 12 entries, or `"off"` to hide routine progress. These are selected-profile settings; reload/restart the gateway after changing them. Warnings, provider/routing fallback notices, failed/gated tool notices, and approval cards remain separate and visible in every mode. Progress keeps independent state per supplied account/chat/topic/user identity, coalesces edits, and honors Telegram retry delays. After a completed answer is confirmed delivered, the gateway deletes the transient progress bubble best-effort. Failed, blocked, cancelled, or unconfirmed deliveries retain it; cleanup cannot remove approval cards or warnings. Execution records remain authoritative.
+
+Rich Markdown tables remain supported, including draft-streamed and non-streamed replies. If rich table delivery is unsupported, the HTML fallback preserves row/column associations as labeled lines. The fallback also renders HTTP(S) Markdown citations safely and preserves code literally. Telegram answer guidance encourages a direct answer, nearby source links, useful tables, and explicit version/deployment/retirement qualifications for availability claims; it does not guarantee research correctness.
 
 | Setting | Default | Description |
 |---------|---------|-------------|
@@ -151,7 +155,7 @@ Telegram delivery preserves the originating topic for text, typing indicators, s
 | `channels.telegram.streaming.maxFloodStrikes` | `2` | Active-handle Telegram flood-control degradation limit. Reaching the limit forces final fallback for that turn. |
 | `channels.telegram.streaming.cleanupFailedAttempts` | `true` | Whether failed or fallback provider attempts delete or neutralize provisional streamed messages before final fallback. |
 | `channels.telegram.streaming.transport` | `"auto"` | Streaming transport. `"auto"` selects draft previews for DMs when supported and edit streaming otherwise. `"edit"` uses ordinary message edits. `"draft"` uses Telegram draft previews in DMs only when supported by the Bot API. |
-| `channels.telegram.streaming.freshFinalAfterSeconds` | `0` | Fresh-final delay in seconds. `0` disables fresh-final delivery. A positive value sends the completed answer as a fresh message after a preview has been visible that many seconds, then deletes the preview best-effort. |
+| `channels.telegram.streaming.freshFinalAfterSeconds` | `0` | Fresh-final delay in seconds. `0` disables age-triggered fresh-final delivery; rich or reply-anchored finals can still require a fresh message. A positive value sends the completed answer as a fresh message after a preview has been visible that many seconds, then deletes the preview best-effort. |
 
 Operational constraints:
 

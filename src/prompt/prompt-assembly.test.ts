@@ -85,6 +85,20 @@ function renderMessages(messages: ProviderMessage[]): string {
 }
 
 describe("assembleProviderPrompt", () => {
+  it("includes Telegram formatting and evidence guidance without disabling tables", () => {
+    const prompt = assembleProviderPrompt(basePromptInput({ channel: "telegram" }));
+    const content = renderMessages(prompt.messages);
+    expect(content).toContain("Rich tables are supported");
+    expect(content).toContain("retirement status");
+    expect(content).toContain("links beside the claims");
+    expect(renderMessages(assembleProviderPrompt(basePromptInput({ channel: "cli" })).messages)).not.toContain("Telegram presentation:");
+  });
+
+  it("keeps Telegram guidance in tool continuations", () => {
+    const prompt = assembleProviderContinuationPrompt({ ...basePromptInput({ channel: "telegram" }), providerExecution: undefined, toolPlans: [] });
+    expect(renderMessages(prompt.messages)).toContain("Telegram presentation:");
+  });
+
   it("omits duplicated tool names and descriptions for native function calling", () => {
     const prompt = assembleProviderPrompt(basePromptInput({
       model: toolModel,

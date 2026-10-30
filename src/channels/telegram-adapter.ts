@@ -19,7 +19,8 @@ import type { TelegramChannelConfig } from "../config/runtime-config.js";
 import { sanitizeHookError } from "../gateway/hook-registry.js";
 import { buildAdapterCapability } from "./adapter-capability.js";
 import { renderChannelProgressLabel, type ActivityLabelLocale } from "./activity-labels.js";
-import { formatTelegramReply } from "./telegram-format.js";
+import { renderTelegramProgressLabel, isPersistentTelegramNotice } from "./telegram-progress.js";
+import { formatTelegramReply, containsTelegramTable } from "./telegram-format.js";
 import { telegramAttributionMessageIds } from "./telegram-message-attribution.js";
 import {
   createTelegramStreamTextSanitizer,
@@ -51,6 +52,7 @@ export type TelegramAdapterOptions = {
   voiceTempRoot?: string;
   ffmpegPath?: string;
   activityLabelsLocale?: ActivityLabelLocale;
+  progressMode?: "compact" | "detailed" | "off";
   fetch?: TelegramFetch;
   now?: () => Date;
   streamingNowMs?: () => number;
@@ -222,6 +224,7 @@ const DEFAULT_STREAM_CURSOR = "▌";
 const DEFAULT_STREAM_MAX_FLOOD_STRIKES = 2;
 const DEFAULT_MEDIA_GROUP_BATCH_MS = 800;
 const DEFAULT_PROGRESS_EDIT_INTERVAL_MS = 1_500;
+const PROGRESS_REQUEST_TIMEOUT_MS = 5_000;
 const MAX_PROGRESS_ENTRIES = 12;
 const MAX_PROGRESS_LINE_UTF16 = 300;
 
@@ -314,6 +317,7 @@ export class TelegramAdapter implements ChannelAdapter {
   readonly #voiceTempRoot: string | undefined;
   readonly #ffmpegPath: string;
   readonly #activityLabelsLocale: ActivityLabelLocale;
+  readonly #progressMode: "compact" | "detailed" | "off";
   readonly #fetch: TelegramFetch;
   readonly #now: () => Date;
   readonly #streamingNowMs: () => number;
@@ -334,7 +338,10 @@ export class TelegramAdapter implements ChannelAdapter {
   readonly delivery = {
     sendText: async (sessionKey: ChannelSessionKey, text: string, options?: ChannelTextOptions) => {
       const address = telegramDeliveryAddress(sessionKey);
-      this.#clearProgress(sessionKey);
+      if (options?.format === undefined && options?.editMessageId == null && containsTelegramTable(text)) {
+        const rich = await this.#trySendRichMessage(address, text, options);
+        if (rich !== undefined) return { messageIds: [String(rich.message_id)] };
+      }
       const formatted = formatTelegramReply(text, options);
       const chunks = chunkTelegramText(formatted.text, formatted.format);
       const editMessageId = parseTelegramEditMessageId(options?.editMessageId);
@@ -355,6 +362,7 @@ export class TelegramAdapter implements ChannelAdapter {
       for (const [index, chunk] of chunks.entries()) {
         const sent = await this.#sendMessage(address, chunk, {
           ...options,
+          replyTo: index === 0 ? options?.replyTo : undefined,
           actions: index === chunks.length - 1 ? options?.actions : undefined,
           format: formatted.format
         });
@@ -368,9 +376,12 @@ export class TelegramAdapter implements ChannelAdapter {
         await this.#sendChatAction(address, "typing");
       }
 
-      const rendered = renderChannelProgressLabel(event, this.#activityLabelsLocale);
+      const rendered = isPersistentTelegramNotice(event)
+        ? renderTelegramProgressLabel(event, this.#activityLabelsLocale)
+        : this.#progressMode === "detailed" ? renderChannelProgressLabel(event, this.#activityLabelsLocale)
+        : this.#progressMode === "off" ? "" : renderTelegramProgressLabel(event, this.#activityLabelsLocale);
 
-      if (event.kind === "routing-status" && event.configuredMode === "jev-assisted" && (event.actualEngine === "standard" || event.partialFallback === true)) {
+      if (isPersistentTelegramNotice(event) && rendered.length > 0) {
         // Keep the fallback explanation after subsequent progress edits or final delivery.
         await this.#sendMessage(address, rendered);
         return;
@@ -379,9 +390,11 @@ export class TelegramAdapter implements ChannelAdapter {
         await this.#upsertProgressMessage(sessionKey, address, rendered);
       }
     },
+    finishProgress: async (sessionKey: ChannelSessionKey, completed: boolean) => {
+      await this.#finishProgress(sessionKey, completed);
+    },
     sendArtifact: async (sessionKey: ChannelSessionKey, artifact: ArtifactRecord) => {
       const address = telegramDeliveryAddress(sessionKey);
-      this.#clearProgress(sessionKey);
       let failedAttempt: Extract<TelegramArtifactUploadAttempt, { ok: false }> | undefined;
       let reasonCode = "native-upload-failed";
       if (artifact.kind === "audio") {
@@ -451,6 +464,7 @@ export class TelegramAdapter implements ChannelAdapter {
     this.#voiceTempRoot = options.voiceTempRoot;
     this.#ffmpegPath = options.ffmpegPath ?? "ffmpeg";
     this.#activityLabelsLocale = options.activityLabelsLocale ?? "en";
+    this.#progressMode = options.progressMode ?? "compact";
     this.#fetch = options.fetch ?? fetchJson;
     this.#now = options.now ?? (() => new Date());
     this.#streamingNowMs = options.streamingNowMs ?? (() => performance.now());
@@ -674,20 +688,25 @@ export class TelegramAdapter implements ChannelAdapter {
 
   #startStreamingText(sessionKey: ChannelSessionKey, options?: ChannelStreamingTextOptions): ChannelStreamingTextHandle {
     const address = telegramDeliveryAddress(sessionKey);
+    let replySent = false;
     return new TelegramStreamingTextWorker({
       chatId: address.chatId,
       chatType: sessionKey.chatType,
       options,
-      sendMessage: async (text, textOptions) => this.#sendMessage(address, text, textOptions),
+      sendMessage: async (text, textOptions) => {
+        const sent = await this.#sendMessage(address, text, {
+          ...textOptions,
+          replyTo: textOptions.replyTo ?? (replySent ? undefined : options?.replyTo)
+        });
+        replySent = true;
+        return sent;
+      },
       editMessageText: async (messageId, text, textOptions) => this.#editMessageText(address.chatId, messageId, text, textOptions),
       deleteMessage: async (messageId) => this.#deleteMessage(address.chatId, messageId),
       sendDraft: async (draftId, text) => this.#sendDraft(address, draftId, text),
-      trySendRich: async (text) => this.#trySendRichMessage(address, text),
+      trySendRich: async (text) => this.#trySendRichMessage(address, text, { replyTo: options?.replyTo }),
       trySendRichDraft: async (draftId, text) => this.#trySendRichDraft(address, draftId, text),
       prefersFreshFinal: (text) => this.#prefersFreshFinal(text),
-      clearProgress: () => {
-        this.#clearProgress(sessionKey);
-      },
       formatFinalText: (text) => {
         const formatted = formatTelegramReply(text);
         return {
@@ -713,6 +732,7 @@ export class TelegramAdapter implements ChannelAdapter {
         ...telegramAddressPayload(address),
         ...this.#richMessagePayload(content),
         link_preview_options: this.#richLinkPreviewOptions(),
+        ...telegramReplyPayload(options?.replyTo),
         reply_markup: options?.actions === undefined
           ? undefined
           : this.#inlineKeyboardPayload(options.actions)
@@ -797,16 +817,17 @@ export class TelegramAdapter implements ChannelAdapter {
       || description.includes("not implemented");
   }
 
-  async #sendMessage(address: TelegramDeliveryAddress, text: string, options?: ChannelTextOptions): Promise<TelegramSentMessage> {
+  async #sendMessage(address: TelegramDeliveryAddress, text: string, options?: ChannelTextOptions, signal?: AbortSignal): Promise<TelegramSentMessage> {
     return this.#call<TelegramSentMessage>("sendMessage", {
       ...telegramAddressPayload(address),
       text,
+      ...telegramReplyPayload(options?.replyTo),
       disable_web_page_preview: true,
       parse_mode: options?.format === "html" ? "HTML" : undefined,
       reply_markup: options?.actions === undefined
         ? undefined
         : this.#inlineKeyboardPayload(options.actions)
-    });
+    }, { signal });
   }
 
   #inlineKeyboardPayload(actions: NonNullable<ChannelTextOptions["actions"]>): Record<string, unknown> {
@@ -865,7 +886,7 @@ export class TelegramAdapter implements ChannelAdapter {
     });
   }
 
-  async #editMessageText(chatId: string, messageId: number, text: string, options?: ChannelTextOptions): Promise<TelegramSentMessage> {
+  async #editMessageText(chatId: string, messageId: number, text: string, options?: ChannelTextOptions, signal?: AbortSignal): Promise<TelegramSentMessage> {
     return this.#call<TelegramSentMessage>("editMessageText", {
       chat_id: chatId,
       message_id: messageId,
@@ -875,14 +896,14 @@ export class TelegramAdapter implements ChannelAdapter {
       reply_markup: options?.actions === undefined
         ? undefined
         : this.#inlineKeyboardPayload(options.actions)
-    });
+    }, { signal });
   }
 
-  async #deleteMessage(chatId: string, messageId: number): Promise<void> {
+  async #deleteMessage(chatId: string, messageId: number, signal?: AbortSignal): Promise<void> {
     await this.#call("deleteMessage", {
       chat_id: chatId,
       message_id: messageId
-    });
+    }, { signal });
   }
 
   async #upsertProgressMessage(
@@ -900,6 +921,7 @@ export class TelegramAdapter implements ChannelAdapter {
       disposed: false
     };
     this.#progressBySession.set(key, state);
+    if (this.#progressMode !== "detailed") state.entries.length = 0;
     appendProgressEntry(state.entries, line);
 
     const rendered = renderProgressSummary(state.entries);
@@ -975,11 +997,11 @@ export class TelegramAdapter implements ChannelAdapter {
 
     if (state.messageId === undefined) {
       try {
-        const message = await this.#sendMessage(state.address, rendered);
+        const message = await this.#sendMessage(state.address, rendered, undefined, AbortSignal.timeout(PROGRESS_REQUEST_TIMEOUT_MS));
+        state.messageId = message.message_id;
         if (!this.#isActiveProgressState(state)) {
           return;
         }
-        state.messageId = message.message_id;
         state.lastRendered = rendered;
         state.lastMutationAtMs = this.#streamingNowMs();
       } catch (error) {
@@ -998,7 +1020,7 @@ export class TelegramAdapter implements ChannelAdapter {
     }
 
     try {
-      await this.#editMessageText(state.address.chatId, state.messageId, rendered);
+      await this.#editMessageText(state.address.chatId, state.messageId, rendered, undefined, AbortSignal.timeout(PROGRESS_REQUEST_TIMEOUT_MS));
       if (!this.#isActiveProgressState(state)) {
         return;
       }
@@ -1014,11 +1036,11 @@ export class TelegramAdapter implements ChannelAdapter {
         return;
       }
       try {
-        const message = await this.#sendMessage(state.address, rendered);
+        const message = await this.#sendMessage(state.address, rendered, undefined, AbortSignal.timeout(PROGRESS_REQUEST_TIMEOUT_MS));
+        state.messageId = message.message_id;
         if (!this.#isActiveProgressState(state)) {
           return;
         }
-        state.messageId = message.message_id;
         state.lastRendered = rendered;
         state.lastMutationAtMs = this.#streamingNowMs();
       } catch (sendError) {
@@ -1048,14 +1070,20 @@ export class TelegramAdapter implements ChannelAdapter {
     return !state.disposed && this.#progressBySession.get(state.key) === state;
   }
 
-  #clearProgress(sessionKey: ChannelSessionKey): void {
+  async #finishProgress(sessionKey: ChannelSessionKey, completed: boolean): Promise<void> {
     const key = telegramProgressKey(sessionKey);
     const state = this.#progressBySession.get(key);
-    if (state === undefined) {
-      return;
-    }
+    if (state === undefined) return;
     disposeProgressState(state);
     this.#progressBySession.delete(key);
+    await state.queue;
+    if (completed && state.messageId !== undefined) {
+      try {
+        await this.#deleteMessage(state.address.chatId, state.messageId, AbortSignal.timeout(PROGRESS_REQUEST_TIMEOUT_MS));
+      } catch {
+        // Cosmetic cleanup cannot invalidate a delivered answer.
+      }
+    }
   }
 
   #clearAllProgress(): void {
@@ -1456,7 +1484,6 @@ type TelegramStreamingTextWorkerInput = {
   trySendRich?(text: string): Promise<TelegramSentMessage | undefined>;
   trySendRichDraft?(draftId: number, text: string): Promise<boolean>;
   prefersFreshFinal?(text: string): boolean;
-  clearProgress(): void;
   formatFinalText(text: string): { chunks: string[]; format: "plain" | "html" };
   nowMs?(): number;
 };
@@ -1552,7 +1579,6 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
     if (this.#useDraftStreaming) {
       this.#assignNextDraftId();
     }
-    this.#input.clearProgress();
     this.#runSafely(async () => {
       if (this.#useDraftStreaming) {
         await this.#materializeDraftSegment(segment);
@@ -1607,7 +1633,7 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
         return this.#fallbackResult(finalText);
       }
 
-      if (segment.messageId !== undefined && (this.#shouldSendFreshFinal() || this.#input.prefersFreshFinal?.(finalText) === true)) {
+      if (segment.messageId !== undefined && (this.#input.options?.replyTo !== undefined || this.#shouldSendFreshFinal() || this.#input.prefersFreshFinal?.(finalText) === true)) {
         return this.#finishWithFreshFinal(finalText);
       }
 
@@ -1964,8 +1990,8 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
         return this.#fallbackResult(finalText);
       }
 
-      for (const chunk of chunks) {
-        const message = await this.#input.sendMessage(chunk, { format: formatted.format });
+      for (const [index, chunk] of chunks.entries()) {
+        const message = await this.#input.sendMessage(chunk, { format: formatted.format, replyTo: index === 0 ? this.#input.options?.replyTo : undefined });
         messageIds.push(String(message.message_id));
       }
 
@@ -1984,6 +2010,9 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
   }
 
   async #finishDraft(finalText: string): Promise<ChannelStreamingTextResult> {
+    if (containsTelegramTable(finalText) && this.#input.prefersFreshFinal?.(finalText) === true) {
+      return this.#finishWithFreshFinal(finalText);
+    }
     const messageIds: string[] = [];
     try {
       const formatted = this.#input.formatFinalText(finalText);
@@ -1993,8 +2022,8 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
         return this.#fallbackResult(finalText);
       }
 
-      for (const chunk of chunks) {
-        const message = await this.#input.sendMessage(chunk, { format: formatted.format });
+      for (const [index, chunk] of chunks.entries()) {
+        const message = await this.#input.sendMessage(chunk, { format: formatted.format, replyTo: index === 0 ? this.#input.options?.replyTo : undefined });
         messageIds.push(String(message.message_id));
       }
 
@@ -2227,7 +2256,6 @@ class TelegramStreamingTextWorker implements ChannelStreamingTextHandle {
     if (this.#useDraftStreaming) {
       this.#assignNextDraftId();
     }
-    this.#input.clearProgress();
     this.#runSafely(async () => {
       await this.#cleanupFailedAttempt(segment);
     });
@@ -3004,4 +3032,9 @@ function formatBytes(bytes: number): string {
 
 function truncateSummary(value: string, maxChars = 240): string {
   return value.length <= maxChars ? value : `${value.slice(0, maxChars - 1)}…`;
+}
+
+function telegramReplyPayload(replyTo: string | null | undefined): Record<string, unknown> {
+  if (typeof replyTo !== "string" || !/^[1-9]\d*$/u.test(replyTo) || !Number.isSafeInteger(Number(replyTo))) return {};
+  return { reply_parameters: { message_id: Number(replyTo), allow_sending_without_reply: true } };
 }
