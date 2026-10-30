@@ -32,3 +32,19 @@ export function providerBudgetsForRun(limits: AgentRunLimits) {
     maxProviderWallClockMs: limits.maxDurationMinutes === 0 ? Infinity : limits.maxDurationMinutes * 60_000
   };
 }
+
+
+/** Explicit legacy child timeouts remain a narrower operator ceiling. */
+export function unattendedRunLimits(config: {runLimits?:RunLimitsConfig;delegation?:{childTimeoutSeconds?:number}}): AgentRunLimits {
+  const limits=normalizeRunLimits(config.runLimits).unattended;
+  const legacy=config.delegation?.childTimeoutSeconds;
+  if(legacy!==undefined && config.runLimits?.unattended===undefined){
+    if(!Number.isFinite(legacy)||legacy<0)throw new Error('Invalid delegated timeout.');
+    limits.maxDurationMinutes=Math.min(limits.maxDurationMinutes,Math.max(30,Math.floor(legacy))/60);
+  }
+  return limits;
+}
+
+export function taskLimitsForRun(limits:AgentRunLimits){
+  return {maxProviderCalls:limits.maxIterations,maxTotalTokens:1_000_000,maxWallClockMs:Math.floor(limits.maxDurationMinutes*60_000)};
+}

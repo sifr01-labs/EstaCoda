@@ -34,6 +34,17 @@ describe("TaskOperatorService", () => {
     rmSync(root, { recursive: true, force: true });
   });
 
+  it("accepts configured long Tasks but rejects caller expansion and unlimited budgets",()=>{
+    const limits={maxProviderCalls:120,maxTotalTokens:1_000_000,maxWallClockMs:90*60_000};
+    const configured=new TaskOperatorService({store,executionLimitCeiling:limits});
+    const request={objective:'Review a long report',workspace:workspace(),creatorSessionId:'owner',creationKey:'long-task'};
+    const created=configured.begin(request);
+    expect(service.begin(request).taskId).toBe(created.taskId);
+    expect(store.getTask(created.taskId)!.executionLimits).toMatchObject(limits);
+    expect(()=>configured.begin({objective:'Expand',workspace:workspace(),creatorSessionId:'owner',executionLimits:{...limits,maxProviderCalls:121}})).toThrow('narrow');
+    expect(()=>new TaskOperatorService({store,executionLimitCeiling:{...limits,maxWallClockMs:Infinity}})).toThrow('finite');
+  });
+
   it("creates a conservative fixed Task linked to the interactive creator", () => {
     const created = service.begin({
       objective: "Inspect the runtime and write a focused fix.",
@@ -667,7 +678,12 @@ describe("TaskOperatorService", () => {
     expect(store.getTask(task.id)?.status).toBe("waiting_for_input");
     expect(store.listAttempts(task.id, step.id)).toHaveLength(mode === "attempts" ? step.retryPolicy.maxAttempts : 1);
     store.updateTask({ ...store.getTask(task.id)!, status: "paused", waitReason: { kind: "execution_limit", summary: "Exhausted", requestedAt: now() } });
-    if (mode !== "attempts") expect(() => service.resume(task.id, "owner")).toThrow("limit is exhausted");
+    if (mode !== "attempts") {
+      expect(() => service.resume(task.id, "owner")).toThrow("limit is exhausted");
+      const expanded=new TaskOperatorService({store,now:()=>new Date(now()),executionLimitCeiling:{maxProviderCalls:120,maxTotalTokens:1000000,maxWallClockMs:5400000}});
+      expect(()=>expanded.resume(task.id,"owner")).toThrow("limit is exhausted");
+      expect(store.getTask(task.id)!.executionLimits).toEqual(task.executionLimits);
+    }
   });
 
   it("cancels queued work durably and keeps status output bounded", () => {

@@ -235,6 +235,7 @@ export type TaskSubagentProjection = {
 /** Profile-bound operator controls. Session authorization is explicit for in-session callers. */
 export class TaskOperatorService {
   readonly #store: TaskStore;
+  readonly #executionLimitCeiling: {maxProviderCalls:number;maxTotalTokens:number;maxWallClockMs:number};
   readonly #now: () => Date;
   readonly #eventId: () => string;
   readonly #backgroundContinuation: () => TaskStatusProjection["backgroundContinuation"];
@@ -243,6 +244,7 @@ export class TaskOperatorService {
 
   constructor(options: {
     store: TaskStore;
+    executionLimitCeiling?: {maxProviderCalls:number;maxTotalTokens:number;maxWallClockMs:number};
     now?: () => Date;
     eventId?: () => string;
     backgroundContinuation?: () => TaskStatusProjection["backgroundContinuation"];
@@ -250,6 +252,8 @@ export class TaskOperatorService {
     spendingScope?: (kind: ProviderSpendScopeKind, ownerId: string) => ProviderSpendingScope | null;
   }) {
     this.#store = options.store;
+    this.#executionLimitCeiling = {...(options.executionLimitCeiling ?? {maxProviderCalls:45,maxTotalTokens:1_000_000,maxWallClockMs:30*60*1000})};
+    if(Object.values(this.#executionLimitCeiling).some(n=>!Number.isSafeInteger(n)||n<1))throw new Error("Task execution ceilings must be finite positive integers.");
     this.#now = options.now ?? (() => new Date());
     this.#eventId = options.eventId ?? randomUUID;
     this.#backgroundContinuation = options.backgroundContinuation ?? (() => "unknown");
@@ -268,9 +272,11 @@ export class TaskOperatorService {
     initialHostLease?: InitialTaskHostLeaseInput;
   }): TaskStatusProjection {
     const objective = normalizeTaskOperatorObjective(input.objective);
-    const requestedLimits=input.executionLimits??{maxProviderCalls:45,maxTotalTokens:1_000_000,maxWallClockMs:30*60*1000};
+    const existing=input.creationKey?this.#store.getTaskByCreationKey(input.creationKey):null;
+    const ceiling=existing?.executionLimits??this.#executionLimitCeiling;
+    const requestedLimits=input.executionLimits??ceiling;
     const limits={maxProviderCalls:requestedLimits.maxProviderCalls,maxTotalTokens:requestedLimits.maxTotalTokens,maxWallClockMs:requestedLimits.maxWallClockMs};
-    for(const[key,max]of Object.entries({maxProviderCalls:45,maxTotalTokens:1_000_000,maxWallClockMs:30*60*1000})){const value=limits[key as keyof typeof limits];if(!Number.isSafeInteger(value)||value<1||value>max)throw new Error('Task limits may only narrow operator defaults.');}
+    for(const[key,max]of Object.entries({maxProviderCalls:ceiling.maxProviderCalls,maxTotalTokens:ceiling.maxTotalTokens,maxWallClockMs:ceiling.maxWallClockMs})){const value=limits[key as keyof typeof limits];if(!Number.isSafeInteger(value)||value<1||value>max)throw new Error('Task limits may only narrow operator defaults.');}
     if(input.taskId&&!input.creationKey)throw new Error('An explicit Task ID needs an idempotent creation key.');
     const authority = operatorTaskAuthority();
     const source = input.source ?? "cli";

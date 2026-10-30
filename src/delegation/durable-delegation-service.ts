@@ -1,3 +1,4 @@
+import type { AgentRunLimits } from '../config/run-limits.js';
 import { requestedFileOutputs } from "../contracts/request-requirements.js";
 import { createHash } from "node:crypto";
 import type {
@@ -155,6 +156,7 @@ export class DurableDelegationService {
   readonly #creatorSessionId: () => string;
   readonly #workspace: TaskWorkspaceBinding;
   readonly #config: DelegationConfig;
+  readonly #resolveRunLimits?: () => Promise<AgentRunLimits>;
   readonly #visibleTools: () => readonly ToolDefinition[];
   readonly #activeTaskExecution: ActiveTaskExecution | undefined;
   readonly #completionDestination: (() => TaskDeliveryDestination | undefined) | undefined;
@@ -169,6 +171,7 @@ export class DurableDelegationService {
     creatorSessionId: () => string;
     workspace: TaskWorkspaceBinding;
     config: DelegationConfig;
+    resolveRunLimits?: () => Promise<AgentRunLimits>;
     visibleTools: () => readonly ToolDefinition[];
     activeTaskExecution?: ActiveTaskExecution;
     completionDestination?: () => TaskDeliveryDestination | undefined;
@@ -184,6 +187,7 @@ export class DurableDelegationService {
     this.#creatorSessionId = options.creatorSessionId;
     this.#workspace = options.workspace;
     this.#config = options.config;
+    this.#resolveRunLimits = options.resolveRunLimits;
     this.#visibleTools = options.visibleTools;
     this.#activeTaskExecution = options.activeTaskExecution;
     this.#completionDestination = options.completionDestination;
@@ -195,7 +199,7 @@ export class DurableDelegationService {
   }
 
   async createAndActivate(request: DurableDelegationRequest): Promise<DurableDelegationHandle> {
-    const handle = this.create(request);
+    const handle = this.create(request, await this.#resolveRunLimits?.());
     if (handle.executionPreference === "auto" && this.#onTaskCreated !== undefined) {
       try {
         await this.#onTaskCreated(handle.taskId);
@@ -209,7 +213,7 @@ export class DurableDelegationService {
     return this.#refreshHandle(handle);
   }
 
-  create(request: DurableDelegationRequest): DurableDelegationHandle {
+  create(request: DurableDelegationRequest, runLimits?: AgentRunLimits): DurableDelegationHandle {
     if (!request.trustedWorkspace) throw new Error("Durable delegation requires a trusted workspace.");
     if (request.tasks.length === 0 || request.tasks.length > this.#config.maxBatchTasks) {
       throw new Error(`Durable delegation requires 1-${this.#config.maxBatchTasks} task items.`);
@@ -286,13 +290,14 @@ export class DurableDelegationService {
     const taskAuthority = mergeAuthorities(allAuthorities);
     const workerCount = tasks.length;
     const hasSynthesis = synthesis !== undefined;
-    const executionLimits = delegationExecutionLimits(
+    const executionLimits = existing === null ? delegationExecutionLimits(
       workerCount,
       Number(hasSynthesis) + Number(deliveryAuthority !== undefined),
       this.#config.maxConcurrentChildren,
-      this.#config.childTimeoutSeconds,
-      parent?.executionLimits
-    );
+      runLimits === undefined ? this.#config.childTimeoutSeconds : runLimits.maxDurationMinutes * 60,
+      parent?.executionLimits,
+      runLimits?.maxIterations
+    ) : {task: existing.executionLimits, step: existingSteps[0]!.executionLimits};
     const workerSteps = tasks.map((item, index): FixedTaskStepInput => {
       const authority = stepAuthorities[index]!;
       const access = resolvedStepAuthorities[index]!.access;
@@ -766,7 +771,8 @@ function delegationExecutionLimits(
   terminalPhases: number,
   maxConcurrentChildren: number,
   timeoutSeconds: number,
-  ceiling?: TaskExecutionLimits
+  ceiling?: TaskExecutionLimits,
+  providerCalls = STEP_PROVIDER_CALLS
 ): {
   task: TaskExecutionLimits;
   step: TaskStepExecutionLimits;
@@ -784,7 +790,7 @@ function delegationExecutionLimits(
   const wall = Math.max(1, Math.floor(timeoutSeconds * 1_000));
   const phaseWall = ceiling === undefined
     ? wall
-    : Math.max(1, Math.floor(ceiling.maxWallClockMs / scheduledPhaseCount));
+    : Math.min(wall, Math.max(1, Math.floor(ceiling.maxWallClockMs / scheduledPhaseCount)));
   let rootTaskWall = ceiling?.maxWallClockMs;
   if (rootTaskWall === undefined) {
     const workerWall = wall * workerWaveCount;
@@ -802,7 +808,7 @@ function delegationExecutionLimits(
       throw new Error("Delegation wall-clock limit exceeds the safe integer range.");
     }
   }
-  const totalCalls = STEP_PROVIDER_CALLS * stepCount;
+  const totalCalls = providerCalls * stepCount;
   const totalTokens = STEP_TOTAL_TOKENS * stepCount;
   const task: TaskExecutionLimits = ceiling === undefined ? {
     maxConcurrentAttempts,
@@ -811,14 +817,14 @@ function delegationExecutionLimits(
     maxWallClockMs: rootTaskWall
   } : {
     maxConcurrentAttempts,
-    maxProviderCalls: ceiling.maxProviderCalls,
-    maxTotalTokens: ceiling.maxTotalTokens,
+    maxProviderCalls: Math.min(totalCalls, ceiling.maxProviderCalls),
+    maxTotalTokens: Math.min(totalTokens, ceiling.maxTotalTokens),
     maxWallClockMs: ceiling.maxWallClockMs
   };
   return {
     task,
     step: {
-      maxProviderCalls: ceiling === undefined ? STEP_PROVIDER_CALLS : Math.floor(ceiling.maxProviderCalls / stepCount),
+      maxProviderCalls: ceiling === undefined ? providerCalls : Math.min(providerCalls, Math.floor(ceiling.maxProviderCalls / stepCount)),
       maxTotalTokens: ceiling === undefined ? STEP_TOTAL_TOKENS : Math.floor(ceiling.maxTotalTokens / stepCount),
       maxWallClockMs: phaseWall
     }

@@ -1,3 +1,4 @@
+import { unattendedRunLimits, taskLimitsForRun } from '../config/run-limits.js';
 import { ensureRuntimeSession } from "../session/session-workspace-ownership.js";
 import { createSessionId } from "../session/session-id.js";
 import { defaultProfileId, readActiveProfile, resolveGlobalStateHome, resolveProfileStateHome } from "../config/profile-home.js";
@@ -55,6 +56,7 @@ export async function taskCommand(options: CliOptions, args: string[]): Promise<
     const service = new TaskOperatorService({
       store,
       defaultTaskSpendingLimit: budgets.task,
+      executionLimitCeiling:taskLimitsForRun(unattendedRunLimits(profileConfig)),
       spendingScope: (kind, ownerId) => spendController.getScope(kind, ownerId),
       backgroundContinuation: () => initialBackgroundHost === "active" ? "available" : "unavailable"
     });

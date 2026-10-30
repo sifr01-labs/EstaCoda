@@ -1,3 +1,4 @@
+import {TASK_CREATION_LIMITS} from './task-limits.js';
 import {CONNECTION_OPERATION_ISSUES} from './telegram.js';
 import {SETUP_STATES} from './onboarding.js';
 import {SETTINGS_ACTIONS,SETTINGS_SECTIONS} from './settings.js';
@@ -247,7 +248,7 @@ const contracts: { [M in keyof MethodContracts]: { params: Check; result: Check 
   "providers.list": { params: shape(pageParams, optionalPage), result: page(provider) },
   "connections.list": { params: shape(pageParams, optionalPage), result: page(connection) },
   "connections.get": { params: shape({ connectionId: id }), result: connection },
-  "tasks.create": {params:shape({...sessionParams,taskId:id,objective:text(4000,1),limits:shape({maxProviderCalls:integer(1,45),maxTotalTokens:integer(1,1000000),maxWallClockMs:integer(1,1800000)}),selection:nullable(shape({providerId:id,modelId:text(200,1)}))}),result:receipt},
+  "tasks.create": {params:shape({...sessionParams,taskId:id,objective:text(4000,1),limits:shape({maxProviderCalls:integer(1,TASK_CREATION_LIMITS.maxProviderCalls),maxTotalTokens:integer(1,TASK_CREATION_LIMITS.maxTotalTokens),maxWallClockMs:integer(1,TASK_CREATION_LIMITS.maxWallClockMs)}),selection:nullable(shape({providerId:id,modelId:text(200,1)}))}),result:receipt},
   "tasks.pause": { params: shape({ ...sessionParams, taskId: id }), result: receipt },
   "tasks.resume": { params: shape({ ...sessionParams, taskId: id }), result: receipt },
   "tasks.cancel": { params: shape({ ...sessionParams, taskId: id }), result: receipt },

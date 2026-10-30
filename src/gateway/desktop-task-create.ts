@@ -1,3 +1,4 @@
+import { unattendedRunLimits, taskLimitsForRun } from '../config/run-limits.js';
 import {randomUUID} from 'node:crypto';
 import type {PrivateControlRequest} from '../contracts/control-protocol.js';
 import type {SessionRecord} from '../contracts/session.js';
@@ -13,7 +14,7 @@ export async function desktopCreateTask(input:{store:TaskStore;request:PrivateCo
  if(selected&&(!selected.ok||!input.context.config.providers?.[selected.route.provider]?.enableNetwork))throw new Error('Task model is not runnable.');
  return store.atomicWrite((store)=>{
  const existing=store.getTaskByCreationKey(request.operationId);
- const task=new TaskOperatorService({store,defaultTaskSpendingLimit:input.spendingLimit}).begin({taskId:request.taskId,creationKey:request.operationId,objective:request.objective!,workspace:session.executionTarget!.workspace,creatorSessionId:session.id,executionPreference:'background',executionLimits:request.limits});
+ const task=new TaskOperatorService({store,defaultTaskSpendingLimit:input.spendingLimit,executionLimitCeiling:taskLimitsForRun(unattendedRunLimits(input.context.config))}).begin({taskId:request.taskId,creationKey:request.operationId,objective:request.objective!,workspace:session.executionTarget!.workspace,creatorSessionId:session.id,executionPreference:'background',executionLimits:request.limits});
  if(!existing&&selected?.ok)store.appendEvent({id:randomUUID(),profileId:store.profileId,taskId:task.taskId,kind:'model-override-changed',timestamp:new Date().toISOString(),data:{selection:{providerId:selected.route.provider,modelId:selected.route.id}}});
  return{taskId:task.taskId};
  });

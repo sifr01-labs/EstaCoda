@@ -48,6 +48,19 @@ describe("DurableDelegationService", () => {
     rmSync(root, { recursive: true, force: true });
   });
 
+  it("snapshots selected unattended settings for each new graph",async()=>{
+    let iterations=120;
+    const service=new DurableDelegationService({store,creatorSessionId:()=>"parent",workspace:workspace(),config:DEFAULT_DELEGATION_CONFIG,visibleTools:visibleTools,resolveRunLimits:async()=>({maxIterations:iterations,maxToolCalls:300,maxDurationMinutes:90})});
+    const request={toolCallId:'configured-1',originTurnId:'visible-turn-alpha',trustedWorkspace:true,tasks:[{task:'Read A'}],synthesis:false as const};
+    const first=await service.createAndActivate(request);const task=store.getTask(first.taskId)!;
+    expect(store.listSteps(task.id,task.activePlanRevisionId!)[0]!.executionLimits).toMatchObject({maxProviderCalls:120,maxWallClockMs:90*60_000});
+    iterations=160;
+    expect((await service.createAndActivate(request)).taskId).toBe(first.taskId);
+    const second=await service.createAndActivate({...request,toolCallId:'configured-2'});
+    expect(store.getTask(second.taskId)!.executionLimits.maxProviderCalls).toBe(160);
+    expect(store.getTask(first.taskId)!.executionLimits.maxProviderCalls).toBe(120);
+  });
+
   it("scopes provider-call idempotency to the creator session and visible turn", async () => {
     const service = rootService(store);
     const first = service.create({

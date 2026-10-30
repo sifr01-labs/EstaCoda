@@ -1,3 +1,4 @@
+import { readUnattendedRunLimits } from '../config/run-limits-store.js';
 import { RuntimeSessionOwner } from "./session-execution-owner.js";
 import { validateSessionWorkspaceOwnership } from "../session/session-workspace-ownership.js";
 import type { ChannelKind } from "../contracts/channel.js";
@@ -271,6 +272,7 @@ export class DefaultChildAgentLoopFactory implements ChildAgentLoopFactory {
             creatorSessionId: () => sessionRuntimeContext.currentSessionId(),
             workspace: this.#taskWorkspace!,
             config: this.#delegationConfig,
+            resolveRunLimits: () => readUnattendedRunLimits({homeDir:this.#homeDir,profileId:input.profileId}),
             defaultTaskSpendingLimit: this.#defaultTaskSpendingLimit,
             visibleTools,
             activeTaskExecution: input.taskExecution,

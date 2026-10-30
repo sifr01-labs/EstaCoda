@@ -537,6 +537,7 @@ describe("AgentStepExecutor", () => {
       const lineage = makeNestedLineage(3);
       const nestedStore = taskStoreWithLineage(store, lineage);
       const graph = lineage[lineage.length - 1]!;
+      graph.steps[0]!.executionLimits.maxWallClockMs=2000;
       const childFactory: ChildAgentLoopFactory = {
         createChild: vi.fn(async (input) => {
           await sessionDb.createSession({
@@ -574,6 +575,9 @@ describe("AgentStepExecutor", () => {
         heartbeat: vi.fn(),
         checkpoint: vi.fn()
       });
+      const settled=vi.fn();void execution.then(settled);
+      await vi.advanceTimersByTimeAsync(1_001);
+      expect(settled).not.toHaveBeenCalled(); // Legacy one-second timer cannot shorten the persisted Step budget.
       await vi.advanceTimersByTimeAsync(1_001);
 
       await expect(execution).resolves.toMatchObject({

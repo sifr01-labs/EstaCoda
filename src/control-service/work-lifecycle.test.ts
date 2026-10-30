@@ -53,7 +53,7 @@ it.skipIf(process.platform === 'win32')('starts and controls Work through a real
     const grantApproval = vi.fn(async () => undefined);
     const receipts = new ControlReceipts(db.db, 'p', lock.instanceId!);
     host = new SharedSessionHost({ profileId: 'p', sessionDb: db, receipts, approvalQueue: queue,
-      taskControl:async request=>{const store=new SQLiteTaskStore({db:db.db,profileId:'p'});return request.method==='task.create'?desktopCreateTask({store,request,session:(await db.getSessionForProfile(request.sessionId,'p'))!,context:{} as any}):desktopTaskControl(store,request);},
+      taskControl:async request=>{const store=new SQLiteTaskStore({db:db.db,profileId:'p'});return request.method==='task.create'?desktopCreateTask({store,request,session:(await db.getSessionForProfile(request.sessionId,'p'))!,context:{config:{}} as any}):desktopTaskControl(store,request);},
       validateTarget: async (request) => {
         const session = (await db.getSessionForProfile(request.sessionId, 'p'))!;
         await validateSessionWorkspaceOwnership({ homeDir, profileId: 'p', session, workspaceRoot: homeDir });

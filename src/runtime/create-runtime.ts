@@ -1,3 +1,5 @@
+import { taskLimitsForRun } from '../config/run-limits.js';
+import { readUnattendedRunLimits } from '../config/run-limits-store.js';
 import {profileHeaderEnvironment} from '../config/header-secret-references.js';
 import {HumanBrowserControl} from '../browser/human-control.js';
 import {BrowserControlOwner} from '../browser/control-lease.js';
@@ -443,6 +445,7 @@ async function buildRuntime(options: RuntimeOptions, rollback: ResourceCleanup):
         locale: options.ui?.language === "ar" ? "ar" : "en",
       });
   const taskOperatorService = taskStore === undefined ? undefined : new TaskOperatorService({
+    executionLimitCeiling: taskLimitsForRun(await readUnattendedRunLimits({homeDir:options.homeDir,profileId})),
     store: taskStore,
     defaultTaskSpendingLimit: options.budgets?.task,
     ...(providerSpendController === undefined ? {} : {
@@ -1137,6 +1140,7 @@ async function buildRuntime(options: RuntimeOptions, rollback: ResourceCleanup):
           creatorSessionId: () => sessionRuntimeContext.currentSessionId(),
           workspace: taskWorkspace,
           config: options.delegationConfig ?? DEFAULT_DELEGATION_CONFIG,
+          resolveRunLimits: () => readUnattendedRunLimits({homeDir:options.homeDir,profileId}),
           defaultTaskSpendingLimit: options.budgets?.task,
           visibleTools,
           completionDestination: currentTaskCompletionDestination,
@@ -1262,7 +1266,15 @@ async function buildRuntime(options: RuntimeOptions, rollback: ResourceCleanup):
           const origin = currentTaskCreationOrigin();
           const executionPreference = beginOptions.executionPreference ?? (origin.source === "gateway" ? "background" : "auto");
           const initialHostLease = executionPreference === "auto" ? options.taskHostAdmission?.() : undefined;
-          const task = taskOperatorService.begin({
+          const task = new TaskOperatorService({
+            store: taskStore!,
+            defaultTaskSpendingLimit: options.budgets?.task,
+            executionLimitCeiling: taskLimitsForRun(await readUnattendedRunLimits({homeDir:options.homeDir,profileId})),
+            ...(providerSpendController === undefined ? {} : {
+              spendingScope: (kind, ownerId) => providerSpendController.getScope(kind, ownerId)
+            }),
+            backgroundContinuation: () => options.taskBackgroundContinuation ?? "unknown"
+          }).begin({
             objective,
             workspace: taskWorkspace,
             creatorSessionId: sessionRuntimeContext.currentSessionId(),

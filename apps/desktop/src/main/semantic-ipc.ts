@@ -1,3 +1,4 @@
+import {TASK_CREATION_LIMITS} from '@estacoda/control-protocol';
 import {writeFile} from 'node:fs/promises';
 import {updateDiagnostics} from './updates/diagnostics.js';
 import {releasePolicy} from './updates/release-policy.js';
@@ -121,7 +122,7 @@ export function validateSemanticPayload(method:string,payload:unknown):void {
       if(payload.inspectOnly!==undefined&&typeof payload.inspectOnly!=='boolean')throw new Error('Invalid inspection');
       if((payload.securityMode!==undefined&&!['strict','adaptive','open'].includes(String(payload.securityMode)))||(payload.interrupt!==undefined&&typeof payload.interrupt!=='boolean')||(payload.kind==='task'&&(payload.securityMode!==undefined||payload.interrupt!==undefined)))throw new Error('Invalid conversation controls');
       if(payload.kind!==undefined&&!['session','task'].includes(String(payload.kind)))throw new Error('Invalid Work kind');
-      if(payload.limits!==undefined){const limits=payload.limits;if(!isRecord(limits)||!exactKeys(limits,['maxProviderCalls','maxTotalTokens','maxWallClockMs'])||!Object.entries({maxProviderCalls:45,maxTotalTokens:1000000,maxWallClockMs:1800000}).every(([key,max])=>Number.isSafeInteger(limits[key])&&Number(limits[key])>=1&&Number(limits[key])<=max))throw new Error('Invalid Task limits');}
+      if(payload.limits!==undefined){const limits=payload.limits;if(!isRecord(limits)||!exactKeys(limits,['maxProviderCalls','maxTotalTokens','maxWallClockMs'])||!Object.entries(TASK_CREATION_LIMITS).every(([key,max])=>Number.isSafeInteger(limits[key])&&Number(limits[key])>=1&&Number(limits[key])<=max))throw new Error('Invalid Task limits');}
       if(payload.selection!==undefined)validateSemanticPayload('setOverride',{workId:'validation',selection:payload.selection});
     }return;
   }

@@ -2,7 +2,7 @@ import {expect,it} from 'vitest';
 import {mkdtemp,mkdir,writeFile,rm} from 'node:fs/promises';
 import {tmpdir} from 'node:os';
 import {join} from 'node:path';
-import {normalizeRunLimits,providerBudgetsForRun} from './run-limits.js';
+import {normalizeRunLimits,providerBudgetsForRun,unattendedRunLimits,taskLimitsForRun} from './run-limits.js';
 import {readRunLimits} from './run-limits-store.js';
 import {resolveProfileStateHome} from './profile-home.js';
 
@@ -24,4 +24,9 @@ it('reads only the selected profile and observes later saved edits',async()=>{
   expect((await readRunLimits({homeDir,profileId:'one'})).interactive.maxIterations).toBe(90);
   expect((await readRunLimits({homeDir,profileId:'two'})).interactive.maxIterations).toBe(80);
  }finally{await rm(homeDir,{recursive:true,force:true});}
+});
+
+it('migrates an explicit legacy child timeout only when new unattended policy is absent',()=>{
+ expect(taskLimitsForRun(unattendedRunLimits({delegation:{childTimeoutSeconds:600}})).maxWallClockMs).toBe(600000);
+ expect(taskLimitsForRun(unattendedRunLimits({delegation:{childTimeoutSeconds:600},runLimits:{unattended:{maxDurationMinutes:90,maxIterations:120}}}))).toEqual({maxProviderCalls:120,maxTotalTokens:1000000,maxWallClockMs:5400000});
 });

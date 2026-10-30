@@ -1091,10 +1091,9 @@ function childRunnerConfig(
     : 1;
   return {
     ...config,
-    childTimeoutSeconds: Math.max(1, Math.ceil(Math.min(
-      config.childTimeoutSeconds * 1_000,
-      step.executionLimits.maxWallClockMs
-    ) / 1_000)),
+    // The persisted Step budget is authoritative; the scheduler also enforces
+    // remaining Task/ancestor time across attempts. Do not reapply a hidden timer.
+    childTimeoutSeconds: Math.max(1, Math.ceil(step.executionLimits.maxWallClockMs / 1_000)),
     heartbeatSeconds: Math.min(configuredHeartbeatSeconds, maximumHeartbeatSeconds, safeHeartbeatSeconds)
   };
 }

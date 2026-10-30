@@ -1,3 +1,4 @@
+import {TASK_CREATION_LIMITS} from './desktop-control/task-limits.js';
 import {validateWorkInputCommand,type WorkInputCommand} from './desktop-control/work-input.js';
 import {validateHumanBrowserCommand,type HumanBrowserCommand} from './desktop-control/browser-human.js';
 /** Existing shared-host v1 semantics. Pure contract only: no transport or authority. */
@@ -30,7 +31,7 @@ export function validatePrivateControlRequest(value: unknown): asserts value is 
     validateHumanBrowserCommand(request.browserControl);
     if(request.targetGeneration===undefined||Object.keys(request).sort().join(',')!=='browserControl,method,operationId,sessionId,targetGeneration,targetId')throw new Error('Invalid browser owner binding.');
   }
-  if(request.method==='task.create'&&(typeof request.objective!=='string'||!request.objective.trim()||request.objective.length>4000||!request.limits||Object.keys(request.limits).length!==3||!Object.keys(request.limits).every(key=>['maxProviderCalls','maxTotalTokens','maxWallClockMs'].includes(key))||!Object.entries({maxProviderCalls:45,maxTotalTokens:1_000_000,maxWallClockMs:1_800_000}).every(([key,max])=>{const value=request.limits![key as keyof NonNullable<PrivateControlRequest['limits']>];return Number.isSafeInteger(value)&&value>=1&&value<=max;})))throw new Error('Invalid Task creation.');
+  if(request.method==='task.create'&&(typeof request.objective!=='string'||!request.objective.trim()||request.objective.length>4000||!request.limits||Object.keys(request.limits).length!==3||!Object.keys(request.limits).every(key=>['maxProviderCalls','maxTotalTokens','maxWallClockMs'].includes(key))||!Object.entries(TASK_CREATION_LIMITS).every(([key,max])=>{const value=request.limits![key as keyof NonNullable<PrivateControlRequest['limits']>];return Number.isSafeInteger(value)&&value>=1&&value<=max;})))throw new Error('Invalid Task creation.');
   if (!["mcp.control","secure.input","browser.control","task.create", "model", "task.model", "send", "cancel", "approval", "inspect", "start", "resume", "task.pause", "task.resume", "task.cancel", "task.retry", "task.guide"].includes(request.method) ||
     ((request.method === "model" || request.method === "task.model" || request.method === "task.create") && (request.targetGeneration === undefined || request.selection !== null && (!request.selection || typeof request.selection.providerId !== "string" || !/^[A-Za-z0-9_.:-]{1,160}$/.test(request.selection.providerId) || typeof request.selection.modelId !== "string" || request.selection.modelId.length < 1 || request.selection.modelId.length > 200))) ||
     [request.sessionId, request.targetId, request.operationId].some((id) => typeof id !== "string" || !/^[A-Za-z0-9_.:-]{1,160}$/.test(id)) ||

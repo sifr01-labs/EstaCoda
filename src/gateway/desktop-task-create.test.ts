@@ -11,11 +11,16 @@ it('creates an idempotent background Task with narrowed limits, inherited target
  try{await ensureRuntimeSession({sessionDb:db,sessionId:'s',profileId:'p',workspaceRoot:homeDir,homeDir,durable:true});const session=(await db.getSession('s'))!,target=session.executionTarget!,store=new SQLiteTaskStore({db:db.db,profileId:'p'});
  const request={method:'task.create' as const,sessionId:'s',taskId:'task_desktop',operationId:createControlOperationId(),targetId:target.targetId,targetGeneration:target.targetGeneration,selection:null,objective:'Inspect safely',limits:{maxProviderCalls:4,maxTotalTokens:8000,maxWallClockMs:60000}};
  const receipts=new ControlReceipts(db.db,'p','owner');receipts.accept(request);expect(()=>receipts.accept({...request,limits:{...request.limits,maxProviderCalls:5}})).toThrow('different input');
- const input={store,request,session,context:{} as any,spendingLimit:{maxEstimatedCostUsd:2,warningThresholdPercent:80}};
+ const input={store,request,session,context:{config:{}} as any,spendingLimit:{maxEstimatedCostUsd:2,warningThresholdPercent:80}};
  expect(await desktopCreateTask(input)).toEqual({taskId:'task_desktop'});expect(await desktopCreateTask(input)).toEqual({taskId:'task_desktop'});
  const task=store.getTask('task_desktop')!;expect(task.executionPreference).toBe('background');expect(task.executionTarget).toEqual(target);expect(task.executionLimits.maxProviderCalls).toBe(4);expect(task.spendingLimit?.maxEstimatedCostUsd).toBe(2);expect(task.authorityPolicy.blockedTools).toContain('terminal.run');expect(store.listTasks({limit:100})).toHaveLength(1);
  await expect(desktopCreateTask({...input,request:{...request,operationId:createControlOperationId(),taskId:'second',limits:{...request.limits,maxProviderCalls:46}}})).rejects.toThrow('narrow');expect(store.getTask('second')).toBeNull();
  await expect(desktopCreateTask({...input,request:{...request,targetGeneration:9}})).rejects.toThrow('binding');
+ const large={...request,operationId:createControlOperationId(),taskId:'configured-long',limits:{maxProviderCalls:120,maxTotalTokens:1000000,maxWallClockMs:5400000}};
+ const {validatePrivateControlRequest}=await import('../contracts/control-protocol.js');expect(()=>validatePrivateControlRequest(large)).not.toThrow();
+ await desktopCreateTask({...input,context:{config:{runLimits:{unattended:{maxIterations:120,maxDurationMinutes:90}}}} as any,request:large});
+ expect(store.getTask('configured-long')!.executionLimits).toMatchObject(large.limits);
+
  }finally{db.close();await rm(homeDir,{recursive:true,force:true});}
 });
 
