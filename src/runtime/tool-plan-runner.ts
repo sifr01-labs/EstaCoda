@@ -16,7 +16,7 @@ import type {
 } from "../tools/tool-executor.js";
 import { summarizeSecurityTarget } from "../tools/tool-executor.js";
 import { buildToolDisplayPreview } from "../tools/tool-target-summary.js";
-import { packetizeToolExecution } from "../tools/tool-result-packet.js";
+import { packetizeToolExecution, providerVisibleToolResultMaxChars } from "../tools/tool-result-packet.js";
 import { DelegateCallBudget } from "../delegation/delegate-call-budget.js";
 import type { RunRecorder } from "./run-recorder.js";
 import type { SessionRuntimeContext } from "./session-runtime-context.js";
@@ -575,7 +575,7 @@ export function toolResultStats(execution: ToolExecutionRecord): {
 
   const packet = packetizeToolExecution({
     execution,
-    maxChars: 1_400
+    maxChars: providerVisibleToolResultMaxChars(execution.tool.name)
   });
 
   return {

@@ -295,6 +295,13 @@ export type ProviderCompletionOptions = {
   staleTimeoutMs?: number;
 };
 
+export type ProviderErrorDiagnostics = {
+  code?: string;
+  type?: string;
+  httpStatus?: number;
+  requestId?: string;
+};
+
 export type ProviderResponse = {
   ok: boolean;
   content: string;
@@ -302,6 +309,7 @@ export type ProviderResponse = {
   model: string;
   provider: ProviderId;
   errorClass?: ProviderErrorClass;
+  errorDiagnostics?: ProviderErrorDiagnostics;
   finishReason?: ProviderFinishReason;
   incompleteReason?: string;
   reasoning?: string;

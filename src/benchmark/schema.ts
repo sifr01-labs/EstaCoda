@@ -108,6 +108,16 @@ export type BenchmarkRunSummary = {
   model: BenchmarkModelSummary;
   metrics: BenchmarkMetrics;
   providerUsage?: { session: ProviderUsageTotals; routing: ProviderUsageTotals };
+  completion?: {
+    status: string;
+    terminationCause: string;
+    completionFloor: string;
+    confirmedActionCount: number;
+    uncertainActionCount: number;
+    validationFailure?: string;
+  };
+  completionChecks?: Array<{ accepted: boolean; repair: boolean; repairAttempt: number; feedback?: string }>;
+  providerFailures?: Array<{ provider: string; model: string; errorClass?: string; errorDiagnostics?: import("../contracts/provider.js").ProviderErrorDiagnostics }>;
   finalAnswer: string;
   artifacts: BenchmarkArtifactSummary;
   failure: BenchmarkFailureSummary | null;

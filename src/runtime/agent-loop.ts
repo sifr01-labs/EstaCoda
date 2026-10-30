@@ -1,3 +1,4 @@
+import { completionAdmissionFeedback } from "./completion-admission.js";
 import { recordRoutingStatus, routingStatus, routingNotice } from "./jev/routing-status.js";
 import { selectJevCapabilities, type CapabilityEvaluation } from "./jev/capability-selection.js";
 import { jevRoutingContext } from "./jev/live-routing.js";
@@ -1133,7 +1134,8 @@ export class AgentLoop {
       }) : undefined,
       validateCompletion: (text, executions) => {
         const receipts = this.#executionEvidenceIndex.recordsForTurn(visibleTurn.id);
-        const checks = commandCompletionFeedback(executions, receipts);
+        const checks = commandCompletionFeedback(executions, receipts) ??
+          completionAdmissionFeedback(text, ["mutation", "mutation_with_verification"].includes(turnCompletionFloor) || intent.requestRequirements?.fileOutput !== undefined);
         if (input.stepCompletion?.validate !== undefined) return input.stepCompletion.validate(text, executions) ?? checks;
         if (intent.requestRequirements?.research === undefined && intent.requestRequirements?.fileOutput === undefined && !intent.requestRequirements?.issues.includes("file-output-limit")) return checks;
         const research = researchRequestEvidence({ finalText: text, requestRequirements: intent.requestRequirements,

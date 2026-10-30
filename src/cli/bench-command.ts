@@ -21,6 +21,7 @@ import type {
   BenchmarkIdentity,
   BenchmarkModelSummary,
   BenchmarkRunStatus,
+  BenchmarkRunSummary,
   EstaCodaBenchmarkIdentity
 } from "../benchmark/schema.js";
 import {
@@ -198,6 +199,7 @@ async function runBenchRun(
   let retainRuntime = false;
   let trustDirectory: string | undefined;
   let finalAnswer = "";
+  let completion: BenchmarkRunSummary["completion"];
   let status: BenchmarkRunStatus = "success";
   let failure: BenchmarkFailureSummary | null = null;
   let modelSummary: BenchmarkModelSummary = {
@@ -324,6 +326,14 @@ async function runBenchRun(
       })
     );
     finalAnswer = response.text;
+    if (response.finalOutcome !== undefined) {
+      const outcome = response.finalOutcome;
+      completion = {
+        status: outcome.status, terminationCause: outcome.terminationCause, completionFloor: outcome.completionFloor,
+        confirmedActionCount: outcome.confirmedActions.length, uncertainActionCount: outcome.uncertainActions.length,
+        ...(response.completionValidationFailure === undefined ? {} : { validationFailure: redactBenchmarkText(response.completionValidationFailure).slice(0, 2_000) })
+      };
+    }
     failure = classifyBenchmarkResponse(response);
     status = failure?.status ?? "success";
     // The operator can extend this benchmark session through external grading.
@@ -379,6 +389,18 @@ async function runBenchRun(
       },
       failure
     });
+
+    summary.completion = completion;
+    summary.providerFailures = events.filter((event): event is Extract<RuntimeEvent, { kind: "provider-result" }> =>
+      event.kind === "provider-result" && !event.ok).slice(-100).map(event => ({
+        provider: event.provider, model: event.model,
+        ...(event.errorClass === undefined ? {} : { errorClass: event.errorClass }),
+        ...(event.errorDiagnostics === undefined ? {} : { errorDiagnostics: event.errorDiagnostics })
+      }));
+    summary.completionChecks = runtime?.sessionId === undefined ? [] :
+      (await sessionDb.listEvents(runtime.sessionId)).filter(event => event.kind === "step-completion-validation")
+        .slice(-20).map(event => ({ accepted: event.accepted, repair: event.repair, repairAttempt: event.repairAttempt,
+          ...(event.feedback === undefined ? {} : { feedback: redactBenchmarkText(event.feedback).slice(0, 2_000) }) }));
 
     // Read the actual run ledger, including when benchmark mode uses an in-memory
     // DB. Persist aggregate counters only, never request context or credential data.

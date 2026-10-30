@@ -1,3 +1,4 @@
+import { providerErrorDiagnostics } from "./provider-error-diagnostics.js";
 import { assertCurrentExecutionFence } from "../session/execution-fence-context.js";
 import type {
   ProviderCompletionOptions,
@@ -45,6 +46,7 @@ export type ProviderAttempt = ProviderAttemptState & {
   credentialId?: string;
   ok: boolean;
   errorClass?: string;
+  errorDiagnostics?: import("../contracts/provider.js").ProviderErrorDiagnostics;
   content: string;
   partialContent?: string;
   finishReason?: ProviderFinishReason;
@@ -135,6 +137,7 @@ export type ProviderRuntimeEvent =
       credentialId?: string;
       ok: boolean;
       errorClass?: string;
+      errorDiagnostics?: import("../contracts/provider.js").ProviderErrorDiagnostics;
       fallback: boolean;
       willFallback: boolean;
       finishReason?: ProviderFinishReason;
@@ -558,11 +561,11 @@ export class ProviderExecutor {
         const remainingRetryWindowMs = remainingDeadlineMs(options.deadlineAtMs, options.now);
         const canRetrySameRoute =
           (options.retryRateLimits === true && callResponse.errorClass === "rate-limit" ||
-            options.retryTransientFailures === true && ["network", "server"].includes(callResponse.errorClass ?? "") &&
-            !callResponse.partialContent && callResult.toolCalls.length === 0 &&
-            extractToolCallsFromProviderResponse(callResponse.raw).length === 0 &&
-            (callResult.streamDiagnostics?.visibleChars ?? 0) === 0 &&
-            (callResult.streamDiagnostics?.toolCallChunks ?? 0) === 0) &&
+            options.retryTransientFailures === true && ["network", "server"].includes(callResponse.errorClass ?? "")) &&
+          !callResponse.partialContent && callResult.toolCalls.length === 0 &&
+          extractToolCallsFromProviderResponse(callResponse.raw).length === 0 &&
+          (callResult.streamDiagnostics?.visibleChars ?? 0) === 0 &&
+          (callResult.streamDiagnostics?.toolCallChunks ?? 0) === 0 &&
           !isSignalAborted(options.signal) &&
           callResponse.ok === false &&
           routeAttemptCount < maxRouteAttempts &&
@@ -975,10 +978,12 @@ async function waitForProviderRetry(milliseconds: number, signal?: AbortSignal):
 
 function attemptMetadataFromResponse(response: ProviderResponse): Pick<
   ProviderAttempt,
-  "finishReason" | "incompleteReason" | "usage" | "reasoningMetadata"
+  "finishReason" | "incompleteReason" | "usage" | "reasoningMetadata" | "errorDiagnostics"
 > {
   const reasoningMetadata = safeReasoningMetadataFromResponse(response);
+  const diagnostics = response.ok ? undefined : providerErrorDiagnostics(response.errorDiagnostics);
   return {
+    ...(diagnostics === undefined ? {} : { errorDiagnostics: diagnostics }),
     ...(response.finishReason === undefined ? {} : { finishReason: response.finishReason }),
     ...(response.incompleteReason === undefined ? {} : { incompleteReason: response.incompleteReason }),
     ...(response.usage === undefined ? {} : { usage: response.usage }),

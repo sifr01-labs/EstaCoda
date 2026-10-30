@@ -7,6 +7,20 @@ description: "Tool system: registry, schemas, execution, and builtin tools."
 
 Tools are functions that extend the agent's capabilities. They are organized into a registry with risk-based gating.
 
+File, terminal, process-log and code-execution feedback uses a provider-visible
+ceiling of 16,000 characters, capped further by the tool's declared result size
+and the prompt budget. Oversized feedback preserves head and tail, marks omitted
+content, and points to bounded file reads or managed-process tails. File readback
+receipts do not mean the model saw an entire clipped file. Inspect large files in
+small `lineStart`/`lineEnd` ranges; never replay mutations just to recover output.
+
+For output/mutation requests, an explicit final-answer admission of unfinished
+required work rejects completion and enters the existing bounded repair path.
+This is a conservative signal, not semantic proof or execution authority. Quoted
+examples and optional future work do not create obligations. Validation still
+requires task-appropriate evidence, and every repair respects approvals, denied
+actions, cancellation and shared provider budgets.
+
 ## Provider-visible inventory
 
 A stable core working set (file readers/writers/search, terminal and code execution, process start/observation/cancellation, skill listing/reading, and capability discovery/recovery) is selected from the already eligible session catalog before optional tools. Standard and JEV relevance routing prioritize additional capabilities; a relevance miss cannot remove the core or its discovery path. Discovery is budgeted first. Configured exclusions, availability, provider-schema eligibility, explicit tool restrictions, and schema ceilings still apply. Exposure does not request an action or grant permission: conversation-only requests still call for a conversational answer, and every invocation retains trust, approval, path, credential, and hardline enforcement.

@@ -1,3 +1,4 @@
+import { providerErrorDiagnostics } from "./provider-error-diagnostics.js";
 import type {
   ModelProfile,
   ProviderAdapter,
@@ -44,6 +45,7 @@ export type FetchLike = (url: string, init: {
   ok: boolean;
   status: number;
   statusText: string;
+  headers?: { get(name: string): string | null };
   json(): Promise<unknown>;
   text(): Promise<string>;
   body?: ReadableStream<Uint8Array> | null;
@@ -231,7 +233,10 @@ async function collectResponsesStream(input: {
     }
 
     if (event.kind === "error") {
-      return event.response;
+      return withCollectedResponsesToolCalls({
+        ...event.response,
+        ...(content.length === 0 ? {} : { partialContent: content })
+      }, toolCallFragments);
     }
 
     if (event.kind === "transport-done") {
@@ -562,10 +567,9 @@ export async function executeResponsesRequest(input: {
     if (!response.ok) {
       return {
         ok: false,
-        content: await safeErrorText(response),
+        ...await responsesHttpFailure(response),
         model: input.model,
         provider: input.provider,
-        errorClass: classifyHttpError(response.status),
         raw: {
           status: response.status,
           statusText: response.statusText
@@ -577,7 +581,9 @@ export async function executeResponsesRequest(input: {
     return parseResponsesPayload({
       provider: input.provider,
       model: input.model,
-      payload
+      payload,
+      httpStatus: response.status,
+      requestId: response.headers?.get("x-request-id")
     });
   } catch (error) {
     return {
@@ -632,10 +638,9 @@ async function* streamResponsesRequest(input: {
         model: input.model,
         response: {
           ok: false,
-          content: await safeErrorText(response),
+          ...await responsesHttpFailure(response),
           model: input.model,
           provider: input.provider,
-          errorClass: classifyHttpError(response.status),
           raw: {
             status: response.status,
             statusText: response.statusText
@@ -651,7 +656,9 @@ async function* streamResponsesRequest(input: {
       const parsed = parseResponsesPayload({
         provider: input.provider,
         model: input.model,
-        payload
+        payload,
+        httpStatus: response.status,
+        requestId: response.headers?.get("x-request-id")
       });
 
       if (parsed.ok) {
@@ -760,6 +767,7 @@ async function* streamResponsesRequest(input: {
       }
 
       if (event.kind === "error") {
+        event.response.errorDiagnostics = providerErrorDiagnostics({ ...event.response.errorDiagnostics, httpStatus: response.status, requestId: response.headers?.get("x-request-id") });
         yield event;
         return;
       }
@@ -1106,6 +1114,8 @@ export function parseResponsesPayload(input: {
   model: string;
   payload: unknown;
   isStreamingCompletion?: boolean;
+  httpStatus?: number;
+  requestId?: string | null;
 }): ProviderResponse {
   const payload = input.payload as {
     status?: string;
@@ -1148,9 +1158,8 @@ export function parseResponsesPayload(input: {
       content: payload.error.message ?? "Provider returned an error.",
       model: input.model,
       provider: input.provider,
-      errorClass: payload.error.code === "cyber_policy"
-        ? "policy"
-        : classifyProviderError(payload.error.type ?? payload.error.code),
+      errorClass: classifyResponsesError(payload.error, input.httpStatus),
+      errorDiagnostics: providerErrorDiagnostics({ ...payload.error, httpStatus: input.httpStatus, requestId: input.requestId }),
       raw: input.payload
     };
   }
@@ -1498,14 +1507,19 @@ export function extractResponsesToolCalls(payload: unknown): Array<{
     }));
 }
 
-function classifyProviderError(code: string | undefined): ProviderErrorClass {
-  if (code === undefined) return "unknown";
-  if (/auth|key|permission|forbidden|unauthorized/i.test(code)) return "auth";
-  if (/rate/i.test(code)) return "rate-limit";
-  if (/quota|credit|billing/i.test(code)) return "quota";
-  if (/model|not_found|unavailable/i.test(code)) return "model-unavailable";
-  if (/timeout/i.test(code)) return "timeout";
-  return "unknown";
+function classifyResponsesError(error: { code?: string; type?: string }, status?: number): ProviderErrorClass {
+  // Consider both fields. Permanent/policy failures win over conflicting
+  // transient hints, and a generic type cannot hide a specific model code.
+  const values = [error.code, error.type];
+  const matches = (known: string[]) => values.some(value => typeof value === "string" && known.includes(value));
+  if (matches(["cyber_policy", "content_policy_violation"])) return "policy";
+  if (status === 401 || status === 403 || matches(["invalid_api_key", "authentication_error", "permission_denied", "permission_error", "unauthorized"])) return "auth";
+  if (status === 402 || matches(["insufficient_quota", "quota_exceeded", "billing_hard_limit_reached"])) return "quota";
+  if (matches(["model_not_found", "model_not_available", "model_unavailable"])) return "model-unavailable";
+  if (matches(["rate_limit_exceeded", "rate_limit_error"])) return "rate-limit";
+  if ((status === undefined || status < 400 || status >= 500) && matches(["server_error", "internal_server_error", "service_unavailable", "overloaded_error"])) return "server";
+  if (matches(["timeout", "request_timeout"])) return "timeout";
+  return status !== undefined && status >= 400 ? classifyHttpError(status) : "unknown";
 }
 
 function formatProviderTotalTimeout(timeoutMs: number): string {
@@ -1528,11 +1542,16 @@ function formatDuration(timeoutMs: number): string {
   return `${timeoutMs}ms`;
 }
 
-async function safeErrorText(response: { json(): Promise<unknown>; text(): Promise<string> }): Promise<string> {
-  try {
-    const payload = await response.json() as { error?: { message?: string }; message?: string };
-    return payload.error?.message ?? payload.message ?? JSON.stringify(payload);
-  } catch {
-    return response.text();
-  }
+async function responsesHttpFailure(response: {
+  status: number; headers?: { get(name: string): string | null };
+  json(): Promise<unknown>; text(): Promise<string>;
+}): Promise<Pick<ProviderResponse, "content" | "errorClass" | "errorDiagnostics">> {
+  let payload: { error?: { message?: string; code?: string; type?: string }; message?: string } = {};
+  try { payload = await response.json() as typeof payload; } catch { /* No raw body in diagnostics. */ }
+  const error = payload?.error ?? {};
+  return {
+    content: typeof error.message === "string" ? error.message : `Provider HTTP error ${response.status}.`,
+    errorClass: classifyResponsesError(error, response.status),
+    errorDiagnostics: providerErrorDiagnostics({ ...error, httpStatus: response.status, requestId: response.headers?.get("x-request-id") })
+  };
 }

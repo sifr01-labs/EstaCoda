@@ -3297,6 +3297,7 @@ function mapProviderRuntimeEvent(event: ProviderRuntimeEvent): RuntimeEvent {
     case "provider-attempt-end":
       return {
         kind: "provider-result",
+        ...(event.errorDiagnostics === undefined ? {} : { errorDiagnostics: event.errorDiagnostics }),
         provider: event.provider,
         model: event.model,
         ok: event.ok,

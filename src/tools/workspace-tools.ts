@@ -194,7 +194,7 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
   return [
     {
       name: "file.read",
-      description: "Read a text file inside the active workspace. The leading # path line is a display label, not file content; do not include it when copying or editing the file.",
+      description: "Read a text file inside the active workspace. For large files, use small lineStart/lineEnd ranges and advance through them; truncated excerpts are not complete file content. The leading # path line is a display label, not file content; do not include it when copying or editing the file.",
       inputSchema: {
         type: "object",
         properties: {

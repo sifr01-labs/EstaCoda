@@ -28,6 +28,29 @@ afterEach(async () => {
 });
 
 describe("benchCommand", () => {
+  it("exports redacted completion checks and structured provider failures without a trajectory", async () => {
+    const root = await makeTempDir();
+    const db = new InMemorySessionDB();
+    await db.createSession({ id: "session-1", profileId: "default" });
+    await db.appendEvent("session-1", { kind: "step-completion-validation", accepted: false, repair: true, repairAttempt: 0,
+      feedback: "Missing evidence; Bearer abcdefghijklmnopqrstuvwxyz123456" });
+    const runtime = fakeRuntime([{ kind: "provider-result", provider: "probe", model: "test", ok: false, fallback: false, willFallback: false,
+      errorClass: "server", errorDiagnostics: { code: "server_error", httpStatus: 503, requestId: "req_example" } }]);
+    const handle = runtime.handle;
+    runtime.handle = async input => ({ ...await handle(input), finalOutcome: {
+      status: "partially_completed", terminationCause: "normal", completionFloor: "mutation_with_verification", confirmedActions: [], uncertainActions: []
+    } });
+    await benchCommand({ argv: [], workspaceRoot: root }, ["run", "--workspace", root, "--instruction", "work", "--model", "openai/gpt-test", "--out", join(root, "out")], {
+      ...dependenciesForRuntime(root, runtime), createSessionDb: () => db
+    });
+    const summary = JSON.parse(await readFile(join(root, "out/summary.json"), "utf8"));
+    expect(summary.completion).toMatchObject({ status: "partially_completed", terminationCause: "normal", confirmedActionCount: 0 });
+    expect(summary.completionChecks).toEqual([expect.objectContaining({ accepted: false, repair: true, feedback: "Missing evidence; Bearer [REDACTED]" })]);
+    expect(summary.providerFailures[0].errorDiagnostics).toEqual({ code: "server_error", httpStatus: 503, requestId: "req_example" });
+    expect(summary.artifacts.trajectory).toBeNull();
+    expect(JSON.stringify(summary)).not.toContain("abcdefghijklmnopqrstuvwxyz123456");
+  });
+
   it("exports aggregate routing usage from the run's in-memory ledger without other sessions", async () => {
     const root = await makeTempDir();
     const db = new InMemorySessionDB();

@@ -1,3 +1,4 @@
+import { completionAdmissionFeedback } from "./completion-admission.js";
 import { selectProviderToolsForTurn } from "./provider-tool-narrowing.js";
 import { commandCompletionFeedback } from "./command-completion-checks.js";
 import { assessHardlineFloor } from "../security/command-safety.js";
@@ -5316,6 +5317,20 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     expect(JSON.stringify(await harness.sessionDb.listEvents(harness.sessionId))).not.toContain("hunter2");
   });
 
+
+  it("continues an incomplete final answer through bounded completion repair", async () => {
+    const harness = await createPostToolNudgeHarness({
+      responses: [providerExecution("The required behavior is not implemented."), providerExecution("", [providerToolCall("write", '{"path":"report.md","content":"done"}', "file.write")]), providerExecution("Completed and verified.")],
+      toolSteps: [{}, { executions: [toolExecutionForTool("write", "file.write", "written")] }, {}], maxProviderIterations: 5
+    });
+    const result = await runBasicProviderTurn(harness.loop, {
+      providerTools: [toolProviderSchema("file.write")], validateCompletion: text => completionAdmissionFeedback(text, true)
+    });
+    expect(harness.completeSpy).toHaveBeenCalledTimes(3);
+    expect(result.completionValidationFailure).toBeUndefined();
+    expect((await harness.sessionDb.listEvents(harness.sessionId)).filter(event => event.kind === "step-completion-validation"))
+      .toEqual([expect.objectContaining({ accepted: false, repair: true }), expect.objectContaining({ accepted: true, repair: false })]);
+  });
 
   it("restricts repair after an unrelated denial to the written output readbacks", async () => {
     const harness = await createPostToolNudgeHarness({

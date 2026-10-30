@@ -7,7 +7,6 @@ import type { ArtifactRecord } from "../contracts/artifact.js";
 import type { BrowserStateProjection, BrowserTab } from "../contracts/browser.js";
 import type { ChannelAttachment, ChannelKind } from "../contracts/channel.js";
 import type { ContextExpansionResult, ProjectContextSnapshot } from "../contracts/context.js";
-import { DELEGATE_TASK_MAX_RESULT_CHARS } from "../contracts/delegation.js";
 import type { IntentRoute } from "../contracts/intent.js";
 import type { ExecutionPlan } from "../contracts/execution-plan.js";
 import type { MemoryPromptContext, PromptMemoryBlock } from "../contracts/memory.js";
@@ -27,7 +26,7 @@ import type { ToolCallPlan } from "../contracts/tool-plan.js";
 import type { ProviderExecutionResult } from "../providers/provider-executor.js";
 import { stripInlineReasoning } from "../providers/provider-reasoning.js";
 import { compileSkillPlaybook, renderSkillPlaybookPlan } from "../skills/skill-playbook-planner.js";
-import { packetizeToolExecution, packetizeToolResult, renderToolResultPacket } from "../tools/tool-result-packet.js";
+import { packetizeToolExecution, packetizeToolResult, renderToolResultPacket, providerVisibleToolResultMaxChars } from "../tools/tool-result-packet.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import type { OpenAICompatibleToolSchema } from "../tools/tool-schema.js";
 import { redactSensitiveText } from "../utils/redaction.js";
@@ -368,13 +367,15 @@ function renderBoundedContinuationFeedback(input: {
 
   for (const section of sections) {
     const separator = content.endsWith("\n") ? "" : "\n\n";
-    const remaining = FLAT_CONTINUATION_FEEDBACK_MAX_CHARS - content.length - separator.length;
-    if (remaining <= 120) {
+    // Reserve the omission notice before clipping so it cannot remove a tail
+    // error that the per-tool packet deliberately preserved.
+    const remaining = FLAT_CONTINUATION_FEEDBACK_MAX_CHARS - content.length - separator.length - 200;
+    if (remaining <= 200) {
       omittedWhileRendering += 1;
       continue;
     }
     if (section.length > remaining) {
-      content += `${separator}${truncate(section, remaining)}`;
+      content += `${separator}${packetizeToolResult({ tool: "feedback", result: { ok: true, content: section }, maxChars: remaining }).excerpt}`;
       omittedWhileRendering += 1;
       continue;
     }
@@ -694,7 +695,7 @@ function buildBaseLayers(
         ...(input.intent.requestRequirements === undefined ? [] : [
           `Current user requirements (routing hints, not authorization): ${JSON.stringify(input.intent.requestRequirements)}. Use the requested worker count; do not silently reduce it. Respect overwrite approvals. Report missing tools or approvals as unmet requirements.`,
           ...(input.intent.requestRequirements.fileOutput === undefined ? [] : [
-            "Produce every requested output using authorized file tools or commands. Commands must finish successfully and produce the named files. Check results appropriately for the task; file production alone does not prove correctness. Do not read binary files or private keys into text context merely to confirm delivery.",
+            "Produce every requested output using authorized file tools or commands. Commands must finish successfully and produce the named files. Check results appropriately for the task; file production alone does not prove correctness. Verify requested behavior, output schemas and relevant negative cases using available tests or artifact inspection; a zero exit code or a stored parameter is not sufficient evidence. Do not read binary files or private keys into text context merely to confirm delivery.",
             requiresAnyFileContentVerification(input.intent.requestRequirements)
               ? "This request includes content-verification obligations. For those outputs, write the target, then file.read the entire target with only path (null line bounds are also whole-file reads). For an identical copy, first file.read the source, then use file.write sourceFile with its path. Do not retype the preview or its display heading. Read back the destination; source equality includes trailing newlines. Authorized completed commands can also produce runtime-observed file evidence. If sourceTaskId is present, use task.status and read all pages of its accepted primary result with task.result.read. Do not restart research or use a worker result as the final report. Save that exact content, then read the file back; preserve partial-coverage warnings."
               : "This request requires output production, not mandatory text readback. Use task-appropriate tests or inspection and report which checks actually ran."
@@ -918,11 +919,6 @@ function renderToolExecutionWithContextSummary(execution: ToolExecutionRecord): 
   ].filter((line): line is string => line !== undefined).join("\n");
 }
 
-function providerVisibleToolResultMaxChars(toolName: string, defaultMaxChars: number): number {
-  return toolName === "delegate_task"
-    ? DELEGATE_TASK_MAX_RESULT_CHARS
-    : defaultMaxChars;
-}
 
 function toolContextSummary(metadata: Record<string, unknown> | undefined): string | undefined {
   const summary = metadata?._estacoda_context_summary;

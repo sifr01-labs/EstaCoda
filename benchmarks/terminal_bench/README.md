@@ -58,6 +58,32 @@ export ESTACODA_BENCH_COMMAND="node /path/to/estacoda/dist/index.js"
 
 ## Harbor Sharp Edges
 
+Run the operator check with the **same `PATH`, `DOCKER_HOST`, `DOCKER_CONFIG`, and
+platform settings** that will launch Harbor. Docker Compose alone is insufficient:
+separate verifiers can require Buildx to build Harbor's egress-control sidecar.
+Install/expose the Buildx plugin in that configuration; do not disable egress
+control to work around a missing plugin.
+
+```bash
+# Use an operator-approved Linux image containing bash/sh, ideally already cached.
+python3 -m benchmarks.terminal_bench.operator_check preflight \
+  --probe-image debian:bookworm-slim --out .harbor-jobs/operator-check
+
+# After a campaign, preserve later verifier/cleanup errors as well as agent errors.
+python3 -m benchmarks.terminal_bench.operator_check inspect \
+  --jobs .harbor-jobs --out .harbor-jobs/phase-report
+```
+
+The preflight runs a tiny oracle fixture, without a provider, to exercise artifact
+transfer and the separate verifier with internet access disabled. It may pull the
+explicit image and build Harbor's sidecar. Use a fresh output directory and a
+Harbor-compatible image. Prerequisite checks alone do not count as a passing
+preflight: success requires a graded reward of one from the fixture. Check disk,
+CPU/RAM and GPU capacity for the actual dataset separately. The result inspector
+preserves unknown/ungraded outcomes; it does not turn a missing grade into zero
+or replace Harbor's authoritative grading. Its log signatures cover the observed
+sidecar failures; inspect native Harbor logs for unfamiliar infrastructure errors.
+
 - Harbor requires a working Docker-capable environment. On macOS/Colima, keep Harbor's host-side job and result directory on a Docker-shared workspace path, such as a checkout-local `.harbor-jobs/` directory. Avoid host `/tmp` for verifier-bearing runs if the verifier reports `RewardFileNotFoundError`; the task container may write the reward file while the host-side verifier cannot see it.
 - The EstaCoda command runs inside the Terminal-Bench task container. Do not point `ESTACODA_BENCH_COMMAND` at macOS `node_modules` or host-native binaries. Use a Linux-built runtime available in the task container, or install/build EstaCoda inside the container through `ESTACODA_HARBOR_INSTALL_COMMAND`.
 - Live model runs need explicit provider configuration. Set `ESTACODA_BENCH_MODEL`, provider credentials, temperature, and any required max-token setting through the Harbor agent environment instead of relying on a real user home.
@@ -90,6 +116,30 @@ from the conversation's actual ledger and verified compression ancestors, includ
 the default in-memory database. Separate delegated-task ledgers are not included. Inspect
 `usageComplete` and `pricingComplete` before comparing costs; missing usage is not
 zero cost. A separate SQLite exporter is neither necessary nor authoritative.
+
+Summaries also retain the final completion status/cause, action counts, up to 20
+completion-validation decisions, and up to 100 provider failures, even when no
+trajectory is exported. Provider error metadata is allowlisted (code, type, HTTP
+status and supported request ID); raw response bodies/headers are not diagnostic
+fields. Completion feedback is bounded and redacted. Relays must preserve the
+structured `ProviderResponse.errorDiagnostics` field when forwarding errors; a
+generic HTTP error or exception string loses upstream identity.
+
+Recognized Responses server failures use the existing bounded retry path.
+Unknown `model_error` values do not become model-unavailable or automatically
+retriable. Rate-limit and transient retries both reject replay after partial
+content or tool calls. Explicit admissions of incomplete required work reject
+completion for mutation/output requests and use the existing repair allowance;
+they cannot grant permission or prove semantic correctness. Task verification
+must still check actual requested behavior, schemas and relevant negative cases.
+No benchmark-specific solution or grader data is added to runtime context.
+
+Terminal/file/process feedback uses tool-specific caps (at most 16,000 characters,
+also bounded by each tool's declared limit and prompt budgets). Clipped results
+retain head and tail with an omission marker. Read files in smaller line ranges
+and inspect managed process tails instead of repeatedly requesting the same full
+output. Bounded command output that was not saved cannot be reconstructed; do
+not replay a mutating command solely to recover its output.
 
 For fair build-heavy comparisons, use native Linux amd64 execution when possible.
 Record emulation and CPU/memory limits, and investigate compiler crashes separately
@@ -177,5 +227,6 @@ The local adapter tests do not require Harbor:
 
 ```bash
 python3 -m unittest benchmarks.terminal_bench.harbor_agent_test
+python3 -m unittest benchmarks.terminal_bench.operator_check_test
 python3 -m py_compile benchmarks/terminal_bench/estacoda_harbor_agent.py
 ```

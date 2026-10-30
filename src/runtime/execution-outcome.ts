@@ -1,3 +1,4 @@
+import { completionAdmissionFeedback } from "./completion-admission.js";
 import { settledLocalCommandExit } from "./local-command-result.js";
 import { toolOperationFingerprint } from "./tool-result-fingerprint.js";
 import { declaresCommandCheck, commandCompletionChecks } from "./command-completion-checks.js";
@@ -129,7 +130,9 @@ export function deriveExecutionFinalOutcome(input: {
     fileOutputMeetsFloor: fileEvidence.satisfied && fileEvidence.writeCallId !== undefined && (fileEvidence.contentVerified === true || completionFloor === "mutation" || requiresAnyFileContentVerification(input.requestRequirements)),
     delegatedFileOutput: input.delegatedAnswerOwned === true && input.requestRequirements?.fileOutput !== undefined
   });
-  return { status, terminationCause, completionFloor, confirmedActions, uncertainActions };
+  const admission = completionAdmissionFeedback(input.finalText, ["mutation", "mutation_with_verification"].includes(completionFloor) || input.requestRequirements?.fileOutput !== undefined);
+  const admittedIncomplete = admission !== undefined && (status === "completed" || status === "completed_with_recovered_errors");
+  return { status: admittedIncomplete ? (confirmedActions.length > 0 ? "partially_completed" : "blocked") : status, terminationCause, completionFloor, confirmedActions, uncertainActions };
 }
 
 export function learningOutcomeStatus(

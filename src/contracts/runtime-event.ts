@@ -153,6 +153,7 @@ export type RuntimeEvent =
     }
   | {
       kind: "provider-result";
+      errorDiagnostics?: import("./provider.js").ProviderErrorDiagnostics;
       provider: string;
       model: string;
       ok: boolean;

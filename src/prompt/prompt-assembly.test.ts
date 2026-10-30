@@ -1150,7 +1150,7 @@ describe("assembleProviderPrompt", () => {
     expect(rendered).not.toContain("_estacoda_context_summary=Command exited 0 with 1 line.");
   });
 
-  it("uses the delegation result budget in initial prompts without widening other tools", () => {
+  it("retains delegation tails and honors terminal result limits in initial prompts", () => {
     const delegationContent = `${"d".repeat(7_000)}delegation-visible${"d".repeat(1_100)}delegation-beyond-limit`;
     const genericContent = `${"g".repeat(1_500)}generic-beyond-limit`;
     const prompt = assembleProviderPrompt(basePromptInput({
@@ -1166,10 +1166,11 @@ describe("assembleProviderPrompt", () => {
     const rendered = renderMessages(prompt.messages);
 
     expect(rendered).toContain("delegation-visible");
-    expect(rendered).not.toContain("delegation-beyond-limit");
-    expect(rendered).not.toContain("generic-beyond-limit");
+    expect(rendered).toContain("delegation-beyond-limit");
+    expect(rendered).toContain("generic-beyond-limit");
     expect(rendered).toContain("8.0k sent (truncated)");
-    expect(rendered).toContain("1.4k sent (truncated)");
+    expect(rendered).toContain("1.5k sent");
+    expect(rendered).toContain("characters omitted");
   });
 });
 
@@ -1289,7 +1290,7 @@ describe("assembleProviderContinuationPrompt", () => {
     expect(rendered).not.toContain("produce the final answer now");
   });
 
-  it("uses the delegation result budget in continuations without widening other tools", () => {
+  it("retains delegation and generic diagnostic tails within continuation budgets", () => {
     const delegationContent = `${"d".repeat(7_000)}delegation-visible${"d".repeat(1_100)}delegation-beyond-limit`;
     const genericContent = `${"g".repeat(1_900)}generic-beyond-limit`;
     const prompt = assembleProviderContinuationPrompt(baseContinuationInput({
@@ -1322,8 +1323,8 @@ describe("assembleProviderContinuationPrompt", () => {
     const rendered = renderMessages(prompt.messages);
 
     expect(rendered).toContain("delegation-visible");
-    expect(rendered).not.toContain("delegation-beyond-limit");
-    expect(rendered).not.toContain("generic-beyond-limit");
+    expect(rendered).toContain("delegation-beyond-limit");
+    expect(rendered).toContain("generic-beyond-limit");
     expect(rendered).toContain("8.0k sent (truncated)");
     expect(rendered).toContain("1.8k sent (truncated)");
     expect(countOccurrences(rendered, "delegation-visible")).toBe(1);
@@ -1378,7 +1379,8 @@ describe("assembleProviderContinuationPrompt", () => {
     expect(content).toContain("call-latest");
     expect(content).toContain("call-prior");
     expect(content).not.toContain(priorRawResult);
-    expect(content).not.toContain("latest-result-tail");
+    expect(content).toContain("latest-result-tail");
+    expect(content).toContain("characters omitted");
   });
 
   it("keeps cumulative artifact references when older raw feedback is consumed", () => {

@@ -36,6 +36,17 @@ async function fixture(prompt = "Write output.c", contentVerification = true) {
 }
 
 describe("command-generated file completion", () => {
+  it("does not let valid file receipts erase an admission of unfinished behavior", async () => {
+    const f = await fixture();
+    try {
+      await f.run("file.write", { path: "output.c", content: "int main() {}" });
+      await f.run("file.read", { path: "output.c" });
+      expect(fileOutputEvidence(f.evidence()).satisfied).toBe(true);
+      expect(deriveExecutionFinalOutcome({ ...f.evidence(), requestRequirements: f.evidence().requirements,
+        completionFloor: "mutation_with_verification", finalText: "The required behavior is not implemented." }).status).toBe("partially_completed");
+    } finally { await f.close(); }
+  });
+
   it.each(["bounded", "managed", "python"])("verifies %s output only after readback", async mode => {
     const f = await fixture();
     try {
