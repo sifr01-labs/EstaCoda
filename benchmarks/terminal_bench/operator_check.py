@@ -97,7 +97,8 @@ environment_mode = "separate"
 timeout_sec = 60
 [verifier.environment]
 build_timeout_sec = 120
-docker_image = "{image}"
+# Inherit the agent image so Harbor uploads tests/test.sh. An explicit
+# verifier docker_image means the image already bundles its tests.
 cpus = 1
 memory_mb = 512
 storage_mb = 1024

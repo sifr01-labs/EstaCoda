@@ -42,6 +42,8 @@ class OperatorCheckTest(unittest.TestCase):
             self.assertIn('name = "estacoda/operator-probe"', task)
             self.assertIn('environment_mode = "separate"', task)
             self.assertIn("allow_internet = false", task)
+            self.assertEqual(task.count('docker_image = "debian:bookworm-slim"'), 1)
+            self.assertNotIn('\ndocker_image =', task.split('[verifier.environment]')[1])
 
 
 if __name__ == "__main__":
