@@ -1,3 +1,4 @@
+import {normalizeRunLimits} from '../../config/run-limits.js';
 import {normalizeRoutingConfig} from '../../config/routing-config.js';
 import {parseExecutionPolicy} from '../../execution/docker-policy.js';
 import {validateMcpSetupInput,normalizeAuxiliarySlotInput,setupAuxiliaryModelConfig,readConfig,saveRuntimeConfig,loadRuntimeConfig,setupUiConfig,setupProfileConfig,type UiSetupInput,type ProfileSetupInput} from '../../config/runtime-config.js';
@@ -30,6 +31,7 @@ export async function applyPublicSettings(changes:SettingChange[],input:{homeDir
  }
  for(const name of new Set(changes.filter(c=>c.fieldId.startsWith('mcpServers.')).map(c=>c.selectors[0]!))){const server=config.mcpServers?.[name];if(server)validateMcpSetupInput({name,...server});}
  if(changes.some(c=>c.fieldId.startsWith('routing.')))normalizeRoutingConfig(config.routing);
+ if(changes.some(c=>c.fieldId.startsWith('runLimits.')))normalizeRunLimits(config.runLimits);
  await saveRuntimeConfig(configPath,config);
  // Reuse public CLI normalization/validation in the staging profile, before live commit.
  const options={...input,workspaceRoot:input.homeDir};

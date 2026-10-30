@@ -1,5 +1,9 @@
 import type {SettingField} from '../contracts/desktop-control/index.js';
 export const runtimeSettings:readonly SettingField[]=[
+ ...(['interactive', 'unattended'] as const).flatMap(scope => (['maxIterations', 'maxToolCalls', 'maxDurationMinutes'] as const).map(key => ({
+   id: `runLimits.${scope}.${key}`, path: ['runLimits', scope, key], section: 'runtime' as const, kind: 'number' as const,
+   min: scope === 'interactive' ? 0 : 1, max: key === 'maxDurationMinutes' ? 10080 : 1_000_000
+ }))),
   {
     "id": "execution.backend",
     "path": [

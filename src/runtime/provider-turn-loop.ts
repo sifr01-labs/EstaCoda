@@ -171,6 +171,7 @@ export type ProviderTurnLoopOptions = {
     responseLanguage: AgentResponseLanguage;
   } | undefined;
   budgets: ProviderTurnLoopBudgets;
+  resolveRunBudgets?: (channel?: ChannelKind) => Promise<Partial<ProviderTurnLoopBudgets>>;
   providerRequestDefaults?: ProviderTurnLoopRequestDefaults;
   initialContextWindowUsage?: SessionContextWindowUsage;
   taskExecution?: ProviderUsageTaskAttribution;
@@ -210,7 +211,9 @@ export class ProviderTurnLoop {
   readonly #skillsIndex: SkillCatalogEntry[];
   readonly #ui: ProviderTurnLoopOptions["ui"];
   readonly #agentProfile: ProviderTurnLoopOptions["agentProfile"];
-  readonly #budgets: NormalizedProviderTurnLoopBudgets;
+  #budgets: NormalizedProviderTurnLoopBudgets;
+  readonly #resolveRunBudgets: ProviderTurnLoopOptions["resolveRunBudgets"];
+  readonly #baseBudgets: NormalizedProviderTurnLoopBudgets;
   readonly #providerRequestDefaults: ProviderTurnLoopRequestDefaults;
   readonly #profileId: string;
   readonly #taskExecution: ProviderUsageTaskAttribution | undefined;
@@ -258,6 +261,8 @@ export class ProviderTurnLoop {
         options.budgets.maxProviderWallClockMs
       )
     };
+    this.#baseBudgets = this.#budgets;
+    this.#resolveRunBudgets = options.resolveRunBudgets;
     this.#providerRequestDefaults = options.providerRequestDefaults ?? {};
     this.#profileId = options.profileId;
     this.#taskExecution = options.taskExecution;
@@ -327,6 +332,8 @@ export class ProviderTurnLoop {
     const releaseBrowserLeaseOnAbort = (): void => this.#releaseBrowserSessionLease();
     input.signal?.addEventListener("abort", releaseBrowserLeaseOnAbort, { once: true });
     try {
+    this.#budgets = { ...this.#baseBudgets, ...await this.#resolveRunBudgets?.(input.channel) };
+    this.#budgets.finalizationReserveMs = normalizeFinalizationReserve(this.#budgets.finalizationReserveMs, this.#budgets.maxProviderWallClockMs);
     this.#providerRequestSequence = 0;
     this.#toolPlanRunner.resetPerTurnBudgets?.();
     if (input.diagnosticOnly === true) {
@@ -2859,7 +2866,8 @@ function normalizeFinalizationReserve(reserveMs: number, wallClockMs: number): n
 function providerWorkDeadlineAt(
   loopStartedAt: number,
   budgets: Pick<NormalizedProviderTurnLoopBudgets, "maxProviderWallClockMs" | "finalizationReserveMs">
-): number {
+): number | undefined {
+  if (!Number.isFinite(budgets.maxProviderWallClockMs)) return undefined;
   return loopStartedAt + budgets.maxProviderWallClockMs - budgets.finalizationReserveMs;
 }
 
@@ -2944,7 +2952,7 @@ export function providerEfficiencySignals(input: {
   repeatedMcpReads: number;
   machineReadableApiDescriptionAvailable: boolean;
 }): string[] {
-  const providerCallThreshold = Math.max(1, Math.ceil(input.providerCallBudget * 0.5));
+  const providerCallThreshold = Math.max(1, Math.ceil((Number.isFinite(input.providerCallBudget) ? input.providerCallBudget : 45) * 0.5));
   return [
     input.repeatedMcpReads > 0
       ? `${input.repeatedMcpReads} identical MCP read${input.repeatedMcpReads === 1 ? " was" : "s were"} already reused. Do not request those facts again unless a mutation or input change makes them stale.`

@@ -24,6 +24,7 @@ const PR6_EDITOR_ACTION_ORDER: readonly SetupEditorActionId[] = [
   "edit-security-mode",
   "edit-routing-model",
   "edit-execution-policy",
+  "edit-run-limits",
   "edit-workflow-learning",
   "edit-budgets",
   "edit-language",
@@ -320,6 +321,8 @@ function editorActionDescription(action: SetupEditorActionDraft, locale: SetupCo
       return setupCopyText(locale, "setupEditor.actions.repairWorkspaceTrust.description");
     case "edit-routing-model":
       return setupCopyText(locale, "setupEditor.actions.editRoutingModel.description");
+    case "edit-run-limits":
+      return setupCopyText(locale, "setupEditor.actions.editRunLimits.description");
     case "edit-execution-policy":
       return setupCopyText(locale, "setupEditor.actions.editExecutionPolicy.description");
     case "edit-security-mode":

@@ -18,6 +18,8 @@ export function executionSelectionChanges(page:SettingsPage,backend:'host'|'dock
  return page.fields.filter(f=>f.id.startsWith('execution.')).map(f=>({fieldId:f.id,selectors:[],value:policy[f.id]??null}));
 }
 export const runtimeSettingLabels={
+ 'runLimits.interactive.maxDurationMinutes':'Interactive run duration (minutes)', 'runLimits.interactive.maxIterations':'Interactive model steps', 'runLimits.interactive.maxToolCalls':'Interactive tool calls',
+ 'runLimits.unattended.maxDurationMinutes':'Unattended run duration (minutes)', 'runLimits.unattended.maxIterations':'Unattended model steps', 'runLimits.unattended.maxToolCalls':'Unattended tool calls',
  'routing.mode':'Routing mode','routing.jev.provider':'Routing provider','routing.jev.id':'Routing model','routing.jev.apiKeyEnv':'API key','routing.jev.timeoutMs':'Routing timeout (milliseconds)',
  'execution.backend':'Execution environment','execution.imageId':'Prepared image',
  'execution.workspaceAccess.value':'Project files','execution.workspaceAccess.requirement':'File access enforcement',
@@ -28,8 +30,9 @@ export const runtimeSettingLabels={
  'ui.language':'Command-line language','ui.flavor':'Status style','ui.activityLabels':'Activity language','ui.showResponseProgress':'Response progress','profile.mode':'Working style','profile.responseLanguage':'Response language'
 } as const;
 export function runtimeDisplay(change:SettingChange):string|number|boolean|string[]|null {
+ if(change.fieldId.startsWith('runLimits.interactive.')&&change.value===0)return 'unlimited';
  if(typeof change.value==='number')return change.fieldId.endsWith('Bytes')?change.value/1024/1024:change.fieldId.endsWith('timeoutMs')&&!change.fieldId.startsWith('routing.')?change.value/1000:change.value;
  return change.value;
 }
 
-export const runtimeChoiceLabels={'jev-assisted':'Jev-assisted',typesafe:'TypeSafe',host:'This computer',docker:'Isolated environment',mandatory:'Required',advisory:'Preferred','read-only':'Read only','read-write':'Read and write',disabled:'Blocked',unrestricted:'Allowed',session:'This session',en:'English',ar:'Arabic','match-user':'Match my message',focused:'Focused',operator:'Operator',builder:'Builder',research:'Research',standard:'Standard','arabic-light':'Arabic light','kemet-full':'Kemet full'} as const;
+export const runtimeChoiceLabels={unlimited:'No limit','jev-assisted':'Jev-assisted',typesafe:'TypeSafe',host:'This computer',docker:'Isolated environment',mandatory:'Required',advisory:'Preferred','read-only':'Read only','read-write':'Read and write',disabled:'Blocked',unrestricted:'Allowed',session:'This session',en:'English',ar:'Arabic','match-user':'Match my message',focused:'Focused',operator:'Operator',builder:'Builder',research:'Research',standard:'Standard','arabic-light':'Arabic light','kemet-full':'Kemet full'} as const;

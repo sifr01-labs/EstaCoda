@@ -9,6 +9,7 @@ export type SetupEditorActionId =
   | "repair-missing-credential"
   | "edit-routing-model"
   | "edit-execution-policy"
+  | "edit-run-limits"
   | "edit-security-mode"
   | "edit-workflow-learning"
   | "edit-budgets"
@@ -30,6 +31,7 @@ export type SetupEditorActionId =
 export type SetupEditorPatchField =
   | "routing"
   | "publicSettings"
+  | "runLimits"
   | "model.provider"
   | "model.id"
   | "model.fallbacks"

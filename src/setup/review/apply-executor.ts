@@ -1,3 +1,4 @@
+import { normalizeRunLimits } from '../../config/run-limits.js';
 import { normalizeRoutingConfig } from "../../config/routing-config.js";
 import { saveRuntimeConfig } from "../../config/runtime-config.js";
 import {applyPublicSettings} from './public-settings-apply.js';
@@ -314,6 +315,18 @@ async function applyConfigPatch(
       const routing = { ...config.routing, mode: mode as "standard" | "jev-assisted", ...(mode === "jev-assisted" ? { jev: { ...config.routing?.jev, provider: "typesafe" as const, id: stringValue(values.model), apiKeyEnv: stringValue(values.apiKeyEnv) } } : {}) };
       normalizeRoutingConfig(routing);
       await saveRuntimeConfig(path, { ...config, routing });
+      return [];
+    }
+    case "setupDrafts.runLimits.summary": {
+      const target = configApplyTarget(operation, options);
+      const profileId = target.profileId ?? readActiveProfile({homeDir:target.homeDir}).profileId ?? defaultProfileId();
+      const path = resolveProfileStateHome({...target,profileId}).configPath;
+      const {config} = await readConfig(path);
+      const values = operation.review.values, scope = values.runScope;
+      if(scope !== 'interactive' && scope !== 'unattended')throw new Error('Invalid run limit scope');
+      const limits = {maxDurationMinutes:values.maxDurationMinutes,maxIterations:values.maxIterations,maxToolCalls:values.maxToolCalls};
+      const runLimits = normalizeRunLimits({...config.runLimits,[scope]:limits});
+      await saveRuntimeConfig(path,{...config,runLimits});
       return [];
     }
     case "setupDrafts.publicSettings.summary": {

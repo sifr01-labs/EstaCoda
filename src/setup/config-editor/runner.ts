@@ -1,3 +1,4 @@
+import { promptRunLimitsSetup } from '../run-limits-setup.js';
 import {checkJevConnection} from '../jev-connection-check.js';
 import { promptRoutingModelSetup } from "../routing-model-setup.js";
 import { normalizeRoutingConfig } from "../../config/routing-config.js";
@@ -579,6 +580,12 @@ async function handleAction(
       const collected = await promptRoutingModelSetup(options.prompt, options.locale, current,()=>{const homeDir=resolveStateHome({homeDir:options.homeDir}).homeDir;return checkJevConnection({homeDir,profileId:options.profileId??readActiveProfile({homeDir}).profileId??defaultProfileId(),spendApproved:true});});
       if (!collected) return menuBackResult(initialDecision, action.id);
       return reviewAndApplyAction(options, initialDecision, session, { ...requireEditorAction(action), reviewValues: collected.values }, { pendingCredentialWrites: collected.pendingCredentialWrites });
+    }
+    case "edit-run-limits": {
+      const current = (await readConfig(activeProfileConfigPath(options))).config.runLimits;
+      const values = await promptRunLimitsSetup(options.prompt, options.locale, current);
+      if (!values) return menuBackResult(initialDecision, action.id);
+      return reviewAndApplyAction(options, initialDecision, session, { ...requireEditorAction(action), reviewValues: values });
     }
     case "edit-execution-policy": {
       try {

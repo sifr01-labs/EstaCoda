@@ -1,3 +1,5 @@
+import { providerBudgetsForRun } from '../config/run-limits.js';
+import { readRunLimits } from '../config/run-limits-store.js';
 import { recordRoutingStatus } from "./jev/routing-status.js";
 import { JevDecisionClient } from "./jev/decision-client.js";
 import { routingSnapshotReader } from "./jev/routing-snapshot.js";
@@ -703,6 +705,10 @@ export class AgentLoopBuilder {
       budgets: {
         ...DEFAULT_PROVIDER_TURN_BUDGETS,
         ...substrate.executionControls?.providerBudgets
+      },
+      resolveRunBudgets: async (channel) => {
+        const limits = await readRunLimits({ homeDir: substrate.homeDir, profileId: substrate.profileId });
+        return { ...providerBudgetsForRun(limits[ownsForegroundSupervision && channel === 'cli' ? 'interactive' : 'unattended']), ...substrate.executionControls?.providerBudgets };
       },
       providerRequestDefaults: substrate.executionControls?.providerRequestDefaults,
       initialContextWindowUsage,

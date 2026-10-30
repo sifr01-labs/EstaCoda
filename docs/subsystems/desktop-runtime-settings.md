@@ -42,3 +42,11 @@ This change does not grant workspace trust, forward credentials, start Docker
 containers, relax command approval, or install an engine. Preparation only uses the
 registered bundled-image operation. Runtime metadata contains public settings only;
 unknown response fields remain rejected by strict protocol validation.
+
+## Agent run limits
+
+Execution → Agent run limits uses the same staged review and save flow as other Execution settings. It is available for both host and Docker execution. The CLI Setup Editor exposes the same policy through **Agent run limits**. Changes affect subsequent turns; active turns keep their snapshot.
+
+The selected profile stores `runLimits.interactive` and `runLimits.unattended`. Both accept `maxDurationMinutes`, `maxIterations` (model steps), and `maxToolCalls`. Interactive work defaults to **Until complete**: zero disables each individual ceiling. Unattended work defaults to 30 minutes, 45 model steps, and 100 tool calls and requires positive limits. Supported ranges are up to 10,080 minutes and 1,000,000 steps or tool calls. Invalid policy fails validation rather than silently becoming unlimited.
+
+CLI and desktop foreground conversations use interactive limits. Channel and delegated runs use unattended limits. Request timeouts, command resource limits, cancellation, repeated-failure and no-progress detection, spending controls, workspace trust, and action approvals remain separate and enforced. Increasing a run limit grants no additional tool authority.

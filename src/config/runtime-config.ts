@@ -1,3 +1,4 @@
+import { normalizeRunLimits, type RunLimitsConfig } from './run-limits.js';
 import { normalizeRoutingConfig } from "./routing-config.js";
 import type { RoutingConfig, ResolvedRoutingConfig } from "../contracts/routing.js";
 import {profileHeaderEnvironment,resolveHeaderReferences} from './header-secret-references.js';
@@ -428,6 +429,7 @@ export type ModelAliasDefinition = {
 };
 
 export type EstaCodaConfig = {
+  runLimits?: RunLimitsConfig;
   routing?: RoutingConfig;
   execution?: RequestedExecutionPolicy;
   model?: {
@@ -1094,6 +1096,7 @@ export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Prom
     }));
   }
 
+  normalizeRunLimits(config.runLimits);
   return {
     config,
     sources: loadedConfig.loaded ? [loadedConfig.path] : [],

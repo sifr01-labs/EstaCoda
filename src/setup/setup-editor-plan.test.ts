@@ -318,6 +318,7 @@ describe("buildSetupEditorPlan", () => {
       "edit-fallback-model-route",
       "edit-auxiliary-model-route",
       "edit-routing-model",
+      "edit-run-limits",
       "edit-execution-policy",
       "edit-security-mode",
       "edit-workflow-learning",

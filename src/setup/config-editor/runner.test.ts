@@ -87,6 +87,18 @@ describe("runConfigEditor", () => {
     await rm(tempDir, { recursive: true, force: true });
   });
 
+  it.each([true,false])("reviews CLI run limits before applying them (%s)",async approved=>{
+    await writeUserConfig(tempDir,localReadyConfig());await trustWorkspace(tempDir,workspaceRoot);
+    const before=await readFile(profileConfigPath(tempDir),'utf8');
+    const result=await runConfigEditor({homeDir:tempDir,workspaceRoot,defaultActionId:'edit-run-limits',
+      prompt:fakePrompt({values:['unattended','90','120','300',approved]}),
+      applyExecutor:createReviewedSetupApplyExecutor({homeDir:tempDir,workspaceRoot,collectVerification:()=>readyVerification(profileConfigPath(tempDir))})});
+    const after=await readFile(profileConfigPath(tempDir),'utf8');
+    if(approved){expect(JSON.parse(after).runLimits.unattended).toEqual({maxDurationMinutes:90,maxIterations:120,maxToolCalls:300});expect(JSON.parse(after).model).toEqual(JSON.parse(before).model);}
+    else expect(after).toBe(before);
+    expect(result.reviewManifest?.lines.some(line=>line.summaryKey==='setupDrafts.runLimits.summary')).toBe(true);
+  });
+
   it.each([true, false])("reviews Jev model configuration before applying credentials (%s)", async approved => {
     await writeUserConfig(tempDir, {...localReadyConfig(), routing: {jev: {timeoutMs: 9000}}});
     await trustWorkspace(tempDir, workspaceRoot);
@@ -288,6 +300,7 @@ describe("runConfigEditor", () => {
       "edit-security-mode",
       "edit-routing-model",
       "edit-execution-policy",
+      "edit-run-limits",
       "edit-workflow-learning",
       "edit-budgets",
       "edit-language",

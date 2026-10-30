@@ -693,6 +693,8 @@ async function createPostToolNudgeHarness(input: {
   modelFallbackRoutes?: ResolvedModelRoute[];
   maxProviderIterations?: number;
   maxProviderWallClockMs?: number;
+  maxProviderToolCalls?: number;
+  resolveRunBudgets?: ProviderTurnLoopOptions["resolveRunBudgets"];
   noProgressNudgeIteration?: number;
   maxNoProgressIterations?: number;
   finalizationReserveMs?: number;
@@ -815,7 +817,7 @@ async function createPostToolNudgeHarness(input: {
     agentProfile: undefined,
     budgets: {
       maxProviderIterations: input.maxProviderIterations ?? 3,
-      maxProviderToolCalls: 8,
+      maxProviderToolCalls: input.maxProviderToolCalls ?? 8,
       maxRepeatedToolFailures: 3,
       maxRepeatedBrowserObservations: 3,
       noProgressNudgeIteration: input.noProgressNudgeIteration ?? 3,
@@ -823,6 +825,7 @@ async function createPostToolNudgeHarness(input: {
       maxProviderWallClockMs: input.maxProviderWallClockMs ?? 10_000,
       finalizationReserveMs: input.finalizationReserveMs ?? 0
     },
+    resolveRunBudgets: input.resolveRunBudgets,
     taskExecution: input.taskExecution,
     executionPlanReader: input.executionPlanController ?? input.executionPlanReader,
     executionWorkingSet: input.executionWorkingSet,
@@ -3366,6 +3369,27 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     const nudgeText = "The foreground tool loop has repeated the same calls or results without material progress.";
     const requests = harness.completeSpy.mock.calls.map(([request]) => request as ProviderRequest);
     expect(requests.filter((request) => JSON.stringify(request.messages).includes(nudgeText))).toHaveLength(1);
+  });
+
+  it("continues progressing work beyond the former 45 iteration / 100 tool limits", async () => {
+    const harness = await createPostToolNudgeHarness({
+      responses: [...Array.from({ length: 105 }, (_, i) => providerExecution("", [providerToolCall(`long-${i}`, JSON.stringify({caseId:i}))])), providerExecution("Completed all reviews.")],
+      toolSteps: Array.from({ length: 105 }, (_, i) => ({ executions: [{...toolExecutionForTool(`long-${i}`, testTool.name, `Unique case ${i}`), input:{caseId:i}}] })),
+      resolveRunBudgets: async () => ({ maxProviderIterations: Infinity, maxProviderToolCalls: Infinity, maxProviderWallClockMs: Infinity })
+    });
+    const result = await runBasicProviderTurn(harness.loop);
+    expect(harness.completeSpy).toHaveBeenCalledTimes(106);
+    expect(result.toolExecutions).toHaveLength(105);
+    expect(result.terminationCause).toBe("normal");
+  });
+
+  it("snapshots run limits anew for each turn without changing an active turn", async () => {
+    const resolveRunBudgets = vi.fn().mockResolvedValueOnce({maxProviderIterations:1}).mockResolvedValueOnce({maxProviderIterations:3});
+    const harness = await createPostToolNudgeHarness({responses:[providerExecution("",[providerToolCall("step")]), providerExecution("Done.")],toolSteps:[{executions:[toolExecutionForTool("step","file.read","evidence")]}],resolveRunBudgets});
+    await runBasicProviderTurn(harness.loop);
+    expect(resolveRunBudgets).toHaveBeenCalledTimes(1);
+    await runBasicProviderTurn(harness.loop);
+    expect(resolveRunBudgets).toHaveBeenCalledTimes(2);
   });
 
   it("stops before new tool work when the emergency finalization reserve is reached", async () => {

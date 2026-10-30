@@ -395,6 +395,9 @@ function draftFromEditorAction(
     return configDraft({ id: editorDraftId(action), kind: "auxiliary-model-route", source, riskSurface: "security-policy", scope: ["routing"], configPath: options.configPath, summaryKey: "setupDrafts.routing.summary", values: action.reviewValues ?? {} });
   }
 
+  if (action.id === "edit-run-limits") {
+    return configDraft({ id: editorDraftId(action), kind: "security-mode", source, riskSurface: "security-policy", scope: ["runLimits"], configPath: options.configPath, summaryKey: "setupDrafts.runLimits.summary", values: action.reviewValues ?? {} });
+  }
   if (action.id === "edit-execution-policy") {
     return configDraft({ id: editorDraftId(action), kind: "security-mode", source, riskSurface: "security-policy",
       scope: action.patch?.fields ?? [], configPath: options.configPath, summaryKey: "setupDrafts.executionPolicy.summary", values: action.reviewValues ?? {} });
@@ -784,6 +787,7 @@ function kindForEditorAction(action: SetupEditorActionDraft): SetupDraftKind {
     case "edit-routing-model":
     case "edit-auxiliary-model-route":
       return "auxiliary-model-route";
+    case "edit-run-limits":
     case "edit-execution-policy":
     case "edit-security-mode":
       return "security-mode";
