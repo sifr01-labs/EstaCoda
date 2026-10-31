@@ -448,7 +448,7 @@ describe("web and browser tools baselines", () => {
       ok: false,
       metadata: {
         capability: "search",
-        reason: "No available web search provider configured.",
+        reason: expect.stringContaining("No available web search provider configured."),
         explicit: false,
         fallback: false
       }
@@ -665,7 +665,7 @@ describe("web and browser tools baselines", () => {
       ok: false,
       metadata: {
         capability: "crawl",
-        reason: "No available web crawl provider configured.",
+        reason: expect.stringContaining("No available web crawl provider configured."),
         explicit: false,
         fallback: false
       }
@@ -730,14 +730,18 @@ describe("web and browser tools baselines", () => {
       truncated: false,
       publicReadReusable: true,
       title: "Example Title",
-      content: "Example Title Hello world.",
+      content: "Hello world.",
+      contentKind: "main",
+      guidance: undefined,
+      notice: undefined,
+      statusText: "OK",
       sourceTruncated: false,
-      retrievedTextChars: 26,
-      windows: [{ start: 0, end: 26 }],
+      retrievedTextChars: 12,
+      windows: [{ start: 0, end: 12 }],
       contentType: "text/html",
       status: 200,
       source: "fetch",
-      _estacoda_context_summary: "Extracted 26 chars from https://example.com/article using fetch. Title: Example Title. Status: 200."
+      _estacoda_context_summary: "Extracted 12 chars from https://example.com/article using fetch. Title: Example Title. Status: 200."
     });
     expect(fetch).toHaveBeenCalledWith("https://example.com/article", expect.objectContaining({ method: "GET", redirect: "manual" }));
   });

@@ -125,6 +125,8 @@ export type RuntimeEvent =
       sentChars?: number;
       truncated?: boolean;
       commandOutcome?: { exitCode?: number | null; signal?: string | null; timeoutMs?: number; timedOut?: boolean; cancelled?: boolean };
+      /** Reviewed read failure; policy/security refusals never set this flag. */
+      recoverableReadFailure?: boolean;
       fileChangePreview?: FileChangePreviewViewModel;
       targetSummary?: string;
       displayPreview?: string;

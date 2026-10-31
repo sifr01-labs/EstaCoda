@@ -1,8 +1,10 @@
 import { EventEmitter } from "node:events";
+import { PassThrough } from "node:stream";
 import { describe, expect, it, vi } from "vitest";
 import { launchChrome } from "./chrome-launcher.js";
 
 class FakeChildProcess extends EventEmitter {
+  stderr = new PassThrough();
   pid = 12_345;
   exitCode: number | null = null;
   signalCode: NodeJS.Signals | null = null;
@@ -82,6 +84,23 @@ function spawnedArgs(spawn: SpawnMock): string[] {
 }
 
 describe("launchChrome", () => {
+  it("reports early exit and a classified startup cause without leaking stderr secrets or profile paths", async () => {
+    const child = new FakeChildProcess();
+    const harness = createHarness({ child, readFile: async () => {
+      child.stderr.write("Missing X server or $DISPLAY /private/profile password=supersecret\n");
+      child.exitCode = 21;
+      throw missingFileError();
+    } });
+    const failure = await launchChrome(harness.options).catch(error => error as Error);
+    expect(failure).toBeInstanceOf(Error);
+    const message = (failure as Error).message;
+    expect(message).toContain("exitCode=21");
+    expect(message).toContain("display-server-unavailable");
+    expect(message).not.toContain("supersecret");
+    expect(message).not.toContain("/private/profile");
+    expect(child.stderr.listenerCount("data")).toBe(0);
+    expect(harness.rm).toHaveBeenCalled();
+  });
   it("spawns the executable with an args array and no shell", async () => {
     const harness = createHarness();
 

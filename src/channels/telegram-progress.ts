@@ -7,11 +7,14 @@ export function isPersistentTelegramNotice(event: RuntimeEvent): boolean {
   return event.kind === "provider-spending-warning"
     || event.kind === "provider-serving-transition"
     || (event.kind === "delegation-progress" && event.childEvent.kind === "provider-spending-warning")
-    || (event.kind === "tool-result" && (event.ok === false || (event.decision !== undefined && event.decision !== "allow")))
+    || (event.kind === "tool-result" && ((event.ok === false && !isRecoverableResearchNotice(event)) || (event.decision !== undefined && event.decision !== "allow")))
     || (event.kind === "routing-status" && event.configuredMode === "jev-assisted" && (event.actualEngine === "standard" || event.partialFallback === true));
 }
 
 export function renderTelegramProgressLabel(event: RuntimeEvent, locale: ActivityLabelLocale): string {
+  if (isRecoverableResearchNotice(event)) {
+    return locale === "ar" ? "🔎 جارٍ التحقق من تعذّر قراءة المصدر وتجربة مسار آخر" : "🔎 Recovering from an unsuccessful source read";
+  }
   if (event.kind === "tool-result" && isPersistentTelegramNotice(event)) {
     return `${activityLabel(locale, event.decision !== undefined && event.decision !== "allow" ? "warning" : "failed")} · ${toolDisplayLabel(event.tool, locale)}`;
   }
@@ -28,4 +31,9 @@ export function renderTelegramProgressLabel(event: RuntimeEvent, locale: Activit
     return activityLabel(locale, activityKeyForTool(event.tool));
   }
   return renderChannelProgressLabel(event, locale);
+}
+
+function isRecoverableResearchNotice(event: RuntimeEvent): boolean {
+  return event.kind === "tool-result" && event.ok === false && event.decision === "allow"
+    && event.recoverableReadFailure === true && ["web.extract", "web.search"].includes(event.tool);
 }

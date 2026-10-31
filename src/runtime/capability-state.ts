@@ -1,7 +1,7 @@
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import type { OpenAICompatibleToolSchema, ProviderToolSchemaCatalog } from "../tools/tool-schema.js";
 
-export type RuntimeCapabilityState = { tool: string; exposure: "exposed" | "not_selected" | "provider_restricted"; readiness: string; observation?: string };
+export type RuntimeCapabilityState = { tool: string; exposure: "exposed" | "not_selected" | "provider_restricted"; readiness: string; observation?: string; availabilityReason?: string };
 
 /** Current-turn executor records only. No transcript, memory, URL or raw error text. */
 export function projectCapabilityState(input: {
@@ -13,7 +13,8 @@ export function projectCapabilityState(input: {
   const exposed = new Set(input.exposed.map((schema) => input.catalog?.aliases.get(schema.function.name) ?? schema.function.name));
   const latest = new Map<string, ToolExecutionRecord>();
   for (const record of input.executions) if (record.toolCallId !== undefined) latest.set(record.tool.name, record);
-  const names = [...new Set([...latest.keys()].reverse().concat(input.required ?? [], [...exposed].sort()))].slice(0, 12);
+  const researchContext = input.executions.some(record => ["web.extract", "web.search"].includes(record.tool.name));
+  const names = [...new Set([...latest.keys()].reverse().concat(researchContext ? ["web.search"] : [], input.required ?? [], [...exposed].sort()))].slice(0, 12);
   return names.flatMap((tool) => {
     const registered = input.catalog?.inventory.find((entry) => entry.name === tool);
     if (!registered && !exposed.has(tool)) return [];
@@ -25,7 +26,8 @@ export function projectCapabilityState(input: {
     return [{ tool, exposure: registered?.schemaEligible === false ? "provider_restricted" as const : exposed.has(tool) ? "exposed" as const : "not_selected" as const,
       readiness: observation === "call_succeeded" ? "observed_callable" : observation === "reported_available" ? "observed_available" : observation === "reported_unavailable" ? "observed_unavailable"
         : registered?.availability === "temporarily_unavailable" ? "catalog_unavailable" : "registered; execution readiness unverified",
-      ...(observation === undefined ? {} : { observation }) }];
+      ...(observation === undefined ? {} : { observation }),
+      ...(registered?.availabilityReason && registered.availability !== "available" ? { availabilityReason: registered.availabilityReason } : {}) }];
   });
 }
 
@@ -35,6 +37,22 @@ export function renderCapabilityState(state: readonly RuntimeCapabilityState[]):
     "Current tool observations supersede contradictory historical availability claims in memory or conversation. A successful status call reporting available=false means unavailable; a registered/exposed tool alone proves neither setup readiness nor action success.",
     "Keep user preferences such as do not browse, current provider restrictions, approval requirements and action denials authoritative. A denied action does not mean its whole capability is missing. Inspect exposed status/discovery tools when readiness is unknown; never infer missing configuration from memory alone."
   ].join("\n");
+}
+
+/** One bounded strategy reminder; only authorized retrieval attempts qualify.
+ * The caller sends this at most once per turn. It does not activate tools. */
+export function researchRecoveryGuidance(executions: readonly ToolExecutionRecord[]): string | undefined {
+  const reads = executions.filter(record => ["web.extract", "web.search"].includes(record.tool.name)).slice(-8);
+  const unproductiveRead = (record: ToolExecutionRecord) => ["fetch-failed", "provider-failed", "http-error", "empty-content", "access-challenge", "query-not-found", "offset-out-of-range"].includes(String(record.result?.metadata?.reason)) || record.result?.metadata?.contentKind === "navigation-only";
+  const latest = reads.at(-1);
+  if (!latest || !unproductiveRead(latest)) return undefined;
+  let unproductive = 0;
+  for (const record of reads.reverse()) {
+    if (record.decision !== "allow") return undefined;
+    if (!unproductiveRead(record)) continue;
+    if (++unproductive >= 2) return "Several source reads failed or returned no usable passage. Inspect the current failure before retrying. If search is missing, use capability.discover once to check web.search and its setup reason; request exposure only if it is available and permitted. Do not keep guessing documentation URLs; follow the actual links in retrieved pages. For an empty literal query, retry from startChar=0 or inspect another window of the retrieved document. Preserve useful lifecycle evidence, change retrieval strategy, and report any remaining blocker. Discovery grants no execution authority; never bypass a denial.";
+  }
+  return undefined;
 }
 
 /** Correct only direct blanket availability denials contradicted by current owned receipts.

@@ -3589,6 +3589,29 @@ describe("Telegram conversation presentation", () => {
   const key = { platform: "telegram" as const, chatId: "123", threadId: "42", userId: "a" };
   const table = "| Model | Service |\n| --- | --- |\n| Kimi | AWS |";
 
+  it("groups recoverable research failures but keeps security refusals persistent", async () => {
+    vi.useFakeTimers();
+    const { adapter, calls } = createTelegramStreamingHarness();
+    for (let i = 0; i < 9; i++) {
+      await adapter.delivery.sendProgress(key, { kind: "tool-result", tool: "web.extract", ok: false, decision: "allow", recoverableReadFailure: true });
+      await vi.advanceTimersByTimeAsync(1500);
+    }
+    expect(callsFor(calls, "sendMessage")).toHaveLength(1);
+    expect(callsFor(calls, "sendMessage")[0]?.body.text).toContain("Recovering");
+    await adapter.delivery.sendProgress(key, { kind: "tool-result", tool: "web.extract", ok: false, decision: "deny", recoverableReadFailure: true });
+    expect(callsFor(calls, "sendMessage")).toHaveLength(2);
+    await adapter.delivery.finishProgress(key, true);
+    expect(callsFor(calls, "deleteMessage").map(call => call.body.message_id)).toEqual([1]);
+  });
+
+  it("honors progress off for recoverable reads without hiding unknown or policy failures", async () => {
+    const { adapter, calls } = createTelegramStreamingHarness({ progressMode: "off" });
+    await adapter.delivery.sendProgress(key, { kind: "tool-result", tool: "web.extract", ok: false, decision: "allow", recoverableReadFailure: true });
+    expect(callsFor(calls, "sendMessage")).toHaveLength(0);
+    await adapter.delivery.sendProgress(key, { kind: "tool-result", tool: "web.extract", ok: false, decision: "allow" });
+    expect(callsFor(calls, "sendMessage")).toHaveLength(1);
+  });
+
   it("uses one compact bubble across tool rounds and cleans it after confirmed delivery", async () => {
     vi.useFakeTimers();
     const { adapter, calls } = createTelegramStreamingHarness();

@@ -20,6 +20,8 @@ The deterministic runtime harness loads contradictory profile memory, executes t
 
 ## Slice 3: bounded public-read reuse
 
+Historical implementation below. The October 31 research recovery update extends reuse to bounded source documents and distinct passage windows; current limits and invalidation behavior are documented in [Research reads and recovery](../subsystems/tools.md#research-reads-and-recovery).
+
 The built-in guarded fetch provider opts in to turn-local `web.extract` reuse. Other providers must explicitly declare stateless public extraction; individual results can decline reuse. Search, browser state, private URLs, protected/authenticated responses, redirects, errors, secret-bearing URLs and responses with restrictive or short-lived cache headers are excluded. The store admits at most 16 observations and 256,000 serialized bytes, with a maximum observation age of 60 seconds. `refresh: true` discards the old observation before retrieving again under normal policy.
 
 Keys preserve meaningful query parameters and effective extraction limits. The executor scopes observations to profile, session, visible turn, execution target and authority/configuration generation. Handler configuration, provider registration and fetch implementation identities also invalidate reuse. Any intervening non-extract execution, approval request, policy denial, failed dispatched execution or new turn conservatively clears reuse. Late results from invalidated views cannot repopulate a new scope.

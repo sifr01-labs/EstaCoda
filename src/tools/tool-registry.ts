@@ -1,4 +1,5 @@
 import type { RegisteredTool, ToolDefinition, ToolsetName } from "../contracts/tool.js";
+import { redactSensitiveText } from "../utils/redaction.js";
 
 export type ToolRegistrySnapshot = {
   total: number;
@@ -54,8 +55,10 @@ export class ToolRegistry {
     const unavailable: ToolDefinition[] = [];
 
     for (const tool of this.#tools.values()) {
-      const target = (await tool.isAvailable()) ? available : unavailable;
-      target.push(toDefinition(tool));
+      const status = tool.getAvailability ? await tool.getAvailability() : { available: await tool.isAvailable() };
+      const target = status.available ? available : unavailable;
+      target.push({ ...toDefinition(tool), ...(!status.available && status.reason
+        ? { availabilityReason: redactSensitiveText(status.reason).replace(/[\r\n\u0000-\u001f]/gu, " ").slice(0, 500) } : {}) });
     }
 
     return {

@@ -51,6 +51,29 @@ function browserDiscovery(text: string, observationId = 1): ToolExecutionRecord 
 }
 
 describe("ToolLoopProgressGuard", () => {
+  it("warns across different failed source attempts without counting them as evidence or stopping on variety alone", () => {
+    const guard = new ToolLoopProgressGuard({ research: true, noProgressNudgeIteration: 2, maxNoProgressIterations: 3 });
+    const read = (url: string) => execution({ tool: { ...execution().tool, name: "web.extract" }, input: { url },
+      result: { ok: false, content: "Not found", metadata: { reason: "http-error" } } });
+    expect(guard.observe([read("https://example.org/a")]).shouldNudge).toBe(false);
+    expect(guard.observe([read("https://example.org/b")])).toMatchObject({ shouldNudge: true, materialProgress: false });
+    expect(guard.observe([read("https://example.org/c")])).toMatchObject({ shouldStop: false, materialProgress: false });
+    expect(guard.observe([read("https://example.org/c")]).shouldStop).toBe(true);
+  });
+  it("does not count identical text at new URLs as progress, but credits new cached passages beyond a shared prefix", () => {
+    const guard = new ToolLoopProgressGuard({ noProgressNudgeIteration: 2, maxNoProgressIterations: 6 });
+    const read = (url: string, content: string, readReuseOf?: string) => execution({
+      tool: { ...execution().tool, name: "web.extract" }, input: { url }, readReuseOf,
+      result: { ok: true, content, metadata: { url, content } }
+    });
+    const prefix = "Shared model navigation ".repeat(150);
+    expect(guard.observe([read("https://example.org/a", prefix)]).materialProgress).toBe(true);
+    expect(guard.observe([read("https://example.org/b", prefix)]).materialProgress).toBe(false);
+    expect(guard.observe([read("https://example.org/c", prefix)])).toMatchObject({ shouldNudge: true, shouldStop: false });
+    expect(guard.observe([read("https://example.org/a", prefix + "Retired endpoints", "original")]).materialProgress).toBe(true);
+    expect(guard.observe([read("https://example.org/a", prefix + "Retired endpoints", "original")]).materialProgress).toBe(false);
+    expect(guard.observe([read("https://example.org/a", prefix + "Supported endpoints", "original")]).materialProgress).toBe(true);
+  });
   it("credits new research sources under a checkpoint but ignores reordered sources, clocks, cache reuse and empty searches", async () => {
     const checkpoint=new ExecutionCheckpointController({sessionId:"s",profileId:"p"});
     await checkpoint.ensure({originTurnId:"t",originalObjective:"Research and save report",qualificationReasons:["external_multi_step"],intentLabels:["research"],requiredOperations:["mutation","verification"],connectorIds:[],completionFloor:"mutation_with_verification"});
@@ -85,7 +108,7 @@ describe("ToolLoopProgressGuard", () => {
 
   it("does not credit reused web observations even when feedback labels change", async () => {
     const guard = new ToolLoopProgressGuard({ noProgressNudgeIteration: 3, maxNoProgressIterations: 6 });
-    const read = execution({ tool: { ...execution().tool, name: "web.extract" }, executionEffect: { kind: "read" } });
+    const read = execution({ tool: { ...execution().tool, name: "web.extract" }, executionEffect: { kind: "read" }, result: { ok: true, content: "Observed passage", metadata: { url: "https://example.org/a", content: "Observed passage" } } });
     expect(guard.observe([read]).materialProgress).toBe(true);
     expect(guard.observe([{ ...read, readReuseOf: "call-1", result: { ok: true, content: "Prior observation with new receipt label" } }]).materialProgress).toBe(false);
   });

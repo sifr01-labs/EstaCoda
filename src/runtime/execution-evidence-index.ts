@@ -37,6 +37,7 @@ export type ExecutionEvidenceStatus = IndexedExecutionEvidence["status"];
 export function executionEvidenceStatus(execution: ToolExecutionRecord): ExecutionEvidenceStatus {
   // A yielded shell call proves dispatch only, not the requested command's result.
   return execution.readReuseOf !== undefined || INELIGIBLE_EVIDENCE_TOOLS.has(execution.tool.name) ||
+    (execution.tool.name === "web.extract" && execution.decision === "allow" && execution.result?.ok === true && (execution.result?.metadata?.notice !== undefined || execution.result?.metadata?.contentKind === "navigation-only")) ||
     (execution.tool.name === "terminal.run" && execution.result?.metadata?.running === true)
     ? "ineligible"
     : execution.decision !== "allow"

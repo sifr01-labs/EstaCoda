@@ -39,6 +39,8 @@ export type ToolDefinition = {
   progressLabel: string;
   maxResultSizeChars: number;
   requiredConfig?: string[];
+  /** Bounded setup diagnostic, populated by the registry for unavailable tools. */
+  availabilityReason?: string;
 };
 
 export type ToolResultMetadata = Record<string, unknown> & {
@@ -251,6 +253,8 @@ export type RegisteredTool<TInput = any> = ToolDefinition & {
   /** Runtime-only reviewed operation identity; never projected into provider schemas. */
   operationJournal?: RegisteredToolOperationJournal<TInput>;
   isAvailable(): Promise<boolean> | boolean;
+  /** Optional setup-only diagnostic. Must not contain credentials or raw provider errors. */
+  getAvailability?(): Promise<{ available: boolean; reason?: string }> | { available: boolean; reason?: string };
   resolveSecurity?(input: TInput, context: ToolSecurityResolverContext): Promise<ToolSecurityResolution | undefined> | ToolSecurityResolution | undefined;
   run: ToolHandler<TInput>;
 };

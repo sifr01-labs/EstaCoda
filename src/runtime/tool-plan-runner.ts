@@ -564,6 +564,7 @@ export class ToolPlanRunner {
 }
 
 export function toolResultStats(execution: ToolExecutionRecord): {
+  recoverableReadFailure?: boolean;
   chars?: number;
   sentChars?: number;
   truncated?: boolean;
@@ -580,6 +581,9 @@ export function toolResultStats(execution: ToolExecutionRecord): {
 
   return {
     chars: packet.chars,
+    ...(execution.decision === "allow" && execution.result.ok === false && ["web.search", "web.extract"].includes(execution.tool.name)
+      && ["fetch-failed", "provider-failed", "http-error", "empty-content", "access-challenge"].includes(String(execution.result.metadata?.reason))
+      ? { recoverableReadFailure: true } : {}),
     sentChars: packet.sentChars,
     truncated: packet.truncated,
     ...(execution.tool.name !== "terminal.run" ? {} : { commandOutcome: commandOutcome(execution.result.metadata) })

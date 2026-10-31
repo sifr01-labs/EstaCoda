@@ -36,23 +36,25 @@ describe("turn-local public extract reuse", () => {
     expect(h.fetch).toHaveBeenCalledTimes(3);
   });
 
-  it("does not substitute a cached prefix for a different passage or query", async () => {
+  it("serves different passages and queries from the same full source", async () => {
     const h = fixture();
     await h.run({ url, maxContentChars: 10 });
     const later = await h.run({ url, startChar: 10, maxContentChars: 10 });
     const match = await h.run({ url, query: "Observation", maxContentChars: 10 });
-    expect(h.fetch).toHaveBeenCalledTimes(3);
-    expect(later.metadata?.webReadReuse).toBeUndefined();
-    expect(match.metadata?.webReadReuse).toBeUndefined();
+    expect(h.fetch).toHaveBeenCalledTimes(1);
+    expect(later.metadata?.webReadReuse).toBe(true);
+    expect(match.metadata?.webReadReuse).toBe(true);
+    expect(later.metadata?.content).toBe("[Characters 10-20]\nn for http");
+    expect(match.metadata?.content).toBe("[Characters 0-10]\nObservatio");
     const same = await h.run({ url, startChar: 10, maxContentChars: 10 });
     expect(same.metadata?.webReadReuse).toBe(true);
     expect(same.metadata?.windows).toEqual(later.metadata?.windows);
   });
 
-  it("keeps meaningful queries and extraction limits distinct", async () => {
+  it("keeps URL queries distinct while reusing different extraction limits", async () => {
     const h = fixture();
     await h.run(); await h.run({ url: url.replace("one", "two") }); await h.run({ url, maxContentChars: 10 });
-    expect(h.fetch).toHaveBeenCalledTimes(3);
+    expect(h.fetch).toHaveBeenCalledTimes(2);
   });
 
   it.each([{ "cache-control": "private" }, { "cache-control": "no-store" }, { "cache-control": "max-age=1" }, { "set-cookie": "session=value" }, { vary: "Cookie" }])("excludes protected or uncertain-freshness responses %j", async (headers) => {
@@ -124,7 +126,7 @@ describe("bounded owned observation store", () => {
     const view = cache.bind("session-a", "original").configure("config-a");
     for (let i = 0; i < 17; i++) view.put(String(i), { ok: true, content: String(i) });
     expect(view.get("0")).toBeUndefined(); expect(view.get("16")).toBeDefined();
-    view.put("large", { ok: true, content: "a".repeat(256001) }); expect(view.get("large")).toBeUndefined();
+    view.put("large", { ok: true, content: "a".repeat(4000001) }); expect(view.get("large")).toBeUndefined();
     view.put("error", { ok: false, content: "error" }); expect(view.get("error")).toBeUndefined();
     now = 60001; expect(view.get("16")).toBeUndefined();
     cache.bind("session-b", "b").configure("config-a");

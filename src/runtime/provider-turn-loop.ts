@@ -3,7 +3,7 @@ import { toolOperationFingerprint, toolResultFingerprint } from "./tool-result-f
 import { assessHardlineFloor } from "../security/command-safety.js";
 import { redactSensitiveText } from "../utils/redaction.js";
 import { groundForegroundResearch, researchCitationUrls, RESEARCH_EVIDENCE_INSTRUCTION } from "../tasks/research-result-evidence.js";
-import { projectCapabilityState, type RuntimeCapabilityState } from "./capability-state.js";
+import { projectCapabilityState, researchRecoveryGuidance, type RuntimeCapabilityState } from "./capability-state.js";
 import { requiredRequestTools, requiredSkillsDelivered } from "./request-requirements.js";
 import { MAX_CAPABILITY_ADDITIONS, type SessionCapabilityRecovery } from "../tools/capability-tools.js";
 import { buildSkillReadinessMetadata } from "../skills/skill-readiness.js";
@@ -402,6 +402,7 @@ export class ProviderTurnLoop {
     let activeProviderTools = budgetProviderTools({ tools: input.providerTools }).tools;
     let toolExpansionUsed = false;
     let capabilityRecoveryFeedback: string[] = [...(input.capabilityRecoveryFeedback ?? [])];
+    let researchRecoveryNudged = false;
     let pendingSkillLoads: Array<{ receipt: Omit<RecoveredSkillReceipt, "appliedIteration">; content: string }> = [];
     const recoveredSkillContext = new Map<string, string>();
     const connectorInventory = () => (input.connectorInventory ?? []).map((connector) => ({
@@ -947,6 +948,13 @@ export class ProviderTurnLoop {
         capabilityRecoveryFeedback = [...capabilityRecoveryFeedback.slice(0, 1), JSON.stringify({
           rejected: [...skillInstructionRejections].map(([id, reason]) => ({ id, reason }))
         })];
+      }
+      if (!researchRecoveryNudged && canContinueWithExpandedInventory) {
+        const guidance = researchRecoveryGuidance(providerToolExecutions);
+        if (guidance) {
+          capabilityRecoveryFeedback.push(guidance);
+          researchRecoveryNudged = true;
+        }
       }
       if (
         !toolExpansionUsed &&

@@ -449,6 +449,8 @@ Current provider state:
 
 Provider selection checks the capability-specific key first, then `web.backend`, then auto-detection. Explicit unavailable providers do not silently fall back. `web.extract` falls back to the guarded fetch extractor only when no explicit unavailable extract provider was configured and no available extract provider was auto-detected. `web.crawl` exists as tool infrastructure, but no live crawl provider is implemented yet.
 
+Unavailable search/crawl capabilities expose a bounded setup reason through capability discovery and current runtime capability evidence. Auto-detection reports the unavailable candidates' reasons; this diagnostic does not install dependencies, change configuration, authorize execution, or expose an unavailable tool schema.
+
 Brave credentials use the same `apiKeyEnv` reference model as other credentialed providers; raw API keys do not belong in config. DDGS uses the managed Python capability registry and must not install packages during runtime search.
 
 ## Cloud Browser Providers

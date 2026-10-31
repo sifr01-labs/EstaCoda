@@ -383,7 +383,7 @@ export class TelegramAdapter implements ChannelAdapter {
 
       if (isPersistentTelegramNotice(event) && rendered.length > 0) {
         // Keep the fallback explanation after subsequent progress edits or final delivery.
-        await this.#sendMessage(address, rendered);
+        await this.#sendMessage(address, rendered, undefined, AbortSignal.timeout(PROGRESS_REQUEST_TIMEOUT_MS));
         return;
       }
       if (rendered.length > 0) {

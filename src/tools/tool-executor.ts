@@ -231,7 +231,7 @@ export class ToolExecutor {
   }
 
   async executeTool(request: NamedToolExecutionRequest): Promise<ToolExecutionRecord | undefined> {
-    if (request.tool !== "web.extract") this.#webReadCache.clear();
+    if (!["web.extract", "web.search", "capability.discover", "capability.request", "browser.status", "file.read"].includes(request.tool)) this.#webReadCache.clear();
     const tool = this.#registry.get(request.tool);
 
     if (tool === undefined || !(await tool.isAvailable())) {
@@ -797,7 +797,9 @@ export class ToolExecutor {
       result: storedResult
     });
 
-    if (!result.ok) this.#webReadCache.clear();
+    // web.extract invalidates its own failed source; an unrelated failed search
+    // must not discard successful public documents needed for recovery.
+    if (!result.ok && !["web.extract", "web.search"].includes(request.tool)) this.#webReadCache.clear();
     const execution: ToolExecutionRecord = {
       ...(this.#webReadCache.provenance(result) === undefined ? {} : { readReuseOf: this.#webReadCache.provenance(result) }),
       tool: definition,

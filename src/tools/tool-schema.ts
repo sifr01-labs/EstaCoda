@@ -24,7 +24,7 @@ export type OpenAICompatibleToolSchema = {
   };
 };
 
-export type SessionToolMetadata = Pick<ToolDefinition, "name" | "description" | "toolsets"> & {
+export type SessionToolMetadata = Pick<ToolDefinition, "name" | "description" | "toolsets" | "availabilityReason"> & {
   availability: "available" | "temporarily_unavailable";
   schemaEligible: boolean;
 };
@@ -140,5 +140,6 @@ function normalizeSchema(schema: unknown): unknown {
 
 function metadata(tool: ToolDefinition, availability: SessionToolMetadata["availability"]): SessionToolMetadata {
   return { name: tool.name, description: tool.description, toolsets: [...tool.toolsets],
+    ...(availability === "available" || !tool.availabilityReason ? {} : { availabilityReason: tool.availabilityReason }),
     availability, schemaEligible: !BLOCKED_PROVIDER_RISKS.has(tool.riskClass) };
 }

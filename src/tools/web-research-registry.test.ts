@@ -90,7 +90,7 @@ describe("web research provider registry", () => {
       fallback: false,
       availability: {
         available: false,
-        reason: "No available web search provider configured."
+        reason: expect.stringContaining("No available web search provider configured.")
       }
     });
   });

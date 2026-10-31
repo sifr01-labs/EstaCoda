@@ -3333,7 +3333,7 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
         providerToolCall(`call-progress-${index + 1}`)
       ])),
       toolSteps: Array.from({ length: 8 }, (_, index) => ({
-        executions: [toolExecutionForTool(`call-progress-${index + 1}`, "web.extract", "same evidence")]
+        executions: [{ ...toolExecutionForTool(`call-progress-${index + 1}`, "web.extract", "same evidence"), result: { ok: true, content: "same evidence", metadata: { url: "https://example.org/source", content: "same evidence" } } }]
       })),
       executionPlanReader: planStore,
       maxProviderIterations: 8,
@@ -3369,6 +3369,22 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     const nudgeText = "The foreground tool loop has repeated the same calls or results without material progress.";
     const requests = harness.completeSpy.mock.calls.map(([request]) => request as ProviderRequest);
     expect(requests.filter((request) => JSON.stringify(request.messages).includes(nudgeText))).toHaveLength(1);
+  });
+
+  it("offers bounded source recovery after two failed reads without widening the tool inventory", async () => {
+    const harness = await createPostToolNudgeHarness({
+      responses: [providerExecution("", [providerToolCall("read-one")]), providerExecution("", [providerToolCall("read-two")]), providerExecution("The source could not be retrieved; its claims remain unverified.")],
+      toolSteps: ["one", "two"].map(id => ({ executions: [{
+        ...toolExecutionForTool(id, "web.extract"), input: { url: `https://example.org/${id}` },
+        result: { ok: false, content: "Not found", metadata: { reason: "http-error" } }
+      }] })),
+      maxProviderIterations: 4
+    });
+    await runBasicProviderTurn(harness.loop);
+    const requests = harness.completeSpy.mock.calls.map(([request]) => request as ProviderRequest);
+    expect(JSON.stringify(requests[0]?.messages)).not.toContain("Do not keep guessing documentation URLs");
+    expect(JSON.stringify(requests[2]?.messages)).toContain("Do not keep guessing documentation URLs");
+    expect(requests[2]?.tools).toEqual(requests[0]?.tools);
   });
 
   it("continues progressing work beyond the former 45 iteration / 100 tool limits", async () => {

@@ -123,6 +123,18 @@ The runtime assembles tools from provider modules at startup. Treat this table a
 | `workspace.trust.*` | `read-only-local` / `shared-state-mutation` | `smoke-tested` |
 | `cronjob` | `caution` | `smoke-tested` |
 
+## Research reads and recovery
+
+Unavailable web capabilities remain in discovery metadata with a bounded setup reason. An unavailable capability has no callable provider schema; discovery and recovery guidance do not grant execution authority. Explicitly configured unavailable search providers do not silently switch providers.
+
+The fetch extractor prefers readable `main`/`article` content, falls back to the page body, and labels navigation-only output. It preserves ordinary HTTP(S) link destinations so moved documentation can be followed without guessing URLs. Links remain untrusted source data and every subsequent request still passes normal URL and approval checks. Navigation-only output and empty passage lookups do not establish source evidence. A successful download with no literal query match or an out-of-range offset returns `ok: true` with an empty passage and a diagnostic reason; it does not mean the source lacks the claim.
+
+Eligible public documents are cached within the turn before selecting bounded query/offset windows. The cache holds at most 16 documents and 4,000,000 serialized bytes for 60 seconds; each source is bounded to 1,000,000 characters. Search, capability discovery/request, browser status and file reads preserve this cache. Other operations and policy/approval boundaries invalidate it. Existing profile/session/authority scoping, DNS/URL checks and exclusions for redirects, authenticated/private responses, secret-bearing URLs and restrictive cache headers still apply. `refresh: true` requests a new retrieval. Returned metadata includes only the selected passage, not the cached full text.
+
+New passages from a reused document may advance research, but do not count as fresh network observations. Identical normalized passage text at different URLs does not earn new progress. Distinct recoverable read failures trigger strategy guidance rather than an immediate generic no-progress stop; exact-repeat controls and total call/time budgets remain active. After repeated unproductive reads, the runtime provides one strategy reminder to check search readiness, follow retrieved links or adjust passage selection. It does not change tool exposure by itself.
+
+Telegram groups classified recoverable web failures into the normal progress message. Policy denials, unknown errors and other tool failures remain persistent notices; all execution failures remain in the trace. This changes presentation, not task completion or evidence requirements.
+
 ## Vision Analysis
 
 `vision.analyze` keeps the compatible single-image `path` input and accepts `paths` with two to twenty images for comparison. `paths` selects `compare` mode when `mode` is omitted; supplying both `path` and `paths`, more than twenty paths, or a non-compare multi-image mode fails before file reads. Sets above ten images are validated and processed sequentially in provider batches of at most ten. Activity identifies the current image range, and a final text-only pass synthesizes successful batches without resending images. The combined result explicitly reports complete or partial processing and falls back to the full batch findings if synthesis is unavailable. Other controls are optional `prompt`, `mode` (`describe`, `ocr`, `document`, `chart`, `screenshot`, `compare`), `detail` (`low`, `standard`, `high`), and `output` (`concise`, `standard`, `detailed`). Text inside an image is untrusted content: prompts explicitly require transcription or reporting where relevant, never obedience to image-borne commands or policy claims.

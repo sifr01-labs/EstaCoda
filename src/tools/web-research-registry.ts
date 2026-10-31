@@ -83,6 +83,7 @@ export async function selectWebResearchProvider(
     return selectExplicitProvider(capability, explicitName, config, options);
   }
 
+  const unavailable: string[] = [];
   for (const name of AUTO_DETECT_ORDER) {
     const provider = providers.get(name);
     if (provider === undefined || provider.capabilities[capability] !== true) {
@@ -94,6 +95,7 @@ export async function selectWebResearchProvider(
     if (availability.available) {
       return { provider: configuredProvider, providerName: configuredProvider.name, availability, explicit: false, fallback: false };
     }
+    unavailable.push(`${name}: ${availability.reason ?? "unavailable"}`);
   }
 
   if (capability === "extract") {
@@ -108,7 +110,7 @@ export async function selectWebResearchProvider(
   }
 
   return {
-    availability: { available: false, reason: `No available web ${capability} provider configured.` },
+    availability: { available: false, reason: `No available web ${capability} provider configured.${unavailable.length ? ` ${unavailable.reverse().join("; ")}` : ""}` },
     explicit: false,
     fallback: false
   };

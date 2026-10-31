@@ -923,8 +923,12 @@ function safeDiagnosticOutput(
 }
 
 function hasUnrecoveredToolFailure(step: TaskStep, executions: readonly ToolExecutionRecord[], text: string): boolean {
-  return executions.some((execution, index) => execution.result?.ok === false &&
+  return executions.some((execution, index) => (execution.result?.ok === false || isEmptyPassageLookup(execution)) &&
     !isRecoveredRead(execution, index, executions) && !isRecoveredPassageLookup(execution, index, executions) && !isRecoveredDeliveryValidation(step, execution, index, executions) && !isAlternativeResearchRead(step, execution, executions, text));
+}
+
+function isEmptyPassageLookup(execution: ToolExecutionRecord): boolean {
+  return execution.tool.name === "web.extract" && ["query-not-found", "offset-out-of-range"].includes(String(execution.result?.metadata?.reason));
 }
 
 /** A pre-write validation error has no uncertain effect. A later authorized
@@ -1005,6 +1009,7 @@ function isRecoveredRead(
     candidate.riskClass === failedExecution.riskClass &&
     candidate.decision === "allow" &&
     candidate.result?.ok === true &&
+    !isEmptyPassageLookup(candidate) &&
     stableToolInput(candidate.input) === failedInput
   );
 }

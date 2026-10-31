@@ -2,7 +2,8 @@ import { createHash } from "node:crypto";
 import type { ToolResult, WebReadReuse } from "../contracts/tool.js";
 
 const MAX_ENTRIES = 16;
-const MAX_BYTES = 256_000;
+// Holds bounded source documents, not just the first returned passage.
+const MAX_BYTES = 4_000_000;
 const MAX_AGE_MS = 60_000;
 /** Executor-owned, turn-local public-read observations. Never persisted. */
 export class TurnWebReadCache {

@@ -119,25 +119,27 @@ exports[`web and browser golden snapshots > web.extract output matches golden > 
 Title: Example
 Status: 200 OK
 
-Example Hello world",
+Hello world",
   "metadata": {
-    "_estacoda_context_summary": "Extracted 19 chars from https://example.com/ using fetch. Title: Example. Status: 200.",
-    "content": "Example Hello world",
+    "_estacoda_context_summary": "Extracted 11 chars from https://example.com/ using fetch. Title: Example. Status: 200.",
+    "content": "Hello world",
+    "contentKind": "body",
     "contentType": "text/html",
     "originUrl": "https://example.com/",
     "publicReadReusable": false,
     "redirectCount": 0,
     "retrievedAt": "<timestamp>",
-    "retrievedTextChars": 19,
+    "retrievedTextChars": 11,
     "source": "fetch",
     "sourceTruncated": false,
     "status": 200,
+    "statusText": "OK",
     "title": "Example",
     "truncated": false,
     "url": "https://example.com/",
     "windows": [
       {
-        "end": 19,
+        "end": 11,
         "start": 0,
       },
     ],

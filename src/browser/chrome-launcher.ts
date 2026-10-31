@@ -80,6 +80,8 @@ export async function launchChrome(options: ChromeLauncherOptions): Promise<Laun
   const createdUserDataDir = options.userDataDir === undefined;
   const userDataDir = options.userDataDir ?? await mkdtemp(join(tmpdir(), "estacoda-chrome-"));
   let child: ChildProcess | undefined;
+  let startupOutput = "";
+  const captureStartup = (chunk: Buffer | string) => { startupOutput = (startupOutput + String(chunk)).slice(-4096); };
 
   try {
     if (!createdUserDataDir) {
@@ -103,8 +105,9 @@ export async function launchChrome(options: ChromeLauncherOptions): Promise<Laun
       cwd: options.cwd,
       env: options.env,
       shell: false,
-      stdio: "ignore"
+      stdio: ["ignore", "ignore", "pipe"]
     });
+    child.stderr?.on("data", captureStartup);
 
     const errorPromise = childErrorPromise(child);
     const port = await Promise.race([
@@ -118,6 +121,8 @@ export async function launchChrome(options: ChromeLauncherOptions): Promise<Laun
     ]);
     const endpoint = `http://127.0.0.1:${port}`;
     await assertHealthy(endpoint, fetch);
+    child.stderr?.off("data", captureStartup);
+    child.stderr?.resume();
 
     return {
       endpoint,
@@ -134,12 +139,24 @@ export async function launchChrome(options: ChromeLauncherOptions): Promise<Laun
       }
     };
   } catch (error) {
+    child?.stderr?.off("data", captureStartup);
+    child?.stderr?.resume();
+    // Classify the bounded stderr buffer rather than exposing arbitrary process
+    // output (which can contain profile paths, URLs or credentials).
+    const diagnostic = /(?:missing x server|\$DISPLAY|cannot open display)/iu.test(startupOutput) ? "display-server-unavailable"
+      : /(?:singletonlock|profile.*in use|processsingleton)/iu.test(startupOutput) ? "profile-in-use"
+      : /(?:no usable sandbox|sandbox.*(?:failed|not supported)|operation not permitted)/iu.test(startupOutput) ? "sandbox-startup-failed"
+      : /permission denied/iu.test(startupOutput) ? "permission-denied" : undefined;
+    const exit = child?.exitCode == null ? undefined : `exitCode=${child.exitCode}`;
+    const signal = child?.signalCode == null ? undefined : `signal=${child.signalCode}`;
     await cleanupChrome({
       child,
       userDataDir,
       deleteUserDataDir: createdUserDataDir,
       rm
     });
+    const details = [exit, signal, diagnostic].filter(Boolean).join(", ");
+    if (details && error instanceof Error) throw new Error(`${error.message} (${details})`, { cause: error });
     throw error;
   }
 }

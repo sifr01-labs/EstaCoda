@@ -51,7 +51,8 @@ describe("bounded source passage retrieval", () => {
     expect(String(result.metadata?.content).length).toBeLessThan(100);
     expect(extract).toHaveBeenCalledWith("https://example.com/spec", expect.objectContaining({ maxContentChars: MAX_EXTRACT_SOURCE_CHARS }));
     const missing = await tool.run({ url: "https://example.com/spec", query: "unobserved fact" });
-    expect(missing.ok).toBe(false);
+    expect(missing.ok).toBe(true);
+    expect(missing.metadata).toMatchObject({ reason: "query-not-found", content: "" });
     expect(missing.content).toContain("not evidence");
   });
   it("preserves URL guards, validates window inputs and fetches actual late text", async () => {

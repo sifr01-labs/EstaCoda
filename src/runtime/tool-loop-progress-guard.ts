@@ -40,6 +40,7 @@ export class ToolLoopProgressGuard {
   readonly #stopIteration: number;
   readonly #research: boolean;
   readonly #seenResearchSources = new Set<string>();
+  readonly #seenResearchAttempts = new Set<string>();
   readonly #seenFileObservations = new Set<string>();
   readonly #seenFileWrites = new Set<string>();
   readonly #pendingCommandReadbacks = new Set<string>();
@@ -101,6 +102,7 @@ export class ToolLoopProgressGuard {
     const progressKinds = new Set<ToolLoopProgressKind>();
     let materialProgress = false;
     let waitingForProcess = false;
+    let newResearchAttempt = false;
     const currentCheckpointRevision = activeCheckpointProgressRevision(this.#checkpointReader);
     const checkpointControlsProgress = currentCheckpointRevision !== undefined;
     const checkpointAdvanced =
@@ -113,6 +115,11 @@ export class ToolLoopProgressGuard {
     this.#checkpointProgressRevision = currentCheckpointRevision;
 
     for (const execution of eligible) {
+      if (recoverableResearchAttempt(execution)) {
+        const key = toolCallFingerprint(execution);
+        if (!this.#seenResearchAttempts.has(key) && !unchangedCompletionRepair) newResearchAttempt = true;
+        this.#seenResearchAttempts.add(key);
+      }
       const status = executionEvidenceStatus(execution);
       if (status === "success" && execution.readReuseOf === undefined && execution.result?.metadata?.mcpReadReuse !== true) {
         const turn = this.#checkpointReader?.current()?.originTurnId;
@@ -126,7 +133,7 @@ export class ToolLoopProgressGuard {
           }
         }
       }
-      if (execution.readReuseOf !== undefined || execution.result?.metadata?.mcpReadReuse === true) continue;
+      if ((execution.readReuseOf !== undefined && execution.tool.name !== "web.extract") || execution.result?.metadata?.mcpReadReuse === true) continue;
       // Failed diagnostics and changed results from the same command are useful
       // observations, not completion evidence. Admission failures and unfinished
       // commands cannot earn progress; deadlines still bound novel diagnostics.
@@ -140,7 +147,10 @@ export class ToolLoopProgressGuard {
         } else progressKinds.add("repeated-tool-call");
         continue;
       }
-      if (status !== "success") continue;
+      // A new passage of a cached public document can advance research, while
+      // remaining ineligible as proof of a fresh network read or a mutation.
+      if (status !== "success" && !(execution.tool.name === "web.extract" && execution.readReuseOf !== undefined
+        && execution.decision === "allow" && execution.result?.ok === true)) continue;
       // Host-owned, bounded waits are not stuck model polling. Preserve the
       // counter rather than pretending time elapsed is deliverable progress.
       // Deadlines, provider budgets and cancellation still bound the execution.
@@ -179,9 +189,9 @@ export class ToolLoopProgressGuard {
       }
 
       // New page text can repair a citation-free candidate. Merely discovering
-      // more URLs cannot; identical pages and reused reads still do not count.
+      // more URLs cannot; identical passages still do not count.
       if (unchangedCompletionRepair && execution.tool.name === "web.search") continue;
-      if (this.#research) {
+      if (this.#research || execution.tool.name === "web.extract") {
         const sources = researchEvidence(execution);
         const newEvidence = sources.some((source) => !this.#seenResearchSources.has(source));
         sources.forEach((source) => this.#seenResearchSources.add(source));
@@ -315,12 +325,16 @@ export class ToolLoopProgressGuard {
       progressKinds,
       noProgressIterations: this.#noProgressIterations,
       shouldNudge,
-      shouldStop: this.#noProgressIterations >= this.#stopIteration
+      // Distinct failed public reads warrant a strategy reminder, not an
+      // immediate hard stop. Total call/time limits and exact-repeat guards
+      // still apply; varying URLs never earns material progress.
+      shouldStop: this.#noProgressIterations >= this.#stopIteration && !newResearchAttempt
     });
   }
 
   #seed(executions: readonly ToolExecutionRecord[]): void {
     for (const execution of executions) {
+      if (recoverableResearchAttempt(execution)) this.#seenResearchAttempts.add(toolCallFingerprint(execution));
       const commandObservation = commandObservationFingerprint(execution);
       if (commandObservation !== undefined) {
         this.#seenCommandObservations.add(commandObservation);
@@ -328,8 +342,8 @@ export class ToolLoopProgressGuard {
       }
       if (
         INELIGIBLE_TOOLS.has(execution.tool.name) ||
-        executionEvidenceStatus(execution) !== "success" ||
-        (execution.readReuseOf !== undefined || execution.result?.metadata?.mcpReadReuse === true)
+        (executionEvidenceStatus(execution) !== "success" && !(execution.tool.name === "web.extract" && execution.readReuseOf !== undefined && execution.decision === "allow" && execution.result?.ok === true)) ||
+        ((execution.readReuseOf !== undefined && execution.tool.name !== "web.extract") || execution.result?.metadata?.mcpReadReuse === true)
       ) continue;
       this.#active = true;
       if (execution.tool.name === "process.logs") {
@@ -338,7 +352,7 @@ export class ToolLoopProgressGuard {
         if (execution.toolCallId) this.#seenWaitCalls.add(execution.toolCallId);
       }
       this.#observeRecoveryOrResult(execution);
-      if (this.#research) researchEvidence(execution).forEach((source) => this.#seenResearchSources.add(source));
+      if (this.#research || execution.tool.name === "web.extract") researchEvidence(execution).forEach((source) => this.#seenResearchSources.add(source));
       const discovery = browserDiscoveryFingerprint(execution) ?? connectorDiscoveryFingerprint(execution);
       if (discovery !== undefined) this.#seenDiscoveryFingerprints.add(discovery);
       this.#seenCallFingerprints.add(toolCallFingerprint(execution));
@@ -533,7 +547,15 @@ function researchEvidence(execution: ToolExecutionRecord): string[] {
   if (execution.tool.name === "web.extract") {
     const url = canonicalUrl(metadata?.url);
     const content = metadata?.content ?? execution.result?.content;
-    if (url && typeof content === "string" && content.trim()) return ["extract:" + fingerprint({url, content}, true)];
+    if (metadata?.contentKind === "navigation-only" || metadata?.notice) return [];
+    // The same boilerplate under another URL is not new evidence. Hash the
+    // entire returned passage: differences after a long shared prefix matter.
+    if (url && typeof content === "string" && content.trim()) return ["extract:" + createHash("sha256").update(content.replace(/^\[Characters \d+-\d+\]\n/gmu, "").replace(/\s+/gu, " ").trim()).digest("hex")];
   }
   return [];
+}
+
+function recoverableResearchAttempt(execution: ToolExecutionRecord): boolean {
+  return execution.decision === "allow" && ["web.extract", "web.search"].includes(execution.tool.name)
+    && ["fetch-failed", "provider-failed", "http-error", "empty-content", "access-challenge", "query-not-found", "offset-out-of-range"].includes(String(execution.result?.metadata?.reason));
 }

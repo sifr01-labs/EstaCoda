@@ -123,6 +123,10 @@ function observedSources(executions: readonly ToolExecutionRecord[], now: Date):
     for (const execution of executions) {
       if (execution.decision !== "allow" || execution.result?.ok !== true) continue;
       const m = execution.result.metadata;
+      // A successful fetch with no returned passage (or only navigation) does
+      // not upgrade a search snippet into observed source content.
+      if (execution.tool.name === "web.extract" && (m?.notice || m?.contentKind === "navigation-only" ||
+        (typeof m?.content === "string" && !m.content.trim()))) continue;
       const observed = execution.tool.name === "web.search" && Array.isArray(m?.results) ? m.results
         : execution.tool.name === "web.extract" && m?.url !== undefined ? [m] : [];
       for (const item of observed.slice(0, 24)) {

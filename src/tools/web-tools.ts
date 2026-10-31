@@ -1,4 +1,5 @@
 import { webExtractWindow, MAX_EXTRACT_SOURCE_CHARS, type WebExtractWindow } from "./web-extract-window.js";
+import { webReadableText } from "./web-readable-text.js";
 import { webReadFingerprint } from "./turn-web-read-cache.js";
 import { undispatchedResult } from "./undispatched-result.js";
 import { createHash, randomUUID } from "node:crypto";
@@ -156,7 +157,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
     createWebSearchTool(options.webConfig, options),
     {
       name: "web.extract",
-      description: "Fetch readable text from a URL. For long pages use query (literal text search, not instructions) or startChar (character offset) to retrieve bounded passages. Cite only returned text; a page prefix does not verify unseen sections. Identical public reads may be reused within this turn; refresh retrieves again.",
+      description: "Fetch readable text from a URL. For long pages use query (literal text search, not instructions) or startChar (character offset) to retrieve bounded passages. Cite only returned text; a page prefix does not verify unseen sections. Public source documents may be reused for different queries and offsets within this turn; refresh retrieves again. An empty query result is not a failed fetch.",
       inputSchema: {
         type: "object",
         properties: {
@@ -242,7 +243,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
           configure: identity(registeredProvider?.configure), fetch: identity(options.fetch ?? globalThis.fetch)
         }));
         const limit = Math.min(input.maxContentChars ?? maxContentChars, maxContentChars);
-        const key = webReadFingerprint({ url, maxContentChars: limit, ...window });
+        const key = webReadFingerprint({ url });
         const reusable = registeredProvider?.publicExtractReuse === true
           && providerSelection.provider?.publicExtractReuse === true
           && Object.keys(input).every((name) => ["url", "text", "maxContentChars", "refresh", "startChar", "query"].includes(name))
@@ -250,15 +251,15 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
         if (input.refresh === true || !reusable) reuse?.forget(key);
         if (reusable && input.refresh !== true) {
           const prior = reuse?.get(key);
-          if (prior !== undefined) return prior;
+          if (prior !== undefined) return windowWebExtractResult(prior, limit, window);
         }
         const remember = (result: ToolResult): ToolResult => {
           // Retrieval time belongs to this observation, never to a later cache hit.
-          if (!result.ok) { reuse?.forget(key); return result; }
+          if (!result.ok) { reuse?.forget(key); return windowWebExtractResult(result, limit, window); }
           result.metadata = { ...result.metadata, originUrl: url, retrievedAt: new Date().toISOString() };
           if (reusable && result.ok && result.metadata.url === url && result.metadata.publicReadReusable !== false) reuse?.put(key, result);
           else reuse?.forget(key);
-          return result;
+          return windowWebExtractResult(result, limit, window);
         };
 
         if (!providerSelection.fallback && providerSelection.providerName !== "fetch") {
@@ -273,7 +274,7 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
           }
 
           const providerResult = await providerSelection.provider.extract(url, {
-            maxContentChars: window.query || window.startChar ? MAX_EXTRACT_SOURCE_CHARS : limit,
+            maxContentChars: MAX_EXTRACT_SOURCE_CHARS,
             signal: context?.signal
           }).catch((error: unknown) => ({ error }));
           if ("error" in providerResult) {
@@ -295,14 +296,14 @@ export function createWebTools(options: WebToolOptions = {}): readonly Registere
             status: providerResult.status,
             contentLength: providerResult.content.length
           });
-          return remember(withDebug(formatWebExtractProviderResult(providerSelection.provider, providerResult, limit, window), debug));
+          return remember(withDebug(formatWebExtractProviderResult(providerSelection.provider, providerResult, MAX_EXTRACT_SOURCE_CHARS, {}), debug));
         }
 
         return remember(await extractWithFetch({
           url,
           fetch: options.fetch ?? globalThis.fetch,
-          maxContentChars: limit,
-          window,
+          maxContentChars: MAX_EXTRACT_SOURCE_CHARS,
+          window: {},
           guardUrl: extractUrlGuard,
           debug,
           signal: context?.signal
@@ -1115,6 +1116,7 @@ function createWebSearchTool(webConfig: WebResearchConfig | undefined, options: 
     progressLabel: "searching web",
     maxResultSizeChars: 8000,
     isAvailable: async () => (await selectWebResearchProvider("search", webConfig, webResearchSelectionOptions(options))).availability.available,
+    getAvailability: async () => (await selectWebResearchProvider("search", webConfig, webResearchSelectionOptions(options))).availability,
     run: async (input: { query?: string; maxResults?: number }, context) => {
       const query = input.query?.trim();
       if (query === undefined || query.length === 0) {
@@ -1193,6 +1195,7 @@ function createWebCrawlTool(webConfig: WebResearchConfig | undefined, guardUrl: 
     progressLabel: "crawling web",
     maxResultSizeChars: 12000,
     isAvailable: async () => (await selectWebResearchProvider("crawl", webConfig, webResearchSelectionOptions(options))).availability.available,
+    getAvailability: async () => (await selectWebResearchProvider("crawl", webConfig, webResearchSelectionOptions(options))).availability,
     run: async (input: { url?: string; text?: string; maxPages?: number; maxContentChars?: number }, context) => {
       const url = normalizeUrl(input.url ?? extractFirstUrl(input.text ?? ""));
       if (url === undefined) {
@@ -1286,6 +1289,29 @@ function unavailableWebResearchResult(
   };
 }
 
+/** Re-window a bounded source without exposing the cached full document. Mutate the
+ * returned object so executor-owned reuse provenance remains attached to it. */
+function windowWebExtractResult(result: ToolResult, limit: number, window: WebExtractWindow): ToolResult {
+  const metadata = result.metadata;
+  if (typeof metadata?.content !== "string") return result;
+  const view = webExtractWindow(metadata.content, limit, window, metadata.sourceTruncated === true);
+  const reuseNotice = metadata.webReadReuse === true
+    ? `Prior observation reused from ${metadata.sourceToolCallId}; no new network retrieval.` : undefined;
+  result.content = [reuseNotice, `URL: ${metadata.url}`,
+    metadata.title === undefined ? undefined : `Title: ${metadata.title}`,
+    metadata.status === undefined ? undefined : `Status: ${metadata.status}${typeof metadata.statusText === "string" && metadata.statusText ? ` ${metadata.statusText}` : ""}`,
+    result.ok ? undefined : `Extraction failed: ${metadata.reason ?? "retrieval-failed"}.`,
+    view.notice, view.guidance, "", view.content].filter(line => line !== undefined).join("\n");
+  if (metadata.contentKind === "navigation-only") result.content += "\nOnly navigation text was extracted; this does not establish the page's substantive claims. Try a source link or another retrieval route.";
+  result.metadata = { ...metadata, ...view, ...(!result.ok && metadata.reason ? { reason: metadata.reason } : {}),
+    _estacoda_context_summary: `${reuseNotice ? `${reuseNotice} ` : ""}${view.notice ?? webExtractContextSummary({
+      url: String(metadata.url), title: typeof metadata.title === "string" ? metadata.title : undefined,
+      status: typeof metadata.status === "number" ? metadata.status : undefined,
+      contentLength: view.content.length, source: String(metadata.provider ?? metadata.source ?? "fetch")
+    })}` };
+  return result;
+}
+
 function formatWebExtractProviderResult(
   provider: WebResearchProvider,
   result: import("./web-research-provider.js").WebExtractResult,
@@ -1294,7 +1320,7 @@ function formatWebExtractProviderResult(
 ) {
   const view = webExtractWindow(result.content, limit, window, result.truncated);
   return {
-    ok: !view.notice && (result.status === undefined || (result.status >= 200 && result.status < 400)),
+    ok: result.status === undefined || (result.status >= 200 && result.status < 400),
     content: [
       `URL: ${result.url}`,
       result.title === undefined ? undefined : `Title: ${result.title}`,
@@ -3293,7 +3319,8 @@ async function extractWithFetch(input: {
       return withDebug({ ok: false, content: "The response contains binary data, not extracted document text. Use a supported document extraction path or another source.",
         metadata: { url, status: response.status, contentType, source: "fetch", reason: "unsupported-content-type", publicReadReusable: false } }, input.debug);
     }
-    const extracted = extractReadableText(raw, contentType);
+    const readable = webReadableText(raw, contentType, url);
+    const extracted = readable.text;
     const title = extractTitle(raw);
     const extractionFailure = !extracted.trim() ? "empty-content"
       : extracted.length < 1_000 && (
@@ -3318,7 +3345,7 @@ async function extractWithFetch(input: {
     });
 
     return withDebug({
-      ok: response.ok && extractionFailure === undefined && view.notice === undefined,
+      ok: response.ok && extractionFailure === undefined,
       content: [
         `URL: ${result.url}`,
         result.title === undefined ? undefined : `Title: ${result.title}`,
@@ -3330,9 +3357,11 @@ async function extractWithFetch(input: {
       ].filter((line) => line !== undefined).join("\n"),
       metadata: {
         ...result,
+        contentKind: readable.contentKind,
+        statusText: response.statusText,
         redirectCount,
         ...view,
-        ...(extractionFailure === undefined ? {} : { reason: extractionFailure }),
+        ...(extractionFailure === undefined && response.ok ? {} : { reason: extractionFailure ?? "http-error" }),
         publicReadReusable: extractionFailure === undefined && response.ok && redirectCount === 0
           && !response.headers.get("set-cookie") && !response.headers.get("vary")
           && !/private|no-store|no-cache|must-revalidate/i.test(response.headers.get("cache-control") ?? "")
@@ -3538,25 +3567,6 @@ function normalizeUrl(url: string | undefined): string | undefined {
   } catch {
     return undefined;
   }
-}
-
-function extractReadableText(raw: string, contentType: string | undefined): string {
-  if (contentType !== undefined && !/html|text|json|xml/i.test(contentType)) {
-    return truncate(raw, DEFAULT_MAX_CONTENT_CHARS);
-  }
-
-  return raw
-    .replace(/<script[\s\S]*?<\/script>/giu, " ")
-    .replace(/<style[\s\S]*?<\/style>/giu, " ")
-    .replace(/<[^>]+>/gu, " ")
-    .replace(/&nbsp;/giu, " ")
-    .replace(/&amp;/giu, "&")
-    .replace(/&lt;/giu, "<")
-    .replace(/&gt;/giu, ">")
-    .replace(/&quot;/giu, "\"")
-    .replace(/&#39;/giu, "'")
-    .replace(/\s+/gu, " ")
-    .trim();
 }
 
 function extractTitle(raw: string): string | undefined {

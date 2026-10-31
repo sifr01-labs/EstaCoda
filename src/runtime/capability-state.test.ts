@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import type { ProviderToolSchemaCatalog } from "../tools/tool-schema.js";
-import { correctContradictedCapabilityClaim, projectCapabilityState, renderCapabilityState } from "./capability-state.js";
+import { toolResultStats } from "./tool-plan-runner.js";
+import { correctContradictedCapabilityClaim, projectCapabilityState, renderCapabilityState, researchRecoveryGuidance } from "./capability-state.js";
 const catalog = { inventory: [{ name: "browser.status", availability: "available", schemaEligible: true },
   { name: "web.search", availability: "temporarily_unavailable", schemaEligible: true },
   { name: "file.write", availability: "available", schemaEligible: false }], entries: [], aliases: new Map([["browser_status", "browser.status"]]), tools: [] } as unknown as ProviderToolSchemaCatalog;
@@ -10,6 +11,25 @@ function record(name = "browser.status", available = true): ToolExecutionRecord 
   return { tool: { name, description: name, inputSchema: {}, riskClass: "read-only-network", toolsets: ["core"], progressLabel: name, maxResultSizeChars: 1000 }, riskClass: "read-only-network", toolCallId: "owned", decision: "allow", result: { ok: true, content: "private body", metadata: { available, endpoint: "private endpoint" } } } as ToolExecutionRecord;
 }
 describe("current capability evidence", () => {
+  it("marks only reviewed retrieval failures as recoverable channel activity", () => {
+    const failure = { ...record("web.extract"), result: { ok: false, content: "fetch failed", metadata: { reason: "fetch-failed" } } };
+    expect(toolResultStats(failure).recoverableReadFailure).toBe(true);
+    expect(toolResultStats({ ...failure, decision: "deny" }).recoverableReadFailure).toBeUndefined();
+    for (const reason of ["unsafe-url", "website-policy", "secret-in-url", "unknown"]) {
+      expect(toolResultStats({ ...failure, result: { ...failure.result, metadata: { reason } } }).recoverableReadFailure).toBeUndefined();
+    }
+  });
+  it("nudges repeated unproductive reads while preserving denials and productive investigation", () => {
+    const failure = { ...record("web.extract"), result: { ok: false, content: "failed", metadata: { reason: "fetch-failed" } } };
+    expect(researchRecoveryGuidance([failure])).toBeUndefined();
+    expect(researchRecoveryGuidance([failure, failure])).toContain("capability.discover once");
+    expect(researchRecoveryGuidance([failure, record("web.extract"), failure])).toContain("actual links");
+    expect(researchRecoveryGuidance([failure, { ...failure, decision: "deny" }])).toBeUndefined();
+    expect(researchRecoveryGuidance([failure, { ...failure, result: { ok: false, content: "blocked", metadata: { reason: "website-policy" } } }])).toBeUndefined();
+    expect(researchRecoveryGuidance([failure, failure, record("web.extract")])).toBeUndefined();
+    const state = projectCapabilityState({ catalog, exposed, executions: [failure] });
+    expect(state.find(item => item.tool === "web.search")?.readiness).toBe("catalog_unavailable");
+  });
   it("separates catalog readiness, exposure and action observations without copying sensitive results", () => {
     const state = projectCapabilityState({ catalog, exposed, executions: [record()], required: ["web.search", "file.write"] });
     expect(state).toEqual([
