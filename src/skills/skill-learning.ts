@@ -1,6 +1,10 @@
 import * as fs from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import type { AgentEvolutionPolicy } from "../contracts/agent-evolution.js";
+import type { ProviderUsageLineage } from "../contracts/provider-usage.js";
+import type { SkillDrafter } from "./skill-draft.js";
+import { SkillProposalService, readBoundedSkillFile } from "./skill-proposal-service.js";
+import { skillContentHash } from "./skill-task-evaluation.js";
 import type { SessionDB } from "../contracts/session.js";
 import type {
   LoadedSkill,
@@ -39,6 +43,9 @@ export type SkillLearningRecord = {
   createdSkillName?: string;
   createdSkillPath?: string;
   updatedAt: string;
+  draftAttemptedAt?: string;
+  draftProposalId?: string;
+  draftStatus?: "attempted" | "proposed" | "abstained";
 };
 
 type SkillLearningFile = {
@@ -69,6 +76,9 @@ export class SkillLearningManager {
   readonly #store: SkillLearningStore;
   readonly #sessionDb: SessionDB;
   readonly #skillEvolutionStore: SkillEvolutionStore | undefined;
+  readonly #registry: SkillRegistry;
+  readonly #draft: SkillDrafter | undefined;
+  readonly #proposals: SkillProposalService | undefined;
 
   constructor(options: {
     autonomy: SkillAutonomy;
@@ -77,6 +87,8 @@ export class SkillLearningManager {
     storePath: string;
     sessionDb: SessionDB;
     skillEvolutionStore?: SkillEvolutionStore;
+    drafter?: SkillDrafter;
+    proposalService?: SkillProposalService;
   }) {
     this.#autonomy = options.autonomy;
     this.#store = new SkillLearningStore({
@@ -85,9 +97,14 @@ export class SkillLearningManager {
     });
     this.#sessionDb = options.sessionDb;
     this.#skillEvolutionStore = options.skillEvolutionStore;
+    this.#registry = options.registry;
+    this.#draft = options.drafter;
+    this.#proposals = options.proposalService;
   }
 
   async observeTurn(input: {
+    signal?: AbortSignal;
+    usage?: ProviderUsageLineage;
     profileId: string;
     sessionId: string;
     userText: string;
@@ -222,6 +239,8 @@ export class SkillLearningManager {
   }
 
   async #observeSelectedSkillTurn(input: {
+    signal?: AbortSignal;
+    usage?: ProviderUsageLineage;
     profileId: string;
     sessionId: string;
     userText: string;
@@ -291,12 +310,13 @@ export class SkillLearningManager {
     if (record.status === "stale") {
       return undefined;
     }
-    const candidateRecord = record.status === "candidate"
+    let candidateRecord = record.status === "candidate"
       ? record
       : await this.#store.markCandidate(record.key);
     if (candidateRecord.status === "stale") {
       return undefined;
     }
+    if (input.outcomeStatus === "failed") candidateRecord = await this.#prepareDraft(candidateRecord, candidate, input);
 
     await this.#sessionDb.appendEvent(input.sessionId, {
       kind: "skill-learned",
@@ -310,6 +330,48 @@ export class SkillLearningManager {
       evidence,
       candidate
     };
+  }
+
+  async #prepareDraft(record: SkillLearningRecord, candidate: SkillLearningCandidate, input: {
+    sessionId: string; agentEvolutionPolicy: AgentEvolutionPolicy; signal?: AbortSignal; usage?: ProviderUsageLineage;
+  }): Promise<SkillLearningRecord> {
+    const policy = input.agentEvolutionPolicy;
+    if (!this.#draft || !this.#proposals || !this.#skillEvolutionStore || !policy.preparePatches || !policy.createProposals ||
+        input.signal?.aborted || candidate.kind !== "selected_skill_refinement" || candidate.suggestedTarget !== "skill_patch" ||
+        record.occurrences < 2) return record;
+    const today = new Date().toISOString().slice(0, 10);
+    if (record.draftAttemptedAt?.startsWith(today)) return record;
+    const attempts = (await this.#store.list()).filter((item) => item.draftAttemptedAt?.startsWith(today)).length;
+    const proposals = await this.#proposals.listProposals();
+    const limit = Math.min(3, policy.budgets.maxProposalsPerDay ?? 3);
+    if (!Number.isFinite(limit) || attempts >= limit || proposals.filter((item) => item.createdAt.startsWith(today)).length >= limit ||
+        proposals.some((item) => item.skillName === candidate.selectedSkill && item.status === "proposed")) return record;
+    const skill = this.#registry.get(candidate.selectedSkill);
+    if (!skill || !("sourcePath" in skill)) return record;
+    const evidence = await this.#skillEvolutionStore.listObservations({ skillName: skill.name, ids: record.evidenceIds });
+    const failures = evidence.filter((item) => item.sourceTrust === "runtime_internal" && item.outcome === "failed");
+    if (new Set(failures.map((item) => item.sessionId).filter(Boolean)).size < 2) return record;
+    record = await this.#store.recordDraft(record.key, "attempted");
+    try {
+      const content = await readBoundedSkillFile(skill.sourceRoot, skill.sourcePath);
+      if (content.length > 20_000) return await this.#store.recordDraft(record.key, "abstained");
+      const patch = await this.#draft({
+        content, candidateId: candidate.id, sessionId: input.sessionId, policy, signal: input.signal, usage: input.usage,
+        // No raw user text, tool arguments, outputs, credentials, or arbitrary lessons enter the draft prompt.
+        evidence: failures.slice(-6).map((item) => ({ outcome: item.outcome, tools: item.toolsAttempted.slice(0, 20),
+          lesson: "The selected skill did not complete this task successfully." }))
+      });
+      if (patch && !input.signal?.aborted) {
+        const result = await this.#proposals.createProposalFromLearningCandidate({
+          candidate: { ...candidate, evidenceIds: failures.map((item) => item.id) },
+          agentEvolutionPolicy: policy, patch, baseContentHash: skillContentHash(content)
+        });
+        if (result.ok) return await this.#store.recordDraft(record.key, "proposed", result.proposal.id);
+      }
+    } catch {
+      // Drafting is best-effort; retain evidence and a visible abstention without failing the user's task.
+    }
+    return this.#store.recordDraft(record.key, "abstained");
   }
 }
 
@@ -555,7 +617,10 @@ class SkillLearningStore {
       createdSkillPath: existing?.createdSkillPath,
       staleReason: existing?.staleReason,
       staleDetectedAt: existing?.staleDetectedAt,
-      updatedAt: now
+      updatedAt: now,
+      draftAttemptedAt: existing?.draftAttemptedAt,
+      draftProposalId: existing?.draftProposalId,
+      draftStatus: existing?.draftStatus
     };
     this.#records.set(input.key, record);
     await this.#flush();
@@ -577,6 +642,15 @@ class SkillLearningStore {
       status: "candidate",
       updatedAt: this.#now().toISOString()
     };
+    this.#records.set(key, updated);
+    await this.#flush();
+    return updated;
+  }
+
+  async recordDraft(key: string, status: NonNullable<SkillLearningRecord["draftStatus"]>, proposalId?: string): Promise<SkillLearningRecord> {
+    const record = this.#records.get(key);
+    if (!record) throw new Error("Learning record missing.");
+    const updated = { ...record, draftAttemptedAt: this.#now().toISOString(), draftStatus: status, draftProposalId: proposalId };
     this.#records.set(key, updated);
     await this.#flush();
     return updated;

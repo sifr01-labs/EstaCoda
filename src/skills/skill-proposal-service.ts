@@ -1,6 +1,6 @@
 import {constants} from 'node:fs';
 import { cp, mkdir, readFile, readdir, rm, writeFile, lstat, open } from "node:fs/promises";
-import { dirname, join, relative, isAbsolute } from "node:path";
+import { dirname, join, relative, isAbsolute, resolve } from "node:path";
 import type { LoadedSkill, SkillDefinition, SkillEvaluation } from "../contracts/skill.js";
 import type { EvolutionChangeManifest, EvolutionExperiment } from "../contracts/evolution.js";
 import type { AgentEvolutionPolicy } from "../contracts/agent-evolution.js";
@@ -24,6 +24,7 @@ import { assertSkillContentMutationAllowed, assertSkillMutable } from "./skill-m
 import { ensureContainedDirectory, isSafeRelativeSkillPath } from "./skill-path-safety.js";
 import { MAX_SKILL_RESOURCE_BYTES, MAX_SKILL_RESOURCE_CHARS } from "./skill-limits.js";
 import { truncateContextDocument } from "./skill-loader.js";
+import { skillContentHash, validateSkillTaskEvaluation } from "./skill-task-evaluation.js";
 
 export type SkillProposalServiceOptions = {
   registry: SkillRegistry;
@@ -48,6 +49,7 @@ export type ProposalReview = {
   affectedFields: string[];
   diffSummary: string;
   evalResult?: {
+    evaluationKind: "metadata";
     status: string;
     score: number;
     threshold: number;
@@ -116,11 +118,23 @@ export class SkillProposalService {
     });
     const riskLevel = riskLevelForProposal(proposal);
     const skill = this.#options.registry.get(proposal.skillName);
-    const evalGate = skill === undefined ? undefined : await runSkillEvalGate(skill);
+    let evalGate = skill === undefined ? undefined : await runSkillEvalGate(skill);
+    let draftBlockedReason: string | undefined;
+    if (proposal.patch !== undefined && skill !== undefined && isLoadedSkill(skill)) {
+      try {
+        const { current, next } = await this.#proposalContents(proposal);
+        evalGate = await runSkillEvalGate(await hydrateSkillResources(parseSkillFile(skill.sourcePath, next, {
+          sourceKind: skill.sourceKind, sourceRoot: skill.sourceRoot
+        })));
+        if (proposal.requiresTaskEvaluation) validateSkillTaskEvaluation(proposal.taskEvaluation, current, next);
+      } catch (error) {
+        draftBlockedReason = error instanceof Error ? error.message : String(error);
+      }
+    }
     const trustGate = evaluateProposalTrust(proposal, observations, riskLevel);
     const recommendedAction = proposal.status !== "proposed"
       ? "none"
-      : !trustGate.ok
+      : !trustGate.ok || draftBlockedReason !== undefined
         ? "review"
         : evalGate?.status === "failed"
           ? "reject"
@@ -142,13 +156,14 @@ export class SkillProposalService {
       evalResult: evalGate === undefined
         ? undefined
         : {
+            evaluationKind: "metadata",
             status: evalGate.status,
             score: evalGate.score,
             threshold: evalGate.threshold,
             failures: evalGate.failures
           },
       recommendedAction,
-      blockedReason: trustGate.ok ? undefined : trustGate.reason
+      blockedReason: draftBlockedReason ?? (trustGate.ok ? undefined : trustGate.reason)
     };
   }
 
@@ -179,6 +194,25 @@ export class SkillProposalService {
 
   async approveProposal(proposalId: string, approvedBy?: string): Promise<SkillPatchProposal | undefined> {
     return this.#options.skillEvolutionStore.approveProposal(proposalId, approvedBy ?? "user");
+  }
+
+  /** Operator-only attestation. No model-visible tool accepts task grades. */
+  async recordTaskEvaluation(proposalId: string, report: unknown): Promise<SkillPatchProposal | undefined> {
+    const proposal = await this.findProposal(proposalId);
+    if (!proposal || proposal.status !== "proposed") throw new Error("A pending executable proposal is required.");
+    const { current, next } = await this.#proposalContents(proposal);
+    const evaluated = validateSkillTaskEvaluation(report, current, next);
+    return this.#options.skillEvolutionStore.recordProposalTaskEvaluation(proposal.id, evaluated);
+  }
+
+  async #proposalContents(proposal: SkillPatchProposal): Promise<{ current: string; next: string }> {
+    const skill = this.#options.registry.get(proposal.skillName);
+    if (!skill || !isLoadedSkill(skill) || !proposal.patch) throw new Error("A file-backed skill and executable patch are required.");
+    const current = await readBoundedSkillFile(skill.sourceRoot, skill.sourcePath);
+    if (proposal.baseContentHash && proposal.baseContentHash !== skillContentHash(current)) {
+      throw new Error("Skill changed after drafting; regenerate and reevaluate the proposal.");
+    }
+    return { current, next: applySkillPatch(current, proposal.patch) };
   }
 
   async rejectProposal(proposalId: string): Promise<SkillPatchProposal | undefined> {
@@ -214,14 +248,33 @@ export class SkillProposalService {
       return { ok: false, reason: trustGate.reason };
     }
 
+    if (proposal.baseContentHash || proposal.requiresTaskEvaluation) {
+      try {
+        const { current, next } = await this.#proposalContents(proposal);
+        if (proposal.requiresTaskEvaluation) validateSkillTaskEvaluation(proposal.taskEvaluation, current, next);
+      } catch (error) {
+        return { ok: false, reason: error instanceof Error ? error.message : String(error) };
+      }
+    }
+
     const target = await this.#requireMutableLocalSkill(proposal.skillName, "promote");
     if (typeof target === "string") {
       return { ok: false, reason: target };
     }
 
     const current = await readFile(target.skillPath, "utf8");
-    const currentSkill = this.#options.registry.get(proposal.skillName);
-    const beforeEvalGate = currentSkill === undefined ? undefined : await runSkillEvalGate(currentSkill);
+    if (proposal.baseContentHash && skillContentHash(current) !== proposal.baseContentHash) {
+      return { ok: false, reason: "Skill changed during promotion; regenerate and reevaluate the proposal." };
+    }
+    let currentSkill: LoadedSkill;
+    try {
+      currentSkill = await hydrateSkillResources(parseSkillFile(target.skillPath, current, {
+        sourceKind: "local", sourceRoot: this.#options.localSkillsRoot
+      }));
+    } catch (error) {
+      return { ok: false, reason: error instanceof Error ? error.message : String(error) };
+    }
+    const beforeEvalGate = await runSkillEvalGate(currentSkill);
     const next = applySkillPatch(current, proposal.patch);
 
     let loaded: LoadedSkill;
@@ -236,6 +289,10 @@ export class SkillProposalService {
 
     if (loaded.name !== proposal.skillName) {
       return { ok: false, reason: `Promoted patch changed skill name from ${proposal.skillName} to ${loaded.name}` };
+    }
+    if (currentSkill) {
+      const allowed = await assertSkillContentMutationAllowed({ current: currentSkill, next: loaded, action: "promote", store: this.#options.skillEvolutionStore });
+      if (!allowed.ok) return allowed;
     }
 
     const evalGate = await runSkillEvalGate(loaded);
@@ -254,8 +311,9 @@ export class SkillProposalService {
     }
 
     const snapshotPath = await this.#snapshotLocalSkill(target, proposal.skillName);
+    if (await readFile(target.skillPath, "utf8") !== current) return { ok: false, reason: "Skill changed during promotion; retry review." };
     await writeFile(target.skillPath, next, "utf8");
-    this.#options.registry.register(loaded);
+    this.#options.registry.replaceLoaded(loaded);
 
     const promotion = await this.#options.skillEvolutionStore.recordPromotion({
       proposal,
@@ -388,6 +446,8 @@ export class SkillProposalService {
     affectedFiles?: string[];
     evalPlan?: GovernedProposalEvalPlan;
     rollbackExpectation?: string;
+    patch?: SkillPatchOperation;
+    baseContentHash?: string;
   }): Promise<LearningCandidateProposalResult> {
     const policyDecision = policyDecisionForLearningCandidateProposal(options.agentEvolutionPolicy);
     if (!policyDecision.allowed) {
@@ -397,12 +457,33 @@ export class SkillProposalService {
     const changeKind = governedChangeKindForLearningCandidate(options.candidate);
     const skillName = skillNameForLearningCandidate(options.candidate, options.skillName);
     const skill = this.#options.registry.get(skillName);
+    let baseContentHash: string | undefined;
+    if (options.patch !== undefined) {
+      if (!options.agentEvolutionPolicy.preparePatches || changeKind !== "skill_patch" || !skill || !isLoadedSkill(skill)) {
+        return { ok: false, reason: "Executable learning drafts require preparePatches and a file-backed skill_patch target." };
+      }
+      const current = await readBoundedSkillFile(skill.sourceRoot, skill.sourcePath);
+      baseContentHash = skillContentHash(current);
+      if (options.baseContentHash !== baseContentHash) return { ok: false, reason: "Skill changed while drafting." };
+      try {
+        const baseline = parseSkillFile(skill.sourcePath, current, { sourceKind: skill.sourceKind, sourceRoot: skill.sourceRoot });
+        const next = parseSkillFile(skill.sourcePath, applySkillPatch(current, options.patch), { sourceKind: skill.sourceKind, sourceRoot: skill.sourceRoot });
+        if (next.name !== skill.name) return { ok: false, reason: "Learning drafts cannot rename skills." };
+        const allowed = await assertSkillContentMutationAllowed({ current: baseline, next, action: "patch", store: this.#options.skillEvolutionStore });
+        if (!allowed.ok) return allowed;
+      } catch (error) {
+        return { ok: false, reason: error instanceof Error ? error.message : String(error) };
+      }
+    }
     const source = skill !== undefined && isLoadedSkill(skill) ? skill.sourceKind : undefined;
     const affectedFiles = options.affectedFiles ?? (skill !== undefined && isLoadedSkill(skill) ? [skill.sourcePath] : []);
-    const riskClass = riskClassForGovernedChangeKind(changeKind);
-    const requiresHumanApproval = requiresApprovalForRisk(options.agentEvolutionPolicy, riskClass);
+    const riskClass = options.patch ? classifyPatchRisk(options.patch) : riskClassForGovernedChangeKind(changeKind);
+    const requiresHumanApproval = options.patch !== undefined || requiresApprovalForRisk(options.agentEvolutionPolicy, riskClass);
     const proposal = await this.#options.skillEvolutionStore.appendGovernedProposal({
       skillName,
+      patch: options.patch,
+      baseContentHash,
+      requiresTaskEvaluation: options.patch !== undefined,
       source,
       reason: options.candidate.reason,
       confidence: options.candidate.confidence,
@@ -426,6 +507,14 @@ export class SkillProposalService {
       },
       approvalState: requiresHumanApproval ? "required" : "not_required"
     });
+    if (options.patch && options.agentEvolutionPolicy.createManifests) {
+      const manifest = await this.createManifestFromProposal({ skillName, reason: options.candidate.reason, patch: options.patch });
+      if (manifest) {
+        await this.#options.skillEvolutionStore.linkProposalManifest(proposal.id, manifest.manifestId);
+        await this.#options.changeManifestStore?.linkEvidence(manifest.manifestId, { traces: options.candidate.evidenceIds });
+        return { ok: true, proposal: (await this.findProposal(proposal.id))! };
+      }
+    }
     return { ok: true, proposal };
   }
 
@@ -921,6 +1010,7 @@ function parseJsonPointer(path: string): string[] {
 }
 
 export type SkillEvalGateResult = {
+  evaluationKind: "metadata";
   status: "passed" | "failed" | "not-run";
   caseCount: number;
   score: number;
@@ -966,6 +1056,7 @@ export async function runSkillEvalGate(skill: LoadedSkill | SkillDefinition): Pr
   ];
   if (cases.length === 0) {
     return {
+      evaluationKind: "metadata",
       status: "not-run",
       caseCount: 0,
       score: 0,
@@ -1046,10 +1137,12 @@ export async function runSkillEvalGate(skill: LoadedSkill | SkillDefinition): Pr
       details.skillVisible = true;
     }
     if (evaluation.expected?.degraded !== undefined) {
-      details.degraded = true;
+      details.degraded = false;
+      failures.push(`${label}: degraded behavior requires a task evaluation; metadata cannot establish it`);
     }
     if (evaluation.expected?.mustEndState !== undefined) {
-      details.finalBehavior = true;
+      details.finalBehavior = false;
+      failures.push(`${label}: final behavior requires a task evaluation; metadata cannot establish it`);
     }
     const threshold = clampEvalScore(evaluation.passThreshold ?? 1);
     const score = scoreEvalDetails(details, evaluation.scoring);
@@ -1073,6 +1166,7 @@ export async function runSkillEvalGate(skill: LoadedSkill | SkillDefinition): Pr
     ? 1
     : Math.min(...caseResults.map((result) => result.threshold));
   return {
+    evaluationKind: "metadata",
     status: failures.length === 0 ? "passed" : "failed",
     caseCount: cases.length,
     score,
@@ -1249,7 +1343,8 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);
 }
 
-async function readBoundedSkillFile(root:string,path:string):Promise<string>{
+export async function readBoundedSkillFile(root:string,path:string):Promise<string>{
+ root=resolve(root);path=resolve(path);
  const rel=relative(root,path);if(!rel||rel.startsWith('..')||isAbsolute(rel))throw new Error('Invalid skill path');
  for(let dir=dirname(path);;dir=dirname(dir)){const info=await lstat(dir);if(!info.isDirectory()||info.isSymbolicLink())throw new Error('Invalid skill directory');if(dir===root)break;}
  const file=await open(path,constants.O_RDONLY|constants.O_NOFOLLOW);try{const info=await file.stat();if(!info.isFile()||info.size>1048576)throw new Error('Skill exceeds bound');const buffer=Buffer.alloc(1048577);let size=0;while(size<buffer.length){const part=await file.read(buffer,size,buffer.length-size,size);if(!part.bytesRead)break;size+=part.bytesRead;}if(size>1048576)throw new Error('Skill exceeds bound');return new TextDecoder('utf-8',{fatal:true}).decode(buffer.subarray(0,size));}finally{await file.close();}

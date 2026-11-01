@@ -6,6 +6,7 @@ import { resolveProfileStateHome } from "../config/profile-home.js";
 import { ChangeManifestStore } from "../skills/change-manifest-store.js";
 import { SkillEvolutionStore, type SkillPatchProposal } from "../skills/skill-evolution.js";
 import { runCliCommand } from "./cli.js";
+import { skillContentHash } from "../skills/skill-task-evaluation.js";
 
 const tempDirs: string[] = [];
 
@@ -16,6 +17,34 @@ afterEach(async () => {
 });
 
 describe("proposal CLI review surface", () => {
+  it("imports paired task evidence only into the command-selected profile and resets approval", async () => {
+    const harness = await createHarness();
+    const skillRoot = resolveProfileStateHome({ homeDir: harness.homeDir, profileId: "work" }).skillsPath;
+    await mkdir(join(skillRoot, "checks"), { recursive: true });
+    const before = `---\n${JSON.stringify({ name: "checks", description: "Check outputs", requiredToolsets: ["files"], playbook: [], evaluations: [] })}\n---\nRun checks.\n`;
+    const after = before.replace("Run checks.", "Run checks and verify the output.");
+    await writeFile(join(skillRoot, "checks", "SKILL.md"), before);
+    const store = new SkillEvolutionStore({ usagePath: join(skillRoot, ".usage.json"), evolutionRoot: join(skillRoot, ".evolution") });
+    const proposal = await store.appendGovernedProposal({ skillName: "checks", reason: "Verify outputs", changeKind: "skill_patch",
+      baseContentHash: skillContentHash(before), requiresTaskEvaluation: true,
+      patch: { type: "text_patch", oldString: "Run checks.", newString: "Run checks and verify the output." } });
+    await store.approveProposal(proposal.id);
+    const reportPath = join(harness.homeDir, "paired.json");
+    await writeFile(reportPath, JSON.stringify({ version: 1, baselineHash: skillContentHash(before), candidateHash: skillContentHash(after),
+      suiteId: "suite", modelId: "fixed-model", graderId: "independent", environmentHash: "a".repeat(64),
+      cases: ["repair", "regression"].map((id) => ({ id, fixtureHash: skillContentHash(id),
+        baseline: { score: 0.8, safetyPassed: true, artifact: `${id}-before` },
+        candidate: { score: 1, safetyPassed: true, artifact: `${id}-after` } })) }));
+    const args = { argv: ["proposal", "evaluate", proposal.id, reportPath], workspaceRoot: harness.homeDir, homeDir: harness.homeDir };
+    expect((await runCliCommand(args)).exitCode).toBe(1);
+    const result = await runCliCommand({ ...args, profileId: "work" });
+    expect(result.exitCode).toBe(0);
+    expect(result.output).toContain("operator-attested");
+    expect(await store.findProposal(proposal.id)).toMatchObject({ taskEvaluationSource: "operator_attested", requiresHumanApproval: true, approvalState: "required" });
+    expect((await store.findProposal(proposal.id))?.approvedAt).toBeUndefined();
+    expect(await harness.skillEvolutionStore.listProposals()).toEqual([]);
+  });
+
   it("lists pending governed proposals with linked review metadata without mutating evolution state", async () => {
     const harness = await createHarness();
     const observation = await harness.skillEvolutionStore.appendObservation({

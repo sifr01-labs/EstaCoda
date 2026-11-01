@@ -72,25 +72,15 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
     const foundSkill = skill.skill;
     const result = await readSkillContent(foundSkill, input, options.skillConfig?.[foundSkill.name]);
     options.capabilityRecovery?.observeSkillRead(foundSkill, result, input, context);
-    return result;
-  };
-  const runSkillView = async (input: SkillReadInput): Promise<ToolResult> => {
-    const skill = getSkill(inspectionRegistry, input.name);
-    if (!skill.ok) {
-      return skill;
-    }
-    const foundSkill = skill.skill;
-    // skill.read intentionally avoids retrieval usage recording in PR 1;
-    // retrieval traces belong with PR 2 routing evidence. Preserve the
-    // legacy viewed counter for the deprecated skill.view compatibility alias.
-    await options.skillEvolutionStore?.recordSkillViewed({
+    if (result.ok) await options.skillEvolutionStore?.recordSkillViewed({
       skillName: foundSkill.name,
       source: isLoadedSkill(foundSkill) ? foundSkill.sourceKind : undefined,
-      provenanceKind: "provenance" in foundSkill ? foundSkill.provenance?.kind : undefined
+      provenanceKind: "provenance" in foundSkill ? foundSkill.provenance?.kind : undefined,
+      resource: input.path !== undefined
     });
-
-    return readSkillContent(foundSkill, input, options.skillConfig?.[foundSkill.name]);
+    return result;
   };
+  const runSkillView = runSkillRead;
   const runSkillSearch = async (input: SkillSearchInput): Promise<ToolResult> => {
     if (!isNonEmptyString(input.query)) {
       return {

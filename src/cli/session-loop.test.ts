@@ -449,6 +449,40 @@ function approvalAnswerKeypresses(answer: string): readonly string[] {
 }
 
 describe("runSessionLoop — user prompt rail behavior", () => {
+  it("refreshes only the same profile and session, reporting the revalidated catalog delta", async () => {
+    const entry = { name: "new-visible", description: "New skill", category: "general", version: "1", requiredToolsets: [] };
+    const original = createMockRuntime({ profileId: "work", skills: () => [{ ...entry, name: "old-visible" }] });
+    const refreshed = createMockRuntime({ profileId: "work", skills: () => [entry] });
+    await refreshed.sessionDb.createSession({ id: refreshed.sessionId, profileId: "work" });
+    const refreshRuntime = vi.fn(async () => refreshed);
+    const result = await handleSlashCommand({ text: "/skills refresh", runtime: original, refreshRuntime,
+      output: { write: () => true } as unknown as NodeJS.WritableStream,
+      renderer: { render: renderPlain, capabilities: interactiveCaps() } });
+    expect(refreshRuntime).toHaveBeenCalledExactlyOnceWith({ preserveSession: true });
+    expect(typeof result).toBe("object");
+    if (typeof result === "object") {
+      expect(result.notice(refreshed)).toContain("added: new-visible");
+      expect(result.notice(refreshed)).toContain("removed: old-visible");
+    }
+    expect(await refreshed.sessionDb.listMessages(refreshed.sessionId)).toContainEqual(expect.objectContaining({
+      role: "system", content: expect.stringContaining('"added":["new-visible"]'), metadata: { skillCatalogRefresh: true }
+    }));
+  });
+
+  it.each(["different-profile", "different-session"])("refuses a skill refresh across %s", async (mismatch) => {
+    const dispose = vi.fn();
+    const refreshed = createMockRuntime({ profileId: mismatch === "different-profile" ? "personal" : "work",
+      sessionId: mismatch === "different-session" ? "other" : "test-session", dispose });
+    const chunks: string[] = [];
+    const result = await handleSlashCommand({ text: "/skills refresh", runtime: createMockRuntime({ profileId: "work" }),
+      refreshRuntime: async () => refreshed,
+      output: { write: (text: string) => { chunks.push(text); return true; } } as NodeJS.WritableStream,
+      renderer: { render: renderPlain, capabilities: interactiveCaps() } });
+    expect(result).toBe(false);
+    expect(dispose).toHaveBeenCalledOnce();
+    expect(chunks.join("")).toContain("refused");
+  });
+
   it("shows MCP failure diagnostics without reconnecting when status is requested", async () => {
     const chunks: string[] = [];
     const refreshRuntime = vi.fn();

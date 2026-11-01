@@ -210,7 +210,7 @@ function registerAll(): void {
     name: "skills",
     aliases: [],
     category: "Info",
-    description: "Browse available skills",
+    description: "Browse available skills; /skills refresh reloads the visible catalog",
     visibility: "public",
     scope: "both",
   });

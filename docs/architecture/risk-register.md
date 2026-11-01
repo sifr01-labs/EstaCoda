@@ -20,7 +20,7 @@ description: "Identified architecture risks, severity, and mitigations."
 | R11 | **AGENTS.md drift** | Low | High | Low | **Resolved** | Updated to match current structure. |
 | R12 | **Channel maturity is uneven** | Medium | Low | Medium | **Accepted** | Telegram is the strongest first-party remote channel. Discord and Email are implemented but deployment validation is operator-specific. WhatsApp has external API risk. |
 | R13 | **Gateway readiness ≠ liveness** | Low | Medium | Low | **Accepted** | Gateway status reports readiness/configuration; service-manager paths provide stronger process state where installed. |
-| R14 | **Skill promotion evals are metadata/playbook-only** | Medium | Medium | Medium | **Accepted** | Default eval fixtures cover skill/evolution behavior, but promotion gates still evaluate skill metadata, playbook expectations, and degraded-behavior assertions rather than executing open-ended task fixtures. |
+| R14 | **Skill task grades depend on operator evidence** | Medium | Medium | Medium | **Accepted** | Learned executable drafts require content-bound paired task results with quality, non-regression, and safety checks plus approval. Results are operator-attested; the importer does not execute tasks or verify referenced artifacts. Legacy/manual proposals still use metadata gates. Metadata checks cannot establish final-state or degraded behavior. |
 | R15 | **OpenRouter exactness issues** | Medium | Medium | Medium | **Accepted** | Provider-specific hardening ongoing. |
 | R16 | **MCP HTTP transport unproven** | Low | Low | Low | **Accepted** | Smoke-tested but not broadly live-proven. |
 | R17 | **Local/Ollama unproven** | Low | Low | Low | **Accepted** | Present but unproven in practice. |

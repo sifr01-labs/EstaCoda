@@ -1,0 +1,144 @@
+{
+  "date": "2026-10-31",
+  "hermes_commit": "adecc4024456b387b1518813b90bd60c82b51287",
+  "estacoda_base_commit": "053903e0903918be971a30701d8070f2187af03f",
+  "estacoda_state": "inspected working tree with concurrent local edits",
+  "method": "Actual EstaCoda loader, registry, prompt assembly and discovery; Hermes pinned renderer and 60-character word-boundary clipper extracted through AST. Common EstaCoda bundled input catalog plus synthetic 12-skill category. No live-model performance benchmark.",
+  "estacoda": {
+    "errors": [],
+    "actual": {
+      "skills": 22,
+      "indexChars": 792,
+      "namesShown": 22,
+      "descriptionsShown": 0,
+      "omitted": [],
+      "index": "Compact skills index:\nautomation: api-integration (browser,mcp)\ncoding: product-builder (core)\ncreative: hyperframes (files,shell-write), manim-video (files,shell-write)\ndesign: ui-design (files)\ndocuments: pdf-editor (files), pdf-extraction (files)\nemail: himalaya-email (core)\nmedia: ascii-video (media,files,shell-write)\nplanning: product-design (files)\nproductivity: remember (memory,research)\nresearch: research-discovery (web), researcher (files,research), wiki-builder (files,research)\nsocial-media: xurl (shell-readonly,shell-write)\nsoftware-development: batch (files,shell-readonly,research), simplify (files,shell-readonly), skillify (files,research), verify (files,shell-write,browser)\ntesting: dogfooding (browser,files)\nvisualization: infographics (files), system-diagram (files)"
+    },
+    "synthetic": {
+      "skills": 12,
+      "indexChars": 189,
+      "namesShown": 8,
+      "descriptionsShown": 0,
+      "omitted": [
+        "fixture-09",
+        "fixture-10",
+        "fixture-11",
+        "fixture-12"
+      ],
+      "index": "Compact skills index:\nfixture: fixture-01 (files), fixture-02 (files), fixture-03 (files), fixture-04 (files), fixture-05 (files), fixture-06 (files), fixture-07 (files), fixture-08 (files)"
+    },
+    "categories": {
+      "automation": 1,
+      "coding": 1,
+      "creative": 2,
+      "design": 1,
+      "documents": 2,
+      "email": 1,
+      "media": 1,
+      "planning": 1,
+      "productivity": 1,
+      "research": 3,
+      "social-media": 1,
+      "software-development": 4,
+      "testing": 1,
+      "visualization": 2
+    },
+    "listToolCount": 22,
+    "listToolContentChars": 3338,
+    "contracts": [
+      {
+        "name": "hyperframes",
+        "rootChars": 14117,
+        "contractChars": 1956
+      },
+      {
+        "name": "infographics",
+        "rootChars": 10136,
+        "contractChars": 2686
+      },
+      {
+        "name": "manim-video",
+        "rootChars": 11291,
+        "contractChars": 2114
+      },
+      {
+        "name": "researcher",
+        "rootChars": 9902,
+        "contractChars": 2778
+      },
+      {
+        "name": "ui-design",
+        "rootChars": 18101,
+        "contractChars": 1555
+      },
+      {
+        "name": "wiki-builder",
+        "rootChars": 12619,
+        "contractChars": 2228
+      },
+      {
+        "name": "xurl",
+        "rootChars": 14781,
+        "contractChars": 1658
+      }
+    ],
+    "syntheticRecovery": {
+      "matches": [
+        {
+          "id": "skill:fixture-12",
+          "kind": "skill",
+          "name": "fixture-12",
+          "description": "Use when handling scenario 12. Follow the verified procedure.",
+          "toolsets": [
+            "files"
+          ],
+          "readiness_status": "available",
+          "setup_needed": false,
+          "state": "available"
+        }
+      ],
+      "truncated": false
+    }
+  },
+  "hermes": {
+    "method": "Pinned renderer function extracted with Python AST; ordinary interactive-session branch; same EstaCoda catalog; upstream description clipping checked separately. Not a full Hermes runtime or model run.",
+    "actual": {
+      "skills": 22,
+      "indexChars": 1731,
+      "totalSkillsBlockChars": 2905,
+      "namesShown": 22,
+      "descriptionsShown": 22,
+      "index": "  - api-integration: Connect an API to a destination system using...\n  - product-builder: Guides non-technical builders through agent-assisted...\n  creative:\n    - hyperframes: Create rendered MP4/WebM motion graphics from HTML, CSS...\n    - manim-video: Create mathematical, algorithmic, and technical explainer...\n  - ui-design: Apply a strong product-design critique and implementation...\n  documents:\n    - pdf-editor: Edit PDFs through a managed pdf-editor environment with...\n    - pdf-extraction: Extract text, tables, metadata, images, Markdown, and...\n  - himalaya-email: Use the Himalaya CLI for email tasks with explicit...\n  - ascii-video: Create ASCII art videos, animated logo treatments, and...\n  - product-design: Author, review, and optionally lint DESIGN.md product...\n  - remember: Review EstaCoda memory entries and propose promotions...\n  research:\n    - research-discovery: Discover research sources and academic literature...\n    - researcher: Plan, execute, analyze, draft, review, and submit...\n    - wiki-builder: Build, query, lint, and maintain a persistent markdown...\n  - xurl: Operate X/Twitter through the official xurl CLI for...\n  software-development:\n    - batch: Research and plan a large-scale change across a codebase...\n    - simplify: Review changed code for reuse, quality, and efficiency...\n    - skillify: Capture this session's repeatable process into an...\n    - verify: Verify a code change does what it should by running the app.\n  - dogfooding: Run exploratory QA on web apps with Browser inspection...\n  visualization:\n    - infographics: Turn source material into structured infographic prompts...\n    - system-diagram: Create dark-themed SVG system, cloud, infrastructure, and..."
+    },
+    "actual_compact": {
+      "skills": 22,
+      "indexChars": 635,
+      "totalSkillsBlockChars": 1984,
+      "namesShown": 22,
+      "descriptionsShown": 0,
+      "index": "  automation [names only]: api-integration\n  coding [names only]: product-builder\n  creative [names only]: hyperframes, manim-video\n  design [names only]: ui-design\n  documents [names only]: pdf-editor, pdf-extraction\n  email [names only]: himalaya-email\n  media [names only]: ascii-video\n  planning [names only]: product-design\n  productivity [names only]: remember\n  research [names only]: research-discovery, researcher, wiki-builder\n  social-media [names only]: xurl\n  software-development [names only]: batch, simplify, skillify, verify\n  testing [names only]: dogfooding\n  visualization [names only]: infographics, system-diagram"
+    },
+    "synthetic": {
+      "skills": 12,
+      "indexChars": 937,
+      "totalSkillsBlockChars": 2111,
+      "namesShown": 12,
+      "descriptionsShown": 12,
+      "index": "  fixture:\n    - fixture-01: Use when handling scenario 1. Follow the verified procedure.\n    - fixture-02: Use when handling scenario 2. Follow the verified procedure.\n    - fixture-03: Use when handling scenario 3. Follow the verified procedure.\n    - fixture-04: Use when handling scenario 4. Follow the verified procedure.\n    - fixture-05: Use when handling scenario 5. Follow the verified procedure.\n    - fixture-06: Use when handling scenario 6. Follow the verified procedure.\n    - fixture-07: Use when handling scenario 7. Follow the verified procedure.\n    - fixture-08: Use when handling scenario 8. Follow the verified procedure.\n    - fixture-09: Use when handling scenario 9. Follow the verified procedure.\n    - fixture-10: Use when handling scenario 10. Follow the verified...\n    - fixture-11: Use when handling scenario 11. Follow the verified...\n    - fixture-12: Use when handling scenario 12. Follow the verified..."
+    },
+    "synthetic_compact": {
+      "skills": 12,
+      "indexChars": 166,
+      "totalSkillsBlockChars": 1515,
+      "namesShown": 12,
+      "descriptionsShown": 0,
+      "index": "  fixture [names only]: fixture-01, fixture-02, fixture-03, fixture-04, fixture-05, fixture-06, fixture-07, fixture-08, fixture-09, fixture-10, fixture-11, fixture-12"
+    }
+  },
+  "validation": {
+    "focused_test_files": 13,
+    "passed_tests": 354,
+    "hermes_full_suite_run": false,
+    "full_estacoda_validation_run": false
+  }
+}

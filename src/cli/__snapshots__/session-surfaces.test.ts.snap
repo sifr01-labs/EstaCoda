@@ -13,7 +13,7 @@ exports[`Session surfaces — /help > renders in narrow width > help-narrow widt
 • /memory: Inspect and manage memory curation
 • /tools: Browse available tools
 • /browser: Manage local browser/CDP connection
-• /skills: Browse available skills
+• /skills: Browse available skills; /skills refresh reloads the visible catalog
 • /packs: Manage packs (install, enable, disable, uninstall)
 • /reload-mcp: Reload MCP config and refresh MCP tools for this session
 • /resume: Show the latest interrupted-turn resume note
@@ -47,7 +47,7 @@ exports[`Session surfaces — /help > renders in no Unicode > help-no Unicode 1`
 - /memory: Inspect and manage memory curation
 - /tools: Browse available tools
 - /browser: Manage local browser/CDP connection
-- /skills: Browse available skills
+- /skills: Browse available skills; /skills refresh reloads the visible catalog
 - /packs: Manage packs (install, enable, disable, uninstall)
 - /reload-mcp: Reload MCP config and refresh MCP tools for this session
 - /resume: Show the latest interrupted-turn resume note
@@ -81,7 +81,7 @@ exports[`Session surfaces — /help > renders in no color > help-no color 1`] = 
 • /memory: Inspect and manage memory curation
 • /tools: Browse available tools
 • /browser: Manage local browser/CDP connection
-• /skills: Browse available skills
+• /skills: Browse available skills; /skills refresh reloads the visible catalog
 • /packs: Manage packs (install, enable, disable, uninstall)
 • /reload-mcp: Reload MCP config and refresh MCP tools for this session
 • /resume: Show the latest interrupted-turn resume note
@@ -115,7 +115,7 @@ exports[`Session surfaces — /help > renders in plain > help-plain 1`] = `
 - /memory: Inspect and manage memory curation
 - /tools: Browse available tools
 - /browser: Manage local browser/CDP connection
-- /skills: Browse available skills
+- /skills: Browse available skills; /skills refresh reloads the visible catalog
 - /packs: Manage packs (install, enable, disable, uninstall)
 - /reload-mcp: Reload MCP config and refresh MCP tools for this session
 - /resume: Show the latest interrupted-turn resume note
@@ -149,7 +149,7 @@ exports[`Session surfaces — /help > renders in standard dark > help-standard d
 • /memory: Inspect and manage memory curation
 • /tools: Browse available tools
 • /browser: Manage local browser/CDP connection
-• /skills: Browse available skills
+• /skills: Browse available skills; /skills refresh reloads the visible catalog
 • /packs: Manage packs (install, enable, disable, uninstall)
 • /reload-mcp: Reload MCP config and refresh MCP tools for this session
 • /resume: Show the latest interrupted-turn resume note
@@ -183,7 +183,7 @@ exports[`Session surfaces — /help > renders in standard light > help-standard 
 • /memory: Inspect and manage memory curation
 • /tools: Browse available tools
 • /browser: Manage local browser/CDP connection
-• /skills: Browse available skills
+• /skills: Browse available skills; /skills refresh reloads the visible catalog
 • /packs: Manage packs (install, enable, disable, uninstall)
 • /reload-mcp: Reload MCP config and refresh MCP tools for this session
 • /resume: Show the latest interrupted-turn resume note
@@ -484,7 +484,7 @@ exports[`Session surfaces — slash menu > renders in narrow width > slash-menu-
 /memory                  Inspect and manage memory curation
 /tools                   Browse available tools
 /browser                 Manage local browser/CDP connection
-/skills                  Browse available skills
+/skills                  Browse available skills; /skills refresh reloads the visible catalog
 /packs                   Manage packs (install, enable, disable, uninstall)
 /reload-mcp              Reload MCP config and refresh MCP tools for this session
 /resume                  Show the latest interrupted-turn resume note
@@ -520,7 +520,7 @@ exports[`Session surfaces — slash menu > renders in no Unicode > slash-menu-no
 /memory                  Inspect and manage memory curation
 /tools                   Browse available tools
 /browser                 Manage local browser/CDP connection
-/skills                  Browse available skills
+/skills                  Browse available skills; /skills refresh reloads the visible catalog
 /packs                   Manage packs (install, enable, disable, uninstall)
 /reload-mcp              Reload MCP config and refresh MCP tools for this session
 /resume                  Show the latest interrupted-turn resume note
@@ -556,7 +556,7 @@ Name                     Description
 /memory                  Inspect and manage memory curation
 /tools                   Browse available tools
 /browser                 Manage local browser/CDP connection
-/skills                  Browse available skills
+/skills                  Browse available skills; /skills refresh reloads the visible catalog
 /packs                   Manage packs (install, enable, disable, uninstall)
 /reload-mcp              Reload MCP config and refresh MCP tools for this session
 /resume                  Show the latest interrupted-turn resume note
@@ -592,7 +592,7 @@ Name                     Description
 /memory                  Inspect and manage memory curation
 /tools                   Browse available tools
 /browser                 Manage local browser/CDP connection
-/skills                  Browse available skills
+/skills                  Browse available skills; /skills refresh reloads the visible catalog
 /packs                   Manage packs (install, enable, disable, uninstall)
 /reload-mcp              Reload MCP config and refresh MCP tools for this session
 /resume                  Show the latest interrupted-turn resume note
@@ -628,7 +628,7 @@ exports[`Session surfaces — slash menu > renders in standard dark > slash-menu
 /memory                  Inspect and manage memory curation
 /tools                   Browse available tools
 /browser                 Manage local browser/CDP connection
-/skills                  Browse available skills
+/skills                  Browse available skills; /skills refresh reloads the visible catalog
 /packs                   Manage packs (install, enable, disable, uninstall)
 /reload-mcp              Reload MCP config and refresh MCP tools for this session
 /resume                  Show the latest interrupted-turn resume note
@@ -664,7 +664,7 @@ exports[`Session surfaces — slash menu > renders in standard light > slash-men
 /memory                  Inspect and manage memory curation
 /tools                   Browse available tools
 /browser                 Manage local browser/CDP connection
-/skills                  Browse available skills
+/skills                  Browse available skills; /skills refresh reloads the visible catalog
 /packs                   Manage packs (install, enable, disable, uninstall)
 /reload-mcp              Reload MCP config and refresh MCP tools for this session
 /resume                  Show the latest interrupted-turn resume note

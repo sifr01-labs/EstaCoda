@@ -41,6 +41,8 @@ Implemented now:
 - Additive route/outcome telemetry fields for routing evidence, future correction signals, and final outcomes.
 - Offline deterministic routing/evolution baseline fixture metrics.
 - `SkillLearningManager` as an evidence source, not mutation authority.
+- Bounded instruction drafts after repeated selected-skill failures in proactive/autonomous mode, through the existing proposal service. Drafting may abstain; it never promotes or mutates live skills.
+- Content-bound, operator-attested paired task evidence for learned executable drafts, followed by explicit approval. Metadata checks remain separate and do not claim real-task execution. See [skills evaluation and limits](../subsystems/skills.md#paired-task-evidence).
 - Reduced governed evolution change kinds: `skill_patch`, `skill_create`, `routing_metadata_update`.
 - Durable `EvolutionExperiment` records.
 - `estacoda proposal list` and `estacoda proposal inspect <id>` review surfaces for pending proposals and linked evidence/candidates/experiments/evals.

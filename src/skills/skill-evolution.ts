@@ -1,4 +1,5 @@
 import {ProfileJsonl} from '../storage/profile-jsonl.js';
+import type { SkillTaskEvaluation } from "./skill-task-evaluation.js";
 import { appendFile, mkdir, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
@@ -37,6 +38,8 @@ export type SkillUsageRecord = {
   provenanceKind?: SkillProvenanceKind;
   useCount: number;
   viewCount: number;
+  rootReadCount?: number;
+  resourceReadCount?: number;
   successCount: number;
   failureCount: number;
   routeMatchCount: number;
@@ -160,6 +163,11 @@ export type GovernedProposalPolicyDecision = {
 };
 
 export type SkillPatchProposal = {
+  baseContentHash?: string;
+  requiresTaskEvaluation?: boolean;
+  taskEvaluation?: SkillTaskEvaluation;
+  taskEvaluatedAt?: string;
+  taskEvaluationSource?: "operator_attested";
   id: string;
   skillName: string;
   source?: SkillSourceKind;
@@ -199,6 +207,8 @@ export type SkillPatchProposal = {
 };
 
 export type SkillGovernedProposalInput = {
+  baseContentHash?: string;
+  requiresTaskEvaluation?: boolean;
   skillName: string;
   source?: SkillSourceKind;
   reason: string;
@@ -306,6 +316,8 @@ export class SkillEvolutionStore {
   readonly #now: () => Date;
   #usage = new Map<string, SkillUsageRecord>();
   #loaded = false;
+  #loading: Promise<void> | undefined;
+  #usageUpdates: Promise<void> = Promise.resolve();
   readonly #jsonl?: ProfileJsonl;
   readonly #readUsage?: () => Promise<string | undefined>;
 
@@ -393,11 +405,14 @@ export class SkillEvolutionStore {
     skillName: string;
     source?: SkillSourceKind;
     provenanceKind?: SkillProvenanceKind;
+    resource?: boolean;
   }): Promise<SkillUsageRecord> {
     const now = this.#nowIso();
     return await this.#updateUsage(input.skillName, input.source, (record) => {
       record.provenanceKind = input.provenanceKind ?? record.provenanceKind;
       record.viewCount += 1;
+      if (input.resource) record.resourceReadCount = (record.resourceReadCount ?? 0) + 1;
+      else record.rootReadCount = (record.rootReadCount ?? 0) + 1;
       record.lastViewedAt = now;
     });
   }
@@ -650,6 +665,8 @@ export class SkillEvolutionStore {
     const sourceTrust = input.sourceTrust ?? "runtime_internal";
     const requiresHumanApproval = input.requiresHumanApproval ?? !sourceTrustAllowsAutomaticPromotion(sourceTrust);
     const proposal: SkillPatchProposal = {
+      baseContentHash: input.baseContentHash,
+      requiresTaskEvaluation: input.requiresTaskEvaluation,
       id: `proposal_${randomUUID()}`,
       skillName: input.skillName,
       source: input.source,
@@ -714,6 +731,17 @@ export class SkillEvolutionStore {
       requiresHumanApproval: false,
       approvalState: "approved"
     }));
+  }
+
+  async recordProposalTaskEvaluation(id: string, taskEvaluation: SkillTaskEvaluation): Promise<SkillPatchProposal | undefined> {
+    return this.#rewriteProposal(id, (proposal) => ({
+      ...proposal, taskEvaluation, taskEvaluatedAt: this.#nowIso(), taskEvaluationSource: "operator_attested", requiresHumanApproval: true,
+      approvedAt: undefined, approvedBy: undefined, approvalState: "required"
+    }));
+  }
+
+  async linkProposalManifest(id: string, changeManifestId: string): Promise<SkillPatchProposal | undefined> {
+    return this.#rewriteProposal(id, (proposal) => ({ ...proposal, changeManifestId }));
   }
 
   async listObservations(filter: { skillName?: string; ids?: string[] } = {}): Promise<SkillObservationRecord[]> {
@@ -876,21 +904,30 @@ export class SkillEvolutionStore {
     source: SkillSourceKind | undefined,
     update: (record: SkillUsageRecord) => void
   ): Promise<SkillUsageRecord> {
-    await this.#ensureLoaded();
-    const record = this.#usage.get(skillName) ?? defaultUsageRecord(skillName, source);
-    if (source !== undefined) {
-      record.source = source;
-    }
-    update(record);
-    this.#usage.set(skillName, record);
-    await this.#flushUsage();
-    return { ...record };
+    // A tool batch may read several skills/resources concurrently. Serialize
+    // initial loading and persistence so those successful reads are not lost.
+    const result = this.#usageUpdates.then(async () => {
+      await this.#ensureLoaded();
+      const record = this.#usage.get(skillName) ?? defaultUsageRecord(skillName, source);
+      if (source !== undefined) record.source = source;
+      update(record);
+      this.#usage.set(skillName, record);
+      await this.#flushUsage();
+      return { ...record };
+    });
+    this.#usageUpdates = result.then(() => undefined, () => undefined);
+    return result;
   }
 
   async #ensureLoaded(): Promise<void> {
     if (this.#loaded) {
       return;
     }
+    this.#loading ??= this.#loadUsage().finally(() => { this.#loading = undefined; });
+    return this.#loading;
+  }
+
+  async #loadUsage(): Promise<void> {
     const raw = this.#readUsage ? await this.#readUsage() : await readFile(this.#usagePath, "utf8").catch(() => undefined);
     if (raw !== undefined) {
       try {

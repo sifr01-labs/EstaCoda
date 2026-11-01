@@ -100,6 +100,8 @@ import { SkillRegistry } from "../skills/skill-registry.js";
 import { SkillEvolutionStore } from "../skills/skill-evolution.js";
 import { ChangeManifestStore } from "../skills/change-manifest-store.js";
 import { SkillLearningManager, type SkillAutonomy } from "../skills/skill-learning.js";
+import { createSkillDrafter } from "../skills/skill-draft.js";
+import { SkillProposalService } from "../skills/skill-proposal-service.js";
 import { availableToolsetsFromTools } from "../cron/cron-runtime-validation.js";
 import { SQLiteTaskStore } from "../tasks/sqlite-task-store.js";
 import { TaskResultService } from "../tasks/task-result-service.js";
@@ -281,6 +283,7 @@ function resolveRuntimeUiIdentity(options: RuntimeOptions): string {
 }
 
 export type Runtime = {
+  readonly profileId?: string;
   browserControl?(command:import('../contracts/desktop-control/browser-human.js').HumanBrowserCommand):Promise<import('../contracts/desktop-control/browser-human.js').HumanBrowserResult>;
   validateExecutionHealth?(): Promise<void>;
   readEditorFile?(path: string): Promise<string>;
@@ -798,7 +801,9 @@ async function buildRuntime(options: RuntimeOptions, rollback: ResourceCleanup):
     localSkillsRoot,
     storePath: skillLearningStorePath,
     sessionDb,
-    skillEvolutionStore
+    skillEvolutionStore,
+    drafter: options.model.provider === "unconfigured" ? undefined : createSkillDrafter({ executor: providerExecutor, route: mainRoute, profileId }),
+    proposalService: new SkillProposalService({ registry: skillRegistry, localSkillsRoot, skillEvolutionStore, changeManifestStore })
   });
   try {
     await skillLearningManager.reconcileCreatedPaths();
@@ -1234,6 +1239,7 @@ async function buildRuntime(options: RuntimeOptions, rollback: ResourceCleanup):
       });
 
   return {
+    profileId,
     browserControl:command=>humanBrowserControl.execute(command),
     async validateExecutionHealth() {
       await executionOwner.validate(); executionLease.assertActive();

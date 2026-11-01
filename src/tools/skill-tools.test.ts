@@ -223,7 +223,7 @@ describe("skill.read", () => {
     expect(view.metadata).toEqual(read.metadata);
   });
 
-  it("does not record usage telemetry for canonical skill.read", async () => {
+  it("records a successful canonical skill.read as a view without claiming use or success", async () => {
     const recordSkillViewed = vi.fn().mockResolvedValue(undefined);
     const harness = await skillToolHarness([loadedSkill({ name: "read-telemetry" })], {
       skillEvolutionStore: { recordSkillViewed } as unknown as SkillEvolutionStore
@@ -232,7 +232,7 @@ describe("skill.read", () => {
     const result = await harness.run("skill.read", { name: "read-telemetry" });
 
     expect(result.ok).toBe(true);
-    expect(recordSkillViewed).not.toHaveBeenCalled();
+    expect(recordSkillViewed).toHaveBeenCalledExactlyOnceWith({ skillName: "read-telemetry", source: "local", provenanceKind: undefined, resource: false });
   });
 
   it("preserves legacy viewed usage recording for skill.view compatibility", async () => {
@@ -248,7 +248,8 @@ describe("skill.read", () => {
     expect(recordSkillViewed).toHaveBeenCalledWith({
       skillName: "view-telemetry",
       source: "local",
-      provenanceKind: undefined
+      provenanceKind: undefined,
+      resource: false
     });
   });
 

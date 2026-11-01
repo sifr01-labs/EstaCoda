@@ -1,4 +1,7 @@
 import { join } from "node:path";
+import { open, constants } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
+import { loadRuntimeConfig } from "../config/runtime-config.js";
 import type { CliCommandResult, CliOptions } from "./cli.js";
 import { resolveHomeDir } from "../config/home-dir.js";
 import { defaultProfileId, readActiveProfile, resolveProfileStateHome } from "../config/profile-home.js";
@@ -14,15 +17,22 @@ function resolveHome(options: CliOptions): string {
 
 async function openProposalService(options: CliOptions): Promise<SkillProposalService> {
   const home = resolveHome(options);
-  const profileId = readActiveProfile({ homeDir: home }).profileId ?? defaultProfileId();
+  const profileId = options.profileId ?? readActiveProfile({ homeDir: home }).profileId ?? defaultProfileId();
   const localSkillsRoot = resolveProfileStateHome({ homeDir: home, profileId }).skillsPath;
   const registry = new SkillRegistry();
-  const loaded = await loadSkillsFromDirectory(localSkillsRoot, {
-    sourceKind: "local",
-    sourceRoot: localSkillsRoot
-  }).catch(() => ({ skills: [], errors: [] }));
-  for (const skill of loaded.skills) {
-    registry.register(skill);
+  const config = await loadRuntimeConfig({ workspaceRoot: options.workspaceRoot, homeDir: home, profileId, configurationInspection: true });
+  // Match runtime source precedence without starting providers or loading secrets.
+  const sources = [
+    { root: join(localSkillsRoot, "packs"), kind: "external" as const },
+    { root: fileURLToPath(new URL("../../skills/official", import.meta.url)), kind: "bundled" as const },
+    { root: localSkillsRoot, kind: "local" as const },
+    ...config.skills.externalDirs.map((root) => ({ root, kind: "external" as const }))
+  ];
+  for (const { root, kind } of sources) {
+    const loaded = await loadSkillsFromDirectory(root, {
+      sourceKind: kind, sourceRoot: root, ...(kind === "local" ? { exclude: ["packs"] } : {})
+    });
+    for (const skill of loaded.skills) registry.register(skill);
   }
   const skillEvolutionStore = new SkillEvolutionStore({
     usagePath: join(localSkillsRoot, ".usage.json"),
@@ -55,6 +65,25 @@ export async function proposalCommand(options: CliOptions, args: string[]): Prom
       return proposalReject(service, restArgs);
     case "promote":
       return proposalPromote(service, restArgs);
+    case "evaluate": {
+      const [id, reportPath] = restArgs;
+      if (!id || !reportPath) return { handled: true, exitCode: 1, output: "Usage: estacoda proposal evaluate <id> <paired-task-report.json>" };
+      try {
+        const file = await open(reportPath, constants.O_RDONLY | constants.O_NOFOLLOW);
+        let report: unknown;
+        try {
+          if (!(await file.stat()).isFile()) throw new Error("Task report must be a regular file.");
+          const buffer = Buffer.alloc(128_001);
+          const { bytesRead } = await file.read(buffer, 0, buffer.length, 0);
+          if (bytesRead > 128_000) throw new Error("Task report exceeds 128 KB.");
+          report = JSON.parse(buffer.subarray(0, bytesRead).toString("utf8"));
+        } finally { await file.close(); }
+        await service.recordTaskEvaluation(id, report);
+        return { handled: true, exitCode: 0, output: "Paired task evaluation recorded as operator-attested evidence. Review and approve the proposal before promotion." };
+      } catch (error) {
+        return { handled: true, exitCode: 1, output: error instanceof Error ? error.message : String(error) };
+      }
+    }
     case undefined:
     case "help":
     case "--help":
@@ -81,6 +110,7 @@ function proposalHelp(): string {
     "  estacoda proposal list --status <s>    Filter by status (proposed|promoted|rejected)",
     "  estacoda proposal inspect <id>         Show proposal details with linked review records",
     "  estacoda proposal approve <id>         Mark proposal as approved",
+    "  estacoda proposal evaluate <id> <json> Record operator-attested paired task results; resets approval",
     "  estacoda proposal reject <id>          Reject a proposal",
     "  estacoda proposal promote <id>         Promote proposal after eval gates"
   ].join("\n");

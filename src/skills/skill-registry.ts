@@ -66,6 +66,14 @@ export class SkillRegistry {
     return this.#skills.get(name);
   }
 
+  /** Replace an explicitly mutated file; ordinary loading still resolves duplicate sources. */
+  replaceLoaded(skill: LoadedSkill): void {
+    const current = this.#skills.get(skill.name);
+    if (current && "sourcePath" in current && current.sourcePath === skill.sourcePath && current.sourceKind === skill.sourceKind) {
+      this.#skills.set(skill.name, skill);
+    } else this.register(skill);
+  }
+
   resolve(name: string): LoadedSkill | SkillDefinition | undefined {
     return this.get(name);
   }

@@ -1539,6 +1539,8 @@ export class AgentLoop {
     }
     if (finalizationNote) response.text += `\n\n${finalizationNote}`;
     await this.#skillLearningManager?.observeTurn({
+      signal: input.signal,
+      usage: await this.#providerUsageLineage(visibleTurn.id),
       profileId: this.#profileId,
       sessionId: this.#currentSessionId(),
       userText: effectiveText,

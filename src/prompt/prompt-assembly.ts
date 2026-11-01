@@ -1951,7 +1951,7 @@ function renderMemoryBlock(block: PromptMemoryBlock, maxChars: number): string {
   ].join("\n");
 }
 
-function renderSkillsIndex(skills: SkillCatalogEntry[] | undefined): string {
+export function renderSkillsIndex(skills: SkillCatalogEntry[] | undefined): string {
   if (skills === undefined || skills.length === 0) {
     return "Skills index: no skills loaded.";
   }
@@ -1962,17 +1962,29 @@ function renderSkillsIndex(skills: SkillCatalogEntry[] | undefined): string {
     grouped.set(category, [...(grouped.get(category) ?? []), skill]);
   }
 
-  return [
-    "Compact skills index:",
+  const render = (descriptions: boolean) => [
+    descriptions ? "Skills index (short descriptions; use skill.read for instructions):" :
+      "Skills index (compressed to names and toolsets; all eligible names retained; use skill.list for descriptions):",
     ...[...grouped.entries()]
       .sort(([left], [right]) => left.localeCompare(right))
       .map(([category, entries]) =>
         `${category}: ${entries
-          .slice(0, 8)
-          .map((skill) => `${skill.name} (${skill.requiredToolsets.join(",") || "no-tools"})`)
-          .join(", ")}`
+          .slice().sort((left, right) => left.name.localeCompare(right.name))
+          .map((skill) => `${skill.name} (${skill.requiredToolsets.join(",") || "no-tools"})${descriptions ? ` — ${shortSkillDescription(skill.description)}` : ""}`)
+          .join("; ")}`
       )
   ].join("\n");
+  const full = render(true);
+  // The description budget must never become a name-count limit.
+  return full.length <= 6_000 ? full : render(false);
+}
+
+function shortSkillDescription(value: string): string {
+  const text = value.replace(/\s+/gu, " ").trim();
+  if (text.length <= 80) return text;
+  const prefix = text.slice(0, 79);
+  const boundary = prefix.lastIndexOf(" ");
+  return `${prefix.slice(0, boundary > 40 ? boundary : prefix.length)}…`;
 }
 
 function cacheKey(name: PromptLayerName, content: string): string {
