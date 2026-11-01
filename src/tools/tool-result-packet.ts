@@ -1,6 +1,7 @@
 import type { ToolResult } from "../contracts/tool.js";
 import type { ToolExecutionRecord } from "./tool-executor.js";
 import { DELEGATE_TASK_MAX_RESULT_CHARS } from "../contracts/delegation.js";
+import { outputReadHint } from "../session/tool-output-retention.js";
 
 export type ToolResultPacket = {
   tool: string;
@@ -17,6 +18,9 @@ export type ToolResultPacket = {
 /** Per-result ceilings; the prompt packer's aggregate context budget still applies. */
 export function providerVisibleToolResultMaxChars(toolName: string, defaultMaxChars = 1_400): number {
   if (toolName === "delegate_task") return DELEGATE_TASK_MAX_RESULT_CHARS;
+  // A recovered page must arrive intact: clipping it while advancing nextOffset
+  // would silently skip evidence again. The tool enforces its own bounded JSON.
+  if (toolName === "session_search") return 20_000;
   return ["file.read", "terminal.run", "terminal.inspect", "process.logs", "execute_code"].includes(toolName)
     ? 16_000 : defaultMaxChars;
 }
@@ -55,6 +59,10 @@ export function packetizeToolResult(input: {
   const excerpt = truncated
     ? `${content.slice(0, headEnd)}\n[... ${tailStart - headEnd} characters omitted ...]\n${content.slice(tailStart)}`
     : content;
+  const metadata = input.result?.metadata;
+  const retainedReference = metadata?.retainedOutput === true && typeof metadata.observationSessionId === "string" &&
+    typeof metadata.observationMessageId === "string"
+    ? outputReadHint(metadata.observationSessionId, metadata.observationMessageId) : undefined;
 
   return {
     tool: input.tool,
@@ -64,7 +72,7 @@ export function packetizeToolResult(input: {
     sentChars: excerpt.length,
     truncated,
     excerpt,
-    ...(truncated ? { recoveryHint: input.tool === "file.read"
+    ...(retainedReference ? { recoveryHint: retainedReference } : truncated ? { recoveryHint: input.tool === "file.read"
       ? "Read smaller ranges with file.read lineStart/lineEnd; do not repeat the whole-file read or treat this excerpt as full content."
       : "Inspect saved output files with bounded file.read ranges, or use process.logs tailChars for managed processes. Do not rerun a mutating command just to recover output." } : {}),
     metadataSummary: summarizeMetadata(input.result?.metadata)

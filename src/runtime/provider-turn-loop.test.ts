@@ -5347,6 +5347,21 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     expect(result.completionValidationFailure).toBe("missing-check");
   });
 
+  it("delivers a revalidated candidate when the last allowed call settles its check", async () => {
+    const passed: ToolExecutionRecord = { ...toolExecutionForTool("passed", "terminal.run", "PASS"),
+      input: { command: "test -s REPORT.md", verification: "report-check" },
+      result: { ok: true, content: "PASS", metadata: { code: 0, signal: null, timedOut: false, cancelled: false } } };
+    const harness = await createPostToolNudgeHarness({ responses: [providerExecution("Supported findings, report in REPORT.md."),
+      providerExecution("", [providerToolCall("check", "{}", "terminal.run")])],
+      toolSteps: [{}, { executions: [passed] }], maxProviderIterations: 2 });
+    const result = await runBasicProviderTurn(harness.loop, { validateCompletion: (_text, calls) => calls.includes(passed) ? undefined : "missing-check" });
+    expect(result.terminationCause).toBe("budget_exhausted");
+    expect(result.providerExecution?.response?.content).toBe("Supported findings, report in REPORT.md.");
+    expect(result.completionCandidate).toBeUndefined();
+    expect(result.completionValidationFailure).toBeUndefined();
+    expect(harness.completeSpy).toHaveBeenCalledTimes(2);
+  });
+
   it("retains the substantive rejected candidate and original defect when the repair exhausts its iterations", async () => {
     const harness = await createPostToolNudgeHarness({ responses: [providerExecution("Useful but unaccepted draft"),
       providerExecution("", [providerToolCall("search", "{}", "web.search")])],

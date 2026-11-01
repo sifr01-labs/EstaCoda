@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import type { RegisteredTool, ToolResult } from "../contracts/tool.js";
 import type { LoadedSkill } from "../contracts/skill.js";
 import { createSkillTools } from "./skill-tools.js";
+import { createDelegationTools } from "./delegation-tools.js";
 import { SKILL_READ_MAX_CHARS } from "../skills/skill-limits.js";
 import { CHARS_PER_TOKEN } from "../prompt/token-estimator.js";
 import type { ToolExecutionRecord } from "./tool-executor.js";
@@ -28,6 +29,18 @@ function execution(result: ToolResult, overrides: Partial<ToolExecutionRecord> =
 }
 
 describe("session capability recovery requests", () => {
+  it("discovers why durable delegation is unavailable without exposing an executable schema", async () => {
+    const registry = new ToolRegistry();
+    for (const tool of createDelegationTools({ trustedWorkspace: () => true })) registry.register(tool);
+    const recovery = new SessionCapabilityRecovery({ registry, skills: new SkillRegistry() });
+    const snapshot = await registry.snapshot();
+    recovery.bindCatalog(buildProviderToolSchemaCatalog({ tools: snapshot.available, unavailableTools: snapshot.unavailable }));
+    recovery.beginTurn({ ...scope, tools: [] });
+    const result = recovery.discover({ ids: ["tool:delegate_task"] }, scope);
+    expect(JSON.stringify(result)).toContain("persistent SQLite Task store");
+    expect(await recovery.toolSchema("tool:delegate_task")).toBeUndefined();
+  });
+
   it("treats empty discovery IDs as no filter without allowing empty exposure requests", () => {
     const { recovery } = harness();
     expect(recovery.discover({ ids: [], query: "test" }, scope)).toEqual(recovery.discover({ query: "test" }, scope));

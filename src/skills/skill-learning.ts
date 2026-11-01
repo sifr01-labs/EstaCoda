@@ -1,3 +1,4 @@
+import { learningDraftEvidence, learningFindings, learningLesson, type LearningTurnDiagnostics } from "./learning-diagnostics.js";
 import * as fs from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import type { AgentEvolutionPolicy } from "../contracts/agent-evolution.js";
@@ -114,6 +115,7 @@ export class SkillLearningManager {
     routeConfidence?: number;
     promptHash?: string;
     outcomeStatus?: SkillRouteFinalOutcomeStatus;
+    turnDiagnostics?: LearningTurnDiagnostics;
     correctionSignals?: SkillRouteCorrectionSignal[];
     modelSelfCorrectionSignal?: string;
     candidatesShown?: string[];
@@ -162,7 +164,7 @@ export class SkillLearningManager {
       promptSummary: workflow.content,
       toolsAttempted: workflow.tools,
       outcome: observationOutcomeFromFinalStatus(input.outcomeStatus),
-      lesson: `No skill was selected for a repeated local workflow using ${workflow.tools.join(", ")}.`,
+      lesson: learningLesson(learningFindings(input.toolExecutions, input.turnDiagnostics), `No skill was selected for a local workflow using ${workflow.tools.join(", ")}.`),
       candidateImprovement: candidateImprovementForSuggestedTarget(suggestedTarget),
       sourceTrust: "runtime_internal",
       mayPromoteAutomatically: false,
@@ -250,6 +252,7 @@ export class SkillLearningManager {
     routeConfidence?: number;
     promptHash?: string;
     outcomeStatus?: SkillRouteFinalOutcomeStatus;
+    turnDiagnostics?: LearningTurnDiagnostics;
     correctionSignals?: SkillRouteCorrectionSignal[];
     modelSelfCorrectionSignal?: string;
     candidatesShown?: string[];
@@ -270,9 +273,9 @@ export class SkillLearningManager {
       promptSummary: promptSummaryForLearning(input.userText),
       toolsAttempted: tools,
       outcome: observationOutcomeFromFinalStatus(input.outcomeStatus),
-      lesson: finalSkillUsed === selectedSkillName
+      lesson: learningLesson(learningFindings(input.toolExecutions, input.turnDiagnostics), finalSkillUsed === selectedSkillName
         ? `Selected skill ${selectedSkillName} completed with outcome ${input.outcomeStatus ?? "unknown"}.`
-        : `Selected skill ${selectedSkillName} was corrected to final skill ${finalSkillUsed}.`,
+        : `Selected skill ${selectedSkillName} was corrected to final skill ${finalSkillUsed}.`),
       candidateImprovement: candidateImprovementForSuggestedTarget(suggestedTarget),
       sourceTrust: "runtime_internal",
       mayPromoteAutomatically: false,
@@ -351,6 +354,7 @@ export class SkillLearningManager {
     const evidence = await this.#skillEvolutionStore.listObservations({ skillName: skill.name, ids: record.evidenceIds });
     const failures = evidence.filter((item) => item.sourceTrust === "runtime_internal" && item.outcome === "failed");
     if (new Set(failures.map((item) => item.sessionId).filter(Boolean)).size < 2) return record;
+    if (failures.every(item => learningDraftEvidence(item.evidence).runtimeOnly)) return record;
     record = await this.#store.recordDraft(record.key, "attempted");
     try {
       const content = await readBoundedSkillFile(skill.sourceRoot, skill.sourcePath);
@@ -359,7 +363,7 @@ export class SkillLearningManager {
         content, candidateId: candidate.id, sessionId: input.sessionId, policy, signal: input.signal, usage: input.usage,
         // No raw user text, tool arguments, outputs, credentials, or arbitrary lessons enter the draft prompt.
         evidence: failures.slice(-6).map((item) => ({ outcome: item.outcome, tools: item.toolsAttempted.slice(0, 20),
-          lesson: "The selected skill did not complete this task successfully." }))
+          lesson: learningDraftEvidence(item.evidence).lesson }))
       });
       if (patch && !input.signal?.aborted) {
         const result = await this.#proposals.createProposalFromLearningCandidate({
@@ -383,6 +387,7 @@ function buildLearningEvidence(
     noSkillResult?: SkillRouteNoSkillResult;
     routeConfidence?: number;
     outcomeStatus?: SkillRouteFinalOutcomeStatus;
+    turnDiagnostics?: LearningTurnDiagnostics;
     correctionSignals?: SkillRouteCorrectionSignal[];
     modelSelfCorrectionSignal?: string;
     candidatesShown?: string[];
@@ -399,6 +404,8 @@ function buildLearningEvidence(
     finalSkillUsed: input.finalSkillUsed,
     noSkillResult: input.noSkillResult,
     outcomeStatus: input.outcomeStatus,
+    findings: learningFindings(input.toolExecutions, input.turnDiagnostics),
+    turnDiagnostics: input.turnDiagnostics,
     correctionSignals: input.correctionSignals,
     modelSelfCorrectionSignal: input.modelSelfCorrectionSignal,
     candidatesShown: input.candidatesShown,
@@ -416,6 +423,7 @@ function buildLearningEvidence(
 function selectedSkillSuggestedTarget(
   input: {
     outcomeStatus?: SkillRouteFinalOutcomeStatus;
+    turnDiagnostics?: LearningTurnDiagnostics;
     correctionSignals?: SkillRouteCorrectionSignal[];
     candidatesRejected?: SkillRouteRejectedCandidate[];
     searchedReplacementSkill?: string;

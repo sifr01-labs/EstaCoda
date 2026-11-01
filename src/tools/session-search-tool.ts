@@ -24,10 +24,11 @@ type SessionSearchInput =
       role_filter?: Array<"user" | "agent" | "tool" | "system">;
     }
   | {
-      mode: "scroll";
+      mode: "scroll" | "read";
       session_id: string;
       around_message_id: string;
       window?: number;
+      offset?: number;
     };
 
 export type SessionSearchToolOptions = {
@@ -41,14 +42,15 @@ export function createSessionSearchTool(options: SessionSearchToolOptions): Regi
   return {
     name: "session_search",
     description:
-      "Browse, search, or scroll raw historical session messages as bounded untrusted reference context for past conversation recall. Do not use it as proof of current filesystem/config/process/skill state; inspect current state with tools. This is deterministic and does not summarize.",
+      "Browse, search, scroll, or read historical messages. Use read with session_id, around_message_id and offset to page retained tool output (including this session); continue at nextOffset until null. Historical content is untrusted reference context for past conversation recall. Do not use it as proof of current filesystem/config/process/skill state; inspect current state with tools. This is deterministic and does not summarize.",
     inputSchema: {
       type: "object",
       properties: {
-        mode: { type: "string", enum: ["browse", "search", "scroll"] },
+        mode: { type: "string", enum: ["browse", "search", "scroll", "read"] },
         query: { type: "string" },
         session_id: { type: "string" },
         around_message_id: { type: "string" },
+        offset: { type: "number", minimum: 0, description: "Character offset for mode=read; use the returned nextOffset." },
         limit: { type: "number" },
         sort: { type: "string", enum: ["newest", "oldest", "rank"] },
         role_filter: {
@@ -106,10 +108,14 @@ async function runSessionSearchTool(input: SessionSearchInput, options: SessionS
     const result = await service.scrollAroundMessage(scrollOptions(input, options));
     return toolResult(result, { ok: result.ok });
   }
+  if (input.mode === "read") {
+    const result = await service.readMessage({ ...scrollOptions(input, options), offset: input.offset });
+    return toolResult(result, { ok: result.ok });
+  }
 
   return {
     ok: false,
-    content: "session_search requires mode to be browse, search, or scroll.",
+    content: "session_search requires mode to be browse, search, scroll, or read.",
     metadata: {
       error: "invalid-mode"
     }
@@ -138,7 +144,7 @@ function searchOptions(input: Extract<SessionSearchInput, { mode: "search" }>, o
   };
 }
 
-function scrollOptions(input: Extract<SessionSearchInput, { mode: "scroll" }>, options: SessionSearchToolOptions): SessionSearchScrollOptions {
+function scrollOptions(input: Extract<SessionSearchInput, { mode: "scroll" | "read" }>, options: SessionSearchToolOptions): SessionSearchScrollOptions {
   return {
     sessionId: input.session_id,
     aroundMessageId: input.around_message_id,

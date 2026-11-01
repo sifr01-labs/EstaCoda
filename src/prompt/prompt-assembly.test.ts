@@ -1909,7 +1909,7 @@ describe("assembleProviderContinuationPrompt", () => {
       .toBeLessThan(prompt.messages.length - 1);
   });
 
-  it("uses a fixed native-history allowance for a one-million-token model", () => {
+  it("uses a bounded adaptive native-history allowance for a one-million-token model", () => {
     const rawSessionHistory: SessionMessage[] = [];
     for (let index = 0; index < 10; index += 1) {
       const callId = `call-native-${index}`;
@@ -1948,12 +1948,11 @@ describe("assembleProviderContinuationPrompt", () => {
     const nativeToolMessages = prompt.messages.filter((message) => message.role === "tool");
 
     expect(nativeToolMessages.length).toBeGreaterThan(0);
-    expect(nativeToolMessages.length).toBeLessThan(10);
+    expect(nativeToolMessages.length).toBe(10);
     expect(rendered).toContain("native-result-9");
-    expect(rendered).not.toContain("native-result-0-");
-    expect(rendered).toContain("Earlier native tool group repacked");
+    expect(rendered).toContain("native-result-0-");
     expect(prompt.budget.layers.find((layer) => layer.name === "native-history")?.estimatedTokens)
-      .toBeLessThanOrEqual(12_000);
+      .toBeLessThanOrEqual(64_000);
   });
 
   it("excludes the active current user from native history selection and appends it once at the end", () => {

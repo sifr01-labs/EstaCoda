@@ -1,3 +1,4 @@
+import { outputReadHint, toolOutputPreview, TOOL_OUTPUT_RETAINED_CHARS } from "../session/tool-output-retention.js";
 import { TurnWebReadCache, webReadFingerprint } from "./turn-web-read-cache.js";
 import { isUndispatchedResult } from "./undispatched-result.js";
 import { validateCurrentExecutionAuthority, withExecutionOperation } from "../runtime/live-execution-authority.js";
@@ -769,28 +770,36 @@ export class ToolExecutor {
       }
     }
 
-    const storedResult = redactToolResultForPersistence(truncateToolResultForStorage(result));
-    await this.#sessionDb.appendEvent(request.sessionId, {
-      kind: "tool-result",
-      tool: tool.name,
-      result: storedResult,
-      toolCallId: request.toolCallId,
-      toolCallName: request.toolCallName,
-      providerNativeToolCall: persistedCall.providerNativeToolCall
-    });
-    await this.#sessionDb.appendMessage({
+    // Redact before retaining: the durable observation is distinct from its prompt/event preview.
+    const redactedResult = redactToolResultForPersistence(result);
+    const retained = redactedResult.content.length > MAX_STORED_TOOL_RESULT_CHARS;
+    const retentionLimited = redactedResult.content.length > TOOL_OUTPUT_RETAINED_CHARS;
+    const durableContent = retentionLimited
+      ? `${redactedResult.content.slice(0, TOOL_OUTPUT_RETAINED_CHARS)}\n[Retention limit: ${redactedResult.content.length - TOOL_OUTPUT_RETAINED_CHARS} characters not retained.]`
+      : redactedResult.content;
+    const message = await this.#sessionDb.appendMessage({
       sessionId: request.sessionId,
       role: "tool",
-      content: storedResult.content,
+      content: durableContent,
       metadata: {
-        tool: tool.name,
-        tool_call_id: request.toolCallId,
-        tool_call_name: request.toolCallName,
-        provider_native_tool_call: persistedCall.providerNativeToolCall,
-        ok: result.ok,
-        truncated: storedResult.metadata?.truncatedForStorage,
-        ...contextSummaryMetadata(storedResult.metadata)
+        tool: tool.name, tool_call_id: request.toolCallId, tool_call_name: request.toolCallName,
+        provider_native_tool_call: persistedCall.providerNativeToolCall, ok: result.ok,
+        ...(retained ? { retainedOutput: true, retentionLimited, originalChars: redactedResult.content.length } : {}),
+        ...contextSummaryMetadata(redactedResult.metadata)
       }
+    });
+    const storedResult = retained ? {
+      ...redactedResult,
+      content: `${toolOutputPreview(durableContent)}\n${outputReadHint(request.sessionId, message.id)}`,
+      metadata: { ...redactedResult.metadata, retainedOutput: true, retentionLimited,
+        originalChars: redactedResult.content.length, observationMessageId: message.id }
+    } : redactedResult;
+    if (retained) result = { ...result, metadata: { ...result.metadata,
+      retainedOutput: true, retentionLimited, observationMessageId: message.id, observationSessionId: request.sessionId } };
+    await this.#sessionDb.appendEvent(request.sessionId, {
+      kind: "tool-result", tool: tool.name, result: storedResult,
+      toolCallId: request.toolCallId, toolCallName: request.toolCallName,
+      providerNativeToolCall: persistedCall.providerNativeToolCall
     });
     this.#trajectoryRecorder.record("tool-result", {
       tool: tool.name,

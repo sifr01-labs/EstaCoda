@@ -12,6 +12,15 @@ describe("deriveSessionHistoryBudget", () => {
 });
 
 describe("packSessionHistory", () => {
+  it("keeps a recovery address in a bounded non-native observation preview", () => {
+    const packed = packSessionHistory([{ id: "observation", sessionId: "session", role: "tool",
+      content: "HEAD" + "x".repeat(30_000) + "TAIL", metadata: { retainedOutput: true } }]);
+    expect(packed.messages[0]?.content).toContain('around_message_id="observation"');
+    expect(packed.messages[0]?.content).toContain("HEAD");
+    expect(packed.messages[0]?.content).toContain("TAIL");
+    expect(packed.messages[0]!.content.length).toBeLessThan(13_000);
+  });
+
   it("reserves expanded repair context for the latest rejected candidate only", () => {
     const draft = "Research paragraph. ".repeat(1500);
     const packed = packSessionHistory([

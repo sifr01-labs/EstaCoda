@@ -140,7 +140,7 @@ describe("session_search tool", () => {
     expect(JSON.stringify(tool.inputSchema)).toContain("window");
     expect(schema.type).toBe("object");
     expect(schema.oneOf).toBeUndefined();
-    expect(schema.properties?.mode?.enum).toEqual(["browse", "search", "scroll"]);
+    expect(schema.properties?.mode?.enum).toEqual(["browse", "search", "scroll", "read"]);
     expect(schema.properties?.sort?.enum).toEqual(["newest", "oldest", "rank"]);
     expect(schema.required).toEqual(["mode"]);
   });

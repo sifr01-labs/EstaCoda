@@ -911,8 +911,7 @@ describe("createRuntime MCP trust gating", () => {
     try {
       const tools = runtime.tools();
       const expectedToolNames = providerToolNameGroups
-        .flatMap((group) => group.toolNames)
-        .filter((name) => name !== "delegate_task");
+        .flatMap((group) => group.toolNames);
       expect(tools.map((tool) => tool.name)).toEqual(expectedToolNames);
 
       const providerMetadataByToolName = buildProviderMetadataLookup();
@@ -1601,6 +1600,7 @@ describe("createRuntime MCP trust gating", () => {
               "command",
               "timeoutMs",
               "verification",
+              "verificationInputs",
             ],
             "toolsets": [
               "shell-readonly",
@@ -2405,6 +2405,7 @@ describe("createRuntime MCP trust gating", () => {
               "around_message_id",
               "limit",
               "mode",
+              "offset",
               "query",
               "role_filter",
               "session_id",
@@ -2981,9 +2982,35 @@ describe("createRuntime MCP trust gating", () => {
             ],
           },
           {
+            "maxResultSizeChars": 8000,
+            "name": "delegate_task",
+            "orderIndex": 107,
+            "providerKind": "session",
+            "providerPhase": "post-tool-executor",
+            "requiredConfig": undefined,
+            "riskClass": "shared-state-mutation",
+            "schemaAliasOrder": [
+              "allowedTools",
+              "allowedToolsets",
+              "context",
+              "executionPreference",
+              "modelOverride",
+              "research",
+              "role",
+              "synthesis",
+              "task",
+              "tasks",
+            ],
+            "toolsets": [
+              "core",
+              "research",
+              "coding",
+            ],
+          },
+          {
             "maxResultSizeChars": 48000,
             "name": "execute_code",
-            "orderIndex": 107,
+            "orderIndex": 108,
             "providerKind": "session",
             "providerPhase": "post-tool-executor",
             "requiredConfig": undefined,
@@ -2994,6 +3021,7 @@ describe("createRuntime MCP trust gating", () => {
               "maxOutputChars",
               "timeoutMs",
               "verification",
+              "verificationInputs",
             ],
             "toolsets": [
               "coding",
@@ -3111,6 +3139,7 @@ describe("createRuntime MCP trust gating", () => {
           "knowledge.memory.inspect",
           "knowledge.memory.deactivate",
           "knowledge.code.query",
+          "delegate_task",
           "execute_code",
         ]
       `);
@@ -3189,11 +3218,12 @@ describe("createRuntime MCP trust gating", () => {
     }
   });
 
-  it("omits delegate_task when durable Task persistence is unavailable", async () => {
+  it("registers unavailable durable delegation without making it executable", async () => {
     const options = await minimalRuntimeOptions();
     const runtime = await createRuntime({ ...options, sessionDb: new InMemorySessionDB() });
     try {
-      expect(runtime.tools().map((tool) => tool.name)).not.toContain("delegate_task");
+      const tool = runtime.tools().find((tool) => tool.name === "delegate_task");
+      expect(tool).toBeDefined();
       await expect(runtime.executeTool?.({
         tool: "delegate_task",
         toolInput: { task: "Do not run" },

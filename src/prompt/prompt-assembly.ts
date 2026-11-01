@@ -1,3 +1,4 @@
+import { retainedOutputMessage, outputReadHint, toolOutputPreview } from "../session/tool-output-retention.js";
 import { requiresAnyFileContentVerification } from "../contracts/request-requirements.js";
 import { historyContentLimit, truncateHistoryContent } from "./history-content.js";
 import { taskResultContext } from "./task-result-context.js";
@@ -1297,7 +1298,7 @@ function buildNativePromptHistory(
     }
     return undefined;
   }
-  const rawMessages = priorNativeHistoryMessages(input.rawSessionHistory ?? [], input.userText);
+  const rawMessages = priorNativeHistoryMessages((input.rawSessionHistory ?? []).map(retainedOutputMessage), input.userText);
   if (rawMessages.length === 0) {
     return {
       messages: [],
@@ -1311,7 +1312,7 @@ function buildNativePromptHistory(
   }
 
   const selectedWindow = selectNativeHistoryWindow(rawMessages, {
-    maxTokens: Math.min(budgetTarget, ACTIVE_NATIVE_HISTORY_MAX_TOKENS),
+    maxTokens: Math.min(budgetTarget, Math.max(ACTIVE_NATIVE_HISTORY_MAX_TOKENS, Math.min(64_000, Math.floor(budgetTarget * 0.3)))),
     reservedTokens: 0
   });
   // The native-history builder already fences route-specific reasoning echo.
@@ -1599,7 +1600,7 @@ function repackNativeHistoryUnits(units: NativeHistoryUnit[]): PromptSessionHist
     const message = repackNativeHistoryUnit(units[index]!);
     const content = stringifyProviderMessageContent(message.content);
     if (usedChars + content.length > REPACKED_NATIVE_HISTORY_MAX_CHARS) {
-      break;
+      continue;
     }
     packed.unshift(message);
     usedChars += content.length;
@@ -1608,7 +1609,9 @@ function repackNativeHistoryUnits(units: NativeHistoryUnit[]): PromptSessionHist
   if (packed.length < units.length) {
     packed.unshift({
       role: "assistant",
-      content: `[Earlier native history repacked: ${units.length - packed.length} unit(s) omitted.]`
+      content: `[Earlier native history repacked: ${units.length - packed.length} unit(s) omitted. Historical observations can be paged with session_search mode=read; they do not prove current state. The reference index below includes at most the latest 16 results; use session_search search/scroll for older observations.]\n` +
+        units.flatMap(unit => unit.kind === "message" ? [] : unit.messages.slice(1)).slice(-16)
+          .map(message => `${message.metadata?.tool ?? "tool"}: session_id=${JSON.stringify(message.sessionId)} around_message_id=${JSON.stringify(message.id)}`).join("\n")
     });
   }
   return packed;
@@ -1648,8 +1651,8 @@ function repackNativeHistoryUnit(unit: NativeHistoryUnit): PromptSessionHistoryM
       `tools=${tools.length > 0 ? [...new Set(tools)].join(",") : "unknown"}`,
       `calls=${calls.length}`,
       `results=${Math.max(0, unit.messages.length - 1)}`,
-      ...unit.messages.slice(1).map(message => `Retained observation ${message.id}: ${truncate(redactSensitiveText(stripInlineReasoning(message.content)), 900)}`),
-      `Full messages remain in session ${assistant?.sessionId ?? "current"}; use session_search if available to retrieve omitted content.`
+      ...unit.messages.slice(1).map(message => `Retained observation ${message.id}: ${toolOutputPreview(redactSensitiveText(stripInlineReasoning(message.content)), 600)}`),
+      ...unit.messages.slice(1).map(message => outputReadHint(message.sessionId, message.id))
     ].join(" ")
   };
 }

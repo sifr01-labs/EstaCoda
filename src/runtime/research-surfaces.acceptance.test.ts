@@ -1,7 +1,7 @@
 import { PassThrough } from "node:stream";
-import { readFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
 import { join } from "node:path";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type { AgentLoopResponse } from "./agent-loop.js";
 import type { ChannelMessage } from "../contracts/channel.js";
 import { runSessionLoop } from "../cli/session-loop.js";
@@ -10,6 +10,8 @@ import { createFakeTelegramAdapter } from "../test/fakes/fake-telegram-adapter.j
 import { createSecurityPolicyForMode } from "../security/security-policy-factory.js";
 import { createResearchWorkflowHarness, nativeCall, answer, REPORT } from "../eval/fixtures/research-workflow-harness.js";
 import { measureResearchWorkflow } from "../eval/fixtures/research-workflow-release.js";
+import { ExecutionEvidenceIndex } from "./execution-evidence-index.js";
+import { commandCompletionChecks } from "./command-completion-checks.js";
 
 type Harness = Awaited<ReturnType<typeof createResearchWorkflowHarness>>;
 type Surface = "cli" | "telegram";
@@ -50,6 +52,39 @@ async function surface(h: Harness, kind: Surface) {
 }
 
 describe.sequential("research through real CLI and Telegram entry points", () => {
+  it.each([false, true])("delivers the comparison after checks and a report patch through Telegram (limit=%s)", async atLimit => {
+    const h = await createResearchWorkflowHarness({ maxToolCalls: atLimit ? 7 : 8 });
+    const entry = await surface(h, "telegram");
+    const sendText = vi.spyOn(entry.adapter.delivery!, "sendText");
+    try {
+      await writeFile(join(h.workspaceRoot, "source.txt"), "Local implementation evidence.\n".repeat(800));
+      h.enqueue(nativeCall("file_read", { path: "source.txt" }));
+      for (const verification of ["upstream-tests", "local-tests", "comparison-results"]) {
+        h.enqueue(nativeCall("terminal_run", { command: "test -s source.txt", verification,
+          verificationInputs: ["source.txt", "package.json"], timeoutMs: 1000 }));
+      }
+      h.enqueue(nativeCall("file_write", { path: "REPORT.md", content: "# Comparison\n\nPreliminary local findings." }),
+        nativeCall("file_patch", { mode: "replace", path: "REPORT.md", old_string: "Preliminary", new_string: "Source-backed" }),
+        nativeCall("file_read", { path: "REPORT.md" }));
+      if (!atLimit) h.enqueue(answer("Local comparison saved to REPORT.md. The three declared checks passed. This is a deterministic source comparison; no live performance ranking was established."));
+      const result = await entry.turn("Compare the local agent codebases using only source.txt. Run three local checks, then write and read back REPORT.md. No web research or delegation is needed.");
+      expect(result.matchedSkills).toContain("external-agent-runtime-comparison");
+      expect(h.scriptErrors).toEqual([]);
+      expect(h.remainingSteps()).toBe(0);
+      expect(result.toolExecutions.filter(call => call.tool.name === "terminal.run")).toHaveLength(3);
+      const evidence = new ExecutionEvidenceIndex();
+      for (const call of result.toolExecutions) evidence.record(call, "test-turn");
+      expect(commandCompletionChecks(result.toolExecutions, evidence.recordsForTurn("test-turn")).passedRequirements).toHaveLength(3);
+      expect(await readFile(join(h.workspaceRoot, "REPORT.md"), "utf8")).toContain("Source-backed");
+      expect(result.text).toContain("REPORT.md");
+      if (atLimit) {
+        expect(result.finalOutcome?.terminationCause).toBe("budget_exhausted");
+        expect(result.text).toContain("Outputs written");
+      } else expect(result.text).toContain("no live performance ranking");
+      expect(sendText.mock.calls.filter(([, text]) => text === result.text)).toHaveLength(1);
+    } finally { await entry.close(); await h.dispose(); }
+  });
+
   it.each<Surface>(["cli", "telegram"])("%s runs three workers, synthesis and restart save without a second batch", async (kind) => {
     const result = await measureResearchWorkflow({ harnessOptions: { securityPolicy: createSecurityPolicyForMode("open") }, surface: (h) => surface(h, kind) });
     expect(result).toMatchObject({ workers: 3, acceptedResults: 5, tasks: 1, searches: 3, finalOutcome: "completed", restarted: true });

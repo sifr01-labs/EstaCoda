@@ -123,6 +123,27 @@ export class SessionSearchService {
     this.#sessionDb = options.sessionDb;
   }
 
+  async readMessage(options: SessionSearchScrollOptions & { offset?: number }) {
+    if (typeof options.sessionId !== "string" || !options.sessionId || typeof options.aroundMessageId !== "string" || !options.aroundMessageId) {
+      return { ok: false, error: { code: "invalid-reference", message: "read requires session_id and around_message_id" } };
+    }
+    // Reuse exactly the same profile/workspace/child-session boundary as scroll.
+    const access = await this.scrollAroundMessage({ ...options, window: 1 });
+    if (!access.ok) return access;
+    if (options.offset !== undefined && (!Number.isSafeInteger(options.offset) || options.offset < 0)) {
+      return { ok: false, error: { code: "invalid-offset", message: "offset must be a non-negative safe integer" } };
+    }
+    const message = (await this.#sessionDb.listMessages(options.sessionId)).find(item => item.id === options.aroundMessageId);
+    if (!message) return { ok: false, error: { code: "message-not-found" } };
+    const content = redactSensitiveText(message.content);
+    const offset = Math.min(options.offset ?? 0, content.length);
+    const end = Math.min(offset + 3_000, content.length);
+    return { ok: true, sessionId: options.sessionId, messageId: message.id, role: message.role,
+      content: content.slice(offset, end), offset, nextOffset: end < content.length ? end : null,
+      totalChars: content.length, retentionLimited: message.metadata?.retentionLimited === true,
+      untrusted: true, untrustedLabel: SESSION_SEARCH_UNTRUSTED_LABEL };
+  }
+
   async browseRecentSessions(options: SessionSearchBrowseOptions = {}): Promise<SessionSearchBrowseResult> {
     const limit = clampLimit(options.limit);
     const excluded = new Set(options.excludeSessionIds ?? []);

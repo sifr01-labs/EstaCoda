@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-10-14T15:35:29.581Z",
+  "generatedAt": "2026-11-01T20:44:44.022Z",
   "skills": [
     {
       "id": "official.api-integration",
@@ -165,6 +165,46 @@
         "label": "Official",
         "path": "skills/official/dogfooding/SKILL.md",
         "githubUrl": "https://github.com/sifr01-labs/EstaCoda/blob/main/skills/official/dogfooding/SKILL.md"
+      },
+      "trust": {
+        "level": "official",
+        "reviewed": true,
+        "governed": true
+      }
+    },
+    {
+      "id": "official.external-agent-runtime-comparison",
+      "slug": "external-agent-runtime-comparison",
+      "name": "External Agent Runtime Comparison",
+      "description": "Compare agent codebases and their underlying runtimes using pinned source evidence, executed checks and explicit benchmark limits.",
+      "overview": "Compare the complete stacks relevant to the user's task. Establish whether the published project is an application, plugin, skill bundle or runtime, and identify which capabilities come from its host. Inspect implementation rather than treating README claims or directory presence as demonstrated behavior.",
+      "labels": [
+        "research.runtime-comparison"
+      ],
+      "triggerPatterns": [
+        "external-agent-runtime-comparison",
+        "\\b(?:compare|benchmark)\\b.{0,180}\\b(?:codebases?|harnesses?|agent runtimes?)\\b",
+        "(?:قارن|مقارنة).{0,120}(?:وكلاء|كود|أنظمة التشغيل)"
+      ],
+      "requiredToolsets": [
+        "files"
+      ],
+      "optionalToolsets": [
+        "web",
+        "shell-readonly",
+        "research",
+        "core"
+      ],
+      "playbookSteps": 3,
+      "evaluationCount": 1,
+      "routing": {
+        "confirmation": "policy"
+      },
+      "source": {
+        "type": "official",
+        "label": "Official",
+        "path": "skills/official/external-agent-runtime-comparison/SKILL.md",
+        "githubUrl": "https://github.com/sifr01-labs/EstaCoda/blob/main/skills/official/external-agent-runtime-comparison/SKILL.md"
       },
       "trust": {
         "level": "official",

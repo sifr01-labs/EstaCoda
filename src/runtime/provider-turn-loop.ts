@@ -1259,6 +1259,22 @@ export class ProviderTurnLoop {
       }
     }
 
+    // The last allowed tool call can settle a rejected answer's checks. Reuse
+    // that exact answer only after revalidation; do not spend another model call
+    // or promote an unsupported draft merely because the budget expired.
+    if (completionCandidate && effectiveProviderExecution?.ok && effectiveProviderExecution.response &&
+      ["budget_exhausted", "deadline_reached", "tool_loop_no_progress"].includes(terminationCause) &&
+      !input.signal?.aborted && input.validateCompletion &&
+      input.validateCompletion(completionCandidate, [...input.toolExecutions, ...providerToolExecutions]) === undefined) {
+      effectiveProviderExecution = { ...effectiveProviderExecution, toolCalls: [],
+        response: { ...effectiveProviderExecution.response, content: completionCandidate } };
+      completionValidationFailure = undefined;
+      await this.#sessionDb.appendEvent(this.#currentSessionId(), {
+        kind: "step-completion-validation", accepted: true, repair: false, repairAttempt: completionRepairs
+      });
+      completionCandidate = undefined;
+    }
+
     // Stop network work at the existing failure limit, but preserve an honest
     // partial explanation. This single tool-free continuation uses remaining
     // provider/time limits and can never dispatch even hallucinated calls.

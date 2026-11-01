@@ -1,3 +1,4 @@
+import { safePath } from "./command-file-observation.js";
 import {formatRunLimitStop} from './run-limit-receipt.js';
 import { completionAdmissionFeedback } from "./completion-admission.js";
 import { recordRoutingStatus, routingStatus, routingNotice } from "./jev/routing-status.js";
@@ -1537,6 +1538,14 @@ export class AgentLoop {
       const locale=this.#ui?.language === 'ar' ? 'ar' : 'en';
       response.text=appendExecutionReceipt(`${formatRunLimitStop(providerLoop.runLimitStop,locale,this.#taskExecution!==undefined)}\n\n${response.text}`,finalOutcome,locale);
     }
+    if (providerLoop.runLimitStop !== undefined || providerLoop.completionValidationFailure !== undefined) {
+      const outputs = [...new Set(toolExecutions.filter(call => ["file.write", "file.patch"].includes(call.tool.name) &&
+        call.decision === "allow" && call.result?.ok === true && call.settlement?.sideEffectState !== "possible")
+        .flatMap(call => { const path = safePath(call.result?.metadata?.path); return path && !/[\x00-\x1f\x7f]/u.test(path) ? [path] : []; }))];
+      if (outputs.length) response.text += this.#ui?.language === "ar"
+        ? `\n\nمخرجات مكتوبة؛ قد يبقى التحقق غير مكتمل: ${outputs.slice(0, 12).map(path => `⁦${path}⁩`).join(", ")}`
+        : `\n\nOutputs written (validation may remain incomplete): ${outputs.slice(0, 12).join(", ")}`;
+    }
     if (finalizationNote) response.text += `\n\n${finalizationNote}`;
     await this.#skillLearningManager?.observeTurn({
       signal: input.signal,
@@ -1550,6 +1559,12 @@ export class AgentLoop {
       routeConfidence: intent.confidence,
       promptHash: hashSkillRoutePrompt(effectiveText),
       outcomeStatus: learningOutcomeStatus(finalOutcome.status),
+      turnDiagnostics: {
+        limitReached: providerLoop.runLimitStop !== undefined,
+        completionRejected: providerLoop.completionValidationFailure !== undefined,
+        unresolvedCheckCount: commandCompletionChecks(toolExecutions, this.#executionEvidenceIndex.recordsForTurn(visibleTurn.id)).unresolvedRequirements.length,
+        delegationAvailable: this.#providerToolSchemaCatalog?.inventory.some(tool => tool.name === "delegate_task" && tool.availability === "available")
+      },
       candidatesShown: intent.suggestedSkills.map((skill) => skill.name),
       agentEvolutionPolicy: this.#agentEvolutionPolicy ?? noLearningPolicy(),
       toolExecutions

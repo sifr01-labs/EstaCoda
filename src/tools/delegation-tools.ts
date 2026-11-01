@@ -25,7 +25,7 @@ import type { TaskExecutionPreference } from "../contracts/task.js";
 import { DEFAULT_DELEGATION_CONFIG } from "../config/delegation-defaults.js";
 
 export type DelegationToolOptions = {
-  service: DurableDelegationService;
+  service?: DurableDelegationService;
   trustedWorkspace: () => Promise<boolean> | boolean;
   delegationConfig?: DelegationConfig;
 };
@@ -138,8 +138,13 @@ export function createDelegationTools(options: DelegationToolOptions): Registere
       toolsets: ["core", "research", "coding"],
       progressLabel: "delegating task",
       maxResultSizeChars: DELEGATE_TASK_MAX_RESULT_CHARS,
-      isAvailable: () => true,
+      isAvailable: () => options.service !== undefined,
+      getAvailability: () => options.service === undefined
+        ? { available: false, reason: "Durable delegation is unavailable: this session needs a persistent SQLite Task store and an active workspace binding. Continue locally or ask the operator to enable durable Tasks; no child was started." }
+        : { available: true },
       run: async (input: DelegateTaskInput, context?: ToolExecutionContext) => {
+        if (!options.service) return undispatchedResult(structuredValidationError(
+          "Durable delegation requires a persistent Task store and workspace binding. No child was started.", "delegation-unavailable"));
         const parsed = parseDelegateTaskInput(input, delegationConfig);
         if (!parsed.ok) {
           return undispatchedResult(parsed.error);
@@ -256,10 +261,9 @@ export const delegationToolProvider: SessionToolProvider = {
   name: "delegation",
   kind: "session",
   createTools(ctx) {
-    if (ctx.delegationService === undefined) return [];
     return createDelegationTools({
       service: ctx.delegationService,
-      trustedWorkspace: requireProviderDependency("delegation", "trustedWorkspace", ctx.trustedWorkspace),
+      trustedWorkspace: ctx.delegationService === undefined ? () => false : requireProviderDependency("delegation", "trustedWorkspace", ctx.trustedWorkspace),
       delegationConfig: ctx.delegationConfig
     });
   }

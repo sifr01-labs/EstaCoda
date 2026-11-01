@@ -1,4 +1,5 @@
 import { historyContentLimit, truncateHistoryContent } from "./history-content.js";
+import { outputReadHint, toolOutputPreview } from "../session/tool-output-retention.js";
 import type { SessionMessage } from "../contracts/session.js";
 import { stripInlineReasoning } from "../providers/provider-reasoning.js";
 import { estimateMessageTokensRough, estimateMessagesTokensRough } from "./token-estimator.js";
@@ -97,7 +98,7 @@ export function packSessionHistory(
         }]),
     ...recent.map((message, index) => ({
       role: message.role === "agent" ? "assistant" as const : message.role,
-      content: sanitizeHistoryContent(message.content, maxMessageChars ?? Math.min(
+      content: packedObservationContent(message, maxMessageChars ?? Math.min(
         historyContentLimit(message.role, index === latestCandidate ? message.metadata : undefined),
         Math.max(900, maxEstimatedTokens * 3)
       )),
@@ -116,6 +117,13 @@ export function packSessionHistory(
     protectedToolPairCount: countProtectedToolPairs(recent),
     estimatedTokens: estimateTokens(packedMessages)
   };
+}
+
+function packedObservationContent(message: PackableSessionMessage, limit: number): string {
+  if (message.role === "tool" && message.metadata?.retainedOutput === true && message.id && message.sessionId) {
+    return `${toolOutputPreview(stripInlineReasoning(message.content), Math.max(1, limit - 500))}\n${outputReadHint(message.sessionId, message.id)}`;
+  }
+  return sanitizeHistoryContent(message.content, limit);
 }
 
 export function sanitizeSessionHistoryCredentials<T extends PackableSessionMessage>(messages: readonly T[]): T[] {

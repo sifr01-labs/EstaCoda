@@ -13,6 +13,27 @@ import {
 import type { SessionRole } from "../contracts/session.js";
 
 describe("SessionSearchService", () => {
+  it("pages observations with the same profile, workspace and child-session boundaries", async () => {
+    const db = new InMemorySessionDB();
+    const service = new SessionSearchService({ sessionDb: db });
+    for (const [id, profileId, metadata] of [
+      ["current", "alpha", { workspaceRoot: "/workspace/a" }],
+      ["other-profile", "beta", { workspaceRoot: "/workspace/a" }],
+      ["other-workspace", "alpha", { workspaceRoot: "/workspace/b" }],
+      ["child", "alpha", { workspaceRoot: "/workspace/a", kind: "delegated-child" }]
+    ] as const) {
+      await db.createSession({ id, profileId, metadata });
+      const message = await db.appendMessage({ sessionId: id, role: "tool", content: "a".repeat(3_000) + "final evidence" });
+      const read = (offset: number) => service.readMessage({ sessionId: id, aroundMessageId: message.id, profileId: "alpha", workspaceRoot: "/workspace/a", offset });
+      if (id !== "current") expect(await read(0)).toMatchObject({ ok: false, error: { code: "session-not-accessible" } });
+      else {
+        expect(await read(0)).toMatchObject({ ok: true, nextOffset: 3_000 });
+        expect(await read(3_000)).toMatchObject({ ok: true, content: "final evidence", nextOffset: null });
+        for (const offset of [-1, NaN, 0.5]) expect(await read(offset)).toMatchObject({ ok: false, error: { code: "invalid-offset" } });
+      }
+    }
+  });
+
   it("browses recent sessions with the default limit", async () => {
     const { db } = createFixture();
     await seedSessions(db, 12);

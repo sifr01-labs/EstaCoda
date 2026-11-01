@@ -1,3 +1,4 @@
+import { verificationInputs, verificationInputsSchema } from "./verification-inputs.js";
 import { beginCommandFileObservation, finishCommandFileObservation } from "../execution/command-file-evidence.js";
 import { HostWorkspaceFiles } from "../execution/host-workspace-files.js";
 import type { HostExecutionLease } from "../execution/host-environment.js";
@@ -47,6 +48,7 @@ export function createExecuteCodeTool(options: ExecuteCodeToolOptions): Register
       type: "object",
       properties: {
         code: { type: "string" },
+        verificationInputs: verificationInputsSchema,
         verification: { type: ["string", "null"], pattern: "^[a-z][a-z0-9-]{0,79}$", description: "Stable task requirement checked by this code. Reuse the same label as terminal.run for alternative checks; omit for exploration. A collected successful exit proves the check, not printed prose. Grants no execution authority." },
         input: { type: "object" },
         timeoutMs: { type: "number" },
@@ -70,6 +72,9 @@ export function createExecuteCodeTool(options: ExecuteCodeToolOptions): Register
         return errorResult("execute_code requires non-empty Python code");
       }
 
+      if (input.verificationInputs != null && (!input.verification || !verificationInputs(input.verificationInputs))) {
+        return errorResult("verificationInputs requires a verification label and 1–32 workspace-relative paths without traversal or globs");
+      }
       if (input.verification != null && (typeof input.verification !== "string" || !/^[a-z][a-z0-9-]{0,79}$/u.test(input.verification))) {
         return errorResult("verification must be a requirement name using 1–80 lowercase letters, digits, or hyphens, beginning with a letter");
       }
@@ -141,7 +146,7 @@ export function createExecuteCodeTool(options: ExecuteCodeToolOptions): Register
           return execution.result;
         }
       });
-      return { ...result, metadata: { ...result.metadata, cwd: options.executionLease?.workspaceRoot ?? options.workspaceRoot, verification: input.verification ?? undefined, commandFileObservation: await finishCommandFileObservation(files, observation) } };
+      return { ...result, metadata: { ...result.metadata, cwd: options.executionLease?.workspaceRoot ?? options.workspaceRoot, verification: input.verification ?? undefined, verificationInputs: verificationInputs(input.verificationInputs), commandFileObservation: await finishCommandFileObservation(files, observation) } };
     }
   };
 }

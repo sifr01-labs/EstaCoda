@@ -1,4 +1,6 @@
 import { createWorkspaceTools } from "./workspace-tools.js";
+import { SessionSearchService } from "../session/session-search-service.js";
+import { retainedOutputMessage, TOOL_OUTPUT_RETAINED_CHARS } from "../session/tool-output-retention.js";
 import { undispatchedResult } from "./undispatched-result.js";
 import { verifyHostExecution } from "../execution/host-authority.js";
 import { localApprovalScope } from "../security/approval-scope.js";
@@ -864,6 +866,37 @@ describe("ToolExecutor delegate call budget", () => {
 });
 
 describe("ToolExecutor input redaction", () => {
+  it("retains redacted output and pages the middle without executing the tool again", async () => {
+    const run = vi.fn(async () => ({ ok: true, content: "HEAD\n" + "a".repeat(16_000) +
+      "\nMIDDLE EVIDENCE\nOPENAI_API_KEY=retained-secret-value\n" + "b".repeat(16_000) + "\nTAIL" }));
+    const { executor, sessionDb, trajectoryRecorder } = await setupExecutor({ tools: [{ ...createEchoTool("evidence.read"), run }] });
+    const execution = await executor.executeTool({ tool: "evidence.read", input: {}, trustedWorkspace: true, sessionId: "test-session" });
+    const message = (await sessionDb.listMessages("test-session")).find(item => item.role === "tool")!;
+    expect(message.content).toContain("MIDDLE EVIDENCE");
+    expect(message.metadata?.retainedOutput).toBe(true);
+    const preview = retainedOutputMessage(message).content;
+    expect(preview.length).toBeLessThan(13_000);
+    expect(preview).toContain("HEAD");
+    expect(preview).toContain("TAIL");
+    expect(preview).toContain(message.id);
+    expect(preview).not.toContain("MIDDLE EVIDENCE");
+    expect(execution?.result?.metadata?.observationMessageId).toBe(message.id);
+    const page = await new SessionSearchService({ sessionDb }).readMessage({ profileId: "test", sessionId: "test-session", aroundMessageId: message.id, offset: 15_000 });
+    expect(page).toMatchObject({ ok: true, content: expect.stringContaining("MIDDLE EVIDENCE"), nextOffset: 18_000, untrusted: true });
+    expect(await persistedExecutionState(sessionDb, trajectoryRecorder)).not.toContain("retained-secret-value");
+    expect(run).toHaveBeenCalledOnce();
+  });
+
+  it("makes the durable retention ceiling explicit", async () => {
+    const { executor, sessionDb } = await setupExecutor({ tools: [{ ...createEchoTool("evidence.read"),
+      run: async () => ({ ok: true, content: "x".repeat(TOOL_OUTPUT_RETAINED_CHARS + 200) }) }] });
+    const result = await executor.executeTool({ tool: "evidence.read", input: {}, trustedWorkspace: true, sessionId: "test-session" });
+    const message = (await sessionDb.listMessages("test-session")).find(item => item.role === "tool")!;
+    expect(result?.result?.metadata?.retentionLimited).toBe(true);
+    expect(message.content).toContain("200 characters not retained");
+    expect(message.content.length).toBeLessThan(TOOL_OUTPUT_RETAINED_CHARS + 100);
+  });
+
   it("redacts sensitive keys in session events", async () => {
     const { executor, sessionDb } = await setupExecutor({
       tools: [createSensitiveEchoTool("setup")]

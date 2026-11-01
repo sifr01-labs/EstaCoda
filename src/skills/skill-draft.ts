@@ -33,6 +33,7 @@ export function createSkillDrafter(options: {
           "Return only JSON: {oldString:string,newString:string}, or {abstain:true} when evidence is insufficient.",
           "Replace exactly one existing body passage. Do not change JSON frontmatter, authority, approval rules, names, or resources.",
           "Do not infer undocumented commands, private user details, preferences, credentials, or task-specific paths.",
+          "Write a generalizable procedure or pitfall and its mechanism, never an incident narrative. Do not treat a proposed correction as tested. Runtime defects belong in runtime regression tests, not compensating skill rules.",
           "A failed task alone is not a diagnosis; abstain unless the skill text and repeated outcomes support a specific correction."
         ].join("\n") },
         { role: "user", content: JSON.stringify({ skill: input.content, outcomes: input.evidence }) }

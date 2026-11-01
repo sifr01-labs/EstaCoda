@@ -243,6 +243,10 @@ Security note: automatic drafting adds a bounded provider request in modes that 
 
 ## Contracts
 
+Learning observations also carry bounded runtime findings: completion repair at a run limit, output retention limits, repeated declared checks, unavailable delegation, and a failed tool followed by a successful call of the same tool. Each finding separates the observed symptom, proposed investigation/correction and evidence call IDs. Corrections are explicitly unverified. A repeated check is not presumed unnecessary, and a later tool success does not establish task success.
+
+The existing proposal drafter receives only recognized mechanism labels translated into fixed diagnostic text, not arbitrary persisted lessons, commands or user text. Repeated failures explained solely by runtime findings do not trigger a skill-workaround draft. Other eligible candidates retain the existing evidence, budget, evaluation, approval and promotion gates. This improves the evidence supplied for review; it does not diagnose every failure automatically or prove that a proposed change improves real tasks.
+
 Key types in `src/contracts/skill.ts`:
 
 - `SkillDefinition`

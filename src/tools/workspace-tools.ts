@@ -1,3 +1,4 @@
+import { verificationInputs, verificationInputsSchema } from "./verification-inputs.js";
 import { beginCommandFileObservation, finishCommandFileObservation } from "../execution/command-file-evidence.js";
 import type { ToolExecutionContext } from "../contracts/tool.js";
 import { undispatchedResult } from "./undispatched-result.js";
@@ -685,6 +686,7 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
         type: "object",
         properties: {
           command: { type: "string" },
+          verificationInputs: verificationInputsSchema,
           verification: { type: ["string", "null"], pattern: "^[a-z][a-z0-9-]{0,79}$", description: "Stable name of the task requirement this command checks, e.g. package-installation or unit-tests. Reuse the same name for alternative implementations and rechecks of that requirement. Omit or use null for exploration or debugging a method. Each declared requirement needs a successful check on current output; unrelated checks cannot clear it. Preserve the check exit status. This grants no execution authority." },
           timeoutMs: { type: ["number", "null"], minimum: 1, maximum: commandTimeoutMs, description: `Explicit hard execution limit in milliseconds, maximum ${commandTimeoutMs}. Omit or use null for the default behavior described above.` }
         },
@@ -700,9 +702,12 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
       // normal authorization. Signals, deadlines and cancellation stay uncertain.
       isFailureOutcomeKnown: result => Number.isInteger(result.metadata?.code) &&
         result.metadata?.signal === null && result.metadata.timedOut === false && result.metadata.cancelled === false,
-      run: async (input: { command?: string; timeoutMs?: number | null; verification?: string | null }, context) => {
+      run: async (input: { command?: string; timeoutMs?: number | null; verification?: string | null; verificationInputs?: string[] | null }, context) => {
         if (typeof input.command !== "string" || input.command.trim().length === 0) {
           return errorResult("command must be a non-empty string");
+        }
+        if (input.verificationInputs != null && (!input.verification || !verificationInputs(input.verificationInputs))) {
+          return undispatchedResult(errorResult("verificationInputs requires a verification label and 1–32 workspace-relative paths without traversal or globs"));
         }
         if (input.verification != null && (typeof input.verification !== "string" || !/^[a-z][a-z0-9-]{0,79}$/u.test(input.verification))) {
           return undispatchedResult(errorResult("verification must be a requirement name using 1–80 lowercase letters, digits, or hyphens, beginning with a letter"));
@@ -720,7 +725,7 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
         try { await contentView.assertMaterialized(); } catch (error) { return errorResult(error instanceof Error ? error.message : "Editor content is not materialized."); }
         const signal = AbortSignal.any([...[context?.signal, options.executionLease?.signal].filter((value): value is AbortSignal => value !== undefined)]);
         if (options.processManager && input.timeoutMs == null) {
-          return runManagedCommand(options.processManager, input.command, Math.min(commandTimeoutMs, 30_000), signal, context?.continuationSignal ?? options.executionLease?.signal, context, input.verification ?? undefined);
+          return runManagedCommand(options.processManager, input.command, Math.min(commandTimeoutMs, 30_000), signal, context?.continuationSignal ?? options.executionLease?.signal, context, input.verification ?? undefined, verificationInputs(input.verificationInputs));
         }
         const ownedProcesses = options.executionLease ? undefined : new HostProcessScope(root);
         const observation = await beginCommandFileObservation(files, context?.requestContract?.requirements, context?.visibleTurnId);
@@ -732,7 +737,7 @@ export function createWorkspaceTools(options: WorkspaceToolOptions): readonly Re
           options.executionLease?.processes ?? ownedProcesses!,
           signal
         );
-          return { ...result, metadata: { ...result.metadata, command: input.command, cwd: root, verification: input.verification ?? undefined, commandFileObservation: await finishCommandFileObservation(files, observation) } };
+          return { ...result, metadata: { ...result.metadata, command: input.command, cwd: root, verification: input.verification ?? undefined, verificationInputs: verificationInputs(input.verificationInputs), commandFileObservation: await finishCommandFileObservation(files, observation) } };
         } finally { await ownedProcesses?.release(); }
       }
     }
@@ -1812,8 +1817,8 @@ function isNodeError(error: unknown): error is NodeJS.ErrnoException {
   return typeof error === "object" && error !== null && "code" in error;
 }
 
-async function runManagedCommand(manager: ProcessManager, command: string, waitMs: number, signal: AbortSignal, continuationSignal?: AbortSignal, context?: ToolExecutionContext, verification?: string | null): Promise<ToolResult> {
-  const started = await manager.start(command, signal, { input: false, continuationSignal, requirements: context?.requestContract?.requirements, visibleTurnId: context?.visibleTurnId, verification: verification ?? undefined });
+async function runManagedCommand(manager: ProcessManager, command: string, waitMs: number, signal: AbortSignal, continuationSignal?: AbortSignal, context?: ToolExecutionContext, verification?: string | null, checkInputs?: string[]): Promise<ToolResult> {
+  const started = await manager.start(command, signal, { input: false, continuationSignal, requirements: context?.requestContract?.requirements, visibleTurnId: context?.visibleTurnId, verification: verification ?? undefined, verificationInputs: checkInputs });
   const process = (await manager.wait(started.id, waitMs, signal))!;
   const logs = manager.logs(process.id, { tailChars: 16_000 }) ?? [];
   const stdout = logs.filter(log => log.stream === "stdout").map(log => log.text).join("");

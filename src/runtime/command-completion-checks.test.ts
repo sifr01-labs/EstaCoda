@@ -18,7 +18,7 @@ import { deriveRequestRequirements } from "./request-requirements.js";
 import { commandCompletionChecks, commandCompletionFeedback } from "./command-completion-checks.js";
 import { deriveExecutionFinalOutcome } from "./execution-outcome.js";
 
-async function fixture(request = "Write report.txt and read it back", floor: "mutation" | "mutation_with_verification" = "mutation", throughExecutor = false) {
+async function fixture(request = "Write report.txt and read it back", floor: "none" | "mutation" | "mutation_with_verification" = "mutation", throughExecutor = false) {
   const root = await mkdtemp(join(tmpdir(), "completion-checks-"));
   const manager = new ProcessManager({ workspaceRoot: root });
   const tools = [...createWorkspaceTools({ workspaceRoot: root, processManager: manager, commandTimeoutMs: 100 }), ...createProcessTools({ processManager: manager })];
@@ -54,7 +54,7 @@ async function fixture(request = "Write report.txt and read it back", floor: "mu
     const input = { toolExecutions: calls, executionReceipts: index.recordsForTurn("turn-1"), requestRequirements: requirements, completionFloor: floor };
     return deriveExecutionFinalOutcome(input);
   };
-  return { root, run, output, outcome, calls, async close() { await manager.dispose(); await rm(root, { recursive: true, force: true }); } };
+  return { root, run, output, outcome, calls, checks: () => commandCompletionChecks(calls, index.recordsForTurn("turn-1")), async close() { await manager.dispose(); await rm(root, { recursive: true, force: true }); } };
 }
 
 describe("completion checks and unsuccessful approaches", () => {
@@ -402,4 +402,55 @@ it("retains an observed file predicate across unrelated writes without narrowing
     await f.output("updated");
     expect(commandCompletionChecks(f.calls, f.calls.map(c => ({ toolCallId: c.toolCallId!, tool: c.tool.name, visibleTurnId: "turn-1", status: "success" } as never))).unresolvedRequirements).toContain("output-check");
   } finally { await f.close(); }
+});
+
+
+describe("verification input scopes", () => {
+  it.each(["REPORT.md", "src/input.txt"])("revalidates a scoped managed process after editing %s", async path => {
+    const f = await fixture("Compare implementations", "none", true);
+    try {
+      await f.run("file.write", { path: "src/input.txt", content: "ready" });
+      const started = await f.run("terminal.run", { command: "sleep 0.3; test -s src/input.txt", verification: "source-tests", verificationInputs: ["src"] });
+      expect(started.metadata?.running).toBe(true);
+      await f.run("file.write", { path, content: "changed", overwrite: true });
+      const id = (started.metadata?.process as { id: string }).id;
+      await f.run("process.logs", { id, waitMs: 5000 });
+      expect(f.checks().passed).toBe(path === "REPORT.md");
+    } finally { await f.close(); }
+  });
+
+  it("preserves three source checks across a report patch, then invalidates an affected source check", async () => {
+    const f = await fixture("Compare implementations", "none", true);
+    try {
+      await f.run("file.write", { path: "src/input.txt", content: "ready" });
+      await f.run("file.write", { path: "REPORT.md", content: "Draft" });
+      for (const verification of ["upstream-tests", "local-tests", "comparison-results"]) {
+        expect((await f.run("terminal.run", { command: "test -s src/input.txt", verification,
+          verificationInputs: ["src", "tests", "package.json"], timeoutMs: 100 })).ok).toBe(true);
+      }
+      expect(f.checks().passedRequirements).toHaveLength(3);
+      await f.run("file.patch", { mode: "replace", path: "REPORT.md", old_string: "Draft", new_string: "Supported comparison" });
+      expect(f.checks().passedRequirements).toHaveLength(3);
+      await f.run("file.write", { path: "src/input.txt", content: "changed", overwrite: true });
+      expect(f.checks().unresolvedRequirements).toHaveLength(3);
+    } finally { await f.close(); }
+  });
+
+  it.each([{ verificationInputs: undefined }, { verificationInputs: ["."] }])("keeps unknown or whole-workspace dependencies conservative: %j", async ({ verificationInputs }) => {
+    const f = await fixture();
+    try {
+      await f.run("terminal.run", { command: "true", verification: "source-tests", verificationInputs, timeoutMs: 100 });
+      await f.run("file.write", { path: "REPORT.md", content: "Report" });
+      expect(f.checks().unresolvedRequirements).toEqual(["source-tests"]);
+    } finally { await f.close(); }
+  });
+
+  it.each([[], ["../src"], ["/src"], ["src/**"], ["src\\input"], [""]].map(verificationInputs => ({ verificationInputs })))("rejects an unsafe or ambiguous scope before running: %j", async ({ verificationInputs }) => {
+    const f = await fixture();
+    try {
+      const result = await f.run("terminal.run", { command: "true", verification: "source-tests", verificationInputs });
+      expect(result.ok).toBe(false);
+      expect(result.content).toContain("verificationInputs");
+    } finally { await f.close(); }
+  });
 });

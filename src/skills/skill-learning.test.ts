@@ -28,6 +28,21 @@ afterEach(async () => {
 });
 
 describe("SkillLearningManager", () => {
+  it("records causal runtime findings without asserting a verified skill correction", async () => {
+    const harness = await createHarness("proactive");
+    const result = await harness.manager.observeTurn({ ...turnBase(), selectedSkill: undefined,
+      outcomeStatus: "partial", agentEvolutionPolicy: harness.policy,
+      turnDiagnostics: { limitReached: true, completionRejected: true, unresolvedCheckCount: 3, delegationAvailable: false },
+      toolExecutions: [execution("shell"), execution("file.read")] });
+    expect(result?.evidence?.lesson).toContain("Completion validation rejected an answer");
+    expect(result?.evidence?.lesson).toContain("not validated");
+    expect(result?.evidence?.evidence?.findings).toEqual(expect.arrayContaining([
+      expect.objectContaining({ mechanism: "completion-repair-at-limit", correctionVerified: false, target: "runtime-regression" }),
+      expect.objectContaining({ mechanism: "delegation-unavailable", correctionVerified: false })
+    ]));
+    expect(result?.evidence).toMatchObject({ requiresHumanApproval: true, mayPromoteAutomatically: false });
+  });
+
   it("observes no-skill turns as new_or_missing_playbook evidence candidates", async () => {
     const harness = await createHarness("suggest");
 

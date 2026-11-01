@@ -4,6 +4,8 @@ import { semanticMutationKey } from "../tools/execution-operation-ledger.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 import type { ExecutionEvidenceRecord } from "../contracts/execution-plan.js";
 import { commandFileObservation } from "./command-file-observation.js";
+import { verificationAffected, verificationInputs } from "../tools/verification-inputs.js";
+import { safePath } from "./command-file-observation.js";
 
 /** A check declaration can only add an obligation. Proof comes from the owned
  * command's collected exit, never its prose, tool-call success, or a new label.
@@ -13,6 +15,7 @@ export function commandCompletionChecks(calls: readonly ToolExecutionRecord[], r
 } {
   const records = new Map(receipts.map(receipt => [receipt.toolCallId, receipt]));
   const checks = new Map<string, boolean>();
+  const checkInputs = new Map<string, string[]>();
   const filePredicates = new Map<string, string>();
   const failedChecks = new Map<string, string[]>();
   const requirements = new Map<string, string>();
@@ -20,7 +23,7 @@ export function commandCompletionChecks(calls: readonly ToolExecutionRecord[], r
   const passingChecks: { key: string; turn: string; requirement: string; index: number }[] = [];
   let lastPassedCallId: string | undefined;
   const observed = new Set<string>();
-  const processes = new Map<string, { turn: string; stale: boolean; collected: boolean }>();
+  const processes = new Map<string, { turn: string; stale: boolean; collected: boolean; inputs?: string[] }>();
   for (const [index, call] of calls.entries()) {
     const receipt = call.toolCallId ? records.get(call.toolCallId) : undefined;
     if (!receipt?.visibleTurnId || receipt.tool !== call.tool.name) continue;
@@ -38,7 +41,8 @@ export function commandCompletionChecks(calls: readonly ToolExecutionRecord[], r
     const process = call.result?.metadata?.process as { id?: unknown; status?: unknown } | undefined;
     const processId = typeof process?.id === "string" ? process.id : undefined;
     if (call.tool.name === "terminal.run" && processId && !processes.has(processId)) {
-      processes.set(processId, { turn: receipt.visibleTurnId, stale: false, collected: false });
+      processes.set(processId, { turn: receipt.visibleTurnId, stale: false, collected: false,
+        inputs: verificationInputs((process as { verificationInputs?: unknown }).verificationInputs) });
     }
     const ownedProcess = processId ? processes.get(processId) : undefined;
     const observation = commandFileObservation(call, receipt.visibleTurnId);
@@ -53,6 +57,11 @@ export function commandCompletionChecks(calls: readonly ToolExecutionRecord[], r
       changed || (["file.write", "file.patch"].includes(call.tool.name) && call.result?.metadata?.changed !== false)
     );
     if (mutation) {
+      // Unknown effects stay broad. Only successful, observed file writes can
+      // preserve explicitly scoped checks; a filename extension is never proof.
+      const writtenPath = safePath(call.result?.metadata?.path);
+      const changedPaths = call.result?.ok === true && ["file.write", "file.patch"].includes(call.tool.name) && writtenPath
+        ? [writtenPath] : undefined;
       for (const key of checks.keys()) if (key.startsWith(`${receipt.visibleTurnId}:`)) {
         const target = filePredicates.get(key);
         // Only a literal existence/size predicate with an observed regular file
@@ -62,10 +71,10 @@ export function commandCompletionChecks(calls: readonly ToolExecutionRecord[], r
           call.result?.ok === true && call.result.metadata?.materialized === true &&
           typeof written === "string" && !posix.isAbsolute(written) && !written.split("/").includes("..") &&
           posix.normalize(written) !== target && !target.startsWith(`${posix.normalize(written)}/`);
-        if (!independentWrite) checks.set(key, false);
+        if (!independentWrite && verificationAffected(checkInputs.get(key), changedPaths)) checks.set(key, false);
       }
       for (const [id, state] of processes) {
-        if (state.turn === receipt.visibleTurnId && id !== processId) state.stale = true;
+        if (state.turn === receipt.visibleTurnId && id !== processId && verificationAffected(state.inputs, changedPaths)) state.stale = true;
       }
     }
     // A later poll must not turn an old exit into fresh validation after an edit.
@@ -74,6 +83,9 @@ export function commandCompletionChecks(calls: readonly ToolExecutionRecord[], r
     if (!command || (!command.declared && !checks.has(command.key))) continue;
     const passed = receipt.status === "success" && !ownedProcess?.stale && commandSucceeded(call);
     checks.set(command.key, passed);
+    const scope = ownedProcess?.inputs ?? verificationInputs(call.result?.metadata?.verificationInputs);
+    if (scope) checkInputs.set(command.key, scope);
+    else checkInputs.delete(command.key);
     filePredicates.delete(command.key);
     const predicate = call.tool.name === "terminal.run" && typeof call.input?.command === "string"
       ? /^test\s+-(?:f|s)\s+([A-Za-z0-9_./-]+)\s*$/u.exec(call.input.command) : null;

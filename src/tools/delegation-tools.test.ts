@@ -313,13 +313,12 @@ describe("createDelegationTools", () => {
     expect(create).not.toHaveBeenCalled();
   });
 
-  it("omits delegate_task when durable Task persistence is unavailable", () => {
-    expect(delegationToolProvider.createTools({
-      workspaceRoot: "/workspace",
-      profileId: "alpha",
-      sessionId: "session",
-      currentSessionId: () => "session"
-    })).toEqual([]);
+  it("keeps unavailable delegation discoverable without making it executable", async () => {
+    const [tool] = delegationToolProvider.createTools({} as never);
+    expect(tool?.name).toBe("delegate_task");
+    expect(await tool!.isAvailable()).toBe(false);
+    expect(await tool!.getAvailability!()).toMatchObject({ available: false, reason: expect.stringContaining("persistent SQLite") });
+    expect(await tool!.run({ task: "Inspect source" })).toMatchObject({ ok: false, metadata: { code: "delegation-unavailable" } });
   });
 });
 
