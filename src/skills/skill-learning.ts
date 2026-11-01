@@ -1,3 +1,5 @@
+import { withProfileWriteLock } from "../config/profile-write-lock.js";
+import { constants } from "node:fs";
 import { learningDraftEvidence, learningFindings, learningLesson, type LearningTurnDiagnostics } from "./learning-diagnostics.js";
 import * as fs from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
@@ -5,6 +7,7 @@ import type { AgentEvolutionPolicy } from "../contracts/agent-evolution.js";
 import type { ProviderUsageLineage } from "../contracts/provider-usage.js";
 import type { SkillDrafter } from "./skill-draft.js";
 import { SkillProposalService, readBoundedSkillFile } from "./skill-proposal-service.js";
+import { parseSkillFile } from "./skill-loader.js";
 import { skillContentHash } from "./skill-task-evaluation.js";
 import type { SessionDB } from "../contracts/session.js";
 import type {
@@ -46,7 +49,7 @@ export type SkillLearningRecord = {
   updatedAt: string;
   draftAttemptedAt?: string;
   draftProposalId?: string;
-  draftStatus?: "attempted" | "proposed" | "abstained";
+  draftStatus?: "pending" | "attempted" | "proposed" | "abstained";
 };
 
 type SkillLearningFile = {
@@ -80,6 +83,9 @@ export class SkillLearningManager {
   readonly #registry: SkillRegistry;
   readonly #draft: SkillDrafter | undefined;
   readonly #proposals: SkillProposalService | undefined;
+  #review: Promise<void> | undefined;
+  #reviewController: AbortController | undefined;
+  #latestUsage: ProviderUsageLineage | undefined;
 
   constructor(options: {
     autonomy: SkillAutonomy;
@@ -124,6 +130,7 @@ export class SkillLearningManager {
     agentEvolutionPolicy: AgentEvolutionPolicy;
     toolExecutions: ToolExecutionRecord[];
   }): Promise<SkillLearningObservation | undefined> {
+    this.#latestUsage = input.usage;
     if (
       this.#autonomy === "none" ||
       !input.agentEvolutionPolicy.observeTurns ||
@@ -232,6 +239,37 @@ export class SkillLearningManager {
     };
   }
 
+  /** Delivery never waits for model review. Records on disk are the pending queue. */
+  startBackgroundReview(input: {
+    profileId: string; sessionId: string; agentEvolutionPolicy: AgentEvolutionPolicy;
+    validateAuthority: () => Promise<void>;
+  }): void {
+    if (this.#review || !input.agentEvolutionPolicy.preparePatches || !input.agentEvolutionPolicy.createProposals) return;
+    const controller = new AbortController();
+    this.#reviewController = controller;
+    this.#review = (async () => {
+      // Yield so the foreground response can be delivered first.
+      await new Promise<void>(resolve => setImmediate(resolve));
+      for (const record of (await this.#store.list()).slice(0, 100)) {
+        if (controller.signal.aborted) break;
+        if (record.status !== "candidate" || !record.candidateId || record.occurrences < 2) continue;
+        await input.validateAuthority();
+        const candidate = (await this.#skillEvolutionStore?.listLearningCandidates([record.candidateId]))?.find(item => item.id === record.candidateId);
+        if (!candidate) continue;
+        await this.#prepareDraft(record, candidate, { ...input, usage: this.#latestUsage, signal: controller.signal });
+      }
+    })().catch(() => {
+      // Optional review must never turn a delivered task into a failure. Persisted candidates remain reviewable.
+    }).finally(() => { this.#review = undefined; this.#reviewController = undefined; });
+  }
+
+  async waitForBackgroundReview(): Promise<void> { await this.#review; }
+
+  async cancelBackgroundReview(): Promise<void> {
+    this.#reviewController?.abort();
+    await this.#review;
+  }
+
   async inspect(): Promise<SkillLearningRecord[]> {
     return this.#store.list();
   }
@@ -296,7 +334,7 @@ export class SkillLearningManager {
       promptHash: input.promptHash
     });
     const record = await this.#store.observe({
-      key: `selected:${selectedSkillName}:${input.promptHash ?? normalizePrompt(promptSummaryForLearning(input.userText))}`,
+      key: `selected:${selectedSkillName}:${skillDefinitionRevision(input.selectedSkill)}`,
       name: `${selectedSkillName} refinement`,
       content: `Selected skill refinement evidence: ${selectedSkillName}`,
       sessionId: input.sessionId,
@@ -319,7 +357,7 @@ export class SkillLearningManager {
     if (candidateRecord.status === "stale") {
       return undefined;
     }
-    if (input.outcomeStatus === "failed") candidateRecord = await this.#prepareDraft(candidateRecord, candidate, input);
+    // Review is scheduled after delivery; observation never waits for a provider call.
 
     await this.#sessionDb.appendEvent(input.sessionId, {
       kind: "skill-learned",
@@ -336,38 +374,54 @@ export class SkillLearningManager {
   }
 
   async #prepareDraft(record: SkillLearningRecord, candidate: SkillLearningCandidate, input: {
-    sessionId: string; agentEvolutionPolicy: AgentEvolutionPolicy; signal?: AbortSignal; usage?: ProviderUsageLineage;
+    sessionId: string; agentEvolutionPolicy: AgentEvolutionPolicy; signal?: AbortSignal; usage?: ProviderUsageLineage; validateAuthority: () => Promise<void>;
   }): Promise<SkillLearningRecord> {
     const policy = input.agentEvolutionPolicy;
-    if (!this.#draft || !this.#proposals || !this.#skillEvolutionStore || !policy.preparePatches || !policy.createProposals ||
-        input.signal?.aborted || candidate.kind !== "selected_skill_refinement" || candidate.suggestedTarget !== "skill_patch" ||
-        record.occurrences < 2) return record;
+    if (!this.#proposals || !this.#skillEvolutionStore || !policy.preparePatches || !policy.createProposals ||
+        input.signal?.aborted || record.occurrences < 2) return record;
     const today = new Date().toISOString().slice(0, 10);
-    if (record.draftAttemptedAt?.startsWith(today)) return record;
-    const attempts = (await this.#store.list()).filter((item) => item.draftAttemptedAt?.startsWith(today)).length;
     const proposals = await this.#proposals.listProposals();
     const limit = Math.min(3, policy.budgets.maxProposalsPerDay ?? 3);
-    if (!Number.isFinite(limit) || attempts >= limit || proposals.filter((item) => item.createdAt.startsWith(today)).length >= limit ||
-        proposals.some((item) => item.skillName === candidate.selectedSkill && item.status === "proposed")) return record;
-    const skill = this.#registry.get(candidate.selectedSkill);
-    if (!skill || !("sourcePath" in skill)) return record;
-    const evidence = await this.#skillEvolutionStore.listObservations({ skillName: skill.name, ids: record.evidenceIds });
-    const failures = evidence.filter((item) => item.sourceTrust === "runtime_internal" && item.outcome === "failed");
-    if (new Set(failures.map((item) => item.sessionId).filter(Boolean)).size < 2) return record;
-    if (failures.every(item => learningDraftEvidence(item.evidence).runtimeOnly)) return record;
-    record = await this.#store.recordDraft(record.key, "attempted");
+    if (!Number.isFinite(limit) || proposals.filter(item => item.createdAt.startsWith(today)).length >= limit ||
+        proposals.some(item => item.status === "proposed" && (item.evidenceIds?.some(id => record.evidenceIds?.includes(id)) ||
+          (candidate.kind === "selected_skill_refinement" && item.skillName === candidate.selectedSkill)))) return record;
+    const skill = candidate.kind === "selected_skill_refinement" ? this.#registry.get(candidate.selectedSkill) : undefined;
+    // Changed definitions must collect fresh evidence instead of applying an older lesson.
+    if (skill && record.key !== `selected:${skill.name}:${skillDefinitionRevision(skill)}`) return record;
+    const evidence = (await this.#skillEvolutionStore.listObservations({ ids: record.evidenceIds }))
+      .filter(item => item.sourceTrust === "runtime_internal");
+    if (new Set(evidence.map(item => item.sessionId).filter(Boolean)).size < 2) return record;
+    if (evidence.every(item => learningDraftEvidence(item.evidence).runtimeOnly)) return record;
+    if (!await this.#store.claimDraft(record.key, limit)) return record;
+    record = (await this.#store.get(record.key))!;
+    // Missing coverage and route corrections become review proposals, never invented executable skills.
+    if (!skill || !("sourcePath" in skill) || !("sourceRoot" in skill) || typeof skill.sourcePath !== "string" || typeof skill.sourceRoot !== "string" || candidate.suggestedTarget !== "skill_patch") {
+      try {
+        await input.validateAuthority();
+        if (input.signal?.aborted) return await this.#store.recordDraft(record.key, "pending");
+        const result = await this.#proposals.createProposalFromLearningCandidate({
+          candidate: { ...candidate, evidenceIds: evidence.map(item => item.id) }, agentEvolutionPolicy: policy
+        });
+        if (result.ok) return await this.#store.recordDraft(record.key, "proposed", result.proposal.id);
+      } catch { /* Retain the candidate for operator inspection. */ }
+      return this.#store.recordDraft(record.key, "abstained");
+    }
+    if (!this.#draft) return this.#store.recordDraft(record.key, "abstained");
     try {
       const content = await readBoundedSkillFile(skill.sourceRoot, skill.sourcePath);
+      const diskSkill = parseSkillFile(skill.sourcePath, content, { sourceRoot: skill.sourceRoot, sourceKind: (skill as LoadedSkill).sourceKind });
+      if (skillDefinitionRevision(diskSkill) !== skillDefinitionRevision(skill)) return await this.#store.recordDraft(record.key, "abstained");
       if (content.length > 20_000) return await this.#store.recordDraft(record.key, "abstained");
       const patch = await this.#draft({
         content, candidateId: candidate.id, sessionId: input.sessionId, policy, signal: input.signal, usage: input.usage,
         // No raw user text, tool arguments, outputs, credentials, or arbitrary lessons enter the draft prompt.
-        evidence: failures.slice(-6).map((item) => ({ outcome: item.outcome, tools: item.toolsAttempted.slice(0, 20),
-          lesson: learningDraftEvidence(item.evidence).lesson }))
+        evidence: evidence.slice(-6).map((item) => ({ outcome: item.outcome, tools: item.toolsAttempted.slice(0, 20),
+          lesson: item.outcome === "succeeded" ? "The task succeeded; preserve effective instructions. Success alone does not establish an improvement." : learningDraftEvidence(item.evidence).lesson }))
       });
+      await input.validateAuthority();
       if (patch && !input.signal?.aborted) {
         const result = await this.#proposals.createProposalFromLearningCandidate({
-          candidate: { ...candidate, evidenceIds: failures.map((item) => item.id) },
+          candidate: { ...candidate, evidenceIds: evidence.map((item) => item.id) },
           agentEvolutionPolicy: policy, patch, baseContentHash: skillContentHash(content)
         });
         if (result.ok) return await this.#store.recordDraft(record.key, "proposed", result.proposal.id);
@@ -375,7 +429,7 @@ export class SkillLearningManager {
     } catch {
       // Drafting is best-effort; retain evidence and a visible abstention without failing the user's task.
     }
-    return this.#store.recordDraft(record.key, "abstained");
+    return this.#store.recordDraft(record.key, input.signal?.aborted ? "pending" : "abstained");
   }
 }
 
@@ -441,9 +495,7 @@ function selectedSkillSuggestedTarget(
   ) {
     return "routing_metadata_update";
   }
-  if (input.outcomeStatus === "succeeded") {
-    return "routing_eval_addition";
-  }
+
   return "skill_patch";
 }
 
@@ -583,7 +635,49 @@ class SkillLearningStore {
     this.#now = options.now ?? (() => new Date());
   }
 
-  async observe(input: {
+  async #transaction<T>(work: () => Promise<T>): Promise<T> {
+    return withProfileWriteLock(dirname(this.#path), async () => {
+      this.#loaded = false;
+      this.#records.clear();
+      await this.#ensureLoaded();
+      return work();
+    });
+  }
+
+  observe(input: {
+    key: string;
+    name: string;
+    content: string;
+    sessionId: string;
+    tools: string[];
+    requiredToolsets: ToolsetName[];
+    bounded: boolean;
+    boundedReason?: string;
+    evidenceId?: string;
+    candidateId?: string;
+    candidateKind?: SkillLearningCandidate["kind"];
+    promptHash?: string;
+    selectedSkillName?: string;
+  }) { return this.#transaction(() => this.#observe(input)); }
+  markCandidate(key: string) { return this.#transaction(() => this.#markCandidate(key)); }
+  recordDraft(key: string, status: NonNullable<SkillLearningRecord["draftStatus"]>, proposalId?: string) {
+    return this.#transaction(() => this.#recordDraft(key, status, proposalId));
+  }
+  get(key: string) { return this.#transaction(() => this.#get(key)); }
+  list() { return this.#transaction(() => this.#list()); }
+  reconcileCreatedPaths() { return this.#transaction(() => this.#reconcileCreatedPaths()); }
+  claimDraft(key: string, limit: number): Promise<boolean> {
+    return this.#transaction(async () => {
+      const today = this.#now().toISOString().slice(0, 10);
+      const record = this.#records.get(key);
+      if (!record || record.draftAttemptedAt?.startsWith(today) ||
+          [...this.#records.values()].filter(item => item.draftAttemptedAt?.startsWith(today)).length >= limit) return false;
+      await this.#recordDraft(key, "attempted");
+      return true;
+    });
+  }
+
+  async #observe(input: {
     key: string;
     name: string;
     content: string;
@@ -635,7 +729,7 @@ class SkillLearningStore {
     return record;
   }
 
-  async markCandidate(key: string): Promise<SkillLearningRecord> {
+  async #markCandidate(key: string): Promise<SkillLearningRecord> {
     await this.#ensureLoaded();
     await this.#reconcileCreatedPathsLoaded();
     const existing = this.#records.get(key);
@@ -655,7 +749,7 @@ class SkillLearningStore {
     return updated;
   }
 
-  async recordDraft(key: string, status: NonNullable<SkillLearningRecord["draftStatus"]>, proposalId?: string): Promise<SkillLearningRecord> {
+  async #recordDraft(key: string, status: NonNullable<SkillLearningRecord["draftStatus"]>, proposalId?: string): Promise<SkillLearningRecord> {
     const record = this.#records.get(key);
     if (!record) throw new Error("Learning record missing.");
     const updated = { ...record, draftAttemptedAt: this.#now().toISOString(), draftStatus: status, draftProposalId: proposalId };
@@ -664,13 +758,13 @@ class SkillLearningStore {
     return updated;
   }
 
-  async get(key: string): Promise<SkillLearningRecord | undefined> {
+  async #get(key: string): Promise<SkillLearningRecord | undefined> {
     await this.#ensureLoaded();
     await this.#reconcileCreatedPathsLoaded();
     return this.#records.get(key);
   }
 
-  async reconcileCreatedPaths(): Promise<{ checked: number; stale: number }> {
+  async #reconcileCreatedPaths(): Promise<{ checked: number; stale: number }> {
     await this.#ensureLoaded();
     return this.#reconcileCreatedPathsLoaded();
   }
@@ -685,14 +779,14 @@ class SkillLearningStore {
       checked += 1;
       const reason = await this.#staleReasonForCreatedRecord(record);
       if (reason !== undefined) {
-        await this.markStale(record.key, reason);
+        await this.#markStale(record.key, reason);
         stale += 1;
       }
     }
     return { checked, stale };
   }
 
-  async markStale(key: string, reason: NonNullable<SkillLearningRecord["staleReason"]>): Promise<SkillLearningRecord> {
+  async #markStale(key: string, reason: NonNullable<SkillLearningRecord["staleReason"]>): Promise<SkillLearningRecord> {
     await this.#ensureLoaded();
     const existing = this.#records.get(key);
     if (existing === undefined) {
@@ -710,7 +804,7 @@ class SkillLearningStore {
     return updated;
   }
 
-  async list(): Promise<SkillLearningRecord[]> {
+  async #list(): Promise<SkillLearningRecord[]> {
     await this.#ensureLoaded();
     await this.#reconcileCreatedPathsLoaded();
     return [...this.#records.values()].sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
@@ -722,7 +816,13 @@ class SkillLearningStore {
     }
     this.#loaded = true;
     try {
-      const parsed = JSON.parse(await fs.readFile(this.#path, "utf8")) as Partial<SkillLearningFile>;
+      const file = await fs.open(this.#path, constants.O_RDONLY | constants.O_NOFOLLOW);
+      let parsed: Partial<SkillLearningFile>;
+      try {
+        const stat = await file.stat();
+        if (!stat.isFile() || stat.size > 8_000_000) throw new Error("Invalid learning store.");
+        parsed = JSON.parse(await file.readFile("utf8"));
+      } finally { await file.close(); }
       for (const record of Array.isArray(parsed.records) ? parsed.records : []) {
         if (typeof record?.key !== "string") {
           continue;
@@ -764,7 +864,11 @@ class SkillLearningStore {
       records: [...this.#records.values()].sort((left, right) => left.key.localeCompare(right.key))
     };
     await fs.mkdir(dirname(this.#path), { recursive: true });
-    await fs.writeFile(this.#path, `${JSON.stringify(file, null, 2)}\n`, "utf8");
+    const temporary = `${this.#path}.${process.pid}.tmp`;
+    try {
+      await fs.writeFile(temporary, `${JSON.stringify(file, null, 2)}\n`, { flag: "wx", mode: 0o600 });
+      await fs.rename(temporary, this.#path);
+    } finally { await fs.rm(temporary, { force: true }); }
   }
 }
 
@@ -952,3 +1056,10 @@ const STOP_WORDS = new Set([
   "give",
   "make"
 ]);
+
+/** Exclude derived session readiness fields; bind learning to the actual definition and instructions. */
+function skillDefinitionRevision(skill: SkillDefinition | LoadedSkill): string {
+  return skillContentHash(JSON.stringify({ ...skill, resources: undefined, contract: undefined,
+    providerInstructions: undefined, pythonCapabilitySetup: undefined, loadWarnings: undefined,
+    provenance: undefined, lifecycleState: undefined }));
+}

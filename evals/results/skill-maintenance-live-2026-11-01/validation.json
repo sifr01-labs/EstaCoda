@@ -1,0 +1,55 @@
+{
+  "recordedAt": "2026-11-01T22:00:24.614423+00:00",
+  "node": "v24.14.1",
+  "pnpm": "10.33.0",
+  "checks": {
+    "typecheck": {
+      "logSha256": "afe491524b1f6609f712102280afd09dbadcbf9bfa27f319668e8f71a77f1b1f",
+      "tail": "> estacoda@0.1.0 typecheck /Users/ahnwy/Documents/Codex/2026-05-10/i-d-like-to-work-on/EstaCoda\n> tsc --noEmit"
+    },
+    "build": {
+      "logSha256": "e2d1b91014298af12d4674a8ef8e1e433902f1dad78ac007bd03ad58aa59d709",
+      "tail": "> estacoda@0.1.0 build /Users/ahnwy/Documents/Codex/2026-05-10/i-d-like-to-work-on/EstaCoda\n> pnpm run clean:dist && tsc -p tsconfig.build.json\n\n\n> estacoda@0.1.0 clean:dist /Users/ahnwy/Documents/Codex/2026-05-10/i-d-like-to-work-on/EstaCoda\n> node scripts/clean-dist.mjs"
+    },
+    "runtimeImports": {
+      "logSha256": "b13b10a7cb18419d742ea874424904a294e5d2468553cba5db946137342bab0b",
+      "tail": "> estacoda@0.1.0 audit:runtime-imports /Users/ahnwy/Documents/Codex/2026-05-10/i-d-like-to-work-on/EstaCoda\n> node scripts/audit-runtime-imports.mjs\n\nRuntime import audit passed"
+    },
+    "esm": {
+      "logSha256": "545a15938e2f4ef96df021b18c24b0d4636c0c2515493da8eed128a175d3449e",
+      "tail": "> estacoda@0.1.0 audit:esm /Users/ahnwy/Documents/Codex/2026-05-10/i-d-like-to-work-on/EstaCoda\n> node scripts/audit-esm.mjs dist\n\nESM audit passed for /Users/ahnwy/Documents/Codex/2026-05-10/i-d-like-to-work-on/EstaCoda/dist"
+    },
+    "smoke": {
+      "logSha256": "030e27b5a561ec10f10ecb28f976fb7a67c10827073ae5393edad43f9505a3a4",
+      "tail": "[PASS] WhatsApp wizard, docs boundary, and package quarantine smoke (195ms)\n[PASS] Durable delegation Task cutover smoke coverage (216ms)\n[PASS] Provider setup uses endpoint-first Local / Custom flow (391ms)\n[PASS] Session continuation stays profile- and workspace-scoped (204ms)\n[PASS] Codex model selection reuses OAuth and cancels without changes (103ms)\n\nAll smoke cases passed."
+    },
+    "packagedSmoke": {
+      "logSha256": "dc1b1d1705f21324e0d8b4322fb9a25cfa51f1444ff10ca4d3e2eb2eddb00b1d",
+      "tail": "[PASS] WhatsApp wizard, docs boundary, and package quarantine smoke (218ms)\n[PASS] Durable delegation Task cutover smoke coverage (217ms)\n[PASS] Provider setup uses endpoint-first Local / Custom flow (403ms)\n[PASS] Session continuation stays profile- and workspace-scoped (204ms)\n[PASS] Codex model selection reuses OAuth and cancels without changes (102ms)\n\nAll smoke cases passed."
+    },
+    "fullSuite": {
+      "logSha256": "9be66dba85378e230009c273f1c005a37ba610babc055af90385291ae0012b65",
+      "tail": "\n Test Files  1 failed | 785 passed (786)\n      Tests  2 failed | 13426 passed (13428)\n   Start at  21:56:28\n   Duration  135.23s (transform 28.12s, setup 7.18s, import 145.34s, tests 981.10s, environment 46ms)\n\n\u2009ELIFECYCLE\u2009 Test failed. See above for more details."
+    },
+    "timeoutRerun": {
+      "logSha256": "b439c56fcbaa96ca8003230255ff5baeb04a06177c0e4286d976e8de951f324f",
+      "tail": " \u2713 src/cli/entrypoint-home.test.ts > entrypoint home directory propagation > starts fresh by default and continues only the profile/workspace v2 pointer explicitly 3885ms\n \u2713 src/cli/entrypoint-home.test.ts > entrypoint home directory propagation > fails closed when --continue has no pointer for the profile and workspace 1024ms\n\n Test Files  1 passed (1)\n      Tests  3 passed (3)\n   Start at  21:59:21\n   Duration  6.11s (transform 24ms, setup 12ms, import 23ms, tests 6.02s, environment 0ms)"
+    },
+    "dependencies": {
+      "logSha256": "983146cba9ad9d4b52fe67ba8c27444accbf53ff993baa5d05d926435684fae0",
+      "tail": "Scope: all 3 workspace projects\nLockfile is up to date, resolution step is skipped\nAlready up to date\n\napps/desktop postinstall$ node scripts/prepare-pty.mjs\napps/desktop postinstall: Done\nDone in 430ms using pnpm v10.33.0"
+    }
+  },
+  "finalSourceSha256": {
+    "src/cli/proposal-commands.ts": "182781b657731c6225a24d2f45b690826ea898b7a7076966b26f6511f84ab248",
+    "src/runtime/create-runtime.ts": "7c4f0d814bb07897e37e592e98a2fd36dabc418adf9e6ec3b237682b6e885e84",
+    "src/runtime/execution-outcome.ts": "3bda4971761312bd5214890543db37bb490714e7c1ebb0c5189eba1d8ee46eb7",
+    "src/skills/learning-diagnostics.ts": "db96a891c7414f616047065dc0712210d4028a07389a02c1e537c3f88afeac39",
+    "src/skills/skill-evolution.ts": "f63407916a223c827394627460ac9f270c6483d0c61660e25e3af89a077ed5dc",
+    "src/skills/skill-learning.ts": "f3d7899ed841f9ef9b9d72ed4be442a99fe29ccd178ce42dec8d64a4c84b8b9d",
+    "src/skills/skill-proposal-service.ts": "a3403e49862f8c4d01e85d24c92561e954672fe3b6d8350fad4b2bbf05908af4",
+    "src/skills/skill-task-runner.ts": "6061e400de05e76fc822d84c091b9ca7c80ecc4e144b9e314af8944223d79336"
+  },
+  "interpretation": "Final full run: 13,426 passed, two CLI timeout failures. All three tests in that file passed on isolated rerun. Earlier complete run: 13,427 passed before the final added missing-workflow case. No timeout threshold or expected result was weakened. Source and packaged smoke: 14/14 each.",
+  "credentialArtifactScan": "No JWT/access-token value patterns found in committed evidence; all temporary benchmark auth copies removed after completed runs."
+}

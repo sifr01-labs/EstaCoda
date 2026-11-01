@@ -850,3 +850,8 @@ describe("supplied content and hypothetical execution boundaries", () => {
     expect(deriveExecutionCompletionFloor({userText,capabilities})).toBe(floor);
   });
 });
+
+it("records completed tasks with recovered errors as learning successes without clearing partial outcomes", () => {
+  expect(learningOutcomeStatus("completed_with_recovered_errors")).toBe("succeeded");
+  expect(learningOutcomeStatus("partially_completed")).toBe("partial");
+});

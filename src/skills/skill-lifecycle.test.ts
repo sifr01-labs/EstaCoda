@@ -87,8 +87,11 @@ describe("governed skill lifecycle", () => {
     await observe("one"); expect(drafter).not.toHaveBeenCalled();
     await observe("one"); expect(drafter).not.toHaveBeenCalled();
     await observe("two", "suggest"); expect(drafter).not.toHaveBeenCalled();
-    const result = await observe("three");
-    expect(result?.record.draftStatus).toBe("proposed");
+    await observe("three");
+    expect(drafter).not.toHaveBeenCalled();
+    manager.startBackgroundReview({ profileId: "default", sessionId: "three", agentEvolutionPolicy: deriveAgentEvolutionPolicy("proactive"), validateAuthority: async () => {} });
+    await manager.waitForBackgroundReview();
+    expect((await manager.inspect())[0]?.draftStatus).toBe("proposed");
     expect(JSON.stringify(drafter.mock.calls)).not.toContain("Private task details");
     await observe("four"); expect(drafter).toHaveBeenCalledTimes(1);
     const [proposal] = await h.store.listProposals();
@@ -143,4 +146,102 @@ describe("governed skill lifecycle", () => {
     await writeFile(join(h.root, "checks", "evals", "behavior.json"), JSON.stringify({ id: "behavior", expected: { mustEndState: "tests passed" } }));
     expect(await runSkillEvalGate(h.skill)).toMatchObject({ evaluationKind: "metadata", status: "failed", failures: expect.arrayContaining([expect.stringContaining("metadata cannot establish")]) });
   });
+});
+
+
+it("reviews successful tasks across different prompts, can abstain, and leaves suggest mode idle", async () => {
+  const h = await harness();
+  const drafter = vi.fn().mockResolvedValue(undefined);
+  const db = new InMemorySessionDB();
+  for (const id of ["success-a", "success-b"]) await db.createSession({ id, profileId: "default" });
+  const manager = new SkillLearningManager({ autonomy: "proactive", registry: h.registry, localSkillsRoot: h.root,
+    storePath: join(h.root, ".learning.json"), sessionDb: db, skillEvolutionStore: h.store, drafter, proposalService: h.service });
+  for (const sessionId of ["success-a", "success-b"]) await manager.observeTurn({ profileId: "default", sessionId,
+    userText: `Private task ${sessionId}`, promptHash: sessionId, selectedSkill: h.skill, outcomeStatus: "succeeded",
+    agentEvolutionPolicy: deriveAgentEvolutionPolicy("proactive"), toolExecutions: [] });
+  expect(await manager.inspect()).toHaveLength(1);
+  manager.startBackgroundReview({ profileId: "default", sessionId: "success-b", agentEvolutionPolicy: deriveAgentEvolutionPolicy("suggest"), validateAuthority: async () => {} });
+  await manager.waitForBackgroundReview(); expect(drafter).not.toHaveBeenCalled();
+  manager.startBackgroundReview({ profileId: "default", sessionId: "success-b", agentEvolutionPolicy: deriveAgentEvolutionPolicy("proactive"), validateAuthority: async () => {} });
+  await manager.waitForBackgroundReview();
+  expect(drafter).toHaveBeenCalledTimes(1);
+  expect(drafter.mock.calls[0]![0].evidence[0]).toMatchObject({ outcome: "succeeded", lesson: expect.stringContaining("preserve") });
+  expect(JSON.stringify(drafter.mock.calls)).not.toContain("Private task");
+  expect((await manager.inspect())[0]?.draftStatus).toBe("abstained");
+  expect(await h.service.listProposals()).toHaveLength(0);
+});
+
+it("cancels background model review for foreground work and preserves a retryable candidate", async () => {
+  const h = await harness(); const db = new InMemorySessionDB();
+  for (const id of ["cancel-a", "cancel-b"]) await db.createSession({ id, profileId: "default" });
+  let started!: () => void; const entered = new Promise<void>(resolve => { started = resolve; });
+  const drafter = vi.fn(async ({ signal }) => { started(); await new Promise<void>(resolve => signal.addEventListener("abort", () => resolve(), { once: true })); return patch; });
+  const manager = new SkillLearningManager({ autonomy: "proactive", registry: h.registry, localSkillsRoot: h.root,
+    storePath: join(h.root, ".learning.json"), sessionDb: db, skillEvolutionStore: h.store, drafter, proposalService: h.service });
+  for (const sessionId of ["cancel-a", "cancel-b"]) await manager.observeTurn({ profileId: "default", sessionId,
+    userText: "Run checks", selectedSkill: h.skill, outcomeStatus: "failed", agentEvolutionPolicy: deriveAgentEvolutionPolicy("proactive"), toolExecutions: [] });
+  manager.startBackgroundReview({ profileId: "default", sessionId: "cancel-b", agentEvolutionPolicy: deriveAgentEvolutionPolicy("proactive"), validateAuthority: async () => {} });
+  await entered; await manager.cancelBackgroundReview();
+  expect((await manager.inspect())[0]).toMatchObject({ draftStatus: "pending" });
+  expect((await manager.inspect())[0]?.draftAttemptedAt).toBeDefined();
+  manager.startBackgroundReview({ profileId: "default", sessionId: "cancel-b", agentEvolutionPolicy: deriveAgentEvolutionPolicy("proactive"), validateAuthority: async () => {} });
+  await manager.waitForBackgroundReview();
+  expect(drafter).toHaveBeenCalledTimes(1);
+  expect(await h.service.listProposals()).toHaveLength(0);
+  expect(await readFile(h.skillPath, "utf8")).toBe(content);
+});
+
+it("serializes shared profile observations and draft claims across managers", async () => {
+  const h = await harness(); const db = new InMemorySessionDB(); const drafter = vi.fn().mockResolvedValue(patch);
+  const managers = [0, 1].map(() => new SkillLearningManager({ autonomy: "proactive", registry: h.registry, localSkillsRoot: h.root,
+    storePath: join(h.root, ".learning.json"), sessionDb: db, skillEvolutionStore: h.store, drafter, proposalService: h.service }));
+  for (const id of ["parallel-a", "parallel-b"]) await db.createSession({ id, profileId: "default" });
+  await Promise.all(managers.map((manager, i) => manager.observeTurn({ profileId: "default", sessionId: i ? "parallel-b" : "parallel-a",
+    userText: "Run checks", selectedSkill: h.skill, outcomeStatus: "failed", agentEvolutionPolicy: deriveAgentEvolutionPolicy("proactive"), toolExecutions: [] })));
+  expect((await managers[0]!.inspect())[0]?.occurrences).toBe(2);
+  for (const manager of managers) manager.startBackgroundReview({ profileId: "default", sessionId: "parallel-b", agentEvolutionPolicy: deriveAgentEvolutionPolicy("proactive"), validateAuthority: async () => {} });
+  await Promise.all(managers.map(manager => manager.waitForBackgroundReview()));
+  expect(drafter).toHaveBeenCalledTimes(1);
+  expect(await h.service.listProposals()).toHaveLength(1);
+});
+
+
+it("records runner provenance and invalidates earlier passing evidence when a rerun ties", async () => {
+  const h = await harness();
+  const candidate = await h.store.appendLearningCandidate({ kind: "selected_skill_refinement", selectedSkill: "checks", suggestedTarget: "skill_patch", evidenceIds: [], reason: "Verify results" });
+  const drafted = await h.service.createProposalFromLearningCandidate({ candidate, agentEvolutionPolicy: deriveAgentEvolutionPolicy("proactive"), patch, baseContentHash: skillContentHash(content) });
+  if (!drafted.ok) throw new Error(drafted.reason);
+  const suite = { version: 1, id: "task-output", cases: ["a", "b"].map(id => ({ id, instruction: "Produce the result.", input: "fixture", expected: { done: true } })) };
+  const complete = vi.fn(async (request) => ({ ok: true, toolCalls: [], response: { content: JSON.stringify({ done: request.messages[0].content.includes("inspect the result") }) } }));
+  const options = { suite, executor: { complete } as never, route: { provider: "test", id: "fixed" } as never };
+  expect((await h.service.runTaskEvaluation(drafted.proposal.id, options)).passed).toBe(true);
+  expect(await h.service.findProposal(drafted.proposal.id)).toMatchObject({ taskEvaluationSource: "runner_executed", requiresHumanApproval: true });
+  await h.service.approveProposal(drafted.proposal.id);
+  complete.mockImplementation(async () => ({ ok: true, toolCalls: [], response: { content: '{"done":true}' } }));
+  expect((await h.service.runTaskEvaluation(drafted.proposal.id, options)).passed).toBe(false);
+  const after = await h.service.findProposal(drafted.proposal.id);
+  expect(after?.approvedAt).toBeUndefined();
+  await h.service.approveProposal(drafted.proposal.id);
+  expect(await h.service.promoteProposal(drafted.proposal.id)).toMatchObject({ ok: false, reason: expect.stringContaining("improvement") });
+  expect(await readFile(h.skillPath, "utf8")).toBe(content);
+});
+
+
+it("queues missing workflow proposals without creating executable skills", async () => {
+  const h = await harness(); const db = new InMemorySessionDB(); const drafter = vi.fn();
+  const manager = new SkillLearningManager({ autonomy: "proactive", registry: h.registry, localSkillsRoot: h.root,
+    storePath: join(h.root, ".learning.json"), sessionDb: db, skillEvolutionStore: h.store, drafter, proposalService: h.service });
+  for (const sessionId of ["missing-a", "missing-b"]) {
+    await db.createSession({ id: sessionId, profileId: "default" });
+    await manager.observeTurn({ profileId: "default", sessionId, userText: "Run the release checks and write a report", selectedSkill: undefined,
+      outcomeStatus: "succeeded", noSkillResult: "missed", agentEvolutionPolicy: deriveAgentEvolutionPolicy("proactive"),
+      toolExecutions: ["file.read", "file.write"].map(name => ({ tool: { name, toolsets: ["files"] }, decision: "allow", riskClass: "workspace-write", result: { ok: true } })) as never });
+  }
+  manager.startBackgroundReview({ profileId: "default", sessionId: "missing-b", agentEvolutionPolicy: deriveAgentEvolutionPolicy("proactive"), validateAuthority: async () => {} });
+  await manager.waitForBackgroundReview();
+  const [proposal] = await h.service.listProposals();
+  expect(proposal).toMatchObject({ changeKind: "skill_create", mayPromoteAutomatically: false, requiresHumanApproval: true });
+  expect(proposal?.patch).toBeUndefined();
+  expect(drafter).not.toHaveBeenCalled();
+  expect(h.registry.list()).toHaveLength(1);
 });

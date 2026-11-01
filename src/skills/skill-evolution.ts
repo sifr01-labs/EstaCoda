@@ -1,6 +1,8 @@
+import { constants } from "node:fs";
+import { withProfileWriteLock } from "../config/profile-write-lock.js";
 import {ProfileJsonl} from '../storage/profile-jsonl.js';
 import type { SkillTaskEvaluation } from "./skill-task-evaluation.js";
-import { appendFile, mkdir, readFile, rename, writeFile } from "node:fs/promises";
+import { mkdir, open, readFile, rename, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import { randomUUID } from "node:crypto";
 import type { SkillOutcome } from "../contracts/memory.js";
@@ -167,7 +169,7 @@ export type SkillPatchProposal = {
   requiresTaskEvaluation?: boolean;
   taskEvaluation?: SkillTaskEvaluation;
   taskEvaluatedAt?: string;
-  taskEvaluationSource?: "operator_attested";
+  taskEvaluationSource?: "operator_attested" | "runner_executed";
   id: string;
   skillName: string;
   source?: SkillSourceKind;
@@ -493,8 +495,12 @@ export class SkillEvolutionStore {
     });
   }
 
-  async usage(): Promise<SkillUsageRecord[]> {
-    await this.#ensureLoaded();
+  async usage(options: { refresh?: boolean } = {}): Promise<SkillUsageRecord[]> {
+    if (options.refresh) {
+      const refresh = this.#usageUpdates.then(() => withProfileWriteLock(dirname(this.#usagePath), () => this.#loadUsage(true)));
+      this.#usageUpdates = refresh.then(() => undefined, () => undefined);
+      await refresh;
+    } else await this.#ensureLoaded();
     return [...this.#usage.values()]
       .map((record) => ({ ...record }))
       .sort((left, right) => left.skillName.localeCompare(right.skillName));
@@ -733,11 +739,22 @@ export class SkillEvolutionStore {
     }));
   }
 
-  async recordProposalTaskEvaluation(id: string, taskEvaluation: SkillTaskEvaluation): Promise<SkillPatchProposal | undefined> {
-    return this.#rewriteProposal(id, (proposal) => ({
-      ...proposal, taskEvaluation, taskEvaluatedAt: this.#nowIso(), taskEvaluationSource: "operator_attested", requiresHumanApproval: true,
-      approvedAt: undefined, approvedBy: undefined, approvalState: "required"
-    }));
+  async invalidateProposalTaskEvaluation(id: string): Promise<SkillPatchProposal | undefined> {
+    return this.#rewriteProposal(id, proposal => {
+      if (proposal.status !== "proposed") throw new Error("A pending proposal is required.");
+      return { ...proposal, taskEvaluation: undefined, taskEvaluatedAt: undefined, taskEvaluationSource: undefined,
+        approvedAt: undefined, approvedBy: undefined, requiresHumanApproval: true, approvalState: "required" };
+    });
+  }
+
+  async recordProposalTaskEvaluation(id: string, taskEvaluation: SkillTaskEvaluation, source: "operator_attested" | "runner_executed" = "operator_attested"): Promise<SkillPatchProposal | undefined> {
+    return this.#rewriteProposal(id, (proposal) => {
+      if (proposal.status !== "proposed") throw new Error("A pending proposal is required.");
+      return {
+        ...proposal, taskEvaluation, taskEvaluatedAt: this.#nowIso(), taskEvaluationSource: source,
+        requiresHumanApproval: true, approvedAt: undefined, approvedBy: undefined, approvalState: "required"
+      };
+    });
   }
 
   async linkProposalManifest(id: string, changeManifestId: string): Promise<SkillPatchProposal | undefined> {
@@ -863,6 +880,10 @@ export class SkillEvolutionStore {
   }
 
   async #rewriteProposal(id: string, update: (proposal: SkillPatchProposal) => SkillPatchProposal): Promise<SkillPatchProposal | undefined> {
+    return withProfileWriteLock(this.#evolutionRoot, () => this.#rewriteProposalLocked(id, update));
+  }
+
+  async #rewriteProposalLocked(id: string, update: (proposal: SkillPatchProposal) => SkillPatchProposal): Promise<SkillPatchProposal | undefined> {
     if(this.#jsonl)return this.#jsonl.rewrite<SkillPatchProposal>(join(this.#evolutionRoot,"proposed-patches.jsonl"),id,p=>update(normalizeProposalRecord(p)));
     const proposals = (await this.#readJsonl<SkillPatchProposal>("proposed-patches.jsonl"))
       .map(normalizeProposalRecord);
@@ -882,6 +903,10 @@ export class SkillEvolutionStore {
   }
 
   async #rewriteExperiment(id: string, update: (experiment: EvolutionExperiment) => EvolutionExperiment): Promise<EvolutionExperiment | undefined> {
+    return withProfileWriteLock(this.#evolutionRoot, () => this.#rewriteExperimentLocked(id, update));
+  }
+
+  async #rewriteExperimentLocked(id: string, update: (experiment: EvolutionExperiment) => EvolutionExperiment): Promise<EvolutionExperiment | undefined> {
     if(this.#jsonl)return this.#jsonl.rewrite<EvolutionExperiment>(join(this.#evolutionRoot,"experiments.jsonl"),id,update);
     const experiments = await this.#readJsonl<EvolutionExperiment>("experiments.jsonl");
     let updated: EvolutionExperiment | undefined;
@@ -906,15 +931,15 @@ export class SkillEvolutionStore {
   ): Promise<SkillUsageRecord> {
     // A tool batch may read several skills/resources concurrently. Serialize
     // initial loading and persistence so those successful reads are not lost.
-    const result = this.#usageUpdates.then(async () => {
-      await this.#ensureLoaded();
+    const result = this.#usageUpdates.then(() => withProfileWriteLock(dirname(this.#usagePath), async () => {
+      await this.#loadUsage(true);
       const record = this.#usage.get(skillName) ?? defaultUsageRecord(skillName, source);
       if (source !== undefined) record.source = source;
       update(record);
       this.#usage.set(skillName, record);
       await this.#flushUsage();
       return { ...record };
-    });
+    }));
     this.#usageUpdates = result.then(() => undefined, () => undefined);
     return result;
   }
@@ -927,14 +952,15 @@ export class SkillEvolutionStore {
     return this.#loading;
   }
 
-  async #loadUsage(): Promise<void> {
-    const raw = this.#readUsage ? await this.#readUsage() : await readFile(this.#usagePath, "utf8").catch(() => undefined);
+  async #loadUsage(strict = false): Promise<void> {
+    const raw = this.#readUsage ? await this.#readUsage() : await readFile(this.#usagePath, "utf8").catch(error => { if ((error as NodeJS.ErrnoException).code === "ENOENT") return undefined; throw error; });
     if (raw !== undefined) {
       try {
         const parsed = JSON.parse(raw) as UsageFile;
-        if(this.#readUsage){
+        if(this.#readUsage || strict){
           if(parsed.version!==1||!Array.isArray(parsed.skills)||parsed.skills.some(r=>!r||typeof r.skillName!=='string'||!r.skillName||typeof r.pinned!=='boolean'||!['active','stale','archived','inactive'].includes(r.state)))throw new Error('Invalid skill usage state');
         }
+        this.#usage.clear();
         for (const record of parsed.skills ?? []) {
           this.#usage.set(record.skillName, {
             ...defaultUsageRecord(record.skillName, record.source),
@@ -942,12 +968,12 @@ export class SkillEvolutionStore {
           });
         }
       } catch(error) {
-        if(this.#readUsage)throw error;
+        if(this.#readUsage || strict)throw error;
         const corruptPath = `${this.#usagePath}.corrupt-${this.#nowIso().replace(/[:.]/gu, "-")}`;
         await rename(this.#usagePath, corruptPath).catch(() => undefined);
         this.#usage.clear();
       }
-    }
+    } else { this.#usage.clear(); }
     this.#loaded = true;
   }
 
@@ -960,8 +986,15 @@ export class SkillEvolutionStore {
   }
 
   async #appendJsonl(file: string, value: unknown): Promise<void> {
-    await mkdir(this.#evolutionRoot, { recursive: true });
-    await appendFile(join(this.#evolutionRoot, file), `${JSON.stringify(value)}\n`, "utf8");
+    await withProfileWriteLock(this.#evolutionRoot, async () => {
+      const path = join(this.#evolutionRoot, file);
+      await this.#jsonl?.check(path);
+      const output = await open(path, constants.O_CREAT | constants.O_APPEND | constants.O_WRONLY | constants.O_NOFOLLOW, 0o600);
+      try {
+        if (!(await output.stat()).isFile()) throw new Error("Invalid evolution file.");
+        await output.writeFile(`${JSON.stringify(value)}\n`);
+      } finally { await output.close(); }
+    });
   }
 
   async #readJsonl<T>(file: string): Promise<T[]> {

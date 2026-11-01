@@ -39,7 +39,7 @@ export function learningFindings(calls: readonly ToolExecutionRecord[], turn: Le
     "Inspect intervening mutations and check input scopes before recommending another run. Do not assume a repeated check was unnecessary.", "workflow-review", repeated);
   if (turn.delegationAvailable === false) add("delegation-unavailable", "Delegation was unavailable in the session inventory.",
     "Inspect persistent Task prerequisites and exposure. Absence from this session is not a permanent capability limitation.", "runtime-regression", []);
-  const recovered = calls.filter((call, index) => call.decision === "allow" && call.result?.ok === false &&
+  const recovered = calls.filter((call, index) => call.decision === "allow" && call.result?.ok === false && !isExpectedDiffResult(call) &&
     calls.slice(index + 1).some(next => next.tool.name === call.tool.name && next.decision === "allow" && next.result?.ok));
   if (recovered.length) add("recovered-tool-failure", "A failed tool call was followed by a successful call of the same tool; task success is separate.",
     "Review the successful alternative and its evidence before proposing a reusable procedure. Do not persist a transient failure as tool unavailability.", "workflow-review", recovered);
@@ -70,4 +70,11 @@ export function learningDraftEvidence(evidence: Record<string, unknown> | undefi
     lesson: mechanisms.length ? mechanisms.map(key => lessons[key]).join(" ") + " Proposed corrections remain unverified; abstain without sufficient evidence."
       : "The selected skill did not complete this task successfully; the cause is unknown."
   };
+}
+
+/** diff uses exit 1 for a successful comparison with differences. Never forgive a compound command or a declared check. */
+function isExpectedDiffResult(call: ToolExecutionRecord): boolean {
+  return call.tool.name === "terminal.run" && call.result?.metadata?.exitCode === 1 &&
+    call.input?.verification === undefined && call.result?.metadata?.timedOut !== true &&
+    typeof call.input?.command === "string" && /^diff\s+[^;&|`$\n<>]+$/u.test(call.input.command.trim());
 }

@@ -1,3 +1,8 @@
+import { randomUUID } from "node:crypto";
+import { createSQLiteSessionDB } from "../session/session-setup.js";
+import { SQLiteProviderSpendController } from "../tasks/sqlite-provider-spend.js";
+import { createProviderUsageRecorder } from "../providers/provider-usage-ledger.js";
+import { ProviderExecutor } from "../providers/provider-executor.js";
 import { join } from "node:path";
 import { open, constants } from "node:fs/promises";
 import { fileURLToPath } from "node:url";
@@ -35,6 +40,7 @@ async function openProposalService(options: CliOptions): Promise<SkillProposalSe
     for (const skill of loaded.skills) registry.register(skill);
   }
   const skillEvolutionStore = new SkillEvolutionStore({
+    profileRoot: localSkillsRoot,
     usagePath: join(localSkillsRoot, ".usage.json"),
     evolutionRoot: join(localSkillsRoot, ".evolution")
   });
@@ -51,6 +57,8 @@ async function openProposalService(options: CliOptions): Promise<SkillProposalSe
 
 export async function proposalCommand(options: CliOptions, args: string[]): Promise<CliCommandResult> {
   const [subcommand, ...restArgs] = args;
+  // Pin one profile across source loading, credential resolution, execution and recording.
+  options = { ...options, profileId: options.profileId ?? readActiveProfile({ homeDir: resolveHome(options) }).profileId ?? defaultProfileId() };
 
   const service = await openProposalService(options);
 
@@ -65,6 +73,39 @@ export async function proposalCommand(options: CliOptions, args: string[]): Prom
       return proposalReject(service, restArgs);
     case "promote":
       return proposalPromote(service, restArgs);
+    case "test": {
+      const [id, suitePath] = restArgs;
+      if (!id || !suitePath) return { handled: true, exitCode: 1, output: "Usage: estacoda proposal test <id> <task-suite.json>" };
+      let executor: ProviderExecutor | undefined;
+      let db: Awaited<ReturnType<typeof createSQLiteSessionDB>> | undefined;
+      try {
+        const file = await open(suitePath, constants.O_RDONLY | constants.O_NOFOLLOW);
+        let suite: unknown;
+        try {
+          const stat = await file.stat();
+          if (!stat.isFile() || stat.size > 128_000) throw new Error("Task suite must be a regular file up to 128 KB.");
+          const buffer = Buffer.alloc(128_001);
+          const { bytesRead } = await file.read(buffer, 0, buffer.length, 0);
+          if (bytesRead > 128_000) throw new Error("Task suite exceeds 128 KB.");
+          suite = JSON.parse(buffer.subarray(0, bytesRead).toString("utf8"));
+        } finally { await file.close(); }
+        const config = await loadRuntimeConfig({ workspaceRoot: options.workspaceRoot, homeDir: resolveHome(options), profileId: options.profileId });
+        if (config.primaryModelRoute.provider === "unconfigured") throw new Error("Configure a model before running task evaluations.");
+        db = await createSQLiteSessionDB({ homeDir: resolveHome(options) });
+        const sessionId = randomUUID();
+        await db.createSession({ id: sessionId, profileId: config.profileId, title: "Skill task evaluation",
+          ...(config.budgets.session ? { spendingScopeSessionId: sessionId, spendingLimit: config.budgets.session } : {}) });
+        const ledger = db;
+        executor = new ProviderExecutor({ registry: config.providerRegistry, homeDir: resolveHome(options), profileId: config.profileId,
+          spendController: new SQLiteProviderSpendController({ db: db.db, profileId: config.profileId }),
+          usageRecorder: createProviderUsageRecorder({ profileId: config.profileId, record: entries => ledger.recordProviderUsageEntries(entries) }) });
+        const result = await service.runTaskEvaluation(id, { suite, executor, route: config.primaryModelRoute, sessionId });
+        return { handled: true, exitCode: result.passed ? 0 : 1,
+          output: `${result.passed ? "Executed paired task evaluation passed; approval is still required." : `Evaluation did not establish improvement: ${result.reason}`}\nEvidence: ${result.directory}` };
+      } catch (error) {
+        return { handled: true, exitCode: 1, output: error instanceof Error ? error.message : String(error) };
+      } finally { await executor?.dispose(); db?.close(); }
+    }
     case "evaluate": {
       const [id, reportPath] = restArgs;
       if (!id || !reportPath) return { handled: true, exitCode: 1, output: "Usage: estacoda proposal evaluate <id> <paired-task-report.json>" };
@@ -110,6 +151,7 @@ function proposalHelp(): string {
     "  estacoda proposal list --status <s>    Filter by status (proposed|promoted|rejected)",
     "  estacoda proposal inspect <id>         Show proposal details with linked review records",
     "  estacoda proposal approve <id>         Mark proposal as approved",
+    "  estacoda proposal test <id> <json>     Run paid, tool-free paired tasks on the configured model",
     "  estacoda proposal evaluate <id> <json> Record operator-attested paired task results; resets approval",
     "  estacoda proposal reject <id>          Reject a proposal",
     "  estacoda proposal promote <id>         Promote proposal after eval gates"

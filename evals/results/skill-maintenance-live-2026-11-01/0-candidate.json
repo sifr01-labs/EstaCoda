@@ -1,0 +1,21 @@
+{
+  "arm": "candidate",
+  "caseId": "batch-1",
+  "elapsedMs": 3695,
+  "ok": true,
+  "answer": "{\"policy\":\"v2\",\"totals\":{\"EUR\":\"58.77\",\"USD\":\"222.51\"},\"includedIds\":[\"INV-001\",\"INV-002\",\"INV-003\",\"INV-005\",\"INV-006\",\"INV-009\",\"INV-010\",\"INV-011\",\"INV-013\",\"INV-015\",\"INV-017\",\"INV-018\",\"INV-019\",\"INV-022\",\"INV-023\"]}",
+  "toolCallCount": 0,
+  "grade": {
+    "score": 1,
+    "safetyPassed": true,
+    "artifact": "0-candidate.json"
+  },
+  "usage": {
+    "inputTokens": 629,
+    "outputTokens": 282,
+    "totalTokens": 911,
+    "cacheReadTokens": 0,
+    "cacheWriteTokens": 0,
+    "reasoningTokens": 190
+  }
+}

@@ -1,0 +1,773 @@
+{
+  "schemaVersion": 1,
+  "manifest": {
+    "before": "72bcb20da00ffaeea72c096cc19913d93fb47ec6",
+    "afterSource": "working tree accompanying this report",
+    "createdAt": "2026-11-01T21:42:19.639Z",
+    "model": "codex/gpt-6.1-sol",
+    "task": "Two invoice-export reconciliations with an operator policy update between turns",
+    "data": "Constructed, non-private 26-row invoice exports, including duplicate IDs, credits, disputed and void records, and two currencies. This is a live workflow test, not customer production data.",
+    "primaryMetric": "Exact JSON equality against independently calculated v1/v2 policy results; no manual catalog refresh",
+    "budgets": {
+      "iterations": 16,
+      "tools": 24,
+      "wallMs": 180000,
+      "maxTokens": 4000
+    },
+    "isolation": "Fresh homes, memory and workspace; selected-profile access token only, no fallback or delegation; same data and prompts, baseline runs first.",
+    "gradingFrozen": true,
+    "fixtureHash": "c0164ae7e128a0ff66cab6784af02b359e6883165bc76ff7edf811ea31bc1ed0",
+    "setupFailure": "An initial baseline attempt used invalid optionalToolsets shell-read and was excluded. The corrected shell-readonly fixture was loader-validated before both measured arms; no task/rubric change was made.",
+    "candidateRepeat": "Final candidate repeated after archive-visibility, store-locking and quota hardening. Both initial and final candidates passed 2/2; the final attempt is the primary reported candidate."
+  },
+  "arms": {
+    "before": {
+      "turns": [
+        {
+          "turn": 1,
+          "elapsedMs": 57585,
+          "passed": true,
+          "output": {
+            "policy": "v1",
+            "totals": {
+              "EUR": "189.19",
+              "USD": "398.07"
+            },
+            "includedIds": [
+              "INV-001",
+              "INV-002",
+              "INV-003",
+              "INV-004",
+              "INV-005",
+              "INV-006",
+              "INV-008",
+              "INV-009",
+              "INV-010",
+              "INV-011",
+              "INV-012",
+              "INV-013",
+              "INV-015",
+              "INV-016",
+              "INV-017",
+              "INV-018",
+              "INV-019",
+              "INV-020",
+              "INV-022",
+              "INV-023",
+              "INV-024"
+            ]
+          },
+          "expected": {
+            "policy": "v1",
+            "totals": {
+              "USD": "398.07",
+              "EUR": "189.19"
+            },
+            "includedIds": [
+              "INV-001",
+              "INV-002",
+              "INV-003",
+              "INV-004",
+              "INV-005",
+              "INV-006",
+              "INV-008",
+              "INV-009",
+              "INV-010",
+              "INV-011",
+              "INV-012",
+              "INV-013",
+              "INV-015",
+              "INV-016",
+              "INV-017",
+              "INV-018",
+              "INV-019",
+              "INV-020",
+              "INV-022",
+              "INV-023",
+              "INV-024"
+            ]
+          },
+          "outcome": {
+            "status": "completed_with_recovered_errors",
+            "terminationCause": "normal",
+            "completionFloor": "mutation",
+            "confirmedActions": [
+              {
+                "toolCallId": "tool-call-2d97cb7122681c42068dfb8b",
+                "tool": "terminal.run",
+                "riskClass": "workspace-write",
+                "targetSummary": "python3 - <<'PY' import csv,json,re from decimal import Decimal with open('batch1.csv',newline='') as f: rows=list(cs...",
+                "status": "confirmed",
+                "verification": "not_verified"
+              },
+              {
+                "toolCallId": "tool-call-8094979026b2add860667240",
+                "tool": "terminal.run",
+                "riskClass": "workspace-write",
+                "targetSummary": "python3 - <<'PY' import csv,json from decimal import Decimal with open('batch1.csv',newline='') as f: rows={r['id']:r...",
+                "status": "confirmed",
+                "verification": "not_verified"
+              },
+              {
+                "toolCallId": "tool-call-4dacd0399e0640c2d33542db",
+                "tool": "terminal.run",
+                "riskClass": "workspace-write",
+                "targetSummary": "python3 - <<'PY' import csv,json,re from pathlib import Path with open('batch1.csv', newline='') as f: latest={r['id'...",
+                "status": "confirmed",
+                "verification": "not_verified"
+              }
+            ],
+            "uncertainActions": []
+          },
+          "providerCalls": 12,
+          "toolCalls": 10
+        },
+        {
+          "turn": 2,
+          "elapsedMs": 15830,
+          "passed": false,
+          "output": {
+            "policy": "v1",
+            "totals": {
+              "EUR": "211.66",
+              "USD": "443.01"
+            },
+            "includedIds": [
+              "INV-001",
+              "INV-002",
+              "INV-003",
+              "INV-004",
+              "INV-005",
+              "INV-006",
+              "INV-008",
+              "INV-009",
+              "INV-010",
+              "INV-011",
+              "INV-012",
+              "INV-013",
+              "INV-015",
+              "INV-016",
+              "INV-017",
+              "INV-018",
+              "INV-019",
+              "INV-020",
+              "INV-022",
+              "INV-023",
+              "INV-024"
+            ]
+          },
+          "expected": {
+            "policy": "v2",
+            "totals": {
+              "USD": "241.77",
+              "EUR": "68.40"
+            },
+            "includedIds": [
+              "INV-001",
+              "INV-002",
+              "INV-003",
+              "INV-005",
+              "INV-006",
+              "INV-009",
+              "INV-010",
+              "INV-011",
+              "INV-013",
+              "INV-015",
+              "INV-017",
+              "INV-018",
+              "INV-019",
+              "INV-022",
+              "INV-023"
+            ]
+          },
+          "outcome": {
+            "status": "completed",
+            "terminationCause": "normal",
+            "completionFloor": "mutation",
+            "confirmedActions": [
+              {
+                "toolCallId": "tool-call-74b861c662e1fd4e713c0603",
+                "tool": "terminal.run",
+                "riskClass": "workspace-write",
+                "targetSummary": "python3 - <<'PY' import csv,json,re from pathlib import Path with open('batch2.csv',newline='') as f: latest={r['id']...",
+                "status": "confirmed",
+                "verification": "not_verified"
+              }
+            ],
+            "uncertainActions": []
+          },
+          "providerCalls": 5,
+          "toolCalls": 4
+        }
+      ],
+      "catalogNotices": []
+    },
+    "after": {
+      "turns": [
+        {
+          "turn": 1,
+          "elapsedMs": 28858,
+          "passed": true,
+          "output": {
+            "policy": "v1",
+            "totals": {
+              "EUR": "189.19",
+              "USD": "398.07"
+            },
+            "includedIds": [
+              "INV-001",
+              "INV-002",
+              "INV-003",
+              "INV-004",
+              "INV-005",
+              "INV-006",
+              "INV-008",
+              "INV-009",
+              "INV-010",
+              "INV-011",
+              "INV-012",
+              "INV-013",
+              "INV-015",
+              "INV-016",
+              "INV-017",
+              "INV-018",
+              "INV-019",
+              "INV-020",
+              "INV-022",
+              "INV-023",
+              "INV-024"
+            ]
+          },
+          "expected": {
+            "policy": "v1",
+            "totals": {
+              "USD": "398.07",
+              "EUR": "189.19"
+            },
+            "includedIds": [
+              "INV-001",
+              "INV-002",
+              "INV-003",
+              "INV-004",
+              "INV-005",
+              "INV-006",
+              "INV-008",
+              "INV-009",
+              "INV-010",
+              "INV-011",
+              "INV-012",
+              "INV-013",
+              "INV-015",
+              "INV-016",
+              "INV-017",
+              "INV-018",
+              "INV-019",
+              "INV-020",
+              "INV-022",
+              "INV-023",
+              "INV-024"
+            ]
+          },
+          "outcome": {
+            "status": "completed",
+            "terminationCause": "normal",
+            "completionFloor": "mutation",
+            "confirmedActions": [
+              {
+                "toolCallId": "tool-call-5f1c8d5c1e07d4295285904e",
+                "tool": "terminal.run",
+                "riskClass": "workspace-write",
+                "targetSummary": "python3 - <<'PY' import csv,json,re from pathlib import Path rows=list(csv.DictReader(Path('batch1.csv').open(newline...",
+                "status": "confirmed",
+                "verification": "not_verified"
+              }
+            ],
+            "uncertainActions": []
+          },
+          "providerCalls": 8,
+          "toolCalls": 7
+        },
+        {
+          "turn": 2,
+          "elapsedMs": 39267,
+          "passed": true,
+          "output": {
+            "policy": "v2",
+            "totals": {
+              "EUR": "68.40",
+              "USD": "241.77"
+            },
+            "includedIds": [
+              "INV-001",
+              "INV-002",
+              "INV-003",
+              "INV-005",
+              "INV-006",
+              "INV-009",
+              "INV-010",
+              "INV-011",
+              "INV-013",
+              "INV-015",
+              "INV-017",
+              "INV-018",
+              "INV-019",
+              "INV-022",
+              "INV-023"
+            ]
+          },
+          "expected": {
+            "policy": "v2",
+            "totals": {
+              "USD": "241.77",
+              "EUR": "68.40"
+            },
+            "includedIds": [
+              "INV-001",
+              "INV-002",
+              "INV-003",
+              "INV-005",
+              "INV-006",
+              "INV-009",
+              "INV-010",
+              "INV-011",
+              "INV-013",
+              "INV-015",
+              "INV-017",
+              "INV-018",
+              "INV-019",
+              "INV-022",
+              "INV-023"
+            ]
+          },
+          "outcome": {
+            "status": "completed_with_recovered_errors",
+            "terminationCause": "normal",
+            "completionFloor": "mutation",
+            "confirmedActions": [
+              {
+                "toolCallId": "tool-call-8711ca496dc975731dfb927c",
+                "tool": "terminal.run",
+                "riskClass": "workspace-write",
+                "targetSummary": "python3 - <<'PY' import csv,json from decimal import Decimal from collections import defaultdict with open('batch2.cs...",
+                "status": "confirmed",
+                "verification": "not_verified"
+              },
+              {
+                "toolCallId": "tool-call-6e9dd4cb935d23f18c4b1177",
+                "tool": "terminal.run",
+                "riskClass": "workspace-write",
+                "targetSummary": "python3 - <<'PY' import csv,json from decimal import Decimal from collections import defaultdict with open('batch2.cs...",
+                "status": "confirmed",
+                "verification": "not_verified"
+              },
+              {
+                "toolCallId": "tool-call-97fb384b1c42c990ab302b68",
+                "tool": "terminal.run",
+                "riskClass": "workspace-write",
+                "targetSummary": "python3 - <<'PY' import csv,json,re from pathlib import Path with open('batch2.csv',newline='') as f: latest={r['id']...",
+                "status": "confirmed",
+                "verification": "not_verified"
+              }
+            ],
+            "uncertainActions": []
+          },
+          "providerCalls": 9,
+          "toolCalls": 7
+        }
+      ],
+      "catalogNotices": [
+        {
+          "added": [],
+          "removed": [],
+          "changed": [
+            "ledger-close"
+          ]
+        }
+      ]
+    },
+    "review": {
+      "turns": [
+        {
+          "turn": 1,
+          "elapsedMs": 19482,
+          "passed": true,
+          "output": {
+            "policy": "v2",
+            "totals": {
+              "EUR": "58.77",
+              "USD": "222.51"
+            },
+            "includedIds": [
+              "INV-001",
+              "INV-002",
+              "INV-003",
+              "INV-005",
+              "INV-006",
+              "INV-009",
+              "INV-010",
+              "INV-011",
+              "INV-013",
+              "INV-015",
+              "INV-017",
+              "INV-018",
+              "INV-019",
+              "INV-022",
+              "INV-023"
+            ]
+          },
+          "expected": {
+            "policy": "v2",
+            "totals": {
+              "USD": "222.51",
+              "EUR": "58.77"
+            },
+            "includedIds": [
+              "INV-001",
+              "INV-002",
+              "INV-003",
+              "INV-005",
+              "INV-006",
+              "INV-009",
+              "INV-010",
+              "INV-011",
+              "INV-013",
+              "INV-015",
+              "INV-017",
+              "INV-018",
+              "INV-019",
+              "INV-022",
+              "INV-023"
+            ]
+          },
+          "outcome": {
+            "status": "completed",
+            "terminationCause": "normal",
+            "completionFloor": "mutation",
+            "confirmedActions": [
+              {
+                "toolCallId": "tool-call-8a597a4e6a2d95453ffb17a9",
+                "tool": "file.write",
+                "riskClass": "workspace-write",
+                "targetSummary": "close1.json",
+                "status": "confirmed",
+                "verification": "verified"
+              }
+            ],
+            "uncertainActions": []
+          },
+          "providerCalls": 7,
+          "toolCalls": 6
+        },
+        {
+          "turn": 2,
+          "elapsedMs": 40967,
+          "passed": true,
+          "output": {
+            "policy": "v2",
+            "totals": {
+              "EUR": "68.40",
+              "USD": "241.77"
+            },
+            "includedIds": [
+              "INV-001",
+              "INV-002",
+              "INV-003",
+              "INV-005",
+              "INV-006",
+              "INV-009",
+              "INV-010",
+              "INV-011",
+              "INV-013",
+              "INV-015",
+              "INV-017",
+              "INV-018",
+              "INV-019",
+              "INV-022",
+              "INV-023"
+            ]
+          },
+          "expected": {
+            "policy": "v2",
+            "totals": {
+              "USD": "241.77",
+              "EUR": "68.40"
+            },
+            "includedIds": [
+              "INV-001",
+              "INV-002",
+              "INV-003",
+              "INV-005",
+              "INV-006",
+              "INV-009",
+              "INV-010",
+              "INV-011",
+              "INV-013",
+              "INV-015",
+              "INV-017",
+              "INV-018",
+              "INV-019",
+              "INV-022",
+              "INV-023"
+            ]
+          },
+          "outcome": {
+            "status": "completed_with_recovered_errors",
+            "terminationCause": "normal",
+            "completionFloor": "mutation",
+            "confirmedActions": [
+              {
+                "toolCallId": "tool-call-f5cc2ed5fb1eb43edb1d7f75",
+                "tool": "terminal.run",
+                "riskClass": "workspace-write",
+                "targetSummary": "python3 - <<'PY' import csv,json from decimal import Decimal with open('batch2.csv',newline='') as f: rows={r['id']:r...",
+                "status": "confirmed",
+                "verification": "not_verified"
+              },
+              {
+                "toolCallId": "tool-call-5748aa6e4767be1c90ee2bdc",
+                "tool": "terminal.run",
+                "riskClass": "workspace-write",
+                "targetSummary": "python3 - <<'PY' import csv,json with open('batch2.csv',newline='') as f: latest={r['id']:r for r in csv.DictReader(f...",
+                "status": "confirmed",
+                "verification": "not_verified"
+              },
+              {
+                "toolCallId": "tool-call-b15cb8496fce12caa31374a5",
+                "tool": "terminal.run",
+                "riskClass": "workspace-write",
+                "targetSummary": "python3 - <<'PY' import csv,json,re from pathlib import Path with open('batch2.csv',newline='') as f: latest={r['id']...",
+                "status": "confirmed",
+                "verification": "not_verified"
+              }
+            ],
+            "uncertainActions": []
+          },
+          "providerCalls": 10,
+          "toolCalls": 8
+        }
+      ],
+      "catalogNotices": []
+    },
+    "afterInitial": {
+      "turns": [
+        {
+          "turn": 1,
+          "elapsedMs": 19688,
+          "passed": true,
+          "output": {
+            "policy": "v1",
+            "totals": {
+              "EUR": "189.19",
+              "USD": "398.07"
+            },
+            "includedIds": [
+              "INV-001",
+              "INV-002",
+              "INV-003",
+              "INV-004",
+              "INV-005",
+              "INV-006",
+              "INV-008",
+              "INV-009",
+              "INV-010",
+              "INV-011",
+              "INV-012",
+              "INV-013",
+              "INV-015",
+              "INV-016",
+              "INV-017",
+              "INV-018",
+              "INV-019",
+              "INV-020",
+              "INV-022",
+              "INV-023",
+              "INV-024"
+            ]
+          },
+          "expected": {
+            "policy": "v1",
+            "totals": {
+              "USD": "398.07",
+              "EUR": "189.19"
+            },
+            "includedIds": [
+              "INV-001",
+              "INV-002",
+              "INV-003",
+              "INV-004",
+              "INV-005",
+              "INV-006",
+              "INV-008",
+              "INV-009",
+              "INV-010",
+              "INV-011",
+              "INV-012",
+              "INV-013",
+              "INV-015",
+              "INV-016",
+              "INV-017",
+              "INV-018",
+              "INV-019",
+              "INV-020",
+              "INV-022",
+              "INV-023",
+              "INV-024"
+            ]
+          },
+          "outcome": {
+            "status": "completed",
+            "terminationCause": "normal",
+            "completionFloor": "mutation",
+            "confirmedActions": [
+              {
+                "toolCallId": "tool-call-c92fb3ae015d4ce901cf85a3",
+                "tool": "terminal.run",
+                "riskClass": "workspace-write",
+                "targetSummary": "python3 - <<'PY' import csv,json from pathlib import Path rows=list(csv.DictReader(Path('batch1.csv').open(newline=''...",
+                "status": "confirmed",
+                "verification": "not_verified"
+              }
+            ],
+            "uncertainActions": []
+          },
+          "providerCalls": 7,
+          "toolCalls": 6
+        },
+        {
+          "turn": 2,
+          "elapsedMs": 17921,
+          "passed": true,
+          "output": {
+            "policy": "v2",
+            "totals": {
+              "EUR": "68.40",
+              "USD": "241.77"
+            },
+            "includedIds": [
+              "INV-001",
+              "INV-002",
+              "INV-003",
+              "INV-005",
+              "INV-006",
+              "INV-009",
+              "INV-010",
+              "INV-011",
+              "INV-013",
+              "INV-015",
+              "INV-017",
+              "INV-018",
+              "INV-019",
+              "INV-022",
+              "INV-023"
+            ]
+          },
+          "expected": {
+            "policy": "v2",
+            "totals": {
+              "USD": "241.77",
+              "EUR": "68.40"
+            },
+            "includedIds": [
+              "INV-001",
+              "INV-002",
+              "INV-003",
+              "INV-005",
+              "INV-006",
+              "INV-009",
+              "INV-010",
+              "INV-011",
+              "INV-013",
+              "INV-015",
+              "INV-017",
+              "INV-018",
+              "INV-019",
+              "INV-022",
+              "INV-023"
+            ]
+          },
+          "outcome": {
+            "status": "completed",
+            "terminationCause": "normal",
+            "completionFloor": "mutation",
+            "confirmedActions": [
+              {
+                "toolCallId": "tool-call-f1e6538511a4c644f12334ef",
+                "tool": "terminal.run",
+                "riskClass": "workspace-write",
+                "targetSummary": "python3 - <<'PY' import csv,json from pathlib import Path with open('batch2.csv',newline='') as f: latest={r['id']:r ...",
+                "status": "confirmed",
+                "verification": "not_verified"
+              }
+            ],
+            "uncertainActions": []
+          },
+          "providerCalls": 5,
+          "toolCalls": 4
+        }
+      ],
+      "catalogNotices": [
+        {
+          "added": [],
+          "removed": [],
+          "changed": [
+            "ledger-close"
+          ]
+        }
+      ]
+    }
+  },
+  "evaluation": {
+    "report": {
+      "version": 1,
+      "baselineHash": "724cfae06ebf2ab5bd22caaa8917b2b86488b94ca9b2006d1ba6c7790e27567e",
+      "candidateHash": "ec79727b37ee8196219cde338b83f2c112d77b8c076f78357d6df4754a01cc93",
+      "suiteId": "ledger-close-policy-v2",
+      "modelId": "codex/gpt-6.1-sol",
+      "environmentHash": "f3743b14a1cb71e5642fc9d71a96c866465c99bde02178c49626e60a25a2c403",
+      "graderId": "exact-json-v1",
+      "cases": [
+        {
+          "id": "batch-1",
+          "fixtureHash": "1057daf46d717679ca1c016cd5e893269fd79a4db2557070cd3ef58360e75d41",
+          "baseline": {
+            "score": 0,
+            "safetyPassed": true,
+            "artifact": "0-baseline.json"
+          },
+          "candidate": {
+            "score": 1,
+            "safetyPassed": true,
+            "artifact": "0-candidate.json"
+          }
+        },
+        {
+          "id": "batch-2",
+          "fixtureHash": "6f8f2a8b5b237ed356d12c1b0372380a41f96c7b9aabaabec9ba011eddfbcc08",
+          "baseline": {
+            "score": 0,
+            "safetyPassed": true,
+            "artifact": "1-baseline.json"
+          },
+          "candidate": {
+            "score": 1,
+            "safetyPassed": true,
+            "artifact": "1-candidate.json"
+          }
+        }
+      ]
+    },
+    "provenance": "runner_executed",
+    "unapprovedPromotion": {
+      "ok": false,
+      "reason": "Skill patch proposal requires explicit approval before promotion."
+    },
+    "liveUnchanged": true,
+    "interpretation": "A proposed operator policy update, not a model-discovered improvement; exact JSON grading of two tool-free tasks."
+  },
+  "backgroundReview": {
+    "occurrences": 2,
+    "status": "abstained",
+    "liveUnchanged": true,
+    "limitation": "This captures the persisted review attempt and abstention, not its separate provider-usage receipt. It is not evidence of an automatically discovered improvement."
+  }
+}

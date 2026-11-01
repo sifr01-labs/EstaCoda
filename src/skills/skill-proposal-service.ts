@@ -1,3 +1,4 @@
+import { runSkillTaskSuite } from "./skill-task-runner.js";
 import {constants} from 'node:fs';
 import { cp, mkdir, readFile, readdir, rm, writeFile, lstat, open } from "node:fs/promises";
 import { dirname, join, relative, isAbsolute, resolve } from "node:path";
@@ -203,6 +204,27 @@ export class SkillProposalService {
     const { current, next } = await this.#proposalContents(proposal);
     const evaluated = validateSkillTaskEvaluation(report, current, next);
     return this.#options.skillEvolutionStore.recordProposalTaskEvaluation(proposal.id, evaluated);
+  }
+
+  /** Operator-triggered execution. Imported reports cannot claim this provenance. */
+  async runTaskEvaluation(proposalId: string, options: Omit<Parameters<typeof runSkillTaskSuite>[0], "baseline" | "candidate" | "artifactRoot">) {
+    const proposal = await this.findProposal(proposalId);
+    if (!proposal || proposal.status !== "proposed") throw new Error("A pending executable proposal is required.");
+    const { current, next } = await this.#proposalContents(proposal);
+    const artifactRoot = await ensureContainedDirectory(this.#options.localSkillsRoot, ".evolution/task-evaluations");
+    if (!artifactRoot.ok) throw new Error(artifactRoot.reason);
+    await this.#options.skillEvolutionStore.invalidateProposalTaskEvaluation(proposalId);
+    const result = await runSkillTaskSuite({ ...options, baseline: current, candidate: next, artifactRoot: artifactRoot.path });
+    // Revalidate source and proposal after the provider calls, before accepting evidence.
+    const latest = await this.findProposal(proposalId);
+    if (!latest || latest.status !== "proposed") throw new Error("Proposal changed during evaluation.");
+    const contents = await this.#proposalContents(latest);
+    if (skillContentHash(contents.current) !== result.report.baselineHash || skillContentHash(contents.next) !== result.report.candidateHash) {
+      throw new Error("Proposal changed during evaluation.");
+    }
+    // Persist failing/tied runs too: a rerun must never leave an older passing result promotable.
+    await this.#options.skillEvolutionStore.recordProposalTaskEvaluation(proposalId, result.report, "runner_executed");
+    return result;
   }
 
   async #proposalContents(proposal: SkillPatchProposal): Promise<{ current: string; next: string }> {

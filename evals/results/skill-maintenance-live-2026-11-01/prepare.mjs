@@ -1,0 +1,28 @@
+import {mkdir,readFile,writeFile,symlink} from 'node:fs/promises';
+import {join} from 'node:path';
+import {execFileSync} from 'node:child_process';
+import {createHash} from 'node:crypto';
+const repo=process.cwd(),root=process.argv[2];
+if(!root)throw Error('Pass a new absolute temporary directory as argument');await mkdir(root);
+const before='72bcb20da00ffaeea72c096cc19913d93fb47ec6';
+const source=join(root,'source-before');await mkdir(source,{recursive:true});
+execFileSync('tar',['-xf','-','-C',source],{input:execFileSync('git',['archive',before],{maxBuffer:256*1024*1024})});
+await symlink(join(repo,'node_modules'),join(source,'node_modules')).catch(e=>{if(e.code!=='EEXIST')throw e;});
+const header={name:'ledger-close',description:'Reconcile invoice exports into exact currency totals under the current close policy.',requiredToolsets:['files'],optionalToolsets:['shell-readonly'],routing:{labels:['finance'],triggerPatterns:[{type:'contains',value:'ledger-close'}],confirmation:'policy'},playbook:[],evaluations:[]};
+const shared='Read the requested CSV. Keep the last occurrence of each id; ignore void rows. Group by currency without converting currencies. Amounts are decimal strings; use integer cents to avoid floating-point rounding. Write the requested JSON file with keys policy, totals, includedIds. totals maps currency codes to fixed two-decimal strings; includedIds is sorted alphabetically. Read back the JSON before reporting completion.';
+const body1=shared+'\nPolicy v1: include posted and disputed rows. Sum the amount as supplied for both invoice and credit rows. Set policy to "v1".';
+const body2=shared+'\nPolicy v2: include posted rows only; exclude disputed rows. Credit rows subtract their absolute amount, invoice rows add their amount. Set policy to "v2".';
+const skill=body=>`---\n${JSON.stringify(header)}\n---\n${body}\n`;
+const rows=[];for(let i=1;i<=24;i++){rows.push({id:`INV-${String(i).padStart(3,'0')}`,currency:i%3===0?'EUR':'USD',type:i%5===0?'credit':'invoice',status:i%7===0?'void':i%4===0?'disputed':'posted',amount:(1000+i*137)/100});}rows.push({...rows[1],amount:42.19});rows.push({...rows[9],amount:18.05});
+const csv=r=>['id,currency,type,status,amount',...r.map(x=>[x.id,x.currency,x.type,x.status,x.amount.toFixed(2)].join(','))].join('\n')+'\n';
+const batch2=rows.map(x=>({...x,amount:Math.round((x.amount+3.21)*100)/100}));
+const expected=(data,v)=>{const latest=new Map(data.map(x=>[x.id,x]));const chosen=[...latest.values()].filter(x=>x.status!=='void'&&(v==='v1'||x.status==='posted'));const totals={};for(const x of chosen)totals[x.currency]=(totals[x.currency]??0)+Math.round(x.amount*100)*(v==='v2'&&x.type==='credit'?-1:1);return {policy:v,totals:Object.fromEntries(Object.entries(totals).map(([k,v])=>[k,(v/100).toFixed(2)])),includedIds:chosen.map(x=>x.id).sort()};};
+await writeFile(join(root,'fixture.json'),JSON.stringify({header,skillV1:skill(body1),skillV2:skill(body2),expected1:expected(rows,'v1'),expected2:expected(batch2,'v2'),csv1:csv(rows),csv2:csv(batch2)},null,2));
+const {loadRuntimeConfig}=await import(join(repo,'src/config/runtime-config.ts'));
+const {resolveProfileStateHome}=await import(join(repo,'src/config/profile-home.ts'));
+const config=await loadRuntimeConfig({workspaceRoot:repo,configurationInspection:true});
+const auth=JSON.parse(await readFile(resolveProfileStateHome({profileId:config.profileId}).authJsonPath,'utf8'));
+const token=auth.providers.codex;if(!token?.accessToken)throw Error('No selected Codex token');if(token.expiresAt&&Date.parse(token.expiresAt)<Date.now())throw Error('Expired selected credential');
+for(const arm of ['before','after']){const base=join(root,arm),profile=join(base,'home/.estacoda/profiles/default');await mkdir(join(profile,'skills/ledger-close'),{recursive:true});await mkdir(join(base,'workspace'),{recursive:true});await writeFile(join(profile,'skills/ledger-close/SKILL.md'),skill(body1));await writeFile(join(base,'workspace/batch1.csv'),csv(rows));await writeFile(join(base,'workspace/batch2.csv'),csv(batch2));const {refreshToken,...accessOnly}=token;await writeFile(join(profile,'auth.json'),JSON.stringify({version:auth.version,providers:{codex:accessOnly}}),{mode:0o600});await writeFile(join(profile,'config.json'),JSON.stringify({model:{provider:'codex',id:'gpt-6.1-sol',fallbacks:[]},providers:{codex:{kind:'openai-compatible',apiMode:'openai_responses',authMethod:'oauth_device_pkce',enableNetwork:true,models:['gpt-6.1-sol']}},skills:{autonomy:'none'},web:{enableNetwork:false}}),{mode:0o600});}
+await writeFile(join(root,'manifest.json'),JSON.stringify({before,afterSource:repo,createdAt:new Date().toISOString(),model:'codex/gpt-6.1-sol',task:'Two invoice-export reconciliations with an operator policy update between turns',data:'Constructed, non-private 26-row invoice exports, including duplicate IDs, credits, disputed and void records, and two currencies. This is a live workflow test, not customer production data.',primaryMetric:'Exact JSON equality against independently calculated v1/v2 policy results; no manual catalog refresh',budgets:{iterations:16,tools:24,wallMs:180000,maxTokens:4000},isolation:'Fresh homes, memory and workspace; selected-profile access token only, no fallback or delegation; same data and prompts, baseline runs first.',gradingFrozen:true,fixtureHash:createHash('sha256').update(await readFile(join(root,'fixture.json'))).digest('hex')},null,2));
+console.log(JSON.stringify({root,before,ready:true}));

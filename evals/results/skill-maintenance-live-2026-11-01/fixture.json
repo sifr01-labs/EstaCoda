@@ -1,0 +1,84 @@
+{
+  "header": {
+    "name": "ledger-close",
+    "description": "Reconcile invoice exports into exact currency totals under the current close policy.",
+    "requiredToolsets": [
+      "files"
+    ],
+    "optionalToolsets": [
+      "shell-readonly"
+    ],
+    "routing": {
+      "labels": [
+        "finance"
+      ],
+      "triggerPatterns": [
+        {
+          "type": "contains",
+          "value": "ledger-close"
+        }
+      ],
+      "confirmation": "policy"
+    },
+    "playbook": [],
+    "evaluations": []
+  },
+  "skillV1": "---\n{\"name\":\"ledger-close\",\"description\":\"Reconcile invoice exports into exact currency totals under the current close policy.\",\"requiredToolsets\":[\"files\"],\"optionalToolsets\":[\"shell-readonly\"],\"routing\":{\"labels\":[\"finance\"],\"triggerPatterns\":[{\"type\":\"contains\",\"value\":\"ledger-close\"}],\"confirmation\":\"policy\"},\"playbook\":[],\"evaluations\":[]}\n---\nRead the requested CSV. Keep the last occurrence of each id; ignore void rows. Group by currency without converting currencies. Amounts are decimal strings; use integer cents to avoid floating-point rounding. Write the requested JSON file with keys policy, totals, includedIds. totals maps currency codes to fixed two-decimal strings; includedIds is sorted alphabetically. Read back the JSON before reporting completion.\nPolicy v1: include posted and disputed rows. Sum the amount as supplied for both invoice and credit rows. Set policy to \"v1\".\n",
+  "skillV2": "---\n{\"name\":\"ledger-close\",\"description\":\"Reconcile invoice exports into exact currency totals under the current close policy.\",\"requiredToolsets\":[\"files\"],\"optionalToolsets\":[\"shell-readonly\"],\"routing\":{\"labels\":[\"finance\"],\"triggerPatterns\":[{\"type\":\"contains\",\"value\":\"ledger-close\"}],\"confirmation\":\"policy\"},\"playbook\":[],\"evaluations\":[]}\n---\nRead the requested CSV. Keep the last occurrence of each id; ignore void rows. Group by currency without converting currencies. Amounts are decimal strings; use integer cents to avoid floating-point rounding. Write the requested JSON file with keys policy, totals, includedIds. totals maps currency codes to fixed two-decimal strings; includedIds is sorted alphabetically. Read back the JSON before reporting completion.\nPolicy v2: include posted rows only; exclude disputed rows. Credit rows subtract their absolute amount, invoice rows add their amount. Set policy to \"v2\".\n",
+  "expected1": {
+    "policy": "v1",
+    "totals": {
+      "USD": "398.07",
+      "EUR": "189.19"
+    },
+    "includedIds": [
+      "INV-001",
+      "INV-002",
+      "INV-003",
+      "INV-004",
+      "INV-005",
+      "INV-006",
+      "INV-008",
+      "INV-009",
+      "INV-010",
+      "INV-011",
+      "INV-012",
+      "INV-013",
+      "INV-015",
+      "INV-016",
+      "INV-017",
+      "INV-018",
+      "INV-019",
+      "INV-020",
+      "INV-022",
+      "INV-023",
+      "INV-024"
+    ]
+  },
+  "expected2": {
+    "policy": "v2",
+    "totals": {
+      "USD": "241.77",
+      "EUR": "68.40"
+    },
+    "includedIds": [
+      "INV-001",
+      "INV-002",
+      "INV-003",
+      "INV-005",
+      "INV-006",
+      "INV-009",
+      "INV-010",
+      "INV-011",
+      "INV-013",
+      "INV-015",
+      "INV-017",
+      "INV-018",
+      "INV-019",
+      "INV-022",
+      "INV-023"
+    ]
+  },
+  "csv1": "id,currency,type,status,amount\nINV-001,USD,invoice,posted,11.37\nINV-002,USD,invoice,posted,12.74\nINV-003,EUR,invoice,posted,14.11\nINV-004,USD,invoice,disputed,15.48\nINV-005,USD,credit,posted,16.85\nINV-006,EUR,invoice,posted,18.22\nINV-007,USD,invoice,void,19.59\nINV-008,USD,invoice,disputed,20.96\nINV-009,EUR,invoice,posted,22.33\nINV-010,USD,credit,posted,23.70\nINV-011,USD,invoice,posted,25.07\nINV-012,EUR,invoice,disputed,26.44\nINV-013,USD,invoice,posted,27.81\nINV-014,USD,invoice,void,29.18\nINV-015,EUR,credit,posted,30.55\nINV-016,USD,invoice,disputed,31.92\nINV-017,USD,invoice,posted,33.29\nINV-018,EUR,invoice,posted,34.66\nINV-019,USD,invoice,posted,36.03\nINV-020,USD,credit,disputed,37.40\nINV-021,EUR,invoice,void,38.77\nINV-022,USD,invoice,posted,40.14\nINV-023,USD,invoice,posted,41.51\nINV-024,EUR,invoice,disputed,42.88\nINV-002,USD,invoice,posted,42.19\nINV-010,USD,credit,posted,18.05\n",
+  "csv2": "id,currency,type,status,amount\nINV-001,USD,invoice,posted,14.58\nINV-002,USD,invoice,posted,15.95\nINV-003,EUR,invoice,posted,17.32\nINV-004,USD,invoice,disputed,18.69\nINV-005,USD,credit,posted,20.06\nINV-006,EUR,invoice,posted,21.43\nINV-007,USD,invoice,void,22.80\nINV-008,USD,invoice,disputed,24.17\nINV-009,EUR,invoice,posted,25.54\nINV-010,USD,credit,posted,26.91\nINV-011,USD,invoice,posted,28.28\nINV-012,EUR,invoice,disputed,29.65\nINV-013,USD,invoice,posted,31.02\nINV-014,USD,invoice,void,32.39\nINV-015,EUR,credit,posted,33.76\nINV-016,USD,invoice,disputed,35.13\nINV-017,USD,invoice,posted,36.50\nINV-018,EUR,invoice,posted,37.87\nINV-019,USD,invoice,posted,39.24\nINV-020,USD,credit,disputed,40.61\nINV-021,EUR,invoice,void,41.98\nINV-022,USD,invoice,posted,43.35\nINV-023,USD,invoice,posted,44.72\nINV-024,EUR,invoice,disputed,46.09\nINV-002,USD,invoice,posted,45.40\nINV-010,USD,credit,posted,21.26\n"
+}

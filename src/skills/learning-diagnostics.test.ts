@@ -21,3 +21,13 @@ describe("causal learning diagnostics", () => {
     expect(learningDraftEvidence({ findings: [{ mechanism: "invented cause" }] })).toMatchObject({ runtimeOnly: false, lesson: expect.stringContaining("cause is unknown") });
   });
 });
+
+it("does not learn ordinary diff differences as failures, but retains failed checks and compound commands", () => {
+  const make = (command: string, verification?: string) => [
+    { tool: { name: "terminal.run" }, input: { command, verification }, decision: "allow", result: { ok: false, content: "difference", metadata: { exitCode: 1 } } },
+    { tool: { name: "terminal.run" }, input: {}, decision: "allow", result: { ok: true, content: "done" } }
+  ] as ToolExecutionRecord[];
+  expect(learningFindings(make("diff old.txt new.txt"))).toEqual([]);
+  expect(learningFindings(make("diff old.txt new.txt", "required-check"))).toEqual(expect.arrayContaining([expect.objectContaining({ mechanism: "recovered-tool-failure" })]));
+  expect(learningFindings(make("diff old.txt new.txt; test-command"))).toEqual(expect.arrayContaining([expect.objectContaining({ mechanism: "recovered-tool-failure" })]));
+});

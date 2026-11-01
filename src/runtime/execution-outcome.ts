@@ -140,8 +140,8 @@ export function learningOutcomeStatus(
 ): SkillRouteFinalOutcomeStatus {
   switch (status) {
     case "completed":
-      return "succeeded";
     case "completed_with_recovered_errors":
+      return "succeeded";
     case "partially_completed":
       return "partial";
     case "blocked":

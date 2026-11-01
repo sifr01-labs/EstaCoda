@@ -1,3 +1,4 @@
+import { skillContentHash } from "./skill-task-evaluation.js";
 import { mkdir, mkdtemp, readdir, rm, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -100,7 +101,7 @@ describe("SkillLearningManager", () => {
     expect(result?.candidate).toEqual(expect.objectContaining({
       kind: "selected_skill_refinement",
       selectedSkill: "release-skill",
-      suggestedTarget: "routing_eval_addition",
+      suggestedTarget: "skill_patch",
       promptHash: "prompt-hash-2"
     }));
     expect(result?.evidence).toEqual(expect.objectContaining({
@@ -288,7 +289,7 @@ describe("SkillLearningManager", () => {
   it("does not emit live candidate events for stale selected-skill records", async () => {
     const harness = await createHarness("proactive");
     const staleDetectedAt = "2026-06-17T00:00:00.000Z";
-    const key = "selected:release-skill:prompt-hash-stale";
+    const key = `selected:release-skill:${skillContentHash(JSON.stringify(skill("release-skill")))}`;
     await seedSkillLearningStore(harness.storePath, [{
       ...record(key),
       name: "release-skill refinement",

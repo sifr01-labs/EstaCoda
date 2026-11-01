@@ -51,7 +51,7 @@ The runtime does not currently load `<workspace>/.estacoda/skills/` as a project
 Selected skills are loaded through an indexed prompt model:
 
 - The session-visible index retains every eligible name with an 80-character description. Above a 6,000-character description budget it explicitly switches to names and toolsets, retaining every name. Visibility still comes from profile, lifecycle, platform, and capability gates.
-- `/skills refresh` rebuilds the runtime between turns, rechecks session/profile identity and normal visibility/readiness gates, and reports added, removed, and changed visible skills. Changes to instructions under the same name are detected. A scoped session notice tells the agent to reload changed skills before relying on earlier reads. The new index applies on the next turn; there is no mid-turn mutation of cached system context.
+- At the beginning of each turn, the runtime scans the same selected-profile/package sources and automatically rebuilds the session if definitions or lifecycle visibility changed. `/skills refresh` remains an explicit operator refresh. Both paths recheck session/profile identity and normal visibility/readiness gates, and report added, removed, and changed visible skills. Changes to instructions under the same name are detected. A scoped session notice tells the agent to reload changed skills before relying on earlier reads. The new index applies on the next turn; there is no mid-turn mutation of cached system context.
 - Skills at or below the root inline cap are injected into the prompt with their full root `SKILL.md` instructions.
 - Oversized selected skills are represented in the prompt as deterministic contracts instead of silently truncated root bodies.
 - Contract prompt content includes the skill name, description, original root character count, heading index, linked resource/script index, and an explicit note that referenced resource contents are not included.
@@ -169,9 +169,9 @@ observe → evidence/candidate → proposal → eval/review → manual promotion
 **What "governed" means:**
 
 - `SkillLearningManager` is an evidence source. It does not directly create, patch, promote, or mutate skills as final authority.
-- In proactive/autonomous mode, repeated failed uses of the same selected skill and task across at least two sessions can prepare an executable instruction patch through `SkillProposalService`. The bounded, tool-free drafter uses the configured main model and shared provider spend/usage accounting. It receives existing skill text and compact outcome/tool-name evidence, not raw user messages or tool arguments/results. It may abstain when the evidence cannot support a specific correction.
-- Draft attempts are limited to once per learning record per day and three records per runtime learning store per day (or a lower configured proposal budget), with at most one pending proposal per skill. Requests have a 20-second ceiling, 1,500 output tokens, no fallback, cancellation, and any configured evolution cost ceiling. Existing profile/session/task provider-spending gates still apply. Independent concurrent runtimes do not share an atomic draft-attempt quota.
-- Generated learning patches require explicit approval, matching source-content hashes, and paired task evidence before promotion. They preserve the existing authority-expansion checks and use profile-local working copies. Successful promotion replaces the in-memory definition for that same owned file; existing session exposure changes still require refresh.
+- In proactive/autonomous mode, repeated uses of the same selected skill definition across at least two sessions can prepare an executable instruction patch through `SkillProposalService`. Successful and recovered tasks are eligible as well as failures; success alone is not proof of a useful edit. Route corrections and missing-workflow candidates produce review proposals through the same queue, without synthesizing executable new skills. The bounded, tool-free drafter uses the configured main model and shared provider spend/usage accounting. It receives existing skill text and compact outcome/tool-name evidence, not raw user messages or tool arguments/results. It may abstain when the evidence cannot support a specific correction.
+- Draft attempts are limited to once per learning record per day and three records per profile learning store per day (or a lower configured proposal budget), with at most one pending proposal per skill. Requests have a 20-second ceiling, 1,500 output tokens, no fallback, cancellation, and any configured evolution cost ceiling. Existing profile/session/task provider-spending gates still apply. Atomic profile-local claims prevent concurrent runtimes from spending the same draft quota. Records live under `profiles/<id>/skills/.evolution/learning.json`; legacy workspace learning stores are not imported automatically. Review starts after foreground completion and yields to the next turn or shutdown. Cancellation leaves a pending record for the next eligible review and still consumes the daily attempt/cooldown, so repeated interruptions cannot bypass spending bounds. There is no independent scheduler when the app is closed.
+- Generated learning patches require explicit approval, matching source-content hashes, and paired task evidence before promotion. They preserve the existing authority-expansion checks and use profile-local working copies. Successful promotion replaces the in-memory definition for that same owned file; existing sessions pick up exposure changes at their next turn after visibility and readiness checks.
 - `SkillEvolutionStore` owns observations, learning candidates, proposals, eval/promotion/snapshot/rollback metadata, experiment records, and experiment links.
 - `ChangeManifestStore` owns change manifests. Evolution records may link to manifests, but manifests are not stored in `SkillEvolutionStore`.
 - Proposed manifest-backed changes carry a `ChangeManifest` with hypothesis, predicted impact, risk level, eval plan, constraint gates, and rollback plan.
@@ -187,8 +187,8 @@ observe → evidence/candidate → proposal → eval/review → manual promotion
 **Limitations:**
 
 - `skill.eval` remains a metadata/playbook check and labels its result accordingly. It refuses to report unexecuted final-state or degraded-behavior assertions as passing. It does not run real tasks.
-- Learned executable drafts additionally require operator-attested paired task results. The operator runs and independently grades representative baseline/candidate tasks, then imports the report. Import validates the report and exact skill hashes; it does not execute tasks, inspect the referenced artifacts, or prove that operator-supplied grades are truthful. Legacy/manual proposals retain their existing metadata gates and do not thereby establish a performance improvement.
-- Automatic drafting currently handles selected-skill instruction refinements after repeated failures. New-skill creation, routing changes, consolidation, and successful-task candidates remain reviewable candidates/proposal records; they are not automatically synthesized into executable changes.
+- Learned executable drafts additionally require matching paired task results. `proposal test` executes bounded tool-free JSON tasks on the configured model and records runner provenance; it cannot establish filesystem, browser, or deployment performance. `proposal evaluate` remains an operator-attested import. The operator runs and independently grades representative baseline/candidate tasks, then imports the report. Import validates the report and exact skill hashes; it does not execute tasks, inspect the referenced artifacts, or prove that operator-supplied grades are truthful. Legacy/manual proposals retain their existing metadata gates and do not thereby establish a performance improvement.
+- Automatic review covers successful and unsuccessful selected-skill uses. New-skill creation, routing changes and consolidation remain reviewable proposal records; they are not automatically synthesized into executable changes. Evidence without a specific reusable lesson may correctly result in abstention.
 - Tool-description and routing-metadata proposals are representable as manifest targets but not auto-applied.
 - No autonomous promotion or rollback automation.
 - No provider embeddings.
@@ -203,6 +203,7 @@ observe → evidence/candidate → proposal → eval/review → manual promotion
 ```bash
 estacoda proposal list [--skill <name>] [--status <s>]
 estacoda proposal inspect <id>
+estacoda proposal test <id> <task-suite.json>
 estacoda proposal evaluate <id> <paired-task-report.json>
 estacoda proposal approve <id>
 estacoda proposal reject <id>
@@ -221,12 +222,17 @@ Agent Evolution is the user-facing control plane for EstaCoda's reviewable self-
 |------|----------|
 | `none` | No Agent Evolution evidence or proposals |
 | `suggest` | Records evidence/candidates and creates reviewable proposal records; no promotion |
-| `proactive` | Can prepare bounded instruction drafts after repeated failures; task evidence and approval gate promotion |
+| `proactive` | Background review of repeated successes, failures and route/missing-workflow candidates; bounded instruction drafts; task evidence and approval gate promotion |
 | `autonomous` | Same bounded drafting plus shadow decisions; no real auto-promotion or auto-rollback |
 
 Roadmap behavior must remain labeled as planned until implemented: provider embeddings, semantic/LLM routing as official authority, advisory route tools, real autonomous promotion, auto-rollback, skill fork/merge/archive, and hygiene scanning.
 
 ### Paired task evidence
+
+`estacoda proposal test <id> task-suite.json` is an explicit, potentially paid operator action. It runs 2–8 paired tool-free tasks through the configured provider with no fallback, a 90-second per-call deadline, a 4,000-token output limit and existing session spending controls. The suite has `version: 1`, `id`, and `cases`; each case supplies `id`, `instruction`, `input` (text), and `expected` (JSON). Expected answers remain outside model context. Exact JSON equality grades extraction, classification and transformation tasks; this is not an arbitrary shell-test runner. Both definitions and fixtures are frozen before execution; arm order alternates. Inputs, answers, usage and grades remain in the selected profile's `.evolution/task-evaluations/` directory. Supply non-sensitive fixtures; these files contain the task inputs and answers.
+
+A successful run records `runner_executed` provenance and resets approval. Ties, regressions, invalid JSON, requested tool calls and incomplete provider execution cannot establish improvement. The safety result here verifies the tool-free/output contract only, not broad semantic safety. Neither this runner nor imported reports prove general performance or authorize promotion without review. Starting a rerun invalidates earlier grades and approval; failed/tied runs replace earlier evidence and cannot pass promotion.
+
 
 Run the unchanged and proposed skill against the same representative task fixtures, model settings, environment, and independent grader. Use the benchmark runner or an external task harness in operator-controlled isolated workspaces. Include a targeted repair case and a regression case; do not use the drafting model's self-assessment as the grader. This command records an operator attestation, so it is deliberately absent from the model-visible skill tools:
 

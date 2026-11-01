@@ -1,3 +1,4 @@
+import { skillCatalogDelta, snapshotSkillCatalog } from "../skills/skill-catalog-delta.js";
 import { taskLimitsForRun } from '../config/run-limits.js';
 import { readUnattendedRunLimits } from '../config/run-limits-store.js';
 import {profileHeaderEnvironment} from '../config/header-secret-references.js';
@@ -623,47 +624,26 @@ async function buildRuntime(options: RuntimeOptions, rollback: ResourceCleanup):
   // 3. profiles/<id>/skills/ direct directories (local, highest priority)
   const packsRoot = join(localSkillsRoot, "packs");
 
-  // external: pack-materialized skills
-  const packsLoaded = await loadSkillsFromDirectory(packsRoot, {
-    sourceKind: "external",
-    sourceRoot: packsRoot
-  }).catch(() => ({ skills: [], errors: [] }));
-  skillLoadWarnings.push(...packsLoaded.errors.map((error) => error.message));
-  for (const skill of packsLoaded.skills) {
-    skillRegistry.register(skill);
-  }
-
-  // bundled: built-in package skills
-  const bundledLoaded = await loadSkillsFromDirectory(bundledSkillsDir, {
-    sourceKind: "bundled",
-    sourceRoot: bundledSkillsDir
-  }).catch(() => ({ skills: [], errors: [] }));
-  skillLoadWarnings.push(...bundledLoaded.errors.map((error) => error.message));
-  for (const skill of bundledLoaded.skills) {
-    skillRegistry.register(skill);
-  }
-
-  // local: selected profile skills (highest priority, loaded last to win conflicts)
-  const localLoaded = await loadSkillsFromDirectory(localSkillsRoot, {
-    sourceKind: "local",
-    sourceRoot: localSkillsRoot,
-    exclude: ["packs"]
-  }).catch(() => ({ skills: [], errors: [] }));
-  skillLoadWarnings.push(...localLoaded.errors.map((error) => error.message));
-  for (const skill of localLoaded.skills) {
-    skillRegistry.register(skill);
-  }
-
-  for (const root of options.externalSkillRoots ?? []) {
-    const loaded = await loadSkillsFromDirectory(root, {
-      sourceKind: "external",
-      sourceRoot: root
-    }).catch(() => ({ skills: [], errors: [] }));
-    skillLoadWarnings.push(...loaded.errors.map((error) => error.message));
-    for (const skill of loaded.skills) {
-      skillRegistry.register(skill);
+  const skillSources = [
+    { root: packsRoot, kind: "external" as const },
+    { root: bundledSkillsDir, kind: "bundled" as const },
+    { root: localSkillsRoot, kind: "local" as const },
+    ...(options.externalSkillRoots ?? []).map(root => ({ root, kind: "external" as const }))
+  ];
+  const reloadSkillSources = async () => {
+    skillLoadWarnings.length = 0;
+    const next = new SkillRegistry();
+    for (const { root, kind } of skillSources) {
+      const loaded = await loadSkillsFromDirectory(root, {
+        sourceKind: kind, sourceRoot: root, ...(kind === "local" ? { exclude: ["packs"] } : {})
+      });
+      // Invalid or removed definitions must not leave an older executable copy behind.
+      skillLoadWarnings.push(...loaded.errors.map(error => error.message));
+      for (const skill of loaded.skills) next.register(skill);
     }
-  }
+    return next;
+  };
+  for (const skill of (await reloadSkillSources()).list()) skillRegistry.register(skill);
   const supervisedLocalCdp = options.browserBackend === undefined
     && options.browser?.backend === "local-cdp"
     && options.browser.supervised !== false;
@@ -738,6 +718,7 @@ async function buildRuntime(options: RuntimeOptions, rollback: ResourceCleanup):
     ...(options.externalMemoryProviders ?? [])
   ];
   const skillEvolutionStore = new SkillEvolutionStore({
+    profileRoot: localSkillsRoot,
     usagePath: join(localSkillsRoot, ".usage.json"),
     evolutionRoot: join(localSkillsRoot, ".evolution")
   });
@@ -761,7 +742,7 @@ async function buildRuntime(options: RuntimeOptions, rollback: ResourceCleanup):
     })
   ]);
   const sharedMemoryContent = renderSharedMemory(await listSharedMemory({ homeDir: options.homeDir }));
-  const skillLearningStorePath = join(workspaceRoot, ".estacoda", "skill-learning.json");
+  const skillLearningStorePath = join(localSkillsRoot, ".evolution", "learning.json");
   if (sharedMemoryContent !== undefined) {
     memoryStore.hydrate("SHARED.md", sharedMemoryContent);
   }
@@ -1189,6 +1170,36 @@ async function buildRuntime(options: RuntimeOptions, rollback: ResourceCleanup):
     sessionRecallService,
     memoryCurationService
   } = builtSession;
+  let sourceSkillSnapshot = snapshotSkillCatalog(skillRegistry.catalog(), name => skillRegistry.get(name));
+  let skillLifecycleSnapshot = JSON.stringify([...skillUsageByName].map(([name, usage]) => [name, usage.state]).sort());
+  const refreshSessionSkills = async (channel: Parameters<typeof agentLoop.handle>[0]["channel"]) => {
+    const next = await reloadSkillSources();
+    const snapshot = snapshotSkillCatalog(next.catalog(), name => next.get(name));
+    const usage = await skillEvolutionStore.usage({ refresh: true });
+    const lifecycle = JSON.stringify(usage.map(item => [item.skillName, item.state]).sort());
+    const changes = skillCatalogDelta(sourceSkillSnapshot, snapshot);
+    if (!changes.added.length && !changes.removed.length && !changes.changed.length && lifecycle === skillLifecycleSnapshot) return;
+    const before = snapshotSkillCatalog(sessionSkillCatalog, name => sessionSkillRegistry.get(name));
+    for (const skill of skillRegistry.list()) skillRegistry.unregister(skill.name);
+    for (const skill of next.list()) skillRegistry.register(skill);
+    skillUsageByName.clear();
+    for (const item of usage) skillUsageByName.set(item.skillName, item);
+    // The builder reapplies visibility/readiness and creates fresh instruction-delivery receipts.
+    // This runs under executionOwner, strictly between turns, never during a provider request.
+    const refreshed = await buildSession();
+    await builder.cleanupSession(builtSession);
+    builtSession = refreshed;
+    ({ agentLoop, toolRegistry, toolExecutor, sessionSkillRegistry, sessionSkillCatalog,
+      sessionRecallService, memoryCurationService } = refreshed);
+    sourceSkillSnapshot = snapshot;
+    skillLifecycleSnapshot = lifecycle;
+    const delta = skillCatalogDelta(before, snapshotSkillCatalog(sessionSkillCatalog, name => sessionSkillRegistry.get(name)));
+    if (delta.added.length || delta.removed.length || delta.changed.length) {
+      await sessionDb.appendMessage({ sessionId: sessionRuntimeContext.currentSessionId(), role: "user", channel,
+        content: `Skill catalog refreshed between turns. ${JSON.stringify(delta)}. Read changed skills again before use. Visibility does not grant execution authority.`,
+        metadata: { kind: "skill-catalog-refreshed", delta } });
+    }
+  };
   const secretBroker = new EphemeralSecretBroker();
   resources.defer(() => secretBroker.dispose());
   const secureInputTransports = new SecureInputTransportRegistry();
@@ -1429,51 +1440,60 @@ async function buildRuntime(options: RuntimeOptions, rollback: ResourceCleanup):
       activeTrustedWorkspace = trustedWorkspace;
 
       executionLease.assertActive();
-      return executionOwner.run(() => agentLoop.handle({
-        ...input,
-        signal: AbortSignal.any([executionOwner.signal, executionLease.signal, ...(input.signal ? [input.signal] : [])]),
-        trustedWorkspace
-      }, async (finalOutcome, artifacts) => {
-        // Only the local foreground outcome consumes local task-start copy authority.
-        // Child/remote work can export through the operator workflow after settlement.
-        if (input.channel === "cli" && current.executionTarget && resolveSessionOriginSurface(current) === "cli" && !current.parentSessionId &&
-          finalOutcome.terminationCause === "normal" &&
-          ["completed", "completed_with_recovered_errors"].includes(finalOutcome.status) &&
-          finalOutcome.uncertainActions.length === 0 && !input.signal?.aborted) {
-          let changes: ChangeApplicationStore | undefined;
-          try {
-            changes = new ChangeApplicationStore({ homeDir: options.homeDir, profileId });
-            if (changes.getTarget(current.executionTarget.targetId)?.kind === "temporary-copy") {
-              const unsettled = processManager.list().some((process) => ["prepared", "running"].includes(process.status)) ||
-                subagentRegistry.hasActiveSubagents(current.id) || !!taskStore?.listTasks({ workspaceIdentityHash: current.executionTarget.workspace.identityHash,
-                  statuses: ["planning", "queued", "running", "waiting_for_host", "waiting_for_input", "waiting_for_approval", "paused"], limit: 1 }).length;
-              if (unsettled) {
-                finalOutcome.status = "partially_completed";
-                return options.ui?.language === "ar"
-                  ? "تنتظر تغييرات مجلد العمل انتهاء العمليات أو المهام الفرعية النشطة. استخدم ⁦workspace finish⁩ بعد انتهائها."
-                  : "Workspace changes await settlement of active processes or child work. Use workspace finish after they settle.";
+      return executionOwner.run(async () => {
+        await skillLearningManager.cancelBackgroundReview();
+        await refreshSessionSkills(input.channel);
+        const response = await agentLoop.handle({
+          ...input,
+          signal: AbortSignal.any([executionOwner.signal, executionLease.signal, ...(input.signal ? [input.signal] : [])]),
+          trustedWorkspace
+        }, async (finalOutcome, artifacts) => {
+          // Only the local foreground outcome consumes local task-start copy authority.
+          // Child/remote work can export through the operator workflow after settlement.
+          if (input.channel === "cli" && current.executionTarget && resolveSessionOriginSurface(current) === "cli" && !current.parentSessionId &&
+            finalOutcome.terminationCause === "normal" &&
+            ["completed", "completed_with_recovered_errors"].includes(finalOutcome.status) &&
+            finalOutcome.uncertainActions.length === 0 && !input.signal?.aborted) {
+            let changes: ChangeApplicationStore | undefined;
+            try {
+              changes = new ChangeApplicationStore({ homeDir: options.homeDir, profileId });
+              if (changes.getTarget(current.executionTarget.targetId)?.kind === "temporary-copy") {
+                const unsettled = processManager.list().some((process) => ["prepared", "running"].includes(process.status)) ||
+                  subagentRegistry.hasActiveSubagents(current.id) || !!taskStore?.listTasks({ workspaceIdentityHash: current.executionTarget.workspace.identityHash,
+                    statuses: ["planning", "queued", "running", "waiting_for_host", "waiting_for_input", "waiting_for_approval", "paused"], limit: 1 }).length;
+                if (unsettled) {
+                  finalOutcome.status = "partially_completed";
+                  return options.ui?.language === "ar"
+                    ? "تنتظر تغييرات مجلد العمل انتهاء العمليات أو المهام الفرعية النشطة. استخدم ⁦workspace finish⁩ بعد انتهائها."
+                    : "Workspace changes await settlement of active processes or child work. Use workspace finish after they settle.";
+                }
+                await executionOwner.validate(); executionLease.assertActive();
+                const completionSessionId = sessionRuntimeContext.currentSessionId();
+                const result = await changes.finish(current.executionTarget.targetId, completionSessionId,
+                  async (artifact) => {
+                    const event = { kind: "session-artifact-registered" as const, artifact };
+                    await sessionDb.appendEvent(completionSessionId, event);
+                    await artifactStore.hydrateSessionArtifacts({ events: [event], sessionId: completionSessionId, profileId });
+                  });
+                artifacts.push(result.artifact);
+                if (["attention", "conflict"].includes(result.status)) finalOutcome.status = "partially_completed";
+                return workspaceChangeSummary(result, options.ui?.language);
               }
-              await executionOwner.validate(); executionLease.assertActive();
-              const completionSessionId = sessionRuntimeContext.currentSessionId();
-              const result = await changes.finish(current.executionTarget.targetId, completionSessionId,
-                async (artifact) => {
-                  const event = { kind: "session-artifact-registered" as const, artifact };
-                  await sessionDb.appendEvent(completionSessionId, event);
-                  await artifactStore.hydrateSessionArtifacts({ events: [event], sessionId: completionSessionId, profileId });
-                });
-              artifacts.push(result.artifact);
-              if (["attention", "conflict"].includes(result.status)) finalOutcome.status = "partially_completed";
-              return workspaceChangeSummary(result, options.ui?.language);
-            }
-          } catch {
-            finalOutcome.status = "partially_completed";
-            return options.ui?.language === "ar"
-              ? "تحتاج تغييرات مجلد العمل إلى مراجعة. افحص التصدير والتطبيق والاسترداد محليًا قبل إعادة المحاولة."
-              : "Workspace changes need attention. Inspect export/application and recovery locally before retrying.";
-          } finally { changes?.close(); }
-        }
-        return undefined;
-      }));
+            } catch {
+              finalOutcome.status = "partially_completed";
+              return options.ui?.language === "ar"
+                ? "تحتاج تغييرات مجلد العمل إلى مراجعة. افحص التصدير والتطبيق والاسترداد محليًا قبل إعادة المحاولة."
+                : "Workspace changes need attention. Inspect export/application and recovery locally before retrying.";
+            } finally { changes?.close(); }
+          }
+          return undefined;
+        });
+        if (!disposed && !input.signal?.aborted) skillLearningManager.startBackgroundReview({
+          profileId, sessionId: sessionRuntimeContext.currentSessionId(), agentEvolutionPolicy,
+          validateAuthority: validateLiveAuthority
+        });
+        return response;
+      });
     },
     async executeTool(input) {
       executionLease.assertActive();
@@ -1615,6 +1635,7 @@ async function buildRuntime(options: RuntimeOptions, rollback: ResourceCleanup):
     async dispose() {
       return disposal ??= (async () => {
         disposed = true;
+        await skillLearningManager.cancelBackgroundReview();
         await executionOwner.settle();
         await executionLease.release();
         await hostEnvironment.retire(async () => {
