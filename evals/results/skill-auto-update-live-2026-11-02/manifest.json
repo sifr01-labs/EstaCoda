@@ -1,0 +1,34 @@
+{
+  "before": "f68f2490a",
+  "sourceHashes": {
+    "src/acp/server.ts": "bcde9ad1bbcf1e80540cd2201936a761746433e56b3ed39feb93ea6ceb5ac996",
+    "src/cli/bench-command.ts": "0773131779bc5d8612a32b54cb986120cbff1929b896156917d97eb10a7b61aa",
+    "src/cli/one-shot.ts": "340877f646e3287f4e235a2c0cf21f00ec202f80840e91a57184d452e3944634",
+    "src/cli/session-loop.ts": "a3904b9ee63c7453c44a53ff4c856f580d0fbaafa078a566b52f869b937b1cc0",
+    "src/config/runtime-config.ts": "f8888294ddb98afee87ee6b7bf5f519175a62b4f17bf65b58717a3d34a79e4d4",
+    "src/contracts/agent-evolution.ts": "efc7b68ad0c6031367f3fa65d6b55f19f017bbae990d05277f41d9c580163f25",
+    "src/contracts/runtime-event.ts": "10bac354ddc4add4618c4ed582892299126ca2fab905f600c948d7ac8ed02e7a",
+    "src/contracts/session.ts": "c7362718e436f6ea1eec25afbdbe7125473a2b48732a6278f826ce257d297342",
+    "src/cron/cron-runtime-factory.ts": "678809531db710321e9ab80135e0e9e0b1b46db3f30ad856692f5f2b36b58b54",
+    "src/gateway/supervisor.ts": "0acc08402e381f178ba81332234a14fe18557c93094080477b61736c9fad5688",
+    "src/index.ts": "b9a901cf95231700bdadf3e2e7116e7d9dfcf03edce86f187b761b2d44714878",
+    "src/runtime/create-runtime.ts": "f06b2420601b313169e8c5d1e6721a801fef9b25a30793d9a88a28e1eda57757",
+    "src/runtime/live-execution-authority.ts": "1c777650038d4bd1cf295291338d9d175fdb672ad6bd7fbc48cec8fcd9c3d97f",
+    "src/runtime/runtime-fingerprint.ts": "54e4771c1bf510a6dede5b1cf1704710b85a13573e40cea311e6586e0338f15b",
+    "src/setup/setup-copy.ts": "d8acd4aa300017c10b45e5fe3d23954c14438015c5f18bc4c2b14bd2b287d873",
+    "src/skills/skill-learning.ts": "fe25f86f06ebc6a62d9300c865a0c4e50d10d22e5c1415f691a625d3ea323b02",
+    "src/skills/skill-proposal-service.ts": "b4bd62f97c569a1fd8b644c8cc0a7ae0d305d384bd33687ba6db3e0f4ad8536e",
+    "src/ui/settings-labels.ts": "7bdbbe4dbbe15b774da22c8e38f70122749e40d3068d806acabd8bd4bff13b68"
+  },
+  "createdAt": "2026-11-02T09:06:33.482Z",
+  "model": "codex/gpt-6.1-sol",
+  "budgets": {
+    "maxProviderIterations": 16,
+    "maxProviderToolCalls": 24,
+    "maxProviderWallClockMs": 180000,
+    "maxRepeatedToolFailures": 3
+  },
+  "fixtureHash": "8e21922a9999da3b2ad9f2f9e9b4e3702fd777940f72c35b75ae826c02eda60c",
+  "protocol": "Four isolated training profiles: previous runtime, updated automatic mode, updated approval-required mode, and updated pinned skill. Continue with fresh sessions/workspaces reading the actual persisted skill; never manually install a candidate. Compare three unseen tasks on previous/automatic profiles. Exercise pending approval, explicit approval, pinning, snapshots and undo. Expected answers remain outside held-out workspaces.",
+  "limitation": "Controlled file-processing tasks with a seeded stale procedure and explicit correction. This establishes automatic activation/reuse and controls, not general spontaneous improvement or a Hermes head-to-head."
+}

@@ -1,0 +1,160 @@
+{
+  "state": {
+    "version": 1,
+    "draftBudget": {
+      "day": "2026-11-02",
+      "attempts": 1
+    },
+    "records": [
+      {
+        "key": "selected:stock-snapshot:8c84d2abb5827d78e47fdfc0cb58cb964beffd8f0817041d5970337d5f74cf39",
+        "name": "stock-snapshot refinement",
+        "content": "Selected skill refinement evidence: stock-snapshot",
+        "occurrences": 1,
+        "sourceSessionIds": [
+          "d57d3bd8-16cd-4892-97c4-b5abc7f9ccad"
+        ],
+        "tools": [
+          "file.read",
+          "file.write",
+          "terminal.run"
+        ],
+        "requiredToolsets": [
+          "files"
+        ],
+        "bounded": true,
+        "boundedReason": "selected-skill-turn",
+        "status": "candidate",
+        "evidenceIds": [
+          "obs_dd7fd219-e5ad-4ed1-bd69-c13bcc9d0e94"
+        ],
+        "candidateId": "learn_1c74d162-f0d3-44ab-9802-dad062822ec7",
+        "candidateKind": "selected_skill_refinement",
+        "promptHash": "7d059f92295cf284",
+        "selectedSkillName": "stock-snapshot",
+        "updatedAt": "2026-11-02T09:08:29.210Z",
+        "draftCandidateId": "learn_1c74d162-f0d3-44ab-9802-dad062822ec7",
+        "draftAttemptedAt": "2026-11-02T09:08:32.408Z",
+        "draftStatus": "abstained"
+      }
+    ]
+  },
+  "proposals": [],
+  "observations": [
+    {
+      "id": "obs_19b74d2b-a82c-42ff-b815-3b32cf291c47",
+      "skillName": "stock-snapshot",
+      "source": "local",
+      "sessionId": "d57d3bd8-16cd-4892-97c4-b5abc7f9ccad",
+      "timestamp": "2026-11-02T09:08:29.196Z",
+      "type": "success",
+      "promptSummary": "Use stock-snapshot to reconcile events.csv into stock.json. Correction: the exporter does not deliver chronological rows; its replay contract in CONTRACT.txt overrides the stale skill procedure. Read the contract, reconcile the file, and ru\n[truncated 252 chars]",
+      "selectedPlaybookStep": "run",
+      "toolsAttempted": [
+        "file.read",
+        "file.read",
+        "file.write",
+        "terminal.run",
+        "terminal.run"
+      ],
+      "outcome": "succeeded",
+      "lesson": "Skill completed successfully using file.read, file.write, terminal.run.",
+      "sourceTrust": "runtime_internal",
+      "mayPromoteAutomatically": true,
+      "requiresHumanApproval": false,
+      "evidence": {
+        "useCount": 1,
+        "successCount": 1,
+        "failureCount": 0,
+        "summary": "stock-snapshot completed with file.read, file.write, terminal.run. Attempted: file.read, file.write, terminal.run."
+      }
+    },
+    {
+      "id": "obs_dd7fd219-e5ad-4ed1-bd69-c13bcc9d0e94",
+      "skillName": "stock-snapshot",
+      "source": "local",
+      "sessionId": "d57d3bd8-16cd-4892-97c4-b5abc7f9ccad",
+      "timestamp": "2026-11-02T09:08:29.204Z",
+      "type": "success",
+      "promptSummary": "Use stock-snapshot to reconcile events.csv into stock.json. Correction: the exporter does not deliver chronological rows; its replay contract in CONTRACT.txt overrides the stale skill procedure. Read the contract, reconcile the file, and run node verify.mjs to verify the saved output. Do not change the contract or verifier. Do not use skill-management tools during this foreground task; leave skill learning to the configured background reviewer. Work locally without network or delegation",
+      "toolsAttempted": [
+        "file.read",
+        "file.write",
+        "terminal.run"
+      ],
+      "outcome": "succeeded",
+      "lesson": "The same declared verification was started more than once; necessity is not established. Proposed follow-up (not validated): Inspect intervening mutations and check input scopes before recommending another run. Do not assume a repeated check was unnecessary. Delegation was unavailable in the session inventory. Proposed follow-up (not validated): Inspect persistent Task prerequisites and exposure. Absence from this session is not a permanent capability limitation.",
+      "candidateImprovement": "Refine the selected skill through the governed evolution path.",
+      "sourceTrust": "runtime_internal",
+      "mayPromoteAutomatically": false,
+      "requiresHumanApproval": true,
+      "evidence": {
+        "profileId": "default",
+        "promptHash": "7d059f92295cf284",
+        "routeConfidence": 0.7,
+        "finalSkillUsed": "stock-snapshot",
+        "outcomeStatus": "succeeded",
+        "findings": [
+          {
+            "mechanism": "repeated-check",
+            "observed": "The same declared verification was started more than once; necessity is not established.",
+            "correction": "Inspect intervening mutations and check input scopes before recommending another run. Do not assume a repeated check was unnecessary.",
+            "target": "workflow-review",
+            "correctionVerified": false,
+            "callIds": [
+              "tool-call-17c6acf7f4d2995d8c897b1d",
+              "tool-call-5e952080f8cd9fe6dd4bade8"
+            ]
+          },
+          {
+            "mechanism": "delegation-unavailable",
+            "observed": "Delegation was unavailable in the session inventory.",
+            "correction": "Inspect persistent Task prerequisites and exposure. Absence from this session is not a permanent capability limitation.",
+            "target": "runtime-regression",
+            "correctionVerified": false,
+            "callIds": []
+          }
+        ],
+        "turnDiagnostics": {
+          "limitReached": false,
+          "completionRejected": false,
+          "unresolvedCheckCount": 0,
+          "delegationAvailable": false
+        },
+        "candidatesShown": [
+          "stock-snapshot"
+        ],
+        "tools": [
+          {
+            "name": "file.read",
+            "ok": true,
+            "riskClass": "read-only-local"
+          },
+          {
+            "name": "file.read",
+            "ok": true,
+            "riskClass": "read-only-local"
+          },
+          {
+            "name": "file.write",
+            "ok": true,
+            "riskClass": "workspace-write"
+          },
+          {
+            "name": "terminal.run",
+            "ok": true,
+            "riskClass": "workspace-write"
+          },
+          {
+            "name": "terminal.run",
+            "ok": true,
+            "riskClass": "workspace-write"
+          }
+        ],
+        "selectedSkill": "stock-snapshot"
+      }
+    }
+  ],
+  "promotions": [],
+  "reviewCalls": 1
+}

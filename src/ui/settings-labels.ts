@@ -60,21 +60,21 @@ export const SKILL_AUTONOMY_LABELS = {
   proactive: {
     en: {
       label: "Proactive",
-      description: "Prepares stronger review proposals from evidence and evals. Promotion remains manual."
+      description: "Updates eligible local skill instructions automatically unless skill write approval is enabled. Changes can be reviewed and undone."
     },
     ar: {
       label: "استباقي",
-      description: "يجهّز مقترحات مراجعة أقوى من الأدلة والتقييمات. تبقى الترقية يدوية."
+      description: "يحدّث تعليمات المهارات المحلية المؤهلة تلقائيًا ما لم تكن الموافقة على كتابة المهارات مفعّلة. يمكن مراجعة التغييرات والتراجع عنها."
     }
   },
   autonomous: {
     en: {
       label: "Autonomous",
-      description: "Records shadow-only autonomous decisions for review. Real auto-promotion is not active in v0.1.0."
+      description: "Updates eligible local skill instructions automatically unless skill write approval is enabled. Changes can be reviewed and undone."
     },
     ar: {
       label: "ذاتي",
-      description: "يسجّل قرارات ذاتية في وضع ظل فقط للمراجعة. الترقية التلقائية الفعلية غير مفعّلة في v0.1.0."
+      description: "يحدّث تعليمات المهارات المحلية المؤهلة تلقائيًا ما لم تكن الموافقة على كتابة المهارات مفعّلة. يمكن مراجعة التغييرات والتراجع عنها."
     }
   }
 } as const;

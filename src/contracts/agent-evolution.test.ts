@@ -44,52 +44,16 @@ describe("deriveAgentEvolutionPolicy", () => {
     });
   });
 
-  it("maps proactive correctly", () => {
-    expect(deriveAgentEvolutionPolicy("proactive")).toMatchObject({
-      mode: "proactive",
-      routingMode: "hybrid",
-      observeTurns: true,
-      observeSelectedSkillTurns: true,
-      createEvidence: true,
-      createProposals: true,
-      createExperiments: true,
-      createManifests: true,
-      preparePatches: true,
-      runEvals: true,
-      shadowAutonomousDecisions: false,
-      requireApprovalForLowRisk: true,
-      requireApprovalForMediumRisk: true,
-      requireApprovalForHighRisk: true,
-      autoPromoteEligibleLocalChanges: false,
-      autoRollbackEligibleLocalChanges: false
-    });
+  it.each(["proactive", "autonomous"] as const)("allows bounded instruction updates in %s unless approval is enabled", mode => {
+    expect(deriveAgentEvolutionPolicy(mode)).toMatchObject({ skillWriteApproval: false, preparePatches: true,
+      requireApprovalForLowRisk: false, requireApprovalForMediumRisk: true, requireApprovalForHighRisk: true,
+      autoPromoteEligibleLocalChanges: true, autoRollbackEligibleLocalChanges: false });
+    expect(deriveAgentEvolutionPolicy(mode, { skillWriteApproval: true, autoPromoteEligibleLocalChanges: true }))
+      .toMatchObject({ requireApprovalForLowRisk: true, autoPromoteEligibleLocalChanges: false });
   });
 
-  it("maps autonomous correctly as shadow-only", () => {
-    expect(deriveAgentEvolutionPolicy("autonomous")).toMatchObject({
-      mode: "autonomous",
-      routingMode: "hybrid-plus",
-      observeTurns: true,
-      observeSelectedSkillTurns: true,
-      createEvidence: true,
-      createProposals: true,
-      createExperiments: true,
-      createManifests: true,
-      preparePatches: true,
-      runEvals: true,
-      shadowAutonomousDecisions: true,
-      requireApprovalForLowRisk: false,
-      requireApprovalForMediumRisk: true,
-      requireApprovalForHighRisk: true,
-      autoPromoteEligibleLocalChanges: false,
-      autoRollbackEligibleLocalChanges: false
-    });
-  });
-
-  it("does not allow advancedOverride to enable real auto-promotion in Phase 1A", () => {
-    expect(deriveAgentEvolutionPolicy("autonomous", {
-      autoPromoteEligibleLocalChanges: true
-    }).autoPromoteEligibleLocalChanges).toBe(false);
+  it.each(["none", "suggest"] as const)("cannot force automatic promotion in %s", mode => {
+    expect(deriveAgentEvolutionPolicy(mode, { autoPromoteEligibleLocalChanges: true })).toMatchObject({ autoPromoteEligibleLocalChanges: false });
   });
 
   it("does not allow advancedOverride to enable auto-rollback in Phase 1A", () => {

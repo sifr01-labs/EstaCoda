@@ -1,0 +1,83 @@
+{
+  "standardValidation": [
+    {
+      "command": "node --version",
+      "exitCode": 0,
+      "seconds": 0.01
+    },
+    {
+      "command": "pnpm --version",
+      "exitCode": 0,
+      "seconds": 0.12
+    },
+    {
+      "command": "pnpm install --frozen-lockfile",
+      "exitCode": 0,
+      "seconds": 0.47
+    },
+    {
+      "command": "pnpm run typecheck",
+      "exitCode": 0,
+      "seconds": 9.23
+    },
+    {
+      "command": "pnpm run test",
+      "exitCode": 0,
+      "seconds": 98.54
+    },
+    {
+      "command": "pnpm run smoke",
+      "exitCode": 0,
+      "seconds": 57.54
+    },
+    {
+      "command": "pnpm run build",
+      "exitCode": 0,
+      "seconds": 6.02
+    },
+    {
+      "command": "pnpm run audit:runtime-imports",
+      "exitCode": 0,
+      "seconds": 0.57
+    },
+    {
+      "command": "pnpm run audit:esm",
+      "exitCode": 0,
+      "seconds": 0.75
+    },
+    {
+      "command": "pnpm run smoke:dist",
+      "exitCode": 0,
+      "seconds": 56.1
+    },
+    {
+      "command": "git diff --check",
+      "exitCode": 0,
+      "seconds": 0.03
+    }
+  ],
+  "targetedTests": 430,
+  "fullSuite": {
+    "filesPassed": 786,
+    "testsPassed": 13446
+  },
+  "productionSourceHashesMatch": true,
+  "liveTasks": 13,
+  "fixedInputsUnchanged": true,
+  "normalTaskTerminations": 13,
+  "automaticCandidateMatchesGeneratedPatch": true,
+  "model": "gpt-6.1-sol",
+  "temporaryAuthFilesRemaining": 0,
+  "artifactCredentialPatternMatches": 0,
+  "artifactAbsoluteUserPathMatches": 0,
+  "controls": {
+    "previous": 1,
+    "automatic": 3,
+    "total": 3,
+    "automaticPromoted": true,
+    "approvalBlocked": true,
+    "explicitApprovalApplied": true,
+    "pinnedUnchanged": true,
+    "undoRestoredOriginal": true
+  }
+}

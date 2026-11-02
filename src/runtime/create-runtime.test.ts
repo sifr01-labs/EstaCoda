@@ -762,7 +762,7 @@ describe("createRuntime token branding", () => {
         mode: "autonomous",
         routingMode: "hybrid-plus",
         shadowAutonomousDecisions: true,
-        autoPromoteEligibleLocalChanges: false,
+        autoPromoteEligibleLocalChanges: true,
         autoRollbackEligibleLocalChanges: false
       });
 

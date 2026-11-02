@@ -50,7 +50,7 @@ export type SkillLearningRecord = {
   updatedAt: string;
   draftAttemptedAt?: string;
   draftProposalId?: string;
-  draftStatus?: "pending" | "attempted" | "proposed" | "abstained";
+  draftStatus?: "pending" | "attempted" | "proposed" | "abstained" | "promoted";
   draftCandidateId?: string;
 };
 
@@ -246,6 +246,7 @@ export class SkillLearningManager {
   startBackgroundReview(input: {
     profileId: string; sessionId: string; agentEvolutionPolicy: AgentEvolutionPolicy;
     validateAuthority: () => Promise<void>;
+    onSkillUpdated?: (skillName: string, proposalId: string) => Promise<void>;
   }): void {
     if (this.#review || !input.agentEvolutionPolicy.preparePatches || !input.agentEvolutionPolicy.createProposals) return;
     const controller = new AbortController();
@@ -378,7 +379,7 @@ export class SkillLearningManager {
   }
 
   async #prepareDraft(record: SkillLearningRecord, candidate: SkillLearningCandidate, input: {
-    profileId: string; sessionId: string; agentEvolutionPolicy: AgentEvolutionPolicy; signal?: AbortSignal; usage?: ProviderUsageLineage; validateAuthority: () => Promise<void>;
+    profileId: string; sessionId: string; agentEvolutionPolicy: AgentEvolutionPolicy; signal?: AbortSignal; usage?: ProviderUsageLineage; validateAuthority: () => Promise<void>; onSkillUpdated?: (skillName: string, proposalId: string) => Promise<void>;
   }): Promise<SkillLearningRecord> {
     const policy = input.agentEvolutionPolicy;
     if (!this.#proposals || !this.#skillEvolutionStore || !policy.preparePatches || !policy.createProposals ||
@@ -441,7 +442,19 @@ export class SkillLearningManager {
           candidate: { ...candidate, evidenceIds: evidence.map((item) => item.id) },
           agentEvolutionPolicy: policy, patch, baseContentHash: skillContentHash(content)
         });
-        if (result.ok) return await this.#store.recordDraft(record.key, "proposed", result.proposal.id);
+        if (result.ok) {
+          await this.#store.recordDraft(record.key, "proposed", result.proposal.id);
+          if (result.proposal.mayPromoteAutomatically && policy.autoPromoteEligibleLocalChanges && !input.signal?.aborted) {
+            const promoted = await this.#proposals.promoteProposal(result.proposal.id, { policy, validateAuthority: input.validateAuthority, signal: input.signal });
+            if (promoted.ok) {
+              const updated = await this.#store.recordDraft(record.key, "promoted", result.proposal.id);
+              // A failed notification must not undo or conceal a successful, recorded update.
+              try { await input.onSkillUpdated?.(skill.name, result.proposal.id); } catch { /* Persisted promotion remains inspectable. */ }
+              return updated;
+            }
+          }
+          return (await this.#store.get(record.key))!;
+        }
       }
     } catch {
       // Drafting is best-effort; retain evidence and a visible abstention without failing the user's task.

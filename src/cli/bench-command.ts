@@ -268,6 +268,7 @@ async function runBenchRun(
       sessionDb,
       externalSkillRoots: runtimeConfig.skills.externalDirs,
       skillAutonomy: runtimeConfig.skills.autonomy,
+      skillWriteApproval: runtimeConfig.skills.writeApproval,
       skillConfig: runtimeConfig.skills.config,
       ui: runtimeConfig.ui,
       agentProfile: runtimeConfig.profile,

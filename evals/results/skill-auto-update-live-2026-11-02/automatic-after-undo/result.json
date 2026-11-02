@@ -1,0 +1,42 @@
+{
+  "id": "automatic-after-undo",
+  "artifactPassed": false,
+  "passed": false,
+  "output": {
+    "stock": {
+      "K": 99,
+      "L": 17,
+      "M": -4
+    }
+  },
+  "expected": {
+    "stock": {
+      "K": 8,
+      "M": -4
+    }
+  },
+  "fixedInputsUnchanged": true,
+  "liveSkillUnchanged": true,
+  "skillBeforeHash": "2c21ba4b5efc544a38eea74efd27fc4125f85a7fb3dcf728b6bb48453fcbae5f",
+  "skillAfterHash": "2c21ba4b5efc544a38eea74efd27fc4125f85a7fb3dcf728b6bb48453fcbae5f",
+  "elapsedMs": 15115,
+  "outcome": {
+    "status": "completed",
+    "terminationCause": "normal",
+    "completionFloor": "read",
+    "confirmedActions": [
+      {
+        "toolCallId": "tool-call-98cd39f202e4506850608596",
+        "tool": "file.write",
+        "riskClass": "workspace-write",
+        "targetSummary": "stock.json",
+        "status": "confirmed",
+        "verification": "verified"
+      }
+    ],
+    "uncertainActions": []
+  },
+  "text": "Reconciled `events.csv` into `stock.json` and read back the saved output to verify:\n\n```json\n{\"stock\":{\"K\":99,\"L\":17,\"M\":-4}}\n```\n\nApplied the skill’s procedure: kept the last row for each SKU, omitted any selected row marked deleted, preserved negative quantities, and sorted keys alphabetically. Worked locally without network, delegation, or skill edits.",
+  "providerCalls": 5,
+  "reviewCalls": 0
+}

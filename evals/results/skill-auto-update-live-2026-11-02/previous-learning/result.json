@@ -1,0 +1,59 @@
+{
+  "id": "previous-learning",
+  "artifactPassed": true,
+  "passed": true,
+  "output": {
+    "stock": {
+      "A": 12,
+      "C": 0,
+      "D": -3
+    }
+  },
+  "expected": {
+    "stock": {
+      "A": 12,
+      "C": 0,
+      "D": -3
+    }
+  },
+  "fixedInputsUnchanged": true,
+  "liveSkillUnchanged": true,
+  "skillBeforeHash": "2c21ba4b5efc544a38eea74efd27fc4125f85a7fb3dcf728b6bb48453fcbae5f",
+  "skillAfterHash": "2c21ba4b5efc544a38eea74efd27fc4125f85a7fb3dcf728b6bb48453fcbae5f",
+  "elapsedMs": 31559,
+  "outcome": {
+    "status": "completed",
+    "terminationCause": "normal",
+    "completionFloor": "read",
+    "confirmedActions": [
+      {
+        "toolCallId": "tool-call-2854aa75e9419198c38e7042",
+        "tool": "file.write",
+        "riskClass": "workspace-write",
+        "targetSummary": "stock.json",
+        "status": "confirmed",
+        "verification": "verified"
+      },
+      {
+        "toolCallId": "tool-call-4f2f2e8c062d193041547d06",
+        "tool": "terminal.run",
+        "riskClass": "workspace-write",
+        "targetSummary": "node verify.mjs",
+        "status": "confirmed",
+        "verification": "not_verified"
+      },
+      {
+        "toolCallId": "tool-call-0dd0857c703caaaa60c9f362",
+        "tool": "terminal.run",
+        "riskClass": "workspace-write",
+        "targetSummary": "node verify.mjs",
+        "status": "confirmed",
+        "verification": "not_verified"
+      }
+    ],
+    "uncertainActions": []
+  },
+  "text": "Reconciled `events.csv` into `stock.json` using `CONTRACT.txt`: highest numeric revision wins, ties use the last occurrence, and winning tombstones are omitted.\n\nSaved output:\n```json\n{\"stock\":{\"A\":12,\"C\":0,\"D\":-3}}\n```\n\n`node verify.mjs` **passed**, including checks for out-of-order rows, tombstones, and tied revisions.\n\nThe contract and verifier were left unchanged. No network, delegation, or skill-management tools were used.",
+  "providerCalls": 9,
+  "reviewCalls": 1
+}

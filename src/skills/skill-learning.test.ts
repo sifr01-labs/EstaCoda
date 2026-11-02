@@ -164,7 +164,7 @@ describe("SkillLearningManager", () => {
     expect(harness.events).toEqual([]);
   });
 
-  it("autonomous mode remains shadow-only and only emits evidence candidates", async () => {
+  it("observation alone emits evidence candidates without applying changes", async () => {
     const harness = await createHarness("autonomous");
 
     const result = await harness.manager.observeTurn({
@@ -177,7 +177,7 @@ describe("SkillLearningManager", () => {
     });
 
     expect(harness.policy.shadowAutonomousDecisions).toBe(true);
-    expect(harness.policy.autoPromoteEligibleLocalChanges).toBe(false);
+    expect(harness.policy.autoPromoteEligibleLocalChanges).toBe(true);
     expect(result?.candidate?.kind).toBe("selected_skill_refinement");
     await expect(harness.skillEvolutionStore.listProposals()).resolves.toEqual([]);
   });

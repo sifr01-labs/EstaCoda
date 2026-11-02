@@ -1,0 +1,4 @@
+---
+{"name":"stock-snapshot","description":"Build an inventory snapshot from an event export.","requiredToolsets":["files"],"optionalToolsets":["shell-readonly"],"routing":{"labels":["coding"],"triggerPatterns":[{"type":"contains","value":"stock-snapshot"}],"confirmation":"policy"},"playbook":[],"evaluations":[]}
+---
+Read the requested CSV inventory events (sku, revision, quantity, deleted). For each sku, select the row with the greatest numeric revision; if revisions tie, the last occurrence wins. Do not assume file order is chronological: a later lower-revision row must not replace a newer row or resurrect a newer tombstone. After selecting the last row, omit entries whose deleted value is true. Preserve zero and negative integer quantities. Write the requested JSON as {"stock":{<sku>:<quantity>}} with sku keys sorted alphabetically. Read back and verify the saved file before reporting completion.

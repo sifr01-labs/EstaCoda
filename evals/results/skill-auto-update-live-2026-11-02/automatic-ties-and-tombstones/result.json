@@ -1,0 +1,41 @@
+{
+  "id": "automatic-ties-and-tombstones",
+  "artifactPassed": true,
+  "passed": true,
+  "output": {
+    "stock": {
+      "P": 0,
+      "R": -6
+    }
+  },
+  "expected": {
+    "stock": {
+      "P": 0,
+      "R": -6
+    }
+  },
+  "fixedInputsUnchanged": true,
+  "liveSkillUnchanged": true,
+  "skillBeforeHash": "196056a0087f8a7bdad5197139c08605cfcdbb8a8136be596e2178a06835f74a",
+  "skillAfterHash": "196056a0087f8a7bdad5197139c08605cfcdbb8a8136be596e2178a06835f74a",
+  "elapsedMs": 18537,
+  "outcome": {
+    "status": "completed",
+    "terminationCause": "normal",
+    "completionFloor": "read",
+    "confirmedActions": [
+      {
+        "toolCallId": "tool-call-6eed62025ece475676511f08",
+        "tool": "file.write",
+        "riskClass": "workspace-write",
+        "targetSummary": "stock.json",
+        "status": "confirmed",
+        "verification": "verified"
+      }
+    ],
+    "uncertainActions": []
+  },
+  "text": "Saved and read back `stock.json`, verifying it against the stock-snapshot rules:\n\n```json\n{\"stock\":{\"P\":0,\"R\":-6}}\n```\n\n- **P:** revision 7; the last tied occurrence wins, preserving quantity `0`.\n- **Q:** omitted because its highest revision, 11, is deleted; revision 8 cannot resurrect it.\n- **R:** revision 3; the last tied occurrence wins, preserving quantity `-6`.\n\nKeys are alphabetically sorted. All work was local, with no network, delegation, or skill edits.",
+  "providerCalls": 5,
+  "reviewCalls": 0
+}

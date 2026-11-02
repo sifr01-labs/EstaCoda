@@ -108,3 +108,16 @@ it("invalidates live authority when the selected execution policy changes", asyn
     await expect(check()).rejects.toThrow("configuration changed");
   } finally { await rm(root, { recursive: true, force: true }); }
 });
+
+
+it("revokes background write authority when skill approval is enabled", async () => {
+  const root = await mkdtemp(join(tmpdir(), "skill-approval-authority-"));
+  const trustStore = new WorkspaceTrustStore({ homeDir: root }); await trustStore.grant(root);
+  try {
+    const path = join(root, "config.json");
+    await writeFile(path, JSON.stringify({ skills: { autonomy: "proactive", writeApproval: false } }));
+    const check = await createLiveAuthority({ profileRoot: root, workspaceRoot: root, trustStore });
+    await writeFile(path, JSON.stringify({ skills: { autonomy: "proactive", writeApproval: true } }));
+    await expect(check()).rejects.toThrow("configuration changed");
+  } finally { await rm(root, { recursive: true, force: true }); }
+});

@@ -585,6 +585,7 @@ export type SessionEvent =
       action: "reject_route" | "search_routes" | "rerank";
       details: SkillRouteTelemetryDetails;
     }
+  | { kind: "skill-updated"; skillName: string; proposalId: string; text: string }
   | {
       kind: "skill-lifecycle-changed";
       skillName: string;

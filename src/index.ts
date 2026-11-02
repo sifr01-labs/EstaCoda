@@ -269,6 +269,7 @@ async function main(): Promise<void> {
       sessionMetadata: input.sessionMetadata,
       externalSkillRoots: latestConfig.skills.externalDirs,
       skillAutonomy: latestConfig.skills.autonomy,
+      skillWriteApproval: latestConfig.skills.writeApproval,
       skillConfig: latestConfig.skills.config,
       ui: latestConfig.ui,
       agentProfile: latestConfig.profile,

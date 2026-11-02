@@ -1264,6 +1264,7 @@ describe("computeRuntimeFingerprint", () => {
    expect(classifyRuntimeChange(original, { ...original, runtimeUiIdentity: "new-theme" })).toBe("metadata");
    expect(classifyRuntimeChange(original, { ...original, modelId: "new-model" })).toBe("construction");
    expect(classifyRuntimeChange(original, { ...original, mcpServersHash: "changed" })).toBe("definition");
+   expect(classifyRuntimeChange(original, { ...original, skillWriteApproval: true })).toBe("definition");
    expect(classifyRuntimeChange(original, { ...original, securityMode: "strict" })).toBe("authority");
    expect(runtimeRevisions({ ...original, modelId: "new-model" }).authority).toBe(runtimeRevisions(original).authority);
  });

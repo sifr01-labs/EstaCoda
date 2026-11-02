@@ -1,0 +1,43 @@
+{
+  "id": "automatic-chronological-regression",
+  "artifactPassed": true,
+  "passed": true,
+  "output": {
+    "stock": {
+      "S": 7,
+      "T": -3,
+      "V": 0
+    }
+  },
+  "expected": {
+    "stock": {
+      "S": 7,
+      "T": -3,
+      "V": 0
+    }
+  },
+  "fixedInputsUnchanged": true,
+  "liveSkillUnchanged": true,
+  "skillBeforeHash": "196056a0087f8a7bdad5197139c08605cfcdbb8a8136be596e2178a06835f74a",
+  "skillAfterHash": "196056a0087f8a7bdad5197139c08605cfcdbb8a8136be596e2178a06835f74a",
+  "elapsedMs": 17209,
+  "outcome": {
+    "status": "completed",
+    "terminationCause": "normal",
+    "completionFloor": "read",
+    "confirmedActions": [
+      {
+        "toolCallId": "tool-call-e0a6d56e958cfbe9c203fd01",
+        "tool": "file.write",
+        "riskClass": "workspace-write",
+        "targetSummary": "stock.json",
+        "status": "confirmed",
+        "verification": "verified"
+      }
+    ],
+    "uncertainActions": []
+  },
+  "text": "Reconciled `events.csv` into `stock.json` and read back the saved file to verify:\n\n```json\n{\"stock\":{\"S\":7,\"T\":-3,\"V\":0}}\n```\n\nVerification passed: highest numeric revisions selected, deleted SKU `U` omitted, negative and zero quantities preserved, and SKU keys sorted alphabetically.\n\nCompleted locally without network access, delegation, or skill edits.",
+  "providerCalls": 6,
+  "reviewCalls": 0
+}

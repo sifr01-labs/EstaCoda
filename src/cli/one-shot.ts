@@ -108,6 +108,8 @@ function renderOneShotEvent(
       return safeLine(`thinking: ${event.input}`);
     case "intent":
       return safeLine(`intent: ${event.labels.join(", ")} (${Math.round(event.confidence * 100)}%)`);
+    case "skill-updated":
+      return safeLine(event.text);
     case "skill":
       return safeLine(`skill: ${event.name}`);
     case "tool-start": {

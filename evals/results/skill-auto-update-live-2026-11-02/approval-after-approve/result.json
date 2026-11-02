@@ -1,0 +1,41 @@
+{
+  "id": "approval-after-approve",
+  "artifactPassed": true,
+  "passed": true,
+  "output": {
+    "stock": {
+      "K": 8,
+      "M": -4
+    }
+  },
+  "expected": {
+    "stock": {
+      "K": 8,
+      "M": -4
+    }
+  },
+  "fixedInputsUnchanged": true,
+  "liveSkillUnchanged": true,
+  "skillBeforeHash": "42a48928b5151ee836e25d34ea237201e8b0b1eebb0c09fa7db4e1c49ebc148a",
+  "skillAfterHash": "42a48928b5151ee836e25d34ea237201e8b0b1eebb0c09fa7db4e1c49ebc148a",
+  "elapsedMs": 18477,
+  "outcome": {
+    "status": "completed",
+    "terminationCause": "normal",
+    "completionFloor": "read",
+    "confirmedActions": [
+      {
+        "toolCallId": "tool-call-7fb473aa2045a2b3a8c04908",
+        "tool": "file.write",
+        "riskClass": "workspace-write",
+        "targetSummary": "stock.json",
+        "status": "confirmed",
+        "verification": "verified"
+      }
+    ],
+    "uncertainActions": []
+  },
+  "text": "Saved and read back `stock.json`, verifying it against the skill’s reconciliation rules:\n\n```json\n{\"stock\":{\"K\":8,\"M\":-4}}\n```\n\n- **K:** revision 13 wins over revision 2 → `8`.\n- **L:** revision 12 is a deletion, so L is omitted.\n- **M:** negative quantity `-4` is preserved.\n- SKU keys are alphabetically sorted.\n\nCompleted locally without network access, delegation, or skill edits.",
+  "providerCalls": 5,
+  "reviewCalls": 0
+}

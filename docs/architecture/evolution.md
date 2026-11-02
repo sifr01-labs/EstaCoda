@@ -41,13 +41,13 @@ Implemented now:
 - Additive route/outcome telemetry fields for routing evidence, future correction signals, and final outcomes.
 - Offline deterministic routing/evolution baseline fixture metrics.
 - `SkillLearningManager` as an evidence source, not mutation authority.
-- Bounded instruction drafts from current-session skill use in proactive/autonomous mode, through the existing proposal service. A single clear correction can suffice. Review uses redacted conversation/tool evidence and contained skill references, retains shared spending limits, and may abstain; it never promotes or mutates live skills.
-- Content-bound paired task evidence from bounded tool-free execution or an explicitly labelled operator attestation for learned executable drafts, followed by explicit approval. Metadata checks remain separate and do not claim real-task execution. See [skills evaluation and limits](../subsystems/skills.md#paired-task-evidence).
+- Bounded instruction drafts from current-session skill use in proactive/autonomous mode, through the existing proposal service. A single clear correction can suffice. Review uses redacted conversation/tool evidence and contained skill references, retains shared spending limits, and may abstain; eligible local body-only edits activate automatically unless `skills.writeApproval` is true.
+- Content-bound paired task evidence from bounded tool-free execution or an explicitly labelled operator attestation as optional diagnostics for eligible instruction edits; other learned executable drafts retain evaluation and approval requirements. Metadata checks remain separate and do not claim real-task execution. See [skills evaluation and limits](../subsystems/skills.md#paired-task-evidence).
 - Reduced governed evolution change kinds: `skill_patch`, `skill_create`, `routing_metadata_update`.
 - Durable `EvolutionExperiment` records.
 - `estacoda proposal list` and `estacoda proposal inspect <id>` review surfaces for pending proposals and linked evidence/candidates/experiments/evals.
 
-Autonomous behavior is shadow-only. It may record policy decisions and proposal metadata, but it does not auto-promote, auto-rollback, bypass approval gates, or mutate bundled/external skills.
+Proactive/autonomous modes automatically activate eligible low-risk local instruction edits through the proposal service when `skills.writeApproval` is false (default). Changes are content-bound, serialized, snapshotted and audited. Pinned skills and authority expansion remain blocked. Approval-enabled edits remain pending. Other autonomous decisions remain shadow-only; no automatic rollback or bundled/external mutation is enabled.
 
 ## Change Manifest
 

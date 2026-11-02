@@ -1,3 +1,4 @@
+import { withProfileWriteLock } from "../config/profile-write-lock.js";
 import { runSkillTaskSuite } from "./skill-task-runner.js";
 import {constants} from 'node:fs';
 import { cp, mkdir, readFile, readdir, rm, writeFile, lstat, open } from "node:fs/promises";
@@ -127,7 +128,7 @@ export class SkillProposalService {
         evalGate = await runSkillEvalGate(await hydrateSkillResources(parseSkillFile(skill.sourcePath, next, {
           sourceKind: skill.sourceKind, sourceRoot: skill.sourceRoot
         })));
-        if (proposal.requiresTaskEvaluation) validateSkillTaskEvaluation(proposal.taskEvaluation, current, next);
+        if (proposal.requiresTaskEvaluation || proposal.taskEvaluation) validateSkillTaskEvaluation(proposal.taskEvaluation, current, next);
       } catch (error) {
         draftBlockedReason = error instanceof Error ? error.message : String(error);
       }
@@ -245,7 +246,11 @@ export class SkillProposalService {
     return proposal;
   }
 
-  async promoteProposal(proposalId: string): Promise<PromoteResult> {
+  async promoteProposal(proposalId: string, automatic?: { policy: AgentEvolutionPolicy; validateAuthority: () => Promise<void>; signal?: AbortSignal }): Promise<PromoteResult> {
+    return withProfileWriteLock(this.#options.localSkillsRoot, () => this.#promoteProposal(proposalId, automatic));
+  }
+
+  async #promoteProposal(proposalId: string, automatic?: { policy: AgentEvolutionPolicy; validateAuthority: () => Promise<void>; signal?: AbortSignal }): Promise<PromoteResult> {
     const proposal = await this.#options.skillEvolutionStore.findProposal(proposalId);
     if (proposal === undefined) {
       return { ok: false, reason: `Skill patch proposal not found: ${proposalId}` };
@@ -265,15 +270,20 @@ export class SkillProposalService {
       ids: proposal.evidence.observations
     });
     const riskLevel = classifyPatchRisk(proposal.patch);
+    if (automatic && (!automatic.policy.autoPromoteEligibleLocalChanges || automatic.policy.skillWriteApproval === true ||
+        !proposal.mayPromoteAutomatically || proposal.requiresHumanApproval || proposal.sourceTrust !== "runtime_internal" ||
+        riskLevel !== "low" || !proposal.baseContentHash || proposal.patch.type !== "text_patch")) {
+      return { ok: false, reason: "This proposal is not eligible for automatic skill updates." };
+    }
     const trustGate = evaluateProposalTrust(proposal, proposalObservations, riskLevel);
     if (!trustGate.ok) {
       return { ok: false, reason: trustGate.reason };
     }
 
-    if (proposal.baseContentHash || proposal.requiresTaskEvaluation) {
+    if (proposal.baseContentHash || proposal.requiresTaskEvaluation || proposal.taskEvaluation) {
       try {
         const { current, next } = await this.#proposalContents(proposal);
-        if (proposal.requiresTaskEvaluation) validateSkillTaskEvaluation(proposal.taskEvaluation, current, next);
+        if (proposal.requiresTaskEvaluation || proposal.taskEvaluation) validateSkillTaskEvaluation(proposal.taskEvaluation, current, next);
       } catch (error) {
         return { ok: false, reason: error instanceof Error ? error.message : String(error) };
       }
@@ -332,7 +342,13 @@ export class SkillProposalService {
       return { ok: false, reason: `Skill patch proposal ${proposal.id} failed eval gate: ${evalGate.failures.join("; ")}` };
     }
 
+    if (automatic) {
+      automatic.signal?.throwIfAborted();
+      await automatic.validateAuthority();
+      if (!isInstructionOnlyPatch(current, next, proposal.patch)) return { ok: false, reason: "Automatic updates may only change skill body instructions." };
+    }
     const snapshotPath = await this.#snapshotLocalSkill(target, proposal.skillName);
+    if (automatic) { await automatic.validateAuthority(); automatic.signal?.throwIfAborted(); }
     if (await readFile(target.skillPath, "utf8") !== current) return { ok: false, reason: "Skill changed during promotion; retry review." };
     await writeFile(target.skillPath, next, "utf8");
     this.#options.registry.replaceLoaded(loaded);
@@ -480,6 +496,7 @@ export class SkillProposalService {
     const skillName = skillNameForLearningCandidate(options.candidate, options.skillName);
     const skill = this.#options.registry.get(skillName);
     let baseContentHash: string | undefined;
+    let instructionOnly = false;
     if (options.patch !== undefined) {
       if (!options.agentEvolutionPolicy.preparePatches || changeKind !== "skill_patch" || !skill || !isLoadedSkill(skill)) {
         return { ok: false, reason: "Executable learning drafts require preparePatches and a file-backed skill_patch target." };
@@ -489,7 +506,9 @@ export class SkillProposalService {
       if (options.baseContentHash !== baseContentHash) return { ok: false, reason: "Skill changed while drafting." };
       try {
         const baseline = parseSkillFile(skill.sourcePath, current, { sourceKind: skill.sourceKind, sourceRoot: skill.sourceRoot });
-        const next = parseSkillFile(skill.sourcePath, applySkillPatch(current, options.patch), { sourceKind: skill.sourceKind, sourceRoot: skill.sourceRoot });
+        const nextContent = applySkillPatch(current, options.patch);
+        const next = parseSkillFile(skill.sourcePath, nextContent, { sourceKind: skill.sourceKind, sourceRoot: skill.sourceRoot });
+        instructionOnly = isInstructionOnlyPatch(current, nextContent, options.patch);
         if (next.name !== skill.name) return { ok: false, reason: "Learning drafts cannot rename skills." };
         const allowed = await assertSkillContentMutationAllowed({ current: baseline, next, action: "patch", store: this.#options.skillEvolutionStore });
         if (!allowed.ok) return allowed;
@@ -500,18 +519,20 @@ export class SkillProposalService {
     const source = skill !== undefined && isLoadedSkill(skill) ? skill.sourceKind : undefined;
     const affectedFiles = options.affectedFiles ?? (skill !== undefined && isLoadedSkill(skill) ? [skill.sourcePath] : []);
     const riskClass = options.patch ? classifyPatchRisk(options.patch) : riskClassForGovernedChangeKind(changeKind);
-    const requiresHumanApproval = options.patch !== undefined || requiresApprovalForRisk(options.agentEvolutionPolicy, riskClass);
+    const eligibleInstructionEdit = instructionOnly && riskClass === "low" && source === "local";
+    const requiresHumanApproval = eligibleInstructionEdit ? options.agentEvolutionPolicy.skillWriteApproval !== false
+      : options.patch !== undefined || requiresApprovalForRisk(options.agentEvolutionPolicy, riskClass);
     const proposal = await this.#options.skillEvolutionStore.appendGovernedProposal({
       skillName,
       patch: options.patch,
       baseContentHash,
-      requiresTaskEvaluation: options.patch !== undefined,
+      requiresTaskEvaluation: options.patch !== undefined && !eligibleInstructionEdit,
       source,
       reason: options.candidate.reason,
       confidence: options.candidate.confidence,
       evidenceIds: options.candidate.evidenceIds,
       sourceTrust: "runtime_internal",
-      mayPromoteAutomatically: false,
+      mayPromoteAutomatically: eligibleInstructionEdit && options.agentEvolutionPolicy.autoPromoteEligibleLocalChanges && !requiresHumanApproval,
       requiresHumanApproval,
       changeKind,
       targetSurface: targetSurfaceForGovernedChangeKind(changeKind),
@@ -525,7 +546,8 @@ export class SkillProposalService {
       rollbackExpectation: options.rollbackExpectation ?? defaultRollbackExpectation(changeKind),
       policyDecision: {
         ...policyDecision,
-        requiresApproval: requiresHumanApproval
+        requiresApproval: requiresHumanApproval,
+        ...(eligibleInstructionEdit ? { shadowOnly: false, reason: "Instruction update follows the configured skill write-approval policy." } : {})
       },
       approvalState: requiresHumanApproval ? "required" : "not_required"
     });
@@ -1370,4 +1392,11 @@ export async function readBoundedSkillFile(root:string,path:string):Promise<stri
  const rel=relative(root,path);if(!rel||rel.startsWith('..')||isAbsolute(rel))throw new Error('Invalid skill path');
  for(let dir=dirname(path);;dir=dirname(dir)){const info=await lstat(dir);if(!info.isDirectory()||info.isSymbolicLink())throw new Error('Invalid skill directory');if(dir===root)break;}
  const file=await open(path,constants.O_RDONLY|constants.O_NOFOLLOW);try{const info=await file.stat();if(!info.isFile()||info.size>1048576)throw new Error('Skill exceeds bound');const buffer=Buffer.alloc(1048577);let size=0;while(size<buffer.length){const part=await file.read(buffer,size,buffer.length-size,size);if(!part.bytesRead)break;size+=part.bytesRead;}if(size>1048576)throw new Error('Skill exceeds bound');return new TextDecoder('utf-8',{fatal:true}).decode(buffer.subarray(0,size));}finally{await file.close();}
+}
+
+/** Automatic learning never changes frontmatter, resources, routing, or declared authority. */
+function isInstructionOnlyPatch(current: string, next: string, patch: SkillPatchOperation): boolean {
+  if (patch.type !== "text_patch") return false;
+  const header = /^---\n[\s\S]*?\n---\n/u.exec(current)?.[0];
+  return !!header && next.startsWith(header) && current.indexOf(patch.oldString) >= header.length;
 }

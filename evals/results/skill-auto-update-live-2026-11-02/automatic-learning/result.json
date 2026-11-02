@@ -1,0 +1,59 @@
+{
+  "id": "automatic-learning",
+  "artifactPassed": true,
+  "passed": true,
+  "output": {
+    "stock": {
+      "A": 12,
+      "C": 0,
+      "D": -3
+    }
+  },
+  "expected": {
+    "stock": {
+      "A": 12,
+      "C": 0,
+      "D": -3
+    }
+  },
+  "fixedInputsUnchanged": true,
+  "liveSkillUnchanged": false,
+  "skillBeforeHash": "2c21ba4b5efc544a38eea74efd27fc4125f85a7fb3dcf728b6bb48453fcbae5f",
+  "skillAfterHash": "196056a0087f8a7bdad5197139c08605cfcdbb8a8136be596e2178a06835f74a",
+  "elapsedMs": 30312,
+  "outcome": {
+    "status": "completed",
+    "terminationCause": "normal",
+    "completionFloor": "read",
+    "confirmedActions": [
+      {
+        "toolCallId": "tool-call-05eeb00793b6652a3905e187",
+        "tool": "file.write",
+        "riskClass": "workspace-write",
+        "targetSummary": "stock.json",
+        "status": "confirmed",
+        "verification": "not_verified"
+      },
+      {
+        "toolCallId": "tool-call-afd357d94dc7f1371df6a7e8",
+        "tool": "terminal.run",
+        "riskClass": "workspace-write",
+        "targetSummary": "cat CONTRACT.txt && printf '\\n--- events.csv ---\\n' && cat events.csv && printf '\\n--- stock.json ---\\n' && cat stock...",
+        "status": "confirmed",
+        "verification": "not_verified"
+      },
+      {
+        "toolCallId": "tool-call-b3be7991789d0664f8d9924d",
+        "tool": "terminal.run",
+        "riskClass": "workspace-write",
+        "targetSummary": "cat CONTRACT.txt && cat events.csv && cat stock.json && node verify.mjs",
+        "status": "confirmed",
+        "verification": "not_verified"
+      }
+    ],
+    "uncertainActions": []
+  },
+  "text": "Reconciled `events.csv` into `stock.json` using `CONTRACT.txt`’s rules: highest numeric revision wins, with the last occurrence breaking ties, then deleted winners are omitted.\n\n```json\n{\"stock\":{\"A\":12,\"C\":0,\"D\":-3}}\n```\n\n`node verify.mjs` passed. The contract and verifier were unchanged.",
+  "providerCalls": 7,
+  "reviewCalls": 1
+}

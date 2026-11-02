@@ -1,0 +1,59 @@
+{
+  "id": "pinned-learning",
+  "artifactPassed": true,
+  "passed": true,
+  "output": {
+    "stock": {
+      "A": 12,
+      "C": 0,
+      "D": -3
+    }
+  },
+  "expected": {
+    "stock": {
+      "A": 12,
+      "C": 0,
+      "D": -3
+    }
+  },
+  "fixedInputsUnchanged": true,
+  "liveSkillUnchanged": true,
+  "skillBeforeHash": "2c21ba4b5efc544a38eea74efd27fc4125f85a7fb3dcf728b6bb48453fcbae5f",
+  "skillAfterHash": "2c21ba4b5efc544a38eea74efd27fc4125f85a7fb3dcf728b6bb48453fcbae5f",
+  "elapsedMs": 25836,
+  "outcome": {
+    "status": "completed",
+    "terminationCause": "normal",
+    "completionFloor": "read",
+    "confirmedActions": [
+      {
+        "toolCallId": "tool-call-539b077fd87f21aa29ffd7b2",
+        "tool": "file.write",
+        "riskClass": "workspace-write",
+        "targetSummary": "stock.json",
+        "status": "confirmed",
+        "verification": "not_verified"
+      },
+      {
+        "toolCallId": "tool-call-17c6acf7f4d2995d8c897b1d",
+        "tool": "terminal.run",
+        "riskClass": "workspace-write",
+        "targetSummary": "cat CONTRACT.txt && cat events.csv && cat stock.json && node verify.mjs",
+        "status": "confirmed",
+        "verification": "not_verified"
+      },
+      {
+        "toolCallId": "tool-call-5e952080f8cd9fe6dd4bade8",
+        "tool": "terminal.run",
+        "riskClass": "workspace-write",
+        "targetSummary": "cat CONTRACT.txt && cat events.csv && cat stock.json && node verify.mjs",
+        "status": "confirmed",
+        "verification": "not_verified"
+      }
+    ],
+    "uncertainActions": []
+  },
+  "text": "Saved `stock.json` using `CONTRACT.txt`’s replay rules:\n\n```json\n{\"stock\":{\"A\":12,\"C\":0,\"D\":-3}}\n```\n\nSelected the highest numeric revision per SKU, used the last occurrence for ties, and then removed deleted winners. This excludes B while preserving C’s zero and D’s negative quantity.\n\n`node verify.mjs` **passed**. The contract and verifier were unchanged; no network, delegation, or skill-management tools were used.",
+  "providerCalls": 7,
+  "reviewCalls": 1
+}

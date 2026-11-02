@@ -822,6 +822,7 @@ export class AcpServer {
       closeSessionDbOnDispose: false,
       externalSkillRoots: config.skills.externalDirs,
       skillAutonomy: config.skills.autonomy,
+      skillWriteApproval: config.skills.writeApproval,
       skillConfig: config.skills.config,
       ui: config.ui,
       agentProfile: config.profile,

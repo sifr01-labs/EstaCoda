@@ -1,0 +1,71 @@
+{
+  "id": "previous-learning",
+  "passed": true,
+  "output": {
+    "stock": {
+      "A": 12,
+      "C": 0,
+      "D": -3
+    }
+  },
+  "expected": {
+    "stock": {
+      "A": 12,
+      "C": 0,
+      "D": -3
+    }
+  },
+  "fixedInputsUnchanged": true,
+  "liveSkillUnchanged": true,
+  "skillBeforeHash": "2c21ba4b5efc544a38eea74efd27fc4125f85a7fb3dcf728b6bb48453fcbae5f",
+  "skillAfterHash": "2c21ba4b5efc544a38eea74efd27fc4125f85a7fb3dcf728b6bb48453fcbae5f",
+  "elapsedMs": 102765,
+  "outcome": {
+    "status": "partially_completed",
+    "terminationCause": "budget_exhausted",
+    "completionFloor": "read",
+    "confirmedActions": [
+      {
+        "toolCallId": "tool-call-e3c5f74fb72cc7352dbc76c9",
+        "tool": "file.write",
+        "riskClass": "workspace-write",
+        "targetSummary": "stock.json",
+        "status": "confirmed",
+        "verification": "verified"
+      },
+      {
+        "toolCallId": "tool-call-63a4e004e1239d2546f606b6",
+        "tool": "terminal.run",
+        "riskClass": "workspace-write",
+        "targetSummary": "node verify.mjs",
+        "status": "confirmed",
+        "verification": "not_verified"
+      },
+      {
+        "toolCallId": "tool-call-3030cb2346b9514a526a58e1",
+        "tool": "skill.observe",
+        "riskClass": "workspace-write",
+        "status": "confirmed",
+        "verification": "not_verified"
+      },
+      {
+        "toolCallId": "tool-call-63c624e6a58eaef12c8c9c56",
+        "tool": "skill.propose_patch",
+        "riskClass": "workspace-write",
+        "status": "confirmed",
+        "verification": "not_verified"
+      }
+    ],
+    "uncertainActions": [
+      {
+        "toolCallId": "tool-call-57beb4604fec42743d83916a",
+        "tool": "skill.promote_patch",
+        "riskClass": "workspace-write",
+        "status": "uncertain"
+      }
+    ]
+  },
+  "text": "Stopped at the configured run limit: 16 model steps.\n\nSend Continue to start another turn with the saved limits. Limits were not raised automatically. Check uncertain actions before repeating them.\n\nExecution stopped before an accepted answer was produced. Any retained draft is available for review.\n\nConfirmed actions:\n- file.write — stock.json (verified)\n- terminal.run — node verify.mjs (not independently verified)\n- skill.observe (not independently verified)\n- skill.propose_patch (not independently verified)\n\nUncertain actions:\n- skill.promote_patch (execution started, but no authoritative completion result was recorded)\n\nThe confirmed actions remain confirmed; independent verification was not completed.\n\nOutputs written (validation may remain incomplete): stock.json",
+  "providerCalls": 16,
+  "reviewCalls": 0
+}

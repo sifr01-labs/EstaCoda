@@ -3200,6 +3200,9 @@ export function renderRuntimeEvent(
       return "thinking";
     case "intent":
       return "routing";
+    case "skill-updated":
+      safeWrite(`${event.text}\n`);
+      return undefined;
     case "skill":
       safeWrite(`\u2625 skill: ${event.name}\n`);
       return undefined;

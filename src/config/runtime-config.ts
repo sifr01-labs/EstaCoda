@@ -511,6 +511,7 @@ export type EstaCodaConfig = {
   skills?: {
     externalDirs?: string[];
     autonomy?: SkillAutonomy;
+    writeApproval?: boolean;
     config?: Record<string, Record<string, unknown>>;
   };
   ui?: {
@@ -710,6 +711,7 @@ export type LoadedRuntimeConfig = {
   skills: {
     externalDirs: string[];
     autonomy: SkillAutonomy;
+    writeApproval?: boolean;
     config: Record<string, Record<string, unknown>>;
   };
   ui: {
@@ -1138,6 +1140,7 @@ export async function loadRuntimeConfig(options: LoadRuntimeConfigOptions): Prom
     skills: {
       externalDirs: expandConfiguredPaths(config.skills?.externalDirs ?? [], homeDir),
       autonomy: config.skills?.autonomy ?? "suggest",
+      writeApproval: normalizeSkillWriteApproval(config.skills?.writeApproval),
       config: normalizeSkillConfig(config.skills?.config)
     },
     ui: normalizeUiConfig(config.ui),
@@ -1279,6 +1282,7 @@ function patchConfig(...configs: EstaCodaConfig[]): EstaCodaConfig {
       ...(merged.skills ?? {}),
       externalDirs: config.skills?.externalDirs ?? merged.skills?.externalDirs,
       autonomy: config.skills?.autonomy ?? merged.skills?.autonomy,
+      writeApproval: config.skills?.writeApproval ?? merged.skills?.writeApproval,
       config: {
         ...(merged.skills?.config ?? {}),
         ...(config.skills?.config ?? {})
@@ -4667,4 +4671,10 @@ export async function setupExecutionConfig(options: { workspaceRoot: string; hom
   await saveRuntimeConfig(path, config);
   return { path, config };
   });
+}
+
+function normalizeSkillWriteApproval(value: unknown): boolean {
+  if (value === undefined) return false;
+  if (typeof value !== "boolean") throw new Error("skills.writeApproval must be a boolean.");
+  return value;
 }

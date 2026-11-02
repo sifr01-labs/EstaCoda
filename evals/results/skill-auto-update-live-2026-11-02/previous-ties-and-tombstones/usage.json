@@ -1,0 +1,165 @@
+[
+  {
+    "id": "de02e759f459f0c51097972ba90fdb2830a804ee9e75bc98362c1f38e73b7f72",
+    "profileId": "default",
+    "sessionId": "ca545b1b-3270-4d9b-8bd2-66e56d2ea742",
+    "visibleTurnId": "bfb69fae-786e-460e-a708-f250ef97e459",
+    "requestKey": "sha256:18e9f8a4c75f4faddcd417ee025672321fd78c432803a25659d2fbedc4a40843",
+    "provider": "codex",
+    "model": "gpt-6.1-sol",
+    "routeRole": "primary",
+    "routeIndex": 0,
+    "providerAttemptIndex": 0,
+    "sourceKind": "main",
+    "pricing": {
+      "currency": "USD",
+      "fingerprint": "sha256:86d2d084448f4481c5c3c9adcf5f7aab00246015e081ac2b1e55b510eb493af0"
+    },
+    "pricingFingerprint": "sha256:86d2d084448f4481c5c3c9adcf5f7aab00246015e081ac2b1e55b510eb493af0",
+    "inputTokens": 5031,
+    "outputTokens": 29,
+    "reasoningTokens": 0,
+    "cacheReadTokens": 0,
+    "cacheWriteTokens": 0,
+    "totalTokens": 5060,
+    "estimatedCostUsd": 0,
+    "usageComplete": true,
+    "pricingComplete": false,
+    "incompleteReasons": [
+      "provider-attempt-1-input-pricing-missing",
+      "provider-attempt-1-output-pricing-missing"
+    ],
+    "dispatchedAt": "2026-11-02T09:09:35.042Z"
+  },
+  {
+    "id": "aec735d31aa095967a87b642956eb87590d0c30e42a321bdaa5c36a1d1cb31e7",
+    "profileId": "default",
+    "sessionId": "ca545b1b-3270-4d9b-8bd2-66e56d2ea742",
+    "visibleTurnId": "bfb69fae-786e-460e-a708-f250ef97e459",
+    "requestKey": "sha256:d77983f5a4a6f4193ecb3802948f2f21e8004ef09992f0afe53c3f68e533a6cb",
+    "provider": "codex",
+    "model": "gpt-6.1-sol",
+    "routeRole": "primary",
+    "routeIndex": 0,
+    "providerAttemptIndex": 0,
+    "sourceKind": "main",
+    "pricing": {
+      "currency": "USD",
+      "fingerprint": "sha256:86d2d084448f4481c5c3c9adcf5f7aab00246015e081ac2b1e55b510eb493af0"
+    },
+    "pricingFingerprint": "sha256:86d2d084448f4481c5c3c9adcf5f7aab00246015e081ac2b1e55b510eb493af0",
+    "inputTokens": 5426,
+    "outputTokens": 58,
+    "reasoningTokens": 0,
+    "cacheReadTokens": 2688,
+    "cacheWriteTokens": 0,
+    "totalTokens": 5484,
+    "estimatedCostUsd": 0,
+    "usageComplete": true,
+    "pricingComplete": false,
+    "incompleteReasons": [
+      "provider-attempt-1-input-pricing-missing",
+      "provider-attempt-1-output-pricing-missing",
+      "provider-attempt-1-cache-read-pricing-missing"
+    ],
+    "dispatchedAt": "2026-11-02T09:09:37.778Z"
+  },
+  {
+    "id": "cc3a0fe9dac6760cbff1883ff851916c5601477082aa252ff9fff2e0c22f25b7",
+    "profileId": "default",
+    "sessionId": "ca545b1b-3270-4d9b-8bd2-66e56d2ea742",
+    "visibleTurnId": "bfb69fae-786e-460e-a708-f250ef97e459",
+    "requestKey": "sha256:ac87378a0ec9469e3db6db6640828022acbb004cde1e0c2e404ac8c18c52f0c2",
+    "provider": "codex",
+    "model": "gpt-6.1-sol",
+    "routeRole": "primary",
+    "routeIndex": 0,
+    "providerAttemptIndex": 0,
+    "sourceKind": "main",
+    "pricing": {
+      "currency": "USD",
+      "fingerprint": "sha256:86d2d084448f4481c5c3c9adcf5f7aab00246015e081ac2b1e55b510eb493af0"
+    },
+    "pricingFingerprint": "sha256:86d2d084448f4481c5c3c9adcf5f7aab00246015e081ac2b1e55b510eb493af0",
+    "inputTokens": 5491,
+    "outputTokens": 29,
+    "reasoningTokens": 0,
+    "cacheReadTokens": 2688,
+    "cacheWriteTokens": 0,
+    "totalTokens": 5520,
+    "estimatedCostUsd": 0,
+    "usageComplete": true,
+    "pricingComplete": false,
+    "incompleteReasons": [
+      "provider-attempt-1-input-pricing-missing",
+      "provider-attempt-1-output-pricing-missing",
+      "provider-attempt-1-cache-read-pricing-missing"
+    ],
+    "dispatchedAt": "2026-11-02T09:09:40.673Z"
+  },
+  {
+    "id": "b5db46c9b4d52cd511a82bdcf70c708b84b5982689068323da6050eb1373eca4",
+    "profileId": "default",
+    "sessionId": "ca545b1b-3270-4d9b-8bd2-66e56d2ea742",
+    "visibleTurnId": "bfb69fae-786e-460e-a708-f250ef97e459",
+    "requestKey": "sha256:e240695aafcf3fe4b1e3cffad10ac37088e1350384412ad2aea826093eb1acb9",
+    "provider": "codex",
+    "model": "gpt-6.1-sol",
+    "routeRole": "primary",
+    "routeIndex": 0,
+    "providerAttemptIndex": 0,
+    "sourceKind": "main",
+    "pricing": {
+      "currency": "USD",
+      "fingerprint": "sha256:86d2d084448f4481c5c3c9adcf5f7aab00246015e081ac2b1e55b510eb493af0"
+    },
+    "pricingFingerprint": "sha256:86d2d084448f4481c5c3c9adcf5f7aab00246015e081ac2b1e55b510eb493af0",
+    "inputTokens": 5797,
+    "outputTokens": 29,
+    "reasoningTokens": 0,
+    "cacheReadTokens": 0,
+    "cacheWriteTokens": 0,
+    "totalTokens": 5826,
+    "estimatedCostUsd": 0,
+    "usageComplete": true,
+    "pricingComplete": false,
+    "incompleteReasons": [
+      "provider-attempt-1-input-pricing-missing",
+      "provider-attempt-1-output-pricing-missing"
+    ],
+    "dispatchedAt": "2026-11-02T09:09:43.517Z"
+  },
+  {
+    "id": "3e74b49ec7a8bd0de5f07534fdd3759120610866ad7a7a86e69c6ec41b811a29",
+    "profileId": "default",
+    "sessionId": "ca545b1b-3270-4d9b-8bd2-66e56d2ea742",
+    "visibleTurnId": "bfb69fae-786e-460e-a708-f250ef97e459",
+    "requestKey": "sha256:a6769933d3d3657e7d4dced34263ecb56534d85bde482359eb3c5887b08c020e",
+    "provider": "codex",
+    "model": "gpt-6.1-sol",
+    "routeRole": "primary",
+    "routeIndex": 0,
+    "providerAttemptIndex": 0,
+    "sourceKind": "main",
+    "pricing": {
+      "currency": "USD",
+      "fingerprint": "sha256:86d2d084448f4481c5c3c9adcf5f7aab00246015e081ac2b1e55b510eb493af0"
+    },
+    "pricingFingerprint": "sha256:86d2d084448f4481c5c3c9adcf5f7aab00246015e081ac2b1e55b510eb493af0",
+    "inputTokens": 5979,
+    "outputTokens": 84,
+    "reasoningTokens": 0,
+    "cacheReadTokens": 2688,
+    "cacheWriteTokens": 0,
+    "totalTokens": 6063,
+    "estimatedCostUsd": 0,
+    "usageComplete": true,
+    "pricingComplete": false,
+    "incompleteReasons": [
+      "provider-attempt-1-input-pricing-missing",
+      "provider-attempt-1-output-pricing-missing",
+      "provider-attempt-1-cache-read-pricing-missing"
+    ],
+    "dispatchedAt": "2026-11-02T09:09:47.354Z"
+  }
+]

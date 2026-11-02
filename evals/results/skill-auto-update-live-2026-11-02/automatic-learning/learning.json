@@ -1,0 +1,261 @@
+{
+  "state": {
+    "version": 1,
+    "draftBudget": {
+      "day": "2026-11-02",
+      "attempts": 1
+    },
+    "records": [
+      {
+        "key": "selected:stock-snapshot:a8d19ad1348f928da00b3a74bbd0f1cf5ed993390fbf92edeef891b6cfa845cb",
+        "name": "stock-snapshot refinement",
+        "content": "Selected skill refinement evidence: stock-snapshot",
+        "occurrences": 1,
+        "sourceSessionIds": [
+          "0d07cb8c-934c-498a-95f8-692369c947ac"
+        ],
+        "tools": [
+          "file.read",
+          "file.write",
+          "terminal.run"
+        ],
+        "requiredToolsets": [
+          "files"
+        ],
+        "bounded": true,
+        "boundedReason": "selected-skill-turn",
+        "status": "candidate",
+        "evidenceIds": [
+          "obs_e221e7b2-8906-47d9-a8bb-ff9dfc907647"
+        ],
+        "candidateId": "learn_4618640b-e5eb-4194-af0f-c930af433048",
+        "candidateKind": "selected_skill_refinement",
+        "promptHash": "7d059f92295cf284",
+        "selectedSkillName": "stock-snapshot",
+        "updatedAt": "2026-11-02T09:07:31.458Z",
+        "draftCandidateId": "learn_4618640b-e5eb-4194-af0f-c930af433048",
+        "draftAttemptedAt": "2026-11-02T09:07:38.245Z",
+        "draftStatus": "promoted",
+        "draftProposalId": "proposal_c546535f-7fcb-4a47-a96c-7d21f5cd21c3"
+      }
+    ]
+  },
+  "proposals": [
+    {
+      "baseContentHash": "2c21ba4b5efc544a38eea74efd27fc4125f85a7fb3dcf728b6bb48453fcbae5f",
+      "requiresTaskEvaluation": false,
+      "id": "proposal_c546535f-7fcb-4a47-a96c-7d21f5cd21c3",
+      "skillName": "stock-snapshot",
+      "source": "local",
+      "createdAt": "2026-11-02T09:07:38.181Z",
+      "reason": "Selected skill turn produced evidence for future governed refinement.",
+      "confidence": 0.7,
+      "evidence": {
+        "observations": [
+          "obs_e221e7b2-8906-47d9-a8bb-ff9dfc907647"
+        ],
+        "successes": 0,
+        "failures": 0
+      },
+      "sourceTrust": "runtime_internal",
+      "mayPromoteAutomatically": true,
+      "requiresHumanApproval": false,
+      "patch": {
+        "type": "text_patch",
+        "oldString": "Keep the last row for each sku because exports arrive in chronological order.",
+        "newString": "For each sku, select the row with the greatest numeric revision; if revisions tie, the last occurrence wins. Do not assume file order is chronological: a later lower-revision row must not replace a newer row or resurrect a newer tombstone."
+      },
+      "changeKind": "skill_patch",
+      "targetSurface": "skill",
+      "affectedSurface": "stock-snapshot",
+      "affectedFiles": [
+        "<BENCHMARK_ROOT>/automatic/home/.estacoda/profiles/default/skills/stock-snapshot/SKILL.md"
+      ],
+      "evidenceIds": [
+        "obs_e221e7b2-8906-47d9-a8bb-ff9dfc907647"
+      ],
+      "hypothesis": "Selected skill turn produced evidence for future governed refinement.",
+      "riskClass": "low",
+      "authorityExpansion": false,
+      "sourceKind": "local",
+      "evalPlan": {
+        "command": "pnpm run eval:fixtures",
+        "constraintGates": [
+          "pnpm run typecheck",
+          "pnpm run smoke"
+        ],
+        "expectedMetrics": [
+          "primary_skill_precision",
+          "false_positive_rate",
+          "no_skill_correctness"
+        ]
+      },
+      "rollbackExpectation": "Revert the governed skill patch through snapshot-backed promotion rollback if later promoted.",
+      "policyDecision": {
+        "mode": "proactive",
+        "createProposals": true,
+        "shadowOnly": false,
+        "allowed": true,
+        "requiresApproval": false,
+        "reason": "Instruction update follows the configured skill write-approval policy."
+      },
+      "approvalState": "not_required",
+      "status": "promoted",
+      "changeManifestId": "manifest_d9f332ff-5538-4a27-9e1d-eaa07ad9c655",
+      "promotedAt": "2026-11-02T09:07:38.229Z",
+      "promotionId": "promo_428d6e36-5e86-49ee-8ba8-0aece3c90a51"
+    }
+  ],
+  "observations": [
+    {
+      "id": "obs_ef76efe9-50b0-410d-bf9c-b040cb343893",
+      "skillName": "stock-snapshot",
+      "source": "local",
+      "sessionId": "0d07cb8c-934c-498a-95f8-692369c947ac",
+      "timestamp": "2026-11-02T09:07:31.447Z",
+      "type": "success",
+      "promptSummary": "Use stock-snapshot to reconcile events.csv into stock.json. Correction: the exporter does not deliver chronological rows; its replay contract in CONTRACT.txt overrides the stale skill procedure. Read the contract, reconcile the file, and ru\n[truncated 252 chars]",
+      "selectedPlaybookStep": "run",
+      "toolsAttempted": [
+        "file.read",
+        "file.read",
+        "file.write",
+        "terminal.run",
+        "terminal.run"
+      ],
+      "outcome": "succeeded",
+      "lesson": "Skill completed successfully using file.read, file.write, terminal.run.",
+      "sourceTrust": "runtime_internal",
+      "mayPromoteAutomatically": true,
+      "requiresHumanApproval": false,
+      "evidence": {
+        "useCount": 1,
+        "successCount": 1,
+        "failureCount": 0,
+        "summary": "stock-snapshot completed with file.read, file.write, terminal.run. Attempted: file.read, file.write, terminal.run."
+      }
+    },
+    {
+      "id": "obs_e221e7b2-8906-47d9-a8bb-ff9dfc907647",
+      "skillName": "stock-snapshot",
+      "source": "local",
+      "sessionId": "0d07cb8c-934c-498a-95f8-692369c947ac",
+      "timestamp": "2026-11-02T09:07:31.454Z",
+      "type": "success",
+      "promptSummary": "Use stock-snapshot to reconcile events.csv into stock.json. Correction: the exporter does not deliver chronological rows; its replay contract in CONTRACT.txt overrides the stale skill procedure. Read the contract, reconcile the file, and run node verify.mjs to verify the saved output. Do not change the contract or verifier. Do not use skill-management tools during this foreground task; leave skill learning to the configured background reviewer. Work locally without network or delegation",
+      "toolsAttempted": [
+        "file.read",
+        "file.write",
+        "terminal.run"
+      ],
+      "outcome": "succeeded",
+      "lesson": "The same declared verification was started more than once; necessity is not established. Proposed follow-up (not validated): Inspect intervening mutations and check input scopes before recommending another run. Do not assume a repeated check was unnecessary. Delegation was unavailable in the session inventory. Proposed follow-up (not validated): Inspect persistent Task prerequisites and exposure. Absence from this session is not a permanent capability limitation.",
+      "candidateImprovement": "Refine the selected skill through the governed evolution path.",
+      "sourceTrust": "runtime_internal",
+      "mayPromoteAutomatically": false,
+      "requiresHumanApproval": true,
+      "evidence": {
+        "profileId": "default",
+        "promptHash": "7d059f92295cf284",
+        "routeConfidence": 0.7,
+        "finalSkillUsed": "stock-snapshot",
+        "outcomeStatus": "succeeded",
+        "findings": [
+          {
+            "mechanism": "repeated-check",
+            "observed": "The same declared verification was started more than once; necessity is not established.",
+            "correction": "Inspect intervening mutations and check input scopes before recommending another run. Do not assume a repeated check was unnecessary.",
+            "target": "workflow-review",
+            "correctionVerified": false,
+            "callIds": [
+              "tool-call-afd357d94dc7f1371df6a7e8",
+              "tool-call-b3be7991789d0664f8d9924d"
+            ]
+          },
+          {
+            "mechanism": "delegation-unavailable",
+            "observed": "Delegation was unavailable in the session inventory.",
+            "correction": "Inspect persistent Task prerequisites and exposure. Absence from this session is not a permanent capability limitation.",
+            "target": "runtime-regression",
+            "correctionVerified": false,
+            "callIds": []
+          }
+        ],
+        "turnDiagnostics": {
+          "limitReached": false,
+          "completionRejected": false,
+          "unresolvedCheckCount": 0,
+          "delegationAvailable": false
+        },
+        "candidatesShown": [
+          "stock-snapshot"
+        ],
+        "tools": [
+          {
+            "name": "file.read",
+            "ok": true,
+            "riskClass": "read-only-local"
+          },
+          {
+            "name": "file.read",
+            "ok": true,
+            "riskClass": "read-only-local"
+          },
+          {
+            "name": "file.write",
+            "ok": true,
+            "riskClass": "workspace-write"
+          },
+          {
+            "name": "terminal.run",
+            "ok": true,
+            "riskClass": "workspace-write"
+          },
+          {
+            "name": "terminal.run",
+            "ok": true,
+            "riskClass": "workspace-write"
+          }
+        ],
+        "selectedSkill": "stock-snapshot"
+      }
+    }
+  ],
+  "promotions": [
+    {
+      "id": "promo_428d6e36-5e86-49ee-8ba8-0aece3c90a51",
+      "proposalId": "proposal_c546535f-7fcb-4a47-a96c-7d21f5cd21c3",
+      "skillName": "stock-snapshot",
+      "appliedAt": "2026-11-02T09:07:38.229Z",
+      "snapshotPath": "<BENCHMARK_ROOT>/automatic/home/.estacoda/profiles/default/skills/.snapshots/stock-snapshot/2026-11-02T09-07-38-226Z",
+      "fromSnapshot": "<BENCHMARK_ROOT>/automatic/home/.estacoda/profiles/default/skills/.snapshots/stock-snapshot/2026-11-02T09-07-38-226Z",
+      "fromVersion": "0.1.0",
+      "toVersion": "0.1.0",
+      "reason": "Selected skill turn produced evidence for future governed refinement.",
+      "evidence": {
+        "observations": [
+          "obs_e221e7b2-8906-47d9-a8bb-ff9dfc907647"
+        ],
+        "successes": 0,
+        "failures": 0
+      },
+      "sourceTrust": "runtime_internal",
+      "requiresHumanApproval": false,
+      "diffSummary": "Applied one exact text replacement.",
+      "riskLevel": "low",
+      "evalDelta": {
+        "afterScore": 0,
+        "failedCases": [],
+        "newlyPassingCases": [],
+        "newlyFailingCases": []
+      },
+      "checks": {
+        "schema": "passed",
+        "frontmatter": "passed",
+        "smoke": "not-run",
+        "evals": "not-run"
+      }
+    }
+  ],
+  "reviewCalls": 1
+}

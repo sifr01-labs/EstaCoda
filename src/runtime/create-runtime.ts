@@ -180,6 +180,7 @@ export type RuntimeOptions = {
   externalSkillRoots?: string[];
   mcpServers?: Record<string, MCPServerConfig>;
   skillAutonomy?: SkillAutonomy;
+  skillWriteApproval?: boolean;
   skillConfig?: Record<string, Record<string, unknown>>;
   trustStore?: WorkspaceTrustStore;
   trustStorePath?: string;
@@ -775,7 +776,7 @@ async function buildRuntime(options: RuntimeOptions, rollback: ResourceCleanup):
     profileId
   });
   const skillAutonomy = options.skillAutonomy ?? "suggest";
-  const agentEvolutionPolicy = deriveAgentEvolutionPolicy(skillAutonomy);
+  const agentEvolutionPolicy = deriveAgentEvolutionPolicy(skillAutonomy, { skillWriteApproval: options.skillWriteApproval ?? false });
   const skillLearningManager = new SkillLearningManager({
     autonomy: skillAutonomy,
     registry: skillRegistry,
@@ -1490,7 +1491,16 @@ async function buildRuntime(options: RuntimeOptions, rollback: ResourceCleanup):
         });
         if (!disposed && !input.signal?.aborted) skillLearningManager.startBackgroundReview({
           profileId, sessionId: sessionRuntimeContext.currentSessionId(), agentEvolutionPolicy,
-          validateAuthority: validateLiveAuthority
+          validateAuthority: validateLiveAuthority,
+          onSkillUpdated: async (skillName, proposalId) => {
+            const reviewSessionId = current.id;
+            const text = `Updated skill ${skillName} from this task. The previous version is saved for undo.`;
+            await sessionDb.appendMessage({ sessionId: reviewSessionId, role: "agent", channel: input.channel, content: text,
+              metadata: { kind: "skill-auto-updated", skillName, proposalId } });
+            const event = { kind: "skill-updated" as const, skillName, proposalId, text };
+            await sessionDb.appendEvent(reviewSessionId, event);
+            await input.onEvent?.(event);
+          }
         });
         return response;
       });

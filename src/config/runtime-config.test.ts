@@ -4026,3 +4026,24 @@ function lineNumberAt(source: string, offset: number): number {
   }
   return line;
 }
+
+
+describe("skill write approval", () => {
+  it.each([undefined, false, true])("loads the profile setting %s", async value => {
+    const homeDir = await mkdtemp(join(tmpdir(), "skill-write-approval-"));
+    try {
+      const path = profileConfigPath(homeDir); await mkdir(dirname(path), { recursive: true });
+      await writeFile(path, JSON.stringify({ skills: { autonomy: "proactive", writeApproval: value } }));
+      const loaded = await loadRuntimeConfig({ workspaceRoot: homeDir, homeDir, profileId: "default", configurationInspection: true });
+      expect(loaded.skills.writeApproval).toBe(value ?? false);
+    } finally { await rm(homeDir, { recursive: true, force: true }); }
+  });
+  it("rejects a malformed approval setting rather than silently disabling it", async () => {
+    const homeDir = await mkdtemp(join(tmpdir(), "skill-write-approval-"));
+    try {
+      const path = profileConfigPath(homeDir); await mkdir(dirname(path), { recursive: true });
+      await writeFile(path, JSON.stringify({ skills: { writeApproval: "true" } }));
+      await expect(loadRuntimeConfig({ workspaceRoot: homeDir, homeDir, profileId: "default", configurationInspection: true })).rejects.toThrow("skills.writeApproval must be a boolean");
+    } finally { await rm(homeDir, { recursive: true, force: true }); }
+  });
+});

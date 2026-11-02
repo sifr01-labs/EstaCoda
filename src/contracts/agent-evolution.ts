@@ -20,6 +20,8 @@ export type AgentEvolutionPolicy = {
   createExperiments: boolean;
   createManifests: boolean;
   preparePatches: boolean;
+  /** Require approval for learned instruction edits; defaults to false in active review modes. */
+  skillWriteApproval?: boolean;
   runEvals: boolean;
   shadowAutonomousDecisions: boolean;
   requireApprovalForLowRisk: boolean;
@@ -53,10 +55,15 @@ export function deriveAgentEvolutionPolicy(
     }
   };
 
+  const activeReview = mode === "proactive" || mode === "autonomous";
+  const skillWriteApproval = merged.skillWriteApproval ?? false;
   return {
     ...merged,
+    skillWriteApproval,
+    requireApprovalForLowRisk: activeReview ? skillWriteApproval : true,
+    requireApprovalForMediumRisk: true,
     requireApprovalForHighRisk: true,
-    autoPromoteEligibleLocalChanges: false,
+    autoPromoteEligibleLocalChanges: activeReview && !skillWriteApproval && merged.preparePatches && merged.createProposals,
     autoRollbackEligibleLocalChanges: false
   };
 }

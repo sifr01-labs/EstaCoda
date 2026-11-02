@@ -1,0 +1,394 @@
+{
+  "manifest": {
+    "before": "f68f2490a",
+    "sourceHashes": {
+      "src/acp/server.ts": "bcde9ad1bbcf1e80540cd2201936a761746433e56b3ed39feb93ea6ceb5ac996",
+      "src/cli/bench-command.ts": "0773131779bc5d8612a32b54cb986120cbff1929b896156917d97eb10a7b61aa",
+      "src/cli/one-shot.ts": "340877f646e3287f4e235a2c0cf21f00ec202f80840e91a57184d452e3944634",
+      "src/cli/session-loop.ts": "a3904b9ee63c7453c44a53ff4c856f580d0fbaafa078a566b52f869b937b1cc0",
+      "src/config/runtime-config.ts": "f8888294ddb98afee87ee6b7bf5f519175a62b4f17bf65b58717a3d34a79e4d4",
+      "src/contracts/agent-evolution.ts": "efc7b68ad0c6031367f3fa65d6b55f19f017bbae990d05277f41d9c580163f25",
+      "src/contracts/runtime-event.ts": "10bac354ddc4add4618c4ed582892299126ca2fab905f600c948d7ac8ed02e7a",
+      "src/contracts/session.ts": "c7362718e436f6ea1eec25afbdbe7125473a2b48732a6278f826ce257d297342",
+      "src/cron/cron-runtime-factory.ts": "678809531db710321e9ab80135e0e9e0b1b46db3f30ad856692f5f2b36b58b54",
+      "src/gateway/supervisor.ts": "0acc08402e381f178ba81332234a14fe18557c93094080477b61736c9fad5688",
+      "src/index.ts": "b9a901cf95231700bdadf3e2e7116e7d9dfcf03edce86f187b761b2d44714878",
+      "src/runtime/create-runtime.ts": "f06b2420601b313169e8c5d1e6721a801fef9b25a30793d9a88a28e1eda57757",
+      "src/runtime/live-execution-authority.ts": "1c777650038d4bd1cf295291338d9d175fdb672ad6bd7fbc48cec8fcd9c3d97f",
+      "src/runtime/runtime-fingerprint.ts": "54e4771c1bf510a6dede5b1cf1704710b85a13573e40cea311e6586e0338f15b",
+      "src/setup/setup-copy.ts": "d8acd4aa300017c10b45e5fe3d23954c14438015c5f18bc4c2b14bd2b287d873",
+      "src/skills/skill-learning.ts": "fe25f86f06ebc6a62d9300c865a0c4e50d10d22e5c1415f691a625d3ea323b02",
+      "src/skills/skill-proposal-service.ts": "b4bd62f97c569a1fd8b644c8cc0a7ae0d305d384bd33687ba6db3e0f4ad8536e",
+      "src/ui/settings-labels.ts": "7bdbbe4dbbe15b774da22c8e38f70122749e40d3068d806acabd8bd4bff13b68"
+    },
+    "createdAt": "2026-11-02T09:03:16.853Z",
+    "model": "codex/gpt-6.1-sol",
+    "budgets": {
+      "maxProviderIterations": 16,
+      "maxProviderToolCalls": 24,
+      "maxProviderWallClockMs": 180000,
+      "maxRepeatedToolFailures": 3
+    },
+    "fixtureHash": "8e21922a9999da3b2ad9f2f9e9b4e3702fd777940f72c35b75ae826c02eda60c",
+    "protocol": "Four isolated training profiles: previous runtime, updated automatic mode, updated approval-required mode, and updated pinned skill. Continue with fresh sessions/workspaces reading the actual persisted skill; never manually install a candidate. Compare three unseen tasks on previous/automatic profiles. Exercise pending approval, explicit approval, pinning, snapshots and undo. Expected answers remain outside held-out workspaces.",
+    "limitation": "Controlled file-processing tasks with a seeded stale procedure and explicit correction. This establishes automatic activation/reuse and controls, not general spontaneous improvement or a Hermes head-to-head."
+  },
+  "runs": [
+    {
+      "id": "previous-learning",
+      "passed": true,
+      "output": {
+        "stock": {
+          "A": 12,
+          "C": 0,
+          "D": -3
+        }
+      },
+      "expected": {
+        "stock": {
+          "A": 12,
+          "C": 0,
+          "D": -3
+        }
+      },
+      "fixedInputsUnchanged": true,
+      "liveSkillUnchanged": true,
+      "skillBeforeHash": "2c21ba4b5efc544a38eea74efd27fc4125f85a7fb3dcf728b6bb48453fcbae5f",
+      "skillAfterHash": "2c21ba4b5efc544a38eea74efd27fc4125f85a7fb3dcf728b6bb48453fcbae5f",
+      "elapsedMs": 102765,
+      "outcome": {
+        "status": "partially_completed",
+        "terminationCause": "budget_exhausted",
+        "completionFloor": "read",
+        "confirmedActions": [
+          {
+            "toolCallId": "tool-call-e3c5f74fb72cc7352dbc76c9",
+            "tool": "file.write",
+            "riskClass": "workspace-write",
+            "targetSummary": "stock.json",
+            "status": "confirmed",
+            "verification": "verified"
+          },
+          {
+            "toolCallId": "tool-call-63a4e004e1239d2546f606b6",
+            "tool": "terminal.run",
+            "riskClass": "workspace-write",
+            "targetSummary": "node verify.mjs",
+            "status": "confirmed",
+            "verification": "not_verified"
+          },
+          {
+            "toolCallId": "tool-call-3030cb2346b9514a526a58e1",
+            "tool": "skill.observe",
+            "riskClass": "workspace-write",
+            "status": "confirmed",
+            "verification": "not_verified"
+          },
+          {
+            "toolCallId": "tool-call-63c624e6a58eaef12c8c9c56",
+            "tool": "skill.propose_patch",
+            "riskClass": "workspace-write",
+            "status": "confirmed",
+            "verification": "not_verified"
+          }
+        ],
+        "uncertainActions": [
+          {
+            "toolCallId": "tool-call-57beb4604fec42743d83916a",
+            "tool": "skill.promote_patch",
+            "riskClass": "workspace-write",
+            "status": "uncertain"
+          }
+        ]
+      },
+      "text": "Stopped at the configured run limit: 16 model steps.\n\nSend Continue to start another turn with the saved limits. Limits were not raised automatically. Check uncertain actions before repeating them.\n\nExecution stopped before an accepted answer was produced. Any retained draft is available for review.\n\nConfirmed actions:\n- file.write — stock.json (verified)\n- terminal.run — node verify.mjs (not independently verified)\n- skill.observe (not independently verified)\n- skill.propose_patch (not independently verified)\n\nUncertain actions:\n- skill.promote_patch (execution started, but no authoritative completion result was recorded)\n\nThe confirmed actions remain confirmed; independent verification was not completed.\n\nOutputs written (validation may remain incomplete): stock.json",
+      "providerCalls": 16,
+      "reviewCalls": 0
+    }
+  ],
+  "reviews": {
+    "previous-learning": {
+      "state": {
+        "version": 1,
+        "records": [
+          {
+            "key": "selected:stock-snapshot:ddd538f4235b76cb7a4163b3024f7d88fd774417b09b227f5720931f9a27d2fa",
+            "name": "stock-snapshot refinement",
+            "content": "Selected skill refinement evidence: stock-snapshot",
+            "occurrences": 1,
+            "sourceSessionIds": [
+              "08cbf0df-35d3-4d6a-b54f-d360b91bc1ac"
+            ],
+            "tools": [
+              "file.read",
+              "terminal.inspect",
+              "capability.discover",
+              "config.provider.status",
+              "skill.read",
+              "file.write",
+              "terminal.run",
+              "skill.observe",
+              "skill.propose_patch",
+              "config.provider.execution_status"
+            ],
+            "requiredToolsets": [
+              "files"
+            ],
+            "bounded": true,
+            "boundedReason": "selected-skill-turn",
+            "status": "candidate",
+            "evidenceIds": [
+              "obs_74a0dd9e-a979-4235-99e0-ad4b65db436d"
+            ],
+            "candidateId": "learn_320f9996-0b6e-4219-8f29-27df63451cd6",
+            "candidateKind": "selected_skill_refinement",
+            "promptHash": "f2fb69b5c21dc2e7",
+            "selectedSkillName": "stock-snapshot",
+            "updatedAt": "2026-11-02T09:04:30.512Z"
+          }
+        ]
+      },
+      "proposals": [
+        {
+          "id": "patch_260cd7f7-493e-4841-894c-03811795f526",
+          "skillName": "stock-snapshot",
+          "source": "local",
+          "createdAt": "2026-11-02T09:04:22.667Z",
+          "reason": "User corrected chronological assumption; CONTRACT.txt defines revision-based replay, confirmed by node verify.mjs.",
+          "confidence": 1,
+          "evidence": {
+            "observations": [],
+            "successes": 1,
+            "failures": 0
+          },
+          "sourceTrust": "untrusted_document",
+          "mayPromoteAutomatically": false,
+          "requiresHumanApproval": true,
+          "patch": {
+            "old_string": "Keep the last row for each sku because exports arrive in chronological order. After selecting the last row, omit entries whose deleted value is true.",
+            "new_string": "Read and follow the exporter's replay contract when supplied; it overrides any default ordering assumption. For revision-based replay, select the greatest numeric revision for each sku, breaking equal-revision ties by last occurrence. Select winners before omitting entries whose deleted value is true, so lower revisions cannot resurrect newer tombstones."
+          },
+          "changeKind": "skill_patch",
+          "targetSurface": "skill",
+          "affectedSurface": "stock-snapshot",
+          "evidenceIds": [],
+          "hypothesis": "User corrected chronological assumption; CONTRACT.txt defines revision-based replay, confirmed by node verify.mjs.",
+          "riskClass": "low",
+          "authorityExpansion": false,
+          "sourceKind": "local",
+          "evalPlan": {
+            "command": "pnpm run eval:fixtures",
+            "constraintGates": [
+              "pnpm run typecheck",
+              "pnpm run smoke"
+            ]
+          },
+          "rollbackExpectation": "Revert skill file using skill.rollback or restore from snapshot.",
+          "approvalState": "required",
+          "status": "proposed",
+          "changeManifestId": "manifest_404ba946-4a3c-4f6f-98ac-6ea57b5a342f"
+        }
+      ],
+      "observations": [
+        {
+          "id": "obs_3a20b700-e256-4f5e-b14a-46338d3cc129",
+          "skillName": "stock-snapshot",
+          "source": "local",
+          "timestamp": "2026-11-02T09:04:09.189Z",
+          "type": "correction",
+          "promptSummary": "Reconcile events.csv under the exporter replay contract, verify stock.json locally, and honor configured skill-learning policy.",
+          "selectedPlaybookStep": "run",
+          "toolsAttempted": [
+            "file.read",
+            "file.write",
+            "terminal.run"
+          ],
+          "outcome": "Saved stock.json with A=12, C=0, D=-3; node verify.mjs passed with exit code 0. Contract and verifier unchanged.",
+          "lesson": "CONTRACT.txt overrides the stale chronological-row assumption. Select greatest numeric revision per SKU, with last occurrence winning equal revisions; only then omit deleted winners. Preserve zero and negative quantities and sort keys.",
+          "candidateImprovement": "Replace the chronological last-row assumption with contract-first replay: greatest numeric revision per SKU, last occurrence for ties, then filter tombstones.",
+          "sourceTrust": "untrusted_document",
+          "mayPromoteAutomatically": false,
+          "requiresHumanApproval": true
+        },
+        {
+          "id": "obs_d66bdebb-6f13-49d1-a0b9-4321bf026640",
+          "skillName": "stock-snapshot",
+          "source": "local",
+          "sessionId": "08cbf0df-35d3-4d6a-b54f-d360b91bc1ac",
+          "timestamp": "2026-11-02T09:04:30.502Z",
+          "type": "partial",
+          "promptSummary": "Use stock-snapshot to reconcile events.csv into stock.json. Correction: the exporter does not deliver chronological rows; its replay contract in CONTRACT.txt overrides the stale skill procedure. Read the contract, reconcile the file, and ru\n[truncated 173 chars]",
+          "selectedPlaybookStep": "run",
+          "toolsAttempted": [
+            "file.read",
+            "terminal.inspect",
+            "file.read",
+            "capability.discover",
+            "config.provider.status",
+            "capability.discover",
+            "terminal.inspect",
+            "skill.read",
+            "file.write",
+            "terminal.run",
+            "file.read",
+            "skill.observe",
+            "capability.discover",
+            "skill.propose_patch",
+            "config.provider.execution_status",
+            "skill.promote_patch"
+          ],
+          "outcome": "partial",
+          "lesson": "Skill ended with status partial: stock-snapshot completed with file.read, terminal.inspect, capability.discover, config.provider.status, skill.read, file.write, terminal.run, skill.observe, skill.propose_patch, config.provider.execution_status, skill.promote_patch. Attempted: file.read, terminal.inspect, capability.discover, config.provider.status, skill.read, file.write, terminal.run, skill.observe, skill.propose_patch, config.provider.execution_status, skill.promote_patch.",
+          "sourceTrust": "runtime_internal",
+          "mayPromoteAutomatically": false,
+          "requiresHumanApproval": true,
+          "evidence": {
+            "useCount": 1,
+            "successCount": 0,
+            "failureCount": 1,
+            "summary": "stock-snapshot completed with file.read, terminal.inspect, capability.discover, config.provider.status, skill.read, file.write, terminal.run, skill.observe, skill.propose_patch, config.provider.execution_status, skill.promote_patch. Attempted: file.read, terminal.inspect, capability.discover, config.provider.status, skill.read, file.write, terminal.run, skill.observe, skill.propose_patch, config.provider.execution_status, skill.promote_patch."
+          }
+        },
+        {
+          "id": "obs_74a0dd9e-a979-4235-99e0-ad4b65db436d",
+          "skillName": "stock-snapshot",
+          "source": "local",
+          "sessionId": "08cbf0df-35d3-4d6a-b54f-d360b91bc1ac",
+          "timestamp": "2026-11-02T09:04:30.509Z",
+          "type": "partial",
+          "promptSummary": "Use stock-snapshot to reconcile events.csv into stock.json. Correction: the exporter does not deliver chronological rows; its replay contract in CONTRACT.txt overrides the stale skill procedure. Read the contract, reconcile the file, and run node verify.mjs to verify the saved output. Do not change the contract or verifier. Honor the configured skill-learning policy. Work locally without network or delegation",
+          "toolsAttempted": [
+            "file.read",
+            "terminal.inspect",
+            "capability.discover",
+            "config.provider.status",
+            "skill.read",
+            "file.write",
+            "terminal.run",
+            "skill.observe",
+            "skill.propose_patch",
+            "config.provider.execution_status"
+          ],
+          "outcome": "partial",
+          "lesson": "Delegation was unavailable in the session inventory. Proposed follow-up (not validated): Inspect persistent Task prerequisites and exposure. Absence from this session is not a permanent capability limitation.",
+          "candidateImprovement": "Refine the selected skill through the governed evolution path.",
+          "sourceTrust": "runtime_internal",
+          "mayPromoteAutomatically": false,
+          "requiresHumanApproval": true,
+          "evidence": {
+            "profileId": "default",
+            "promptHash": "f2fb69b5c21dc2e7",
+            "routeConfidence": 0.7,
+            "finalSkillUsed": "stock-snapshot",
+            "outcomeStatus": "partial",
+            "findings": [
+              {
+                "mechanism": "delegation-unavailable",
+                "observed": "Delegation was unavailable in the session inventory.",
+                "correction": "Inspect persistent Task prerequisites and exposure. Absence from this session is not a permanent capability limitation.",
+                "target": "runtime-regression",
+                "correctionVerified": false,
+                "callIds": []
+              }
+            ],
+            "turnDiagnostics": {
+              "limitReached": true,
+              "completionRejected": false,
+              "unresolvedCheckCount": 0,
+              "delegationAvailable": false
+            },
+            "candidatesShown": [
+              "stock-snapshot"
+            ],
+            "tools": [
+              {
+                "name": "file.read",
+                "ok": true,
+                "riskClass": "read-only-local"
+              },
+              {
+                "name": "terminal.inspect",
+                "ok": true,
+                "riskClass": "read-only-local"
+              },
+              {
+                "name": "file.read",
+                "ok": true,
+                "riskClass": "read-only-local"
+              },
+              {
+                "name": "capability.discover",
+                "ok": true,
+                "riskClass": "read-only-local"
+              },
+              {
+                "name": "config.provider.status",
+                "ok": true,
+                "riskClass": "read-only-local"
+              },
+              {
+                "name": "capability.discover",
+                "ok": true,
+                "riskClass": "read-only-local"
+              },
+              {
+                "name": "terminal.inspect",
+                "ok": false,
+                "riskClass": "read-only-local"
+              },
+              {
+                "name": "skill.read",
+                "ok": true,
+                "riskClass": "read-only-local"
+              },
+              {
+                "name": "file.write",
+                "ok": true,
+                "riskClass": "workspace-write"
+              },
+              {
+                "name": "terminal.run",
+                "ok": true,
+                "riskClass": "workspace-write"
+              },
+              {
+                "name": "file.read",
+                "ok": true,
+                "riskClass": "read-only-local"
+              },
+              {
+                "name": "skill.observe",
+                "ok": true,
+                "riskClass": "workspace-write"
+              },
+              {
+                "name": "capability.discover",
+                "ok": true,
+                "riskClass": "read-only-local"
+              },
+              {
+                "name": "skill.propose_patch",
+                "ok": true,
+                "riskClass": "workspace-write"
+              },
+              {
+                "name": "config.provider.execution_status",
+                "ok": true,
+                "riskClass": "read-only-local"
+              },
+              {
+                "name": "skill.promote_patch",
+                "ok": false,
+                "riskClass": "workspace-write"
+              }
+            ],
+            "selectedSkill": "stock-snapshot"
+          }
+        }
+      ],
+      "promotions": [],
+      "reviewCalls": 0
+    }
+  },
+  "pairs": []
+}

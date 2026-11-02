@@ -1,0 +1,41 @@
+{
+  "id": "automatic-out-of-order",
+  "artifactPassed": true,
+  "passed": true,
+  "output": {
+    "stock": {
+      "K": 8,
+      "M": -4
+    }
+  },
+  "expected": {
+    "stock": {
+      "K": 8,
+      "M": -4
+    }
+  },
+  "fixedInputsUnchanged": true,
+  "liveSkillUnchanged": true,
+  "skillBeforeHash": "196056a0087f8a7bdad5197139c08605cfcdbb8a8136be596e2178a06835f74a",
+  "skillAfterHash": "196056a0087f8a7bdad5197139c08605cfcdbb8a8136be596e2178a06835f74a",
+  "elapsedMs": 15840,
+  "outcome": {
+    "status": "completed",
+    "terminationCause": "normal",
+    "completionFloor": "read",
+    "confirmedActions": [
+      {
+        "toolCallId": "tool-call-5a114ced3d6619f1c263786c",
+        "tool": "file.write",
+        "riskClass": "workspace-write",
+        "targetSummary": "stock.json",
+        "status": "confirmed",
+        "verification": "verified"
+      }
+    ],
+    "uncertainActions": []
+  },
+  "text": "Reconciled `events.csv` into `stock.json` and read back the saved output to verify:\n\n```json\n{\"stock\":{\"K\":8,\"M\":-4}}\n```\n\n- **K:** revision 13 wins over revision 2 → `8`.\n- **L:** revision 12 is a deletion; the older row does not restore it.\n- **M:** negative quantity preserved → `-4`.\n\nKeys are alphabetically sorted. Completed locally without network access, delegation, or skill edits.",
+  "providerCalls": 5,
+  "reviewCalls": 0
+}

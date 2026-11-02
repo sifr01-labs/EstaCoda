@@ -66,7 +66,7 @@ Common false premises:
 - Workspace trust should load project config. It should not. Workspace trust gates behavior; it does not merge project config into the active profile.
 - Open mode means security off. It does not. The hardline floor still applies.
 - Skipped setup capability means broken setup. Optional capabilities are optional; skipped features must not block core setup.
-- A skill proposal should patch the live skill immediately. It should not. Agent Evolution records evidence and proposals; promotion is gated.
+- Every skill proposal should patch the live skill immediately. It should not. Only eligible local instruction patches may activate automatically under the explicit skill-write policy; other proposals remain gated.
 - A provider route always needs an API key. Some routes use OAuth in profile-local `auth.json`, and some providers support `authMethod: "none"`.
 - Renderer snapshots are always bad. They are valid for terminal UI surfaces; avoid snapshots for behavioral contracts.
 
@@ -553,24 +553,24 @@ Learning must remain reviewable.
 Rules:
 
 1. Observations are not automatically trusted.
-2. Proposed patches are not automatically accepted.
+2. Only eligible instruction patches can activate under the configured write-approval policy; other proposals are not automatically accepted.
 3. Proposed changes must carry enough evidence to review.
 4. Promotion runs available gates; failing gates block promotion.
-5. Skill evals are currently metadata/workflow-scoring only. Do not assume real task fixture execution exists unless you add and verify it.
+5. Skill metadata checks do not establish task performance. Paired task evaluation is optional for eligible local instruction edits; available failed evaluations still block activation. Other learned executable changes retain their evaluation requirements.
 6. Medium-risk, high-risk, and untrusted-source proposals require explicit approval.
 7. Learned behavior must not weaken security policy.
 8. Learned behavior must not silently store sensitive user information.
 9. Learned behavior must not promote provider hallucinations into durable instructions.
 10. Bundled and external skill assets are not mutated directly; local/profile-owned copies may shadow.
-11. Current autonomous mode is shadow-only unless code and docs explicitly prove otherwise. Do not add auto-promotion, auto-rollback, or live mutation by implication.
+11. Proactive/autonomous modes may automatically activate low-risk, body-only instruction patches to profile-owned local skills when `skills.writeApproval` is false (default). Pinning, content binding, authority checks, snapshots and audit remain mandatory. With write approval enabled, stage for explicit approval. No automatic rollback, bundled/external mutation, new skill creation, or permission changes are authorized by this policy.
 
 The governed loop is:
 
 ```text
-observe -> propose -> gate/evaluate -> review -> approve or reject -> promote or rollback metadata
+observe -> propose -> validate -> apply eligible instruction edit or await approval -> record snapshot and audit
 ```
 
-Do not collapse this into automatic mutation of live skills.
+Automatic instruction updates must use the existing proposal/promotion service and preserve undo. Do not extend this policy to other persistent state.
 
 ## Tool execution
 
@@ -945,9 +945,9 @@ False-positive handling must stay narrow. A pattern that auto-approves wrappers 
 
 EstaCoda source skills use JSON frontmatter. `workflow` is stale; use `playbook`.
 
-### Do not make Agent Evolution live self-mutation
+### Keep automatic skill updates within their explicit policy
 
-Learning is useful only if reviewable. Current autonomous mode is shadow-only unless code and docs explicitly prove otherwise. Automatic skill, prompt, memory, or runtime policy mutation turns user behavior and provider output into uncontrolled policy.
+Learning must remain inspectable and reversible. Eligible local skill instructions can update under the documented write-approval policy. This does not authorize automatic prompt, memory, credential or runtime-policy mutation.
 
 ### Do not confuse Onboarding Wizard with Setup Editor
 

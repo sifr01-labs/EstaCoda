@@ -66,7 +66,7 @@ async function governance(profileRoot: string): Promise<string> {
   } catch (error) { if ((error as NodeJS.ErrnoException).code !== "ENOENT") throw error; }
 
   return stableJsonHash({ execution: config.execution, security: config.security, tools: config.tools, mcp: config.mcp,
-    browser: config.browser, web: config.web });
+    browser: config.browser, web: config.web, skills: config.skills });
 }
 export async function createLiveAuthority(input: { profileRoot: string; workspaceRoot: string; trustStore: WorkspaceTrustStore }): Promise<() => Promise<void>> {
   const revision = await governance(input.profileRoot);

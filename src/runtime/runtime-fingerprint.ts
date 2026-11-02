@@ -51,6 +51,7 @@ export type RuntimeFingerprint = {
 
   // ── Skills ──
   skillAutonomy: string;
+  skillWriteApproval?: boolean;
   skillConfigHash: string;
   externalSkillRoots: string[];
 
@@ -139,6 +140,7 @@ export function computeRuntimeFingerprint(
     budgetsHash: stableJsonHash(config.budgets ?? {}),
     disableCronTools: options.disableCronTools,
     skillAutonomy: config.skills.autonomy,
+    skillWriteApproval: config.skills.writeApproval ?? false,
     skillConfigHash: stableJsonHash(config.skills.config),
     externalSkillRoots: [...config.skills.externalDirs].sort(),
     uiLanguage: config.ui.language,
@@ -242,6 +244,7 @@ export function runtimeRevisions(fingerprint: RuntimeFingerprint): RuntimeRevisi
     routingConfigHash: fingerprint.routingConfigHash,
     skillConfigHash: fingerprint.skillConfigHash,
     skillAutonomy: fingerprint.skillAutonomy,
+    skillWriteApproval: fingerprint.skillWriteApproval ?? false,
     externalSkillRoots: fingerprint.externalSkillRoots,
     mcpServersHash: fingerprint.mcpServersHash,
     disabledToolsets: fingerprint.disabledToolsets,

@@ -1,0 +1,3 @@
+{
+  "reason": "Foreground agent attempted skill management after an ambiguous learning-policy instruction and exhausted its budget. Aborted before completing the matrix. Revised prompt delegates skill changes exclusively to background review. Undo helper also corrected to use the production manifest store. These partial runs are excluded from the completed comparison; no production source was changed."
+}

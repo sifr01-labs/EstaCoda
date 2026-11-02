@@ -1167,13 +1167,13 @@ describe("setup copy", () => {
     expect(rawSetupCopy("en", "setupEditor.actions.configureBrowser.description")).toBe("Configure how EstaCoda opens and controls browsers.");
     expect(rawSetupCopy("en", "setupEditor.actions.editSecurityMode")).toBe("Security mode");
     expect(rawSetupCopy("en", "setupEditor.actions.editSecurityMode.description")).toBe("Review policy for risky actions.");
-    expect(rawSetupCopy("en", "onboarding.workflowLearning")).toBe("Agent Evolution controls EstaCoda's reviewable self-improvement: evidence, proposals, evals, and manual promotion.");
+    expect(rawSetupCopy("en", "onboarding.workflowLearning")).toBe("Agent Evolution records learning and can update eligible skill instructions automatically. Skill write approval is optional.");
     expect(rawSetupCopy("en", "setupEditor.actions.editWorkflowLearning")).toBe("Agent Evolution");
     expect(rawSetupCopy("en", "setupEditor.actions.editWorkflowLearning.description")).toBe("Reviewable self-improvement proposals.");
     expect(rawSetupCopy("en", "onboarding.workflowLearning.options.autonomous.description")).toBe(
-      "Record shadow-only autonomous decisions for review. No automatic promotion is active in v0.1.0."
+      "Updates eligible local skill instructions automatically unless skill write approval is enabled. Changes can be reviewed and undone."
     );
-    expect(rawSetupCopy("ar", "onboarding.workflowLearning.options.autonomous.description")).toContain("v0.1.0");
+    expect(rawSetupCopy("ar", "onboarding.workflowLearning.options.autonomous.description")).toContain("التراجع");
     expect(rawSetupCopy("ar", "setupEditor.actions.editWorkflowLearning.description")).toBe("مقترحات تحسين ذاتي قابلة للمراجعة.");
     expect(resolveSetupCopy("ar", "setupEditor.actions.editWorkflowLearning")).toBe(isolateLtr("Agent Evolution"));
     expect(rawSetupCopy("en", "setupEditor.actions.chooseLanguage")).toBe("Language");
