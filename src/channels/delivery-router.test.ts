@@ -105,6 +105,27 @@ describe("DeliveryRouter", () => {
   });
 
   describe("text delivery", () => {
+    it("routes the complete report through a supporting adapter without applying the legacy text cap", async () => {
+      const router = new DeliveryRouter({ homeDir: tmpDir, maxOutputChars: 4 });
+      const telegram = createFakeTelegramAdapter();
+      const sendReport = vi.fn(async () => ({ messageIds: ["summary", "document"] }));
+      telegram.delivery!.sendReport = sendReport;
+      router.registerAdapter(telegram);
+      const report = { content: "Full findings and limitations" };
+      const result = await router.deliverText([{ kind: "channel", platform: "telegram", chatId: "123", threadId: "42" }], "Summary", { report });
+      expect(sendReport).toHaveBeenCalledWith({ platform: "telegram", chatId: "123", threadId: "42" }, "Summary", report);
+      expect([...result.values()][0]).toMatchObject({ success: true, receipt: { messageIds: ["summary", "document"] } });
+    });
+
+    it("preserves full report text on an adapter without document delivery", async () => {
+      const router = new DeliveryRouter({ homeDir: tmpDir });
+      const adapter = createFakeDiscordAdapter() as FakeAdapter;
+      router.registerAdapter(adapter);
+      await router.deliverText([{ kind: "channel", platform: "discord", chatId: "123" }], "Summary", { report: { content: "Full findings and limitations" } });
+      expect(adapter.records[0].text).toBe("Summary\n\nFull findings and limitations");
+      expect(adapter.records[0].options).not.toHaveProperty("report");
+    });
+
     it("delivers to registered telegram adapter", async () => {
       const router = new DeliveryRouter({ homeDir: tmpDir });
       const telegram = createFakeTelegramAdapter() as FakeAdapter;

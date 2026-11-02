@@ -3143,6 +3143,40 @@ describe("TelegramAdapter", () => {
     expect(message?.sessionKey.platform).toBe("telegram");
   });
 
+  it("delivers a short task summary followed by the complete in-memory report in the same topic", async () => {
+    const { adapter, calls } = createTelegramArtifactHarness();
+    const content = "# التقرير\n\n" + "Full evidence. ".repeat(400);
+    const receipt = await adapter.delivery.sendReport(
+      { platform: "telegram", chatId: "123", threadId: "42" },
+      "**Partially complete**\n\nSome work is missing.", { content });
+    expect(receipt.messageIds).toHaveLength(2);
+    const messages = callsForArtifactMethod(calls, "sendMessage");
+    expect(messages).toHaveLength(1);
+    expect(jsonBody(messages[0]).text).toContain("<b>Partially complete</b>");
+    expect(jsonBody(messages[0]).text).not.toContain(content);
+    expect(jsonBody(messages[0]).message_thread_id).toBe(42);
+    const form = formDataBody(callsForArtifactMethod(calls, "sendDocument")[0]);
+    expect(form.get("chat_id")).toBe("123");
+    expect(form.get("message_thread_id")).toBe("42");
+    const document = form.get("document") as File;
+    expect(document.name).toBe("task-report.md");
+    expect(await document.text()).toBe(content);
+    expect(calls.findIndex(call => call.method === "sendMessage")).toBeLessThan(calls.findIndex(call => call.method === "sendDocument"));
+  });
+
+  it("rejects oversized reports before sending a summary", async () => {
+    const { adapter, calls } = createTelegramArtifactHarness({ maxAttachmentBytes: 4 });
+    await expect(adapter.delivery.sendReport({ platform: "telegram", chatId: "123" }, "Summary", { content: "حروف عربية" })).rejects.toThrow(/size limit/u);
+    expect(calls).toHaveLength(0);
+  });
+
+  it("does not claim success or resend after a report upload fails", async () => {
+    const { adapter, calls } = createTelegramArtifactHarness({ failMethods: ["sendDocument"] });
+    await expect(adapter.delivery.sendReport({ platform: "telegram", chatId: "123" }, "Summary", { content: "Full report" })).rejects.toThrow();
+    expect(callsForArtifactMethod(calls, "sendMessage")).toHaveLength(1);
+    expect(callsForArtifactMethod(calls, "sendDocument")).toHaveLength(1);
+  });
+
   it("delivery.sendArtifact uploads document artifacts via sendDocument", async () => {
     const tempDir = await mkdtemp(join(tmpdir(), "estacoda-telegram-doc-"));
     try {

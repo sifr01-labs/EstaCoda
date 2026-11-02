@@ -162,7 +162,9 @@ describe("durable research-to-report vertical slice", () => {
     await createHost(store, resultService, delivery, executor, "host-delivery-retry", id).runOnce();
     expect(store.getDeliveryBinding(binding.id)?.status).toBe("delivered");
     expect(successfulDelivery).toHaveBeenCalledTimes(1);
-    expect(deliveredText[0]).toContain("Artifact handle: task-result:");
+    expect(deliveredText[0]).toContain("Published research report");
+    expect(deliveredText[0]).toContain("Ask me to retrieve the saved output.");
+    expect(deliveredText[0]).not.toContain("task-result:");
     expect(deliveredText[0]).not.toContain(resultRoot);
     sessionDb.close();
   });

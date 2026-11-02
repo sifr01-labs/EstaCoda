@@ -5,11 +5,12 @@ import type {
   TaskDeliveryDestination,
   TaskResult
 } from "../contracts/task.js";
+import type { ChannelTextOptions } from "../contracts/channel.js";
 import type { DeliveryTarget } from "../channels/delivery-router.js";
 import { TASK_RESULT_PAGE_MAX_CHARS, type TaskResultService } from "./task-result-service.js";
 import type { TaskStore } from "./task-store.js";
 import { deliveredReportPath, taskPrimaryResult, taskPrimaryResultStepId, taskRequestCompletion } from "./task-primary-result.js";
-import { listStepTreeAttempts, listTaskTreeUsageEntries } from "./task-tree-accounting.js";
+import { listTaskTreeUsageEntries } from "./task-tree-accounting.js";
 import { taskUsageFromEntries } from "./task-agent-usage.js";
 import { formatUsageCost, formatUsageCostNotice, formatUsdAmount } from "../ui/usage-cost-format.js";
 import { spendingBudgetSummary } from "../providers/provider-spend-projection.js";
@@ -22,7 +23,8 @@ const MAX_DELIVERY_RESULTS = 64;
 export type TaskCompletionDeliveryRouter = {
   deliverText(
     targets: DeliveryTarget[],
-    text: string
+    text: string,
+    options?: ChannelTextOptions
   ): Promise<Map<string, { success: boolean; error?: string }>>;
 };
 
@@ -218,11 +220,11 @@ export class TaskCompletionDeliveryService {
       const claimed = this.#store.claimDeliveryBinding(candidate.id, this.#now().toISOString());
       if (claimed === null) continue;
       result.claimed++;
-      let text: string;
+      let message: { text: string; options?: ChannelTextOptions };
       try {
         const task = this.#store.getTask(claimed.taskId);
         if (task === null) throw new Error("task-unavailable");
-        text = await this.#renderCompletion(task, claimed);
+        message = await this.#renderCompletion(task, claimed);
       } catch {
         this.#store.settleDeliveryBinding({
           id: claimed.id,
@@ -236,7 +238,7 @@ export class TaskCompletionDeliveryService {
       }
       let delivery: Map<string, { success: boolean; error?: string }>;
       try {
-        delivery = await this.#router.deliverText([toDeliveryTarget(claimed.destination)], text);
+        delivery = await this.#router.deliverText([toDeliveryTarget(claimed.destination)], message.text, message.options);
       } catch {
         this.#store.settleDeliveryBinding({
           id: claimed.id,
@@ -253,7 +255,7 @@ export class TaskCompletionDeliveryService {
           id: claimed.id,
           status: "failed",
           settledAt: this.#now().toISOString(),
-          failureClass: "delivery-failed",
+          failureClass: message.options?.report === undefined ? "delivery-failed" : "delivery-outcome-unknown",
           failureMessage: "Task completion delivery failed."
         });
         result.failed++;
@@ -269,114 +271,122 @@ export class TaskCompletionDeliveryService {
     return result;
   }
 
-  async #renderCompletion(task: Task, binding: TaskDeliveryBinding): Promise<string> {
-    const lines = [
-      `Task ${task.id} ${task.status}.`,
-      `Objective: ${boundText(task.objective, 2_000)}`
-    ];
-    if (taskRequestCompletion(this.#store, task).fileOutputPending) lines.push(copy(this.#locale,
-      "At Task settlement, the requested file had not been verified. File delivery requires a verified workspace save.",
-      "عند انتهاء المهمة، لم يكن قد جرى التحقق من حفظ الملف المطلوب. يلزم التحقق من حفظ الملف في مساحة العمل قبل اعتبار تسليمه مكتملًا."));
-    const reportPath = deliveredReportPath(this.#store, task);
-    if (reportPath !== undefined) lines.push(`${copy(this.#locale, "Saved and verified:", "تم حفظ الملف والتحقق منه:")} ${this.#locale === "ar" ? isolateLtr(reportPath) : reportPath}.`);
-    if (task.failure !== undefined) lines.push(`Failure: ${boundText(task.failure.class, 80)}`);
-    const usageEntries = listTaskTreeUsageEntries(this.#store, task.id);
-    const taskUsage = taskUsageFromEntries(usageEntries);
-    lines.push("", `${copy(this.#locale, "Task total", "إجمالي المهمة")}: ${formatTaskUsage(taskUsage, this.#locale)}`);
-    const pricingNotice = formatUsageCostNotice(taskUsageCostSummary(taskUsage), { locale: this.#locale });
-    if (pricingNotice !== undefined) lines.push(pricingNotice);
-    if (task.activePlanRevisionId !== undefined) {
-      for (const step of this.#store.listSteps(task.id, task.activePlanRevisionId)) {
-        const attemptIds = new Set(listStepTreeAttempts(this.#store, task.id, step.id).map((attempt) => attempt.id));
-        const stepUsage = taskUsageFromEntries(usageEntries.filter((entry) =>
-          entry.attemptId !== undefined && attemptIds.has(entry.attemptId)
-        ));
-        lines.push(`${boundText(step.title, 160)}: ${formatTaskUsage(stepUsage, this.#locale)}`);
+  async #renderCompletion(task: Task, binding: TaskDeliveryBinding): Promise<{ text: string; options?: ChannelTextOptions }> {
+    const available = this.#store.listResults(task.id).filter((result) => result.status === "available");
+    const primaryStepId = taskPrimaryResultStepId(this.#store, task);
+    const primary = taskPrimaryResult(this.#store, task);
+    const accepted = available.filter((result) => result.disposition === "accepted");
+    const selected = primaryStepId === undefined ? accepted : primary === undefined ? [] : [primary];
+    const results = selected.slice(0, MAX_DELIVERY_RESULTS);
+    const bodies: string[] = [];
+    let remaining = MAX_DELIVERY_TEXT_CHARS;
+    let excerpted = selected.length > results.length;
+    for (const result of results) {
+      if (remaining <= 0) {
+        excerpted = true;
+        bodies.push(copy(this.#locale, "[Delivery excerpt limit reached. Ask me for the remaining saved results.]", "[بلغ المقتطف حد التسليم. يمكنك طلب بقية النتائج المحفوظة.]"));
+        break;
       }
+      if (result.kind === "artifact") {
+        bodies.push(copy(this.#locale, "**Additional output**", "**مخرجات إضافية**"),
+          boundText(result.displaySummary ?? result.summary ?? copy(this.#locale, "An output is saved with this task.", "حُفظت مخرجات هذه المهمة."), 1_000),
+          copy(this.#locale, "Ask me to retrieve the saved output.", "يمكنك أن تطلب مني استرجاع المخرجات المحفوظة."));
+      } else {
+        const content = await this.#readTextResult(task.id, result, binding.authorizedSessionId, remaining);
+        bodies.push(content.text);
+        remaining -= content.text.length;
+        excerpted ||= content.truncated;
+      }
+    }
+    const filePending = taskRequestCompletion(this.#store, task).fileOutputPending;
+    const status = task.status === "cancelled" ? copy(this.#locale, "Work cancelled", "أُلغي العمل")
+      : task.status === "failed" ? copy(this.#locale, "Work stopped before completion", "توقف العمل قبل اكتماله")
+      : results.length === 0 ? copy(this.#locale, "No answer available", "لا توجد إجابة متاحة")
+      : task.status === "partial" || filePending ? copy(this.#locale, "Partially complete", "اكتمل جزئيًا")
+      : copy(this.#locale, "Result ready", "النتيجة جاهزة");
+    const notices: string[] = [];
+    if (task.status === "partial") notices.push(copy(this.#locale,
+      "Some requested work is still incomplete. You can ask me to continue it.",
+      "لم يكتمل بعض العمل المطلوب بعد. يمكنك أن تطلب مني متابعته."));
+    if (filePending) notices.push(copy(this.#locale,
+      "The requested file has not been verified as saved. File delivery is still incomplete.",
+      "لم يُتحقق بعد من حفظ الملف المطلوب. لم يكتمل تسليم الملف."));
+    const reportPath = deliveredReportPath(this.#store, task);
+    if (reportPath !== undefined) notices.push(`${copy(this.#locale, "Saved and verified:", "تم حفظ الملف والتحقق منه:")} ${this.#locale === "ar" ? isolateLtr(reportPath) : reportPath}.`);
+    if (results.length === 0) bodies.push(copy(this.#locale,
+      "The work ended without an accepted answer. No substitute answer was generated. You can ask me to inspect what stopped it.",
+      "انتهى العمل من دون إجابة مقبولة. لم تُنشأ إجابة بديلة. يمكنك أن تطلب مني فحص سبب توقفه."));
+    if (available.some((result) => result.disposition === "diagnostic")) notices.push(copy(this.#locale,
+      "Incomplete output is retained for inspection; it is not included as an accepted answer.",
+      "احتُفظ بالمخرجات غير المكتملة للفحص؛ ولم تُدرج بوصفها إجابة مقبولة."));
+
+    const usage = taskUsageFromEntries(listTaskTreeUsageEntries(this.#store, task.id));
+    // Known cost and spending limits remain visible; missing per-worker prices do not crowd the answer.
+    if (usage.pricingComplete || usage.estimatedCostUsd > 0) {
+      notices.push(`${copy(this.#locale, "Cost", "التكلفة")}: ${formatTaskUsage(usage, this.#locale)}`);
+      const pricingNotice = formatUsageCostNotice(taskUsageCostSummary(usage), { locale: this.#locale });
+      if (pricingNotice !== undefined) notices.push(pricingNotice);
     }
     const root = task.id === task.rootTaskId ? task : this.#store.getTask(task.rootTaskId);
     if (root?.spendingLimit !== undefined) {
-      const budget = spendingBudgetSummary(root.spendingLimit, undefined, taskUsage.estimatedCostUsd);
-      lines.push(
-        "",
-        copy(this.#locale, "Task spending", "إنفاق المهمة"),
+      const budget = spendingBudgetSummary(root.spendingLimit, undefined, usage.estimatedCostUsd);
+      notices.push(copy(this.#locale, "Task spending", "إنفاق المهمة"),
         `${copy(this.#locale, "Spent", "المنفق")}: ${formatUsdAmount(budget.spentCostUsd, this.#locale)}`,
-        `${copy(this.#locale, "Reserved", "المحجوز")}: ${formatUsdAmount(budget.reservedCostUsd, this.#locale)}`,
         `${copy(this.#locale, "Remaining", "المتبقي")}: ${formatUsdAmount(budget.remainingCostUsd, this.#locale)}`,
-        `${copy(this.#locale, "Limit", "الحد")}: ${formatUsdAmount(budget.maxEstimatedCostUsd, this.#locale)}`
-      );
+        `${copy(this.#locale, "Limit", "الحد")}: ${formatUsdAmount(budget.maxEstimatedCostUsd, this.#locale)}`);
     }
-
-    const availableResults = this.#store.listResults(task.id)
-      .filter((result) => result.status === "available");
-    const acceptedResults = availableResults.filter((result) => result.disposition === "accepted");
-    const diagnosticResults = availableResults.filter((result) => result.disposition === "diagnostic");
-    const primaryResultStepId = taskPrimaryResultStepId(this.#store, task);
-    const primaryResult = taskPrimaryResult(this.#store, task);
-    const results = (primaryResultStepId === undefined
-      ? acceptedResults
-      : primaryResult === undefined ? [] : [primaryResult])
-      .slice(0, MAX_DELIVERY_RESULTS);
-    for (const result of results) {
-      lines.push("", resultHeading(result, result.id === primaryResult?.id));
-      if (result.kind === "artifact") {
-        lines.push(`Artifact handle: ${result.handle}`);
-        const summary = result.displaySummary ?? result.summary;
-        if (summary !== undefined) lines.push(boundText(summary, 1_000));
-        continue;
-      }
-      lines.push(await this.#readTextResult(task.id, result, binding.authorizedSessionId));
+    const body = bodies.join("\n\n");
+    const title = body.match(/^#{1,3} ([^\n]{1,140})(?:\n|$)/u)?.[1];
+    const heading = title === undefined ? `**${status}**` : `**${title}**\n${status}`;
+    if (body.length <= 3_000) {
+      return { text: [heading, body, ...notices].join("\n\n") };
     }
-    if (results.length === 0) {
-      lines.push(
-        "",
-        primaryResultStepId === undefined
-          ? copy(this.#locale, "No durable results were produced.", "لم تُنتج Results دائمة.")
-          : copy(this.#locale, "No durable primary result was produced.", "لم تُنتج Result رئيسية دائمة."),
-        copy(
-          this.#locale,
-          "The delegated Task settled without an accepted answer. No substitute answer was generated.",
-          "اكتملت Task المفوضة من دون إجابة مقبولة. لم تُنشأ إجابة بديلة."
-        )
-      );
-    }
-    if (acceptedResults.length > results.length) {
-      const label = primaryResultStepId === undefined ? "additional" : "intermediate";
-      lines.push("", `${acceptedResults.length - results.length} ${label} result(s) remain available through task.result.read.`);
-    }
-    if (diagnosticResults.length > 0) {
-      lines.push(
-        "",
-        copy(this.#locale, "Recovered output", "المخرجات المستردة"),
-        copy(
-          this.#locale,
-          "The Attempt failed. This output may be incomplete and was not accepted as the successful Step result.",
-          "فشلت المحاولة. قد تكون هذه المخرجات غير مكتملة ولم تُقبل كنتيجة ناجحة للخطوة."
-        ),
-        ...diagnosticResults.slice(0, MAX_DELIVERY_RESULTS).map((result) =>
-          `${result.id} (${result.kind}, ${result.byteLength} bytes, handle ${result.handle})`
-        )
-      );
-    }
-    return boundText(lines.join("\n"), MAX_DELIVERY_TEXT_CHARS);
+    // Use a recorded summary when available. A fallback is labelled as an excerpt, not an invented verdict.
+    const summary = primary?.displaySummary ?? primary?.summary ?? (results.length === 1 ? results[0]?.displaySummary ?? results[0]?.summary : undefined);
+    const preview = summary?.trim()
+      ? boundText(summary, 1_000)
+      : `${copy(this.#locale, "Report preview", "مقتطف من التقرير")}\n${boundText(body, 1_000)}`;
+    const details = [
+      copy(this.#locale, "## Run details", "## تفاصيل التنفيذ"),
+      `Task: ${task.id} (${task.status})`,
+      `Objective: ${boundText(task.objective, 2_000)}`,
+      ...available.slice(0, MAX_DELIVERY_RESULTS).map((result) => `${result.disposition}: ${result.id} (${result.kind}, ${result.byteLength} bytes, handle ${result.handle})`),
+      ...(task.failure === undefined ? [] : [`Failure: ${boundText(task.failure.class, 80)}`])
+    ];
+    return {
+      text: [heading, preview, ...notices, excerpted
+        ? copy(this.#locale, "A report excerpt and run details follow. The full results exceed the delivery limit and remain saved; ask me for the rest.",
+          "يلي ذلك مقتطف من التقرير وتفاصيل التنفيذ. تتجاوز النتائج الكاملة حد التسليم وتظل محفوظة؛ يمكنك طلب البقية.")
+        : copy(this.#locale, "Full report and run details follow. The preview is not the complete report.",
+          "يلي ذلك التقرير الكامل وتفاصيل التنفيذ. المقتطف ليس التقرير الكامل.")].join("\n\n"),
+      options: { report: { content: [body, ...notices, ...details].join("\n\n") } }
+    };
   }
 
-  async #readTextResult(taskId: string, result: TaskResult, sessionId: string): Promise<string> {
+  async #readTextResult(taskId: string, result: TaskResult, sessionId: string, maxChars: number): Promise<{ text: string; truncated: boolean }> {
     let offset = 0;
     let content = "";
+    let truncated = false;
     do {
       const page = await this.#resultService.readPage({
         taskId,
         resultId: result.id,
         sessionId,
         offset,
-        maxChars: Math.min(TASK_RESULT_PAGE_MAX_CHARS, MAX_DELIVERY_TEXT_CHARS - content.length)
+        maxChars: Math.min(TASK_RESULT_PAGE_MAX_CHARS, maxChars - content.length)
       });
       content += page.content;
-      if (!page.hasMore || page.nextOffset === undefined || content.length >= MAX_DELIVERY_TEXT_CHARS) break;
+      if (!page.hasMore) break;
+      if (page.nextOffset === undefined || content.length >= maxChars) {
+        truncated = true;
+        content += "\n\n" + copy(this.#locale,
+          "[Delivery excerpt limit reached. The full result remains saved; ask me to retrieve the rest.]",
+          "[بلغ المقتطف حد التسليم. النتيجة الكاملة محفوظة؛ يمكنك طلب استرجاع البقية.]");
+        break;
+      }
       offset = page.nextOffset;
-    } while (content.length < MAX_DELIVERY_TEXT_CHARS);
-    return content;
+    } while (content.length < maxChars);
+    return { text: content, truncated };
   }
 }
 
@@ -435,10 +445,6 @@ function toDeliveryTarget(destination: TaskDeliveryDestination): DeliveryTarget 
         chatId: destination.chatId,
         ...(destination.threadId === undefined ? {} : { threadId: destination.threadId })
       };
-}
-
-function resultHeading(result: TaskResult, primary: boolean): string {
-  return `${primary ? "Primary result" : "Result"} ${result.id} (${result.kind}, ${result.byteLength} bytes, handle ${result.handle}):`;
 }
 
 function boundedToken(value: string | undefined, label: string, maxChars: number): string {

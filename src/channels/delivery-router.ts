@@ -213,7 +213,7 @@ export class DeliveryRouter {
     if (target.kind === "local") {
       const path = target.path ?? join(this.#deliveryRoot, `${this.#now().toISOString()}.md`);
       await mkdir(dirname(path), { recursive: true });
-      await writeFile(path, text, "utf-8");
+      await writeFile(path, options?.report === undefined ? text : `${text}\n\n${options.report.content}`, "utf-8");
       return {};
     }
 
@@ -238,8 +238,15 @@ export class DeliveryRouter {
       throw new Error(`No delivery adapter available for ${sessionKey.platform}`);
     }
 
-    const capped = await this.#applyLegacyOutputCap(text, sessionKey.platform);
-    const receipt = await adapter.delivery.sendText(sessionKey, capped.text, options);
+    if (options?.report !== undefined && adapter.delivery.sendReport !== undefined) {
+      const receipt = await adapter.delivery.sendReport(sessionKey, text, options.report);
+      return receipt === undefined ? {} : { receipt };
+    }
+    // A summary is not a replacement for the full result on text-only channels.
+    const fullText = options?.report === undefined ? text : `${text}\n\n${options.report.content}`;
+    const capped = await this.#applyLegacyOutputCap(fullText, sessionKey.platform);
+    const { report: _report, ...textOptions } = options ?? {};
+    const receipt = await adapter.delivery.sendText(sessionKey, capped.text, textOptions);
 
     return {
       truncated: capped.wasTruncated || undefined,

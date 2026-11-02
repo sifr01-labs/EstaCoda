@@ -1,6 +1,5 @@
 import type { TaskStatus } from "../contracts/task.js";
 import type { ToolExecutionRecord } from "../tools/tool-executor.js";
-import { isolateLtr } from "../ui/bidi.js";
 
 const PENDING_TASK_STATUSES = new Set<TaskStatus>([
   "planning",
@@ -52,18 +51,20 @@ export function renderDelegatedAnswerAcknowledgement(
   ownership: PendingDelegatedAnswerOwnership,
   locale: "en" | "ar" = "en"
 ): string {
-  return ownership.tasks.map((task) => locale === "ar"
-    ? [
-        `تم إنشاء ${isolateLtr("Task")}: ${isolateLtr(task.taskId)}.`,
-        `الحالة الحالية: ${isolateLtr(task.status)} (${isolateLtr(task.execution)}).`,
-        `تملك هذه ${isolateLtr("Task")} الإجابة المطلوبة. ستُسلَّم النتيجة عند اكتمال ${isolateLtr("Task")}.`
-      ].join("\n")
-    : [
-        `Task created: ${task.taskId}.`,
-        `Current state: ${task.status} (${task.execution}).`,
-        "This Task owns the requested answer. The result will be delivered when the Task settles."
-      ].join("\n")
-  ).join("\n\n");
+  const messages: Record<string, [string, string]> = {
+    planning: ["Your request is being prepared. The result will appear here.", "أُجهّز العمل وسأنشر النتيجة هنا."],
+    queued: ["Your request is queued. The result will appear here when it’s ready.", "طلبك في قائمة الانتظار. سأنشر النتيجة هنا عندما تكون جاهزة."],
+    running: ["Work is underway. The result will appear here.", "أعمل على طلبك وسأنشر النتيجة هنا."],
+    waiting_for_host: ["The work is waiting for an available execution host.", "العمل بانتظار جهاز متاح للتنفيذ."],
+    waiting_for_input: ["The work needs your input before it can continue.", "يحتاج العمل إلى معلومات منك قبل المتابعة."],
+    waiting_for_approval: ["The work is waiting for your approval before it can continue.", "العمل بانتظار موافقتك قبل المتابعة."],
+    paused: ["The work is paused. You can ask me to resume it.", "العمل متوقف مؤقتًا. يمكنك أن تطلب مني استئنافه."]
+  };
+  return ownership.tasks.map((task, index) => {
+    const message = messages[task.status] ?? messages.queued!;
+    const text = message[locale === "ar" ? 1 : 0];
+    return ownership.tasks.length === 1 ? text : `${index + 1}. ${text}`;
+  }).join("\n\n");
 }
 
 function taskStatus(value: unknown): TaskStatus | undefined {

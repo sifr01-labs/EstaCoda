@@ -31,15 +31,21 @@ describe("delegated answer ownership", () => {
       tasks: [{ taskId: "task-123", status: "queued" as const, execution: "background" as const }]
     };
 
-    expect(renderDelegatedAnswerAcknowledgement(ownership)).toBe([
-      "Task created: task-123.",
-      "Current state: queued (background).",
-      "This Task owns the requested answer. The result will be delivered when the Task settles."
-    ].join("\n"));
+    expect(renderDelegatedAnswerAcknowledgement(ownership)).toBe("Your request is queued. The result will appear here when it’s ready.");
     const arabic = renderDelegatedAnswerAcknowledgement(ownership, "ar");
-    expect(arabic).toContain("تم إنشاء");
-    expect(arabic).toContain("task-123");
+    expect(arabic).toContain("قائمة الانتظار");
+    expect(arabic).not.toContain("task-123");
   });
+  it.each([
+    ["waiting_for_approval", "approval"], ["waiting_for_input", "input"],
+    ["paused", "paused"], ["waiting_for_host", "execution host"]
+  ] as const)("does not promise active work when %s", (status, expected) => {
+    const text = renderDelegatedAnswerAcknowledgement({ tasks: [{ taskId: "private-id", status, execution: "waiting" }] });
+    expect(text).toContain(expected);
+    expect(text).not.toContain("working on");
+    expect(text).not.toContain("private-id");
+  });
+
 });
 
 function delegationExecution(

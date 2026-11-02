@@ -336,6 +336,18 @@ export class TelegramAdapter implements ChannelAdapter {
   #secureInputIntakeCount = 0;
 
   readonly delivery = {
+    sendReport: async (sessionKey: ChannelSessionKey, summary: string, report: import("../contracts/channel.js").ChannelTextReport) => {
+      const document = new Blob([report.content], { type: "text/markdown;charset=utf-8" });
+      if (document.size > Math.min(this.#maxAttachmentBytes, 50 * 1024 * 1024)) {
+        throw new Error("Task report exceeds the attachment size limit.");
+      }
+      const receipt = await this.delivery.sendText(sessionKey, summary);
+      const form = new FormData();
+      appendTelegramAddress(form, telegramDeliveryAddress(sessionKey));
+      form.set("document", document, "task-report.md");
+      const sent = await this.#callMultipart<TelegramSentMessage>("sendDocument", form);
+      return { messageIds: [...receipt.messageIds, String(sent.message_id)] };
+    },
     sendText: async (sessionKey: ChannelSessionKey, text: string, options?: ChannelTextOptions) => {
       const address = telegramDeliveryAddress(sessionKey);
       if (options?.format === undefined && options?.editMessageId == null && containsTelegramTable(text)) {

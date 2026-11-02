@@ -1512,11 +1512,7 @@ describe("AgentLoop provider availability gating", () => {
       trustedWorkspace: true
     });
 
-    expect(response.text).toBe([
-      "Task created: task-owned.",
-      "Current state: running (foreground).",
-      "This Task owns the requested answer. The result will be delivered when the Task settles."
-    ].join("\n"));
+    expect(response.text).toBe("Work is underway. The result will appear here.");
     expect(response.text).not.toContain("substitute answer");
     expect(JSON.stringify(response)).not.toContain("substitute answer");
     expect(response.providerExecution?.response?.content).toBe("");
@@ -1543,11 +1539,7 @@ describe("AgentLoop provider availability gating", () => {
       trustedWorkspace: true
     });
 
-    expect(response.text).toBe([
-      "Task created: task-preplanned.",
-      "Current state: queued (background).",
-      "This Task owns the requested answer. The result will be delivered when the Task settles."
-    ].join("\n"));
+    expect(response.text).toBe("Your request is queued. The result will appear here when it’s ready.");
     expect(response.text).not.toContain("Provider note");
   });
 

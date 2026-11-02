@@ -69,6 +69,12 @@ export type ChannelTextOptions = {
   actions?: ChannelTextAction[][];
   replyTo?: string | null;
   editMessageId?: string | null;
+  /** Full, already-authorized text behind a short summary. Routers must preserve it on unsupported adapters. */
+  report?: ChannelTextReport;
+};
+
+export type ChannelTextReport = {
+  content: string;
 };
 
 export type ChannelSender = {
@@ -169,6 +175,8 @@ export type ChannelTextDeliveryReceipt = {
 };
 
 export type ChannelDelivery = {
+  /** Deliver summary plus an in-memory document; never resolves arbitrary local paths. */
+  sendReport?(sessionKey: ChannelSessionKey, summary: string, report: ChannelTextReport): Promise<ChannelTextDeliveryReceipt | void>;
   sendText(
     sessionKey: ChannelSessionKey,
     text: string,

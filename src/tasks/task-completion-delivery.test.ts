@@ -11,7 +11,8 @@ import type {
 } from "../contracts/task.js";
 import { TASK_TOOL_RISK_CLASSES } from "../contracts/task.js";
 import type { ToolRiskClass } from "../contracts/tool.js";
-import type { DeliveryTarget } from "../channels/delivery-router.js";
+import { DeliveryRouter, type DeliveryTarget } from "../channels/delivery-router.js";
+import { TelegramAdapter } from "../channels/telegram-adapter.js";
 import { SQLiteSessionDB } from "../session/sqlite-session-db.js";
 import { SQLiteTaskStore } from "./sqlite-task-store.js";
 import {
@@ -53,7 +54,7 @@ describe("TaskCompletionDeliveryService", () => {
     rmSync(tempDir, { recursive: true, force: true });
   });
 
-  it("delivers terminal text and opaque artifact handles exactly once", async () => {
+  it("delivers the answer first without operational metadata, exactly once", async () => {
     resultService.record({ taskId: "task-alpha", kind: "text", content: "A durable answer." });
     resultService.record({
       taskId: "task-alpha",
@@ -80,9 +81,11 @@ describe("TaskCompletionDeliveryService", () => {
     const [targets, text] = deliverText.mock.calls[0]!;
     expect(targets).toEqual([{ kind: "channel", platform: "telegram", chatId: "chat-1", threadId: "thread-1" }]);
     expect(text).toContain("A durable answer.");
-    expect(text).toContain("Artifact handle: task-result:handle-2");
-    expect(text).toContain("Task total:");
-    expect(text).toContain("Produce result: unavailable");
+    expect(text).toContain("Binary output");
+    expect(text).not.toContain("task-result:");
+    expect(text).toMatch(/^\*\*Result ready\*\*\n\nA durable answer\./u);
+    expect(text).not.toContain("Objective:");
+    expect(text).not.toContain("unavailable");
     expect(text).not.toContain(tempDir);
     await expect(service.runOnce()).resolves.toEqual({
       recovered: 0, recoveryFailed: 0, claimed: 0, delivered: 0, failed: 0
@@ -103,7 +106,7 @@ describe("TaskCompletionDeliveryService", () => {
     service.bind({ taskId: "task-synthesis", authorizedSessionId: "creator-alpha", deliveryKey: "file-pending",
       destination: { platform: "telegram", chatId: "chat-1" } });
     await service.runOnce();
-    expect(deliverText.mock.calls[0]![1]).toContain("At Task settlement, the requested file had not been verified");
+    expect(deliverText.mock.calls[0]![1]).toContain("The requested file has not been verified as saved");
     await service.runOnce();
     expect(deliverText).toHaveBeenCalledTimes(1);
   });
@@ -135,9 +138,9 @@ describe("TaskCompletionDeliveryService", () => {
 
     await service.runOnce();
     const text = deliverText.mock.calls[0]![1];
-    expect(text).toContain("Primary result result-2");
+    expect(text).not.toContain("result-2");
     expect(text).toContain("The final synthesized answer.");
-    expect(text).toContain("1 intermediate result(s) remain available through task.result.read.");
+    expect(text).not.toContain("task.result.read");
     expect(text).not.toContain("Intermediate worker evidence");
   });
 
@@ -165,7 +168,7 @@ describe("TaskCompletionDeliveryService", () => {
 
     expect(deliverText).toHaveBeenCalledOnce();
     const text = deliverText.mock.calls[0]![1];
-    expect(text).toContain("The delegated Task settled without an accepted answer.");
+    expect(text).toContain("The work ended without an accepted answer.");
     expect(text).toContain("No substitute answer was generated.");
     expect(text).not.toContain("Incomplete worker text");
     await service.runOnce();
@@ -188,8 +191,96 @@ describe("TaskCompletionDeliveryService", () => {
     await service.runOnce();
 
     const text = deliverText.mock.calls[0]![1];
-    expect(text).toContain("اكتملت Task المفوضة من دون إجابة مقبولة");
+    expect(text).toContain("انتهى العمل من دون إجابة مقبولة");
     expect(text).toContain("لم تُنشأ إجابة بديلة");
+  });
+
+  it.each(["partial", "failed", "cancelled"] as const)("labels %s work honestly even with accepted output", async (status) => {
+    resultService.record({ taskId: "task-alpha", kind: "text", content: "Useful findings with limits." });
+    const task = store.getTask("task-alpha")!;
+    store.updateTask({ ...task, status: "running", updatedAt: NOW });
+    store.updateTask({ ...store.getTask("task-alpha")!, status, updatedAt: NOW });
+    const deliverText = vi.fn<TaskCompletionDeliveryRouter["deliverText"]>(async () => new Map([["telegram:chat-1", { success: true }]]));
+    const service = createService(deliverText);
+    service.bind({ taskId: task.id, authorizedSessionId: "creator-alpha", deliveryKey: status, destination: { platform: "telegram", chatId: "chat-1" } });
+    await service.runOnce();
+    const text = deliverText.mock.calls[0]![1];
+    expect(text).toContain(status === "partial" ? "Partially complete" : status === "failed" ? "Work stopped before completion" : "Work cancelled");
+    expect(text).toContain("Useful findings with limits.");
+    expect(text).not.toContain("Result ready");
+  });
+
+  it.each([true, false])("delivers a bounded preview and full report (recorded summary: %s)", async (withSummary) => {
+    const body = "# DeepSeek vs EstaCoda\n\n" + "Evidence and limitations.\n".repeat(500);
+    resultService.record({ taskId: "task-alpha", kind: "text", content: body,
+      ...(withSummary ? { summary: "No comparative winner is established." } : {}) });
+    resultService.record({ taskId: "task-alpha", kind: "text", disposition: "diagnostic", content: "DIAGNOSTIC BODY MUST NOT SHIP" });
+    completeTask();
+    const deliverText = vi.fn<TaskCompletionDeliveryRouter["deliverText"]>(async () => new Map([["telegram:chat-1", { success: true }]]));
+    const service = createService(deliverText);
+    service.bind({ taskId: "task-alpha", authorizedSessionId: "creator-alpha", deliveryKey: "report", destination: { platform: "telegram", chatId: "chat-1" } });
+    await service.runOnce();
+    const [, text, options] = deliverText.mock.calls[0]!;
+    expect(text.length).toBeLessThan(1_600);
+    expect(text).toContain(withSummary ? "No comparative winner is established." : "Report preview");
+    expect(text).not.toContain("task-alpha");
+    expect(text).not.toContain("Objective:");
+    expect(options?.report?.content).toContain(body);
+    expect(options?.report?.content).toContain("## Run details");
+    expect(options?.report?.content).not.toContain("DIAGNOSTIC BODY MUST NOT SHIP");
+  });
+
+  it("labels oversized saved results as excerpts without claiming full delivery", async () => {
+    resultService.record({ taskId: "task-alpha", kind: "text", content: "Evidence. ".repeat(15_000) + "FINAL-SAVED-SENTINEL" });
+    completeTask();
+    const deliverText = vi.fn<TaskCompletionDeliveryRouter["deliverText"]>(async () => new Map([["telegram:chat-1", { success: true }]]));
+    const service = createService(deliverText);
+    service.bind({ taskId: "task-alpha", authorizedSessionId: "creator-alpha", deliveryKey: "large", destination: { platform: "telegram", chatId: "chat-1" } });
+    await service.runOnce();
+    const [, text, options] = deliverText.mock.calls[0]!;
+    expect(text).toContain("exceed the delivery limit");
+    expect(text).not.toContain("Full report and run details follow");
+    expect(options?.report?.content).toContain("Delivery excerpt limit reached");
+    expect(options?.report?.content).not.toContain("FINAL-SAVED-SENTINEL");
+  });
+
+  it("delivers an authorized long result through the real router and Telegram adapter once", async () => {
+    const content = "# Comparison\n\n" + "Verified findings. ".repeat(300);
+    resultService.record({ taskId: "task-alpha", kind: "text", content, summary: "A useful comparison with limits." });
+    completeTask();
+    const calls: { method: string; body: unknown }[] = [];
+    const adapter = new TelegramAdapter({ botToken: "test-token", fetch: async (url, init) => {
+      calls.push({ method: String(url).split("/").at(-1)!, body: init?.body });
+      return { ok: true, status: 200, json: async () => ({ ok: true, result: { message_id: calls.length } }) };
+    } });
+    const router = new DeliveryRouter({ homeDir: tempDir });
+    router.registerAdapter(adapter);
+    const service = new TaskCompletionDeliveryService({ store, resultService, router });
+    const binding = service.bind({ taskId: "task-alpha", authorizedSessionId: "creator-alpha", deliveryKey: "native-report", destination: { platform: "telegram", chatId: "123", threadId: "42" } });
+    await expect(service.runOnce()).resolves.toMatchObject({ delivered: 1, failed: 0 });
+    expect(calls.map(call => call.method)).toEqual(["sendMessage", "sendDocument"]);
+    const message = JSON.parse(String(calls[0]!.body));
+    expect(message.text).toContain("A useful comparison with limits.");
+    expect(message.text).not.toContain("task-alpha");
+    const document = (calls[1]!.body as FormData).get("document") as File;
+    expect(await document.text()).toContain(content);
+    expect((calls[1]!.body as FormData).get("message_thread_id")).toBe("42");
+    expect(store.getDeliveryBinding(binding.id)?.status).toBe("delivered");
+    await service.runOnce();
+    expect(calls).toHaveLength(2);
+  });
+
+  it("does not retry a failed multi-message report delivery with an uncertain partial send", async () => {
+    resultService.record({ taskId: "task-alpha", kind: "text", content: "Full report. ".repeat(500) });
+    completeTask();
+    const deliverText = vi.fn<TaskCompletionDeliveryRouter["deliverText"]>(async () => new Map([["telegram:chat-1", { success: false }]]));
+    const service = createService(deliverText);
+    const binding = service.bind({ taskId: "task-alpha", authorizedSessionId: "creator-alpha", deliveryKey: "report", destination: { platform: "telegram", chatId: "chat-1" } });
+    await service.runOnce();
+    expect(store.getDeliveryBinding(binding.id)?.failureClass).toBe("delivery-outcome-unknown");
+    expect(() => service.retry(binding.id, "creator-alpha")).toThrow(/ambiguous external outcome/u);
+    await service.runOnce();
+    expect(deliverText).toHaveBeenCalledOnce();
   });
 
   it("leaves local CLI completion bindings for the interactive session", async () => {
