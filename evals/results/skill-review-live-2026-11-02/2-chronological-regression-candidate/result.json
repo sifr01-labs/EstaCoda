@@ -1,0 +1,40 @@
+{
+  "id": "2-chronological-regression-candidate",
+  "passed": true,
+  "output": {
+    "stock": {
+      "S": 7,
+      "T": -3,
+      "V": 0
+    }
+  },
+  "expected": {
+    "stock": {
+      "S": 7,
+      "T": -3,
+      "V": 0
+    }
+  },
+  "fixedInputsUnchanged": true,
+  "liveSkillUnchanged": true,
+  "elapsedMs": 24283,
+  "outcome": {
+    "status": "completed",
+    "terminationCause": "normal",
+    "completionFloor": "read",
+    "confirmedActions": [
+      {
+        "toolCallId": "tool-call-44f3a5b7ececb62c56226ead",
+        "tool": "file.write",
+        "riskClass": "workspace-write",
+        "targetSummary": "stock.json",
+        "status": "confirmed",
+        "verification": "verified"
+      }
+    ],
+    "uncertainActions": []
+  },
+  "text": "Reconciled `events.csv` into `stock.json` and read back the saved file to verify:\n\n```json\n{\"stock\":{\"S\":7,\"T\":-3,\"V\":0}}\n```\n\nApplied the greatest numeric revision per SKU, omitted `U` because its winning event is deleted, preserved negative and zero quantities, and sorted keys alphabetically. All work stayed local; no network, delegation, or skill edits were used.",
+  "providerCalls": 6,
+  "reviewCalls": 0
+}

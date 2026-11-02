@@ -1,0 +1,39 @@
+{
+  "id": "2-ties-and-tombstones-baseline",
+  "passed": false,
+  "output": {
+    "stock": {
+      "P": 77,
+      "Q": 44,
+      "R": -6
+    }
+  },
+  "expected": {
+    "stock": {
+      "P": 0,
+      "R": -6
+    }
+  },
+  "fixedInputsUnchanged": true,
+  "liveSkillUnchanged": true,
+  "elapsedMs": 22424,
+  "outcome": {
+    "status": "completed",
+    "terminationCause": "normal",
+    "completionFloor": "read",
+    "confirmedActions": [
+      {
+        "toolCallId": "tool-call-b4ddb242b15664d7a68c80df",
+        "tool": "file.write",
+        "riskClass": "workspace-write",
+        "targetSummary": "stock.json",
+        "status": "confirmed",
+        "verification": "verified"
+      }
+    ],
+    "uncertainActions": []
+  },
+  "text": "Reconciled `events.csv` into `stock.json` using the skill’s last-row-per-SKU rule, then read back and verified the saved output:\n\n```json\n{\"stock\":{\"P\":77,\"Q\":44,\"R\":-6}}\n```\n\nKeys are alphabetically sorted, and the negative quantity is preserved. Completed locally without network access, delegation, or skill edits.",
+  "providerCalls": 6,
+  "reviewCalls": 0
+}

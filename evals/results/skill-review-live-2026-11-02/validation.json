@@ -1,0 +1,175 @@
+{
+  "runtime": {
+    "node": "v24.14.1",
+    "pnpm": "10.33.0"
+  },
+  "initialStandardValidation": [
+    {
+      "check": "node-version",
+      "command": [
+        "node",
+        "--version"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.01
+    },
+    {
+      "check": "pnpm-version",
+      "command": [
+        "pnpm",
+        "--version"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.11
+    },
+    {
+      "check": "install",
+      "command": [
+        "pnpm",
+        "install",
+        "--frozen-lockfile"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.46
+    },
+    {
+      "check": "typecheck",
+      "command": [
+        "pnpm",
+        "run",
+        "typecheck"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 9.34
+    },
+    {
+      "check": "test",
+      "command": [
+        "pnpm",
+        "run",
+        "test"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 100.17
+    },
+    {
+      "check": "smoke",
+      "command": [
+        "pnpm",
+        "run",
+        "smoke"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 56.48
+    },
+    {
+      "check": "build",
+      "command": [
+        "pnpm",
+        "run",
+        "build"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 6.0
+    },
+    {
+      "check": "runtime-imports",
+      "command": [
+        "pnpm",
+        "run",
+        "audit:runtime-imports"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.48
+    },
+    {
+      "check": "esm",
+      "command": [
+        "pnpm",
+        "run",
+        "audit:esm"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.75
+    },
+    {
+      "check": "smoke-dist",
+      "command": [
+        "pnpm",
+        "run",
+        "smoke:dist"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 56.36
+    },
+    {
+      "check": "diff-check",
+      "command": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.02
+    }
+  ],
+  "finalSourceRevalidation": [
+    {
+      "command": "pnpm run typecheck",
+      "exitCode": 0,
+      "seconds": 9.28
+    },
+    {
+      "command": "pnpm run test",
+      "exitCode": 0,
+      "seconds": 104.08
+    },
+    {
+      "command": "pnpm run build",
+      "exitCode": 0,
+      "seconds": 6.18
+    },
+    {
+      "command": "pnpm run audit:runtime-imports",
+      "exitCode": 0,
+      "seconds": 0.56
+    },
+    {
+      "command": "pnpm run audit:esm",
+      "exitCode": 0,
+      "seconds": 0.74
+    },
+    {
+      "command": "pnpm run smoke:dist",
+      "exitCode": 0,
+      "seconds": 56.43
+    },
+    {
+      "command": "git diff --check",
+      "exitCode": 0,
+      "seconds": 0.01
+    }
+  ],
+  "note": "Initial standard validation preceded the final correction-retention adjustment; targeted tests and finalSourceRevalidation ran after it. No production source changed during or after the live benchmark.",
+  "targetedTests": {
+    "command": "pnpm exec vitest run src/skills/skill-draft.test.ts src/skills/skill-lifecycle.test.ts src/skills/skill-learning.test.ts",
+    "passed": 48
+  },
+  "fullSuite": {
+    "filesPassed": 786,
+    "testsPassed": 13433
+  },
+  "sourceHashes": {
+    "src/skills/skill-draft.ts": "d7f65627dcafe30c30933e51f23a01974d0d249148279b864c88762a02472ea5",
+    "src/skills/skill-learning.ts": "2f6173c747ae4bed544f2dec8e8b2361dba25e24522495ea2431adb0db599370"
+  },
+  "artifactChecks": {
+    "runCount": 14,
+    "pairCount": 6,
+    "inputsAndInstalledSkillsUnchanged": true,
+    "candidateMatchesAutomaticPatch": true,
+    "allModels": "gpt-6.1-sol",
+    "temporaryTaskAuthFilesRemaining": 0,
+    "credentialPatternMatches": 0
+  }
+}

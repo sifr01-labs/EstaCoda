@@ -1,0 +1,18 @@
+{
+  "before": "407fb6363834db51224b3b30b0f90d9ebf03aad4",
+  "sourceHashes": {
+    "src/skills/skill-draft.ts": "d7f65627dcafe30c30933e51f23a01974d0d249148279b864c88762a02472ea5",
+    "src/skills/skill-learning.ts": "2f6173c747ae4bed544f2dec8e8b2361dba25e24522495ea2431adb0db599370"
+  },
+  "createdAt": "2026-11-02T07:52:33.898Z",
+  "model": "codex/gpt-6.1-sol",
+  "budgets": {
+    "maxProviderIterations": 16,
+    "maxProviderToolCalls": 24,
+    "maxProviderWallClockMs": 180000,
+    "maxRepeatedToolFailures": 3
+  },
+  "fixtureHash": "8e21922a9999da3b2ad9f2f9e9b4e3702fd777940f72c35b75ae826c02eda60c",
+  "protocol": "A deliberately stale fixture skill receives one explicit, contract-backed correction in a fresh live session. Compare old/new runtime automatic review. Use the exact new reviewer-written patch on three unseen file tasks, including a regression, twice with alternating arm order. No hand-written candidate, no promotion. Expected held-out answers remain outside workspaces.",
+  "limitation": "Targeted learning from an explicit correction to a seeded defect, not general spontaneous improvement or a Hermes head-to-head."
+}

@@ -1,0 +1,38 @@
+{
+  "id": "1-ties-and-tombstones-candidate",
+  "passed": true,
+  "output": {
+    "stock": {
+      "P": 0,
+      "R": -6
+    }
+  },
+  "expected": {
+    "stock": {
+      "P": 0,
+      "R": -6
+    }
+  },
+  "fixedInputsUnchanged": true,
+  "liveSkillUnchanged": true,
+  "elapsedMs": 17284,
+  "outcome": {
+    "status": "completed",
+    "terminationCause": "normal",
+    "completionFloor": "read",
+    "confirmedActions": [
+      {
+        "toolCallId": "tool-call-081285372d1c1a0d6c018e31",
+        "tool": "file.write",
+        "riskClass": "workspace-write",
+        "targetSummary": "stock.json",
+        "status": "confirmed",
+        "verification": "verified"
+      }
+    ],
+    "uncertainActions": []
+  },
+  "text": "Reconciled `events.csv` into `stock.json` and read back the saved output to verify:\n\n```json\n{\"stock\":{\"P\":0,\"R\":-6}}\n```\n\n- **P:** Revision 7 tied; the last occurrence wins, preserving quantity `0`.\n- **Q:** Revision 11 is a deletion, so Q is omitted despite its older nondeleted row.\n- **R:** Revision 3 tied; the last occurrence wins, preserving quantity `-6`.\n\nKeys are alphabetically sorted. Completed locally without network access, delegation, or skill edits.",
+  "providerCalls": 5,
+  "reviewCalls": 0
+}

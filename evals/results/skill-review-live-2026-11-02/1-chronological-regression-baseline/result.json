@@ -1,0 +1,40 @@
+{
+  "id": "1-chronological-regression-baseline",
+  "passed": true,
+  "output": {
+    "stock": {
+      "S": 7,
+      "T": -3,
+      "V": 0
+    }
+  },
+  "expected": {
+    "stock": {
+      "S": 7,
+      "T": -3,
+      "V": 0
+    }
+  },
+  "fixedInputsUnchanged": true,
+  "liveSkillUnchanged": true,
+  "elapsedMs": 18356,
+  "outcome": {
+    "status": "completed",
+    "terminationCause": "normal",
+    "completionFloor": "read",
+    "confirmedActions": [
+      {
+        "toolCallId": "tool-call-ebb21c9579530113da57e8b9",
+        "tool": "file.write",
+        "riskClass": "workspace-write",
+        "targetSummary": "stock.json",
+        "status": "confirmed",
+        "verification": "verified"
+      }
+    ],
+    "uncertainActions": []
+  },
+  "text": "Reconciled `events.csv` into `stock.json` and verified the saved output by reading it back:\n\n```json\n{\"stock\":{\"S\":7,\"T\":-3,\"V\":0}}\n```\n\nUsed the last row for each SKU, omitted deleted `U`, preserved negative and zero quantities, and sorted SKU keys alphabetically. All work was local, with no network, delegation, or skill edits.",
+  "providerCalls": 6,
+  "reviewCalls": 0
+}

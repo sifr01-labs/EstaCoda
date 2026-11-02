@@ -1,0 +1,38 @@
+{
+  "id": "2-ties-and-tombstones-candidate",
+  "passed": true,
+  "output": {
+    "stock": {
+      "P": 0,
+      "R": -6
+    }
+  },
+  "expected": {
+    "stock": {
+      "P": 0,
+      "R": -6
+    }
+  },
+  "fixedInputsUnchanged": true,
+  "liveSkillUnchanged": true,
+  "elapsedMs": 22730,
+  "outcome": {
+    "status": "completed",
+    "terminationCause": "normal",
+    "completionFloor": "read",
+    "confirmedActions": [
+      {
+        "toolCallId": "tool-call-1c5715848691310b8fab2889",
+        "tool": "file.write",
+        "riskClass": "workspace-write",
+        "targetSummary": "stock.json",
+        "status": "confirmed",
+        "verification": "verified"
+      }
+    ],
+    "uncertainActions": []
+  },
+  "text": "Saved and read back `stock.json`, verifying it against the skill’s reconciliation rules:\n\n```json\n{\"stock\":{\"P\":0,\"R\":-6}}\n```\n\n- **P:** revision 7 tied; the last occurrence wins, preserving quantity `0`.\n- **Q:** revision 11 is a tombstone, so Q is omitted.\n- **R:** revision 3 tied; the last occurrence wins, preserving quantity `-6`.\n\nKeys are alphabetically sorted. No network, delegation, or skill edits were used.",
+  "providerCalls": 5,
+  "reviewCalls": 0
+}

@@ -1,0 +1,1177 @@
+{
+  "prompt": "Use stock-snapshot to reconcile events.csv into stock.json according to the skill procedure. Read back and verify the saved output. Work locally without network, delegation or skill edits.",
+  "events": [
+    {
+      "kind": "agent-start",
+      "sessionId": "7a5b6506-d1e4-4027-b2e4-55bf6c9d5ebf",
+      "input": "Use stock-snapshot to reconcile events.csv into stock.json according to the skill procedure. Read back and verify the saved output. Work locally without network, delegation or skill edits."
+    },
+    {
+      "kind": "context-estimate",
+      "filled": 107,
+      "total": 1050000,
+      "source": "live-estimate",
+      "stage": "input"
+    },
+    {
+      "kind": "intent",
+      "labels": [
+        "general"
+      ],
+      "confidence": 0.7
+    },
+    {
+      "kind": "routing-status",
+      "stage": "intent-skills",
+      "configuredMode": "standard",
+      "actualEngine": "standard",
+      "turnMessageId": "ee4ba55a-9e2a-4cde-9f7e-f6dbbd63ee87"
+    },
+    {
+      "kind": "skill-route-telemetry",
+      "promptHash": "e1a2a82484b91274",
+      "selectedSkill": "stock-snapshot",
+      "finalSkillUsed": "stock-snapshot",
+      "taskClass": "general",
+      "primarySkill": "stock-snapshot",
+      "supportingSkills": [],
+      "candidateSkills": [],
+      "candidatesRejected": [],
+      "rejectedCandidates": [],
+      "deferredCandidates": [],
+      "confidence": 0.7,
+      "routeConfidence": 0.7,
+      "candidatesShown": [
+        "stock-snapshot"
+      ],
+      "candidates": [
+        {
+          "skillName": "stock-snapshot",
+          "selected": true,
+          "explicitInvocation": false,
+          "confidence": 0.7,
+          "sourceKind": "local",
+          "role": "primary"
+        }
+      ],
+      "details": {
+        "routingDecision": {
+          "schemaVersion": 1,
+          "configuredMode": "standard",
+          "actualEngine": "standard",
+          "configurationRevision": "2b6bf02e891b93d218df12fa73925d01ac5ea9b2a3a91044818c402f04097252",
+          "catalogRevision": "7524f8ec8bb4b2f6db9975c5683d25a0b07c6f3cae183bb92c6cdf3a0cc2585d",
+          "nativeIntent": "general",
+          "taskClass": "general",
+          "intents": [
+            {
+              "id": "general",
+              "selected": true
+            }
+          ],
+          "skills": [
+            {
+              "id": "stock-snapshot",
+              "selected": true
+            }
+          ],
+          "primarySkillId": "stock-snapshot",
+          "capabilities": []
+        },
+        "taskClass": "general",
+        "primarySkill": "stock-snapshot",
+        "supportingSkills": [],
+        "candidateSkills": [],
+        "candidatesShown": [
+          "stock-snapshot"
+        ],
+        "candidatesRejected": [],
+        "rejectedCandidates": [],
+        "deferredCandidates": [],
+        "finalSkillUsed": "stock-snapshot"
+      }
+    },
+    {
+      "kind": "session-recall-decision",
+      "triggered": false,
+      "reason": "no explicit recall trigger",
+      "sourceSessionIds": []
+    },
+    {
+      "kind": "context-estimate",
+      "filled": 107,
+      "total": 1050000,
+      "source": "live-estimate",
+      "stage": "memory"
+    },
+    {
+      "kind": "skill",
+      "name": "stock-snapshot"
+    },
+    {
+      "kind": "context-estimate",
+      "filled": 317,
+      "total": 1050000,
+      "source": "live-estimate",
+      "stage": "skill"
+    },
+    {
+      "kind": "context-estimate",
+      "filled": 317,
+      "total": 1050000,
+      "source": "live-estimate",
+      "stage": "tools"
+    },
+    {
+      "kind": "routing-status",
+      "stage": "capabilities",
+      "configuredMode": "standard",
+      "actualEngine": "standard",
+      "turnMessageId": "ee4ba55a-9e2a-4cde-9f7e-f6dbbd63ee87"
+    },
+    {
+      "kind": "provider-tool-inventory",
+      "phase": "initial",
+      "selection": {
+        "policy": "conversation",
+        "routing": {
+          "schemaVersion": 1,
+          "configuredMode": "standard",
+          "actualEngine": "standard",
+          "configurationRevision": "2b6bf02e891b93d218df12fa73925d01ac5ea9b2a3a91044818c402f04097252",
+          "catalogRevision": "7524f8ec8bb4b2f6db9975c5683d25a0b07c6f3cae183bb92c6cdf3a0cc2585d",
+          "selections": []
+        },
+        "catalogCount": 78,
+        "availableCount": 76,
+        "schemaEligibleCount": 74,
+        "selectedCount": 37,
+        "omissionCounts": {
+          "not_selected": 37,
+          "schema_budget": 0,
+          "temporarily_unavailable": 2,
+          "provider_schema_restricted": 2,
+          "evidence_required": 0,
+          "not_in_session": 0
+        },
+        "omissions": [
+          {
+            "tool": "secure_input.store",
+            "reason": "not_selected"
+          },
+          {
+            "tool": "trajectory.record",
+            "reason": "not_selected"
+          },
+          {
+            "tool": "plan",
+            "reason": "not_selected"
+          },
+          {
+            "tool": "python.probe",
+            "reason": "not_selected"
+          },
+          {
+            "tool": "media.probe-ffmpeg",
+            "reason": "not_selected"
+          },
+          {
+            "tool": "vision.analyze",
+            "reason": "not_selected"
+          },
+          {
+            "tool": "config.security.status",
+            "reason": "not_selected"
+          },
+          {
+            "tool": "config.compression.status",
+            "reason": "not_selected"
+          },
+          {
+            "tool": "config.security.setup",
+            "reason": "not_selected"
+          },
+          {
+            "tool": "config.web.setup",
+            "reason": "not_selected"
+          },
+          {
+            "tool": "config.browser.setup",
+            "reason": "not_selected"
+          },
+          {
+            "tool": "config.mcp.setup",
+            "reason": "not_selected"
+          },
+          {
+            "tool": "config.telegram.setup",
+            "reason": "not_selected"
+          },
+          {
+            "tool": "config.telegram.status",
+            "reason": "not_selected"
+          },
+          {
+            "tool": "config.image.status",
+            "reason": "not_selected"
+          },
+          {
+            "tool": "config.provider.setup",
+            "reason": "not_selected"
+          },
+          {
+            "tool": "config.image.setup",
+            "reason": "not_selected"
+          },
+          {
+            "tool": "memory.curate",
+            "reason": "not_selected"
+          },
+          {
+            "tool": "memory.read",
+            "reason": "not_selected"
+          },
+          {
+            "tool": "memory.search",
+            "reason": "not_selected"
+          },
+          {
+            "tool": "memory.file_compact",
+            "reason": "not_selected"
+          },
+          {
+            "tool": "memory.file_compaction_restore",
+            "reason": "not_selected"
+          },
+          {
+            "tool": "session_search",
+            "reason": "not_selected"
+          },
+          {
+            "tool": "session.usage",
+            "reason": "not_selected"
+          },
+          {
+            "tool": "skill.search",
+            "reason": "not_selected"
+          },
+          {
+            "tool": "skill.view",
+            "reason": "not_selected"
+          },
+          {
+            "tool": "skill.inspect",
+            "reason": "not_selected"
+          },
+          {
+            "tool": "skill.eval",
+            "reason": "not_selected"
+          },
+          {
+            "tool": "skill.usage",
+            "reason": "not_selected"
+          },
+          {
+            "tool": "skill.list_proposals",
+            "reason": "not_selected"
+          },
+          {
+            "tool": "skill.review_proposals",
+            "reason": "not_selected"
+          },
+          {
+            "tool": "skill.review_proposal",
+            "reason": "not_selected"
+          }
+        ],
+        "omittedDetailsCount": 9,
+        "requestedOmissions": []
+      },
+      "tools": [
+        "capability_discover",
+        "capability_request",
+        "file_read",
+        "file_write",
+        "file_patch",
+        "file_search",
+        "terminal_inspect",
+        "terminal_run",
+        "file_glob",
+        "file_grep",
+        "process_list",
+        "process_logs",
+        "skill_list",
+        "skill_read",
+        "config_provider_execution_status",
+        "document_probe",
+        "browser_status",
+        "notebook_edit",
+        "media_inspect",
+        "media_extract-frame",
+        "artifact_record",
+        "workspace_trust_status",
+        "workspace_trust_grant",
+        "workspace_trust_revoke",
+        "config_provider_status",
+        "config_mcp_status",
+        "skill_observe",
+        "skill_propose_patch",
+        "skill_promote_patch",
+        "skill_create",
+        "skill_patch",
+        "skill_edit",
+        "skill_rollback",
+        "skill_reset",
+        "skill_write_file",
+        "skill_import",
+        "skill_export"
+      ],
+      "addedTools": [
+        "capability_discover",
+        "capability_request",
+        "file_read",
+        "file_write",
+        "file_patch",
+        "file_search",
+        "terminal_inspect",
+        "terminal_run",
+        "file_glob",
+        "file_grep",
+        "process_list",
+        "process_logs",
+        "skill_list",
+        "skill_read",
+        "config_provider_execution_status",
+        "document_probe",
+        "browser_status",
+        "notebook_edit",
+        "media_inspect",
+        "media_extract-frame",
+        "artifact_record",
+        "workspace_trust_status",
+        "workspace_trust_grant",
+        "workspace_trust_revoke",
+        "config_provider_status",
+        "config_mcp_status",
+        "skill_observe",
+        "skill_propose_patch",
+        "skill_promote_patch",
+        "skill_create",
+        "skill_patch",
+        "skill_edit",
+        "skill_rollback",
+        "skill_reset",
+        "skill_write_file",
+        "skill_import",
+        "skill_export"
+      ],
+      "nativeSchemaTokens": 4550,
+      "connectors": []
+    },
+    {
+      "kind": "context-estimate",
+      "filled": 4868,
+      "total": 1050000,
+      "source": "live-estimate",
+      "stage": "preflight"
+    },
+    {
+      "kind": "context-estimate",
+      "filled": 7399,
+      "total": 1050000,
+      "source": "assembled-prompt",
+      "stage": "assembled-prompt"
+    },
+    {
+      "kind": "provider-attempt",
+      "provider": "codex",
+      "model": "gpt-6.1-sol",
+      "fallback": false
+    },
+    {
+      "kind": "provider-result",
+      "provider": "codex",
+      "model": "gpt-6.1-sol",
+      "ok": true,
+      "fallback": false,
+      "willFallback": false,
+      "finishReason": "tool_calls",
+      "usage": {
+        "inputTokens": 5070,
+        "outputTokens": 29,
+        "totalTokens": 5099,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "reasoningTokens": 0
+      }
+    },
+    {
+      "kind": "provider-tool-call",
+      "provider": "codex",
+      "model": "gpt-6.1-sol",
+      "index": 0,
+      "id": "tool-call-bfa5146e54bab3a4b6ff977a",
+      "name": "file_read",
+      "argumentsText": "{\"path\":\"events.csv\",\"lineStart\":null,\"lineEnd\":null}"
+    },
+    {
+      "kind": "context-window-usage",
+      "usedTokens": 5070,
+      "totalTokens": 1050000,
+      "provider": "codex",
+      "model": "gpt-6.1-sol",
+      "routeRole": "primary",
+      "source": "provider-actual"
+    },
+    {
+      "kind": "tool-start",
+      "tool": "file.read",
+      "targetSummary": "events.csv",
+      "displayPreview": "events.csv",
+      "activityId": "tool-call-bfa5146e54bab3a4b6ff977a"
+    },
+    {
+      "kind": "tool-result",
+      "tool": "file.read",
+      "decision": "allow",
+      "riskClass": "read-only-local",
+      "ok": true,
+      "targetSummary": "events.csv",
+      "displayPreview": "events.csv",
+      "activityId": "tool-call-bfa5146e54bab3a4b6ff977a",
+      "chars": 115,
+      "sentChars": 115,
+      "truncated": false
+    },
+    {
+      "kind": "context-estimate",
+      "filled": 7431,
+      "total": 1050000,
+      "source": "live-estimate",
+      "stage": "provider-tool-feedback"
+    },
+    {
+      "kind": "provider-iteration",
+      "iteration": 0,
+      "phase": "initial",
+      "ok": true,
+      "toolCalls": 1,
+      "executedTools": 1,
+      "exhausted": false,
+      "count": 1
+    },
+    {
+      "kind": "context-estimate",
+      "filled": 7866,
+      "total": 1050000,
+      "source": "assembled-prompt",
+      "stage": "assembled-prompt"
+    },
+    {
+      "kind": "provider-attempt",
+      "provider": "codex",
+      "model": "gpt-6.1-sol",
+      "fallback": false
+    },
+    {
+      "kind": "provider-result",
+      "provider": "codex",
+      "model": "gpt-6.1-sol",
+      "ok": true,
+      "fallback": false,
+      "willFallback": false,
+      "finishReason": "tool_calls",
+      "usage": {
+        "inputTokens": 5462,
+        "outputTokens": 58,
+        "totalTokens": 5520,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "reasoningTokens": 0
+      }
+    },
+    {
+      "kind": "provider-tool-call",
+      "provider": "codex",
+      "model": "gpt-6.1-sol",
+      "index": 0,
+      "id": "tool-call-bf2a0d55261a601a48687306",
+      "name": "file_write",
+      "argumentsText": "{\"path\":\"stock.json\",\"content\":\"{\\\"stock\\\":{\\\"S\\\":7,\\\"T\\\":-3,\\\"V\\\":0}}\\n\",\"sourceFile\":null,\"sourceResult\":null,\"overwrite\":true,\"allowShrink\":false}"
+    },
+    {
+      "kind": "context-window-usage",
+      "usedTokens": 5462,
+      "totalTokens": 1050000,
+      "provider": "codex",
+      "model": "gpt-6.1-sol",
+      "routeRole": "primary",
+      "source": "provider-actual"
+    },
+    {
+      "kind": "security-risk-escalated",
+      "from": "read-only-local",
+      "to": "workspace-write",
+      "reason": "provider proposed higher-risk tool call than initial turn posture"
+    },
+    {
+      "kind": "tool-start",
+      "tool": "file.write",
+      "targetSummary": "stock.json",
+      "displayPreview": "stock.json",
+      "activityId": "tool-call-bf2a0d55261a601a48687306"
+    },
+    {
+      "kind": "tool-result",
+      "tool": "file.write",
+      "decision": "allow",
+      "riskClass": "workspace-write",
+      "ok": true,
+      "fileChangePreview": {
+        "kind": "fileChangePreview",
+        "path": "stock.json",
+        "changeType": "added",
+        "summary": [
+          "Added 2 line(s).",
+          "Wrote 31 byte(s)."
+        ],
+        "diff": "+ {\"stock\":{\"S\":7,\"T\":-3,\"V\":0}}\n+ ",
+        "omittedLineCount": 0
+      },
+      "targetSummary": "stock.json",
+      "displayPreview": "stock.json",
+      "activityId": "tool-call-bf2a0d55261a601a48687306",
+      "chars": 28,
+      "sentChars": 28,
+      "truncated": false
+    },
+    {
+      "kind": "context-estimate",
+      "filled": 7876,
+      "total": 1050000,
+      "source": "live-estimate",
+      "stage": "provider-tool-feedback"
+    },
+    {
+      "kind": "provider-iteration",
+      "iteration": 1,
+      "phase": "continuation",
+      "ok": true,
+      "toolCalls": 1,
+      "executedTools": 1,
+      "exhausted": false,
+      "count": 1
+    },
+    {
+      "kind": "context-estimate",
+      "filled": 7901,
+      "total": 1050000,
+      "source": "assembled-prompt",
+      "stage": "assembled-prompt"
+    },
+    {
+      "kind": "provider-attempt",
+      "provider": "codex",
+      "model": "gpt-6.1-sol",
+      "fallback": false
+    },
+    {
+      "kind": "provider-result",
+      "provider": "codex",
+      "model": "gpt-6.1-sol",
+      "ok": true,
+      "fallback": false,
+      "willFallback": false,
+      "finishReason": "tool_calls",
+      "usage": {
+        "inputTokens": 5527,
+        "outputTokens": 29,
+        "totalTokens": 5556,
+        "cacheReadTokens": 2688,
+        "cacheWriteTokens": 0,
+        "reasoningTokens": 0
+      }
+    },
+    {
+      "kind": "provider-tool-call",
+      "provider": "codex",
+      "model": "gpt-6.1-sol",
+      "index": 0,
+      "id": "tool-call-7cbf532e65615a68bf20b06b",
+      "name": "file_read",
+      "argumentsText": "{\"path\":\"events.csv\",\"lineStart\":null,\"lineEnd\":null}"
+    },
+    {
+      "kind": "context-window-usage",
+      "usedTokens": 5527,
+      "totalTokens": 1050000,
+      "provider": "codex",
+      "model": "gpt-6.1-sol",
+      "routeRole": "primary",
+      "source": "provider-actual"
+    },
+    {
+      "kind": "tool-start",
+      "tool": "file.read",
+      "targetSummary": "events.csv",
+      "displayPreview": "events.csv",
+      "activityId": "tool-call-7cbf532e65615a68bf20b06b"
+    },
+    {
+      "kind": "tool-result",
+      "tool": "file.read",
+      "decision": "allow",
+      "riskClass": "read-only-local",
+      "ok": true,
+      "targetSummary": "events.csv",
+      "displayPreview": "events.csv",
+      "activityId": "tool-call-7cbf532e65615a68bf20b06b",
+      "chars": 115,
+      "sentChars": 115,
+      "truncated": false
+    },
+    {
+      "kind": "context-estimate",
+      "filled": 7933,
+      "total": 1050000,
+      "source": "live-estimate",
+      "stage": "provider-tool-feedback"
+    },
+    {
+      "kind": "provider-iteration",
+      "iteration": 2,
+      "phase": "continuation",
+      "ok": true,
+      "toolCalls": 1,
+      "executedTools": 1,
+      "exhausted": false,
+      "count": 1
+    },
+    {
+      "kind": "context-estimate",
+      "filled": 8212,
+      "total": 1050000,
+      "source": "assembled-prompt",
+      "stage": "assembled-prompt"
+    },
+    {
+      "kind": "provider-attempt",
+      "provider": "codex",
+      "model": "gpt-6.1-sol",
+      "fallback": false
+    },
+    {
+      "kind": "provider-result",
+      "provider": "codex",
+      "model": "gpt-6.1-sol",
+      "ok": true,
+      "fallback": false,
+      "willFallback": false,
+      "finishReason": "tool_calls",
+      "usage": {
+        "inputTokens": 5825,
+        "outputTokens": 29,
+        "totalTokens": 5854,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "reasoningTokens": 0
+      }
+    },
+    {
+      "kind": "provider-tool-call",
+      "provider": "codex",
+      "model": "gpt-6.1-sol",
+      "index": 0,
+      "id": "tool-call-3c559e1d6a46454c5a9f20a4",
+      "name": "file_read",
+      "argumentsText": "{\"path\":\"stock.json\",\"lineStart\":null,\"lineEnd\":null}"
+    },
+    {
+      "kind": "context-window-usage",
+      "usedTokens": 5825,
+      "totalTokens": 1050000,
+      "provider": "codex",
+      "model": "gpt-6.1-sol",
+      "routeRole": "primary",
+      "source": "provider-actual"
+    },
+    {
+      "kind": "tool-start",
+      "tool": "file.read",
+      "targetSummary": "stock.json",
+      "displayPreview": "stock.json",
+      "activityId": "tool-call-3c559e1d6a46454c5a9f20a4"
+    },
+    {
+      "kind": "tool-result",
+      "tool": "file.read",
+      "decision": "allow",
+      "riskClass": "read-only-local",
+      "ok": true,
+      "targetSummary": "stock.json",
+      "displayPreview": "stock.json",
+      "activityId": "tool-call-3c559e1d6a46454c5a9f20a4",
+      "chars": 44,
+      "sentChars": 44,
+      "truncated": false
+    },
+    {
+      "kind": "context-estimate",
+      "filled": 8226,
+      "total": 1050000,
+      "source": "live-estimate",
+      "stage": "provider-tool-feedback"
+    },
+    {
+      "kind": "provider-iteration",
+      "iteration": 3,
+      "phase": "continuation",
+      "ok": true,
+      "toolCalls": 1,
+      "executedTools": 1,
+      "exhausted": false,
+      "count": 1
+    },
+    {
+      "kind": "context-estimate",
+      "filled": 8385,
+      "total": 1050000,
+      "source": "assembled-prompt",
+      "stage": "assembled-prompt"
+    },
+    {
+      "kind": "provider-attempt",
+      "provider": "codex",
+      "model": "gpt-6.1-sol",
+      "fallback": false
+    },
+    {
+      "kind": "provider-result",
+      "provider": "codex",
+      "model": "gpt-6.1-sol",
+      "ok": true,
+      "fallback": false,
+      "willFallback": false,
+      "finishReason": "stop",
+      "usage": {
+        "inputTokens": 6013,
+        "outputTokens": 100,
+        "totalTokens": 6113,
+        "cacheReadTokens": 0,
+        "cacheWriteTokens": 0,
+        "reasoningTokens": 0
+      }
+    },
+    {
+      "kind": "context-window-usage",
+      "usedTokens": 6013,
+      "totalTokens": 1050000,
+      "provider": "codex",
+      "model": "gpt-6.1-sol",
+      "routeRole": "primary",
+      "source": "provider-actual"
+    },
+    {
+      "kind": "provider-iteration",
+      "iteration": 4,
+      "phase": "continuation",
+      "ok": true,
+      "toolCalls": 0,
+      "executedTools": 0,
+      "exhausted": false,
+      "count": 1
+    },
+    {
+      "kind": "agent-final",
+      "text": "Saved and read back `stock.json`, verifying it against the stock-snapshot procedure:\n\n```json\n{\"stock\":{\"S\":7,\"T\":-3,\"V\":0}}\n```\n\n- Selected the greatest numeric revision for each SKU.\n- Omitted `U` because its latest revision is deleted.\n- Preserved the negative quantity for `T` and zero for `V`.\n- Sorted SKU keys alphabetically.\n\nCompleted locally without network access, delegation, or skill edits."
+    }
+  ],
+  "sessions": [
+    {
+      "session": {
+        "id": "7a5b6506-d1e4-4027-b2e4-55bf6c9d5ebf",
+        "profileId": "default",
+        "title": "Use stock-snapshot to reconcile events.csv into stock.json according to the skill procedure. Re…",
+        "createdAt": "2026-11-02T07:55:18.962Z",
+        "updatedAt": "2026-11-02T07:55:38.817Z",
+        "metadata": {
+          "workspaceRoot": "<BENCHMARK_ROOT>/1-chronological-regression-candidate/workspace",
+          "originSurface": "cli"
+        }
+      },
+      "messages": [
+        {
+          "id": "ee4ba55a-9e2a-4cde-9f7e-f6dbbd63ee87",
+          "sessionId": "7a5b6506-d1e4-4027-b2e4-55bf6c9d5ebf",
+          "role": "user",
+          "content": "Use stock-snapshot to reconcile events.csv into stock.json according to the skill procedure. Read back and verify the saved output. Work locally without network, delegation or skill edits.",
+          "createdAt": "2026-11-02T07:55:19.001Z",
+          "channel": "cli",
+          "metadata": {
+            "attachments": [],
+            "contextReferences": [],
+            "projectContextFiles": []
+          }
+        },
+        {
+          "id": "c0251f8b-1da8-4008-bddc-65df70005d33",
+          "sessionId": "7a5b6506-d1e4-4027-b2e4-55bf6c9d5ebf",
+          "role": "agent",
+          "content": "",
+          "createdAt": "2026-11-02T07:55:26.155Z",
+          "metadata": {
+            "kind": "provider-tool-call-turn",
+            "nativeReplaySafe": true,
+            "providerToolCalls": [
+              {
+                "id": "tool-call-bfa5146e54bab3a4b6ff977a",
+                "name": "file_read",
+                "argumentsText": "{\"path\":\"events.csv\",\"lineStart\":null,\"lineEnd\":null}"
+              }
+            ],
+            "provider": "codex",
+            "model": "gpt-6.1-sol",
+            "routeRole": "primary",
+            "attemptedRouteIndex": 0
+          }
+        },
+        {
+          "id": "d844b3cb-f179-4040-a21f-7baff1bb0a6e",
+          "sessionId": "7a5b6506-d1e4-4027-b2e4-55bf6c9d5ebf",
+          "role": "tool",
+          "content": "# events.csv\nsku,revision,quantity,deleted\nS,1,2,false\nS,2,7,false\nT,3,-3,false\nU,4,1,false\nU,5,0,true\nV,2,0,false\n",
+          "createdAt": "2026-11-02T07:55:26.161Z",
+          "metadata": {
+            "tool": "file.read",
+            "tool_call_id": "tool-call-bfa5146e54bab3a4b6ff977a",
+            "tool_call_name": "file.read",
+            "provider_native_tool_call": {
+              "type": "function_call",
+              "id": "fc_0775006020091a19016ae841eddff081919137c7ba7bbf0d13",
+              "call_id": "call_dff9ae33c0c24959ba62647f65c9f7e6",
+              "name": "file_read",
+              "arguments": "{\"path\":\"events.csv\",\"lineStart\":null,\"lineEnd\":null}",
+              "status": "completed"
+            },
+            "ok": true
+          }
+        },
+        {
+          "id": "13cb5564-bbc4-4667-9d5b-26158e83d3bf",
+          "sessionId": "7a5b6506-d1e4-4027-b2e4-55bf6c9d5ebf",
+          "role": "agent",
+          "content": "",
+          "createdAt": "2026-11-02T07:55:29.514Z",
+          "metadata": {
+            "kind": "provider-tool-call-turn",
+            "nativeReplaySafe": true,
+            "providerToolCalls": [
+              {
+                "id": "tool-call-bf2a0d55261a601a48687306",
+                "name": "file_write",
+                "argumentsText": "{\"path\":\"stock.json\",\"content\":\"{\\\"stock\\\":{\\\"S\\\":7,\\\"T\\\":-3,\\\"V\\\":0}}\\n\",\"sourceFile\":null,\"sourceResult\":null,\"overwrite\":true,\"allowShrink\":false}"
+              }
+            ],
+            "provider": "codex",
+            "model": "gpt-6.1-sol",
+            "routeRole": "primary",
+            "attemptedRouteIndex": 0
+          }
+        },
+        {
+          "id": "07a8c85c-0eca-4c6b-83fc-8f2562bb02f1",
+          "sessionId": "7a5b6506-d1e4-4027-b2e4-55bf6c9d5ebf",
+          "role": "tool",
+          "content": "Wrote stock.json (31 bytes).",
+          "createdAt": "2026-11-02T07:55:29.520Z",
+          "metadata": {
+            "tool": "file.write",
+            "tool_call_id": "tool-call-bf2a0d55261a601a48687306",
+            "tool_call_name": "file.write",
+            "provider_native_tool_call": {
+              "type": "function_call",
+              "id": "fc_03056522e6560c3a016ae841f0761481918887337034b33139",
+              "call_id": "call_e652a91c2d104eefad46b28e16d2f647",
+              "name": "file_write",
+              "arguments": "{\"path\":\"stock.json\",\"content\":\"{\\\"stock\\\":{\\\"S\\\":7,\\\"T\\\":-3,\\\"V\\\":0}}\\n\",\"sourceFile\":null,\"sourceResult\":null,\"overwrite\":true,\"allowShrink\":false}",
+              "status": "completed"
+            },
+            "ok": true
+          }
+        },
+        {
+          "id": "21847c6c-1e2a-4745-8a0d-7513e52356b9",
+          "sessionId": "7a5b6506-d1e4-4027-b2e4-55bf6c9d5ebf",
+          "role": "agent",
+          "content": "",
+          "createdAt": "2026-11-02T07:55:32.112Z",
+          "metadata": {
+            "kind": "provider-tool-call-turn",
+            "nativeReplaySafe": true,
+            "providerToolCalls": [
+              {
+                "id": "tool-call-7cbf532e65615a68bf20b06b",
+                "name": "file_read",
+                "argumentsText": "{\"path\":\"events.csv\",\"lineStart\":null,\"lineEnd\":null}"
+              }
+            ],
+            "provider": "codex",
+            "model": "gpt-6.1-sol",
+            "routeRole": "primary",
+            "attemptedRouteIndex": 0
+          }
+        },
+        {
+          "id": "da889585-8775-40a6-98ef-be0131905969",
+          "sessionId": "7a5b6506-d1e4-4027-b2e4-55bf6c9d5ebf",
+          "role": "tool",
+          "content": "# events.csv\nsku,revision,quantity,deleted\nS,1,2,false\nS,2,7,false\nT,3,-3,false\nU,4,1,false\nU,5,0,true\nV,2,0,false\n",
+          "createdAt": "2026-11-02T07:55:32.118Z",
+          "metadata": {
+            "tool": "file.read",
+            "tool_call_id": "tool-call-7cbf532e65615a68bf20b06b",
+            "tool_call_name": "file.read",
+            "provider_native_tool_call": {
+              "type": "function_call",
+              "id": "fc_0eedff9de55c4ebc016ae841f3c6d88191b84991d44cbe6bd5",
+              "call_id": "call_ec173943c60e4aac82ac7ef601136993",
+              "name": "file_read",
+              "arguments": "{\"path\":\"events.csv\",\"lineStart\":null,\"lineEnd\":null}",
+              "status": "completed"
+            },
+            "ok": true
+          }
+        },
+        {
+          "id": "1cf99cb2-5b85-461f-9bba-cd0ab64306f7",
+          "sessionId": "7a5b6506-d1e4-4027-b2e4-55bf6c9d5ebf",
+          "role": "agent",
+          "content": "",
+          "createdAt": "2026-11-02T07:55:34.598Z",
+          "metadata": {
+            "kind": "provider-tool-call-turn",
+            "nativeReplaySafe": true,
+            "providerToolCalls": [
+              {
+                "id": "tool-call-3c559e1d6a46454c5a9f20a4",
+                "name": "file_read",
+                "argumentsText": "{\"path\":\"stock.json\",\"lineStart\":null,\"lineEnd\":null}"
+              }
+            ],
+            "provider": "codex",
+            "model": "gpt-6.1-sol",
+            "routeRole": "primary",
+            "attemptedRouteIndex": 0
+          }
+        },
+        {
+          "id": "32c56011-1b8b-439a-ba2b-1da4310cc4a0",
+          "sessionId": "7a5b6506-d1e4-4027-b2e4-55bf6c9d5ebf",
+          "role": "tool",
+          "content": "# stock.json\n{\"stock\":{\"S\":7,\"T\":-3,\"V\":0}}\n",
+          "createdAt": "2026-11-02T07:55:34.604Z",
+          "metadata": {
+            "tool": "file.read",
+            "tool_call_id": "tool-call-3c559e1d6a46454c5a9f20a4",
+            "tool_call_name": "file.read",
+            "provider_native_tool_call": {
+              "type": "function_call",
+              "id": "fc_0b4fbb05664cc3bb016ae841f647088191b498a80913ba55c2",
+              "call_id": "call_fa322eda9815421b9ea6cc1b62e5ebe3",
+              "name": "file_read",
+              "arguments": "{\"path\":\"stock.json\",\"lineStart\":null,\"lineEnd\":null}",
+              "status": "completed"
+            },
+            "ok": true
+          }
+        },
+        {
+          "id": "8ef88209-e280-4f94-b84f-a9aa55a7ae12",
+          "sessionId": "7a5b6506-d1e4-4027-b2e4-55bf6c9d5ebf",
+          "role": "agent",
+          "content": "Saved and read back `stock.json`, verifying it against the stock-snapshot procedure:\n\n```json\n{\"stock\":{\"S\":7,\"T\":-3,\"V\":0}}\n```\n\n- Selected the greatest numeric revision for each SKU.\n- Omitted `U` because its latest revision is deleted.\n- Preserved the negative quantity for `T` and zero for `V`.\n- Sorted SKU keys alphabetically.\n\nCompleted locally without network access, delegation, or skill edits.",
+          "createdAt": "2026-11-02T07:55:38.817Z",
+          "channel": "cli",
+          "metadata": {
+            "respondingToTurnId": "ee4ba55a-9e2a-4cde-9f7e-f6dbbd63ee87",
+            "matchedSkills": [
+              "stock-snapshot"
+            ],
+            "intentLabels": [
+              "general"
+            ],
+            "securityDecision": "allow",
+            "contextReferences": [],
+            "toolExecutions": [
+              "file.read",
+              "file.write",
+              "file.read",
+              "file.read"
+            ],
+            "provider": "codex/gpt-6.1-sol",
+            "providerExecution": {
+              "configuredPrimary": {
+                "provider": "codex",
+                "model": "gpt-6.1-sol"
+              },
+              "actual": {
+                "provider": "codex",
+                "model": "gpt-6.1-sol"
+              },
+              "fallbackUsed": false,
+              "attempts": [
+                {
+                  "provider": "codex",
+                  "model": "gpt-6.1-sol",
+                  "ok": true,
+                  "streamDiagnostics": {
+                    "stream": true,
+                    "startedAtMs": 1793606119009,
+                    "endedAtMs": 1793606126155,
+                    "durationMs": 7146,
+                    "firstEventMs": 6894,
+                    "eventCount": 19,
+                    "tokenChunks": 0,
+                    "visibleChars": 0,
+                    "toolCallChunks": 17,
+                    "transportDone": false,
+                    "finish": "done",
+                    "finishReason": "tool_calls"
+                  },
+                  "routeRole": "primary",
+                  "attemptedRouteIndex": 0
+                },
+                {
+                  "provider": "codex",
+                  "model": "gpt-6.1-sol",
+                  "ok": true,
+                  "streamDiagnostics": {
+                    "stream": true,
+                    "startedAtMs": 1793606126163,
+                    "endedAtMs": 1793606129513,
+                    "durationMs": 3350,
+                    "firstEventMs": 2404,
+                    "eventCount": 48,
+                    "tokenChunks": 0,
+                    "visibleChars": 0,
+                    "toolCallChunks": 46,
+                    "transportDone": false,
+                    "finish": "done",
+                    "finishReason": "tool_calls"
+                  },
+                  "routeRole": "fallback",
+                  "attemptedRouteIndex": 1
+                },
+                {
+                  "provider": "codex",
+                  "model": "gpt-6.1-sol",
+                  "ok": true,
+                  "streamDiagnostics": {
+                    "stream": true,
+                    "startedAtMs": 1793606129522,
+                    "endedAtMs": 1793606132112,
+                    "durationMs": 2590,
+                    "firstEventMs": 2292,
+                    "eventCount": 19,
+                    "tokenChunks": 0,
+                    "visibleChars": 0,
+                    "toolCallChunks": 17,
+                    "transportDone": false,
+                    "finish": "done",
+                    "finishReason": "tool_calls"
+                  },
+                  "routeRole": "fallback",
+                  "attemptedRouteIndex": 2
+                },
+                {
+                  "provider": "codex",
+                  "model": "gpt-6.1-sol",
+                  "ok": true,
+                  "streamDiagnostics": {
+                    "stream": true,
+                    "startedAtMs": 1793606132120,
+                    "endedAtMs": 1793606134597,
+                    "durationMs": 2477,
+                    "firstEventMs": 2223,
+                    "eventCount": 19,
+                    "tokenChunks": 0,
+                    "visibleChars": 0,
+                    "toolCallChunks": 17,
+                    "transportDone": false,
+                    "finish": "done",
+                    "finishReason": "tool_calls"
+                  },
+                  "routeRole": "fallback",
+                  "attemptedRouteIndex": 3
+                },
+                {
+                  "provider": "codex",
+                  "model": "gpt-6.1-sol",
+                  "ok": true,
+                  "streamDiagnostics": {
+                    "stream": true,
+                    "startedAtMs": 1793606134606,
+                    "endedAtMs": 1793606138809,
+                    "durationMs": 4203,
+                    "firstEventMs": 2713,
+                    "firstTokenMs": 2713,
+                    "eventCount": 98,
+                    "tokenChunks": 96,
+                    "visibleChars": 403,
+                    "toolCallChunks": 0,
+                    "transportDone": false,
+                    "finish": "done",
+                    "finishReason": "stop"
+                  },
+                  "routeRole": "fallback",
+                  "attemptedRouteIndex": 4
+                }
+              ],
+              "status": "primary-success"
+            },
+            "providerFallbackUsed": false,
+            "finalOutcome": {
+              "status": "completed",
+              "terminationCause": "normal",
+              "completionFloor": "read",
+              "confirmedActions": [
+                {
+                  "toolCallId": "tool-call-bf2a0d55261a601a48687306",
+                  "tool": "file.write",
+                  "riskClass": "workspace-write",
+                  "targetSummary": "stock.json",
+                  "status": "confirmed",
+                  "verification": "verified"
+                }
+              ],
+              "uncertainActions": []
+            },
+            "toolPlans": [
+              {
+                "id": "tool-call-bfa5146e54bab3a4b6ff977a",
+                "tool": "file.read",
+                "status": "executed"
+              },
+              {
+                "id": "tool-call-bf2a0d55261a601a48687306",
+                "tool": "file.write",
+                "status": "executed"
+              },
+              {
+                "id": "tool-call-7cbf532e65615a68bf20b06b",
+                "tool": "file.read",
+                "status": "executed"
+              },
+              {
+                "id": "tool-call-3c559e1d6a46454c5a9f20a4",
+                "tool": "file.read",
+                "status": "executed"
+              }
+            ],
+            "artifacts": []
+          }
+        }
+      ]
+    }
+  ]
+}

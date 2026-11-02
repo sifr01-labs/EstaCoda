@@ -1,0 +1,39 @@
+{
+  "id": "1-ties-and-tombstones-baseline",
+  "passed": false,
+  "output": {
+    "stock": {
+      "P": 77,
+      "Q": 44,
+      "R": -6
+    }
+  },
+  "expected": {
+    "stock": {
+      "P": 0,
+      "R": -6
+    }
+  },
+  "fixedInputsUnchanged": true,
+  "liveSkillUnchanged": true,
+  "elapsedMs": 23899,
+  "outcome": {
+    "status": "completed",
+    "terminationCause": "normal",
+    "completionFloor": "read",
+    "confirmedActions": [
+      {
+        "toolCallId": "tool-call-3e7c885b64beb5890398fb01",
+        "tool": "file.write",
+        "riskClass": "workspace-write",
+        "targetSummary": "stock.json",
+        "status": "confirmed",
+        "verification": "verified"
+      }
+    ],
+    "uncertainActions": []
+  },
+  "text": "Saved and read back `stock.json`:\n\n```json\n{\"stock\":{\"P\":77,\"Q\":44,\"R\":-6}}\n```\n\nVerified against the skill procedure: selected the **last CSV row per SKU** (not the highest revision), then applied deletion filtering, preserved negative quantities, and sorted SKU keys alphabetically. All final rows have `deleted=false`.\n\nCompleted locally without network access, delegation, or skill edits.",
+  "providerCalls": 6,
+  "reviewCalls": 0
+}

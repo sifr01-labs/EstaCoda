@@ -1,0 +1,40 @@
+{
+  "id": "1-chronological-regression-candidate",
+  "passed": true,
+  "output": {
+    "stock": {
+      "S": 7,
+      "T": -3,
+      "V": 0
+    }
+  },
+  "expected": {
+    "stock": {
+      "S": 7,
+      "T": -3,
+      "V": 0
+    }
+  },
+  "fixedInputsUnchanged": true,
+  "liveSkillUnchanged": true,
+  "elapsedMs": 19859,
+  "outcome": {
+    "status": "completed",
+    "terminationCause": "normal",
+    "completionFloor": "read",
+    "confirmedActions": [
+      {
+        "toolCallId": "tool-call-bf2a0d55261a601a48687306",
+        "tool": "file.write",
+        "riskClass": "workspace-write",
+        "targetSummary": "stock.json",
+        "status": "confirmed",
+        "verification": "verified"
+      }
+    ],
+    "uncertainActions": []
+  },
+  "text": "Saved and read back `stock.json`, verifying it against the stock-snapshot procedure:\n\n```json\n{\"stock\":{\"S\":7,\"T\":-3,\"V\":0}}\n```\n\n- Selected the greatest numeric revision for each SKU.\n- Omitted `U` because its latest revision is deleted.\n- Preserved the negative quantity for `T` and zero for `V`.\n- Sorted SKU keys alphabetically.\n\nCompleted locally without network access, delegation, or skill edits.",
+  "providerCalls": 5,
+  "reviewCalls": 0
+}

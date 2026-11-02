@@ -1,0 +1,38 @@
+{
+  "id": "2-out-of-order-candidate",
+  "passed": true,
+  "output": {
+    "stock": {
+      "K": 8,
+      "M": -4
+    }
+  },
+  "expected": {
+    "stock": {
+      "K": 8,
+      "M": -4
+    }
+  },
+  "fixedInputsUnchanged": true,
+  "liveSkillUnchanged": true,
+  "elapsedMs": 19909,
+  "outcome": {
+    "status": "completed",
+    "terminationCause": "normal",
+    "completionFloor": "read",
+    "confirmedActions": [
+      {
+        "toolCallId": "tool-call-fa79e5f858b1eea56d8460f6",
+        "tool": "file.write",
+        "riskClass": "workspace-write",
+        "targetSummary": "stock.json",
+        "status": "confirmed",
+        "verification": "verified"
+      }
+    ],
+    "uncertainActions": []
+  },
+  "text": "Reconciled `events.csv` into `stock.json` and verified the saved output by reading it back:\n\n```json\n{\"stock\":{\"K\":8,\"M\":-4}}\n```\n\n- `K`: revision 13 wins over revision 2.\n- `L`: omitted because revision 12 is a deletion; revision 1 cannot resurrect it.\n- `M`: negative quantity preserved.\n- SKU keys are alphabetically sorted.\n\nCompleted locally without network access, delegation, or skill edits.",
+  "providerCalls": 5,
+  "reviewCalls": 0
+}

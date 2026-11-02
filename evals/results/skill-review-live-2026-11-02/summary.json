@@ -1,0 +1,1528 @@
+{
+  "manifest": {
+    "before": "407fb6363834db51224b3b30b0f90d9ebf03aad4",
+    "sourceHashes": {
+      "src/skills/skill-draft.ts": "d7f65627dcafe30c30933e51f23a01974d0d249148279b864c88762a02472ea5",
+      "src/skills/skill-learning.ts": "2f6173c747ae4bed544f2dec8e8b2361dba25e24522495ea2431adb0db599370"
+    },
+    "createdAt": "2026-11-02T07:52:33.898Z",
+    "model": "codex/gpt-6.1-sol",
+    "budgets": {
+      "maxProviderIterations": 16,
+      "maxProviderToolCalls": 24,
+      "maxProviderWallClockMs": 180000,
+      "maxRepeatedToolFailures": 3
+    },
+    "fixtureHash": "8e21922a9999da3b2ad9f2f9e9b4e3702fd777940f72c35b75ae826c02eda60c",
+    "protocol": "A deliberately stale fixture skill receives one explicit, contract-backed correction in a fresh live session. Compare old/new runtime automatic review. Use the exact new reviewer-written patch on three unseen file tasks, including a regression, twice with alternating arm order. No hand-written candidate, no promotion. Expected held-out answers remain outside workspaces.",
+    "limitation": "Targeted learning from an explicit correction to a seeded defect, not general spontaneous improvement or a Hermes head-to-head."
+  },
+  "runs": [
+    {
+      "id": "before-learning",
+      "passed": true,
+      "output": {
+        "stock": {
+          "A": 12,
+          "C": 0,
+          "D": -3
+        }
+      },
+      "expected": {
+        "stock": {
+          "A": 12,
+          "C": 0,
+          "D": -3
+        }
+      },
+      "fixedInputsUnchanged": true,
+      "liveSkillUnchanged": true,
+      "elapsedMs": 27698,
+      "outcome": {
+        "status": "completed",
+        "terminationCause": "normal",
+        "completionFloor": "read",
+        "confirmedActions": [
+          {
+            "toolCallId": "tool-call-05b2d924cea2201a0e77ae44",
+            "tool": "file.write",
+            "riskClass": "workspace-write",
+            "targetSummary": "stock.json",
+            "status": "confirmed",
+            "verification": "not_verified"
+          },
+          {
+            "toolCallId": "tool-call-bc6b7163faaddac84e22cf99",
+            "tool": "terminal.run",
+            "riskClass": "workspace-write",
+            "targetSummary": "cat CONTRACT.txt && cat events.csv && cat stock.json && cat verify.mjs",
+            "status": "confirmed",
+            "verification": "not_verified"
+          },
+          {
+            "toolCallId": "tool-call-f3c0ce7350fd2701fb3be6c9",
+            "tool": "terminal.run",
+            "riskClass": "workspace-write",
+            "targetSummary": "cat CONTRACT.txt && cat events.csv && cat stock.json && node verify.mjs",
+            "status": "confirmed",
+            "verification": "not_verified"
+          },
+          {
+            "toolCallId": "tool-call-c65128e43ef82eb056f8b0da",
+            "tool": "terminal.run",
+            "riskClass": "workspace-write",
+            "targetSummary": "cat CONTRACT.txt && cat events.csv && cat stock.json && node verify.mjs",
+            "status": "confirmed",
+            "verification": "not_verified"
+          }
+        ],
+        "uncertainActions": []
+      },
+      "text": "Reconciled `events.csv` into `stock.json` using `CONTRACT.txt` rather than the skill’s stale chronological-order assumption.\n\n```json\n{\"stock\":{\"A\":12,\"C\":0,\"D\":-3}}\n```\n\n- Selected the greatest numeric revision per SKU, with the last occurrence winning ties.\n- Removed B because its winning revision is a deletion.\n- Preserved zero and negative quantities and sorted the keys.\n\n`node verify.mjs` **passed**. The contract, verifier, and skill files were not changed. All work was local, without network access or delegation.",
+      "providerCalls": 7,
+      "reviewCalls": 0
+    },
+    {
+      "id": "after-learning",
+      "passed": true,
+      "output": {
+        "stock": {
+          "A": 12,
+          "C": 0,
+          "D": -3
+        }
+      },
+      "expected": {
+        "stock": {
+          "A": 12,
+          "C": 0,
+          "D": -3
+        }
+      },
+      "fixedInputsUnchanged": true,
+      "liveSkillUnchanged": true,
+      "elapsedMs": 38544,
+      "outcome": {
+        "status": "completed_with_recovered_errors",
+        "terminationCause": "normal",
+        "completionFloor": "read",
+        "confirmedActions": [
+          {
+            "toolCallId": "tool-call-04980b8f37b139c18a1a583d",
+            "tool": "file.write",
+            "riskClass": "workspace-write",
+            "targetSummary": "stock.json",
+            "status": "confirmed",
+            "verification": "not_verified"
+          },
+          {
+            "toolCallId": "tool-call-a82f4d4be92349c995f05ceb",
+            "tool": "terminal.run",
+            "riskClass": "workspace-write",
+            "targetSummary": "cat CONTRACT.txt events.csv stock.json && node verify.mjs",
+            "status": "confirmed",
+            "verification": "not_verified"
+          },
+          {
+            "toolCallId": "tool-call-506452890ef5f9bfb9f9e9a7",
+            "tool": "terminal.run",
+            "riskClass": "workspace-write",
+            "targetSummary": "cat CONTRACT.txt events.csv stock.json && node verify.mjs",
+            "status": "confirmed",
+            "verification": "not_verified"
+          },
+          {
+            "toolCallId": "tool-call-7ddc9bfbc82f50b2372750c6",
+            "tool": "terminal.run",
+            "riskClass": "workspace-write",
+            "targetSummary": "cat CONTRACT.txt events.csv stock.json && node verify.mjs",
+            "status": "confirmed",
+            "verification": "not_verified"
+          },
+          {
+            "toolCallId": "tool-call-1867c6d89ec54c09d4f74ee1",
+            "tool": "terminal.run",
+            "riskClass": "workspace-write",
+            "targetSummary": "cat CONTRACT.txt events.csv stock.json && node verify.mjs",
+            "status": "confirmed",
+            "verification": "not_verified"
+          }
+        ],
+        "uncertainActions": []
+      },
+      "text": "Saved `stock.json` using `CONTRACT.txt`’s replay rules:\n\n```json\n{\"stock\":{\"A\":12,\"C\":0,\"D\":-3}}\n```\n\n- Highest numeric revision wins; the last occurrence breaks ties.\n- `B` is omitted because its winning revision is deleted.\n- Zero and negative quantities are preserved.\n\n`node verify.mjs` **passed**. The contract, verifier, and skill files were not changed. All work was local, without network access or delegation.",
+      "providerCalls": 10,
+      "reviewCalls": 1
+    },
+    {
+      "id": "1-out-of-order-baseline",
+      "passed": false,
+      "output": {
+        "stock": {
+          "K": 99,
+          "L": 17,
+          "M": -4
+        }
+      },
+      "expected": {
+        "stock": {
+          "K": 8,
+          "M": -4
+        }
+      },
+      "fixedInputsUnchanged": true,
+      "liveSkillUnchanged": true,
+      "elapsedMs": 17725,
+      "outcome": {
+        "status": "completed",
+        "terminationCause": "normal",
+        "completionFloor": "read",
+        "confirmedActions": [
+          {
+            "toolCallId": "tool-call-900624167b5af9fe116493a8",
+            "tool": "file.write",
+            "riskClass": "workspace-write",
+            "targetSummary": "stock.json",
+            "status": "confirmed",
+            "verification": "verified"
+          }
+        ],
+        "uncertainActions": []
+      },
+      "text": "Saved and read back `stock.json`, verifying it matches the skill’s procedure: use the **last row per SKU**, omit rows marked deleted, preserve zero and negative quantities, and sort SKU keys alphabetically.\n\n```json\n{\"stock\":{\"K\":99,\"L\":17,\"M\":-4}}\n```\n\nWorked locally without network access, delegation, or skill edits.",
+      "providerCalls": 5,
+      "reviewCalls": 0
+    },
+    {
+      "id": "1-out-of-order-candidate",
+      "passed": true,
+      "output": {
+        "stock": {
+          "K": 8,
+          "M": -4
+        }
+      },
+      "expected": {
+        "stock": {
+          "K": 8,
+          "M": -4
+        }
+      },
+      "fixedInputsUnchanged": true,
+      "liveSkillUnchanged": true,
+      "elapsedMs": 19698,
+      "outcome": {
+        "status": "completed",
+        "terminationCause": "normal",
+        "completionFloor": "read",
+        "confirmedActions": [
+          {
+            "toolCallId": "tool-call-5fae540b9b9c41c4336658d9",
+            "tool": "file.write",
+            "riskClass": "workspace-write",
+            "targetSummary": "stock.json",
+            "status": "confirmed",
+            "verification": "verified"
+          }
+        ],
+        "uncertainActions": []
+      },
+      "text": "Reconciled `events.csv` into `stock.json` and verified the saved output by reading it back:\n\n```json\n{\"stock\":{\"K\":8,\"M\":-4}}\n```\n\n- **K:** revision 13 wins over revision 2.\n- **L:** omitted because revision 12 is a deletion; revision 1 cannot restore it.\n- **M:** negative quantity preserved.\n\nKeys are alphabetically sorted. No network, delegation, or skill edits were used.",
+      "providerCalls": 5,
+      "reviewCalls": 0
+    },
+    {
+      "id": "1-ties-and-tombstones-candidate",
+      "passed": true,
+      "output": {
+        "stock": {
+          "P": 0,
+          "R": -6
+        }
+      },
+      "expected": {
+        "stock": {
+          "P": 0,
+          "R": -6
+        }
+      },
+      "fixedInputsUnchanged": true,
+      "liveSkillUnchanged": true,
+      "elapsedMs": 17284,
+      "outcome": {
+        "status": "completed",
+        "terminationCause": "normal",
+        "completionFloor": "read",
+        "confirmedActions": [
+          {
+            "toolCallId": "tool-call-081285372d1c1a0d6c018e31",
+            "tool": "file.write",
+            "riskClass": "workspace-write",
+            "targetSummary": "stock.json",
+            "status": "confirmed",
+            "verification": "verified"
+          }
+        ],
+        "uncertainActions": []
+      },
+      "text": "Reconciled `events.csv` into `stock.json` and read back the saved output to verify:\n\n```json\n{\"stock\":{\"P\":0,\"R\":-6}}\n```\n\n- **P:** Revision 7 tied; the last occurrence wins, preserving quantity `0`.\n- **Q:** Revision 11 is a deletion, so Q is omitted despite its older nondeleted row.\n- **R:** Revision 3 tied; the last occurrence wins, preserving quantity `-6`.\n\nKeys are alphabetically sorted. Completed locally without network access, delegation, or skill edits.",
+      "providerCalls": 5,
+      "reviewCalls": 0
+    },
+    {
+      "id": "1-ties-and-tombstones-baseline",
+      "passed": false,
+      "output": {
+        "stock": {
+          "P": 77,
+          "Q": 44,
+          "R": -6
+        }
+      },
+      "expected": {
+        "stock": {
+          "P": 0,
+          "R": -6
+        }
+      },
+      "fixedInputsUnchanged": true,
+      "liveSkillUnchanged": true,
+      "elapsedMs": 23899,
+      "outcome": {
+        "status": "completed",
+        "terminationCause": "normal",
+        "completionFloor": "read",
+        "confirmedActions": [
+          {
+            "toolCallId": "tool-call-3e7c885b64beb5890398fb01",
+            "tool": "file.write",
+            "riskClass": "workspace-write",
+            "targetSummary": "stock.json",
+            "status": "confirmed",
+            "verification": "verified"
+          }
+        ],
+        "uncertainActions": []
+      },
+      "text": "Saved and read back `stock.json`:\n\n```json\n{\"stock\":{\"P\":77,\"Q\":44,\"R\":-6}}\n```\n\nVerified against the skill procedure: selected the **last CSV row per SKU** (not the highest revision), then applied deletion filtering, preserved negative quantities, and sorted SKU keys alphabetically. All final rows have `deleted=false`.\n\nCompleted locally without network access, delegation, or skill edits.",
+      "providerCalls": 6,
+      "reviewCalls": 0
+    },
+    {
+      "id": "1-chronological-regression-baseline",
+      "passed": true,
+      "output": {
+        "stock": {
+          "S": 7,
+          "T": -3,
+          "V": 0
+        }
+      },
+      "expected": {
+        "stock": {
+          "S": 7,
+          "T": -3,
+          "V": 0
+        }
+      },
+      "fixedInputsUnchanged": true,
+      "liveSkillUnchanged": true,
+      "elapsedMs": 18356,
+      "outcome": {
+        "status": "completed",
+        "terminationCause": "normal",
+        "completionFloor": "read",
+        "confirmedActions": [
+          {
+            "toolCallId": "tool-call-ebb21c9579530113da57e8b9",
+            "tool": "file.write",
+            "riskClass": "workspace-write",
+            "targetSummary": "stock.json",
+            "status": "confirmed",
+            "verification": "verified"
+          }
+        ],
+        "uncertainActions": []
+      },
+      "text": "Reconciled `events.csv` into `stock.json` and verified the saved output by reading it back:\n\n```json\n{\"stock\":{\"S\":7,\"T\":-3,\"V\":0}}\n```\n\nUsed the last row for each SKU, omitted deleted `U`, preserved negative and zero quantities, and sorted SKU keys alphabetically. All work was local, with no network, delegation, or skill edits.",
+      "providerCalls": 6,
+      "reviewCalls": 0
+    },
+    {
+      "id": "1-chronological-regression-candidate",
+      "passed": true,
+      "output": {
+        "stock": {
+          "S": 7,
+          "T": -3,
+          "V": 0
+        }
+      },
+      "expected": {
+        "stock": {
+          "S": 7,
+          "T": -3,
+          "V": 0
+        }
+      },
+      "fixedInputsUnchanged": true,
+      "liveSkillUnchanged": true,
+      "elapsedMs": 19859,
+      "outcome": {
+        "status": "completed",
+        "terminationCause": "normal",
+        "completionFloor": "read",
+        "confirmedActions": [
+          {
+            "toolCallId": "tool-call-bf2a0d55261a601a48687306",
+            "tool": "file.write",
+            "riskClass": "workspace-write",
+            "targetSummary": "stock.json",
+            "status": "confirmed",
+            "verification": "verified"
+          }
+        ],
+        "uncertainActions": []
+      },
+      "text": "Saved and read back `stock.json`, verifying it against the stock-snapshot procedure:\n\n```json\n{\"stock\":{\"S\":7,\"T\":-3,\"V\":0}}\n```\n\n- Selected the greatest numeric revision for each SKU.\n- Omitted `U` because its latest revision is deleted.\n- Preserved the negative quantity for `T` and zero for `V`.\n- Sorted SKU keys alphabetically.\n\nCompleted locally without network access, delegation, or skill edits.",
+      "providerCalls": 5,
+      "reviewCalls": 0
+    },
+    {
+      "id": "2-out-of-order-candidate",
+      "passed": true,
+      "output": {
+        "stock": {
+          "K": 8,
+          "M": -4
+        }
+      },
+      "expected": {
+        "stock": {
+          "K": 8,
+          "M": -4
+        }
+      },
+      "fixedInputsUnchanged": true,
+      "liveSkillUnchanged": true,
+      "elapsedMs": 19909,
+      "outcome": {
+        "status": "completed",
+        "terminationCause": "normal",
+        "completionFloor": "read",
+        "confirmedActions": [
+          {
+            "toolCallId": "tool-call-fa79e5f858b1eea56d8460f6",
+            "tool": "file.write",
+            "riskClass": "workspace-write",
+            "targetSummary": "stock.json",
+            "status": "confirmed",
+            "verification": "verified"
+          }
+        ],
+        "uncertainActions": []
+      },
+      "text": "Reconciled `events.csv` into `stock.json` and verified the saved output by reading it back:\n\n```json\n{\"stock\":{\"K\":8,\"M\":-4}}\n```\n\n- `K`: revision 13 wins over revision 2.\n- `L`: omitted because revision 12 is a deletion; revision 1 cannot resurrect it.\n- `M`: negative quantity preserved.\n- SKU keys are alphabetically sorted.\n\nCompleted locally without network access, delegation, or skill edits.",
+      "providerCalls": 5,
+      "reviewCalls": 0
+    },
+    {
+      "id": "2-out-of-order-baseline",
+      "passed": false,
+      "output": {
+        "stock": {
+          "K": 99,
+          "L": 17,
+          "M": -4
+        }
+      },
+      "expected": {
+        "stock": {
+          "K": 8,
+          "M": -4
+        }
+      },
+      "fixedInputsUnchanged": true,
+      "liveSkillUnchanged": true,
+      "elapsedMs": 14836,
+      "outcome": {
+        "status": "completed",
+        "terminationCause": "normal",
+        "completionFloor": "read",
+        "confirmedActions": [
+          {
+            "toolCallId": "tool-call-6940ffd50c324894b906cf84",
+            "tool": "file.write",
+            "riskClass": "workspace-write",
+            "targetSummary": "stock.json",
+            "status": "confirmed",
+            "verification": "verified"
+          }
+        ],
+        "uncertainActions": []
+      },
+      "text": "Reconciled `events.csv` into `stock.json` using the stock-snapshot procedure: retained the last row for each SKU, omitted any selected row marked deleted, preserved negative quantities, and sorted SKU keys.\n\nRead back and verified the saved output:\n\n```json\n{\"stock\":{\"K\":99,\"L\":17,\"M\":-4}}\n```\n\nSelection followed CSV row order, not revision numbers. All work was local, with no network access, delegation, or skill edits.",
+      "providerCalls": 5,
+      "reviewCalls": 0
+    },
+    {
+      "id": "2-ties-and-tombstones-baseline",
+      "passed": false,
+      "output": {
+        "stock": {
+          "P": 77,
+          "Q": 44,
+          "R": -6
+        }
+      },
+      "expected": {
+        "stock": {
+          "P": 0,
+          "R": -6
+        }
+      },
+      "fixedInputsUnchanged": true,
+      "liveSkillUnchanged": true,
+      "elapsedMs": 22424,
+      "outcome": {
+        "status": "completed",
+        "terminationCause": "normal",
+        "completionFloor": "read",
+        "confirmedActions": [
+          {
+            "toolCallId": "tool-call-b4ddb242b15664d7a68c80df",
+            "tool": "file.write",
+            "riskClass": "workspace-write",
+            "targetSummary": "stock.json",
+            "status": "confirmed",
+            "verification": "verified"
+          }
+        ],
+        "uncertainActions": []
+      },
+      "text": "Reconciled `events.csv` into `stock.json` using the skill’s last-row-per-SKU rule, then read back and verified the saved output:\n\n```json\n{\"stock\":{\"P\":77,\"Q\":44,\"R\":-6}}\n```\n\nKeys are alphabetically sorted, and the negative quantity is preserved. Completed locally without network access, delegation, or skill edits.",
+      "providerCalls": 6,
+      "reviewCalls": 0
+    },
+    {
+      "id": "2-ties-and-tombstones-candidate",
+      "passed": true,
+      "output": {
+        "stock": {
+          "P": 0,
+          "R": -6
+        }
+      },
+      "expected": {
+        "stock": {
+          "P": 0,
+          "R": -6
+        }
+      },
+      "fixedInputsUnchanged": true,
+      "liveSkillUnchanged": true,
+      "elapsedMs": 22730,
+      "outcome": {
+        "status": "completed",
+        "terminationCause": "normal",
+        "completionFloor": "read",
+        "confirmedActions": [
+          {
+            "toolCallId": "tool-call-1c5715848691310b8fab2889",
+            "tool": "file.write",
+            "riskClass": "workspace-write",
+            "targetSummary": "stock.json",
+            "status": "confirmed",
+            "verification": "verified"
+          }
+        ],
+        "uncertainActions": []
+      },
+      "text": "Saved and read back `stock.json`, verifying it against the skill’s reconciliation rules:\n\n```json\n{\"stock\":{\"P\":0,\"R\":-6}}\n```\n\n- **P:** revision 7 tied; the last occurrence wins, preserving quantity `0`.\n- **Q:** revision 11 is a tombstone, so Q is omitted.\n- **R:** revision 3 tied; the last occurrence wins, preserving quantity `-6`.\n\nKeys are alphabetically sorted. No network, delegation, or skill edits were used.",
+      "providerCalls": 5,
+      "reviewCalls": 0
+    },
+    {
+      "id": "2-chronological-regression-candidate",
+      "passed": true,
+      "output": {
+        "stock": {
+          "S": 7,
+          "T": -3,
+          "V": 0
+        }
+      },
+      "expected": {
+        "stock": {
+          "S": 7,
+          "T": -3,
+          "V": 0
+        }
+      },
+      "fixedInputsUnchanged": true,
+      "liveSkillUnchanged": true,
+      "elapsedMs": 24283,
+      "outcome": {
+        "status": "completed",
+        "terminationCause": "normal",
+        "completionFloor": "read",
+        "confirmedActions": [
+          {
+            "toolCallId": "tool-call-44f3a5b7ececb62c56226ead",
+            "tool": "file.write",
+            "riskClass": "workspace-write",
+            "targetSummary": "stock.json",
+            "status": "confirmed",
+            "verification": "verified"
+          }
+        ],
+        "uncertainActions": []
+      },
+      "text": "Reconciled `events.csv` into `stock.json` and read back the saved file to verify:\n\n```json\n{\"stock\":{\"S\":7,\"T\":-3,\"V\":0}}\n```\n\nApplied the greatest numeric revision per SKU, omitted `U` because its winning event is deleted, preserved negative and zero quantities, and sorted keys alphabetically. All work stayed local; no network, delegation, or skill edits were used.",
+      "providerCalls": 6,
+      "reviewCalls": 0
+    },
+    {
+      "id": "2-chronological-regression-baseline",
+      "passed": true,
+      "output": {
+        "stock": {
+          "S": 7,
+          "T": -3,
+          "V": 0
+        }
+      },
+      "expected": {
+        "stock": {
+          "S": 7,
+          "T": -3,
+          "V": 0
+        }
+      },
+      "fixedInputsUnchanged": true,
+      "liveSkillUnchanged": true,
+      "elapsedMs": 17586,
+      "outcome": {
+        "status": "completed",
+        "terminationCause": "normal",
+        "completionFloor": "read",
+        "confirmedActions": [
+          {
+            "toolCallId": "tool-call-0472a63d6c907003e5a81173",
+            "tool": "file.write",
+            "riskClass": "workspace-write",
+            "targetSummary": "stock.json",
+            "status": "confirmed",
+            "verification": "verified"
+          }
+        ],
+        "uncertainActions": []
+      },
+      "text": "Reconciled `events.csv` into `stock.json` and read back the saved file to verify:\n\n```json\n{\"stock\":{\"S\":7,\"T\":-3,\"V\":0}}\n```\n\nVerified that the last row per SKU was used, deleted SKU `U` was omitted, zero and negative quantities were preserved, and keys are alphabetically sorted. All work stayed local, with no network, delegation, or skill edits.",
+      "providerCalls": 5,
+      "reviewCalls": 0
+    }
+  ],
+  "reviews": {
+    "before-learning": {
+      "state": {
+        "version": 1,
+        "records": [
+          {
+            "key": "selected:stock-snapshot:a2630fbccf9b1abcdf013d3e0c35b60b8f9e93e5ecd5653210f2eefb2ff8d37d",
+            "name": "stock-snapshot refinement",
+            "content": "Selected skill refinement evidence: stock-snapshot",
+            "occurrences": 1,
+            "sourceSessionIds": [
+              "85665ac0-4e61-4da4-9f42-dc775c177350"
+            ],
+            "tools": [
+              "file.read",
+              "file.write",
+              "terminal.run"
+            ],
+            "requiredToolsets": [
+              "files"
+            ],
+            "bounded": true,
+            "boundedReason": "selected-skill-turn",
+            "status": "candidate",
+            "evidenceIds": [
+              "obs_b379c741-1d7f-419b-9213-fc4bce7210a2"
+            ],
+            "candidateId": "learn_55bca8c2-7c69-444e-a162-3d85f6920eba",
+            "candidateKind": "selected_skill_refinement",
+            "promptHash": "dd4bb00531b08934",
+            "selectedSkillName": "stock-snapshot",
+            "updatedAt": "2026-11-02T07:53:01.525Z"
+          }
+        ]
+      },
+      "proposals": [],
+      "observations": [
+        {
+          "id": "obs_4409d7bd-2730-4500-aaa5-ca9354076626",
+          "skillName": "stock-snapshot",
+          "source": "local",
+          "sessionId": "85665ac0-4e61-4da4-9f42-dc775c177350",
+          "timestamp": "2026-11-02T07:53:01.516Z",
+          "type": "success",
+          "promptSummary": "Use stock-snapshot to reconcile events.csv into stock.json. Correction: the exporter does not deliver chronological rows; its replay contract in CONTRACT.txt overrides the stale skill procedure. Read the contract, reconcile the file, and ru\n[truncated 147 chars]",
+          "selectedPlaybookStep": "run",
+          "toolsAttempted": [
+            "file.read",
+            "file.read",
+            "file.write",
+            "terminal.run",
+            "terminal.run",
+            "terminal.run"
+          ],
+          "outcome": "succeeded",
+          "lesson": "Skill completed successfully using file.read, file.write, terminal.run.",
+          "sourceTrust": "runtime_internal",
+          "mayPromoteAutomatically": true,
+          "requiresHumanApproval": false,
+          "evidence": {
+            "useCount": 1,
+            "successCount": 1,
+            "failureCount": 0,
+            "summary": "stock-snapshot completed with file.read, file.write, terminal.run. Attempted: file.read, file.write, terminal.run."
+          }
+        },
+        {
+          "id": "obs_b379c741-1d7f-419b-9213-fc4bce7210a2",
+          "skillName": "stock-snapshot",
+          "source": "local",
+          "sessionId": "85665ac0-4e61-4da4-9f42-dc775c177350",
+          "timestamp": "2026-11-02T07:53:01.521Z",
+          "type": "success",
+          "promptSummary": "Use stock-snapshot to reconcile events.csv into stock.json. Correction: the exporter does not deliver chronological rows; its replay contract in CONTRACT.txt overrides the stale skill procedure. Read the contract, reconcile the file, and run node verify.mjs to verify the saved output. Do not change the contract, verifier, or any skill files. Work locally without network or delegation",
+          "toolsAttempted": [
+            "file.read",
+            "file.write",
+            "terminal.run"
+          ],
+          "outcome": "succeeded",
+          "lesson": "The same declared verification was started more than once; necessity is not established. Proposed follow-up (not validated): Inspect intervening mutations and check input scopes before recommending another run. Do not assume a repeated check was unnecessary. Delegation was unavailable in the session inventory. Proposed follow-up (not validated): Inspect persistent Task prerequisites and exposure. Absence from this session is not a permanent capability limitation.",
+          "candidateImprovement": "Refine the selected skill through the governed evolution path.",
+          "sourceTrust": "runtime_internal",
+          "mayPromoteAutomatically": false,
+          "requiresHumanApproval": true,
+          "evidence": {
+            "profileId": "default",
+            "promptHash": "dd4bb00531b08934",
+            "routeConfidence": 0.7,
+            "finalSkillUsed": "stock-snapshot",
+            "outcomeStatus": "succeeded",
+            "findings": [
+              {
+                "mechanism": "repeated-check",
+                "observed": "The same declared verification was started more than once; necessity is not established.",
+                "correction": "Inspect intervening mutations and check input scopes before recommending another run. Do not assume a repeated check was unnecessary.",
+                "target": "workflow-review",
+                "correctionVerified": false,
+                "callIds": [
+                  "tool-call-f3c0ce7350fd2701fb3be6c9",
+                  "tool-call-c65128e43ef82eb056f8b0da"
+                ]
+              },
+              {
+                "mechanism": "delegation-unavailable",
+                "observed": "Delegation was unavailable in the session inventory.",
+                "correction": "Inspect persistent Task prerequisites and exposure. Absence from this session is not a permanent capability limitation.",
+                "target": "runtime-regression",
+                "correctionVerified": false,
+                "callIds": []
+              }
+            ],
+            "turnDiagnostics": {
+              "limitReached": false,
+              "completionRejected": false,
+              "unresolvedCheckCount": 0,
+              "delegationAvailable": false
+            },
+            "candidatesShown": [
+              "stock-snapshot"
+            ],
+            "tools": [
+              {
+                "name": "file.read",
+                "ok": true,
+                "riskClass": "read-only-local"
+              },
+              {
+                "name": "file.read",
+                "ok": true,
+                "riskClass": "read-only-local"
+              },
+              {
+                "name": "file.write",
+                "ok": true,
+                "riskClass": "workspace-write"
+              },
+              {
+                "name": "terminal.run",
+                "ok": true,
+                "riskClass": "workspace-write"
+              },
+              {
+                "name": "terminal.run",
+                "ok": true,
+                "riskClass": "workspace-write"
+              },
+              {
+                "name": "terminal.run",
+                "ok": true,
+                "riskClass": "workspace-write"
+              }
+            ],
+            "selectedSkill": "stock-snapshot"
+          }
+        }
+      ],
+      "reviewCalls": 0
+    },
+    "after-learning": {
+      "state": {
+        "version": 1,
+        "draftBudget": {
+          "day": "2026-11-02",
+          "attempts": 1
+        },
+        "records": [
+          {
+            "key": "selected:stock-snapshot:5932d9df8e20f73f4c805fb147e00812617af3d36159e4022772d20725124e5d",
+            "name": "stock-snapshot refinement",
+            "content": "Selected skill refinement evidence: stock-snapshot",
+            "occurrences": 1,
+            "sourceSessionIds": [
+              "1442846e-a35e-4be2-bf49-2cadfbf3dcbe"
+            ],
+            "tools": [
+              "file.read",
+              "file.write",
+              "terminal.run"
+            ],
+            "requiredToolsets": [
+              "files"
+            ],
+            "bounded": true,
+            "boundedReason": "selected-skill-turn",
+            "status": "candidate",
+            "evidenceIds": [
+              "obs_1b4b170a-c1d0-443a-8c01-ef1e7179d299"
+            ],
+            "candidateId": "learn_00711612-b42f-4814-b0f3-796654679f3e",
+            "candidateKind": "selected_skill_refinement",
+            "promptHash": "dd4bb00531b08934",
+            "selectedSkillName": "stock-snapshot",
+            "updatedAt": "2026-11-02T07:53:35.969Z",
+            "draftCandidateId": "learn_00711612-b42f-4814-b0f3-796654679f3e",
+            "draftAttemptedAt": "2026-11-02T07:53:41.772Z",
+            "draftStatus": "proposed",
+            "draftProposalId": "proposal_e4c2077d-784e-4709-92d8-434a84509e60"
+          }
+        ]
+      },
+      "proposals": [
+        {
+          "baseContentHash": "2c21ba4b5efc544a38eea74efd27fc4125f85a7fb3dcf728b6bb48453fcbae5f",
+          "requiresTaskEvaluation": true,
+          "id": "proposal_e4c2077d-784e-4709-92d8-434a84509e60",
+          "skillName": "stock-snapshot",
+          "source": "local",
+          "createdAt": "2026-11-02T07:53:41.759Z",
+          "reason": "Selected skill turn produced evidence for future governed refinement.",
+          "confidence": 0.7,
+          "evidence": {
+            "observations": [
+              "obs_1b4b170a-c1d0-443a-8c01-ef1e7179d299"
+            ],
+            "successes": 0,
+            "failures": 0
+          },
+          "sourceTrust": "runtime_internal",
+          "mayPromoteAutomatically": false,
+          "requiresHumanApproval": true,
+          "patch": {
+            "type": "text_patch",
+            "oldString": "Keep the last row for each sku because exports arrive in chronological order. After selecting the last row, omit entries whose deleted value is true.",
+            "newString": "For each sku, select the row with the greatest numeric revision; if revisions tie, select the last occurrence in the file. File order is not chronological. Only after selecting winners, omit entries whose deleted value is true so that lower-revision rows cannot resurrect newer tombstones."
+          },
+          "changeKind": "skill_patch",
+          "targetSurface": "skill",
+          "affectedSurface": "stock-snapshot",
+          "affectedFiles": [
+            "<BENCHMARK_ROOT>/after-learning/home/.estacoda/profiles/default/skills/stock-snapshot/SKILL.md"
+          ],
+          "evidenceIds": [
+            "obs_1b4b170a-c1d0-443a-8c01-ef1e7179d299"
+          ],
+          "hypothesis": "Selected skill turn produced evidence for future governed refinement.",
+          "riskClass": "low",
+          "authorityExpansion": false,
+          "sourceKind": "local",
+          "evalPlan": {
+            "command": "pnpm run eval:fixtures",
+            "constraintGates": [
+              "pnpm run typecheck",
+              "pnpm run smoke"
+            ],
+            "expectedMetrics": [
+              "primary_skill_precision",
+              "false_positive_rate",
+              "no_skill_correctness"
+            ]
+          },
+          "rollbackExpectation": "Revert the governed skill patch through snapshot-backed promotion rollback if later promoted.",
+          "policyDecision": {
+            "mode": "proactive",
+            "createProposals": true,
+            "shadowOnly": false,
+            "allowed": true,
+            "requiresApproval": true
+          },
+          "approvalState": "required",
+          "status": "proposed",
+          "changeManifestId": "manifest_dabeb3bb-0486-4b7b-8dc1-11a8e7825db3"
+        }
+      ],
+      "observations": [
+        {
+          "id": "obs_49e4e0dc-9f43-4d42-b904-21939eb0e238",
+          "skillName": "stock-snapshot",
+          "source": "local",
+          "sessionId": "1442846e-a35e-4be2-bf49-2cadfbf3dcbe",
+          "timestamp": "2026-11-02T07:53:35.958Z",
+          "type": "success",
+          "promptSummary": "Use stock-snapshot to reconcile events.csv into stock.json. Correction: the exporter does not deliver chronological rows; its replay contract in CONTRACT.txt overrides the stale skill procedure. Read the contract, reconcile the file, and ru\n[truncated 147 chars]",
+          "selectedPlaybookStep": "run",
+          "toolsAttempted": [
+            "file.read",
+            "file.read",
+            "file.read",
+            "file.write",
+            "terminal.run",
+            "terminal.run",
+            "terminal.run",
+            "terminal.run"
+          ],
+          "outcome": "succeeded",
+          "lesson": "Skill completed successfully using file.read, file.write, terminal.run.",
+          "sourceTrust": "runtime_internal",
+          "mayPromoteAutomatically": true,
+          "requiresHumanApproval": false,
+          "evidence": {
+            "useCount": 1,
+            "successCount": 1,
+            "failureCount": 0,
+            "summary": "stock-snapshot completed with file.read, file.write, terminal.run. Attempted: file.read, file.write, terminal.run."
+          }
+        },
+        {
+          "id": "obs_1b4b170a-c1d0-443a-8c01-ef1e7179d299",
+          "skillName": "stock-snapshot",
+          "source": "local",
+          "sessionId": "1442846e-a35e-4be2-bf49-2cadfbf3dcbe",
+          "timestamp": "2026-11-02T07:53:35.965Z",
+          "type": "success",
+          "promptSummary": "Use stock-snapshot to reconcile events.csv into stock.json. Correction: the exporter does not deliver chronological rows; its replay contract in CONTRACT.txt overrides the stale skill procedure. Read the contract, reconcile the file, and run node verify.mjs to verify the saved output. Do not change the contract, verifier, or any skill files. Work locally without network or delegation",
+          "toolsAttempted": [
+            "file.read",
+            "file.write",
+            "terminal.run"
+          ],
+          "outcome": "succeeded",
+          "lesson": "The same declared verification was started more than once; necessity is not established. Proposed follow-up (not validated): Inspect intervening mutations and check input scopes before recommending another run. Do not assume a repeated check was unnecessary. Delegation was unavailable in the session inventory. Proposed follow-up (not validated): Inspect persistent Task prerequisites and exposure. Absence from this session is not a permanent capability limitation.",
+          "candidateImprovement": "Refine the selected skill through the governed evolution path.",
+          "sourceTrust": "runtime_internal",
+          "mayPromoteAutomatically": false,
+          "requiresHumanApproval": true,
+          "evidence": {
+            "profileId": "default",
+            "promptHash": "dd4bb00531b08934",
+            "routeConfidence": 0.7,
+            "finalSkillUsed": "stock-snapshot",
+            "outcomeStatus": "succeeded",
+            "findings": [
+              {
+                "mechanism": "repeated-check",
+                "observed": "The same declared verification was started more than once; necessity is not established.",
+                "correction": "Inspect intervening mutations and check input scopes before recommending another run. Do not assume a repeated check was unnecessary.",
+                "target": "workflow-review",
+                "correctionVerified": false,
+                "callIds": [
+                  "tool-call-a82f4d4be92349c995f05ceb",
+                  "tool-call-506452890ef5f9bfb9f9e9a7",
+                  "tool-call-7ddc9bfbc82f50b2372750c6",
+                  "tool-call-1867c6d89ec54c09d4f74ee1"
+                ]
+              },
+              {
+                "mechanism": "delegation-unavailable",
+                "observed": "Delegation was unavailable in the session inventory.",
+                "correction": "Inspect persistent Task prerequisites and exposure. Absence from this session is not a permanent capability limitation.",
+                "target": "runtime-regression",
+                "correctionVerified": false,
+                "callIds": []
+              }
+            ],
+            "turnDiagnostics": {
+              "limitReached": false,
+              "completionRejected": false,
+              "unresolvedCheckCount": 0,
+              "delegationAvailable": false
+            },
+            "candidatesShown": [
+              "stock-snapshot"
+            ],
+            "tools": [
+              {
+                "name": "file.read",
+                "ok": true,
+                "riskClass": "read-only-local"
+              },
+              {
+                "name": "file.read",
+                "ok": true,
+                "riskClass": "read-only-local"
+              },
+              {
+                "name": "file.read",
+                "ok": false,
+                "riskClass": "read-only-local"
+              },
+              {
+                "name": "file.write",
+                "ok": true,
+                "riskClass": "workspace-write"
+              },
+              {
+                "name": "terminal.run",
+                "ok": true,
+                "riskClass": "workspace-write"
+              },
+              {
+                "name": "terminal.run",
+                "ok": true,
+                "riskClass": "workspace-write"
+              },
+              {
+                "name": "terminal.run",
+                "ok": true,
+                "riskClass": "workspace-write"
+              },
+              {
+                "name": "terminal.run",
+                "ok": true,
+                "riskClass": "workspace-write"
+              }
+            ],
+            "selectedSkill": "stock-snapshot"
+          }
+        }
+      ],
+      "reviewCalls": 1
+    }
+  },
+  "pairs": [
+    {
+      "id": "out-of-order",
+      "repeat": 1,
+      "baseline": {
+        "id": "1-out-of-order-baseline",
+        "passed": false,
+        "output": {
+          "stock": {
+            "K": 99,
+            "L": 17,
+            "M": -4
+          }
+        },
+        "expected": {
+          "stock": {
+            "K": 8,
+            "M": -4
+          }
+        },
+        "fixedInputsUnchanged": true,
+        "liveSkillUnchanged": true,
+        "elapsedMs": 17725,
+        "outcome": {
+          "status": "completed",
+          "terminationCause": "normal",
+          "completionFloor": "read",
+          "confirmedActions": [
+            {
+              "toolCallId": "tool-call-900624167b5af9fe116493a8",
+              "tool": "file.write",
+              "riskClass": "workspace-write",
+              "targetSummary": "stock.json",
+              "status": "confirmed",
+              "verification": "verified"
+            }
+          ],
+          "uncertainActions": []
+        },
+        "text": "Saved and read back `stock.json`, verifying it matches the skill’s procedure: use the **last row per SKU**, omit rows marked deleted, preserve zero and negative quantities, and sort SKU keys alphabetically.\n\n```json\n{\"stock\":{\"K\":99,\"L\":17,\"M\":-4}}\n```\n\nWorked locally without network access, delegation, or skill edits.",
+        "providerCalls": 5,
+        "reviewCalls": 0
+      },
+      "candidate": {
+        "id": "1-out-of-order-candidate",
+        "passed": true,
+        "output": {
+          "stock": {
+            "K": 8,
+            "M": -4
+          }
+        },
+        "expected": {
+          "stock": {
+            "K": 8,
+            "M": -4
+          }
+        },
+        "fixedInputsUnchanged": true,
+        "liveSkillUnchanged": true,
+        "elapsedMs": 19698,
+        "outcome": {
+          "status": "completed",
+          "terminationCause": "normal",
+          "completionFloor": "read",
+          "confirmedActions": [
+            {
+              "toolCallId": "tool-call-5fae540b9b9c41c4336658d9",
+              "tool": "file.write",
+              "riskClass": "workspace-write",
+              "targetSummary": "stock.json",
+              "status": "confirmed",
+              "verification": "verified"
+            }
+          ],
+          "uncertainActions": []
+        },
+        "text": "Reconciled `events.csv` into `stock.json` and verified the saved output by reading it back:\n\n```json\n{\"stock\":{\"K\":8,\"M\":-4}}\n```\n\n- **K:** revision 13 wins over revision 2.\n- **L:** omitted because revision 12 is a deletion; revision 1 cannot restore it.\n- **M:** negative quantity preserved.\n\nKeys are alphabetically sorted. No network, delegation, or skill edits were used.",
+        "providerCalls": 5,
+        "reviewCalls": 0
+      }
+    },
+    {
+      "id": "ties-and-tombstones",
+      "repeat": 1,
+      "candidate": {
+        "id": "1-ties-and-tombstones-candidate",
+        "passed": true,
+        "output": {
+          "stock": {
+            "P": 0,
+            "R": -6
+          }
+        },
+        "expected": {
+          "stock": {
+            "P": 0,
+            "R": -6
+          }
+        },
+        "fixedInputsUnchanged": true,
+        "liveSkillUnchanged": true,
+        "elapsedMs": 17284,
+        "outcome": {
+          "status": "completed",
+          "terminationCause": "normal",
+          "completionFloor": "read",
+          "confirmedActions": [
+            {
+              "toolCallId": "tool-call-081285372d1c1a0d6c018e31",
+              "tool": "file.write",
+              "riskClass": "workspace-write",
+              "targetSummary": "stock.json",
+              "status": "confirmed",
+              "verification": "verified"
+            }
+          ],
+          "uncertainActions": []
+        },
+        "text": "Reconciled `events.csv` into `stock.json` and read back the saved output to verify:\n\n```json\n{\"stock\":{\"P\":0,\"R\":-6}}\n```\n\n- **P:** Revision 7 tied; the last occurrence wins, preserving quantity `0`.\n- **Q:** Revision 11 is a deletion, so Q is omitted despite its older nondeleted row.\n- **R:** Revision 3 tied; the last occurrence wins, preserving quantity `-6`.\n\nKeys are alphabetically sorted. Completed locally without network access, delegation, or skill edits.",
+        "providerCalls": 5,
+        "reviewCalls": 0
+      },
+      "baseline": {
+        "id": "1-ties-and-tombstones-baseline",
+        "passed": false,
+        "output": {
+          "stock": {
+            "P": 77,
+            "Q": 44,
+            "R": -6
+          }
+        },
+        "expected": {
+          "stock": {
+            "P": 0,
+            "R": -6
+          }
+        },
+        "fixedInputsUnchanged": true,
+        "liveSkillUnchanged": true,
+        "elapsedMs": 23899,
+        "outcome": {
+          "status": "completed",
+          "terminationCause": "normal",
+          "completionFloor": "read",
+          "confirmedActions": [
+            {
+              "toolCallId": "tool-call-3e7c885b64beb5890398fb01",
+              "tool": "file.write",
+              "riskClass": "workspace-write",
+              "targetSummary": "stock.json",
+              "status": "confirmed",
+              "verification": "verified"
+            }
+          ],
+          "uncertainActions": []
+        },
+        "text": "Saved and read back `stock.json`:\n\n```json\n{\"stock\":{\"P\":77,\"Q\":44,\"R\":-6}}\n```\n\nVerified against the skill procedure: selected the **last CSV row per SKU** (not the highest revision), then applied deletion filtering, preserved negative quantities, and sorted SKU keys alphabetically. All final rows have `deleted=false`.\n\nCompleted locally without network access, delegation, or skill edits.",
+        "providerCalls": 6,
+        "reviewCalls": 0
+      }
+    },
+    {
+      "id": "chronological-regression",
+      "repeat": 1,
+      "baseline": {
+        "id": "1-chronological-regression-baseline",
+        "passed": true,
+        "output": {
+          "stock": {
+            "S": 7,
+            "T": -3,
+            "V": 0
+          }
+        },
+        "expected": {
+          "stock": {
+            "S": 7,
+            "T": -3,
+            "V": 0
+          }
+        },
+        "fixedInputsUnchanged": true,
+        "liveSkillUnchanged": true,
+        "elapsedMs": 18356,
+        "outcome": {
+          "status": "completed",
+          "terminationCause": "normal",
+          "completionFloor": "read",
+          "confirmedActions": [
+            {
+              "toolCallId": "tool-call-ebb21c9579530113da57e8b9",
+              "tool": "file.write",
+              "riskClass": "workspace-write",
+              "targetSummary": "stock.json",
+              "status": "confirmed",
+              "verification": "verified"
+            }
+          ],
+          "uncertainActions": []
+        },
+        "text": "Reconciled `events.csv` into `stock.json` and verified the saved output by reading it back:\n\n```json\n{\"stock\":{\"S\":7,\"T\":-3,\"V\":0}}\n```\n\nUsed the last row for each SKU, omitted deleted `U`, preserved negative and zero quantities, and sorted SKU keys alphabetically. All work was local, with no network, delegation, or skill edits.",
+        "providerCalls": 6,
+        "reviewCalls": 0
+      },
+      "candidate": {
+        "id": "1-chronological-regression-candidate",
+        "passed": true,
+        "output": {
+          "stock": {
+            "S": 7,
+            "T": -3,
+            "V": 0
+          }
+        },
+        "expected": {
+          "stock": {
+            "S": 7,
+            "T": -3,
+            "V": 0
+          }
+        },
+        "fixedInputsUnchanged": true,
+        "liveSkillUnchanged": true,
+        "elapsedMs": 19859,
+        "outcome": {
+          "status": "completed",
+          "terminationCause": "normal",
+          "completionFloor": "read",
+          "confirmedActions": [
+            {
+              "toolCallId": "tool-call-bf2a0d55261a601a48687306",
+              "tool": "file.write",
+              "riskClass": "workspace-write",
+              "targetSummary": "stock.json",
+              "status": "confirmed",
+              "verification": "verified"
+            }
+          ],
+          "uncertainActions": []
+        },
+        "text": "Saved and read back `stock.json`, verifying it against the stock-snapshot procedure:\n\n```json\n{\"stock\":{\"S\":7,\"T\":-3,\"V\":0}}\n```\n\n- Selected the greatest numeric revision for each SKU.\n- Omitted `U` because its latest revision is deleted.\n- Preserved the negative quantity for `T` and zero for `V`.\n- Sorted SKU keys alphabetically.\n\nCompleted locally without network access, delegation, or skill edits.",
+        "providerCalls": 5,
+        "reviewCalls": 0
+      }
+    },
+    {
+      "id": "out-of-order",
+      "repeat": 2,
+      "candidate": {
+        "id": "2-out-of-order-candidate",
+        "passed": true,
+        "output": {
+          "stock": {
+            "K": 8,
+            "M": -4
+          }
+        },
+        "expected": {
+          "stock": {
+            "K": 8,
+            "M": -4
+          }
+        },
+        "fixedInputsUnchanged": true,
+        "liveSkillUnchanged": true,
+        "elapsedMs": 19909,
+        "outcome": {
+          "status": "completed",
+          "terminationCause": "normal",
+          "completionFloor": "read",
+          "confirmedActions": [
+            {
+              "toolCallId": "tool-call-fa79e5f858b1eea56d8460f6",
+              "tool": "file.write",
+              "riskClass": "workspace-write",
+              "targetSummary": "stock.json",
+              "status": "confirmed",
+              "verification": "verified"
+            }
+          ],
+          "uncertainActions": []
+        },
+        "text": "Reconciled `events.csv` into `stock.json` and verified the saved output by reading it back:\n\n```json\n{\"stock\":{\"K\":8,\"M\":-4}}\n```\n\n- `K`: revision 13 wins over revision 2.\n- `L`: omitted because revision 12 is a deletion; revision 1 cannot resurrect it.\n- `M`: negative quantity preserved.\n- SKU keys are alphabetically sorted.\n\nCompleted locally without network access, delegation, or skill edits.",
+        "providerCalls": 5,
+        "reviewCalls": 0
+      },
+      "baseline": {
+        "id": "2-out-of-order-baseline",
+        "passed": false,
+        "output": {
+          "stock": {
+            "K": 99,
+            "L": 17,
+            "M": -4
+          }
+        },
+        "expected": {
+          "stock": {
+            "K": 8,
+            "M": -4
+          }
+        },
+        "fixedInputsUnchanged": true,
+        "liveSkillUnchanged": true,
+        "elapsedMs": 14836,
+        "outcome": {
+          "status": "completed",
+          "terminationCause": "normal",
+          "completionFloor": "read",
+          "confirmedActions": [
+            {
+              "toolCallId": "tool-call-6940ffd50c324894b906cf84",
+              "tool": "file.write",
+              "riskClass": "workspace-write",
+              "targetSummary": "stock.json",
+              "status": "confirmed",
+              "verification": "verified"
+            }
+          ],
+          "uncertainActions": []
+        },
+        "text": "Reconciled `events.csv` into `stock.json` using the stock-snapshot procedure: retained the last row for each SKU, omitted any selected row marked deleted, preserved negative quantities, and sorted SKU keys.\n\nRead back and verified the saved output:\n\n```json\n{\"stock\":{\"K\":99,\"L\":17,\"M\":-4}}\n```\n\nSelection followed CSV row order, not revision numbers. All work was local, with no network access, delegation, or skill edits.",
+        "providerCalls": 5,
+        "reviewCalls": 0
+      }
+    },
+    {
+      "id": "ties-and-tombstones",
+      "repeat": 2,
+      "baseline": {
+        "id": "2-ties-and-tombstones-baseline",
+        "passed": false,
+        "output": {
+          "stock": {
+            "P": 77,
+            "Q": 44,
+            "R": -6
+          }
+        },
+        "expected": {
+          "stock": {
+            "P": 0,
+            "R": -6
+          }
+        },
+        "fixedInputsUnchanged": true,
+        "liveSkillUnchanged": true,
+        "elapsedMs": 22424,
+        "outcome": {
+          "status": "completed",
+          "terminationCause": "normal",
+          "completionFloor": "read",
+          "confirmedActions": [
+            {
+              "toolCallId": "tool-call-b4ddb242b15664d7a68c80df",
+              "tool": "file.write",
+              "riskClass": "workspace-write",
+              "targetSummary": "stock.json",
+              "status": "confirmed",
+              "verification": "verified"
+            }
+          ],
+          "uncertainActions": []
+        },
+        "text": "Reconciled `events.csv` into `stock.json` using the skill’s last-row-per-SKU rule, then read back and verified the saved output:\n\n```json\n{\"stock\":{\"P\":77,\"Q\":44,\"R\":-6}}\n```\n\nKeys are alphabetically sorted, and the negative quantity is preserved. Completed locally without network access, delegation, or skill edits.",
+        "providerCalls": 6,
+        "reviewCalls": 0
+      },
+      "candidate": {
+        "id": "2-ties-and-tombstones-candidate",
+        "passed": true,
+        "output": {
+          "stock": {
+            "P": 0,
+            "R": -6
+          }
+        },
+        "expected": {
+          "stock": {
+            "P": 0,
+            "R": -6
+          }
+        },
+        "fixedInputsUnchanged": true,
+        "liveSkillUnchanged": true,
+        "elapsedMs": 22730,
+        "outcome": {
+          "status": "completed",
+          "terminationCause": "normal",
+          "completionFloor": "read",
+          "confirmedActions": [
+            {
+              "toolCallId": "tool-call-1c5715848691310b8fab2889",
+              "tool": "file.write",
+              "riskClass": "workspace-write",
+              "targetSummary": "stock.json",
+              "status": "confirmed",
+              "verification": "verified"
+            }
+          ],
+          "uncertainActions": []
+        },
+        "text": "Saved and read back `stock.json`, verifying it against the skill’s reconciliation rules:\n\n```json\n{\"stock\":{\"P\":0,\"R\":-6}}\n```\n\n- **P:** revision 7 tied; the last occurrence wins, preserving quantity `0`.\n- **Q:** revision 11 is a tombstone, so Q is omitted.\n- **R:** revision 3 tied; the last occurrence wins, preserving quantity `-6`.\n\nKeys are alphabetically sorted. No network, delegation, or skill edits were used.",
+        "providerCalls": 5,
+        "reviewCalls": 0
+      }
+    },
+    {
+      "id": "chronological-regression",
+      "repeat": 2,
+      "candidate": {
+        "id": "2-chronological-regression-candidate",
+        "passed": true,
+        "output": {
+          "stock": {
+            "S": 7,
+            "T": -3,
+            "V": 0
+          }
+        },
+        "expected": {
+          "stock": {
+            "S": 7,
+            "T": -3,
+            "V": 0
+          }
+        },
+        "fixedInputsUnchanged": true,
+        "liveSkillUnchanged": true,
+        "elapsedMs": 24283,
+        "outcome": {
+          "status": "completed",
+          "terminationCause": "normal",
+          "completionFloor": "read",
+          "confirmedActions": [
+            {
+              "toolCallId": "tool-call-44f3a5b7ececb62c56226ead",
+              "tool": "file.write",
+              "riskClass": "workspace-write",
+              "targetSummary": "stock.json",
+              "status": "confirmed",
+              "verification": "verified"
+            }
+          ],
+          "uncertainActions": []
+        },
+        "text": "Reconciled `events.csv` into `stock.json` and read back the saved file to verify:\n\n```json\n{\"stock\":{\"S\":7,\"T\":-3,\"V\":0}}\n```\n\nApplied the greatest numeric revision per SKU, omitted `U` because its winning event is deleted, preserved negative and zero quantities, and sorted keys alphabetically. All work stayed local; no network, delegation, or skill edits were used.",
+        "providerCalls": 6,
+        "reviewCalls": 0
+      },
+      "baseline": {
+        "id": "2-chronological-regression-baseline",
+        "passed": true,
+        "output": {
+          "stock": {
+            "S": 7,
+            "T": -3,
+            "V": 0
+          }
+        },
+        "expected": {
+          "stock": {
+            "S": 7,
+            "T": -3,
+            "V": 0
+          }
+        },
+        "fixedInputsUnchanged": true,
+        "liveSkillUnchanged": true,
+        "elapsedMs": 17586,
+        "outcome": {
+          "status": "completed",
+          "terminationCause": "normal",
+          "completionFloor": "read",
+          "confirmedActions": [
+            {
+              "toolCallId": "tool-call-0472a63d6c907003e5a81173",
+              "tool": "file.write",
+              "riskClass": "workspace-write",
+              "targetSummary": "stock.json",
+              "status": "confirmed",
+              "verification": "verified"
+            }
+          ],
+          "uncertainActions": []
+        },
+        "text": "Reconciled `events.csv` into `stock.json` and read back the saved file to verify:\n\n```json\n{\"stock\":{\"S\":7,\"T\":-3,\"V\":0}}\n```\n\nVerified that the last row per SKU was used, deleted SKU `U` was omitted, zero and negative quantities were preserved, and keys are alphabetically sorted. All work stayed local, with no network, delegation, or skill edits.",
+        "providerCalls": 5,
+        "reviewCalls": 0
+      }
+    }
+  ],
+  "unapprovedPromotion": {
+    "ok": false,
+    "reason": "Skill patch proposal requires explicit approval before promotion."
+  },
+  "result": "Automatic correction learned and generalized on these held-out tasks.",
+  "completedAt": "2026-11-02T07:57:40.875Z"
+}

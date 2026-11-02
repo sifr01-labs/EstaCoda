@@ -1,0 +1,72 @@
+{
+  "id": "after-learning",
+  "passed": true,
+  "output": {
+    "stock": {
+      "A": 12,
+      "C": 0,
+      "D": -3
+    }
+  },
+  "expected": {
+    "stock": {
+      "A": 12,
+      "C": 0,
+      "D": -3
+    }
+  },
+  "fixedInputsUnchanged": true,
+  "liveSkillUnchanged": true,
+  "elapsedMs": 38544,
+  "outcome": {
+    "status": "completed_with_recovered_errors",
+    "terminationCause": "normal",
+    "completionFloor": "read",
+    "confirmedActions": [
+      {
+        "toolCallId": "tool-call-04980b8f37b139c18a1a583d",
+        "tool": "file.write",
+        "riskClass": "workspace-write",
+        "targetSummary": "stock.json",
+        "status": "confirmed",
+        "verification": "not_verified"
+      },
+      {
+        "toolCallId": "tool-call-a82f4d4be92349c995f05ceb",
+        "tool": "terminal.run",
+        "riskClass": "workspace-write",
+        "targetSummary": "cat CONTRACT.txt events.csv stock.json && node verify.mjs",
+        "status": "confirmed",
+        "verification": "not_verified"
+      },
+      {
+        "toolCallId": "tool-call-506452890ef5f9bfb9f9e9a7",
+        "tool": "terminal.run",
+        "riskClass": "workspace-write",
+        "targetSummary": "cat CONTRACT.txt events.csv stock.json && node verify.mjs",
+        "status": "confirmed",
+        "verification": "not_verified"
+      },
+      {
+        "toolCallId": "tool-call-7ddc9bfbc82f50b2372750c6",
+        "tool": "terminal.run",
+        "riskClass": "workspace-write",
+        "targetSummary": "cat CONTRACT.txt events.csv stock.json && node verify.mjs",
+        "status": "confirmed",
+        "verification": "not_verified"
+      },
+      {
+        "toolCallId": "tool-call-1867c6d89ec54c09d4f74ee1",
+        "tool": "terminal.run",
+        "riskClass": "workspace-write",
+        "targetSummary": "cat CONTRACT.txt events.csv stock.json && node verify.mjs",
+        "status": "confirmed",
+        "verification": "not_verified"
+      }
+    ],
+    "uncertainActions": []
+  },
+  "text": "Saved `stock.json` using `CONTRACT.txt`’s replay rules:\n\n```json\n{\"stock\":{\"A\":12,\"C\":0,\"D\":-3}}\n```\n\n- Highest numeric revision wins; the last occurrence breaks ties.\n- `B` is omitted because its winning revision is deleted.\n- Zero and negative quantities are preserved.\n\n`node verify.mjs` **passed**. The contract, verifier, and skill files were not changed. All work was local, without network access or delegation.",
+  "providerCalls": 10,
+  "reviewCalls": 1
+}

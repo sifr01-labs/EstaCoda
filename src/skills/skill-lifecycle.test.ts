@@ -1,4 +1,4 @@
-import { mkdir, mkdtemp, readFile, rm, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { afterEach, describe, expect, it, vi } from "vitest";
@@ -106,6 +106,73 @@ describe("governed skill lifecycle", () => {
     await h.service.approveProposal(proposal!.id);
     expect(await h.service.promoteProposal(proposal!.id)).toMatchObject({ ok: true });
     expect((h.registry.get("checks") as typeof h.skill).instructions).toContain("inspect the result");
+  });
+
+  it("drafts after one session with a correction and receipts, reads only contained references, and keeps approval gates", async () => {
+    const h = await harness(); const db = new InMemorySessionDB();
+    await db.createSession({ id: "one-correction", profileId: "default" });
+    await db.appendMessage({ sessionId: "one-correction", role: "user", content: "Correction: inspect the check result before claiming completion." });
+    await db.appendMessage({ sessionId: "one-correction", role: "tool", content: "FAIL: report claims success but check failed. API_KEY=sk-123456789012345678901234567890", metadata: { tool: "terminal.run", ok: false } });
+    const references = join(h.root, "checks", "references"); await mkdir(references);
+    await writeFile(join(references, "checks.md"), "Check process status and assertion failures. password=do-not-send-this");
+    await writeFile(join(h.root, "outside.md"), "Outside skill boundary");
+    await symlink(join(h.root, "outside.md"), join(references, "escape.md"));
+    const skill = { ...h.skill, resources: [{ kind: "reference" as const, path: "references/checks.md" }, { kind: "reference" as const, path: "references/escape.md" }] };
+    h.registry.replaceLoaded(skill);
+    const drafter = vi.fn().mockResolvedValue(patch);
+    const manager = new SkillLearningManager({ autonomy: "proactive", registry: h.registry, localSkillsRoot: h.root,
+      storePath: join(h.root, ".learning.json"), sessionDb: db, skillEvolutionStore: h.store, drafter, proposalService: h.service });
+    await manager.observeTurn({ profileId: "default", sessionId: "one-correction", userText: "Run checks", selectedSkill: skill,
+      outcomeStatus: "succeeded", toolExecutions: [], agentEvolutionPolicy: deriveAgentEvolutionPolicy("proactive") });
+    manager.startBackgroundReview({ profileId: "default", sessionId: "one-correction", agentEvolutionPolicy: deriveAgentEvolutionPolicy("proactive"), validateAuthority: async () => {} });
+    await manager.waitForBackgroundReview();
+    expect(drafter).toHaveBeenCalledTimes(1);
+    const request = JSON.stringify(drafter.mock.calls[0]![0]);
+    expect(request).toContain("Correction: inspect");
+    expect(request).toContain("report claims success but check failed");
+    expect(request).toContain("Check process status");
+    expect(request).toContain("Reference unavailable");
+    expect(request).not.toContain("Outside skill boundary");
+    expect(request).not.toContain("sk-123456789012345678901234567890");
+    expect(request).not.toContain("do-not-send-this");
+    expect((await manager.inspect())[0]?.occurrences).toBe(1);
+    expect(await readFile(join(h.root, ".learning.json"), "utf8")).not.toContain("report claims success");
+    const [proposal] = await h.service.listProposals();
+    expect(proposal).toMatchObject({ requiresHumanApproval: true, requiresTaskEvaluation: true, mayPromoteAutomatically: false });
+    expect(await h.service.promoteProposal(proposal!.id)).toMatchObject({ ok: false });
+    expect(await readFile(h.skillPath, "utf8")).toBe(content);
+  });
+
+  it("does not replay another profile's conversation", async () => {
+    const h = await harness(); const db = new InMemorySessionDB();
+    await db.createSession({ id: "foreign", profileId: "other" });
+    await db.appendMessage({ sessionId: "foreign", role: "user", content: "Other profile correction" });
+    const drafter = vi.fn(); const read = vi.spyOn(db, "listMessages");
+    const manager = new SkillLearningManager({ autonomy: "proactive", registry: h.registry, localSkillsRoot: h.root,
+      storePath: join(h.root, ".learning.json"), sessionDb: db, skillEvolutionStore: h.store, drafter, proposalService: h.service });
+    await manager.observeTurn({ profileId: "default", sessionId: "foreign", userText: "Run checks", selectedSkill: h.skill,
+      outcomeStatus: "failed", toolExecutions: [], agentEvolutionPolicy: deriveAgentEvolutionPolicy("proactive") });
+    manager.startBackgroundReview({ profileId: "default", sessionId: "foreign", agentEvolutionPolicy: deriveAgentEvolutionPolicy("proactive"), validateAuthority: async () => {} });
+    await manager.waitForBackgroundReview();
+    expect(read).not.toHaveBeenCalled(); expect(drafter).not.toHaveBeenCalled();
+  });
+
+  it("reviews fresh corrections after abstention but cannot repeat evidence or exceed the shared daily budget", async () => {
+    const h = await harness(); const db = new InMemorySessionDB(); await db.createSession({ id: "correct", profileId: "default" });
+    const drafter = vi.fn().mockResolvedValue(undefined);
+    const manager = new SkillLearningManager({ autonomy: "proactive", registry: h.registry, localSkillsRoot: h.root,
+      storePath: join(h.root, ".learning.json"), sessionDb: db, skillEvolutionStore: h.store, drafter, proposalService: h.service });
+    const review = async () => { manager.startBackgroundReview({ profileId: "default", sessionId: "correct", agentEvolutionPolicy: deriveAgentEvolutionPolicy("proactive"), validateAuthority: async () => {} }); await manager.waitForBackgroundReview(); };
+    for (let i = 0; i < 4; i++) {
+      await db.appendMessage({ sessionId: "correct", role: "user", content: `Correction ${i}: inspect the check output.` });
+      await manager.observeTurn({ profileId: "default", sessionId: "correct", userText: "Run checks", selectedSkill: h.skill,
+        outcomeStatus: "failed", toolExecutions: [], agentEvolutionPolicy: deriveAgentEvolutionPolicy("proactive") });
+      await review(); await review();
+      expect(drafter).toHaveBeenCalledTimes(Math.min(i + 1, 3));
+    }
+    const state = JSON.parse(await readFile(join(h.root, ".learning.json"), "utf8"));
+    expect(state.draftBudget.attempts).toBe(3);
+    expect(await h.service.listProposals()).toHaveLength(0);
   });
 
   it("retains parallel read counters across usage-store reloads", async () => {

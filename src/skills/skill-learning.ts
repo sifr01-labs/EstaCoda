@@ -5,7 +5,8 @@ import * as fs from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import type { AgentEvolutionPolicy } from "../contracts/agent-evolution.js";
 import type { ProviderUsageLineage } from "../contracts/provider-usage.js";
-import type { SkillDrafter } from "./skill-draft.js";
+import { buildSkillReviewContext, clipSkillReviewText, type SkillDrafter } from "./skill-draft.js";
+import { redactSensitiveText } from "../utils/redaction.js";
 import { SkillProposalService, readBoundedSkillFile } from "./skill-proposal-service.js";
 import { parseSkillFile } from "./skill-loader.js";
 import { skillContentHash } from "./skill-task-evaluation.js";
@@ -50,11 +51,13 @@ export type SkillLearningRecord = {
   draftAttemptedAt?: string;
   draftProposalId?: string;
   draftStatus?: "pending" | "attempted" | "proposed" | "abstained";
+  draftCandidateId?: string;
 };
 
 type SkillLearningFile = {
   version: 1;
   records: SkillLearningRecord[];
+  draftBudget?: { day: string; attempts: number };
 };
 
 export type SkillLearningObservation =
@@ -250,9 +253,10 @@ export class SkillLearningManager {
     this.#review = (async () => {
       // Yield so the foreground response can be delivered first.
       await new Promise<void>(resolve => setImmediate(resolve));
+      if (!await this.#sessionDb.getSessionForProfile(input.sessionId, input.profileId)) return;
       for (const record of (await this.#store.list()).slice(0, 100)) {
         if (controller.signal.aborted) break;
-        if (record.status !== "candidate" || !record.candidateId || record.occurrences < 2) continue;
+        if (record.status !== "candidate" || !record.candidateId) continue;
         await input.validateAuthority();
         const candidate = (await this.#skillEvolutionStore?.listLearningCandidates([record.candidateId]))?.find(item => item.id === record.candidateId);
         if (!candidate) continue;
@@ -374,11 +378,11 @@ export class SkillLearningManager {
   }
 
   async #prepareDraft(record: SkillLearningRecord, candidate: SkillLearningCandidate, input: {
-    sessionId: string; agentEvolutionPolicy: AgentEvolutionPolicy; signal?: AbortSignal; usage?: ProviderUsageLineage; validateAuthority: () => Promise<void>;
+    profileId: string; sessionId: string; agentEvolutionPolicy: AgentEvolutionPolicy; signal?: AbortSignal; usage?: ProviderUsageLineage; validateAuthority: () => Promise<void>;
   }): Promise<SkillLearningRecord> {
     const policy = input.agentEvolutionPolicy;
     if (!this.#proposals || !this.#skillEvolutionStore || !policy.preparePatches || !policy.createProposals ||
-        input.signal?.aborted || record.occurrences < 2) return record;
+        input.signal?.aborted) return record;
     const today = new Date().toISOString().slice(0, 10);
     const proposals = await this.#proposals.listProposals();
     const limit = Math.min(3, policy.budgets.maxProposalsPerDay ?? 3);
@@ -390,9 +394,13 @@ export class SkillLearningManager {
     if (skill && record.key !== `selected:${skill.name}:${skillDefinitionRevision(skill)}`) return record;
     const evidence = (await this.#skillEvolutionStore.listObservations({ ids: record.evidenceIds }))
       .filter(item => item.sourceTrust === "runtime_internal");
-    if (new Set(evidence.map(item => item.sessionId).filter(Boolean)).size < 2) return record;
-    if (evidence.every(item => learningDraftEvidence(item.evidence).runtimeOnly)) return record;
-    if (!await this.#store.claimDraft(record.key, limit)) return record;
+    // Replay only the active profile/session for the skill actually observed there, not other chats.
+    const selectedHere = candidate.kind === "selected_skill_refinement" && evidence.some(item => item.sessionId === input.sessionId);
+    if (candidate.kind === "selected_skill_refinement" && !selectedHere) return record;
+    const context = selectedHere ? buildSkillReviewContext(await this.#sessionDb.listMessages(input.sessionId)) : undefined;
+    if (!context?.messages.length && new Set(evidence.map(item => item.sessionId).filter(Boolean)).size < 2) return record;
+    if (!context?.messages.length && evidence.every(item => learningDraftEvidence(item.evidence).runtimeOnly)) return record;
+    if (!await this.#store.claimDraft(record.key, limit, candidate.id)) return record;
     record = (await this.#store.get(record.key))!;
     // Missing coverage and route corrections become review proposals, never invented executable skills.
     if (!skill || !("sourcePath" in skill) || !("sourceRoot" in skill) || typeof skill.sourcePath !== "string" || typeof skill.sourceRoot !== "string" || candidate.suggestedTarget !== "skill_patch") {
@@ -412,9 +420,18 @@ export class SkillLearningManager {
       const diskSkill = parseSkillFile(skill.sourcePath, content, { sourceRoot: skill.sourceRoot, sourceKind: (skill as LoadedSkill).sourceKind });
       if (skillDefinitionRevision(diskSkill) !== skillDefinitionRevision(skill)) return await this.#store.recordDraft(record.key, "abstained");
       if (content.length > 20_000) return await this.#store.recordDraft(record.key, "abstained");
+      const references = [];
+      const skillRoot = dirname(skill.sourcePath);
+      for (const resource of ((skill as LoadedSkill).resources ?? []).filter(item => item.kind === "reference").slice(0, 2)) {
+        try {
+          const text = await readBoundedSkillFile(skillRoot, resolve(skillRoot, resource.path));
+          references.push({ path: resource.path, content: clipSkillReviewText(redactSensitiveText(text), 4_000) });
+        } catch { references.push({ path: resource.path, content: "Reference unavailable for review." }); }
+      }
       const patch = await this.#draft({
         content, candidateId: candidate.id, sessionId: input.sessionId, policy, signal: input.signal, usage: input.usage,
-        // No raw user text, tool arguments, outputs, credentials, or arbitrary lessons enter the draft prompt.
+        // Bounded, redacted replay stays ephemeral; only the proposal/evidence IDs are persisted here.
+        context, references,
         evidence: evidence.slice(-6).map((item) => ({ outcome: item.outcome, tools: item.toolsAttempted.slice(0, 20),
           lesson: item.outcome === "succeeded" ? "The task succeeded; preserve effective instructions. Success alone does not establish an improvement." : learningDraftEvidence(item.evidence).lesson }))
       });
@@ -628,6 +645,7 @@ class SkillLearningStore {
   readonly #now: () => Date;
   readonly #records = new Map<string, SkillLearningRecord>();
   #loaded = false;
+  #draftBudget: SkillLearningFile["draftBudget"];
 
   constructor(options: { path: string; localSkillsRoot: string; now?: () => Date }) {
     this.#path = options.path;
@@ -639,6 +657,7 @@ class SkillLearningStore {
     return withProfileWriteLock(dirname(this.#path), async () => {
       this.#loaded = false;
       this.#records.clear();
+      this.#draftBudget = undefined;
       await this.#ensureLoaded();
       return work();
     });
@@ -666,12 +685,16 @@ class SkillLearningStore {
   get(key: string) { return this.#transaction(() => this.#get(key)); }
   list() { return this.#transaction(() => this.#list()); }
   reconcileCreatedPaths() { return this.#transaction(() => this.#reconcileCreatedPaths()); }
-  claimDraft(key: string, limit: number): Promise<boolean> {
+  claimDraft(key: string, limit: number, candidateId: string): Promise<boolean> {
     return this.#transaction(async () => {
       const today = this.#now().toISOString().slice(0, 10);
       const record = this.#records.get(key);
-      if (!record || record.draftAttemptedAt?.startsWith(today) ||
-          [...this.#records.values()].filter(item => item.draftAttemptedAt?.startsWith(today)).length >= limit) return false;
+      const attempts = this.#draftBudget?.day === today ? this.#draftBudget.attempts
+        : [...this.#records.values()].filter(item => item.draftAttemptedAt?.startsWith(today)).length;
+      if (!record || record.candidateId !== candidateId || record.draftCandidateId === candidateId ||
+          (record.draftStatus === "attempted" && record.draftAttemptedAt?.startsWith(today)) || attempts >= limit) return false;
+      this.#draftBudget = { day: today, attempts: attempts + 1 };
+      this.#records.set(key, { ...record, draftCandidateId: candidateId });
       await this.#recordDraft(key, "attempted");
       return true;
     });
@@ -722,7 +745,8 @@ class SkillLearningStore {
       updatedAt: now,
       draftAttemptedAt: existing?.draftAttemptedAt,
       draftProposalId: existing?.draftProposalId,
-      draftStatus: existing?.draftStatus
+      draftStatus: existing?.draftStatus,
+      draftCandidateId: existing?.draftCandidateId
     };
     this.#records.set(input.key, record);
     await this.#flush();
@@ -829,6 +853,10 @@ class SkillLearningStore {
         }
         this.#records.set(record.key, record);
       }
+      if (parsed.draftBudget !== undefined) {
+        if (!/^\d{4}-\d{2}-\d{2}$/u.test(parsed.draftBudget.day) || !Number.isSafeInteger(parsed.draftBudget.attempts) || parsed.draftBudget.attempts < 0) throw new Error("Invalid draft budget.");
+        this.#draftBudget = parsed.draftBudget;
+      }
     } catch (error) {
       if ((error as NodeJS.ErrnoException).code !== "ENOENT") {
         throw error;
@@ -861,6 +889,7 @@ class SkillLearningStore {
   async #flush(): Promise<void> {
     const file: SkillLearningFile = {
       version: 1,
+      draftBudget: this.#draftBudget,
       records: [...this.#records.values()].sort((left, right) => left.key.localeCompare(right.key))
     };
     await fs.mkdir(dirname(this.#path), { recursive: true });

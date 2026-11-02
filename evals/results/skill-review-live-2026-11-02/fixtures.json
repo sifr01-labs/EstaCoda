@@ -1,0 +1,48 @@
+{
+  "baseline": "---\n{\"name\":\"stock-snapshot\",\"description\":\"Build an inventory snapshot from an event export.\",\"requiredToolsets\":[\"files\"],\"optionalToolsets\":[\"shell-readonly\"],\"routing\":{\"labels\":[\"coding\"],\"triggerPatterns\":[{\"type\":\"contains\",\"value\":\"stock-snapshot\"}],\"confirmation\":\"policy\"},\"playbook\":[],\"evaluations\":[]}\n---\nRead the requested CSV inventory events (sku, revision, quantity, deleted). Keep the last row for each sku because exports arrive in chronological order. After selecting the last row, omit entries whose deleted value is true. Preserve zero and negative integer quantities. Write the requested JSON as {\"stock\":{<sku>:<quantity>}} with sku keys sorted alphabetically. Read back and verify the saved file before reporting completion.\n",
+  "contract": "Inventory exporter replay contract: file order is not chronological. For each sku select the greatest numeric revision; if two rows have that revision, the last occurrence wins. Select first, then remove winners marked deleted=true. A lower-revision row must never resurrect a newer tombstone. Quantities are integers, including zero and negative values. Output {\"stock\":{sku:quantity}} with keys sorted.",
+  "train": {
+    "id": "correction",
+    "csv": "sku,revision,quantity,deleted\nA,8,12,false\nB,9,0,true\nA,2,100,false\nC,3,0,false\nB,4,9,false\nD,5,-2,false\nD,5,-3,false\n",
+    "expected": {
+      "stock": {
+        "A": 12,
+        "C": 0,
+        "D": -3
+      }
+    }
+  },
+  "held": [
+    {
+      "id": "out-of-order",
+      "csv": "sku,revision,quantity,deleted\nK,13,8,false\nL,12,0,true\nK,2,99,false\nL,1,17,false\nM,5,-4,false\n",
+      "expected": {
+        "stock": {
+          "K": 8,
+          "M": -4
+        }
+      }
+    },
+    {
+      "id": "ties-and-tombstones",
+      "csv": "sku,revision,quantity,deleted\nP,7,2,false\nQ,11,0,true\nP,7,0,false\nR,3,-5,false\nP,4,77,false\nQ,8,44,false\nR,3,-6,false\n",
+      "expected": {
+        "stock": {
+          "P": 0,
+          "R": -6
+        }
+      }
+    },
+    {
+      "id": "chronological-regression",
+      "csv": "sku,revision,quantity,deleted\nS,1,2,false\nS,2,7,false\nT,3,-3,false\nU,4,1,false\nU,5,0,true\nV,2,0,false\n",
+      "expected": {
+        "stock": {
+          "S": 7,
+          "T": -3,
+          "V": 0
+        }
+      }
+    }
+  ]
+}

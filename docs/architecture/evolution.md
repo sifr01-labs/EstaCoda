@@ -41,7 +41,7 @@ Implemented now:
 - Additive route/outcome telemetry fields for routing evidence, future correction signals, and final outcomes.
 - Offline deterministic routing/evolution baseline fixture metrics.
 - `SkillLearningManager` as an evidence source, not mutation authority.
-- Bounded instruction drafts after repeated selected-skill failures in proactive/autonomous mode, through the existing proposal service. Drafting may abstain; it never promotes or mutates live skills.
+- Bounded instruction drafts from current-session skill use in proactive/autonomous mode, through the existing proposal service. A single clear correction can suffice. Review uses redacted conversation/tool evidence and contained skill references, retains shared spending limits, and may abstain; it never promotes or mutates live skills.
 - Content-bound paired task evidence from bounded tool-free execution or an explicitly labelled operator attestation for learned executable drafts, followed by explicit approval. Metadata checks remain separate and do not claim real-task execution. See [skills evaluation and limits](../subsystems/skills.md#paired-task-evidence).
 - Reduced governed evolution change kinds: `skill_patch`, `skill_create`, `routing_metadata_update`.
 - Durable `EvolutionExperiment` records.

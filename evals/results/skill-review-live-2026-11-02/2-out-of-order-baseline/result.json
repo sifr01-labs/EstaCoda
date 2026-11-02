@@ -1,0 +1,39 @@
+{
+  "id": "2-out-of-order-baseline",
+  "passed": false,
+  "output": {
+    "stock": {
+      "K": 99,
+      "L": 17,
+      "M": -4
+    }
+  },
+  "expected": {
+    "stock": {
+      "K": 8,
+      "M": -4
+    }
+  },
+  "fixedInputsUnchanged": true,
+  "liveSkillUnchanged": true,
+  "elapsedMs": 14836,
+  "outcome": {
+    "status": "completed",
+    "terminationCause": "normal",
+    "completionFloor": "read",
+    "confirmedActions": [
+      {
+        "toolCallId": "tool-call-6940ffd50c324894b906cf84",
+        "tool": "file.write",
+        "riskClass": "workspace-write",
+        "targetSummary": "stock.json",
+        "status": "confirmed",
+        "verification": "verified"
+      }
+    ],
+    "uncertainActions": []
+  },
+  "text": "Reconciled `events.csv` into `stock.json` using the stock-snapshot procedure: retained the last row for each SKU, omitted any selected row marked deleted, preserved negative quantities, and sorted SKU keys.\n\nRead back and verified the saved output:\n\n```json\n{\"stock\":{\"K\":99,\"L\":17,\"M\":-4}}\n```\n\nSelection followed CSV row order, not revision numbers. All work was local, with no network access, delegation, or skill edits.",
+  "providerCalls": 5,
+  "reviewCalls": 0
+}

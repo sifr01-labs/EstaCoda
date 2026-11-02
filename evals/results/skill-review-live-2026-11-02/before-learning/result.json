@@ -1,0 +1,64 @@
+{
+  "id": "before-learning",
+  "passed": true,
+  "output": {
+    "stock": {
+      "A": 12,
+      "C": 0,
+      "D": -3
+    }
+  },
+  "expected": {
+    "stock": {
+      "A": 12,
+      "C": 0,
+      "D": -3
+    }
+  },
+  "fixedInputsUnchanged": true,
+  "liveSkillUnchanged": true,
+  "elapsedMs": 27698,
+  "outcome": {
+    "status": "completed",
+    "terminationCause": "normal",
+    "completionFloor": "read",
+    "confirmedActions": [
+      {
+        "toolCallId": "tool-call-05b2d924cea2201a0e77ae44",
+        "tool": "file.write",
+        "riskClass": "workspace-write",
+        "targetSummary": "stock.json",
+        "status": "confirmed",
+        "verification": "not_verified"
+      },
+      {
+        "toolCallId": "tool-call-bc6b7163faaddac84e22cf99",
+        "tool": "terminal.run",
+        "riskClass": "workspace-write",
+        "targetSummary": "cat CONTRACT.txt && cat events.csv && cat stock.json && cat verify.mjs",
+        "status": "confirmed",
+        "verification": "not_verified"
+      },
+      {
+        "toolCallId": "tool-call-f3c0ce7350fd2701fb3be6c9",
+        "tool": "terminal.run",
+        "riskClass": "workspace-write",
+        "targetSummary": "cat CONTRACT.txt && cat events.csv && cat stock.json && node verify.mjs",
+        "status": "confirmed",
+        "verification": "not_verified"
+      },
+      {
+        "toolCallId": "tool-call-c65128e43ef82eb056f8b0da",
+        "tool": "terminal.run",
+        "riskClass": "workspace-write",
+        "targetSummary": "cat CONTRACT.txt && cat events.csv && cat stock.json && node verify.mjs",
+        "status": "confirmed",
+        "verification": "not_verified"
+      }
+    ],
+    "uncertainActions": []
+  },
+  "text": "Reconciled `events.csv` into `stock.json` using `CONTRACT.txt` rather than the skill’s stale chronological-order assumption.\n\n```json\n{\"stock\":{\"A\":12,\"C\":0,\"D\":-3}}\n```\n\n- Selected the greatest numeric revision per SKU, with the last occurrence winning ties.\n- Removed B because its winning revision is a deletion.\n- Preserved zero and negative quantities and sorted the keys.\n\n`node verify.mjs` **passed**. The contract, verifier, and skill files were not changed. All work was local, without network access or delegation.",
+  "providerCalls": 7,
+  "reviewCalls": 0
+}

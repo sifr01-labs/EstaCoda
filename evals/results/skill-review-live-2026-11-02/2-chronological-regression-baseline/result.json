@@ -1,0 +1,40 @@
+{
+  "id": "2-chronological-regression-baseline",
+  "passed": true,
+  "output": {
+    "stock": {
+      "S": 7,
+      "T": -3,
+      "V": 0
+    }
+  },
+  "expected": {
+    "stock": {
+      "S": 7,
+      "T": -3,
+      "V": 0
+    }
+  },
+  "fixedInputsUnchanged": true,
+  "liveSkillUnchanged": true,
+  "elapsedMs": 17586,
+  "outcome": {
+    "status": "completed",
+    "terminationCause": "normal",
+    "completionFloor": "read",
+    "confirmedActions": [
+      {
+        "toolCallId": "tool-call-0472a63d6c907003e5a81173",
+        "tool": "file.write",
+        "riskClass": "workspace-write",
+        "targetSummary": "stock.json",
+        "status": "confirmed",
+        "verification": "verified"
+      }
+    ],
+    "uncertainActions": []
+  },
+  "text": "Reconciled `events.csv` into `stock.json` and read back the saved file to verify:\n\n```json\n{\"stock\":{\"S\":7,\"T\":-3,\"V\":0}}\n```\n\nVerified that the last row per SKU was used, deleted SKU `U` was omitted, zero and negative quantities were preserved, and keys are alphabetically sorted. All work stayed local, with no network, delegation, or skill edits.",
+  "providerCalls": 5,
+  "reviewCalls": 0
+}
