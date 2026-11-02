@@ -1,0 +1,44 @@
+{
+  "before": "c7d656c614d9acf5b9649148fa2d6d6e8c5b3c4b",
+  "hermesRevision": "5e7c2b254d414e4e25105231f818f385fee67469",
+  "afterSourceHashes": {
+    "src/tasks/agent-step-executor.ts": "ceaa55c1af806671d24d4556047f70a285db7db44d723b44c6b2ee5e4464331f"
+  },
+  "inputHashes": {
+    "estacoda/src/tasks/agent-step-executor.test.ts": "85ae3653b72a0e95b96729d68a8f17d1595db5864193d556ada7f2c2acab2f7c",
+    "estacoda/src/tasks/agent-step-executor.ts": "ceaa55c1af806671d24d4556047f70a285db7db44d723b44c6b2ee5e4464331f",
+    "estacoda/src/tasks/research-result-evidence.ts": "d395f7c4cbe639619c562ed3a49fd7d6c8c570f1447a8ce4920993be60125a4f",
+    "hermes/agent/tool_executor.py": "6849b63a321225a24dc4c4b5560a10ad8a69e42ee6f7f16cdf7d90846a2b14f3",
+    "hermes/agent/turn_stop_gates.py": "76c0d5cd75684844a14f349e41845d9d66d63a44b067017054c8ee57393a2cad",
+    "hermes/agent/turn_tool_round.py": "9e1474baeec26af32ad521a44f5aec24e5ebad1635a769d07ed175fba94d4c40",
+    "hermes/tools/delegate_tool_child_run.py": "af2b00db5b24f68ef0a15cd65ee393489bc70e0c2c6098627bf2f0678467b057"
+  },
+  "objective": "Compare how EstaCoda and Hermes accept delegated research after local read errors. Inspect the supplied pinned source snapshots, trace implementation rather than relying on comments, and recommend a small defensible acceptance policy. Distinguish execution authorization, available report text, evidence coverage, and verified task completion. Cite exact repository paths and symbols. Return a substantial readable report (about 800 words) with concrete findings from BOTH codebases, limitations, and a regression-test plan. No performance winner or claims of executed tests: this is a source investigation.",
+  "tasks": [
+    {
+      "task": "Inspect EstaCoda. Reproduce these two harmless read-input failures once each before your source investigation: terminal.inspect with argv [\"git\",\"log\",\"-1\"] and file.grep with pattern \"hasUnrecoveredToolFailure\", path \"estacoda/src/tasks\", max_filesize \"\". Then recover using supported arguments (for example git log -n 1 and a valid grep size) or another authorized read. Do not repeat a rejected formulation or bypass permissions. These are deliberately seeded regression probes, not evidence about the code. Read MANIFEST.json for actual source revisions; the workspace Git HEAD identifies only the fixture. Trace hasUnrecoveredToolFailure, researchCompletionFailure, researchReadLimitations, researchEvidenceFailure and settlement in estacoda/src/tasks/agent-step-executor.ts. Use successful discovery and file.read observations, cite paths and symbols, and report what remains unverified. Inspect only the relevant sections; do not dump whole large files.",
+      "research": {
+        "scope": "estacoda-source",
+        "requireLiveSources": false,
+        "requireRepositoryEvidence": true
+      }
+    },
+    {
+      "task": "Inspect Hermes in hermes/tools/delegate_tool_child_run.py (_build_result_entry, _validate_child_output_schema), hermes/agent/turn_tool_round.py and hermes/agent/turn_stop_gates.py. Use discovery and file.read. Explain how tool errors, real run failures, partial output and schema failures affect delegated results. Cite paths and symbols; distinguish observed code from inference. Read MANIFEST.json for source revision. Inspect relevant sections, not whole large files.",
+      "research": {
+        "scope": "hermes-source",
+        "requireLiveSources": false,
+        "requireRepositoryEvidence": true
+      }
+    }
+  ],
+  "budgets": {
+    "maxProviderIterations": 18,
+    "maxProviderToolCalls": 42,
+    "maxProviderWallClockMs": 300000,
+    "maxRepeatedToolFailures": 5,
+    "finalizationReserveMs": 20000
+  },
+  "model": "codex/gpt-6.1-sol",
+  "scope": "Two real model research workers plus live synthesis per arm; deliberately seeded real read failures. Same curated source snapshots in both arms. No Telegram or upstream test execution. Runtime before is HEAD; after is the working tree."
+}

@@ -1,0 +1,4 @@
+{
+  "includedInComparison": false,
+  "reason": "Provider network unavailable in restricted environment; no substantive research executed. Exporter initially closed SQLite before reading evidence, then recovered the persisted attempt via export-only. Export-only elapsedMs is not run duration. Both issues corrected before the completed paired runs."
+}

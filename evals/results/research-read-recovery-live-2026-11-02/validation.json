@@ -1,0 +1,143 @@
+{
+  "initialCommands": [
+    {
+      "command": [
+        "node",
+        "--version"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.1
+    },
+    {
+      "command": [
+        "pnpm",
+        "--version"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.19
+    },
+    {
+      "command": [
+        "pnpm",
+        "install",
+        "--frozen-lockfile"
+      ],
+      "exitCode": 1,
+      "elapsedSeconds": 0.22
+    },
+    {
+      "command": [
+        "pnpm",
+        "run",
+        "typecheck"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 8.96
+    },
+    {
+      "command": [
+        "pnpm",
+        "run",
+        "test"
+      ],
+      "exitCode": 1,
+      "elapsedSeconds": 104.95
+    },
+    {
+      "command": [
+        "pnpm",
+        "run",
+        "smoke"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 76.07
+    },
+    {
+      "command": [
+        "pnpm",
+        "run",
+        "build"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 17.28
+    },
+    {
+      "command": [
+        "pnpm",
+        "run",
+        "audit:runtime-imports"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 1.63
+    },
+    {
+      "command": [
+        "pnpm",
+        "run",
+        "audit:esm"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 1.75
+    },
+    {
+      "command": [
+        "pnpm",
+        "run",
+        "smoke:dist"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 84.65
+    },
+    {
+      "command": [
+        "git",
+        "diff",
+        "--check"
+      ],
+      "exitCode": 0,
+      "elapsedSeconds": 0.02
+    }
+  ],
+  "retries": [
+    {
+      "command": [
+        "pnpm",
+        "install",
+        "--frozen-lockfile"
+      ],
+      "exitCode": 0,
+      "reason": "Registry access was blocked; unrestricted retry reported already up to date."
+    },
+    {
+      "command": [
+        "pnpm",
+        "run",
+        "test"
+      ],
+      "exitCode": 0,
+      "testsPassed": 13456,
+      "filesPassed": 786,
+      "reason": "Initial restricted run blocked IPC/loopback sockets; unrestricted full rerun passed."
+    }
+  ],
+  "focused": {
+    "command": [
+      "pnpm",
+      "exec",
+      "vitest",
+      "run",
+      "src/tasks/agent-step-executor.test.ts",
+      "src/tasks/research-result-evidence.test.ts",
+      "src/tools/terminal-inspect-tool.test.ts",
+      "src/tools/grep-tools.test.ts"
+    ],
+    "exitCode": 0,
+    "testsPassed": 133
+  },
+  "live": {
+    "passed": true,
+    "temporaryCredentialsRemoved": true,
+    "privatePathAndCredentialPatternScan": "passed"
+  },
+  "risk": "Repository evidence checks establish minimum successful provenance, not exhaustive coverage or factual correctness. This patch changes acceptance only; it grants no new execution permissions."
+}

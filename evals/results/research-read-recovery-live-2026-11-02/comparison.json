@@ -1,0 +1,85 @@
+{
+  "passed": true,
+  "checks": {
+    "sameSeededErrorsAndSuccessfulCorrections": true,
+    "baselineReproducesRejection": true,
+    "updatedCompletesWithBothSources": true,
+    "limitationsSurvive": true,
+    "noUpdatedValidationRepair": true
+  },
+  "runs": {
+    "before": {
+      "status": "waiting_for_input",
+      "steps": [
+        [
+          "worker",
+          "waiting_for_input"
+        ],
+        [
+          "worker",
+          "ready"
+        ],
+        [
+          "synthesis",
+          "pending"
+        ]
+      ],
+      "failedReadTools": [
+        "terminal.inspect",
+        "file.grep"
+      ],
+      "bothSeededFailuresObserved": true,
+      "correctedGitSucceeded": true,
+      "correctedGrepSucceeded": true,
+      "acceptedResults": 0,
+      "diagnosticResults": 1,
+      "completionValidationAccepted": 0,
+      "completionValidationRejected": 1,
+      "inputsUnchanged": true,
+      "providerCalls": 18,
+      "totalTokens": 191681,
+      "elapsedMs": 84982,
+      "rejectedForToolError": true,
+      "rejectedDraftBytes": 7465
+    },
+    "after": {
+      "status": "completed",
+      "steps": [
+        [
+          "worker",
+          "completed"
+        ],
+        [
+          "worker",
+          "completed"
+        ],
+        [
+          "synthesis",
+          "completed"
+        ]
+      ],
+      "failedReadTools": [
+        "terminal.inspect",
+        "file.grep"
+      ],
+      "bothSeededFailuresObserved": true,
+      "correctedGitSucceeded": true,
+      "correctedGrepSucceeded": true,
+      "acceptedResults": 3,
+      "diagnosticResults": 0,
+      "completionValidationAccepted": 3,
+      "completionValidationRejected": 0,
+      "inputsUnchanged": true,
+      "providerCalls": 32,
+      "totalTokens": 354414,
+      "elapsedMs": 183362,
+      "synthesisReadBothResults": true,
+      "readLimitationReachedSynthesis": true,
+      "reportCitesBothCodebases": true,
+      "reportDisclosesReadFailures": true,
+      "allAttemptsCompleted": true,
+      "reportBytes": 7064
+    }
+  },
+  "scope": "One paired real-model durable research task on curated actual source snapshots. Errors deliberately seeded. No Telegram delivery, DeepSeek end-to-end benchmark, upstream tests, repeated quality trial or measured general performance claim. Pricing unavailable; zero estimates are not zero cost."
+}

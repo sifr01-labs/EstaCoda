@@ -454,7 +454,7 @@ export class AgentStepExecutor implements TaskStepExecutor {
       const unavailableSources = response.toolExecutions.filter(execution => execution.result?.ok === false &&
         isAlternativeResearchRead(input.step, execution, response.toolExecutions, response.text)).length;
       const researchText = (grounded.text ?? response.text) + (unavailableSources
-        ? `\n\nSource access limitation: ${unavailableSources} source read(s) failed. Findings use other observed sources; failed retrievals remain in the attempt history.` : "");
+        ? `\n\nSource access limitation: ${unavailableSources} source read(s) failed. Findings use other observed sources; failed retrievals remain in the attempt history.` : "") + researchReadLimitations(input.step, response.toolExecutions);
       const captured = await captureResults(researchText, response.artifacts, input, this.#resolveArtifactContent);
       if (captured.failure !== undefined) {
         return {
@@ -716,7 +716,7 @@ function researchCompletionFailure(
   if (grounded.failure !== undefined) return `Research evidence needs correction: ${grounded.failure}. ${grounded.feedback ?? "Return the corrected report with observed citations and source limitations."}`;
   // Use the same failure recovery decision before completion and at settlement.
   // A provider must be able to repair required reads before its Attempt ends.
-  if (hasUnrecoveredToolFailure(input.step, executions, text)) return "Research evidence needs correction: unresolved-tool-error. Obtain the missing required evidence with allowed tools, or report the gap. An optional token-bearing source URL may be abandoned only after citing a later successful authorized source read. Never retry a blocked URL or bypass a denial. Required-source failures, execution-policy denials, and other URL safety blocks remain unresolved.";
+  if (hasUnrecoveredToolFailure(input.step, executions, text)) return "Research evidence needs correction: unresolved-tool-error. Inspect the failed tool results and obtain missing evidence with allowed tools. Ordinary local research read errors are limitations, not evidence; successful observations must still support the report. Never retry a blocked operation or bypass a denial. Required-source failures, execution-policy denials, and other URL safety blocks remain unresolved.";
   const missing = researchEvidenceFailure(input.step, text, [...executions]);
   return missing === undefined ? undefined : `Research evidence needs correction: ${missing}. Cite evidence observed with the assigned tools; obtain missing evidence or explicitly report the unresolved gap.`;
 }
@@ -924,7 +924,27 @@ function safeDiagnosticOutput(
 
 function hasUnrecoveredToolFailure(step: TaskStep, executions: readonly ToolExecutionRecord[], text: string): boolean {
   return executions.some((execution, index) => (execution.result?.ok === false || isEmptyPassageLookup(execution)) &&
-    !isRecoveredRead(execution, index, executions) && !isRecoveredPassageLookup(execution, index, executions) && !isRecoveredDeliveryValidation(step, execution, index, executions) && !isAlternativeResearchRead(step, execution, executions, text));
+    !isLocalResearchReadLimitation(step, execution) && !isRecoveredRead(execution, index, executions) && !isRecoveredPassageLookup(execution, index, executions) && !isRecoveredDeliveryValidation(step, execution, index, executions) && !isAlternativeResearchRead(step, execution, executions, text));
+}
+
+/** A failed exploratory read is not an outstanding mutation or proof of missing
+ * research. Keep it visible without requiring an identical retry. The existing
+ * authorization, successful-source and completion gates still apply. */
+function isLocalResearchReadLimitation(step: TaskStep, execution: ToolExecutionRecord): boolean {
+  return step.executor.role === "worker" && step.executor.research?.requireRepositoryEvidence === true &&
+    step.executor.requestContract?.requirements.research !== undefined &&
+    execution.decision === "allow" && execution.riskClass === "read-only-local" &&
+    ["terminal.inspect", "file.read", "file.grep", "file.search", "file.glob"].includes(execution.tool.name) &&
+    (execution.settlement === undefined || execution.settlement.sideEffectState === "none") &&
+    execution.result?.metadata?.reason !== "unavailable";
+}
+
+function researchReadLimitations(step: TaskStep, executions: readonly ToolExecutionRecord[]): string {
+  const failed = executions.filter(execution => execution.result?.ok === false && isLocalResearchReadLimitation(step, execution));
+  if (failed.length === 0) return "";
+  // Do not copy failed arguments, paths or error bodies into a durable result.
+  const names = [...new Set(failed.map(execution => execution.tool.name))].sort().join(", ");
+  return `\n\nResearch read limitations: ${failed.length} local read attempt(s) failed (${names}). These attempts are not evidence and remain recorded in the worker history. Acceptance of this report does not establish that every requested source was inspected. Use only successful observations and preserve any unresolved coverage gaps in synthesis.`;
 }
 
 function isEmptyPassageLookup(execution: ToolExecutionRecord): boolean {

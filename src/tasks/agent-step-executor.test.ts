@@ -882,6 +882,57 @@ describe("AgentStepExecutor", () => {
     expect(settled).toMatchObject({ outcome: "failed", failure: { class: "evidence-contract-unsatisfied" } });
   });
 
+  it.each(["corrected", "alternative", "missing-evidence", "uncited-evidence", "denied", "uncertain-effect", "mutation", "unavailable", "non-research", "stopped"])("preserves local research with read limitations: %s", async mode => {
+    const graph = makeGraph();
+    const step: TaskStep = { ...graph.steps[0]!, executor: { ...graph.steps[0]!.executor, role: "worker",
+      research: { scope: "repository completion behavior", requireLiveSources: false, requireRepositoryEvidence: true },
+      ...(mode === "non-research" ? {} : { requestContract: { version: 1 as const, objective: "Inspect repository completion behavior", requirements: {
+        skillReferences: [], issues: [], research: { fresh: true, domain: "general" as const }
+      } } }) } };
+    const calls: import("../tools/tool-executor.js").ToolExecutionRecord[] = [
+      { tool: tool("terminal.inspect", "read-only-local", ["shell-readonly"]), input: { argv: ["git", "log", "-1"] },
+        decision: mode === "denied" ? "deny" : "allow", riskClass: "read-only-local",
+        result: { ok: false, content: "git log argument is not allowed: -1" } },
+      { tool: tool("terminal.inspect", "read-only-local", ["shell-readonly"]), input: { argv: ["git", "log", "--format=%H"] },
+        decision: "allow", riskClass: "read-only-local", result: { ok: false, content: "git log argument is not allowed: --format=%H" } },
+      { tool: tool("file.grep", "read-only-local", ["files"]), input: { pattern: "completion", max_filesize: "" },
+        decision: "allow", riskClass: "read-only-local", result: { ok: false, content: "invalid format for size" } }
+    ];
+    if (mode === "uncertain-effect") calls[0]!.settlement = { terminalStatus: "failed", dispatchState: "started", sideEffectState: "possible" };
+    if (mode === "mutation") calls[0] = { ...calls[0]!, tool: tool("file.write", "workspace-write", ["files"]), riskClass: "workspace-write" };
+    if (mode === "unavailable") calls[0]!.result = { ok: false, content: "Tool unavailable", metadata: { reason: "unavailable" } };
+    if (mode !== "missing-evidence") calls.push(
+      successfulEvidenceExecution("terminal.inspect", "read-only-local", ["shell-readonly"], { argv: ["git", "rev-parse", "HEAD"] }, "a".repeat(40)),
+      successfulEvidenceExecution(mode === "alternative" ? "file.glob" : "file.grep", "read-only-local", ["files"],
+        mode === "alternative" ? { pattern: "src/*.ts" } : { pattern: "completion", max_filesize: "2M" }, "src/completion.ts"),
+      successfulEvidenceExecution("file.read", "read-only-local", ["files"], { path: "src/completion.ts" }, "export const completion = true;", { path: "src/completion.ts" })
+    );
+    const text = mode === "uncited-evidence" ? "Completion is supported." : "src/completion.ts exports completion = true. No tests were executed. Other subsystems were not inspected.";
+    const accepted = ["corrected", "alternative"].includes(mode);
+    const childFactory: ChildAgentLoopFactory = { createChild: vi.fn(async input => {
+      await sessionDb.createSession({ id: "local-research", profileId: input.profileId, parentSessionId: input.parentSessionId });
+      return childRuntime(async request => {
+        const feedback = request.stepCompletion?.validate?.(text, calls);
+        if (mode !== "denied" && mode !== "stopped") expect(feedback === undefined).toBe(accepted);
+        return response({ text, toolExecutions: calls, ...(mode === "stopped" ? { completionValidationFailure: "Report not accepted before budget exhaustion" } : {}) });
+      }, async () => undefined, { sessionId: "local-research", trajectoryId: "local-research-trace" },
+      { tools: calls.map(call => call.tool.name), toolsets: ["files", "shell-readonly", "research"] });
+    }) };
+    const executor = new AgentStepExecutor({ childFactory, sessionDb, taskStore: store, hostWorkspace: graph.task.workspace,
+      isWorkspaceTrusted: () => true, parentVisibleTools: tools, approvalService: new TaskApprovalService({ store }), securityPolicy: capabilityFirstDefaults });
+    const result = await executor.execute({ task: graph.task, step, attempt: attempt({ ...graph, steps: [step] }),
+      signal: new AbortController().signal, heartbeat: vi.fn(), checkpoint: vi.fn() });
+    expect(result.outcome).toBe(accepted ? "succeeded" : "failed");
+    if (result.outcome === "succeeded") {
+      const report = result.results?.[0]?.content;
+      expect(report).toContain(text);
+      expect(report).toContain("Research read limitations: 3 local read attempt(s) failed (file.grep, terminal.inspect)");
+      expect(report).not.toContain("--format=%H");
+    }
+    if (mode === "denied") expect(result).toMatchObject({ failure: { class: "security-deny" } });
+    if (mode === "missing-evidence" || mode === "uncited-evidence") expect(result).toMatchObject({ failure: { class: "evidence-contract-unsatisfied" } });
+  });
+
   it("returns safe read-only failure output as diagnostic content", async () => {
     const graph = makeGraph();
     const childFactory: ChildAgentLoopFactory = {

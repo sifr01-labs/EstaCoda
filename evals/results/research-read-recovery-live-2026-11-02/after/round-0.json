@@ -1,0 +1,9 @@
+{
+  "reconciled": 0,
+  "dispatched": 1,
+  "completed": 1,
+  "failed": 0,
+  "cancelled": 0,
+  "leaseLost": 0,
+  "warnings": []
+}
