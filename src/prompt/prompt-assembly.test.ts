@@ -1624,6 +1624,21 @@ describe("assembleProviderContinuationPrompt", () => {
     ]));
   });
 
+  it("keeps earlier current-turn receipts current across continuation batches", () => {
+    const input = baseContinuationInput({
+      model: toolModel,
+      rawSessionHistory: [providerToolTurn("earlier-call"),
+        sessionMessage("earlier-result", "tool", "19 visible skills", { tool_call_id: "call-1" })],
+      nativeHistoryRoute: supportedNativeRoute,
+      toolExecutions: [{ ...toolExecution({ content: "19 visible skills", toolName: "skill.list" }), toolCallId: "call-1" }]
+    });
+    // The active batch uses call-read; call-1 is from an earlier batch in this turn.
+    const current = assembleProviderContinuationPrompt(input);
+    expect(current.messages.find(message => message.toolCallId === "call-1")?.content).toBe("19 visible skills");
+    const laterTurn = assembleProviderContinuationPrompt({ ...input, toolExecutions: [] });
+    expect(laterTurn.messages.find(message => message.toolCallId === "call-1")?.content).toContain("Historical tool result");
+  });
+
   it("does not prepend provider execution annotations to native assistant history", () => {
     const prompt = assembleProviderContinuationPrompt(baseContinuationInput({
       model: toolModel,

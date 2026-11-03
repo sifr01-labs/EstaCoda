@@ -1,0 +1,1266 @@
+{
+  "before": {
+    "work": {
+      "error": null,
+      "status": [
+        "partial"
+      ],
+      "providerCalls": 54,
+      "elapsedMs": 193732,
+      "inputsUnchanged": true,
+      "steps": [
+        {
+          "role": "worker",
+          "status": "failed"
+        },
+        {
+          "role": "worker",
+          "status": "failed"
+        },
+        {
+          "role": "synthesis",
+          "status": "skipped"
+        }
+      ],
+      "admissionFailures": [
+        "delegate_task tasks[0]: Delegated work requested unavailable tools: terminal.run.",
+        "delegate_task tasks[0]: Delegated work requested unavailable tools: execute_code."
+      ],
+      "accessPreviews": 0,
+      "tests": [],
+      "resultReads": []
+    },
+    "skills": {
+      "error": null,
+      "outcome": {
+        "status": "partially_completed",
+        "terminationCause": "tool_loop_no_progress",
+        "completionFloor": "read",
+        "confirmedActions": [
+          {
+            "toolCallId": "tool-call-0eb95b21d2bb9448d0d0a8e3",
+            "tool": "execute_code",
+            "riskClass": "workspace-write",
+            "targetSummary": "for args in [{\"category\": \"\"}, {}, {\"category\": \"__missing_catalog_probe__\"}]:",
+            "status": "confirmed",
+            "verification": "not_verified"
+          }
+        ],
+        "uncertainActions": []
+      },
+      "providerCalls": 11,
+      "elapsedMs": 24374,
+      "inputsUnchanged": true,
+      "calls": [
+        {
+          "input": {
+            "category": ""
+          },
+          "ok": true,
+          "count": 0,
+          "totalVisible": null,
+          "names": [],
+          "contentFirstLine": "No skills found."
+        },
+        {
+          "input": {
+            "category": ""
+          },
+          "ok": true,
+          "count": 0,
+          "totalVisible": null,
+          "names": [],
+          "contentFirstLine": "No skills found."
+        },
+        {
+          "input": {
+            "category": ""
+          },
+          "ok": true,
+          "count": 0,
+          "totalVisible": null,
+          "names": [],
+          "contentFirstLine": "No skills found."
+        },
+        {
+          "input": {
+            "category": ""
+          },
+          "ok": true,
+          "count": 0,
+          "totalVisible": null,
+          "names": [],
+          "contentFirstLine": "No skills found."
+        },
+        {
+          "input": {
+            "category": ""
+          },
+          "ok": true,
+          "count": 0,
+          "totalVisible": null,
+          "names": [],
+          "contentFirstLine": "No skills found."
+        },
+        {
+          "input": {
+            "category": ""
+          },
+          "ok": true,
+          "count": 0,
+          "totalVisible": null,
+          "names": [],
+          "contentFirstLine": "No skills found."
+        },
+        {
+          "input": {
+            "category": ""
+          },
+          "ok": true,
+          "count": 0,
+          "totalVisible": null,
+          "names": [],
+          "contentFirstLine": "No skills found."
+        },
+        {
+          "input": {
+            "category": ""
+          },
+          "ok": true,
+          "count": 0,
+          "totalVisible": null,
+          "names": [],
+          "contentFirstLine": "No skills found."
+        },
+        {
+          "input": {
+            "category": ""
+          },
+          "ok": true,
+          "count": 0,
+          "totalVisible": null,
+          "names": [],
+          "contentFirstLine": "No skills found."
+        },
+        {
+          "input": {
+            "category": ""
+          },
+          "ok": true,
+          "count": 0,
+          "totalVisible": null,
+          "names": [],
+          "contentFirstLine": "No skills found."
+        }
+      ]
+    }
+  },
+  "after": {
+    "work": {
+      "error": null,
+      "status": [
+        "completed"
+      ],
+      "providerCalls": 41,
+      "elapsedMs": 136710,
+      "inputsUnchanged": true,
+      "steps": [
+        {
+          "role": "worker",
+          "status": "completed"
+        },
+        {
+          "role": "worker",
+          "status": "completed"
+        },
+        {
+          "role": "synthesis",
+          "status": "completed"
+        }
+      ],
+      "admissionFailures": [],
+      "accessPreviews": 0,
+      "tests": [
+        {
+          "sessionId": "child_7d461836-bb08-424a-ae33-42505fec8011",
+          "child": true,
+          "command": "pnpm exec vitest run --config vitest.node.config.ts src/delegation/toolset-security.test.ts src/tasks/task-approval-service.test.ts",
+          "ok": true,
+          "exitCode": 0,
+          "passed": 15,
+          "running": false,
+          "timedOut": false
+        },
+        {
+          "sessionId": "child_a2befa7f-3c42-4e0f-b4e5-f000318ef558",
+          "child": true,
+          "command": "pnpm exec vitest run --config vitest.node.config.ts src/tools/skill-tools.test.ts",
+          "ok": true,
+          "exitCode": 0,
+          "passed": 37,
+          "running": false,
+          "timedOut": false
+        }
+      ],
+      "resultReads": [
+        {
+          "task_id": "task_87afdaf0-1c75-4101-9d93-909f8d70cc41",
+          "result_id": "d4b469e8-7f71-40c1-994f-1aedfdfb0a0c",
+          "offset": 0,
+          "max_chars": 20000
+        },
+        {
+          "task_id": "task_87afdaf0-1c75-4101-9d93-909f8d70cc41",
+          "result_id": "c8ebd3b5-4226-4de2-a2e5-0a4ea4dd8c08",
+          "offset": 0,
+          "max_chars": 20000
+        }
+      ]
+    },
+    "skills": {
+      "error": null,
+      "outcome": {
+        "status": "completed",
+        "terminationCause": "normal",
+        "completionFloor": "read",
+        "confirmedActions": [
+          {
+            "toolCallId": "tool-call-cab91072b9236cad9f2ead14",
+            "tool": "execute_code",
+            "riskClass": "workspace-write",
+            "targetSummary": "result = tool('skill.list', {})",
+            "status": "confirmed",
+            "verification": "not_verified"
+          }
+        ],
+        "uncertainActions": []
+      },
+      "providerCalls": 5,
+      "elapsedMs": 18165,
+      "inputsUnchanged": true,
+      "calls": [
+        {
+          "input": {
+            "category": ""
+          },
+          "ok": true,
+          "count": 19,
+          "totalVisible": 19,
+          "names": [
+            "product-builder",
+            "hyperframes",
+            "manim-video",
+            "ui-design",
+            "pdf-editor",
+            "pdf-extraction",
+            "himalaya-email",
+            "ascii-video",
+            "product-design",
+            "remember",
+            "external-agent-runtime-comparison",
+            "researcher",
+            "wiki-builder",
+            "xurl",
+            "batch",
+            "simplify",
+            "skillify",
+            "infographics",
+            "system-diagram"
+          ],
+          "contentFirstLine": "Showing 19 of 19 visible skills."
+        },
+        {
+          "input": {
+            "category": ""
+          },
+          "ok": true,
+          "count": 19,
+          "totalVisible": 19,
+          "names": [
+            "product-builder",
+            "hyperframes",
+            "manim-video",
+            "ui-design",
+            "pdf-editor",
+            "pdf-extraction",
+            "himalaya-email",
+            "ascii-video",
+            "product-design",
+            "remember",
+            "external-agent-runtime-comparison",
+            "researcher",
+            "wiki-builder",
+            "xurl",
+            "batch",
+            "simplify",
+            "skillify",
+            "infographics",
+            "system-diagram"
+          ],
+          "contentFirstLine": "Showing 19 of 19 visible skills."
+        },
+        {
+          "input": {
+            "category": "__missing_catalog_probe__"
+          },
+          "ok": true,
+          "count": 0,
+          "totalVisible": 19,
+          "names": [],
+          "contentFirstLine": "No skills match category \"__missing_catalog_probe__\". 19 skills are visible. Available categories: coding, creative, design, documents, email, media, planning, productivity, research, social-media, software-development, visualization. Omit category to list all visible skills."
+        }
+      ]
+    }
+  },
+  "checks": {
+    "updatedTaskCompleted": true,
+    "twoWorkersAndSynthesisAccepted": true,
+    "workersExecutedBothChecks": true,
+    "synthesisReadBothReports": true,
+    "sourceUnchanged": true,
+    "skillsCompleted": true,
+    "blankFilterListsSkills": true,
+    "missingCategoryDistinguished": true
+  },
+  "pilot": {
+    "before": {
+      "work": {
+        "error": null,
+        "status": [
+          "partial"
+        ],
+        "providerCalls": 51,
+        "elapsedMs": 203513,
+        "inputsUnchanged": true,
+        "steps": [
+          {
+            "role": "worker",
+            "status": "failed"
+          },
+          {
+            "role": "worker",
+            "status": "failed"
+          },
+          {
+            "role": "synthesis",
+            "status": "skipped"
+          }
+        ],
+        "admissionFailures": [
+          "delegate_task tasks[0]: Delegated work requested unavailable tools: terminal.run.",
+          "delegate_task tasks[0]: Delegated work requested unavailable tools: process.start."
+        ],
+        "accessPreviews": 0,
+        "tests": [],
+        "resultReads": []
+      },
+      "skills": {
+        "error": null,
+        "outcome": {
+          "status": "partially_completed",
+          "terminationCause": "tool_loop_no_progress",
+          "completionFloor": "read",
+          "confirmedActions": [],
+          "uncertainActions": []
+        },
+        "providerCalls": 7,
+        "elapsedMs": 15097,
+        "inputsUnchanged": true,
+        "calls": [
+          {
+            "input": {
+              "category": ""
+            },
+            "ok": true,
+            "count": 0,
+            "totalVisible": null,
+            "names": [],
+            "contentFirstLine": "No skills found."
+          },
+          {
+            "input": {
+              "category": ""
+            },
+            "ok": true,
+            "count": 0,
+            "totalVisible": null,
+            "names": [],
+            "contentFirstLine": "No skills found."
+          },
+          {
+            "input": {
+              "category": ""
+            },
+            "ok": true,
+            "count": 0,
+            "totalVisible": null,
+            "names": [],
+            "contentFirstLine": "No skills found."
+          },
+          {
+            "input": {
+              "category": ""
+            },
+            "ok": true,
+            "count": 0,
+            "totalVisible": null,
+            "names": [],
+            "contentFirstLine": "No skills found."
+          },
+          {
+            "input": {
+              "category": ""
+            },
+            "ok": true,
+            "count": 0,
+            "totalVisible": null,
+            "names": [],
+            "contentFirstLine": "No skills found."
+          },
+          {
+            "input": {
+              "category": ""
+            },
+            "ok": true,
+            "count": 0,
+            "totalVisible": null,
+            "names": [],
+            "contentFirstLine": "No skills found."
+          },
+          {
+            "input": {
+              "category": ""
+            },
+            "ok": true,
+            "count": 0,
+            "totalVisible": null,
+            "names": [],
+            "contentFirstLine": "No skills found."
+          }
+        ]
+      }
+    },
+    "after": {
+      "work": {
+        "error": null,
+        "status": [
+          "partial"
+        ],
+        "providerCalls": 50,
+        "elapsedMs": 163320,
+        "inputsUnchanged": true,
+        "steps": [
+          {
+            "role": "worker",
+            "status": "failed"
+          },
+          {
+            "role": "worker",
+            "status": "failed"
+          },
+          {
+            "role": "synthesis",
+            "status": "skipped"
+          }
+        ],
+        "admissionFailures": [],
+        "accessPreviews": 1,
+        "tests": [
+          {
+            "sessionId": "child_8d30d3bf-7eef-4957-bf6b-c55be6ebf2c7",
+            "child": true,
+            "command": "pnpm exec vitest run --config vitest.node.config.ts src/tools/skill-tools.test.ts",
+            "ok": true,
+            "exitCode": 0,
+            "passed": 37,
+            "running": false,
+            "timedOut": false
+          },
+          {
+            "sessionId": "child_75b2f09f-c6ea-4f33-be62-14826b133254",
+            "child": true,
+            "command": "pnpm exec vitest run --config vitest.node.config.ts src/delegation/toolset-security.test.ts src/tasks/task-approval-service.test.ts",
+            "ok": true,
+            "exitCode": 0,
+            "passed": 15,
+            "running": false,
+            "timedOut": false
+          }
+        ],
+        "resultReads": []
+      },
+      "skills": {
+        "error": null,
+        "outcome": {
+          "status": "partially_completed",
+          "terminationCause": "tool_loop_no_progress",
+          "completionFloor": "read",
+          "confirmedActions": [],
+          "uncertainActions": []
+        },
+        "providerCalls": 7,
+        "elapsedMs": 15950,
+        "inputsUnchanged": true,
+        "calls": [
+          {
+            "input": {
+              "category": ""
+            },
+            "ok": true,
+            "count": 19,
+            "totalVisible": 19,
+            "names": [
+              "product-builder",
+              "hyperframes",
+              "manim-video",
+              "ui-design",
+              "pdf-editor",
+              "pdf-extraction",
+              "himalaya-email",
+              "ascii-video",
+              "product-design",
+              "remember",
+              "external-agent-runtime-comparison",
+              "researcher",
+              "wiki-builder",
+              "xurl",
+              "batch",
+              "simplify",
+              "skillify",
+              "infographics",
+              "system-diagram"
+            ],
+            "contentFirstLine": "Showing 19 of 19 visible skills."
+          },
+          {
+            "input": {
+              "category": ""
+            },
+            "ok": true,
+            "count": 19,
+            "totalVisible": 19,
+            "names": [
+              "product-builder",
+              "hyperframes",
+              "manim-video",
+              "ui-design",
+              "pdf-editor",
+              "pdf-extraction",
+              "himalaya-email",
+              "ascii-video",
+              "product-design",
+              "remember",
+              "external-agent-runtime-comparison",
+              "researcher",
+              "wiki-builder",
+              "xurl",
+              "batch",
+              "simplify",
+              "skillify",
+              "infographics",
+              "system-diagram"
+            ],
+            "contentFirstLine": "Showing 19 of 19 visible skills."
+          },
+          {
+            "input": {
+              "category": ""
+            },
+            "ok": true,
+            "count": 19,
+            "totalVisible": 19,
+            "names": [
+              "product-builder",
+              "hyperframes",
+              "manim-video",
+              "ui-design",
+              "pdf-editor",
+              "pdf-extraction",
+              "himalaya-email",
+              "ascii-video",
+              "product-design",
+              "remember",
+              "external-agent-runtime-comparison",
+              "researcher",
+              "wiki-builder",
+              "xurl",
+              "batch",
+              "simplify",
+              "skillify",
+              "infographics",
+              "system-diagram"
+            ],
+            "contentFirstLine": "Showing 19 of 19 visible skills."
+          },
+          {
+            "input": {
+              "category": ""
+            },
+            "ok": true,
+            "count": 19,
+            "totalVisible": 19,
+            "names": [
+              "product-builder",
+              "hyperframes",
+              "manim-video",
+              "ui-design",
+              "pdf-editor",
+              "pdf-extraction",
+              "himalaya-email",
+              "ascii-video",
+              "product-design",
+              "remember",
+              "external-agent-runtime-comparison",
+              "researcher",
+              "wiki-builder",
+              "xurl",
+              "batch",
+              "simplify",
+              "skillify",
+              "infographics",
+              "system-diagram"
+            ],
+            "contentFirstLine": "Showing 19 of 19 visible skills."
+          },
+          {
+            "input": {
+              "category": ""
+            },
+            "ok": true,
+            "count": 19,
+            "totalVisible": 19,
+            "names": [
+              "product-builder",
+              "hyperframes",
+              "manim-video",
+              "ui-design",
+              "pdf-editor",
+              "pdf-extraction",
+              "himalaya-email",
+              "ascii-video",
+              "product-design",
+              "remember",
+              "external-agent-runtime-comparison",
+              "researcher",
+              "wiki-builder",
+              "xurl",
+              "batch",
+              "simplify",
+              "skillify",
+              "infographics",
+              "system-diagram"
+            ],
+            "contentFirstLine": "Showing 19 of 19 visible skills."
+          },
+          {
+            "input": {
+              "category": ""
+            },
+            "ok": true,
+            "count": 19,
+            "totalVisible": 19,
+            "names": [
+              "product-builder",
+              "hyperframes",
+              "manim-video",
+              "ui-design",
+              "pdf-editor",
+              "pdf-extraction",
+              "himalaya-email",
+              "ascii-video",
+              "product-design",
+              "remember",
+              "external-agent-runtime-comparison",
+              "researcher",
+              "wiki-builder",
+              "xurl",
+              "batch",
+              "simplify",
+              "skillify",
+              "infographics",
+              "system-diagram"
+            ],
+            "contentFirstLine": "Showing 19 of 19 visible skills."
+          },
+          {
+            "input": {
+              "category": ""
+            },
+            "ok": true,
+            "count": 19,
+            "totalVisible": 19,
+            "names": [
+              "product-builder",
+              "hyperframes",
+              "manim-video",
+              "ui-design",
+              "pdf-editor",
+              "pdf-extraction",
+              "himalaya-email",
+              "ascii-video",
+              "product-design",
+              "remember",
+              "external-agent-runtime-comparison",
+              "researcher",
+              "wiki-builder",
+              "xurl",
+              "batch",
+              "simplify",
+              "skillify",
+              "infographics",
+              "system-diagram"
+            ],
+            "contentFirstLine": "Showing 19 of 19 visible skills."
+          }
+        ]
+      }
+    }
+  },
+  "intermediate": {
+    "before": {
+      "work": {
+        "error": null,
+        "status": [
+          "partial"
+        ],
+        "providerCalls": 49,
+        "elapsedMs": 197244,
+        "inputsUnchanged": true,
+        "steps": [
+          {
+            "role": "worker",
+            "status": "failed"
+          },
+          {
+            "role": "worker",
+            "status": "failed"
+          },
+          {
+            "role": "synthesis",
+            "status": "skipped"
+          }
+        ],
+        "admissionFailures": [
+          "delegate_task tasks[0]: Delegated work requested unavailable tools: terminal.run.",
+          "delegate_task tasks[0]: Delegated work requested unavailable tools: process.start.",
+          "delegate_task tasks[0]: Delegated work requested unavailable tools: execute_code."
+        ],
+        "accessPreviews": 0,
+        "tests": [],
+        "resultReads": []
+      },
+      "skills": {
+        "error": null,
+        "outcome": {
+          "status": "partially_completed",
+          "terminationCause": "tool_loop_no_progress",
+          "completionFloor": "read",
+          "confirmedActions": [],
+          "uncertainActions": []
+        },
+        "providerCalls": 7,
+        "elapsedMs": 17512,
+        "inputsUnchanged": true,
+        "calls": [
+          {
+            "input": {
+              "category": ""
+            },
+            "ok": true,
+            "count": 0,
+            "totalVisible": null,
+            "names": [],
+            "contentFirstLine": "No skills found."
+          },
+          {
+            "input": {
+              "category": ""
+            },
+            "ok": true,
+            "count": 0,
+            "totalVisible": null,
+            "names": [],
+            "contentFirstLine": "No skills found."
+          },
+          {
+            "input": {
+              "category": ""
+            },
+            "ok": true,
+            "count": 0,
+            "totalVisible": null,
+            "names": [],
+            "contentFirstLine": "No skills found."
+          },
+          {
+            "input": {
+              "category": ""
+            },
+            "ok": true,
+            "count": 0,
+            "totalVisible": null,
+            "names": [],
+            "contentFirstLine": "No skills found."
+          },
+          {
+            "input": {
+              "category": ""
+            },
+            "ok": true,
+            "count": 0,
+            "totalVisible": null,
+            "names": [],
+            "contentFirstLine": "No skills found."
+          },
+          {
+            "input": {
+              "category": ""
+            },
+            "ok": true,
+            "count": 0,
+            "totalVisible": null,
+            "names": [],
+            "contentFirstLine": "No skills found."
+          },
+          {
+            "input": {
+              "category": ""
+            },
+            "ok": true,
+            "count": 0,
+            "totalVisible": null,
+            "names": [],
+            "contentFirstLine": "No skills found."
+          }
+        ]
+      }
+    },
+    "after": {
+      "work": {
+        "error": null,
+        "status": [
+          "completed"
+        ],
+        "providerCalls": 43,
+        "elapsedMs": 150563,
+        "inputsUnchanged": true,
+        "steps": [
+          {
+            "role": "worker",
+            "status": "completed"
+          },
+          {
+            "role": "worker",
+            "status": "completed"
+          },
+          {
+            "role": "synthesis",
+            "status": "completed"
+          }
+        ],
+        "admissionFailures": [],
+        "accessPreviews": 1,
+        "tests": [
+          {
+            "sessionId": "child_6d8e306e-61dd-4a13-ad18-5f1bd0d6fa2e",
+            "child": true,
+            "command": "pnpm exec vitest run --config vitest.node.config.ts src/tools/skill-tools.test.ts",
+            "ok": true,
+            "exitCode": 0,
+            "passed": 37,
+            "running": false,
+            "timedOut": false
+          },
+          {
+            "sessionId": "child_75b1a8d5-761a-471d-b1f4-798c3c3744f8",
+            "child": true,
+            "command": "pnpm exec vitest run --config vitest.node.config.ts src/delegation/toolset-security.test.ts src/tasks/task-approval-service.test.ts",
+            "ok": true,
+            "exitCode": 0,
+            "passed": 15,
+            "running": false,
+            "timedOut": false
+          }
+        ],
+        "resultReads": [
+          {
+            "task_id": "task_545b6695-a18a-46db-baa9-2b9fd695f72b",
+            "result_id": "8d3a1c75-b1d7-4bfd-8b18-b8bed6d728fc",
+            "offset": 0,
+            "max_chars": 20000
+          },
+          {
+            "task_id": "task_545b6695-a18a-46db-baa9-2b9fd695f72b",
+            "result_id": "a820b158-94c5-42e4-9871-87c53eb31231",
+            "offset": 0,
+            "max_chars": 20000
+          }
+        ]
+      },
+      "skills": {
+        "error": null,
+        "outcome": {
+          "status": "partially_completed",
+          "terminationCause": "tool_loop_no_progress",
+          "completionFloor": "read",
+          "confirmedActions": [
+            {
+              "toolCallId": "tool-call-745521d7a6b63ea5b769f667",
+              "tool": "execute_code",
+              "riskClass": "workspace-write",
+              "targetSummary": "r = tool('skill.list', {})",
+              "status": "confirmed",
+              "verification": "not_verified"
+            }
+          ],
+          "uncertainActions": []
+        },
+        "providerCalls": 13,
+        "elapsedMs": 27398,
+        "inputsUnchanged": true,
+        "calls": [
+          {
+            "input": {
+              "category": ""
+            },
+            "ok": true,
+            "count": 19,
+            "totalVisible": 19,
+            "names": [
+              "product-builder",
+              "hyperframes",
+              "manim-video",
+              "ui-design",
+              "pdf-editor",
+              "pdf-extraction",
+              "himalaya-email",
+              "ascii-video",
+              "product-design",
+              "remember",
+              "external-agent-runtime-comparison",
+              "researcher",
+              "wiki-builder",
+              "xurl",
+              "batch",
+              "simplify",
+              "skillify",
+              "infographics",
+              "system-diagram"
+            ],
+            "contentFirstLine": "Showing 19 of 19 visible skills."
+          },
+          {
+            "input": {
+              "category": "__missing_catalog_probe__"
+            },
+            "ok": true,
+            "count": 0,
+            "totalVisible": 19,
+            "names": [],
+            "contentFirstLine": "No skills match category \"__missing_catalog_probe__\". 19 skills are visible. Available categories: coding, creative, design, documents, email, media, planning, productivity, research, social-media, software-development, visualization. Omit category to list all visible skills."
+          },
+          {
+            "input": {
+              "category": ""
+            },
+            "ok": true,
+            "count": 19,
+            "totalVisible": 19,
+            "names": [
+              "product-builder",
+              "hyperframes",
+              "manim-video",
+              "ui-design",
+              "pdf-editor",
+              "pdf-extraction",
+              "himalaya-email",
+              "ascii-video",
+              "product-design",
+              "remember",
+              "external-agent-runtime-comparison",
+              "researcher",
+              "wiki-builder",
+              "xurl",
+              "batch",
+              "simplify",
+              "skillify",
+              "infographics",
+              "system-diagram"
+            ],
+            "contentFirstLine": "Showing 19 of 19 visible skills."
+          },
+          {
+            "input": {
+              "category": ""
+            },
+            "ok": true,
+            "count": 19,
+            "totalVisible": 19,
+            "names": [
+              "product-builder",
+              "hyperframes",
+              "manim-video",
+              "ui-design",
+              "pdf-editor",
+              "pdf-extraction",
+              "himalaya-email",
+              "ascii-video",
+              "product-design",
+              "remember",
+              "external-agent-runtime-comparison",
+              "researcher",
+              "wiki-builder",
+              "xurl",
+              "batch",
+              "simplify",
+              "skillify",
+              "infographics",
+              "system-diagram"
+            ],
+            "contentFirstLine": "Showing 19 of 19 visible skills."
+          },
+          {
+            "input": {
+              "category": ""
+            },
+            "ok": true,
+            "count": 19,
+            "totalVisible": 19,
+            "names": [
+              "product-builder",
+              "hyperframes",
+              "manim-video",
+              "ui-design",
+              "pdf-editor",
+              "pdf-extraction",
+              "himalaya-email",
+              "ascii-video",
+              "product-design",
+              "remember",
+              "external-agent-runtime-comparison",
+              "researcher",
+              "wiki-builder",
+              "xurl",
+              "batch",
+              "simplify",
+              "skillify",
+              "infographics",
+              "system-diagram"
+            ],
+            "contentFirstLine": "Showing 19 of 19 visible skills."
+          },
+          {
+            "input": {
+              "category": ""
+            },
+            "ok": true,
+            "count": 19,
+            "totalVisible": 19,
+            "names": [
+              "product-builder",
+              "hyperframes",
+              "manim-video",
+              "ui-design",
+              "pdf-editor",
+              "pdf-extraction",
+              "himalaya-email",
+              "ascii-video",
+              "product-design",
+              "remember",
+              "external-agent-runtime-comparison",
+              "researcher",
+              "wiki-builder",
+              "xurl",
+              "batch",
+              "simplify",
+              "skillify",
+              "infographics",
+              "system-diagram"
+            ],
+            "contentFirstLine": "Showing 19 of 19 visible skills."
+          },
+          {
+            "input": {
+              "category": ""
+            },
+            "ok": true,
+            "count": 19,
+            "totalVisible": 19,
+            "names": [
+              "product-builder",
+              "hyperframes",
+              "manim-video",
+              "ui-design",
+              "pdf-editor",
+              "pdf-extraction",
+              "himalaya-email",
+              "ascii-video",
+              "product-design",
+              "remember",
+              "external-agent-runtime-comparison",
+              "researcher",
+              "wiki-builder",
+              "xurl",
+              "batch",
+              "simplify",
+              "skillify",
+              "infographics",
+              "system-diagram"
+            ],
+            "contentFirstLine": "Showing 19 of 19 visible skills."
+          },
+          {
+            "input": {
+              "category": ""
+            },
+            "ok": true,
+            "count": 19,
+            "totalVisible": 19,
+            "names": [
+              "product-builder",
+              "hyperframes",
+              "manim-video",
+              "ui-design",
+              "pdf-editor",
+              "pdf-extraction",
+              "himalaya-email",
+              "ascii-video",
+              "product-design",
+              "remember",
+              "external-agent-runtime-comparison",
+              "researcher",
+              "wiki-builder",
+              "xurl",
+              "batch",
+              "simplify",
+              "skillify",
+              "infographics",
+              "system-diagram"
+            ],
+            "contentFirstLine": "Showing 19 of 19 visible skills."
+          },
+          {
+            "input": {
+              "category": ""
+            },
+            "ok": true,
+            "count": 19,
+            "totalVisible": 19,
+            "names": [
+              "product-builder",
+              "hyperframes",
+              "manim-video",
+              "ui-design",
+              "pdf-editor",
+              "pdf-extraction",
+              "himalaya-email",
+              "ascii-video",
+              "product-design",
+              "remember",
+              "external-agent-runtime-comparison",
+              "researcher",
+              "wiki-builder",
+              "xurl",
+              "batch",
+              "simplify",
+              "skillify",
+              "infographics",
+              "system-diagram"
+            ],
+            "contentFirstLine": "Showing 19 of 19 visible skills."
+          },
+          {
+            "input": {
+              "category": ""
+            },
+            "ok": true,
+            "count": 19,
+            "totalVisible": 19,
+            "names": [
+              "product-builder",
+              "hyperframes",
+              "manim-video",
+              "ui-design",
+              "pdf-editor",
+              "pdf-extraction",
+              "himalaya-email",
+              "ascii-video",
+              "product-design",
+              "remember",
+              "external-agent-runtime-comparison",
+              "researcher",
+              "wiki-builder",
+              "xurl",
+              "batch",
+              "simplify",
+              "skillify",
+              "infographics",
+              "system-diagram"
+            ],
+            "contentFirstLine": "Showing 19 of 19 visible skills."
+          },
+          {
+            "input": {
+              "category": ""
+            },
+            "ok": true,
+            "count": 19,
+            "totalVisible": 19,
+            "names": [
+              "product-builder",
+              "hyperframes",
+              "manim-video",
+              "ui-design",
+              "pdf-editor",
+              "pdf-extraction",
+              "himalaya-email",
+              "ascii-video",
+              "product-design",
+              "remember",
+              "external-agent-runtime-comparison",
+              "researcher",
+              "wiki-builder",
+              "xurl",
+              "batch",
+              "simplify",
+              "skillify",
+              "infographics",
+              "system-diagram"
+            ],
+            "contentFirstLine": "Showing 19 of 19 visible skills."
+          },
+          {
+            "input": {
+              "category": ""
+            },
+            "ok": true,
+            "count": 19,
+            "totalVisible": 19,
+            "names": [
+              "product-builder",
+              "hyperframes",
+              "manim-video",
+              "ui-design",
+              "pdf-editor",
+              "pdf-extraction",
+              "himalaya-email",
+              "ascii-video",
+              "product-design",
+              "remember",
+              "external-agent-runtime-comparison",
+              "researcher",
+              "wiki-builder",
+              "xurl",
+              "batch",
+              "simplify",
+              "skillify",
+              "infographics",
+              "system-diagram"
+            ],
+            "contentFirstLine": "Showing 19 of 19 visible skills."
+          }
+        ]
+      }
+    }
+  }
+}

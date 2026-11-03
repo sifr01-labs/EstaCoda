@@ -1,0 +1,70 @@
+{
+  "node": "v24.14.1",
+  "pnpm": "10.33.0",
+  "baseline": "fbf1f4db2e190009e217beb9989d6f239568330f",
+  "branch": "ame/jev-assisted-routing",
+  "checks": [
+    {
+      "command": "pnpm install --frozen-lockfile",
+      "status": "passed"
+    },
+    {
+      "command": "pnpm run typecheck",
+      "status": "passed"
+    },
+    {
+      "command": "pnpm run test --maxWorkers=4",
+      "status": "passed"
+    },
+    {
+      "command": "pnpm run smoke",
+      "status": "passed"
+    },
+    {
+      "command": "pnpm run build",
+      "status": "passed"
+    },
+    {
+      "command": "pnpm run audit:runtime-imports",
+      "status": "passed"
+    },
+    {
+      "command": "pnpm run audit:esm",
+      "status": "passed"
+    },
+    {
+      "command": "pnpm run smoke:dist",
+      "status": "passed"
+    },
+    {
+      "command": "pnpm exec vitest run --config vitest.node.config.ts src/delegation/toolset-security.test.ts",
+      "status": "passed"
+    },
+    {
+      "command": "git diff --check",
+      "status": "passed"
+    },
+    {
+      "command": "python3 evals/results/delegated-work-live-2026-11-03/grade.py",
+      "status": "passed"
+    }
+  ],
+  "fullSuite": {
+    "files": 786,
+    "passed": 13483,
+    "failed": 0
+  },
+  "priorValidation": [
+    "First full suite: stale delegation-security expectation and tool-schema snapshot; unrelated subprocess timeout passed in isolation.",
+    "Subsequent full suite: 13480 passed before current-turn history/research-contract tests.",
+    "Later full suite: stale live-history expectation plus CLI timeout under load. Expectation updated; final full suite uses four workers.",
+    "Focused current-turn evidence suites: 297 passed before the additional assembly regression test."
+  ],
+  "limitations": [
+    "No Telegram or external DeepSeek/Hermes run.",
+    "One final matched pair; earlier failed and intermediate runs retained.",
+    "Provider-required category field prevented live literal-omission test; covered deterministically.",
+    "Corepack bootstrap notice prevents certifying zero network/install activity.",
+    "No OS sandbox or test-only execution boundary claimed."
+  ]
+}

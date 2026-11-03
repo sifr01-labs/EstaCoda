@@ -31,6 +31,7 @@ export type DelegationToolOptions = {
 };
 
 type DelegateTaskInput = {
+  mode?: "create" | "inspect";
   task?: string;
   tasks?: unknown;
   context?: string;
@@ -55,11 +56,15 @@ export function createDelegationTools(options: DelegationToolOptions): Registere
       name: "delegate_task",
       description: [
         "Create durable Tasks for bounded subtasks with explicit context and tool access.",
+        "Use mode=inspect to preview current child tool access without creating work; omit task/tasks in that mode.",
+        "Omit allowedTools and allowedToolsets to inherit eligible parent-visible tools; supply them only to narrow access. Tool exposure does not authorize execution: workspace trust, runtime approval and Task authority still apply.",
+        `Eligible risk classes: ${delegationConfig.defaultAllowedRiskClasses.join(", ")}. Excluded toolsets: ${delegationConfig.defaultExcludedToolsets.join(", ") || "none"}. Blocked names: ${delegationConfig.blockedToolNames.join(", ") || "none"}. Blocked prefixes: ${delegationConfig.blockedToolPrefixes.join(", ") || "none"}.`,
         "Returns a Task handle immediately; use Task status and result surfaces to follow completion.",
         `Supports one task or up to ${delegationConfig.maxBatchTasks} batch tasks.`,
         "Batches add one fixed terminal synthesis Step by default; pass synthesis: false only for inspection-only work.",
         "A synthesis object can provide a custom final-answer objective and model.",
         "A non-terminal root Task with a primary Result Step owns the requested answer: this provider turn ends after creation and the durable result is delivered when the Task settles.",
+        "Include required verification in the worker objectives before handing off; synthesis must receive actual test receipts and limitations. If execution is unavailable, finish parent-owned checks before delegation or report the unmet requirement; do not silently omit it.",
         "Research items should use distinct non-overlapping scopes; live and repository evidence requirements are verified from observed tool results, not model claims.",
         `The durable scheduler runs at most ${delegationConfig.maxConcurrentChildren} Steps in parallel.`,
         `Child delegation depth is limited to ${delegationConfig.maxSpawnDepth}.`
@@ -67,6 +72,7 @@ export function createDelegationTools(options: DelegationToolOptions): Registere
       inputSchema: {
         type: "object",
         properties: {
+          mode: { type: "string", enum: ["create", "inspect"], description: "Defaults to create. inspect previews child access without starting workers." },
           task: {
             type: "string",
             description: "Single task text. Required when tasks is omitted."
@@ -145,6 +151,21 @@ export function createDelegationTools(options: DelegationToolOptions): Registere
       run: async (input: DelegateTaskInput, context?: ToolExecutionContext) => {
         if (!options.service) return undispatchedResult(structuredValidationError(
           "Durable delegation requires a persistent Task store and workspace binding. No child was started.", "delegation-unavailable"));
+        if (input.mode === "inspect") {
+          const access = options.service.inspectAccess(input);
+          return undispatchedResult({
+            ok: true,
+            content: [
+              "Child access preview; no Task or worker was created. Admission is revalidated when creating work and every operation remains policy checked.",
+              `Eligible tools: ${access.effectiveAllowedTools.join(", ") || "none"}.`,
+              `Eligible toolsets: ${access.effectiveAllowedToolsets.join(", ") || "none"}.`,
+              `Excluded tools and reasons: ${access.strippedTools.map((tool) => `${tool.name} (${tool.reasons.join(", ")})`).join("; ") || "none"}.`
+            ].join("\n"),
+            metadata: { reason: "delegation-access-preview", access }
+          });
+        }
+        if (input.mode !== undefined && input.mode !== "create") return undispatchedResult(structuredValidationError(
+          "delegate_task mode must be create or inspect.", "invalid-delegation-mode"));
         const parsed = parseDelegateTaskInput(input, delegationConfig);
         if (!parsed.ok) {
           return undispatchedResult(parsed.error);
@@ -188,16 +209,20 @@ export function createDelegationTools(options: DelegationToolOptions): Registere
             );
           }
           if (error instanceof DelegationAccessError) {
+            const available = options.service.inspectAccess();
             return undispatchedResult({
               ok: false,
-              content: error.taskIndex === undefined
+              content: (error.taskIndex === undefined
                 ? error.message
-                : `delegate_task tasks[${error.taskIndex}]: ${error.message}`,
+                : `delegate_task tasks[${error.taskIndex}]: ${error.message}`) +
+                `\nNo new workers started. Eligible child tools before optional narrowing: ${available.effectiveAllowedTools.join(", ") || "none"}.` +
+                "\nRetry with eligible tools or omit optional allowlists to inherit them. Keep required checks in scope: if a necessary capability is unavailable, perform that work before handing off or explicitly report it as incomplete. Use mode=inspect for exclusion reasons.",
               metadata: {
                 reason: "delegation-access-error",
                 code: error.code,
                 ...(error.taskIndex === undefined ? {} : { taskIndex: error.taskIndex }),
-                access: error.access
+                access: error.access,
+                availableAccess: available
               }
             });
           }

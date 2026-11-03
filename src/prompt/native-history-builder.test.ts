@@ -60,6 +60,27 @@ function replayEcho(
 }
 
 describe("buildNativeHistoryMessages", () => {
+  it("does not demand another read for the active continuation but keeps older evidence historical", () => {
+    const history = [message("user-1", "user", "Inspect current state"), providerToolTurn("agent-call"),
+      toolResult("tool-1", "call-1", "current skill catalog")];
+    const current = buildNativeHistoryMessages(history, { replayEchoContext: {
+      kind: "active-continuation", activeToolCallIds: new Set(["call-1"]), requiresReasoningEcho: false
+    } });
+    expect(current.messages.at(-1)?.content).toBe("current skill catalog");
+    expect(current.stats.historicalToolResultsLabeled).toBe(0);
+    const prior = buildNativeHistoryMessages(history, { replayEchoContext: {
+      kind: "active-continuation", activeToolCallIds: new Set(["another-call"]), requiresReasoningEcho: false
+    } });
+    expect(prior.messages.at(-1)?.content).toContain("Historical tool result");
+    expect(prior.stats.historicalToolResultsLabeled).toBe(1);
+    const earlierInThisTurn = buildNativeHistoryMessages(history, {
+      currentTurnToolCallIds: new Set(["call-1"]),
+      replayEchoContext: { kind: "active-continuation", activeToolCallIds: new Set(["another-call"]), requiresReasoningEcho: false }
+    });
+    expect(earlierInThisTurn.messages.at(-1)?.content).toBe("current skill catalog");
+    expect(earlierInThisTurn.stats.historicalToolResultsLabeled).toBe(0);
+  });
+
   it("converts a valid safe provider tool turn into native assistant and tool messages", () => {
     const result = buildNativeHistoryMessages([
       message("user-1", "user", "Read the file"),

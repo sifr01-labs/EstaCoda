@@ -19,6 +19,7 @@ export type NativeHistoryBuilderOptions = {
   mergeAdjacentUsers?: boolean;
   replayEchoContext?: ProviderReplayEchoContext;
   activeRouteIdentity?: ProviderReplayEchoRouteIdentity;
+  currentTurnToolCallIds?: ReadonlySet<string>;
 };
 
 export type ProviderReplayEchoRouteIdentity = {
@@ -166,9 +167,15 @@ function buildToolCallTurnMessages(
 
     for (const result of resultsForCall) {
       const toolName = toolNameFromMetadata(result.metadata) ?? toolNameById.get(toolCall.id);
+      // Current-turn observations remain evidence across continuation batches.
+      // Their IDs come from execution receipts, never historical model text.
+      const current = options.currentTurnToolCallIds?.has(toolCall.id) === true ||
+        options.replayEchoContext?.kind === "active-continuation" && options.replayEchoContext.activeToolCallIds.has(toolCall.id);
       providerMessages.push({
         role: "tool",
-        content: labelHistoricalToolResultContent(result, result.content, toolName, stats),
+        content: current
+          ? toolName === "delegate_task" ? truncateNativeDelegationResult(result.content) : result.content
+          : labelHistoricalToolResultContent(result, result.content, toolName, stats),
         toolCallId: toolCall.id
       });
       stats.nativeToolResults += 1;

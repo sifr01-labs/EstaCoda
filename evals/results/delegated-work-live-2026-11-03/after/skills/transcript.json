@@ -1,0 +1,811 @@
+[
+  {
+    "session": {
+      "executionTarget": {
+        "schemaVersion": 1,
+        "targetId": "target_4432f3b7-325b-430c-a7da-85a80ce3974a",
+        "targetGeneration": 1,
+        "workspace": {
+          "canonicalPath": "<BENCHMARK_ROOT>/after/skills/workspace",
+          "identityHash": "f01546ec89149c3cd5308b9697603bbb97c74174a904e3873f518c339e591345"
+        }
+      },
+      "id": "1c0bab97-07c4-432e-951b-82653917c108",
+      "profileId": "default",
+      "title": "Audit the skills currently visible to this session. First call skill.list with category set to …",
+      "createdAt": "2026-11-03T22:33:56.357Z",
+      "updatedAt": "2026-11-03T22:34:14.331Z",
+      "metadata": {
+        "workspaceRoot": "<BENCHMARK_ROOT>/after/skills/workspace",
+        "originSurface": "cli",
+        "latestUserTurn": {
+          "id": "d3ec2d6e-ba5f-4a31-9da9-5b5cc5d9a957",
+          "createdAt": "2026-11-03T22:33:56.455Z"
+        }
+      }
+    },
+    "messages": [
+      {
+        "id": "d3ec2d6e-ba5f-4a31-9da9-5b5cc5d9a957",
+        "sessionId": "1c0bab97-07c4-432e-951b-82653917c108",
+        "role": "user",
+        "content": "Audit the skills currently visible to this session. First call skill.list with category set to the empty string, then call it with no category, then with category __missing_catalog_probe__. These deliberately supplied inputs exercise discovery, not skill execution. Explain whether the first two return the same names/count and whether the last means an empty catalog or an unmatched category. Use tool results rather than guessing from the prompt index; do not edit skills or inspect personal state. Return the observed counts and a brief interpretation.",
+        "createdAt": "2026-11-03T22:33:56.455Z",
+        "channel": "cli"
+      },
+      {
+        "id": "63021707-9849-4290-a0f5-9ed8b4cde80c",
+        "sessionId": "1c0bab97-07c4-432e-951b-82653917c108",
+        "role": "agent",
+        "content": "| Input | Observed result |\n|---|---:|\n| `category: \"\"` | 19 skills |\n| Second call—also sent as `category: \"\"` | 19 skills; identical names |\n| `category: \"__missing_catalog_probe__\"` | 0 matches; 19 skills still visible |\n\nThe probe means **an unmatched category, not an empty catalog**. The tool explicitly reported that 19 skills remain visible.\n\n**Limitation:** I did not successfully test an omitted category. The exposed tool schema required the field, so the second direct call repeated the empty string; an attempted omitted-field call through the execution wrapper was unavailable. Thus, the two observed listings match exactly, but omitted-category equivalence was not independently verified.\n\nNo skills were executed or edited, and no personal state was inspected.",
+        "createdAt": "2026-11-03T22:34:14.331Z",
+        "channel": "cli"
+      }
+    ],
+    "events": [
+      {
+        "kind": "security-assessed",
+        "tool": "skill.list",
+        "riskClass": "read-only-local",
+        "assessment": {
+          "decision": "allow",
+          "mode": "adaptive",
+          "reason": "Allowed by skills-first policy for this tool and workspace state.",
+          "risk": "low",
+          "deterministicRule": "capability-first"
+        }
+      },
+      {
+        "kind": "tool-plan",
+        "plan": {
+          "id": "tool-call-56f63eaaff1c74a451883ee4",
+          "tool": "skill.list",
+          "input": {
+            "category": ""
+          },
+          "source": "provider-tool-call",
+          "status": "executed",
+          "riskClass": "read-only-local",
+          "result": {
+            "ok": true,
+            "content": "Showing 19 of 19 visible skills.\nproduct-builder\tcoding\tbundled\tGuides non-technical builders through agent-assisted product development using decision maps, phased PRDs, vertical slices, reviewer-agent loops, and milestone control artifacts.\nhyperframes\tcreative\tbundled\tCreate rendered MP4/WebM motion graphics from HTML, CSS, JavaScript, GSAP, audio, and media assets.\nmanim-video\tcreative\tbundled\tCreate mathematical, algorithmic, and technical explainer videos with Manim Community Edition.\nui-design\tdesign\tbundled\tApply a strong product-design critique and implementation workflow for polished web interfaces and visual systems.\npdf-editor\tdocuments\tbundled\tEdit PDFs through a managed pdf-editor environment with explicit approval, output-copy safety, and verification.\npdf-extraction\tdocuments\tbundled\tExtract text, tables, metadata, images, Markdown, and OCR-ready content from PDFs, scans, and document images using managed Python extractors.\nhimalaya-email\temail\tbundled\tUse the Himalaya CLI for email tasks with explicit credential, send, delete, and download approvals.\nascii-video\tmedia\tbundled\tCreate ASCII art videos, animated logo treatments, and generative terminal-style motion pieces.\nproduct-design\tplanning\tbundled\tAuthor, review, and optionally lint DESIGN.md product specs for AI-assisted software planning.\nremember\tproductivity\tbundled\tReview EstaCoda memory entries and propose promotions, cleanup, deduplication, and conflict fixes across memory layers.\nexternal-agent-runtime-comparison\tresearch\tbundled\tCompare agent codebases and their underlying runtimes using pinned source evidence, executed checks and explicit benchmark limits.\nresearcher\tresearch\tbundled\tPlan, execute, analyze, draft, review, and submit research papers with citation verification and experiment discipline.\nwiki-builder\tresearch\tbundled\tBuild, query, lint, and maintain a persistent markdown knowledge wiki with raw-source provenance, cross-links, schema discipline, and compounding synthesis.\nxurl\tsocial-media\tbundled\tOperate X/Twitter through the official xurl CLI for posts, search, timelines, DMs, media, and raw API calls.\nbatch\tsoftware-development\tbundled\tResearch and plan a large-scale change across a codebase. Produces a decomposed plan with verification recipes, ready for user approval before execution.\nsimplify\tsoftware-development\tbundled\tReview changed code for reuse, quality, and efficiency, then present findings for approval.\nskillify\tsoftware-development\tbundled\tCapture this session's repeatable process into an EstaCoda skill through a structured interview and review step, using governed skill creation tools.\ninfographics\tvisualization\tbundled\tTurn source material into structured infographic prompts and generate or prepare visual summaries using curated layouts and styles.\nsystem-diagram\tvisualization\tbundled\tCreate dark-themed SVG system, cloud, infrastructure, and architecture diagrams as standalone HTML files.",
+            "metadata": {
+              "count": 19,
+              "totalVisible": 19,
+              "category": null,
+              "categories": [
+                "coding",
+                "creative",
+                "design",
+                "documents",
+                "email",
+                "media",
+                "planning",
+                "productivity",
+                "research",
+                "social-media",
+                "software-development",
+                "visualization"
+              ],
+              "skills": [
+                {
+                  "name": "product-builder",
+                  "description": "Guides non-technical builders through agent-assisted product development using decision maps, phased PRDs, vertical slices, reviewer-agent loops, and milestone control artifacts.",
+                  "version": "0.1.0",
+                  "category": "coding",
+                  "requiredToolsets": [
+                    "core"
+                  ],
+                  "sourceKind": "bundled",
+                  "sourcePath": "<BENCHMARK_ROOT>/after-source/skills/official/product-builder/SKILL.md",
+                  "instructionBytes": 3992
+                },
+                {
+                  "name": "hyperframes",
+                  "description": "Create rendered MP4/WebM motion graphics from HTML, CSS, JavaScript, GSAP, audio, and media assets.",
+                  "version": "1.0.0",
+                  "category": "creative",
+                  "requiredToolsets": [
+                    "files",
+                    "shell-write"
+                  ],
+                  "sourceKind": "bundled",
+                  "sourcePath": "<BENCHMARK_ROOT>/after-source/skills/official/hyperframes/SKILL.md",
+                  "instructionBytes": 14234
+                },
+                {
+                  "name": "manim-video",
+                  "description": "Create mathematical, algorithmic, and technical explainer videos with Manim Community Edition.",
+                  "version": "1.0.0",
+                  "category": "creative",
+                  "requiredToolsets": [
+                    "files",
+                    "shell-write"
+                  ],
+                  "sourceKind": "bundled",
+                  "sourcePath": "<BENCHMARK_ROOT>/after-source/skills/official/manim-video/SKILL.md",
+                  "instructionBytes": 11339
+                },
+                {
+                  "name": "ui-design",
+                  "description": "Apply a strong product-design critique and implementation workflow for polished web interfaces and visual systems.",
+                  "version": "1.0.0",
+                  "category": "design",
+                  "requiredToolsets": [
+                    "files"
+                  ],
+                  "sourceKind": "bundled",
+                  "sourcePath": "<BENCHMARK_ROOT>/after-source/skills/official/ui-design/SKILL.md",
+                  "instructionBytes": 18143
+                },
+                {
+                  "name": "pdf-editor",
+                  "description": "Edit PDFs through a managed pdf-editor environment with explicit approval, output-copy safety, and verification.",
+                  "version": "1.0.0",
+                  "category": "documents",
+                  "requiredToolsets": [
+                    "files"
+                  ],
+                  "sourceKind": "bundled",
+                  "sourcePath": "<BENCHMARK_ROOT>/after-source/skills/official/pdf-editor/SKILL.md",
+                  "instructionBytes": 1830
+                },
+                {
+                  "name": "pdf-extraction",
+                  "description": "Extract text, tables, metadata, images, Markdown, and OCR-ready content from PDFs, scans, and document images using managed Python extractors.",
+                  "version": "2.3.0",
+                  "category": "documents",
+                  "requiredToolsets": [
+                    "files"
+                  ],
+                  "sourceKind": "bundled",
+                  "sourcePath": "<BENCHMARK_ROOT>/after-source/skills/official/pdf-extraction/SKILL.md",
+                  "instructionBytes": 6332
+                },
+                {
+                  "name": "himalaya-email",
+                  "description": "Use the Himalaya CLI for email tasks with explicit credential, send, delete, and download approvals.",
+                  "version": "1.0.0",
+                  "category": "email",
+                  "requiredToolsets": [
+                    "core"
+                  ],
+                  "sourceKind": "bundled",
+                  "sourcePath": "<BENCHMARK_ROOT>/after-source/skills/official/himalaya-email/SKILL.md",
+                  "instructionBytes": 6915
+                },
+                {
+                  "name": "ascii-video",
+                  "description": "Create ASCII art videos, animated logo treatments, and generative terminal-style motion pieces.",
+                  "version": "0.1.0",
+                  "category": "media",
+                  "requiredToolsets": [
+                    "media",
+                    "files",
+                    "shell-write"
+                  ],
+                  "sourceKind": "bundled",
+                  "sourcePath": "<BENCHMARK_ROOT>/after-source/skills/official/ascii-video/SKILL.md",
+                  "instructionBytes": 782
+                },
+                {
+                  "name": "product-design",
+                  "description": "Author, review, and optionally lint DESIGN.md product specs for AI-assisted software planning.",
+                  "version": "1.0.0",
+                  "category": "planning",
+                  "requiredToolsets": [
+                    "files"
+                  ],
+                  "sourceKind": "bundled",
+                  "sourcePath": "<BENCHMARK_ROOT>/after-source/skills/official/product-design/SKILL.md",
+                  "instructionBytes": 6895
+                },
+                {
+                  "name": "remember",
+                  "description": "Review EstaCoda memory entries and propose promotions, cleanup, deduplication, and conflict fixes across memory layers.",
+                  "version": "1.0.0",
+                  "category": "productivity",
+                  "requiredToolsets": [
+                    "memory",
+                    "research"
+                  ],
+                  "sourceKind": "bundled",
+                  "sourcePath": "<BENCHMARK_ROOT>/after-source/skills/official/remember/SKILL.md",
+                  "instructionBytes": 3981
+                },
+                {
+                  "name": "external-agent-runtime-comparison",
+                  "description": "Compare agent codebases and their underlying runtimes using pinned source evidence, executed checks and explicit benchmark limits.",
+                  "version": "1.0.0",
+                  "category": "research",
+                  "requiredToolsets": [
+                    "files"
+                  ],
+                  "sourceKind": "bundled",
+                  "sourcePath": "<BENCHMARK_ROOT>/after-source/skills/official/external-agent-runtime-comparison/SKILL.md",
+                  "instructionBytes": 4002
+                },
+                {
+                  "name": "researcher",
+                  "description": "Plan, execute, analyze, draft, review, and submit research papers with citation verification and experiment discipline.",
+                  "version": "2.0.0",
+                  "category": "research",
+                  "requiredToolsets": [
+                    "files",
+                    "research"
+                  ],
+                  "sourceKind": "bundled",
+                  "sourcePath": "<BENCHMARK_ROOT>/after-source/skills/official/researcher/SKILL.md",
+                  "instructionBytes": 9916
+                },
+                {
+                  "name": "wiki-builder",
+                  "description": "Build, query, lint, and maintain a persistent markdown knowledge wiki with raw-source provenance, cross-links, schema discipline, and compounding synthesis.",
+                  "version": "1.0.0",
+                  "category": "research",
+                  "requiredToolsets": [
+                    "files",
+                    "research"
+                  ],
+                  "sourceKind": "bundled",
+                  "sourcePath": "<BENCHMARK_ROOT>/after-source/skills/official/wiki-builder/SKILL.md",
+                  "instructionBytes": 12619
+                },
+                {
+                  "name": "xurl",
+                  "description": "Operate X/Twitter through the official xurl CLI for posts, search, timelines, DMs, media, and raw API calls.",
+                  "version": "1.1.1",
+                  "category": "social-media",
+                  "requiredToolsets": [
+                    "shell-readonly",
+                    "shell-write"
+                  ],
+                  "sourceKind": "bundled",
+                  "sourcePath": "<BENCHMARK_ROOT>/after-source/skills/official/xurl/SKILL.md",
+                  "instructionBytes": 14823
+                },
+                {
+                  "name": "batch",
+                  "description": "Research and plan a large-scale change across a codebase. Produces a decomposed plan with verification recipes, ready for user approval before execution.",
+                  "version": "1.0.0",
+                  "category": "software-development",
+                  "requiredToolsets": [
+                    "files",
+                    "shell-readonly",
+                    "research"
+                  ],
+                  "sourceKind": "bundled",
+                  "sourcePath": "<BENCHMARK_ROOT>/after-source/skills/official/batch/SKILL.md",
+                  "instructionBytes": 3999
+                },
+                {
+                  "name": "simplify",
+                  "description": "Review changed code for reuse, quality, and efficiency, then present findings for approval.",
+                  "version": "1.0.0",
+                  "category": "software-development",
+                  "requiredToolsets": [
+                    "files",
+                    "shell-readonly"
+                  ],
+                  "sourceKind": "bundled",
+                  "sourcePath": "<BENCHMARK_ROOT>/after-source/skills/official/simplify/SKILL.md",
+                  "instructionBytes": 3859
+                },
+                {
+                  "name": "skillify",
+                  "description": "Capture this session's repeatable process into an EstaCoda skill through a structured interview and review step, using governed skill creation tools.",
+                  "version": "1.0.0",
+                  "category": "software-development",
+                  "requiredToolsets": [
+                    "files",
+                    "research"
+                  ],
+                  "sourceKind": "bundled",
+                  "sourcePath": "<BENCHMARK_ROOT>/after-source/skills/official/skillify/SKILL.md",
+                  "instructionBytes": 3839
+                },
+                {
+                  "name": "infographics",
+                  "description": "Turn source material into structured infographic prompts and generate or prepare visual summaries using curated layouts and styles.",
+                  "version": "1.0.0",
+                  "category": "visualization",
+                  "requiredToolsets": [
+                    "files"
+                  ],
+                  "sourceKind": "bundled",
+                  "sourcePath": "<BENCHMARK_ROOT>/after-source/skills/official/infographics/SKILL.md",
+                  "instructionBytes": 10273
+                },
+                {
+                  "name": "system-diagram",
+                  "description": "Create dark-themed SVG system, cloud, infrastructure, and architecture diagrams as standalone HTML files.",
+                  "version": "1.0.0",
+                  "category": "visualization",
+                  "requiredToolsets": [
+                    "files"
+                  ],
+                  "sourceKind": "bundled",
+                  "sourcePath": "<BENCHMARK_ROOT>/after-source/skills/official/system-diagram/SKILL.md",
+                  "instructionBytes": 5537
+                }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "kind": "structured-tool-history-selected",
+        "provider": "codex",
+        "model": "gpt-6.1-sol",
+        "routeRole": "primary",
+        "nativePairs": 1,
+        "droppedOrphans": 0,
+        "injectedStubs": 0,
+        "mergedUsers": 0,
+        "skippedMalformedToolCalls": 0,
+        "skippedUnsafeTurns": 0,
+        "echoMessages": 0,
+        "preservedEchoMessages": 0,
+        "placeholderEchoMessages": 0,
+        "strippedEchoMessages": 0,
+        "nativeReplayUnsafeTurns": 0,
+        "historicalToolResultsLabeled": 0,
+        "mutableStateToolResultsLabeled": 0
+      },
+      {
+        "kind": "security-assessed",
+        "tool": "skill.list",
+        "riskClass": "read-only-local",
+        "assessment": {
+          "decision": "allow",
+          "mode": "adaptive",
+          "reason": "Allowed by skills-first policy for this tool and workspace state.",
+          "risk": "low",
+          "deterministicRule": "capability-first"
+        }
+      },
+      {
+        "kind": "tool-plan",
+        "plan": {
+          "id": "tool-call-5d780c5d6ec958bbea035f91",
+          "tool": "skill.list",
+          "input": {
+            "category": ""
+          },
+          "source": "provider-tool-call",
+          "status": "executed",
+          "riskClass": "read-only-local",
+          "result": {
+            "ok": true,
+            "content": "Showing 19 of 19 visible skills.\nproduct-builder\tcoding\tbundled\tGuides non-technical builders through agent-assisted product development using decision maps, phased PRDs, vertical slices, reviewer-agent loops, and milestone control artifacts.\nhyperframes\tcreative\tbundled\tCreate rendered MP4/WebM motion graphics from HTML, CSS, JavaScript, GSAP, audio, and media assets.\nmanim-video\tcreative\tbundled\tCreate mathematical, algorithmic, and technical explainer videos with Manim Community Edition.\nui-design\tdesign\tbundled\tApply a strong product-design critique and implementation workflow for polished web interfaces and visual systems.\npdf-editor\tdocuments\tbundled\tEdit PDFs through a managed pdf-editor environment with explicit approval, output-copy safety, and verification.\npdf-extraction\tdocuments\tbundled\tExtract text, tables, metadata, images, Markdown, and OCR-ready content from PDFs, scans, and document images using managed Python extractors.\nhimalaya-email\temail\tbundled\tUse the Himalaya CLI for email tasks with explicit credential, send, delete, and download approvals.\nascii-video\tmedia\tbundled\tCreate ASCII art videos, animated logo treatments, and generative terminal-style motion pieces.\nproduct-design\tplanning\tbundled\tAuthor, review, and optionally lint DESIGN.md product specs for AI-assisted software planning.\nremember\tproductivity\tbundled\tReview EstaCoda memory entries and propose promotions, cleanup, deduplication, and conflict fixes across memory layers.\nexternal-agent-runtime-comparison\tresearch\tbundled\tCompare agent codebases and their underlying runtimes using pinned source evidence, executed checks and explicit benchmark limits.\nresearcher\tresearch\tbundled\tPlan, execute, analyze, draft, review, and submit research papers with citation verification and experiment discipline.\nwiki-builder\tresearch\tbundled\tBuild, query, lint, and maintain a persistent markdown knowledge wiki with raw-source provenance, cross-links, schema discipline, and compounding synthesis.\nxurl\tsocial-media\tbundled\tOperate X/Twitter through the official xurl CLI for posts, search, timelines, DMs, media, and raw API calls.\nbatch\tsoftware-development\tbundled\tResearch and plan a large-scale change across a codebase. Produces a decomposed plan with verification recipes, ready for user approval before execution.\nsimplify\tsoftware-development\tbundled\tReview changed code for reuse, quality, and efficiency, then present findings for approval.\nskillify\tsoftware-development\tbundled\tCapture this session's repeatable process into an EstaCoda skill through a structured interview and review step, using governed skill creation tools.\ninfographics\tvisualization\tbundled\tTurn source material into structured infographic prompts and generate or prepare visual summaries using curated layouts and styles.\nsystem-diagram\tvisualization\tbundled\tCreate dark-themed SVG system, cloud, infrastructure, and architecture diagrams as standalone HTML files.",
+            "metadata": {
+              "count": 19,
+              "totalVisible": 19,
+              "category": null,
+              "categories": [
+                "coding",
+                "creative",
+                "design",
+                "documents",
+                "email",
+                "media",
+                "planning",
+                "productivity",
+                "research",
+                "social-media",
+                "software-development",
+                "visualization"
+              ],
+              "skills": [
+                {
+                  "name": "product-builder",
+                  "description": "Guides non-technical builders through agent-assisted product development using decision maps, phased PRDs, vertical slices, reviewer-agent loops, and milestone control artifacts.",
+                  "version": "0.1.0",
+                  "category": "coding",
+                  "requiredToolsets": [
+                    "core"
+                  ],
+                  "sourceKind": "bundled",
+                  "sourcePath": "<BENCHMARK_ROOT>/after-source/skills/official/product-builder/SKILL.md",
+                  "instructionBytes": 3992
+                },
+                {
+                  "name": "hyperframes",
+                  "description": "Create rendered MP4/WebM motion graphics from HTML, CSS, JavaScript, GSAP, audio, and media assets.",
+                  "version": "1.0.0",
+                  "category": "creative",
+                  "requiredToolsets": [
+                    "files",
+                    "shell-write"
+                  ],
+                  "sourceKind": "bundled",
+                  "sourcePath": "<BENCHMARK_ROOT>/after-source/skills/official/hyperframes/SKILL.md",
+                  "instructionBytes": 14234
+                },
+                {
+                  "name": "manim-video",
+                  "description": "Create mathematical, algorithmic, and technical explainer videos with Manim Community Edition.",
+                  "version": "1.0.0",
+                  "category": "creative",
+                  "requiredToolsets": [
+                    "files",
+                    "shell-write"
+                  ],
+                  "sourceKind": "bundled",
+                  "sourcePath": "<BENCHMARK_ROOT>/after-source/skills/official/manim-video/SKILL.md",
+                  "instructionBytes": 11339
+                },
+                {
+                  "name": "ui-design",
+                  "description": "Apply a strong product-design critique and implementation workflow for polished web interfaces and visual systems.",
+                  "version": "1.0.0",
+                  "category": "design",
+                  "requiredToolsets": [
+                    "files"
+                  ],
+                  "sourceKind": "bundled",
+                  "sourcePath": "<BENCHMARK_ROOT>/after-source/skills/official/ui-design/SKILL.md",
+                  "instructionBytes": 18143
+                },
+                {
+                  "name": "pdf-editor",
+                  "description": "Edit PDFs through a managed pdf-editor environment with explicit approval, output-copy safety, and verification.",
+                  "version": "1.0.0",
+                  "category": "documents",
+                  "requiredToolsets": [
+                    "files"
+                  ],
+                  "sourceKind": "bundled",
+                  "sourcePath": "<BENCHMARK_ROOT>/after-source/skills/official/pdf-editor/SKILL.md",
+                  "instructionBytes": 1830
+                },
+                {
+                  "name": "pdf-extraction",
+                  "description": "Extract text, tables, metadata, images, Markdown, and OCR-ready content from PDFs, scans, and document images using managed Python extractors.",
+                  "version": "2.3.0",
+                  "category": "documents",
+                  "requiredToolsets": [
+                    "files"
+                  ],
+                  "sourceKind": "bundled",
+                  "sourcePath": "<BENCHMARK_ROOT>/after-source/skills/official/pdf-extraction/SKILL.md",
+                  "instructionBytes": 6332
+                },
+                {
+                  "name": "himalaya-email",
+                  "description": "Use the Himalaya CLI for email tasks with explicit credential, send, delete, and download approvals.",
+                  "version": "1.0.0",
+                  "category": "email",
+                  "requiredToolsets": [
+                    "core"
+                  ],
+                  "sourceKind": "bundled",
+                  "sourcePath": "<BENCHMARK_ROOT>/after-source/skills/official/himalaya-email/SKILL.md",
+                  "instructionBytes": 6915
+                },
+                {
+                  "name": "ascii-video",
+                  "description": "Create ASCII art videos, animated logo treatments, and generative terminal-style motion pieces.",
+                  "version": "0.1.0",
+                  "category": "media",
+                  "requiredToolsets": [
+                    "media",
+                    "files",
+                    "shell-write"
+                  ],
+                  "sourceKind": "bundled",
+                  "sourcePath": "<BENCHMARK_ROOT>/after-source/skills/official/ascii-video/SKILL.md",
+                  "instructionBytes": 782
+                },
+                {
+                  "name": "product-design",
+                  "description": "Author, review, and optionally lint DESIGN.md product specs for AI-assisted software planning.",
+                  "version": "1.0.0",
+                  "category": "planning",
+                  "requiredToolsets": [
+                    "files"
+                  ],
+                  "sourceKind": "bundled",
+                  "sourcePath": "<BENCHMARK_ROOT>/after-source/skills/official/product-design/SKILL.md",
+                  "instructionBytes": 6895
+                },
+                {
+                  "name": "remember",
+                  "description": "Review EstaCoda memory entries and propose promotions, cleanup, deduplication, and conflict fixes across memory layers.",
+                  "version": "1.0.0",
+                  "category": "productivity",
+                  "requiredToolsets": [
+                    "memory",
+                    "research"
+                  ],
+                  "sourceKind": "bundled",
+                  "sourcePath": "<BENCHMARK_ROOT>/after-source/skills/official/remember/SKILL.md",
+                  "instructionBytes": 3981
+                },
+                {
+                  "name": "external-agent-runtime-comparison",
+                  "description": "Compare agent codebases and their underlying runtimes using pinned source evidence, executed checks and explicit benchmark limits.",
+                  "version": "1.0.0",
+                  "category": "research",
+                  "requiredToolsets": [
+                    "files"
+                  ],
+                  "sourceKind": "bundled",
+                  "sourcePath": "<BENCHMARK_ROOT>/after-source/skills/official/external-agent-runtime-comparison/SKILL.md",
+                  "instructionBytes": 4002
+                },
+                {
+                  "name": "researcher",
+                  "description": "Plan, execute, analyze, draft, review, and submit research papers with citation verification and experiment discipline.",
+                  "version": "2.0.0",
+                  "category": "research",
+                  "requiredToolsets": [
+                    "files",
+                    "research"
+                  ],
+                  "sourceKind": "bundled",
+                  "sourcePath": "<BENCHMARK_ROOT>/after-source/skills/official/researcher/SKILL.md",
+                  "instructionBytes": 9916
+                },
+                {
+                  "name": "wiki-builder",
+                  "description": "Build, query, lint, and maintain a persistent markdown knowledge wiki with raw-source provenance, cross-links, schema discipline, and compounding synthesis.",
+                  "version": "1.0.0",
+                  "category": "research",
+                  "requiredToolsets": [
+                    "files",
+                    "research"
+                  ],
+                  "sourceKind": "bundled",
+                  "sourcePath": "<BENCHMARK_ROOT>/after-source/skills/official/wiki-builder/SKILL.md",
+                  "instructionBytes": 12619
+                },
+                {
+                  "name": "xurl",
+                  "description": "Operate X/Twitter through the official xurl CLI for posts, search, timelines, DMs, media, and raw API calls.",
+                  "version": "1.1.1",
+                  "category": "social-media",
+                  "requiredToolsets": [
+                    "shell-readonly",
+                    "shell-write"
+                  ],
+                  "sourceKind": "bundled",
+                  "sourcePath": "<BENCHMARK_ROOT>/after-source/skills/official/xurl/SKILL.md",
+                  "instructionBytes": 14823
+                },
+                {
+                  "name": "batch",
+                  "description": "Research and plan a large-scale change across a codebase. Produces a decomposed plan with verification recipes, ready for user approval before execution.",
+                  "version": "1.0.0",
+                  "category": "software-development",
+                  "requiredToolsets": [
+                    "files",
+                    "shell-readonly",
+                    "research"
+                  ],
+                  "sourceKind": "bundled",
+                  "sourcePath": "<BENCHMARK_ROOT>/after-source/skills/official/batch/SKILL.md",
+                  "instructionBytes": 3999
+                },
+                {
+                  "name": "simplify",
+                  "description": "Review changed code for reuse, quality, and efficiency, then present findings for approval.",
+                  "version": "1.0.0",
+                  "category": "software-development",
+                  "requiredToolsets": [
+                    "files",
+                    "shell-readonly"
+                  ],
+                  "sourceKind": "bundled",
+                  "sourcePath": "<BENCHMARK_ROOT>/after-source/skills/official/simplify/SKILL.md",
+                  "instructionBytes": 3859
+                },
+                {
+                  "name": "skillify",
+                  "description": "Capture this session's repeatable process into an EstaCoda skill through a structured interview and review step, using governed skill creation tools.",
+                  "version": "1.0.0",
+                  "category": "software-development",
+                  "requiredToolsets": [
+                    "files",
+                    "research"
+                  ],
+                  "sourceKind": "bundled",
+                  "sourcePath": "<BENCHMARK_ROOT>/after-source/skills/official/skillify/SKILL.md",
+                  "instructionBytes": 3839
+                },
+                {
+                  "name": "infographics",
+                  "description": "Turn source material into structured infographic prompts and generate or prepare visual summaries using curated layouts and styles.",
+                  "version": "1.0.0",
+                  "category": "visualization",
+                  "requiredToolsets": [
+                    "files"
+                  ],
+                  "sourceKind": "bundled",
+                  "sourcePath": "<BENCHMARK_ROOT>/after-source/skills/official/infographics/SKILL.md",
+                  "instructionBytes": 10273
+                },
+                {
+                  "name": "system-diagram",
+                  "description": "Create dark-themed SVG system, cloud, infrastructure, and architecture diagrams as standalone HTML files.",
+                  "version": "1.0.0",
+                  "category": "visualization",
+                  "requiredToolsets": [
+                    "files"
+                  ],
+                  "sourceKind": "bundled",
+                  "sourcePath": "<BENCHMARK_ROOT>/after-source/skills/official/system-diagram/SKILL.md",
+                  "instructionBytes": 5537
+                }
+              ]
+            }
+          }
+        }
+      },
+      {
+        "kind": "structured-tool-history-selected",
+        "provider": "codex",
+        "model": "gpt-6.1-sol",
+        "routeRole": "primary",
+        "nativePairs": 2,
+        "droppedOrphans": 0,
+        "injectedStubs": 0,
+        "mergedUsers": 0,
+        "skippedMalformedToolCalls": 0,
+        "skippedUnsafeTurns": 0,
+        "echoMessages": 0,
+        "preservedEchoMessages": 0,
+        "placeholderEchoMessages": 0,
+        "strippedEchoMessages": 0,
+        "nativeReplayUnsafeTurns": 0,
+        "historicalNativeReplay": true,
+        "historicalToolResultsLabeled": 0,
+        "mutableStateToolResultsLabeled": 0
+      },
+      {
+        "kind": "security-assessed",
+        "tool": "skill.list",
+        "riskClass": "read-only-local",
+        "assessment": {
+          "decision": "allow",
+          "mode": "adaptive",
+          "reason": "Allowed by skills-first policy for this tool and workspace state.",
+          "risk": "low",
+          "deterministicRule": "capability-first"
+        }
+      },
+      {
+        "kind": "tool-plan",
+        "plan": {
+          "id": "tool-call-9e8710ccfa2f4c977ce77f13",
+          "tool": "skill.list",
+          "input": {
+            "category": "__missing_catalog_probe__"
+          },
+          "source": "provider-tool-call",
+          "status": "executed",
+          "riskClass": "read-only-local",
+          "result": {
+            "ok": true,
+            "content": "No skills match category \"__missing_catalog_probe__\". 19 skills are visible. Available categories: coding, creative, design, documents, email, media, planning, productivity, research, social-media, software-development, visualization. Omit category to list all visible skills.",
+            "metadata": {
+              "count": 0,
+              "totalVisible": 19,
+              "category": "__missing_catalog_probe__",
+              "categories": [
+                "coding",
+                "creative",
+                "design",
+                "documents",
+                "email",
+                "media",
+                "planning",
+                "productivity",
+                "research",
+                "social-media",
+                "software-development",
+                "visualization"
+              ],
+              "skills": []
+            }
+          }
+        }
+      },
+      {
+        "kind": "structured-tool-history-selected",
+        "provider": "codex",
+        "model": "gpt-6.1-sol",
+        "routeRole": "primary",
+        "nativePairs": 3,
+        "droppedOrphans": 0,
+        "injectedStubs": 0,
+        "mergedUsers": 0,
+        "skippedMalformedToolCalls": 0,
+        "skippedUnsafeTurns": 0,
+        "echoMessages": 0,
+        "preservedEchoMessages": 0,
+        "placeholderEchoMessages": 0,
+        "strippedEchoMessages": 0,
+        "nativeReplayUnsafeTurns": 0,
+        "historicalNativeReplay": true,
+        "historicalToolResultsLabeled": 0,
+        "mutableStateToolResultsLabeled": 0
+      },
+      {
+        "kind": "security-assessed",
+        "tool": "execute_code",
+        "riskClass": "workspace-write",
+        "targetSummary": "result = tool('skill.list', {})",
+        "assessment": {
+          "decision": "allow",
+          "mode": "adaptive",
+          "reason": "Allowed by skills-first policy for this tool and workspace state.",
+          "risk": "medium",
+          "deterministicRule": "capability-first"
+        }
+      },
+      {
+        "kind": "tool-plan",
+        "plan": {
+          "id": "tool-call-cab91072b9236cad9f2ead14",
+          "tool": "execute_code",
+          "input": {
+            "code": "result = tool('skill.list', {})\nprint(result)",
+            "maxOutputChars": 5000
+          },
+          "source": "provider-tool-call",
+          "status": "executed",
+          "riskClass": "workspace-write",
+          "result": {
+            "ok": true,
+            "content": "{'ok': False, 'content': 'Tool is not available inside execute_code: skill.list', 'metadata': {'tool': 'skill.list', 'allowedTools': ['document.probe', 'file.patch', 'file.read', 'file.search', 'file.write', 'process.list', 'process.logs', 'process.start', 'process.stop', 'python.probe', 'terminal.run']}}",
+            "metadata": {
+              "exitCode": 0,
+              "signal": null,
+              "timedOut": false,
+              "cancelled": false,
+              "timeoutMs": 5000,
+              "maxOutputChars": 5000,
+              "toolCalls": 1,
+              "outputTruncated": false,
+              "cwd": "<BENCHMARK_ROOT>/after/skills/workspace"
+            }
+          }
+        }
+      },
+      {
+        "kind": "structured-tool-history-selected",
+        "provider": "codex",
+        "model": "gpt-6.1-sol",
+        "routeRole": "primary",
+        "nativePairs": 4,
+        "droppedOrphans": 0,
+        "injectedStubs": 0,
+        "mergedUsers": 0,
+        "skippedMalformedToolCalls": 0,
+        "skippedUnsafeTurns": 0,
+        "echoMessages": 0,
+        "preservedEchoMessages": 0,
+        "placeholderEchoMessages": 0,
+        "strippedEchoMessages": 0,
+        "nativeReplayUnsafeTurns": 0,
+        "historicalNativeReplay": true,
+        "historicalToolResultsLabeled": 0,
+        "mutableStateToolResultsLabeled": 0
+      },
+      {
+        "kind": "step-completion-validation",
+        "accepted": true,
+        "repair": false,
+        "repairAttempt": 0
+      },
+      {
+        "kind": "execution-final-outcome-recorded",
+        "status": "completed",
+        "terminationCause": "normal",
+        "completionFloor": "read",
+        "turnMessageId": "d3ec2d6e-ba5f-4a31-9da9-5b5cc5d9a957"
+      }
+    ]
+  }
+]

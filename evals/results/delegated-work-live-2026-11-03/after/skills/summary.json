@@ -1,0 +1,24 @@
+{
+  "arm": "after",
+  "test": "skills",
+  "elapsedMs": 18165,
+  "inputsUnchanged": true,
+  "outcome": {
+    "status": "completed",
+    "terminationCause": "normal",
+    "completionFloor": "read",
+    "confirmedActions": [
+      {
+        "toolCallId": "tool-call-cab91072b9236cad9f2ead14",
+        "tool": "execute_code",
+        "riskClass": "workspace-write",
+        "targetSummary": "result = tool('skill.list', {})",
+        "status": "confirmed",
+        "verification": "not_verified"
+      }
+    ],
+    "uncertainActions": []
+  },
+  "providerCalls": 5,
+  "tasks": []
+}

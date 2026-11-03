@@ -24,7 +24,6 @@ const RESERVED_BLOCKED_TOOL_NAMES = new Set<string>();
 const RESERVED_BLOCKED_TOOL_PREFIXES = new Set<string>();
 
 const DANGEROUS_RISK_CLASSES = new Set([
-  "workspace-write",
   "external-side-effect",
   "credential-access",
   "destructive-local",
@@ -34,7 +33,6 @@ const DANGEROUS_RISK_CLASSES = new Set([
 ]);
 
 const DANGEROUS_TOOLSETS = new Set<ToolsetName>([
-  "shell-write",
   "dangerous",
   "memory",
   "browser",
@@ -53,16 +51,16 @@ const DANGEROUS_NAME_PREFIXES = [
 
 const DANGEROUS_EXACT_NAMES = new Set([
   "delegate_task",
-  "execute_code",
-  "terminal.run",
   "process.start",
   "process.stop",
-  "file.write",
-  "file.patch",
   "session_search"
 ]);
 
-const REQUIRED_IF_REGISTERED_READ_ONLY_TOOLS = [
+const REQUIRED_IF_REGISTERED_WORK_TOOLS = [
+  "terminal.run",
+  "execute_code",
+  "file.write",
+  "file.patch",
   "file.read",
   "file.search",
   "file.glob",
@@ -107,7 +105,7 @@ describe("delegation child tool inventory audit", () => {
     expect(stalePrefixBlocks, `blockedToolPrefixes no longer match registered tools: ${stalePrefixBlocks.join(", ")}`).toEqual([]);
   });
 
-  it("allows useful registered read-only local and network tools by default", async () => {
+  it("inherits registered workspace and research tools by default", async () => {
     const tools = await registeredRuntimeTools();
     const result = resolveChildToolAccess({
       parentVisibleTools: tools,
@@ -117,7 +115,7 @@ describe("delegation child tool inventory audit", () => {
     });
     const registeredNames = new Set(tools.map((tool) => tool.name));
     const effective = new Set(result.effectiveAllowedTools);
-    const missingAllowed = REQUIRED_IF_REGISTERED_READ_ONLY_TOOLS.filter((name) =>
+    const missingAllowed = REQUIRED_IF_REGISTERED_WORK_TOOLS.filter((name) =>
       registeredNames.has(name) && !effective.has(name)
     );
 

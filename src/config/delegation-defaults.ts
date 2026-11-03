@@ -14,17 +14,14 @@ export const DEFAULT_DELEGATION_CONFIG: DelegationConfig = {
     enabled: true,
     includePromptPreview: false
   },
-  defaultAllowedRiskClasses: ["read-only-local", "read-only-network"],
+  // Exposure is inherited; each operation still passes Task and runtime policy.
+  defaultAllowedRiskClasses: ["read-only-local", "read-only-network", "workspace-write"],
   defaultExcludedToolsets: ["browser", "media", "mcp"],
   defaultAllowedToolsets: [],
   blockedToolNames: [
     "delegate_task",
-    "execute_code",
-    "terminal.run",
     "process.start",
     "process.stop",
-    "file.write",
-    "file.patch",
     "session_search"
   ],
   blockedToolPrefixes: [

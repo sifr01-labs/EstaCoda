@@ -198,6 +198,16 @@ export class DurableDelegationService {
     this.#defaultTaskSpendingLimit = cloneSpendingLimit(options.defaultTaskSpendingLimit);
   }
 
+  /** Preview the same admission policy without creating a Task or granting authority. */
+  inspectAccess(request: Pick<DelegateTaskItem, "allowedTools" | "allowedToolsets" | "role"> = {}): DelegationAccessAudit {
+    try {
+      return this.#authorityFor({ task: "Inspect child tool access", ...request }, this.#parentContext()?.authority).access;
+    } catch (error) {
+      if (error instanceof DelegationAccessError) return error.access;
+      throw error;
+    }
+  }
+
   async createAndActivate(request: DurableDelegationRequest): Promise<DurableDelegationHandle> {
     const handle = this.create(request, await this.#resolveRunLimits?.());
     if (handle.executionPreference === "auto" && this.#onTaskCreated !== undefined) {

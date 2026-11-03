@@ -1,0 +1,19 @@
+{
+  "text": "Stopped retrying after 6 consecutive iterations without new execution evidence. Earlier work is preserved. Ask to continue so the remaining work can resume with corrected arguments or a different approach.",
+  "finalOutcome": {
+    "status": "partially_completed",
+    "terminationCause": "tool_loop_no_progress",
+    "completionFloor": "read",
+    "confirmedActions": [
+      {
+        "toolCallId": "tool-call-0eb95b21d2bb9448d0d0a8e3",
+        "tool": "execute_code",
+        "riskClass": "workspace-write",
+        "targetSummary": "for args in [{\"category\": \"\"}, {}, {\"category\": \"__missing_catalog_probe__\"}]:",
+        "status": "confirmed",
+        "verification": "not_verified"
+      }
+    ],
+    "uncertainActions": []
+  }
+}

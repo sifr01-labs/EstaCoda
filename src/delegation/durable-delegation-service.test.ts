@@ -13,6 +13,7 @@ import { SQLiteTaskStore } from "../tasks/sqlite-task-store.js";
 import { TaskOperatorService } from "../tasks/task-operator-service.js";
 import { TaskResultService } from "../tasks/task-result-service.js";
 import { TaskScheduler } from "../tasks/task-scheduler.js";
+import { TaskApprovalService } from "../tasks/task-approval-service.js";
 import {
   DurableDelegationService,
   type DurableDelegationRequest
@@ -46,6 +47,34 @@ describe("DurableDelegationService", () => {
   afterEach(() => {
     sessionDb.close();
     rmSync(root, { recursive: true, force: true });
+  });
+
+  it("previews and admits inherited workspace execution under runtime policy without making it retry safe", () => {
+    let available = [...visibleTools(), tool("terminal.run", "workspace-write", ["shell-write"]), tool("file.patch", "workspace-write", ["files"])];
+    const service = new DurableDelegationService({ store, creatorSessionId: () => "parent", workspace: workspace(),
+      config: DEFAULT_DELEGATION_CONFIG, visibleTools: () => available });
+    expect(service.inspectAccess().effectiveAllowedTools).toEqual(expect.arrayContaining(["terminal.run", "file.patch"]));
+    expect(store.listTasks()).toEqual([]);
+    const handle = service.create({ toolCallId: "execute-tests", trustedWorkspace: true,
+      tasks: [{ task: "Inspect implementation and run its tests", allowedTools: ["file.read", "terminal.run"] }], synthesis: false });
+    const task = store.getTask(handle.taskId)!;
+    const step = store.listSteps(task.id, task.activePlanRevisionId!)[0]!;
+    expect(step.authorityPolicy.allowedTools).toEqual(["file.read", "terminal.run"]);
+    expect(step.authorityPolicy.riskClassPolicy["workspace-write"]).toBe("runtime_policy");
+    expect(step.authorityPolicy.riskClassPolicy["external-side-effect"]).toBe("forbid");
+    expect(step.idempotency).not.toBe("retry_safe");
+    const approvals = new TaskApprovalService({ store });
+    for (const decision of ["allow", "ask", "deny"] as const) {
+      const policy = approvals.securityPolicyFor(task, step, { id: "preview-attempt" } as TaskAttempt, { decide: () => decision });
+      expect(policy.decide({ toolName: "terminal.run", riskClass: "workspace-write", command: "pnpm test",
+        description: "Run tests", context: { trustedWorkspace: true } })).toBe(decision);
+      expect(policy.decide({ toolName: "send_message", riskClass: "external-side-effect",
+        description: "Unrelated external action", context: { trustedWorkspace: true } })).toBe("deny");
+    }
+    available = visibleTools();
+    expect(service.inspectAccess().effectiveAllowedTools).not.toContain("terminal.run");
+    expect(() => service.create({ toolCallId: "after-revocation", trustedWorkspace: true,
+      tasks: [{ task: "Execute tests", allowedTools: ["terminal.run"] }] })).toThrow(/unavailable tools/);
   });
 
   it("snapshots selected unattended settings for each new graph",async()=>{
@@ -211,7 +240,7 @@ describe("DurableDelegationService", () => {
       creatorSessionId: () => "parent",
       workspace: workspace(),
       config: DEFAULT_DELEGATION_CONFIG,
-      visibleTools: () => [tool("terminal.run", "workspace-write", ["files"])]
+      visibleTools: () => [tool("process.start", "workspace-write", ["shell-write"])]
     });
     expect(() => zeroAccess.create({
       toolCallId: "call-zero-tools",

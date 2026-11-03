@@ -17,6 +17,32 @@ import { RuntimeRouter } from "../runtime/runtime-router.js";
 import type { IntentRouter } from "../runtime/intent-router.js";
 import { createSkillTools } from "./skill-tools.js";
 
+describe("skill.list catalog consistency", () => {
+  it.each([{}, { category: "" }, { category: "  " }])("lists every visible skill for an absent or blank category: %j", async input => {
+    const harness = await skillToolHarness([
+      loadedSkill({ name: "visible", category: "research" }),
+      loadedSkill({ name: "hidden", category: "private" })
+    ], { visibleNames: ["visible"] });
+    const result = await harness.run("skill.list", input);
+    expect(result.metadata).toMatchObject({ count: 1, totalVisible: 1, category: null, categories: ["research"] });
+    expect(result.content).toContain("Showing 1 of 1 visible skills");
+    expect(JSON.stringify(result)).not.toContain("hidden");
+    expect(JSON.stringify(result)).not.toContain("private");
+  });
+
+  it("distinguishes a missing category from an empty visible catalog", async () => {
+    const harness = await skillToolHarness([loadedSkill({ name: "example", category: "research" })]);
+    const missing = await harness.run("skill.list", { category: "coding" });
+    expect(missing.metadata).toMatchObject({ count: 0, totalVisible: 1, categories: ["research"] });
+    expect(missing.content).toContain('No skills match category "coding"');
+    expect(missing.content).toContain("Omit category");
+    const matched = await harness.run("skill.list", { category: " research " });
+    expect(matched.metadata).toMatchObject({ count: 1, category: "research" });
+    const empty = await skillToolHarness([]);
+    expect((await empty.run("skill.list", {})).content).toBe("No skills are visible in this session.");
+  });
+});
+
 describe("skill.read", () => {
   it("returns full content for small loaded skills with rich metadata", async () => {
     const harness = await skillToolHarness([loadedSkill({

@@ -1,6 +1,6 @@
 {
   "schemaVersion": 1,
-  "generatedAt": "2026-11-01T20:44:44.022Z",
+  "generatedAt": "2026-11-03T22:05:40.115Z",
   "skills": [
     {
       "id": "official.api-integration",
@@ -192,6 +192,7 @@
       "optionalToolsets": [
         "web",
         "shell-readonly",
+        "shell-write",
         "research",
         "core"
       ],

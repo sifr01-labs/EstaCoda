@@ -1,0 +1,24 @@
+{
+  "arm": "before",
+  "test": "skills",
+  "elapsedMs": 24374,
+  "inputsUnchanged": true,
+  "outcome": {
+    "status": "partially_completed",
+    "terminationCause": "tool_loop_no_progress",
+    "completionFloor": "read",
+    "confirmedActions": [
+      {
+        "toolCallId": "tool-call-0eb95b21d2bb9448d0d0a8e3",
+        "tool": "execute_code",
+        "riskClass": "workspace-write",
+        "targetSummary": "for args in [{\"category\": \"\"}, {}, {\"category\": \"__missing_catalog_probe__\"}]:",
+        "status": "confirmed",
+        "verification": "not_verified"
+      }
+    ],
+    "uncertainActions": []
+  },
+  "providerCalls": 11,
+  "tasks": []
+}

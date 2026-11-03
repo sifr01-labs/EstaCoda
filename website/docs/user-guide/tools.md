@@ -270,7 +270,7 @@ Worker sessions are created only after the scheduler leases a Step. They remain 
 
 Allowed commands are `pwd`, `ls`, `cat`, `head`, `tail`, `wc`, `stat`, `file`, `git status`, `git diff`, `git log`, `git branch`, `git remote`, `git ls-files`, and `git grep`. `git show` is not allowed.
 
-The tool rejects shell wrappers, pipes, redirection, command chaining, command substitution, environment assignment, package scripts, interpreters, arbitrary binaries, mutating commands, unsupported glob arguments, and paths outside the workspace. Output is bounded and redacted. `terminal.inspect` may be available to children only through the same parent-visible, read-only child tool policy; `terminal.run` remains excluded from default child schemas.
+The tool rejects shell wrappers, pipes, redirection, command chaining, command substitution, environment assignment, package scripts, interpreters, arbitrary binaries, mutating commands, unsupported glob arguments, and paths outside the workspace. Output is bounded and redacted. Both `terminal.inspect` and `terminal.run` can be inherited by workers when visible to the parent. Execution retains workspace trust, runtime approvals and Task authority checks. Operators can explicitly retain a read-only child policy. Use `delegate_task` with `mode: "inspect"` to preview eligible tools; previews do not authorize execution.
 
 ---
 

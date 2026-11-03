@@ -2994,6 +2994,7 @@ describe("createRuntime MCP trust gating", () => {
               "allowedToolsets",
               "context",
               "executionPreference",
+              "mode",
               "modelOverride",
               "research",
               "role",

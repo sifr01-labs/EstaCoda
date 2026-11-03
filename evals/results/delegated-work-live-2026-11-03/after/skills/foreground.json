@@ -1,0 +1,19 @@
+{
+  "text": "| Input | Observed result |\n|---|---:|\n| `category: \"\"` | 19 skills |\n| Second call—also sent as `category: \"\"` | 19 skills; identical names |\n| `category: \"__missing_catalog_probe__\"` | 0 matches; 19 skills still visible |\n\nThe probe means **an unmatched category, not an empty catalog**. The tool explicitly reported that 19 skills remain visible.\n\n**Limitation:** I did not successfully test an omitted category. The exposed tool schema required the field, so the second direct call repeated the empty string; an attempted omitted-field call through the execution wrapper was unavailable. Thus, the two observed listings match exactly, but omitted-category equivalence was not independently verified.\n\nNo skills were executed or edited, and no personal state was inspected.",
+  "finalOutcome": {
+    "status": "completed",
+    "terminationCause": "normal",
+    "completionFloor": "read",
+    "confirmedActions": [
+      {
+        "toolCallId": "tool-call-cab91072b9236cad9f2ead14",
+        "tool": "execute_code",
+        "riskClass": "workspace-write",
+        "targetSummary": "result = tool('skill.list', {})",
+        "status": "confirmed",
+        "verification": "not_verified"
+      }
+    ],
+    "uncertainActions": []
+  }
+}

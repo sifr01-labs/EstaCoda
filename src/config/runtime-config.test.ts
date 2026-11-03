@@ -499,7 +499,7 @@ describe("normalizeDelegationConfig", () => {
     const normalized = normalizeDelegationConfig({});
 
     expect(normalized.recoverJsonStringTasks).toBe(true);
-    expect(normalized.defaultAllowedRiskClasses).toEqual(["read-only-local", "read-only-network"]);
+    expect(normalized.defaultAllowedRiskClasses).toEqual(["read-only-local", "read-only-network", "workspace-write"]);
     expect(normalized.defaultExcludedToolsets).toEqual(["browser", "media", "mcp"]);
   });
 

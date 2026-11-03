@@ -5,7 +5,15 @@ import type { ToolDefinition, ToolRiskClass, ToolsetName } from "../contracts/to
 import { resolveChildToolAccess, resolveTaskStepToolAccess } from "./toolset-security.js";
 
 describe("resolveChildToolAccess", () => {
-  it("defaults children to parent-visible read-only local and network tools", () => {
+  it("preserves an operator's explicit read-only ceiling", () => {
+    expect(resolveChildToolAccess({
+      parentVisibleTools: inventory(), childCandidateTools: inventory(),
+      config: { ...DEFAULT_DELEGATION_CONFIG, defaultAllowedRiskClasses: ["read-only-local", "read-only-network"] },
+      request: { role: "leaf", depth: 1, allowedTools: ["terminal.run", "file.write"] }
+    }).effectiveAllowedTools).toEqual([]);
+  });
+
+  it("inherits parent-visible workspace execution and editing tools without granting sensitive capabilities", () => {
     const result = resolveChildToolAccess({
       parentVisibleTools: inventory(),
       childCandidateTools: inventory(),
@@ -13,11 +21,9 @@ describe("resolveChildToolAccess", () => {
       request: { role: "leaf", depth: 1 }
     });
 
-    expect(result.effectiveAllowedTools).toEqual(["file.read", "file.search", "terminal.inspect", "process.logs", "web.search"]);
+    expect(result.effectiveAllowedTools).toEqual(["file.read", "file.search", "terminal.inspect", "process.logs", "web.search", "terminal.run", "file.write"]);
     expect(result.strippedTools).toEqual(expect.arrayContaining([
       expect.objectContaining({ name: "delegate_task", reasons: ["leaf-delegation-disabled", "disallowed-risk-class"] }),
-      expect.objectContaining({ name: "terminal.run", reasons: ["blocked-exact-name", "disallowed-risk-class"] }),
-      expect.objectContaining({ name: "file.write", reasons: ["blocked-exact-name", "disallowed-risk-class"] }),
       expect.objectContaining({ name: "memory.search", reasons: ["blocked-prefix"] }),
       expect.objectContaining({ name: "browser.open", reasons: expect.arrayContaining(["excluded-toolset"]) }),
       expect.objectContaining({ name: "mcp:server.tool", reasons: ["excluded-toolset"] })
@@ -75,7 +81,7 @@ describe("resolveChildToolAccess", () => {
     const result = resolveChildToolAccess({
       parentVisibleTools: inventory(),
       childCandidateTools: inventory(),
-      config: DEFAULT_DELEGATION_CONFIG,
+      config: { ...DEFAULT_DELEGATION_CONFIG, blockedToolNames: [...DEFAULT_DELEGATION_CONFIG.blockedToolNames, "terminal.run"] },
       request: {
         role: "leaf",
         depth: 1,
@@ -119,7 +125,7 @@ describe("resolveChildToolAccess", () => {
 });
 
 describe("resolveTaskStepToolAccess", () => {
-  it("keeps Task-authorized write tools without inheriting delegation's read-only defaults", () => {
+  it("keeps Task-authorized write tools without reapplying delegation defaults", () => {
     const candidates = [
       tool("file.read", "read-only-local", ["files"]),
       tool("file.write", "workspace-write", ["files"]),

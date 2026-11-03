@@ -46,7 +46,7 @@ export type ResolveTaskStepToolAccessInput = {
 
 /**
  * A durable Task Step has already been narrowed by its persisted authority policy.
- * Keep the parent's visibility boundary, but do not apply delegation's read-only
+ * Keep the parent's visibility boundary, but do not reapply delegation's
  * defaults a second time. The Task security policy still gates every execution.
  */
 export function resolveTaskStepToolAccess(input: ResolveTaskStepToolAccessInput): ChildToolAccessResult {

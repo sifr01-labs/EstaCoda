@@ -4360,9 +4360,8 @@ describe("ProviderTurnLoop post-tool empty response recovery", () => {
     const liveReplayToolMessage = continuationRequest.messages.find((message) =>
       message.role === "tool" && message.toolCallId === liveRuntimeId
     );
-    expect(String(liveReplayToolMessage?.content)).toContain("[Historical tool result from ");
-    expect(String(liveReplayToolMessage?.content)).toContain("via test.tool; reference only.");
-    expect(String(liveReplayToolMessage?.content)).toContain("live tool result");
+    expect(liveReplayToolMessage?.content).toBe("live tool result");
+    expect(String(liveReplayToolMessage?.content)).not.toContain("Historical tool result");
     const events = await harness.sessionDb.listEvents(harness.sessionId);
     expect(events).toEqual(expect.arrayContaining([
       expect.objectContaining({

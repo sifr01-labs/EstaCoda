@@ -932,7 +932,6 @@ function hasUnrecoveredToolFailure(step: TaskStep, executions: readonly ToolExec
  * authorization, successful-source and completion gates still apply. */
 function isLocalResearchReadLimitation(step: TaskStep, execution: ToolExecutionRecord): boolean {
   return step.executor.role === "worker" && step.executor.research?.requireRepositoryEvidence === true &&
-    step.executor.requestContract?.requirements.research !== undefined &&
     execution.decision === "allow" && execution.riskClass === "read-only-local" &&
     ["terminal.inspect", "file.read", "file.grep", "file.search", "file.glob"].includes(execution.tool.name) &&
     (execution.settlement === undefined || execution.settlement.sideEffectState === "none") &&

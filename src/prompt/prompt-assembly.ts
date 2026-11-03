@@ -1348,6 +1348,7 @@ function buildNativePromptHistory(
   const route = input.nativeHistoryRoute!;
   const replayEchoContext = nativeReplayEchoContext(input);
   const built = buildNativeHistoryMessages(selectedMessages, {
+    currentTurnToolCallIds: new Set(input.toolExecutions.flatMap(execution => execution.toolCallId ? [execution.toolCallId] : [])),
     targetProviderFamily: route.reasoningEchoProviderFamily,
     targetApiMode: route.apiMode === "openai_chat_completions" ? route.apiMode : undefined,
     mergeAdjacentUsers: true,

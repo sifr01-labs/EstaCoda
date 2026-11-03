@@ -882,11 +882,11 @@ describe("AgentStepExecutor", () => {
     expect(settled).toMatchObject({ outcome: "failed", failure: { class: "evidence-contract-unsatisfied" } });
   });
 
-  it.each(["corrected", "alternative", "missing-evidence", "uncited-evidence", "denied", "uncertain-effect", "mutation", "unavailable", "non-research", "stopped"])("preserves local research with read limitations: %s", async mode => {
+  it.each(["corrected", "alternative", "worker-contract-only", "missing-evidence", "uncited-evidence", "denied", "uncertain-effect", "mutation", "unavailable", "non-research", "stopped"])("preserves local research with read limitations: %s", async mode => {
     const graph = makeGraph();
     const step: TaskStep = { ...graph.steps[0]!, executor: { ...graph.steps[0]!.executor, role: "worker",
-      research: { scope: "repository completion behavior", requireLiveSources: false, requireRepositoryEvidence: true },
-      ...(mode === "non-research" ? {} : { requestContract: { version: 1 as const, objective: "Inspect repository completion behavior", requirements: {
+      ...(mode === "non-research" ? {} : { research: { scope: "repository completion behavior", requireLiveSources: false, requireRepositoryEvidence: true } }),
+      ...(["non-research", "worker-contract-only"].includes(mode) ? {} : { requestContract: { version: 1 as const, objective: "Inspect repository completion behavior", requirements: {
         skillReferences: [], issues: [], research: { fresh: true, domain: "general" as const }
       } } }) } };
     const calls: import("../tools/tool-executor.js").ToolExecutionRecord[] = [
@@ -908,12 +908,12 @@ describe("AgentStepExecutor", () => {
       successfulEvidenceExecution("file.read", "read-only-local", ["files"], { path: "src/completion.ts" }, "export const completion = true;", { path: "src/completion.ts" })
     );
     const text = mode === "uncited-evidence" ? "Completion is supported." : "src/completion.ts exports completion = true. No tests were executed. Other subsystems were not inspected.";
-    const accepted = ["corrected", "alternative"].includes(mode);
+    const accepted = ["corrected", "alternative", "worker-contract-only"].includes(mode);
     const childFactory: ChildAgentLoopFactory = { createChild: vi.fn(async input => {
       await sessionDb.createSession({ id: "local-research", profileId: input.profileId, parentSessionId: input.parentSessionId });
       return childRuntime(async request => {
         const feedback = request.stepCompletion?.validate?.(text, calls);
-        if (mode !== "denied" && mode !== "stopped") expect(feedback === undefined).toBe(accepted);
+        if (!["denied", "stopped", "non-research"].includes(mode)) expect(feedback === undefined).toBe(accepted);
         return response({ text, toolExecutions: calls, ...(mode === "stopped" ? { completionValidationFailure: "Report not accepted before budget exhaustion" } : {}) });
       }, async () => undefined, { sessionId: "local-research", trajectoryId: "local-research-trace" },
       { tools: calls.map(call => call.tool.name), toolsets: ["files", "shell-readonly", "research"] });

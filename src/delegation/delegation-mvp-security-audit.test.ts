@@ -14,8 +14,8 @@ const SECURITY_AUDIT_ITEMS = [
   "direct-stripped-tool-execution",
   "leaf-orchestrator-depth",
   "parent-tool-intersection",
-  "default-read-only-risk-classes",
-  "terminal-run-excluded",
+  "default-workspace-risk-classes",
+  "terminal-run-policy-gated",
   "memory-session-search-unavailable",
   "skill-config-trust-mutation-unavailable",
   "hardline-fail-closed-approval-policy",
@@ -34,7 +34,7 @@ describe("delegation MVP security audit checklist", () => {
       "batch-timeout-metadata-preserves-timeout",
       "child-registry-tool-schema-bounds",
       "child-sessions-excluded-from-recall-search-memory-prompt-packing",
-      "default-read-only-risk-classes",
+      "default-workspace-risk-classes",
       "diagnostics-bounded-redacted-no-full-prompts",
       "direct-stripped-tool-execution",
       "gateway-active-subagent-queueing",
@@ -46,11 +46,11 @@ describe("delegation MVP security audit checklist", () => {
       "parent-abort-stop-cleanup",
       "parent-tool-intersection",
       "skill-config-trust-mutation-unavailable",
-      "terminal-run-excluded"
+      "terminal-run-policy-gated"
     ]);
   });
 
-  it("keeps default child authority read-only after parent intersection and block stripping", () => {
+  it("inherits workspace execution while retaining parent intersection and sensitive exclusions", () => {
     const parentTools = [
       tool("file.read", "read-only-local", ["files"]),
       tool("web.search", "read-only-network", ["web"]),
@@ -77,7 +77,7 @@ describe("delegation MVP security audit checklist", () => {
     expect(effective.has("file.read")).toBe(true);
     expect(effective.has("web.search")).toBe(true);
     expect(effective.has("file.grep")).toBe(false);
-    expect(effective.has("terminal.run")).toBe(false);
+    expect(effective.has("terminal.run")).toBe(true);
     expect(effective.has("session_search")).toBe(false);
     expect(effective.has("memory.read")).toBe(false);
     expect(effective.has("skill.evolve")).toBe(false);
@@ -97,7 +97,7 @@ describe("delegation MVP security audit checklist", () => {
       isAvailable: () => false, run: async () => ({ ok: true, content: "hidden" }) });
     applyChildToolAccessResult(registry, result);
     expect(registry.get("hidden.unavailable")).toBeUndefined();
-    expect(registry.get("terminal.run")).toBeUndefined();
+    expect(registry.get("terminal.run")).toBeDefined();
     expect(registry.get("session_search")).toBeUndefined();
     expect(registry.get("file.grep")).toBeUndefined();
   });

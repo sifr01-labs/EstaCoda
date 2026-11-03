@@ -117,7 +117,7 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
       inputSchema: {
         type: "object",
         properties: {
-          category: { type: "string" }
+          category: { type: "string", description: "Optional exact category. Omit or leave blank to list all visible skills." }
         }
       },
       riskClass: "read-only-local",
@@ -126,18 +126,25 @@ export function createSkillTools(options: SkillToolsOptions): readonly Registere
       maxResultSizeChars: 12_000,
       isAvailable: () => true,
       run: async (input: { category?: string }) => {
-        const catalog = inspectionRegistry.catalog()
-          .filter((skill) => input.category === undefined || skill.category === input.category);
+        const visibleCatalog = inspectionRegistry.catalog();
+        const category = input.category?.trim() || undefined;
+        const categories = [...new Set(visibleCatalog.map((skill) => skill.category))].sort();
+        const catalog = visibleCatalog.filter((skill) => category === undefined || skill.category === category);
 
         return {
           ok: true,
           content: catalog.length === 0
-            ? "No skills found."
-            : catalog
+            ? visibleCatalog.length === 0
+              ? "No skills are visible in this session."
+              : `No skills match category ${JSON.stringify(category)}. ${visibleCatalog.length} skills are visible. Available categories: ${categories.join(", ")}. Omit category to list all visible skills.`
+            : `Showing ${catalog.length} of ${visibleCatalog.length} visible skills.\n` + catalog
                 .map((skill) => `${skill.name}\t${skill.category}\t${skill.sourceKind ?? "runtime"}\t${skill.description}`)
                 .join("\n"),
           metadata: {
             count: catalog.length,
+            totalVisible: visibleCatalog.length,
+            category: category ?? null,
+            categories,
             skills: catalog
           }
         };

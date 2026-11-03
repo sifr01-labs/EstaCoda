@@ -1,0 +1,15 @@
+{
+  "arm": "before",
+  "test": "skills",
+  "elapsedMs": 17512,
+  "inputsUnchanged": true,
+  "outcome": {
+    "status": "partially_completed",
+    "terminationCause": "tool_loop_no_progress",
+    "completionFloor": "read",
+    "confirmedActions": [],
+    "uncertainActions": []
+  },
+  "providerCalls": 7,
+  "tasks": []
+}

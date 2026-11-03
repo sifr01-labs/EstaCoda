@@ -10,6 +10,16 @@ import {
 import { createDelegationTools, delegationToolProvider } from "./delegation-tools.js";
 
 describe("createDelegationTools", () => {
+  it("previews eligible access without creating work or handing off the answer", async () => {
+    const create = vi.fn();
+    const [tool] = tools(create);
+    const result = await tool!.run({ mode: "inspect" });
+    expect(result).toMatchObject({ ok: true, metadata: { reason: "delegation-access-preview" } });
+    expect(result.content).toContain("file.read");
+    expect(result.content).toContain("no Task or worker was created");
+    expect(result.metadata).not.toHaveProperty("taskId");
+    expect(create).not.toHaveBeenCalled();
+  });
   it("advertises immediate durable Task creation with the established input shape", () => {
     const [tool] = tools(vi.fn());
 
@@ -289,6 +299,8 @@ describe("createDelegationTools", () => {
     });
     expect(result.content).toContain("delegate_task tasks[0]");
     expect(result.content).toContain("web.search");
+    expect(result.content).toContain("Eligible child tools before optional narrowing: file.read");
+    expect(result.content).toContain("Keep required checks in scope");
   });
 
   it.each([
@@ -324,7 +336,11 @@ describe("createDelegationTools", () => {
 
 function tools(create: ReturnType<typeof vi.fn>) {
   return createDelegationTools({
-    service: { createAndActivate: create } as unknown as DurableDelegationService,
+    service: { createAndActivate: create, inspectAccess: () => ({
+      version: 1, requestedTools: [], requestedToolsets: [], parentVisibleTools: ["file.read"],
+      effectiveAllowedTools: ["file.read"], effectiveAllowedToolsets: ["files"],
+      strippedTools: [], rejectedRequestedTools: [], rejectedRequestedToolsets: []
+    }) } as unknown as DurableDelegationService,
     trustedWorkspace: () => true
   });
 }
