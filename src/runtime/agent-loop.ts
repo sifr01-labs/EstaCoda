@@ -1340,7 +1340,7 @@ export class AgentLoop {
     const finalizationNote = await finalizeExecution?.(finalOutcome, artifacts);
     await this.#runRecorder.recordExecutionFinalOutcome(finalOutcome);
     const skillOutcomes = await this.#runRecorder.recordSkillOutcomes({
-      selectedSkill,
+      selectedSkill: providerLoop.delegatedAnswerOwnership ? undefined : selectedSkill,
       userText: effectiveText,
       toolExecutions,
       toolPlans,
@@ -1548,6 +1548,7 @@ export class AgentLoop {
     }
     if (finalizationNote) response.text += `\n\n${finalizationNote}`;
     await this.#skillLearningManager?.observeTurn({
+      delegatedTaskIds: providerLoop.delegatedAnswerOwnership?.tasks.map(task => task.taskId),
       signal: input.signal,
       usage: await this.#providerUsageLineage(visibleTurn.id),
       profileId: this.#profileId,

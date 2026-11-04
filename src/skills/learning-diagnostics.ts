@@ -3,12 +3,13 @@ import type { ToolExecutionRecord } from "../tools/tool-executor.js";
 /** Runtime observations only: no raw user text, outputs, commands or paths. */
 export type LearningTurnDiagnostics = {
   limitReached?: boolean;
+  delegatedTaskSettled?: boolean;
   completionRejected?: boolean;
   unresolvedCheckCount?: number;
   delegationAvailable?: boolean;
 };
 export type LearningFinding = {
-  mechanism: "completion-repair-at-limit" | "output-retention-limit" | "repeated-check" | "delegation-unavailable" | "recovered-tool-failure";
+  mechanism: "delegated-budget-stop" | "completion-repair-at-limit" | "output-retention-limit" | "repeated-check" | "delegation-unavailable" | "recovered-tool-failure";
   observed: string;
   correction: string;
   target: "runtime-regression" | "workflow-review";
@@ -23,6 +24,9 @@ export function learningFindings(calls: readonly ToolExecutionRecord[], turn: Le
       mechanism, observed, correction, target, correctionVerified: false,
       callIds: evidence.flatMap(call => call.toolCallId ? [call.toolCallId] : []).slice(-12)
     });
+  if (turn.delegatedTaskSettled && turn.limitReached) add("delegated-budget-stop",
+    "A delegated attempt stopped at an execution limit; dispatch success did not establish objective success.",
+    "Inspect cumulative usage and retained result receipts before changing the workflow. Budget and preservation defects need runtime tests.", "runtime-regression", []);
   if (turn.limitReached && turn.completionRejected) add("completion-repair-at-limit",
     "Completion validation rejected an answer and the run reached a limit.",
     "Reproduce the completion sequence; preserve delivery separately from verification, without accepting unsupported claims.", "runtime-regression", calls.slice(-4));
@@ -54,6 +58,7 @@ export function learningLesson(findings: readonly LearningFinding[], fallback: s
  * to the proposal model, even when the original observation was internal. */
 export function learningDraftEvidence(evidence: Record<string, unknown> | undefined): { runtimeOnly: boolean; lesson: string } {
   const lessons = {
+    "delegated-budget-stop": "A delegated attempt reached an execution limit. Inspect usage, batching and result receipts; do not assume a skill change fixes a runtime budget or preservation defect.",
     "completion-repair-at-limit": "Completion repair reached a run limit. Investigate the runtime delivery path; a skill edit is not an established correction.",
     "output-retention-limit": "Output exceeded durable retention. Investigate retention and recovery in the runtime before proposing a skill correction.",
     "repeated-check": "A declared check ran repeatedly. Inspect intervening mutations and dependency scopes; repetition may have been necessary.",
@@ -66,7 +71,7 @@ export function learningDraftEvidence(evidence: Record<string, unknown> | undefi
     return typeof mechanism === "string" && Object.hasOwn(lessons, mechanism) ? [mechanism as keyof typeof lessons] : [];
   }))];
   return {
-    runtimeOnly: mechanisms.some(key => ["completion-repair-at-limit", "output-retention-limit"].includes(key)) && mechanisms.every(key => ["completion-repair-at-limit", "output-retention-limit", "delegation-unavailable"].includes(key)),
+    runtimeOnly: mechanisms.some(key => ["delegated-budget-stop", "completion-repair-at-limit", "output-retention-limit"].includes(key)) && mechanisms.every(key => ["delegated-budget-stop", "completion-repair-at-limit", "output-retention-limit", "delegation-unavailable"].includes(key)),
     lesson: mechanisms.length ? mechanisms.map(key => lessons[key]).join(" ") + " Proposed corrections remain unverified; abstain without sufficient evidence."
       : "The selected skill did not complete this task successfully; the cause is unknown."
   };

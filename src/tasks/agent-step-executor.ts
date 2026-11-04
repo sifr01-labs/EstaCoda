@@ -56,6 +56,7 @@ export type ResolveTaskArtifactContent = (input: {
 }) => Promise<string | Uint8Array | undefined>;
 
 export type AgentStepExecutorOptions = {
+  onTaskSettled?: (task: Task) => Promise<void>;
   childFactory: ChildAgentLoopFactory;
   sessionDb: SessionDB;
   taskStore: TaskStore;
@@ -75,6 +76,7 @@ export type AgentStepExecutorOptions = {
 
 /** Production agent executor for one durable Attempt. Scheduler state remains its only lifecycle authority. */
 export class AgentStepExecutor implements TaskStepExecutor {
+  readonly onTaskSettled: AgentStepExecutorOptions["onTaskSettled"];
   readonly kind = "agent" as const;
   readonly #childFactory: ChildAgentLoopFactory;
   readonly #sessionDb: SessionDB;
@@ -93,6 +95,7 @@ export class AgentStepExecutor implements TaskStepExecutor {
   readonly #securityPolicy: SecurityPolicy;
 
   constructor(options: AgentStepExecutorOptions) {
+    this.onTaskSettled = options.onTaskSettled;
     if (options.taskStore.profileId.trim().length === 0) {
       throw new Error("AgentStepExecutor requires a profile-bound TaskStore.");
     }

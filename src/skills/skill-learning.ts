@@ -1,3 +1,7 @@
+import type { RegisteredTool } from "../contracts/tool.js";
+import { createHash } from "node:crypto";
+import { isTerminalTaskStatus } from "../contracts/task.js";
+import type { TaskStore } from "../tasks/task-store.js";
 import { withProfileWriteLock } from "../config/profile-write-lock.js";
 import { constants } from "node:fs";
 import { learningDraftEvidence, learningFindings, learningLesson, type LearningTurnDiagnostics } from "./learning-diagnostics.js";
@@ -5,7 +9,7 @@ import * as fs from "node:fs/promises";
 import { dirname, isAbsolute, relative, resolve, sep } from "node:path";
 import type { AgentEvolutionPolicy } from "../contracts/agent-evolution.js";
 import type { ProviderUsageLineage } from "../contracts/provider-usage.js";
-import { buildSkillReviewContext, clipSkillReviewText, type SkillDrafter } from "./skill-draft.js";
+import { SkillDraftError, buildSkillReviewContext, clipSkillReviewText, type SkillDrafter } from "./skill-draft.js";
 import { redactSensitiveText } from "../utils/redaction.js";
 import { SkillProposalService, readBoundedSkillFile } from "./skill-proposal-service.js";
 import { parseSkillFile } from "./skill-loader.js";
@@ -50,14 +54,30 @@ export type SkillLearningRecord = {
   updatedAt: string;
   draftAttemptedAt?: string;
   draftProposalId?: string;
-  draftStatus?: "pending" | "attempted" | "proposed" | "abstained" | "promoted";
+  draftStatus?: "pending" | "attempted" | "proposed" | "abstained" | "promoted" | "failed";
+  draftFailure?: string;
+  draftAttempts?: number;
   draftCandidateId?: string;
+};
+
+type DeferredSkillTurn = {
+  id: string; profileId: string; sessionId: string; taskIds: string[];
+  skillName?: string; skillRevision?: string; promptSummary: string; promptHash?: string;
+};
+
+type SkillReviewRequest = {
+  profileId: string;
+  sessionId: string;
+  agentEvolutionPolicy: AgentEvolutionPolicy;
+  validateAuthority: () => Promise<void>;
+  onSkillUpdated?: (skillName: string, proposalId: string) => Promise<void>;
 };
 
 type SkillLearningFile = {
   version: 1;
   records: SkillLearningRecord[];
   draftBudget?: { day: string; attempts: number };
+  deferredTurns?: DeferredSkillTurn[];
 };
 
 export type SkillLearningObservation =
@@ -85,10 +105,12 @@ export class SkillLearningManager {
   readonly #skillEvolutionStore: SkillEvolutionStore | undefined;
   readonly #registry: SkillRegistry;
   readonly #draft: SkillDrafter | undefined;
+  readonly #reviewTools: ((input: { sessionId: string; skillName: string; taskIds: string[] }) => readonly RegisteredTool[]) | undefined;
   readonly #proposals: SkillProposalService | undefined;
   #review: Promise<void> | undefined;
   #reviewController: AbortController | undefined;
-  #latestUsage: ProviderUsageLineage | undefined;
+  readonly #reviewQueue = new Map<string, SkillReviewRequest>();
+  readonly #reviewUsage = new Map<string, ProviderUsageLineage>();
 
   constructor(options: {
     autonomy: SkillAutonomy;
@@ -98,6 +120,7 @@ export class SkillLearningManager {
     sessionDb: SessionDB;
     skillEvolutionStore?: SkillEvolutionStore;
     drafter?: SkillDrafter;
+    reviewTools?: (input: { sessionId: string; skillName: string; taskIds: string[] }) => readonly RegisteredTool[];
     proposalService?: SkillProposalService;
   }) {
     this.#autonomy = options.autonomy;
@@ -109,10 +132,13 @@ export class SkillLearningManager {
     this.#skillEvolutionStore = options.skillEvolutionStore;
     this.#registry = options.registry;
     this.#draft = options.drafter;
+    this.#reviewTools = options.reviewTools;
     this.#proposals = options.proposalService;
   }
 
   async observeTurn(input: {
+    delegatedTaskIds?: string[];
+    settledTaskEvidence?: { id: string; taskIds: string[]; failures: string[]; acceptedResults: number; diagnosticResults: number; results: Array<{taskId: string; resultId: string; disposition: string}> };
     signal?: AbortSignal;
     usage?: ProviderUsageLineage;
     profileId: string;
@@ -133,13 +159,27 @@ export class SkillLearningManager {
     agentEvolutionPolicy: AgentEvolutionPolicy;
     toolExecutions: ToolExecutionRecord[];
   }): Promise<SkillLearningObservation | undefined> {
-    this.#latestUsage = input.usage;
+    if (input.usage) {
+      this.#reviewUsage.delete(input.sessionId);
+      this.#reviewUsage.set(input.sessionId, input.usage);
+      if (this.#reviewUsage.size > 100) this.#reviewUsage.delete(this.#reviewUsage.keys().next().value!);
+    }
     if (
       this.#autonomy === "none" ||
       !input.agentEvolutionPolicy.observeTurns ||
       !input.agentEvolutionPolicy.createEvidence ||
       this.#skillEvolutionStore === undefined
     ) {
+      return undefined;
+    }
+
+    if (input.delegatedTaskIds?.length) {
+      const taskIds = [...new Set(input.delegatedTaskIds)].sort();
+      const id = createHash("sha256").update(JSON.stringify([input.profileId, input.sessionId, taskIds])).digest("hex");
+      await this.#store.defer({ id, profileId: input.profileId, sessionId: input.sessionId, taskIds,
+        skillName: input.selectedSkill?.name,
+        skillRevision: input.selectedSkill ? skillDefinitionRevision(input.selectedSkill) : undefined,
+        promptSummary: promptSummaryForLearning(input.userText).slice(0, 2000), promptHash: input.promptHash });
       return undefined;
     }
 
@@ -242,26 +282,72 @@ export class SkillLearningManager {
     };
   }
 
+  /** Reconciles persisted handoffs from authoritative Task receipts, also on restart. */
+  async reconcileSettledTasks(input: { store: TaskStore; profileId: string; workspaceIdentityHash?: string; agentEvolutionPolicy: AgentEvolutionPolicy;
+    validateAuthority: () => Promise<void> }): Promise<string[]> {
+    if (input.store.profileId !== input.profileId || !input.agentEvolutionPolicy.observeTurns ||
+        !input.agentEvolutionPolicy.createEvidence || !this.#skillEvolutionStore) return [];
+    const sessions = new Set<string>();
+    for (const pending of await this.#store.deferred()) {
+      if (pending.profileId !== input.profileId || !await this.#sessionDb.getSessionForProfile(pending.sessionId, input.profileId)) continue;
+      const tasks = pending.taskIds.map(id => input.store.getTask(id));
+      if (tasks.some(task => !task || task.originSessionId !== pending.sessionId || !isTerminalTaskStatus(task.status) ||
+          (input.workspaceIdentityHash !== undefined && task.workspace.identityHash !== input.workspaceIdentityHash))) continue;
+      await input.validateAuthority();
+      const attempts = tasks.flatMap(task => input.store.listAttempts(task!.id));
+      const failures = [...new Set(attempts.flatMap(attempt => attempt.failure ? [attempt.failure.class] : []))];
+      const results = tasks.flatMap(task => input.store.listResults(task!.id));
+      const outcomeStatus = tasks.every(task => task!.status === "completed") ? "succeeded" as const
+        : tasks.some(task => task!.status === "partial" || task!.status === "completed") ? "partial" as const
+        : tasks.every(task => task!.status === "cancelled") ? "cancelled" as const : "failed" as const;
+      const receipts = { id: pending.id, taskIds: pending.taskIds, failures,
+        acceptedResults: results.filter(result => result.disposition === "accepted").length,
+        diagnosticResults: results.filter(result => result.disposition === "diagnostic").length,
+        results: results.slice(0, 64).map(result => ({ taskId: result.taskId, resultId: result.id, disposition: result.disposition })) };
+      const skill = pending.skillName ? this.#registry.get(pending.skillName) : undefined;
+      if (skill && skillDefinitionRevision(skill) === pending.skillRevision) {
+        await this.observeTurn({ profileId: input.profileId, sessionId: pending.sessionId, userText: pending.promptSummary,
+          selectedSkill: skill, outcomeStatus, promptHash: pending.promptHash,
+          settledTaskEvidence: receipts, agentEvolutionPolicy: input.agentEvolutionPolicy, toolExecutions: [],
+          turnDiagnostics: { delegatedTaskSettled: true, limitReached: failures.includes("execution-limit-exceeded"),
+            completionRejected: failures.some(failure => ["completion-validation-failed"].includes(failure)) } });
+      } else {
+        // A changed/removed skill must not receive a patch based on an old definition.
+        await this.#skillEvolutionStore.appendObservation({ id: `obs_task_${pending.id}`,
+          skillName: pending.skillName ?? "Delegated workflow", sessionId: pending.sessionId,
+          type: observationTypeFromOutcome(outcomeStatus), outcome: observationOutcomeFromFinalStatus(outcomeStatus),
+          sourceTrust: "runtime_internal", requiresHumanApproval: true, mayPromoteAutomatically: false,
+          lesson: "Delegated work settled. No current matching skill definition is available for a refinement.",
+          evidence: { profileId: input.profileId, settledTasks: receipts, outcomeStatus } });
+      }
+      await this.#store.finishDeferred(pending.id);
+      sessions.add(pending.sessionId);
+    }
+    return [...sessions];
+  }
+
   /** Delivery never waits for model review. Records on disk are the pending queue. */
-  startBackgroundReview(input: {
-    profileId: string; sessionId: string; agentEvolutionPolicy: AgentEvolutionPolicy;
-    validateAuthority: () => Promise<void>;
-    onSkillUpdated?: (skillName: string, proposalId: string) => Promise<void>;
-  }): void {
-    if (this.#review || !input.agentEvolutionPolicy.preparePatches || !input.agentEvolutionPolicy.createProposals) return;
+  startBackgroundReview(input: SkillReviewRequest): void {
+    if (!input.agentEvolutionPolicy.preparePatches || !input.agentEvolutionPolicy.createProposals) return;
+    this.#reviewQueue.set(input.sessionId, input);
+    if (this.#review) return;
     const controller = new AbortController();
     this.#reviewController = controller;
     this.#review = (async () => {
       // Yield so the foreground response can be delivered first.
       await new Promise<void>(resolve => setImmediate(resolve));
-      if (!await this.#sessionDb.getSessionForProfile(input.sessionId, input.profileId)) return;
-      for (const record of (await this.#store.list()).slice(0, 100)) {
-        if (controller.signal.aborted) break;
-        if (record.status !== "candidate" || !record.candidateId) continue;
-        await input.validateAuthority();
-        const candidate = (await this.#skillEvolutionStore?.listLearningCandidates([record.candidateId]))?.find(item => item.id === record.candidateId);
-        if (!candidate) continue;
-        await this.#prepareDraft(record, candidate, { ...input, usage: this.#latestUsage, signal: controller.signal });
+      while (this.#reviewQueue.size && !controller.signal.aborted) {
+        const next = this.#reviewQueue.values().next().value!;
+        this.#reviewQueue.delete(next.sessionId);
+        if (!await this.#sessionDb.getSessionForProfile(next.sessionId, next.profileId)) continue;
+        for (const record of (await this.#store.list()).slice(0, 100)) {
+          if (controller.signal.aborted) break;
+          if (record.status !== "candidate" || !record.candidateId || !record.sourceSessionIds.includes(next.sessionId)) continue;
+          await next.validateAuthority();
+          const candidate = (await this.#skillEvolutionStore?.listLearningCandidates([record.candidateId]))?.find(item => item.id === record.candidateId);
+          if (!candidate || candidate.sessionId !== next.sessionId) continue;
+          await this.#prepareDraft(record, candidate, { ...next, usage: this.#reviewUsage.get(next.sessionId), signal: controller.signal });
+        }
       }
     })().catch(() => {
       // Optional review must never turn a delivered task into a failure. Persisted candidates remain reviewable.
@@ -271,6 +357,7 @@ export class SkillLearningManager {
   async waitForBackgroundReview(): Promise<void> { await this.#review; }
 
   async cancelBackgroundReview(): Promise<void> {
+    this.#reviewQueue.clear();
     this.#reviewController?.abort();
     await this.#review;
   }
@@ -284,6 +371,7 @@ export class SkillLearningManager {
   }
 
   async #observeSelectedSkillTurn(input: {
+    settledTaskEvidence?: { id: string; taskIds: string[]; failures: string[]; acceptedResults: number; diagnosticResults: number; results: Array<{taskId: string; resultId: string; disposition: string}> };
     signal?: AbortSignal;
     usage?: ProviderUsageLineage;
     profileId: string;
@@ -309,6 +397,7 @@ export class SkillLearningManager {
     const finalSkillUsed = input.finalSkillUsed ?? selectedSkillName;
     const suggestedTarget = selectedSkillSuggestedTarget(input, selectedSkillName, finalSkillUsed);
     const evidence = await this.#skillEvolutionStore!.appendObservation({
+      id: input.settledTaskEvidence ? `obs_task_${input.settledTaskEvidence.id}` : undefined,
       skillName: selectedSkillName,
       source: "sourceKind" in input.selectedSkill ? input.selectedSkill.sourceKind : undefined,
       sessionId: input.sessionId,
@@ -325,10 +414,12 @@ export class SkillLearningManager {
       requiresHumanApproval: true,
       evidence: buildLearningEvidence(input, {
         selectedSkill: selectedSkillName,
+        settledTasks: input.settledTaskEvidence,
         finalSkillUsed
       })
     });
     const candidate = await this.#skillEvolutionStore!.appendLearningCandidate({
+      id: input.settledTaskEvidence ? `learn_task_${input.settledTaskEvidence.id}` : undefined,
       kind: "selected_skill_refinement",
       selectedSkill: selectedSkillName,
       evidenceIds: [evidence.id],
@@ -412,15 +503,17 @@ export class SkillLearningManager {
           candidate: { ...candidate, evidenceIds: evidence.map(item => item.id) }, agentEvolutionPolicy: policy
         });
         if (result.ok) return await this.#store.recordDraft(record.key, "proposed", result.proposal.id);
-      } catch { /* Retain the candidate for operator inspection. */ }
-      return this.#store.recordDraft(record.key, "abstained");
+      } catch {
+        return this.#store.recordDraft(record.key, "failed", undefined, "evidence-unavailable");
+      }
+      return this.#store.recordDraft(record.key, "failed", undefined, "proposal-rejected");
     }
-    if (!this.#draft) return this.#store.recordDraft(record.key, "abstained");
+    if (!this.#draft) return this.#store.recordDraft(record.key, "failed", undefined, "review-unavailable");
     try {
       const content = await readBoundedSkillFile(skill.sourceRoot, skill.sourcePath);
       const diskSkill = parseSkillFile(skill.sourcePath, content, { sourceRoot: skill.sourceRoot, sourceKind: (skill as LoadedSkill).sourceKind });
-      if (skillDefinitionRevision(diskSkill) !== skillDefinitionRevision(skill)) return await this.#store.recordDraft(record.key, "abstained");
-      if (content.length > 20_000) return await this.#store.recordDraft(record.key, "abstained");
+      if (skillDefinitionRevision(diskSkill) !== skillDefinitionRevision(skill)) return await this.#store.recordDraft(record.key, "failed", undefined, "stale-evidence");
+      if (content.length > 20_000) return await this.#store.recordDraft(record.key, "failed", undefined, "evidence-unavailable");
       const references = [];
       const skillRoot = dirname(skill.sourcePath);
       for (const resource of ((skill as LoadedSkill).resources ?? []).filter(item => item.kind === "reference").slice(0, 2)) {
@@ -430,9 +523,16 @@ export class SkillLearningManager {
         } catch { references.push({ path: resource.path, content: "Reference unavailable for review." }); }
       }
       const patch = await this.#draft({
-        content, candidateId: candidate.id, sessionId: input.sessionId, policy, signal: input.signal, usage: input.usage,
+        content, reviewAttempt: record.draftAttempts, candidateId: candidate.id, sessionId: input.sessionId, policy, signal: input.signal, usage: input.usage,
         // Bounded, redacted replay stays ephemeral; only the proposal/evidence IDs are persisted here.
         context, references,
+        receipts: evidence.filter(item => item.sessionId === input.sessionId).map(item => item.evidence?.settledTasks).filter(Boolean),
+        readTools: this.#reviewTools?.({ sessionId: input.sessionId, skillName: skill.name,
+          taskIds: evidence.filter(item => item.sessionId === input.sessionId).flatMap(item => {
+            const tasks = item.evidence?.settledTasks;
+            return tasks && typeof tasks === "object" && "taskIds" in tasks && Array.isArray(tasks.taskIds)
+              ? tasks.taskIds.filter((id): id is string => typeof id === "string") : [];
+          }) }),
         evidence: evidence.slice(-6).map((item) => ({ outcome: item.outcome, tools: item.toolsAttempted.slice(0, 20),
           lesson: item.outcome === "succeeded" ? "The task succeeded; preserve effective instructions. Success alone does not establish an improvement." : learningDraftEvidence(item.evidence).lesson }))
       });
@@ -455,9 +555,10 @@ export class SkillLearningManager {
           }
           return (await this.#store.get(record.key))!;
         }
+        return this.#store.recordDraft(record.key, "failed", undefined, "proposal-rejected");
       }
-    } catch {
-      // Drafting is best-effort; retain evidence and a visible abstention without failing the user's task.
+    } catch (error) {
+      return this.#store.recordDraft(record.key, "failed", undefined, error instanceof SkillDraftError ? error.reason : "evidence-unavailable");
     }
     return this.#store.recordDraft(record.key, input.signal?.aborted ? "pending" : "abstained");
   }
@@ -659,6 +760,7 @@ class SkillLearningStore {
   readonly #records = new Map<string, SkillLearningRecord>();
   #loaded = false;
   #draftBudget: SkillLearningFile["draftBudget"];
+  #deferred = new Map<string, DeferredSkillTurn>();
 
   constructor(options: { path: string; localSkillsRoot: string; now?: () => Date }) {
     this.#path = options.path;
@@ -671,10 +773,17 @@ class SkillLearningStore {
       this.#loaded = false;
       this.#records.clear();
       this.#draftBudget = undefined;
+      this.#deferred.clear();
       await this.#ensureLoaded();
       return work();
     });
   }
+
+  defer(turn: DeferredSkillTurn) { return this.#transaction(async () => {
+    this.#deferred.set(turn.id, turn); await this.#flush();
+  }); }
+  deferred() { return this.#transaction(async () => [...this.#deferred.values()]); }
+  finishDeferred(id: string) { return this.#transaction(async () => { this.#deferred.delete(id); await this.#flush(); }); }
 
   observe(input: {
     key: string;
@@ -692,8 +801,8 @@ class SkillLearningStore {
     selectedSkillName?: string;
   }) { return this.#transaction(() => this.#observe(input)); }
   markCandidate(key: string) { return this.#transaction(() => this.#markCandidate(key)); }
-  recordDraft(key: string, status: NonNullable<SkillLearningRecord["draftStatus"]>, proposalId?: string) {
-    return this.#transaction(() => this.#recordDraft(key, status, proposalId));
+  recordDraft(key: string, status: NonNullable<SkillLearningRecord["draftStatus"]>, proposalId?: string, failure?: string) {
+    return this.#transaction(() => this.#recordDraft(key, status, proposalId, failure));
   }
   get(key: string) { return this.#transaction(() => this.#get(key)); }
   list() { return this.#transaction(() => this.#list()); }
@@ -704,10 +813,12 @@ class SkillLearningStore {
       const record = this.#records.get(key);
       const attempts = this.#draftBudget?.day === today ? this.#draftBudget.attempts
         : [...this.#records.values()].filter(item => item.draftAttemptedAt?.startsWith(today)).length;
-      if (!record || record.candidateId !== candidateId || record.draftCandidateId === candidateId ||
+      if (!record || record.candidateId !== candidateId || (record.draftCandidateId === candidateId && !(record.draftStatus === "failed" && record.draftFailure === "provider-failure" &&
+            (record.draftAttempts ?? 1) < 2 && Date.now() - Date.parse(record.draftAttemptedAt ?? "") >= 60_000)) ||
           (record.draftStatus === "attempted" && record.draftAttemptedAt?.startsWith(today)) || attempts >= limit) return false;
       this.#draftBudget = { day: today, attempts: attempts + 1 };
-      this.#records.set(key, { ...record, draftCandidateId: candidateId });
+      this.#records.set(key, { ...record, draftCandidateId: candidateId,
+        draftAttempts: record.draftCandidateId === candidateId ? (record.draftAttempts ?? 1) + 1 : 1 });
       await this.#recordDraft(key, "attempted");
       return true;
     });
@@ -759,6 +870,8 @@ class SkillLearningStore {
       draftAttemptedAt: existing?.draftAttemptedAt,
       draftProposalId: existing?.draftProposalId,
       draftStatus: existing?.draftStatus,
+      draftFailure: existing?.draftFailure,
+      draftAttempts: existing?.draftAttempts,
       draftCandidateId: existing?.draftCandidateId
     };
     this.#records.set(input.key, record);
@@ -786,10 +899,10 @@ class SkillLearningStore {
     return updated;
   }
 
-  async #recordDraft(key: string, status: NonNullable<SkillLearningRecord["draftStatus"]>, proposalId?: string): Promise<SkillLearningRecord> {
+  async #recordDraft(key: string, status: NonNullable<SkillLearningRecord["draftStatus"]>, proposalId?: string, failure?: string): Promise<SkillLearningRecord> {
     const record = this.#records.get(key);
     if (!record) throw new Error("Learning record missing.");
-    const updated = { ...record, draftAttemptedAt: this.#now().toISOString(), draftStatus: status, draftProposalId: proposalId };
+    const updated = { ...record, draftAttemptedAt: this.#now().toISOString(), draftStatus: status, draftProposalId: proposalId, draftFailure: failure };
     this.#records.set(key, updated);
     await this.#flush();
     return updated;
@@ -866,6 +979,11 @@ class SkillLearningStore {
         }
         this.#records.set(record.key, record);
       }
+      for (const turn of parsed.deferredTurns ?? []) {
+        if (typeof turn.id !== "string" || typeof turn.profileId !== "string" || typeof turn.sessionId !== "string" ||
+            !Array.isArray(turn.taskIds) || !turn.taskIds.every(id => typeof id === "string")) throw new Error("Invalid deferred learning turn.");
+        this.#deferred.set(turn.id, turn);
+      }
       if (parsed.draftBudget !== undefined) {
         if (!/^\d{4}-\d{2}-\d{2}$/u.test(parsed.draftBudget.day) || !Number.isSafeInteger(parsed.draftBudget.attempts) || parsed.draftBudget.attempts < 0) throw new Error("Invalid draft budget.");
         this.#draftBudget = parsed.draftBudget;
@@ -903,6 +1021,7 @@ class SkillLearningStore {
     const file: SkillLearningFile = {
       version: 1,
       draftBudget: this.#draftBudget,
+      deferredTurns: [...this.#deferred.values()],
       records: [...this.#records.values()].sort((left, right) => left.key.localeCompare(right.key))
     };
     await fs.mkdir(dirname(this.#path), { recursive: true });

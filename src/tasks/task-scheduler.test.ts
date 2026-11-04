@@ -97,6 +97,23 @@ describe("TaskScheduler", () => {
     expect(executorFailureDiagnostic({message:"secret"},"id")).not.toContain("secret");
   });
 
+  it("notifies learning only after Task settlement and result publication; observer failure cannot reject delivery", async () => {
+    store.createTaskGraph(makeGraph([makeStep("research", 0), makeStep("synthesis", 1, { dependsOn: ["step-research"] })]));
+    const onTaskSettled = vi.fn(async (task: Task) => {
+      expect(task.status).toBe("completed");
+      expect(store.listResults(task.id)).toHaveLength(2);
+      throw Error("optional observer unavailable");
+    });
+    const executor = Object.assign(new FakeTaskStepExecutor(() => ({ outcome: "succeeded", results: [{ kind: "text", content: "Observed source result" }] })), { onTaskSettled });
+    const scheduler = makeScheduler(executor);
+    await scheduler.runOnce();
+    expect(onTaskSettled).not.toHaveBeenCalled();
+    const result = await scheduler.runOnce();
+    expect(onTaskSettled).toHaveBeenCalledTimes(1);
+    expect(result.warnings).toContain("Task settled; optional learning reconciliation remains pending.");
+    expect(store.getTask("task-alpha")?.status).toBe("completed");
+  });
+
   it("runs dependencies in order and settles the Task only after durable result acceptance", async () => {
     store.createTaskGraph(makeGraph([
       makeStep("research", 0),

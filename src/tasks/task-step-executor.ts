@@ -110,6 +110,8 @@ export type TaskStepExecutionInput = {
 export interface TaskStepExecutor {
   readonly kind: TaskStep["executor"]["kind"];
   execute(input: TaskStepExecutionInput): Promise<TaskExecutorSettlement>;
+  /** Optional post-settlement evidence observer; it cannot change the Task verdict. */
+  onTaskSettled?(task: Task): Promise<void>;
 }
 
 export type ResolveTaskStepExecutor = (task: Task, step: TaskStep) => TaskStepExecutor | undefined;

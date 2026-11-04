@@ -345,8 +345,18 @@ export class TaskScheduler {
       }
     }
 
-    const completion = Promise.all(launches).then(() => {
+    const completion = Promise.all(launches).then(async () => {
       for (const taskId of touchedTaskIds) this.#finalizeTaskIfSettled(taskId);
+      for (const taskId of touchedTaskIds) {
+        const task = this.#store.getTask(taskId);
+        if (!task || !isTerminalTaskStatus(task.status) || !task.activePlanRevisionId) continue;
+        const observers = new Set(this.#store.listSteps(task.id, task.activePlanRevisionId)
+          .map(step => this.#resolveExecutor(task, step)).filter(executor => executor?.onTaskSettled));
+        for (const observer of observers) {
+          try { await observer!.onTaskSettled!(task); }
+          catch { result.warnings.push("Task settled; optional learning reconciliation remains pending."); }
+        }
+      }
       return snapshotRunResult(result);
     });
     this.#trackBatch(completion);

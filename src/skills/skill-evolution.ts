@@ -532,7 +532,7 @@ export class SkillEvolutionStore {
       requiresHumanApproval: input.requiresHumanApproval ?? !sourceTrustAllowsAutomaticPromotion(sourceTrust),
       evidence: sanitizeSkillEvidence(input.evidence)
     };
-    await this.#appendJsonl("observations.jsonl", observation);
+    await this.#appendJsonl("observations.jsonl", observation, input.id);
     return observation;
   }
 
@@ -543,7 +543,7 @@ export class SkillEvolutionStore {
       confidence: clampConfidence(input.confidence ?? 0.5),
       createdAt: input.createdAt ?? this.#nowIso()
     } as SkillLearningCandidate;
-    await this.#appendJsonl("learning-candidates.jsonl", candidate);
+    await this.#appendJsonl("learning-candidates.jsonl", candidate, input.id);
     return candidate;
   }
 
@@ -985,10 +985,12 @@ export class SkillEvolutionStore {
     await atomicWriteJson(this.#usagePath, payload);
   }
 
-  async #appendJsonl(file: string, value: unknown): Promise<void> {
+  async #appendJsonl(file: string, value: unknown, uniqueId?: string): Promise<void> {
     await withProfileWriteLock(this.#evolutionRoot, async () => {
       const path = join(this.#evolutionRoot, file);
       await this.#jsonl?.check(path);
+      if (uniqueId && (await (this.#jsonl ?? new ProfileJsonl(this.#evolutionRoot)).query<{ id: string }>(path,
+        { where: record => record.id === uniqueId, limit: 1 })).length) return;
       const output = await open(path, constants.O_CREAT | constants.O_APPEND | constants.O_WRONLY | constants.O_NOFOLLOW, 0o600);
       try {
         if (!(await output.stat()).isFile()) throw new Error("Invalid evolution file.");

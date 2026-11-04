@@ -1,3 +1,5 @@
+import { createSkillTools } from "../tools/skill-tools.js";
+import { createTaskResultTools } from "../tools/task-result-tools.js";
 import { skillCatalogDelta, snapshotSkillCatalog } from "../skills/skill-catalog-delta.js";
 import { taskLimitsForRun } from '../config/run-limits.js';
 import { readUnattendedRunLimits } from '../config/run-limits-store.js';
@@ -784,7 +786,36 @@ async function buildRuntime(options: RuntimeOptions, rollback: ResourceCleanup):
     storePath: skillLearningStorePath,
     sessionDb,
     skillEvolutionStore,
-    drafter: options.model.provider === "unconfigured" ? undefined : createSkillDrafter({ executor: providerExecutor, route: mainRoute, profileId }),
+    drafter: options.model.provider === "unconfigured" ? undefined : createSkillDrafter({ executor: providerExecutor, route: mainRoute, fallbackChain: options.modelFallbackRoutes, profileId,
+      preferredRoute: async (reviewSessionId) => {
+        if (!await sessionDb.getSessionForProfile(reviewSessionId, profileId)) return undefined;
+        const last = (await sessionDb.listEvents(reviewSessionId)).reverse().find(event => event.kind === "provider-route" && event.state === "responded");
+        return last?.kind === "provider-route" ? [mainRoute, ...(options.modelFallbackRoutes ?? [])]
+          .find(route => route.provider === last.provider && route.id === last.model) : undefined;
+      }
+    }),
+    reviewTools: ({ sessionId: reviewSessionId, skillName, taskIds }) => {
+      const skill = skillRegistry.get(skillName);
+      const allowedResources = new Set(skill && "resources" in skill ? skill.resources?.map(resource => resource.path) : []);
+      const readers = [
+        ...createSkillTools({ registry: skillRegistry, localSkillsRoot }).filter(tool => tool.name === "skill.read"),
+        ...createTaskResultTools({ service: taskResultService, currentSessionId: () => reviewSessionId }).filter(tool => tool.name === "task.result.read")
+      ];
+      return readers.map(tool => ({ ...tool, run: async (args: Record<string, unknown>) => {
+        await validateLiveAuthority();
+        if (disposed || !args || typeof args !== "object" || !await sessionDb.getSessionForProfile(reviewSessionId, profileId))
+          return { ok: false, content: "Review authority is unavailable." };
+        if (tool.name === "skill.read") {
+          if (args.name !== skillName || (args.path !== undefined && !allowedResources.has(String(args.path))))
+            return { ok: false, content: "Only the observed skill and its declared resources are available." };
+        } else {
+          const task = typeof args.task_id === "string" && taskIds.includes(args.task_id) ? taskStore?.getTask(args.task_id) : undefined;
+          if (!task || task.originSessionId !== reviewSessionId || task.workspace.identityHash !== taskWorkspace?.identityHash)
+            return { ok: false, content: "Only this session's observed Task results are available." };
+        }
+        return tool.run({ ...args, ...(tool.name === "task.result.read" ? { max_chars: 6000 } : {}) });
+      } }));
+    },
     proposalService: new SkillProposalService({ registry: skillRegistry, localSkillsRoot, skillEvolutionStore, changeManifestStore })
   });
   try {
@@ -792,6 +823,15 @@ async function buildRuntime(options: RuntimeOptions, rollback: ResourceCleanup):
   } catch {
     // Old learning records are best-effort startup hygiene; runtime creation should continue.
   }
+  const reconcileTaskLearning = async () => {
+    if (disposed || !taskStore) return;
+    const sessions = await skillLearningManager.reconcileSettledTasks({ store: taskStore, profileId, workspaceIdentityHash: taskWorkspace?.identityHash,
+      agentEvolutionPolicy, validateAuthority: validateLiveAuthority });
+    for (const sessionId of sessions) skillLearningManager.startBackgroundReview({ profileId, sessionId,
+      agentEvolutionPolicy, validateAuthority: validateLiveAuthority });
+  };
+  // Persisted pending handoffs survive process interruption between settlement and observation.
+  await reconcileTaskLearning().catch(() => undefined);
   const memoryPromptContextBuilder = new MemoryPromptContextBuilder({
     store: memoryStore,
     promotionStore: memoryPromotionStore
@@ -1230,6 +1270,7 @@ async function buildRuntime(options: RuntimeOptions, rollback: ResourceCleanup):
   const taskAgentExecutor = taskStore === undefined
     ? undefined
     : new AgentStepExecutor({
+        onTaskSettled: reconcileTaskLearning,
         childFactory,
         sessionDb,
         taskStore,
@@ -1489,6 +1530,7 @@ async function buildRuntime(options: RuntimeOptions, rollback: ResourceCleanup):
           }
           return undefined;
         });
+        await reconcileTaskLearning().catch(() => undefined);
         if (!disposed && !input.signal?.aborted) skillLearningManager.startBackgroundReview({
           profileId, sessionId: sessionRuntimeContext.currentSessionId(), agentEvolutionPolicy,
           validateAuthority: validateLiveAuthority,
