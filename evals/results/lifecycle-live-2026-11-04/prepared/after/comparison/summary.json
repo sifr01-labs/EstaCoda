@@ -1,0 +1,195 @@
+{
+  "arm": "after",
+  "test": "comparison",
+  "foregroundOutcome": "partially_completed",
+  "elapsedMs": 624510,
+  "providerCalls": 70,
+  "inputTokens": 1591474,
+  "outputTokens": 33512,
+  "usageComplete": true,
+  "pricingComplete": false,
+  "tasks": [
+    {
+      "status": "partial",
+      "settlementDurationMs": 550021,
+      "steps": [
+        {
+          "id": "step_871d00a6-f1ae-4811-87d9-c553f2a64196",
+          "title": "Delegated work 1",
+          "role": "worker",
+          "status": "completed",
+          "tokenLimit": 1000000,
+          "attempts": [
+            {
+              "status": "completed",
+              "providerCalls": 16,
+              "totalTokens": 429087
+            }
+          ],
+          "results": [
+            {
+              "disposition": "accepted",
+              "bytes": 13447,
+              "sha256": "sha256:995086293d5f22e34a07a2574572ddc649dc7ab05774eab0e545ab313faa8c55"
+            }
+          ]
+        },
+        {
+          "id": "step_ff891b49-34d1-4a3c-baa4-44c6ed012fad",
+          "title": "Delegated work 2",
+          "role": "worker",
+          "status": "failed",
+          "tokenLimit": 1000000,
+          "attempts": [
+            {
+              "status": "failed",
+              "failure": {
+                "class": "evidence-contract-unsatisfied",
+                "message": "Execution stopped (normal). Research evidence needs correction: repository-evidence. Cite evidence observed with the assigned tools; obtain missing evidence or explicitly report the unresolved gap. Inspect the preserved draft.",
+                "retryable": false,
+                "uncertainSideEffects": false
+              },
+              "providerCalls": 18,
+              "totalTokens": 516912
+            }
+          ],
+          "results": [
+            {
+              "disposition": "diagnostic",
+              "bytes": 10426,
+              "sha256": "sha256:12bc996fb7e8c7baeeb01c4c888dd433a69209be39e68eb0dd7e3d40dccdd7b5"
+            }
+          ]
+        },
+        {
+          "id": "step_b004c833-43a4-413c-bea5-19564eb94305",
+          "title": "Delegated work 3",
+          "role": "worker",
+          "status": "completed",
+          "tokenLimit": 1000000,
+          "attempts": [
+            {
+              "status": "completed",
+              "providerCalls": 17,
+              "totalTokens": 426806
+            }
+          ],
+          "results": [
+            {
+              "disposition": "accepted",
+              "bytes": 13033,
+              "sha256": "sha256:4ba014c9f2e9a7502fb51d2c8dfdcec9c7f706878c1bbd6120f58b777032ec38"
+            }
+          ]
+        },
+        {
+          "id": "step_2ccfdebb-e79a-4134-8766-dcb796eca2b2",
+          "title": "Synthesize delegated results",
+          "role": "synthesis",
+          "status": "completed",
+          "tokenLimit": 1000000,
+          "attempts": [
+            {
+              "status": "completed",
+              "providerCalls": 3,
+              "totalTokens": 36910
+            }
+          ],
+          "results": [
+            {
+              "disposition": "accepted",
+              "bytes": 31073,
+              "sha256": "sha256:b7e4ef5d3a9f5eab0e60b33ebbf099104a3a3bd231a6c7973bf280d44acd0a6a"
+            }
+          ]
+        },
+        {
+          "id": "step_621a1693-8812-45c3-b1a1-76337cff72de",
+          "title": "Save and verify research report",
+          "role": "report-delivery",
+          "status": "completed",
+          "tokenLimit": 1000000,
+          "attempts": [
+            {
+              "status": "completed",
+              "providerCalls": 0,
+              "totalTokens": 0
+            }
+          ],
+          "results": [
+            {
+              "disposition": "accepted",
+              "bytes": 74,
+              "sha256": "sha256:66d7b6de1467f2571902793df290f9b757dbc5aa68333e5b33a8654db420176c"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "reports": [
+    {
+      "path": "reports/superagent-vs-estacoda.md",
+      "bytes": 31073,
+      "sha256": "b7e4ef5d3a9f5eab0e60b33ebbf099104a3a3bd231a6c7973bf280d44acd0a6a",
+      "matchesAcceptedResult": true
+    }
+  ],
+  "changedOriginalFixtureFiles": [],
+  "learning": {
+    "pendingHandoffs": 0,
+    "drafts": [
+      {
+        "status": "proposed",
+        "attempts": 1,
+        "proposalCreated": true
+      }
+    ],
+    "observations": [
+      {
+        "sessionId": "e49aae7f-5f76-4532-ac86-e2fc519e35ed",
+        "outcome": "partial",
+        "settledTasks": {
+          "id": "61e95ae700c7965f6b707ef6f6a3ae1c7357c791cf8fee133cf49e25077a36d0",
+          "taskIds": [
+            "task_b09590ce-6701-4a27-903a-2b8828305599"
+          ],
+          "failures": [
+            "evidence-contract-unsatisfied"
+          ],
+          "acceptedResults": 4,
+          "diagnosticResults": 1,
+          "results": [
+            {
+              "taskId": "task_b09590ce-6701-4a27-903a-2b8828305599",
+              "resultId": "979cc332-d667-45cf-9610-95fdf2b39fb2",
+              "disposition": "diagnostic"
+            },
+            {
+              "taskId": "task_b09590ce-6701-4a27-903a-2b8828305599",
+              "resultId": "f267dbd8-5e3a-4aa8-8e3e-4503b863bf89",
+              "disposition": "accepted"
+            },
+            {
+              "taskId": "task_b09590ce-6701-4a27-903a-2b8828305599",
+              "resultId": "198de3d6-34c4-4bc5-850a-dee8b74e46d4",
+              "disposition": "accepted"
+            },
+            {
+              "taskId": "task_b09590ce-6701-4a27-903a-2b8828305599",
+              "resultId": "9cce739b-a6d9-4143-95e3-4122284a0ab8",
+              "disposition": "accepted"
+            },
+            {
+              "taskId": "task_b09590ce-6701-4a27-903a-2b8828305599",
+              "resultId": "6cf422df-c0d5-45b1-a11f-dd7f5f356e3d",
+              "disposition": "accepted"
+            }
+          ]
+        },
+        "findings": [],
+        "timestamp": "2026-11-04T23:46:16.067Z"
+      }
+    ]
+  }
+}

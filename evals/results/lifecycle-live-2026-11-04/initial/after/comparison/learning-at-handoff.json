@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "deferredTurns": [
+    {
+      "id": "9c399afb42f5cb0b42457f120a009bcd713e1c5ce90a236797e06792dd14832f",
+      "profileId": "default",
+      "sessionId": "57b245db-ed3c-487b-b35d-f6a70d5e7db1",
+      "taskIds": [
+        "task_52ab4608-0904-4bb4-ac0a-1d15e1945f8a"
+      ],
+      "skillName": "external-agent-runtime-comparison",
+      "skillRevision": "ccb015849cc98e52c873ca1a9378d27c205e53e1a4aa84bfa457d4967e046ed1",
+      "promptSummary": "deepseek reportedly launched a new open source thing called super-agent. I want you to find it and benchmark it against EstaCoda's codebase and capabilities",
+      "promptHash": "b755c6e505723c29"
+    }
+  ],
+  "records": []
+}

@@ -1,0 +1,3 @@
+
+> estacoda@0.1.0 typecheck <REPOSITORY>
+> tsc --noEmit

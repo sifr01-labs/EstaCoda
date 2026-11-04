@@ -1,0 +1,53 @@
+{
+  "arm": "before-pilot",
+  "test": "budget",
+  "error": "SqliteError: Task Step execution limits are immutable",
+  "foregroundOutcome": "completed",
+  "elapsedMs": 19744,
+  "providerCalls": 3,
+  "inputTokens": 18130,
+  "outputTokens": 614,
+  "usageComplete": true,
+  "pricingComplete": false,
+  "tasks": [
+    {
+      "status": "queued",
+      "steps": [
+        {
+          "id": "step_ec865990-8fd5-4f86-ad3f-ef2e7f58034c",
+          "title": "Delegated work",
+          "role": "worker",
+          "status": "pending",
+          "tokenLimit": 1000000,
+          "attempts": [],
+          "results": []
+        },
+        {
+          "id": "step_b6fe7b29-6b45-4424-9fb0-a679235802e2",
+          "title": "Synthesize delegated results",
+          "role": "synthesis",
+          "status": "pending",
+          "tokenLimit": 1000000,
+          "attempts": [],
+          "results": []
+        },
+        {
+          "id": "step_c56bf204-e0d5-40e7-8d71-1a16858baccd",
+          "title": "Save and verify research report",
+          "role": "report-delivery",
+          "status": "pending",
+          "tokenLimit": 1000000,
+          "attempts": [],
+          "results": []
+        }
+      ]
+    }
+  ],
+  "reports": [],
+  "changedOriginalFixtureFiles": [],
+  "learning": {
+    "pendingHandoffs": 0,
+    "drafts": [],
+    "observations": []
+  }
+}

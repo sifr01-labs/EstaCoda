@@ -1,0 +1,95 @@
+{
+  "arm": "before",
+  "test": "learning",
+  "foregroundOutcome": "completed",
+  "elapsedMs": 66386,
+  "providerCalls": 17,
+  "inputTokens": 108468,
+  "outputTokens": 1929,
+  "usageComplete": true,
+  "pricingComplete": false,
+  "tasks": [
+    {
+      "status": "partial",
+      "settlementDurationMs": 35891,
+      "steps": [
+        {
+          "id": "step_07d15cb7-ba22-4f7a-ab02-3af19a9e6e85",
+          "title": "Delegated work",
+          "role": "worker",
+          "status": "failed",
+          "tokenLimit": 1000000,
+          "attempts": [
+            {
+              "status": "failed",
+              "failure": {
+                "class": "evidence-contract-unsatisfied",
+                "message": "Execution stopped (normal). File output: unresolved-target. Produce the named outputs using authorized file tools or commands and check the result appropriately. Commands must exit successfully and produce the requested files; text readback is not required. Respect overwrite approvals and do not retry denied actions. Do not claim unobserved results. Inspect the preserved draft.",
+                "retryable": false,
+                "uncertainSideEffects": false
+              },
+              "providerCalls": 10,
+              "totalTokens": 57271
+            }
+          ],
+          "results": [
+            {
+              "disposition": "diagnostic",
+              "bytes": 855,
+              "sha256": "sha256:677e633c6623e0186307574d690fa27a60ed0660315081067320278a66e6e12b"
+            }
+          ]
+        },
+        {
+          "id": "step_02fd5daa-ffa2-4012-9a1f-74837e55f9aa",
+          "title": "Synthesize delegated results",
+          "role": "synthesis",
+          "status": "skipped",
+          "tokenLimit": 1000000,
+          "attempts": [],
+          "results": []
+        }
+      ]
+    }
+  ],
+  "reports": [],
+  "changedOriginalFixtureFiles": [],
+  "learning": {
+    "pendingHandoffs": 0,
+    "drafts": [
+      {
+        "status": "promoted",
+        "proposalCreated": true
+      }
+    ],
+    "observations": [
+      {
+        "sessionId": "3a7a4e0d-5d6a-48da-9c0f-c5c4d029273b",
+        "outcome": "succeeded",
+        "timestamp": "2026-11-04T23:09:23.427Z"
+      },
+      {
+        "sessionId": "3a7a4e0d-5d6a-48da-9c0f-c5c4d029273b",
+        "outcome": "succeeded",
+        "findings": [
+          {
+            "mechanism": "recovered-tool-failure",
+            "observed": "A failed tool call was followed by a successful call of the same tool; task success is separate.",
+            "correction": "Review the successful alternative and its evidence before proposing a reusable procedure. Do not persist a transient failure as tool unavailability.",
+            "target": "workflow-review",
+            "correctionVerified": false,
+            "callIds": [
+              "tool-call-f71bbff7c68459067194f14c"
+            ]
+          }
+        ],
+        "timestamp": "2026-11-04T23:09:23.430Z"
+      },
+      {
+        "sessionId": "child_9d8e14c8-50be-42e5-8df2-d87d6349751c",
+        "outcome": "partial",
+        "timestamp": "2026-11-04T23:09:59.284Z"
+      }
+    ]
+  }
+}

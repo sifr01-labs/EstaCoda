@@ -1,0 +1,195 @@
+{
+  "arm": "after",
+  "test": "comparison",
+  "foregroundOutcome": "partially_completed",
+  "elapsedMs": 561137,
+  "providerCalls": 100,
+  "inputTokens": 2072156,
+  "outputTokens": 24971,
+  "usageComplete": true,
+  "pricingComplete": false,
+  "tasks": [
+    {
+      "status": "partial",
+      "settlementDurationMs": 472642,
+      "steps": [
+        {
+          "id": "step_aa30624e-671f-4d7b-96cd-e24439a64d44",
+          "title": "Delegated work 1",
+          "role": "worker",
+          "status": "completed",
+          "tokenLimit": 1000000,
+          "attempts": [
+            {
+              "status": "completed",
+              "providerCalls": 26,
+              "totalTokens": 620438
+            }
+          ],
+          "results": [
+            {
+              "disposition": "accepted",
+              "bytes": 14885,
+              "sha256": "sha256:9883ce0e2e5670e01cef642ab8924714c0c0424d7c659bb72d15708732be58f7"
+            }
+          ]
+        },
+        {
+          "id": "step_14c5b40f-f995-4085-8f07-a5c38c25adf4",
+          "title": "Delegated work 2",
+          "role": "worker",
+          "status": "failed",
+          "tokenLimit": 1000000,
+          "attempts": [
+            {
+              "status": "failed",
+              "failure": {
+                "class": "evidence-contract-unsatisfied",
+                "message": "Execution stopped (normal). Declared checks remain unresolved: [\"harness-loop-policy-recovery\",\"harness-subagent-provider-skills\"]. Verify those requirements on the current result using an authorized command and reuse the exact verification label. A missing interpreter, crash, failed exit, or stale check is not a passing validation. Reading files or passing a differently named check does not settle these requirements. Do not retry denied actions, bypass permissions, or rerun uncertain side effec",
+                "retryable": false,
+                "uncertainSideEffects": false
+              },
+              "providerCalls": 24,
+              "totalTokens": 558367
+            }
+          ],
+          "results": [
+            {
+              "disposition": "diagnostic",
+              "bytes": 15904,
+              "sha256": "sha256:4b65f2b620464e9b8c5e68ed9e284de8b46ef2784a5c3edb067f6bcf4141bdeb"
+            }
+          ]
+        },
+        {
+          "id": "step_693e96f4-fb20-4d9e-b1b3-b2424afc506c",
+          "title": "Delegated work 3",
+          "role": "worker",
+          "status": "completed",
+          "tokenLimit": 1000000,
+          "attempts": [
+            {
+              "status": "completed",
+              "providerCalls": 29,
+              "totalTokens": 630359
+            }
+          ],
+          "results": [
+            {
+              "disposition": "accepted",
+              "bytes": 18646,
+              "sha256": "sha256:538b4dedae3770719a785488a7eeac99e03ef0481ed99fc6140b43cf322d6d7d"
+            }
+          ]
+        },
+        {
+          "id": "step_9ebd37c4-f6eb-4f25-80bf-6e2a1eff6883",
+          "title": "Synthesize delegated results",
+          "role": "synthesis",
+          "status": "completed",
+          "tokenLimit": 1000000,
+          "attempts": [
+            {
+              "status": "completed",
+              "providerCalls": 3,
+              "totalTokens": 39032
+            }
+          ],
+          "results": [
+            {
+              "disposition": "accepted",
+              "bytes": 30464,
+              "sha256": "sha256:e9b2fbe73a0340b4541abe4b30fffad66518bcc531839d2a764c549d29d1f088"
+            }
+          ]
+        },
+        {
+          "id": "step_83f11278-df41-4000-8d52-8fe2f96f0917",
+          "title": "Save and verify research report",
+          "role": "report-delivery",
+          "status": "completed",
+          "tokenLimit": 1000000,
+          "attempts": [
+            {
+              "status": "completed",
+              "providerCalls": 0,
+              "totalTokens": 0
+            }
+          ],
+          "results": [
+            {
+              "disposition": "accepted",
+              "bytes": 74,
+              "sha256": "sha256:66d7b6de1467f2571902793df290f9b757dbc5aa68333e5b33a8654db420176c"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "reports": [
+    {
+      "path": "reports/superagent-vs-estacoda.md",
+      "bytes": 30464,
+      "sha256": "e9b2fbe73a0340b4541abe4b30fffad66518bcc531839d2a764c549d29d1f088",
+      "matchesAcceptedResult": true
+    }
+  ],
+  "changedOriginalFixtureFiles": [],
+  "learning": {
+    "pendingHandoffs": 0,
+    "drafts": [
+      {
+        "status": "proposed",
+        "attempts": 1,
+        "proposalCreated": true
+      }
+    ],
+    "observations": [
+      {
+        "sessionId": "57b245db-ed3c-487b-b35d-f6a70d5e7db1",
+        "outcome": "partial",
+        "settledTasks": {
+          "id": "9c399afb42f5cb0b42457f120a009bcd713e1c5ce90a236797e06792dd14832f",
+          "taskIds": [
+            "task_52ab4608-0904-4bb4-ac0a-1d15e1945f8a"
+          ],
+          "failures": [
+            "evidence-contract-unsatisfied"
+          ],
+          "acceptedResults": 4,
+          "diagnosticResults": 1,
+          "results": [
+            {
+              "taskId": "task_52ab4608-0904-4bb4-ac0a-1d15e1945f8a",
+              "resultId": "e355e737-8161-4314-a875-b4cf44483712",
+              "disposition": "accepted"
+            },
+            {
+              "taskId": "task_52ab4608-0904-4bb4-ac0a-1d15e1945f8a",
+              "resultId": "42f24ed4-7a6d-4429-9194-8a551cc580fc",
+              "disposition": "diagnostic"
+            },
+            {
+              "taskId": "task_52ab4608-0904-4bb4-ac0a-1d15e1945f8a",
+              "resultId": "f4c1d56a-f1fa-4e03-9703-9bcb3fa069a1",
+              "disposition": "accepted"
+            },
+            {
+              "taskId": "task_52ab4608-0904-4bb4-ac0a-1d15e1945f8a",
+              "resultId": "be31054c-864c-440e-86dc-25f9a5105114",
+              "disposition": "accepted"
+            },
+            {
+              "taskId": "task_52ab4608-0904-4bb4-ac0a-1d15e1945f8a",
+              "resultId": "6065711f-87b2-4410-874b-47218daffe60",
+              "disposition": "accepted"
+            }
+          ]
+        },
+        "findings": [],
+        "timestamp": "2026-11-04T23:24:45.449Z"
+      }
+    ]
+  }
+}

@@ -1,0 +1,37 @@
+{
+  "version": 1,
+  "records": [
+    {
+      "key": "use one delegated investigator to audit the command safety and terminal inspection implementations and relevant tests inspect the actual source run the relevant existing suites and produce a useful evidence based report with limitations this run has a deliberately small 160 000 cumulative token worker allowance use that allowance efficiently and conclude with observed evidence before exhaustion synthesize the result and save reports release audit md do not change source or tests or request a larger budget::capability.discover>capability.request>delegate_task>task.status>terminal.inspect",
+      "name": "Use One Delegated Investigator Audit workflow",
+      "content": "Reusable workflow: Use one delegated investigator to audit the command-safety and terminal-inspection implementations and relevant tests. Inspect the actual source, run the relevant existing suites, and produce a useful evidence-based report with limitations. This run has a deliberately small 160,000 cumulative-token worker allowance. Use that allowance efficiently and conclude with observed evidence before exhaustion. Synthesize the result and save reports/release-audit.md. Do not change source or tests or request a larger budget",
+      "occurrences": 1,
+      "sourceSessionIds": [
+        "8aa9184c-ea75-4a4e-8fb3-4782e13e19ed"
+      ],
+      "tools": [
+        "capability.discover",
+        "capability.request",
+        "delegate_task",
+        "task.status",
+        "terminal.inspect"
+      ],
+      "requiredToolsets": [
+        "core",
+        "research",
+        "coding",
+        "shell-readonly"
+      ],
+      "bounded": false,
+      "boundedReason": "prompt references secrets or credentials",
+      "status": "observed",
+      "evidenceIds": [
+        "obs_92659a85-adf1-4a28-a648-1d84749924bf"
+      ],
+      "candidateId": "learn_815345ea-fb18-4507-8b09-4b97dad3d32e",
+      "candidateKind": "new_or_missing_playbook",
+      "promptHash": "c8a891229c809d05",
+      "updatedAt": "2026-11-04T23:17:28.803Z"
+    }
+  ]
+}

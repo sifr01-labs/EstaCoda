@@ -1,0 +1,147 @@
+{
+  "text": "## Bottom line\n\nThe matching project is **`dsh-superagent`**, a proactive coding agent built on **DeepSeek Harness**. An important correction: its README explicitly calls it a **research prototype, “not an official DeepSeek product.”** It also warns that some designs from the associated research article are not implemented in the published prototype.\n\nI inspected the supplied pinned source for **Superagent, Harness, and EstaCoda**, then executed selected deterministic tests across all three.\n\n**Assessment:** Superagent’s clearest strength is its specialized GitHub-team workflow. EstaCoda has strong demonstrated mechanisms for general durable-task orchestration, budget accounting, and governed skill adaptation. **This investigation does not establish which produces better code.**\n\n## Material differences\n\n| Area | Superagent + DeepSeek Harness | EstaCoda |\n|---|---|---|\n| Focus | One GitHub repository, with optional Feishu conversations | General-purpose agent workflows and durable tasks |\n| Team workflow | Explicit triggers, authorization, tickets, thread subscriptions, follow-ups, worker sessions and replies | Task/step/attempt/result orchestration, rather than the same specialized ticket domain |\n| Concurrency | Worker-slot reservation; background work retains slots; additional capacity for human follow-ups | Tested task, profile, executor and provider limits, including competing scheduler owners |\n| Recovery | Interrupted-assignment recovery, persistent sessions/directories, queued effects and transient retries | Tested leases/fencing, restart recovery, stale-result rejection, and operator review for uncertain non-idempotent work |\n| Authorization | Source/sender policies and ticket mandates, plus Harness permissions | Tested parent-to-child authority narrowing and tool/risk ceilings |\n| Spending controls | Equivalent cross-worker monetary guarantees were **not established** in this inspection | Tested atomic spend reservations, synthesis-budget protection and tamper rejection |\n| Skills/adaptation | Uses host skill facilities; research-paper claims cannot be assumed implemented | Tested evidence-linked drafts, authority checks, supported automatic corrections, snapshots and undo |\n\nThe fair comparison is **Superagent + Harness versus EstaCoda**, not Superagent’s bundle alone. Harness supplies substantial agent-loop, session, permission and subagent infrastructure.\n\nImplementation anchors include:\n- Superagent: `upstream/superagent/src/core/intake.ts:16–65`; `src/executor/dsh.ts` — `WorkerSlots`, `DshExecutor.resume`; `src/app/outbox.ts` — `Outbox.send`.\n- EstaCoda: `src/tasks/task-scheduler.ts` — `TaskScheduler`; `src/tasks/sqlite-provider-spend.ts` — `SQLiteProviderSpendController`; `src/delegation/toolset-security.test.ts` — authority-intersection checks.\n\n## Executed checks\n\nAll selected suites passed, including a subsequent recheck:\n\n| Stack | Selected checks | Results | Recheck duration |\n|---|---|---:|---:|\n| EstaCoda | Durable delegation, scheduler, provider spend, skill lifecycle, child-tool security | **147 passed; 5 files; exit 0** | 7.94 s |\n| Superagent | Policy, core engine, concurrency, outbox, store | **516 passed; 5 files; exit 0** | 7.51 s |\n| Harness | Permission presets, subagent outcome settlement, session-title persistence | **34 passed; 3 files; exit 0** | 0.72 s |\n\n**These counts and durations are not rankings.** The suites exercise different behavior. Harness’s selected permission tests stub shell execution; Superagent’s concurrency tests use a fixture host—not live GitHub, Feishu or model sessions.\n\n### An operational EstaCoda problem surfaced\n\nIts delegation tool successfully previewed child-tool access, but creating this investigation’s task graph failed with **`step-executor-invalid`**. No delegated workers ran; I completed the inspection and tests locally.\n\nThat is a concrete issue in this environment. Passing source tests do not erase it, and its underlying cause remains unverified.\n\n## Recommendation\n\n- **For a repository-focused team bot:** Superagent deserves evaluation. Its detailed handling of conversations, tickets, follow-ups and human attention is its strongest demonstrated distinction. Respect its research-prototype disclaimer.\n- **For broader durable automation:** EstaCoda’s ownership, recovery, accounting and adaptation mechanisms are substantive strengths—but resolve the executor-admission issue before depending on delegation here.\n- **For a coding-performance winner:** run identical tasks with the same model/version, budgets, permissions, repository commits and concurrency. Measure held-out success, regressions, cost, latency and human interventions. **That experiment was not performed.**\n\n### Discovery and provenance limits\n\nLive web fetching was disabled, so I could not independently verify the reported launch, latest release, or Superagent’s canonical public repository URL. The comparison uses the supplied snapshots: Superagent `8c32a9dc…`, Harness `fcc0ad46…`, and the EstaCoda comparison fixture—not independently verified current releases.\n\n[Read the detailed benchmark report](reports/superagent-estacoda-benchmark.md), with exact commands, initial-run timings, revision provenance, source references and limitations.\n\nArtifacts:\n- reports/superagent-estacoda-benchmark.md:b8d0bf54-8c58-46ab-ac67-2ceda3992f50 (document, 14.1 KB) - Source-backed comparison of dsh-superagent, DeepSeek Harness and EstaCoda, with deterministic test results, revision pro...",
+  "finalOutcome": {
+    "status": "partially_completed",
+    "terminationCause": "normal",
+    "completionFloor": "read",
+    "confirmedActions": [
+      {
+        "toolCallId": "tool-call-3097294c3eec4da04e8db0d9",
+        "tool": "terminal.run",
+        "riskClass": "workspace-write",
+        "targetSummary": "date -u +%Y-%m-%d; cat package.json; find upstream/superagent/src upstream/superagent/tests -maxdepth 2 -type f | hea...",
+        "status": "confirmed",
+        "verification": "not_verified"
+      },
+      {
+        "toolCallId": "tool-call-fe86bddcb4da68f1c2d1b1e2",
+        "tool": "terminal.run",
+        "riskClass": "workspace-write",
+        "targetSummary": "find upstream/superagent/tests -maxdepth 2 -type f; rg -n 'github.com/.*/(superagent|harness)|github.com/deepseek' up...",
+        "status": "confirmed",
+        "verification": "not_verified"
+      },
+      {
+        "toolCallId": "tool-call-ad9fcabc7c4aa038bf257b8f",
+        "tool": "terminal.run",
+        "riskClass": "workspace-write",
+        "targetSummary": "ls src/tasks/*test.ts src/delegation/*test.ts src/runtime/*budget*test.ts src/skills/*lifecycle*test.ts; find upstrea...",
+        "status": "confirmed",
+        "verification": "not_verified"
+      },
+      {
+        "toolCallId": "tool-call-b4aedafab01c2265c55ade3a",
+        "tool": "terminal.run",
+        "riskClass": "workspace-write",
+        "targetSummary": "find src/tasks src/delegation src/skills src/runtime -name '*test.ts' | head -45; find upstream/harness/packages -max...",
+        "status": "confirmed",
+        "verification": "not_verified"
+      },
+      {
+        "toolCallId": "tool-call-908fa940e53e86a3186aa1a4",
+        "tool": "terminal.run",
+        "riskClass": "workspace-write",
+        "targetSummary": "node node_modules/vitest/vitest.mjs run --config vitest.node.config.ts src/delegation/durable-delegation-service.test...",
+        "status": "confirmed",
+        "verification": "not_verified"
+      },
+      {
+        "toolCallId": "tool-call-4927c700d5cef6de8397e533",
+        "tool": "terminal.run",
+        "riskClass": "workspace-write",
+        "targetSummary": "cd upstream/superagent && node node_modules/vitest/vitest.mjs run tests/policy.spec.ts tests/core-engine.spec.ts test...",
+        "status": "confirmed",
+        "verification": "not_verified"
+      },
+      {
+        "toolCallId": "tool-call-fcaed7ded21ddd60e2c33fb3",
+        "tool": "terminal.run",
+        "riskClass": "workspace-write",
+        "targetSummary": "find upstream/harness/packages/interaction/permission-presets/tests upstream/harness/packages/subagent/subagent/tests...",
+        "status": "confirmed",
+        "verification": "not_verified"
+      },
+      {
+        "toolCallId": "tool-call-a6778b139cfb54a370b7e825",
+        "tool": "terminal.run",
+        "riskClass": "workspace-write",
+        "targetSummary": "cd upstream/harness && node node_modules/vitest/vitest.mjs run packages/interaction/permission-presets/tests/permissi...",
+        "status": "confirmed",
+        "verification": "not_verified"
+      },
+      {
+        "toolCallId": "tool-call-b027c64a6c08c191326b63de",
+        "tool": "terminal.run",
+        "riskClass": "workspace-write",
+        "targetSummary": "sed -n '1,150p' upstream/superagent/docs/007-architecture.md; sed -n '1,115p' upstream/superagent/docs/002-authorizat...",
+        "status": "confirmed",
+        "verification": "not_verified"
+      },
+      {
+        "toolCallId": "tool-call-b3bb1544e01a2f198bfbc584",
+        "tool": "terminal.run",
+        "riskClass": "workspace-write",
+        "targetSummary": "rg -n 'export |class |transaction|allowed|gate' upstream/superagent/src/core/intake.ts upstream/superagent/src/core/e...",
+        "status": "confirmed",
+        "verification": "not_verified"
+      },
+      {
+        "toolCallId": "tool-call-b888b05dc64808854754c7d7",
+        "tool": "terminal.run",
+        "riskClass": "workspace-write",
+        "targetSummary": "sed -n '1,85p' upstream/superagent/src/core/intake.ts; sed -n '20,65p' upstream/superagent/src/app/outbox.ts; sed -n ...",
+        "status": "confirmed",
+        "verification": "not_verified"
+      },
+      {
+        "toolCallId": "tool-call-3d3335cd1681e4a09f636b18",
+        "tool": "terminal.run",
+        "riskClass": "workspace-write",
+        "targetSummary": "sed -n '1,100p' upstream/harness/packages/interaction/permission-presets/tests/permission-presets.spec.ts; sed -n '1,...",
+        "status": "confirmed",
+        "verification": "not_verified"
+      },
+      {
+        "toolCallId": "tool-call-61873d0564480b1be138d9e5",
+        "tool": "file.write",
+        "riskClass": "workspace-write",
+        "targetSummary": "reports/superagent-estacoda-benchmark.md",
+        "status": "confirmed",
+        "verification": "not_verified"
+      },
+      {
+        "toolCallId": "tool-call-8636057632bf72ece77f7e57",
+        "tool": "artifact.record",
+        "riskClass": "shared-state-mutation",
+        "targetSummary": "reports/superagent-estacoda-benchmark.md",
+        "status": "confirmed",
+        "verification": "not_verified"
+      },
+      {
+        "toolCallId": "tool-call-64bea58e2a31a43825f1c28a",
+        "tool": "terminal.run",
+        "riskClass": "workspace-write",
+        "targetSummary": "node node_modules/vitest/vitest.mjs run --config vitest.node.config.ts src/delegation/durable-delegation-service.test...",
+        "status": "confirmed",
+        "verification": "not_verified"
+      },
+      {
+        "toolCallId": "tool-call-fb0410db83b0f4344dc98c7d",
+        "tool": "terminal.run",
+        "riskClass": "workspace-write",
+        "targetSummary": "cd upstream/superagent && node node_modules/vitest/vitest.mjs run tests/policy.spec.ts tests/core-engine.spec.ts test...",
+        "status": "confirmed",
+        "verification": "not_verified"
+      },
+      {
+        "toolCallId": "tool-call-9dfc3ee0731bd78a2b18297d",
+        "tool": "terminal.run",
+        "riskClass": "workspace-write",
+        "targetSummary": "cd upstream/harness && node node_modules/vitest/vitest.mjs run packages/interaction/permission-presets/tests/permissi...",
+        "status": "confirmed",
+        "verification": "not_verified"
+      }
+    ],
+    "uncertainActions": []
+  }
+}

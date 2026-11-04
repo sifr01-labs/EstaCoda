@@ -1,0 +1,31 @@
+
+ RUN  v4.1.6 <REPOSITORY>
+
+ ✓ src/tasks/sqlite-provider-spend.test.ts > SQLiteProviderSpendController > renews siblings under their own real async fence when the timer owner closes (active=false) 656ms
+ ✓ src/tasks/sqlite-provider-spend.test.ts > SQLiteProviderSpendController > renews siblings under their own real async fence when the timer owner closes (active=true) 646ms
+ ✓ src/tasks/sqlite-provider-spend.test.ts > SQLiteProviderSpendController > reserves tokens across runtimes even without a dollar limit and releases undispatched capacity 121ms
+ ✓ src/tasks/sqlite-provider-spend.test.ts > SQLiteProviderSpendController > reserves concurrent call capacity independently of token and dollar limits 127ms
+ ✓ src/tasks/sqlite-provider-spend.test.ts > SQLiteProviderSpendController > uses actual complete usage, but retains incomplete token exposure (complete=true) 122ms
+ ✓ src/tasks/sqlite-provider-spend.test.ts > SQLiteProviderSpendController > uses actual complete usage, but retains incomplete token exposure (complete=false) 163ms
+ ✓ src/tasks/sqlite-provider-spend.test.ts > SQLiteProviderSpendController > atomically reserves every enabled scope and returns a typed capacity denial 132ms
+ ✓ src/tasks/sqlite-provider-spend.test.ts > SQLiteProviderSpendController > deduplicates a canonical request without re-emitting its warning 136ms
+ ✓ src/tasks/sqlite-provider-spend.test.ts > SQLiteProviderSpendController > queues a threshold warning for the Task's authorized external origin 127ms
+ ✓ src/tasks/sqlite-provider-spend.test.ts > SQLiteProviderSpendController > durably marks dispatch and atomically settles immutable usage into both scopes 119ms
+ ✓ src/tasks/sqlite-provider-spend.test.ts > SQLiteProviderSpendController > releases only pre-dispatch reservations and keeps uncertain dispatch capacity held 121ms
+ ✓ src/tasks/sqlite-provider-spend.test.ts > SQLiteProviderSpendController > fences a live reservation from another runtime and never revives it after recovery 126ms
+ ✓ src/tasks/sqlite-provider-spend.test.ts > SQLiteProviderSpendController > heartbeats an active dispatch so another runtime cannot recover it 120ms
+ ✓ src/tasks/sqlite-provider-spend.test.ts > SQLiteProviderSpendController > rejects settlement after the execution lease expires even before recovery runs 119ms
+ ✓ src/tasks/sqlite-provider-spend.test.ts > SQLiteProviderSpendController > allocates profile-wide monotonic fencing tokens across runtimes 119ms
+ ✓ src/tasks/sqlite-provider-spend.test.ts > SQLiteProviderSpendController > verifies and rebuilds materialized balances from durable allocations and usage facts 120ms
+ ✓ src/tasks/sqlite-provider-spend.test.ts > SQLiteProviderSpendController > persists unbudgeted requests without inventing a spending scope 121ms
+ ✓ src/tasks/sqlite-provider-spend.test.ts > SQLiteProviderSpendController > keeps a synthesis earmark inside the root Task and Session limits 122ms
+ ✓ src/tasks/sqlite-provider-spend.test.ts > SQLiteProviderSpendController > protects synthesis under a session-only limit across concurrent workers 127ms
+ ✓ src/tasks/sqlite-provider-spend.test.ts > SQLiteProviderSpendController > shares a session synthesis earmark across multiple root Tasks 126ms
+ ✓ src/tasks/sqlite-provider-spend.test.ts > SQLiteProviderSpendController > does not earmark synthesis capacity already committed by another root 125ms
+ ✓ src/tasks/sqlite-provider-spend.test.ts > SQLiteProviderSpendController > retains synthesis protection after partial worker failure and releases it when synthesis terminates 122ms
+ ✓ src/tasks/sqlite-provider-spend.test.ts > SQLiteProviderSpendController > fails closed when materialized balances or immutable scope policy are tampered with 120ms
+
+ Test Files  1 passed (1)
+      Tests  23 passed (23)
+   Start at  23:28:28
+   Duration  4.27s (transform 198ms, setup 17ms, import 232ms, tests 3.94s, environment 0ms)

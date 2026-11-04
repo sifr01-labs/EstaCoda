@@ -1,0 +1,10 @@
+{
+  "text": "Your request is queued. The result will appear here when it’s ready.",
+  "finalOutcome": {
+    "status": "partially_completed",
+    "terminationCause": "normal",
+    "completionFloor": "read",
+    "confirmedActions": [],
+    "uncertainActions": []
+  }
+}

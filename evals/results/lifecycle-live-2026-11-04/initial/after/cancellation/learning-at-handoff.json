@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "deferredTurns": [
+    {
+      "id": "414d80d2e3a6106ed3249d0fbaa7f70324d34d24df2a5e623be856203f7b8327",
+      "profileId": "default",
+      "sessionId": "2fee2f72-3076-4e3d-ba87-6ea70666f1ff",
+      "taskIds": [
+        "task_e58a7d31-0f23-4a74-8494-cf6d0de1e98c"
+      ],
+      "promptSummary": "Audit whether cancellation and late-result rejection work consistently across EstaCoda's task scheduler and its result service. Use two delegated investigators, one for each subsystem, then synthesize. Each must inspect source and execute relevant existing tests, report precise source references and distinguish measured checks from inferred guarantees. Identify one concrete cross-subsystem risk or a testable reason the boundaries compose. Save the complete report to reports/release-audit.md. Do not change source or tests",
+      "promptHash": "65dcc3d33bc97d4c"
+    }
+  ],
+  "records": []
+}

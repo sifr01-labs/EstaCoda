@@ -1,0 +1,10 @@
+{
+  "text": "File output is incomplete. Production of the requested output was not confirmed. The output may be missing, unfinished, or unavailable to runtime observation.",
+  "finalOutcome": {
+    "status": "partially_completed",
+    "terminationCause": "tool_loop_no_progress",
+    "completionFloor": "mutation",
+    "confirmedActions": [],
+    "uncertainActions": []
+  }
+}

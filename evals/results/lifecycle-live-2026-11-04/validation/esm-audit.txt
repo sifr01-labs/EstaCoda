@@ -1,0 +1,5 @@
+
+> estacoda@0.1.0 audit:esm <REPOSITORY>
+> node scripts/audit-esm.mjs dist
+
+ESM audit passed for <REPOSITORY>/dist

@@ -1,0 +1,39 @@
+ ✓ src/delegation/durable-delegation-service.test.ts > DurableDelegationService > scopes provider-call idempotency to the creator session and visible turn 129ms
+ ✓ src/delegation/durable-delegation-service.test.ts > DurableDelegationService > allows redundant known toolsets with an exact permitted tool list without broadening child access 109ms
+ ✓ src/delegation/durable-delegation-service.test.ts > DurableDelegationService > fails closed before persistence when requested or effective child access is unavailable 93ms
+ ✓ src/delegation/durable-delegation-service.test.ts > DurableDelegationService > persists bounded access provenance and replays it without widening or re-resolving 100ms
+ ✓ src/delegation/durable-delegation-service.test.ts > DurableDelegationService > admits only research contracts whose required evidence capabilities are effective 96ms
+ ✓ src/delegation/durable-delegation-service.test.ts > DurableDelegationService > persists normalized distinct research scopes, instructions, and inspection projections 101ms
+ ✓ src/delegation/durable-delegation-service.test.ts > DurableDelegationService > snapshots the configured root spending limit and only permits finite narrowing 98ms
+ ✓ src/delegation/durable-delegation-service.test.ts > DurableDelegationService > activates a Task only after its durable graph is visible 102ms
+ ✓ src/delegation/durable-delegation-service.test.ts > DurableDelegationService > returns the durable handle with a redacted marker when post-commit activation fails 102ms
+ ✓ src/delegation/durable-delegation-service.test.ts > DurableDelegationService > persists direct-background preference, skips foreground activation, and replay-checks it 100ms
+ ✓ src/delegation/durable-delegation-service.test.ts > DurableDelegationService > creates one immutable fan-out graph with a terminal synthesis primary Result Step 98ms
+ ✓ src/delegation/durable-delegation-service.test.ts > DurableDelegationService > adds terminal synthesis to a multi-Step batch when the caller omits it 103ms
+ ✓ src/delegation/durable-delegation-service.test.ts > DurableDelegationService > runs workers before synthesis and preserves the graph and primary Result across restart 114ms
+ ✓ src/delegation/durable-delegation-service.test.ts > DurableDelegationService > synthesizes accepted worker evidence with explicit partial Task state after another worker fails 107ms
+ ✓ src/delegation/durable-delegation-service.test.ts > DurableDelegationService > fails closed without synthesis when no worker publishes accepted evidence 102ms
+ ✓ src/delegation/durable-delegation-service.test.ts > DurableDelegationService > cancels running workers and the pending synthesis Step together 150ms
+ ✓ src/delegation/durable-delegation-service.test.ts > DurableDelegationService > rejects a provider call replay whose immutable definition changed 97ms
+ ✓ src/delegation/durable-delegation-service.test.ts > DurableDelegationService > creates a linked child Task under the active Attempt with narrower authority and budget 100ms
+ ✓ src/delegation/durable-delegation-service.test.ts > DurableDelegationService > rejects child creation without a current parent Attempt lease 94ms
+ ✓ src/delegation/durable-delegation-service.test.ts > DurableDelegationService > rejects cancelled parent lease ownership before child creation 95ms
+ ✓ src/delegation/durable-delegation-service.test.ts > DurableDelegationService > rejects child creation after the parent Attempt lease expires 93ms
+ ✓ src/delegation/durable-delegation-service.test.ts > DurableDelegationService > rejects new stale child creation while preserving exact replay after the parent fence advances 99ms
+ ✓ src/delegation/durable-delegation-service.test.ts > DurableDelegationService > atomically refuses repeated child calls that would multiply the parent Step ceiling 101ms
+ ✓ src/delegation/durable-delegation-service.test.ts > DurableDelegationService > divides an inherited wall-clock ceiling between child execution phases 99ms
+ ✓ src/delegation/durable-delegation-service.test.ts > DurableDelegationService > prevents child Tasks from redefining the root monetary scope 100ms
+ ✓ src/delegation/durable-delegation-service.test.ts > DurableDelegationService > rolls a reservation back when the child graph cannot be persisted 99ms
+ ✓ src/delegation/durable-delegation-service.test.ts > DurableDelegationService > serializes competing child reservations so only one can consume the remaining ceiling 98ms
+ ✓ src/delegation/durable-delegation-service.test.ts > DurableDelegationService > counts descendant usage in the parent projection and rejects child settlement above the ancestor ceiling 105ms
+ ✓ src/delegation/durable-delegation-service.test.ts > DurableDelegationService > budgets two worker waves plus synthesis when six workers have concurrency three 97ms
+ ✓ src/delegation/durable-delegation-service.test.ts > DurableDelegationService > does not let a child Task expand the root Task's live concurrency 100ms
+ ✓ src/delegation/durable-delegation-service.test.ts > DurableDelegationService > does not dispatch a descendant after its ancestor wall-clock ceiling expires 100ms
+ ✓ src/delegation/durable-delegation-service.test.ts > DurableDelegationService > actively aborts descendant execution at the remaining ancestor deadline 107ms
+ ✓ src/delegation/durable-delegation-service.test.ts > DurableDelegationService > rejects runtime children when the active parent Step policy forbids them 96ms
+ ✓ src/delegation/durable-delegation-service.test.ts > DurableDelegationService > fails closed for untrusted workspaces and overlong objectives 95ms
+
+ Test Files  1 passed (1)
+      Tests  38 passed (38)
+   Start at  23:34:34
+   Duration  4.27s (transform 234ms, setup 15ms, import 274ms, tests 3.91s, environment 0ms)

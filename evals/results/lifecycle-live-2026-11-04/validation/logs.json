@@ -1,0 +1,62 @@
+{
+  "full-suite.txt": {
+    "completeLogSha256": "060362e797efe8114eeea704a3d8f4241e7ccc4d6c8dd3985dc03f3b15948671",
+    "completeLogBytes": 1957082,
+    "excerptLines": 40
+  },
+  "baseline-known-failure.txt": {
+    "completeLogSha256": "e8648bdd75f36dfe9036cc3a5e45103994736280c748169fe8c9332c1562043e",
+    "completeLogBytes": 916,
+    "excerptLines": 27
+  },
+  "learning-wiring.txt": {
+    "completeLogSha256": "7247a2f5aa11d563ae623c50c4f5064e9f05b5b8b1165c114b4ef79d9db173ea",
+    "completeLogBytes": 15771,
+    "excerptLines": 39
+  },
+  "admission-regression.txt": {
+    "completeLogSha256": "efb20f162b543e89c54354f143cbb7248bd3604618dad95f1bfcfac77caf5d0b",
+    "completeLogBytes": 6628,
+    "excerptLines": 39
+  },
+  "provider-reservations.txt": {
+    "completeLogSha256": "87825559f9ebd881707561a9cdc5314a8802169f425b17fc1bffaa37f9cc3c9e",
+    "completeLogBytes": 3996,
+    "excerptLines": 31
+  },
+  "source-smoke.txt": {
+    "completeLogSha256": "0b01a365fe6bae26cec329d7a3fc50a0921e386466babafbd446ae89bf95143a",
+    "completeLogBytes": 1176,
+    "excerptLines": 23
+  },
+  "distribution-smoke.txt": {
+    "completeLogSha256": "62e208ab4d2015a758ca7753c15edc61ac89a510472447bbe93807624e094607",
+    "completeLogBytes": 1169,
+    "excerptLines": 23
+  },
+  "typecheck.txt": {
+    "completeLogSha256": "afe491524b1f6609f712102280afd09dbadcbf9bfa27f319668e8f71a77f1b1f",
+    "completeLogBytes": 113,
+    "excerptLines": 3
+  },
+  "build.txt": {
+    "completeLogSha256": "e2d1b91014298af12d4674a8ef8e1e433902f1dad78ac007bd03ad58aa59d709",
+    "completeLogBytes": 275,
+    "excerptLines": 7
+  },
+  "runtime-import-audit.txt": {
+    "completeLogSha256": "b13b10a7cb18419d742ea874424904a294e5d2468553cba5db946137342bab0b",
+    "completeLogBytes": 179,
+    "excerptLines": 5
+  },
+  "esm-audit.txt": {
+    "completeLogSha256": "545a15938e2f4ef96df021b18c24b0d4636c0c2515493da8eed128a175d3449e",
+    "completeLogBytes": 227,
+    "excerptLines": 5
+  },
+  "install.txt": {
+    "completeLogSha256": "16a174276c072eea90e1c4392f40e16f1aa4d2f88fddac49a3838f5b06e41a71",
+    "completeLogBytes": 223,
+    "excerptLines": 7
+  }
+}

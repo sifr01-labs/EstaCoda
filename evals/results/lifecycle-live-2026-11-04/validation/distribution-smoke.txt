@@ -1,0 +1,23 @@
+
+> estacoda@0.1.0 smoke:dist <REPOSITORY>
+> node dist/smoke.js
+
+=== Smoke Report ===
+Total: 14 | Passed: 14 | Failed: 0 | Skipped: 0 | Duration: 70757ms
+
+[PASS] Corrupt skill usage sidecar recovery (139ms)
+[PASS] Bundled skill sync, update, and reset (132ms)
+[PASS] First-run bootstrap creates non-authorizing state (177ms)
+[PASS] Update dry-run shows info without modifying files (110ms)
+[PASS] Bare first launch selects onboarding (144ms)
+[PASS] pack install/enable/disable/uninstall lifecycle (120ms)
+[PASS] Evolution commands reject unsafe or unsupported operations (11390ms)
+[PASS] Evolution full lifecycle: test, approve, promote, rollback (46718ms)
+[PASS] gateway stop sends SIGTERM and cleans up PID/state files (10623ms)
+[PASS] WhatsApp wizard, docs boundary, and package quarantine smoke (184ms)
+[PASS] Durable delegation Task cutover smoke coverage (228ms)
+[PASS] Provider setup uses endpoint-first Local / Custom flow (420ms)
+[PASS] Session continuation stays profile- and workspace-scoped (224ms)
+[PASS] Codex model selection reuses OAuth and cancels without changes (113ms)
+
+All smoke cases passed.

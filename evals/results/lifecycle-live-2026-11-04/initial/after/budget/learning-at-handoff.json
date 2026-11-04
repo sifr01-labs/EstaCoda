@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "deferredTurns": [
+    {
+      "id": "8d3197dec393a96a636f4c9472f98f807e8c5df3aca5cece18857b28138df669",
+      "profileId": "default",
+      "sessionId": "d99e99a1-3d03-4fcb-9399-662726a630f8",
+      "taskIds": [
+        "task_5397e6d8-2e43-4c98-92e8-470c21423776"
+      ],
+      "promptSummary": "Use one delegated investigator to audit the command-safety and terminal-inspection implementations and relevant tests. Inspect the actual source, run the relevant existing suites, and produce a useful evidence-based report with limitations. This run has a deliberately small 160,000 cumulative-token worker allowance. Use that allowance efficiently and conclude with observed evidence before exhaustion. Synthesize the result and save reports/release-audit.md. Do not change source or tests or request a larger budget",
+      "promptHash": "c8a891229c809d05"
+    }
+  ],
+  "records": []
+}

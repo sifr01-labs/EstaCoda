@@ -1,0 +1,201 @@
+{
+  "arm": "after-pilot",
+  "test": "comparison",
+  "foregroundOutcome": "partially_completed",
+  "elapsedMs": 470055,
+  "providerCalls": 82,
+  "inputTokens": 2211503,
+  "outputTokens": 19192,
+  "usageComplete": true,
+  "pricingComplete": false,
+  "tasks": [
+    {
+      "status": "partial",
+      "settlementDurationMs": 414099,
+      "steps": [
+        {
+          "id": "step_9bc53f37-4ed7-42b7-a8cf-fb06a992060a",
+          "title": "Delegated work 1",
+          "role": "worker",
+          "status": "failed",
+          "tokenLimit": 1000000,
+          "attempts": [
+            {
+              "status": "failed",
+              "failure": {
+                "class": "spend-denied",
+                "message": "Agent Step execution failed (spend-denied).",
+                "retryable": true,
+                "uncertainSideEffects": false
+              },
+              "providerCalls": 24,
+              "totalTokens": 704433
+            }
+          ],
+          "results": [
+            {
+              "disposition": "diagnostic",
+              "bytes": 2492,
+              "sha256": "sha256:83d422ce32fe99a65bb721cc403d0520602c2dafee9be622774f07282cdd087b"
+            }
+          ]
+        },
+        {
+          "id": "step_ab645b62-17ec-4d50-b1df-349d9652dd01",
+          "title": "Delegated work 2",
+          "role": "worker",
+          "status": "failed",
+          "tokenLimit": 1000000,
+          "attempts": [
+            {
+              "status": "failed",
+              "failure": {
+                "class": "spend-denied",
+                "message": "Agent Step execution failed (spend-denied).",
+                "retryable": true,
+                "uncertainSideEffects": false
+              },
+              "providerCalls": 22,
+              "totalTokens": 729309
+            }
+          ],
+          "results": [
+            {
+              "disposition": "diagnostic",
+              "bytes": 1551,
+              "sha256": "sha256:dbc784ed409a12ce40cd82ede346620d92a0ea724740cf63ba04514d98621c4a"
+            }
+          ]
+        },
+        {
+          "id": "step_a77d611e-8614-413e-89de-6cc17f950bcf",
+          "title": "Delegated work 3",
+          "role": "worker",
+          "status": "completed",
+          "tokenLimit": 1000000,
+          "attempts": [
+            {
+              "status": "completed",
+              "providerCalls": 23,
+              "totalTokens": 636862
+            }
+          ],
+          "results": [
+            {
+              "disposition": "accepted",
+              "bytes": 16570,
+              "sha256": "sha256:b7bf6dbeb369933be3fb4ea2241919b9a09e97add05183519bf66a6f7334fac3"
+            }
+          ]
+        },
+        {
+          "id": "step_21b9f833-1882-444b-bac2-6bf025d93a18",
+          "title": "Synthesize delegated results",
+          "role": "synthesis",
+          "status": "completed",
+          "tokenLimit": 1000000,
+          "attempts": [
+            {
+              "status": "completed",
+              "providerCalls": 2,
+              "totalTokens": 20199
+            }
+          ],
+          "results": [
+            {
+              "disposition": "accepted",
+              "bytes": 22873,
+              "sha256": "sha256:79805d77c2c353c162a3abbf12caa39324b3e6fb9cec74387e548b719dd4b0e7"
+            }
+          ]
+        },
+        {
+          "id": "step_0ab491d0-afed-4401-9403-6b155feefb48",
+          "title": "Save and verify research report",
+          "role": "report-delivery",
+          "status": "completed",
+          "tokenLimit": 1000000,
+          "attempts": [
+            {
+              "status": "completed",
+              "providerCalls": 0,
+              "totalTokens": 0
+            }
+          ],
+          "results": [
+            {
+              "disposition": "accepted",
+              "bytes": 76,
+              "sha256": "sha256:144a37d9c20da26ba8759e353899807550cf2a3ef86c28ece39dbf2fcb2f5738"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "reports": [
+    {
+      "path": "benchmark-superagent-vs-estacoda.md",
+      "bytes": 22873,
+      "sha256": "79805d77c2c353c162a3abbf12caa39324b3e6fb9cec74387e548b719dd4b0e7",
+      "matchesAcceptedResult": true
+    }
+  ],
+  "changedOriginalFixtureFiles": [],
+  "learning": {
+    "pendingHandoffs": 0,
+    "drafts": [
+      {
+        "status": "abstained",
+        "attempts": 1,
+        "proposalCreated": false
+      }
+    ],
+    "observations": [
+      {
+        "sessionId": "826fd913-da70-496d-ae51-e3a7055965c3",
+        "outcome": "partial",
+        "settledTasks": {
+          "id": "60f863b1cd98b0be764abd206359550d2b915e122b39faa42aa871882b980942",
+          "taskIds": [
+            "task_83b756a8-9f5e-4d3d-aa21-00c3d1ebca4e"
+          ],
+          "failures": [
+            "spend-denied"
+          ],
+          "acceptedResults": 3,
+          "diagnosticResults": 2,
+          "results": [
+            {
+              "taskId": "task_83b756a8-9f5e-4d3d-aa21-00c3d1ebca4e",
+              "resultId": "447559c6-01be-423e-b467-656f2e1cdd17",
+              "disposition": "diagnostic"
+            },
+            {
+              "taskId": "task_83b756a8-9f5e-4d3d-aa21-00c3d1ebca4e",
+              "resultId": "af58b591-c910-416e-a7a9-f69b648e83ea",
+              "disposition": "diagnostic"
+            },
+            {
+              "taskId": "task_83b756a8-9f5e-4d3d-aa21-00c3d1ebca4e",
+              "resultId": "44c9320f-5362-4e34-b6ad-13537aa5b1a3",
+              "disposition": "accepted"
+            },
+            {
+              "taskId": "task_83b756a8-9f5e-4d3d-aa21-00c3d1ebca4e",
+              "resultId": "8eb60b86-22c8-40eb-a5ab-6ac9172cc9b1",
+              "disposition": "accepted"
+            },
+            {
+              "taskId": "task_83b756a8-9f5e-4d3d-aa21-00c3d1ebca4e",
+              "resultId": "b47ef89b-6800-48ee-9aa0-1c1081ec11c0",
+              "disposition": "accepted"
+            }
+          ]
+        },
+        "findings": [],
+        "timestamp": "2026-11-04T23:08:58.820Z"
+      }
+    ]
+  }
+}

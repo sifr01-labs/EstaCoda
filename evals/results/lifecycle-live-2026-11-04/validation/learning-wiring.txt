@@ -1,0 +1,39 @@
+ ✓ src/runtime/create-runtime.test.ts > createRuntime MCP trust gating > reconnects a failed connector, refreshes tools, and preserves the browser substrate 110ms
+ ✓ src/runtime/create-runtime.test.ts > createRuntime MCP trust gating > starts MCP only with current persisted trust 27ms
+ ✓ src/runtime/create-runtime.test.ts > createRuntime external memory providers > wires explicitly configured file-backed external memory without enabling providers by default 26ms
+ ✓ src/runtime/create-runtime.test.ts > createRuntime browser backend wiring > forwards the configured browser inactivity timeout to supervised lifecycle cleanup 351ms
+ ✓ src/runtime/create-runtime.test.ts > createRuntime browser backend wiring > uses supervised local CDP by default from ordinary runtime config 355ms
+ ✓ src/runtime/create-runtime.test.ts > createRuntime browser backend wiring > releases a runtime-owned Browserbase session during runtime dispose 357ms
+ ✓ src/runtime/create-runtime.test.ts > createRuntime browser backend wiring > does not call Browserbase when an unused runtime-owned Browserbase backend is disposed 19ms
+ ✓ src/runtime/create-runtime.test.ts > createRuntime browser backend wiring > surfaces Browserbase release failures during runtime dispose 336ms
+ ✓ src/runtime/create-runtime.test.ts > createRuntime browser backend wiring > preserves injected browserBackend behavior 29ms
+ ✓ src/runtime/create-runtime.test.ts > createRuntime browser backend wiring > does not close an injected browserBackend during runtime dispose 17ms
+ ✓ src/runtime/create-runtime.test.ts > createRuntime session recall > excludes the active runtime session from recall 25ms
+ ✓ src/runtime/create-runtime.test.ts > createRuntime semantic compression construction > keeps runtime compactSession non-rotating unless caller opts into transcript preservation 21ms
+ ✓ src/runtime/create-runtime.test.ts > createRuntime semantic compression construction > uses the compression auxiliary route and not memory_compaction for semantic compression 46ms
+ ✓ src/runtime/create-runtime.test.ts > createRuntime semantic compression construction > rotates provider-turn auto compression before provider prompt assembly and writes the response to the child 41ms
+ ✓ src/runtime/create-runtime.test.ts > createDefaultProviderRegistry > does not register metadata-non-runnable fallback providers as executable adapters 0ms
+ ✓ src/runtime/create-runtime.test.ts > createDefaultProviderRegistry > registers known runnable providers with real metadata default endpoints 0ms
+ ✓ src/runtime/create-runtime.test.ts > createDefaultProviderRegistry > registers selected zai model through the OpenAI-compatible adapter path 0ms
+ ✓ src/runtime/create-runtime.test.ts > createDefaultProviderRegistry > does not use placeholder endpoints in executable provider adapters 0ms
+ ✓ src/runtime/create-runtime.test.ts > createRuntime getStartupReadiness trust threading > ignores project config in verification when workspaceTrusted is trusted 69ms
+ ✓ src/runtime/create-runtime.test.ts > createRuntime getStartupReadiness trust threading > skips project config in verification when workspaceTrusted is untrusted 40ms
+ ✓ src/runtime/create-runtime.test.ts > createRuntime auxiliary consumer wiring > passes visionAuxiliaryRoute into the vision tool 34ms
+ ✓ src/runtime/create-runtime.test.ts > createRuntime auxiliary consumer wiring > passes assessor fallbackToMain and mainRoute into effective security assessor 18ms
+ ✓ src/runtime/create-runtime.test.ts > createRuntime auxiliary consumer wiring > passes active profileId as smart approval scope key 21ms
+ ✓ src/runtime/create-runtime.test.ts > createRuntime faster-whisper runtime wiring > creates managed Python lazily and resolves persistent model cache paths under global state 19ms
+ ✓ src/runtime/create-runtime.test.ts > createRuntime faster-whisper runtime wiring > reports faster-whisper unavailable without failing runtime startup when lazy managed Python creation fails 20ms
+ ✓ src/runtime/create-runtime.test.ts > createRuntime faster-whisper runtime wiring > uses configured Python and Hugging Face cache overrides lazily when provided 20ms
+ ✓ src/runtime/create-runtime.test.ts > createRuntime faster-whisper runtime wiring > does not instantiate faster-whisper resources for local command mode 20ms
+ ✓ src/runtime/create-runtime.test.ts > createRuntime SQLite session lifecycle > registers durable Task result reads only for SQLite runtimes 145ms
+ ✓ src/runtime/create-runtime.test.ts > createRuntime SQLite session lifecycle > queues finalization only when an explicit session boundary requests it 180ms
+ ✓ src/runtime/create-runtime.test.ts > createRuntime SQLite session lifecycle > closes an injected SQLite session DB when disposed 145ms
+ ✓ src/runtime/create-runtime.test.ts > createRuntime SQLite session lifecycle > leaves shared SQLite session DB open when disposal ownership is disabled 162ms
+ ✓ src/runtime/create-runtime.test.ts > createRuntime SQLite session lifecycle > closes owned session storage when runtime construction fails 130ms
+ ✓ src/runtime/create-runtime.test.ts > createRuntime SQLite session lifecycle > retains the Session claim and database after a worker cleanup failure 150ms
+ ✓ src/runtime/create-runtime.test.ts > createRuntime SQLite session lifecycle > disposes runtime-owned faster-whisper resources 22ms
+
+ Test Files  3 passed (3)
+      Tests  105 passed (105)
+   Start at  23:31:42
+   Duration  6.73s (transform 2.01s, setup 44ms, import 2.44s, tests 4.98s, environment 0ms)

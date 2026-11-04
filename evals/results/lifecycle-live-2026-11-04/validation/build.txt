@@ -1,0 +1,7 @@
+
+> estacoda@0.1.0 build <REPOSITORY>
+> pnpm run clean:dist && tsc -p tsconfig.build.json
+
+
+> estacoda@0.1.0 clean:dist <REPOSITORY>
+> node scripts/clean-dist.mjs

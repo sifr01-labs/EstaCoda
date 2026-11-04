@@ -1,0 +1,112 @@
+{
+  "arm": "after",
+  "test": "learning",
+  "foregroundOutcome": "completed",
+  "elapsedMs": 59892,
+  "providerCalls": 14,
+  "inputTokens": 85245,
+  "outputTokens": 1786,
+  "usageComplete": true,
+  "pricingComplete": false,
+  "tasks": [
+    {
+      "status": "completed",
+      "settlementDurationMs": 41374,
+      "steps": [
+        {
+          "id": "step_09bb1058-0cd3-4501-9cd8-800831125c2d",
+          "title": "Delegated work",
+          "role": "worker",
+          "status": "completed",
+          "tokenLimit": 1000000,
+          "attempts": [
+            {
+              "status": "completed",
+              "providerCalls": 8,
+              "totalTokens": 54479
+            }
+          ],
+          "results": [
+            {
+              "disposition": "accepted",
+              "bytes": 1459,
+              "sha256": "sha256:3919c7a989e430497c077b4886f19ba628366a88642a59c6eaf9e682b4472d30"
+            }
+          ]
+        },
+        {
+          "id": "step_18a1d59e-c911-4f69-b75f-f6e952e90a6c",
+          "title": "Synthesize delegated results",
+          "role": "synthesis",
+          "status": "completed",
+          "tokenLimit": 1000000,
+          "attempts": [
+            {
+              "status": "completed",
+              "providerCalls": 2,
+              "totalTokens": 7774
+            }
+          ],
+          "results": [
+            {
+              "disposition": "accepted",
+              "bytes": 1557,
+              "sha256": "sha256:5697887b8b5d42e9625fd4af866e37ff4fe9daa6120f39847a6e08785169b726"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "reports": [],
+  "changedOriginalFixtureFiles": [],
+  "learning": {
+    "pendingHandoffs": 0,
+    "drafts": [
+      {
+        "status": "promoted",
+        "attempts": 1,
+        "proposalCreated": true
+      }
+    ],
+    "observations": [
+      {
+        "sessionId": "child_62239b0d-71f0-4dfc-b273-52915d2c2b03",
+        "outcome": "succeeded",
+        "timestamp": "2026-11-04T23:16:21.201Z"
+      },
+      {
+        "sessionId": "child_64344ae7-346f-47b5-96f8-8bb1b90d9de5",
+        "outcome": "succeeded",
+        "timestamp": "2026-11-04T23:16:33.288Z"
+      },
+      {
+        "sessionId": "454e0746-0ac8-4b77-9247-8a2ab527b99e",
+        "outcome": "succeeded",
+        "settledTasks": {
+          "id": "ea0b25eeb81081e0998536b455ce284ca2fbf1c6bc865a9efb265fa8c939e0ee",
+          "taskIds": [
+            "task_112c7168-b933-447a-9297-3776b694db1a"
+          ],
+          "failures": [],
+          "acceptedResults": 2,
+          "diagnosticResults": 0,
+          "results": [
+            {
+              "taskId": "task_112c7168-b933-447a-9297-3776b694db1a",
+              "resultId": "c8570651-ae5e-4612-9ff3-e36482b15f9d",
+              "disposition": "accepted"
+            },
+            {
+              "taskId": "task_112c7168-b933-447a-9297-3776b694db1a",
+              "resultId": "ce2dd8b8-4ee0-41f7-9f43-81620f04e3ff",
+              "disposition": "accepted"
+            }
+          ]
+        },
+        "findings": [],
+        "timestamp": "2026-11-04T23:16:33.313Z"
+      }
+    ]
+  }
+}

@@ -1,0 +1,70 @@
+{
+  "arm": "after-pilot",
+  "test": "comparison",
+  "foregroundOutcome": "partially_completed",
+  "elapsedMs": 306052,
+  "providerCalls": 36,
+  "inputTokens": 1076730,
+  "outputTokens": 9902,
+  "usageComplete": true,
+  "pricingComplete": false,
+  "tasks": [],
+  "reports": [
+    {
+      "path": "reports/superagent-estacoda-benchmark.md",
+      "bytes": 14423,
+      "sha256": "7cdcda4a850cf2cca59a3e8350c3f118fd0cb4d4861f07d1f1abcbd0a3dbaab5",
+      "matchesAcceptedResult": false
+    }
+  ],
+  "changedOriginalFixtureFiles": [],
+  "learning": {
+    "pendingHandoffs": 0,
+    "drafts": [
+      {
+        "status": "abstained",
+        "attempts": 1,
+        "proposalCreated": false
+      }
+    ],
+    "observations": [
+      {
+        "sessionId": "3c9bf234-7c74-470e-bc49-608ff3fc6274",
+        "outcome": "partial",
+        "timestamp": "2026-11-04T23:31:25.840Z"
+      },
+      {
+        "sessionId": "3c9bf234-7c74-470e-bc49-608ff3fc6274",
+        "outcome": "partial",
+        "findings": [
+          {
+            "mechanism": "repeated-check",
+            "observed": "The same declared verification was started more than once; necessity is not established.",
+            "correction": "Inspect intervening mutations and check input scopes before recommending another run. Do not assume a repeated check was unnecessary.",
+            "target": "workflow-review",
+            "correctionVerified": false,
+            "callIds": [
+              "tool-call-908fa940e53e86a3186aa1a4",
+              "tool-call-64bea58e2a31a43825f1c28a",
+              "tool-call-4927c700d5cef6de8397e533",
+              "tool-call-fb0410db83b0f4344dc98c7d",
+              "tool-call-a6778b139cfb54a370b7e825",
+              "tool-call-9dfc3ee0731bd78a2b18297d"
+            ]
+          },
+          {
+            "mechanism": "recovered-tool-failure",
+            "observed": "A failed tool call was followed by a successful call of the same tool; task success is separate.",
+            "correction": "Review the successful alternative and its evidence before proposing a reusable procedure. Do not persist a transient failure as tool unavailability.",
+            "target": "workflow-review",
+            "correctionVerified": false,
+            "callIds": [
+              "tool-call-5fa72c6fcebd6859ae78ab81"
+            ]
+          }
+        ],
+        "timestamp": "2026-11-04T23:31:25.845Z"
+      }
+    ]
+  }
+}

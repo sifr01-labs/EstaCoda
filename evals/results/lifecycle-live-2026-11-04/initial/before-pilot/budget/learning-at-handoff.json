@@ -1,0 +1,34 @@
+{
+  "version": 1,
+  "records": [
+    {
+      "key": "use one delegated investigator to audit the command safety and terminal inspection implementations and relevant tests inspect the actual source run the relevant existing suites and produce a useful evidence based report with limitations this run has a deliberately small 160 000 cumulative token worker allowance use that allowance efficiently and conclude with observed evidence before exhaustion synthesize the result and save reports release audit md do not change source or tests or request a larger budget::capability.discover>capability.request>delegate_task",
+      "name": "Use One Delegated Investigator Audit workflow",
+      "content": "Reusable workflow: Use one delegated investigator to audit the command-safety and terminal-inspection implementations and relevant tests. Inspect the actual source, run the relevant existing suites, and produce a useful evidence-based report with limitations. This run has a deliberately small 160,000 cumulative-token worker allowance. Use that allowance efficiently and conclude with observed evidence before exhaustion. Synthesize the result and save reports/release-audit.md. Do not change source or tests or request a larger budget",
+      "occurrences": 1,
+      "sourceSessionIds": [
+        "953e9571-42b1-410b-845d-c155d2be8a8a"
+      ],
+      "tools": [
+        "capability.discover",
+        "capability.request",
+        "delegate_task"
+      ],
+      "requiredToolsets": [
+        "core",
+        "research",
+        "coding"
+      ],
+      "bounded": false,
+      "boundedReason": "prompt references secrets or credentials",
+      "status": "observed",
+      "evidenceIds": [
+        "obs_c00debb2-58d3-4f10-84bb-a7f739478ec8"
+      ],
+      "candidateId": "learn_35cad4fb-58b4-4529-9fd2-f967ef7b4cdf",
+      "candidateKind": "new_or_missing_playbook",
+      "promptHash": "c8a891229c809d05",
+      "updatedAt": "2026-11-04T23:09:09.634Z"
+    }
+  ]
+}

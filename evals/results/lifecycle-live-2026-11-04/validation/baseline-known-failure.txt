@@ -1,0 +1,27 @@
+
+ RUN  v4.1.6 /private/tmp/estacoda-lifecycle-live-20261104/before-source
+
+ × src/control-service/evolution-toolchain.test.ts > runs an installed pnpm with the packaged PATH and owned Node without passing profile credentials 367ms
+   → expected false to be true // Object.is equality
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/control-service/evolution-toolchain.test.ts > runs an installed pnpm with the packaged PATH and owned Node without passing profile credentials
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ src/control-service/evolution-toolchain.test.ts:14:86
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed (1)
+      Tests  1 failed (1)
+   Start at  23:01:37
+   Duration  500ms (transform 55ms, setup 14ms, import 59ms, tests 367ms, environment 0ms)

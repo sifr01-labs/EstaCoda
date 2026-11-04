@@ -1,0 +1,154 @@
+{
+  "arm": "after",
+  "test": "cancellation",
+  "foregroundOutcome": "completed",
+  "elapsedMs": 304032,
+  "providerCalls": 63,
+  "inputTokens": 1261448,
+  "outputTokens": 15511,
+  "usageComplete": true,
+  "pricingComplete": false,
+  "tasks": [
+    {
+      "status": "completed",
+      "settlementDurationMs": 281287,
+      "steps": [
+        {
+          "id": "step_ef8be78d-acd2-4ca1-90be-9dcf433fbe08",
+          "title": "Delegated work 1",
+          "role": "worker",
+          "status": "completed",
+          "tokenLimit": 1000000,
+          "attempts": [
+            {
+              "status": "completed",
+              "providerCalls": 27,
+              "totalTokens": 598917
+            }
+          ],
+          "results": [
+            {
+              "disposition": "accepted",
+              "bytes": 14505,
+              "sha256": "sha256:4613c7a225317269f3d35864216310cdfcd4f1999c233875e623b489e659fa74"
+            }
+          ]
+        },
+        {
+          "id": "step_6da11395-bef0-4536-93d0-02150d0e855a",
+          "title": "Delegated work 2",
+          "role": "worker",
+          "status": "completed",
+          "tokenLimit": 1000000,
+          "attempts": [
+            {
+              "status": "completed",
+              "providerCalls": 29,
+              "totalTokens": 617061
+            }
+          ],
+          "results": [
+            {
+              "disposition": "accepted",
+              "bytes": 15485,
+              "sha256": "sha256:e0a113d34810b92f185f7ef842e9c4248b2ca49d060db7e20170a5b66f28aa5b"
+            }
+          ]
+        },
+        {
+          "id": "step_ace47772-e278-4376-918a-efe940d76553",
+          "title": "Synthesize delegated results",
+          "role": "synthesis",
+          "status": "completed",
+          "tokenLimit": 1000000,
+          "attempts": [
+            {
+              "status": "completed",
+              "providerCalls": 3,
+              "totalTokens": 34313
+            }
+          ],
+          "results": [
+            {
+              "disposition": "accepted",
+              "bytes": 24927,
+              "sha256": "sha256:03cc35f3c67292b9095d00619c3c7ca08864cb613faafd9fee7079e8bb4e718c"
+            }
+          ]
+        },
+        {
+          "id": "step_4a80c191-acb6-44c5-bd05-a954e827ba94",
+          "title": "Save and verify research report",
+          "role": "report-delivery",
+          "status": "completed",
+          "tokenLimit": 1000000,
+          "attempts": [
+            {
+              "status": "completed",
+              "providerCalls": 0,
+              "totalTokens": 0
+            }
+          ],
+          "results": [
+            {
+              "disposition": "accepted",
+              "bytes": 65,
+              "sha256": "sha256:3e06ef7c6e64bd063cbb6ef3c9261a6e026af2bd76461b228f6be3ae1a055dee"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "reports": [
+    {
+      "path": "reports/release-audit.md",
+      "bytes": 24927,
+      "sha256": "03cc35f3c67292b9095d00619c3c7ca08864cb613faafd9fee7079e8bb4e718c",
+      "matchesAcceptedResult": true
+    }
+  ],
+  "changedOriginalFixtureFiles": [],
+  "learning": {
+    "pendingHandoffs": 0,
+    "drafts": [],
+    "observations": [
+      {
+        "sessionId": "2fee2f72-3076-4e3d-ba87-6ea70666f1ff",
+        "outcome": "succeeded",
+        "settledTasks": {
+          "id": "414d80d2e3a6106ed3249d0fbaa7f70324d34d24df2a5e623be856203f7b8327",
+          "taskIds": [
+            "task_e58a7d31-0f23-4a74-8494-cf6d0de1e98c"
+          ],
+          "failures": [],
+          "acceptedResults": 4,
+          "diagnosticResults": 0,
+          "results": [
+            {
+              "taskId": "task_e58a7d31-0f23-4a74-8494-cf6d0de1e98c",
+              "resultId": "ceb240bc-6788-43b4-bd2a-a7bf3e4eeae4",
+              "disposition": "accepted"
+            },
+            {
+              "taskId": "task_e58a7d31-0f23-4a74-8494-cf6d0de1e98c",
+              "resultId": "eacd25f4-6e46-43d2-bd27-3a85660e5237",
+              "disposition": "accepted"
+            },
+            {
+              "taskId": "task_e58a7d31-0f23-4a74-8494-cf6d0de1e98c",
+              "resultId": "0e6a3a38-5756-49b3-aba7-8012d5df7893",
+              "disposition": "accepted"
+            },
+            {
+              "taskId": "task_e58a7d31-0f23-4a74-8494-cf6d0de1e98c",
+              "resultId": "c9d489fb-42f5-4f5e-9bf8-5142967515a8",
+              "disposition": "accepted"
+            }
+          ]
+        },
+        "timestamp": "2026-11-04T23:25:31.804Z"
+      }
+    ]
+  }
+}

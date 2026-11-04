@@ -1,0 +1,128 @@
+{
+  "arm": "before",
+  "test": "cancellation",
+  "foregroundOutcome": "completed",
+  "elapsedMs": 321151,
+  "providerCalls": 55,
+  "inputTokens": 948006,
+  "outputTokens": 11517,
+  "usageComplete": true,
+  "pricingComplete": false,
+  "tasks": [
+    {
+      "status": "completed",
+      "settlementDurationMs": 233069,
+      "steps": [
+        {
+          "id": "step_82d0bd8b-6139-40a5-a1b6-5e36301e446d",
+          "title": "Delegated work 1",
+          "role": "worker",
+          "status": "completed",
+          "tokenLimit": 1000000,
+          "attempts": [
+            {
+              "status": "completed",
+              "providerCalls": 25,
+              "totalTokens": 506271
+            }
+          ],
+          "results": [
+            {
+              "disposition": "accepted",
+              "bytes": 11334,
+              "sha256": "sha256:9bc191b2530a1c3e1db268d835b2560b434653976b9f6879c58f70443ce28dbb"
+            }
+          ]
+        },
+        {
+          "id": "step_ebf6e705-089b-4826-a859-37785e6161d4",
+          "title": "Delegated work 2",
+          "role": "worker",
+          "status": "completed",
+          "tokenLimit": 1000000,
+          "attempts": [
+            {
+              "status": "completed",
+              "providerCalls": 23,
+              "totalTokens": 395335
+            }
+          ],
+          "results": [
+            {
+              "disposition": "accepted",
+              "bytes": 10330,
+              "sha256": "sha256:02a7c07026b4751cc251cb23081b9cc30f81c25c59aed0238beb6fad240fc585"
+            }
+          ]
+        },
+        {
+          "id": "step_56ca7445-2d7b-4c3d-9a41-65c4a599f8ed",
+          "title": "Synthesize delegated results",
+          "role": "synthesis",
+          "status": "completed",
+          "tokenLimit": 1000000,
+          "attempts": [
+            {
+              "status": "completed",
+              "providerCalls": 3,
+              "totalTokens": 30705
+            }
+          ],
+          "results": [
+            {
+              "disposition": "accepted",
+              "bytes": 18390,
+              "sha256": "sha256:a8cdf117a729a3cdba4f7a0bdf3823664a2ed12467c09499a6f0a5cd3f8fdc44"
+            }
+          ]
+        },
+        {
+          "id": "step_860b390e-26b2-4b93-a89e-94ac8a8d1515",
+          "title": "Save and verify research report",
+          "role": "report-delivery",
+          "status": "completed",
+          "tokenLimit": 1000000,
+          "attempts": [
+            {
+              "status": "completed",
+              "providerCalls": 0,
+              "totalTokens": 0
+            }
+          ],
+          "results": [
+            {
+              "disposition": "accepted",
+              "bytes": 65,
+              "sha256": "sha256:3e06ef7c6e64bd063cbb6ef3c9261a6e026af2bd76461b228f6be3ae1a055dee"
+            }
+          ]
+        }
+      ]
+    }
+  ],
+  "reports": [
+    {
+      "path": "reports/release-audit.md",
+      "bytes": 18390,
+      "sha256": "a8cdf117a729a3cdba4f7a0bdf3823664a2ed12467c09499a6f0a5cd3f8fdc44",
+      "matchesAcceptedResult": true
+    }
+  ],
+  "changedOriginalFixtureFiles": [],
+  "learning": {
+    "pendingHandoffs": 0,
+    "drafts": [
+      {
+        "proposalCreated": false
+      }
+    ],
+    "observations": [
+      {
+        "sessionId": "7ee9b655-1a44-4ddf-ba61-d869cb6f2aee",
+        "outcome": "succeeded",
+        "findings": [],
+        "timestamp": "2026-11-04T23:20:47.425Z"
+      }
+    ]
+  }
+}

@@ -1,0 +1,40 @@
+ ✓ src/session/session-launch-intent.test.ts > session launch intent > starts fresh by default 1ms
+ ✓ src/session/session-launch-intent.test.ts > session launch intent > represents each explicit continuation route 0ms
+ ✓ src/session/session-launch-intent.test.ts > session launch intent > uses a validated picker handoff over the original command shape 0ms
+ ✓ src/providers/model-image-capabilities.test.ts > supportsMultipleImageInputs > recognizes kimi vision routes as multi-image capable 1ms
+ ✓ src/providers/model-image-capabilities.test.ts > supportsMultipleImageInputs > recognizes codex vision routes as multi-image capable 0ms
+ ✓ src/providers/model-image-capabilities.test.ts > supportsMultipleImageInputs > keeps unknown vision routes fail-closed 0ms
+ ✓ src/providers/model-image-capabilities.test.ts > supportsMultipleImageInputs > honors explicit capability overrides 0ms
+ ✓ src/providers/model-image-capabilities.test.ts > supportsMultipleImageInputs > never treats text-only routes as multi-image capable 0ms
+ ✓ src/runtime/session-runtime-context.test.ts > SessionRuntimeContext browser state > isolates browser projections across rotated runtime sessions 1ms
+ ✓ src/memory/memory-inspector.test.ts > MemoryInspector > protects SOUL.md without classifying AGENTS.md as memory safety context 1ms
+ ✓ src/contracts/channel.test.ts > ChannelDelivery streaming contract > exposes an optional session-scoped streaming text handle 1ms
+ ✓ src/test/proof-of-life.test.ts > vitest proof of life > should run under bun 1ms
+ ✓ src/test/proof-of-life.test.ts > vitest proof of life > should have process global available 0ms
+ ✓ src/setup/whatsapp-setup-flow.test.ts > WhatsApp setup flow output filtering > removes the internal bridge ready sentinel from user-facing output 1ms
+ ✓ src/memory/memory-pressure.test.ts > memory budget pressure > classifies ok, warning, critical, and overflow ratios 1ms
+ ✓ src/execution/docker-tool-boundary.test.ts > keeps contained tools callable and refuses host/network bridges, including named connectors 1ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 1 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/control-service/evolution-toolchain.test.ts > runs an installed pnpm with the packaged PATH and owned Node without passing profile credentials
+AssertionError: expected false to be true // Object.is equality
+
+- Expected
++ Received
+
+- true
++ false
+
+ ❯ src/control-service/evolution-toolchain.test.ts:14:86
+
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/1]⎯
+
+
+ Test Files  1 failed | 787 passed (788)
+      Tests  1 failed | 13519 passed (13520)
+   Start at  23:36:11
+   Duration  274.16s (transform 7.63s, setup 1.91s, import 48.87s, tests 451.71s, environment 28ms)
+
+ ELIFECYCLE  Test failed. See above for more details.

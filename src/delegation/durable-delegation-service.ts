@@ -277,7 +277,9 @@ export class DurableDelegationService {
       if (requestContract?.requirements.fileOutput !== undefined && requestContract.requirements.fileOutput.path !== path) {
         throw new Error("synthesis.outputPath must match the existing user output requirement.");
       }
-      requestContract ??= { version: 1, objective: synthesis.objective, requirements: { skillReferences: [], issues: [], ...(originTurnId === undefined ? {} : { originTurnId }) } };
+      // The full synthesis objective remains on its Step. This generated
+      // contract owns exact delivery, and has a smaller persisted text bound.
+      requestContract ??= { version: 1, objective: `Save the complete accepted synthesis to ${path}.`, requirements: { skillReferences: [], issues: [], ...(originTurnId === undefined ? {} : { originTurnId }) } };
       requestContract = structuredClone(requestContract);
       requestContract.requirements.fileOutput ??= { format: path.endsWith(".md") ? "markdown" : "text", path };
     }

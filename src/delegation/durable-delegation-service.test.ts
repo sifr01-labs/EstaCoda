@@ -104,6 +104,23 @@ describe("DurableDelegationService", () => {
       tasks: [{ task: "Execute tests", allowedTools: ["terminal.run"] }] })).toThrow(/unavailable tools/);
   });
 
+  it("keeps a long synthesis objective intact without overflowing the generated delivery contract", () => {
+    const service = new DurableDelegationService({ store, creatorSessionId: () => "parent", workspace: workspace(),
+      config: DEFAULT_DELEGATION_CONFIG, visibleTools: () => [...visibleTools(), tool("file.write", "workspace-write", ["files"])] });
+    const objective = "Compare the observed evidence. ".repeat(80);
+    expect(objective.length).toBeGreaterThan(2000);
+    const handle = service.create({ toolCallId: "long-report-objective", trustedWorkspace: true,
+      tasks: [{ task: "Inspect source", allowedTools: ["file.read"] }],
+      synthesis: { objective, outputPath: "reports/audit.md" } });
+    const task = store.getTask(handle.taskId)!;
+    const steps = store.listSteps(task.id, task.activePlanRevisionId!);
+    expect(steps.find(step => step.executor.role === "synthesis")?.objective).toBe(objective.trim());
+    for (const step of steps) {
+      expect(step.executor.requestContract?.objective).toBe("Save the complete accepted synthesis to reports/audit.md.");
+      expect(step.executor.requestContract?.requirements.fileOutput?.path).toBe("reports/audit.md");
+    }
+  });
+
   it("snapshots selected unattended settings for each new graph",async()=>{
     let iterations=120;
     const service=new DurableDelegationService({store,creatorSessionId:()=>"parent",workspace:workspace(),config:DEFAULT_DELEGATION_CONFIG,visibleTools:visibleTools,resolveRunLimits:async()=>({maxIterations:iterations,maxToolCalls:300,maxDurationMinutes:90})});
@@ -1125,6 +1142,7 @@ describe("DurableDelegationService", () => {
     expect(await childScheduler.runOnce()).toMatchObject({ dispatched: 1, failed: 1, completed: 0 });
     expect(store.listProviderUsageEntries({ rootTaskId: parentTask.rootTaskId })).toHaveLength(2);
     expect(store.getTask(child.taskId)?.status).toBe("failed");
+    expect(store.listResults(child.taskId)).toEqual([expect.objectContaining({ disposition: "diagnostic" })]);
     expect(store.listAttempts(child.taskId)[0]).toMatchObject({
       status: "failed",
       failure: { class: "execution-limit-exceeded" }
@@ -1427,7 +1445,8 @@ function scheduler(
       store: taskStore,
       profileId: taskStore.profileId,
       contentRoot,
-      sessionDb: database
+      sessionDb: database,
+      now: clock
     }),
     ownerId,
     resolveExecutor: () => executor,

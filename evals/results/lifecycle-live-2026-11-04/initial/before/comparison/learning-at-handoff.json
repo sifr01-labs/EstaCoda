@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "records": [
+    {
+      "key": "selected:external-agent-runtime-comparison:0e7f7e84397e8dfbe89dfeb829f13028f490e6de0e11d460b6bf19a85524f583",
+      "name": "external-agent-runtime-comparison refinement",
+      "content": "Selected skill refinement evidence: external-agent-runtime-comparison",
+      "occurrences": 1,
+      "sourceSessionIds": [
+        "d8514f24-88c7-4bfc-bfa3-abc5ff0ac65b"
+      ],
+      "tools": [
+        "terminal.inspect",
+        "file.read",
+        "config.provider.execution_status",
+        "capability.discover",
+        "file.grep",
+        "delegate_task"
+      ],
+      "requiredToolsets": [
+        "files"
+      ],
+      "bounded": true,
+      "boundedReason": "selected-skill-turn",
+      "status": "candidate",
+      "evidenceIds": [
+        "obs_58d95171-7f0a-4a1d-b424-676abeb6f9c5"
+      ],
+      "candidateId": "learn_ca950a44-918f-4fc2-aebe-be14795c96fe",
+      "candidateKind": "selected_skill_refinement",
+      "promptHash": "b755c6e505723c29",
+      "selectedSkillName": "external-agent-runtime-comparison",
+      "updatedAt": "2026-11-04T23:02:15.687Z"
+    }
+  ]
+}

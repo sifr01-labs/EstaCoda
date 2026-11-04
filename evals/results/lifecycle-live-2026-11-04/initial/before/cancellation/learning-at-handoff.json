@@ -1,0 +1,36 @@
+{
+  "version": 1,
+  "records": [
+    {
+      "key": "audit whether cancellation and late result rejection work consistently across estacodas task scheduler and its result service use two delegated investigators one for each subsystem then synthesize each must inspect source and execute relevant existing tests report precise source references and distinguish measured checks from inferred guarantees identify one concrete cross subsystem risk or a testable reason the boundaries compose save the complete report to reports release audit md do not change source or tests::capability.discover>capability.request>terminal.inspect>delegate_task",
+      "name": "Audit Whether Cancellation Late Result workflow",
+      "content": "Reusable workflow: Audit whether cancellation and late-result rejection work consistently across EstaCoda's task scheduler and its result service. Use two delegated investigators, one for each subsystem, then synthesize. Each must inspect source and execute relevant existing tests, report precise source references and distinguish measured checks from inferred guarantees. Identify one concrete cross-subsystem risk or a testable reason the boundaries compose. Save the complete report to reports/release-audit.md. Do not change source or tests",
+      "occurrences": 1,
+      "sourceSessionIds": [
+        "7ee9b655-1a44-4ddf-ba61-d869cb6f2aee"
+      ],
+      "tools": [
+        "capability.discover",
+        "capability.request",
+        "terminal.inspect",
+        "delegate_task"
+      ],
+      "requiredToolsets": [
+        "core",
+        "shell-readonly",
+        "coding",
+        "research"
+      ],
+      "bounded": false,
+      "boundedReason": "unbounded-tool-risk",
+      "status": "observed",
+      "evidenceIds": [
+        "obs_6588b7f8-eae1-4874-9ba7-f2e89955f62e"
+      ],
+      "candidateId": "learn_019200be-9cd7-458a-8966-366019191556",
+      "candidateKind": "new_or_missing_playbook",
+      "promptHash": "65dcc3d33bc97d4c",
+      "updatedAt": "2026-11-04T23:20:47.428Z"
+    }
+  ]
+}

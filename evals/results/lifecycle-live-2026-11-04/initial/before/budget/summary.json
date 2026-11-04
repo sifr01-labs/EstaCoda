@@ -1,0 +1,69 @@
+{
+  "arm": "before",
+  "test": "budget",
+  "foregroundOutcome": "partially_completed",
+  "elapsedMs": 269690,
+  "providerCalls": 43,
+  "inputTokens": 787355,
+  "outputTokens": 5690,
+  "usageComplete": true,
+  "pricingComplete": false,
+  "tasks": [
+    {
+      "status": "failed",
+      "settlementDurationMs": 177552,
+      "steps": [
+        {
+          "id": "step_878fdd8b-b76c-4bb7-a2f4-7799e0014e1d",
+          "title": "Delegated work",
+          "role": "worker",
+          "status": "failed",
+          "tokenLimit": 160000,
+          "attempts": [
+            {
+              "status": "failed",
+              "failure": {
+                "class": "execution-limit-exceeded",
+                "message": "Attempt exceeded its task-token-limit-exhausted.",
+                "retryable": false,
+                "uncertainSideEffects": false
+              },
+              "providerCalls": 28,
+              "totalTokens": 659452
+            }
+          ],
+          "results": []
+        }
+      ]
+    }
+  ],
+  "reports": [],
+  "changedOriginalFixtureFiles": [],
+  "learning": {
+    "pendingHandoffs": 0,
+    "drafts": [
+      {
+        "proposalCreated": false
+      }
+    ],
+    "observations": [
+      {
+        "sessionId": "8aa9184c-ea75-4a4e-8fb3-4782e13e19ed",
+        "outcome": "partial",
+        "findings": [
+          {
+            "mechanism": "recovered-tool-failure",
+            "observed": "A failed tool call was followed by a successful call of the same tool; task success is separate.",
+            "correction": "Review the successful alternative and its evidence before proposing a reusable procedure. Do not persist a transient failure as tool unavailability.",
+            "target": "workflow-review",
+            "correctionVerified": false,
+            "callIds": [
+              "tool-call-261b4d4b79a8927c415cafcc"
+            ]
+          }
+        ],
+        "timestamp": "2026-11-04T23:17:28.800Z"
+      }
+    ]
+  }
+}

@@ -1,0 +1,35 @@
+{
+  "version": 1,
+  "records": [
+    {
+      "key": "selected:ledger-review:772f14c5c5f0f73da69888072ce5927bf3ec91df0cefc95c991d3aa3a9103a1d",
+      "name": "ledger-review refinement",
+      "content": "Selected skill refinement evidence: ledger-review",
+      "occurrences": 1,
+      "sourceSessionIds": [
+        "3a7a4e0d-5d6a-48da-9c0f-c5c4d029273b"
+      ],
+      "tools": [
+        "capability.discover",
+        "capability.request",
+        "file.read",
+        "delegate_task"
+      ],
+      "requiredToolsets": [
+        "files",
+        "shell-write"
+      ],
+      "bounded": true,
+      "boundedReason": "selected-skill-turn",
+      "status": "candidate",
+      "evidenceIds": [
+        "obs_ccbba34a-d7e3-42db-b0cb-d0ed8dd77659"
+      ],
+      "candidateId": "learn_a0c2e35d-80ef-480b-9258-7fea1b4ecb0e",
+      "candidateKind": "selected_skill_refinement",
+      "promptHash": "c9bd9c2ee904b9f8",
+      "selectedSkillName": "ledger-review",
+      "updatedAt": "2026-11-04T23:09:23.432Z"
+    }
+  ]
+}

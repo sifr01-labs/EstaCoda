@@ -1,0 +1,1275 @@
+[
+  {
+    "arm": "before",
+    "test": "budget",
+    "foregroundOutcome": "partially_completed",
+    "elapsedMs": 269690,
+    "providerCalls": 43,
+    "inputTokens": 787355,
+    "outputTokens": 5690,
+    "usageComplete": true,
+    "pricingComplete": false,
+    "tasks": [
+      {
+        "status": "failed",
+        "settlementDurationMs": 177552,
+        "steps": [
+          {
+            "id": "step_878fdd8b-b76c-4bb7-a2f4-7799e0014e1d",
+            "title": "Delegated work",
+            "role": "worker",
+            "status": "failed",
+            "tokenLimit": 160000,
+            "attempts": [
+              {
+                "status": "failed",
+                "failure": {
+                  "class": "execution-limit-exceeded",
+                  "message": "Attempt exceeded its task-token-limit-exhausted.",
+                  "retryable": false,
+                  "uncertainSideEffects": false
+                },
+                "providerCalls": 28,
+                "totalTokens": 659452
+              }
+            ],
+            "results": []
+          }
+        ]
+      }
+    ],
+    "reports": [],
+    "changedOriginalFixtureFiles": [],
+    "learning": {
+      "pendingHandoffs": 0,
+      "drafts": [
+        {
+          "proposalCreated": false
+        }
+      ],
+      "observations": [
+        {
+          "sessionId": "8aa9184c-ea75-4a4e-8fb3-4782e13e19ed",
+          "outcome": "partial",
+          "findings": [
+            {
+              "mechanism": "recovered-tool-failure",
+              "observed": "A failed tool call was followed by a successful call of the same tool; task success is separate.",
+              "correction": "Review the successful alternative and its evidence before proposing a reusable procedure. Do not persist a transient failure as tool unavailability.",
+              "target": "workflow-review",
+              "correctionVerified": false,
+              "callIds": [
+                "tool-call-261b4d4b79a8927c415cafcc"
+              ]
+            }
+          ],
+          "timestamp": "2026-11-04T23:17:28.800Z"
+        }
+      ]
+    }
+  },
+  {
+    "arm": "before",
+    "test": "cancellation",
+    "foregroundOutcome": "completed",
+    "elapsedMs": 321151,
+    "providerCalls": 55,
+    "inputTokens": 948006,
+    "outputTokens": 11517,
+    "usageComplete": true,
+    "pricingComplete": false,
+    "tasks": [
+      {
+        "status": "completed",
+        "settlementDurationMs": 233069,
+        "steps": [
+          {
+            "id": "step_82d0bd8b-6139-40a5-a1b6-5e36301e446d",
+            "title": "Delegated work 1",
+            "role": "worker",
+            "status": "completed",
+            "tokenLimit": 1000000,
+            "attempts": [
+              {
+                "status": "completed",
+                "providerCalls": 25,
+                "totalTokens": 506271
+              }
+            ],
+            "results": [
+              {
+                "disposition": "accepted",
+                "bytes": 11334,
+                "sha256": "sha256:9bc191b2530a1c3e1db268d835b2560b434653976b9f6879c58f70443ce28dbb"
+              }
+            ]
+          },
+          {
+            "id": "step_ebf6e705-089b-4826-a859-37785e6161d4",
+            "title": "Delegated work 2",
+            "role": "worker",
+            "status": "completed",
+            "tokenLimit": 1000000,
+            "attempts": [
+              {
+                "status": "completed",
+                "providerCalls": 23,
+                "totalTokens": 395335
+              }
+            ],
+            "results": [
+              {
+                "disposition": "accepted",
+                "bytes": 10330,
+                "sha256": "sha256:02a7c07026b4751cc251cb23081b9cc30f81c25c59aed0238beb6fad240fc585"
+              }
+            ]
+          },
+          {
+            "id": "step_56ca7445-2d7b-4c3d-9a41-65c4a599f8ed",
+            "title": "Synthesize delegated results",
+            "role": "synthesis",
+            "status": "completed",
+            "tokenLimit": 1000000,
+            "attempts": [
+              {
+                "status": "completed",
+                "providerCalls": 3,
+                "totalTokens": 30705
+              }
+            ],
+            "results": [
+              {
+                "disposition": "accepted",
+                "bytes": 18390,
+                "sha256": "sha256:a8cdf117a729a3cdba4f7a0bdf3823664a2ed12467c09499a6f0a5cd3f8fdc44"
+              }
+            ]
+          },
+          {
+            "id": "step_860b390e-26b2-4b93-a89e-94ac8a8d1515",
+            "title": "Save and verify research report",
+            "role": "report-delivery",
+            "status": "completed",
+            "tokenLimit": 1000000,
+            "attempts": [
+              {
+                "status": "completed",
+                "providerCalls": 0,
+                "totalTokens": 0
+              }
+            ],
+            "results": [
+              {
+                "disposition": "accepted",
+                "bytes": 65,
+                "sha256": "sha256:3e06ef7c6e64bd063cbb6ef3c9261a6e026af2bd76461b228f6be3ae1a055dee"
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "reports": [
+      {
+        "path": "reports/release-audit.md",
+        "bytes": 18390,
+        "sha256": "a8cdf117a729a3cdba4f7a0bdf3823664a2ed12467c09499a6f0a5cd3f8fdc44",
+        "matchesAcceptedResult": true
+      }
+    ],
+    "changedOriginalFixtureFiles": [],
+    "learning": {
+      "pendingHandoffs": 0,
+      "drafts": [
+        {
+          "proposalCreated": false
+        }
+      ],
+      "observations": [
+        {
+          "sessionId": "7ee9b655-1a44-4ddf-ba61-d869cb6f2aee",
+          "outcome": "succeeded",
+          "findings": [],
+          "timestamp": "2026-11-04T23:20:47.425Z"
+        }
+      ]
+    }
+  },
+  {
+    "arm": "before",
+    "test": "comparison",
+    "foregroundOutcome": "partially_completed",
+    "elapsedMs": 547411,
+    "providerCalls": 123,
+    "inputTokens": 3240799,
+    "outputTokens": 21580,
+    "usageComplete": true,
+    "pricingComplete": false,
+    "tasks": [
+      {
+        "status": "partial",
+        "settlementDurationMs": 477616,
+        "steps": [
+          {
+            "id": "step_195e0760-d12c-479c-a2fa-c7ff0ef163a6",
+            "title": "Delegated work 1",
+            "role": "worker",
+            "status": "failed",
+            "tokenLimit": 1000000,
+            "attempts": [
+              {
+                "status": "failed",
+                "failure": {
+                  "class": "execution-limit-exceeded",
+                  "message": "Attempt exceeded its step-token-limit-exhausted.",
+                  "retryable": false,
+                  "uncertainSideEffects": false
+                },
+                "providerCalls": 36,
+                "totalTokens": 1150211
+              }
+            ],
+            "results": []
+          },
+          {
+            "id": "step_09de5d09-8202-4505-a67f-b0d287382317",
+            "title": "Delegated work 2",
+            "role": "worker",
+            "status": "completed",
+            "tokenLimit": 1000000,
+            "attempts": [
+              {
+                "status": "completed",
+                "providerCalls": 30,
+                "totalTokens": 789818
+              }
+            ],
+            "results": [
+              {
+                "disposition": "accepted",
+                "bytes": 12009,
+                "sha256": "sha256:4133ef36bf33c6e66d7f567ae2c9b313924199039dd641180f9f158f8eb64d13"
+              }
+            ]
+          },
+          {
+            "id": "step_42a22bfd-1fe4-4364-a671-5e73f03c0852",
+            "title": "Delegated work 3",
+            "role": "worker",
+            "status": "failed",
+            "tokenLimit": 1000000,
+            "attempts": [
+              {
+                "status": "failed",
+                "failure": {
+                  "class": "execution-limit-exceeded",
+                  "message": "Attempt exceeded its step-token-limit-exhausted.",
+                  "retryable": false,
+                  "uncertainSideEffects": false
+                },
+                "providerCalls": 42,
+                "totalTokens": 1117802
+              }
+            ],
+            "results": []
+          },
+          {
+            "id": "step_39e6140c-4ddc-41e8-95c1-a1d8564ef650",
+            "title": "Synthesize delegated results",
+            "role": "synthesis",
+            "status": "completed",
+            "tokenLimit": 1000000,
+            "attempts": [
+              {
+                "status": "completed",
+                "providerCalls": 2,
+                "totalTokens": 20610
+              }
+            ],
+            "results": [
+              {
+                "disposition": "accepted",
+                "bytes": 20817,
+                "sha256": "sha256:10cb0b0f3326defb9c4b64dbf57c23d1b02a062f9ecf3f4b329159d2854613d7"
+              }
+            ]
+          },
+          {
+            "id": "step_3ef928fc-d72b-449c-90d6-ee79a4107c20",
+            "title": "Save and verify research report",
+            "role": "report-delivery",
+            "status": "completed",
+            "tokenLimit": 1000000,
+            "attempts": [
+              {
+                "status": "completed",
+                "providerCalls": 0,
+                "totalTokens": 0
+              }
+            ],
+            "results": [
+              {
+                "disposition": "accepted",
+                "bytes": 77,
+                "sha256": "sha256:bf6f15b7866421299bdb5f9de78660e1f8c51f9e56ec843c9ddc213492aa283f"
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "reports": [
+      {
+        "path": "benchmarks/superagent-vs-estacoda.md",
+        "bytes": 20817,
+        "sha256": "10cb0b0f3326defb9c4b64dbf57c23d1b02a062f9ecf3f4b329159d2854613d7",
+        "matchesAcceptedResult": true
+      }
+    ],
+    "changedOriginalFixtureFiles": [],
+    "learning": {
+      "pendingHandoffs": 0,
+      "drafts": [
+        {
+          "status": "abstained",
+          "proposalCreated": false
+        }
+      ],
+      "observations": [
+        {
+          "sessionId": "d8514f24-88c7-4bfc-bfa3-abc5ff0ac65b",
+          "outcome": "partial",
+          "timestamp": "2026-11-04T23:02:15.678Z"
+        },
+        {
+          "sessionId": "d8514f24-88c7-4bfc-bfa3-abc5ff0ac65b",
+          "outcome": "partial",
+          "findings": [
+            {
+              "mechanism": "recovered-tool-failure",
+              "observed": "A failed tool call was followed by a successful call of the same tool; task success is separate.",
+              "correction": "Review the successful alternative and its evidence before proposing a reusable procedure. Do not persist a transient failure as tool unavailability.",
+              "target": "workflow-review",
+              "correctionVerified": false,
+              "callIds": [
+                "tool-call-40487f715ee6598ebbb85fd6"
+              ]
+            }
+          ],
+          "timestamp": "2026-11-04T23:02:15.684Z"
+        },
+        {
+          "sessionId": "child_47d78abe-94e3-4d90-934f-ffe787617b23",
+          "outcome": "succeeded",
+          "timestamp": "2026-11-04T23:04:38.957Z"
+        }
+      ]
+    }
+  },
+  {
+    "arm": "before",
+    "test": "learning",
+    "foregroundOutcome": "completed",
+    "elapsedMs": 66386,
+    "providerCalls": 17,
+    "inputTokens": 108468,
+    "outputTokens": 1929,
+    "usageComplete": true,
+    "pricingComplete": false,
+    "tasks": [
+      {
+        "status": "partial",
+        "settlementDurationMs": 35891,
+        "steps": [
+          {
+            "id": "step_07d15cb7-ba22-4f7a-ab02-3af19a9e6e85",
+            "title": "Delegated work",
+            "role": "worker",
+            "status": "failed",
+            "tokenLimit": 1000000,
+            "attempts": [
+              {
+                "status": "failed",
+                "failure": {
+                  "class": "evidence-contract-unsatisfied",
+                  "message": "Execution stopped (normal). File output: unresolved-target. Produce the named outputs using authorized file tools or commands and check the result appropriately. Commands must exit successfully and produce the requested files; text readback is not required. Respect overwrite approvals and do not retry denied actions. Do not claim unobserved results. Inspect the preserved draft.",
+                  "retryable": false,
+                  "uncertainSideEffects": false
+                },
+                "providerCalls": 10,
+                "totalTokens": 57271
+              }
+            ],
+            "results": [
+              {
+                "disposition": "diagnostic",
+                "bytes": 855,
+                "sha256": "sha256:677e633c6623e0186307574d690fa27a60ed0660315081067320278a66e6e12b"
+              }
+            ]
+          },
+          {
+            "id": "step_02fd5daa-ffa2-4012-9a1f-74837e55f9aa",
+            "title": "Synthesize delegated results",
+            "role": "synthesis",
+            "status": "skipped",
+            "tokenLimit": 1000000,
+            "attempts": [],
+            "results": []
+          }
+        ]
+      }
+    ],
+    "reports": [],
+    "changedOriginalFixtureFiles": [],
+    "learning": {
+      "pendingHandoffs": 0,
+      "drafts": [
+        {
+          "status": "promoted",
+          "proposalCreated": true
+        }
+      ],
+      "observations": [
+        {
+          "sessionId": "3a7a4e0d-5d6a-48da-9c0f-c5c4d029273b",
+          "outcome": "succeeded",
+          "timestamp": "2026-11-04T23:09:23.427Z"
+        },
+        {
+          "sessionId": "3a7a4e0d-5d6a-48da-9c0f-c5c4d029273b",
+          "outcome": "succeeded",
+          "findings": [
+            {
+              "mechanism": "recovered-tool-failure",
+              "observed": "A failed tool call was followed by a successful call of the same tool; task success is separate.",
+              "correction": "Review the successful alternative and its evidence before proposing a reusable procedure. Do not persist a transient failure as tool unavailability.",
+              "target": "workflow-review",
+              "correctionVerified": false,
+              "callIds": [
+                "tool-call-f71bbff7c68459067194f14c"
+              ]
+            }
+          ],
+          "timestamp": "2026-11-04T23:09:23.430Z"
+        },
+        {
+          "sessionId": "child_9d8e14c8-50be-42e5-8df2-d87d6349751c",
+          "outcome": "partial",
+          "timestamp": "2026-11-04T23:09:59.284Z"
+        }
+      ]
+    }
+  },
+  {
+    "arm": "after",
+    "test": "budget",
+    "foregroundOutcome": "completed",
+    "elapsedMs": 96638,
+    "providerCalls": 10,
+    "inputTokens": 63015,
+    "outputTokens": 3782,
+    "usageComplete": true,
+    "pricingComplete": false,
+    "tasks": [
+      {
+        "status": "partial",
+        "settlementDurationMs": 63213,
+        "steps": [
+          {
+            "id": "step_7f627de1-92f6-4c63-bef7-9da11f10590b",
+            "title": "Delegated work",
+            "role": "worker",
+            "status": "failed",
+            "tokenLimit": 160000,
+            "attempts": [
+              {
+                "status": "failed",
+                "failure": {
+                  "class": "tool-error",
+                  "message": "Agent Step execution failed (tool-error).",
+                  "retryable": false,
+                  "uncertainSideEffects": false
+                },
+                "providerCalls": 5,
+                "totalTokens": 31963
+              }
+            ],
+            "results": [
+              {
+                "disposition": "diagnostic",
+                "bytes": 11890,
+                "sha256": "sha256:55f5d843c73e3707b8e1ce798a62b1121cda612ff1c261a4f76fc99e156c2c8a"
+              }
+            ]
+          },
+          {
+            "id": "step_dbda5007-de5d-4223-87a8-9eadaa9f7984",
+            "title": "Synthesize delegated results",
+            "role": "synthesis",
+            "status": "skipped",
+            "tokenLimit": 160000,
+            "attempts": [],
+            "results": []
+          },
+          {
+            "id": "step_7ecb0d25-96d1-4962-b328-f4904264a690",
+            "title": "Save and verify research report",
+            "role": "report-delivery",
+            "status": "skipped",
+            "tokenLimit": 160000,
+            "attempts": [],
+            "results": []
+          }
+        ]
+      }
+    ],
+    "reports": [],
+    "changedOriginalFixtureFiles": [],
+    "learning": {
+      "pendingHandoffs": 0,
+      "drafts": [],
+      "observations": [
+        {
+          "sessionId": "d99e99a1-3d03-4fcb-9399-662726a630f8",
+          "outcome": "partial",
+          "settledTasks": {
+            "id": "8d3197dec393a96a636f4c9472f98f807e8c5df3aca5cece18857b28138df669",
+            "taskIds": [
+              "task_5397e6d8-2e43-4c98-92e8-470c21423776"
+            ],
+            "failures": [
+              "tool-error"
+            ],
+            "acceptedResults": 0,
+            "diagnosticResults": 1,
+            "results": [
+              {
+                "taskId": "task_5397e6d8-2e43-4c98-92e8-470c21423776",
+                "resultId": "31ca8fac-e7a1-41e2-a21e-fa89a92463b5",
+                "disposition": "diagnostic"
+              }
+            ]
+          },
+          "timestamp": "2026-11-04T23:18:15.025Z"
+        }
+      ]
+    }
+  },
+  {
+    "arm": "after",
+    "test": "cancellation",
+    "foregroundOutcome": "completed",
+    "elapsedMs": 304032,
+    "providerCalls": 63,
+    "inputTokens": 1261448,
+    "outputTokens": 15511,
+    "usageComplete": true,
+    "pricingComplete": false,
+    "tasks": [
+      {
+        "status": "completed",
+        "settlementDurationMs": 281287,
+        "steps": [
+          {
+            "id": "step_ef8be78d-acd2-4ca1-90be-9dcf433fbe08",
+            "title": "Delegated work 1",
+            "role": "worker",
+            "status": "completed",
+            "tokenLimit": 1000000,
+            "attempts": [
+              {
+                "status": "completed",
+                "providerCalls": 27,
+                "totalTokens": 598917
+              }
+            ],
+            "results": [
+              {
+                "disposition": "accepted",
+                "bytes": 14505,
+                "sha256": "sha256:4613c7a225317269f3d35864216310cdfcd4f1999c233875e623b489e659fa74"
+              }
+            ]
+          },
+          {
+            "id": "step_6da11395-bef0-4536-93d0-02150d0e855a",
+            "title": "Delegated work 2",
+            "role": "worker",
+            "status": "completed",
+            "tokenLimit": 1000000,
+            "attempts": [
+              {
+                "status": "completed",
+                "providerCalls": 29,
+                "totalTokens": 617061
+              }
+            ],
+            "results": [
+              {
+                "disposition": "accepted",
+                "bytes": 15485,
+                "sha256": "sha256:e0a113d34810b92f185f7ef842e9c4248b2ca49d060db7e20170a5b66f28aa5b"
+              }
+            ]
+          },
+          {
+            "id": "step_ace47772-e278-4376-918a-efe940d76553",
+            "title": "Synthesize delegated results",
+            "role": "synthesis",
+            "status": "completed",
+            "tokenLimit": 1000000,
+            "attempts": [
+              {
+                "status": "completed",
+                "providerCalls": 3,
+                "totalTokens": 34313
+              }
+            ],
+            "results": [
+              {
+                "disposition": "accepted",
+                "bytes": 24927,
+                "sha256": "sha256:03cc35f3c67292b9095d00619c3c7ca08864cb613faafd9fee7079e8bb4e718c"
+              }
+            ]
+          },
+          {
+            "id": "step_4a80c191-acb6-44c5-bd05-a954e827ba94",
+            "title": "Save and verify research report",
+            "role": "report-delivery",
+            "status": "completed",
+            "tokenLimit": 1000000,
+            "attempts": [
+              {
+                "status": "completed",
+                "providerCalls": 0,
+                "totalTokens": 0
+              }
+            ],
+            "results": [
+              {
+                "disposition": "accepted",
+                "bytes": 65,
+                "sha256": "sha256:3e06ef7c6e64bd063cbb6ef3c9261a6e026af2bd76461b228f6be3ae1a055dee"
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "reports": [
+      {
+        "path": "reports/release-audit.md",
+        "bytes": 24927,
+        "sha256": "03cc35f3c67292b9095d00619c3c7ca08864cb613faafd9fee7079e8bb4e718c",
+        "matchesAcceptedResult": true
+      }
+    ],
+    "changedOriginalFixtureFiles": [],
+    "learning": {
+      "pendingHandoffs": 0,
+      "drafts": [],
+      "observations": [
+        {
+          "sessionId": "2fee2f72-3076-4e3d-ba87-6ea70666f1ff",
+          "outcome": "succeeded",
+          "settledTasks": {
+            "id": "414d80d2e3a6106ed3249d0fbaa7f70324d34d24df2a5e623be856203f7b8327",
+            "taskIds": [
+              "task_e58a7d31-0f23-4a74-8494-cf6d0de1e98c"
+            ],
+            "failures": [],
+            "acceptedResults": 4,
+            "diagnosticResults": 0,
+            "results": [
+              {
+                "taskId": "task_e58a7d31-0f23-4a74-8494-cf6d0de1e98c",
+                "resultId": "ceb240bc-6788-43b4-bd2a-a7bf3e4eeae4",
+                "disposition": "accepted"
+              },
+              {
+                "taskId": "task_e58a7d31-0f23-4a74-8494-cf6d0de1e98c",
+                "resultId": "eacd25f4-6e46-43d2-bd27-3a85660e5237",
+                "disposition": "accepted"
+              },
+              {
+                "taskId": "task_e58a7d31-0f23-4a74-8494-cf6d0de1e98c",
+                "resultId": "0e6a3a38-5756-49b3-aba7-8012d5df7893",
+                "disposition": "accepted"
+              },
+              {
+                "taskId": "task_e58a7d31-0f23-4a74-8494-cf6d0de1e98c",
+                "resultId": "c9d489fb-42f5-4f5e-9bf8-5142967515a8",
+                "disposition": "accepted"
+              }
+            ]
+          },
+          "timestamp": "2026-11-04T23:25:31.804Z"
+        }
+      ]
+    }
+  },
+  {
+    "arm": "after",
+    "test": "comparison",
+    "foregroundOutcome": "partially_completed",
+    "elapsedMs": 561137,
+    "providerCalls": 100,
+    "inputTokens": 2072156,
+    "outputTokens": 24971,
+    "usageComplete": true,
+    "pricingComplete": false,
+    "tasks": [
+      {
+        "status": "partial",
+        "settlementDurationMs": 472642,
+        "steps": [
+          {
+            "id": "step_aa30624e-671f-4d7b-96cd-e24439a64d44",
+            "title": "Delegated work 1",
+            "role": "worker",
+            "status": "completed",
+            "tokenLimit": 1000000,
+            "attempts": [
+              {
+                "status": "completed",
+                "providerCalls": 26,
+                "totalTokens": 620438
+              }
+            ],
+            "results": [
+              {
+                "disposition": "accepted",
+                "bytes": 14885,
+                "sha256": "sha256:9883ce0e2e5670e01cef642ab8924714c0c0424d7c659bb72d15708732be58f7"
+              }
+            ]
+          },
+          {
+            "id": "step_14c5b40f-f995-4085-8f07-a5c38c25adf4",
+            "title": "Delegated work 2",
+            "role": "worker",
+            "status": "failed",
+            "tokenLimit": 1000000,
+            "attempts": [
+              {
+                "status": "failed",
+                "failure": {
+                  "class": "evidence-contract-unsatisfied",
+                  "message": "Execution stopped (normal). Declared checks remain unresolved: [\"harness-loop-policy-recovery\",\"harness-subagent-provider-skills\"]. Verify those requirements on the current result using an authorized command and reuse the exact verification label. A missing interpreter, crash, failed exit, or stale check is not a passing validation. Reading files or passing a differently named check does not settle these requirements. Do not retry denied actions, bypass permissions, or rerun uncertain side effec",
+                  "retryable": false,
+                  "uncertainSideEffects": false
+                },
+                "providerCalls": 24,
+                "totalTokens": 558367
+              }
+            ],
+            "results": [
+              {
+                "disposition": "diagnostic",
+                "bytes": 15904,
+                "sha256": "sha256:4b65f2b620464e9b8c5e68ed9e284de8b46ef2784a5c3edb067f6bcf4141bdeb"
+              }
+            ]
+          },
+          {
+            "id": "step_693e96f4-fb20-4d9e-b1b3-b2424afc506c",
+            "title": "Delegated work 3",
+            "role": "worker",
+            "status": "completed",
+            "tokenLimit": 1000000,
+            "attempts": [
+              {
+                "status": "completed",
+                "providerCalls": 29,
+                "totalTokens": 630359
+              }
+            ],
+            "results": [
+              {
+                "disposition": "accepted",
+                "bytes": 18646,
+                "sha256": "sha256:538b4dedae3770719a785488a7eeac99e03ef0481ed99fc6140b43cf322d6d7d"
+              }
+            ]
+          },
+          {
+            "id": "step_9ebd37c4-f6eb-4f25-80bf-6e2a1eff6883",
+            "title": "Synthesize delegated results",
+            "role": "synthesis",
+            "status": "completed",
+            "tokenLimit": 1000000,
+            "attempts": [
+              {
+                "status": "completed",
+                "providerCalls": 3,
+                "totalTokens": 39032
+              }
+            ],
+            "results": [
+              {
+                "disposition": "accepted",
+                "bytes": 30464,
+                "sha256": "sha256:e9b2fbe73a0340b4541abe4b30fffad66518bcc531839d2a764c549d29d1f088"
+              }
+            ]
+          },
+          {
+            "id": "step_83f11278-df41-4000-8d52-8fe2f96f0917",
+            "title": "Save and verify research report",
+            "role": "report-delivery",
+            "status": "completed",
+            "tokenLimit": 1000000,
+            "attempts": [
+              {
+                "status": "completed",
+                "providerCalls": 0,
+                "totalTokens": 0
+              }
+            ],
+            "results": [
+              {
+                "disposition": "accepted",
+                "bytes": 74,
+                "sha256": "sha256:66d7b6de1467f2571902793df290f9b757dbc5aa68333e5b33a8654db420176c"
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "reports": [
+      {
+        "path": "reports/superagent-vs-estacoda.md",
+        "bytes": 30464,
+        "sha256": "e9b2fbe73a0340b4541abe4b30fffad66518bcc531839d2a764c549d29d1f088",
+        "matchesAcceptedResult": true
+      }
+    ],
+    "changedOriginalFixtureFiles": [],
+    "learning": {
+      "pendingHandoffs": 0,
+      "drafts": [
+        {
+          "status": "proposed",
+          "attempts": 1,
+          "proposalCreated": true
+        }
+      ],
+      "observations": [
+        {
+          "sessionId": "57b245db-ed3c-487b-b35d-f6a70d5e7db1",
+          "outcome": "partial",
+          "settledTasks": {
+            "id": "9c399afb42f5cb0b42457f120a009bcd713e1c5ce90a236797e06792dd14832f",
+            "taskIds": [
+              "task_52ab4608-0904-4bb4-ac0a-1d15e1945f8a"
+            ],
+            "failures": [
+              "evidence-contract-unsatisfied"
+            ],
+            "acceptedResults": 4,
+            "diagnosticResults": 1,
+            "results": [
+              {
+                "taskId": "task_52ab4608-0904-4bb4-ac0a-1d15e1945f8a",
+                "resultId": "e355e737-8161-4314-a875-b4cf44483712",
+                "disposition": "accepted"
+              },
+              {
+                "taskId": "task_52ab4608-0904-4bb4-ac0a-1d15e1945f8a",
+                "resultId": "42f24ed4-7a6d-4429-9194-8a551cc580fc",
+                "disposition": "diagnostic"
+              },
+              {
+                "taskId": "task_52ab4608-0904-4bb4-ac0a-1d15e1945f8a",
+                "resultId": "f4c1d56a-f1fa-4e03-9703-9bcb3fa069a1",
+                "disposition": "accepted"
+              },
+              {
+                "taskId": "task_52ab4608-0904-4bb4-ac0a-1d15e1945f8a",
+                "resultId": "be31054c-864c-440e-86dc-25f9a5105114",
+                "disposition": "accepted"
+              },
+              {
+                "taskId": "task_52ab4608-0904-4bb4-ac0a-1d15e1945f8a",
+                "resultId": "6065711f-87b2-4410-874b-47218daffe60",
+                "disposition": "accepted"
+              }
+            ]
+          },
+          "findings": [],
+          "timestamp": "2026-11-04T23:24:45.449Z"
+        }
+      ]
+    }
+  },
+  {
+    "arm": "after",
+    "test": "learning",
+    "foregroundOutcome": "completed",
+    "elapsedMs": 59892,
+    "providerCalls": 14,
+    "inputTokens": 85245,
+    "outputTokens": 1786,
+    "usageComplete": true,
+    "pricingComplete": false,
+    "tasks": [
+      {
+        "status": "completed",
+        "settlementDurationMs": 41374,
+        "steps": [
+          {
+            "id": "step_09bb1058-0cd3-4501-9cd8-800831125c2d",
+            "title": "Delegated work",
+            "role": "worker",
+            "status": "completed",
+            "tokenLimit": 1000000,
+            "attempts": [
+              {
+                "status": "completed",
+                "providerCalls": 8,
+                "totalTokens": 54479
+              }
+            ],
+            "results": [
+              {
+                "disposition": "accepted",
+                "bytes": 1459,
+                "sha256": "sha256:3919c7a989e430497c077b4886f19ba628366a88642a59c6eaf9e682b4472d30"
+              }
+            ]
+          },
+          {
+            "id": "step_18a1d59e-c911-4f69-b75f-f6e952e90a6c",
+            "title": "Synthesize delegated results",
+            "role": "synthesis",
+            "status": "completed",
+            "tokenLimit": 1000000,
+            "attempts": [
+              {
+                "status": "completed",
+                "providerCalls": 2,
+                "totalTokens": 7774
+              }
+            ],
+            "results": [
+              {
+                "disposition": "accepted",
+                "bytes": 1557,
+                "sha256": "sha256:5697887b8b5d42e9625fd4af866e37ff4fe9daa6120f39847a6e08785169b726"
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "reports": [],
+    "changedOriginalFixtureFiles": [],
+    "learning": {
+      "pendingHandoffs": 0,
+      "drafts": [
+        {
+          "status": "promoted",
+          "attempts": 1,
+          "proposalCreated": true
+        }
+      ],
+      "observations": [
+        {
+          "sessionId": "child_62239b0d-71f0-4dfc-b273-52915d2c2b03",
+          "outcome": "succeeded",
+          "timestamp": "2026-11-04T23:16:21.201Z"
+        },
+        {
+          "sessionId": "child_64344ae7-346f-47b5-96f8-8bb1b90d9de5",
+          "outcome": "succeeded",
+          "timestamp": "2026-11-04T23:16:33.288Z"
+        },
+        {
+          "sessionId": "454e0746-0ac8-4b77-9247-8a2ab527b99e",
+          "outcome": "succeeded",
+          "settledTasks": {
+            "id": "ea0b25eeb81081e0998536b455ce284ca2fbf1c6bc865a9efb265fa8c939e0ee",
+            "taskIds": [
+              "task_112c7168-b933-447a-9297-3776b694db1a"
+            ],
+            "failures": [],
+            "acceptedResults": 2,
+            "diagnosticResults": 0,
+            "results": [
+              {
+                "taskId": "task_112c7168-b933-447a-9297-3776b694db1a",
+                "resultId": "c8570651-ae5e-4612-9ff3-e36482b15f9d",
+                "disposition": "accepted"
+              },
+              {
+                "taskId": "task_112c7168-b933-447a-9297-3776b694db1a",
+                "resultId": "ce2dd8b8-4ee0-41f7-9f43-81620f04e3ff",
+                "disposition": "accepted"
+              }
+            ]
+          },
+          "findings": [],
+          "timestamp": "2026-11-04T23:16:33.313Z"
+        }
+      ]
+    }
+  },
+  {
+    "arm": "before-pilot",
+    "test": "budget",
+    "error": "SqliteError: Task Step execution limits are immutable",
+    "foregroundOutcome": "completed",
+    "elapsedMs": 19744,
+    "providerCalls": 3,
+    "inputTokens": 18130,
+    "outputTokens": 614,
+    "usageComplete": true,
+    "pricingComplete": false,
+    "tasks": [
+      {
+        "status": "queued",
+        "steps": [
+          {
+            "id": "step_ec865990-8fd5-4f86-ad3f-ef2e7f58034c",
+            "title": "Delegated work",
+            "role": "worker",
+            "status": "pending",
+            "tokenLimit": 1000000,
+            "attempts": [],
+            "results": []
+          },
+          {
+            "id": "step_b6fe7b29-6b45-4424-9fb0-a679235802e2",
+            "title": "Synthesize delegated results",
+            "role": "synthesis",
+            "status": "pending",
+            "tokenLimit": 1000000,
+            "attempts": [],
+            "results": []
+          },
+          {
+            "id": "step_c56bf204-e0d5-40e7-8d71-1a16858baccd",
+            "title": "Save and verify research report",
+            "role": "report-delivery",
+            "status": "pending",
+            "tokenLimit": 1000000,
+            "attempts": [],
+            "results": []
+          }
+        ]
+      }
+    ],
+    "reports": [],
+    "changedOriginalFixtureFiles": [],
+    "learning": {
+      "pendingHandoffs": 0,
+      "drafts": [],
+      "observations": []
+    }
+  },
+  {
+    "arm": "after-pilot",
+    "test": "comparison",
+    "foregroundOutcome": "partially_completed",
+    "elapsedMs": 470055,
+    "providerCalls": 82,
+    "inputTokens": 2211503,
+    "outputTokens": 19192,
+    "usageComplete": true,
+    "pricingComplete": false,
+    "tasks": [
+      {
+        "status": "partial",
+        "settlementDurationMs": 414099,
+        "steps": [
+          {
+            "id": "step_9bc53f37-4ed7-42b7-a8cf-fb06a992060a",
+            "title": "Delegated work 1",
+            "role": "worker",
+            "status": "failed",
+            "tokenLimit": 1000000,
+            "attempts": [
+              {
+                "status": "failed",
+                "failure": {
+                  "class": "spend-denied",
+                  "message": "Agent Step execution failed (spend-denied).",
+                  "retryable": true,
+                  "uncertainSideEffects": false
+                },
+                "providerCalls": 24,
+                "totalTokens": 704433
+              }
+            ],
+            "results": [
+              {
+                "disposition": "diagnostic",
+                "bytes": 2492,
+                "sha256": "sha256:83d422ce32fe99a65bb721cc403d0520602c2dafee9be622774f07282cdd087b"
+              }
+            ]
+          },
+          {
+            "id": "step_ab645b62-17ec-4d50-b1df-349d9652dd01",
+            "title": "Delegated work 2",
+            "role": "worker",
+            "status": "failed",
+            "tokenLimit": 1000000,
+            "attempts": [
+              {
+                "status": "failed",
+                "failure": {
+                  "class": "spend-denied",
+                  "message": "Agent Step execution failed (spend-denied).",
+                  "retryable": true,
+                  "uncertainSideEffects": false
+                },
+                "providerCalls": 22,
+                "totalTokens": 729309
+              }
+            ],
+            "results": [
+              {
+                "disposition": "diagnostic",
+                "bytes": 1551,
+                "sha256": "sha256:dbc784ed409a12ce40cd82ede346620d92a0ea724740cf63ba04514d98621c4a"
+              }
+            ]
+          },
+          {
+            "id": "step_a77d611e-8614-413e-89de-6cc17f950bcf",
+            "title": "Delegated work 3",
+            "role": "worker",
+            "status": "completed",
+            "tokenLimit": 1000000,
+            "attempts": [
+              {
+                "status": "completed",
+                "providerCalls": 23,
+                "totalTokens": 636862
+              }
+            ],
+            "results": [
+              {
+                "disposition": "accepted",
+                "bytes": 16570,
+                "sha256": "sha256:b7bf6dbeb369933be3fb4ea2241919b9a09e97add05183519bf66a6f7334fac3"
+              }
+            ]
+          },
+          {
+            "id": "step_21b9f833-1882-444b-bac2-6bf025d93a18",
+            "title": "Synthesize delegated results",
+            "role": "synthesis",
+            "status": "completed",
+            "tokenLimit": 1000000,
+            "attempts": [
+              {
+                "status": "completed",
+                "providerCalls": 2,
+                "totalTokens": 20199
+              }
+            ],
+            "results": [
+              {
+                "disposition": "accepted",
+                "bytes": 22873,
+                "sha256": "sha256:79805d77c2c353c162a3abbf12caa39324b3e6fb9cec74387e548b719dd4b0e7"
+              }
+            ]
+          },
+          {
+            "id": "step_0ab491d0-afed-4401-9403-6b155feefb48",
+            "title": "Save and verify research report",
+            "role": "report-delivery",
+            "status": "completed",
+            "tokenLimit": 1000000,
+            "attempts": [
+              {
+                "status": "completed",
+                "providerCalls": 0,
+                "totalTokens": 0
+              }
+            ],
+            "results": [
+              {
+                "disposition": "accepted",
+                "bytes": 76,
+                "sha256": "sha256:144a37d9c20da26ba8759e353899807550cf2a3ef86c28ece39dbf2fcb2f5738"
+              }
+            ]
+          }
+        ]
+      }
+    ],
+    "reports": [
+      {
+        "path": "benchmark-superagent-vs-estacoda.md",
+        "bytes": 22873,
+        "sha256": "79805d77c2c353c162a3abbf12caa39324b3e6fb9cec74387e548b719dd4b0e7",
+        "matchesAcceptedResult": true
+      }
+    ],
+    "changedOriginalFixtureFiles": [],
+    "learning": {
+      "pendingHandoffs": 0,
+      "drafts": [
+        {
+          "status": "abstained",
+          "attempts": 1,
+          "proposalCreated": false
+        }
+      ],
+      "observations": [
+        {
+          "sessionId": "826fd913-da70-496d-ae51-e3a7055965c3",
+          "outcome": "partial",
+          "settledTasks": {
+            "id": "60f863b1cd98b0be764abd206359550d2b915e122b39faa42aa871882b980942",
+            "taskIds": [
+              "task_83b756a8-9f5e-4d3d-aa21-00c3d1ebca4e"
+            ],
+            "failures": [
+              "spend-denied"
+            ],
+            "acceptedResults": 3,
+            "diagnosticResults": 2,
+            "results": [
+              {
+                "taskId": "task_83b756a8-9f5e-4d3d-aa21-00c3d1ebca4e",
+                "resultId": "447559c6-01be-423e-b467-656f2e1cdd17",
+                "disposition": "diagnostic"
+              },
+              {
+                "taskId": "task_83b756a8-9f5e-4d3d-aa21-00c3d1ebca4e",
+                "resultId": "af58b591-c910-416e-a7a9-f69b648e83ea",
+                "disposition": "diagnostic"
+              },
+              {
+                "taskId": "task_83b756a8-9f5e-4d3d-aa21-00c3d1ebca4e",
+                "resultId": "44c9320f-5362-4e34-b6ad-13537aa5b1a3",
+                "disposition": "accepted"
+              },
+              {
+                "taskId": "task_83b756a8-9f5e-4d3d-aa21-00c3d1ebca4e",
+                "resultId": "8eb60b86-22c8-40eb-a5ab-6ac9172cc9b1",
+                "disposition": "accepted"
+              },
+              {
+                "taskId": "task_83b756a8-9f5e-4d3d-aa21-00c3d1ebca4e",
+                "resultId": "b47ef89b-6800-48ee-9aa0-1c1081ec11c0",
+                "disposition": "accepted"
+              }
+            ]
+          },
+          "findings": [],
+          "timestamp": "2026-11-04T23:08:58.820Z"
+        }
+      ]
+    }
+  }
+]
