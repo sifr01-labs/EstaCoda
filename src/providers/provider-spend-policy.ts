@@ -107,6 +107,8 @@ export function providerSpendDenialMessage(reason: ProviderSpendDenialReason): s
   switch (reason) {
     case "SESSION_LIMIT_EXHAUSTED":
       return "This logical session has reached its estimated provider spending limit. No provider request was sent.";
+    case "TASK_EXECUTION_LIMIT_EXHAUSTED":
+      return "The remaining Task execution allowance cannot fit another request. No provider request was sent; preserve available work as a qualified draft.";
     case "TASK_LIMIT_EXHAUSTED":
       return "This Task tree has reached its estimated provider spending limit. No provider request was sent.";
     case "SESSION_CAPACITY_RESERVED":
@@ -128,7 +130,7 @@ type ProviderInputTokenEstimate = {
   imageTokenEstimator?: string;
 };
 
-function estimateProviderRequestInputTokens(
+export function estimateProviderRequestInputTokens(
   request: ProviderRequest,
   route: ResolvedModelRoute,
   usage: ProviderUsageContext

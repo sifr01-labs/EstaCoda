@@ -1,3 +1,4 @@
+import { TaskProviderBudgetError } from "../contracts/provider-spend.js";
 import { withExecutionFence } from "../session/execution-fence-context.js";
 import { mkdtempSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -95,6 +96,43 @@ describe("SQLiteProviderSpendController", () => {
         expect(warning.mock.calls[0]![0]).not.toContain("Session execution");
       } else expect(warning).not.toHaveBeenCalled();
     } finally { warning.mockRestore(); }
+  });
+
+  it("reserves tokens across runtimes even without a dollar limit and releases undispatched capacity", () => {
+    const peer = new SQLiteProviderSpendController({ db: sessionDb.db, profileId: PROFILE_ID });
+    try {
+      const before = controller.taskExecutionBudget("task-root", "step-root", Date.parse(DISPATCHED_AT));
+      const request = spendRequest({ requestKey: "token-one", maximumEstimatedCostUsd: 0,
+        estimatedInputTokens: 1_000, boundedMaximumOutputTokens: 4_000 });
+      expect(controller.reserve(request, DISPATCHED_AT).ok).toBe(true);
+      const reserved = peer.taskExecutionBudget("task-root", "step-root", Date.parse(DISPATCHED_AT));
+      expect(reserved.remainingTokens).toBe(before.remainingTokens - 5_250);
+      expect(reserved.remainingCalls).toBe(before.remainingCalls - 1);
+      expect(() => peer.reserve({ ...request, requestKey: "token-two" }, DISPATCHED_AT)).toThrow(TaskProviderBudgetError);
+      controller.releaseBeforeDispatch(request.requestKey, DISPATCHED_AT);
+      expect(peer.taskExecutionBudget("task-root", "step-root", Date.parse(DISPATCHED_AT))).toEqual(before);
+      expect(peer.reserve({ ...request, requestKey: "token-three" }, DISPATCHED_AT).ok).toBe(true);
+    } finally { peer.dispose(SETTLED_AT); }
+  });
+
+  it("reserves concurrent call capacity independently of token and dollar limits", () => {
+    for (let index = 0; index < 10; index++) {
+      expect(controller.reserve(spendRequest({ requestKey: `call-${index}`, estimatedInputTokens: 1,
+        boundedMaximumOutputTokens: 1, maximumEstimatedCostUsd: 0 }), DISPATCHED_AT).ok).toBe(true);
+    }
+    expect(controller.taskExecutionBudget("task-root", "step-root", Date.parse(DISPATCHED_AT)))
+      .toMatchObject({ remainingCalls: 0, remainingTokens: 9970 });
+    expect(() => controller.reserve(spendRequest({ requestKey: "overflow", maximumEstimatedCostUsd: 0 }), DISPATCHED_AT))
+      .toThrow(TaskProviderBudgetError);
+  });
+
+  it.each([true, false])("uses actual complete usage, but retains incomplete token exposure (complete=%s)", complete => {
+    controller.reserve(spendRequest({ maximumEstimatedCostUsd: 0 }), CREATED_AT);
+    controller.markDispatching("request-1", DISPATCHED_AT);
+    controller.settle("request-1", { ...usageEntry(0), usageComplete: complete,
+      incompleteReasons: complete ? [] : ["output-usage-missing"] }, SETTLED_AT);
+    expect(controller.taskExecutionBudget("task-root", "step-root", Date.parse(SETTLED_AT)))
+      .toMatchObject({ remainingCalls: 9, remainingTokens: complete ? 9850 : 9675 });
   });
 
   it("atomically reserves every enabled scope and returns a typed capacity denial", () => {

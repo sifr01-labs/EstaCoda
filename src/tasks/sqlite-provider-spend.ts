@@ -1,3 +1,6 @@
+import { SQLiteTaskStore } from "./sqlite-task-store.js";
+import { listTaskExecutionScopes, listTaskTreeAttempts, listStepTreeAttempts } from "./task-tree-accounting.js";
+import { TaskProviderBudgetError, type TaskProviderBudget } from "../contracts/provider-spend.js";
 import { createHash, randomUUID } from "node:crypto";
 import { AsyncResource } from "node:async_hooks";
 import type { SpendingLimit } from "../contracts/budget.js";
@@ -102,6 +105,46 @@ export class SQLiteProviderSpendController {
     this.#db.exec("pragma foreign_keys = on");
   }
 
+  /** Includes live reservations in the same SQLite transaction used to admit a request.
+   * Provider token counts are not known in advance: reserve a conservative estimate
+   * and still enforce actual usage at settlement. Unknown dispatches retain exposure. */
+  taskExecutionBudget(taskId: string, stepId: string, nowMs = this.#now().getTime()): TaskProviderBudget {
+    const store = new SQLiteTaskStore({ db: this.#db, profileId: this.#profileId });
+    const task = store.getTask(taskId), step = store.getStep(stepId);
+    if (!task || !step || step.taskId !== task.id) throw new ProviderSpendIntegrityError("Task budget scope is unavailable.");
+    const rows = this.#db.query<{ attribution_json: string; state: string }>(
+      "select attribution_json, state from provider_spend_attempts where profile_id = ? and json_extract(attribution_json, '$.rootTaskId') = ? and state != 'released'"
+    ).all(this.#profileId, task.rootTaskId);
+    const reservations = rows.map(row => ({ request: JSON.parse(row.attribution_json) as ProviderSpendRequest, state: row.state }));
+    const budget = { remainingCalls: Infinity, remainingTokens: Infinity, remainingMs: Infinity };
+    for (const scope of listTaskExecutionScopes(store, task, step)) {
+      for (const [attempts, limits, startedAt] of [
+        [listTaskTreeAttempts(store, scope.task.id), scope.task.executionLimits, scope.task.startedAt],
+        [listStepTreeAttempts(store, scope.task.id, scope.step.id), scope.step.executionLimits, undefined]
+      ] as const) {
+        let calls = 0, tokens = 0;
+        for (const attempt of attempts) {
+          const entries = store.listProviderUsageEntries({ attemptId: attempt.id });
+          const known = new Set(entries.map(entry => entry.requestKey));
+          const pending = reservations.filter(row => row.request.attemptId === attempt.id && !known.has(row.request.requestKey));
+          const incomplete = entries.filter(entry => !entry.usageComplete);
+          calls += Math.max(attempt.usage.providerCalls, entries.length) + pending.length;
+          tokens += Math.max(attempt.usage.totalTokens, entries.reduce((sum, entry) => sum + entry.totalTokens, 0))
+            + pending.reduce((sum, row) => sum + requestTokenExposure(row.request), 0)
+            + incomplete.reduce((sum, entry) => {
+              const reserved = reservations.find(row => row.request.requestKey === entry.requestKey);
+              return sum + (reserved ? Math.max(0, requestTokenExposure(reserved.request) - entry.totalTokens) : limits.maxTotalTokens);
+            }, 0);
+        }
+        const start = startedAt ?? attempts.flatMap(attempt => attempt.startedAt ? [attempt.startedAt] : []).sort()[0];
+        budget.remainingCalls = Math.min(budget.remainingCalls, Math.max(0, limits.maxProviderCalls - calls));
+        budget.remainingTokens = Math.min(budget.remainingTokens, Math.max(0, limits.maxTotalTokens - tokens));
+        budget.remainingMs = Math.min(budget.remainingMs, Math.max(0, limits.maxWallClockMs - (start ? nowMs - Date.parse(start) : 0)));
+      }
+    }
+    return budget;
+  }
+
   reserve(request: ProviderSpendRequest, reservedAt: string): ProviderSpendReservationResult {
     this.#assertOpen();
     assertProviderSpendRequest(request);
@@ -126,6 +169,14 @@ export class SQLiteProviderSpendController {
           );
         }
         return { ok: true, attempt: persisted };
+      }
+
+      if (resolved.request.taskId !== undefined && resolved.request.stepId !== undefined) {
+        const budget = this.taskExecutionBudget(resolved.request.taskId, resolved.request.stepId, Date.parse(reservedAt));
+        const exposure = requestTokenExposure(resolved.request);
+        if (budget.remainingCalls < 1 || budget.remainingTokens < exposure || budget.remainingMs <= 0) {
+          throw new TaskProviderBudgetError();
+        }
       }
 
       const scopes = resolved.scopes.map((source) => {
@@ -1340,3 +1391,8 @@ type SettledIntegrityRow = {
   actual_estimated_cost_usd: number | null;
   estimated_cost_usd: number | null;
 };
+
+function requestTokenExposure(request: ProviderSpendRequest): number {
+  // Shared reservation envelope; reasoning may be reported separately by a route.
+  return Math.ceil(request.estimatedInputTokens * 1.25) + request.boundedMaximumOutputTokens + (request.boundedMaximumReasoningTokens ?? 0);
+}

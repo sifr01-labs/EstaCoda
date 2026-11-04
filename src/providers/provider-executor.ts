@@ -1,3 +1,4 @@
+import { TaskProviderBudgetError, type TaskProviderBudget } from "../contracts/provider-spend.js";
 import { providerErrorDiagnostics } from "./provider-error-diagnostics.js";
 import { assertCurrentExecutionFence } from "../session/execution-fence-context.js";
 import type {
@@ -182,6 +183,7 @@ export type ProviderExecutorOptions = {
 };
 
 export type ProviderSpendController = {
+  taskExecutionBudget?(taskId: string, stepId: string): TaskProviderBudget;
   reserve(
     request: ProviderSpendRequest,
     reservedAt: string
@@ -216,6 +218,10 @@ export class ProviderExecutor {
   readonly #allowUnenforcedAttributedSpend: boolean;
   readonly #readOnlyCredentials: boolean;
   readonly #retrySleep: NonNullable<ProviderExecutorOptions["retrySleep"]>;
+
+  taskExecutionBudget(taskId: string, stepId: string): TaskProviderBudget | undefined {
+    return this.#spendController?.taskExecutionBudget?.(taskId, stepId);
+  }
 
   constructor(options: ProviderExecutorOptions) {
     this.#registry = options.registry;
@@ -845,8 +851,8 @@ export class ProviderExecutor {
     let reserved: ProviderSpendReservationResult;
     try {
       reserved = await this.#spendController.reserve(prepared.request, input.reservedAt);
-    } catch {
-      return { ok: false, reason: "SPEND_CONTROLLER_UNAVAILABLE" };
+    } catch (error) {
+      return { ok: false, reason: error instanceof TaskProviderBudgetError ? "TASK_EXECUTION_LIMIT_EXHAUSTED" : "SPEND_CONTROLLER_UNAVAILABLE" };
     }
     if (!reserved.ok) {
       return {

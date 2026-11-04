@@ -385,6 +385,10 @@ export class AgentStepExecutor implements TaskStepExecutor {
       if (hasStructuredBlock(response, events)) {
         return { outcome: "failed", failure: taskFailure("security-deny", false), ...safeDiagnosticOutput(response.completionCandidate ?? response.text, response.toolExecutions), ...metering, ...common };
       }
+      if (response.providerExecution?.spendDenialReason === "TASK_EXECUTION_LIMIT_EXHAUSTED") {
+        return { outcome: "failed", failure: taskFailure("execution-limit-exceeded", false),
+          ...safeDiagnosticOutput(response.completionCandidate ?? response.text, response.toolExecutions), ...metering, ...common };
+      }
       if (response.providerExecution?.spendDenialReason !== undefined) {
         endReason = "task-step-spending-denied";
         return {

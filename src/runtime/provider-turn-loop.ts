@@ -1,3 +1,5 @@
+import { estimateProviderRequestInputTokens } from "../providers/provider-spend-policy.js";
+import type { TaskProviderBudget } from "../contracts/provider-spend.js";
 import {runLimitStop,type RunLimitStop} from './run-limit-receipt.js';
 import { toolOperationFingerprint, toolResultFingerprint } from "./tool-result-fingerprint.js";
 import { assessHardlineFloor } from "../security/command-safety.js";
@@ -202,6 +204,7 @@ function canReassessHardlineCommand(call: ToolExecutionRecord): boolean {
 }
 
 export class ProviderTurnLoop {
+  #taskBudgetFinalizing = false;
   readonly #capabilityRecovery: SessionCapabilityRecovery | undefined;
   readonly #providerExecutor: ProviderExecutor | undefined;
   readonly #model: ModelProfile | undefined;
@@ -341,6 +344,7 @@ export class ProviderTurnLoop {
     input.signal?.addEventListener("abort", releaseBrowserLeaseOnAbort, { once: true });
     try {
     this.#budgets = { ...this.#baseBudgets, ...await this.#resolveRunBudgets?.(input.channel) };
+    this.#taskBudgetFinalizing = false;
     this.#budgets.finalizationReserveMs = normalizeFinalizationReserve(this.#budgets.finalizationReserveMs, this.#budgets.maxProviderWallClockMs);
     this.#providerRequestSequence = 0;
     this.#toolPlanRunner.resetPerTurnBudgets?.();
@@ -1187,7 +1191,7 @@ export class ProviderTurnLoop {
           ["terminal.run", "terminal.inspect", "execute_code"].includes(call.tool.name) &&
           call.riskClass !== "external-side-effect" && call.executionEffect?.connector === undefined);
         const readbackPaths = hasBoundary ? input.completionReadbackPaths?.([...input.toolExecutions, ...providerToolExecutions]) : undefined;
-        const repair = completionValidationFailure !== undefined && (typeof validationFailure === "string" || validationFailure?.repairable !== false) && completionRepairs < 2 &&
+        const repair = !this.#taskBudgetFinalizing && completionValidationFailure !== undefined && (typeof validationFailure === "string" || validationFailure?.repairable !== false) && completionRepairs < 2 &&
           iteration + consumedProviderIterations < this.#budgets.maxProviderIterations && !input.signal?.aborted &&
           (!hasBoundary || (readbackPaths !== undefined && readbackPaths.length > 0) ||
             (canUseAlternative && activeProviderTools.some(tool => !boundaries.some(call =>
@@ -1878,6 +1882,17 @@ export class ProviderTurnLoop {
     visibleTurnId?: string;
     providerToolCallNamespace: string;
   }): Promise<ProviderExecutionResult> {
+    const taskBudget = this.#taskExecution === undefined ? undefined : this.#providerExecutor?.taskExecutionBudget?.(
+      this.#taskExecution.taskId, this.#taskExecution.stepId);
+    if (taskBudget !== undefined) {
+      const routes = resolvedRouteChain(input.primaryRoute ?? this.#primaryModelRoute, input.fallbackChain ?? this.#modelFallbackRoutes);
+      const reservedInputTokens = Math.max(...routes.map(route => estimateProviderRequestInputTokens(
+        { ...input.request, model: route.id }, route, { requestKey: "budget-preview", sourceKind: "task", imageInputs: input.imageInputs })?.tokens ?? Infinity));
+      const budgeted = budgetTaskProviderRequest(input.request, taskBudget, reservedInputTokens);
+      this.#taskBudgetFinalizing = budgeted.finalizing;
+      input = { ...input, request: budgeted.request,
+        preferences: budgeted.finalizing ? { ...input.preferences, requireTools: false } : input.preferences };
+    }
     const raw = await this.#completeProviderRequestWithTruncatedToolRetry(input);
     const initial = rebaseRetryRouteIdentity(raw,
       resolvedRouteChain(input.primaryRoute ?? this.#primaryModelRoute, input.fallbackChain ?? this.#modelFallbackRoutes),
@@ -3241,7 +3256,7 @@ function appendWithExactOverlapTrim(accumulated: string, continuation: string): 
   return accumulated + continuation;
 }
 
-function mergeProviderExecutions(
+export function mergeProviderExecutions(
   initial: ProviderExecutionResult | undefined,
   continuation: ProviderExecutionResult | undefined
 ): ProviderExecutionResult | undefined {
@@ -3255,6 +3270,7 @@ function mergeProviderExecutions(
 
   return {
     ok: continuation.ok,
+    spendDenialReason: continuation.spendDenialReason,
     response: continuation.response,
     fallbackUsed: initial.fallbackUsed || continuation.fallbackUsed,
     attempts: [
@@ -3351,4 +3367,21 @@ function mapProviderRuntimeEvent(event: ProviderRuntimeEvent): RuntimeEvent {
         ...(event.reasoningMetadata === undefined ? {} : { reasoningMetadata: event.reasoningMetadata })
       };
   }
+}
+
+/** Plan the last useful request inside the same allowance enforced at dispatch.
+ * Estimates guide finalization; durable reservations and actual settlement remain authoritative. */
+export function budgetTaskProviderRequest<T extends Omit<ProviderRequest, "model"> & { model?: string }>(
+  request: T, budget: TaskProviderBudget, reservedInputTokens?: number
+): { request: T & { maxTokens: number }; finalizing: boolean } {
+  const inputTokens = reservedInputTokens ?? estimateProviderRequestAccounting(request, 0).estimatedInputTokens;
+  const maxTokens = Math.max(1, Math.min(request.maxTokens ?? 8_192, Math.floor((budget.remainingTokens - inputTokens * 1.25 - 2048) / 2)));
+  const finalizing = budget.remainingCalls <= 2 || budget.remainingMs <= 30_000 ||
+    budget.remainingTokens < 2 * (inputTokens * 1.25 + maxTokens * 2 + 2048);
+  const message = `Task allowance remaining (including other workers and reservations): ${budget.remainingCalls} provider calls, ${budget.remainingTokens} cumulative tokens, ${Math.floor(budget.remainingMs / 1000)} seconds. ` +
+    (finalizing ? "Finalize now using observed evidence. No further tool work is available in this request. Clearly identify unverified scope, failed tests and outstanding obligations; do not claim completion of missing work." :
+      "Reserve room to finalize. Batch independent identified reads with existing governed tools; check test prerequisites early. Do not reread confirmed evidence or treat passing checks as comparative performance.");
+  return { finalizing, request: { ...request, maxTokens,
+    ...(finalizing ? { tools: undefined, toolChoice: undefined } : {}),
+    messages: [...request.messages, { role: "user", content: message }] } };
 }

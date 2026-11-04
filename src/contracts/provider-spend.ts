@@ -118,6 +118,7 @@ export type ProviderSpendAttempt = {
 };
 
 export type ProviderSpendDenialReason =
+  | "TASK_EXECUTION_LIMIT_EXHAUSTED"
   | "SESSION_LIMIT_EXHAUSTED"
   | "TASK_LIMIT_EXHAUSTED"
   | "SESSION_CAPACITY_RESERVED"
@@ -125,6 +126,16 @@ export type ProviderSpendDenialReason =
   | "PRICING_UNAVAILABLE"
   | "REQUEST_CANNOT_BE_SAFELY_BOUNDED"
   | "SPEND_CONTROLLER_UNAVAILABLE";
+
+export type TaskProviderBudget = {
+  remainingCalls: number;
+  remainingTokens: number;
+  remainingMs: number;
+};
+
+export class TaskProviderBudgetError extends Error {
+  constructor() { super("The remaining Task execution allowance cannot fit this provider request."); }
+}
 
 export type ProviderSpendReservationResult =
   | { ok: true; attempt: ProviderSpendAttempt; warnings?: readonly ProviderSpendingWarning[] }

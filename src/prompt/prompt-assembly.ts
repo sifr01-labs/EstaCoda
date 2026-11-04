@@ -667,7 +667,7 @@ function buildBaseLayers(
       cacheable: false,
       protectedLayer: true,
       priority: 0,
-      content: [
+      content: input.userText === input.routedText ? `User message:\n${input.userText}` : [
         `User message:\n${input.userText}`,
         "",
         `Expanded/routed message:\n${input.routedText}`
